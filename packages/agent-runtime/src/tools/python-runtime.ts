@@ -23,8 +23,12 @@ export const resolvePythonRuntime = (): PythonRuntimeConfig | undefined => {
     }
     seen.add(venvRoot);
 
-    const pythonBin = path.join(venvRoot, "bin", "python");
-    if (!existsSync(pythonBin)) {
+    const pythonBin = [
+      path.join(venvRoot, "Scripts", "python.exe"),
+      path.join(venvRoot, "Scripts", "python"),
+      path.join(venvRoot, "bin", "python")
+    ].find(existsSync);
+    if (!pythonBin) {
       continue;
     }
 
@@ -36,6 +40,10 @@ export const resolvePythonRuntime = (): PythonRuntimeConfig | undefined => {
 
 /** Locate `<venv>/lib/python3.x/site-packages` for PYTHONPATH injection. */
 export const resolvePythonSitePackages = (venvRoot: string): string | undefined => {
+  const windowsSitePackages = path.join(venvRoot, "Lib", "site-packages");
+  if (existsSync(windowsSitePackages)) {
+    return windowsSitePackages;
+  }
   const libDir = path.join(venvRoot, "lib");
   if (!existsSync(libDir)) {
     return undefined;
@@ -58,7 +66,7 @@ export const buildPythonSandboxEnv = (python: PythonRuntimeConfig): NodeJS.Proce
   const hostPath = process.env.PATH ?? "/usr/bin:/bin";
   const sitePackages = resolvePythonSitePackages(python.venvRoot);
   return {
-    PATH: hostPath,
+    PATH: `${path.dirname(python.pythonBin)}${path.delimiter}${hostPath}`,
     ...(sitePackages ? { PYTHONPATH: sitePackages } : {}),
     MPLBACKEND: "Agg",
     PYTHONDONTWRITEBYTECODE: "1",
