@@ -80,6 +80,15 @@ export {
   type EnergyScopedDataSource,
   type EnergyScopedDataSourceContext
 } from "./energy-scoped-datasource.js";
+export {
+  readEnergyFactMaterializationStats,
+  writeEnergyFactMaterialization,
+  type EnergyFactMaterializationWrite,
+  type EnergyIntervalFactWrite,
+  type EnergyNormalizedReadingWrite,
+  type EnergyQualityEventWrite,
+  type EnergyRawReadingWrite,
+} from "./energy-fact-writer.js";
 
 export type {
   AdapterExecutionInput,

@@ -1,4 +1,5 @@
 import { createErrorResult, createSuccessResult, type AppErrorCode } from "@datafoundry/contracts";
+import { resolveEnergyFactStorePath, writeEnergyFactMaterialization } from "@datafoundry/data-gateway";
 import type { EnergyIqImportBatchRecord, EnergyIqProjectSetupDocument } from "@datafoundry/metadata";
 import { createHash, randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
@@ -7,6 +8,7 @@ import type { ConfigApiContext, ConfigApiResponse } from "../routes/types.js";
 import { readMultipartUpload } from "../upload-parser.js";
 import { executeEnergyScopeAnalysis } from "./energy-analysis.js";
 import { inspectEnergyExcelWorkbook } from "./energy-excel-import.js";
+import { buildEnergyExcelMaterialization } from "./energy-import-materializer.js";
 import {
   resolveEnergyAccessContext,
   resolveEnergyQueryContext,
@@ -63,6 +65,47 @@ export const handleEnergyApiRequest = async (
       const projectId = decodeURIComponent(segments[1] ?? "");
       requireEnergyAdminProject(context, user, projectId);
       const project = context.metadataStore.energyIq.getProject(projectId);
+      if (segments.length === 5 && segments[4] === "materialize" && request.method === "POST") {
+        const batchId = decodeURIComponent(segments[3] ?? "");
+        const batch = context.metadataStore.energyIq.getImportBatch(batchId);
+        if (batch.project_id !== projectId) throw new Error("ENERGYIQ_IMPORT_BATCH_FORBIDDEN");
+        if (batch.status === "materialized") {
+          return {
+            status: 200,
+            body: createSuccessResult({ batch: toEnergyImportBatchDto(batch), duplicate: true }),
+          };
+        }
+        if (batch.source_kind !== "excel" || !batch.file_asset_ref_id) {
+          throw new Error("ENERGYIQ_IMPORT_BATCH_INVALID");
+        }
+        const original = context.fileAssetService.readRef({
+          user_id: batch.created_by,
+          workspace_id: batch.workspace_id,
+          id: batch.file_asset_ref_id,
+        });
+        const draft = context.metadataStore.energyIq.projectSetup.getDraft({
+          project_id: projectId,
+          user_id: user.id,
+        });
+        const materialization = await buildEnergyExcelMaterialization({
+          content: original.body,
+          batch,
+          document: draft.document,
+          timezone: project.timezone,
+          databasePath: resolveEnergyFactStorePath(project.workspace_id),
+        });
+        await writeEnergyFactMaterialization(materialization.write);
+        const completed = context.metadataStore.energyIq.completeImportBatchMaterialization({
+          batch_id: batch.id,
+          project_id: projectId,
+          snapshot_id: materialization.summary.snapshotId,
+          summary: materialization.summary,
+        });
+        return {
+          status: 200,
+          body: createSuccessResult({ batch: toEnergyImportBatchDto(completed), duplicate: false }),
+        };
+      }
       if (segments.length === 3 && request.method === "GET") {
         return {
           status: 200,
@@ -237,7 +280,7 @@ export const handleEnergyApiRequest = async (
     const message = error instanceof Error ? error.message : String(error);
     const forbidden = message.includes("FORBIDDEN") || message.includes("ADMIN_REQUIRED");
     const conflict = message.includes("CONFLICT");
-    const invalid = message.includes("INVALID") || message.includes("REQUIRED") || message.includes("EXCEL_EMPTY");
+    const invalid = message.includes("INVALID") || message.includes("REQUIRED") || message.includes("EXCEL_EMPTY") || message.includes("NOT_CONFIRMED");
     const code: AppErrorCode = forbidden
       ? "FORBIDDEN"
       : conflict
@@ -262,6 +305,10 @@ const toEnergyImportBatchDto = (
   filename: batch.filename,
   status: batch.status,
   inspection: JSON.parse(batch.inspection_json) as unknown,
+  ...(batch.materialization_json
+    ? { materialization: JSON.parse(batch.materialization_json) as unknown }
+    : {}),
+  ...(batch.materialized_at ? { materializedAt: batch.materialized_at } : {}),
   createdAt: batch.created_at,
 });
 

@@ -75,6 +75,8 @@ export type EnergyIqImportBatchRecord = {
   file_asset_ref_id?: string;
   status: "inspected" | "materialized" | "failed";
   inspection_json: string;
+  materialization_json?: string;
+  materialized_at?: string;
   created_by: string;
   created_at: string;
 };
@@ -149,6 +151,8 @@ export const initializeEnergyIqSchema = (db: DatabaseSync): void => {
       file_asset_ref_id TEXT,
       status TEXT NOT NULL CHECK (status IN ('inspected', 'materialized', 'failed')),
       inspection_json TEXT NOT NULL,
+      materialization_json TEXT,
+      materialized_at TEXT,
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL,
       UNIQUE (project_id, source_sha256),
@@ -163,6 +167,13 @@ export const initializeEnergyIqSchema = (db: DatabaseSync): void => {
   const projectColumns = db.prepare("PRAGMA table_info(energyiq_projects)").all();
   if (!projectColumns.some((column) => isRecord(column) && column.name === "data_snapshot_id")) {
     db.exec("ALTER TABLE energyiq_projects ADD COLUMN data_snapshot_id TEXT NOT NULL DEFAULT 'unavailable'");
+  }
+  const importBatchColumns = db.prepare("PRAGMA table_info(energyiq_import_batches)").all();
+  if (!importBatchColumns.some((column) => isRecord(column) && column.name === "materialization_json")) {
+    db.exec("ALTER TABLE energyiq_import_batches ADD COLUMN materialization_json TEXT");
+  }
+  if (!importBatchColumns.some((column) => isRecord(column) && column.name === "materialized_at")) {
+    db.exec("ALTER TABLE energyiq_import_batches ADD COLUMN materialized_at TEXT");
   }
 };
 
@@ -480,6 +491,27 @@ export class EnergyIqStore {
       ORDER BY created_at DESC
     `).all(projectId).filter(isRecord).map(mapImportBatch);
   }
+
+  completeImportBatchMaterialization(input: {
+    batch_id: string;
+    project_id: string;
+    snapshot_id: string;
+    summary: unknown;
+  }): EnergyIqImportBatchRecord {
+    const materializedAt = new Date().toISOString();
+    const result = this.db.prepare(`
+      UPDATE energyiq_import_batches
+      SET status = 'materialized', materialization_json = ?, materialized_at = ?
+      WHERE id = ? AND project_id = ?
+    `).run(JSON.stringify(input.summary), materializedAt, input.batch_id, input.project_id);
+    if (result.changes !== 1) throw new Error(`ENERGYIQ_IMPORT_BATCH_NOT_FOUND:${input.batch_id}`);
+    this.db.prepare(`
+      UPDATE energyiq_projects
+      SET data_snapshot_id = ?, updated_at = ?
+      WHERE id = ?
+    `).run(input.snapshot_id, materializedAt, input.project_id);
+    return this.getImportBatch(input.batch_id);
+  }
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -566,6 +598,8 @@ const mapProjectAccess = (row: Record<string, unknown>): EnergyIqProjectAccessRe
 
 const mapImportBatch = (row: Record<string, unknown>): EnergyIqImportBatchRecord => {
   const fileAssetRefId = optionalString(row, "file_asset_ref_id");
+  const materializationJson = optionalString(row, "materialization_json");
+  const materializedAt = optionalString(row, "materialized_at");
   return {
     id: requiredString(row, "id"),
     workspace_id: requiredString(row, "workspace_id"),
@@ -576,6 +610,8 @@ const mapImportBatch = (row: Record<string, unknown>): EnergyIqImportBatchRecord
     ...(fileAssetRefId ? { file_asset_ref_id: fileAssetRefId } : {}),
     status: requiredString(row, "status") as EnergyIqImportBatchRecord["status"],
     inspection_json: requiredString(row, "inspection_json"),
+    ...(materializationJson ? { materialization_json: materializationJson } : {}),
+    ...(materializedAt ? { materialized_at: materializedAt } : {}),
     created_by: requiredString(row, "created_by"),
     created_at: requiredString(row, "created_at"),
   };

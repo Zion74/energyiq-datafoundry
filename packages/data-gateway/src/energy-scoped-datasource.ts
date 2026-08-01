@@ -127,17 +127,22 @@ const createScopedView = async (
 ): Promise<void> => {
   const meterNodeIds = [...new Set(context.scopeNodeIds)];
   const nodeFilter = meterNodeIds.length > 0
-    ? `meter_node_id IN (${meterNodeIds.map(sqlLiteral).join(", ")})`
+    ? `scope_id IN (${meterNodeIds.map(sqlLiteral).join(", ")})`
     : "FALSE";
   const database = await getDuckDbDatabase(databasePath);
   const connection = database.connect();
   try {
+    await duckDbRun(connection, `
+      ALTER TABLE energy_interval_facts ADD COLUMN IF NOT EXISTS scope_id VARCHAR;
+      UPDATE energy_interval_facts SET scope_id = meter_node_id WHERE scope_id IS NULL;
+    `);
     await duckDbRun(connection, `
       CREATE OR REPLACE VIEW ${quoteIdentifier(viewName)} AS
       SELECT
         project_id,
         resource,
         meter_node_id,
+        scope_id,
         parent_node_id,
         level_node_id,
         device_name,

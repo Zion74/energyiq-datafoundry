@@ -337,6 +337,15 @@ describe("EnergyIqStore", () => {
         source_sha256: "sha-1",
       })?.id).toBe("batch-1");
       expect(metadata.energyIq.listImportBatches("project-import")).toHaveLength(1);
+      const materialized = metadata.energyIq.completeImportBatchMaterialization({
+        batch_id: "batch-1",
+        project_id: "project-import",
+        snapshot_id: "snapshot-1",
+        summary: { intervalFactCount: 9 },
+      });
+      expect(materialized.status).toBe("materialized");
+      expect(JSON.parse(materialized.materialization_json ?? "{}")).toMatchObject({ intervalFactCount: 9 });
+      expect(metadata.energyIq.getProject("project-import").data_snapshot_id).toBe("snapshot-1");
       expect(() => metadata.energyIq.createImportBatch({
         ...created,
         id: "batch-2",

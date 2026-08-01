@@ -18,9 +18,26 @@ export type EnergyExcelImportInspection = {
   issues: string[];
 };
 
+export type EnergyExcelSourceRow = {
+  sourceRowNumber: number;
+  sourceLabel: string;
+  localTimestamp?: string;
+  activeEnergyKwh?: number;
+  validationError?: "missing_device_name" | "invalid_timestamp" | "invalid_active_energy" | "negative_active_energy";
+};
+
+export type EnergyExcelWorkbook = {
+  inspection: EnergyExcelImportInspection;
+  rows: EnergyExcelSourceRow[];
+};
+
 export const inspectEnergyExcelWorkbook = async (
   content: Buffer,
-): Promise<EnergyExcelImportInspection> => {
+): Promise<EnergyExcelImportInspection> => (await readEnergyExcelWorkbook(content)).inspection;
+
+export const readEnergyExcelWorkbook = async (
+  content: Buffer,
+): Promise<EnergyExcelWorkbook> => {
   const rows = await readSheet(content);
   if (rows.length === 0) throw new Error("ENERGYIQ_EXCEL_EMPTY");
   const columns = rows[0]!.map(displayCell);
@@ -44,19 +61,37 @@ export const inspectEnergyExcelWorkbook = async (
   let negativeReadingCount = 0;
   let coverageFrom: number | undefined;
   let coverageTo: number | undefined;
+  const sourceRows: EnergyExcelSourceRow[] = [];
 
-  for (const row of rows.slice(1)) {
+  for (const [rowIndex, row] of rows.slice(1).entries()) {
     if (row.every((cell) => cell === null || displayCell(cell) === "")) continue;
     rowCount += 1;
     const label = displayCell(row[labelIndex]).trim();
     const timestamp = timestampValue(row[timeIndex]);
     const reading = numberValue(row[readingIndex]);
-    if (!label || timestamp === undefined || reading === undefined) {
+    const validationError = !label
+      ? "missing_device_name" as const
+      : timestamp === undefined
+        ? "invalid_timestamp" as const
+        : reading === undefined
+          ? "invalid_active_energy" as const
+          : reading < 0
+            ? "negative_active_energy" as const
+            : undefined;
+    sourceRows.push({
+      sourceRowNumber: rowIndex + 2,
+      sourceLabel: label,
+      ...(timestamp === undefined ? {} : { localTimestamp: localTimestampValue(row[timeIndex]) }),
+      ...(reading === undefined ? {} : { activeEnergyKwh: reading }),
+      ...(validationError ? { validationError } : {}),
+    });
+    if (validationError) {
       invalidRowCount += 1;
+      if (validationError === "negative_active_energy") negativeReadingCount += 1;
       continue;
     }
+    if (timestamp === undefined || reading === undefined) continue;
     validRowCount += 1;
-    if (reading < 0) negativeReadingCount += 1;
     labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
     timestampsByLabel.set(label, [...(timestampsByLabel.get(label) ?? []), timestamp]);
     const key = `${label}\u0000${timestamp}`;
@@ -88,21 +123,24 @@ export const inspectEnergyExcelWorkbook = async (
   ];
 
   return {
-    columns,
-    sourceLabels: [...labelCounts.entries()]
-      .map(([label, count]) => ({ label, rowCount: count }))
-      .sort((left, right) => left.label.localeCompare(right.label)),
-    rowCount,
-    validRowCount,
-    invalidRowCount,
-    duplicateReadingCount,
-    negativeReadingCount,
-    ...(coverageFrom === undefined ? {} : { coverageFrom: new Date(coverageFrom).toISOString() }),
-    ...(coverageTo === undefined ? {} : { coverageTo: new Date(coverageTo).toISOString() }),
-    ...(typicalIntervalMinutes === undefined ? {} : { typicalIntervalMinutes }),
-    readingKind: "cumulative",
-    qualityStatus: issues.length === 0 ? "ready" : "needs_review",
-    issues,
+    inspection: {
+      columns,
+      sourceLabels: [...labelCounts.entries()]
+        .map(([label, count]) => ({ label, rowCount: count }))
+        .sort((left, right) => left.label.localeCompare(right.label)),
+      rowCount,
+      validRowCount,
+      invalidRowCount,
+      duplicateReadingCount,
+      negativeReadingCount,
+      ...(coverageFrom === undefined ? {} : { coverageFrom: new Date(coverageFrom).toISOString() }),
+      ...(coverageTo === undefined ? {} : { coverageTo: new Date(coverageTo).toISOString() }),
+      ...(typicalIntervalMinutes === undefined ? {} : { typicalIntervalMinutes }),
+      readingKind: "cumulative",
+      qualityStatus: issues.length === 0 ? "ready" : "needs_review",
+      issues,
+    },
+    rows: sourceRows,
   };
 };
 
@@ -119,6 +157,22 @@ const timestampValue = (value: CellValue | null | undefined): number | undefined
   if (typeof value !== "string" && typeof value !== "number") return undefined;
   const timestamp = new Date(value).getTime();
   return Number.isFinite(timestamp) ? timestamp : undefined;
+};
+
+const localTimestampValue = (value: CellValue | null | undefined): string => {
+  const date = value instanceof Date ? value : new Date(String(value));
+  if (Number.isFinite(date.getTime())) {
+    return [
+      date.getUTCFullYear().toString().padStart(4, "0"),
+      (date.getUTCMonth() + 1).toString().padStart(2, "0"),
+      date.getUTCDate().toString().padStart(2, "0"),
+    ].join("-") + "T" + [
+      date.getUTCHours().toString().padStart(2, "0"),
+      date.getUTCMinutes().toString().padStart(2, "0"),
+      date.getUTCSeconds().toString().padStart(2, "0"),
+    ].join(":");
+  }
+  return String(value);
 };
 
 const numberValue = (value: CellValue | null | undefined): number | undefined => {
