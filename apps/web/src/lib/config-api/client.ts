@@ -372,6 +372,16 @@ export const configApi = {
     );
   },
 
+  materializeEnergyImportBatch(
+    projectId: string,
+    batchId: string,
+  ): Promise<{ batch: EnergyImportBatchDto; duplicate: boolean }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/imports/${encodeURIComponent(batchId)}/materialize`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  },
+
   getDevIdentities(): Promise<DevIdentitiesResponseDto> {
     return requestEnvelope<DevIdentitiesResponseDto>("/api/v1/dev/identities");
   },

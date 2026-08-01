@@ -176,6 +176,15 @@ export type EnergyImportBatchDto = {
   filename: string;
   status: "inspected" | "materialized" | "failed";
   inspection: EnergyExcelImportInspectionDto;
+  materialization?: {
+    snapshotId: string;
+    rawRowCount: number;
+    normalizedReadingCount: number;
+    intervalFactCount: number;
+    totalUsageKwh: number;
+    qualityCounts: Record<string, number>;
+  };
+  materializedAt?: string;
   createdAt: string;
 };
 

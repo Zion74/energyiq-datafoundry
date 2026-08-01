@@ -558,6 +558,7 @@ function DataSourcesPage({
   const [batches, setBatches] = useState<EnergyImportBatchDto[]>([]);
   const [loadingImports, setLoadingImports] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [materializing, setMaterializing] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importNotice, setImportNotice] = useState<string | null>(null);
 
@@ -599,6 +600,7 @@ function DataSourcesPage({
   };
 
   const latest = batches[0];
+  const mappingConfirmed = document.meter_mapping?.confirmed === true;
   const useDetectedLabels = () => {
     if (!latest) return;
     const mapping = createMeterMappingFromSourceLabels(
@@ -607,6 +609,24 @@ function DataSourcesPage({
     );
     changeDocument((current) => ({ ...current, meter_mapping: mapping }));
     setImportNotice(`${mapping.rows.length} source labels were prepared as a Mapping draft. Unmatched labels still require an admin Scope selection.`);
+  };
+
+  const materializeLatest = async () => {
+    if (!latest) return;
+    setMaterializing(true);
+    setImportError(null);
+    setImportNotice(null);
+    try {
+      const result = await configApi.materializeEnergyImportBatch(projectId, latest.id);
+      setBatches((current) => current.map((batch) => batch.id === result.batch.id ? result.batch : batch));
+      setImportNotice(result.duplicate
+        ? "This Import Batch was already materialized. Existing facts were reused."
+        : "Raw readings, interval facts and quality events were materialized successfully.");
+    } catch (reason) {
+      setImportError(messageFrom(reason, "Fact materialization failed"));
+    } finally {
+      setMaterializing(false);
+    }
   };
 
   return (
@@ -654,11 +674,15 @@ function DataSourcesPage({
             <p className="mt-1 text-xs text-muted">An import is evidence only; it does not change the published hierarchy or Mapping.</p>
           </div>
           {latest ? (
-            <span className={latest.inspection.qualityStatus === "ready"
+            <span className={latest.status === "materialized" || latest.inspection.qualityStatus === "ready"
               ? "rounded-full bg-step-success/10 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-wide text-step-success"
               : "rounded-full bg-step-warning/10 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-wide text-step-warning"}
             >
-              {latest.inspection.qualityStatus === "ready" ? "Ready for mapping" : "Review quality"}
+              {latest.status === "materialized"
+                ? "Facts ready"
+                : latest.inspection.qualityStatus === "ready"
+                  ? "Ready for mapping"
+                  : "Review quality"}
             </span>
           ) : null}
         </div>
@@ -676,6 +700,14 @@ function DataSourcesPage({
               <ImportFact label="Coverage" value={formatImportCoverage(latest)} />
               <ImportFact label="SHA-256" value={latest.sourceSha256.slice(0, 16)} mono />
             </div>
+            {latest.materialization ? (
+              <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
+                <ImportFact label="Raw readings" value={latest.materialization.rawRowCount.toLocaleString()} />
+                <ImportFact label="Normalized" value={latest.materialization.normalizedReadingCount.toLocaleString()} />
+                <ImportFact label="Interval facts" value={latest.materialization.intervalFactCount.toLocaleString()} />
+                <ImportFact label="All-meter deltas" value={`${latest.materialization.totalUsageKwh.toLocaleString("en-SG", { maximumFractionDigits: 3 })} kWh`} />
+              </div>
+            ) : null}
             {latest.inspection.issues.length > 0 ? (
               <ul className="space-y-1 rounded-lg bg-step-warning/5 px-4 py-3 text-[11px] text-step-warning">
                 {latest.inspection.issues.map((issue) => <li key={issue}>• {issue}</li>)}
@@ -684,8 +716,20 @@ function DataSourcesPage({
               <p className="rounded-lg bg-step-success/5 px-4 py-3 text-[11px] text-step-success">Required fields, timestamps and cumulative readings passed the inspection.</p>
             )}
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
-              <p className="text-xs text-muted">Detected: {latest.inspection.columns.join(" · ")}</p>
-              <button type="button" onClick={useDetectedLabels} className={secondaryButton}>Use detected labels</button>
+              <div>
+                <p className="text-xs text-muted">Detected: {latest.inspection.columns.join(" · ")}</p>
+                {latest.status !== "materialized" && !mappingConfirmed ? (
+                  <p className="mt-1 text-[10px] text-step-warning">Confirm and save Meter Mapping before building facts.</p>
+                ) : null}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={useDetectedLabels} disabled={latest.status === "materialized"} className={secondaryButton}>Use detected labels</button>
+                {latest.status === "materialized" ? null : (
+                  <button type="button" onClick={() => void materializeLatest()} disabled={!mappingConfirmed || materializing} className={primaryButton}>
+                    {materializing ? "Building facts..." : "Build interval facts"}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         ) : (
