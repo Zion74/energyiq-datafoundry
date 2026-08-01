@@ -43,9 +43,24 @@ export type EnergyIqMeterMappingRow = {
   aggregation_usage: EnergyIqAggregationUsage;
 };
 
+export type EnergyIqVirtualMeterTerm = {
+  mapping_row_id: string;
+  coefficient: 1 | -1;
+};
+
+export type EnergyIqVirtualMeter = {
+  id: string;
+  display_name: string;
+  scope_id: string;
+  resource: "electricity" | "water";
+  category: EnergyIqMeterCategory;
+  terms: EnergyIqVirtualMeterTerm[];
+};
+
 export type EnergyIqMeterMappingDraft = {
   source_kind: "excel" | "tuya";
   rows: EnergyIqMeterMappingRow[];
+  virtual_meters?: EnergyIqVirtualMeter[];
   confirmed: boolean;
 };
 
@@ -855,6 +870,36 @@ export const validateProjectSetupDocument = (
         push("MULTIPLE_DIRECT_TOTALS", "error", `More than one whole-scope meter is configured for ${routeKey}.`, "meter_mapping.rows");
       }
     }
+    const virtualIds = new Set<string>();
+    const virtualNames = new Set<string>();
+    const mappingRowsById = new Map(document.meter_mapping.rows.map((row) => [row.id, row]));
+    for (const [index, virtualMeter] of (document.meter_mapping.virtual_meters ?? []).entries()) {
+      if (!virtualMeter.id || virtualIds.has(virtualMeter.id)) {
+        push("VIRTUAL_METER_ID_DUPLICATE", "error", "Virtual Meter IDs must be unique.", `meter_mapping.virtual_meters[${index}].id`);
+      }
+      virtualIds.add(virtualMeter.id);
+      const nameKey = `${virtualMeter.scope_id}:${normaliseDisplayName(virtualMeter.display_name)}`;
+      if (!virtualMeter.display_name.trim() || virtualNames.has(nameKey)) {
+        push("VIRTUAL_METER_NAME_DUPLICATE", "error", "Virtual Meter names must be unique inside a Scope.", `meter_mapping.virtual_meters[${index}].display_name`);
+      }
+      virtualNames.add(nameKey);
+      if (!nodesById.has(virtualMeter.scope_id)) {
+        push("VIRTUAL_METER_SCOPE_NOT_FOUND", "error", "Virtual Meter Scope must already exist in Structure.", `meter_mapping.virtual_meters[${index}].scope_id`);
+      }
+      if (virtualMeter.terms.length < 2) {
+        push("VIRTUAL_METER_TERMS_REQUIRED", "error", "A Virtual Meter formula needs at least two physical meter inputs.", `meter_mapping.virtual_meters[${index}].terms`);
+      }
+      const termIds = new Set<string>();
+      for (const [termIndex, term] of virtualMeter.terms.entries()) {
+        const source = mappingRowsById.get(term.mapping_row_id);
+        if (!source || termIds.has(term.mapping_row_id)) {
+          push("VIRTUAL_METER_TERM_INVALID", "error", "Each Virtual Meter input must reference one unique mapped physical meter.", `meter_mapping.virtual_meters[${index}].terms[${termIndex}]`);
+        } else if (source.resource !== virtualMeter.resource) {
+          push("VIRTUAL_METER_RESOURCE_MISMATCH", "error", "Virtual Meter inputs must use the same resource.", `meter_mapping.virtual_meters[${index}].terms[${termIndex}]`);
+        }
+        termIds.add(term.mapping_row_id);
+      }
+    }
     if (document.meter_mapping.rows.length === 0) {
       push("METER_MAPPING_EMPTY", "warning", "No source labels have been mapped yet.", "meter_mapping.rows");
     } else if (!document.meter_mapping.confirmed) {
@@ -930,7 +975,22 @@ const canonicalizeDocument = (
               meter_role: normalizeMeterRole(row.meter_role),
               aggregation_usage: row.aggregation_usage === "official" ? "official" as const : "excluded" as const
             }))
-          : []
+          : [],
+        ...(Array.isArray(document.meter_mapping.virtual_meters) ? {
+          virtual_meters: document.meter_mapping.virtual_meters.map((virtualMeter) => ({
+            id: String(virtualMeter.id ?? "").trim(),
+            display_name: normaliseDisplayNameForStorage(String(virtualMeter.display_name ?? "")),
+            scope_id: String(virtualMeter.scope_id ?? "").trim(),
+            resource: virtualMeter.resource === "water" ? "water" as const : "electricity" as const,
+            category: normalizeMeterCategory(virtualMeter.category),
+            terms: Array.isArray(virtualMeter.terms)
+              ? virtualMeter.terms.map((term) => ({
+                  mapping_row_id: String(term.mapping_row_id ?? "").trim(),
+                  coefficient: term.coefficient === -1 ? -1 as const : 1 as const
+                }))
+              : []
+          }))
+        } : {})
       }
     } : {})
   };

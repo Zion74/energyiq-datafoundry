@@ -118,4 +118,42 @@ describe("validateProjectSetupDocument sibling names", () => {
     expect(validation.issues.filter((issue) => issue.code === "MULTIPLE_DIRECT_TOTALS")).toHaveLength(1);
     expect(validation.blocking).toBe(true);
   });
+
+  it("accepts a standalone Virtual Meter with two valid physical inputs", () => {
+    const validation = validateProjectSetupDocument({
+      project: { name: "Test", timezone: "Asia/Singapore" },
+      tier_structure_locked: true,
+      tiers: [
+        { id: "circuit", ordinal: 1, alias: "Circuit" },
+        { id: "level", ordinal: 2, alias: "Level" },
+      ],
+      nodes: [
+        { id: "l1", tier_definition_id: "level", name: "Level 1", sort_order: 1, metadata_status: "confirmed" },
+        { id: "c1", tier_definition_id: "circuit", parent_id: "l1", name: "Load 1", sort_order: 1, metadata_status: "confirmed" },
+        { id: "c2", tier_definition_id: "circuit", parent_id: "l1", name: "Load 2", sort_order: 2, metadata_status: "confirmed" },
+      ],
+      meter_mapping: {
+        source_kind: "excel",
+        confirmed: true,
+        rows: [
+          { id: "m1", source_label: "Load 1", scope_id: "c1", display_name: "Load 1", resource: "electricity", category: "load", coverage: "whole", meter_role: "total", aggregation_usage: "official" },
+          { id: "m2", source_label: "Load 2", scope_id: "c2", display_name: "Load 2", resource: "electricity", category: "load", coverage: "whole", meter_role: "total", aggregation_usage: "official" },
+        ],
+        virtual_meters: [{
+          id: "vm-load-12",
+          display_name: "Load 12",
+          scope_id: "l1",
+          resource: "electricity",
+          category: "load",
+          terms: [
+            { mapping_row_id: "m1", coefficient: 1 },
+            { mapping_row_id: "m2", coefficient: 1 },
+          ],
+        }],
+      },
+    });
+
+    expect(validation.issues.some((issue) => issue.code.startsWith("VIRTUAL_METER"))).toBe(false);
+    expect(validation.blocking).toBe(false);
+  });
 });

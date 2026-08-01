@@ -55,6 +55,8 @@ export type {
   EnergyMeterMappingDraftDto,
   EnergyMeterMappingRowDto,
   EnergyMeterRoleDto,
+  EnergyVirtualMeterDto,
+  EnergyVirtualMeterTermDto,
   EnergyProjectHierarchyDto,
   EnergyProjectNodeDto,
   EnergyProjectDto,

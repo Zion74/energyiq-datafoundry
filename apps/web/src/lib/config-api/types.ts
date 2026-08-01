@@ -131,9 +131,24 @@ export type EnergyMeterMappingRowDto = {
   aggregation_usage: EnergyAggregationUsageDto;
 };
 
+export type EnergyVirtualMeterTermDto = {
+  mapping_row_id: string;
+  coefficient: 1 | -1;
+};
+
+export type EnergyVirtualMeterDto = {
+  id: string;
+  display_name: string;
+  scope_id: string;
+  resource: "electricity" | "water";
+  category: EnergyMeterCategoryDto;
+  terms: EnergyVirtualMeterTermDto[];
+};
+
 export type EnergyMeterMappingDraftDto = {
   source_kind: "excel" | "tuya";
   rows: EnergyMeterMappingRowDto[];
+  virtual_meters?: EnergyVirtualMeterDto[];
   confirmed: boolean;
 };
 

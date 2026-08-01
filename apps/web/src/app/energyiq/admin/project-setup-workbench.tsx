@@ -14,6 +14,7 @@ import {
   configApi,
   type EnergyMeterMappingDraftDto,
   type EnergyMeterMappingRowDto,
+  type EnergyVirtualMeterDto,
   type EnergyProjectDto,
   type EnergyProjectSetupDocumentDto,
   type EnergyProjectSetupDto,
@@ -179,7 +180,7 @@ export function EnergyIqAdminWorkbench({
   const errorCount = validation?.issues.filter((issue) => issue.severity === "error").length ?? 0;
   const warningCount = validation?.issues.filter((issue) => issue.severity === "warning").length ?? 0;
   const sectionMeta = adminSectionMeta(section, selectedProject?.name);
-  const showSetupActions = section === "basics" || section === "structure";
+  const showSetupActions = section === "basics" || section === "structure" || section === "meter-mapping";
   const showProjectLink = Boolean(selectedProject?.status === "published" && isProjectContext(section));
   const chooseAdminProject = (projectId: string) => {
     setSelectedProjectId(projectId);
@@ -675,15 +676,20 @@ function MeterMappingPage({
           </aside>
         </div>
       ) : (
-        <AggregationReviewPanel document={document} mapping={mapping} groups={aggregation} />
+        <AggregationReviewPanel
+          document={document}
+          mapping={mapping}
+          groups={aggregation}
+          onChange={(next) => setMapping({ ...next, confirmed: false })}
+        />
       )}
 
       <section className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-surface p-5">
         <div>
-          <h4 className="text-sm font-semibold">{reviewing ? "Confirm the Mapping Draft" : "Ready to review aggregation?"}</h4>
+          <h4 className="text-sm font-semibold">{reviewing ? "Confirm the Mapping Checkpoint" : "Ready to review aggregation?"}</h4>
           <p className="mt-1 text-xs leading-5 text-muted">
             {reviewing
-              ? "Confirmation stores the reviewed Mapping in the Project Draft. Final customer publication still happens in Review & Publish."
+              ? "Mark the reviewed Mapping as confirmed, then use Save draft in the page header. Final customer publication still happens in Review & Publish."
               : "Review groups by Scope, resource and category before confirmation. Overall is never added to Load, Light, Aircon or Other."}
           </p>
         </div>
@@ -698,7 +704,7 @@ function MeterMappingPage({
                 onClick={() => setMapping({ ...mapping, confirmed: true })}
                 className={primaryButton}
               >
-                Confirm Mapping
+                Mark Mapping Confirmed
               </button>
             </>
           ) : (
@@ -809,12 +815,15 @@ function AggregationReviewPanel({
   document,
   mapping,
   groups,
+  onChange,
 }: {
   document: EnergyProjectSetupDocumentDto;
   mapping: EnergyMeterMappingDraftDto;
   groups: ReturnType<typeof buildAggregationReview>;
+  onChange: (mapping: EnergyMeterMappingDraftDto) => void;
 }) {
   const overallCount = groups.filter((group) => group.category === "overall").length;
+  const [addingVirtual, setAddingVirtual] = useState(false);
   return (
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
       <section className="rounded-xl border border-border bg-surface">
@@ -845,10 +854,113 @@ function AggregationReviewPanel({
         </section>
         <section className="rounded-xl border border-border bg-surface p-5">
           <h4 className="text-sm font-semibold">Optional Virtual Meter</h4>
-          <p className="mt-2 text-xs leading-5 text-muted">Virtual formulas are added after the physical Mapping is confirmed. They default to standalone and never enter official totals unless an admin explicitly promotes the route.</p>
+          <p className="mt-2 text-xs leading-5 text-muted">Create an optional + / - formula from mapped physical meters. Virtual Meters stay standalone and excluded from official totals.</p>
+          <button type="button" onClick={() => setAddingVirtual((current) => !current)} className={`${secondaryButton} mt-4 w-full`}>{addingVirtual ? "Cancel" : "Add Virtual Meter"}</button>
         </section>
       </aside>
+      {(addingVirtual || (mapping.virtual_meters?.length ?? 0) > 0) ? (
+        <VirtualMeterPanel
+          document={document}
+          mapping={mapping}
+          adding={addingVirtual}
+          onCancel={() => setAddingVirtual(false)}
+          onChange={onChange}
+        />
+      ) : null}
     </div>
+  );
+}
+
+function VirtualMeterPanel({
+  document,
+  mapping,
+  adding,
+  onCancel,
+  onChange,
+}: {
+  document: EnergyProjectSetupDocumentDto;
+  mapping: EnergyMeterMappingDraftDto;
+  adding: boolean;
+  onCancel: () => void;
+  onChange: (mapping: EnergyMeterMappingDraftDto) => void;
+}) {
+  const initialScopeId = mapping.rows[0]?.scope_id ?? document.nodes[0]?.id ?? "";
+  const [name, setName] = useState("Load 12");
+  const [scopeId, setScopeId] = useState(initialScopeId);
+  const [resource, setResource] = useState<EnergyVirtualMeterDto["resource"]>("electricity");
+  const [category, setCategory] = useState<EnergyVirtualMeterDto["category"]>("load");
+  const [terms, setTerms] = useState<Record<string, 0 | 1 | -1>>({});
+  const selectedTerms = Object.entries(terms).filter((entry): entry is [string, 1 | -1] => entry[1] !== 0);
+  const availableRows = mapping.rows.filter((row) => row.resource === resource);
+  const saveVirtualMeter = () => {
+    const virtualMeter: EnergyVirtualMeterDto = {
+      id: `virtual-${Date.now()}`,
+      display_name: name.trim(),
+      scope_id: scopeId,
+      resource,
+      category,
+      terms: selectedTerms.map(([mappingRowId, coefficient]) => ({ mapping_row_id: mappingRowId, coefficient })),
+    };
+    onChange({ ...mapping, virtual_meters: [...(mapping.virtual_meters ?? []), virtualMeter] });
+    onCancel();
+  };
+  return (
+    <section className="rounded-xl border border-border bg-surface xl:col-span-2">
+      <div className="border-b border-border px-5 py-4">
+        <h4 className="text-sm font-semibold">Virtual Meters</h4>
+        <p className="mt-1 text-xs leading-5 text-muted">Optional derived values for comparison or gap analysis. They never alter official rollups in this pilot.</p>
+      </div>
+      {(mapping.virtual_meters?.length ?? 0) > 0 ? (
+        <div className="divide-y divide-border">
+          {mapping.virtual_meters?.map((virtualMeter) => (
+            <div key={virtualMeter.id} className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
+              <div>
+                <p className="text-xs font-semibold">{virtualMeter.display_name}</p>
+                <p className="mt-1 text-[10px] text-muted">{nodePathLabel(document, virtualMeter.scope_id)} · {virtualMeter.terms.map((term, index) => {
+                  const label = mapping.rows.find((row) => row.id === term.mapping_row_id)?.display_name ?? "Missing meter";
+                  return `${index === 0 && term.coefficient === 1 ? "" : term.coefficient === 1 ? "+ " : "- "}${label}`;
+                }).join(" ")}</p>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-[9px] font-semibold uppercase tracking-wide text-muted">Standalone · Excluded</span>
+                <button type="button" onClick={() => onChange({ ...mapping, virtual_meters: mapping.virtual_meters?.filter((item) => item.id !== virtualMeter.id) })} className="text-[10px] font-semibold text-step-error hover:underline">Delete</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {adding ? (
+        <div className="grid gap-5 border-t border-border p-5 xl:grid-cols-[320px_minmax(0,1fr)]">
+          <div className="space-y-4">
+            <Field label="Display name"><input value={name} onChange={(event) => setName(event.target.value)} className={inputClass} /></Field>
+            <Field label="Existing Scope">
+              <select value={scopeId} onChange={(event) => setScopeId(event.target.value)} className={inputClass}>
+                {tiersTopDown(document).flatMap((tier) => document.nodes.filter((node) => node.tier_definition_id === tier.id).map((node) => <option key={node.id} value={node.id}>{tier.alias} · {nodePathLabel(document, node.id)}</option>))}
+              </select>
+            </Field>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+              <Field label="Resource"><select value={resource} onChange={(event) => { setResource(event.target.value as EnergyVirtualMeterDto["resource"]); setTerms({}); }} className={inputClass}><option value="electricity">Electricity</option><option value="water">Water</option></select></Field>
+              <Field label="Category"><select value={category} onChange={(event) => setCategory(event.target.value as EnergyVirtualMeterDto["category"])} className={inputClass}><option value="overall">Overall</option><option value="load">Load</option><option value="light">Light</option><option value="aircon">Aircon</option><option value="other">Other</option></select></Field>
+            </div>
+            <button type="button" disabled={!name.trim() || !scopeId || selectedTerms.length < 2} onClick={saveVirtualMeter} className={`${primaryButton} w-full`}>Save Virtual Meter</button>
+            <p className="text-[10px] leading-4 text-muted">Choose at least two inputs. Use + to sum circuits or - to calculate a residual from a total.</p>
+          </div>
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Formula inputs</p>
+            <div className="mt-3 grid gap-2 md:grid-cols-2">
+              {availableRows.map((row) => (
+                <div key={row.id} className="flex items-center gap-3 rounded-lg bg-surface-subtle px-3 py-2.5">
+                  <select value={terms[row.id] ?? 0} onChange={(event) => setTerms((current) => ({ ...current, [row.id]: Number(event.target.value) as 0 | 1 | -1 }))} aria-label={`Formula operator for ${row.source_label}`} className="h-8 rounded-md border border-border bg-surface px-2 text-xs">
+                    <option value="0">Off</option><option value="1">+</option><option value="-1">-</option>
+                  </select>
+                  <span className="min-w-0"><span className="block truncate text-[11px] font-semibold">{row.display_name}</span><span className="block truncate text-[9px] text-muted">{nodePathLabel(document, row.scope_id)}</span></span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </section>
   );
 }
 

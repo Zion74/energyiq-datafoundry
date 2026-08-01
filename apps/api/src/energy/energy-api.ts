@@ -355,7 +355,33 @@ const parseMeterMappingDraft = (
         meter_role: meterRole,
         aggregation_usage: aggregationUsage
       };
-    })
+    }),
+    ...(Array.isArray(mapping.virtual_meters) ? {
+      virtual_meters: mapping.virtual_meters.map((value, index) => {
+        const virtualMeter = requireRecord(value, `ENERGYIQ_VIRTUAL_METER_INVALID:${index}`);
+        if (!Array.isArray(virtualMeter.terms)) {
+          throw new Error(`ENERGYIQ_VIRTUAL_METER_TERMS_INVALID:${index}`);
+        }
+        const category = virtualMeter.category;
+        if (category !== "overall" && category !== "load" && category !== "light" && category !== "aircon" && category !== "other") {
+          throw new Error(`ENERGYIQ_VIRTUAL_METER_CATEGORY_INVALID:${index}`);
+        }
+        return {
+          id: requireNonEmptyString(virtualMeter.id, `ENERGYIQ_VIRTUAL_METER_ID_REQUIRED:${index}`),
+          display_name: requireNonEmptyString(virtualMeter.display_name, `ENERGYIQ_VIRTUAL_METER_NAME_REQUIRED:${index}`),
+          scope_id: requireNonEmptyString(virtualMeter.scope_id, `ENERGYIQ_VIRTUAL_METER_SCOPE_REQUIRED:${index}`),
+          resource: virtualMeter.resource === "water" ? "water" as const : "electricity" as const,
+          category,
+          terms: virtualMeter.terms.map((value, termIndex) => {
+            const term = requireRecord(value, `ENERGYIQ_VIRTUAL_METER_TERM_INVALID:${index}:${termIndex}`);
+            return {
+              mapping_row_id: requireNonEmptyString(term.mapping_row_id, `ENERGYIQ_VIRTUAL_METER_TERM_ID_REQUIRED:${index}:${termIndex}`),
+              coefficient: term.coefficient === -1 ? -1 as const : 1 as const
+            };
+          })
+        };
+      })
+    } : {})
   };
 };
 
