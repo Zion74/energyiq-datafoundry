@@ -117,7 +117,7 @@ describe("data task identity menu", () => {
 
     for (const label of [
       "Sign in",
-      "Create account",
+      "Activate account",
       "Forgot password",
       "Verify email",
     ]) {
