@@ -1,0 +1,158 @@
+---
+title: "EnergyIQ 领域词汇表"
+summary: "固定 EnergyIQ 中 Project、Tier、Scope、计量、事实、模板和运行等术语，避免计算名与客户展示名混用。"
+doc_type: concept
+tags: [领域语言, Tier, Meter, Template, Analysis]
+updated_at: "2026-08-01"
+related:
+  - "当前共识与新会话入口.md"
+  - "领域模型.md"
+status: accepted
+---
+
+# EnergyIQ 领域词汇表
+
+本表是代码、数据库、API、文档和 UI 的共同语言。术语的详细字段和关系见[领域模型](领域模型.md)。
+
+## 租户与项目
+
+**Partner**  
+销售或实施客户项目的合作组织，例如 Tuya。它不属于客户空间 Tier，也不自动获得客户数据权限。
+
+**Workspace**  
+客户组织的数据和权限隔离边界。一个用户可以属于多个 Workspace，一个 Workspace 可以包含多个 Project。
+
+**Membership**  
+用户与 Workspace 的授权关系。服务端必须由登录身份解析 Membership，不能信任浏览器传入的 workspace_id。
+
+**Project**  
+Workspace 内可独立配置、发布和分析的业务项目。Project 是分析根，不是空间 Tier，也不需要 Company 节点充当统一顶层。
+
+## Tier 与空间范围
+
+**Tier Definition**  
+某个 Project 内一个有业务意义的层级定义，包含稳定 id、从下往上的 ordinal、客户显示 alias 和可用属性。计算用 id/ordinal，展示用 alias。
+
+**Tier Ordinal**  
+Project 内从最低有意义层开始的序号：Tier 1、Tier 2、Tier 3……。它只用于计算和配置，不直接展示给客户。
+
+**Tier Alias**  
+管理员为 Tier Definition 配置的业务名称，例如 Circuit、Room、Floor、Block、Estate。
+
+**Tier Structure Lock**  
+Structure 阶段在 Draft 内确认 Tier 数量、顺序和 Alias 的检查点。它允许管理员继续创建真实节点，但不等于发布；客户仍只读取第五阶段发布的 Hierarchy Revision。
+
+**Project Node / Scope Node**  
+Tier Definition 的具体实例，例如 Room 1、Level 6。它有稳定 scope_id、display_name、parent_scope_id 和 tier_definition_id。
+
+**Scope**  
+一次导航、比较、查询或分析覆盖的范围。通常是 Project 或一个 Project Node，也可以精确到 Meter Point。
+
+**Hierarchy Revision**  
+一个 Project 已发布的 Tier Definition、Project Node 和父子关系快照。历史运行始终引用当时的版本。
+
+**Node Metadata**  
+节点的面积、代表人数、营业时间、用途等属性。需要历史复跑的属性应带生效时间。
+
+## 计量
+
+**Meter Point**  
+可独立查询的逻辑计量对象。可以是物理表，也可以是虚拟表；可挂在任意 Project Node。
+
+**Physical Meter Point**  
+与 Tuya device/DP 或 Excel source label 绑定、产生原始累计读数的 Meter Point。
+
+**Virtual Meter Point**  
+通过已发布线性公式从其他 Interval Fact 加减得到、没有独立上传读数的 Meter Point。
+
+**Meter Role**  
+计量点在挂载 Scope 内的覆盖角色：total、component 或 standalone。physical/virtual 属于 Meter Kind，不能混入 Meter Role。
+
+**Official Aggregation Route**  
+一个 `scope + resource + category` 的正式汇总口径，可以指定直接总表、虚拟总表、选定且互不重叠的 component，或下级 Scope 的正式口径。它与 Meter Role 分开保存，用于防止总表和分表重复计算。
+
+**Meter Topology**  
+计量点之间的总分和公式依赖关系。它与客户导航使用的空间树分开保存。
+
+**Resource Type**  
+计量资源。首期支持 electricity，并为 water 使用同一模型；carbon 是未来派生指标。
+
+**Business Category**  
+对计量点的业务分类。首期为 overall、load、aircon、light、other。overall 表示已经覆盖整个 Scope 全部用能的总进线口径，不能再与其分类表相加。
+
+## 数据
+
+**Source Adapter**  
+把 Excel 或 Tuya API 转换为统一 Raw Reading 的适配器。它不包含指标和模板逻辑。
+
+**Import Batch**  
+一次文件导入或 API 同步的可追溯批次，包含来源、SHA/请求窗口、状态、质量摘要和时间。
+
+**Raw Reading / Meter Reading**  
+物理计量点在时间点上的累计读数。它不可直接求和。
+
+**Interval Fact**  
+同一物理计量点相邻有效累计读数之差，绑定区间、实际时长、单位、质量和来源批次。
+
+**Utility Fact**  
+经映射、质量校验、正式聚合和虚拟表计算后，供模板、Explorer 和 AI 共用的规范事实。
+
+**Data Snapshot**  
+一次分析可见的数据批次和质量状态集合。它让运行结果可以解释和复跑。
+
+## 指标与分析
+
+**Metric Definition / Metric Revision**  
+指标的名称、单位、输入事实、聚合方法、可比较范围和版本。metric_id 是稳定身份，revision 固定某次计算口径。
+
+**Rule Revision**  
+异常或建议规则的不可变版本，包含阈值、基线方法、适用范围和最低质量要求。
+
+**Analysis Context / Energy Query Context**  
+服务端解析的可信查询边界，至少固定 Workspace、Project、Scope、Tier、时间、资源、指标及有关版本。
+
+**Baseline**  
+结论的比较基准，优先使用同一 Scope 的自身历史同类时段，其次是项目规则或可靠归一化同级。
+
+**Evidence Bundle**  
+支撑结论的范围、时间、指标、SQL/查询参数、数据批次、版本和质量状态。
+
+## 模板与运行
+
+**Component Catalog**  
+允许模板引用的受控指标卡、图表、比较、异常和证据组件集合。
+
+**Template Preset**  
+可供不同项目参考的模块组合，例如 Charles Preschool 或 Ngee Ann Level/Circuit preset。它不是正式运行模板。
+
+**Project Template**  
+项目总览使用的结构化模板。
+
+**Tier Template**  
+某个 Tier Definition 下全部节点共用的结构化模板。首期不提供 per-node override。
+
+**Template Draft**  
+尚未发布的结构化模板，可以由 AI 辅助生成并由 admin 调整。
+
+**Template Revision**  
+经过校验、预览和人工发布的不可变模板版本。
+
+**Analysis Run**  
+固定 Template Revision、Scope、Period、Data Snapshot 和有关版本执行的一次确定性分析。
+
+**Template Change Proposal**  
+人工或 AI 生成的结构化变更建议。它必须经过 Diff、校验、预览和人工发布，不能直接改变正式模板。
+
+## 用户与后台
+
+**user**  
+客户权限。FM 与 Boss 当前均为 user，可以运行、下钻和问数，不能改项目配置或发布模板。
+
+**admin**  
+项目实施和平台管理权限，负责账号、Project、Tier、计量、数据、规则、模板、发布和技术配置。
+
+**My Assets**  
+用户个人临时文件空间。文件只有经 admin 提升和映射后，才成为 Project Data 或 Project Knowledge。
+
+**Knowledge**  
+带原文、解析、切块、全文/向量检索、版本、作用域和引用的非结构化知识。它不能代替 Energy Fact、Tier、映射或指标规则。
