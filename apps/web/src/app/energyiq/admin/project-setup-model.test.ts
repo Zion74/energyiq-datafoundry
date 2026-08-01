@@ -164,7 +164,7 @@ describe("project setup model", () => {
 
     const imported = createMeterMappingFromSourceLabels(document, [
       "Lvl 6 Total Office Load",
-      "Lvl 6 Office Load 1",
+      "Lvl 6 Office Load 1: L1P1-L3P6",
       "Lvl 7 Office Load 1",
       "Unknown Meter",
     ]);
@@ -172,6 +172,10 @@ describe("project setup model", () => {
       scope_id: "l6",
       display_name: "Total Office Load",
       category: "load",
+    });
+    expect(imported.rows.find((row) => row.source_label === "Lvl 6 Office Load 1: L1P1-L3P6")).toMatchObject({
+      scope_id: "load-1",
+      display_name: "Office Load 1",
     });
     expect(imported.rows.find((row) => row.source_label === "Lvl 7 Office Load 1")?.scope_id).toBe("load-1-l7");
     expect(imported.rows.find((row) => row.source_label === "Unknown Meter")?.scope_id).toBe("");

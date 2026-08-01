@@ -169,7 +169,17 @@ export const createMeterMappingFromSourceLabels = (
     .sort((left, right) => left.localeCompare(right))
     .map((sourceLabel, index): EnergyMeterMappingRowDto => {
       const parsed = parseSourceLabel(sourceLabel);
-      const candidates = document.nodes.filter((node) => normaliseDisplayName(node.name) === normaliseDisplayName(parsed.meterName));
+      const meterName = normaliseDisplayName(parsed.meterName);
+      const meterNameBeforeDetails = normaliseDisplayName(parsed.meterName.split(":", 1)[0] ?? parsed.meterName);
+      const exactCandidates = document.nodes.filter((node) => normaliseDisplayName(node.name) === meterName);
+      const candidates = exactCandidates.length > 0
+        ? exactCandidates
+        : document.nodes.filter((node) => {
+          const nodeName = normaliseDisplayName(node.name);
+          return nodeName === meterNameBeforeDetails
+            || nodeName.startsWith(`${meterNameBeforeDetails} `)
+            || nodeName.startsWith(`${meterNameBeforeDetails}:`);
+        });
       const scopedCandidates = parsed.locationName
         ? candidates.filter((node) => ancestorNames(node, nodesById)
           .some((name) => normaliseDisplayName(name) === normaliseDisplayName(parsed.locationName!)))
@@ -185,7 +195,7 @@ export const createMeterMappingFromSourceLabels = (
         id: `mapping-${slug(sourceLabel)}-${index + 1}`,
         source_label: sourceLabel,
         scope_id: scopeId,
-        display_name: parsed.meterName,
+        display_name: matched?.name ?? parsed.meterName,
         resource: "electricity",
         category: inferMeterCategory(parsed.meterName),
         coverage: representsParentTotal ? "whole" : "whole",
