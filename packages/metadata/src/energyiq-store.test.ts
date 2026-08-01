@@ -6,6 +6,61 @@ import { describe, expect, it } from "vitest";
 import { createMetadataStore } from "./index.js";
 
 describe("EnergyIqStore", () => {
+  it("uses customer Workspace membership as the published Project visibility boundary", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-access-store-"));
+    try {
+      const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+      metadata.users.upsertDevUser({
+        id: "member-user",
+        email: "member@example.com",
+        display_name: "Member User",
+        dev_token: "member-token"
+      });
+      metadata.workspaces.upsert({
+        id: "customer-a",
+        owner_user_id: "dev-user",
+        name: "Customer A",
+        kind: "customer"
+      });
+      metadata.workspaceMemberships.upsert({
+        workspace_id: "customer-a",
+        user_id: "member-user",
+        role: "member"
+      });
+      metadata.energyIq.upsertProject({
+        id: "published-a",
+        workspace_id: "customer-a",
+        name: "Published A",
+        status: "published"
+      });
+      metadata.energyIq.upsertProject({
+        id: "draft-a",
+        workspace_id: "customer-a",
+        name: "Draft A",
+        status: "draft"
+      });
+
+      expect(metadata.energyIq.listVisibleProjects({
+        user_id: "member-user",
+        workspace_id: "customer-a",
+        is_admin: false
+      }).map((project) => project.id)).toEqual(["published-a"]);
+      expect(metadata.energyIq.listVisibleProjects({
+        user_id: "outsider",
+        workspace_id: "customer-a",
+        is_admin: false
+      })).toEqual([]);
+      expect(metadata.energyIq.listVisibleProjects({
+        user_id: "dev-user",
+        workspace_id: "customer-a",
+        is_admin: true
+      }).map((project) => project.id)).toEqual(["published-a", "draft-a"]);
+      metadata.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
   it("stores customer workspace, project hierarchy, access and version pins", () => {
     const root = mkdtempSync(join(tmpdir(), "energyiq-store-"));
     try {

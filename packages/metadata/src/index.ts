@@ -58,7 +58,7 @@ export type AuthSessionRecord = {
   last_seen_at: string;
 };
 
-export type AuthTokenPurpose = "email_verification" | "password_reset";
+export type AuthTokenPurpose = "account_invitation" | "email_verification" | "password_reset";
 
 export type AuthTokenRecord = {
   id: string;
@@ -75,6 +75,7 @@ export type WorkspaceRecord = {
   name: string;
   kind: "personal" | "customer";
   owner_user_id: string;
+  disabled_at?: string;
   created_at: string;
   updated_at: string;
 };
@@ -893,6 +894,22 @@ export class UserRepository {
     return this.getById({ user_id: input.user_id });
   }
 
+  updateDisplayName(input: { user_id: string; display_name: string }): UserRecord {
+    const updatedAt = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE users SET display_name = ?, updated_at = ? WHERE id = ?
+    `).run(input.display_name, updatedAt, input.user_id);
+    return this.getById({ user_id: input.user_id });
+  }
+
+  setDisabled(input: { user_id: string; disabled: boolean }): UserRecord {
+    const updatedAt = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE users SET disabled_at = ?, updated_at = ? WHERE id = ?
+    `).run(input.disabled ? updatedAt : null, updatedAt, input.user_id);
+    return this.getById({ user_id: input.user_id });
+  }
+
   getByDevToken(input: { dev_token: string }): Optional<UserRecord> {
     return mapUserRow(this.db.prepare("SELECT * FROM users WHERE dev_token = ?").get(input.dev_token));
   }
@@ -1030,6 +1047,13 @@ export class AuthSessionRepository {
       .filter((record): record is AuthSessionRecord => Boolean(record));
   }
 
+  latestSeenAt(input: { user_id: string }): string | undefined {
+    const row = this.db.prepare(`
+      SELECT MAX(last_seen_at) AS last_seen_at FROM auth_sessions WHERE user_id = ?
+    `).get(input.user_id);
+    return isRecord(row) ? optionalString(row.last_seen_at) : undefined;
+  }
+
   touch(input: { id: string; last_seen_at?: string }): void {
     this.db.prepare("UPDATE auth_sessions SET last_seen_at = ? WHERE id = ?")
       .run(input.last_seen_at ?? new Date().toISOString(), input.id);
@@ -1088,6 +1112,18 @@ export class AuthTokenRepository {
     return this.get(input);
   }
 
+  consumeOpenByUser(input: {
+    user_id: string;
+    purpose: AuthTokenPurpose;
+    consumed_at?: string;
+  }): void {
+    this.db.prepare(`
+      UPDATE auth_tokens
+      SET consumed_at = COALESCE(consumed_at, ?)
+      WHERE user_id = ? AND purpose = ? AND consumed_at IS NULL
+    `).run(input.consumed_at ?? new Date().toISOString(), input.user_id, input.purpose);
+  }
+
   get(input: { id: string }): AuthTokenRecord {
     const token = mapAuthTokenRow(this.db.prepare("SELECT * FROM auth_tokens WHERE id = ?").get(input.id));
     if (!token) {
@@ -1137,6 +1173,16 @@ export class WorkspaceRepository {
       throw new Error(`WORKSPACE_NOT_FOUND:${input.id}`);
     }
     return workspace;
+  }
+
+  setCustomerDetails(input: { id: string; name: string; disabled: boolean }): WorkspaceRecord {
+    const updatedAt = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE workspaces
+      SET name = ?, disabled_at = ?, updated_at = ?
+      WHERE id = ? AND kind = 'customer'
+    `).run(input.name, input.disabled ? updatedAt : null, updatedAt, input.id);
+    return this.get({ id: input.id });
   }
 
   findPersonalByUser(input: { user_id: string }): Optional<WorkspaceRecord> {
@@ -1216,6 +1262,20 @@ export class WorkspaceMembershipRepository {
     `).all(input.user_id)
       .map(mapWorkspaceMembershipRow)
       .filter((membership): membership is WorkspaceMembershipRecord => membership !== undefined);
+  }
+
+  listByWorkspace(input: { workspace_id: string }): WorkspaceMembershipRecord[] {
+    return this.db.prepare(`
+      SELECT * FROM workspace_memberships WHERE workspace_id = ? ORDER BY created_at
+    `).all(input.workspace_id)
+      .map(mapWorkspaceMembershipRow)
+      .filter((membership): membership is WorkspaceMembershipRecord => membership !== undefined);
+  }
+
+  remove(input: { workspace_id: string; user_id: string }): void {
+    this.db.prepare(`
+      DELETE FROM workspace_memberships WHERE workspace_id = ? AND user_id = ?
+    `).run(input.workspace_id, input.user_id);
   }
 }
 
@@ -4133,6 +4193,7 @@ const initializeAuthSchema = (db: DatabaseSync): void => {
       name TEXT NOT NULL,
       kind TEXT NOT NULL,
       owner_user_id TEXT NOT NULL,
+      disabled_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (owner_user_id) REFERENCES users(id)
@@ -4175,6 +4236,7 @@ const initializeAuthSchema = (db: DatabaseSync): void => {
       updated_at TEXT NOT NULL
     );
   `);
+  ensureColumn(db, "workspaces", "disabled_at", "TEXT");
 };
 
 const initializeSessionBranchSchema = (db: DatabaseSync): void => {
@@ -4635,11 +4697,13 @@ const mapWorkspaceRow = (row: unknown): Optional<WorkspaceRecord> => {
   if (!isRecord(row)) {
     return undefined;
   }
+  const disabledAt = optionalString(row.disabled_at);
   return {
     id: requiredString(row, "id"),
     name: requiredString(row, "name"),
     kind: requiredString(row, "kind") as WorkspaceRecord["kind"],
     owner_user_id: requiredString(row, "owner_user_id"),
+    ...(disabledAt ? { disabled_at: disabledAt } : {}),
     created_at: requiredString(row, "created_at"),
     updated_at: requiredString(row, "updated_at")
   };

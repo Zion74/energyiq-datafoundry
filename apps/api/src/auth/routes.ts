@@ -52,6 +52,24 @@ export async function handleAuthApiRequest(
       }));
       return true;
     }
+    if (root === "activate" && request.method === "POST") {
+      const result = await context.authService.acceptInvitation({
+        token: requiredString(body.token, "token"),
+        password: requiredString(body.password, "password"),
+        ...(optionalString(body.displayName) ? { displayName: optionalString(body.displayName) } : {}),
+        ...requestMeta(request)
+      });
+      appendAuthCookies(response, {
+        csrfToken: result.csrfToken,
+        maxAgeSeconds: result.maxAgeSeconds,
+        sessionToken: result.sessionToken
+      });
+      sendJson(response, 200, createSuccessResult({
+        user: result.user,
+        workspace: result.workspace
+      }));
+      return true;
+    }
     if (root === "verify-email" && request.method === "POST") {
       sendJson(response, 200, createSuccessResult(await context.authService.verifyEmail({
         token: requiredString(body.token, "token"),

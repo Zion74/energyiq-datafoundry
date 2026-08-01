@@ -303,6 +303,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       );
 
       const configResponse = await handleConfigApiRequest(request, requestUrl.pathname, {
+        authService,
         dataGateway,
         fileAssetService,
         knowledgeService,
@@ -1150,7 +1151,9 @@ const resolveRequestAuth = (
       user: identity.user,
       ...(requestedWorkspaceId ? { requestedWorkspaceId } : {})
     });
-    const workspace = metadataStore.workspaces.get({ id: access.activeWorkspaceId });
+    const workspace = access.activeWorkspaceId
+      ? metadataStore.workspaces.get({ id: access.activeWorkspaceId })
+      : identity.workspace;
     return {
       identity: { ...identity, workspace },
       user: userRecordToMeResponse(identity.user),

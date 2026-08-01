@@ -309,6 +309,29 @@ export class EnergyIqStore {
     `).all(...parameters).filter(isRecord).map(mapProject);
   }
 
+  listVisibleProjects(input: {
+    user_id: string;
+    workspace_id: string;
+    is_admin: boolean;
+    include_archived?: boolean;
+  }): EnergyIqProjectRecord[] {
+    if (!input.is_admin) {
+      const membership = this.db.prepare(`
+        SELECT 1 FROM workspace_memberships WHERE workspace_id = ? AND user_id = ?
+      `).get(input.workspace_id, input.user_id);
+      if (!membership) return [];
+    }
+    const statuses = input.is_admin
+      ? (input.include_archived ? ["published", "draft", "archived"] : ["published", "draft"])
+      : ["published"];
+    const placeholders = statuses.map(() => "?").join(", ");
+    return this.db.prepare(`
+      SELECT * FROM energyiq_projects
+      WHERE workspace_id = ? AND status IN (${placeholders})
+      ORDER BY CASE status WHEN 'published' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END, name
+    `).all(input.workspace_id, ...statuses).filter(isRecord).map(mapProject);
+  }
+
   upsertProjectNode(input: {
     id: string;
     project_id: string;

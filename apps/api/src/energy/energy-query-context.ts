@@ -21,6 +21,7 @@ export type EnergyAccessContext = {
     id: string;
     name: string;
     kind: WorkspaceRecord["kind"];
+    disabled: boolean;
   }>;
   projects: Array<{
     id: string;
@@ -97,9 +98,19 @@ export const resolveEnergyAccessContext = (input: {
     role === "admin"
       ? input.metadataStore.workspaces.list()
       : input.metadataStore.workspaces.listByUser({ user_id: input.user.id })
-  ).filter((workspace) => workspace.kind === "customer");
+  ).filter((workspace) => workspace.kind === "customer" && (role === "admin" || !workspace.disabled_at));
   if (workspaces.length === 0) {
-    throw new Error("ENERGYIQ_WORKSPACE_REQUIRED");
+    return {
+      role,
+      user: {
+        id: input.user.id,
+        ...(input.user.email ? { email: input.user.email } : {}),
+        ...(input.user.display_name ? { displayName: input.user.display_name } : {})
+      },
+      activeWorkspaceId: "",
+      workspaces: [],
+      projects: []
+    };
   }
   const activeWorkspace = input.requestedWorkspaceId
     ? workspaces.find((workspace) => workspace.id === input.requestedWorkspaceId)
@@ -107,12 +118,11 @@ export const resolveEnergyAccessContext = (input: {
   if (!activeWorkspace) {
     throw new Error("ENERGYIQ_WORKSPACE_FORBIDDEN");
   }
-  const projects = role === "admin"
-    ? input.metadataStore.energyIq.listProjectsByWorkspace(activeWorkspace.id)
-    : input.metadataStore.energyIq.listProjectsForUser({
-        user_id: input.user.id,
-        workspace_id: activeWorkspace.id
-      });
+  const projects = input.metadataStore.energyIq.listVisibleProjects({
+    user_id: input.user.id,
+    workspace_id: activeWorkspace.id,
+    is_admin: role === "admin"
+  });
   return {
     role,
     user: {
@@ -124,7 +134,8 @@ export const resolveEnergyAccessContext = (input: {
     workspaces: workspaces.map((workspace) => ({
       id: workspace.id,
       name: workspace.name,
-      kind: workspace.kind
+      kind: workspace.kind,
+      disabled: Boolean(workspace.disabled_at)
     })),
     projects: projects.map((project) => ({
       id: project.id,

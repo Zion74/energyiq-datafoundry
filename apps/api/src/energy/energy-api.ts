@@ -5,10 +5,12 @@ import { createHash, randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 
 import type { ConfigApiContext, ConfigApiResponse } from "../routes/types.js";
+import { AuthError } from "../auth/service.js";
 import { readMultipartUpload } from "../upload-parser.js";
 import { executeEnergyScopeAnalysis } from "./energy-analysis.js";
 import { inspectEnergyExcelWorkbook } from "./energy-excel-import.js";
 import { buildEnergyExcelMaterialization } from "./energy-import-materializer.js";
+import { EnergyAdminAccessService } from "./energy-admin-access.js";
 import {
   resolveEnergyAccessContext,
   resolveEnergyQueryContext,
@@ -23,6 +25,75 @@ export const handleEnergyApiRequest = async (
 ): Promise<ConfigApiResponse> => {
   try {
     const user = context.metadataStore.users.getById({ user_id: context.userId });
+    if (segments[0] === "admin") {
+      requireEnergyAdmin(context, user);
+      const service = new EnergyAdminAccessService(context.metadataStore, context.authService);
+      if (segments[1] === "organisations" && segments.length === 2 && request.method === "GET") {
+        return { status: 200, body: createSuccessResult({ organisations: service.listOrganisations() }) };
+      }
+      if (segments[1] === "organisations" && segments.length === 2 && request.method === "POST") {
+        const body = requireRecord(await readJsonBody(request));
+        return {
+          status: 201,
+          body: createSuccessResult(service.createOrganisation({
+            actorUserId: user.id,
+            name: requireNonEmptyString(body.name, "ENERGYIQ_ORGANISATION_NAME_REQUIRED")
+          }))
+        };
+      }
+      if (segments[1] === "organisations" && segments[2] && segments.length === 3 && request.method === "PATCH") {
+        const body = requireRecord(await readJsonBody(request));
+        return {
+          status: 200,
+          body: createSuccessResult(service.updateOrganisation({
+            actorUserId: user.id,
+            id: decodeURIComponent(segments[2]),
+            name: requireNonEmptyString(body.name, "ENERGYIQ_ORGANISATION_NAME_REQUIRED"),
+            disabled: body.disabled === true
+          }))
+        };
+      }
+      if (segments[1] === "users" && segments.length === 2 && request.method === "GET") {
+        return { status: 200, body: createSuccessResult({ users: service.listUsers() }) };
+      }
+      if (segments[1] === "users" && segments.length === 2 && request.method === "POST") {
+        const body = requireRecord(await readJsonBody(request));
+        const displayName = optionalString(body.displayName);
+        return {
+          status: 201,
+          body: createSuccessResult(await service.inviteUser({
+            actorUserId: user.id,
+            email: requireNonEmptyString(body.email, "ENERGYIQ_USER_EMAIL_REQUIRED"),
+            ...(displayName ? { displayName } : {}),
+            organisationIds: requireStringArray(body.organisationIds, "ENERGYIQ_USER_ORGANISATIONS_REQUIRED"),
+            role: body.role === "admin" ? "admin" : "user"
+          }))
+        };
+      }
+      if (segments[1] === "users" && segments[2] && segments.length === 3 && request.method === "PATCH") {
+        const body = requireRecord(await readJsonBody(request));
+        return {
+          status: 200,
+          body: createSuccessResult(service.updateUser({
+            actorUserId: user.id,
+            userId: decodeURIComponent(segments[2]),
+            displayName: requireNonEmptyString(body.displayName, "ENERGYIQ_USER_NAME_REQUIRED"),
+            organisationIds: requireStringArray(body.organisationIds, "ENERGYIQ_USER_ORGANISATIONS_REQUIRED"),
+            role: body.role === "admin" ? "admin" : "user",
+            disabled: body.disabled === true
+          }))
+        };
+      }
+      if (segments[1] === "users" && segments[2] && segments[3] === "resend-invitation" && request.method === "POST") {
+        return {
+          status: 200,
+          body: createSuccessResult(await service.resendInvitation({
+            actorUserId: user.id,
+            userId: decodeURIComponent(segments[2])
+          }))
+        };
+      }
+    }
     if (segments[0] === "access-context" && request.method === "GET") {
       return {
         status: 200,
@@ -282,6 +353,12 @@ export const handleEnergyApiRequest = async (
       body: createErrorResult("RESOURCE_NOT_FOUND", "EnergyIQ endpoint not found.")
     };
   } catch (error) {
+    if (error instanceof AuthError) {
+      return {
+        status: error.status,
+        body: createErrorResult(error.code as AppErrorCode, error.message)
+      };
+    }
     const message = error instanceof Error ? error.message : String(error);
     const forbidden = message.includes("FORBIDDEN") || message.includes("ADMIN_REQUIRED");
     const conflict = message.includes("CONFLICT");
@@ -298,6 +375,13 @@ export const handleEnergyApiRequest = async (
       body: createErrorResult(code, message)
     };
   }
+};
+
+const requireStringArray = (value: unknown, code: string): string[] => {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw new Error(code);
+  }
+  return value.map((item) => item.trim()).filter(Boolean);
 };
 
 const toEnergyImportBatchDto = (

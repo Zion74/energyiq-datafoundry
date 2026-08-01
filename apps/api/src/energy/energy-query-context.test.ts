@@ -126,7 +126,7 @@ describe("EnergyQueryContext", () => {
     }
   });
 
-  it("prevents a user from selecting another customer workspace or an unpublished project", () => {
+  it("inherits published Project access from Organisation membership and rejects drafts or another Organisation", () => {
     const root = mkdtempSync(join(tmpdir(), "energy-query-context-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
     try {
@@ -151,8 +151,8 @@ describe("EnergyQueryContext", () => {
       metadata.energyIq.upsertProject({
         id: "customer-two-project",
         workspace_id: "customer-two",
-        name: "Customer Two Project",
-        status: "draft"
+        name: "Customer Two Published",
+        status: "published"
       });
       metadata.energyIq.upsertProjectNode({
         id: "customer-two-root",
@@ -160,10 +160,11 @@ describe("EnergyQueryContext", () => {
         name: "Customer Two Project",
         node_type: "project"
       });
-      metadata.energyIq.upsertProjectAccess({
-        project_id: "customer-two-project",
-        user_id: "fm-user",
-        role: "viewer"
+      metadata.energyIq.upsertProject({
+        id: "customer-two-draft",
+        workspace_id: "customer-two",
+        name: "Customer Two Draft",
+        status: "draft"
       });
       const user = metadata.users.getById({ user_id: "fm-user" });
       const access = resolveEnergyAccessContext({
@@ -173,13 +174,81 @@ describe("EnergyQueryContext", () => {
         env: {}
       });
       expect(access.role).toBe("user");
-      expect(access.projects).toEqual([]);
+      expect(access.projects.map((project) => project.id)).toEqual(["customer-two-project"]);
+      expect(() => resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user,
+        workspaceId: "customer-two",
+        request: {
+          projectId: "customer-two-draft",
+          period: "Yesterday"
+        },
+        env: {}
+      })).toThrow("ENERGYIQ_PROJECT_FORBIDDEN");
       expect(() => resolveEnergyAccessContext({
         metadataStore: metadata,
         user,
         requestedWorkspaceId: "default",
         env: {}
       })).toThrow("ENERGYIQ_WORKSPACE_FORBIDDEN");
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
+  it("hides personal and disabled Organisations from users while admins retain repair access", () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-query-context-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      metadata.users.upsertDevUser({
+        id: "multi-user",
+        email: "multi@example.com",
+        display_name: "Multi User",
+        dev_token: "multi-token"
+      });
+      metadata.workspaces.createPersonal({
+        id: "personal-multi-user",
+        owner_user_id: "multi-user",
+        name: "Personal"
+      });
+      metadata.workspaceMemberships.upsertOwner({
+        workspace_id: "personal-multi-user",
+        user_id: "multi-user"
+      });
+      metadata.workspaces.upsert({
+        id: "disabled-customer",
+        owner_user_id: "dev-user",
+        name: "Disabled Customer",
+        kind: "customer"
+      });
+      metadata.workspaceMemberships.upsert({
+        workspace_id: "disabled-customer",
+        user_id: "multi-user",
+        role: "member"
+      });
+      metadata.workspaces.setCustomerDetails({
+        id: "disabled-customer",
+        name: "Disabled Customer",
+        disabled: true
+      });
+
+      const userAccess = resolveEnergyAccessContext({
+        metadataStore: metadata,
+        user: metadata.users.getById({ user_id: "multi-user" }),
+        env: {}
+      });
+      expect(userAccess.workspaces).toEqual([]);
+      expect(userAccess.activeWorkspaceId).toBe("");
+
+      const adminAccess = resolveEnergyAccessContext({
+        metadataStore: metadata,
+        user: metadata.users.getById({ user_id: "dev-user" }),
+        requestedWorkspaceId: "disabled-customer"
+      });
+      expect(adminAccess.workspaces.find((workspace) => workspace.id === "disabled-customer"))
+        .toMatchObject({ disabled: true });
     } finally {
       metadata.close();
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

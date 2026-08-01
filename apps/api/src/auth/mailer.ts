@@ -3,28 +3,42 @@ import type { PasswordAuthConfig } from "./config.js";
 
 export type AuthMailResult = {
   testToken?: string;
+  testUrl?: string;
 };
 
 export class AuthMailer {
   constructor(private readonly config: PasswordAuthConfig) {}
 
   async sendVerification(input: { email: string; token: string }): Promise<AuthMailResult> {
-    const url = `${this.config.publicBaseUrl.replace(/\/$/u, "")}/data-tasks?verify=${encodeURIComponent(input.token)}`;
+    const url = `${this.config.publicBaseUrl.replace(/\/$/u, "")}/login?verify=${encodeURIComponent(input.token)}`;
     return this.send({
       email: input.email,
-      subject: "Verify your DataFoundry account",
-      text: `Verify your DataFoundry account: ${url}`,
-      token: input.token
+      subject: "Verify your EnergyIQ account",
+      text: `Verify your EnergyIQ account: ${url}`,
+      token: input.token,
+      url
+    });
+  }
+
+  async sendInvitation(input: { email: string; token: string }): Promise<AuthMailResult> {
+    const url = `${this.config.publicBaseUrl.replace(/\/$/u, "")}/login?invite=${encodeURIComponent(input.token)}`;
+    return this.send({
+      email: input.email,
+      subject: "Set up your EnergyIQ account",
+      text: `Set up your EnergyIQ account: ${url}`,
+      token: input.token,
+      url
     });
   }
 
   async sendPasswordReset(input: { email: string; token: string }): Promise<AuthMailResult> {
-    const url = `${this.config.publicBaseUrl.replace(/\/$/u, "")}/data-tasks?reset=${encodeURIComponent(input.token)}`;
+    const url = `${this.config.publicBaseUrl.replace(/\/$/u, "")}/login?reset=${encodeURIComponent(input.token)}`;
     return this.send({
       email: input.email,
       subject: "Reset your DataFoundry password",
       text: `Reset your DataFoundry password: ${url}`,
-      token: input.token
+      token: input.token,
+      url
     });
   }
 
@@ -33,9 +47,10 @@ export class AuthMailer {
     subject: string;
     text: string;
     token: string;
+    url: string;
   }): Promise<AuthMailResult> {
     if (this.config.emailDelivery === "test") {
-      return { testToken: input.token };
+      return { testToken: input.token, testUrl: input.url };
     }
     if (!this.config.smtp) {
       throw new Error("AUTH_CONFIG_MISSING:SMTP is required.");

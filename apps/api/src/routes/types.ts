@@ -4,8 +4,10 @@ import type { FileAssetService } from "@datafoundry/files";
 import type { LocalKnowledgeService } from "@datafoundry/knowledge";
 import type { MetadataStore } from "@datafoundry/metadata";
 import type { RunCancelRegistry } from "../run-cancel-registry.js";
+import type { AuthService } from "../auth/service.js";
 
 export type ConfigApiContext = {
+  authService: AuthService;
   dataGateway: LocalDataGateway;
   fileAssetService: FileAssetService;
   knowledgeService: LocalKnowledgeService;
