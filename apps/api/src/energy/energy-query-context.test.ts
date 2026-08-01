@@ -51,6 +51,7 @@ describe("EnergyQueryContext", () => {
       });
       expect(resolveEnergyScopeMeterNodeIds(metadata, "ngee-ann-polytechnic", "level-7"))
         .toEqual([
+          "level-7",
           "l7-total-light",
           "l7-total-load",
           "l7-front-light",
@@ -76,7 +77,7 @@ describe("EnergyQueryContext", () => {
       expect(preschoolNodes.filter((node) => node.parent_id === "preschool-project"))
         .toHaveLength(30);
       expect(resolveEnergyScopeMeterNodeIds(metadata, "preschool-demo", "preschool-centre-a"))
-        .toHaveLength(9);
+        .toHaveLength(10);
       expect(metadata.energyIq.getProject("preschool-demo").hierarchy_revision_id)
         .toBe("preschool-hierarchy-v4");
       expect(metadata.energyIq.listTierDefinitions("preschool-demo")).toMatchObject([

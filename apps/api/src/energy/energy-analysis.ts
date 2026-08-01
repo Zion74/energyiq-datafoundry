@@ -78,6 +78,7 @@ export type EnergyScopeAnalysis = {
 
 type MeterAggregate = {
   meterNodeId: string;
+  scopeId: string;
   name: string;
   appliance: string;
   category: string;
@@ -123,25 +124,38 @@ export const executeEnergyScopeAnalysis = async (input: {
       ?? join(resolve(dirname(fileURLToPath(import.meta.url)), "../../../.."), "storage", "energy", input.context.workspaceId, "energy.duckdb")
   });
 
-  const [summaryResult, profileResult, meterResult] = await Promise.all([
+  const meterResult = await input.dataGateway.runSqlReadonly({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: scoped.datasourceId,
+    sql: meterBreakdownSql(scoped.viewName),
+    limit: 1000
+  });
+  const meterAggregates = meterResult.rows.map(rowToMeterAggregate);
+  const hierarchy = input.metadataStore.energyIq.listProjectNodes(input.context.projectId);
+  const selectedNode = hierarchy.find((node) => node.id === input.context.scopeId);
+  if (!selectedNode) {
+    throw new Error("ENERGYIQ_SCOPE_FORBIDDEN");
+  }
+  const aggregateMeters = selectAggregateMetersForScope(
+    selectedNode.id,
+    meterAggregates,
+    hierarchy
+  );
+  const aggregateMeterNodeIds = aggregateMeters.map((meter) => meter.meterNodeId);
+  const aggregationRule = aggregationRuleForMeters(aggregateMeters);
+  const [summaryResult, profileResult] = await Promise.all([
     input.dataGateway.runSqlReadonly({
       user_id: input.userId,
       workspace_id: input.context.workspaceId,
       datasource_id: scoped.datasourceId,
-      sql: scopeSummarySql(scoped.viewName)
+      sql: scopeSummarySql(scoped.viewName, aggregateMeterNodeIds)
     }),
     input.dataGateway.runSqlReadonly({
       user_id: input.userId,
       workspace_id: input.context.workspaceId,
       datasource_id: scoped.datasourceId,
-      sql: hourlyProfileSql(scoped.viewName)
-    }),
-    input.dataGateway.runSqlReadonly({
-      user_id: input.userId,
-      workspace_id: input.context.workspaceId,
-      datasource_id: scoped.datasourceId,
-      sql: meterBreakdownSql(scoped.viewName),
-      limit: 1000
+      sql: hourlyProfileSql(scoped.viewName, aggregateMeterNodeIds)
     })
   ]);
 
@@ -151,13 +165,6 @@ export const executeEnergyScopeAnalysis = async (input: {
   const nonOperatingKwh = numberAt(summaryRow, 2);
   const validIntervalCount = numberAt(summaryRow, 3);
   const qualityEventCount = numberAt(summaryRow, 4);
-  const aggregationRule = aggregationRuleAt(summaryRow, 5);
-  const meterAggregates = meterResult.rows.map(rowToMeterAggregate);
-  const hierarchy = input.metadataStore.energyIq.listProjectNodes(input.context.projectId);
-  const selectedNode = hierarchy.find((node) => node.id === input.context.scopeId);
-  if (!selectedNode) {
-    throw new Error("ENERGYIQ_SCOPE_FORBIDDEN");
-  }
   const scopeDimensions = resolveScopeDimensions(selectedNode.id, hierarchy);
   const childScopes = buildChildScopes({
     scopeNodeId: selectedNode.id,
@@ -231,10 +238,10 @@ const buildChildScopes = (input: {
   return children.map((child) => {
     const descendantIds = collectDescendantIds(child.id, input.hierarchy);
     descendantIds.add(child.id);
-    const meters = input.meterAggregates.filter((meter) => descendantIds.has(meter.meterNodeId));
-    const aggregateMeters = selectAggregateMeters(meters);
+    const meters = input.meterAggregates.filter((meter) => descendantIds.has(meter.scopeId));
+    const aggregateMeters = selectAggregateMetersForScope(child.id, meters, input.hierarchy);
     const usageKwh = aggregateMeters.reduce((sum, meter) => sum + meter.usageKwh, 0);
-    const breakdownMeters = meters.filter((meter) => meter.meterRole !== "total");
+    const breakdownMeters = meters.filter((meter) => meter.scopeId !== child.id);
     const topCircuit = maxBy(breakdownMeters, (meter) => meter.usageKwh);
     const dimensions = resolveScopeDimensions(child.id, input.hierarchy);
     return {
@@ -368,7 +375,7 @@ const collectDescendantIds = (
   return descendants;
 };
 
-const selectAggregateMeters = (meters: MeterAggregate[]): MeterAggregate[] => {
+const selectMetersWithinScope = (meters: MeterAggregate[]): MeterAggregate[] => {
   const totals = meters.filter((meter) => meter.meterRole === "total");
   if (totals.length > 0) return totals;
   const components = meters.filter((meter) => meter.meterRole === "component");
@@ -376,35 +383,79 @@ const selectAggregateMeters = (meters: MeterAggregate[]): MeterAggregate[] => {
   return meters.filter((meter) => meter.meterRole === "submeter");
 };
 
+const selectAggregateMetersForScope = (
+  scopeId: string,
+  meters: MeterAggregate[],
+  hierarchy: ReturnType<MetadataStore["energyIq"]["listProjectNodes"]>
+): MeterAggregate[] => {
+  const parentById = new Map(hierarchy.map((node) => [node.id, node.parent_id]));
+  const candidates = meters.flatMap((meter) => {
+    const path = pathFromScope(scopeId, meter.scopeId, parentById);
+    return path ? [{ meter, depth: path.length - 1, branchId: path[1] ?? scopeId }] : [];
+  });
+  const direct = candidates.filter((candidate) => candidate.depth === 0).map((candidate) => candidate.meter);
+  if (direct.length > 0) return selectMetersWithinScope(direct);
+
+  const byBranch = new Map<string, typeof candidates>();
+  for (const candidate of candidates) {
+    const branch = byBranch.get(candidate.branchId) ?? [];
+    branch.push(candidate);
+    byBranch.set(candidate.branchId, branch);
+  }
+  const selected: MeterAggregate[] = [];
+  for (const branch of byBranch.values()) {
+    const minimumDepth = Math.min(...branch.map((candidate) => candidate.depth));
+    const nearest = branch.filter((candidate) => candidate.depth === minimumDepth);
+    const byScope = new Map<string, MeterAggregate[]>();
+    for (const candidate of nearest) {
+      const scopeMeters = byScope.get(candidate.meter.scopeId) ?? [];
+      scopeMeters.push(candidate.meter);
+      byScope.set(candidate.meter.scopeId, scopeMeters);
+    }
+    for (const scopeMeters of byScope.values()) {
+      selected.push(...selectMetersWithinScope(scopeMeters));
+    }
+  }
+  return selected;
+};
+
+const pathFromScope = (
+  ancestorId: string,
+  nodeId: string,
+  parentById: Map<string, string | undefined>
+): string[] | undefined => {
+  const reversed = [nodeId];
+  let current = nodeId;
+  while (current !== ancestorId) {
+    const parent = parentById.get(current);
+    if (!parent) return undefined;
+    reversed.push(parent);
+    current = parent;
+  }
+  return reversed.reverse();
+};
+
 const rowToMeterAggregate = (row: unknown[]): MeterAggregate => ({
   meterNodeId: stringAt(row, 0),
-  name: stringAt(row, 1),
-  appliance: stringAt(row, 2),
-  category: stringAt(row, 3),
-  meterRole: stringAt(row, 4),
-  usageKwh: numberAt(row, 5),
-  nonOperatingKwh: numberAt(row, 6),
-  peakKw: numberAt(row, 7),
-  validIntervalCount: numberAt(row, 8),
-  qualityEventCount: numberAt(row, 9)
+  scopeId: stringAt(row, 1),
+  name: stringAt(row, 2),
+  appliance: stringAt(row, 3),
+  category: stringAt(row, 4),
+  meterRole: stringAt(row, 5),
+  usageKwh: numberAt(row, 6),
+  nonOperatingKwh: numberAt(row, 7),
+  peakKw: numberAt(row, 8),
+  validIntervalCount: numberAt(row, 9),
+  qualityEventCount: numberAt(row, 10)
 });
 
-const scopeSummarySql = (viewName: string): string => `
+const scopeSummarySql = (viewName: string, meterNodeIds: string[]): string => `
   SELECT
     COALESCE(SUM(usage_kwh), 0) AS usage_kwh,
     COALESCE(MAX(average_kw), 0) AS peak_kw,
     COALESCE(SUM(non_operating_kwh), 0) AS non_operating_kwh,
     COALESCE(SUM(valid_interval_count), 0) AS valid_interval_count,
-    COALESCE(SUM(quality_event_count), 0) AS quality_event_count,
-    (
-      SELECT CASE
-        WHEN COUNT(*) FILTER (WHERE meter_role = 'total') > 0 THEN 'total'
-        WHEN COUNT(*) FILTER (WHERE meter_role = 'component') > 0 THEN 'component'
-        WHEN COUNT(*) FILTER (WHERE meter_role = 'submeter') > 0 THEN 'submeter'
-        ELSE 'none'
-      END
-      FROM ${quoteIdentifier(viewName)}
-    ) AS aggregation_rule
+    COALESCE(SUM(quality_event_count), 0) AS quality_event_count
   FROM (
     SELECT
       local_interval_start,
@@ -414,33 +465,17 @@ const scopeSummarySql = (viewName: string): string => `
       COUNT(*) FILTER (WHERE quality_status = 'ok') AS valid_interval_count,
       COUNT(*) FILTER (WHERE quality_status <> 'ok') AS quality_event_count
     FROM ${quoteIdentifier(viewName)} source
-    WHERE source.meter_role = (
-      SELECT CASE
-        WHEN COUNT(*) FILTER (WHERE meter_role = 'total') > 0 THEN 'total'
-        WHEN COUNT(*) FILTER (WHERE meter_role = 'component') > 0 THEN 'component'
-        WHEN COUNT(*) FILTER (WHERE meter_role = 'submeter') > 0 THEN 'submeter'
-        ELSE 'none'
-      END
-      FROM ${quoteIdentifier(viewName)}
-    )
+    WHERE ${meterNodeFilter(meterNodeIds)}
     GROUP BY local_interval_start
   ) interval_totals
 `;
 
-const hourlyProfileSql = (viewName: string): string => `
+const hourlyProfileSql = (viewName: string, meterNodeIds: string[]): string => `
   SELECT local_hour, AVG(scope_kw) AS average_kw, MAX(scope_kw) AS peak_kw
   FROM (
     SELECT local_date, local_hour, local_interval_start, SUM(average_kw) AS scope_kw
     FROM ${quoteIdentifier(viewName)} source
-    WHERE source.meter_role = (
-      SELECT CASE
-        WHEN COUNT(*) FILTER (WHERE meter_role = 'total') > 0 THEN 'total'
-        WHEN COUNT(*) FILTER (WHERE meter_role = 'component') > 0 THEN 'component'
-        WHEN COUNT(*) FILTER (WHERE meter_role = 'submeter') > 0 THEN 'submeter'
-        ELSE 'none'
-      END
-      FROM ${quoteIdentifier(viewName)}
-    )
+    WHERE ${meterNodeFilter(meterNodeIds)}
       AND source.quality_status = 'ok'
     GROUP BY local_date, local_hour, local_interval_start
   ) interval_totals
@@ -451,6 +486,7 @@ const hourlyProfileSql = (viewName: string): string => `
 const meterBreakdownSql = (viewName: string): string => `
   SELECT
     meter_node_id,
+    MAX(scope_id) AS scope_id,
     MAX(device_name) AS device_name,
     MAX(appliance) AS appliance,
     MAX(category) AS category,
@@ -465,17 +501,19 @@ const meterBreakdownSql = (viewName: string): string => `
   ORDER BY meter_node_id
 `;
 
-const aggregationRuleAt = (
-  row: unknown[],
-  index: number
+const aggregationRuleForMeters = (
+  meters: MeterAggregate[]
 ): EnergyScopeAnalysis["provenance"]["aggregationRule"] => {
-  const value = stringAt(row, index);
-  return value === "total"
-    ? "designated_total"
-    : value === "component" || value === "submeter" || value === "none"
-      ? value
-      : "none";
+  if (meters.some((meter) => meter.meterRole === "total")) return "designated_total";
+  if (meters.some((meter) => meter.meterRole === "component")) return "component";
+  if (meters.some((meter) => meter.meterRole === "submeter")) return "submeter";
+  return "none";
 };
+
+const meterNodeFilter = (meterNodeIds: string[]): string =>
+  meterNodeIds.length > 0
+    ? `source.meter_node_id IN (${meterNodeIds.map(sqlLiteral).join(", ")})`
+    : "FALSE";
 
 const numberAt = (row: unknown[], index: number): number => {
   const value = Number(row[index] ?? 0);
@@ -508,3 +546,5 @@ const maxBy = <T>(values: T[], score: (value: T) => number): T | undefined => {
 
 const quoteIdentifier = (value: string): string =>
   `"${value.replaceAll('"', '""')}"`;
+
+const sqlLiteral = (value: string): string => `'${value.replaceAll("'", "''")}'`;

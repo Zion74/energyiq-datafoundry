@@ -132,9 +132,16 @@ const createScopedView = async (
   const database = await getDuckDbDatabase(databasePath);
   const connection = database.connect();
   try {
+    await duckDbRun(connection, "ALTER TABLE energy_interval_facts ADD COLUMN IF NOT EXISTS scope_id VARCHAR");
+    await duckDbRun(connection, "ALTER TABLE energy_interval_facts ADD COLUMN IF NOT EXISTS import_batch_id VARCHAR");
+    await duckDbRun(connection, "UPDATE energy_interval_facts SET scope_id = meter_node_id WHERE scope_id IS NULL");
     await duckDbRun(connection, `
-      ALTER TABLE energy_interval_facts ADD COLUMN IF NOT EXISTS scope_id VARCHAR;
-      UPDATE energy_interval_facts SET scope_id = meter_node_id WHERE scope_id IS NULL;
+      UPDATE energy_interval_facts
+      SET scope_id = level_node_id
+      WHERE import_batch_id IS NULL
+        AND meter_role = 'total'
+        AND meter_node_id NOT LIKE 'mapping-%'
+        AND level_node_id IS NOT NULL
     `);
     await duckDbRun(connection, `
       CREATE OR REPLACE VIEW ${quoteIdentifier(viewName)} AS

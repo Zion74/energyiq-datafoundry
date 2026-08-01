@@ -224,11 +224,7 @@ export const resolveEnergyScopeMeterNodeIds = (
     pending.push(...(byParent.get(nodeId) ?? []));
   }
   return nodes
-    .filter(
-      (node) =>
-        (node.node_type === "meter" || node.node_type === "circuit")
-        && included.has(node.id)
-    )
+    .filter((node) => included.has(node.id))
     .map((node) => node.id);
 };
 

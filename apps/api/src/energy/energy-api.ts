@@ -94,12 +94,17 @@ export const handleEnergyApiRequest = async (
           timezone: project.timezone,
           databasePath: resolveEnergyFactStorePath(project.workspace_id),
         });
-        await writeEnergyFactMaterialization(materialization.write);
+        const persisted = await writeEnergyFactMaterialization(materialization.write);
         const completed = context.metadataStore.energyIq.completeImportBatchMaterialization({
           batch_id: batch.id,
           project_id: projectId,
           snapshot_id: materialization.summary.snapshotId,
-          summary: materialization.summary,
+          summary: {
+            ...materialization.summary,
+            rawRowCount: persisted.rawRows,
+            normalizedReadingCount: persisted.normalizedRows,
+            intervalFactCount: persisted.intervalFacts,
+          },
         });
         return {
           status: 200,

@@ -90,9 +90,16 @@ export type EnergyFactMaterializationWrite = {
   qualityEvents: EnergyQualityEventWrite[];
 };
 
+export type EnergyFactMaterializationStats = {
+  rawRows: number;
+  normalizedRows: number;
+  intervalFacts: number;
+  qualityEvents: number;
+};
+
 export const writeEnergyFactMaterialization = async (
   input: EnergyFactMaterializationWrite,
-): Promise<void> => {
+): Promise<EnergyFactMaterializationStats> => {
   const databasePath = input.databasePath === ":memory:" ? input.databasePath : resolve(input.databasePath);
   if (databasePath !== ":memory:") mkdirSync(dirname(databasePath), { recursive: true });
   const database = await getDuckDbDatabase(databasePath);
@@ -101,12 +108,16 @@ export const writeEnergyFactMaterialization = async (
     await ensureFactSchema(connection);
     await duckDbRun(connection, "BEGIN TRANSACTION");
     await deleteExistingBatch(connection, input);
+    await updateHistoricalMappings(connection, input.normalizedReadings);
     await insertRows(connection, "raw_meter_readings", RAW_COLUMNS, input.rawReadings.map(rawValues));
     await insertRows(connection, "normalized_meter_readings", NORMALIZED_COLUMNS, input.normalizedReadings.map(normalizedValues));
     await insertRows(connection, "energy_interval_facts", FACT_COLUMNS, input.intervalFacts.map(factValues));
     await insertRows(connection, "energy_quality_events", QUALITY_COLUMNS, input.qualityEvents.map(qualityValues));
+    await markRawOverlapConflicts(connection, input.projectId);
+    await deduplicateCanonicalRows(connection, input.projectId);
     await duckDbRun(connection, "COMMIT");
     await duckDbRun(connection, "CHECKPOINT");
+    return await readMaterializationStats(connection, input.importBatchId);
   } catch (error) {
     await duckDbRun(connection, "ROLLBACK").catch(() => undefined);
     throw error;
@@ -115,30 +126,81 @@ export const writeEnergyFactMaterialization = async (
   }
 };
 
+const updateHistoricalMappings = async (
+  connection: DuckDbModule.Connection,
+  readings: EnergyNormalizedReadingWrite[],
+): Promise<void> => {
+  const mappingByLabel = new Map<string, EnergyNormalizedReadingWrite>();
+  for (const reading of readings) mappingByLabel.set(reading.sourceLabel, reading);
+  for (const mapped of mappingByLabel.values()) {
+    await duckDbRun(connection, `
+      UPDATE raw_meter_readings
+      SET meter_node_id = ?, scope_id = ?
+      WHERE project_id = ? AND device_name = ?
+    `, [mapped.meterPointId, mapped.scopeId, mapped.projectId, mapped.sourceLabel]);
+    await duckDbRun(connection, `
+      UPDATE normalized_meter_readings
+      SET meter_node_id = ?, scope_id = ?, level_node_id = ?, category = ?, meter_role = ?
+      WHERE project_id = ? AND device_name = ?
+    `, [
+      mapped.meterPointId,
+      mapped.scopeId,
+      mapped.parentNodeId ?? null,
+      mapped.category,
+      mapped.meterRole,
+      mapped.projectId,
+      mapped.sourceLabel,
+    ]);
+    await duckDbRun(connection, `
+      UPDATE energy_interval_facts
+      SET meter_node_id = ?, scope_id = ?, parent_node_id = ?, level_node_id = ?,
+          appliance = ?, circuit_name = device_name, category = ?, meter_role = ?
+      WHERE project_id = ? AND device_name = ?
+    `, [
+      mapped.meterPointId,
+      mapped.scopeId,
+      mapped.parentNodeId ?? null,
+      mapped.parentNodeId ?? null,
+      mapped.category,
+      mapped.category,
+      mapped.meterRole,
+      mapped.projectId,
+      mapped.sourceLabel,
+    ]);
+  }
+};
+
 export const readEnergyFactMaterializationStats = async (input: {
   databasePath: string;
   importBatchId: string;
-}): Promise<{ rawRows: number; normalizedRows: number; intervalFacts: number; qualityEvents: number }> => {
+}): Promise<EnergyFactMaterializationStats> => {
   const databasePath = input.databasePath === ":memory:" ? input.databasePath : resolve(input.databasePath);
   const database = await getDuckDbDatabase(databasePath);
   const connection = database.connect();
   try {
-    const row = await duckDbGet(connection, `
-      SELECT
-        (SELECT COUNT(*) FROM raw_meter_readings WHERE import_batch_id = ?) AS raw_rows,
-        (SELECT COUNT(*) FROM normalized_meter_readings WHERE import_batch_id = ?) AS normalized_rows,
-        (SELECT COUNT(*) FROM energy_interval_facts WHERE import_batch_id = ?) AS interval_facts,
-        (SELECT COUNT(*) FROM energy_quality_events WHERE import_batch_id = ?) AS quality_events
-    `, [input.importBatchId, input.importBatchId, input.importBatchId, input.importBatchId]);
-    return {
-      rawRows: Number(row.raw_rows ?? 0),
-      normalizedRows: Number(row.normalized_rows ?? 0),
-      intervalFacts: Number(row.interval_facts ?? 0),
-      qualityEvents: Number(row.quality_events ?? 0),
-    };
+    return await readMaterializationStats(connection, input.importBatchId);
   } finally {
     await duckDbClose(connection).catch(ignoreAlreadyClosed);
   }
+};
+
+const readMaterializationStats = async (
+  connection: DuckDbModule.Connection,
+  importBatchId: string,
+): Promise<EnergyFactMaterializationStats> => {
+  const row = await duckDbGet(connection, `
+    SELECT
+      (SELECT COUNT(*) FROM raw_meter_readings WHERE import_batch_id = ?) AS raw_rows,
+      (SELECT COUNT(*) FROM normalized_meter_readings WHERE import_batch_id = ?) AS normalized_rows,
+      (SELECT COUNT(*) FROM energy_interval_facts WHERE import_batch_id = ?) AS interval_facts,
+      (SELECT COUNT(*) FROM energy_quality_events WHERE import_batch_id = ?) AS quality_events
+  `, [importBatchId, importBatchId, importBatchId, importBatchId]);
+  return {
+    rawRows: Number(row.raw_rows ?? 0),
+    normalizedRows: Number(row.normalized_rows ?? 0),
+    intervalFacts: Number(row.interval_facts ?? 0),
+    qualityEvents: Number(row.quality_events ?? 0),
+  };
 };
 
 const ensureFactSchema = async (connection: DuckDbModule.Connection): Promise<void> => {
@@ -201,7 +263,7 @@ const ensureFactSchema = async (connection: DuckDbModule.Connection): Promise<vo
 
 const deleteExistingBatch = async (
   connection: DuckDbModule.Connection,
-  input: Pick<EnergyFactMaterializationWrite, "projectId" | "importBatchId" | "sourceSha256">,
+  input: EnergyFactMaterializationWrite,
 ): Promise<void> => {
   for (const table of ["raw_meter_readings", "normalized_meter_readings", "energy_interval_facts"]) {
     await duckDbRun(connection, `DELETE FROM ${table} WHERE project_id = ? AND (import_batch_id = ? OR source_sha256 = ?)`, [
@@ -214,6 +276,85 @@ const deleteExistingBatch = async (
     input.projectId,
     input.importBatchId,
   ]);
+};
+
+const markRawOverlapConflicts = async (
+  connection: DuckDbModule.Connection,
+  projectId: string,
+): Promise<void> => {
+  await duckDbRun(connection, `
+    UPDATE raw_meter_readings target
+    SET is_overlap_conflict = TRUE
+    WHERE target.project_id = ?
+      AND target.event_time IS NOT NULL
+      AND EXISTS (
+        SELECT 1
+        FROM raw_meter_readings candidate
+        WHERE candidate.project_id = target.project_id
+          AND candidate.meter_node_id = target.meter_node_id
+          AND candidate.event_time = target.event_time
+          AND candidate.active_energy_kwh <> target.active_energy_kwh
+      )
+  `, [projectId]);
+};
+
+const deduplicateCanonicalRows = async (
+  connection: DuckDbModule.Connection,
+  projectId: string,
+): Promise<void> => {
+  await replaceProjectRowsWithPreferredSource(connection, {
+    table: "normalized_meter_readings",
+    columns: NORMALIZED_COLUMNS,
+    projectId,
+    timestampColumn: "event_time",
+  });
+  await replaceProjectRowsWithPreferredSource(connection, {
+    table: "energy_interval_facts",
+    columns: FACT_COLUMNS,
+    projectId,
+    timestampColumn: "interval_start",
+    coverageColumn: "interval_end",
+  });
+};
+
+const replaceProjectRowsWithPreferredSource = async (
+  connection: DuckDbModule.Connection,
+  input: {
+    table: string;
+    columns: readonly string[];
+    projectId: string;
+    timestampColumn: string;
+    coverageColumn?: string;
+  },
+): Promise<void> => {
+  const tempTable = `preferred_${input.table}`;
+  const coverageColumn = input.coverageColumn ?? input.timestampColumn;
+  await duckDbRun(connection, `
+    CREATE OR REPLACE TEMP TABLE ${tempTable} AS
+    WITH ranked_sources AS (
+      SELECT *,
+        MAX(${coverageColumn}) OVER (
+          PARTITION BY project_id, meter_node_id, source_sha256
+        ) AS source_coverage_end
+      FROM ${input.table}
+      WHERE project_id = ?
+    ), ranked_rows AS (
+      SELECT *, ROW_NUMBER() OVER (
+        PARTITION BY project_id, meter_node_id, ${input.timestampColumn}
+        ORDER BY source_coverage_end DESC, source_file DESC, COALESCE(import_batch_id, '') DESC
+      ) AS source_rank
+      FROM ranked_sources
+    )
+    SELECT ${input.columns.join(", ")}
+    FROM ranked_rows
+    WHERE source_rank = 1
+  `, [input.projectId]);
+  await duckDbRun(connection, `DELETE FROM ${input.table} WHERE project_id = ?`, [input.projectId]);
+  await duckDbRun(connection, `
+    INSERT INTO ${input.table} (${input.columns.join(", ")})
+    SELECT ${input.columns.join(", ")} FROM ${tempTable}
+  `);
+  await duckDbRun(connection, `DROP TABLE ${tempTable}`);
 };
 
 const RAW_COLUMNS = [
@@ -266,7 +407,7 @@ const insertRows = async (
   columns: readonly string[],
   rows: unknown[][],
 ): Promise<void> => {
-  const chunkSize = 250;
+  const chunkSize = Math.max(1, Math.min(1_000, Math.floor(30_000 / columns.length)));
   for (let offset = 0; offset < rows.length; offset += chunkSize) {
     const chunk = rows.slice(offset, offset + chunkSize);
     const placeholders = chunk.map(() => `(${columns.map(() => "?").join(",")})`).join(",");

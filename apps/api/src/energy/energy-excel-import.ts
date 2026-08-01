@@ -153,14 +153,15 @@ const displayCell = (value: CellValue | null | undefined): string => {
 };
 
 const timestampValue = (value: CellValue | null | undefined): number | undefined => {
-  if (value instanceof Date && Number.isFinite(value.getTime())) return value.getTime();
+  if (value instanceof Date && Number.isFinite(value.getTime())) return snapNearMinute(value.getTime());
   if (typeof value !== "string" && typeof value !== "number") return undefined;
   const timestamp = new Date(value).getTime();
-  return Number.isFinite(timestamp) ? timestamp : undefined;
+  return Number.isFinite(timestamp) ? snapNearMinute(timestamp) : undefined;
 };
 
 const localTimestampValue = (value: CellValue | null | undefined): string => {
-  const date = value instanceof Date ? value : new Date(String(value));
+  const source = value instanceof Date ? value.getTime() : new Date(String(value)).getTime();
+  const date = new Date(snapNearMinute(source));
   if (Number.isFinite(date.getTime())) {
     return [
       date.getUTCFullYear().toString().padStart(4, "0"),
@@ -173,6 +174,12 @@ const localTimestampValue = (value: CellValue | null | undefined): string => {
     ].join(":");
   }
   return String(value);
+};
+
+const snapNearMinute = (timestamp: number): number => {
+  if (!Number.isFinite(timestamp)) return timestamp;
+  const nearestMinute = Math.round(timestamp / 60_000) * 60_000;
+  return Math.abs(nearestMinute - timestamp) <= 1_000 ? nearestMinute : timestamp;
 };
 
 const numberValue = (value: CellValue | null | undefined): number | undefined => {

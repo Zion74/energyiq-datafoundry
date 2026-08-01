@@ -1,7 +1,7 @@
 import writeXlsxFile from "write-excel-file/node";
 import { describe, expect, it } from "vitest";
 
-import { inspectEnergyExcelWorkbook } from "./energy-excel-import.js";
+import { inspectEnergyExcelWorkbook, readEnergyExcelWorkbook } from "./energy-excel-import.js";
 
 describe("inspectEnergyExcelWorkbook", () => {
   it("detects cumulative meter labels, coverage and quality evidence", async () => {
@@ -37,6 +37,19 @@ describe("inspectEnergyExcelWorkbook", () => {
     await expect(inspectEnergyExcelWorkbook(workbook)).rejects.toThrow(
       "ENERGYIQ_EXCEL_COLUMN_REQUIRED:Active Energy",
     );
+  });
+
+  it("snaps Excel floating-point timestamps that are within one second of a minute", async () => {
+    const workbook = await writeXlsxFile([
+      [text("Device Name"), text("Time"), text("Active Energy")],
+      [text("Meter 1"), date("2026-05-01T00:00:00Z"), number(100)],
+      [text("Meter 1"), date("2026-05-01T00:14:59.999Z"), number(100.4)],
+    ]).toBuffer();
+
+    const parsed = await readEnergyExcelWorkbook(workbook);
+
+    expect(parsed.inspection.typicalIntervalMinutes).toBe(15);
+    expect(parsed.rows[1]?.localTimestamp).toBe("2026-05-01T00:15:00");
   });
 });
 

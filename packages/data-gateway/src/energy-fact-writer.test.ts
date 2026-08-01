@@ -86,4 +86,85 @@ describe("writeEnergyFactMaterialization", () => {
       importBatchId: "batch-1",
     })).resolves.toEqual({ rawRows: 1, normalizedRows: 1, intervalFacts: 1, qualityEvents: 1 });
   });
+
+  it("keeps the source with the later coverage end at an overlapping timestamp", async () => {
+    const databasePath = ":memory:";
+    const base = {
+      databasePath,
+      projectId: "project-overlap",
+      rawReadings: [],
+      qualityEvents: [],
+    };
+    const normalized = (batch: string, sha: string, time: string, value: number) => ({
+      workspaceId: "workspace-1",
+      projectId: "project-overlap",
+      importBatchId: batch,
+      resource: "electricity" as const,
+      meterPointId: "meter-a",
+      scopeId: "scope-a",
+      sourceLabel: "Meter A",
+      category: "load",
+      meterRole: "total",
+      eventTime: time,
+      activeEnergyKwh: value,
+      sourceFile: `${batch}.xlsx`,
+      sourceSha256: sha,
+      sourceRowNumber: 2,
+    });
+    const fact = (batch: string, sha: string, start: string, end: string, usage: number) => ({
+      workspaceId: "workspace-1",
+      projectId: "project-overlap",
+      importBatchId: batch,
+      resource: "electricity" as const,
+      meterPointId: "meter-a",
+      scopeId: "scope-a",
+      sourceLabel: "Meter A",
+      category: "load",
+      meterRole: "total",
+      intervalStart: start,
+      intervalEnd: end,
+      elapsedMinutes: 15,
+      activeEnergyKwh: 101,
+      previousActiveEnergyKwh: 100,
+      rawDeltaKwh: usage,
+      usageKwh: usage,
+      averageKw: usage * 4,
+      qualityStatus: "ok",
+      localDate: "2026-05-01",
+      localHour: 8,
+      dayType: "weekday",
+      sourceFile: `${batch}.xlsx`,
+      sourceSha256: sha,
+    });
+
+    await writeEnergyFactMaterialization({
+      ...base,
+      importBatchId: "later",
+      sourceSha256: "sha-later",
+      normalizedReadings: [
+        normalized("later", "sha-later", "2026-05-01T00:15:00.000Z", 101),
+        normalized("later", "sha-later", "2026-05-01T00:30:00.000Z", 102),
+      ],
+      intervalFacts: [
+        fact("later", "sha-later", "2026-05-01T00:00:00.000Z", "2026-05-01T00:15:00.000Z", 1),
+        fact("later", "sha-later", "2026-05-01T00:15:00.000Z", "2026-05-01T00:30:00.000Z", 1),
+      ],
+    });
+    await writeEnergyFactMaterialization({
+      ...base,
+      importBatchId: "earlier",
+      sourceSha256: "sha-earlier",
+      normalizedReadings: [
+        normalized("earlier", "sha-earlier", "2026-05-01T00:15:00.000Z", 100.9),
+      ],
+      intervalFacts: [
+        fact("earlier", "sha-earlier", "2026-05-01T00:00:00.000Z", "2026-05-01T00:15:00.000Z", 0.9),
+      ],
+    });
+
+    await expect(readEnergyFactMaterializationStats({ databasePath, importBatchId: "later" }))
+      .resolves.toMatchObject({ normalizedRows: 2, intervalFacts: 2 });
+    await expect(readEnergyFactMaterializationStats({ databasePath, importBatchId: "earlier" }))
+      .resolves.toMatchObject({ normalizedRows: 0, intervalFacts: 0 });
+  });
 });
