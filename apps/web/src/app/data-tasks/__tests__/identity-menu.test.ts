@@ -41,6 +41,21 @@ describe("data task identity menu", () => {
     );
   });
 
+  it("hides duplicate identity chrome in the embedded EnergyIQ workspace", () => {
+    const page = readFileSync(
+      join(process.cwd(), "src/app/data-tasks/data-tasks-app.tsx"),
+      "utf8",
+    );
+    const workbench = readFileSync(
+      join(process.cwd(), "src/app/energyiq/_components/energy-analysis-workbench.tsx"),
+      "utf8",
+    );
+
+    expect(page).toContain('hideIdentityChrome={viewport === "embedded"}');
+    expect(page).toContain("!preview && !hideIdentityChrome");
+    expect(workbench).toContain("inheritIdentity");
+  });
+
   it("exposes the shared account popover to the EnergyIQ top bar", () => {
     const identity = source();
     const shell = readFileSync(

@@ -41,27 +41,53 @@ function SparkIcon({ className }: { className?: string }) {
 
 export function DataTaskWelcomeScreen({
   onUsePrompt,
+  variant = "default",
+  contextLabel,
 }: {
   onUsePrompt?: (prompt: string) => void;
+  variant?: "default" | "energy";
+  contextLabel?: string;
 }) {
   const t = useT();
-  const examplePrompts = [
-    {
-      title: t("welcome.inspectSchema"),
-      description: t("welcome.inspectSchemaDesc"),
-      prompt: t("welcome.inspectSchemaPrompt"),
-    },
-    {
-      title: t("welcome.runSql"),
-      description: t("welcome.runSqlDesc"),
-      prompt: t("welcome.runSqlPrompt"),
-    },
-    {
-      title: t("welcome.analyzeTrends"),
-      description: t("welcome.analyzeTrendsDesc"),
-      prompt: t("welcome.analyzeTrendsPrompt"),
-    },
-  ] as const;
+  const energyMode = variant === "energy";
+  const examplePrompts = energyMode
+    ? [
+        {
+          title: "Compare with history",
+          description: "Use this scope's own historical baseline",
+          prompt:
+            "Compare the selected scope and period with its own historical baseline. Explain the largest change and show the supporting data.",
+        },
+        {
+          title: "Analyse the time pattern",
+          description: "Find peak and off-hours consumption",
+          prompt:
+            "Show the hourly demand profile for the selected scope and period. Identify the peak period and any elevated off-hours consumption.",
+        },
+        {
+          title: "Investigate an anomaly",
+          description: "Trace the finding to meters and calculations",
+          prompt:
+            "Find the most important energy anomaly in the selected scope. Show the affected meters, calculation basis, estimated impact and recommended FM check.",
+        },
+      ]
+    : [
+        {
+          title: t("welcome.inspectSchema"),
+          description: t("welcome.inspectSchemaDesc"),
+          prompt: t("welcome.inspectSchemaPrompt"),
+        },
+        {
+          title: t("welcome.runSql"),
+          description: t("welcome.runSqlDesc"),
+          prompt: t("welcome.runSqlPrompt"),
+        },
+        {
+          title: t("welcome.analyzeTrends"),
+          description: t("welcome.analyzeTrendsDesc"),
+          prompt: t("welcome.analyzeTrendsPrompt"),
+        },
+      ];
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center px-6 py-10">
@@ -69,18 +95,24 @@ export function DataTaskWelcomeScreen({
         <DatabaseIcon className="h-7 w-7" />
       </div>
       <h2 className="text-center text-lg font-semibold text-foreground">
-        {t("welcome.title")}
+        {energyMode ? "Energy Analysis" : t("welcome.title")}
       </h2>
       <p className="mt-2 max-w-md text-center text-sm leading-6 text-muted">
-        {t("welcome.subtitle")}
+        {energyMode
+          ? "Ask follow-up questions using the same project, scope, time period and metric definitions as Overview."
+          : t("welcome.subtitle")}
       </p>
       <div className="mt-6 flex flex-wrap justify-center gap-2">
         <span className={chipClass}>
           <SparkIcon className="h-3.5 w-3.5 text-muted-light" />
-          {t("welcome.chipSql")}
+          {energyMode ? "Project-scoped" : t("welcome.chipSql")}
         </span>
-        <span className={chipClass}>{t("welcome.chipSchema")}</span>
-        <span className={chipClass}>{t("welcome.chipTrace")}</span>
+        <span className={chipClass}>
+          {energyMode ? "Read-only analysis" : t("welcome.chipSchema")}
+        </span>
+        <span className={chipClass}>
+          {energyMode ? "Traceable evidence" : t("welcome.chipTrace")}
+        </span>
       </div>
       <div className="mt-8 grid w-full max-w-lg gap-3">
         {examplePrompts.map((item) => (
@@ -98,7 +130,7 @@ export function DataTaskWelcomeScreen({
               </div>
               {onUsePrompt ? (
                 <span className="shrink-0 rounded-full border border-border bg-surface-subtle px-2 py-0.5 text-[10px] font-semibold text-muted-light">
-                  {t("welcome.useThisPrompt")}
+                  {energyMode ? "Use this prompt" : t("welcome.useThisPrompt")}
                 </span>
               ) : null}
             </div>
@@ -108,13 +140,19 @@ export function DataTaskWelcomeScreen({
           </button>
         ))}
       </div>
-      <p className="mt-6 text-xs text-muted-light">
-        {t("welcome.footerBeforeAt")}{" "}
-        <kbd className="rounded border border-border bg-surface-subtle px-1 py-0.5 font-mono text-[10px]">
-          @
-        </kbd>{" "}
-        {t("welcome.footerAfterAt")}
-      </p>
+      {energyMode ? (
+        <p className="mt-6 text-xs text-muted-light">
+          Current context: {contextLabel ?? "selected project scope"}
+        </p>
+      ) : (
+        <p className="mt-6 text-xs text-muted-light">
+          {t("welcome.footerBeforeAt")}{" "}
+          <kbd className="rounded border border-border bg-surface-subtle px-1 py-0.5 font-mono text-[10px]">
+            @
+          </kbd>{" "}
+          {t("welcome.footerAfterAt")}
+        </p>
+      )}
     </div>
   );
 }

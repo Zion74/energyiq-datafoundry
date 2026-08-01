@@ -961,17 +961,53 @@ function sanitizeWorkspaceConfig(
   };
 }
 
-export default function DataTasksApp() {
+export type DataTasksExternalContext = {
+  source: "energyiq";
+  projectId: string;
+  projectName?: string;
+  scopeId?: string;
+  scopeName?: string;
+  resource?: "electricity" | "water";
+  period?: string;
+  from?: string;
+  to?: string;
+};
+
+export default function DataTasksApp({
+  viewport = "standalone",
+  accessMode = "admin",
+  externalContext,
+  inheritIdentity = false,
+}: {
+  viewport?: "standalone" | "embedded";
+  accessMode?: "admin" | "user";
+  externalContext?: DataTasksExternalContext;
+  inheritIdentity?: boolean;
+}) {
+  const shell = (
+    <DataTasksCopilotShell
+      viewport={viewport}
+      accessMode={accessMode}
+      externalContext={externalContext}
+    />
+  );
+
   return (
     <LocaleProvider>
-      <DataTaskIdentityProvider>
-        <DataTasksCopilotShell />
-      </DataTaskIdentityProvider>
+      {inheritIdentity ? shell : <DataTaskIdentityProvider>{shell}</DataTaskIdentityProvider>}
     </LocaleProvider>
   );
 }
 
-function DataTasksCopilotShell() {
+function DataTasksCopilotShell({
+  viewport,
+  accessMode,
+  externalContext,
+}: {
+  viewport: "standalone" | "embedded";
+  accessMode: "admin" | "user";
+  externalContext?: DataTasksExternalContext;
+}) {
   const [copilotProperties, setCopilotProperties] = useState<Record<string, unknown>>(
     {},
   );
@@ -1022,6 +1058,9 @@ function DataTasksCopilotShell() {
           <DataTaskWorkspace
             key={scopeKey}
             identityScopeKey={scopeKey}
+            viewport={viewport}
+            accessMode={accessMode}
+            externalContext={externalContext}
             onCopilotPropertiesChange={setCopilotProperties}
           />
         </LiveRunProvider>
@@ -1032,9 +1071,15 @@ function DataTasksCopilotShell() {
 
 function DataTaskWorkspace({
   identityScopeKey,
+  viewport,
+  accessMode,
+  externalContext,
   onCopilotPropertiesChange,
 }: {
   identityScopeKey: string;
+  viewport: "standalone" | "embedded";
+  accessMode: "admin" | "user";
+  externalContext?: DataTasksExternalContext;
   onCopilotPropertiesChange: (properties: Record<string, unknown>) => void;
 }) {
   const t = useT();
@@ -1830,10 +1875,19 @@ function DataTaskWorkspace({
             audits: liveRun.audits,
             artifacts: liveRun.artifacts,
           },
+          ...(externalContext ? { externalContext } : {}),
           selection,
         }),
       ) as JsonSerializable,
-    [activeSession, activeDatasourceId, activeLlmId, liveRun, selection, workspaceConfig],
+    [
+      activeSession,
+      activeDatasourceId,
+      activeLlmId,
+      externalContext,
+      liveRun,
+      selection,
+      workspaceConfig,
+    ],
   );
 
   const visibleArtifacts = liveRun.artifacts;
@@ -1933,19 +1987,27 @@ function DataTaskWorkspace({
     description: "Current data task workspace state",
     value: agentContext,
   });
+  useAgentContext({
+    description:
+      "Trusted host context for the current EnergyIQ project, selected scope, resource and reporting period",
+    value: externalContext ?? {},
+  });
 
   const chatInputBindings = useMemo(
     () => ({
       activeLlmId,
       llmOptions: enabledLlmOptions,
       onActiveLlmChange: setActiveLlmId,
-      onOpenLlmConfig: () => openConfigPanel("llm"),
-      mentionResources,
+      onOpenLlmConfig:
+        accessMode === "admin" ? () => openConfigPanel("llm") : undefined,
+      showResourceControls: accessMode === "admin",
+      mentionResources: accessMode === "admin" ? mentionResources : [],
       perRunSelection,
       onTogglePerRunMention: togglePerRunMentionItem,
       onRemovePerRunMention: removePerRunMentionItem,
       onClearPerRunMentions: clearPerRunMentions,
-      fileMentionResources,
+      fileMentionResources:
+        accessMode === "admin" ? fileMentionResources : [],
       perRunFiles,
       onTogglePerRunFileMention: togglePerRunFileMentionItem,
       onRemovePerRunFileMention: removePerRunFileMentionItem,
@@ -1974,6 +2036,7 @@ function DataTaskWorkspace({
     }),
     [
       activeLlmId,
+      accessMode,
       activeAgentId,
       activeSession,
       activeThreadId,
@@ -2089,7 +2152,8 @@ function DataTaskWorkspace({
         data-guide-id="workspace-layout"
         ref={gridRef}
         className={[
-          "grid h-screen min-h-[560px] overflow-hidden bg-surface-subtle text-foreground",
+          "grid min-h-[560px] overflow-hidden bg-surface-subtle text-foreground",
+          viewport === "embedded" ? "h-full" : "h-screen",
           isRightPanelResizing ||
           isLeftPanelResizing ||
           isAutoLayout ||
@@ -2149,24 +2213,28 @@ function DataTaskWorkspace({
         onDeleteSession={deleteSession}
         onTogglePinSession={togglePinSession}
         workspaceConfig={workspaceConfig}
+        showWorkspaceResources={accessMode === "admin"}
+        hideIdentityChrome={viewport === "embedded"}
         quickStartGuide={
-          <QuickStartGuide
-            workspaceConfig={workspaceConfig}
-            liveRun={liveRun}
-            hasSubmittedTask={
-              agentRenderSnapshot.messageCount > 0 ||
-              liveRun.runStatus !== "idle" ||
-              sessionUsage.runCount > 0
-            }
-            onOpenConfigPanel={openConfigPanel}
-            onOpenTaskConsole={openTaskConsole}
-            onUseExampleQuery={(text) =>
-              setDraftPromptRequest((current) => ({
-                id: (current?.id ?? 0) + 1,
-                text,
-              }))
-            }
-          />
+          accessMode === "admin" ? (
+            <QuickStartGuide
+              workspaceConfig={workspaceConfig}
+              liveRun={liveRun}
+              hasSubmittedTask={
+                agentRenderSnapshot.messageCount > 0 ||
+                liveRun.runStatus !== "idle" ||
+                sessionUsage.runCount > 0
+              }
+              onOpenConfigPanel={openConfigPanel}
+              onOpenTaskConsole={openTaskConsole}
+              onUseExampleQuery={(text) =>
+                setDraftPromptRequest((current) => ({
+                  id: (current?.id ?? 0) + 1,
+                  text,
+                }))
+              }
+            />
+          ) : undefined
         }
       />
 
@@ -2277,6 +2345,7 @@ function DataTaskWorkspace({
         title={activeSession?.title ?? "Data Tasks"}
         workspaceConfig={workspaceConfig}
         activeSession={activeSession}
+        externalContext={externalContext}
         liveRunStatus={liveRun.runStatus}
         liveRun={liveRun}
         runningThreadIds={runningThreadIds}
@@ -4841,6 +4910,8 @@ type SessionPaneProps = {
   runningThreadIds: ReadonlySet<string>;
   workspaceFileCount: number;
   workspaceConfig: WorkspaceConfigStore;
+  showWorkspaceResources: boolean;
+  hideIdentityChrome: boolean;
   quickStartGuide?: ReactNode;
   capabilitiesReady: boolean;
   onCreateSession: () => void;
@@ -4871,6 +4942,8 @@ function SessionPane({
   runningThreadIds,
   workspaceFileCount,
   workspaceConfig,
+  showWorkspaceResources,
+  hideIdentityChrome,
   quickStartGuide,
   capabilitiesReady,
   onCreateSession,
@@ -4916,6 +4989,8 @@ function SessionPane({
               runningThreadIds={runningThreadIds}
               workspaceFileCount={workspaceFileCount}
               workspaceConfig={workspaceConfig}
+              showWorkspaceResources={showWorkspaceResources}
+              hideIdentityChrome={hideIdentityChrome}
               quickStartGuide={quickStartGuide}
               capabilitiesReady={capabilitiesReady}
               onCreateSession={onCreateSession}
@@ -4932,14 +5007,20 @@ function SessionPane({
             />
           </div>
         </div>
-        <DataTaskUserBar
-          compact
-          quickStartGuide={quickStartGuide}
-          onOpenSettings={() => {
-            onToggleCollapse();
-            onOpenConfigPanel("llm");
-          }}
-        />
+        {hideIdentityChrome ? null : (
+          <DataTaskUserBar
+            compact
+            quickStartGuide={quickStartGuide}
+            onOpenSettings={
+              showWorkspaceResources
+                ? () => {
+                    onToggleCollapse();
+                    onOpenConfigPanel("llm");
+                  }
+                : undefined
+            }
+          />
+        )}
       </aside>
     );
   }
@@ -4974,6 +5055,8 @@ function SessionPane({
         runningThreadIds={runningThreadIds}
         workspaceFileCount={workspaceFileCount}
         workspaceConfig={workspaceConfig}
+        showWorkspaceResources={showWorkspaceResources}
+        hideIdentityChrome={hideIdentityChrome}
         quickStartGuide={quickStartGuide}
         capabilitiesReady={capabilitiesReady}
         onCreateSession={onCreateSession}
@@ -5013,6 +5096,8 @@ function SessionPaneContent({
   runningThreadIds,
   workspaceFileCount,
   workspaceConfig,
+  showWorkspaceResources,
+  hideIdentityChrome,
   quickStartGuide,
   capabilitiesReady,
   onCreateSession,
@@ -5063,42 +5148,58 @@ function SessionPaneContent({
           : "flex h-full min-h-0 w-full flex-col overflow-hidden"
       }
     >
-      <div className="flex h-16 items-center gap-3 border-b border-border px-4">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface text-sm font-semibold text-foreground shadow-[var(--shadow-card)]">
-          D
+      {hideIdentityChrome ? (
+        <div className="flex justify-end px-2 pt-2">
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            title={preview ? t("sidebar.expandToSidebar") : t("sidebar.collapseToRail")}
+            aria-label={preview ? t("sidebar.expandToSidebar") : t("sidebar.collapseToRail")}
+            className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-light transition-colors duration-200 hover:bg-surface hover:text-foreground"
+          >
+            <SidebarToggleIcon />
+          </button>
         </div>
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate text-sm font-semibold text-foreground">{t("sidebar.brand")}</h1>
-          <p className="text-xs text-muted-light">{t("sidebar.sessionCount", { count: sessionCount })}</p>
+      ) : (
+        <div className="flex h-16 items-center gap-3 border-b border-border px-4">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface text-sm font-semibold text-foreground shadow-[var(--shadow-card)]">
+            D
+          </div>
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-sm font-semibold text-foreground">{t("sidebar.brand")}</h1>
+            <p className="text-xs text-muted-light">{t("sidebar.sessionCount", { count: sessionCount })}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            title={preview ? t("sidebar.expandToSidebar") : t("sidebar.collapseToRail")}
+            aria-label={preview ? t("sidebar.expandToSidebar") : t("sidebar.collapseToRail")}
+            className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-light transition-colors duration-200 hover:bg-surface-subtle hover:text-foreground"
+          >
+            <SidebarToggleIcon />
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onToggleCollapse}
-          title={preview ? t("sidebar.expandToSidebar") : t("sidebar.collapseToRail")}
-          aria-label={preview ? t("sidebar.expandToSidebar") : t("sidebar.collapseToRail")}
-          className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-light transition-colors duration-200 hover:bg-surface-subtle hover:text-foreground"
-        >
-          <SidebarToggleIcon />
-        </button>
-      </div>
+      )}
 
-      <div
-        data-guide-id="workspace-resources"
-        className="border-b border-border px-2.5 pt-1.5 pb-1"
-      >
-        <div className="mb-0.5 px-0.5">
-          <span className={sectionLabelClass}>{t("sidebar.workspaceResources")}</span>
+      {showWorkspaceResources ? (
+        <div
+          data-guide-id="workspace-resources"
+          className="border-b border-border px-2.5 pt-1.5 pb-1"
+        >
+          <div className="mb-0.5 px-0.5">
+            <span className={sectionLabelClass}>{t("sidebar.workspaceResources")}</span>
+          </div>
+          <div className="flex flex-col gap-px">
+            {resourceNavGroups.map((group) => (
+              <ResourceNavCard
+                key={group.id}
+                group={group}
+                onAction={handleResourceAction}
+              />
+            ))}
+          </div>
         </div>
-        <div className="flex flex-col gap-px">
-          {resourceNavGroups.map((group) => (
-            <ResourceNavCard
-              key={group.id}
-              group={group}
-              onAction={handleResourceAction}
-            />
-          ))}
-        </div>
-      </div>
+      ) : null}
 
       <div className="border-b border-border px-2.5 py-2">
         <button
@@ -5148,9 +5249,13 @@ function SessionPaneContent({
           )}
         </div>
       </div>
-      {!preview ? (
+      {!preview && !hideIdentityChrome ? (
         <DataTaskUserBar
-          onOpenSettings={() => onOpenConfigPanel("llm")}
+          onOpenSettings={
+            showWorkspaceResources
+              ? () => onOpenConfigPanel("llm")
+              : undefined
+          }
           quickStartGuide={quickStartGuide}
         />
       ) : null}
@@ -7523,9 +7628,11 @@ function ProcessToolGroupSync({
 function ChatWelcomeOverlay({
   liveRunStatus,
   onUseExamplePrompt,
+  externalContext,
 }: {
   liveRunStatus: LiveRun["runStatus"];
   onUseExamplePrompt: (prompt: string) => void;
+  externalContext?: DataTasksExternalContext;
 }) {
   const t = useT();
   const chatConfig = useCopilotChatConfiguration();
@@ -7555,7 +7662,21 @@ function ChatWelcomeOverlay({
   return (
     <div className="pointer-events-none absolute inset-x-0 top-0 bottom-32 z-10 overflow-y-auto">
       <div className="pointer-events-auto min-h-full">
-        <DataTaskWelcomeScreen onUsePrompt={onUseExamplePrompt} />
+        <DataTaskWelcomeScreen
+          onUsePrompt={onUseExamplePrompt}
+          variant={externalContext ? "energy" : "default"}
+          contextLabel={
+            externalContext
+              ? [
+                  externalContext.projectName,
+                  externalContext.scopeName,
+                  externalContext.period,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
+              : undefined
+          }
+        />
       </div>
     </div>
   );
@@ -7627,6 +7748,7 @@ function SessionChatRuntime({
   onUserMessageSubmitted,
   onToolGroupsChange,
   onUseExamplePrompt,
+  externalContext,
 }: {
   threadId: string;
   isActive: boolean;
@@ -7638,6 +7760,7 @@ function SessionChatRuntime({
   onUserMessageSubmitted: (text: string) => void;
   onToolGroupsChange: (groups: ProcessToolGroup[]) => void;
   onUseExamplePrompt: (prompt: string) => void;
+  externalContext?: DataTasksExternalContext;
 }) {
   const agentId = dataTaskSessionAgentId(threadId);
   const { liveRun } = useLiveRun(threadId);
@@ -7695,6 +7818,7 @@ function SessionChatRuntime({
           <ChatWelcomeOverlay
             liveRunStatus={liveRunStatus}
             onUseExamplePrompt={onUseExamplePrompt}
+            externalContext={externalContext}
           />
         ) : null}
         <CopilotChat
@@ -7729,6 +7853,7 @@ function ChatPane({
   title,
   workspaceConfig,
   activeSession,
+  externalContext,
   liveRunStatus,
   liveRun,
   runningThreadIds,
@@ -7750,6 +7875,7 @@ function ChatPane({
   title: string;
   workspaceConfig: WorkspaceConfigStore;
   activeSession: ChatSession | null;
+  externalContext?: DataTasksExternalContext;
   liveRunStatus: LiveRun["runStatus"];
   liveRun: LiveRun;
   runningThreadIds: ReadonlySet<string>;
@@ -7846,13 +7972,27 @@ function ChatPane({
             {title}
           </h2>
           <div className="mt-0.5">
-            <SessionHeaderResourceChips
-              workspaceConfig={workspaceConfig}
-              session={activeSession}
-              onPreviewDatasource={(itemId) =>
-                setSchemaPreviewDatasourceId((current) => (current === itemId ? null : itemId))
-              }
-            />
+            {externalContext ? (
+              <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-light">
+                <span className="truncate">
+                  {externalContext.projectName ?? externalContext.projectId}
+                </span>
+                <span aria-hidden>·</span>
+                <span className="truncate">
+                  {externalContext.scopeName ?? externalContext.scopeId}
+                </span>
+                <span aria-hidden>·</span>
+                <span className="shrink-0">{externalContext.period}</span>
+              </div>
+            ) : (
+              <SessionHeaderResourceChips
+                workspaceConfig={workspaceConfig}
+                session={activeSession}
+                onPreviewDatasource={(itemId) =>
+                  setSchemaPreviewDatasourceId((current) => (current === itemId ? null : itemId))
+                }
+              />
+            )}
           </div>
           {schemaPreviewDatasource ? (
             <DatasourceSchemaPreviewPopover
@@ -7898,6 +8038,7 @@ function ChatPane({
                     onUserMessageSubmitted={onUserMessageSubmitted}
                     onToolGroupsChange={onToolGroupsChange}
                     onUseExamplePrompt={onUseExamplePrompt}
+                    externalContext={externalContext}
                   />
                 </div>
               );
