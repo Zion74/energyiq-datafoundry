@@ -12,6 +12,7 @@ import {
 
 import {
   configApi,
+  type EnergyImportBatchDto,
   type EnergyMeterMappingDraftDto,
   type EnergyMeterMappingRowDto,
   type EnergyVirtualMeterDto,
@@ -31,7 +32,7 @@ import {
   branchNodeCount,
   canLockTierStructure,
   buildAggregationReview,
-  createInitialMeterMapping,
+  createMeterMappingFromSourceLabels,
   hasSiblingNameConflict,
   initialTierSelection,
   isTierStructureLocked,
@@ -180,7 +181,10 @@ export function EnergyIqAdminWorkbench({
   const errorCount = validation?.issues.filter((issue) => issue.severity === "error").length ?? 0;
   const warningCount = validation?.issues.filter((issue) => issue.severity === "warning").length ?? 0;
   const sectionMeta = adminSectionMeta(section, selectedProject?.name);
-  const showSetupActions = section === "basics" || section === "structure" || section === "meter-mapping";
+  const showSetupActions = section === "basics"
+    || section === "structure"
+    || section === "data-sources"
+    || section === "meter-mapping";
   const showProjectLink = Boolean(selectedProject?.status === "published" && isProjectContext(section));
   const chooseAdminProject = (projectId: string) => {
     setSelectedProjectId(projectId);
@@ -352,7 +356,14 @@ function renderAdminSection({
     );
   }
   if (section === "data-sources") {
-    return <DataSourcesPage setSection={setSection} />;
+    return (
+      <DataSourcesPage
+        projectId={selectedProjectId}
+        document={document}
+        changeDocument={changeDocument}
+        setSection={setSection}
+      />
+    );
   }
   if (section === "meter-mapping") {
     return (
@@ -533,18 +544,156 @@ function ProjectDeliveryOverview({
   );
 }
 
-function DataSourcesPage({ setSection }: { setSection: Dispatch<SetStateAction<AdminSection>> }) {
+function DataSourcesPage({
+  projectId,
+  document,
+  changeDocument,
+  setSection,
+}: {
+  projectId: string;
+  document: EnergyProjectSetupDocumentDto;
+  changeDocument: (updater: (current: EnergyProjectSetupDocumentDto) => EnergyProjectSetupDocumentDto) => void;
+  setSection: Dispatch<SetStateAction<AdminSection>>;
+}) {
+  const [batches, setBatches] = useState<EnergyImportBatchDto[]>([]);
+  const [loadingImports, setLoadingImports] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importNotice, setImportNotice] = useState<string | null>(null);
+
+  const loadBatches = useCallback(async () => {
+    setLoadingImports(true);
+    setImportError(null);
+    try {
+      const result = await configApi.listEnergyImportBatches(projectId);
+      setBatches(result.batches);
+    } catch (reason) {
+      setImportError(messageFrom(reason, "Failed to load import batches"));
+    } finally {
+      setLoadingImports(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    void loadBatches();
+  }, [loadBatches]);
+
+  const uploadWorkbook = async (file: File) => {
+    setUploading(true);
+    setImportError(null);
+    setImportNotice(null);
+    try {
+      const result = await configApi.uploadEnergyExcelImport(projectId, file);
+      setBatches((current) => [
+        result.batch,
+        ...current.filter((batch) => batch.id !== result.batch.id),
+      ]);
+      setImportNotice(result.duplicate
+        ? "This exact workbook was already inspected. The existing Import Batch was reused."
+        : "Workbook preserved and inspected. Review the detected labels before opening Meter Mapping.");
+    } catch (reason) {
+      setImportError(messageFrom(reason, "Excel inspection failed"));
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const latest = batches[0];
+  const useDetectedLabels = () => {
+    if (!latest) return;
+    const mapping = createMeterMappingFromSourceLabels(
+      document,
+      latest.inspection.sourceLabels.map((source) => source.label),
+    );
+    changeDocument((current) => ({ ...current, meter_mapping: mapping }));
+    setImportNotice(`${mapping.rows.length} source labels were prepared as a Mapping draft. Unmatched labels still require an admin Scope selection.`);
+  };
+
   return (
     <div className="mx-auto max-w-5xl space-y-5">
+      {importError ? <StatusMessage tone="error">{importError}</StatusMessage> : null}
+      {importNotice ? <StatusMessage tone="success">{importNotice}</StatusMessage> : null}
       <section className="rounded-xl border border-border bg-surface p-5">
         <h3 className="text-base font-semibold">Connect project data</h3>
         <p className="mt-1 max-w-3xl text-xs leading-5 text-muted">
           Excel is the current onboarding path. Tuya will use the same Import Batch and Raw Reading contract when its API is available.
         </p>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
-          <SourceOption title="Excel workbook" status="Current onboarding format" description="Upload, inspect fields and preserve the original file with its SHA." active />
+          <div className="rounded-xl border border-primary/30 bg-primary-light/5 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h4 className="text-sm font-semibold">Excel workbook</h4>
+                <p className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-primary">Current onboarding format</p>
+              </div>
+              <EnergyIcon name="check" className="h-4 w-4 text-primary" />
+            </div>
+            <p className="mt-3 text-xs leading-5 text-muted">Upload one `.xlsx`, inspect the fixed cumulative-reading contract and preserve the original bytes by SHA.</p>
+            <label className={`${primaryButton} mt-4 inline-flex cursor-pointer`}>
+              {uploading ? "Inspecting workbook..." : "Upload Excel"}
+              <input
+                type="file"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                disabled={uploading}
+                className="sr-only"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.target.value = "";
+                  if (file) void uploadWorkbook(file);
+                }}
+              />
+            </label>
+          </div>
           <SourceOption title="Tuya API" status="Connector pending" description="Daily synchronisation will reuse the same downstream mapping and quality rules." />
         </div>
+      </section>
+
+      <section className="rounded-xl border border-border bg-surface p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold">Latest Import Batch</h3>
+            <p className="mt-1 text-xs text-muted">An import is evidence only; it does not change the published hierarchy or Mapping.</p>
+          </div>
+          {latest ? (
+            <span className={latest.inspection.qualityStatus === "ready"
+              ? "rounded-full bg-step-success/10 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-wide text-step-success"
+              : "rounded-full bg-step-warning/10 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-wide text-step-warning"}
+            >
+              {latest.inspection.qualityStatus === "ready" ? "Ready for mapping" : "Review quality"}
+            </span>
+          ) : null}
+        </div>
+        {loadingImports ? (
+          <p className="mt-5 text-xs text-muted">Loading imports...</p>
+        ) : latest ? (
+          <div className="mt-5 space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <ImportFact label="Workbook" value={latest.filename} />
+              <ImportFact label="Rows" value={`${latest.inspection.validRowCount.toLocaleString()} valid / ${latest.inspection.rowCount.toLocaleString()}`} />
+              <ImportFact label="Source labels" value={String(latest.inspection.sourceLabels.length)} />
+              <ImportFact label="Typical interval" value={latest.inspection.typicalIntervalMinutes ? `${latest.inspection.typicalIntervalMinutes} min` : "Unknown"} />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <ImportFact label="Coverage" value={formatImportCoverage(latest)} />
+              <ImportFact label="SHA-256" value={latest.sourceSha256.slice(0, 16)} mono />
+            </div>
+            {latest.inspection.issues.length > 0 ? (
+              <ul className="space-y-1 rounded-lg bg-step-warning/5 px-4 py-3 text-[11px] text-step-warning">
+                {latest.inspection.issues.map((issue) => <li key={issue}>• {issue}</li>)}
+              </ul>
+            ) : (
+              <p className="rounded-lg bg-step-success/5 px-4 py-3 text-[11px] text-step-success">Required fields, timestamps and cumulative readings passed the inspection.</p>
+            )}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+              <p className="text-xs text-muted">Detected: {latest.inspection.columns.join(" · ")}</p>
+              <button type="button" onClick={useDetectedLabels} className={secondaryButton}>Use detected labels</button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-5 rounded-lg border border-dashed border-border px-5 py-8 text-center">
+            <p className="text-sm font-semibold">No Excel Import Batch yet</p>
+            <p className="mt-1 text-xs text-muted">Upload the first workbook above. Mapping stays unavailable until labels are inspected.</p>
+          </div>
+        )}
       </section>
 
       <section className="rounded-xl border border-border bg-surface p-5">
@@ -559,12 +708,28 @@ function DataSourcesPage({ setSection }: { setSection: Dispatch<SetStateAction<A
           <p className="max-w-2xl text-xs leading-5 text-muted">
             Adding a source does not change customer-facing analysis until its mapping and quality checks are approved.
           </p>
-          <button type="button" onClick={() => setSection("meter-mapping")} className={secondaryButton}>Open Meter Mapping</button>
+          <button type="button" onClick={() => setSection("meter-mapping")} disabled={!document.meter_mapping?.rows.length} className={secondaryButton}>Open Meter Mapping</button>
         </div>
       </section>
     </div>
   );
 }
+
+function ImportFact({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="rounded-lg bg-surface-subtle px-3 py-2.5">
+      <p className="text-[9px] font-semibold uppercase tracking-wide text-muted">{label}</p>
+      <p className={`mt-1 truncate text-xs font-semibold ${mono ? "font-mono" : ""}`}>{value}</p>
+    </div>
+  );
+}
+
+const formatImportCoverage = (batch: EnergyImportBatchDto): string => {
+  const from = batch.inspection.coverageFrom;
+  const to = batch.inspection.coverageTo;
+  if (!from || !to) return "Unknown";
+  return `${new Date(from).toLocaleDateString("en-SG")} – ${new Date(to).toLocaleDateString("en-SG")}`;
+};
 
 function MeterMappingPage({
   setSection,
@@ -577,8 +742,11 @@ function MeterMappingPage({
   document: EnergyProjectSetupDocumentDto;
   changeDocument: (updater: (current: EnergyProjectSetupDocumentDto) => EnergyProjectSetupDocumentDto) => void;
 }) {
-  const initialMapping = useMemo(() => createInitialMeterMapping(document), [document]);
-  const mapping = document.meter_mapping ?? initialMapping;
+  const mapping = document.meter_mapping ?? {
+    source_kind: "excel" as const,
+    rows: [],
+    confirmed: false,
+  };
   const [reviewing, setReviewing] = useState(false);
   const [selectedRowId, setSelectedRowId] = useState(
     () => mapping.rows.find((row) => row.scope_id === intent?.scopeId)?.id ?? mapping.rows[0]?.id ?? "",
@@ -624,10 +792,10 @@ function MeterMappingPage({
           <section className="min-w-0 rounded-xl border border-border bg-surface">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
               <div>
-                <h4 className="text-sm font-semibold">Detected source labels</h4>
-                <p className="mt-1 text-xs text-muted">Pilot labels are prepared from the current fixture until the Excel Import Batch endpoint is connected.</p>
+                <h4 className="text-sm font-semibold">Imported source labels</h4>
+                <p className="mt-1 text-xs text-muted">Labels preserve the exact Excel `Device Name`; suggested Scopes remain editable by an admin.</p>
               </div>
-              <span className="rounded-full bg-step-warning/10 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-wide text-step-warning">Fixture labels</span>
+              <span className="rounded-full bg-primary-light/10 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-wide text-primary">Excel import</span>
             </div>
             {mapping.rows.length === 0 ? (
               <div className="flex min-h-64 flex-col items-center justify-center px-6 text-center">

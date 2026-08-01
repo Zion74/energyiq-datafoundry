@@ -160,6 +160,42 @@ export const createInitialMeterMapping = (
   return { source_kind: "excel", rows, confirmed: false };
 };
 
+export const createMeterMappingFromSourceLabels = (
+  document: EnergyProjectSetupDocumentDto,
+  labels: string[],
+): EnergyMeterMappingDraftDto => {
+  const nodesById = new Map(document.nodes.map((node) => [node.id, node]));
+  const rows = [...new Set(labels.map((label) => label.trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right))
+    .map((sourceLabel, index): EnergyMeterMappingRowDto => {
+      const parsed = parseSourceLabel(sourceLabel);
+      const candidates = document.nodes.filter((node) => normaliseDisplayName(node.name) === normaliseDisplayName(parsed.meterName));
+      const scopedCandidates = parsed.locationName
+        ? candidates.filter((node) => ancestorNames(node, nodesById)
+          .some((name) => normaliseDisplayName(name) === normaliseDisplayName(parsed.locationName!)))
+        : candidates;
+      const matched = scopedCandidates.length === 1
+        ? scopedCandidates[0]
+        : candidates.length === 1
+          ? candidates[0]
+          : undefined;
+      const representsParentTotal = /^total\b/i.test(parsed.meterName) && Boolean(matched?.parent_id);
+      const scopeId = representsParentTotal ? matched!.parent_id! : matched?.id ?? "";
+      return {
+        id: `mapping-${slug(sourceLabel)}-${index + 1}`,
+        source_label: sourceLabel,
+        scope_id: scopeId,
+        display_name: parsed.meterName,
+        resource: "electricity",
+        category: inferMeterCategory(parsed.meterName),
+        coverage: representsParentTotal ? "whole" : "whole",
+        meter_role: "total",
+        aggregation_usage: "official",
+      };
+    });
+  return { source_kind: "excel", rows, confirmed: false };
+};
+
 export const inferMeterCategory = (label: string): EnergyMeterCategoryDto => {
   const value = label.toLocaleLowerCase();
   if (/air\s*con|aircon|a\/c/.test(value)) return "aircon";
@@ -286,6 +322,27 @@ const slug = (value: string): string =>
 
 const normaliseDisplayName = (value: string): string =>
   value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+
+const parseSourceLabel = (label: string): { locationName?: string; meterName: string } => {
+  const match = label.trim().match(/^(?:lvl|level|floor)\s+([^\s]+)\s+(.+)$/i);
+  if (!match) return { meterName: label.trim() };
+  return { locationName: `Level ${match[1]}`, meterName: match[2]!.trim() };
+};
+
+const ancestorNames = (
+  node: EnergyProjectSetupNodeDto,
+  nodesById: Map<string, EnergyProjectSetupNodeDto>,
+): string[] => {
+  const names: string[] = [];
+  const visited = new Set<string>();
+  let current = node.parent_id ? nodesById.get(node.parent_id) : undefined;
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    names.push(current.name);
+    current = current.parent_id ? nodesById.get(current.parent_id) : undefined;
+  }
+  return names;
+};
 
 const uniqueId = (candidate: string, existing: Set<string>): string => {
   let value = candidate;

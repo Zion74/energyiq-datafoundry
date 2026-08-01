@@ -152,6 +152,33 @@ export type EnergyMeterMappingDraftDto = {
   confirmed: boolean;
 };
 
+export type EnergyExcelImportInspectionDto = {
+  columns: string[];
+  sourceLabels: Array<{ label: string; rowCount: number }>;
+  rowCount: number;
+  validRowCount: number;
+  invalidRowCount: number;
+  duplicateReadingCount: number;
+  negativeReadingCount: number;
+  coverageFrom?: string;
+  coverageTo?: string;
+  typicalIntervalMinutes?: number;
+  readingKind: "cumulative";
+  qualityStatus: "ready" | "needs_review";
+  issues: string[];
+};
+
+export type EnergyImportBatchDto = {
+  id: string;
+  projectId: string;
+  sourceKind: "excel" | "tuya";
+  sourceSha256: string;
+  filename: string;
+  status: "inspected" | "materialized" | "failed";
+  inspection: EnergyExcelImportInspectionDto;
+  createdAt: string;
+};
+
 export type EnergyProjectSetupDocumentDto = {
   project: { name: string; timezone: string };
   tier_structure_locked: boolean;

@@ -54,6 +54,8 @@ export type {
   EnergyAccessContextDto,
   EnergyDeliveryStage,
   EnergyHierarchyRevisionDto,
+  EnergyExcelImportInspectionDto,
+  EnergyImportBatchDto,
   EnergyAggregationUsageDto,
   EnergyMeterCategoryDto,
   EnergyMeterCoverageDto,

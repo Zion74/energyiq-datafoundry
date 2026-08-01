@@ -14,6 +14,7 @@ import type {
   DevIdentitiesResponseDto,
   DevIdentityUser,
   EnergyAccessContextDto,
+  EnergyImportBatchDto,
   EnergyProjectHierarchyDto,
   EnergyProjectRecordDto,
   EnergyProjectSetupDocumentDto,
@@ -351,6 +352,24 @@ export const configApi = {
       method: "POST",
       body: JSON.stringify(body),
     });
+  },
+
+  listEnergyImportBatches(projectId: string): Promise<{ batches: EnergyImportBatchDto[] }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/imports`,
+    );
+  },
+
+  uploadEnergyExcelImport(
+    projectId: string,
+    file: File,
+  ): Promise<{ batch: EnergyImportBatchDto; duplicate: boolean }> {
+    const form = new FormData();
+    form.append("file", file);
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/imports/excel`,
+      { method: "POST", body: form },
+    );
   },
 
   getDevIdentities(): Promise<DevIdentitiesResponseDto> {

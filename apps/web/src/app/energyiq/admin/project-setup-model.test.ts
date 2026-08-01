@@ -9,6 +9,7 @@ import {
   buildAggregationReview,
   canLockTierStructure,
   createInitialMeterMapping,
+  createMeterMappingFromSourceLabels,
   hasSiblingNameConflict,
   inferMeterCategory,
   initialTierSelection,
@@ -160,5 +161,19 @@ describe("project setup model", () => {
     expect(nodePathLabel(document, "load-1-l7")).toBe("Level 7 / Office Load 1");
     expect(inferMeterCategory("Kitchen Lighting")).toBe("light");
     expect(buildAggregationReview(document, mapping).some((group) => group.scopeId === "l6" && group.recommendation === "direct total")).toBe(true);
+
+    const imported = createMeterMappingFromSourceLabels(document, [
+      "Lvl 6 Total Office Load",
+      "Lvl 6 Office Load 1",
+      "Lvl 7 Office Load 1",
+      "Unknown Meter",
+    ]);
+    expect(imported.rows.find((row) => row.source_label === "Lvl 6 Total Office Load")).toMatchObject({
+      scope_id: "l6",
+      display_name: "Total Office Load",
+      category: "load",
+    });
+    expect(imported.rows.find((row) => row.source_label === "Lvl 7 Office Load 1")?.scope_id).toBe("load-1-l7");
+    expect(imported.rows.find((row) => row.source_label === "Unknown Meter")?.scope_id).toBe("");
   });
 });
