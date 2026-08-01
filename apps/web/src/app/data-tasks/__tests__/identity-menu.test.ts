@@ -37,8 +37,22 @@ describe("data task identity menu", () => {
     expect(page).toContain("DataTaskUserBar");
     expect(page).toContain("compact");
     expect(page).toMatch(
-      /onOpenSettings=\{\(\) => \{\s*onToggleCollapse\(\);\s*onOpenConfigPanel\("llm"\);\s*\}\}/,
+      /onToggleCollapse\(\);\s*onOpenConfigPanel\("llm"\);/,
     );
+  });
+
+  it("exposes the shared account popover to the EnergyIQ top bar", () => {
+    const identity = source();
+    const shell = readFileSync(
+      join(process.cwd(), "src/app/energyiq/_components/energyiq-shell.tsx"),
+      "utf8",
+    );
+
+    expect(identity).toContain("export function DataTaskAccountMenu");
+    expect(identity).toContain('label="Settings"');
+    expect(identity).toContain('label="Sign out"');
+    expect(shell).toContain("DataTaskAccountMenu");
+    expect(shell).toContain('settingsHref="/energyiq/settings"');
   });
 
   it("does not expose placeholder account menu items", () => {
@@ -46,7 +60,6 @@ describe("data task identity menu", () => {
 
     for (const label of [
       "Personal account",
-      "Profile",
       "Usage",
       "Favorites",
       "API service",

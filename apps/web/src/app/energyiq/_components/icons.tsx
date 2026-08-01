@@ -1,0 +1,189 @@
+import type { SVGProps } from "react";
+
+export type EnergyIconName =
+  | "analysis"
+  | "explorer"
+  | "ask"
+  | "map"
+  | "bolt"
+  | "water"
+  | "building"
+  | "floor"
+  | "meter"
+  | "chevron"
+  | "calendar"
+  | "search"
+  | "alert"
+  | "check"
+  | "spark"
+  | "arrow"
+  | "info"
+  | "send"
+  | "plus"
+  | "settings"
+  | "user";
+
+export function EnergyIcon({
+  name,
+  className,
+  ...props
+}: SVGProps<SVGSVGElement> & { name: EnergyIconName }) {
+  const common = {
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    className,
+    "aria-hidden": true,
+    ...props,
+  };
+
+  switch (name) {
+    case "analysis":
+      return (
+        <svg {...common}>
+          <path d="M4 19V9" />
+          <path d="M10 19V5" />
+          <path d="M16 19v-7" />
+          <path d="M22 19V3" />
+        </svg>
+      );
+    case "explorer":
+      return (
+        <svg {...common}>
+          <path d="M4 5h6l2 2h8v12H4z" />
+          <path d="M8 11h8M8 15h5" />
+        </svg>
+      );
+    case "ask":
+      return (
+        <svg {...common}>
+          <path d="M4 5h16v12H9l-5 4z" />
+          <path d="M8 9h8M8 13h5" />
+        </svg>
+      );
+    case "map":
+      return (
+        <svg {...common}>
+          <circle cx="5" cy="12" r="2" />
+          <circle cx="12" cy="5" r="2" />
+          <circle cx="19" cy="12" r="2" />
+          <circle cx="12" cy="19" r="2" />
+          <path d="m6.5 10.5 4-4M13.5 6.5l4 4M17.5 13.5l-4 4M10.5 17.5l-4-4" />
+        </svg>
+      );
+    case "bolt":
+      return (
+        <svg {...common}>
+          <path d="m13 2-8 12h7l-1 8 8-12h-7z" />
+        </svg>
+      );
+    case "water":
+      return (
+        <svg {...common}>
+          <path d="M12 2s6 6.3 6 12a6 6 0 0 1-12 0c0-5.7 6-12 6-12Z" />
+        </svg>
+      );
+    case "building":
+      return (
+        <svg {...common}>
+          <path d="M4 21V4h11v17M15 9h5v12M8 8h3M8 12h3M8 16h3M18 13h.01M18 17h.01" />
+        </svg>
+      );
+    case "floor":
+      return (
+        <svg {...common}>
+          <path d="m4 8 8-4 8 4-8 4z" />
+          <path d="m4 12 8 4 8-4M4 16l8 4 8-4" />
+        </svg>
+      );
+    case "meter":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="8" />
+          <path d="m12 12 3-3M8 16h8" />
+        </svg>
+      );
+    case "chevron":
+      return (
+        <svg {...common}>
+          <path d="m9 18 6-6-6-6" />
+        </svg>
+      );
+    case "calendar":
+      return (
+        <svg {...common}>
+          <rect x="3" y="5" width="18" height="16" rx="2" />
+          <path d="M16 3v4M8 3v4M3 10h18" />
+        </svg>
+      );
+    case "search":
+      return (
+        <svg {...common}>
+          <circle cx="11" cy="11" r="7" />
+          <path d="m20 20-4-4" />
+        </svg>
+      );
+    case "alert":
+      return (
+        <svg {...common}>
+          <path d="M12 3 2.8 20h18.4z" />
+          <path d="M12 9v4M12 17h.01" />
+        </svg>
+      );
+    case "check":
+      return (
+        <svg {...common}>
+          <path d="m5 12 4 4L19 6" />
+        </svg>
+      );
+    case "spark":
+      return (
+        <svg {...common}>
+          <path d="m12 3 1.4 4.6L18 9l-4.6 1.4L12 15l-1.4-4.6L6 9l4.6-1.4z" />
+          <path d="m18.5 14 .8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z" />
+        </svg>
+      );
+    case "arrow":
+      return (
+        <svg {...common}>
+          <path d="M5 12h14M14 7l5 5-5 5" />
+        </svg>
+      );
+    case "info":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 11v5M12 8h.01" />
+        </svg>
+      );
+    case "send":
+      return (
+        <svg {...common}>
+          <path d="m22 2-7 20-4-9-9-4zM11 13 22 2" />
+        </svg>
+      );
+    case "plus":
+      return (
+        <svg {...common}>
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+      );
+    case "settings":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1z" />
+        </svg>
+      );
+    case "user":
+      return (
+        <svg {...common}>
+          <circle cx="12" cy="8" r="4" />
+          <path d="M4 21a8 8 0 0 1 16 0" />
+        </svg>
+      );
+  }
+}
