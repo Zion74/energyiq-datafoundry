@@ -1,10 +1,12 @@
 import { createErrorResult, createSuccessResult, type AppErrorCode } from "@datafoundry/contracts";
-import type { EnergyIqProjectSetupDocument } from "@datafoundry/metadata";
-import { randomUUID } from "node:crypto";
+import type { EnergyIqImportBatchRecord, EnergyIqProjectSetupDocument } from "@datafoundry/metadata";
+import { createHash, randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 
 import type { ConfigApiContext, ConfigApiResponse } from "../routes/types.js";
+import { readMultipartUpload } from "../upload-parser.js";
 import { executeEnergyScopeAnalysis } from "./energy-analysis.js";
+import { inspectEnergyExcelWorkbook } from "./energy-excel-import.js";
 import {
   resolveEnergyAccessContext,
   resolveEnergyQueryContext,
@@ -56,6 +58,67 @@ export const handleEnergyApiRequest = async (
         status: 201,
         body: createSuccessResult({ project, draft })
       };
+    }
+    if (segments[0] === "projects" && segments[2] === "imports") {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      requireEnergyAdminProject(context, user, projectId);
+      const project = context.metadataStore.energyIq.getProject(projectId);
+      if (segments.length === 3 && request.method === "GET") {
+        return {
+          status: 200,
+          body: createSuccessResult({
+            batches: context.metadataStore.energyIq
+              .listImportBatches(projectId)
+              .map(toEnergyImportBatchDto),
+          }),
+        };
+      }
+      if (segments[3] === "excel" && request.method === "POST") {
+        if (!request.headers["content-type"]?.includes("multipart/form-data")) {
+          throw new Error("ENERGYIQ_EXCEL_MULTIPART_REQUIRED");
+        }
+        const { file } = await readMultipartUpload(request);
+        if (!file.filename.toLowerCase().endsWith(".xlsx")) {
+          throw new Error("ENERGYIQ_EXCEL_FILE_INVALID");
+        }
+        const sourceSha256 = createHash("sha256").update(file.content).digest("hex");
+        const existing = context.metadataStore.energyIq.findImportBatchBySha({
+          project_id: projectId,
+          source_sha256: sourceSha256,
+        });
+        if (existing) {
+          return {
+            status: 200,
+            body: createSuccessResult({ batch: toEnergyImportBatchDto(existing), duplicate: true }),
+          };
+        }
+        const inspection = await inspectEnergyExcelWorkbook(file.content);
+        const fileRef = context.fileAssetService.createRef({
+          user_id: user.id,
+          workspace_id: project.workspace_id,
+          filename: file.filename,
+          content: file.content,
+          declared_mime_type: file.mimeType,
+          source: "upload",
+          metadata: { purpose: "energyiq_import", projectId },
+        });
+        const batch = context.metadataStore.energyIq.createImportBatch({
+          id: `energy-import-${randomUUID()}`,
+          workspace_id: project.workspace_id,
+          project_id: projectId,
+          source_kind: "excel",
+          source_sha256: sourceSha256,
+          filename: file.filename,
+          file_asset_ref_id: fileRef.ref.id,
+          status: "inspected",
+          inspection,
+          created_by: user.id,
+        });
+        return {
+          status: 201,
+          body: createSuccessResult({ batch: toEnergyImportBatchDto(batch), duplicate: false }),
+        };
+      }
     }
     if (segments[0] === "projects" && segments[2] === "setup") {
       const projectId = decodeURIComponent(segments[1] ?? "");
@@ -174,7 +237,7 @@ export const handleEnergyApiRequest = async (
     const message = error instanceof Error ? error.message : String(error);
     const forbidden = message.includes("FORBIDDEN") || message.includes("ADMIN_REQUIRED");
     const conflict = message.includes("CONFLICT");
-    const invalid = message.includes("INVALID") || message.includes("REQUIRED");
+    const invalid = message.includes("INVALID") || message.includes("REQUIRED") || message.includes("EXCEL_EMPTY");
     const code: AppErrorCode = forbidden
       ? "FORBIDDEN"
       : conflict
@@ -188,6 +251,19 @@ export const handleEnergyApiRequest = async (
     };
   }
 };
+
+const toEnergyImportBatchDto = (
+  batch: EnergyIqImportBatchRecord,
+) => ({
+  id: batch.id,
+  projectId: batch.project_id,
+  sourceKind: batch.source_kind,
+  sourceSha256: batch.source_sha256,
+  filename: batch.filename,
+  status: batch.status,
+  inspection: JSON.parse(batch.inspection_json) as unknown,
+  createdAt: batch.created_at,
+});
 
 const requireEnergyAdmin = (
   context: Required<ConfigApiContext>,

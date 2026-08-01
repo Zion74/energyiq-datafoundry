@@ -302,4 +302,49 @@ describe("EnergyIqStore", () => {
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
+
+  it("stores immutable import inspections and finds repeated file hashes", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-import-batch-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.workspaces.upsert({
+        id: "workspace-1",
+        owner_user_id: "dev-user",
+        name: "Customer Workspace",
+        kind: "customer",
+      });
+      metadata.energyIq.upsertProject({
+        id: "project-import",
+        workspace_id: "workspace-1",
+        name: "Import Project",
+        status: "draft",
+      });
+      const created = metadata.energyIq.createImportBatch({
+        id: "batch-1",
+        workspace_id: "workspace-1",
+        project_id: "project-import",
+        source_kind: "excel",
+        source_sha256: "sha-1",
+        filename: "meter.xlsx",
+        status: "inspected",
+        inspection: { rowCount: 10, sourceLabels: ["Meter 1"] },
+        created_by: "dev-user",
+      });
+
+      expect(JSON.parse(created.inspection_json)).toMatchObject({ rowCount: 10 });
+      expect(metadata.energyIq.findImportBatchBySha({
+        project_id: "project-import",
+        source_sha256: "sha-1",
+      })?.id).toBe("batch-1");
+      expect(metadata.energyIq.listImportBatches("project-import")).toHaveLength(1);
+      expect(() => metadata.energyIq.createImportBatch({
+        ...created,
+        id: "batch-2",
+        inspection: {},
+      })).toThrow();
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
 });

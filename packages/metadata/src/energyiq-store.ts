@@ -65,6 +65,20 @@ export type EnergyIqProjectAccessRecord = {
   updated_at: string;
 };
 
+export type EnergyIqImportBatchRecord = {
+  id: string;
+  workspace_id: string;
+  project_id: string;
+  source_kind: "excel" | "tuya";
+  source_sha256: string;
+  filename: string;
+  file_asset_ref_id?: string;
+  status: "inspected" | "materialized" | "failed";
+  inspection_json: string;
+  created_by: string;
+  created_at: string;
+};
+
 export const initializeEnergyIqSchema = (db: DatabaseSync): void => {
   db.exec(`
     CREATE TABLE IF NOT EXISTS energyiq_user_roles (
@@ -124,6 +138,27 @@ export const initializeEnergyIqSchema = (db: DatabaseSync): void => {
     );
     CREATE INDEX IF NOT EXISTS idx_energyiq_project_access_user
       ON energyiq_project_access(user_id, project_id);
+
+    CREATE TABLE IF NOT EXISTS energyiq_import_batches (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      source_kind TEXT NOT NULL CHECK (source_kind IN ('excel', 'tuya')),
+      source_sha256 TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      file_asset_ref_id TEXT,
+      status TEXT NOT NULL CHECK (status IN ('inspected', 'materialized', 'failed')),
+      inspection_json TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE (project_id, source_sha256),
+      FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+      FOREIGN KEY (project_id) REFERENCES energyiq_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (file_asset_ref_id) REFERENCES file_asset_refs(id),
+      FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_energyiq_import_batches_project
+      ON energyiq_import_batches(project_id, created_at DESC);
   `);
   const projectColumns = db.prepare("PRAGMA table_info(energyiq_projects)").all();
   if (!projectColumns.some((column) => isRecord(column) && column.name === "data_snapshot_id")) {
@@ -384,6 +419,67 @@ export class EnergyIqStore {
     `).get(input.project_id, input.user_id);
     return isRecord(row) ? mapProjectAccess(row) : undefined;
   }
+
+  createImportBatch(input: {
+    id: string;
+    workspace_id: string;
+    project_id: string;
+    source_kind: "excel" | "tuya";
+    source_sha256: string;
+    filename: string;
+    file_asset_ref_id?: string;
+    status: "inspected" | "materialized" | "failed";
+    inspection: unknown;
+    created_by: string;
+  }): EnergyIqImportBatchRecord {
+    const createdAt = new Date().toISOString();
+    this.db.prepare(`
+      INSERT INTO energyiq_import_batches (
+        id, workspace_id, project_id, source_kind, source_sha256, filename,
+        file_asset_ref_id, status, inspection_json, created_by, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.id,
+      input.workspace_id,
+      input.project_id,
+      input.source_kind,
+      input.source_sha256,
+      input.filename,
+      input.file_asset_ref_id ?? null,
+      input.status,
+      JSON.stringify(input.inspection),
+      input.created_by,
+      createdAt,
+    );
+    return this.getImportBatch(input.id);
+  }
+
+  getImportBatch(batchId: string): EnergyIqImportBatchRecord {
+    const row = this.db.prepare(
+      "SELECT * FROM energyiq_import_batches WHERE id = ?",
+    ).get(batchId);
+    if (!isRecord(row)) throw new Error(`ENERGYIQ_IMPORT_BATCH_NOT_FOUND:${batchId}`);
+    return mapImportBatch(row);
+  }
+
+  findImportBatchBySha(input: {
+    project_id: string;
+    source_sha256: string;
+  }): EnergyIqImportBatchRecord | undefined {
+    const row = this.db.prepare(`
+      SELECT * FROM energyiq_import_batches
+      WHERE project_id = ? AND source_sha256 = ?
+    `).get(input.project_id, input.source_sha256);
+    return isRecord(row) ? mapImportBatch(row) : undefined;
+  }
+
+  listImportBatches(projectId: string): EnergyIqImportBatchRecord[] {
+    return this.db.prepare(`
+      SELECT * FROM energyiq_import_batches
+      WHERE project_id = ?
+      ORDER BY created_at DESC
+    `).all(projectId).filter(isRecord).map(mapImportBatch);
+  }
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -467,3 +563,20 @@ const mapProjectAccess = (row: Record<string, unknown>): EnergyIqProjectAccessRe
   created_at: requiredString(row, "created_at"),
   updated_at: requiredString(row, "updated_at")
 });
+
+const mapImportBatch = (row: Record<string, unknown>): EnergyIqImportBatchRecord => {
+  const fileAssetRefId = optionalString(row, "file_asset_ref_id");
+  return {
+    id: requiredString(row, "id"),
+    workspace_id: requiredString(row, "workspace_id"),
+    project_id: requiredString(row, "project_id"),
+    source_kind: requiredString(row, "source_kind") as EnergyIqImportBatchRecord["source_kind"],
+    source_sha256: requiredString(row, "source_sha256"),
+    filename: requiredString(row, "filename"),
+    ...(fileAssetRefId ? { file_asset_ref_id: fileAssetRefId } : {}),
+    status: requiredString(row, "status") as EnergyIqImportBatchRecord["status"],
+    inspection_json: requiredString(row, "inspection_json"),
+    created_by: requiredString(row, "created_by"),
+    created_at: requiredString(row, "created_at"),
+  };
+};
