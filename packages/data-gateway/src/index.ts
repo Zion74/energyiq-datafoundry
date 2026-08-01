@@ -74,6 +74,12 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export { createDemoDuckDbConfig, demoDuckDbPath } from "./demo-duckdb.js";
+export {
+  ensureEnergyScopedDataSource,
+  resolveEnergyFactStorePath,
+  type EnergyScopedDataSource,
+  type EnergyScopedDataSourceContext
+} from "./energy-scoped-datasource.js";
 
 export type {
   AdapterExecutionInput,
