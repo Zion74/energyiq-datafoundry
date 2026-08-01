@@ -1,7 +1,7 @@
 # 原型验证首次数据源配置流程
 
 Type: prototype
-Status: claimed
+Status: resolved
 Blocked by: 02
 Label: ready-for-agent
 
@@ -36,4 +36,14 @@ Label: ready-for-agent
 6. Virtual Meter 在 Confirm Mapping 中可选创建，不单设 Tab；
 7. 正式发布统一位于第五阶段。
 
-当前进入正式 Admin 实现与浏览器验收，完成后再关闭本票。
+## Formal implementation evidence
+
+- 正式路径已落为 `Project Overview → Structure → Data Sources → Meter Mapping`，不再使用 A/B/C 作为产品信息架构；
+- 真实 Ngee Ann `.xlsx` 已验证为 25,919/25,919 有效行、9 个精确标签、15 分钟典型间隔；
+- 原文件按 SHA 保存，重复上传复用同一 Import Batch；
+- 9 个标签均可建议到 Structure 已有 Scope，管理员保存后刷新仍为 9 个 Mapped、0 个 Needs Scope；
+- Virtual Meter 保留在 Mapping 内作为可选能力；
+- 自动化验证为 3 个测试文件、12 项通过，根 TypeScript build 通过；
+- 详细证据见 `docs/energyiq/2026-08-01-Admin-Excel-Import-Batch实施记录.md`。
+
+本票解决的是首次数据源配置的正式路径与交互可行性。上传批次物化为 Raw Reading / Interval Fact / Quality Event 属于后续实现票，不在本票中冒充完成。

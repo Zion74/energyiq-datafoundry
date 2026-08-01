@@ -13,9 +13,9 @@ status: in_progress
 
 # EnergyIQ 开发计划：Admin 与模板运行闭环
 
-> 状态：**批次 0–1 已于 2026-08-01 完成并通过本地自动化验证；批次 2 及以后仍为计划。**
+> 状态：**批次 0–1 已完成；批次 2 的 Meter Mapping、可选 Virtual Meter、Excel Import Batch 检查与标签复用已完成，上传批次正式物化为 Raw Reading / Interval Fact 和质量事件仍待开发。**
 
-实施证据见：[2026-08-01 Admin 与 Tier 批次 0–1 实施记录](2026-08-01-Admin-Tier-批次0-1实施记录.md)。
+实施证据见：[2026-08-01 Admin 与 Tier 批次 0–1 实施记录](2026-08-01-Admin-Tier-批次0-1实施记录.md)、[Admin Meter Mapping 与虚拟电表实施记录](2026-08-01-Admin-Meter-Mapping与虚拟电表实施记录.md)和 [Admin Excel Import Batch 实施记录](2026-08-01-Admin-Excel-Import-Batch实施记录.md)。
 
 ## 1. 目标
 
@@ -132,6 +132,8 @@ admin creates Project
 7. 切换 Project 后 Overview、Explorer 和 AI Analyst 都获得新的 project_id。
 
 ## 6. 批次 2：Meter Mapping、Virtual Meter 与 Excel
+
+> 实施状态：前半段已完成。真实 `.xlsx` 可保存为带 SHA 的 Import Batch、检查固定字段/标签/覆盖区间/典型间隔并生成可编辑 Mapping Draft；重复文件会复用已有批次。离线 golden builder 已验证累计读数到 15 分钟事实的计算，但 UI 上传批次尚未触发正式事实物化和质量事件持久化。
 
 ### 后端
 
@@ -353,7 +355,7 @@ admin creates Project
 
 ## 15. 已批准并完成的范围
 
-本轮已批准并完成 **批次 0 + 批次 1**：
+当前已完成 **批次 0 + 批次 1，以及批次 2 的前半段**：
 
 1. golden 基线与 migration 护栏；
 2. Project/Tier/Node 正式领域模型；
@@ -361,10 +363,14 @@ admin creates Project
 4. Draft/Validate/Publish；
 5. Ngee Ann 去掉 Block Test；
 6. Preschool 保留 provisional fixture，不虚构 Block/Room。
+7. Meter Mapping 只能绑定既有 Scope，并支持 Official Aggregation Review；
+8. Virtual Meter 作为 Mapping 内可选项，默认不参与官方汇总；
+9. 真实 Excel Import Batch、原文件保存、SHA 幂等、字段与标签检查；
+10. 精确保留 `Device Name`，并以可解释规则建议 Ngee Ann 的 9 个既有 Scope，管理员最终确认和保存。
 
-这一步已做到可见、可验证，同时没有提前把 Meter Mapping、Excel、Metric Registry 和模板编辑器写死。
+这一步已做到可见、可验证，同时没有提前把 Metric Registry 和模板编辑器写死。
 
-## 16. 下一批开始前的边界
+## 16. 批次 2 后半段边界
 
 批次 2 继续采用以下已确认选择：
 
@@ -374,4 +380,4 @@ admin creates Project
 4. Preschool 不自动猜 Block/Room；
 5. Admin 与客户 UI 均先英文。
 
-批次 2 尚未开始。进入 Meter Mapping 与 Excel 前，应先以当前 Admin 页面为基础完成用户验收，并保持 Preschool Block/Room 映射为待补输入。
+下一步只补齐数据事实闭环：让已检查的上传批次按已保存 Mapping 生成 Raw Reading、Interval Fact 和质量事件，并把结果显示在 Admin。Preschool Block/Room 仍保持待补输入，不自动猜测；在事实闭环通过前，不进入 Metric Registry 与模板运行开发。
