@@ -51,7 +51,7 @@
     "chineseShort": "中"
   },
   "sidebar": {
-    "brand": "DataFoundry",
+    "brand": "EnergyIQ",
     "sessionCount": "{{count}} 个会话",
     "workspaceResources": "工作区资源",
     "newTask": "新建数据任务",
@@ -219,7 +219,7 @@
     "metricOutputs": "输出",
     "metricItems": "{{count}} 项",
     "currentQuestion": "当前问题",
-    "startPrompt": "发送问题以启动 DataFoundry。",
+    "startPrompt": "发送问题以启动 EnergyIQ。",
     "steps": "步骤",
     "stepsSession": "步骤（会话）",
     "successRate": "成功率",

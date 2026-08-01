@@ -11,14 +11,14 @@ export function LoginClient() {
 
   useEffect(() => {
     if (!isPasswordAuthMode()) {
-      router.replace("/data-tasks");
+      router.replace("/energyiq/overview");
       return;
     }
     let cancelled = false;
     configApi
       .getMe()
       .then(() => {
-        if (!cancelled) router.replace("/data-tasks");
+        if (!cancelled) router.replace("/energyiq/overview");
       })
       .catch(() => {
         if (!cancelled) setChecking(false);
@@ -32,5 +32,5 @@ export function LoginClient() {
     return <PasswordAuthShell title="Loading account..." />;
   }
 
-  return <AuthFlow initialMode="login" onAuthenticated={() => router.replace("/data-tasks")} />;
+  return <AuthFlow initialMode="login" onAuthenticated={() => router.replace("/energyiq/overview")} />;
 }

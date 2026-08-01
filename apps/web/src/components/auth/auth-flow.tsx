@@ -7,8 +7,8 @@ import { configApi } from "../../lib/config-api/client";
 export type AuthMode = "login" | "register" | "forgot" | "verify" | "reset";
 
 const AUTH_MODE_META: Record<AuthMode, { title: string; subtitle: string; submit: string }> = {
-  login: { title: "Sign in", subtitle: "Welcome back to DataFoundry", submit: "Sign in" },
-  register: { title: "Create account", subtitle: "Get started with DataFoundry", submit: "Create account" },
+  login: { title: "Sign in", subtitle: "Welcome back to EnergyIQ", submit: "Sign in" },
+  register: { title: "Create account", subtitle: "Get started with EnergyIQ", submit: "Create account" },
   forgot: { title: "Forgot password", subtitle: "We'll send you a reset link", submit: "Send reset link" },
   verify: { title: "Verify email", subtitle: "Enter the code we sent you", submit: "Verify email" },
   reset: { title: "Reset password", subtitle: "Choose a new password", submit: "Reset password" },
@@ -221,7 +221,7 @@ function AuthModeSwitch({
   return (
     <div className="mt-5 border-t border-border pt-4 text-center text-xs text-muted">
       {mode === "login" ? (
-        <p>New to DataFoundry? {link("Create an account", onGoRegister)}</p>
+        <p>New to EnergyIQ? {link("Create an account", onGoRegister)}</p>
       ) : mode === "register" ? (
         <p>Already have an account? {link("Sign in", onGoLogin)}</p>
       ) : (
@@ -288,9 +288,9 @@ export function PasswordAuthShell({
       <section className="auth-card-in w-full max-w-sm">
         <div className="mb-6 flex items-center gap-2.5">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-xs font-bold tracking-tight text-white">
-            DF
+            EI
           </span>
-          <span className="text-sm font-semibold text-foreground">DataFoundry</span>
+          <span className="text-sm font-semibold text-foreground">EnergyIQ</span>
         </div>
         <div className="rounded-xl border border-border bg-surface p-6 shadow-[var(--shadow-card)]">
           <div className="mb-5">

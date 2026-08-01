@@ -51,7 +51,7 @@
     "chineseShort": "中"
   },
   "sidebar": {
-    "brand": "DataFoundry",
+    "brand": "EnergyIQ",
     "sessionCount": "{{count}} sessions",
     "workspaceResources": "Workspace Resources",
     "newTask": "New data task",

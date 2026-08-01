@@ -28,8 +28,8 @@ describe("locale translate", () => {
     expect(toggleLocaleValue("en")).toBe("zh-CN");
   });
 
-  it("uses the expected storage key and default locale", () => {
-    expect(LOCALE_STORAGE_KEY).toBe("data-tasks:locale:v1");
-    expect(DEFAULT_LOCALE).toBe("zh-CN");
+  it("uses the EnergyIQ storage key and English default locale", () => {
+    expect(LOCALE_STORAGE_KEY).toBe("energyiq:locale:v2");
+    expect(DEFAULT_LOCALE).toBe("en");
   });
 });
