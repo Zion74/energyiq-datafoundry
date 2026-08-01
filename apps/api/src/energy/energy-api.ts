@@ -262,6 +262,9 @@ const parseProjectSetupDocument = (value: unknown): EnergyIqProjectSetupDocument
   if (!Array.isArray(document.tiers) || !Array.isArray(document.nodes)) {
     throw new Error("ENERGYIQ_SETUP_DOCUMENT_INVALID");
   }
+  const meterMapping = document.meter_mapping === undefined
+    ? undefined
+    : parseMeterMappingDraft(document.meter_mapping);
   return {
     project: {
       name: requireNonEmptyString(project.name, "ENERGYIQ_PROJECT_NAME_REQUIRED"),
@@ -307,6 +310,50 @@ const parseProjectSetupDocument = (value: unknown): EnergyIqProjectSetupDocument
         ...(effectiveTo ? { effective_to: effectiveTo } : {}),
         ...(independentReason ? { independent_reason: independentReason } : {}),
         ...(metadata ? { metadata } : {})
+      };
+    }),
+    ...(meterMapping ? { meter_mapping: meterMapping } : {})
+  };
+};
+
+const parseMeterMappingDraft = (
+  value: unknown
+): NonNullable<EnergyIqProjectSetupDocument["meter_mapping"]> => {
+  const mapping = requireRecord(value, "ENERGYIQ_METER_MAPPING_INVALID");
+  if (!Array.isArray(mapping.rows)) {
+    throw new Error("ENERGYIQ_METER_MAPPING_ROWS_INVALID");
+  }
+  return {
+    source_kind: mapping.source_kind === "tuya" ? "tuya" : "excel",
+    confirmed: mapping.confirmed === true,
+    rows: mapping.rows.map((value, index) => {
+      const row = requireRecord(value, `ENERGYIQ_METER_MAPPING_ROW_INVALID:${index}`);
+      const category = row.category;
+      const coverage = row.coverage;
+      const meterRole = row.meter_role;
+      const aggregationUsage = row.aggregation_usage;
+      if (category !== "overall" && category !== "load" && category !== "light" && category !== "aircon" && category !== "other") {
+        throw new Error(`ENERGYIQ_METER_CATEGORY_INVALID:${index}`);
+      }
+      if (coverage !== "whole" && coverage !== "partial" && coverage !== "reference") {
+        throw new Error(`ENERGYIQ_METER_COVERAGE_INVALID:${index}`);
+      }
+      if (meterRole !== "total" && meterRole !== "component" && meterRole !== "standalone") {
+        throw new Error(`ENERGYIQ_METER_ROLE_INVALID:${index}`);
+      }
+      if (aggregationUsage !== "official" && aggregationUsage !== "excluded") {
+        throw new Error(`ENERGYIQ_AGGREGATION_USAGE_INVALID:${index}`);
+      }
+      return {
+        id: requireNonEmptyString(row.id, `ENERGYIQ_METER_MAPPING_ID_REQUIRED:${index}`),
+        source_label: requireNonEmptyString(row.source_label, `ENERGYIQ_SOURCE_LABEL_REQUIRED:${index}`),
+        scope_id: requireNonEmptyString(row.scope_id, `ENERGYIQ_METER_SCOPE_REQUIRED:${index}`),
+        display_name: requireNonEmptyString(row.display_name, `ENERGYIQ_METER_NAME_REQUIRED:${index}`),
+        resource: row.resource === "water" ? "water" : "electricity",
+        category,
+        coverage,
+        meter_role: meterRole,
+        aggregation_usage: aggregationUsage
       };
     })
   };

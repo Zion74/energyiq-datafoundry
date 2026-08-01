@@ -6,10 +6,14 @@ import {
   addNode,
   addParentTier,
   branchNodeCount,
+  buildAggregationReview,
   canLockTierStructure,
+  createInitialMeterMapping,
   hasSiblingNameConflict,
+  inferMeterCategory,
   initialTierSelection,
   isTierStructureLocked,
+  nodePathLabel,
   nodesForTierAndParent,
   removeNodeAndDescendants,
   removeHighestTier,
@@ -124,5 +128,37 @@ describe("project setup model", () => {
 
     const result = addNode(document, { projectId: "test", tierId: "room", parentId: "l1" });
     expect(result.document.nodes.at(-1)?.name).toBe("Room 4");
+  });
+
+  it("creates a deterministic pilot Mapping and moves labelled totals to their parent Scope", () => {
+    const document: EnergyProjectSetupDocumentDto = {
+      project: { name: "Test", timezone: "Asia/Singapore" },
+      tier_structure_locked: true,
+      tiers: [
+        { id: "circuit", ordinal: 1, alias: "Circuit" },
+        { id: "level", ordinal: 2, alias: "Level" },
+      ],
+      nodes: [
+        { id: "l6", tier_definition_id: "level", name: "Level 6", sort_order: 1, metadata_status: "confirmed" },
+        { id: "total-load", tier_definition_id: "circuit", parent_id: "l6", name: "Total Office Load", sort_order: 1, metadata_status: "confirmed" },
+        { id: "load-1", tier_definition_id: "circuit", parent_id: "l6", name: "Office Load 1", sort_order: 2, metadata_status: "confirmed" },
+        { id: "l7", tier_definition_id: "level", name: "Level 7", sort_order: 2, metadata_status: "confirmed" },
+        { id: "load-1-l7", tier_definition_id: "circuit", parent_id: "l7", name: "Office Load 1", sort_order: 1, metadata_status: "confirmed" },
+      ],
+    };
+
+    const mapping = createInitialMeterMapping(document);
+    expect(mapping.rows.find((row) => row.source_label === "Total Office Load")).toMatchObject({
+      scope_id: "l6",
+      category: "load",
+      coverage: "whole",
+      meter_role: "total",
+      aggregation_usage: "official",
+    });
+    expect(mapping.rows.find((row) => row.source_label === "Level 6 / Office Load 1")?.scope_id).toBe("load-1");
+    expect(mapping.rows.find((row) => row.source_label === "Level 7 / Office Load 1")?.scope_id).toBe("load-1-l7");
+    expect(nodePathLabel(document, "load-1-l7")).toBe("Level 7 / Office Load 1");
+    expect(inferMeterCategory("Kitchen Lighting")).toBe("light");
+    expect(buildAggregationReview(document, mapping).some((group) => group.scopeId === "l6" && group.recommendation === "direct total")).toBe(true);
   });
 });

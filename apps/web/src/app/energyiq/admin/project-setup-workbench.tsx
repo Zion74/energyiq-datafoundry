@@ -12,6 +12,8 @@ import {
 
 import {
   configApi,
+  type EnergyMeterMappingDraftDto,
+  type EnergyMeterMappingRowDto,
   type EnergyProjectDto,
   type EnergyProjectSetupDocumentDto,
   type EnergyProjectSetupDto,
@@ -27,9 +29,12 @@ import {
   addParentTier,
   branchNodeCount,
   canLockTierStructure,
+  buildAggregationReview,
+  createInitialMeterMapping,
   hasSiblingNameConflict,
   initialTierSelection,
   isTierStructureLocked,
+  nodePathLabel,
   nodesForTierAndParent,
   removeNodeAndDescendants,
   removeHighestTier,
@@ -349,7 +354,14 @@ function renderAdminSection({
     return <DataSourcesPage setSection={setSection} />;
   }
   if (section === "meter-mapping") {
-    return <MeterMappingPage setSection={setSection} intent={meterMappingIntent} />;
+    return (
+      <MeterMappingPage
+        setSection={setSection}
+        intent={meterMappingIntent}
+        document={document}
+        changeDocument={changeDocument}
+      />
+    );
   }
 
   const planned = plannedSectionCopy(section);
@@ -556,40 +568,286 @@ function DataSourcesPage({ setSection }: { setSection: Dispatch<SetStateAction<A
 function MeterMappingPage({
   setSection,
   intent,
+  document,
+  changeDocument,
 }: {
   setSection: Dispatch<SetStateAction<AdminSection>>;
   intent: MeterMappingIntent | null;
+  document: EnergyProjectSetupDocumentDto;
+  changeDocument: (updater: (current: EnergyProjectSetupDocumentDto) => EnergyProjectSetupDocumentDto) => void;
 }) {
-  const intentTitle = intent?.kind === "virtual" ? "Create virtual meter" : "Attach physical meter";
+  const initialMapping = useMemo(() => createInitialMeterMapping(document), [document]);
+  const mapping = document.meter_mapping ?? initialMapping;
+  const [reviewing, setReviewing] = useState(false);
+  const [selectedRowId, setSelectedRowId] = useState(
+    () => mapping.rows.find((row) => row.scope_id === intent?.scopeId)?.id ?? mapping.rows[0]?.id ?? "",
+  );
+  const selectedRow = mapping.rows.find((row) => row.id === selectedRowId) ?? mapping.rows[0] ?? null;
+  const aggregation = useMemo(() => buildAggregationReview(document, mapping), [document, mapping]);
+  const conflicts = aggregation.filter((group) => group.conflict);
+  const missingScopes = mapping.rows.filter((row) => !document.nodes.some((node) => node.id === row.scope_id));
+  const setMapping = (next: EnergyMeterMappingDraftDto) => {
+    changeDocument((current) => ({ ...current, meter_mapping: next }));
+  };
+
+  useEffect(() => {
+    if (!selectedRowId && mapping.rows[0]) setSelectedRowId(mapping.rows[0].id);
+  }, [mapping.rows, selectedRowId]);
+
   return (
-    <div className="mx-auto max-w-5xl">
-      <section className="rounded-xl border border-border bg-surface p-6">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-surface-subtle text-muted">
-          <EnergyIcon name="meter" className="h-5 w-5" />
+    <div className="mx-auto max-w-6xl space-y-5">
+      <section className="rounded-xl border border-border bg-surface p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-primary">Data & Meters</span>
+            <h3 className="mt-1 text-base font-semibold">Map source labels to existing Scopes</h3>
+            <p className="mt-1 max-w-3xl text-xs leading-5 text-muted">Mapping cannot create Floors, Rooms or Circuits. If a Scope is missing, return to Structure, add it, then continue here.</p>
+          </div>
+          {intent ? (
+            <div className="rounded-lg bg-primary-light/5 px-3 py-2 text-right">
+              <p className="text-[9px] font-semibold uppercase tracking-wide text-primary">Selected from Structure</p>
+              <p className="mt-0.5 text-xs font-semibold">{intent.scopeName}</p>
+            </div>
+          ) : null}
         </div>
-        <h3 className="mt-4 text-base font-semibold">{intent ? `${intentTitle} · ${intent.scopeName}` : "Meter Mapping needs source labels"}</h3>
-        <p className="mt-2 max-w-2xl text-xs leading-5 text-muted">
-          {intent?.kind === "virtual"
-            ? "The selected scope is carried from Structure. Virtual meter formulas remain optional and are configured after their input meters exist."
-            : "First connect a source and inspect its labels. Then map each label to a physical meter, Project scope, resource, category, role and official aggregation setting."}
-        </p>
-        {intent ? (
-          <dl className="mt-5 grid gap-3 rounded-xl bg-surface-subtle p-4 sm:grid-cols-2">
-            <div><dt className="text-[10px] text-muted">Selected scope</dt><dd className="mt-1 text-xs font-semibold">{intent.scopeName}</dd></div>
-            <div><dt className="text-[10px] text-muted">Meter type</dt><dd className="mt-1 text-xs font-semibold capitalize">{intent.kind}</dd></div>
-          </dl>
-        ) : null}
-        <div className="mt-5 rounded-xl bg-surface-subtle p-4">
-          <p className="text-xs font-semibold">Optional derived meters</p>
-          <p className="mt-1 text-xs leading-5 text-muted">
-            Virtual meters are created here only after physical mappings exist. They are optional and do not have a separate navigation page.
-          </p>
-        </div>
-        <div className="mt-5 flex flex-wrap gap-2">
-          {intent ? <button type="button" onClick={() => setSection("structure")} className={secondaryButton}>Back to Structure</button> : null}
-          <button type="button" onClick={() => setSection("data-sources")} className={primaryButton}>Go to Data Sources</button>
+        <div className="mt-5 grid gap-2 sm:grid-cols-4">
+          <MappingProgressStep number="1" label="Source labels" state="Complete" active={!reviewing} />
+          <MappingProgressStep number="2" label="Physical Mapping" state={`${mapping.rows.length} labels`} active={!reviewing} />
+          <MappingProgressStep number="3" label="Aggregation review" state={conflicts.length ? `${conflicts.length} conflicts` : "Ready"} active={reviewing} />
+          <MappingProgressStep number="4" label="Confirm" state={mapping.confirmed ? "Confirmed" : "Draft"} active={false} />
         </div>
       </section>
+
+      {!reviewing ? (
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+          <section className="min-w-0 rounded-xl border border-border bg-surface">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
+              <div>
+                <h4 className="text-sm font-semibold">Detected source labels</h4>
+                <p className="mt-1 text-xs text-muted">Pilot labels are prepared from the current fixture until the Excel Import Batch endpoint is connected.</p>
+              </div>
+              <span className="rounded-full bg-step-warning/10 px-2.5 py-1 text-[9px] font-semibold uppercase tracking-wide text-step-warning">Fixture labels</span>
+            </div>
+            {mapping.rows.length === 0 ? (
+              <div className="flex min-h-64 flex-col items-center justify-center px-6 text-center">
+                <p className="text-sm font-semibold">No source labels available</p>
+                <p className="mt-1 text-xs text-muted">Connect an Excel source, or complete the lowest Tier nodes for this pilot.</p>
+              </div>
+            ) : (
+              <div className="max-h-[620px] overflow-auto divide-y divide-border">
+                {mapping.rows.map((row) => {
+                  const scope = document.nodes.find((node) => node.id === row.scope_id);
+                  return (
+                    <button
+                      key={row.id}
+                      type="button"
+                      onClick={() => setSelectedRowId(row.id)}
+                      className={[
+                        "grid w-full gap-2 px-5 py-3 text-left transition-colors sm:grid-cols-[minmax(180px,1.3fr)_minmax(140px,1fr)_90px_88px] sm:items-center",
+                        selectedRow?.id === row.id ? "bg-primary-light/5" : "hover:bg-surface-subtle",
+                      ].join(" ")}
+                    >
+                      <span className="truncate text-xs font-semibold">{row.source_label}</span>
+                      <span className="truncate text-[11px] text-muted">{scope ? nodePathLabel(document, scope.id) : "Missing Scope"}</span>
+                      <span className="text-[10px] capitalize text-muted">{row.category}</span>
+                      <span className={scope ? "text-[10px] font-semibold text-step-success" : "text-[10px] font-semibold text-step-error"}>{scope ? "Mapped" : "Needs Scope"}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          <aside className="space-y-5">
+            {selectedRow ? (
+              <MeterMappingEditor
+                key={selectedRow.id}
+                row={selectedRow}
+                document={document}
+                onApply={(nextRow) => setMapping({
+                  ...mapping,
+                  confirmed: false,
+                  rows: mapping.rows.map((row) => row.id === nextRow.id ? nextRow : row),
+                })}
+                onReturnToStructure={() => setSection("structure")}
+              />
+            ) : null}
+          </aside>
+        </div>
+      ) : (
+        <AggregationReviewPanel document={document} mapping={mapping} groups={aggregation} />
+      )}
+
+      <section className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-surface p-5">
+        <div>
+          <h4 className="text-sm font-semibold">{reviewing ? "Confirm the Mapping Draft" : "Ready to review aggregation?"}</h4>
+          <p className="mt-1 text-xs leading-5 text-muted">
+            {reviewing
+              ? "Confirmation stores the reviewed Mapping in the Project Draft. Final customer publication still happens in Review & Publish."
+              : "Review groups by Scope, resource and category before confirmation. Overall is never added to Load, Light, Aircon or Other."}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => setSection("structure")} className={secondaryButton}>Return to Structure</button>
+          {reviewing ? (
+            <>
+              <button type="button" onClick={() => setReviewing(false)} className={secondaryButton}>Back to labels</button>
+              <button
+                type="button"
+                disabled={conflicts.length > 0 || missingScopes.length > 0 || mapping.rows.length === 0}
+                onClick={() => setMapping({ ...mapping, confirmed: true })}
+                className={primaryButton}
+              >
+                Confirm Mapping
+              </button>
+            </>
+          ) : (
+            <button type="button" onClick={() => setReviewing(true)} disabled={mapping.rows.length === 0} className={primaryButton}>Review aggregation</button>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function MappingProgressStep({ number, label, state, active }: { number: string; label: string; state: string; active: boolean }) {
+  return (
+    <div className={[
+      "flex items-center gap-3 rounded-xl px-3 py-2.5",
+      active ? "bg-primary-light/5" : "bg-surface-subtle",
+    ].join(" ")}>
+      <span className={[
+        "flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[9px] font-semibold",
+        active ? "bg-primary text-white" : "bg-surface text-muted",
+      ].join(" ")}>{number}</span>
+      <span className="min-w-0"><span className="block truncate text-[11px] font-semibold">{label}</span><span className="block text-[9px] text-muted">{state}</span></span>
+    </div>
+  );
+}
+
+function MeterMappingEditor({
+  row,
+  document,
+  onApply,
+  onReturnToStructure,
+}: {
+  row: EnergyMeterMappingRowDto;
+  document: EnergyProjectSetupDocumentDto;
+  onApply: (row: EnergyMeterMappingRowDto) => void;
+  onReturnToStructure: () => void;
+}) {
+  const [draft, setDraft] = useState(row);
+  const scopeExists = document.nodes.some((node) => node.id === draft.scope_id);
+  const orderedTiers = tiersTopDown(document);
+  return (
+    <section className="rounded-xl border border-border bg-surface p-5">
+      <h4 className="text-sm font-semibold">Mapping details</h4>
+      <p className="mt-1 text-xs leading-5 text-muted">A source label always creates or updates a Physical Meter Point. Virtual Meters are optional and reviewed after this step.</p>
+      <div className="mt-5 space-y-4">
+        <ReadOnlyField label="Source label" value={draft.source_label} />
+        <Field label="Meter display name">
+          <input value={draft.display_name} onChange={(event) => setDraft((current) => ({ ...current, display_name: event.target.value }))} className={inputClass} />
+        </Field>
+        <Field label="Existing Scope" hint="Scopes are created only in Structure.">
+          <select value={draft.scope_id} onChange={(event) => setDraft((current) => ({ ...current, scope_id: event.target.value }))} className={`${inputClass} ${scopeExists ? "" : "border-step-error"}`}>
+            <option value="">Select an existing Scope</option>
+            {orderedTiers.flatMap((tier) => document.nodes
+              .filter((node) => node.tier_definition_id === tier.id)
+              .map((node) => <option key={node.id} value={node.id}>{tier.alias} · {nodePathLabel(document, node.id)}</option>))}
+          </select>
+          {!scopeExists ? <button type="button" onClick={onReturnToStructure} className="mt-2 text-[11px] font-semibold text-step-error hover:underline">Scope missing · Return to Structure</button> : null}
+        </Field>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Resource">
+            <select value={draft.resource} onChange={(event) => setDraft((current) => ({ ...current, resource: event.target.value as EnergyMeterMappingRowDto["resource"] }))} className={inputClass}>
+              <option value="electricity">Electricity</option>
+              <option value="water">Water</option>
+            </select>
+          </Field>
+          <Field label="Category">
+            <select value={draft.category} onChange={(event) => setDraft((current) => ({ ...current, category: event.target.value as EnergyMeterMappingRowDto["category"] }))} className={inputClass}>
+              <option value="overall">Overall</option>
+              <option value="load">Load</option>
+              <option value="light">Light</option>
+              <option value="aircon">Aircon</option>
+              <option value="other">Other</option>
+            </select>
+          </Field>
+        </div>
+        <Field label="Coverage" hint="This describes what the meter covers inside the selected Scope and Category.">
+          <select value={draft.coverage} onChange={(event) => setDraft((current) => ({ ...current, coverage: event.target.value as EnergyMeterMappingRowDto["coverage"] }))} className={inputClass}>
+            <option value="whole">Whole scope</option>
+            <option value="partial">Partial</option>
+            <option value="reference">Reference only</option>
+          </select>
+        </Field>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Meter Role">
+            <select value={draft.meter_role} onChange={(event) => setDraft((current) => ({ ...current, meter_role: event.target.value as EnergyMeterMappingRowDto["meter_role"] }))} className={inputClass}>
+              <option value="total">Total</option>
+              <option value="component">Component</option>
+              <option value="standalone">Standalone</option>
+            </select>
+          </Field>
+          <Field label="Official aggregation">
+            <select value={draft.aggregation_usage} onChange={(event) => setDraft((current) => ({ ...current, aggregation_usage: event.target.value as EnergyMeterMappingRowDto["aggregation_usage"] }))} className={inputClass}>
+              <option value="official">Included</option>
+              <option value="excluded">Excluded</option>
+            </select>
+          </Field>
+        </div>
+        {draft.meter_role === "standalone" && draft.aggregation_usage === "official" ? (
+          <p className="rounded-lg bg-step-error/10 px-3 py-2 text-[11px] font-medium text-step-error">Standalone meters must be excluded from official aggregation.</p>
+        ) : null}
+        <button type="button" disabled={!scopeExists || !draft.display_name.trim() || (draft.meter_role === "standalone" && draft.aggregation_usage === "official")} onClick={() => onApply({ ...draft, display_name: draft.display_name.trim() })} className={`${primaryButton} w-full`}>Apply Mapping</button>
+      </div>
+    </section>
+  );
+}
+
+function AggregationReviewPanel({
+  document,
+  mapping,
+  groups,
+}: {
+  document: EnergyProjectSetupDocumentDto;
+  mapping: EnergyMeterMappingDraftDto;
+  groups: ReturnType<typeof buildAggregationReview>;
+}) {
+  const overallCount = groups.filter((group) => group.category === "overall").length;
+  return (
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <section className="rounded-xl border border-border bg-surface">
+        <div className="border-b border-border px-5 py-4">
+          <h4 className="text-sm font-semibold">Official aggregation review</h4>
+          <p className="mt-1 text-xs leading-5 text-muted">One official Total is allowed for each Scope, resource and category. Included Components are summed only when no official Total is selected.</p>
+        </div>
+        <div className="divide-y divide-border">
+          {groups.map((group) => (
+            <div key={group.key} className="grid gap-3 px-5 py-4 md:grid-cols-[minmax(160px,1fr)_100px_minmax(180px,1fr)_90px] md:items-center">
+              <div><p className="text-xs font-semibold">{group.scopeName}</p><p className="mt-0.5 text-[10px] capitalize text-muted">{group.resource}</p></div>
+              <span className="text-[10px] font-semibold capitalize text-muted">{group.category}</span>
+              <div><p className="text-[11px] font-semibold capitalize">{group.recommendation}</p><p className="mt-0.5 text-[10px] text-muted">{group.officialTotals.length} totals · {group.officialComponents.length} components · {group.excluded.length} excluded</p></div>
+              <span className={group.conflict ? "text-[10px] font-semibold text-step-error" : "text-[10px] font-semibold text-step-success"}>{group.conflict ? "Conflict" : "Ready"}</span>
+            </div>
+          ))}
+        </div>
+      </section>
+      <aside className="space-y-5">
+        <section className="rounded-xl border border-border bg-surface p-5">
+          <h4 className="text-sm font-semibold">Review summary</h4>
+          <dl className="mt-4 divide-y divide-border">
+            <SummaryRow label="Physical labels" value={String(mapping.rows.length)} />
+            <SummaryRow label="Aggregation groups" value={String(groups.length)} />
+            <SummaryRow label="Overall routes" value={String(overallCount)} />
+            <SummaryRow label="Missing Scopes" value={String(mapping.rows.filter((row) => !document.nodes.some((node) => node.id === row.scope_id)).length)} />
+          </dl>
+        </section>
+        <section className="rounded-xl border border-border bg-surface p-5">
+          <h4 className="text-sm font-semibold">Optional Virtual Meter</h4>
+          <p className="mt-2 text-xs leading-5 text-muted">Virtual formulas are added after the physical Mapping is confirmed. They default to standalone and never enter official totals unless an admin explicitly promotes the route.</p>
+        </section>
+      </aside>
     </div>
   );
 }

@@ -114,11 +114,35 @@ export type EnergyProjectSetupNodeDto = {
   metadata?: Record<string, unknown>;
 };
 
+export type EnergyMeterCategoryDto = "overall" | "load" | "light" | "aircon" | "other";
+export type EnergyMeterCoverageDto = "whole" | "partial" | "reference";
+export type EnergyMeterRoleDto = "total" | "component" | "standalone";
+export type EnergyAggregationUsageDto = "official" | "excluded";
+
+export type EnergyMeterMappingRowDto = {
+  id: string;
+  source_label: string;
+  scope_id: string;
+  display_name: string;
+  resource: "electricity" | "water";
+  category: EnergyMeterCategoryDto;
+  coverage: EnergyMeterCoverageDto;
+  meter_role: EnergyMeterRoleDto;
+  aggregation_usage: EnergyAggregationUsageDto;
+};
+
+export type EnergyMeterMappingDraftDto = {
+  source_kind: "excel" | "tuya";
+  rows: EnergyMeterMappingRowDto[];
+  confirmed: boolean;
+};
+
 export type EnergyProjectSetupDocumentDto = {
   project: { name: string; timezone: string };
   tier_structure_locked: boolean;
   tiers: EnergyTierDefinitionDto[];
   nodes: EnergyProjectSetupNodeDto[];
+  meter_mapping?: EnergyMeterMappingDraftDto;
 };
 
 export type EnergyProjectSetupDraftDto = {

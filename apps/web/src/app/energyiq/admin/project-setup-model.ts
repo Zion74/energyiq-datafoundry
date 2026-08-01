@@ -1,4 +1,7 @@
 import type {
+  EnergyMeterCategoryDto,
+  EnergyMeterMappingDraftDto,
+  EnergyMeterMappingRowDto,
   EnergyProjectSetupDocumentDto,
   EnergyProjectSetupNodeDto,
   EnergyTierDefinitionDto,
@@ -33,6 +36,19 @@ export const initialTierSelection = (
     parentId = first.id;
   }
   return selected;
+};
+
+export type EnergyAggregationReview = {
+  key: string;
+  scopeId: string;
+  scopeName: string;
+  resource: EnergyMeterMappingRowDto["resource"];
+  category: EnergyMeterCategoryDto;
+  officialTotals: EnergyMeterMappingRowDto[];
+  officialComponents: EnergyMeterMappingRowDto[];
+  excluded: EnergyMeterMappingRowDto[];
+  recommendation: "direct total" | "selected components" | "reference only";
+  conflict: boolean;
 };
 
 export const addParentTier = (
@@ -93,6 +109,98 @@ export const branchNodeCount = (
   document: EnergyProjectSetupDocumentDto,
   nodeId: string,
 ): number => document.nodes.length - removeNodeAndDescendants(document, nodeId).nodes.length;
+
+export const nodePathLabel = (
+  document: EnergyProjectSetupDocumentDto,
+  nodeId: string,
+): string => {
+  const nodesById = new Map(document.nodes.map((node) => [node.id, node]));
+  const names: string[] = [];
+  let current = nodesById.get(nodeId);
+  const visited = new Set<string>();
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    names.unshift(current.name);
+    current = current.parent_id ? nodesById.get(current.parent_id) : undefined;
+  }
+  return names.join(" / ");
+};
+
+export const createInitialMeterMapping = (
+  document: EnergyProjectSetupDocumentDto,
+): EnergyMeterMappingDraftDto => {
+  const lowestOrdinal = Math.min(...document.tiers.map((tier) => tier.ordinal));
+  const lowestTierIds = new Set(
+    document.tiers.filter((tier) => tier.ordinal === lowestOrdinal).map((tier) => tier.id),
+  );
+  const sourceNodes = document.nodes.filter((node) => lowestTierIds.has(node.tier_definition_id));
+  const nameCounts = new Map<string, number>();
+  for (const node of sourceNodes) {
+    const key = node.name.trim().toLocaleLowerCase();
+    nameCounts.set(key, (nameCounts.get(key) ?? 0) + 1);
+  }
+  const rows = sourceNodes
+    .map((node): EnergyMeterMappingRowDto => {
+      const category = inferMeterCategory(node.name);
+      const representsParentTotal = /^total\b/i.test(node.name) && Boolean(node.parent_id);
+      const duplicateName = (nameCounts.get(node.name.trim().toLocaleLowerCase()) ?? 0) > 1;
+      return {
+        id: `mapping-${node.id}`,
+        source_label: duplicateName ? nodePathLabel(document, node.id) : node.name,
+        scope_id: representsParentTotal ? node.parent_id! : node.id,
+        display_name: node.name,
+        resource: "electricity",
+        category,
+        coverage: "whole",
+        meter_role: "total",
+        aggregation_usage: "official",
+      };
+    })
+    .sort((left, right) => left.source_label.localeCompare(right.source_label));
+  return { source_kind: "excel", rows, confirmed: false };
+};
+
+export const inferMeterCategory = (label: string): EnergyMeterCategoryDto => {
+  const value = label.toLocaleLowerCase();
+  if (/air\s*con|aircon|a\/c/.test(value)) return "aircon";
+  if (/light|lighting/.test(value)) return "light";
+  if (/load|socket|power/.test(value)) return "load";
+  return "other";
+};
+
+export const buildAggregationReview = (
+  document: EnergyProjectSetupDocumentDto,
+  mapping: EnergyMeterMappingDraftDto,
+): EnergyAggregationReview[] => {
+  const groups = new Map<string, EnergyMeterMappingRowDto[]>();
+  for (const row of mapping.rows) {
+    const key = `${row.scope_id}:${row.resource}:${row.category}`;
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+  return [...groups.entries()].map(([key, rows]): EnergyAggregationReview => {
+    const officialTotals = rows.filter((row) => row.meter_role === "total" && row.aggregation_usage === "official");
+    const officialComponents = rows.filter((row) => row.meter_role === "component" && row.aggregation_usage === "official");
+    const excluded = rows.filter((row) => row.aggregation_usage === "excluded");
+    return {
+      key,
+      scopeId: rows[0]!.scope_id,
+      scopeName: document.nodes.some((node) => node.id === rows[0]!.scope_id)
+        ? nodePathLabel(document, rows[0]!.scope_id)
+        : "Missing Scope",
+      resource: rows[0]!.resource,
+      category: rows[0]!.category,
+      officialTotals,
+      officialComponents,
+      excluded,
+      recommendation: officialTotals.length === 1
+        ? "direct total"
+        : officialComponents.length > 0
+          ? "selected components"
+          : "reference only",
+      conflict: officialTotals.length > 1,
+    };
+  }).sort((left, right) => left.scopeName.localeCompare(right.scopeName) || left.category.localeCompare(right.category));
+};
 
 export const addNode = (
   document: EnergyProjectSetupDocumentDto,

@@ -26,6 +26,29 @@ export type EnergyIqProjectSetupNode = {
   metadata?: Record<string, unknown>;
 };
 
+export type EnergyIqMeterCategory = "overall" | "load" | "light" | "aircon" | "other";
+export type EnergyIqMeterCoverage = "whole" | "partial" | "reference";
+export type EnergyIqMeterRole = "total" | "component" | "standalone";
+export type EnergyIqAggregationUsage = "official" | "excluded";
+
+export type EnergyIqMeterMappingRow = {
+  id: string;
+  source_label: string;
+  scope_id: string;
+  display_name: string;
+  resource: "electricity" | "water";
+  category: EnergyIqMeterCategory;
+  coverage: EnergyIqMeterCoverage;
+  meter_role: EnergyIqMeterRole;
+  aggregation_usage: EnergyIqAggregationUsage;
+};
+
+export type EnergyIqMeterMappingDraft = {
+  source_kind: "excel" | "tuya";
+  rows: EnergyIqMeterMappingRow[];
+  confirmed: boolean;
+};
+
 export type EnergyIqProjectSetupDocument = {
   project: {
     name: string;
@@ -34,6 +57,7 @@ export type EnergyIqProjectSetupDocument = {
   tier_structure_locked: boolean;
   tiers: EnergyIqTierDefinition[];
   nodes: EnergyIqProjectSetupNode[];
+  meter_mapping?: EnergyIqMeterMappingDraft;
 };
 
 export type EnergyIqProjectSetupDraft = {
@@ -801,6 +825,43 @@ export const validateProjectSetupDocument = (
     }
   }
 
+  if (document.meter_mapping) {
+    const rowIds = new Set<string>();
+    const sourceLabels = new Set<string>();
+    const wholeCoverage = new Map<string, number>();
+    for (const [index, row] of document.meter_mapping.rows.entries()) {
+      if (!row.id || rowIds.has(row.id)) {
+        push("METER_MAPPING_ID_DUPLICATE", "error", "Meter Mapping row IDs must be unique.", `meter_mapping.rows[${index}].id`);
+      }
+      rowIds.add(row.id);
+      const sourceKey = normaliseDisplayName(row.source_label);
+      if (!sourceKey || sourceLabels.has(sourceKey)) {
+        push("SOURCE_LABEL_DUPLICATE", "error", "Each source label can be mapped only once.", `meter_mapping.rows[${index}].source_label`);
+      }
+      sourceLabels.add(sourceKey);
+      if (!nodesById.has(row.scope_id)) {
+        push("METER_SCOPE_NOT_FOUND", "error", "Mapped Scope must already exist in Structure.", `meter_mapping.rows[${index}].scope_id`);
+      }
+      if (row.meter_role === "standalone" && row.aggregation_usage === "official") {
+        push("STANDALONE_METER_OFFICIAL", "error", "A standalone meter cannot enter the official aggregation route.", `meter_mapping.rows[${index}].aggregation_usage`);
+      }
+      if (row.meter_role === "total" && row.aggregation_usage === "official") {
+        const routeKey = `${row.scope_id}:${row.resource}:${row.category}`;
+        wholeCoverage.set(routeKey, (wholeCoverage.get(routeKey) ?? 0) + 1);
+      }
+    }
+    for (const [routeKey, count] of wholeCoverage) {
+      if (count > 1) {
+        push("MULTIPLE_DIRECT_TOTALS", "error", `More than one whole-scope meter is configured for ${routeKey}.`, "meter_mapping.rows");
+      }
+    }
+    if (document.meter_mapping.rows.length === 0) {
+      push("METER_MAPPING_EMPTY", "warning", "No source labels have been mapped yet.", "meter_mapping.rows");
+    } else if (!document.meter_mapping.confirmed) {
+      push("METER_MAPPING_NOT_CONFIRMED", "warning", "Review aggregation routes and confirm Meter Mapping.", "meter_mapping.confirmed");
+    }
+  }
+
   return {
     blocking: issues.some((issue) => issue.severity === "error"),
     issues
@@ -852,9 +913,39 @@ const canonicalizeDocument = (
           ...(tier.description?.trim() ? { description: tier.description.trim() } : {})
         }))
       : [],
-    nodes
+    nodes,
+    ...(document.meter_mapping ? {
+      meter_mapping: {
+        source_kind: document.meter_mapping.source_kind === "tuya" ? "tuya" as const : "excel" as const,
+        confirmed: document.meter_mapping.confirmed === true,
+        rows: Array.isArray(document.meter_mapping.rows)
+          ? document.meter_mapping.rows.map((row) => ({
+              id: String(row.id ?? "").trim(),
+              source_label: normaliseDisplayNameForStorage(String(row.source_label ?? "")),
+              scope_id: String(row.scope_id ?? "").trim(),
+              display_name: normaliseDisplayNameForStorage(String(row.display_name ?? "")),
+              resource: row.resource === "water" ? "water" as const : "electricity" as const,
+              category: normalizeMeterCategory(row.category),
+              coverage: normalizeMeterCoverage(row.coverage),
+              meter_role: normalizeMeterRole(row.meter_role),
+              aggregation_usage: row.aggregation_usage === "official" ? "official" as const : "excluded" as const
+            }))
+          : []
+      }
+    } : {})
   };
 };
+
+const normalizeMeterCategory = (value: unknown): EnergyIqMeterCategory =>
+  value === "overall" || value === "load" || value === "light" || value === "aircon"
+    ? value
+    : "other";
+
+const normalizeMeterCoverage = (value: unknown): EnergyIqMeterCoverage =>
+  value === "whole" || value === "partial" ? value : "reference";
+
+const normalizeMeterRole = (value: unknown): EnergyIqMeterRole =>
+  value === "total" || value === "component" ? value : "standalone";
 
 const ensureColumn = (
   db: DatabaseSync,
