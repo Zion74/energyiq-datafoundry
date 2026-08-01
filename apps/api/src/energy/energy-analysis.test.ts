@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { executeEnergyScopeAnalysis } from "./energy-analysis.js";
-import { ensureEnergyIqBootstrap } from "./energy-bootstrap.js";
+import { ensureEnergyIqBootstrap, PRESCHOOL_WORKSPACE_ID } from "./energy-bootstrap.js";
 import { resolveEnergyQueryContext } from "./energy-query-context.js";
 
 describe("EnergyScopeAnalysis", () => {
@@ -20,7 +20,7 @@ describe("EnergyScopeAnalysis", () => {
       const context = resolveEnergyQueryContext({
         metadataStore: metadata,
         user,
-        workspaceId: "default",
+        workspaceId: PRESCHOOL_WORKSPACE_ID,
         request: {
           projectId: "preschool-demo",
           scopeId: "preschool-project",
@@ -35,7 +35,7 @@ describe("EnergyScopeAnalysis", () => {
         dataGateway: gateway,
         userId: "dev-user",
         context,
-        databasePath: resolve("storage/energy/default/energy.duckdb")
+        databasePath: resolve(`storage/energy/${PRESCHOOL_WORKSPACE_ID}/energy.duckdb`)
       });
 
       expect(portfolio.summary.usageKwh).toBe(24_921.8123);
@@ -57,7 +57,7 @@ describe("EnergyScopeAnalysis", () => {
       const centreContext = resolveEnergyQueryContext({
         metadataStore: metadata,
         user,
-        workspaceId: "default",
+        workspaceId: PRESCHOOL_WORKSPACE_ID,
         request: {
           projectId: "preschool-demo",
           scopeId: "preschool-centre-a",
@@ -72,7 +72,7 @@ describe("EnergyScopeAnalysis", () => {
         dataGateway: gateway,
         userId: "dev-user",
         context: centreContext,
-        databasePath: resolve("storage/energy/default/energy.duckdb")
+        databasePath: resolve(`storage/energy/${PRESCHOOL_WORKSPACE_ID}/energy.duckdb`)
       });
       expect(centre.summary.usageKwh).toBe(843.0985);
       expect(centre.circuits).toHaveLength(9);

@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { ensureEnergyIqBootstrap } from "./energy-bootstrap.js";
+import {
+  ensureEnergyIqBootstrap,
+  PRESCHOOL_WORKSPACE_ID
+} from "./energy-bootstrap.js";
 import {
   resolveEnergyAccessContext,
   resolveEnergyQueryContext,
@@ -24,7 +27,13 @@ describe("EnergyQueryContext", () => {
         requestedWorkspaceId: "default"
       });
       expect(access.role).toBe("admin");
-      expect(access.projects.map((project) => project.status)).toEqual(["published", "published"]);
+      expect(access.projects.map((project) => project.id)).toEqual(["ngee-ann-polytechnic"]);
+      const preschoolAccess = resolveEnergyAccessContext({
+        metadataStore: metadata,
+        user,
+        requestedWorkspaceId: PRESCHOOL_WORKSPACE_ID
+      });
+      expect(preschoolAccess.projects.map((project) => project.id)).toEqual(["preschool-demo"]);
 
       const context = resolveEnergyQueryContext({
         metadataStore: metadata,

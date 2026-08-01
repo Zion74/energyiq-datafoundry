@@ -748,7 +748,7 @@ function overviewAnalysisRequest(
   projectId: string,
   period: (typeof periods)[number],
 ): EnergyQueryContextRequestDto {
-  const scopeId = projectId === "preschool-demo" ? "preschool-project" : "block-test";
+  const scopeId = projectId === "preschool-demo" ? "preschool-project" : "project";
   if (period !== "Custom") {
     return { projectId, scopeId, resource: "electricity", period };
   }

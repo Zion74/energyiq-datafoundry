@@ -45,7 +45,15 @@ export function EnergyIqAccessProvider({ children }: { children: ReactNode }) {
         ? null
         : window.localStorage.getItem(ORGANISATION_STORAGE_KEY));
       if (restoredWorkspaceId) setConfigApiWorkspaceId(restoredWorkspaceId);
-      const next = await configApi.getEnergyAccessContext();
+      let next: EnergyAccessContextDto;
+      try {
+        next = await configApi.getEnergyAccessContext();
+      } catch (reason) {
+        if (!restoredWorkspaceId || !isStaleOrganisationSelection(reason)) throw reason;
+        window.localStorage.removeItem(ORGANISATION_STORAGE_KEY);
+        setConfigApiWorkspaceId(null);
+        next = await configApi.getEnergyAccessContext();
+      }
       if (next.activeWorkspaceId) {
         setConfigApiWorkspaceId(next.activeWorkspaceId);
         try {
@@ -128,4 +136,10 @@ export function useEnergyIqAccess(): EnergyIqAccessValue {
     throw new Error("useEnergyIqAccess must be used inside EnergyIqAccessProvider");
   }
   return value;
+}
+
+function isStaleOrganisationSelection(reason: unknown): boolean {
+  if (!(reason instanceof Error)) return false;
+  return reason.message.includes("WORKSPACE_NOT_FOUND")
+    || reason.message.includes("ENERGYIQ_WORKSPACE_FORBIDDEN");
 }

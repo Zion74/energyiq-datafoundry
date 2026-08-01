@@ -170,6 +170,20 @@ User
 4. 所有后端查询根据登录身份重新解析 Workspace 与 Project，不相信前端传入的 ID；
 5. 保留 Membership 接口，未来再扩展“部分 Project 可见”和 `partner_admin`，首期不实现。
 
+### 已确认的账户开通流程
+
+```text
+Admin 创建 Organisation
+→ Admin 邀请 User 并选择一个或多个 Organisation
+→ User 打开 7 天有效邀请链接
+→ 设置姓名和至少 8 位密码
+→ 自动登录
+→ Organisation selector
+→ 仅加载该 Organisation 的 published Projects
+```
+
+公开注册关闭；邮箱作为 MVP 唯一登录标识。个人 Workspace 继续承载 My Assets，但不会出现在客户 Organisation 选择器中。停用 Organisation 时 user 立即失去访问，admin 仍可进入排查和修复。
+
 ## 7. 两个项目案例的首期映射
 
 ### Ngee Ann Polytechnic
@@ -364,12 +378,13 @@ executeEnergyQuery(context, querySpec): EnergyQueryResult
    - `energyiq_project_access`
 3. `workspace.kind` 支持 `customer`，Membership 支持 `owner/member`；
 4. 本地 `dev-user` 默认是 `admin`；正式环境管理员通过 `ENERGYIQ_ADMIN_EMAILS` 白名单确定；
-5. 建立真实客户 Workspace `default / Ngee Ann FM`，并写入两个样板：
-   - `ngee-ann-polytechnic`：`published`，客户项目选择器可见；
-   - `preschool-demo`：`published`，客户 Project 选择器可见；30 个 Centre、270 个 Circuit 与 May 2026 小时事实已导入；
-6. Ngee Ann 的 Project、Block、Level 6、Level 7 和当前 Explorer 电表节点已写入同一层级存储；
-7. `/energyiq/admin` 已有服务端数据驱动的后台骨架；仅 `admin` 显示入口，API 仍负责最终权限校验；
-8. 客户项目选择器只显示 `published` Project，草稿不会因管理员身份误出现在客户入口。
+5. 两个样板按真实客户边界拆成独立 Organisation：
+   - `default / Ngee Ann FM` → `ngee-ann-polytechnic`；
+   - `preschool-demo-org / Preschool Demo` → `preschool-demo`，含 30 个 Centre、270 个 Circuit 与 May 2026 小时事实；
+6. 两个 Organisation 分别使用 `storage/energy/<workspace_id>/energy.duckdb`，查询文件和服务端 Workspace/Project 校验形成双重隔离；
+7. Ngee Ann 的 Project、Level 6、Level 7 和当前 Explorer 电表节点已写入同一层级存储，旧 `Block Test` 包装已移除；
+8. `/energyiq/admin` 的 Organisations、Users 与 Project 配置入口使用同一 Admin Shell；仅 `admin` 显示入口，API 仍负责最终权限校验；
+9. 顶栏先选择 Organisation，再显示其 `published` Project；Project 选择按 Organisation 独立保存。
 
 当前管理员页面是后台导航和真实状态骨架，不代表 Accounts、数据接入、层级编辑、模板发布已经全部开发完成。
 
@@ -407,7 +422,7 @@ AI Analyst 首次进入时会先解析上下文；正式 Agent Run 还会再次�
 - 对话和临时图表默认个人私有，正式 Project Data 与发布报告为 Workspace 共享；
 - 正式 Excel 数据仅管理员上传，个人文件只进入 My Assets；
 - Tuya 每日同步使用业务 Connector，不伪装成 MCP；
-- 每个 Workspace 先使用一个 Energy DuckDB，通过 `project_id` 隔离项目；
+- 每个 Workspace 使用一个独立 Energy DuckDB；同一 Workspace 内再通过 `project_id` 隔离多个项目；
 - AI 可以理解用户在对话中修改的范围和时间，但后端必须重新解析 `EnergyQueryContext`；
 - Knowledge 使用版本与归档，不直接硬删除已发布内容；
 - 用户不选择模型、数据源、MCP 或 Skill，运行配置由项目预设。

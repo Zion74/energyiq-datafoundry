@@ -3,7 +3,7 @@ title: "EnergyIQ 开发计划：Admin 与模板运行闭环"
 summary: "在 DataFoundry 现有代码上分批完成 Tier、计量映射、Excel 数据、项目模板、复跑和客户页面贯通。"
 doc_type: playbook
 tags: [开发计划, Admin, Tier, Excel, Template Revision, Analysis Run]
-updated_at: "2026-08-01"
+updated_at: "2026-08-02"
 related:
   - "当前共识与新会话入口.md"
   - "领域模型.md"
@@ -13,7 +13,7 @@ status: in_progress
 
 # EnergyIQ 开发计划：Admin 与模板运行闭环
 
-> 状态：**批次 0–2 已完成；真实 Excel Import Batch 已按确认 Mapping 物化为 Raw/Normalized/Interval Fact 与质量事件，并通过重叠导出、幂等和 golden 回归。下一步进入批次 3。**
+> 状态：**批次 0–2 已完成；Access 基础已提前完成 Organisation、Users、邀请登录、Membership、双层选择与两个演示客户的数据隔离。下一步进入批次 3 Metrics/Rules。**
 
 实施证据见：[2026-08-01 Admin 与 Tier 批次 0–1 实施记录](2026-08-01-Admin-Tier-批次0-1实施记录.md)、[Admin Meter Mapping 与虚拟电表实施记录](2026-08-01-Admin-Meter-Mapping与虚拟电表实施记录.md)和 [Admin Excel Import Batch 实施记录](2026-08-01-Admin-Excel-Import-Batch实施记录.md)。
 
@@ -276,7 +276,7 @@ admin creates Project
 
 ### 直接挂接
 
-- Accounts；
+- Accounts（Organisation/User Admin、邀请激活与登录已完成；后续只补生产邮件和运维细节）；
 - Data Sources；
 - Knowledge；
 - Assets；

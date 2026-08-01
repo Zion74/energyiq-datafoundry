@@ -69,7 +69,7 @@ export function clearConfigApiIdentity(): void {
   currentIdentity = null;
 }
 
-export function setConfigApiWorkspaceId(workspaceId: string): void {
+export function setConfigApiWorkspaceId(workspaceId: string | null): void {
   currentWorkspaceId = workspaceId;
 }
 

@@ -5,17 +5,30 @@ import type {
 
 const NGEE_ANN_PROJECT_ID = "ngee-ann-polytechnic";
 const PRESCHOOL_PROJECT_ID = "preschool-demo";
+export const NGEE_ANN_WORKSPACE_ID = "default";
+export const PRESCHOOL_WORKSPACE_ID = "preschool-demo-org";
 
 export const ensureEnergyIqBootstrap = (metadataStore: MetadataStore): void => {
   metadataStore.energyIq.upsertUserRole({ user_id: "dev-user", role: "admin" });
   metadataStore.workspaces.upsert({
-    id: "default",
+    id: NGEE_ANN_WORKSPACE_ID,
     owner_user_id: "dev-user",
     name: "Ngee Ann FM",
     kind: "customer"
   });
   metadataStore.workspaceMemberships.upsert({
-    workspace_id: "default",
+    workspace_id: NGEE_ANN_WORKSPACE_ID,
+    user_id: "dev-user",
+    role: "owner"
+  });
+  metadataStore.workspaces.upsert({
+    id: PRESCHOOL_WORKSPACE_ID,
+    owner_user_id: "dev-user",
+    name: "Preschool Demo",
+    kind: "customer"
+  });
+  metadataStore.workspaceMemberships.upsert({
+    workspace_id: PRESCHOOL_WORKSPACE_ID,
     user_id: "dev-user",
     role: "owner"
   });
@@ -23,7 +36,7 @@ export const ensureEnergyIqBootstrap = (metadataStore: MetadataStore): void => {
   metadataStore.energyIq.projectSetup.bootstrapPublished({
     project: {
       id: NGEE_ANN_PROJECT_ID,
-      workspace_id: "default",
+      workspace_id: NGEE_ANN_WORKSPACE_ID,
       name: "Ngee Ann Polytechnic",
       timezone: "Asia/Singapore",
       hierarchy_revision_id: "ngee-ann-hierarchy-v2",
@@ -37,6 +50,7 @@ export const ensureEnergyIqBootstrap = (metadataStore: MetadataStore): void => {
     document: buildNgeeAnnSetup(),
     published_by: "dev-user"
   });
+  ensureBootstrapProjectWorkspace(metadataStore, NGEE_ANN_PROJECT_ID, NGEE_ANN_WORKSPACE_ID);
   metadataStore.energyIq.upsertProjectAccess({
     project_id: NGEE_ANN_PROJECT_ID,
     user_id: "dev-user",
@@ -46,7 +60,7 @@ export const ensureEnergyIqBootstrap = (metadataStore: MetadataStore): void => {
   metadataStore.energyIq.projectSetup.bootstrapPublished({
     project: {
       id: PRESCHOOL_PROJECT_ID,
-      workspace_id: "default",
+      workspace_id: PRESCHOOL_WORKSPACE_ID,
       name: "Preschool Portfolio",
       timezone: "Asia/Singapore",
       hierarchy_revision_id: "preschool-hierarchy-v4",
@@ -60,10 +74,24 @@ export const ensureEnergyIqBootstrap = (metadataStore: MetadataStore): void => {
     document: buildPreschoolSetup(),
     published_by: "dev-user"
   });
+  ensureBootstrapProjectWorkspace(metadataStore, PRESCHOOL_PROJECT_ID, PRESCHOOL_WORKSPACE_ID);
   metadataStore.energyIq.upsertProjectAccess({
     project_id: PRESCHOOL_PROJECT_ID,
     user_id: "dev-user",
     role: "editor"
+  });
+};
+
+const ensureBootstrapProjectWorkspace = (
+  metadataStore: MetadataStore,
+  projectId: string,
+  workspaceId: string
+): void => {
+  const project = metadataStore.energyIq.getProject(projectId);
+  if (project.workspace_id === workspaceId) return;
+  metadataStore.energyIq.upsertProject({
+    ...project,
+    workspace_id: workspaceId
   });
 };
 

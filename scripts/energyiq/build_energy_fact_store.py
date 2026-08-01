@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import re
+import shutil
 from dataclasses import dataclass
 from datetime import UTC
 from pathlib import Path
@@ -23,7 +24,8 @@ import pandas as pd
 
 NGEE_ANN_PROJECT_ID = "ngee-ann-polytechnic"
 PRESCHOOL_PROJECT_ID = "preschool-demo"
-WORKSPACE_ID = "default"
+NGEE_ANN_WORKSPACE_ID = "default"
+PRESCHOOL_WORKSPACE_ID = "preschool-demo-org"
 RESOURCE = "electricity"
 EXPECTED_INTERVAL_MINUTES = 15
 SINGAPORE_TIMEZONE = "Asia/Singapore"
@@ -53,6 +55,12 @@ def parse_args() -> argparse.Namespace:
         "--preschool-input",
         type=Path,
         help="Optional Preschool May 2026 workbook to add to the same fact store.",
+    )
+    parser.add_argument(
+        "--preschool-output",
+        type=Path,
+        default=Path("storage/energy/preschool-demo-org/energy.duckdb"),
+        help="Workspace-isolated Preschool DuckDB file to replace.",
     )
     return parser.parse_args()
 
@@ -119,7 +127,7 @@ def read_source(source: SourceFile) -> pd.DataFrame:
     frame["source_sha256"] = source.sha256
     frame["source_row_number"] = range(2, len(frame) + 2)
     frame["source_coverage_end"] = frame["event_time"].max()
-    frame["workspace_id"] = WORKSPACE_ID
+    frame["workspace_id"] = NGEE_ANN_WORKSPACE_ID
     frame["project_id"] = NGEE_ANN_PROJECT_ID
     frame["resource"] = RESOURCE
     return frame
@@ -374,7 +382,7 @@ def build_preschool_facts(
         & (long["local_hour"] >= opening_hour)
         & (long["local_hour"] < closing_hour)
     )
-    long["workspace_id"] = WORKSPACE_ID
+    long["workspace_id"] = PRESCHOOL_WORKSPACE_ID
     long["project_id"] = PRESCHOOL_PROJECT_ID
     long["resource"] = RESOURCE
     long["parent_node_id"] = (
@@ -430,7 +438,7 @@ def build_preschool_facts(
     ]
     raw_usage = long[raw_columns].copy()
     summary = {
-        "workspace_id": WORKSPACE_ID,
+        "workspace_id": PRESCHOOL_WORKSPACE_ID,
         "project_id": PRESCHOOL_PROJECT_ID,
         "source_files": [{"path": str(source.path), "sha256": source.sha256}],
         "source_rows": int(len(energy)),
@@ -620,7 +628,7 @@ def write_fact_store(
         )
         ngee_ann_summary = {
             "snapshot_id": snapshot_id,
-            "workspace_id": WORKSPACE_ID,
+            "workspace_id": NGEE_ANN_WORKSPACE_ID,
             "project_id": NGEE_ANN_PROJECT_ID,
             "source_files": [
                 {"path": str(source.path), "sha256": source.sha256}
@@ -678,6 +686,44 @@ def write_fact_store(
     }
 
 
+def isolate_workspace_store(source: Path, output: Path, workspace_id: str) -> int:
+    """Copy and prune the staged store so one file contains one Organisation."""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_suffix(f"{output.suffix}.tmp")
+    temporary.unlink(missing_ok=True)
+    Path(f"{temporary}.wal").unlink(missing_ok=True)
+    shutil.copy2(source, temporary)
+    connection = duckdb.connect(str(temporary))
+    try:
+        for table in (
+            "raw_meter_readings",
+            "normalized_meter_readings",
+            "energy_interval_facts",
+            "raw_interval_usage",
+        ):
+            connection.execute(
+                f"DELETE FROM {table} WHERE workspace_id <> ?",
+                [workspace_id],
+            )
+        connection.execute(
+            """
+            DELETE FROM energy_import_batches
+            WHERE json_extract_string(manifest_json, '$.workspace_id') <> ?
+            """,
+            [workspace_id],
+        )
+        fact_rows = int(
+            connection.execute("SELECT COUNT(*) FROM energy_interval_facts").fetchone()[0]
+        )
+        connection.execute("CHECKPOINT")
+    finally:
+        connection.close()
+    output.unlink(missing_ok=True)
+    Path(f"{output}.wal").unlink(missing_ok=True)
+    temporary.replace(output)
+    return fact_rows
+
+
 def main() -> None:
     args = parse_args()
     sources = discover_sources(args.input_dir)
@@ -715,6 +761,27 @@ def main() -> None:
         preschool_intervals=preschool_intervals,
         preschool_summary=preschool_summary,
     )
+    if preschool_source is not None:
+        preschool_rows = isolate_workspace_store(
+            args.output,
+            args.preschool_output,
+            PRESCHOOL_WORKSPACE_ID,
+        )
+        ngee_ann_rows = isolate_workspace_store(
+            args.output,
+            args.output,
+            NGEE_ANN_WORKSPACE_ID,
+        )
+        summary["workspace_outputs"] = {
+            NGEE_ANN_WORKSPACE_ID: {
+                "output": str(args.output),
+                "fact_rows": ngee_ann_rows,
+            },
+            PRESCHOOL_WORKSPACE_ID: {
+                "output": str(args.preschool_output),
+                "fact_rows": preschool_rows,
+            },
+        }
     print(json.dumps(summary, indent=2))
 
 
