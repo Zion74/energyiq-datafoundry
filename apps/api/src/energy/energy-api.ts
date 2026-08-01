@@ -1,0 +1,346 @@
+import { createErrorResult, createSuccessResult, type AppErrorCode } from "@datafoundry/contracts";
+import type { EnergyIqProjectSetupDocument } from "@datafoundry/metadata";
+import { randomUUID } from "node:crypto";
+import type { IncomingMessage } from "node:http";
+
+import type { ConfigApiContext, ConfigApiResponse } from "../routes/types.js";
+import { executeEnergyScopeAnalysis } from "./energy-analysis.js";
+import {
+  resolveEnergyAccessContext,
+  resolveEnergyQueryContext,
+  type EnergyPeriod,
+  type EnergyQueryContextRequest
+} from "./energy-query-context.js";
+
+export const handleEnergyApiRequest = async (
+  request: IncomingMessage,
+  segments: string[],
+  context: Required<ConfigApiContext>
+): Promise<ConfigApiResponse> => {
+  try {
+    const user = context.metadataStore.users.getById({ user_id: context.userId });
+    if (segments[0] === "access-context" && request.method === "GET") {
+      return {
+        status: 200,
+        body: createSuccessResult(resolveEnergyAccessContext({
+          metadataStore: context.metadataStore,
+          user,
+          requestedWorkspaceId: context.workspaceId
+        }))
+      };
+    }
+    if (segments[0] === "projects" && segments.length === 1 && request.method === "POST") {
+      const access = requireEnergyAdmin(context, user);
+      const body = requireRecord(await readJsonBody(request));
+      const name = requireNonEmptyString(body.name, "ENERGYIQ_PROJECT_NAME_REQUIRED");
+      const timezone = optionalString(body.timezone) ?? "Asia/Singapore";
+      const projectId = optionalString(body.id) ?? `energy-project-${randomUUID().slice(0, 8)}`;
+      const project = context.metadataStore.energyIq.upsertProject({
+        id: projectId,
+        workspace_id: access.activeWorkspaceId,
+        name,
+        status: "draft",
+        timezone,
+        root_scope_id: `${projectId}-project`
+      });
+      context.metadataStore.energyIq.upsertProjectAccess({
+        project_id: projectId,
+        user_id: user.id,
+        role: "editor"
+      });
+      const draft = context.metadataStore.energyIq.projectSetup.getDraft({
+        project_id: projectId,
+        user_id: user.id
+      });
+      return {
+        status: 201,
+        body: createSuccessResult({ project, draft })
+      };
+    }
+    if (segments[0] === "projects" && segments[2] === "setup") {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      requireEnergyAdminProject(context, user, projectId);
+      if (segments.length === 3 && request.method === "GET") {
+        const draft = context.metadataStore.energyIq.projectSetup.getDraft({
+          project_id: projectId,
+          user_id: user.id
+        });
+        return {
+          status: 200,
+          body: createSuccessResult({
+            project: context.metadataStore.energyIq.getProject(projectId),
+            draft,
+            validation: context.metadataStore.energyIq.projectSetup.validateDraft(projectId),
+            published: {
+              tiers: context.metadataStore.energyIq.listTierDefinitions(projectId),
+              nodes: context.metadataStore.energyIq.listProjectNodes(projectId),
+              revisions: context.metadataStore.energyIq.projectSetup.listHierarchyRevisions(projectId)
+            }
+          })
+        };
+      }
+      if (segments[3] === "draft" && request.method === "PUT") {
+        const body = requireRecord(await readJsonBody(request));
+        const draft = context.metadataStore.energyIq.projectSetup.saveDraft({
+          project_id: projectId,
+          expected_revision: requireInteger(body.expectedRevision, "ENERGYIQ_SETUP_REVISION_REQUIRED"),
+          user_id: user.id,
+          document: parseProjectSetupDocument(body.document)
+        });
+        return {
+          status: 200,
+          body: createSuccessResult({
+            draft,
+            validation: context.metadataStore.energyIq.projectSetup.validateDraft(projectId)
+          })
+        };
+      }
+      if (segments[3] === "validate" && request.method === "POST") {
+        return {
+          status: 200,
+          body: createSuccessResult(
+            context.metadataStore.energyIq.projectSetup.validateDraft(projectId)
+          )
+        };
+      }
+      if (segments[3] === "publish" && request.method === "POST") {
+        const body = requireRecord(await readJsonBody(request));
+        const published = context.metadataStore.energyIq.projectSetup.publishDraft({
+          project_id: projectId,
+          expected_revision: requireInteger(body.expectedRevision, "ENERGYIQ_SETUP_REVISION_REQUIRED"),
+          user_id: user.id
+        });
+        return {
+          status: 200,
+          body: createSuccessResult({
+            ...published,
+            project: context.metadataStore.energyIq.getProject(projectId)
+          })
+        };
+      }
+    }
+    if (segments[0] === "query-context" && segments[1] === "resolve" && request.method === "POST") {
+      const body = await readJsonBody(request);
+      return {
+        status: 200,
+        body: createSuccessResult(resolveEnergyQueryContext({
+          metadataStore: context.metadataStore,
+          user,
+          workspaceId: context.workspaceId,
+          request: parseQueryContextRequest(body)
+        }))
+      };
+    }
+    if (segments[0] === "analysis" && segments[1] === "execute" && request.method === "POST") {
+      const body = await readJsonBody(request);
+      const energyContext = resolveEnergyQueryContext({
+        metadataStore: context.metadataStore,
+        user,
+        workspaceId: context.workspaceId,
+        request: parseQueryContextRequest(body)
+      });
+      return {
+        status: 200,
+        body: createSuccessResult(await executeEnergyScopeAnalysis({
+          metadataStore: context.metadataStore,
+          dataGateway: context.dataGateway,
+          userId: context.userId,
+          context: energyContext
+        }))
+      };
+    }
+    if (segments[0] === "projects" && segments[2] === "hierarchy" && request.method === "GET") {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      resolveEnergyQueryContext({
+        metadataStore: context.metadataStore,
+        user,
+        workspaceId: context.workspaceId,
+        request: { projectId, scopeId: "project", period: "Yesterday" }
+      });
+      return {
+        status: 200,
+        body: createSuccessResult({
+          project: context.metadataStore.energyIq.getProject(projectId),
+          tiers: context.metadataStore.energyIq.listTierDefinitions(projectId),
+          nodes: context.metadataStore.energyIq.listProjectNodes(projectId)
+        })
+      };
+    }
+    return {
+      status: 404,
+      body: createErrorResult("RESOURCE_NOT_FOUND", "EnergyIQ endpoint not found.")
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const forbidden = message.includes("FORBIDDEN") || message.includes("ADMIN_REQUIRED");
+    const conflict = message.includes("CONFLICT");
+    const invalid = message.includes("INVALID") || message.includes("REQUIRED");
+    const code: AppErrorCode = forbidden
+      ? "FORBIDDEN"
+      : conflict
+        ? "CONFLICT"
+        : invalid
+          ? "BAD_REQUEST"
+          : "INTERNAL_ERROR";
+    return {
+      status: forbidden ? 403 : conflict ? 409 : invalid ? 400 : 500,
+      body: createErrorResult(code, message)
+    };
+  }
+};
+
+const requireEnergyAdmin = (
+  context: Required<ConfigApiContext>,
+  user: ReturnType<Required<ConfigApiContext>["metadataStore"]["users"]["getById"]>
+) => {
+  const access = resolveEnergyAccessContext({
+    metadataStore: context.metadataStore,
+    user,
+    requestedWorkspaceId: context.workspaceId
+  });
+  if (access.role !== "admin") {
+    throw new Error("ENERGYIQ_ADMIN_REQUIRED");
+  }
+  return access;
+};
+
+const requireEnergyAdminProject = (
+  context: Required<ConfigApiContext>,
+  user: ReturnType<Required<ConfigApiContext>["metadataStore"]["users"]["getById"]>,
+  projectId: string
+): void => {
+  const access = requireEnergyAdmin(context, user);
+  const project = context.metadataStore.energyIq.getProject(projectId);
+  if (project.workspace_id !== access.activeWorkspaceId) {
+    throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
+  }
+};
+
+const readJsonBody = async (request: IncomingMessage): Promise<unknown> => {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length;
+    if (size > 1024 * 1024) {
+      throw new Error("ENERGYIQ_INVALID_BODY");
+    }
+    chunks.push(buffer);
+  }
+  if (chunks.length === 0) {
+    return {};
+  }
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+  } catch {
+    throw new Error("ENERGYIQ_INVALID_BODY");
+  }
+};
+
+const parseQueryContextRequest = (value: unknown): EnergyQueryContextRequest => {
+  if (!isRecord(value) || typeof value.projectId !== "string") {
+    throw new Error("ENERGYIQ_PROJECT_REQUIRED");
+  }
+  const resource = value.resource === "water" ? "water" : "electricity";
+  const allowedPeriods = new Set(["Yesterday", "Last 7 days", "Last 30 days", "Custom"]);
+  const period: EnergyPeriod = typeof value.period === "string" && allowedPeriods.has(value.period)
+    ? value.period as EnergyPeriod
+    : "Last 30 days";
+  return {
+    projectId: value.projectId,
+    ...(typeof value.scopeId === "string" ? { scopeId: value.scopeId } : {}),
+    resource,
+    period,
+    ...(typeof value.from === "string" ? { from: value.from } : {}),
+    ...(typeof value.to === "string" ? { to: value.to } : {})
+  };
+};
+
+const parseProjectSetupDocument = (value: unknown): EnergyIqProjectSetupDocument => {
+  const document = requireRecord(value, "ENERGYIQ_SETUP_DOCUMENT_INVALID");
+  const project = requireRecord(document.project, "ENERGYIQ_SETUP_PROJECT_INVALID");
+  if (!Array.isArray(document.tiers) || !Array.isArray(document.nodes)) {
+    throw new Error("ENERGYIQ_SETUP_DOCUMENT_INVALID");
+  }
+  return {
+    project: {
+      name: requireNonEmptyString(project.name, "ENERGYIQ_PROJECT_NAME_REQUIRED"),
+      timezone: requireNonEmptyString(project.timezone, "ENERGYIQ_PROJECT_TIMEZONE_REQUIRED")
+    },
+    tier_structure_locked: typeof document.tier_structure_locked === "boolean"
+      ? document.tier_structure_locked
+      : document.nodes.length > 0,
+    tiers: document.tiers.map((value, index) => {
+      const tier = requireRecord(value, `ENERGYIQ_TIER_INVALID:${index}`);
+      const description = optionalString(tier.description);
+      return {
+        id: requireNonEmptyString(tier.id, `ENERGYIQ_TIER_ID_REQUIRED:${index}`),
+        ordinal: requireInteger(tier.ordinal, `ENERGYIQ_TIER_ORDINAL_REQUIRED:${index}`),
+        alias: requireNonEmptyString(tier.alias, `ENERGYIQ_TIER_ALIAS_REQUIRED:${index}`),
+        ...(description ? { description } : {})
+      };
+    }),
+    nodes: document.nodes.map((value, index) => {
+      const node = requireRecord(value, `ENERGYIQ_NODE_INVALID:${index}`);
+      const parentId = optionalString(node.parent_id);
+      const areaSqm = optionalNumber(node.area_sqm);
+      const occupantCount = optionalNumber(node.occupant_count);
+      const effectiveFrom = optionalString(node.effective_from);
+      const effectiveTo = optionalString(node.effective_to);
+      const independentReason = optionalString(node.independent_reason);
+      const metadata = node.metadata === undefined
+        ? undefined
+        : requireRecord(node.metadata, `ENERGYIQ_NODE_METADATA_INVALID:${index}`);
+      return {
+        id: requireNonEmptyString(node.id, `ENERGYIQ_NODE_ID_REQUIRED:${index}`),
+        tier_definition_id: requireNonEmptyString(
+          node.tier_definition_id,
+          `ENERGYIQ_NODE_TIER_REQUIRED:${index}`
+        ),
+        ...(parentId ? { parent_id: parentId } : {}),
+        name: requireNonEmptyString(node.name, `ENERGYIQ_NODE_NAME_REQUIRED:${index}`),
+        sort_order: requireInteger(node.sort_order, `ENERGYIQ_NODE_SORT_ORDER_REQUIRED:${index}`),
+        ...(areaSqm === undefined ? {} : { area_sqm: areaSqm }),
+        ...(occupantCount === undefined ? {} : { occupant_count: occupantCount }),
+        metadata_status: node.metadata_status === "confirmed" ? "confirmed" : "provisional",
+        ...(effectiveFrom ? { effective_from: effectiveFrom } : {}),
+        ...(effectiveTo ? { effective_to: effectiveTo } : {}),
+        ...(independentReason ? { independent_reason: independentReason } : {}),
+        ...(metadata ? { metadata } : {})
+      };
+    })
+  };
+};
+
+const requireRecord = (
+  value: unknown,
+  message = "ENERGYIQ_INVALID_BODY"
+): Record<string, unknown> => {
+  if (!isRecord(value)) {
+    throw new Error(message);
+  }
+  return value;
+};
+
+const requireNonEmptyString = (value: unknown, message: string): string => {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(message);
+  }
+  return value.trim();
+};
+
+const optionalString = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim() ? value.trim() : undefined;
+
+const optionalNumber = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) ? value : undefined;
+
+const requireInteger = (value: unknown, message: string): number => {
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw new Error(message);
+  }
+  return value;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);

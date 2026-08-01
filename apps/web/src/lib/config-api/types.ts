@@ -43,6 +43,7 @@ export type DevIdentityUser = {
   id: string;
   email?: string;
   displayName?: string;
+  avatarUrl?: string;
   devToken?: string;
 };
 
@@ -54,6 +55,245 @@ export type IdentityWorkspace = {
 export type MeResponseDto = {
   user: DevIdentityUser;
   workspace: IdentityWorkspace;
+};
+
+export type EnergyRole = "user" | "admin";
+
+export type EnergyWorkspaceDto = {
+  id: string;
+  name: string;
+  kind: "personal" | "customer";
+};
+
+export type EnergyProjectDto = {
+  id: string;
+  workspaceId: string;
+  name: string;
+  status: "draft" | "published" | "archived";
+  timezone: string;
+};
+
+export type EnergyDeliveryStage = "draft" | "configured" | "published";
+
+export type EnergyProjectRecordDto = {
+  id: string;
+  workspace_id: string;
+  name: string;
+  status: "draft" | "published" | "archived";
+  timezone: string;
+  hierarchy_revision_id: string;
+  meter_formula_revision_id: string;
+  data_snapshot_id: string;
+  metric_version: string;
+  business_calendar_version: string;
+  tariff_schedule_version: string;
+  delivery_stage: EnergyDeliveryStage;
+  root_scope_id: string;
+  has_unpublished_changes: boolean;
+};
+
+export type EnergyTierDefinitionDto = {
+  id: string;
+  ordinal: number;
+  alias: string;
+  description?: string;
+};
+
+export type EnergyProjectSetupNodeDto = {
+  id: string;
+  tier_definition_id: string;
+  parent_id?: string;
+  name: string;
+  sort_order: number;
+  area_sqm?: number;
+  occupant_count?: number;
+  metadata_status: "provisional" | "confirmed";
+  effective_from?: string;
+  effective_to?: string;
+  independent_reason?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type EnergyProjectSetupDocumentDto = {
+  project: { name: string; timezone: string };
+  tier_structure_locked: boolean;
+  tiers: EnergyTierDefinitionDto[];
+  nodes: EnergyProjectSetupNodeDto[];
+};
+
+export type EnergyProjectSetupDraftDto = {
+  project_id: string;
+  revision: number;
+  based_on_hierarchy_revision_id?: string;
+  document: EnergyProjectSetupDocumentDto;
+  updated_by: string;
+  updated_at: string;
+};
+
+export type EnergyProjectSetupIssueDto = {
+  code: string;
+  severity: "error" | "warning";
+  message: string;
+  path?: string;
+};
+
+export type EnergyProjectSetupValidationDto = {
+  blocking: boolean;
+  issues: EnergyProjectSetupIssueDto[];
+};
+
+export type EnergyHierarchyRevisionDto = {
+  id: string;
+  project_id: string;
+  sequence: number;
+  published_by: string;
+  published_at: string;
+};
+
+export type EnergyProjectSetupDto = {
+  project: EnergyProjectRecordDto;
+  draft: EnergyProjectSetupDraftDto;
+  validation: EnergyProjectSetupValidationDto;
+  published: {
+    tiers: EnergyTierDefinitionDto[];
+    nodes: EnergyProjectNodeDto[];
+    revisions: EnergyHierarchyRevisionDto[];
+  };
+};
+
+export type EnergyAccessContextDto = {
+  role: EnergyRole;
+  user: {
+    id: string;
+    email?: string;
+    displayName?: string;
+  };
+  activeWorkspaceId: string;
+  workspaces: EnergyWorkspaceDto[];
+  projects: EnergyProjectDto[];
+};
+
+export type EnergyQueryContextRequestDto = {
+  projectId: string;
+  scopeId?: string;
+  resource?: "electricity" | "water";
+  period?: "Yesterday" | "Last 7 days" | "Last 30 days" | "Custom";
+  from?: string;
+  to?: string;
+};
+
+export type EnergyQueryContextDto = {
+  userId: string;
+  workspaceId: string;
+  projectId: string;
+  projectName: string;
+  scopeId: string;
+  scopeName: string;
+  scopeType: string;
+  resource: "electricity" | "water";
+  timezone: string;
+  from: string;
+  to: string;
+  endExclusive: true;
+  period: EnergyQueryContextRequestDto["period"];
+  hierarchyRevisionId: string;
+  meterFormulaRevisionId: string;
+  dataSnapshotId: string;
+  metricVersion: string;
+  businessCalendarVersion: string;
+  tariffScheduleVersion: string;
+  resolvedAt: string;
+};
+
+export type EnergyScopeAnalysisDto = {
+  context: EnergyQueryContextDto;
+  summary: {
+    usageKwh: number;
+    costSgd: number;
+    peakKw: number;
+    nonOperatingKwh: number;
+    nonOperatingSharePct: number;
+    areaSqm?: number;
+    occupantCount?: number;
+    kwhPerSqm?: number;
+    kwhPerPerson?: number;
+    validIntervalCount: number;
+    qualityEventCount: number;
+  };
+  hourlyProfile: Array<{
+    hour: number;
+    averageKw: number;
+    peakKw: number;
+  }>;
+  childScopes: Array<{
+    nodeId: string;
+    name: string;
+    nodeType: string;
+    usageKwh: number;
+    sharePct: number;
+    areaSqm?: number;
+    occupantCount?: number;
+    kwhPerSqm?: number;
+    kwhPerPerson?: number;
+    topCircuitName?: string;
+    topCircuitUsageKwh?: number;
+  }>;
+  circuits: Array<{
+    meterNodeId: string;
+    name: string;
+    appliance: string;
+    category: string;
+    meterRole: string;
+    usageKwh: number;
+    sharePct: number;
+    nonOperatingKwh: number;
+    peakKw: number;
+    qualityEventCount: number;
+  }>;
+  attention: Array<{
+    code: string;
+    severity: "info" | "warning";
+    title: string;
+    evidence: string;
+    suggestedAction: string;
+  }>;
+  provenance: {
+    dataSnapshotId: string;
+    hierarchyRevisionId: string;
+    meterFormulaRevisionId: string;
+    metricVersion: string;
+    aggregationRule: "designated_total" | "component" | "submeter" | "none";
+    sourceView: string;
+    queryIds: ["scope_summary_v1", "hourly_profile_v1", "meter_breakdown_v1"];
+  };
+};
+
+export type EnergyProjectNodeDto = {
+  id: string;
+  project_id: string;
+  parent_id?: string;
+  name: string;
+  node_type: string;
+  tier_definition_id?: string;
+  hierarchy_revision_id?: string;
+  sort_order: number;
+  area_sqm?: number;
+  occupant_count?: number;
+  metadata_json?: string;
+  metadata_status: "provisional" | "confirmed";
+  effective_from?: string;
+  effective_to?: string;
+  independent_reason?: string;
+};
+
+export type EnergyProjectHierarchyDto = {
+  project: {
+    id: string;
+    name: string;
+    hierarchy_revision_id: string;
+  };
+  tiers: EnergyTierDefinitionDto[];
+  nodes: EnergyProjectNodeDto[];
 };
 
 export type DevIdentitiesResponseDto = {
