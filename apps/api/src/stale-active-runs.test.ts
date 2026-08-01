@@ -11,8 +11,11 @@ type FakeRun = {
   user_id: string;
   session_id: string;
   status: "queued" | "running" | "suspended" | "canceled" | "completed" | "failed";
+  started_at: string;
   error_message?: string | null;
 };
+
+const startedAt = (ageMs: number): string => new Date(Date.now() - ageMs).toISOString();
 
 function createFakeStore(initial: FakeRun[]) {
   const runs = [...initial];
@@ -66,6 +69,7 @@ describe("resolveLiveSessionActiveRun", () => {
         user_id: "u1",
         session_id: "s1",
         status: "running",
+        started_at: startedAt(61_000),
       },
     ]);
     const registry = new RunCancelRegistry();
@@ -81,6 +85,27 @@ describe("resolveLiveSessionActiveRun", () => {
     expect(store.runs.findActiveBySession({ user_id: "u1", session_id: "s1" })).toBeUndefined();
   });
 
+  it("keeps a newly created run while its cancel handle is still registering", () => {
+    const store = createFakeStore([
+      {
+        id: "run-registering",
+        user_id: "u1",
+        session_id: "s1",
+        status: "running",
+        started_at: startedAt(5_000),
+      },
+    ]);
+
+    expect(
+      resolveLiveSessionActiveRun({
+        metadataStore: store as never,
+        runCancelRegistry: new RunCancelRegistry(),
+        userId: "u1",
+        sessionId: "s1",
+      })?.id,
+    ).toBe("run-registering");
+  });
+
   it("keeps live running runs and suspended HITL locks", () => {
     const store = createFakeStore([
       {
@@ -88,12 +113,14 @@ describe("resolveLiveSessionActiveRun", () => {
         user_id: "u1",
         session_id: "s1",
         status: "running",
+        started_at: startedAt(5_000),
       },
       {
         id: "run-hitl",
         user_id: "u1",
         session_id: "s2",
         status: "suspended",
+        started_at: startedAt(5_000),
       },
     ]);
     const registry = new RunCancelRegistry();
@@ -132,18 +159,21 @@ describe("reclaimOrphanedQueuedAndRunningRuns", () => {
         user_id: "u1",
         session_id: "s1",
         status: "queued",
+        started_at: startedAt(61_000),
       },
       {
         id: "run-b",
         user_id: "u1",
         session_id: "s2",
         status: "running",
+        started_at: startedAt(5_000),
       },
       {
         id: "run-c",
         user_id: "u1",
         session_id: "s3",
         status: "suspended",
+        started_at: startedAt(5_000),
       },
     ]);
     const registry = new RunCancelRegistry();
