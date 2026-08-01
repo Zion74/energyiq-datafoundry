@@ -27,6 +27,7 @@ import type { InteractionResume } from "./interaction-runtime-adapter.js";
 import { createPolicyMcpTools } from "./policy-mcp-tools.js";
 import type { McpRuntime, ResolvedRunConfig } from "./run-config-resolver.js";
 import type { EffectiveRunConfig } from "./run-input.js";
+import type { EnergyQueryContext } from "./energy/energy-query-context.js";
 
 export type RunAgentAssembly = {
   destroyWorkspace(): Promise<void>;
@@ -54,6 +55,7 @@ type CreateRunAgentContextInput = {
   userId: string;
   userInput: string;
   workspaceId: string;
+  energyQueryContext?: EnergyQueryContext;
 };
 
 type CreateRunAgentAssemblyInput = {
@@ -129,7 +131,10 @@ export const createRunAgentContext = (input: CreateRunAgentContextInput): AgentR
     ...(input.effectiveRunConfig.evidenceRefs.length > 0
       ? { evidence_refs: input.effectiveRunConfig.evidenceRefs }
       : {}),
-    model_name: input.modelProvider.model_name
+    model_name: input.modelProvider.model_name,
+    ...(input.energyQueryContext
+      ? { energy_query_context: input.energyQueryContext }
+      : {})
   });
 
 /** Assemble the Mastra-backed AG-UI agent and its run-scoped execution metadata. */

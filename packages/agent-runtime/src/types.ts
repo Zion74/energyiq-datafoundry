@@ -29,6 +29,8 @@ export type AgentRunContext = {
   pinned_paths?: string[];
   /** User-selected evidence references for this run. Concrete content is resolved server-side. */
   evidence_refs?: EvidenceRef[];
+  /** Server-authoritative EnergyIQ project, scope, time range and version pins. */
+  energy_query_context?: unknown;
 };
 
 export type AgentRunContextInput = AgentRunContext;

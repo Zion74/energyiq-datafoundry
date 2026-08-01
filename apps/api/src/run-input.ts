@@ -4,6 +4,7 @@ import type { ConfigResourceKind, MetadataStore } from "@datafoundry/metadata";
 import type { SkillMode, SkillPolicyConfig } from "@datafoundry/skills";
 
 import { preferConnectedResourceId } from "./model-profile-connection-status.js";
+import type { EnergyQueryContextRequest } from "./energy/energy-query-context.js";
 
 export type RunConfigDefaults = {
   activeDatasourceId?: string;
@@ -344,6 +345,47 @@ export const extractLastUserText = (input: RunAgentInput): string | undefined =>
     .map((part) => part.text)
     .join("\n")
     .trim();
+};
+
+/** Extract an untrusted EnergyIQ context request. It must be resolved again server-side. */
+export const extractEnergyQueryContextRequest = (
+  input: RunAgentInput
+): EnergyQueryContextRequest | undefined => {
+  const forwardedProps = isRecord(input.forwardedProps) ? input.forwardedProps : {};
+  const forwarded = recordFromUnknown(
+    forwardedProps.externalContext ?? forwardedProps.energyQueryContext
+  );
+  const contextValue = input.context.find((item) =>
+    item.description ===
+      "Trusted host context for the current EnergyIQ project, selected scope, resource and reporting period"
+  )?.value;
+  const candidate = forwarded ?? recordFromUnknown(contextValue);
+  if (!candidate || candidate.source !== "energyiq") {
+    return undefined;
+  }
+  const projectId = stringFromRecord(candidate, "projectId");
+  if (!projectId) {
+    throw new Error("ENERGYIQ_PROJECT_REQUIRED");
+  }
+  const resource = candidate.resource === "water" ? "water" : "electricity";
+  const periodValue = stringFromRecord(candidate, "period");
+  const period = periodValue === "Yesterday"
+    || periodValue === "Last 7 days"
+    || periodValue === "Last 30 days"
+    || periodValue === "Custom"
+    ? periodValue
+    : "Last 30 days";
+  const scopeId = stringFromRecord(candidate, "scopeId");
+  const from = stringFromRecord(candidate, "from");
+  const to = stringFromRecord(candidate, "to");
+  return {
+    projectId,
+    ...(scopeId ? { scopeId } : {}),
+    resource,
+    period,
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {})
+  };
 };
 
 const stringFromRecord = (record: Record<string, unknown>, key: string): string | undefined => {

@@ -15,7 +15,7 @@ import {
 } from "@datafoundry/agent-runtime";
 import { LocalArtifactService, SessionOutputService } from "@datafoundry/artifacts";
 import { type MeResponse, createEnvConfig, createErrorResult, createSuccessResult } from "@datafoundry/contracts";
-import { LocalDataGateway } from "@datafoundry/data-gateway";
+import { ensureEnergyScopedDataSource, LocalDataGateway } from "@datafoundry/data-gateway";
 import { LocalFileAssetService } from "@datafoundry/files";
 import { LocalKnowledgeService } from "@datafoundry/knowledge";
 import {
@@ -63,7 +63,7 @@ import { resolveCheckpointResumeSeed, type CheckpointResumeSeed } from "./run-ch
 import { resolveRunConfig } from "./run-config-resolver.js";
 import { resolveRunIdentity } from "./run-identity-orchestrator.js";
 import { createRunMemoryAssembly } from "./run-memory-assembly.js";
-import { extractLastUserText } from "./run-input.js";
+import { extractEnergyQueryContextRequest, extractLastUserText } from "./run-input.js";
 import {
   buildHitlToolCallStartEvent,
   extractInteractionResume,
@@ -75,11 +75,18 @@ import { RunFinalizer, createRunStatusDelta } from "./run-finalizer.js";
 import { startSessionTitleTask } from "./session-title.js";
 import { TaskPlanProjector } from "./task-plan-projector.js";
 import { ToolCallResultBridge } from "./tool-call-result-bridge.js";
+import { ensureEnergyIqBootstrap } from "./energy/energy-bootstrap.js";
+import { resolveEnergyAccessContext } from "./energy/energy-query-context.js";
+import {
+  resolveEnergyQueryContext,
+  resolveEnergyScopeMeterNodeIds
+} from "./energy/energy-query-context.js";
+import { createEnergyQueryContextItem } from "./energy/energy-context-item.js";
 
 const DEV_USER: MeResponse = {
   id: "dev-user",
-  email: "dev@example.com",
-  display_name: "Dev User"
+  email: "admin@energyiq.local",
+  display_name: "EnergyIQ Admin"
 };
 
 const COPILOTKIT_PATH = "/api/copilotkit";
@@ -179,8 +186,8 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       ...(envConfig.storage.secret_master_key ? { secret_master_key: envConfig.storage.secret_master_key } : {}),
       dev_user: {
         id: DEV_USER.id,
-        email: DEV_USER.email ?? "dev@example.com",
-        display_name: DEV_USER.display_name ?? "Dev User",
+        email: DEV_USER.email ?? "admin@energyiq.local",
+        display_name: DEV_USER.display_name ?? "EnergyIQ Admin",
         dev_token: "dev-token"
       }
     }),
@@ -215,6 +222,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
   const runCancelRegistry = new RunCancelRegistry();
   const authService = new AuthService(metadataStore, authConfig);
   ensureDevUser(metadataStore);
+  ensureEnergyIqBootstrap(metadataStore);
   removeLegacyBuiltinDemoDataSourceOnce(metadataStore, DEV_USER.id);
 
   const [taskStateRuntime] = await Promise.all([
@@ -500,7 +508,41 @@ class DataFoundryAgUiAgent extends AbstractAgent {
         let runTimeoutMs;
         let selectedSkills;
         let skillSelection;
+        let energyQueryContext;
         try {
+          const energyRequest = extractEnergyQueryContextRequest(normalizedRunInput);
+          energyQueryContext = energyRequest
+            ? resolveEnergyQueryContext({
+                metadataStore: this.input.metadataStore,
+                user: this.input.metadataStore.users.getById({ user_id: this.input.user.id }),
+                workspaceId: this.input.workspaceId,
+                request: energyRequest
+              })
+            : undefined;
+          const energyScopedDataSource = energyQueryContext
+            ? await ensureEnergyScopedDataSource({
+                metadataStore: this.input.metadataStore,
+                userId: this.input.user.id,
+                context: {
+                  workspaceId: energyQueryContext.workspaceId,
+                  projectId: energyQueryContext.projectId,
+                  scopeId: energyQueryContext.scopeId,
+                  scopeNodeIds: resolveEnergyScopeMeterNodeIds(
+                    this.input.metadataStore,
+                    energyQueryContext.projectId,
+                    energyQueryContext.scopeId
+                  ),
+                  resource: energyQueryContext.resource,
+                  from: energyQueryContext.from,
+                  to: energyQueryContext.to,
+                  timezone: energyQueryContext.timezone,
+                  hierarchyRevisionId: energyQueryContext.hierarchyRevisionId,
+                  meterFormulaRevisionId: energyQueryContext.meterFormulaRevisionId,
+                  dataSnapshotId: energyQueryContext.dataSnapshotId,
+                  metricVersion: energyQueryContext.metricVersion
+                }
+              })
+            : undefined;
           ({
             effectiveRunConfig,
             mcpRuntime,
@@ -512,8 +554,8 @@ class DataFoundryAgUiAgent extends AbstractAgent {
             selectedSkills,
             skillSelection
           } = resolveRunConfig({
-            ...(this.input.defaultDatasourceId
-              ? { defaultDatasourceId: this.input.defaultDatasourceId }
+            ...(energyScopedDataSource?.datasourceId || this.input.defaultDatasourceId
+              ? { defaultDatasourceId: energyScopedDataSource?.datasourceId ?? this.input.defaultDatasourceId }
               : {}),
             metadataStore: this.input.metadataStore,
             runInput: normalizedRunInput,
@@ -521,6 +563,17 @@ class DataFoundryAgUiAgent extends AbstractAgent {
             userInput,
             workspaceId: this.input.workspaceId
           }));
+          if (energyScopedDataSource) {
+            effectiveRunConfig = {
+              ...effectiveRunConfig,
+              activeDatasourceId: energyScopedDataSource.datasourceId,
+              enabledDatasourceIds: [energyScopedDataSource.datasourceId],
+              resourceRevisions: {
+                ...effectiveRunConfig.resourceRevisions,
+                [`datasource:${energyScopedDataSource.datasourceId}`]: energyScopedDataSource.revision
+              }
+            };
+          }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           persistEarlyFailedUserMessage({
@@ -607,7 +660,8 @@ class DataFoundryAgUiAgent extends AbstractAgent {
           sessionId,
           userId: this.input.user.id,
           userInput,
-          workspaceId: this.input.workspaceId
+          workspaceId: this.input.workspaceId,
+          ...(energyQueryContext ? { energyQueryContext } : {})
         });
         const evidenceContext = resolveEvidenceReferenceContext({
           evidenceRefs: effectiveRunConfig.evidenceRefs,
@@ -616,6 +670,10 @@ class DataFoundryAgUiAgent extends AbstractAgent {
           userId: this.input.user.id,
           workspaceId: this.input.workspaceId
         });
+        const authoritativeContextItems = [
+          ...(energyQueryContext ? [createEnergyQueryContextItem(energyQueryContext, sessionId)] : []),
+          ...evidenceContext.items
+        ];
         const taskPlanProjector = new TaskPlanProjector(runContext);
         const toolCallResultBridge = new ToolCallResultBridge();
         const checkpointProjector = new RunCheckpointProjector(this.input.metadataStore, this.input.user.id);
@@ -658,6 +716,18 @@ class DataFoundryAgUiAgent extends AbstractAgent {
         };
         replayPendingProtocolEvents({ runId, stateStore: protocolStateStore, emit });
         const agentAssembly = await createRunAgentAssembly({
+          ...(energyQueryContext
+            ? {
+                // The server-created EnergyIQ view is already the physical,
+                // allowlisted contract for this project/scope/time range.
+                // Preserve Data Foundry's downstream SQL validation without a
+                // second model call that can drift from the trusted boundary.
+                analysisContractGrounder: async (groundingInput) => ({
+                  requirements: groundingInput.requirements,
+                  findings: []
+                })
+              }
+            : {}),
           abortSignal: runAbortController.signal,
           contextPackageRecorder,
           contextPackageExists: (reference) => Boolean(
@@ -671,7 +741,9 @@ class DataFoundryAgUiAgent extends AbstractAgent {
           artifactService: this.input.artifactService,
           sessionOutputService: this.input.sessionOutputService,
           effectiveRunConfig,
-          ...(evidenceContext.items.length ? { evidenceContextItems: evidenceContext.items } : {}),
+          ...(authoritativeContextItems.length
+            ? { evidenceContextItems: authoritativeContextItems }
+            : {}),
           fileAssetService: this.input.fileAssetService,
           emitter: { emit },
           ...(effectiveRunConfig.goal ? { goal: effectiveRunConfig.goal } : {}),
@@ -1070,19 +1142,29 @@ const resolveRequestAuth = (
 ): RequestAuthContext => {
   if (isPasswordAuth(authConfig)) {
     const identity = resolvePasswordSessionIdentity(authService, request);
+    const requestedWorkspaceId = sanitizeOptionalWorkspaceId(
+      headerString(request.headers["x-workspace-id"])
+    );
+    const access = resolveEnergyAccessContext({
+      metadataStore,
+      user: identity.user,
+      ...(requestedWorkspaceId ? { requestedWorkspaceId } : {})
+    });
+    const workspace = metadataStore.workspaces.get({ id: access.activeWorkspaceId });
     return {
-      identity,
+      identity: { ...identity, workspace },
       user: userRecordToMeResponse(identity.user),
-      workspaceId: identity.workspace.id
+      workspaceId: workspace.id
     };
   }
 
   const token = extractAuthToken(request);
   const workspaceId = sanitizeWorkspaceId(headerString(request.headers["x-workspace-id"]));
   const devUser = metadataStore.users.getById({ user_id: DEV_USER.id });
+  const devWorkspace = metadataStore.workspaces.get({ id: workspaceId });
   const devIdentity = {
     user: devUser,
-    workspace: { id: workspaceId, name: workspaceId, kind: "personal" as const, owner_user_id: DEV_USER.id, created_at: "", updated_at: "" }
+    workspace: devWorkspace
   };
   if (!token) {
     return { identity: devIdentity, user: DEV_USER, workspaceId };
@@ -1091,20 +1173,19 @@ const resolveRequestAuth = (
   if (!user) {
     throw new Error("UNAUTHORIZED:Invalid local auth token.");
   }
+  const access = resolveEnergyAccessContext({
+    metadataStore,
+    user,
+    requestedWorkspaceId: workspaceId
+  });
+  const workspace = metadataStore.workspaces.get({ id: access.activeWorkspaceId });
   return {
     identity: {
       user,
-      workspace: {
-        id: workspaceId,
-        name: workspaceId,
-        kind: "personal",
-        owner_user_id: user.id,
-        created_at: "",
-        updated_at: ""
-      }
+      workspace
     },
     user: userRecordToMeResponse(user),
-    workspaceId
+    workspaceId: workspace.id
   };
 };
 
@@ -1146,6 +1227,9 @@ const sanitizeWorkspaceId = (value: string | undefined): string => {
   return candidate;
 };
 
+const sanitizeOptionalWorkspaceId = (value: string | undefined): string | undefined =>
+  value === undefined ? undefined : sanitizeWorkspaceId(value);
+
 const headerString = (value: string | string[] | undefined): string | undefined =>
   Array.isArray(value) ? value[0] : value;
 
@@ -1158,8 +1242,8 @@ const userRecordToMeResponse = (user: UserRecord): MeResponse => ({
 const ensureDevUser = (metadataStore: MetadataStore): void => {
   metadataStore.users.upsertDevUser({
     id: DEV_USER.id,
-    email: DEV_USER.email ?? "dev@example.com",
-    display_name: DEV_USER.display_name ?? "Dev User",
+    email: DEV_USER.email ?? "admin@energyiq.local",
+    display_name: DEV_USER.display_name ?? "EnergyIQ Admin",
     dev_token: "dev-token"
   });
 };

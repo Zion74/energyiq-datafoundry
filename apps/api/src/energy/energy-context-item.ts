@@ -1,0 +1,66 @@
+import {
+  createAgentContextItem,
+  createAgentContextSourceMetadata,
+  type AgentContextItem
+} from "@datafoundry/agent-runtime";
+
+import type { EnergyQueryContext } from "./energy-query-context.js";
+
+export const createEnergyQueryContextItem = (
+  context: EnergyQueryContext,
+  sessionId: string
+): AgentContextItem => createAgentContextItem({
+  id: `energy-query-context:${context.projectId}:${context.scopeId}:${context.dataSnapshotId}`,
+  sourceType: "energy-query-context",
+  sourceId: context.projectId,
+  groupId: "energy-query-context",
+  visibility: "model",
+  trust: "tool",
+  retention: "active",
+  priority: 100,
+  content: [
+    "Authoritative EnergyIQ query context. Use this scope and time range for every data query.",
+    "The end timestamp is exclusive. Never substitute client-provided project or scope names.",
+    "The enabled DuckDB datasource is a server-filtered view for exactly this context; do not use another datasource.",
+    "usage_kwh is canonical interval consumption. source_reading_kind states whether it came from a cumulative-energy delta or a supplied interval-usage value.",
+    "For a scope with designated total meters, aggregate meter_role='total' and use submeters only for breakdowns. For a component-only scope, aggregate meter_role='component' once. Never mix designated totals with their components.",
+    "Use appliance for Aircon, Heater, Lighting and Plugload analysis; category is the simplified aircon, light or load business classification.",
+    "is_operating comes from the published operating schedule. Compare non-operating usage, per-person usage and per-area usage only when the relevant metadata is available.",
+    "Rows with quality_status other than 'ok' are evidence of data quality events and must not be counted as consumption.",
+    `workspace_id=${context.workspaceId}`,
+    `project_id=${context.projectId}`,
+    `project_name=${context.projectName}`,
+    `scope_id=${context.scopeId}`,
+    `scope_name=${context.scopeName}`,
+    `scope_type=${context.scopeType}`,
+    `resource=${context.resource}`,
+    `timezone=${context.timezone}`,
+    `from=${context.from}`,
+    `to_exclusive=${context.to}`,
+    `hierarchy_revision_id=${context.hierarchyRevisionId}`,
+    `meter_formula_revision_id=${context.meterFormulaRevisionId}`,
+    `data_snapshot_id=${context.dataSnapshotId}`,
+    `metric_version=${context.metricVersion}`,
+    `business_calendar_version=${context.businessCalendarVersion}`,
+    `tariff_schedule_version=${context.tariffScheduleVersion}`
+  ].join("\n"),
+  metadata: createAgentContextSourceMetadata({
+    dedupeKeys: ["energy-query-context"],
+    exclusivityKey: "energy-query-context",
+    overlapKeys: [
+      `project:${context.projectId}`,
+      `scope:${context.scopeId}`,
+      `snapshot:${context.dataSnapshotId}`
+    ],
+    scope: {
+      datasourceId: context.dataSnapshotId,
+      sessionId,
+      userId: context.userId
+    },
+    sourceKind: "energy-query-context",
+    sourceOwner: "server"
+  }, {
+    atomic: true,
+    groupKind: "source"
+  })
+});
