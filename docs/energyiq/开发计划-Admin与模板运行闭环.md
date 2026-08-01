@@ -13,7 +13,7 @@ status: in_progress
 
 # EnergyIQ 开发计划：Admin 与模板运行闭环
 
-> 状态：**批次 0–1 已完成；批次 2 的 Meter Mapping、可选 Virtual Meter、Excel Import Batch 检查与标签复用已完成，上传批次正式物化为 Raw Reading / Interval Fact 和质量事件仍待开发。**
+> 状态：**批次 0–2 已完成；真实 Excel Import Batch 已按确认 Mapping 物化为 Raw/Normalized/Interval Fact 与质量事件，并通过重叠导出、幂等和 golden 回归。下一步进入批次 3。**
 
 实施证据见：[2026-08-01 Admin 与 Tier 批次 0–1 实施记录](2026-08-01-Admin-Tier-批次0-1实施记录.md)、[Admin Meter Mapping 与虚拟电表实施记录](2026-08-01-Admin-Meter-Mapping与虚拟电表实施记录.md)和 [Admin Excel Import Batch 实施记录](2026-08-01-Admin-Excel-Import-Batch实施记录.md)。
 
@@ -133,7 +133,7 @@ admin creates Project
 
 ## 6. 批次 2：Meter Mapping、Virtual Meter 与 Excel
 
-> 实施状态：前半段已完成。真实 `.xlsx` 可保存为带 SHA 的 Import Batch、检查固定字段/标签/覆盖区间/典型间隔并生成可编辑 Mapping Draft；重复文件会复用已有批次。离线 golden builder 已验证累计读数到 15 分钟事实的计算，但 UI 上传批次尚未触发正式事实物化和质量事件持久化。
+> 实施状态：已完成。真实 `.xlsx` 可保存为带 SHA 的 Import Batch、检查固定字段/标签/覆盖区间/典型间隔并生成可编辑 Mapping Draft；确认 Mapping 后可显式构建 Raw/Normalized/Interval Fact 与质量事件。重复文件复用批次，重叠文件按覆盖结束时间裁决，Ngee Ann 与 Preschool golden 保持不变。
 
 ### 后端
 
@@ -355,7 +355,7 @@ admin creates Project
 
 ## 15. 已批准并完成的范围
 
-当前已完成 **批次 0 + 批次 1，以及批次 2 的前半段**：
+当前已完成 **批次 0 + 批次 1 + 批次 2**：
 
 1. golden 基线与 migration 护栏；
 2. Project/Tier/Node 正式领域模型；
@@ -366,13 +366,16 @@ admin creates Project
 7. Meter Mapping 只能绑定既有 Scope，并支持 Official Aggregation Review；
 8. Virtual Meter 作为 Mapping 内可选项，默认不参与官方汇总；
 9. 真实 Excel Import Batch、原文件保存、SHA 幂等、字段与标签检查；
-10. 精确保留 `Device Name`，并以可解释规则建议 Ngee Ann 的 9 个既有 Scope，管理员最终确认和保存。
+10. 确认 Mapping 后的 Raw/Normalized/Interval Fact 物化与 Quality Event；
+11. 重叠来源按覆盖结束时间裁决，Raw 证据不丢失；
+12. Scope/Meter Point 分离和最近计量层聚合，防止总表与分表重复相加。
+13. 精确保留 `Device Name`，并以可解释规则建议 Ngee Ann 的 9 个既有 Scope，管理员最终确认和保存。
 
 这一步已做到可见、可验证，同时没有提前把 Metric Registry 和模板编辑器写死。
 
-## 16. 批次 2 后半段边界
+## 16. 批次 2 完成边界
 
-批次 2 继续采用以下已确认选择：
+批次 2 已按以下选择完成：
 
 1. 先批准批次 0–1，其余作为已规划后续；
 2. 生产运行时 Excel 解析使用 Node/TypeScript，uv/pandas 仅做复算；
@@ -380,4 +383,4 @@ admin creates Project
 4. Preschool 不自动猜 Block/Room；
 5. Admin 与客户 UI 均先英文。
 
-下一步只补齐数据事实闭环：让已检查的上传批次按已保存 Mapping 生成 Raw Reading、Interval Fact 和质量事件，并把结果显示在 Admin。Preschool Block/Room 仍保持待补输入，不自动猜测；在事实闭环通过前，不进入 Metric Registry 与模板运行开发。
+数据事实闭环已经通过。Preschool Block/Room 仍保持待补输入，不自动猜测；下一步开始 Metric Registry、Rule、Component Catalog 与模板运行开发。

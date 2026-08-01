@@ -1,6 +1,6 @@
 ---
 title: "2026-08-01 开发记录：Admin Excel Import Batch"
-summary: "记录真实 Excel 上传、检查、SHA 幂等、Mapping Draft 生成与浏览器验收，并明确事实物化仍未完成。"
+summary: "记录真实 Excel 上传、检查、SHA 幂等、Mapping Draft、Raw/Normalized/Interval Fact 物化、重叠裁决与验收。"
 doc_type: runlog
 tags: [Admin, Excel, Import Batch, Meter Mapping, Data Quality]
 updated_at: "2026-08-01"
@@ -14,9 +14,9 @@ status: implemented
 
 ## 1. 目标与范围
 
-正式 Admin 路径保持为 `Basics → Structure → Data & Meters → Analysis → Review & Publish`。本轮只补 `Data & Meters` 的真实输入前半段：管理员在 `Data Sources` 上传 Excel，系统保存原文件、检查数据契约、展示批次证据，再把精确源标签带到 `Meter Mapping`。Mapping 只能选择 Structure 已存在的 Scope，不会反向创建层级。
+正式 Admin 路径保持为 `Basics → Structure → Data & Meters → Analysis → Review & Publish`。管理员在 `Data Sources` 上传 Excel，系统保存原文件、检查数据契约、展示批次证据，把精确源标签带到 `Meter Mapping`；Mapping 确认后，再由管理员显式执行 `Build interval facts`。Mapping 只能选择 Structure 已存在的 Scope，不会反向创建层级。
 
-本次不包含上传批次的 Raw Reading / Interval Fact 物化、Tuya API、Metric/Rule/Template 和正式发布。
+本次已完成上传批次的 `Raw Reading → Normalized Reading → Interval Fact → Quality Event` 物化；不包含 Tuya API、Metric/Rule/Template 和正式发布。
 
 ## 2. 代码改动
 
@@ -29,6 +29,13 @@ status: implemented
 - `Use detected labels` 生成可编辑 Mapping Draft，原始 label 不被改写；
 - Ngee Ann 的位置前缀与冒号后回路说明仅用于可解释的匹配建议，最终仍由管理员确认；
 - Mapping Draft 保存后可刷新复用，不再在没有 Import Batch 时伪造 fixture labels。
+- Mapping 确认后可显式构建事实；未确认时按钮禁用并说明原因；
+- 累计读数按实际经过时间差分，首条读数保留为 boundary 质量事件；
+- Excel 浮点时间在距离整分钟 1 秒内时归一到整分钟，避免 `14:59.999` 破坏重叠判断；
+- Raw 层保留重叠来源证据，Normalized/Interval Fact 对同一 Meter Point/时点选择覆盖结束时间更晚的来源；
+- Meter Point ID 与 Scope ID 分开保存，实体表可挂任意 Tier；
+- 分析 Scope 优先使用本 Scope 直接计量；没有直接计量时，每个子分支选择最近一层事实，避免总表与分表重复相加；
+- Admin 显示 Raw、Normalized、Interval Fact 和 All-meter deltas，后者明确不是正式 Scope 总量。
 
 | 文件 | 改动类型 | 说明 |
 | --- | --- | --- |
@@ -37,12 +44,18 @@ status: implemented
 | `packages/metadata/src/energyiq-store.ts` | 修改 | 持久化 Project 级 Import Batch 元数据 |
 | `apps/web/src/app/energyiq/admin/project-setup-workbench.tsx` | 修改 | 连接 Data Sources、批次检查和 Mapping Draft |
 | `apps/web/src/app/energyiq/admin/project-setup-model.ts` | 修改 | 以可解释规则建议既有 Scope，不创建层级 |
+| `apps/api/src/energy/energy-import-materializer.ts` | 新增 | 由已确认 Mapping 生成规范读数、区间事实和质量事件 |
+| `packages/data-gateway/src/energy-fact-writer.ts` | 新增 | DuckDB 事务写入、幂等重跑和跨文件重叠裁决 |
+| `apps/api/src/energy/energy-analysis.ts` | 修改 | 按 Scope 距离选择正式聚合路径 |
 
 主要提交：
 
 - `861783b feat(energyiq): persist inspected Excel import batches`
 - `5bd7908 feat(energyiq): connect Admin Excel import to mapping`
 - `ad8ed80 fix(energyiq): match detailed meter labels to scopes`
+- `edbceec feat(energyiq): materialize Excel batches into facts`
+- `efc9002 fix(energyiq): preserve canonical facts across overlapping imports`
+- `fb28e11 feat(energyiq): expose interval fact build in Admin`
 
 ## 3. 验证证据
 
@@ -60,6 +73,13 @@ status: implemented
 | 重复上传 | 复用已有 Import Batch |
 | Mapping 建议 | 9 Mapped / 0 Needs Scope |
 | Draft 持久化 | 保存、刷新后仍为 9 / 0 |
+| Raw evidence | 25,919 |
+| Canonical normalized readings | 24,192 |
+| Canonical interval facts | 24,183 |
+| Source all-meter deltas | 4,597.72855 kWh，仅作批次证据 |
+| Ngee Ann Project golden | 5,328.2073 kWh |
+| Level 6 / Level 7 | 2,013.9707 / 3,314.2365 kWh |
+| Preschool golden | 24,921.8123 kWh |
 
 ### 3.2 自动化证据
 
@@ -69,7 +89,7 @@ npx vitest run apps/api/src/energy/energy-excel-import.test.ts \
   apps/web/src/app/energyiq/admin/project-setup-model.test.ts
 ~~~
 
-结果：3 个测试文件、12 项测试通过。
+最终相关回归：7 个测试文件、22 项测试通过，包括 Excel 时间归一、重叠来源优先级、幂等写入、Scope 聚合、Ngee Ann 与 Preschool golden。
 
 ~~~text
 npm run build
@@ -82,6 +102,9 @@ npm run build
 - 现象：带说明后缀的标签（如 `Lvl 6 Office Load 1: L1P1-L3P6`）最初无法匹配 `Office Load 1`。
 - 根因：建议逻辑只允许完整名称相等，没有区分稳定业务名和冒号后的回路说明。
 - 处理：精确名称优先；没有精确项时，使用冒号前业务名做同位置内的唯一前缀匹配。原始 label 保持不变，管理员仍需最终确认，没有引入自动建树或 LLM 猜测。
+- 现象：首次将真实批次写入已有 Golden Store 后，Level 6 比基线少 `0.1831 kWh`。
+- 根因：5 月 20 日重叠边界存在两份导出；较早文件被错误允许覆盖覆盖期更长的后续文件，而且 Excel 浮点时间出现 `14:59.999`，使等时点去重失效。
+- 处理：Raw 保留双方；Normalized/Fact 按来源覆盖结束时间裁决；整分钟附近时间先归一。修复后 golden 精确恢复。
 
 ## 5. 复现与排查
 
@@ -95,12 +118,9 @@ npm run build
 
 ## 6. 后续与关联
 
-当前上传会保存原文件并生成检查结果，但尚未把该批次正式物化为项目运行时使用的 `Raw Reading → Interval Fact → Quality Event`。离线 builder 已验证累计读数差分、实际区间平均功率、重叠冲突与 virtual meter 计算，但它还没有接到每次 UI Import Batch 上。
+Excel 事实闭环已通过。下一步进入批次 3：Metric Definition、确定性 Rule、Component Catalog 与 Project/Tier Template。Tuya API 后续只新增 Source Adapter，并复用相同事实管线。
 
-下一步按已冻结边界开发：
+当前保留两个明确优化项：
 
-1. 从已保存 Import Batch 读取工作簿并写 Raw Reading；
-2. 复用已保存 Meter Mapping 生成 15 分钟 Interval Fact；
-3. 持久化重复、负差、缺口、不规则间隔和覆盖率质量事件；
-4. 在 Admin 显示物化结果和 blocker；
-5. 事实闭环通过后，再进入 Metric/Rule/Template。
+1. 25,919 行完整物化本机约 56 秒，一天一次试点可用，但批量写入与 Mapping 更新仍需优化；
+2. Admin 需要继续补充更直观的 Quality Summary 与失败重试信息，避免只显示数量。
