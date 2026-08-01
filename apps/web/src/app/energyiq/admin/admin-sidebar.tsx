@@ -47,8 +47,8 @@ type NavigationItem = {
 };
 
 const accessItems: NavigationItem[] = [
-  { id: "organisations", label: "Organisations", icon: "building", available: false },
-  { id: "users", label: "Users", icon: "user", available: false },
+  { id: "organisations", label: "Organisations", icon: "building", available: true },
+  { id: "users", label: "Users", icon: "user", available: true },
 ];
 
 const projectItems: NavigationItem[] = [

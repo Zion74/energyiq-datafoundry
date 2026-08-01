@@ -14,6 +14,8 @@ import type {
   DevIdentitiesResponseDto,
   DevIdentityUser,
   EnergyAccessContextDto,
+  EnergyAdminOrganisationDto,
+  EnergyAdminUserDto,
   EnergyImportBatchDto,
   EnergyProjectHierarchyDto,
   EnergyProjectRecordDto,
@@ -269,6 +271,13 @@ export const configApi = {
     return requestEnvelope<MeResponseDto>("/api/v1/me");
   },
 
+  activateAccount(body: { displayName?: string; password: string; token: string }): Promise<MeResponseDto> {
+    return requestEnvelope<MeResponseDto>("/api/v1/auth/activate", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
   updateMe(body: { displayName: string; avatarUrl?: string | null }): Promise<MeResponseDto> {
     return requestEnvelope<MeResponseDto>("/api/v1/me", {
       method: "PATCH",
@@ -278,6 +287,65 @@ export const configApi = {
 
   getEnergyAccessContext(): Promise<EnergyAccessContextDto> {
     return requestEnvelope<EnergyAccessContextDto>("/api/v1/energy/access-context");
+  },
+
+  listEnergyAdminOrganisations(): Promise<{ organisations: EnergyAdminOrganisationDto[] }> {
+    return requestEnvelope("/api/v1/energy/admin/organisations");
+  },
+
+  createEnergyAdminOrganisation(body: { name: string }): Promise<EnergyAdminOrganisationDto> {
+    return requestEnvelope("/api/v1/energy/admin/organisations", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  updateEnergyAdminOrganisation(
+    id: string,
+    body: { disabled: boolean; name: string },
+  ): Promise<EnergyAdminOrganisationDto> {
+    return requestEnvelope(`/api/v1/energy/admin/organisations/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  },
+
+  listEnergyAdminUsers(): Promise<{ users: EnergyAdminUserDto[] }> {
+    return requestEnvelope("/api/v1/energy/admin/users");
+  },
+
+  inviteEnergyAdminUser(body: {
+    displayName?: string;
+    email: string;
+    organisationIds: string[];
+    role: "user" | "admin";
+  }): Promise<{ invitationUrl?: string; user: EnergyAdminUserDto }> {
+    return requestEnvelope("/api/v1/energy/admin/users", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  updateEnergyAdminUser(
+    id: string,
+    body: {
+      disabled: boolean;
+      displayName: string;
+      organisationIds: string[];
+      role: "user" | "admin";
+    },
+  ): Promise<EnergyAdminUserDto> {
+    return requestEnvelope(`/api/v1/energy/admin/users/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  },
+
+  resendEnergyAdminInvitation(id: string): Promise<{ invitationUrl?: string; user: EnergyAdminUserDto }> {
+    return requestEnvelope(`/api/v1/energy/admin/users/${encodeURIComponent(id)}/resend-invitation`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
   },
 
   getEnergyProjectHierarchy(projectId: string): Promise<EnergyProjectHierarchyDto> {

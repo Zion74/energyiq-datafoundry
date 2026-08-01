@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -26,6 +27,7 @@ import {
 import { EnergyIcon } from "../_components/icons";
 import type { useEnergyIqAccess } from "../_components/energyiq-access";
 import { EnergyIqAdminSidebar, type AdminSection } from "./admin-sidebar";
+import { AdminAccessPages } from "./admin-access-pages";
 import {
   addNode,
   addParentTier,
@@ -57,6 +59,7 @@ export function EnergyIqAdminWorkbench({
   accessState: AccessState;
   initialSection?: AdminSection;
 }) {
+  const router = useRouter();
   const { access, activeProject, refresh, selectProject } = accessState;
   const projects = access?.projects ?? [];
   const [selectedProjectId, setSelectedProjectId] = useState(
@@ -105,8 +108,9 @@ export function EnergyIqAdminWorkbench({
   }, []);
 
   useEffect(() => {
+    if (section === "organisations" || section === "users") return;
     void loadSetup(selectedProjectId);
-  }, [loadSetup, selectedProjectId]);
+  }, [loadSetup, section, selectedProjectId]);
 
   const changeDocument = useCallback((
     updater: (current: EnergyProjectSetupDocumentDto) => EnergyProjectSetupDocumentDto,
@@ -203,7 +207,10 @@ export function EnergyIqAdminWorkbench({
           setSection("project-overview");
         }}
         onCreateProject={() => setNewProjectOpen(true)}
-        onSectionChange={setSection}
+        onSectionChange={(nextSection) => {
+          setSection(nextSection);
+          router.replace(`/energyiq/admin?section=${nextSection}`, { scroll: false });
+        }}
       />
 
       <div className="min-w-0 flex-1">
@@ -248,8 +255,11 @@ export function EnergyIqAdminWorkbench({
         <div className="p-4 lg:p-6">
           {error ? <StatusMessage tone="error">{error}</StatusMessage> : null}
           {notice ? <StatusMessage tone={validation?.blocking ? "warning" : "success"}>{notice}</StatusMessage> : null}
-          {loading ? <LoadingPanel /> : null}
-          {!loading && document && setup ? renderAdminSection({
+          {section === "organisations" || section === "users" ? (
+            <AdminAccessPages initialView={section} />
+          ) : null}
+          {section !== "organisations" && section !== "users" && loading ? <LoadingPanel /> : null}
+          {section !== "organisations" && section !== "users" && !loading && document && setup ? renderAdminSection({
             section,
             projects,
             selectedProject,

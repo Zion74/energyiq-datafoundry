@@ -63,6 +63,30 @@ export type EnergyWorkspaceDto = {
   id: string;
   name: string;
   kind: "personal" | "customer";
+  disabled: boolean;
+};
+
+export type EnergyAdminOrganisationDto = {
+  id: string;
+  name: string;
+  status: "active" | "disabled";
+  userCount: number;
+  projectCount: number;
+  projects: Array<{ id: string; name: string; status: string }>;
+  createdAt: string;
+};
+
+export type EnergyAdminUserDto = {
+  id: string;
+  displayName?: string;
+  email?: string;
+  role: EnergyRole;
+  status: "pending" | "active" | "disabled";
+  organisationIds: string[];
+  organisations: Array<{ id: string; name: string }>;
+  projectIds: string[];
+  lastLoginAt?: string;
+  createdAt: string;
 };
 
 export type EnergyProjectDto = {

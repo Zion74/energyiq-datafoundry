@@ -52,6 +52,8 @@ export type {
   DevIdentitiesResponseDto,
   DevIdentityUser,
   EnergyAccessContextDto,
+  EnergyAdminOrganisationDto,
+  EnergyAdminUserDto,
   EnergyDeliveryStage,
   EnergyHierarchyRevisionDto,
   EnergyExcelImportInspectionDto,
