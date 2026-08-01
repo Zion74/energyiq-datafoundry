@@ -21,7 +21,7 @@ const navigation: Array<{
 
 export function EnergyIqShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const { access, activeProject, selectProject } = useEnergyIqAccess();
+  const { access, activeProject, selectOrganisation, selectProject } = useEnergyIqAccess();
   const visibleNavigation = access?.role === "admin"
     ? [...navigation, { href: "/energyiq/admin", label: "Admin", shortLabel: "Admin", icon: "settings" as EnergyIconName }]
     : navigation;
@@ -43,15 +43,35 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
           <div className="hidden h-5 w-px bg-border sm:block" />
 
           <label
-            className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-left text-xs font-medium text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+            className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-left text-xs font-medium text-foreground transition-colors hover:bg-surface-subtle focus-within:ring-2 focus-within:ring-primary/20"
           >
             <EnergyIcon name="building" className="h-3.5 w-3.5 shrink-0 text-muted-light" />
+            <select
+              aria-label="Select organisation"
+              className="max-w-32 appearance-none bg-transparent pr-4 outline-none sm:max-w-48"
+              value={access?.activeWorkspaceId ?? ""}
+              onChange={(event) => void selectOrganisation(event.target.value)}
+            >
+              {(access?.workspaces ?? []).map((workspace) => (
+                <option key={workspace.id} value={workspace.id}>
+                  {workspace.name}{workspace.disabled ? " (disabled)" : ""}
+                </option>
+              ))}
+            </select>
+            <EnergyIcon name="chevron" className="-ml-4 h-3 w-3 rotate-90 text-muted-light" />
+          </label>
+
+          <label
+            className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-left text-xs font-medium text-foreground transition-colors hover:bg-surface-subtle focus-within:ring-2 focus-within:ring-primary/20"
+          >
+            <EnergyIcon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-light" />
             <select
               aria-label="Select project"
               className="max-w-36 appearance-none bg-transparent pr-4 outline-none sm:max-w-56"
               value={activeProject?.id ?? ""}
               onChange={(event) => selectProject(event.target.value)}
             >
+              {activeProject ? null : <option value="">No published projects</option>}
               {(access?.projects ?? [])
                 .filter((project) => project.status === "published")
                 .map((project) => (
@@ -124,7 +144,19 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
         </nav>
       </header>
 
-      <main className="min-h-0 flex-1 overflow-auto">{children}</main>
+      <main className="min-h-0 flex-1 overflow-auto">
+        {access?.role === "user" && access.workspaces.length === 0 ? (
+          <section className="mx-auto flex min-h-[60vh] max-w-lg flex-col items-center justify-center px-6 text-center">
+            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-surface text-muted shadow-[var(--shadow-card)]">
+              <EnergyIcon name="building" className="h-5 w-5" />
+            </span>
+            <h1 className="mt-4 text-lg font-semibold">No organisation access</h1>
+            <p className="mt-2 text-sm leading-6 text-muted">
+              Your account is active, but it has not been assigned to a customer Organisation. Contact your EnergyIQ administrator.
+            </p>
+          </section>
+        ) : children}
+      </main>
     </div>
   );
 }
