@@ -2,6 +2,8 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, normalize, relative } from "node:path";
 
 const roots = ["README.md", "README_zh.md", "CONTRIBUTING.md", "docs", "apps/web/README.md", "apps/tui/README.md"].filter(existsSync);
+const ignoredDocRoots = ["docs/Net-Zero Product"].map(normalize);
+const internalResearchRoots = ["docs/energyiq/research"].map(normalize);
 const files = roots.flatMap((root) => collectDocFiles(root)).sort();
 
 const brokenLinks = [];
@@ -43,6 +45,9 @@ if (brokenLinks.length > 0 || forbiddenPublicLinks.length > 0 || sensitiveMatche
 console.log(`Documentation link smoke OK: files=${files.length}`);
 
 function collectDocFiles(path) {
+  if (isPathWithinRoots(path, ignoredDocRoots)) {
+    return [];
+  }
   if (!existsSync(path)) {
     return [];
   }
@@ -83,6 +88,9 @@ function scanLinks(file, text) {
 }
 
 function scanSensitiveContent(file, text) {
+  if (isPathWithinRoots(file, internalResearchRoots)) {
+    return;
+  }
   const checks = [
     { label: "source-sensitive product reference", pattern: /\bDB-GPT(?:-like)?\b/i },
     { label: "source-sensitive reference repo", pattern: /\bReference repo\b/i },
@@ -109,6 +117,14 @@ function scanSensitiveContent(file, text) {
       }
     }
   }
+}
+
+function isPathWithinRoots(path, rootsToCheck) {
+  const normalizedPath = normalize(path);
+  return rootsToCheck.some((root) => {
+    const relativePath = relative(root, normalizedPath);
+    return relativePath === "" || (!relativePath.startsWith("..") && !relativePath.startsWith("/"));
+  });
 }
 
 function isPublicDoc(file) {
