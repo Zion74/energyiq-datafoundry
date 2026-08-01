@@ -69,6 +69,7 @@
     "smoke:copilotkit": "node scripts/smoke-copilotkit.mjs",
     "smoke:copilotkit-run": "npm run build && node scripts/smoke-copilotkit-run.mjs",
     "smoke:api-context": "npm run build && node scripts/smoke-copilotkit-context.mjs",
+    "prototype:energy-source-facts": "node scripts/energyiq/prototypes/source-to-fact/prototype.mjs",
     "smoke:context-architecture": "node scripts/smoke-context-architecture.mjs",
     "smoke:context-compilation": "npm run build && node scripts/smoke-context-compilation.mjs",
     "docs:dev": "python -m mkdocs serve -a 127.0.0.1:8000",
