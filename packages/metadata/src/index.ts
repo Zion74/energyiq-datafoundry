@@ -22,6 +22,7 @@ export type UserRecord = {
   id: string;
   email?: string;
   display_name?: string;
+  avatar_url?: string;
   dev_token?: string;
   email_verified_at?: string;
   disabled_at?: string;
@@ -876,6 +877,20 @@ export class UserRepository {
       .run(input.id, input.email, input.display_name, input.dev_token, now, now);
 
     return this.getById({ user_id: input.id });
+  }
+
+  updateProfile(input: {
+    user_id: string;
+    display_name: string;
+    avatar_url?: string | null;
+  }): UserRecord {
+    const updatedAt = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE users
+      SET display_name = ?, avatar_url = ?, updated_at = ?
+      WHERE id = ?
+    `).run(input.display_name, input.avatar_url ?? null, updatedAt, input.user_id);
+    return this.getById({ user_id: input.user_id });
   }
 
   getByDevToken(input: { dev_token: string }): Optional<UserRecord> {
@@ -3448,6 +3463,7 @@ const runMigrations = (db: DatabaseSync): void => {
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE,
       display_name TEXT,
+      avatar_url TEXT,
       dev_token TEXT UNIQUE,
       email_verified_at TEXT,
       disabled_at TEXT,
@@ -4069,6 +4085,7 @@ const initializeProtocolEventJournalSchema = (db: DatabaseSync): void => {
 };
 
 const initializeAuthSchema = (db: DatabaseSync): void => {
+  ensureColumn(db, "users", "avatar_url", "TEXT");
   ensureColumn(db, "users", "email_verified_at", "TEXT");
   ensureColumn(db, "users", "disabled_at", "TEXT");
   ensureColumn(db, "users", "password_updated_at", "TEXT");
@@ -4544,6 +4561,7 @@ const mapUserRow = (row: unknown): Optional<UserRecord> => {
 
   const email = optionalString(row.email);
   const displayName = optionalString(row.display_name);
+  const avatarUrl = optionalString(row.avatar_url);
   const devToken = optionalString(row.dev_token);
   const emailVerifiedAt = optionalString(row.email_verified_at);
   const disabledAt = optionalString(row.disabled_at);
@@ -4553,6 +4571,7 @@ const mapUserRow = (row: unknown): Optional<UserRecord> => {
     id: requiredString(row, "id"),
     ...(email ? { email } : {}),
     ...(displayName ? { display_name: displayName } : {}),
+    ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
     ...(devToken ? { dev_token: devToken } : {}),
     ...(emailVerifiedAt ? { email_verified_at: emailVerifiedAt } : {}),
     ...(disabledAt ? { disabled_at: disabledAt } : {}),

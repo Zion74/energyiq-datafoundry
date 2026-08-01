@@ -7,6 +7,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -26,8 +27,8 @@ const DEV_SIGNED_OUT_STORAGE_KEY = "data-tasks:identity:signed-out:v1";
 
 const DEFAULT_IDENTITY: ConfigApiIdentity = {
   userId: "dev-user",
-  displayName: "Dev User",
-  email: "dev@example.com",
+  displayName: "EnergyIQ Admin",
+  email: "admin@energyiq.local",
   devToken: "dev-token",
 };
 
@@ -43,6 +44,7 @@ type DataTaskIdentityContextValue = {
   selectUser: (userId: string) => void;
   signOut: () => void;
   signOutAll: () => void;
+  updateProfile: (input: { displayName: string; avatarUrl?: string | null }) => Promise<void>;
   users: ConfigApiIdentity[];
 };
 
@@ -59,6 +61,7 @@ function storageIdentity(): ConfigApiIdentity {
       userId: parsed.userId,
       displayName: parsed.displayName || parsed.userId,
       ...(parsed.email ? { email: parsed.email } : {}),
+      ...(parsed.avatarUrl ? { avatarUrl: parsed.avatarUrl } : {}),
       devToken: parsed.devToken,
     };
   } catch {
@@ -111,6 +114,7 @@ function dtoToIdentity(user: DevIdentityUser): ConfigApiIdentity {
     userId: user.id,
     displayName: user.displayName || user.id,
     ...(user.email ? { email: user.email } : {}),
+    ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
     devToken: user.devToken ?? "",
   };
 }
@@ -244,6 +248,19 @@ function DevIdentityProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  const updateProfile = useCallback(async (input: { displayName: string; avatarUrl?: string | null }) => {
+    setError(null);
+    try {
+      const response = await configApi.updateMe(input);
+      const next = dtoToIdentity(response.user);
+      setCurrentUser(next);
+      setUsers((current) => current.map((user) => user.userId === next.userId ? next : user));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update profile");
+      throw err;
+    }
+  }, []);
+
   const value = useMemo<DataTaskIdentityContextValue>(
     () => ({
       authMode: "dev",
@@ -260,9 +277,10 @@ function DevIdentityProvider({ children }: { children: ReactNode }) {
       selectUser,
       signOut,
       signOutAll,
+      updateProfile,
       users,
     }),
-    [changePassword, createUser, currentUser, error, loading, selectUser, signOut, signOutAll, users],
+    [changePassword, createUser, currentUser, error, loading, selectUser, signOut, signOutAll, updateProfile, users],
   );
 
   if (signedOut) {
@@ -346,6 +364,17 @@ function PasswordIdentityProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const updateProfile = useCallback(async (input: { displayName: string; avatarUrl?: string | null }) => {
+    setError(null);
+    try {
+      const response = await configApi.updateMe(input);
+      setCurrentUser(dtoToIdentity(response.user));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to update profile");
+      throw err;
+    }
+  }, []);
+
   const value = useMemo<DataTaskIdentityContextValue | null>(() => {
     if (!currentUser) return null;
     return {
@@ -360,9 +389,10 @@ function PasswordIdentityProvider({ children }: { children: ReactNode }) {
       selectUser: () => undefined,
       signOut,
       signOutAll,
+      updateProfile,
       users: [currentUser],
     };
-  }, [changePassword, createUser, currentUser, error, loading, signOut, signOutAll]);
+  }, [changePassword, createUser, currentUser, error, loading, signOut, signOutAll, updateProfile]);
 
   useEffect(() => {
     if (!loading && (!currentUser || !value)) {
@@ -401,6 +431,124 @@ export function useDataTaskIdentity(): DataTaskIdentityContextValue {
   return context;
 }
 
+export function DataTaskAccountMenu({
+  details = [],
+  settingsHref,
+}: {
+  details?: Array<{ label: string; value: string }>;
+  settingsHref?: string;
+}) {
+  const { currentUser, error, signOut } = useDataTaskIdentity();
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <div ref={menuRef} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-surface text-xs font-semibold text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+        aria-label="Open account menu"
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <DataTaskAvatar identity={currentUser} className="h-8 w-8 border-0" />
+      </button>
+
+      {open ? (
+        <div
+          role="menu"
+          className="account-menu-popover-in absolute right-0 top-full z-50 mt-2 w-72 rounded-xl border border-border bg-surface p-1.5 shadow-[var(--shadow-popover)]"
+        >
+          <div className="border-b border-border px-2 py-2">
+            <div className="flex items-center gap-2 px-2 py-1.5">
+              <DataTaskAvatar identity={currentUser} className="h-9 w-9" />
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-semibold text-foreground">
+                  {currentUser.displayName || currentUser.userId}
+                </span>
+                <span className="block truncate text-xs text-muted-light">
+                  {currentUser.email || currentUser.userId}
+                </span>
+              </span>
+            </div>
+            {details.length > 0 ? (
+              <dl className="mt-1 grid gap-1 px-2 pb-1 text-xs">
+                {details.map((detail) => (
+                  <div key={detail.label} className="flex items-center justify-between gap-3">
+                    <dt className="text-muted-light">{detail.label}</dt>
+                    <dd className="truncate font-medium text-foreground">{detail.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            ) : null}
+          </div>
+          <div className="pt-1.5">
+            {settingsHref ? (
+              <AccountMenuItem
+                label="Settings"
+                onClick={() => {
+                  router.push(settingsHref);
+                  setOpen(false);
+                }}
+              />
+            ) : null}
+            <AccountMenuItem
+              label="Sign out"
+              onClick={() => {
+                signOut();
+                setOpen(false);
+              }}
+            />
+          </div>
+          {error ? <p className="mt-2 px-2 text-xs text-rose-700">{error}</p> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function DataTaskAvatar({
+  identity,
+  className = "h-8 w-8",
+}: {
+  identity: ConfigApiIdentity;
+  className?: string;
+}) {
+  return (
+    <span
+      className={`flex shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-surface-subtle text-xs font-semibold text-foreground ${className}`}
+    >
+      {identity.avatarUrl ? (
+        <img src={identity.avatarUrl} alt="" className="h-full w-full object-cover" />
+      ) : (
+        identityInitials(identity)
+      )}
+    </span>
+  );
+}
+
 import { LanguageToggle } from "../../i18n/LanguageToggle";
 import { useT } from "../../i18n/locale-context";
 
@@ -432,7 +580,7 @@ export function DataTaskUserBar({
           title={currentUser.displayName || currentUser.userId}
           aria-label={t("userBar.currentUser")}
         >
-          {identityInitials(currentUser)}
+          <DataTaskAvatar identity={currentUser} className="h-8 w-8 border-0" />
         </button>
         <LanguageToggle compact />
       </div>
@@ -445,9 +593,7 @@ export function DataTaskUserBar({
         <div className="account-menu-popover-in absolute bottom-full left-2 right-2 z-50 origin-bottom rounded-xl border border-border bg-surface p-1.5 shadow-[var(--shadow-popover)]">
           <div className="border-b border-border px-2 py-2">
             <div className="flex items-center gap-2 px-2 py-1.5">
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-surface-subtle text-xs font-semibold text-foreground">
-                {identityInitials(currentUser)}
-              </span>
+              <DataTaskAvatar identity={currentUser} className="h-9 w-9" />
               <span className="min-w-0">
                 <span className="block truncate text-sm font-semibold text-foreground">
                   {currentUser.displayName || currentUser.userId}
@@ -459,13 +605,15 @@ export function DataTaskUserBar({
             </div>
           </div>
           <div className="pt-1.5">
-            <AccountMenuItem
-              label={t("userBar.settings")}
-              onClick={() => {
-                onOpenSettings?.();
-                setOpen(false);
-              }}
-            />
+            {onOpenSettings ? (
+              <AccountMenuItem
+                label={t("userBar.settings")}
+                onClick={() => {
+                  onOpenSettings();
+                  setOpen(false);
+                }}
+              />
+            ) : null}
             <AccountMenuItem
               label={t("userBar.signOut")}
               onClick={() => {
@@ -483,9 +631,7 @@ export function DataTaskUserBar({
           onClick={() => setOpen((value) => !value)}
           className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-surface/60"
         >
-          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-surface-subtle text-xs font-semibold text-foreground">
-            {identityInitials(currentUser)}
-          </span>
+          <DataTaskAvatar identity={currentUser} className="h-8 w-8" />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-xs font-semibold text-foreground">
               {currentUser.displayName || currentUser.userId}

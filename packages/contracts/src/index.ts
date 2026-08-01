@@ -14,6 +14,7 @@ export type MeResponse = {
   id: string;
   email?: string;
   display_name?: string;
+  avatar_url?: string;
 };
 
 export type Citation = {

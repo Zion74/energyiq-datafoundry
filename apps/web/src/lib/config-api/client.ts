@@ -51,6 +51,7 @@ export type ConfigApiIdentity = {
   userId: string;
   displayName?: string;
   email?: string;
+  avatarUrl?: string;
   devToken: string;
 };
 
@@ -265,6 +266,13 @@ export const configApi = {
 
   getMe(): Promise<MeResponseDto> {
     return requestEnvelope<MeResponseDto>("/api/v1/me");
+  },
+
+  updateMe(body: { displayName: string; avatarUrl?: string | null }): Promise<MeResponseDto> {
+    return requestEnvelope<MeResponseDto>("/api/v1/me", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
   },
 
   getEnergyAccessContext(): Promise<EnergyAccessContextDto> {

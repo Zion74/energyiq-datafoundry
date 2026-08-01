@@ -242,13 +242,28 @@ const routeConfigRequest = async (
   return fail(404, "RESOURCE_NOT_FOUND", `Unknown API resource: ${root}`);
 };
 
-const handleMeRequest = (
+const MAX_AVATAR_DATA_URL_LENGTH = 350_000;
+const AVATAR_DATA_URL_PATTERN = /^data:image\/(?:jpeg|png|webp);base64,[a-zA-Z0-9+/]+={0,2}$/u;
+
+const handleMeRequest = async (
   request: IncomingMessage,
   context: Required<ConfigApiContext>
-): ConfigApiResponse => {
-  if (request.method !== "GET") {
-    return methodNotAllowed();
+): Promise<ConfigApiResponse> => {
+  if (request.method === "PATCH") {
+    const body = await readJsonBody(request);
+    const displayName = sanitizeDisplayName(stringValue(body.displayName) ?? "");
+    const avatarUrl = sanitizeAvatarUrl(body.avatarUrl);
+    const user = context.metadataStore.users.updateProfile({
+      user_id: context.userId,
+      display_name: displayName,
+      avatar_url: avatarUrl
+    });
+    return ok({
+      user: devIdentityUserDto(user),
+      workspace: defaultWorkspaceDto(context.workspaceId)
+    });
   }
+  if (request.method !== "GET") return methodNotAllowed();
   const user = context.metadataStore.users.getById({ user_id: context.userId });
   return ok({
     user: devIdentityUserDto(user),
@@ -3585,6 +3600,7 @@ const devIdentityUserDto = (user: UserRecord): Record<string, unknown> => ({
   id: user.id,
   ...(user.email ? { email: user.email } : {}),
   ...(user.display_name ? { displayName: user.display_name } : {}),
+  ...(user.avatar_url ? { avatarUrl: user.avatar_url } : {}),
   ...(user.dev_token ? { devToken: user.dev_token } : {})
 });
 
@@ -3607,6 +3623,17 @@ const sanitizeDisplayName = (value: string): string => {
     throw new Error("DEV_USER_DISPLAY_NAME_REQUIRED");
   }
   return normalized.slice(0, 80);
+};
+
+const sanitizeAvatarUrl = (value: unknown): string | null => {
+  if (value === null || value === "" || value === undefined) return null;
+  if (typeof value !== "string" || value.length > MAX_AVATAR_DATA_URL_LENGTH) {
+    throw new Error("INVALID_AVATAR_SIZE");
+  }
+  if (!AVATAR_DATA_URL_PATTERN.test(value)) {
+    throw new Error("INVALID_AVATAR_FORMAT");
+  }
+  return value;
 };
 
 const sanitizeOptionalEmail = (value: string | undefined, id: string): string => {

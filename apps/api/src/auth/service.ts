@@ -18,6 +18,7 @@ export type AuthUserDto = {
   id: string;
   email?: string;
   displayName?: string;
+  avatarUrl?: string;
 };
 
 export type AuthWorkspaceDto = {
@@ -407,7 +408,8 @@ export function userDto(user: UserRecord): AuthUserDto {
   return {
     id: user.id,
     ...(user.email ? { email: user.email } : {}),
-    ...(user.display_name ? { displayName: user.display_name } : {})
+    ...(user.display_name ? { displayName: user.display_name } : {}),
+    ...(user.avatar_url ? { avatarUrl: user.avatar_url } : {})
   };
 }
 

@@ -1236,7 +1236,8 @@ const headerString = (value: string | string[] | undefined): string | undefined 
 const userRecordToMeResponse = (user: UserRecord): MeResponse => ({
   id: user.id,
   ...(user.email ? { email: user.email } : {}),
-  ...(user.display_name ? { display_name: user.display_name } : {})
+  ...(user.display_name ? { display_name: user.display_name } : {}),
+  ...(user.avatar_url ? { avatar_url: user.avatar_url } : {})
 });
 
 const ensureDevUser = (metadataStore: MetadataStore): void => {
