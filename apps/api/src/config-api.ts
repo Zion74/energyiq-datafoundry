@@ -85,6 +85,7 @@ import { buildSessionTraceDag } from "./trace-dag.js";
 import { readMultipartFiles, readMultipartUpload } from "./upload-parser.js";
 import { knowledgeDocumentTextFromFile } from "./knowledge-document-text.js";
 import { resolveLiveSessionActiveRun } from "./stale-active-runs.js";
+import { handleEnergyApiRequest } from "./energy/energy-api.js";
 
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
 const DEFAULT_WORKSPACE_ID = "default";
@@ -173,6 +174,9 @@ const routeConfigRequest = async (
 
   if (root === "me") {
     return handleMeRequest(request, context);
+  }
+  if (root === "energy") {
+    return handleEnergyApiRequest(request, segments.slice(1), context);
   }
   if (root === "dev") {
     return handleDevIdentityRequest(request, segments.slice(1), context);

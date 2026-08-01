@@ -11,8 +11,12 @@ import {
   EncryptedSecretStore,
   initializeConfigSchema
 } from "./config-store.js";
+import { EnergyIqStore, initializeEnergyIqSchema } from "./energyiq-store.js";
+import { initializeEnergyIqProjectSetupSchema } from "./energyiq-project-setup-store.js";
 
 export * from "./config-store.js";
+export * from "./energyiq-store.js";
+export * from "./energyiq-project-setup-store.js";
 
 export type UserRecord = {
   id: string;
@@ -68,7 +72,7 @@ export type AuthTokenRecord = {
 export type WorkspaceRecord = {
   id: string;
   name: string;
-  kind: "personal";
+  kind: "personal" | "customer";
   owner_user_id: string;
   created_at: string;
   updated_at: string;
@@ -77,7 +81,7 @@ export type WorkspaceRecord = {
 export type WorkspaceMembershipRecord = {
   workspace_id: string;
   user_id: string;
-  role: "owner";
+  role: "owner" | "member";
   created_at: string;
 };
 
@@ -630,8 +634,8 @@ export type CreateQueryHistoryInput = {
 
 const DEFAULT_DEV_USER = {
   id: "dev-user",
-  email: "dev@example.com",
-  display_name: "Dev User",
+  email: "admin@energyiq.local",
+  display_name: "EnergyIQ Admin",
   dev_token: "dev-token"
 };
 
@@ -648,6 +652,7 @@ export class MetadataStore {
   readonly conversationSummaries: ConversationSummaryRepository;
   readonly contextPackageSnapshots: ContextPackageSnapshotRepository;
   readonly dataSources: DataSourceRepository;
+  readonly energyIq: EnergyIqStore;
   readonly fileAssetRefs: FileAssetRefRepository;
   readonly fileAssets: FileAssetRepository;
   readonly interactions: InteractionRepository;
@@ -688,6 +693,7 @@ export class MetadataStore {
     this.traceSections = new TraceSectionRepository(db);
     this.contextPackageSnapshots = new ContextPackageSnapshotRepository(db);
     this.dataSources = new DataSourceRepository(db);
+    this.energyIq = new EnergyIqStore(db);
     this.fileAssets = new FileAssetRepository(db);
     this.fileAssetRefs = new FileAssetRefRepository(db);
     this.interactions = new InteractionRepository(db);
@@ -1091,6 +1097,25 @@ export class WorkspaceRepository {
     return this.get({ id: input.id });
   }
 
+  upsert(input: {
+    id: string;
+    owner_user_id: string;
+    name: string;
+    kind: WorkspaceRecord["kind"];
+  }): WorkspaceRecord {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      INSERT INTO workspaces (id, name, kind, owner_user_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        kind = excluded.kind,
+        owner_user_id = excluded.owner_user_id,
+        updated_at = excluded.updated_at
+    `).run(input.id, input.name, input.kind, input.owner_user_id, now, now);
+    return this.get({ id: input.id });
+  }
+
   get(input: { id: string }): WorkspaceRecord {
     const workspace = mapWorkspaceRow(this.db.prepare("SELECT * FROM workspaces WHERE id = ?").get(input.id));
     if (!workspace) {
@@ -1103,6 +1128,24 @@ export class WorkspaceRepository {
     return mapWorkspaceRow(this.db.prepare(`
       SELECT * FROM workspaces WHERE kind = 'personal' AND owner_user_id = ? ORDER BY created_at ASC LIMIT 1
     `).get(input.user_id));
+  }
+
+  list(): WorkspaceRecord[] {
+    return this.db.prepare("SELECT * FROM workspaces ORDER BY kind, name")
+      .all()
+      .map(mapWorkspaceRow)
+      .filter((workspace): workspace is WorkspaceRecord => workspace !== undefined);
+  }
+
+  listByUser(input: { user_id: string }): WorkspaceRecord[] {
+    return this.db.prepare(`
+      SELECT w.* FROM workspaces w
+      INNER JOIN workspace_memberships m ON m.workspace_id = w.id
+      WHERE m.user_id = ?
+      ORDER BY CASE w.kind WHEN 'customer' THEN 0 ELSE 1 END, w.name
+    `).all(input.user_id)
+      .map(mapWorkspaceRow)
+      .filter((workspace): workspace is WorkspaceRecord => workspace !== undefined);
   }
 }
 
@@ -1119,6 +1162,20 @@ export class WorkspaceMembershipRepository {
     return this.get(input);
   }
 
+  upsert(input: {
+    workspace_id: string;
+    user_id: string;
+    role: WorkspaceMembershipRecord["role"];
+  }): WorkspaceMembershipRecord {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      INSERT INTO workspace_memberships (workspace_id, user_id, role, created_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(workspace_id, user_id) DO UPDATE SET role = excluded.role
+    `).run(input.workspace_id, input.user_id, input.role, now);
+    return this.get(input);
+  }
+
   get(input: { workspace_id: string; user_id: string }): WorkspaceMembershipRecord {
     const membership = mapWorkspaceMembershipRow(this.db.prepare(`
       SELECT * FROM workspace_memberships WHERE workspace_id = ? AND user_id = ?
@@ -1127,6 +1184,23 @@ export class WorkspaceMembershipRepository {
       throw new Error(`WORKSPACE_MEMBERSHIP_NOT_FOUND:${input.workspace_id}:${input.user_id}`);
     }
     return membership;
+  }
+
+  find(input: {
+    workspace_id: string;
+    user_id: string;
+  }): Optional<WorkspaceMembershipRecord> {
+    return mapWorkspaceMembershipRow(this.db.prepare(`
+      SELECT * FROM workspace_memberships WHERE workspace_id = ? AND user_id = ?
+    `).get(input.workspace_id, input.user_id));
+  }
+
+  listByUser(input: { user_id: string }): WorkspaceMembershipRecord[] {
+    return this.db.prepare(`
+      SELECT * FROM workspace_memberships WHERE user_id = ? ORDER BY created_at
+    `).all(input.user_id)
+      .map(mapWorkspaceMembershipRow)
+      .filter((membership): membership is WorkspaceMembershipRecord => membership !== undefined);
   }
 }
 
@@ -3815,6 +3889,12 @@ const runMigrations = (db: DatabaseSync): void => {
   });
   runSchemaMigration(db, "0017_protocol_event_journal", "Ensure protocol event journal schema", () => {
     initializeProtocolEventJournalSchema(db);
+  });
+  runSchemaMigration(db, "0018_energyiq_domain_schema", "Ensure EnergyIQ domain schema", () => {
+    initializeEnergyIqSchema(db);
+  });
+  runSchemaMigration(db, "0019_energyiq_project_setup_schema", "Ensure EnergyIQ project setup schema", () => {
+    initializeEnergyIqProjectSetupSchema(db);
   });
 };
 

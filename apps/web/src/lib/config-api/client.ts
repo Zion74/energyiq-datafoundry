@@ -13,6 +13,16 @@ import type {
   DatasourceTypeDto,
   DevIdentitiesResponseDto,
   DevIdentityUser,
+  EnergyAccessContextDto,
+  EnergyProjectHierarchyDto,
+  EnergyProjectRecordDto,
+  EnergyProjectSetupDocumentDto,
+  EnergyProjectSetupDraftDto,
+  EnergyProjectSetupDto,
+  EnergyProjectSetupValidationDto,
+  EnergyQueryContextDto,
+  EnergyQueryContextRequestDto,
+  EnergyScopeAnalysisDto,
   FileAssetRefDto,
   JobDto,
   KnowledgeBaseDto,
@@ -45,6 +55,7 @@ export type ConfigApiIdentity = {
 };
 
 let currentIdentity: ConfigApiIdentity | null = null;
+let currentWorkspaceId: string | null = isPasswordAuthMode() ? null : DEFAULT_WORKSPACE_ID;
 
 export function setConfigApiIdentity(identity: ConfigApiIdentity | null): void {
   currentIdentity = identity;
@@ -54,16 +65,20 @@ export function clearConfigApiIdentity(): void {
   currentIdentity = null;
 }
 
+export function setConfigApiWorkspaceId(workspaceId: string): void {
+  currentWorkspaceId = workspaceId;
+}
+
 export function configApiIdentityHeaders(): Record<string, string> {
   if (isPasswordAuthMode()) {
-    return {};
+    return currentWorkspaceId ? { "X-Workspace-Id": currentWorkspaceId } : {};
   }
   if (!currentIdentity?.devToken) {
     return {};
   }
   return {
     Authorization: `Bearer ${currentIdentity.devToken}`,
-    "X-Workspace-Id": DEFAULT_WORKSPACE_ID,
+    "X-Workspace-Id": currentWorkspaceId ?? DEFAULT_WORKSPACE_ID,
   };
 }
 
@@ -250,6 +265,84 @@ export const configApi = {
 
   getMe(): Promise<MeResponseDto> {
     return requestEnvelope<MeResponseDto>("/api/v1/me");
+  },
+
+  getEnergyAccessContext(): Promise<EnergyAccessContextDto> {
+    return requestEnvelope<EnergyAccessContextDto>("/api/v1/energy/access-context");
+  },
+
+  getEnergyProjectHierarchy(projectId: string): Promise<EnergyProjectHierarchyDto> {
+    return requestEnvelope<EnergyProjectHierarchyDto>(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/hierarchy`,
+    );
+  },
+
+  createEnergyProject(body: {
+    name: string;
+    timezone?: string;
+  }): Promise<{ project: EnergyProjectRecordDto; draft: EnergyProjectSetupDraftDto }> {
+    return requestEnvelope("/api/v1/energy/projects", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  getEnergyProjectSetup(projectId: string): Promise<EnergyProjectSetupDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/setup`,
+    );
+  },
+
+  saveEnergyProjectSetupDraft(
+    projectId: string,
+    body: { expectedRevision: number; document: EnergyProjectSetupDocumentDto },
+  ): Promise<{
+    draft: EnergyProjectSetupDraftDto;
+    validation: EnergyProjectSetupValidationDto;
+  }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/setup/draft`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+  },
+
+  validateEnergyProjectSetup(projectId: string): Promise<EnergyProjectSetupValidationDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/setup/validate`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  },
+
+  publishEnergyProjectSetup(
+    projectId: string,
+    expectedRevision: number,
+  ): Promise<{
+    hierarchy_revision_id: string;
+    validation: EnergyProjectSetupValidationDto;
+    project: EnergyProjectRecordDto;
+  }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/setup/publish`,
+      { method: "POST", body: JSON.stringify({ expectedRevision }) },
+    );
+  },
+
+  resolveEnergyQueryContext(
+    body: EnergyQueryContextRequestDto,
+  ): Promise<EnergyQueryContextDto> {
+    return requestEnvelope<EnergyQueryContextDto>("/api/v1/energy/query-context/resolve", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  executeEnergyScopeAnalysis(
+    body: EnergyQueryContextRequestDto,
+  ): Promise<EnergyScopeAnalysisDto> {
+    return requestEnvelope<EnergyScopeAnalysisDto>("/api/v1/energy/analysis/execute", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
   },
 
   getDevIdentities(): Promise<DevIdentitiesResponseDto> {
