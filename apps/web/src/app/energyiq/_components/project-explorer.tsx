@@ -13,6 +13,7 @@ import {
 
 import { EnergyIcon, type EnergyIconName } from "./icons";
 import { useEnergyIqAccess } from "./energyiq-access";
+import { orderProjectNodesDepthFirst } from "./project-tree-model";
 import {
   configApi,
   type EnergyProjectNodeDto,
@@ -853,9 +854,13 @@ function ProjectTree({
   searchActive: boolean;
   onSelect: (id: string) => void;
 }) {
+  const orderedNodes = useMemo(
+    () => orderProjectNodesDepthFirst(visibleNodes),
+    [visibleNodes],
+  );
   const renderedNodes = searchActive
-    ? visibleNodes
-    : visibleNodes.filter((node) => ancestorsAreExpanded(node, allNodes, expandedIds));
+    ? orderedNodes
+    : orderedNodes.filter((node) => ancestorsAreExpanded(node, allNodes, expandedIds));
 
   return (
     <div className="space-y-0.5">
