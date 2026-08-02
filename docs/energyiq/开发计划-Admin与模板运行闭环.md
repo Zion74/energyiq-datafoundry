@@ -13,7 +13,7 @@ status: in_progress
 
 # EnergyIQ 开发计划：Admin 与模板运行闭环
 
-> 状态：**批次 0–2 已完成并通过 Ngee Ann Level 6 的真实 Admin→Facts→FM→AI Context 闭环复验；批次 3 的 Metric/Rule Registry、Component Catalog 与 Project/Tier Template Draft 已完成。下一步是 Draft Preview，并进入批次 4 的不可变 Template Revision、Analysis Run 与 Review & Publish。**
+> 状态：**批次 0–3 与批次 4 的真实 Draft Preview 已完成，并通过 Ngee Ann/Preschool 双项目验证。下一步是不可变 Template Revision、Analysis Run、Rerun 与 Review & Publish。**
 
 实施证据见：[2026-08-01 Admin 与 Tier 批次 0–1 实施记录](2026-08-01-Admin-Tier-批次0-1实施记录.md)、[Admin Meter Mapping 与虚拟电表实施记录](2026-08-01-Admin-Meter-Mapping与虚拟电表实施记录.md)、[Admin Excel Import Batch 实施记录](2026-08-01-Admin-Excel-Import-Batch实施记录.md)、[Admin Metric/Rule Registry 实施记录](2026-08-02-Admin-Metric-Rule-Registry实施记录.md)和 [Admin Component Catalog 与 Template Draft 实施记录](2026-08-02-Admin-Component-Catalog与Template-Draft实施记录.md)。
 
@@ -56,7 +56,7 @@ admin creates Project
 - Preschool 现有可运行事实仍是 Project → Centre → Circuit，Block → Room → Circuit 目标映射等待客户输入；
 - Tariff 0.2727 仍在分析代码中硬编码；
 - Metric/Rule Revision 已持久化并驱动确定性计算，但当前 Project 选择仍是 Draft，尚未冻结为 Published Template Revision；
-- Component Catalog 与 Project/Tier Template Draft 已实现；Draft Preview、不可变 Template Revision、Analysis Run 与 Rerun 尚未实现；
+- Component Catalog、Project/Tier Template Draft 与真实 Project/Scope/Period Draft Preview 已实现；不可变 Template Revision、Analysis Run 与 Rerun 尚未实现；
 - 客户 Overview/Explorer 尚未统一消费已发布模板。
 
 ## 3. 实施原则
@@ -219,13 +219,13 @@ admin creates Project
 
 ### 工作
 
+- 已完成：Draft Preview 与正式运行隔离；Preview 使用真实 Project/Scope/Period、canonical fact 覆盖、Project timezone 和受控 Component Renderer；
 - Publish 产生不可变 Template Revision；
 - 建立 Analysis Run 与运行状态；
 - 固定 Context、Data Snapshot 和全部计算版本；
 - 保存结果 Artifact、Evidence、SQL/Query Spec 和质量摘要；
 - 历史列表、详情和 Rerun；
 - 新数据运行产生新 Run，不覆盖旧结果；
-- Draft Preview 与正式运行隔离。
 
 ### 验收
 
@@ -384,4 +384,4 @@ admin creates Project
 4. Preschool 不自动猜 Block/Room；
 5. Admin 与客户 UI 均先英文。
 
-数据事实闭环和批次 3 的 Metric/Rule/Component/Template Draft 均已通过。Preschool Block/Room 仍保持待补输入，不自动猜测；下一步先让 Draft 在真实 Project/Scope/Period 上预览，再进入不可变 Template Revision、Analysis Run 与发布。
+数据事实闭环、批次 3 的 Metric/Rule/Component/Template Draft，以及真实 Project/Scope/Period Draft Preview 均已通过。Preschool Block/Room 仍保持待补输入，不自动猜测；下一步进入不可变 Template Revision、Analysis Run、Rerun 与发布。

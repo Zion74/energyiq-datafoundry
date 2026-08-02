@@ -1,6 +1,6 @@
 ---
 title: "2026-08-02 开发记录：Admin Component Catalog 与 Template Draft"
-summary: "建立受控分析组件目录、Project/Tier 模板草稿和可解释就绪状态，并完成保存复载验证。"
+summary: "建立受控分析组件目录、Project/Tier 模板草稿和真实事实预览，并完成保存复载、时区与双项目验证。"
 doc_type: runlog
 tags: [开发记录, Admin, Component Catalog, Template Draft, Tier]
 updated_at: "2026-08-02"
@@ -78,6 +78,44 @@ npm --workspace @datafoundry/api run build
 - 当前 Draft 是可变配置，不是正式版本。不能把它当作客户已发布模板，也不能据此宣称复跑闭环完成。
 - Ngee Ann 的 2 个 Level 不足以支撑 3 个同级样本的面积/人数基准，因此正确行为是降级提示，不是为了展示效果降低统计门槛。
 
-## 6. 后续
+## 6. Draft Preview 增量
 
-下一步进入批次 4 的第一段：用真实 Project、Scope、Period 预览 Draft，确认 Component Catalog 能驱动现有 Overview/Explorer 模块；之后再冻结不可变 Template Revision，建立 Analysis Run、Evidence 和 Rerun。
+提交 `7625ec5` 已完成批次 4 的第一段：管理员可在 `Templates → Template layout` 中选择 Project Template 或 Tier Template，再选择真实 Scope 和时间范围运行 Draft Preview。
+
+关键边界：
+
+- Preview 直接调用既有可信范围分析接口，不新增第二套计算逻辑；
+- 默认时间范围来自 canonical `energy_interval_facts` 的实际覆盖，不依赖是否存在 Excel Import Batch，因此 Excel 与未来 Tuya API 共用同一逻辑；
+- 时间标签和 Custom 日期默认值统一按 Project timezone 解释；
+- Component Catalog 的顺序和启用状态直接驱动预览；`Not ready` 模块不伪造结果，而显示 `Preview withheld` 与缺失条件；
+- Preview 是 admin-only 临时运行，不创建 Template Revision 或 Analysis Run，也不会影响客户页面；
+- canonical 范围可能包含多个导入批次，因此界面显示“日期范围 + interval 数量”，不误标成来自某一个 Excel 文件。
+
+新增或修改的主要入口：
+
+| 文件/模块 | 作用 |
+| --- | --- |
+| `apps/web/src/app/energyiq/admin/template-draft-preview-model.ts` | 生成 Project/Tier 预览计划、推荐可用 Scope、解析真实事实覆盖和请求参数 |
+| `apps/web/src/app/energyiq/admin/template-draft-preview.tsx` | Admin 的 Scope/Period 控件、运行状态与草稿预览容器 |
+| `apps/web/src/app/energyiq/_components/energy-template-renderer.tsx` | 按 Component `view_key` 渲染十类受控分析模块 |
+| `packages/data-gateway/src/energy-scoped-datasource.ts` | 读取 Project/Resource 的 canonical fact 覆盖范围和 interval 数量 |
+| `apps/api/src/energy/energy-api.ts` | 增加 admin-only Project 数据覆盖查询接口 |
+
+验证证据：
+
+~~~powershell
+npx vitest run apps/web/src/app/energyiq/admin/template-draft-preview-model.test.ts apps/web/src/app/energyiq/admin/analysis-configuration-model.test.ts
+npx vitest run packages/data-gateway/src/energy-fact-writer.test.ts
+npm --workspace @datafoundry/data-gateway run build
+npm --workspace @datafoundry/api run build
+~~~
+
+- Web preview/readiness：16/16 通过；Data Gateway：2/2 通过；两个 workspace build 通过；
+- Preschool Project Preview：`1 May 2026–31 May 2026`，`24,921.81 kWh`；
+- Ngee Ann Project Preview：`21 Apr 2026–17 Jun 2026`，`10,209.87 kWh`；
+- Ngee Ann Level Template：能选择 Level 6/7，并按各自 Scope 重算；
+- 全量 Web TypeScript 仍被既有 Data Tasks 测试类型错误阻塞；本次新增预览文件未出现在错误列表。
+
+## 7. 后续
+
+下一步冻结不可变 Template Revision，并建立 Analysis Run、Evidence、历史结果与 Rerun。客户 Overview/Explorer 只能消费 Published Revision，不直接读取可变 Draft。
