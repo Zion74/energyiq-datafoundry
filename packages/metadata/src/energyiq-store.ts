@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { EnergyIqMetricStore } from "./energyiq-metric-store.js";
 import { EnergyIqRuleStore } from "./energyiq-rule-store.js";
+import { EnergyIqTemplateStore } from "./energyiq-template-store.js";
 
 import {
   EnergyIqProjectSetupStore,
@@ -184,11 +185,13 @@ export class EnergyIqStore {
   readonly metrics: EnergyIqMetricStore;
   readonly projectSetup: EnergyIqProjectSetupStore;
   readonly rules: EnergyIqRuleStore;
+  readonly templates: EnergyIqTemplateStore;
 
   constructor(private readonly db: DatabaseSync) {
     this.metrics = new EnergyIqMetricStore(db);
     this.projectSetup = new EnergyIqProjectSetupStore(db);
     this.rules = new EnergyIqRuleStore(db);
+    this.templates = new EnergyIqTemplateStore(db);
   }
 
   upsertUserRole(input: { user_id: string; role: EnergyIqRole }): EnergyIqUserRoleRecord {

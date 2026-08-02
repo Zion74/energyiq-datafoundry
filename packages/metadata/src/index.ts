@@ -15,12 +15,14 @@ import { EnergyIqStore, initializeEnergyIqSchema } from "./energyiq-store.js";
 import { initializeEnergyIqMetricSchema } from "./energyiq-metric-store.js";
 import { initializeEnergyIqProjectSetupSchema } from "./energyiq-project-setup-store.js";
 import { initializeEnergyIqRuleSchema } from "./energyiq-rule-store.js";
+import { initializeEnergyIqTemplateSchema } from "./energyiq-template-store.js";
 
 export * from "./config-store.js";
 export * from "./energyiq-store.js";
 export * from "./energyiq-metric-store.js";
 export * from "./energyiq-project-setup-store.js";
 export * from "./energyiq-rule-store.js";
+export * from "./energyiq-template-store.js";
 
 export type UserRecord = {
   id: string;
@@ -3981,6 +3983,9 @@ const runMigrations = (db: DatabaseSync): void => {
   });
   runSchemaMigration(db, "0021_energyiq_rule_schema", "Ensure EnergyIQ rule revision schema", () => {
     initializeEnergyIqRuleSchema(db);
+  });
+  runSchemaMigration(db, "0022_energyiq_template_schema", "Ensure EnergyIQ component and template draft schema", () => {
+    initializeEnergyIqTemplateSchema(db);
   });
 };
 

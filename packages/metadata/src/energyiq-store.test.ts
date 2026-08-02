@@ -6,6 +6,83 @@ import { describe, expect, it } from "vitest";
 import { createMetadataStore } from "./index.js";
 
 describe("EnergyIqStore", () => {
+  it("stores the controlled component catalog and one draft per Project and Tier", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-template-store-"));
+    try {
+      const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+      metadata.workspaces.upsert({ id: "template-workspace", owner_user_id: "dev-user", name: "Templates", kind: "customer" });
+      metadata.energyIq.upsertProject({ id: "template-project", workspace_id: "template-workspace", name: "Templates", status: "draft" });
+
+      const catalog = metadata.energyIq.templates.listComponentRevisions();
+      expect(catalog.map((component) => component.revision_id)).toEqual(expect.arrayContaining([
+        "decision.executive_actions@1",
+        "comparison.child_scope_ranking@1",
+        "composition.meter_breakdown@1",
+      ]));
+      const initial = metadata.energyIq.templates.getProjectDraft({
+        project_id: "template-project",
+        tier_definition_ids: ["tier-circuit", "tier-level"],
+      });
+      expect(initial.revision).toBe(0);
+      expect(initial.document.templates.map((template) => template.template_id)).toEqual([
+        "project",
+        "tier:tier-circuit",
+        "tier:tier-level",
+      ]);
+      expect(initial.document.templates[0]?.components.map((item) => item.component_revision_id))
+        .not.toContain("composition.meter_breakdown@1");
+      expect(initial.document.templates[1]?.components.map((item) => item.component_revision_id))
+        .toContain("composition.meter_breakdown@1");
+
+      const projectTemplate = initial.document.templates[0]!;
+      const saved = metadata.energyIq.templates.saveProjectDraft({
+        project_id: "template-project",
+        expected_revision: 0,
+        tier_definition_ids: ["tier-circuit", "tier-level"],
+        document: {
+          templates: [
+            {
+              ...projectTemplate,
+              components: projectTemplate.components.map((component, index) => ({
+                ...component,
+                enabled: index !== 0,
+              })),
+            },
+            ...initial.document.templates.slice(1),
+          ],
+        },
+        updated_by: "dev-user",
+      });
+      expect(saved.revision).toBe(1);
+      expect(saved.document.templates[0]?.components[0]?.enabled).toBe(false);
+      expect(() => metadata.energyIq.templates.saveProjectDraft({
+        project_id: "template-project",
+        expected_revision: 0,
+        tier_definition_ids: ["tier-circuit", "tier-level"],
+        document: saved.document,
+        updated_by: "dev-user",
+      })).toThrow("ENERGYIQ_TEMPLATE_DRAFT_REVISION_CONFLICT");
+      expect(() => metadata.energyIq.templates.saveProjectDraft({
+        project_id: "template-project",
+        expected_revision: 1,
+        tier_definition_ids: ["tier-circuit", "tier-level"],
+        document: {
+          templates: saved.document.templates.map((template) => template.template_id === "project"
+            ? {
+                ...template,
+                components: [{ component_revision_id: "composition.meter_breakdown@1", enabled: true }],
+              }
+            : template),
+        },
+        updated_by: "dev-user",
+      })).toThrow("ENERGYIQ_TEMPLATE_COMPONENT_TARGET_INVALID");
+
+      metadata.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
   it("stores immutable rule revisions and versioned project selections", () => {
     const root = mkdtempSync(join(tmpdir(), "energyiq-rules-store-"));
     try {
