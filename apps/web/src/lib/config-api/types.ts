@@ -362,6 +362,7 @@ export type EnergyScopeAnalysisDto = {
     hierarchyRevisionId: string;
     meterFormulaRevisionId: string;
     metricVersion: string;
+    ruleRevisionIds: string[];
     aggregationRule: "designated_total" | "component" | "submeter" | "none";
     sourceView: string;
     queryIds: ["scope_summary_v1", "hourly_profile_v1", "meter_breakdown_v1"];

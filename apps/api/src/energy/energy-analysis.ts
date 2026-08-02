@@ -2,7 +2,7 @@ import {
   ensureEnergyScopedDataSource,
   type LocalDataGateway
 } from "@datafoundry/data-gateway";
-import type { MetadataStore } from "@datafoundry/metadata";
+import type { EnergyIqRuleRevisionRecord, MetadataStore } from "@datafoundry/metadata";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -71,6 +71,7 @@ export type EnergyScopeAnalysis = {
     hierarchyRevisionId: string;
     meterFormulaRevisionId: string;
     metricVersion: string;
+    ruleRevisionIds: string[];
     aggregationRule: "designated_total" | "component" | "submeter" | "none";
     sourceView: string;
     queryIds: ["scope_summary_v1", "hourly_profile_v1", "meter_breakdown_v1"];
@@ -97,6 +98,7 @@ export const executeEnergyScopeAnalysis = async (input: {
   userId: string;
   context: EnergyQueryContext;
   databasePath?: string;
+  ruleRevisions?: readonly EnergyIqRuleRevisionRecord[];
 }): Promise<EnergyScopeAnalysis> => {
   const scopeNodeIds = resolveEnergyScopeMeterNodeIds(
     input.metadataStore,
@@ -206,6 +208,7 @@ export const executeEnergyScopeAnalysis = async (input: {
     validIntervalCount,
     qualityEventCount
   };
+  const ruleRevisions = input.ruleRevisions ?? input.metadataStore.energyIq.rules.listRevisions();
 
   return {
     context: input.context,
@@ -217,12 +220,13 @@ export const executeEnergyScopeAnalysis = async (input: {
     })),
     childScopes,
     circuits,
-    attention: buildAttention({ summary, childScopes, circuits }),
+    attention: evaluateEnergyAttention({ summary, childScopes, circuits, ruleRevisions }),
     provenance: {
       dataSnapshotId: input.context.dataSnapshotId,
       hierarchyRevisionId: input.context.hierarchyRevisionId,
       meterFormulaRevisionId: input.context.meterFormulaRevisionId,
       metricVersion: input.context.metricVersion,
+      ruleRevisionIds: ruleRevisions.map((rule) => rule.revision_id),
       aggregationRule,
       sourceView: scoped.viewName,
       queryIds: ["scope_summary_v1", "hourly_profile_v1", "meter_breakdown_v1"]
@@ -271,22 +275,26 @@ const buildChildScopes = (input: {
   }).sort((left, right) => right.usageKwh - left.usageKwh);
 };
 
-const buildAttention = (input: {
+export const evaluateEnergyAttention = (input: {
   summary: EnergyScopeAnalysis["summary"];
   childScopes: EnergyScopeAnalysis["childScopes"];
   circuits: EnergyScopeAnalysis["circuits"];
+  ruleRevisions: readonly EnergyIqRuleRevisionRecord[];
 }): EnergyScopeAnalysis["attention"] => {
+  const ruleByEvaluationKey = new Map(input.ruleRevisions.map((rule) => [rule.evaluation_key, rule]));
   if (input.summary.usageKwh <= 0) {
-    return [{
+    return ruleByEvaluationKey.has("NO_DATA") ? [{
       code: "NO_DATA",
       severity: "info",
       title: "No validated consumption in this period",
       evidence: "The trusted scope returned zero valid interval consumption.",
       suggestedAction: "Check the selected period and latest import batch."
-    }];
+    }] : [];
   }
   const attention: EnergyScopeAnalysis["attention"] = [];
-  if (input.summary.nonOperatingSharePct >= 10) {
+  const offHoursRule = ruleByEvaluationKey.get("NON_OPERATING_SHARE");
+  const offHoursThreshold = numericRuleParameter(offHoursRule?.parameters.threshold_pct, 10);
+  if (offHoursRule && input.summary.nonOperatingSharePct >= offHoursThreshold) {
     const breakdownCircuits = input.circuits.filter((circuit) => circuit.meterRole !== "total");
     const topNonOperating = maxBy(
       breakdownCircuits.length > 0 ? breakdownCircuits : input.circuits,
@@ -303,7 +311,9 @@ const buildAttention = (input: {
     });
   }
   const highestChild = input.childScopes[0];
-  if (highestChild && input.childScopes.length > 1) {
+  const highestChildRule = ruleByEvaluationKey.get("TOP_CHILD_SCOPE");
+  const minimumChildren = numericRuleParameter(highestChildRule?.parameters.minimum_peers, 2);
+  if (highestChildRule && highestChild && input.childScopes.length >= minimumChildren) {
     attention.push({
       code: "TOP_CHILD_SCOPE",
       severity: "info",
@@ -315,11 +325,14 @@ const buildAttention = (input: {
   const normalised = input.childScopes.filter(
     (child): child is typeof child & { kwhPerSqm: number } => child.kwhPerSqm !== undefined
   );
-  if (normalised.length >= 3) {
+  const areaRule = ruleByEvaluationKey.get("AREA_NORMALISED_OUTLIER");
+  const minimumAreaPeers = numericRuleParameter(areaRule?.parameters.minimum_peers, 3);
+  const areaMedianRatio = numericRuleParameter(areaRule?.parameters.median_ratio, 1.2);
+  if (areaRule && normalised.length >= minimumAreaPeers) {
     const values = normalised.map((child) => child.kwhPerSqm).sort((left, right) => left - right);
     const median = values[Math.floor(values.length / 2)] ?? 0;
     const highest = maxBy(normalised, (child) => child.kwhPerSqm);
-    if (highest && median > 0 && highest.kwhPerSqm >= median * 1.2) {
+    if (highest && median > 0 && highest.kwhPerSqm >= median * areaMedianRatio) {
       attention.push({
         code: "AREA_NORMALISED_OUTLIER",
         severity: "warning",
@@ -329,8 +342,32 @@ const buildAttention = (input: {
       });
     }
   }
+
+  const peopleNormalised = input.childScopes.filter(
+    (child): child is typeof child & { kwhPerPerson: number } => child.kwhPerPerson !== undefined
+  );
+  const peopleRule = ruleByEvaluationKey.get("PEOPLE_NORMALISED_OUTLIER");
+  const minimumPeoplePeers = numericRuleParameter(peopleRule?.parameters.minimum_peers, 3);
+  const peopleMedianRatio = numericRuleParameter(peopleRule?.parameters.median_ratio, 1.2);
+  if (peopleRule && peopleNormalised.length >= minimumPeoplePeers) {
+    const values = peopleNormalised.map((child) => child.kwhPerPerson).sort((left, right) => left - right);
+    const median = values[Math.floor(values.length / 2)] ?? 0;
+    const highest = maxBy(peopleNormalised, (child) => child.kwhPerPerson);
+    if (highest && median > 0 && highest.kwhPerPerson >= median * peopleMedianRatio) {
+      attention.push({
+        code: "PEOPLE_NORMALISED_OUTLIER",
+        severity: "warning",
+        title: `${highest.name} has the highest per-person consumption`,
+        evidence: `${highest.kwhPerPerson.toFixed(2)} kWh/person versus a sibling median of ${median.toFixed(2)} kWh/person.`,
+        suggestedAction: "Confirm typical occupancy and operating hours before comparing absolute kWh alone."
+      });
+    }
+  }
   return attention;
 };
+
+const numericRuleParameter = (value: number | string | undefined, fallback: number): number =>
+  typeof value === "number" && Number.isFinite(value) ? value : fallback;
 
 const resolveScopeDimensions = (
   scopeNodeId: string,

@@ -1,11 +1,11 @@
 import { LocalDataGateway } from "@datafoundry/data-gateway";
-import { createMetadataStore } from "@datafoundry/metadata";
+import { createMetadataStore, type EnergyIqRuleRevisionRecord } from "@datafoundry/metadata";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { executeEnergyScopeAnalysis } from "./energy-analysis.js";
+import { evaluateEnergyAttention, executeEnergyScopeAnalysis } from "./energy-analysis.js";
 import { ensureEnergyIqBootstrap, PRESCHOOL_WORKSPACE_ID } from "./energy-bootstrap.js";
 import { resolveEnergyQueryContext } from "./energy-query-context.js";
 
@@ -53,6 +53,7 @@ describe("EnergyScopeAnalysis", () => {
         meterFormulaRevisionId: "preschool-meter-formula-v2",
         aggregationRule: "component"
       });
+      expect(portfolio.provenance.ruleRevisionIds).toContain("time.high_off_hours_share@1");
       expect(portfolio.attention.some((item) => item.code === "NON_OPERATING_SHARE")).toBe(true);
 
       const centreContext = resolveEnergyQueryContext({
@@ -130,4 +131,49 @@ describe("EnergyScopeAnalysis", () => {
       rmSync(root, { recursive: true, force: true });
     }
   }, 30_000);
+
+  it("evaluates only supplied rule revisions and takes thresholds from the registry", () => {
+    const attention = evaluateEnergyAttention({
+      summary: {
+        usageKwh: 100,
+        averageDailyUsageKwh: 100,
+        costSgd: 0,
+        peakKw: 5,
+        nonOperatingKwh: 50,
+        nonOperatingSharePct: 50,
+        validIntervalCount: 96,
+        qualityEventCount: 0,
+      },
+      childScopes: [
+        { nodeId: "a", name: "A", nodeType: "room", usageKwh: 30, sharePct: 30, occupantCount: 10, kwhPerPerson: 3 },
+        { nodeId: "b", name: "B", nodeType: "room", usageKwh: 10, sharePct: 10, occupantCount: 10, kwhPerPerson: 1 },
+        { nodeId: "c", name: "C", nodeType: "room", usageKwh: 10, sharePct: 10, occupantCount: 10, kwhPerPerson: 1 },
+      ],
+      circuits: [],
+      ruleRevisions: [ruleRevision({
+        revision_id: "comparison.people_intensity_outlier@7",
+        evaluation_key: "PEOPLE_NORMALISED_OUTLIER",
+        parameters: { minimum_peers: 3, median_ratio: 2.5 },
+      })],
+    });
+
+    expect(attention.map((item) => item.code)).toEqual(["PEOPLE_NORMALISED_OUTLIER"]);
+    expect(attention[0]?.evidence).toContain("3.00 kWh/person");
+  });
+});
+
+const ruleRevision = (override: Partial<EnergyIqRuleRevisionRecord>): EnergyIqRuleRevisionRecord => ({
+  revision_id: "rule@1",
+  rule_id: "rule",
+  version: 1,
+  display_name: "Rule",
+  description: "Rule",
+  family: "comparison",
+  severity: "warning",
+  evaluation_key: "RULE",
+  metric_revision_ids: [],
+  parameters: {},
+  requirement: "always",
+  created_at: "2026-08-02T00:00:00.000Z",
+  ...override,
 });
