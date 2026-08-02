@@ -460,6 +460,56 @@ export type EnergyProjectRuleConfigResponseDto = {
   config: EnergyProjectRuleConfigDto;
 };
 
+export type EnergyComponentFamilyDto = "decision" | "overview" | "comparison" | "time" | "composition" | "quality" | "evidence";
+export type EnergyComponentTargetDto = "project" | "tier" | "both";
+export type EnergyComponentRequirementDto = "always" | "rules" | "operating_hours" | "children" | "area_peers" | "people_peers" | "meter_breakdown";
+
+export type EnergyComponentRevisionDto = {
+  revision_id: string;
+  component_id: string;
+  version: number;
+  display_name: string;
+  description: string;
+  family: EnergyComponentFamilyDto;
+  view_key: string;
+  target: EnergyComponentTargetDto;
+  metric_revision_ids: string[];
+  rule_revision_ids: string[];
+  query_ids: string[];
+  requirement: EnergyComponentRequirementDto;
+  created_at: string;
+};
+
+export type EnergyTemplateComponentPlacementDto = {
+  component_revision_id: string;
+  enabled: boolean;
+};
+
+export type EnergyTemplateDefinitionDto = {
+  template_id: string;
+  target_kind: "project" | "tier";
+  tier_definition_id?: string;
+  components: EnergyTemplateComponentPlacementDto[];
+};
+
+export type EnergyTemplateDraftDocumentDto = {
+  templates: EnergyTemplateDefinitionDto[];
+};
+
+export type EnergyProjectTemplateDraftDto = {
+  project_id: string;
+  revision: number;
+  document: EnergyTemplateDraftDocumentDto;
+  updated_by?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type EnergyProjectTemplateDraftResponseDto = {
+  catalog: EnergyComponentRevisionDto[];
+  draft: EnergyProjectTemplateDraftDto;
+};
+
 export type DevIdentitiesResponseDto = {
   users: DevIdentityUser[];
   currentUserId: string;

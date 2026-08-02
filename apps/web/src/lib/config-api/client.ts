@@ -19,6 +19,8 @@ import type {
   EnergyImportBatchDto,
   EnergyProjectMetricConfigResponseDto,
   EnergyProjectRuleConfigResponseDto,
+  EnergyProjectTemplateDraftResponseDto,
+  EnergyTemplateDraftDocumentDto,
   EnergyProjectHierarchyDto,
   EnergyProjectRecordDto,
   EnergyProjectSetupDocumentDto,
@@ -434,6 +436,22 @@ export const configApi = {
   ): Promise<EnergyProjectRuleConfigResponseDto> {
     return requestEnvelope(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/rule-config`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+  },
+
+  getEnergyProjectTemplateDraft(projectId: string): Promise<EnergyProjectTemplateDraftResponseDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/template-draft`,
+    );
+  },
+
+  saveEnergyProjectTemplateDraft(
+    projectId: string,
+    body: { expectedRevision: number; document: EnergyTemplateDraftDocumentDto },
+  ): Promise<EnergyProjectTemplateDraftResponseDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/template-draft`,
       { method: "PUT", body: JSON.stringify(body) },
     );
   },

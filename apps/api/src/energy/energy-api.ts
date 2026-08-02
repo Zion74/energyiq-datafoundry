@@ -1,6 +1,10 @@
 import { createErrorResult, createSuccessResult, type AppErrorCode } from "@datafoundry/contracts";
 import { resolveEnergyFactStorePath, writeEnergyFactMaterialization } from "@datafoundry/data-gateway";
-import type { EnergyIqImportBatchRecord, EnergyIqProjectSetupDocument } from "@datafoundry/metadata";
+import type {
+  EnergyIqImportBatchRecord,
+  EnergyIqProjectSetupDocument,
+  EnergyIqTemplateDraftDocument,
+} from "@datafoundry/metadata";
 import { createHash, randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 
@@ -371,6 +375,48 @@ export const handleEnergyApiRequest = async (
         };
       }
     }
+    if (segments[0] === "projects" && segments[2] === "template-draft" && segments.length === 3) {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      requireEnergyAdminProject(context, user, projectId);
+      const setupDraft = context.metadataStore.energyIq.projectSetup.getDraft({
+        project_id: projectId,
+        user_id: user.id,
+      });
+      const tierDefinitionIds = [...setupDraft.document.tiers]
+        .sort((left, right) => right.ordinal - left.ordinal)
+        .map((tier) => tier.id);
+      if (request.method === "GET") {
+        return {
+          status: 200,
+          body: createSuccessResult({
+            catalog: context.metadataStore.energyIq.templates.listComponentRevisions(),
+            draft: context.metadataStore.energyIq.templates.getProjectDraft({
+              project_id: projectId,
+              tier_definition_ids: tierDefinitionIds,
+            }),
+          }),
+        };
+      }
+      if (request.method === "PUT") {
+        const body = requireRecord(await readJsonBody(request));
+        return {
+          status: 200,
+          body: createSuccessResult({
+            catalog: context.metadataStore.energyIq.templates.listComponentRevisions(),
+            draft: context.metadataStore.energyIq.templates.saveProjectDraft({
+              project_id: projectId,
+              expected_revision: requireInteger(
+                body.expectedRevision,
+                "ENERGYIQ_TEMPLATE_DRAFT_REVISION_REQUIRED",
+              ),
+              tier_definition_ids: tierDefinitionIds,
+              document: parseTemplateDraftDocument(body.document),
+              updated_by: user.id,
+            }),
+          }),
+        };
+      }
+    }
     if (segments[0] === "query-context" && segments[1] === "resolve" && request.method === "POST") {
       const body = await readJsonBody(request);
       return {
@@ -595,6 +641,42 @@ const parseProjectSetupDocument = (value: unknown): EnergyIqProjectSetupDocument
       };
     }),
     ...(meterMapping ? { meter_mapping: meterMapping } : {})
+  };
+};
+
+const parseTemplateDraftDocument = (value: unknown): EnergyIqTemplateDraftDocument => {
+  const document = requireRecord(value, "ENERGYIQ_TEMPLATE_DOCUMENT_INVALID");
+  if (!Array.isArray(document.templates)) throw new Error("ENERGYIQ_TEMPLATE_DOCUMENT_INVALID");
+  return {
+    templates: document.templates.map((value, templateIndex) => {
+      const template = requireRecord(value, `ENERGYIQ_TEMPLATE_INVALID:${templateIndex}`);
+      if (!Array.isArray(template.components)) {
+        throw new Error(`ENERGYIQ_TEMPLATE_COMPONENTS_INVALID:${templateIndex}`);
+      }
+      const targetKind = template.target_kind;
+      if (targetKind !== "project" && targetKind !== "tier") {
+        throw new Error(`ENERGYIQ_TEMPLATE_TARGET_INVALID:${templateIndex}`);
+      }
+      const tierDefinitionId = optionalString(template.tier_definition_id);
+      return {
+        template_id: requireNonEmptyString(template.template_id, `ENERGYIQ_TEMPLATE_ID_REQUIRED:${templateIndex}`),
+        target_kind: targetKind,
+        ...(tierDefinitionId ? { tier_definition_id: tierDefinitionId } : {}),
+        components: template.components.map((value, componentIndex) => {
+          const component = requireRecord(
+            value,
+            `ENERGYIQ_TEMPLATE_COMPONENT_INVALID:${templateIndex}:${componentIndex}`,
+          );
+          return {
+            component_revision_id: requireNonEmptyString(
+              component.component_revision_id,
+              `ENERGYIQ_TEMPLATE_COMPONENT_ID_REQUIRED:${templateIndex}:${componentIndex}`,
+            ),
+            enabled: component.enabled === true,
+          };
+        }),
+      };
+    }),
   };
 };
 
