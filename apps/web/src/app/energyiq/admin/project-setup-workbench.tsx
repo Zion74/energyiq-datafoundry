@@ -30,6 +30,7 @@ import { EnergyIcon } from "../_components/icons";
 import type { useEnergyIqAccess } from "../_components/energyiq-access";
 import { EnergyIqAdminSidebar, type AdminSection } from "./admin-sidebar";
 import { AdminAccessPages } from "./admin-access-pages";
+import { resolveMetricReadiness } from "./analysis-configuration-model";
 import { deriveProjectDeliveryProgress } from "./project-delivery-progress";
 import { useProjectSetupLoader } from "./use-project-setup-loader";
 import {
@@ -387,7 +388,7 @@ function renderAdminSection({
     );
   }
   if (section === "templates") {
-    return <AnalysisConfigurationPage projectId={selectedProjectId} />;
+    return <AnalysisConfigurationPage projectId={selectedProjectId} document={document} />;
   }
 
   const planned = plannedSectionCopy(section);
@@ -413,7 +414,13 @@ const metricFamilyCopy: Record<EnergyMetricFamilyDto, { label: string; descripti
   },
 };
 
-function AnalysisConfigurationPage({ projectId }: { projectId: string }) {
+function AnalysisConfigurationPage({
+  projectId,
+  document,
+}: {
+  projectId: string;
+  document: EnergyProjectSetupDocumentDto;
+}) {
   const [catalog, setCatalog] = useState<EnergyMetricRevisionDto[]>([]);
   const [revision, setRevision] = useState(0);
   const [selected, setSelected] = useState<string[]>([]);
@@ -470,6 +477,10 @@ function AnalysisConfigurationPage({ projectId }: { projectId: string }) {
   const families = (["aggregate", "time", "normalised", "quality"] as const)
     .map((family) => ({ family, metrics: catalog.filter((metric) => metric.family === family) }))
     .filter((group) => group.metrics.length > 0);
+  const readinessByMetricId = new Map(catalog.map((metric) => [
+    metric.revision_id,
+    resolveMetricReadiness(metric, document),
+  ]));
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">
@@ -536,6 +547,7 @@ function AnalysisConfigurationPage({ projectId }: { projectId: string }) {
                 <div className="grid gap-3 lg:grid-cols-2">
                   {metrics.map((metric) => {
                     const checked = selected.includes(metric.revision_id);
+                    const readiness = readinessByMetricId.get(metric.revision_id);
                     return (
                       <label
                         key={metric.revision_id}
@@ -557,10 +569,20 @@ function AnalysisConfigurationPage({ projectId }: { projectId: string }) {
                             <strong className="text-xs">{metric.display_name}</strong>
                             <span className="rounded-full bg-surface px-2 py-0.5 text-[9px] font-semibold text-muted">{metric.unit}</span>
                             <span className="rounded-full bg-surface px-2 py-0.5 text-[9px] text-muted">v{metric.version}</span>
+                            {readiness ? (
+                              <span className={[
+                                "rounded-full px-2 py-0.5 text-[9px] font-semibold",
+                                readiness.status === "ready"
+                                  ? "bg-step-success/10 text-step-success"
+                                  : readiness.status === "partial"
+                                    ? "bg-step-warning/10 text-step-warning"
+                                    : "bg-surface text-muted",
+                              ].join(" ")}>{readiness.label}</span>
+                            ) : null}
                           </span>
                           <span className="mt-1.5 block text-[11px] leading-4 text-muted">{metric.description}</span>
                           <span className="mt-2 block text-[10px] font-medium text-muted-light">
-                            {metric.requirement === "area" ? "Requires area metadata" : metric.requirement === "people" ? "Requires 24-hour people metadata" : "Available from interval facts"}
+                            {readiness?.detail ?? "Readiness unavailable"}
                           </span>
                         </span>
                       </label>
