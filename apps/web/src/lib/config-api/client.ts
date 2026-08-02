@@ -18,6 +18,7 @@ import type {
   EnergyAdminUserDto,
   EnergyImportBatchDto,
   EnergyProjectMetricConfigResponseDto,
+  EnergyProjectDataCoverageDto,
   EnergyProjectRuleConfigResponseDto,
   EnergyProjectTemplateDraftResponseDto,
   EnergyTemplateDraftDocumentDto,
@@ -443,6 +444,12 @@ export const configApi = {
   getEnergyProjectTemplateDraft(projectId: string): Promise<EnergyProjectTemplateDraftResponseDto> {
     return requestEnvelope(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/template-draft`,
+    );
+  },
+
+  getEnergyProjectDataCoverage(projectId: string): Promise<{ coverage: EnergyProjectDataCoverageDto | null }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/data-coverage`,
     );
   },
 

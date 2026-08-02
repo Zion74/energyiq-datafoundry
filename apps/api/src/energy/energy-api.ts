@@ -1,5 +1,5 @@
 import { createErrorResult, createSuccessResult, type AppErrorCode } from "@datafoundry/contracts";
-import { resolveEnergyFactStorePath, writeEnergyFactMaterialization } from "@datafoundry/data-gateway";
+import { readEnergyFactCoverage, resolveEnergyFactStorePath, writeEnergyFactMaterialization } from "@datafoundry/data-gateway";
 import type {
   EnergyIqImportBatchRecord,
   EnergyIqProjectSetupDocument,
@@ -242,6 +242,21 @@ export const handleEnergyApiRequest = async (
           body: createSuccessResult({ batch: toEnergyImportBatchDto(batch), duplicate: false }),
         };
       }
+    }
+    if (segments[0] === "projects" && segments[2] === "data-coverage" && segments.length === 3 && request.method === "GET") {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      requireEnergyAdminProject(context, user, projectId);
+      const project = context.metadataStore.energyIq.getProject(projectId);
+      return {
+        status: 200,
+        body: createSuccessResult({
+          coverage: await readEnergyFactCoverage({
+            workspaceId: project.workspace_id,
+            projectId,
+            resource: "electricity",
+          }),
+        }),
+      };
     }
     if (segments[0] === "projects" && segments[2] === "setup") {
       const projectId = decodeURIComponent(segments[1] ?? "");

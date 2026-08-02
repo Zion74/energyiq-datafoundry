@@ -38,6 +38,12 @@ import { EnergyIqAdminSidebar, type AdminSection } from "./admin-sidebar";
 import { AdminAccessPages } from "./admin-access-pages";
 import { resolveComponentReadiness, resolveMetricReadiness, resolveRuleReadiness } from "./analysis-configuration-model";
 import { deriveProjectDeliveryProgress } from "./project-delivery-progress";
+import { TemplateDraftPreview } from "./template-draft-preview";
+import {
+  buildTemplatePreviewPlan,
+  resolveEnergyPreviewRange,
+  type EnergyPreviewRange,
+} from "./template-draft-preview-model";
 import { useProjectSetupLoader } from "./use-project-setup-loader";
 import {
   addNode,
@@ -462,6 +468,7 @@ function AnalysisConfigurationPage({
   const [componentCatalog, setComponentCatalog] = useState<EnergyComponentRevisionDto[]>([]);
   const [templateDraft, setTemplateDraft] = useState<EnergyProjectTemplateDraftDto | null>(null);
   const [savedTemplateDocument, setSavedTemplateDocument] = useState<EnergyTemplateDraftDocumentDto | null>(null);
+  const [previewRange, setPreviewRange] = useState<EnergyPreviewRange | null>(null);
   const [activeTemplateId, setActiveTemplateId] = useState("project");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -473,10 +480,12 @@ function AnalysisConfigurationPage({
     setError(null);
     setNotice(null);
     try {
-      const [metricResult, ruleResult, templateResult] = await Promise.all([
+      const [metricResult, ruleResult, templateResult, importResult, coverageResult] = await Promise.all([
         configApi.getEnergyProjectMetricConfig(projectId),
         configApi.getEnergyProjectRuleConfig(projectId),
         configApi.getEnergyProjectTemplateDraft(projectId),
+        configApi.listEnergyImportBatches(projectId).catch(() => ({ batches: [] })),
+        configApi.getEnergyProjectDataCoverage(projectId).catch(() => ({ coverage: null })),
       ]);
       setCatalog(metricResult.catalog);
       setRevision(metricResult.config.revision);
@@ -489,6 +498,11 @@ function AnalysisConfigurationPage({
       setComponentCatalog(templateResult.catalog);
       setTemplateDraft(templateResult.draft);
       setSavedTemplateDocument(templateResult.draft.document);
+      setPreviewRange(resolveEnergyPreviewRange({
+        coverage: coverageResult.coverage,
+        batches: importResult.batches,
+        timezone: document.project.timezone,
+      }));
       setActiveTemplateId("project");
     } catch (reason) {
       setError(messageFrom(reason, "Failed to load analysis configuration"));
@@ -805,6 +819,8 @@ function AnalysisConfigurationPage({
           selectedMetricRevisionIds={selectedMetricIdSet}
           selectedRuleRevisionIds={selectedRuleIdSet}
           businessCalendarVersion={businessCalendarVersion}
+          projectId={projectId}
+          previewRange={previewRange}
           activeTemplateId={activeTemplateId}
           setActiveTemplateId={setActiveTemplateId}
           dirty={templateDirty}
@@ -831,6 +847,8 @@ function TemplateLayoutPanel({
   selectedMetricRevisionIds,
   selectedRuleRevisionIds,
   businessCalendarVersion,
+  projectId,
+  previewRange,
   activeTemplateId,
   setActiveTemplateId,
   dirty,
@@ -847,6 +865,8 @@ function TemplateLayoutPanel({
   selectedMetricRevisionIds: ReadonlySet<string>;
   selectedRuleRevisionIds: ReadonlySet<string>;
   businessCalendarVersion: string;
+  projectId: string;
+  previewRange: EnergyPreviewRange | null;
   activeTemplateId: string;
   setActiveTemplateId: Dispatch<SetStateAction<string>>;
   dirty: boolean;
@@ -883,6 +903,14 @@ function TemplateLayoutPanel({
   const templateLabel = selectedTemplate.target_kind === "project"
     ? "Project Overview"
     : `${tierById.get(selectedTemplate.tier_definition_id ?? "")?.alias ?? "Tier"} Template`;
+  const previewPlan = buildTemplatePreviewPlan({
+    template: selectedTemplate,
+    document,
+    catalog: componentCatalog,
+    selectedMetricRevisionIds,
+    selectedRuleRevisionIds,
+    businessCalendarVersion,
+  });
 
   return (
     <section className="rounded-xl border border-border bg-surface">
@@ -1026,6 +1054,13 @@ function TemplateLayoutPanel({
           </div>
         </div>
       </div>
+      <TemplateDraftPreview
+        key={`${projectId}:${selectedTemplate.template_id}`}
+        projectId={projectId}
+        plan={previewPlan}
+        previewRange={previewRange}
+        dirty={dirty}
+      />
     </section>
   );
 }

@@ -281,6 +281,12 @@ export type EnergyQueryContextRequestDto = {
   to?: string;
 };
 
+export type EnergyProjectDataCoverageDto = {
+  from: string;
+  to: string;
+  intervalCount: number;
+};
+
 export type EnergyQueryContextDto = {
   userId: string;
   workspaceId: string;

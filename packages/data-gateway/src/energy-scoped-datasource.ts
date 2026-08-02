@@ -28,6 +28,12 @@ export type EnergyScopedDataSource = {
   databasePath: string;
 };
 
+export type EnergyFactCoverage = {
+  from: string;
+  to: string;
+  intervalCount: number;
+};
+
 export const resolveEnergyFactStorePath = (
   workspaceId: string,
   configuredPath = process.env.ENERGYIQ_DUCKDB_PATH,
@@ -38,6 +44,46 @@ export const resolveEnergyFactStorePath = (
     ? []
     : ["../../..", "storage", "energy", workspaceId, "energy.duckdb"]),
 );
+
+export const readEnergyFactCoverage = async (input: {
+  workspaceId: string;
+  projectId: string;
+  resource: "electricity" | "water";
+  databasePath?: string;
+}): Promise<EnergyFactCoverage | null> => {
+  const databasePath = input.databasePath
+    ? input.databasePath === ":memory:" ? input.databasePath : resolve(input.databasePath)
+    : resolveEnergyFactStorePath(input.workspaceId);
+  if (databasePath !== ":memory:" && !existsSync(databasePath)) return null;
+
+  const database = await getDuckDbDatabase(databasePath);
+  const connection = database.connect();
+  try {
+    const row = await duckDbGet(connection, `
+      SELECT
+        epoch_ms(MIN(interval_start)) AS from_ms,
+        epoch_ms(MAX(interval_end)) AS to_ms,
+        COUNT(*) AS interval_count
+      FROM energy_interval_facts
+      WHERE workspace_id = ${sqlLiteral(input.workspaceId)}
+        AND project_id = ${sqlLiteral(input.projectId)}
+        AND resource = ${sqlLiteral(input.resource)}
+    `);
+    const fromMs = numericValue(row.from_ms);
+    const toMs = numericValue(row.to_ms);
+    if (fromMs === null || toMs === null) return null;
+    return {
+      from: new Date(fromMs).toISOString(),
+      to: new Date(toMs).toISOString(),
+      intervalCount: numericValue(row.interval_count) ?? 0,
+    };
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("energy_interval_facts does not exist")) return null;
+    throw error;
+  } finally {
+    await duckDbClose(connection).catch(ignoreAlreadyClosed);
+  }
+};
 
 /**
  * Materialize a run-safe, read-only EnergyIQ view and register only that view
@@ -192,6 +238,15 @@ const duckDbRun = async (
     connection.run(sql, (error) => error ? reject(error) : resolvePromise());
   });
 
+const duckDbGet = async (
+  connection: DuckDbModule.Connection,
+  sql: string,
+): Promise<Record<string, unknown>> => await new Promise((resolvePromise, reject) => {
+  connection.all(sql, (error, rows) => error
+    ? reject(error)
+    : resolvePromise((rows[0] ?? {}) as Record<string, unknown>));
+});
+
 const duckDbClose = async (connection: DuckDbModule.Connection): Promise<void> =>
   await new Promise((resolvePromise, reject) => {
     connection.close((error) => error ? reject(error) : resolvePromise());
@@ -202,4 +257,11 @@ const ignoreAlreadyClosed = (error: unknown): void => {
     return;
   }
   throw error;
+};
+
+const numericValue = (value: unknown): number | null => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "bigint") return Number(value);
+  if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  return null;
 };

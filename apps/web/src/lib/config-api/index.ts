@@ -69,6 +69,7 @@ export type {
   EnergyMetricRevisionDto,
   EnergyProjectMetricConfigDto,
   EnergyProjectMetricConfigResponseDto,
+  EnergyProjectDataCoverageDto,
   EnergyProjectRuleConfigDto,
   EnergyProjectRuleConfigResponseDto,
   EnergyComponentFamilyDto,

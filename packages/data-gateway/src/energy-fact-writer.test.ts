@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { readEnergyFactMaterializationStats, writeEnergyFactMaterialization } from "./energy-fact-writer.js";
+import { readEnergyFactCoverage } from "./energy-scoped-datasource.js";
 
 describe("writeEnergyFactMaterialization", () => {
   it("writes a batch idempotently into the canonical fact tables", async () => {
@@ -85,6 +86,16 @@ describe("writeEnergyFactMaterialization", () => {
       databasePath: ":memory:",
       importBatchId: "batch-1",
     })).resolves.toEqual({ rawRows: 1, normalizedRows: 1, intervalFacts: 1, qualityEvents: 1 });
+    await expect(readEnergyFactCoverage({
+      databasePath: ":memory:",
+      workspaceId: "workspace-1",
+      projectId: "project-1",
+      resource: "electricity",
+    })).resolves.toEqual({
+      from: "2026-05-01T00:00:00.000Z",
+      to: "2026-05-01T00:15:00.000Z",
+      intervalCount: 1,
+    });
   });
 
   it("keeps the source with the later coverage end at an overlapping timestamp", async () => {

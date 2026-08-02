@@ -76,7 +76,9 @@ import { join } from "node:path";
 export { createDemoDuckDbConfig, demoDuckDbPath } from "./demo-duckdb.js";
 export {
   ensureEnergyScopedDataSource,
+  readEnergyFactCoverage,
   resolveEnergyFactStorePath,
+  type EnergyFactCoverage,
   type EnergyScopedDataSource,
   type EnergyScopedDataSourceContext
 } from "./energy-scoped-datasource.js";
