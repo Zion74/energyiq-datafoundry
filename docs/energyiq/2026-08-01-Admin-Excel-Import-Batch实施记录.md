@@ -3,7 +3,7 @@ title: "2026-08-01 开发记录：Admin Excel Import Batch"
 summary: "记录真实 Excel 上传、检查、SHA 幂等、Mapping Draft、Raw/Normalized/Interval Fact 物化、重叠裁决与验收。"
 doc_type: runlog
 tags: [Admin, Excel, Import Batch, Meter Mapping, Data Quality]
-updated_at: "2026-08-01"
+updated_at: "2026-08-02"
 related:
   - "开发计划-Admin与模板运行闭环.md"
   - "2026-08-01-Admin-Meter-Mapping与虚拟电表实施记录.md"
@@ -124,3 +124,38 @@ Excel 事实闭环已通过。下一步进入批次 3：Metric Definition、确�
 
 1. 25,919 行完整物化本机约 56 秒，一天一次试点可用，但批量写入与 Mapping 更新仍需优化；
 2. Admin 需要继续补充更直观的 Quality Summary 与失败重试信息，避免只显示数量。
+
+## 7. 2026-08-02 Ngee Ann 管理员闭环复验
+
+使用真实 Admin 账号和正式页面，从 `Data Sources` 重新走通一份 Level 6 Excel 的检查、Mapping、虚拟表、事实构建、校验与 FM 视角查询。
+
+### 复验结果
+
+| 检查项 | 结果 |
+| --- | --- |
+| Workbook | `Ngee Ann Poly Level 6 (19 May - 17 June).xlsx` |
+| 有效行 | 25,919 / 25,919 |
+| Source labels | 9 |
+| 典型间隔 | 15 min |
+| 覆盖区间 | 2026-05-19 至 2026-06-18 |
+| Mapping | 9 个标签、0 个缺失 Scope，已确认并保存到共享 Project Draft |
+| Virtual Meter | `Load 12 = Office Load 1 + Office Load 2`，挂在 Level 6，独立展示且不参与官方汇总 |
+| Raw readings | 25,919 |
+| Interval facts | 25,910 |
+| All-meter deltas | 4,002.133 kWh，仅作为本批次证据 |
+| Draft validation | 通过 |
+| FM Level 6 | 2,013.97 kWh，5,758 valid / 0 flagged |
+| AI Context | 正确携带 Project、Level 6、Custom period 和日期边界 |
+
+### 本次发现并修复
+
+1. **跨 Admin 页面会清空未保存 Mapping**：Project setup loader 错把 `section` 当作加载依赖，每次从 Data Sources 跳到 Meter Mapping 都会用后端旧 Draft 覆盖本地编辑。现已改为只在 `projectId` 变化时加载，并增加回归测试。
+2. **Project Overview 阶段状态写死**：即使 Mapping 已确认、Facts 已生成，仍显示 `Data & Meters: Not configured`。现已按 Import Batch、Mapping 和 materialization 的真实状态派生，复验显示 `Facts ready` 和 `Analysis: Ready to configure`。
+
+对应提交：`2cd2530 fix(energyiq): keep admin delivery state in sync`。
+
+### 当前边界
+
+- 本轮遵循“一次只验证一个 Excel”的约定，因此新 Import Batch 只覆盖 Level 6；不是完整 Ngee Ann 双楼层重新发布。
+- Draft Mapping 和 `Load 12` 尚未进入不可变 Published Snapshot；客户页面当前消费已物化 facts 和既有 published hierarchy。
+- Stage 5 `Review & Publish` 尚未实现，不能把 Draft 已通过校验表述为已正式发布。

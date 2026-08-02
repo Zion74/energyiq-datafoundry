@@ -13,7 +13,7 @@ status: in_progress
 
 # EnergyIQ 开发计划：Admin 与模板运行闭环
 
-> 状态：**批次 0–2 已完成；Access 基础已提前完成 Organisation、Users、邀请登录、Membership、双层选择与两个演示客户的数据隔离。下一步进入批次 3 Metrics/Rules。**
+> 状态：**批次 0–2 已完成并通过 Ngee Ann Level 6 的真实 Admin→Facts→FM→AI Context 闭环复验；Access 基础已完成 Organisation、Users、邀请登录、Membership、双层选择与两个演示客户的数据隔离。下一步进入批次 3 Metrics/Rules，但正式发布仍需批次 4 的 Review & Publish。**
 
 实施证据见：[2026-08-01 Admin 与 Tier 批次 0–1 实施记录](2026-08-01-Admin-Tier-批次0-1实施记录.md)、[Admin Meter Mapping 与虚拟电表实施记录](2026-08-01-Admin-Meter-Mapping与虚拟电表实施记录.md)和 [Admin Excel Import Batch 实施记录](2026-08-01-Admin-Excel-Import-Batch实施记录.md)。
 
