@@ -28,6 +28,8 @@ import { EnergyIcon } from "../_components/icons";
 import type { useEnergyIqAccess } from "../_components/energyiq-access";
 import { EnergyIqAdminSidebar, type AdminSection } from "./admin-sidebar";
 import { AdminAccessPages } from "./admin-access-pages";
+import { deriveProjectDeliveryProgress } from "./project-delivery-progress";
+import { useProjectSetupLoader } from "./use-project-setup-loader";
 import {
   addNode,
   addParentTier,
@@ -107,10 +109,7 @@ export function EnergyIqAdminWorkbench({
     }
   }, []);
 
-  useEffect(() => {
-    if (section === "organisations" || section === "users") return;
-    void loadSetup(selectedProjectId);
-  }, [loadSetup, section, selectedProjectId]);
+  useProjectSetupLoader(selectedProjectId, loadSetup);
 
   const changeDocument = useCallback((
     updater: (current: EnergyProjectSetupDocumentDto) => EnergyProjectSetupDocumentDto,
@@ -334,7 +333,7 @@ function renderAdminSection({
     return <AdminOverview projects={projects} selectedProject={selectedProject} chooseAdminProject={chooseAdminProject} setSection={setSection} />;
   }
   if (section === "project-overview") {
-    return <ProjectDeliveryOverview project={selectedProject} setup={setup} document={document} setSection={setSection} />;
+    return <ProjectDeliveryOverview projectId={selectedProjectId} project={selectedProject} setup={setup} document={document} setSection={setSection} />;
   }
   if (section === "basics") {
     return (
@@ -467,27 +466,52 @@ function AdminOverview({
 }
 
 function ProjectDeliveryOverview({
+  projectId,
   project,
   setup,
   document,
   setSection,
 }: {
+  projectId: string;
   project?: EnergyProjectDto;
   setup: EnergyProjectSetupDto;
   document: EnergyProjectSetupDocumentDto;
   setSection: Dispatch<SetStateAction<AdminSection>>;
 }) {
+  const [batches, setBatches] = useState<EnergyImportBatchDto[]>([]);
+  const [loadingBatches, setLoadingBatches] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setLoadingBatches(true);
+    void configApi.listEnergyImportBatches(projectId)
+      .then((result) => {
+        if (active) setBatches(result.batches);
+      })
+      .catch(() => {
+        if (active) setBatches([]);
+      })
+      .finally(() => {
+        if (active) setLoadingBatches(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
+
   const hasBasics = Boolean(document.project.name && document.project.timezone);
   const hasStructure = isTierStructureLocked(document) && document.tiers.length > 0 && document.nodes.length > 0;
-  const nextSection: AdminSection = hasStructure ? "data-sources" : hasBasics ? "structure" : "basics";
-  const nextLabel = hasStructure ? "Connect the first data source" : hasBasics ? "Finish the project structure" : "Complete project basics";
-  const stages = [
-    { label: "Basics", state: hasBasics ? "Complete" : "Needs action", section: "basics" as AdminSection, enabled: true },
-    { label: "Structure", state: hasStructure ? "Draft ready" : "Needs action", section: "structure" as AdminSection, enabled: true },
-    { label: "Data & Meters", state: "Not configured", section: "data-sources" as AdminSection, enabled: true },
-    { label: "Analysis", state: "Waiting for data", section: "templates" as AdminSection, enabled: true },
-    { label: "Review & Publish", state: "Not ready", section: "project-overview" as AdminSection, enabled: false },
-  ];
+  const latestBatch = batches[0];
+  const hasConfirmedMapping = document.meter_mapping?.confirmed === true
+    && document.meter_mapping.rows.length > 0;
+  const progress = deriveProjectDeliveryProgress({
+    hasBasics,
+    hasStructure,
+    hasSource: Boolean(latestBatch),
+    hasConfirmedMapping,
+    hasMaterializedFacts: latestBatch?.status === "materialized",
+  });
+  const { nextSection, nextLabel, stages } = progress;
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">
@@ -516,7 +540,9 @@ function ProjectDeliveryOverview({
                 <span className="block text-xs font-semibold">{stage.label}</span>
                 <span className={[
                   "mt-1 block text-[10px]",
-                  stage.state === "Complete" || stage.state === "Draft ready" ? "text-step-success" : "text-muted",
+                  stage.state === "Complete" || stage.state === "Draft ready" || stage.state === "Facts ready" || stage.state === "Ready to configure"
+                    ? "text-step-success"
+                    : "text-muted",
                 ].join(" ")}>{stage.state}</span>
               </span>
             </button>
@@ -532,12 +558,12 @@ function ProjectDeliveryOverview({
               <EnergyIcon name="arrow" className="h-4 w-4" />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold">{nextLabel}</p>
+              <p className="text-sm font-semibold">{loadingBatches ? "Checking project data" : nextLabel}</p>
               <p className="mt-1 text-xs leading-5 text-muted">
                 Structure is confirmed before source labels are mapped. Data Sources comes before Meter Mapping; virtual meters remain optional inside Mapping.
               </p>
             </div>
-            <button type="button" onClick={() => setSection(nextSection)} className={secondaryButton}>Continue</button>
+            <button type="button" onClick={() => setSection(nextSection)} disabled={loadingBatches} className={secondaryButton}>Continue</button>
           </div>
         </section>
 
