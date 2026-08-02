@@ -6,6 +6,50 @@ import { describe, expect, it } from "vitest";
 import { createMetadataStore } from "./index.js";
 
 describe("EnergyIqStore", () => {
+  it("stores immutable rule revisions and versioned project selections", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-rules-store-"));
+    try {
+      const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+      metadata.workspaces.upsert({ id: "rules-workspace", owner_user_id: "dev-user", name: "Rules", kind: "customer" });
+      metadata.energyIq.upsertProject({ id: "rules-project", workspace_id: "rules-workspace", name: "Rules", status: "draft" });
+
+      const catalog = metadata.energyIq.rules.listRevisions();
+      expect(catalog.map((rule) => rule.revision_id)).toContain("time.high_off_hours_share@1");
+      expect(catalog.map((rule) => rule.revision_id)).toContain("comparison.people_intensity_outlier@1");
+      expect(metadata.energyIq.rules.getProjectConfig("rules-project")).toMatchObject({
+        revision: 0,
+        selected_rule_revision_ids: catalog.map((rule) => rule.revision_id),
+      });
+
+      const saved = metadata.energyIq.rules.saveProjectConfig({
+        project_id: "rules-project",
+        expected_revision: 0,
+        selected_rule_revision_ids: ["quality.no_valid_data@1", "time.high_off_hours_share@1"],
+        updated_by: "dev-user",
+      });
+      expect(saved).toMatchObject({
+        revision: 1,
+        selected_rule_revision_ids: ["quality.no_valid_data@1", "time.high_off_hours_share@1"],
+      });
+      expect(() => metadata.energyIq.rules.saveProjectConfig({
+        project_id: "rules-project",
+        expected_revision: 0,
+        selected_rule_revision_ids: [],
+        updated_by: "dev-user",
+      })).toThrow("ENERGYIQ_RULE_CONFIG_REVISION_CONFLICT");
+      expect(() => metadata.energyIq.rules.saveProjectConfig({
+        project_id: "rules-project",
+        expected_revision: 1,
+        selected_rule_revision_ids: ["rule.unknown@1"],
+        updated_by: "dev-user",
+      })).toThrow("ENERGYIQ_RULE_REVISION_NOT_FOUND");
+
+      metadata.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
   it("stores immutable metric revisions and versioned project selections", () => {
     const root = mkdtempSync(join(tmpdir(), "energyiq-metrics-store-"));
     try {

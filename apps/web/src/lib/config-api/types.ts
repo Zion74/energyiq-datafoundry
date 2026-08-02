@@ -427,6 +427,38 @@ export type EnergyProjectMetricConfigResponseDto = {
   config: EnergyProjectMetricConfigDto;
 };
 
+export type EnergyRuleFamilyDto = "data_quality" | "time" | "comparison";
+export type EnergyRuleRequirementDto = "always" | "operating_hours" | "children" | "area_peers" | "people_peers";
+
+export type EnergyRuleRevisionDto = {
+  revision_id: string;
+  rule_id: string;
+  version: number;
+  display_name: string;
+  description: string;
+  family: EnergyRuleFamilyDto;
+  severity: "info" | "warning";
+  evaluation_key: string;
+  metric_revision_ids: string[];
+  parameters: Record<string, number | string>;
+  requirement: EnergyRuleRequirementDto;
+  created_at: string;
+};
+
+export type EnergyProjectRuleConfigDto = {
+  project_id: string;
+  revision: number;
+  selected_rule_revision_ids: string[];
+  updated_by?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type EnergyProjectRuleConfigResponseDto = {
+  catalog: EnergyRuleRevisionDto[];
+  config: EnergyProjectRuleConfigDto;
+};
+
 export type DevIdentitiesResponseDto = {
   users: DevIdentityUser[];
   currentUserId: string;

@@ -18,6 +18,8 @@ import {
   type EnergyMeterMappingRowDto,
   type EnergyMetricFamilyDto,
   type EnergyMetricRevisionDto,
+  type EnergyRuleFamilyDto,
+  type EnergyRuleRevisionDto,
   type EnergyVirtualMeterDto,
   type EnergyProjectDto,
   type EnergyProjectSetupDocumentDto,
@@ -30,7 +32,7 @@ import { EnergyIcon } from "../_components/icons";
 import type { useEnergyIqAccess } from "../_components/energyiq-access";
 import { EnergyIqAdminSidebar, type AdminSection } from "./admin-sidebar";
 import { AdminAccessPages } from "./admin-access-pages";
-import { resolveMetricReadiness } from "./analysis-configuration-model";
+import { resolveMetricReadiness, resolveRuleReadiness } from "./analysis-configuration-model";
 import { deriveProjectDeliveryProgress } from "./project-delivery-progress";
 import { useProjectSetupLoader } from "./use-project-setup-loader";
 import {
@@ -388,7 +390,13 @@ function renderAdminSection({
     );
   }
   if (section === "templates") {
-    return <AnalysisConfigurationPage projectId={selectedProjectId} document={document} />;
+    return (
+      <AnalysisConfigurationPage
+        projectId={selectedProjectId}
+        document={document}
+        businessCalendarVersion={setup.project.business_calendar_version}
+      />
+    );
   }
 
   const planned = plannedSectionCopy(section);
@@ -414,17 +422,39 @@ const metricFamilyCopy: Record<EnergyMetricFamilyDto, { label: string; descripti
   },
 };
 
+const ruleFamilyCopy: Record<EnergyRuleFamilyDto, { label: string; description: string }> = {
+  data_quality: {
+    label: "Data integrity",
+    description: "Deterministic checks that prevent a dashboard from presenting missing facts as a valid result.",
+  },
+  time: {
+    label: "Time-based findings",
+    description: "Findings derived from the selected period and the Project operating-hours calendar.",
+  },
+  comparison: {
+    label: "Scope comparison",
+    description: "Peer findings that only run when enough genuinely comparable child or sibling scopes exist.",
+  },
+};
+
 function AnalysisConfigurationPage({
   projectId,
   document,
+  businessCalendarVersion,
 }: {
   projectId: string;
   document: EnergyProjectSetupDocumentDto;
+  businessCalendarVersion: string;
 }) {
+  const [activeStep, setActiveStep] = useState<"metrics" | "rules">("metrics");
   const [catalog, setCatalog] = useState<EnergyMetricRevisionDto[]>([]);
   const [revision, setRevision] = useState(0);
   const [selected, setSelected] = useState<string[]>([]);
   const [savedSelection, setSavedSelection] = useState<string[]>([]);
+  const [ruleCatalog, setRuleCatalog] = useState<EnergyRuleRevisionDto[]>([]);
+  const [ruleRevision, setRuleRevision] = useState(0);
+  const [selectedRules, setSelectedRules] = useState<string[]>([]);
+  const [savedRuleSelection, setSavedRuleSelection] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -435,13 +465,20 @@ function AnalysisConfigurationPage({
     setError(null);
     setNotice(null);
     try {
-      const result = await configApi.getEnergyProjectMetricConfig(projectId);
-      setCatalog(result.catalog);
-      setRevision(result.config.revision);
-      setSelected(result.config.selected_metric_revision_ids);
-      setSavedSelection(result.config.selected_metric_revision_ids);
+      const [metricResult, ruleResult] = await Promise.all([
+        configApi.getEnergyProjectMetricConfig(projectId),
+        configApi.getEnergyProjectRuleConfig(projectId),
+      ]);
+      setCatalog(metricResult.catalog);
+      setRevision(metricResult.config.revision);
+      setSelected(metricResult.config.selected_metric_revision_ids);
+      setSavedSelection(metricResult.config.selected_metric_revision_ids);
+      setRuleCatalog(ruleResult.catalog);
+      setRuleRevision(ruleResult.config.revision);
+      setSelectedRules(ruleResult.config.selected_rule_revision_ids);
+      setSavedRuleSelection(ruleResult.config.selected_rule_revision_ids);
     } catch (reason) {
-      setError(messageFrom(reason, "Failed to load metric configuration"));
+      setError(messageFrom(reason, "Failed to load analysis configuration"));
     } finally {
       setLoading(false);
     }
@@ -453,7 +490,9 @@ function AnalysisConfigurationPage({
 
   const dirty = selected.length !== savedSelection.length
     || selected.some((id) => !savedSelection.includes(id));
-  const save = useCallback(async () => {
+  const rulesDirty = selectedRules.length !== savedRuleSelection.length
+    || selectedRules.some((id) => !savedRuleSelection.includes(id));
+  const saveMetrics = useCallback(async () => {
     setSaving(true);
     setError(null);
     setNotice(null);
@@ -474,12 +513,42 @@ function AnalysisConfigurationPage({
     }
   }, [projectId, revision, selected]);
 
+  const saveRules = useCallback(async () => {
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await configApi.saveEnergyProjectRuleConfig(projectId, {
+        expectedRevision: ruleRevision,
+        selectedRuleRevisionIds: selectedRules,
+      });
+      setRuleCatalog(result.catalog);
+      setRuleRevision(result.config.revision);
+      setSelectedRules(result.config.selected_rule_revision_ids);
+      setSavedRuleSelection(result.config.selected_rule_revision_ids);
+      setNotice("Rule selection saved as a new project configuration revision.");
+    } catch (reason) {
+      setError(messageFrom(reason, "Failed to save rule configuration"));
+    } finally {
+      setSaving(false);
+    }
+  }, [projectId, ruleRevision, selectedRules]);
+
   const families = (["aggregate", "time", "normalised", "quality"] as const)
     .map((family) => ({ family, metrics: catalog.filter((metric) => metric.family === family) }))
     .filter((group) => group.metrics.length > 0);
   const readinessByMetricId = new Map(catalog.map((metric) => [
     metric.revision_id,
     resolveMetricReadiness(metric, document),
+  ]));
+  const selectedMetricIdSet = new Set(selected);
+  const selectedRuleIdSet = new Set(selectedRules);
+  const ruleFamilies = (["data_quality", "time", "comparison"] as const)
+    .map((family) => ({ family, rules: ruleCatalog.filter((rule) => rule.family === family) }))
+    .filter((group) => group.rules.length > 0);
+  const readinessByRuleId = new Map(ruleCatalog.map((rule) => [
+    rule.revision_id,
+    resolveRuleReadiness(rule, document, selectedMetricIdSet, businessCalendarVersion),
   ]));
 
   return (
@@ -499,16 +568,16 @@ function AnalysisConfigurationPage({
         </div>
 
         <ol className="mt-5 grid gap-3 md:grid-cols-3">
-          <AnalysisStep number="1" title="Metrics" body="Select approved calculations." active />
-          <AnalysisStep number="2" title="Rules" body="Define deterministic findings next." />
-          <AnalysisStep number="3" title="Template layout" body="Place evidence-backed modules next." />
+          <AnalysisStep number="1" title="Metrics" body="Select approved calculations." active={activeStep === "metrics"} onClick={() => setActiveStep("metrics")} />
+          <AnalysisStep number="2" title="Rules" body="Select deterministic findings." active={activeStep === "rules"} onClick={() => setActiveStep("rules")} />
+          <AnalysisStep number="3" title="Template layout" body="Place evidence-backed modules next." disabled />
         </ol>
       </section>
 
       {error ? <div className="rounded-lg border border-step-error/25 bg-step-error/5 px-4 py-3 text-xs text-step-error">{error}</div> : null}
       {notice ? <div className="rounded-lg border border-step-success/25 bg-step-success/5 px-4 py-3 text-xs text-step-success">{notice}</div> : null}
 
-      <section className="rounded-xl border border-border bg-surface">
+      {activeStep === "metrics" ? <section className="rounded-xl border border-border bg-surface">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
           <div>
             <h4 className="text-sm font-semibold">Metric catalog</h4>
@@ -526,7 +595,7 @@ function AnalysisConfigurationPage({
             <button
               type="button"
               disabled={!dirty || saving}
-              onClick={() => void save()}
+              onClick={() => void saveMetrics()}
               className="rounded-md bg-foreground px-3 py-2 text-xs font-semibold text-background disabled:cursor-not-allowed disabled:opacity-40"
             >
               {saving ? "Saving..." : "Save selection"}
@@ -546,7 +615,7 @@ function AnalysisConfigurationPage({
                 </div>
                 <div className="grid gap-3 lg:grid-cols-2">
                   {metrics.map((metric) => {
-                    const checked = selected.includes(metric.revision_id);
+                    const checked = selectedMetricIdSet.has(metric.revision_id);
                     const readiness = readinessByMetricId.get(metric.revision_id);
                     return (
                       <label
@@ -593,7 +662,98 @@ function AnalysisConfigurationPage({
             ))}
           </div>
         )}
-      </section>
+      </section> : (
+        <section className="rounded-xl border border-border bg-surface">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
+            <div>
+              <h4 className="text-sm font-semibold">Rule catalog</h4>
+              <p className="mt-1 text-[11px] text-muted">
+                {selectedRules.length} of {ruleCatalog.length} deterministic rule revisions enabled · draft revision {ruleRevision}
+              </p>
+              <p className="mt-1 text-[10px] text-muted-light">
+                Draft changes do not affect customer analysis until Review &amp; Publish.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={!rulesDirty || saving}
+                onClick={() => setSelectedRules(savedRuleSelection)}
+                className="rounded-md border border-border px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                disabled={!rulesDirty || saving}
+                onClick={() => void saveRules()}
+                className="rounded-md bg-foreground px-3 py-2 text-xs font-semibold text-background disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {saving ? "Saving..." : "Save selection"}
+              </button>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="p-8 text-center text-xs text-muted">Loading rule definitions...</div>
+          ) : (
+            <div className="space-y-7 p-5">
+              {ruleFamilies.map(({ family, rules }) => (
+                <div key={family}>
+                  <div className="mb-3">
+                    <h5 className="text-xs font-semibold">{ruleFamilyCopy[family].label}</h5>
+                    <p className="mt-1 text-[11px] text-muted">{ruleFamilyCopy[family].description}</p>
+                  </div>
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    {rules.map((rule) => {
+                      const checked = selectedRuleIdSet.has(rule.revision_id);
+                      const readiness = readinessByRuleId.get(rule.revision_id);
+                      return (
+                        <label
+                          key={rule.revision_id}
+                          className={[
+                            "flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition-colors",
+                            checked ? "border-foreground/30 bg-surface-subtle" : "border-border hover:border-foreground/20",
+                          ].join(" ")}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => setSelectedRules((current) => checked
+                              ? current.filter((id) => id !== rule.revision_id)
+                              : [...current, rule.revision_id])}
+                            className="mt-1 h-4 w-4 accent-current"
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="flex flex-wrap items-center gap-2">
+                              <strong className="text-xs">{rule.display_name}</strong>
+                              <span className={[
+                                "rounded-full px-2 py-0.5 text-[9px] font-semibold",
+                                rule.severity === "warning" ? "bg-step-warning/10 text-step-warning" : "bg-surface text-muted",
+                              ].join(" ")}>{rule.severity}</span>
+                              <span className="rounded-full bg-surface px-2 py-0.5 text-[9px] text-muted">v{rule.version}</span>
+                              {readiness ? (
+                                <span className={[
+                                  "rounded-full px-2 py-0.5 text-[9px] font-semibold",
+                                  readiness.status === "ready" ? "bg-step-success/10 text-step-success" : "bg-surface text-muted",
+                                ].join(" ")}>{readiness.label}</span>
+                              ) : null}
+                            </span>
+                            <span className="mt-1.5 block text-[11px] leading-4 text-muted">{rule.description}</span>
+                            <span className="mt-2 block text-[10px] font-medium text-muted-light">
+                              {readiness?.detail ?? "Readiness unavailable"} · {formatRuleParameters(rule)}
+                            </span>
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }
@@ -603,21 +763,39 @@ function AnalysisStep({
   title,
   body,
   active = false,
+  disabled = false,
+  onClick,
 }: {
   number: string;
   title: string;
   body: string;
   active?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
 }) {
   return (
-    <li className={["rounded-xl border p-3", active ? "border-foreground/25 bg-surface-subtle" : "border-border"].join(" ")}>
-      <div className="flex items-center gap-2">
-        <span className={["flex h-5 w-5 items-center justify-center rounded text-[9px] font-bold", active ? "bg-foreground text-background" : "bg-surface-subtle text-muted"].join(" ")}>{number}</span>
-        <strong className="text-xs">{title}</strong>
-      </div>
-      <p className="mt-2 text-[10px] leading-4 text-muted">{body}</p>
+    <li className={["rounded-xl border", active ? "border-foreground/25 bg-surface-subtle" : "border-border", disabled ? "opacity-60" : ""].join(" ")}>
+      <button type="button" disabled={disabled} onClick={onClick} className="w-full p-3 text-left disabled:cursor-not-allowed">
+        <span className="flex items-center gap-2">
+          <span className={["flex h-5 w-5 items-center justify-center rounded text-[9px] font-bold", active ? "bg-foreground text-background" : "bg-surface-subtle text-muted"].join(" ")}>{number}</span>
+          <strong className="text-xs">{title}</strong>
+        </span>
+        <span className="mt-2 block text-[10px] leading-4 text-muted">{body}</span>
+      </button>
     </li>
   );
+}
+
+function formatRuleParameters(rule: EnergyRuleRevisionDto): string {
+  const threshold = rule.parameters.threshold_pct;
+  if (typeof threshold === "number") return `Threshold ≥ ${threshold}%`;
+  const medianRatio = rule.parameters.median_ratio;
+  const minimumPeers = rule.parameters.minimum_peers;
+  if (typeof medianRatio === "number" && typeof minimumPeers === "number") {
+    return `≥ ${medianRatio}× sibling median · min ${minimumPeers} peers`;
+  }
+  if (typeof minimumPeers === "number") return `Minimum ${minimumPeers} comparable scopes`;
+  return "Controlled deterministic evaluation";
 }
 
 function AdminOverview({

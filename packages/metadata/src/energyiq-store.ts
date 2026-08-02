@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
 import { EnergyIqMetricStore } from "./energyiq-metric-store.js";
+import { EnergyIqRuleStore } from "./energyiq-rule-store.js";
 
 import {
   EnergyIqProjectSetupStore,
@@ -182,10 +183,12 @@ export const initializeEnergyIqSchema = (db: DatabaseSync): void => {
 export class EnergyIqStore {
   readonly metrics: EnergyIqMetricStore;
   readonly projectSetup: EnergyIqProjectSetupStore;
+  readonly rules: EnergyIqRuleStore;
 
   constructor(private readonly db: DatabaseSync) {
     this.metrics = new EnergyIqMetricStore(db);
     this.projectSetup = new EnergyIqProjectSetupStore(db);
+    this.rules = new EnergyIqRuleStore(db);
   }
 
   upsertUserRole(input: { user_id: string; role: EnergyIqRole }): EnergyIqUserRoleRecord {

@@ -18,6 +18,7 @@ import type {
   EnergyAdminUserDto,
   EnergyImportBatchDto,
   EnergyProjectMetricConfigResponseDto,
+  EnergyProjectRuleConfigResponseDto,
   EnergyProjectHierarchyDto,
   EnergyProjectRecordDto,
   EnergyProjectSetupDocumentDto,
@@ -417,6 +418,22 @@ export const configApi = {
   ): Promise<EnergyProjectMetricConfigResponseDto> {
     return requestEnvelope(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/metric-config`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+  },
+
+  getEnergyProjectRuleConfig(projectId: string): Promise<EnergyProjectRuleConfigResponseDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/rule-config`,
+    );
+  },
+
+  saveEnergyProjectRuleConfig(
+    projectId: string,
+    body: { expectedRevision: number; selectedRuleRevisionIds: string[] },
+  ): Promise<EnergyProjectRuleConfigResponseDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/rule-config`,
       { method: "PUT", body: JSON.stringify(body) },
     );
   },
