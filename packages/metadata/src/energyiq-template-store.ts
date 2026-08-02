@@ -69,7 +69,7 @@ const BUILT_IN_COMPONENTS: readonly Omit<EnergyIqComponentRevisionRecord, "creat
     family: "overview",
     view_key: "consumption_overview_v1",
     target: "both",
-    metric_revision_ids: ["energy.total_usage_kwh@1", "energy.average_daily_usage_kwh@1", "power.peak_kw@1"],
+    metric_revision_ids: ["energy.total_usage_kwh@1", "energy.average_daily_usage_kwh@1", "energy.peak_demand_kw@1"],
     rule_revision_ids: [],
     query_ids: ["scope_summary_v1"],
     requirement: "always",
@@ -139,7 +139,7 @@ const BUILT_IN_COMPONENTS: readonly Omit<EnergyIqComponentRevisionRecord, "creat
     family: "time",
     view_key: "operating_pattern_v1",
     target: "both",
-    metric_revision_ids: ["power.peak_kw@1"],
+    metric_revision_ids: ["energy.peak_demand_kw@1"],
     rule_revision_ids: [],
     query_ids: ["hourly_profile_v1"],
     requirement: "always",
@@ -266,7 +266,17 @@ export class EnergyIqTemplateStore {
     const row = this.db.prepare(`
       SELECT * FROM energyiq_project_template_drafts WHERE project_id = ?
     `).get(input.project_id);
-    if (isRecord(row)) return mapProjectTemplateDraft(row);
+    if (isRecord(row)) {
+      const saved = mapProjectTemplateDraft(row);
+      return {
+        ...saved,
+        document: reconcileTemplateDocument(
+          saved.document,
+          this.listComponentRevisions(),
+          input.tier_definition_ids,
+        ),
+      };
+    }
     return {
       project_id: input.project_id,
       revision: 0,
@@ -340,6 +350,34 @@ export const createDefaultTemplateDocument = (
     })),
   ],
 });
+
+const reconcileTemplateDocument = (
+  saved: EnergyIqTemplateDraftDocument,
+  catalog: readonly EnergyIqComponentRevisionRecord[],
+  tierDefinitionIds: readonly string[],
+): EnergyIqTemplateDraftDocument => {
+  const defaults = createDefaultTemplateDocument(catalog, tierDefinitionIds);
+  const savedByTemplateId = new Map(saved.templates.map((template) => [template.template_id, template]));
+  const catalogById = new Map(catalog.map((component) => [component.revision_id, component]));
+  return {
+    templates: defaults.templates.map((fallback) => {
+      const current = savedByTemplateId.get(fallback.template_id);
+      if (!current) return fallback;
+      const applicableIds = new Set(fallback.components.map((placement) => placement.component_revision_id));
+      const existing = current.components.filter((placement) =>
+        applicableIds.has(placement.component_revision_id) && catalogById.has(placement.component_revision_id)
+      );
+      const existingIds = new Set(existing.map((placement) => placement.component_revision_id));
+      return {
+        ...fallback,
+        components: [
+          ...existing,
+          ...fallback.components.filter((placement) => !existingIds.has(placement.component_revision_id)),
+        ],
+      };
+    }),
+  };
+};
 
 const validateAndCanonicalizeTemplateDocument = (input: {
   document: EnergyIqTemplateDraftDocument;

@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type {
+  EnergyComponentRevisionDto,
   EnergyMetricRevisionDto,
   EnergyProjectSetupDocumentDto,
   EnergyRuleRevisionDto,
+  EnergyTemplateDefinitionDto,
 } from "../../../lib/config-api";
-import { resolveMetricReadiness, resolveRuleReadiness } from "./analysis-configuration-model";
+import { resolveComponentReadiness, resolveMetricReadiness, resolveRuleReadiness } from "./analysis-configuration-model";
 
 const metric = (requirement: EnergyMetricRevisionDto["requirement"]): EnergyMetricRevisionDto => ({
   revision_id: `metric.${requirement}@1`,
@@ -120,5 +122,95 @@ describe("resolveRuleReadiness", () => {
     ]);
     expect(resolveRuleReadiness(rule("people_peers"), separated, selectedMetrics, "sg-calendar-v1"))
       .toMatchObject({ status: "missing", detail: "1/3 required siblings with people metadata" });
+  });
+});
+
+const component = (
+  requirement: EnergyComponentRevisionDto["requirement"],
+): EnergyComponentRevisionDto => ({
+  revision_id: `component.${requirement}@1`,
+  component_id: `component.${requirement}`,
+  version: 1,
+  display_name: requirement,
+  description: requirement,
+  family: "comparison",
+  view_key: requirement,
+  target: "both",
+  metric_revision_ids: [],
+  rule_revision_ids: [],
+  query_ids: [],
+  requirement,
+  created_at: "2026-08-02T00:00:00.000Z",
+});
+
+const projectTemplate: EnergyTemplateDefinitionDto = {
+  template_id: "project",
+  target_kind: "project",
+  components: [],
+};
+
+describe("resolveComponentReadiness", () => {
+  it("evaluates child comparability for the selected template target", () => {
+    const project = document([
+      { id: "level-1", tier_definition_id: "level", name: "Level 1", sort_order: 1, metadata_status: "confirmed" },
+      { id: "level-2", tier_definition_id: "level", name: "Level 2", sort_order: 2, metadata_status: "confirmed" },
+    ]);
+    expect(resolveComponentReadiness(component("children"), projectTemplate, project, new Set(), new Set(), "sg-calendar-v1"))
+      .toMatchObject({ status: "ready", detail: "1/1 template scopes have comparable children" });
+    expect(resolveComponentReadiness(component("area_peers"), projectTemplate, project, new Set(), new Set(), "sg-calendar-v1"))
+      .toMatchObject({
+        status: "missing",
+        detail: "0/1 template scopes have at least 3 area-comparable children · best available group 0/3",
+      });
+  });
+
+  it("reports partial readiness for a shared Tier Template", () => {
+    const tierTemplate: EnergyTemplateDefinitionDto = {
+      template_id: "tier:level",
+      target_kind: "tier",
+      tier_definition_id: "level",
+      components: [],
+    };
+    const project = document([
+      { id: "level-1", tier_definition_id: "level", name: "Level 1", sort_order: 1, metadata_status: "confirmed" },
+      { id: "level-2", tier_definition_id: "level", name: "Level 2", sort_order: 2, metadata_status: "confirmed" },
+      { id: "circuit-1", tier_definition_id: "circuit", parent_id: "level-1", name: "Circuit 1", sort_order: 1, metadata_status: "confirmed" },
+      { id: "circuit-2", tier_definition_id: "circuit", parent_id: "level-1", name: "Circuit 2", sort_order: 2, metadata_status: "confirmed" },
+    ]);
+    expect(resolveComponentReadiness(component("children"), tierTemplate, project, new Set(), new Set(), "sg-calendar-v1"))
+      .toMatchObject({ status: "partial", detail: "1/2 template scopes have comparable children" });
+  });
+
+  it("checks mapped meters inside each Tier scope", () => {
+    const tierTemplate: EnergyTemplateDefinitionDto = {
+      template_id: "tier:level",
+      target_kind: "tier",
+      tier_definition_id: "level",
+      components: [],
+    };
+    const project: EnergyProjectSetupDocumentDto = {
+      ...document([
+        { id: "level-1", tier_definition_id: "level", name: "Level 1", sort_order: 1, metadata_status: "confirmed" },
+        { id: "level-2", tier_definition_id: "level", name: "Level 2", sort_order: 2, metadata_status: "confirmed" },
+        { id: "circuit-1", tier_definition_id: "circuit", parent_id: "level-1", name: "Circuit 1", sort_order: 1, metadata_status: "confirmed" },
+      ]),
+      meter_mapping: {
+        source_kind: "excel",
+        confirmed: true,
+        rows: [{
+          id: "meter-1",
+          source_label: "Meter 1",
+          scope_id: "circuit-1",
+          display_name: "Meter 1",
+          resource: "electricity",
+          category: "load",
+          coverage: "partial",
+          meter_role: "component",
+          aggregation_usage: "official",
+        }],
+      },
+    };
+    expect(resolveComponentReadiness(component("meter_breakdown"), tierTemplate, project, new Set(), new Set(), "sg-calendar-v1"))
+      .toMatchObject({ status: "partial", detail: "1/2 template scopes have mapped meters" });
   });
 });

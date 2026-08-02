@@ -1,7 +1,9 @@
 import type {
+  EnergyComponentRevisionDto,
   EnergyMetricRevisionDto,
   EnergyProjectSetupDocumentDto,
   EnergyRuleRevisionDto,
+  EnergyTemplateDefinitionDto,
 } from "../../../lib/config-api";
 
 export type MetricReadiness = {
@@ -11,6 +13,7 @@ export type MetricReadiness = {
 };
 
 export type RuleReadiness = MetricReadiness;
+export type ComponentReadiness = MetricReadiness;
 
 export function resolveMetricReadiness(
   metric: EnergyMetricRevisionDto,
@@ -107,6 +110,101 @@ export function resolveRuleReadiness(
     label: "Not ready",
     detail: `${largestGroup}/${minimumPeers} required ${subject}`,
   };
+}
+
+export function resolveComponentReadiness(
+  component: EnergyComponentRevisionDto,
+  template: EnergyTemplateDefinitionDto,
+  document: EnergyProjectSetupDocumentDto,
+  selectedMetricRevisionIds: ReadonlySet<string>,
+  selectedRuleRevisionIds: ReadonlySet<string>,
+  businessCalendarVersion: string,
+): ComponentReadiness {
+  const missingMetrics = component.metric_revision_ids.filter((id) => !selectedMetricRevisionIds.has(id));
+  const missingRules = component.rule_revision_ids.filter((id) => !selectedRuleRevisionIds.has(id));
+  if (missingMetrics.length + missingRules.length > 0) {
+    return {
+      status: "missing",
+      label: "Not ready",
+      detail: `Enable ${missingMetrics.length + missingRules.length} required Metric/Rule revision${missingMetrics.length + missingRules.length === 1 ? "" : "s"}`,
+    };
+  }
+  if (component.requirement === "rules") {
+    return selectedRuleRevisionIds.size > 0
+      ? { status: "ready", label: "Ready", detail: `${selectedRuleRevisionIds.size} enabled rules can provide findings` }
+      : { status: "missing", label: "Not ready", detail: "Enable at least one deterministic rule" };
+  }
+  if (component.requirement === "operating_hours") {
+    return businessCalendarVersion.trim()
+      ? { status: "ready", label: "Ready", detail: `Uses ${businessCalendarVersion}` }
+      : { status: "missing", label: "Not ready", detail: "Missing operating-hours calendar" };
+  }
+  if (component.requirement === "always") {
+    return { status: "ready", label: "Ready", detail: "Required calculations are enabled" };
+  }
+
+  const targetNodes = template.target_kind === "project"
+    ? [{ id: "__project__" }]
+    : document.nodes
+        .filter((node) => node.tier_definition_id === template.tier_definition_id)
+        .map((node) => ({ id: node.id }));
+  const childGroups = targetNodes.map((target) => target.id === "__project__"
+    ? document.nodes.filter((node) => !node.parent_id)
+    : document.nodes.filter((node) => node.parent_id === target.id));
+
+  if (component.requirement === "meter_breakdown") {
+    const mappingRows = document.meter_mapping?.rows ?? [];
+    const parentByNodeId = new Map(document.nodes.map((node) => [node.id, node.parent_id]));
+    const readyTargets = targetNodes.filter((target) => target.id !== "__project__" && mappingRows.some((row) =>
+      isNodeInsideScope(row.scope_id, target.id, parentByNodeId)
+    )).length;
+    return readinessForTargetCount(readyTargets, targetNodes.length, "template scopes have mapped meters");
+  }
+
+  const minimumPeers = component.requirement === "children" ? 2 : 3;
+  const peerCounts = childGroups.map((children) => {
+    if (component.requirement === "children") return children.length;
+    return children.filter((child) => component.requirement === "area_peers"
+      ? typeof child.area_sqm === "number" && child.area_sqm > 0
+      : typeof child.occupant_count === "number" && child.occupant_count > 0
+    ).length;
+  });
+  const qualifyingGroups = peerCounts.filter((count) => count >= minimumPeers).length;
+  const label = component.requirement === "children"
+    ? "template scopes have comparable children"
+    : component.requirement === "area_peers"
+      ? "template scopes have at least 3 area-comparable children"
+      : "template scopes have at least 3 people-comparable children";
+  const readiness = readinessForTargetCount(qualifyingGroups, childGroups.length, label);
+  if (readiness.status !== "missing") return readiness;
+  const bestAvailableGroup = peerCounts.length > 0 ? Math.max(...peerCounts) : 0;
+  return {
+    ...readiness,
+    detail: `${readiness.detail} · best available group ${bestAvailableGroup}/${minimumPeers}`,
+  };
+}
+
+function readinessForTargetCount(readyCount: number, totalCount: number, detailLabel: string): ComponentReadiness {
+  if (totalCount > 0 && readyCount === totalCount) {
+    return { status: "ready", label: "Ready", detail: `${readyCount}/${totalCount} ${detailLabel}` };
+  }
+  if (readyCount > 0) {
+    return { status: "partial", label: "Partially ready", detail: `${readyCount}/${totalCount} ${detailLabel}` };
+  }
+  return { status: "missing", label: "Not ready", detail: `0/${totalCount} ${detailLabel}` };
+}
+
+function isNodeInsideScope(
+  nodeId: string,
+  scopeId: string,
+  parentByNodeId: ReadonlyMap<string, string | undefined>,
+): boolean {
+  let current: string | undefined = nodeId;
+  while (current) {
+    if (current === scopeId) return true;
+    current = parentByNodeId.get(current);
+  }
+  return false;
 }
 
 function peerGroups(

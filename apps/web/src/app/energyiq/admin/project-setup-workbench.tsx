@@ -13,6 +13,7 @@ import {
 
 import {
   configApi,
+  type EnergyComponentRevisionDto,
   type EnergyImportBatchDto,
   type EnergyMeterMappingDraftDto,
   type EnergyMeterMappingRowDto,
@@ -26,13 +27,16 @@ import {
   type EnergyProjectSetupDto,
   type EnergyProjectSetupNodeDto,
   type EnergyProjectSetupValidationDto,
+  type EnergyProjectTemplateDraftDto,
+  type EnergyTemplateDraftDocumentDto,
+  type EnergyTemplateDefinitionDto,
   type EnergyTierDefinitionDto,
 } from "../../../lib/config-api";
 import { EnergyIcon } from "../_components/icons";
 import type { useEnergyIqAccess } from "../_components/energyiq-access";
 import { EnergyIqAdminSidebar, type AdminSection } from "./admin-sidebar";
 import { AdminAccessPages } from "./admin-access-pages";
-import { resolveMetricReadiness, resolveRuleReadiness } from "./analysis-configuration-model";
+import { resolveComponentReadiness, resolveMetricReadiness, resolveRuleReadiness } from "./analysis-configuration-model";
 import { deriveProjectDeliveryProgress } from "./project-delivery-progress";
 import { useProjectSetupLoader } from "./use-project-setup-loader";
 import {
@@ -446,7 +450,7 @@ function AnalysisConfigurationPage({
   document: EnergyProjectSetupDocumentDto;
   businessCalendarVersion: string;
 }) {
-  const [activeStep, setActiveStep] = useState<"metrics" | "rules">("metrics");
+  const [activeStep, setActiveStep] = useState<"metrics" | "rules" | "layout">("metrics");
   const [catalog, setCatalog] = useState<EnergyMetricRevisionDto[]>([]);
   const [revision, setRevision] = useState(0);
   const [selected, setSelected] = useState<string[]>([]);
@@ -455,6 +459,10 @@ function AnalysisConfigurationPage({
   const [ruleRevision, setRuleRevision] = useState(0);
   const [selectedRules, setSelectedRules] = useState<string[]>([]);
   const [savedRuleSelection, setSavedRuleSelection] = useState<string[]>([]);
+  const [componentCatalog, setComponentCatalog] = useState<EnergyComponentRevisionDto[]>([]);
+  const [templateDraft, setTemplateDraft] = useState<EnergyProjectTemplateDraftDto | null>(null);
+  const [savedTemplateDocument, setSavedTemplateDocument] = useState<EnergyTemplateDraftDocumentDto | null>(null);
+  const [activeTemplateId, setActiveTemplateId] = useState("project");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -465,9 +473,10 @@ function AnalysisConfigurationPage({
     setError(null);
     setNotice(null);
     try {
-      const [metricResult, ruleResult] = await Promise.all([
+      const [metricResult, ruleResult, templateResult] = await Promise.all([
         configApi.getEnergyProjectMetricConfig(projectId),
         configApi.getEnergyProjectRuleConfig(projectId),
+        configApi.getEnergyProjectTemplateDraft(projectId),
       ]);
       setCatalog(metricResult.catalog);
       setRevision(metricResult.config.revision);
@@ -477,6 +486,10 @@ function AnalysisConfigurationPage({
       setRuleRevision(ruleResult.config.revision);
       setSelectedRules(ruleResult.config.selected_rule_revision_ids);
       setSavedRuleSelection(ruleResult.config.selected_rule_revision_ids);
+      setComponentCatalog(templateResult.catalog);
+      setTemplateDraft(templateResult.draft);
+      setSavedTemplateDocument(templateResult.draft.document);
+      setActiveTemplateId("project");
     } catch (reason) {
       setError(messageFrom(reason, "Failed to load analysis configuration"));
     } finally {
@@ -492,6 +505,8 @@ function AnalysisConfigurationPage({
     || selected.some((id) => !savedSelection.includes(id));
   const rulesDirty = selectedRules.length !== savedRuleSelection.length
     || selectedRules.some((id) => !savedRuleSelection.includes(id));
+  const templateDirty = templateDraft !== null && savedTemplateDocument !== null
+    && JSON.stringify(templateDraft.document) !== JSON.stringify(savedTemplateDocument);
   const saveMetrics = useCallback(async () => {
     setSaving(true);
     setError(null);
@@ -534,6 +549,27 @@ function AnalysisConfigurationPage({
     }
   }, [projectId, ruleRevision, selectedRules]);
 
+  const saveTemplate = useCallback(async () => {
+    if (!templateDraft) return;
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await configApi.saveEnergyProjectTemplateDraft(projectId, {
+        expectedRevision: templateDraft.revision,
+        document: templateDraft.document,
+      });
+      setComponentCatalog(result.catalog);
+      setTemplateDraft(result.draft);
+      setSavedTemplateDocument(result.draft.document);
+      setNotice("Project and Tier template layouts saved as a new Draft revision.");
+    } catch (reason) {
+      setError(messageFrom(reason, "Failed to save template layout"));
+    } finally {
+      setSaving(false);
+    }
+  }, [projectId, templateDraft]);
+
   const families = (["aggregate", "time", "normalised", "quality"] as const)
     .map((family) => ({ family, metrics: catalog.filter((metric) => metric.family === family) }))
     .filter((group) => group.metrics.length > 0);
@@ -550,6 +586,11 @@ function AnalysisConfigurationPage({
     rule.revision_id,
     resolveRuleReadiness(rule, document, selectedMetricIdSet, businessCalendarVersion),
   ]));
+  const activeRevision = activeStep === "metrics"
+    ? revision
+    : activeStep === "rules"
+      ? ruleRevision
+      : templateDraft?.revision ?? 0;
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">
@@ -557,20 +598,20 @@ function AnalysisConfigurationPage({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">Analysis configuration</span>
-            <h3 className="mt-2 text-base font-semibold">Choose the trusted metrics this Project may use</h3>
+            <h3 className="mt-2 text-base font-semibold">Configure trusted calculations, findings and layouts</h3>
             <p className="mt-1 max-w-3xl text-xs leading-5 text-muted">
               Formulas are controlled, versioned definitions. Here the administrator only selects which metrics may appear in rules and templates; free-form SQL is intentionally out of scope.
             </p>
           </div>
           <span className="rounded-full bg-surface-subtle px-3 py-1 text-[10px] font-semibold text-muted">
-            Draft config revision {revision}
+            Draft config revision {activeRevision}
           </span>
         </div>
 
         <ol className="mt-5 grid gap-3 md:grid-cols-3">
           <AnalysisStep number="1" title="Metrics" body="Select approved calculations." active={activeStep === "metrics"} onClick={() => setActiveStep("metrics")} />
           <AnalysisStep number="2" title="Rules" body="Select deterministic findings." active={activeStep === "rules"} onClick={() => setActiveStep("rules")} />
-          <AnalysisStep number="3" title="Template layout" body="Place evidence-backed modules next." disabled />
+          <AnalysisStep number="3" title="Template layout" body="Choose and order evidence-backed modules." active={activeStep === "layout"} onClick={() => setActiveStep("layout")} />
         </ol>
       </section>
 
@@ -662,7 +703,7 @@ function AnalysisConfigurationPage({
             ))}
           </div>
         )}
-      </section> : (
+      </section> : activeStep === "rules" ? (
         <section className="rounded-xl border border-border bg-surface">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
             <div>
@@ -753,9 +794,253 @@ function AnalysisConfigurationPage({
             </div>
           )}
         </section>
+      ) : (
+        <TemplateLayoutPanel
+          loading={loading}
+          saving={saving}
+          document={document}
+          componentCatalog={componentCatalog}
+          templateDraft={templateDraft}
+          savedTemplateDocument={savedTemplateDocument}
+          selectedMetricRevisionIds={selectedMetricIdSet}
+          selectedRuleRevisionIds={selectedRuleIdSet}
+          businessCalendarVersion={businessCalendarVersion}
+          activeTemplateId={activeTemplateId}
+          setActiveTemplateId={setActiveTemplateId}
+          dirty={templateDirty}
+          onReset={() => setTemplateDraft((current) => current && savedTemplateDocument
+            ? { ...current, document: savedTemplateDocument }
+            : current)}
+          onChange={(nextDocument) => setTemplateDraft((current) => current
+            ? { ...current, document: nextDocument }
+            : current)}
+          onSave={() => void saveTemplate()}
+        />
       )}
     </div>
   );
+}
+
+function TemplateLayoutPanel({
+  loading,
+  saving,
+  document,
+  componentCatalog,
+  templateDraft,
+  savedTemplateDocument,
+  selectedMetricRevisionIds,
+  selectedRuleRevisionIds,
+  businessCalendarVersion,
+  activeTemplateId,
+  setActiveTemplateId,
+  dirty,
+  onReset,
+  onChange,
+  onSave,
+}: {
+  loading: boolean;
+  saving: boolean;
+  document: EnergyProjectSetupDocumentDto;
+  componentCatalog: EnergyComponentRevisionDto[];
+  templateDraft: EnergyProjectTemplateDraftDto | null;
+  savedTemplateDocument: EnergyTemplateDraftDocumentDto | null;
+  selectedMetricRevisionIds: ReadonlySet<string>;
+  selectedRuleRevisionIds: ReadonlySet<string>;
+  businessCalendarVersion: string;
+  activeTemplateId: string;
+  setActiveTemplateId: Dispatch<SetStateAction<string>>;
+  dirty: boolean;
+  onReset: () => void;
+  onChange: (document: EnergyTemplateDraftDocumentDto) => void;
+  onSave: () => void;
+}) {
+  if (loading || !templateDraft || !savedTemplateDocument) {
+    return (
+      <section className="rounded-xl border border-border bg-surface p-8 text-center text-xs text-muted">
+        Loading Component Catalog and template layouts...
+      </section>
+    );
+  }
+
+  const tierById = new Map(document.tiers.map((tier) => [tier.id, tier]));
+  const catalogById = new Map(componentCatalog.map((component) => [component.revision_id, component]));
+  const selectedTemplate = templateDraft.document.templates.find((template) => template.template_id === activeTemplateId)
+    ?? templateDraft.document.templates[0];
+  if (!selectedTemplate) {
+    return (
+      <section className="rounded-xl border border-border bg-surface p-8 text-center text-xs text-muted">
+        Define and save the Project Tier structure before configuring templates.
+      </section>
+    );
+  }
+
+  const updateComponents = (components: EnergyTemplateDefinitionDto["components"]) => onChange({
+    templates: templateDraft.document.templates.map((template) => template.template_id === selectedTemplate.template_id
+      ? { ...template, components }
+      : template),
+  });
+  const enabledCount = selectedTemplate.components.filter((placement) => placement.enabled).length;
+  const templateLabel = selectedTemplate.target_kind === "project"
+    ? "Project Overview"
+    : `${tierById.get(selectedTemplate.tier_definition_id ?? "")?.alias ?? "Tier"} Template`;
+
+  return (
+    <section className="rounded-xl border border-border bg-surface">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
+        <div>
+          <h4 className="text-sm font-semibold">Template layout</h4>
+          <p className="mt-1 max-w-2xl text-[11px] leading-4 text-muted">
+            Configure one Project Overview and one shared layout per Tier Definition. Templates may only reference the controlled Component Catalog.
+          </p>
+          <p className="mt-1 text-[10px] text-muted-light">
+            Draft revision {templateDraft.revision} · changes remain invisible to customers until Review &amp; Publish.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button type="button" disabled={!dirty || saving} onClick={onReset} className="rounded-md border border-border px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40">
+            Reset
+          </button>
+          <button type="button" disabled={!dirty || saving} onClick={onSave} className="rounded-md bg-foreground px-3 py-2 text-xs font-semibold text-background disabled:cursor-not-allowed disabled:opacity-40">
+            {saving ? "Saving..." : "Save layout"}
+          </button>
+        </div>
+      </div>
+
+      <div className="grid min-h-[520px] lg:grid-cols-[230px_minmax(0,1fr)]">
+        <aside className="border-b border-border p-4 lg:border-b-0 lg:border-r">
+          <p className="px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-light">Analysis scope</p>
+          <div className="mt-3 space-y-1">
+            {templateDraft.document.templates.map((template) => {
+              const active = template.template_id === selectedTemplate.template_id;
+              const tier = template.tier_definition_id ? tierById.get(template.tier_definition_id) : undefined;
+              const label = template.target_kind === "project" ? "Project Overview" : tier?.alias ?? "Tier Template";
+              const count = template.components.filter((placement) => placement.enabled).length;
+              return (
+                <button
+                  key={template.template_id}
+                  type="button"
+                  onClick={() => setActiveTemplateId(template.template_id)}
+                  className={[
+                    "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-xs transition-colors",
+                    active ? "bg-foreground text-background" : "text-muted hover:bg-surface-subtle hover:text-foreground",
+                  ].join(" ")}
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate font-semibold">{label}</span>
+                    <span className={["mt-0.5 block text-[9px]", active ? "text-background/65" : "text-muted-light"].join(" ")}>
+                      {template.target_kind === "project" ? "Project scope" : `Shared by all ${tier?.alias ?? "Tier"} nodes`}
+                    </span>
+                  </span>
+                  <span className={["ml-2 rounded-full px-2 py-0.5 text-[9px]", active ? "bg-background/15" : "bg-surface-subtle"].join(" ")}>{count}</span>
+                </button>
+              );
+            })}
+          </div>
+        </aside>
+
+        <div className="p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h5 className="text-sm font-semibold">{templateLabel}</h5>
+              <p className="mt-1 text-[11px] text-muted">{enabledCount} enabled modules · order runs from top to bottom</p>
+            </div>
+            <span className="rounded-full bg-surface-subtle px-2.5 py-1 text-[9px] font-semibold text-muted">
+              {selectedTemplate.target_kind === "project" ? "PROJECT" : "TIER"}
+            </span>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            {selectedTemplate.components.map((placement, index) => {
+              const component = catalogById.get(placement.component_revision_id);
+              if (!component) return null;
+              const readiness = resolveComponentReadiness(
+                component,
+                selectedTemplate,
+                document,
+                selectedMetricRevisionIds,
+                selectedRuleRevisionIds,
+                businessCalendarVersion,
+              );
+              const dependencyCount = component.metric_revision_ids.length + component.rule_revision_ids.length;
+              return (
+                <div
+                  key={placement.component_revision_id}
+                  className={[
+                    "grid gap-3 rounded-xl border p-4 sm:grid-cols-[32px_minmax(0,1fr)_auto]",
+                    placement.enabled ? "border-foreground/25 bg-surface-subtle" : "border-border opacity-65",
+                  ].join(" ")}
+                >
+                  <div className="flex h-7 w-7 items-center justify-center rounded-md bg-surface text-[10px] font-bold text-muted">{index + 1}</div>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="inline-flex cursor-pointer items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={placement.enabled}
+                          onChange={() => updateComponents(selectedTemplate.components.map((item) => item.component_revision_id === placement.component_revision_id
+                            ? { ...item, enabled: !item.enabled }
+                            : item))}
+                          className="h-4 w-4 accent-current"
+                        />
+                        <strong className="text-xs">{component.display_name}</strong>
+                      </label>
+                      <span className="rounded-full bg-surface px-2 py-0.5 text-[9px] capitalize text-muted">{component.family}</span>
+                      <span className="rounded-full bg-surface px-2 py-0.5 text-[9px] text-muted">v{component.version}</span>
+                      <span className={[
+                        "rounded-full px-2 py-0.5 text-[9px] font-semibold",
+                        readiness.status === "ready"
+                          ? "bg-step-success/10 text-step-success"
+                          : readiness.status === "partial"
+                            ? "bg-step-warning/10 text-step-warning"
+                            : "bg-surface text-muted",
+                      ].join(" ")}>{readiness.label}</span>
+                    </div>
+                    <p className="mt-1.5 text-[11px] leading-4 text-muted">{component.description}</p>
+                    <p className="mt-2 text-[10px] text-muted-light">
+                      {readiness.detail} · {dependencyCount} controlled dependencies · {component.query_ids.length} query specs
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 self-center">
+                    <button
+                      type="button"
+                      aria-label={`Move ${component.display_name} up`}
+                      disabled={index === 0}
+                      onClick={() => updateComponents(movePlacement(selectedTemplate.components, index, index - 1))}
+                      className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-xs disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Move ${component.display_name} down`}
+                      disabled={index === selectedTemplate.components.length - 1}
+                      onClick={() => updateComponents(movePlacement(selectedTemplate.components, index, index + 1))}
+                      className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-xs disabled:cursor-not-allowed disabled:opacity-30"
+                    >
+                      ↓
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function movePlacement(
+  placements: EnergyTemplateDefinitionDto["components"],
+  from: number,
+  to: number,
+): EnergyTemplateDefinitionDto["components"] {
+  if (to < 0 || to >= placements.length || from === to) return placements;
+  const next = [...placements];
+  const [placement] = next.splice(from, 1);
+  if (!placement) return placements;
+  next.splice(to, 0, placement);
+  return next;
 }
 
 function AnalysisStep({

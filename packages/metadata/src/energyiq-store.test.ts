@@ -55,6 +55,13 @@ describe("EnergyIqStore", () => {
       });
       expect(saved.revision).toBe(1);
       expect(saved.document.templates[0]?.components[0]?.enabled).toBe(false);
+      const reconciled = metadata.energyIq.templates.getProjectDraft({
+        project_id: "template-project",
+        tier_definition_ids: ["tier-circuit", "tier-room", "tier-level"],
+      });
+      expect(reconciled.revision).toBe(1);
+      expect(reconciled.document.templates.map((template) => template.template_id)).toContain("tier:tier-room");
+      expect(reconciled.document.templates[0]?.components[0]?.enabled).toBe(false);
       expect(() => metadata.energyIq.templates.saveProjectDraft({
         project_id: "template-project",
         expected_revision: 0,
