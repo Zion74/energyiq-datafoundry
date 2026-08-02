@@ -9,6 +9,13 @@ export type AuthMailResult = {
 export class AuthMailer {
   constructor(private readonly config: PasswordAuthConfig) {}
 
+  assertDeliveryConfigured(): void {
+    if (this.config.emailDelivery === "test") return;
+    if (!this.config.smtp?.host || !this.config.smtp.from) {
+      throw new Error("AUTH_CONFIG_MISSING:SMTP is required.");
+    }
+  }
+
   async sendVerification(input: { email: string; token: string }): Promise<AuthMailResult> {
     const url = `${this.config.publicBaseUrl.replace(/\/$/u, "")}/login?verify=${encodeURIComponent(input.token)}`;
     return this.send({
@@ -49,22 +56,21 @@ export class AuthMailer {
     token: string;
     url: string;
   }): Promise<AuthMailResult> {
+    this.assertDeliveryConfigured();
     if (this.config.emailDelivery === "test") {
       return { testToken: input.token, testUrl: input.url };
     }
-    if (!this.config.smtp) {
-      throw new Error("AUTH_CONFIG_MISSING:SMTP is required.");
-    }
+    const smtp = this.config.smtp!;
     const transport = nodemailer.createTransport({
-      host: this.config.smtp.host,
-      port: this.config.smtp.port,
-      secure: this.config.smtp.secure,
-      auth: this.config.smtp.user
-        ? { user: this.config.smtp.user, pass: this.config.smtp.password ?? "" }
+      host: smtp.host,
+      port: smtp.port,
+      secure: smtp.secure,
+      auth: smtp.user
+        ? { user: smtp.user, pass: smtp.password ?? "" }
         : undefined
     });
     await transport.sendMail({
-      from: this.config.smtp.from,
+      from: smtp.from,
       to: input.email,
       subject: input.subject,
       text: input.text

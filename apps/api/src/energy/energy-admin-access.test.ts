@@ -110,4 +110,26 @@ describe("EnergyAdminAccessService", () => {
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
+
+  it("does not leave an orphaned pending user when email delivery is unavailable", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-admin-mail-config-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const auth = new AuthService(metadata, { ...authConfig, emailDelivery: "smtp" });
+      const service = new EnergyAdminAccessService(metadata, auth);
+
+      await expect(service.inviteUser({
+        actorUserId: "dev-user",
+        email: "no-mail@example.com",
+        organisationIds: ["default"],
+        role: "user"
+      })).rejects.toThrow("AUTH_CONFIG_MISSING:SMTP is required.");
+
+      expect(metadata.users.findByEmail({ email: "no-mail@example.com" })).toBeUndefined();
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
 });

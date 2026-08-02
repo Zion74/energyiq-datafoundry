@@ -74,6 +74,10 @@ export class AuthService {
     if (existing?.disabled_at) {
       throw new AuthError(409, "CONFLICT", "The account is disabled. Enable it before adding access.");
     }
+    if (existing?.email_verified_at && existing.password_updated_at) {
+      return { active: true, user: userDto(existing) };
+    }
+    this.mailer.assertDeliveryConfigured();
     const user = existing ?? this.metadataStore.users.createPasswordUser({
       id: randomUUID(),
       email,
@@ -84,9 +88,6 @@ export class AuthService {
         user_id: user.id,
         display_name: normalizeDisplayName(input.displayName)
       });
-    }
-    if (user.email_verified_at && user.password_updated_at) {
-      return { active: true, user: userDto(this.metadataStore.users.getById({ user_id: user.id })) };
     }
     this.metadataStore.authTokens.consumeOpenByUser({
       user_id: user.id,
