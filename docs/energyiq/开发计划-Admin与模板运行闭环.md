@@ -13,7 +13,7 @@ status: in_progress
 
 # EnergyIQ 开发计划：Admin 与模板运行闭环
 
-> 状态：**批次 0–2 已完成并通过 Ngee Ann Level 6 的真实 Admin→Facts→FM→AI Context 闭环复验；Access 基础已完成 Organisation、Users、邀请登录、Membership、双层选择与两个演示客户的数据隔离。下一步进入批次 3 Metrics/Rules，但正式发布仍需批次 4 的 Review & Publish。**
+> 状态：**批次 0–2 已完成并通过 Ngee Ann Level 6 的真实 Admin→Facts→FM→AI Context 闭环复验；批次 3 的第一步 Metric Registry 与 Project Metric Config 已完成。下一步继续确定性 Rules、Component Catalog 与 Project/Tier Template；正式发布仍需批次 4 的 Review & Publish。**
 
 实施证据见：[2026-08-01 Admin 与 Tier 批次 0–1 实施记录](2026-08-01-Admin-Tier-批次0-1实施记录.md)、[Admin Meter Mapping 与虚拟电表实施记录](2026-08-01-Admin-Meter-Mapping与虚拟电表实施记录.md)和 [Admin Excel Import Batch 实施记录](2026-08-01-Admin-Excel-Import-Batch实施记录.md)。
 
@@ -174,6 +174,8 @@ admin creates Project
 - Preschool May 2026 fixture 总量为约 24921.8123 kWh。
 
 ## 7. 批次 3：Metric、Rule、Component 与项目模板
+
+> 实施状态：第一步已完成。系统已有 9 个受控 Metric Revision，Project 可在 Admin `Templates` 中选择启用项并以乐观 revision 保存；公式不可在 UI 中任意改写。Rules、Component Catalog 与模板布局仍未实现。
 
 ### 后端
 
@@ -383,4 +385,4 @@ admin creates Project
 4. Preschool 不自动猜 Block/Room；
 5. Admin 与客户 UI 均先英文。
 
-数据事实闭环已经通过。Preschool Block/Room 仍保持待补输入，不自动猜测；下一步开始 Metric Registry、Rule、Component Catalog 与模板运行开发。
+数据事实闭环已经通过，Metric Registry 与 Project 级指标选择也已完成。Preschool Block/Room 仍保持待补输入，不自动猜测；下一步从确定性 Rule 开始，再连接 Component Catalog 与 Project/Tier Template。

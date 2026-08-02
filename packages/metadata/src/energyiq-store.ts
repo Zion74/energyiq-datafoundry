@@ -1,5 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
+import { EnergyIqMetricStore } from "./energyiq-metric-store.js";
+
 import {
   EnergyIqProjectSetupStore,
   type EnergyIqDeliveryStage,
@@ -178,9 +180,11 @@ export const initializeEnergyIqSchema = (db: DatabaseSync): void => {
 };
 
 export class EnergyIqStore {
+  readonly metrics: EnergyIqMetricStore;
   readonly projectSetup: EnergyIqProjectSetupStore;
 
   constructor(private readonly db: DatabaseSync) {
+    this.metrics = new EnergyIqMetricStore(db);
     this.projectSetup = new EnergyIqProjectSetupStore(db);
   }
 

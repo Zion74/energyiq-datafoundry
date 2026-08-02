@@ -17,6 +17,7 @@ export type EnergyScopeAnalysis = {
   context: EnergyQueryContext;
   summary: {
     usageKwh: number;
+    averageDailyUsageKwh: number;
     costSgd: number;
     peakKw: number;
     nonOperatingKwh: number;
@@ -189,6 +190,7 @@ export const executeEnergyScopeAnalysis = async (input: {
 
   const summary: EnergyScopeAnalysis["summary"] = {
     usageKwh: round(usageKwh, 4),
+    averageDailyUsageKwh: round(usageKwh / calendarDayCount(input.context.from, input.context.to), 4),
     costSgd: round(usageKwh * SINGAPORE_TARIFF_SGD_PER_KWH, 2),
     peakKw: round(peakKw, 4),
     nonOperatingKwh: round(nonOperatingKwh, 4),
@@ -227,6 +229,9 @@ export const executeEnergyScopeAnalysis = async (input: {
     }
   };
 };
+
+const calendarDayCount = (from: string, to: string): number =>
+  Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000));
 
 const buildChildScopes = (input: {
   scopeNodeId: string;

@@ -159,3 +159,40 @@ Excel 事实闭环已通过。下一步进入批次 3：Metric Definition、确�
 - 本轮遵循“一次只验证一个 Excel”的约定，因此新 Import Batch 只覆盖 Level 6；不是完整 Ngee Ann 双楼层重新发布。
 - Draft Mapping 和 `Load 12` 尚未进入不可变 Published Snapshot；客户页面当前消费已物化 facts 和既有 published hierarchy。
 - Stage 5 `Review & Publish` 尚未实现，不能把 Draft 已通过校验表述为已正式发布。
+
+## 8. 2026-08-02 Metric Registry 第一阶段
+
+在现有 `Templates` Admin 子页中加入 Analysis configuration，不新增侧栏入口。当前仅允许管理员选择项目可用指标，不提供自由 SQL 或公式编辑器。
+
+### 已实现
+
+- 新增 9 个稳定的内置 Metric Revision：总耗电、日均耗电、峰值、非营业时段耗电/占比、每平方米、人均、有效区间数与质量事件数；
+- Metric Revision 固定 `metric_id`、版本、单位、依赖条件与现有分析结果的 `calculation_key`；
+- Project Metric Config 只保存启用的 revision IDs，并用 `expected_revision` 防止并发覆盖；
+- 面积和人数缺失时明确标记依赖，不用 mock 值伪装可计算；
+- 新增 `averageDailyUsageKwh`，按所选日期范围实际包含的日历日计算；
+- Ngee Ann 与 Preschool 的指标选择按 Project 隔离。
+
+### 验证证据
+
+| 检查项 | 结果 |
+| --- | --- |
+| Metadata 测试 | 6/6 通过，覆盖目录种子、默认选择、保存、revision 冲突与非法指标 |
+| Energy golden tests | 2/2 通过，Preschool 与 Ngee Ann 总量不变并新增日均断言 |
+| Metadata typecheck | 通过 |
+| API build | 通过 |
+| Web 变更文件类型检查 | 无新增错误；全库仍有既有 DataTasks 测试类型错误 |
+| 浏览器目录加载 | Ngee Ann 9/9 指标加载成功 |
+| 保存与复载 | 关闭一项保存为 revision 1，刷新后保持 8/9 |
+| 恢复默认 | 恢复为 9/9，保存为 revision 2 |
+| Project 隔离 | 切换 Preschool 显示独立 revision 0，返回 Ngee Ann 保持 revision 2 |
+
+### 当前边界
+
+- Rules、Component Catalog、Project/Tier Template 布局和 Preview 尚未实现；
+- 历史基线、同级排名、热力图、Bell curve 与四象限属于后续比较/组件能力，不在本次 9 个标量指标中；
+- 新配置仍是 Draft 能力，尚未进入不可变 Published Snapshot 或 Analysis Run；
+
+### 同步修复的连接问题
+
+Ngee Ann golden 测试曾稳定报 `Connection was never established or has been closed already`。根因是 DuckDB Database 构造为异步建立连接，但缓存立即返回未 ready 的 handle。缓存现改为保存并等待 opening Promise；失败时删除缓存项，允许后续重试。原始双 Project golden 测试随后 2/2 通过。

@@ -8,7 +8,7 @@
 
 1. [当前共识与新会话入口](当前共识与新会话入口.md)：截至 2026-08-01 的全部最终共识、现状、差距、开放输入和延期项；
 2. [领域词汇表](CONTEXT.md)：Project、Tier、Scope、Meter、Fact、Template 和 Run 的统一用语；
-3. [开发计划：Admin 与模板运行闭环](开发计划-Admin与模板运行闭环.md)：批次 0–1 与批次 2 前半段已完成，下一步补上传批次的事实物化；
+3. [开发计划：Admin 与模板运行闭环](开发计划-Admin与模板运行闭环.md)：批次 0–2 与批次 3 的 Metric Registry 已完成，下一步是确定性 Rules 与模板组件；
 4. [最新 MVP PRD](PRD-EnergyIQ-MVP.md)：客户页面、Admin、数据、模板与验收。
 
 若旧聊天或旧文档冲突，以“当前共识与新会话入口”及其链接的 accepted 专题为准。

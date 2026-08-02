@@ -301,6 +301,41 @@ export const handleEnergyApiRequest = async (
         };
       }
     }
+    if (segments[0] === "projects" && segments[2] === "metric-config" && segments.length === 3) {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      requireEnergyAdminProject(context, user, projectId);
+      if (request.method === "GET") {
+        return {
+          status: 200,
+          body: createSuccessResult({
+            catalog: context.metadataStore.energyIq.metrics.listRevisions(),
+            config: context.metadataStore.energyIq.metrics.getProjectConfig(projectId)
+          })
+        };
+      }
+      if (request.method === "PUT") {
+        const body = requireRecord(await readJsonBody(request));
+        const selectedMetricRevisionIds = requireStringArray(
+          body.selectedMetricRevisionIds,
+          "ENERGYIQ_METRIC_SELECTION_REQUIRED"
+        );
+        return {
+          status: 200,
+          body: createSuccessResult({
+            catalog: context.metadataStore.energyIq.metrics.listRevisions(),
+            config: context.metadataStore.energyIq.metrics.saveProjectConfig({
+              project_id: projectId,
+              expected_revision: requireInteger(
+                body.expectedRevision,
+                "ENERGYIQ_METRIC_CONFIG_REVISION_REQUIRED"
+              ),
+              selected_metric_revision_ids: selectedMetricRevisionIds,
+              updated_by: user.id
+            })
+          })
+        };
+      }
+    }
     if (segments[0] === "query-context" && segments[1] === "resolve" && request.method === "POST") {
       const body = await readJsonBody(request);
       return {
@@ -362,7 +397,7 @@ export const handleEnergyApiRequest = async (
     const message = error instanceof Error ? error.message : String(error);
     const forbidden = message.includes("FORBIDDEN") || message.includes("ADMIN_REQUIRED");
     const conflict = message.includes("CONFLICT");
-    const invalid = message.includes("INVALID") || message.includes("REQUIRED") || message.includes("EXCEL_EMPTY") || message.includes("NOT_CONFIRMED");
+    const invalid = message.includes("INVALID") || message.includes("REQUIRED") || message.includes("EXCEL_EMPTY") || message.includes("NOT_CONFIRMED") || message === "ENERGYIQ_METRIC_REVISION_NOT_FOUND";
     const code: AppErrorCode = forbidden
       ? "FORBIDDEN"
       : conflict

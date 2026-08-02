@@ -6,6 +6,62 @@ import { describe, expect, it } from "vitest";
 import { createMetadataStore } from "./index.js";
 
 describe("EnergyIqStore", () => {
+  it("stores immutable metric revisions and versioned project selections", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-metrics-store-"));
+    try {
+      const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+      metadata.workspaces.upsert({
+        id: "metrics-workspace",
+        owner_user_id: "dev-user",
+        name: "Metrics Workspace",
+        kind: "customer"
+      });
+      metadata.energyIq.upsertProject({
+        id: "metrics-project",
+        workspace_id: "metrics-workspace",
+        name: "Metrics Project",
+        status: "draft"
+      });
+
+      const catalog = metadata.energyIq.metrics.listRevisions();
+      expect(catalog.map((metric) => metric.revision_id)).toContain("energy.total_usage_kwh@1");
+      expect(catalog.map((metric) => metric.revision_id)).toContain("energy.usage_per_person@1");
+
+      const initial = metadata.energyIq.metrics.getProjectConfig("metrics-project");
+      expect(initial.revision).toBe(0);
+      expect(initial.selected_metric_revision_ids).toHaveLength(catalog.length);
+
+      const saved = metadata.energyIq.metrics.saveProjectConfig({
+        project_id: "metrics-project",
+        expected_revision: 0,
+        selected_metric_revision_ids: ["energy.total_usage_kwh@1", "energy.peak_demand_kw@1"],
+        updated_by: "dev-user"
+      });
+      expect(saved.revision).toBe(1);
+      expect(saved.selected_metric_revision_ids).toEqual([
+        "energy.total_usage_kwh@1",
+        "energy.peak_demand_kw@1"
+      ]);
+
+      expect(() => metadata.energyIq.metrics.saveProjectConfig({
+        project_id: "metrics-project",
+        expected_revision: 0,
+        selected_metric_revision_ids: ["energy.total_usage_kwh@1"],
+        updated_by: "dev-user"
+      })).toThrow("ENERGYIQ_METRIC_CONFIG_REVISION_CONFLICT");
+      expect(() => metadata.energyIq.metrics.saveProjectConfig({
+        project_id: "metrics-project",
+        expected_revision: 1,
+        selected_metric_revision_ids: ["energy.unknown@1"],
+        updated_by: "dev-user"
+      })).toThrow("ENERGYIQ_METRIC_REVISION_NOT_FOUND");
+
+      metadata.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
   it("uses customer Workspace membership as the published Project visibility boundary", () => {
     const root = mkdtempSync(join(tmpdir(), "energyiq-access-store-"));
     try {

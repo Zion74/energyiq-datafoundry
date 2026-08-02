@@ -308,6 +308,7 @@ export type EnergyScopeAnalysisDto = {
   context: EnergyQueryContextDto;
   summary: {
     usageKwh: number;
+    averageDailyUsageKwh: number;
     costSgd: number;
     peakKw: number;
     nonOperatingKwh: number;
@@ -393,6 +394,37 @@ export type EnergyProjectHierarchyDto = {
   };
   tiers: EnergyTierDefinitionDto[];
   nodes: EnergyProjectNodeDto[];
+};
+
+export type EnergyMetricFamilyDto = "aggregate" | "time" | "normalised" | "quality";
+export type EnergyMetricRequirementDto = "always" | "area" | "people";
+
+export type EnergyMetricRevisionDto = {
+  revision_id: string;
+  metric_id: string;
+  version: number;
+  display_name: string;
+  description: string;
+  family: EnergyMetricFamilyDto;
+  unit: string;
+  value_type: "number";
+  calculation_key: string;
+  requirement: EnergyMetricRequirementDto;
+  created_at: string;
+};
+
+export type EnergyProjectMetricConfigDto = {
+  project_id: string;
+  revision: number;
+  selected_metric_revision_ids: string[];
+  updated_by?: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type EnergyProjectMetricConfigResponseDto = {
+  catalog: EnergyMetricRevisionDto[];
+  config: EnergyProjectMetricConfigDto;
 };
 
 export type DevIdentitiesResponseDto = {

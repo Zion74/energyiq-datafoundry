@@ -16,6 +16,8 @@ import {
   type EnergyImportBatchDto,
   type EnergyMeterMappingDraftDto,
   type EnergyMeterMappingRowDto,
+  type EnergyMetricFamilyDto,
+  type EnergyMetricRevisionDto,
   type EnergyVirtualMeterDto,
   type EnergyProjectDto,
   type EnergyProjectSetupDocumentDto,
@@ -384,9 +386,216 @@ function renderAdminSection({
       />
     );
   }
+  if (section === "templates") {
+    return <AnalysisConfigurationPage projectId={selectedProjectId} />;
+  }
 
   const planned = plannedSectionCopy(section);
   return <PlannedAdminPage title={planned.title} description={planned.description} dependency={planned.dependency} />;
+}
+
+const metricFamilyCopy: Record<EnergyMetricFamilyDto, { label: string; description: string }> = {
+  aggregate: {
+    label: "Core totals",
+    description: "Stable totals used by the Project and Tier analysis templates.",
+  },
+  time: {
+    label: "Time patterns",
+    description: "Metrics that explain when consumption and demand occur.",
+  },
+  normalised: {
+    label: "Normalised comparison",
+    description: "Fair comparison after area or people metadata is available.",
+  },
+  quality: {
+    label: "Data quality",
+    description: "Signals that show whether the calculation has enough trustworthy facts.",
+  },
+};
+
+function AnalysisConfigurationPage({ projectId }: { projectId: string }) {
+  const [catalog, setCatalog] = useState<EnergyMetricRevisionDto[]>([]);
+  const [revision, setRevision] = useState(0);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [savedSelection, setSavedSelection] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await configApi.getEnergyProjectMetricConfig(projectId);
+      setCatalog(result.catalog);
+      setRevision(result.config.revision);
+      setSelected(result.config.selected_metric_revision_ids);
+      setSavedSelection(result.config.selected_metric_revision_ids);
+    } catch (reason) {
+      setError(messageFrom(reason, "Failed to load metric configuration"));
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const dirty = selected.length !== savedSelection.length
+    || selected.some((id) => !savedSelection.includes(id));
+  const save = useCallback(async () => {
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const result = await configApi.saveEnergyProjectMetricConfig(projectId, {
+        expectedRevision: revision,
+        selectedMetricRevisionIds: selected,
+      });
+      setCatalog(result.catalog);
+      setRevision(result.config.revision);
+      setSelected(result.config.selected_metric_revision_ids);
+      setSavedSelection(result.config.selected_metric_revision_ids);
+      setNotice("Metric selection saved as a new project configuration revision.");
+    } catch (reason) {
+      setError(messageFrom(reason, "Failed to save metric configuration"));
+    } finally {
+      setSaving(false);
+    }
+  }, [projectId, revision, selected]);
+
+  const families = (["aggregate", "time", "normalised", "quality"] as const)
+    .map((family) => ({ family, metrics: catalog.filter((metric) => metric.family === family) }))
+    .filter((group) => group.metrics.length > 0);
+
+  return (
+    <div className="mx-auto max-w-6xl space-y-5">
+      <section className="rounded-xl border border-border bg-surface p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">Analysis configuration</span>
+            <h3 className="mt-2 text-base font-semibold">Choose the trusted metrics this Project may use</h3>
+            <p className="mt-1 max-w-3xl text-xs leading-5 text-muted">
+              Formulas are controlled, versioned definitions. Here the administrator only selects which metrics may appear in rules and templates; free-form SQL is intentionally out of scope.
+            </p>
+          </div>
+          <span className="rounded-full bg-surface-subtle px-3 py-1 text-[10px] font-semibold text-muted">
+            Draft config revision {revision}
+          </span>
+        </div>
+
+        <ol className="mt-5 grid gap-3 md:grid-cols-3">
+          <AnalysisStep number="1" title="Metrics" body="Select approved calculations." active />
+          <AnalysisStep number="2" title="Rules" body="Define deterministic findings next." />
+          <AnalysisStep number="3" title="Template layout" body="Place evidence-backed modules next." />
+        </ol>
+      </section>
+
+      {error ? <div className="rounded-lg border border-step-error/25 bg-step-error/5 px-4 py-3 text-xs text-step-error">{error}</div> : null}
+      {notice ? <div className="rounded-lg border border-step-success/25 bg-step-success/5 px-4 py-3 text-xs text-step-success">{notice}</div> : null}
+
+      <section className="rounded-xl border border-border bg-surface">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
+          <div>
+            <h4 className="text-sm font-semibold">Metric catalog</h4>
+            <p className="mt-1 text-[11px] text-muted">{selected.length} of {catalog.length} metric revisions enabled</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={!dirty || saving}
+              onClick={() => setSelected(savedSelection)}
+              className="rounded-md border border-border px-3 py-2 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Reset
+            </button>
+            <button
+              type="button"
+              disabled={!dirty || saving}
+              onClick={() => void save()}
+              className="rounded-md bg-foreground px-3 py-2 text-xs font-semibold text-background disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {saving ? "Saving..." : "Save selection"}
+            </button>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="p-8 text-center text-xs text-muted">Loading metric definitions...</div>
+        ) : (
+          <div className="space-y-7 p-5">
+            {families.map(({ family, metrics }) => (
+              <div key={family}>
+                <div className="mb-3">
+                  <h5 className="text-xs font-semibold">{metricFamilyCopy[family].label}</h5>
+                  <p className="mt-1 text-[11px] text-muted">{metricFamilyCopy[family].description}</p>
+                </div>
+                <div className="grid gap-3 lg:grid-cols-2">
+                  {metrics.map((metric) => {
+                    const checked = selected.includes(metric.revision_id);
+                    return (
+                      <label
+                        key={metric.revision_id}
+                        className={[
+                          "flex cursor-pointer items-start gap-3 rounded-xl border p-4 transition-colors",
+                          checked ? "border-foreground/30 bg-surface-subtle" : "border-border hover:border-foreground/20",
+                        ].join(" ")}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => setSelected((current) => checked
+                            ? current.filter((id) => id !== metric.revision_id)
+                            : [...current, metric.revision_id])}
+                          className="mt-1 h-4 w-4 accent-current"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex flex-wrap items-center gap-2">
+                            <strong className="text-xs">{metric.display_name}</strong>
+                            <span className="rounded-full bg-surface px-2 py-0.5 text-[9px] font-semibold text-muted">{metric.unit}</span>
+                            <span className="rounded-full bg-surface px-2 py-0.5 text-[9px] text-muted">v{metric.version}</span>
+                          </span>
+                          <span className="mt-1.5 block text-[11px] leading-4 text-muted">{metric.description}</span>
+                          <span className="mt-2 block text-[10px] font-medium text-muted-light">
+                            {metric.requirement === "area" ? "Requires area metadata" : metric.requirement === "people" ? "Requires 24-hour people metadata" : "Available from interval facts"}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function AnalysisStep({
+  number,
+  title,
+  body,
+  active = false,
+}: {
+  number: string;
+  title: string;
+  body: string;
+  active?: boolean;
+}) {
+  return (
+    <li className={["rounded-xl border p-3", active ? "border-foreground/25 bg-surface-subtle" : "border-border"].join(" ")}>
+      <div className="flex items-center gap-2">
+        <span className={["flex h-5 w-5 items-center justify-center rounded text-[9px] font-bold", active ? "bg-foreground text-background" : "bg-surface-subtle text-muted"].join(" ")}>{number}</span>
+        <strong className="text-xs">{title}</strong>
+      </div>
+      <p className="mt-2 text-[10px] leading-4 text-muted">{body}</p>
+    </li>
+  );
 }
 
 function AdminOverview({

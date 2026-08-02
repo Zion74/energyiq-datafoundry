@@ -12,10 +12,12 @@ import {
   initializeConfigSchema
 } from "./config-store.js";
 import { EnergyIqStore, initializeEnergyIqSchema } from "./energyiq-store.js";
+import { initializeEnergyIqMetricSchema } from "./energyiq-metric-store.js";
 import { initializeEnergyIqProjectSetupSchema } from "./energyiq-project-setup-store.js";
 
 export * from "./config-store.js";
 export * from "./energyiq-store.js";
+export * from "./energyiq-metric-store.js";
 export * from "./energyiq-project-setup-store.js";
 
 export type UserRecord = {
@@ -3971,6 +3973,9 @@ const runMigrations = (db: DatabaseSync): void => {
   });
   runSchemaMigration(db, "0019_energyiq_project_setup_schema", "Ensure EnergyIQ project setup schema", () => {
     initializeEnergyIqProjectSetupSchema(db);
+  });
+  runSchemaMigration(db, "0020_energyiq_metric_schema", "Ensure EnergyIQ metric revision schema", () => {
+    initializeEnergyIqMetricSchema(db);
   });
 };
 

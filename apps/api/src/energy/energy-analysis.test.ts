@@ -39,6 +39,7 @@ describe("EnergyScopeAnalysis", () => {
       });
 
       expect(portfolio.summary.usageKwh).toBe(24_921.8123);
+      expect(portfolio.summary.averageDailyUsageKwh).toBe(803.9294);
       expect(portfolio.summary.nonOperatingSharePct).toBe(12.45);
       expect(portfolio.hourlyProfile).toHaveLength(24);
       expect(portfolio.childScopes).toHaveLength(30);
@@ -112,6 +113,7 @@ describe("EnergyScopeAnalysis", () => {
       });
 
       expect(analysis.summary.usageKwh).toBe(5_328.2073);
+      expect(analysis.summary.averageDailyUsageKwh).toBe(177.6069);
       expect(analysis.summary.peakKw).toBe(22.5009);
       expect(analysis.summary.qualityEventCount).toBe(0);
       expect(analysis.childScopes).toMatchObject([
