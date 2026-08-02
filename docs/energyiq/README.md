@@ -8,7 +8,7 @@
 
 1. [当前共识与新会话入口](当前共识与新会话入口.md)：截至 2026-08-01 的全部最终共识、现状、差距、开放输入和延期项；
 2. [领域词汇表](CONTEXT.md)：Project、Tier、Scope、Meter、Fact、Template 和 Run 的统一用语；
-3. [开发计划：Admin 与模板运行闭环](开发计划-Admin与模板运行闭环.md)：批次 0–2 与批次 3 的 Metric Registry 已完成，下一步是确定性 Rules 与模板组件；
+3. [开发计划：Admin 与模板运行闭环](开发计划-Admin与模板运行闭环.md)：批次 0–2 与批次 3 的 Metric/Rule Registry 已完成，下一步是 Component Catalog 与 Project/Tier Template Draft；
 4. [最新 MVP PRD](PRD-EnergyIQ-MVP.md)：客户页面、Admin、数据、模板与验收。
 
 若旧聊天或旧文档冲突，以“当前共识与新会话入口”及其链接的 accepted 专题为准。
@@ -31,7 +31,7 @@
 
 | 文档 | 状态 |
 | --- | --- |
-| [开发计划：Admin 与模板运行闭环](开发计划-Admin与模板运行闭环.md) | in progress；批次 0–1 和批次 2 前半段已完成 |
+| [开发计划：Admin 与模板运行闭环](开发计划-Admin与模板运行闭环.md) | in progress；批次 0–2、Metric/Rule Registry 已完成 |
 
 ## 实现证据
 
@@ -41,6 +41,7 @@
 | [2026-08-01 Admin 与 Tier 批次 0–1 实施记录](2026-08-01-Admin-Tier-批次0-1实施记录.md) | Project/Tier/Node Draft、Validate、Publish、样板迁移、测试和本地复现证据 |
 | [2026-08-01 Admin Meter Mapping 与虚拟电表实施记录](2026-08-01-Admin-Meter-Mapping与虚拟电表实施记录.md) | 物理表映射、官方汇总审查、可选加减法 Virtual Meter、Draft 保存与验证证据 |
 | [2026-08-01 Admin Excel Import Batch 实施记录](2026-08-01-Admin-Excel-Import-Batch实施记录.md) | 真实 Excel 保存与检查、SHA 去重、精确标签到 Mapping Draft、浏览器与测试证据 |
+| [2026-08-02 Admin Metric/Rule Registry 实施记录](2026-08-02-Admin-Metric-Rule-Registry实施记录.md) | 受控指标与规则版本、项目 Draft 选择、Ready 判定、确定性执行与 provenance 证据 |
 | [2026-08-01 Ngee Ann 源到事实契约原型](2026-08-01-Ngee-Ann-源到事实契约原型记录.md) | 统一 Adapter、SHA 幂等、实际时长 Fact、Virtual Load 12、冲突与官方汇总排重的可运行证据 |
 | [2026-08-01 Admin 首次数据源配置交互原型](2026-08-01-Admin-首次数据源配置交互原型记录.md) | 已废弃的 A/B/C 历史实验记录；正式路径已回归 Project Overview、Structure、Data Sources 与 Meter Mapping |
 

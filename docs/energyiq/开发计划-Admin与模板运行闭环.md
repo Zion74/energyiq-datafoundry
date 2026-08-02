@@ -13,9 +13,9 @@ status: in_progress
 
 # EnergyIQ 开发计划：Admin 与模板运行闭环
 
-> 状态：**批次 0–2 已完成并通过 Ngee Ann Level 6 的真实 Admin→Facts→FM→AI Context 闭环复验；批次 3 的第一步 Metric Registry 与 Project Metric Config 已完成。下一步继续确定性 Rules、Component Catalog 与 Project/Tier Template；正式发布仍需批次 4 的 Review & Publish。**
+> 状态：**批次 0–2 已完成并通过 Ngee Ann Level 6 的真实 Admin→Facts→FM→AI Context 闭环复验；批次 3 的 Metric Registry、Project Metric Config、Rule Registry 与 Project Rule Config 已完成。下一步是 Component Catalog 与 Project/Tier Template Draft；正式发布仍需批次 4 的 Review & Publish。**
 
-实施证据见：[2026-08-01 Admin 与 Tier 批次 0–1 实施记录](2026-08-01-Admin-Tier-批次0-1实施记录.md)、[Admin Meter Mapping 与虚拟电表实施记录](2026-08-01-Admin-Meter-Mapping与虚拟电表实施记录.md)和 [Admin Excel Import Batch 实施记录](2026-08-01-Admin-Excel-Import-Batch实施记录.md)。
+实施证据见：[2026-08-01 Admin 与 Tier 批次 0–1 实施记录](2026-08-01-Admin-Tier-批次0-1实施记录.md)、[Admin Meter Mapping 与虚拟电表实施记录](2026-08-01-Admin-Meter-Mapping与虚拟电表实施记录.md)、[Admin Excel Import Batch 实施记录](2026-08-01-Admin-Excel-Import-Batch实施记录.md)和 [Admin Metric/Rule Registry 实施记录](2026-08-02-Admin-Metric-Rule-Registry实施记录.md)。
 
 ## 1. 目标
 
@@ -52,13 +52,11 @@ admin creates Project
 
 现状限制：
 
-- Project Node 仍靠自由 node_type，尚无 Tier Definition；
-- Meter 仍混在 node tree，空间与计量未正式分表；
-- Ngee Ann 有历史 Block Test 包裹节点；
-- Preschool 只有 Centre → Circuit fixture；
+- Preschool 现有可运行事实仍是 Project → Centre → Circuit，Block → Room → Circuit 目标映射等待客户输入；
 - Tariff 0.2727 仍在分析代码中硬编码；
-- Template Revision、Analysis Run、Metric/Rule/Component Catalog 尚未持久化；
-- Admin 主要是状态与导航骨架，不是可完成交付的 CRUD 流程。
+- Metric/Rule Revision 已持久化并驱动确定性计算，但当前 Project 选择仍是 Draft，尚未冻结为 Published Template Revision；
+- Component Catalog、Project/Tier Template Draft、Analysis Run 与 Rerun 尚未实现；
+- 客户 Overview/Explorer 尚未统一消费已发布模板。
 
 ## 3. 实施原则
 
@@ -175,7 +173,7 @@ admin creates Project
 
 ## 7. 批次 3：Metric、Rule、Component 与项目模板
 
-> 实施状态：第一步已完成。系统已有 9 个受控 Metric Revision，Project 可在 Admin `Templates` 中选择启用项并以乐观 revision 保存；公式不可在 UI 中任意改写。Rules、Component Catalog 与模板布局仍未实现。
+> 实施状态：前两步已完成。系统已有 9 个受控 Metric Revision 和 5 个受控 Rule Revision；Project 可在 Admin `Templates` 中分别选择并以乐观 revision 保存。Enabled 与 Ready 分开显示，规则阈值从 Registry 进入确定性计算，结果 provenance 记录实际 `ruleRevisionIds`。Component Catalog 与模板布局仍未实现。
 
 ### 后端
 
@@ -385,4 +383,4 @@ admin creates Project
 4. Preschool 不自动猜 Block/Room；
 5. Admin 与客户 UI 均先英文。
 
-数据事实闭环已经通过，Metric Registry 与 Project 级指标选择也已完成。Preschool Block/Room 仍保持待补输入，不自动猜测；下一步从确定性 Rule 开始，再连接 Component Catalog 与 Project/Tier Template。
+数据事实闭环已经通过，Metric/Rule Registry 与 Project 级 Draft 选择也已完成。Preschool Block/Room 仍保持待补输入，不自动猜测；下一步连接 Component Catalog 与 Project/Tier Template Draft。
