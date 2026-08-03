@@ -1,9 +1,12 @@
 import React, { type ReactNode } from "react";
 
+import type { EnergyScopeAnalysisDto } from "../../../lib/config-api";
 import {
   EnergyTemplateRenderer,
+  type EnergyTemplateRenderAdvisory,
   type EnergyTemplateRendererState,
 } from "./energy-template-renderer";
+import type { EnergyTemplateRenderPlan } from "./energy-template-render-plan";
 
 export type ProjectRendererRequest =
   | {
@@ -42,6 +45,50 @@ const CONFIGURATION_REQUIRED = {
   title: "Project analysis is not configured",
   detail: "Ask an administrator to publish a Project Template Revision with a registered customer Renderer.",
 } as const;
+
+const MINIMUM_DECISION_COVERAGE_PCT = 95;
+const QUALITY_GATED_VIEW_KEYS = new Set([
+  "executive_action_summary_v1",
+  "recommended_actions_v1",
+  "exceptions_evidence_v1",
+]);
+
+export type ProjectAnalysisQualityPolicy = {
+  plan: EnergyTemplateRenderPlan;
+  advisories: readonly EnergyTemplateRenderAdvisory[];
+  saveAllowed: boolean;
+};
+
+export function applyProjectAnalysisQualityPolicy(input: {
+  plan: EnergyTemplateRenderPlan;
+  dataQuality: EnergyScopeAnalysisDto["dataHealth"];
+}): ProjectAnalysisQualityPolicy {
+  if (input.dataQuality.coveragePct >= MINIMUM_DECISION_COVERAGE_PCT) {
+    return { plan: input.plan, advisories: [], saveAllowed: true };
+  }
+  const sections = input.plan.sections
+    .map((section) => ({
+      ...section,
+      modules: section.modules.filter(
+        (module) => !QUALITY_GATED_VIEW_KEYS.has(module.component.view_key),
+      ),
+    }))
+    .filter((section) => section.modules.length > 0);
+  const moduleCount = sections.reduce((count, section) => count + section.modules.length, 0);
+  return {
+    plan: {
+      ...input.plan,
+      sections,
+      module_count: moduleCount,
+    },
+    advisories: [{
+      kind: "partial",
+      title: "Partial data",
+      detail: `Coverage is ${input.dataQuality.coveragePct.toFixed(1)}%. Business exceptions and recommendations are withheld until coverage reaches 95%.`,
+    }],
+    saveAllowed: false,
+  };
+}
 
 export function selectProjectRenderer(request: ProjectRendererRequest): ProjectRendererSelection {
   if (request.mode === "admin-preview") return ADMIN_GENERIC_PREVIEW;

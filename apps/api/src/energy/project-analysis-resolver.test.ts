@@ -154,6 +154,11 @@ describe("ProjectAnalysisResolver", () => {
           scopeId: "preschool-project",
           from: "2026-04-30T16:00:00.000Z",
           to: "2026-05-31T16:00:00.000Z",
+          projectReleaseId: "legacy-profile:preschool-demo:1",
+          primaryPeriod: {
+            start: "2026-04-30T16:00:00.000Z",
+            endExclusive: "2026-05-31T16:00:00.000Z",
+          },
         },
         projectRelease: {
           id: "legacy-profile:preschool-demo:1",
@@ -174,13 +179,17 @@ describe("ProjectAnalysisResolver", () => {
           summary: { usageKwh: PRESCHOOL_GOLDEN.period.usageKwh },
         },
       });
-      expect(result.snapshot.evidence.queryIds).toEqual([
-        "scope_summary_v1",
-        "hourly_profile_v1",
-        "meter_breakdown_v1",
-      ]);
-      expect(result.snapshot.evidence.ruleRevisionIds)
-        .toEqual(result.snapshot.projectRelease.ruleRevisionIds);
+      expect(result.snapshot.evidence.length).toBeGreaterThan(0);
+      expect(result.snapshot.evidence.every((item) => (
+        item.id.length > 0
+        && item.metricId.length > 0
+        && item.queryIds.length > 0
+        && item.queryIds.every((queryId) => result.snapshot.analysis.provenance.queryIds.includes(queryId))
+        && !Object.hasOwn(item, "queryReceiptId")
+      ))).toBe(true);
+      expect(new Set(result.snapshot.evidence.map((item) => item.id)).size)
+        .toBe(result.snapshot.evidence.length);
+      expect(result.snapshot.findings).toEqual(result.snapshot.analysis.attention);
 
       const project = metadata.energyIq.getProject("preschool-demo");
       const publishedRevision = metadata.energyIq.templates.publishProjectRevisionWithinTransaction({
@@ -216,6 +225,14 @@ describe("ProjectAnalysisResolver", () => {
         metricRevisionIds: publishedRevision.selected_metric_revision_ids,
         ruleRevisionIds: publishedRevision.selected_rule_revision_ids,
       });
+      expect(releasedResult.snapshot.context).toMatchObject({
+        projectReleaseId: publishedRevision.revision_id,
+        primaryPeriod: {
+          start: "2026-04-30T16:00:00.000Z",
+          endExclusive: "2026-05-31T16:00:00.000Z",
+        },
+      });
+      expect(releasedResult.snapshot.evidence).toEqual(result.snapshot.evidence);
     } finally {
       metadata.close();
       removeTemporaryFixture(root);

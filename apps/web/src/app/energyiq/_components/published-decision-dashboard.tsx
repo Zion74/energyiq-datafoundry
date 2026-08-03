@@ -17,7 +17,11 @@ import {
 import { buildEnergyTemplateRenderPlan } from "./energy-template-render-plan";
 import { useEnergyIqAccess } from "./energyiq-access";
 import { EnergyIcon } from "./icons";
-import { ProjectRenderer } from "./project-renderer-registry";
+import {
+  applyProjectAnalysisQualityPolicy,
+  ProjectRenderer,
+  type ProjectAnalysisQualityPolicy,
+} from "./project-renderer-registry";
 
 const periodOptions: ReadonlyArray<{
   label: string;
@@ -67,6 +71,19 @@ export function PublishedDecisionDashboard() {
       : null,
     [currentSnapshot, projectTemplate],
   );
+  const qualityPolicy = useMemo(
+    () => renderPlan && currentSnapshot
+      ? applyProjectAnalysisQualityPolicy({
+        plan: renderPlan,
+        dataQuality: currentSnapshot.dataQuality,
+      })
+      : null,
+    [currentSnapshot, renderPlan],
+  );
+  const renderPlanForDisplay = qualityPolicy?.plan ?? renderPlan;
+  const saveAllowed = Boolean(
+    qualityPolicy?.saveAllowed && currentSnapshot?.projectRelease.templateRevisionId,
+  );
 
   useEffect(() => {
     if (!projectId || resource !== "electricity") return;
@@ -101,9 +118,9 @@ export function PublishedDecisionDashboard() {
   }, [effectiveCustomRange.from, effectiveCustomRange.to, period, projectId, refreshRevision, resource]);
 
   useEffect(() => {
-    const firstSectionId = renderPlan?.sections[0]?.section_id ?? "";
+    const firstSectionId = renderPlanForDisplay?.sections[0]?.section_id ?? "";
     setActiveSection(firstSectionId);
-  }, [projectId, renderPlan]);
+  }, [projectId, renderPlanForDisplay]);
 
   useEffect(() => {
     setSavedAnalysis(null);
@@ -111,7 +128,7 @@ export function PublishedDecisionDashboard() {
   }, [effectiveCustomRange.from, effectiveCustomRange.to, period, projectId, resource]);
 
   const saveCurrentAnalysis = async () => {
-    if (!projectId || !currentAnalysis || !currentSnapshot?.projectRelease.templateRevisionId || resource !== "electricity") return;
+    if (!projectId || !currentAnalysis || !saveAllowed || resource !== "electricity") return;
     setSaving(true);
     setSaveError(null);
     try {
@@ -129,8 +146,8 @@ export function PublishedDecisionDashboard() {
   };
 
   useEffect(() => {
-    if (!renderPlan) return;
-    const elements = renderPlan.sections
+    if (!renderPlanForDisplay) return;
+    const elements = renderPlanForDisplay.sections
       .map((section) => document.getElementById(sectionDomId(section.section_id)))
       .filter((element): element is HTMLElement => Boolean(element));
     if (elements.length === 0) return;
@@ -143,7 +160,7 @@ export function PublishedDecisionDashboard() {
     updateActiveSection();
     scrollContainer.addEventListener("scroll", updateActiveSection, { passive: true });
     return () => scrollContainer.removeEventListener("scroll", updateActiveSection);
-  }, [renderPlan]);
+  }, [renderPlanForDisplay]);
 
   const runMessage = currentAnalysis
     ? `${formatRunPeriod(currentAnalysis)} · ${currentSnapshot?.dataSnapshot.id ?? currentAnalysis.provenance.dataSnapshotId}`
@@ -154,7 +171,8 @@ export function PublishedDecisionDashboard() {
     loading: running,
     analysisError,
     resolution: currentResolution,
-    plan: renderPlan,
+    plan: renderPlanForDisplay,
+    advisories: qualityPolicy?.advisories,
   });
   const rendererRequest = currentResolution?.status === "ready"
     ? { mode: "customer" as const, rendererKey: currentResolution.snapshot.renderer.key }
@@ -224,7 +242,7 @@ export function PublishedDecisionDashboard() {
           <button
             type="button"
             onClick={() => void saveCurrentAnalysis()}
-            disabled={saving || rendererState.status !== "ready" || !currentSnapshot?.projectRelease.templateRevisionId}
+            disabled={saving || rendererState.status !== "ready" || !saveAllowed}
             className="h-10 rounded-lg border border-border bg-surface px-4 text-xs font-semibold text-foreground transition-colors hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving ? "Saving…" : "Save analysis"}
@@ -309,6 +327,7 @@ function resolveOverviewRendererState(input: {
   analysisError: string | null;
   resolution: EnergyProjectAnalysisResolutionDto | null;
   plan: ReturnType<typeof buildEnergyTemplateRenderPlan> | null;
+  advisories?: ProjectAnalysisQualityPolicy["advisories"];
 }): EnergyTemplateRendererState {
   if (!input.projectId) {
     return { status: "empty", title: "Select a Project", detail: "Choose a Project to load its published Template Revision and analysis context." };
@@ -329,7 +348,12 @@ function resolveOverviewRendererState(input: {
   if (!input.plan) {
     return { status: "empty", title: "Published analysis has no Project Template", detail: "Publish a Project Template with at least one enabled module." };
   }
-  return { status: "ready", analysis: input.resolution.snapshot.analysis, plan: input.plan };
+  return {
+    status: "ready",
+    analysis: input.resolution.snapshot.analysis,
+    plan: input.plan,
+    ...(input.advisories?.length ? { advisories: input.advisories } : {}),
+  };
 }
 
 function DateField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {

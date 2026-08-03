@@ -20,6 +20,14 @@ import {
 
 export type ProjectRendererKey = "ngee-ann-overview" | "preschool-overview";
 
+const PROJECT_ANALYSIS_RECIPE = {
+  id: "energy-scope-analysis",
+  version: "1",
+} as const;
+
+const PROJECT_RENDERER_VERSION = "1" as const;
+const PROJECT_RENDERER_CONTRACT_VERSION = "project-analysis-snapshot@1" as const;
+
 export type PublishedProjectRelease = {
   id: string;
   source: "template-revision" | "legacy-profile";
@@ -47,16 +55,24 @@ export type PublishedProjectRelease = {
 };
 
 export type ProjectAnalysisSnapshot = {
-  context: EnergyQueryContext;
+  context: EnergyQueryContext & {
+    primaryPeriod: {
+      start: string;
+      endExclusive: string;
+    };
+    projectReleaseId: string;
+  };
   projectRelease: PublishedProjectRelease;
   recipe: PublishedProjectRelease["recipe"];
   renderer: PublishedProjectRelease["renderer"];
   dataQuality: EnergyScopeAnalysis["dataHealth"];
-  evidence: {
+  evidence: Array<{
+    id: string;
+    metricId: string;
     queryIds: EnergyScopeAnalysis["provenance"]["queryIds"];
-    ruleRevisionIds: string[];
-    findings: EnergyScopeAnalysis["attention"];
-  };
+    queryReceiptId?: string;
+  }>;
+  findings: EnergyScopeAnalysis["attention"];
   dataSnapshot: {
     id: string;
     importBatchIds: string[];
@@ -124,19 +140,38 @@ export const resolveProjectAnalysis = async (input: {
       .filter((rule) => projectRelease.ruleRevisionIds.includes(rule.revision_id)),
     ...(input.databasePath ? { databasePath: input.databasePath } : {}),
   });
+  const snapshotContext: ProjectAnalysisSnapshot["context"] = {
+    ...context,
+    primaryPeriod: {
+      start: context.from,
+      endExclusive: context.to,
+    },
+    projectReleaseId: projectRelease.id,
+  };
+  const evidenceMetricIds = [...(
+    projectRelease.metricRevisionIds.length > 0
+      ? projectRelease.metricRevisionIds
+      : [analysis.provenance.metricVersion]
+  )].sort((left, right) => left.localeCompare(right));
   return {
     status: "ready",
     snapshot: {
-      context,
+      context: snapshotContext,
       projectRelease,
       recipe: projectRelease.recipe,
       renderer: projectRelease.renderer,
       dataQuality: analysis.dataHealth,
-      evidence: {
-        queryIds: analysis.provenance.queryIds,
-        ruleRevisionIds: analysis.provenance.ruleRevisionIds,
-        findings: analysis.attention,
-      },
+      evidence: evidenceMetricIds.map((metricId) => ({
+        id: [
+          "evidence",
+          analysis.provenance.dataSnapshotId,
+          context.scopeId,
+          metricId,
+        ].join(":"),
+        metricId,
+        queryIds: [...analysis.provenance.queryIds],
+      })),
+      findings: analysis.attention,
       dataSnapshot: {
         id: analysis.provenance.dataSnapshotId,
         importBatchIds: analysis.dataHealth.importBatchIds,
@@ -164,27 +199,24 @@ const releaseFromTemplateRevision = (
   revision: EnergyIqTemplateRevisionRecord,
   rendererKey: ProjectRendererKey,
   catalog: EnergyIqComponentRevisionRecord[],
-): PublishedProjectRelease => ({
-  id: revision.revision_id,
-  source: "template-revision",
-  projectId: revision.project_id,
-  templateRevisionId: revision.revision_id,
-  templateRevisionSequence: revision.sequence,
-  recipe: { id: "energy-scope-analysis", version: "1" },
-  renderer: {
-    key: rendererKey,
-    version: "1",
-    contractVersion: "project-analysis-snapshot@1",
+): PublishedProjectRelease => buildPublishedProjectRelease({
+  rendererKey,
+  release: {
+    id: revision.revision_id,
+    source: "template-revision",
+    projectId: revision.project_id,
+    templateRevisionId: revision.revision_id,
+    templateRevisionSequence: revision.sequence,
+    hierarchyRevisionId: revision.hierarchy_revision_id,
+    meterFormulaRevisionId: revision.meter_formula_revision_id,
+    metricRevisionIds: revision.selected_metric_revision_ids,
+    ruleRevisionIds: revision.selected_rule_revision_ids,
+    businessCalendarVersion: revision.business_calendar_version,
+    tariffScheduleVersion: revision.tariff_schedule_version,
+    publishedAt: revision.published_at,
+    document: revision.document,
+    catalog,
   },
-  hierarchyRevisionId: revision.hierarchy_revision_id,
-  meterFormulaRevisionId: revision.meter_formula_revision_id,
-  metricRevisionIds: revision.selected_metric_revision_ids,
-  ruleRevisionIds: revision.selected_rule_revision_ids,
-  businessCalendarVersion: revision.business_calendar_version,
-  tariffScheduleVersion: revision.tariff_schedule_version,
-  publishedAt: revision.published_at,
-  document: revision.document,
-  catalog,
 });
 
 const releaseFromLegacyProfile = (
@@ -192,32 +224,42 @@ const releaseFromLegacyProfile = (
   context: EnergyQueryContext,
   profile: LegacyProjectProfile,
   catalog: EnergyIqComponentRevisionRecord[],
-): PublishedProjectRelease => ({
-  id: `legacy-profile:${context.projectId}:1`,
-  source: "legacy-profile",
-  projectId: context.projectId,
-  templateRevisionId: null,
-  templateRevisionSequence: null,
-  recipe: { id: "energy-scope-analysis", version: "1" },
-  renderer: {
-    key: profile.rendererKey,
-    version: "1",
-    contractVersion: "project-analysis-snapshot@1",
-  },
-  hierarchyRevisionId: context.hierarchyRevisionId,
-  meterFormulaRevisionId: context.meterFormulaRevisionId,
-  metricRevisionIds: metadataStore.energyIq.metrics
-    .getProjectConfig(context.projectId).selected_metric_revision_ids,
-  ruleRevisionIds: metadataStore.energyIq.rules
-    .getProjectConfig(context.projectId).selected_rule_revision_ids,
-  businessCalendarVersion: context.businessCalendarVersion,
-  tariffScheduleVersion: context.tariffScheduleVersion,
-  publishedAt: null,
-  document: createDefaultTemplateDocument(
+): PublishedProjectRelease => buildPublishedProjectRelease({
+  rendererKey: profile.rendererKey,
+  release: {
+    id: `legacy-profile:${context.projectId}:1`,
+    source: "legacy-profile",
+    projectId: context.projectId,
+    templateRevisionId: null,
+    templateRevisionSequence: null,
+    hierarchyRevisionId: context.hierarchyRevisionId,
+    meterFormulaRevisionId: context.meterFormulaRevisionId,
+    metricRevisionIds: metadataStore.energyIq.metrics
+      .getProjectConfig(context.projectId).selected_metric_revision_ids,
+    ruleRevisionIds: metadataStore.energyIq.rules
+      .getProjectConfig(context.projectId).selected_rule_revision_ids,
+    businessCalendarVersion: context.businessCalendarVersion,
+    tariffScheduleVersion: context.tariffScheduleVersion,
+    publishedAt: null,
+    document: createDefaultTemplateDocument(
+      catalog,
+      [...metadataStore.energyIq.listTierDefinitions(context.projectId)]
+        .sort((left, right) => right.ordinal - left.ordinal)
+        .map((tier) => tier.id),
+    ),
     catalog,
-    [...metadataStore.energyIq.listTierDefinitions(context.projectId)]
-      .sort((left, right) => right.ordinal - left.ordinal)
-      .map((tier) => tier.id),
-  ),
-  catalog,
+  },
+});
+
+const buildPublishedProjectRelease = (input: {
+  rendererKey: ProjectRendererKey;
+  release: Omit<PublishedProjectRelease, "recipe" | "renderer">;
+}): PublishedProjectRelease => ({
+  ...input.release,
+  recipe: PROJECT_ANALYSIS_RECIPE,
+  renderer: {
+    key: input.rendererKey,
+    version: PROJECT_RENDERER_VERSION,
+    contractVersion: PROJECT_RENDERER_CONTRACT_VERSION,
+  },
 });

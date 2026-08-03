@@ -406,9 +406,9 @@ export type EnergyScopeAnalysisDto = {
     expectedMeterIntervalCount: number;
     validIntervalCount: number;
     qualityEventCount: number;
-    cumulativeDeltaMismatchCount?: number;
-    averageKwMismatchCount?: number;
-    invalidIntervalDurationCount?: number;
+    cumulativeDeltaMismatchCount: number;
+    averageKwMismatchCount: number;
+    invalidIntervalDurationCount: number;
     lastSeenAt?: string;
     importBatchIds: string[];
   };
@@ -466,16 +466,24 @@ export type EnergyPublishedProjectReleaseDto = {
 };
 
 export type EnergyProjectAnalysisSnapshotDto = {
-  context: EnergyQueryContextDto;
+  context: EnergyQueryContextDto & {
+    primaryPeriod: {
+      start: string;
+      endExclusive: string;
+    };
+    projectReleaseId: string;
+  };
   projectRelease: EnergyPublishedProjectReleaseDto;
   recipe: EnergyPublishedProjectReleaseDto["recipe"];
   renderer: EnergyPublishedProjectReleaseDto["renderer"];
   dataQuality: EnergyScopeAnalysisDto["dataHealth"];
-  evidence: {
+  evidence: Array<{
+    id: string;
+    metricId: string;
     queryIds: EnergyScopeAnalysisDto["provenance"]["queryIds"];
-    ruleRevisionIds: string[];
-    findings: EnergyScopeAnalysisDto["attention"];
-  };
+    queryReceiptId?: string;
+  }>;
+  findings: EnergyScopeAnalysisDto["attention"];
   dataSnapshot: {
     id: string;
     importBatchIds: string[];
