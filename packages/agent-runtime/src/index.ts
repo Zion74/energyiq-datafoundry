@@ -98,6 +98,7 @@ import { createAnalysisRequirementsCommitTool } from "./protocol/analysis-requir
 import type { DataAnalysisState } from "./protocol/protocols/data-analysis.js";
 import { createDefaultSemanticProvider } from "./semantic/default-semantic-provider.js";
 import { EnergyQuerySemanticProvider } from "./semantic/energy-query-semantic-provider.js";
+import type { TrustedEnergyTextQueryContract } from "./semantic/trusted-energy-text.js";
 import type { ProtocolEvent } from "./protocol/types.js";
 import type { ContextPackageRef, ProtocolStateStore } from "./protocol/types.js";
 import { toolErrorObservation as createToolErrorObservation } from "./errors/tool-execution-error.js";
@@ -505,7 +506,12 @@ export const createDataFoundry = async (
             datasourceId: selectedDatasourceId,
             datasourceRevision: String(
               input.resourceRevisions?.[`datasource:${selectedDatasourceId}`] ?? "unknown"
-            )
+            ),
+            ...(input.runContext.energy_query_context
+              && "kind" in input.runContext.energy_query_context
+              && input.runContext.energy_query_context.kind === "trusted-energy-text-query"
+              ? { physicalSchema: input.runContext.energy_query_context.pins.sourcePin.physicalSchema }
+              : {})
           }
         }
       : {}),
@@ -928,6 +934,17 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
   const policies: string[] = [];
   if (context.energy_query_context) {
     const energyContext = context.energy_query_context;
+    if (isTrustedEnergyTextQueryContract(energyContext)) {
+      policies.push(
+        "EnergyIQ trusted Snapshot path: the server has already compiled immutable Project, Scope, half-open Period, "
+          + "timezone, released Metric, Data Snapshot, Data as of, expected facts, and Evidence pins. Use only the "
+          + "structured expected facts in the authoritative ProjectAnalysisSnapshot context. Do not rediscover or "
+          + "replace them with SQL, files, memory, another datasource, or model inference. Never reveal the internal "
+          + "datasource, schema, model profile, provider configuration, or credentials. The answer must state Scope, "
+          + "Period with exclusive end and timezone, Metric, Data as of, and Evidence. If a required expected fact is "
+          + "absent, report it as unavailable; never invent, extrapolate, or substitute a nearby Metric."
+      );
+    } else {
     const localRangeStart = formatEnergyTimestamp(energyContext.from, energyContext.timezone);
     const localRangeEnd = formatEnergyTimestamp(
       new Date(Date.parse(energyContext.to) - 1).toISOString(),
@@ -977,6 +994,7 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
             + "query budget; otherwise state plainly that no chart was generated."
           : "")
     );
+    }
   }
   if (taskToolsEnabled && taskTools.length === 4) {
     policies.push(
@@ -1164,6 +1182,11 @@ Operating policy:
 ${policies.map((policy, index) => `${index + 1}. ${policy}`).join("\n")}
 `;
 };
+
+const isTrustedEnergyTextQueryContract = (
+  value: NonNullable<AgentRunContext["energy_query_context"]>
+): value is TrustedEnergyTextQueryContract =>
+  "kind" in value && value.kind === "trusted-energy-text-query";
 
 const formatEnergyTimestamp = (value: string, timeZone: string): string =>
   new Intl.DateTimeFormat("en-CA", {
@@ -1542,6 +1565,16 @@ export type * from "./protocol/protocol-runtime.js";
 export type * from "./protocol/types.js";
 export { DataLinkSemanticProvider } from "./semantic/datalink-semantic-provider.js";
 export { EnergyQuerySemanticProvider } from "./semantic/energy-query-semantic-provider.js";
+export {
+  executeTrustedEnergyText,
+  projectAnalysisSnapshotToTrustedText
+} from "./semantic/project-analysis-snapshot-trusted-text.js";
+export type {
+  ProjectAnalysisSnapshotTrustedTextInput,
+  TrustedEnergySnapshotMetric,
+  TrustedEnergySnapshotProjection,
+  TrustedEnergyStructuredClaimProvider
+} from "./semantic/project-analysis-snapshot-trusted-text.js";
 export {
   compileTrustedEnergyTextQuery,
   createTrustedEnergyAnswerEnvelope,

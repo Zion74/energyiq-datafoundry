@@ -5,7 +5,11 @@ import {
   STATIC_AGENT_TOOL_NAMES,
   type AgentModelContextProfile
 } from "@datafoundry/agent-runtime";
-import type { MetadataStore } from "@datafoundry/metadata";
+import {
+  WORKSPACE_DEFAULT_MODEL_PROFILE_ID,
+  type ConfigResourceRecord,
+  type MetadataStore
+} from "@datafoundry/metadata";
 import {
   selectSkillsForRun,
   type SkillRecord,
@@ -15,6 +19,7 @@ import {
 import type { PolicyMcpClientConfig, PolicyMcpToolConfig } from "./policy-mcp-middleware.js";
 
 import { resolveEffectiveRunConfig, type EffectiveRunConfig } from "./run-input.js";
+import { resolveModelProfileChain } from "./workspace-model-profile-resolver.js";
 
 export type ResolvedRunConfig = {
   effectiveRunConfig: EffectiveRunConfig;
@@ -220,18 +225,18 @@ const resolveEffectiveResourceRevisions = (
     ...(config.activeSkillId ? [config.activeSkillId] : [])
   ]);
   if (config.activeLlmProfileId) {
-    let profileId: string | undefined = config.activeLlmProfileId;
-    const visited = new Set<string>();
-    while (profileId && !visited.has(profileId)) {
-      visited.add(profileId);
-      const profile = metadataStore.configResources.get({
-        id: profileId,
-        workspace_id: workspaceId,
-        user_id: userId,
-        kind: "model-profile"
-      });
-      revisions[`model-profile:${profileId}`] = profile.revision;
-      profileId = stringRecordValue(profile.payload, "fallbackProfileId");
+    const chain = resolveModelProfileChain({
+      metadataStore,
+      profileId: config.activeLlmProfileId,
+      userId,
+      workspaceId
+    });
+    for (const profile of chain) {
+      revisions[`model-profile:${profile.exposedId}`] = profile.resource.revision;
+    }
+    if (config.activeLlmProfileId === WORKSPACE_DEFAULT_MODEL_PROFILE_ID) {
+      revisions[`model-profile-binding:${WORKSPACE_DEFAULT_MODEL_PROFILE_ID}`] =
+        metadataStore.workspaceDefaultModelProfiles.get(workspaceId).revision;
     }
   }
   return revisions;
@@ -252,21 +257,15 @@ const resolveRunModelProvider = (
   }
   const providers: Array<Exclude<ReturnType<typeof createModelProviderFromEnv>, { kind: "mock" }>> = [];
   const profileIds: string[] = [];
-  const visited = new Set<string>();
-  let currentId: string | undefined = profileId;
-  while (currentId) {
-    if (visited.has(currentId)) {
-      throw new Error(`MODEL_FALLBACK_CYCLE:${currentId}`);
-    }
-    visited.add(currentId);
-    const profile = metadataStore.configResources.get({
-      id: currentId,
-      workspace_id: workspaceId,
-      user_id: userId,
-      kind: "model-profile"
-    });
+  const chain = resolveModelProfileChain({ metadataStore, profileId, userId, workspaceId });
+  for (const resolved of chain) {
+    const profile = resolved.resource;
     const credentials = profile.secret_ref
-      ? metadataStore.secrets.get({ ref: profile.secret_ref, workspace_id: workspaceId, user_id: userId })
+      ? metadataStore.secrets.get({
+          ref: profile.secret_ref,
+          workspace_id: workspaceId,
+          user_id: resolved.ownerUserId
+        })
       : {};
     const apiKey = stringRecordValue(credentials, "apiKey") ?? stringRecordValue(credentials, "api_key");
     const provider = createModelProviderFromProfile({
@@ -276,11 +275,10 @@ const resolveRunModelProvider = (
       ...(apiKey ? { api_key: apiKey } : {})
     });
     if (provider.kind === "mock") {
-      throw new Error(`PROVIDER_CONFIG_MISSING:${currentId}`);
+      throw new Error(`PROVIDER_CONFIG_MISSING:${resolved.exposedId}`);
     }
     providers.push(provider);
-    profileIds.push(currentId);
-    currentId = stringRecordValue(profile.payload, "fallbackProfileId");
+    profileIds.push(resolved.exposedId);
   }
   const primary = providers[0];
   if (!primary) {
@@ -343,10 +341,22 @@ const validateEffectiveResources = (
   if (config.activeSkillId) {
     validateConfigIds(metadataStore, userId, workspaceId, "skill", [config.activeSkillId]);
   }
-  if (config.activeLlmProfileId && config.activeLlmProfileId !== "server-default") {
+  if (
+    config.activeLlmProfileId
+    && config.activeLlmProfileId !== "server-default"
+    && config.activeLlmProfileId !== WORKSPACE_DEFAULT_MODEL_PROFILE_ID
+  ) {
     // An explicitly requested LLM profile that is default_enabled=false is still honored
     // (the user asked for it); we only drop from the *enabled* passive sets above.
     validateConfigIds(metadataStore, userId, workspaceId, "model-profile", [config.activeLlmProfileId]);
+  }
+  if (config.activeLlmProfileId === WORKSPACE_DEFAULT_MODEL_PROFILE_ID) {
+    resolveModelProfileChain({
+      metadataStore,
+      profileId: config.activeLlmProfileId,
+      userId,
+      workspaceId
+    });
   }
   if (droppedKb.length > 0) {
     config.enabledKnowledgeIds = config.enabledKnowledgeIds.filter((id) => !droppedKb.includes(id));
@@ -361,6 +371,17 @@ const validateEffectiveResources = (
   }
 };
 
+const resolvePrimaryModelProfile = (
+  profileId: string,
+  metadataStore: MetadataStore,
+  userId: string,
+  workspaceId: string
+): ConfigResourceRecord => {
+  const profile = resolveModelProfileChain({ metadataStore, profileId, userId, workspaceId })[0]?.resource;
+  if (!profile) throw new Error(`PROVIDER_CONFIG_MISSING:${profileId}`);
+  return profile;
+};
+
 const resolveModelSettings = (
   profileId: string | undefined,
   metadataStore: MetadataStore,
@@ -370,12 +391,7 @@ const resolveModelSettings = (
   if (!profileId || profileId === "server-default") {
     return undefined;
   }
-  const profile = metadataStore.configResources.get({
-    id: profileId,
-    workspace_id: workspaceId,
-    user_id: userId,
-    kind: "model-profile"
-  });
+  const profile = resolvePrimaryModelProfile(profileId, metadataStore, userId, workspaceId);
   const temperature = numericRecordValue(profile.payload, "temperature");
   const topP = numericRecordValue(profile.payload, "topP") ?? numericRecordValue(profile.payload, "top_p");
   const frequencyPenalty =
@@ -407,12 +423,7 @@ const resolveModelContextProfile = (
   if (!profileId || profileId === "server-default") {
     return undefined;
   }
-  const profile = metadataStore.configResources.get({
-    id: profileId,
-    workspace_id: workspaceId,
-    user_id: userId,
-    kind: "model-profile"
-  });
+  const profile = resolvePrimaryModelProfile(profileId, metadataStore, userId, workspaceId);
   const contextLength = numericRecordValue(profile.payload, "contextLength")
     ?? numericRecordValue(profile.payload, "context_length");
   if (contextLength === undefined) {
@@ -446,12 +457,7 @@ const resolveReasoningModel = (
   if (!profileId || profileId === "server-default") {
     return undefined;
   }
-  const profile = metadataStore.configResources.get({
-    id: profileId,
-    workspace_id: workspaceId,
-    user_id: userId,
-    kind: "model-profile"
-  });
+  const profile = resolvePrimaryModelProfile(profileId, metadataStore, userId, workspaceId);
   return booleanRecordValue(profile.payload, "reasoningModel")
     ?? booleanRecordValue(profile.payload, "reasoning_model");
 };
@@ -465,12 +471,7 @@ const resolveRunTimeoutMs = (
   if (!profileId || profileId === "server-default") {
     return undefined;
   }
-  const profile = metadataStore.configResources.get({
-    id: profileId,
-    workspace_id: workspaceId,
-    user_id: userId,
-    kind: "model-profile"
-  });
+  const profile = resolvePrimaryModelProfile(profileId, metadataStore, userId, workspaceId);
   const timeoutMs = numericRecordValue(profile.payload, "timeoutMs")
     ?? numericRecordValue(profile.payload, "timeout_ms");
   return timeoutMs !== undefined ? Math.max(1000, Math.min(10 * 60 * 1000, Math.floor(timeoutMs))) : undefined;

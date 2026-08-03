@@ -29,6 +29,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   artifactRecordToSummary,
+  WORKSPACE_DEFAULT_MODEL_PROFILE_ID,
   type ArtifactRecord,
   type CheckpointRecord,
   type ConfigResourceKind,
@@ -86,6 +87,10 @@ import { readMultipartFiles, readMultipartUpload } from "./upload-parser.js";
 import { knowledgeDocumentTextFromFile } from "./knowledge-document-text.js";
 import { resolveLiveSessionActiveRun } from "./stale-active-runs.js";
 import { handleEnergyApiRequest } from "./energy/energy-api.js";
+import {
+  handleWorkspaceDefaultModelProfileRequest,
+  workspaceDefaultModelProfileDto
+} from "./workspace-model-profile-api.js";
 
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
 const DEFAULT_WORKSPACE_ID = "default";
@@ -177,6 +182,9 @@ const routeConfigRequest = async (
   }
   if (root === "energy") {
     return handleEnergyApiRequest(request, segments.slice(1), context);
+  }
+  if (root === "workspace-default-model-profile") {
+    return handleWorkspaceDefaultModelProfileRequest(request, context);
   }
   if (root === "dev") {
     return handleDevIdentityRequest(request, segments.slice(1), context);
@@ -1700,6 +1708,9 @@ const saveConfigResourceInTransaction = (
   kind: ConfigResourceKind,
   context: Required<ConfigApiContext>
 ): Record<string, unknown> => {
+  if (kind === "model-profile" && id === WORKSPACE_DEFAULT_MODEL_PROFILE_ID) {
+    throw new Error("WORKSPACE_DEFAULT_MODEL_PROFILE_ID_RESERVED");
+  }
   const current = context.metadataStore.configResources.find({
     id,
     workspace_id: context.workspaceId,
@@ -3563,7 +3574,7 @@ const buildWorkspaceConfig = (context: Required<ConfigApiContext>): Record<strin
   datasources: context.metadataStore.dataSources.list({ user_id: context.userId }).map(dataSourceDto),
   knowledgeBases: listConfig(context, "knowledge-base"),
   mcpServers: listConfig(context, "mcp-server"),
-  modelProfiles: listConfig(context, "model-profile"),
+  modelProfiles: workspaceModelProfiles(context),
   skills: listConfig(context, "skill")
 });
 
@@ -3584,7 +3595,9 @@ const buildRunDefaults = (context: Required<ConfigApiContext>): Record<string, u
     enabledMcpServerIds: enabled("mcp-server").map((item) => item.id),
     enabledSkillIds: enabled("skill").map((item) => item.id),
     ...(datasourceIds[0] ? { activeDatasourceId: datasourceIds[0] } : {}),
-    activeLlmProfileId: preferConnectedResourceId(modelProfiles),
+    activeLlmProfileId: workspaceDefaultModelProfileAvailable(context)
+      ? "workspace-default"
+      : preferConnectedResourceId(modelProfiles),
     activeSkillId: enabled("skill")[0]?.id
   };
 };
@@ -3595,6 +3608,28 @@ const listConfig = (context: Required<ConfigApiContext>, kind: ConfigResourceKin
     user_id: context.userId,
     kind
   }).map(configResourceDto);
+
+const workspaceModelProfiles = (context: Required<ConfigApiContext>): Record<string, unknown>[] => {
+  const own = listConfig(context, "model-profile").filter((item) => item.id !== "workspace-default");
+  const shared = workspaceDefaultModelProfileDto({
+    context,
+    isAdmin: context.metadataStore.energyIq.findUserRole(context.userId)?.role === "admin"
+  });
+  return shared.configured === true ? [shared, ...own] : own;
+};
+
+const workspaceDefaultModelProfileAvailable = (context: Required<ConfigApiContext>): boolean => {
+  const binding = context.metadataStore.workspaceDefaultModelProfiles.find(context.workspaceId);
+  if (!binding) return false;
+  const profile = context.metadataStore.configResources.find({
+    id: binding.profile_id,
+    workspace_id: binding.workspace_id,
+    user_id: binding.profile_owner_user_id,
+    kind: "model-profile"
+  });
+  return profile?.default_enabled === true && profile.status === "connected"
+    && typeof profile.payload.fallbackProfileId !== "string";
+};
 
 const devIdentityUserDto = (user: UserRecord): Record<string, unknown> => ({
   id: user.id,
@@ -3883,6 +3918,9 @@ const errorResponse = (error: unknown): ConfigApiResponse => {
   if (message.startsWith("REVISION_CONFLICT")) {
     return fail(409, "REVISION_CONFLICT", message);
   }
+  if (message.includes("FORBIDDEN") || message.includes("ADMIN_REQUIRED")) {
+    return fail(403, "FORBIDDEN", message);
+  }
   if (message.startsWith("RUN_NOT_BRANCHABLE")) {
     return fail(409, "RUN_NOT_BRANCHABLE", message);
   }
@@ -3930,6 +3968,9 @@ const errorResponse = (error: unknown): ConfigApiResponse => {
   }
   if (message.startsWith("PROVIDER_") || message.startsWith("MODEL_FALLBACK")) {
     return fail(422, "PROVIDER_TEST_FAILED", message);
+  }
+  if (message.startsWith("WORKSPACE_DEFAULT_MODEL_")) {
+    return fail(422, "BAD_REQUEST", message);
   }
   if (message.startsWith("BUILTIN_RESOURCE_READONLY") || message.startsWith("SECRET_OWNER_MISMATCH")) {
     return fail(409, "CONFLICT", message);

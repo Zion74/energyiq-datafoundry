@@ -1,10 +1,22 @@
 import type { RunAgentInput } from "@ag-ui/client";
 import type { EvidenceKind, EvidenceRef, EvidenceSelection } from "@datafoundry/contracts";
-import type { ConfigResourceKind, MetadataStore } from "@datafoundry/metadata";
+import {
+  WORKSPACE_DEFAULT_MODEL_PROFILE_ID,
+  type ConfigResourceKind,
+  type MetadataStore
+} from "@datafoundry/metadata";
 import type { SkillMode, SkillPolicyConfig } from "@datafoundry/skills";
 
 import { preferConnectedResourceId } from "./model-profile-connection-status.js";
 import type { EnergyQueryContextRequest } from "./energy/energy-query-context.js";
+import {
+  TRUSTED_ENERGY_TEXT_INTENTS,
+  type TrustedEnergyTextIntent
+} from "@datafoundry/agent-runtime";
+import {
+  resolveModelProfileChain,
+  workspaceDefaultModelProfileAvailable
+} from "./workspace-model-profile-resolver.js";
 
 export type RunConfigDefaults = {
   activeDatasourceId?: string;
@@ -196,7 +208,9 @@ const loadWorkspaceRunDefaults = (
   }).filter((item) => item.default_enabled && item.status !== "disabled");
   const modelProfiles = enabled("model-profile");
   const skillIds = enabled("skill").map((item) => item.id);
-  const activeLlmProfileId = preferConnectedResourceId(modelProfiles);
+  const activeLlmProfileId = workspaceDefaultModelProfileAvailable(metadataStore, workspaceId)
+    ? WORKSPACE_DEFAULT_MODEL_PROFILE_ID
+    : preferConnectedResourceId(modelProfiles);
   return {
     ...(datasourceIds[0] ? { activeDatasourceId: datasourceIds[0] } : {}),
     ...(activeLlmProfileId ? { activeLlmProfileId } : {}),
@@ -236,20 +250,18 @@ const resolveResourceRevisions = (
     ...(config.activeSkillId ? [config.activeSkillId] : [])
   ]);
   if (config.activeLlmProfileId) {
-    const visited = new Set<string>();
-    let profileId: string | undefined = config.activeLlmProfileId;
-    while (profileId && !visited.has(profileId)) {
-      visited.add(profileId);
-      const profile = metadataStore.configResources.get({
-        id: profileId,
-        workspace_id: workspaceId,
-        user_id: userId,
-        kind: "model-profile"
-      });
-      revisions[`model-profile:${profileId}`] = profile.revision;
-      profileId = typeof profile.payload.fallbackProfileId === "string"
-        ? profile.payload.fallbackProfileId
-        : undefined;
+    const chain = resolveModelProfileChain({
+      metadataStore,
+      profileId: config.activeLlmProfileId,
+      userId,
+      workspaceId
+    });
+    for (const profile of chain) {
+      revisions[`model-profile:${profile.exposedId}`] = profile.resource.revision;
+    }
+    if (config.activeLlmProfileId === WORKSPACE_DEFAULT_MODEL_PROFILE_ID) {
+      revisions[`model-profile-binding:${WORKSPACE_DEFAULT_MODEL_PROFILE_ID}`] =
+        metadataStore.workspaceDefaultModelProfiles.get(workspaceId).revision;
     }
   }
   return revisions;
@@ -386,6 +398,27 @@ export const extractEnergyQueryContextRequest = (
     ...(from ? { from } : {}),
     ...(to ? { to } : {})
   };
+};
+
+/** Extract only the allowlisted trusted-text intent; all facts are resolved server-side. */
+export const extractTrustedEnergyTextIntent = (
+  input: RunAgentInput
+): TrustedEnergyTextIntent | undefined => {
+  const forwardedProps = isRecord(input.forwardedProps) ? input.forwardedProps : {};
+  const forwarded = recordFromUnknown(
+    forwardedProps.externalContext ?? forwardedProps.energyQueryContext
+  );
+  const contextValue = input.context.find((item) =>
+    item.description ===
+      "Trusted host context for the current EnergyIQ project, selected scope, resource and reporting period"
+  )?.value;
+  const candidate = forwarded ?? recordFromUnknown(contextValue);
+  const value = candidate ? stringFromRecord(candidate, "trustedTextIntent") : undefined;
+  if (!value) return undefined;
+  if (!TRUSTED_ENERGY_TEXT_INTENTS.some((intent) => intent === value)) {
+    throw new Error(`TRUSTED_ENERGY_TEXT_INTENT_INVALID:${value}`);
+  }
+  return value as TrustedEnergyTextIntent;
 };
 
 const stringFromRecord = (record: Record<string, unknown>, key: string): string | undefined => {

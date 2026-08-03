@@ -11,7 +11,8 @@ import {
   parseAgentMemoryMode,
   resolveSkillCacheDir,
   type AgentMemoryMode,
-  type TaskStateRuntime
+  type TaskStateRuntime,
+  type TrustedEnergyTextQueryContract
 } from "@datafoundry/agent-runtime";
 import { LocalArtifactService, SessionOutputService } from "@datafoundry/artifacts";
 import { type MeResponse, createEnvConfig, createErrorResult, createSuccessResult } from "@datafoundry/contracts";
@@ -63,7 +64,11 @@ import { resolveCheckpointResumeSeed, type CheckpointResumeSeed } from "./run-ch
 import { resolveRunConfig } from "./run-config-resolver.js";
 import { resolveRunIdentity } from "./run-identity-orchestrator.js";
 import { createRunMemoryAssembly } from "./run-memory-assembly.js";
-import { extractEnergyQueryContextRequest, extractLastUserText } from "./run-input.js";
+import {
+  extractEnergyQueryContextRequest,
+  extractLastUserText,
+  extractTrustedEnergyTextIntent
+} from "./run-input.js";
 import {
   buildHitlToolCallStartEvent,
   extractInteractionResume,
@@ -75,13 +80,18 @@ import { RunFinalizer, createRunStatusDelta } from "./run-finalizer.js";
 import { startSessionTitleTask } from "./session-title.js";
 import { TaskPlanProjector } from "./task-plan-projector.js";
 import { ToolCallResultBridge } from "./tool-call-result-bridge.js";
+import { compileTrustedEnergyRunContract } from "./trusted-energy-run-contract.js";
 import { ensureEnergyIqBootstrap } from "./energy/energy-bootstrap.js";
 import { resolveEnergyAccessContext } from "./energy/energy-query-context.js";
 import {
   resolveEnergyQueryContext,
   resolveEnergyScopeMeterNodeIds
 } from "./energy/energy-query-context.js";
-import { createEnergyQueryContextItem } from "./energy/energy-context-item.js";
+import {
+  createEnergyQueryContextItem,
+  createTrustedEnergyTextContextItem
+} from "./energy/energy-context-item.js";
+import { resolveProjectAnalysis } from "./energy/project-analysis-resolver.js";
 
 const DEV_USER: MeResponse = {
   id: "dev-user",
@@ -510,8 +520,13 @@ class DataFoundryAgUiAgent extends AbstractAgent {
         let selectedSkills;
         let skillSelection;
         let energyQueryContext;
+        let trustedEnergyTextContract: TrustedEnergyTextQueryContract | undefined;
         try {
           const energyRequest = extractEnergyQueryContextRequest(normalizedRunInput);
+          const trustedTextIntent = extractTrustedEnergyTextIntent(normalizedRunInput);
+          if (trustedTextIntent && !energyRequest) {
+            throw new Error("TRUSTED_ENERGY_TEXT_CONTEXT_REQUIRED");
+          }
           energyQueryContext = energyRequest
             ? resolveEnergyQueryContext({
                 metadataStore: this.input.metadataStore,
@@ -544,6 +559,24 @@ class DataFoundryAgUiAgent extends AbstractAgent {
                 }
               })
             : undefined;
+          if (trustedTextIntent && energyRequest && energyScopedDataSource) {
+            const resolution = await resolveProjectAnalysis({
+              metadataStore: this.input.metadataStore,
+              dataGateway: this.input.dataGateway,
+              user: this.input.metadataStore.users.getById({ user_id: this.input.user.id }),
+              workspaceId: this.input.workspaceId,
+              request: energyRequest
+            });
+            if (resolution.status !== "ready") {
+              throw new Error("TRUSTED_ENERGY_TEXT_PROJECT_ANALYSIS_NOT_CONFIGURED");
+            }
+            trustedEnergyTextContract = compileTrustedEnergyRunContract({
+              intent: trustedTextIntent,
+              metadataStore: this.input.metadataStore,
+              snapshot: resolution.snapshot,
+              scopedDatasource: energyScopedDataSource
+            });
+          }
           ({
             effectiveRunConfig,
             mcpRuntime,
@@ -653,6 +686,7 @@ class DataFoundryAgUiAgent extends AbstractAgent {
           conversationMessages,
           longTermMemories
         } = memoryAssembly;
+        const authoritativeEnergyQueryContext = trustedEnergyTextContract ?? energyQueryContext;
         const runContext = createRunAgentContext({
           effectiveRunConfig,
           modelProvider,
@@ -663,7 +697,9 @@ class DataFoundryAgUiAgent extends AbstractAgent {
           userId: this.input.user.id,
           userInput,
           workspaceId: this.input.workspaceId,
-          ...(energyQueryContext ? { energyQueryContext } : {})
+          ...(authoritativeEnergyQueryContext
+            ? { energyQueryContext: authoritativeEnergyQueryContext }
+            : {})
         });
         const evidenceContext = resolveEvidenceReferenceContext({
           evidenceRefs: effectiveRunConfig.evidenceRefs,
@@ -673,7 +709,15 @@ class DataFoundryAgUiAgent extends AbstractAgent {
           workspaceId: this.input.workspaceId
         });
         const authoritativeContextItems = [
-          ...(energyQueryContext ? [createEnergyQueryContextItem(energyQueryContext, sessionId)] : []),
+          ...(trustedEnergyTextContract
+            ? [createTrustedEnergyTextContextItem(
+                trustedEnergyTextContract,
+                sessionId,
+                this.input.user.id
+              )]
+            : energyQueryContext
+              ? [createEnergyQueryContextItem(energyQueryContext, sessionId)]
+              : []),
           ...evidenceContext.items
         ];
         const taskPlanProjector = new TaskPlanProjector(runContext);
@@ -718,7 +762,7 @@ class DataFoundryAgUiAgent extends AbstractAgent {
         };
         replayPendingProtocolEvents({ runId, stateStore: protocolStateStore, emit });
         const agentAssembly = await createRunAgentAssembly({
-          ...(energyQueryContext
+          ...(trustedEnergyTextContract || energyQueryContext
             ? {
                 // The server-created EnergyIQ view is already the physical,
                 // allowlisted contract for this project/scope/time range.
