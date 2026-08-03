@@ -25,7 +25,41 @@ export const compileTrustedEnergyRunContract = (input: {
     }));
   return projectAnalysisSnapshotToTrustedText({
     intent: input.intent,
-    snapshot: input.snapshot,
+    snapshot: {
+      context: {
+        projectId: input.snapshot.context.projectId,
+        projectName: input.snapshot.context.projectName,
+        scopeId: input.snapshot.context.scopeId,
+        scopeName: input.snapshot.context.scopeName,
+        scopeType: input.snapshot.context.scopeType,
+        period: input.snapshot.context.period,
+        timezone: input.snapshot.context.timezone,
+        primaryPeriod: input.snapshot.context.primaryPeriod,
+      },
+      projectRelease: {
+        metricRevisionIds: input.snapshot.projectRelease.metricRevisionIds,
+      },
+      dataSnapshot: input.snapshot.dataSnapshot,
+      evidence: input.snapshot.evidence.map((item) => ({ id: item.id, metricId: item.metricId })),
+      findings: input.snapshot.findings,
+      analysis: {
+        summary: input.snapshot.analysis.summary,
+        comparison: input.snapshot.analysis.comparison,
+        categories: input.snapshot.analysis.categories,
+        childScopes: input.snapshot.analysis.childScopes,
+        topCircuits: input.snapshot.analysis.topCircuits,
+        offHours: input.snapshot.analysis.offHours.status === "available"
+          ? {
+              status: "available",
+              usageKwh: input.snapshot.analysis.offHours.usageKwh,
+              sharePct: input.snapshot.analysis.offHours.sharePct,
+            }
+          : {
+              status: "unavailable",
+              reason: input.snapshot.analysis.offHours.reason.message,
+            },
+      },
+    },
     sourcePin: {
       datasourceId: input.scopedDatasource.datasourceId,
       datasourceRevision: String(input.scopedDatasource.revision),

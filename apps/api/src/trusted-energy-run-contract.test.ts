@@ -109,14 +109,21 @@ const snapshot = (): ProjectAnalysisSnapshot => ({
   evidence: [{
     id: "evidence:snapshot-1:energy.total_usage_kwh@1",
     metricId: "energy.total_usage_kwh@1",
-    queryIds: ["scope_summary_v1", "hourly_profile_v1", "meter_breakdown_v1"]
+    queryIds: [
+      "scope_summary_v1",
+      "hourly_profile_v1",
+      "meter_breakdown_v1",
+      "operational_policy_scope_intervals_v1",
+      "operational_policy_meter_intervals_v1",
+    ]
   }],
   findings: [],
   dataSnapshot: { id: "snapshot-1", importBatchIds: ["batch-1"], lastSeenAt: "2026-06-16T15:45:00.000Z" },
+  metadata: {} as never,
   analysis: {
     context: {} as never,
     summary: {
-      usageKwh: 1531.1, averageDailyUsageKwh: 218.7, costSgd: 0, peakKw: 85.3,
+      usageKwh: 1531.1, averageDailyUsageKwh: 218.7, peakKw: 85.3,
       nonOperatingKwh: 0, nonOperatingSharePct: 0, validIntervalCount: 672, qualityEventCount: 0
     },
     hourlyProfile: [],
@@ -125,20 +132,35 @@ const snapshot = (): ProjectAnalysisSnapshot => ({
       usageKwh: 1450, changeKwh: 81.1, changePct: 5.59
     },
     categories: [], childScopes: [], circuits: [], topCircuits: [], virtualMeters: [],
-    offHours: { status: "unavailable", reason: "OPERATING_CALENDAR_NOT_MATERIALIZED" },
-    cost: { status: "unavailable", reason: "TARIFF_NOT_CONFIGURED", currency: "SGD" },
+    offHours: {
+      status: "unavailable",
+      reason: { code: "OPERATING_CALENDAR_VERSION_NOT_FOUND", message: "Published calendar was not found." },
+      businessCalendarVersion: "calendar@1",
+    },
+    cost: {
+      status: "unavailable",
+      reason: { code: "TARIFF_VERSION_NOT_FOUND", message: "Published tariff was not found." },
+      tariffScheduleVersion: "tariff@1",
+    },
     dataHealth: {
       status: "complete", coveragePct: 100, expectedMeterIntervalCount: 672, validIntervalCount: 672,
       qualityEventCount: 0, cumulativeDeltaMismatchCount: 0, averageKwMismatchCount: 0,
       invalidIntervalDurationCount: 0, lastSeenAt: "2026-06-16T15:45:00.000Z", importBatchIds: ["batch-1"]
     },
     units: { usage: "kWh", demand: "kW", intervalMinutes: 15, timezone: "Asia/Singapore" },
+    metadata: {} as never,
     attention: [],
     provenance: {
       dataSnapshotId: "snapshot-1", hierarchyRevisionId: "hierarchy@1", meterFormulaRevisionId: "formula@1",
       metricVersion: "energy.total_usage_kwh@1", ruleRevisionIds: [], aggregationRule: "designated_total",
       sourceView: "energy_scope_deadbeef",
-      queryIds: ["scope_summary_v1", "hourly_profile_v1", "meter_breakdown_v1"]
+      queryIds: [
+        "scope_summary_v1",
+        "hourly_profile_v1",
+        "meter_breakdown_v1",
+        "operational_policy_scope_intervals_v1",
+        "operational_policy_meter_intervals_v1",
+      ]
     }
   }
 });
