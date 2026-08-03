@@ -29,6 +29,7 @@ describe("EnergyScopeAnalysis", () => {
     try {
       await materializePreschoolGoldenFixture(databasePath);
       ensureEnergyIqBootstrap(metadata);
+      configurePreschoolOperationalPolicy(metadata);
       const user = metadata.users.getById({ user_id: "dev-user" });
       const context = resolveEnergyQueryContext({
         metadataStore: metadata,
@@ -54,6 +55,17 @@ describe("EnergyScopeAnalysis", () => {
       expect(portfolio.summary.usageKwh).toBe(PRESCHOOL_GOLDEN.period.usageKwh);
       expect(portfolio.summary.averageDailyUsageKwh).toBe(PRESCHOOL_GOLDEN.period.averageDailyUsageKwh);
       expect(portfolio.summary.nonOperatingSharePct).toBe(PRESCHOOL_GOLDEN.period.nonOperatingSharePct);
+      expect(portfolio.cost).toMatchObject({
+        status: "available",
+        amount: 6230.453075,
+        currency: "SGD",
+        tariffScheduleVersion: "sg-tariff-v1",
+      });
+      expect(portfolio.offHours).toMatchObject({
+        status: "available",
+        standbyKwh: 3102.765631,
+        businessCalendarVersion: "sg-preschool-calendar-v1",
+      });
       expect(portfolio.hourlyProfile).toHaveLength(24);
       expect(portfolio.childScopes).toHaveLength(PRESCHOOL_GOLDEN.period.centreCount);
       expect(portfolio.circuits).toHaveLength(PRESCHOOL_GOLDEN.period.circuitCount);
@@ -169,12 +181,19 @@ describe("EnergyScopeAnalysis", () => {
       );
       expect(analysis.offHours).toEqual({
         status: NGEE_ANN_GOLDEN.invariants.offHoursStatus,
-        reason: "OPERATING_CALENDAR_NOT_MATERIALIZED"
+        reason: {
+          code: "OPERATING_CALENDAR_VERSION_NOT_FOUND",
+          message: "Operating calendar sg-calendar-v1 is not published for this Project.",
+        },
+        businessCalendarVersion: "sg-calendar-v1",
       });
       expect(analysis.cost).toEqual({
         status: NGEE_ANN_GOLDEN.invariants.tariffStatus,
-        reason: "TARIFF_NOT_CONFIGURED",
-        currency: "SGD"
+        reason: {
+          code: "TARIFF_VERSION_NOT_FOUND",
+          message: "Tariff schedule sg-tariff-v1 is not published for this Project.",
+        },
+        tariffScheduleVersion: "sg-tariff-v1",
       });
       expect(analysis.dataHealth).toMatchObject(NGEE_ANN_GOLDEN.period.dataHealth);
       expect(analysis.dataHealth).toMatchObject({
@@ -293,7 +312,6 @@ describe("EnergyScopeAnalysis", () => {
       summary: {
         usageKwh: 100,
         averageDailyUsageKwh: 100,
-        costSgd: 0,
         peakKw: 5,
         nonOperatingKwh: 50,
         nonOperatingSharePct: 50,
@@ -333,6 +351,44 @@ const ruleRevision = (override: Partial<EnergyIqRuleRevisionRecord>): EnergyIqRu
   created_at: "2026-08-02T00:00:00.000Z",
   ...override,
 });
+
+const configurePreschoolOperationalPolicy = (
+  metadata: ReturnType<typeof createMetadataStore>,
+): void => {
+  metadata.energyIq.operationalPolicy.publishTariffSchedule({
+    version_id: "sg-tariff-v1",
+    project_id: PRESCHOOL_GOLDEN.projectId,
+    published_by: "dev-user",
+    entries: [{
+      id: "sg-tariff-v1-flat",
+      owner: { kind: "project" },
+      effective_from: "2026-04-30T16:00:00.000Z",
+      effective_to: "2026-05-31T16:00:00.000Z",
+      currency: "SGD",
+      rate_per_kwh: 0.25,
+    }],
+  });
+  metadata.energyIq.operationalPolicy.publishOperatingCalendar({
+    version_id: "sg-preschool-calendar-v1",
+    project_id: PRESCHOOL_GOLDEN.projectId,
+    published_by: "dev-user",
+    entries: [{
+      id: "sg-preschool-calendar-v1-hours",
+      owner: { kind: "project" },
+      effective_from: "2026-05-01",
+      effective_to: "2026-06-01",
+      weekly: {
+        monday: [{ from: "08:00", to: "24:00" }],
+        tuesday: [{ from: "08:00", to: "24:00" }],
+        wednesday: [{ from: "08:00", to: "24:00" }],
+        thursday: [{ from: "08:00", to: "24:00" }],
+        friday: [{ from: "08:00", to: "24:00" }],
+        saturday: [{ from: "08:00", to: "24:00" }],
+        sunday: [{ from: "08:00", to: "24:00" }],
+      },
+    }],
+  });
+};
 
 type GoldenMeter = {
   id: string;
