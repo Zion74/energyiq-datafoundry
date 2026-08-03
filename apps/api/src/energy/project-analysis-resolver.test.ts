@@ -200,6 +200,13 @@ describe("ProjectAnalysisResolver", () => {
         published_by: "dev-user",
         published_at: "2026-08-04T00:00:00.000Z",
       });
+      metadata.energyIq.upsertProject({
+        ...project,
+        hierarchy_revision_id: "unpublished-hierarchy-drift",
+        meter_formula_revision_id: "unpublished-meter-formula-drift",
+        business_calendar_version: "unpublished-calendar-drift",
+        tariff_schedule_version: "unpublished-tariff-drift",
+      });
       const releasedResult = await resolveProjectAnalysis({
         metadataStore: metadata,
         dataGateway: gateway,
@@ -227,12 +234,43 @@ describe("ProjectAnalysisResolver", () => {
       });
       expect(releasedResult.snapshot.context).toMatchObject({
         projectReleaseId: publishedRevision.revision_id,
+        hierarchyRevisionId: publishedRevision.hierarchy_revision_id,
+        meterFormulaRevisionId: publishedRevision.meter_formula_revision_id,
+        businessCalendarVersion: publishedRevision.business_calendar_version,
+        tariffScheduleVersion: publishedRevision.tariff_schedule_version,
         primaryPeriod: {
           start: "2026-04-30T16:00:00.000Z",
           endExclusive: "2026-05-31T16:00:00.000Z",
         },
       });
+      expect(releasedResult.snapshot.analysis.provenance).toMatchObject({
+        hierarchyRevisionId: publishedRevision.hierarchy_revision_id,
+        meterFormulaRevisionId: publishedRevision.meter_formula_revision_id,
+      });
+      expect(releasedResult.snapshot.analysis.cost).toMatchObject({
+        tariffScheduleVersion: publishedRevision.tariff_schedule_version,
+      });
       expect(releasedResult.snapshot.evidence).toEqual(result.snapshot.evidence);
+
+      const anotherPeriodResult = await resolveProjectAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        user: metadata.users.getById({ user_id: "dev-user" }),
+        workspaceId: PRESCHOOL_WORKSPACE_ID,
+        request: {
+          projectId: "preschool-demo",
+          scopeId: "project",
+          resource: "electricity",
+          period: "Custom",
+          from: "2026-05-01",
+          to: "2026-05-02",
+        },
+        databasePath,
+      });
+      expect(anotherPeriodResult.status).toBe("ready");
+      if (anotherPeriodResult.status !== "ready") throw new Error("Expected another period");
+      expect(anotherPeriodResult.snapshot.evidence.map((item) => item.id))
+        .not.toEqual(releasedResult.snapshot.evidence.map((item) => item.id));
     } finally {
       metadata.close();
       removeTemporaryFixture(root);

@@ -53,7 +53,7 @@
   "scripts": {
     "build": "tsc -b tsconfig.build.json",
     "typecheck": "tsc -b tsconfig.build.json --pretty",
-    "test:energyiq:seams": "npm --workspace @datafoundry/data-gateway run build && vitest run apps/api/src/energy/project-analysis-resolver.test.ts apps/api/src/energy/energy-analysis.test.ts apps/web/src/app/energyiq/_components/project-renderer-registry.test.tsx apps/web/src/app/energyiq/_components/published-decision-dashboard.test.ts apps/web/src/app/energyiq/_components/energy-template-renderer.test.tsx packages/agent-runtime/src/semantic/energy-query-semantic-provider.test.ts",
+    "test:energyiq:seams": "npm --workspace @datafoundry/data-gateway run build && vitest run apps/api/src/energy/project-analysis-resolver.test.ts apps/api/src/energy/energy-api.saved-analysis.test.ts apps/api/src/energy/energy-analysis.test.ts apps/web/src/app/energyiq/_components/project-renderer-registry.test.tsx apps/web/src/app/energyiq/_components/published-decision-dashboard.test.ts apps/web/src/app/energyiq/_components/energy-template-renderer.test.tsx packages/agent-runtime/src/semantic/energy-query-semantic-provider.test.ts",
     "postinstall": "node scripts/postinstall.mjs",
     "predev:api": "node scripts/ensure-dev-environment.mjs",
     "dev": "node scripts/dev.mjs",

@@ -131,20 +131,21 @@ export const resolveProjectAnalysis = async (input: {
       detail: "Publish a Project Template Revision and register its customer Renderer before opening the customer Overview.",
     };
   }
+  const releasedContext = bindPublishedReleaseContext(context, projectRelease);
   const analysis = await executeEnergyScopeAnalysis({
     metadataStore: input.metadataStore,
     dataGateway: input.dataGateway,
     userId: input.user.id,
-    context,
+    context: releasedContext,
     ruleRevisions: input.metadataStore.energyIq.rules.listRevisions()
       .filter((rule) => projectRelease.ruleRevisionIds.includes(rule.revision_id)),
     ...(input.databasePath ? { databasePath: input.databasePath } : {}),
   });
   const snapshotContext: ProjectAnalysisSnapshot["context"] = {
-    ...context,
+    ...releasedContext,
     primaryPeriod: {
-      start: context.from,
-      endExclusive: context.to,
+      start: releasedContext.from,
+      endExclusive: releasedContext.to,
     },
     projectReleaseId: projectRelease.id,
   };
@@ -165,7 +166,9 @@ export const resolveProjectAnalysis = async (input: {
         id: [
           "evidence",
           analysis.provenance.dataSnapshotId,
-          context.scopeId,
+          releasedContext.scopeId,
+          releasedContext.from,
+          releasedContext.to,
           metricId,
         ].join(":"),
         metricId,
@@ -181,6 +184,17 @@ export const resolveProjectAnalysis = async (input: {
     },
   };
 };
+
+const bindPublishedReleaseContext = (
+  context: EnergyQueryContext,
+  release: PublishedProjectRelease,
+): EnergyQueryContext => ({
+  ...context,
+  hierarchyRevisionId: release.hierarchyRevisionId,
+  meterFormulaRevisionId: release.meterFormulaRevisionId,
+  businessCalendarVersion: release.businessCalendarVersion,
+  tariffScheduleVersion: release.tariffScheduleVersion,
+});
 
 const resolvePublishedProjectRelease = (
   metadataStore: MetadataStore,

@@ -14,7 +14,7 @@ import type { IncomingMessage } from "node:http";
 import type { ConfigApiContext, ConfigApiResponse } from "../routes/types.js";
 import { AuthError } from "../auth/service.js";
 import { readMultipartUpload } from "../upload-parser.js";
-import { executeEnergyScopeAnalysis } from "./energy-analysis.js";
+import { executeEnergyScopeAnalysis, type EnergyScopeAnalysis } from "./energy-analysis.js";
 import { inspectEnergyExcelWorkbook } from "./energy-excel-import.js";
 import { buildEnergyExcelMaterialization } from "./energy-import-materializer.js";
 import { EnergyAdminAccessService } from "./energy-admin-access.js";
@@ -483,6 +483,7 @@ export const handleEnergyApiRequest = async (
           userId: context.userId,
           context: energyContext,
         });
+        requireDecisionGradeCoverage(analysis);
         const templateRevision = context.metadataStore.energyIq.templates.getLatestProjectRevision(projectId);
         if (!templateRevision) throw new Error("ENERGYIQ_TEMPLATE_REVISION_REQUIRED");
         const record = context.metadataStore.energyIq.savedAnalyses.create({
@@ -531,6 +532,7 @@ export const handleEnergyApiRequest = async (
           userId: context.userId,
           context: energyContext,
         });
+        requireDecisionGradeCoverage(analysis);
         const templateRevision = context.metadataStore.energyIq.templates.getLatestProjectRevision(projectId);
         if (!templateRevision) throw new Error("ENERGYIQ_TEMPLATE_REVISION_REQUIRED");
         const record = context.metadataStore.energyIq.savedAnalyses.create({
@@ -667,6 +669,14 @@ export const handleEnergyApiRequest = async (
       status: forbidden ? 403 : conflict ? 409 : invalid ? 400 : 500,
       body: createErrorResult(code, message)
     };
+  }
+};
+
+const MINIMUM_SAVED_ANALYSIS_COVERAGE_PCT = 95;
+
+const requireDecisionGradeCoverage = (analysis: EnergyScopeAnalysis): void => {
+  if (analysis.dataHealth.coveragePct < MINIMUM_SAVED_ANALYSIS_COVERAGE_PCT) {
+    throw new Error("ENERGYIQ_DECISION_COVERAGE_REQUIRED");
   }
 };
 
