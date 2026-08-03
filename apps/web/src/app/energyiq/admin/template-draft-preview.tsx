@@ -3,7 +3,10 @@
 import { useEffect, useState } from "react";
 
 import { configApi, type EnergyScopeAnalysisDto } from "../../../lib/config-api";
-import { EnergyTemplateRenderer } from "../_components/energy-template-renderer";
+import {
+  EnergyTemplateRenderer,
+  type EnergyTemplateRendererState,
+} from "../_components/energy-template-renderer";
 import { EnergySelect } from "../_components/energy-select";
 import {
   buildTemplatePreviewRequest,
@@ -71,9 +74,16 @@ export function TemplateDraftPreview({
     customTo,
   });
   const renderedAnalysis = analysis?.context.projectId === projectId ? analysis : null;
+  const rendererState = resolveDraftPreviewRendererState({
+    scopeCount: plan.scopes.length,
+    loading,
+    error,
+    analysis: renderedAnalysis,
+    plan,
+  });
 
   return (
-    <div className="border-t border-border bg-background/40 p-5">
+    <div className="min-w-0 border-t border-border bg-background/40 p-4 sm:p-5 xl:border-t-0">
       <div className="rounded-xl border border-border bg-background p-4 sm:p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -130,21 +140,43 @@ export function TemplateDraftPreview({
           </div>
         ) : null}
 
-        {plan.scopes.length === 0 ? <p className="mt-4 rounded-lg border border-step-warning/25 bg-step-warning/5 px-4 py-3 text-xs text-step-warning">Create at least one node in this Tier before previewing its shared template.</p> : null}
-        {error ? <p className="mt-4 rounded-lg border border-step-error/25 bg-step-error/5 px-4 py-3 text-xs text-step-error">{error}</p> : null}
-        {loading ? <div className="mt-4 rounded-lg border border-border bg-surface p-8 text-center text-xs text-muted">Resolving the selected Project, Scope, period and trusted facts...</div> : null}
-        {!loading && renderedAnalysis ? (
-          <div className="mt-5">
+        <div className="mt-5">
+          {rendererState.status === "ready" ? (
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-[10px] text-muted-light">
-              <span>{renderedAnalysis.context.scopeName} · {formatPeriod(renderedAnalysis)} · {renderedAnalysis.summary.usageKwh.toLocaleString("en-SG", { maximumFractionDigits: 2 })} kWh</span>
-              <span className="font-mono">{renderedAnalysis.provenance.dataSnapshotId}</span>
+              <span>{rendererState.analysis.context.scopeName} · {formatPeriod(rendererState.analysis)} · {rendererState.analysis.summary.usageKwh.toLocaleString("en-SG", { maximumFractionDigits: 2 })} kWh</span>
+              <span className="font-mono">{rendererState.analysis.provenance.dataSnapshotId}</span>
             </div>
-            <EnergyTemplateRenderer analysis={renderedAnalysis} modules={plan.modules} />
-          </div>
-        ) : null}
+          ) : null}
+          <EnergyTemplateRenderer
+            state={rendererState}
+            onRetry={nextRequest ? () => setSubmittedRequest(nextRequest) : undefined}
+          />
+        </div>
       </div>
     </div>
   );
+}
+
+function resolveDraftPreviewRendererState(input: {
+  scopeCount: number;
+  loading: boolean;
+  error: string | null;
+  analysis: EnergyScopeAnalysisDto | null;
+  plan: TemplatePreviewPlan;
+}): EnergyTemplateRendererState {
+  if (input.scopeCount === 0) {
+    return { status: "empty", title: "No preview scope is available", detail: "Create at least one node in this Tier before previewing its shared template." };
+  }
+  if (input.error) {
+    return { status: "error", title: "Draft Preview is unavailable", detail: `${input.error} Retry the same Draft, Scope and period without publishing it.` };
+  }
+  if (input.loading) {
+    return { status: "loading", title: "Resolving Draft Preview", detail: "Loading the selected Project, Scope, period and trusted facts. This does not create an Analysis Run." };
+  }
+  if (!input.analysis) {
+    return { status: "empty", title: "Preview has not been run", detail: "Choose a Scope and period, then run the Draft Preview." };
+  }
+  return { status: "ready", analysis: input.analysis, plan: input.plan.renderPlan };
 }
 
 function formatPeriod(analysis: EnergyScopeAnalysisDto): string {

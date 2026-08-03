@@ -1,5 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
+import { markEnergyIqProjectConfigurationChanged } from "./energyiq-project-change-tracker.js";
+
 export type EnergyIqRuleFamily = "data_quality" | "time" | "comparison";
 export type EnergyIqRuleRequirement = "always" | "operating_hours" | "children" | "area_peers" | "people_peers";
 
@@ -210,6 +212,7 @@ export class EnergyIqRuleStore {
       current.created_at ?? now,
       now,
     );
+    markEnergyIqProjectConfigurationChanged(this.db, input.project_id, now);
     return this.getProjectConfig(input.project_id);
   }
 }

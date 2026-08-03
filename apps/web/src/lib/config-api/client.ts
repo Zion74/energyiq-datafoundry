@@ -21,6 +21,7 @@ import type {
   EnergyProjectDataCoverageDto,
   EnergyProjectRuleConfigResponseDto,
   EnergyProjectTemplateDraftResponseDto,
+  EnergyPublishedTemplateResponseDto,
   EnergyTemplateDraftDocumentDto,
   EnergyProjectHierarchyDto,
   EnergyProjectRecordDto,
@@ -31,6 +32,8 @@ import type {
   EnergyQueryContextDto,
   EnergyQueryContextRequestDto,
   EnergyScopeAnalysisDto,
+  EnergySavedAnalysisDetailDto,
+  EnergySavedAnalysisSummaryDto,
   FileAssetRefDto,
   JobDto,
   KnowledgeBaseDto,
@@ -397,15 +400,21 @@ export const configApi = {
 
   publishEnergyProjectSetup(
     projectId: string,
-    expectedRevision: number,
+    body: {
+      expectedRevision: number;
+      expectedTemplateDraftRevision: number;
+      expectedMetricConfigRevision: number;
+      expectedRuleConfigRevision: number;
+    },
   ): Promise<{
     hierarchy_revision_id: string;
+    template_revision_id: string;
     validation: EnergyProjectSetupValidationDto;
     project: EnergyProjectRecordDto;
   }> {
     return requestEnvelope(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/setup/publish`,
-      { method: "POST", body: JSON.stringify({ expectedRevision }) },
+      { method: "POST", body: JSON.stringify(body) },
     );
   },
 
@@ -444,6 +453,47 @@ export const configApi = {
   getEnergyProjectTemplateDraft(projectId: string): Promise<EnergyProjectTemplateDraftResponseDto> {
     return requestEnvelope(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/template-draft`,
+    );
+  },
+
+  getEnergyPublishedTemplate(projectId: string): Promise<EnergyPublishedTemplateResponseDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/published-template`,
+    );
+  },
+
+  listEnergySavedAnalyses(projectId: string): Promise<{ items: EnergySavedAnalysisSummaryDto[] }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/saved-analyses`,
+    );
+  },
+
+  saveEnergyAnalysis(
+    projectId: string,
+    body: EnergyQueryContextRequestDto & { title?: string },
+  ): Promise<EnergySavedAnalysisDetailDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/saved-analyses`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  },
+
+  getEnergySavedAnalysis(
+    projectId: string,
+    analysisId: string,
+  ): Promise<EnergySavedAnalysisDetailDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/saved-analyses/${encodeURIComponent(analysisId)}`,
+    );
+  },
+
+  rerunEnergySavedAnalysis(
+    projectId: string,
+    analysisId: string,
+  ): Promise<EnergySavedAnalysisDetailDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/saved-analyses/${encodeURIComponent(analysisId)}/rerun`,
+      { method: "POST", body: JSON.stringify({}) },
     );
   },
 

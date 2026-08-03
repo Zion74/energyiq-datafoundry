@@ -6,6 +6,10 @@ import type {
   EnergyQueryContextRequestDto,
   EnergyTemplateDefinitionDto,
 } from "../../../lib/config-api";
+import {
+  buildEnergyTemplateRenderPlan,
+  type EnergyTemplateRenderPlan,
+} from "../_components/energy-template-render-plan";
 import { resolveComponentReadiness, type ComponentReadiness } from "./analysis-configuration-model";
 
 export type TemplatePreviewScope = {
@@ -25,6 +29,7 @@ export type TemplatePreviewPlan = {
   scopes: TemplatePreviewScope[];
   recommendedScopeId: string;
   modules: TemplatePreviewModule[];
+  renderPlan: EnergyTemplateRenderPlan;
 };
 
 export type EnergyPreviewRange = {
@@ -69,14 +74,10 @@ export function buildTemplatePreviewPlan(input: {
             factsMapped,
           };
         });
-  const catalogById = new Map(input.catalog.map((component) => [component.revision_id, component]));
-  const modules = input.template.components.flatMap((placement) => {
-    if (!placement.enabled) return [];
-    const component = catalogById.get(placement.component_revision_id);
-    if (!component) return [];
-    return [{
-      component,
-      readiness: resolveComponentReadiness(
+  const renderPlan = buildEnergyTemplateRenderPlan({
+    template: input.template,
+    catalog: input.catalog,
+    resolveReadiness: (component) => resolveComponentReadiness(
         component,
         input.template,
         input.document,
@@ -84,13 +85,14 @@ export function buildTemplatePreviewPlan(input: {
         input.selectedRuleRevisionIds,
         input.businessCalendarVersion,
       ),
-    }];
   });
+  const modules = renderPlan.sections.flatMap((section) => section.modules);
   return {
     label,
     scopes,
     recommendedScopeId: scopes.find((scope) => scope.factsMapped)?.id ?? scopes[0]?.id ?? "",
     modules,
+    renderPlan,
   };
 }
 

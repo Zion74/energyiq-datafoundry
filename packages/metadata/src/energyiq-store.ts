@@ -2,6 +2,7 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { EnergyIqMetricStore } from "./energyiq-metric-store.js";
 import { EnergyIqRuleStore } from "./energyiq-rule-store.js";
+import { EnergyIqSavedAnalysisStore } from "./energyiq-saved-analysis-store.js";
 import { EnergyIqTemplateStore } from "./energyiq-template-store.js";
 
 import {
@@ -185,12 +186,14 @@ export class EnergyIqStore {
   readonly metrics: EnergyIqMetricStore;
   readonly projectSetup: EnergyIqProjectSetupStore;
   readonly rules: EnergyIqRuleStore;
+  readonly savedAnalyses: EnergyIqSavedAnalysisStore;
   readonly templates: EnergyIqTemplateStore;
 
   constructor(private readonly db: DatabaseSync) {
     this.metrics = new EnergyIqMetricStore(db);
     this.projectSetup = new EnergyIqProjectSetupStore(db);
     this.rules = new EnergyIqRuleStore(db);
+    this.savedAnalyses = new EnergyIqSavedAnalysisStore(db);
     this.templates = new EnergyIqTemplateStore(db);
   }
 

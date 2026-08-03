@@ -15,10 +15,19 @@ describe("EnergyIqStore", () => {
 
       const catalog = metadata.energyIq.templates.listComponentRevisions();
       expect(catalog.map((component) => component.revision_id)).toEqual(expect.arrayContaining([
+        "decision.recommended_actions@1",
         "decision.executive_actions@1",
         "comparison.child_scope_ranking@1",
         "composition.meter_breakdown@1",
       ]));
+      expect(catalog.find((component) => component.revision_id === "comparison.child_scope_ranking@1")?.allowed_presentation).toMatchObject({
+        layout: { spans: [6, 8, 12] },
+        visuals: {
+          presets: ["bar", "list"],
+          legend: { configurable: true, default: true },
+          limit: { configurable: true, min: 1, max: 25, default: 10 },
+        },
+      });
       const initial = metadata.energyIq.templates.getProjectDraft({
         project_id: "template-project",
         tier_definition_ids: ["tier-circuit", "tier-level"],
@@ -28,6 +37,16 @@ describe("EnergyIqStore", () => {
         "project",
         "tier:tier-circuit",
         "tier:tier-level",
+      ]);
+      expect(initial.document.schema_version).toBe(2);
+      expect(initial.document.templates[0]?.sections?.map((section) => section.section_id)).toEqual([
+        "action-summary",
+        "data-status",
+        "energy-overview",
+        "comparison",
+        "time-pattern",
+        "composition",
+        "exceptions",
       ]);
       expect(initial.document.templates[0]?.components.map((item) => item.component_revision_id))
         .not.toContain("composition.meter_breakdown@1");
@@ -46,6 +65,14 @@ describe("EnergyIqStore", () => {
               components: projectTemplate.components.map((component, index) => ({
                 ...component,
                 enabled: index !== 0,
+                ...(index === 0 ? {
+                  layout: { span: 8 as const, height: "tall" as const },
+                  presentation: {
+                    ...component.presentation!,
+                    tone: "highlight" as const,
+                    title: "Project decision brief",
+                  },
+                } : {}),
               })),
             },
             ...initial.document.templates.slice(1),
@@ -55,6 +82,16 @@ describe("EnergyIqStore", () => {
       });
       expect(saved.revision).toBe(1);
       expect(saved.document.templates[0]?.components[0]?.enabled).toBe(false);
+      expect(saved.document.templates[0]?.components[0]).toMatchObject({
+        layout: { span: 8, height: "tall" },
+        presentation: { tone: "highlight", title: "Project decision brief" },
+      });
+      expect(saved.document.templates[0]?.components[1]).toMatchObject({
+        placement_id: expect.any(String),
+        section_id: expect.any(String),
+        layout: { span: expect.any(Number), height: expect.any(String) },
+        presentation: { visual_preset: expect.any(String), density: expect.any(String), tone: expect.any(String) },
+      });
       const reconciled = metadata.energyIq.templates.getProjectDraft({
         project_id: "template-project",
         tier_definition_ids: ["tier-circuit", "tier-room", "tier-level"],
@@ -83,6 +120,57 @@ describe("EnergyIqStore", () => {
         },
         updated_by: "dev-user",
       })).toThrow("ENERGYIQ_TEMPLATE_COMPONENT_TARGET_INVALID");
+      expect(() => metadata.energyIq.templates.saveProjectDraft({
+        project_id: "template-project",
+        expected_revision: 1,
+        tier_definition_ids: ["tier-circuit", "tier-level"],
+        document: {
+          ...saved.document,
+          templates: saved.document.templates.map((template) => template.template_id === "project"
+            ? {
+                ...template,
+                components: template.components.map((component, index) => index < 2
+                  ? { ...component, placement_id: "duplicate-placement" }
+                  : component),
+              }
+            : template),
+        },
+        updated_by: "dev-user",
+      })).toThrow("ENERGYIQ_TEMPLATE_PLACEMENT_ID_INVALID");
+      expect(() => metadata.energyIq.templates.saveProjectDraft({
+        project_id: "template-project",
+        expected_revision: 1,
+        tier_definition_ids: ["tier-circuit", "tier-level"],
+        document: {
+          ...saved.document,
+          templates: saved.document.templates.map((template) => template.template_id === "project"
+            ? {
+                ...template,
+                components: template.components.map((component) => component.component_revision_id === "comparison.child_scope_ranking@1"
+                  ? { ...component, presentation: { ...component.presentation!, visual_preset: "cards" as const } }
+                  : component),
+              }
+            : template),
+        },
+        updated_by: "dev-user",
+      })).toThrow("ENERGYIQ_TEMPLATE_COMPONENT_VISUAL_NOT_ALLOWED");
+      expect(() => metadata.energyIq.templates.saveProjectDraft({
+        project_id: "template-project",
+        expected_revision: 1,
+        tier_definition_ids: ["tier-circuit", "tier-level"],
+        document: {
+          ...saved.document,
+          templates: saved.document.templates.map((template) => template.template_id === "project"
+            ? {
+                ...template,
+                components: template.components.map((component) => component.component_revision_id === "overview.consumption@1"
+                  ? { ...component, layout: { ...component.layout!, span: 4 as const } }
+                  : component),
+              }
+            : template),
+        },
+        updated_by: "dev-user",
+      })).toThrow("ENERGYIQ_TEMPLATE_COMPONENT_SPAN_NOT_ALLOWED");
 
       metadata.close();
     } finally {
@@ -399,12 +487,61 @@ describe("EnergyIqStore", () => {
       const validation = metadata.energyIq.projectSetup.validateDraft("project-setup");
       expect(validation.blocking).toBe(false);
 
+      const templateDraft = metadata.energyIq.templates.getProjectDraft({
+        project_id: "project-setup",
+        tier_definition_ids: ["tier-level", "tier-circuit"],
+      });
+      const savedTemplateDraft = metadata.energyIq.templates.saveProjectDraft({
+        project_id: "project-setup",
+        expected_revision: templateDraft.revision,
+        tier_definition_ids: ["tier-level", "tier-circuit"],
+        document: {
+          templates: templateDraft.document.templates.map((template) => template.template_id === "project"
+            ? {
+                ...template,
+                components: template.components.map((component, index) => ({
+                  ...component,
+                  enabled: index !== 0,
+                })),
+              }
+            : template),
+        },
+        updated_by: "dev-user",
+      });
+      const metricConfig = metadata.energyIq.metrics.saveProjectConfig({
+        project_id: "project-setup",
+        expected_revision: 0,
+        selected_metric_revision_ids: ["energy.total_usage_kwh@1", "energy.peak_demand_kw@1"],
+        updated_by: "dev-user",
+      });
+      const ruleConfig = metadata.energyIq.rules.saveProjectConfig({
+        project_id: "project-setup",
+        expected_revision: 0,
+        selected_rule_revision_ids: ["quality.no_valid_data@1"],
+        updated_by: "dev-user",
+      });
+
       const published = metadata.energyIq.projectSetup.publishDraft({
         project_id: "project-setup",
         expected_revision: saved.revision,
-        user_id: "dev-user"
+        user_id: "dev-user",
+        expected_template_draft_revision: savedTemplateDraft.revision,
+        expected_metric_config_revision: metricConfig.revision,
+        expected_rule_config_revision: ruleConfig.revision,
       });
       expect(published.hierarchy_revision_id).toBe("project-setup-hierarchy-v1");
+      expect(published.template_revision_id).toBe("project-setup-template-v1");
+      const publishedTemplate = metadata.energyIq.templates.getLatestProjectRevision("project-setup");
+      expect(publishedTemplate).toMatchObject({
+        revision_id: "project-setup-template-v1",
+        hierarchy_revision_id: "project-setup-hierarchy-v1",
+        source_template_draft_revision: 1,
+        metric_config_revision: 1,
+        selected_metric_revision_ids: ["energy.total_usage_kwh@1", "energy.peak_demand_kw@1"],
+        rule_config_revision: 1,
+        selected_rule_revision_ids: ["quality.no_valid_data@1"],
+      });
+      expect(publishedTemplate?.document.templates[0]?.components[0]?.enabled).toBe(false);
       expect(metadata.energyIq.getProject("project-setup")).toMatchObject({
         name: "Ngee Ann Test",
         status: "published",
@@ -461,6 +598,15 @@ describe("EnergyIqStore", () => {
           project: { ...postPublishDraft.document.project, name: "Unpublished rename" }
         }
       });
+      metadata.energyIq.templates.saveProjectDraft({
+        project_id: "project-setup",
+        expected_revision: savedTemplateDraft.revision,
+        tier_definition_ids: ["tier-level", "tier-circuit"],
+        document: templateDraft.document,
+        updated_by: "dev-user",
+      });
+      expect(metadata.energyIq.templates.getLatestProjectRevision("project-setup"))
+        .toEqual(publishedTemplate);
       expect(changed.revision).toBe(4);
       expect(metadata.energyIq.getProject("project-setup").name).toBe("Ngee Ann Test");
       expect(() => metadata.energyIq.projectSetup.saveDraft({

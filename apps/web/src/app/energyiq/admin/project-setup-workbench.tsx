@@ -18,7 +18,9 @@ import {
   type EnergyMeterMappingDraftDto,
   type EnergyMeterMappingRowDto,
   type EnergyMetricFamilyDto,
+  type EnergyProjectMetricConfigDto,
   type EnergyMetricRevisionDto,
+  type EnergyProjectRuleConfigDto,
   type EnergyRuleFamilyDto,
   type EnergyRuleRevisionDto,
   type EnergyVirtualMeterDto,
@@ -69,6 +71,12 @@ type MeterMappingIntent = {
   scopeName: string;
   kind: "physical" | "virtual";
 };
+type ProjectPublicationReview = {
+  templateDraft: EnergyProjectTemplateDraftDto;
+  metricConfig: EnergyProjectMetricConfigDto;
+  ruleConfig: EnergyProjectRuleConfigDto;
+};
+type AdminProjectOption = EnergyProjectDto & { workspaceName: string };
 
 export function EnergyIqAdminWorkbench({
   accessState,
@@ -78,8 +86,15 @@ export function EnergyIqAdminWorkbench({
   initialSection?: AdminSection;
 }) {
   const router = useRouter();
-  const { access, activeProject, refresh, selectProject } = accessState;
-  const projects = access?.projects ?? [];
+  const { access, activeProject, refresh, selectProject, selectProjectContext } = accessState;
+  const currentWorkspaceProjects = useMemo(() => access?.projects ?? [], [access?.projects]);
+  const activeWorkspaceName = access?.workspaces.find(
+    (workspace) => workspace.id === access.activeWorkspaceId,
+  )?.name ?? "Current workspace";
+  const [adminProjects, setAdminProjects] = useState<AdminProjectOption[]>([]);
+  const projects: AdminProjectOption[] = access?.role === "admin" && adminProjects.length > 0
+    ? adminProjects
+    : currentWorkspaceProjects.map((project) => ({ ...project, workspaceName: activeWorkspaceName }));
   const [selectedProjectId, setSelectedProjectId] = useState(
     activeProject?.id ?? projects[0]?.id ?? "",
   );
@@ -95,12 +110,50 @@ export function EnergyIqAdminWorkbench({
   const [notice, setNotice] = useState<string | null>(null);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [meterMappingIntent, setMeterMappingIntent] = useState<MeterMappingIntent | null>(null);
+  const [adminNavigationCollapsed, setAdminNavigationCollapsed] = useState(false);
+
+  const loadAdminProjects = useCallback(async () => {
+    if (access?.role !== "admin") {
+      setAdminProjects([]);
+      return;
+    }
+    const result = await configApi.listEnergyAdminOrganisations();
+    const next = result.organisations.flatMap((organisation) =>
+      organisation.projects.map((project) => ({
+        id: project.id,
+        workspaceId: organisation.id,
+        workspaceName: organisation.name,
+        name: project.name,
+        status: normalizeProjectStatus(project.status),
+        timezone: currentWorkspaceProjects.find((candidate) => candidate.id === project.id)?.timezone
+          ?? "Asia/Singapore",
+      })),
+    ).sort((left, right) => left.workspaceName.localeCompare(right.workspaceName)
+      || left.name.localeCompare(right.name));
+    setAdminProjects(next);
+  }, [access?.role, currentWorkspaceProjects]);
+
+  useEffect(() => {
+    void loadAdminProjects().catch((reason) => {
+      setError(messageFrom(reason, "Failed to load projects across customer Workspaces"));
+    });
+  }, [loadAdminProjects]);
 
   useEffect(() => {
     if (!selectedProjectId && projects[0]) {
       setSelectedProjectId(projects[0].id);
     }
   }, [projects, selectedProjectId]);
+
+  useEffect(() => {
+    if (!access?.activeWorkspaceId || adminProjects.length === 0) return;
+    const selected = adminProjects.find((project) => project.id === selectedProjectId);
+    if (selected?.workspaceId === access.activeWorkspaceId) return;
+    const next = adminProjects.find((project) =>
+      project.workspaceId === access.activeWorkspaceId && project.id === activeProject?.id,
+    ) ?? adminProjects.find((project) => project.workspaceId === access.activeWorkspaceId);
+    if (next) setSelectedProjectId(next.id);
+  }, [access?.activeWorkspaceId, activeProject?.id, adminProjects, selectedProjectId]);
 
   const loadSetup = useCallback(async (projectId: string) => {
     if (!projectId) return;
@@ -180,6 +233,31 @@ export function EnergyIqAdminWorkbench({
     }
   }, [persistDraft, selectedProjectId]);
 
+  const publishProjectRevision = useCallback(async (review: ProjectPublicationReview) => {
+    setSaving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const savedSetupDraft = await persistDraft();
+      const result = await configApi.publishEnergyProjectSetup(selectedProjectId, {
+        expectedRevision: savedSetupDraft.revision,
+        expectedTemplateDraftRevision: review.templateDraft.revision,
+        expectedMetricConfigRevision: review.metricConfig.revision,
+        expectedRuleConfigRevision: review.ruleConfig.revision,
+      });
+      await Promise.all([
+        loadSetup(selectedProjectId),
+        refresh(),
+      ]);
+      setNotice(`Published ${result.template_revision_id}. Future edits remain in Draft until the next publication.`);
+    } catch (reason) {
+      setError(messageFrom(reason, "Failed to publish project revision"));
+      throw reason;
+    } finally {
+      setSaving(false);
+    }
+  }, [loadSetup, persistDraft, refresh, selectedProjectId]);
+
   const discardUnsavedChanges = useCallback(() => {
     if (!setup || !dirty) return;
     if (!window.confirm("Discard all changes made since the last saved draft?")) return;
@@ -206,9 +284,18 @@ export function EnergyIqAdminWorkbench({
     || section === "meter-mapping";
   const showProjectLink = Boolean(selectedProject?.status === "published" && isProjectContext(section));
   const chooseAdminProject = (projectId: string) => {
-    setSelectedProjectId(projectId);
+    const nextProject = projects.find((project) => project.id === projectId);
+    if (!nextProject) return;
     setMeterMappingIntent(null);
-    selectProject(projectId);
+    if (nextProject.workspaceId === access?.activeWorkspaceId) {
+      setSelectedProjectId(projectId);
+      selectProject(projectId);
+      return;
+    }
+    setLoading(true);
+    void selectProjectContext(nextProject.workspaceId, projectId).then(() => {
+      setSelectedProjectId(projectId);
+    });
   };
 
   return (
@@ -217,11 +304,13 @@ export function EnergyIqAdminWorkbench({
         projects={projects}
         selectedProjectId={selectedProjectId}
         activeSection={section}
+        desktopCollapsed={adminNavigationCollapsed}
         onProjectChange={(projectId) => {
           chooseAdminProject(projectId);
           setSection("project-overview");
         }}
         onCreateProject={() => setNewProjectOpen(true)}
+        onDesktopCollapsedChange={setAdminNavigationCollapsed}
         onSectionChange={(nextSection) => {
           setSection(nextSection);
           router.replace(`/energyiq/admin?section=${nextSection}`, { scroll: false });
@@ -231,6 +320,18 @@ export function EnergyIqAdminWorkbench({
       <div className="min-w-0 flex-1">
         <header className="sticky top-0 z-20 border-b border-border bg-surface px-4 py-3 lg:px-6">
           <div className="flex flex-wrap items-center gap-3">
+            {adminNavigationCollapsed ? (
+              <button
+                type="button"
+                aria-label="Show admin navigation"
+                title="Show admin navigation"
+                onClick={() => setAdminNavigationCollapsed(false)}
+                className="hidden h-9 shrink-0 items-center gap-2 rounded-lg border border-border px-3 text-xs font-semibold text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 lg:flex"
+              >
+                <EnergyIcon name="chevron" className="h-3.5 w-3.5" />
+                Show navigation
+              </button>
+            ) : null}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <h2 className="truncate text-base font-semibold">{sectionMeta.title}</h2>
@@ -291,6 +392,8 @@ export function EnergyIqAdminWorkbench({
             setSelectedNodeId,
             changeDocument,
             setSection,
+            publishing: saving,
+            publishProjectRevision,
           }) : null}
         </div>
       </div>
@@ -301,6 +404,7 @@ export function EnergyIqAdminWorkbench({
           onCreated={async (projectId) => {
             setNewProjectOpen(false);
             await refresh();
+            await loadAdminProjects();
             setSelectedProjectId(projectId);
             setSection("basics");
           }}
@@ -327,6 +431,8 @@ function renderAdminSection({
   setSelectedNodeId,
   changeDocument,
   setSection,
+  publishing,
+  publishProjectRevision,
 }: {
   section: AdminSection;
   projects: EnergyProjectDto[];
@@ -344,12 +450,24 @@ function renderAdminSection({
   setSelectedNodeId: Dispatch<SetStateAction<string | null>>;
   changeDocument: (updater: (current: EnergyProjectSetupDocumentDto) => EnergyProjectSetupDocumentDto) => void;
   setSection: Dispatch<SetStateAction<AdminSection>>;
+  publishing: boolean;
+  publishProjectRevision: (review: ProjectPublicationReview) => Promise<void>;
 }) {
   if (section === "overview") {
     return <AdminOverview projects={projects} selectedProject={selectedProject} chooseAdminProject={chooseAdminProject} setSection={setSection} />;
   }
   if (section === "project-overview") {
-    return <ProjectDeliveryOverview projectId={selectedProjectId} project={selectedProject} setup={setup} document={document} setSection={setSection} />;
+    return (
+      <ProjectDeliveryOverview
+        projectId={selectedProjectId}
+        project={selectedProject}
+        setup={setup}
+        document={document}
+        setSection={setSection}
+        publishing={publishing}
+        onPublish={publishProjectRevision}
+      />
+    );
   }
   if (section === "basics") {
     return (
@@ -457,7 +575,7 @@ function AnalysisConfigurationPage({
   document: EnergyProjectSetupDocumentDto;
   businessCalendarVersion: string;
 }) {
-  const [activeStep, setActiveStep] = useState<"metrics" | "rules" | "layout">("metrics");
+  const [activeStep, setActiveStep] = useState<"metrics" | "rules" | "layout">("layout");
   const [catalog, setCatalog] = useState<EnergyMetricRevisionDto[]>([]);
   const [revision, setRevision] = useState(0);
   const [selected, setSelected] = useState<string[]>([]);
@@ -608,7 +726,7 @@ function AnalysisConfigurationPage({
       : templateDraft?.revision ?? 0;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
+    <div className={["mx-auto space-y-5", activeStep === "layout" ? "max-w-[1800px]" : "max-w-6xl"].join(" ")}>
       <section className="rounded-xl border border-border bg-surface p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -875,6 +993,7 @@ function TemplateLayoutPanel({
   onChange: (document: EnergyTemplateDraftDocumentDto) => void;
   onSave: () => void;
 }) {
+  const [selectedComponentRevisionId, setSelectedComponentRevisionId] = useState<string | null>(null);
   if (loading || !templateDraft || !savedTemplateDocument) {
     return (
       <section className="rounded-xl border border-border bg-surface p-8 text-center text-xs text-muted">
@@ -900,6 +1019,12 @@ function TemplateLayoutPanel({
       ? { ...template, components }
       : template),
   });
+  const updatePlacement = (
+    componentRevisionId: string,
+    updater: (placement: EnergyTemplateDefinitionDto["components"][number]) => EnergyTemplateDefinitionDto["components"][number],
+  ) => updateComponents(selectedTemplate.components.map((placement) => placement.component_revision_id === componentRevisionId
+    ? updater(placement)
+    : placement));
   const enabledCount = selectedTemplate.components.filter((placement) => placement.enabled).length;
   const templateLabel = selectedTemplate.target_kind === "project"
     ? "Project Overview"
@@ -912,6 +1037,22 @@ function TemplateLayoutPanel({
     selectedRuleRevisionIds,
     businessCalendarVersion,
   });
+  const selectedPlacement = selectedTemplate.components.find(
+    (placement) => placement.component_revision_id === selectedComponentRevisionId,
+  ) ?? selectedTemplate.components.find((placement) => placement.enabled) ?? selectedTemplate.components[0];
+  const selectedComponent = selectedPlacement
+    ? catalogById.get(selectedPlacement.component_revision_id)
+    : undefined;
+  const selectedReadiness = selectedComponent
+    ? resolveComponentReadiness(
+        selectedComponent,
+        selectedTemplate,
+        document,
+        selectedMetricRevisionIds,
+        selectedRuleRevisionIds,
+        businessCalendarVersion,
+      )
+    : undefined;
 
   return (
     <section className="rounded-xl border border-border bg-surface">
@@ -919,7 +1060,7 @@ function TemplateLayoutPanel({
         <div>
           <h4 className="text-sm font-semibold">Template layout</h4>
           <p className="mt-1 max-w-2xl text-[11px] leading-4 text-muted">
-            Configure one Project Overview and one shared layout per Tier Definition. Templates may only reference the controlled Component Catalog.
+            Choose modules on the left, adjust the selected module, and compare the result in Draft Preview. Templates may only use the controlled Component Catalog.
           </p>
           <p className="mt-1 text-[10px] text-muted-light">
             Draft revision {templateDraft.revision} · changes remain invisible to customers until Review &amp; Publish.
@@ -935,10 +1076,9 @@ function TemplateLayoutPanel({
         </div>
       </div>
 
-      <div className="grid min-h-[520px] lg:grid-cols-[230px_minmax(0,1fr)]">
-        <aside className="border-b border-border p-4 lg:border-b-0 lg:border-r">
-          <p className="px-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-light">Analysis scope</p>
-          <div className="mt-3 space-y-1">
+      <div className="border-b border-border px-4 py-3 sm:px-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="mr-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-light">Template scope</span>
             {templateDraft.document.templates.map((template) => {
               const active = template.template_id === selectedTemplate.template_id;
               const tier = template.tier_definition_id ? tierById.get(template.tier_definition_id) : undefined;
@@ -950,120 +1090,293 @@ function TemplateLayoutPanel({
                   type="button"
                   onClick={() => setActiveTemplateId(template.template_id)}
                   className={[
-                    "flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-left text-xs transition-colors",
-                    active ? "bg-foreground text-background" : "text-muted hover:bg-surface-subtle hover:text-foreground",
+                    "inline-flex min-h-9 items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
+                    active ? "border-foreground bg-foreground text-background" : "border-border text-muted hover:bg-surface-subtle hover:text-foreground",
                   ].join(" ")}
                 >
-                  <span className="min-w-0">
-                    <span className="block truncate font-semibold">{label}</span>
-                    <span className={["mt-0.5 block text-[9px]", active ? "text-background/65" : "text-muted-light"].join(" ")}>
-                      {template.target_kind === "project" ? "Project scope" : `Shared by all ${tier?.alias ?? "Tier"} nodes`}
-                    </span>
-                  </span>
-                  <span className={["ml-2 rounded-full px-2 py-0.5 text-[9px]", active ? "bg-background/15" : "bg-surface-subtle"].join(" ")}>{count}</span>
+                  <span className="font-semibold">{label}</span>
+                  <span className={["rounded-full px-1.5 py-0.5 text-[9px]", active ? "bg-background/15" : "bg-surface-subtle"].join(" ")}>{count}</span>
                 </button>
               );
             })}
-          </div>
-        </aside>
+        </div>
+      </div>
 
-        <div className="p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <h5 className="text-sm font-semibold">{templateLabel}</h5>
-              <p className="mt-1 text-[11px] text-muted">{enabledCount} enabled modules · order runs from top to bottom</p>
+      <div className="grid min-h-[640px] xl:grid-cols-[minmax(340px,400px)_minmax(0,1fr)]">
+        <div className="min-w-0 border-b border-border xl:border-b-0 xl:border-r">
+          <div className="p-4 sm:p-5 xl:sticky xl:top-[72px] xl:max-h-[calc(100vh-128px)] xl:overflow-y-auto">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h5 className="text-sm font-semibold">{templateLabel}</h5>
+                <p className="mt-1 text-[11px] text-muted">{enabledCount} enabled modules · preview renders from top to bottom</p>
+              </div>
+              <span className="rounded-full bg-surface-subtle px-2.5 py-1 text-[9px] font-semibold text-muted">
+                {selectedTemplate.target_kind === "project" ? "PROJECT" : "TIER"}
+              </span>
             </div>
-            <span className="rounded-full bg-surface-subtle px-2.5 py-1 text-[9px] font-semibold text-muted">
-              {selectedTemplate.target_kind === "project" ? "PROJECT" : "TIER"}
-            </span>
-          </div>
 
-          <div className="mt-4 space-y-2">
-            {selectedTemplate.components.map((placement, index) => {
-              const component = catalogById.get(placement.component_revision_id);
-              if (!component) return null;
-              const readiness = resolveComponentReadiness(
-                component,
-                selectedTemplate,
-                document,
-                selectedMetricRevisionIds,
-                selectedRuleRevisionIds,
-                businessCalendarVersion,
-              );
-              const dependencyCount = component.metric_revision_ids.length + component.rule_revision_ids.length;
-              return (
-                <div
-                  key={placement.component_revision_id}
-                  className={[
-                    "grid gap-3 rounded-xl border p-4 sm:grid-cols-[32px_minmax(0,1fr)_auto]",
-                    placement.enabled ? "border-foreground/25 bg-surface-subtle" : "border-border opacity-65",
-                  ].join(" ")}
-                >
-                  <div className="flex h-7 w-7 items-center justify-center rounded-md bg-surface text-[10px] font-bold text-muted">{index + 1}</div>
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <label className="inline-flex cursor-pointer items-center gap-2">
+            <div className="mt-5">
+              <div className="flex items-center justify-between gap-3">
+                <h6 className="text-xs font-semibold">Modules</h6>
+                <span className="text-[10px] text-muted-light">Enable · select · reorder</span>
+              </div>
+              <div className="mt-2 space-y-1.5">
+                {selectedTemplate.components.map((placement, index) => {
+                  const component = catalogById.get(placement.component_revision_id);
+                  if (!component) return null;
+                  const readiness = resolveComponentReadiness(
+                    component,
+                    selectedTemplate,
+                    document,
+                    selectedMetricRevisionIds,
+                    selectedRuleRevisionIds,
+                    businessCalendarVersion,
+                  );
+                  const selected = selectedPlacement?.component_revision_id === placement.component_revision_id;
+                  return (
+                    <div
+                      key={placement.component_revision_id}
+                      className={[
+                        "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border px-2 py-2 transition-colors",
+                        selected ? "border-foreground/35 bg-surface-subtle" : "border-border hover:border-foreground/20",
+                        placement.enabled ? "" : "opacity-60",
+                      ].join(" ")}
+                    >
+                      <label className="flex h-8 w-8 cursor-pointer items-center justify-center" title={`Enable ${component.display_name}`}>
                         <input
                           type="checkbox"
                           checked={placement.enabled}
-                          onChange={() => updateComponents(selectedTemplate.components.map((item) => item.component_revision_id === placement.component_revision_id
-                            ? { ...item, enabled: !item.enabled }
-                            : item))}
+                          onChange={() => updatePlacement(placement.component_revision_id, (item) => ({ ...item, enabled: !item.enabled }))}
                           className="h-4 w-4 accent-current"
                         />
-                        <strong className="text-xs">{component.display_name}</strong>
                       </label>
-                      <span className="rounded-full bg-surface px-2 py-0.5 text-[9px] capitalize text-muted">{component.family}</span>
-                      <span className="rounded-full bg-surface px-2 py-0.5 text-[9px] text-muted">v{component.version}</span>
-                      <span className={[
-                        "rounded-full px-2 py-0.5 text-[9px] font-semibold",
-                        readiness.status === "ready"
-                          ? "bg-step-success/10 text-step-success"
-                          : readiness.status === "partial"
-                            ? "bg-step-warning/10 text-step-warning"
-                            : "bg-surface text-muted",
-                      ].join(" ")}>{readiness.label}</span>
+                      <button
+                        type="button"
+                        aria-label={`Select ${component.display_name} module`}
+                        aria-pressed={selected}
+                        onClick={() => setSelectedComponentRevisionId(placement.component_revision_id)}
+                        className="min-w-0 rounded-md px-1 py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+                      >
+                        <span className="flex items-center gap-2">
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-surface text-[9px] font-bold text-muted">{index + 1}</span>
+                          <span className="truncate text-[11px] font-semibold">{component.display_name}</span>
+                        </span>
+                        <span className={[
+                          "mt-1 block pl-7 text-[9px] font-medium",
+                          readiness.status === "ready" ? "text-step-success" : readiness.status === "partial" ? "text-step-warning" : "text-muted-light",
+                        ].join(" ")}>{readiness.label}</span>
+                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          aria-label={`Move ${component.display_name} up`}
+                          disabled={index === 0}
+                          onClick={() => updateComponents(movePlacement(selectedTemplate.components, index, index - 1))}
+                          className="flex h-8 w-8 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface hover:text-foreground disabled:cursor-not-allowed disabled:opacity-25"
+                        >
+                          <EnergyIcon name="chevron" className="h-3.5 w-3.5 -rotate-90" />
+                        </button>
+                        <button
+                          type="button"
+                          aria-label={`Move ${component.display_name} down`}
+                          disabled={index === selectedTemplate.components.length - 1}
+                          onClick={() => updateComponents(movePlacement(selectedTemplate.components, index, index + 1))}
+                          className="flex h-8 w-8 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface hover:text-foreground disabled:cursor-not-allowed disabled:opacity-25"
+                        >
+                          <EnergyIcon name="chevron" className="h-3.5 w-3.5 rotate-90" />
+                        </button>
+                      </div>
                     </div>
-                    <p className="mt-1.5 text-[11px] leading-4 text-muted">{component.description}</p>
-                    <p className="mt-2 text-[10px] text-muted-light">
-                      {readiness.detail} · {dependencyCount} controlled dependencies · {component.query_ids.length} query specs
-                    </p>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="mt-5 border-t border-border pt-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h6 className="text-xs font-semibold">Selected module settings</h6>
+                  <p className="mt-1 text-[10px] leading-4 text-muted">Layout &amp; appearance stay visible while you compare Draft Preview.</p>
+                </div>
+                {selectedComponent && selectedReadiness ? (
+                  <span className={[
+                    "rounded-full px-2 py-1 text-[9px] font-semibold",
+                    selectedReadiness.status === "ready"
+                      ? "bg-step-success/10 text-step-success"
+                      : selectedReadiness.status === "partial"
+                        ? "bg-step-warning/10 text-step-warning"
+                        : "bg-surface-subtle text-muted",
+                  ].join(" ")}>{selectedReadiness.label}</span>
+                ) : null}
+              </div>
+
+              {!selectedPlacement || !selectedComponent ? (
+                <p className="mt-4 rounded-lg bg-surface-subtle px-3 py-4 text-[11px] text-muted">Select a module to configure its presentation.</p>
+              ) : !selectedPlacement.enabled ? (
+                <div className="mt-4 rounded-lg bg-surface-subtle px-3 py-4">
+                  <p className="text-[11px] font-semibold">{selectedComponent.display_name} is disabled</p>
+                  <p className="mt-1 text-[10px] leading-4 text-muted">Enable it in the module list before changing its presentation.</p>
+                </div>
+              ) : (
+                <div className="mt-4">
+                  <div className="mb-4">
+                    <p className="text-xs font-semibold">{selectedComponent.display_name}</p>
+                    <p className="mt-1 text-[10px] leading-4 text-muted">{selectedComponent.description}</p>
+                    <p className="mt-1 text-[9px] leading-4 text-muted-light">{selectedReadiness?.detail}</p>
                   </div>
-                  <div className="flex items-center gap-1 self-center">
-                    <button
-                      type="button"
-                      aria-label={`Move ${component.display_name} up`}
-                      disabled={index === 0}
-                      onClick={() => updateComponents(movePlacement(selectedTemplate.components, index, index - 1))}
-                      className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-xs disabled:cursor-not-allowed disabled:opacity-30"
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      aria-label={`Move ${component.display_name} down`}
-                      disabled={index === selectedTemplate.components.length - 1}
-                      onClick={() => updateComponents(movePlacement(selectedTemplate.components, index, index + 1))}
-                      className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-xs disabled:cursor-not-allowed disabled:opacity-30"
-                    >
-                      ↓
-                    </button>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <TemplatePlacementSelect
+                      label="Section"
+                      value={selectedPlacement.section_id ?? selectedTemplate.sections?.[0]?.section_id ?? ""}
+                      options={(selectedTemplate.sections ?? []).map((section) => ({ value: section.section_id, label: section.navigation_label }))}
+                      onChange={(sectionId) => updatePlacement(selectedPlacement.component_revision_id, (item) => ({ ...item, section_id: sectionId }))}
+                    />
+                    <TemplatePlacementSelect
+                      label="Width"
+                      value={String(selectedPlacement.layout?.span ?? 12)}
+                      options={selectedComponent.allowed_presentation.layout.spans.map((span) => ({ value: String(span), label: spanLabel(span) }))}
+                      onChange={(span) => updatePlacement(selectedPlacement.component_revision_id, (item) => ({ ...item, layout: { span: Number(span) as 4 | 6 | 8 | 12, height: item.layout?.height ?? "standard" } }))}
+                    />
+                    <TemplatePlacementSelect
+                      label="Height"
+                      value={selectedPlacement.layout?.height ?? "standard"}
+                      options={selectedComponent.allowed_presentation.layout.heights.map((height) => ({ value: height, label: titleCase(height) }))}
+                      onChange={(height) => updatePlacement(selectedPlacement.component_revision_id, (item) => ({ ...item, layout: { span: item.layout?.span ?? 12, height: height as "compact" | "standard" | "tall" } }))}
+                    />
+                    <TemplatePlacementSelect
+                      label="Visual"
+                      value={selectedPlacement.presentation?.visual_preset ?? "auto"}
+                      options={selectedComponent.allowed_presentation.visuals.presets.map((preset) => ({ value: preset, label: visualPresetLabel(preset) }))}
+                      onChange={(visualPreset) => updatePlacement(selectedPlacement.component_revision_id, (item) => ({ ...item, presentation: { ...defaultPresentation(item), visual_preset: visualPreset as "auto" | "cards" | "bar" | "area" | "table" | "list" } }))}
+                    />
+                    <TemplatePlacementSelect
+                      label="Density"
+                      value={selectedPlacement.presentation?.density ?? "comfortable"}
+                      options={selectedComponent.allowed_presentation.visuals.densities.map((density) => ({ value: density, label: titleCase(density) }))}
+                      onChange={(density) => updatePlacement(selectedPlacement.component_revision_id, (item) => ({ ...item, presentation: { ...defaultPresentation(item), density: density as "comfortable" | "compact" } }))}
+                    />
+                    <TemplatePlacementSelect
+                      label="Tone"
+                      value={selectedPlacement.presentation?.tone ?? "default"}
+                      options={selectedComponent.allowed_presentation.visuals.tones.map((tone) => ({ value: tone, label: titleCase(tone) }))}
+                      onChange={(tone) => updatePlacement(selectedPlacement.component_revision_id, (item) => ({ ...item, presentation: { ...defaultPresentation(item), tone: tone as "default" | "highlight" | "quiet" } }))}
+                    />
+                    <label className="text-[9px] font-semibold uppercase tracking-wide text-muted-light sm:col-span-2">
+                      Display title
+                      <input
+                        value={selectedPlacement.presentation?.title ?? ""}
+                        placeholder={selectedComponent.display_name}
+                        onChange={(event) => updatePlacement(selectedPlacement.component_revision_id, (item) => ({ ...item, presentation: withPresentationTitle(item, event.target.value) }))}
+                        className="mt-1 h-8 w-full rounded-md border border-border bg-surface px-2 text-[10px] font-medium normal-case tracking-normal text-foreground"
+                      />
+                    </label>
+                    {selectedComponent.allowed_presentation.visuals.limit.configurable ? (
+                      <label className="text-[9px] font-semibold uppercase tracking-wide text-muted-light">
+                        Row limit
+                        <input
+                          type="number"
+                          min={selectedComponent.allowed_presentation.visuals.limit.min}
+                          max={selectedComponent.allowed_presentation.visuals.limit.max}
+                          value={selectedPlacement.presentation?.limit ?? selectedComponent.allowed_presentation.visuals.limit.default}
+                          onChange={(event) => updatePlacement(selectedPlacement.component_revision_id, (item) => ({ ...item, presentation: { ...defaultPresentation(item), limit: Math.min(selectedComponent.allowed_presentation.visuals.limit.max, Math.max(selectedComponent.allowed_presentation.visuals.limit.min, Number(event.target.value) || selectedComponent.allowed_presentation.visuals.limit.min)) } }))}
+                          className="mt-1 h-8 w-full rounded-md border border-border bg-surface px-2 text-[10px] font-medium normal-case tracking-normal text-foreground"
+                        />
+                      </label>
+                    ) : null}
+                    {selectedComponent.allowed_presentation.visuals.legend.configurable ? (
+                      <label className="flex min-h-8 items-center gap-2 self-end text-[10px] font-medium text-muted">
+                        <input
+                          type="checkbox"
+                          checked={selectedPlacement.presentation?.show_legend ?? selectedComponent.allowed_presentation.visuals.legend.default}
+                          onChange={(event) => updatePlacement(selectedPlacement.component_revision_id, (item) => ({ ...item, presentation: { ...defaultPresentation(item), show_legend: event.target.checked } }))}
+                          className="h-4 w-4 accent-current"
+                        />
+                        Show chart legend
+                      </label>
+                    ) : null}
                   </div>
                 </div>
-              );
-            })}
+              )}
+            </div>
           </div>
         </div>
+
+        <TemplateDraftPreview
+          key={`${projectId}:${selectedTemplate.template_id}`}
+          projectId={projectId}
+          plan={previewPlan}
+          previewRange={previewRange}
+          dirty={dirty}
+        />
       </div>
-      <TemplateDraftPreview
-        key={`${projectId}:${selectedTemplate.template_id}`}
-        projectId={projectId}
-        plan={previewPlan}
-        previewRange={previewRange}
-        dirty={dirty}
-      />
     </section>
   );
+}
+
+function TemplatePlacementSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="text-[9px] font-semibold uppercase tracking-wide text-muted-light">
+      {label}
+      <EnergySelect
+        ariaLabel={label}
+        value={value}
+        options={options}
+        onValueChange={onChange}
+        className="mt-1 w-full"
+        size="compact"
+      />
+    </div>
+  );
+}
+
+function defaultPresentation(
+  placement: EnergyTemplateDefinitionDto["components"][number],
+): NonNullable<EnergyTemplateDefinitionDto["components"][number]["presentation"]> {
+  return placement.presentation ?? {
+    visual_preset: "auto",
+    density: "comfortable",
+    tone: "default",
+    show_legend: true,
+    limit: 10,
+  };
+}
+
+function withPresentationTitle(
+  placement: EnergyTemplateDefinitionDto["components"][number],
+  value: string,
+): NonNullable<EnergyTemplateDefinitionDto["components"][number]["presentation"]> {
+  const current = defaultPresentation(placement);
+  const title = value.trim();
+  if (title) return { ...current, title };
+  const { title: _removed, ...withoutTitle } = current;
+  return withoutTitle;
+}
+
+function spanLabel(span: 4 | 6 | 8 | 12): string {
+  if (span === 4) return "1/3 width";
+  if (span === 6) return "1/2 width";
+  if (span === 8) return "2/3 width";
+  return "Full width";
+}
+
+function visualPresetLabel(preset: "auto" | "cards" | "bar" | "area" | "table" | "list"): string {
+  if (preset === "bar") return "Bar chart";
+  if (preset === "area") return "Area chart";
+  return titleCase(preset);
+}
+
+function titleCase(value: string): string {
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
 }
 
 function movePlacement(
@@ -1178,7 +1491,7 @@ function AdminOverview({
             <SummaryRow label="Draft or changing" value={String(draftCount)} />
           </dl>
           <p className="mt-4 text-[11px] leading-5 text-muted">
-            Counts come from the current Workspace. Import failures, AI runs and cost are not shown until their operational APIs are wired.
+            Counts cover all customer Workspaces. Import failures, AI runs and cost are not shown until their operational APIs are wired.
           </p>
         </aside>
       </section>
@@ -1201,25 +1514,46 @@ function ProjectDeliveryOverview({
   setup,
   document,
   setSection,
+  publishing,
+  onPublish,
 }: {
   projectId: string;
   project?: EnergyProjectDto;
   setup: EnergyProjectSetupDto;
   document: EnergyProjectSetupDocumentDto;
   setSection: Dispatch<SetStateAction<AdminSection>>;
+  publishing: boolean;
+  onPublish: (review: ProjectPublicationReview) => Promise<void>;
 }) {
   const [batches, setBatches] = useState<EnergyImportBatchDto[]>([]);
+  const [publicationReview, setPublicationReview] = useState<ProjectPublicationReview | null>(null);
   const [loadingBatches, setLoadingBatches] = useState(true);
+  const [reviewError, setReviewError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     setLoadingBatches(true);
-    void configApi.listEnergyImportBatches(projectId)
-      .then((result) => {
-        if (active) setBatches(result.batches);
+    setReviewError(null);
+    void Promise.all([
+      configApi.listEnergyImportBatches(projectId),
+      configApi.getEnergyProjectTemplateDraft(projectId),
+      configApi.getEnergyProjectMetricConfig(projectId),
+      configApi.getEnergyProjectRuleConfig(projectId),
+    ])
+      .then(([importResult, templateResult, metricResult, ruleResult]) => {
+        if (!active) return;
+        setBatches(importResult.batches);
+        setPublicationReview({
+          templateDraft: templateResult.draft,
+          metricConfig: metricResult.config,
+          ruleConfig: ruleResult.config,
+        });
       })
-      .catch(() => {
-        if (active) setBatches([]);
+      .catch((reason) => {
+        if (!active) return;
+        setBatches([]);
+        setPublicationReview(null);
+        setReviewError(messageFrom(reason, "Failed to load publication review"));
       })
       .finally(() => {
         if (active) setLoadingBatches(false);
@@ -1240,8 +1574,24 @@ function ProjectDeliveryOverview({
     hasSource: Boolean(latestBatch),
     hasConfirmedMapping,
     hasMaterializedFacts: latestBatch?.status === "materialized",
+    hasAnalysisConfiguration: publicationReview !== null,
+    hasPublishedRevision: setup.published.templateRevisions.length > 0,
   });
   const { nextSection, nextLabel, stages } = progress;
+  const latestTemplateRevision = setup.published.templateRevisions[0];
+  const readyToPublish = Boolean(
+    publicationReview
+    && hasConfirmedMapping
+    && latestBatch?.status === "materialized"
+    && !setup.validation.blocking,
+  );
+  const continueWorkflow = (target: AdminSection) => {
+    if (target === "project-overview") {
+      window.document.getElementById("review-publish")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    setSection(target);
+  };
 
   return (
     <div className="mx-auto max-w-6xl space-y-5">
@@ -1253,7 +1603,7 @@ function ProjectDeliveryOverview({
               This page coordinates the delivery workflow. Configuration remains in the specialist pages in the sidebar.
             </p>
           </div>
-          <button type="button" onClick={() => setSection(nextSection)} className={primaryButton}>{nextLabel}</button>
+          <button type="button" onClick={() => continueWorkflow(nextSection)} className={primaryButton}>{nextLabel}</button>
         </div>
 
         <div className="mt-6 grid gap-2 lg:grid-cols-5">
@@ -1262,7 +1612,7 @@ function ProjectDeliveryOverview({
               key={stage.label}
               type="button"
               disabled={!stage.enabled}
-              onClick={() => setSection(stage.section)}
+              onClick={() => continueWorkflow(stage.section)}
               className="flex min-h-20 items-start gap-3 rounded-xl bg-surface-subtle p-3 text-left transition-colors enabled:hover:bg-primary-light/5 enabled:focus-visible:outline-none enabled:focus-visible:ring-2 enabled:focus-visible:ring-primary/20 disabled:cursor-default"
             >
               <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-surface text-[10px] font-semibold text-muted">{index + 1}</span>
@@ -1270,7 +1620,7 @@ function ProjectDeliveryOverview({
                 <span className="block text-xs font-semibold">{stage.label}</span>
                 <span className={[
                   "mt-1 block text-[10px]",
-                  stage.state === "Complete" || stage.state === "Draft ready" || stage.state === "Facts ready" || stage.state === "Ready to configure"
+                  stage.state === "Complete" || stage.state === "Draft ready" || stage.state === "Facts ready" || stage.state === "Ready to configure" || stage.state === "Configured" || stage.state === "Ready" || stage.state === "Published"
                     ? "text-step-success"
                     : "text-muted",
                 ].join(" ")}>{stage.state}</span>
@@ -1293,7 +1643,7 @@ function ProjectDeliveryOverview({
                 Structure is confirmed before source labels are mapped. Data Sources comes before Meter Mapping; virtual meters remain optional inside Mapping.
               </p>
             </div>
-            <button type="button" onClick={() => setSection(nextSection)} disabled={loadingBatches} className={secondaryButton}>Continue</button>
+            <button type="button" onClick={() => continueWorkflow(nextSection)} disabled={loadingBatches} className={secondaryButton}>Continue</button>
           </div>
         </section>
 
@@ -1301,10 +1651,79 @@ function ProjectDeliveryOverview({
           <h3 className="text-sm font-semibold">Published configuration</h3>
           <dl className="mt-4 divide-y divide-border">
             <SummaryRow label="Hierarchy" value={setup.project.hierarchy_revision_id || "Not published"} />
+            <SummaryRow label="Template" value={latestTemplateRevision?.revision_id ?? "Not published"} />
             <SummaryRow label="Tiers" value={String(setup.published.tiers.length)} />
             <SummaryRow label="Nodes" value={String(Math.max(0, setup.published.nodes.length - 1))} />
           </dl>
         </aside>
+      </div>
+
+      <section id="review-publish" className="scroll-mt-24 rounded-xl border border-border bg-surface p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold">Review &amp; Publish</h3>
+              <span className={[
+                "rounded-full px-2.5 py-1 text-[9px] font-semibold",
+                readyToPublish ? "bg-step-success/10 text-step-success" : "bg-step-warning/10 text-step-warning",
+              ].join(" ")}>{readyToPublish ? "READY" : "BLOCKED"}</span>
+            </div>
+            <p className="mt-1 max-w-2xl text-xs leading-5 text-muted">
+              Publish one immutable revision that pins the hierarchy, template layout, metrics, rules, calendar, tariff and meter formula. Customer pages never read the editable Draft directly.
+            </p>
+          </div>
+          <button
+            type="button"
+            disabled={!readyToPublish || publishing || !publicationReview}
+            onClick={() => {
+              if (!publicationReview) return;
+              if (!window.confirm("Publish the reviewed Project configuration as a new immutable revision?")) return;
+              void onPublish(publicationReview).catch(() => undefined);
+            }}
+            className={primaryButton}
+          >
+            {publishing ? "Publishing..." : "Publish revision"}
+          </button>
+        </div>
+
+        {reviewError ? <p className="mt-4 rounded-lg border border-step-error/25 bg-step-error/5 px-4 py-3 text-xs text-step-error">{reviewError}</p> : null}
+        <dl className="mt-5 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 xl:grid-cols-4">
+          <PublicationPin label="Hierarchy Draft" value={`r${setup.draft.revision}`} detail={`${document.tiers.length} tiers · ${document.nodes.length} nodes`} />
+          <PublicationPin label="Template Draft" value={publicationReview ? `r${publicationReview.templateDraft.revision}` : "Loading"} detail={publicationReview ? `${publicationReview.templateDraft.document.templates.length} layouts` : "Waiting for configuration"} />
+          <PublicationPin label="Metric Config" value={publicationReview ? `r${publicationReview.metricConfig.revision}` : "Loading"} detail={publicationReview ? `${publicationReview.metricConfig.selected_metric_revision_ids.length} metrics` : "Waiting for configuration"} />
+          <PublicationPin label="Rule Config" value={publicationReview ? `r${publicationReview.ruleConfig.revision}` : "Loading"} detail={publicationReview ? `${publicationReview.ruleConfig.selected_rule_revision_ids.length} rules` : "Waiting for configuration"} />
+        </dl>
+
+        <div className="mt-4 grid gap-3 text-xs md:grid-cols-3">
+          <ReviewGate label="Interval facts" ready={latestBatch?.status === "materialized"} detail={latestBatch?.status === "materialized" ? latestBatch.filename : "Materialize a source first"} />
+          <ReviewGate label="Meter mapping" ready={hasConfirmedMapping} detail={hasConfirmedMapping ? `${document.meter_mapping?.rows.length ?? 0} confirmed rows` : "Confirm Mapping first"} />
+          <ReviewGate label="Setup validation" ready={!setup.validation.blocking} detail={setup.validation.blocking ? "Resolve blocking issues" : "No blocking issue"} />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function PublicationPin({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <div className="bg-surface p-4">
+      <dt className="text-[10px] font-semibold uppercase tracking-wide text-muted-light">{label}</dt>
+      <dd className="mt-2 text-sm font-semibold">{value}</dd>
+      <p className="mt-1 text-[10px] leading-4 text-muted">{detail}</p>
+    </div>
+  );
+}
+
+function ReviewGate({ label, ready, detail }: { label: string; ready: boolean; detail: string }) {
+  return (
+    <div className="flex items-start gap-3 rounded-lg bg-surface-subtle p-3">
+      <span className={[
+        "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
+        ready ? "bg-step-success/10 text-step-success" : "bg-step-warning/10 text-step-warning",
+      ].join(" ")}>{ready ? "✓" : "!"}</span>
+      <div>
+        <p className="font-semibold">{label}</p>
+        <p className="mt-0.5 text-[10px] leading-4 text-muted">{detail}</p>
       </div>
     </div>
   );
@@ -2332,6 +2751,9 @@ function HierarchyBuilder({
   onOpenMeterMapping: (node: EnergyProjectSetupNodeDto, kind: MeterMappingIntent["kind"]) => void;
 }) {
   const orderedTiers = useMemo(() => tiersTopDown(document), [document]);
+  const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(
+    () => new Set(document.nodes.map((node) => node.id)),
+  );
   const topTier = orderedTiers[0];
   const selectedNode = document.nodes.find((node) => node.id === selectedNodeId) ?? null;
   const selectedTier = selectedNode
@@ -2358,6 +2780,16 @@ function HierarchyBuilder({
     const result = addNode(document, { projectId, tierId: tier.id, ...(parentId ? { parentId } : {}) });
     changeDocument(() => result.document);
     setSelectedNodeId(parentId ?? result.nodeId);
+    setExpandedNodeIds((current) => new Set([...current, ...(parentId ? [parentId] : []), result.nodeId]));
+  };
+
+  const toggleHierarchyNode = (nodeId: string) => {
+    setExpandedNodeIds((current) => {
+      const next = new Set(current);
+      if (next.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
+      return next;
+    });
   };
 
   return (
@@ -2383,12 +2815,30 @@ function HierarchyBuilder({
       {topTier ? (
         <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
           <section className="min-w-0 rounded-xl border border-border bg-surface">
-            <div className="border-b border-border px-5 py-4">
+            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
               <div>
                 <h3 className="text-sm font-semibold">Hierarchy tree</h3>
                 <p className="mt-1 max-w-2xl text-xs leading-5 text-muted">
                   Expand a branch to inspect its children. A meter shortcut always carries the selected Scope into Data & Meters.
                 </p>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  aria-label="Expand all hierarchy nodes"
+                  onClick={() => setExpandedNodeIds(new Set(document.nodes.map((node) => node.id)))}
+                  className="rounded-lg border border-border px-2.5 py-1.5 text-[10px] font-semibold text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+                >
+                  Expand all
+                </button>
+                <button
+                  type="button"
+                  aria-label="Collapse all hierarchy nodes"
+                  onClick={() => setExpandedNodeIds(new Set())}
+                  className="rounded-lg border border-border px-2.5 py-1.5 text-[10px] font-semibold text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+                >
+                  Collapse all
+                </button>
               </div>
             </div>
 
@@ -2420,7 +2870,9 @@ function HierarchyBuilder({
                       key={node.id}
                       node={node}
                       document={document}
+                      expandedNodeIds={expandedNodeIds}
                       selectedNodeId={selectedNodeId}
+                      onToggle={toggleHierarchyNode}
                       onSelect={setSelectedNodeId}
                       onAddChild={addScopeNode}
                       onOpenMeterMapping={onOpenMeterMapping}
@@ -2444,7 +2896,9 @@ function HierarchyBuilder({
                         key={node.id}
                         node={node}
                         document={document}
+                        expandedNodeIds={expandedNodeIds}
                         selectedNodeId={selectedNodeId}
+                        onToggle={toggleHierarchyNode}
                         onSelect={setSelectedNodeId}
                         onAddChild={addScopeNode}
                         onOpenMeterMapping={onOpenMeterMapping}
@@ -2547,19 +3001,23 @@ function LockedTierSummary({
 function HierarchyTreeNode({
   node,
   document,
+  expandedNodeIds,
   selectedNodeId,
+  onToggle,
   onSelect,
   onAddChild,
   onOpenMeterMapping,
 }: {
   node: EnergyProjectSetupNodeDto;
   document: EnergyProjectSetupDocumentDto;
+  expandedNodeIds: Set<string>;
   selectedNodeId: string | null;
+  onToggle: (nodeId: string) => void;
   onSelect: (nodeId: string) => void;
   onAddChild: (tier: EnergyTierDefinitionDto, parentId?: string) => void;
   onOpenMeterMapping: (node: EnergyProjectSetupNodeDto, kind: MeterMappingIntent["kind"]) => void;
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const expanded = expandedNodeIds.has(node.id);
   const tier = document.tiers.find((candidate) => candidate.id === node.tier_definition_id);
   if (!tier) return null;
   const childTier = document.tiers.find((candidate) => candidate.ordinal === tier.ordinal - 1);
@@ -2578,7 +3036,7 @@ function HierarchyTreeNode({
             type="button"
             aria-label={`${expanded ? "Collapse" : "Expand"} ${node.name}`}
             aria-expanded={expanded}
-            onClick={() => setExpanded((current) => !current)}
+            onClick={() => onToggle(node.id)}
             className="flex h-8 w-7 shrink-0 items-center justify-center rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
           >
             <EnergyIcon name="chevron" className={selected ? `h-3 w-3 text-white/70 transition-transform ${expanded ? "rotate-90" : ""}` : `h-3 w-3 text-muted-light transition-transform ${expanded ? "rotate-90" : ""}`} />
@@ -2618,7 +3076,9 @@ function HierarchyTreeNode({
               key={child.id}
               node={child}
               document={document}
+              expandedNodeIds={expandedNodeIds}
               selectedNodeId={selectedNodeId}
+              onToggle={onToggle}
               onSelect={onSelect}
               onAddChild={onAddChild}
               onOpenMeterMapping={onOpenMeterMapping}
@@ -2930,6 +3390,7 @@ function LoadingPanel() {
 }
 
 const optionalNumericInput = (value: string): number | undefined => value === "" ? undefined : Number(value);
+const normalizeProjectStatus = (value: string): EnergyProjectDto["status"] => value === "published" || value === "archived" ? value : "draft";
 const messageFrom = (reason: unknown, fallback: string): string => reason instanceof Error ? reason.message : fallback;
 const inputClass = "w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none transition-shadow focus:border-primary/30 focus:ring-2 focus:ring-primary/10";
 const resourceOptions = [

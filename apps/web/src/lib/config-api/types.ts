@@ -257,6 +257,7 @@ export type EnergyProjectSetupDto = {
     tiers: EnergyTierDefinitionDto[];
     nodes: EnergyProjectNodeDto[];
     revisions: EnergyHierarchyRevisionDto[];
+    templateRevisions: EnergyTemplateRevisionDto[];
   };
 };
 
@@ -317,6 +318,7 @@ export type EnergyScopeAnalysisDto = {
     averageDailyUsageKwh: number;
     costSgd: number;
     peakKw: number;
+    peakAt?: string;
     nonOperatingKwh: number;
     nonOperatingSharePct: number;
     areaSqm?: number;
@@ -328,8 +330,22 @@ export type EnergyScopeAnalysisDto = {
   };
   hourlyProfile: Array<{
     hour: number;
+    usageKwh: number;
     averageKw: number;
     peakKw: number;
+    observationCount: number;
+  }>;
+  comparison: {
+    from: string;
+    to: string;
+    usageKwh: number;
+    changeKwh: number;
+    changePct: number | null;
+  };
+  categories: Array<{
+    category: string;
+    usageKwh: number;
+    sharePct: number;
   }>;
   childScopes: Array<{
     nodeId: string;
@@ -356,6 +372,49 @@ export type EnergyScopeAnalysisDto = {
     peakKw: number;
     qualityEventCount: number;
   }>;
+  topCircuits: EnergyScopeAnalysisDto["circuits"];
+  virtualMeters: Array<{
+    meterNodeId: string;
+    name: string;
+    scopeId: string;
+    termMeterNodeIds: string[];
+    usageKwh: number;
+    includedInOfficialTotal: false;
+  }>;
+  offHours: {
+    status: "available";
+    usageKwh: number;
+    sharePct: number;
+    knownMeterIntervalCount: number;
+  } | {
+    status: "unavailable";
+    reason: "OPERATING_CALENDAR_NOT_MATERIALIZED";
+  };
+  cost: {
+    status: "unavailable";
+    reason: "TARIFF_NOT_CONFIGURED";
+    currency: "SGD";
+  } | {
+    status: "estimated";
+    amount: number;
+    currency: "SGD";
+    tariffScheduleVersion: string;
+  };
+  dataHealth: {
+    status: "complete" | "partial" | "unavailable";
+    coveragePct: number;
+    expectedMeterIntervalCount: number;
+    validIntervalCount: number;
+    qualityEventCount: number;
+    lastSeenAt?: string;
+    importBatchIds: string[];
+  };
+  units: {
+    usage: "kWh";
+    demand: "kW";
+    intervalMinutes: number;
+    timezone: string;
+  };
   attention: Array<{
     code: string;
     severity: "info" | "warning";
@@ -373,6 +432,29 @@ export type EnergyScopeAnalysisDto = {
     sourceView: string;
     queryIds: ["scope_summary_v1", "hourly_profile_v1", "meter_breakdown_v1"];
   };
+};
+
+export type EnergySavedAnalysisSummaryDto = {
+  id: string;
+  seriesId: string;
+  sequence: number;
+  projectId: string;
+  scopeId: string;
+  scopeName: string;
+  resource: "electricity";
+  title: string;
+  templateRevisionId: string;
+  dataSnapshotId: string;
+  rerunOfId?: string;
+  createdBy: string;
+  createdAt: string;
+};
+
+export type EnergySavedAnalysisDetailDto = EnergySavedAnalysisSummaryDto & {
+  query: EnergyQueryContextRequestDto;
+  analysis: EnergyScopeAnalysisDto;
+  templateRevision: EnergyTemplateRevisionDto;
+  catalog: EnergyComponentRevisionDto[];
 };
 
 export type EnergyProjectNodeDto = {
@@ -469,6 +551,33 @@ export type EnergyProjectRuleConfigResponseDto = {
 export type EnergyComponentFamilyDto = "decision" | "overview" | "comparison" | "time" | "composition" | "quality" | "evidence";
 export type EnergyComponentTargetDto = "project" | "tier" | "both";
 export type EnergyComponentRequirementDto = "always" | "rules" | "operating_hours" | "children" | "area_peers" | "people_peers" | "meter_breakdown";
+export type EnergyTemplateSpanDto = 4 | 6 | 8 | 12;
+export type EnergyTemplateHeightDto = "compact" | "standard" | "tall";
+export type EnergyTemplateVisualPresetDto = "auto" | "cards" | "bar" | "area" | "table" | "list";
+export type EnergyTemplateDensityDto = "comfortable" | "compact";
+export type EnergyTemplateToneDto = "default" | "highlight" | "quiet";
+
+export type EnergyComponentAllowedPresentationDto = {
+  layout: {
+    spans: EnergyTemplateSpanDto[];
+    heights: EnergyTemplateHeightDto[];
+  };
+  visuals: {
+    presets: EnergyTemplateVisualPresetDto[];
+    densities: EnergyTemplateDensityDto[];
+    tones: EnergyTemplateToneDto[];
+    legend: {
+      configurable: boolean;
+      default: boolean;
+    };
+    limit: {
+      configurable: boolean;
+      min: number;
+      max: number;
+      default: number;
+    };
+  };
+};
 
 export type EnergyComponentRevisionDto = {
   revision_id: string;
@@ -483,22 +592,51 @@ export type EnergyComponentRevisionDto = {
   rule_revision_ids: string[];
   query_ids: string[];
   requirement: EnergyComponentRequirementDto;
+  allowed_presentation: EnergyComponentAllowedPresentationDto;
   created_at: string;
 };
 
 export type EnergyTemplateComponentPlacementDto = {
+  placement_id?: string;
   component_revision_id: string;
   enabled: boolean;
+  section_id?: string;
+  layout?: EnergyTemplateComponentLayoutDto;
+  presentation?: EnergyTemplateComponentPresentationDto;
+};
+
+export type EnergyTemplateSectionDto = {
+  section_id: string;
+  title: string;
+  navigation_label: string;
+  description?: string;
+};
+
+export type EnergyTemplateComponentLayoutDto = {
+  span: EnergyTemplateSpanDto;
+  height: EnergyTemplateHeightDto;
+};
+
+export type EnergyTemplateComponentPresentationDto = {
+  visual_preset: EnergyTemplateVisualPresetDto;
+  density: EnergyTemplateDensityDto;
+  tone: EnergyTemplateToneDto;
+  show_legend: boolean;
+  limit: number;
+  title?: string;
+  description?: string;
 };
 
 export type EnergyTemplateDefinitionDto = {
   template_id: string;
   target_kind: "project" | "tier";
   tier_definition_id?: string;
+  sections?: EnergyTemplateSectionDto[];
   components: EnergyTemplateComponentPlacementDto[];
 };
 
 export type EnergyTemplateDraftDocumentDto = {
+  schema_version?: 2;
   templates: EnergyTemplateDefinitionDto[];
 };
 
@@ -514,6 +652,31 @@ export type EnergyProjectTemplateDraftDto = {
 export type EnergyProjectTemplateDraftResponseDto = {
   catalog: EnergyComponentRevisionDto[];
   draft: EnergyProjectTemplateDraftDto;
+};
+
+export type EnergyTemplateRevisionDto = {
+  revision_id: string;
+  project_id: string;
+  sequence: number;
+  source_template_draft_revision: number;
+  document: EnergyTemplateDraftDocumentDto;
+  hierarchy_revision_id: string;
+  meter_formula_revision_id: string;
+  metric_config_revision: number;
+  selected_metric_revision_ids: string[];
+  rule_config_revision: number;
+  selected_rule_revision_ids: string[];
+  business_calendar_version: string;
+  tariff_schedule_version: string;
+  published_by: string;
+  published_at: string;
+};
+
+export type EnergyPublishedTemplateResponseDto = {
+  source: "published-revision" | "compatibility-default";
+  revision: EnergyTemplateRevisionDto | null;
+  document: EnergyTemplateDraftDocumentDto;
+  catalog: EnergyComponentRevisionDto[];
 };
 
 export type DevIdentitiesResponseDto = {

@@ -6,6 +6,8 @@ export type ProjectDeliverySignals = {
   hasSource: boolean;
   hasConfirmedMapping: boolean;
   hasMaterializedFacts: boolean;
+  hasAnalysisConfiguration: boolean;
+  hasPublishedRevision: boolean;
 };
 
 export type ProjectDeliveryStage = {
@@ -55,6 +57,10 @@ export function deriveProjectDeliveryProgress(
     nextSection = "templates";
     nextLabel = "Configure analysis";
   }
+  if (signals.hasMaterializedFacts && signals.hasConfirmedMapping && signals.hasAnalysisConfiguration) {
+    nextSection = "project-overview";
+    nextLabel = signals.hasPublishedRevision ? "Review current publication" : "Review and publish";
+  }
 
   return {
     nextSection,
@@ -65,11 +71,24 @@ export function deriveProjectDeliveryProgress(
       { label: "Data & Meters", state: dataState, section: "data-sources", enabled: true },
       {
         label: "Analysis",
-        state: signals.hasMaterializedFacts && signals.hasConfirmedMapping ? "Ready to configure" : "Waiting for data",
+        state: signals.hasAnalysisConfiguration
+          ? "Configured"
+          : signals.hasMaterializedFacts && signals.hasConfirmedMapping
+            ? "Ready to configure"
+            : "Waiting for data",
         section: "templates",
         enabled: true,
       },
-      { label: "Review & Publish", state: "Not ready", section: "project-overview", enabled: false },
+      {
+        label: "Review & Publish",
+        state: signals.hasPublishedRevision
+          ? "Published"
+          : signals.hasAnalysisConfiguration && signals.hasMaterializedFacts && signals.hasConfirmedMapping
+            ? "Ready"
+            : "Not ready",
+        section: "project-overview",
+        enabled: signals.hasAnalysisConfiguration && signals.hasMaterializedFacts && signals.hasConfirmedMapping,
+      },
     ],
   };
 }

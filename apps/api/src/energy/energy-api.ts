@@ -3,8 +3,11 @@ import { readEnergyFactCoverage, resolveEnergyFactStorePath, writeEnergyFactMate
 import type {
   EnergyIqImportBatchRecord,
   EnergyIqProjectSetupDocument,
+  EnergyIqSavedAnalysisRecord,
   EnergyIqTemplateDraftDocument,
+  EnergyIqTemplateRevisionRecord,
 } from "@datafoundry/metadata";
+import { createDefaultTemplateDocument } from "@datafoundry/metadata";
 import { createHash, randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 
@@ -275,7 +278,8 @@ export const handleEnergyApiRequest = async (
             published: {
               tiers: context.metadataStore.energyIq.listTierDefinitions(projectId),
               nodes: context.metadataStore.energyIq.listProjectNodes(projectId),
-              revisions: context.metadataStore.energyIq.projectSetup.listHierarchyRevisions(projectId)
+              revisions: context.metadataStore.energyIq.projectSetup.listHierarchyRevisions(projectId),
+              templateRevisions: context.metadataStore.energyIq.templates.listProjectRevisions(projectId),
             }
           })
         };
@@ -309,7 +313,19 @@ export const handleEnergyApiRequest = async (
         const published = context.metadataStore.energyIq.projectSetup.publishDraft({
           project_id: projectId,
           expected_revision: requireInteger(body.expectedRevision, "ENERGYIQ_SETUP_REVISION_REQUIRED"),
-          user_id: user.id
+          user_id: user.id,
+          expected_template_draft_revision: requireInteger(
+            body.expectedTemplateDraftRevision,
+            "ENERGYIQ_TEMPLATE_DRAFT_REVISION_REQUIRED",
+          ),
+          expected_metric_config_revision: requireInteger(
+            body.expectedMetricConfigRevision,
+            "ENERGYIQ_METRIC_CONFIG_REVISION_REQUIRED",
+          ),
+          expected_rule_config_revision: requireInteger(
+            body.expectedRuleConfigRevision,
+            "ENERGYIQ_RULE_CONFIG_REVISION_REQUIRED",
+          ),
         });
         return {
           status: 200,
@@ -432,6 +448,138 @@ export const handleEnergyApiRequest = async (
         };
       }
     }
+    if (segments[0] === "projects" && segments[2] === "saved-analyses") {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      const projectAccessContext = resolveEnergyQueryContext({
+        metadataStore: context.metadataStore,
+        user,
+        workspaceId: context.workspaceId,
+        request: { projectId, scopeId: "project", period: "Yesterday" },
+      });
+      if (segments.length === 3 && request.method === "GET") {
+        return {
+          status: 200,
+          body: createSuccessResult({
+            items: context.metadataStore.energyIq.savedAnalyses
+              .listProject(projectId)
+              .map(toEnergySavedAnalysisSummary),
+          }),
+        };
+      }
+      if (segments.length === 3 && request.method === "POST") {
+        const body = requireRecord(await readJsonBody(request));
+        const query = parseQueryContextRequest({ ...body, projectId });
+        if (query.resource === "water") throw new Error("ENERGYIQ_SAVED_ANALYSIS_RESOURCE_INVALID");
+        const energyContext = resolveEnergyQueryContext({
+          metadataStore: context.metadataStore,
+          user,
+          workspaceId: context.workspaceId,
+          request: query,
+        });
+        const analysis = await executeEnergyScopeAnalysis({
+          metadataStore: context.metadataStore,
+          dataGateway: context.dataGateway,
+          userId: context.userId,
+          context: energyContext,
+        });
+        const templateRevision = context.metadataStore.energyIq.templates.getLatestProjectRevision(projectId);
+        if (!templateRevision) throw new Error("ENERGYIQ_TEMPLATE_REVISION_REQUIRED");
+        const record = context.metadataStore.energyIq.savedAnalyses.create({
+          id: `saved-analysis-${randomUUID()}`,
+          series_id: `saved-analysis-series-${randomUUID()}`,
+          project_id: projectId,
+          workspace_id: projectAccessContext.workspaceId,
+          scope_id: energyContext.scopeId,
+          scope_name: energyContext.scopeName,
+          resource: "electricity",
+          title: optionalString(body.title) ?? `${energyContext.scopeName} · ${query.period ?? "Custom"}`,
+          query_json: JSON.stringify(query),
+          analysis_json: JSON.stringify(analysis),
+          template_revision_id: templateRevision.revision_id,
+          data_snapshot_id: analysis.provenance.dataSnapshotId,
+          created_by: user.id,
+        });
+        return {
+          status: 201,
+          body: createSuccessResult(toEnergySavedAnalysisDetail(record, templateRevision, context)),
+        };
+      }
+      if (segments[3] && segments.length === 4 && request.method === "GET") {
+        const record = requireSavedAnalysisForProject(context, projectId, decodeURIComponent(segments[3]));
+        return {
+          status: 200,
+          body: createSuccessResult(toEnergySavedAnalysisDetail(
+            record,
+            requireSavedAnalysisTemplateRevision(context, record),
+            context,
+          )),
+        };
+      }
+      if (segments[3] && segments[4] === "rerun" && segments.length === 5 && request.method === "POST") {
+        const previous = requireSavedAnalysisForProject(context, projectId, decodeURIComponent(segments[3]));
+        const query = parseSavedAnalysisQuery(previous);
+        const energyContext = resolveEnergyQueryContext({
+          metadataStore: context.metadataStore,
+          user,
+          workspaceId: context.workspaceId,
+          request: query,
+        });
+        const analysis = await executeEnergyScopeAnalysis({
+          metadataStore: context.metadataStore,
+          dataGateway: context.dataGateway,
+          userId: context.userId,
+          context: energyContext,
+        });
+        const templateRevision = context.metadataStore.energyIq.templates.getLatestProjectRevision(projectId);
+        if (!templateRevision) throw new Error("ENERGYIQ_TEMPLATE_REVISION_REQUIRED");
+        const record = context.metadataStore.energyIq.savedAnalyses.create({
+          id: `saved-analysis-${randomUUID()}`,
+          series_id: previous.series_id,
+          project_id: previous.project_id,
+          workspace_id: previous.workspace_id,
+          scope_id: energyContext.scopeId,
+          scope_name: energyContext.scopeName,
+          resource: "electricity",
+          title: previous.title,
+          query_json: previous.query_json,
+          analysis_json: JSON.stringify(analysis),
+          template_revision_id: templateRevision.revision_id,
+          data_snapshot_id: analysis.provenance.dataSnapshotId,
+          rerun_of_id: previous.id,
+          created_by: user.id,
+        });
+        return {
+          status: 201,
+          body: createSuccessResult(toEnergySavedAnalysisDetail(record, templateRevision, context)),
+        };
+      }
+    }
+    if (segments[0] === "projects" && segments[2] === "published-template" && segments.length === 3 && request.method === "GET") {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      resolveEnergyQueryContext({
+        metadataStore: context.metadataStore,
+        user,
+        workspaceId: context.workspaceId,
+        request: { projectId, scopeId: "project", period: "Yesterday" },
+      });
+      const catalog = context.metadataStore.energyIq.templates.listComponentRevisions();
+      const revision = context.metadataStore.energyIq.templates.getLatestProjectRevision(projectId);
+      const document = revision?.document ?? createDefaultTemplateDocument(
+        catalog,
+        [...context.metadataStore.energyIq.listTierDefinitions(projectId)]
+          .sort((left, right) => right.ordinal - left.ordinal)
+          .map((tier) => tier.id),
+      );
+      return {
+        status: 200,
+        body: createSuccessResult({
+          source: revision ? "published-revision" : "compatibility-default",
+          revision,
+          document,
+          catalog,
+        }),
+      };
+    }
     if (segments[0] === "query-context" && segments[1] === "resolve" && request.method === "POST") {
       const body = await readJsonBody(request);
       return {
@@ -531,6 +679,63 @@ const toEnergyImportBatchDto = (
   ...(batch.materialized_at ? { materializedAt: batch.materialized_at } : {}),
   createdAt: batch.created_at,
 });
+
+const toEnergySavedAnalysisSummary = (record: EnergyIqSavedAnalysisRecord) => ({
+  id: record.id,
+  seriesId: record.series_id,
+  sequence: record.sequence,
+  projectId: record.project_id,
+  scopeId: record.scope_id,
+  scopeName: record.scope_name,
+  resource: record.resource,
+  title: record.title,
+  templateRevisionId: record.template_revision_id,
+  dataSnapshotId: record.data_snapshot_id,
+  ...(record.rerun_of_id ? { rerunOfId: record.rerun_of_id } : {}),
+  createdBy: record.created_by,
+  createdAt: record.created_at,
+});
+
+const toEnergySavedAnalysisDetail = (
+  record: EnergyIqSavedAnalysisRecord,
+  templateRevision: EnergyIqTemplateRevisionRecord,
+  context: Required<ConfigApiContext>,
+) => ({
+  ...toEnergySavedAnalysisSummary(record),
+  query: parseSavedAnalysisQuery(record),
+  analysis: JSON.parse(record.analysis_json) as unknown,
+  templateRevision,
+  catalog: context.metadataStore.energyIq.templates.listComponentRevisions(),
+});
+
+const requireSavedAnalysisForProject = (
+  context: Required<ConfigApiContext>,
+  projectId: string,
+  analysisId: string,
+): EnergyIqSavedAnalysisRecord => {
+  const record = context.metadataStore.energyIq.savedAnalyses.get(analysisId);
+  if (record.project_id !== projectId) throw new Error("ENERGYIQ_SAVED_ANALYSIS_FORBIDDEN");
+  return record;
+};
+
+const requireSavedAnalysisTemplateRevision = (
+  context: Required<ConfigApiContext>,
+  record: EnergyIqSavedAnalysisRecord,
+) => {
+  const revision = context.metadataStore.energyIq.templates
+    .listProjectRevisions(record.project_id)
+    .find((candidate) => candidate.revision_id === record.template_revision_id);
+  if (!revision) throw new Error("ENERGYIQ_TEMPLATE_REVISION_NOT_FOUND");
+  return revision;
+};
+
+const parseSavedAnalysisQuery = (record: EnergyIqSavedAnalysisRecord): EnergyQueryContextRequest => {
+  try {
+    return parseQueryContextRequest(JSON.parse(record.query_json) as unknown);
+  } catch {
+    throw new Error("ENERGYIQ_SAVED_ANALYSIS_QUERY_INVALID");
+  }
+};
 
 const requireEnergyAdmin = (
   context: Required<ConfigApiContext>,
@@ -662,7 +867,11 @@ const parseProjectSetupDocument = (value: unknown): EnergyIqProjectSetupDocument
 const parseTemplateDraftDocument = (value: unknown): EnergyIqTemplateDraftDocument => {
   const document = requireRecord(value, "ENERGYIQ_TEMPLATE_DOCUMENT_INVALID");
   if (!Array.isArray(document.templates)) throw new Error("ENERGYIQ_TEMPLATE_DOCUMENT_INVALID");
+  if (document.schema_version !== undefined && document.schema_version !== 2) {
+    throw new Error("ENERGYIQ_TEMPLATE_SCHEMA_VERSION_INVALID");
+  }
   return {
+    schema_version: 2,
     templates: document.templates.map((value, templateIndex) => {
       const template = requireRecord(value, `ENERGYIQ_TEMPLATE_INVALID:${templateIndex}`);
       if (!Array.isArray(template.components)) {
@@ -673,25 +882,99 @@ const parseTemplateDraftDocument = (value: unknown): EnergyIqTemplateDraftDocume
         throw new Error(`ENERGYIQ_TEMPLATE_TARGET_INVALID:${templateIndex}`);
       }
       const tierDefinitionId = optionalString(template.tier_definition_id);
+      const sections = Array.isArray(template.sections)
+        ? template.sections.map((value, sectionIndex) => {
+            const section = requireRecord(value, `ENERGYIQ_TEMPLATE_SECTION_INVALID:${templateIndex}:${sectionIndex}`);
+            const description = optionalString(section.description);
+            return {
+              section_id: requireNonEmptyString(section.section_id, `ENERGYIQ_TEMPLATE_SECTION_ID_REQUIRED:${templateIndex}:${sectionIndex}`),
+              title: requireNonEmptyString(section.title, `ENERGYIQ_TEMPLATE_SECTION_TITLE_REQUIRED:${templateIndex}:${sectionIndex}`),
+              navigation_label: requireNonEmptyString(section.navigation_label, `ENERGYIQ_TEMPLATE_SECTION_NAVIGATION_REQUIRED:${templateIndex}:${sectionIndex}`),
+              ...(description ? { description } : {}),
+            };
+          })
+        : undefined;
       return {
         template_id: requireNonEmptyString(template.template_id, `ENERGYIQ_TEMPLATE_ID_REQUIRED:${templateIndex}`),
         target_kind: targetKind,
         ...(tierDefinitionId ? { tier_definition_id: tierDefinitionId } : {}),
+        ...(sections ? { sections } : {}),
         components: template.components.map((value, componentIndex) => {
           const component = requireRecord(
             value,
             `ENERGYIQ_TEMPLATE_COMPONENT_INVALID:${templateIndex}:${componentIndex}`,
           );
+          const placementId = optionalString(component.placement_id);
+          const sectionId = optionalString(component.section_id);
+          const layout = component.layout === undefined
+            ? undefined
+            : parseTemplateLayout(component.layout, templateIndex, componentIndex);
+          const presentation = component.presentation === undefined
+            ? undefined
+            : parseTemplatePresentation(component.presentation, templateIndex, componentIndex);
           return {
+            ...(placementId ? { placement_id: placementId } : {}),
             component_revision_id: requireNonEmptyString(
               component.component_revision_id,
               `ENERGYIQ_TEMPLATE_COMPONENT_ID_REQUIRED:${templateIndex}:${componentIndex}`,
             ),
             enabled: component.enabled === true,
+            ...(sectionId ? { section_id: sectionId } : {}),
+            ...(layout ? { layout } : {}),
+            ...(presentation ? { presentation } : {}),
           };
         }),
       };
     }),
+  };
+};
+
+const parseTemplateLayout = (
+  value: unknown,
+  templateIndex: number,
+  componentIndex: number,
+): NonNullable<EnergyIqTemplateDraftDocument["templates"][number]["components"][number]["layout"]> => {
+  const layout = requireRecord(value, `ENERGYIQ_TEMPLATE_LAYOUT_INVALID:${templateIndex}:${componentIndex}`);
+  const span = layout.span;
+  const height = layout.height;
+  if (span !== 4 && span !== 6 && span !== 8 && span !== 12) {
+    throw new Error(`ENERGYIQ_TEMPLATE_LAYOUT_SPAN_INVALID:${templateIndex}:${componentIndex}`);
+  }
+  if (height !== "compact" && height !== "standard" && height !== "tall") {
+    throw new Error(`ENERGYIQ_TEMPLATE_LAYOUT_HEIGHT_INVALID:${templateIndex}:${componentIndex}`);
+  }
+  return { span, height };
+};
+
+const parseTemplatePresentation = (
+  value: unknown,
+  templateIndex: number,
+  componentIndex: number,
+): NonNullable<EnergyIqTemplateDraftDocument["templates"][number]["components"][number]["presentation"]> => {
+  const presentation = requireRecord(value, `ENERGYIQ_TEMPLATE_PRESENTATION_INVALID:${templateIndex}:${componentIndex}`);
+  const visualPreset = presentation.visual_preset;
+  const density = presentation.density;
+  const tone = presentation.tone;
+  const limit = requireInteger(presentation.limit, `ENERGYIQ_TEMPLATE_LIMIT_REQUIRED:${templateIndex}:${componentIndex}`);
+  if (visualPreset !== "auto" && visualPreset !== "cards" && visualPreset !== "bar" && visualPreset !== "area" && visualPreset !== "table" && visualPreset !== "list") {
+    throw new Error(`ENERGYIQ_TEMPLATE_VISUAL_PRESET_INVALID:${templateIndex}:${componentIndex}`);
+  }
+  if (density !== "comfortable" && density !== "compact") {
+    throw new Error(`ENERGYIQ_TEMPLATE_DENSITY_INVALID:${templateIndex}:${componentIndex}`);
+  }
+  if (tone !== "default" && tone !== "highlight" && tone !== "quiet") {
+    throw new Error(`ENERGYIQ_TEMPLATE_TONE_INVALID:${templateIndex}:${componentIndex}`);
+  }
+  const title = optionalString(presentation.title);
+  const description = optionalString(presentation.description);
+  return {
+    visual_preset: visualPreset,
+    density,
+    tone,
+    show_legend: presentation.show_legend === true,
+    limit,
+    ...(title ? { title } : {}),
+    ...(description ? { description } : {}),
   };
 };
 

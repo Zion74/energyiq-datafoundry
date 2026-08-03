@@ -1,5 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
+import { markEnergyIqProjectConfigurationChanged } from "./energyiq-project-change-tracker.js";
+
 export type EnergyIqMetricFamily = "aggregate" | "time" | "normalised" | "quality";
 export type EnergyIqMetricRequirement = "always" | "area" | "people";
 
@@ -254,6 +256,7 @@ export class EnergyIqMetricStore {
       current.created_at ?? now,
       now,
     );
+    markEnergyIqProjectConfigurationChanged(this.db, input.project_id, now);
     return this.getProjectConfig(input.project_id);
   }
 }

@@ -1,5 +1,5 @@
-import { DecisionDashboard } from "../_components/decision-dashboard";
+import { PublishedDecisionDashboard } from "../_components/published-decision-dashboard";
 
 export default function EnergyIqOverviewPage() {
-  return <DecisionDashboard />;
+  return <PublishedDecisionDashboard />;
 }

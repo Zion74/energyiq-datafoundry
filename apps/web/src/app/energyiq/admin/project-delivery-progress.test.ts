@@ -8,6 +8,8 @@ const baseSignals = {
   hasSource: false,
   hasConfirmedMapping: false,
   hasMaterializedFacts: false,
+  hasAnalysisConfiguration: false,
+  hasPublishedRevision: false,
 };
 
 describe("deriveProjectDeliveryProgress", () => {
@@ -16,6 +18,21 @@ describe("deriveProjectDeliveryProgress", () => {
 
     expect(progress.nextLabel).toBe("Connect the first data source");
     expect(progress.stages[2]?.state).toBe("Not configured");
+  });
+
+  it("opens Review & Publish after analysis configuration is available", () => {
+    const progress = deriveProjectDeliveryProgress({
+      ...baseSignals,
+      hasSource: true,
+      hasConfirmedMapping: true,
+      hasMaterializedFacts: true,
+      hasAnalysisConfiguration: true,
+    });
+
+    expect(progress.nextSection).toBe("project-overview");
+    expect(progress.nextLabel).toBe("Review and publish");
+    expect(progress.stages[3]?.state).toBe("Configured");
+    expect(progress.stages[4]).toMatchObject({ state: "Ready", enabled: true });
   });
 
   it("sends an inspected source to meter mapping", () => {

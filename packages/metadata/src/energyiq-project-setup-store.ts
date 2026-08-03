@@ -1,5 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 
+import { EnergyIqTemplateStore } from "./energyiq-template-store.js";
+
 export type EnergyIqMetadataStatus = "provisional" | "confirmed";
 export type EnergyIqDeliveryStage = "draft" | "configured" | "published";
 export type EnergyIqSetupIssueSeverity = "error" | "warning";
@@ -311,8 +313,12 @@ export class EnergyIqProjectSetupStore {
     project_id: string;
     expected_revision: number;
     user_id: string;
+    expected_template_draft_revision?: number;
+    expected_metric_config_revision?: number;
+    expected_rule_config_revision?: number;
   }): {
     hierarchy_revision_id: string;
+    template_revision_id: string;
     validation: EnergyIqProjectSetupValidation;
   } {
     const draft = this.requireDraft(input.project_id);
@@ -348,6 +354,24 @@ export class EnergyIqProjectSetupStore {
         document: draft.document,
         now
       });
+      const templateRevision = new EnergyIqTemplateStore(this.db).publishProjectRevisionWithinTransaction({
+        project_id: input.project_id,
+        tier_definition_ids: [...draft.document.tiers]
+          .sort((left, right) => right.ordinal - left.ordinal)
+          .map((tier) => tier.id),
+        hierarchy_revision_id: hierarchyRevisionId,
+        published_by: input.user_id,
+        published_at: now,
+        ...(input.expected_template_draft_revision !== undefined
+          ? { expected_template_draft_revision: input.expected_template_draft_revision }
+          : {}),
+        ...(input.expected_metric_config_revision !== undefined
+          ? { expected_metric_config_revision: input.expected_metric_config_revision }
+          : {}),
+        ...(input.expected_rule_config_revision !== undefined
+          ? { expected_rule_config_revision: input.expected_rule_config_revision }
+          : {}),
+      });
       this.db.prepare(`
         UPDATE energyiq_projects
         SET name = ?,
@@ -380,7 +404,11 @@ export class EnergyIqProjectSetupStore {
         input.expected_revision
       );
       this.db.exec("COMMIT");
-      return { hierarchy_revision_id: hierarchyRevisionId, validation };
+      return {
+        hierarchy_revision_id: hierarchyRevisionId,
+        template_revision_id: templateRevision.revision_id,
+        validation,
+      };
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;

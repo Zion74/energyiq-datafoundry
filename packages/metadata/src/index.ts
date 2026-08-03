@@ -15,10 +15,12 @@ import { EnergyIqStore, initializeEnergyIqSchema } from "./energyiq-store.js";
 import { initializeEnergyIqMetricSchema } from "./energyiq-metric-store.js";
 import { initializeEnergyIqProjectSetupSchema } from "./energyiq-project-setup-store.js";
 import { initializeEnergyIqRuleSchema } from "./energyiq-rule-store.js";
-import { initializeEnergyIqTemplateSchema } from "./energyiq-template-store.js";
+import { initializeEnergyIqSavedAnalysisSchema } from "./energyiq-saved-analysis-store.js";
+import { initializeEnergyIqTemplateRevisionSchema, initializeEnergyIqTemplateSchema } from "./energyiq-template-store.js";
 
 export * from "./config-store.js";
 export * from "./energyiq-store.js";
+export * from "./energyiq-saved-analysis-store.js";
 export * from "./energyiq-metric-store.js";
 export * from "./energyiq-project-setup-store.js";
 export * from "./energyiq-rule-store.js";
@@ -3986,6 +3988,12 @@ const runMigrations = (db: DatabaseSync): void => {
   });
   runSchemaMigration(db, "0022_energyiq_template_schema", "Ensure EnergyIQ component and template draft schema", () => {
     initializeEnergyIqTemplateSchema(db);
+  });
+  runSchemaMigration(db, "0023_energyiq_template_revision_schema", "Ensure immutable EnergyIQ template revision schema", () => {
+    initializeEnergyIqTemplateRevisionSchema(db);
+  });
+  runSchemaMigration(db, "0024_energyiq_saved_analysis_schema", "Ensure immutable EnergyIQ saved analysis schema", () => {
+    initializeEnergyIqSavedAnalysisSchema(db);
   });
 };
 
