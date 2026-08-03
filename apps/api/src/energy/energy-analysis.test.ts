@@ -7,7 +7,7 @@ import {
 import { createMetadataStore, type EnergyIqRuleRevisionRecord } from "@datafoundry/metadata";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -18,13 +18,16 @@ import {
 import { ensureEnergyIqBootstrap, PRESCHOOL_WORKSPACE_ID } from "./energy-bootstrap.js";
 import { resolveEnergyQueryContext } from "./energy-query-context.js";
 import { NGEE_ANN_GOLDEN } from "./ngee-ann-golden.fixture.js";
+import { materializePreschoolGoldenFixture, PRESCHOOL_GOLDEN } from "./preschool-golden.fixture.js";
 
 describe("EnergyScopeAnalysis", () => {
   it("calculates reproducible Preschool portfolio and circuit drill-down facts", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-analysis-"));
+    const databasePath = join(root, "energy.duckdb");
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
     const gateway = new LocalDataGateway(metadata);
     try {
+      await materializePreschoolGoldenFixture(databasePath);
       ensureEnergyIqBootstrap(metadata);
       const user = metadata.users.getById({ user_id: "dev-user" });
       const context = resolveEnergyQueryContext({
@@ -45,18 +48,18 @@ describe("EnergyScopeAnalysis", () => {
         dataGateway: gateway,
         userId: "dev-user",
         context,
-        databasePath: resolve(`storage/energy/${PRESCHOOL_WORKSPACE_ID}/energy.duckdb`)
+        databasePath
       });
 
-      expect(portfolio.summary.usageKwh).toBe(24_921.8123);
-      expect(portfolio.summary.averageDailyUsageKwh).toBe(803.9294);
-      expect(portfolio.summary.nonOperatingSharePct).toBe(12.45);
+      expect(portfolio.summary.usageKwh).toBe(PRESCHOOL_GOLDEN.period.usageKwh);
+      expect(portfolio.summary.averageDailyUsageKwh).toBe(PRESCHOOL_GOLDEN.period.averageDailyUsageKwh);
+      expect(portfolio.summary.nonOperatingSharePct).toBe(PRESCHOOL_GOLDEN.period.nonOperatingSharePct);
       expect(portfolio.hourlyProfile).toHaveLength(24);
-      expect(portfolio.childScopes).toHaveLength(30);
-      expect(portfolio.circuits).toHaveLength(270);
+      expect(portfolio.childScopes).toHaveLength(PRESCHOOL_GOLDEN.period.centreCount);
+      expect(portfolio.circuits).toHaveLength(PRESCHOOL_GOLDEN.period.circuitCount);
       expect(portfolio.childScopes.every((child) => child.usageKwh > 0)).toBe(true);
       expect(portfolio.childScopes.reduce((sum, child) => sum + child.usageKwh, 0))
-        .toBe(portfolio.summary.usageKwh);
+        .toBeCloseTo(portfolio.summary.usageKwh, 4);
       expect(portfolio.provenance).toMatchObject({
         dataSnapshotId: "preschool-26b85b9c0b95e090",
         hierarchyRevisionId: "preschool-hierarchy-v4",
@@ -72,7 +75,7 @@ describe("EnergyScopeAnalysis", () => {
         workspaceId: PRESCHOOL_WORKSPACE_ID,
         request: {
           projectId: "preschool-demo",
-          scopeId: "preschool-centre-a",
+          scopeId: PRESCHOOL_GOLDEN.centreA.scopeId,
           resource: "electricity",
           period: "Custom",
           from: "2026-05-01",
@@ -84,14 +87,14 @@ describe("EnergyScopeAnalysis", () => {
         dataGateway: gateway,
         userId: "dev-user",
         context: centreContext,
-        databasePath: resolve(`storage/energy/${PRESCHOOL_WORKSPACE_ID}/energy.duckdb`)
+        databasePath
       });
-      expect(centre.summary.usageKwh).toBe(843.0985);
-      expect(centre.circuits).toHaveLength(9);
-      expect(centre.childScopes).toHaveLength(9);
+      expect(centre.summary.usageKwh).toBe(PRESCHOOL_GOLDEN.centreA.usageKwh);
+      expect(centre.circuits).toHaveLength(PRESCHOOL_GOLDEN.centreA.circuitCount);
+      expect(centre.childScopes).toHaveLength(PRESCHOOL_GOLDEN.centreA.circuitCount);
     } finally {
       metadata.close();
-      rmSync(root, { recursive: true, force: true });
+      removeTemporaryEnergyFixture(root);
     }
   }, 30_000);
 

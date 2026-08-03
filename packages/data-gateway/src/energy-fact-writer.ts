@@ -63,6 +63,7 @@ export type EnergyIntervalFactWrite = {
   localDate: string;
   localHour: number;
   dayType: string;
+  isOperating?: boolean;
   sourceFile: string;
   sourceSha256: string;
 };
@@ -394,7 +395,7 @@ const factValues = (row: EnergyIntervalFactWrite): unknown[] => [
   row.category, row.meterRole, "cumulative_energy", row.intervalStart, row.intervalEnd,
   row.elapsedMinutes, row.activeEnergyKwh, row.previousActiveEnergyKwh, row.rawDeltaKwh,
   row.usageKwh ?? null, row.averageKw ?? null, row.qualityStatus, row.localDate, row.localHour,
-  row.dayType, null, row.sourceFile, row.sourceSha256,
+  row.dayType, row.isOperating ?? null, row.sourceFile, row.sourceSha256,
 ];
 const qualityValues = (row: EnergyQualityEventWrite): unknown[] => [
   row.workspaceId, row.projectId, row.importBatchId, row.meterPointId ?? null,
