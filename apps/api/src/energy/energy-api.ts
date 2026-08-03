@@ -18,7 +18,10 @@ import { executeEnergyScopeAnalysis, type EnergyScopeAnalysis } from "./energy-a
 import { inspectEnergyExcelWorkbook } from "./energy-excel-import.js";
 import { buildEnergyExcelMaterialization } from "./energy-import-materializer.js";
 import { EnergyAdminAccessService } from "./energy-admin-access.js";
-import { resolveProjectAnalysis } from "./project-analysis-resolver.js";
+import {
+  resolveProjectAnalysis,
+  type ProjectAnalysisSnapshot,
+} from "./project-analysis-resolver.js";
 import {
   resolveEnergyAccessContext,
   resolveEnergyQueryContext,
@@ -471,21 +474,17 @@ export const handleEnergyApiRequest = async (
         const body = requireRecord(await readJsonBody(request));
         const query = parseQueryContextRequest({ ...body, projectId });
         if (query.resource === "water") throw new Error("ENERGYIQ_SAVED_ANALYSIS_RESOURCE_INVALID");
-        const energyContext = resolveEnergyQueryContext({
+        const resolution = await resolveProjectAnalysis({
           metadataStore: context.metadataStore,
+          dataGateway: context.dataGateway,
           user,
           workspaceId: context.workspaceId,
           request: query,
         });
-        const analysis = await executeEnergyScopeAnalysis({
-          metadataStore: context.metadataStore,
-          dataGateway: context.dataGateway,
-          userId: context.userId,
-          context: energyContext,
-        });
+        if (resolution.status !== "ready") throw new Error("ENERGYIQ_PROJECT_ANALYSIS_CONFIGURATION_REQUIRED");
+        const { analysis, context: energyContext } = resolution.snapshot;
         requireDecisionGradeCoverage(analysis);
-        const templateRevision = context.metadataStore.energyIq.templates.getLatestProjectRevision(projectId);
-        if (!templateRevision) throw new Error("ENERGYIQ_TEMPLATE_REVISION_REQUIRED");
+        const templateRevision = requireSnapshotTemplateRevision(context, resolution.snapshot);
         const record = context.metadataStore.energyIq.savedAnalyses.create({
           id: `saved-analysis-${randomUUID()}`,
           series_id: `saved-analysis-series-${randomUUID()}`,
@@ -520,21 +519,17 @@ export const handleEnergyApiRequest = async (
       if (segments[3] && segments[4] === "rerun" && segments.length === 5 && request.method === "POST") {
         const previous = requireSavedAnalysisForProject(context, projectId, decodeURIComponent(segments[3]));
         const query = parseSavedAnalysisQuery(previous);
-        const energyContext = resolveEnergyQueryContext({
+        const resolution = await resolveProjectAnalysis({
           metadataStore: context.metadataStore,
+          dataGateway: context.dataGateway,
           user,
           workspaceId: context.workspaceId,
           request: query,
         });
-        const analysis = await executeEnergyScopeAnalysis({
-          metadataStore: context.metadataStore,
-          dataGateway: context.dataGateway,
-          userId: context.userId,
-          context: energyContext,
-        });
+        if (resolution.status !== "ready") throw new Error("ENERGYIQ_PROJECT_ANALYSIS_CONFIGURATION_REQUIRED");
+        const { analysis, context: energyContext } = resolution.snapshot;
         requireDecisionGradeCoverage(analysis);
-        const templateRevision = context.metadataStore.energyIq.templates.getLatestProjectRevision(projectId);
-        if (!templateRevision) throw new Error("ENERGYIQ_TEMPLATE_REVISION_REQUIRED");
+        const templateRevision = requireSnapshotTemplateRevision(context, resolution.snapshot);
         const record = context.metadataStore.energyIq.savedAnalyses.create({
           id: `saved-analysis-${randomUUID()}`,
           series_id: previous.series_id,
@@ -749,6 +744,19 @@ const requireSavedAnalysisTemplateRevision = (
   const revision = context.metadataStore.energyIq.templates
     .listProjectRevisions(record.project_id)
     .find((candidate) => candidate.revision_id === record.template_revision_id);
+  if (!revision) throw new Error("ENERGYIQ_TEMPLATE_REVISION_NOT_FOUND");
+  return revision;
+};
+
+const requireSnapshotTemplateRevision = (
+  context: Required<ConfigApiContext>,
+  snapshot: ProjectAnalysisSnapshot,
+): EnergyIqTemplateRevisionRecord => {
+  const revisionId = snapshot.projectRelease.templateRevisionId;
+  if (!revisionId) throw new Error("ENERGYIQ_TEMPLATE_REVISION_REQUIRED");
+  const revision = context.metadataStore.energyIq.templates
+    .listProjectRevisions(snapshot.context.projectId)
+    .find((candidate) => candidate.revision_id === revisionId);
   if (!revision) throw new Error("ENERGYIQ_TEMPLATE_REVISION_NOT_FOUND");
   return revision;
 };

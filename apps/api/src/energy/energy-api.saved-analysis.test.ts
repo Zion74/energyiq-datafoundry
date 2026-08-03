@@ -95,6 +95,91 @@ describe("saved analysis decision-quality boundary", () => {
       removeTemporaryFixture(root);
     }
   }, 30_000);
+
+  it("creates and reruns Saved Analysis through the published Project Release", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-api-saved-analysis-release-"));
+    const databasePath = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const gateway = new LocalDataGateway(metadata);
+    try {
+      await materializePreschoolGoldenFixture(databasePath);
+      vi.stubEnv("ENERGYIQ_DUCKDB_PATH", databasePath);
+      ensureEnergyIqBootstrap(metadata);
+      const project = metadata.energyIq.getProject("preschool-demo");
+      const templateRevision = metadata.energyIq.templates.publishProjectRevisionWithinTransaction({
+        project_id: project.id,
+        tier_definition_ids: metadata.energyIq.listTierDefinitions(project.id).map((tier) => tier.id),
+        hierarchy_revision_id: project.hierarchy_revision_id,
+        published_by: "dev-user",
+        published_at: "2026-08-04T00:00:00.000Z",
+      });
+      metadata.energyIq.upsertProject({
+        ...project,
+        hierarchy_revision_id: "unpublished-hierarchy-drift",
+        meter_formula_revision_id: "unpublished-meter-formula-drift",
+        metric_version: "unpublished-metric-drift",
+        business_calendar_version: "unpublished-calendar-drift",
+        tariff_schedule_version: "unpublished-tariff-drift",
+      });
+      const query = {
+        projectId: project.id,
+        scopeId: "project",
+        resource: "electricity",
+        period: "Custom",
+        from: "2026-05-01",
+        to: "2026-05-01",
+      } as const;
+      const context = {
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        workspaceId: PRESCHOOL_WORKSPACE_ID,
+      } as Required<ConfigApiContext>;
+
+      const creation = await handleEnergyApiRequest(
+        jsonPost(query),
+        ["projects", project.id, "saved-analyses"],
+        context,
+      );
+      expect(creation.status, JSON.stringify(creation.body)).toBe(201);
+      const first = metadata.energyIq.savedAnalyses.listProject(project.id)[0];
+      expect(first?.template_revision_id).toBe(templateRevision.revision_id);
+      const frozenAnalysisJson = first?.analysis_json;
+      const firstAnalysis = JSON.parse(first?.analysis_json ?? "null") as {
+        context: Record<string, unknown>;
+        provenance: Record<string, unknown>;
+      };
+      expect(firstAnalysis.context).toMatchObject({
+        hierarchyRevisionId: templateRevision.hierarchy_revision_id,
+        meterFormulaRevisionId: templateRevision.meter_formula_revision_id,
+        businessCalendarVersion: templateRevision.business_calendar_version,
+        tariffScheduleVersion: templateRevision.tariff_schedule_version,
+      });
+      expect(firstAnalysis.provenance).toMatchObject({
+        hierarchyRevisionId: templateRevision.hierarchy_revision_id,
+        meterFormulaRevisionId: templateRevision.meter_formula_revision_id,
+      });
+
+      const rerun = await handleEnergyApiRequest(
+        jsonPost({}),
+        ["projects", project.id, "saved-analyses", first?.id ?? "", "rerun"],
+        context,
+      );
+      expect(rerun.status).toBe(201);
+      const records = metadata.energyIq.savedAnalyses.listProject(project.id);
+      expect(records).toHaveLength(2);
+      expect(records[0]).toMatchObject({
+        series_id: first?.series_id,
+        sequence: 2,
+        rerun_of_id: first?.id,
+        template_revision_id: templateRevision.revision_id,
+      });
+      expect(records.find((record) => record.id === first?.id)?.analysis_json).toBe(frozenAnalysisJson);
+    } finally {
+      metadata.close();
+      removeTemporaryFixture(root);
+    }
+  }, 30_000);
 });
 
 const jsonPost = (body: unknown): IncomingMessage => {
