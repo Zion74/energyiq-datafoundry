@@ -22,6 +22,7 @@ import {
   ProjectRenderer,
   type ProjectAnalysisQualityPolicy,
 } from "./project-renderer-registry";
+import { ScopeMetadataStatus } from "./scope-metadata-status";
 
 const periodOptions: ReadonlyArray<{
   label: string;
@@ -274,6 +275,12 @@ export function PublishedDecisionDashboard() {
           ) : null}
         </div>
       </div>
+
+      {currentSnapshot ? (
+        <div className="mt-6">
+          <ScopeMetadataStatus metadata={currentSnapshot.metadata} mode="interactive" />
+        </div>
+      ) : null}
 
       {rendererState.status === "ready" ? (
         <div className="mt-6 lg:grid lg:grid-cols-[200px_minmax(0,1fr)] lg:items-start lg:gap-8 xl:grid-cols-[220px_minmax(0,1fr)]">

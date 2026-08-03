@@ -9,6 +9,7 @@ import { buildEnergyTemplateRenderPlan } from "./energy-template-render-plan";
 import { EnergyTemplateRenderer, type EnergyTemplateRendererState } from "./energy-template-renderer";
 import { useEnergyIqAccess } from "./energyiq-access";
 import { EnergyIcon } from "./icons";
+import { ScopeMetadataStatus } from "./scope-metadata-status";
 
 export function SavedAnalysisDetail() {
   const params = useParams<{ id: string }>();
@@ -110,6 +111,12 @@ export function SavedAnalysisDetail() {
           </dl>
         ) : null}
       </div>
+
+      {detail ? (
+        <div className="mt-7">
+          <ScopeMetadataStatus metadata={detail.analysis.metadata} mode="saved" />
+        </div>
+      ) : null}
 
       <div className="mt-7">
         <EnergyTemplateRenderer state={rendererState} />

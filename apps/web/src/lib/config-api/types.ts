@@ -439,6 +439,94 @@ export type EnergyScopeAnalysisDto = {
 
 export type EnergyProjectRendererKeyDto = "ngee-ann-overview" | "preschool-overview";
 
+export type EnergyScopeMetadataEvidenceDto = {
+  metadataRevisionId: string;
+  hierarchyRevisionId: string;
+  dimension: "area" | "headcount";
+  value: number | null;
+  status: "confirmed" | "provisional";
+  effectiveFrom: string | null;
+  effectiveTo: string | null;
+  timezone: string;
+};
+
+export type EnergyScopeMetadataValueDto = {
+  status: "confirmed" | "provisional";
+  value: number;
+  unit: "m2" | "people";
+  metadataRevisionIds: string[];
+  hierarchyRevisionIds: string[];
+  evidence: EnergyScopeMetadataEvidenceDto[];
+} | {
+  status: "missing";
+  value: null;
+  unit: "m2" | "people";
+  reason: "not-configured" | "not-effective-for-period" | "ambiguous-effective-revisions" | "value-changes-within-period" | "invalid-value";
+  guidance: string;
+  metadataRevisionIds: string[];
+  hierarchyRevisionIds: string[];
+  evidence: EnergyScopeMetadataEvidenceDto[];
+};
+
+export type EnergyNormalisedMetricDto = {
+  status: "confirmed" | "provisional";
+  metricId: "energy.usage_per_sqm" | "energy.usage_per_person";
+  value: number;
+  unit: "kWh/m2" | "kWh/person";
+  metadataRevisionIds: string[];
+  hierarchyRevisionIds: string[];
+  evidence: EnergyScopeMetadataEvidenceDto[];
+} | {
+  status: "missing";
+  metricId: "energy.usage_per_sqm" | "energy.usage_per_person";
+  value: null;
+  unit: "kWh/m2" | "kWh/person";
+  reason: "not-configured" | "not-effective-for-period" | "ambiguous-effective-revisions" | "value-changes-within-period" | "invalid-value" | "invalid-energy";
+  guidance: string;
+  metadataRevisionIds: string[];
+  hierarchyRevisionIds: string[];
+  evidence: EnergyScopeMetadataEvidenceDto[];
+};
+
+export type EnergyProjectAnalysisMetadataEvidenceDto = EnergyScopeMetadataEvidenceDto & {
+  scopeId: string;
+  scopeName: string;
+};
+
+export type EnergyProjectAnalysisScopeMetadataDto = {
+  scopeId: string;
+  scopeName: string;
+  usageKwh: number;
+  status: "confirmed" | "provisional" | "missing";
+  area: EnergyScopeMetadataValueDto;
+  headcount: EnergyScopeMetadataValueDto;
+  normalisations: {
+    eui: EnergyNormalisedMetricDto;
+    perPax: EnergyNormalisedMetricDto;
+  };
+  evidence: EnergyProjectAnalysisMetadataEvidenceDto[];
+};
+
+export type EnergyProjectAnalysisMetadataDto = {
+  status: "confirmed" | "provisional" | "missing";
+  hierarchyRevisionId: string;
+  timezone: string;
+  period: {
+    start: string;
+    endExclusive: string;
+  };
+  selectedScope: EnergyProjectAnalysisScopeMetadataDto;
+  comparisonScopes: EnergyProjectAnalysisScopeMetadataDto[];
+  evidence: EnergyProjectAnalysisMetadataEvidenceDto[];
+};
+
+export type EnergyProjectAnalysisPayloadDto = Omit<EnergyScopeAnalysisDto, "childScopes"> & {
+  metadata: EnergyProjectAnalysisMetadataDto;
+  childScopes: Array<EnergyScopeAnalysisDto["childScopes"][number] & {
+    metadata: EnergyProjectAnalysisScopeMetadataDto;
+  }>;
+};
+
 export type EnergyPublishedProjectReleaseDto = {
   id: string;
   source: "template-revision" | "legacy-profile";
@@ -489,7 +577,8 @@ export type EnergyProjectAnalysisSnapshotDto = {
     importBatchIds: string[];
     lastSeenAt: string | null;
   };
-  analysis: EnergyScopeAnalysisDto;
+  metadata: EnergyProjectAnalysisMetadataDto;
+  analysis: EnergyProjectAnalysisPayloadDto;
 };
 
 export type EnergyProjectAnalysisResolutionDto =
@@ -523,7 +612,12 @@ export type EnergySavedAnalysisSummaryDto = {
 
 export type EnergySavedAnalysisDetailDto = EnergySavedAnalysisSummaryDto & {
   query: EnergyQueryContextRequestDto;
-  analysis: EnergyScopeAnalysisDto;
+  analysis: Omit<EnergyScopeAnalysisDto, "childScopes"> & {
+    metadata?: EnergyProjectAnalysisMetadataDto;
+    childScopes: Array<EnergyScopeAnalysisDto["childScopes"][number] & {
+      metadata?: EnergyProjectAnalysisScopeMetadataDto;
+    }>;
+  };
   templateRevision: EnergyTemplateRevisionDto;
   catalog: EnergyComponentRevisionDto[];
 };

@@ -190,6 +190,90 @@ describe("ProjectAnalysisResolver", () => {
       expect(new Set(result.snapshot.evidence.map((item) => item.id)).size)
         .toBe(result.snapshot.evidence.length);
       expect(result.snapshot.findings).toEqual(result.snapshot.analysis.attention);
+      expect(result.snapshot.metadata).toMatchObject({
+        hierarchyRevisionId: "preschool-hierarchy-v4",
+        timezone: "Asia/Singapore",
+        selectedScope: {
+          scopeId: "preschool-project",
+          scopeName: "Preschool Portfolio",
+          status: "missing",
+          normalisations: {
+            eui: {
+              status: "missing",
+              value: null,
+            },
+            perPax: {
+              status: "missing",
+              value: null,
+            },
+          },
+        },
+      });
+      expect(result.snapshot.metadata.comparisonScopes).toHaveLength(30);
+      expect(result.snapshot.metadata.comparisonScopes[0]).toMatchObject({
+        scopeId: PRESCHOOL_GOLDEN.centreA.scopeId,
+        scopeName: "Centre A",
+        usageKwh: PRESCHOOL_GOLDEN.centreA.usageKwh,
+        status: "provisional",
+        area: { status: "provisional", value: 743, unit: "m2" },
+        headcount: { status: "provisional", value: 58, unit: "people" },
+        normalisations: {
+          eui: { status: "provisional", unit: "kWh/m2" },
+          perPax: { status: "provisional", unit: "kWh/person" },
+        },
+      });
+      expect(result.snapshot.metadata.comparisonScopes[0]?.normalisations.eui.value)
+        .toBeCloseTo(PRESCHOOL_GOLDEN.centreA.usageKwh / 743, 8);
+      expect(result.snapshot.metadata.comparisonScopes[0]?.normalisations.perPax.value)
+        .toBeCloseTo(PRESCHOOL_GOLDEN.centreA.usageKwh / 58, 8);
+      expect(result.snapshot.analysis.childScopes[0]).toMatchObject({
+        nodeId: PRESCHOOL_GOLDEN.centreA.scopeId,
+        metadata: {
+          status: "provisional",
+          normalisations: {
+            eui: { status: "provisional" },
+            perPax: { status: "provisional" },
+          },
+        },
+      });
+      expect(result.snapshot.metadata.evidence[0]).toMatchObject({
+        scopeId: PRESCHOOL_GOLDEN.centreA.scopeId,
+        dimension: "area",
+        value: 743,
+        status: "provisional",
+        hierarchyRevisionId: "preschool-hierarchy-v4",
+      });
+      expect(result.snapshot.analysis.metadata).toEqual(result.snapshot.metadata);
+
+      const selectedCentreResult = await resolveProjectAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        user: metadata.users.getById({ user_id: "dev-user" }),
+        workspaceId: PRESCHOOL_WORKSPACE_ID,
+        request: {
+          projectId: "preschool-demo",
+          scopeId: PRESCHOOL_GOLDEN.centreA.scopeId,
+          resource: "electricity",
+          period: "Custom",
+          from: "2026-05-01",
+          to: "2026-05-31",
+        },
+        databasePath,
+      });
+      expect(selectedCentreResult.status).toBe("ready");
+      if (selectedCentreResult.status !== "ready") throw new Error("Expected Centre analysis");
+      expect(selectedCentreResult.snapshot.metadata.selectedScope).toMatchObject({
+        scopeId: PRESCHOOL_GOLDEN.centreA.scopeId,
+        scopeName: "Centre A",
+        usageKwh: PRESCHOOL_GOLDEN.centreA.usageKwh,
+        status: "provisional",
+        area: { value: 743, status: "provisional" },
+        headcount: { value: 58, status: "provisional" },
+        normalisations: {
+          eui: { status: "provisional" },
+          perPax: { status: "provisional" },
+        },
+      });
 
       const project = metadata.energyIq.getProject("preschool-demo");
       const publishedRevision = metadata.energyIq.templates.publishProjectRevisionWithinTransaction({

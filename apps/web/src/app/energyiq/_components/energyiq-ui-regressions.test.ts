@@ -77,4 +77,10 @@ describe("EnergyIQ UI regressions", () => {
     expect(savedDetailSource).toContain("rerunEnergySavedAnalysis");
     expect(savedDetailSource).not.toContain("contentEditable");
   });
+
+  it("shows release-pinned metadata in Overview and only frozen metadata in Saved Analysis", () => {
+    expect(overviewSource).toContain("<ScopeMetadataStatus metadata={currentSnapshot.metadata} mode=\"interactive\" />");
+    expect(savedDetailSource).toContain("<ScopeMetadataStatus metadata={detail.analysis.metadata} mode=\"saved\" />");
+    expect(savedDetailSource).not.toContain("resolveProjectAnalysis");
+  });
 });
