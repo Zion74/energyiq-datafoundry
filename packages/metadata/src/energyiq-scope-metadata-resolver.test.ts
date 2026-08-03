@@ -420,6 +420,101 @@ describe("EnergyIqScopeMetadataResolver", () => {
     }
   });
 
+  it("rejects an impossible effective timestamp instead of normalising it", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-scope-metadata-timestamp-"));
+    let metadata: TestMetadata | undefined;
+    try {
+      metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+      seedProject(metadata, [{
+        id: "project-1-hierarchy-v1:scope-1",
+        hierarchyRevisionId: "project-1-hierarchy-v1",
+        areaSqm: 100,
+        occupantCount: 10,
+        metadataStatus: "confirmed",
+        effectiveFrom: "2026-02-30T00:00:00Z",
+        effectiveTo: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }]);
+
+      expect(() => metadata!.energyIq.scopeMetadata.resolveForPeriod({
+        projectId: "project-1",
+        scopeId: "scope-1",
+        hierarchyRevisionId: "project-1-hierarchy-v1",
+        period: {
+          start: "2026-02-28T16:00:00.000Z",
+          endExclusive: "2026-03-02T16:00:00.000Z",
+        },
+      })).toThrow("ENERGYIQ_METADATA_EFFECTIVE_DATE_INVALID");
+    } finally {
+      metadata?.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
+  it("rejects a Period timestamp without an explicit offset", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-scope-metadata-offset-"));
+    let metadata: TestMetadata | undefined;
+    try {
+      metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+      seedProject(metadata, [{
+        id: "project-1-hierarchy-v1:scope-1",
+        hierarchyRevisionId: "project-1-hierarchy-v1",
+        areaSqm: 100,
+        occupantCount: 10,
+        metadataStatus: "confirmed",
+        effectiveFrom: null,
+        effectiveTo: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }]);
+
+      expect(() => metadata!.energyIq.scopeMetadata.resolveForPeriod({
+        projectId: "project-1",
+        scopeId: "scope-1",
+        hierarchyRevisionId: "project-1-hierarchy-v1",
+        period: {
+          start: "2026-07-01T16:00:00",
+          endExclusive: "2026-07-08T16:00:00.000Z",
+        },
+      })).toThrow("ENERGYIQ_METADATA_PERIOD_INVALID");
+    } finally {
+      metadata?.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
+  it("accepts ISO instants with Z and numeric offsets", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-scope-metadata-valid-offset-"));
+    let metadata: TestMetadata | undefined;
+    try {
+      metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+      seedProject(metadata, [{
+        id: "project-1-hierarchy-v1:scope-1",
+        hierarchyRevisionId: "project-1-hierarchy-v1",
+        areaSqm: 100,
+        occupantCount: 10,
+        metadataStatus: "confirmed",
+        effectiveFrom: "2026-07-01T00:00:00+08:00",
+        effectiveTo: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }]);
+
+      const resolution = metadata.energyIq.scopeMetadata.resolveForPeriod({
+        projectId: "project-1",
+        scopeId: "scope-1",
+        hierarchyRevisionId: "project-1-hierarchy-v1",
+        period: {
+          start: "2026-06-30T16:00:00.000Z",
+          endExclusive: "2026-07-09T00:00:00+08:00",
+        },
+      });
+
+      expect(resolution.area).toMatchObject({ status: "confirmed", value: 100 });
+    } finally {
+      metadata?.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
   it("rejects a non-increasing effective range after timezone conversion", () => {
     const root = mkdtempSync(join(tmpdir(), "energyiq-scope-metadata-range-"));
     let metadata: TestMetadata | undefined;

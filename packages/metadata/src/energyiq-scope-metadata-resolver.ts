@@ -531,6 +531,26 @@ const assertTimeZone = (timezone: string): void => {
 };
 
 const parseInstant = (value: string, errorCode: string): number => {
+  const calendar = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/.exec(value);
+  if (!calendar) throw new Error(errorCode);
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText] = calendar;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const second = Number(secondText);
+  const roundTrip = new Date(0);
+  roundTrip.setUTCFullYear(year, month - 1, day);
+  roundTrip.setUTCHours(hour, minute, second, 0);
+  if (roundTrip.getUTCFullYear() !== year
+    || roundTrip.getUTCMonth() !== month - 1
+    || roundTrip.getUTCDate() !== day
+    || roundTrip.getUTCHours() !== hour
+    || roundTrip.getUTCMinutes() !== minute
+    || roundTrip.getUTCSeconds() !== second) {
+    throw new Error(errorCode);
+  }
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) throw new Error(errorCode);
   return parsed;
