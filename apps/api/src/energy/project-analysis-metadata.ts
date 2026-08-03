@@ -92,18 +92,43 @@ export const projectAnalysisPayload = (input: {
   const metadataByScopeId = new Map(
     input.metadata.comparisonScopes.map((scope) => [scope.scopeId, scope]),
   );
+  const summary = { ...input.analysis.summary };
+  delete summary.areaSqm;
+  delete summary.occupantCount;
+  delete summary.kwhPerSqm;
+  delete summary.kwhPerPerson;
+  Object.assign(summary, effectiveMetadataFields(input.metadata.selectedScope));
   return {
     ...input.analysis,
+    summary,
     childScopes: input.analysis.childScopes.map((scope) => {
       const metadata = metadataByScopeId.get(scope.nodeId);
       if (!metadata) {
         throw new Error(`ENERGYIQ_ANALYSIS_METADATA_PROJECTION_MISSING:${scope.nodeId}`);
       }
-      return { ...scope, metadata };
+      const projected = { ...scope };
+      delete projected.areaSqm;
+      delete projected.occupantCount;
+      delete projected.kwhPerSqm;
+      delete projected.kwhPerPerson;
+      return { ...projected, ...effectiveMetadataFields(metadata), metadata };
     }),
     metadata: input.metadata,
   };
 };
+
+const effectiveMetadataFields = (
+  metadata: ProjectAnalysisScopeMetadata,
+): Pick<EnergyScopeAnalysis["summary"], "areaSqm" | "occupantCount" | "kwhPerSqm" | "kwhPerPerson"> => ({
+  ...(metadata.area.status !== "missing" ? { areaSqm: metadata.area.value } : {}),
+  ...(metadata.headcount.status !== "missing" ? { occupantCount: metadata.headcount.value } : {}),
+  ...(metadata.normalisations.eui.status !== "missing"
+    ? { kwhPerSqm: metadata.normalisations.eui.value }
+    : {}),
+  ...(metadata.normalisations.perPax.status !== "missing"
+    ? { kwhPerPerson: metadata.normalisations.perPax.value }
+    : {}),
+});
 
 const resolveScopeMetadata = (input: {
   metadataStore: MetadataStore;

@@ -1,5 +1,8 @@
 import { createSuccessResult } from "@datafoundry/contracts";
-import type { ConfigResourceRecord } from "@datafoundry/metadata";
+import {
+  WORKSPACE_DEFAULT_MODEL_PROFILE_ID,
+  type ConfigResourceRecord,
+} from "@datafoundry/metadata";
 import type { IncomingMessage } from "node:http";
 
 import { resolveEnergyAccessContext } from "./energy/energy-query-context.js";
@@ -93,7 +96,7 @@ const unavailableProxy = (
 ): Record<string, unknown> => ({
   configured: true,
   available: false,
-  id: "workspace-default",
+  id: WORKSPACE_DEFAULT_MODEL_PROFILE_ID,
   name: "Workspace default · unavailable",
   description: "The configured source profile is unavailable. An admin must repair the binding.",
   connectionStatus: "unavailable",
@@ -115,7 +118,7 @@ const toWorkspaceProxy = (
 ): Record<string, unknown> => ({
   configured: true,
   available: true,
-  id: "workspace-default",
+  id: WORKSPACE_DEFAULT_MODEL_PROFILE_ID,
   name: `Workspace default · ${profile.name}`,
   description: "Admin-managed Workspace model. Credentials remain server-side.",
   provider: safeString(profile.payload.provider),

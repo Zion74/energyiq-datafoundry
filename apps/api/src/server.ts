@@ -576,6 +576,10 @@ class DataFoundryAgUiAgent extends AbstractAgent {
               snapshot: resolution.snapshot,
               scopedDatasource: energyScopedDataSource
             });
+            // A generic Agent response is not a trusted result. Enable this
+            // branch only after production calls executeTrustedEnergyText and
+            // persists its validated canonical answer.
+            throw new Error("TRUSTED_ENERGY_TEXT_VALIDATED_EXECUTOR_REQUIRED");
           }
           ({
             effectiveRunConfig,

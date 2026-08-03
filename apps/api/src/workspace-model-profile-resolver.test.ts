@@ -86,6 +86,13 @@ describe("Workspace default model profile runtime", () => {
       context: userContext,
       isAdmin: false
     })).toMatchObject({ configured: true, available: false, unavailableReason: "source-profile-not-connected" });
+    expect(() => resolveRunConfig({
+      metadataStore: metadata,
+      runInput: emptyRunInput(),
+      userId: "normal-user",
+      userInput: "Compare this period",
+      workspaceId: "customer-1"
+    })).toThrow("WORKSPACE_DEFAULT_MODEL_PROFILE_NOT_CONNECTED");
     expect(() => resolveModelProfileChain({
       metadataStore: metadata, profileId: "workspace-default", userId: "normal-user", workspaceId: "customer-1"
     })).toThrow("WORKSPACE_DEFAULT_MODEL_PROFILE_NOT_CONNECTED");

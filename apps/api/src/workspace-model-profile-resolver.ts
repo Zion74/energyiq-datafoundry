@@ -52,21 +52,10 @@ export const resolveModelProfileChain = (input: {
   return profiles;
 };
 
-export const workspaceDefaultModelProfileAvailable = (
+export const workspaceDefaultModelProfileConfigured = (
   metadataStore: MetadataStore,
-  workspaceId: string
-): boolean => {
-  try {
-    return resolveModelProfileChain({
-      metadataStore,
-      profileId: WORKSPACE_DEFAULT_MODEL_PROFILE_ID,
-      userId: "unused-for-workspace-default",
-      workspaceId
-    }).length === 1;
-  } catch {
-    return false;
-  }
-};
+  workspaceId: string,
+): boolean => metadataStore.workspaceDefaultModelProfiles.find(workspaceId) !== undefined;
 
 const stringValue = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() ? value.trim() : undefined;

@@ -228,6 +228,10 @@ describe("ProjectAnalysisResolver", () => {
         .toBeCloseTo(PRESCHOOL_GOLDEN.centreA.usageKwh / 58, 8);
       expect(result.snapshot.analysis.childScopes[0]).toMatchObject({
         nodeId: PRESCHOOL_GOLDEN.centreA.scopeId,
+        areaSqm: 743,
+        occupantCount: 58,
+        kwhPerSqm: PRESCHOOL_GOLDEN.centreA.usageKwh / 743,
+        kwhPerPerson: PRESCHOOL_GOLDEN.centreA.usageKwh / 58,
         metadata: {
           status: "provisional",
           normalisations: {
@@ -273,6 +277,12 @@ describe("ProjectAnalysisResolver", () => {
           eui: { status: "provisional" },
           perPax: { status: "provisional" },
         },
+      });
+      expect(selectedCentreResult.snapshot.analysis.summary).toMatchObject({
+        areaSqm: 743,
+        occupantCount: 58,
+        kwhPerSqm: PRESCHOOL_GOLDEN.centreA.usageKwh / 743,
+        kwhPerPerson: PRESCHOOL_GOLDEN.centreA.usageKwh / 58,
       });
 
       const project = metadata.energyIq.getProject("preschool-demo");

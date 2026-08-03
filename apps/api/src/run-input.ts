@@ -15,7 +15,7 @@ import {
 } from "@datafoundry/agent-runtime";
 import {
   resolveModelProfileChain,
-  workspaceDefaultModelProfileAvailable
+  workspaceDefaultModelProfileConfigured
 } from "./workspace-model-profile-resolver.js";
 
 export type RunConfigDefaults = {
@@ -208,7 +208,7 @@ const loadWorkspaceRunDefaults = (
   }).filter((item) => item.default_enabled && item.status !== "disabled");
   const modelProfiles = enabled("model-profile");
   const skillIds = enabled("skill").map((item) => item.id);
-  const activeLlmProfileId = workspaceDefaultModelProfileAvailable(metadataStore, workspaceId)
+  const activeLlmProfileId = workspaceDefaultModelProfileConfigured(metadataStore, workspaceId)
     ? WORKSPACE_DEFAULT_MODEL_PROFILE_ID
     : preferConnectedResourceId(modelProfiles);
   return {

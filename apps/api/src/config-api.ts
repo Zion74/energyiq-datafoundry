@@ -91,6 +91,7 @@ import {
   handleWorkspaceDefaultModelProfileRequest,
   workspaceDefaultModelProfileDto
 } from "./workspace-model-profile-api.js";
+import { workspaceDefaultModelProfileConfigured } from "./workspace-model-profile-resolver.js";
 
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
 const DEFAULT_WORKSPACE_ID = "default";
@@ -3595,8 +3596,8 @@ const buildRunDefaults = (context: Required<ConfigApiContext>): Record<string, u
     enabledMcpServerIds: enabled("mcp-server").map((item) => item.id),
     enabledSkillIds: enabled("skill").map((item) => item.id),
     ...(datasourceIds[0] ? { activeDatasourceId: datasourceIds[0] } : {}),
-    activeLlmProfileId: workspaceDefaultModelProfileAvailable(context)
-      ? "workspace-default"
+    activeLlmProfileId: workspaceDefaultModelProfileConfigured(context.metadataStore, context.workspaceId)
+      ? WORKSPACE_DEFAULT_MODEL_PROFILE_ID
       : preferConnectedResourceId(modelProfiles),
     activeSkillId: enabled("skill")[0]?.id
   };
@@ -3610,25 +3611,13 @@ const listConfig = (context: Required<ConfigApiContext>, kind: ConfigResourceKin
   }).map(configResourceDto);
 
 const workspaceModelProfiles = (context: Required<ConfigApiContext>): Record<string, unknown>[] => {
-  const own = listConfig(context, "model-profile").filter((item) => item.id !== "workspace-default");
+  const own = listConfig(context, "model-profile")
+    .filter((item) => item.id !== WORKSPACE_DEFAULT_MODEL_PROFILE_ID);
   const shared = workspaceDefaultModelProfileDto({
     context,
     isAdmin: context.metadataStore.energyIq.findUserRole(context.userId)?.role === "admin"
   });
   return shared.configured === true ? [shared, ...own] : own;
-};
-
-const workspaceDefaultModelProfileAvailable = (context: Required<ConfigApiContext>): boolean => {
-  const binding = context.metadataStore.workspaceDefaultModelProfiles.find(context.workspaceId);
-  if (!binding) return false;
-  const profile = context.metadataStore.configResources.find({
-    id: binding.profile_id,
-    workspace_id: binding.workspace_id,
-    user_id: binding.profile_owner_user_id,
-    kind: "model-profile"
-  });
-  return profile?.default_enabled === true && profile.status === "connected"
-    && typeof profile.payload.fallbackProfileId !== "string";
 };
 
 const devIdentityUserDto = (user: UserRecord): Record<string, unknown> => ({
