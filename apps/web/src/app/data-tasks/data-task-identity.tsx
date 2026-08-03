@@ -338,15 +338,29 @@ function PasswordIdentityProvider({ children }: { children: ReactNode }) {
   }, [loadMe]);
 
   const signOut = useCallback(() => {
-    void configApi.logout().finally(() => {
-      setCurrentUser(null);
-    });
+    setError(null);
+    void (async () => {
+      try {
+        await configApi.logout();
+        setCurrentUser(null);
+        window.location.assign("/login");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to sign out");
+      }
+    })();
   }, []);
 
   const signOutAll = useCallback(() => {
-    void configApi.logoutAll().finally(() => {
-      setCurrentUser(null);
-    });
+    setError(null);
+    void (async () => {
+      try {
+        await configApi.logoutAll();
+        setCurrentUser(null);
+        window.location.assign("/login");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to sign out on all devices");
+      }
+    })();
   }, []);
 
   const changePassword = useCallback(async (input: { currentPassword: string; newPassword: string }) => {

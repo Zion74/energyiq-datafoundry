@@ -25,6 +25,7 @@ type EnergyIqAccessValue = {
   refresh: () => Promise<void>;
   selectOrganisation: (workspaceId: string) => Promise<void>;
   selectProject: (projectId: string) => void;
+  selectProjectContext: (workspaceId: string, projectId: string) => Promise<void>;
 };
 
 const EnergyIqAccessContext = createContext<EnergyIqAccessValue | null>(null);
@@ -110,6 +111,22 @@ export function EnergyIqAccessProvider({ children }: { children: ReactNode }) {
     await load(workspaceId);
   }, [access?.activeWorkspaceId, load]);
 
+  const selectProjectContext = useCallback(async (workspaceId: string, projectId: string) => {
+    if (!workspaceId || !projectId) return;
+    if (workspaceId === access?.activeWorkspaceId) {
+      selectProject(projectId);
+      return;
+    }
+    setConfigApiWorkspaceId(workspaceId);
+    try {
+      window.localStorage.setItem(ORGANISATION_STORAGE_KEY, workspaceId);
+      window.localStorage.setItem(projectStorageKey(workspaceId), projectId);
+    } catch {
+      // The requested context is still applied in memory when localStorage is unavailable.
+    }
+    await load(workspaceId);
+  }, [access?.activeWorkspaceId, load, selectProject]);
+
   const value = useMemo<EnergyIqAccessValue>(
     () => ({
       access,
@@ -119,8 +136,9 @@ export function EnergyIqAccessProvider({ children }: { children: ReactNode }) {
       refresh: load,
       selectOrganisation,
       selectProject,
+      selectProjectContext,
     }),
-    [access, activeProject, error, load, loading, selectOrganisation, selectProject],
+    [access, activeProject, error, load, loading, selectOrganisation, selectProject, selectProjectContext],
   );
 
   return (

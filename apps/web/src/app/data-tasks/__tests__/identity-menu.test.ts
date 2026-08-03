@@ -70,6 +70,14 @@ describe("data task identity menu", () => {
     expect(shell).toContain('settingsHref="/energyiq/settings"');
   });
 
+  it("finishes password sign out with a fresh login document", () => {
+    const file = source();
+
+    expect(file).toContain("await configApi.logout()");
+    expect(file).toContain('window.location.assign("/login")');
+    expect(file).not.toMatch(/configApi\.logout\(\)\.finally/);
+  });
+
   it("does not expose placeholder account menu items", () => {
     const file = source();
 

@@ -37,8 +37,10 @@ type AdminSidebarProps = {
   projects: AdminProjectSummary[];
   selectedProjectId: string;
   activeSection: AdminSection;
+  desktopCollapsed: boolean;
   onProjectChange: (projectId: string) => void;
   onCreateProject: () => void;
+  onDesktopCollapsedChange: (collapsed: boolean) => void;
   onSectionChange: (section: AdminSection) => void;
 };
 
@@ -85,7 +87,10 @@ export function EnergyIqAdminSidebar(props: AdminSidebarProps) {
 
   return (
     <>
-      <aside className="hidden w-[276px] shrink-0 border-r border-border bg-surface lg:flex lg:flex-col">
+      <aside className={props.desktopCollapsed
+        ? "hidden"
+        : "hidden w-[276px] shrink-0 border-r border-border bg-surface lg:flex lg:flex-col"}
+      >
         <SidebarContent {...props} selectedProject={selectedProject} />
       </aside>
 
@@ -115,6 +120,7 @@ function SidebarContent({
   activeSection,
   onProjectChange,
   onCreateProject,
+  onDesktopCollapsedChange,
   onSectionChange,
   compact = false,
 }: AdminSidebarProps & { selectedProject?: AdminProjectSummary; compact?: boolean }) {
@@ -122,19 +128,29 @@ function SidebarContent({
     <div className={compact ? "p-3" : "flex min-h-0 flex-1 flex-col"}>
       {!compact ? (
         <div className="border-b border-border px-4 py-4">
-          <div className="flex items-center justify-between gap-3">
-            <div>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
               <h1 className="text-sm font-semibold">Admin console</h1>
               <p className="mt-0.5 text-[11px] text-muted">Delivery, access and AI operations</p>
             </div>
             <button
               type="button"
-              onClick={onCreateProject}
-              className="shrink-0 rounded-lg border border-border px-2.5 py-1.5 text-[11px] font-semibold transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+              aria-label="Collapse admin navigation"
+              title="Collapse admin navigation"
+              onClick={() => onDesktopCollapsedChange(true)}
+              className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border px-2 text-[11px] font-semibold text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
             >
-              New project
+              <EnergyIcon name="chevron" className="h-3.5 w-3.5 rotate-180" />
+              Collapse
             </button>
           </div>
+          <button
+            type="button"
+            onClick={onCreateProject}
+            className="mt-3 w-full rounded-lg border border-border px-2.5 py-1.5 text-[11px] font-semibold transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+          >
+            New project
+          </button>
         </div>
       ) : null}
 

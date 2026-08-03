@@ -16,6 +16,7 @@ const navigation: Array<{
   icon: EnergyIconName;
 }> = [
   { href: "/energyiq/overview", label: "Overview", shortLabel: "Overview", icon: "analysis" },
+  { href: "/energyiq/saved", label: "Saved analyses", shortLabel: "Saved", icon: "calendar" },
   { href: "/energyiq/ai", label: "AI Analyst", shortLabel: "AI Analyst", icon: "ask" },
   { href: "/energyiq/explorer", label: "Project Explorer", shortLabel: "Explorer", icon: "explorer" },
 ];
@@ -107,9 +108,7 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
           <div className="ml-auto flex items-center gap-2">
             <span className="hidden items-center gap-1.5 rounded-full border border-step-success/25 bg-step-success/10 px-2.5 py-1 text-[11px] font-medium text-step-success sm:inline-flex">
               <span className="h-1.5 w-1.5 rounded-full bg-step-success" />
-              {activeProject?.id === "preschool-demo"
-                ? "Facts loaded · template preview"
-                : "Data through 17 Jun 2026"}
+              Published Project
             </span>
             <DataTaskAccountMenu
               settingsHref="/energyiq/settings"

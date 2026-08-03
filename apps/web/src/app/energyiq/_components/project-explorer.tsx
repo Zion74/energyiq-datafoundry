@@ -25,154 +25,22 @@ type ProjectNode = {
   parentId: string | null;
   type: "project" | "block" | "level" | "centre" | "meter" | "circuit";
   name: string;
-  subtitle?: string;
   role?: "total" | "submeter" | "virtual";
-  value?: number;
   category?: "Light" | "Load" | "Aircon";
-  quality?: "complete" | "partial";
-  areaSqm?: number;
-  occupantCount?: number;
 };
 
-const ngeeAnnNodes: ProjectNode[] = [
-  { id: "project", parentId: null, type: "project", name: "Ngee Ann Polytechnic" },
-  { id: "block-test", parentId: "project", type: "block", name: "Block Test", subtitle: "2 levels · 18 meters" },
-  { id: "level-7", parentId: "block-test", type: "level", name: "Level 7", subtitle: "9 direct meters" },
-  {
-    id: "l7-total-light",
-    parentId: "level-7",
-    type: "meter",
-    name: "Total Office Light",
-    subtitle: "Physical total",
-    role: "total",
-    category: "Light",
-    value: 701.76,
-    quality: "complete",
-  },
-  {
-    id: "l7-total-load",
-    parentId: "level-7",
-    type: "meter",
-    name: "Total Office Load",
-    subtitle: "Physical total",
-    role: "total",
-    category: "Load",
-    value: 1038.42,
-    quality: "complete",
-  },
-  {
-    id: "l7-front-light",
-    parentId: "level-7",
-    type: "meter",
-    name: "Front Row Office Light",
-    role: "submeter",
-    category: "Light",
-    value: 183.54,
-    quality: "complete",
-  },
-  {
-    id: "l7-middle-light",
-    parentId: "level-7",
-    type: "meter",
-    name: "Middle Row Office Light",
-    role: "submeter",
-    category: "Light",
-    value: 201.82,
-    quality: "complete",
-  },
-  {
-    id: "l7-back-light",
-    parentId: "level-7",
-    type: "meter",
-    name: "Back Row Office Light",
-    role: "submeter",
-    category: "Light",
-    value: 221.36,
-    quality: "complete",
-  },
-  {
-    id: "l7-load-1",
-    parentId: "level-7",
-    type: "meter",
-    name: "Office Load 1 · L1P1–L3P6",
-    role: "submeter",
-    category: "Load",
-    value: 284.72,
-    quality: "complete",
-  },
-  {
-    id: "l7-load-2",
-    parentId: "level-7",
-    type: "meter",
-    name: "Office Load 2 · L1P7–L3P15",
-    role: "submeter",
-    category: "Load",
-    value: 253.18,
-    quality: "complete",
-  },
-  {
-    id: "l7-load-3",
-    parentId: "level-7",
-    type: "meter",
-    name: "Office Load 3 · L1P16–L3P21",
-    role: "submeter",
-    category: "Load",
-    value: 267.63,
-    quality: "complete",
-  },
-  {
-    id: "l7-load-4",
-    parentId: "level-7",
-    type: "meter",
-    name: "Office Load 4 · Fan ISOL 1/2",
-    role: "submeter",
-    category: "Load",
-    value: 232.89,
-    quality: "complete",
-  },
-  { id: "level-6", parentId: "block-test", type: "level", name: "Level 6", subtitle: "9 direct meters" },
-  {
-    id: "l6-total-light",
-    parentId: "level-6",
-    type: "meter",
-    name: "Total Office Light",
-    subtitle: "Physical total",
-    role: "total",
-    category: "Light",
-    value: 565.73,
-    quality: "complete",
-  },
-  {
-    id: "l6-total-load",
-    parentId: "level-6",
-    type: "meter",
-    name: "Total Office Load",
-    subtitle: "Physical total",
-    role: "total",
-    category: "Load",
-    value: 924.16,
-    quality: "complete",
-  },
-  {
-    id: "l6-light-right",
-    parentId: "level-6",
-    type: "meter",
-    name: "Office Light-Right · Internal",
-    role: "submeter",
-    category: "Light",
-    value: 241.72,
-    quality: "partial",
-  },
-  {
-    id: "l6-load-4",
-    parentId: "level-6",
-    type: "meter",
-    name: "Office Load 4 · L1P19–L3P24",
-    role: "submeter",
-    category: "Load",
-    value: 258.24,
-    quality: "complete",
-  },
+type ExplorerPeriod = "Yesterday" | "Last 7 days" | "Custom";
+
+const explorerPeriodOptions: readonly Array<{
+  label: string;
+  value?: ExplorerPeriod;
+  disabled?: boolean;
+  title?: string;
+}> = [
+  { label: "Yesterday", value: "Yesterday" },
+  { label: "Last 7 days", value: "Last 7 days" },
+  { label: "Previous month", disabled: true, title: "Awaiting the trusted calendar-month period contract." },
+  { label: "Custom", value: "Custom" },
 ];
 
 const typeIcon: Record<ProjectNode["type"], EnergyIconName> = {
@@ -186,7 +54,7 @@ const typeIcon: Record<ProjectNode["type"], EnergyIconName> = {
 
 export function ProjectExplorer() {
   const { activeProject } = useEnergyIqAccess();
-  const [selectedId, setSelectedId] = useState("block-test");
+  const [selectedId, setSelectedId] = useState("");
   const [search, setSearch] = useState("");
   const [resource, setResource] = useState<"electricity" | "water">("electricity");
   const [hierarchyNodes, setHierarchyNodes] = useState<ProjectNode[] | null>(null);
@@ -194,9 +62,9 @@ export function ProjectExplorer() {
   const [analysis, setAnalysis] = useState<EnergyScopeAnalysisDto | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(
-    () => new Set(["project", "block-test", "level-6", "level-7"]),
-  );
+  const [periodSelection, setPeriodSelection] = useState<ExplorerPeriod>("Last 7 days");
+  const [customRange, setCustomRange] = useState({ projectId: "", from: "", to: "" });
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
 
   const activeProjectId = activeProject?.id;
 
@@ -208,16 +76,11 @@ export function ProjectExplorer() {
       .then((hierarchy) => {
         if (cancelled) return;
         const mapped = hierarchy.nodes.map((node) =>
-          mapHierarchyNode(
-            node,
-            activeProjectId === "ngee-ann-polytechnic"
-              ? ngeeAnnNodes.find((candidate) => candidate.id === node.id)
-              : undefined,
-          ),
+          mapHierarchyNode(node),
         );
         setHierarchyNodes(mapped);
-        setSelectedId(defaultScopeId(activeProjectId, mapped));
-        setExpandedIds(defaultExpandedIds(activeProjectId, mapped));
+        setSelectedId(defaultScopeId(mapped));
+        setExpandedIds(defaultExpandedIds(mapped));
       })
       .catch((reason) => {
         if (cancelled) return;
@@ -225,7 +88,7 @@ export function ProjectExplorer() {
         setHierarchyError(
           reason instanceof Error ? reason.message : "Unable to load project hierarchy",
         );
-        setSelectedId(activeProjectId === "ngee-ann-polytechnic" ? "block-test" : "");
+        setSelectedId("");
       });
     return () => {
       cancelled = true;
@@ -239,19 +102,32 @@ export function ProjectExplorer() {
       return;
     }
     let cancelled = false;
-    const period = analysisPeriodForProject(activeProjectId);
+    const range = customRange.projectId === activeProjectId
+      ? customRange
+      : { projectId: activeProjectId, from: "", to: "" };
+    if (periodSelection === "Custom" && (!range.from || !range.to)) {
+      setAnalysis(null);
+      setAnalysisError(null);
+      return;
+    }
     setAnalysisLoading(true);
     setAnalysisError(null);
     void configApi.executeEnergyScopeAnalysis({
       projectId: activeProjectId,
       scopeId: selectedId,
       resource,
-      period: "Custom",
-      from: period.from,
-      to: period.to,
+      period: periodSelection,
+      ...(periodSelection === "Custom" ? { from: range.from, to: range.to } : {}),
     }).then((result) => {
       if (cancelled) return;
       setAnalysis(result);
+      setCustomRange((current) => current.projectId === activeProjectId && current.from && current.to
+        ? current
+        : {
+          projectId: activeProjectId,
+          from: formatDateInput(result.context.from, result.context.timezone),
+          to: formatDateInput(new Date(Date.parse(result.context.to) - 1).toISOString(), result.context.timezone),
+        });
     }).catch((reason) => {
       if (cancelled) return;
       setAnalysis(null);
@@ -262,22 +138,16 @@ export function ProjectExplorer() {
     return () => {
       cancelled = true;
     };
-  }, [activeProjectId, resource, selectedId]);
+  }, [activeProjectId, customRange.from, customRange.projectId, customRange.to, periodSelection, resource, selectedId]);
 
-  const projectNodes = hierarchyNodes
-    ?? (activeProject?.id === "ngee-ann-polytechnic" ? ngeeAnnNodes : []);
+  const projectNodes = hierarchyNodes ?? [];
   const selected = projectNodes.find((node) => node.id === selectedId)
     ?? projectNodes[0]
-    ?? ngeeAnnNodes[0]!;
+    ?? { id: "", parentId: null, type: "project", name: activeProject?.name ?? "Loading project" };
   const children = projectNodes.filter((node) => node.parentId === selected.id);
   const directMeters = projectNodes.filter(
     (node) => node.parentId === selected.id && isMeterNode(node),
   );
-  const period = analysisPeriodForProject(activeProjectId ?? "");
-  const scopeArea = analysis?.summary.areaSqm ?? 0;
-  const scopeOccupants = analysis?.summary.occupantCount ?? 0;
-  const centresInScope = [selected, ...getDescendantNodes(selected.id, projectNodes)]
-    .filter((node) => node.type === "centre");
   const explorerMetricsPending = analysisLoading || !analysis;
   const analysisCircuitById = new Map(
     (analysis?.circuits ?? []).map((circuit) => [circuit.meterNodeId, circuit]),
@@ -318,23 +188,8 @@ export function ProjectExplorer() {
   const selectedValue = analysis?.summary.usageKwh ?? 0;
   const selectedTrend = (analysis?.hourlyProfile ?? []).map((point) => ({
     time: `${String(point.hour).padStart(2, "0")}:00`,
-    energy: point.averageKw,
-    baseline: point.peakKw,
+    averagePowerKw: point.averageKw,
   }));
-  const childScopeComparisons = analysis?.childScopes ?? [];
-  const composition = ["Light", "Load", "Aircon"].map((category) => {
-    const categoryCircuits = (analysis?.circuits ?? []).filter(
-      (circuit) => circuit.category.toLowerCase() === category.toLowerCase()
-        && circuit.meterRole !== "total",
-    );
-    const top = categoryCircuits[0];
-    return {
-      category,
-      total: categoryCircuits.reduce((sum, circuit) => sum + circuit.usageKwh, 0),
-      top,
-    };
-  }).filter((row) => row.total > 0);
-  const primaryAttention = analysis?.attention[0];
 
   return (
     <div className="mx-auto grid min-h-[calc(100vh-56px)] w-full max-w-[1680px] lg:grid-cols-[300px_minmax(0,1fr)]">
@@ -401,7 +256,35 @@ export function ProjectExplorer() {
                   {hierarchyError}
                 </p>
               ) : null}
-              <div className="mt-4" role="tree" aria-label="Project structure">
+              <div className="mt-4 flex items-center justify-between gap-3">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-light">
+                  Hierarchy
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    aria-label="Expand all hierarchy nodes"
+                    onClick={() => setExpandedIds(new Set(
+                      projectNodes
+                        .filter((node) => projectNodes.some((candidate) => candidate.parentId === node.id))
+                        .map((node) => node.id),
+                    ))}
+                    className="rounded-md px-2 py-1 text-[10px] font-semibold text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+                  >
+                    Expand all
+                  </button>
+                  <span className="text-border">/</span>
+                  <button
+                    type="button"
+                    aria-label="Collapse all hierarchy nodes"
+                    onClick={() => setExpandedIds(new Set())}
+                    className="rounded-md px-2 py-1 text-[10px] font-semibold text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+                  >
+                    Collapse all
+                  </button>
+                </div>
+              </div>
+              <div className="mt-2" role="tree" aria-label="Project structure">
                 <ProjectTree
                   allNodes={projectNodes}
                   nodes={filteredNodes}
@@ -465,29 +348,33 @@ export function ProjectExplorer() {
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-surface px-3 text-xs font-medium text-muted transition-colors hover:bg-surface-subtle hover:text-foreground"
-                >
-                  <EnergyIcon name="calendar" className="h-3.5 w-3.5" />
-                  {period.label}
-                </button>
-                <a
-                  href={buildEnergyAiHref({
-                    projectId: activeProject?.id ?? "",
-                    projectName: activeProject?.name ?? "",
-                    scopeId: selected.id,
-                    scopeName: selected.name,
-                    resource,
-                  })}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-semibold text-white transition-colors hover:bg-primary-light"
-                >
-                  <EnergyIcon name="ask" className="h-3.5 w-3.5" />
-                  Investigate with AI
-                </a>
+              <div className="flex max-w-full overflow-x-auto rounded-lg border border-border bg-surface p-1" aria-label="Explorer period">
+                {explorerPeriodOptions.map((option) => (
+                  <button
+                    key={option.label}
+                    type="button"
+                    onClick={() => option.value ? setPeriodSelection(option.value) : undefined}
+                    disabled={option.disabled}
+                    title={option.title}
+                    className={[
+                      "h-8 whitespace-nowrap rounded-md px-2.5 text-xs font-medium transition-colors",
+                      option.value && periodSelection === option.value ? "bg-surface-subtle text-foreground shadow-sm" : "text-muted hover:text-foreground",
+                      option.disabled ? "cursor-not-allowed opacity-45 hover:text-muted" : "",
+                    ].join(" ")}
+                  >
+                    {option.label}
+                  </button>
+                ))}
               </div>
             </div>
+
+            {periodSelection === "Custom" ? (
+              <div className="mt-4 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface px-4 py-3">
+                <ExplorerDateField label="From" value={customRange.projectId === activeProjectId ? customRange.from : ""} onChange={(from) => setCustomRange((current) => ({ ...current, projectId: activeProjectId ?? "", from }))} />
+                <ExplorerDateField label="To, inclusive" value={customRange.projectId === activeProjectId ? customRange.to : ""} onChange={(to) => setCustomRange((current) => ({ ...current, projectId: activeProjectId ?? "", to }))} />
+                <p className="pb-2 text-[10px] text-muted-light">The hierarchy stays fixed while the selected-period facts are re-queried.</p>
+              </div>
+            ) : null}
 
             {analysisError ? (
               <p className="mt-4 rounded-lg border border-step-warning/25 bg-step-warning/5 p-3 text-xs leading-5 text-step-warning">
@@ -495,7 +382,7 @@ export function ProjectExplorer() {
               </p>
             ) : null}
 
-            <div className="mt-6 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 xl:grid-cols-4">
+            <div className="mt-6 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 xl:grid-cols-5">
               {explorerMetricsPending ? (
                 <>
                   <MetricCell
@@ -504,17 +391,22 @@ export function ProjectExplorer() {
                     note="Resolved from the trusted project, scope and period"
                   />
                   <MetricCell
-                    label="Area in scope"
-                    value={scopeArea > 0 ? `${scopeArea.toLocaleString()} m²` : "—"}
-                    note={`${centresInScope.length} centre${centresInScope.length === 1 ? "" : "s"} in scope`}
+                    label="Latest cumulative reading"
+                    value="—"
+                    note="Waiting for the Meter Data Health contract"
                   />
                   <MetricCell
-                    label="People in scope"
-                    value={scopeOccupants > 0 ? scopeOccupants.toLocaleString() : "—"}
-                    note="Teachers + customers from project metadata"
+                    label="Average power"
+                    value="—"
+                    note="Hourly interval-average power loads below"
                   />
                   <MetricCell
-                    label="Data quality"
+                    label="Source"
+                    value="—"
+                    note="Waiting for trusted analysis provenance"
+                  />
+                  <MetricCell
+                    label="Data health"
                     value="—"
                     note="Waiting for deterministic analysis"
                   />
@@ -524,27 +416,28 @@ export function ProjectExplorer() {
                   <MetricCell
                     label="Period consumption"
                     value={`${selectedValue.toLocaleString(undefined, { maximumFractionDigits: 2 })} kWh`}
-                    note={`${analysis!.summary.nonOperatingSharePct.toFixed(1)}% outside operating hours`}
+                    note={`${analysis!.context.scopeName} · selected period`}
                   />
                   <MetricCell
-                    label="Estimated energy cost"
-                    value={`S$${analysis!.summary.costSgd.toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
-                    note={analysis!.summary.kwhPerSqm !== undefined
-                      ? `${analysis!.summary.kwhPerSqm.toFixed(2)} kWh/m²`
-                      : "Singapore reference tariff"}
+                    label="Latest cumulative reading"
+                    value="Not provided"
+                    note="Requires the latest accepted Raw Reading from Data Foundation"
                   />
                   <MetricCell
-                    label="Peak demand"
-                    value={`${analysis!.summary.peakKw.toLocaleString(undefined, { maximumFractionDigits: 2 })} kW`}
-                    note={analysis!.summary.kwhPerPerson !== undefined
-                      ? `${analysis!.summary.kwhPerPerson.toFixed(2)} kWh/person`
-                      : "Highest validated interval"}
+                    label="Average power"
+                    value="Hourly series"
+                    note={`${analysis!.hourlyProfile.length} server-provided hourly averages`}
                   />
                   <MetricCell
-                    label="Data quality"
-                    value={analysis!.summary.qualityEventCount > 0 ? "Review" : "Validated"}
-                    note={`${analysis!.summary.validIntervalCount.toLocaleString()} valid · ${analysis!.summary.qualityEventCount} flagged`}
-                    tone={analysis!.summary.qualityEventCount > 0 ? "warning" : "success"}
+                    label="Source"
+                    value={analysis!.provenance.sourceView}
+                    note={`Snapshot ${analysis!.provenance.dataSnapshotId}`}
+                  />
+                  <MetricCell
+                    label="Data health"
+                    value={analysis!.dataHealth.status === "complete" ? "Complete" : analysis!.dataHealth.status === "partial" ? "Review" : "Unavailable"}
+                    note={`${analysis!.dataHealth.coveragePct.toFixed(1)}% coverage · ${analysis!.dataHealth.qualityEventCount} flagged`}
+                    tone={analysis!.dataHealth.status === "complete" ? "success" : "warning"}
                   />
                 </>
               )}
@@ -555,7 +448,7 @@ export function ProjectExplorer() {
                 <div className="mb-3 flex items-end justify-between">
                   <div>
                     <h2 className="text-sm font-semibold text-foreground">Hourly operating profile</h2>
-                    <p className="mt-1 text-xs text-muted-light">Average and observed peak by hour across the selected period</p>
+                    <p className="mt-1 text-xs text-muted-light">Server-provided interval-average power by hour across the selected period</p>
                   </div>
                   <span className="text-[11px] text-muted-light">Average power · kW</span>
                 </div>
@@ -563,9 +456,11 @@ export function ProjectExplorer() {
                   {explorerMetricsPending ? (
                     <div className="grid h-full place-items-center text-center">
                       <div>
-                        <p className="text-sm font-medium text-foreground">Loading trusted interval facts</p>
+                        <p className="text-sm font-medium text-foreground">
+                          {analysisLoading ? "Loading trusted interval facts" : analysisError ? "Trusted interval facts are unavailable" : "No validated interval facts"}
+                        </p>
                         <p className="mt-1 max-w-sm text-xs leading-5 text-muted">
-                          The chart uses the exact Project, Scope and period shown above.
+                          {analysisError ? "Resolve the Data Foundation error shown above, then retry this exact Scope and period." : "The chart uses the exact Project, Scope and period shown above."}
                         </p>
                       </div>
                     </div>
@@ -588,22 +483,11 @@ export function ProjectExplorer() {
                           boxShadow: "0 8px 24px rgba(13,13,13,.08)",
                           fontSize: 12,
                         }}
-                        formatter={(value, name) => [
-                          `${Number(value).toFixed(1)} kW`,
-                          name === "energy" ? "Hourly average" : "Observed peak",
-                        ]}
+                        formatter={(value) => [`${Number(value).toFixed(1)} kW`, "Hourly average"]}
                       />
                       <Area
                         type="monotone"
-                        dataKey="baseline"
-                        stroke="#a3a3a3"
-                        strokeDasharray="5 4"
-                        fill="none"
-                        dot={false}
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="energy"
+                        dataKey="averagePowerKw"
                         stroke="#3f827f"
                         strokeWidth={2}
                         fill="url(#explorer-fill)"
@@ -617,147 +501,34 @@ export function ProjectExplorer() {
 
               <div>
                 <div className="mb-3">
-                  <h2 className="text-sm font-semibold text-foreground">What needs attention</h2>
-                  <p className="mt-1 text-xs text-muted-light">Evidence attached to this scope</p>
+                  <h2 className="text-sm font-semibold text-foreground">Source & Data Health</h2>
+                  <p className="mt-1 text-xs text-muted-light">Trace the selected facts without making a decision claim</p>
                 </div>
-                <div className={[
-                  "rounded-xl border p-5",
-                  explorerMetricsPending
-                    ? "border-border bg-surface"
-                    : "border-step-warning/30 bg-step-warning/5",
-                ].join(" ")}>
-                  <div className="flex items-center gap-2 text-step-warning">
-                    <EnergyIcon name="alert" className="h-4 w-4" />
-                    <span className="text-[11px] font-semibold uppercase tracking-[0.07em]">
-                      {explorerMetricsPending ? "Evaluating rules" : primaryAttention?.severity ?? "No exception"}
-                    </span>
-                  </div>
-                  <h3 className="mt-3 text-sm font-semibold text-foreground">
-                    {explorerMetricsPending
-                      ? "No anomaly claim before the rule is evaluated"
-                      : primaryAttention?.title ?? "No deterministic exception was triggered"}
-                  </h3>
-                  <p className="mt-2 text-xs leading-5 text-muted">
-                    {explorerMetricsPending
-                      ? "The system is calculating time, per-person and per-area evidence for this exact scope."
-                      : primaryAttention?.evidence ?? "The selected period passed the current deterministic checks."}
-                  </p>
-                  <div className="mt-4 border-t border-step-warning/20 pt-4">
-                    <p className="text-[11px] font-semibold text-foreground">Suggested check</p>
-                    <p className="mt-1 text-xs leading-5 text-muted">
-                      {explorerMetricsPending
-                        ? "Wait for the scoped evidence before acting."
-                        : primaryAttention?.suggestedAction ?? "Continue monitoring the next scheduled import."}
+                <div className="rounded-xl border border-border bg-surface p-5 shadow-[var(--shadow-card)]">
+                  {explorerMetricsPending ? (
+                    <p className="text-xs leading-5 text-muted">
+                      {analysisLoading
+                        ? "Loading the selected Scope, Data Snapshot and source query versions."
+                        : analysisError
+                          ? "Source evidence is withheld because the trusted analysis request failed."
+                          : "No source evidence was returned for this selection."}
                     </p>
-                  </div>
+                  ) : (
+                    <dl className="space-y-3 text-xs">
+                      <EvidenceRow label="Source view" value={analysis!.provenance.sourceView} />
+                      <EvidenceRow label="Data Snapshot" value={analysis!.provenance.dataSnapshotId} />
+                      <EvidenceRow label="Hierarchy" value={analysis!.provenance.hierarchyRevisionId} />
+                      <EvidenceRow label="Meter formula" value={analysis!.provenance.meterFormulaRevisionId} />
+                      <EvidenceRow label="Coverage" value={`${analysis!.dataHealth.coveragePct.toFixed(1)}%`} />
+                      <EvidenceRow label="Valid intervals" value={`${analysis!.dataHealth.validIntervalCount.toLocaleString()} / ${analysis!.dataHealth.expectedMeterIntervalCount.toLocaleString()}`} />
+                      <EvidenceRow label="Quality events" value={analysis!.dataHealth.qualityEventCount.toLocaleString()} />
+                      <EvidenceRow label="Last interval" value={analysis!.dataHealth.lastSeenAt ? formatExplorerTimestamp(analysis!.dataHealth.lastSeenAt, analysis!.context.timezone) : "Not provided"} />
+                      <EvidenceRow label="Import batches" value={analysis!.dataHealth.importBatchIds.join(", ") || "Not provided"} />
+                    </dl>
+                  )}
                 </div>
               </div>
             </div>
-
-            {!isMeterNode(selected) && !explorerMetricsPending ? (
-              <section className="mt-8">
-                <div className="mb-3">
-                  <h2 className="text-sm font-semibold text-foreground">Horizontal and vertical comparisons</h2>
-                  <p className="mt-1 text-xs text-muted-light">
-                    Horizontal compares sibling scopes; vertical compares this scope with its own historical time pattern.
-                  </p>
-                </div>
-
-                <div className="grid gap-6 xl:grid-cols-[0.85fr_1.15fr]">
-                  <div className="overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-card)]">
-                    <div className="border-b border-border px-5 py-4">
-                      <h3 className="text-sm font-semibold text-foreground">
-                        {childScopeComparisons.length > 0 ? "Child scope comparison" : "Load composition"}
-                      </h3>
-                      <p className="mt-1 text-xs text-muted-light">
-                        {childScopeComparisons.length > 0
-                          ? "Each child uses its own designated totals; the dominant submeter is shown separately."
-                          : "Light and load totals are compared without double-counting their submeters."}
-                      </p>
-                    </div>
-
-                    {childScopeComparisons.length > 0
-                      ? childScopeComparisons.map((scope) => {
-                          const max = Math.max(...childScopeComparisons.map((entry) => entry.usageKwh), 1);
-                          return (
-                            <button
-                              key={scope.nodeId}
-                              type="button"
-                              onClick={() => setSelectedId(scope.nodeId)}
-                              className="block w-full border-b border-border px-5 py-4 text-left last:border-b-0 hover:bg-surface-subtle"
-                            >
-                              <div className="flex items-center justify-between gap-4">
-                                <div>
-                                  <p className="text-sm font-semibold text-foreground">{scope.name}</p>
-                                  <p className="mt-1 text-xs text-muted">
-                                    Highest load: {scope.topCircuitName ?? "Not mapped"}
-                                  </p>
-                                </div>
-                                <span className="text-sm font-semibold tabular-nums text-foreground">
-                                  {scope.usageKwh.toLocaleString(undefined, { maximumFractionDigits: 0 })} kWh
-                                </span>
-                              </div>
-                              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-subtle">
-                                <div
-                                  className="h-full rounded-full bg-step-inspect"
-                                  style={{ width: `${Math.max(8, (scope.usageKwh / max) * 100)}%` }}
-                                />
-                              </div>
-                              <p className="mt-2 text-[11px] text-muted-light">
-                                {scope.sharePct.toFixed(1)}% of selected scope
-                                {scope.kwhPerSqm !== undefined ? ` · ${scope.kwhPerSqm.toFixed(2)} kWh/m²` : ""}
-                              </p>
-                            </button>
-                          );
-                        })
-                      : composition.map((row) => (
-                          <div key={row.category} className="border-b border-border px-5 py-4 last:border-b-0">
-                            <div className="flex items-center justify-between gap-4">
-                              <div>
-                                <p className="text-sm font-semibold text-foreground">{row.category}</p>
-                                <p className="mt-1 text-xs text-muted">
-                                  Highest component: {row.top?.name ?? "No submeter configured"}
-                                </p>
-                              </div>
-                              <span className="text-sm font-semibold tabular-nums text-foreground">
-                                {row.total.toLocaleString(undefined, { maximumFractionDigits: 0 })} kWh
-                              </span>
-                            </div>
-                            <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-surface-subtle">
-                              <div
-                                className={[
-                                  "h-full rounded-full",
-                                  row.category === "Light" ? "bg-step-inspect" : "bg-step-warning",
-                                ].join(" ")}
-                                style={{ width: `${Math.max(8, (row.total / Math.max(selectedValue, 1)) * 100)}%` }}
-                              />
-                            </div>
-                          </div>
-                        ))}
-                  </div>
-
-                  <div className="rounded-xl border border-border bg-surface p-5 shadow-[var(--shadow-card)]">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <h3 className="text-sm font-semibold text-foreground">Trusted query evidence</h3>
-                        <p className="mt-1 text-xs text-muted-light">The visible metrics are reproducible from fixed queries.</p>
-                      </div>
-                      <span className="rounded-full bg-step-success/10 px-2 py-1 text-[10px] font-semibold text-step-success">Scoped</span>
-                    </div>
-                    <dl className="mt-5 space-y-3 text-xs">
-                      <EvidenceRow label="Snapshot" value={analysis!.provenance.dataSnapshotId} />
-                      <EvidenceRow label="Hierarchy" value={analysis!.provenance.hierarchyRevisionId} />
-                      <EvidenceRow label="Meter formula" value={analysis!.provenance.meterFormulaRevisionId} />
-                      <EvidenceRow label="Aggregation" value={analysis!.provenance.aggregationRule.replaceAll("_", " ")} />
-                      <EvidenceRow label="Queries" value={analysis!.provenance.queryIds.join(", ")} />
-                    </dl>
-                    <p className="mt-5 border-t border-border pt-4 text-[11px] leading-5 text-muted">
-                      The room × level × time heatmap will use the same scope contract after room-level mappings are available; no mock heatmap is mixed into these facts.
-                    </p>
-                  </div>
-                </div>
-              </section>
-            ) : null}
 
             <section className="mt-8">
               <div className="mb-3 flex items-end justify-between">
@@ -765,8 +536,8 @@ export function ProjectExplorer() {
                   <h2 className="text-sm font-semibold text-foreground">Meter points attached to {selected.name}</h2>
                   <p className="mt-1 text-xs text-muted-light">
                     {explorerMetricsPending
-                      ? "Each circuit is queryable independently and rolls up once to its Centre."
-                      : "Total meters define scope totals; submeters support composition and drill-down."}
+                      ? "Each Meter Point is queried within the selected Scope and period."
+                      : "Period energy and health come from the same trusted analysis result shown above."}
                   </p>
                 </div>
                 <span className="text-[11px] text-muted-light">{directMeters.length} direct meters</span>
@@ -777,8 +548,8 @@ export function ProjectExplorer() {
                   <div className="hidden grid-cols-[minmax(0,1fr)_100px_110px_100px] gap-4 border-b border-border bg-surface-subtle px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-light md:grid">
                     <span>Meter point</span>
                     <span>Role</span>
-                    <span>Reading</span>
-                    <span>Quality</span>
+                    <span>Period energy</span>
+                    <span>Data health</span>
                   </div>
                   {directMeters.map((meter) => {
                     const circuit = analysisCircuitById.get(meter.id);
@@ -821,13 +592,13 @@ export function ProjectExplorer() {
               ) : isMeterNode(selected) ? (
                 <div className="rounded-xl border border-dashed border-border bg-surface p-6 text-center">
                   <p className="text-sm font-medium text-foreground">No child meters are attached</p>
-                  <p className="mt-1 text-xs text-muted-light">This is a leaf meter point. Use its trend and source records above.</p>
+                  <p className="mt-1 text-xs text-muted-light">This is a leaf Meter Point. Its selected-period facts and source evidence are shown above.</p>
                 </div>
               ) : (
                 <div className="rounded-xl border border-dashed border-border bg-surface p-6 text-center">
                   <p className="text-sm font-medium text-foreground">Meters are attached below this scope</p>
                   <p className="mt-1 text-xs text-muted-light">
-                    Use the child comparison above or select a child node to inspect its direct totals and submeters.
+                    Select a child node in the hierarchy to inspect its direct Meter Points.
                   </p>
                 </div>
               )}
@@ -897,9 +668,6 @@ function ProjectTree({
                 className={["h-3.5 w-3.5 shrink-0", selected ? "text-white" : "text-muted-light"].join(" ")}
               />
               <span className="min-w-0 flex-1 truncate font-medium">{node.name}</span>
-              {node.quality === "partial" ? (
-                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-step-warning" title="Partial data" />
-              ) : null}
             </button>
           );
         })}
@@ -927,53 +695,15 @@ function buildBreadcrumbs(node: ProjectNode, allNodes: ProjectNode[]): ProjectNo
   return result;
 }
 
-function getDescendantNodes(nodeId: string, allNodes: ProjectNode[]): ProjectNode[] {
-  const childIds = allNodes
-    .filter((node) => node.parentId === nodeId)
-    .map((node) => node.id);
-  const descendantIds = new Set(childIds);
-  const queue = [...childIds];
-  while (queue.length > 0) {
-    const current = queue.shift();
-    for (const child of allNodes.filter((node) => node.parentId === current)) {
-      if (descendantIds.has(child.id)) continue;
-      descendantIds.add(child.id);
-      queue.push(child.id);
-    }
-  }
-  return allNodes.filter((node) => descendantIds.has(node.id));
-}
-
-function getDescendantMeters(nodeId: string, allNodes: ProjectNode[]): ProjectNode[] {
-  return getDescendantNodes(nodeId, allNodes).filter(isMeterNode);
-}
-
 function isMeterNode(node: ProjectNode): boolean {
   return node.type === "meter" || node.type === "circuit";
 }
 
-function analysisPeriodForProject(projectId: string): { from: string; to: string; label: string } {
-  if (projectId === "preschool-demo") {
-    return { from: "2026-05-01", to: "2026-05-31", label: "1–31 May 2026" };
-  }
-  return { from: "2026-05-19", to: "2026-06-17", label: "19 May–17 Jun 2026" };
-}
-
-function defaultScopeId(projectId: string, allNodes: ProjectNode[]): string {
-  if (projectId === "ngee-ann-polytechnic" && allNodes.some((node) => node.id === "block-test")) {
-    return "block-test";
-  }
+function defaultScopeId(allNodes: ProjectNode[]): string {
   return allNodes.find((node) => node.parentId === null)?.id ?? allNodes[0]?.id ?? "";
 }
 
-function defaultExpandedIds(projectId: string, allNodes: ProjectNode[]): Set<string> {
-  if (projectId === "ngee-ann-polytechnic") {
-    return new Set(
-      ["project", "block-test", "level-6", "level-7"].filter((id) =>
-        allNodes.some((node) => node.id === id),
-      ),
-    );
-  }
+function defaultExpandedIds(allNodes: ProjectNode[]): Set<string> {
   const rootId = allNodes.find((node) => node.parentId === null)?.id;
   return new Set(rootId ? [rootId] : []);
 }
@@ -991,51 +721,50 @@ function ancestorsAreExpanded(
   return true;
 }
 
-function buildEnergyAiHref(input: {
-  projectId: string;
-  projectName: string;
-  scopeId: string;
-  scopeName: string;
-  resource: "electricity" | "water";
-}): string {
-  const params = new URLSearchParams({
-    projectId: input.projectId,
-    projectName: input.projectName,
-    scopeId: input.scopeId,
-    scopeName: input.scopeName,
-    resource: input.resource,
-  });
-  const period = analysisPeriodForProject(input.projectId);
-  params.set("period", "Custom");
-  params.set("from", period.from);
-  params.set("to", period.to);
-  return `/energyiq/ai?${params.toString()}`;
-}
-
 function mapHierarchyNode(
   node: EnergyProjectNodeDto,
-  fallback?: ProjectNode,
 ): ProjectNode {
   const metadata = parseHierarchyMetadata(node.metadata_json);
   const nodeType = normalizeNodeType(node.node_type);
   return {
-    ...fallback,
     id: node.id,
     parentId: node.parent_id ?? null,
     type: nodeType,
     name: node.name,
-    subtitle: nodeType === "centre"
-      ? [
-          metadata.facilityType,
-          node.area_sqm ? `${node.area_sqm.toLocaleString()} m²` : null,
-          node.occupant_count ? `${node.occupant_count} people` : null,
-        ].filter(Boolean).join(" · ")
-      : fallback?.subtitle,
-    role: metadata.meterRole ?? fallback?.role,
-    category: metadata.category ?? fallback?.category,
-    areaSqm: node.area_sqm,
-    occupantCount: node.occupant_count,
+    role: metadata.meterRole,
+    category: metadata.category,
   };
+}
+
+function ExplorerDateField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="text-[9px] font-semibold uppercase tracking-wide text-muted-light">
+      {label}
+      <input
+        type="date"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="mt-1 block h-9 rounded-md border border-border bg-surface px-3 text-xs font-medium normal-case text-foreground"
+      />
+    </label>
+  );
+}
+
+export function formatDateInput(value: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone,
+  }).format(new Date(value));
 }
 
 function normalizeNodeType(value: string): ProjectNode["type"] {
@@ -1053,7 +782,6 @@ function normalizeNodeType(value: string): ProjectNode["type"] {
 }
 
 function parseHierarchyMetadata(value: string | undefined): {
-  facilityType?: string;
   meterRole?: ProjectNode["role"];
   category?: ProjectNode["category"];
 } {
@@ -1066,7 +794,6 @@ function parseHierarchyMetadata(value: string | undefined): {
       ? `${rawCategory.slice(0, 1).toUpperCase()}${rawCategory.slice(1).toLowerCase()}`
       : undefined;
     return {
-      facilityType: typeof parsed.facilityType === "string" ? parsed.facilityType : undefined,
       meterRole:
         meterRole === "total" || meterRole === "submeter" || meterRole === "virtual"
           ? meterRole
@@ -1079,6 +806,18 @@ function parseHierarchyMetadata(value: string | undefined): {
   } catch {
     return {};
   }
+}
+
+function formatExplorerTimestamp(value: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-SG", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone,
+  }).format(new Date(value));
 }
 
 function EvidenceRow({ label, value }: { label: string; value: string }) {
