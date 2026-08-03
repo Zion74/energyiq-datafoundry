@@ -406,6 +406,9 @@ export type EnergyScopeAnalysisDto = {
     expectedMeterIntervalCount: number;
     validIntervalCount: number;
     qualityEventCount: number;
+    cumulativeDeltaMismatchCount?: number;
+    averageKwMismatchCount?: number;
+    invalidIntervalDurationCount?: number;
     lastSeenAt?: string;
     importBatchIds: string[];
   };
@@ -433,6 +436,66 @@ export type EnergyScopeAnalysisDto = {
     queryIds: ["scope_summary_v1", "hourly_profile_v1", "meter_breakdown_v1"];
   };
 };
+
+export type EnergyProjectRendererKeyDto = "ngee-ann-overview" | "preschool-overview";
+
+export type EnergyPublishedProjectReleaseDto = {
+  id: string;
+  source: "template-revision" | "legacy-profile";
+  projectId: string;
+  templateRevisionId: string | null;
+  templateRevisionSequence: number | null;
+  recipe: {
+    id: "energy-scope-analysis";
+    version: "1";
+  };
+  renderer: {
+    key: EnergyProjectRendererKeyDto;
+    version: "1";
+    contractVersion: "project-analysis-snapshot@1";
+  };
+  hierarchyRevisionId: string;
+  meterFormulaRevisionId: string;
+  metricRevisionIds: string[];
+  ruleRevisionIds: string[];
+  businessCalendarVersion: string;
+  tariffScheduleVersion: string;
+  publishedAt: string | null;
+  document: EnergyTemplateDraftDocumentDto;
+  catalog: EnergyComponentRevisionDto[];
+};
+
+export type EnergyProjectAnalysisSnapshotDto = {
+  context: EnergyQueryContextDto;
+  projectRelease: EnergyPublishedProjectReleaseDto;
+  recipe: EnergyPublishedProjectReleaseDto["recipe"];
+  renderer: EnergyPublishedProjectReleaseDto["renderer"];
+  dataQuality: EnergyScopeAnalysisDto["dataHealth"];
+  evidence: {
+    queryIds: EnergyScopeAnalysisDto["provenance"]["queryIds"];
+    ruleRevisionIds: string[];
+    findings: EnergyScopeAnalysisDto["attention"];
+  };
+  dataSnapshot: {
+    id: string;
+    importBatchIds: string[];
+    lastSeenAt: string | null;
+  };
+  analysis: EnergyScopeAnalysisDto;
+};
+
+export type EnergyProjectAnalysisResolutionDto =
+  | {
+    status: "ready";
+    snapshot: EnergyProjectAnalysisSnapshotDto;
+  }
+  | {
+    status: "configuration-required";
+    context: EnergyQueryContextDto;
+    projectId: string;
+    title: "Project analysis is not configured";
+    detail: string;
+  };
 
 export type EnergySavedAnalysisSummaryDto = {
   id: string;

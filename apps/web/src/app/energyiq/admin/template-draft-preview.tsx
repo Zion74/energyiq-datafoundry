@@ -4,10 +4,10 @@ import { useEffect, useState } from "react";
 
 import { configApi, type EnergyScopeAnalysisDto } from "../../../lib/config-api";
 import {
-  EnergyTemplateRenderer,
   type EnergyTemplateRendererState,
 } from "../_components/energy-template-renderer";
 import { EnergySelect } from "../_components/energy-select";
+import { ProjectRenderer } from "../_components/project-renderer-registry";
 import {
   buildTemplatePreviewRequest,
   type EnergyPreviewRange,
@@ -147,7 +147,8 @@ export function TemplateDraftPreview({
               <span className="font-mono">{rendererState.analysis.provenance.dataSnapshotId}</span>
             </div>
           ) : null}
-          <EnergyTemplateRenderer
+          <ProjectRenderer
+            request={{ mode: "admin-preview" }}
             state={rendererState}
             onRetry={nextRequest ? () => setSubmittedRequest(nextRequest) : undefined}
           />

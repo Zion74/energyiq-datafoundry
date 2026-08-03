@@ -441,6 +441,13 @@ Recipe：
 
 这条边界保证 Charles 改视觉不会改坏计算，也保证换 Excel/API 不需要重写页面。
 
+### 9.1 当前可执行接口（2026-08-04）
+
+- 客户 Overview 通过 `POST /api/v1/energy/analysis/resolve` 一次取得服务端解析的 Project、Scope、Primary Period、Published Project Release 前置契约和版本化 `ProjectAnalysisSnapshot`，不再分别拼接 Template 与 Analysis 响应。
+- `ProjectAnalysisSnapshot` 固定 Recipe/Renderer 版本，并携带 Data Quality、Evidence、Data Snapshot 与确定性 Scope Analysis。Workspace Membership、Project 可见性和 Scope 归属仍由服务端解析，浏览器传入的 Workspace 或客户专属 Scope 名称不构成授权依据。
+- 当前以不可变 `EnergyIqTemplateRevisionRecord` 作为 Published Project Release 的前置接口。历史 Ngee Ann 与 Preschool 在正式重新发布前只允许使用显式 `legacy-profile`；其他客户 Project 没有已注册 Renderer 时返回 `configuration-required`，不得回退为通用成品看板。
+- Renderer Registry 当前受控注册 `ngee-ann-overview@1`、`preschool-overview@1` 与仅限 Admin 的 `admin-generic-preview@1`。三者复用既有 `buildEnergyTemplateRenderPlan → EnergyTemplateRenderer`，没有建立虚构的 Recharts/ECharts Adapter seam；Renderer 不查询 DuckDB、不计算指标，也不生成建议。
+
 ## 10. Interactive、Save 和 Rerun 的关系
 
 ### 普通交互

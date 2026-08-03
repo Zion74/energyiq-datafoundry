@@ -17,6 +17,7 @@ import type {
   EnergyAdminOrganisationDto,
   EnergyAdminUserDto,
   EnergyImportBatchDto,
+  EnergyProjectAnalysisResolutionDto,
   EnergyProjectMetricConfigResponseDto,
   EnergyProjectDataCoverageDto,
   EnergyProjectRuleConfigResponseDto,
@@ -526,6 +527,15 @@ export const configApi = {
     body: EnergyQueryContextRequestDto,
   ): Promise<EnergyScopeAnalysisDto> {
     return requestEnvelope<EnergyScopeAnalysisDto>("/api/v1/energy/analysis/execute", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  resolveProjectAnalysis(
+    body: EnergyQueryContextRequestDto,
+  ): Promise<EnergyProjectAnalysisResolutionDto> {
+    return requestEnvelope<EnergyProjectAnalysisResolutionDto>("/api/v1/energy/analysis/resolve", {
       method: "POST",
       body: JSON.stringify(body),
     });

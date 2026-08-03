@@ -18,6 +18,7 @@ import { executeEnergyScopeAnalysis } from "./energy-analysis.js";
 import { inspectEnergyExcelWorkbook } from "./energy-excel-import.js";
 import { buildEnergyExcelMaterialization } from "./energy-import-materializer.js";
 import { EnergyAdminAccessService } from "./energy-admin-access.js";
+import { resolveProjectAnalysis } from "./project-analysis-resolver.js";
 import {
   resolveEnergyAccessContext,
   resolveEnergyQueryContext,
@@ -608,6 +609,19 @@ export const handleEnergyApiRequest = async (
           userId: context.userId,
           context: energyContext
         }))
+      };
+    }
+    if (segments[0] === "analysis" && segments[1] === "resolve" && request.method === "POST") {
+      const body = await readJsonBody(request);
+      return {
+        status: 200,
+        body: createSuccessResult(await resolveProjectAnalysis({
+          metadataStore: context.metadataStore,
+          dataGateway: context.dataGateway,
+          user,
+          workspaceId: context.workspaceId,
+          request: parseQueryContextRequest(body),
+        })),
       };
     }
     if (segments[0] === "projects" && segments[2] === "hierarchy" && request.method === "GET") {
