@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { configApi, type EnergyScopeAnalysisDto } from "../../../lib/config-api";
 import { EnergyTemplateRenderer } from "../_components/energy-template-renderer";
+import { EnergySelect } from "../_components/energy-select";
 import {
   buildTemplatePreviewRequest,
   type EnergyPreviewRange,
@@ -89,22 +90,34 @@ export function TemplateDraftPreview({
         </div>
 
         <div className="mt-4 grid gap-3 rounded-lg bg-surface-subtle p-3 md:grid-cols-[minmax(160px,0.8fr)_minmax(180px,1fr)_auto] md:items-end">
-          <label className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-muted">
             Preview scope
-            <select value={scopeId} onChange={(event) => setScopeId(event.target.value)} className="mt-1.5 h-9 w-full rounded-md border border-border bg-surface px-3 text-xs font-medium normal-case tracking-normal text-foreground">
-              {plan.scopes.map((scope) => <option key={scope.id} value={scope.id}>{scope.name} · {scope.detail}</option>)}
-            </select>
-          </label>
-          <label className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+            <EnergySelect
+              ariaLabel="Preview scope"
+              value={scopeId}
+              options={plan.scopes.map((scope) => ({ value: scope.id, label: `${scope.name} · ${scope.detail}` }))}
+              onValueChange={setScopeId}
+              className="mt-1.5 w-full"
+              size="small"
+            />
+          </div>
+          <div className="text-[10px] font-semibold uppercase tracking-wide text-muted">
             Analysis period
-            <select value={period} onChange={(event) => setPeriod(event.target.value as PreviewPeriod)} className="mt-1.5 h-9 w-full rounded-md border border-border bg-surface px-3 text-xs font-medium normal-case tracking-normal text-foreground">
-              <option value="Available facts" disabled={!previewRange}>Available fact range{previewRange ? ` · ${previewRange.label}` : " · unavailable"}</option>
-              <option value="Yesterday">Yesterday</option>
-              <option value="Last 7 days">Last 7 days</option>
-              <option value="Last 30 days">Last 30 days</option>
-              <option value="Custom">Custom dates</option>
-            </select>
-          </label>
+            <EnergySelect
+              ariaLabel="Analysis period"
+              value={period}
+              options={[
+                { value: "Available facts", label: `Available fact range${previewRange ? ` · ${previewRange.label}` : " · unavailable"}`, disabled: !previewRange },
+                { value: "Yesterday", label: "Yesterday" },
+                { value: "Last 7 days", label: "Last 7 days" },
+                { value: "Last 30 days", label: "Last 30 days" },
+                { value: "Custom", label: "Custom dates" },
+              ]}
+              onValueChange={(nextPeriod) => setPeriod(nextPeriod as PreviewPeriod)}
+              className="mt-1.5 w-full"
+              size="small"
+            />
+          </div>
           <button type="button" disabled={!nextRequest || loading || plan.scopes.length === 0} onClick={() => setSubmittedRequest(nextRequest)} className="h-9 rounded-md bg-foreground px-4 text-xs font-semibold text-background disabled:cursor-not-allowed disabled:opacity-40">
             {loading ? "Running..." : "Run preview"}
           </button>

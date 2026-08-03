@@ -33,6 +33,7 @@ import {
   type EnergyTierDefinitionDto,
 } from "../../../lib/config-api";
 import { EnergyIcon } from "../_components/icons";
+import { EnergySelect } from "../_components/energy-select";
 import type { useEnergyIqAccess } from "../_components/energyiq-access";
 import { EnergyIqAdminSidebar, type AdminSection } from "./admin-sidebar";
 import { AdminAccessPages } from "./admin-access-pages";
@@ -1732,51 +1733,67 @@ function MeterMappingEditor({
           <input value={draft.display_name} onChange={(event) => setDraft((current) => ({ ...current, display_name: event.target.value }))} className={inputClass} />
         </Field>
         <Field label="Existing Scope" hint="Scopes are created only in Structure.">
-          <select value={draft.scope_id} onChange={(event) => setDraft((current) => ({ ...current, scope_id: event.target.value }))} className={`${inputClass} ${scopeExists ? "" : "border-step-error"}`}>
-            <option value="">Select an existing Scope</option>
-            {orderedTiers.flatMap((tier) => document.nodes
-              .filter((node) => node.tier_definition_id === tier.id)
-              .map((node) => <option key={node.id} value={node.id}>{tier.alias} · {nodePathLabel(document, node.id)}</option>))}
-          </select>
+          <EnergySelect
+            ariaLabel="Existing Scope"
+            value={draft.scope_id}
+            options={[
+              { value: "", label: "Select an existing Scope" },
+              ...orderedTiers.flatMap((tier) => document.nodes
+                .filter((node) => node.tier_definition_id === tier.id)
+                .map((node) => ({ value: node.id, label: `${tier.alias} · ${nodePathLabel(document, node.id)}` }))),
+            ]}
+            onValueChange={(scopeId) => setDraft((current) => ({ ...current, scope_id: scopeId }))}
+            invalid={!scopeExists}
+            className="w-full"
+          />
           {!scopeExists ? <button type="button" onClick={onReturnToStructure} className="mt-2 text-[11px] font-semibold text-step-error hover:underline">Scope missing · Return to Structure</button> : null}
         </Field>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Resource">
-            <select value={draft.resource} onChange={(event) => setDraft((current) => ({ ...current, resource: event.target.value as EnergyMeterMappingRowDto["resource"] }))} className={inputClass}>
-              <option value="electricity">Electricity</option>
-              <option value="water">Water</option>
-            </select>
+            <EnergySelect ariaLabel="Resource" value={draft.resource} options={resourceOptions} onValueChange={(resource) => setDraft((current) => ({ ...current, resource: resource as EnergyMeterMappingRowDto["resource"] }))} className="w-full" />
           </Field>
           <Field label="Category">
-            <select value={draft.category} onChange={(event) => setDraft((current) => ({ ...current, category: event.target.value as EnergyMeterMappingRowDto["category"] }))} className={inputClass}>
-              <option value="overall">Overall</option>
-              <option value="load">Load</option>
-              <option value="light">Light</option>
-              <option value="aircon">Aircon</option>
-              <option value="other">Other</option>
-            </select>
+            <EnergySelect ariaLabel="Category" value={draft.category} options={categoryOptions} onValueChange={(category) => setDraft((current) => ({ ...current, category: category as EnergyMeterMappingRowDto["category"] }))} className="w-full" />
           </Field>
         </div>
         <Field label="Coverage" hint="This describes what the meter covers inside the selected Scope and Category.">
-          <select value={draft.coverage} onChange={(event) => setDraft((current) => ({ ...current, coverage: event.target.value as EnergyMeterMappingRowDto["coverage"] }))} className={inputClass}>
-            <option value="whole">Whole scope</option>
-            <option value="partial">Partial</option>
-            <option value="reference">Reference only</option>
-          </select>
+          <EnergySelect
+            ariaLabel="Coverage"
+            value={draft.coverage}
+            options={[
+              { value: "whole", label: "Whole scope" },
+              { value: "partial", label: "Partial" },
+              { value: "reference", label: "Reference only" },
+            ]}
+            onValueChange={(coverage) => setDraft((current) => ({ ...current, coverage: coverage as EnergyMeterMappingRowDto["coverage"] }))}
+            className="w-full"
+          />
         </Field>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Meter Role">
-            <select value={draft.meter_role} onChange={(event) => setDraft((current) => ({ ...current, meter_role: event.target.value as EnergyMeterMappingRowDto["meter_role"] }))} className={inputClass}>
-              <option value="total">Total</option>
-              <option value="component">Component</option>
-              <option value="standalone">Standalone</option>
-            </select>
+            <EnergySelect
+              ariaLabel="Meter Role"
+              value={draft.meter_role}
+              options={[
+                { value: "total", label: "Total" },
+                { value: "component", label: "Component" },
+                { value: "standalone", label: "Standalone" },
+              ]}
+              onValueChange={(meterRole) => setDraft((current) => ({ ...current, meter_role: meterRole as EnergyMeterMappingRowDto["meter_role"] }))}
+              className="w-full"
+            />
           </Field>
           <Field label="Official aggregation">
-            <select value={draft.aggregation_usage} onChange={(event) => setDraft((current) => ({ ...current, aggregation_usage: event.target.value as EnergyMeterMappingRowDto["aggregation_usage"] }))} className={inputClass}>
-              <option value="official">Included</option>
-              <option value="excluded">Excluded</option>
-            </select>
+            <EnergySelect
+              ariaLabel="Official aggregation"
+              value={draft.aggregation_usage}
+              options={[
+                { value: "official", label: "Included" },
+                { value: "excluded", label: "Excluded" },
+              ]}
+              onValueChange={(aggregationUsage) => setDraft((current) => ({ ...current, aggregation_usage: aggregationUsage as EnergyMeterMappingRowDto["aggregation_usage"] }))}
+              className="w-full"
+            />
           </Field>
         </div>
         {draft.meter_role === "standalone" && draft.aggregation_usage === "official" ? (
@@ -1911,13 +1928,23 @@ function VirtualMeterPanel({
           <div className="space-y-4">
             <Field label="Display name"><input value={name} onChange={(event) => setName(event.target.value)} className={inputClass} /></Field>
             <Field label="Existing Scope">
-              <select value={scopeId} onChange={(event) => setScopeId(event.target.value)} className={inputClass}>
-                {tiersTopDown(document).flatMap((tier) => document.nodes.filter((node) => node.tier_definition_id === tier.id).map((node) => <option key={node.id} value={node.id}>{tier.alias} · {nodePathLabel(document, node.id)}</option>))}
-              </select>
+              <EnergySelect
+                ariaLabel="Existing Scope"
+                value={scopeId}
+                options={tiersTopDown(document).flatMap((tier) => document.nodes
+                  .filter((node) => node.tier_definition_id === tier.id)
+                  .map((node) => ({ value: node.id, label: `${tier.alias} · ${nodePathLabel(document, node.id)}` })))}
+                onValueChange={setScopeId}
+                className="w-full"
+              />
             </Field>
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-              <Field label="Resource"><select value={resource} onChange={(event) => { setResource(event.target.value as EnergyVirtualMeterDto["resource"]); setTerms({}); }} className={inputClass}><option value="electricity">Electricity</option><option value="water">Water</option></select></Field>
-              <Field label="Category"><select value={category} onChange={(event) => setCategory(event.target.value as EnergyVirtualMeterDto["category"])} className={inputClass}><option value="overall">Overall</option><option value="load">Load</option><option value="light">Light</option><option value="aircon">Aircon</option><option value="other">Other</option></select></Field>
+              <Field label="Resource">
+                <EnergySelect ariaLabel="Resource" value={resource} options={resourceOptions} onValueChange={(nextResource) => { setResource(nextResource as EnergyVirtualMeterDto["resource"]); setTerms({}); }} className="w-full" />
+              </Field>
+              <Field label="Category">
+                <EnergySelect ariaLabel="Category" value={category} options={categoryOptions} onValueChange={(nextCategory) => setCategory(nextCategory as EnergyVirtualMeterDto["category"])} className="w-full" />
+              </Field>
             </div>
             <button type="button" disabled={!name.trim() || !scopeId || selectedTerms.length < 2} onClick={saveVirtualMeter} className={`${primaryButton} w-full`}>Save Virtual Meter</button>
             <p className="text-[10px] leading-4 text-muted">Choose at least two inputs. Use + to sum circuits or - to calculate a residual from a total.</p>
@@ -1927,9 +1954,15 @@ function VirtualMeterPanel({
             <div className="mt-3 grid gap-2 md:grid-cols-2">
               {availableRows.map((row) => (
                 <div key={row.id} className="flex items-center gap-3 rounded-lg bg-surface-subtle px-3 py-2.5">
-                  <select value={terms[row.id] ?? 0} onChange={(event) => setTerms((current) => ({ ...current, [row.id]: Number(event.target.value) as 0 | 1 | -1 }))} aria-label={`Formula operator for ${row.source_label}`} className="h-8 rounded-md border border-border bg-surface px-2 text-xs">
-                    <option value="0">Off</option><option value="1">+</option><option value="-1">-</option>
-                  </select>
+                  <EnergySelect
+                    ariaLabel={`Formula operator for ${row.source_label}`}
+                    value={String(terms[row.id] ?? 0)}
+                    options={formulaOperatorOptions}
+                    onValueChange={(operator) => setTerms((current) => ({ ...current, [row.id]: Number(operator) as 0 | 1 | -1 }))}
+                    className="w-16 shrink-0"
+                    menuClassName="min-w-24"
+                    size="compact"
+                  />
                   <span className="min-w-0"><span className="block truncate text-[11px] font-semibold">{row.display_name}</span><span className="block truncate text-[9px] text-muted">{nodePathLabel(document, row.scope_id)}</span></span>
                 </div>
               ))}
@@ -2053,18 +2086,16 @@ function ProjectProfile({
               />
             </Field>
             <Field label="Timezone">
-              <select
+              <EnergySelect
+                ariaLabel="Timezone"
                 value={document.project.timezone}
-                onChange={(event) => changeDocument((current) => ({
+                options={timezoneOptions}
+                onValueChange={(timezone) => changeDocument((current) => ({
                   ...current,
-                  project: { ...current.project, timezone: event.target.value },
+                  project: { ...current.project, timezone },
                 }))}
-                className={inputClass}
-              >
-                <option value="Asia/Singapore">Asia/Singapore (SGT)</option>
-                <option value="Asia/Kuala_Lumpur">Asia/Kuala Lumpur (MYT)</option>
-                <option value="UTC">UTC</option>
-              </select>
+                className="w-full"
+              />
             </Field>
             <ReadOnlyField label="Project ID" value={setup.project.id} />
             <ReadOnlyField label="Workspace ID" value={setup.project.workspace_id} />
@@ -2723,24 +2754,32 @@ function NodeInspector({
       <ReadOnlyField label="Internal node ID" value={node.id} />
       {parentTier ? (
         <Field label={`Parent ${parentTier.alias}`}>
-          <select
+          <EnergySelect
+            ariaLabel={`Parent ${parentTier.alias}`}
             value={draft.parent_id ?? ""}
-            onChange={(event) => {
-              const nextParentId = event.target.value || undefined;
+            options={[
+              { value: "", label: "Select parent" },
+              ...parentOptions.map((parent) => ({ value: parent.id, label: parent.name })),
+            ]}
+            onValueChange={(parentId) => {
+              const nextParentId = parentId || undefined;
               setDraft((current) => ({ ...current, parent_id: nextParentId }));
             }}
-            className={inputClass}
-          >
-            <option value="">Select parent</option>
-            {parentOptions.map((parent) => <option key={parent.id} value={parent.id}>{parent.name}</option>)}
-          </select>
+            className="w-full"
+          />
         </Field>
       ) : null}
       <Field label="Metadata confidence" hint="Provisional values remain visibly labelled until confirmed.">
-        <select value={draft.metadata_status} onChange={(event) => setDraft((current) => ({ ...current, metadata_status: event.target.value as EnergyProjectSetupNodeDto["metadata_status"] }))} className={inputClass}>
-          <option value="provisional">Provisional</option>
-          <option value="confirmed">Confirmed</option>
-        </select>
+        <EnergySelect
+          ariaLabel="Metadata confidence"
+          value={draft.metadata_status}
+          options={[
+            { value: "provisional", label: "Provisional" },
+            { value: "confirmed", label: "Confirmed" },
+          ]}
+          onValueChange={(metadataStatus) => setDraft((current) => ({ ...current, metadata_status: metadataStatus as EnergyProjectSetupNodeDto["metadata_status"] }))}
+          className="w-full"
+        />
       </Field>
       <Field label="Area (m²)" hint="Optional. Used for kWh per m² comparisons.">
         <input type="number" min="0" value={draft.area_sqm ?? ""} onChange={(event) => setDraft((current) => ({ ...current, area_sqm: optionalNumericInput(event.target.value) }))} className={inputClass} />
@@ -2848,7 +2887,7 @@ function NewProjectDialog({ onClose, onCreated }: { onClose: () => void; onCreat
         <p className="mt-1 text-xs leading-5 text-muted">Create the stable project scope first. Tiers and nodes remain an unpublished draft until you validate and publish them.</p>
         <div className="mt-5 space-y-4">
           <Field label="Project name"><input autoFocus required value={name} onChange={(event) => setName(event.target.value)} className={inputClass} placeholder="e.g. Tampines Preschool Portfolio" /></Field>
-          <Field label="Timezone"><select value={timezone} onChange={(event) => setTimezone(event.target.value)} className={inputClass}><option value="Asia/Singapore">Asia/Singapore (SGT)</option><option value="Asia/Kuala_Lumpur">Asia/Kuala Lumpur (MYT)</option><option value="UTC">UTC</option></select></Field>
+          <Field label="Timezone"><EnergySelect ariaLabel="Timezone" value={timezone} options={timezoneOptions} onValueChange={setTimezone} className="w-full" /></Field>
         </div>
         {error ? <p className="mt-4 text-xs text-step-error">{error}</p> : null}
         <div className="mt-6 flex justify-end gap-2">
@@ -2893,5 +2932,26 @@ function LoadingPanel() {
 const optionalNumericInput = (value: string): number | undefined => value === "" ? undefined : Number(value);
 const messageFrom = (reason: unknown, fallback: string): string => reason instanceof Error ? reason.message : fallback;
 const inputClass = "w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm outline-none transition-shadow focus:border-primary/30 focus:ring-2 focus:ring-primary/10";
+const resourceOptions = [
+  { value: "electricity", label: "Electricity" },
+  { value: "water", label: "Water" },
+];
+const categoryOptions = [
+  { value: "overall", label: "Overall" },
+  { value: "load", label: "Load" },
+  { value: "light", label: "Light" },
+  { value: "aircon", label: "Aircon" },
+  { value: "other", label: "Other" },
+];
+const formulaOperatorOptions = [
+  { value: "0", label: "Off" },
+  { value: "1", label: "+" },
+  { value: "-1", label: "−" },
+];
+const timezoneOptions = [
+  { value: "Asia/Singapore", label: "Asia/Singapore (SGT)" },
+  { value: "Asia/Kuala_Lumpur", label: "Asia/Kuala Lumpur (MYT)" },
+  { value: "UTC", label: "UTC" },
+];
 const secondaryButton = "inline-flex items-center justify-center rounded-lg border border-border bg-surface px-3 py-2 text-xs font-semibold text-foreground hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-40";
 const primaryButton = "inline-flex items-center justify-center rounded-lg bg-primary px-3 py-2 text-xs font-semibold text-white hover:bg-primary-light disabled:cursor-not-allowed disabled:opacity-40";

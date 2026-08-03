@@ -1,6 +1,7 @@
 "use client";
 
 import { EnergyIcon, type EnergyIconName } from "../_components/icons";
+import { EnergySelect } from "../_components/energy-select";
 
 export type AdminSection =
   | "overview"
@@ -28,6 +29,8 @@ type AdminProjectSummary = {
   id: string;
   name: string;
   status: string;
+  workspaceId?: string;
+  workspaceName?: string;
 };
 
 type AdminSidebarProps = {
@@ -148,25 +151,25 @@ function SidebarContent({
         <details className="group/projects" open>
           <NavigationGroupSummary label="Projects" active={isProjectSection(activeSection)} />
           <div className="mt-1 space-y-1 pl-2">
-            <label className="mb-2 block px-1">
-              <span className="sr-only">Admin project</span>
-              <span className="relative block">
-                <EnergyIcon name="building" className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-light" />
-                <select
-                  aria-label="Admin project"
-                  value={selectedProjectId}
-                  onChange={(event) => onProjectChange(event.target.value)}
-                  className="h-10 w-full appearance-none rounded-lg border border-border bg-surface-subtle pl-9 pr-8 text-xs font-semibold outline-none transition-colors hover:border-muted-light focus-visible:ring-2 focus-visible:ring-primary/20"
-                >
-                  {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-                </select>
-                <EnergyIcon name="chevron" className="pointer-events-none absolute right-3 top-1/2 h-3 w-3 -translate-y-1/2 rotate-90 text-muted-light" />
-              </span>
+            <div className="mb-2 px-1">
+              <EnergySelect
+                ariaLabel="Admin project"
+                value={selectedProjectId}
+                options={projects.map((project) => ({
+                  value: project.id,
+                  label: project.workspaceName ? `${project.workspaceName} · ${project.name}` : project.name,
+                }))}
+                onValueChange={onProjectChange}
+                leadingIcon={<EnergyIcon name="building" className="h-3.5 w-3.5" />}
+                placeholder="Select project"
+                className="w-full"
+                triggerClassName="bg-surface-subtle text-xs font-semibold hover:border-muted-light"
+              />
               <span className="mt-1.5 flex items-center justify-between px-1 text-[10px] text-muted-light">
                 <span>Selected project</span>
                 <span className="capitalize">{selectedProject?.status ?? "Draft"}</span>
               </span>
-            </label>
+            </div>
             {projectItems.map((item) => (
               <NavigationButton
                 key={item.id}

@@ -8,6 +8,7 @@ import {
   type EnergyAdminUserDto,
 } from "../../../lib/config-api";
 import { EnergyIcon } from "../_components/icons";
+import { EnergySelect } from "../_components/energy-select";
 
 type AdminAccessPagesProps = {
   initialView: "organisations" | "users";
@@ -204,10 +205,16 @@ function UsersView({
           aria-label="Search users"
           className={inputClass}
         />
-        <select value={organisationId} onChange={(event) => setOrganisationId(event.target.value)} className={inputClass} aria-label="Filter by organisation">
-          <option value="all">All organisations</option>
-          {organisations.map((organisation) => <option key={organisation.id} value={organisation.id}>{organisation.name}</option>)}
-        </select>
+        <EnergySelect
+          ariaLabel="Filter by organisation"
+          value={organisationId}
+          options={[
+            { value: "all", label: "All organisations" },
+            ...organisations.map((organisation) => ({ value: organisation.id, label: organisation.name })),
+          ]}
+          onValueChange={setOrganisationId}
+          className="w-full"
+        />
       </div>
       {visibleUsers.length === 0 ? (
         <AccessState icon="user" title="No users match this view" />
@@ -346,10 +353,16 @@ function UserDialog({
           <Field label="Email"><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} className={inputClass} required disabled={Boolean(user)} /></Field>
         </div>
         <Field label="Account role">
-          <select value={role} onChange={(event) => setRole(event.target.value === "admin" ? "admin" : "user")} className={inputClass}>
-            <option value="user">User — customer product access</option>
-            <option value="admin">Admin — platform-wide access</option>
-          </select>
+          <EnergySelect
+            ariaLabel="Account role"
+            value={role}
+            options={[
+              { value: "user", label: "User — customer product access" },
+              { value: "admin", label: "Admin — platform-wide access" },
+            ]}
+            onValueChange={(nextRole) => setRole(nextRole === "admin" ? "admin" : "user")}
+            className="w-full"
+          />
         </Field>
         <fieldset>
           <legend className="text-xs font-semibold">Organisations</legend>

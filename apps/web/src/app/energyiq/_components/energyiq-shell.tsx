@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { EnergyIcon, type EnergyIconName } from "./icons";
+import { EnergySelect } from "./energy-select";
 import { useEnergyIqAccess } from "./energyiq-access";
 import { DataTaskAccountMenu } from "../../data-tasks/data-task-identity";
 
@@ -28,6 +29,11 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
   const activeWorkspace = access?.workspaces.find(
     (workspace) => workspace.id === access.activeWorkspaceId,
   );
+  const publishedProjects = access?.projects.filter((project) => project.status === "published") ?? [];
+  const isAdminPage = pathname.startsWith("/energyiq/admin");
+  const showWorkspaceSelector = !isAdminPage && (access?.workspaces.length ?? 0) > 1;
+  const showProjectSelector = !isAdminPage && publishedProjects.length > 1;
+  const showStaticProjectContext = !isAdminPage && publishedProjects.length === 1 && activeProject;
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-surface-subtle text-foreground">
@@ -42,44 +48,41 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
 
           <div className="hidden h-5 w-px bg-border sm:block" />
 
-          <label
-            className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-left text-xs font-medium text-foreground transition-colors hover:bg-surface-subtle focus-within:ring-2 focus-within:ring-primary/20"
-          >
-            <EnergyIcon name="building" className="h-3.5 w-3.5 shrink-0 text-muted-light" />
-            <select
-              aria-label="Select organisation"
-              className="max-w-32 appearance-none bg-transparent pr-4 outline-none sm:max-w-48"
+          {showWorkspaceSelector ? (
+            <EnergySelect
+              ariaLabel="Customer workspace"
               value={access?.activeWorkspaceId ?? ""}
-              onChange={(event) => void selectOrganisation(event.target.value)}
-            >
-              {(access?.workspaces ?? []).map((workspace) => (
-                <option key={workspace.id} value={workspace.id}>
-                  {workspace.name}{workspace.disabled ? " (disabled)" : ""}
-                </option>
-              ))}
-            </select>
-            <EnergyIcon name="chevron" className="-ml-4 h-3 w-3 rotate-90 text-muted-light" />
-          </label>
+              options={(access?.workspaces ?? []).map((workspace) => ({
+                value: workspace.id,
+                label: `Workspace · ${workspace.name}${workspace.disabled ? " (disabled)" : ""}`,
+              }))}
+              onValueChange={(workspaceId) => void selectOrganisation(workspaceId)}
+              leadingIcon={<EnergyIcon name="building" className="h-3.5 w-3.5" />}
+              placeholder="No organisations"
+              className="max-w-40 sm:max-w-52"
+              triggerClassName="w-auto max-w-40 sm:max-w-52"
+              size="small"
+            />
+          ) : null}
 
-          <label
-            className="flex min-w-0 items-center gap-2 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-left text-xs font-medium text-foreground transition-colors hover:bg-surface-subtle focus-within:ring-2 focus-within:ring-primary/20"
-          >
-            <EnergyIcon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-light" />
-            <select
-              aria-label="Select project"
-              className="max-w-36 appearance-none bg-transparent pr-4 outline-none sm:max-w-56"
+          {showProjectSelector ? (
+            <EnergySelect
+              ariaLabel="Energy project"
               value={activeProject?.id ?? ""}
-              onChange={(event) => selectProject(event.target.value)}
-            >
-              {activeProject ? null : <option value="">No published projects</option>}
-              {(access?.projects ?? [])
-                .filter((project) => project.status === "published")
-                .map((project) => (
-                  <option key={project.id} value={project.id}>{project.name}</option>
-                ))}
-            </select>
-            <EnergyIcon name="chevron" className="-ml-4 h-3 w-3 rotate-90 text-muted-light" />
-          </label>
+              options={publishedProjects.map((project) => ({ value: project.id, label: `Project · ${project.name}` }))}
+              onValueChange={selectProject}
+              leadingIcon={<EnergyIcon name="explorer" className="h-3.5 w-3.5" />}
+              placeholder="No published projects"
+              className="max-w-44 sm:max-w-60"
+              triggerClassName="w-auto max-w-44 sm:max-w-60"
+              size="small"
+            />
+          ) : showStaticProjectContext ? (
+            <div className="hidden min-w-0 items-center gap-2 text-xs sm:flex" aria-label="Energy project">
+              <EnergyIcon name="explorer" className="h-3.5 w-3.5 shrink-0 text-muted-light" />
+              <span className="max-w-56 truncate font-medium">{activeProject.name}</span>
+            </div>
+          ) : null}
 
           <nav className="hidden h-full items-center gap-1 md:flex" aria-label="Main navigation">
             {visibleNavigation.map((item) => {
