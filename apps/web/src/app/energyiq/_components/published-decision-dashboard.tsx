@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   configApi,
-  type EnergyPublishedTemplateResponseDto,
+  type EnergyProjectAnalysisResolutionDto,
   type EnergyQueryContextRequestDto,
   type EnergySavedAnalysisDetailDto,
   type EnergyScopeAnalysisDto,
@@ -17,8 +17,13 @@ import {
 import { buildEnergyTemplateRenderPlan } from "./energy-template-render-plan";
 import { useEnergyIqAccess } from "./energyiq-access";
 import { EnergyIcon } from "./icons";
+import {
+  applyProjectAnalysisQualityPolicy,
+  ProjectRenderer,
+  type ProjectAnalysisQualityPolicy,
+} from "./project-renderer-registry";
 
-const periodOptions: readonly Array<{
+const periodOptions: ReadonlyArray<{
   label: string;
   value?: OverviewPeriod;
   disabled?: boolean;
@@ -32,9 +37,9 @@ const periodOptions: readonly Array<{
 type OverviewPeriod = "Yesterday" | "Last 7 days" | "Custom";
 type ResourceType = "electricity" | "water";
 
-type LoadedTemplate = {
+type LoadedResolution = {
   projectId: string;
-  value: EnergyPublishedTemplateResponseDto;
+  value: EnergyProjectAnalysisResolutionDto;
 };
 
 export function PublishedDecisionDashboard() {
@@ -42,11 +47,8 @@ export function PublishedDecisionDashboard() {
   const [resource, setResource] = useState<ResourceType>("electricity");
   const [period, setPeriod] = useState<OverviewPeriod>("Last 7 days");
   const [customRange, setCustomRange] = useState({ projectId: "", from: "", to: "" });
-  const [template, setTemplate] = useState<LoadedTemplate | null>(null);
-  const [analysis, setAnalysis] = useState<EnergyScopeAnalysisDto | null>(null);
-  const [templateError, setTemplateError] = useState<string | null>(null);
+  const [resolution, setResolution] = useState<LoadedResolution | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const [loadingTemplate, setLoadingTemplate] = useState(false);
   const [running, setRunning] = useState(false);
   const [refreshRevision, setRefreshRevision] = useState(0);
   const [activeSection, setActiveSection] = useState("");
@@ -58,38 +60,30 @@ export function PublishedDecisionDashboard() {
   const effectiveCustomRange = customRange.projectId === projectId
     ? customRange
     : { projectId, from: "", to: "" };
-  const currentTemplate = template?.projectId === projectId ? template.value : null;
-  const currentAnalysis = analysis?.context.projectId === projectId ? analysis : null;
-  const projectTemplate = currentTemplate?.document.templates.find((candidate) => candidate.template_id === "project") ?? null;
+  const currentResolution = resolution?.projectId === projectId ? resolution.value : null;
+  const currentSnapshot = currentResolution?.status === "ready" ? currentResolution.snapshot : null;
+  const currentAnalysis = currentSnapshot?.analysis ?? null;
+  const projectTemplate = currentSnapshot?.projectRelease.document.templates
+    .find((candidate) => candidate.template_id === "project") ?? null;
   const renderPlan = useMemo(
-    () => projectTemplate && currentTemplate
-      ? buildEnergyTemplateRenderPlan({ template: projectTemplate, catalog: currentTemplate.catalog })
+    () => projectTemplate && currentSnapshot
+      ? buildEnergyTemplateRenderPlan({ template: projectTemplate, catalog: currentSnapshot.projectRelease.catalog })
       : null,
-    [currentTemplate, projectTemplate],
+    [currentSnapshot, projectTemplate],
   );
-
-  useEffect(() => {
-    if (!projectId) return;
-    let cancelled = false;
-    setLoadingTemplate(true);
-    setTemplateError(null);
-    void configApi.getEnergyPublishedTemplate(projectId)
-      .then((result) => {
-        if (cancelled) return;
-        setTemplate({ projectId, value: result });
+  const qualityPolicy = useMemo(
+    () => renderPlan && currentSnapshot
+      ? applyProjectAnalysisQualityPolicy({
+        plan: renderPlan,
+        dataQuality: currentSnapshot.dataQuality,
       })
-      .catch((reason) => {
-        if (cancelled) return;
-        setTemplate(null);
-        setTemplateError(messageFrom(reason, "Unable to load the published Project Template"));
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingTemplate(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, refreshRevision]);
+      : null,
+    [currentSnapshot, renderPlan],
+  );
+  const renderPlanForDisplay = qualityPolicy?.plan ?? renderPlan;
+  const saveAllowed = Boolean(
+    qualityPolicy?.saveAllowed && currentSnapshot?.projectRelease.templateRevisionId,
+  );
 
   useEffect(() => {
     if (!projectId || resource !== "electricity") return;
@@ -97,21 +91,22 @@ export function PublishedDecisionDashboard() {
     const request = overviewAnalysisRequest(projectId, period, effectiveCustomRange);
     setRunning(true);
     setAnalysisError(null);
-    void configApi.executeEnergyScopeAnalysis(request)
+    void configApi.resolveProjectAnalysis(request)
       .then((result) => {
         if (cancelled) return;
-        setAnalysis(result);
+        setResolution({ projectId, value: result });
+        if (result.status !== "ready") return;
         setCustomRange((current) => current.projectId === projectId && current.from && current.to
           ? current
           : {
             projectId,
-            from: toDateInput(result.context.from, result.context.timezone),
-            to: toDateInput(new Date(Date.parse(result.context.to) - 1).toISOString(), result.context.timezone),
+            from: toDateInput(result.snapshot.context.from, result.snapshot.context.timezone),
+            to: toDateInput(new Date(Date.parse(result.snapshot.context.to) - 1).toISOString(), result.snapshot.context.timezone),
           });
       })
       .catch((reason) => {
         if (cancelled) return;
-        setAnalysis(null);
+        setResolution(null);
         setAnalysisError(messageFrom(reason, "Unable to run project analysis"));
       })
       .finally(() => {
@@ -123,9 +118,9 @@ export function PublishedDecisionDashboard() {
   }, [effectiveCustomRange.from, effectiveCustomRange.to, period, projectId, refreshRevision, resource]);
 
   useEffect(() => {
-    const firstSectionId = renderPlan?.sections[0]?.section_id ?? "";
+    const firstSectionId = renderPlanForDisplay?.sections[0]?.section_id ?? "";
     setActiveSection(firstSectionId);
-  }, [projectId, renderPlan]);
+  }, [projectId, renderPlanForDisplay]);
 
   useEffect(() => {
     setSavedAnalysis(null);
@@ -133,7 +128,7 @@ export function PublishedDecisionDashboard() {
   }, [effectiveCustomRange.from, effectiveCustomRange.to, period, projectId, resource]);
 
   const saveCurrentAnalysis = async () => {
-    if (!projectId || !currentAnalysis || !currentTemplate?.revision || resource !== "electricity") return;
+    if (!projectId || !currentAnalysis || !saveAllowed || resource !== "electricity") return;
     setSaving(true);
     setSaveError(null);
     try {
@@ -151,8 +146,8 @@ export function PublishedDecisionDashboard() {
   };
 
   useEffect(() => {
-    if (!renderPlan) return;
-    const elements = renderPlan.sections
+    if (!renderPlanForDisplay) return;
+    const elements = renderPlanForDisplay.sections
       .map((section) => document.getElementById(sectionDomId(section.section_id)))
       .filter((element): element is HTMLElement => Boolean(element));
     if (elements.length === 0) return;
@@ -165,20 +160,25 @@ export function PublishedDecisionDashboard() {
     updateActiveSection();
     scrollContainer.addEventListener("scroll", updateActiveSection, { passive: true });
     return () => scrollContainer.removeEventListener("scroll", updateActiveSection);
-  }, [renderPlan]);
+  }, [renderPlanForDisplay]);
 
   const runMessage = currentAnalysis
-    ? `${formatRunPeriod(currentAnalysis)} · ${currentAnalysis.provenance.dataSnapshotId}`
+    ? `${formatRunPeriod(currentAnalysis)} · ${currentSnapshot?.dataSnapshot.id ?? currentAnalysis.provenance.dataSnapshotId}`
     : running ? "Resolving Project scope and trusted facts…" : "Waiting for analysis context";
   const rendererState = resolveOverviewRendererState({
     projectId,
     resource,
-    loading: loadingTemplate || running,
-    templateError,
+    loading: running,
     analysisError,
-    analysis: currentAnalysis,
-    plan: renderPlan,
+    resolution: currentResolution,
+    plan: renderPlanForDisplay,
+    advisories: qualityPolicy?.advisories,
   });
+  const rendererRequest = currentResolution?.status === "ready"
+    ? { mode: "customer" as const, rendererKey: currentResolution.snapshot.renderer.key }
+    : currentResolution?.status === "configuration-required"
+      ? { mode: "customer" as const, rendererKey: null }
+      : null;
   const publishedSections = rendererState.status === "ready" ? rendererState.plan.sections : [];
 
   return (
@@ -242,7 +242,7 @@ export function PublishedDecisionDashboard() {
           <button
             type="button"
             onClick={() => void saveCurrentAnalysis()}
-            disabled={saving || rendererState.status !== "ready" || !currentTemplate?.revision}
+            disabled={saving || rendererState.status !== "ready" || !saveAllowed}
             className="h-10 rounded-lg border border-border bg-surface px-4 text-xs font-semibold text-foreground transition-colors hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving ? "Saving…" : "Save analysis"}
@@ -267,9 +267,9 @@ export function PublishedDecisionDashboard() {
               Saved as version {savedAnalysis.sequence} →
             </Link>
           ) : null}
-          {currentTemplate ? (
+          {currentSnapshot ? (
             <span className="font-mono">
-              {currentTemplate.revision?.revision_id ?? "No published Template Revision"}
+              {currentSnapshot.projectRelease.id}
             </span>
           ) : null}
         </div>
@@ -300,12 +300,20 @@ export function PublishedDecisionDashboard() {
           </aside>
 
           <div className="min-w-0">
-            <EnergyTemplateRenderer state={rendererState} sectionIdPrefix="customer-overview" onRetry={() => setRefreshRevision((current) => current + 1)} />
+            {rendererRequest ? (
+              <ProjectRenderer request={rendererRequest} state={rendererState} sectionIdPrefix="customer-overview" onRetry={() => setRefreshRevision((current) => current + 1)} />
+            ) : (
+              <EnergyTemplateRenderer state={rendererState} sectionIdPrefix="customer-overview" onRetry={() => setRefreshRevision((current) => current + 1)} />
+            )}
           </div>
         </div>
       ) : (
         <div className="mt-6">
-          <EnergyTemplateRenderer state={rendererState} onRetry={() => setRefreshRevision((current) => current + 1)} />
+          {rendererRequest ? (
+            <ProjectRenderer request={rendererRequest} state={rendererState} onRetry={() => setRefreshRevision((current) => current + 1)} />
+          ) : (
+            <EnergyTemplateRenderer state={rendererState} onRetry={() => setRefreshRevision((current) => current + 1)} />
+          )}
         </div>
       )}
     </div>
@@ -316,10 +324,10 @@ function resolveOverviewRendererState(input: {
   projectId: string;
   resource: ResourceType;
   loading: boolean;
-  templateError: string | null;
   analysisError: string | null;
-  analysis: EnergyScopeAnalysisDto | null;
+  resolution: EnergyProjectAnalysisResolutionDto | null;
   plan: ReturnType<typeof buildEnergyTemplateRenderPlan> | null;
+  advisories?: ProjectAnalysisQualityPolicy["advisories"];
 }): EnergyTemplateRendererState {
   if (!input.projectId) {
     return { status: "empty", title: "Select a Project", detail: "Choose a Project to load its published Template Revision and analysis context." };
@@ -327,14 +335,25 @@ function resolveOverviewRendererState(input: {
   if (input.resource === "water") {
     return { status: "unsupported", title: "Water analysis is not configured", detail: "Publish water metrics, capabilities and modules before this view displays decision-grade results." };
   }
-  const error = input.templateError ?? input.analysisError;
+  const error = input.analysisError;
   if (error) {
     return { status: "error", title: "Published analysis is unavailable", detail: `${error} Retry the same Project and period without changing the published template.` };
   }
-  if (input.loading || !input.analysis || !input.plan) {
+  if (input.loading || !input.resolution) {
     return { status: "loading", title: "Resolving the published analysis", detail: "Loading the Template Revision, trusted Project scope, selected period and data snapshot." };
   }
-  return { status: "ready", analysis: input.analysis, plan: input.plan };
+  if (input.resolution.status === "configuration-required") {
+    return { status: "unsupported", title: input.resolution.title, detail: input.resolution.detail };
+  }
+  if (!input.plan) {
+    return { status: "empty", title: "Published analysis has no Project Template", detail: "Publish a Project Template with at least one enabled module." };
+  }
+  return {
+    status: "ready",
+    analysis: input.resolution.snapshot.analysis,
+    plan: input.plan,
+    ...(input.advisories?.length ? { advisories: input.advisories } : {}),
+  };
 }
 
 function DateField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
@@ -346,12 +365,12 @@ function DateField({ label, value, onChange }: { label: string; value: string; o
   );
 }
 
-function overviewAnalysisRequest(
+export function overviewAnalysisRequest(
   projectId: string,
   period: OverviewPeriod,
   customRange: { from: string; to: string },
 ): EnergyQueryContextRequestDto {
-  const scopeId = projectId === "preschool-demo" ? "preschool-project" : "project";
+  const scopeId = "project";
   if (period !== "Custom") return { projectId, scopeId, resource: "electricity", period };
   return { projectId, scopeId, resource: "electricity", period, from: customRange.from, to: customRange.to };
 }

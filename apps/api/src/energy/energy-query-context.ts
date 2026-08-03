@@ -170,7 +170,9 @@ export const resolveEnergyQueryContext = (input: {
   }
   const projectRecord = input.metadataStore.energyIq.getProject(project.id);
   const nodes = input.metadataStore.energyIq.listProjectNodes(project.id);
-  const root = nodes.find((node) => !node.parent_id);
+  const root = nodes.find((node) =>
+    node.id === projectRecord.root_scope_id && !node.parent_id
+  );
   if (!root) {
     throw new Error("ENERGYIQ_PROJECT_ROOT_REQUIRED");
   }

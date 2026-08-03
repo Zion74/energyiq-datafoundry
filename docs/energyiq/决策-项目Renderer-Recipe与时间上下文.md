@@ -441,6 +441,15 @@ Recipe：
 
 这条边界保证 Charles 改视觉不会改坏计算，也保证换 Excel/API 不需要重写页面。
 
+### 9.1 当前可执行接口（2026-08-04）
+
+- 客户 Overview 通过 `POST /api/v1/energy/analysis/resolve` 一次取得服务端解析的 Project、Scope、Primary Period、Published Project Release 前置契约和版本化 `ProjectAnalysisSnapshot`，不再分别拼接 Template 与 Analysis 响应。
+- `ProjectAnalysisSnapshot.context` 固定 `primaryPeriod` 与服务端解析的 `projectReleaseId`；浏览器不能提交或覆盖 Release/Renderer。Resolver 在执行 Recipe 前把 Release 固定的 Hierarchy、Meter Formula、Metric Revisions、Business Calendar 与 Tariff 版本重新投影到可信执行上下文，不能只在响应中附加版本标签。Snapshot 同时固定 Recipe/Renderer 版本，并携带 Data Quality、Data Snapshot 与确定性 Scope Analysis。Workspace Membership、Project 可见性和 Scope 归属仍由服务端解析，浏览器传入的 Workspace 或客户专属 Scope 名称不构成授权依据。
+- `evidence[]` 使用包含 Data Snapshot、Scope、Primary Period 与已发布 `metricId` 的稳定 `id`，并以实际 `queryIds` 定位事实来源；当前尚未持久化 Query Receipt，因此不得伪造 `queryReceiptId`。规则产生的业务结论保留在独立 `findings` 字段，不能冒充底层 Evidence。
+- 当前以不可变 `EnergyIqTemplateRevisionRecord` 作为 Published Project Release 的前置接口。历史 Ngee Ann 与 Preschool 在正式重新发布前只允许使用显式 `legacy-profile`；其他客户 Project 没有已注册 Renderer 时返回 `configuration-required`，不得回退为通用成品看板。
+- Renderer Registry 当前受控注册 `ngee-ann-overview@1`、`preschool-overview@1` 与仅限 Admin 的 `admin-generic-preview@1`。三者复用既有 `buildEnergyTemplateRenderPlan → EnergyTemplateRenderer`，没有建立虚构的 Recharts/ECharts Adapter seam；Renderer 不查询 DuckDB、不计算指标，也不生成建议。
+- 客户 Overview 对 Coverage `<95%` 应用统一质量策略：保留可用的事实与 Data Quality 图表，显示 `Partial data`，隐藏业务异常/建议模块，并在函数和按钮两层禁用 `Save analysis`。API 对首次保存和 Rerun 在持久化前重复执行同一 `>=95%` 门禁，直接调用接口也不能绕过。
+
 ## 10. Interactive、Save 和 Rerun 的关系
 
 ### 普通交互
