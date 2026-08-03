@@ -9,6 +9,22 @@ export type PerRunMention = {
   skill: string[];
 };
 
+export type AgentEnergyQueryContext = {
+  projectId: string;
+  projectName: string;
+  scopeId: string;
+  scopeName: string;
+  scopeType: string;
+  resource: "electricity" | "water";
+  timezone: string;
+  from: string;
+  to: string;
+  endExclusive: true;
+  period: "Yesterday" | "Last 7 days" | "Last 30 days" | "Custom";
+  dataSnapshotId?: string;
+  metricVersion?: string;
+};
+
 export type AgentRunContext = {
   active_skill_id?: string;
   user_id: string;
@@ -23,6 +39,8 @@ export type AgentRunContext = {
   enabled_mcp_server_ids?: string[];
   requested_llm_profile_id?: string;
   model_name?: string;
+  /** Provider-neutral reasoning switch resolved from the selected model profile. */
+  reasoning_model?: boolean;
   /** Per-run @ mentions (R-019) — focus signal, not a narrowing of enabled*Ids. */
   mentioned?: PerRunMention;
   /** Per-run pinned session-relative paths (R-024). */
@@ -30,7 +48,7 @@ export type AgentRunContext = {
   /** User-selected evidence references for this run. Concrete content is resolved server-side. */
   evidence_refs?: EvidenceRef[];
   /** Server-authoritative EnergyIQ project, scope, time range and version pins. */
-  energy_query_context?: unknown;
+  energy_query_context?: AgentEnergyQueryContext;
 };
 
 export type AgentRunContextInput = AgentRunContext;

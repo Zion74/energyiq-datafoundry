@@ -25,6 +25,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import {
   createModelProvider,
   createModelProviderFromConfig,
+  createModelRuntimeProviderOptions,
   type ChatProviderConfig,
   type ModelProvider
 } from "@datafoundry/providers";
@@ -60,7 +61,7 @@ import {
   type ContextSourceMetadata
 } from "./context/inventory/context-source-metadata.js";
 import { GoalRuntimeAdapter, type GoalRequest } from "./memory/goal-runtime-adapter.js";
-import { createDataFoundryToolRegistry } from "./tools/data-tools.js";
+import { createDataFoundryToolRegistry, isChartRequested } from "./tools/data-tools.js";
 import { GovernedToolFactory } from "./tools/governed-tool-factory.js";
 import {
   maybeIngestSessionFileOutput,
@@ -95,6 +96,7 @@ import {
 import type { AnalysisRequirement } from "./protocol/analysis-requirements.js";
 import type { DataAnalysisState } from "./protocol/protocols/data-analysis.js";
 import { createDefaultSemanticProvider } from "./semantic/default-semantic-provider.js";
+import { EnergyQuerySemanticProvider } from "./semantic/energy-query-semantic-provider.js";
 import type { ProtocolEvent } from "./protocol/types.js";
 import type { ContextPackageRef, ProtocolStateStore } from "./protocol/types.js";
 import { toolErrorObservation as createToolErrorObservation } from "./errors/tool-execution-error.js";
@@ -336,6 +338,7 @@ export const createDataFoundry = async (
   const tokenUsageCorrelation = createTokenUsageCorrelationStore();
   const registry = createDataFoundryToolRegistry({
     ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+    ...(input.artifactService ? { artifactService: input.artifactService } : {}),
     dataGateway: input.dataGateway,
     emitter: input.emitter,
     runContext: input.runContext,
@@ -492,7 +495,9 @@ export const createDataFoundry = async (
     tools: selectedTools,
     ...(selectedDatasourceId
       ? {
-          semanticProvider: createDefaultSemanticProvider({ tools: selectedTools }),
+          semanticProvider: input.runContext.energy_query_context
+            ? new EnergyQuerySemanticProvider(input.runContext.energy_query_context)
+            : createDefaultSemanticProvider({ tools: selectedTools }),
           semanticRequest: {
             userId: input.runContext.user_id,
             workspaceId: input.runContext.workspace_id ?? "default",
@@ -564,6 +569,9 @@ export const createDataFoundry = async (
     ? ((protocolState.domain as DataAnalysisState).requirements ?? []).filter((requirement) =>
         requirement.source === "user")
     : [];
+  const hasDeclaredClaimValues = analysisRequirements.some((requirement) =>
+    requirement.assertions.some((assertion) => assertion.claimValues.length > 0)
+  );
   const requirementsCommitTools = analysisRequirements.length > 0
     ? {
         analysis_requirements_commit: createTool({
@@ -584,14 +592,19 @@ export const createDataFoundry = async (
           }),
           execute: async (toolInput, options) => {
             const toolCallId = protocolToolCallId(options);
+            const commitInput = input.runContext.energy_query_context && !hasDeclaredClaimValues
+              ? {
+                  claims: toolInput.claims.map(({ values: _ignoredValues, ...claim }) => claim)
+                }
+              : toolInput;
             try {
               const result = await protocol.actionRouter.execute({
                 runId: input.runContext.run_id,
                 segmentId: protocol.segmentId,
                 actionId: toolCallId ?? `analysis-requirements-commit:${Date.now()}`,
                 actionName: "analysis.requirements.commit",
-                input: toolInput,
-                idempotencyKey: toolCallId ?? JSON.stringify(toolInput)
+                input: commitInput,
+                idempotencyKey: toolCallId ?? JSON.stringify(commitInput)
               });
               return result.observation;
             } catch (error) {
@@ -631,6 +644,13 @@ export const createDataFoundry = async (
       }
     })
   };
+  const runtimeProviderOptions = createModelRuntimeProviderOptions({
+    providerId: input.modelProvider.provider_id,
+    ...(input.modelProvider.provider_ids ? { providerIds: input.modelProvider.provider_ids } : {}),
+    ...(input.runContext.reasoning_model !== undefined
+      ? { reasoningEnabled: input.runContext.reasoning_model }
+      : {})
+  });
   const agent = new Agent({
     id: "data-foundry",
     name: "DataFoundry",
@@ -663,11 +683,7 @@ export const createDataFoundry = async (
     defaultOptions: {
       maxSteps: AGENT_MAX_STEPS,
       ...(input.modelSettings ? { modelSettings: input.modelSettings } : {}),
-      providerOptions: {
-        openai: {
-          systemMessageMode: "system"
-        }
-      }
+      ...(runtimeProviderOptions ? { providerOptions: runtimeProviderOptions } : {})
     }
   });
   const agentForAgUi = wrapAgentForAgUi(
@@ -943,6 +959,58 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
   }
 
   const policies: string[] = [];
+  if (context.energy_query_context) {
+    const energyContext = context.energy_query_context;
+    const localRangeStart = formatEnergyTimestamp(energyContext.from, energyContext.timezone);
+    const localRangeEnd = formatEnergyTimestamp(
+      new Date(Date.parse(energyContext.to) - 1).toISOString(),
+      energyContext.timezone
+    );
+    const noDeclaredClaimValues = input.analysisRequirements.every((requirement) =>
+      requirement.assertions.every((assertion) => assertion.claimValues.length === 0)
+    );
+    const chartRequested = isChartRequested(context.user_input);
+    policies.push(
+      "EnergyIQ trusted-query fast path: the server has already selected and allowlisted exactly one datasource for "
+        + `Project "${energyContext.projectName}", scope "${energyContext.scopeName}" (${energyContext.scopeType}), `
+        + `resource "${energyContext.resource}", and the half-open time range [${energyContext.from}, `
+        + `${energyContext.to}) in timezone ${energyContext.timezone}. The user selected period is `
+        + `"${energyContext.period}"; its local calendar display range is ${localRangeStart} through `
+        + `${localRangeEnd}. Treat that scope and period as authoritative and show the local calendar range, not raw UTC. `
+        + "Do not call list_data_sources, list_files, preview_table, workspace file tools, or direct database clients "
+        + "to rediscover data. Inspect the selected datasource schema once, then reuse its schema_id. Prefer one "
+        + "focused aggregate SQL query that supplies all requested figures; for simple aggregates, query the inspected "
+        + "physical table directly and avoid CTEs or derived table aliases. Use at most three successful SQL queries "
+        + "unless the user explicitly asks for a deeper investigation. If a validation error occurs, correct the "
+        + "rejected query instead of exploring unrelated tables. Commit evidenced analysis requirements promptly. "
+        + (noDeclaredClaimValues
+          ? "This run declares no claim value names, so every analysis_requirements_commit claim must omit its values field entirely. "
+          : "Include only claim value names explicitly declared in the requirement assertions. ")
+        + "Call tools without narrating internal plans or validation "
+        + "mechanics. After the tools finish, start the final answer with the user-facing result itself, then give the "
+        + "scope, period, unit, and concise caveats. Never preface the answer with a workflow status such as requirements "
+        + "committed, validation completed, analysis completed, or protocol completed. Do not mention requirement IDs, "
+        + "tool names, schema IDs, artifact IDs, commits, or internal protocol state unless "
+        + "the user explicitly asks for audit details. Never show the internal datasource ID; use the Project and scope "
+        + "names above. Do not create a report, export, chart file, "
+        + "or other workspace artifact unless the user explicitly requests one; a normal conversational answer is not "
+        + "an artifact. "
+        + (chartRequested
+          ? "The user explicitly requested a chart. Make the first chartable analytical SQL result exactly two columns: "
+            + "one label/time column and one numeric metric column, with 2 to 500 exact rows, and set the "
+            + "run_sql_readonly limit argument to 500 so the result is not truncated. The backend automatically "
+            + "creates the validated chart preview from those SQL rows. Never use write_file or execute_command to build "
+            + "HTML, CSV, JavaScript, SVG, or simulated chart values; never interpolate, repeat, or invent points. For an "
+            + "hourly trend across a multi-day period, group by the full local hourly timestamp (for example date_trunc "
+            + "to hour), not by hour-of-day or EXTRACT(hour); a complete seven-day hourly timeline has 168 ordered points, "
+            + "not 24 aggregated clock-hour buckets. Mention a generated chart preview only when the successful SQL tool "
+            + "result explicitly reports that the backend created a chart artifact. When it exists, tell the user that "
+            + "the chart is available in Task Console > Outputs > Preview; do not say chart below because charts are not "
+            + "currently embedded inline in the answer. If no chart artifact exists, correct the SQL and retry within the "
+            + "query budget; otherwise state plainly that no chart was generated."
+          : "")
+    );
+  }
   if (taskToolsEnabled && taskTools.length === 4) {
     policies.push(
       "Plan with tasks. For work with three or more distinct actions, call task_write first and keep exactly one "
@@ -1129,6 +1197,17 @@ Operating policy:
 ${policies.map((policy, index) => `${index + 1}. ${policy}`).join("\n")}
 `;
 };
+
+const formatEnergyTimestamp = (value: string, timeZone: string): string =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  }).format(new Date(value));
 
 const selectToolsByPolicy = <TTool>(
   availableTools: Record<string, TTool>,
@@ -1495,6 +1574,7 @@ export type * from "./protocol/protocol-router.js";
 export type * from "./protocol/protocol-runtime.js";
 export type * from "./protocol/types.js";
 export { DataLinkSemanticProvider } from "./semantic/datalink-semantic-provider.js";
+export { EnergyQuerySemanticProvider } from "./semantic/energy-query-semantic-provider.js";
 export { LocalSemanticProvider } from "./semantic/local-semantic-provider.js";
 export { SemanticProviderChain } from "./semantic/semantic-provider-chain.js";
 export { createDefaultSemanticProvider } from "./semantic/default-semantic-provider.js";

@@ -49,6 +49,7 @@ export type RunAgentAssembly = {
 type CreateRunAgentContextInput = {
   effectiveRunConfig: EffectiveRunConfig;
   modelProvider: ResolvedRunConfig["modelProvider"];
+  reasoningModel?: boolean;
   runId: string;
   selectedDatasourceId?: string;
   sessionId: string;
@@ -132,6 +133,9 @@ export const createRunAgentContext = (input: CreateRunAgentContextInput): AgentR
       ? { evidence_refs: input.effectiveRunConfig.evidenceRefs }
       : {}),
     model_name: input.modelProvider.model_name,
+    ...(input.reasoningModel !== undefined
+      ? { reasoning_model: input.reasoningModel }
+      : {}),
     ...(input.energyQueryContext
       ? { energy_query_context: input.energyQueryContext }
       : {})

@@ -289,15 +289,23 @@ const resolveRunModelProvider = (
   if (providers.length === 1) {
     return primary;
   }
+  const requiresNonEmptyMessageContent = providers.some(
+    (provider) => provider.prompt_compat?.requires_non_empty_message_content === true
+  );
   return {
     kind: primary.kind,
+    provider_id: primary.provider_id,
+    provider_ids: providers.map((provider) => provider.provider_id),
     model_name: profileIds.join(" -> "),
     model: providers.map((provider, index) => ({
       id: profileIds[index] as string,
       model: provider.model,
       maxRetries: 1,
       enabled: true
-    }))
+    })),
+    ...(requiresNonEmptyMessageContent
+      ? { prompt_compat: { requires_non_empty_message_content: true } }
+      : {})
   };
 };
 

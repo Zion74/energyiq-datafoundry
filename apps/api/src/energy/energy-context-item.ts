@@ -27,6 +27,7 @@ export const createEnergyQueryContextItem = (
     "Use appliance for Aircon, Heater, Lighting and Plugload analysis; category is the simplified aircon, light or load business classification.",
     "is_operating comes from the published operating schedule. Compare non-operating usage, per-person usage and per-area usage only when the relevant metadata is available.",
     "Rows with quality_status other than 'ok' are evidence of data quality events and must not be counted as consumption.",
+    ...ngeeAnnAnalysisPolicy(context),
     `workspace_id=${context.workspaceId}`,
     `project_id=${context.projectId}`,
     `project_name=${context.projectName}`,
@@ -64,3 +65,22 @@ export const createEnergyQueryContextItem = (
     groupKind: "source"
   })
 });
+
+const ngeeAnnAnalysisPolicy = (context: EnergyQueryContext): string[] =>
+  context.projectId === "ngee-ann-polytechnic"
+    ? [
+        "Ngee Ann analysis policy:",
+        "Start with list_data_sources, inspect_schema and preview_table. Use run_sql_readonly only after inspecting the run-local schema, and cite the resulting tool call or artifact for every reported number.",
+        "For Project or Level totals, filter quality_status='ok' and use designated meter_role='total' rows exactly once. Group Project child comparison by level_node_id. Submeters are breakdown evidence and must never be added back to designated totals.",
+        "For Circuit or category contribution, query non-total breakdown rows separately and compare them with the corresponding designated total. If the breakdown does not reconcile with that total, disclose the mismatch instead of forcing shares to 100%.",
+        "For peak interval-average power, group by local_interval_start, sum average_kw across the designated totals, and then take the maximum. Never use MAX(average_kw) across individual meter rows as the Project peak.",
+        "Compare Workday, Weekend and Public Holiday only for day_type values actually present in the inspected result. An absent slice is unavailable, not zero.",
+        "Previous-period change and own-history normal level require rows for those comparison windows. This scoped datasource contains only the authoritative from-to range; when required rows fall outside it, say the comparison is unavailable instead of extrapolating.",
+        "Per-area and per-person results require authoritative metadata in the current context or tool evidence. If those dimensions are absent, say unavailable and do not infer them from names or typical values.",
+        "Off-hours conclusions require authoritative is_operating values and adequate coverage. If schedule or coverage cannot be established, describe observed rows only and do not label usage as avoidable waste.",
+        "Do not answer tariff cost, carbon, forecast or water questions unless authoritative values are explicitly present in the current evidence.",
+        "Every answer must state Scope, inclusive-exclusive Period, timezone, unit, aggregation route, material limitations, and the SQL/tool evidence used.",
+        "Use SQL-produced table evidence for exact figures. Controlled line, bar or pie charts may only reuse columns returned by a tool result; never create new chart values or arbitrary chart code.",
+        "When evidence is insufficient, return the precise limitation and the next required data. Never generate mock figures, business anomalies, root causes or action priorities."
+      ]
+    : [];

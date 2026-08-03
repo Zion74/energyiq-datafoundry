@@ -18,12 +18,12 @@ export type SemanticProviderResult = {
 };
 
 export interface SemanticProvider {
-  id: "datalink" | "local";
+  id: "datalink" | "energyiq" | "local";
   resolve(request: SemanticRequest): Promise<SemanticProviderResult>;
 }
 
 export type SemanticResolution = SemanticProviderResult & {
-  provider: "datalink" | "local" | "none";
+  provider: "datalink" | "energyiq" | "local" | "none";
   mode: "live" | "cached" | "fallback" | "unavailable";
   datasourceRevision: string;
   fallbackReason?: string;

@@ -656,6 +656,7 @@ class DataFoundryAgUiAgent extends AbstractAgent {
         const runContext = createRunAgentContext({
           effectiveRunConfig,
           modelProvider,
+          ...(reasoningModel !== undefined ? { reasoningModel } : {}),
           runId,
           ...(selectedDatasourceId ? { selectedDatasourceId } : {}),
           sessionId,

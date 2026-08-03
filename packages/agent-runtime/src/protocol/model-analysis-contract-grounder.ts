@@ -1,5 +1,5 @@
 import { Agent } from "@mastra/core/agent";
-import type { ModelProvider } from "@datafoundry/providers";
+import { createModelHelperProviderOptions, type ModelProvider } from "@datafoundry/providers";
 import { z } from "zod";
 
 import { AGENT_RUNTIME_LIMITS } from "../config/agent-runtime-limits.js";
@@ -171,7 +171,8 @@ export const createModelAnalysisContractGrounder = (
         modelSettings: {
           maxOutputTokens: AGENT_RUNTIME_LIMITS.contractGrounderMaxOutputTokens,
           temperature: 0
-        }
+        },
+        providerOptions: createModelHelperProviderOptions()
       });
       try {
         return parseAnalysisContractGroundingText(output.text, input.requirements, input.physicalSchema);
