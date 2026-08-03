@@ -290,8 +290,8 @@ function ConsumptionOverview({ analysis }: { analysis: EnergyScopeAnalysisDto })
     { label: "Peak demand", value: `${formatNumber(summary.peakKw, 2)} kW`, note: peakNote },
     {
       label: "Energy cost",
-      value: cost.status === "estimated" ? `S$${formatNumber(cost.amount, 2)}` : "Not configured",
-      note: cost.status === "estimated" ? `Tariff ${cost.tariffScheduleVersion}` : "No formal tariff is attached to this project",
+      value: cost.status === "available" ? formatCurrencyAmount(cost.amount, cost.currency, 2) : "Unavailable",
+      note: cost.status === "available" ? `Tariff ${cost.tariffScheduleVersion}` : cost.reason.message,
     },
   ];
   return (
@@ -378,9 +378,12 @@ function NormalisedComparison({ analysis, kind, limit }: { analysis: EnergyScope
 
 function OffHoursAnalysis({ analysis, limit }: { analysis: EnergyScopeAnalysisDto; limit: number }) {
   if (analysis.offHours.status === "unavailable") {
-    return <UnavailableModule detail="Operating-hour facts are not materialised for this project, so off-hours usage is not asserted." />;
+    return <UnavailableModule detail={analysis.offHours.reason.message} />;
   }
-  const rows = analysis.circuits.toSorted((left, right) => right.nonOperatingKwh - left.nonOperatingKwh).slice(0, limit);
+  const rows = analysis.circuits
+    .filter((row): row is typeof row & { nonOperatingKwh: number } => row.nonOperatingKwh !== undefined)
+    .toSorted((left, right) => right.nonOperatingKwh - left.nonOperatingKwh)
+    .slice(0, limit);
   return (
     <div className="grid gap-5 lg:grid-cols-[0.7fr_1.3fr]">
       <div className="rounded-lg bg-surface-subtle p-5">
@@ -554,6 +557,12 @@ function UnavailableModule({ detail }: { detail: string }) {
 
 function formatNumber(value: number, digits: number): string {
   return value.toLocaleString("en-SG", { maximumFractionDigits: digits, minimumFractionDigits: digits });
+}
+
+function formatCurrencyAmount(amount: number, currency: string, digits: number): string {
+  const code = currency.trim().toUpperCase();
+  const value = formatNumber(amount, digits);
+  return code === "SGD" ? `S$${value}` : `${code} ${value}`;
 }
 
 function formatAnalysisTimestamp(value: string, timeZone: string): string {

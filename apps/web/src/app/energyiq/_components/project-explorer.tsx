@@ -31,7 +31,7 @@ type ProjectNode = {
 
 type ExplorerPeriod = "Yesterday" | "Last 7 days" | "Custom";
 
-const explorerPeriodOptions: readonly Array<{
+const explorerPeriodOptions: ReadonlyArray<{
   label: string;
   value?: ExplorerPeriod;
   disabled?: boolean;

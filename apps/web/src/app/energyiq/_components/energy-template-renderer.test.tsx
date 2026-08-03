@@ -4,6 +4,8 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import type { EnergyScopeAnalysisDto } from "../../../lib/config-api";
+import type { EnergyTemplateRenderPlan } from "./energy-template-render-plan";
 import { EnergyTemplateRenderer } from "./energy-template-renderer";
 
 describe("EnergyTemplateRenderer states", () => {
@@ -102,9 +104,45 @@ describe("EnergyTemplateRenderer states", () => {
     expect(markup).toContain("Off-hours consumption is elevated");
     expect(markup).toContain("Review the top contributing circuits with the FM team.");
   });
+
+  it("renders release-pinned cost and an explicit operating-hours unavailable reason", () => {
+    const analysis = analysisFixture();
+    analysis.cost = {
+      status: "available",
+      amount: 27.27,
+      currency: "SGD",
+      tariffScheduleVersion: "tariff-v1",
+      allocations: [],
+    };
+    const plan = renderPlanFixture();
+    plan.sections[0]!.modules[0]!.component = {
+      ...plan.sections[0]!.modules[0]!.component,
+      revision_id: "consumption.overview@1",
+      component_id: "consumption.overview",
+      display_name: "Consumption overview",
+      view_key: "consumption_overview_v1",
+      family: "overview",
+    };
+
+    const costMarkup = renderToStaticMarkup(<EnergyTemplateRenderer state={{ status: "ready", analysis, plan }} />);
+
+    plan.sections[0]!.modules[0]!.component = {
+      ...plan.sections[0]!.modules[0]!.component,
+      revision_id: "time.off_hours@1",
+      component_id: "time.off_hours",
+      display_name: "Off-hours analysis",
+      view_key: "off_hours_analysis_v1",
+      family: "time",
+    };
+    const offHoursMarkup = renderToStaticMarkup(<EnergyTemplateRenderer state={{ status: "ready", analysis, plan }} />);
+
+    expect(costMarkup).toContain("S$27.27");
+    expect(costMarkup).toContain("Tariff tariff-v1");
+    expect(offHoursMarkup).toContain("Published operating calendar was not found.");
+  });
 });
 
-function analysisFixture() {
+function analysisFixture(): EnergyScopeAnalysisDto {
   return {
     context: {
       userId: "admin",
@@ -131,7 +169,6 @@ function analysisFixture() {
     summary: {
       usageKwh: 100,
       averageDailyUsageKwh: 10,
-      costSgd: 27.27,
       peakKw: 8,
       peakAt: "2026-05-12T06:00:00.000Z",
       nonOperatingKwh: 12,
@@ -154,12 +191,19 @@ function analysisFixture() {
     virtualMeters: [],
     offHours: {
       status: "unavailable" as const,
-      reason: "OPERATING_CALENDAR_NOT_MATERIALIZED" as const,
+      reason: {
+        code: "OPERATING_CALENDAR_VERSION_NOT_FOUND" as const,
+        message: "Published operating calendar was not found.",
+      },
+      businessCalendarVersion: "calendar-v1",
     },
     cost: {
       status: "unavailable" as const,
-      reason: "TARIFF_NOT_CONFIGURED" as const,
-      currency: "SGD" as const,
+      reason: {
+        code: "TARIFF_VERSION_NOT_FOUND" as const,
+        message: "Published tariff was not found.",
+      },
+      tariffScheduleVersion: "tariff-v1",
     },
     dataHealth: {
       status: "partial" as const,
@@ -167,6 +211,9 @@ function analysisFixture() {
       expectedMeterIntervalCount: 101,
       validIntervalCount: 100,
       qualityEventCount: 1,
+      cumulativeDeltaMismatchCount: 0,
+      averageKwMismatchCount: 0,
+      invalidIntervalDurationCount: 0,
       lastSeenAt: "2026-05-31T15:45:00.000Z",
       importBatchIds: ["batch-1"],
     },
@@ -185,12 +232,18 @@ function analysisFixture() {
       ruleRevisionIds: [],
       aggregationRule: "component" as const,
       sourceView: "fixture",
-      queryIds: ["scope_summary_v1", "hourly_profile_v1", "meter_breakdown_v1"] as const,
+      queryIds: [
+        "scope_summary_v1",
+        "hourly_profile_v1",
+        "meter_breakdown_v1",
+        "operational_policy_scope_intervals_v1",
+        "operational_policy_meter_intervals_v1",
+      ],
     },
   };
 }
 
-function renderPlanFixture() {
+function renderPlanFixture(): EnergyTemplateRenderPlan {
   return {
     template_id: "project",
     target_kind: "project" as const,

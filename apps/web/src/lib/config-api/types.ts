@@ -311,16 +311,29 @@ export type EnergyQueryContextDto = {
   resolvedAt: string;
 };
 
+export type EnergyPolicyUnavailableReasonDto = {
+  code:
+    | "TARIFF_VERSION_MISSING"
+    | "TARIFF_VERSION_NOT_FOUND"
+    | "TARIFF_NOT_EFFECTIVE_FOR_PERIOD"
+    | "TARIFF_CURRENCY_CONFLICT"
+    | "COST_FACTS_UNAVAILABLE"
+    | "OPERATING_CALENDAR_VERSION_MISSING"
+    | "OPERATING_CALENDAR_VERSION_NOT_FOUND"
+    | "OPERATING_CALENDAR_NOT_EFFECTIVE_FOR_PERIOD"
+    | "OPERATING_FACTS_UNAVAILABLE";
+  message: string;
+};
+
 export type EnergyScopeAnalysisDto = {
   context: EnergyQueryContextDto;
   summary: {
     usageKwh: number;
     averageDailyUsageKwh: number;
-    costSgd: number;
     peakKw: number;
     peakAt?: string;
-    nonOperatingKwh: number;
-    nonOperatingSharePct: number;
+    nonOperatingKwh?: number;
+    nonOperatingSharePct?: number;
     areaSqm?: number;
     occupantCount?: number;
     kwhPerSqm?: number;
@@ -368,7 +381,7 @@ export type EnergyScopeAnalysisDto = {
     meterRole: string;
     usageKwh: number;
     sharePct: number;
-    nonOperatingKwh: number;
+    nonOperatingKwh?: number;
     peakKw: number;
     qualityEventCount: number;
   }>;
@@ -383,22 +396,33 @@ export type EnergyScopeAnalysisDto = {
   }>;
   offHours: {
     status: "available";
+    operatingKwh: number;
+    standbyKwh: number;
     usageKwh: number;
     sharePct: number;
-    knownMeterIntervalCount: number;
+    timezone: string;
+    businessCalendarVersion: string;
   } | {
     status: "unavailable";
-    reason: "OPERATING_CALENDAR_NOT_MATERIALIZED";
+    reason: EnergyPolicyUnavailableReasonDto;
+    businessCalendarVersion?: string;
   };
   cost: {
-    status: "unavailable";
-    reason: "TARIFF_NOT_CONFIGURED";
-    currency: "SGD";
-  } | {
-    status: "estimated";
+    status: "available";
     amount: number;
-    currency: "SGD";
+    currency: string;
     tariffScheduleVersion: string;
+    allocations: Array<{
+      from: string;
+      to: string;
+      ratePerKwh: number;
+      usageKwh: number;
+      cost: number;
+    }>;
+  } | {
+    status: "unavailable";
+    reason: EnergyPolicyUnavailableReasonDto;
+    tariffScheduleVersion?: string;
   };
   dataHealth: {
     status: "complete" | "partial" | "unavailable";
@@ -433,7 +457,13 @@ export type EnergyScopeAnalysisDto = {
     ruleRevisionIds: string[];
     aggregationRule: "designated_total" | "component" | "submeter" | "none";
     sourceView: string;
-    queryIds: ["scope_summary_v1", "hourly_profile_v1", "meter_breakdown_v1"];
+    queryIds: [
+      "scope_summary_v1",
+      "hourly_profile_v1",
+      "meter_breakdown_v1",
+      "operational_policy_scope_intervals_v1",
+      "operational_policy_meter_intervals_v1",
+    ];
   };
 };
 

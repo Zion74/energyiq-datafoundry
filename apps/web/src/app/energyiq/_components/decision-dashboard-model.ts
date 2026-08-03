@@ -52,6 +52,14 @@ export function buildDecisionDashboardModel(
   const circuitsForComposition = analysis.circuits.some((circuit) => circuit.meterRole !== "total")
     ? analysis.circuits.filter((circuit) => circuit.meterRole !== "total")
     : analysis.circuits;
+  const offHours = analysis.offHours.status === "available" ? analysis.offHours : null;
+  const cost = analysis.cost.status === "available" ? analysis.cost : null;
+  const offHoursUnavailableReason = analysis.offHours.status === "unavailable"
+    ? analysis.offHours.reason.message
+    : null;
+  const costUnavailableReason = analysis.cost.status === "unavailable"
+    ? analysis.cost.reason.message
+    : null;
 
   return {
     projectName: context.projectName,
@@ -60,20 +68,24 @@ export function buildDecisionDashboardModel(
       {
         label: "Total consumption",
         value: `${formatNumber(summary.usageKwh, 2)} kWh`,
-        note: `${formatNumber(summary.nonOperatingKwh, 2)} kWh outside operating hours`,
-        tone: summary.nonOperatingSharePct >= 10 ? "warning" : "muted",
+        note: offHours
+          ? `${formatNumber(offHours.standbyKwh, 2)} kWh outside operating hours`
+          : `Operating-hours unavailable: ${offHoursUnavailableReason ?? "Policy facts unavailable"}`,
+        tone: offHours && offHours.sharePct >= 10 ? "warning" : "muted",
       },
       {
-        label: "Estimated cost",
-        value: `S$${formatNumber(summary.costSgd, 2)}`,
-        note: `Tariff ${context.tariffScheduleVersion}`,
+        label: "Energy cost",
+        value: cost ? formatCurrencyAmount(cost.amount, cost.currency, 2) : "Unavailable",
+        note: cost ? `Tariff ${cost.tariffScheduleVersion}` : costUnavailableReason ?? "Policy facts unavailable",
         tone: "muted",
       },
       {
         label: "Off-hours share",
-        value: `${summary.nonOperatingSharePct.toFixed(1)}%`,
-        note: summary.nonOperatingSharePct >= 10 ? "Review shutdown schedules" : "Within the current rule threshold",
-        tone: summary.nonOperatingSharePct >= 10 ? "warning" : "success",
+        value: offHours ? `${offHours.sharePct.toFixed(1)}%` : "Unavailable",
+        note: offHours
+          ? offHours.sharePct >= 10 ? "Review shutdown schedules" : "Within the current rule threshold"
+          : offHoursUnavailableReason ?? "Policy facts unavailable",
+        tone: offHours ? offHours.sharePct >= 10 ? "warning" : "success" : "muted",
       },
       {
         label: "Data quality",
@@ -103,11 +115,11 @@ export function buildDecisionDashboardModel(
       ...(child.kwhPerPerson !== undefined ? { perPerson: child.kwhPerPerson } : {}),
       sharePct: child.sharePct,
     })),
-    operatingMix: buildOperatingMix(circuitsForComposition),
+    operatingMix: offHours ? buildOperatingMix(circuitsForComposition) : [],
     timeProfile: buildTimeProfile(analysis.hourlyProfile),
     forecast: {
       projectedUsage: `${formatNumber(summary.usageKwh, 0)} kWh`,
-      projectedCost: `S$${formatNumber(summary.costSgd, 0)}`,
+      projectedCost: cost ? formatCurrencyAmount(cost.amount, cost.currency, 0) : "Unavailable",
       readiness: "Not released",
     },
     provenanceLabel: `${analysis.provenance.dataSnapshotId} · ${analysis.provenance.metricVersion}`,
@@ -145,7 +157,9 @@ function buildInsights(analysis: EnergyScopeAnalysisDto): DashboardInsight[] {
 
 function impactForAttention(code: string, analysis: EnergyScopeAnalysisDto): string {
   if (code === "NON_OPERATING_SHARE") {
-    return `${formatNumber(analysis.summary.nonOperatingKwh, 2)} kWh outside operating hours`;
+    return analysis.offHours.status === "available"
+      ? `${formatNumber(analysis.offHours.standbyKwh, 2)} kWh outside operating hours`
+      : "Operating-hours fact unavailable";
   }
   if (code === "NO_DATA") return "No validated energy was included";
   return `${formatNumber(analysis.summary.usageKwh, 2)} kWh analysed in this scope`;
@@ -156,6 +170,7 @@ function buildOperatingMix(
 ): DecisionDashboardModel["operatingMix"] {
   const grouped = new Map<string, { operating: number; offHours: number }>();
   for (const circuit of circuits) {
+    if (circuit.nonOperatingKwh === undefined) continue;
     const label = categoryLabel(circuit.category);
     const current = grouped.get(label) ?? { operating: 0, offHours: 0 };
     current.operating += Math.max(0, circuit.usageKwh - circuit.nonOperatingKwh);
@@ -165,6 +180,12 @@ function buildOperatingMix(
   return [...grouped.entries()]
     .map(([category, values]) => ({ category, ...values }))
     .sort((left, right) => right.offHours - left.offHours);
+}
+
+function formatCurrencyAmount(amount: number, currency: string, digits: number): string {
+  const code = currency.trim().toUpperCase();
+  const value = formatNumber(amount, digits);
+  return code === "SGD" ? `S$${value}` : `${code} ${value}`;
 }
 
 function buildTimeProfile(
