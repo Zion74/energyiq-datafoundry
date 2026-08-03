@@ -96,6 +96,7 @@
     "smoke:model-fallback": "npm run build && node scripts/smoke-model-fallback.mjs",
     "smoke:energyiq-qwen-agent": "node scripts/smoke-energyiq-qwen-agent.mjs",
     "smoke:energyiq-qwen-chart": "node scripts/smoke-energyiq-qwen-agent.mjs --chart",
+    "eval:energyiq:trusted-text:offline": "npm --workspace @datafoundry/agent-runtime run build && node scripts/eval-energyiq-trusted-text-offline.mjs",
     "smoke:agent-protocol-deepseek": "npm run build && node scripts/smoke-agent-protocol-deepseek.mjs",
     "smoke:trace-sections": "npm run build && node scripts/smoke-trace-sections.mjs",
     "eval:dacomp6": "node scripts/run-dacomp6-complex-case.mjs",
