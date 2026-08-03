@@ -192,6 +192,9 @@ const bindPublishedReleaseContext = (
   ...context,
   hierarchyRevisionId: release.hierarchyRevisionId,
   meterFormulaRevisionId: release.meterFormulaRevisionId,
+  metricVersion: `metric-revisions:${[...release.metricRevisionIds]
+    .sort((left, right) => left.localeCompare(right))
+    .join(",") || "none"}`,
   businessCalendarVersion: release.businessCalendarVersion,
   tariffScheduleVersion: release.tariffScheduleVersion,
 });

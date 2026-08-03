@@ -204,6 +204,7 @@ describe("ProjectAnalysisResolver", () => {
         ...project,
         hierarchy_revision_id: "unpublished-hierarchy-drift",
         meter_formula_revision_id: "unpublished-meter-formula-drift",
+        metric_version: "unpublished-metric-drift",
         business_calendar_version: "unpublished-calendar-drift",
         tariff_schedule_version: "unpublished-tariff-drift",
       });
@@ -236,6 +237,9 @@ describe("ProjectAnalysisResolver", () => {
         projectReleaseId: publishedRevision.revision_id,
         hierarchyRevisionId: publishedRevision.hierarchy_revision_id,
         meterFormulaRevisionId: publishedRevision.meter_formula_revision_id,
+        metricVersion: `metric-revisions:${[...publishedRevision.selected_metric_revision_ids]
+          .sort((left, right) => left.localeCompare(right))
+          .join(",") || "none"}`,
         businessCalendarVersion: publishedRevision.business_calendar_version,
         tariffScheduleVersion: publishedRevision.tariff_schedule_version,
         primaryPeriod: {
@@ -246,6 +250,9 @@ describe("ProjectAnalysisResolver", () => {
       expect(releasedResult.snapshot.analysis.provenance).toMatchObject({
         hierarchyRevisionId: publishedRevision.hierarchy_revision_id,
         meterFormulaRevisionId: publishedRevision.meter_formula_revision_id,
+        metricVersion: `metric-revisions:${[...publishedRevision.selected_metric_revision_ids]
+          .sort((left, right) => left.localeCompare(right))
+          .join(",") || "none"}`,
       });
       expect(releasedResult.snapshot.analysis.cost).toMatchObject({
         tariffScheduleVersion: publishedRevision.tariff_schedule_version,
