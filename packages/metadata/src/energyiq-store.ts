@@ -4,6 +4,7 @@ import { EnergyIqMetricStore } from "./energyiq-metric-store.js";
 import { EnergyIqOperationalPolicyStore } from "./energyiq-operational-policy-store.js";
 import { EnergyIqRuleStore } from "./energyiq-rule-store.js";
 import { EnergyIqSavedAnalysisStore } from "./energyiq-saved-analysis-store.js";
+import { EnergyIqScopeMetadataResolver } from "./energyiq-scope-metadata-resolver.js";
 import { EnergyIqTemplateStore } from "./energyiq-template-store.js";
 
 import {
@@ -189,6 +190,7 @@ export class EnergyIqStore {
   readonly projectSetup: EnergyIqProjectSetupStore;
   readonly rules: EnergyIqRuleStore;
   readonly savedAnalyses: EnergyIqSavedAnalysisStore;
+  readonly scopeMetadata: EnergyIqScopeMetadataResolver;
   readonly templates: EnergyIqTemplateStore;
 
   constructor(private readonly db: DatabaseSync) {
@@ -197,6 +199,7 @@ export class EnergyIqStore {
     this.projectSetup = new EnergyIqProjectSetupStore(db);
     this.rules = new EnergyIqRuleStore(db);
     this.savedAnalyses = new EnergyIqSavedAnalysisStore(db);
+    this.scopeMetadata = new EnergyIqScopeMetadataResolver(db);
     this.templates = new EnergyIqTemplateStore(db);
   }
 

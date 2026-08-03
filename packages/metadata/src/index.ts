@@ -25,6 +25,7 @@ import { initializeEnergyIqTemplateRevisionSchema, initializeEnergyIqTemplateSch
 export * from "./config-store.js";
 export * from "./energyiq-store.js";
 export * from "./energyiq-saved-analysis-store.js";
+export * from "./energyiq-scope-metadata-resolver.js";
 export * from "./energyiq-metric-store.js";
 export * from "./energyiq-operational-policy-store.js";
 export * from "./energyiq-project-setup-store.js";
