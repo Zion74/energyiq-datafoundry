@@ -94,6 +94,7 @@ import {
   type AnalysisContractGrounder
 } from "./protocol/model-analysis-contract-grounder.js";
 import type { AnalysisRequirement } from "./protocol/analysis-requirements.js";
+import { adaptTrustedEnergyRequirementsCommit } from "./protocol/trusted-energy-requirements-commit-adapter.js";
 import type { DataAnalysisState } from "./protocol/protocols/data-analysis.js";
 import { createDefaultSemanticProvider } from "./semantic/default-semantic-provider.js";
 import { EnergyQuerySemanticProvider } from "./semantic/energy-query-semantic-provider.js";
@@ -569,9 +570,6 @@ export const createDataFoundry = async (
     ? ((protocolState.domain as DataAnalysisState).requirements ?? []).filter((requirement) =>
         requirement.source === "user")
     : [];
-  const hasDeclaredClaimValues = analysisRequirements.some((requirement) =>
-    requirement.assertions.some((assertion) => assertion.claimValues.length > 0)
-  );
   const requirementsCommitTools = analysisRequirements.length > 0
     ? {
         analysis_requirements_commit: createTool({
@@ -592,10 +590,8 @@ export const createDataFoundry = async (
           }),
           execute: async (toolInput, options) => {
             const toolCallId = protocolToolCallId(options);
-            const commitInput = input.runContext.energy_query_context && !hasDeclaredClaimValues
-              ? {
-                  claims: toolInput.claims.map(({ values: _ignoredValues, ...claim }) => claim)
-                }
+            const commitInput = input.runContext.energy_query_context
+              ? adaptTrustedEnergyRequirementsCommit(toolInput, analysisRequirements)
               : toolInput;
             try {
               const result = await protocol.actionRouter.execute({
@@ -1575,6 +1571,20 @@ export type * from "./protocol/protocol-runtime.js";
 export type * from "./protocol/types.js";
 export { DataLinkSemanticProvider } from "./semantic/datalink-semantic-provider.js";
 export { EnergyQuerySemanticProvider } from "./semantic/energy-query-semantic-provider.js";
+export {
+  compileTrustedEnergyTextQuery,
+  createTrustedEnergyAnswerEnvelope,
+  TRUSTED_ENERGY_TEXT_INTENT_METRICS,
+  TRUSTED_ENERGY_TEXT_INTENTS,
+  validateTrustedEnergyTextResult
+} from "./semantic/trusted-energy-text.js";
+export type {
+  TrustedEnergyTextIntent,
+  TrustedEnergyTextQueryContract,
+  TrustedEnergyTextRequest,
+  TrustedEnergyTextResult,
+  TrustedEnergyTextResultInput
+} from "./semantic/trusted-energy-text.js";
 export { LocalSemanticProvider } from "./semantic/local-semantic-provider.js";
 export { SemanticProviderChain } from "./semantic/semantic-provider-chain.js";
 export { createDefaultSemanticProvider } from "./semantic/default-semantic-provider.js";

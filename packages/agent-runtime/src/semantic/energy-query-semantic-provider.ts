@@ -1,4 +1,5 @@
 import type { AgentEnergyQueryContext } from "../types.js";
+import type { TrustedEnergyTextQueryContract } from "./trusted-energy-text.js";
 import type { SemanticRequest, SemanticResolution } from "./types.js";
 
 /**
@@ -9,38 +10,86 @@ import type { SemanticRequest, SemanticResolution } from "./types.js";
 export class EnergyQuerySemanticProvider {
   readonly id = "energyiq" as const;
 
-  constructor(private readonly context: AgentEnergyQueryContext) {}
+  constructor(private readonly context: AgentEnergyQueryContext | TrustedEnergyTextQueryContract) {}
 
   async resolve(request: SemanticRequest): Promise<SemanticResolution> {
+    if (isTrustedTextContract(this.context)) {
+      return resolveTrustedTextContext(this.context, request);
+    }
+    const context = this.context;
     return {
       value: {
         physicalSchema: request.physicalSchema,
         project: {
-          id: this.context.projectId,
-          name: this.context.projectName
+          id: context.projectId,
+          name: context.projectName
         },
         scope: {
-          id: this.context.scopeId,
-          name: this.context.scopeName,
-          type: this.context.scopeType
+          id: context.scopeId,
+          name: context.scopeName,
+          type: context.scopeType
         },
-        resource: this.context.resource,
+        resource: context.resource,
         period: {
-          label: this.context.period,
-          from: this.context.from,
-          to: this.context.to,
+          label: context.period,
+          from: context.from,
+          to: context.to,
           endExclusive: true,
-          timezone: this.context.timezone
+          timezone: context.timezone
         },
-        ...(this.context.metricVersion ? { metricVersion: this.context.metricVersion } : {})
+        ...(context.metricVersion ? { metricVersion: context.metricVersion } : {})
       },
       capabilities: ["physical-schema", "energy-query-context", "canonical-energy-fact"],
       trust: "authoritative",
       warnings: [],
-      ...(this.context.dataSnapshotId ? { snapshotId: this.context.dataSnapshotId } : {}),
+      ...(context.dataSnapshotId ? { snapshotId: context.dataSnapshotId } : {}),
       provider: "energyiq",
       mode: "live",
       datasourceRevision: request.datasourceRevision
     };
   }
 }
+
+function isTrustedTextContract(
+  context: AgentEnergyQueryContext | TrustedEnergyTextQueryContract
+): context is TrustedEnergyTextQueryContract {
+  return "kind" in context && context.kind === "trusted-energy-text-query";
+}
+
+const resolveTrustedTextContext = (
+  contract: TrustedEnergyTextQueryContract,
+  request: SemanticRequest
+): SemanticResolution => ({
+  value: {
+    physicalSchema: request.physicalSchema,
+    project: contract.pins.project,
+    scope: contract.pins.scope,
+    period: {
+      label: contract.pins.period.label,
+      from: contract.pins.period.start,
+      to: contract.pins.period.endExclusive,
+      endExclusive: true,
+      timezone: contract.pins.period.timezone
+    },
+    metric: contract.pins.metric,
+    dataAsOf: contract.pins.dataAsOf,
+    evidenceRefs: contract.pins.evidenceRefs,
+    trustedTextQuery: {
+      id: contract.id,
+      intent: contract.intent,
+      selector: contract.selector
+    }
+  },
+  capabilities: [
+    "physical-schema",
+    "energy-query-context",
+    "canonical-energy-fact",
+    "trusted-energy-text"
+  ],
+  trust: "authoritative",
+  warnings: [],
+  snapshotId: contract.pins.dataSnapshotId,
+  provider: "energyiq",
+  mode: "live",
+  datasourceRevision: request.datasourceRevision
+});
