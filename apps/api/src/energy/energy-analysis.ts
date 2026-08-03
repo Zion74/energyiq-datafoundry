@@ -1,8 +1,13 @@
 import {
   ensureEnergyScopedDataSource,
+  readEnergyFactCoverage,
   type LocalDataGateway
 } from "@datafoundry/data-gateway";
-import type { EnergyIqRuleRevisionRecord, MetadataStore } from "@datafoundry/metadata";
+import type {
+  EnergyIqProjectSetupDocument,
+  EnergyIqRuleRevisionRecord,
+  MetadataStore
+} from "@datafoundry/metadata";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,6 +25,7 @@ export type EnergyScopeAnalysis = {
     averageDailyUsageKwh: number;
     costSgd: number;
     peakKw: number;
+    peakAt?: string;
     nonOperatingKwh: number;
     nonOperatingSharePct: number;
     areaSqm?: number;
@@ -31,8 +37,22 @@ export type EnergyScopeAnalysis = {
   };
   hourlyProfile: Array<{
     hour: number;
+    usageKwh: number;
     averageKw: number;
     peakKw: number;
+    observationCount: number;
+  }>;
+  comparison: {
+    from: string;
+    to: string;
+    usageKwh: number;
+    changeKwh: number;
+    changePct: number | null;
+  };
+  categories: Array<{
+    category: string;
+    usageKwh: number;
+    sharePct: number;
   }>;
   childScopes: Array<{
     nodeId: string;
@@ -59,6 +79,52 @@ export type EnergyScopeAnalysis = {
     peakKw: number;
     qualityEventCount: number;
   }>;
+  topCircuits: EnergyScopeAnalysis["circuits"];
+  virtualMeters: Array<{
+    meterNodeId: string;
+    name: string;
+    scopeId: string;
+    termMeterNodeIds: string[];
+    usageKwh: number;
+    includedInOfficialTotal: false;
+  }>;
+  offHours: {
+    status: "available";
+    usageKwh: number;
+    sharePct: number;
+    knownMeterIntervalCount: number;
+  } | {
+    status: "unavailable";
+    reason: "OPERATING_CALENDAR_NOT_MATERIALIZED";
+  };
+  cost: {
+    status: "unavailable";
+    reason: "TARIFF_NOT_CONFIGURED";
+    currency: "SGD";
+  } | {
+    status: "estimated";
+    amount: number;
+    currency: "SGD";
+    tariffScheduleVersion: string;
+  };
+  dataHealth: {
+    status: "complete" | "partial" | "unavailable";
+    coveragePct: number;
+    expectedMeterIntervalCount: number;
+    validIntervalCount: number;
+    qualityEventCount: number;
+    cumulativeDeltaMismatchCount: number;
+    averageKwMismatchCount: number;
+    invalidIntervalDurationCount: number;
+    lastSeenAt?: string;
+    importBatchIds: string[];
+  };
+  units: {
+    usage: "kWh";
+    demand: "kW";
+    intervalMinutes: number;
+    timezone: string;
+  };
   attention: Array<{
     code: string;
     severity: "info" | "warning";
@@ -78,6 +144,23 @@ export type EnergyScopeAnalysis = {
   };
 };
 
+export type EnergyGoldenSelection = {
+  periodDays: number;
+  intervalMinutes: number;
+  policy: "highest current coverage, then previous-period coverage, then fewest quality events, then latest";
+  period: {
+    localFrom: string;
+    localToExclusive: string;
+    from: string;
+    to: string;
+  };
+  day: {
+    localDate: string;
+    from: string;
+    to: string;
+  };
+};
+
 type MeterAggregate = {
   meterNodeId: string;
   scopeId: string;
@@ -90,6 +173,127 @@ type MeterAggregate = {
   peakKw: number;
   validIntervalCount: number;
   qualityEventCount: number;
+};
+
+const GOLDEN_SELECTION_POLICY =
+  "highest current coverage, then previous-period coverage, then fewest quality events, then latest" as const;
+
+export const selectEnergyGoldenPeriod = async (input: {
+  metadataStore: MetadataStore;
+  dataGateway: LocalDataGateway;
+  userId: string;
+  context: EnergyQueryContext;
+  databasePath?: string;
+  periodDays?: number;
+}): Promise<EnergyGoldenSelection> => {
+  const periodDays = input.periodDays ?? 7;
+  if (!Number.isInteger(periodDays) || periodDays < 1) {
+    throw new Error("ENERGYIQ_GOLDEN_PERIOD_DAYS_INVALID");
+  }
+  const databasePath = input.databasePath
+    ?? process.env.ENERGYIQ_DUCKDB_PATH
+    ?? join(resolve(dirname(fileURLToPath(import.meta.url)), "../../../.."), "storage", "energy", input.context.workspaceId, "energy.duckdb");
+  const coverage = await readEnergyFactCoverage({
+    workspaceId: input.context.workspaceId,
+    projectId: input.context.projectId,
+    resource: input.context.resource,
+    databasePath
+  });
+  if (!coverage) {
+    throw new Error("ENERGYIQ_GOLDEN_COVERAGE_NOT_FOUND");
+  }
+  const scopeNodeIds = resolveEnergyScopeMeterNodeIds(
+    input.metadataStore,
+    input.context.projectId,
+    input.context.scopeId
+  );
+  const scoped = await ensureEnergyScopedDataSource({
+    metadataStore: input.metadataStore,
+    userId: input.userId,
+    context: {
+      workspaceId: input.context.workspaceId,
+      projectId: input.context.projectId,
+      scopeId: input.context.scopeId,
+      scopeNodeIds,
+      resource: input.context.resource,
+      from: coverage.from,
+      to: coverage.to,
+      timezone: input.context.timezone,
+      hierarchyRevisionId: input.context.hierarchyRevisionId,
+      meterFormulaRevisionId: input.context.meterFormulaRevisionId,
+      dataSnapshotId: input.context.dataSnapshotId,
+      metricVersion: input.context.metricVersion
+    },
+    databasePath
+  });
+  const meterResult = await input.dataGateway.runSqlReadonly({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: scoped.datasourceId,
+    sql: meterBreakdownSql(scoped.viewName),
+    limit: 1000
+  });
+  const meterAggregates = meterResult.rows.map(rowToMeterAggregate);
+  const hierarchy = input.metadataStore.energyIq.listProjectNodes(input.context.projectId);
+  const selectedNode = hierarchy.find((node) => node.id === input.context.scopeId);
+  if (!selectedNode) {
+    throw new Error("ENERGYIQ_SCOPE_FORBIDDEN");
+  }
+  const aggregateMeterNodeIds = selectAggregateMetersForScope(
+    selectedNode.id,
+    meterAggregates,
+    hierarchy
+  ).map((meter) => meter.meterNodeId);
+  const selected = await input.dataGateway.runSqlReadonly({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: scoped.datasourceId,
+    sql: goldenPeriodSelectionSql(
+      scoped.viewName,
+      aggregateMeterNodeIds,
+      periodDays,
+      input.context.timezone
+    ),
+    limit: 1
+  });
+  const row = selected.rows[0];
+  if (!row) {
+    throw new Error("ENERGYIQ_GOLDEN_PERIOD_NOT_FOUND");
+  }
+  const dayResult = await input.dataGateway.runSqlReadonly({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: scoped.datasourceId,
+    sql: goldenDaySelectionSql(
+      scoped.viewName,
+      aggregateMeterNodeIds,
+      stringAt(row, 0),
+      stringAt(row, 1),
+      input.context.timezone
+    ),
+    limit: 1
+  });
+  const dayRow = dayResult.rows[0];
+  if (!dayRow) {
+    throw new Error("ENERGYIQ_GOLDEN_DAY_NOT_FOUND");
+  }
+  const intervalMinutes = numberAt(row, 4);
+  return {
+    periodDays,
+    intervalMinutes,
+    policy: GOLDEN_SELECTION_POLICY,
+    period: {
+      localFrom: stringAt(row, 0),
+      localToExclusive: stringAt(row, 1),
+      from: isoAt(row, 2),
+      to: isoAt(row, 3)
+    },
+    day: {
+      localDate: stringAt(dayRow, 0),
+      from: isoAt(dayRow, 1),
+      to: isoAt(dayRow, 2)
+    }
+  };
 };
 
 export const executeEnergyScopeAnalysis = async (input: {
@@ -147,7 +351,29 @@ export const executeEnergyScopeAnalysis = async (input: {
   );
   const aggregateMeterNodeIds = aggregateMeters.map((meter) => meter.meterNodeId);
   const aggregationRule = aggregationRuleForMeters(aggregateMeters);
-  const [summaryResult, profileResult] = await Promise.all([
+  const periodDurationMs = Date.parse(input.context.to) - Date.parse(input.context.from);
+  const previousFrom = new Date(Date.parse(input.context.from) - periodDurationMs).toISOString();
+  const previousTo = input.context.from;
+  const previousScoped = await ensureEnergyScopedDataSource({
+    metadataStore: input.metadataStore,
+    userId: input.userId,
+    context: {
+      workspaceId: input.context.workspaceId,
+      projectId: input.context.projectId,
+      scopeId: input.context.scopeId,
+      scopeNodeIds,
+      resource: input.context.resource,
+      from: previousFrom,
+      to: previousTo,
+      timezone: input.context.timezone,
+      hierarchyRevisionId: input.context.hierarchyRevisionId,
+      meterFormulaRevisionId: input.context.meterFormulaRevisionId,
+      dataSnapshotId: input.context.dataSnapshotId,
+      metricVersion: input.context.metricVersion
+    },
+    databasePath: scoped.databasePath
+  });
+  const [summaryResult, profileResult, healthResult, previousSummaryResult] = await Promise.all([
     input.dataGateway.runSqlReadonly({
       user_id: input.userId,
       workspace_id: input.context.workspaceId,
@@ -159,15 +385,44 @@ export const executeEnergyScopeAnalysis = async (input: {
       workspace_id: input.context.workspaceId,
       datasource_id: scoped.datasourceId,
       sql: hourlyProfileSql(scoped.viewName, aggregateMeterNodeIds)
+    }),
+    input.dataGateway.runSqlReadonly({
+      user_id: input.userId,
+      workspace_id: input.context.workspaceId,
+      datasource_id: scoped.datasourceId,
+      sql: scopeHealthSql(scoped.viewName, aggregateMeterNodeIds)
+    }),
+    input.dataGateway.runSqlReadonly({
+      user_id: input.userId,
+      workspace_id: input.context.workspaceId,
+      datasource_id: previousScoped.datasourceId,
+      sql: scopeSummarySql(previousScoped.viewName, aggregateMeterNodeIds)
     })
   ]);
 
   const summaryRow = summaryResult.rows[0] ?? [];
   const usageKwh = numberAt(summaryRow, 0);
   const peakKw = numberAt(summaryRow, 1);
-  const nonOperatingKwh = numberAt(summaryRow, 2);
-  const validIntervalCount = numberAt(summaryRow, 3);
-  const qualityEventCount = numberAt(summaryRow, 4);
+  const peakAt = optionalStringAt(summaryRow, 2);
+  const nonOperatingKwh = numberAt(summaryRow, 3);
+  const healthRow = healthResult.rows[0] ?? [];
+  const validIntervalCount = numberAt(healthRow, 0);
+  const qualityEventCount = numberAt(healthRow, 1);
+  const knownOperatingIntervalCount = numberAt(healthRow, 2);
+  const intervalMinutes = numberAt(healthRow, 3) || 15;
+  const lastSeenAt = optionalStringAt(healthRow, 4);
+  const importBatchIds = stringAt(healthRow, 5)
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .sort();
+  const cumulativeDeltaMismatchCount = numberAt(healthRow, 6);
+  const averageKwMismatchCount = numberAt(healthRow, 7);
+  const invalidIntervalDurationCount = numberAt(healthRow, 8);
+  const previousUsageKwh = numberAt(previousSummaryResult.rows[0] ?? [], 0);
+  const expectedMeterIntervalCount = aggregateMeterNodeIds.length * Math.round(
+    periodDurationMs / (intervalMinutes * 60_000)
+  );
   const scopeDimensions = resolveScopeDimensions(selectedNode.id, hierarchy);
   const childScopes = buildChildScopes({
     scopeNodeId: selectedNode.id,
@@ -189,12 +444,34 @@ export const executeEnergyScopeAnalysis = async (input: {
       qualityEventCount: meter.qualityEventCount
     }))
     .sort((left, right) => right.usageKwh - left.usageKwh);
+  const topCircuits = circuits.filter((meter) => !aggregateMeterNodeIds.includes(meter.meterNodeId));
+  const categoryUsage = new Map<string, number>();
+  for (const meter of aggregateMeters) {
+    categoryUsage.set(meter.category, (categoryUsage.get(meter.category) ?? 0) + meter.usageKwh);
+  }
+  const categories = [...categoryUsage.entries()]
+    .map(([category, categoryUsageKwh]) => ({
+      category,
+      usageKwh: round(categoryUsageKwh, 4),
+      sharePct: percent(categoryUsageKwh, usageKwh)
+    }))
+    .sort((left, right) => right.usageKwh - left.usageKwh);
+  const virtualMeters = buildVirtualMeters({
+    metadataStore: input.metadataStore,
+    projectId: input.context.projectId,
+    hierarchyRevisionId: input.context.hierarchyRevisionId,
+    resource: input.context.resource,
+    selectedScopeId: selectedNode.id,
+    hierarchy,
+    circuits
+  });
 
   const summary: EnergyScopeAnalysis["summary"] = {
     usageKwh: round(usageKwh, 4),
     averageDailyUsageKwh: round(usageKwh / calendarDayCount(input.context.from, input.context.to), 4),
     costSgd: round(usageKwh * SINGAPORE_TARIFF_SGD_PER_KWH, 2),
     peakKw: round(peakKw, 4),
+    ...(peakAt ? { peakAt } : {}),
     nonOperatingKwh: round(nonOperatingKwh, 4),
     nonOperatingSharePct: percent(nonOperatingKwh, usageKwh),
     ...(scopeDimensions.areaSqm > 0 ? {
@@ -208,18 +485,83 @@ export const executeEnergyScopeAnalysis = async (input: {
     validIntervalCount,
     qualityEventCount
   };
+  const comparison: EnergyScopeAnalysis["comparison"] = {
+    from: previousFrom,
+    to: previousTo,
+    usageKwh: round(previousUsageKwh, 4),
+    changeKwh: round(usageKwh - previousUsageKwh, 4),
+    changePct: previousUsageKwh > 0
+      ? round(((usageKwh - previousUsageKwh) / previousUsageKwh) * 100, 4)
+      : null
+  };
+  const offHours: EnergyScopeAnalysis["offHours"] = knownOperatingIntervalCount > 0
+    ? {
+        status: "available",
+        usageKwh: round(nonOperatingKwh, 4),
+        sharePct: percent(nonOperatingKwh, usageKwh),
+        knownMeterIntervalCount: knownOperatingIntervalCount
+      }
+    : {
+        status: "unavailable",
+        reason: "OPERATING_CALENDAR_NOT_MATERIALIZED"
+      };
+  const coveragePct = expectedMeterIntervalCount > 0
+    ? round(Math.min(validIntervalCount / expectedMeterIntervalCount, 1) * 100, 4)
+    : 0;
+  const dataHealth: EnergyScopeAnalysis["dataHealth"] = {
+    status: expectedMeterIntervalCount === 0
+      ? "unavailable"
+      : validIntervalCount >= expectedMeterIntervalCount && qualityEventCount === 0
+        ? "complete"
+        : "partial",
+    coveragePct,
+    expectedMeterIntervalCount,
+    validIntervalCount,
+    qualityEventCount,
+    cumulativeDeltaMismatchCount,
+    averageKwMismatchCount,
+    invalidIntervalDurationCount,
+    ...(lastSeenAt ? { lastSeenAt } : {}),
+    importBatchIds
+  };
   const ruleRevisions = input.ruleRevisions ?? input.metadataStore.energyIq.rules.listRevisions();
 
   return {
     context: input.context,
     summary,
+    comparison,
     hourlyProfile: profileResult.rows.map((row) => ({
       hour: numberAt(row, 0),
-      averageKw: round(numberAt(row, 1), 4),
-      peakKw: round(numberAt(row, 2), 4)
+      usageKwh: round(numberAt(row, 1), 4),
+      averageKw: round(numberAt(row, 2), 4),
+      peakKw: round(numberAt(row, 3), 4),
+      observationCount: numberAt(row, 4)
     })),
+    categories,
     childScopes,
     circuits,
+    topCircuits,
+    virtualMeters,
+    offHours,
+    cost: input.context.projectId === "ngee-ann-polytechnic"
+      ? {
+          status: "unavailable",
+          reason: "TARIFF_NOT_CONFIGURED",
+          currency: "SGD"
+        }
+      : {
+          status: "estimated",
+          amount: summary.costSgd,
+          currency: "SGD",
+          tariffScheduleVersion: input.context.tariffScheduleVersion
+        },
+    dataHealth,
+    units: {
+      usage: "kWh",
+      demand: "kW",
+      intervalMinutes,
+      timezone: input.context.timezone
+    },
     attention: evaluateEnergyAttention({ summary, childScopes, circuits, ruleRevisions }),
     provenance: {
       dataSnapshotId: input.context.dataSnapshotId,
@@ -273,6 +615,45 @@ const buildChildScopes = (input: {
       } : {})
     };
   }).sort((left, right) => right.usageKwh - left.usageKwh);
+};
+
+const buildVirtualMeters = (input: {
+  metadataStore: MetadataStore;
+  projectId: string;
+  hierarchyRevisionId: string;
+  resource: "electricity" | "water";
+  selectedScopeId: string;
+  hierarchy: ReturnType<MetadataStore["energyIq"]["listProjectNodes"]>;
+  circuits: EnergyScopeAnalysis["circuits"];
+}): EnergyScopeAnalysis["virtualMeters"] => {
+  const revision = input.metadataStore.energyIq.projectSetup
+    .listHierarchyRevisions(input.projectId)
+    .find((candidate) => candidate.id === input.hierarchyRevisionId);
+  if (!revision) return [];
+  const mapping = (JSON.parse(revision.snapshot_json) as EnergyIqProjectSetupDocument).meter_mapping;
+  if (!mapping) return [];
+  const includedScopeIds = collectDescendantIds(input.selectedScopeId, input.hierarchy);
+  includedScopeIds.add(input.selectedScopeId);
+  const circuitByMeterNodeId = new Map(input.circuits.map((circuit) => [circuit.meterNodeId, circuit]));
+  return (mapping.virtual_meters ?? []).flatMap((virtualMeter) => {
+    if (virtualMeter.resource !== input.resource || !includedScopeIds.has(virtualMeter.scope_id)) return [];
+    const terms = virtualMeter.terms.map((term) => ({
+      term,
+      circuit: circuitByMeterNodeId.get(term.mapping_row_id)
+    }));
+    if (terms.some(({ circuit }) => !circuit)) return [];
+    return [{
+      meterNodeId: virtualMeter.id,
+      name: virtualMeter.display_name,
+      scopeId: virtualMeter.scope_id,
+      termMeterNodeIds: terms.map(({ term }) => term.mapping_row_id),
+      usageKwh: round(terms.reduce(
+        (sum, { term, circuit }) => sum + (circuit?.usageKwh ?? 0) * term.coefficient,
+        0
+      ), 4),
+      includedInOfficialTotal: false as const
+    }];
+  });
 };
 
 export const evaluateEnergyAttention = (input: {
@@ -495,27 +876,35 @@ const scopeSummarySql = (viewName: string, meterNodeIds: string[]): string => `
   SELECT
     COALESCE(SUM(usage_kwh), 0) AS usage_kwh,
     COALESCE(MAX(average_kw), 0) AS peak_kw,
-    COALESCE(SUM(non_operating_kwh), 0) AS non_operating_kwh,
-    COALESCE(SUM(valid_interval_count), 0) AS valid_interval_count,
-    COALESCE(SUM(quality_event_count), 0) AS quality_event_count
+    ARG_MAX(interval_start, average_kw) AS peak_at,
+    COALESCE(SUM(non_operating_kwh), 0) AS non_operating_kwh
   FROM (
     SELECT
+      interval_start,
       local_interval_start,
       SUM(usage_kwh) FILTER (WHERE quality_status = 'ok') AS usage_kwh,
       SUM(average_kw) FILTER (WHERE quality_status = 'ok') AS average_kw,
-      SUM(usage_kwh) FILTER (WHERE quality_status = 'ok' AND is_operating = FALSE) AS non_operating_kwh,
-      COUNT(*) FILTER (WHERE quality_status = 'ok') AS valid_interval_count,
-      COUNT(*) FILTER (WHERE quality_status <> 'ok') AS quality_event_count
+      SUM(usage_kwh) FILTER (WHERE quality_status = 'ok' AND is_operating = FALSE) AS non_operating_kwh
     FROM ${quoteIdentifier(viewName)} source
     WHERE ${meterNodeFilter(meterNodeIds)}
-    GROUP BY local_interval_start
+    GROUP BY interval_start, local_interval_start
   ) interval_totals
 `;
 
 const hourlyProfileSql = (viewName: string, meterNodeIds: string[]): string => `
-  SELECT local_hour, AVG(scope_kw) AS average_kw, MAX(scope_kw) AS peak_kw
+  SELECT
+    local_hour,
+    SUM(scope_usage_kwh) AS usage_kwh,
+    AVG(scope_kw) AS average_kw,
+    MAX(scope_kw) AS peak_kw,
+    COUNT(*) AS observation_count
   FROM (
-    SELECT local_date, local_hour, local_interval_start, SUM(average_kw) AS scope_kw
+    SELECT
+      local_date,
+      local_hour,
+      local_interval_start,
+      SUM(usage_kwh) AS scope_usage_kwh,
+      SUM(average_kw) AS scope_kw
     FROM ${quoteIdentifier(viewName)} source
     WHERE ${meterNodeFilter(meterNodeIds)}
       AND source.quality_status = 'ok'
@@ -523,6 +912,140 @@ const hourlyProfileSql = (viewName: string, meterNodeIds: string[]): string => `
   ) interval_totals
   GROUP BY local_hour
   ORDER BY local_hour
+`;
+
+const scopeHealthSql = (viewName: string, meterNodeIds: string[]): string => `
+  SELECT
+    COUNT(*) FILTER (WHERE quality_status = 'ok') AS valid_interval_count,
+    COUNT(*) FILTER (WHERE quality_status <> 'ok') AS quality_event_count,
+    COUNT(*) FILTER (WHERE quality_status = 'ok' AND is_operating IS NOT NULL) AS known_operating_interval_count,
+    COALESCE(MEDIAN(elapsed_minutes) FILTER (
+      WHERE quality_status = 'ok' AND elapsed_minutes > 0
+    ), 15) AS interval_minutes,
+    MAX(interval_end) FILTER (WHERE quality_status = 'ok') AS last_seen_at,
+    COALESCE(STRING_AGG(
+      DISTINCT COALESCE(import_batch_id, '<legacy>'),
+      ','
+    ) FILTER (WHERE quality_status = 'ok'), '') AS import_batch_ids,
+    COUNT(*) FILTER (
+      WHERE source_reading_kind = 'cumulative_energy'
+        AND quality_status = 'ok'
+        AND ABS((active_energy_kwh - previous_active_energy_kwh) - raw_delta_kwh) > 0.000001
+    ) AS cumulative_delta_mismatch_count,
+    COUNT(*) FILTER (
+      WHERE quality_status = 'ok'
+        AND elapsed_minutes > 0
+        AND ABS(average_kw - usage_kwh * 60 / elapsed_minutes) > 0.000001
+    ) AS average_kw_mismatch_count,
+    COUNT(*) FILTER (
+      WHERE quality_status = 'ok' AND elapsed_minutes <> 15
+    ) AS invalid_interval_duration_count
+  FROM ${quoteIdentifier(viewName)} source
+  WHERE ${meterNodeFilter(meterNodeIds)}
+`;
+
+const goldenPeriodSelectionSql = (
+  viewName: string,
+  meterNodeIds: string[],
+  periodDays: number,
+  timezone: string
+): string => `
+  SELECT
+    STRFTIME(local_date, '%Y-%m-%d') AS local_from,
+    STRFTIME(local_date + INTERVAL ${periodDays} DAY, '%Y-%m-%d') AS local_to_exclusive,
+    EPOCH_MS(TIMEZONE(${sqlLiteral(timezone)}, CAST(local_date AS TIMESTAMP))) AS from_ms,
+    EPOCH_MS(TIMEZONE(
+      ${sqlLiteral(timezone)},
+      CAST(local_date + INTERVAL ${periodDays} DAY AS TIMESTAMP)
+    )) AS to_ms,
+    interval_minutes
+  FROM (
+    SELECT
+      daily_windows.*,
+      LEAD(local_date, ${periodDays - 1}) OVER (ORDER BY local_date) AS current_end_date,
+      LAG(local_date, ${periodDays}) OVER (ORDER BY local_date) AS previous_start_date,
+      COUNT(*) OVER (
+        ORDER BY local_date ROWS BETWEEN CURRENT ROW AND ${periodDays - 1} FOLLOWING
+      ) AS current_day_count,
+      COUNT(*) OVER (
+        ORDER BY local_date ROWS BETWEEN ${periodDays} PRECEDING AND 1 PRECEDING
+      ) AS previous_day_count,
+      SUM(valid_interval_count) OVER (
+        ORDER BY local_date ROWS BETWEEN CURRENT ROW AND ${periodDays - 1} FOLLOWING
+      ) AS current_valid_count,
+      SUM(expected_interval_count) OVER (
+        ORDER BY local_date ROWS BETWEEN CURRENT ROW AND ${periodDays - 1} FOLLOWING
+      ) AS current_expected_count,
+      SUM(quality_event_count) OVER (
+        ORDER BY local_date ROWS BETWEEN CURRENT ROW AND ${periodDays - 1} FOLLOWING
+      ) AS current_quality_count,
+      SUM(valid_interval_count) OVER (
+        ORDER BY local_date ROWS BETWEEN ${periodDays} PRECEDING AND 1 PRECEDING
+      ) AS previous_valid_count,
+      SUM(expected_interval_count) OVER (
+        ORDER BY local_date ROWS BETWEEN ${periodDays} PRECEDING AND 1 PRECEDING
+      ) AS previous_expected_count
+    FROM (
+      SELECT
+        local_date,
+        COUNT(*) FILTER (WHERE quality_status = 'ok') AS valid_interval_count,
+        COUNT(*) FILTER (WHERE quality_status <> 'ok') AS quality_event_count,
+        COALESCE(MEDIAN(elapsed_minutes) FILTER (
+          WHERE quality_status = 'ok' AND elapsed_minutes > 0
+        ), 15) AS interval_minutes,
+        ${meterNodeIds.length} * ROUND(1440 / COALESCE(MEDIAN(elapsed_minutes) FILTER (
+          WHERE quality_status = 'ok' AND elapsed_minutes > 0
+        ), 15)) AS expected_interval_count
+      FROM ${quoteIdentifier(viewName)} source
+      WHERE ${meterNodeFilter(meterNodeIds)}
+      GROUP BY local_date
+    ) daily_windows
+  ) candidates
+  WHERE current_day_count = ${periodDays}
+    AND previous_day_count = ${periodDays}
+    AND DATE_DIFF('day', local_date, current_end_date) = ${periodDays - 1}
+    AND DATE_DIFF('day', previous_start_date, local_date) = ${periodDays}
+  ORDER BY
+    current_valid_count / NULLIF(current_expected_count, 0) DESC,
+    previous_valid_count / NULLIF(previous_expected_count, 0) DESC,
+    current_quality_count ASC,
+    local_date DESC
+  LIMIT 1
+`;
+
+const goldenDaySelectionSql = (
+  viewName: string,
+  meterNodeIds: string[],
+  localFrom: string,
+  localToExclusive: string,
+  timezone: string
+): string => `
+  SELECT
+    STRFTIME(local_date, '%Y-%m-%d') AS local_date,
+    EPOCH_MS(TIMEZONE(${sqlLiteral(timezone)}, CAST(local_date AS TIMESTAMP))) AS from_ms,
+    EPOCH_MS(TIMEZONE(
+      ${sqlLiteral(timezone)},
+      CAST(local_date + INTERVAL 1 DAY AS TIMESTAMP)
+    )) AS to_ms
+  FROM (
+    SELECT
+      local_date,
+      COUNT(*) FILTER (WHERE quality_status = 'ok') AS valid_interval_count,
+      COUNT(*) FILTER (WHERE quality_status <> 'ok') AS quality_event_count,
+      ${meterNodeIds.length} * ROUND(1440 / COALESCE(MEDIAN(elapsed_minutes) FILTER (
+        WHERE quality_status = 'ok' AND elapsed_minutes > 0
+      ), 15)) AS expected_interval_count
+    FROM ${quoteIdentifier(viewName)} source
+    WHERE ${meterNodeFilter(meterNodeIds)}
+      AND local_date >= CAST(${sqlLiteral(localFrom)} AS DATE)
+      AND local_date < CAST(${sqlLiteral(localToExclusive)} AS DATE)
+    GROUP BY local_date
+  ) candidate_days
+  ORDER BY
+    valid_interval_count / NULLIF(expected_interval_count, 0) DESC,
+    quality_event_count ASC,
+    local_date DESC
+  LIMIT 1
 `;
 
 const meterBreakdownSql = (viewName: string): string => `
@@ -564,6 +1087,26 @@ const numberAt = (row: unknown[], index: number): number => {
 
 const stringAt = (row: unknown[], index: number): string =>
   typeof row[index] === "string" ? row[index] : String(row[index] ?? "");
+
+const optionalStringAt = (row: unknown[], index: number): string | undefined => {
+  const value = row[index];
+  if (typeof value === "string" && value.length > 0) return value;
+  if (value instanceof Date) return value.toISOString();
+  return undefined;
+};
+
+const isoAt = (row: unknown[], index: number): string => {
+  const value = row[index];
+  if (typeof value === "number" || typeof value === "bigint") {
+    return new Date(Number(value)).toISOString();
+  }
+  if (typeof value === "string") {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
+  }
+  if (value instanceof Date) return value.toISOString();
+  throw new Error(`ENERGYIQ_GOLDEN_TIMESTAMP_INVALID:${index}`);
+};
 
 const percent = (part: number, total: number): number =>
   total > 0 ? round((part / total) * 100, 2) : 0;
