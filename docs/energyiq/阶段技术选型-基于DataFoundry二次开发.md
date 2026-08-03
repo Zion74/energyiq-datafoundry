@@ -33,13 +33,13 @@ status: accepted
 | 选项 | 当前已有 | 首期仍需补 | 判断 |
 | --- | --- | --- | --- |
 | **基于 DataFoundry 二次开发** | 登录、Chat/Session、数据源、文件、只读 SQL、运行记录、Trace | Workspace 租户边界、每日 Tuya/Excel 数据链、能源事实层、固定分析页 | **首期选择** |
-| **回到 energyiq-rebuild** | Energy Fact、Decision Brief、Ask、数据快照 | 账号和 Session 产品化、数据源体系、当前前端重做 | 可参考领域实现，不作为交付仓库 |
+| **继续使用 energyiq-rebuild** | 无；该仓库已废弃 | 会重新引入两套实现与错误基线 | 禁止 |
 | **接入 Superset** | 成熟图表与看板 | 集成、权限映射、部署运维 | 客户不能编辑看板时没有必要 |
 | **接入 Rill** | SQL/YAML 模板和定时刷新 | Chat、租户、发布链和集成 | 作为未来模板即代码备选 |
 
 ## 3. 决定
 
-**首期在 `energyiq-datafoundry` 上完成两条产品路径，不接入 Superset、Rill，也不继续在 `energyiq-rebuild` 开发交付页面。**
+**所有 EnergyIQ 设计、开发、测试和文档只在 energyiq-datafoundry 进行。energyiq-rebuild 已废弃，不再维护、参考或迁移。首期不接入 Superset、Rill。**
 
 ```text
 每日 Tuya / Excel
@@ -48,7 +48,7 @@ status: accepted
 └── DataFoundry Ask → read-only SQL → answer + provenance
 ```
 
-`energyiq-rebuild` 中已经验证过的 Energy Fact、Snapshot、Receipt 和不可变报告思想可以选择性移植，但不整体合并两套前端和运行时。
+不得从 energyiq-rebuild 选择性移植代码、合同、Runtime、Receipt 或测试结论。需要的业务能力必须依据当前 accepted 文档和 energyiq-datafoundry 现有代码重新确认。
 
 ## 4. 理由
 

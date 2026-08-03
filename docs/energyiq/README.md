@@ -6,10 +6,17 @@
 
 按顺序：
 
-1. [当前共识与新会话入口](当前共识与新会话入口.md)：截至 2026-08-02 的全部最终共识、现状、差距、开放输入和延期项；
-2. [领域词汇表](CONTEXT.md)：Project、Tier、Scope、Meter、Fact、Template 和 Run 的统一用语；
-3. [开发计划：Admin 与模板运行闭环](开发计划-Admin与模板运行闭环.md)：批次 0–3 和真实 Draft Preview 已完成，下一步是 Template Revision、Analysis Run 与 Review & Publish；
-4. [最新 MVP PRD](PRD-EnergyIQ-MVP.md)：客户页面、Admin、数据、模板与验收。
+1. [当前共识与新会话入口](当前共识与新会话入口.md)：截至 2026-08-03 的全部最终共识、现状、差距、开放输入和延期项；
+2. [MVP 底座 + 双功能 + 协同架构](决策-MVP底座双功能协同架构.md)：当前最高优先级与复杂度边界；
+3. [Overview 改造与 AI Analysis 打通最终方案](决策-Overview改造与AI-Analysis打通最终方案.md)：项目专属 Recipe/Renderer、DataFoundry AI 边界和最终实施顺序；
+4. [项目 Renderer、Recipe 与时间上下文](决策-项目Renderer-Recipe与时间上下文.md)：全局主时间、Benchmark、四象限和 AI 上下文契约；
+5. [Ngee Ann 首个试点路线与页面边界](决策-NgeeAnn首个试点路线与页面边界.md)：Ngee Ann 模块、交互/保存语义，以及 Overview/Explorer/AI 的最新边界；
+6. [三 Agent MVP 最终执行与重置包](2026-08-03-三Agent-MVP最终执行与重置包.md)：唯一有效派工入口及三个可复制 Prompt；
+7. [三 Agent MVP 执行手册](2026-08-03-三Agent-MVP执行手册.md)：Data Foundation、Structured Template 和 AI Analyst 的责任、并行依赖与验收；
+8. [DataFoundry Agent Harness 复用边界](说明-DataFoundry-Agent-Harness与EnergyIQ复用边界.md)：解释已有 Runtime、Task Console、Knowledge/MCP/Tools 和受控图表，不重复建设；
+9. [领域词汇表](CONTEXT.md)：Project、Tier、Scope、Meter、Fact、Template、Run 和 Data Health 的统一用语；
+10. [开发计划：Admin 与模板运行闭环](开发计划-Admin与模板运行闭环.md)：已有 Admin/模板能力与当前 Ngee Ann MVP 批次；
+11. [最新 MVP PRD](PRD-EnergyIQ-MVP.md)：客户页面、Admin、数据、模板与验收。
 
 若旧聊天或旧文档冲突，以“当前共识与新会话入口”及其链接的 accepted 专题为准。
 
@@ -20,18 +27,28 @@
 | [阶段技术选型](阶段技术选型-基于DataFoundry二次开发.md) | 为什么选择在 DataFoundry 内二次开发，不引入 Superset/Rill 作为 MVP 主底座 |
 | [双角色、用户动线与管理后台](决策-双角色与管理后台.md) | user/admin 权限、Boss/FM 动线、Admin 信息架构与 DataFoundry 技术配置复用 |
 | [三个核心任务界面与 Data Map](三类核心界面设计.md) | Overview、Explorer、AI Analyst、Data Map 的页面任务和交互 |
+| [MVP 底座 + 双功能 + 协同架构](决策-MVP底座双功能协同架构.md) | 数据底座按需支撑双功能；结构化模板优先，AI Analyst 增强，最后做协同 |
+| [Ngee Ann 首个试点路线与页面边界](决策-NgeeAnn首个试点路线与页面边界.md) | 首个试点、Ngee Ann Preset、时间与异常语义、Interactive/Saved Analysis、Rerun/Report、Explorer 数据健康和开发顺序 |
+| [DataFoundry Agent Harness 复用边界](说明-DataFoundry-Agent-Harness与EnergyIQ复用边界.md) | 复用现有 Mastra/AG-UI、Task Console、Knowledge、MCP、Skills、模型配置和受控 Chart Artifact |
 | [灵活 Tier、项目节点与计量点](灵活项目结构与计量点模型.md) | Project 外置、Tier alias/ordinal、加层判断、任意节点挂表、虚拟表和 Water |
 | [领域模型](领域模型.md) | Tier Definition、Node、Meter、Fact、Metric、Template、Run 的字段和关系 |
-| [项目专属模板与决策型分析](决策-项目专属模板与决策型分析.md) | Project/Tier Template、Component Catalog、建议证据与复跑 |
+| [项目专属模板与决策型分析](决策-项目专属模板与决策型分析.md) | EnergyIQ Template Schema、Component Catalog/Analysis Spec、开源复用边界、Agent 受控生成、证据与复跑 |
+| [项目 Renderer、Recipe 与时间上下文](决策-项目Renderer-Recipe与时间上下文.md) | 已确认的统一主时间、受控局部时间、Benchmark 周期、正确四象限和 AI 上下文契约 |
+| [Overview 改造与 AI Analysis 打通最终方案](决策-Overview改造与AI-Analysis打通最终方案.md) | 项目专属 Recipe + React Renderer、DataFoundry AI Runtime 边界、上下文跳转、AI Slot 与实施顺序 |
 | [项目配置、数据接入与模板发布流程](流程-项目配置与模板发布.md) | Admin 从 Project Draft 到 Published 的操作与发布门槛 |
 | [Preschool 数据与三层目标结构](决策-Preschool-Portfolio数据集接入.md) | 区分 Centre×Circuit 现有事实与 Block→Room→Circuit 目标映射 |
 | [Ngee Ann 模板吸收方案](评估-Ngee-Ann模板吸收方案.md) | 原型可直接吸收、需参数化、延期模块与 golden baseline |
+| [NetZero Prototype 完整理解与复用审计](2026-08-03-NetZero-Prototype完整理解与复用审计.md) | 全量拆解 NetZero SaaS、Ngee Ann/EliteIOT 指标与图表、真实/Mock 边界，以及项目专属 Recipe + Renderer 路线 |
 
 ## 实施计划
 
 | 文档 | 状态 |
 | --- | --- |
-| [开发计划：Admin 与模板运行闭环](开发计划-Admin与模板运行闭环.md) | in progress；批次 0–3 已完成 |
+| [三 Agent MVP 最终执行与重置包](2026-08-03-三Agent-MVP最终执行与重置包.md) | accepted；唯一派工入口，含共同基线和三个最终 Prompt |
+| [三 Agent MVP 执行手册](2026-08-03-三Agent-MVP执行手册.md) | accepted；三个 Agent 的责任、并行节奏、MVP 边界与验收 Owner 已确认 |
+| [开发计划：Admin 与模板运行闭环](开发计划-Admin与模板运行闭环.md) | in progress；按 Ngee Ann MVP 路线收口，不再横向扩建平台 |
+
+原来的三线责任文档、各 Agent Handoff 和纠正 Prompt 已标记为 `superseded`，只保留为历史入口；执行统一以“三 Agent MVP 执行手册”为准。
 
 ## 实现证据
 
@@ -43,6 +60,9 @@
 | [2026-08-01 Admin Excel Import Batch 实施记录](2026-08-01-Admin-Excel-Import-Batch实施记录.md) | 真实 Excel 保存与检查、SHA 去重、精确标签到 Mapping Draft、浏览器与测试证据 |
 | [2026-08-02 Admin Metric/Rule Registry 实施记录](2026-08-02-Admin-Metric-Rule-Registry实施记录.md) | 受控指标与规则版本、项目 Draft 选择、Ready 判定、确定性执行与 provenance 证据 |
 | [2026-08-02 Admin Component Catalog 与 Template Draft 实施记录](2026-08-02-Admin-Component-Catalog与Template-Draft实施记录.md) | 受控组件目录、Project/Tier 模板草稿、真实事实预览、时区处理与双项目浏览器证据 |
+| [2026-08-03 Admin Preview 与客户 Overview 统一渲染实施记录](2026-08-03-Admin-Preview与客户-Overview统一渲染实施记录.md) | Template Schema v2、共享 Render Plan、受控布局视觉协议、双端 Renderer 与兼容发布策略 |
+| [2026-08-03 AI Analyst 可信问数与受控图表实施记录](2026-08-03-AI-Analyst可信问数与受控图表实施记录.md) | Qwen/DeepSeek Provider、权威 Energy Query Context、Ngee Ann 可信 SQL、Task Console completed 与 168 点后端 ChartPreview |
+| [2026-08-03 DeepSeek V4 Flash 与 DataFoundry 实测记录](2026-08-03-DeepSeek-V4-Flash与DataFoundry实测记录.md) | Flash 连接和工具链可运行，但同一问数产生过两种结果；记录时区 SQL、图表触发、60 秒超时和用户级模型配置等真实缺口 |
 | [2026-08-01 Ngee Ann 源到事实契约原型](2026-08-01-Ngee-Ann-源到事实契约原型记录.md) | 统一 Adapter、SHA 幂等、实际时长 Fact、Virtual Load 12、冲突与官方汇总排重的可运行证据 |
 | [2026-08-01 Admin 首次数据源配置交互原型](2026-08-01-Admin-首次数据源配置交互原型记录.md) | 已废弃的 A/B/C 历史实验记录；正式路径已回归 Project Overview、Structure、Data Sources 与 Meter Mapping |
 
@@ -51,8 +71,8 @@
 | 文档 | 作用 |
 | --- | --- |
 | [甲方确认稿](甲方确认稿-日级能源分析与AI问数MVP.md) | 客户已确认的日级分析与 AI 问数需求边界 |
-| [Charles 静态能源报告](../Energy_Report_May2026.html) | Preschool 模板种子，不是可运行模板 |
-| [历史调研索引](research/README.md) | 选型收敛前的 ChatBI、Rill、Superset 等调研 |
+| [Charles 静态能源报告](../template/Preschool/Energy_Report_May2026.html) | Preschool 模板种子，不是可运行模板 |
+| [调研索引](research/README.md) | ChatBI 历史选型，以及 Explorer 对 CopilotKit、Superset、Recharts/ECharts 的当前评估 |
 
 ## 历史/已被替代
 
@@ -68,7 +88,8 @@
 - apps/web/src/app/energyiq：EnergyIQ Shell 与页面；
 - apps/api/src/energy：Query Context、确定性分析和样板；
 - packages/metadata/src/energyiq-project-setup-store.ts：Project/Tier/Node Draft、Validate、Publish 与不可变 Revision；
-- packages/metadata/src/energyiq-template-store.ts：受控 Component Catalog 与 Project/Tier Template Draft；
+- packages/metadata/src/energyiq-template-store.ts：受控 Component Catalog、Project/Tier Template Draft、Schema v2 与不可变 Template Revision；
+- apps/web/src/app/energyiq/_components/energy-template-render-plan.ts：Admin Preview 与客户 Overview 共用的临时 Render Plan 编译入口；
 - packages/metadata/src/energyiq-store.ts：Project/Node/Access 兼容读取与运行时存储；
 - packages/data-gateway/src/energy-scoped-datasource.ts：受 Scope 限制的能源事实查询。
 

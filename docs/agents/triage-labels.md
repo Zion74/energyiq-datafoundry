@@ -1,6 +1,6 @@
 # Triage Labels
 
-Use this shared vocabulary for local Markdown tickets. A ticket may carry one workflow label at a time.
+Use this shared vocabulary for GitHub Issues. A ticket may carry one workflow label at a time.
 
 | Label | Meaning | Typical next action |
 | --- | --- | --- |

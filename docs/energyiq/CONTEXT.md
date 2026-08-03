@@ -3,7 +3,7 @@ title: "EnergyIQ 领域词汇表"
 summary: "固定 EnergyIQ 中 Project、Tier、Scope、计量、事实、模板和运行等术语，避免计算名与客户展示名混用。"
 doc_type: concept
 tags: [领域语言, Tier, Meter, Template, Analysis]
-updated_at: "2026-08-01"
+updated_at: "2026-08-03"
 related:
   - "当前共识与新会话入口.md"
   - "领域模型.md"
@@ -94,11 +94,26 @@ Tier Definition 的具体实例，例如 Room 1、Level 6。它有稳定 scope_i
 **Interval Fact**  
 同一物理计量点相邻有效累计读数之差，绑定区间、实际时长、单位、质量和来源批次。
 
+**Interval Average Power**<br>
+某个有效区间的能耗除以实际经过小时数得到的平均功率。它不是瞬时功率；避免把累计电能差分结果称为 `Instantaneous Power`。
+
 **Utility Fact**  
 经映射、质量校验、正式聚合和虚拟表计算后，供模板、Explorer 和 AI 共用的规范事实。
 
 **Data Snapshot**  
 一次分析可见的数据批次和质量状态集合。它让运行结果可以解释和复跑。
+
+**Data Freshness**<br>
+最新已接受读数相对 Project 计划同步时间的新鲜程度。每日批次只能证明数据最近收到，不能证明设备此刻实时在线。
+
+**Connectivity Status**<br>
+来源 API 明确提供的 heartbeat、online 或 last_seen 连接信号。没有显式信号时保持 unknown；避免仅凭累计读数是否变化推断在线/离线。
+
+**Flatline**<br>
+新时间戳持续到达，但累计读数在配置窗口内保持不变的观测。它可能表示真实零耗能或读数卡住，本身不等于设备离线。
+
+**Meter Data Health**<br>
+由 Freshness、覆盖率、数据有效性、Flatline 和可选 Connectivity Status 综合得到的运行状态，用于 Explorer 核查数据是否可用。
 
 ## 指标与分析
 
@@ -112,15 +127,45 @@ Tier Definition 的具体实例，例如 Room 1、Level 6。它有稳定 scope_i
 服务端解析的可信查询边界，至少固定 Workspace、Project、Scope、Tier、时间、资源、指标及有关版本。
 
 **Baseline**  
-结论的比较基准，优先使用同一 Scope 的自身历史同类时段，其次是项目规则或可靠归一化同级。
+结论的比较基准。MVP 异常默认使用同一 Scope 最近 4 个同类型、同长度完整周期的平均值；不足时只做描述，不判异常。它不同于紧邻当前 Period 的 previous-period comparison。
+
+**Peak interval-average power**<br>
+所有可用 15 分钟区间中最大的平均功率 `kW`，由 interval usage 除以实际经过小时数得到，并带发生时间。它不是电表瞬时功率。
+
+**Data Health Alert**<br>
+针对读数延迟、过期、Flatline、复位、单位或覆盖问题的运维提示，属于 Project Explorer，不评价用能表现。
+
+**Energy Behaviour Exception**<br>
+某个 Scope 的用能相对历史、营业时间或可靠同级基准出现的业务异常，属于 Overview，并必须带 Baseline 与 Evidence。
 
 **Evidence Bundle**  
-支撑结论的范围、时间、指标、SQL/查询参数、数据批次、版本和质量状态。
+支撑结论的 Scope、Period、当前值、历史基线、差值、贡献 Circuit、数据质量、SQL/查询参数、数据批次，以及 Data Snapshot、Metric/Rule/Template/Release 版本。
+
+**Interactive Analysis**<br>
+用户在已发布 Template/Release 内改变 Scope、Period、粒度、分类或对比参数后即时得到的确定性分析视图。视图状态可以由 URL 恢复；它不改变计算口径、不创建 Analysis Run，也不进入 Runs History。
 
 ## 模板与运行
 
 **Component Catalog**  
-允许模板引用的受控指标卡、图表、比较、异常和证据组件集合。
+EnergyIQ 自己维护、允许模板引用的版本化模块注册表。每个 Component Revision 定义输入槽位、适用 target、数据要求、允许的 Analysis/Presentation/Interaction 和 Renderer key；其实现可以复用开源图表库。
+
+**Component Revision**<br>
+Catalog 中一个不可变模块定义版本。只有受控发布流程可以新增；Template 和 Agent 必须引用明确 Revision，不能使用未注册的临时代码。
+
+**EnergyIQ Template Schema**<br>
+EnergyIQ 自有的版本化模板协议。它定义 Section、Placement、Component Revision、Query Policy 与 Interaction，只保存稳定业务语义，不保存任意 SQL、React、CSS 或底层图表库配置。
+
+**Placement**<br>
+某个 Component Revision 在模板中的实例位置，包含稳定 placement_id、所在 Section、顺序、受控 Layout 与 Presentation。Agent 创建的是 Placement 或组合，不是新的 React 代码。
+
+**Analysis Spec**<br>
+Placement 使用的受控分析描述，引用已发布 Metric/Rule，并从白名单选择 Dimension、Time Grain、Comparison、Normalisation、Ranking、Share、Filter 和营业/非营业切片。它由确定性查询模块编译，不允许任意 SQL。
+
+**Render Plan**<br>
+Template Revision、Component Catalog、Energy Query Context、Metric/Rule 结果和 Data Quality 在一次请求中编译出的临时渲染计划。它不持久化为新的真相源。
+
+**Renderer Adapter**<br>
+在 Render Plan 与具体图表实现之间的适配器。当前只有 Recharts 时不提前建立形式化 Adapter；未来局部 ECharts 成为第二实现后再形成真实 seam。Template Revision 始终不依赖底层原生 props/option。
 
 **Template Preset**  
 可供不同项目参考的模块组合，例如 Charles Preschool 或 Ngee Ann Level/Circuit preset。它不是正式运行模板。
@@ -138,10 +183,19 @@ Tier Definition 的具体实例，例如 Room 1、Level 6。它有稳定 scope_i
 经过校验、预览和人工发布的不可变模板版本。
 
 **Analysis Run**  
-固定 Template Revision、Scope、Period、Data Snapshot 和有关版本执行的一次确定性分析。
+因 Save analysis、Generate report、定时报告或保存 AI 正式结果而产生的不可变分析记录，固定 Template Revision、Scope、Period、Data Snapshot、结果和有关版本。Run 归属 Workspace、共享可见，并记录创建人和创建时间；普通 Interactive Analysis 不创建 Run。
+
+**Saved analysis**<br>
+Analysis Run 的只读客户视图。标题和备注可以调整，但冻结的 Context、版本、结果与 Evidence 不可改变。
+
+**Rerun**<br>
+复用历史 Run 配置并基于最新 Available 数据创建的新 Analysis Run，通过 `rerun_of_run_id` 关联原 Run，不覆盖历史结果。
+
+**Report Artifact**<br>
+由同一 Analysis Run 结果生成的站内 HTML 或可打印 PDF；它不重新计算指标。
 
 **Template Change Proposal**  
-人工或 AI 生成的结构化变更建议。它必须经过 Diff、校验、预览和人工发布，不能直接改变正式模板。
+人工或 AI 生成、绑定 base_template_revision_id 的结构化模板 Patch。它只能使用协议允许的操作，必须经过权限、Schema、引用、readiness、Diff、固定快照预览和人工发布，不能直接改变正式模板。
 
 ## 用户与后台
 

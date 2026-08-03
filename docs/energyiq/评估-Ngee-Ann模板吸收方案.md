@@ -3,7 +3,7 @@ title: "Ngee Ann 现有模板吸收方案"
 summary: "确认同事原型的数据真实性，定义可直接吸收、需参数化与暂缓的模块，并落到 EnergyIQ 的项目专属模板体系。"
 doc_type: decision
 tags: [NgeeAnn, 结构化模板, 指标口径, 回归基准]
-updated_at: "2026-08-01"
+updated_at: "2026-08-02"
 related:
   - "决策-项目专属模板与决策型分析.md"
   - "2026-07-31-可信查询范围与Energy-Fact接入记录.md"
@@ -77,19 +77,21 @@ status: accepted
 
 ### Project 模板
 
-1. **Decision Summary**：先展示异常、影响和建议动作；
-2. **Scope & Data Quality**：时间段、15 分钟频率、数据完整度、来源批次；
-3. **Consumption Overview**：总用电、日均、峰值、自身历史变化；
+1. **Action Summary**：先展示最值得处理的 1–3 件事、影响范围和优先级；
+2. **Data Status & Scope**：Project/Scope、时间段、15 分钟频率、数据新鲜度、完整度、来源批次与版本；
+3. **Energy Overview**：总用电、日均、峰值及时间、自身历史变化；
 4. **Level Comparison**：Level 6 与 Level 7 的总量及 `light/load/aircon/other` 构成；
-5. **Time Behaviour**：每日趋势、工作日/周末/节假日曲线、峰值时段；
+5. **Day Profile & Heatmap**：每日趋势、工作日/周末/节假日 24 小时曲线和日期×时间热点；
 6. **Exceptions & Evidence**：异常日期、异常 Level、贡献 Circuit 和可追溯证据；
 7. **Recommended Actions**：按影响排序，支持跳转到对应 Scope 或 AI Analyst。
+
+Circuit Ranking 不再单独堆成长章节：正常排名嵌入 Level Comparison，用于解释 Level 差异；异常贡献排名嵌入 Exceptions & Evidence，用于定位具体 Circuit；逐表读数和数据健康核查再跳转 Project Explorer。
 
 ### Level 模板
 
 - 本 Level 与自身历史比较；
 - 本 Level 的分类构成；
-- 子 Circuit 排名与时间热力图；
+- 子 Circuit 排名与时间热力图；排名用于解释本 Level 构成，不另建独立长章节；
 - 非营业时段消耗与异常；
 - 对应建议和证据。
 

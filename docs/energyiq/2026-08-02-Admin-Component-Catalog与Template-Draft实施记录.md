@@ -118,4 +118,4 @@ npm --workspace @datafoundry/api run build
 
 ## 7. 后续
 
-下一步冻结不可变 Template Revision，并建立 Analysis Run、Evidence、历史结果与 Rerun。客户 Overview/Explorer 只能消费 Published Revision，不直接读取可变 Draft。
+2026-08-03 后续已完成不可变 Template Revision 存储、Schema v2、共享 Render Plan，以及 Admin Preview/客户 Overview 的同源 Renderer；详见[统一渲染实施记录](2026-08-03-Admin-Preview与客户-Overview统一渲染实施记录.md)。下一步先为本地 Ngee Ann 发布正式 Revision，再建立 Analysis Run、Evidence、历史结果与 Rerun。客户页面不读取可变 Draft。

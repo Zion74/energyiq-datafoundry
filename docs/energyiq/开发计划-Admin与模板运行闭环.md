@@ -3,17 +3,20 @@ title: "EnergyIQ 开发计划：Admin 与模板运行闭环"
 summary: "在 DataFoundry 现有代码上分批完成 Tier、计量映射、Excel 数据、项目模板、复跑和客户页面贯通。"
 doc_type: playbook
 tags: [开发计划, Admin, Tier, Excel, Template Revision, Analysis Run]
-updated_at: "2026-08-02"
+updated_at: "2026-08-03"
 related:
   - "当前共识与新会话入口.md"
   - "领域模型.md"
   - "流程-项目配置与模板发布.md"
+  - "决策-NgeeAnn首个试点路线与页面边界.md"
 status: in_progress
 ---
 
 # EnergyIQ 开发计划：Admin 与模板运行闭环
 
-> 状态：**批次 0–3 与批次 4 的真实 Draft Preview 已完成，并通过 Ngee Ann/Preschool 双项目验证。下一步是不可变 Template Revision、Analysis Run、Rerun 与 Review & Publish。**
+> 状态：**数据事实、Admin 配置、Template Draft/Revision 代码和双端 Renderer 已有较完整基础；当前不再横向扩建，转为完成 Ngee Ann 真实 MVP。**
+
+> 2026-08-03 路线修正：以[底座 + 双功能 + 协同](决策-MVP底座双功能协同架构.md)为最高优先级。Data Foundation 封口 Ngee Ann golden result；Structured Template 先发布正式 Revision 并验收 Interactive Overview，再补 Save/History/Rerun 与精简 Explorer；AI Analyst 并行复用 DataFoundry 原生能力完成可信问数；最后才做二者协同。
 
 实施证据见：[2026-08-01 Admin 与 Tier 批次 0–1 实施记录](2026-08-01-Admin-Tier-批次0-1实施记录.md)、[Admin Meter Mapping 与虚拟电表实施记录](2026-08-01-Admin-Meter-Mapping与虚拟电表实施记录.md)、[Admin Excel Import Batch 实施记录](2026-08-01-Admin-Excel-Import-Batch实施记录.md)、[Admin Metric/Rule Registry 实施记录](2026-08-02-Admin-Metric-Rule-Registry实施记录.md)和 [Admin Component Catalog 与 Template Draft 实施记录](2026-08-02-Admin-Component-Catalog与Template-Draft实施记录.md)。
 
@@ -55,9 +58,9 @@ admin creates Project
 
 - Preschool 现有可运行事实仍是 Project → Centre → Circuit，Block → Room → Circuit 目标映射等待客户输入；
 - Tariff 0.2727 仍在分析代码中硬编码；
-- Metric/Rule Revision 已持久化并驱动确定性计算，但当前 Project 选择仍是 Draft，尚未冻结为 Published Template Revision；
-- Component Catalog、Project/Tier Template Draft 与真实 Project/Scope/Period Draft Preview 已实现；不可变 Template Revision、Analysis Run 与 Rerun 尚未实现；
-- 客户 Overview/Explorer 尚未统一消费已发布模板。
+- Metric/Rule Revision 已持久化并驱动确定性计算；Review & Publish 可将 Hierarchy、Formula、Metric/Rule 选择和 Template 一次冻结为 Published Revision；
+- Component Catalog、Project/Tier Template Draft、真实 Project/Scope/Period Draft Preview、不可变 Template Revision 存储、Schema v2 和共享 Render Plan 已实现；Analysis Run 与 Rerun 尚未实现；
+- 客户 Overview 已通过 Published Template endpoint 与 Admin Preview 共用 Renderer；本地历史 Ngee Ann/Preschool 尚未重新发布 Template Revision，当前使用明确标记的 `compatibility-default`；Explorer 仍需补发布版本上下文。
 
 ## 3. 实施原则
 
@@ -194,7 +197,9 @@ admin creates Project
 - kWh/m²、kWh/person；
 - off-hours usage/share；
 - coverage/quality；
-- 四类确定性异常；
+- 四类确定性异常：高于自身基线、非营业用量、峰值时段、可靠元数据下的归一化异常；
+- 最近 4 个同类型完整周期历史基线，以及独立的 previous-period comparison；
+- Project Rule Revision 阈值、Attention/High priority 和受控 Action Template；
 - Charles Preschool Preset；
 - Ngee Ann Level/Circuit Preset。
 
@@ -215,21 +220,35 @@ admin creates Project
 - 硬编码 tariff 从 energy-analysis.ts 移除；
 - Ngee Ann 与 Charles 模块都由同一 Component Catalog 渲染，但可选模块不同。
 
-## 8. 批次 4：Template Revision、Analysis Run 与发布
+## 8. 批次 4：Ngee Ann 发布、Interactive Overview 与保存复跑
 
 ### 工作
 
 - 已完成：Draft Preview 与正式运行隔离；Preview 使用真实 Project/Scope/Period、canonical fact 覆盖、Project timezone 和受控 Component Renderer；
-- Publish 产生不可变 Template Revision；
-- 建立 Analysis Run 与运行状态；
-- 固定 Context、Data Snapshot 和全部计算版本；
+- 已完成：Publish 产生不可变 Template Revision，并固定 Hierarchy、Formula、Metric/Rule、Calendar 与 Tariff 版本；
+- 已完成：Schema v2 保存 Section、Placement、Layout 与 Presentation，并兼容旧版 Placement-only Draft；
+- 已完成：Admin Preview 与客户 Overview 共用 `Render Plan → EnergyTemplateRenderer`；
+- 待执行：先用 Admin Review & Publish 为 Ngee Ann 生成首个正式 Template Revision；Preschool 后置；
+- 先用 Ngee Ann 真实结果完成并验收 Interactive Overview；
+- Interactive Overview 验收后，再建立 Saved Analysis/Analysis Run 与运行状态；
+- 固定 Context、所用数据批次和全部计算版本；MVP 不建设任意历史 Snapshot 重放平台；
 - 保存结果 Artifact、Evidence、SQL/Query Spec 和质量摘要；
 - 历史列表、详情和 Rerun；
 - 新数据运行产生新 Run，不覆盖旧结果；
+- Save analysis 自动命名并允许修改标题/备注；Saved analysis 只读，Explore with these settings 返回交互模式；
+- Rerun 记录 rerun_of_run_id，复用原配置和最新 Available 数据；
+- Runs History 展示 Name、Project、Scope、Period、Saved by/at、Data/Report status，并支持 Project/Scope/作者筛选；
+- 后置：同一 Run Artifact 生成站内 HTML/PDF、Scheduled Report 和邮件发送，不阻塞第一版 MVP；
+- Interactive Analysis 的时间/Scope/粒度/对比变化调用同一确定性计算模块，但不创建正式 Run；
+- 第一版只有 Save analysis 创建正式 Run；Generate report、定时报告和保存 AI 正式结果后置；
+- Interactive Analysis 视图状态可由 URL 恢复和分享，恢复不创建 Run；未保存交互只进入请求日志/AI Session Trace，不进入 Runs History；
+- 保存的 Run 归属当前 Workspace，记录 saved_by/saved_at，并对同一 Workspace user 共享；
+- 第一版 user 只做手动 Save analysis、只读历史和 Rerun；Scheduled Report 与 Generate report 后置；
+- Release/Revision 不修改、不删除；回滚通过重新激活历史 Release 并记录审计；
 
 ### 验收
 
-- 相同 Snapshot + Revision 复跑结果一致；
+- 已保存结果能解释当时的数据批次和 Revision；Rerun 使用最新可用数据生成新结果且不覆盖历史；
 - 改模板、公式、指标或数据后生成新 Run/Revision；
 - 历史报告仍能解释当时口径；
 - 每条异常和建议可回到来源批次与查询；
@@ -237,20 +256,40 @@ admin creates Project
 
 ## 9. 批次 5：客户页面统一消费发布配置
 
+> 实施状态：共享 Published Template endpoint、Render Plan、Renderer、Section 导航和全局 Period 刷新已完成。Heatmap、Recommended Actions、正式 Ngee Ann Revision 验收和 Explorer 发布版本上下文仍未完成。
+
 ### Overview
 
 - 使用 Project Template；
-- 保留 Charles 左侧 Overview/Benchmarks/Standby/Operating/Forecast Preview 目录；
-- 决策建议优先；
-- Project、Scope、Period 变化重新运行；
+- Ngee Ann 顺序固定为 Action Summary → Data Status & Scope → Energy Overview → Level Comparison → Day Profile & Heatmap → Exceptions & Evidence → Recommended Actions；
+- Circuit Ranking 嵌入 Level Comparison 或异常证据，不单独堆成长章节；
+- Action Summary 最多 3 条，遵循 Problem → Impact → Action → Evidence；无重要异常显示 No priority exceptions；
+- 阻断质量问题优先，并抑制受影响的能耗结论；Data Status & Scope 固定且不可关闭；
+- Ngee Ann 两个 Level 只做描述性/历史/可用时归一化比较，Circuit Ranking 每个 Level/分类默认 Top 5、可展开；
+- Day Profile 区分工作日、周末和公共假期；多日默认 Date × Hour、单日默认 Level × Hour；
+- Recommended Actions 只读且连接 Evidence、Explorer、AI Analyst，不实现工单流程；
+- 异常使用最近 4 个同类型完整周期的自身历史平均，不足时只做描述；上一周期对比保持独立；
+- 首期只做高于自身基线、非营业用量、峰值时段和归一化异常，阈值来自 Project Rule Revision；
+- 异常按额外耗电量/影响范围使用 Attention、High priority；Data Health 黄/红保持独立；
+- Action Template 由规则选择，AI 只润色；Evidence 固定当前值、基线、差值、贡献 Circuit、质量、Query/SQL 与版本；
+- Overview 默认 Last 7 complete days；完整周期不含今天，无数据时提供 View latest available data 而不偷换 Period；
+- Custom 统一 `[from, to)`；默认粒度为单日 Hour、2–31 天 Day、更长范围 Week；
+- Peak 固定为 15 分钟 interval-average kW；Coverage `<95%` 时隐藏异常/建议并禁用 Save/Generate；
+- Project、Scope、Resource、Period 变化后自动刷新全部模块；模块内可切换粒度、上一周期对比、分类和排名展开；
+- 普通交互不显示 Run analysis；正式动作使用 Save analysis / Generate report；
 - Forecast 和费用按数据条件隐藏/标 Preview。
 
 ### Project Explorer
 
-- 使用 Tier Template；
 - 通用树支持 2–4 Tier；
 - 节点与 Meter Point 分开表现；
-- 同级横向、自身历史纵向、分类构成与时间切片；
+- 只展示来源数据与确定性派生值：最新累计读数、区间能耗、区间平均功率、覆盖率、来源与质量；
+- 增加统一 Period Selector，默认 Latest complete data day；漏 1 次同步为黄色 Delayed，连续漏 2 次为红色 Stale，连续 3 日有新时间戳但读数不变为黄色 Flatline；
+- Connectivity 只有在 Tuya API 明确提供 heartbeat/online 时展示；
+- Scope 只在 Official Aggregation Route 受影响时标红，否则汇总子表 warning/critical 数量；Virtual Meter 显示 Derived/Partial；
+- 区分最新同步的 Current data health 与所选时间段的 Selected-period quality；
+- Meter 摘要固定六项，并提供 user 规范 CSV / admin 原始 payload 两级导出；
+- 同级比较、跨节点热力图、用能异常、成本和行动建议全部进入 Overview；
 - 水只在配置后出现。
 
 ### AI Analyst
@@ -270,7 +309,15 @@ admin creates Project
 
 - 切换 Project 四个入口同步变化；
 - 同一 Scope/Period 在 Overview、Explorer 与 AI 的数字一致；
-- 无数据、部分数据、过期、失败和 provisional 状态明确；
+- Interactive Analysis 的参数变化不产生 Run；保存后的正式 Run 冻结同一计算结果和版本证据；
+- 刷新或分享 URL 能恢复 Interactive Analysis 的 Project/Scope/Period 与模块控件，且不产生 Run；
+- 未保存结果不出现在 Runs History；保存结果显示创建人/时间并对同一 Workspace 可见；user 无法配置 Scheduled Report；
+- Saved analysis 不可被交互控件改写；Explore/Rerun 产生新上下文或新 Run，HTML/PDF 与页面数字一致；
+- Overview/Explorer 往返保持 Project、Scope、Period、Resource 与 Run/Release/Snapshot，Circuit 证据直达 Meter；
+- 无数据、部分数据、过期、Flatline、连接未知、失败和 provisional 状态明确；
+- Yesterday 等预设不因数据过期被静默重解释，Custom 边界与 Project timezone 可复现；
+- Coverage `<95%` 的 Interactive Analysis 不产生正式结论或可保存报告；
+- 累计读数差分得到的功率明确标为 interval average power，不冒充瞬时功率；
 - 客户 UI 不出现 Tier 1/2 计算术语。
 
 ## 10. 批次 6：复用技术设置与轻量 Operations
@@ -356,7 +403,7 @@ admin creates Project
 
 ## 15. 已批准并完成的范围
 
-当前已完成 **批次 0 + 批次 1 + 批次 2**：
+当前已完成 **批次 0–3，以及批次 4 的真实 Draft Preview**：
 
 1. golden 基线与 migration 护栏；
 2. Project/Tier/Node 正式领域模型；
@@ -371,6 +418,8 @@ admin creates Project
 11. 重叠来源按覆盖结束时间裁决，Raw 证据不丢失；
 12. Scope/Meter Point 分离和最近计量层聚合，防止总表与分表重复相加。
 13. 精确保留 `Device Name`，并以可解释规则建议 Ngee Ann 的 9 个既有 Scope，管理员最终确认和保存。
+14. Metric/Rule/Component Revision、Project/Tier Template Draft 与真实 Scope/Period Preview；
+15. Enabled/Ready 分离，并对缺面积、人数、Calendar、Meter Mapping 等条件明确降级。
 
 这一步已做到可见、可验证，同时没有提前把 Metric Registry 和模板编辑器写死。
 
@@ -384,4 +433,4 @@ admin creates Project
 4. Preschool 不自动猜 Block/Room；
 5. Admin 与客户 UI 均先英文。
 
-数据事实闭环、批次 3 的 Metric/Rule/Component/Template Draft，以及真实 Project/Scope/Period Draft Preview 均已通过。Preschool Block/Room 仍保持待补输入，不自动猜测；下一步进入不可变 Template Revision、Analysis Run、Rerun 与发布。
+数据事实闭环、批次 3 的 Metric/Rule/Component/Template Draft，以及真实 Project/Scope/Period Draft Preview 均已有基础。Preschool Block/Room 仍保持待补输入，不自动猜测。当前下一步只推进 Ngee Ann：正式发布 Revision → Interactive Overview → Save/History/Rerun → 精简 Explorer；AI Analyst 由独立 Agent 并行完成可信问数，二者稳定后再协同。
