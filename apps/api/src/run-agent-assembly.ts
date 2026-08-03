@@ -15,6 +15,7 @@ import {
   type ContextPackageRef,
   type ProtocolStateStore,
   type TaskStateRuntime,
+  type TrustedEnergyTextQueryContract,
   type WorkspaceAttachment
 } from "@datafoundry/agent-runtime";
 import type { DataGateway } from "@datafoundry/data-gateway";
@@ -56,7 +57,7 @@ type CreateRunAgentContextInput = {
   userId: string;
   userInput: string;
   workspaceId: string;
-  energyQueryContext?: EnergyQueryContext;
+  energyQueryContext?: EnergyQueryContext | TrustedEnergyTextQueryContract;
 };
 
 type CreateRunAgentAssemblyInput = {

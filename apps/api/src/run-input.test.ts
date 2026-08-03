@@ -1,7 +1,7 @@
 import type { RunAgentInput } from "@ag-ui/client";
 import { describe, expect, it } from "vitest";
 
-import { extractEffectiveRunConfig } from "./run-input.js";
+import { extractEffectiveRunConfig, extractTrustedEnergyTextIntent } from "./run-input.js";
 
 describe("extractEffectiveRunConfig protocol selection", () => {
   it("parses an explicit protocol identity from run_config", () => {
@@ -16,6 +16,25 @@ describe("extractEffectiveRunConfig protocol selection", () => {
     expect(() => extractEffectiveRunConfig(createInput({
       protocol: { id: "data-analysis" }
     }))).toThrow("INVALID_PROTOCOL_SELECTION");
+  });
+});
+
+describe("trusted Energy text run input", () => {
+  it("accepts only an allowlisted intent from the untrusted host context", () => {
+    const valid = createInput({});
+    valid.forwardedProps = {
+      externalContext: {
+        source: "energyiq",
+        projectId: "ngee-ann-polytechnic",
+        trustedTextIntent: "period-usage-vs-previous"
+      }
+    };
+    expect(extractTrustedEnergyTextIntent(valid)).toBe("period-usage-vs-previous");
+
+    (valid.forwardedProps as Record<string, unknown>).externalContext = {
+      source: "energyiq", projectId: "ngee-ann-polytechnic", trustedTextIntent: "free-form-sql"
+    };
+    expect(() => extractTrustedEnergyTextIntent(valid)).toThrow("TRUSTED_ENERGY_TEXT_INTENT_INVALID:free-form-sql");
   });
 });
 

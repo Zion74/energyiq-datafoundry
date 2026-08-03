@@ -3,6 +3,7 @@ import {
   createAgentContextSourceMetadata,
   type AgentContextItem
 } from "@datafoundry/agent-runtime";
+import type { TrustedEnergyTextQueryContract } from "@datafoundry/agent-runtime";
 
 import type { EnergyQueryContext } from "./energy-query-context.js";
 
@@ -64,6 +65,53 @@ export const createEnergyQueryContextItem = (
     atomic: true,
     groupKind: "source"
   })
+});
+
+export const createTrustedEnergyTextContextItem = (
+  contract: TrustedEnergyTextQueryContract,
+  sessionId: string,
+  userId: string
+): AgentContextItem => createAgentContextItem({
+  id: `trusted-energy-text:${contract.id}`,
+  sourceType: "project-analysis-snapshot",
+  sourceId: contract.pins.project.id,
+  groupId: "trusted-energy-text",
+  visibility: "model",
+  trust: "tool",
+  retention: "active",
+  priority: 100,
+  content: [
+    "Authoritative ProjectAnalysisSnapshot trusted-text contract.",
+    "Use only the expected facts and Evidence below. Do not query another source or substitute Scope, Period, Metric, or values.",
+    "The Period end is exclusive. Return structured claims for validation; never reveal provider configuration or credentials.",
+    `contract_id=${contract.id}`,
+    `intent=${contract.intent}`,
+    `scope=${contract.pins.scope.name} (${contract.pins.scope.id})`,
+    `period_start=${contract.pins.period.start}`,
+    `period_end_exclusive=${contract.pins.period.endExclusive}`,
+    `timezone=${contract.pins.period.timezone}`,
+    `metric=${contract.pins.metric.id} (${contract.pins.metric.revisionId})`,
+    `data_snapshot_id=${contract.pins.dataSnapshotId}`,
+    `data_as_of=${contract.pins.dataAsOf}`,
+    `expected_facts=${JSON.stringify(contract.pins.expectedFacts)}`,
+    `evidence=${JSON.stringify(contract.pins.evidenceRefs)}`
+  ].join("\n"),
+  metadata: createAgentContextSourceMetadata({
+    dedupeKeys: ["trusted-energy-text"],
+    exclusivityKey: "trusted-energy-text",
+    overlapKeys: [
+      `project:${contract.pins.project.id}`,
+      `scope:${contract.pins.scope.id}`,
+      `snapshot:${contract.pins.dataSnapshotId}`
+    ],
+    scope: {
+      datasourceId: contract.pins.sourcePin.datasourceId,
+      sessionId,
+      userId
+    },
+    sourceKind: "project-analysis-snapshot",
+    sourceOwner: "server"
+  }, { atomic: true, groupKind: "source" })
 });
 
 const ngeeAnnAnalysisPolicy = (context: EnergyQueryContext): string[] =>

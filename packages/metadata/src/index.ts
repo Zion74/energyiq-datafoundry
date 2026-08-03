@@ -11,6 +11,10 @@ import {
   EncryptedSecretStore,
   initializeConfigSchema
 } from "./config-store.js";
+import {
+  initializeWorkspaceDefaultModelProfileSchema,
+  WorkspaceDefaultModelProfileRepository
+} from "./workspace-model-profile-store.js";
 import { EnergyIqStore, initializeEnergyIqSchema } from "./energyiq-store.js";
 import { initializeEnergyIqMetricSchema } from "./energyiq-metric-store.js";
 import {
@@ -31,6 +35,7 @@ export * from "./energyiq-operational-policy-store.js";
 export * from "./energyiq-project-setup-store.js";
 export * from "./energyiq-rule-store.js";
 export * from "./energyiq-template-store.js";
+export * from "./workspace-model-profile-store.js";
 
 export type UserRecord = {
   id: string;
@@ -685,6 +690,7 @@ export class MetadataStore {
   readonly userPasswordCredentials: UserPasswordCredentialRepository;
   readonly users: UserRepository;
   readonly workspaceMemberships: WorkspaceMembershipRepository;
+  readonly workspaceDefaultModelProfiles: WorkspaceDefaultModelProfileRepository;
   readonly workspaces: WorkspaceRepository;
 
   constructor(readonly db: DatabaseSync, secretMasterKey?: string) {
@@ -695,6 +701,7 @@ export class MetadataStore {
     this.authAuditEvents = new AuthAuditEventRepository(db);
     this.workspaces = new WorkspaceRepository(db);
     this.workspaceMemberships = new WorkspaceMembershipRepository(db);
+    this.workspaceDefaultModelProfiles = new WorkspaceDefaultModelProfileRepository(db);
     this.sessions = new SessionRepository(db);
     this.runs = new RunRepository(db);
     this.runEvents = new RunEventRepository(db);
@@ -4006,6 +4013,9 @@ const runMigrations = (db: DatabaseSync): void => {
   });
   runSchemaMigration(db, "0026_energyiq_operational_policy_binding_ownership", "Enforce EnergyIQ operational policy Project ownership", () => {
     ensureEnergyIqOperationalPolicyBindingOwnershipSchema(db);
+  });
+  runSchemaMigration(db, "0027_workspace_default_model_profile", "Bind a server-side Workspace default model profile", () => {
+    initializeWorkspaceDefaultModelProfileSchema(db);
   });
 };
 
