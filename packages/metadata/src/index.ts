@@ -13,6 +13,10 @@ import {
 } from "./config-store.js";
 import { EnergyIqStore, initializeEnergyIqSchema } from "./energyiq-store.js";
 import { initializeEnergyIqMetricSchema } from "./energyiq-metric-store.js";
+import {
+  ensureEnergyIqOperationalPolicyBindingOwnershipSchema,
+  initializeEnergyIqOperationalPolicySchema
+} from "./energyiq-operational-policy-store.js";
 import { initializeEnergyIqProjectSetupSchema } from "./energyiq-project-setup-store.js";
 import { initializeEnergyIqRuleSchema } from "./energyiq-rule-store.js";
 import { initializeEnergyIqSavedAnalysisSchema } from "./energyiq-saved-analysis-store.js";
@@ -22,6 +26,7 @@ export * from "./config-store.js";
 export * from "./energyiq-store.js";
 export * from "./energyiq-saved-analysis-store.js";
 export * from "./energyiq-metric-store.js";
+export * from "./energyiq-operational-policy-store.js";
 export * from "./energyiq-project-setup-store.js";
 export * from "./energyiq-rule-store.js";
 export * from "./energyiq-template-store.js";
@@ -3994,6 +3999,12 @@ const runMigrations = (db: DatabaseSync): void => {
   });
   runSchemaMigration(db, "0024_energyiq_saved_analysis_schema", "Ensure immutable EnergyIQ saved analysis schema", () => {
     initializeEnergyIqSavedAnalysisSchema(db);
+  });
+  runSchemaMigration(db, "0025_energyiq_operational_policy_schema", "Ensure immutable EnergyIQ operational policy schema", () => {
+    initializeEnergyIqOperationalPolicySchema(db);
+  });
+  runSchemaMigration(db, "0026_energyiq_operational_policy_binding_ownership", "Enforce EnergyIQ operational policy Project ownership", () => {
+    ensureEnergyIqOperationalPolicyBindingOwnershipSchema(db);
   });
 };
 
