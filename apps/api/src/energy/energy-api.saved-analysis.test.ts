@@ -180,6 +180,145 @@ describe("saved analysis decision-quality boundary", () => {
       removeTemporaryFixture(root);
     }
   }, 30_000);
+
+  it("returns frozen metadata evidence without replacing it from the current Project release", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-api-saved-metadata-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const gateway = new LocalDataGateway(metadata);
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const project = metadata.energyIq.getProject("preschool-demo");
+      const templateRevision = metadata.energyIq.templates.publishProjectRevisionWithinTransaction({
+        project_id: project.id,
+        tier_definition_ids: metadata.energyIq.listTierDefinitions(project.id).map((tier) => tier.id),
+        hierarchy_revision_id: project.hierarchy_revision_id,
+        published_by: "dev-user",
+        published_at: "2026-08-04T00:00:00.000Z",
+      });
+      const query = {
+        projectId: project.id,
+        scopeId: "preschool-centre-a",
+        resource: "electricity",
+        period: "Custom",
+        from: "2026-05-01",
+        to: "2026-05-31",
+      } as const;
+      const frozenAnalysis = {
+        context: {
+          projectId: project.id,
+          scopeId: "preschool-centre-a",
+          scopeName: "Centre A",
+          timezone: "Asia/Singapore",
+          from: "2026-04-30T16:00:00.000Z",
+          to: "2026-05-31T16:00:00.000Z",
+        },
+        metadata: {
+          status: "provisional",
+          hierarchyRevisionId: project.hierarchy_revision_id,
+          selectedScope: {
+            scopeId: "preschool-centre-a",
+            status: "provisional",
+            area: { status: "provisional", value: 743 },
+            evidence: [{
+              scopeId: "preschool-centre-a",
+              dimension: "area",
+              value: 743,
+              status: "provisional",
+              hierarchyRevisionId: project.hierarchy_revision_id,
+              metadataRevisionId: `${project.hierarchy_revision_id}:preschool-centre-a`,
+            }],
+          },
+        },
+      };
+      const record = metadata.energyIq.savedAnalyses.create({
+        id: "saved-analysis-frozen-metadata",
+        series_id: "saved-analysis-frozen-metadata-series",
+        project_id: project.id,
+        workspace_id: PRESCHOOL_WORKSPACE_ID,
+        scope_id: "preschool-centre-a",
+        scope_name: "Centre A",
+        resource: "electricity",
+        title: "Frozen Centre A metadata",
+        query_json: JSON.stringify(query),
+        analysis_json: JSON.stringify(frozenAnalysis),
+        template_revision_id: templateRevision.revision_id,
+        data_snapshot_id: project.data_snapshot_id,
+        created_by: "dev-user",
+      });
+
+      const draft = metadata.energyIq.projectSetup.getDraft({
+        project_id: project.id,
+        user_id: "dev-user",
+      });
+      const savedDraft = metadata.energyIq.projectSetup.saveDraft({
+        project_id: project.id,
+        expected_revision: draft.revision,
+        user_id: "dev-user",
+        document: {
+          ...draft.document,
+          nodes: draft.document.nodes.map((node) => node.id === "preschool-centre-a"
+            ? { ...node, area_sqm: 999, metadata_status: "confirmed" }
+            : node),
+        },
+      });
+      const currentRelease = metadata.energyIq.projectSetup.publishDraft({
+        project_id: project.id,
+        expected_revision: savedDraft.revision,
+        user_id: "dev-user",
+      });
+      expect(metadata.energyIq.scopeMetadata.resolveForPeriod({
+        projectId: project.id,
+        scopeId: "preschool-centre-a",
+        hierarchyRevisionId: currentRelease.hierarchy_revision_id,
+        period: {
+          start: "2026-04-30T16:00:00.000Z",
+          endExclusive: "2026-05-31T16:00:00.000Z",
+        },
+      }).area).toMatchObject({
+        status: "missing",
+        reason: "ambiguous-effective-revisions",
+        value: null,
+        evidence: [{ value: 743 }, { value: 999 }],
+      });
+
+      const response = await handleEnergyApiRequest(
+        getRequest(),
+        ["projects", project.id, "saved-analyses", record.id],
+        {
+          metadataStore: metadata,
+          dataGateway: gateway,
+          userId: "dev-user",
+          workspaceId: PRESCHOOL_WORKSPACE_ID,
+        } as Required<ConfigApiContext>,
+      );
+
+      expect(response).toMatchObject({
+        status: 200,
+        body: {
+          success: true,
+          data: {
+            analysis: {
+              metadata: {
+                status: "provisional",
+                hierarchyRevisionId: project.hierarchy_revision_id,
+                selectedScope: {
+                  area: { status: "provisional", value: 743 },
+                  evidence: [{
+                    dimension: "area",
+                    value: 743,
+                    metadataRevisionId: `${project.hierarchy_revision_id}:preschool-centre-a`,
+                  }],
+                },
+              },
+            },
+          },
+        },
+      });
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
 });
 
 const jsonPost = (body: unknown): IncomingMessage => {
@@ -189,6 +328,13 @@ const jsonPost = (body: unknown): IncomingMessage => {
     headers: { "content-type": "application/json" },
   });
   request.end(JSON.stringify(body));
+  return request as unknown as IncomingMessage;
+};
+
+const getRequest = (): IncomingMessage => {
+  const request = new PassThrough();
+  Object.assign(request, { method: "GET", headers: {} });
+  request.end();
   return request as unknown as IncomingMessage;
 };
 

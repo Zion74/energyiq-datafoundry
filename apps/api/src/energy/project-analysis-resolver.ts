@@ -13,6 +13,12 @@ import {
   type EnergyScopeAnalysis,
 } from "./energy-analysis.js";
 import {
+  projectAnalysisPayload,
+  resolveProjectAnalysisMetadata,
+  type ProjectAnalysisMetadataProjection,
+  type ProjectAnalysisPayload,
+} from "./project-analysis-metadata.js";
+import {
   resolveEnergyQueryContext,
   type EnergyQueryContext,
   type EnergyQueryContextRequest,
@@ -78,7 +84,8 @@ export type ProjectAnalysisSnapshot = {
     importBatchIds: string[];
     lastSeenAt: string | null;
   };
-  analysis: EnergyScopeAnalysis;
+  metadata: ProjectAnalysisMetadataProjection;
+  analysis: ProjectAnalysisPayload;
 };
 
 export type ProjectAnalysisResolution =
@@ -132,7 +139,7 @@ export const resolveProjectAnalysis = async (input: {
     };
   }
   const releasedContext = bindPublishedReleaseContext(context, projectRelease);
-  const analysis = await executeEnergyScopeAnalysis({
+  const scopeAnalysis = await executeEnergyScopeAnalysis({
     metadataStore: input.metadataStore,
     dataGateway: input.dataGateway,
     userId: input.user.id,
@@ -152,8 +159,17 @@ export const resolveProjectAnalysis = async (input: {
   const evidenceMetricIds = [...(
     projectRelease.metricRevisionIds.length > 0
       ? projectRelease.metricRevisionIds
-      : [analysis.provenance.metricVersion]
+      : [scopeAnalysis.provenance.metricVersion]
   )].sort((left, right) => left.localeCompare(right));
+  const metadata = resolveProjectAnalysisMetadata({
+    metadataStore: input.metadataStore,
+    projectId: releasedContext.projectId,
+    hierarchyRevisionId: releasedContext.hierarchyRevisionId,
+    timezone: releasedContext.timezone,
+    period: snapshotContext.primaryPeriod,
+    analysis: scopeAnalysis,
+  });
+  const analysis = projectAnalysisPayload({ analysis: scopeAnalysis, metadata });
   return {
     status: "ready",
     snapshot: {
@@ -180,6 +196,7 @@ export const resolveProjectAnalysis = async (input: {
         importBatchIds: analysis.dataHealth.importBatchIds,
         lastSeenAt: analysis.dataHealth.lastSeenAt ?? null,
       },
+      metadata,
       analysis,
     },
   };
