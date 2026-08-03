@@ -20,7 +20,7 @@ export type TrustedEnergyRequirementsCommitInput = {
 /**
  * Reconcile model-shaped commit input with the server-owned requirement registry.
  * The old global fallback kept invented values whenever any other requirement had
- * declared values; normalizing per requirement prevents that mismatch/retry loop.
+ * declared values; exact per-requirement validation prevents that mismatch/retry loop.
  */
 export const adaptTrustedEnergyRequirementsCommit = (
   input: TrustedEnergyRequirementsCommitInput,
@@ -41,7 +41,14 @@ export const adaptTrustedEnergyRequirementsCommit = (
       }
       const declaredValueNames = new Set(requirement.assertions.flatMap((assertion) =>
         assertion.claimValues.map((value) => value.name)));
-      const values = (claim.values ?? []).filter((value) => declaredValueNames.has(value.name));
+      for (const value of claim.values ?? []) {
+        if (!declaredValueNames.has(value.name)) {
+          throw new Error(
+            `TRUSTED_ENERGY_REQUIREMENT_VALUE_NOT_FOUND:${claim.requirement_id}:${value.name}`
+          );
+        }
+      }
+      const values = claim.values ?? [];
       return {
         requirement_id: claim.requirement_id,
         claim: claim.claim,

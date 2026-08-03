@@ -27,20 +27,18 @@ const requirements = createUserAnalysisRequirements([
 ]);
 
 describe("trusted Energy requirements commit adapter", () => {
-  it("normalizes each claim against its own requirement registry instead of a global fallback", () => {
+  it("preserves declared values against each claim's own requirement registry", () => {
     const input = {
       claims: [
         {
           requirement_id: "R1",
-          claim: "Usage increased from the previous period.",
-          values: [{ name: "invented_change", value: 26.3677, unit: "%" }]
+          claim: "Usage increased from the previous period."
         },
         {
           requirement_id: "R2",
           claim: "Usage was 1,531.1683 kWh.",
           values: [
-            { name: "usage_kwh", value: 1531.1683, unit: "kWh" },
-            { name: "invented_total", value: 3050.1648, unit: "kWh" }
+            { name: "usage_kwh", value: 1531.1683, unit: "kWh" }
           ]
         }
       ]
@@ -59,7 +57,20 @@ describe("trusted Energy requirements commit adapter", () => {
         }
       ]
     });
-    expect(input.claims[0]).toHaveProperty("values");
+    expect(input.claims[1]?.values).not.toBe(requirements[1]?.assertions[0]?.claimValues);
+  });
+
+  it.each([
+    ["a claim with no value registry", "R1", "invented_change"],
+    ["a different requirement's registry", "R2", "invented_total"]
+  ])("rejects an unknown value name from %s", (_label, requirementId, valueName) => {
+    expect(() => adaptTrustedEnergyRequirementsCommit({
+      claims: [{
+        requirement_id: requirementId,
+        claim: "Invented value",
+        values: [{ name: valueName, value: 1 }]
+      }]
+    }, requirements)).toThrow(`TRUSTED_ENERGY_REQUIREMENT_VALUE_NOT_FOUND:${requirementId}:${valueName}`);
   });
 
   it("fails closed when the model commits a requirement outside the server registry", () => {

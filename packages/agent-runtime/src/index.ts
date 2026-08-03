@@ -94,7 +94,7 @@ import {
   type AnalysisContractGrounder
 } from "./protocol/model-analysis-contract-grounder.js";
 import type { AnalysisRequirement } from "./protocol/analysis-requirements.js";
-import { adaptTrustedEnergyRequirementsCommit } from "./protocol/trusted-energy-requirements-commit-adapter.js";
+import { createAnalysisRequirementsCommitTool } from "./protocol/analysis-requirements-commit-tool.js";
 import type { DataAnalysisState } from "./protocol/protocols/data-analysis.js";
 import { createDefaultSemanticProvider } from "./semantic/default-semantic-provider.js";
 import { EnergyQuerySemanticProvider } from "./semantic/energy-query-semantic-provider.js";
@@ -572,41 +572,12 @@ export const createDataFoundry = async (
     : [];
   const requirementsCommitTools = analysisRequirements.length > 0
     ? {
-        analysis_requirements_commit: createTool({
-          id: "analysis_requirements_commit",
-          description: "Commit final claims for analysis requirements using artifact evidence from successful SQL results.",
-          inputSchema: z.object({
-            claims: z.array(z.object({
-              requirement_id: z.string().min(1),
-              claim: z.string().min(1),
-              values: z.array(z.object({
-                name: z.string().min(1),
-                value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
-                unit: z.string().optional()
-              })).max(AGENT_RUNTIME_LIMITS.requirementCommitMaxOutputFields).optional(),
-              evidence_refs: z.array(z.string().min(1)).optional(),
-              evidence_requirement_ids: z.array(z.string().min(1)).optional()
-            })).min(1).max(AGENT_RUNTIME_LIMITS.requirementCommitMaxClaims)
-          }),
-          execute: async (toolInput, options) => {
-            const toolCallId = protocolToolCallId(options);
-            const commitInput = input.runContext.energy_query_context
-              ? adaptTrustedEnergyRequirementsCommit(toolInput, analysisRequirements)
-              : toolInput;
-            try {
-              const result = await protocol.actionRouter.execute({
-                runId: input.runContext.run_id,
-                segmentId: protocol.segmentId,
-                actionId: toolCallId ?? `analysis-requirements-commit:${Date.now()}`,
-                actionName: "analysis.requirements.commit",
-                input: commitInput,
-                idempotencyKey: toolCallId ?? JSON.stringify(commitInput)
-              });
-              return result.observation;
-            } catch (error) {
-              return createToolErrorObservation(error, { toolName: "analysis_requirements_commit" });
-            }
-          }
+        analysis_requirements_commit: createAnalysisRequirementsCommitTool({
+          analysisRequirements,
+          executeAction: (action) => protocol.actionRouter.execute(action),
+          runId: input.runContext.run_id,
+          segmentId: protocol.segmentId,
+          trustedEnergy: Boolean(input.runContext.energy_query_context)
         })
       }
     : {};
@@ -1579,6 +1550,7 @@ export {
   validateTrustedEnergyTextResult
 } from "./semantic/trusted-energy-text.js";
 export type {
+  TrustedEnergyPhysicalSchemaIdentity,
   TrustedEnergyTextIntent,
   TrustedEnergyTextQueryContract,
   TrustedEnergyTextRequest,
