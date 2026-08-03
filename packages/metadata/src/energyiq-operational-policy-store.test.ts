@@ -89,6 +89,7 @@ describe("EnergyIqOperationalPolicyStore", () => {
             usage_kwh: 10,
           },
         ],
+        policy_source: { mode: "active" },
       });
 
       expect(revision.version_id).toBe("tariff-v1");
@@ -199,6 +200,7 @@ describe("EnergyIqOperationalPolicyStore", () => {
           { start: "2026-07-02T02:00:00Z", end_exclusive: "2026-07-02T04:00:00Z", usage_kwh: 2 },
           { start: "2026-07-03T08:00:00Z", end_exclusive: "2026-07-03T10:00:00Z", usage_kwh: 2 },
         ],
+        policy_source: { mode: "active" },
       });
 
       expect(result.operating).toEqual({
@@ -246,6 +248,7 @@ describe("EnergyIqOperationalPolicyStore", () => {
         scope_id: "project-3-root",
         period,
         intervals: interval,
+        policy_source: { mode: "active" },
       });
 
       metadata.energyIq.operationalPolicy.publishTariffSchedule({
@@ -278,14 +281,18 @@ describe("EnergyIqOperationalPolicyStore", () => {
         scope_id: "project-3-root",
         period,
         intervals: interval,
+        policy_source: { mode: "active" },
       });
       const strict = metadata.energyIq.operationalPolicy.evaluateAnalysisPolicy({
         project_id: "project-3",
         scope_id: "project-3-root",
         period,
         intervals: interval,
-        tariff_schedule_version: "release-missing-tariff",
-        business_calendar_version: "release-missing-calendar",
+        policy_source: {
+          mode: "release-pinned",
+          tariff_schedule_version: "release-missing-tariff",
+          business_calendar_version: "release-missing-calendar",
+        },
       });
 
       metadata.energyIq.operationalPolicy.publishTariffSchedule({
@@ -316,13 +323,18 @@ describe("EnergyIqOperationalPolicyStore", () => {
         scope_id: "project-3-root",
         period,
         intervals: interval,
-        tariff_schedule_version: "tariff-currency-conflict",
+        policy_source: {
+          mode: "release-pinned",
+          tariff_schedule_version: "tariff-currency-conflict",
+          business_calendar_version: "calendar-gap",
+        },
       });
       const noFacts = metadata.energyIq.operationalPolicy.evaluateAnalysisPolicy({
         project_id: "project-3",
         scope_id: "project-3-root",
         period: { from: "2026-07-02T00:00:00+08:00", to: "2026-07-03T00:00:00+08:00" },
         intervals: [],
+        policy_source: { mode: "active" },
       });
 
       expect([
@@ -381,6 +393,7 @@ describe("EnergyIqOperationalPolicyStore", () => {
         scope_id: "project-4-root",
         period,
         intervals,
+        policy_source: { mode: "active" },
       });
       metadata.energyIq.savedAnalyses.create({
         id: "saved-v1",
@@ -405,14 +418,18 @@ describe("EnergyIqOperationalPolicyStore", () => {
         scope_id: "project-4-root",
         period,
         intervals,
+        policy_source: { mode: "active" },
       });
       const pinned = metadata.energyIq.operationalPolicy.evaluateAnalysisPolicy({
         project_id: "project-4",
         scope_id: "project-4-root",
         period,
         intervals,
-        tariff_schedule_version: "tariff-v1",
-        business_calendar_version: "calendar-v1",
+        policy_source: {
+          mode: "release-pinned",
+          tariff_schedule_version: "tariff-v1",
+          business_calendar_version: "calendar-v1",
+        },
       });
       const saved = JSON.parse(metadata.energyIq.savedAnalyses.get("saved-v1").analysis_json) as unknown;
 
@@ -430,6 +447,193 @@ describe("EnergyIqOperationalPolicyStore", () => {
           operating: { status: "available", business_calendar_version: "calendar-v1", operating_kwh: 0, standby_kwh: 10 },
         },
       });
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects duplicate Tariff entry IDs even when adjacent entries carry different rates", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-tariff-entry-id-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.workspaces.upsert({
+        id: "workspace-duplicate",
+        owner_user_id: "dev-user",
+        name: "Duplicate Entry Workspace",
+        kind: "customer",
+      });
+      metadata.energyIq.upsertProject({
+        id: "project-duplicate",
+        workspace_id: "workspace-duplicate",
+        name: "Duplicate Entry Project",
+        status: "published",
+        root_scope_id: "project-duplicate-root",
+      });
+
+      expect(() => metadata.energyIq.operationalPolicy.publishTariffSchedule({
+        version_id: "tariff-duplicate-id",
+        project_id: "project-duplicate",
+        published_by: "dev-user",
+        entries: [
+          {
+            id: "duplicate-rate",
+            owner: { kind: "project" },
+            effective_from: "2026-07-01T00:00:00+08:00",
+            effective_to: "2026-07-01T12:00:00+08:00",
+            currency: "SGD",
+            rate_per_kwh: 0.2,
+          },
+          {
+            id: "duplicate-rate",
+            owner: { kind: "project" },
+            effective_from: "2026-07-01T12:00:00+08:00",
+            effective_to: "2026-07-02T00:00:00+08:00",
+            currency: "SGD",
+            rate_per_kwh: 0.4,
+          },
+        ],
+      })).toThrowError("ENERGYIQ_TARIFF_ENTRY_ID_DUPLICATE:duplicate-rate");
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a Scope lineage whose parent belongs to another Project", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-policy-lineage-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.workspaces.upsert({
+        id: "workspace-lineage",
+        owner_user_id: "dev-user",
+        name: "Lineage Workspace",
+        kind: "customer",
+      });
+      metadata.energyIq.upsertProject({
+        id: "project-lineage-a",
+        workspace_id: "workspace-lineage",
+        name: "Project A",
+        status: "published",
+        root_scope_id: "project-a-root",
+      });
+      metadata.energyIq.upsertProject({
+        id: "project-lineage-b",
+        workspace_id: "workspace-lineage",
+        name: "Project B",
+        status: "published",
+        root_scope_id: "project-b-root",
+      });
+      metadata.energyIq.upsertProjectNode({
+        id: "project-b-root",
+        project_id: "project-lineage-b",
+        name: "Project B",
+        node_type: "project",
+      });
+      metadata.energyIq.upsertProjectNode({
+        id: "project-a-circuit",
+        project_id: "project-lineage-a",
+        parent_id: "project-b-root",
+        name: "Circuit",
+        node_type: "circuit",
+      });
+
+      expect(() => metadata.energyIq.operationalPolicy.evaluateAnalysisPolicy({
+        project_id: "project-lineage-a",
+        scope_id: "project-a-circuit",
+        period: { from: "2026-07-01T00:00:00+08:00", to: "2026-07-02T00:00:00+08:00" },
+        intervals: [],
+        policy_source: { mode: "active" },
+      })).toThrowError("ENERGYIQ_POLICY_SCOPE_LINEAGE_INVALID:project-a-circuit:project-b-root");
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("enforces Project ownership on active policy bindings in SQLite", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-policy-binding-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.workspaces.upsert({
+        id: "workspace-binding",
+        owner_user_id: "dev-user",
+        name: "Binding Workspace",
+        kind: "customer",
+      });
+      metadata.energyIq.upsertProject({
+        id: "project-binding-a",
+        workspace_id: "workspace-binding",
+        name: "Project A",
+        status: "published",
+      });
+      metadata.energyIq.upsertProject({
+        id: "project-binding-b",
+        workspace_id: "workspace-binding",
+        name: "Project B",
+        status: "published",
+      });
+      metadata.energyIq.operationalPolicy.publishTariffSchedule({
+        version_id: "project-b-tariff",
+        project_id: "project-binding-b",
+        published_by: "dev-user",
+        entries: [{
+          id: "project-b-rate",
+          owner: { kind: "project" },
+          effective_from: "2026-07-01T00:00:00+08:00",
+          currency: "SGD",
+          rate_per_kwh: 0.2,
+        }],
+      });
+
+      expect(() => metadata.db.prepare(`
+        INSERT INTO energyiq_operational_policy_bindings (
+          project_id, tariff_schedule_version, business_calendar_version, updated_by, updated_at
+        ) VALUES (?, ?, NULL, ?, ?)
+      `).run(
+        "project-binding-a",
+        "project-b-tariff",
+        "dev-user",
+        "2026-08-04T00:00:00.000Z",
+      )).toThrowError(/FOREIGN KEY constraint failed/);
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when an untyped caller supplies only one Release-pinned operational-policy version", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-policy-source-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.workspaces.upsert({
+        id: "workspace-5",
+        owner_user_id: "dev-user",
+        name: "Workspace 5",
+        kind: "customer",
+      });
+      metadata.energyIq.upsertProject({
+        id: "project-5",
+        workspace_id: "workspace-5",
+        name: "Project 5",
+        status: "published",
+        timezone: "Asia/Singapore",
+        root_scope_id: "project-5-root",
+      });
+      const evaluateUntyped = metadata.energyIq.operationalPolicy.evaluateAnalysisPolicy.bind(
+        metadata.energyIq.operationalPolicy,
+      ) as (input: unknown) => unknown;
+
+      expect(() => evaluateUntyped({
+        project_id: "project-5",
+        scope_id: "project-5-root",
+        period: { from: "2026-07-01T00:00:00+08:00", to: "2026-07-02T00:00:00+08:00" },
+        intervals: [],
+        policy_source: {
+          mode: "release-pinned",
+          tariff_schedule_version: "tariff-v1",
+        },
+      })).toThrowError("ENERGYIQ_OPERATIONAL_POLICY_SOURCE_INVALID");
     } finally {
       metadata.close();
       rmSync(root, { recursive: true, force: true });
@@ -502,3 +706,14 @@ const unavailableCode = (value: {
   status: "available" | "unavailable";
   reason?: { code: string };
 }): string => value.status === "unavailable" ? value.reason?.code ?? "MISSING_REASON" : "AVAILABLE";
+
+type PolicySource = Parameters<
+  ReturnType<typeof createMetadataStore>["energyIq"]["operationalPolicy"]["evaluateAnalysisPolicy"]
+>[0]["policy_source"];
+
+// @ts-expect-error A Release source is invalid unless both versions are pinned.
+const partialReleasePolicySource: PolicySource = {
+  mode: "release-pinned",
+  tariff_schedule_version: "tariff-v1",
+};
+void partialReleasePolicySource;

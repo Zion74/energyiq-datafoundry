@@ -57,7 +57,7 @@ admin creates Project
 现状限制：
 
 - Preschool 现有可运行事实仍是 Project → Centre → Circuit，Block → Room → Circuit 目标映射等待客户输入；
-- Tariff 0.2727 仍在分析代码中硬编码；
+- Tariff/Operating Calendar 的不可变持久化、Project/Scope 生效解析、active/Release-pinned 来源和显式 Unavailable 深模块已完成；`energy-analysis.ts` 的 0.2727 仍待 Orchestrator 通过现有 Resolver/Recipe seam 替换，客户 API/Web 尚未打通；
 - Metric/Rule Revision 已持久化并驱动确定性计算；Review & Publish 可将 Hierarchy、Formula、Metric/Rule 选择和 Template 一次冻结为 Published Revision；
 - Component Catalog、Project/Tier Template Draft、真实 Project/Scope/Period Draft Preview、不可变 Template Revision 存储、Schema v2 和共享 Render Plan 已实现；Analysis Run 与 Rerun 尚未实现；
 - 客户 Overview 已通过 Published Template endpoint 与 Admin Preview 共用 Renderer；本地历史 Ngee Ann/Preschool 尚未重新发布 Template Revision，当前使用明确标记的 `compatibility-default`；Explorer 仍需补发布版本上下文。

@@ -63,6 +63,22 @@ export type EnergyIqAnalysisInterval = {
   usage_kwh: number;
 };
 
+export type EnergyIqOperationalPolicySource =
+  | { mode: "active" }
+  | {
+      mode: "release-pinned";
+      tariff_schedule_version: string;
+      business_calendar_version: string;
+    };
+
+export type EnergyIqEvaluateAnalysisPolicyInput = {
+  project_id: string;
+  scope_id: string;
+  period: { from: string; to: string };
+  intervals: EnergyIqAnalysisInterval[];
+  policy_source: EnergyIqOperationalPolicySource;
+};
+
 export type EnergyIqPolicyUnavailableReasonCode =
   | "TARIFF_VERSION_MISSING"
   | "TARIFF_VERSION_NOT_FOUND"
@@ -147,6 +163,7 @@ export const initializeEnergyIqOperationalPolicySchema = (db: DatabaseSync): voi
       entries_json TEXT NOT NULL,
       published_by TEXT NOT NULL,
       published_at TEXT NOT NULL,
+      UNIQUE (project_id, version_id),
       FOREIGN KEY (project_id) REFERENCES energyiq_projects(id) ON DELETE CASCADE,
       FOREIGN KEY (published_by) REFERENCES users(id)
     );
@@ -160,6 +177,7 @@ export const initializeEnergyIqOperationalPolicySchema = (db: DatabaseSync): voi
       entries_json TEXT NOT NULL,
       published_by TEXT NOT NULL,
       published_at TEXT NOT NULL,
+      UNIQUE (project_id, version_id),
       FOREIGN KEY (project_id) REFERENCES energyiq_projects(id) ON DELETE CASCADE,
       FOREIGN KEY (published_by) REFERENCES users(id)
     );
@@ -173,8 +191,10 @@ export const initializeEnergyIqOperationalPolicySchema = (db: DatabaseSync): voi
       updated_by TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (project_id) REFERENCES energyiq_projects(id) ON DELETE CASCADE,
-      FOREIGN KEY (tariff_schedule_version) REFERENCES energyiq_tariff_schedule_revisions(version_id),
-      FOREIGN KEY (business_calendar_version) REFERENCES energyiq_operating_calendar_revisions(version_id),
+      FOREIGN KEY (project_id, tariff_schedule_version)
+        REFERENCES energyiq_tariff_schedule_revisions(project_id, version_id),
+      FOREIGN KEY (project_id, business_calendar_version)
+        REFERENCES energyiq_operating_calendar_revisions(project_id, version_id),
       FOREIGN KEY (updated_by) REFERENCES users(id)
     );
 
@@ -199,6 +219,73 @@ export const initializeEnergyIqOperationalPolicySchema = (db: DatabaseSync): voi
       SELECT RAISE(ABORT, 'ENERGYIQ_OPERATING_CALENDAR_REVISION_IMMUTABLE');
     END;
   `);
+};
+
+export const ensureEnergyIqOperationalPolicyBindingOwnershipSchema = (db: DatabaseSync): void => {
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_energyiq_tariff_revisions_project_version
+      ON energyiq_tariff_schedule_revisions(project_id, version_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_energyiq_operating_calendar_revisions_project_version
+      ON energyiq_operating_calendar_revisions(project_id, version_id);
+  `);
+  if (hasCompositePolicyBindingForeignKeys(db)) return;
+
+  const invalidBinding = db.prepare(`
+    SELECT b.project_id
+    FROM energyiq_operational_policy_bindings b
+    WHERE (
+      b.tariff_schedule_version IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM energyiq_tariff_schedule_revisions t
+        WHERE t.project_id = b.project_id
+          AND t.version_id = b.tariff_schedule_version
+      )
+    ) OR (
+      b.business_calendar_version IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM energyiq_operating_calendar_revisions c
+        WHERE c.project_id = b.project_id
+          AND c.version_id = b.business_calendar_version
+      )
+    )
+    LIMIT 1
+  `).get();
+  if (isRecord(invalidBinding)) {
+    throw new Error(
+      `ENERGYIQ_OPERATIONAL_POLICY_BINDING_PROJECT_MISMATCH:${requiredString(invalidBinding, "project_id")}`,
+    );
+  }
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.exec(`
+      ALTER TABLE energyiq_operational_policy_bindings
+        RENAME TO energyiq_operational_policy_bindings_legacy;
+      CREATE TABLE energyiq_operational_policy_bindings (
+        project_id TEXT PRIMARY KEY,
+        tariff_schedule_version TEXT,
+        business_calendar_version TEXT,
+        updated_by TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (project_id) REFERENCES energyiq_projects(id) ON DELETE CASCADE,
+        FOREIGN KEY (project_id, tariff_schedule_version)
+          REFERENCES energyiq_tariff_schedule_revisions(project_id, version_id),
+        FOREIGN KEY (project_id, business_calendar_version)
+          REFERENCES energyiq_operating_calendar_revisions(project_id, version_id),
+        FOREIGN KEY (updated_by) REFERENCES users(id)
+      );
+      INSERT INTO energyiq_operational_policy_bindings (
+        project_id, tariff_schedule_version, business_calendar_version, updated_by, updated_at
+      )
+      SELECT project_id, tariff_schedule_version, business_calendar_version, updated_by, updated_at
+      FROM energyiq_operational_policy_bindings_legacy;
+      DROP TABLE energyiq_operational_policy_bindings_legacy;
+    `);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 };
 
 export class EnergyIqOperationalPolicyStore {
@@ -375,20 +462,23 @@ export class EnergyIqOperationalPolicyStore {
     };
   }
 
-  evaluateAnalysisPolicy(input: {
-    project_id: string;
-    scope_id: string;
-    period: { from: string; to: string };
-    intervals: EnergyIqAnalysisInterval[];
-    tariff_schedule_version?: string;
-    business_calendar_version?: string;
-  }): EnergyIqOperationalPolicyEvaluation {
+  evaluateAnalysisPolicy(input: EnergyIqEvaluateAnalysisPolicyInput): EnergyIqOperationalPolicyEvaluation {
+    if (
+      Object.prototype.hasOwnProperty.call(input, "tariff_schedule_version")
+      || Object.prototype.hasOwnProperty.call(input, "business_calendar_version")
+    ) {
+      throw new Error("ENERGYIQ_OPERATIONAL_POLICY_SOURCE_INVALID");
+    }
+    const policySource = validatePolicySource(input.policy_source);
     const period = parsePeriod(input.period);
     const intervals = canonicalizeIntervals(input.intervals, period);
     const scopeLineage = this.resolveScopeLineage(input.project_id, input.scope_id);
-    const active = this.getActivePolicyVersions(input.project_id);
-    const tariffVersion = input.tariff_schedule_version ?? active.tariff_schedule_version;
-    const calendarVersion = input.business_calendar_version ?? active.business_calendar_version;
+    const versions = policySource.mode === "active"
+      ? this.getActivePolicyVersions(input.project_id)
+      : {
+          tariff_schedule_version: policySource.tariff_schedule_version,
+          business_calendar_version: policySource.business_calendar_version,
+        };
 
     return {
       tariff: this.evaluateTariff({
@@ -396,14 +486,14 @@ export class EnergyIqOperationalPolicyStore {
         scopeLineage,
         period,
         intervals,
-        versionId: tariffVersion,
+        versionId: versions.tariff_schedule_version,
       }),
       operating: this.evaluateOperating({
         projectId: input.project_id,
         scopeLineage,
         period,
         intervals,
-        versionId: calendarVersion,
+        versionId: versions.business_calendar_version,
       }),
     };
   }
@@ -577,17 +667,22 @@ export class EnergyIqOperationalPolicyStore {
 
     const lineage: string[] = [];
     const visited = new Set<string>();
-    let current: string | undefined = scopeId;
-    while (current) {
+    let current = scopeId;
+    while (current !== rootScopeId) {
       if (visited.has(current)) throw new Error("ENERGYIQ_POLICY_SCOPE_CYCLE");
       visited.add(current);
       lineage.push(current);
-      if (current === rootScopeId) break;
       const row = byId.get(current);
-      if (!row) break;
-      current = optionalString(row.parent_id) ?? rootScopeId;
+      if (!row) {
+        throw new Error(`ENERGYIQ_POLICY_SCOPE_LINEAGE_INVALID:${scopeId}:${current}`);
+      }
+      const parentId = optionalString(row.parent_id);
+      if (!parentId || (parentId !== rootScopeId && !byId.has(parentId))) {
+        throw new Error(`ENERGYIQ_POLICY_SCOPE_LINEAGE_INVALID:${scopeId}:${parentId ?? "missing-parent"}`);
+      }
+      current = parentId;
     }
-    if (lineage[lineage.length - 1] !== rootScopeId) lineage.push(rootScopeId);
+    lineage.push(rootScopeId);
     return lineage;
   }
 
@@ -690,6 +785,14 @@ const canonicalizeTariffEntries = (entries: EnergyIqTariffScheduleEntry[]): Ener
       currency,
     };
   });
+
+  const entryIds = new Set<string>();
+  for (const entry of canonical) {
+    if (entryIds.has(entry.id)) {
+      throw new Error(`ENERGYIQ_TARIFF_ENTRY_ID_DUPLICATE:${entry.id}`);
+    }
+    entryIds.add(entry.id);
+  }
 
   const byOwner = new Map<string, EnergyIqTariffScheduleEntry[]>();
   for (const entry of canonical) {
@@ -839,12 +942,7 @@ const resolveTariffSegments = (input: {
       .sort((left, right) => left.rank - right.rank);
     const selected = candidates[0]?.entry;
     if (!selected) return undefined;
-    const previous = segments[segments.length - 1];
-    if (previous && previous.entry.id === selected.id && previous.toMs === fromMs) {
-      previous.toMs = toMs;
-    } else {
-      segments.push({ fromMs, toMs, entry: selected });
-    }
+    segments.push({ fromMs, toMs, entry: selected });
   }
   return segments;
 };
@@ -904,6 +1002,53 @@ const parsePeriod = (period: { from: string; to: string }): { fromMs: number; to
   const toMs = parseInstant(period.to, "period:to");
   if (toMs <= fromMs) throw new Error("ENERGYIQ_POLICY_PERIOD_INVALID");
   return { fromMs, toMs };
+};
+
+const validatePolicySource = (value: unknown): EnergyIqOperationalPolicySource => {
+  if (!isRecord(value)) throw new Error("ENERGYIQ_OPERATIONAL_POLICY_SOURCE_INVALID");
+  if (value.mode === "active") {
+    if (
+      Object.prototype.hasOwnProperty.call(value, "tariff_schedule_version")
+      || Object.prototype.hasOwnProperty.call(value, "business_calendar_version")
+    ) {
+      throw new Error("ENERGYIQ_OPERATIONAL_POLICY_SOURCE_INVALID");
+    }
+    return { mode: "active" };
+  }
+  if (value.mode === "release-pinned") {
+    const tariffVersion = optionalString(value.tariff_schedule_version)?.trim();
+    const calendarVersion = optionalString(value.business_calendar_version)?.trim();
+    if (!tariffVersion || !calendarVersion) {
+      throw new Error("ENERGYIQ_OPERATIONAL_POLICY_SOURCE_INVALID");
+    }
+    return {
+      mode: "release-pinned",
+      tariff_schedule_version: tariffVersion,
+      business_calendar_version: calendarVersion,
+    };
+  }
+  throw new Error("ENERGYIQ_OPERATIONAL_POLICY_SOURCE_INVALID");
+};
+
+const hasCompositePolicyBindingForeignKeys = (db: DatabaseSync): boolean => {
+  const rows = db.prepare("PRAGMA foreign_key_list(energyiq_operational_policy_bindings)")
+    .all()
+    .filter(isRecord);
+  const hasPair = (table: string, versionColumn: string): boolean => {
+    const groups = new Map<string, Set<string>>();
+    for (const row of rows) {
+      if (row.table !== table) continue;
+      const id = String(row.id);
+      const mappings = groups.get(id) ?? new Set<string>();
+      mappings.add(`${String(row.from)}:${String(row.to)}`);
+      groups.set(id, mappings);
+    }
+    return [...groups.values()].some((mappings) =>
+      mappings.has("project_id:project_id")
+        && mappings.has(`${versionColumn}:version_id`));
+  };
+  return hasPair("energyiq_tariff_schedule_revisions", "tariff_schedule_version")
+    && hasPair("energyiq_operating_calendar_revisions", "business_calendar_version");
 };
 
 const parseInstant = (value: string, field: string): number => {
