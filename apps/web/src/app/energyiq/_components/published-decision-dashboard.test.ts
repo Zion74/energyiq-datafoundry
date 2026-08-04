@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   EnergyAccessContextDto,
   EnergyComponentRevisionDto,
+  EnergyProjectHierarchyDto,
   EnergyProjectDto,
   EnergyTemplateDefinitionDto,
 } from "../../../lib/config-api";
@@ -24,8 +25,12 @@ const mockedAccess = vi.hoisted(() => ({
   activeProject: null as EnergyProjectDto | null,
   selectProject: vi.fn<(projectId: string) => void>(),
 }));
+const mockedRouter = vi.hoisted(() => ({
+  replace: vi.fn<(href: string) => void>(),
+}));
 
 vi.mock("next/navigation", () => ({
+  useRouter: () => mockedRouter,
   useSearchParams: () => new URLSearchParams(window.location.search),
 }));
 
@@ -47,6 +52,8 @@ describe("published Overview URL reload", () => {
     mockedAccess.access = null;
     mockedAccess.activeProject = null;
     mockedAccess.selectProject.mockReset();
+    mockedRouter.replace.mockReset();
+    vi.spyOn(configApi, "getEnergyProjectHierarchy").mockResolvedValue(projectHierarchy());
     window.history.replaceState({}, "", "/energyiq/overview");
     container = document.createElement("div");
     document.body.append(container);
@@ -251,6 +258,96 @@ describe("published Overview URL reload", () => {
     expect(resolveProjectAnalysis).not.toHaveBeenCalled();
     expect(container.textContent).toContain("Water analysis is not configured");
   });
+
+  it("switches from Project to a published hierarchy Scope through the public URL", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    const scopeSelect = container.querySelector<HTMLButtonElement>("[role='combobox'][aria-label='Analysis Scope']");
+    expect(scopeSelect).not.toBeNull();
+    await act(async () => scopeSelect?.click());
+    const options = Array.from(document.querySelectorAll<HTMLButtonElement>("[role='option']"));
+    expect(options.map((option) => option.textContent)).toEqual([
+      "Project · Ngee Ann Polytechnic",
+      "Level · Level 6",
+      "Circuit · L6 Light Left",
+      "Circuit · L6 Total Light",
+    ]);
+
+    const totalCircuit = options.find((option) => option.textContent?.includes("L6 Total Light"));
+    await act(async () => totalCircuit?.click());
+    expect(mockedRouter.replace).toHaveBeenCalledOnce();
+    expect(mockedRouter.replace).toHaveBeenCalledWith(
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16",
+    );
+
+    resolveProjectAnalysis.mockClear();
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+    expect(resolveProjectAnalysis).toHaveBeenCalledTimes(1);
+    expect(resolveProjectAnalysis).toHaveBeenCalledWith({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "l6-total-light",
+      resource: "electricity",
+      period: "Custom",
+      from: "2026-06-10",
+      to: "2026-06-16",
+    });
+  });
+
+  it("moves the public URL to the new Project root when the global Project changes", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    const preschool = project("preschool-demo", "Preschool Demo");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn, preschool]);
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=level-6&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+    resolveProjectAnalysis.mockClear();
+    mockedRouter.replace.mockClear();
+    mockedAccess.selectProject.mockClear();
+
+    mockedAccess.activeProject = preschool;
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    expect(resolveProjectAnalysis).not.toHaveBeenCalled();
+    expect(mockedAccess.selectProject).not.toHaveBeenCalled();
+    expect(mockedRouter.replace).toHaveBeenCalledOnce();
+    expect(mockedRouter.replace).toHaveBeenCalledWith(
+      "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16",
+    );
+
+    resolveProjectAnalysis.mockClear();
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+    expect(resolveProjectAnalysis).toHaveBeenCalledTimes(1);
+    expect(resolveProjectAnalysis).toHaveBeenCalledWith({
+      projectId: "preschool-demo",
+      scopeId: "project",
+      resource: "electricity",
+      period: "Custom",
+      from: "2026-06-10",
+      to: "2026-06-16",
+    });
+  });
 });
 
 describe("published Overview date inputs", () => {
@@ -367,5 +464,50 @@ function accessContext(projects: EnergyProjectDto[], activeWorkspaceId = "worksp
     activeWorkspaceId,
     workspaces: [],
     projects,
+  };
+}
+
+function projectHierarchy(): EnergyProjectHierarchyDto {
+  return {
+    project: {
+      id: "ngee-ann-polytechnic",
+      name: "Ngee Ann Polytechnic",
+      hierarchy_revision_id: "hierarchy-v6",
+    },
+    tiers: [
+      { id: "tier-level", ordinal: 2, alias: "Level" },
+      { id: "tier-circuit", ordinal: 1, alias: "Circuit" },
+    ],
+    nodes: [
+      {
+        id: "level-6",
+        project_id: "ngee-ann-polytechnic",
+        name: "Level 6",
+        node_type: "level",
+        tier_definition_id: "tier-level",
+        sort_order: 1,
+        metadata_status: "confirmed",
+      },
+      {
+        id: "l6-light-left",
+        project_id: "ngee-ann-polytechnic",
+        parent_id: "level-6",
+        name: "L6 Light Left",
+        node_type: "circuit",
+        tier_definition_id: "tier-circuit",
+        sort_order: 1,
+        metadata_status: "confirmed",
+      },
+      {
+        id: "l6-total-light",
+        project_id: "ngee-ann-polytechnic",
+        parent_id: "level-6",
+        name: "L6 Total Light",
+        node_type: "circuit",
+        tier_definition_id: "tier-circuit",
+        sort_order: 2,
+        metadata_status: "confirmed",
+      },
+    ],
   };
 }

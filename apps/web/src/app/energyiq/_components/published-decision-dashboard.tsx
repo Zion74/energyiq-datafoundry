@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   configApi,
   type EnergyProjectAnalysisResolutionDto,
+  type EnergyProjectHierarchyDto,
   type EnergyQueryContextRequestDto,
   type EnergySavedAnalysisDetailDto,
   type EnergyScopeAnalysisDto,
@@ -16,8 +17,10 @@ import {
   type EnergyTemplateRendererState,
 } from "./energy-template-renderer";
 import { buildEnergyTemplateRenderPlan } from "./energy-template-render-plan";
+import { EnergySelect } from "./energy-select";
 import { useEnergyIqAccess } from "./energyiq-access";
 import { EnergyIcon } from "./icons";
+import { orderProjectNodesDepthFirst } from "./project-tree-model";
 import {
   applyProjectAnalysisQualityPolicy,
   ProjectRenderer,
@@ -63,10 +66,23 @@ export function PublishedDecisionDashboard() {
     initialViewState.from,
     initialViewState.to,
   ].join(":");
-  return <PublishedDecisionDashboardView key={viewStateKey} initialViewState={initialViewState} />;
+  return (
+    <PublishedDecisionDashboardView
+      key={viewStateKey}
+      initialViewState={initialViewState}
+      urlSearch={searchParams.toString()}
+    />
+  );
 }
 
-function PublishedDecisionDashboardView({ initialViewState }: { initialViewState: OverviewUrlViewState }) {
+function PublishedDecisionDashboardView({
+  initialViewState,
+  urlSearch,
+}: {
+  initialViewState: OverviewUrlViewState;
+  urlSearch: string;
+}) {
+  const router = useRouter();
   const { access, activeProject, selectProject } = useEnergyIqAccess();
   const requestedProject = initialViewState.projectId && access
     ? access.projects.find((candidate) => candidate.id === initialViewState.projectId
@@ -93,6 +109,7 @@ function PublishedDecisionDashboardView({ initialViewState }: { initialViewState
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAnalysis, setSavedAnalysis] = useState<EnergySavedAnalysisDetailDto | null>(null);
+  const [hierarchy, setHierarchy] = useState<EnergyProjectHierarchyDto | null>(null);
 
   const projectId = selectedProject?.id ?? "";
   const effectiveCustomRange = customRange.projectId === projectId || customRange.projectId === ""
@@ -104,11 +121,52 @@ function PublishedDecisionDashboardView({ initialViewState }: { initialViewState
     effectiveCustomRange.to,
   );
   const requestedProjectId = requestedProject?.id ?? "";
+  const lastActiveProjectIdRef = useRef(activeProject?.id ?? "");
 
   useEffect(() => {
-    if (!requestedProjectId || requestedProjectId === activeProject?.id) return;
+    const previousActiveProjectId = lastActiveProjectIdRef.current;
+    const activeProjectId = activeProject?.id ?? "";
+    lastActiveProjectIdRef.current = activeProjectId;
+    if (!requestedProjectId || !activeProjectId || requestedProjectId === activeProjectId) return;
+    if (previousActiveProjectId === requestedProjectId) {
+      router.replace(overviewUrlWithProject(urlSearch, activeProjectId));
+      return;
+    }
     selectProject(requestedProjectId);
-  }, [activeProject?.id, requestedProjectId, selectProject]);
+  }, [activeProject?.id, requestedProjectId, router, selectProject, urlSearch]);
+
+  useEffect(() => {
+    if (!projectId) {
+      setHierarchy(null);
+      return;
+    }
+    let cancelled = false;
+    setHierarchy(null);
+    void configApi.getEnergyProjectHierarchy(projectId)
+      .then((result) => {
+        if (!cancelled) setHierarchy(result);
+      })
+      .catch(() => {
+        if (!cancelled) setHierarchy(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  const scopeOptions = useMemo(() => {
+    const tierAliases = new Map(hierarchy?.tiers.map((tier) => [tier.id, tier.alias]) ?? []);
+    const orderedNodes = orderProjectNodesDepthFirst(
+      (hierarchy?.nodes ?? []).map((node) => ({ ...node, parentId: node.parent_id ?? null })),
+    );
+    return [
+      { value: "project", label: `Project · ${selectedProject?.name ?? "Project"}` },
+      ...orderedNodes.map((node) => ({
+        value: node.id,
+        label: `${tierAliases.get(node.tier_definition_id ?? "") ?? node.node_type} · ${node.name}`,
+      })),
+    ];
+  }, [hierarchy, selectedProject?.name]);
   const currentResolution = resolution?.projectId === projectId ? resolution.value : null;
   const currentSnapshot = currentResolution?.status === "ready" ? currentResolution.snapshot : null;
   const currentAnalysis = currentSnapshot?.analysis ?? null;
@@ -252,6 +310,17 @@ function PublishedDecisionDashboardView({ initialViewState }: { initialViewState
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          <div className="w-full min-w-[220px] sm:w-auto">
+            <EnergySelect
+              ariaLabel="Analysis Scope"
+              value={scopeId}
+              options={scopeOptions}
+              onValueChange={(nextScopeId) => router.replace(overviewUrlWithScope(urlSearch, nextScopeId))}
+              size="small"
+              disabled={!projectId}
+              triggerClassName="sm:w-[260px]"
+            />
+          </div>
           <div className="flex rounded-lg border border-border bg-surface p-1" aria-label="Resource type">
             {(["electricity", "water"] as const).map((item) => (
               <button
@@ -465,6 +534,19 @@ function isValidDateInput(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00.000Z`);
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function overviewUrlWithScope(urlSearch: string, scopeId: string): string {
+  const next = new URLSearchParams(urlSearch);
+  next.set("scopeId", scopeId || "project");
+  return `/energyiq/overview?${next.toString()}`;
+}
+
+function overviewUrlWithProject(urlSearch: string, projectId: string): string {
+  const next = new URLSearchParams(urlSearch);
+  next.set("projectId", projectId);
+  next.set("scopeId", "project");
+  return `/energyiq/overview?${next.toString()}`;
 }
 
 export function toDateInput(value: string, timeZone: string): string {
