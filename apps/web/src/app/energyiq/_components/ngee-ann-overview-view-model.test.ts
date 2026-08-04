@@ -4,6 +4,16 @@ import { ngeeAnnGoldenSnapshot, ngeeAnnSingleDaySnapshot } from "./ngee-ann-over
 import { buildNgeeAnnOverviewViewModel } from "./ngee-ann-overview-view-model";
 
 type GoldenSnapshot = ReturnType<typeof ngeeAnnGoldenSnapshot>;
+type AvailableDailyAnomalies = Extract<
+  NonNullable<GoldenSnapshot["analysis"]["dailyUsageAnomalies"]>,
+  { status: "available" }
+>;
+
+function dailyAnomalyBundle(snapshot: GoldenSnapshot): AvailableDailyAnomalies {
+  const bundle = snapshot.analysis.dailyUsageAnomalies;
+  if (bundle?.status !== "available") throw new Error("Expected the Golden daily anomaly bundle.");
+  return bundle;
+}
 
 const peakEvidencePinMismatchCases: Array<{
   name: string;
@@ -119,6 +129,87 @@ const timeEvidencePinMismatchCases: Array<{
         .find((candidate) => candidate.metricId === "energy.total_usage_kwh@1")!;
       reference.queryIds = reference.queryIds.filter((queryId) => queryId !== "time_bucket_grid_v1");
     },
+  },
+];
+
+const anomalyEvidencePinMismatchCases: Array<{
+  name: string;
+  mutate: (snapshot: GoldenSnapshot) => void;
+}> = [
+  ...peakEvidencePinMismatchCases.slice(0, 15),
+  {
+    name: "Bundle Snapshot",
+    mutate: (snapshot) => { dailyAnomalyBundle(snapshot).evidencePins.dataSnapshotId = "snapshot-mismatch"; },
+  },
+  {
+    name: "Bundle Hierarchy",
+    mutate: (snapshot) => { dailyAnomalyBundle(snapshot).evidencePins.hierarchyRevisionId = "hierarchy-mismatch"; },
+  },
+  {
+    name: "Bundle Mapping",
+    mutate: (snapshot) => { dailyAnomalyBundle(snapshot).evidencePins.meterMappingRevisionId = "mapping-mismatch"; },
+  },
+  {
+    name: "Bundle Formula",
+    mutate: (snapshot) => { dailyAnomalyBundle(snapshot).evidencePins.meterFormulaRevisionId = "formula-mismatch"; },
+  },
+  {
+    name: "Bundle Metric Version",
+    mutate: (snapshot) => { dailyAnomalyBundle(snapshot).evidencePins.metricVersion = "metric-mismatch"; },
+  },
+  {
+    name: "Context Metric Version",
+    mutate: (snapshot) => { snapshot.context.metricVersion = "metric-mismatch"; },
+  },
+  {
+    name: "Analysis Context Metric Version",
+    mutate: (snapshot) => { snapshot.analysis.context.metricVersion = "metric-mismatch"; },
+  },
+  {
+    name: "Release Usage Metric",
+    mutate: (snapshot) => {
+      snapshot.projectRelease.metricRevisionIds = snapshot.projectRelease.metricRevisionIds
+        .filter((metricId) => metricId !== "energy.total_usage_kwh@1");
+    },
+  },
+  {
+    name: "Release Rule",
+    mutate: (snapshot) => {
+      snapshot.projectRelease.ruleRevisionIds = snapshot.projectRelease.ruleRevisionIds
+        .filter((ruleId) => ruleId !== dailyAnomalyBundle(snapshot).ruleRevisionId);
+    },
+  },
+  {
+    name: "Analysis Rule",
+    mutate: (snapshot) => {
+      snapshot.analysis.provenance.ruleRevisionIds = snapshot.analysis.provenance.ruleRevisionIds
+        .filter((ruleId) => ruleId !== dailyAnomalyBundle(snapshot).ruleRevisionId);
+    },
+  },
+  {
+    name: "Bundle Query",
+    mutate: (snapshot) => {
+      dailyAnomalyBundle(snapshot).evidencePins.queryIds = ["wrong-query" as "time_slot_anomaly_v1"];
+    },
+  },
+  {
+    name: "Analysis Query",
+    mutate: (snapshot) => {
+      snapshot.analysis.provenance.queryIds = snapshot.analysis.provenance.queryIds
+        .filter((queryId) => queryId !== "time_slot_anomaly_v1");
+    },
+  },
+  {
+    name: "Usage Evidence Query",
+    mutate: (snapshot) => {
+      const reference = snapshot.evidence
+        .find((candidate) => candidate.metricId === "energy.total_usage_kwh@1")!;
+      reference.queryIds = reference.queryIds.filter((queryId) => queryId !== "time_slot_anomaly_v1");
+    },
+  },
+  {
+    name: "Calendar",
+    mutate: (snapshot) => { snapshot.context.businessCalendarVersion = "calendar-mismatch"; },
   },
 ];
 
@@ -435,6 +526,141 @@ describe("Ngee Ann Overview ViewModel", () => {
       status: "complete",
       intervals: "16 / 16 valid intervals",
     });
+  });
+
+  it("projects only the seven server-triggered daily incidents in frozen Scope and date order", () => {
+    const dailyAnomalies = buildNgeeAnnOverviewViewModel(ngeeAnnGoldenSnapshot()).dailyAnomalies;
+
+    expect(dailyAnomalies).toMatchObject({
+      status: "available",
+      allSuppressed: false,
+      rule: {
+        ruleRevisionId: "comparison.daily_usage_above_baseline@1",
+        baselineCutoff: "2026-06-10",
+        baselineMethod: "mean_of_complete_comparable_days_by_local_hour",
+        relativeThresholdPct: "20%",
+        absoluteImpactKwh: "20 kWh",
+        minimumCoveragePct: "95%",
+        minimumSampleCount: 4,
+      },
+      evidence: {
+        bundleId: "anomaly-bundle-ngee-ann-golden",
+        snapshotId: "snapshot-ngee-ann-golden",
+        projectReleaseId: "release-ngee-ann-golden",
+        hierarchyRevisionId: "hierarchy-v6",
+        meterMappingRevisionId: "mapping-v1",
+        meterFormulaRevisionId: "formula-v1",
+        metricVersion: "metric-v1",
+        queryIds: ["time_slot_anomaly_v1"],
+      },
+    });
+    expect(dailyAnomalies.incidents.map((incident) => [incident.scopeId, incident.localDate])).toEqual([
+      ["project", "2026-06-11"],
+      ["project", "2026-06-13"],
+      ["project", "2026-06-14"],
+      ["level-7", "2026-06-11"],
+      ["level-7", "2026-06-12"],
+      ["level-7", "2026-06-13"],
+      ["level-7", "2026-06-14"],
+    ]);
+    expect(dailyAnomalies.incidents.some((incident) => incident.scopeId === "level-6")).toBe(false);
+    expect(dailyAnomalies.incidents[0]).toMatchObject({
+      scopeName: "Project",
+      actualKwh: "268.399",
+      baselineKwh: "218.885",
+      impactKwh: "+49.514",
+      baselineDates: ["2026-06-04", "2026-06-05", "2026-06-08", "2026-06-09"],
+    });
+    expect(dailyAnomalies.incidents[0]!.hourlyComparison).toHaveLength(24);
+    expect(dailyAnomalies.incidents[0]!.series.map((series) => series.scopeId)).toEqual([
+      "project",
+      "level-7",
+      "level-6",
+    ]);
+    expect(dailyAnomalies.incidents[3]!.series.map((series) => ({
+      scopeId: series.scopeId,
+      category: series.category,
+      includedInOfficialTotal: series.includedInOfficialTotal,
+    }))).toEqual([
+      { scopeId: "level-7", category: null, includedInOfficialTotal: true },
+      { scopeId: "l7-anomaly-load", category: "load", includedInOfficialTotal: false },
+      { scopeId: "l7-anomaly-light", category: "light", includedInOfficialTotal: false },
+    ]);
+  });
+
+  it.each(anomalyEvidencePinMismatchCases)(
+    "fails daily anomalies closed for a mismatched $name pin",
+    ({ mutate }) => {
+      const snapshot = ngeeAnnGoldenSnapshot();
+      mutate(snapshot);
+
+      const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+      expect(view.dailyAnomalies).toMatchObject({ status: "unavailable", incidents: [] });
+    },
+  );
+
+  it("fails only daily anomalies closed for absent, unavailable or invalid optional payloads", () => {
+    const absent = ngeeAnnGoldenSnapshot();
+    delete absent.analysis.dailyUsageAnomalies;
+    const unavailable = ngeeAnnGoldenSnapshot();
+    unavailable.analysis.dailyUsageAnomalies = {
+      status: "unavailable",
+      ruleRevisionId: "comparison.daily_usage_above_baseline@1",
+      reason: {
+        code: "BUSINESS_CALENDAR_VERSION_NOT_FOUND",
+        message: "The pinned business Calendar is unavailable.",
+      },
+    };
+    const invalid = ngeeAnnGoldenSnapshot();
+    dailyAnomalyBundle(invalid).scopes[0]!.rows[1]!.hourlyComparison.pop();
+
+    expect(buildNgeeAnnOverviewViewModel(absent).dailyAnomalies).toMatchObject({
+      status: "unavailable",
+      reason: expect.stringContaining("does not include"),
+    });
+    expect(buildNgeeAnnOverviewViewModel(unavailable).dailyAnomalies).toMatchObject({
+      status: "unavailable",
+      reason: "The pinned business Calendar is unavailable.",
+    });
+    const invalidView = buildNgeeAnnOverviewViewModel(invalid);
+    expect(invalidView.dailyAnomalies).toMatchObject({ status: "unavailable", incidents: [] });
+    expect(invalidView.energyTrend.status).toBe("available");
+  });
+
+  it("keeps an all-suppressed bundle and partial detail series honest without inventing incidents or zeroes", () => {
+    const suppressed = ngeeAnnGoldenSnapshot();
+    for (const scope of dailyAnomalyBundle(suppressed).scopes) {
+      for (const row of scope.rows) {
+        row.outcome = "suppressed";
+        row.suppressionReason = {
+          code: "CALENDAR_EXCEPTION_DATE",
+          message: "The date is excluded by the pinned Calendar.",
+        };
+      }
+    }
+    expect(buildNgeeAnnOverviewViewModel(suppressed).dailyAnomalies).toMatchObject({
+      status: "available",
+      allSuppressed: true,
+      incidents: [],
+    });
+
+    const partial = ngeeAnnGoldenSnapshot();
+    const component = dailyAnomalyBundle(partial).scopes[1]!.rows[1]!.detailSeries[1]!;
+    component.status = "partial";
+    component.selectedTotalKwh = null;
+    component.points[0]!.selectedKwh = null;
+    component.points[0]!.impactKwh = null;
+    const partialSeries = buildNgeeAnnOverviewViewModel(partial).dailyAnomalies.incidents
+      .find((incident) => incident.scopeId === "level-7" && incident.localDate === "2026-06-11")!
+      .series.find((series) => series.scopeId === "l7-anomaly-load")!;
+    expect(partialSeries).toMatchObject({
+      status: "partial",
+      statusLabel: "Partial",
+      selectedTotalKwh: null,
+    });
+    expect(partialSeries.points).toHaveLength(24);
+    expect(partialSeries.points[0]).toMatchObject({ localHour: 0, selectedKwh: null, impactKwh: null });
   });
 
   it("projects server Day Profiles and the direct hourly heatmap grid", () => {

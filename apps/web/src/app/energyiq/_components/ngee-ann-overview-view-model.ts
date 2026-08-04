@@ -131,6 +131,96 @@ export type NgeeAnnUsageHeatmapViewModel = {
   evidence: TimeBehaviourEvidence;
 };
 
+export type NgeeAnnDailyAnomalyViewModel = {
+  status: "available" | "unavailable";
+  decisionQuestion: string;
+  reason: string | null;
+  allSuppressed: boolean;
+  incidents: Array<{
+    anomalyId: string;
+    incidentId: string;
+    scopeId: string;
+    scopeName: string;
+    localDate: string;
+    dateLabel: string;
+    weekday: string;
+    dayType: "Weekday" | "Weekend";
+    range: string;
+    actualKwh: string;
+    baselineKwh: string;
+    impactKwh: string;
+    relativePct: string;
+    coverage: string;
+    intervals: string;
+    qualityEvents: string;
+    baselineDates: string[];
+    baselineSamples: Array<{
+      localDate: string;
+      coverage: string;
+      intervals: string;
+      qualityEvents: string;
+    }>;
+    hourlyComparison: Array<{
+      localHour: number;
+      actualKwh: number;
+      baselineKwh: number;
+      impactKwh: number;
+      relativePct: number;
+    }>;
+    series: Array<{
+      seriesId: string;
+      relationship: "selected_scope" | "immediate_level" | "component_circuit";
+      kind: "official_scope" | "component_circuit";
+      scopeId: string;
+      scopeName: string;
+      meterNodeId: string | null;
+      category: string | null;
+      categoryLabel: string | null;
+      includedInOfficialTotal: boolean;
+      status: "available" | "partial" | "unavailable";
+      statusLabel: "Available" | "Partial" | "Unavailable";
+      selectedTotalKwh: string | null;
+      baselineTotalKwh: string | null;
+      impactKwh: string | null;
+      relativePct: string | null;
+      coverage: string;
+      intervals: string;
+      qualityEvents: string;
+      points: Array<{
+        localHour: number;
+        hourLabel: string;
+        selectedKwh: number | null;
+        baselineKwh: number | null;
+        impactKwh: number | null;
+      }>;
+    }>;
+  }>;
+  rule: {
+    ruleRevisionId: string;
+    baselineCutoff: string;
+    baselineMethod: "mean_of_complete_comparable_days_by_local_hour";
+    relativeThresholdPct: string;
+    absoluteImpactKwh: string;
+    minimumCoveragePct: string;
+    minimumSampleCount: number;
+    maximumQualityEventCount: number;
+    maximumLookbackDays: number;
+  } | null;
+  evidence: {
+    bundleId: string | null;
+    snapshotId: string;
+    projectReleaseId: string;
+    hierarchyRevisionId: string;
+    meterMappingRevisionId: string;
+    meterFormulaRevisionId: string;
+    metricVersion: string;
+    metricId: "energy.total_usage_kwh@1";
+    period: string;
+    timezone: string;
+    queryIds: ["time_slot_anomaly_v1"];
+  };
+};
+
 type PeakBreakdownQuality = {
   status: "complete" | "unavailable";
   statusLabel: "Complete" | "Unavailable";
@@ -330,6 +420,7 @@ export type NgeeAnnOverviewViewModel = {
   highlights: NgeeAnnOverviewHighlight[];
   peakBreakdown: NgeeAnnPeakBreakdownViewModel;
   energyTrend: NgeeAnnEnergyTrendViewModel;
+  dailyAnomalies: NgeeAnnDailyAnomalyViewModel;
   dayProfile: NgeeAnnDayProfileViewModel;
   usageHeatmap: NgeeAnnUsageHeatmapViewModel;
   levelComparison: NgeeAnnLevelComparisonViewModel;
@@ -478,6 +569,7 @@ export function buildNgeeAnnOverviewViewModel(
     ],
     peakBreakdown: buildPeakBreakdown(snapshot, unavailable),
     energyTrend: buildEnergyTrend(snapshot, unavailable),
+    dailyAnomalies: buildDailyAnomalies(snapshot, unavailable),
     dayProfile: buildDayProfile(snapshot, unavailable),
     usageHeatmap: buildUsageHeatmap(snapshot, unavailable),
     levelComparison: buildLevelComparison(snapshot, unavailable),
@@ -1118,6 +1210,425 @@ function peakBreakdownQuality(quality: {
 type TimeBehaviour = NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["timeBehaviour"]>;
 type TimeScope = TimeBehaviour["scopes"][number];
 type TimeCell = TimeScope["cells"][number];
+type DailyAnomalyBundle = Extract<
+  NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["dailyUsageAnomalies"]>,
+  { status: "available" }
+>;
+type DailyAnomalyRow = DailyAnomalyBundle["scopes"][number]["rows"][number];
+
+const DAILY_ANOMALY_SUPPRESSION_CODES = new Set([
+  "CALENDAR_EXCEPTION_DATE",
+  "DAILY_FACTS_UNAVAILABLE",
+  "DAY_TYPE_CLASSIFICATION_UNAVAILABLE",
+  "COVERAGE_BELOW_THRESHOLD",
+  "QUALITY_EVENT_PRESENT",
+  "BASELINE_SAMPLE_COUNT_INSUFFICIENT",
+  "BASELINE_VALUE_UNAVAILABLE",
+]);
+
+function buildDailyAnomalies(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  overviewUnavailable: boolean,
+): NgeeAnnDailyAnomalyViewModel {
+  const bundle = snapshot.analysis.dailyUsageAnomalies;
+  const evidence: NgeeAnnDailyAnomalyViewModel["evidence"] = {
+    bundleId: bundle?.status === "available" ? bundle.bundleId : null,
+    snapshotId: snapshot.dataSnapshot.id,
+    projectReleaseId: snapshot.projectRelease.id,
+    hierarchyRevisionId: snapshot.analysis.provenance.hierarchyRevisionId,
+    meterMappingRevisionId: snapshot.analysis.provenance.meterMappingRevisionId,
+    meterFormulaRevisionId: snapshot.analysis.provenance.meterFormulaRevisionId,
+    metricVersion: snapshot.analysis.provenance.metricVersion,
+    metricId: "energy.total_usage_kwh@1",
+    period: `[${snapshot.context.primaryPeriod.start}, ${snapshot.context.primaryPeriod.endExclusive})`,
+    timezone: bundle?.status === "available" ? bundle.timezone : snapshot.context.timezone,
+    queryIds: ["time_slot_anomaly_v1"],
+  };
+  const unavailable = (reason: string): NgeeAnnDailyAnomalyViewModel => ({
+    status: "unavailable",
+    decisionQuestion: "Which complete local days crossed the pinned usage rule and need investigation?",
+    reason,
+    allSuppressed: false,
+    incidents: [],
+    rule: null,
+    evidence,
+  });
+  if (overviewUnavailable) {
+    return unavailable("No trusted intervals support a daily anomaly conclusion for this Period.");
+  }
+  if (snapshot.context.scopeType !== "project") {
+    return unavailable("Select the Project Scope to review Project and Level daily incidents.");
+  }
+  if (!bundle) {
+    return unavailable("This published Snapshot does not include the authoritative daily anomaly contract.");
+  }
+  if (bundle.status === "unavailable") {
+    return unavailable(bundle.reason.message);
+  }
+  const invalidReason = invalidDailyAnomalyBundleReason(snapshot, bundle);
+  if (invalidReason) return unavailable(invalidReason);
+
+  const allRows = bundle.scopes.flatMap((scope) => scope.rows);
+  const incidents = bundle.scopes.flatMap((scope) => scope.rows
+    .filter((row) => row.outcome === "triggered")
+    .map((row) => ({
+      anomalyId: row.anomalyId,
+      incidentId: row.incidentId,
+      scopeId: scope.scopeId,
+      scopeName: scope.scopeType === "project" ? "Project" : scope.scopeName,
+      localDate: row.localDate,
+      dateLabel: formatLocalDate(row.localDate),
+      weekday: formatLocalWeekday(row.localDate),
+      dayType: row.dayType === "weekday" ? "Weekday" as const : "Weekend" as const,
+      range: formatEvidenceRange(row.from, row.to, bundle.timezone),
+      actualKwh: formatDecimal(row.actualKwh!, 4),
+      baselineKwh: formatDecimal(row.baselineKwh!, 4),
+      impactKwh: signedDecimal(row.impactKwh!, 4),
+      relativePct: `${signedDecimal(row.relativePct!, 4)}%`,
+      coverage: `${formatDecimal(row.coveragePct, 1)}% coverage`,
+      intervals: `${row.validIntervalCount.toLocaleString("en-SG")} / ${row.expectedMeterIntervalCount.toLocaleString("en-SG")} valid intervals`,
+      qualityEvents: `${row.qualityEventCount.toLocaleString("en-SG")} quality events`,
+      baselineDates: [...row.baselineDates],
+      baselineSamples: row.baselineSamples.map((sample) => ({
+        localDate: sample.localDate,
+        coverage: `${formatDecimal(sample.coveragePct, 1)}% coverage`,
+        intervals: `${sample.validIntervalCount.toLocaleString("en-SG")} / ${sample.expectedMeterIntervalCount.toLocaleString("en-SG")} valid intervals`,
+        qualityEvents: `${sample.qualityEventCount.toLocaleString("en-SG")} quality events`,
+      })),
+      hourlyComparison: row.hourlyComparison.map((point) => ({
+        localHour: point.localHour,
+        actualKwh: point.actualKwh!,
+        baselineKwh: point.baselineKwh!,
+        impactKwh: point.impactKwh!,
+        relativePct: point.relativePct!,
+      })),
+      series: row.detailSeries.map((series) => ({
+        seriesId: series.seriesId,
+        relationship: series.relationship,
+        kind: series.kind,
+        scopeId: series.scopeId,
+        scopeName: series.scopeName,
+        meterNodeId: series.meterNodeId ?? null,
+        category: series.category ?? null,
+        categoryLabel: series.category ? formatCategoryLabel(series.category) : null,
+        includedInOfficialTotal: series.includedInOfficialTotal,
+        status: series.status,
+        statusLabel: series.status === "available"
+          ? "Available" as const
+          : series.status === "partial"
+            ? "Partial" as const
+            : "Unavailable" as const,
+        selectedTotalKwh: series.selectedTotalKwh === null ? null : formatDecimal(series.selectedTotalKwh, 4),
+        baselineTotalKwh: series.baselineTotalKwh === null ? null : formatDecimal(series.baselineTotalKwh, 4),
+        impactKwh: series.impactKwh === null ? null : signedDecimal(series.impactKwh, 4),
+        relativePct: series.relativePct === null ? null : `${signedDecimal(series.relativePct, 4)}%`,
+        coverage: `${formatDecimal(series.coveragePct, 1)}% coverage`,
+        intervals: `${series.validIntervalCount.toLocaleString("en-SG")} / ${series.expectedMeterIntervalCount.toLocaleString("en-SG")} valid intervals`,
+        qualityEvents: `${series.qualityEventCount.toLocaleString("en-SG")} quality events`,
+        points: series.points.map((point) => ({
+          localHour: point.localHour,
+          hourLabel: formatLocalHour(point.localHour),
+          selectedKwh: point.selectedKwh,
+          baselineKwh: point.baselineKwh,
+          impactKwh: point.impactKwh,
+        })),
+      })),
+    })));
+
+  return {
+    status: "available",
+    decisionQuestion: "Which complete local days crossed the pinned usage rule and need investigation?",
+    reason: null,
+    allSuppressed: allRows.length > 0 && allRows.every((row) => row.outcome === "suppressed"),
+    incidents,
+    rule: {
+      ruleRevisionId: bundle.ruleRevisionId,
+      baselineCutoff: bundle.baselineCutoff,
+      baselineMethod: bundle.rule.baselineMethod,
+      relativeThresholdPct: `${formatDecimal(bundle.rule.relativeThresholdPct, 4)}%`,
+      absoluteImpactKwh: `${formatDecimal(bundle.rule.absoluteImpactKwh, 4)} kWh`,
+      minimumCoveragePct: `${formatDecimal(bundle.rule.minimumCoveragePct, 4)}%`,
+      minimumSampleCount: bundle.rule.minimumSampleCount,
+      maximumQualityEventCount: bundle.rule.maximumQualityEventCount,
+      maximumLookbackDays: bundle.rule.maximumLookbackDays,
+    },
+    evidence,
+  };
+}
+
+function invalidDailyAnomalyBundleReason(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  bundle: DailyAnomalyBundle,
+): string | null {
+  if (!validDailyAnomalyEvidencePins(snapshot, bundle)) {
+    return "The anomaly Snapshot, Release, Rule or revision evidence pins are inconsistent.";
+  }
+  if (
+    !bundle.bundleId
+    || bundle.metricId !== "energy.total_usage_kwh@1"
+    || bundle.queryId !== "time_slot_anomaly_v1"
+    || bundle.timezone !== snapshot.context.timezone
+    || !/^\d{4}-\d{2}-\d{2}$/u.test(bundle.baselineCutoff)
+    || !validDailyAnomalyRule(bundle.rule)
+  ) {
+    return "The anomaly bundle identity, timezone, cutoff or pinned Rule is invalid.";
+  }
+  const expectedScopes = [
+    { id: snapshot.context.scopeId, name: snapshot.context.scopeName, type: "project" },
+    ...snapshot.analysis.childScopes
+      .filter((scope) => scope.nodeType === "level")
+      .map((scope) => ({ id: scope.nodeId, name: scope.name, type: scope.nodeType })),
+  ];
+  if (
+    expectedScopes.length !== 3
+    || bundle.scopes.length !== expectedScopes.length
+    || bundle.scopes.some((scope, index) => {
+      const expected = expectedScopes[index];
+      return !expected
+        || scope.scopeId !== expected.id
+        || scope.scopeName !== expected.name
+        || scope.scopeType !== expected.type;
+    })
+  ) {
+    return "The anomaly Scope contract is incomplete or out of order.";
+  }
+  const projectRows = bundle.scopes[0]?.rows;
+  if (!projectRows || !validDailyAnomalySpine(projectRows, snapshot.context.primaryPeriod)) {
+    return "The anomaly local-date spine is incomplete or invalid.";
+  }
+  const spine = projectRows.map((row) => `${row.localDate}|${row.from}|${row.to}`);
+  const anomalyIds = new Set<string>();
+  const incidentIds = new Set<string>();
+  const rowsValid = bundle.scopes.every((scope) => (
+    scope.rows.length === spine.length
+    && scope.rows.every((row, index) => {
+      if (`${row.localDate}|${row.from}|${row.to}` !== spine[index]) return false;
+      if (!row.anomalyId || anomalyIds.has(row.anomalyId) || !row.incidentId || incidentIds.has(row.incidentId)) return false;
+      anomalyIds.add(row.anomalyId);
+      incidentIds.add(row.incidentId);
+      return validDailyAnomalyRow(row, scope.scopeId, bundle);
+    })
+  ));
+  return rowsValid ? null : "The anomaly rows, baseline samples, outcomes or detail series are invalid.";
+}
+
+function validDailyAnomalyEvidencePins(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  bundle: DailyAnomalyBundle,
+): boolean {
+  const { analysis, context, projectRelease } = snapshot;
+  const hasReference = snapshot.evidence.some((item) => (
+    item.metricId === "energy.total_usage_kwh@1"
+    && item.queryIds.includes("time_slot_anomaly_v1")
+  ));
+  return context.projectReleaseId === projectRelease.id
+    && context.projectId === projectRelease.projectId
+    && analysis.context.projectId === projectRelease.projectId
+    && bundle.evidencePins.dataSnapshotId === snapshot.dataSnapshot.id
+    && analysis.provenance.dataSnapshotId === snapshot.dataSnapshot.id
+    && context.dataSnapshotId === snapshot.dataSnapshot.id
+    && analysis.context.dataSnapshotId === snapshot.dataSnapshot.id
+    && bundle.evidencePins.hierarchyRevisionId === projectRelease.hierarchyRevisionId
+    && analysis.provenance.hierarchyRevisionId === projectRelease.hierarchyRevisionId
+    && context.hierarchyRevisionId === projectRelease.hierarchyRevisionId
+    && analysis.context.hierarchyRevisionId === projectRelease.hierarchyRevisionId
+    && bundle.evidencePins.meterMappingRevisionId === projectRelease.meterMappingRevisionId
+    && analysis.provenance.meterMappingRevisionId === projectRelease.meterMappingRevisionId
+    && context.meterMappingRevisionId === projectRelease.meterMappingRevisionId
+    && analysis.context.meterMappingRevisionId === projectRelease.meterMappingRevisionId
+    && bundle.evidencePins.meterFormulaRevisionId === projectRelease.meterFormulaRevisionId
+    && analysis.provenance.meterFormulaRevisionId === projectRelease.meterFormulaRevisionId
+    && context.meterFormulaRevisionId === projectRelease.meterFormulaRevisionId
+    && analysis.context.meterFormulaRevisionId === projectRelease.meterFormulaRevisionId
+    && bundle.evidencePins.metricVersion === analysis.provenance.metricVersion
+    && bundle.evidencePins.metricVersion === context.metricVersion
+    && bundle.evidencePins.metricVersion === analysis.context.metricVersion
+    && bundle.evidencePins.queryIds.length === 1
+    && bundle.evidencePins.queryIds[0] === "time_slot_anomaly_v1"
+    && projectRelease.metricRevisionIds.includes("energy.total_usage_kwh@1")
+    && projectRelease.ruleRevisionIds.includes(bundle.ruleRevisionId)
+    && analysis.provenance.ruleRevisionIds.includes(bundle.ruleRevisionId)
+    && context.businessCalendarVersion === projectRelease.businessCalendarVersion
+    && analysis.provenance.queryIds.includes("time_slot_anomaly_v1")
+    && hasReference;
+}
+
+function validDailyAnomalyRule(rule: DailyAnomalyBundle["rule"]): boolean {
+  return finiteNonNegative(rule.relativeThresholdPct)
+    && finiteNonNegative(rule.absoluteImpactKwh)
+    && validPercentage(rule.minimumCoveragePct)
+    && Number.isInteger(rule.minimumSampleCount)
+    && rule.minimumSampleCount > 0
+    && Number.isInteger(rule.maximumQualityEventCount)
+    && rule.maximumQualityEventCount >= 0
+    && Number.isInteger(rule.maximumLookbackDays)
+    && rule.maximumLookbackDays > 0
+    && rule.direction === "above"
+    && rule.baselineMethod === "mean_of_complete_comparable_days_by_local_hour";
+}
+
+function validDailyAnomalySpine(
+  rows: DailyAnomalyRow[],
+  period: EnergyProjectAnalysisSnapshotDto["context"]["primaryPeriod"],
+): boolean {
+  if (rows.length === 0 || rows[0]?.from !== period.start || rows.at(-1)?.to !== period.endExclusive) return false;
+  return rows.every((row, index) => {
+    const previous = rows[index - 1];
+    return /^\d{4}-\d{2}-\d{2}$/u.test(row.localDate)
+      && Number.isFinite(Date.parse(row.from))
+      && Number.isFinite(Date.parse(row.to))
+      && Date.parse(row.to) - Date.parse(row.from) === 86_400_000
+      && (!previous || (previous.to === row.from && previous.localDate < row.localDate));
+  });
+}
+
+function validDailyAnomalyRow(
+  row: DailyAnomalyRow,
+  scopeId: string,
+  bundle: DailyAnomalyBundle,
+): boolean {
+  const baselineDatesValid = row.baselineSampleCount === row.baselineDates.length
+    && row.baselineSamples.length === row.baselineDates.length
+    && row.baselineDates.every((date, index) => (
+      /^\d{4}-\d{2}-\d{2}$/u.test(date)
+      && date < bundle.baselineCutoff
+      && (index === 0 || row.baselineDates[index - 1]! < date)
+      && validEligibleBaselineSample(row.baselineSamples[index], date)
+    ));
+  const thresholdsValid = row.thresholds.relativeThresholdPct === bundle.rule.relativeThresholdPct
+    && row.thresholds.absoluteImpactKwh === bundle.rule.absoluteImpactKwh
+    && row.thresholds.minimumCoveragePct === bundle.rule.minimumCoveragePct
+    && row.thresholds.maximumQualityEventCount === bundle.rule.maximumQualityEventCount;
+  const identityValid = row.ruleRevisionId === bundle.ruleRevisionId
+    && row.metricId === bundle.metricId
+    && row.queryId === bundle.queryId
+    && (row.dayType === "weekday" || row.dayType === "weekend" || row.dayType === null)
+    && (row.outcome === "triggered" || row.outcome === "within_threshold" || row.outcome === "suppressed");
+  if (!identityValid || !baselineDatesValid || !thresholdsValid || !validAnomalyHealth(row)) return false;
+  if (
+    row.hourlyComparison.length !== 24
+    || !row.hourlyComparison.every((point, index) => (
+      point.localHour === index
+      && finiteNonNegativeOrNull(point.actualKwh)
+      && finiteNonNegativeOrNull(point.baselineKwh)
+      && finiteOrNull(point.impactKwh)
+      && finiteOrNull(point.relativePct)
+    ))
+  ) return false;
+  const suppressed = row.outcome === "suppressed";
+  const validSuppression = suppressed
+    ? Boolean(row.suppressionReason?.message)
+      && DAILY_ANOMALY_SUPPRESSION_CODES.has(row.suppressionReason!.code)
+    : row.suppressionReason === undefined;
+  if (!validSuppression) return false;
+  if (row.outcome === "triggered" || row.outcome === "within_threshold") {
+    if (
+      row.dayType === null
+      || !finiteNonNegative(row.actualKwh)
+      || !finiteNonNegative(row.baselineKwh)
+      || row.baselineKwh <= 0
+      || !Number.isFinite(row.impactKwh)
+      || !Number.isFinite(row.relativePct)
+    ) return false;
+  } else if (
+    !finiteNonNegativeOrNull(row.actualKwh)
+    || !finiteNonNegativeOrNull(row.baselineKwh)
+    || !finiteOrNull(row.impactKwh)
+    || !finiteOrNull(row.relativePct)
+  ) return false;
+  if (row.outcome !== "triggered") return true;
+  if (
+    row.impactKwh === null
+    || row.relativePct === null
+    || row.hourlyComparison.some((point) => (
+      point.actualKwh === null || point.baselineKwh === null || point.impactKwh === null
+    ))
+  ) return false;
+  return validTriggeredDetailSeries(row, scopeId);
+}
+
+function validEligibleBaselineSample(
+  sample: DailyAnomalyRow["baselineSamples"][number] | undefined,
+  localDate: string,
+): boolean {
+  return Boolean(sample)
+    && sample!.localDate === localDate
+    && sample!.eligible === true
+    && validAnomalyHealth(sample!);
+}
+
+function validAnomalyHealth(health: {
+  coveragePct: number;
+  expectedMeterIntervalCount: number;
+  validIntervalCount: number;
+  qualityEventCount: number;
+}): boolean {
+  return validPercentage(health.coveragePct)
+    && Number.isInteger(health.expectedMeterIntervalCount)
+    && health.expectedMeterIntervalCount > 0
+    && Number.isInteger(health.validIntervalCount)
+    && health.validIntervalCount >= 0
+    && health.validIntervalCount <= health.expectedMeterIntervalCount
+    && Number.isInteger(health.qualityEventCount)
+    && health.qualityEventCount >= 0;
+}
+
+function validTriggeredDetailSeries(
+  row: DailyAnomalyRow,
+  scopeId: string,
+): boolean {
+  const ids = new Set<string>();
+  const selected = row.detailSeries.filter((series) => series.relationship === "selected_scope");
+  if (selected.length !== 1 || selected[0]?.scopeId !== scopeId) return false;
+  return row.detailSeries.length > 0 && row.detailSeries.every((series) => {
+    if (!series.seriesId || ids.has(series.seriesId) || !series.scopeId || !series.scopeName) return false;
+    ids.add(series.seriesId);
+    const relationshipValid = series.relationship === "component_circuit"
+      ? series.kind === "component_circuit"
+        && series.includedInOfficialTotal === false
+        && Boolean(series.meterNodeId)
+        && (series.category === "load" || series.category === "light")
+      : (series.relationship === "selected_scope" || series.relationship === "immediate_level")
+        && series.kind === "official_scope"
+        && series.includedInOfficialTotal === true;
+    const pointsValid = series.points.length === 24 && series.points.every((point, index) => (
+      point.localHour === index
+      && finiteNonNegativeOrNull(point.selectedKwh)
+      && finiteNonNegativeOrNull(point.baselineKwh)
+      && finiteOrNull(point.impactKwh)
+    ));
+    if (
+      !relationshipValid
+      || !pointsValid
+      || !validAnomalyHealth(series)
+      || (series.status !== "available" && series.status !== "partial" && series.status !== "unavailable")
+    ) return false;
+    if (series.status === "available") {
+      return finiteNonNegative(series.selectedTotalKwh)
+        && finiteNonNegative(series.baselineTotalKwh)
+        && Number.isFinite(series.impactKwh)
+        && finiteOrNull(series.relativePct)
+        && series.points.every((point) => point.selectedKwh !== null && point.baselineKwh !== null && point.impactKwh !== null);
+    }
+    return finiteNonNegativeOrNull(series.selectedTotalKwh)
+      && finiteNonNegativeOrNull(series.baselineTotalKwh)
+      && finiteOrNull(series.impactKwh)
+      && finiteOrNull(series.relativePct);
+  }) && selected[0]!.points.every((point, index) => {
+    const comparison = row.hourlyComparison[index]!;
+    return point.selectedKwh === comparison.actualKwh
+      && point.baselineKwh === comparison.baselineKwh
+      && point.impactKwh === comparison.impactKwh;
+  });
+}
+
+function finiteOrNull(value: number | null): boolean {
+  return value === null || Number.isFinite(value);
+}
+
+function finiteNonNegativeOrNull(value: number | null): boolean {
+  return value === null || finiteNonNegative(value);
+}
 
 function timeBehaviourEvidence(snapshot: EnergyProjectAnalysisSnapshotDto): TimeBehaviourEvidence {
   return {
@@ -1433,6 +1944,14 @@ function timeScopeLimitation(cells: TimeCell[]): string | null {
 function dayTypeLabel(dayType: "weekday" | "weekend" | "public_holiday"):
   "Weekday" | "Weekend" | "Public Holiday" {
   return dayType === "weekday" ? "Weekday" : dayType === "weekend" ? "Weekend" : "Public Holiday";
+}
+
+function formatCategoryLabel(value: string): string {
+  return value
+    .split(/[_\s-]+/u)
+    .filter(Boolean)
+    .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1).toLowerCase()}`)
+    .join(" ");
 }
 
 function formatLocalHour(localHour: number): string {

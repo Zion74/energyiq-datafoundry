@@ -464,6 +464,130 @@ export type EnergyTimeBehaviourDto = {
   }>;
 };
 
+export type EnergyDailyUsageAnomalySuppressionCodeDto =
+  | "CALENDAR_EXCEPTION_DATE"
+  | "DAILY_FACTS_UNAVAILABLE"
+  | "DAY_TYPE_CLASSIFICATION_UNAVAILABLE"
+  | "COVERAGE_BELOW_THRESHOLD"
+  | "QUALITY_EVENT_PRESENT"
+  | "BASELINE_SAMPLE_COUNT_INSUFFICIENT"
+  | "BASELINE_VALUE_UNAVAILABLE";
+
+export type EnergyDailyUsageAnomaliesDto = {
+  status: "available";
+  bundleId: string;
+  metricId: "energy.total_usage_kwh@1";
+  queryId: "time_slot_anomaly_v1";
+  ruleRevisionId: string;
+  timezone: string;
+  baselineCutoff: string;
+  rule: {
+    relativeThresholdPct: number;
+    absoluteImpactKwh: number;
+    minimumCoveragePct: number;
+    minimumSampleCount: number;
+    maximumQualityEventCount: number;
+    maximumLookbackDays: number;
+    direction: "above";
+    baselineMethod: "mean_of_complete_comparable_days_by_local_hour";
+  };
+  evidencePins: {
+    dataSnapshotId: string;
+    hierarchyRevisionId: string;
+    meterMappingRevisionId: string;
+    meterFormulaRevisionId: string;
+    metricVersion: string;
+    queryIds: ["time_slot_anomaly_v1"];
+  };
+  scopes: Array<{
+    scopeId: string;
+    scopeName: string;
+    scopeType: string;
+    rows: Array<{
+      anomalyId: string;
+      incidentId: string;
+      ruleRevisionId: string;
+      metricId: "energy.total_usage_kwh@1";
+      queryId: "time_slot_anomaly_v1";
+      localDate: string;
+      from: string;
+      to: string;
+      dayType: "weekday" | "weekend" | null;
+      baselineDates: string[];
+      baselineSampleCount: number;
+      baselineSamples: Array<{
+        localDate: string;
+        coveragePct: number;
+        expectedMeterIntervalCount: number;
+        validIntervalCount: number;
+        qualityEventCount: number;
+        eligible: true;
+      }>;
+      actualKwh: number | null;
+      baselineKwh: number | null;
+      impactKwh: number | null;
+      relativePct: number | null;
+      thresholds: {
+        relativeThresholdPct: number;
+        absoluteImpactKwh: number;
+        minimumCoveragePct: number;
+        maximumQualityEventCount: number;
+      };
+      coveragePct: number;
+      expectedMeterIntervalCount: number;
+      validIntervalCount: number;
+      qualityEventCount: number;
+      outcome: "triggered" | "within_threshold" | "suppressed";
+      suppressionReason?: {
+        code: EnergyDailyUsageAnomalySuppressionCodeDto;
+        message: string;
+      };
+      hourlyComparison: Array<{
+        localHour: number;
+        actualKwh: number | null;
+        baselineKwh: number | null;
+        impactKwh: number | null;
+        relativePct: number | null;
+      }>;
+      detailSeries: Array<{
+        seriesId: string;
+        relationship: "selected_scope" | "immediate_level" | "component_circuit";
+        kind: "official_scope" | "component_circuit";
+        scopeId: string;
+        scopeName: string;
+        meterNodeId?: string;
+        category?: string;
+        includedInOfficialTotal: boolean;
+        status: "available" | "partial" | "unavailable";
+        selectedTotalKwh: number | null;
+        baselineTotalKwh: number | null;
+        impactKwh: number | null;
+        relativePct: number | null;
+        coveragePct: number;
+        expectedMeterIntervalCount: number;
+        validIntervalCount: number;
+        qualityEventCount: number;
+        points: Array<{
+          localHour: number;
+          selectedKwh: number | null;
+          baselineKwh: number | null;
+          impactKwh: number | null;
+        }>;
+      }>;
+    }>;
+  }>;
+} | {
+  status: "unavailable";
+  ruleRevisionId: string;
+  reason: {
+    code:
+      | "BUSINESS_CALENDAR_VERSION_MISSING"
+      | "BUSINESS_CALENDAR_VERSION_NOT_FOUND"
+      | "DAILY_USAGE_ANOMALY_RULE_INVALID";
+    message: string;
+  };
+};
+
 export type EnergyPeakIntervalDataHealthDto = EnergyAnalysisDataHealthDto & {
   status: "complete" | "unavailable";
 };
@@ -621,6 +745,7 @@ export type EnergyScopeAnalysisDto = {
   }>;
   dailyTotals?: EnergyDailyTotalsDto;
   timeBehaviour?: EnergyTimeBehaviourDto;
+  dailyUsageAnomalies?: EnergyDailyUsageAnomaliesDto;
   peakBreakdown?: EnergyPeakBreakdownDto;
   virtualMeterTraces?: EnergyVirtualMeterTraceDto[];
   offHours: {
@@ -691,6 +816,7 @@ export type EnergyScopeAnalysisDto = {
       | "scope_summary_v1"
       | "daily_totals_v1"
       | "time_bucket_grid_v1"
+      | "time_slot_anomaly_v1"
       | "peak_breakdown_v1"
       | "hourly_profile_v1"
       | "meter_breakdown_v1"

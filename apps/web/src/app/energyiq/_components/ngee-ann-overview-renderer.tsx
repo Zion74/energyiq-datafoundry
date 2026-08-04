@@ -3,6 +3,7 @@ import React from "react";
 import type { EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
 import { EnergyIcon } from "./icons";
 import { NgeeAnnDayProfile } from "./ngee-ann-day-profile";
+import { NgeeAnnDailyAnomalies } from "./ngee-ann-daily-anomalies";
 import { NgeeAnnEnergyComposition } from "./ngee-ann-energy-composition";
 import { NgeeAnnEnergyTrend } from "./ngee-ann-energy-trend";
 import { NgeeAnnLevelComparison } from "./ngee-ann-level-comparison";
@@ -126,6 +127,8 @@ export function NgeeAnnOverviewRenderer({
       </div>
 
       <NgeeAnnEnergyTrend key={`trend:${view.energyTrend.evidence.period}`} view={view.energyTrend} />
+
+      <NgeeAnnDailyAnomalies key={`anomalies:${view.dailyAnomalies.evidence.period}`} view={view.dailyAnomalies} />
 
       <NgeeAnnDayProfile key={`profile:${view.dayProfile.evidence.period}`} view={view.dayProfile} />
 

@@ -31,6 +31,11 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Energy trend Scope");
     expect(markup).toContain("7 daily buckets");
     expect(markup).toContain("Trend evidence / daily_totals_v1");
+    expect(markup).toContain("Daily usage anomalies");
+    expect(markup).toContain("Which complete local days crossed the pinned usage rule and need investigation?");
+    expect(markup).toContain("Triggered only / pinned Rule comparison.daily_usage_above_baseline@1");
+    expect(markup.match(/Open incident detail/g)).toHaveLength(7);
+    expect(markup).toContain("Anomaly Rule &amp; evidence / time_slot_anomaly_v1");
     expect(markup).toContain("Day profile");
     expect(markup).toContain("How does the typical 24-hour energy shape change by Day Type and Scope?");
     expect(markup).toContain("5 complete days / 24 server values");
@@ -103,7 +108,8 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("No · explanatory component");
     expect(markup).toContain("[2026-06-09T16:00:00.000Z, 2026-06-16T16:00:00.000Z)");
     expect(markup.indexOf("Energy trend")).toBeLessThan(markup.indexOf("Level comparison"));
-    expect(markup.indexOf("Energy trend")).toBeLessThan(markup.indexOf("Day profile"));
+    expect(markup.indexOf("Energy trend")).toBeLessThan(markup.indexOf("Daily usage anomalies"));
+    expect(markup.indexOf("Daily usage anomalies")).toBeLessThan(markup.indexOf("Day profile"));
     expect(markup.indexOf("Day profile")).toBeLessThan(markup.indexOf("Usage heatmap"));
     expect(markup.indexOf("Usage heatmap")).toBeLessThan(markup.indexOf("Level comparison"));
     expect(markup.indexOf("Level comparison")).toBeLessThan(markup.indexOf("Energy composition"));
@@ -118,7 +124,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Comparison evidence");
     expect(markup).toContain("Previous period uses [from, to): start inclusive, end exclusive.");
     expect(markup).toContain("Previous period range");
-    expect(markup).not.toContain("Baseline");
+    expect(markup).not.toContain("Baseline period");
     expect(markup).not.toContain("Peak 1h Consumption");
     expect(markup).toContain("[03 Jun 2026, 00:00, 10 Jun 2026, 00:00)");
     expect(markup).toContain("1531.1683 kWh");
@@ -184,6 +190,62 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("does not include the authoritative hourly time grid");
     expect(markup).toContain("Level comparison");
     expect(markup).toContain("Energy composition");
+  });
+
+  it("keeps absent, unavailable, invalid and all-suppressed daily anomaly states explicit", () => {
+    const absent = ngeeAnnGoldenSnapshot();
+    delete absent.analysis.dailyUsageAnomalies;
+    const unavailable = ngeeAnnGoldenSnapshot();
+    unavailable.analysis.dailyUsageAnomalies = {
+      status: "unavailable",
+      ruleRevisionId: "comparison.daily_usage_above_baseline@1",
+      reason: {
+        code: "BUSINESS_CALENDAR_VERSION_MISSING",
+        message: "No Published Calendar is pinned.",
+      },
+    };
+    const invalid = ngeeAnnGoldenSnapshot();
+    if (invalid.analysis.dailyUsageAnomalies?.status === "available") {
+      invalid.analysis.dailyUsageAnomalies.evidencePins.dataSnapshotId = "snapshot-mismatch";
+    }
+    const suppressed = ngeeAnnGoldenSnapshot();
+    if (suppressed.analysis.dailyUsageAnomalies?.status === "available") {
+      for (const scope of suppressed.analysis.dailyUsageAnomalies.scopes) {
+        for (const row of scope.rows) {
+          row.outcome = "suppressed";
+          row.suppressionReason = {
+            code: "CALENDAR_EXCEPTION_DATE",
+            message: "Excluded by the pinned Calendar.",
+          };
+        }
+      }
+    }
+
+    const absentMarkup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot: absent }} />,
+    );
+    const unavailableMarkup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot: unavailable }} />,
+    );
+    const invalidMarkup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot: invalid }} />,
+    );
+    const suppressedMarkup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot: suppressed }} />,
+    );
+
+    expect(absentMarkup).toContain("Daily anomaly analysis unavailable");
+    expect(absentMarkup).toContain("does not include the authoritative daily anomaly contract");
+    expect(unavailableMarkup).toContain("No Published Calendar is pinned.");
+    expect(invalidMarkup).toContain("evidence pins are inconsistent");
+    expect(suppressedMarkup).toContain("All candidate dates were suppressed");
+    expect(suppressedMarkup).toContain("prevented a business anomaly conclusion");
+    expect(suppressedMarkup).not.toContain("Open incident detail");
+    for (const markup of [absentMarkup, unavailableMarkup, invalidMarkup, suppressedMarkup]) {
+      expect(markup).toContain("Energy trend");
+      expect(markup).toContain("Day profile");
+      expect(markup).toContain("Level comparison");
+    }
   });
 
   it("keeps the static Peak KPI when the optional breakdown is absent or invalid", () => {
@@ -375,6 +437,21 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
       .find((candidate) => candidate.textContent === label) as HTMLButtonElement | undefined;
   };
 
+  const anomalyTriggers = () => Array.from(container.querySelectorAll("button"))
+    .filter((candidate) => candidate.textContent === "Open incident detail") as HTMLButtonElement[];
+
+  const anomalyDialog = () => document.querySelector<HTMLDivElement>(
+    '[role="dialog"][aria-labelledby="ngee-ann-anomaly-dialog-title"]',
+  );
+
+  const anomalyFilterButton = (legend: string, label: string) => {
+    const dialog = anomalyDialog();
+    const fieldset = Array.from(dialog?.querySelectorAll("fieldset") ?? [])
+      .find((candidate) => candidate.querySelector("legend")?.textContent === legend);
+    return Array.from(fieldset?.querySelectorAll("button") ?? [])
+      .find((candidate) => candidate.textContent === label) as HTMLButtonElement | undefined;
+  };
+
   it("opens the dialog, enters focus, selects a Level and expands server Circuit evidence", async () => {
     await renderGolden();
     const trigger = peakTrigger();
@@ -535,6 +612,114 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(container.textContent).toContain("157.1325 kWh");
   });
 
+  it("opens a frozen daily incident, switches exact server modes, closes and restores trigger focus", async () => {
+    await renderGolden();
+    expect(anomalyTriggers()).toHaveLength(7);
+    const trigger = anomalyTriggers()[0]!;
+
+    await activateNativeButton(trigger, "Enter");
+    let dialog = anomalyDialog()!;
+    expect(dialog).toBeTruthy();
+    expect(dialog.textContent).toContain("Project / Thu 11 Jun");
+    expect((document.activeElement as HTMLElement)?.textContent).toBe("Close");
+    expect(anomalyFilterButton("Incident view", "Overlay")?.getAttribute("aria-pressed")).toBe("true");
+    expect(dialog.querySelectorAll("[data-anomaly-series]")).toHaveLength(3);
+
+    let point = dialog.querySelector<HTMLButtonElement>('[data-anomaly-series="scope:project"] button')!;
+    expect(point.getAttribute("aria-label")).toContain("selected");
+    expect(point.getAttribute("aria-label")).toContain("average");
+    await act(async () => point.focus());
+    expect(dialog.textContent).toContain("Impact");
+
+    await act(async () => anomalyFilterButton("Incident view", "Selected")?.click());
+    point = dialog.querySelector<HTMLButtonElement>('[data-anomaly-series="scope:project"] button')!;
+    expect(point.getAttribute("aria-label")).toContain("selected");
+    expect(point.getAttribute("aria-label")).not.toContain("average");
+    await act(async () => point.focus());
+    const selectedDetail = dialog.querySelector('[aria-live="polite"]')?.textContent ?? "";
+    expect(selectedDetail).toContain("Selected");
+    expect(selectedDetail).not.toContain("Average");
+    expect(selectedDetail).not.toContain("Impact");
+
+    await act(async () => anomalyFilterButton("Incident view", "Average")?.click());
+    point = dialog.querySelector<HTMLButtonElement>('[data-anomaly-series="scope:project"] button')!;
+    expect(point.getAttribute("aria-label")).not.toContain("selected");
+    expect(point.getAttribute("aria-label")).toContain("average");
+    await act(async () => point.focus());
+    const averageDetail = dialog.querySelector('[aria-live="polite"]')?.textContent ?? "";
+    expect(averageDetail).not.toContain("Selected");
+    expect(averageDetail).toContain("Average");
+    expect(averageDetail).not.toContain("Impact");
+
+    const close = Array.from(dialog.querySelectorAll("button"))
+      .find((button) => button.textContent === "Close") as HTMLButtonElement;
+    await act(async () => close.click());
+    expect(anomalyDialog()).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+
+    await activateNativeButton(trigger, " ");
+    dialog = anomalyDialog()!;
+    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
+      "button:not([disabled]), summary, a[href], input, select, textarea, [tabindex]:not([tabindex='-1'])",
+    ));
+    const first = focusable[0]!;
+    const last = focusable.at(-1)!;
+    await act(async () => last.focus());
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+    });
+    expect(document.activeElement).toBe(first);
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(anomalyDialog()).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("filters an L7 incident by frozen Scope and Load/Light component categories only", async () => {
+    await renderGolden();
+    await act(async () => anomalyTriggers()[3]!.click());
+    const dialog = anomalyDialog()!;
+
+    expect(dialog.textContent).toContain("Level 7 / Thu 11 Jun");
+    expect(dialog.querySelectorAll("[data-anomaly-series]")).toHaveLength(3);
+    await act(async () => anomalyFilterButton("Incident Category", "Load")?.click());
+    expect(dialog.querySelectorAll("[data-anomaly-series]")).toHaveLength(1);
+    expect(dialog.querySelector('[data-anomaly-series="meter:l7-anomaly-load"]')).toBeTruthy();
+    expect(dialog.textContent).toContain("Explanatory component · not included in the official total");
+
+    await act(async () => anomalyFilterButton("Incident Category", "Light")?.click());
+    expect(dialog.querySelectorAll("[data-anomaly-series]")).toHaveLength(1);
+    expect(dialog.querySelector('[data-anomaly-series="meter:l7-anomaly-light"]')).toBeTruthy();
+
+    await act(async () => anomalyFilterButton("Incident Category", "All")?.click());
+    await act(async () => anomalyFilterButton("Incident Scope", "Level 7 component Load")?.click());
+    expect(dialog.querySelectorAll("[data-anomaly-series]")).toHaveLength(1);
+    expect(dialog.querySelector('[data-anomaly-series="meter:l7-anomaly-load"]')).toBeTruthy();
+    expect(dialog.textContent).toContain("1 server series");
+  });
+
+  it("keeps a partial anomaly detail series explicit and never zero-fills its missing hour", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    if (snapshot.analysis.dailyUsageAnomalies?.status === "available") {
+      const component = snapshot.analysis.dailyUsageAnomalies.scopes[1]!.rows[1]!.detailSeries[1]!;
+      component.status = "partial";
+      component.selectedTotalKwh = null;
+      component.points[0]!.selectedKwh = null;
+      component.points[0]!.impactKwh = null;
+    }
+    await renderGolden(snapshot);
+    await act(async () => anomalyTriggers()[3]!.click());
+    const dialog = anomalyDialog()!;
+    await act(async () => anomalyFilterButton("Incident Category", "Load")?.click());
+
+    const series = dialog.querySelector<HTMLElement>('[data-anomaly-series="meter:l7-anomaly-load"]')!;
+    expect(series.textContent).toContain("Partial");
+    const missingPoint = series.querySelector<HTMLButtonElement>("button")!;
+    expect(missingPoint.getAttribute("aria-label")).toContain("selected unavailable");
+    expect(missingPoint.getAttribute("aria-label")).not.toContain("selected 0.0000 kWh");
+  });
+
   it("renders and operates 24 server hours for a single-day Period without dailyTotals", async () => {
     const snapshot = ngeeAnnSingleDaySnapshot({ includeDailyTotals: false });
     await renderGolden(snapshot);
@@ -572,9 +757,13 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
       'button[aria-label^="Wed 10 Jun / Wed 10 Jun 00:00:"]',
     )!;
     await act(async () => heatmapCell.click());
+    await act(async () => anomalyTriggers()[0]!.click());
+    await act(async () => anomalyFilterButton("Incident view", "Average")?.click());
     expect(trendPoint.getAttribute("aria-pressed")).toBe("true");
     expect(profilePoint.getAttribute("aria-pressed")).toBe("true");
     expect(heatmapCell.getAttribute("aria-pressed")).toBe("true");
+    expect(anomalyDialog()).toBeTruthy();
+    expect(anomalyFilterButton("Incident view", "Average")?.getAttribute("aria-pressed")).toBe("true");
 
     const next = ngeeAnnSingleDaySnapshot({ includeDailyTotals: false });
     await act(async () => {
@@ -590,6 +779,8 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
       'button[aria-label^="16 Jun 00:00: 5.3565 kWh"]',
     )?.getAttribute("aria-pressed")).toBe("false");
     expect(container.textContent).toContain("Hover or focus an hour");
+    expect(anomalyDialog()).toBeNull();
+    expect(container.textContent).toContain("Daily anomaly analysis unavailable");
   });
 
   it("keeps partial and missing daily buckets visible without zero-filling them", async () => {

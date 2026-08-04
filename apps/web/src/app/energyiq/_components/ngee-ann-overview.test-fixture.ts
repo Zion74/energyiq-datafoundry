@@ -23,6 +23,7 @@ export function ngeeAnnGoldenSnapshot(input: {
     "scope_summary_v1",
     "daily_totals_v1",
     "time_bucket_grid_v1",
+    "time_slot_anomaly_v1",
     "peak_breakdown_v1",
     "hourly_profile_v1",
     "meter_breakdown_v1",
@@ -335,6 +336,7 @@ export function ngeeAnnGoldenSnapshot(input: {
     },
   ];
 
+  const timeBehaviour = goldenTimeBehaviour();
   const analysis: EnergyProjectAnalysisSnapshotDto["analysis"] = {
     context: {
       userId: "user-1",
@@ -375,7 +377,8 @@ export function ngeeAnnGoldenSnapshot(input: {
       observationCount: 28,
     })),
     dailyTotals: goldenDailyTotals(),
-    timeBehaviour: goldenTimeBehaviour(),
+    timeBehaviour,
+    dailyUsageAnomalies: goldenDailyUsageAnomalies(timeBehaviour),
     peakBreakdown: goldenPeakBreakdown(topCircuits, dataStatus, coveragePct),
     comparison: {
       from: "2026-06-02T16:00:00.000Z",
@@ -552,7 +555,7 @@ export function ngeeAnnGoldenSnapshot(input: {
       meterMappingRevisionId: "mapping-v1",
       meterFormulaRevisionId: "formula-v1",
       metricVersion: "metric-v1",
-      ruleRevisionIds: ["rule-v1"],
+      ruleRevisionIds: ["rule-v1", "comparison.daily_usage_above_baseline@1"],
       aggregationRule: "designated_total",
       sourceView: "energy_scope_intervals",
       queryIds: [...queryIds],
@@ -585,7 +588,7 @@ export function ngeeAnnGoldenSnapshot(input: {
       meterMappingRevisionId: "mapping-v1",
       meterFormulaRevisionId: "formula-v1",
       metricRevisionIds: ["energy.total_usage_kwh@1", "energy.peak_demand_kw@1"],
-      ruleRevisionIds: ["rule-v1"],
+      ruleRevisionIds: ["rule-v1", "comparison.daily_usage_above_baseline@1"],
       businessCalendarVersion: "calendar-v1",
       tariffScheduleVersion: "tariff-v1",
       publishedAt: "2026-08-04T00:00:00.000Z",
@@ -630,6 +633,7 @@ export function ngeeAnnSingleDaySnapshot(input: { includeDailyTotals?: boolean }
   snapshot.context.to = endExclusive;
   snapshot.analysis.context.from = start;
   snapshot.analysis.context.to = endExclusive;
+  delete snapshot.analysis.dailyUsageAnomalies;
   if (input.includeDailyTotals === false) {
     delete snapshot.analysis.dailyTotals;
   } else {
@@ -928,6 +932,273 @@ function goldenTimeBehaviour(): NonNullable<EnergyProjectAnalysisSnapshotDto["an
     queryId: "time_bucket_grid_v1",
     scopes,
     dayProfiles,
+  };
+}
+
+function goldenDailyUsageAnomalies(
+  timeBehaviour: NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["timeBehaviour"]>,
+): Extract<
+  NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["dailyUsageAnomalies"]>,
+  { status: "available" }
+> {
+  const ruleRevisionId = "comparison.daily_usage_above_baseline@1";
+  const rule = {
+    relativeThresholdPct: 20,
+    absoluteImpactKwh: 20,
+    minimumCoveragePct: 95,
+    minimumSampleCount: 4,
+    maximumQualityEventCount: 0,
+    maximumLookbackDays: 60,
+    direction: "above" as const,
+    baselineMethod: "mean_of_complete_comparable_days_by_local_hour" as const,
+  };
+  const scopeInputs = [
+    {
+      scopeId: "project",
+      scopeName: "Ngee Ann Polytechnic",
+      scopeType: "project",
+      dailyUsage: [253.7018, 268.399, 260.0659, 168.9645, 127.9387, 230.1002, 221.9982],
+      weekdayBaseline: 218.885,
+      weekendBaseline: 63.3385,
+      expectedIntervals: 384,
+      triggeredDates: new Set(["2026-06-11", "2026-06-13", "2026-06-14"]),
+    },
+    {
+      scopeId: "level-7",
+      scopeName: "Level 7",
+      scopeType: "level",
+      dailyUsage: [157.1325, 182.6915, 170.9233, 114.7684, 115.1763, 157.1724, 156.3201],
+      weekdayBaseline: 138.8777,
+      weekendBaseline: 26.6704,
+      expectedIntervals: 192,
+      triggeredDates: new Set(["2026-06-11", "2026-06-12", "2026-06-13", "2026-06-14"]),
+    },
+    {
+      scopeId: "level-6",
+      scopeName: "Level 6",
+      scopeType: "level",
+      dailyUsage: [96.5693, 85.7075, 89.1426, 54.1961, 12.7624, 72.9278, 65.6781],
+      weekdayBaseline: 80.0073,
+      weekendBaseline: 36.6681,
+      expectedIntervals: 192,
+      triggeredDates: new Set<string>(),
+    },
+  ];
+  const dateSpine = GOLDEN_DATES.map((localDate) => ({
+    localDate,
+    from: `${previousLocalDate(localDate)}T16:00:00.000Z`,
+    to: `${localDate}T16:00:00.000Z`,
+  }));
+
+  const seriesPoints = (
+    scopeId: string,
+    localDate: string,
+    selectedTotal: number,
+    baselineTotal: number,
+    ratio = 1,
+  ) => {
+    const cells = timeBehaviour.scopes.find((scope) => scope.scopeId === scopeId)!.cells
+      .filter((cell) => cell.localDate === localDate);
+    return cells.map((cell) => {
+      const selectedKwh = roundFixture((cell.usageKwh ?? 0) * ratio);
+      const baselineKwh = roundFixture(selectedTotal > 0
+        ? selectedKwh * baselineTotal / selectedTotal
+        : 0);
+      return {
+        localHour: cell.localHour,
+        selectedKwh,
+        baselineKwh,
+        impactKwh: roundFixture(selectedKwh - baselineKwh),
+      };
+    });
+  };
+  const detailSeries = (
+    selectedScopeId: string,
+    selectedDate: string,
+    selectedTotal: number,
+    baselineTotal: number,
+  ) => {
+    const selectedInput = scopeInputs.find((scope) => scope.scopeId === selectedScopeId)!;
+    const series = [anomalyDetailSeries({
+      seriesId: `scope:${selectedScopeId}`,
+      relationship: "selected_scope",
+      kind: "official_scope",
+      scopeId: selectedScopeId,
+      scopeName: selectedInput.scopeName,
+      includedInOfficialTotal: true,
+      selectedTotal,
+      baselineTotal,
+      expectedIntervals: selectedInput.expectedIntervals,
+      points: seriesPoints(selectedScopeId, selectedDate, selectedTotal, baselineTotal),
+    })];
+    if (selectedScopeId === "project") {
+      for (const level of scopeInputs.slice(1)) {
+        const dateIndex = GOLDEN_DATES.indexOf(selectedDate as typeof GOLDEN_DATES[number]);
+        const levelSelected = level.dailyUsage[dateIndex]!;
+        const day = new Date(`${selectedDate}T00:00:00.000Z`).getUTCDay();
+        const levelBaseline = day === 0 || day === 6 ? level.weekendBaseline : level.weekdayBaseline;
+        series.push(anomalyDetailSeries({
+          seriesId: `scope:${level.scopeId}`,
+          relationship: "immediate_level",
+          kind: "official_scope",
+          scopeId: level.scopeId,
+          scopeName: level.scopeName,
+          includedInOfficialTotal: true,
+          selectedTotal: levelSelected,
+          baselineTotal: levelBaseline,
+          expectedIntervals: level.expectedIntervals,
+          points: seriesPoints(level.scopeId, selectedDate, levelSelected, levelBaseline),
+        }));
+      }
+    } else if (selectedScopeId === "level-7") {
+      for (const component of [
+        { id: "l7-anomaly-load", name: "Level 7 component Load", category: "load", ratio: 0.7 },
+        { id: "l7-anomaly-light", name: "Level 7 component Light", category: "light", ratio: 0.3 },
+      ]) {
+        series.push(anomalyDetailSeries({
+          seriesId: `meter:${component.id}`,
+          relationship: "component_circuit",
+          kind: "component_circuit",
+          scopeId: component.id,
+          scopeName: component.name,
+          meterNodeId: component.id,
+          category: component.category,
+          includedInOfficialTotal: false,
+          selectedTotal: roundFixture(selectedTotal * component.ratio),
+          baselineTotal: roundFixture(baselineTotal * component.ratio),
+          expectedIntervals: 96,
+          points: seriesPoints(selectedScopeId, selectedDate, selectedTotal, baselineTotal, component.ratio),
+        }));
+      }
+    }
+    return series;
+  };
+
+  return {
+    status: "available",
+    bundleId: "anomaly-bundle-ngee-ann-golden",
+    metricId: "energy.total_usage_kwh@1",
+    queryId: "time_slot_anomaly_v1",
+    ruleRevisionId,
+    timezone: "Asia/Singapore",
+    baselineCutoff: "2026-06-10",
+    rule,
+    evidencePins: {
+      dataSnapshotId: "snapshot-ngee-ann-golden",
+      hierarchyRevisionId: "hierarchy-v6",
+      meterMappingRevisionId: "mapping-v1",
+      meterFormulaRevisionId: "formula-v1",
+      metricVersion: "metric-v1",
+      queryIds: ["time_slot_anomaly_v1"],
+    },
+    scopes: scopeInputs.map((scope) => ({
+      scopeId: scope.scopeId,
+      scopeName: scope.scopeName,
+      scopeType: scope.scopeType,
+      rows: dateSpine.map(({ localDate, from, to }, dateIndex) => {
+        const day = new Date(`${localDate}T00:00:00.000Z`).getUTCDay();
+        const dayType = day === 0 || day === 6 ? "weekend" as const : "weekday" as const;
+        const baselineDates = dayType === "weekend"
+          ? ["2026-05-24", "2026-05-30", "2026-06-06", "2026-06-07"]
+          : ["2026-06-04", "2026-06-05", "2026-06-08", "2026-06-09"];
+        const actualKwh = scope.dailyUsage[dateIndex]!;
+        const baselineKwh = dayType === "weekend" ? scope.weekendBaseline : scope.weekdayBaseline;
+        const impactKwh = roundFixture(actualKwh - baselineKwh);
+        const relativePct = roundFixture(impactKwh / baselineKwh * 100);
+        const points = seriesPoints(scope.scopeId, localDate, actualKwh, baselineKwh);
+        return {
+          anomalyId: `daily-usage:${scope.scopeId}:${localDate}`,
+          incidentId: `incident:${scope.scopeId}:${localDate}`,
+          ruleRevisionId,
+          metricId: "energy.total_usage_kwh@1" as const,
+          queryId: "time_slot_anomaly_v1" as const,
+          localDate,
+          from,
+          to,
+          dayType,
+          baselineDates,
+          baselineSampleCount: baselineDates.length,
+          baselineSamples: baselineDates.map((baselineDate) => ({
+            localDate: baselineDate,
+            coveragePct: 100,
+            expectedMeterIntervalCount: scope.expectedIntervals,
+            validIntervalCount: scope.expectedIntervals,
+            qualityEventCount: 0,
+            eligible: true as const,
+          })),
+          actualKwh,
+          baselineKwh,
+          impactKwh,
+          relativePct,
+          thresholds: {
+            relativeThresholdPct: rule.relativeThresholdPct,
+            absoluteImpactKwh: rule.absoluteImpactKwh,
+            minimumCoveragePct: rule.minimumCoveragePct,
+            maximumQualityEventCount: rule.maximumQualityEventCount,
+          },
+          coveragePct: 100,
+          expectedMeterIntervalCount: scope.expectedIntervals,
+          validIntervalCount: scope.expectedIntervals,
+          qualityEventCount: 0,
+          outcome: scope.triggeredDates.has(localDate) ? "triggered" as const : "within_threshold" as const,
+          hourlyComparison: points.map((point) => ({
+            localHour: point.localHour,
+            actualKwh: point.selectedKwh,
+            baselineKwh: point.baselineKwh,
+            impactKwh: point.impactKwh,
+            relativePct: point.baselineKwh > 0
+              ? roundFixture(point.impactKwh / point.baselineKwh * 100)
+              : null,
+          })),
+          detailSeries: detailSeries(scope.scopeId, localDate, actualKwh, baselineKwh),
+        };
+      }),
+    })),
+  };
+}
+
+function anomalyDetailSeries(input: {
+  seriesId: string;
+  relationship: "selected_scope" | "immediate_level" | "component_circuit";
+  kind: "official_scope" | "component_circuit";
+  scopeId: string;
+  scopeName: string;
+  meterNodeId?: string;
+  category?: string;
+  includedInOfficialTotal: boolean;
+  selectedTotal: number;
+  baselineTotal: number;
+  expectedIntervals: number;
+  points: Array<{
+    localHour: number;
+    selectedKwh: number;
+    baselineKwh: number;
+    impactKwh: number;
+  }>;
+}): Extract<
+  NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["dailyUsageAnomalies"]>,
+  { status: "available" }
+>["scopes"][number]["rows"][number]["detailSeries"][number] {
+  const impactKwh = roundFixture(input.selectedTotal - input.baselineTotal);
+  return {
+    seriesId: input.seriesId,
+    relationship: input.relationship,
+    kind: input.kind,
+    scopeId: input.scopeId,
+    scopeName: input.scopeName,
+    ...(input.meterNodeId ? { meterNodeId: input.meterNodeId } : {}),
+    ...(input.category ? { category: input.category } : {}),
+    includedInOfficialTotal: input.includedInOfficialTotal,
+    status: "available",
+    selectedTotalKwh: input.selectedTotal,
+    baselineTotalKwh: input.baselineTotal,
+    impactKwh,
+    relativePct: roundFixture(impactKwh / input.baselineTotal * 100),
+    coveragePct: 100,
+    expectedMeterIntervalCount: input.expectedIntervals,
+    validIntervalCount: input.expectedIntervals,
+    qualityEventCount: 0,
+    points: input.points,
   };
 }
 
