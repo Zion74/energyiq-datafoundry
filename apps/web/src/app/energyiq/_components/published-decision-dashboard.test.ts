@@ -305,49 +305,6 @@ describe("published Overview URL reload", () => {
     });
   });
 
-  it("moves the public URL to the new Project root when the global Project changes", async () => {
-    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
-    const preschool = project("preschool-demo", "Preschool Demo");
-    mockedAccess.activeProject = ngeeAnn;
-    mockedAccess.access = accessContext([ngeeAnn, preschool]);
-    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=level-6&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
-    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
-      .mockReturnValue(new Promise<never>(() => undefined));
-
-    await act(async () => {
-      root.render(React.createElement(PublishedDecisionDashboard));
-    });
-    resolveProjectAnalysis.mockClear();
-    mockedRouter.replace.mockClear();
-    mockedAccess.selectProject.mockClear();
-
-    mockedAccess.activeProject = preschool;
-    await act(async () => {
-      root.render(React.createElement(PublishedDecisionDashboard));
-    });
-
-    expect(resolveProjectAnalysis).not.toHaveBeenCalled();
-    expect(mockedAccess.selectProject).not.toHaveBeenCalled();
-    expect(mockedRouter.replace).toHaveBeenCalledOnce();
-    expect(mockedRouter.replace).toHaveBeenCalledWith(
-      "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16",
-    );
-
-    resolveProjectAnalysis.mockClear();
-    window.history.replaceState({}, "", "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
-    await act(async () => {
-      root.render(React.createElement(PublishedDecisionDashboard));
-    });
-    expect(resolveProjectAnalysis).toHaveBeenCalledTimes(1);
-    expect(resolveProjectAnalysis).toHaveBeenCalledWith({
-      projectId: "preschool-demo",
-      scopeId: "project",
-      resource: "electricity",
-      period: "Custom",
-      from: "2026-06-10",
-      to: "2026-06-16",
-    });
-  });
 });
 
 describe("published Overview date inputs", () => {

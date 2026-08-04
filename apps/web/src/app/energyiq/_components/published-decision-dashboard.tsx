@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   configApi,
@@ -121,19 +121,11 @@ function PublishedDecisionDashboardView({
     effectiveCustomRange.to,
   );
   const requestedProjectId = requestedProject?.id ?? "";
-  const lastActiveProjectIdRef = useRef(activeProject?.id ?? "");
 
   useEffect(() => {
-    const previousActiveProjectId = lastActiveProjectIdRef.current;
-    const activeProjectId = activeProject?.id ?? "";
-    lastActiveProjectIdRef.current = activeProjectId;
-    if (!requestedProjectId || !activeProjectId || requestedProjectId === activeProjectId) return;
-    if (previousActiveProjectId === requestedProjectId) {
-      router.replace(overviewUrlWithProject(urlSearch, activeProjectId));
-      return;
-    }
+    if (!requestedProjectId || requestedProjectId === activeProject?.id) return;
     selectProject(requestedProjectId);
-  }, [activeProject?.id, requestedProjectId, router, selectProject, urlSearch]);
+  }, [activeProject?.id, requestedProjectId, selectProject]);
 
   useEffect(() => {
     if (!projectId) {
@@ -539,13 +531,6 @@ function isValidDateInput(value: string): boolean {
 function overviewUrlWithScope(urlSearch: string, scopeId: string): string {
   const next = new URLSearchParams(urlSearch);
   next.set("scopeId", scopeId || "project");
-  return `/energyiq/overview?${next.toString()}`;
-}
-
-function overviewUrlWithProject(urlSearch: string, projectId: string): string {
-  const next = new URLSearchParams(urlSearch);
-  next.set("projectId", projectId);
-  next.set("scopeId", "project");
   return `/energyiq/overview?${next.toString()}`;
 }
 
