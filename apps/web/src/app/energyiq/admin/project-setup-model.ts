@@ -264,12 +264,16 @@ export const buildOfficialAggregationRoutes = (
   return [...routeMembers.entries()]
     .map(([key, members]) => {
       const [scopeId = "", resource = "electricity", category = "other"] = key.split("\u0000");
+      const routeCategory: EnergyMeterCategoryDto = category === "overall"
+        || category === "load"
+        || category === "light"
+        || category === "aircon"
+        ? category
+        : "other";
       return {
         scope_id: scopeId,
         resource: resource === "water" ? "water" as const : "electricity" as const,
-        category: category === "overall" || category === "load" || category === "light" || category === "aircon"
-          ? category
-          : "other" as const,
+        category: routeCategory,
         meter_point_ids: [...members].sort(),
       };
     })
