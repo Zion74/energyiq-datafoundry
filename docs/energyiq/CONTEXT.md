@@ -3,7 +3,7 @@ title: "EnergyIQ 领域词汇表"
 summary: "固定 EnergyIQ 中 Project、Tier、Scope、计量、事实、模板和运行等术语，避免计算名与客户展示名混用。"
 doc_type: concept
 tags: [领域语言, Tier, Meter, Template, Analysis]
-updated_at: "2026-08-03"
+updated_at: "2026-08-04"
 related:
   - "当前共识与新会话入口.md"
   - "领域模型.md"
@@ -68,8 +68,14 @@ Tier Definition 的具体实例，例如 Room 1、Level 6。它有稳定 scope_i
 **Meter Role**  
 计量点在挂载 Scope 内的覆盖角色：total、component 或 standalone。physical/virtual 属于 Meter Kind，不能混入 Meter Role。
 
+**Published Meter Attachment**<br>
+某个 Mapping Revision 中 `meter_point_id → navigation_scope_id` 的已发布挂载关系。它决定 Meter 在 Explorer 中属于哪个 Scope，以及该 Scope 能否直接查询该 Meter；不能由 Fact 中旧的 `scope_id`、Meter Role 或名称在查询时推断。
+
 **Official Aggregation Route**  
-一个 `scope + resource + category` 的正式汇总口径，可以指定直接总表、虚拟总表、选定且互不重叠的 component，或下级 Scope 的正式口径。它与 Meter Role 分开保存，用于防止总表和分表重复计算。
+一个 `scope + resource + category` 的已发布正式汇总口径，显式列出互不重叠的 `meter_point_ids`。Circuit 的 own-Scope route 允许逐表查询；Level/Project route 只列入该层官方口径。它与 Meter Role、导航挂载分开保存，禁止查询时用 `scope_id + meter_role` 猜测，以防总表和分表重复计算。
+
+**Meter Mapping Revision / Meter Routing Revision**<br>
+Mapping schema v2 的不可变身份，指纹覆盖 Physical Meter identity、Published Meter Attachment 与全部 Official Aggregation Route。Template/Project Release、Analysis Context、Overview 与 Saved analysis 必须 pin 同一 revision；缺失、重复、悬空、跨 Resource/Category/Scope 或 pin 不一致均 fail closed。
 
 **Meter Topology**  
 计量点之间的总分和公式依赖关系。它与客户导航使用的空间树分开保存。
