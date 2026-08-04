@@ -1,7 +1,11 @@
 import type { RunAgentInput } from "@ag-ui/client";
 import { describe, expect, it } from "vitest";
 
-import { extractEffectiveRunConfig, extractTrustedEnergyTextIntent } from "./run-input.js";
+import {
+  extractEffectiveRunConfig,
+  extractEnergyQueryContextRequest,
+  extractTrustedEnergyTextIntent,
+} from "./run-input.js";
 
 describe("extractEffectiveRunConfig protocol selection", () => {
   it("parses an explicit protocol identity from run_config", () => {
@@ -20,6 +24,41 @@ describe("extractEffectiveRunConfig protocol selection", () => {
 });
 
 describe("trusted Energy text run input", () => {
+  it("preserves Previous week for server-authoritative Energy context resolution", () => {
+    const input = createInput({});
+    input.forwardedProps = {
+      externalContext: {
+        source: "energyiq",
+        projectId: "ngee-ann-polytechnic",
+        scopeId: "project",
+        resource: "electricity",
+        period: "Previous week",
+      },
+    };
+
+    expect(extractEnergyQueryContextRequest(input)).toEqual({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "project",
+      resource: "electricity",
+      period: "Previous week",
+    });
+  });
+
+  it("rejects an explicitly unknown Period instead of silently using Last 30 days", () => {
+    const input = createInput({});
+    input.forwardedProps = {
+      externalContext: {
+        source: "energyiq",
+        projectId: "ngee-ann-polytechnic",
+        scopeId: "project",
+        resource: "electricity",
+        period: "Previous fortnight",
+      },
+    };
+
+    expect(() => extractEnergyQueryContextRequest(input)).toThrow("ENERGYIQ_PERIOD_INVALID");
+  });
+
   it("accepts only an allowlisted intent from the untrusted host context", () => {
     const valid = createInput({});
     valid.forwardedProps = {

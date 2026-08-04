@@ -36,10 +36,11 @@ const periodOptions: ReadonlyArray<{
 }> = [
   { label: "Yesterday", value: "Yesterday" },
   { label: "Last 7 days", value: "Last 7 days" },
+  { label: "Previous week", value: "Previous week" },
   { label: "Previous month", disabled: true, title: "Awaiting the trusted calendar-month period contract." },
   { label: "Custom", value: "Custom" },
 ];
-type OverviewPeriod = "Yesterday" | "Last 7 days" | "Custom";
+type OverviewPeriod = "Yesterday" | "Last 7 days" | "Previous week" | "Custom";
 type ResourceType = "electricity" | "water";
 type OverviewUrlViewState = {
   projectId: string;
@@ -555,7 +556,9 @@ export function overviewAnalysisRequest(
 
 export function overviewViewStateFromSearchParams(searchParams: Pick<URLSearchParams, "get">): OverviewUrlViewState {
   const requestedPeriod = searchParams.get("period");
-  const period = requestedPeriod === "Yesterday" || requestedPeriod === "Custom"
+  const period = requestedPeriod === "Yesterday"
+    || requestedPeriod === "Previous week"
+    || requestedPeriod === "Custom"
     ? requestedPeriod
     : "Last 7 days";
   return {

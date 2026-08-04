@@ -106,14 +106,22 @@ describe("ProjectAnalysisResolver", () => {
           projectId: "customer-without-renderer",
           scopeId: "project",
           resource: "electricity",
-          period: "Yesterday",
+          period: "Previous week",
         },
+        now: new Date("2026-08-03T16:30:00.000Z"),
       });
 
       expect(result).toMatchObject({
         status: "configuration-required",
         projectId: "customer-without-renderer",
         title: "Project analysis is not configured",
+        context: {
+          period: "Previous week",
+          timezone: "Asia/Singapore",
+          from: "2026-07-26T16:00:00.000Z",
+          to: "2026-08-02T16:00:00.000Z",
+          endExclusive: true,
+        },
       });
       expect(result).not.toHaveProperty("snapshot");
     } finally {

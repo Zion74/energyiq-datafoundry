@@ -337,7 +337,7 @@ export type EnergyQueryContextRequestDto = {
   projectId: string;
   scopeId?: string;
   resource?: "electricity" | "water";
-  period?: "Yesterday" | "Last 7 days" | "Last 30 days" | "Custom";
+  period?: "Yesterday" | "Last 7 days" | "Last 30 days" | "Previous week" | "Custom";
   from?: string;
   to?: string;
 };

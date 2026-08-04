@@ -1020,10 +1020,15 @@ const parseQueryContextRequest = (value: unknown): EnergyQueryContextRequest => 
     throw new Error("ENERGYIQ_PROJECT_REQUIRED");
   }
   const resource = value.resource === "water" ? "water" : "electricity";
-  const allowedPeriods = new Set(["Yesterday", "Last 7 days", "Last 30 days", "Custom"]);
-  const period: EnergyPeriod = typeof value.period === "string" && allowedPeriods.has(value.period)
-    ? value.period as EnergyPeriod
-    : "Last 30 days";
+  const allowedPeriods = new Set(["Yesterday", "Last 7 days", "Last 30 days", "Previous week", "Custom"]);
+  if (value.period !== undefined && (
+    typeof value.period !== "string" || !allowedPeriods.has(value.period)
+  )) {
+    throw new Error("ENERGYIQ_PERIOD_INVALID");
+  }
+  const period: EnergyPeriod = value.period === undefined
+    ? "Last 30 days"
+    : value.period as EnergyPeriod;
   return {
     projectId: value.projectId,
     ...(typeof value.scopeId === "string" ? { scopeId: value.scopeId } : {}),

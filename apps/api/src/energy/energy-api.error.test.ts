@@ -1,16 +1,63 @@
-import { describe, expect, it } from "vitest";
+import { LocalDataGateway } from "@datafoundry/data-gateway";
 import {
+  createMetadataStore,
   createEnergyIqSourceManifest,
   type EnergyIqImportBatchRecord,
   type EnergyIqProjectSetupDocument,
 } from "@datafoundry/metadata";
+import { mkdtempSync, rmSync } from "node:fs";
+import type { IncomingMessage } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { PassThrough } from "node:stream";
+import { describe, expect, it } from "vitest";
 
+import type { ConfigApiContext } from "../routes/types.js";
+import { ensureEnergyIqBootstrap } from "./energy-bootstrap.js";
 import {
+  handleEnergyApiRequest,
   requireEnergyImportMaterializationPreconditions,
   toEnergyApiErrorResponse,
 } from "./energy-api.js";
 
 describe("Energy API business error mapping", () => {
+  it("rejects an explicitly unknown Period instead of silently using Last 30 days", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-api-period-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const response = await handleEnergyApiRequest(
+        jsonPost({
+          projectId: "ngee-ann-polytechnic",
+          scopeId: "project",
+          resource: "electricity",
+          period: "Previous fortnight",
+        }),
+        ["analysis", "resolve"],
+        {
+          metadataStore: metadata,
+          dataGateway: new LocalDataGateway(metadata),
+          userId: "dev-user",
+          workspaceId: "default",
+        } as Required<ConfigApiContext>,
+      );
+
+      expect(response).toMatchObject({
+        status: 400,
+        body: {
+          success: false,
+          error: {
+            code: "BAD_REQUEST",
+            message: "ENERGYIQ_PERIOD_INVALID",
+          },
+        },
+      });
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
   it("returns a diagnosable 409 when Project publication is blocked by data readiness", () => {
     expect(toEnergyApiErrorResponse(new Error(
       "ENERGYIQ_PROJECT_DATA_NOT_READY:IMPORT_BATCH_NOT_MATERIALIZED,SNAPSHOT_MAPPING_MISMATCH",
@@ -86,6 +133,16 @@ const importBatches = (): EnergyIqImportBatchRecord[] => [
   importBatch("batch-a", "a".repeat(64), "Meter A"),
   importBatch("batch-b", "b".repeat(64), "Meter B"),
 ];
+
+const jsonPost = (body: unknown): IncomingMessage => {
+  const request = new PassThrough();
+  Object.assign(request, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+  });
+  request.end(JSON.stringify(body));
+  return request as unknown as IncomingMessage;
+};
 
 const importBatch = (id: string, sha256: string, label: string): EnergyIqImportBatchRecord => ({
   id,

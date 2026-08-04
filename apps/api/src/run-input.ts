@@ -381,9 +381,19 @@ export const extractEnergyQueryContextRequest = (
   }
   const resource = candidate.resource === "water" ? "water" : "electricity";
   const periodValue = stringFromRecord(candidate, "period");
+  if (candidate.period !== undefined && !(
+    periodValue === "Yesterday"
+    || periodValue === "Last 7 days"
+    || periodValue === "Last 30 days"
+    || periodValue === "Previous week"
+    || periodValue === "Custom"
+  )) {
+    throw new Error("ENERGYIQ_PERIOD_INVALID");
+  }
   const period = periodValue === "Yesterday"
     || periodValue === "Last 7 days"
     || periodValue === "Last 30 days"
+    || periodValue === "Previous week"
     || periodValue === "Custom"
     ? periodValue
     : "Last 30 days";

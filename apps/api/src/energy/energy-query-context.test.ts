@@ -2,7 +2,7 @@ import { createMetadataStore } from "@datafoundry/metadata";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   ensureEnergyIqBootstrap,
@@ -158,6 +158,95 @@ describe("EnergyQueryContext", () => {
         }
       })).toThrow("ENERGYIQ_SCOPE_FORBIDDEN");
     } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
+  it.each([
+    {
+      name: "the fixed 2026-08-04 acceptance date",
+      now: "2026-08-03T16:30:00.000Z",
+      from: "2026-07-26T16:00:00.000Z",
+      to: "2026-08-02T16:00:00.000Z",
+    },
+    {
+      name: "a previous week crossing a month boundary",
+      now: "2026-03-01T16:30:00.000Z",
+      from: "2026-02-22T16:00:00.000Z",
+      to: "2026-03-01T16:00:00.000Z",
+    },
+    {
+      name: "a previous week crossing a year boundary",
+      now: "2025-12-31T16:30:00.000Z",
+      from: "2025-12-21T16:00:00.000Z",
+      to: "2025-12-28T16:00:00.000Z",
+    },
+  ])("resolves Previous week in Singapore ISO calendar time for $name", ({ now, from, to }) => {
+    const root = mkdtempSync(join(tmpdir(), "energy-query-context-previous-week-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const context = resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user: metadata.users.getById({ user_id: "dev-user" }),
+        workspaceId: "default",
+        request: {
+          projectId: "ngee-ann-polytechnic",
+          scopeId: "project",
+          resource: "electricity",
+          period: "Previous week",
+        },
+        now: new Date(now),
+      });
+
+      expect(context).toMatchObject({
+        period: "Previous week",
+        timezone: "Asia/Singapore",
+        from,
+        to,
+        endExclusive: true,
+      });
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
+  it("pins Previous week range and resolvedAt to one instant across the Monday boundary", () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-query-context-previous-week-boundary-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const NativeDate = Date;
+    const beforeBoundary = "2026-08-02T15:59:59.999Z";
+    const afterBoundary = "2026-08-02T16:00:00.001Z";
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const implicitInstants = [beforeBoundary, afterBoundary];
+      vi.stubGlobal("Date", class extends NativeDate {
+        constructor(value?: string | number) {
+          super(value ?? implicitInstants.shift() ?? afterBoundary);
+        }
+      });
+
+      const context = resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user: metadata.users.getById({ user_id: "dev-user" }),
+        workspaceId: "default",
+        request: {
+          projectId: "ngee-ann-polytechnic",
+          scopeId: "project",
+          resource: "electricity",
+          period: "Previous week",
+        },
+      });
+
+      expect(context).toMatchObject({
+        from: "2026-07-19T16:00:00.000Z",
+        to: "2026-07-26T16:00:00.000Z",
+        resolvedAt: beforeBoundary,
+      });
+    } finally {
+      vi.unstubAllGlobals();
       metadata.close();
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }

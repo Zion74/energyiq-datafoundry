@@ -11,7 +11,7 @@ import type {
 import { energyIqPublishedMeterRoutingRevisionId } from "@datafoundry/metadata";
 
 export type EnergyResource = "electricity" | "water";
-export type EnergyPeriod = "Yesterday" | "Last 7 days" | "Last 30 days" | "Custom";
+export type EnergyPeriod = "Yesterday" | "Last 7 days" | "Last 30 days" | "Previous week" | "Custom";
 
 export type EnergyAccessContext = {
   role: EnergyIqRole;
@@ -205,12 +205,13 @@ export const resolveEnergyQueryContext = (input: {
     throw new Error("ENERGYIQ_SCOPE_FORBIDDEN");
   }
   const period = input.request.period ?? "Last 30 days";
+  const resolvedAt = input.now ?? new Date();
   const range = resolvePeriodRange({
     period,
     timezone: projectRecord.timezone,
     ...(input.request.from ? { from: input.request.from } : {}),
     ...(input.request.to ? { to: input.request.to } : {}),
-    now: input.now ?? new Date()
+    now: resolvedAt
   });
   const publishedMeterRoute = input.allowUnconfigured
     ? undefined
@@ -245,7 +246,7 @@ export const resolveEnergyQueryContext = (input: {
     metricVersion: projectRecord.metric_version,
     businessCalendarVersion: projectRecord.business_calendar_version,
     tariffScheduleVersion: projectRecord.tariff_schedule_version,
-    resolvedAt: (input.now ?? new Date()).toISOString()
+    resolvedAt: resolvedAt.toISOString()
   };
 };
 
@@ -442,6 +443,15 @@ const resolvePeriodRange = (input: {
     return { from, to };
   }
   const today = localDate(input.now, input.timezone);
+  if (input.period === "Previous week") {
+    const localWeekday = new Date(`${today}T00:00:00.000Z`).getUTCDay();
+    const daysSinceMonday = (localWeekday + 6) % 7;
+    const currentMonday = shiftDate(today, -daysSinceMonday);
+    return {
+      from: zonedStartOfDay(shiftDate(currentMonday, -7), input.timezone),
+      to: zonedStartOfDay(currentMonday, input.timezone),
+    };
+  }
   const endDate = today;
   const days = input.period === "Yesterday" ? 1 : input.period === "Last 7 days" ? 7 : 30;
   return {

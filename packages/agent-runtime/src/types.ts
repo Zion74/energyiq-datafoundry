@@ -21,7 +21,7 @@ export type AgentEnergyQueryContext = {
   from: string;
   to: string;
   endExclusive: true;
-  period: "Yesterday" | "Last 7 days" | "Last 30 days" | "Custom";
+  period: "Yesterday" | "Last 7 days" | "Last 30 days" | "Previous week" | "Custom";
   dataSnapshotId?: string;
   metricVersion?: string;
 };

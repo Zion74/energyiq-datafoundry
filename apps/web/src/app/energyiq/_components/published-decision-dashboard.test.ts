@@ -333,6 +333,104 @@ describe("published Overview URL reload", () => {
     ]);
   });
 
+  it("selects and restores Previous week through the server-authoritative URL contract", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Last%207%20days");
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    const previousWeek = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "Previous week");
+    await act(async () => previousWeek?.click());
+    const previousWeekUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Previous+week";
+    expect(mockedRouter.replace).toHaveBeenCalledWith(previousWeekUrl);
+
+    resolveProjectAnalysis.mockClear();
+    window.history.replaceState({}, "", previousWeekUrl);
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+    expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
+    expect(resolveProjectAnalysis).toHaveBeenCalledWith({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "project",
+      resource: "electricity",
+      period: "Previous week",
+    });
+  });
+
+  it("preserves Previous week when Scope changes before the router rerenders", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Last%207%20days");
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    const previousWeek = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "Previous week");
+    await act(async () => previousWeek?.click());
+    const scopeSelect = container.querySelector<HTMLButtonElement>("[role='combobox'][aria-label='Analysis Scope']");
+    await act(async () => scopeSelect?.click());
+    const totalCircuit = Array.from(document.querySelectorAll<HTMLButtonElement>("[role='option']"))
+      .find((option) => option.textContent?.endsWith("Level 6 / Total Office Load"));
+    await act(async () => totalCircuit?.click());
+
+    const previousWeekScopeUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Previous+week";
+    expect(mockedRouter.replace.mock.calls.map(([href]) => href)).toEqual([
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Previous+week",
+      previousWeekScopeUrl,
+    ]);
+
+    resolveProjectAnalysis.mockClear();
+    window.history.replaceState({}, "", previousWeekScopeUrl);
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+    expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
+    expect(resolveProjectAnalysis).toHaveBeenCalledWith({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "l6-total-light",
+      resource: "electricity",
+      period: "Previous week",
+    });
+  });
+
+  it("keeps an empty Previous week explicit without auto-navigation or a second resolve", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    const previousWeekUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Previous+week";
+    window.history.replaceState({}, "", previousWeekUrl);
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockResolvedValue(readyRangeResolution());
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
+    expect(resolveProjectAnalysis).toHaveBeenCalledWith({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "project",
+      resource: "electricity",
+      period: "Previous week",
+    });
+    expect(mockedRouter.replace).not.toHaveBeenCalled();
+    expect(window.location.pathname + window.location.search).toBe(previousWeekUrl);
+    expect(container.textContent).toContain("Published analysis has no Project Template");
+  });
+
   it("carries the server-resolved range when a standard Period changes to Custom", async () => {
     const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
     mockedAccess.activeProject = ngeeAnn;
