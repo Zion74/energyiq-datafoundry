@@ -303,4 +303,23 @@ describe("Ngee Ann decision priorities", () => {
       items: [],
     });
   });
+
+  it("fails priorities closed when a triggered child violates the released anomaly contract", () => {
+    const result = build(anomalies([{
+      scopeId: "project",
+      scopeName: "Ngee Ann Polytechnic",
+      scopeType: "project",
+      rows: [{
+        ...anomalyRow({ incidentId: "invalid-triggered-child", impactKwh: 25 }),
+        actualKwh: null,
+      }],
+    }]));
+
+    expect(result).toMatchObject({
+      status: "unavailable",
+      limitation: { code: "DAILY_USAGE_ANOMALIES_CONTRACT_MISMATCH" },
+      evidencePins,
+      items: [],
+    });
+  });
 });
