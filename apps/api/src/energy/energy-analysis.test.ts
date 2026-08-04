@@ -79,6 +79,25 @@ describe("EnergyScopeAnalysis", () => {
         businessCalendarVersion: "sg-preschool-calendar-v1",
       });
       expect(portfolio.hourlyProfile).toHaveLength(24);
+      const portfolioTimeCells = portfolio.timeBehaviour?.scopes.find(
+        (scope) => scope.scopeId === "preschool-project",
+      )?.cells ?? [];
+      expect(portfolioTimeCells).toHaveLength(31 * 24);
+      expect(portfolioTimeCells.filter((cell) => cell.usageKwh !== null)).toHaveLength(24);
+      expect(roundForGolden(portfolioTimeCells.reduce(
+        (sum, cell) => sum + (cell.usageKwh ?? 0),
+        0,
+      ))).toBeCloseTo(portfolio.summary.usageKwh, 3);
+      expect(portfolio.timeBehaviour?.dayProfiles.find((profile) => (
+        profile.scopeId === "preschool-project" && profile.dayType === "weekday"
+      ))).toMatchObject({ status: "available", sampleDayCount: 1 });
+      expect(portfolio.timeBehaviour?.dayProfiles.find((profile) => (
+        profile.scopeId === "preschool-project" && profile.dayType === "weekend"
+      ))).toMatchObject({
+        status: "unavailable",
+        reason: { code: "COMPLETE_DAY_SAMPLE_UNAVAILABLE" },
+      });
+      expect(portfolio.provenance.queryIds).toContain("time_bucket_grid_v1");
       expect(portfolio.childScopes).toHaveLength(PRESCHOOL_GOLDEN.period.centreCount);
       expect(portfolio.circuits).toHaveLength(PRESCHOOL_GOLDEN.period.circuitCount);
       expect(portfolio.virtualMeterTraces).toBeUndefined();
@@ -324,6 +343,68 @@ describe("EnergyScopeAnalysis", () => {
         expectedHourlyProfile(NGEE_ANN_GOLDEN.period.hourlyProfile, 28)
       );
       expect(analysis.dailyTotals).toEqual(expectedNgeeAnnDailyTotals());
+      expect(analysis.timeBehaviour).toMatchObject({
+        metricId: "energy.total_usage_kwh@1",
+        grain: "hour",
+        unit: "kWh",
+        timezone: NGEE_ANN_GOLDEN.timezone,
+        queryId: "time_bucket_grid_v1",
+      });
+      expect(analysis.timeBehaviour?.scopes).toHaveLength(3);
+      expect(analysis.timeBehaviour?.scopes.every((scope) => scope.cells.length === 7 * 24))
+        .toBe(true);
+      const timeScope = (scopeId: string) => analysis.timeBehaviour?.scopes.find(
+        (scope) => scope.scopeId === scopeId,
+      );
+      const projectCells = timeScope("project")?.cells ?? [];
+      const level7Cells = timeScope("level-7")?.cells ?? [];
+      const level6Cells = timeScope("level-6")?.cells ?? [];
+      expect(roundForGolden(projectCells.reduce(
+        (sum, cell) => sum + (cell.usageKwh ?? 0),
+        0,
+      ))).toBeCloseTo(NGEE_ANN_GOLDEN.period.usageKwh, 3);
+      for (const dailyRow of analysis.dailyTotals?.scopes[0]?.rows ?? []) {
+        expect(roundForGolden(projectCells.filter(
+          (cell) => cell.localDate === dailyRow.localDate,
+        ).reduce((sum, cell) => sum + (cell.usageKwh ?? 0), 0)))
+          .toBeCloseTo(dailyRow.usageKwh ?? 0, 3);
+      }
+      for (const hourlyRow of analysis.hourlyProfile) {
+        expect(roundForGolden(projectCells.filter(
+          (cell) => cell.localHour === hourlyRow.hour,
+        ).reduce((sum, cell) => sum + (cell.usageKwh ?? 0), 0)))
+          .toBeCloseTo(hourlyRow.usageKwh, 3);
+      }
+      for (const [index, projectCell] of projectCells.entries()) {
+        expect(projectCell.usageKwh).not.toBeNull();
+        expect(projectCell.usageKwh ?? 0).toBeCloseTo(
+          (level7Cells[index]?.usageKwh ?? 0) + (level6Cells[index]?.usageKwh ?? 0),
+          3,
+        );
+      }
+      const profile = (
+        dayType: "weekday" | "weekend" | "public_holiday",
+        scopeId = "project",
+      ) => analysis.timeBehaviour?.dayProfiles.find((candidate) => (
+        candidate.dayType === dayType && candidate.scopeId === scopeId
+      ));
+      expect(profile("weekday")).toMatchObject({
+        status: "available",
+        sampleDayCount: 5,
+        values: expect.any(Array),
+      });
+      expect(profile("weekend")).toMatchObject({
+        status: "available",
+        sampleDayCount: 2,
+        values: expect.any(Array),
+      });
+      expect(profile("public_holiday")).toMatchObject({
+        status: "unavailable",
+        reason: { code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE" },
+      });
+      expect(analysis.timeBehaviour?.dayProfiles.filter(
+        (candidate) => candidate.status === "available",
+      ).every((candidate) => candidate.values.length === 24)).toBe(true);
       expect(analysis.peakBreakdown).toEqual(expectedNgeeAnnPeakBreakdown());
       for (const scope of analysis.dailyTotals?.scopes ?? []) {
         const expectedUsageKwh = scope.scopeId === "project"
@@ -377,6 +458,7 @@ describe("EnergyScopeAnalysis", () => {
         aggregationRule: "designated_total"
       });
       expect(analysis.provenance.queryIds).toContain("previous_meter_usage_v1");
+      expect(analysis.provenance.queryIds).toContain("time_bucket_grid_v1");
 
       const dayContext = resolveEnergyQueryContext({
         metadataStore: metadata,
@@ -415,6 +497,54 @@ describe("EnergyScopeAnalysis", () => {
         scope.rows.length === 1
         && scope.rows[0]?.localDate === NGEE_ANN_GOLDEN.selection.day.localDate
       ))).toBe(true);
+      expect(day.timeBehaviour).toMatchObject({
+        metricId: "energy.total_usage_kwh@1",
+        grain: "hour",
+        unit: "kWh",
+        timezone: NGEE_ANN_GOLDEN.timezone,
+        queryId: "time_bucket_grid_v1",
+      });
+      expect(day.timeBehaviour?.scopes).toHaveLength(3);
+      const projectHours = day.timeBehaviour?.scopes.find(
+        (scope) => scope.scopeId === "project",
+      )?.cells;
+      expect(projectHours).toHaveLength(24);
+      expect(projectHours?.[0]).toEqual({
+        localDate: NGEE_ANN_GOLDEN.selection.day.localDate,
+        localHour: 0,
+        from: "2026-06-15T16:00:00.000Z",
+        to: "2026-06-15T17:00:00.000Z",
+        usageKwh: 5.3565,
+        dataHealth: {
+          status: "complete",
+          coveragePct: 100,
+          expectedMeterIntervalCount: 16,
+          validIntervalCount: 16,
+          qualityEventCount: 0,
+        },
+      });
+      expect(roundForGolden(projectHours?.reduce(
+        (sum, cell) => sum + (cell.usageKwh ?? 0),
+        0,
+      ) ?? 0)).toBeCloseTo(NGEE_ANN_GOLDEN.day.usageKwh, 3);
+      const projectProfile = (dayType: "weekday" | "weekend" | "public_holiday") => (
+        day.timeBehaviour?.dayProfiles.find((profile) => (
+          profile.dayType === dayType && profile.scopeId === "project"
+        ))
+      );
+      expect(projectProfile("weekday")).toMatchObject({
+        status: "available",
+        sampleDayCount: 1,
+        values: expect.any(Array),
+      });
+      expect(projectProfile("weekend")).toMatchObject({
+        status: "unavailable",
+        reason: { code: "COMPLETE_DAY_SAMPLE_UNAVAILABLE" },
+      });
+      expect(projectProfile("public_holiday")).toMatchObject({
+        status: "unavailable",
+        reason: { code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE" },
+      });
 
       const analyzeScope = async (scopeId: string) => {
         const scopeContext = resolveEnergyQueryContext({
@@ -544,11 +674,18 @@ describe("EnergyScopeAnalysis", () => {
     try {
       ensureEnergyIqBootstrap(metadata);
       await materializeNgeeAnnGoldenFixture(databasePath, metadata, {
-        transformIntervalFacts: (facts) => facts.filter((fact) => (
-          fact.localDate !== "2026-06-12"
-          && !(fact.localDate === "2026-06-13"
-            && fact.meterPointId === "mapping-lvl-6-total-office-light-8")
-        )),
+        transformIntervalFacts: (facts) => facts
+          .filter((fact) => (
+            fact.localDate !== "2026-06-12"
+            && !(fact.localDate === "2026-06-13"
+              && fact.meterPointId === "mapping-lvl-6-total-office-light-8")
+          ))
+          .map((fact) => (
+            fact.intervalStart === "2026-06-15T01:00:00.000Z"
+              && fact.meterPointId === "mapping-lvl-7-total-office-load-18"
+              ? { ...fact, qualityStatus: "rejected" }
+              : fact
+          )),
       });
       const user = metadata.users.getById({ user_id: "dev-user" });
       const context = resolveEnergyQueryContext({
@@ -620,10 +757,122 @@ describe("EnergyScopeAnalysis", () => {
           qualityEventCount: 0,
         },
       });
+      const cell = (scopeId: string, localDate: string, localHour: number) => (
+        analysis.timeBehaviour?.scopes.find((candidate) => candidate.scopeId === scopeId)
+          ?.cells.find((candidate) => (
+            candidate.localDate === localDate && candidate.localHour === localHour
+          ))
+      );
+      expect(cell("project", "2026-06-12", 8)).toEqual({
+        localDate: "2026-06-12",
+        localHour: 8,
+        from: "2026-06-12T00:00:00.000Z",
+        to: "2026-06-12T01:00:00.000Z",
+        usageKwh: null,
+        dataHealth: {
+          status: "unavailable",
+          coveragePct: 0,
+          expectedMeterIntervalCount: 16,
+          validIntervalCount: 0,
+          qualityEventCount: 0,
+        },
+      });
+      expect(cell("project", "2026-06-13", 8)?.dataHealth).toEqual({
+        status: "partial",
+        coveragePct: 75,
+        expectedMeterIntervalCount: 16,
+        validIntervalCount: 12,
+        qualityEventCount: 0,
+      });
+      expect(cell("level-7", "2026-06-13", 8)?.dataHealth).toEqual({
+        status: "complete",
+        coveragePct: 100,
+        expectedMeterIntervalCount: 8,
+        validIntervalCount: 8,
+        qualityEventCount: 0,
+      });
+      expect(cell("level-6", "2026-06-13", 8)?.dataHealth).toEqual({
+        status: "partial",
+        coveragePct: 50,
+        expectedMeterIntervalCount: 8,
+        validIntervalCount: 4,
+        qualityEventCount: 0,
+      });
+      expect(cell("project", "2026-06-15", 9)).toMatchObject({
+        usageKwh: expect.any(Number),
+        dataHealth: {
+          status: "partial",
+          coveragePct: 93.75,
+          expectedMeterIntervalCount: 16,
+          validIntervalCount: 15,
+          qualityEventCount: 1,
+        },
+      });
+      const dayProfile = (dayType: "weekday" | "weekend", scopeId: string) => (
+        analysis.timeBehaviour?.dayProfiles.find((candidate) => (
+          candidate.dayType === dayType && candidate.scopeId === scopeId
+        ))
+      );
+      expect(dayProfile("weekday", "project")).toMatchObject({
+        status: "available",
+        sampleDayCount: 3,
+      });
+      expect(dayProfile("weekday", "level-6")).toMatchObject({
+        status: "available",
+        sampleDayCount: 4,
+      });
+      expect(dayProfile("weekend", "project")).toMatchObject({
+        status: "available",
+        sampleDayCount: 1,
+      });
+      expect(dayProfile("weekend", "level-7")).toMatchObject({
+        status: "available",
+        sampleDayCount: 2,
+      });
+      expect(dayProfile("weekend", "level-6")).toMatchObject({
+        status: "available",
+        sampleDayCount: 1,
+      });
     } finally {
       metadata.close();
       removeTemporaryEnergyFixture(root);
     }
+  }, 30_000);
+
+  it("fails Day Profile closed per Scope when accepted fact Day Type conflicts", async () => {
+    const analysis = await analyzeNgeeAnnFixture((facts) => facts.map((fact) => (
+      fact.intervalStart === "2026-06-10T00:00:00.000Z"
+        && fact.meterPointId === "mapping-lvl-7-total-office-load-18"
+        ? { ...fact, dayType: "weekend" }
+        : fact
+    )));
+    const profile = (dayType: "weekday" | "weekend", scopeId: string) => (
+      analysis.timeBehaviour?.dayProfiles.find((candidate) => (
+        candidate.dayType === dayType && candidate.scopeId === scopeId
+      ))
+    );
+
+    for (const scopeId of ["project", "level-7"]) {
+      expect(profile("weekday", scopeId)).toMatchObject({
+        status: "unavailable",
+        reason: { code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE" },
+      });
+      expect(profile("weekend", scopeId)).toMatchObject({
+        status: "unavailable",
+        reason: { code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE" },
+      });
+    }
+    expect(profile("weekday", "level-6")).toMatchObject({
+      status: "available",
+      sampleDayCount: 5,
+    });
+    expect(profile("weekend", "level-6")).toMatchObject({
+      status: "available",
+      sampleDayCount: 2,
+    });
+    expect(analysis.timeBehaviour?.scopes.find((scope) => scope.scopeId === "project")
+      ?.cells.find((cell) => cell.localDate === "2026-06-10" && cell.localHour === 8)
+      ?.dataHealth.status).toBe("complete");
   }, 30_000);
 
   it.each([

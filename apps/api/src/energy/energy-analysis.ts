@@ -69,6 +69,46 @@ export type EnergyScopeAnalysis = {
       }>;
     }>;
   };
+  timeBehaviour?: {
+    metricId: "energy.total_usage_kwh@1";
+    grain: "hour";
+    unit: "kWh";
+    timezone: string;
+    queryId: "time_bucket_grid_v1";
+    scopes: Array<{
+      scopeId: string;
+      scopeName: string;
+      scopeType: string;
+      cells: Array<{
+        localDate: string;
+        localHour: number;
+        from: string;
+        to: string;
+        usageKwh: number | null;
+        dataHealth: TimeBucketDataHealth;
+      }>;
+    }>;
+    dayProfiles: Array<{
+      dayType: "weekday" | "weekend";
+      scopeId: string;
+      scopeName: string;
+      status: "available";
+      sampleDayCount: number;
+      values: Array<{
+        localHour: number;
+        usageKwh: number;
+      }>;
+    } | {
+      dayType: "weekday" | "weekend" | "public_holiday";
+      scopeId: string;
+      scopeName: string;
+      status: "unavailable";
+      reason: {
+        code: "COMPLETE_DAY_SAMPLE_UNAVAILABLE" | "DAY_TYPE_CLASSIFICATION_UNAVAILABLE";
+        message: string;
+      };
+    }>;
+  };
   peakBreakdown?: {
     status: "available";
     metricId: "energy.peak_demand_kw@1";
@@ -290,6 +330,7 @@ export type EnergyScopeAnalysis = {
       "scope_summary_v1",
       "hourly_profile_v1",
       "daily_totals_v1",
+      "time_bucket_grid_v1",
       "peak_breakdown_v1",
       "meter_breakdown_v1",
       "previous_meter_usage_v1",
@@ -342,6 +383,14 @@ type MeterAggregate = {
 
 type PeakIntervalDataHealth = {
   status: "complete" | "unavailable";
+  coveragePct: number;
+  expectedMeterIntervalCount: number;
+  validIntervalCount: number;
+  qualityEventCount: number;
+};
+
+type TimeBucketDataHealth = {
+  status: "complete" | "partial" | "unavailable";
   coveragePct: number;
   expectedMeterIntervalCount: number;
   validIntervalCount: number;
@@ -666,6 +715,13 @@ export const executeEnergyScopeAnalysis = async (input: {
     sql: dailyTotalsSql(scoped.viewName, dailyTotalScopes),
     limit: Math.max(1, dailyTotalScopes.length * dailyDateBuckets.length),
   });
+  const timeBucketGridResultPromise = input.dataGateway.runSqlReadonly({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: scoped.datasourceId,
+    sql: timeBucketGridSql(scoped.viewName, dailyTotalScopes),
+    limit: Math.max(1, dailyTotalScopes.length),
+  });
   const healthResultPromise = input.dataGateway.runSqlReadonly({
     user_id: input.userId,
     workspace_id: input.context.workspaceId,
@@ -713,6 +769,7 @@ export const executeEnergyScopeAnalysis = async (input: {
     summaryResult,
     profileResult,
     dailyTotalsResult,
+    timeBucketGridResult,
     peakBreakdownResult,
     healthResult,
     previousMeterUsageResult,
@@ -722,6 +779,7 @@ export const executeEnergyScopeAnalysis = async (input: {
     summaryResultPromise,
     profileResultPromise,
     dailyTotalsResultPromise,
+    timeBucketGridResultPromise,
     peakBreakdownResultPromise,
     healthResultPromise,
     previousMeterUsageResultPromise,
@@ -765,7 +823,7 @@ export const executeEnergyScopeAnalysis = async (input: {
         );
         const status = validIntervalCount === 0
           ? "unavailable" as const
-          : validIntervalCount >= expectedMeterIntervalCount && qualityEventCount === 0
+          : validIntervalCount === expectedMeterIntervalCount && qualityEventCount === 0
             ? "complete" as const
             : "partial" as const;
         return {
@@ -788,6 +846,13 @@ export const executeEnergyScopeAnalysis = async (input: {
       }),
     })),
   };
+  const timeBehaviour = buildTimeBehaviour({
+    timezone: input.context.timezone,
+    scopes: dailyTotalScopes,
+    dateBuckets: dailyDateBuckets,
+    intervalMinutes,
+    rows: timeBucketGridResult.rows,
+  });
   const previousMeterUsageById = new Map(
     previousMeterUsageResult.rows.map((row) => [stringAt(row, 0), numberAt(row, 1)]),
   );
@@ -1059,6 +1124,7 @@ export const executeEnergyScopeAnalysis = async (input: {
       observationCount: numberAt(row, 4)
     })),
     dailyTotals,
+    timeBehaviour,
     ...(peakBreakdown ? { peakBreakdown } : {}),
     categories,
     childScopes,
@@ -1093,6 +1159,7 @@ export const executeEnergyScopeAnalysis = async (input: {
         "scope_summary_v1",
         "hourly_profile_v1",
         "daily_totals_v1",
+        "time_bucket_grid_v1",
         "peak_breakdown_v1",
         "meter_breakdown_v1",
         "previous_meter_usage_v1",
@@ -1313,6 +1380,237 @@ const buildDailyDateBuckets = (context: EnergyQueryContext): DailyDateBucket[] =
   return buckets;
 };
 
+const buildTimeBehaviour = (input: {
+  timezone: string;
+  scopes: DailyTotalScope[];
+  dateBuckets: DailyDateBucket[];
+  intervalMinutes: number;
+  rows: unknown[][];
+}): NonNullable<EnergyScopeAnalysis["timeBehaviour"]> => {
+  const factsByScopeDateHour = new Map(
+    input.rows.flatMap((row) => parseTimeBucketFacts(
+      stringAt(row, 0),
+      stringAt(row, 3),
+    )).map((fact) => [
+      `${fact.scopeId}:${fact.localDate}:${fact.localHour}`,
+      fact,
+    ]),
+  );
+  const scopes = input.scopes.map((scope) => ({
+    scopeId: scope.scopeId,
+    scopeName: scope.scopeName,
+    scopeType: scope.scopeType,
+    cells: input.dateBuckets.flatMap((dateBucket) => Array.from(
+      { length: 24 },
+      (_, localHour) => {
+        const from = zonedStartOfLocalHour(
+          dateBucket.localDate,
+          localHour,
+          input.timezone,
+        );
+        const to = localHour === 23
+          ? dateBucket.to
+          : zonedStartOfLocalHour(dateBucket.localDate, localHour + 1, input.timezone);
+        const row = factsByScopeDateHour.get(
+          `${scope.scopeId}:${dateBucket.localDate}:${localHour}`,
+        );
+        const validIntervalCount = row?.validIntervalCount ?? 0;
+        const qualityEventCount = row?.qualityEventCount ?? 0;
+        const expectedMeterIntervalCount = scope.meterNodeIds.length * Math.round(
+          (Date.parse(to) - Date.parse(from)) / (input.intervalMinutes * 60_000),
+        );
+        const status = validIntervalCount === 0
+          ? "unavailable" as const
+          : validIntervalCount >= expectedMeterIntervalCount && qualityEventCount === 0
+            ? "complete" as const
+            : "partial" as const;
+        return {
+          localDate: dateBucket.localDate,
+          localHour,
+          from,
+          to,
+          usageKwh: row?.usageKwh !== null && row?.usageKwh !== undefined
+            ? round(row.usageKwh, 4)
+            : null,
+          dataHealth: {
+            status,
+            coveragePct: expectedMeterIntervalCount > 0
+              ? round(Math.min(validIntervalCount / expectedMeterIntervalCount, 1) * 100, 4)
+              : 0,
+            expectedMeterIntervalCount,
+            validIntervalCount,
+            qualityEventCount,
+          },
+        };
+      },
+    )),
+  }));
+  const dayProfiles: NonNullable<EnergyScopeAnalysis["timeBehaviour"]>["dayProfiles"] = [];
+  for (const scope of scopes) {
+    const classifiedCompleteDates = new Map<string, "weekday" | "weekend">();
+    let classificationUnavailable = false;
+    for (const dateBucket of input.dateBuckets) {
+      const dateCells = scope.cells.filter((cell) => cell.localDate === dateBucket.localDate);
+      const isCompleteDate = dateCells.length === 24
+        && dateCells.every((cell) => (
+          cell.dataHealth.status === "complete" && cell.usageKwh !== null
+        ));
+      if (!isCompleteDate) continue;
+      const dayTypes = new Set<"weekday" | "weekend">();
+      for (const cell of dateCells) {
+        const fact = factsByScopeDateHour.get(
+          `${scope.scopeId}:${cell.localDate}:${cell.localHour}`,
+        );
+        if (
+          fact?.dayTypeCount !== 1
+          || (fact.dayType !== "weekday" && fact.dayType !== "weekend")
+        ) {
+          classificationUnavailable = true;
+          break;
+        }
+        dayTypes.add(fact.dayType);
+      }
+      if (classificationUnavailable || dayTypes.size !== 1) {
+        classificationUnavailable = true;
+        break;
+      }
+      classifiedCompleteDates.set(dateBucket.localDate, [...dayTypes][0]!);
+    }
+    for (const dayType of ["weekday", "weekend"] as const) {
+      if (classificationUnavailable) {
+        dayProfiles.push({
+          dayType,
+          scopeId: scope.scopeId,
+          scopeName: scope.scopeName,
+          status: "unavailable",
+          reason: {
+            code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE",
+            message: `Accepted facts do not provide one consistent Day Type per complete local day for ${scope.scopeName}.`,
+          },
+        });
+        continue;
+      }
+      const completeDates = [...classifiedCompleteDates.entries()]
+        .filter(([, classifiedDayType]) => classifiedDayType === dayType)
+        .map(([localDate]) => localDate);
+      if (completeDates.length === 0) {
+        dayProfiles.push({
+          dayType,
+          scopeId: scope.scopeId,
+          scopeName: scope.scopeName,
+          status: "unavailable",
+          reason: {
+            code: "COMPLETE_DAY_SAMPLE_UNAVAILABLE",
+            message: `No complete ${dayType} local-day sample is available for ${scope.scopeName}.`,
+          },
+        });
+        continue;
+      }
+      const completeDateSet = new Set(completeDates);
+      dayProfiles.push({
+        dayType,
+        scopeId: scope.scopeId,
+        scopeName: scope.scopeName,
+        status: "available",
+        sampleDayCount: completeDates.length,
+        values: Array.from({ length: 24 }, (_, localHour) => {
+          const samples = scope.cells.filter((cell) => (
+            cell.localHour === localHour
+            && completeDateSet.has(cell.localDate)
+            && cell.usageKwh !== null
+          ));
+          return {
+            localHour,
+            usageKwh: round(
+              samples.reduce((sum, cell) => sum + (cell.usageKwh ?? 0), 0) / samples.length,
+              4,
+            ),
+          };
+        }),
+      });
+    }
+  }
+  for (const scope of scopes) {
+    dayProfiles.push({
+      dayType: "public_holiday",
+      scopeId: scope.scopeId,
+      scopeName: scope.scopeName,
+      status: "unavailable",
+      reason: {
+        code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE",
+        message: "Public Holiday profile requires an authoritative release-pinned Calendar classification.",
+      },
+    });
+  }
+  return {
+    metricId: "energy.total_usage_kwh@1",
+    grain: "hour",
+    unit: "kWh",
+    timezone: input.timezone,
+    queryId: "time_bucket_grid_v1",
+    scopes,
+    dayProfiles,
+  };
+};
+
+const parseTimeBucketFacts = (
+  scopeId: string,
+  value: string,
+): Array<{
+  scopeId: string;
+  localDate: string;
+  localHour: number;
+  usageKwh: number | null;
+  validIntervalCount: number;
+  qualityEventCount: number;
+  dayType: string | null;
+  dayTypeCount: number;
+}> => {
+  const parsed = JSON.parse(value || "[]") as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error(`ENERGYIQ_TIME_BUCKET_GRID_INVALID:${scopeId}`);
+  }
+  return parsed.map((item, index) => {
+    if (!isRecord(item)) {
+      throw new Error(`ENERGYIQ_TIME_BUCKET_GRID_CELL_INVALID:${scopeId}:${index}`);
+    }
+    const localDate = String(item.local_date ?? "");
+    const localHour = Number(item.local_hour);
+    const usageKwh = item.usage_kwh === null || item.usage_kwh === undefined
+      ? null
+      : Number(item.usage_kwh);
+    const validIntervalCount = Number(item.valid_interval_count);
+    const qualityEventCount = Number(item.quality_event_count);
+    const dayType = item.day_type === null || item.day_type === undefined
+      ? null
+      : String(item.day_type);
+    const dayTypeCount = Number(item.day_type_count);
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(localDate)
+      || !Number.isInteger(localHour)
+      || localHour < 0
+      || localHour > 23
+      || (usageKwh !== null && !Number.isFinite(usageKwh))
+      || !Number.isFinite(validIntervalCount)
+      || !Number.isFinite(qualityEventCount)
+      || !Number.isInteger(dayTypeCount)
+      || dayTypeCount < 0
+    ) {
+      throw new Error(`ENERGYIQ_TIME_BUCKET_GRID_CELL_INVALID:${scopeId}:${index}`);
+    }
+    return {
+      scopeId,
+      localDate,
+      localHour,
+      usageKwh,
+      validIntervalCount,
+      qualityEventCount,
+      dayType,
+      dayTypeCount,
+    };
+  });
+};
+
 const formatLocalDate = (value: string, timezone: string): string => {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
@@ -1332,9 +1630,16 @@ const shiftLocalDate = (value: string, days: number): string => {
   return shifted.toISOString().slice(0, 10);
 };
 
-const zonedStartOfLocalDay = (value: string, timezone: string): string => {
+const zonedStartOfLocalDay = (value: string, timezone: string): string =>
+  zonedStartOfLocalHour(value, 0, timezone);
+
+const zonedStartOfLocalHour = (
+  value: string,
+  hour: number,
+  timezone: string,
+): string => {
   const [year, month, day] = value.split("-").map(Number);
-  const targetUtc = Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1);
+  const targetUtc = Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1, hour);
   let candidate = targetUtc;
   for (let index = 0; index < 3; index += 1) {
     const parts = new Intl.DateTimeFormat("en-CA", {
@@ -1944,6 +2249,47 @@ const dailyTotalsSql = (
   WHERE ${meterNodeFilter(scope.meterNodeIds)}
   GROUP BY CAST(source.local_interval_start AS DATE)
 `).join(" UNION ALL ") + " ORDER BY scope_order, local_date";
+
+const timeBucketGridSql = (
+  viewName: string,
+  scopes: DailyTotalScope[],
+): string => `
+  SELECT
+    scope_id,
+    scope_name,
+    scope_type,
+    COALESCE(TO_JSON(LIST(STRUCT_PACK(
+      local_date := local_date,
+      local_hour := local_hour,
+      usage_kwh := usage_kwh,
+      valid_interval_count := valid_interval_count,
+      quality_event_count := quality_event_count,
+      day_type := day_type,
+      day_type_count := day_type_count
+    ) ORDER BY local_date, local_hour)), '[]') AS cells_json,
+    scope_order
+  FROM (
+${scopes.map((scope, index) => `
+  SELECT
+    ${sqlLiteral(scope.scopeId)} AS scope_id,
+    ${sqlLiteral(scope.scopeName)} AS scope_name,
+    ${sqlLiteral(scope.scopeType)} AS scope_type,
+    STRFTIME(CAST(source.local_interval_start AS DATE), '%Y-%m-%d') AS local_date,
+    source.local_hour,
+    SUM(source.usage_kwh) FILTER (WHERE source.quality_status = 'ok') AS usage_kwh,
+    COUNT(*) FILTER (WHERE source.quality_status = 'ok') AS valid_interval_count,
+    COUNT(*) FILTER (WHERE source.quality_status <> 'ok') AS quality_event_count,
+    MAX(source.day_type) FILTER (WHERE source.quality_status = 'ok') AS day_type,
+    COUNT(DISTINCT source.day_type) FILTER (WHERE source.quality_status = 'ok') AS day_type_count,
+    ${index} AS scope_order
+  FROM ${quoteIdentifier(viewName)} source
+  WHERE ${meterNodeFilter(scope.meterNodeIds)}
+  GROUP BY CAST(source.local_interval_start AS DATE), source.local_hour
+`).join(" UNION ALL ")}
+  ) time_cells
+  GROUP BY scope_id, scope_name, scope_type, scope_order
+  ORDER BY scope_order
+`;
 
 const peakBreakdownSql = (viewName: string, peakAt?: string): string => `
   SELECT
