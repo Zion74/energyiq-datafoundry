@@ -2,8 +2,13 @@ import { createErrorResult, createSuccessResult, type AppErrorCode } from "@data
 import { readEnergyFactCoverage, resolveEnergyFactStorePath, writeEnergyFactMaterialization } from "@datafoundry/data-gateway";
 import type {
   EnergyIqImportBatchRecord,
+  EnergyIqOperatingCalendarEntry,
+  EnergyIqOperatingDay,
+  EnergyIqOperatingTimeRange,
+  EnergyIqPolicyOwner,
   EnergyIqProjectSetupDocument,
   EnergyIqSavedAnalysisRecord,
+  EnergyIqTariffScheduleEntry,
   EnergyIqTemplateDraftDocument,
   EnergyIqTemplateRevisionRecord,
 } from "@datafoundry/metadata";
@@ -264,6 +269,50 @@ export const handleEnergyApiRequest = async (
           }),
         }),
       };
+    }
+    if (segments[0] === "projects" && segments[2] === "operational-policies") {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      requireEnergyAdminProject(context, user, projectId);
+      if (segments.length === 3 && request.method === "GET") {
+        return {
+          status: 200,
+          body: createSuccessResult(createOperationalPolicyConfiguration(context, projectId)),
+        };
+      }
+      if (segments.length === 4 && segments[3] === "tariff" && request.method === "POST") {
+        const body = requireRecord(await readJsonBody(request));
+        const revision = context.metadataStore.energyIq.operationalPolicy.publishTariffSchedule({
+          version_id: `tariff-${randomUUID()}`,
+          project_id: projectId,
+          entries: parseTariffScheduleEntries(body.entries),
+          published_by: user.id,
+          activate: true,
+        });
+        return {
+          status: 201,
+          body: createSuccessResult({
+            revision,
+            configuration: createOperationalPolicyConfiguration(context, projectId),
+          }),
+        };
+      }
+      if (segments.length === 4 && segments[3] === "calendar" && request.method === "POST") {
+        const body = requireRecord(await readJsonBody(request));
+        const revision = context.metadataStore.energyIq.operationalPolicy.publishOperatingCalendar({
+          version_id: `calendar-${randomUUID()}`,
+          project_id: projectId,
+          entries: parseOperatingCalendarEntries(body.entries),
+          published_by: user.id,
+          activate: true,
+        });
+        return {
+          status: 201,
+          body: createSuccessResult({
+            revision,
+            configuration: createOperationalPolicyConfiguration(context, projectId),
+          }),
+        };
+      }
     }
     if (segments[0] === "projects" && segments[2] === "setup") {
       const projectId = decodeURIComponent(segments[1] ?? "");
@@ -652,7 +701,14 @@ export const handleEnergyApiRequest = async (
     const message = error instanceof Error ? error.message : String(error);
     const forbidden = message.includes("FORBIDDEN") || message.includes("ADMIN_REQUIRED");
     const conflict = message.includes("CONFLICT");
-    const invalid = message.includes("INVALID") || message.includes("REQUIRED") || message.includes("EXCEL_EMPTY") || message.includes("NOT_CONFIRMED") || message === "ENERGYIQ_METRIC_REVISION_NOT_FOUND" || message === "ENERGYIQ_RULE_REVISION_NOT_FOUND";
+    const invalid = message.includes("INVALID")
+      || message.includes("REQUIRED")
+      || message.includes("EXCEL_EMPTY")
+      || message.includes("NOT_CONFIRMED")
+      || message.startsWith("ENERGYIQ_TARIFF_")
+      || message.startsWith("ENERGYIQ_OPERATING_")
+      || message === "ENERGYIQ_METRIC_REVISION_NOT_FOUND"
+      || message === "ENERGYIQ_RULE_REVISION_NOT_FOUND";
     const code: AppErrorCode = forbidden
       ? "FORBIDDEN"
       : conflict
@@ -668,6 +724,31 @@ export const handleEnergyApiRequest = async (
 };
 
 const MINIMUM_SAVED_ANALYSIS_COVERAGE_PCT = 95;
+
+const createOperationalPolicyConfiguration = (
+  context: Required<ConfigApiContext>,
+  projectId: string,
+) => {
+  const project = context.metadataStore.energyIq.getProject(projectId);
+  const binding = context.metadataStore.energyIq.operationalPolicy.getActivePolicyVersions(projectId);
+  const publishedRevision = context.metadataStore.energyIq.templates.getLatestProjectRevision(projectId);
+  return {
+    projectId,
+    timezone: project.timezone,
+    published: {
+      tariff_schedule_version: publishedRevision?.tariff_schedule_version ?? project.tariff_schedule_version,
+      business_calendar_version: publishedRevision?.business_calendar_version ?? project.business_calendar_version,
+      ...(publishedRevision ? { template_revision_id: publishedRevision.revision_id } : {}),
+    },
+    pending: {
+      tariff_schedule_version: binding.tariff_schedule_version ?? project.tariff_schedule_version,
+      business_calendar_version: binding.business_calendar_version ?? project.business_calendar_version,
+    },
+    tariffRevisions: context.metadataStore.energyIq.operationalPolicy.listTariffSchedules(projectId),
+    operatingCalendarRevisions: context.metadataStore.energyIq.operationalPolicy.listOperatingCalendars(projectId),
+    hasUnpublishedChanges: project.has_unpublished_changes,
+  };
+};
 
 const requireDecisionGradeCoverage = (analysis: EnergyScopeAnalysis): void => {
   if (analysis.dataHealth.coveragePct < MINIMUM_SAVED_ANALYSIS_COVERAGE_PCT) {
@@ -896,6 +977,119 @@ const parseProjectSetupDocument = (value: unknown): EnergyIqProjectSetupDocument
   };
 };
 
+const parseTariffScheduleEntries = (value: unknown): EnergyIqTariffScheduleEntry[] => {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error("ENERGYIQ_TARIFF_ENTRIES_REQUIRED");
+  }
+  return value.map((candidate, index) => {
+    const entry = requireRecord(candidate, `ENERGYIQ_TARIFF_ENTRY_INVALID:${index}`);
+    const effectiveTo = optionalString(entry.effectiveTo);
+    return {
+      id: `tariff-entry-${randomUUID()}`,
+      owner: parsePolicyOwner(entry.owner, `ENERGYIQ_TARIFF_OWNER_INVALID:${index}`),
+      effective_from: requireNonEmptyString(
+        entry.effectiveFrom,
+        `ENERGYIQ_TARIFF_EFFECTIVE_FROM_REQUIRED:${index}`,
+      ),
+      ...(effectiveTo ? { effective_to: effectiveTo } : {}),
+      currency: requireNonEmptyString(entry.currency, `ENERGYIQ_TARIFF_CURRENCY_REQUIRED:${index}`).toUpperCase(),
+      rate_per_kwh: requirePositiveNumber(entry.ratePerKwh, `ENERGYIQ_TARIFF_RATE_INVALID:${index}`),
+    };
+  });
+};
+
+const OPERATING_POLICY_DAYS: EnergyIqOperatingDay[] = [
+  "monday",
+  "tuesday",
+  "wednesday",
+  "thursday",
+  "friday",
+  "saturday",
+  "sunday",
+];
+
+const parseOperatingCalendarEntries = (value: unknown): EnergyIqOperatingCalendarEntry[] => {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error("ENERGYIQ_OPERATING_CALENDAR_ENTRIES_REQUIRED");
+  }
+  return value.map((candidate, index) => {
+    const entry = requireRecord(candidate, `ENERGYIQ_OPERATING_CALENDAR_ENTRY_INVALID:${index}`);
+    const effectiveTo = optionalString(entry.effectiveTo);
+    const weekly = requireRecord(entry.weekly, `ENERGYIQ_OPERATING_WEEKLY_REQUIRED:${index}`);
+    const parsedWeekly = Object.fromEntries(OPERATING_POLICY_DAYS.map((day) => [
+      day,
+      parseOperatingTimeRanges(weekly[day], `ENERGYIQ_OPERATING_DAY_INVALID:${index}:${day}`),
+    ])) as Record<EnergyIqOperatingDay, EnergyIqOperatingTimeRange[]>;
+    const exceptions = entry.exceptions === undefined
+      ? undefined
+      : parseOperatingExceptions(entry.exceptions, index);
+    return {
+      id: `calendar-entry-${randomUUID()}`,
+      owner: parsePolicyOwner(entry.owner, `ENERGYIQ_OPERATING_OWNER_INVALID:${index}`),
+      effective_from: requireNonEmptyString(
+        entry.effectiveFrom,
+        `ENERGYIQ_OPERATING_EFFECTIVE_FROM_REQUIRED:${index}`,
+      ),
+      ...(effectiveTo ? { effective_to: effectiveTo } : {}),
+      weekly: parsedWeekly,
+      ...(exceptions ? { exceptions } : {}),
+    };
+  });
+};
+
+const parsePolicyOwner = (value: unknown, message: string): EnergyIqPolicyOwner => {
+  const owner = requireRecord(value, message);
+  if (owner.kind === "project") return { kind: "project" };
+  if (owner.kind === "scope") {
+    return {
+      kind: "scope",
+      scope_id: requireNonEmptyString(owner.scopeId, `${message}:SCOPE_REQUIRED`),
+    };
+  }
+  throw new Error(message);
+};
+
+const parseOperatingTimeRanges = (
+  value: unknown,
+  message: string,
+): EnergyIqOperatingTimeRange[] => {
+  if (!Array.isArray(value)) throw new Error(message);
+  return value.map((candidate, index) => {
+    const range = requireRecord(candidate, `${message}:${index}`);
+    return {
+      from: requireNonEmptyString(range.from, `${message}:${index}:FROM_REQUIRED`),
+      to: requireNonEmptyString(range.to, `${message}:${index}:TO_REQUIRED`),
+    };
+  });
+};
+
+const parseOperatingExceptions = (
+  value: unknown,
+  entryIndex: number,
+): NonNullable<EnergyIqOperatingCalendarEntry["exceptions"]> => {
+  if (!Array.isArray(value)) {
+    throw new Error(`ENERGYIQ_OPERATING_EXCEPTIONS_INVALID:${entryIndex}`);
+  }
+  return value.map((candidate, exceptionIndex) => {
+    const exception = requireRecord(
+      candidate,
+      `ENERGYIQ_OPERATING_EXCEPTION_INVALID:${entryIndex}:${exceptionIndex}`,
+    );
+    const label = optionalString(exception.label);
+    return {
+      date: requireNonEmptyString(
+        exception.date,
+        `ENERGYIQ_OPERATING_EXCEPTION_DATE_REQUIRED:${entryIndex}:${exceptionIndex}`,
+      ),
+      operating: parseOperatingTimeRanges(
+        exception.operating,
+        `ENERGYIQ_OPERATING_EXCEPTION_RANGES_INVALID:${entryIndex}:${exceptionIndex}`,
+      ),
+      ...(label ? { label } : {}),
+    };
+  });
+};
+
 const parseTemplateDraftDocument = (value: unknown): EnergyIqTemplateDraftDocument => {
   const document = requireRecord(value, "ENERGYIQ_TEMPLATE_DOCUMENT_INVALID");
   if (!Array.isArray(document.templates)) throw new Error("ENERGYIQ_TEMPLATE_DOCUMENT_INVALID");
@@ -1101,6 +1295,12 @@ const optionalString = (value: unknown): string | undefined =>
 
 const optionalNumber = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) ? value : undefined;
+
+const requirePositiveNumber = (value: unknown, message: string): number => {
+  const number = optionalNumber(value);
+  if (number === undefined || number <= 0) throw new Error(message);
+  return number;
+};
 
 const requireInteger = (value: unknown, message: string): number => {
   if (typeof value !== "number" || !Number.isInteger(value)) {

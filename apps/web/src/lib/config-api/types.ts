@@ -467,6 +467,101 @@ export type EnergyScopeAnalysisDto = {
   };
 };
 
+export type EnergyOperationalPolicyOwnerDto =
+  | { kind: "project" }
+  | { kind: "scope"; scope_id: string };
+
+export type EnergyOperationalPolicyOwnerInputDto =
+  | { kind: "project" }
+  | { kind: "scope"; scopeId: string };
+
+export type EnergyOperatingDayDto =
+  | "monday"
+  | "tuesday"
+  | "wednesday"
+  | "thursday"
+  | "friday"
+  | "saturday"
+  | "sunday";
+
+export type EnergyOperatingTimeRangeDto = { from: string; to: string };
+
+export type EnergyTariffScheduleEntryDto = {
+  id: string;
+  owner: EnergyOperationalPolicyOwnerDto;
+  effective_from: string;
+  effective_to?: string;
+  currency: string;
+  rate_per_kwh: number;
+};
+
+export type EnergyTariffScheduleRevisionDto = {
+  version_id: string;
+  project_id: string;
+  entries: EnergyTariffScheduleEntryDto[];
+  published_by: string;
+  published_at: string;
+};
+
+export type EnergyOperatingCalendarEntryDto = {
+  id: string;
+  owner: EnergyOperationalPolicyOwnerDto;
+  effective_from: string;
+  effective_to?: string;
+  weekly: Record<EnergyOperatingDayDto, EnergyOperatingTimeRangeDto[]>;
+  exceptions?: Array<{
+    date: string;
+    operating: EnergyOperatingTimeRangeDto[];
+    label?: string;
+  }>;
+};
+
+export type EnergyOperatingCalendarRevisionDto = {
+  version_id: string;
+  project_id: string;
+  timezone: string;
+  entries: EnergyOperatingCalendarEntryDto[];
+  published_by: string;
+  published_at: string;
+};
+
+export type EnergyOperationalPolicyConfigurationDto = {
+  projectId: string;
+  timezone: string;
+  published: {
+    tariff_schedule_version: string;
+    business_calendar_version: string;
+    template_revision_id?: string;
+  };
+  pending: {
+    tariff_schedule_version: string;
+    business_calendar_version: string;
+  };
+  tariffRevisions: EnergyTariffScheduleRevisionDto[];
+  operatingCalendarRevisions: EnergyOperatingCalendarRevisionDto[];
+  hasUnpublishedChanges: boolean;
+};
+
+export type EnergyTariffScheduleEntryInputDto = {
+  owner: EnergyOperationalPolicyOwnerInputDto;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  currency: string;
+  ratePerKwh: number;
+};
+
+export type EnergyOperatingCalendarEntryInputDto = {
+  owner: EnergyOperationalPolicyOwnerInputDto;
+  effectiveFrom: string;
+  effectiveTo?: string;
+  weekly: Record<EnergyOperatingDayDto, EnergyOperatingTimeRangeDto[]>;
+  exceptions?: Array<{
+    date: string;
+    operating: EnergyOperatingTimeRangeDto[];
+    label?: string;
+  }>;
+};
+
 export type EnergyProjectRendererKeyDto = "ngee-ann-overview" | "preschool-overview";
 
 export type EnergyScopeMetadataEvidenceDto = {

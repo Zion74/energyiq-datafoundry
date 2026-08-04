@@ -354,6 +354,19 @@ export class EnergyIqProjectSetupStore {
         document: draft.document,
         now
       });
+      const pendingPolicies = this.resolvePendingOperationalPolicies(input.project_id);
+      this.db.prepare(`
+        UPDATE energyiq_projects
+        SET business_calendar_version = ?,
+            tariff_schedule_version = ?,
+            updated_at = ?
+        WHERE id = ?
+      `).run(
+        pendingPolicies.business_calendar_version,
+        pendingPolicies.tariff_schedule_version,
+        now,
+        input.project_id,
+      );
       const templateRevision = new EnergyIqTemplateStore(this.db).publishProjectRevisionWithinTransaction({
         project_id: input.project_id,
         tier_definition_ids: [...draft.document.tiers]
@@ -413,6 +426,26 @@ export class EnergyIqProjectSetupStore {
       this.db.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  private resolvePendingOperationalPolicies(projectId: string): {
+    business_calendar_version: string;
+    tariff_schedule_version: string;
+  } {
+    const row = this.db.prepare(`
+      SELECT
+        COALESCE(binding.business_calendar_version, project.business_calendar_version) AS business_calendar_version,
+        COALESCE(binding.tariff_schedule_version, project.tariff_schedule_version) AS tariff_schedule_version
+      FROM energyiq_projects project
+      LEFT JOIN energyiq_operational_policy_bindings binding
+        ON binding.project_id = project.id
+      WHERE project.id = ?
+    `).get(projectId);
+    if (!isRecord(row)) throw new Error(`ENERGYIQ_PROJECT_NOT_FOUND:${projectId}`);
+    return {
+      business_calendar_version: requiredString(row, "business_calendar_version"),
+      tariff_schedule_version: requiredString(row, "tariff_schedule_version"),
+    };
   }
 
   bootstrapPublished(input: EnergyIqProjectBootstrapInput): string {

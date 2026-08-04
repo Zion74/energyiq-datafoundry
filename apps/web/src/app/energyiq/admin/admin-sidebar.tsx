@@ -12,6 +12,7 @@ export type AdminSection =
   | "structure"
   | "data-sources"
   | "meter-mapping"
+  | "operational-policies"
   | "data-map"
   | "templates"
   | "knowledge"
@@ -61,6 +62,7 @@ const projectItems: NavigationItem[] = [
   { id: "structure", label: "Structure", icon: "floor", available: true },
   { id: "data-sources", label: "Data Sources", icon: "settings", available: true },
   { id: "meter-mapping", label: "Meter Mapping", icon: "meter", available: true },
+  { id: "operational-policies", label: "Tariff & Hours", icon: "settings", available: true },
   { id: "data-map", label: "Data Map", icon: "map", available: true },
   { id: "templates", label: "Templates", icon: "explorer", available: true },
   { id: "knowledge", label: "Knowledge", icon: "spark", available: true },
@@ -312,7 +314,7 @@ export function isAdminSection(value: string | null): value is AdminSection {
   if (!value) return false;
   return [
     "overview", "organisations", "users", "project-overview", "basics", "structure",
-    "data-sources", "meter-mapping", "data-map", "templates", "knowledge", "assets",
+    "data-sources", "meter-mapping", "operational-policies", "data-map", "templates", "knowledge", "assets",
     "runs", "conversations", "usage", "traces", "models", "skills", "tools", "mcp",
   ].includes(value);
 }

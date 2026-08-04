@@ -453,6 +453,89 @@ describe("EnergyIqOperationalPolicyStore", () => {
     }
   });
 
+  it("keeps activated policy revisions pending until Project Setup publishes a new release", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-policy-pending-release-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.workspaces.upsert({
+        id: "workspace-pending-release",
+        owner_user_id: "dev-user",
+        name: "Pending Release Workspace",
+        kind: "customer",
+      });
+      metadata.energyIq.projectSetup.bootstrapPublished({
+        project: {
+          id: "project-pending-release",
+          workspace_id: "workspace-pending-release",
+          name: "Pending Release Project",
+          timezone: "Asia/Singapore",
+          hierarchy_revision_id: "project-pending-release-hierarchy-v1",
+          meter_formula_revision_id: "project-pending-release-meter-v1",
+          business_calendar_version: "calendar-v1",
+          tariff_schedule_version: "tariff-v1",
+          root_scope_id: "project-pending-release-root",
+        },
+        document: {
+          project: { name: "Pending Release Project", timezone: "Asia/Singapore" },
+          tier_structure_locked: true,
+          tiers: [{ id: "tier-level", ordinal: 1, alias: "Level" }],
+          nodes: [{
+            id: "level-1",
+            tier_definition_id: "tier-level",
+            name: "Level 1",
+            sort_order: 1,
+            metadata_status: "confirmed",
+          }],
+        },
+        published_by: "dev-user",
+      });
+
+      publishTariff(metadata, "project-pending-release", "tariff-v2", 0.4, true);
+      publishCalendar(
+        metadata,
+        "project-pending-release",
+        "calendar-v2",
+        operatingWeek("08:00", "18:00"),
+        true,
+      );
+
+      expect(metadata.energyIq.operationalPolicy.getActivePolicyVersions("project-pending-release"))
+        .toEqual({
+          tariff_schedule_version: "tariff-v2",
+          business_calendar_version: "calendar-v2",
+        });
+      expect(metadata.energyIq.getProject("project-pending-release")).toMatchObject({
+        tariff_schedule_version: "tariff-v1",
+        business_calendar_version: "calendar-v1",
+        has_unpublished_changes: true,
+      });
+
+      const draft = metadata.energyIq.projectSetup.getDraft({
+        project_id: "project-pending-release",
+        user_id: "dev-user",
+      });
+      metadata.energyIq.projectSetup.publishDraft({
+        project_id: "project-pending-release",
+        expected_revision: draft.revision,
+        user_id: "dev-user",
+      });
+
+      expect(metadata.energyIq.templates.getLatestProjectRevision("project-pending-release"))
+        .toMatchObject({
+          tariff_schedule_version: "tariff-v2",
+          business_calendar_version: "calendar-v2",
+        });
+      expect(metadata.energyIq.getProject("project-pending-release")).toMatchObject({
+        tariff_schedule_version: "tariff-v2",
+        business_calendar_version: "calendar-v2",
+        has_unpublished_changes: false,
+      });
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects duplicate Tariff entry IDs even when adjacent entries carry different rates", () => {
     const root = mkdtempSync(join(tmpdir(), "energyiq-tariff-entry-id-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });

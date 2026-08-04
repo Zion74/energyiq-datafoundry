@@ -17,6 +17,9 @@ import type {
   EnergyAdminOrganisationDto,
   EnergyAdminUserDto,
   EnergyImportBatchDto,
+  EnergyOperatingCalendarEntryInputDto,
+  EnergyOperatingCalendarRevisionDto,
+  EnergyOperationalPolicyConfigurationDto,
   EnergyProjectAnalysisResolutionDto,
   EnergyProjectMetricConfigResponseDto,
   EnergyProjectDataCoverageDto,
@@ -35,6 +38,8 @@ import type {
   EnergyScopeAnalysisDto,
   EnergySavedAnalysisDetailDto,
   EnergySavedAnalysisSummaryDto,
+  EnergyTariffScheduleEntryInputDto,
+  EnergyTariffScheduleRevisionDto,
   FileAssetRefDto,
   JobDto,
   KnowledgeBaseDto,
@@ -415,6 +420,38 @@ export const configApi = {
   }> {
     return requestEnvelope(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/setup/publish`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  },
+
+  getEnergyOperationalPolicies(projectId: string): Promise<EnergyOperationalPolicyConfigurationDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/operational-policies`,
+    );
+  },
+
+  publishEnergyTariffSchedule(
+    projectId: string,
+    body: { entries: EnergyTariffScheduleEntryInputDto[] },
+  ): Promise<{
+    revision: EnergyTariffScheduleRevisionDto;
+    configuration: EnergyOperationalPolicyConfigurationDto;
+  }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/operational-policies/tariff`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  },
+
+  publishEnergyOperatingCalendar(
+    projectId: string,
+    body: { entries: EnergyOperatingCalendarEntryInputDto[] },
+  ): Promise<{
+    revision: EnergyOperatingCalendarRevisionDto;
+    configuration: EnergyOperationalPolicyConfigurationDto;
+  }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/operational-policies/calendar`,
       { method: "POST", body: JSON.stringify(body) },
     );
   },

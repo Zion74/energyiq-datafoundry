@@ -343,6 +343,15 @@ export class EnergyIqOperationalPolicyStore {
     return mapTariffRevision(row);
   }
 
+  listTariffSchedules(projectId: string): EnergyIqTariffScheduleRevision[] {
+    this.requireProject(projectId);
+    return this.db.prepare(`
+      SELECT * FROM energyiq_tariff_schedule_revisions
+      WHERE project_id = ?
+      ORDER BY published_at DESC, version_id DESC
+    `).all(projectId).filter(isRecord).map(mapTariffRevision);
+  }
+
   publishOperatingCalendar(input: {
     version_id: string;
     project_id: string;
@@ -396,6 +405,15 @@ export class EnergyIqOperationalPolicyStore {
       throw new Error(`ENERGYIQ_OPERATING_CALENDAR_REVISION_NOT_FOUND:${versionId}`);
     }
     return mapOperatingCalendarRevision(row);
+  }
+
+  listOperatingCalendars(projectId: string): EnergyIqOperatingCalendarRevision[] {
+    this.requireProject(projectId);
+    return this.db.prepare(`
+      SELECT * FROM energyiq_operating_calendar_revisions
+      WHERE project_id = ?
+      ORDER BY published_at DESC, version_id DESC
+    `).all(projectId).filter(isRecord).map(mapOperatingCalendarRevision);
   }
 
   activateProjectPolicies(input: {
@@ -742,20 +760,11 @@ export class EnergyIqOperationalPolicyStore {
       input.updated_by,
       input.updated_at,
     );
-    if (input.tariff_schedule_version) {
-      this.db.prepare(`
-        UPDATE energyiq_projects
-        SET tariff_schedule_version = ?, has_unpublished_changes = 1, updated_at = ?
-        WHERE id = ?
-      `).run(input.tariff_schedule_version, input.updated_at, input.project_id);
-    }
-    if (input.business_calendar_version) {
-      this.db.prepare(`
-        UPDATE energyiq_projects
-        SET business_calendar_version = ?, has_unpublished_changes = 1, updated_at = ?
-        WHERE id = ?
-      `).run(input.business_calendar_version, input.updated_at, input.project_id);
-    }
+    this.db.prepare(`
+      UPDATE energyiq_projects
+      SET has_unpublished_changes = 1, updated_at = ?
+      WHERE id = ?
+    `).run(input.updated_at, input.project_id);
   }
 }
 

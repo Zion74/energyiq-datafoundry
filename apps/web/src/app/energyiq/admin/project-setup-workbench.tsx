@@ -40,6 +40,7 @@ import type { useEnergyIqAccess } from "../_components/energyiq-access";
 import { EnergyIqAdminSidebar, type AdminSection } from "./admin-sidebar";
 import { AdminAccessPages } from "./admin-access-pages";
 import { resolveComponentReadiness, resolveMetricReadiness, resolveRuleReadiness } from "./analysis-configuration-model";
+import { OperationalPolicySettings } from "./operational-policy-settings";
 import { deriveProjectDeliveryProgress } from "./project-delivery-progress";
 import { TemplateDraftPreview } from "./template-draft-preview";
 import {
@@ -178,6 +179,13 @@ export function EnergyIqAdminWorkbench({
     }
   }, []);
 
+  const refreshSelectedProjectState = useCallback(async () => {
+    await Promise.all([
+      loadSetup(selectedProjectId),
+      refresh(),
+    ]);
+  }, [loadSetup, refresh, selectedProjectId]);
+
   useProjectSetupLoader(selectedProjectId, loadSetup);
 
   const changeDocument = useCallback((
@@ -245,10 +253,7 @@ export function EnergyIqAdminWorkbench({
         expectedMetricConfigRevision: review.metricConfig.revision,
         expectedRuleConfigRevision: review.ruleConfig.revision,
       });
-      await Promise.all([
-        loadSetup(selectedProjectId),
-        refresh(),
-      ]);
+      await refreshSelectedProjectState();
       setNotice(`Published ${result.template_revision_id}. Future edits remain in Draft until the next publication.`);
     } catch (reason) {
       setError(messageFrom(reason, "Failed to publish project revision"));
@@ -256,7 +261,7 @@ export function EnergyIqAdminWorkbench({
     } finally {
       setSaving(false);
     }
-  }, [loadSetup, persistDraft, refresh, selectedProjectId]);
+  }, [persistDraft, refreshSelectedProjectState, selectedProjectId]);
 
   const discardUnsavedChanges = useCallback(() => {
     if (!setup || !dirty) return;
@@ -394,6 +399,7 @@ export function EnergyIqAdminWorkbench({
             setSection,
             publishing: saving,
             publishProjectRevision,
+            onPoliciesChanged: refreshSelectedProjectState,
           }) : null}
         </div>
       </div>
@@ -433,6 +439,7 @@ function renderAdminSection({
   setSection,
   publishing,
   publishProjectRevision,
+  onPoliciesChanged,
 }: {
   section: AdminSection;
   projects: EnergyProjectDto[];
@@ -452,6 +459,7 @@ function renderAdminSection({
   setSection: Dispatch<SetStateAction<AdminSection>>;
   publishing: boolean;
   publishProjectRevision: (review: ProjectPublicationReview) => Promise<void>;
+  onPoliciesChanged: () => Promise<void>;
 }) {
   if (section === "overview") {
     return <AdminOverview projects={projects} selectedProject={selectedProject} chooseAdminProject={chooseAdminProject} setSection={setSection} />;
@@ -515,6 +523,15 @@ function renderAdminSection({
         intent={meterMappingIntent}
         document={document}
         changeDocument={changeDocument}
+      />
+    );
+  }
+  if (section === "operational-policies") {
+    return (
+      <OperationalPolicySettings
+        projectId={selectedProjectId}
+        setup={setup}
+        onChanged={onPoliciesChanged}
       />
     );
   }
@@ -2433,7 +2450,7 @@ function plannedSectionCopy(section: AdminSection): { title: string; description
 }
 
 function isProjectContext(section: AdminSection): boolean {
-  return ["project-overview", "basics", "structure", "data-sources", "meter-mapping", "data-map", "templates", "knowledge", "assets"].includes(section);
+  return ["project-overview", "basics", "structure", "data-sources", "meter-mapping", "operational-policies", "data-map", "templates", "knowledge", "assets"].includes(section);
 }
 
 function adminSectionMeta(section: AdminSection, projectName?: string): { title: string; description: string } {
@@ -2447,6 +2464,7 @@ function adminSectionMeta(section: AdminSection, projectName?: string): { title:
     structure: { title: "Structure", description: `${project} · define meaningful Tiers and Nodes from the lowest scope upward.` },
     "data-sources": { title: "Data Sources", description: `${project} · Excel now, Tuya later, one downstream fact contract.` },
     "meter-mapping": { title: "Meter Mapping", description: `${project} · source labels to physical meters, scopes and optional derived meters.` },
+    "operational-policies": { title: "Tariff & Operating Hours", description: `${project} · immutable effective policy revisions prepared for the next Project publication.` },
     "data-map": { title: "Data Map", description: `${project} · trusted configured relationships and traceable lineage.` },
     templates: { title: "Templates", description: `${project} · controlled Project and Tier analysis templates.` },
     knowledge: { title: "Knowledge", description: `${project} · documents and citations available to AI.` },
