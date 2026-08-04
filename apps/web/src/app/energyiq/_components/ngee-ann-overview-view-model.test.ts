@@ -277,12 +277,12 @@ describe("Ngee Ann Overview ViewModel", () => {
       usageKwh: point.usageKwh,
       status: point.status,
     }))).toEqual([
-      { localDate: "2026-06-10", usageKwh: "216.3774", status: "complete" },
-      { localDate: "2026-06-11", usageKwh: "233.8201", status: "complete" },
-      { localDate: "2026-06-12", usageKwh: "214.7432", status: "complete" },
-      { localDate: "2026-06-13", usageKwh: "214.7432", status: "complete" },
-      { localDate: "2026-06-14", usageKwh: "214.7432", status: "complete" },
-      { localDate: "2026-06-15", usageKwh: "214.7432", status: "complete" },
+      { localDate: "2026-06-10", usageKwh: "253.7018", status: "complete" },
+      { localDate: "2026-06-11", usageKwh: "268.399", status: "complete" },
+      { localDate: "2026-06-12", usageKwh: "260.0659", status: "complete" },
+      { localDate: "2026-06-13", usageKwh: "168.9645", status: "complete" },
+      { localDate: "2026-06-14", usageKwh: "127.9387", status: "complete" },
+      { localDate: "2026-06-15", usageKwh: "230.1002", status: "complete" },
       { localDate: "2026-06-16", usageKwh: "221.9982", status: "complete" },
     ]);
   });
@@ -311,7 +311,7 @@ describe("Ngee Ann Overview ViewModel", () => {
     expect(trend.status).toBe("available");
     expect(trend.scopes[0]!.limitation).toContain("not zero-filled");
     expect(trend.scopes[0]!.points[1]).toMatchObject({
-      usageKwh: "233.8201",
+      usageKwh: "268.399",
       status: "partial",
       statusLabel: "Partial",
       coverage: "75% coverage",

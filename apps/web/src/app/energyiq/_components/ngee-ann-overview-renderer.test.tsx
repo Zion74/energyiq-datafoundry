@@ -326,16 +326,16 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(level7Button.getAttribute("aria-pressed")).toBe("false");
 
     const projectPoint = container.querySelector<HTMLButtonElement>(
-      'button[aria-label^="Wed 10 Jun: 216.3774 kWh"]',
+      'button[aria-label^="Wed 10 Jun: 253.7018 kWh"]',
     )!;
     await act(async () => projectPoint.focus());
-    expect(container.textContent).toContain("216.3774 kWh");
+    expect(container.textContent).toContain("253.7018 kWh");
     expect(container.textContent).toContain("Complete / 100% coverage / 384 / 384 valid intervals");
 
     await activateNativeButton(projectPoint, "Enter");
     await act(async () => projectPoint.blur());
     expect(projectPoint.getAttribute("aria-pressed")).toBe("true");
-    expect(container.textContent).toContain("216.3774 kWh");
+    expect(container.textContent).toContain("253.7018 kWh");
 
     await activateNativeButton(level7Button, " ");
     expect(projectButton.getAttribute("aria-pressed")).toBe("false");
@@ -343,10 +343,10 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(container.textContent).toContain("Hover or focus a day to inspect accepted usage and coverage.");
 
     const level7Point = container.querySelector<HTMLButtonElement>(
-      'button[aria-label^="Wed 10 Jun: 148.956 kWh"]',
+      'button[aria-label^="Wed 10 Jun: 157.1325 kWh"]',
     )!;
     await act(async () => level7Point.focus());
-    expect(container.textContent).toContain("148.956 kWh");
+    expect(container.textContent).toContain("157.1325 kWh");
   });
 
   it("keeps partial and missing daily buckets visible without zero-filling them", async () => {
@@ -371,7 +371,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
 
     expect(container.textContent).toContain("not zero-filled");
     const partialPoint = container.querySelector<HTMLButtonElement>(
-      'button[aria-label*="233.8201 kWh; Partial; 75% coverage"]',
+      'button[aria-label*="268.399 kWh; Partial; 75% coverage"]',
     )!;
     const missingPoint = container.querySelector<HTMLButtonElement>(
       'button[aria-label*="no accepted facts; Unavailable; 0% coverage"]',
