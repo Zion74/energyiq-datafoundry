@@ -305,6 +305,79 @@ describe("published Overview URL reload", () => {
     });
   });
 
+  it("writes the current resource, period and Custom range when Scope changes", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Last%207%20days");
+    vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    const customPeriod = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "Custom");
+    await act(async () => customPeriod?.click());
+
+    const [fromInput, toInput] = Array.from(container.querySelectorAll<HTMLInputElement>("input[type='date']"));
+    const inputValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    await act(async () => {
+      inputValueSetter?.call(fromInput, "2026-06-10");
+      fromInput.dispatchEvent(new Event("input", { bubbles: true }));
+      inputValueSetter?.call(toInput, "2026-06-16");
+      toInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    const water = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "Water");
+    await act(async () => water?.click());
+    mockedRouter.replace.mockClear();
+
+    const scopeSelect = container.querySelector<HTMLButtonElement>("[role='combobox'][aria-label='Analysis Scope']");
+    await act(async () => scopeSelect?.click());
+    const totalCircuit = Array.from(document.querySelectorAll<HTMLButtonElement>("[role='option']"))
+      .find((option) => option.textContent?.includes("L6 Total Light"));
+    await act(async () => totalCircuit?.click());
+
+    expect(mockedRouter.replace).toHaveBeenCalledOnce();
+    expect(mockedRouter.replace).toHaveBeenCalledWith(
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=water&period=Custom&from=2026-06-10&to=2026-06-16",
+    );
+  });
+
+  it("shows a disabled Scope selector when hierarchy loading fails and retries on Refresh", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Last%207%20days");
+    const loadHierarchy = vi.mocked(configApi.getEnergyProjectHierarchy)
+      .mockRejectedValueOnce(new Error("Hierarchy service unavailable"))
+      .mockResolvedValue(projectHierarchy());
+    vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockRejectedValue(new Error("Analysis service unavailable"));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    const failedScopeSelect = container.querySelector<HTMLButtonElement>("[role='combobox'][aria-label='Analysis Scope']");
+    expect(failedScopeSelect?.disabled).toBe(true);
+    expect(container.textContent).toContain("Analysis scopes unavailable: Hierarchy service unavailable");
+    expect(loadHierarchy).toHaveBeenCalledTimes(1);
+
+    const refresh = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "Refresh view");
+    expect(refresh?.disabled).toBe(false);
+    await act(async () => refresh?.click());
+
+    expect(loadHierarchy).toHaveBeenCalledTimes(2);
+    const restoredScopeSelect = container.querySelector<HTMLButtonElement>("[role='combobox'][aria-label='Analysis Scope']");
+    expect(restoredScopeSelect?.disabled).toBe(false);
+    expect(container.textContent).not.toContain("Analysis scopes unavailable");
+  });
+
 });
 
 describe("published Overview date inputs", () => {
@@ -436,6 +509,14 @@ function projectHierarchy(): EnergyProjectHierarchyDto {
       { id: "tier-circuit", ordinal: 1, alias: "Circuit" },
     ],
     nodes: [
+      {
+        id: "ngee-ann-polytechnic",
+        project_id: "ngee-ann-polytechnic",
+        name: "Ngee Ann Polytechnic",
+        node_type: "project",
+        sort_order: 0,
+        metadata_status: "confirmed",
+      },
       {
         id: "level-6",
         project_id: "ngee-ann-polytechnic",

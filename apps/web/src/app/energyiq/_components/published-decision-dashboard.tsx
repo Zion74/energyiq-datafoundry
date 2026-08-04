@@ -110,6 +110,8 @@ function PublishedDecisionDashboardView({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAnalysis, setSavedAnalysis] = useState<EnergySavedAnalysisDetailDto | null>(null);
   const [hierarchy, setHierarchy] = useState<EnergyProjectHierarchyDto | null>(null);
+  const [hierarchyError, setHierarchyError] = useState<string | null>(null);
+  const [hierarchyLoading, setHierarchyLoading] = useState(false);
 
   const projectId = selectedProject?.id ?? "";
   const effectiveCustomRange = customRange.projectId === projectId || customRange.projectId === ""
@@ -130,26 +132,37 @@ function PublishedDecisionDashboardView({
   useEffect(() => {
     if (!projectId) {
       setHierarchy(null);
+      setHierarchyError(null);
+      setHierarchyLoading(false);
       return;
     }
     let cancelled = false;
     setHierarchy(null);
+    setHierarchyError(null);
+    setHierarchyLoading(true);
     void configApi.getEnergyProjectHierarchy(projectId)
       .then((result) => {
         if (!cancelled) setHierarchy(result);
       })
-      .catch(() => {
-        if (!cancelled) setHierarchy(null);
+      .catch((reason) => {
+        if (cancelled) return;
+        setHierarchy(null);
+        setHierarchyError(messageFrom(reason, "Unable to load Project hierarchy"));
+      })
+      .finally(() => {
+        if (!cancelled) setHierarchyLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, refreshRevision]);
 
   const scopeOptions = useMemo(() => {
     const tierAliases = new Map(hierarchy?.tiers.map((tier) => [tier.id, tier.alias]) ?? []);
     const orderedNodes = orderProjectNodesDepthFirst(
-      (hierarchy?.nodes ?? []).map((node) => ({ ...node, parentId: node.parent_id ?? null })),
+      (hierarchy?.nodes ?? [])
+        .filter((node) => node.node_type !== "project")
+        .map((node) => ({ ...node, parentId: node.parent_id ?? null })),
     );
     return [
       { value: "project", label: `Project · ${selectedProject?.name ?? "Project"}` },
@@ -307,11 +320,21 @@ function PublishedDecisionDashboardView({
               ariaLabel="Analysis Scope"
               value={scopeId}
               options={scopeOptions}
-              onValueChange={(nextScopeId) => router.replace(overviewUrlWithScope(urlSearch, nextScopeId))}
+              onValueChange={(nextScopeId) => router.replace(overviewUrlWithScope(urlSearch, nextScopeId, {
+                resource,
+                period,
+                from: effectiveCustomRange.from,
+                to: effectiveCustomRange.to,
+              }))}
               size="small"
-              disabled={!projectId}
+              disabled={!projectId || hierarchyLoading || Boolean(hierarchyError)}
               triggerClassName="sm:w-[260px]"
             />
+            {hierarchyError ? (
+              <p role="alert" className="mt-1 text-[10px] leading-4 text-step-error">
+                Analysis scopes unavailable: {hierarchyError}
+              </p>
+            ) : null}
           </div>
           <div className="flex rounded-lg border border-border bg-surface p-1" aria-label="Resource type">
             {(["electricity", "water"] as const).map((item) => (
@@ -528,9 +551,22 @@ function isValidDateInput(value: string): boolean {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
-function overviewUrlWithScope(urlSearch: string, scopeId: string): string {
+function overviewUrlWithScope(
+  urlSearch: string,
+  scopeId: string,
+  view: Pick<OverviewUrlViewState, "resource" | "period" | "from" | "to">,
+): string {
   const next = new URLSearchParams(urlSearch);
   next.set("scopeId", scopeId || "project");
+  next.set("resource", view.resource);
+  next.set("period", view.period);
+  if (view.period === "Custom") {
+    next.set("from", view.from);
+    next.set("to", view.to);
+  } else {
+    next.delete("from");
+    next.delete("to");
+  }
   return `/energyiq/overview?${next.toString()}`;
 }
 
