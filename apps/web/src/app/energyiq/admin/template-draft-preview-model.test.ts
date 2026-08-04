@@ -144,6 +144,7 @@ describe("resolveLatestImportedPreviewRange", () => {
       filename: "old.xlsx",
       status: "materialized",
       inspection: {
+        sheetName: "Sheet1",
         columns: [], sourceLabels: [], rowCount: 2, validRowCount: 2, invalidRowCount: 0,
         duplicateReadingCount: 0, negativeReadingCount: 0, readingKind: "cumulative", qualityStatus: "ready", issues: [],
         coverageFrom: "2026-05-01T00:00:00.000Z", coverageTo: "2026-05-01T00:15:00.000Z", typicalIntervalMinutes: 15,
@@ -154,6 +155,7 @@ describe("resolveLatestImportedPreviewRange", () => {
     const range = resolveLatestImportedPreviewRange([
       batch({}),
       batch({ id: "batch-new", filename: "new.xlsx", createdAt: "2026-06-01T00:00:00.000Z", inspection: {
+        sheetName: "Sheet1",
         ...batch({}).inspection,
         coverageFrom: "2026-06-01T00:00:00.000Z",
         coverageTo: "2026-06-30T23:45:00.000Z",

@@ -1,4 +1,5 @@
 import type {
+  EnergyImportBatchDto,
   EnergyMeterCategoryDto,
   EnergyMeterMappingDraftDto,
   EnergyMeterMappingRowDto,
@@ -163,8 +164,13 @@ export const createInitialMeterMapping = (
 export const createMeterMappingFromSourceLabels = (
   document: EnergyProjectSetupDocumentDto,
   labels: string[],
+  existingMapping?: EnergyMeterMappingDraftDto,
 ): EnergyMeterMappingDraftDto => {
   const nodesById = new Map(document.nodes.map((node) => [node.id, node]));
+  const existingByLabel = new Map((existingMapping?.rows ?? []).map((row) => [
+    normaliseDisplayName(row.source_label),
+    row,
+  ]));
   const rows = [...new Set(labels.map((label) => label.trim()).filter(Boolean))]
     .sort((left, right) => left.localeCompare(right))
     .map((sourceLabel, index): EnergyMeterMappingRowDto => {
@@ -189,22 +195,40 @@ export const createMeterMappingFromSourceLabels = (
         : candidates.length === 1
           ? candidates[0]
           : undefined;
-      const representsParentTotal = /^total\b/i.test(parsed.meterName) && Boolean(matched?.parent_id);
+      const existing = existingByLabel.get(normaliseDisplayName(sourceLabel));
+      if (!matched && existing) return existing;
+      const configuredMeterRole = stringMetadata(matched?.metadata?.meterRole);
+      const representsParentTotal = (
+        configuredMeterRole === "total" || /^total\b/i.test(parsed.meterName)
+      ) && Boolean(matched?.parent_id);
+      const representsComponent = configuredMeterRole === "submeter";
       const scopeId = representsParentTotal ? matched!.parent_id! : matched?.id ?? "";
+      const configuredCategory = meterCategoryMetadata(matched?.metadata?.category);
       return {
-        id: `mapping-${slug(sourceLabel)}-${index + 1}`,
+        id: existing?.id ?? `mapping-${slug(sourceLabel)}-${index + 1}`,
         source_label: sourceLabel,
         scope_id: scopeId,
         display_name: matched?.name ?? parsed.meterName,
         resource: "electricity",
-        category: inferMeterCategory(parsed.meterName),
-        coverage: representsParentTotal ? "whole" : "whole",
-        meter_role: "total",
-        aggregation_usage: "official",
+        category: configuredCategory ?? inferMeterCategory(parsed.meterName),
+        coverage: representsComponent ? "partial" : "whole",
+        meter_role: representsComponent ? "component" : "total",
+        aggregation_usage: representsComponent ? "excluded" : "official",
       };
     });
-  return { source_kind: "excel", rows, confirmed: false };
+  return {
+    source_kind: "excel",
+    rows,
+    ...resolveNgeeAnnVirtualMeters(document, rows, existingMapping),
+    confirmed: false,
+  };
 };
+
+export const sourceLabelsAcrossImportBatches = (
+  batches: EnergyImportBatchDto[],
+): string[] => [...new Map(batches.flatMap((batch) => batch.inspection.sourceLabels)
+  .map((source) => [normaliseDisplayName(source.label), source.label.trim()])).values()]
+  .sort((left, right) => left.localeCompare(right));
 
 export const inferMeterCategory = (label: string): EnergyMeterCategoryDto => {
   const value = label.toLocaleLowerCase();
@@ -338,6 +362,45 @@ const parseSourceLabel = (label: string): { locationName?: string; meterName: st
   if (!match) return { meterName: label.trim() };
   return { locationName: `Level ${match[1]}`, meterName: match[2]!.trim() };
 };
+
+const resolveNgeeAnnVirtualMeters = (
+  document: EnergyProjectSetupDocumentDto,
+  rows: EnergyMeterMappingRowDto[],
+  existingMapping?: EnergyMeterMappingDraftDto,
+): Pick<EnergyMeterMappingDraftDto, "virtual_meters"> | Record<string, never> => {
+  if (document.project.name !== "Ngee Ann Polytechnic") {
+    return existingMapping?.virtual_meters?.length
+      ? { virtual_meters: existingMapping.virtual_meters }
+      : {};
+  }
+  const load1 = rows.find((row) => row.scope_id === "l6-load-1");
+  const load2 = rows.find((row) => row.scope_id === "l6-load-2");
+  if (!load1 || !load2) return {};
+  const retained = (existingMapping?.virtual_meters ?? []).filter((meter) =>
+    normaliseDisplayName(meter.display_name) !== "load 12"
+    && meter.id !== "ngee-ann-load-12-v1");
+  return {
+    virtual_meters: [...retained, {
+      id: "ngee-ann-load-12-v1",
+      display_name: "Load 12",
+      scope_id: "level-6",
+      resource: "electricity",
+      category: "load",
+      terms: [
+        { mapping_row_id: load1.id, coefficient: 1 },
+        { mapping_row_id: load2.id, coefficient: 1 },
+      ],
+    }],
+  };
+};
+
+const stringMetadata = (value: unknown): string | undefined =>
+  typeof value === "string" ? value : undefined;
+
+const meterCategoryMetadata = (value: unknown): EnergyMeterCategoryDto | undefined =>
+  value === "overall" || value === "load" || value === "light" || value === "aircon" || value === "other"
+    ? value
+    : undefined;
 
 const ancestorNames = (
   node: EnergyProjectSetupNodeDto,

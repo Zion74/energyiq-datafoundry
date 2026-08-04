@@ -177,6 +177,7 @@ export type EnergyMeterMappingDraftDto = {
 };
 
 export type EnergyExcelImportInspectionDto = {
+  sheetName: string;
   columns: string[];
   sourceLabels: Array<{ label: string; rowCount: number }>;
   rowCount: number;
@@ -210,6 +211,44 @@ export type EnergyImportBatchDto = {
   };
   materializedAt?: string;
   createdAt: string;
+};
+
+export type EnergyDataSnapshotDto = {
+  id: string;
+  projectId: string;
+  manifest: unknown;
+  audit: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type EnergyProjectDataReadinessDto = {
+  status: "not_required" | "blocked" | "ready";
+  ready: boolean;
+  requiresFormalData: boolean;
+  importBatchCount: number;
+  materializedBatchCount: number;
+  sourceLabelCount: number;
+  mappedSourceLabelCount: number;
+  unmappedSourceLabels: string[];
+  inactiveMappingSourceLabels: string[];
+  mappingConfirmed: boolean;
+  dataSnapshotId?: string;
+  blockingReasons: string[];
+  warnings: string[];
+  audit?: Record<string, unknown>;
+};
+
+export type EnergyImportBatchesResponseDto = {
+  batches: EnergyImportBatchDto[];
+  dataSnapshot?: EnergyDataSnapshotDto;
+  readiness: EnergyProjectDataReadinessDto;
+};
+
+export type EnergyImportMaterializationResponseDto = {
+  batch: EnergyImportBatchDto;
+  dataSnapshot?: EnergyDataSnapshotDto;
+  readiness: EnergyProjectDataReadinessDto;
+  duplicate: boolean;
 };
 
 export type EnergyProjectSetupDocumentDto = {

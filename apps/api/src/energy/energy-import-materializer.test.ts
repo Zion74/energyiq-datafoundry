@@ -2,7 +2,10 @@ import writeXlsxFile from "write-excel-file/node";
 import { describe, expect, it } from "vitest";
 
 import type { EnergyIqImportBatchRecord, EnergyIqProjectSetupDocument } from "@datafoundry/metadata";
-import { buildEnergyExcelMaterialization } from "./energy-import-materializer.js";
+import {
+  buildEnergyExcelMaterialization,
+  isEnergyImportMaterializationCurrent,
+} from "./energy-import-materializer.js";
 
 describe("buildEnergyExcelMaterialization", () => {
   it("turns mapped Singapore cumulative readings into traceable interval facts", async () => {
@@ -16,6 +19,7 @@ describe("buildEnergyExcelMaterialization", () => {
       content: workbook,
       batch: batch(),
       document: document(),
+      mappingRevision: 4,
       timezone: "Asia/Singapore",
       databasePath: "ignored.duckdb",
     });
@@ -37,8 +41,38 @@ describe("buildEnergyExcelMaterialization", () => {
       normalizedReadingCount: 3,
       intervalFactCount: 2,
       totalUsageKwh: 1,
+      mappingRevision: 4,
+      timezone: "Asia/Singapore",
+      materializerContractVersion: "energy-excel-cumulative-v1",
     });
+    expect(result.summary.mappingFingerprint).toMatch(/^[a-f0-9]{64}$/);
     expect(result.summary.qualityCounts.boundary).toBe(1);
+
+    expect(isEnergyImportMaterializationCurrent({
+      batch: {
+        ...batch(),
+        status: "materialized",
+        materialization_json: JSON.stringify(result.summary),
+      },
+      document: document(),
+      timezone: "Asia/Singapore",
+    })).toBe(true);
+    expect(isEnergyImportMaterializationCurrent({
+      batch: { ...batch(), status: "materialized", materialization_json: JSON.stringify({ intervalFactCount: 2 }) },
+      document: document(),
+      timezone: "Asia/Singapore",
+    })).toBe(false);
+    const changed = document();
+    changed.meter_mapping!.rows[0]!.category = "other";
+    expect(isEnergyImportMaterializationCurrent({
+      batch: {
+        ...batch(),
+        status: "materialized",
+        materialization_json: JSON.stringify(result.summary),
+      },
+      document: changed,
+      timezone: "Asia/Singapore",
+    })).toBe(false);
   });
 
   it("requires a confirmed Mapping", async () => {
@@ -52,6 +86,7 @@ describe("buildEnergyExcelMaterialization", () => {
       content: workbook,
       batch: batch(),
       document: unconfirmed,
+      mappingRevision: 4,
       timezone: "Asia/Singapore",
       databasePath: "ignored.duckdb",
     })).rejects.toThrow("ENERGYIQ_METER_MAPPING_NOT_CONFIRMED");

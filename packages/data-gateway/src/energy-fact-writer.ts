@@ -98,9 +98,26 @@ export type EnergyFactMaterializationStats = {
   qualityEvents: number;
 };
 
+export type EnergyFactProjectAudit = {
+  rawRowCount: number;
+  invalidRawRowCount: number;
+  unmappedRawRowCount: number;
+  rawOverlapConflictCount: number;
+  normalizedReadingCount: number;
+  intervalFactCount: number;
+  duplicateNormalizedReadingCount: number;
+  duplicateIntervalFactCount: number;
+  invalidIntervalDurationCount: number;
+  legacyCanonicalRowCount: number;
+};
+
+export type EnergyFactMaterializationResult = EnergyFactMaterializationStats & {
+  projectAudit: EnergyFactProjectAudit;
+};
+
 export const writeEnergyFactMaterialization = async (
   input: EnergyFactMaterializationWrite,
-): Promise<EnergyFactMaterializationStats> => {
+): Promise<EnergyFactMaterializationResult> => {
   const databasePath = input.databasePath === ":memory:" ? input.databasePath : resolve(input.databasePath);
   if (databasePath !== ":memory:") mkdirSync(dirname(databasePath), { recursive: true });
   const database = await getDuckDbDatabase(databasePath);
@@ -118,10 +135,28 @@ export const writeEnergyFactMaterialization = async (
     await deduplicateCanonicalRows(connection, input.projectId);
     await duckDbRun(connection, "COMMIT");
     await duckDbRun(connection, "CHECKPOINT");
-    return await readMaterializationStats(connection, input.importBatchId);
+    return {
+      ...await readMaterializationStats(connection, input.importBatchId),
+      projectAudit: await readProjectAudit(connection, input.projectId),
+    };
   } catch (error) {
     await duckDbRun(connection, "ROLLBACK").catch(() => undefined);
     throw error;
+  } finally {
+    await duckDbClose(connection).catch(ignoreAlreadyClosed);
+  }
+};
+
+export const readEnergyFactProjectAudit = async (input: {
+  databasePath: string;
+  projectId: string;
+}): Promise<EnergyFactProjectAudit> => {
+  const databasePath = input.databasePath === ":memory:" ? input.databasePath : resolve(input.databasePath);
+  const database = await getDuckDbDatabase(databasePath);
+  const connection = database.connect();
+  try {
+    await ensureFactSchema(connection);
+    return await readProjectAudit(connection, input.projectId);
   } finally {
     await duckDbClose(connection).catch(ignoreAlreadyClosed);
   }
@@ -201,6 +236,55 @@ const readMaterializationStats = async (
     normalizedRows: Number(row.normalized_rows ?? 0),
     intervalFacts: Number(row.interval_facts ?? 0),
     qualityEvents: Number(row.quality_events ?? 0),
+  };
+};
+
+const readProjectAudit = async (
+  connection: DuckDbModule.Connection,
+  projectId: string,
+): Promise<EnergyFactProjectAudit> => {
+  const row = await duckDbGet(connection, `
+    SELECT
+      (SELECT COUNT(*) FROM raw_meter_readings WHERE project_id = ?) AS raw_rows,
+      (SELECT COUNT(*) FROM raw_meter_readings WHERE project_id = ? AND NOT is_valid) AS invalid_raw_rows,
+      (SELECT COUNT(*) FROM raw_meter_readings WHERE project_id = ? AND is_valid AND meter_node_id IS NULL) AS unmapped_raw_rows,
+      (SELECT COUNT(*) FROM raw_meter_readings WHERE project_id = ? AND is_overlap_conflict) AS raw_overlap_conflicts,
+      (SELECT COUNT(*) FROM normalized_meter_readings WHERE project_id = ?) AS normalized_rows,
+      (SELECT COUNT(*) FROM energy_interval_facts WHERE project_id = ?) AS interval_facts,
+      (SELECT COALESCE(SUM(row_count - 1), 0) FROM (
+        SELECT COUNT(*) AS row_count
+        FROM normalized_meter_readings
+        WHERE project_id = ?
+        GROUP BY meter_node_id, event_time
+        HAVING COUNT(*) > 1
+      )) AS duplicate_normalized_rows,
+      (SELECT COALESCE(SUM(row_count - 1), 0) FROM (
+        SELECT COUNT(*) AS row_count
+        FROM energy_interval_facts
+        WHERE project_id = ?
+        GROUP BY meter_node_id, interval_start
+        HAVING COUNT(*) > 1
+      )) AS duplicate_interval_facts,
+      (SELECT COUNT(*) FROM energy_interval_facts
+        WHERE project_id = ? AND elapsed_minutes <> 15) AS invalid_interval_durations,
+      (SELECT COUNT(*) FROM energy_interval_facts
+        WHERE project_id = ? AND (
+          import_batch_id IS NULL OR import_batch_id = '' OR import_batch_id = '<legacy>'
+          OR source_sha256 IS NULL OR source_sha256 = '' OR source_sha256 = '<legacy>'
+          OR LOWER(source_file) LIKE '%synthetic%'
+        )) AS legacy_canonical_rows
+  `, Array.from({ length: 10 }, () => projectId));
+  return {
+    rawRowCount: Number(row.raw_rows ?? 0),
+    invalidRawRowCount: Number(row.invalid_raw_rows ?? 0),
+    unmappedRawRowCount: Number(row.unmapped_raw_rows ?? 0),
+    rawOverlapConflictCount: Number(row.raw_overlap_conflicts ?? 0),
+    normalizedReadingCount: Number(row.normalized_rows ?? 0),
+    intervalFactCount: Number(row.interval_facts ?? 0),
+    duplicateNormalizedReadingCount: Number(row.duplicate_normalized_rows ?? 0),
+    duplicateIntervalFactCount: Number(row.duplicate_interval_facts ?? 0),
+    invalidIntervalDurationCount: Number(row.invalid_interval_durations ?? 0),
+    legacyCanonicalRowCount: Number(row.legacy_canonical_rows ?? 0),
   };
 };
 

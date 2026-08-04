@@ -15,6 +15,7 @@ import {
   configApi,
   type EnergyComponentRevisionDto,
   type EnergyImportBatchDto,
+  type EnergyProjectDataReadinessDto,
   type EnergyMeterMappingDraftDto,
   type EnergyMeterMappingRowDto,
   type EnergyMetricFamilyDto,
@@ -63,6 +64,7 @@ import {
   nodesForTierAndParent,
   removeNodeAndDescendants,
   removeHighestTier,
+  sourceLabelsAcrossImportBatches,
   tiersTopDown,
 } from "./project-setup-model";
 
@@ -1543,6 +1545,7 @@ function ProjectDeliveryOverview({
   onPublish: (review: ProjectPublicationReview) => Promise<void>;
 }) {
   const [batches, setBatches] = useState<EnergyImportBatchDto[]>([]);
+  const [dataReadiness, setDataReadiness] = useState<EnergyProjectDataReadinessDto | null>(null);
   const [publicationReview, setPublicationReview] = useState<ProjectPublicationReview | null>(null);
   const [loadingBatches, setLoadingBatches] = useState(true);
   const [reviewError, setReviewError] = useState<string | null>(null);
@@ -1560,6 +1563,7 @@ function ProjectDeliveryOverview({
       .then(([importResult, templateResult, metricResult, ruleResult]) => {
         if (!active) return;
         setBatches(importResult.batches);
+        setDataReadiness(importResult.readiness);
         setPublicationReview({
           templateDraft: templateResult.draft,
           metricConfig: metricResult.config,
@@ -1569,6 +1573,7 @@ function ProjectDeliveryOverview({
       .catch((reason) => {
         if (!active) return;
         setBatches([]);
+        setDataReadiness(null);
         setPublicationReview(null);
         setReviewError(messageFrom(reason, "Failed to load publication review"));
       })
@@ -1590,7 +1595,7 @@ function ProjectDeliveryOverview({
     hasStructure,
     hasSource: Boolean(latestBatch),
     hasConfirmedMapping,
-    hasMaterializedFacts: latestBatch?.status === "materialized",
+    hasMaterializedFacts: dataReadiness?.ready === true,
     hasAnalysisConfiguration: publicationReview !== null,
     hasPublishedRevision: setup.published.templateRevisions.length > 0,
   });
@@ -1599,7 +1604,7 @@ function ProjectDeliveryOverview({
   const readyToPublish = Boolean(
     publicationReview
     && hasConfirmedMapping
-    && latestBatch?.status === "materialized"
+    && dataReadiness?.ready === true
     && !setup.validation.blocking,
   );
   const continueWorkflow = (target: AdminSection) => {
@@ -1712,7 +1717,13 @@ function ProjectDeliveryOverview({
         </dl>
 
         <div className="mt-4 grid gap-3 text-xs md:grid-cols-3">
-          <ReviewGate label="Interval facts" ready={latestBatch?.status === "materialized"} detail={latestBatch?.status === "materialized" ? latestBatch.filename : "Materialize a source first"} />
+          <ReviewGate
+            label="Interval facts"
+            ready={dataReadiness?.ready === true}
+            detail={dataReadiness
+              ? `${dataReadiness.materializedBatchCount}/${dataReadiness.importBatchCount} batches · ${dataReadiness.dataSnapshotId ?? dataReadiness.blockingReasons.join(", ")}`
+              : "Checking composite Data Snapshot"}
+          />
           <ReviewGate label="Meter mapping" ready={hasConfirmedMapping} detail={hasConfirmedMapping ? `${document.meter_mapping?.rows.length ?? 0} confirmed rows` : "Confirm Mapping first"} />
           <ReviewGate label="Setup validation" ready={!setup.validation.blocking} detail={setup.validation.blocking ? "Resolve blocking issues" : "No blocking issue"} />
         </div>
@@ -1758,6 +1769,7 @@ function DataSourcesPage({
   setSection: Dispatch<SetStateAction<AdminSection>>;
 }) {
   const [batches, setBatches] = useState<EnergyImportBatchDto[]>([]);
+  const [dataReadiness, setDataReadiness] = useState<EnergyProjectDataReadinessDto | null>(null);
   const [loadingImports, setLoadingImports] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [materializing, setMaterializing] = useState(false);
@@ -1770,6 +1782,7 @@ function DataSourcesPage({
     try {
       const result = await configApi.listEnergyImportBatches(projectId);
       setBatches(result.batches);
+      setDataReadiness(result.readiness);
     } catch (reason) {
       setImportError(messageFrom(reason, "Failed to load import batches"));
     } finally {
@@ -1787,10 +1800,7 @@ function DataSourcesPage({
     setImportNotice(null);
     try {
       const result = await configApi.uploadEnergyExcelImport(projectId, file);
-      setBatches((current) => [
-        result.batch,
-        ...current.filter((batch) => batch.id !== result.batch.id),
-      ]);
+      await loadBatches();
       setImportNotice(result.duplicate
         ? "This exact workbook was already inspected. The existing Import Batch was reused."
         : "Workbook preserved and inspected. Review the detected labels before opening Meter Mapping.");
@@ -1804,26 +1814,33 @@ function DataSourcesPage({
   const latest = batches[0];
   const mappingConfirmed = document.meter_mapping?.confirmed === true;
   const useDetectedLabels = () => {
-    if (!latest) return;
+    if (batches.length === 0) return;
     const mapping = createMeterMappingFromSourceLabels(
       document,
-      latest.inspection.sourceLabels.map((source) => source.label),
+      sourceLabelsAcrossImportBatches(batches),
+      document.meter_mapping,
     );
     changeDocument((current) => ({ ...current, meter_mapping: mapping }));
     setImportNotice(`${mapping.rows.length} source labels were prepared as a Mapping draft. Unmatched labels still require an admin Scope selection.`);
   };
 
-  const materializeLatest = async () => {
-    if (!latest) return;
+  const materializeAll = async () => {
+    if (batches.length === 0) return;
     setMaterializing(true);
     setImportError(null);
     setImportNotice(null);
     try {
-      const result = await configApi.materializeEnergyImportBatch(projectId, latest.id);
-      setBatches((current) => current.map((batch) => batch.id === result.batch.id ? result.batch : batch));
-      setImportNotice(result.duplicate
-        ? "This Import Batch was already materialized. Existing facts were reused."
-        : "Raw readings, interval facts and quality events were materialized successfully.");
+      let built = 0;
+      let reused = 0;
+      for (const batch of [...batches].reverse()) {
+        const result = await configApi.materializeEnergyImportBatch(projectId, batch.id);
+        if (result.duplicate) reused += 1;
+        else built += 1;
+        setBatches((current) => current.map((candidate) => candidate.id === result.batch.id ? result.batch : candidate));
+        setDataReadiness(result.readiness);
+      }
+      await loadBatches();
+      setImportNotice(`${built} Import Batch(es) materialized; ${reused} current batch(es) reused. Composite Snapshot readiness was refreshed.`);
     } catch (reason) {
       setImportError(messageFrom(reason, "Fact materialization failed"));
     } finally {
@@ -1925,12 +1942,10 @@ function DataSourcesPage({
                 ) : null}
               </div>
               <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={useDetectedLabels} disabled={latest.status === "materialized"} className={secondaryButton}>Use detected labels</button>
-                {latest.status === "materialized" ? null : (
-                  <button type="button" onClick={() => void materializeLatest()} disabled={!mappingConfirmed || materializing} className={primaryButton}>
-                    {materializing ? "Building facts..." : "Build interval facts"}
-                  </button>
-                )}
+                <button type="button" onClick={useDetectedLabels} disabled={batches.length === 0} className={secondaryButton}>Use all detected labels</button>
+                <button type="button" onClick={() => void materializeAll()} disabled={!mappingConfirmed || materializing} className={primaryButton}>
+                  {materializing ? "Building facts..." : "Build all interval facts"}
+                </button>
               </div>
             </div>
           </div>
@@ -1941,6 +1956,21 @@ function DataSourcesPage({
           </div>
         )}
       </section>
+
+      {dataReadiness ? (
+        <section className="rounded-xl border border-border bg-surface p-5">
+          <h3 className="text-sm font-semibold">Composite Data Snapshot</h3>
+          <p className="mt-2 text-xs leading-5 text-muted">
+            {dataReadiness.materializedBatchCount}/{dataReadiness.importBatchCount} batches · {dataReadiness.mappedSourceLabelCount}/{dataReadiness.sourceLabelCount} labels mapped · {dataReadiness.dataSnapshotId ?? "Snapshot pending"}
+          </p>
+          {dataReadiness.blockingReasons.length > 0 ? (
+            <p className="mt-3 text-[11px] text-step-warning">Blocked: {dataReadiness.blockingReasons.join(" · ")}</p>
+          ) : (
+            <p className="mt-3 text-[11px] text-step-success">All registered batches, Mapping pins and canonical fact checks are current.</p>
+          )}
+          {dataReadiness.warnings.map((warning) => <p key={warning} className="mt-2 text-[10px] text-muted">{warning}</p>)}
+        </section>
+      ) : null}
 
       <section className="rounded-xl border border-border bg-surface p-5">
         <h3 className="text-sm font-semibold">First source workflow</h3>

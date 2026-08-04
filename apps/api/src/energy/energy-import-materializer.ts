@@ -9,22 +9,51 @@ import type {
   EnergyIqImportBatchRecord,
   EnergyIqProjectSetupDocument,
 } from "@datafoundry/metadata";
+import { fingerprintEnergyIqMeterMapping } from "@datafoundry/metadata";
 
 import { readEnergyExcelWorkbook } from "./energy-excel-import.js";
 
 export type EnergyImportMaterializationSummary = {
-  snapshotId: string;
+  snapshotId?: string;
   rawRowCount: number;
   normalizedReadingCount: number;
   intervalFactCount: number;
   totalUsageKwh: number;
   qualityCounts: Record<string, number>;
+  mappingRevision: number;
+  mappingFingerprint: string;
+  timezone: string;
+  materializerContractVersion: typeof ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION;
+};
+
+export const ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION = "energy-excel-cumulative-v1" as const;
+
+export const isEnergyImportMaterializationCurrent = (input: {
+  batch: EnergyIqImportBatchRecord;
+  document: EnergyIqProjectSetupDocument;
+  timezone: string;
+}): boolean => {
+  const mapping = input.document.meter_mapping;
+  if (input.batch.status !== "materialized" || !mapping?.confirmed || !input.batch.materialization_json) {
+    return false;
+  }
+  let summary: unknown;
+  try {
+    summary = JSON.parse(input.batch.materialization_json) as unknown;
+  } catch {
+    return false;
+  }
+  if (!isRecord(summary)) return false;
+  return summary.mappingFingerprint === fingerprintEnergyIqMeterMapping(mapping)
+    && summary.timezone === input.timezone
+    && summary.materializerContractVersion === ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION;
 };
 
 export const buildEnergyExcelMaterialization = async (input: {
   content: Buffer;
   batch: EnergyIqImportBatchRecord;
   document: EnergyIqProjectSetupDocument;
+  mappingRevision: number;
   timezone: string;
   databasePath: string;
 }): Promise<{
@@ -210,12 +239,15 @@ export const buildEnergyExcelMaterialization = async (input: {
     ...qualityEvents.map((event) => event.code),
   ]);
   const summary: EnergyImportMaterializationSummary = {
-    snapshotId: `energy-snapshot-${input.batch.source_sha256.slice(0, 20)}`,
     rawRowCount: rawReadings.length,
     normalizedReadingCount: normalizedReadings.length,
     intervalFactCount: intervalFacts.length,
     totalUsageKwh: round(intervalFacts.reduce((sum, fact) => sum + (fact.usageKwh ?? 0), 0)),
     qualityCounts,
+    mappingRevision: input.mappingRevision,
+    mappingFingerprint: fingerprintEnergyIqMeterMapping(mapping),
+    timezone: input.timezone,
+    materializerContractVersion: ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION,
   };
   return {
     write: {
@@ -303,3 +335,6 @@ const countQuality = (codes: string[]): Record<string, number> => {
 };
 
 const round = (value: number): number => Math.round(value * 1_000_000) / 1_000_000;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);

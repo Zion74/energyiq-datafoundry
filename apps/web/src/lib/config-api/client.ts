@@ -17,6 +17,8 @@ import type {
   EnergyAdminOrganisationDto,
   EnergyAdminUserDto,
   EnergyImportBatchDto,
+  EnergyImportBatchesResponseDto,
+  EnergyImportMaterializationResponseDto,
   EnergyOperatingCalendarEntryInputDto,
   EnergyOperatingCalendarRevisionDto,
   EnergyOperationalPolicyConfigurationDto,
@@ -578,7 +580,7 @@ export const configApi = {
     });
   },
 
-  listEnergyImportBatches(projectId: string): Promise<{ batches: EnergyImportBatchDto[] }> {
+  listEnergyImportBatches(projectId: string): Promise<EnergyImportBatchesResponseDto> {
     return requestEnvelope(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/imports`,
     );
@@ -599,7 +601,7 @@ export const configApi = {
   materializeEnergyImportBatch(
     projectId: string,
     batchId: string,
-  ): Promise<{ batch: EnergyImportBatchDto; duplicate: boolean }> {
+  ): Promise<EnergyImportMaterializationResponseDto> {
     return requestEnvelope(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/imports/${encodeURIComponent(batchId)}/materialize`,
       { method: "POST", body: JSON.stringify({}) },

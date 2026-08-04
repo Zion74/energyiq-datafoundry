@@ -83,9 +83,12 @@ export {
   type EnergyScopedDataSourceContext
 } from "./energy-scoped-datasource.js";
 export {
+  readEnergyFactProjectAudit,
   readEnergyFactMaterializationStats,
   writeEnergyFactMaterialization,
   type EnergyFactMaterializationWrite,
+  type EnergyFactMaterializationResult,
+  type EnergyFactProjectAudit,
   type EnergyIntervalFactWrite,
   type EnergyNormalizedReadingWrite,
   type EnergyQualityEventWrite,

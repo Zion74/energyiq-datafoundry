@@ -688,7 +688,7 @@ describe("EnergyIqStore", () => {
     }
   });
 
-  it("stores immutable import inspections and finds repeated file hashes", () => {
+  it("stores immutable import inspections and advances a deterministic composite data snapshot", () => {
     const root = mkdtempSync(join(tmpdir(), "energyiq-import-batch-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
     try {
@@ -712,7 +712,7 @@ describe("EnergyIqStore", () => {
         source_sha256: "sha-1",
         filename: "meter.xlsx",
         status: "inspected",
-        inspection: { rowCount: 10, sourceLabels: ["Meter 1"] },
+        inspection: importInspection("batch-1"),
         created_by: "dev-user",
       });
 
@@ -722,18 +722,96 @@ describe("EnergyIqStore", () => {
         source_sha256: "sha-1",
       })?.id).toBe("batch-1");
       expect(metadata.energyIq.listImportBatches("project-import")).toHaveLength(1);
-      const materialized = metadata.energyIq.completeImportBatchMaterialization({
+      const first = metadata.energyIq.completeImportBatchMaterialization({
         batch_id: "batch-1",
         project_id: "project-import",
-        snapshot_id: "snapshot-1",
-        summary: { intervalFactCount: 9 },
+        summary: materializationSummary("mapping-sha-1"),
+        project_audit: projectAudit(),
       });
-      expect(materialized.status).toBe("materialized");
-      expect(JSON.parse(materialized.materialization_json ?? "{}")).toMatchObject({ intervalFactCount: 9 });
-      expect(metadata.energyIq.getProject("project-import").data_snapshot_id).toBe("snapshot-1");
+      expect(first.batch.status).toBe("materialized");
+      expect(JSON.parse(first.batch.materialization_json ?? "{}")).toMatchObject({
+        intervalFactCount: 9,
+        snapshotId: first.snapshot.id,
+      });
+      expect(metadata.energyIq.getProject("project-import").data_snapshot_id).toBe(first.snapshot.id);
+      expect(JSON.parse(first.snapshot.manifest_json)).toMatchObject({
+        version: 1,
+        projectId: "project-import",
+        batches: [{ batchId: "batch-1", sourceSha256: "sha-1" }],
+      });
+
+      metadata.energyIq.createImportBatch({
+        id: "batch-2",
+        workspace_id: "workspace-1",
+        project_id: "project-import",
+        source_kind: "excel",
+        source_sha256: "sha-2",
+        filename: "meter-2.xlsx",
+        status: "inspected",
+        inspection: importInspection("batch-2"),
+        created_by: "dev-user",
+      });
+      const second = metadata.energyIq.completeImportBatchMaterialization({
+        batch_id: "batch-2",
+        project_id: "project-import",
+        summary: materializationSummary("mapping-sha-1"),
+        project_audit: projectAudit({ rawOverlapConflictCount: 2 }),
+      });
+      expect(second.snapshot.id).not.toBe(first.snapshot.id);
+      expect(JSON.parse(second.snapshot.manifest_json)).toMatchObject({
+        batches: [
+          { sourceSha256: "sha-1" },
+          { sourceSha256: "sha-2" },
+        ],
+      });
+      expect(JSON.parse(second.snapshot.audit_json)).toMatchObject({ rawOverlapConflictCount: 2 });
+      expect(metadata.energyIq.getDataSnapshot(second.snapshot.id).id).toBe(second.snapshot.id);
+
+      const replayRoot = mkdtempSync(join(tmpdir(), "energyiq-import-batch-replay-"));
+      const replay = createMetadataStore({ database_path: join(replayRoot, "metadata.sqlite") });
+      try {
+        replay.workspaces.upsert({
+          id: "workspace-1",
+          owner_user_id: "dev-user",
+          name: "Customer Workspace",
+          kind: "customer",
+        });
+        replay.energyIq.upsertProject({
+          id: "project-import",
+          workspace_id: "workspace-1",
+          name: "Import Project",
+          status: "draft",
+        });
+        for (const input of [
+          { id: "replay-b", sha: "sha-2", filename: "renamed-later.xlsx", coverage: "batch-2" },
+          { id: "replay-a", sha: "sha-1", filename: "renamed-earlier.xlsx", coverage: "batch-1" },
+        ]) {
+          replay.energyIq.createImportBatch({
+            id: input.id,
+            workspace_id: "workspace-1",
+            project_id: "project-import",
+            source_kind: "excel",
+            source_sha256: input.sha,
+            filename: input.filename,
+            status: "inspected",
+            inspection: importInspection(input.coverage),
+            created_by: "dev-user",
+          });
+          replay.energyIq.completeImportBatchMaterialization({
+            batch_id: input.id,
+            project_id: "project-import",
+            summary: materializationSummary("mapping-sha-1"),
+            project_audit: projectAudit({ rawOverlapConflictCount: input.coverage === "batch-1" ? 2 : 0 }),
+          });
+        }
+        expect(replay.energyIq.getProject("project-import").data_snapshot_id).toBe(second.snapshot.id);
+      } finally {
+        replay.close();
+        rmSync(replayRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      }
       expect(() => metadata.energyIq.createImportBatch({
         ...created,
-        id: "batch-2",
+        id: "batch-duplicate",
         inspection: {},
       })).toThrow();
     } finally {
@@ -741,4 +819,42 @@ describe("EnergyIqStore", () => {
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
+});
+
+const materializationSummary = (mappingFingerprint: string) => ({
+  rawRowCount: 10,
+  normalizedReadingCount: 10,
+  intervalFactCount: 9,
+  totalUsageKwh: 1,
+  qualityCounts: { ok: 9, boundary: 1 },
+  mappingRevision: 3,
+  mappingFingerprint,
+  timezone: "Asia/Singapore",
+  materializerContractVersion: "energy-excel-cumulative-v1",
+});
+
+const importInspection = (batchId: string) => ({
+  sheetName: "Sheet1",
+  rowCount: 10,
+  sourceLabels: [{ label: "Meter 1", rowCount: 10 }],
+  coverageFrom: batchId === "batch-1"
+    ? "2026-04-20T16:00:00.000Z"
+    : "2026-05-19T16:00:00.000Z",
+  coverageTo: batchId === "batch-1"
+    ? "2026-05-20T15:45:00.000Z"
+    : "2026-06-17T15:45:00.000Z",
+});
+
+const projectAudit = (overrides: Record<string, number> = {}) => ({
+  rawRowCount: 10,
+  invalidRawRowCount: 0,
+  unmappedRawRowCount: 0,
+  rawOverlapConflictCount: 0,
+  normalizedReadingCount: 10,
+  intervalFactCount: 9,
+  duplicateNormalizedReadingCount: 0,
+  duplicateIntervalFactCount: 0,
+  invalidIntervalDurationCount: 0,
+  legacyCanonicalRowCount: 0,
+  ...overrides,
 });

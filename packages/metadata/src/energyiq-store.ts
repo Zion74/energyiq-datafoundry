@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
 
 import { EnergyIqMetricStore } from "./energyiq-metric-store.js";
 import { EnergyIqOperationalPolicyStore } from "./energyiq-operational-policy-store.js";
@@ -88,6 +89,20 @@ export type EnergyIqImportBatchRecord = {
   created_at: string;
 };
 
+export type EnergyIqDataSnapshotRecord = {
+  id: string;
+  workspace_id: string;
+  project_id: string;
+  manifest_json: string;
+  audit_json: string;
+  created_at: string;
+};
+
+export type EnergyIqImportMaterializationCompletion = {
+  batch: EnergyIqImportBatchRecord;
+  snapshot: EnergyIqDataSnapshotRecord;
+};
+
 export const initializeEnergyIqSchema = (db: DatabaseSync): void => {
   db.exec(`
     CREATE TABLE IF NOT EXISTS energyiq_user_roles (
@@ -170,6 +185,19 @@ export const initializeEnergyIqSchema = (db: DatabaseSync): void => {
     );
     CREATE INDEX IF NOT EXISTS idx_energyiq_import_batches_project
       ON energyiq_import_batches(project_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS energyiq_data_snapshots (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      manifest_json TEXT NOT NULL,
+      audit_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+      FOREIGN KEY (project_id) REFERENCES energyiq_projects(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_energyiq_data_snapshots_project
+      ON energyiq_data_snapshots(project_id, created_at DESC);
   `);
   const projectColumns = db.prepare("PRAGMA table_info(energyiq_projects)").all();
   if (!projectColumns.some((column) => isRecord(column) && column.name === "data_snapshot_id")) {
@@ -537,22 +565,99 @@ export class EnergyIqStore {
   completeImportBatchMaterialization(input: {
     batch_id: string;
     project_id: string;
-    snapshot_id: string;
     summary: unknown;
-  }): EnergyIqImportBatchRecord {
+    project_audit: unknown;
+  }): EnergyIqImportMaterializationCompletion {
     const materializedAt = new Date().toISOString();
-    const result = this.db.prepare(`
-      UPDATE energyiq_import_batches
-      SET status = 'materialized', materialization_json = ?, materialized_at = ?
-      WHERE id = ? AND project_id = ?
-    `).run(JSON.stringify(input.summary), materializedAt, input.batch_id, input.project_id);
-    if (result.changes !== 1) throw new Error(`ENERGYIQ_IMPORT_BATCH_NOT_FOUND:${input.batch_id}`);
-    this.db.prepare(`
-      UPDATE energyiq_projects
-      SET data_snapshot_id = ?, updated_at = ?
-      WHERE id = ?
-    `).run(input.snapshot_id, materializedAt, input.project_id);
-    return this.getImportBatch(input.batch_id);
+    const currentBatch = this.getImportBatch(input.batch_id);
+    if (currentBatch.project_id !== input.project_id) {
+      throw new Error(`ENERGYIQ_IMPORT_BATCH_NOT_FOUND:${input.batch_id}`);
+    }
+    const summary = requireJsonRecord(input.summary, "ENERGYIQ_IMPORT_MATERIALIZATION_SUMMARY_INVALID");
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const provisionalResult = this.db.prepare(`
+        UPDATE energyiq_import_batches
+        SET status = 'materialized', materialization_json = ?, materialized_at = ?
+        WHERE id = ? AND project_id = ?
+      `).run(JSON.stringify(summary), materializedAt, input.batch_id, input.project_id);
+      if (provisionalResult.changes !== 1) {
+        throw new Error(`ENERGYIQ_IMPORT_BATCH_NOT_FOUND:${input.batch_id}`);
+      }
+
+      const batches = this.listImportBatches(input.project_id)
+        .filter((batch) => batch.status === "materialized")
+        .sort((left, right) => left.source_sha256.localeCompare(right.source_sha256));
+      const identity = createDataSnapshotIdentity(input.project_id, batches);
+      const snapshotId = `energy-snapshot-${createHash("sha256")
+        .update(JSON.stringify(identity))
+        .digest("hex")
+        .slice(0, 24)}`;
+      const materialization = { ...summary, snapshotId };
+      this.db.prepare(`
+        UPDATE energyiq_import_batches
+        SET materialization_json = ?
+        WHERE id = ? AND project_id = ?
+      `).run(JSON.stringify(materialization), input.batch_id, input.project_id);
+
+      const manifest = {
+        version: 1,
+        projectId: input.project_id,
+        identity,
+        batches: batches.map((batch) => ({
+          batchId: batch.id,
+          sourceSha256: batch.source_sha256,
+          filename: batch.filename,
+          inspection: parseJsonRecord(batch.inspection_json),
+          materialization: batch.id === input.batch_id
+            ? materialization
+            : parseJsonRecord(batch.materialization_json),
+        })),
+      };
+      this.db.prepare(`
+        INSERT OR IGNORE INTO energyiq_data_snapshots (
+          id, workspace_id, project_id, manifest_json, audit_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `).run(
+        snapshotId,
+        currentBatch.workspace_id,
+        input.project_id,
+        JSON.stringify(manifest),
+        JSON.stringify(input.project_audit),
+        materializedAt,
+      );
+      this.db.prepare(`
+        UPDATE energyiq_projects
+        SET data_snapshot_id = ?, updated_at = ?
+        WHERE id = ?
+      `).run(snapshotId, materializedAt, input.project_id);
+      this.db.exec("COMMIT");
+      return {
+        batch: this.getImportBatch(input.batch_id),
+        snapshot: this.getDataSnapshot(snapshotId),
+      };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  getDataSnapshot(snapshotId: string): EnergyIqDataSnapshotRecord {
+    const row = this.db.prepare(
+      "SELECT * FROM energyiq_data_snapshots WHERE id = ?",
+    ).get(snapshotId);
+    if (!isRecord(row)) throw new Error(`ENERGYIQ_DATA_SNAPSHOT_NOT_FOUND:${snapshotId}`);
+    return mapDataSnapshot(row);
+  }
+
+  findCurrentDataSnapshot(projectId: string): EnergyIqDataSnapshotRecord | undefined {
+    const row = this.db.prepare(`
+      SELECT snapshot.*
+      FROM energyiq_projects project
+      JOIN energyiq_data_snapshots snapshot ON snapshot.id = project.data_snapshot_id
+      WHERE project.id = ? AND snapshot.project_id = project.id
+    `).get(projectId);
+    return isRecord(row) ? mapDataSnapshot(row) : undefined;
   }
 }
 
@@ -658,3 +763,51 @@ const mapImportBatch = (row: Record<string, unknown>): EnergyIqImportBatchRecord
     created_at: requiredString(row, "created_at"),
   };
 };
+
+const mapDataSnapshot = (row: Record<string, unknown>): EnergyIqDataSnapshotRecord => ({
+  id: requiredString(row, "id"),
+  workspace_id: requiredString(row, "workspace_id"),
+  project_id: requiredString(row, "project_id"),
+  manifest_json: requiredString(row, "manifest_json"),
+  audit_json: requiredString(row, "audit_json"),
+  created_at: requiredString(row, "created_at"),
+});
+
+const createDataSnapshotIdentity = (
+  projectId: string,
+  batches: EnergyIqImportBatchRecord[],
+) => ({
+  version: 1,
+  projectId,
+  batches: batches.map((batch) => {
+    const inspection = parseJsonRecord(batch.inspection_json);
+    const materialization = parseJsonRecord(batch.materialization_json);
+    return {
+      sourceSha256: batch.source_sha256,
+      sheetName: optionalJsonString(inspection.sheetName),
+      coverageFrom: optionalJsonString(inspection.coverageFrom),
+      coverageTo: optionalJsonString(inspection.coverageTo),
+      mappingRevision: optionalJsonNumber(materialization.mappingRevision),
+      mappingFingerprint: optionalJsonString(materialization.mappingFingerprint),
+      timezone: optionalJsonString(materialization.timezone),
+      materializerContractVersion: optionalJsonString(materialization.materializerContractVersion),
+    };
+  }),
+});
+
+const requireJsonRecord = (value: unknown, code: string): Record<string, unknown> => {
+  if (!isRecord(value)) throw new Error(code);
+  return value;
+};
+
+const parseJsonRecord = (value: string | undefined): Record<string, unknown> => {
+  if (!value) return {};
+  const parsed = JSON.parse(value) as unknown;
+  return isRecord(parsed) ? parsed : {};
+};
+
+const optionalJsonString = (value: unknown): string | null =>
+  typeof value === "string" && value.length > 0 ? value : null;
+
+const optionalJsonNumber = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? value : null;

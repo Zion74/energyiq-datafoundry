@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
 
 import { EnergyIqTemplateStore } from "./energyiq-template-store.js";
 
@@ -65,6 +66,38 @@ export type EnergyIqMeterMappingDraft = {
   virtual_meters?: EnergyIqVirtualMeter[];
   confirmed: boolean;
 };
+
+export const fingerprintEnergyIqMeterMapping = (
+  mapping: EnergyIqMeterMappingDraft,
+): string => createHash("sha256").update(JSON.stringify({
+  source_kind: mapping.source_kind,
+  confirmed: mapping.confirmed,
+  rows: [...mapping.rows]
+    .sort((left, right) => left.source_label.localeCompare(right.source_label) || left.id.localeCompare(right.id))
+    .map((row) => ({
+      id: row.id,
+      source_label: row.source_label,
+      scope_id: row.scope_id,
+      display_name: row.display_name,
+      resource: row.resource,
+      category: row.category,
+      coverage: row.coverage,
+      meter_role: row.meter_role,
+      aggregation_usage: row.aggregation_usage,
+    })),
+  virtual_meters: [...(mapping.virtual_meters ?? [])]
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map((meter) => ({
+      id: meter.id,
+      display_name: meter.display_name,
+      scope_id: meter.scope_id,
+      resource: meter.resource,
+      category: meter.category,
+      terms: [...meter.terms]
+        .sort((left, right) => left.mapping_row_id.localeCompare(right.mapping_row_id))
+        .map((term) => ({ mapping_row_id: term.mapping_row_id, coefficient: term.coefficient })),
+    })),
+})).digest("hex");
 
 export type EnergyIqProjectSetupDocument = {
   project: {

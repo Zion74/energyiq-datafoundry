@@ -1,8 +1,9 @@
-import { readSheet, type CellValue } from "read-excel-file/node";
+import readExcelFile, { type CellValue } from "read-excel-file/node";
 
 const REQUIRED_COLUMNS = ["Device Name", "Time", "Active Energy"] as const;
 
 export type EnergyExcelImportInspection = {
+  sheetName: string;
   columns: string[];
   sourceLabels: Array<{ label: string; rowCount: number }>;
   rowCount: number;
@@ -38,7 +39,10 @@ export const inspectEnergyExcelWorkbook = async (
 export const readEnergyExcelWorkbook = async (
   content: Buffer,
 ): Promise<EnergyExcelWorkbook> => {
-  const rows = await readSheet(content);
+  const sheets = await readExcelFile(content);
+  if (sheets.length !== 1) throw new Error("ENERGYIQ_EXCEL_SINGLE_SHEET_REQUIRED");
+  const sheet = sheets[0]!;
+  const rows = sheet.data;
   if (rows.length === 0) throw new Error("ENERGYIQ_EXCEL_EMPTY");
   const columns = rows[0]!.map(displayCell);
   const indexes = new Map(columns.map((column, index) => [normaliseHeader(column), index]));
@@ -124,6 +128,7 @@ export const readEnergyExcelWorkbook = async (
 
   return {
     inspection: {
+      sheetName: sheet.sheet,
       columns,
       sourceLabels: [...labelCounts.entries()]
         .map(([label, count]) => ({ label, rowCount: count }))

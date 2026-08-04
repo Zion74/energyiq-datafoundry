@@ -16,6 +16,7 @@ describe("inspectEnergyExcelWorkbook", () => {
 
     const inspection = await inspectEnergyExcelWorkbook(workbook);
 
+    expect(inspection.sheetName).toBe("Sheet1");
     expect(inspection.readingKind).toBe("cumulative");
     expect(inspection.rowCount).toBe(5);
     expect(inspection.validRowCount).toBe(4);

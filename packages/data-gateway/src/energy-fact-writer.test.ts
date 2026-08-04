@@ -103,9 +103,24 @@ describe("writeEnergyFactMaterialization", () => {
     const base = {
       databasePath,
       projectId: "project-overlap",
-      rawReadings: [],
       qualityEvents: [],
     };
+    const raw = (batch: string, sha: string, time: string, value: number) => ({
+      workspaceId: "workspace-1",
+      projectId: "project-overlap",
+      importBatchId: batch,
+      resource: "electricity" as const,
+      sourceLabel: "Meter A",
+      meterPointId: "meter-a",
+      scopeId: "scope-a",
+      eventTime: time,
+      activeEnergyKwh: value,
+      sourceFile: `${batch}.xlsx`,
+      sourceSha256: sha,
+      sourceRowNumber: 2,
+      isValid: true,
+      isOverlapConflict: false,
+    });
     const normalized = (batch: string, sha: string, time: string, value: number) => ({
       workspaceId: "workspace-1",
       projectId: "project-overlap",
@@ -152,6 +167,10 @@ describe("writeEnergyFactMaterialization", () => {
       ...base,
       importBatchId: "later",
       sourceSha256: "sha-later",
+      rawReadings: [
+        raw("later", "sha-later", "2026-05-01T00:15:00.000Z", 101),
+        raw("later", "sha-later", "2026-05-01T00:30:00.000Z", 102),
+      ],
       normalizedReadings: [
         normalized("later", "sha-later", "2026-05-01T00:15:00.000Z", 101),
         normalized("later", "sha-later", "2026-05-01T00:30:00.000Z", 102),
@@ -161,10 +180,13 @@ describe("writeEnergyFactMaterialization", () => {
         fact("later", "sha-later", "2026-05-01T00:15:00.000Z", "2026-05-01T00:30:00.000Z", 1),
       ],
     });
-    await writeEnergyFactMaterialization({
+    const materialized = await writeEnergyFactMaterialization({
       ...base,
       importBatchId: "earlier",
       sourceSha256: "sha-earlier",
+      rawReadings: [
+        raw("earlier", "sha-earlier", "2026-05-01T00:15:00.000Z", 100.9),
+      ],
       normalizedReadings: [
         normalized("earlier", "sha-earlier", "2026-05-01T00:15:00.000Z", 100.9),
       ],
@@ -177,5 +199,17 @@ describe("writeEnergyFactMaterialization", () => {
       .resolves.toMatchObject({ normalizedRows: 2, intervalFacts: 2 });
     await expect(readEnergyFactMaterializationStats({ databasePath, importBatchId: "earlier" }))
       .resolves.toMatchObject({ normalizedRows: 0, intervalFacts: 0 });
+    expect(materialized.projectAudit).toEqual({
+      rawRowCount: 3,
+      invalidRawRowCount: 0,
+      unmappedRawRowCount: 0,
+      rawOverlapConflictCount: 2,
+      normalizedReadingCount: 2,
+      intervalFactCount: 2,
+      duplicateNormalizedReadingCount: 0,
+      duplicateIntervalFactCount: 0,
+      invalidIntervalDurationCount: 0,
+      legacyCanonicalRowCount: 0,
+    });
   });
 });
