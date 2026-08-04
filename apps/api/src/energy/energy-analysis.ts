@@ -23,6 +23,129 @@ import {
   type EnergyQueryContext
 } from "./energy-query-context.js";
 
+export type EnergyDailyUsageAnomalies = {
+  status: "available";
+  bundleId: string;
+  metricId: "energy.total_usage_kwh@1";
+  queryId: "time_slot_anomaly_v1";
+  ruleRevisionId: string;
+  timezone: string;
+  baselineCutoff: string;
+  rule: {
+    relativeThresholdPct: number;
+    absoluteImpactKwh: number;
+    minimumCoveragePct: number;
+    minimumSampleCount: number;
+    maximumQualityEventCount: number;
+    maximumLookbackDays: number;
+    direction: "above";
+    baselineMethod: "mean_of_complete_comparable_days_by_local_hour";
+  };
+  evidencePins: {
+    dataSnapshotId: string;
+    hierarchyRevisionId: string;
+    meterMappingRevisionId: string;
+    meterFormulaRevisionId: string;
+    metricVersion: string;
+    queryIds: ["time_slot_anomaly_v1"];
+  };
+  scopes: Array<{
+    scopeId: string;
+    scopeName: string;
+    scopeType: string;
+    rows: Array<{
+      anomalyId: string;
+      incidentId: string;
+      ruleRevisionId: string;
+      metricId: "energy.total_usage_kwh@1";
+      queryId: "time_slot_anomaly_v1";
+      localDate: string;
+      from: string;
+      to: string;
+      dayType: "weekday" | "weekend" | null;
+      baselineDates: string[];
+      baselineSampleCount: number;
+      baselineSamples: Array<{
+        localDate: string;
+        coveragePct: number;
+        expectedMeterIntervalCount: number;
+        validIntervalCount: number;
+        qualityEventCount: number;
+        eligible: true;
+      }>;
+      actualKwh: number | null;
+      baselineKwh: number | null;
+      impactKwh: number | null;
+      relativePct: number | null;
+      thresholds: {
+        relativeThresholdPct: number;
+        absoluteImpactKwh: number;
+        minimumCoveragePct: number;
+        maximumQualityEventCount: number;
+      };
+      coveragePct: number;
+      expectedMeterIntervalCount: number;
+      validIntervalCount: number;
+      qualityEventCount: number;
+      outcome: "triggered" | "within_threshold" | "suppressed";
+      suppressionReason?: {
+        code: DailyUsageAnomalySuppressionCode;
+        message: string;
+      };
+      hourlyComparison: Array<{
+        localHour: number;
+        actualKwh: number | null;
+        baselineKwh: number | null;
+        impactKwh: number | null;
+        relativePct: number | null;
+      }>;
+      detailSeries: Array<{
+        seriesId: string;
+        relationship: "selected_scope" | "immediate_level" | "component_circuit";
+        kind: "official_scope" | "component_circuit";
+        scopeId: string;
+        scopeName: string;
+        meterNodeId?: string;
+        category?: string;
+        includedInOfficialTotal: boolean;
+        status: "available" | "partial" | "unavailable";
+        selectedTotalKwh: number | null;
+        baselineTotalKwh: number | null;
+        impactKwh: number | null;
+        relativePct: number | null;
+        coveragePct: number;
+        expectedMeterIntervalCount: number;
+        validIntervalCount: number;
+        qualityEventCount: number;
+        points: Array<{
+          localHour: number;
+          selectedKwh: number | null;
+          baselineKwh: number | null;
+          impactKwh: number | null;
+        }>;
+      }>;
+    }>;
+  }>;
+} | {
+  status: "unavailable";
+  ruleRevisionId: string;
+  reason: {
+    code: "BUSINESS_CALENDAR_VERSION_MISSING"
+      | "BUSINESS_CALENDAR_VERSION_NOT_FOUND"
+      | "DAILY_USAGE_ANOMALY_RULE_INVALID";
+    message: string;
+  };
+};
+
+type DailyUsageAnomalySuppressionCode =
+  | "CALENDAR_EXCEPTION_DATE"
+  | "DAILY_FACTS_UNAVAILABLE"
+  | "DAY_TYPE_CLASSIFICATION_UNAVAILABLE"
+  | "COVERAGE_BELOW_THRESHOLD"
+  | "QUALITY_EVENT_PRESENT"
+  | "BASELINE_SAMPLE_COUNT_INSUFFICIENT"
+  | "BASELINE_VALUE_UNAVAILABLE";
+
 export type EnergyScopeAnalysis = {
   context: EnergyQueryContext;
   summary: {
@@ -109,6 +232,7 @@ export type EnergyScopeAnalysis = {
       };
     }>;
   };
+  dailyUsageAnomalies?: EnergyDailyUsageAnomalies;
   peakBreakdown?: {
     status: "available";
     metricId: "energy.peak_demand_kw@1";
@@ -336,6 +460,7 @@ export type EnergyScopeAnalysis = {
       | "previous_meter_usage_v1"
       | "operational_policy_scope_intervals_v1"
       | "operational_policy_meter_intervals_v1"
+      | "time_slot_anomaly_v1"
     >;
   };
 };
@@ -424,6 +549,60 @@ type OperationalIntervalSeries = {
   meterNodeId?: string;
   scopeId?: string;
   intervals: EnergyIqAnalysisInterval[];
+};
+
+type DailyUsageAnomalyRule = Extract<EnergyDailyUsageAnomalies, { status: "available" }>["rule"];
+
+type DailyUsageAnomalySeriesDefinition = {
+  seriesOrder: number;
+  seriesId: string;
+  kind: "official_scope" | "component_circuit";
+  ownerScopeId: string;
+  scopeId: string;
+  scopeName: string;
+  scopeType: string;
+  meterNodeIds: string[];
+  meterNodeId?: string;
+  category?: string;
+  includedInOfficialTotal: boolean;
+};
+
+type DailyUsageAnomalyHourFact = {
+  localDate: string;
+  localHour: number;
+  usageKwh: number | null;
+  validIntervalCount: number;
+  qualityEventCount: number;
+  dayType: string | null;
+  dayTypeCount: number;
+};
+
+type DailyUsageAnomalyLoadResult = {
+  status: "absent";
+} | {
+  status: "unavailable";
+  bundle: Extract<EnergyDailyUsageAnomalies, { status: "unavailable" }>;
+} | {
+  status: "loaded";
+  ruleRevisionId: string;
+  rule: DailyUsageAnomalyRule;
+  exceptionDates: Set<string>;
+  series: DailyUsageAnomalySeriesDefinition[];
+  rows: unknown[][];
+};
+
+type DailyUsageAnomalyDayFact = {
+  localDate: string;
+  dayType: "weekday" | "weekend" | null;
+  coveragePct: number;
+  validIntervalCount: number;
+  expectedMeterIntervalCount: number;
+  qualityEventCount: number;
+  hours: Array<{
+    localHour: number;
+    usageKwh: number | null;
+  }>;
+  totalKwh: number | null;
 };
 
 const GOLDEN_SELECTION_POLICY =
@@ -608,6 +787,9 @@ export const executeEnergyScopeAnalysis = async (input: {
   ruleRevisions?: readonly EnergyIqRuleRevisionRecord[];
   includeTimeBehaviour?: boolean;
 }): Promise<EnergyScopeAnalysis> => {
+  const ruleRevisions = input.ruleRevisions
+    ?? input.metadataStore.energyIq.rules.listRevisions()
+      .filter((rule) => rule.requirement !== "historical_baseline");
   const publishedMeterRoute = resolveEnergyPublishedMeterRoute({
     metadataStore: input.metadataStore,
     projectId: input.context.projectId,
@@ -671,6 +853,18 @@ export const executeEnergyScopeAnalysis = async (input: {
     aggregateMeterNodeIds,
   });
   const dailyDateBuckets = buildDailyDateBuckets(input.context);
+  const dailyUsageAnomalyLoadInput = {
+    metadataStore: input.metadataStore,
+    dataGateway: input.dataGateway,
+    userId: input.userId,
+    context: input.context,
+    databasePath: scoped.databasePath,
+    meterAttachments: publishedMeterRoute.attachments,
+    ruleRevisions,
+    dailyTotalScopes,
+    hierarchy,
+    meterAggregates,
+  };
   const aggregationRule = publishedMeterRoute.officialMeterRoles
     ? aggregationRuleForRoles(publishedMeterRoute.officialMeterRoles)
     : aggregationRuleForMeters(aggregateMeters);
@@ -697,8 +891,8 @@ export const executeEnergyScopeAnalysis = async (input: {
     },
     databasePath: scoped.databasePath
   });
-  // DuckDB scans over one Snapshot-backed view contend heavily when all analysis queries start
-  // together. Keep each explicit batch bounded while preserving the same query/evidence set.
+  // Keep Snapshot-backed scans in explicit bounded batches. The optional anomaly query runs in
+  // its own final batch so enabling it cannot push the shared DuckDB connection fan-out above 3.
   const [summaryResult, profileResult, healthResult] = await Promise.all([
     input.dataGateway.runSqlReadonly({
       user_id: input.userId,
@@ -778,6 +972,7 @@ export const executeEnergyScopeAnalysis = async (input: {
       limit: Math.max(1, meterAggregates.length),
     }),
   ]);
+  const dailyUsageAnomalyLoad = await loadDailyUsageAnomalyFacts(dailyUsageAnomalyLoadInput);
   const summaryRow = summaryResult.rows[0] ?? [];
   const usageKwh = numberAt(summaryRow, 0);
   const peakKw = numberAt(summaryRow, 1);
@@ -847,6 +1042,12 @@ export const executeEnergyScopeAnalysis = async (input: {
         rows: timeBucketGridResult.rows,
       })
     : undefined;
+  const dailyUsageAnomalies = buildDailyUsageAnomalies({
+    load: dailyUsageAnomalyLoad,
+    context: input.context,
+    dateBuckets: dailyDateBuckets,
+    intervalMinutes,
+  });
   const previousMeterUsageById = new Map(
     previousMeterUsageResult.rows.map((row) => [stringAt(row, 0), numberAt(row, 1)]),
   );
@@ -1104,8 +1305,6 @@ export const executeEnergyScopeAnalysis = async (input: {
         facts: peakBreakdownResult.rows.map(rowToPeakIntervalFact),
       })
     : undefined;
-  const ruleRevisions = input.ruleRevisions ?? input.metadataStore.energyIq.rules.listRevisions();
-
   return {
     context: input.context,
     summary,
@@ -1119,6 +1318,7 @@ export const executeEnergyScopeAnalysis = async (input: {
     })),
     dailyTotals,
     ...(timeBehaviour ? { timeBehaviour } : {}),
+    ...(dailyUsageAnomalies ? { dailyUsageAnomalies } : {}),
     ...(peakBreakdown ? { peakBreakdown } : {}),
     categories,
     childScopes,
@@ -1159,9 +1359,710 @@ export const executeEnergyScopeAnalysis = async (input: {
         "previous_meter_usage_v1",
         "operational_policy_scope_intervals_v1",
         "operational_policy_meter_intervals_v1",
+        ...(dailyUsageAnomalyLoad.status === "loaded" ? ["time_slot_anomaly_v1" as const] : []),
       ]
     }
   };
+};
+
+const loadDailyUsageAnomalyFacts = async (input: {
+  metadataStore: MetadataStore;
+  dataGateway: LocalDataGateway;
+  userId: string;
+  context: EnergyQueryContext;
+  databasePath: string;
+  meterAttachments: Array<{
+    meterPointId: string;
+    scopeId: string;
+    officialAggregation: boolean;
+  }>;
+  ruleRevisions: readonly EnergyIqRuleRevisionRecord[];
+  dailyTotalScopes: DailyTotalScope[];
+  hierarchy: ReturnType<MetadataStore["energyIq"]["listProjectNodes"]>;
+  meterAggregates: MeterAggregate[];
+}): Promise<DailyUsageAnomalyLoadResult> => {
+  const matchingRules = input.ruleRevisions.filter(
+    (rule) => rule.evaluation_key === "DAILY_USAGE_ABOVE_BASELINE",
+  );
+  if (matchingRules.length === 0) return { status: "absent" };
+  const ruleRevision = matchingRules[0]!;
+  if (matchingRules.length !== 1) {
+    return dailyUsageAnomalyRuleUnavailable(
+      ruleRevision.revision_id,
+      "Daily usage anomaly evaluation requires exactly one pinned Rule Revision.",
+    );
+  }
+  const rule = parseDailyUsageAnomalyRule(ruleRevision);
+  if (!rule) {
+    return dailyUsageAnomalyRuleUnavailable(
+      ruleRevision.revision_id,
+      "The pinned daily usage anomaly Rule Revision has invalid parameters.",
+    );
+  }
+  const calendarVersion = input.context.businessCalendarVersion.trim();
+  if (!calendarVersion) {
+    return {
+      status: "unavailable",
+      bundle: {
+        status: "unavailable",
+        ruleRevisionId: ruleRevision.revision_id,
+        reason: {
+          code: "BUSINESS_CALENDAR_VERSION_MISSING",
+          message: "A release-pinned Business Calendar is required for daily usage anomalies.",
+        },
+      },
+    };
+  }
+  const calendar = input.metadataStore.energyIq.operationalPolicy
+    .listOperatingCalendars(input.context.projectId)
+    .find((candidate) => candidate.version_id === calendarVersion);
+  if (!calendar) {
+    return {
+      status: "unavailable",
+      bundle: {
+        status: "unavailable",
+        ruleRevisionId: ruleRevision.revision_id,
+        reason: {
+          code: "BUSINESS_CALENDAR_VERSION_NOT_FOUND",
+          message: `Business Calendar ${calendarVersion} is not published for this Project.`,
+        },
+      },
+    };
+  }
+  const series = buildDailyUsageAnomalySeries({
+    dailyTotalScopes: input.dailyTotalScopes,
+    hierarchy: input.hierarchy,
+    meterAggregates: input.meterAggregates,
+  });
+  if (series.length === 0) return { status: "absent" };
+  const baselineCutoff = formatLocalDate(input.context.from, input.context.timezone);
+  const historicalFrom = zonedStartOfLocalDay(
+    shiftLocalDate(baselineCutoff, -rule.maximumLookbackDays),
+    input.context.timezone,
+  );
+  const historicalScoped = await ensureEnergyScopedDataSource({
+    metadataStore: input.metadataStore,
+    userId: input.userId,
+    context: {
+      workspaceId: input.context.workspaceId,
+      projectId: input.context.projectId,
+      scopeId: input.context.scopeId,
+      meterAttachments: input.meterAttachments,
+      resource: input.context.resource,
+      from: historicalFrom,
+      to: input.context.to,
+      timezone: input.context.timezone,
+      hierarchyRevisionId: input.context.hierarchyRevisionId,
+      meterMappingRevisionId: input.context.meterMappingRevisionId,
+      meterFormulaRevisionId: input.context.meterFormulaRevisionId,
+      dataSnapshotId: input.context.dataSnapshotId,
+      metricVersion: input.context.metricVersion,
+    },
+    databasePath: input.databasePath,
+  });
+  const result = await input.dataGateway.runSqlReadonly({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: historicalScoped.datasourceId,
+    sql: dailyUsageAnomalySql(historicalScoped.viewName, series),
+    limit: Math.max(1, series.length),
+  });
+  return {
+    status: "loaded",
+    ruleRevisionId: ruleRevision.revision_id,
+    rule,
+    exceptionDates: new Set(calendar.entries.flatMap(
+      (entry) => (entry.exceptions ?? []).map((exception) => exception.date),
+    )),
+    series,
+    rows: result.rows,
+  };
+};
+
+const dailyUsageAnomalyRuleUnavailable = (
+  ruleRevisionId: string,
+  message: string,
+): Extract<DailyUsageAnomalyLoadResult, { status: "unavailable" }> => ({
+  status: "unavailable",
+  bundle: {
+    status: "unavailable",
+    ruleRevisionId,
+    reason: { code: "DAILY_USAGE_ANOMALY_RULE_INVALID", message },
+  },
+});
+
+const parseDailyUsageAnomalyRule = (
+  revision: EnergyIqRuleRevisionRecord,
+): DailyUsageAnomalyRule | null => {
+  const numberParameter = (key: string): number | null => {
+    const value = revision.parameters[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  };
+  const relativeThresholdPct = numberParameter("relative_threshold_pct");
+  const absoluteImpactKwh = numberParameter("absolute_impact_kwh");
+  const minimumCoveragePct = numberParameter("minimum_coverage_pct");
+  const minimumSampleCount = numberParameter("minimum_sample_count");
+  const maximumQualityEventCount = numberParameter("maximum_quality_event_count");
+  const maximumLookbackDays = numberParameter("maximum_lookback_days");
+  if (relativeThresholdPct === null
+    || absoluteImpactKwh === null
+    || minimumCoveragePct === null
+    || minimumSampleCount === null
+    || maximumQualityEventCount === null
+    || maximumLookbackDays === null
+    || relativeThresholdPct < 0
+    || absoluteImpactKwh < 0
+    || minimumCoveragePct < 0
+    || minimumCoveragePct > 100
+    || !Number.isSafeInteger(minimumSampleCount)
+    || minimumSampleCount < 1
+    || !Number.isSafeInteger(maximumQualityEventCount)
+    || maximumQualityEventCount < 0
+    || !Number.isSafeInteger(maximumLookbackDays)
+    || maximumLookbackDays < 1
+    || revision.parameters.direction !== "above"
+    || revision.parameters.baseline_method !== "mean_of_complete_comparable_days_by_local_hour") {
+    return null;
+  }
+  return {
+    relativeThresholdPct,
+    absoluteImpactKwh,
+    minimumCoveragePct,
+    minimumSampleCount,
+    maximumQualityEventCount,
+    maximumLookbackDays,
+    direction: "above",
+    baselineMethod: "mean_of_complete_comparable_days_by_local_hour",
+  };
+};
+
+const buildDailyUsageAnomalySeries = (input: {
+  dailyTotalScopes: DailyTotalScope[];
+  hierarchy: ReturnType<MetadataStore["energyIq"]["listProjectNodes"]>;
+  meterAggregates: MeterAggregate[];
+}): DailyUsageAnomalySeriesDefinition[] => {
+  const hierarchyById = new Map(input.hierarchy.map((node) => [node.id, node]));
+  const levelScopeIds = new Set(
+    input.dailyTotalScopes
+      .filter((scope) => scope.scopeType === "level")
+      .map((scope) => scope.scopeId),
+  );
+  const officialMeterNodeIds = new Set(
+    input.dailyTotalScopes.flatMap((scope) => scope.meterNodeIds),
+  );
+  const official = input.dailyTotalScopes
+    .filter((scope) => scope.scopeType === "project" || scope.scopeType === "level")
+    .sort((left, right) => {
+      if (left.scopeId === right.scopeId) return 0;
+      if (left.scopeId === input.dailyTotalScopes[0]?.scopeId) return -1;
+      if (right.scopeId === input.dailyTotalScopes[0]?.scopeId) return 1;
+      return (hierarchyById.get(left.scopeId)?.sort_order ?? 0)
+        - (hierarchyById.get(right.scopeId)?.sort_order ?? 0)
+        || left.scopeId.localeCompare(right.scopeId);
+    })
+    .map((scope): DailyUsageAnomalySeriesDefinition => ({
+      seriesOrder: 0,
+      seriesId: `scope:${scope.scopeId}`,
+      kind: "official_scope",
+      ownerScopeId: scope.scopeId,
+      scopeId: scope.scopeId,
+      scopeName: scope.scopeName,
+      scopeType: scope.scopeType,
+      meterNodeIds: scope.meterNodeIds,
+      includedInOfficialTotal: true,
+    }));
+  const components = input.meterAggregates
+    .filter((meter) => {
+      const parentScopeId = hierarchyById.get(meter.scopeId)?.parent_id;
+      return !officialMeterNodeIds.has(meter.meterNodeId)
+        && parentScopeId !== undefined
+        && levelScopeIds.has(parentScopeId);
+    })
+    .sort((left, right) => {
+      const leftNode = hierarchyById.get(left.scopeId);
+      const rightNode = hierarchyById.get(right.scopeId);
+      const leftParent = leftNode?.parent_id ? hierarchyById.get(leftNode.parent_id) : undefined;
+      const rightParent = rightNode?.parent_id ? hierarchyById.get(rightNode.parent_id) : undefined;
+      return (leftParent?.sort_order ?? 0) - (rightParent?.sort_order ?? 0)
+        || (leftNode?.sort_order ?? 0) - (rightNode?.sort_order ?? 0)
+        || left.meterNodeId.localeCompare(right.meterNodeId);
+    })
+    .map((meter): DailyUsageAnomalySeriesDefinition => {
+      const parentScopeId = hierarchyById.get(meter.scopeId)?.parent_id;
+      if (!parentScopeId) throw new Error(`ENERGYIQ_ANOMALY_COMPONENT_PARENT_MISSING:${meter.scopeId}`);
+      return {
+        seriesOrder: 0,
+        seriesId: `meter:${meter.meterNodeId}`,
+        kind: "component_circuit",
+        ownerScopeId: parentScopeId,
+        scopeId: meter.scopeId,
+        scopeName: meter.name,
+        scopeType: "circuit",
+        meterNodeIds: [meter.meterNodeId],
+        meterNodeId: meter.meterNodeId,
+        category: meter.category,
+        includedInOfficialTotal: false,
+      };
+    });
+  return official.flatMap((scope) => [
+    scope,
+    ...components.filter((component) => component.ownerScopeId === scope.scopeId),
+  ]).map((series, seriesOrder) => ({ ...series, seriesOrder }));
+};
+
+const buildDailyUsageAnomalies = (input: {
+  load: DailyUsageAnomalyLoadResult;
+  context: EnergyQueryContext;
+  dateBuckets: DailyDateBucket[];
+  intervalMinutes: number;
+}): EnergyDailyUsageAnomalies | undefined => {
+  if (input.load.status === "absent") return undefined;
+  if (input.load.status === "unavailable") return input.load.bundle;
+  const load = input.load;
+  const factsBySeriesId = new Map<string, DailyUsageAnomalyHourFact[]>(load.rows.map((row) => [
+    stringAt(row, 0),
+    parseDailyUsageAnomalyFacts(stringAt(row, 1)),
+  ]));
+  const daysBySeriesId = new Map<string, Map<string, DailyUsageAnomalyDayFact>>(
+    load.series.map((series) => [
+    series.seriesId,
+    buildDailyUsageAnomalyDays({
+      facts: factsBySeriesId.get(series.seriesId) ?? [],
+      meterCount: series.meterNodeIds.length,
+      intervalMinutes: input.intervalMinutes,
+    }),
+    ]),
+  );
+  const baselineCutoff = formatLocalDate(input.context.from, input.context.timezone);
+  const earliestBaselineDate = shiftLocalDate(
+    baselineCutoff,
+    -load.rule.maximumLookbackDays,
+  );
+  const officialSeries = load.series.filter((series) => series.kind === "official_scope");
+  return {
+    status: "available",
+    bundleId: [
+      "daily-usage-anomalies",
+      input.context.dataSnapshotId,
+      input.context.scopeId,
+      input.context.from,
+      input.context.to,
+      load.ruleRevisionId,
+    ].join(":"),
+    metricId: "energy.total_usage_kwh@1",
+    queryId: "time_slot_anomaly_v1",
+    ruleRevisionId: load.ruleRevisionId,
+    timezone: input.context.timezone,
+    baselineCutoff,
+    rule: load.rule,
+    evidencePins: {
+      dataSnapshotId: input.context.dataSnapshotId,
+      hierarchyRevisionId: input.context.hierarchyRevisionId,
+      meterMappingRevisionId: input.context.meterMappingRevisionId,
+      meterFormulaRevisionId: input.context.meterFormulaRevisionId,
+      metricVersion: input.context.metricVersion,
+      queryIds: ["time_slot_anomaly_v1"],
+    },
+    scopes: officialSeries.map((series) => {
+      const days = daysBySeriesId.get(series.seriesId)
+        ?? new Map<string, DailyUsageAnomalyDayFact>();
+      const baselineDatesByDayType = new Map<"weekday" | "weekend", string[]>(
+        (["weekday", "weekend"] as const).map((dayType) => [
+          dayType,
+          [...days.values()]
+            .filter((day) => day.localDate >= earliestBaselineDate
+              && day.localDate < baselineCutoff
+              && day.dayType === dayType
+              && !load.exceptionDates.has(day.localDate)
+              && day.coveragePct >= load.rule.minimumCoveragePct
+              && day.qualityEventCount <= load.rule.maximumQualityEventCount
+              && day.totalKwh !== null
+              && day.hours.every((hour) => hour.usageKwh !== null))
+            .sort((left, right) => right.localDate.localeCompare(left.localDate))
+            .slice(0, load.rule.minimumSampleCount)
+            .map((day) => day.localDate)
+            .sort((left, right) => left.localeCompare(right)),
+        ]),
+      );
+      return {
+        scopeId: series.scopeId,
+        scopeName: series.scopeName,
+        scopeType: series.scopeType,
+        rows: input.dateBuckets.map((bucket) => buildDailyUsageAnomalyRow({
+          dateBucket: bucket,
+          series,
+          allSeries: load.series,
+          daysBySeriesId,
+          baselineDatesByDayType,
+          exceptionDates: load.exceptionDates,
+          rule: load.rule,
+          ruleRevisionId: load.ruleRevisionId,
+          context: input.context,
+        })),
+      };
+    }),
+  };
+};
+
+const buildDailyUsageAnomalyRow = (input: {
+  dateBucket: DailyDateBucket;
+  series: DailyUsageAnomalySeriesDefinition;
+  allSeries: DailyUsageAnomalySeriesDefinition[];
+  daysBySeriesId: Map<string, Map<string, DailyUsageAnomalyDayFact>>;
+  baselineDatesByDayType: Map<"weekday" | "weekend", string[]>;
+  exceptionDates: Set<string>;
+  rule: DailyUsageAnomalyRule;
+  ruleRevisionId: string;
+  context: EnergyQueryContext;
+}): Extract<EnergyDailyUsageAnomalies, { status: "available" }>["scopes"][number]["rows"][number] => {
+  const days = input.daysBySeriesId.get(input.series.seriesId)
+    ?? new Map<string, DailyUsageAnomalyDayFact>();
+  const selectedDay = days.get(input.dateBucket.localDate)
+    ?? emptyDailyUsageAnomalyDay(input.dateBucket.localDate);
+  const baselineDates = selectedDay.dayType
+    ? input.baselineDatesByDayType.get(selectedDay.dayType) ?? []
+    : [];
+  const baselineHours = meanDailyUsageAnomalyHours(days, baselineDates);
+  const baselineKwh = baselineHours.every((value) => value !== null)
+    ? baselineHours.reduce<number>((sum, value) => sum + (value ?? 0), 0)
+    : null;
+  const actualKwh = selectedDay.totalKwh;
+  const impactKwh = actualKwh !== null && baselineKwh !== null
+    ? actualKwh - baselineKwh
+    : null;
+  const relativePct = impactKwh !== null && baselineKwh !== null && baselineKwh > 0
+    ? impactKwh / baselineKwh * 100
+    : null;
+  const suppressionReason = dailyUsageAnomalySuppressionReason({
+    localDate: input.dateBucket.localDate,
+    selectedDay,
+    baselineDates,
+    baselineKwh,
+    exceptionDates: input.exceptionDates,
+    rule: input.rule,
+  });
+  const outcome = suppressionReason
+    ? "suppressed" as const
+    : impactKwh !== null
+      && relativePct !== null
+      && actualKwh !== null
+      && baselineKwh !== null
+      && actualKwh > baselineKwh
+      && impactKwh >= input.rule.absoluteImpactKwh
+      && relativePct >= input.rule.relativeThresholdPct
+      ? "triggered" as const
+      : "within_threshold" as const;
+  return {
+    anomalyId: [
+      "daily-usage-above-baseline",
+      input.series.scopeId,
+      input.dateBucket.localDate,
+    ].join(":"),
+    incidentId: [
+      "daily-usage-above-baseline",
+      input.context.dataSnapshotId,
+      input.ruleRevisionId,
+      input.series.scopeId,
+      formatLocalDate(input.context.from, input.context.timezone),
+      input.dateBucket.localDate,
+    ].join(":"),
+    ruleRevisionId: input.ruleRevisionId,
+    metricId: "energy.total_usage_kwh@1",
+    queryId: "time_slot_anomaly_v1",
+    localDate: input.dateBucket.localDate,
+    from: input.dateBucket.from,
+    to: input.dateBucket.to,
+    dayType: selectedDay.dayType,
+    baselineDates,
+    baselineSampleCount: baselineDates.length,
+    baselineSamples: baselineDates.map((localDate) => {
+      const sample = days.get(localDate) ?? emptyDailyUsageAnomalyDay(localDate);
+      return {
+        localDate,
+        coveragePct: round(sample.coveragePct, 4),
+        expectedMeterIntervalCount: sample.expectedMeterIntervalCount,
+        validIntervalCount: sample.validIntervalCount,
+        qualityEventCount: sample.qualityEventCount,
+        eligible: true as const,
+      };
+    }),
+    actualKwh: nullableRound(actualKwh),
+    baselineKwh: nullableRound(baselineKwh),
+    impactKwh: nullableRound(impactKwh),
+    relativePct: nullableRound(relativePct),
+    thresholds: {
+      relativeThresholdPct: input.rule.relativeThresholdPct,
+      absoluteImpactKwh: input.rule.absoluteImpactKwh,
+      minimumCoveragePct: input.rule.minimumCoveragePct,
+      maximumQualityEventCount: input.rule.maximumQualityEventCount,
+    },
+    coveragePct: round(selectedDay.coveragePct, 4),
+    expectedMeterIntervalCount: selectedDay.expectedMeterIntervalCount,
+    validIntervalCount: selectedDay.validIntervalCount,
+    qualityEventCount: selectedDay.qualityEventCount,
+    outcome,
+    ...(suppressionReason ? { suppressionReason } : {}),
+    hourlyComparison: Array.from({ length: 24 }, (_, localHour) => {
+      const actual = selectedDay.hours[localHour]?.usageKwh ?? null;
+      const baseline = baselineHours[localHour] ?? null;
+      const impact = actual !== null && baseline !== null ? actual - baseline : null;
+      return {
+        localHour,
+        actualKwh: nullableRound(actual),
+        baselineKwh: nullableRound(baseline),
+        impactKwh: nullableRound(impact),
+        relativePct: impact !== null && baseline !== null && baseline > 0
+          ? round(impact / baseline * 100, 4)
+          : null,
+      };
+    }),
+    detailSeries: input.allSeries
+      .filter((series) => input.series.scopeType === "project"
+        || series.ownerScopeId === input.series.scopeId)
+      .map((series) => buildDailyUsageAnomalyDetailSeries({
+        series,
+        selectedScopeId: input.series.scopeId,
+        localDate: input.dateBucket.localDate,
+        baselineDates,
+        days: input.daysBySeriesId.get(series.seriesId) ?? new Map(),
+        rule: input.rule,
+      })),
+  };
+};
+
+const dailyUsageAnomalySuppressionReason = (input: {
+  localDate: string;
+  selectedDay: DailyUsageAnomalyDayFact;
+  baselineDates: string[];
+  baselineKwh: number | null;
+  exceptionDates: Set<string>;
+  rule: DailyUsageAnomalyRule;
+}): { code: DailyUsageAnomalySuppressionCode; message: string } | undefined => {
+  if (input.exceptionDates.has(input.localDate)) {
+    return {
+      code: "CALENDAR_EXCEPTION_DATE",
+      message: "The release-pinned Business Calendar marks this local date as an exception.",
+    };
+  }
+  if (input.selectedDay.validIntervalCount === 0 || input.selectedDay.totalKwh === null) {
+    return {
+      code: "DAILY_FACTS_UNAVAILABLE",
+      message: "Accepted interval facts are unavailable for this local date.",
+    };
+  }
+  if (input.selectedDay.dayType === null) {
+    return {
+      code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE",
+      message: "Accepted facts do not provide one consistent weekday or weekend classification.",
+    };
+  }
+  if (input.selectedDay.coveragePct < input.rule.minimumCoveragePct) {
+    return {
+      code: "COVERAGE_BELOW_THRESHOLD",
+      message: `Daily coverage is below ${input.rule.minimumCoveragePct}%.`,
+    };
+  }
+  if (input.selectedDay.qualityEventCount > input.rule.maximumQualityEventCount) {
+    return {
+      code: "QUALITY_EVENT_PRESENT",
+      message: "Daily quality events exceed the pinned Rule threshold.",
+    };
+  }
+  if (input.baselineDates.length < input.rule.minimumSampleCount) {
+    return {
+      code: "BASELINE_SAMPLE_COUNT_INSUFFICIENT",
+      message: `Fewer than ${input.rule.minimumSampleCount} complete comparable dates are available.`,
+    };
+  }
+  if (input.baselineKwh === null || input.baselineKwh <= 0) {
+    return {
+      code: "BASELINE_VALUE_UNAVAILABLE",
+      message: "The frozen hourly baseline is unavailable or non-positive.",
+    };
+  }
+  return undefined;
+};
+
+const buildDailyUsageAnomalyDetailSeries = (input: {
+  series: DailyUsageAnomalySeriesDefinition;
+  selectedScopeId: string;
+  localDate: string;
+  baselineDates: string[];
+  days: Map<string, DailyUsageAnomalyDayFact>;
+  rule: DailyUsageAnomalyRule;
+}): Extract<EnergyDailyUsageAnomalies, { status: "available" }>["scopes"][number]["rows"][number]["detailSeries"][number] => {
+  const selectedDay = input.days.get(input.localDate) ?? emptyDailyUsageAnomalyDay(input.localDate);
+  const baselineHours = meanDailyUsageAnomalyHours(input.days, input.baselineDates);
+  const baselineTotal = baselineHours.every((value) => value !== null)
+    ? baselineHours.reduce<number>((sum, value) => sum + (value ?? 0), 0)
+    : null;
+  const selectedTotal = selectedDay.totalKwh;
+  const impact = selectedTotal !== null && baselineTotal !== null
+    ? selectedTotal - baselineTotal
+    : null;
+  const relativePct = impact !== null && baselineTotal !== null && baselineTotal > 0
+    ? impact / baselineTotal * 100
+    : null;
+  const selectedHoursAvailable = selectedDay.hours.every((hour) => hour.usageKwh !== null);
+  const baselineAvailable = input.baselineDates.length === input.rule.minimumSampleCount
+    && baselineHours.every((value) => value !== null);
+  const status = selectedDay.validIntervalCount === 0
+    ? "unavailable" as const
+    : selectedHoursAvailable
+      && baselineAvailable
+      && selectedDay.coveragePct >= input.rule.minimumCoveragePct
+      && selectedDay.qualityEventCount <= input.rule.maximumQualityEventCount
+      ? "available" as const
+      : "partial" as const;
+  return {
+    seriesId: input.series.seriesId,
+    relationship: input.series.kind === "component_circuit"
+      ? "component_circuit"
+      : input.series.scopeId === input.selectedScopeId
+        ? "selected_scope"
+        : "immediate_level",
+    kind: input.series.kind,
+    scopeId: input.series.scopeId,
+    scopeName: input.series.scopeName,
+    ...(input.series.meterNodeId ? { meterNodeId: input.series.meterNodeId } : {}),
+    ...(input.series.category ? { category: input.series.category } : {}),
+    includedInOfficialTotal: input.series.includedInOfficialTotal,
+    status,
+    selectedTotalKwh: nullableRound(selectedTotal),
+    baselineTotalKwh: nullableRound(baselineTotal),
+    impactKwh: nullableRound(impact),
+    relativePct: nullableRound(relativePct),
+    coveragePct: round(selectedDay.coveragePct, 4),
+    expectedMeterIntervalCount: selectedDay.expectedMeterIntervalCount,
+    validIntervalCount: selectedDay.validIntervalCount,
+    qualityEventCount: selectedDay.qualityEventCount,
+    points: Array.from({ length: 24 }, (_, localHour) => {
+      const selectedKwh = selectedDay.hours[localHour]?.usageKwh ?? null;
+      const baselineKwh = baselineHours[localHour] ?? null;
+      return {
+        localHour,
+        selectedKwh: nullableRound(selectedKwh),
+        baselineKwh: nullableRound(baselineKwh),
+        impactKwh: selectedKwh !== null && baselineKwh !== null
+          ? round(selectedKwh - baselineKwh, 4)
+          : null,
+      };
+    }),
+  };
+};
+
+const buildDailyUsageAnomalyDays = (input: {
+  facts: DailyUsageAnomalyHourFact[];
+  meterCount: number;
+  intervalMinutes: number;
+}): Map<string, DailyUsageAnomalyDayFact> => {
+  const factsByDate = new Map<string, DailyUsageAnomalyHourFact[]>();
+  for (const fact of input.facts) {
+    factsByDate.set(fact.localDate, [...(factsByDate.get(fact.localDate) ?? []), fact]);
+  }
+  return new Map([...factsByDate.entries()].map(([localDate, facts]) => {
+    const factByHour = new Map(facts.map((fact) => [fact.localHour, fact]));
+    const hours = Array.from({ length: 24 }, (_, localHour) => ({
+      localHour,
+      usageKwh: factByHour.get(localHour)?.usageKwh ?? null,
+    }));
+    const validIntervalCount = facts.reduce((sum, fact) => sum + fact.validIntervalCount, 0);
+    const qualityEventCount = facts.reduce((sum, fact) => sum + fact.qualityEventCount, 0);
+    const expectedMeterIntervalCount = input.meterCount * Math.round(24 * 60 / input.intervalMinutes);
+    const classifiedFacts = facts.filter((fact) => fact.validIntervalCount > 0);
+    const classifiedDayTypes = new Set(classifiedFacts.map((fact) => fact.dayType));
+    const dayType = classifiedFacts.length > 0
+      && classifiedFacts.every((fact) => fact.dayTypeCount === 1)
+      && classifiedDayTypes.size === 1
+      && (classifiedFacts[0]?.dayType === "weekday" || classifiedFacts[0]?.dayType === "weekend")
+      ? classifiedFacts[0].dayType
+      : null;
+    return [localDate, {
+      localDate,
+      dayType,
+      coveragePct: expectedMeterIntervalCount > 0
+        ? Math.min(validIntervalCount / expectedMeterIntervalCount, 1) * 100
+        : 0,
+      validIntervalCount,
+      expectedMeterIntervalCount,
+      qualityEventCount,
+      hours,
+      totalKwh: validIntervalCount > 0
+        ? hours.reduce((sum, hour) => sum + (hour.usageKwh ?? 0), 0)
+        : null,
+    }];
+  }));
+};
+
+const emptyDailyUsageAnomalyDay = (localDate: string): DailyUsageAnomalyDayFact => ({
+  localDate,
+  dayType: null,
+  coveragePct: 0,
+  validIntervalCount: 0,
+  expectedMeterIntervalCount: 0,
+  qualityEventCount: 0,
+  hours: Array.from({ length: 24 }, (_, localHour) => ({ localHour, usageKwh: null })),
+  totalKwh: null,
+});
+
+const meanDailyUsageAnomalyHours = (
+  days: Map<string, DailyUsageAnomalyDayFact>,
+  baselineDates: string[],
+): Array<number | null> => Array.from({ length: 24 }, (_, localHour) => {
+  const values = baselineDates.map(
+    (localDate) => days.get(localDate)?.hours[localHour]?.usageKwh ?? null,
+  );
+  return values.length === 0 || values.some((value) => value === null)
+    ? null
+    : values.reduce<number>((sum, value) => sum + (value ?? 0), 0) / values.length;
+});
+
+const parseDailyUsageAnomalyFacts = (value: string): DailyUsageAnomalyHourFact[] => {
+  if (!value) return [];
+  const parsed = JSON.parse(value) as unknown;
+  if (!Array.isArray(parsed)) throw new Error("ENERGYIQ_DAILY_USAGE_ANOMALY_FACTS_INVALID");
+  return parsed.map((item, index) => {
+    if (!isRecord(item)) {
+      throw new Error(`ENERGYIQ_DAILY_USAGE_ANOMALY_FACT_INVALID:${index}`);
+    }
+    const localHour = Number(item.local_hour);
+    if (typeof item.local_date !== "string"
+      || !Number.isSafeInteger(localHour)
+      || localHour < 0
+      || localHour > 23) {
+      throw new Error(`ENERGYIQ_DAILY_USAGE_ANOMALY_FACT_INVALID:${index}`);
+    }
+    return {
+      localDate: item.local_date,
+      localHour,
+      usageKwh: item.usage_kwh === null || item.usage_kwh === undefined
+        ? null
+        : finiteNumber(item.usage_kwh, `ENERGYIQ_DAILY_USAGE_ANOMALY_USAGE_INVALID:${index}`),
+      validIntervalCount: finiteNumber(
+        item.valid_interval_count,
+        `ENERGYIQ_DAILY_USAGE_ANOMALY_VALID_COUNT_INVALID:${index}`,
+      ),
+      qualityEventCount: finiteNumber(
+        item.quality_event_count,
+        `ENERGYIQ_DAILY_USAGE_ANOMALY_QUALITY_COUNT_INVALID:${index}`,
+      ),
+      dayType: typeof item.day_type === "string" ? item.day_type : null,
+      dayTypeCount: finiteNumber(
+        item.day_type_count,
+        `ENERGYIQ_DAILY_USAGE_ANOMALY_DAY_TYPE_COUNT_INVALID:${index}`,
+      ),
+    };
+  });
+};
+
+const nullableRound = (value: number | null): number | null => value === null
+  ? null
+  : round(value, 4);
+
+const finiteNumber = (value: unknown, errorCode: string): number => {
+  const number = Number(value);
+  if (!Number.isFinite(number)) throw new Error(errorCode);
+  return number;
 };
 
 const calendarDayCount = (from: string, to: string): number =>
@@ -2243,6 +3144,56 @@ const dailyTotalsSql = (
   WHERE ${meterNodeFilter(scope.meterNodeIds)}
   GROUP BY CAST(source.local_interval_start AS DATE)
 `).join(" UNION ALL ") + " ORDER BY scope_order, local_date";
+
+const dailyUsageAnomalySql = (
+  viewName: string,
+  series: DailyUsageAnomalySeriesDefinition[],
+): string => `
+  SELECT
+    series_definitions.series_id,
+    COALESCE(TO_JSON(LIST(STRUCT_PACK(
+      local_date := time_cells.local_date,
+      local_hour := time_cells.local_hour,
+      usage_kwh := time_cells.usage_kwh,
+      valid_interval_count := time_cells.valid_interval_count,
+      quality_event_count := time_cells.quality_event_count,
+      day_type := time_cells.day_type,
+      day_type_count := time_cells.day_type_count
+    ) ORDER BY time_cells.local_date, time_cells.local_hour) FILTER (
+      WHERE time_cells.local_date IS NOT NULL
+    )), '[]') AS cells_json,
+    series_definitions.series_order
+  FROM (VALUES ${series.map((definition) => `(
+    ${definition.seriesOrder},
+    ${sqlLiteral(definition.seriesId)}
+  )`).join(", ")}) AS series_definitions(series_order, series_id)
+  LEFT JOIN (
+    SELECT
+      routes.series_order,
+      routes.series_id,
+      STRFTIME(CAST(source.local_interval_start AS DATE), '%Y-%m-%d') AS local_date,
+      source.local_hour,
+      SUM(source.usage_kwh) FILTER (WHERE source.quality_status = 'ok') AS usage_kwh,
+      COUNT(*) FILTER (WHERE source.quality_status = 'ok') AS valid_interval_count,
+      COUNT(*) FILTER (WHERE source.quality_status <> 'ok') AS quality_event_count,
+      MAX(source.day_type) FILTER (WHERE source.quality_status = 'ok') AS day_type,
+      COUNT(DISTINCT source.day_type) FILTER (WHERE source.quality_status = 'ok') AS day_type_count
+    FROM ${quoteIdentifier(viewName)} source
+    JOIN (VALUES ${series.flatMap((definition) => definition.meterNodeIds.map((meterNodeId) => `(
+      ${definition.seriesOrder},
+      ${sqlLiteral(definition.seriesId)},
+      ${sqlLiteral(meterNodeId)}
+    )`)).join(", ")}) AS routes(series_order, series_id, meter_node_id)
+      ON routes.meter_node_id = source.meter_node_id
+    GROUP BY
+      routes.series_order,
+      routes.series_id,
+      CAST(source.local_interval_start AS DATE),
+      source.local_hour
+  ) time_cells ON time_cells.series_order = series_definitions.series_order
+  GROUP BY series_definitions.series_order, series_definitions.series_id
+  ORDER BY series_definitions.series_order
+`;
 
 const timeBucketGridSql = (
   viewName: string,

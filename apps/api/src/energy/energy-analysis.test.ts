@@ -97,6 +97,7 @@ describe("EnergyScopeAnalysis", () => {
         status: "unavailable",
         reason: { code: "COMPLETE_DAY_SAMPLE_UNAVAILABLE" },
       });
+      expect(portfolio.dailyUsageAnomalies).toBeUndefined();
       expect(portfolio.provenance.queryIds).toContain("time_bucket_grid_v1");
       expect(portfolio.childScopes).toHaveLength(PRESCHOOL_GOLDEN.period.centreCount);
       expect(portfolio.circuits).toHaveLength(PRESCHOOL_GOLDEN.period.circuitCount);
@@ -136,6 +137,381 @@ describe("EnergyScopeAnalysis", () => {
       expect(centre.summary.usageKwh).toBe(PRESCHOOL_GOLDEN.centreA.usageKwh);
       expect(centre.circuits).toHaveLength(PRESCHOOL_GOLDEN.centreA.circuitCount);
       expect(centre.childScopes).toHaveLength(PRESCHOOL_GOLDEN.centreA.circuitCount);
+    } finally {
+      metadata.close();
+      removeTemporaryEnergyFixture(root);
+    }
+  }, 30_000);
+
+  it("fails daily usage anomalies closed without the release-pinned Calendar", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-analysis-anomaly-calendar-"));
+    const databasePath = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const gateway = new LocalDataGateway(metadata);
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      await materializeNgeeAnnGoldenFixture(databasePath, metadata);
+      const user = metadata.users.getById({ user_id: "dev-user" });
+      const context = resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user,
+        workspaceId: "default",
+        request: {
+          projectId: "ngee-ann-polytechnic",
+          scopeId: "project",
+          resource: "electricity",
+          period: "Custom",
+          from: NGEE_ANN_GOLDEN.selection.period.localFrom,
+          to: "2026-06-16",
+        },
+      });
+      const anomalyRule = metadata.energyIq.rules.listRevisions().find(
+        (rule) => rule.evaluation_key === "DAILY_USAGE_ABOVE_BASELINE",
+      );
+      if (!anomalyRule) throw new Error("DAILY_USAGE_ABOVE_BASELINE_RULE_MISSING");
+
+      const analysis = await executeEnergyScopeAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        context,
+        databasePath,
+        ruleRevisions: [anomalyRule],
+        includeTimeBehaviour: false,
+      });
+
+      expect(analysis.dailyUsageAnomalies).toEqual({
+        status: "unavailable",
+        ruleRevisionId: "comparison.daily_usage_above_baseline@1",
+        reason: {
+          code: "BUSINESS_CALENDAR_VERSION_NOT_FOUND",
+          message: "Business Calendar sg-calendar-v1 is not published for this Project.",
+        },
+      });
+      expect(analysis.provenance.queryIds).not.toContain("time_slot_anomaly_v1");
+    } finally {
+      metadata.close();
+      removeTemporaryEnergyFixture(root);
+    }
+  }, 30_000);
+
+  it("evaluates Ngee Ann daily usage anomalies from one frozen comparable-day baseline", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-analysis-anomaly-golden-"));
+    const databasePath = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const gateway = new LocalDataGateway(metadata);
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      await materializeNgeeAnnGoldenFixture(databasePath, metadata, {
+        includeAnomalyHistory: true,
+      });
+      metadata.energyIq.operationalPolicy.publishOperatingCalendar({
+        version_id: "sg-calendar-v1",
+        project_id: NGEE_ANN_GOLDEN.projectId,
+        published_by: "dev-user",
+        entries: [{
+          id: "ngee-ann-anomaly-calendar",
+          owner: { kind: "project" },
+          effective_from: "2026-04-01",
+          weekly: allDays("00:00", "24:00"),
+          exceptions: [
+            { date: "2026-05-31", operating: [], label: "Do not parse this label" },
+            { date: "2026-06-01", operating: [], label: "Still not a semantic input" },
+          ],
+        }],
+      });
+      const user = metadata.users.getById({ user_id: "dev-user" });
+      const context = resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user,
+        workspaceId: "default",
+        request: {
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "project",
+          resource: "electricity",
+          period: "Custom",
+          from: NGEE_ANN_GOLDEN.selection.period.localFrom,
+          to: "2026-06-16",
+        },
+      });
+      const anomalyRule = metadata.energyIq.rules.listRevisions().find(
+        (rule) => rule.evaluation_key === "DAILY_USAGE_ABOVE_BASELINE",
+      );
+      if (!anomalyRule) throw new Error("DAILY_USAGE_ABOVE_BASELINE_RULE_MISSING");
+
+      const analysis = await executeEnergyScopeAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        context,
+        databasePath,
+        ruleRevisions: [anomalyRule],
+        includeTimeBehaviour: false,
+      });
+
+      expect(analysis.summary.usageKwh).toBe(NGEE_ANN_GOLDEN.period.usageKwh);
+      expect(analysis.provenance.queryIds).toContain("time_slot_anomaly_v1");
+      expect(analysis.dailyUsageAnomalies).toMatchObject({
+        status: "available",
+        bundleId: expect.stringContaining("daily-usage-anomalies:"),
+        metricId: "energy.total_usage_kwh@1",
+        queryId: "time_slot_anomaly_v1",
+        ruleRevisionId: "comparison.daily_usage_above_baseline@1",
+        baselineCutoff: "2026-06-10",
+        rule: {
+          relativeThresholdPct: 20,
+          absoluteImpactKwh: 20,
+          minimumCoveragePct: 95,
+          minimumSampleCount: 4,
+          maximumQualityEventCount: 0,
+          maximumLookbackDays: 60,
+          direction: "above",
+        },
+        evidencePins: {
+          dataSnapshotId: analysis.context.dataSnapshotId,
+          hierarchyRevisionId: analysis.context.hierarchyRevisionId,
+          meterMappingRevisionId: analysis.context.meterMappingRevisionId,
+          meterFormulaRevisionId: analysis.context.meterFormulaRevisionId,
+          metricVersion: analysis.context.metricVersion,
+          queryIds: ["time_slot_anomaly_v1"],
+        },
+      });
+      if (analysis.dailyUsageAnomalies?.status !== "available") {
+        throw new Error("Expected available daily usage anomalies");
+      }
+      expect(analysis.dailyUsageAnomalies.scopes.map((scope) => scope.scopeId))
+        .toEqual(["project", "level-6", "level-7"]);
+      const expectationByScope = {
+        project: {
+          weekdayBaseline: 218.885,
+          weekendBaseline: 63.3385,
+          triggered: ["2026-06-11", "2026-06-13", "2026-06-14"],
+        },
+        "level-7": {
+          weekdayBaseline: 138.8777,
+          weekendBaseline: 26.6704,
+          triggered: ["2026-06-11", "2026-06-12", "2026-06-13", "2026-06-14"],
+        },
+        "level-6": {
+          weekdayBaseline: 80.0073,
+          weekendBaseline: 36.6681,
+          triggered: [],
+        },
+      } as const;
+      for (const scope of analysis.dailyUsageAnomalies.scopes) {
+        const expected = expectationByScope[scope.scopeId as keyof typeof expectationByScope];
+        expect(expected).toBeDefined();
+        expect(scope.rows.filter((row) => row.outcome === "triggered").map((row) => row.localDate))
+          .toEqual(expected.triggered);
+        for (const row of scope.rows) {
+          expect(row.hourlyComparison).toHaveLength(24);
+          expect(row.baselineDates).not.toContain("2026-05-31");
+          expect(row.baselineDates).not.toContain("2026-06-01");
+          if (row.dayType === "weekday") {
+            expect(row.baselineDates).toEqual([
+              "2026-06-04",
+              "2026-06-05",
+              "2026-06-08",
+              "2026-06-09",
+            ]);
+            expect(row.baselineKwh).toBe(expected.weekdayBaseline);
+          } else if (row.dayType === "weekend") {
+            expect(row.baselineDates).toEqual([
+              "2026-05-24",
+              "2026-05-30",
+              "2026-06-06",
+              "2026-06-07",
+            ]);
+            expect(row.baselineKwh).toBe(expected.weekendBaseline);
+          }
+        }
+      }
+      const level7 = analysis.dailyUsageAnomalies.scopes.find(
+        (scope) => scope.scopeId === "level-7",
+      );
+      const level7Selected = level7?.rows.find((row) => row.localDate === "2026-06-11");
+      expect(level7Selected).toMatchObject({
+        anomalyId: "daily-usage-above-baseline:level-7:2026-06-11",
+        incidentId: expect.stringContaining(
+          ":comparison.daily_usage_above_baseline@1:level-7:2026-06-10:2026-06-11",
+        ),
+        ruleRevisionId: "comparison.daily_usage_above_baseline@1",
+        metricId: "energy.total_usage_kwh@1",
+        queryId: "time_slot_anomaly_v1",
+        from: "2026-06-10T16:00:00.000Z",
+        to: "2026-06-11T16:00:00.000Z",
+        baselineSampleCount: 4,
+        expectedMeterIntervalCount: 192,
+        validIntervalCount: 192,
+        qualityEventCount: 0,
+        thresholds: {
+          relativeThresholdPct: 20,
+          absoluteImpactKwh: 20,
+          minimumCoveragePct: 95,
+          maximumQualityEventCount: 0,
+        },
+      });
+      expect(level7Selected?.baselineSamples).toHaveLength(4);
+      expect(level7Selected?.baselineSamples.every((sample) => (
+        sample.eligible
+        && sample.coveragePct === 100
+        && sample.expectedMeterIntervalCount === 192
+        && sample.validIntervalCount === 192
+        && sample.qualityEventCount === 0
+      ))).toBe(true);
+      expect(level7Selected?.detailSeries[0]).toMatchObject({
+        seriesId: "scope:level-7",
+        relationship: "selected_scope",
+        kind: "official_scope",
+        includedInOfficialTotal: true,
+        status: "available",
+      });
+      expect(level7Selected?.detailSeries.slice(1)).toHaveLength(7);
+      expect(level7Selected?.detailSeries.slice(1).every((series) => (
+        series.kind === "component_circuit"
+        && series.includedInOfficialTotal === false
+        && series.points.length === 24
+      ))).toBe(true);
+      expect(level7Selected?.detailSeries.every((series) => (
+        series.points.every((point) => Object.hasOwn(point, "impactKwh"))
+      ))).toBe(true);
+      const projectSelected = analysis.dailyUsageAnomalies.scopes
+        .find((scope) => scope.scopeId === "project")
+        ?.rows.find((row) => row.localDate === "2026-06-11");
+      expect(projectSelected?.detailSeries).toHaveLength(17);
+      expect(projectSelected?.detailSeries.filter(
+        (series) => series.relationship === "selected_scope",
+      )).toHaveLength(1);
+      expect(projectSelected?.detailSeries.filter(
+        (series) => series.relationship === "immediate_level",
+      )).toHaveLength(2);
+      expect(projectSelected?.detailSeries.filter(
+        (series) => series.relationship === "component_circuit",
+      )).toHaveLength(14);
+    } finally {
+      metadata.close();
+      removeTemporaryEnergyFixture(root);
+    }
+  }, 30_000);
+
+  it("suppresses daily anomaly claims when coverage, quality, baseline, Calendar, or Day Type gates fail", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-analysis-anomaly-gates-"));
+    const databasePath = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const gateway = new LocalDataGateway(metadata);
+    const runSqlReadonly = gateway.runSqlReadonly.bind(gateway);
+    gateway.runSqlReadonly = async (request) => {
+      const result = await runSqlReadonly(request);
+      if (!request.sql.includes("series_definitions.series_id")) return result;
+      return {
+        ...result,
+        rows: result.rows.map((row) => {
+          if (row[0] !== "scope:project") return row;
+          const cells = JSON.parse(String(row[1])) as Array<Record<string, unknown>>;
+          const targetValidCountPerHour = 4 * 24 * 4 * 0.949999 / 24;
+          for (const cell of cells) {
+            if (cell.local_date === "2026-06-10") {
+              cell.valid_interval_count = targetValidCountPerHour;
+            }
+          }
+          return [row[0], JSON.stringify(cells), ...row.slice(2)];
+        }),
+      };
+    };
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      await materializeNgeeAnnGoldenFixture(databasePath, metadata, {
+        includeAnomalyHistory: true,
+        transformIntervalFacts: (facts) => {
+          return facts.flatMap((fact) => {
+            if (fact.meterRole !== "total") return [fact];
+            if (fact.localDate === "2026-06-11" && fact.localHour === 0) {
+              return [{ ...fact, qualityStatus: "rejected" }];
+            }
+            if (fact.localDate === "2026-06-15" && fact.localHour === 0) {
+              return [{ ...fact, dayType: "weekend" }];
+            }
+            if (fact.localDate === "2026-06-16") {
+              return [{ ...fact, dayType: "" }];
+            }
+            return [fact];
+          });
+        },
+      });
+      metadata.energyIq.operationalPolicy.publishOperatingCalendar({
+        version_id: "sg-calendar-v1",
+        project_id: NGEE_ANN_GOLDEN.projectId,
+        published_by: "dev-user",
+        entries: [{
+          id: "ngee-ann-anomaly-calendar-gates",
+          owner: { kind: "project" },
+          effective_from: "2026-04-01",
+          weekly: allDays("00:00", "24:00"),
+          exceptions: ["2026-05-30", "2026-05-31", "2026-06-01", "2026-06-12"]
+            .map((date) => ({ date, operating: [], label: "Ignored" })),
+        }],
+      });
+      const user = metadata.users.getById({ user_id: "dev-user" });
+      const context = resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user,
+        workspaceId: "default",
+        request: {
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "project",
+          resource: "electricity",
+          period: "Custom",
+          from: NGEE_ANN_GOLDEN.selection.period.localFrom,
+          to: "2026-06-16",
+        },
+      });
+      const anomalyRule = metadata.energyIq.rules.listRevisions().find(
+        (rule) => rule.evaluation_key === "DAILY_USAGE_ABOVE_BASELINE",
+      );
+      if (!anomalyRule) throw new Error("DAILY_USAGE_ABOVE_BASELINE_RULE_MISSING");
+      const analysis = await executeEnergyScopeAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        context,
+        databasePath,
+        ruleRevisions: [anomalyRule],
+        includeTimeBehaviour: false,
+      });
+      if (analysis.dailyUsageAnomalies?.status !== "available") {
+        throw new Error("Expected available daily usage anomaly gates");
+      }
+      const projectRows = new Map(
+        analysis.dailyUsageAnomalies.scopes.find((scope) => scope.scopeId === "project")
+          ?.rows.map((row) => [row.localDate, row]),
+      );
+      expect(projectRows.get("2026-06-10")).toMatchObject({
+        outcome: "suppressed",
+        coveragePct: 94.9999,
+        suppressionReason: { code: "COVERAGE_BELOW_THRESHOLD" },
+      });
+      expect(projectRows.get("2026-06-11")).toMatchObject({
+        outcome: "suppressed",
+        suppressionReason: { code: "QUALITY_EVENT_PRESENT" },
+      });
+      expect(projectRows.get("2026-06-12")).toMatchObject({
+        outcome: "suppressed",
+        suppressionReason: { code: "CALENDAR_EXCEPTION_DATE" },
+      });
+      expect(projectRows.get("2026-06-13")).toMatchObject({
+        outcome: "suppressed",
+        baselineDates: ["2026-05-24", "2026-06-06", "2026-06-07"],
+        suppressionReason: { code: "BASELINE_SAMPLE_COUNT_INSUFFICIENT" },
+      });
+      expect(projectRows.get("2026-06-15")).toMatchObject({
+        outcome: "suppressed",
+        suppressionReason: { code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE" },
+      });
+      expect(projectRows.get("2026-06-16")).toMatchObject({
+        outcome: "suppressed",
+        suppressionReason: { code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE" },
+      });
+      expect([...projectRows.values()].filter((row) => row.outcome === "triggered")).toEqual([]);
     } finally {
       metadata.close();
       removeTemporaryEnergyFixture(root);
@@ -1313,13 +1689,18 @@ const materializeNgeeAnnGoldenFixture = async (
   metadataStore: MetadataStore,
   options: {
     transformIntervalFacts?: (facts: EnergyIntervalFactWrite[]) => EnergyIntervalFactWrite[];
+    includeAnomalyHistory?: boolean;
   } = {},
 ) => {
   const currentRootUsage = buildCurrentRootUsage();
   const currentLevel6Usage = allocateLevel6Usage(currentRootUsage);
   const currentLevel7Usage = currentRootUsage.map((usage, index) => usage - currentLevel6Usage[index]!);
-  const previousLevel6Usage = constantUsage(477.051617, 7 * 24 * 4);
-  const previousLevel7Usage = constantUsage(734.625651, 7 * 24 * 4);
+  const previousLevel6Usage = options.includeAnomalyHistory
+    ? dailyIntervalUsage([83.686217, 80.0073, 80.0073, 36.6681, 36.6681, 80.0073, 80.0073])
+    : constantUsage(477.051617, 7 * 24 * 4);
+  const previousLevel7Usage = options.includeAnomalyHistory
+    ? dailyIntervalUsage([125.774051, 138.8777, 138.8777, 26.6704, 26.6704, 138.8777, 138.8777])
+    : constantUsage(734.625651, 7 * 24 * 4);
   const currentFrom = Date.parse(NGEE_ANN_GOLDEN.selection.period.from);
   const previousFrom = currentFrom - 7 * 86_400_000;
   const overlapSentinelFrom = Date.parse("2026-05-18T16:00:00.000Z");
@@ -1389,6 +1770,57 @@ const materializeNgeeAnnGoldenFixture = async (
         : currentFrom + index * 15 * 60_000;
       return factFor(meter, usage, index, intervalStartMs);
     }));
+    if (options.includeAnomalyHistory) {
+      const extraOfficialDailyUsage = new Map([
+        ["2026-05-24", { "level-7": 26.6704, "level-6": 36.6681 }],
+        ["2026-05-30", { "level-7": 26.6704, "level-6": 36.6681 }],
+        ["2026-05-31", { "level-7": 26.6704, "level-6": 36.6681 }],
+        ["2026-06-01", { "level-7": 138.8777, "level-6": 80.0073 }],
+      ] as const);
+      const componentBaselineDates = [
+        "2026-05-24",
+        "2026-05-30",
+        "2026-05-31",
+        "2026-06-01",
+        "2026-06-04",
+        "2026-06-05",
+        "2026-06-06",
+        "2026-06-07",
+        "2026-06-08",
+        "2026-06-09",
+      ];
+      for (const meter of batchMeters) {
+        if (meter.meterRole === "total") {
+          const lightShare = meter.scopeId === "level-7" ? level7LightShare : level6LightShare;
+          const categoryShare = meter.category === "light" ? lightShare : 1 - lightShare;
+          for (const [localDate, levelUsage] of extraOfficialDailyUsage) {
+            intervalFacts.push(...factsForLocalDate(
+              meter,
+              localDate,
+              levelUsage[meter.scopeId as "level-7" | "level-6"] * categoryShare,
+            ));
+          }
+          for (const fact of intervalFacts) {
+            if (fact.meterPointId === meter.id
+              && fact.localDate === "2026-06-03"
+              && fact.localHour === 0) {
+              fact.dayType = "weekend";
+            }
+          }
+          continue;
+        }
+        const currentUsage = meter.usage.slice(-7 * 24 * 4);
+        const componentDailyUsage = currentUsage.reduce((sum, usage) => sum + usage, 0) / 7;
+        const existingDates = new Set(intervalFacts
+          .filter((fact) => fact.meterPointId === meter.id)
+          .map((fact) => fact.localDate));
+        for (const localDate of componentBaselineDates) {
+          if (!existingDates.has(localDate)) {
+            intervalFacts.push(...factsForLocalDate(meter, localDate, componentDailyUsage));
+          }
+        }
+      }
+    }
     const sentinelMeter = batchMeters.find((meter) => meter.meterRole === "total");
     if (!sentinelMeter) throw new Error(`NGEE_ANN_GOLDEN_SENTINEL_METER_MISSING:${importBatchId}`);
     intervalFacts.push(factFor(sentinelMeter, 1.234, 0, overlapSentinelFrom));
@@ -1891,6 +2323,34 @@ const fixtureSourceFile = (importBatchId: string): string => {
 
 const constantUsage = (total: number, count: number): number[] =>
   new Array<number>(count).fill(total / count);
+
+const allDays = (from: string, to: string) => ({
+  monday: [{ from, to }],
+  tuesday: [{ from, to }],
+  wednesday: [{ from, to }],
+  thursday: [{ from, to }],
+  friday: [{ from, to }],
+  saturday: [{ from, to }],
+  sunday: [{ from, to }],
+});
+
+const dailyIntervalUsage = (dailyTotals: readonly number[]): number[] =>
+  dailyTotals.flatMap((total) => constantUsage(total, 24 * 4));
+
+const factsForLocalDate = (
+  meter: GoldenMeter,
+  localDate: string,
+  dailyUsageKwh: number,
+): EnergyIntervalFactWrite[] => {
+  const localStartMs = Date.parse(`${localDate}T00:00:00.000Z`);
+  const utcStartMs = localStartMs - 8 * 60 * 60_000;
+  return Array.from({ length: 24 * 4 }, (_, index) => factFor(
+    meter,
+    dailyUsageKwh / (24 * 4),
+    0,
+    utcStartMs + index * 15 * 60_000,
+  ));
+};
 
 const totalCircuitGolden = (
   scopeId: typeof NGEE_ANN_GOLDEN.period.totalCircuits[number]["scopeId"],
