@@ -159,6 +159,24 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("1531.1683");
   });
 
+  it("keeps the static Peak KPI when the optional breakdown is absent or invalid", () => {
+    const absent = ngeeAnnGoldenSnapshot();
+    delete absent.analysis.peakBreakdown;
+    const invalid = ngeeAnnGoldenSnapshot();
+    if (invalid.analysis.peakBreakdown?.status === "available") {
+      invalid.analysis.peakBreakdown.levels[0]!.circuits[0]!.sharePct = null;
+    }
+
+    for (const snapshot of [absent, invalid]) {
+      const markup = renderToStaticMarkup(
+        <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+      );
+      expect(markup).toContain("20.6731");
+      expect(markup).toContain("Breakdown unavailable");
+      expect(markup).not.toContain("View peak breakdown");
+    }
+  });
+
   it("keeps Category facts visible when explicit Circuit and accounting evidence is unavailable", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     delete snapshot.analysis.topCircuits[0]!.includedInOfficialTotal;
@@ -316,6 +334,146 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     return Array.from(fieldset?.querySelectorAll("button") ?? [])
       .find((candidate) => candidate.textContent === label) as HTMLButtonElement | undefined;
   };
+
+  const peakTrigger = () => Array.from(container.querySelectorAll("button"))
+    .find((candidate) => candidate.textContent === "View peak breakdown") as HTMLButtonElement;
+
+  const peakDialog = () => document.querySelector<HTMLDivElement>('[role="dialog"][aria-modal="true"]');
+
+  const peakScopeButton = (label: string) => {
+    const dialog = peakDialog();
+    const fieldset = Array.from(dialog?.querySelectorAll("fieldset") ?? [])
+      .find((candidate) => candidate.querySelector("legend")?.textContent === "Peak breakdown Scope");
+    return Array.from(fieldset?.querySelectorAll("button") ?? [])
+      .find((candidate) => candidate.textContent === label) as HTMLButtonElement | undefined;
+  };
+
+  it("opens the dialog, enters focus, selects a Level and expands server Circuit evidence", async () => {
+    await renderGolden();
+    const trigger = peakTrigger();
+    expect(trigger).toBeTruthy();
+
+    await activateNativeButton(trigger, "Enter");
+    const dialog = peakDialog()!;
+    expect(dialog).toBeTruthy();
+    expect((document.activeElement as HTMLElement)?.textContent).toBe("Close");
+    expect(peakScopeButton("All Project")?.getAttribute("aria-pressed")).toBe("true");
+    expect(dialog.textContent).toContain("12.0637 kW");
+    expect(dialog.textContent).toContain("8.6094 kW");
+
+    await act(async () => peakScopeButton("Level 7")?.click());
+    expect(peakScopeButton("Level 7")?.getAttribute("aria-pressed")).toBe("true");
+    expect(dialog.textContent).toContain("Level 7 official contribution");
+    const circuitDisclosure = Array.from(dialog.querySelectorAll("details"))
+      .find((details) => details.querySelector("summary")?.textContent?.includes("Circuit evidence"))!;
+    expect(circuitDisclosure.open).toBe(false);
+    await act(async () => circuitDisclosure.querySelector("summary")?.click());
+    expect(circuitDisclosure.open).toBe(true);
+    const rows = Array.from(dialog.querySelectorAll<HTMLTableRowElement>("[data-peak-circuit-row]"));
+    expect(rows).toHaveLength(7);
+    expect(rows[0]?.textContent).toContain("mapping-lvl-7-office-load-4-l1p22-l3p25-fan-isol1-2-16");
+    expect(dialog.textContent).toContain("Explanatory only; component Circuits are not added");
+
+    await act(async () => peakScopeButton("Level 6")?.click());
+    const level6Disclosure = Array.from(dialog.querySelectorAll("details"))
+      .find((details) => details.querySelector("summary")?.textContent?.includes("Circuit evidence"))!;
+    expect(level6Disclosure.open).toBe(false);
+  });
+
+  it("closes through Close and Escape, restores focus and resets All Project", async () => {
+    await renderGolden();
+    const trigger = peakTrigger();
+    await act(async () => trigger.click());
+    await act(async () => peakScopeButton("Level 7")?.click());
+    expect(peakScopeButton("Level 7")?.getAttribute("aria-pressed")).toBe("true");
+
+    const closeButton = Array.from(peakDialog()!.querySelectorAll("button"))
+      .find((button) => button.textContent === "Close") as HTMLButtonElement;
+    await act(async () => closeButton.click());
+    expect(peakDialog()).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+
+    await activateNativeButton(trigger, " ");
+    expect(peakScopeButton("All Project")?.getAttribute("aria-pressed")).toBe("true");
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(peakDialog()).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("traps Tab focus inside the Peak dialog", async () => {
+    await renderGolden();
+    await act(async () => peakTrigger().click());
+    const dialog = peakDialog()!;
+    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
+      "button:not([disabled]), summary, a[href], input, select, textarea, [tabindex]:not([tabindex='-1'])",
+    ));
+    const first = focusable[0]!;
+    const last = focusable.at(-1)!;
+    expect(document.activeElement).toBe(first);
+
+    await act(async () => last.focus());
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
+    });
+    expect(document.activeElement).toBe(first);
+
+    await act(async () => first.focus());
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true }));
+    });
+    expect(document.activeElement).toBe(last);
+  });
+
+  it("keeps a partial Period and unavailable Circuit row honest inside the dialog", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot({
+      dataStatus: "partial",
+      coveragePct: 75,
+      validIntervalCount: 2_016,
+    });
+    if (snapshot.analysis.peakBreakdown?.status === "available") {
+      const circuit = snapshot.analysis.peakBreakdown.levels[0]!.circuits[0]!;
+      circuit.averageKw = null;
+      circuit.sharePct = null;
+      circuit.dataHealth = {
+        status: "unavailable",
+        coveragePct: 0,
+        expectedMeterIntervalCount: 1,
+        validIntervalCount: 2,
+        qualityEventCount: 1,
+      };
+    }
+    await renderGolden(snapshot);
+    await act(async () => peakTrigger().click());
+    const dialog = peakDialog()!;
+    expect(dialog.textContent).toContain("This Period is incomplete (75% coverage)");
+    expect(dialog.textContent).toContain("highest complete observed interval");
+
+    await act(async () => peakScopeButton("Level 7")?.click());
+    const disclosure = Array.from(dialog.querySelectorAll("details"))
+      .find((details) => details.querySelector("summary")?.textContent?.includes("Circuit evidence"))!;
+    await act(async () => disclosure.querySelector("summary")?.click());
+    expect(disclosure.textContent).toContain("Unavailable");
+    expect(disclosure.textContent).toContain("0% coverage");
+    expect(disclosure.textContent).toContain("1 quality events");
+  });
+
+  it("shows an honest empty Circuit evidence state for a selected Level", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    if (snapshot.analysis.peakBreakdown?.status === "available") {
+      snapshot.analysis.peakBreakdown.levels[1]!.circuits = [];
+    }
+    await renderGolden(snapshot);
+    await act(async () => peakTrigger().click());
+    await act(async () => peakScopeButton("Level 6")?.click());
+    const disclosure = Array.from(peakDialog()!.querySelectorAll("details"))
+      .find((details) => details.querySelector("summary")?.textContent?.includes("Circuit evidence"))!;
+    await act(async () => disclosure.querySelector("summary")?.click());
+
+    expect(disclosure.textContent).toContain("Circuit evidence unavailable for this Level.");
+    expect(disclosure.querySelectorAll("[data-peak-circuit-row]")).toHaveLength(0);
+  });
 
   it("switches authoritative trend Scopes and exposes point detail through focus and keyboard selection", async () => {
     await renderGolden();

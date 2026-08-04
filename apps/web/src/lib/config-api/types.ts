@@ -419,6 +419,52 @@ export type EnergyDailyTotalsDto = {
   }>;
 };
 
+export type EnergyPeakIntervalDataHealthDto = EnergyAnalysisDataHealthDto & {
+  status: "complete" | "unavailable";
+};
+
+export type EnergyPeakBreakdownDto = {
+  status: "available";
+  metricId: "energy.peak_demand_kw@1";
+  intervalMinutes: number;
+  timezone: string;
+  unit: "kW";
+  periodStatus: "complete" | "partial";
+  coveragePct: number;
+  peak: {
+    from: string;
+    to: string;
+    averageKw: number;
+    dataHealth: EnergyPeakIntervalDataHealthDto;
+  };
+  levels: Array<{
+    scopeId: string;
+    scopeName: string;
+    averageKw: number;
+    sharePct: number;
+    dataHealth: EnergyPeakIntervalDataHealthDto;
+    circuits: Array<{
+      meterNodeId: string;
+      name: string;
+      category: string;
+      averageKw: number | null;
+      sharePct: number | null;
+      includedInOfficialTotal: false;
+      dataHealth: EnergyPeakIntervalDataHealthDto;
+    }>;
+  }>;
+} | {
+  status: "unavailable";
+  reason: {
+    code:
+      | "PEAK_AT_MISSING"
+      | "PEAK_INTERVAL_FACTS_UNAVAILABLE"
+      | "PEAK_INTERVAL_FACTS_AMBIGUOUS"
+      | "PEAK_INTERVAL_FACTS_REJECTED";
+    message: string;
+  };
+};
+
 export type EnergyVirtualMeterTraceTermDto = {
   meterNodeId: string;
   name: string;
@@ -529,6 +575,7 @@ export type EnergyScopeAnalysisDto = {
     includedInOfficialTotal: false;
   }>;
   dailyTotals?: EnergyDailyTotalsDto;
+  peakBreakdown?: EnergyPeakBreakdownDto;
   virtualMeterTraces?: EnergyVirtualMeterTraceDto[];
   offHours: {
     status: "available";
@@ -597,6 +644,7 @@ export type EnergyScopeAnalysisDto = {
     queryIds: Array<
       | "scope_summary_v1"
       | "daily_totals_v1"
+      | "peak_breakdown_v1"
       | "hourly_profile_v1"
       | "meter_breakdown_v1"
       | "previous_meter_usage_v1"

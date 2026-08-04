@@ -58,6 +58,54 @@ export type NgeeAnnEnergyTrendViewModel = {
   };
 };
 
+type PeakBreakdownQuality = {
+  status: "complete" | "unavailable";
+  statusLabel: "Complete" | "Unavailable";
+  coverage: string;
+  intervals: string;
+  qualityEvents: string;
+};
+
+export type NgeeAnnPeakBreakdownViewModel = {
+  status: "available" | "unavailable";
+  decisionQuestion: string;
+  reason: string | null;
+  periodStatus: "complete" | "partial" | null;
+  periodCoverage: string | null;
+  peakLabel: string;
+  peakAt: string | null;
+  peakInterval: string | null;
+  averageKw: string | null;
+  quality: PeakBreakdownQuality | null;
+  levels: Array<{
+    scopeId: string;
+    scopeName: string;
+    averageKw: string;
+    sharePct: string;
+    quality: PeakBreakdownQuality;
+    circuits: Array<{
+      meterNodeId: string;
+      name: string;
+      category: string;
+      averageKw: string | null;
+      sharePct: string | null;
+      includedInOfficialTotal: false;
+      quality: PeakBreakdownQuality;
+    }>;
+  }>;
+  evidence: {
+    snapshotId: string;
+    projectReleaseId: string;
+    meterMappingRevisionId: string;
+    meterFormulaRevisionId: string;
+    metricId: "energy.peak_demand_kw@1";
+    period: string;
+    timezone: string;
+    unit: "kW";
+    queryIds: ["peak_breakdown_v1"];
+  };
+};
+
 export type NgeeAnnLevelComparisonViewModel = {
   status: "available" | "unavailable";
   decisionQuestion: string;
@@ -207,6 +255,7 @@ export type NgeeAnnOverviewViewModel = {
     lastSeen: string;
   };
   highlights: NgeeAnnOverviewHighlight[];
+  peakBreakdown: NgeeAnnPeakBreakdownViewModel;
   energyTrend: NgeeAnnEnergyTrendViewModel;
   levelComparison: NgeeAnnLevelComparisonViewModel;
   energyComposition: NgeeAnnEnergyCompositionViewModel;
@@ -352,6 +401,7 @@ export function buildNgeeAnnOverviewViewModel(
         available: costAvailable,
       },
     ],
+    peakBreakdown: buildPeakBreakdown(snapshot, unavailable),
     energyTrend: buildEnergyTrend(snapshot, unavailable),
     levelComparison: buildLevelComparison(snapshot, unavailable),
     energyComposition: buildEnergyComposition(snapshot, unavailable),
@@ -745,6 +795,213 @@ function compositionQuality(quality: {
   return {
     coverage: `${formatDecimal(quality.coveragePct, 1)}% coverage`,
     intervals: `${quality.validIntervalCount.toLocaleString("en-SG")} / ${quality.expectedMeterIntervalCount.toLocaleString("en-SG")}`,
+    qualityEvents: `${quality.qualityEventCount.toLocaleString("en-SG")} quality events`,
+  };
+}
+
+function buildPeakBreakdown(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  overviewUnavailable: boolean,
+): NgeeAnnPeakBreakdownViewModel {
+  const { analysis, context } = snapshot;
+  const breakdown = analysis.peakBreakdown;
+  const evidence: NgeeAnnPeakBreakdownViewModel["evidence"] = {
+    snapshotId: snapshot.dataSnapshot.id,
+    projectReleaseId: snapshot.projectRelease.id,
+    meterMappingRevisionId: analysis.provenance.meterMappingRevisionId,
+    meterFormulaRevisionId: analysis.provenance.meterFormulaRevisionId,
+    metricId: "energy.peak_demand_kw@1",
+    period: `[${context.primaryPeriod.start}, ${context.primaryPeriod.endExclusive})`,
+    timezone: context.timezone,
+    unit: "kW",
+    queryIds: ["peak_breakdown_v1"],
+  };
+  const unavailable = (reason: string): NgeeAnnPeakBreakdownViewModel => ({
+    status: "unavailable",
+    decisionQuestion: "Which Level drove the highest accepted 15-minute interval-average Project load?",
+    reason,
+    periodStatus: null,
+    periodCoverage: null,
+    peakLabel: "Peak breakdown unavailable",
+    peakAt: null,
+    peakInterval: null,
+    averageKw: null,
+    quality: null,
+    levels: [],
+    evidence,
+  });
+
+  if (overviewUnavailable) {
+    return unavailable("No trusted intervals support a Peak breakdown for this Period.");
+  }
+  if (context.scopeType !== "project") {
+    return unavailable("Select the Project Scope to inspect the Project Peak breakdown.");
+  }
+  if (!breakdown) {
+    return unavailable("This published Snapshot does not include the Peak breakdown contract.");
+  }
+  if (breakdown.status === "unavailable") {
+    return unavailable(breakdown.reason.message);
+  }
+
+  const expectedPeriodStatus = analysis.dataHealth.status === "complete" ? "complete" : "partial";
+  const peakFromMs = Date.parse(breakdown.peak.from);
+  const peakToMs = Date.parse(breakdown.peak.to);
+  const validIdentity = breakdown.metricId === "energy.peak_demand_kw@1"
+    && breakdown.unit === analysis.units.demand
+    && breakdown.timezone === context.timezone
+    && analysis.units.timezone === context.timezone
+    && breakdown.intervalMinutes === analysis.units.intervalMinutes
+    && breakdown.intervalMinutes === 15
+    && breakdown.periodStatus === expectedPeriodStatus
+    && Number.isFinite(breakdown.coveragePct)
+    && breakdown.coveragePct >= 0
+    && breakdown.coveragePct <= 100
+    && formatDecimal(breakdown.coveragePct, 4) === formatDecimal(analysis.dataHealth.coveragePct, 4)
+    && analysis.provenance.queryIds.includes("peak_breakdown_v1");
+  const validPeak = analysis.summary.peakAt === breakdown.peak.from
+    && Number.isFinite(peakFromMs)
+    && Number.isFinite(peakToMs)
+    && peakToMs - peakFromMs === breakdown.intervalMinutes * 60_000
+    && peakFromMs >= Date.parse(context.primaryPeriod.start)
+    && peakToMs <= Date.parse(context.primaryPeriod.endExclusive)
+    && finiteNonNegative(breakdown.peak.averageKw)
+    && formatDecimal(breakdown.peak.averageKw, 4) === formatDecimal(analysis.summary.peakKw, 4)
+    && validCompletePeakHealth(breakdown.peak.dataHealth);
+  if (!validIdentity || !validPeak) {
+    return unavailable("The Peak identity, interval, Project value, quality or query evidence is invalid.");
+  }
+
+  const expectedLevels = analysis.childScopes
+    .filter((scope) => scope.nodeType === "level")
+    .map((scope) => ({ scopeId: scope.nodeId, scopeName: scope.name }));
+  const uniqueLevelIds = new Set<string>();
+  const uniqueCircuitIds = new Set<string>();
+  const validLevels = expectedLevels.length === 2
+    && breakdown.levels.length === expectedLevels.length
+    && breakdown.levels.every((level) => {
+      const expectedLevel = expectedLevels.find((candidate) => candidate.scopeId === level.scopeId);
+      if (
+        !expectedLevel
+        || level.scopeName !== expectedLevel.scopeName
+        || uniqueLevelIds.has(level.scopeId)
+        || !finiteNonNegative(level.averageKw)
+        || !validPercentage(level.sharePct)
+        || !validCompletePeakHealth(level.dataHealth)
+      ) {
+        return false;
+      }
+      uniqueLevelIds.add(level.scopeId);
+      return level.circuits.every((circuit) => {
+        if (
+          !circuit.meterNodeId
+          || uniqueCircuitIds.has(circuit.meterNodeId)
+          || !circuit.name
+          || !circuit.category
+          || circuit.includedInOfficialTotal !== false
+          || (circuit.dataHealth.status !== "complete" && circuit.dataHealth.status !== "unavailable")
+          || !validPeakHealth(circuit.dataHealth)
+        ) {
+          return false;
+        }
+        uniqueCircuitIds.add(circuit.meterNodeId);
+        return circuit.dataHealth.status === "complete"
+          ? validCompletePeakHealth(circuit.dataHealth)
+            && finiteNonNegative(circuit.averageKw)
+            && validPercentage(circuit.sharePct)
+          : circuit.averageKw === null && circuit.sharePct === null;
+      });
+    });
+  if (!validLevels) {
+    return unavailable("The Level or Circuit Peak breakdown contract is incomplete or invalid.");
+  }
+
+  return {
+    status: "available",
+    decisionQuestion: "Which Level drove the highest accepted 15-minute interval-average Project load?",
+    reason: null,
+    periodStatus: breakdown.periodStatus,
+    periodCoverage: `${formatDecimal(breakdown.coveragePct, 1)}% coverage`,
+    peakLabel: breakdown.periodStatus === "partial"
+      ? "Highest complete observed interval"
+      : "Highest accepted interval",
+    peakAt: formatTimestamp(breakdown.peak.from, breakdown.timezone),
+    peakInterval: formatEvidenceRange(breakdown.peak.from, breakdown.peak.to, breakdown.timezone),
+    averageKw: formatDecimal(breakdown.peak.averageKw, 4),
+    quality: peakBreakdownQuality(breakdown.peak.dataHealth),
+    levels: breakdown.levels.map((level) => ({
+      scopeId: level.scopeId,
+      scopeName: level.scopeName,
+      averageKw: formatDecimal(level.averageKw, 4),
+      sharePct: `${formatDecimal(level.sharePct, 4)}%`,
+      quality: peakBreakdownQuality(level.dataHealth),
+      circuits: level.circuits.map((circuit) => ({
+        meterNodeId: circuit.meterNodeId,
+        name: circuit.name,
+        category: circuit.category,
+        averageKw: circuit.averageKw === null ? null : formatDecimal(circuit.averageKw, 4),
+        sharePct: circuit.sharePct === null ? null : `${formatDecimal(circuit.sharePct, 4)}%`,
+        includedInOfficialTotal: false,
+        quality: peakBreakdownQuality(circuit.dataHealth),
+      })),
+    })),
+    evidence,
+  };
+}
+
+function validCompletePeakHealth(health: {
+  status: string;
+  coveragePct: number;
+  expectedMeterIntervalCount: number;
+  validIntervalCount: number;
+  qualityEventCount: number;
+}): boolean {
+  return health.status === "complete"
+    && health.coveragePct === 100
+    && health.qualityEventCount === 0
+    && validPeakHealth(health)
+    && health.expectedMeterIntervalCount > 0
+    && health.validIntervalCount === health.expectedMeterIntervalCount;
+}
+
+function validPeakHealth(health: {
+  status: string;
+  coveragePct: number;
+  expectedMeterIntervalCount: number;
+  validIntervalCount: number;
+  qualityEventCount: number;
+}): boolean {
+  return Number.isFinite(health.coveragePct)
+    && health.coveragePct >= 0
+    && health.coveragePct <= 100
+    && Number.isInteger(health.expectedMeterIntervalCount)
+    && health.expectedMeterIntervalCount >= 0
+    && Number.isInteger(health.validIntervalCount)
+    && health.validIntervalCount >= 0
+    && Number.isInteger(health.qualityEventCount)
+    && health.qualityEventCount >= 0;
+}
+
+function finiteNonNegative(value: number | null): value is number {
+  return value !== null && Number.isFinite(value) && value >= 0;
+}
+
+function validPercentage(value: number | null): value is number {
+  return value !== null && Number.isFinite(value) && value >= 0 && value <= 100;
+}
+
+function peakBreakdownQuality(quality: {
+  status: "complete" | "unavailable";
+  coveragePct: number;
+  expectedMeterIntervalCount: number;
+  validIntervalCount: number;
+  qualityEventCount: number;
+}): PeakBreakdownQuality {
+  return {
+    status: quality.status,
+    statusLabel: quality.status === "complete" ? "Complete" : "Unavailable",
+    coverage: `${formatDecimal(quality.coveragePct, 1)}% coverage`,
+    intervals: `${quality.validIntervalCount.toLocaleString("en-SG")} / ${quality.expectedMeterIntervalCount.toLocaleString("en-SG")} valid intervals`,
     qualityEvents: `${quality.qualityEventCount.toLocaleString("en-SG")} quality events`,
   };
 }

@@ -22,6 +22,7 @@ export function ngeeAnnGoldenSnapshot(input: {
   const queryIds = [
     "scope_summary_v1",
     "daily_totals_v1",
+    "peak_breakdown_v1",
     "hourly_profile_v1",
     "meter_breakdown_v1",
     "previous_meter_usage_v1",
@@ -367,6 +368,7 @@ export function ngeeAnnGoldenSnapshot(input: {
     },
     hourlyProfile: [],
     dailyTotals: goldenDailyTotals(),
+    peakBreakdown: goldenPeakBreakdown(topCircuits, dataStatus, coveragePct),
     comparison: {
       from: "2026-06-02T16:00:00.000Z",
       to: "2026-06-09T16:00:00.000Z",
@@ -603,6 +605,99 @@ export function ngeeAnnGoldenSnapshot(input: {
     },
     metadata,
     analysis,
+  };
+}
+
+function goldenPeakBreakdown(
+  circuits: EnergyProjectAnalysisSnapshotDto["analysis"]["topCircuits"],
+  dataStatus: "complete" | "partial" | "unavailable",
+  coveragePct: number,
+): NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["peakBreakdown"]> {
+  const completeHealth = (expectedMeterIntervalCount: number) => ({
+    status: "complete" as const,
+    coveragePct: 100 as const,
+    expectedMeterIntervalCount,
+    validIntervalCount: expectedMeterIntervalCount,
+    qualityEventCount: 0 as const,
+  });
+  const circuitFacts = new Map<string, { averageKw: number; sharePct: number }>([
+    ["mapping-lvl-7-office-load-4-l1p22-l3p25-fan-isol1-2-16", { averageKw: 3.3922, sharePct: 28.1194 }],
+    ["mapping-lvl-7-office-load-3-l1p16-l3p21-15", { averageKw: 3.2421, sharePct: 26.8748 }],
+    ["mapping-lvl-7-front-row-office-light-11", { averageKw: 1.9506, sharePct: 16.1694 }],
+    ["mapping-lvl-7-back-row-office-light-10", { averageKw: 1.4399, sharePct: 11.936 }],
+    ["mapping-lvl-7-office-load-2-l1p7-l3p15-14", { averageKw: 1.3746, sharePct: 11.3947 }],
+    ["mapping-lvl-7-middle-row-office-light-12", { averageKw: 0.3004, sharePct: 2.4898 }],
+    ["mapping-lvl-7-office-load-1-l1p1-l3p6-13", { averageKw: 0.1804, sharePct: 1.4956 }],
+    ["mapping-lvl-6-office-load-4-l1p19-l3p24-6", { averageKw: 3.4747, sharePct: 40.3592 }],
+    ["mapping-lvl-6-office-light-right-internal-2", { averageKw: 1.5823, sharePct: 18.3784 }],
+    ["mapping-lvl-6-office-light-left-external-1", { averageKw: 1.4839, sharePct: 17.2353 }],
+    ["mapping-lvl-6-office-load-5-l1p25-l3p29-fan-isol-1-2-7", { averageKw: 0.5735, sharePct: 6.6611 }],
+    ["mapping-lvl-6-office-load-1-l1p1-l3p6-3", { averageKw: 0.5018, sharePct: 5.8282 }],
+    ["mapping-lvl-6-office-load-2-l1p7-l3p12-4", { averageKw: 0.4295, sharePct: 4.9887 }],
+    ["mapping-lvl-6-office-load-3-l1p13-l3p18-5", { averageKw: 0.4028, sharePct: 4.6787 }],
+  ]);
+  const circuitRow = (meterNodeId: string) => {
+    const circuit = circuits.find((candidate) => candidate.meterNodeId === meterNodeId)!;
+    const fact = circuitFacts.get(meterNodeId)!;
+    return {
+      meterNodeId,
+      name: circuit.name,
+      category: circuit.category,
+      averageKw: fact.averageKw,
+      sharePct: fact.sharePct,
+      includedInOfficialTotal: false as const,
+      dataHealth: completeHealth(1),
+    };
+  };
+
+  return {
+    status: "available",
+    metricId: "energy.peak_demand_kw@1",
+    intervalMinutes: 15,
+    timezone: "Asia/Singapore",
+    unit: "kW",
+    periodStatus: dataStatus === "complete" ? "complete" : "partial",
+    coveragePct,
+    peak: {
+      from: "2026-06-11T06:00:00.000Z",
+      to: "2026-06-11T06:15:00.000Z",
+      averageKw: 20.6731,
+      dataHealth: completeHealth(4),
+    },
+    levels: [
+      {
+        scopeId: "level-7",
+        scopeName: "Level 7",
+        averageKw: 12.0637,
+        sharePct: 58.3545,
+        dataHealth: completeHealth(2),
+        circuits: [
+          circuitRow("mapping-lvl-7-office-load-4-l1p22-l3p25-fan-isol1-2-16"),
+          circuitRow("mapping-lvl-7-office-load-3-l1p16-l3p21-15"),
+          circuitRow("mapping-lvl-7-front-row-office-light-11"),
+          circuitRow("mapping-lvl-7-back-row-office-light-10"),
+          circuitRow("mapping-lvl-7-office-load-2-l1p7-l3p15-14"),
+          circuitRow("mapping-lvl-7-middle-row-office-light-12"),
+          circuitRow("mapping-lvl-7-office-load-1-l1p1-l3p6-13"),
+        ],
+      },
+      {
+        scopeId: "level-6",
+        scopeName: "Level 6",
+        averageKw: 8.6094,
+        sharePct: 41.6455,
+        dataHealth: completeHealth(2),
+        circuits: [
+          circuitRow("mapping-lvl-6-office-load-4-l1p19-l3p24-6"),
+          circuitRow("mapping-lvl-6-office-light-right-internal-2"),
+          circuitRow("mapping-lvl-6-office-light-left-external-1"),
+          circuitRow("mapping-lvl-6-office-load-5-l1p25-l3p29-fan-isol-1-2-7"),
+          circuitRow("mapping-lvl-6-office-load-1-l1p1-l3p6-3"),
+          circuitRow("mapping-lvl-6-office-load-2-l1p7-l3p12-4"),
+          circuitRow("mapping-lvl-6-office-load-3-l1p13-l3p18-5"),
+        ],
+      },
+    ],
   };
 }
 

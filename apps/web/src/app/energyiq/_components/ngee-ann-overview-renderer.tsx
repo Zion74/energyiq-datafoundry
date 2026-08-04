@@ -5,6 +5,7 @@ import { EnergyIcon } from "./icons";
 import { NgeeAnnEnergyComposition } from "./ngee-ann-energy-composition";
 import { NgeeAnnEnergyTrend } from "./ngee-ann-energy-trend";
 import { NgeeAnnLevelComparison } from "./ngee-ann-level-comparison";
+import { NgeeAnnPeakBreakdown } from "./ngee-ann-peak-breakdown";
 import {
   buildNgeeAnnOverviewViewModel,
   type NgeeAnnLatestAvailableRange,
@@ -117,6 +118,7 @@ export function NgeeAnnOverviewRenderer({
               {highlight.unit ? <span className="ml-1 text-xs font-medium tracking-normal text-muted">{highlight.unit}</span> : null}
             </p>
             <p className="mt-2 text-[10px] leading-4 text-muted-light">{highlight.detail}</p>
+            {highlight.id === "peak" ? <NgeeAnnPeakBreakdown view={view.peakBreakdown} /> : null}
           </article>
         ))}
       </div>

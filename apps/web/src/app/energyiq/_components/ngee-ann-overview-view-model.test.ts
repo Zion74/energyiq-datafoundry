@@ -287,6 +287,118 @@ describe("Ngee Ann Overview ViewModel", () => {
     ]);
   });
 
+  it("projects the authoritative same-interval Peak breakdown without reordering server rows", () => {
+    const view = buildNgeeAnnOverviewViewModel(ngeeAnnGoldenSnapshot());
+
+    expect(view.peakBreakdown).toMatchObject({
+      status: "available",
+      periodStatus: "complete",
+      periodCoverage: "100% coverage",
+      peakLabel: "Highest accepted interval",
+      peakAt: "11 Jun 2026, 14:00",
+      peakInterval: "[11 Jun 2026, 14:00, 11 Jun 2026, 14:15)",
+      averageKw: "20.6731",
+      levels: [
+        {
+          scopeId: "level-7",
+          scopeName: "Level 7",
+          averageKw: "12.0637",
+          sharePct: "58.3545%",
+        },
+        {
+          scopeId: "level-6",
+          scopeName: "Level 6",
+          averageKw: "8.6094",
+          sharePct: "41.6455%",
+        },
+      ],
+      evidence: {
+        snapshotId: "snapshot-ngee-ann-golden",
+        projectReleaseId: "release-ngee-ann-golden",
+        meterMappingRevisionId: "mapping-v1",
+        meterFormulaRevisionId: "formula-v1",
+        metricId: "energy.peak_demand_kw@1",
+        period: "[2026-06-09T16:00:00.000Z, 2026-06-16T16:00:00.000Z)",
+        timezone: "Asia/Singapore",
+        unit: "kW",
+        queryIds: ["peak_breakdown_v1"],
+      },
+    });
+    expect(view.peakBreakdown.levels[0]!.circuits.map((row) => row.meterNodeId)).toEqual([
+      "mapping-lvl-7-office-load-4-l1p22-l3p25-fan-isol1-2-16",
+      "mapping-lvl-7-office-load-3-l1p16-l3p21-15",
+      "mapping-lvl-7-front-row-office-light-11",
+      "mapping-lvl-7-back-row-office-light-10",
+      "mapping-lvl-7-office-load-2-l1p7-l3p15-14",
+      "mapping-lvl-7-middle-row-office-light-12",
+      "mapping-lvl-7-office-load-1-l1p1-l3p6-13",
+    ]);
+  });
+
+  it("keeps an accepted Peak available while labeling an incomplete Period", () => {
+    const snapshot = ngeeAnnGoldenSnapshot({
+      dataStatus: "partial",
+      coveragePct: 75,
+      validIntervalCount: 2_016,
+    });
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.peakBreakdown).toMatchObject({
+      status: "available",
+      periodStatus: "partial",
+      periodCoverage: "75% coverage",
+      peakLabel: "Highest complete observed interval",
+      averageKw: "20.6731",
+    });
+  });
+
+  it("matches Peak Levels by identity while preserving server Peak order", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    if (snapshot.analysis.peakBreakdown?.status === "available") {
+      snapshot.analysis.peakBreakdown.levels.reverse();
+    }
+
+    const peak = buildNgeeAnnOverviewViewModel(snapshot).peakBreakdown;
+
+    expect(peak.status).toBe("available");
+    expect(peak.levels.map((level) => level.scopeId)).toEqual(["level-6", "level-7"]);
+  });
+
+  it("fails only Peak breakdown closed for absent, unavailable or invalid optional payloads", () => {
+    const absent = ngeeAnnGoldenSnapshot();
+    delete absent.analysis.peakBreakdown;
+    const unavailable = ngeeAnnGoldenSnapshot();
+    unavailable.analysis.peakBreakdown = {
+      status: "unavailable",
+      reason: {
+        code: "PEAK_INTERVAL_FACTS_REJECTED",
+        message: "The Project Peak interval contains rejected official inputs.",
+      },
+    };
+    const wrongQuery = ngeeAnnGoldenSnapshot();
+    wrongQuery.analysis.provenance.queryIds = wrongQuery.analysis.provenance.queryIds
+      .filter((queryId) => queryId !== "peak_breakdown_v1");
+    const mismatchedPeak = ngeeAnnGoldenSnapshot();
+    if (mismatchedPeak.analysis.peakBreakdown?.status === "available") {
+      mismatchedPeak.analysis.peakBreakdown.peak.averageKw = 21;
+    }
+    const invalidCircuit = ngeeAnnGoldenSnapshot();
+    if (invalidCircuit.analysis.peakBreakdown?.status === "available") {
+      invalidCircuit.analysis.peakBreakdown.levels[0]!.circuits[0]!.sharePct = null;
+    }
+
+    for (const snapshot of [absent, unavailable, wrongQuery, mismatchedPeak, invalidCircuit]) {
+      const view = buildNgeeAnnOverviewViewModel(snapshot);
+      expect(view.peakBreakdown).toMatchObject({ status: "unavailable", levels: [] });
+      expect(view.highlights.find((highlight) => highlight.id === "peak")).toMatchObject({
+        value: "20.6731",
+        unit: "kW",
+        available: true,
+      });
+      expect(view.energyTrend.status).toBe("available");
+    }
+  });
+
   it("keeps partial accepted usage and an unavailable day on the authoritative date spine", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     const rows = snapshot.analysis.dailyTotals!.scopes[0]!.rows;
