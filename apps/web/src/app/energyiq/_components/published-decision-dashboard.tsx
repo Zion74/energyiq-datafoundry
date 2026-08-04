@@ -38,6 +38,14 @@ const periodOptions: ReadonlyArray<{
 ];
 type OverviewPeriod = "Yesterday" | "Last 7 days" | "Custom";
 type ResourceType = "electricity" | "water";
+type OverviewUrlViewState = {
+  projectId: string;
+  scopeId: string;
+  resource: ResourceType;
+  period: OverviewPeriod;
+  from: string;
+  to: string;
+};
 
 type LoadedResolution = {
   projectId: string;
@@ -46,9 +54,31 @@ type LoadedResolution = {
 
 export function PublishedDecisionDashboard() {
   const searchParams = useSearchParams();
-  const { activeProject } = useEnergyIqAccess();
-  const [initialViewState] = useState(() => overviewViewStateFromSearchParams(searchParams));
-  const [resource, setResource] = useState<ResourceType>("electricity");
+  const initialViewState = overviewViewStateFromSearchParams(searchParams);
+  const viewStateKey = [
+    initialViewState.projectId,
+    initialViewState.scopeId,
+    initialViewState.resource,
+    initialViewState.period,
+    initialViewState.from,
+    initialViewState.to,
+  ].join(":");
+  return <PublishedDecisionDashboardView key={viewStateKey} initialViewState={initialViewState} />;
+}
+
+function PublishedDecisionDashboardView({ initialViewState }: { initialViewState: OverviewUrlViewState }) {
+  const { access, activeProject, selectProject } = useEnergyIqAccess();
+  const requestedProject = initialViewState.projectId && access
+    ? access.projects.find((candidate) => candidate.id === initialViewState.projectId
+      && candidate.status === "published"
+      && candidate.workspaceId === access.activeWorkspaceId) ?? null
+    : null;
+  const selectedProject = initialViewState.projectId ? requestedProject : activeProject;
+  const projectSelectionError = initialViewState.projectId && access && !requestedProject
+    ? "Requested Project is unavailable in the active workspace."
+    : null;
+  const scopeId = initialViewState.scopeId;
+  const [resource, setResource] = useState<ResourceType>(initialViewState.resource);
   const [period, setPeriod] = useState<OverviewPeriod>(initialViewState.period);
   const [customRange, setCustomRange] = useState({
     projectId: "",
@@ -64,10 +94,21 @@ export function PublishedDecisionDashboard() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAnalysis, setSavedAnalysis] = useState<EnergySavedAnalysisDetailDto | null>(null);
 
-  const projectId = activeProject?.id ?? "";
+  const projectId = selectedProject?.id ?? "";
   const effectiveCustomRange = customRange.projectId === projectId || customRange.projectId === ""
     ? { ...customRange, projectId }
     : { projectId, from: "", to: "" };
+  const queryValidationError = validateOverviewCustomRange(
+    period,
+    effectiveCustomRange.from,
+    effectiveCustomRange.to,
+  );
+  const requestedProjectId = requestedProject?.id ?? "";
+
+  useEffect(() => {
+    if (!requestedProjectId || requestedProjectId === activeProject?.id) return;
+    selectProject(requestedProjectId);
+  }, [activeProject?.id, requestedProjectId, selectProject]);
   const currentResolution = resolution?.projectId === projectId ? resolution.value : null;
   const currentSnapshot = currentResolution?.status === "ready" ? currentResolution.snapshot : null;
   const currentAnalysis = currentSnapshot?.analysis ?? null;
@@ -94,9 +135,12 @@ export function PublishedDecisionDashboard() {
   );
 
   useEffect(() => {
-    if (!projectId || resource !== "electricity") return;
+    if (!projectId || resource !== "electricity" || projectSelectionError || queryValidationError) return;
     let cancelled = false;
-    const request = overviewAnalysisRequest(projectId, period, effectiveCustomRange);
+    const request = overviewAnalysisRequest(projectId, period, effectiveCustomRange, {
+      scopeId,
+      resource,
+    });
     setRunning(true);
     setAnalysisError(null);
     void configApi.resolveProjectAnalysis(request)
@@ -123,7 +167,7 @@ export function PublishedDecisionDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [effectiveCustomRange.from, effectiveCustomRange.to, period, projectId, refreshRevision, resource]);
+  }, [effectiveCustomRange.from, effectiveCustomRange.to, period, projectId, projectSelectionError, queryValidationError, refreshRevision, resource, scopeId]);
 
   useEffect(() => {
     const firstSectionId = renderPlanForDisplay?.sections[0]?.section_id ?? "";
@@ -141,7 +185,10 @@ export function PublishedDecisionDashboard() {
     setSaveError(null);
     try {
       const saved = await configApi.saveEnergyAnalysis(projectId, {
-        ...overviewAnalysisRequest(projectId, period, effectiveCustomRange),
+        ...overviewAnalysisRequest(projectId, period, effectiveCustomRange, {
+          scopeId,
+          resource,
+        }),
         title: `${currentAnalysis.context.scopeName} · ${period}`,
       });
       setSavedAnalysis(saved);
@@ -177,7 +224,7 @@ export function PublishedDecisionDashboard() {
     projectId,
     resource,
     loading: running,
-    analysisError,
+    analysisError: projectSelectionError ?? queryValidationError ?? analysisError,
     resolution: currentResolution,
     plan: renderPlanForDisplay,
     advisories: qualityPolicy?.advisories,
@@ -194,7 +241,7 @@ export function PublishedDecisionDashboard() {
       <section className="flex flex-col gap-5 border-b border-border pb-6 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted">
-            <span>{activeProject?.name ?? "Select a Project"}</span>
+            <span>{selectedProject?.name ?? "Select a Project"}</span>
             <EnergyIcon name="chevron" className="h-3 w-3" />
             <span>Published analysis</span>
           </div>
@@ -343,15 +390,15 @@ function resolveOverviewRendererState(input: {
   plan: ReturnType<typeof buildEnergyTemplateRenderPlan> | null;
   advisories?: ProjectAnalysisQualityPolicy["advisories"];
 }): EnergyTemplateRendererState {
+  const error = input.analysisError;
+  if (error) {
+    return { status: "error", title: "Published analysis is unavailable", detail: `${error} Retry the same Project and period without changing the published template.` };
+  }
   if (!input.projectId) {
     return { status: "empty", title: "Select a Project", detail: "Choose a Project to load its published Template Revision and analysis context." };
   }
   if (input.resource === "water") {
     return { status: "unsupported", title: "Water analysis is not configured", detail: "Publish water metrics, capabilities and modules before this view displays decision-grade results." };
-  }
-  const error = input.analysisError;
-  if (error) {
-    return { status: "error", title: "Published analysis is unavailable", detail: `${error} Retry the same Project and period without changing the published template.` };
   }
   if (input.loading || !input.resolution) {
     return { status: "loading", title: "Resolving the published analysis", detail: "Loading the Template Revision, trusted Project scope, selected period and data snapshot." };
@@ -383,26 +430,41 @@ export function overviewAnalysisRequest(
   projectId: string,
   period: OverviewPeriod,
   customRange: { from: string; to: string },
+  view: { scopeId?: string; resource?: ResourceType } = {},
 ): EnergyQueryContextRequestDto {
-  const scopeId = "project";
-  if (period !== "Custom") return { projectId, scopeId, resource: "electricity", period };
-  return { projectId, scopeId, resource: "electricity", period, from: customRange.from, to: customRange.to };
+  const scopeId = view.scopeId?.trim() || "project";
+  const resource = view.resource ?? "electricity";
+  if (period !== "Custom") return { projectId, scopeId, resource, period };
+  return { projectId, scopeId, resource, period, from: customRange.from, to: customRange.to };
 }
 
-export function overviewViewStateFromSearchParams(searchParams: Pick<URLSearchParams, "get">): {
-  period: OverviewPeriod;
-  from: string;
-  to: string;
-} {
+export function overviewViewStateFromSearchParams(searchParams: Pick<URLSearchParams, "get">): OverviewUrlViewState {
   const requestedPeriod = searchParams.get("period");
   const period = requestedPeriod === "Yesterday" || requestedPeriod === "Custom"
     ? requestedPeriod
     : "Last 7 days";
   return {
+    projectId: searchParams.get("projectId")?.trim() || "",
+    scopeId: searchParams.get("scopeId")?.trim() || "project",
+    resource: searchParams.get("resource") === "water" ? "water" : "electricity",
     period,
     from: period === "Custom" ? searchParams.get("from") ?? "" : "",
     to: period === "Custom" ? searchParams.get("to") ?? "" : "",
   };
+}
+
+function validateOverviewCustomRange(period: OverviewPeriod, from: string, to: string): string | null {
+  if (period !== "Custom") return null;
+  if (!from || !to) return "Choose both From and To dates for a Custom period.";
+  if (!isValidDateInput(from) || !isValidDateInput(to)) return "Use valid Custom dates in YYYY-MM-DD format.";
+  if (from > to) return "From date must be on or before To date.";
+  return null;
+}
+
+function isValidDateInput(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
 export function toDateInput(value: string, timeZone: string): string {

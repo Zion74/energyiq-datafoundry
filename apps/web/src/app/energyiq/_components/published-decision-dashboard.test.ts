@@ -5,7 +5,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  EnergyAccessContextDto,
   EnergyComponentRevisionDto,
+  EnergyProjectDto,
   EnergyTemplateDefinitionDto,
 } from "../../../lib/config-api";
 import { configApi } from "../../../lib/config-api";
@@ -18,7 +20,9 @@ import {
 import { applyProjectAnalysisQualityPolicy } from "./project-renderer-registry";
 
 const mockedAccess = vi.hoisted(() => ({
-  activeProject: null as { id: string; name: string } | null,
+  access: null as EnergyAccessContextDto | null,
+  activeProject: null as EnergyProjectDto | null,
+  selectProject: vi.fn<(projectId: string) => void>(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -26,7 +30,11 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("./energyiq-access", () => ({
-  useEnergyIqAccess: () => ({ activeProject: mockedAccess.activeProject }),
+  useEnergyIqAccess: () => ({
+    access: mockedAccess.access,
+    activeProject: mockedAccess.activeProject,
+    selectProject: mockedAccess.selectProject,
+  }),
 }));
 
 describe("published Overview URL reload", () => {
@@ -36,7 +44,9 @@ describe("published Overview URL reload", () => {
   beforeEach(() => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
     vi.stubGlobal("React", React);
+    mockedAccess.access = null;
     mockedAccess.activeProject = null;
+    mockedAccess.selectProject.mockReset();
     window.history.replaceState({}, "", "/energyiq/overview");
     container = document.createElement("div");
     document.body.append(container);
@@ -60,7 +70,7 @@ describe("published Overview URL reload", () => {
     });
     expect(resolveProjectAnalysis).not.toHaveBeenCalled();
 
-    mockedAccess.activeProject = { id: "ngee-ann-polytechnic", name: "Ngee Ann Polytechnic" };
+    mockedAccess.activeProject = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
     await act(async () => {
       root.render(React.createElement(PublishedDecisionDashboard));
     });
@@ -76,6 +86,170 @@ describe("published Overview URL reload", () => {
     });
     expect(Array.from(container.querySelectorAll<HTMLInputElement>("input[type='date']"), (input) => input.value))
       .toEqual(["2026-06-10", "2026-06-16"]);
+  });
+
+  it("atomically resolves new Custom dates after client navigation changes the public URL", async () => {
+    mockedAccess.activeProject = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    window.history.replaceState({}, "", "/energyiq/overview?period=Custom&from=2026-06-01&to=2026-06-07");
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+    expect(resolveProjectAnalysis).toHaveBeenCalledWith({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "project",
+      resource: "electricity",
+      period: "Custom",
+      from: "2026-06-01",
+      to: "2026-06-07",
+    });
+
+    resolveProjectAnalysis.mockClear();
+    window.history.replaceState({}, "", "/energyiq/overview?period=Custom&from=2026-06-10&to=2026-06-16");
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    expect(resolveProjectAnalysis).toHaveBeenCalledTimes(1);
+    expect(resolveProjectAnalysis).toHaveBeenCalledWith({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "project",
+      resource: "electricity",
+      period: "Custom",
+      from: "2026-06-10",
+      to: "2026-06-16",
+    });
+    expect(Array.from(container.querySelectorAll<HTMLInputElement>("input[type='date']"), (input) => input.value))
+      .toEqual(["2026-06-10", "2026-06-16"]);
+  });
+
+  it("does not resolve an incomplete Custom URL and explains which dates are required", async () => {
+    mockedAccess.activeProject = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    window.history.replaceState({}, "", "/energyiq/overview?period=Custom&from=2026-06-10");
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    expect(resolveProjectAnalysis).not.toHaveBeenCalled();
+    expect(container.querySelector("[role='alert']")?.textContent)
+      .toContain("Choose both From and To dates for a Custom period.");
+  });
+
+  it("does not resolve a reversed Custom URL and explains the accepted date order", async () => {
+    mockedAccess.activeProject = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    window.history.replaceState({}, "", "/energyiq/overview?period=Custom&from=2026-06-16&to=2026-06-10");
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    expect(resolveProjectAnalysis).not.toHaveBeenCalled();
+    expect(container.querySelector("[role='alert']")?.textContent)
+      .toContain("From date must be on or before To date.");
+  });
+
+  it("does not resolve invalid Custom URL dates", async () => {
+    mockedAccess.activeProject = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    window.history.replaceState({}, "", "/energyiq/overview?period=Custom&from=2026-06-10&to=not-a-date");
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    expect(resolveProjectAnalysis).not.toHaveBeenCalled();
+    expect(container.querySelector("[role='alert']")?.textContent)
+      .toContain("Use valid Custom dates in YYYY-MM-DD format.");
+  });
+
+  it("uses an authorized published URL Project and Scope before the different active Project", async () => {
+    const preschool = project("preschool-demo", "Preschool Demo");
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = preschool;
+    mockedAccess.access = accessContext([preschool, ngeeAnn]);
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=level-6&period=Custom&from=2026-06-10&to=2026-06-16");
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    expect(resolveProjectAnalysis).toHaveBeenCalledTimes(1);
+    expect(resolveProjectAnalysis).toHaveBeenCalledWith({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "level-6",
+      resource: "electricity",
+      period: "Custom",
+      from: "2026-06-10",
+      to: "2026-06-16",
+    });
+    expect(mockedAccess.selectProject).toHaveBeenCalledOnce();
+    expect(mockedAccess.selectProject).toHaveBeenCalledWith("ngee-ann-polytechnic");
+    expect(container.textContent).toContain("Ngee Ann Polytechnic");
+    expect(container.textContent).not.toContain("Preschool Demo");
+  });
+
+  it("does not fall back to the active Project when the URL Project is unavailable", async () => {
+    const preschool = project("preschool-demo", "Preschool Demo");
+    mockedAccess.activeProject = preschool;
+    mockedAccess.access = accessContext([preschool]);
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=unknown-project&period=Last%207%20days");
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    expect(resolveProjectAnalysis).not.toHaveBeenCalled();
+    const alert = container.querySelector("[role='alert']");
+    expect(alert).not.toBeNull();
+    expect(alert?.textContent).toContain("Requested Project is unavailable in the active workspace.");
+    expect(container.textContent).not.toContain("Preschool Demo");
+  });
+
+  it("rejects a published URL Project outside the active workspace", async () => {
+    const preschool = project("preschool-demo", "Preschool Demo");
+    const otherWorkspaceProject = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic", "workspace-2");
+    mockedAccess.activeProject = preschool;
+    mockedAccess.access = accessContext([preschool, otherWorkspaceProject]);
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&period=Last%207%20days");
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    expect(resolveProjectAnalysis).not.toHaveBeenCalled();
+    expect(mockedAccess.selectProject).not.toHaveBeenCalled();
+    expect(container.querySelector("[role='alert']")?.textContent)
+      .toContain("Requested Project is unavailable in the active workspace.");
+  });
+
+  it("restores water as an explicit unsupported URL resource without resolving", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&resource=water&period=Last%207%20days");
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    expect(resolveProjectAnalysis).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Water analysis is not configured");
   });
 });
 
@@ -179,5 +353,19 @@ function component(
     query_ids: [],
     requirement: "always",
     created_at: "2026-08-04T00:00:00.000Z",
+  };
+}
+
+function project(id: string, name: string, workspaceId = "workspace-1"): EnergyProjectDto {
+  return { id, name, workspaceId, status: "published", timezone: "Asia/Singapore" };
+}
+
+function accessContext(projects: EnergyProjectDto[], activeWorkspaceId = "workspace-1"): EnergyAccessContextDto {
+  return {
+    role: "user",
+    user: { id: "user-1" },
+    activeWorkspaceId,
+    workspaces: [],
+    projects,
   };
 }
