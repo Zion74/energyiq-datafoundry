@@ -843,6 +843,9 @@ function buildPeakBreakdown(
   if (breakdown.status === "unavailable") {
     return unavailable(breakdown.reason.message);
   }
+  if (!validPeakEvidencePins(snapshot)) {
+    return unavailable("The Peak Snapshot, Release or revision evidence pins are inconsistent.");
+  }
 
   const expectedPeriodStatus = analysis.dataHealth.status === "complete" ? "complete" : "partial";
   const peakFromMs = Date.parse(breakdown.peak.from);
@@ -964,6 +967,34 @@ function validCompletePeakHealth(health: {
     && health.validIntervalCount === health.expectedMeterIntervalCount;
 }
 
+function validPeakEvidencePins(snapshot: EnergyProjectAnalysisSnapshotDto): boolean {
+  const { analysis, context, projectRelease } = snapshot;
+  const peakMetricId = "energy.peak_demand_kw@1";
+  const peakQueryId = "peak_breakdown_v1";
+  const hasPeakEvidence = snapshot.evidence.some((reference) =>
+    reference.metricId === peakMetricId
+    && reference.queryIds.includes(peakQueryId)
+  );
+
+  return context.projectReleaseId === projectRelease.id
+    && context.projectId === projectRelease.projectId
+    && analysis.context.projectId === projectRelease.projectId
+    && analysis.provenance.dataSnapshotId === snapshot.dataSnapshot.id
+    && context.dataSnapshotId === snapshot.dataSnapshot.id
+    && analysis.context.dataSnapshotId === snapshot.dataSnapshot.id
+    && analysis.provenance.hierarchyRevisionId === projectRelease.hierarchyRevisionId
+    && context.hierarchyRevisionId === projectRelease.hierarchyRevisionId
+    && analysis.context.hierarchyRevisionId === projectRelease.hierarchyRevisionId
+    && analysis.provenance.meterMappingRevisionId === projectRelease.meterMappingRevisionId
+    && context.meterMappingRevisionId === projectRelease.meterMappingRevisionId
+    && analysis.context.meterMappingRevisionId === projectRelease.meterMappingRevisionId
+    && analysis.provenance.meterFormulaRevisionId === projectRelease.meterFormulaRevisionId
+    && context.meterFormulaRevisionId === projectRelease.meterFormulaRevisionId
+    && analysis.context.meterFormulaRevisionId === projectRelease.meterFormulaRevisionId
+    && projectRelease.metricRevisionIds.includes(peakMetricId)
+    && hasPeakEvidence;
+}
+
 function validPeakHealth(health: {
   status: string;
   coveragePct: number;
@@ -978,6 +1009,7 @@ function validPeakHealth(health: {
     && health.expectedMeterIntervalCount >= 0
     && Number.isInteger(health.validIntervalCount)
     && health.validIntervalCount >= 0
+    && health.validIntervalCount <= health.expectedMeterIntervalCount
     && Number.isInteger(health.qualityEventCount)
     && health.qualityEventCount >= 0;
 }

@@ -576,7 +576,7 @@ export function ngeeAnnGoldenSnapshot(input: {
       hierarchyRevisionId: "hierarchy-v6",
       meterMappingRevisionId: "mapping-v1",
       meterFormulaRevisionId: "formula-v1",
-      metricRevisionIds: ["energy.total_usage_kwh@1"],
+      metricRevisionIds: ["energy.total_usage_kwh@1", "energy.peak_demand_kw@1"],
       ruleRevisionIds: ["rule-v1"],
       businessCalendarVersion: "calendar-v1",
       tariffScheduleVersion: "tariff-v1",
@@ -596,6 +596,11 @@ export function ngeeAnnGoldenSnapshot(input: {
       metricId: "energy.total_usage_kwh@1",
       queryIds: [...queryIds],
       queryReceiptId: "receipt-ngee-ann-golden",
+    }, {
+      id: "evidence:ngee-ann-golden:energy.peak_demand_kw@1",
+      metricId: "energy.peak_demand_kw@1",
+      queryIds: ["peak_breakdown_v1"],
+      queryReceiptId: "receipt-ngee-ann-golden-peak",
     }],
     findings: analysis.attention,
     dataSnapshot: {

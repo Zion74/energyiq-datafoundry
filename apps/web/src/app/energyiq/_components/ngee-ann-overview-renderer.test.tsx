@@ -440,7 +440,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
         status: "unavailable",
         coveragePct: 0,
         expectedMeterIntervalCount: 1,
-        validIntervalCount: 2,
+        validIntervalCount: 0,
         qualityEventCount: 1,
       };
     }
@@ -456,6 +456,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     await act(async () => disclosure.querySelector("summary")?.click());
     expect(disclosure.textContent).toContain("Unavailable");
     expect(disclosure.textContent).toContain("0% coverage");
+    expect(disclosure.textContent).toContain("0 / 1 valid intervals");
     expect(disclosure.textContent).toContain("1 quality events");
   });
 

@@ -3,6 +3,96 @@ import { describe, expect, it } from "vitest";
 import { ngeeAnnGoldenSnapshot } from "./ngee-ann-overview.test-fixture";
 import { buildNgeeAnnOverviewViewModel } from "./ngee-ann-overview-view-model";
 
+type GoldenSnapshot = ReturnType<typeof ngeeAnnGoldenSnapshot>;
+
+const peakEvidencePinMismatchCases: Array<{
+  name: string;
+  mutate: (snapshot: GoldenSnapshot) => void;
+}> = [
+  {
+    name: "Context Release",
+    mutate: (snapshot) => { snapshot.context.projectReleaseId = "release-mismatch"; },
+  },
+  {
+    name: "Context Project",
+    mutate: (snapshot) => { snapshot.context.projectId = "project-mismatch"; },
+  },
+  {
+    name: "Analysis Context Project",
+    mutate: (snapshot) => { snapshot.analysis.context.projectId = "project-mismatch"; },
+  },
+  {
+    name: "provenance Snapshot",
+    mutate: (snapshot) => { snapshot.analysis.provenance.dataSnapshotId = "snapshot-mismatch"; },
+  },
+  {
+    name: "Context Snapshot",
+    mutate: (snapshot) => { snapshot.context.dataSnapshotId = "snapshot-mismatch"; },
+  },
+  {
+    name: "Analysis Context Snapshot",
+    mutate: (snapshot) => { snapshot.analysis.context.dataSnapshotId = "snapshot-mismatch"; },
+  },
+  {
+    name: "provenance Hierarchy",
+    mutate: (snapshot) => { snapshot.analysis.provenance.hierarchyRevisionId = "hierarchy-mismatch"; },
+  },
+  {
+    name: "Context Hierarchy",
+    mutate: (snapshot) => { snapshot.context.hierarchyRevisionId = "hierarchy-mismatch"; },
+  },
+  {
+    name: "Analysis Context Hierarchy",
+    mutate: (snapshot) => { snapshot.analysis.context.hierarchyRevisionId = "hierarchy-mismatch"; },
+  },
+  {
+    name: "provenance Mapping",
+    mutate: (snapshot) => { snapshot.analysis.provenance.meterMappingRevisionId = "mapping-mismatch"; },
+  },
+  {
+    name: "Context Mapping",
+    mutate: (snapshot) => { snapshot.context.meterMappingRevisionId = "mapping-mismatch"; },
+  },
+  {
+    name: "Analysis Context Mapping",
+    mutate: (snapshot) => { snapshot.analysis.context.meterMappingRevisionId = "mapping-mismatch"; },
+  },
+  {
+    name: "provenance Formula",
+    mutate: (snapshot) => { snapshot.analysis.provenance.meterFormulaRevisionId = "formula-mismatch"; },
+  },
+  {
+    name: "Context Formula",
+    mutate: (snapshot) => { snapshot.context.meterFormulaRevisionId = "formula-mismatch"; },
+  },
+  {
+    name: "Analysis Context Formula",
+    mutate: (snapshot) => { snapshot.analysis.context.meterFormulaRevisionId = "formula-mismatch"; },
+  },
+  {
+    name: "Release Peak Metric",
+    mutate: (snapshot) => {
+      snapshot.projectRelease.metricRevisionIds = snapshot.projectRelease.metricRevisionIds
+        .filter((metricId) => metricId !== "energy.peak_demand_kw@1");
+    },
+  },
+  {
+    name: "Peak Evidence Metric",
+    mutate: (snapshot) => {
+      snapshot.evidence = snapshot.evidence
+        .filter((reference) => reference.metricId !== "energy.peak_demand_kw@1");
+    },
+  },
+  {
+    name: "Peak Evidence Query",
+    mutate: (snapshot) => {
+      const reference = snapshot.evidence
+        .find((candidate) => candidate.metricId === "energy.peak_demand_kw@1")!;
+      reference.queryIds = reference.queryIds.filter((queryId) => queryId !== "peak_breakdown_v1");
+    },
+  },
+];
+
 describe("Ngee Ann Overview ViewModel", () => {
   it("projects the fixed Custom Golden Snapshot without creating a second formula stack", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
@@ -214,11 +304,19 @@ describe("Ngee Ann Overview ViewModel", () => {
       importBatchCount: 4,
     });
     expect(view.evidence.queryIds).toEqual(snapshot.analysis.provenance.queryIds);
-    expect(view.evidence.references).toEqual([expect.objectContaining({
-      id: "evidence:ngee-ann-golden:energy.total_usage_kwh@1",
-      metricId: "energy.total_usage_kwh@1",
-      queryReceiptId: "receipt-ngee-ann-golden",
-    })]);
+    expect(view.evidence.references).toEqual([
+      expect.objectContaining({
+        id: "evidence:ngee-ann-golden:energy.total_usage_kwh@1",
+        metricId: "energy.total_usage_kwh@1",
+        queryReceiptId: "receipt-ngee-ann-golden",
+      }),
+      expect.objectContaining({
+        id: "evidence:ngee-ann-golden:energy.peak_demand_kw@1",
+        metricId: "energy.peak_demand_kw@1",
+        queryIds: ["peak_breakdown_v1"],
+        queryReceiptId: "receipt-ngee-ann-golden-peak",
+      }),
+    ]);
     expect(view.evidence.comparison).toEqual({
       status: "available",
       from: "2026-06-02T16:00:00.000Z",
@@ -362,6 +460,50 @@ describe("Ngee Ann Overview ViewModel", () => {
 
     expect(peak.status).toBe("available");
     expect(peak.levels.map((level) => level.scopeId)).toEqual(["level-6", "level-7"]);
+  });
+
+  it.each(peakEvidencePinMismatchCases)(
+    "fails only Peak breakdown closed for a mismatched $name pin",
+    ({ mutate }) => {
+      const snapshot = ngeeAnnGoldenSnapshot();
+      mutate(snapshot);
+
+      const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+      expect(view.peakBreakdown).toMatchObject({
+        status: "unavailable",
+        reason: "The Peak Snapshot, Release or revision evidence pins are inconsistent.",
+        levels: [],
+      });
+      expect(view.highlights.find((highlight) => highlight.id === "peak")).toMatchObject({
+        value: "20.6731",
+        unit: "kW",
+        available: true,
+      });
+      expect(view.energyTrend.status).toBe("available");
+    },
+  );
+
+  it("fails Peak breakdown closed for impossible interval-health counts", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    if (snapshot.analysis.peakBreakdown?.status === "available") {
+      const circuit = snapshot.analysis.peakBreakdown.levels[0]!.circuits[0]!;
+      circuit.averageKw = null;
+      circuit.sharePct = null;
+      circuit.dataHealth = {
+        status: "unavailable",
+        coveragePct: 0,
+        expectedMeterIntervalCount: 1,
+        validIntervalCount: 2,
+        qualityEventCount: 1,
+      };
+    }
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.peakBreakdown).toMatchObject({ status: "unavailable", levels: [] });
+    expect(view.highlights.find((highlight) => highlight.id === "peak")?.value).toBe("20.6731");
+    expect(view.energyTrend.status).toBe("available");
   });
 
   it("fails only Peak breakdown closed for absent, unavailable or invalid optional payloads", () => {
