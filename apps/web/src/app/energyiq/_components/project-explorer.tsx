@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
   Area,
@@ -29,7 +30,16 @@ type ProjectNode = {
   category?: "Light" | "Load" | "Aircon";
 };
 
-type ExplorerPeriod = "Yesterday" | "Last 7 days" | "Custom";
+type ExplorerPeriod = "Yesterday" | "Last 7 days" | "Previous week" | "Previous month" | "Custom";
+
+export type ExplorerUrlViewState = {
+  projectId: string;
+  scopeId: string;
+  resource: "electricity" | "water";
+  period: ExplorerPeriod;
+  from: string;
+  to: string;
+};
 
 const explorerPeriodOptions: ReadonlyArray<{
   label: string;
@@ -39,7 +49,8 @@ const explorerPeriodOptions: ReadonlyArray<{
 }> = [
   { label: "Yesterday", value: "Yesterday" },
   { label: "Last 7 days", value: "Last 7 days" },
-  { label: "Previous month", disabled: true, title: "Awaiting the trusted calendar-month period contract." },
+  { label: "Previous week", value: "Previous week" },
+  { label: "Previous month", value: "Previous month" },
   { label: "Custom", value: "Custom" },
 ];
 
@@ -53,20 +64,67 @@ const typeIcon: Record<ProjectNode["type"], EnergyIconName> = {
 };
 
 export function ProjectExplorer() {
-  const { activeProject } = useEnergyIqAccess();
+  const searchParams = useSearchParams();
+  const initialViewState = explorerViewStateFromSearchParams(searchParams);
+  const viewStateKey = [
+    initialViewState.projectId,
+    initialViewState.scopeId,
+    initialViewState.resource,
+    initialViewState.period,
+    initialViewState.from,
+    initialViewState.to,
+  ].join(":");
+  return <ProjectExplorerView key={viewStateKey} initialViewState={initialViewState} />;
+}
+
+function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerUrlViewState }) {
+  const { access, activeProject, selectProject } = useEnergyIqAccess();
+  const requestedProject = initialViewState.projectId && access
+    ? access.projects.find((candidate) => candidate.id === initialViewState.projectId
+      && candidate.status === "published"
+      && candidate.workspaceId === access.activeWorkspaceId) ?? null
+    : null;
+  const selectedProject = initialViewState.projectId ? requestedProject : activeProject;
+  const projectSelectionError = initialViewState.projectId && access && !requestedProject
+    ? "Requested Project is unavailable in the active workspace."
+    : null;
   const [selectedId, setSelectedId] = useState("");
   const [search, setSearch] = useState("");
-  const [resource, setResource] = useState<"electricity" | "water">("electricity");
+  const [resource, setResource] = useState<"electricity" | "water">(initialViewState.resource);
   const [hierarchyNodes, setHierarchyNodes] = useState<ProjectNode[] | null>(null);
   const [hierarchyError, setHierarchyError] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<EnergyScopeAnalysisDto | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
-  const [periodSelection, setPeriodSelection] = useState<ExplorerPeriod>("Last 7 days");
-  const [customRange, setCustomRange] = useState({ projectId: "", from: "", to: "" });
+  const [periodSelection, setPeriodSelection] = useState<ExplorerPeriod>(initialViewState.period);
+  const [customRange, setCustomRange] = useState({
+    projectId: initialViewState.projectId,
+    from: initialViewState.from,
+    to: initialViewState.to,
+  });
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
 
-  const activeProjectId = activeProject?.id;
+  const activeProjectId = selectedProject?.id;
+
+  useEffect(() => {
+    if (!requestedProject || requestedProject.id === activeProject?.id) return;
+    selectProject(requestedProject.id);
+  }, [activeProject?.id, requestedProject, selectProject]);
+
+  useEffect(() => {
+    if (
+      !activeProjectId
+      || periodSelection !== "Custom"
+      || customRange.projectId
+      || !initialViewState.from
+      || !initialViewState.to
+    ) return;
+    setCustomRange({
+      projectId: activeProjectId,
+      from: initialViewState.from,
+      to: initialViewState.to,
+    });
+  }, [activeProjectId, customRange.projectId, initialViewState.from, initialViewState.to, periodSelection]);
 
   useEffect(() => {
     if (!activeProjectId) return;
@@ -79,7 +137,7 @@ export function ProjectExplorer() {
           mapHierarchyNode(node),
         );
         setHierarchyNodes(mapped);
-        setSelectedId(defaultScopeId(mapped));
+        setSelectedId(requestedScopeId(mapped, initialViewState.scopeId));
         setExpandedIds(defaultExpandedIds(mapped));
       })
       .catch((reason) => {
@@ -93,7 +151,7 @@ export function ProjectExplorer() {
     return () => {
       cancelled = true;
     };
-  }, [activeProjectId]);
+  }, [activeProjectId, initialViewState.scopeId]);
 
   useEffect(() => {
     if (!activeProjectId || !selectedId || resource !== "electricity") {
@@ -143,7 +201,7 @@ export function ProjectExplorer() {
   const projectNodes = hierarchyNodes ?? [];
   const selected = projectNodes.find((node) => node.id === selectedId)
     ?? projectNodes[0]
-    ?? { id: "", parentId: null, type: "project", name: activeProject?.name ?? "Loading project" };
+    ?? { id: "", parentId: null, type: "project", name: selectedProject?.name ?? "Loading project" };
   const children = projectNodes.filter((node) => node.parentId === selected.id);
   const directMeters = projectNodes.filter(
     (node) => node.parentId === selected.id && isMeterNode(node),
@@ -199,6 +257,12 @@ export function ProjectExplorer() {
             <h1 className="text-sm font-semibold text-foreground">Project Explorer</h1>
             <p className="mt-1 text-xs leading-5 text-muted-light">Browse configured project structure and meter evidence.</p>
           </div>
+
+          {projectSelectionError ? (
+            <p role="alert" className="mt-4 rounded-lg border border-step-warning/25 bg-step-warning/5 p-3 text-xs leading-5 text-step-warning">
+              {projectSelectionError}
+            </p>
+          ) : null}
 
           <div className="mt-4 flex rounded-lg border border-border bg-surface-subtle p-1">
             <button
@@ -703,6 +767,13 @@ function defaultScopeId(allNodes: ProjectNode[]): string {
   return allNodes.find((node) => node.parentId === null)?.id ?? allNodes[0]?.id ?? "";
 }
 
+function requestedScopeId(allNodes: ProjectNode[], scopeId: string): string {
+  if (scopeId && scopeId !== "project" && allNodes.some((node) => node.id === scopeId)) {
+    return scopeId;
+  }
+  return defaultScopeId(allNodes);
+}
+
 function defaultExpandedIds(allNodes: ProjectNode[]): Set<string> {
   const rootId = allNodes.find((node) => node.parentId === null)?.id;
   return new Set(rootId ? [rootId] : []);
@@ -765,6 +836,36 @@ export function formatDateInput(value: string, timeZone: string): string {
     day: "2-digit",
     timeZone,
   }).format(new Date(value));
+}
+
+export function explorerViewStateFromSearchParams(
+  searchParams: Pick<URLSearchParams, "get">,
+): ExplorerUrlViewState {
+  const requestedPeriod = searchParams.get("period");
+  const period: ExplorerPeriod = requestedPeriod === "Yesterday"
+    || requestedPeriod === "Previous week"
+    || requestedPeriod === "Previous month"
+    || requestedPeriod === "Custom"
+    ? requestedPeriod
+    : "Last 7 days";
+  const requestedFrom = period === "Custom" ? searchParams.get("from") ?? "" : "";
+  const requestedTo = period === "Custom" ? searchParams.get("to") ?? "" : "";
+  const hasValidCustomRange = period !== "Custom"
+    || (validDateInput(requestedFrom) && validDateInput(requestedTo) && requestedFrom <= requestedTo);
+  return {
+    projectId: searchParams.get("projectId")?.trim() || "",
+    scopeId: searchParams.get("scopeId")?.trim() || "project",
+    resource: searchParams.get("resource") === "water" ? "water" : "electricity",
+    period,
+    from: hasValidCustomRange ? requestedFrom : "",
+    to: hasValidCustomRange ? requestedTo : "",
+  };
+}
+
+function validDateInput(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
 function normalizeNodeType(value: string): ProjectNode["type"] {
