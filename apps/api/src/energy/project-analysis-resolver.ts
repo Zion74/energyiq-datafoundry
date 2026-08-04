@@ -20,6 +20,10 @@ import {
   type ProjectAnalysisPayload,
 } from "./project-analysis-metadata.js";
 import {
+  buildNgeeAnnDecisionPriorities,
+  type NgeeAnnDecisionPriorities,
+} from "./ngee-ann-decision-priorities.js";
+import {
   resolveEnergyAccessContext,
   resolveEnergyQueryContext,
   type EnergyQueryContext,
@@ -82,6 +86,7 @@ export type ProjectAnalysisSnapshot = {
     queryReceiptId?: string;
   }>;
   findings: EnergyScopeAnalysis["attention"];
+  decisionPriorities?: NgeeAnnDecisionPriorities;
   dataSnapshot: {
     id: string;
     importBatchIds: string[];
@@ -208,6 +213,23 @@ export const resolveProjectAnalysis = async (input: {
     analysis: scopeAnalysis,
   });
   const analysis = projectAnalysisPayload({ analysis: scopeAnalysis, metadata });
+  const decisionPriorities = projectRelease.renderer.key === "ngee-ann-overview"
+    ? buildNgeeAnnDecisionPriorities({
+        selectedScopeId: releasedContext.scopeId,
+        primaryPeriod: snapshotContext.primaryPeriod,
+        expectedEvidencePins: {
+          projectReleaseId: projectRelease.id,
+          dataSnapshotId: analysis.provenance.dataSnapshotId,
+          hierarchyRevisionId: projectRelease.hierarchyRevisionId,
+          meterMappingRevisionId: projectRelease.meterMappingRevisionId,
+          meterFormulaRevisionId: projectRelease.meterFormulaRevisionId,
+          metricVersion: releasedContext.metricVersion,
+          businessCalendarVersion: projectRelease.businessCalendarVersion,
+          queryIds: ["time_slot_anomaly_v1"],
+        },
+        dailyUsageAnomalies: analysis.dailyUsageAnomalies,
+      })
+    : undefined;
   const latestAvailablePeriod = analysis.summary.validIntervalCount === 0
     ? await resolveLatestAvailablePeriod({
         metadataStore: input.metadataStore,
@@ -238,6 +260,7 @@ export const resolveProjectAnalysis = async (input: {
         queryIds: [...analysis.provenance.queryIds],
       })),
       findings: analysis.attention,
+      ...(decisionPriorities ? { decisionPriorities } : {}),
       dataSnapshot: {
         id: analysis.provenance.dataSnapshotId,
         importBatchIds: analysis.dataHealth.importBatchIds,

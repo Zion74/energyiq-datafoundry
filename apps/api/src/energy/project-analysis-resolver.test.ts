@@ -156,6 +156,35 @@ describe("ProjectAnalysisResolver", () => {
     try {
       ensureEnergyIqBootstrap(metadata);
       await materializeNgeeAnnLatestPeriodFixture(databasePath, metadata);
+      const ruleConfig = metadata.energyIq.rules.getProjectConfig(NGEE_ANN_GOLDEN.projectId);
+      metadata.energyIq.rules.saveProjectConfig({
+        project_id: NGEE_ANN_GOLDEN.projectId,
+        expected_revision: ruleConfig.revision,
+        selected_rule_revision_ids: [
+          ...ruleConfig.selected_rule_revision_ids,
+          "comparison.daily_usage_above_baseline@1",
+        ],
+        updated_by: "dev-user",
+      });
+      metadata.energyIq.operationalPolicy.publishOperatingCalendar({
+        version_id: "sg-calendar-v1",
+        project_id: NGEE_ANN_GOLDEN.projectId,
+        published_by: "dev-user",
+        entries: [{
+          id: "ngee-ann-resolver-calendar",
+          owner: { kind: "project" },
+          effective_from: "2020-01-01",
+          weekly: {
+            monday: [{ from: "00:00", to: "24:00" }],
+            tuesday: [{ from: "00:00", to: "24:00" }],
+            wednesday: [{ from: "00:00", to: "24:00" }],
+            thursday: [{ from: "00:00", to: "24:00" }],
+            friday: [{ from: "00:00", to: "24:00" }],
+            saturday: [{ from: "00:00", to: "24:00" }],
+            sunday: [{ from: "00:00", to: "24:00" }],
+          },
+        }],
+      });
       const user = metadata.users.getById({ user_id: "dev-user" });
       const resolve = (
         scopeId: string,
@@ -257,7 +286,54 @@ describe("ProjectAnalysisResolver", () => {
       expect(healthyResult.snapshot.analysis.summary.validIntervalCount).toBeGreaterThan(0);
       expect(healthyResult.snapshot.analysis.timeBehaviour).toBeDefined();
       expect(healthyResult.snapshot.analysis.provenance.queryIds).toContain("time_bucket_grid_v1");
+      expect(healthyResult.snapshot.analysis.dailyUsageAnomalies?.status).toBe("available");
+      expect(healthyResult.snapshot.decisionPriorities).toEqual({
+        status: "partial",
+        limitation: {
+          code: "SOME_CANDIDATE_DATES_SUPPRESSED",
+          message: "Some candidate dates were suppressed, so the absence of a priority is not a complete no-exception conclusion.",
+        },
+        evidencePins: healthyResult.snapshot.analysis.dailyUsageAnomalies?.status === "available"
+          ? healthyResult.snapshot.analysis.dailyUsageAnomalies.evidencePins
+          : undefined,
+        items: [],
+      });
       expect(healthyResult.snapshot).not.toHaveProperty("latestAvailablePeriod");
+
+      const anomalyFailingGateway = new LocalDataGateway(metadata);
+      const runSqlReadonly = anomalyFailingGateway.runSqlReadonly.bind(anomalyFailingGateway);
+      anomalyFailingGateway.runSqlReadonly = async (request) => {
+        if (request.sql.includes("series_definitions.series_id")) {
+          throw new Error("OPTIONAL_ANOMALY_QUERY_FAILED");
+        }
+        return runSqlReadonly(request);
+      };
+      const anomalyUnavailableResult = await resolve(
+        "project",
+        NGEE_ANN_GOLDEN.selection.period.localFrom,
+        "2026-06-16",
+        databasePath,
+        anomalyFailingGateway,
+      );
+      expect(anomalyUnavailableResult.status).toBe("ready");
+      if (anomalyUnavailableResult.status !== "ready") {
+        throw new Error("Expected child-local anomaly failure");
+      }
+      expect(anomalyUnavailableResult.snapshot.analysis.summary)
+        .toMatchObject({
+          usageKwh: healthyResult.snapshot.analysis.summary.usageKwh,
+          validIntervalCount: healthyResult.snapshot.analysis.summary.validIntervalCount,
+          qualityEventCount: healthyResult.snapshot.analysis.summary.qualityEventCount,
+        });
+      expect(anomalyUnavailableResult.snapshot.analysis.dailyUsageAnomalies).toMatchObject({
+        status: "unavailable",
+        reason: { code: "DAILY_USAGE_ANOMALY_FACTS_UNAVAILABLE" },
+      });
+      expect(anomalyUnavailableResult.snapshot.decisionPriorities).toMatchObject({
+        status: "unavailable",
+        limitation: { code: "DAILY_USAGE_ANOMALIES_UNAVAILABLE" },
+        items: [],
+      });
 
       for (const message of [
         "ENERGYIQ_SNAPSHOT_STALE:concurrent-snapshot",
@@ -360,6 +436,7 @@ describe("ProjectAnalysisResolver", () => {
       expect(new Set(result.snapshot.evidence.map((item) => item.id)).size)
         .toBe(result.snapshot.evidence.length);
       expect(result.snapshot.findings).toEqual(result.snapshot.analysis.attention);
+      expect(result.snapshot).not.toHaveProperty("decisionPriorities");
       expect(result.snapshot.analysis.timeBehaviour).toBeUndefined();
       expect(result.snapshot.analysis.provenance.queryIds).not.toContain("time_bucket_grid_v1");
       expect(result.snapshot.metadata).toMatchObject({
