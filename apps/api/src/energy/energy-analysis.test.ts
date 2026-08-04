@@ -472,6 +472,26 @@ describe("EnergyScopeAnalysis", () => {
       const currentRootUsage = buildCurrentRootUsage();
       const rawLevel6Usage = allocateLevel6Usage(currentRootUsage);
       const rawLevel7Usage = currentRootUsage.map((usage, index) => usage - rawLevel6Usage[index]!);
+      expect(dailyUsageOracle(currentRootUsage)).toEqual(dailyUsageGolden("project"));
+      expect(dailyUsageOracle(rawLevel7Usage)).toEqual(dailyUsageGolden("level-7"));
+      expect(dailyUsageOracle(rawLevel6Usage)).toEqual(dailyUsageGolden("level-6"));
+      expect(hourlyUsagePeakOracle(currentRootUsage, [0, 1, 2, 3, 4, 5, 6])).toEqual(
+        NGEE_ANN_GOLDEN.period.hourlyProfile.map(([hour, usageKwh, , peakKw]) => ({
+          hour,
+          usageKwh: roundForOracle(usageKwh),
+          peakKw: roundForOracle(peakKw),
+        })),
+      );
+      expect(hourlyUsagePeakOracle(currentRootUsage, [6])).toEqual(
+        NGEE_ANN_GOLDEN.day.hourlyProfile.map(([hour, usageKwh, , peakKw]) => ({
+          hour,
+          usageKwh: roundForOracle(usageKwh),
+          peakKw: roundForOracle(peakKw),
+        })),
+      );
+      expect(roundForOracle(currentRootUsage.reduce((sum, usage) => sum + usage, 0)))
+        .toBe(NGEE_ANN_GOLDEN.invariants.officialUsageKwh);
+      expect(roundForOracle(Math.max(...currentRootUsage) * 4)).toBe(20.673108);
       const level6Total = rawLevel6Usage.reduce((sum, usage) => sum + usage, 0);
       const level7Total = rawLevel7Usage.reduce((sum, usage) => sum + usage, 0);
       const rawUsageByScope = new Map([
@@ -1066,6 +1086,8 @@ const circuitMeter = (
 
 const buildCurrentRootUsage = (): number[] => {
   const values = new Array<number>(7 * 24 * 4).fill(0);
+  const remainingHourlyUsage = new Array<number>(24).fill(0);
+  const fixedPeakUsage = Array.from({ length: 6 }, () => new Array<number>(24).fill(0));
   for (const [hour, weeklyUsage, , weeklyPeakKw] of NGEE_ANN_GOLDEN.period.hourlyProfile) {
     const dayProfile = NGEE_ANN_GOLDEN.day.hourlyProfile[hour];
     if (!dayProfile) throw new Error(`NGEE_ANN_GOLDEN_DAY_HOUR_MISSING:${hour}`);
@@ -1078,13 +1100,54 @@ const buildCurrentRootUsage = (): number[] => {
         : dayOtherUsage;
     }
     const weeklyPeakDay = hour === 10 ? 0 : 1;
-    const weeklyPeakQuarter = hour === 10 ? 2 : 0;
-    const otherUsage = (weeklyUsage - dayUsage - weeklyPeakKw * 0.25) / 23;
-    for (let day = 0; day < 6; day += 1) {
+    remainingHourlyUsage[hour] = weeklyUsage - dayUsage;
+    fixedPeakUsage[weeklyPeakDay]![hour] = weeklyPeakKw * 0.25;
+  }
+
+  const projectDailyGolden = dailyUsageGolden("project").slice(0, 6);
+  const remainingProjectUsage = remainingHourlyUsage.reduce((sum, usage) => sum + usage, 0);
+  const projectDailyMargins = scaleMarginsToTotal(projectDailyGolden, remainingProjectUsage);
+  const fixedDailyUsage = fixedPeakUsage.map((row) => row.reduce((sum, usage) => sum + usage, 0));
+  const fixedHourlyUsage = remainingHourlyUsage.map((_, hour) => fixedPeakUsage.reduce(
+    (sum, row) => sum + row[hour]!,
+    0,
+  ));
+  const residualDailyMargins = projectDailyMargins.map((target, day) => target - fixedDailyUsage[day]!);
+  const residualHourlyMargins = remainingHourlyUsage.map(
+    (target, hour) => target - fixedHourlyUsage[hour]!,
+  );
+  const residualCapacities = fixedPeakUsage.map((row) => row.map((fixedUsage, hour) => {
+    const weeklyProfile = NGEE_ANN_GOLDEN.period.hourlyProfile[hour];
+    if (!weeklyProfile) throw new Error(`NGEE_ANN_GOLDEN_WEEKLY_HOUR_MISSING:${hour}`);
+    const peakUsage = weeklyProfile[3] * 0.25;
+    return fixedUsage > 0 ? peakUsage * 3 : peakUsage * 4;
+  }));
+  if (residualDailyMargins.some((margin) => margin < 0)
+    || residualHourlyMargins.some((margin) => margin < 0)) {
+    throw new Error("NGEE_ANN_PROJECT_DAILY_HOURLY_MARGINS_INFEASIBLE");
+  }
+  const residualCells = allocateByMargins(
+    residualDailyMargins,
+    residualHourlyMargins,
+    residualCapacities,
+  );
+
+  for (let day = 0; day < 6; day += 1) {
+    for (const [hour, , , weeklyPeakKw] of NGEE_ANN_GOLDEN.period.hourlyProfile) {
+      const peakUsage = weeklyPeakKw * 0.25;
+      const fixedUsage = fixedPeakUsage[day]![hour]!;
+      const cellUsage = fixedUsage + residualCells[day]![hour]!;
+      const fixedQuarter = hour === 10 ? 2 : 0;
       for (let quarter = 0; quarter < 4; quarter += 1) {
-        values[intervalIndex(day, hour, quarter)] = day === weeklyPeakDay && quarter === weeklyPeakQuarter
-          ? weeklyPeakKw * 0.25
-          : otherUsage;
+        const quarterUsage = fixedUsage > 0
+          ? quarter === fixedQuarter
+            ? fixedUsage
+            : (cellUsage - fixedUsage) / 3
+          : cellUsage / 4;
+        if (quarterUsage > peakUsage + 1e-9) {
+          throw new Error(`NGEE_ANN_PROJECT_HOURLY_PEAK_INFEASIBLE:${day}:${hour}`);
+        }
+        values[intervalIndex(day, hour, quarter)] = quarterUsage;
       }
     }
   }
@@ -1093,23 +1156,152 @@ const buildCurrentRootUsage = (): number[] => {
 
 const allocateLevel6Usage = (rootUsage: number[]): number[] => {
   const target = 476.983827;
+  const dailyTargets = scaleMarginsToTotal(dailyUsageGolden("level-6"), target);
   const projectPeakIndex = intervalIndex(1, 14, 0);
   const level6PeakIndex = intervalIndex(0, 10, 2);
   const lower = rootUsage.map((usage) => Math.max(0, usage - 12.063679 * 0.25));
   const upper = rootUsage.map((usage) => Math.min(usage, 9.205119 * 0.25));
   lower[projectPeakIndex] = upper[projectPeakIndex] = 8.609428 * 0.25;
   lower[level6PeakIndex] = upper[level6PeakIndex] = 9.20512 * 0.25;
-  const lowerTotal = lower.reduce((sum, usage) => sum + usage, 0);
-  const headroom = upper.reduce((sum, usage, index) => sum + usage - lower[index]!, 0);
-  const fraction = (target - lowerTotal) / headroom;
-  if (fraction < 0 || fraction > 1) throw new Error("NGEE_ANN_LEVEL_ALLOCATION_INVALID");
-  const result = lower.map((usage, index) => usage + (upper[index]! - usage) * fraction);
-  const correction = target - result.reduce((sum, usage) => sum + usage, 0);
-  const correctionIndex = result.findIndex((usage, index) =>
-    index !== projectPeakIndex && index !== level6PeakIndex && usage + correction <= upper[index]!);
-  if (correctionIndex < 0) throw new Error("NGEE_ANN_LEVEL_ALLOCATION_CORRECTION_FAILED");
-  result[correctionIndex] = result[correctionIndex]! + correction;
+  const result = new Array<number>(rootUsage.length).fill(0);
+  for (let day = 0; day < 7; day += 1) {
+    const start = intervalIndex(day, 0, 0);
+    const end = start + 24 * 4;
+    const lowerTotal = lower.slice(start, end).reduce((sum, usage) => sum + usage, 0);
+    const headroom = upper.slice(start, end).reduce(
+      (sum, usage, offset) => sum + usage - lower[start + offset]!,
+      0,
+    );
+    const fraction = (dailyTargets[day]! - lowerTotal) / headroom;
+    if (fraction < 0 || fraction > 1) {
+      throw new Error(`NGEE_ANN_LEVEL_DAILY_ALLOCATION_INVALID:${day}`);
+    }
+    for (let index = start; index < end; index += 1) {
+      result[index] = lower[index]! + (upper[index]! - lower[index]!) * fraction;
+    }
+    const correction = dailyTargets[day]! - result.slice(start, end).reduce(
+      (sum, usage) => sum + usage,
+      0,
+    );
+    const correctionIndex = result.findIndex((usage, index) => index >= start
+      && index < end
+      && index !== projectPeakIndex
+      && index !== level6PeakIndex
+      && usage + correction >= lower[index]! - 1e-12
+      && usage + correction <= upper[index]! + 1e-12);
+    if (correctionIndex < 0) {
+      throw new Error(`NGEE_ANN_LEVEL_DAILY_ALLOCATION_CORRECTION_FAILED:${day}`);
+    }
+    result[correctionIndex] = result[correctionIndex]! + correction;
+  }
   return result;
+};
+
+const dailyUsageGolden = (scopeId: "project" | "level-7" | "level-6"): readonly number[] => {
+  const scope = NGEE_ANN_GOLDEN.period.dailyTotals.scopes.find(
+    (candidate) => candidate.scopeId === scopeId,
+  );
+  if (!scope) throw new Error(`NGEE_ANN_DAILY_GOLDEN_SCOPE_MISSING:${scopeId}`);
+  return scope.usageKwh;
+};
+
+const dailyUsageOracle = (usage: number[]): number[] => Array.from(
+  { length: 7 },
+  (_, day) => roundForGolden(usage.slice(
+    intervalIndex(day, 0, 0),
+    intervalIndex(day + 1, 0, 0),
+  ).reduce((sum, value) => sum + value, 0)),
+);
+
+const hourlyUsagePeakOracle = (
+  usage: number[],
+  days: number[],
+): Array<{ hour: number; usageKwh: number; peakKw: number }> => Array.from(
+  { length: 24 },
+  (_, hour) => {
+    const intervals = days.flatMap((day) => usage.slice(
+      intervalIndex(day, hour, 0),
+      intervalIndex(day, hour + 1, 0),
+    ));
+    return {
+      hour,
+      usageKwh: roundForOracle(intervals.reduce((sum, value) => sum + value, 0)),
+      peakKw: roundForOracle(Math.max(...intervals) * 4),
+    };
+  },
+);
+
+const scaleMarginsToTotal = (margins: readonly number[], target: number): number[] => {
+  const current = margins.reduce((sum, margin) => sum + margin, 0);
+  if (current <= 0 || target <= 0) throw new Error("NGEE_ANN_MARGIN_TOTAL_INVALID");
+  return margins.map((margin) => margin * target / current);
+};
+
+const allocateByMargins = (
+  rowMargins: number[],
+  columnMargins: number[],
+  capacities: number[][],
+): number[][] => {
+  const rowTotal = rowMargins.reduce((sum, margin) => sum + margin, 0);
+  const columnTotal = columnMargins.reduce((sum, margin) => sum + margin, 0);
+  if (Math.abs(rowTotal - columnTotal) > 1e-9) {
+    throw new Error("NGEE_ANN_RAS_MARGIN_TOTAL_MISMATCH");
+  }
+  if (capacities.length !== rowMargins.length
+    || capacities.some((row) => row.length !== columnMargins.length)) {
+    throw new Error("NGEE_ANN_RAS_CAPACITY_SHAPE_INVALID");
+  }
+  const cells = capacities.map((row) => row.map(() => 1));
+  for (let iteration = 0; iteration < 10_000; iteration += 1) {
+    for (let row = 0; row < rowMargins.length; row += 1) {
+      cells[row] = projectToCappedMargin(cells[row]!, capacities[row]!, rowMargins[row]!);
+    }
+    for (let column = 0; column < columnMargins.length; column += 1) {
+      const projected = projectToCappedMargin(
+        cells.map((row) => row[column]!),
+        capacities.map((row) => row[column]!),
+        columnMargins[column]!,
+      );
+      for (let row = 0; row < cells.length; row += 1) {
+        cells[row]![column] = projected[row]!;
+      }
+    }
+    const maximumError = Math.max(
+      ...rowMargins.map((target, row) => Math.abs(
+        cells[row]!.reduce((sum, value) => sum + value, 0) - target,
+      )),
+      ...columnMargins.map((target, column) => Math.abs(
+        cells.reduce((sum, row) => sum + row[column]!, 0) - target,
+      )),
+    );
+    if (maximumError < 1e-10) return cells;
+  }
+  throw new Error("NGEE_ANN_RAS_DID_NOT_CONVERGE");
+};
+
+const projectToCappedMargin = (
+  values: number[],
+  capacities: number[],
+  target: number,
+): number[] => {
+  const capacity = capacities.reduce((sum, value) => sum + value, 0);
+  if (target < -1e-9 || target > capacity + 1e-9) {
+    throw new Error("NGEE_ANN_RAS_MARGIN_CAPACITY_INFEASIBLE");
+  }
+  if (target <= 0) return values.map(() => 0);
+  let lowerScale = 0;
+  let upperScale = 1;
+  const projectedTotal = (scale: number) => values.reduce(
+    (sum, value, index) => sum + Math.min(capacities[index]!, value * scale),
+    0,
+  );
+  while (projectedTotal(upperScale) < target) upperScale *= 2;
+  for (let iteration = 0; iteration < 100; iteration += 1) {
+    const scale = (lowerScale + upperScale) / 2;
+    if (projectedTotal(scale) < target) lowerScale = scale;
+    else upperScale = scale;
+  }
+  return values.map((value, index) => Math.min(capacities[index]!, value * upperScale));
 };
 
 const factFor = (

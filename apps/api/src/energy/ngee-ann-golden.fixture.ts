@@ -262,7 +262,7 @@ export const NGEE_ANN_GOLDEN = {
           scopeId: "project",
           scopeName: "Ngee Ann Polytechnic",
           scopeType: "project",
-          usageKwh: [216.3774, 233.8201, 214.7432, 214.7432, 214.7432, 214.7432, 221.9982],
+          usageKwh: [253.7018, 268.3990, 260.0659, 168.9645, 127.9387, 230.1002, 221.9982],
           dataHealth: {
             status: "complete",
             coveragePct: 100,
@@ -275,7 +275,7 @@ export const NGEE_ANN_GOLDEN = {
           scopeId: "level-7",
           scopeName: "Level 7",
           scopeType: "level",
-          usageKwh: [148.956, 157.3728, 148.6114, 148.6114, 148.6114, 148.6114, 153.4099],
+          usageKwh: [157.1325, 182.6915, 170.9233, 114.7684, 115.1763, 157.1724, 156.3201],
           dataHealth: {
             status: "complete",
             coveragePct: 100,
@@ -288,7 +288,7 @@ export const NGEE_ANN_GOLDEN = {
           scopeId: "level-6",
           scopeName: "Level 6",
           scopeType: "level",
-          usageKwh: [67.4214, 76.4473, 66.1317, 66.1317, 66.1317, 66.1317, 68.5882],
+          usageKwh: [96.5693, 85.7075, 89.1426, 54.1961, 12.7624, 72.9278, 65.6781],
           dataHealth: {
             status: "complete",
             coveragePct: 100,
