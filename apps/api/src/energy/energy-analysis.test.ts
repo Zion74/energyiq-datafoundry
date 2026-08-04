@@ -21,6 +21,7 @@ import {
   executeEnergyScopeAnalysis,
   selectEnergyGoldenPeriod,
   selectEnergyLatestCompletePeriod,
+  type EnergyScopeAnalysis,
 } from "./energy-analysis.js";
 import { ensureEnergyIqBootstrap, PRESCHOOL_WORKSPACE_ID } from "./energy-bootstrap.js";
 import { resolveEnergyQueryContext } from "./energy-query-context.js";
@@ -216,8 +217,26 @@ describe("EnergyScopeAnalysis", () => {
         changePct: NGEE_ANN_GOLDEN.period.changePct
       });
       expect(analysis.childScopes).toMatchObject([
-        { nodeId: "level-7", usageKwh: NGEE_ANN_GOLDEN.period.levelUsageKwh["level-7"] },
-        { nodeId: "level-6", usageKwh: NGEE_ANN_GOLDEN.period.levelUsageKwh["level-6"] }
+        {
+          nodeId: "level-7",
+          usageKwh: NGEE_ANN_GOLDEN.period.levelUsageKwh["level-7"],
+          comparison: {
+            usageKwh: NGEE_ANN_GOLDEN.period.levels["level-7"].previousUsageKwh,
+            changeKwh: NGEE_ANN_GOLDEN.period.levels["level-7"].changeKwh,
+            changePct: NGEE_ANN_GOLDEN.period.levels["level-7"].changePct,
+          },
+          dataHealth: NGEE_ANN_GOLDEN.period.levels["level-7"].dataHealth,
+        },
+        {
+          nodeId: "level-6",
+          usageKwh: NGEE_ANN_GOLDEN.period.levelUsageKwh["level-6"],
+          comparison: {
+            usageKwh: NGEE_ANN_GOLDEN.period.levels["level-6"].previousUsageKwh,
+            changeKwh: NGEE_ANN_GOLDEN.period.levels["level-6"].changeKwh,
+            changePct: NGEE_ANN_GOLDEN.period.levels["level-6"].changePct,
+          },
+          dataHealth: NGEE_ANN_GOLDEN.period.levels["level-6"].dataHealth,
+        }
       ]);
       expect(analysis.circuits).toHaveLength(18);
       expect(analysis.categories).toMatchObject([
@@ -420,9 +439,9 @@ describe("EnergyScopeAnalysis", () => {
         qualityEventCount: 0,
       },
       childScopes: [
-        { nodeId: "a", name: "A", nodeType: "room", usageKwh: 30, sharePct: 30, occupantCount: 10, kwhPerPerson: 3 },
-        { nodeId: "b", name: "B", nodeType: "room", usageKwh: 10, sharePct: 10, occupantCount: 10, kwhPerPerson: 1 },
-        { nodeId: "c", name: "C", nodeType: "room", usageKwh: 10, sharePct: 10, occupantCount: 10, kwhPerPerson: 1 },
+        attentionChildScope("a", "A", 30, 3),
+        attentionChildScope("b", "B", 10, 1),
+        attentionChildScope("c", "C", 10, 1),
       ],
       circuits: [],
       ruleRevisions: [ruleRevision({
@@ -435,6 +454,28 @@ describe("EnergyScopeAnalysis", () => {
     expect(attention.map((item) => item.code)).toEqual(["PEOPLE_NORMALISED_OUTLIER"]);
     expect(attention[0]?.evidence).toContain("3.00 kWh/person");
   });
+});
+
+const attentionChildScope = (
+  nodeId: string,
+  name: string,
+  usageKwh: number,
+  kwhPerPerson: number,
+): EnergyScopeAnalysis["childScopes"][number] => ({
+  nodeId,
+  name,
+  nodeType: "room",
+  usageKwh,
+  sharePct: usageKwh,
+  comparison: { usageKwh, changeKwh: 0, changePct: 0 },
+  dataHealth: {
+    coveragePct: 100,
+    expectedMeterIntervalCount: 96,
+    validIntervalCount: 96,
+    qualityEventCount: 0,
+  },
+  occupantCount: 10,
+  kwhPerPerson,
 });
 
 const ruleRevision = (override: Partial<EnergyIqRuleRevisionRecord>): EnergyIqRuleRevisionRecord => ({

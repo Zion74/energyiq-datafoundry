@@ -427,6 +427,17 @@ export type EnergyScopeAnalysisDto = {
     nodeType: string;
     usageKwh: number;
     sharePct: number;
+    comparison?: {
+      usageKwh: number;
+      changeKwh: number;
+      changePct: number | null;
+    };
+    dataHealth?: {
+      coveragePct: number;
+      expectedMeterIntervalCount: number;
+      validIntervalCount: number;
+      qualityEventCount: number;
+    };
     areaSqm?: number;
     occupantCount?: number;
     kwhPerSqm?: number;

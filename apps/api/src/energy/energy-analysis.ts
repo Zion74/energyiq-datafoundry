@@ -62,6 +62,17 @@ export type EnergyScopeAnalysis = {
     nodeType: string;
     usageKwh: number;
     sharePct: number;
+    comparison: {
+      usageKwh: number;
+      changeKwh: number;
+      changePct: number | null;
+    };
+    dataHealth: {
+      coveragePct: number;
+      expectedMeterIntervalCount: number;
+      validIntervalCount: number;
+      qualityEventCount: number;
+    };
     areaSqm?: number;
     occupantCount?: number;
     kwhPerSqm?: number;
@@ -475,6 +486,7 @@ export const executeEnergyScopeAnalysis = async (input: {
     profileResult,
     healthResult,
     previousSummaryResult,
+    previousMeterResult,
     operationalScopeIntervalResult,
     operationalMeterIntervalResult,
   ] = await Promise.all([
@@ -501,6 +513,13 @@ export const executeEnergyScopeAnalysis = async (input: {
       workspace_id: input.context.workspaceId,
       datasource_id: previousScoped.datasourceId,
       sql: scopeSummarySql(previousScoped.viewName, aggregateMeterNodeIds)
+    }),
+    input.dataGateway.runSqlReadonly({
+      user_id: input.userId,
+      workspace_id: input.context.workspaceId,
+      datasource_id: previousScoped.datasourceId,
+      sql: meterBreakdownSql(previousScoped.viewName),
+      limit: 1000,
     }),
     input.dataGateway.runSqlReadonly({
       user_id: input.userId,
@@ -539,6 +558,7 @@ export const executeEnergyScopeAnalysis = async (input: {
   const averageKwMismatchCount = numberAt(healthRow, 6);
   const invalidIntervalDurationCount = numberAt(healthRow, 7);
   const previousUsageKwh = numberAt(previousSummaryResult.rows[0] ?? [], 0);
+  const previousMeterAggregates = previousMeterResult.rows.map(rowToMeterAggregate);
   const operationalSeries = [
     ...operationalScopeIntervalResult.rows,
     ...operationalMeterIntervalResult.rows,
@@ -594,7 +614,10 @@ export const executeEnergyScopeAnalysis = async (input: {
     scopeNodeId: selectedNode.id,
     hierarchy,
     meterAggregates,
-    scopeUsageKwh: usageKwh
+    previousMeterAggregates,
+    scopeUsageKwh: usageKwh,
+    periodDurationMs,
+    intervalMinutes,
   });
   const circuits = meterAggregates
     .map((meter) => {
@@ -814,7 +837,10 @@ const buildChildScopes = (input: {
   scopeNodeId: string;
   hierarchy: ReturnType<MetadataStore["energyIq"]["listProjectNodes"]>;
   meterAggregates: MeterAggregate[];
+  previousMeterAggregates: MeterAggregate[];
   scopeUsageKwh: number;
+  periodDurationMs: number;
+  intervalMinutes: number;
 }): EnergyScopeAnalysis["childScopes"] => {
   const children = input.hierarchy.filter((node) => node.parent_id === input.scopeNodeId);
   return children.map((child) => {
@@ -836,6 +862,16 @@ const buildChildScopes = (input: {
       ? meters.filter((meter) => officialIds.has(meter.meterNodeId))
       : [];
     const usageKwh = aggregateMeters.reduce((sum, meter) => sum + meter.usageKwh, 0);
+    const previousUsageKwh = officialIds
+      ? input.previousMeterAggregates
+        .filter((meter) => officialIds.has(meter.meterNodeId))
+        .reduce((sum, meter) => sum + meter.usageKwh, 0)
+      : 0;
+    const expectedMeterIntervalCount = (officialIds?.size ?? 0) * Math.round(
+      input.periodDurationMs / (input.intervalMinutes * 60_000),
+    );
+    const validIntervalCount = aggregateMeters.reduce((sum, meter) => sum + meter.validIntervalCount, 0);
+    const qualityEventCount = aggregateMeters.reduce((sum, meter) => sum + meter.qualityEventCount, 0);
     const breakdownMeters = meters.filter((meter) => meter.scopeId !== child.id);
     const topCircuit = maxBy(breakdownMeters, (meter) => meter.usageKwh);
     const dimensions = resolveScopeDimensions(child.id, input.hierarchy);
@@ -845,6 +881,21 @@ const buildChildScopes = (input: {
       nodeType: child.node_type,
       usageKwh: round(usageKwh, 4),
       sharePct: percent(usageKwh, input.scopeUsageKwh),
+      comparison: {
+        usageKwh: round(previousUsageKwh, 4),
+        changeKwh: round(usageKwh - previousUsageKwh, 4),
+        changePct: previousUsageKwh > 0
+          ? round(((usageKwh - previousUsageKwh) / previousUsageKwh) * 100, 4)
+          : null,
+      },
+      dataHealth: {
+        coveragePct: expectedMeterIntervalCount > 0
+          ? round(Math.min(validIntervalCount / expectedMeterIntervalCount, 1) * 100, 4)
+          : 0,
+        expectedMeterIntervalCount,
+        validIntervalCount,
+        qualityEventCount,
+      },
       ...(dimensions.areaSqm > 0 ? {
         areaSqm: round(dimensions.areaSqm, 2),
         kwhPerSqm: round(usageKwh / dimensions.areaSqm, 4)

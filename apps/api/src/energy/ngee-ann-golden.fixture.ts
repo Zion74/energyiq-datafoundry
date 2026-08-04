@@ -42,6 +42,12 @@ export const NGEE_ANN_GOLDEN = {
         previousUsageKwh: 734.6257,
         changeKwh: 319.5588,
         changePct: 43.4995,
+        dataHealth: {
+          coveragePct: 100,
+          expectedMeterIntervalCount: 1344,
+          validIntervalCount: 1344,
+          qualityEventCount: 0
+        },
         peakKw: 12.0637,
         peakAt: "2026-06-11T06:00:00.000Z"
       },
@@ -50,6 +56,12 @@ export const NGEE_ANN_GOLDEN = {
         previousUsageKwh: 477.0516,
         changeKwh: -0.0678,
         changePct: -0.0142,
+        dataHealth: {
+          coveragePct: 100,
+          expectedMeterIntervalCount: 1344,
+          validIntervalCount: 1344,
+          qualityEventCount: 0
+        },
         peakKw: 9.2051,
         peakAt: "2026-06-10T02:30:00.000Z"
       }
