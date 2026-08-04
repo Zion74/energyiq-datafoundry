@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 
 import type { NgeeAnnEnergyCompositionViewModel } from "./ngee-ann-overview-view-model";
 
@@ -7,6 +7,32 @@ export function NgeeAnnEnergyComposition({
 }: {
   view: NgeeAnnEnergyCompositionViewModel;
 }) {
+  const [selectedLevelId, setSelectedLevelId] = useState("all");
+  const [selectedCategoryId, setSelectedCategoryId] = useState("all");
+  const [showAllCircuits, setShowAllCircuits] = useState(false);
+  const [accountingExpanded, setAccountingExpanded] = useState(true);
+  const [derivedExpanded, setDerivedExpanded] = useState(true);
+  const levelOptions = uniqueCircuitOptions(
+    view.circuits.rows.map((row) => ({ id: row.levelId, label: row.levelName })),
+  );
+  const categoryOptions = uniqueCircuitOptions(
+    view.circuits.rows.map((row) => ({ id: row.categoryId, label: row.category })),
+  );
+  const matchingCircuits = view.circuits.rows.filter((row) =>
+    (selectedLevelId === "all" || row.levelId === selectedLevelId)
+    && (selectedCategoryId === "all" || row.categoryId === selectedCategoryId),
+  );
+  const visibleCircuits = showAllCircuits ? matchingCircuits : matchingCircuits.slice(0, 5);
+
+  const selectLevel = (levelId: string) => {
+    setSelectedLevelId(() => levelId);
+    setShowAllCircuits(() => false);
+  };
+  const selectCategory = (categoryId: string) => {
+    setSelectedCategoryId(() => categoryId);
+    setShowAllCircuits(() => false);
+  };
+
   return (
     <section aria-labelledby="ngee-ann-energy-composition" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -67,7 +93,9 @@ export function NgeeAnnEnergyComposition({
       <div className="mt-6 border-t border-border pt-5">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
           <div>
-            <h4 className="text-xs font-semibold text-foreground">Top 5 component Circuits</h4>
+            <h4 className="text-xs font-semibold text-foreground">
+              {showAllCircuits ? "All available component Circuits" : "Top 5 component Circuits"}
+            </h4>
             <p className="mt-1 text-[11px] leading-5 text-muted">
               Ranked by current usage. These are explanatory components and are not added separately to the official Project total.
             </p>
@@ -77,56 +105,117 @@ export function NgeeAnnEnergyComposition({
         {view.circuits.status === "unavailable" ? (
           <Unavailable title="Component Circuit ranking unavailable" reason={view.circuits.reason} />
         ) : (
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[1040px] border-collapse text-left">
-              <caption className="sr-only">Top five explanatory component Circuits</caption>
-              <thead className="border-y border-border bg-surface-subtle text-[10px] font-medium uppercase tracking-[0.08em] text-muted">
-                <tr>
-                  <th scope="col" className="px-3 py-2.5">Rank / Circuit</th>
-                  <th scope="col" className="px-3 py-2.5">Level</th>
-                  <th scope="col" className="px-3 py-2.5">Category</th>
-                  <th scope="col" className="px-3 py-2.5">Current</th>
-                  <th scope="col" className="px-3 py-2.5">Project official share</th>
-                  <th scope="col" className="px-3 py-2.5">Change</th>
-                  <th scope="col" className="px-3 py-2.5">Data quality</th>
-                  <th scope="col" className="px-3 py-2.5">Accounting</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {view.circuits.rows.map((row) => (
-                  <tr key={row.meterNodeId}>
-                    <th scope="row" className="max-w-[260px] px-3 py-3.5 align-top">
-                      <p className="text-xs font-semibold text-foreground">{row.rank}. {row.name}</p>
-                      <CircuitEvidence row={row} evidence={view.evidence} />
-                    </th>
-                    <td className="px-3 py-3.5 align-top text-xs text-foreground">{row.levelName}</td>
-                    <td className="px-3 py-3.5 align-top text-xs text-foreground">{row.category}</td>
-                    <td className="px-3 py-3.5 align-top text-xs font-semibold tabular-nums text-foreground">{row.currentUsageKwh} kWh</td>
-                    <td className="px-3 py-3.5 align-top text-xs tabular-nums text-foreground">{row.projectShare}</td>
-                    <td className="px-3 py-3.5 align-top">
-                      <p className="text-xs font-semibold tabular-nums text-foreground">{row.changePct}</p>
-                      <p className="mt-1 text-[10px] tabular-nums text-muted">{row.changeKwh}</p>
-                      <p className="mt-1 text-[10px] tabular-nums text-muted">Previous {row.previousUsageKwh} kWh</p>
-                    </td>
-                    <td className="px-3 py-3.5 align-top"><Quality quality={row.quality} /></td>
-                    <td className="px-3 py-3.5 align-top text-[10px] font-semibold text-muted">Explanatory only</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <CircuitFilter
+                  label="Filter component Circuits by Level"
+                  options={levelOptions}
+                  selectedId={selectedLevelId}
+                  onSelect={selectLevel}
+                />
+                <CircuitFilter
+                  label="Filter component Circuits by Category"
+                  options={categoryOptions}
+                  selectedId={selectedCategoryId}
+                  onSelect={selectCategory}
+                />
+              </div>
+              <div className="flex min-h-10 flex-wrap items-center gap-3">
+                <p className="text-[11px] text-muted" aria-live="polite" aria-atomic="true">
+                  Showing {visibleCircuits.length} of {matchingCircuits.length} matching component Circuits.
+                </p>
+                {matchingCircuits.length > 5 ? (
+                  <button
+                    type="button"
+                    className="min-h-10 rounded-lg border border-border px-3 py-2 text-[11px] font-semibold text-foreground hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                    aria-expanded={showAllCircuits}
+                    aria-controls="ngee-ann-component-circuit-rows"
+                    onClick={() => setShowAllCircuits((expanded) => !expanded)}
+                  >
+                    {showAllCircuits
+                      ? "Show Top 5 Circuits"
+                      : `Show all ${matchingCircuits.length} Circuits`}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            {matchingCircuits.length === 0 ? (
+              <Unavailable
+                title="No component Circuits match these filters"
+                reason="Choose All or another Level and Category combination to restore the Snapshot rows."
+              />
+            ) : (
+              <div className="mt-3 overflow-x-auto">
+                <table className="w-full min-w-[1040px] border-collapse text-left">
+                  <caption className="sr-only">Filtered explanatory component Circuits</caption>
+                  <thead className="border-y border-border bg-surface-subtle text-[10px] font-medium uppercase tracking-[0.08em] text-muted">
+                    <tr>
+                      <th scope="col" className="px-3 py-2.5">Rank / Circuit</th>
+                      <th scope="col" className="px-3 py-2.5">Level</th>
+                      <th scope="col" className="px-3 py-2.5">Category</th>
+                      <th scope="col" className="px-3 py-2.5">Current</th>
+                      <th scope="col" className="px-3 py-2.5">Project official share</th>
+                      <th scope="col" className="px-3 py-2.5">Change</th>
+                      <th scope="col" className="px-3 py-2.5">Data quality</th>
+                      <th scope="col" className="px-3 py-2.5">Accounting</th>
+                    </tr>
+                  </thead>
+                  <tbody id="ngee-ann-component-circuit-rows" className="divide-y divide-border">
+                    {visibleCircuits.map((row) => (
+                      <tr key={row.meterNodeId} data-circuit-row data-level-id={row.levelId} data-category-id={row.categoryId}>
+                        <th scope="row" className="max-w-[260px] px-3 py-3.5 align-top">
+                          <p className="text-xs font-semibold text-foreground">{row.rank}. {row.name}</p>
+                          <CircuitEvidence row={row} evidence={view.evidence} />
+                        </th>
+                        <td className="px-3 py-3.5 align-top text-xs text-foreground">{row.levelName}</td>
+                        <td className="px-3 py-3.5 align-top text-xs text-foreground">{row.category}</td>
+                        <td className="px-3 py-3.5 align-top text-xs font-semibold tabular-nums text-foreground">{row.currentUsageKwh} kWh</td>
+                        <td className="px-3 py-3.5 align-top text-xs tabular-nums text-foreground">{row.projectShare}</td>
+                        <td className="px-3 py-3.5 align-top">
+                          <p className="text-xs font-semibold tabular-nums text-foreground">{row.changePct}</p>
+                          <p className="mt-1 text-[10px] tabular-nums text-muted">{row.changeKwh}</p>
+                          <p className="mt-1 text-[10px] tabular-nums text-muted">Previous {row.previousUsageKwh} kWh</p>
+                        </td>
+                        <td className="px-3 py-3.5 align-top"><Quality quality={row.quality} /></td>
+                        <td className="px-3 py-3.5 align-top text-[10px] font-semibold text-muted">Explanatory only</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
         )}
       </div>
 
       <div className="mt-6 border-t border-border pt-5">
-        <h4 className="text-xs font-semibold text-foreground">Accounting trace</h4>
-        <p className="mt-1 text-[11px] leading-5 text-muted">
-          Four designated totals form the official Project route. Component Circuits remain outside this addition.
-        </p>
-        {view.accounting.status === "unavailable" || !view.accounting.reconciliation ? (
-          <Unavailable title="Accounting trace unavailable" reason={view.accounting.reason} />
-        ) : (
-          <>
+        <h4>
+          <button
+            id="ngee-ann-accounting-trace-trigger"
+            type="button"
+            className="flex min-h-10 w-full items-center justify-between gap-4 text-left text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+            aria-expanded={accountingExpanded}
+            aria-controls="ngee-ann-accounting-trace-panel"
+            onClick={() => setAccountingExpanded((expanded) => !expanded)}
+          >
+            <span>Accounting trace</span>
+            <span className="text-[10px] font-semibold text-muted">{accountingExpanded ? "Hide" : "Show"}</span>
+          </button>
+        </h4>
+        <div
+          id="ngee-ann-accounting-trace-panel"
+          role="region"
+          aria-labelledby="ngee-ann-accounting-trace-trigger"
+          hidden={!accountingExpanded}
+        >
+          <p className="mt-1 text-[11px] leading-5 text-muted">
+            Four designated totals form the official Project route. Component Circuits remain outside this addition.
+          </p>
+          {view.accounting.status === "unavailable" || !view.accounting.reconciliation ? (
+            <Unavailable title="Accounting trace unavailable" reason={view.accounting.reason} />
+          ) : (
+            <>
             <div className="mt-3 overflow-x-auto">
               <table className="w-full min-w-[760px] border-collapse text-left">
                 <caption className="sr-only">Designated totals included in the official Project total</caption>
@@ -171,9 +260,14 @@ export function NgeeAnnEnergyComposition({
                 Designated rows are rounded for display; the server-reconciled official total is authoritative.
               </p>
             </div>
-          </>
-        )}
-        <DerivedMeterTrace view={view} />
+            </>
+          )}
+          <DerivedMeterTrace
+            view={view}
+            expanded={derivedExpanded}
+            onToggle={() => setDerivedExpanded((expanded) => !expanded)}
+          />
+        </div>
       </div>
 
       <details className="mt-5 border-t border-border pt-3 text-[10px] leading-4 text-muted">
@@ -199,82 +293,153 @@ export function NgeeAnnEnergyComposition({
   );
 }
 
-function DerivedMeterTrace({ view }: { view: NgeeAnnEnergyCompositionViewModel }) {
+function CircuitFilter({
+  label,
+  options,
+  selectedId,
+  onSelect,
+}: {
+  label: string;
+  options: Array<{ id: string; label: string }>;
+  selectedId: string;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <fieldset>
+      <legend className="mb-1 text-[10px] font-semibold text-muted">{label}</legend>
+      <div className="flex flex-wrap gap-1.5">
+        {[{ id: "all", label: "All" }, ...options].map((option) => {
+          const selected = selectedId === option.id;
+          return (
+            <button
+              key={option.id}
+              type="button"
+              className={selected
+                ? "min-h-10 rounded-lg border border-primary bg-primary/10 px-3 py-2 text-[11px] font-semibold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                : "min-h-10 rounded-lg border border-border px-3 py-2 text-[11px] font-semibold text-muted hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"}
+              aria-pressed={selected}
+              onClick={() => onSelect(option.id)}
+            >
+              {option.label}
+            </button>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
+function uniqueCircuitOptions(options: Array<{ id: string; label: string }>) {
+  const unique = new Map<string, string>();
+  for (const option of options) {
+    if (!unique.has(option.id)) {
+      unique.set(option.id, option.label);
+    }
+  }
+  return [...unique].map(([id, label]) => ({ id, label }));
+}
+
+function DerivedMeterTrace({
+  view,
+  expanded,
+  onToggle,
+}: {
+  view: NgeeAnnEnergyCompositionViewModel;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
   const trace = view.derivedMeterTrace;
 
   return (
-    <div className="mt-5 border-t border-border pt-4" aria-labelledby="ngee-ann-derived-meter-trace">
-      <h5 id="ngee-ann-derived-meter-trace" className="text-xs font-semibold text-foreground">
-        Derived meter trace
+    <div className="mt-5 border-t border-border pt-4">
+      <h5>
+        <button
+          id="ngee-ann-derived-meter-trace-trigger"
+          type="button"
+          className="flex min-h-10 w-full items-center justify-between gap-4 text-left text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+          aria-expanded={expanded}
+          aria-controls="ngee-ann-derived-meter-trace-panel"
+          onClick={onToggle}
+        >
+          <span>Derived meter trace</span>
+          <span className="text-[10px] font-semibold text-muted">{expanded ? "Hide" : "Show"}</span>
+        </button>
       </h5>
-      <p className="mt-1 text-[11px] leading-5 text-muted">
-        Server-provided term values explain the derived result; this view does not recalculate it.
-      </p>
+      <div
+        id="ngee-ann-derived-meter-trace-panel"
+        role="region"
+        aria-labelledby="ngee-ann-derived-meter-trace-trigger"
+        hidden={!expanded}
+      >
+        <p className="mt-1 text-[11px] leading-5 text-muted">
+          Server-provided term values explain the derived result; this view does not recalculate it.
+        </p>
 
-      {trace.status === "unavailable" ? (
-        <Unavailable title="Derived meter trace unavailable" reason={trace.reason} />
-      ) : trace.status === "partial" ? (
-        <div className="mt-3 bg-surface-subtle px-4 py-3" role="status">
-          <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
-            <p className="min-w-0 break-words text-xs font-semibold text-foreground">
-              {trace.name} / {trace.scopeName} / {trace.meterKind}
-            </p>
-            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted">Partial</span>
-          </div>
-          <p className="mt-2 text-[11px] leading-5 text-muted">{trace.reason}</p>
-          <p className="mt-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted">Affected inputs</p>
-          <ul className="mt-1 space-y-1">
-            {trace.impactedInputs.map((input) => (
-              <li key={input.meterNodeId} className="min-w-0 text-[11px] leading-5 text-foreground">
-                <span className="font-semibold">{input.name}</span>
-                <span className="ml-2 break-all font-mono text-[10px] text-muted">{input.meterNodeId}</span>
-              </li>
-            ))}
-          </ul>
-          <DerivedTraceBoundaryCopy />
-        </div>
-      ) : (
-        <div className="mt-3">
-          <div className="flex min-w-0 flex-col gap-2 bg-surface-subtle px-4 py-3 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
-            <div className="min-w-0">
-              <p className="break-words text-xs font-semibold text-foreground">
+        {trace.status === "unavailable" ? (
+          <Unavailable title="Derived meter trace unavailable" reason={trace.reason} />
+        ) : trace.status === "partial" ? (
+          <div className="mt-3 bg-surface-subtle px-4 py-3" role="status">
+            <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+              <p className="min-w-0 break-words text-xs font-semibold text-foreground">
                 {trace.name} / {trace.scopeName} / {trace.meterKind}
               </p>
-              <p className="mt-1 break-all font-mono text-[10px] text-muted">{trace.meterNodeId}</p>
+              <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted">Partial</span>
             </div>
-            <p className="shrink-0 text-xs font-semibold tabular-nums text-foreground">
-              Result {trace.resultUsageKwh} kWh
-            </p>
+            <p className="mt-2 text-[11px] leading-5 text-muted">{trace.reason}</p>
+            <p className="mt-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted">Affected inputs</p>
+            <ul className="mt-1 space-y-1">
+              {trace.impactedInputs.map((input) => (
+                <li key={input.meterNodeId} className="min-w-0 text-[11px] leading-5 text-foreground">
+                  <span className="font-semibold">{input.name}</span>
+                  <span className="ml-2 break-all font-mono text-[10px] text-muted">{input.meterNodeId}</span>
+                </li>
+              ))}
+            </ul>
+            <DerivedTraceBoundaryCopy />
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] border-collapse text-left">
-              <caption className="sr-only">Physical meter terms supplied for the Load 12 derived result</caption>
-              <thead className="border-y border-border text-[10px] font-medium uppercase tracking-[0.08em] text-muted">
-                <tr>
-                  <th scope="col" className="px-3 py-2.5">Physical meter</th>
-                  <th scope="col" className="px-3 py-2.5">Server trace</th>
-                  <th scope="col" className="px-3 py-2.5">Data quality</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {trace.terms.map((term) => (
-                  <tr key={term.meterNodeId}>
-                    <th scope="row" className="max-w-[360px] px-3 py-3 align-top">
-                      <p className="break-words text-xs font-semibold text-foreground">{term.name}</p>
-                      <p className="mt-1 break-all font-mono text-[10px] font-normal text-muted">{term.meterNodeId}</p>
-                    </th>
-                    <td className="px-3 py-3 align-top text-xs font-semibold tabular-nums text-foreground">
-                      {term.coefficient} × {term.inputUsageKwh} kWh = {term.contributionKwh} kWh
-                    </td>
-                    <td className="px-3 py-3 align-top"><Quality quality={term.quality} /></td>
+        ) : (
+          <div className="mt-3">
+            <div className="flex min-w-0 flex-col gap-2 bg-surface-subtle px-4 py-3 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
+              <div className="min-w-0">
+                <p className="break-words text-xs font-semibold text-foreground">
+                  {trace.name} / {trace.scopeName} / {trace.meterKind}
+                </p>
+                <p className="mt-1 break-all font-mono text-[10px] text-muted">{trace.meterNodeId}</p>
+              </div>
+              <p className="shrink-0 text-xs font-semibold tabular-nums text-foreground">
+                Result {trace.resultUsageKwh} kWh
+              </p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[760px] border-collapse text-left">
+                <caption className="sr-only">Physical meter terms supplied for the Load 12 derived result</caption>
+                <thead className="border-y border-border text-[10px] font-medium uppercase tracking-[0.08em] text-muted">
+                  <tr>
+                    <th scope="col" className="px-3 py-2.5">Physical meter</th>
+                    <th scope="col" className="px-3 py-2.5">Server trace</th>
+                    <th scope="col" className="px-3 py-2.5">Data quality</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {trace.terms.map((term) => (
+                    <tr key={term.meterNodeId}>
+                      <th scope="row" className="max-w-[360px] px-3 py-3 align-top">
+                        <p className="break-words text-xs font-semibold text-foreground">{term.name}</p>
+                        <p className="mt-1 break-all font-mono text-[10px] font-normal text-muted">{term.meterNodeId}</p>
+                      </th>
+                      <td className="px-3 py-3 align-top text-xs font-semibold tabular-nums text-foreground">
+                        {term.coefficient} × {term.inputUsageKwh} kWh = {term.contributionKwh} kWh
+                      </td>
+                      <td className="px-3 py-3 align-top"><Quality quality={term.quality} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <DerivedTraceBoundaryCopy />
           </div>
-          <DerivedTraceBoundaryCopy />
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }

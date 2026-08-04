@@ -93,7 +93,9 @@ export type NgeeAnnEnergyCompositionViewModel = {
       name: string;
       scopeId: string;
       parentScopeId: string;
+      levelId: string;
       levelName: string;
+      categoryId: string;
       category: string;
       currentUsageKwh: string;
       projectShare: string;
@@ -438,27 +440,43 @@ function buildEnergyComposition(
       rows: [],
     };
 
-  const topCircuits = analysis.topCircuits.slice(0, 5);
+  const designatedTotals = analysis.designatedTotals ?? [];
+  const reconciliation = analysis.componentReconciliation;
+  const officialMeterIds = new Set(reconciliation?.officialMeterNodeIds ?? []);
+  const componentMeterNodeIds = reconciliation?.componentMeterNodeIds ?? [];
+  const componentMeterIds = new Set(componentMeterNodeIds);
+  const explanatoryCircuits = analysis.circuits.filter((circuit) =>
+    circuit.includedInOfficialTotal === false,
+  );
+  const componentCircuits = analysis.circuits.filter((circuit) =>
+    componentMeterIds.has(circuit.meterNodeId),
+  );
   const circuitContractAvailable = unavailableReason === null
-    && topCircuits.length === 5
-    && topCircuits.every((circuit) =>
+    && componentMeterIds.size > 0
+    && componentMeterIds.size === componentMeterNodeIds.length
+    && componentCircuits.length === componentMeterIds.size
+    && componentCircuits.length === explanatoryCircuits.length
+    && componentCircuits.every((circuit) =>
       circuit.includedInOfficialTotal === false
       && Boolean(circuit.scopeId)
       && Boolean(circuit.parentScopeId)
       && levelNames.has(circuit.parentScopeId!)
+      && expectedCategories.has(circuit.category)
       && hasComparisonAndHealth(circuit),
     );
   const circuits: NgeeAnnEnergyCompositionViewModel["circuits"] = circuitContractAvailable
     ? {
       status: "available",
       reason: null,
-      rows: topCircuits.map((circuit, index) => ({
+      rows: componentCircuits.map((circuit, index) => ({
         rank: index + 1,
         meterNodeId: circuit.meterNodeId,
         name: circuit.name,
         scopeId: circuit.scopeId!,
         parentScopeId: circuit.parentScopeId!,
+        levelId: circuit.parentScopeId!,
         levelName: levelNames.get(circuit.parentScopeId!)!,
+        categoryId: circuit.category,
         category: compositionCategoryName(circuit.category),
         currentUsageKwh: formatDecimal(circuit.usageKwh, 4),
         projectShare: `${formatDecimal(circuit.sharePct, 4)}%`,
@@ -474,20 +492,18 @@ function buildEnergyComposition(
     : {
       status: "unavailable",
       reason: unavailableReason
-        ?? "This published Snapshot does not explicitly identify five component Circuit Scopes, parents, official-total markers, comparisons and quality.",
+        ?? "This published Snapshot does not explicitly identify the complete component Circuit set, Scopes, parents, categories, official-total markers, comparisons and quality.",
       rows: [],
     };
 
-  const designatedTotals = analysis.designatedTotals ?? [];
-  const reconciliation = analysis.componentReconciliation;
-  const officialMeterIds = new Set(reconciliation?.officialMeterNodeIds ?? []);
-  const componentMeterIds = new Set(reconciliation?.componentMeterNodeIds ?? []);
   const accountingContractAvailable = unavailableReason === null
     && designatedTotals.length === 4
     && Boolean(reconciliation)
     && reconciliation!.ratioPct !== null
     && officialMeterIds.size === designatedTotals.length
-    && componentMeterIds.size === analysis.topCircuits.length
+    && componentMeterIds.size === componentMeterNodeIds.length
+    && componentMeterIds.size === componentCircuits.length
+    && componentCircuits.length === explanatoryCircuits.length
     && designatedTotals.every((circuit) =>
       circuit.includedInOfficialTotal === true
       && Boolean(circuit.scopeId)
@@ -497,7 +513,7 @@ function buildEnergyComposition(
       && officialMeterIds.has(circuit.meterNodeId)
       && !componentMeterIds.has(circuit.meterNodeId),
     )
-    && topCircuits.every((circuit) =>
+    && componentCircuits.every((circuit) =>
       componentMeterIds.has(circuit.meterNodeId)
       && !officialMeterIds.has(circuit.meterNodeId),
     );

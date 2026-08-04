@@ -260,6 +260,184 @@ describe("NgeeAnnOverviewRenderer", () => {
   });
 });
 
+describe("NgeeAnnOverviewRenderer interaction closure", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+  });
+
+  const renderGolden = async (snapshot = ngeeAnnGoldenSnapshot()) => {
+    await act(async () => {
+      root.render(<NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />);
+    });
+  };
+
+  const circuitRows = () => Array.from(
+    container.querySelectorAll<HTMLTableRowElement>("[data-circuit-row]"),
+  );
+
+  const filterButton = (legend: string, label: string) => {
+    const fieldset = Array.from(container.querySelectorAll("fieldset"))
+      .find((candidate) => candidate.querySelector("legend")?.textContent === legend);
+    return Array.from(fieldset?.querySelectorAll("button") ?? [])
+      .find((candidate) => candidate.textContent === label) as HTMLButtonElement | undefined;
+  };
+
+  it("filters the same ViewModel rows and expands All before returning to Top 5", async () => {
+    await renderGolden();
+
+    expect(circuitRows()).toHaveLength(5);
+    expect(container.textContent).toContain("Showing 5 of 14 matching component Circuits.");
+    const showAllButton = Array.from(container.querySelectorAll("button"))
+      .find((candidate) => candidate.textContent === "Show all 14 Circuits") as HTMLButtonElement;
+    expect(showAllButton).toBeTruthy();
+    expect(showAllButton.getAttribute("aria-expanded")).toBe("false");
+
+    await act(async () => showAllButton.click());
+    expect(circuitRows()).toHaveLength(14);
+    expect(container.textContent).toContain("All available component Circuits");
+    expect(showAllButton.textContent).toBe("Show Top 5 Circuits");
+    expect(showAllButton.getAttribute("aria-expanded")).toBe("true");
+
+    await act(async () => showAllButton.click());
+    expect(circuitRows()).toHaveLength(5);
+    expect(container.textContent).toContain("Top 5 component Circuits");
+
+    const level6Button = filterButton("Filter component Circuits by Level", "Level 6");
+    expect(level6Button?.tagName).toBe("BUTTON");
+    await act(async () => level6Button?.click());
+    expect(circuitRows()).toHaveLength(5);
+    expect(circuitRows().every((row) => row.dataset.levelId === "level-6")).toBe(true);
+    expect(container.textContent).toContain("Showing 5 of 7 matching component Circuits.");
+
+    const lightButton = filterButton("Filter component Circuits by Category", "Light");
+    expect(lightButton?.tagName).toBe("BUTTON");
+    await act(async () => lightButton?.click());
+    expect(circuitRows()).toHaveLength(2);
+    expect(circuitRows().every((row) =>
+      row.dataset.levelId === "level-6" && row.dataset.categoryId === "light"
+    )).toBe(true);
+    expect(container.textContent).toContain("Showing 2 of 2 matching component Circuits.");
+    expect(level6Button?.getAttribute("aria-pressed")).toBe("true");
+    expect(lightButton?.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("shows an honest empty state for a Level and Category combination with no Snapshot rows", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const removedIds = new Set(
+      snapshot.analysis.circuits
+        .filter((circuit) =>
+          circuit.includedInOfficialTotal === false
+          && circuit.parentScopeId === "level-6"
+          && circuit.category === "light"
+        )
+        .map((circuit) => circuit.meterNodeId),
+    );
+    snapshot.analysis.circuits = snapshot.analysis.circuits
+      .filter((circuit) => !removedIds.has(circuit.meterNodeId));
+    snapshot.analysis.componentReconciliation!.componentMeterNodeIds =
+      snapshot.analysis.componentReconciliation!.componentMeterNodeIds
+        .filter((meterNodeId) => !removedIds.has(meterNodeId));
+    await renderGolden(snapshot);
+
+    await act(async () => filterButton("Filter component Circuits by Level", "Level 6")?.click());
+    await act(async () => filterButton("Filter component Circuits by Category", "Light")?.click());
+
+    expect(circuitRows()).toHaveLength(0);
+    expect(container.textContent).toContain("Showing 0 of 0 matching component Circuits.");
+    expect(container.textContent).toContain("No component Circuits match these filters");
+    expect(container.textContent).toContain("Choose All or another Level and Category combination");
+  });
+
+  it("keeps nested Accounting and Derived disclosure state coherent for Enter and Space", async () => {
+    await renderGolden();
+    const accountingButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-controls="ngee-ann-accounting-trace-panel"]',
+    )!;
+    const derivedButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-controls="ngee-ann-derived-meter-trace-panel"]',
+    )!;
+    const accountingPanel = container.querySelector<HTMLElement>("#ngee-ann-accounting-trace-panel")!;
+    const derivedPanel = container.querySelector<HTMLElement>("#ngee-ann-derived-meter-trace-panel")!;
+
+    expect(accountingButton.tagName).toBe("BUTTON");
+    expect(derivedButton.tagName).toBe("BUTTON");
+    expect(accountingButton.getAttribute("aria-expanded")).toBe("true");
+    expect(derivedButton.getAttribute("aria-expanded")).toBe("true");
+
+    await activateNativeButton(derivedButton, "Enter");
+    expect(derivedButton.getAttribute("aria-expanded")).toBe("false");
+    expect(derivedPanel.hidden).toBe(true);
+
+    await activateNativeButton(accountingButton, " ");
+    expect(accountingButton.getAttribute("aria-expanded")).toBe("false");
+    expect(accountingPanel.hidden).toBe(true);
+
+    await activateNativeButton(accountingButton, " ");
+    expect(accountingButton.getAttribute("aria-expanded")).toBe("true");
+    expect(accountingPanel.hidden).toBe(false);
+    expect(derivedButton.getAttribute("aria-expanded")).toBe("false");
+
+    await activateNativeButton(derivedButton, "Enter");
+    expect(derivedButton.getAttribute("aria-expanded")).toBe("true");
+    expect(derivedPanel.hidden).toBe(false);
+    expect(derivedPanel.textContent).toContain("Result 49.0218 kWh");
+  });
+
+  it("preserves partial and unavailable Derived fail-closed states through disclosure toggles", async () => {
+    const partialSnapshot = ngeeAnnGoldenSnapshot();
+    const partialTrace = partialSnapshot.analysis.virtualMeterTraces![0]!;
+    const affectedTerm = partialTrace.terms[0]!;
+    partialTrace.status = "partial";
+    partialTrace.usageKwh = null;
+    partialTrace.missingTermMeterNodeIds = [affectedTerm.meterNodeId];
+    affectedTerm.inputUsageKwh = null;
+    affectedTerm.contributionKwh = null;
+    affectedTerm.dataHealth = null;
+    await renderGolden(partialSnapshot);
+
+    let derivedButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-controls="ngee-ann-derived-meter-trace-panel"]',
+    )!;
+    await act(async () => derivedButton.click());
+    await act(async () => derivedButton.click());
+    expect(container.textContent).toContain("Derived result unavailable because required inputs are missing.");
+    expect(container.textContent).not.toContain("Result 49.0218 kWh");
+
+    const legacySnapshot = ngeeAnnGoldenSnapshot();
+    delete legacySnapshot.analysis.virtualMeterTraces;
+    await renderGolden(legacySnapshot);
+    derivedButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-controls="ngee-ann-derived-meter-trace-panel"]',
+    )!;
+    await act(async () => derivedButton.click());
+    await act(async () => derivedButton.click());
+    expect(container.textContent).toContain("Derived meter trace unavailable");
+    expect(container.textContent).not.toContain("Result 49.0218 kWh");
+  });
+});
+
+async function activateNativeButton(button: HTMLButtonElement, key: "Enter" | " ") {
+  button.focus();
+  await act(async () => {
+    button.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+    button.dispatchEvent(new KeyboardEvent("keyup", { key, bubbles: true }));
+    // happy-dom does not synthesize the browser's native button click from keyboard events.
+    button.click();
+  });
+}
+
 describe("NgeeAnnOverviewRenderer latest-data action", () => {
   let container: HTMLDivElement;
   let root: Root;

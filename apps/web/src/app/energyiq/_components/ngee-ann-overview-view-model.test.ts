@@ -89,13 +89,15 @@ describe("Ngee Ann Overview ViewModel", () => {
       },
       circuits: {
         status: "available",
-        rows: [
-          {
+        rows: expect.arrayContaining([
+          expect.objectContaining({
             rank: 1,
             meterNodeId: "mapping-lvl-7-office-load-4-l1p22-l3p25-fan-isol1-2-16",
             scopeId: "l7-load-4",
             parentScopeId: "level-7",
+            levelId: "level-7",
             levelName: "Level 7",
+            categoryId: "load",
             category: "Load",
             currentUsageKwh: "439.0972",
             projectShare: "28.6773%",
@@ -103,40 +105,40 @@ describe("Ngee Ann Overview ViewModel", () => {
             changeKwh: "+191.1159 kWh",
             changePct: "+77.0687%",
             includedInOfficialTotal: false,
-          },
-          {
+          }),
+          expect.objectContaining({
             rank: 2,
             scopeId: "l7-load-3",
             currentUsageKwh: "337.9023",
             previousUsageKwh: "166.7234",
             changeKwh: "+171.1789 kWh",
             changePct: "+102.6724%",
-          },
-          {
+          }),
+          expect.objectContaining({
             rank: 3,
             scopeId: "l6-load-4",
             currentUsageKwh: "255.1539",
             previousUsageKwh: "262.7359",
             changeKwh: "-7.5821 kWh",
             changePct: "-2.8858%",
-          },
-          {
+          }),
+          expect.objectContaining({
             rank: 4,
             scopeId: "l7-front-light",
             currentUsageKwh: "107.02",
             previousUsageKwh: "124.28",
             changeKwh: "-17.26 kWh",
             changePct: "-13.888%",
-          },
-          {
+          }),
+          expect.objectContaining({
             rank: 5,
             scopeId: "l6-light-right",
             currentUsageKwh: "70.6873",
             previousUsageKwh: "76.9724",
             changeKwh: "-6.2851 kWh",
             changePct: "-8.1653%",
-          },
-        ],
+          }),
+        ]),
       },
       accounting: {
         status: "available",
@@ -197,6 +199,15 @@ describe("Ngee Ann Overview ViewModel", () => {
         unit: "kWh",
       },
     });
+    const componentMeterIds = new Set(
+      snapshot.analysis.componentReconciliation!.componentMeterNodeIds,
+    );
+    expect(view.energyComposition.circuits.rows).toHaveLength(14);
+    expect(view.energyComposition.circuits.rows.map((row) => row.meterNodeId)).toEqual(
+      snapshot.analysis.circuits
+        .filter((circuit) => componentMeterIds.has(circuit.meterNodeId))
+        .map((circuit) => circuit.meterNodeId),
+    );
     expect(view.evidence).toMatchObject({
       snapshotId: "snapshot-ngee-ann-golden",
       projectReleaseId: "release-ngee-ann-golden",
@@ -288,7 +299,7 @@ describe("Ngee Ann Overview ViewModel", () => {
     const view = buildNgeeAnnOverviewViewModel(snapshot);
 
     expect(view.energyComposition.categories.status).toBe("available");
-    expect(view.energyComposition.circuits.status).toBe("available");
+    expect(view.energyComposition.circuits.status).toBe("unavailable");
     expect(view.energyComposition.accounting).toMatchObject({
       status: "unavailable",
       reason: expect.stringContaining("non-overlapping"),
