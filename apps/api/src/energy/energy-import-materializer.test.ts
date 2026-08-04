@@ -1,7 +1,7 @@
 import writeXlsxFile from "write-excel-file/node";
 import { describe, expect, it } from "vitest";
 
-import { writeEnergyFactMaterialization } from "@datafoundry/data-gateway";
+import { writeEnergyFactMaterialization, type EnergyFactMaterializationWrite } from "@datafoundry/data-gateway";
 import type { EnergyIqImportBatchRecord, EnergyIqProjectSetupDocument } from "@datafoundry/metadata";
 import {
   buildEnergyExcelMaterialization,
@@ -43,8 +43,12 @@ describe("buildEnergyExcelMaterialization", () => {
     const forwardInputs = await materialize("project-real-workbooks-forward");
     expect(forwardInputs.earlier.summary.intervalFactCount).toBe(1);
     expect(forwardInputs.later.summary.intervalFactCount).toBe(1);
-    await writeEnergyFactMaterialization(forwardInputs.earlier.write);
-    const forward = await writeEnergyFactMaterialization(forwardInputs.later.write);
+    await writeEnergyFactMaterialization(scopedWrite(forwardInputs.earlier.write, "snapshot-forward-a", ["a".repeat(64)]));
+    const forward = await writeEnergyFactMaterialization(scopedWrite(
+      forwardInputs.later.write,
+      "snapshot-forward-ab",
+      ["a".repeat(64), "b".repeat(64)],
+    ));
     expect(forward.projectAudit).toMatchObject({
       normalizedReadingCount: 4,
       intervalFactCount: 3,
@@ -53,13 +57,21 @@ describe("buildEnergyExcelMaterialization", () => {
       missingAdjacentIntervalCount: 0,
       orphanIntervalFactCount: 0,
     });
-    await expect(writeEnergyFactMaterialization(forwardInputs.earlier.write)).resolves.toMatchObject({
+    await expect(writeEnergyFactMaterialization(scopedWrite(
+      forwardInputs.earlier.write,
+      "snapshot-forward-ab",
+      ["a".repeat(64), "b".repeat(64)],
+    ))).resolves.toMatchObject({
       projectAudit: forward.projectAudit,
     });
 
     const reverseInputs = await materialize("project-real-workbooks-reverse");
-    await writeEnergyFactMaterialization(reverseInputs.later.write);
-    const reverse = await writeEnergyFactMaterialization(reverseInputs.earlier.write);
+    await writeEnergyFactMaterialization(scopedWrite(reverseInputs.later.write, "snapshot-reverse-b", ["b".repeat(64)]));
+    const reverse = await writeEnergyFactMaterialization(scopedWrite(
+      reverseInputs.earlier.write,
+      "snapshot-reverse-ab",
+      ["a".repeat(64), "b".repeat(64)],
+    ));
     expect(reverse.projectAudit).toEqual(forward.projectAudit);
   });
 
@@ -99,7 +111,7 @@ describe("buildEnergyExcelMaterialization", () => {
       mappingRevision: 4,
       timezone: "Asia/Singapore",
       materializerContractVersion: "energy-excel-cumulative-v1",
-      factWriterContractVersion: "energy-fact-writer-project-canonical-v2",
+      factWriterContractVersion: "energy-fact-writer-snapshot-manifest-v3",
       sourceSheetName: "Sheet1",
       sourceRowCount: 3,
       sourceLabels: ["Meter A"],
@@ -124,6 +136,18 @@ describe("buildEnergyExcelMaterialization", () => {
       },
       document: document(),
       timezone: "UTC",
+    })).toBe(false);
+    expect(isEnergyImportMaterializationCurrent({
+      batch: {
+        ...batch(),
+        status: "materialized",
+        materialization_json: JSON.stringify({
+          ...result.summary,
+          factWriterContractVersion: "energy-fact-writer-project-canonical-v2",
+        }),
+      },
+      document: document(),
+      timezone: "Asia/Singapore",
     })).toBe(false);
     expect(isEnergyImportMaterializationCurrent({
       batch: { ...batch(), status: "materialized", materialization_json: JSON.stringify({ intervalFactCount: 2 }) },
@@ -171,6 +195,21 @@ describe("buildEnergyExcelMaterialization", () => {
       databasePath: "ignored.duckdb",
     })).rejects.toThrow("ENERGYIQ_METER_MAPPING_NOT_CONFIRMED");
   });
+});
+
+const scopedWrite = (
+  write: Omit<EnergyFactMaterializationWrite, "snapshotFactScope">,
+  dataSnapshotId: string,
+  sourceSha256: string[],
+): EnergyFactMaterializationWrite => ({
+  ...write,
+  snapshotFactScope: {
+    workspaceId: "workspace-1",
+    projectId: write.projectId,
+    dataSnapshotId,
+    manifestFingerprint: `fingerprint-${dataSnapshotId}`,
+    sourceSha256,
+  },
 });
 
 const batch = (

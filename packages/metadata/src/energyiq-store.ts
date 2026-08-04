@@ -103,6 +103,42 @@ export type EnergyIqImportMaterializationCompletion = {
   snapshot: EnergyIqDataSnapshotRecord;
 };
 
+export type EnergyIqSnapshotFactScope = {
+  workspaceId: string;
+  projectId: string;
+  dataSnapshotId: string;
+  manifestFingerprint: string;
+  sourceSha256: string[];
+};
+
+export type EnergyIqImportMaterializationPreparation = {
+  expected_snapshot_id: string;
+  expected_previous_snapshot_id: string;
+  manifest: Record<string, unknown>;
+  fact_scope: EnergyIqSnapshotFactScope;
+};
+
+export const resolveEnergyIqSnapshotFactScope = (
+  snapshot: EnergyIqDataSnapshotRecord,
+): EnergyIqSnapshotFactScope => {
+  const manifest = parseJsonRecord(snapshot.manifest_json);
+  if (manifest.version !== 1 || manifest.projectId !== snapshot.project_id || !Array.isArray(manifest.batches)) {
+    throw new Error(`ENERGYIQ_SNAPSHOT_MANIFEST_INVALID:${snapshot.id}`);
+  }
+  const sourceSha256 = manifest.batches.map((candidate, index) => {
+    if (!isRecord(candidate) || typeof candidate.sourceSha256 !== "string" || candidate.sourceSha256.trim().length === 0) {
+      throw new Error(`ENERGYIQ_SNAPSHOT_MANIFEST_INVALID:${snapshot.id}:${index}`);
+    }
+    return candidate.sourceSha256.toLocaleLowerCase();
+  }).sort((left, right) => left.localeCompare(right));
+  return createSnapshotFactScope({
+    workspaceId: snapshot.workspace_id,
+    projectId: snapshot.project_id,
+    snapshotId: snapshot.id,
+    sourceSha256,
+  });
+};
+
 export const initializeEnergyIqSchema = (db: DatabaseSync): void => {
   db.exec(`
     CREATE TABLE IF NOT EXISTS energyiq_user_roles (
@@ -562,12 +598,46 @@ export class EnergyIqStore {
     `).all(projectId).filter(isRecord).map(mapImportBatch);
   }
 
+  prepareImportBatchMaterialization(input: {
+    batch_id: string;
+    project_id: string;
+    summary: unknown;
+    source_manifest_sha256?: readonly string[];
+  }): EnergyIqImportMaterializationPreparation {
+    const currentBatch = this.getImportBatch(input.batch_id);
+    if (currentBatch.project_id !== input.project_id) {
+      throw new Error(`ENERGYIQ_IMPORT_BATCH_NOT_FOUND:${input.batch_id}`);
+    }
+    const summary = requireJsonRecord(input.summary, "ENERGYIQ_IMPORT_MATERIALIZATION_SUMMARY_INVALID");
+    const sourceManifestSha256 = normalizedSourceManifest(input.source_manifest_sha256);
+    if (sourceManifestSha256 && !sourceManifestSha256.has(currentBatch.source_sha256.toLocaleLowerCase())) {
+      throw new Error(`ENERGYIQ_IMPORT_BATCH_NOT_PINNED:${input.batch_id}`);
+    }
+    const batches = this.listImportBatches(input.project_id)
+      .filter((batch) => (batch.status === "materialized" || batch.id === currentBatch.id) && (
+        !sourceManifestSha256 || sourceManifestSha256.has(batch.source_sha256.toLocaleLowerCase())
+      ))
+      .map((batch) => batch.id === currentBatch.id
+        ? { ...batch, status: "materialized" as const, materialization_json: JSON.stringify(summary) }
+        : batch)
+      .sort((left, right) => left.source_sha256.localeCompare(right.source_sha256));
+    const candidate = createDataSnapshotCandidate(currentBatch.workspace_id, input.project_id, batches);
+    return {
+      expected_snapshot_id: candidate.snapshotId,
+      expected_previous_snapshot_id: this.getProject(input.project_id).data_snapshot_id,
+      manifest: candidate.manifest,
+      fact_scope: candidate.factScope,
+    };
+  }
+
   completeImportBatchMaterialization(input: {
     batch_id: string;
     project_id: string;
     summary: unknown;
     project_audit: unknown;
     source_manifest_sha256?: readonly string[];
+    expected_snapshot_id?: string;
+    expected_previous_snapshot_id?: string;
   }): EnergyIqImportMaterializationCompletion {
     const materializedAt = new Date().toISOString();
     const currentBatch = this.getImportBatch(input.batch_id);
@@ -576,14 +646,19 @@ export class EnergyIqStore {
     }
     const summary = requireJsonRecord(input.summary, "ENERGYIQ_IMPORT_MATERIALIZATION_SUMMARY_INVALID");
     const projectAudit = requireJsonRecord(input.project_audit, "ENERGYIQ_PROJECT_AUDIT_INVALID");
-    const sourceManifestSha256 = input.source_manifest_sha256
-      ? new Set(input.source_manifest_sha256.map((value) => value.trim().toLocaleLowerCase()))
-      : undefined;
+    const sourceManifestSha256 = normalizedSourceManifest(input.source_manifest_sha256);
     if (sourceManifestSha256 && !sourceManifestSha256.has(currentBatch.source_sha256.toLocaleLowerCase())) {
       throw new Error(`ENERGYIQ_IMPORT_BATCH_NOT_PINNED:${input.batch_id}`);
     }
     this.db.exec("BEGIN IMMEDIATE");
     try {
+      if (input.expected_previous_snapshot_id) {
+        const currentSnapshotId = this.getProject(input.project_id).data_snapshot_id;
+        if (currentSnapshotId !== input.expected_previous_snapshot_id
+          && currentSnapshotId !== input.expected_snapshot_id) {
+          throw new Error(`ENERGYIQ_DATA_SNAPSHOT_STALE:${currentSnapshotId}`);
+        }
+      }
       const provisionalResult = this.db.prepare(`
         UPDATE energyiq_import_batches
         SET status = 'materialized', materialization_json = ?, materialized_at = ?
@@ -598,26 +673,12 @@ export class EnergyIqStore {
           !sourceManifestSha256 || sourceManifestSha256.has(batch.source_sha256.toLocaleLowerCase())
         ))
         .sort((left, right) => left.source_sha256.localeCompare(right.source_sha256));
-      const identity = createDataSnapshotIdentity(input.project_id, batches);
-      const snapshotId = `energy-snapshot-${createHash("sha256")
-        .update(JSON.stringify(identity))
-        .digest("hex")
-        .slice(0, 24)}`;
-
-      const manifest = {
-        version: 1,
-        projectId: input.project_id,
-        identity,
-        batches: batches.map((batch) => ({
-          batchId: batch.id,
-          sourceSha256: batch.source_sha256,
-          filename: batch.filename,
-          inspection: parseJsonRecord(batch.inspection_json),
-          materialization: snapshotMaterializationSummary(batch.id === input.batch_id
-            ? summary
-            : parseJsonRecord(batch.materialization_json)),
-        })),
-      };
+      const candidate = createDataSnapshotCandidate(currentBatch.workspace_id, input.project_id, batches);
+      const snapshotId = candidate.snapshotId;
+      if (input.expected_snapshot_id && input.expected_snapshot_id !== snapshotId) {
+        throw new Error(`ENERGYIQ_DATA_SNAPSHOT_IDENTITY_MISMATCH:${input.expected_snapshot_id}:${snapshotId}`);
+      }
+      const manifest = candidate.manifest;
       const manifestJson = JSON.stringify(manifest);
       const auditJson = JSON.stringify(projectAudit);
       const insertResult = this.db.prepare(`
@@ -809,6 +870,68 @@ const createDataSnapshotIdentity = (
     };
   }),
 });
+
+const createDataSnapshotCandidate = (
+  workspaceId: string,
+  projectId: string,
+  batches: EnergyIqImportBatchRecord[],
+): {
+  snapshotId: string;
+  manifest: Record<string, unknown>;
+  factScope: EnergyIqSnapshotFactScope;
+} => {
+  const identity = createDataSnapshotIdentity(projectId, batches);
+  const snapshotId = `energy-snapshot-${createHash("sha256")
+    .update(JSON.stringify(identity))
+    .digest("hex")
+    .slice(0, 24)}`;
+  const manifest = {
+    version: 1,
+    projectId,
+    identity,
+    batches: batches.map((batch) => ({
+      batchId: batch.id,
+      sourceSha256: batch.source_sha256,
+      filename: batch.filename,
+      inspection: parseJsonRecord(batch.inspection_json),
+      materialization: snapshotMaterializationSummary(parseJsonRecord(batch.materialization_json)),
+    })),
+  };
+  const sourceSha256 = batches.map((batch) => batch.source_sha256.toLocaleLowerCase());
+  const factScope = createSnapshotFactScope({ workspaceId, projectId, snapshotId, sourceSha256 });
+  return {
+    snapshotId,
+    manifest,
+    factScope,
+  };
+};
+
+const createSnapshotFactScope = (input: {
+  workspaceId: string;
+  projectId: string;
+  snapshotId: string;
+  sourceSha256: string[];
+}): EnergyIqSnapshotFactScope => ({
+  workspaceId: input.workspaceId,
+  projectId: input.projectId,
+  dataSnapshotId: input.snapshotId,
+  manifestFingerprint: createHash("sha256")
+    .update(JSON.stringify({
+      version: 1,
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      snapshotId: input.snapshotId,
+      sourceSha256: input.sourceSha256,
+    }))
+    .digest("hex"),
+  sourceSha256: input.sourceSha256,
+});
+
+const normalizedSourceManifest = (
+  sourceManifestSha256: readonly string[] | undefined,
+): Set<string> | undefined => sourceManifestSha256
+  ? new Set(sourceManifestSha256.map((value) => value.trim().toLocaleLowerCase()))
+  : undefined;
 
 const requireJsonRecord = (value: unknown, code: string): Record<string, unknown> => {
   if (!isRecord(value)) throw new Error(code);

@@ -1,10 +1,18 @@
-import type { MetadataStore } from "@datafoundry/metadata";
+import {
+  resolveEnergyIqSnapshotFactScope,
+  type EnergyIqSnapshotFactScope,
+  type MetadataStore,
+} from "@datafoundry/metadata";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type * as DuckDbModule from "duckdb";
 import { getDuckDbDatabase } from "./duckdb-database-cache.js";
+import {
+  ENERGY_FACT_WRITER_CONTRACT_VERSION,
+  readEnergyFactProjectState,
+} from "./energy-fact-writer.js";
 
 export type EnergyScopedDataSourceContext = {
   workspaceId: string;
@@ -48,28 +56,45 @@ export const resolveEnergyFactStorePath = (
 );
 
 export const readEnergyFactCoverage = async (input: {
+  metadataStore: MetadataStore;
   workspaceId: string;
   projectId: string;
+  dataSnapshotId: string;
   resource: "electricity" | "water";
   databasePath?: string;
 }): Promise<EnergyFactCoverage | null> => {
   const databasePath = input.databasePath
     ? input.databasePath === ":memory:" ? input.databasePath : resolve(input.databasePath)
     : resolveEnergyFactStorePath(input.workspaceId);
-  if (databasePath !== ":memory:" && !existsSync(databasePath)) return null;
+  if (databasePath !== ":memory:" && !existsSync(databasePath)) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+  const factScope = await resolveValidatedSnapshotFactScope({
+    metadataStore: input.metadataStore,
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    dataSnapshotId: input.dataSnapshotId,
+    databasePath,
+  });
 
   const database = await getDuckDbDatabase(databasePath);
   const connection = database.connect();
   try {
     const row = await duckDbGet(connection, `
+      WITH snapshot_guard AS MATERIALIZED (
+        SELECT ${snapshotGuardSql(factScope)} AS snapshot_valid
+      )
       SELECT
         epoch_ms(MIN(interval_start)) AS from_ms,
         epoch_ms(MAX(interval_end)) AS to_ms,
         COUNT(*) AS interval_count
-      FROM energy_interval_facts
-      WHERE workspace_id = ${sqlLiteral(input.workspaceId)}
+      FROM snapshot_guard
+      CROSS JOIN energy_interval_facts
+      WHERE snapshot_guard.snapshot_valid
+        AND workspace_id = ${sqlLiteral(input.workspaceId)}
         AND project_id = ${sqlLiteral(input.projectId)}
         AND resource = ${sqlLiteral(input.resource)}
+        AND lower(source_sha256) IN (${factScope.sourceSha256.map(sqlLiteral).join(", ")})
     `);
     const fromMs = numericValue(row.from_ms);
     const toMs = numericValue(row.to_ms);
@@ -104,6 +129,13 @@ export const ensureEnergyScopedDataSource = async (input: {
   if (!existsSync(databasePath)) {
     throw new Error(`ENERGYIQ_FACT_STORE_NOT_FOUND:${databasePath}`);
   }
+  const factScope = await resolveValidatedSnapshotFactScope({
+    metadataStore: input.metadataStore,
+    workspaceId: input.context.workspaceId,
+    projectId: input.context.projectId,
+    dataSnapshotId: input.context.dataSnapshotId,
+    databasePath,
+  });
 
   const signature = createHash("sha256")
     .update(JSON.stringify({
@@ -115,7 +147,7 @@ export const ensureEnergyScopedDataSource = async (input: {
     .slice(0, 20);
   const viewName = `energy_scope_${signature}`;
   const datasourceId = `energy-scope-${signature}`;
-  await createScopedView(databasePath, viewName, input.context);
+  await createScopedView(databasePath, viewName, input.context, factScope);
 
   const config = {
     path: databasePath,
@@ -144,6 +176,9 @@ export const ensureEnergyScopedDataSource = async (input: {
       meterMappingRevisionId: input.context.meterMappingRevisionId,
       meterFormulaRevisionId: input.context.meterFormulaRevisionId,
       dataSnapshotId: input.context.dataSnapshotId,
+      manifestFingerprint: factScope.manifestFingerprint,
+      sourceSha256: factScope.sourceSha256,
+      factWriterContractVersion: ENERGY_FACT_WRITER_CONTRACT_VERSION,
       metricVersion: input.context.metricVersion
     }
   };
@@ -173,7 +208,8 @@ export const ensureEnergyScopedDataSource = async (input: {
 const createScopedView = async (
   databasePath: string,
   viewName: string,
-  context: EnergyScopedDataSourceContext
+  context: EnergyScopedDataSourceContext,
+  factScope: EnergyIqSnapshotFactScope,
 ): Promise<void> => {
   const attachments = [...new Map((context.meterAttachments ?? []).map((attachment) => [
     attachment.meterPointId,
@@ -196,6 +232,9 @@ const createScopedView = async (
   try {
     await duckDbRun(connection, `
       CREATE OR REPLACE VIEW ${quoteIdentifier(viewName)} AS
+      WITH snapshot_guard AS MATERIALIZED (
+        SELECT ${snapshotGuardSql(factScope)} AS snapshot_valid
+      )
       SELECT
         project_id,
         resource,
@@ -226,10 +265,13 @@ const createScopedView = async (
         usage_kwh,
         average_kw,
         quality_status
-      FROM energy_interval_facts
-      WHERE workspace_id = ${sqlLiteral(context.workspaceId)}
+      FROM snapshot_guard
+      CROSS JOIN energy_interval_facts
+      WHERE snapshot_guard.snapshot_valid
+        AND workspace_id = ${sqlLiteral(context.workspaceId)}
         AND project_id = ${sqlLiteral(context.projectId)}
         AND resource = ${sqlLiteral(context.resource)}
+        AND lower(source_sha256) IN (${factScope.sourceSha256.map(sqlLiteral).join(", ")})
         AND interval_start >= CAST(${sqlLiteral(context.from)} AS TIMESTAMPTZ)
         AND interval_start < CAST(${sqlLiteral(context.to)} AS TIMESTAMPTZ)
         AND ${nodeFilter}
@@ -238,6 +280,57 @@ const createScopedView = async (
     await duckDbClose(connection).catch(ignoreAlreadyClosed);
   }
 };
+
+const resolveValidatedSnapshotFactScope = async (input: {
+  metadataStore: MetadataStore;
+  workspaceId: string;
+  projectId: string;
+  dataSnapshotId: string;
+  databasePath: string;
+}): Promise<EnergyIqSnapshotFactScope> => {
+  const project = input.metadataStore.energyIq.getProject(input.projectId);
+  if (project.workspace_id !== input.workspaceId || project.data_snapshot_id !== input.dataSnapshotId) {
+    throw new Error("ENERGYIQ_SNAPSHOT_STALE");
+  }
+  let snapshot;
+  try {
+    snapshot = input.metadataStore.energyIq.getDataSnapshot(input.dataSnapshotId);
+  } catch {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+  if (snapshot.workspace_id !== input.workspaceId || snapshot.project_id !== input.projectId) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+  const factScope = resolveEnergyIqSnapshotFactScope(snapshot);
+  const state = await readEnergyFactProjectState({ databasePath: input.databasePath, projectId: input.projectId });
+  if (!state) throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  if (state.dataSnapshotId !== input.dataSnapshotId) throw new Error("ENERGYIQ_SNAPSHOT_STALE");
+  if (state.workspaceId !== factScope.workspaceId
+    || state.projectId !== factScope.projectId
+    || state.manifestFingerprint !== factScope.manifestFingerprint
+    || state.factWriterContractVersion !== ENERGY_FACT_WRITER_CONTRACT_VERSION
+    || JSON.stringify(state.sourceSha256) !== JSON.stringify(factScope.sourceSha256)) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+  return factScope;
+};
+
+const snapshotGuardSql = (scope: EnergyIqSnapshotFactScope): string => `(
+  SELECT CASE
+    WHEN COUNT(*) = 0 THEN error('ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE')
+    WHEN bool_or(data_snapshot_id <> ${sqlLiteral(scope.dataSnapshotId)})
+      THEN error('ENERGYIQ_SNAPSHOT_STALE')
+    WHEN bool_and(
+      workspace_id = ${sqlLiteral(scope.workspaceId)}
+      AND manifest_fingerprint = ${sqlLiteral(scope.manifestFingerprint)}
+      AND source_sha256_json = ${sqlLiteral(JSON.stringify(scope.sourceSha256))}
+      AND fact_writer_contract_version = ${sqlLiteral(ENERGY_FACT_WRITER_CONTRACT_VERSION)}
+    ) THEN TRUE
+    ELSE error('ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE')
+  END
+  FROM energy_project_fact_state
+  WHERE project_id = ${sqlLiteral(scope.projectId)}
+)`;
 
 const sqlLiteral = (value: string): string => `'${value.replaceAll("'", "''")}'`;
 const quoteIdentifier = (value: string): string => `"${value.replaceAll('"', '""')}"`;

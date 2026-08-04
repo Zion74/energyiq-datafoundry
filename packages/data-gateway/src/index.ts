@@ -85,11 +85,13 @@ export {
 export {
   ENERGY_FACT_WRITER_CONTRACT_VERSION,
   readEnergyFactProjectAudit,
+  readEnergyFactProjectState,
   readEnergyFactMaterializationStats,
   writeEnergyFactMaterialization,
   type EnergyFactMaterializationWrite,
   type EnergyFactMaterializationResult,
   type EnergyFactProjectAudit,
+  type EnergyFactProjectState,
   type EnergyIntervalFactWrite,
   type EnergyNormalizedReadingWrite,
   type EnergyQualityEventWrite,

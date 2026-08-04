@@ -6,6 +6,71 @@ import { describe, expect, it } from "vitest";
 import { createEnergyIqSourceManifest, createMetadataStore } from "./index.js";
 
 describe("EnergyIqStore", () => {
+  it("prepares the Snapshot identity before fact writes and rejects completion after pointer drift", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-snapshot-prepare-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.workspaces.upsert({
+        id: "workspace-1",
+        owner_user_id: "dev-user",
+        name: "Customer Workspace",
+        kind: "customer",
+      });
+      metadata.energyIq.upsertProject({
+        id: "project-snapshot-prepare",
+        workspace_id: "workspace-1",
+        name: "Snapshot Prepare Project",
+        status: "draft",
+      });
+      metadata.energyIq.createImportBatch({
+        id: "batch-prepare",
+        workspace_id: "workspace-1",
+        project_id: "project-snapshot-prepare",
+        source_kind: "excel",
+        source_sha256: "sha-prepare",
+        filename: "prepare.xlsx",
+        status: "inspected",
+        inspection: importInspection("batch-prepare"),
+        created_by: "dev-user",
+      });
+
+      const prepared = metadata.energyIq.prepareImportBatchMaterialization({
+        batch_id: "batch-prepare",
+        project_id: "project-snapshot-prepare",
+        summary: materializationSummary("mapping-sha-1"),
+        source_manifest_sha256: ["sha-prepare"],
+      });
+
+      expect(prepared).toMatchObject({
+        expected_previous_snapshot_id: "unavailable",
+        fact_scope: {
+          workspaceId: "workspace-1",
+          projectId: "project-snapshot-prepare",
+          dataSnapshotId: prepared.expected_snapshot_id,
+          sourceSha256: ["sha-prepare"],
+        },
+      });
+
+      metadata.energyIq.upsertProject({
+        ...metadata.energyIq.getProject("project-snapshot-prepare"),
+        data_snapshot_id: "concurrent-snapshot",
+      });
+      expect(() => metadata.energyIq.completeImportBatchMaterialization({
+        batch_id: "batch-prepare",
+        project_id: "project-snapshot-prepare",
+        summary: materializationSummary("mapping-sha-1"),
+        project_audit: projectAudit(),
+        source_manifest_sha256: ["sha-prepare"],
+        expected_snapshot_id: prepared.expected_snapshot_id,
+        expected_previous_snapshot_id: prepared.expected_previous_snapshot_id,
+      })).toThrow("ENERGYIQ_DATA_SNAPSHOT_STALE:concurrent-snapshot");
+      expect(metadata.energyIq.getImportBatch("batch-prepare").status).toBe("inspected");
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
   it("stores the controlled component catalog and one draft per Project and Tier", () => {
     const root = mkdtempSync(join(tmpdir(), "energyiq-template-store-"));
     try {

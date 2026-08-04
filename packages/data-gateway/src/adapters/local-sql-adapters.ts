@@ -103,14 +103,76 @@ export class DuckDbAdapter implements DataSourceAdapter {
   private async query(sql: string, signal?: AbortSignal | undefined): Promise<Record<string, unknown>[]> {
     const database = await getDuckDbDatabase(stringConfig(this.config, "path"));
     const connection = database.connect();
+    const snapshotScope = energySnapshotScope(this.config.energyQueryScope);
     try {
+      if (snapshotScope) {
+        await duckDbAll(connection, "BEGIN TRANSACTION", signal);
+        await assertEnergySnapshotState(connection, snapshotScope, signal);
+      }
       const rows = await duckDbAll(connection, sql, signal);
       return rows.filter(isRecord);
     } finally {
+      if (snapshotScope) await duckDbAll(connection, "ROLLBACK").catch(() => undefined);
       await duckDbClose(connection).catch(ignoreAlreadyClosed);
     }
   }
 }
+
+type EnergySnapshotScope = {
+  workspaceId: string;
+  projectId: string;
+  dataSnapshotId: string;
+  manifestFingerprint: string;
+  sourceSha256: string[];
+  factWriterContractVersion: string;
+};
+
+const energySnapshotScope = (value: unknown): EnergySnapshotScope | undefined => {
+  if (!isRecord(value)) return undefined;
+  const sourceSha256 = value.sourceSha256;
+  if (typeof value.workspaceId !== "string"
+    || typeof value.projectId !== "string"
+    || typeof value.dataSnapshotId !== "string"
+    || typeof value.manifestFingerprint !== "string"
+    || typeof value.factWriterContractVersion !== "string"
+    || !Array.isArray(sourceSha256)
+    || !sourceSha256.every((source) => typeof source === "string")) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+  return {
+    workspaceId: value.workspaceId,
+    projectId: value.projectId,
+    dataSnapshotId: value.dataSnapshotId,
+    manifestFingerprint: value.manifestFingerprint,
+    sourceSha256,
+    factWriterContractVersion: value.factWriterContractVersion,
+  };
+};
+
+const assertEnergySnapshotState = async (
+  connection: DuckDbModule.Connection,
+  scope: EnergySnapshotScope,
+  signal?: AbortSignal,
+): Promise<void> => {
+  await duckDbAll(connection, `
+    SELECT CASE
+      WHEN COUNT(*) = 0 THEN error('ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE')
+      WHEN bool_or(data_snapshot_id <> ${sqlLiteral(scope.dataSnapshotId)})
+        THEN error('ENERGYIQ_SNAPSHOT_STALE')
+      WHEN bool_and(
+        workspace_id = ${sqlLiteral(scope.workspaceId)}
+        AND manifest_fingerprint = ${sqlLiteral(scope.manifestFingerprint)}
+        AND source_sha256_json = ${sqlLiteral(JSON.stringify(scope.sourceSha256))}
+        AND fact_writer_contract_version = ${sqlLiteral(scope.factWriterContractVersion)}
+      ) THEN TRUE
+      ELSE error('ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE')
+    END AS snapshot_valid
+    FROM energy_project_fact_state
+    WHERE project_id = ${sqlLiteral(scope.projectId)}
+  `, signal);
+};
+
+const sqlLiteral = (value: string): string => `'${value.replaceAll("'", "''")}'`;
 
 const duckDbAll = async (
   connection: DuckDbModule.Connection,

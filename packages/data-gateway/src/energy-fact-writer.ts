@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type * as DuckDbModule from "duckdb";
+import type { EnergyIqSnapshotFactScope } from "@datafoundry/metadata";
 
 import { getDuckDbDatabase } from "./duckdb-database-cache.js";
 
@@ -93,6 +94,7 @@ export type EnergyFactMaterializationWrite = {
   normalizedReadings: EnergyNormalizedReadingWrite[];
   intervalFacts: EnergyIntervalFactWrite[];
   qualityEvents: EnergyQualityEventWrite[];
+  snapshotFactScope: EnergyIqSnapshotFactScope;
 };
 
 export type EnergyFactMaterializationStats = {
@@ -123,10 +125,14 @@ export type EnergyFactProjectAudit = {
   orphanIntervalFactCount: number;
 };
 
-export const ENERGY_FACT_WRITER_CONTRACT_VERSION = "energy-fact-writer-project-canonical-v2" as const;
+export const ENERGY_FACT_WRITER_CONTRACT_VERSION = "energy-fact-writer-snapshot-manifest-v3" as const;
 
 export type EnergyFactMaterializationResult = EnergyFactMaterializationStats & {
   projectAudit: EnergyFactProjectAudit;
+};
+
+export type EnergyFactProjectState = EnergyIqSnapshotFactScope & {
+  factWriterContractVersion: typeof ENERGY_FACT_WRITER_CONTRACT_VERSION;
 };
 
 export const writeEnergyFactMaterialization = async (
@@ -142,13 +148,18 @@ export const writeEnergyFactMaterialization = async (
     await deleteExistingBatch(connection, input);
     await updateHistoricalMappings(connection, input.normalizedReadings);
     await insertRows(connection, "raw_meter_readings", RAW_COLUMNS, input.rawReadings.map(rawValues));
-    await insertRows(connection, "normalized_meter_readings", NORMALIZED_COLUMNS, input.normalizedReadings.map(normalizedValues));
-    await insertRows(connection, "energy_interval_facts", FACT_COLUMNS, input.intervalFacts.map(factValues));
-    await insertRows(connection, "energy_quality_events", QUALITY_COLUMNS, input.qualityEvents.map(qualityValues));
+    await insertRows(connection, "energy_source_normalized_readings", NORMALIZED_COLUMNS, input.normalizedReadings.map(normalizedValues));
+    await insertRows(connection, "energy_source_interval_facts", FACT_COLUMNS, input.intervalFacts.map(factValues));
+    await insertRows(connection, "energy_source_quality_events", QUALITY_COLUMNS, input.qualityEvents.map((event) => qualityValues(event, input.sourceSha256)));
+    validateSnapshotFactScope(input);
+    await rebuildCanonicalNormalizedReadings(connection, input.projectId, input.snapshotFactScope.sourceSha256);
+    await rebuildCanonicalSourceIntervals(connection, input.projectId, input.snapshotFactScope.sourceSha256);
+    await rebuildCanonicalSourceQualityEvents(connection, input.projectId, input.snapshotFactScope.sourceSha256);
     await markRawOverlapConflicts(connection, input.projectId);
     await deduplicateCanonicalRows(connection, input.projectId);
     await rebuildProjectCumulativeIntervals(connection, input.projectId, input.timezone);
     await rebuildProjectCumulativeQualityEvents(connection, input.projectId);
+    await writeProjectFactState(connection, input.snapshotFactScope);
     await duckDbRun(connection, "COMMIT");
     await duckDbRun(connection, "CHECKPOINT");
     return {
@@ -158,6 +169,39 @@ export const writeEnergyFactMaterialization = async (
   } catch (error) {
     await duckDbRun(connection, "ROLLBACK").catch(() => undefined);
     throw error;
+  } finally {
+    await duckDbClose(connection).catch(ignoreAlreadyClosed);
+  }
+};
+
+export const readEnergyFactProjectState = async (input: {
+  databasePath: string;
+  projectId: string;
+}): Promise<EnergyFactProjectState | null> => {
+  const databasePath = input.databasePath === ":memory:" ? input.databasePath : resolve(input.databasePath);
+  const database = await getDuckDbDatabase(databasePath);
+  const connection = database.connect();
+  try {
+    await ensureFactSchema(connection);
+    const row = await duckDbGet(connection, `
+      SELECT workspace_id, project_id, data_snapshot_id, manifest_fingerprint,
+        source_sha256_json, fact_writer_contract_version
+      FROM energy_project_fact_state
+      WHERE project_id = ?
+    `, [input.projectId]);
+    if (typeof row.project_id !== "string") return null;
+    const sourceSha256 = JSON.parse(String(row.source_sha256_json)) as unknown;
+    if (!Array.isArray(sourceSha256) || !sourceSha256.every((value) => typeof value === "string")) {
+      throw new Error(`ENERGYIQ_SNAPSHOT_FACT_STATE_INVALID:${input.projectId}`);
+    }
+    return {
+      workspaceId: String(row.workspace_id),
+      projectId: String(row.project_id),
+      dataSnapshotId: String(row.data_snapshot_id),
+      manifestFingerprint: String(row.manifest_fingerprint),
+      sourceSha256,
+      factWriterContractVersion: String(row.fact_writer_contract_version) as typeof ENERGY_FACT_WRITER_CONTRACT_VERSION,
+    };
   } finally {
     await duckDbClose(connection).catch(ignoreAlreadyClosed);
   }
@@ -191,7 +235,7 @@ const updateHistoricalMappings = async (
       WHERE project_id = ? AND device_name = ?
     `, [mapped.meterPointId, mapped.scopeId, mapped.projectId, mapped.sourceLabel]);
     await duckDbRun(connection, `
-      UPDATE normalized_meter_readings
+      UPDATE energy_source_normalized_readings
       SET meter_node_id = ?, scope_id = ?, level_node_id = ?, category = ?, meter_role = ?
       WHERE project_id = ? AND device_name = ?
     `, [
@@ -204,7 +248,7 @@ const updateHistoricalMappings = async (
       mapped.sourceLabel,
     ]);
     await duckDbRun(connection, `
-      UPDATE energy_interval_facts
+      UPDATE energy_source_interval_facts
       SET meter_node_id = ?, scope_id = ?, parent_node_id = ?, level_node_id = ?,
           appliance = ?, circuit_name = device_name, category = ?, meter_role = ?
       WHERE project_id = ? AND device_name = ?
@@ -390,6 +434,13 @@ const ensureFactSchema = async (connection: DuckDbModule.Connection): Promise<vo
       event_time TIMESTAMPTZ, active_energy_kwh DOUBLE, source_file VARCHAR,
       source_sha256 VARCHAR, source_row_number INTEGER
     );
+    CREATE TABLE IF NOT EXISTS energy_source_normalized_readings (
+      workspace_id VARCHAR, project_id VARCHAR, import_batch_id VARCHAR, resource VARCHAR,
+      meter_node_id VARCHAR, scope_id VARCHAR, level_node_id VARCHAR, device_name VARCHAR,
+      category VARCHAR, meter_role VARCHAR, event_time TIMESTAMPTZ, active_energy_kwh DOUBLE,
+      source_file VARCHAR, source_sha256 VARCHAR, source_row_number INTEGER,
+      source_reading_kind VARCHAR
+    );
     CREATE TABLE IF NOT EXISTS energy_interval_facts (
       workspace_id VARCHAR, project_id VARCHAR, resource VARCHAR, meter_node_id VARCHAR,
       parent_node_id VARCHAR, level_node_id VARCHAR, device_name VARCHAR, appliance VARCHAR,
@@ -410,7 +461,33 @@ const ensureFactSchema = async (connection: DuckDbModule.Connection): Promise<vo
       code VARCHAR NOT NULL,
       severity VARCHAR NOT NULL,
       details_json JSON NOT NULL,
-      source_reading_kind VARCHAR
+      source_reading_kind VARCHAR,
+      source_sha256 VARCHAR
+    );
+    CREATE TABLE IF NOT EXISTS energy_source_quality_events (
+      workspace_id VARCHAR NOT NULL, project_id VARCHAR NOT NULL,
+      import_batch_id VARCHAR NOT NULL, meter_node_id VARCHAR, source_label VARCHAR,
+      event_time TIMESTAMPTZ, code VARCHAR NOT NULL, severity VARCHAR NOT NULL,
+      details_json JSON NOT NULL, source_reading_kind VARCHAR, source_sha256 VARCHAR
+    );
+    CREATE TABLE IF NOT EXISTS energy_source_interval_facts (
+      workspace_id VARCHAR, project_id VARCHAR, import_batch_id VARCHAR, resource VARCHAR,
+      meter_node_id VARCHAR, scope_id VARCHAR, parent_node_id VARCHAR, level_node_id VARCHAR,
+      device_name VARCHAR, appliance VARCHAR, circuit_name VARCHAR, category VARCHAR,
+      meter_role VARCHAR, source_reading_kind VARCHAR, interval_start TIMESTAMPTZ,
+      interval_end TIMESTAMPTZ, elapsed_minutes DOUBLE, active_energy_kwh DOUBLE,
+      previous_active_energy_kwh DOUBLE, raw_delta_kwh DOUBLE, usage_kwh DOUBLE,
+      average_kw DOUBLE, quality_status VARCHAR, local_date DATE, local_hour INTEGER,
+      day_type VARCHAR, is_operating BOOLEAN, source_file VARCHAR, source_sha256 VARCHAR
+    );
+    CREATE TABLE IF NOT EXISTS energy_project_fact_state (
+      project_id VARCHAR PRIMARY KEY,
+      workspace_id VARCHAR NOT NULL,
+      data_snapshot_id VARCHAR NOT NULL,
+      manifest_fingerprint VARCHAR NOT NULL,
+      source_sha256_json JSON NOT NULL,
+      fact_writer_contract_version VARCHAR NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL
     );
     ALTER TABLE raw_meter_readings ADD COLUMN IF NOT EXISTS import_batch_id VARCHAR;
     ALTER TABLE raw_meter_readings ADD COLUMN IF NOT EXISTS meter_node_id VARCHAR;
@@ -421,6 +498,7 @@ const ensureFactSchema = async (connection: DuckDbModule.Connection): Promise<vo
     ALTER TABLE energy_interval_facts ADD COLUMN IF NOT EXISTS import_batch_id VARCHAR;
     ALTER TABLE energy_interval_facts ADD COLUMN IF NOT EXISTS scope_id VARCHAR;
     ALTER TABLE energy_quality_events ADD COLUMN IF NOT EXISTS source_reading_kind VARCHAR;
+    ALTER TABLE energy_quality_events ADD COLUMN IF NOT EXISTS source_sha256 VARCHAR;
     UPDATE normalized_meter_readings SET scope_id = meter_node_id WHERE scope_id IS NULL;
     UPDATE normalized_meter_readings
     SET source_reading_kind = 'cumulative_energy'
@@ -446,21 +524,121 @@ const ensureFactSchema = async (connection: DuckDbModule.Connection): Promise<vo
   `);
 };
 
+const validateSnapshotFactScope = (input: EnergyFactMaterializationWrite): void => {
+  const scope = input.snapshotFactScope!;
+  const rowWorkspaceIds = new Set([
+    ...input.rawReadings.map((row) => row.workspaceId),
+    ...input.normalizedReadings.map((row) => row.workspaceId),
+    ...input.intervalFacts.map((row) => row.workspaceId),
+    ...input.qualityEvents.map((row) => row.workspaceId),
+  ]);
+  if (scope.projectId !== input.projectId
+    || [...rowWorkspaceIds].some((workspaceId) => workspaceId !== scope.workspaceId)) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACT_SCOPE_MISMATCH");
+  }
+  const manifestSources = new Set(scope.sourceSha256.map((value) => value.toLocaleLowerCase()));
+  if (manifestSources.size === 0 || [...manifestSources].some((value) => value.trim().length === 0)) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACT_SCOPE_EMPTY");
+  }
+  if (!manifestSources.has(input.sourceSha256.toLocaleLowerCase())) {
+    throw new Error(`ENERGYIQ_IMPORT_BATCH_NOT_PINNED:${input.importBatchId}`);
+  }
+};
+
+const rebuildCanonicalNormalizedReadings = async (
+  connection: DuckDbModule.Connection,
+  projectId: string,
+  sourceSha256: readonly string[],
+): Promise<void> => {
+  const placeholders = sourceSha256.map(() => "?").join(", ");
+  await duckDbRun(connection, "DELETE FROM normalized_meter_readings WHERE project_id = ?", [projectId]);
+  await duckDbRun(connection, `
+    INSERT INTO normalized_meter_readings (${NORMALIZED_COLUMNS.join(", ")})
+    SELECT ${NORMALIZED_COLUMNS.join(", ")}
+    FROM energy_source_normalized_readings
+    WHERE project_id = ? AND lower(source_sha256) IN (${placeholders})
+  `, [projectId, ...sourceSha256.map((value) => value.toLocaleLowerCase())]);
+};
+
+const rebuildCanonicalSourceQualityEvents = async (
+  connection: DuckDbModule.Connection,
+  projectId: string,
+  sourceSha256: readonly string[],
+): Promise<void> => {
+  const placeholders = sourceSha256.map(() => "?").join(", ");
+  await duckDbRun(connection, "DELETE FROM energy_quality_events WHERE project_id = ?", [projectId]);
+  await duckDbRun(connection, `
+    INSERT INTO energy_quality_events (${QUALITY_COLUMNS.join(", ")})
+    SELECT ${QUALITY_COLUMNS.join(", ")}
+    FROM energy_source_quality_events
+    WHERE project_id = ? AND lower(source_sha256) IN (${placeholders})
+  `, [projectId, ...sourceSha256.map((value) => value.toLocaleLowerCase())]);
+};
+
+const rebuildCanonicalSourceIntervals = async (
+  connection: DuckDbModule.Connection,
+  projectId: string,
+  sourceSha256: readonly string[],
+): Promise<void> => {
+  const placeholders = sourceSha256.map(() => "?").join(", ");
+  await duckDbRun(connection, "DELETE FROM energy_interval_facts WHERE project_id = ?", [projectId]);
+  await duckDbRun(connection, `
+    INSERT INTO energy_interval_facts (${FACT_COLUMNS.join(", ")})
+    SELECT ${FACT_COLUMNS.join(", ")}
+    FROM energy_source_interval_facts
+    WHERE project_id = ? AND lower(source_sha256) IN (${placeholders})
+  `, [projectId, ...sourceSha256.map((value) => value.toLocaleLowerCase())]);
+};
+
+const writeProjectFactState = async (
+  connection: DuckDbModule.Connection,
+  scope: EnergyIqSnapshotFactScope,
+): Promise<void> => {
+  await duckDbRun(connection, `
+    INSERT INTO energy_project_fact_state (
+      project_id, workspace_id, data_snapshot_id, manifest_fingerprint,
+      source_sha256_json, fact_writer_contract_version, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, current_timestamp)
+    ON CONFLICT (project_id) DO UPDATE SET
+      workspace_id = excluded.workspace_id,
+      data_snapshot_id = excluded.data_snapshot_id,
+      manifest_fingerprint = excluded.manifest_fingerprint,
+      source_sha256_json = excluded.source_sha256_json,
+      fact_writer_contract_version = excluded.fact_writer_contract_version,
+      updated_at = excluded.updated_at
+  `, [
+    scope.projectId,
+    scope.workspaceId,
+    scope.dataSnapshotId,
+    scope.manifestFingerprint,
+    JSON.stringify(scope.sourceSha256.map((value) => value.toLocaleLowerCase())),
+    ENERGY_FACT_WRITER_CONTRACT_VERSION,
+  ]);
+};
+
 const deleteExistingBatch = async (
   connection: DuckDbModule.Connection,
   input: EnergyFactMaterializationWrite,
 ): Promise<void> => {
-  for (const table of ["raw_meter_readings", "normalized_meter_readings", "energy_interval_facts"]) {
+  for (const table of [
+    "raw_meter_readings",
+    "energy_source_normalized_readings",
+    "normalized_meter_readings",
+    "energy_source_interval_facts",
+    "energy_interval_facts",
+  ]) {
     await duckDbRun(connection, `DELETE FROM ${table} WHERE project_id = ? AND (import_batch_id = ? OR source_sha256 = ?)`, [
       input.projectId,
       input.importBatchId,
       input.sourceSha256,
     ]);
   }
-  await duckDbRun(connection, "DELETE FROM energy_quality_events WHERE project_id = ? AND import_batch_id = ?", [
-    input.projectId,
-    input.importBatchId,
-  ]);
+  for (const table of ["energy_source_quality_events", "energy_quality_events"]) {
+    await duckDbRun(connection, `DELETE FROM ${table} WHERE project_id = ? AND import_batch_id = ?`, [
+      input.projectId,
+      input.importBatchId,
+    ]);
+  }
 };
 
 const markRawOverlapConflicts = async (
@@ -590,7 +768,8 @@ const rebuildProjectCumulativeQualityEvents = async (
       workspace_id, project_id, import_batch_id, meter_node_id, device_name, event_time,
       'boundary' AS code, 'warning' AS severity,
       json_object('reason', 'No previous canonical cumulative reading exists in this Project.') AS details_json,
-      'cumulative_energy' AS source_reading_kind
+      'cumulative_energy' AS source_reading_kind,
+      source_sha256
     FROM ranked_readings
     WHERE reading_rank = 1
   `, [projectId]);
@@ -601,7 +780,8 @@ const rebuildProjectCumulativeQualityEvents = async (
       quality_status AS code,
       CASE WHEN quality_status = 'negative_delta' THEN 'error' ELSE 'warning' END AS severity,
       json_object('elapsedMinutes', elapsed_minutes, 'rawDeltaKwh', raw_delta_kwh) AS details_json,
-      'cumulative_energy' AS source_reading_kind
+      'cumulative_energy' AS source_reading_kind,
+      source_sha256
     FROM canonical_cumulative_pairs
     WHERE quality_status <> 'ok'
   `);
@@ -667,7 +847,7 @@ const FACT_COLUMNS = [
 ] as const;
 const QUALITY_COLUMNS = [
   "workspace_id", "project_id", "import_batch_id", "meter_node_id", "source_label", "event_time", "code", "severity", "details_json",
-  "source_reading_kind",
+  "source_reading_kind", "source_sha256",
 ] as const;
 
 const rawValues = (row: EnergyRawReadingWrite): unknown[] => [
@@ -690,10 +870,10 @@ const factValues = (row: EnergyIntervalFactWrite): unknown[] => [
   row.usageKwh ?? null, row.averageKw ?? null, row.qualityStatus, row.localDate, row.localHour,
   row.dayType, row.isOperating ?? null, row.sourceFile, row.sourceSha256,
 ];
-const qualityValues = (row: EnergyQualityEventWrite): unknown[] => [
+const qualityValues = (row: EnergyQualityEventWrite, sourceSha256: string): unknown[] => [
   row.workspaceId, row.projectId, row.importBatchId, row.meterPointId ?? null,
   row.sourceLabel ?? null, row.eventTime ?? null, row.code, row.severity, JSON.stringify(row.details),
-  row.sourceReadingKind,
+  row.sourceReadingKind, sourceSha256,
 ];
 
 const insertRows = async (

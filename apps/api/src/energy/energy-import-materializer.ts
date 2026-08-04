@@ -33,6 +33,8 @@ export type EnergyImportMaterializationSummary = {
   sourceCoverageTo?: string;
 };
 
+export type EnergyFactMaterializationDraft = Omit<EnergyFactMaterializationWrite, "snapshotFactScope">;
+
 export const ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION = "energy-excel-cumulative-v1" as const;
 
 export const createEnergyImportCompletionInput = (
@@ -73,7 +75,7 @@ export const buildEnergyExcelMaterialization = async (input: {
   timezone: string;
   databasePath: string;
 }): Promise<{
-  write: EnergyFactMaterializationWrite;
+  write: EnergyFactMaterializationDraft;
   summary: EnergyImportMaterializationSummary;
 }> => {
   const mapping = input.document.meter_mapping;

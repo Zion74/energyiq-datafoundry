@@ -1,9 +1,120 @@
 import { describe, expect, it } from "vitest";
 
-import { readEnergyFactMaterializationStats, writeEnergyFactMaterialization } from "./energy-fact-writer.js";
-import { readEnergyFactCoverage } from "./energy-scoped-datasource.js";
+import {
+  ENERGY_FACT_WRITER_CONTRACT_VERSION,
+  readEnergyFactMaterializationStats,
+  readEnergyFactProjectState,
+  writeEnergyFactMaterialization,
+} from "./energy-fact-writer.js";
 
 describe("writeEnergyFactMaterialization", () => {
+  it("canonicalizes only the prepared manifest sources and commits their Project fact state", async () => {
+    const databasePath = ":memory:";
+    const projectId = "project-manifest-scope";
+    const sourceC = boundaryBatch({
+      databasePath,
+      projectId,
+      importBatchId: "batch-c",
+      sourceSha256: "sha-c",
+      readings: [
+        ["2026-05-01T01:00:00.000Z", 500],
+        ["2026-05-01T01:15:00.000Z", 501],
+      ],
+    });
+    const sourceA = boundaryBatch({
+      databasePath,
+      projectId,
+      importBatchId: "batch-a",
+      sourceSha256: "sha-a",
+      readings: [
+        ["2026-05-01T00:00:00.000Z", 100],
+        ["2026-05-01T00:15:00.000Z", 101],
+      ],
+    });
+    const sourceB = boundaryBatch({
+      databasePath,
+      projectId,
+      importBatchId: "batch-b",
+      sourceSha256: "sha-b",
+      readings: [
+        ["2026-05-01T00:30:00.000Z", 102],
+        ["2026-05-01T00:45:00.000Z", 103],
+      ],
+    });
+
+    await writeEnergyFactMaterialization(withFactScope(sourceC, "snapshot-c", ["sha-c"]));
+    await writeEnergyFactMaterialization(withFactScope(sourceA, "snapshot-a", ["sha-a"]));
+    const result = await writeEnergyFactMaterialization(withFactScope(sourceB, "snapshot-ab", ["sha-a", "sha-b"]));
+
+    expect(result.projectAudit.intervalFactCount).toBe(3);
+    await expect(readEnergyFactProjectState({ databasePath, projectId })).resolves.toEqual({
+      workspaceId: "workspace-1",
+      projectId,
+      dataSnapshotId: "snapshot-ab",
+      manifestFingerprint: "fingerprint-snapshot-ab",
+      sourceSha256: ["sha-a", "sha-b"],
+      factWriterContractVersion: ENERGY_FACT_WRITER_CONTRACT_VERSION,
+    });
+  });
+
+  it("restores the manifest winner after an off-manifest source previously replaced it", async () => {
+    const databasePath = ":memory:";
+    const projectId = "project-manifest-winner-restore";
+    const sourceA = boundaryBatch({
+      databasePath,
+      projectId,
+      importBatchId: "restore-a",
+      sourceSha256: "restore-sha-a",
+      readings: [
+        ["2026-05-01T00:00:00.000Z", 100],
+        ["2026-05-01T00:15:00.000Z", 101],
+        ["2026-05-01T00:30:00.000Z", 102],
+      ],
+    });
+    const sourceB = boundaryBatch({
+      databasePath,
+      projectId,
+      importBatchId: "restore-b",
+      sourceSha256: "restore-sha-b",
+      readings: [
+        ["2026-05-01T00:15:00.000Z", 100.9],
+        ["2026-05-01T00:30:00.000Z", 101.9],
+        ["2026-05-01T00:45:00.000Z", 102.9],
+      ],
+    });
+    const sourceC = boundaryBatch({
+      databasePath,
+      projectId,
+      importBatchId: "restore-c",
+      sourceSha256: "restore-sha-c",
+      readings: [
+        ["2026-05-01T00:15:00.000Z", 100.8],
+        ["2026-05-01T00:30:00.000Z", 101.8],
+        ["2026-05-01T00:45:00.000Z", 102.8],
+        ["2026-05-01T01:00:00.000Z", 103.8],
+      ],
+    });
+
+    await writeEnergyFactMaterialization(withFactScope(sourceA, "snapshot-a", ["restore-sha-a"]));
+    const original = await writeEnergyFactMaterialization(withFactScope(
+      sourceB,
+      "snapshot-ab",
+      ["restore-sha-a", "restore-sha-b"],
+    ));
+    await writeEnergyFactMaterialization(withFactScope(
+      sourceC,
+      "snapshot-abc",
+      ["restore-sha-a", "restore-sha-b", "restore-sha-c"],
+    ));
+    const restored = await writeEnergyFactMaterialization(withFactScope(
+      sourceA,
+      "snapshot-ab-restored",
+      ["restore-sha-a", "restore-sha-b"],
+    ));
+
+    expect(restored.projectAudit).toEqual(original.projectAudit);
+  });
+
   it("rebuilds the interval that crosses adjacent canonical batch boundaries", async () => {
     const databasePath = ":memory:";
     const projectId = "project-cross-batch-boundary";
@@ -29,7 +140,7 @@ describe("writeEnergyFactMaterialization", () => {
       ],
     });
     await writeEnergyFactMaterialization(earlier);
-    const result = await writeEnergyFactMaterialization(later);
+    const result = await writeEnergyFactMaterialization(withFactScope(later, "snapshot-ab", ["sha-a", "sha-b"]));
 
     expect(result.projectAudit).toMatchObject({
       normalizedReadingCount: 4,
@@ -41,13 +152,17 @@ describe("writeEnergyFactMaterialization", () => {
       missingAdjacentIntervalCount: 0,
       orphanIntervalFactCount: 0,
     });
-    await expect(writeEnergyFactMaterialization(earlier)).resolves.toMatchObject({
+    await expect(writeEnergyFactMaterialization(withFactScope(earlier, "snapshot-ab", ["sha-a", "sha-b"]))).resolves.toMatchObject({
       projectAudit: result.projectAudit,
     });
 
     const reverseProjectId = "project-cross-batch-boundary-reverse";
     await writeEnergyFactMaterialization(withProjectId(later, reverseProjectId));
-    const reverse = await writeEnergyFactMaterialization(withProjectId(earlier, reverseProjectId));
+    const reverse = await writeEnergyFactMaterialization(withFactScope(
+      withProjectId(earlier, reverseProjectId),
+      "snapshot-reverse-ab",
+      ["sha-a", "sha-b"],
+    ));
     expect(reverse.projectAudit).toEqual(result.projectAudit);
   });
 
@@ -64,7 +179,7 @@ describe("writeEnergyFactMaterialization", () => {
         ["2026-05-01T00:15:00.000Z", 101],
       ],
     }));
-    const result = await writeEnergyFactMaterialization(boundaryBatch({
+    const result = await writeEnergyFactMaterialization(withFactScope(boundaryBatch({
       databasePath,
       projectId,
       importBatchId: "quality-b",
@@ -74,7 +189,7 @@ describe("writeEnergyFactMaterialization", () => {
         ["2026-05-01T01:00:00.000Z", 90],
         ["2026-05-01T01:15:00.000Z", 91],
       ],
-    }));
+    }), "snapshot-quality-ab", ["quality-sha-a", "quality-sha-b"]));
 
     expect(result.projectAudit).toMatchObject({
       normalizedReadingCount: 5,
@@ -118,7 +233,11 @@ describe("writeEnergyFactMaterialization", () => {
       ],
     });
     await writeEnergyFactMaterialization(later);
-    const result = await writeEnergyFactMaterialization(earlier);
+    const result = await writeEnergyFactMaterialization(withFactScope(
+      earlier,
+      "snapshot-cumulative-ab",
+      ["cumulative-sha-earlier", "cumulative-sha-later"],
+    ));
 
     expect(result.projectAudit).toMatchObject({
       normalizedReadingCount: 4,
@@ -134,7 +253,11 @@ describe("writeEnergyFactMaterialization", () => {
 
     const forwardProjectId = "project-cumulative-overlap-forward";
     await writeEnergyFactMaterialization(withProjectId(earlier, forwardProjectId));
-    const forward = await writeEnergyFactMaterialization(withProjectId(later, forwardProjectId));
+    const forward = await writeEnergyFactMaterialization(withFactScope(
+      withProjectId(later, forwardProjectId),
+      "snapshot-cumulative-forward-ab",
+      ["cumulative-sha-earlier", "cumulative-sha-later"],
+    ));
     expect(forward.projectAudit).toEqual(result.projectAudit);
   });
 
@@ -217,6 +340,7 @@ describe("writeEnergyFactMaterialization", () => {
         details: {},
         sourceReadingKind: "interval_usage" as const,
       }],
+      snapshotFactScope: testFactScope("project-1", "snapshot-1", ["sha-1"]),
     };
 
     await writeEnergyFactMaterialization(input);
@@ -225,23 +349,13 @@ describe("writeEnergyFactMaterialization", () => {
       databasePath: ":memory:",
       importBatchId: "batch-1",
     })).resolves.toEqual({ rawRows: 1, normalizedRows: 1, intervalFacts: 1, qualityEvents: 1 });
-    await expect(readEnergyFactCoverage({
-      databasePath: ":memory:",
-      workspaceId: "workspace-1",
-      projectId: "project-1",
-      resource: "electricity",
-    })).resolves.toEqual({
-      from: "2026-05-01T00:00:00.000Z",
-      to: "2026-05-01T00:15:00.000Z",
-      intervalCount: 1,
-    });
-
     const legacyProjectId = "project-legacy";
-    const legacy = await writeEnergyFactMaterialization({
+    await expect(writeEnergyFactMaterialization({
       ...input,
       projectId: legacyProjectId,
       importBatchId: "",
       sourceSha256: "",
+      snapshotFactScope: testFactScope(legacyProjectId, "snapshot-legacy", [""]),
       rawReadings: input.rawReadings.map((row) => ({
         ...row,
         projectId: legacyProjectId,
@@ -266,15 +380,7 @@ describe("writeEnergyFactMaterialization", () => {
         qualityStatus: "negative_delta",
       })),
       qualityEvents: [],
-    });
-    expect(legacy.projectAudit).toMatchObject({
-      invalidRawRowCount: 1,
-      negativeDeltaIntervalCount: 1,
-      legacyRawRowCount: 1,
-      legacyNormalizedReadingCount: 1,
-      legacyIntervalFactCount: 1,
-      legacyCanonicalRowCount: 2,
-    });
+    })).rejects.toThrow("ENERGYIQ_SNAPSHOT_FACT_SCOPE_EMPTY");
   });
 
   it("keeps the source with the later coverage end at an overlapping timestamp", async () => {
@@ -350,6 +456,7 @@ describe("writeEnergyFactMaterialization", () => {
       ...base,
       importBatchId: "later",
       sourceSha256: "sha-later",
+      snapshotFactScope: testFactScope("project-overlap", "snapshot-later", ["sha-later"]),
       rawReadings: [
         raw("later", "sha-later", "2026-05-01T00:15:00.000Z", 101),
         raw("later", "sha-later", "2026-05-01T00:30:00.000Z", 102),
@@ -367,6 +474,7 @@ describe("writeEnergyFactMaterialization", () => {
       ...base,
       importBatchId: "earlier",
       sourceSha256: "sha-earlier",
+      snapshotFactScope: testFactScope("project-overlap", "snapshot-overlap", ["sha-earlier", "sha-later"]),
       rawReadings: [
         raw("earlier", "sha-earlier", "2026-05-01T00:15:00.000Z", 100.9),
       ],
@@ -409,6 +517,7 @@ describe("writeEnergyFactMaterialization", () => {
       projectId: reverseProjectId,
       importBatchId: "earlier-reverse",
       sourceSha256: "sha-earlier",
+      snapshotFactScope: testFactScope(reverseProjectId, "snapshot-earlier-reverse", ["sha-earlier"]),
       rawReadings: [raw("earlier-reverse", "sha-earlier", "2026-05-01T00:15:00.000Z", 100.9, reverseProjectId)],
       normalizedReadings: [normalized("earlier-reverse", "sha-earlier", "2026-05-01T00:15:00.000Z", 100.9, reverseProjectId)],
       intervalFacts: [fact("earlier-reverse", "sha-earlier", "2026-05-01T00:00:00.000Z", "2026-05-01T00:15:00.000Z", 0.9, reverseProjectId)],
@@ -418,6 +527,7 @@ describe("writeEnergyFactMaterialization", () => {
       projectId: reverseProjectId,
       importBatchId: "later-reverse",
       sourceSha256: "sha-later",
+      snapshotFactScope: testFactScope(reverseProjectId, "snapshot-overlap-reverse", ["sha-earlier", "sha-later"]),
       rawReadings: [
         raw("later-reverse", "sha-later", "2026-05-01T00:15:00.000Z", 101, reverseProjectId),
         raw("later-reverse", "sha-later", "2026-05-01T00:30:00.000Z", 102, reverseProjectId),
@@ -441,6 +551,7 @@ describe("writeEnergyFactMaterialization", () => {
       ...base,
       importBatchId: "earlier",
       sourceSha256: "sha-earlier",
+      snapshotFactScope: testFactScope("project-overlap", "snapshot-overlap-replay", ["sha-earlier", "sha-later"]),
       rawReadings: [
         raw("earlier", "sha-earlier", "2026-05-01T00:15:00.000Z", 101),
       ],
@@ -520,6 +631,7 @@ const boundaryBatch = (input: {
     };
   }),
   qualityEvents: [],
+  snapshotFactScope: testFactScope(input.projectId, `snapshot-${input.importBatchId}`, [input.sourceSha256]),
 });
 
 const withProjectId = (
@@ -528,8 +640,26 @@ const withProjectId = (
 ): ReturnType<typeof boundaryBatch> => ({
   ...input,
   projectId,
+  snapshotFactScope: testFactScope(projectId, input.snapshotFactScope.dataSnapshotId, input.snapshotFactScope.sourceSha256),
   rawReadings: [],
   normalizedReadings: input.normalizedReadings.map((row) => ({ ...row, projectId })),
   intervalFacts: input.intervalFacts.map((row) => ({ ...row, projectId })),
   qualityEvents: [],
+});
+
+const withFactScope = (
+  input: ReturnType<typeof boundaryBatch>,
+  dataSnapshotId: string,
+  sourceSha256: string[],
+) => ({
+  ...input,
+  snapshotFactScope: testFactScope(input.projectId, dataSnapshotId, sourceSha256),
+});
+
+const testFactScope = (projectId: string, dataSnapshotId: string, sourceSha256: string[]) => ({
+  workspaceId: "workspace-1",
+  projectId,
+  dataSnapshotId,
+  manifestFingerprint: `fingerprint-${dataSnapshotId}`,
+  sourceSha256,
 });
