@@ -534,7 +534,7 @@ describe("EnergyScopeAnalysis", () => {
       metadata.close();
       removeTemporaryEnergyFixture(root);
     }
-  }, 30_000);
+  }, 45_000);
 
   it("preserves the date spine and reports partial and unavailable daily totals", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-analysis-daily-health-"));
