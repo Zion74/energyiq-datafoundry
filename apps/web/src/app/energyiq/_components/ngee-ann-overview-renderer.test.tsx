@@ -29,7 +29,9 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("snapshot-ngee-ann-golden");
     expect(markup).toContain("View reproducible evidence");
     expect(markup).toContain("Comparison evidence");
-    expect(markup).toContain("Baseline uses [from, to): start inclusive, end exclusive.");
+    expect(markup).toContain("Previous period uses [from, to): start inclusive, end exclusive.");
+    expect(markup).toContain("Previous period range");
+    expect(markup).not.toContain("Baseline");
     expect(markup).toContain("[03 Jun 2026, 00:00, 10 Jun 2026, 00:00)");
     expect(markup).toContain("1531.1683 kWh");
     expect(markup).toContain("1211.6773 kWh");
@@ -41,14 +43,15 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("0.32 SGD/kWh");
     expect(markup).toContain("1531.168324 kWh");
     expect(markup).toContain("489.973864 SGD");
-    expect(markup).toContain("href=\"#ngee-ann-evidence-ref-evidence_3Angee-ann-golden_3Aenergy.total_usage_kwh\"");
+    expect(markup).toContain("href=\"#ngee-ann-evidence-ref-evidence_3Angee-ann-golden_3Aenergy.total_usage_kwh_401\"");
+    expect(markup).toContain("id=\"ngee-ann-evidence-ref-evidence_3Angee-ann-golden_3Aenergy.total_usage_kwh_401\"");
     const costEvidenceMarkup = markup.slice(
       markup.indexOf("Cost evidence"),
       markup.indexOf("</section>", markup.indexOf("Cost evidence")),
     );
     expect(costEvidenceMarkup).toContain("No dedicated Evidence reference is attached");
     expect(costEvidenceMarkup).not.toContain("href=");
-    expect(costEvidenceMarkup).not.toContain("evidence:ngee-ann-golden:energy.total_usage_kwh");
+    expect(costEvidenceMarkup).not.toContain("evidence:ngee-ann-golden:energy.total_usage_kwh@1");
     expect(markup).not.toContain("Published sections");
   });
 

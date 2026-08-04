@@ -40,7 +40,8 @@ describe("Ngee Ann Overview ViewModel", () => {
     });
     expect(view.evidence.queryIds).toEqual(snapshot.analysis.provenance.queryIds);
     expect(view.evidence.references).toEqual([expect.objectContaining({
-      id: "evidence:ngee-ann-golden:energy.total_usage_kwh",
+      id: "evidence:ngee-ann-golden:energy.total_usage_kwh@1",
+      metricId: "energy.total_usage_kwh@1",
       queryReceiptId: "receipt-ngee-ann-golden",
     })]);
     expect(view.evidence.comparison).toEqual({
@@ -53,7 +54,7 @@ describe("Ngee Ann Overview ViewModel", () => {
       changeKwh: "+319.4911",
       changePct: "+26.3677%",
       queryIds: snapshot.analysis.provenance.queryIds,
-      referenceIds: ["evidence:ngee-ann-golden:energy.total_usage_kwh"],
+      referenceIds: ["evidence:ngee-ann-golden:energy.total_usage_kwh@1"],
     });
     expect(view.evidence.cost).toEqual({
       status: "available",
@@ -71,6 +72,41 @@ describe("Ngee Ann Overview ViewModel", () => {
       queryIds: snapshot.analysis.provenance.queryIds,
       referenceIds: [],
     });
+  });
+
+  it("matches only canonical comparison Metric IDs and their strict revisions", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const reference = snapshot.evidence[0]!;
+    snapshot.evidence = [
+      {
+        ...reference,
+        id: "evidence:comparison-logical",
+        metricId: "energy.comparison_change_kwh",
+      },
+      {
+        ...reference,
+        id: "evidence:usage-revision",
+        metricId: "energy.total_usage_kwh@2",
+      },
+      {
+        ...reference,
+        id: "evidence:nearby-metric",
+        metricId: "energy.total_usage_kwh_daily@1",
+      },
+      {
+        ...reference,
+        id: "evidence:malformed-revision",
+        metricId: "energy.total_usage_kwh@1@shadow",
+      },
+    ];
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.evidence.comparison.referenceIds).toEqual([
+      "evidence:comparison-logical",
+      "evidence:usage-revision",
+    ]);
+    expect(view.evidence.cost.referenceIds).toEqual([]);
   });
 
   it("keeps accepted partial values visible with an actionable incomplete-data status", () => {

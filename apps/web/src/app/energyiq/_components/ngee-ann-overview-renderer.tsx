@@ -196,9 +196,9 @@ function ComparisonEvidence({
       </h4>
       {evidence.status === "available" ? (
         <>
-          <p className="mt-1 text-[10px] text-muted-light">Baseline uses [from, to): start inclusive, end exclusive.</p>
+          <p className="mt-1 text-[10px] text-muted-light">Previous period uses [from, to): start inclusive, end exclusive.</p>
           <dl className="mt-3 grid grid-cols-[104px_minmax(0,1fr)] gap-x-3 gap-y-2">
-            <dt className="text-muted-light">Baseline range</dt>
+            <dt className="text-muted-light">Previous period range</dt>
             <dd className="break-words text-foreground" title={`${evidence.from} / ${evidence.to}`}>
               {evidence.range}
             </dd>

@@ -337,6 +337,17 @@ function comparisonEvidenceReferences(
   snapshot: EnergyProjectAnalysisSnapshotDto,
 ): string[] {
   return snapshot.evidence
-    .filter((reference) => COMPARISON_EVIDENCE_METRIC_IDS.has(reference.metricId))
+    .filter((reference) => Array.from(COMPARISON_EVIDENCE_METRIC_IDS)
+      .some((metricId) => isMetricOrRevision(reference.metricId, metricId)))
     .map((reference) => reference.id);
+}
+
+function isMetricOrRevision(candidate: string, metricId: string): boolean {
+  if (candidate === metricId) return true;
+
+  const revisionPrefix = `${metricId}@`;
+  if (!candidate.startsWith(revisionPrefix)) return false;
+
+  const revision = candidate.slice(revisionPrefix.length);
+  return revision.length > 0 && !revision.includes("@") && !/\s/u.test(revision);
 }
