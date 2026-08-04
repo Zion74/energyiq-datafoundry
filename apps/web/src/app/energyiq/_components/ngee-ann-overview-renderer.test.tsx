@@ -50,6 +50,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("-32.7158 kWh");
     expect(markup).toContain("-10.0832%");
     expect(markup).toContain("Top 5 component Circuits");
+    expect(markup).toContain("These are explanatory components and are not added separately to the official Project total.");
     expect(markup).toContain("439.0972 kWh");
     expect(markup).toContain("28.6773%");
     expect(markup).toContain("70.6873 kWh");

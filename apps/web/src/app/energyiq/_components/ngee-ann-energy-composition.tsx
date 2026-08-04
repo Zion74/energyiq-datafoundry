@@ -69,7 +69,7 @@ export function NgeeAnnEnergyComposition({
           <div>
             <h4 className="text-xs font-semibold text-foreground">Top 5 component Circuits</h4>
             <p className="mt-1 text-[11px] leading-5 text-muted">
-              Ranked by current usage. These are explanatory components and are not included in the official Project total.
+              Ranked by current usage. These are explanatory components and are not added separately to the official Project total.
             </p>
           </div>
           <span className="text-[10px] font-medium text-muted">Share denominator: Project official total</span>
