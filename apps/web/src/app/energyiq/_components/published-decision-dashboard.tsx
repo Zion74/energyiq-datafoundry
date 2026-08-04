@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -44,10 +45,16 @@ type LoadedResolution = {
 };
 
 export function PublishedDecisionDashboard() {
+  const searchParams = useSearchParams();
   const { activeProject } = useEnergyIqAccess();
+  const [initialViewState] = useState(() => overviewViewStateFromSearchParams(searchParams));
   const [resource, setResource] = useState<ResourceType>("electricity");
-  const [period, setPeriod] = useState<OverviewPeriod>("Last 7 days");
-  const [customRange, setCustomRange] = useState({ projectId: "", from: "", to: "" });
+  const [period, setPeriod] = useState<OverviewPeriod>(initialViewState.period);
+  const [customRange, setCustomRange] = useState({
+    projectId: "",
+    from: initialViewState.from,
+    to: initialViewState.to,
+  });
   const [resolution, setResolution] = useState<LoadedResolution | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -58,8 +65,8 @@ export function PublishedDecisionDashboard() {
   const [savedAnalysis, setSavedAnalysis] = useState<EnergySavedAnalysisDetailDto | null>(null);
 
   const projectId = activeProject?.id ?? "";
-  const effectiveCustomRange = customRange.projectId === projectId
-    ? customRange
+  const effectiveCustomRange = customRange.projectId === projectId || customRange.projectId === ""
+    ? { ...customRange, projectId }
     : { projectId, from: "", to: "" };
   const currentResolution = resolution?.projectId === projectId ? resolution.value : null;
   const currentSnapshot = currentResolution?.status === "ready" ? currentResolution.snapshot : null;
@@ -380,6 +387,22 @@ export function overviewAnalysisRequest(
   const scopeId = "project";
   if (period !== "Custom") return { projectId, scopeId, resource: "electricity", period };
   return { projectId, scopeId, resource: "electricity", period, from: customRange.from, to: customRange.to };
+}
+
+export function overviewViewStateFromSearchParams(searchParams: Pick<URLSearchParams, "get">): {
+  period: OverviewPeriod;
+  from: string;
+  to: string;
+} {
+  const requestedPeriod = searchParams.get("period");
+  const period = requestedPeriod === "Yesterday" || requestedPeriod === "Custom"
+    ? requestedPeriod
+    : "Last 7 days";
+  return {
+    period,
+    from: period === "Custom" ? searchParams.get("from") ?? "" : "",
+    to: period === "Custom" ? searchParams.get("to") ?? "" : "",
+  };
 }
 
 export function toDateInput(value: string, timeZone: string): string {

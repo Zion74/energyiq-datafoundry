@@ -1,15 +1,83 @@
-import { describe, expect, it } from "vitest";
+/** @vitest-environment happy-dom */
+
+import React, { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   EnergyComponentRevisionDto,
   EnergyTemplateDefinitionDto,
 } from "../../../lib/config-api";
+import { configApi } from "../../../lib/config-api";
 import { buildEnergyTemplateRenderPlan } from "./energy-template-render-plan";
 import {
   overviewAnalysisRequest,
+  PublishedDecisionDashboard,
   toDateInput,
 } from "./published-decision-dashboard";
 import { applyProjectAnalysisQualityPolicy } from "./project-renderer-registry";
+
+const mockedAccess = vi.hoisted(() => ({
+  activeProject: null as { id: string; name: string } | null,
+}));
+
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(window.location.search),
+}));
+
+vi.mock("./energyiq-access", () => ({
+  useEnergyIqAccess: () => ({ activeProject: mockedAccess.activeProject }),
+}));
+
+describe("published Overview URL reload", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+
+  beforeEach(() => {
+    globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal("React", React);
+    mockedAccess.activeProject = null;
+    window.history.replaceState({}, "", "/energyiq/overview");
+    container = document.createElement("div");
+    document.body.append(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("uses the public Custom URL for the first trusted resolve after Project access loads", async () => {
+    window.history.replaceState({}, "", "/energyiq/overview?period=Custom&from=2026-06-10&to=2026-06-16");
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+    expect(resolveProjectAnalysis).not.toHaveBeenCalled();
+
+    mockedAccess.activeProject = { id: "ngee-ann-polytechnic", name: "Ngee Ann Polytechnic" };
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    expect(resolveProjectAnalysis).toHaveBeenCalledTimes(1);
+    expect(resolveProjectAnalysis).toHaveBeenCalledWith({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "project",
+      resource: "electricity",
+      period: "Custom",
+      from: "2026-06-10",
+      to: "2026-06-16",
+    });
+    expect(Array.from(container.querySelectorAll<HTMLInputElement>("input[type='date']"), (input) => input.value))
+      .toEqual(["2026-06-10", "2026-06-16"]);
+  });
+});
 
 describe("published Overview date inputs", () => {
   it("formats trusted UTC boundaries in the Project timezone", () => {
