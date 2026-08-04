@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { EnergyIcon, type EnergyIconName } from "./icons";
@@ -23,6 +23,7 @@ const navigation: Array<{
 
 export function EnergyIqShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const { access, activeProject, selectOrganisation, selectProject } = useEnergyIqAccess();
   const visibleNavigation = access?.role === "admin"
     ? [...navigation, { href: "/energyiq/admin", label: "Admin", shortLabel: "Admin", icon: "settings" as EnergyIconName }]
@@ -35,6 +36,17 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
   const showWorkspaceSelector = !isAdminPage && (access?.workspaces.length ?? 0) > 1;
   const showProjectSelector = !isAdminPage && publishedProjects.length > 1;
   const showStaticProjectContext = !isAdminPage && publishedProjects.length === 1 && activeProject;
+  const selectProjectFromShell = (projectId: string) => {
+    selectProject(projectId);
+    if (pathname !== "/energyiq/overview") {
+      return;
+    }
+
+    const nextSearchParams = new URLSearchParams(window.location.search);
+    nextSearchParams.set("projectId", projectId);
+    nextSearchParams.set("scopeId", "project");
+    router.replace(`${pathname}?${nextSearchParams.toString()}`);
+  };
 
   return (
     <div className="flex h-dvh flex-col overflow-hidden bg-surface-subtle text-foreground">
@@ -71,7 +83,7 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
               ariaLabel="Energy project"
               value={activeProject?.id ?? ""}
               options={publishedProjects.map((project) => ({ value: project.id, label: `Project · ${project.name}` }))}
-              onValueChange={selectProject}
+              onValueChange={selectProjectFromShell}
               leadingIcon={<EnergyIcon name="explorer" className="h-3.5 w-3.5" />}
               placeholder="No published projects"
               className="max-w-44 sm:max-w-60"
