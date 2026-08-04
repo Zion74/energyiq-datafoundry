@@ -1,4 +1,8 @@
-import { LocalDataGateway } from "@datafoundry/data-gateway";
+import {
+  LocalDataGateway,
+  type EnergyFactMaterializationBatchWrite,
+  type EnergyIntervalFactWrite,
+} from "@datafoundry/data-gateway";
 import { createMetadataStore } from "@datafoundry/metadata";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -7,8 +11,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   ensureEnergyIqBootstrap,
+  NGEE_ANN_WORKSPACE_ID,
   PRESCHOOL_WORKSPACE_ID,
 } from "./energy-bootstrap.js";
+import { materializeTestProjectSnapshot } from "./energy-test-materialization.js";
+import { NGEE_ANN_GOLDEN } from "./ngee-ann-golden.fixture.js";
 import {
   materializePreschoolGoldenFixture,
   PRESCHOOL_GOLDEN,
@@ -140,6 +147,78 @@ describe("ProjectAnalysisResolver", () => {
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
+
+  it("offers the same fixed Ngee Ann Golden range for empty Project and Level periods", async () => {
+    const root = mkdtempSync(join(tmpdir(), "project-analysis-latest-period-"));
+    const databasePath = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const gateway = new LocalDataGateway(metadata);
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      await materializeNgeeAnnLatestPeriodFixture(databasePath, metadata);
+      const user = metadata.users.getById({ user_id: "dev-user" });
+      const resolve = (scopeId: string, from: string, to: string, factsPath = databasePath) =>
+        resolveProjectAnalysis({
+          metadataStore: metadata,
+          dataGateway: gateway,
+          user,
+          workspaceId: NGEE_ANN_WORKSPACE_ID,
+          request: {
+            projectId: NGEE_ANN_GOLDEN.projectId,
+            scopeId,
+            resource: "electricity",
+            period: "Custom",
+            from,
+            to,
+          },
+          databasePath: factsPath,
+        });
+
+      const projectResult = await resolve("project", "2026-08-01", "2026-08-07");
+      expect(projectResult.status).toBe("ready");
+      if (projectResult.status !== "ready") throw new Error("Expected ready Project analysis");
+      expect(projectResult.snapshot.analysis.summary.validIntervalCount).toBe(0);
+      expect(projectResult.snapshot.latestAvailablePeriod).toEqual({
+        period: "Custom",
+        from: NGEE_ANN_GOLDEN.selection.period.localFrom,
+        to: "2026-06-16",
+      });
+
+      const levelResult = await resolve("level-6", "2026-08-01", "2026-08-07");
+      expect(levelResult.status).toBe("ready");
+      if (levelResult.status !== "ready") throw new Error("Expected ready Level analysis");
+      expect(levelResult.snapshot.analysis.summary.validIntervalCount).toBe(0);
+      expect(levelResult.snapshot.latestAvailablePeriod).toEqual(
+        projectResult.snapshot.latestAvailablePeriod,
+      );
+
+      const noCandidateResult = await resolve("l6-light-left", "2026-08-01", "2026-08-07");
+      expect(noCandidateResult.status).toBe("ready");
+      if (noCandidateResult.status !== "ready") throw new Error("Expected ready Circuit analysis");
+      expect(noCandidateResult.snapshot.analysis.summary.validIntervalCount).toBe(0);
+      expect(noCandidateResult.snapshot).not.toHaveProperty("latestAvailablePeriod");
+
+      const healthyResult = await resolve(
+        "project",
+        NGEE_ANN_GOLDEN.selection.period.localFrom,
+        "2026-06-16",
+      );
+      expect(healthyResult.status).toBe("ready");
+      if (healthyResult.status !== "ready") throw new Error("Expected healthy Project analysis");
+      expect(healthyResult.snapshot.analysis.summary.validIntervalCount).toBeGreaterThan(0);
+      expect(healthyResult.snapshot).not.toHaveProperty("latestAvailablePeriod");
+
+      await expect(resolve(
+        "project",
+        "2026-08-01",
+        "2026-08-07",
+        join(root, "missing-energy.duckdb"),
+      )).rejects.toThrow("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+    } finally {
+      metadata.close();
+      removeTemporaryFixture(root);
+    }
+  }, 30_000);
 
   it("returns a versioned Preschool Snapshot from one trusted Resolver Interface", async () => {
     const root = mkdtempSync(join(tmpdir(), "project-analysis-resolver-"));
@@ -399,6 +478,91 @@ describe("ProjectAnalysisResolver", () => {
     }
   }, 30_000);
 });
+
+const materializeNgeeAnnLatestPeriodFixture = async (
+  databasePath: string,
+  metadataStore: ReturnType<typeof createMetadataStore>,
+) => {
+  const importBatchId = "ngee-ann-latest-period-contract-fixture";
+  const sourceSha256 = "f".repeat(64);
+  const sourceFile = `${importBatchId}.xlsx`;
+  const localFromMs = Date.parse("2026-06-02T16:00:00.000Z");
+  const meters = [
+    {
+      id: "mapping-lvl-6-total-office-light-8",
+      scopeId: "level-6",
+      sourceLabel: "Lvl 6 Total Office Light",
+      category: "light" as const,
+    },
+    {
+      id: "mapping-lvl-6-total-office-load-9",
+      scopeId: "level-6",
+      sourceLabel: "Lvl 6 Total Office Load",
+      category: "load" as const,
+    },
+    {
+      id: "mapping-lvl-7-total-office-light-17",
+      scopeId: "level-7",
+      sourceLabel: "Lvl 7 Total Office Light",
+      category: "light" as const,
+    },
+    {
+      id: "mapping-lvl-7-total-office-load-18",
+      scopeId: "level-7",
+      sourceLabel: "Lvl 7 Total Office Load",
+      category: "load" as const,
+    },
+  ];
+  const intervalFacts: EnergyIntervalFactWrite[] = meters.flatMap((meter) =>
+    Array.from({ length: 14 * 24 * 4 }, (_, index) => {
+      const intervalStartMs = localFromMs + index * 15 * 60_000;
+      const local = new Date(intervalStartMs + 8 * 60 * 60_000);
+      return {
+        workspaceId: NGEE_ANN_GOLDEN.workspaceId,
+        projectId: NGEE_ANN_GOLDEN.projectId,
+        importBatchId,
+        resource: "electricity",
+        meterPointId: meter.id,
+        scopeId: meter.scopeId,
+        parentNodeId: meter.scopeId,
+        sourceLabel: meter.sourceLabel,
+        category: meter.category,
+        meterRole: "total",
+        intervalStart: new Date(intervalStartMs).toISOString(),
+        intervalEnd: new Date(intervalStartMs + 15 * 60_000).toISOString(),
+        elapsedMinutes: 15,
+        activeEnergyKwh: 1_000 + (index + 1) * 0.25,
+        previousActiveEnergyKwh: 1_000 + index * 0.25,
+        rawDeltaKwh: 0.25,
+        usageKwh: 0.25,
+        averageKw: 1,
+        qualityStatus: "ok",
+        localDate: local.toISOString().slice(0, 10),
+        localHour: local.getUTCHours(),
+        dayType: [0, 6].includes(local.getUTCDay()) ? "weekend" : "weekday",
+        sourceFile,
+        sourceSha256,
+        sourceReadingKind: "interval_usage",
+      } satisfies EnergyIntervalFactWrite;
+    }),
+  );
+  const batches: EnergyFactMaterializationBatchWrite[] = [{
+    importBatchId,
+    sourceSha256,
+    rawReadings: [],
+    normalizedReadings: [],
+    intervalFacts,
+    qualityEvents: [],
+  }];
+  return materializeTestProjectSnapshot({
+    metadataStore,
+    databasePath,
+    workspaceId: NGEE_ANN_GOLDEN.workspaceId,
+    projectId: NGEE_ANN_GOLDEN.projectId,
+    timezone: NGEE_ANN_GOLDEN.timezone,
+    batches,
+  });
+};
 
 const removeTemporaryFixture = (root: string): void => {
   try {

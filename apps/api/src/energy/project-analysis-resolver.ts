@@ -10,6 +10,7 @@ import {
 
 import {
   executeEnergyScopeAnalysis,
+  selectEnergyGoldenPeriod,
   type EnergyScopeAnalysis,
 } from "./energy-analysis.js";
 import {
@@ -85,6 +86,11 @@ export type ProjectAnalysisSnapshot = {
     id: string;
     importBatchIds: string[];
     lastSeenAt: string | null;
+  };
+  latestAvailablePeriod?: {
+    period: "Custom";
+    from: string;
+    to: string;
   };
   metadata: ProjectAnalysisMetadataProjection;
   analysis: ProjectAnalysisPayload;
@@ -200,6 +206,15 @@ export const resolveProjectAnalysis = async (input: {
     analysis: scopeAnalysis,
   });
   const analysis = projectAnalysisPayload({ analysis: scopeAnalysis, metadata });
+  const latestAvailablePeriod = analysis.summary.validIntervalCount === 0
+    ? await resolveLatestAvailablePeriod({
+        metadataStore: input.metadataStore,
+        dataGateway: input.dataGateway,
+        userId: input.user.id,
+        context: releasedContext,
+        ...(input.databasePath ? { databasePath: input.databasePath } : {}),
+      })
+    : null;
   return {
     status: "ready",
     snapshot: {
@@ -226,10 +241,49 @@ export const resolveProjectAnalysis = async (input: {
         importBatchIds: analysis.dataHealth.importBatchIds,
         lastSeenAt: analysis.dataHealth.lastSeenAt ?? null,
       },
+      ...(latestAvailablePeriod ? { latestAvailablePeriod } : {}),
       metadata,
       analysis,
     },
   };
+};
+
+const resolveLatestAvailablePeriod = async (input: {
+  metadataStore: MetadataStore;
+  dataGateway: LocalDataGateway;
+  userId: string;
+  context: EnergyQueryContext;
+  databasePath?: string;
+}): Promise<NonNullable<ProjectAnalysisSnapshot["latestAvailablePeriod"]> | null> => {
+  try {
+    const selected = await selectEnergyGoldenPeriod(input);
+    return {
+      period: "Custom",
+      from: selected.period.localFrom,
+      to: inclusiveLocalDate(selected.period.localToExclusive),
+    };
+  } catch (error) {
+    if (isMissingGoldenCandidate(error)) return null;
+    throw error;
+  }
+};
+
+const MISSING_GOLDEN_CANDIDATE_ERRORS = new Set([
+  "ENERGYIQ_GOLDEN_COVERAGE_NOT_FOUND",
+  "ENERGYIQ_GOLDEN_PERIOD_NOT_FOUND",
+  "ENERGYIQ_GOLDEN_DAY_NOT_FOUND",
+]);
+
+const isMissingGoldenCandidate = (error: unknown): boolean =>
+  error instanceof Error && MISSING_GOLDEN_CANDIDATE_ERRORS.has(error.message);
+
+const inclusiveLocalDate = (localToExclusive: string): string => {
+  const exclusive = new Date(`${localToExclusive}T00:00:00.000Z`);
+  if (Number.isNaN(exclusive.valueOf())) {
+    throw new Error("ENERGYIQ_GOLDEN_PERIOD_DATE_INVALID");
+  }
+  exclusive.setUTCDate(exclusive.getUTCDate() - 1);
+  return exclusive.toISOString().slice(0, 10);
 };
 
 const bindPublishedReleaseContext = (

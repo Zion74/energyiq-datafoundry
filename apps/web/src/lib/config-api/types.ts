@@ -765,6 +765,11 @@ export type EnergyProjectAnalysisSnapshotDto = {
     importBatchIds: string[];
     lastSeenAt: string | null;
   };
+  latestAvailablePeriod?: {
+    period: "Custom";
+    from: string;
+    to: string;
+  };
   metadata: EnergyProjectAnalysisMetadataDto;
   analysis: EnergyProjectAnalysisPayloadDto;
 };
