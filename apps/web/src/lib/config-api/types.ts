@@ -592,6 +592,79 @@ export type EnergyDailyUsageAnomaliesDto = {
   };
 };
 
+export type NgeeAnnDecisionPriorityEvidencePinsDto = Extract<
+  EnergyDailyUsageAnomaliesDto,
+  { status: "available" }
+>["evidencePins"];
+
+export type NgeeAnnDecisionPriorityLimitationDto = {
+  code:
+    | "DAILY_USAGE_ANOMALIES_ABSENT"
+    | "DAILY_USAGE_ANOMALIES_UNAVAILABLE"
+    | "DAILY_USAGE_ANOMALIES_CONTRACT_MISMATCH"
+    | "EVIDENCE_PINS_MISMATCH"
+    | "ALL_CANDIDATE_DATES_SUPPRESSED"
+    | "SOME_CANDIDATE_DATES_SUPPRESSED"
+    | "SUPPORTING_EVIDENCE_PARTIAL";
+  message: string;
+};
+
+export type NgeeAnnDecisionPriorityDto = {
+  priorityId: string;
+  rank: 1 | 2 | 3;
+  source: "daily_usage_anomaly";
+  finding: {
+    code: "DAILY_USAGE_ABOVE_BASELINE";
+    title: string;
+    actualKwh: number;
+    baselineKwh: number;
+    relativePct: number;
+  };
+  evidence: {
+    bundleId: string;
+    metricId: "energy.total_usage_kwh@1";
+    queryIds: ["time_slot_anomaly_v1"];
+    ruleRevisionId: "comparison.daily_usage_above_baseline@1";
+    period: { from: string; to: string };
+    occurrence: {
+      scopeId: string;
+      scopeName: string;
+      scopeType: string;
+      localDate: string;
+      from: string;
+      to: string;
+    };
+    primaryIncidentId: string;
+    supportingIncidentIds: string[];
+  };
+  impact: {
+    energy: { status: "available"; deltaKwh: number };
+    cost: {
+      status: "unavailable";
+      reason: {
+        code: "INCIDENT_COST_NOT_SUPPORTED_BY_CURRENT_EVIDENCE";
+        message: string;
+      };
+    };
+  };
+  action: {
+    code: "INSPECT_DAILY_USAGE_DRIVERS";
+    label: string;
+    targetIncidentId: string;
+  };
+  confidence: {
+    status: "complete" | "partial";
+    limitation: NgeeAnnDecisionPriorityLimitationDto | null;
+  };
+};
+
+export type NgeeAnnDecisionPrioritiesDto = {
+  status: "available" | "empty" | "partial" | "suppressed" | "unavailable";
+  limitation: NgeeAnnDecisionPriorityLimitationDto | null;
+  evidencePins: NgeeAnnDecisionPriorityEvidencePinsDto;
+  items: NgeeAnnDecisionPriorityDto[];
+};
+
 export type EnergyPeakIntervalDataHealthDto = EnergyAnalysisDataHealthDto & {
   status: "complete" | "unavailable";
 };
@@ -1074,6 +1147,7 @@ export type EnergyProjectAnalysisSnapshotDto = {
   };
   metadata: EnergyProjectAnalysisMetadataDto;
   analysis: EnergyProjectAnalysisPayloadDto;
+  decisionPriorities?: NgeeAnnDecisionPrioritiesDto;
 };
 
 export type EnergyProjectAnalysisResolutionDto =

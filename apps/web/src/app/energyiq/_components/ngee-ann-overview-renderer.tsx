@@ -4,6 +4,7 @@ import type { EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
 import { EnergyIcon } from "./icons";
 import { NgeeAnnDayProfile } from "./ngee-ann-day-profile";
 import { NgeeAnnDailyAnomalies } from "./ngee-ann-daily-anomalies";
+import { NgeeAnnDecisionPriorities } from "./ngee-ann-decision-priorities";
 import { NgeeAnnEnergyComposition } from "./ngee-ann-energy-composition";
 import { NgeeAnnEnergyTrend } from "./ngee-ann-energy-trend";
 import { NgeeAnnLevelComparison } from "./ngee-ann-level-comparison";
@@ -32,11 +33,23 @@ export function NgeeAnnOverviewRenderer({
   onRetry,
   onViewLatestAvailableData,
   latestAvailableRange,
+  projectExplorerHref,
+  aiAnalystHref,
+  comparison = "overlay",
+  category = "all",
+  onComparisonChange,
+  onCategoryChange,
 }: {
   state: NgeeAnnOverviewRendererState;
   onRetry?: () => void;
   onViewLatestAvailableData?: (range: NgeeAnnLatestAvailableRange) => void;
   latestAvailableRange?: NgeeAnnLatestAvailableRange | null;
+  projectExplorerHref?: string;
+  aiAnalystHref?: string;
+  comparison?: "overlay" | "selected" | "average";
+  category?: "all" | "load" | "light";
+  onComparisonChange?: (comparison: "overlay" | "selected" | "average") => void;
+  onCategoryChange?: (category: "all" | "load" | "light") => void;
 }) {
   if (state.status !== "ready") {
     return <NgeeAnnRendererState state={state} onRetry={onRetry} />;
@@ -82,7 +95,7 @@ export function NgeeAnnOverviewRenderer({
                 <span className="text-[11px] text-muted">{view.dataStatus.coverage}</span>
               </div>
               <p className="mt-1 text-[11px] leading-5 text-muted">{view.dataStatus.summary}</p>
-              <p className="mt-1 text-[10px] leading-4 text-muted-light">
+              <p className="mt-1 text-[11px] leading-4 text-muted-light">
                 {view.dataStatus.intervals} / {view.dataStatus.qualityEvents} / {view.dataStatus.lastSeen}
               </p>
             </div>
@@ -106,6 +119,22 @@ export function NgeeAnnOverviewRenderer({
         </div>
       ) : null}
 
+      {view.metadataLimitation ? (
+        <div className="border-b border-border bg-surface px-5 py-3 lg:px-7" role="note">
+          <p className="text-[11px] leading-5 text-muted">
+            <span className="font-semibold text-foreground">Metadata limitation.</span> {view.metadataLimitation}
+          </p>
+        </div>
+      ) : null}
+
+      <NgeeAnnDecisionPriorities
+        view={view.decisionPriorities}
+        projectExplorerHref={projectExplorerHref}
+        aiAnalystHref={aiAnalystHref}
+      />
+
+      <OverviewSectionHeading eyebrow="At a glance" title="Key highlights" />
+
       <div className="grid border-b border-border sm:grid-cols-2 xl:grid-cols-5 xl:divide-x xl:divide-border">
         {view.highlights.map((highlight) => (
           <article
@@ -120,11 +149,13 @@ export function NgeeAnnOverviewRenderer({
               {highlight.value}
               {highlight.unit ? <span className="ml-1 text-xs font-medium tracking-normal text-muted">{highlight.unit}</span> : null}
             </p>
-            <p className="mt-2 text-[10px] leading-4 text-muted-light">{highlight.detail}</p>
+            <p className="mt-2 text-[11px] leading-4 text-muted-light">{highlight.detail}</p>
             {highlight.id === "peak" ? <NgeeAnnPeakBreakdown view={view.peakBreakdown} /> : null}
           </article>
         ))}
       </div>
+
+      <OverviewSectionHeading eyebrow="Change" title="What changed" />
 
       <NgeeAnnEnergyTrend key={`trend:${view.energyTrend.evidence.period}`} view={view.energyTrend} />
 
@@ -137,15 +168,28 @@ export function NgeeAnnOverviewRenderer({
           view.dailyAnomalies.evidence.bundleId ?? "unavailable",
         ].join(":")}
         view={view.dailyAnomalies}
+        comparison={comparison}
+        category={category}
+        onComparisonChange={onComparisonChange}
+        onCategoryChange={onCategoryChange}
       />
+
+
+      <OverviewSectionHeading eyebrow="Location" title="Where" />
+
+      <NgeeAnnLevelComparison view={view.levelComparison} />
+
+      <NgeeAnnEnergyComposition
+        view={view.energyComposition}
+        category={category}
+        onCategoryChange={onCategoryChange}
+      />
+
+      <OverviewSectionHeading eyebrow="Timing" title="When" />
 
       <NgeeAnnDayProfile key={`profile:${view.dayProfile.evidence.period}`} view={view.dayProfile} />
 
       <NgeeAnnUsageHeatmap key={`heatmap:${view.usageHeatmap.evidence.period}`} view={view.usageHeatmap} />
-
-      <NgeeAnnLevelComparison view={view.levelComparison} />
-
-      <NgeeAnnEnergyComposition view={view.energyComposition} />
 
       <div className="px-5 py-4 lg:px-7">
         <div>
@@ -156,7 +200,7 @@ export function NgeeAnnOverviewRenderer({
                 {view.evidence.projectRelease} / {view.evidence.importBatchCount} import batches / Metadata {view.evidence.metadataStatus}
               </p>
             </div>
-            <span className="rounded-md bg-surface-subtle px-2 py-1 text-[10px] font-medium text-muted">
+            <span className="rounded-md bg-surface-subtle px-2 py-1 text-[11px] font-medium text-muted">
               {view.evidence.references.length} references
             </span>
           </div>
@@ -174,7 +218,7 @@ export function NgeeAnnOverviewRenderer({
             <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
               View reproducible evidence
             </summary>
-            <div className="mt-3 space-y-4 text-[10px] leading-4 text-muted">
+            <div className="mt-3 space-y-4 text-[11px] leading-4 text-muted">
               <div className="grid divide-y divide-border border-y border-border lg:grid-cols-2 lg:divide-x lg:divide-y-0">
                 <ComparisonEvidence
                   evidence={view.evidence.comparison}
@@ -209,6 +253,15 @@ export function NgeeAnnOverviewRenderer({
   );
 }
 
+function OverviewSectionHeading({ eyebrow, title }: { eyebrow: string; title: string }) {
+  return (
+    <div className="border-b border-border bg-surface px-5 pb-3 pt-5 lg:px-7">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.11em] text-muted-light">{eyebrow}</p>
+      <h3 className="mt-1 text-base font-semibold text-foreground">{title}</h3>
+    </div>
+  );
+}
+
 function ComparisonEvidence({
   evidence,
   snapshotId,
@@ -225,7 +278,7 @@ function ComparisonEvidence({
       </h4>
       {evidence.status === "available" ? (
         <>
-          <p className="mt-1 text-[10px] text-muted-light">Previous period uses [from, to): start inclusive, end exclusive.</p>
+          <p className="mt-1 text-[11px] text-muted-light">Previous period uses [from, to): start inclusive, end exclusive.</p>
           <dl className="mt-3 grid grid-cols-[104px_minmax(0,1fr)] gap-x-3 gap-y-2">
             <dt className="text-muted-light">Previous period range</dt>
             <dd className="break-words text-foreground" title={`${evidence.from} / ${evidence.to}`}>
@@ -276,7 +329,7 @@ function CostEvidence({
           </dl>
           <div className="mt-3 overflow-x-auto">
             <table className="w-full min-w-[620px] border-collapse text-left">
-              <caption className="mb-2 text-left text-[10px] font-semibold text-foreground">Tariff allocations</caption>
+              <caption className="mb-2 text-left text-[11px] font-semibold text-foreground">Tariff allocations</caption>
               <thead className="border-y border-border text-muted-light">
                 <tr>
                   <th scope="col" className="py-2 pr-3 font-medium">Range [from, to)</th>

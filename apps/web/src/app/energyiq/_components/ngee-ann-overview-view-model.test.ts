@@ -301,16 +301,18 @@ describe("Ngee Ann Overview ViewModel", () => {
       qualityEvents: "0 quality events",
     });
     expect(Object.fromEntries(view.highlights.map((item) => [item.id, item.value]))).toEqual({
-      total: "1531.1683",
-      daily: "218.7383",
-      peak: "20.6731",
-      comparison: "+26.3677%",
-      cost: "489.973864 SGD",
+      total: "1531.17",
+      daily: "218.74",
+      peak: "20.67",
+      comparison: "26.4% higher",
+      cost: "S$489.97",
     });
     expect(view.highlights.find((item) => item.id === "comparison")?.detail)
-      .toBe("Previous 1211.6773 kWh / +319.4911 kWh");
+      .toBe("Current 1531.17 kWh vs previous 1211.68 kWh");
     expect(view.highlights.find((item) => item.id === "cost")?.detail)
       .toBe("Tariff tariff-v1 / 1 allocation");
+    expect(view.metadataLimitation).toContain("Area and headcount metadata are missing");
+    expect(view.metadataLimitation).toContain("does not affect Total energy, Daily average, Peak interval-average power, Comparison or Cost");
     expect(view.levelComparison).toMatchObject({
       status: "available",
       decisionQuestion: "Which Level needs attention first?",
@@ -1113,7 +1115,7 @@ describe("Ngee Ann Overview ViewModel", () => {
         levels: [],
       });
       expect(view.highlights.find((highlight) => highlight.id === "peak")).toMatchObject({
-        value: "20.6731",
+        value: "20.67",
         unit: "kW",
         available: true,
       });
@@ -1139,7 +1141,7 @@ describe("Ngee Ann Overview ViewModel", () => {
     const view = buildNgeeAnnOverviewViewModel(snapshot);
 
     expect(view.peakBreakdown).toMatchObject({ status: "unavailable", levels: [] });
-    expect(view.highlights.find((highlight) => highlight.id === "peak")?.value).toBe("20.6731");
+    expect(view.highlights.find((highlight) => highlight.id === "peak")?.value).toBe("20.67");
     expect(view.energyTrend.status).toBe("available");
   });
 
@@ -1170,7 +1172,7 @@ describe("Ngee Ann Overview ViewModel", () => {
       const view = buildNgeeAnnOverviewViewModel(snapshot);
       expect(view.peakBreakdown).toMatchObject({ status: "unavailable", levels: [] });
       expect(view.highlights.find((highlight) => highlight.id === "peak")).toMatchObject({
-        value: "20.6731",
+        value: "20.67",
         unit: "kW",
         available: true,
       });
@@ -1514,7 +1516,7 @@ describe("Ngee Ann Overview ViewModel", () => {
     });
     expect(view.dataStatus.recovery).toContain("Restore the missing source intervals");
     expect(view.highlights.find((item) => item.id === "total")).toMatchObject({
-      value: "1531.1683",
+      value: "1531.17",
       available: true,
     });
   });
@@ -1572,5 +1574,98 @@ describe("Ngee Ann Overview ViewModel", () => {
       queryIds: view.evidence.queryIds,
       referenceIds: [],
     });
+  });
+
+  it("selects and formats the server-owned Top 3 decision priorities without reranking them", () => {
+    const view = buildNgeeAnnOverviewViewModel(ngeeAnnGoldenSnapshot());
+
+    expect(view.decisionPriorities).toMatchObject({
+      status: "available",
+      limitation: null,
+      items: [
+        {
+          rank: 1,
+          finding: "Ngee Ann Polytechnic used 105.626 kWh above its comparable-day baseline on 2026-06-13.",
+          evidence: "Project / 13 Jun / 168.96 kWh vs 63.34 kWh baseline (+166.8%)",
+          impact: "+105.63 kWh above baseline; incident cost unavailable",
+          targetIncidentId: "incident:project:2026-06-13",
+          confidence: "Complete Evidence",
+        },
+        { rank: 2, targetIncidentId: "incident:project:2026-06-14" },
+        { rank: 3, targetIncidentId: "incident:project:2026-06-11" },
+      ],
+    });
+  });
+
+  it.each([
+    { status: "empty", limitation: null },
+    {
+      status: "partial",
+      limitation: {
+        code: "SOME_CANDIDATE_DATES_SUPPRESSED",
+        message: "Some candidate dates were suppressed.",
+      },
+    },
+    {
+      status: "suppressed",
+      limitation: {
+        code: "ALL_CANDIDATE_DATES_SUPPRESSED",
+        message: "All candidate dates were suppressed.",
+      },
+    },
+    {
+      status: "unavailable",
+      limitation: {
+        code: "DAILY_USAGE_ANOMALIES_UNAVAILABLE",
+        message: "The anomaly facts are unavailable.",
+      },
+    },
+  ] as const)("keeps the server-owned $status priority state fail closed", ({ status, limitation }) => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    snapshot.decisionPriorities = {
+      ...snapshot.decisionPriorities!,
+      status,
+      limitation,
+      items: [],
+    };
+
+    expect(buildNgeeAnnOverviewViewModel(snapshot).decisionPriorities).toMatchObject({
+      status,
+      limitation: limitation?.message ?? null,
+      items: [],
+    });
+  });
+
+  it("withholds only priorities when their order or anomaly Evidence contract is invalid", () => {
+    const invalidRank = ngeeAnnGoldenSnapshot();
+    invalidRank.decisionPriorities!.items[1]!.rank = 1;
+    const invalidPins = ngeeAnnGoldenSnapshot();
+    invalidPins.decisionPriorities!.evidencePins.dataSnapshotId = "snapshot-other";
+    const invalidEmptySource = ngeeAnnGoldenSnapshot();
+    invalidEmptySource.decisionPriorities = {
+      ...invalidEmptySource.decisionPriorities!,
+      status: "empty",
+      limitation: null,
+      items: [],
+    };
+    invalidEmptySource.analysis.dailyUsageAnomalies!.ruleRevisionId = "rule-other";
+
+    for (const snapshot of [invalidRank, invalidPins]) {
+      const view = buildNgeeAnnOverviewViewModel(snapshot);
+      expect(view.decisionPriorities).toMatchObject({
+        status: "unavailable",
+        items: [],
+      });
+      expect(view.dailyAnomalies.status).toBe("available");
+      expect(view.highlights.find((item) => item.id === "total")?.available).toBe(true);
+    }
+
+    const invalidEmptySourceView = buildNgeeAnnOverviewViewModel(invalidEmptySource);
+    expect(invalidEmptySourceView.decisionPriorities).toMatchObject({
+      status: "unavailable",
+      items: [],
+    });
+    expect(invalidEmptySourceView.dailyAnomalies.status).toBe("unavailable");
+    expect(invalidEmptySourceView.highlights.find((item) => item.id === "total")?.available).toBe(true);
   });
 });

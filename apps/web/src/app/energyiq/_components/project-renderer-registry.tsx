@@ -86,6 +86,12 @@ type CustomerProjectRendererProps = ProjectRendererCommonProps & {
   state: ProjectRendererState;
   onViewLatestAvailableData?: (range: NgeeAnnLatestAvailableRange) => void;
   latestAvailableRange?: NgeeAnnLatestAvailableRange | null;
+  comparison?: "overlay" | "selected" | "average";
+  category?: "all" | "load" | "light";
+  onComparisonChange?: (comparison: "overlay" | "selected" | "average") => void;
+  onCategoryChange?: (category: "all" | "load" | "light") => void;
+  projectExplorerHref?: string;
+  aiAnalystHref?: string;
 };
 
 type AdminProjectRendererProps = ProjectRendererCommonProps & {
@@ -170,6 +176,12 @@ export function ProjectRenderer(props: ProjectRendererProps): ReactNode {
           {...(props.onRetry ? { onRetry: props.onRetry } : {})}
           {...(props.onViewLatestAvailableData ? { onViewLatestAvailableData: props.onViewLatestAvailableData } : {})}
           {...(props.latestAvailableRange ? { latestAvailableRange: props.latestAvailableRange } : {})}
+          {...(props.comparison ? { comparison: props.comparison } : {})}
+          {...(props.category ? { category: props.category } : {})}
+          {...(props.onComparisonChange ? { onComparisonChange: props.onComparisonChange } : {})}
+          {...(props.onCategoryChange ? { onCategoryChange: props.onCategoryChange } : {})}
+          {...(props.projectExplorerHref ? { projectExplorerHref: props.projectExplorerHref } : {})}
+          {...(props.aiAnalystHref ? { aiAnalystHref: props.aiAnalystHref } : {})}
         />
       </div>
     );

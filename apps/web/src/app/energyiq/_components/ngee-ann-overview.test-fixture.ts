@@ -619,8 +619,122 @@ export function ngeeAnnGoldenSnapshot(input: {
       importBatchIds: ["batch-1", "batch-2", "batch-3", "batch-4"],
       lastSeenAt,
     },
+    decisionPriorities: goldenDecisionPriorities(),
     metadata,
     analysis,
+  };
+}
+
+function goldenDecisionPriorities(): NonNullable<EnergyProjectAnalysisSnapshotDto["decisionPriorities"]> {
+  const item = (input: {
+    rank: 1 | 2 | 3;
+    localDate: string;
+    from: string;
+    to: string;
+    actualKwh: number;
+    baselineKwh: number;
+    relativePct: number;
+    deltaKwh: number;
+    supportingIncidentIds: string[];
+  }): NonNullable<EnergyProjectAnalysisSnapshotDto["decisionPriorities"]>["items"][number] => {
+    const primaryIncidentId = `incident:project:${input.localDate}`;
+    return {
+      priorityId: `decision-priority:anomaly-bundle-ngee-ann-golden:comparison.daily_usage_above_baseline@1:energy.total_usage_kwh@1:${input.localDate}`,
+      rank: input.rank,
+      source: "daily_usage_anomaly",
+      finding: {
+        code: "DAILY_USAGE_ABOVE_BASELINE",
+        title: `Ngee Ann Polytechnic used ${input.deltaKwh} kWh above its comparable-day baseline on ${input.localDate}.`,
+        actualKwh: input.actualKwh,
+        baselineKwh: input.baselineKwh,
+        relativePct: input.relativePct,
+      },
+      evidence: {
+        bundleId: "anomaly-bundle-ngee-ann-golden",
+        metricId: "energy.total_usage_kwh@1",
+        queryIds: ["time_slot_anomaly_v1"],
+        ruleRevisionId: "comparison.daily_usage_above_baseline@1",
+        period: {
+          from: "2026-06-09T16:00:00.000Z",
+          to: "2026-06-16T16:00:00.000Z",
+        },
+        occurrence: {
+          scopeId: "project",
+          scopeName: "Ngee Ann Polytechnic",
+          scopeType: "project",
+          localDate: input.localDate,
+          from: input.from,
+          to: input.to,
+        },
+        primaryIncidentId,
+        supportingIncidentIds: input.supportingIncidentIds,
+      },
+      impact: {
+        energy: { status: "available", deltaKwh: input.deltaKwh },
+        cost: {
+          status: "unavailable",
+          reason: {
+            code: "INCIDENT_COST_NOT_SUPPORTED_BY_CURRENT_EVIDENCE",
+            message: "The current daily anomaly Evidence does not calculate an incident-level cost delta.",
+          },
+        },
+      },
+      action: {
+        code: "INSPECT_DAILY_USAGE_DRIVERS",
+        label: "Review the hourly and Circuit Evidence for this date before changing schedules or equipment.",
+        targetIncidentId: primaryIncidentId,
+      },
+      confidence: { status: "complete", limitation: null },
+    };
+  };
+  return {
+    status: "available",
+    limitation: null,
+    evidencePins: {
+      projectReleaseId: "release-ngee-ann-golden",
+      dataSnapshotId: "snapshot-ngee-ann-golden",
+      hierarchyRevisionId: "hierarchy-v6",
+      meterMappingRevisionId: "mapping-v1",
+      meterFormulaRevisionId: "formula-v1",
+      metricVersion: "metric-v1",
+      businessCalendarVersion: "calendar-v1",
+      queryIds: ["time_slot_anomaly_v1"],
+    },
+    items: [
+      item({
+        rank: 1,
+        localDate: "2026-06-13",
+        from: "2026-06-12T16:00:00.000Z",
+        to: "2026-06-13T16:00:00.000Z",
+        actualKwh: 168.9645,
+        baselineKwh: 63.3385,
+        relativePct: 166.7643,
+        deltaKwh: 105.626,
+        supportingIncidentIds: ["incident:level-7:2026-06-13", "incident:level-6:2026-06-13"],
+      }),
+      item({
+        rank: 2,
+        localDate: "2026-06-14",
+        from: "2026-06-13T16:00:00.000Z",
+        to: "2026-06-14T16:00:00.000Z",
+        actualKwh: 127.9387,
+        baselineKwh: 63.3385,
+        relativePct: 101.992,
+        deltaKwh: 64.6002,
+        supportingIncidentIds: ["incident:level-7:2026-06-14", "incident:level-6:2026-06-14"],
+      }),
+      item({
+        rank: 3,
+        localDate: "2026-06-11",
+        from: "2026-06-10T16:00:00.000Z",
+        to: "2026-06-11T16:00:00.000Z",
+        actualKwh: 268.399,
+        baselineKwh: 218.885,
+        relativePct: 22.621,
+        deltaKwh: 49.514,
+        supportingIncidentIds: ["incident:level-7:2026-06-11", "incident:level-6:2026-06-11"],
+      }),
+    ],
   };
 }
 

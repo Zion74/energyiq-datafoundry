@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import type { NgeeAnnDailyAnomalyViewModel } from "./ngee-ann-overview-view-model";
+import { anomalyIncidentDomId } from "./ngee-ann-overview-links";
 
 type Incident = NgeeAnnDailyAnomalyViewModel["incidents"][number];
 type Series = Incident["series"][number];
@@ -11,22 +12,40 @@ type ViewMode = "overlay" | "selected" | "average";
 
 const ALL_SCOPES = "all-scopes";
 
-export function NgeeAnnDailyAnomalies({ view }: { view: NgeeAnnDailyAnomalyViewModel }) {
+export function NgeeAnnDailyAnomalies({
+  view,
+  comparison = "overlay",
+  category = "all",
+  onComparisonChange,
+  onCategoryChange,
+}: {
+  view: NgeeAnnDailyAnomalyViewModel;
+  comparison?: ViewMode;
+  category?: "all" | "load" | "light";
+  onComparisonChange?: (comparison: ViewMode) => void;
+  onCategoryChange?: (category: "all" | "load" | "light") => void;
+}) {
   const [openIncidentId, setOpenIncidentId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("overlay");
+  const [viewMode, setViewMode] = useState<ViewMode>(comparison);
   const [selectedScopeId, setSelectedScopeId] = useState(ALL_SCOPES);
-  const [selectedCategory, setSelectedCategory] = useState<"all" | "load" | "light">("all");
+  const [selectedCategory, setSelectedCategory] = useState<"all" | "load" | "light">(category);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
   const closeDialog = useCallback(() => {
     setOpenIncidentId(null);
-    setViewMode("overlay");
+    setViewMode(comparison);
     setSelectedScopeId(ALL_SCOPES);
-    setSelectedCategory("all");
+    setSelectedCategory(category);
     triggerRef.current?.focus();
-  }, []);
+  }, [category, comparison]);
+
+  useEffect(() => {
+    if (openIncidentId) return;
+    setViewMode(comparison);
+    setSelectedCategory(category);
+  }, [category, comparison, openIncidentId]);
 
   useEffect(() => {
     if (!openIncidentId) return;
@@ -104,7 +123,11 @@ export function NgeeAnnDailyAnomalies({ view }: { view: NgeeAnnDailyAnomalyViewM
       {view.incidents.length > 0 ? (
         <div className="mt-4 grid gap-3 lg:grid-cols-2 xl:grid-cols-3" aria-label="Server-triggered daily incidents">
           {view.incidents.map((item) => (
-            <article key={item.incidentId} className="rounded-lg border border-border bg-surface p-4">
+            <article
+              key={item.incidentId}
+              id={anomalyIncidentDomId(item.incidentId)}
+              className="scroll-mt-24 rounded-lg border border-border bg-surface p-4"
+            >
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold text-foreground">{item.scopeName}</p>
@@ -198,7 +221,10 @@ export function NgeeAnnDailyAnomalies({ view }: { view: NgeeAnnDailyAnomalyViewM
                         key={mode}
                         selected={viewMode === mode}
                         controls="ngee-ann-anomaly-series"
-                        onClick={() => setViewMode(mode)}
+                        onClick={() => {
+                          setViewMode(mode);
+                          onComparisonChange?.(mode);
+                        }}
                       >
                         {mode === "overlay" ? "Overlay" : mode === "selected" ? "Selected" : "Average"}
                       </FilterButton>
@@ -226,7 +252,10 @@ export function NgeeAnnDailyAnomalies({ view }: { view: NgeeAnnDailyAnomalyViewM
                         key={category}
                         selected={selectedCategory === category}
                         controls="ngee-ann-anomaly-series"
-                        onClick={() => setSelectedCategory(category)}
+                        onClick={() => {
+                          setSelectedCategory(category);
+                          onCategoryChange?.(category);
+                        }}
                       >
                         {category === "all" ? "All" : category === "load" ? "Load" : "Light"}
                       </FilterButton>

@@ -1,14 +1,18 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
 import type { NgeeAnnEnergyCompositionViewModel } from "./ngee-ann-overview-view-model";
 
 export function NgeeAnnEnergyComposition({
   view,
+  category = "all",
+  onCategoryChange,
 }: {
   view: NgeeAnnEnergyCompositionViewModel;
+  category?: "all" | "load" | "light";
+  onCategoryChange?: (category: "all" | "load" | "light") => void;
 }) {
   const [selectedLevelId, setSelectedLevelId] = useState("all");
-  const [selectedCategoryId, setSelectedCategoryId] = useState("all");
+  const [selectedCategoryId, setSelectedCategoryId] = useState<"all" | "load" | "light">(category);
   const [showAllCircuits, setShowAllCircuits] = useState(false);
   const [accountingExpanded, setAccountingExpanded] = useState(true);
   const [derivedExpanded, setDerivedExpanded] = useState(true);
@@ -24,12 +28,19 @@ export function NgeeAnnEnergyComposition({
   );
   const visibleCircuits = showAllCircuits ? matchingCircuits : matchingCircuits.slice(0, 5);
 
+  useEffect(() => {
+    setSelectedCategoryId(category);
+  }, [category]);
+
   const selectLevel = (levelId: string) => {
     setSelectedLevelId(() => levelId);
     setShowAllCircuits(() => false);
   };
   const selectCategory = (categoryId: string) => {
-    setSelectedCategoryId(() => categoryId);
+    if (categoryId === "all" || categoryId === "load" || categoryId === "light") {
+      setSelectedCategoryId(categoryId);
+      onCategoryChange?.(categoryId);
+    }
     setShowAllCircuits(() => false);
   };
 

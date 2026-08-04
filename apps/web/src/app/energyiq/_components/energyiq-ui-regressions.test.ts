@@ -65,6 +65,9 @@ describe("EnergyIQ UI regressions", () => {
       period: "Previous month",
       from: "",
       to: "",
+      grain: "day",
+      comparison: "overlay",
+      category: "all",
     });
     expect(overviewViewStateFromSearchParams(new URLSearchParams(
       "projectId=ngee-ann-polytechnic&scopeId=level-6&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16",
@@ -75,6 +78,9 @@ describe("EnergyIQ UI regressions", () => {
       period: "Custom",
       from: "2026-06-10",
       to: "2026-06-16",
+      grain: "day",
+      comparison: "overlay",
+      category: "all",
     });
   });
 

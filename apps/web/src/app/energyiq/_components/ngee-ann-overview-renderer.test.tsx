@@ -9,6 +9,80 @@ import { ngeeAnnGoldenSnapshot, ngeeAnnSingleDaySnapshot } from "./ngee-ann-over
 import { NgeeAnnOverviewRenderer } from "./ngee-ann-overview-renderer";
 
 describe("NgeeAnnOverviewRenderer", () => {
+  it("places the server-owned decision priorities after Data Status and before Key highlights", () => {
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer
+        state={{ status: "ready", snapshot: ngeeAnnGoldenSnapshot() }}
+        projectExplorerHref="/energyiq/explorer?projectId=ngee-ann-polytechnic"
+        aiAnalystHref="/energyiq/ai?projectId=ngee-ann-polytechnic"
+      />,
+    );
+
+    expect(markup).toContain("Decision priorities");
+    expect(markup).toContain("Finding");
+    expect(markup).toContain("Evidence");
+    expect(markup).toContain("Impact");
+    expect(markup).toContain("Action");
+    expect(markup).toContain("Complete Evidence");
+    expect(markup).toContain("href=\"#incident-project-2026-06-13\"");
+    expect(markup).toContain("Open Project Explorer");
+    expect(markup).toContain("Ask AI Analyst");
+    expect(markup.indexOf("Decision priorities")).toBeLessThan(markup.indexOf("Key highlights"));
+  });
+
+  it.each([
+    { status: "empty", expected: "No deterministic priority for this Period", code: null },
+    { status: "partial", expected: "No complete priority conclusion", code: "SOME_CANDIDATE_DATES_SUPPRESSED" },
+    { status: "suppressed", expected: "Priority conclusion suppressed", code: "ALL_CANDIDATE_DATES_SUPPRESSED" },
+    { status: "unavailable", expected: "Decision priorities unavailable", code: "DAILY_USAGE_ANOMALIES_UNAVAILABLE" },
+  ] as const)("renders the server-owned $status priority state without inventing a card", ({ status, expected, code }) => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    snapshot.decisionPriorities = {
+      ...snapshot.decisionPriorities!,
+      status,
+      limitation: code ? { code, message: `Server limitation: ${code}` } : null,
+      items: [],
+    };
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+
+    expect(markup).toContain(expected);
+    expect(markup).toContain("0 of 3 priorities");
+    expect(markup).not.toContain("View evidence");
+    expect(markup).toContain("Key highlights");
+  });
+
+  it("fails invalid priorities closed while leaving the rest of the Golden Overview visible", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    snapshot.decisionPriorities!.items[1]!.rank = 1;
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+
+    expect(markup).toContain("Decision priorities unavailable");
+    expect(markup).toContain("order or Evidence contract is invalid");
+    expect(markup).toContain("1531.17");
+    expect(markup).toContain("Energy trend");
+  });
+
+  it("uses a warning badge for a server-owned partial priority", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const limitation = {
+      code: "SUPPORTING_EVIDENCE_PARTIAL" as const,
+      message: "Supporting Circuit Evidence is partial.",
+    };
+    snapshot.decisionPriorities!.status = "partial";
+    snapshot.decisionPriorities!.limitation = limitation;
+    snapshot.decisionPriorities!.items[0]!.confidence = { status: "partial", limitation };
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+
+    expect(markup).toContain("bg-step-warning/10 text-step-warning\">Partial Evidence");
+    expect(markup).toContain("Limitation: Supporting Circuit Evidence is partial.");
+  });
+
   it("keeps the Golden context, status, highlights and evidence in one compact dedicated surface", () => {
     const markup = renderToStaticMarkup(
       <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot: ngeeAnnGoldenSnapshot() }} />,
@@ -20,12 +94,13 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Ready");
     expect(markup).toContain("100% coverage");
     expect(markup).toContain("2,688 / 2,688 valid intervals");
-    expect(markup).toContain("1531.1683");
-    expect(markup).toContain("218.7383");
-    expect(markup).toContain("20.6731");
-    expect(markup).toContain("+26.3677%");
-    expect(markup).toContain("Previous 1211.6773 kWh / +319.4911 kWh");
-    expect(markup).toContain("489.973864 SGD");
+    expect(markup).toContain("1531.17");
+    expect(markup).toContain("218.74");
+    expect(markup).toContain("20.67");
+    expect(markup).toContain("26.4% higher");
+    expect(markup).toContain("Current 1531.17 kWh vs previous 1211.68 kWh");
+    expect(markup).toContain("S$489.97");
+    expect(markup).toContain("Area and headcount metadata are missing");
     expect(markup).toContain("Energy trend");
     expect(markup).toContain("When did accepted energy use change inside the selected Period?");
     expect(markup).toContain("Energy trend Scope");
@@ -109,11 +184,11 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("[2026-06-09T16:00:00.000Z, 2026-06-16T16:00:00.000Z)");
     expect(markup.indexOf("Energy trend")).toBeLessThan(markup.indexOf("Level comparison"));
     expect(markup.indexOf("Energy trend")).toBeLessThan(markup.indexOf("Daily usage anomalies"));
-    expect(markup.indexOf("Daily usage anomalies")).toBeLessThan(markup.indexOf("Day profile"));
-    expect(markup.indexOf("Day profile")).toBeLessThan(markup.indexOf("Usage heatmap"));
-    expect(markup.indexOf("Usage heatmap")).toBeLessThan(markup.indexOf("Level comparison"));
+    expect(markup.indexOf("Daily usage anomalies")).toBeLessThan(markup.indexOf("Level comparison"));
     expect(markup.indexOf("Level comparison")).toBeLessThan(markup.indexOf("Energy composition"));
-    expect(markup.indexOf("Energy composition")).toBeLessThan(markup.indexOf("Snapshot &amp; evidence"));
+    expect(markup.indexOf("Energy composition")).toBeLessThan(markup.indexOf("Day profile"));
+    expect(markup.indexOf("Day profile")).toBeLessThan(markup.indexOf("Usage heatmap"));
+    expect(markup.indexOf("Usage heatmap")).toBeLessThan(markup.indexOf("Snapshot &amp; evidence"));
     expect(markup.indexOf("Accounting trace")).toBeLessThan(markup.indexOf("Derived meter trace"));
     expect(markup.indexOf("Derived meter trace")).toBeLessThan(markup.indexOf("Composition evidence"));
     expect(markup).toContain("mapping-v1");
@@ -281,7 +356,7 @@ describe("NgeeAnnOverviewRenderer", () => {
       const markup = renderToStaticMarkup(
         <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
       );
-      expect(markup).toContain("20.6731");
+      expect(markup).toContain("20.67");
       expect(markup).toContain("Breakdown unavailable");
       expect(markup).not.toContain("View peak breakdown");
     }
@@ -1057,6 +1132,23 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(container.textContent).toContain("Showing 2 of 2 matching component Circuits.");
     expect(level6Button?.getAttribute("aria-pressed")).toBe("true");
     expect(lightButton?.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("uses the URL-backed Category as the initial Composition filter", async () => {
+    await act(async () => {
+      root.render(
+        <NgeeAnnOverviewRenderer
+          state={{ status: "ready", snapshot: ngeeAnnGoldenSnapshot() }}
+          category="light"
+        />,
+      );
+    });
+
+    const lightButton = filterButton("Filter component Circuits by Category", "Light");
+    expect(lightButton?.getAttribute("aria-pressed")).toBe("true");
+    expect(circuitRows()).toHaveLength(5);
+    expect(circuitRows().every((row) => row.dataset.categoryId === "light")).toBe(true);
+    expect(container.textContent).toContain("Showing 5 of 5 matching component Circuits.");
   });
 
   it("shows an honest empty state for a Level and Category combination with no Snapshot rows", async () => {

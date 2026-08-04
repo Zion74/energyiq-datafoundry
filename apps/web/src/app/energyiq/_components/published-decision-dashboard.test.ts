@@ -18,8 +18,11 @@ import type {
 } from "../../../lib/config-api";
 import { configApi } from "../../../lib/config-api";
 import { buildEnergyTemplateRenderPlan } from "./energy-template-render-plan";
+import { ngeeAnnGoldenSnapshot } from "./ngee-ann-overview.test-fixture";
 import {
   overviewAnalysisRequest,
+  overviewUrlWithView,
+  overviewViewStateFromSearchParams,
   PublishedDecisionDashboard,
   toDateInput,
 } from "./published-decision-dashboard";
@@ -70,6 +73,121 @@ describe("published Overview URL reload", () => {
     container.remove();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it("round-trips only the nine approved Fixed Golden URL fields", () => {
+    const fixedUrl = "projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all&dialog-open=true&focus=point-1";
+    const view = overviewViewStateFromSearchParams(new URLSearchParams(fixedUrl));
+
+    expect(view).toEqual({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "project",
+      resource: "electricity",
+      period: "Custom",
+      from: "2026-06-10",
+      to: "2026-06-16",
+      grain: "day",
+      comparison: "overlay",
+      category: "all",
+    });
+    expect(overviewUrlWithView(view)).toBe(
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
+    );
+  });
+
+  it("keeps hour grain only for a single-day Period and defaults invalid view controls safely", () => {
+    const multiDay = overviewViewStateFromSearchParams(new URLSearchParams(
+      "period=Last+7+days&grain=hour&comparison=unknown&category=unknown",
+    ));
+    const singleDay = overviewViewStateFromSearchParams(new URLSearchParams(
+      "period=Custom&from=2026-06-16&to=2026-06-16&grain=hour&comparison=average&category=load",
+    ));
+
+    expect(multiDay).toMatchObject({ grain: "day", comparison: "overlay", category: "all" });
+    expect(singleDay).toMatchObject({ grain: "hour", comparison: "average", category: "load" });
+  });
+
+  it("restores anomaly controls and handoffs from URL, writes changes back, and keeps dialog state transient", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    window.history.replaceState(
+      {},
+      "",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=average&category=load",
+    );
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockResolvedValue({ status: "ready", snapshot: dashboardNgeeAnnSnapshot() });
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    const explorer = Array.from(container.querySelectorAll<HTMLAnchorElement>("a"))
+      .find((anchor) => anchor.textContent?.includes("Open Project Explorer"));
+    const analyst = Array.from(container.querySelectorAll<HTMLAnchorElement>("a"))
+      .find((anchor) => anchor.textContent?.includes("Ask AI Analyst"));
+    const expectedQuery = "projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=average&category=load";
+    expect(explorer?.getAttribute("href")).toBe(`/energyiq/explorer?${expectedQuery}`);
+    expect(analyst?.getAttribute("href")).toBe(`/energyiq/ai?${expectedQuery}`);
+
+    const openIncident = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent?.includes("Open incident detail"));
+    await act(async () => openIncident?.click());
+    const dialog = document.querySelector<HTMLElement>("[role='dialog']");
+    const average = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+      .find((button) => button.textContent === "Average");
+    const selected = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+      .find((button) => button.textContent === "Selected");
+    const load = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+      .find((button) => button.textContent === "Load");
+    const light = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+      .find((button) => button.textContent === "Light");
+    expect(average?.getAttribute("aria-pressed")).toBe("true");
+    expect(load?.getAttribute("aria-pressed")).toBe("true");
+
+    await act(async () => selected?.click());
+    await act(async () => light?.click());
+    const close = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])
+      .find((button) => button.textContent === "Close");
+    await act(async () => close?.click());
+
+    expect(mockedRouter.replace.mock.calls.map(([href]) => href)).toEqual([
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=selected&category=load",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=selected&category=light",
+    ]);
+    expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the default Last 7 days priority-empty state honest without auto-navigation", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    window.history.replaceState(
+      {},
+      "",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Last+7+days&grain=day&comparison=overlay&category=all",
+    );
+    const snapshot = dashboardNgeeAnnSnapshot();
+    snapshot.context.period = "Last 7 days";
+    snapshot.analysis.context.period = "Last 7 days";
+    snapshot.decisionPriorities = {
+      ...snapshot.decisionPriorities!,
+      status: "empty",
+      limitation: null,
+      items: [],
+    };
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockResolvedValue({ status: "ready", snapshot });
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    expect(container.textContent).toContain("No deterministic priority for this Period");
+    expect(container.textContent).toContain("Key highlights");
+    expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
+    expect(mockedRouter.replace).not.toHaveBeenCalled();
   });
 
   it("uses the public Custom URL for the first trusted resolve after Project access loads", async () => {
@@ -315,7 +433,7 @@ describe("published Overview URL reload", () => {
 
     expect(mockedRouter.replace).toHaveBeenCalledOnce();
     expect(mockedRouter.replace).toHaveBeenCalledWith(
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=water&period=Custom&from=2026-06-10&to=2026-06-16",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=water&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
     );
   });
 
@@ -338,8 +456,8 @@ describe("published Overview URL reload", () => {
     await act(async () => lastSevenDays?.click());
 
     expect(mockedRouter.replace.mock.calls.map(([href]) => href)).toEqual([
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=water&period=Custom&from=2026-06-10&to=2026-06-16",
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=water&period=Last+7+days",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=water&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=water&period=Last+7+days&grain=day&comparison=overlay&category=all",
     ]);
   });
 
@@ -364,9 +482,9 @@ describe("published Overview URL reload", () => {
     await act(async () => custom?.click());
 
     expect(mockedRouter.replace.mock.calls.map(([href]) => href)).toEqual([
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Last+7+days",
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Yesterday",
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Last+7+days&grain=day&comparison=overlay&category=all",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Yesterday&grain=day&comparison=overlay&category=all",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
     ]);
   });
 
@@ -385,7 +503,7 @@ describe("published Overview URL reload", () => {
     const previousWeek = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
       .find((button) => button.textContent === "Previous week");
     await act(async () => previousWeek?.click());
-    const previousWeekUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Previous+week";
+    const previousWeekUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Previous+week&grain=day&comparison=overlay&category=all";
     expect(mockedRouter.replace).toHaveBeenCalledWith(previousWeekUrl);
 
     resolveProjectAnalysis.mockClear();
@@ -417,7 +535,7 @@ describe("published Overview URL reload", () => {
     const previousMonth = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
       .find((button) => button.textContent === "Previous month");
     await act(async () => previousMonth?.click());
-    const previousMonthUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Previous+month";
+    const previousMonthUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Previous+month&grain=day&comparison=overlay&category=all";
     expect(mockedRouter.replace).toHaveBeenCalledWith(previousMonthUrl);
 
     resolveProjectAnalysis.mockClear();
@@ -455,9 +573,9 @@ describe("published Overview URL reload", () => {
       .find((option) => option.textContent?.endsWith("Level 6 / Total Office Load"));
     await act(async () => totalCircuit?.click());
 
-    const previousWeekScopeUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Previous+week";
+    const previousWeekScopeUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Previous+week&grain=day&comparison=overlay&category=all";
     expect(mockedRouter.replace.mock.calls.map(([href]) => href)).toEqual([
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Previous+week",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Previous+week&grain=day&comparison=overlay&category=all",
       previousWeekScopeUrl,
     ]);
 
@@ -496,9 +614,9 @@ describe("published Overview URL reload", () => {
       .find((option) => option.textContent?.endsWith("Level 6 / Total Office Load"));
     await act(async () => totalCircuit?.click());
 
-    const previousMonthScopeUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Previous+month";
+    const previousMonthScopeUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Previous+month&grain=day&comparison=overlay&category=all";
     expect(mockedRouter.replace.mock.calls.map(([href]) => href)).toEqual([
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Previous+month",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Previous+month&grain=day&comparison=overlay&category=all",
       previousMonthScopeUrl,
     ]);
 
@@ -576,7 +694,7 @@ describe("published Overview URL reload", () => {
     expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
     expect(mockedRouter.replace).toHaveBeenCalledOnce();
     expect(mockedRouter.replace).toHaveBeenCalledWith(
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
     );
   });
 
@@ -597,7 +715,7 @@ describe("published Overview URL reload", () => {
     await act(async () => custom?.click());
 
     expect(mockedRouter.replace).toHaveBeenCalledWith(
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
     );
   });
 
@@ -622,7 +740,7 @@ describe("published Overview URL reload", () => {
       initialFrom.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
-    const fromUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-11&to=2026-06-16";
+    const fromUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-11&to=2026-06-16&grain=day&comparison=overlay&category=all";
     expect(mockedRouter.replace).toHaveBeenLastCalledWith(fromUrl);
     window.history.replaceState({}, "", fromUrl);
     await act(async () => {
@@ -646,7 +764,7 @@ describe("published Overview URL reload", () => {
       rerenderedTo.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
-    const toUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-11&to=2026-06-17";
+    const toUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-11&to=2026-06-17&grain=day&comparison=overlay&category=all";
     expect(mockedRouter.replace).toHaveBeenLastCalledWith(toUrl);
     window.history.replaceState({}, "", toUrl);
     await act(async () => {
@@ -687,8 +805,8 @@ describe("published Overview URL reload", () => {
     });
 
     expect(mockedRouter.replace.mock.calls.map(([href]) => href)).toEqual([
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-11&to=2026-06-16",
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-11&to=2026-06-17",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-11&to=2026-06-16&grain=day&comparison=overlay&category=all",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-11&to=2026-06-17&grain=day&comparison=overlay&category=all",
     ]);
   });
 
@@ -721,7 +839,7 @@ describe("published Overview URL reload", () => {
     await act(async () => totalCircuit?.click());
     expect(mockedRouter.replace).toHaveBeenCalledOnce();
     expect(mockedRouter.replace).toHaveBeenCalledWith(
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
     );
 
     resolveProjectAnalysis.mockClear();
@@ -814,7 +932,7 @@ describe("published Overview URL reload", () => {
 
     expect(mockedRouter.replace).toHaveBeenCalledOnce();
     expect(mockedRouter.replace).toHaveBeenCalledWith(
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=water&period=Custom&from=2026-06-10&to=2026-06-16",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=water&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
     );
   });
 
@@ -1059,6 +1177,21 @@ function readyRangeResolution(): EnergyProjectAnalysisResolutionDto {
       dataSnapshot: { id: "snapshot-1" },
     },
   } as EnergyProjectAnalysisResolutionDto;
+}
+
+function dashboardNgeeAnnSnapshot() {
+  const snapshot = ngeeAnnGoldenSnapshot();
+  const qualityComponent = component("quality.data_coverage@1", "quality", "data_quality_summary_v1");
+  snapshot.projectRelease.catalog = [qualityComponent];
+  snapshot.projectRelease.document = {
+    schema_version: 2,
+    templates: [{
+      template_id: "project",
+      target_kind: "project",
+      components: [{ component_revision_id: qualityComponent.revision_id, enabled: true }],
+    }],
+  };
+  return snapshot;
 }
 
 function readyZeroCoverageResolution(

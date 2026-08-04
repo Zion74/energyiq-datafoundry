@@ -227,6 +227,22 @@ export type NgeeAnnDailyAnomalyViewModel = {
   };
 };
 
+export type NgeeAnnDecisionPrioritiesViewModel = {
+  status: "available" | "empty" | "partial" | "suppressed" | "unavailable";
+  limitation: string | null;
+  items: Array<{
+    priorityId: string;
+    rank: 1 | 2 | 3;
+    finding: string;
+    evidence: string;
+    impact: string;
+    action: string;
+    confidence: "Complete Evidence" | "Partial Evidence";
+    confidenceLimitation: string | null;
+    targetIncidentId: string;
+  }>;
+};
+
 type PeakBreakdownQuality = {
   status: "complete" | "unavailable";
   statusLabel: "Complete" | "Unavailable";
@@ -423,7 +439,9 @@ export type NgeeAnnOverviewViewModel = {
     qualityEvents: string;
     lastSeen: string;
   };
+  metadataLimitation: string | null;
   highlights: NgeeAnnOverviewHighlight[];
+  decisionPriorities: NgeeAnnDecisionPrioritiesViewModel;
   peakBreakdown: NgeeAnnPeakBreakdownViewModel;
   energyTrend: NgeeAnnEnergyTrendViewModel;
   dailyAnomalies: NgeeAnnDailyAnomalyViewModel;
@@ -504,6 +522,7 @@ export function buildNgeeAnnOverviewViewModel(
   const latestAvailableRange = unavailable ? hint.latestAvailableRange ?? null : null;
   const evidenceQueryIds = [...analysis.provenance.queryIds];
   const comparisonReferenceIds = comparisonEvidenceReferences(snapshot);
+  const dailyAnomalies = buildDailyAnomalies(snapshot, unavailable);
 
   return {
     context: {
@@ -519,11 +538,12 @@ export function buildNgeeAnnOverviewViewModel(
       timezone: context.timezone,
     },
     dataStatus: buildDataStatus(snapshot, status, latestSeenAt, Boolean(latestAvailableRange)),
+    metadataLimitation: buildMetadataLimitation(snapshot),
     highlights: [
       {
         id: "total",
         label: "Total energy",
-        value: unavailable ? "Unavailable" : formatDecimal(analysis.summary.usageKwh, 4),
+        value: unavailable ? "Unavailable" : formatDecimal(analysis.summary.usageKwh, 2),
         unit: unavailable ? undefined : "kWh",
         detail: "Official usage for this Project and Scope",
         available: !unavailable,
@@ -531,7 +551,7 @@ export function buildNgeeAnnOverviewViewModel(
       {
         id: "daily",
         label: "Daily average",
-        value: unavailable ? "Unavailable" : formatDecimal(analysis.summary.averageDailyUsageKwh, 4),
+        value: unavailable ? "Unavailable" : formatDecimal(analysis.summary.averageDailyUsageKwh, 2),
         unit: unavailable ? undefined : "kWh/day",
         detail: "Primary Period daily average",
         available: !unavailable,
@@ -539,7 +559,7 @@ export function buildNgeeAnnOverviewViewModel(
       {
         id: "peak",
         label: "Peak interval-average power",
-        value: unavailable ? "Unavailable" : formatDecimal(analysis.summary.peakKw, 4),
+        value: unavailable ? "Unavailable" : formatDecimal(analysis.summary.peakKw, 2),
         unit: unavailable ? undefined : "kW",
         detail: unavailable
           ? "No accepted interval supports a peak"
@@ -552,10 +572,10 @@ export function buildNgeeAnnOverviewViewModel(
         id: "comparison",
         label: "Comparison",
         value: comparisonAvailable
-          ? `${analysis.comparison.changePct! >= 0 ? "+" : ""}${formatDecimal(analysis.comparison.changePct!, 4)}%`
+          ? `${formatDecimal(Math.abs(analysis.comparison.changePct!), 1)}% ${analysis.comparison.changePct! >= 0 ? "higher" : "lower"}`
           : "Unavailable",
         detail: comparisonAvailable
-          ? `Previous ${formatDecimal(analysis.comparison.usageKwh, 4)} kWh / ${signedDecimal(analysis.comparison.changeKwh, 4)} kWh`
+          ? `Current ${formatDecimal(analysis.summary.usageKwh, 2)} kWh vs previous ${formatDecimal(analysis.comparison.usageKwh, 2)} kWh`
           : "No validated comparable-period usage",
         available: comparisonAvailable,
       },
@@ -563,7 +583,7 @@ export function buildNgeeAnnOverviewViewModel(
         id: "cost",
         label: "Cost",
         value: analysis.cost.status === "available" && !unavailable
-          ? `${formatDecimal(analysis.cost.amount, 6)} ${analysis.cost.currency}`
+          ? `${analysis.cost.currency === "SGD" ? "S$" : `${analysis.cost.currency} `}${formatDecimal(analysis.cost.amount, 2)}`
           : "Unavailable",
         detail: analysis.cost.status === "available" && !unavailable
           ? `Tariff ${analysis.cost.tariffScheduleVersion} / ${analysis.cost.allocations.length} allocation${analysis.cost.allocations.length === 1 ? "" : "s"}`
@@ -573,9 +593,10 @@ export function buildNgeeAnnOverviewViewModel(
         available: costAvailable,
       },
     ],
+    decisionPriorities: buildDecisionPriorities(snapshot, dailyAnomalies),
     peakBreakdown: buildPeakBreakdown(snapshot, unavailable),
     energyTrend: buildEnergyTrend(snapshot, unavailable),
-    dailyAnomalies: buildDailyAnomalies(snapshot, unavailable),
+    dailyAnomalies,
     dayProfile: buildDayProfile(snapshot, unavailable),
     usageHeatmap: buildUsageHeatmap(snapshot, unavailable),
     levelComparison: buildLevelComparison(snapshot, unavailable),
@@ -1232,6 +1253,184 @@ const DAILY_ANOMALY_SUPPRESSION_CODES = new Set([
   "BASELINE_VALUE_UNAVAILABLE",
 ]);
 const DAILY_ANOMALY_RULE_REVISION_ID = "comparison.daily_usage_above_baseline@1";
+
+function buildDecisionPriorities(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  dailyAnomalies: NgeeAnnDailyAnomalyViewModel,
+): NgeeAnnDecisionPrioritiesViewModel {
+  const source = snapshot.decisionPriorities;
+  const unavailable = (limitation: string): NgeeAnnDecisionPrioritiesViewModel => ({
+    status: "unavailable",
+    limitation,
+    items: [],
+  });
+  if (!source) {
+    return unavailable("Decision priorities are unavailable because the server-owned priority contract is absent.");
+  }
+  if (!validDecisionPriorityEnvelope(snapshot, source, dailyAnomalies)) {
+    return unavailable("Decision priorities were withheld because their order or Evidence contract is invalid.");
+  }
+  return {
+    status: source.status,
+    limitation: source.limitation?.message ?? null,
+    items: source.items.map((item) => ({
+      priorityId: item.priorityId,
+      rank: item.rank,
+      finding: item.finding.title,
+      evidence: [
+        item.evidence.occurrence.scopeType === "project"
+          ? "Project"
+          : item.evidence.occurrence.scopeName,
+        formatLocalDate(item.evidence.occurrence.localDate),
+        `${formatDecimal(item.finding.actualKwh, 2)} kWh vs ${formatDecimal(item.finding.baselineKwh, 2)} kWh baseline (${signedDecimal(item.finding.relativePct, 1)}%)`,
+      ].join(" / "),
+      impact: `${signedDecimal(item.impact.energy.deltaKwh, 2)} kWh above baseline; incident cost unavailable`,
+      action: item.action.label,
+      confidence: item.confidence.status === "complete" ? "Complete Evidence" : "Partial Evidence",
+      confidenceLimitation: item.confidence.limitation?.message ?? null,
+      targetIncidentId: item.action.targetIncidentId,
+    })),
+  };
+}
+
+function validDecisionPriorityEnvelope(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  source: NonNullable<EnergyProjectAnalysisSnapshotDto["decisionPriorities"]>,
+  dailyAnomalies: NgeeAnnDailyAnomalyViewModel,
+): boolean {
+  if (!validDecisionPriorityEvidencePins(snapshot, source.evidencePins)) return false;
+  if (!validDecisionPriorityStatus(source)) return false;
+  const bundle = snapshot.analysis.dailyUsageAnomalies;
+  if (source.status === "unavailable") return true;
+  if (dailyAnomalies.status !== "available" || bundle?.status !== "available") return false;
+  if (source.items.length === 0) return true;
+  const incidents = new Map(bundle.scopes.flatMap((scope) => scope.rows.map((row) => [
+    row.incidentId,
+    { scope, row },
+  ] as const)));
+  const priorityIds = new Set<string>();
+  return source.items.every((item, index) => {
+    if (
+      !item.priorityId
+      || priorityIds.has(item.priorityId)
+      || item.rank !== index + 1
+      || item.source !== "daily_usage_anomaly"
+      || item.finding.code !== "DAILY_USAGE_ABOVE_BASELINE"
+      || !item.finding.title.trim()
+      || !finiteNumber(item.finding.actualKwh)
+      || !finiteNumber(item.finding.baselineKwh)
+      || !finiteNumber(item.finding.relativePct)
+      || item.evidence.bundleId !== bundle.bundleId
+      || item.evidence.metricId !== bundle.metricId
+      || item.evidence.queryIds.length !== 1
+      || item.evidence.queryIds[0] !== bundle.queryId
+      || item.evidence.ruleRevisionId !== bundle.ruleRevisionId
+      || item.evidence.period.from !== snapshot.context.primaryPeriod.start
+      || item.evidence.period.to !== snapshot.context.primaryPeriod.endExclusive
+      || item.impact.energy.status !== "available"
+      || !finiteNumber(item.impact.energy.deltaKwh)
+      || item.impact.cost.status !== "unavailable"
+      || item.impact.cost.reason.code !== "INCIDENT_COST_NOT_SUPPORTED_BY_CURRENT_EVIDENCE"
+      || !item.impact.cost.reason.message.trim()
+      || item.action.code !== "INSPECT_DAILY_USAGE_DRIVERS"
+      || !item.action.label.trim()
+      || item.action.targetIncidentId !== item.evidence.primaryIncidentId
+      || !validDecisionPriorityConfidence(item.confidence)
+    ) return false;
+    priorityIds.add(item.priorityId);
+    const primary = incidents.get(item.evidence.primaryIncidentId);
+    if (
+      !primary
+      || primary.row.outcome !== "triggered"
+      || primary.scope.scopeId !== item.evidence.occurrence.scopeId
+      || primary.scope.scopeName !== item.evidence.occurrence.scopeName
+      || primary.scope.scopeType !== item.evidence.occurrence.scopeType
+      || primary.row.localDate !== item.evidence.occurrence.localDate
+      || primary.row.from !== item.evidence.occurrence.from
+      || primary.row.to !== item.evidence.occurrence.to
+      || primary.row.actualKwh !== item.finding.actualKwh
+      || primary.row.baselineKwh !== item.finding.baselineKwh
+      || primary.row.relativePct !== item.finding.relativePct
+      || primary.row.impactKwh !== item.impact.energy.deltaKwh
+    ) return false;
+    const supportingIds = new Set(item.evidence.supportingIncidentIds);
+    if (
+      supportingIds.size !== item.evidence.supportingIncidentIds.length
+      || supportingIds.has(item.evidence.primaryIncidentId)
+    ) return false;
+    return item.evidence.supportingIncidentIds.every((incidentId) => {
+      const supporting = incidents.get(incidentId);
+      return Boolean(supporting
+        && supporting.row.localDate === primary.row.localDate
+        && supporting.row.ruleRevisionId === primary.row.ruleRevisionId
+        && supporting.row.metricId === primary.row.metricId);
+    });
+  });
+}
+
+function validDecisionPriorityEvidencePins(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  pins: NonNullable<EnergyProjectAnalysisSnapshotDto["decisionPriorities"]>["evidencePins"],
+): boolean {
+  const expected = {
+    projectReleaseId: snapshot.projectRelease.id,
+    dataSnapshotId: snapshot.dataSnapshot.id,
+    hierarchyRevisionId: snapshot.analysis.provenance.hierarchyRevisionId,
+    meterMappingRevisionId: snapshot.analysis.provenance.meterMappingRevisionId,
+    meterFormulaRevisionId: snapshot.analysis.provenance.meterFormulaRevisionId,
+    metricVersion: snapshot.analysis.provenance.metricVersion,
+    businessCalendarVersion: snapshot.context.businessCalendarVersion,
+  };
+  return pins.projectReleaseId === expected.projectReleaseId
+    && pins.dataSnapshotId === expected.dataSnapshotId
+    && pins.hierarchyRevisionId === expected.hierarchyRevisionId
+    && pins.meterMappingRevisionId === expected.meterMappingRevisionId
+    && pins.meterFormulaRevisionId === expected.meterFormulaRevisionId
+    && pins.metricVersion === expected.metricVersion
+    && pins.businessCalendarVersion === expected.businessCalendarVersion
+    && pins.queryIds.length === 1
+    && pins.queryIds[0] === "time_slot_anomaly_v1";
+}
+
+function validDecisionPriorityStatus(
+  source: NonNullable<EnergyProjectAnalysisSnapshotDto["decisionPriorities"]>,
+): boolean {
+  if (source.items.length > 3) return false;
+  if (source.status === "available") {
+    return source.items.length > 0
+      && source.limitation === null
+      && source.items.every((item) => item.confidence.status === "complete");
+  }
+  if (source.status === "empty") return source.items.length === 0 && source.limitation === null;
+  if (!source.limitation?.message.trim()) return false;
+  if (source.status === "suppressed") {
+    return source.items.length === 0 && source.limitation.code === "ALL_CANDIDATE_DATES_SUPPRESSED";
+  }
+  if (source.status === "partial") {
+    if (source.limitation.code === "SOME_CANDIDATE_DATES_SUPPRESSED") return true;
+    return source.items.length > 0
+      && source.limitation.code === "SUPPORTING_EVIDENCE_PARTIAL"
+      && source.items.some((item) => item.confidence.status === "partial");
+  }
+  return source.items.length === 0 && [
+    "DAILY_USAGE_ANOMALIES_ABSENT",
+    "DAILY_USAGE_ANOMALIES_UNAVAILABLE",
+    "DAILY_USAGE_ANOMALIES_CONTRACT_MISMATCH",
+    "EVIDENCE_PINS_MISMATCH",
+  ].includes(source.limitation.code);
+}
+
+function validDecisionPriorityConfidence(
+  confidence: NonNullable<EnergyProjectAnalysisSnapshotDto["decisionPriorities"]>["items"][number]["confidence"],
+): boolean {
+  if (confidence.status === "complete") return confidence.limitation === null;
+  return confidence.limitation?.code === "SUPPORTING_EVIDENCE_PARTIAL"
+    && Boolean(confidence.limitation.message.trim());
+}
+
+function finiteNumber(value: number): boolean {
+  return Number.isFinite(value);
+}
 
 function buildDailyAnomalies(
   snapshot: EnergyProjectAnalysisSnapshotDto,
@@ -2348,6 +2547,15 @@ function buildDataStatus(
       ? `Last seen ${formatTimestamp(latestSeenAt, snapshot.context.timezone)}`
       : "Last seen unavailable",
   };
+}
+
+function buildMetadataLimitation(snapshot: EnergyProjectAnalysisSnapshotDto): string | null {
+  const { area, headcount } = snapshot.metadata.selectedScope;
+  const missing: string[] = [];
+  if (area.status === "missing") missing.push("Area");
+  if (headcount.status === "missing") missing.push("headcount");
+  if (missing.length === 0) return null;
+  return `${missing.join(" and ")} metadata ${missing.length === 1 ? "is" : "are"} missing. This does not affect Total energy, Daily average, Peak interval-average power, Comparison or Cost; normalised metrics remain unavailable.`;
 }
 
 function formatDecimal(value: number, maximumFractionDigits: number): string {

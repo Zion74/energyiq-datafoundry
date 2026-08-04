@@ -44,13 +44,18 @@ const periodOptions: ReadonlyArray<{
 ];
 type OverviewPeriod = "Yesterday" | "Last 7 days" | "Previous week" | "Previous month" | "Custom";
 type ResourceType = "electricity" | "water";
-type OverviewUrlViewState = {
+export type OverviewComparison = "overlay" | "selected" | "average";
+export type OverviewCategory = "all" | "load" | "light";
+export type OverviewUrlViewState = {
   projectId: string;
   scopeId: string;
   resource: ResourceType;
   period: OverviewPeriod;
   from: string;
   to: string;
+  grain: "day" | "hour";
+  comparison: OverviewComparison;
+  category: OverviewCategory;
 };
 
 type LoadedResolution = {
@@ -144,7 +149,7 @@ function PublishedDecisionDashboardView({
       ...update,
       projectId: update.projectId ?? (base.projectId || projectId),
     };
-    const href = overviewUrlWithView(pendingUrlSearchRef.current, nextView);
+    const href = overviewUrlWithView(nextView);
     pendingUrlSearchRef.current = href.slice(href.indexOf("?") + 1);
     router.replace(href);
   };
@@ -477,6 +482,22 @@ function PublishedDecisionDashboardView({
               from: range.from,
               to: range.to,
             })}
+            comparison={initialViewState.comparison}
+            category={initialViewState.category}
+            onComparisonChange={(comparison) => navigateOverview({ comparison })}
+            onCategoryChange={(category) => navigateOverview({ category })}
+            projectExplorerHref={overviewHandoffHref("/energyiq/explorer", {
+              ...initialViewState,
+              projectId,
+              from: effectiveCustomRange.from,
+              to: effectiveCustomRange.to,
+            })}
+            aiAnalystHref={overviewHandoffHref("/energyiq/ai", {
+              ...initialViewState,
+              projectId,
+              from: effectiveCustomRange.from,
+              to: effectiveCustomRange.to,
+            })}
           />
         </div>
       ) : rendererState.status === "ready" ? (
@@ -609,13 +630,30 @@ export function overviewViewStateFromSearchParams(searchParams: Pick<URLSearchPa
     || requestedPeriod === "Custom"
     ? requestedPeriod
     : "Last 7 days";
+  const from = period === "Custom" ? searchParams.get("from") ?? "" : "";
+  const to = period === "Custom" ? searchParams.get("to") ?? "" : "";
+  const requestedGrain = searchParams.get("grain");
+  const grain = requestedGrain === "hour" && isHourGrainCompatible(period, from, to)
+    ? "hour"
+    : "day";
+  const requestedComparison = searchParams.get("comparison");
+  const comparison = requestedComparison === "selected" || requestedComparison === "average"
+    ? requestedComparison
+    : "overlay";
+  const requestedCategory = searchParams.get("category");
+  const category = requestedCategory === "load" || requestedCategory === "light"
+    ? requestedCategory
+    : "all";
   return {
     projectId: searchParams.get("projectId")?.trim() || "",
     scopeId: searchParams.get("scopeId")?.trim() || "project",
     resource: searchParams.get("resource") === "water" ? "water" : "electricity",
     period,
-    from: period === "Custom" ? searchParams.get("from") ?? "" : "",
-    to: period === "Custom" ? searchParams.get("to") ?? "" : "",
+    from,
+    to,
+    grain,
+    comparison,
+    category,
   };
 }
 
@@ -633,11 +671,10 @@ function isValidDateInput(value: string): boolean {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
-function overviewUrlWithView(
-  urlSearch: string,
+export function overviewUrlWithView(
   view: OverviewUrlViewState,
 ): string {
-  const next = new URLSearchParams(urlSearch);
+  const next = new URLSearchParams();
   if (view.projectId) next.set("projectId", view.projectId);
   else next.delete("projectId");
   next.set("scopeId", view.scopeId || "project");
@@ -647,10 +684,23 @@ function overviewUrlWithView(
     next.set("from", view.from);
     next.set("to", view.to);
   } else {
-    next.delete("from");
-    next.delete("to");
+    // Non-Custom Periods have no persisted date range.
   }
+  next.set("grain", isHourGrainCompatible(view.period, view.from, view.to) ? view.grain : "day");
+  next.set("comparison", view.comparison);
+  next.set("category", view.category);
   return `/energyiq/overview?${next.toString()}`;
+}
+
+function isHourGrainCompatible(period: OverviewPeriod, from: string, to: string): boolean {
+  return period === "Yesterday" || (period === "Custom" && Boolean(from) && from === to);
+}
+
+function overviewHandoffHref(
+  pathname: "/energyiq/explorer" | "/energyiq/ai",
+  view: OverviewUrlViewState,
+): string {
+  return overviewUrlWithView(view).replace("/energyiq/overview", pathname);
 }
 
 function scopeNodeDisplayPath(
