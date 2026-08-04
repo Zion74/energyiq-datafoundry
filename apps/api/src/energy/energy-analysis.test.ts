@@ -242,8 +242,26 @@ describe("EnergyScopeAnalysis", () => {
       ]);
       expect(analysis.circuits).toHaveLength(18);
       expect(analysis.categories).toMatchObject([
-        { category: "load", usageKwh: NGEE_ANN_GOLDEN.period.categoryUsageKwh.load },
-        { category: "light", usageKwh: NGEE_ANN_GOLDEN.period.categoryUsageKwh.light }
+        {
+          category: "load",
+          usageKwh: NGEE_ANN_GOLDEN.period.categories.load.usageKwh,
+          comparison: {
+            usageKwh: NGEE_ANN_GOLDEN.period.categories.load.previousUsageKwh,
+            changeKwh: NGEE_ANN_GOLDEN.period.categories.load.changeKwh,
+            changePct: NGEE_ANN_GOLDEN.period.categories.load.changePct,
+          },
+          dataHealth: NGEE_ANN_GOLDEN.period.categories.load.dataHealth,
+        },
+        {
+          category: "light",
+          usageKwh: NGEE_ANN_GOLDEN.period.categories.light.usageKwh,
+          comparison: {
+            usageKwh: NGEE_ANN_GOLDEN.period.categories.light.previousUsageKwh,
+            changeKwh: NGEE_ANN_GOLDEN.period.categories.light.changeKwh,
+            changePct: NGEE_ANN_GOLDEN.period.categories.light.changePct,
+          },
+          dataHealth: NGEE_ANN_GOLDEN.period.categories.light.dataHealth,
+        }
       ]);
       expect(roundForGolden(analysis.childScopes.reduce((sum, scope) => sum + scope.usageKwh, 0)))
         .toBe(NGEE_ANN_GOLDEN.period.usageKwh);
@@ -251,8 +269,52 @@ describe("EnergyScopeAnalysis", () => {
         .toBe(NGEE_ANN_GOLDEN.period.usageKwh);
       expect(analysis.topCircuits[0]).toMatchObject({
         meterNodeId: NGEE_ANN_GOLDEN.period.topCircuit.meterNodeId,
+        scopeId: NGEE_ANN_GOLDEN.period.topCircuit.scopeId,
+        parentScopeId: NGEE_ANN_GOLDEN.period.topCircuit.parentScopeId,
+        includedInOfficialTotal: false,
         usageKwh: NGEE_ANN_GOLDEN.period.topCircuit.usageKwh,
-        peakKw: NGEE_ANN_GOLDEN.period.topCircuit.peakKw
+        sharePct: NGEE_ANN_GOLDEN.period.topCircuit.sharePct,
+        peakKw: NGEE_ANN_GOLDEN.period.topCircuit.peakKw,
+        comparison: {
+          usageKwh: NGEE_ANN_GOLDEN.period.topCircuit.previousUsageKwh,
+          changeKwh: NGEE_ANN_GOLDEN.period.topCircuit.changeKwh,
+          changePct: NGEE_ANN_GOLDEN.period.topCircuit.changePct,
+        },
+        dataHealth: NGEE_ANN_GOLDEN.period.topCircuit.dataHealth,
+      });
+      expect(analysis.topCircuits.slice(0, 5).map((meter) => ({
+        meterNodeId: meter.meterNodeId,
+        scopeId: meter.scopeId,
+        parentScopeId: meter.parentScopeId,
+        usageKwh: meter.usageKwh,
+        sharePct: meter.sharePct,
+        previousUsageKwh: meter.comparison.usageKwh,
+        changeKwh: meter.comparison.changeKwh,
+        changePct: meter.comparison.changePct,
+        dataHealth: meter.dataHealth,
+      }))).toEqual(NGEE_ANN_GOLDEN.period.topCircuits);
+      expect(analysis.circuits.every(
+        (meter) => meter.parentScopeId?.startsWith("level-") === true,
+      )).toBe(true);
+      expect(analysis.designatedTotals).toHaveLength(NGEE_ANN_GOLDEN.officialMeterNodeIds.length);
+      expect(analysis.designatedTotals.every((meter) => meter.includedInOfficialTotal)).toBe(true);
+      expect(analysis.topCircuits.every((meter) => !meter.includedInOfficialTotal)).toBe(true);
+      const designatedMeterNodeIds = analysis.designatedTotals
+        .map((meter) => meter.meterNodeId)
+        .sort();
+      const componentMeterNodeIds = analysis.topCircuits.map((meter) => meter.meterNodeId).sort();
+      expect(designatedMeterNodeIds).toEqual([...NGEE_ANN_GOLDEN.officialMeterNodeIds].sort());
+      expect(componentMeterNodeIds).toHaveLength(14);
+      expect(componentMeterNodeIds.filter((meterNodeId) =>
+        designatedMeterNodeIds.includes(meterNodeId)
+      )).toEqual([]);
+      expect(roundForGolden(
+        analysis.designatedTotals.reduce((sum, meter) => sum + meter.usageKwh, 0),
+      )).toBeCloseTo(NGEE_ANN_GOLDEN.period.usageKwh, 3);
+      expect(analysis.componentReconciliation).toEqual({
+        ...NGEE_ANN_GOLDEN.period.componentReconciliation,
+        officialMeterNodeIds: designatedMeterNodeIds,
+        componentMeterNodeIds,
       });
       expect(analysis.hourlyProfile).toEqual(
         expectedHourlyProfile(NGEE_ANN_GOLDEN.period.hourlyProfile, 28)
@@ -295,6 +357,7 @@ describe("EnergyScopeAnalysis", () => {
         meterFormulaRevisionId: context.meterFormulaRevisionId,
         aggregationRule: "designated_total"
       });
+      expect(analysis.provenance.queryIds).toContain("previous_meter_usage_v1");
 
       const dayContext = resolveEnergyQueryContext({
         metadataStore: metadata,

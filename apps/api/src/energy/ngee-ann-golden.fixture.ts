@@ -72,21 +72,143 @@ export const NGEE_ANN_GOLDEN = {
       light: 291.7444,
       load: 1239.4239
     },
+    categories: {
+      light: {
+        usageKwh: 291.7444,
+        previousUsageKwh: 237.1791,
+        changeKwh: 54.5653,
+        changePct: 23.0059,
+        dataHealth: {
+          coveragePct: 100,
+          expectedMeterIntervalCount: 1344,
+          validIntervalCount: 1344,
+          qualityEventCount: 0
+        }
+      },
+      load: {
+        usageKwh: 1239.4239,
+        previousUsageKwh: 974.4981,
+        changeKwh: 264.9258,
+        changePct: 27.1859,
+        dataHealth: {
+          coveragePct: 100,
+          expectedMeterIntervalCount: 1344,
+          validIntervalCount: 1344,
+          qualityEventCount: 0
+        }
+      }
+    },
     topCircuit: {
       scopeId: "l7-load-4",
+      parentScopeId: "level-7",
       meterNodeId: "mapping-lvl-7-office-load-4-l1p22-l3p25-fan-isol1-2-16",
       usageKwh: 439.0972,
+      sharePct: 28.6773,
       previousUsageKwh: 247.9813,
       changeKwh: 191.1159,
       changePct: 77.0687,
-      peakKw: 3.5307
+      peakKw: 3.5307,
+      dataHealth: {
+        coveragePct: 100,
+        expectedMeterIntervalCount: 672,
+        validIntervalCount: 672,
+        qualityEventCount: 0
+      }
     },
-    totalCircuits: [
-      { scopeId: "l6-total-light", meterNodeId: "mapping-lvl-6-total-office-light-8", rawUsageKwh: 111.688071, apiUsageKwh: 111.6881 },
-      { scopeId: "l6-total-load", meterNodeId: "mapping-lvl-6-total-office-load-9", rawUsageKwh: 365.295756, apiUsageKwh: 365.2958 },
-      { scopeId: "l7-total-light", meterNodeId: "mapping-lvl-7-total-office-light-17", rawUsageKwh: 180.056316, apiUsageKwh: 180.0563 },
-      { scopeId: "l7-total-load", meterNodeId: "mapping-lvl-7-total-office-load-18", rawUsageKwh: 874.128181, apiUsageKwh: 874.1282 }
+    topCircuits: [
+      {
+        meterNodeId: "mapping-lvl-7-office-load-4-l1p22-l3p25-fan-isol1-2-16",
+        scopeId: "l7-load-4",
+        parentScopeId: "level-7",
+        usageKwh: 439.0972,
+        sharePct: 28.6773,
+        previousUsageKwh: 247.9813,
+        changeKwh: 191.1159,
+        changePct: 77.0687,
+        dataHealth: {
+          coveragePct: 100,
+          expectedMeterIntervalCount: 672,
+          validIntervalCount: 672,
+          qualityEventCount: 0
+        }
+      },
+      {
+        meterNodeId: "mapping-lvl-7-office-load-3-l1p16-l3p21-15",
+        scopeId: "l7-load-3",
+        parentScopeId: "level-7",
+        usageKwh: 337.9023,
+        sharePct: 22.0683,
+        previousUsageKwh: 0,
+        changeKwh: 337.9023,
+        changePct: null,
+        dataHealth: {
+          coveragePct: 100,
+          expectedMeterIntervalCount: 672,
+          validIntervalCount: 672,
+          qualityEventCount: 0
+        }
+      },
+      {
+        meterNodeId: "mapping-lvl-6-office-load-4-l1p19-l3p24-6",
+        scopeId: "l6-load-4",
+        parentScopeId: "level-6",
+        usageKwh: 255.1539,
+        sharePct: 16.664,
+        previousUsageKwh: 0,
+        changeKwh: 255.1539,
+        changePct: null,
+        dataHealth: {
+          coveragePct: 100,
+          expectedMeterIntervalCount: 672,
+          validIntervalCount: 672,
+          qualityEventCount: 0
+        }
+      },
+      {
+        meterNodeId: "mapping-lvl-7-front-row-office-light-11",
+        scopeId: "l7-front-light",
+        parentScopeId: "level-7",
+        usageKwh: 107.02,
+        sharePct: 6.9894,
+        previousUsageKwh: 0,
+        changeKwh: 107.02,
+        changePct: null,
+        dataHealth: {
+          coveragePct: 100,
+          expectedMeterIntervalCount: 672,
+          validIntervalCount: 672,
+          qualityEventCount: 0
+        }
+      },
+      {
+        meterNodeId: "mapping-lvl-6-office-light-right-internal-2",
+        scopeId: "l6-light-right",
+        parentScopeId: "level-6",
+        usageKwh: 70.6873,
+        sharePct: 4.6166,
+        previousUsageKwh: 0,
+        changeKwh: 70.6873,
+        changePct: null,
+        dataHealth: {
+          coveragePct: 100,
+          expectedMeterIntervalCount: 672,
+          validIntervalCount: 672,
+          qualityEventCount: 0
+        }
+      }
     ],
+    totalCircuits: [
+      { scopeId: "l6-total-light", parentScopeId: "level-6", meterNodeId: "mapping-lvl-6-total-office-light-8", rawUsageKwh: 111.688071, apiUsageKwh: 111.6881 },
+      { scopeId: "l6-total-load", parentScopeId: "level-6", meterNodeId: "mapping-lvl-6-total-office-load-9", rawUsageKwh: 365.295756, apiUsageKwh: 365.2958 },
+      { scopeId: "l7-total-light", parentScopeId: "level-7", meterNodeId: "mapping-lvl-7-total-office-light-17", rawUsageKwh: 180.056316, apiUsageKwh: 180.0563 },
+      { scopeId: "l7-total-load", parentScopeId: "level-7", meterNodeId: "mapping-lvl-7-total-office-load-18", rawUsageKwh: 874.128181, apiUsageKwh: 874.1282 }
+    ],
+    componentReconciliation: {
+      officialUsageKwh: 1531.1683,
+      componentUsageKwh: 1518.9965,
+      gapKwh: 12.1718,
+      ratioPct: 99.2051
+    },
     dataHealth: {
       status: "complete",
       coveragePct: 100,

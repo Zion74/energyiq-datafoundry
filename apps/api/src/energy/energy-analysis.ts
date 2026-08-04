@@ -55,6 +55,17 @@ export type EnergyScopeAnalysis = {
     category: string;
     usageKwh: number;
     sharePct: number;
+    comparison: {
+      usageKwh: number;
+      changeKwh: number;
+      changePct: number | null;
+    };
+    dataHealth: {
+      coveragePct: number;
+      expectedMeterIntervalCount: number;
+      validIntervalCount: number;
+      qualityEventCount: number;
+    };
   }>;
   childScopes: Array<{
     nodeId: string;
@@ -82,17 +93,40 @@ export type EnergyScopeAnalysis = {
   }>;
   circuits: Array<{
     meterNodeId: string;
+    scopeId: string;
+    parentScopeId?: string;
     name: string;
     appliance: string;
     category: string;
     meterRole: string;
+    includedInOfficialTotal: boolean;
     usageKwh: number;
     sharePct: number;
+    comparison: {
+      usageKwh: number;
+      changeKwh: number;
+      changePct: number | null;
+    };
+    dataHealth: {
+      coveragePct: number;
+      expectedMeterIntervalCount: number;
+      validIntervalCount: number;
+      qualityEventCount: number;
+    };
     nonOperatingKwh?: number;
     peakKw: number;
     qualityEventCount: number;
   }>;
   topCircuits: EnergyScopeAnalysis["circuits"];
+  designatedTotals: EnergyScopeAnalysis["circuits"];
+  componentReconciliation: {
+    officialUsageKwh: number;
+    componentUsageKwh: number;
+    gapKwh: number;
+    ratioPct: number | null;
+    officialMeterNodeIds: string[];
+    componentMeterNodeIds: string[];
+  };
   virtualMeters: Array<{
     meterNodeId: string;
     name: string;
@@ -169,6 +203,7 @@ export type EnergyScopeAnalysis = {
       "scope_summary_v1",
       "hourly_profile_v1",
       "meter_breakdown_v1",
+      "previous_meter_usage_v1",
       "operational_policy_scope_intervals_v1",
       "operational_policy_meter_intervals_v1",
     ];
@@ -511,7 +546,10 @@ export const executeEnergyScopeAnalysis = async (input: {
       user_id: input.userId,
       workspace_id: input.context.workspaceId,
       datasource_id: previousScoped.datasourceId,
-      sql: previousMeterUsageSql(previousScoped.viewName, aggregateMeterNodeIds),
+      sql: previousMeterUsageSql(
+        previousScoped.viewName,
+        meterAggregates.map((meter) => meter.meterNodeId),
+      ),
       limit: 1000,
     }),
     input.dataGateway.runSqlReadonly({
@@ -597,9 +635,10 @@ export const executeEnergyScopeAnalysis = async (input: {
       circuitOperatingByMeterId.set(meter.meterNodeId, evaluation.operating);
     }
   }
-  const expectedMeterIntervalCount = aggregateMeterNodeIds.length * Math.round(
-    periodDurationMs / (intervalMinutes * 60_000)
+  const expectedIntervalCountPerMeter = Math.round(
+    periodDurationMs / (intervalMinutes * 60_000),
   );
+  const expectedMeterIntervalCount = aggregateMeterNodeIds.length * expectedIntervalCountPerMeter;
   const scopeDimensions = resolveScopeDimensions(selectedNode.id, hierarchy);
   const childScopes = buildChildScopes({
     metadataStore: input.metadataStore,
@@ -615,17 +654,40 @@ export const executeEnergyScopeAnalysis = async (input: {
     periodDurationMs,
     intervalMinutes,
   });
+  const hierarchyById = new Map(hierarchy.map((node) => [node.id, node]));
   const circuits = meterAggregates
     .map((meter) => {
       const meterOperating = circuitOperatingByMeterId.get(meter.meterNodeId);
+      const parentScopeId = hierarchyById.get(meter.scopeId)?.parent_id;
+      const previousMeterUsageKwh = previousMeterUsageById.get(meter.meterNodeId) ?? 0;
+      const changeKwh = meter.usageKwh - previousMeterUsageKwh;
+      const expectedCircuitIntervalCount = expectedIntervalCountPerMeter;
       return {
         meterNodeId: meter.meterNodeId,
+        scopeId: meter.scopeId,
+        ...(parentScopeId ? { parentScopeId } : {}),
         name: meter.name,
         appliance: meter.appliance,
         category: meter.category,
         meterRole: meter.meterRole,
+        includedInOfficialTotal: aggregateMeterIds.has(meter.meterNodeId),
         usageKwh: round(meter.usageKwh, 4),
-        sharePct: percent(meter.usageKwh, usageKwh),
+        sharePct: percent(meter.usageKwh, usageKwh, 4),
+        comparison: {
+          usageKwh: round(previousMeterUsageKwh, 4),
+          changeKwh: round(changeKwh, 4),
+          changePct: previousMeterUsageKwh > 0
+            ? round((changeKwh / previousMeterUsageKwh) * 100, 4)
+            : null,
+        },
+        dataHealth: {
+          coveragePct: expectedCircuitIntervalCount > 0
+            ? round(Math.min(meter.validIntervalCount / expectedCircuitIntervalCount, 1) * 100, 4)
+            : 0,
+          expectedMeterIntervalCount: expectedCircuitIntervalCount,
+          validIntervalCount: meter.validIntervalCount,
+          qualityEventCount: meter.qualityEventCount,
+        },
         ...(meterOperating?.status === "available"
           ? { nonOperatingKwh: round(meterOperating.standby_kwh, 4) }
           : {}),
@@ -634,18 +696,71 @@ export const executeEnergyScopeAnalysis = async (input: {
       };
     })
     .sort((left, right) => right.usageKwh - left.usageKwh);
-  const topCircuits = circuits.filter((meter) => !aggregateMeterNodeIds.includes(meter.meterNodeId));
-  const categoryUsage = new Map<string, number>();
+  const designatedTotals = circuits.filter((meter) => meter.includedInOfficialTotal);
+  const topCircuits = circuits.filter((meter) => !meter.includedInOfficialTotal);
+  const categoryMeters = new Map<string, MeterAggregate[]>();
   for (const meter of aggregateMeters) {
-    categoryUsage.set(meter.category, (categoryUsage.get(meter.category) ?? 0) + meter.usageKwh);
+    categoryMeters.set(meter.category, [...(categoryMeters.get(meter.category) ?? []), meter]);
   }
-  const categories = [...categoryUsage.entries()]
-    .map(([category, categoryUsageKwh]) => ({
-      category,
-      usageKwh: round(categoryUsageKwh, 4),
-      sharePct: percent(categoryUsageKwh, usageKwh)
-    }))
+  const categories = [...categoryMeters.entries()]
+    .map(([category, meters]) => {
+      const categoryUsageKwh = meters.reduce((sum, meter) => sum + meter.usageKwh, 0);
+      const previousCategoryUsageKwh = meters.reduce(
+        (sum, meter) => sum + (previousMeterUsageById.get(meter.meterNodeId) ?? 0),
+        0,
+      );
+      const changeKwh = categoryUsageKwh - previousCategoryUsageKwh;
+      const expectedCategoryIntervalCount = meters.length * expectedIntervalCountPerMeter;
+      const validCategoryIntervalCount = meters.reduce(
+        (sum, meter) => sum + meter.validIntervalCount,
+        0,
+      );
+      const categoryQualityEventCount = meters.reduce(
+        (sum, meter) => sum + meter.qualityEventCount,
+        0,
+      );
+      return {
+        category,
+        usageKwh: round(categoryUsageKwh, 4),
+        sharePct: percent(categoryUsageKwh, usageKwh, 4),
+        comparison: {
+          usageKwh: round(previousCategoryUsageKwh, 4),
+          changeKwh: round(changeKwh, 4),
+          changePct: previousCategoryUsageKwh > 0
+            ? round((changeKwh / previousCategoryUsageKwh) * 100, 4)
+            : null,
+        },
+        dataHealth: {
+          coveragePct: expectedCategoryIntervalCount > 0
+            ? round(
+              Math.min(validCategoryIntervalCount / expectedCategoryIntervalCount, 1) * 100,
+              4,
+            )
+            : 0,
+          expectedMeterIntervalCount: expectedCategoryIntervalCount,
+          validIntervalCount: validCategoryIntervalCount,
+          qualityEventCount: categoryQualityEventCount,
+        },
+      };
+    })
     .sort((left, right) => right.usageKwh - left.usageKwh);
+  const officialUsageKwh = aggregateMeters.reduce((sum, meter) => sum + meter.usageKwh, 0);
+  const componentUsageKwh = meterAggregates
+    .filter((meter) => !aggregateMeterIds.has(meter.meterNodeId))
+    .reduce((sum, meter) => sum + meter.usageKwh, 0);
+  const componentReconciliation: EnergyScopeAnalysis["componentReconciliation"] = {
+    officialUsageKwh: round(officialUsageKwh, 4),
+    componentUsageKwh: round(componentUsageKwh, 4),
+    gapKwh: round(officialUsageKwh - componentUsageKwh, 4),
+    ratioPct: officialUsageKwh > 0
+      ? round((componentUsageKwh / officialUsageKwh) * 100, 4)
+      : null,
+    officialMeterNodeIds: [...aggregateMeterNodeIds].sort(),
+    componentMeterNodeIds: meterAggregates
+      .filter((meter) => !aggregateMeterIds.has(meter.meterNodeId))
+      .map((meter) => meter.meterNodeId)
+      .sort(),
+  };
   const virtualMeters = buildVirtualMeters({
     metadataStore: input.metadataStore,
     projectId: input.context.projectId,
@@ -723,6 +838,8 @@ export const executeEnergyScopeAnalysis = async (input: {
     childScopes,
     circuits,
     topCircuits,
+    designatedTotals,
+    componentReconciliation,
     virtualMeters,
     offHours,
     cost,
@@ -749,6 +866,7 @@ export const executeEnergyScopeAnalysis = async (input: {
         "scope_summary_v1",
         "hourly_profile_v1",
         "meter_breakdown_v1",
+        "previous_meter_usage_v1",
         "operational_policy_scope_intervals_v1",
         "operational_policy_meter_intervals_v1",
       ]

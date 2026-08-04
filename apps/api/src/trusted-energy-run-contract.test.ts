@@ -115,6 +115,7 @@ const snapshot = (): ProjectAnalysisSnapshot => ({
       "scope_summary_v1",
       "hourly_profile_v1",
       "meter_breakdown_v1",
+      "previous_meter_usage_v1",
       "operational_policy_scope_intervals_v1",
       "operational_policy_meter_intervals_v1",
     ]
@@ -133,7 +134,16 @@ const snapshot = (): ProjectAnalysisSnapshot => ({
       from: "2026-06-02T16:00:00.000Z", to: "2026-06-09T16:00:00.000Z",
       usageKwh: 1450, changeKwh: 81.1, changePct: 5.59
     },
-    categories: [], childScopes: [], circuits: [], topCircuits: [], virtualMeters: [],
+    categories: [], childScopes: [], circuits: [], topCircuits: [], designatedTotals: [],
+    componentReconciliation: {
+      officialUsageKwh: 1531.1,
+      componentUsageKwh: 0,
+      gapKwh: 1531.1,
+      ratioPct: 0,
+      officialMeterNodeIds: [],
+      componentMeterNodeIds: [],
+    },
+    virtualMeters: [],
     offHours: {
       status: "unavailable",
       reason: { code: "OPERATING_CALENDAR_VERSION_NOT_FOUND", message: "Published calendar was not found." },
@@ -160,6 +170,7 @@ const snapshot = (): ProjectAnalysisSnapshot => ({
         "scope_summary_v1",
         "hourly_profile_v1",
         "meter_breakdown_v1",
+        "previous_meter_usage_v1",
         "operational_policy_scope_intervals_v1",
         "operational_policy_meter_intervals_v1",
       ]
