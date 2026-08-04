@@ -11,13 +11,12 @@ export function NgeeAnnLevelComparison({
     <section aria-labelledby="ngee-ann-level-comparison" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-primary">Energy distribution</p>
-          <h3 id="ngee-ann-level-comparison" className="mt-1 text-base font-semibold tracking-[-0.015em] text-foreground">
-            Level comparison
+          <h3 id="ngee-ann-level-comparison" className="text-base font-semibold tracking-[-0.015em] text-foreground">
+            Energy distribution
           </h3>
-          <p className="mt-1 text-xs leading-5 text-muted">{view.decisionQuestion}</p>
+          <p className="mt-1 text-xs leading-5 text-muted">Level comparison · {view.decisionQuestion}</p>
         </div>
-        <p className="max-w-xl text-[11px] leading-5 text-muted-light">
+        <p className="max-w-xl text-[11px] leading-5 text-muted">
           Official-route energy, adjacent-period movement and accepted interval quality from one published Snapshot.
         </p>
       </div>
@@ -31,7 +30,7 @@ export function NgeeAnnLevelComparison({
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[860px] border-collapse text-left">
             <caption className="sr-only">Level 6 and Level 7 official energy comparison</caption>
-            <thead className="border-y border-border bg-surface-subtle text-[10px] font-medium uppercase tracking-[0.08em] text-muted-light">
+            <thead className="border-y border-border bg-surface-subtle text-[10px] font-medium uppercase tracking-[0.08em] text-muted">
               <tr>
                 <th scope="col" className="px-3 py-2.5">Level</th>
                 <th scope="col" className="px-3 py-2.5">Current</th>
@@ -72,7 +71,7 @@ export function NgeeAnnLevelComparison({
         </div>
       )}
 
-      <details className="mt-4 border-t border-border pt-3 text-[9px] leading-4 text-muted-light">
+      <details className="mt-4 border-t border-border pt-3 text-[10px] leading-4 text-muted">
         <summary className="cursor-pointer text-[10px] font-semibold text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
           Level evidence · {view.evidence.queryIds.length} shared queries
         </summary>
