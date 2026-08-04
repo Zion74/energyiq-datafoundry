@@ -4,16 +4,16 @@ summary: "GitHub Issue #24：把 Meter identity、导航挂载与官方汇总口
 doc_type: implementation
 tags: [开发记录, Meter Mapping, Published Route, Release, Golden]
 updated_at: "2026-08-04"
-status: implemented_pending_integration_acceptance
+status: accepted
 ---
 
 # Published Meter Routing 实施记录
 
 ## 1. 结论
 
-Issue #24 的 Worker 代码边界已实现、仍待 Integration 验收，GitHub Issue 保持 OPEN：正式分析不再用 Fact 的 `scope_id + meter_role` 猜测 Meter 归属或汇总成员，而是只读取 Mapping schema v2 中已发布的 attachment 与 `scope + resource + category` routes。Mapping fingerprint 覆盖两类关系，并以 `meter_mapping_revision_id` 进入 Template Revision、Project Release、Analysis provenance 与 Saved analysis 冻结证据。
+Issue #24 已通过 Integration API 与 Chrome 验收：正式分析不再用 Fact 的 `scope_id + meter_role` 猜测 Meter 归属或汇总成员，而是只读取 Mapping schema v2 中已发布的 attachment 与 `scope + resource + category` routes。Mapping fingerprint 覆盖两类关系，并以 `meter_mapping_revision_id` 进入 Template Revision、Project Release、Analysis provenance 与 Saved analysis 冻结证据。
 
-这项工作服务于 Overview 北极星：先证明 Project、Level 与 Circuit 下钻使用同一组可审计事实且不会 double count，再进入 Tariff/Calendar 与 Overview Renderer 验收。它没有修改 Integration metadata、SQLite 或 DuckDB，也没有代替 Project Publish、Overview UI 或客户 Release 切换。
+这项工作服务于 Overview 北极星：先证明 Project、Level 与 Circuit 下钻使用同一组可审计事实且不会 double count，再进入 Tariff/Calendar 与 Overview Renderer 验收。本次只在 Integration 环境完成 Mapping materialization、Project Publish 与验收，没有切换客户环境 Release。
 
 ## 2. 权威模型
 
@@ -57,8 +57,17 @@ Template Revision 发布时同时 pin：
 - `node --check scripts/smoke-energy-trusted-scope.mjs`：通过；
 - `git diff --check`：通过。
 
+Integration 发布与事实审计：
+
+- Published Mapping 为 schema v2，包含 `18` 个稳定 source labels，状态为 `confirmed`；
+- 共 `24` 条 official routes：`18` 条 own-Circuit、`4` 条 Level、`2` 条 Project；Project routes 的官方成员严格限定为 4 个 total meters；
+- Release pins：Data Snapshot `energy-snapshot-c33cc8bb7ba0cfc01c7c2d0a`、Meter Mapping `meter-routing-8006ca893a46dac77957cfe0`、Hierarchy v6、Template v4；
+- materialized facts 为 `100205`；invalid、unmapped、duplicate 均为 `0`，`32` 个 overlap warnings 保留为可见质量提示，不改变官方汇总；
+- Scope API exact Golden 共 `21/21` 通过：Project `1531.1683` kWh、Level 6 `476.9838` kWh、Level 7 `1054.1845` kWh，并与 4 个 total Circuit 及 14 个 component Circuit 的固定口径对账；
+- Chrome UI 回读显示 `18` 个 labels 与 `Confirmed` 状态，控制台无错误。
+
 ## 6. 下一步
 
-由主 Agent 在 Integration 先合入代码，再用权威 Excel materialization 的 Published Mapping 创建/验证 Project Release。随后执行 Tariff/Operating Calendar 与 Overview/Saved v1→v2 Golden acceptance；只有 Overview 的 finding、evidence、impact 与 action 能在同一 Release 下被业务人员验证，才说明北极星方法成立。在这些验收完成并回填证据前，Issue #24 继续保持 OPEN。
+Issue #24 的 Mapping 实现与 Integration acceptance 已收口，下一执行边界转入 Overview ticket #6。Chrome 验收中发现的 Overview Custom URL 状态恢复问题归属 #6；它不改变已发布 Mapping、Release pins、Scope API Golden 或事实审计结果，因此不是 #24 的 Mapping failure。
 
 当前 resolver 为保证正确性会在同一请求的 Context/route/child scope 链路重复解析 Published hierarchy snapshot；这是已知性能 P2。本轮不引入缓存或扩大架构 seam，后续只在 profiling 证明有实际开销时增加 request-scoped memoization。
