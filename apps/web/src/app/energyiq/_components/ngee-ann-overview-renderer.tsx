@@ -2,6 +2,7 @@ import React from "react";
 
 import type { EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
 import { EnergyIcon } from "./icons";
+import { NgeeAnnEnergyComposition } from "./ngee-ann-energy-composition";
 import { NgeeAnnLevelComparison } from "./ngee-ann-level-comparison";
 import {
   buildNgeeAnnOverviewViewModel,
@@ -120,6 +121,8 @@ export function NgeeAnnOverviewRenderer({
       </div>
 
       <NgeeAnnLevelComparison view={view.levelComparison} />
+
+      <NgeeAnnEnergyComposition view={view.energyComposition} />
 
       <div className="px-5 py-4 lg:px-7">
         <div>

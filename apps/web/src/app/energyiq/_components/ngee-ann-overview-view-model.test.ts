@@ -63,6 +63,78 @@ describe("Ngee Ann Overview ViewModel", () => {
         meterMappingRevisionId: "mapping-v1",
       },
     });
+    expect(view.energyComposition).toMatchObject({
+      decisionQuestion: "What explains the official Project total?",
+      categories: {
+        status: "available",
+        rows: [
+          {
+            id: "load",
+            currentUsageKwh: "1239.4239",
+            projectShare: "80.9463%",
+            previousUsageKwh: "974.4981",
+            changeKwh: "+264.9258 kWh",
+            changePct: "+27.1859%",
+            quality: { coverage: "100% coverage", intervals: "1,344 / 1,344" },
+          },
+          {
+            id: "light",
+            currentUsageKwh: "291.7444",
+            projectShare: "19.0537%",
+            previousUsageKwh: "237.1791",
+            changeKwh: "+54.5653 kWh",
+            changePct: "+23.0059%",
+          },
+        ],
+      },
+      circuits: {
+        status: "available",
+        rows: [
+          {
+            rank: 1,
+            meterNodeId: "mapping-lvl-7-office-load-4-l1p22-l3p25-fan-isol1-2-16",
+            scopeId: "l7-load-4",
+            parentScopeId: "level-7",
+            levelName: "Level 7",
+            category: "Load",
+            currentUsageKwh: "439.0972",
+            projectShare: "28.6773%",
+            previousUsageKwh: "247.9813",
+            changeKwh: "+191.1159 kWh",
+            changePct: "+77.0687%",
+            includedInOfficialTotal: false,
+          },
+          { rank: 2, scopeId: "l7-load-3", currentUsageKwh: "337.9023" },
+          { rank: 3, scopeId: "l6-load-4", currentUsageKwh: "255.1539" },
+          { rank: 4, scopeId: "l7-front-light", currentUsageKwh: "107.02" },
+          { rank: 5, scopeId: "l6-light-right", currentUsageKwh: "70.6873" },
+        ],
+      },
+      accounting: {
+        status: "available",
+        designatedTotals: expect.arrayContaining([
+          expect.objectContaining({ scopeId: "l7-total-load", includedInOfficialTotal: true }),
+          expect.objectContaining({ scopeId: "l6-total-load", includedInOfficialTotal: true }),
+          expect.objectContaining({ scopeId: "l7-total-light", includedInOfficialTotal: true }),
+          expect.objectContaining({ scopeId: "l6-total-light", includedInOfficialTotal: true }),
+        ]),
+        reconciliation: {
+          officialUsageKwh: "1531.1683",
+          componentUsageKwh: "1518.9965",
+          gapKwh: "12.1718",
+          ratioPct: "99.2051%",
+          officialMeterCount: 4,
+          componentMeterCount: 14,
+        },
+      },
+      evidence: {
+        snapshotId: "snapshot-ngee-ann-golden",
+        projectReleaseId: "release-ngee-ann-golden",
+        meterMappingRevisionId: "mapping-v1",
+        period: "[2026-06-09T16:00:00.000Z, 2026-06-16T16:00:00.000Z)",
+        unit: "kWh",
+      },
+    });
     expect(view.evidence).toMatchObject({
       snapshotId: "snapshot-ngee-ann-golden",
       projectReleaseId: "release-ngee-ann-golden",
@@ -117,6 +189,80 @@ describe("Ngee Ann Overview ViewModel", () => {
         snapshotId: "snapshot-ngee-ann-golden",
         meterMappingRevisionId: "mapping-v1",
       },
+    });
+  });
+
+  it("keeps official Categories available while Circuit and accounting contracts fail closed", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    delete snapshot.analysis.topCircuits[0]!.parentScopeId;
+    delete snapshot.analysis.designatedTotals![0]!.includedInOfficialTotal;
+    delete snapshot.analysis.componentReconciliation;
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.energyComposition.categories).toMatchObject({
+      status: "available",
+      rows: [
+        { id: "load", currentUsageKwh: "1239.4239" },
+        { id: "light", currentUsageKwh: "291.7444" },
+      ],
+    });
+    expect(view.energyComposition.circuits).toMatchObject({
+      status: "unavailable",
+      rows: [],
+    });
+    expect(view.energyComposition.accounting).toMatchObject({
+      status: "unavailable",
+      designatedTotals: [],
+      reconciliation: null,
+    });
+  });
+
+  it("rejects an accounting contract that would count one meter as official and component", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const reconciliation = snapshot.analysis.componentReconciliation!;
+    reconciliation.componentMeterNodeIds.push(reconciliation.officialMeterNodeIds[0]!);
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.energyComposition.categories.status).toBe("available");
+    expect(view.energyComposition.circuits.status).toBe("available");
+    expect(view.energyComposition.accounting).toMatchObject({
+      status: "unavailable",
+      reason: expect.stringContaining("non-overlapping"),
+      reconciliation: null,
+    });
+  });
+
+  it("rejects reconciliation meter sets with extra or missing identities", () => {
+    const extraOfficialSnapshot = ngeeAnnGoldenSnapshot();
+    extraOfficialSnapshot.analysis.componentReconciliation!.officialMeterNodeIds.push("unexpected-official-meter");
+    const missingComponentSnapshot = ngeeAnnGoldenSnapshot();
+    missingComponentSnapshot.analysis.componentReconciliation!.componentMeterNodeIds.pop();
+
+    expect(buildNgeeAnnOverviewViewModel(extraOfficialSnapshot).energyComposition.accounting.status)
+      .toBe("unavailable");
+    expect(buildNgeeAnnOverviewViewModel(missingComponentSnapshot).energyComposition.accounting.status)
+      .toBe("unavailable");
+  });
+
+  it("formats the authoritative reconciliation without recomputing it from displayed rows", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    snapshot.analysis.componentReconciliation = {
+      ...snapshot.analysis.componentReconciliation!,
+      officialUsageKwh: 2_000,
+      componentUsageKwh: 1_500,
+      gapKwh: 500,
+      ratioPct: 75,
+    };
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.energyComposition.accounting.reconciliation).toMatchObject({
+      officialUsageKwh: "2000",
+      componentUsageKwh: "1500",
+      gapKwh: "500",
+      ratioPct: "75%",
     });
   });
 

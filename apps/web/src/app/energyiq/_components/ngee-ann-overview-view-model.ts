@@ -47,6 +47,80 @@ export type NgeeAnnLevelComparisonViewModel = {
   };
 };
 
+type CompositionStatus = {
+  status: "available" | "unavailable";
+  reason: string | null;
+};
+
+type CompositionQuality = {
+  coverage: string;
+  intervals: string;
+  qualityEvents: string;
+};
+
+export type NgeeAnnEnergyCompositionViewModel = {
+  decisionQuestion: string;
+  categories: CompositionStatus & {
+    rows: Array<{
+      id: string;
+      name: string;
+      currentUsageKwh: string;
+      projectShare: string;
+      previousUsageKwh: string;
+      changeKwh: string;
+      changePct: string;
+      quality: CompositionQuality;
+    }>;
+  };
+  circuits: CompositionStatus & {
+    rows: Array<{
+      rank: number;
+      meterNodeId: string;
+      name: string;
+      scopeId: string;
+      parentScopeId: string;
+      levelName: string;
+      category: string;
+      currentUsageKwh: string;
+      projectShare: string;
+      previousUsageKwh: string;
+      changeKwh: string;
+      changePct: string;
+      includedInOfficialTotal: false;
+      quality: CompositionQuality;
+    }>;
+  };
+  accounting: CompositionStatus & {
+    designatedTotals: Array<{
+      meterNodeId: string;
+      name: string;
+      scopeId: string;
+      parentScopeId: string;
+      levelName: string;
+      category: string;
+      currentUsageKwh: string;
+      includedInOfficialTotal: true;
+      quality: CompositionQuality;
+    }>;
+    reconciliation: null | {
+      officialUsageKwh: string;
+      componentUsageKwh: string;
+      gapKwh: string;
+      ratioPct: string;
+      officialMeterCount: number;
+      componentMeterCount: number;
+    };
+  };
+  evidence: {
+    snapshotId: string;
+    projectReleaseId: string;
+    meterMappingRevisionId: string;
+    queryIds: string[];
+    period: string;
+    unit: "kWh";
+  };
+};
+
 export type NgeeAnnOverviewViewModel = {
   context: {
     projectName: string;
@@ -68,6 +142,7 @@ export type NgeeAnnOverviewViewModel = {
   };
   highlights: NgeeAnnOverviewHighlight[];
   levelComparison: NgeeAnnLevelComparisonViewModel;
+  energyComposition: NgeeAnnEnergyCompositionViewModel;
   evidence: {
     snapshotId: string;
     projectReleaseId: string;
@@ -211,6 +286,7 @@ export function buildNgeeAnnOverviewViewModel(
       },
     ],
     levelComparison: buildLevelComparison(snapshot, unavailable),
+    energyComposition: buildEnergyComposition(snapshot, unavailable),
     evidence: {
       snapshotId: snapshot.dataSnapshot.id,
       projectReleaseId: snapshot.projectRelease.id,
@@ -275,6 +351,191 @@ export function buildNgeeAnnOverviewViewModel(
         },
     },
     latestAvailableRange,
+  };
+}
+
+function buildEnergyComposition(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  overviewUnavailable: boolean,
+): NgeeAnnEnergyCompositionViewModel {
+  const analysis = snapshot.analysis;
+  const evidence: NgeeAnnEnergyCompositionViewModel["evidence"] = {
+    snapshotId: snapshot.dataSnapshot.id,
+    projectReleaseId: snapshot.projectRelease.id,
+    meterMappingRevisionId: analysis.provenance.meterMappingRevisionId,
+    queryIds: [...analysis.provenance.queryIds],
+    period: `[${snapshot.context.primaryPeriod.start}, ${snapshot.context.primaryPeriod.endExclusive})`,
+    unit: "kWh",
+  };
+  const unavailableReason = overviewUnavailable
+    ? "No trusted intervals support energy composition for this Period."
+    : snapshot.context.scopeType !== "project"
+      ? "Select the Project Scope to explain the official Project total."
+      : null;
+  const levelNames = new Map(
+    analysis.childScopes
+      .filter((scope) => scope.nodeType === "level")
+      .map((scope) => [scope.nodeId, scope.name]),
+  );
+
+  const expectedCategories = new Set(["load", "light"]);
+  const categoryContractAvailable = unavailableReason === null
+    && analysis.categories.length === expectedCategories.size
+    && analysis.categories.every((category) =>
+      expectedCategories.has(category.category)
+      && hasComparisonAndHealth(category),
+    );
+  const categories: NgeeAnnEnergyCompositionViewModel["categories"] = categoryContractAvailable
+    ? {
+      status: "available",
+      reason: null,
+      rows: analysis.categories.map((category) => ({
+        id: category.category,
+        name: compositionCategoryName(category.category),
+        currentUsageKwh: formatDecimal(category.usageKwh, 4),
+        projectShare: `${formatDecimal(category.sharePct, 4)}%`,
+        previousUsageKwh: formatDecimal(category.comparison!.usageKwh, 4),
+        changeKwh: `${signedDecimal(category.comparison!.changeKwh, 4)} kWh`,
+        changePct: category.comparison!.changePct === null
+          ? "Rate unavailable"
+          : `${category.comparison!.changePct! >= 0 ? "+" : ""}${formatDecimal(category.comparison!.changePct!, 4)}%`,
+        quality: compositionQuality(category.dataHealth!),
+      })),
+    }
+    : {
+      status: "unavailable",
+      reason: unavailableReason
+        ?? "This published Snapshot does not include complete official Load and Light comparison facts.",
+      rows: [],
+    };
+
+  const topCircuits = analysis.topCircuits.slice(0, 5);
+  const circuitContractAvailable = unavailableReason === null
+    && topCircuits.length === 5
+    && topCircuits.every((circuit) =>
+      circuit.includedInOfficialTotal === false
+      && Boolean(circuit.scopeId)
+      && Boolean(circuit.parentScopeId)
+      && levelNames.has(circuit.parentScopeId!)
+      && hasComparisonAndHealth(circuit),
+    );
+  const circuits: NgeeAnnEnergyCompositionViewModel["circuits"] = circuitContractAvailable
+    ? {
+      status: "available",
+      reason: null,
+      rows: topCircuits.map((circuit, index) => ({
+        rank: index + 1,
+        meterNodeId: circuit.meterNodeId,
+        name: circuit.name,
+        scopeId: circuit.scopeId!,
+        parentScopeId: circuit.parentScopeId!,
+        levelName: levelNames.get(circuit.parentScopeId!)!,
+        category: compositionCategoryName(circuit.category),
+        currentUsageKwh: formatDecimal(circuit.usageKwh, 4),
+        projectShare: `${formatDecimal(circuit.sharePct, 4)}%`,
+        previousUsageKwh: formatDecimal(circuit.comparison!.usageKwh, 4),
+        changeKwh: `${signedDecimal(circuit.comparison!.changeKwh, 4)} kWh`,
+        changePct: circuit.comparison!.changePct === null
+          ? "Rate unavailable"
+          : `${circuit.comparison!.changePct! >= 0 ? "+" : ""}${formatDecimal(circuit.comparison!.changePct!, 4)}%`,
+        includedInOfficialTotal: false,
+        quality: compositionQuality(circuit.dataHealth!),
+      })),
+    }
+    : {
+      status: "unavailable",
+      reason: unavailableReason
+        ?? "This published Snapshot does not explicitly identify five component Circuit Scopes, parents, official-total markers, comparisons and quality.",
+      rows: [],
+    };
+
+  const designatedTotals = analysis.designatedTotals ?? [];
+  const reconciliation = analysis.componentReconciliation;
+  const officialMeterIds = new Set(reconciliation?.officialMeterNodeIds ?? []);
+  const componentMeterIds = new Set(reconciliation?.componentMeterNodeIds ?? []);
+  const accountingContractAvailable = unavailableReason === null
+    && designatedTotals.length === 4
+    && Boolean(reconciliation)
+    && reconciliation!.ratioPct !== null
+    && officialMeterIds.size === designatedTotals.length
+    && componentMeterIds.size === analysis.topCircuits.length
+    && designatedTotals.every((circuit) =>
+      circuit.includedInOfficialTotal === true
+      && Boolean(circuit.scopeId)
+      && Boolean(circuit.parentScopeId)
+      && levelNames.has(circuit.parentScopeId!)
+      && Boolean(circuit.dataHealth)
+      && officialMeterIds.has(circuit.meterNodeId)
+      && !componentMeterIds.has(circuit.meterNodeId),
+    )
+    && topCircuits.every((circuit) =>
+      componentMeterIds.has(circuit.meterNodeId)
+      && !officialMeterIds.has(circuit.meterNodeId),
+    );
+  const accounting: NgeeAnnEnergyCompositionViewModel["accounting"] = accountingContractAvailable
+    ? {
+      status: "available",
+      reason: null,
+      designatedTotals: designatedTotals.map((circuit) => ({
+        meterNodeId: circuit.meterNodeId,
+        name: circuit.name,
+        scopeId: circuit.scopeId!,
+        parentScopeId: circuit.parentScopeId!,
+        levelName: levelNames.get(circuit.parentScopeId!)!,
+        category: compositionCategoryName(circuit.category),
+        currentUsageKwh: formatDecimal(circuit.usageKwh, 4),
+        includedInOfficialTotal: true,
+        quality: compositionQuality(circuit.dataHealth!),
+      })),
+      reconciliation: {
+        officialUsageKwh: formatDecimal(reconciliation!.officialUsageKwh, 4),
+        componentUsageKwh: formatDecimal(reconciliation!.componentUsageKwh, 4),
+        gapKwh: formatDecimal(reconciliation!.gapKwh, 4),
+        ratioPct: `${formatDecimal(reconciliation!.ratioPct!, 4)}%`,
+        officialMeterCount: reconciliation!.officialMeterNodeIds.length,
+        componentMeterCount: reconciliation!.componentMeterNodeIds.length,
+      },
+    }
+    : {
+      status: "unavailable",
+      reason: unavailableReason
+        ?? "This published Snapshot does not include an explicit, non-overlapping designated-total and component reconciliation contract.",
+      designatedTotals: [],
+      reconciliation: null,
+    };
+
+  return {
+    decisionQuestion: "What explains the official Project total?",
+    categories,
+    circuits,
+    accounting,
+    evidence,
+  };
+}
+
+function hasComparisonAndHealth(value: {
+  comparison?: unknown;
+  dataHealth?: unknown;
+}): boolean {
+  return Boolean(value.comparison) && Boolean(value.dataHealth);
+}
+
+function compositionCategoryName(category: string): string {
+  if (category === "load") return "Load";
+  if (category === "light") return "Light";
+  return category;
+}
+
+function compositionQuality(quality: {
+  coveragePct: number;
+  expectedMeterIntervalCount: number;
+  validIntervalCount: number;
+  qualityEventCount: number;
+}): CompositionQuality {
+  return {
+    coverage: `${formatDecimal(quality.coveragePct, 1)}% coverage`,
+    intervals: `${quality.validIntervalCount.toLocaleString("en-SG")} / ${quality.expectedMeterIntervalCount.toLocaleString("en-SG")}`,
+    qualityEvents: `${quality.qualityEventCount.toLocaleString("en-SG")} quality events`,
   };
 }
 

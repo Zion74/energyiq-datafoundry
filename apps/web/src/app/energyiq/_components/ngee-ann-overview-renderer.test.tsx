@@ -36,6 +36,33 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("476.9838");
     expect(markup).toContain("31.1516%");
     expect(markup).toContain("-0.0142%");
+    expect(markup).toContain("Energy composition");
+    expect(markup).toContain("What explains the official Project total?");
+    expect(markup).toContain("Official categories");
+    expect(markup).toContain("1239.4239 kWh");
+    expect(markup).toContain("80.9463%");
+    expect(markup).toContain("291.7444 kWh");
+    expect(markup).toContain("19.0537%");
+    expect(markup).toContain("Top 5 component Circuits");
+    expect(markup).toContain("439.0972 kWh");
+    expect(markup).toContain("28.6773%");
+    expect(markup).toContain("70.6873 kWh");
+    expect(markup).toContain("4.6166%");
+    expect(markup).toContain("Explanatory only");
+    expect(markup).toContain("Accounting trace");
+    expect(markup).toContain("Included once");
+    expect(markup).toContain("Component Circuits explain 1518.9965 kWh of 1531.1683 kWh (99.2051%).");
+    expect(markup).toContain("The 12.1718 kWh difference remains outside the component breakdown");
+    expect(markup).toContain("it is not classified here as an anomaly, missing data or savings");
+    expect(markup).toContain("Designated rows are rounded for display; the server-reconciled official total is authoritative.");
+    expect(markup).toContain("Composition evidence");
+    expect(markup).toContain("Circuit evidence");
+    expect(markup).toContain("l7-load-4");
+    expect(markup).toContain("level-7");
+    expect(markup).toContain("No · explanatory component");
+    expect(markup).toContain("[2026-06-09T16:00:00.000Z, 2026-06-16T16:00:00.000Z)");
+    expect(markup.indexOf("Level comparison")).toBeLessThan(markup.indexOf("Energy composition"));
+    expect(markup.indexOf("Energy composition")).toBeLessThan(markup.indexOf("Snapshot &amp; evidence"));
     expect(markup).toContain("mapping-v1");
     expect(markup).toContain("snapshot-ngee-ann-golden");
     expect(markup).toContain("View reproducible evidence");
@@ -76,6 +103,25 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Level comparison unavailable");
     expect(markup).toContain("does not include the Level comparison and quality contract");
     expect(markup).not.toContain("1054.1845");
+  });
+
+  it("keeps Category facts visible when explicit Circuit and accounting evidence is unavailable", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    delete snapshot.analysis.topCircuits[0]!.includedInOfficialTotal;
+    delete snapshot.analysis.topCircuits[0]!.parentScopeId;
+    delete snapshot.analysis.componentReconciliation;
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+
+    expect(markup).toContain("Official categories");
+    expect(markup).toContain("1239.4239 kWh");
+    expect(markup).toContain("291.7444 kWh");
+    expect(markup).toContain("Component Circuit ranking unavailable");
+    expect(markup).toContain("Accounting trace unavailable");
+    expect(markup).not.toContain("439.0972 kWh");
+    expect(markup).not.toContain("1518.9965 kWh");
   });
 
   it("shows partial accepted values and fails closed for an unavailable selection", () => {

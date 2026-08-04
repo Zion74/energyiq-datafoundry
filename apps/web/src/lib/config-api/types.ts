@@ -386,6 +386,37 @@ export type EnergyPolicyUnavailableReasonDto = {
   message: string;
 };
 
+export type EnergyAnalysisComparisonDto = {
+  usageKwh: number;
+  changeKwh: number;
+  changePct: number | null;
+};
+
+export type EnergyAnalysisDataHealthDto = {
+  coveragePct: number;
+  expectedMeterIntervalCount: number;
+  validIntervalCount: number;
+  qualityEventCount: number;
+};
+
+export type EnergyCircuitAnalysisDto = {
+  meterNodeId: string;
+  name: string;
+  appliance: string;
+  category: string;
+  meterRole: string;
+  usageKwh: number;
+  sharePct: number;
+  nonOperatingKwh?: number;
+  peakKw: number;
+  qualityEventCount: number;
+  scopeId?: string;
+  parentScopeId?: string;
+  includedInOfficialTotal?: boolean;
+  comparison?: EnergyAnalysisComparisonDto;
+  dataHealth?: EnergyAnalysisDataHealthDto;
+};
+
 export type EnergyScopeAnalysisDto = {
   context: EnergyQueryContextDto;
   summary: {
@@ -420,6 +451,8 @@ export type EnergyScopeAnalysisDto = {
     category: string;
     usageKwh: number;
     sharePct: number;
+    comparison?: EnergyAnalysisComparisonDto;
+    dataHealth?: EnergyAnalysisDataHealthDto;
   }>;
   childScopes: Array<{
     nodeId: string;
@@ -427,17 +460,8 @@ export type EnergyScopeAnalysisDto = {
     nodeType: string;
     usageKwh: number;
     sharePct: number;
-    comparison?: {
-      usageKwh: number;
-      changeKwh: number;
-      changePct: number | null;
-    };
-    dataHealth?: {
-      coveragePct: number;
-      expectedMeterIntervalCount: number;
-      validIntervalCount: number;
-      qualityEventCount: number;
-    };
+    comparison?: EnergyAnalysisComparisonDto;
+    dataHealth?: EnergyAnalysisDataHealthDto;
     areaSqm?: number;
     occupantCount?: number;
     kwhPerSqm?: number;
@@ -445,19 +469,17 @@ export type EnergyScopeAnalysisDto = {
     topCircuitName?: string;
     topCircuitUsageKwh?: number;
   }>;
-  circuits: Array<{
-    meterNodeId: string;
-    name: string;
-    appliance: string;
-    category: string;
-    meterRole: string;
-    usageKwh: number;
-    sharePct: number;
-    nonOperatingKwh?: number;
-    peakKw: number;
-    qualityEventCount: number;
-  }>;
+  circuits: EnergyCircuitAnalysisDto[];
   topCircuits: EnergyScopeAnalysisDto["circuits"];
+  designatedTotals?: EnergyCircuitAnalysisDto[];
+  componentReconciliation?: {
+    officialUsageKwh: number;
+    componentUsageKwh: number;
+    gapKwh: number;
+    ratioPct: number | null;
+    officialMeterNodeIds: string[];
+    componentMeterNodeIds: string[];
+  };
   virtualMeters: Array<{
     meterNodeId: string;
     name: string;
