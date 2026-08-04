@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
+import { overviewViewStateFromSearchParams } from "./published-decision-dashboard";
+
 const rendererSource = readFileSync(new URL("./energy-template-renderer.tsx", import.meta.url), "utf8");
 const shellSource = readFileSync(new URL("./energyiq-shell.tsx", import.meta.url), "utf8");
 const explorerSource = readFileSync(new URL("./project-explorer.tsx", import.meta.url), "utf8");
@@ -50,11 +52,20 @@ describe("EnergyIQ UI regressions", () => {
     expect(adminSource).toContain("xl:grid-cols-[minmax(340px,400px)_minmax(0,1fr)]");
   });
 
-  it("does not ship a demo range or mislabel rolling 30 days as the previous month", () => {
+  it("restores the public Overview URL without shipping a demo range or fake previous month", () => {
     expect(overviewSource).not.toContain("demoRangeForProject");
     expect(overviewSource).not.toContain('value: "Last 30 days"');
     expect(overviewSource).toContain('{ label: "Previous month", disabled: true');
-    expect(overviewSource).toContain('useState<OverviewPeriod>("Last 7 days")');
+    expect(overviewViewStateFromSearchParams(new URLSearchParams(
+      "projectId=ngee-ann-polytechnic&scopeId=level-6&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16",
+    ))).toEqual({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "level-6",
+      resource: "electricity",
+      period: "Custom",
+      from: "2026-06-10",
+      to: "2026-06-16",
+    });
   });
 
   it("keeps Project Explorer as a narrow data-verification surface", () => {
