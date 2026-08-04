@@ -136,9 +136,26 @@ describe("EnergyTemplateRenderer states", () => {
     };
     const offHoursMarkup = renderToStaticMarkup(<EnergyTemplateRenderer state={{ status: "ready", analysis, plan }} />);
 
+    analysis.offHours = {
+      status: "available",
+      operatingKwh: 73,
+      standbyKwh: 27,
+      usageKwh: 27,
+      sharePct: 27,
+      timezone: "Asia/Singapore",
+      businessCalendarVersion: "calendar-v1",
+    };
+    const operatingMarkup = renderToStaticMarkup(<EnergyTemplateRenderer state={{ status: "ready", analysis, plan }} />);
+
     expect(costMarkup).toContain("S$27.27");
     expect(costMarkup).toContain("Tariff tariff-v1");
     expect(offHoursMarkup).toContain("Published operating calendar was not found.");
+    expect(operatingMarkup).toContain("Operating energy");
+    expect(operatingMarkup).toContain("73.00 kWh");
+    expect(operatingMarkup).toContain("Standby energy");
+    expect(operatingMarkup).toContain("27.00 kWh");
+    expect(operatingMarkup).toContain("Calendar calendar-v1");
+    expect(operatingMarkup).toContain("Asia/Singapore project timezone");
   });
 });
 

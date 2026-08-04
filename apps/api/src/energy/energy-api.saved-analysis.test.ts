@@ -148,6 +148,8 @@ describe("saved analysis decision-quality boundary", () => {
       const firstAnalysis = JSON.parse(first?.analysis_json ?? "null") as {
         context: Record<string, unknown>;
         provenance: Record<string, unknown>;
+        cost: Record<string, unknown>;
+        offHours: Record<string, unknown>;
       };
       expect(firstAnalysis.context).toMatchObject({
         hierarchyRevisionId: templateRevision.hierarchy_revision_id,
@@ -158,6 +160,49 @@ describe("saved analysis decision-quality boundary", () => {
       expect(firstAnalysis.provenance).toMatchObject({
         hierarchyRevisionId: templateRevision.hierarchy_revision_id,
         meterFormulaRevisionId: templateRevision.meter_formula_revision_id,
+      });
+      expect(firstAnalysis.cost).toMatchObject({
+        tariffScheduleVersion: templateRevision.tariff_schedule_version,
+      });
+      expect(firstAnalysis.offHours).toMatchObject({
+        businessCalendarVersion: templateRevision.business_calendar_version,
+      });
+
+      metadata.energyIq.operationalPolicy.publishTariffSchedule({
+        version_id: "preschool-tariff-v2",
+        project_id: project.id,
+        published_by: "dev-user",
+        activate: true,
+        entries: [{
+          id: "preschool-tariff-v2-flat",
+          owner: { kind: "project" },
+          effective_from: "2026-04-30T16:00:00.000Z",
+          effective_to: "2026-05-01T16:00:00.000Z",
+          currency: "SGD",
+          rate_per_kwh: 0.5,
+        }],
+      });
+      metadata.energyIq.operationalPolicy.publishOperatingCalendar({
+        version_id: "preschool-calendar-v2",
+        project_id: project.id,
+        published_by: "dev-user",
+        activate: true,
+        entries: [{
+          id: "preschool-calendar-v2-full-day",
+          owner: { kind: "project" },
+          effective_from: "2026-05-01",
+          effective_to: "2026-05-02",
+          weekly: allDays("00:00", "24:00"),
+        }],
+      });
+      const draft = metadata.energyIq.projectSetup.getDraft({
+        project_id: project.id,
+        user_id: "dev-user",
+      });
+      const publishedV2 = metadata.energyIq.projectSetup.publishDraft({
+        project_id: project.id,
+        expected_revision: draft.revision,
+        user_id: "dev-user",
       });
 
       const rerun = await handleEnergyApiRequest(
@@ -172,9 +217,30 @@ describe("saved analysis decision-quality boundary", () => {
         series_id: first?.series_id,
         sequence: 2,
         rerun_of_id: first?.id,
-        template_revision_id: templateRevision.revision_id,
+        template_revision_id: publishedV2.template_revision_id,
       });
       expect(records.find((record) => record.id === first?.id)?.analysis_json).toBe(frozenAnalysisJson);
+      const latestAnalysis = JSON.parse(records[0]?.analysis_json ?? "null") as {
+        context: Record<string, unknown>;
+        cost: Record<string, unknown>;
+        offHours: Record<string, unknown>;
+      };
+      expect(latestAnalysis.context).toMatchObject({
+        tariffScheduleVersion: "preschool-tariff-v2",
+        businessCalendarVersion: "preschool-calendar-v2",
+      });
+      expect(latestAnalysis.cost).toMatchObject({
+        status: "available",
+        tariffScheduleVersion: "preschool-tariff-v2",
+      });
+      expect(latestAnalysis.offHours).toMatchObject({
+        status: "available",
+        operatingKwh: expect.any(Number),
+        standbyKwh: 0,
+        businessCalendarVersion: "preschool-calendar-v2",
+      });
+      expect(latestAnalysis.cost).not.toEqual(firstAnalysis.cost);
+      expect(latestAnalysis.offHours).not.toEqual(firstAnalysis.offHours);
     } finally {
       metadata.close();
       removeTemporaryFixture(root);
@@ -319,6 +385,16 @@ describe("saved analysis decision-quality boundary", () => {
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
+});
+
+const allDays = (from: string, to: string) => ({
+  monday: [{ from, to }],
+  tuesday: [{ from, to }],
+  wednesday: [{ from, to }],
+  thursday: [{ from, to }],
+  friday: [{ from, to }],
+  saturday: [{ from, to }],
+  sunday: [{ from, to }],
 });
 
 const jsonPost = (body: unknown): IncomingMessage => {

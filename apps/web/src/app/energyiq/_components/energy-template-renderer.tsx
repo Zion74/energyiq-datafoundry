@@ -385,11 +385,23 @@ function OffHoursAnalysis({ analysis, limit }: { analysis: EnergyScopeAnalysisDt
     .toSorted((left, right) => right.nonOperatingKwh - left.nonOperatingKwh)
     .slice(0, limit);
   return (
-    <div className="grid gap-5 lg:grid-cols-[0.7fr_1.3fr]">
-      <div className="rounded-lg bg-surface-subtle p-5">
-        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-light">Outside operating hours</p>
-        <p className="mt-2 text-2xl font-semibold">{formatNumber(analysis.offHours.usageKwh, 2)} kWh</p>
-        <p className="mt-1 text-xs text-muted">{analysis.offHours.sharePct.toFixed(1)}% of selected-period use</p>
+    <div className="space-y-5">
+      <div className="grid gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3">
+        <div className="bg-surface-subtle p-4">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-light">Operating energy</p>
+          <p className="mt-2 text-xl font-semibold">{formatNumber(analysis.offHours.operatingKwh, 2)} kWh</p>
+          <p className="mt-1 text-xs text-muted">Inside configured hours</p>
+        </div>
+        <div className="bg-surface-subtle p-4">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-light">Standby energy</p>
+          <p className="mt-2 text-xl font-semibold">{formatNumber(analysis.offHours.standbyKwh, 2)} kWh</p>
+          <p className="mt-1 text-xs text-muted">{analysis.offHours.sharePct.toFixed(1)}% outside configured hours</p>
+        </div>
+        <div className="min-w-0 bg-surface-subtle p-4">
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-light">Policy basis</p>
+          <p className="mt-2 break-all text-sm font-semibold">Calendar {analysis.offHours.businessCalendarVersion}</p>
+          <p className="mt-1 text-xs text-muted">{analysis.offHours.timezone} project timezone</p>
+        </div>
       </div>
       <div className="space-y-2">
         {rows.map((row) => (
