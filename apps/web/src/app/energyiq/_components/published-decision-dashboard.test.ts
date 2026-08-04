@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   EnergyAccessContextDto,
   EnergyComponentRevisionDto,
+  EnergyProjectAnalysisResolutionDto,
   EnergyProjectHierarchyDto,
   EnergyProjectDto,
   EnergyTemplateDefinitionDto,
@@ -259,6 +260,138 @@ describe("published Overview URL reload", () => {
     expect(container.textContent).toContain("Water analysis is not configured");
   });
 
+  it("writes a Resource change to the public URL without losing the current view", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
+    vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    const water = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "Water");
+    await act(async () => water?.click());
+
+    expect(mockedRouter.replace).toHaveBeenCalledOnce();
+    expect(mockedRouter.replace).toHaveBeenCalledWith(
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=water&period=Custom&from=2026-06-10&to=2026-06-16",
+    );
+  });
+
+  it("writes Period changes to the public URL with only the effective date range", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
+    vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    const periodButtons = Array.from(container.querySelectorAll<HTMLButtonElement>("button"));
+    const lastSevenDays = periodButtons.find((button) => button.textContent === "Last 7 days");
+    const yesterday = periodButtons.find((button) => button.textContent === "Yesterday");
+    const custom = periodButtons.find((button) => button.textContent === "Custom");
+    await act(async () => lastSevenDays?.click());
+    await act(async () => yesterday?.click());
+    await act(async () => custom?.click());
+
+    expect(mockedRouter.replace.mock.calls.map(([href]) => href)).toEqual([
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Last+7+days",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Yesterday",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16",
+    ]);
+  });
+
+  it("carries the server-resolved range when a standard Period changes to Custom", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Last%207%20days");
+    vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockResolvedValue(readyRangeResolution());
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    const custom = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "Custom");
+    await act(async () => custom?.click());
+
+    expect(mockedRouter.replace).toHaveBeenCalledWith(
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16",
+    );
+  });
+
+  it("writes each Custom date to the public URL before resolving the rerendered view", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    const initialUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16";
+    window.history.replaceState({}, "", initialUrl);
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+    resolveProjectAnalysis.mockClear();
+
+    const inputValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    const [initialFrom] = Array.from(container.querySelectorAll<HTMLInputElement>("input[type='date']"));
+    await act(async () => {
+      inputValueSetter?.call(initialFrom, "2026-06-11");
+      initialFrom.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    const fromUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-11&to=2026-06-16";
+    expect(mockedRouter.replace).toHaveBeenLastCalledWith(fromUrl);
+    window.history.replaceState({}, "", fromUrl);
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+    expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
+    expect(resolveProjectAnalysis).toHaveBeenLastCalledWith({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "l6-total-light",
+      resource: "electricity",
+      period: "Custom",
+      from: "2026-06-11",
+      to: "2026-06-16",
+    });
+
+    mockedRouter.replace.mockClear();
+    resolveProjectAnalysis.mockClear();
+    const [, rerenderedTo] = Array.from(container.querySelectorAll<HTMLInputElement>("input[type='date']"));
+    await act(async () => {
+      inputValueSetter?.call(rerenderedTo, "2026-06-17");
+      rerenderedTo.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    const toUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-11&to=2026-06-17";
+    expect(mockedRouter.replace).toHaveBeenLastCalledWith(toUrl);
+    window.history.replaceState({}, "", toUrl);
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+    expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
+    expect(resolveProjectAnalysis).toHaveBeenLastCalledWith({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "l6-total-light",
+      resource: "electricity",
+      period: "Custom",
+      from: "2026-06-11",
+      to: "2026-06-17",
+    });
+  });
+
   it("switches from Project to a published hierarchy Scope through the public URL", async () => {
     const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
     mockedAccess.activeProject = ngeeAnn;
@@ -305,35 +438,18 @@ describe("published Overview URL reload", () => {
     });
   });
 
-  it("writes the current resource, period and Custom range when Scope changes", async () => {
+  it("preserves the URL-backed resource, period and Custom range when Scope changes", async () => {
     const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
     mockedAccess.activeProject = ngeeAnn;
     mockedAccess.access = accessContext([ngeeAnn]);
-    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Last%207%20days");
-    vi.spyOn(configApi, "resolveProjectAnalysis")
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=water&period=Custom&from=2026-06-10&to=2026-06-16");
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockReturnValue(new Promise<never>(() => undefined));
 
     await act(async () => {
       root.render(React.createElement(PublishedDecisionDashboard));
     });
-
-    const customPeriod = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
-      .find((button) => button.textContent === "Custom");
-    await act(async () => customPeriod?.click());
-
-    const [fromInput, toInput] = Array.from(container.querySelectorAll<HTMLInputElement>("input[type='date']"));
-    const inputValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-    await act(async () => {
-      inputValueSetter?.call(fromInput, "2026-06-10");
-      fromInput.dispatchEvent(new Event("input", { bubbles: true }));
-      inputValueSetter?.call(toInput, "2026-06-16");
-      toInput.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-
-    const water = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
-      .find((button) => button.textContent === "Water");
-    await act(async () => water?.click());
-    mockedRouter.replace.mockClear();
+    expect(resolveProjectAnalysis).not.toHaveBeenCalled();
 
     const scopeSelect = container.querySelector<HTMLButtonElement>("[role='combobox'][aria-label='Analysis Scope']");
     await act(async () => scopeSelect?.click());
@@ -548,4 +664,25 @@ function projectHierarchy(): EnergyProjectHierarchyDto {
       },
     ],
   };
+}
+
+function readyRangeResolution(): EnergyProjectAnalysisResolutionDto {
+  return {
+    status: "ready",
+    snapshot: {
+      context: {
+        from: "2026-06-09T16:00:00.000Z",
+        to: "2026-06-16T16:00:00.000Z",
+        timezone: "Asia/Singapore",
+      },
+      projectRelease: {
+        id: "release-1",
+        templateRevisionId: null,
+        document: { templates: [] },
+        catalog: [],
+      },
+      renderer: { key: "ngee-ann-overview" },
+      dataSnapshot: { id: "snapshot-1" },
+    },
+  } as EnergyProjectAnalysisResolutionDto;
 }

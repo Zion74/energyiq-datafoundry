@@ -94,12 +94,12 @@ function PublishedDecisionDashboardView({
     ? "Requested Project is unavailable in the active workspace."
     : null;
   const scopeId = initialViewState.scopeId;
-  const [resource, setResource] = useState<ResourceType>(initialViewState.resource);
-  const [period, setPeriod] = useState<OverviewPeriod>(initialViewState.period);
-  const [customRange, setCustomRange] = useState({
+  const resource = initialViewState.resource;
+  const period = initialViewState.period;
+  const [resolvedRange, setResolvedRange] = useState({
     projectId: "",
-    from: initialViewState.from,
-    to: initialViewState.to,
+    from: "",
+    to: "",
   });
   const [resolution, setResolution] = useState<LoadedResolution | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
@@ -114,9 +114,14 @@ function PublishedDecisionDashboardView({
   const [hierarchyLoading, setHierarchyLoading] = useState(false);
 
   const projectId = selectedProject?.id ?? "";
-  const effectiveCustomRange = customRange.projectId === projectId || customRange.projectId === ""
-    ? { ...customRange, projectId }
-    : { projectId, from: "", to: "" };
+  const effectiveCustomRange = period === "Custom"
+    ? { projectId, from: initialViewState.from, to: initialViewState.to }
+    : resolvedRange.projectId === projectId
+      ? resolvedRange
+      : { projectId, from: "", to: "" };
+  const requestCustomRange = period === "Custom"
+    ? { from: effectiveCustomRange.from, to: effectiveCustomRange.to }
+    : { from: "", to: "" };
   const queryValidationError = validateOverviewCustomRange(
     period,
     effectiveCustomRange.from,
@@ -200,7 +205,7 @@ function PublishedDecisionDashboardView({
   useEffect(() => {
     if (!projectId || resource !== "electricity" || projectSelectionError || queryValidationError) return;
     let cancelled = false;
-    const request = overviewAnalysisRequest(projectId, period, effectiveCustomRange, {
+    const request = overviewAnalysisRequest(projectId, period, requestCustomRange, {
       scopeId,
       resource,
     });
@@ -211,13 +216,11 @@ function PublishedDecisionDashboardView({
         if (cancelled) return;
         setResolution({ projectId, value: result });
         if (result.status !== "ready") return;
-        setCustomRange((current) => current.projectId === projectId && current.from && current.to
-          ? current
-          : {
-            projectId,
-            from: toDateInput(result.snapshot.context.from, result.snapshot.context.timezone),
-            to: toDateInput(new Date(Date.parse(result.snapshot.context.to) - 1).toISOString(), result.snapshot.context.timezone),
-          });
+        setResolvedRange({
+          projectId,
+          from: toDateInput(result.snapshot.context.from, result.snapshot.context.timezone),
+          to: toDateInput(new Date(Date.parse(result.snapshot.context.to) - 1).toISOString(), result.snapshot.context.timezone),
+        });
       })
       .catch((reason) => {
         if (cancelled) return;
@@ -230,7 +233,7 @@ function PublishedDecisionDashboardView({
     return () => {
       cancelled = true;
     };
-  }, [effectiveCustomRange.from, effectiveCustomRange.to, period, projectId, projectSelectionError, queryValidationError, refreshRevision, resource, scopeId]);
+  }, [period, projectId, projectSelectionError, queryValidationError, refreshRevision, requestCustomRange.from, requestCustomRange.to, resource, scopeId]);
 
   useEffect(() => {
     const firstSectionId = renderPlanForDisplay?.sections[0]?.section_id ?? "";
@@ -240,7 +243,7 @@ function PublishedDecisionDashboardView({
   useEffect(() => {
     setSavedAnalysis(null);
     setSaveError(null);
-  }, [effectiveCustomRange.from, effectiveCustomRange.to, period, projectId, resource]);
+  }, [period, projectId, requestCustomRange.from, requestCustomRange.to, resource]);
 
   const saveCurrentAnalysis = async () => {
     if (!projectId || !currentAnalysis || !saveAllowed || resource !== "electricity") return;
@@ -248,7 +251,7 @@ function PublishedDecisionDashboardView({
     setSaveError(null);
     try {
       const saved = await configApi.saveEnergyAnalysis(projectId, {
-        ...overviewAnalysisRequest(projectId, period, effectiveCustomRange, {
+        ...overviewAnalysisRequest(projectId, period, requestCustomRange, {
           scopeId,
           resource,
         }),
@@ -320,7 +323,9 @@ function PublishedDecisionDashboardView({
               ariaLabel="Analysis Scope"
               value={scopeId}
               options={scopeOptions}
-              onValueChange={(nextScopeId) => router.replace(overviewUrlWithScope(urlSearch, nextScopeId, {
+              onValueChange={(nextScopeId) => router.replace(overviewUrlWithView(urlSearch, {
+                projectId,
+                scopeId: nextScopeId,
                 resource,
                 period,
                 from: effectiveCustomRange.from,
@@ -341,7 +346,14 @@ function PublishedDecisionDashboardView({
               <button
                 key={item}
                 type="button"
-                onClick={() => setResource(item)}
+                onClick={() => router.replace(overviewUrlWithView(urlSearch, {
+                  projectId,
+                  scopeId,
+                  resource: item,
+                  period,
+                  from: effectiveCustomRange.from,
+                  to: effectiveCustomRange.to,
+                }))}
                 className={[
                   "flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors",
                   resource === item ? "bg-primary text-white" : "text-muted hover:bg-surface-subtle hover:text-foreground",
@@ -357,7 +369,14 @@ function PublishedDecisionDashboardView({
               <button
                 key={item.label}
                 type="button"
-                onClick={() => item.value ? setPeriod(item.value) : undefined}
+                onClick={() => item.value ? router.replace(overviewUrlWithView(urlSearch, {
+                  projectId,
+                  scopeId,
+                  resource,
+                  period: item.value,
+                  from: effectiveCustomRange.from,
+                  to: effectiveCustomRange.to,
+                })) : undefined}
                 disabled={item.disabled}
                 title={item.title}
                 className={[
@@ -391,8 +410,22 @@ function PublishedDecisionDashboardView({
 
       {period === "Custom" ? (
         <div className="mt-4 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface px-4 py-3">
-          <DateField label="From" value={effectiveCustomRange.from} onChange={(from) => setCustomRange((current) => ({ ...current, projectId, from }))} />
-          <DateField label="To, inclusive" value={effectiveCustomRange.to} onChange={(to) => setCustomRange((current) => ({ ...current, projectId, to }))} />
+          <DateField label="From" value={effectiveCustomRange.from} onChange={(from) => router.replace(overviewUrlWithView(urlSearch, {
+            projectId,
+            scopeId,
+            resource,
+            period,
+            from,
+            to: effectiveCustomRange.to,
+          }))} />
+          <DateField label="To, inclusive" value={effectiveCustomRange.to} onChange={(to) => router.replace(overviewUrlWithView(urlSearch, {
+            projectId,
+            scopeId,
+            resource,
+            period,
+            from: effectiveCustomRange.from,
+            to,
+          }))} />
           <p className="pb-2 text-[10px] text-muted-light">Changing the range reuses the published template and runs only the scoped queries.</p>
         </div>
       ) : null}
@@ -551,13 +584,14 @@ function isValidDateInput(value: string): boolean {
   return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
-function overviewUrlWithScope(
+function overviewUrlWithView(
   urlSearch: string,
-  scopeId: string,
-  view: Pick<OverviewUrlViewState, "resource" | "period" | "from" | "to">,
+  view: OverviewUrlViewState,
 ): string {
   const next = new URLSearchParams(urlSearch);
-  next.set("scopeId", scopeId || "project");
+  if (view.projectId) next.set("projectId", view.projectId);
+  else next.delete("projectId");
+  next.set("scopeId", view.scopeId || "project");
   next.set("resource", view.resource);
   next.set("period", view.period);
   if (view.period === "Custom") {
