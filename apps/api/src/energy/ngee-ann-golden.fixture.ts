@@ -81,7 +81,7 @@ export const NGEE_ANN_GOLDEN = {
       qualityEventCount: 0,
       lastSeenAt: "2026-06-16T16:00:00.000Z",
       importBatchIds: [
-        "<legacy>",
+        "energy-import-2059d4af-9d67-4e65-8cf1-61d15352be3d",
         "energy-import-776b4be8-9ac4-4159-87d6-73837abe896e"
       ]
     },

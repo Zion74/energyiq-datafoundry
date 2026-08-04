@@ -456,8 +456,8 @@ const materializeNgeeAnnGoldenFixture = async (databasePath: string): Promise<vo
   const previousLevel7Usage = constantUsage(734.625651, 7 * 24 * 4);
   const currentFrom = Date.parse(NGEE_ANN_GOLDEN.selection.period.from);
   const previousFrom = currentFrom - 7 * 86_400_000;
-  const legacyBatchId = NGEE_ANN_GOLDEN.period.dataHealth.importBatchIds[0];
-  const currentBatchId = NGEE_ANN_GOLDEN.period.dataHealth.importBatchIds[1];
+  const level7BatchId = NGEE_ANN_GOLDEN.period.dataHealth.importBatchIds[0];
+  const level6BatchId = NGEE_ANN_GOLDEN.period.dataHealth.importBatchIds[1];
   const level6LightShare = totalCircuitGolden("l6-total-light").rawUsageKwh / 476.983827;
   const level7LightShare = totalCircuitGolden("l7-total-light").rawUsageKwh / 1054.184497;
   const meters: GoldenMeter[] = [
@@ -466,7 +466,7 @@ const materializeNgeeAnnGoldenFixture = async (databasePath: string): Promise<vo
       scopeId: "level-6",
       name: "Lvl 6 Total Office Light",
       category: "light",
-      importBatchId: currentBatchId,
+      importBatchId: level6BatchId,
       previous: previousLevel6Usage.map((usage) => usage * level6LightShare),
       current: currentLevel6Usage.map((usage) => usage * level6LightShare)
     }),
@@ -475,7 +475,7 @@ const materializeNgeeAnnGoldenFixture = async (databasePath: string): Promise<vo
       scopeId: "level-6",
       name: "Lvl 6 Total Office Load",
       category: "load",
-      importBatchId: currentBatchId,
+      importBatchId: level6BatchId,
       previous: previousLevel6Usage.map((usage) => usage * (1 - level6LightShare)),
       current: currentLevel6Usage.map((usage) => usage * (1 - level6LightShare))
     }),
@@ -484,7 +484,7 @@ const materializeNgeeAnnGoldenFixture = async (databasePath: string): Promise<vo
       scopeId: "level-7",
       name: "Total Office Light",
       category: "light",
-      importBatchId: legacyBatchId,
+      importBatchId: level7BatchId,
       previous: previousLevel7Usage.map((usage) => usage * level7LightShare),
       current: currentLevel7Usage.map((usage) => usage * level7LightShare)
     }),
@@ -493,14 +493,14 @@ const materializeNgeeAnnGoldenFixture = async (databasePath: string): Promise<vo
       scopeId: "level-7",
       name: "Total Office Load",
       category: "load",
-      importBatchId: legacyBatchId,
+      importBatchId: level7BatchId,
       previous: previousLevel7Usage.map((usage) => usage * (1 - level7LightShare)),
       current: currentLevel7Usage.map((usage) => usage * (1 - level7LightShare))
     }),
-    ...circuitMeters(currentBatchId, legacyBatchId)
+    ...circuitMeters(level6BatchId, level7BatchId)
   ];
 
-  for (const importBatchId of [legacyBatchId, currentBatchId]) {
+  for (const importBatchId of [level7BatchId, level6BatchId]) {
     const sourceSha256 = fixtureSha(importBatchId);
     const batchMeters = meters.filter((meter) => meter.importBatchId === importBatchId);
     const intervalFacts = batchMeters.flatMap((meter) => meter.usage.map((usage, index) => {
@@ -522,7 +522,7 @@ const materializeNgeeAnnGoldenFixture = async (databasePath: string): Promise<vo
       meterRole: meter.meterRole,
       eventTime: new Date(currentFrom + 7 * 86_400_000).toISOString(),
       activeEnergyKwh: 1000 + meter.usage.reduce((sum, usage) => sum + usage, 0),
-      sourceFile: "ngee-ann-golden.xlsx",
+      sourceFile: fixtureSourceFile(importBatchId),
       sourceSha256,
       sourceRowNumber: 1,
       sourceReadingKind: "interval_usage",
@@ -556,20 +556,20 @@ const officialMeter = (input: {
   usage: [...input.previous, ...input.current]
 });
 
-const circuitMeters = (currentBatchId: string, legacyBatchId: string): GoldenMeter[] => [
-  circuitMeter("mapping-lvl-6-office-light-left-external-1", "l6-light-left", "Lvl 6 Office Light-Left: External", "light", "component", 40.287062, currentBatchId),
-  circuitMeter("mapping-lvl-6-office-light-right-internal-2", "l6-light-right", "Lvl 6 Office Light-Right: Internal", "light", "component", 70.68732, currentBatchId),
-  circuitMeter("mapping-lvl-6-office-load-1-l1p1-l3p6-3", "l6-load-1", "Lvl 6 Office Load 1: L1P1-L3P6", "load", "component", 11.537893, currentBatchId),
-  circuitMeter("mapping-lvl-6-office-load-2-l1p7-l3p12-4", "l6-load-2", "Lvl 6 Office Load 2: L1P7-L3P12", "load", "component", 37.483874, currentBatchId),
-  circuitMeter("mapping-lvl-6-office-load-3-l1p13-l3p18-5", "l6-load-3", "Lvl 6 Office Load 3: L1P13-L3P18", "load", "component", 13.52915, currentBatchId),
-  circuitMeter("mapping-lvl-6-office-load-4-l1p19-l3p24-6", "l6-load-4", "Lvl 6 Office Load 4: L1P19-L3P24", "load", "component", 255.153879, currentBatchId),
-  circuitMeter("mapping-lvl-6-office-load-5-l1p25-l3p29-fan-isol-1-2-7", "l6-load-5", "Lvl 6 Office Load 5: L1P25-L3P29 Fan Isol 1/2", "load", "component", 42.335467, currentBatchId),
-  circuitMeter("mapping-lvl-7-front-row-office-light-11", "l7-front-light", "Front Row Office Light", "light", "component", 107.019997, legacyBatchId),
-  circuitMeter("mapping-lvl-7-middle-row-office-light-12", "l7-middle-light", "Middle Row Office Light", "light", "component", 20.767825, legacyBatchId),
-  circuitMeter("mapping-lvl-7-back-row-office-light-10", "l7-back-light", "Back Row Office Light", "light", "component", 48.904264, legacyBatchId),
-  circuitMeter("mapping-lvl-7-office-load-1-l1p1-l3p6-13", "l7-load-1", "Office Load 1", "load", "component", 28.122014, legacyBatchId),
-  circuitMeter("mapping-lvl-7-office-load-2-l1p7-l3p15-14", "l7-load-2", "Office Load 2", "load", "component", 66.168234, legacyBatchId),
-  circuitMeter("mapping-lvl-7-office-load-3-l1p16-l3p21-15", "l7-load-3", "Office Load 3", "load", "component", 337.902316, legacyBatchId),
+const circuitMeters = (level6BatchId: string, level7BatchId: string): GoldenMeter[] => [
+  circuitMeter("mapping-lvl-6-office-light-left-external-1", "l6-light-left", "Lvl 6 Office Light-Left: External", "light", "component", 40.287062, level6BatchId),
+  circuitMeter("mapping-lvl-6-office-light-right-internal-2", "l6-light-right", "Lvl 6 Office Light-Right: Internal", "light", "component", 70.68732, level6BatchId),
+  circuitMeter("mapping-lvl-6-office-load-1-l1p1-l3p6-3", "l6-load-1", "Lvl 6 Office Load 1: L1P1-L3P6", "load", "component", 11.537893, level6BatchId),
+  circuitMeter("mapping-lvl-6-office-load-2-l1p7-l3p12-4", "l6-load-2", "Lvl 6 Office Load 2: L1P7-L3P12", "load", "component", 37.483874, level6BatchId),
+  circuitMeter("mapping-lvl-6-office-load-3-l1p13-l3p18-5", "l6-load-3", "Lvl 6 Office Load 3: L1P13-L3P18", "load", "component", 13.52915, level6BatchId),
+  circuitMeter("mapping-lvl-6-office-load-4-l1p19-l3p24-6", "l6-load-4", "Lvl 6 Office Load 4: L1P19-L3P24", "load", "component", 255.153879, level6BatchId),
+  circuitMeter("mapping-lvl-6-office-load-5-l1p25-l3p29-fan-isol-1-2-7", "l6-load-5", "Lvl 6 Office Load 5: L1P25-L3P29 Fan Isol 1/2", "load", "component", 42.335467, level6BatchId),
+  circuitMeter("mapping-lvl-7-front-row-office-light-11", "l7-front-light", "Front Row Office Light", "light", "component", 107.019997, level7BatchId),
+  circuitMeter("mapping-lvl-7-middle-row-office-light-12", "l7-middle-light", "Middle Row Office Light", "light", "component", 20.767825, level7BatchId),
+  circuitMeter("mapping-lvl-7-back-row-office-light-10", "l7-back-light", "Back Row Office Light", "light", "component", 48.904264, level7BatchId),
+  circuitMeter("mapping-lvl-7-office-load-1-l1p1-l3p6-13", "l7-load-1", "Office Load 1", "load", "component", 28.122014, level7BatchId),
+  circuitMeter("mapping-lvl-7-office-load-2-l1p7-l3p15-14", "l7-load-2", "Office Load 2", "load", "component", 66.168234, level7BatchId),
+  circuitMeter("mapping-lvl-7-office-load-3-l1p16-l3p21-15", "l7-load-3", "Office Load 3", "load", "component", 337.902316, level7BatchId),
   circuitMeter(
     "mapping-lvl-7-office-load-4-l1p22-l3p25-fan-isol1-2-16",
     "l7-load-4",
@@ -577,7 +577,7 @@ const circuitMeters = (currentBatchId: string, legacyBatchId: string): GoldenMet
     "load",
     "component",
     439.097185,
-    legacyBatchId,
+    level7BatchId,
     3.530652,
     247.9813,
     3.7734
@@ -700,14 +700,31 @@ const factFor = (
     localDate: local.toISOString().slice(0, 10),
     localHour: local.getUTCHours(),
     dayType: [0, 6].includes(local.getUTCDay()) ? "weekend" : "weekday",
-    sourceFile: "ngee-ann-golden.xlsx",
+    sourceFile: fixtureSourceFile(meter.importBatchId),
     sourceSha256: fixtureSha(meter.importBatchId),
     sourceReadingKind: "interval_usage",
   };
 };
 
-const fixtureSha = (importBatchId: string): string =>
-  importBatchId === "<legacy>" ? "ngee-ann-golden-legacy" : "ngee-ann-golden-current";
+const fixtureSha = (importBatchId: string): string => {
+  if (importBatchId === NGEE_ANN_GOLDEN.period.dataHealth.importBatchIds[0]) {
+    return "3f41f94e229933a97ce8d02a0382d3a8192e3c26065bf0f48a04168ec90dd674";
+  }
+  if (importBatchId === NGEE_ANN_GOLDEN.period.dataHealth.importBatchIds[1]) {
+    return "64502f6369dad96f3dc6cbc650b28b3f108bb655e7a95ca078b9aa616966413f";
+  }
+  throw new Error(`NGEE_ANN_GOLDEN_IMPORT_BATCH_UNKNOWN:${importBatchId}`);
+};
+
+const fixtureSourceFile = (importBatchId: string): string => {
+  if (importBatchId === NGEE_ANN_GOLDEN.period.dataHealth.importBatchIds[0]) {
+    return "Ngee Ann Poly Level 7 (19 May - 17 June).xlsx";
+  }
+  if (importBatchId === NGEE_ANN_GOLDEN.period.dataHealth.importBatchIds[1]) {
+    return "Ngee Ann Poly Level 6 (19 May - 17 June).xlsx";
+  }
+  throw new Error(`NGEE_ANN_GOLDEN_IMPORT_BATCH_UNKNOWN:${importBatchId}`);
+};
 
 const constantUsage = (total: number, count: number): number[] =>
   new Array<number>(count).fill(total / count);

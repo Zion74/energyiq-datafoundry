@@ -216,7 +216,7 @@ Official Route 的 no-double-count 证据：
 
 `3,050.164804 = 1,531.168324 + 1,518.996480`。正式 Project Analysis 返回 1,531.1683 kWh，证明 Project/Level route 只取四个 designated totals，没有把 14 个 component meters 重复相加。四个 total Circuit 自身的导航查询仍归 #24。
 
-正式 Analysis API provenance 指向新 Snapshot，`aggregationRule=designated_total`，Data Health 为 complete，`cumulativeDeltaMismatchCount=0`、`averageKwMismatchCount=0`、`invalidIntervalDurationCount=0`，且不含 `<legacy>` batch。
+正式 Analysis API provenance 指向新 Snapshot，`aggregationRule=designated_total`，Data Health 为 complete，`cumulativeDeltaMismatchCount=0`、`averageKwMismatchCount=0`、`invalidIntervalDurationCount=0`，且不含 `<legacy>` batch。Golden fixture 同步使用正式 May–Jun provenance：Level 7 `energy-import-2059d4af-9d67-4e65-8cf1-61d15352be3d` / SHA `3F41F94E229933A97CE8D02A0382D3A8192E3C26065BF0F48A04168EC90DD674`，Level 6 `energy-import-776b4be8-9ac4-4159-87d6-73837abe896e` / SHA `64502F6369DAD96F3DC6CBC650B28B3F108BB655E7A95CA078B9AA616966413F`，source filename 也保持与两份 workbook 一致。
 
 Tariff 与 Operating Calendar 当前仍返回结构化 `Unavailable`：
 
