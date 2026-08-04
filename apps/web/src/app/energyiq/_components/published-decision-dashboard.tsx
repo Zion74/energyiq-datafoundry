@@ -180,9 +180,11 @@ function PublishedDecisionDashboardView({
   }, [projectId, refreshRevision]);
 
   const scopeOptions = useMemo(() => {
+    const hierarchyNodes = hierarchy?.nodes ?? [];
     const tierAliases = new Map(hierarchy?.tiers.map((tier) => [tier.id, tier.alias]) ?? []);
+    const nodesById = new Map(hierarchyNodes.map((node) => [node.id, node]));
     const orderedNodes = orderProjectNodesDepthFirst(
-      (hierarchy?.nodes ?? [])
+      hierarchyNodes
         .filter((node) => node.node_type !== "project")
         .map((node) => ({ ...node, parentId: node.parent_id ?? null })),
     );
@@ -190,7 +192,7 @@ function PublishedDecisionDashboardView({
       { value: "project", label: `Project · ${selectedProject?.name ?? "Project"}` },
       ...orderedNodes.map((node) => ({
         value: node.id,
-        label: `${tierAliases.get(node.tier_definition_id ?? "") ?? node.node_type} · ${node.name}`,
+        label: `${tierAliases.get(node.tier_definition_id ?? "") ?? node.node_type} · ${scopeNodeDisplayPath(node, nodesById)}`,
       })),
     ];
   }, [hierarchy, selectedProject?.name]);
@@ -598,6 +600,26 @@ function overviewUrlWithView(
     next.delete("to");
   }
   return `/energyiq/overview?${next.toString()}`;
+}
+
+function scopeNodeDisplayPath(
+  node: EnergyProjectHierarchyDto["nodes"][number],
+  nodesById: ReadonlyMap<string, EnergyProjectHierarchyDto["nodes"][number]>,
+): string {
+  const segments = [node.name];
+  const visited = new Set([node.id]);
+  let parentId = node.parent_id;
+  let remaining = nodesById.size;
+  while (parentId && remaining > 0) {
+    if (visited.has(parentId)) break;
+    visited.add(parentId);
+    const parent = nodesById.get(parentId);
+    if (!parent) break;
+    if (parent.node_type !== "project") segments.unshift(parent.name);
+    parentId = parent.parent_id;
+    remaining -= 1;
+  }
+  return segments.join(" / ");
 }
 
 export function toDateInput(value: string, timeZone: string): string {

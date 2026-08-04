@@ -464,11 +464,13 @@ describe("published Overview URL reload", () => {
     expect(options.map((option) => option.textContent)).toEqual([
       "Project · Ngee Ann Polytechnic",
       "Level · Level 6",
-      "Circuit · L6 Light Left",
-      "Circuit · L6 Total Light",
+      "Circuit · Level 6 / L6 Light Left",
+      "Circuit · Level 6 / Total Office Load",
+      "Level · Level 7",
+      "Circuit · Level 7 / Total Office Load",
     ]);
 
-    const totalCircuit = options.find((option) => option.textContent?.includes("L6 Total Light"));
+    const totalCircuit = options.find((option) => option.textContent === "Circuit · Level 6 / Total Office Load");
     await act(async () => totalCircuit?.click());
     expect(mockedRouter.replace).toHaveBeenCalledOnce();
     expect(mockedRouter.replace).toHaveBeenCalledWith(
@@ -491,6 +493,59 @@ describe("published Overview URL reload", () => {
     });
   });
 
+  it("bounds Scope display paths when hierarchy parents are missing or cyclic", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    const malformedHierarchy = projectHierarchy();
+    malformedHierarchy.nodes.push(
+      {
+        id: "orphan-circuit",
+        project_id: "ngee-ann-polytechnic",
+        parent_id: "missing-level",
+        name: "Orphan Circuit",
+        node_type: "circuit",
+        tier_definition_id: "tier-circuit",
+        sort_order: 3,
+        metadata_status: "provisional",
+      },
+      {
+        id: "cycle-a",
+        project_id: "ngee-ann-polytechnic",
+        parent_id: "cycle-b",
+        name: "Cycle A",
+        node_type: "circuit",
+        tier_definition_id: "tier-circuit",
+        sort_order: 4,
+        metadata_status: "provisional",
+      },
+      {
+        id: "cycle-b",
+        project_id: "ngee-ann-polytechnic",
+        parent_id: "cycle-a",
+        name: "Cycle B",
+        node_type: "circuit",
+        tier_definition_id: "tier-circuit",
+        sort_order: 5,
+        metadata_status: "provisional",
+      },
+    );
+    vi.mocked(configApi.getEnergyProjectHierarchy).mockResolvedValue(malformedHierarchy);
+    vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    const scopeSelect = container.querySelector<HTMLButtonElement>("[role='combobox'][aria-label='Analysis Scope']");
+    await act(async () => scopeSelect?.click());
+    const labels = Array.from(document.querySelectorAll<HTMLButtonElement>("[role='option']"), (option) => option.textContent);
+    expect(labels).toContain("Circuit · Orphan Circuit");
+    expect(labels).toContain("Circuit · Cycle B / Cycle A");
+    expect(labels).toContain("Circuit · Cycle A / Cycle B");
+  });
+
   it("preserves the URL-backed resource, period and Custom range when Scope changes", async () => {
     const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
     mockedAccess.activeProject = ngeeAnn;
@@ -507,7 +562,7 @@ describe("published Overview URL reload", () => {
     const scopeSelect = container.querySelector<HTMLButtonElement>("[role='combobox'][aria-label='Analysis Scope']");
     await act(async () => scopeSelect?.click());
     const totalCircuit = Array.from(document.querySelectorAll<HTMLButtonElement>("[role='option']"))
-      .find((option) => option.textContent?.includes("L6 Total Light"));
+      .find((option) => option.textContent === "Circuit · Level 6 / Total Office Load");
     await act(async () => totalCircuit?.click());
 
     expect(mockedRouter.replace).toHaveBeenCalledOnce();
@@ -709,10 +764,29 @@ function projectHierarchy(): EnergyProjectHierarchyDto {
         id: "l6-total-light",
         project_id: "ngee-ann-polytechnic",
         parent_id: "level-6",
-        name: "L6 Total Light",
+        name: "Total Office Load",
         node_type: "circuit",
         tier_definition_id: "tier-circuit",
         sort_order: 2,
+        metadata_status: "confirmed",
+      },
+      {
+        id: "level-7",
+        project_id: "ngee-ann-polytechnic",
+        name: "Level 7",
+        node_type: "level",
+        tier_definition_id: "tier-level",
+        sort_order: 2,
+        metadata_status: "confirmed",
+      },
+      {
+        id: "l7-total-office",
+        project_id: "ngee-ann-polytechnic",
+        parent_id: "level-7",
+        name: "Total Office Load",
+        node_type: "circuit",
+        tier_definition_id: "tier-circuit",
+        sort_order: 1,
         metadata_status: "confirmed",
       },
     ],
