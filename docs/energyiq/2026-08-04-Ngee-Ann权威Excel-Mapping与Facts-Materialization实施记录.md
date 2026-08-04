@@ -276,7 +276,17 @@ Source root 与 Worker 不运行服务或共享 DuckDB；只有 Integration 的 
 
 旧 single-batch writer、Metadata per-batch prepare/complete 和 completion shim 已全仓删除。自动化已通过 79 个定向测试、56 个跨层测试、root build/typecheck 与 diff-check；删一行和保持数量但篡改 `usage_kwh` 的回归均 fail closed，Ngee Ann fixture Golden 保持不变。
 
-本段在 live 重放前只证明代码契约。正式关闭 #25 前仍必须记录：新的可恢复备份路径与哈希、通过正式 API 触发的四 SHA v3 rematerialization、v3 Snapshot ID、fact-state count/digest、readiness/coverage/Overview/AI 对账、真实 Project/Level/Circuit Golden 与 Chrome/API 验收。上述证据完成前不得把 3.2 的历史 v2 Snapshot 当作 v3 当前状态。
+2026-08-04 已完成 live v3 重放与验收，历史 v2 Snapshot 不再代表当前事实状态：
+
+- mutation 前在 API 停止状态备份完整 Integration `storage` 到 `D:\Projects\energyiq-datafoundry-backups\t05a-pre-v3-materialization-20260804-205701`：185 files、119,242,725 bytes；SQLite SHA-256 `D9EF8EC0AB463C39196104F336B1AFCC909790BBCF029444F7EE87E091E64CA6`，DuckDB SHA-256 `D49C2354F80BD7DD2FB1BFA7FA0599554A00A5F2301149424BF3F2AD7C776C09`；
+- 只在 Chrome Admin Data Sources 点击一次 `Build all interval facts`，正式 API 使用已保存的四份原始 workbook/File Asset 完成完整 active manifest 重物化；页面由 `FACT_WRITER_CONTRACT_MISMATCH / SNAPSHOT_FACT_STATE_UNAVAILABLE` 转为 4/4 batches、18/18 labels 和 `All registered batches, Mapping pins and canonical fact checks are current`；
+- 当前 Snapshot 为 `energy-snapshot-03499dcda183ae28c47f7d66`，manifest fingerprint 为 `6e5a5f06aeea7dc51f04f2733cad3ee2f317528c3980f82ba6b1d4c2ff31f0e7`；四个 source SHA 精确为 `0b1fb9613c596d3569f6be93046a43737366649b5f8a4d45fc8cdef073c30e5d`、`3f41f94e229933a97ce8d02a0382d3a8192e3c26065bf0f48a04168ec90dd674`、`64502f6369dad96f3dc6cbc650b28b3f108bb655e7a95ca078b9aa616966413f`、`e4d788af0135281c8ba519f04fa3c44751206ce0812e15e434da6cb8fda44f70`，writer contract 全部为 `energy-fact-writer-snapshot-manifest-v3`；
+- GET imports/readiness 返回 ready、blocking reasons 空；project audit 为 raw 103,678、normalized 100,223、interval facts 100,205、18 canonical meter series、missing adjacent 0、orphan 0、legacy 0，仅保留明确 warning `RAW_OVERLAP_CONFLICTS_RESOLVED_BY_LATER_COVERAGE:32`；
+- API 停止后只读 DuckDB 独立复核 `energy_project_fact_state`：`canonical_interval_count=100205`，保存与即时重算 digest 均为 `caf19389d3693e6b586879e0c2dc26eb77ad6ce60be5c53a3e8023ada969678e`，count/digest 均一致；复核后 API 已立即重启并通过 coverage health；
+- Custom Golden Period `2026-06-10`–`2026-06-16` 的正式 Overview 与 scoped Analysis/AI 查询均 pin 同一 Snapshot：Project 1,531.1683 kWh、Daily Average 218.7383 kWh/day、Peak 20.6731 kW、Level 7 1,054.1845 kWh、Level 6 476.9838 kWh、Top Circuit `l7-load-4` 439.0972 kWh、2,688/2,688 intervals、100% coverage；Tariff cost 为 available，489.973864 SGD；
+- Chrome 客户 Overview 显示同一 Snapshot、`1,531.17 kWh`、Tariff、Evidence 与 Level 7/6；九条 Evidence ID、Analysis Context 与 AI provenance 都编码/引用同一 Snapshot。
+
+本地完整 Analysis 当前约 9 秒。它不影响 #25 的 correctness 封顶，但在 #6 真实 Renderer/截图验收中作为体验风险监控；除非明确阻塞客户页面，不因此新增通用底座 Ticket。
 
 ## 4. 问题与取舍
 
