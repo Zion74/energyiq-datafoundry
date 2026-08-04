@@ -24,6 +24,7 @@ export type NgeeAnnLatestAvailableRange = {
 
 export type NgeeAnnEnergyTrendViewModel = {
   status: "available" | "unavailable";
+  grain: "day" | "hour";
   decisionQuestion: string;
   reason: string | null;
   scopes: Array<{
@@ -33,6 +34,7 @@ export type NgeeAnnEnergyTrendViewModel = {
     points: Array<{
       id: string;
       localDate: string;
+      localHour: number | null;
       dateLabel: string;
       weekday: string;
       range: string;
@@ -54,8 +56,79 @@ export type NgeeAnnEnergyTrendViewModel = {
     period: string;
     timezone: string;
     unit: "kWh";
-    queryIds: ["daily_totals_v1"];
+    queryIds: ["daily_totals_v1"] | ["time_bucket_grid_v1"];
   };
+};
+
+type TimeBehaviourEvidence = {
+  snapshotId: string;
+  projectReleaseId: string;
+  meterMappingRevisionId: string;
+  meterFormulaRevisionId: string;
+  metricId: "energy.total_usage_kwh@1";
+  period: string;
+  timezone: string;
+  unit: "kWh";
+  queryIds: ["time_bucket_grid_v1"];
+};
+
+type TimePointQuality = {
+  status: "complete" | "partial" | "unavailable";
+  statusLabel: "Complete" | "Partial" | "Unavailable";
+  coverage: string;
+  intervals: string;
+  qualityEvents: string;
+};
+
+export type NgeeAnnDayProfileViewModel = {
+  status: "available" | "unavailable";
+  decisionQuestion: string;
+  reason: string | null;
+  scopes: Array<{ id: string; name: string }>;
+  profiles: Array<{
+    id: string;
+    dayType: "weekday" | "weekend" | "public_holiday";
+    dayTypeLabel: "Weekday" | "Weekend" | "Public Holiday";
+    scopeId: string;
+    scopeName: string;
+    status: "available" | "unavailable";
+    sampleDayCount: number | null;
+    reason: string | null;
+    values: Array<{
+      id: string;
+      localHour: number;
+      hourLabel: string;
+      acceptedUsageKwh: number;
+      usageKwh: string;
+    }>;
+  }>;
+  evidence: TimeBehaviourEvidence;
+};
+
+export type NgeeAnnUsageHeatmapViewModel = {
+  status: "available" | "unavailable";
+  decisionQuestion: string;
+  reason: string | null;
+  defaultView: "date-hour" | "level-hour";
+  dates: Array<{ id: string; label: string; weekday: string }>;
+  scopes: Array<{
+    id: string;
+    name: string;
+    cells: Array<{
+      id: string;
+      scopeId: string;
+      localDate: string;
+      dateLabel: string;
+      weekday: string;
+      localHour: number;
+      hourLabel: string;
+      range: string;
+      acceptedUsageKwh: number | null;
+      usageKwh: string | null;
+      quality: TimePointQuality;
+    }>;
+  }>;
+  evidence: TimeBehaviourEvidence;
 };
 
 type PeakBreakdownQuality = {
@@ -257,6 +330,8 @@ export type NgeeAnnOverviewViewModel = {
   highlights: NgeeAnnOverviewHighlight[];
   peakBreakdown: NgeeAnnPeakBreakdownViewModel;
   energyTrend: NgeeAnnEnergyTrendViewModel;
+  dayProfile: NgeeAnnDayProfileViewModel;
+  usageHeatmap: NgeeAnnUsageHeatmapViewModel;
   levelComparison: NgeeAnnLevelComparisonViewModel;
   energyComposition: NgeeAnnEnergyCompositionViewModel;
   evidence: {
@@ -403,6 +478,8 @@ export function buildNgeeAnnOverviewViewModel(
     ],
     peakBreakdown: buildPeakBreakdown(snapshot, unavailable),
     energyTrend: buildEnergyTrend(snapshot, unavailable),
+    dayProfile: buildDayProfile(snapshot, unavailable),
+    usageHeatmap: buildUsageHeatmap(snapshot, unavailable),
     levelComparison: buildLevelComparison(snapshot, unavailable),
     energyComposition: buildEnergyComposition(snapshot, unavailable),
     evidence: {
@@ -1038,12 +1115,339 @@ function peakBreakdownQuality(quality: {
   };
 }
 
+type TimeBehaviour = NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["timeBehaviour"]>;
+type TimeScope = TimeBehaviour["scopes"][number];
+type TimeCell = TimeScope["cells"][number];
+
+function timeBehaviourEvidence(snapshot: EnergyProjectAnalysisSnapshotDto): TimeBehaviourEvidence {
+  return {
+    snapshotId: snapshot.dataSnapshot.id,
+    projectReleaseId: snapshot.projectRelease.id,
+    meterMappingRevisionId: snapshot.analysis.provenance.meterMappingRevisionId,
+    meterFormulaRevisionId: snapshot.analysis.provenance.meterFormulaRevisionId,
+    metricId: "energy.total_usage_kwh@1",
+    period: `[${snapshot.context.primaryPeriod.start}, ${snapshot.context.primaryPeriod.endExclusive})`,
+    timezone: snapshot.analysis.timeBehaviour?.timezone ?? snapshot.context.timezone,
+    unit: "kWh",
+    queryIds: ["time_bucket_grid_v1"],
+  };
+}
+
+function buildDayProfile(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  overviewUnavailable: boolean,
+): NgeeAnnDayProfileViewModel {
+  const evidence = timeBehaviourEvidence(snapshot);
+  const unavailable = (reason: string): NgeeAnnDayProfileViewModel => ({
+    status: "unavailable",
+    decisionQuestion: "How does the typical 24-hour energy shape change by Day Type and Scope?",
+    reason,
+    scopes: [],
+    profiles: [],
+    evidence,
+  });
+  if (overviewUnavailable) {
+    return unavailable("No trusted intervals support a Day Profile for this Period.");
+  }
+  if (snapshot.context.scopeType !== "project") {
+    return unavailable("Select the Project Scope to compare Project and Level Day Profiles.");
+  }
+  const grid = validTimeGrid(snapshot);
+  if (!grid.valid) {
+    return unavailable(grid.reason);
+  }
+  const profiles = snapshot.analysis.timeBehaviour!.dayProfiles;
+  const expectedKeys = new Set(grid.scopes.flatMap((scope) => (
+    ["weekday", "weekend", "public_holiday"].map((dayType) => `${scope.scopeId}:${dayType}`)
+  )));
+  const seenKeys = new Set<string>();
+  const validProfiles = profiles.length === expectedKeys.size && profiles.every((profile) => {
+    const scope = grid.scopes.find((candidate) => candidate.scopeId === profile.scopeId);
+    const key = `${profile.scopeId}:${profile.dayType}`;
+    if (!scope || profile.scopeName !== scope.scopeName || !expectedKeys.has(key) || seenKeys.has(key)) {
+      return false;
+    }
+    seenKeys.add(key);
+    if (profile.status === "unavailable") {
+      return Boolean(profile.reason.message)
+        && (profile.reason.code === "COMPLETE_DAY_SAMPLE_UNAVAILABLE"
+          || profile.reason.code === "DAY_TYPE_CLASSIFICATION_UNAVAILABLE")
+        && (profile.dayType !== "public_holiday"
+          || profile.reason.code === "DAY_TYPE_CLASSIFICATION_UNAVAILABLE");
+    }
+    return Number.isInteger(profile.sampleDayCount)
+      && profile.sampleDayCount > 0
+      && profile.values.length === 24
+      && profile.values.every((value, index) => (
+        value.localHour === index && finiteNonNegative(value.usageKwh)
+      ));
+  });
+  if (!validProfiles || seenKeys.size !== expectedKeys.size) {
+    return unavailable("The server Day Profile contract is incomplete or invalid.");
+  }
+
+  return {
+    status: "available",
+    decisionQuestion: "How does the typical 24-hour energy shape change by Day Type and Scope?",
+    reason: null,
+    scopes: grid.scopes.map((scope) => ({
+      id: scope.scopeId,
+      name: scope.scopeType === "project" ? "Project" : scope.scopeName,
+    })),
+    profiles: profiles.map((profile) => ({
+      id: `${profile.scopeId}:${profile.dayType}`,
+      dayType: profile.dayType,
+      dayTypeLabel: dayTypeLabel(profile.dayType),
+      scopeId: profile.scopeId,
+      scopeName: profile.scopeId === snapshot.context.scopeId ? "Project" : profile.scopeName,
+      status: profile.status,
+      sampleDayCount: profile.status === "available" ? profile.sampleDayCount : null,
+      reason: profile.status === "unavailable" ? profile.reason.message : null,
+      values: profile.status === "available"
+        ? profile.values.map((value) => ({
+          id: `${profile.scopeId}:${profile.dayType}:${value.localHour}`,
+          localHour: value.localHour,
+          hourLabel: formatLocalHour(value.localHour),
+          acceptedUsageKwh: value.usageKwh,
+          usageKwh: formatDecimal(value.usageKwh, 4),
+        }))
+        : [],
+    })),
+    evidence,
+  };
+}
+
+function buildUsageHeatmap(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  overviewUnavailable: boolean,
+): NgeeAnnUsageHeatmapViewModel {
+  const evidence = timeBehaviourEvidence(snapshot);
+  const unavailable = (reason: string): NgeeAnnUsageHeatmapViewModel => ({
+    status: "unavailable",
+    decisionQuestion: "Which local date, Level and hour cell needs inspection?",
+    reason,
+    defaultView: "date-hour",
+    dates: [],
+    scopes: [],
+    evidence,
+  });
+  if (overviewUnavailable) {
+    return unavailable("No trusted intervals support an hourly Usage heatmap for this Period.");
+  }
+  if (snapshot.context.scopeType !== "project") {
+    return unavailable("Select the Project Scope to inspect Project and Level hourly cells.");
+  }
+  const grid = validTimeGrid(snapshot);
+  if (!grid.valid) {
+    return unavailable(grid.reason);
+  }
+  const firstScope = grid.scopes[0]!;
+  const dates = firstScope.cells
+    .filter((cell) => cell.localHour === 0)
+    .map((cell) => ({
+      id: cell.localDate,
+      label: formatLocalDate(cell.localDate),
+      weekday: formatLocalWeekday(cell.localDate),
+    }));
+
+  return {
+    status: "available",
+    decisionQuestion: "Which local date, Level and hour cell needs inspection?",
+    reason: null,
+    defaultView: dates.length === 1 ? "level-hour" : "date-hour",
+    dates,
+    scopes: grid.scopes.map((scope) => ({
+      id: scope.scopeId,
+      name: scope.scopeType === "project" ? "Project" : scope.scopeName,
+      cells: scope.cells.map((cell) => ({
+        id: `${scope.scopeId}:${cell.localDate}:${cell.localHour}`,
+        scopeId: scope.scopeId,
+        localDate: cell.localDate,
+        dateLabel: formatLocalDate(cell.localDate),
+        weekday: formatLocalWeekday(cell.localDate),
+        localHour: cell.localHour,
+        hourLabel: formatLocalHour(cell.localHour),
+        range: formatEvidenceRange(cell.from, cell.to, snapshot.analysis.timeBehaviour!.timezone),
+        acceptedUsageKwh: cell.usageKwh,
+        usageKwh: cell.usageKwh === null ? null : formatDecimal(cell.usageKwh, 4),
+        quality: timePointQuality(cell.dataHealth),
+      })),
+    })),
+    evidence,
+  };
+}
+
+function validTimeGrid(snapshot: EnergyProjectAnalysisSnapshotDto):
+  | { valid: true; scopes: TimeScope[] }
+  | { valid: false; reason: string } {
+  const { analysis, context, projectRelease } = snapshot;
+  const timeBehaviour = analysis.timeBehaviour;
+  if (!timeBehaviour) {
+    return { valid: false, reason: "This published Snapshot does not include the authoritative hourly time grid." };
+  }
+  const hasEvidence = snapshot.evidence.some((reference) => (
+    reference.metricId === "energy.total_usage_kwh@1"
+    && reference.queryIds.includes("time_bucket_grid_v1")
+  ));
+  const pinsValid = context.projectReleaseId === projectRelease.id
+    && context.projectId === projectRelease.projectId
+    && analysis.context.projectId === projectRelease.projectId
+    && analysis.provenance.dataSnapshotId === snapshot.dataSnapshot.id
+    && context.dataSnapshotId === snapshot.dataSnapshot.id
+    && analysis.context.dataSnapshotId === snapshot.dataSnapshot.id
+    && analysis.provenance.hierarchyRevisionId === projectRelease.hierarchyRevisionId
+    && context.hierarchyRevisionId === projectRelease.hierarchyRevisionId
+    && analysis.context.hierarchyRevisionId === projectRelease.hierarchyRevisionId
+    && analysis.provenance.meterMappingRevisionId === projectRelease.meterMappingRevisionId
+    && context.meterMappingRevisionId === projectRelease.meterMappingRevisionId
+    && analysis.context.meterMappingRevisionId === projectRelease.meterMappingRevisionId
+    && analysis.provenance.meterFormulaRevisionId === projectRelease.meterFormulaRevisionId
+    && context.meterFormulaRevisionId === projectRelease.meterFormulaRevisionId
+    && analysis.context.meterFormulaRevisionId === projectRelease.meterFormulaRevisionId
+    && projectRelease.metricRevisionIds.includes("energy.total_usage_kwh@1")
+    && hasEvidence;
+  if (!pinsValid) {
+    return { valid: false, reason: "The hourly grid Snapshot, Release or revision evidence pins are inconsistent." };
+  }
+  if (
+    timeBehaviour.metricId !== "energy.total_usage_kwh@1"
+    || timeBehaviour.grain !== "hour"
+    || timeBehaviour.unit !== "kWh"
+    || timeBehaviour.timezone !== context.timezone
+    || timeBehaviour.queryId !== "time_bucket_grid_v1"
+    || !analysis.provenance.queryIds.includes("time_bucket_grid_v1")
+  ) {
+    return { valid: false, reason: "The hourly grid metric, grain, timezone, unit or query evidence is invalid." };
+  }
+  const expectedScopes = [
+    { id: context.scopeId, name: context.scopeName, type: "project" },
+    ...analysis.childScopes
+      .filter((scope) => scope.nodeType === "level")
+      .map((scope) => ({ id: scope.nodeId, name: scope.name, type: scope.nodeType })),
+  ];
+  if (
+    expectedScopes.length !== 3
+    || timeBehaviour.scopes.length !== expectedScopes.length
+    || timeBehaviour.scopes.some((scope, index) => {
+      const expected = expectedScopes[index];
+      return !expected
+        || scope.scopeId !== expected.id
+        || scope.scopeName !== expected.name
+        || scope.scopeType !== expected.type;
+    })
+  ) {
+    return { valid: false, reason: "The hourly grid Scope contract is incomplete or out of order." };
+  }
+  const projectCells = timeBehaviour.scopes[0]?.cells;
+  if (!projectCells || !validTimeSpine(projectCells, context.primaryPeriod)) {
+    return { valid: false, reason: "The hourly grid time spine is incomplete or invalid." };
+  }
+  const spine = projectCells.map((cell) => `${cell.localDate}|${cell.localHour}|${cell.from}|${cell.to}`);
+  if (timeBehaviour.scopes.some((scope) => (
+    scope.cells.length !== spine.length
+    || scope.cells.some((cell, index) => (
+      `${cell.localDate}|${cell.localHour}|${cell.from}|${cell.to}` !== spine[index]
+      || !validTimeCell(cell)
+    ))
+  ))) {
+    return { valid: false, reason: "The hourly grid cells do not share one valid authoritative time spine." };
+  }
+  return { valid: true, scopes: timeBehaviour.scopes };
+}
+
+function validTimeSpine(
+  cells: TimeCell[],
+  period: EnergyProjectAnalysisSnapshotDto["context"]["primaryPeriod"],
+): boolean {
+  if (
+    cells.length === 0
+    || cells.length % 24 !== 0
+    || cells[0]?.from !== period.start
+    || cells.at(-1)?.to !== period.endExclusive
+  ) {
+    return false;
+  }
+  return cells.every((cell, index) => {
+    const previous = cells[index - 1];
+    return /^\d{4}-\d{2}-\d{2}$/u.test(cell.localDate)
+      && Number.isInteger(cell.localHour)
+      && cell.localHour === index % 24
+      && Number.isFinite(Date.parse(cell.from))
+      && Number.isFinite(Date.parse(cell.to))
+      && Date.parse(cell.from) < Date.parse(cell.to)
+      && Date.parse(cell.to) - Date.parse(cell.from) === 3_600_000
+      && (!previous || previous.to === cell.from)
+      && (cell.localHour !== 0 || index === 0 || previous?.localDate < cell.localDate);
+  });
+}
+
+function validTimeCell(cell: TimeCell): boolean {
+  const health = cell.dataHealth;
+  const countsValid = Number.isFinite(health.coveragePct)
+    && health.coveragePct >= 0
+    && health.coveragePct <= 100
+    && Number.isInteger(health.expectedMeterIntervalCount)
+    && health.expectedMeterIntervalCount >= 0
+    && Number.isInteger(health.validIntervalCount)
+    && health.validIntervalCount >= 0
+    && health.validIntervalCount <= health.expectedMeterIntervalCount
+    && Number.isInteger(health.qualityEventCount)
+    && health.qualityEventCount >= 0;
+  if (!countsValid) return false;
+  if (health.status === "complete") {
+    return health.coveragePct === 100
+      && health.expectedMeterIntervalCount > 0
+      && health.validIntervalCount === health.expectedMeterIntervalCount
+      && health.qualityEventCount === 0
+      && finiteNonNegative(cell.usageKwh);
+  }
+  if (health.status === "partial") {
+    return health.expectedMeterIntervalCount > 0
+      && health.validIntervalCount > 0
+      && (health.validIntervalCount < health.expectedMeterIntervalCount || health.qualityEventCount > 0)
+      && finiteNonNegative(cell.usageKwh);
+  }
+  return cell.usageKwh === null;
+}
+
+function timePointQuality(health: TimeCell["dataHealth"]): TimePointQuality {
+  return {
+    status: health.status,
+    statusLabel: health.status === "complete" ? "Complete" : health.status === "partial" ? "Partial" : "Unavailable",
+    coverage: `${formatDecimal(health.coveragePct, 1)}% coverage`,
+    intervals: `${health.validIntervalCount.toLocaleString("en-SG")} / ${health.expectedMeterIntervalCount.toLocaleString("en-SG")} valid intervals`,
+    qualityEvents: `${health.qualityEventCount.toLocaleString("en-SG")} quality events`,
+  };
+}
+
+function timeScopeLimitation(cells: TimeCell[]): string | null {
+  if (cells.some((cell) => cell.dataHealth.status === "unavailable")) {
+    return "At least one hour has no accepted facts. The hour remains visible and is not zero-filled.";
+  }
+  if (cells.some((cell) => cell.dataHealth.status === "partial")) {
+    return "At least one hour is partial. Accepted usage remains visible with its coverage.";
+  }
+  return null;
+}
+
+function dayTypeLabel(dayType: "weekday" | "weekend" | "public_holiday"):
+  "Weekday" | "Weekend" | "Public Holiday" {
+  return dayType === "weekday" ? "Weekday" : dayType === "weekend" ? "Weekend" : "Public Holiday";
+}
+
+function formatLocalHour(localHour: number): string {
+  return `${String(localHour).padStart(2, "0")}:00`;
+}
+
 function buildEnergyTrend(
   snapshot: EnergyProjectAnalysisSnapshotDto,
   overviewUnavailable: boolean,
 ): NgeeAnnEnergyTrendViewModel {
   const { analysis, context } = snapshot;
   const dailyTotals = analysis.dailyTotals;
+  const timeBehaviour = analysis.timeBehaviour;
+  const singleDay = isSingleLocalDayPeriod(context.primaryPeriod, context.timezone);
+  const queryId = singleDay ? "time_bucket_grid_v1" : "daily_totals_v1";
   const evidence: NgeeAnnEnergyTrendViewModel["evidence"] = {
     snapshotId: snapshot.dataSnapshot.id,
     projectReleaseId: snapshot.projectRelease.id,
@@ -1051,12 +1455,13 @@ function buildEnergyTrend(
     meterFormulaRevisionId: analysis.provenance.meterFormulaRevisionId,
     metricId: "energy.total_usage_kwh@1",
     period: `[${context.primaryPeriod.start}, ${context.primaryPeriod.endExclusive})`,
-    timezone: dailyTotals?.timezone ?? context.timezone,
+    timezone: singleDay ? timeBehaviour?.timezone ?? context.timezone : dailyTotals?.timezone ?? context.timezone,
     unit: "kWh",
-    queryIds: ["daily_totals_v1"],
+    queryIds: [queryId],
   };
   const unavailable = (reason: string): NgeeAnnEnergyTrendViewModel => ({
     status: "unavailable",
+    grain: singleDay ? "hour" : "day",
     decisionQuestion: "When did accepted energy use change inside the selected Period?",
     reason,
     scopes: [],
@@ -1068,6 +1473,35 @@ function buildEnergyTrend(
   }
   if (context.scopeType !== "project") {
     return unavailable("Select the Project Scope to compare the Project, Level 7 and Level 6 trend.");
+  }
+  if (singleDay) {
+    const grid = validTimeGrid(snapshot);
+    if (!grid.valid) {
+      return unavailable(grid.reason);
+    }
+    return {
+      status: "available",
+      grain: "hour",
+      decisionQuestion: "Which accepted local hours drove energy use on the selected day?",
+      reason: null,
+      scopes: grid.scopes.map((scope) => ({
+        id: scope.scopeId,
+        name: scope.scopeType === "project" ? "Project" : scope.scopeName,
+        limitation: timeScopeLimitation(scope.cells),
+        points: scope.cells.map((cell) => ({
+          id: `${scope.scopeId}:${cell.localDate}:${cell.localHour}`,
+          localDate: cell.localDate,
+          localHour: cell.localHour,
+          dateLabel: formatLocalHour(cell.localHour),
+          weekday: formatLocalDate(cell.localDate),
+          range: formatEvidenceRange(cell.from, cell.to, timeBehaviour!.timezone),
+          acceptedUsageKwh: cell.usageKwh,
+          usageKwh: cell.usageKwh === null ? null : formatDecimal(cell.usageKwh, 4),
+          ...timePointQuality(cell.dataHealth),
+        })),
+      })),
+      evidence,
+    };
   }
   if (!dailyTotals) {
     return unavailable("This published Snapshot does not include the authoritative daily totals contract.");
@@ -1116,6 +1550,7 @@ function buildEnergyTrend(
 
   return {
     status: "available",
+    grain: "day",
     decisionQuestion: "When did accepted energy use change inside the selected Period?",
     reason: null,
     scopes: dailyTotals.scopes.map((scope) => {
@@ -1132,6 +1567,7 @@ function buildEnergyTrend(
         points: scope.rows.map((row) => ({
           id: `${scope.scopeId}:${row.localDate}`,
           localDate: row.localDate,
+          localHour: null,
           dateLabel: formatLocalDate(row.localDate),
           weekday: formatLocalWeekday(row.localDate),
           range: formatEvidenceRange(row.from, row.to, dailyTotals.timezone),
@@ -1153,11 +1589,33 @@ function buildEnergyTrend(
   };
 }
 
+function isSingleLocalDayPeriod(
+  period: EnergyProjectAnalysisSnapshotDto["context"]["primaryPeriod"],
+  timezone: string,
+): boolean {
+  const start = Date.parse(period.start);
+  const end = Date.parse(period.endExclusive);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || start >= end) return false;
+  const startDate = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(start));
+  const endDate = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(end - 1));
+  return startDate === endDate;
+}
+
 function validDailySpine(
   rows: NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["dailyTotals"]>["scopes"][number]["rows"],
   period: EnergyProjectAnalysisSnapshotDto["context"]["primaryPeriod"],
 ): boolean {
-  if (rows.length !== 7 || rows[0]?.from !== period.start || rows.at(-1)?.to !== period.endExclusive) {
+  if (rows.length === 0 || rows[0]?.from !== period.start || rows.at(-1)?.to !== period.endExclusive) {
     return false;
   }
   return rows.every((row, index) => {

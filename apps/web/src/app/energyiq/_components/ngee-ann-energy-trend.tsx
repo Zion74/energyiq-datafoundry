@@ -44,7 +44,7 @@ export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel
           <p className="mt-1 text-xs leading-5 text-muted">{view.decisionQuestion}</p>
         </div>
         <p className="text-[11px] leading-5 text-muted">
-          Daily totals / {view.evidence.timezone} / {view.evidence.unit}
+          {view.grain === "hour" ? "Hourly grid" : "Daily totals"} / {view.evidence.timezone} / {view.evidence.unit}
         </p>
       </div>
 
@@ -82,12 +82,15 @@ export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel
       ) : null}
 
       <div id="ngee-ann-energy-trend-chart" className="mt-4 overflow-x-auto pb-1">
-        <div className="min-w-[720px]">
+        <div className={view.grain === "hour" ? "min-w-[1100px]" : "min-w-[720px]"}>
           <div className="mb-2 flex items-center justify-between text-[10px] text-muted">
             <span>Accepted energy / kWh</span>
-            <span>{selectedScope.points.length} daily buckets</span>
+            <span>{selectedScope.points.length} {view.grain === "hour" ? "hourly" : "daily"} buckets</span>
           </div>
-          <div className="grid h-56 grid-cols-7 items-end gap-2 border-b border-border px-2">
+          <div
+            className="grid h-56 items-end gap-2 border-b border-border px-2"
+            style={{ gridTemplateColumns: `repeat(${selectedScope.points.length}, minmax(32px, 1fr))` }}
+          >
             {selectedScope.points.map((point) => {
               const selected = selectedPoint?.id === point.id;
               const height = point.acceptedUsageKwh === null || maximumUsageKwh <= 0
@@ -120,8 +123,12 @@ export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel
                       />
                     )}
                   </span>
-                  <span className="mt-2 text-[10px] font-semibold text-foreground">{point.weekday}</span>
-                  <span className="pb-2 text-[10px] text-muted">{point.dateLabel}</span>
+                  <span className="mt-2 text-[10px] font-semibold text-foreground">
+                    {view.grain === "hour" ? point.dateLabel : point.weekday}
+                  </span>
+                  <span className="pb-2 text-[10px] text-muted">
+                    {view.grain === "hour" ? point.localHour! % 3 === 0 ? point.weekday : "" : point.dateLabel}
+                  </span>
                 </button>
               );
             })}
@@ -147,14 +154,14 @@ export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel
           </>
         ) : (
           <p className="text-[11px] leading-5 text-muted">
-            Hover or focus a day to inspect accepted usage and coverage. Press Enter or Space to keep its detail open.
+            Hover or focus {view.grain === "hour" ? "an hour" : "a day"} to inspect accepted usage and coverage. Press Enter or Space to keep its detail open.
           </p>
         )}
       </div>
 
       <details className="mt-4 border-t border-border pt-3 text-[10px] leading-4 text-muted">
         <summary className="cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
-          Trend evidence / daily_totals_v1
+          Trend evidence / {view.evidence.queryIds[0]}
         </summary>
         <dl className="mt-2 grid gap-x-3 gap-y-1 sm:grid-cols-[80px_minmax(0,1fr)]">
           <dt>Snapshot</dt><dd className="break-all font-mono text-foreground">{view.evidence.snapshotId}</dd>

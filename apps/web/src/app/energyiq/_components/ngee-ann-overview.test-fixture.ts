@@ -22,6 +22,7 @@ export function ngeeAnnGoldenSnapshot(input: {
   const queryIds = [
     "scope_summary_v1",
     "daily_totals_v1",
+    "time_bucket_grid_v1",
     "peak_breakdown_v1",
     "hourly_profile_v1",
     "meter_breakdown_v1",
@@ -366,8 +367,15 @@ export function ngeeAnnGoldenSnapshot(input: {
       validIntervalCount,
       qualityEventCount: 0,
     },
-    hourlyProfile: [],
+    hourlyProfile: GOLDEN_PERIOD_HOURLY_PROFILE.map(([hour, usageKwh, averageKw, peakKw]) => ({
+      hour,
+      usageKwh,
+      averageKw,
+      peakKw,
+      observationCount: 28,
+    })),
     dailyTotals: goldenDailyTotals(),
+    timeBehaviour: goldenTimeBehaviour(),
     peakBreakdown: goldenPeakBreakdown(topCircuits, dataStatus, coveragePct),
     comparison: {
       from: "2026-06-02T16:00:00.000Z",
@@ -613,6 +621,62 @@ export function ngeeAnnGoldenSnapshot(input: {
   };
 }
 
+export function ngeeAnnSingleDaySnapshot(input: { includeDailyTotals?: boolean } = {}): EnergyProjectAnalysisSnapshotDto {
+  const snapshot = ngeeAnnGoldenSnapshot();
+  const start = "2026-06-15T16:00:00.000Z";
+  const endExclusive = "2026-06-16T16:00:00.000Z";
+  snapshot.context.primaryPeriod = { start, endExclusive };
+  snapshot.context.from = start;
+  snapshot.context.to = endExclusive;
+  snapshot.analysis.context.from = start;
+  snapshot.analysis.context.to = endExclusive;
+  if (input.includeDailyTotals === false) {
+    delete snapshot.analysis.dailyTotals;
+  } else {
+    for (const scope of snapshot.analysis.dailyTotals!.scopes) {
+      scope.rows = scope.rows.filter((row) => row.localDate === "2026-06-16");
+    }
+  }
+  const timeBehaviour = snapshot.analysis.timeBehaviour!;
+  for (const scope of timeBehaviour.scopes) {
+    scope.cells = scope.cells.filter((cell) => cell.localDate === "2026-06-16");
+  }
+  timeBehaviour.dayProfiles = timeBehaviour.scopes.flatMap((scope) => [
+    {
+      dayType: "weekday" as const,
+      scopeId: scope.scopeId,
+      scopeName: scope.scopeName,
+      status: "available" as const,
+      sampleDayCount: 1,
+      values: scope.cells.map((cell) => ({
+        localHour: cell.localHour,
+        usageKwh: cell.usageKwh!,
+      })),
+    },
+    {
+      dayType: "weekend" as const,
+      scopeId: scope.scopeId,
+      scopeName: scope.scopeName,
+      status: "unavailable" as const,
+      reason: {
+        code: "COMPLETE_DAY_SAMPLE_UNAVAILABLE" as const,
+        message: `No complete weekend local-day sample is available for ${scope.scopeName}.`,
+      },
+    },
+    {
+      dayType: "public_holiday" as const,
+      scopeId: scope.scopeId,
+      scopeName: scope.scopeName,
+      status: "unavailable" as const,
+      reason: {
+        code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE" as const,
+        message: "Public Holiday profile requires an authoritative release-pinned Calendar classification.",
+      },
+    },
+  ]);
+  return snapshot;
+}
+
 function goldenPeakBreakdown(
   circuits: EnergyProjectAnalysisSnapshotDto["analysis"]["topCircuits"],
   dataStatus: "complete" | "partial" | "unavailable",
@@ -706,6 +770,171 @@ function goldenPeakBreakdown(
   };
 }
 
+const GOLDEN_DATES = [
+  "2026-06-10",
+  "2026-06-11",
+  "2026-06-12",
+  "2026-06-13",
+  "2026-06-14",
+  "2026-06-15",
+  "2026-06-16",
+] as const;
+
+const GOLDEN_PERIOD_HOURLY_PROFILE = [
+  [0, 34.102316, 4.871759, 5.649868],
+  [1, 33.992199, 4.856028, 5.717524],
+  [2, 33.932614, 4.847516, 5.626752],
+  [3, 33.832089, 4.833156, 5.607356],
+  [4, 33.964286, 4.852041, 5.753408],
+  [5, 33.891544, 4.841649, 5.62244],
+  [6, 58.626076, 8.375154, 11.39578],
+  [7, 73.499332, 10.499905, 15.036236],
+  [8, 82.5721, 11.796014, 17.543976],
+  [9, 92.633765, 13.233395, 19.907484],
+  [10, 96.758198, 13.8226, 20.061168],
+  [11, 96.989554, 13.855651, 19.1122],
+  [12, 96.622015, 13.803145, 19.271664],
+  [13, 98.235635, 14.033662, 20.28724],
+  [14, 99.781167, 14.254452, 20.673108],
+  [15, 98.641762, 14.09168, 19.677044],
+  [16, 92.724402, 13.246343, 18.137052],
+  [17, 81.79052, 11.68436, 16.41514],
+  [18, 63.807229, 9.115318, 13.19846],
+  [19, 40.634708, 5.804958, 8.338272],
+  [20, 39.402286, 5.628898, 6.605116],
+  [21, 39.09562, 5.585089, 6.298508],
+  [22, 38.341055, 5.477294, 5.980136],
+  [23, 37.297852, 5.328265, 5.671996],
+] as const;
+
+const GOLDEN_DAY_HOURLY_USAGE = [
+  5.35652, 5.173563, 5.104549, 5.125056, 5.185748, 5.242188,
+  9.238492, 11.201303, 12.091472, 13.781568, 13.979613, 13.843545,
+  13.424247, 13.540453, 14.108092, 14.267255, 13.5892, 11.792498,
+  9.493087, 5.396631, 5.279697, 5.299933, 5.304831, 5.178619,
+] as const;
+
+function goldenTimeBehaviour(): NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["timeBehaviour"]> {
+  const scopeInputs = [
+    {
+      scopeId: "project",
+      scopeName: "Ngee Ann Polytechnic",
+      scopeType: "project",
+      dailyUsage: [253.7018, 268.399, 260.0659, 168.9645, 127.9387, 230.1002, 221.9982],
+      expectedPerHour: 16,
+    },
+    {
+      scopeId: "level-7",
+      scopeName: "Level 7",
+      scopeType: "level",
+      dailyUsage: [157.1325, 182.6915, 170.9233, 114.7684, 115.1763, 157.1724, 156.3201],
+      expectedPerHour: 8,
+    },
+    {
+      scopeId: "level-6",
+      scopeName: "Level 6",
+      scopeType: "level",
+      dailyUsage: [96.5693, 85.7075, 89.1426, 54.1961, 12.7624, 72.9278, 65.6781],
+      expectedPerHour: 8,
+    },
+  ];
+  const projectDailyUsage = scopeInputs[0]!.dailyUsage;
+  const firstSixProjectUsage = projectDailyUsage.slice(0, -1).reduce((sum, value) => sum + value, 0);
+  const projectCells = GOLDEN_DATES.flatMap((localDate, dateIndex) => (
+    GOLDEN_PERIOD_HOURLY_PROFILE.map(([localHour, periodHourlyUsage]) => {
+      const from = new Date(
+        Date.parse(`${previousLocalDate(localDate)}T16:00:00.000Z`) + localHour * 3_600_000,
+      ).toISOString();
+      const usageKwh = dateIndex === GOLDEN_DATES.length - 1
+        ? GOLDEN_DAY_HOURLY_USAGE[localHour]!
+        : projectDailyUsage[dateIndex]!
+          * (periodHourlyUsage - GOLDEN_DAY_HOURLY_USAGE[localHour]!)
+          / firstSixProjectUsage;
+      return {
+        localDate,
+        localHour,
+        from,
+        to: new Date(Date.parse(from) + 3_600_000).toISOString(),
+        usageKwh: roundFixture(usageKwh),
+      };
+    })
+  ));
+  const scopes = scopeInputs.map((scope, scopeIndex) => ({
+    scopeId: scope.scopeId,
+    scopeName: scope.scopeName,
+    scopeType: scope.scopeType,
+    cells: projectCells.map((projectCell, cellIndex) => {
+      const dateIndex = Math.floor(cellIndex / 24);
+      const level7Ratio = scopeInputs[1]!.dailyUsage[dateIndex]! / projectDailyUsage[dateIndex]!;
+      const usageKwh = scopeIndex === 0
+        ? projectCell.usageKwh
+        : scopeIndex === 1
+          ? roundFixture(projectCell.usageKwh * level7Ratio)
+          : roundFixture(projectCell.usageKwh - projectCell.usageKwh * level7Ratio);
+      return {
+        ...projectCell,
+        usageKwh,
+        dataHealth: {
+          status: "complete" as const,
+          coveragePct: 100,
+          expectedMeterIntervalCount: scope.expectedPerHour,
+          validIntervalCount: scope.expectedPerHour,
+          qualityEventCount: 0,
+        },
+      };
+    }),
+  }));
+  const dayProfiles: NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["timeBehaviour"]>["dayProfiles"] = [];
+  for (const dayType of ["weekday", "weekend"] as const) {
+    const dates = GOLDEN_DATES.filter((localDate) => {
+      const day = new Date(`${localDate}T00:00:00.000Z`).getUTCDay();
+      return dayType === "weekend" ? day === 0 || day === 6 : day !== 0 && day !== 6;
+    });
+    for (const scope of scopes) {
+      dayProfiles.push({
+        dayType,
+        scopeId: scope.scopeId,
+        scopeName: scope.scopeName,
+        status: "available",
+        sampleDayCount: dates.length,
+        values: Array.from({ length: 24 }, (_, localHour) => ({
+          localHour,
+          usageKwh: roundFixture(
+            scope.cells
+              .filter((cell) => dates.includes(cell.localDate as typeof GOLDEN_DATES[number]) && cell.localHour === localHour)
+              .reduce((sum, cell) => sum + (cell.usageKwh ?? 0), 0) / dates.length,
+          ),
+        })),
+      });
+    }
+  }
+  for (const scope of scopes) {
+    dayProfiles.push({
+      dayType: "public_holiday",
+      scopeId: scope.scopeId,
+      scopeName: scope.scopeName,
+      status: "unavailable",
+      reason: {
+        code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE",
+        message: "Public Holiday profile requires an authoritative release-pinned Calendar classification.",
+      },
+    });
+  }
+  return {
+    metricId: "energy.total_usage_kwh@1",
+    grain: "hour",
+    unit: "kWh",
+    timezone: "Asia/Singapore",
+    queryId: "time_bucket_grid_v1",
+    scopes,
+    dayProfiles,
+  };
+}
+
+function roundFixture(value: number): number {
+  return Math.round((value + Number.EPSILON) * 10_000) / 10_000;
+}
+
 function goldenDailyTotals(): NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["dailyTotals"]> {
   return {
     metricId: "energy.total_usage_kwh@1",
@@ -744,21 +973,11 @@ function dailyScope(
   usage: number[],
   expectedMeterIntervalCount: number,
 ): NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["dailyTotals"]>["scopes"][number] {
-  const dates = [
-    "2026-06-10",
-    "2026-06-11",
-    "2026-06-12",
-    "2026-06-13",
-    "2026-06-14",
-    "2026-06-15",
-    "2026-06-16",
-  ];
-
   return {
     scopeId,
     scopeName,
     scopeType,
-    rows: dates.map((localDate, index) => ({
+    rows: GOLDEN_DATES.map((localDate, index) => ({
       localDate,
       from: `${previousLocalDate(localDate)}T16:00:00.000Z`,
       to: `${localDate}T16:00:00.000Z`,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ngeeAnnGoldenSnapshot } from "./ngee-ann-overview.test-fixture";
+import { ngeeAnnGoldenSnapshot, ngeeAnnSingleDaySnapshot } from "./ngee-ann-overview.test-fixture";
 import { buildNgeeAnnOverviewViewModel } from "./ngee-ann-overview-view-model";
 
 type GoldenSnapshot = ReturnType<typeof ngeeAnnGoldenSnapshot>;
@@ -89,6 +89,35 @@ const peakEvidencePinMismatchCases: Array<{
       const reference = snapshot.evidence
         .find((candidate) => candidate.metricId === "energy.peak_demand_kw@1")!;
       reference.queryIds = reference.queryIds.filter((queryId) => queryId !== "peak_breakdown_v1");
+    },
+  },
+];
+
+const timeEvidencePinMismatchCases: Array<{
+  name: string;
+  mutate: (snapshot: GoldenSnapshot) => void;
+}> = [
+  ...peakEvidencePinMismatchCases.slice(0, 15),
+  {
+    name: "Release Usage Metric",
+    mutate: (snapshot) => {
+      snapshot.projectRelease.metricRevisionIds = snapshot.projectRelease.metricRevisionIds
+        .filter((metricId) => metricId !== "energy.total_usage_kwh@1");
+    },
+  },
+  {
+    name: "Usage Evidence Metric",
+    mutate: (snapshot) => {
+      snapshot.evidence = snapshot.evidence
+        .filter((reference) => reference.metricId !== "energy.total_usage_kwh@1");
+    },
+  },
+  {
+    name: "Usage Evidence Query",
+    mutate: (snapshot) => {
+      const reference = snapshot.evidence
+        .find((candidate) => candidate.metricId === "energy.total_usage_kwh@1")!;
+      reference.queryIds = reference.queryIds.filter((queryId) => queryId !== "time_bucket_grid_v1");
     },
   },
 ];
@@ -383,6 +412,149 @@ describe("Ngee Ann Overview ViewModel", () => {
       { localDate: "2026-06-15", usageKwh: "230.1002", status: "complete" },
       { localDate: "2026-06-16", usageKwh: "221.9982", status: "complete" },
     ]);
+  });
+
+  it("uses the authoritative 24-hour grid for a single local day without depending on dailyTotals", () => {
+    const snapshot = ngeeAnnSingleDaySnapshot({ includeDailyTotals: false });
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.energyTrend).toMatchObject({
+      status: "available",
+      grain: "hour",
+      decisionQuestion: "Which accepted local hours drove energy use on the selected day?",
+      evidence: { queryIds: ["time_bucket_grid_v1"] },
+    });
+    expect(view.energyTrend.scopes[0]!.points).toHaveLength(24);
+    expect(view.energyTrend.scopes[0]!.points[0]).toMatchObject({
+      localDate: "2026-06-16",
+      localHour: 0,
+      dateLabel: "00:00",
+      acceptedUsageKwh: 5.3565,
+      usageKwh: "5.3565",
+      status: "complete",
+      intervals: "16 / 16 valid intervals",
+    });
+  });
+
+  it("projects server Day Profiles and the direct hourly heatmap grid", () => {
+    const view = buildNgeeAnnOverviewViewModel(ngeeAnnGoldenSnapshot());
+
+    expect(view.dayProfile).toMatchObject({
+      status: "available",
+      scopes: [
+        { id: "project", name: "Project" },
+        { id: "level-7", name: "Level 7" },
+        { id: "level-6", name: "Level 6" },
+      ],
+      evidence: { queryIds: ["time_bucket_grid_v1"] },
+    });
+    expect(view.dayProfile.profiles).toHaveLength(9);
+    expect(view.dayProfile.profiles.find((profile) => profile.id === "project:weekday")).toMatchObject({
+      status: "available",
+      sampleDayCount: 5,
+      values: expect.any(Array),
+    });
+    expect(view.dayProfile.profiles.find((profile) => profile.id === "project:weekend")).toMatchObject({
+      status: "available",
+      sampleDayCount: 2,
+    });
+    expect(view.dayProfile.profiles.find((profile) => profile.id === "project:public_holiday")).toMatchObject({
+      status: "unavailable",
+      reason: "Public Holiday profile requires an authoritative release-pinned Calendar classification.",
+      values: [],
+    });
+    expect(view.dayProfile.profiles.find((profile) => profile.id === "project:weekday")?.values).toHaveLength(24);
+
+    expect(view.usageHeatmap).toMatchObject({
+      status: "available",
+      defaultView: "date-hour",
+      evidence: { queryIds: ["time_bucket_grid_v1"] },
+    });
+    expect(view.usageHeatmap.dates).toHaveLength(7);
+    expect(view.usageHeatmap.scopes).toHaveLength(3);
+    expect(view.usageHeatmap.scopes[0]!.cells).toHaveLength(168);
+    expect(view.usageHeatmap.scopes[0]!.cells[0]).toMatchObject({
+      scopeId: "project",
+      localDate: "2026-06-10",
+      localHour: 0,
+      quality: { status: "complete", coverage: "100% coverage" },
+    });
+  });
+
+  it("keeps invalid Day Profile and hourly grid failures inside their owning modules", () => {
+    const invalidProfile = ngeeAnnGoldenSnapshot();
+    const weekday = invalidProfile.analysis.timeBehaviour!.dayProfiles.find((profile) => (
+      profile.status === "available" && profile.scopeId === "project" && profile.dayType === "weekday"
+    ));
+    if (weekday?.status === "available") weekday.values.pop();
+    const invalidGrid = ngeeAnnGoldenSnapshot();
+    invalidGrid.analysis.timeBehaviour!.scopes[1]!.cells[4]!.localHour = 8;
+
+    const profileView = buildNgeeAnnOverviewViewModel(invalidProfile);
+    expect(profileView.dayProfile).toMatchObject({ status: "unavailable", profiles: [] });
+    expect(profileView.usageHeatmap.status).toBe("available");
+    expect(profileView.energyTrend.status).toBe("available");
+
+    const gridView = buildNgeeAnnOverviewViewModel(invalidGrid);
+    expect(gridView.usageHeatmap).toMatchObject({ status: "unavailable", scopes: [] });
+    expect(gridView.dayProfile).toMatchObject({ status: "unavailable", profiles: [] });
+    expect(gridView.energyTrend).toMatchObject({ status: "available", grain: "day" });
+    expect(gridView.levelComparison.status).toBe("available");
+  });
+
+  it.each(timeEvidencePinMismatchCases)(
+    "fails only hourly-grid modules closed for a mismatched $name pin",
+    ({ mutate }) => {
+      const snapshot = ngeeAnnGoldenSnapshot();
+      mutate(snapshot);
+
+      const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+      expect(view.dayProfile).toMatchObject({ status: "unavailable", profiles: [] });
+      expect(view.usageHeatmap).toMatchObject({ status: "unavailable", scopes: [] });
+      expect(view.energyTrend).toMatchObject({ status: "available", grain: "day" });
+      expect(view.levelComparison.status).toBe("available");
+      expect(view.energyComposition.categories.status).toBe("available");
+    },
+  );
+
+  it("keeps partial and unavailable heatmap cells explicit without suppressing the module", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const cells = snapshot.analysis.timeBehaviour!.scopes[0]!.cells;
+    cells[0]!.dataHealth = {
+      status: "partial",
+      coveragePct: 75,
+      expectedMeterIntervalCount: 16,
+      validIntervalCount: 12,
+      qualityEventCount: 1,
+    };
+    cells[1]!.usageKwh = null;
+    cells[1]!.dataHealth = {
+      status: "unavailable",
+      coveragePct: 0,
+      expectedMeterIntervalCount: 16,
+      validIntervalCount: 0,
+      qualityEventCount: 2,
+    };
+
+    const heatmap = buildNgeeAnnOverviewViewModel(snapshot).usageHeatmap;
+
+    expect(heatmap.status).toBe("available");
+    expect(heatmap.scopes[0]!.cells[0]).toMatchObject({
+      usageKwh: expect.any(String),
+      quality: {
+        status: "partial",
+        coverage: "75% coverage",
+        intervals: "12 / 16 valid intervals",
+        qualityEvents: "1 quality events",
+      },
+    });
+    expect(heatmap.scopes[0]!.cells[1]).toMatchObject({
+      acceptedUsageKwh: null,
+      usageKwh: null,
+      quality: { status: "unavailable", coverage: "0% coverage" },
+    });
   });
 
   it("projects the authoritative same-interval Peak breakdown without reordering server rows", () => {

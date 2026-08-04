@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ngeeAnnGoldenSnapshot } from "./ngee-ann-overview.test-fixture";
+import { ngeeAnnGoldenSnapshot, ngeeAnnSingleDaySnapshot } from "./ngee-ann-overview.test-fixture";
 import { NgeeAnnOverviewRenderer } from "./ngee-ann-overview-renderer";
 
 describe("NgeeAnnOverviewRenderer", () => {
@@ -31,6 +31,14 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Energy trend Scope");
     expect(markup).toContain("7 daily buckets");
     expect(markup).toContain("Trend evidence / daily_totals_v1");
+    expect(markup).toContain("Day profile");
+    expect(markup).toContain("How does the typical 24-hour energy shape change by Day Type and Scope?");
+    expect(markup).toContain("5 complete days / 24 server values");
+    expect(markup).toContain("Day Profile evidence / time_bucket_grid_v1");
+    expect(markup).toContain("Usage heatmap");
+    expect(markup).toContain("Which local date, Level and hour cell needs inspection?");
+    expect(markup).toContain("Date × hour");
+    expect(markup).toContain("Heatmap evidence / time_bucket_grid_v1");
     expect(markup).toContain("energy.total_usage_kwh@1");
     expect(markup).toContain("Energy distribution");
     expect(markup).toContain("Level comparison");
@@ -95,6 +103,9 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("No · explanatory component");
     expect(markup).toContain("[2026-06-09T16:00:00.000Z, 2026-06-16T16:00:00.000Z)");
     expect(markup.indexOf("Energy trend")).toBeLessThan(markup.indexOf("Level comparison"));
+    expect(markup.indexOf("Energy trend")).toBeLessThan(markup.indexOf("Day profile"));
+    expect(markup.indexOf("Day profile")).toBeLessThan(markup.indexOf("Usage heatmap"));
+    expect(markup.indexOf("Usage heatmap")).toBeLessThan(markup.indexOf("Level comparison"));
     expect(markup.indexOf("Level comparison")).toBeLessThan(markup.indexOf("Energy composition"));
     expect(markup.indexOf("Energy composition")).toBeLessThan(markup.indexOf("Snapshot &amp; evidence"));
     expect(markup.indexOf("Accounting trace")).toBeLessThan(markup.indexOf("Derived meter trace"));
@@ -157,6 +168,22 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Energy distribution");
     expect(markup).toContain("Energy composition");
     expect(markup).toContain("1531.1683");
+  });
+
+  it("fails only the new time modules closed for an absent authoritative hourly grid", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    delete snapshot.analysis.timeBehaviour;
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+
+    expect(markup).toContain("7 daily buckets");
+    expect(markup).toContain("Day profile unavailable");
+    expect(markup).toContain("Usage heatmap unavailable");
+    expect(markup).toContain("does not include the authoritative hourly time grid");
+    expect(markup).toContain("Level comparison");
+    expect(markup).toContain("Energy composition");
   });
 
   it("keeps the static Peak KPI when the optional breakdown is absent or invalid", () => {
@@ -508,6 +535,63 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(container.textContent).toContain("157.1325 kWh");
   });
 
+  it("renders and operates 24 server hours for a single-day Period without dailyTotals", async () => {
+    const snapshot = ngeeAnnSingleDaySnapshot({ includeDailyTotals: false });
+    await renderGolden(snapshot);
+
+    expect(container.textContent).toContain("24 hourly buckets");
+    expect(container.textContent).toContain("Trend evidence / time_bucket_grid_v1");
+    const firstHour = container.querySelector<HTMLButtonElement>(
+      'button[aria-label^="16 Jun 00:00: 5.3565 kWh"]',
+    )!;
+    await act(async () => firstHour.focus());
+    expect(container.textContent).toContain("5.3565 kWh");
+    expect(container.textContent).toContain("Complete / 100% coverage / 16 / 16 valid intervals");
+    await activateNativeButton(firstHour, "Enter");
+    await act(async () => firstHour.blur());
+    expect(firstHour.getAttribute("aria-pressed")).toBe("true");
+
+    await act(async () => filterButton("Energy trend Scope", "Level 7")?.click());
+    expect(container.textContent).toContain("Hover or focus an hour");
+  });
+
+  it("clears Trend, Day Profile and Heatmap selections when the authoritative Period changes", async () => {
+    await renderGolden();
+    const trendPoint = container.querySelector<HTMLButtonElement>(
+      'button[aria-label^="Wed 10 Jun: 253.7018 kWh"]',
+    )!;
+    await act(async () => trendPoint.click());
+    await act(async () => filterButton("Day Profile type", "Weekend")?.click());
+    await act(async () => filterButton("Day Profile Scope", "Level 7")?.click());
+    const profilePoint = container.querySelector<HTMLButtonElement>(
+      'button[aria-label^="Weekend Level 7 00:00:"]',
+    )!;
+    await act(async () => profilePoint.click());
+    await act(async () => filterButton("Heatmap Level", "Level 7")?.click());
+    const heatmapCell = container.querySelector<HTMLButtonElement>(
+      'button[aria-label^="Wed 10 Jun / Wed 10 Jun 00:00:"]',
+    )!;
+    await act(async () => heatmapCell.click());
+    expect(trendPoint.getAttribute("aria-pressed")).toBe("true");
+    expect(profilePoint.getAttribute("aria-pressed")).toBe("true");
+    expect(heatmapCell.getAttribute("aria-pressed")).toBe("true");
+
+    const next = ngeeAnnSingleDaySnapshot({ includeDailyTotals: false });
+    await act(async () => {
+      root.render(<NgeeAnnOverviewRenderer state={{ status: "ready", snapshot: next }} />);
+    });
+
+    expect(container.textContent).toContain("24 hourly buckets");
+    expect(filterButton("Energy trend Scope", "Project")?.getAttribute("aria-pressed")).toBe("true");
+    expect(filterButton("Day Profile type", "Weekday")?.getAttribute("aria-pressed")).toBe("true");
+    expect(filterButton("Day Profile Scope", "Project")?.getAttribute("aria-pressed")).toBe("true");
+    expect(filterButton("Heatmap view", "Level × hour")?.getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector<HTMLButtonElement>(
+      'button[aria-label^="16 Jun 00:00: 5.3565 kWh"]',
+    )?.getAttribute("aria-pressed")).toBe("false");
+    expect(container.textContent).toContain("Hover or focus an hour");
+  });
+
   it("keeps partial and missing daily buckets visible without zero-filling them", async () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     const rows = snapshot.analysis.dailyTotals!.scopes[0]!.rows;
@@ -543,6 +627,115 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     await act(async () => missingPoint.click());
     expect(container.textContent).toContain("No accepted facts");
     expect(container.textContent).not.toContain("2026-06-12 / 0 kWh");
+  });
+
+  it("switches server Day Type and Scope profiles, exposes keyboard detail, and recovers from explicit empty", async () => {
+    await renderGolden();
+
+    const weekday = filterButton("Day Profile type", "Weekday")!;
+    const weekend = filterButton("Day Profile type", "Weekend")!;
+    const publicHoliday = filterButton("Day Profile type", "Public Holiday")!;
+    const project = filterButton("Day Profile Scope", "Project")!;
+    const level7 = filterButton("Day Profile Scope", "Level 7")!;
+    expect(weekday.getAttribute("aria-pressed")).toBe("true");
+    expect(project.getAttribute("aria-pressed")).toBe("true");
+
+    await act(async () => weekend.click());
+    await act(async () => level7.click());
+    expect(weekend.getAttribute("aria-pressed")).toBe("true");
+    expect(level7.getAttribute("aria-pressed")).toBe("true");
+    expect(container.textContent).toContain("2 complete days / 24 server values");
+
+    const profileHour = container.querySelector<HTMLButtonElement>(
+      'button[aria-label^="Weekend Level 7 00:00:"]',
+    )!;
+    await act(async () => profileHour.focus());
+    expect(container.textContent).toContain("Weekend / Level 7");
+    expect(container.textContent).toContain("2 complete-day samples / mean_of_complete_local_days");
+    await activateNativeButton(profileHour, "Enter");
+    await act(async () => profileHour.blur());
+    expect(profileHour.getAttribute("aria-pressed")).toBe("true");
+
+    await act(async () => publicHoliday.click());
+    expect(container.textContent).toContain("Public Holiday / Level 7 unavailable");
+    expect(container.textContent).toContain("requires an authoritative release-pinned Calendar classification");
+    expect(container.textContent).toContain("No value is inferred or zero-filled");
+
+    await act(async () => weekday.click());
+    expect(container.textContent).toContain("5 complete days / 24 server values");
+    expect(container.textContent).toContain("Hover or focus an hour");
+  });
+
+  it("switches Heatmap Level and View, exposes the same cell by hover/focus, and clears stale detail", async () => {
+    await renderGolden();
+
+    const dateHour = filterButton("Heatmap view", "Date × hour")!;
+    const levelHour = filterButton("Heatmap view", "Level × hour")!;
+    const project = filterButton("Heatmap Level", "Project")!;
+    const level7 = filterButton("Heatmap Level", "Level 7")!;
+    expect(dateHour.getAttribute("aria-pressed")).toBe("true");
+    expect(project.getAttribute("aria-pressed")).toBe("true");
+
+    await act(async () => level7.click());
+    expect(level7.getAttribute("aria-pressed")).toBe("true");
+    const dateCell = container.querySelector<HTMLButtonElement>(
+      'button[aria-label^="Wed 10 Jun / Wed 10 Jun 00:00:"]',
+    )!;
+    await act(async () => dateCell.focus());
+    expect(container.textContent).toContain("Level 7 / Wed 10 Jun / 00:00");
+    expect(container.textContent).toContain("Complete / 100% coverage / 8 / 8 valid intervals");
+    await activateNativeButton(dateCell, "Enter");
+    await act(async () => dateCell.blur());
+    expect(dateCell.getAttribute("aria-pressed")).toBe("true");
+
+    await act(async () => levelHour.click());
+    expect(levelHour.getAttribute("aria-pressed")).toBe("true");
+    expect(container.textContent).toContain("Hover or keyboard-focus a cell");
+    const dateSelector = filterButton("Heatmap date", "Wed 10 Jun")!;
+    await act(async () => dateSelector.click());
+    const levelCell = container.querySelector<HTMLButtonElement>(
+      'button[aria-label^="Level 6 / Wed 10 Jun 00:00:"]',
+    )!;
+    await act(async () => levelCell.focus());
+    expect(container.textContent).toContain("Level 6 / Wed 10 Jun / 00:00");
+
+    await act(async () => dateHour.click());
+    expect(container.textContent).toContain("Hover or keyboard-focus a cell");
+  });
+
+  it("keeps partial and unavailable Heatmap cells explicit and keyboard inspectable", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const cells = snapshot.analysis.timeBehaviour!.scopes[0]!.cells;
+    cells[0]!.dataHealth = {
+      status: "partial",
+      coveragePct: 75,
+      expectedMeterIntervalCount: 16,
+      validIntervalCount: 12,
+      qualityEventCount: 1,
+    };
+    cells[1]!.usageKwh = null;
+    cells[1]!.dataHealth = {
+      status: "unavailable",
+      coveragePct: 0,
+      expectedMeterIntervalCount: 16,
+      validIntervalCount: 0,
+      qualityEventCount: 2,
+    };
+    await renderGolden(snapshot);
+
+    const partial = container.querySelector<HTMLButtonElement>(
+      'button[aria-label*="00:00:"][aria-label*="Partial; 75% coverage"]',
+    )!;
+    const unavailable = container.querySelector<HTMLButtonElement>(
+      'button[aria-label*="01:00: no accepted facts; Unavailable; 0% coverage"]',
+    )!;
+    expect(partial).toBeTruthy();
+    expect(unavailable).toBeTruthy();
+    await act(async () => partial.focus());
+    expect(container.textContent).toContain("Partial / 75% coverage / 12 / 16 valid intervals / 1 quality events");
+    await act(async () => unavailable.focus());
+    expect(container.textContent).toContain("No accepted facts");
+    expect(container.textContent).toContain("Unavailable / 0% coverage / 0 / 16 valid intervals / 2 quality events");
   });
 
   it("filters the same ViewModel rows and expands All before returning to Top 5", async () => {

@@ -419,6 +419,51 @@ export type EnergyDailyTotalsDto = {
   }>;
 };
 
+export type EnergyTimeBucketDataHealthDto = EnergyAnalysisDataHealthDto & {
+  status: "complete" | "partial" | "unavailable";
+};
+
+export type EnergyTimeBehaviourDto = {
+  metricId: "energy.total_usage_kwh@1";
+  grain: "hour";
+  unit: "kWh";
+  timezone: string;
+  queryId: "time_bucket_grid_v1";
+  scopes: Array<{
+    scopeId: string;
+    scopeName: string;
+    scopeType: string;
+    cells: Array<{
+      localDate: string;
+      localHour: number;
+      from: string;
+      to: string;
+      usageKwh: number | null;
+      dataHealth: EnergyTimeBucketDataHealthDto;
+    }>;
+  }>;
+  dayProfiles: Array<{
+    dayType: "weekday" | "weekend";
+    scopeId: string;
+    scopeName: string;
+    status: "available";
+    sampleDayCount: number;
+    values: Array<{
+      localHour: number;
+      usageKwh: number;
+    }>;
+  } | {
+    dayType: "weekday" | "weekend" | "public_holiday";
+    scopeId: string;
+    scopeName: string;
+    status: "unavailable";
+    reason: {
+      code: "COMPLETE_DAY_SAMPLE_UNAVAILABLE" | "DAY_TYPE_CLASSIFICATION_UNAVAILABLE";
+      message: string;
+    };
+  }>;
+};
+
 export type EnergyPeakIntervalDataHealthDto = EnergyAnalysisDataHealthDto & {
   status: "complete" | "unavailable";
 };
@@ -575,6 +620,7 @@ export type EnergyScopeAnalysisDto = {
     includedInOfficialTotal: false;
   }>;
   dailyTotals?: EnergyDailyTotalsDto;
+  timeBehaviour?: EnergyTimeBehaviourDto;
   peakBreakdown?: EnergyPeakBreakdownDto;
   virtualMeterTraces?: EnergyVirtualMeterTraceDto[];
   offHours: {
@@ -644,6 +690,7 @@ export type EnergyScopeAnalysisDto = {
     queryIds: Array<
       | "scope_summary_v1"
       | "daily_totals_v1"
+      | "time_bucket_grid_v1"
       | "peak_breakdown_v1"
       | "hourly_profile_v1"
       | "meter_breakdown_v1"
