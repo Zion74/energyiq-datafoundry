@@ -147,6 +147,21 @@ describe("EnergyScopeAnalysis", () => {
     const databasePath = join(root, "energy.duckdb");
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
     const gateway = new LocalDataGateway(metadata);
+    const runSqlReadonly = gateway.runSqlReadonly.bind(gateway);
+    let activeReadonlyQueries = 0;
+    let maximumReadonlyQueryConcurrency = 0;
+    gateway.runSqlReadonly = async (request) => {
+      activeReadonlyQueries += 1;
+      maximumReadonlyQueryConcurrency = Math.max(
+        maximumReadonlyQueryConcurrency,
+        activeReadonlyQueries,
+      );
+      try {
+        return await runSqlReadonly(request);
+      } finally {
+        activeReadonlyQueries -= 1;
+      }
+    };
     try {
       ensureEnergyIqBootstrap(metadata);
       const ngeeAnnSnapshot = await materializeNgeeAnnGoldenFixture(databasePath, metadata);
@@ -231,6 +246,7 @@ describe("EnergyScopeAnalysis", () => {
       expect(overlap.summary.usageKwh).toBe(2.468);
 
       expect(repeated).toEqual(analysis);
+      expect(maximumReadonlyQueryConcurrency).toBeLessThanOrEqual(3);
       expect(analysis.summary.usageKwh).toBe(NGEE_ANN_GOLDEN.period.usageKwh);
       expect(analysis.summary.peakKw).toBe(NGEE_ANN_GOLDEN.period.peakKw);
       expect(analysis.summary.peakAt).toBe(NGEE_ANN_GOLDEN.period.peakAt);
