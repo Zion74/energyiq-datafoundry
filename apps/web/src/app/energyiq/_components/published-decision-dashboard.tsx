@@ -28,7 +28,6 @@ import {
   type ProjectAnalysisQualityPolicy,
   type ProjectRendererState,
 } from "./project-renderer-registry";
-import type { NgeeAnnLatestAvailableRange } from "./ngee-ann-overview-view-model";
 import { ScopeMetadataStatus } from "./scope-metadata-status";
 
 const periodOptions: ReadonlyArray<{
@@ -203,9 +202,7 @@ function PublishedDecisionDashboardView({
   const currentResolution = resolution?.projectId === projectId ? resolution.value : null;
   const currentSnapshot = currentResolution?.status === "ready" ? currentResolution.snapshot : null;
   const currentAnalysis = currentSnapshot?.analysis ?? null;
-  const latestAvailableRange = currentSnapshot
-    ? readLatestAvailablePeriod(currentSnapshot)
-    : null;
+  const latestAvailableRange = currentSnapshot?.latestAvailablePeriod ?? null;
   const projectTemplate = currentSnapshot?.projectRelease.document.templates
     .find((candidate) => candidate.template_id === "project") ?? null;
   const renderPlan = useMemo(
@@ -581,19 +578,6 @@ function toProjectRendererState(
     plan: state.plan,
     ...(state.advisories?.length ? { advisories: state.advisories } : {}),
   };
-}
-
-function readLatestAvailablePeriod(
-  snapshot: EnergyProjectAnalysisSnapshotDto,
-): NgeeAnnLatestAvailableRange | null {
-  if (!("latestAvailablePeriod" in snapshot)) return null;
-  const period = snapshot.latestAvailablePeriod;
-  if (!period || typeof period !== "object") return null;
-  if (!("period" in period) || period.period !== "Custom") return null;
-  if (!("from" in period) || typeof period.from !== "string") return null;
-  if (!("to" in period) || typeof period.to !== "string") return null;
-  if (!isValidDateInput(period.from) || !isValidDateInput(period.to) || period.from > period.to) return null;
-  return { from: period.from, to: period.to };
 }
 
 function DateField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
