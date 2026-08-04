@@ -262,6 +262,45 @@ describe("EnergyQueryContext", () => {
     }
   });
 
+  it("resolves Previous month at each New York local midnight across the spring DST transition", () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-query-context-previous-month-dst-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const project = metadata.energyIq.getProject("ngee-ann-polytechnic");
+      metadata.energyIq.upsertProject({
+        ...project,
+        timezone: "America/New_York",
+      });
+
+      const context = resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user: metadata.users.getById({ user_id: "dev-user" }),
+        workspaceId: "default",
+        request: {
+          projectId: "ngee-ann-polytechnic",
+          scopeId: "project",
+          resource: "electricity",
+          period: "Previous month",
+        },
+        now: new Date("2026-04-15T16:00:00.000Z"),
+        env: {},
+      });
+
+      expect(context).toMatchObject({
+        period: "Previous month",
+        timezone: "America/New_York",
+        from: "2026-03-01T05:00:00.000Z",
+        to: "2026-04-01T04:00:00.000Z",
+        endExclusive: true,
+      });
+      expect((Date.parse(context.to) - Date.parse(context.from)) / 3_600_000).toBe(743);
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
   it("pins Previous week range and resolvedAt to one instant across the Monday boundary", () => {
     const root = mkdtempSync(join(tmpdir(), "energy-query-context-previous-week-boundary-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });

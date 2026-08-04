@@ -1,4 +1,4 @@
-import { LocalDataGateway } from "@datafoundry/data-gateway";
+import { LocalDataGateway, writeEnergyFactMaterialization } from "@datafoundry/data-gateway";
 import {
   createMetadataStore,
   createEnergyIqSourceManifest,
@@ -72,6 +72,81 @@ describe("Energy API business error mapping", () => {
       vi.useRealTimers();
       metadata.close();
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
+  it("resolves Previous month as a ready zero-coverage Ngee Ann analysis through the public HTTP API", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-api-previous-month-ready-"));
+    const databasePath = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const previousDatabasePath = process.env.ENERGYIQ_DUCKDB_PATH;
+    process.env.ENERGYIQ_DUCKDB_PATH = databasePath;
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-03T16:30:00.000Z"));
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      await writeEnergyFactMaterialization({
+        databasePath,
+        projectId: "ngee-ann-polytechnic",
+        importBatchId: "ngee-ann-empty-previous-month",
+        sourceSha256: "0".repeat(64),
+        timezone: "Asia/Singapore",
+        rawReadings: [],
+        normalizedReadings: [],
+        intervalFacts: [],
+        qualityEvents: [],
+      });
+
+      const response = await handleEnergyApiRequest(
+        jsonPost({
+          projectId: "ngee-ann-polytechnic",
+          scopeId: "project",
+          resource: "electricity",
+          period: "Previous month",
+        }),
+        ["analysis", "resolve"],
+        {
+          metadataStore: metadata,
+          dataGateway: new LocalDataGateway(metadata),
+          userId: "dev-user",
+          workspaceId: "default",
+        } as Required<ConfigApiContext>,
+      );
+
+      expect(response).toMatchObject({
+        status: 200,
+        body: {
+          success: true,
+          data: {
+            status: "ready",
+            snapshot: {
+              context: {
+                period: "Previous month",
+                timezone: "Asia/Singapore",
+                from: "2026-06-30T16:00:00.000Z",
+                to: "2026-07-31T16:00:00.000Z",
+                endExclusive: true,
+              },
+              dataQuality: {
+                coveragePct: 0,
+                validIntervalCount: 0,
+              },
+              analysis: {
+                dataHealth: {
+                  coveragePct: 0,
+                  validIntervalCount: 0,
+                },
+              },
+            },
+          },
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+      if (previousDatabasePath === undefined) delete process.env.ENERGYIQ_DUCKDB_PATH;
+      else process.env.ENERGYIQ_DUCKDB_PATH = previousDatabasePath;
+      metadata.close();
+      removeTemporaryEnergyFixture(root);
     }
   });
 
@@ -196,6 +271,22 @@ const jsonPost = (body: unknown): IncomingMessage => {
   });
   request.end(JSON.stringify(body));
   return request as unknown as IncomingMessage;
+};
+
+const removeTemporaryEnergyFixture = (root: string): void => {
+  try {
+    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch (error) {
+    if (
+      process.platform === "win32"
+      && error instanceof Error
+      && "code" in error
+      && (error.code === "EPERM" || error.code === "EBUSY")
+    ) {
+      return;
+    }
+    throw error;
+  }
 };
 
 const importBatch = (id: string, sha256: string, label: string): EnergyIqImportBatchRecord => ({
