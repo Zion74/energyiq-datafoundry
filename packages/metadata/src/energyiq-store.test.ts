@@ -781,6 +781,23 @@ describe("EnergyIqStore", () => {
         summary: materializationSummary("mapping-sha-1"),
         project_audit: projectAudit({ rawOverlapConflictCount: 2 }),
       }).snapshot.id).toBe(second.snapshot.id);
+      expect(JSON.stringify(JSON.parse(second.snapshot.manifest_json))).not.toContain("mappingRevision");
+      const mappingB = metadata.energyIq.completeImportBatchMaterialization({
+        batch_id: "batch-2",
+        project_id: "project-import",
+        summary: materializationSummary("mapping-sha-2", 4),
+        project_audit: projectAudit({ rawOverlapConflictCount: 2 }),
+      });
+      expect(mappingB.snapshot.id).not.toBe(second.snapshot.id);
+      const rolledBack = metadata.energyIq.completeImportBatchMaterialization({
+        batch_id: "batch-2",
+        project_id: "project-import",
+        summary: materializationSummary("mapping-sha-1", 5),
+        project_audit: projectAudit({ rawOverlapConflictCount: 2 }),
+      });
+      expect(rolledBack.snapshot.id).toBe(second.snapshot.id);
+      expect(JSON.parse(rolledBack.snapshot.manifest_json)).toEqual(JSON.parse(second.snapshot.manifest_json));
+      expect(JSON.parse(rolledBack.batch.materialization_json ?? "{}")).toMatchObject({ mappingRevision: 5 });
       expect(() => metadata.energyIq.completeImportBatchMaterialization({
         batch_id: "batch-2",
         project_id: "project-import",
@@ -895,13 +912,13 @@ describe("EnergyIqStore", () => {
   });
 });
 
-const materializationSummary = (mappingFingerprint: string) => ({
+const materializationSummary = (mappingFingerprint: string, mappingRevision = 3) => ({
   rawRowCount: 10,
   normalizedReadingCount: 10,
   intervalFactCount: 9,
   totalUsageKwh: 1,
   qualityCounts: { ok: 9, boundary: 1 },
-  mappingRevision: 3,
+  mappingRevision,
   mappingFingerprint,
   timezone: "Asia/Singapore",
   materializerContractVersion: "energy-excel-cumulative-v1",

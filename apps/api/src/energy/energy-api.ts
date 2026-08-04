@@ -756,7 +756,7 @@ export const toEnergyApiErrorResponse = (error: unknown): ConfigApiResponse => {
   const conflict = message.includes("CONFLICT")
     || message === "ENERGYIQ_SOURCE_MANIFEST_NOT_CONFIRMED"
     || message === "ENERGYIQ_SOURCE_MANIFEST_MISMATCH"
-    || message === "ENERGYIQ_IMPORT_BATCH_NOT_PINNED"
+    || message.startsWith("ENERGYIQ_IMPORT_BATCH_NOT_PINNED")
     || message.startsWith("ENERGYIQ_DATA_SNAPSHOT_IMMUTABLE_CONFLICT:")
     || message.startsWith("ENERGYIQ_PROJECT_DATA_NOT_READY");
   const invalid = message.includes("INVALID")

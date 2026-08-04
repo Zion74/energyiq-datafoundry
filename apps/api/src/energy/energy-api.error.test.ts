@@ -22,6 +22,7 @@ describe("Energy API business error mapping", () => {
     "ENERGYIQ_SOURCE_MANIFEST_NOT_CONFIRMED",
     "ENERGYIQ_SOURCE_MANIFEST_MISMATCH",
     "ENERGYIQ_IMPORT_BATCH_NOT_PINNED",
+    "ENERGYIQ_IMPORT_BATCH_NOT_PINNED:batch-1",
     "ENERGYIQ_DATA_SNAPSHOT_IMMUTABLE_CONFLICT:energy-snapshot-test",
   ])("returns a diagnosable 409 for materialization precondition %s", (message) => {
     expect(toEnergyApiErrorResponse(new Error(message))).toMatchObject({

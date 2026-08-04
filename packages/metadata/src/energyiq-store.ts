@@ -603,11 +603,6 @@ export class EnergyIqStore {
         .update(JSON.stringify(identity))
         .digest("hex")
         .slice(0, 24)}`;
-      this.db.prepare(`
-        UPDATE energyiq_import_batches
-        SET materialization_json = ?
-        WHERE id = ? AND project_id = ?
-      `).run(JSON.stringify(summary), input.batch_id, input.project_id);
 
       const manifest = {
         version: 1,
@@ -618,9 +613,9 @@ export class EnergyIqStore {
           sourceSha256: batch.source_sha256,
           filename: batch.filename,
           inspection: parseJsonRecord(batch.inspection_json),
-          materialization: batch.id === input.batch_id
+          materialization: snapshotMaterializationSummary(batch.id === input.batch_id
             ? summary
-            : parseJsonRecord(batch.materialization_json),
+            : parseJsonRecord(batch.materialization_json)),
         })),
       };
       const manifestJson = JSON.stringify(manifest);
@@ -824,6 +819,12 @@ const parseJsonRecord = (value: string | undefined): Record<string, unknown> => 
   if (!value) return {};
   const parsed = JSON.parse(value) as unknown;
   return isRecord(parsed) ? parsed : {};
+};
+
+const snapshotMaterializationSummary = (summary: Record<string, unknown>): Record<string, unknown> => {
+  const canonical = { ...summary };
+  delete canonical.mappingRevision;
+  return canonical;
 };
 
 const optionalJsonString = (value: unknown): string | null =>
