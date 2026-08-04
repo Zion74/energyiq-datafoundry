@@ -109,6 +109,10 @@ const timeEvidencePinMismatchCases: Array<{
 }> = [
   ...peakEvidencePinMismatchCases.slice(0, 15),
   {
+    name: "Release ID",
+    mutate: (snapshot) => { snapshot.projectRelease.id = "release-mismatch"; },
+  },
+  {
     name: "Release Usage Metric",
     mutate: (snapshot) => {
       snapshot.projectRelease.metricRevisionIds = snapshot.projectRelease.metricRevisionIds
@@ -140,6 +144,10 @@ const anomalyEvidencePinMismatchCases: Array<{
   {
     name: "Bundle Snapshot",
     mutate: (snapshot) => { dailyAnomalyBundle(snapshot).evidencePins.dataSnapshotId = "snapshot-mismatch"; },
+  },
+  {
+    name: "Bundle Project Release",
+    mutate: (snapshot) => { dailyAnomalyBundle(snapshot).evidencePins.projectReleaseId = "release-mismatch"; },
   },
   {
     name: "Bundle Hierarchy",
@@ -208,8 +216,68 @@ const anomalyEvidencePinMismatchCases: Array<{
     },
   },
   {
-    name: "Calendar",
+    name: "Snapshot Context Calendar",
     mutate: (snapshot) => { snapshot.context.businessCalendarVersion = "calendar-mismatch"; },
+  },
+  {
+    name: "Analysis Context Calendar",
+    mutate: (snapshot) => { snapshot.analysis.context.businessCalendarVersion = "calendar-mismatch"; },
+  },
+  {
+    name: "Release Calendar",
+    mutate: (snapshot) => { snapshot.projectRelease.businessCalendarVersion = "calendar-mismatch"; },
+  },
+  {
+    name: "Bundle Calendar",
+    mutate: (snapshot) => { dailyAnomalyBundle(snapshot).evidencePins.businessCalendarVersion = "calendar-mismatch"; },
+  },
+];
+
+const anomalyStrictRuleMismatchCases: Array<{
+  name: string;
+  mutate: (bundle: AvailableDailyAnomalies) => void;
+}> = [
+  {
+    name: "Rule Revision",
+    mutate: (bundle) => { bundle.ruleRevisionId = "comparison.daily_usage_above_baseline@2"; },
+  },
+  {
+    name: "20 percent relative threshold",
+    mutate: (bundle) => { bundle.rule.relativeThresholdPct = 21; },
+  },
+  {
+    name: "20 kWh absolute impact",
+    mutate: (bundle) => { bundle.rule.absoluteImpactKwh = 21; },
+  },
+  {
+    name: "95 percent coverage",
+    mutate: (bundle) => { bundle.rule.minimumCoveragePct = 94; },
+  },
+  {
+    name: "4 comparable samples",
+    mutate: (bundle) => { bundle.rule.minimumSampleCount = 3; },
+  },
+  {
+    name: "zero quality events",
+    mutate: (bundle) => { bundle.rule.maximumQualityEventCount = 1; },
+  },
+  {
+    name: "60-day lookback",
+    mutate: (bundle) => { bundle.rule.maximumLookbackDays = 61; },
+  },
+  {
+    name: "above direction",
+    mutate: (bundle) => { (bundle.rule as { direction: string }).direction = "below"; },
+  },
+  {
+    name: "hourly comparable-day baseline method",
+    mutate: (bundle) => {
+      (bundle.rule as { baselineMethod: string }).baselineMethod = "median_of_days";
+    },
+  },
+  {
+    name: "Primary Period local-date cutoff",
+    mutate: (bundle) => { bundle.baselineCutoff = "2026-06-09"; },
   },
 ];
 
@@ -534,6 +602,11 @@ describe("Ngee Ann Overview ViewModel", () => {
     expect(dailyAnomalies).toMatchObject({
       status: "available",
       allSuppressed: false,
+      outcomeSummary: {
+        triggered: 7,
+        withinThreshold: 14,
+        suppressed: 0,
+      },
       rule: {
         ruleRevisionId: "comparison.daily_usage_above_baseline@1",
         baselineCutoff: "2026-06-10",
@@ -551,6 +624,7 @@ describe("Ngee Ann Overview ViewModel", () => {
         meterMappingRevisionId: "mapping-v1",
         meterFormulaRevisionId: "formula-v1",
         metricVersion: "metric-v1",
+        businessCalendarVersion: "calendar-v1",
         queryIds: ["time_slot_anomaly_v1"],
       },
     });
@@ -600,6 +674,106 @@ describe("Ngee Ann Overview ViewModel", () => {
     },
   );
 
+  it.each(anomalyStrictRuleMismatchCases)(
+    "fails daily anomalies closed for a non-canonical $name",
+    ({ mutate }) => {
+      const snapshot = ngeeAnnGoldenSnapshot();
+      mutate(dailyAnomalyBundle(snapshot));
+
+      const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+      expect(view.dailyAnomalies).toMatchObject({ status: "unavailable", incidents: [] });
+      expect(view.energyTrend.status).toBe("available");
+    },
+  );
+
+  it("requires exactly the latest four eligible baseline samples for triggered and within-threshold rows", () => {
+    const tooFew = ngeeAnnGoldenSnapshot();
+    const triggered = dailyAnomalyBundle(tooFew).scopes[0]!.rows[1]!;
+    triggered.baselineDates.pop();
+    triggered.baselineSamples.pop();
+    triggered.baselineSampleCount = 3;
+
+    const tooMany = ngeeAnnGoldenSnapshot();
+    const withinThreshold = dailyAnomalyBundle(tooMany).scopes[0]!.rows[0]!;
+    withinThreshold.baselineDates.unshift("2026-06-03");
+    withinThreshold.baselineSamples.unshift({
+      ...withinThreshold.baselineSamples[0]!,
+      localDate: "2026-06-03",
+    });
+    withinThreshold.baselineSampleCount = 5;
+
+    for (const snapshot of [tooFew, tooMany]) {
+      const view = buildNgeeAnnOverviewViewModel(snapshot);
+      expect(view.dailyAnomalies).toMatchObject({ status: "unavailable", incidents: [] });
+      expect(view.energyTrend.status).toBe("available");
+    }
+  });
+
+  it("rejects an eligible baseline sample unless it is complete, 100% covered and quality-clean", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const sample = dailyAnomalyBundle(snapshot).scopes[0]!.rows[1]!.baselineSamples[0]!;
+    sample.coveragePct = 99.7396;
+    sample.validIntervalCount = sample.expectedMeterIntervalCount - 1;
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.dailyAnomalies).toMatchObject({ status: "unavailable", incidents: [] });
+    expect(view.energyTrend.status).toBe("available");
+  });
+
+  it("rejects triggered or within-threshold rows that violate pinned coverage or quality gates", () => {
+    const lowCoverage = ngeeAnnGoldenSnapshot();
+    dailyAnomalyBundle(lowCoverage).scopes[0]!.rows[1]!.coveragePct = 94;
+    const qualityEvent = ngeeAnnGoldenSnapshot();
+    dailyAnomalyBundle(qualityEvent).scopes[0]!.rows[0]!.qualityEventCount = 1;
+
+    for (const snapshot of [lowCoverage, qualityEvent]) {
+      const view = buildNgeeAnnOverviewViewModel(snapshot);
+      expect(view.dailyAnomalies).toMatchObject({ status: "unavailable", incidents: [] });
+      expect(view.energyTrend.status).toBe("available");
+    }
+  });
+
+  it("fails daily anomalies locally when a triggered Project detail omits or reorders an immediate Level", () => {
+    const missingChild = ngeeAnnGoldenSnapshot();
+    dailyAnomalyBundle(missingChild).scopes[0]!.rows[1]!.detailSeries.splice(2, 1);
+    const reorderedChildren = ngeeAnnGoldenSnapshot();
+    const series = dailyAnomalyBundle(reorderedChildren).scopes[0]!.rows[1]!.detailSeries;
+    [series[1], series[2]] = [series[2]!, series[1]!];
+
+    for (const snapshot of [missingChild, reorderedChildren]) {
+      const view = buildNgeeAnnOverviewViewModel(snapshot);
+      expect(view.dailyAnomalies).toMatchObject({ status: "unavailable", incidents: [] });
+      expect(view.energyTrend.status).toBe("available");
+      expect(view.dayProfile.status).toBe("available");
+      expect(view.levelComparison.status).toBe("available");
+    }
+  });
+
+  it("summarises triggered, within-threshold and suppressed rows without treating suppressed as normal", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const suppressed = dailyAnomalyBundle(snapshot).scopes[0]!.rows[0]!;
+    suppressed.outcome = "suppressed";
+    suppressed.suppressionReason = {
+      code: "CALENDAR_EXCEPTION_DATE",
+      message: "The date is excluded by the pinned Calendar.",
+    };
+
+    const dailyAnomalies = buildNgeeAnnOverviewViewModel(snapshot).dailyAnomalies;
+
+    expect(dailyAnomalies).toMatchObject({
+      status: "available",
+      allSuppressed: false,
+      outcomeSummary: {
+        triggered: 7,
+        withinThreshold: 13,
+        suppressed: 1,
+      },
+    });
+    expect(dailyAnomalies.incidents).toHaveLength(7);
+  });
+
   it("fails only daily anomalies closed for absent, unavailable or invalid optional payloads", () => {
     const absent = ngeeAnnGoldenSnapshot();
     delete absent.analysis.dailyUsageAnomalies;
@@ -642,6 +816,11 @@ describe("Ngee Ann Overview ViewModel", () => {
     expect(buildNgeeAnnOverviewViewModel(suppressed).dailyAnomalies).toMatchObject({
       status: "available",
       allSuppressed: true,
+      outcomeSummary: {
+        triggered: 0,
+        withinThreshold: 0,
+        suppressed: 21,
+      },
       incidents: [],
     });
 

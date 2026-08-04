@@ -492,11 +492,13 @@ export type EnergyDailyUsageAnomaliesDto = {
     baselineMethod: "mean_of_complete_comparable_days_by_local_hour";
   };
   evidencePins: {
+    projectReleaseId: string;
     dataSnapshotId: string;
     hierarchyRevisionId: string;
     meterMappingRevisionId: string;
     meterFormulaRevisionId: string;
     metricVersion: string;
+    businessCalendarVersion: string;
     queryIds: ["time_slot_anomaly_v1"];
   };
   scopes: Array<{
@@ -583,6 +585,8 @@ export type EnergyDailyUsageAnomaliesDto = {
     code:
       | "BUSINESS_CALENDAR_VERSION_MISSING"
       | "BUSINESS_CALENDAR_VERSION_NOT_FOUND"
+      | "BUSINESS_CALENDAR_NOT_EFFECTIVE_FOR_PERIOD"
+      | "DAILY_USAGE_ANOMALY_FACTS_UNAVAILABLE"
       | "DAILY_USAGE_ANOMALY_RULE_INVALID";
     message: string;
   };

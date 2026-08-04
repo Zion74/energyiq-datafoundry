@@ -89,6 +89,18 @@ export function NgeeAnnDailyAnomalies({ view }: { view: NgeeAnnDailyAnomalyViewM
         </p>
       </div>
 
+      <div className="mt-4 rounded-lg border border-border bg-surface-subtle px-4 py-3" aria-label="Scope-date evaluation outcome summary">
+        <p className="text-[10px] font-medium text-muted">Scope-date evaluations</p>
+        <p className="text-[11px] font-semibold tabular-nums text-foreground">
+          {view.outcomeSummary.triggered} triggered / {view.outcomeSummary.withinThreshold} within threshold / {view.outcomeSummary.suppressed} suppressed
+        </p>
+        {view.outcomeSummary.suppressed > 0 ? (
+          <p className="mt-1 text-[10px] leading-4 text-step-warning">
+            Suppressed evaluations are not classified as within threshold.
+          </p>
+        ) : null}
+      </div>
+
       {view.incidents.length > 0 ? (
         <div className="mt-4 grid gap-3 lg:grid-cols-2 xl:grid-cols-3" aria-label="Server-triggered daily incidents">
           {view.incidents.map((item) => (
@@ -125,12 +137,18 @@ export function NgeeAnnDailyAnomalies({ view }: { view: NgeeAnnDailyAnomalyViewM
       ) : (
         <div className="mt-4 rounded-lg border border-border bg-surface-subtle px-4 py-4" role="status">
           <p className="text-xs font-semibold text-foreground">
-            {view.allSuppressed ? "All candidate dates were suppressed" : "No server-triggered daily usage incidents"}
+            {view.allSuppressed
+              ? "All Scope-date evaluations were suppressed"
+              : view.outcomeSummary.suppressed > 0
+                ? "No triggered incidents; some Scope-date evaluations were suppressed"
+                : "No server-triggered daily usage incidents"}
           </p>
           <p className="mt-1 text-[11px] leading-5 text-muted">
             {view.allSuppressed
-              ? "Coverage, quality, Calendar or comparable-sample gates prevented a business anomaly conclusion."
-              : "No row in this Snapshot crossed both pinned relative and absolute thresholds."}
+              ? "Coverage, quality, Calendar or comparable-sample gates prevented a business anomaly conclusion for every evaluation."
+              : view.outcomeSummary.suppressed > 0
+                ? "Only server-classified within-threshold evaluations are normal; suppressed evaluations remain inconclusive."
+                : "No row in this Snapshot crossed both pinned relative and absolute thresholds."}
           </p>
         </div>
       )}
@@ -311,7 +329,7 @@ function SeriesChart({ series, viewMode }: { series: Series; viewMode: ViewMode 
           {series.kind === "component_circuit" ? (
             <p className="mt-1 text-[10px] font-semibold text-step-warning">Explanatory component · not included in the official total</p>
           ) : (
-            <p className="mt-1 text-[10px] text-muted-light">Official Scope series · included in the Published route</p>
+            <p className="mt-1 text-[10px] text-muted-light">Official Scope series · included in the official total</p>
           )}
         </div>
         <p className="text-[10px] text-muted">{series.coverage} / {series.intervals} / {series.qualityEvents}</p>
@@ -417,6 +435,7 @@ function AnomalyEvidence({ view }: { view: NgeeAnnDailyAnomalyViewModel }) {
         <dt>Release</dt><dd className="break-all font-mono text-foreground">{view.evidence.projectReleaseId}</dd>
         <dt>Bundle</dt><dd className="break-all font-mono text-foreground">{view.evidence.bundleId}</dd>
         <dt>Rule</dt><dd className="break-all font-mono text-foreground">{view.rule?.ruleRevisionId}</dd>
+        <dt>Calendar</dt><dd className="break-all font-mono text-foreground">{view.evidence.businessCalendarVersion}</dd>
         <dt>Baseline cutoff</dt><dd className="font-mono text-foreground">{view.rule?.baselineCutoff}</dd>
         <dt>Baseline method</dt><dd className="break-all font-mono text-foreground">{view.rule?.baselineMethod}</dd>
         <dt>Thresholds</dt><dd className="text-foreground">{view.rule?.relativeThresholdPct} and {view.rule?.absoluteImpactKwh}</dd>

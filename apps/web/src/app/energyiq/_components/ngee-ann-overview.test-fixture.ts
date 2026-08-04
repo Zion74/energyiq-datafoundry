@@ -1084,11 +1084,13 @@ function goldenDailyUsageAnomalies(
     baselineCutoff: "2026-06-10",
     rule,
     evidencePins: {
+      projectReleaseId: "release-ngee-ann-golden",
       dataSnapshotId: "snapshot-ngee-ann-golden",
       hierarchyRevisionId: "hierarchy-v6",
       meterMappingRevisionId: "mapping-v1",
       meterFormulaRevisionId: "formula-v1",
       metricVersion: "metric-v1",
+      businessCalendarVersion: "calendar-v1",
       queryIds: ["time_slot_anomaly_v1"],
     },
     scopes: scopeInputs.map((scope) => ({

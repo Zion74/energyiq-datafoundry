@@ -128,7 +128,16 @@ export function NgeeAnnOverviewRenderer({
 
       <NgeeAnnEnergyTrend key={`trend:${view.energyTrend.evidence.period}`} view={view.energyTrend} />
 
-      <NgeeAnnDailyAnomalies key={`anomalies:${view.dailyAnomalies.evidence.period}`} view={view.dailyAnomalies} />
+      <NgeeAnnDailyAnomalies
+        key={[
+          "anomalies",
+          view.dailyAnomalies.evidence.period,
+          view.dailyAnomalies.evidence.snapshotId,
+          view.dailyAnomalies.evidence.projectReleaseId,
+          view.dailyAnomalies.evidence.bundleId ?? "unavailable",
+        ].join(":")}
+        view={view.dailyAnomalies}
+      />
 
       <NgeeAnnDayProfile key={`profile:${view.dayProfile.evidence.period}`} view={view.dayProfile} />
 

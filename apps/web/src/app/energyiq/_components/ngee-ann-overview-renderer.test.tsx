@@ -238,14 +238,35 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(absentMarkup).toContain("does not include the authoritative daily anomaly contract");
     expect(unavailableMarkup).toContain("No Published Calendar is pinned.");
     expect(invalidMarkup).toContain("evidence pins are inconsistent");
-    expect(suppressedMarkup).toContain("All candidate dates were suppressed");
-    expect(suppressedMarkup).toContain("prevented a business anomaly conclusion");
+    expect(suppressedMarkup).toContain("All Scope-date evaluations were suppressed");
+    expect(suppressedMarkup).toContain("prevented a business anomaly conclusion for every evaluation");
     expect(suppressedMarkup).not.toContain("Open incident detail");
     for (const markup of [absentMarkup, unavailableMarkup, invalidMarkup, suppressedMarkup]) {
       expect(markup).toContain("Energy trend");
       expect(markup).toContain("Day profile");
       expect(markup).toContain("Level comparison");
     }
+  });
+
+  it("summarises mixed Scope-date outcomes without describing suppressed evaluations as normal", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    if (snapshot.analysis.dailyUsageAnomalies?.status === "available") {
+      const suppressed = snapshot.analysis.dailyUsageAnomalies.scopes[0]!.rows[0]!;
+      suppressed.outcome = "suppressed";
+      suppressed.suppressionReason = {
+        code: "CALENDAR_EXCEPTION_DATE",
+        message: "Excluded by the pinned Calendar.",
+      };
+    }
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+
+    expect(markup).toContain("7 triggered / 13 within threshold / 1 suppressed");
+    expect(markup).toContain("Scope-date evaluations");
+    expect(markup).toContain("Suppressed evaluations are not classified as within threshold.");
+    expect(markup.match(/Open incident detail/g)).toHaveLength(7);
   });
 
   it("keeps the static Peak KPI when the optional breakdown is absent or invalid", () => {
@@ -452,6 +473,42 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
       .find((candidate) => candidate.textContent === label) as HTMLButtonElement | undefined;
   };
 
+  const samePeriodAnomalyRefreshCases: Array<{
+    name: string;
+    mutate: (snapshot: ReturnType<typeof ngeeAnnGoldenSnapshot>) => void;
+  }> = [
+    {
+      name: "Snapshot",
+      mutate: (snapshot) => {
+        snapshot.dataSnapshot.id = "snapshot-ngee-ann-refresh";
+        snapshot.context.dataSnapshotId = "snapshot-ngee-ann-refresh";
+        snapshot.analysis.context.dataSnapshotId = "snapshot-ngee-ann-refresh";
+        snapshot.analysis.provenance.dataSnapshotId = "snapshot-ngee-ann-refresh";
+        if (snapshot.analysis.dailyUsageAnomalies?.status === "available") {
+          snapshot.analysis.dailyUsageAnomalies.evidencePins.dataSnapshotId = "snapshot-ngee-ann-refresh";
+        }
+      },
+    },
+    {
+      name: "Release",
+      mutate: (snapshot) => {
+        snapshot.projectRelease.id = "release-ngee-ann-refresh";
+        snapshot.context.projectReleaseId = "release-ngee-ann-refresh";
+        if (snapshot.analysis.dailyUsageAnomalies?.status === "available") {
+          snapshot.analysis.dailyUsageAnomalies.evidencePins.projectReleaseId = "release-ngee-ann-refresh";
+        }
+      },
+    },
+    {
+      name: "bundle",
+      mutate: (snapshot) => {
+        if (snapshot.analysis.dailyUsageAnomalies?.status === "available") {
+          snapshot.analysis.dailyUsageAnomalies.bundleId = "anomaly-bundle-ngee-ann-refresh";
+        }
+      },
+    },
+  ];
+
   it("opens the dialog, enters focus, selects a Level and expands server Circuit evidence", async () => {
     await renderGolden();
     const trigger = peakTrigger();
@@ -624,6 +681,8 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect((document.activeElement as HTMLElement)?.textContent).toBe("Close");
     expect(anomalyFilterButton("Incident view", "Overlay")?.getAttribute("aria-pressed")).toBe("true");
     expect(dialog.querySelectorAll("[data-anomaly-series]")).toHaveLength(3);
+    expect(dialog.textContent).toContain("Official Scope series · included in the official total");
+    expect(dialog.textContent).not.toContain("路");
 
     let point = dialog.querySelector<HTMLButtonElement>('[data-anomaly-series="scope:project"] button')!;
     expect(point.getAttribute("aria-label")).toContain("selected");
@@ -719,6 +778,38 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(missingPoint.getAttribute("aria-label")).toContain("selected unavailable");
     expect(missingPoint.getAttribute("aria-label")).not.toContain("selected 0.0000 kWh");
   });
+
+  it.each(samePeriodAnomalyRefreshCases)(
+    "resets dialog, modes, filters and stale focus on a same-Period $name refresh",
+    async ({ mutate }) => {
+      await renderGolden();
+      await act(async () => anomalyTriggers()[3]!.click());
+      await act(async () => anomalyFilterButton("Incident view", "Average")?.click());
+      await act(async () => anomalyFilterButton("Incident Category", "Load")?.click());
+      await act(async () => anomalyFilterButton("Incident Scope", "Level 7 component Load")?.click());
+      const oldDialog = anomalyDialog()!;
+      const oldFocusedPoint = oldDialog.querySelector<HTMLButtonElement>(
+        '[data-anomaly-series="meter:l7-anomaly-load"] button',
+      )!;
+      await act(async () => oldFocusedPoint.focus());
+      expect(document.activeElement).toBe(oldFocusedPoint);
+
+      const refreshed = ngeeAnnGoldenSnapshot();
+      mutate(refreshed);
+      await act(async () => {
+        root.render(<NgeeAnnOverviewRenderer state={{ status: "ready", snapshot: refreshed }} />);
+      });
+
+      expect(anomalyDialog()).toBeNull();
+      expect(oldFocusedPoint.isConnected).toBe(false);
+      expect(document.activeElement).not.toBe(oldFocusedPoint);
+      await act(async () => anomalyTriggers()[3]!.click());
+      expect((document.activeElement as HTMLElement)?.textContent).toBe("Close");
+      expect(anomalyFilterButton("Incident view", "Overlay")?.getAttribute("aria-pressed")).toBe("true");
+      expect(anomalyFilterButton("Incident Scope", "All")?.getAttribute("aria-pressed")).toBe("true");
+      expect(anomalyFilterButton("Incident Category", "All")?.getAttribute("aria-pressed")).toBe("true");
+    },
+  );
 
   it("renders and operates 24 server hours for a single-day Period without dailyTotals", async () => {
     const snapshot = ngeeAnnSingleDaySnapshot({ includeDailyTotals: false });
