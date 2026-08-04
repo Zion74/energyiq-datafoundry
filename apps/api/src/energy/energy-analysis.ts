@@ -69,6 +69,46 @@ export type EnergyScopeAnalysis = {
       }>;
     }>;
   };
+  peakBreakdown?: {
+    status: "available";
+    metricId: "energy.peak_demand_kw@1";
+    intervalMinutes: number;
+    timezone: string;
+    unit: "kW";
+    periodStatus: "complete" | "partial";
+    coveragePct: number;
+    peak: {
+      from: string;
+      to: string;
+      averageKw: number;
+      dataHealth: PeakIntervalDataHealth;
+    };
+    levels: Array<{
+      scopeId: string;
+      scopeName: string;
+      averageKw: number;
+      sharePct: number;
+      dataHealth: PeakIntervalDataHealth;
+      circuits: Array<{
+        meterNodeId: string;
+        name: string;
+        category: string;
+        averageKw: number | null;
+        sharePct: number | null;
+        includedInOfficialTotal: false;
+        dataHealth: PeakIntervalDataHealth;
+      }>;
+    }>;
+  } | {
+    status: "unavailable";
+    reason: {
+      code: "PEAK_AT_MISSING"
+        | "PEAK_INTERVAL_FACTS_UNAVAILABLE"
+        | "PEAK_INTERVAL_FACTS_AMBIGUOUS"
+        | "PEAK_INTERVAL_FACTS_REJECTED";
+      message: string;
+    };
+  };
   comparison: {
     from: string;
     to: string;
@@ -250,6 +290,7 @@ export type EnergyScopeAnalysis = {
       "scope_summary_v1",
       "hourly_profile_v1",
       "daily_totals_v1",
+      "peak_breakdown_v1",
       "meter_breakdown_v1",
       "previous_meter_usage_v1",
       "operational_policy_scope_intervals_v1",
@@ -299,6 +340,14 @@ type MeterAggregate = {
   qualityEventCount: number;
 };
 
+type PeakIntervalDataHealth = {
+  status: "complete" | "unavailable";
+  coveragePct: number;
+  expectedMeterIntervalCount: number;
+  validIntervalCount: number;
+  qualityEventCount: number;
+};
+
 type DailyTotalScope = {
   scopeId: string;
   scopeName: string;
@@ -310,6 +359,15 @@ type DailyDateBucket = {
   localDate: string;
   from: string;
   to: string;
+};
+
+type PeakIntervalFact = {
+  meterNodeId: string;
+  intervalStart: string;
+  intervalEnd: string;
+  elapsedMinutes: number;
+  averageKw: number | null;
+  qualityStatus: string;
 };
 
 type OperationalIntervalSeries = {
@@ -589,21 +647,25 @@ export const executeEnergyScopeAnalysis = async (input: {
     },
     databasePath: scoped.databasePath
   });
+  const summaryResult = await input.dataGateway.runSqlReadonly({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: scoped.datasourceId,
+    sql: scopeSummarySql(scoped.viewName, aggregateMeterNodeIds),
+  });
+  const summaryRow = summaryResult.rows[0] ?? [];
+  const usageKwh = numberAt(summaryRow, 0);
+  const peakKw = numberAt(summaryRow, 1);
+  const peakAt = optionalStringAt(summaryRow, 2);
   const [
-    summaryResult,
     profileResult,
     dailyTotalsResult,
+    peakBreakdownResult,
     healthResult,
     previousMeterUsageResult,
     operationalScopeIntervalResult,
     operationalMeterIntervalResult,
   ] = await Promise.all([
-    input.dataGateway.runSqlReadonly({
-      user_id: input.userId,
-      workspace_id: input.context.workspaceId,
-      datasource_id: scoped.datasourceId,
-      sql: scopeSummarySql(scoped.viewName, aggregateMeterNodeIds)
-    }),
     input.dataGateway.runSqlReadonly({
       user_id: input.userId,
       workspace_id: input.context.workspaceId,
@@ -616,6 +678,13 @@ export const executeEnergyScopeAnalysis = async (input: {
       datasource_id: scoped.datasourceId,
       sql: dailyTotalsSql(scoped.viewName, dailyTotalScopes),
       limit: Math.max(1, dailyTotalScopes.length * dailyDateBuckets.length),
+    }),
+    input.dataGateway.runSqlReadonly({
+      user_id: input.userId,
+      workspace_id: input.context.workspaceId,
+      datasource_id: scoped.datasourceId,
+      sql: peakBreakdownSql(scoped.viewName, peakAt),
+      limit: 1000,
     }),
     input.dataGateway.runSqlReadonly({
       user_id: input.userId,
@@ -651,11 +720,6 @@ export const executeEnergyScopeAnalysis = async (input: {
       limit: Math.max(1, meterAggregates.length),
     }),
   ]);
-
-  const summaryRow = summaryResult.rows[0] ?? [];
-  const usageKwh = numberAt(summaryRow, 0);
-  const peakKw = numberAt(summaryRow, 1);
-  const peakAt = optionalStringAt(summaryRow, 2);
   const healthRow = healthResult.rows[0] ?? [];
   const validIntervalCount = numberAt(healthRow, 0);
   const qualityEventCount = numberAt(healthRow, 1);
@@ -954,6 +1018,21 @@ export const executeEnergyScopeAnalysis = async (input: {
     ...(lastSeenAt ? { lastSeenAt } : {}),
     importBatchIds
   };
+  const peakBreakdown = selectedNode.node_type === "project"
+    ? buildPeakBreakdown({
+        ...(peakAt ? { peakAt } : {}),
+        peakKw,
+        intervalMinutes,
+        timezone: input.context.timezone,
+        periodStatus: dataHealth.status === "complete" ? "complete" : "partial",
+        coveragePct: dataHealth.coveragePct,
+        projectOfficialMeterNodeIds: aggregateMeterNodeIds,
+        levelScopes: dailyTotalScopes.slice(1),
+        hierarchy,
+        meterAggregates,
+        facts: peakBreakdownResult.rows.map(rowToPeakIntervalFact),
+      })
+    : undefined;
   const ruleRevisions = input.ruleRevisions ?? input.metadataStore.energyIq.rules.listRevisions();
 
   return {
@@ -968,6 +1047,7 @@ export const executeEnergyScopeAnalysis = async (input: {
       observationCount: numberAt(row, 4)
     })),
     dailyTotals,
+    ...(peakBreakdown ? { peakBreakdown } : {}),
     categories,
     childScopes,
     circuits,
@@ -1001,6 +1081,7 @@ export const executeEnergyScopeAnalysis = async (input: {
         "scope_summary_v1",
         "hourly_profile_v1",
         "daily_totals_v1",
+        "peak_breakdown_v1",
         "meter_breakdown_v1",
         "previous_meter_usage_v1",
         "operational_policy_scope_intervals_v1",
@@ -1552,6 +1633,208 @@ const rowToMeterAggregate = (row: unknown[]): MeterAggregate => ({
   qualityEventCount: numberAt(row, 9)
 });
 
+const rowToPeakIntervalFact = (row: unknown[]): PeakIntervalFact => ({
+  meterNodeId: stringAt(row, 0),
+  intervalStart: isoAt(row, 1),
+  intervalEnd: isoAt(row, 2),
+  elapsedMinutes: numberAt(row, 3),
+  averageKw: optionalNumberAt(row, 4),
+  qualityStatus: stringAt(row, 5),
+});
+
+const buildPeakBreakdown = (input: {
+  peakAt?: string;
+  peakKw: number;
+  intervalMinutes: number;
+  timezone: string;
+  periodStatus: "complete" | "partial";
+  coveragePct: number;
+  projectOfficialMeterNodeIds: string[];
+  levelScopes: DailyTotalScope[];
+  hierarchy: ReturnType<MetadataStore["energyIq"]["listProjectNodes"]>;
+  meterAggregates: MeterAggregate[];
+  facts: PeakIntervalFact[];
+}): NonNullable<EnergyScopeAnalysis["peakBreakdown"]> => {
+  if (!input.peakAt) {
+    return peakBreakdownUnavailable(
+      "PEAK_AT_MISSING",
+      "Peak interval start is unavailable for the selected period.",
+    );
+  }
+  const peakTo = new Date(
+    Date.parse(input.peakAt) + input.intervalMinutes * 60_000,
+  ).toISOString();
+  const factsByMeterId = new Map<string, PeakIntervalFact[]>();
+  for (const fact of input.facts) {
+    factsByMeterId.set(fact.meterNodeId, [
+      ...(factsByMeterId.get(fact.meterNodeId) ?? []),
+      fact,
+    ]);
+  }
+  const officialFacts = input.projectOfficialMeterNodeIds.map(
+    (meterNodeId) => factsByMeterId.get(meterNodeId) ?? [],
+  );
+  if (officialFacts.some((facts) => facts.length === 0)) {
+    return peakBreakdownUnavailable(
+      "PEAK_INTERVAL_FACTS_UNAVAILABLE",
+      "Peak breakdown requires one same-interval fact for every Project official Meter Point.",
+    );
+  }
+  if (officialFacts.some((facts) => facts.length !== 1)) {
+    return peakBreakdownUnavailable(
+      "PEAK_INTERVAL_FACTS_AMBIGUOUS",
+      "Peak breakdown requires exactly one same-interval fact for every Project official Meter Point.",
+    );
+  }
+  if (officialFacts.some((facts) => !isAcceptedPeakFact(
+    facts[0]!,
+    input.peakAt!,
+    peakTo,
+    input.intervalMinutes,
+  ))) {
+    return peakBreakdownUnavailable(
+      "PEAK_INTERVAL_FACTS_REJECTED",
+      "Peak breakdown requires accepted same-interval facts for every Project official Meter Point.",
+    );
+  }
+
+  const projectAverageKw = officialFacts.reduce(
+    (sum, facts) => sum + facts[0]!.averageKw!,
+    0,
+  );
+  if (round(projectAverageKw, 4) !== round(input.peakKw, 4)) {
+    return peakBreakdownUnavailable(
+      "PEAK_INTERVAL_FACTS_AMBIGUOUS",
+      "Peak interval official facts do not reconcile with the Project Peak.",
+    );
+  }
+  const levelOfficialFacts = input.levelScopes.flatMap((level) => level.meterNodeIds.map(
+    (meterNodeId) => factsByMeterId.get(meterNodeId) ?? [],
+  ));
+  if (levelOfficialFacts.some((facts) => facts.length === 0)) {
+    return peakBreakdownUnavailable(
+      "PEAK_INTERVAL_FACTS_UNAVAILABLE",
+      "Peak breakdown requires one same-interval fact for every Level official Meter Point.",
+    );
+  }
+  if (levelOfficialFacts.some((facts) => facts.length !== 1)) {
+    return peakBreakdownUnavailable(
+      "PEAK_INTERVAL_FACTS_AMBIGUOUS",
+      "Peak breakdown requires exactly one same-interval fact for every Level official Meter Point.",
+    );
+  }
+  if (levelOfficialFacts.some((facts) => !isAcceptedPeakFact(
+    facts[0]!,
+    input.peakAt!,
+    peakTo,
+    input.intervalMinutes,
+  ))) {
+    return peakBreakdownUnavailable(
+      "PEAK_INTERVAL_FACTS_REJECTED",
+      "Peak breakdown requires accepted same-interval facts for every Level official Meter Point.",
+    );
+  }
+  const hierarchyById = new Map(input.hierarchy.map((node) => [node.id, node]));
+  const projectOfficialIds = new Set(input.projectOfficialMeterNodeIds);
+  const completeHealth = (expectedMeterIntervalCount: number): PeakIntervalDataHealth => ({
+    status: "complete",
+    coveragePct: 100,
+    expectedMeterIntervalCount,
+    validIntervalCount: expectedMeterIntervalCount,
+    qualityEventCount: 0,
+  });
+  const levels = input.levelScopes.map((level) => {
+    const levelFacts = level.meterNodeIds.map((meterNodeId) => factsByMeterId.get(meterNodeId)![0]!);
+    const levelAverageKw = levelFacts.reduce((sum, fact) => sum + fact.averageKw!, 0);
+    const circuits = input.meterAggregates
+      .filter((meter) => !projectOfficialIds.has(meter.meterNodeId)
+        && hierarchyById.get(meter.scopeId)?.parent_id === level.scopeId)
+      .map((meter) => {
+        const facts = factsByMeterId.get(meter.meterNodeId) ?? [];
+        const accepted = facts.length === 1 && isAcceptedPeakFact(
+          facts[0]!,
+          input.peakAt!,
+          peakTo,
+          input.intervalMinutes,
+        );
+        const averageKw = accepted ? facts[0]!.averageKw! : null;
+        const qualityEventCount = facts.filter((fact) => fact.qualityStatus !== "ok").length;
+        return {
+          meterNodeId: meter.meterNodeId,
+          name: meter.name,
+          category: meter.category,
+          averageKw: averageKw === null ? null : round(averageKw, 4),
+          sharePct: averageKw === null ? null : percent(averageKw, levelAverageKw, 4),
+          includedInOfficialTotal: false as const,
+          dataHealth: accepted
+            ? completeHealth(1)
+            : {
+                status: "unavailable" as const,
+                coveragePct: 0,
+                expectedMeterIntervalCount: 1,
+                validIntervalCount: 0,
+                qualityEventCount,
+              },
+        };
+      })
+      .sort((left, right) => (right.averageKw ?? Number.NEGATIVE_INFINITY)
+        - (left.averageKw ?? Number.NEGATIVE_INFINITY)
+        || left.meterNodeId.localeCompare(right.meterNodeId));
+    return {
+      scopeId: level.scopeId,
+      scopeName: level.scopeName,
+      averageKw: round(levelAverageKw, 4),
+      sharePct: percent(levelAverageKw, projectAverageKw, 4),
+      dataHealth: completeHealth(level.meterNodeIds.length),
+      circuits,
+      rawAverageKw: levelAverageKw,
+    };
+  }).sort((left, right) => right.averageKw - left.averageKw);
+  const levelAverageKw = levels.reduce((sum, level) => sum + level.rawAverageKw, 0);
+  if (round(levelAverageKw, 4) !== round(projectAverageKw, 4)) {
+    return peakBreakdownUnavailable(
+      "PEAK_INTERVAL_FACTS_AMBIGUOUS",
+      "Level official Peak contributions do not reconcile with the Project Peak.",
+    );
+  }
+
+  return {
+    status: "available",
+    metricId: "energy.peak_demand_kw@1",
+    intervalMinutes: input.intervalMinutes,
+    timezone: input.timezone,
+    unit: "kW",
+    periodStatus: input.periodStatus,
+    coveragePct: input.coveragePct,
+    peak: {
+      from: input.peakAt,
+      to: peakTo,
+      averageKw: round(projectAverageKw, 4),
+      dataHealth: completeHealth(input.projectOfficialMeterNodeIds.length),
+    },
+    levels: levels.map(({ rawAverageKw: _rawAverageKw, ...level }) => level),
+  };
+};
+
+const peakBreakdownUnavailable = (
+  code: Extract<NonNullable<EnergyScopeAnalysis["peakBreakdown"]>, { status: "unavailable" }>["reason"]["code"],
+  message: string,
+): NonNullable<EnergyScopeAnalysis["peakBreakdown"]> => ({
+  status: "unavailable",
+  reason: { code, message },
+});
+
+const isAcceptedPeakFact = (
+  fact: PeakIntervalFact,
+  peakFrom: string,
+  peakTo: string,
+  intervalMinutes: number,
+): boolean => fact.qualityStatus === "ok"
+  && fact.averageKw !== null
+  && fact.intervalStart === peakFrom
+  && fact.intervalEnd === peakTo
+  && fact.elapsedMinutes === intervalMinutes;
+
 const rowToOperationalIntervalSeries = (row: unknown[]): OperationalIntervalSeries => {
   const kind = stringAt(row, 0);
   if (kind !== "scope" && kind !== "meter") {
@@ -1649,6 +1932,21 @@ const dailyTotalsSql = (
   WHERE ${meterNodeFilter(scope.meterNodeIds)}
   GROUP BY CAST(source.local_interval_start AS DATE)
 `).join(" UNION ALL ") + " ORDER BY scope_order, local_date";
+
+const peakBreakdownSql = (viewName: string, peakAt?: string): string => `
+  SELECT
+    source.meter_node_id,
+    EPOCH_MS(source.interval_start) AS interval_start_ms,
+    EPOCH_MS(source.interval_end) AS interval_end_ms,
+    source.elapsed_minutes,
+    source.average_kw,
+    source.quality_status
+  FROM ${quoteIdentifier(viewName)} source
+  WHERE ${peakAt
+    ? `source.interval_start = CAST(${sqlLiteral(peakAt)} AS TIMESTAMPTZ)`
+    : "FALSE"}
+  ORDER BY source.meter_node_id, source.interval_end, source.quality_status
+`;
 
 const scopeHealthSql = (viewName: string, meterNodeIds: string[]): string => `
   SELECT
@@ -1938,6 +2236,13 @@ const meterNodeFilter = (meterNodeIds: string[]): string =>
 const numberAt = (row: unknown[], index: number): number => {
   const value = Number(row[index] ?? 0);
   return Number.isFinite(value) ? value : 0;
+};
+
+const optionalNumberAt = (row: unknown[], index: number): number | null => {
+  const value = row[index];
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
 };
 
 const stringAt = (row: unknown[], index: number): string =>

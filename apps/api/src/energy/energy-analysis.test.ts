@@ -324,6 +324,7 @@ describe("EnergyScopeAnalysis", () => {
         expectedHourlyProfile(NGEE_ANN_GOLDEN.period.hourlyProfile, 28)
       );
       expect(analysis.dailyTotals).toEqual(expectedNgeeAnnDailyTotals());
+      expect(analysis.peakBreakdown).toEqual(expectedNgeeAnnPeakBreakdown());
       for (const scope of analysis.dailyTotals?.scopes ?? []) {
         const expectedUsageKwh = scope.scopeId === "project"
           ? NGEE_ANN_GOLDEN.period.usageKwh
@@ -625,6 +626,104 @@ describe("EnergyScopeAnalysis", () => {
     }
   }, 30_000);
 
+  it.each([
+    {
+      name: "missing",
+      expectedCode: "PEAK_INTERVAL_FACTS_UNAVAILABLE",
+      transform: (facts: EnergyIntervalFactWrite[]) => alterProjectPeakOfficialFact(
+        facts,
+        "missing",
+      ),
+    },
+    {
+      name: "duplicate",
+      expectedCode: "PEAK_INTERVAL_FACTS_AMBIGUOUS",
+      transform: (facts: EnergyIntervalFactWrite[]) => alterProjectPeakOfficialFact(
+        facts,
+        "duplicate",
+      ),
+    },
+    {
+      name: "rejected",
+      expectedCode: "PEAK_INTERVAL_FACTS_REJECTED",
+      transform: (facts: EnergyIntervalFactWrite[]) => alterProjectPeakOfficialFact(
+        facts,
+        "rejected",
+      ),
+    },
+  ] as const)("fails the Peak Breakdown closed for a $name Project official input", async ({
+    expectedCode,
+    transform,
+  }) => {
+    const analysis = await analyzeNgeeAnnFixture(
+      transform,
+      expectedCode === "PEAK_INTERVAL_FACTS_AMBIGUOUS"
+        ? "mapping-lvl-6-total-office-light-8"
+        : undefined,
+    );
+
+    expect(analysis.summary.peakAt).toBe(NGEE_ANN_GOLDEN.period.peakAt);
+    expect(analysis.peakBreakdown).toEqual({
+      status: "unavailable",
+      reason: expect.objectContaining({ code: expectedCode }),
+    });
+  }, 30_000);
+
+  it("keeps Peak Breakdown available with a partial-period caveat when Peak inputs are complete", async () => {
+    const analysis = await analyzeNgeeAnnFixture((facts) => facts.filter((fact) => !(
+      fact.meterPointId === "mapping-lvl-6-total-office-light-8"
+      && fact.intervalStart === "2026-06-11T16:00:00.000Z"
+    )));
+
+    expect(analysis.dataHealth.status).toBe("partial");
+    expect(analysis.peakBreakdown).toMatchObject({
+      status: "available",
+      periodStatus: "partial",
+      coveragePct: analysis.dataHealth.coveragePct,
+      peak: {
+        from: NGEE_ANN_GOLDEN.period.peakAt,
+        dataHealth: { status: "complete" },
+      },
+    });
+  }, 30_000);
+
+  it("keeps Peak Breakdown available and isolates missing or duplicate component evidence", async () => {
+    const missingMeterNodeId = "mapping-lvl-7-office-load-1-l1p1-l3p6-13";
+    const duplicateMeterNodeId = "mapping-lvl-6-office-load-3-l1p13-l3p18-5";
+    const analysis = await analyzeNgeeAnnFixture((facts) => facts.flatMap((fact) => {
+      if (fact.intervalStart !== NGEE_ANN_GOLDEN.period.peakAt) return [fact];
+      if (fact.meterPointId === missingMeterNodeId) return [];
+      return [fact];
+    }), duplicateMeterNodeId);
+    const circuits = analysis.peakBreakdown?.status === "available"
+      ? analysis.peakBreakdown.levels.flatMap((level) => level.circuits)
+      : [];
+
+    expect(analysis.peakBreakdown?.status).toBe("available");
+    expect(circuits.find((circuit) => circuit.meterNodeId === missingMeterNodeId)).toMatchObject({
+      averageKw: null,
+      sharePct: null,
+      dataHealth: {
+        status: "unavailable",
+        coveragePct: 0,
+        expectedMeterIntervalCount: 1,
+        validIntervalCount: 0,
+        qualityEventCount: 0,
+      },
+    });
+    expect(circuits.find((circuit) => circuit.meterNodeId === duplicateMeterNodeId)).toMatchObject({
+      averageKw: null,
+      sharePct: null,
+      dataHealth: {
+        status: "unavailable",
+        coveragePct: 0,
+        expectedMeterIntervalCount: 1,
+        validIntervalCount: 0,
+        qualityEventCount: 0,
+      },
+    });
+  }, 30_000);
+
   it("evaluates only supplied rule revisions and takes thresholds from the registry", () => {
     const attention = evaluateEnergyAttention({
       summary: {
@@ -876,6 +975,74 @@ type GoldenMeter = {
   usage: number[];
 };
 
+const analyzeNgeeAnnFixture = async (
+  transformIntervalFacts: (facts: EnergyIntervalFactWrite[]) => EnergyIntervalFactWrite[],
+  duplicatePeakQueryMeterNodeId?: string,
+): Promise<EnergyScopeAnalysis> => {
+  const root = mkdtempSync(join(tmpdir(), "energy-analysis-peak-health-"));
+  const databasePath = join(root, "energy.duckdb");
+  const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+  const gateway = new LocalDataGateway(metadata);
+  const runSqlReadonly = gateway.runSqlReadonly.bind(gateway);
+  gateway.runSqlReadonly = async (request) => {
+    const result = await runSqlReadonly(request);
+    if (!duplicatePeakQueryMeterNodeId
+      || !request.sql.includes("AS interval_start_ms")) return result;
+    const duplicate = result.rows.find((row) => row[0] === duplicatePeakQueryMeterNodeId);
+    return duplicate ? { ...result, rows: [...result.rows, [...duplicate]] } : result;
+  };
+  try {
+    ensureEnergyIqBootstrap(metadata);
+    await materializeNgeeAnnGoldenFixture(databasePath, metadata, { transformIntervalFacts });
+    const user = metadata.users.getById({ user_id: "dev-user" });
+    const context = resolveEnergyQueryContext({
+      metadataStore: metadata,
+      user,
+      workspaceId: NGEE_ANN_GOLDEN.workspaceId,
+      request: {
+        projectId: NGEE_ANN_GOLDEN.projectId,
+        scopeId: "project",
+        resource: "electricity",
+        period: "Custom",
+        from: NGEE_ANN_GOLDEN.selection.period.localFrom,
+        to: "2026-06-16",
+      },
+    });
+    return await executeEnergyScopeAnalysis({
+      metadataStore: metadata,
+      dataGateway: gateway,
+      userId: "dev-user",
+      context,
+      databasePath,
+    });
+  } finally {
+    metadata.close();
+    removeTemporaryEnergyFixture(root);
+  }
+};
+
+const alterProjectPeakOfficialFact = (
+  facts: EnergyIntervalFactWrite[],
+  mode: "missing" | "duplicate" | "rejected",
+): EnergyIntervalFactWrite[] => facts.flatMap((fact) => {
+  if (fact.intervalStart !== NGEE_ANN_GOLDEN.period.peakAt) return [fact];
+  if (fact.meterPointId === "mapping-lvl-6-total-office-light-8") {
+    if (mode === "missing") return [];
+    if (mode === "duplicate") return [fact];
+    return [{ ...fact, qualityStatus: "rejected" }];
+  }
+  if (mode !== "duplicate" && fact.meterPointId === "mapping-lvl-6-total-office-load-9") {
+    return [{
+      ...fact,
+      activeEnergyKwh: fact.previousActiveEnergyKwh + 25,
+      rawDeltaKwh: 25,
+      usageKwh: 25,
+      averageKw: 100,
+    }];
+  }
+  return [fact];
+});
+
 const materializeNgeeAnnGoldenFixture = async (
   databasePath: string,
   metadataStore: MetadataStore,
@@ -897,6 +1064,16 @@ const materializeNgeeAnnGoldenFixture = async (
   const earlierLevel7BatchId = "ngee-ann-l7-apr-may-fixture";
   const level6LightShare = totalCircuitGolden("l6-total-light").rawUsageKwh / 476.983827;
   const level7LightShare = totalCircuitGolden("l7-total-light").rawUsageKwh / 1054.184497;
+  const currentLevel6ByCategory = splitLevelUsageAtSourcePeak(
+    currentLevel6Usage,
+    level6LightShare,
+    3.094124,
+  );
+  const currentLevel7ByCategory = splitLevelUsageAtSourcePeak(
+    currentLevel7Usage,
+    level7LightShare,
+    3.778204,
+  );
   const meters: GoldenMeter[] = [
     officialMeter({
       id: "mapping-lvl-6-total-office-light-8",
@@ -905,7 +1082,7 @@ const materializeNgeeAnnGoldenFixture = async (
       category: "light",
       importBatchId: level6BatchId,
       previous: previousLevel6Usage.map((usage) => usage * level6LightShare),
-      current: currentLevel6Usage.map((usage) => usage * level6LightShare)
+      current: currentLevel6ByCategory.light
     }),
     officialMeter({
       id: "mapping-lvl-6-total-office-load-9",
@@ -914,7 +1091,7 @@ const materializeNgeeAnnGoldenFixture = async (
       category: "load",
       importBatchId: level6BatchId,
       previous: previousLevel6Usage.map((usage) => usage * (1 - level6LightShare)),
-      current: currentLevel6Usage.map((usage) => usage * (1 - level6LightShare))
+      current: currentLevel6ByCategory.load
     }),
     officialMeter({
       id: "mapping-lvl-7-total-office-light-17",
@@ -923,7 +1100,7 @@ const materializeNgeeAnnGoldenFixture = async (
       category: "light",
       importBatchId: level7BatchId,
       previous: previousLevel7Usage.map((usage) => usage * level7LightShare),
-      current: currentLevel7Usage.map((usage) => usage * level7LightShare)
+      current: currentLevel7ByCategory.light
     }),
     officialMeter({
       id: "mapping-lvl-7-total-office-load-18",
@@ -932,7 +1109,7 @@ const materializeNgeeAnnGoldenFixture = async (
       category: "load",
       importBatchId: level7BatchId,
       previous: previousLevel7Usage.map((usage) => usage * (1 - level7LightShare)),
-      current: currentLevel7Usage.map((usage) => usage * (1 - level7LightShare))
+      current: currentLevel7ByCategory.load
     }),
     ...circuitMeters(level6BatchId, level7BatchId)
   ];
@@ -1059,10 +1236,14 @@ const circuitMeter = (
   previousUsageKwh?: number,
   previousPeakKw?: number
 ): GoldenMeter => {
-  const currentUsage = [
+  const baseCurrentUsage = [
     peakKw * 0.25,
     ...constantUsage(totalUsageKwh - peakKw * 0.25, 7 * 24 * 4 - 1)
   ];
+  const currentUsage = pinComponentSourcePeak(
+    baseCurrentUsage,
+    SOURCE_PEAK_COMPONENT_KW_BY_METER_ID[id],
+  );
   const previousUsage = previousUsageKwh === undefined
     ? []
     : [
@@ -1082,6 +1263,76 @@ const circuitMeter = (
     importBatchId,
     usage: [...previousUsage, ...currentUsage]
   };
+};
+
+const SOURCE_PEAK_COMPONENT_KW_BY_METER_ID: Readonly<Record<string, number>> = {
+  "mapping-lvl-7-front-row-office-light-11": 1.950620,
+  "mapping-lvl-7-middle-row-office-light-12": 0.300360,
+  "mapping-lvl-7-back-row-office-light-10": 1.439916,
+  "mapping-lvl-7-office-load-1-l1p1-l3p6-13": 0.180420,
+  "mapping-lvl-7-office-load-2-l1p7-l3p15-14": 1.374620,
+  "mapping-lvl-7-office-load-3-l1p16-l3p21-15": 3.242088,
+  "mapping-lvl-7-office-load-4-l1p22-l3p25-fan-isol1-2-16": 3.392240,
+  "mapping-lvl-6-office-light-left-external-1": 1.483860,
+  "mapping-lvl-6-office-light-right-internal-2": 1.582272,
+  "mapping-lvl-6-office-load-1-l1p1-l3p6-3": 0.501772,
+  "mapping-lvl-6-office-load-2-l1p7-l3p12-4": 0.429500,
+  "mapping-lvl-6-office-load-3-l1p13-l3p18-5": 0.402808,
+  "mapping-lvl-6-office-load-4-l1p19-l3p24-6": 3.474700,
+  "mapping-lvl-6-office-load-5-l1p25-l3p29-fan-isol-1-2-7": 0.573484,
+};
+
+const sourcePeakIntervalIndex = (): number => intervalIndex(1, 14, 0);
+
+const splitLevelUsageAtSourcePeak = (
+  levelUsage: number[],
+  lightShare: number,
+  sourcePeakLightKw: number,
+): { light: number[]; load: number[] } => {
+  const peakIndex = sourcePeakIntervalIndex();
+  const light = levelUsage.map((usage) => usage * lightShare);
+  const sourcePeakLightUsage = sourcePeakLightKw * 0.25;
+  const adjustment = sourcePeakLightUsage - light[peakIndex]!;
+  const adjustableLightUsage = light.reduce(
+    (sum, usage, index) => index === peakIndex ? sum : sum + usage,
+    0,
+  );
+  const scale = (adjustableLightUsage - adjustment) / adjustableLightUsage;
+  if (scale < 0) throw new Error("NGEE_ANN_SOURCE_PEAK_CATEGORY_SPLIT_INFEASIBLE");
+  const adjustedLight = light.map((usage, index) => index === peakIndex
+    ? sourcePeakLightUsage
+    : usage * scale);
+  const lightCorrection = light.reduce((sum, usage) => sum + usage, 0)
+    - adjustedLight.reduce((sum, usage) => sum + usage, 0);
+  adjustedLight[0] = adjustedLight[0]! + lightCorrection;
+  const load = levelUsage.map((usage, index) => usage - adjustedLight[index]!);
+  if (load.some((usage) => usage < 0)) {
+    throw new Error("NGEE_ANN_SOURCE_PEAK_CATEGORY_SPLIT_INFEASIBLE");
+  }
+  return { light: adjustedLight, load };
+};
+
+const pinComponentSourcePeak = (usage: number[], sourcePeakKw?: number): number[] => {
+  if (sourcePeakKw === undefined) return usage;
+  const peakIndex = sourcePeakIntervalIndex();
+  const protectedPeakIndex = 0;
+  const sourcePeakUsage = sourcePeakKw * 0.25;
+  const adjustment = sourcePeakUsage - usage[peakIndex]!;
+  const adjustableUsage = usage.reduce(
+    (sum, value, index) => index === peakIndex || index === protectedPeakIndex ? sum : sum + value,
+    0,
+  );
+  const scale = (adjustableUsage - adjustment) / adjustableUsage;
+  if (scale < 0) throw new Error("NGEE_ANN_SOURCE_PEAK_COMPONENT_INFEASIBLE");
+  const adjusted = usage.map((value, index) => index === peakIndex
+    ? sourcePeakUsage
+    : index === protectedPeakIndex
+      ? value
+      : value * scale);
+  const correction = usage.reduce((sum, value) => sum + value, 0)
+    - adjusted.reduce((sum, value) => sum + value, 0);
+  adjusted[1] = adjusted[1]! + correction;
+  return adjusted;
 };
 
 const buildCurrentRootUsage = (): number[] => {
@@ -1410,6 +1661,41 @@ const expectedNgeeAnnDailyTotals = (): NonNullable<EnergyScopeAnalysis["dailyTot
       ...date,
       usageKwh: scope.usageKwh[index] ?? null,
       dataHealth: scope.dataHealth,
+    })),
+  })),
+});
+
+const expectedNgeeAnnPeakBreakdown = (): NonNullable<EnergyScopeAnalysis["peakBreakdown"]> => ({
+  ...NGEE_ANN_GOLDEN.period.peakBreakdown,
+  peak: {
+    ...NGEE_ANN_GOLDEN.period.peakBreakdown.peak,
+    dataHealth: {
+      status: "complete",
+      coveragePct: 100,
+      expectedMeterIntervalCount: 4,
+      validIntervalCount: 4,
+      qualityEventCount: 0,
+    },
+  },
+  levels: NGEE_ANN_GOLDEN.period.peakBreakdown.levels.map((level) => ({
+    ...level,
+    dataHealth: {
+      status: "complete",
+      coveragePct: 100,
+      expectedMeterIntervalCount: 2,
+      validIntervalCount: 2,
+      qualityEventCount: 0,
+    },
+    circuits: level.circuits.map((circuit) => ({
+      ...circuit,
+      includedInOfficialTotal: false as const,
+      dataHealth: {
+        status: "complete" as const,
+        coveragePct: 100,
+        expectedMeterIntervalCount: 1,
+        validIntervalCount: 1,
+        qualityEventCount: 0,
+      },
     })),
   })),
 });

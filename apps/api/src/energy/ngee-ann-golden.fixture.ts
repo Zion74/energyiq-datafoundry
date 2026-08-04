@@ -298,6 +298,52 @@ export const NGEE_ANN_GOLDEN = {
           }
         }
       ]
+    },
+    peakBreakdown: {
+      status: "available",
+      metricId: "energy.peak_demand_kw@1",
+      intervalMinutes: 15,
+      timezone: "Asia/Singapore",
+      unit: "kW",
+      periodStatus: "complete",
+      coveragePct: 100,
+      peak: {
+        from: "2026-06-11T06:00:00.000Z",
+        to: "2026-06-11T06:15:00.000Z",
+        averageKw: 20.6731
+      },
+      levels: [
+        {
+          scopeId: "level-7",
+          scopeName: "Level 7",
+          averageKw: 12.0637,
+          sharePct: 58.3545,
+          circuits: [
+            { meterNodeId: "mapping-lvl-7-office-load-4-l1p22-l3p25-fan-isol1-2-16", name: "Office Load 4 Fan ISOL 1/2", category: "load", averageKw: 3.3922, sharePct: 28.1194 },
+            { meterNodeId: "mapping-lvl-7-office-load-3-l1p16-l3p21-15", name: "Office Load 3", category: "load", averageKw: 3.2421, sharePct: 26.8748 },
+            { meterNodeId: "mapping-lvl-7-front-row-office-light-11", name: "Front Row Office Light", category: "light", averageKw: 1.9506, sharePct: 16.1694 },
+            { meterNodeId: "mapping-lvl-7-back-row-office-light-10", name: "Back Row Office Light", category: "light", averageKw: 1.4399, sharePct: 11.936 },
+            { meterNodeId: "mapping-lvl-7-office-load-2-l1p7-l3p15-14", name: "Office Load 2", category: "load", averageKw: 1.3746, sharePct: 11.3947 },
+            { meterNodeId: "mapping-lvl-7-middle-row-office-light-12", name: "Middle Row Office Light", category: "light", averageKw: 0.3004, sharePct: 2.4898 },
+            { meterNodeId: "mapping-lvl-7-office-load-1-l1p1-l3p6-13", name: "Office Load 1", category: "load", averageKw: 0.1804, sharePct: 1.4956 }
+          ]
+        },
+        {
+          scopeId: "level-6",
+          scopeName: "Level 6",
+          averageKw: 8.6094,
+          sharePct: 41.6455,
+          circuits: [
+            { meterNodeId: "mapping-lvl-6-office-load-4-l1p19-l3p24-6", name: "Lvl 6 Office Load 4: L1P19-L3P24", category: "load", averageKw: 3.4747, sharePct: 40.3592 },
+            { meterNodeId: "mapping-lvl-6-office-light-right-internal-2", name: "Lvl 6 Office Light-Right: Internal", category: "light", averageKw: 1.5823, sharePct: 18.3784 },
+            { meterNodeId: "mapping-lvl-6-office-light-left-external-1", name: "Lvl 6 Office Light-Left: External", category: "light", averageKw: 1.4839, sharePct: 17.2353 },
+            { meterNodeId: "mapping-lvl-6-office-load-5-l1p25-l3p29-fan-isol-1-2-7", name: "Lvl 6 Office Load 5: L1P25-L3P29 Fan Isol 1/2", category: "load", averageKw: 0.5735, sharePct: 6.6611 },
+            { meterNodeId: "mapping-lvl-6-office-load-1-l1p1-l3p6-3", name: "Lvl 6 Office Load 1: L1P1-L3P6", category: "load", averageKw: 0.5018, sharePct: 5.8282 },
+            { meterNodeId: "mapping-lvl-6-office-load-2-l1p7-l3p12-4", name: "Lvl 6 Office Load 2: L1P7-L3P12", category: "load", averageKw: 0.4295, sharePct: 4.9887 },
+            { meterNodeId: "mapping-lvl-6-office-load-3-l1p13-l3p18-5", name: "Lvl 6 Office Load 3: L1P13-L3P18", category: "load", averageKw: 0.4028, sharePct: 4.6787 }
+          ]
+        }
+      ]
     }
   },
   day: {
