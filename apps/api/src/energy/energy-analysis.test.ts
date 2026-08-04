@@ -8,7 +8,9 @@ import {
 import {
   createMetadataStore,
   resolveEnergyIqSnapshotFactScope,
+  type EnergyIqMeterMappingRow,
   type EnergyIqRuleRevisionRecord,
+  type EnergyIqVirtualMeter,
   type MetadataStore,
 } from "@datafoundry/metadata";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -17,6 +19,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  buildEnergyVirtualMeterTraces,
   evaluateEnergyAttention,
   executeEnergyScopeAnalysis,
   selectEnergyGoldenPeriod,
@@ -78,6 +81,7 @@ describe("EnergyScopeAnalysis", () => {
       expect(portfolio.hourlyProfile).toHaveLength(24);
       expect(portfolio.childScopes).toHaveLength(PRESCHOOL_GOLDEN.period.centreCount);
       expect(portfolio.circuits).toHaveLength(PRESCHOOL_GOLDEN.period.circuitCount);
+      expect(portfolio.virtualMeterTraces).toBeUndefined();
       expect(portfolio.childScopes.every((child) => child.usageKwh > 0)).toBe(true);
       expect(portfolio.childScopes.reduce((sum, child) => sum + child.usageKwh, 0))
         .toBeCloseTo(portfolio.summary.usageKwh, 4);
@@ -351,7 +355,9 @@ describe("EnergyScopeAnalysis", () => {
         timezone: NGEE_ANN_GOLDEN.timezone
       });
       expect(analysis.virtualMeters).toContainEqual(expect.objectContaining(NGEE_ANN_GOLDEN.virtualMeter));
+      expect(analysis.virtualMeterTraces).toEqual([NGEE_ANN_GOLDEN.virtualMeterTrace]);
       expect(analysis.provenance).toMatchObject({
+        dataSnapshotId: ngeeAnnSnapshot.id,
         hierarchyRevisionId: context.hierarchyRevisionId,
         meterMappingRevisionId: context.meterMappingRevisionId,
         meterFormulaRevisionId: context.meterFormulaRevisionId,
@@ -519,6 +525,141 @@ describe("EnergyScopeAnalysis", () => {
     expect(attention.map((item) => item.code)).toEqual(["PEOPLE_NORMALISED_OUTLIER"]);
     expect(attention[0]?.evidence).toContain("3.00 kWh/person");
   });
+});
+
+describe("Energy virtual meter traces", () => {
+  it("returns a partial trace with null result instead of a partial sum when one input is missing", () => {
+    const load1 = virtualTraceMappingRow("load-1", "Load 1");
+    const load2 = virtualTraceMappingRow("load-2", "Load 2");
+    const [trace] = buildEnergyVirtualMeterTraces({
+      virtualMeters: [virtualTraceFormula([
+        { mapping_row_id: load1.id, coefficient: 1 },
+        { mapping_row_id: load2.id, coefficient: 1 },
+      ])],
+      mappingRows: [load1, load2],
+      includedScopeIds: new Set(["level-6"]),
+      resource: "electricity",
+      circuits: [virtualTraceCircuit(load1, 11.5379)],
+    });
+
+    expect(trace).toMatchObject({
+      status: "partial",
+      usageKwh: null,
+      includedInOfficialTotal: false,
+      missingTermMeterNodeIds: [load2.id],
+      terms: [
+        {
+          meterNodeId: load1.id,
+          name: load1.display_name,
+          coefficient: 1,
+          inputUsageKwh: 11.5379,
+          contributionKwh: 11.5379,
+          dataHealth: virtualTraceDataHealth,
+        },
+        {
+          meterNodeId: load2.id,
+          name: load2.display_name,
+          coefficient: 1,
+          inputUsageKwh: null,
+          contributionKwh: null,
+          dataHealth: null,
+        },
+      ],
+    });
+  });
+
+  it("preserves a negative coefficient as a negative contribution", () => {
+    const load1 = virtualTraceMappingRow("load-1", "Load 1");
+    const load2 = virtualTraceMappingRow("load-2", "Load 2");
+    const [trace] = buildEnergyVirtualMeterTraces({
+      virtualMeters: [virtualTraceFormula([
+        { mapping_row_id: load2.id, coefficient: 1 },
+        { mapping_row_id: load1.id, coefficient: -1 },
+      ])],
+      mappingRows: [load1, load2],
+      includedScopeIds: new Set(["level-6"]),
+      resource: "electricity",
+      circuits: [
+        virtualTraceCircuit(load1, 11.5379),
+        virtualTraceCircuit(load2, 37.4839),
+      ],
+    });
+
+    expect(trace).toMatchObject({
+      status: "available",
+      usageKwh: 25.946,
+      includedInOfficialTotal: false,
+      missingTermMeterNodeIds: [],
+      terms: [
+        {
+          meterNodeId: load2.id,
+          coefficient: 1,
+          inputUsageKwh: 37.4839,
+          contributionKwh: 37.4839,
+        },
+        {
+          meterNodeId: load1.id,
+          coefficient: -1,
+          inputUsageKwh: 11.5379,
+          contributionKwh: -11.5379,
+        },
+      ],
+    });
+  });
+});
+
+const virtualTraceDataHealth = {
+  coveragePct: 100,
+  expectedMeterIntervalCount: 672,
+  validIntervalCount: 672,
+  qualityEventCount: 0,
+} as const;
+
+const virtualTraceMappingRow = (
+  id: string,
+  displayName: string,
+): EnergyIqMeterMappingRow => ({
+  id,
+  source_label: displayName,
+  scope_id: id,
+  navigation_scope_id: id,
+  display_name: displayName,
+  resource: "electricity",
+  category: "load",
+  coverage: "partial",
+  meter_role: "component",
+  aggregation_usage: "excluded",
+});
+
+const virtualTraceFormula = (
+  terms: EnergyIqVirtualMeter["terms"],
+): EnergyIqVirtualMeter => ({
+  id: "derived-load",
+  display_name: "Derived load",
+  scope_id: "level-6",
+  resource: "electricity",
+  category: "load",
+  terms,
+});
+
+const virtualTraceCircuit = (
+  meter: EnergyIqMeterMappingRow,
+  usageKwh: number,
+): EnergyScopeAnalysis["circuits"][number] => ({
+  meterNodeId: meter.id,
+  scopeId: meter.navigation_scope_id ?? meter.scope_id,
+  parentScopeId: "level-6",
+  name: meter.display_name,
+  appliance: meter.display_name,
+  category: meter.category,
+  meterRole: meter.meter_role,
+  includedInOfficialTotal: false,
+  usageKwh,
+  sharePct: 0,
+  comparison: { usageKwh: 0, changeKwh: usageKwh, changePct: null },
+  dataHealth: virtualTraceDataHealth,
+  peakKw: 1,
+  qualityEventCount: 0,
 });
 
 const attentionChildScope = (

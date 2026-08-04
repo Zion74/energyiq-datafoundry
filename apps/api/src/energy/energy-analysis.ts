@@ -5,11 +5,13 @@ import {
 } from "@datafoundry/data-gateway";
 import type {
   EnergyIqAnalysisInterval,
+  EnergyIqMeterMappingRow,
   EnergyIqOperatingEvaluation,
   EnergyIqPolicyUnavailableReason,
   EnergyIqProjectSetupDocument,
   EnergyIqRuleRevisionRecord,
   EnergyIqTariffEvaluation,
+  EnergyIqVirtualMeter,
   MetadataStore
 } from "@datafoundry/metadata";
 import { dirname, join, resolve } from "node:path";
@@ -134,6 +136,28 @@ export type EnergyScopeAnalysis = {
     termMeterNodeIds: string[];
     usageKwh: number;
     includedInOfficialTotal: false;
+  }>;
+  virtualMeterTraces?: Array<{
+    meterNodeId: string;
+    name: string;
+    scopeId: string;
+    status: "available" | "partial";
+    usageKwh: number | null;
+    includedInOfficialTotal: false;
+    terms: Array<{
+      meterNodeId: string;
+      name: string;
+      coefficient: 1 | -1;
+      inputUsageKwh: number | null;
+      contributionKwh: number | null;
+      dataHealth: {
+        coveragePct: number;
+        expectedMeterIntervalCount: number;
+        validIntervalCount: number;
+        qualityEventCount: number;
+      } | null;
+    }>;
+    missingTermMeterNodeIds: string[];
   }>;
   offHours: {
     status: "available";
@@ -770,6 +794,15 @@ export const executeEnergyScopeAnalysis = async (input: {
     hierarchy,
     circuits
   });
+  const virtualMeterTraces = buildVirtualMeterTraces({
+    metadataStore: input.metadataStore,
+    projectId: input.context.projectId,
+    hierarchyRevisionId: input.context.hierarchyRevisionId,
+    resource: input.context.resource,
+    selectedScopeId: selectedNode.id,
+    hierarchy,
+    circuits,
+  });
 
   const summary: EnergyScopeAnalysis["summary"] = {
     usageKwh: round(usageKwh, 4),
@@ -841,6 +874,7 @@ export const executeEnergyScopeAnalysis = async (input: {
     designatedTotals,
     componentReconciliation,
     virtualMeters,
+    ...(virtualMeterTraces.length > 0 ? { virtualMeterTraces } : {}),
     offHours,
     cost,
     dataHealth,
@@ -1060,6 +1094,87 @@ const buildVirtualMeters = (input: {
         0
       ), 4),
       includedInOfficialTotal: false as const
+    }];
+  });
+};
+
+const buildVirtualMeterTraces = (input: {
+  metadataStore: MetadataStore;
+  projectId: string;
+  hierarchyRevisionId: string;
+  resource: "electricity" | "water";
+  selectedScopeId: string;
+  hierarchy: ReturnType<MetadataStore["energyIq"]["listProjectNodes"]>;
+  circuits: EnergyScopeAnalysis["circuits"];
+}): NonNullable<EnergyScopeAnalysis["virtualMeterTraces"]> => {
+  const revision = input.metadataStore.energyIq.projectSetup
+    .listHierarchyRevisions(input.projectId)
+    .find((candidate) => candidate.id === input.hierarchyRevisionId);
+  if (!revision) return [];
+  const mapping = (JSON.parse(revision.snapshot_json) as EnergyIqProjectSetupDocument).meter_mapping;
+  if (!mapping) return [];
+  const includedScopeIds = collectDescendantIds(input.selectedScopeId, input.hierarchy);
+  includedScopeIds.add(input.selectedScopeId);
+  return buildEnergyVirtualMeterTraces({
+    virtualMeters: mapping.virtual_meters ?? [],
+    mappingRows: mapping.rows,
+    includedScopeIds,
+    resource: input.resource,
+    circuits: input.circuits,
+  });
+};
+
+export const buildEnergyVirtualMeterTraces = (input: {
+  virtualMeters: readonly EnergyIqVirtualMeter[];
+  mappingRows: readonly EnergyIqMeterMappingRow[];
+  includedScopeIds: ReadonlySet<string>;
+  resource: "electricity" | "water";
+  circuits: EnergyScopeAnalysis["circuits"];
+}): NonNullable<EnergyScopeAnalysis["virtualMeterTraces"]> => {
+  const mappingRowByMeterNodeId = new Map(input.mappingRows.map((row) => [row.id, row]));
+  const circuitByMeterNodeId = new Map(
+    input.circuits.map((circuit) => [circuit.meterNodeId, circuit]),
+  );
+  return input.virtualMeters.flatMap((virtualMeter) => {
+    if (
+      virtualMeter.resource !== input.resource
+      || !input.includedScopeIds.has(virtualMeter.scope_id)
+    ) {
+      return [];
+    }
+    const terms = virtualMeter.terms.map((term) => {
+      const mappingRow = mappingRowByMeterNodeId.get(term.mapping_row_id);
+      const circuit = circuitByMeterNodeId.get(term.mapping_row_id);
+      const available = mappingRow !== undefined && circuit !== undefined;
+      return {
+        meterNodeId: term.mapping_row_id,
+        name: mappingRow?.display_name ?? circuit?.name ?? term.mapping_row_id,
+        coefficient: term.coefficient,
+        inputUsageKwh: available ? circuit.usageKwh : null,
+        contributionKwh: available
+          ? round(circuit.usageKwh * term.coefficient, 4)
+          : null,
+        dataHealth: available ? circuit.dataHealth : null,
+      };
+    });
+    const missingTermMeterNodeIds = terms
+      .filter((term) => term.inputUsageKwh === null)
+      .map((term) => term.meterNodeId);
+    const contributionTotalKwh = terms.reduce<number | null>(
+      (sum, term) => sum === null || term.contributionKwh === null
+        ? null
+        : sum + term.contributionKwh,
+      0,
+    );
+    return [{
+      meterNodeId: virtualMeter.id,
+      name: virtualMeter.display_name,
+      scopeId: virtualMeter.scope_id,
+      status: missingTermMeterNodeIds.length > 0 ? "partial" as const : "available" as const,
+      usageKwh: contributionTotalKwh === null ? null : round(contributionTotalKwh, 4),
+      includedInOfficialTotal: false as const,
+      terms,
+      missingTermMeterNodeIds,
     }];
   });
 };

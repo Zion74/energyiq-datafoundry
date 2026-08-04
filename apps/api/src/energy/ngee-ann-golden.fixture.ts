@@ -293,6 +293,43 @@ export const NGEE_ANN_GOLDEN = {
     usageKwh: 49.0218,
     includedInOfficialTotal: false
   },
+  virtualMeterTrace: {
+    meterNodeId: "ngee-ann-load-12-v1",
+    name: "Load 12",
+    scopeId: "level-6",
+    status: "available",
+    usageKwh: 49.0218,
+    includedInOfficialTotal: false,
+    terms: [
+      {
+        meterNodeId: "mapping-lvl-6-office-load-1-l1p1-l3p6-3",
+        name: "Office Load 1",
+        coefficient: 1,
+        inputUsageKwh: 11.5379,
+        contributionKwh: 11.5379,
+        dataHealth: {
+          coveragePct: 100,
+          expectedMeterIntervalCount: 672,
+          validIntervalCount: 672,
+          qualityEventCount: 0
+        }
+      },
+      {
+        meterNodeId: "mapping-lvl-6-office-load-2-l1p7-l3p12-4",
+        name: "Office Load 2",
+        coefficient: 1,
+        inputUsageKwh: 37.4839,
+        contributionKwh: 37.4839,
+        dataHealth: {
+          coveragePct: 100,
+          expectedMeterIntervalCount: 672,
+          validIntervalCount: 672,
+          qualityEventCount: 0
+        }
+      }
+    ],
+    missingTermMeterNodeIds: []
+  },
   invariants: {
     officialUsageKwh: 1531.168324,
     componentUsageKwh: 1518.996480,
