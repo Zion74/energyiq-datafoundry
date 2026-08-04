@@ -41,13 +41,28 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Official categories");
     expect(markup).toContain("1239.4239 kWh");
     expect(markup).toContain("80.9463%");
+    expect(markup).toContain("887.217 kWh");
+    expect(markup).toContain("+352.2069 kWh");
+    expect(markup).toContain("+39.6979%");
     expect(markup).toContain("291.7444 kWh");
     expect(markup).toContain("19.0537%");
+    expect(markup).toContain("324.4602 kWh");
+    expect(markup).toContain("-32.7158 kWh");
+    expect(markup).toContain("-10.0832%");
     expect(markup).toContain("Top 5 component Circuits");
     expect(markup).toContain("439.0972 kWh");
     expect(markup).toContain("28.6773%");
     expect(markup).toContain("70.6873 kWh");
     expect(markup).toContain("4.6166%");
+    for (const comparison of [
+      ["Previous 247.9813 kWh", "+191.1159 kWh", "+77.0687%"],
+      ["Previous 166.7234 kWh", "+171.1789 kWh", "+102.6724%"],
+      ["Previous 262.7359 kWh", "-7.5821 kWh", "-2.8858%"],
+      ["Previous 124.28 kWh", "-17.26 kWh", "-13.888%"],
+      ["Previous 76.9724 kWh", "-6.2851 kWh", "-8.1653%"],
+    ]) {
+      for (const expected of comparison) expect(markup).toContain(expected);
+    }
     expect(markup).toContain("Explanatory only");
     expect(markup).toContain("Accounting trace");
     expect(markup).toContain("Included once");

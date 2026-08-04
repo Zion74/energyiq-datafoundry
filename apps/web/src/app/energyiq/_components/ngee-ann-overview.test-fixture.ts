@@ -69,7 +69,7 @@ export function ngeeAnnGoldenSnapshot(input: {
       scopeId: "l7-load-3",
       parentScopeId: "level-7",
       includedInOfficialTotal: false,
-      comparison: { usageKwh: 0, changeKwh: 337.9023, changePct: null },
+      comparison: { usageKwh: 166.7234, changeKwh: 171.1789, changePct: 102.6724 },
       dataHealth: circuitDataHealth,
     },
     {
@@ -85,7 +85,7 @@ export function ngeeAnnGoldenSnapshot(input: {
       scopeId: "l6-load-4",
       parentScopeId: "level-6",
       includedInOfficialTotal: false,
-      comparison: { usageKwh: 0, changeKwh: 255.1539, changePct: null },
+      comparison: { usageKwh: 262.7359, changeKwh: -7.5821, changePct: -2.8858 },
       dataHealth: circuitDataHealth,
     },
     {
@@ -101,7 +101,7 @@ export function ngeeAnnGoldenSnapshot(input: {
       scopeId: "l7-front-light",
       parentScopeId: "level-7",
       includedInOfficialTotal: false,
-      comparison: { usageKwh: 0, changeKwh: 107.02, changePct: null },
+      comparison: { usageKwh: 124.28, changeKwh: -17.26, changePct: -13.888 },
       dataHealth: circuitDataHealth,
     },
     {
@@ -117,7 +117,7 @@ export function ngeeAnnGoldenSnapshot(input: {
       scopeId: "l6-light-right",
       parentScopeId: "level-6",
       includedInOfficialTotal: false,
-      comparison: { usageKwh: 0, changeKwh: 70.6873, changePct: null },
+      comparison: { usageKwh: 76.9724, changeKwh: -6.2851, changePct: -8.1653 },
       dataHealth: circuitDataHealth,
     },
     {
@@ -133,7 +133,7 @@ export function ngeeAnnGoldenSnapshot(input: {
       scopeId: "l7-load-2",
       parentScopeId: "level-7",
       includedInOfficialTotal: false,
-      comparison: { usageKwh: 0, changeKwh: 66.1682, changePct: null },
+      comparison: { usageKwh: 67.3961, changeKwh: -1.2279, changePct: -1.8219 },
       dataHealth: circuitDataHealth,
     },
     {
@@ -149,7 +149,7 @@ export function ngeeAnnGoldenSnapshot(input: {
       scopeId: "l7-back-light",
       parentScopeId: "level-7",
       includedInOfficialTotal: false,
-      comparison: { usageKwh: 0, changeKwh: 48.9043, changePct: null },
+      comparison: { usageKwh: 58.7596, changeKwh: -9.8553, changePct: -16.7723 },
       dataHealth: circuitDataHealth,
     },
     {
@@ -165,7 +165,7 @@ export function ngeeAnnGoldenSnapshot(input: {
       scopeId: "l6-load-5",
       parentScopeId: "level-6",
       includedInOfficialTotal: false,
-      comparison: { usageKwh: 0, changeKwh: 42.3355, changePct: null },
+      comparison: { usageKwh: 44.1685, changeKwh: -1.833, changePct: -4.15 },
       dataHealth: circuitDataHealth,
     },
     {
@@ -181,7 +181,7 @@ export function ngeeAnnGoldenSnapshot(input: {
       scopeId: "l6-light-left",
       parentScopeId: "level-6",
       includedInOfficialTotal: false,
-      comparison: { usageKwh: 0, changeKwh: 40.2871, changePct: null },
+      comparison: { usageKwh: 28.0518, changeKwh: 12.2352, changePct: 43.6164 },
       dataHealth: circuitDataHealth,
     },
     {
@@ -197,7 +197,7 @@ export function ngeeAnnGoldenSnapshot(input: {
       scopeId: "l6-load-2",
       parentScopeId: "level-6",
       includedInOfficialTotal: false,
-      comparison: { usageKwh: 0, changeKwh: 37.4839, changePct: null },
+      comparison: { usageKwh: 42.0907, changeKwh: -4.6068, changePct: -10.9449 },
       dataHealth: circuitDataHealth,
     },
     {
@@ -213,7 +213,7 @@ export function ngeeAnnGoldenSnapshot(input: {
       scopeId: "l7-load-1",
       parentScopeId: "level-7",
       includedInOfficialTotal: false,
-      comparison: { usageKwh: 0, changeKwh: 28.122, changePct: null },
+      comparison: { usageKwh: 30.6142, changeKwh: -2.4921, changePct: -8.1405 },
       dataHealth: circuitDataHealth,
     },
     {
@@ -229,7 +229,7 @@ export function ngeeAnnGoldenSnapshot(input: {
       scopeId: "l7-middle-light",
       parentScopeId: "level-7",
       includedInOfficialTotal: false,
-      comparison: { usageKwh: 0, changeKwh: 20.7678, changePct: null },
+      comparison: { usageKwh: 32.3325, changeKwh: -11.5647, changePct: -35.7679 },
       dataHealth: circuitDataHealth,
     },
     {
@@ -245,7 +245,7 @@ export function ngeeAnnGoldenSnapshot(input: {
       scopeId: "l6-load-3",
       parentScopeId: "level-6",
       includedInOfficialTotal: false,
-      comparison: { usageKwh: 0, changeKwh: 13.5291, changePct: null },
+      comparison: { usageKwh: 12.8193, changeKwh: 0.7098, changePct: 5.5372 },
       dataHealth: circuitDataHealth,
     },
     {
@@ -261,7 +261,7 @@ export function ngeeAnnGoldenSnapshot(input: {
       scopeId: "l6-load-1",
       parentScopeId: "level-6",
       includedInOfficialTotal: false,
-      comparison: { usageKwh: 0, changeKwh: 11.5379, changePct: null },
+      comparison: { usageKwh: 4.2616, changeKwh: 7.2763, changePct: 170.7386 },
       dataHealth: circuitDataHealth,
     },
   ];
@@ -377,14 +377,14 @@ export function ngeeAnnGoldenSnapshot(input: {
         category: "load",
         usageKwh: 1239.4239,
         sharePct: 80.9463,
-        comparison: { usageKwh: 974.4981, changeKwh: 264.9258, changePct: 27.1859 },
+        comparison: { usageKwh: 887.217, changeKwh: 352.2069, changePct: 39.6979 },
         dataHealth: categoryDataHealth,
       },
       {
         category: "light",
         usageKwh: 291.7444,
         sharePct: 19.0537,
-        comparison: { usageKwh: 237.1791, changeKwh: 54.5653, changePct: 23.0059 },
+        comparison: { usageKwh: 324.4602, changeKwh: -32.7158, changePct: -10.0832 },
         dataHealth: categoryDataHealth,
       },
     ],
