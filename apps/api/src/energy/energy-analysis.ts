@@ -326,17 +326,17 @@ export type EnergyScopeAnalysis = {
     ruleRevisionIds: string[];
     aggregationRule: "designated_total" | "component" | "submeter" | "none";
     sourceView: string;
-    queryIds: [
-      "scope_summary_v1",
-      "hourly_profile_v1",
-      "daily_totals_v1",
-      "time_bucket_grid_v1",
-      "peak_breakdown_v1",
-      "meter_breakdown_v1",
-      "previous_meter_usage_v1",
-      "operational_policy_scope_intervals_v1",
-      "operational_policy_meter_intervals_v1",
-    ];
+    queryIds: Array<
+      | "scope_summary_v1"
+      | "hourly_profile_v1"
+      | "daily_totals_v1"
+      | "time_bucket_grid_v1"
+      | "peak_breakdown_v1"
+      | "meter_breakdown_v1"
+      | "previous_meter_usage_v1"
+      | "operational_policy_scope_intervals_v1"
+      | "operational_policy_meter_intervals_v1"
+    >;
   };
 };
 
@@ -606,6 +606,7 @@ export const executeEnergyScopeAnalysis = async (input: {
   context: EnergyQueryContext;
   databasePath?: string;
   ruleRevisions?: readonly EnergyIqRuleRevisionRecord[];
+  includeTimeBehaviour?: boolean;
 }): Promise<EnergyScopeAnalysis> => {
   const publishedMeterRoute = resolveEnergyPublishedMeterRoute({
     metadataStore: input.metadataStore,
@@ -715,13 +716,15 @@ export const executeEnergyScopeAnalysis = async (input: {
     sql: dailyTotalsSql(scoped.viewName, dailyTotalScopes),
     limit: Math.max(1, dailyTotalScopes.length * dailyDateBuckets.length),
   });
-  const timeBucketGridResultPromise = input.dataGateway.runSqlReadonly({
-    user_id: input.userId,
-    workspace_id: input.context.workspaceId,
-    datasource_id: scoped.datasourceId,
-    sql: timeBucketGridSql(scoped.viewName, dailyTotalScopes),
-    limit: Math.max(1, dailyTotalScopes.length),
-  });
+  const timeBucketGridResultPromise = input.includeTimeBehaviour === false
+    ? Promise.resolve(undefined)
+    : input.dataGateway.runSqlReadonly({
+        user_id: input.userId,
+        workspace_id: input.context.workspaceId,
+        datasource_id: scoped.datasourceId,
+        sql: timeBucketGridSql(scoped.viewName, dailyTotalScopes),
+        limit: Math.max(1, dailyTotalScopes.length),
+      });
   const healthResultPromise = input.dataGateway.runSqlReadonly({
     user_id: input.userId,
     workspace_id: input.context.workspaceId,
@@ -846,13 +849,15 @@ export const executeEnergyScopeAnalysis = async (input: {
       }),
     })),
   };
-  const timeBehaviour = buildTimeBehaviour({
-    timezone: input.context.timezone,
-    scopes: dailyTotalScopes,
-    dateBuckets: dailyDateBuckets,
-    intervalMinutes,
-    rows: timeBucketGridResult.rows,
-  });
+  const timeBehaviour = timeBucketGridResult
+    ? buildTimeBehaviour({
+        timezone: input.context.timezone,
+        scopes: dailyTotalScopes,
+        dateBuckets: dailyDateBuckets,
+        intervalMinutes,
+        rows: timeBucketGridResult.rows,
+      })
+    : undefined;
   const previousMeterUsageById = new Map(
     previousMeterUsageResult.rows.map((row) => [stringAt(row, 0), numberAt(row, 1)]),
   );
@@ -1124,7 +1129,7 @@ export const executeEnergyScopeAnalysis = async (input: {
       observationCount: numberAt(row, 4)
     })),
     dailyTotals,
-    timeBehaviour,
+    ...(timeBehaviour ? { timeBehaviour } : {}),
     ...(peakBreakdown ? { peakBreakdown } : {}),
     categories,
     childScopes,
@@ -1159,7 +1164,7 @@ export const executeEnergyScopeAnalysis = async (input: {
         "scope_summary_v1",
         "hourly_profile_v1",
         "daily_totals_v1",
-        "time_bucket_grid_v1",
+        ...(timeBucketGridResult ? ["time_bucket_grid_v1" as const] : []),
         "peak_breakdown_v1",
         "meter_breakdown_v1",
         "previous_meter_usage_v1",
@@ -2255,40 +2260,74 @@ const timeBucketGridSql = (
   scopes: DailyTotalScope[],
 ): string => `
   SELECT
+    scope_definitions.scope_id,
+    scope_definitions.scope_name,
+    scope_definitions.scope_type,
+    COALESCE(TO_JSON(LIST(STRUCT_PACK(
+      local_date := time_cells.local_date,
+      local_hour := time_cells.local_hour,
+      usage_kwh := time_cells.usage_kwh,
+      valid_interval_count := time_cells.valid_interval_count,
+      quality_event_count := time_cells.quality_event_count,
+      day_type := time_cells.day_type,
+      day_type_count := time_cells.day_type_count
+    ) ORDER BY time_cells.local_date, time_cells.local_hour) FILTER (
+      WHERE time_cells.local_date IS NOT NULL
+    )), '[]') AS cells_json,
+    scope_definitions.scope_order
+  FROM (VALUES ${scopes.map((scope, index) => `(
+    ${index},
+    ${sqlLiteral(scope.scopeId)},
+    ${sqlLiteral(scope.scopeName)},
+    ${sqlLiteral(scope.scopeType)}
+  )`).join(", ")}) AS scope_definitions(
+    scope_order,
     scope_id,
     scope_name,
-    scope_type,
-    COALESCE(TO_JSON(LIST(STRUCT_PACK(
-      local_date := local_date,
-      local_hour := local_hour,
-      usage_kwh := usage_kwh,
-      valid_interval_count := valid_interval_count,
-      quality_event_count := quality_event_count,
-      day_type := day_type,
-      day_type_count := day_type_count
-    ) ORDER BY local_date, local_hour)), '[]') AS cells_json,
-    scope_order
-  FROM (
-${scopes.map((scope, index) => `
-  SELECT
-    ${sqlLiteral(scope.scopeId)} AS scope_id,
-    ${sqlLiteral(scope.scopeName)} AS scope_name,
-    ${sqlLiteral(scope.scopeType)} AS scope_type,
-    STRFTIME(CAST(source.local_interval_start AS DATE), '%Y-%m-%d') AS local_date,
-    source.local_hour,
-    SUM(source.usage_kwh) FILTER (WHERE source.quality_status = 'ok') AS usage_kwh,
-    COUNT(*) FILTER (WHERE source.quality_status = 'ok') AS valid_interval_count,
-    COUNT(*) FILTER (WHERE source.quality_status <> 'ok') AS quality_event_count,
-    MAX(source.day_type) FILTER (WHERE source.quality_status = 'ok') AS day_type,
-    COUNT(DISTINCT source.day_type) FILTER (WHERE source.quality_status = 'ok') AS day_type_count,
-    ${index} AS scope_order
-  FROM ${quoteIdentifier(viewName)} source
-  WHERE ${meterNodeFilter(scope.meterNodeIds)}
-  GROUP BY CAST(source.local_interval_start AS DATE), source.local_hour
-`).join(" UNION ALL ")}
+    scope_type
+  )
+  LEFT JOIN (
+    SELECT
+      routes.scope_order,
+      routes.scope_id,
+      routes.scope_name,
+      routes.scope_type,
+      STRFTIME(CAST(source.local_interval_start AS DATE), '%Y-%m-%d') AS local_date,
+      source.local_hour,
+      SUM(source.usage_kwh) FILTER (WHERE source.quality_status = 'ok') AS usage_kwh,
+      COUNT(*) FILTER (WHERE source.quality_status = 'ok') AS valid_interval_count,
+      COUNT(*) FILTER (WHERE source.quality_status <> 'ok') AS quality_event_count,
+      MAX(source.day_type) FILTER (WHERE source.quality_status = 'ok') AS day_type,
+      COUNT(DISTINCT source.day_type) FILTER (WHERE source.quality_status = 'ok') AS day_type_count
+    FROM ${quoteIdentifier(viewName)} source
+    JOIN (VALUES ${scopes.flatMap((scope, index) => scope.meterNodeIds.map((meterNodeId) => `(
+      ${index},
+      ${sqlLiteral(scope.scopeId)},
+      ${sqlLiteral(scope.scopeName)},
+      ${sqlLiteral(scope.scopeType)},
+      ${sqlLiteral(meterNodeId)}
+    )`)).join(", ")}) AS routes(
+      scope_order,
+      scope_id,
+      scope_name,
+      scope_type,
+      meter_node_id
+    ) ON routes.meter_node_id = source.meter_node_id
+    GROUP BY
+      routes.scope_order,
+      routes.scope_id,
+      routes.scope_name,
+      routes.scope_type,
+      CAST(source.local_interval_start AS DATE),
+      source.local_hour
   ) time_cells
-  GROUP BY scope_id, scope_name, scope_type, scope_order
-  ORDER BY scope_order
+    ON time_cells.scope_order = scope_definitions.scope_order
+  GROUP BY
+    scope_definitions.scope_order,
+    scope_definitions.scope_id,
+    scope_definitions.scope_name,
+    scope_definitions.scope_type
+  ORDER BY scope_definitions.scope_order
 `;
 
 const peakBreakdownSql = (viewName: string, peakAt?: string): string => `

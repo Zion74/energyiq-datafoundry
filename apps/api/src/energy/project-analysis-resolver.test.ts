@@ -255,6 +255,8 @@ describe("ProjectAnalysisResolver", () => {
       expect(healthyResult.status).toBe("ready");
       if (healthyResult.status !== "ready") throw new Error("Expected healthy Project analysis");
       expect(healthyResult.snapshot.analysis.summary.validIntervalCount).toBeGreaterThan(0);
+      expect(healthyResult.snapshot.analysis.timeBehaviour).toBeDefined();
+      expect(healthyResult.snapshot.analysis.provenance.queryIds).toContain("time_bucket_grid_v1");
       expect(healthyResult.snapshot).not.toHaveProperty("latestAvailablePeriod");
 
       for (const message of [
@@ -358,6 +360,8 @@ describe("ProjectAnalysisResolver", () => {
       expect(new Set(result.snapshot.evidence.map((item) => item.id)).size)
         .toBe(result.snapshot.evidence.length);
       expect(result.snapshot.findings).toEqual(result.snapshot.analysis.attention);
+      expect(result.snapshot.analysis.timeBehaviour).toBeUndefined();
+      expect(result.snapshot.analysis.provenance.queryIds).not.toContain("time_bucket_grid_v1");
       expect(result.snapshot.metadata).toMatchObject({
         hierarchyRevisionId: "preschool-hierarchy-v4",
         timezone: "Asia/Singapore",
