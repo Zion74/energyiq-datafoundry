@@ -346,6 +346,9 @@ export const resolveEnergyPublishedMeterRoute = (input: {
     }
     routeCategories.add(route.category);
   }
+  if (routeCategories.has("overall") && routeCategories.size > 1) {
+    throw new Error(`ENERGYIQ_PUBLISHED_METER_ROUTE_OVERALL_CONFLICT:${input.scopeId}:${input.resource}`);
+  }
   const rowsById = new Map(rows.map((row) => [row.id, row]));
   const attachedIds = new Set(attachments.map((attachment) => attachment.meterPointId));
   const officialMeterPointIds: string[] = [];

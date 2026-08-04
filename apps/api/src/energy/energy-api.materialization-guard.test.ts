@@ -109,14 +109,66 @@ describe("Energy import materialization guard", () => {
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   });
+
+  it.each([
+    ["row", "ENERGYIQ_METER_RESOURCE_INVALID:0"],
+    ["route", "ENERGYIQ_OFFICIAL_ROUTE_RESOURCE_INVALID:0"],
+  ] as const)("rejects an unsupported Mapping %s resource instead of coercing it", async (target, message) => {
+    const root = mkdtempSync(join(tmpdir(), "energy-api-mapping-resource-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const gateway = new LocalDataGateway(metadata);
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const projectId = "ngee-ann-polytechnic";
+      const draft = metadata.energyIq.projectSetup.getDraft({
+        project_id: projectId,
+        user_id: "dev-user",
+      });
+      const hierarchyRevisionId = metadata.energyIq.getProject(projectId).hierarchy_revision_id;
+      const publishedDocument = JSON.parse(metadata.energyIq.projectSetup
+        .listHierarchyRevisions(projectId)
+        .find((revision) => revision.id === hierarchyRevisionId)!.snapshot_json) as typeof draft.document;
+      const mapping = publishedDocument.meter_mapping!;
+      const document = {
+        ...publishedDocument,
+        meter_mapping: {
+          ...mapping,
+          rows: mapping.rows.map((row, index) => index === 0 && target === "row"
+            ? { ...row, resource: "gas" }
+            : row),
+          official_aggregation_routes: (mapping.official_aggregation_routes ?? []).map((route, index) =>
+            index === 0 && target === "route" ? { ...route, resource: "gas" } : route),
+        },
+      };
+
+      const response = await handleEnergyApiRequest(
+        request("PUT", { expectedRevision: draft.revision, document }),
+        ["projects", projectId, "setup", "draft"],
+        {
+          metadataStore: metadata,
+          dataGateway: gateway,
+          userId: "dev-user",
+          workspaceId: NGEE_ANN_WORKSPACE_ID,
+        } as unknown as Required<ConfigApiContext>,
+      );
+
+      expect(response).toMatchObject({
+        status: 400,
+        body: { success: false, error: { code: "BAD_REQUEST", message } },
+      });
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
 });
 
-const request = (method: "POST"): IncomingMessage => {
+const request = (method: "POST" | "PUT", body?: unknown): IncomingMessage => {
   const stream = new PassThrough();
   Object.assign(stream, {
     method,
     headers: { "content-type": "application/json" },
   });
-  stream.end();
+  stream.end(body === undefined ? undefined : JSON.stringify(body));
   return stream as unknown as IncomingMessage;
 };

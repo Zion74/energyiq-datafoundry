@@ -163,6 +163,69 @@ describe("EnergyQueryContext", () => {
     }
   });
 
+  it("resolves an edited attachment and rebuilt routes from the newly published Mapping revision", () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-query-context-edited-route-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const projectId = "ngee-ann-polytechnic";
+      const meterPointId = "mapping-lvl-6-office-load-3-l1p13-l3p18-5";
+      const draft = metadata.energyIq.projectSetup.getDraft({ project_id: projectId, user_id: "dev-user" });
+      const hierarchyRevisionId = metadata.energyIq.getProject(projectId).hierarchy_revision_id;
+      const publishedDocument = JSON.parse(metadata.energyIq.projectSetup
+        .listHierarchyRevisions(projectId)
+        .find((revision) => revision.id === hierarchyRevisionId)!.snapshot_json) as typeof draft.document;
+      const mapping = publishedDocument.meter_mapping!;
+      const rows = mapping.rows.map((row) => row.id === meterPointId ? {
+        ...row,
+        scope_id: "l7-load-1",
+        navigation_scope_id: "l7-load-1",
+        resource: "water" as const,
+        category: "light" as const,
+        meter_role: "total" as const,
+        aggregation_usage: "official" as const,
+      } : row);
+      const officialRoutes = (mapping.official_aggregation_routes ?? [])
+        .filter((route) => !route.meter_point_ids.includes(meterPointId));
+      officialRoutes.push(
+        { scope_id: "l7-load-1", resource: "water", category: "light", meter_point_ids: [meterPointId] },
+        { scope_id: "level-7", resource: "water", category: "light", meter_point_ids: [meterPointId] },
+        { scope_id: "project", resource: "water", category: "light", meter_point_ids: [meterPointId] },
+      );
+      const saved = metadata.energyIq.projectSetup.saveDraft({
+        project_id: projectId,
+        expected_revision: draft.revision,
+        user_id: "dev-user",
+        document: {
+          ...publishedDocument,
+          meter_mapping: { ...mapping, rows, official_aggregation_routes: officialRoutes, confirmed: true },
+        },
+      });
+      const published = metadata.energyIq.projectSetup.publishDraft({
+        project_id: projectId,
+        expected_revision: saved.revision,
+        user_id: "dev-user",
+      });
+
+      const route = resolveEnergyPublishedMeterRoute({
+        metadataStore: metadata,
+        projectId,
+        hierarchyRevisionId: published.hierarchy_revision_id,
+        scopeId: "l7-load-1",
+        resource: "water",
+      });
+      expect(route.officialMeterPointIds).toEqual([meterPointId]);
+      expect(route.attachments).toEqual([{
+        meterPointId,
+        scopeId: "l7-load-1",
+        officialAggregation: true,
+      }]);
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
   it("inherits published Project access from Organisation membership and rejects drafts or another Organisation", () => {
     const root = mkdtempSync(join(tmpdir(), "energy-query-context-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });

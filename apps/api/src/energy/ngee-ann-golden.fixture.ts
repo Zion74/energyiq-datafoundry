@@ -67,12 +67,12 @@ export const NGEE_ANN_GOLDEN = {
       changePct: 77.0687,
       peakKw: 3.5307
     },
-    totalCircuit: {
-      scopeId: "l6-total-load",
-      meterNodeId: "mapping-lvl-6-total-office-load-9",
-      rawUsageKwh: 366.009445,
-      apiUsageKwh: 366.0094
-    },
+    totalCircuits: [
+      { scopeId: "l6-total-light", meterNodeId: "mapping-lvl-6-total-office-light-8", rawUsageKwh: 110.974382, apiUsageKwh: 110.9744 },
+      { scopeId: "l6-total-load", meterNodeId: "mapping-lvl-6-total-office-load-9", rawUsageKwh: 366.009445, apiUsageKwh: 366.0094 },
+      { scopeId: "l7-total-light", meterNodeId: "mapping-lvl-7-total-office-light-17", rawUsageKwh: 180.770005, apiUsageKwh: 180.77 },
+      { scopeId: "l7-total-load", meterNodeId: "mapping-lvl-7-total-office-load-18", rawUsageKwh: 873.414492, apiUsageKwh: 873.4145 }
+    ],
     dataHealth: {
       status: "complete",
       coveragePct: 100,

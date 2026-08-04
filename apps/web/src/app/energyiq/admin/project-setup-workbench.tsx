@@ -53,6 +53,7 @@ import { useProjectSetupLoader } from "./use-project-setup-loader";
 import {
   addNode,
   addParentTier,
+  applyMeterMappingRowEdit,
   branchNodeCount,
   canLockTierStructure,
   buildAggregationReview,
@@ -2052,6 +2053,7 @@ function MeterMappingPage({
   changeDocument: (updater: (current: EnergyProjectSetupDocumentDto) => EnergyProjectSetupDocumentDto) => void;
 }) {
   const mapping = document.meter_mapping ?? {
+    schema_version: 2 as const,
     source_kind: "excel" as const,
     rows: [],
     confirmed: false,
@@ -2142,11 +2144,7 @@ function MeterMappingPage({
                 key={selectedRow.id}
                 row={selectedRow}
                 document={document}
-                onApply={(nextRow) => setMapping({
-                  ...mapping,
-                  confirmed: false,
-                  rows: mapping.rows.map((row) => row.id === nextRow.id ? nextRow : row),
-                })}
+                onApply={(nextRow) => setMapping(applyMeterMappingRowEdit(document, mapping, nextRow))}
                 onReturnToStructure={() => setSection("structure")}
               />
             ) : null}
@@ -2241,7 +2239,11 @@ function MeterMappingEditor({
                 .filter((node) => node.tier_definition_id === tier.id)
                 .map((node) => ({ value: node.id, label: `${tier.alias} · ${nodePathLabel(document, node.id)}` }))),
             ]}
-            onValueChange={(scopeId) => setDraft((current) => ({ ...current, scope_id: scopeId }))}
+            onValueChange={(scopeId) => setDraft((current) => ({
+              ...current,
+              scope_id: scopeId,
+              navigation_scope_id: scopeId,
+            }))}
             invalid={!scopeExists}
             className="w-full"
           />

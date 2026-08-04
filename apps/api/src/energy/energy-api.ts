@@ -1345,6 +1345,9 @@ const parseMeterMappingDraft = (
       const coverage = row.coverage;
       const meterRole = row.meter_role;
       const aggregationUsage = row.aggregation_usage;
+      if (row.resource !== "electricity" && row.resource !== "water") {
+        throw new Error(`ENERGYIQ_METER_RESOURCE_INVALID:${index}`);
+      }
       if (category !== "overall" && category !== "load" && category !== "light" && category !== "aircon" && category !== "other") {
         throw new Error(`ENERGYIQ_METER_CATEGORY_INVALID:${index}`);
       }
@@ -1365,7 +1368,7 @@ const parseMeterMappingDraft = (
           ? { navigation_scope_id: row.navigation_scope_id.trim() }
           : {}),
         display_name: requireNonEmptyString(row.display_name, `ENERGYIQ_METER_NAME_REQUIRED:${index}`),
-        resource: row.resource === "water" ? "water" : "electricity",
+        resource: row.resource,
         category,
         coverage,
         meter_role: meterRole,
@@ -1379,12 +1382,15 @@ const parseMeterMappingDraft = (
           throw new Error(`ENERGYIQ_OFFICIAL_ROUTE_METERS_INVALID:${index}`);
         }
         const category = route.category;
+        if (route.resource !== "electricity" && route.resource !== "water") {
+          throw new Error(`ENERGYIQ_OFFICIAL_ROUTE_RESOURCE_INVALID:${index}`);
+        }
         if (category !== "overall" && category !== "load" && category !== "light" && category !== "aircon" && category !== "other") {
           throw new Error(`ENERGYIQ_OFFICIAL_ROUTE_CATEGORY_INVALID:${index}`);
         }
         return {
           scope_id: requireNonEmptyString(route.scope_id, `ENERGYIQ_OFFICIAL_ROUTE_SCOPE_REQUIRED:${index}`),
-          resource: route.resource === "water" ? "water" as const : "electricity" as const,
+          resource: route.resource,
           category,
           meter_point_ids: route.meter_point_ids.map((meterPointId, memberIndex) =>
             requireNonEmptyString(meterPointId, `ENERGYIQ_OFFICIAL_ROUTE_METER_REQUIRED:${index}:${memberIndex}`))

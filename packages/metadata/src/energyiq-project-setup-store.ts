@@ -127,7 +127,7 @@ export const fingerprintEnergyIqMeterMapping = (
       scope_id: route.scope_id,
       resource: route.resource,
       category: route.category,
-      meter_point_ids: [...new Set(route.meter_point_ids)].sort(),
+      meter_point_ids: [...route.meter_point_ids].sort(),
     })),
   virtual_meters: [...(mapping.virtual_meters ?? [])]
     .sort((left, right) => left.id.localeCompare(right.id))
@@ -160,7 +160,7 @@ export const fingerprintEnergyIqPublishedMeterRouting = (
       scope_id: route.scope_id,
       resource: route.resource,
       category: route.category,
-      meter_point_ids: [...new Set(route.meter_point_ids)].sort(),
+      meter_point_ids: [...route.meter_point_ids].sort(),
     })),
 })).digest("hex");
 
@@ -1051,6 +1051,8 @@ export const validateProjectSetupDocument = (
     const virtualNames = new Set<string>();
     const mappingRowsById = new Map(document.meter_mapping.rows.map((row) => [row.id, row]));
     const routeKeys = new Set<string>();
+    const routeCategoriesByScopeResource = new Map<string, Set<EnergyIqMeterCategory>>();
+    const routeMembersByScopeResource = new Map<string, Set<string>>();
     if (document.meter_mapping.confirmed && !document.meter_mapping.official_aggregation_routes) {
       push("OFFICIAL_ROUTES_REQUIRED", "error", "Confirmed Meter Mapping requires explicit per-Scope official routes.", "meter_mapping.official_aggregation_routes");
     }
@@ -1060,6 +1062,10 @@ export const validateProjectSetupDocument = (
         push("OFFICIAL_ROUTE_DUPLICATE", "error", "Each Scope/resource/category may have only one official route.", `meter_mapping.official_aggregation_routes[${index}]`);
       }
       routeKeys.add(key);
+      const scopeResourceKey = `${route.scope_id}:${route.resource}`;
+      const routeCategories = routeCategoriesByScopeResource.get(scopeResourceKey) ?? new Set<EnergyIqMeterCategory>();
+      routeCategories.add(route.category);
+      routeCategoriesByScopeResource.set(scopeResourceKey, routeCategories);
       if (route.scope_id !== "project" && !nodesById.has(route.scope_id)) {
         push("OFFICIAL_ROUTE_SCOPE_NOT_FOUND", "error", "Official route Scope must already exist in Structure.", `meter_mapping.official_aggregation_routes[${index}].scope_id`);
       }
@@ -1067,10 +1073,15 @@ export const validateProjectSetupDocument = (
         push("OFFICIAL_ROUTE_EMPTY", "error", "Official route requires at least one Meter Point.", `meter_mapping.official_aggregation_routes[${index}].meter_point_ids`);
       }
       const memberIds = new Set<string>();
+      const crossRouteMemberIds = routeMembersByScopeResource.get(scopeResourceKey) ?? new Set<string>();
       for (const [memberIndex, meterPointId] of route.meter_point_ids.entries()) {
         const meter = mappingRowsById.get(meterPointId);
-        if (!meter || memberIds.has(meterPointId)) {
+        if (memberIds.has(meterPointId)) {
+          push("OFFICIAL_ROUTE_METER_DUPLICATE", "error", "Official route members must not repeat a physical Meter Point.", `meter_mapping.official_aggregation_routes[${index}].meter_point_ids[${memberIndex}]`);
+        } else if (!meter) {
           push("OFFICIAL_ROUTE_METER_INVALID", "error", "Official route members must reference unique physical Meter Points.", `meter_mapping.official_aggregation_routes[${index}].meter_point_ids[${memberIndex}]`);
+        } else if (crossRouteMemberIds.has(meterPointId)) {
+          push("OFFICIAL_ROUTE_METER_OVERLAP", "error", "A Meter Point cannot appear in multiple category routes for the same Scope and resource.", `meter_mapping.official_aggregation_routes[${index}].meter_point_ids[${memberIndex}]`);
         } else if (meter.resource !== route.resource) {
           push("OFFICIAL_ROUTE_RESOURCE_MISMATCH", "error", "Official route members must use the route resource.", `meter_mapping.official_aggregation_routes[${index}].meter_point_ids[${memberIndex}]`);
         } else if (route.category !== "overall" && meter.category !== route.category) {
@@ -1082,6 +1093,34 @@ export const validateProjectSetupDocument = (
           push("OFFICIAL_ROUTE_ATTACHMENT_MISMATCH", "error", "Official route members must navigate inside the route Scope.", `meter_mapping.official_aggregation_routes[${index}].meter_point_ids[${memberIndex}]`);
         }
         memberIds.add(meterPointId);
+        crossRouteMemberIds.add(meterPointId);
+      }
+      routeMembersByScopeResource.set(scopeResourceKey, crossRouteMemberIds);
+    }
+    for (const [scopeResourceKey, categories] of routeCategoriesByScopeResource) {
+      if (categories.has("overall") && categories.size > 1) {
+        push("OFFICIAL_ROUTE_OVERALL_CONFLICT", "error", `Overall cannot coexist with category routes for ${scopeResourceKey}.`, "meter_mapping.official_aggregation_routes");
+      }
+    }
+    if (document.meter_mapping.confirmed) {
+      const requiredScopeResources = new Set<string>();
+      for (const row of document.meter_mapping.rows) {
+        let current = nodesById.get(row.navigation_scope_id ?? row.scope_id);
+        const visited = new Set<string>();
+        while (current && !visited.has(current.id)) {
+          visited.add(current.id);
+          requiredScopeResources.add(`${current.id}:${row.resource}`);
+          current = current.parent_id ? nodesById.get(current.parent_id) : undefined;
+        }
+        requiredScopeResources.add(`project:${row.resource}`);
+      }
+      for (const scopeResourceKey of requiredScopeResources) {
+        const [scopeId = "", resource = ""] = scopeResourceKey.split(":");
+        const hasNonEmptyRoute = (document.meter_mapping.official_aggregation_routes ?? []).some((route) =>
+          route.scope_id === scopeId && route.resource === resource && route.meter_point_ids.length > 0);
+        if (!hasNonEmptyRoute) {
+          push("OFFICIAL_ROUTE_SCOPE_RESOURCE_REQUIRED", "error", `Published analysis requires a non-empty route for ${scopeResourceKey}.`, "meter_mapping.official_aggregation_routes");
+        }
       }
     }
     if (document.meter_mapping.official_aggregation_routes) {
@@ -1232,7 +1271,7 @@ const canonicalizeDocument = (
             resource: route.resource === "water" ? "water" as const : "electricity" as const,
             category: normalizeMeterCategory(route.category),
             meter_point_ids: Array.isArray(route.meter_point_ids)
-              ? [...new Set(route.meter_point_ids.map((meterPointId) => String(meterPointId ?? "").trim()))]
+              ? route.meter_point_ids.map((meterPointId) => String(meterPointId ?? "").trim())
               : []
           }))
         } : {}),

@@ -235,7 +235,7 @@ export const createMeterMappingFromSourceLabels = (
   };
 };
 
-const buildOfficialAggregationRoutes = (
+export const buildOfficialAggregationRoutes = (
   document: EnergyProjectSetupDocumentDto,
   rows: EnergyMeterMappingRowDto[],
 ): NonNullable<EnergyMeterMappingDraftDto["official_aggregation_routes"]> => {
@@ -275,6 +275,24 @@ const buildOfficialAggregationRoutes = (
     })
     .sort((left, right) => left.scope_id.localeCompare(right.scope_id)
       || left.resource.localeCompare(right.resource));
+};
+
+export const applyMeterMappingRowEdit = (
+  document: EnergyProjectSetupDocumentDto,
+  mapping: EnergyMeterMappingDraftDto,
+  editedRow: EnergyMeterMappingRowDto,
+): EnergyMeterMappingDraftDto => {
+  const authoritativeRow = {
+    ...editedRow,
+    navigation_scope_id: editedRow.scope_id,
+  };
+  const rows = mapping.rows.map((row) => row.id === authoritativeRow.id ? authoritativeRow : row);
+  return {
+    ...mapping,
+    rows,
+    official_aggregation_routes: buildOfficialAggregationRoutes(document, rows),
+    confirmed: false,
+  };
 };
 
 export const sourceLabelsAcrossImportBatches = (

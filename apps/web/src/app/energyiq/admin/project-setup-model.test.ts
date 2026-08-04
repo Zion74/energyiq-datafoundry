@@ -5,6 +5,7 @@ import type { EnergyImportBatchDto, EnergyProjectSetupDocumentDto } from "../../
 import {
   addNode,
   addParentTier,
+  applyMeterMappingRowEdit,
   branchNodeCount,
   buildAggregationReview,
   canLockTierStructure,
@@ -202,6 +203,41 @@ describe("project setup model", () => {
       category: "load",
       meter_point_ids: ["mapping-total-load"],
     });
+
+    const editableRow = mapping.rows.find((row) => row.id === "mapping-load-1")!;
+    const edited = applyMeterMappingRowEdit(document, mapping, {
+      ...editableRow,
+      scope_id: "load-1-l7",
+      navigation_scope_id: "load-1",
+      resource: "water",
+      category: "light",
+      coverage: "whole",
+      meter_role: "total",
+      aggregation_usage: "official",
+    });
+    expect(edited.confirmed).toBe(false);
+    expect(edited.rows.find((row) => row.id === editableRow.id)).toMatchObject({
+      scope_id: "load-1-l7",
+      navigation_scope_id: "load-1-l7",
+      resource: "water",
+      category: "light",
+      meter_role: "total",
+      aggregation_usage: "official",
+    });
+    expect(edited.official_aggregation_routes).toContainEqual({
+      scope_id: "load-1-l7",
+      resource: "water",
+      category: "light",
+      meter_point_ids: [editableRow.id],
+    });
+    expect(edited.official_aggregation_routes).toContainEqual({
+      scope_id: "l7",
+      resource: "water",
+      category: "light",
+      meter_point_ids: [editableRow.id],
+    });
+    expect(edited.official_aggregation_routes?.some((route) =>
+      route.scope_id === "load-1" && route.meter_point_ids.includes(editableRow.id))).toBe(false);
   });
 
   it("unions all four Ngee Ann batches and corrects formal routes before confirmation", async () => {

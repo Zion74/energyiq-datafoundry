@@ -1,4 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { createMetadataStore } from "./index.js";
 
 import {
   energyIqPublishedMeterRoutingRevisionId,
@@ -181,6 +186,8 @@ describe("validateProjectSetupDocument sibling names", () => {
         official_aggregation_routes: [
           { scope_id: "c1", resource: "electricity", category: "load", meter_point_ids: ["m1"] },
           { scope_id: "c2", resource: "electricity", category: "load", meter_point_ids: ["m2"] },
+          { scope_id: "l1", resource: "electricity", category: "load", meter_point_ids: ["m1", "m2"] },
+          { scope_id: "project", resource: "electricity", category: "load", meter_point_ids: ["m1", "m2"] },
         ],
         virtual_meters: [{
           id: "vm-load-12",
@@ -263,4 +270,134 @@ describe("validateProjectSetupDocument sibling names", () => {
     expect(validation.issues.some((issue) => issue.code === code)).toBe(true);
     expect(validation.blocking).toBe(true);
   });
+
+  it("accepts component-only ancestor and Project routes when no designated total exists", () => {
+    const validation = validateProjectSetupDocument(componentRouteDocument([
+      { scope_id: "c1", resource: "electricity", category: "load", meter_point_ids: ["m1"] },
+      { scope_id: "c2", resource: "electricity", category: "load", meter_point_ids: ["m2"] },
+      { scope_id: "l1", resource: "electricity", category: "load", meter_point_ids: ["m1", "m2"] },
+      { scope_id: "project", resource: "electricity", category: "load", meter_point_ids: ["m1", "m2"] },
+    ]));
+
+    expect(validation.issues.filter((issue) => issue.severity === "error")).toEqual([]);
+    expect(validation.blocking).toBe(false);
+  });
+
+  it.each([
+    ["ancestor", [
+      { scope_id: "c1", resource: "electricity" as const, category: "load" as const, meter_point_ids: ["m1"] },
+      { scope_id: "c2", resource: "electricity" as const, category: "load" as const, meter_point_ids: ["m2"] },
+      { scope_id: "project", resource: "electricity" as const, category: "load" as const, meter_point_ids: ["m1", "m2"] },
+    ]],
+    ["Project", [
+      { scope_id: "c1", resource: "electricity" as const, category: "load" as const, meter_point_ids: ["m1"] },
+      { scope_id: "c2", resource: "electricity" as const, category: "load" as const, meter_point_ids: ["m2"] },
+      { scope_id: "l1", resource: "electricity" as const, category: "load" as const, meter_point_ids: ["m1", "m2"] },
+    ]],
+  ])("blocks a confirmed Mapping with a missing %s route", (_name, routes) => {
+    const validation = validateProjectSetupDocument(componentRouteDocument(routes));
+    expect(validation.issues).toContainEqual(expect.objectContaining({
+      code: "OFFICIAL_ROUTE_SCOPE_RESOURCE_REQUIRED",
+      severity: "error",
+    }));
+    expect(validation.blocking).toBe(true);
+  });
+
+  it("blocks overall and category routes for the same Scope and resource", () => {
+    const validation = validateProjectSetupDocument({
+      project: { name: "Test", timezone: "Asia/Singapore" },
+      tier_structure_locked: true,
+      tiers: [{ id: "circuit", ordinal: 1, alias: "Circuit" }],
+      nodes: [{
+        id: "c1", tier_definition_id: "circuit", name: "Circuit 1", sort_order: 1,
+        metadata_status: "confirmed", independent_reason: "Separate load categories",
+      }],
+      meter_mapping: {
+        schema_version: 2,
+        source_kind: "excel",
+        confirmed: true,
+        rows: [
+          { id: "m-overall", source_label: "Overall", scope_id: "c1", navigation_scope_id: "c1", display_name: "Overall", resource: "electricity", category: "overall", coverage: "whole", meter_role: "total", aggregation_usage: "official" },
+          { id: "m-load", source_label: "Load", scope_id: "c1", navigation_scope_id: "c1", display_name: "Load", resource: "electricity", category: "load", coverage: "partial", meter_role: "component", aggregation_usage: "official" },
+        ],
+        official_aggregation_routes: [
+          { scope_id: "c1", resource: "electricity", category: "overall", meter_point_ids: ["m-overall"] },
+          { scope_id: "c1", resource: "electricity", category: "load", meter_point_ids: ["m-load"] },
+          { scope_id: "project", resource: "electricity", category: "overall", meter_point_ids: ["m-overall"] },
+        ],
+      },
+    });
+
+    expect(validation.issues).toContainEqual(expect.objectContaining({
+      code: "OFFICIAL_ROUTE_OVERALL_CONFLICT",
+      severity: "error",
+    }));
+  });
+
+  it("preserves duplicate route members through saveDraft and blocks publication", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-route-duplicate-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.workspaces.upsert({
+        id: "workspace-route", owner_user_id: "dev-user", name: "Route Workspace", kind: "customer",
+      });
+      metadata.energyIq.upsertProject({
+        id: "project-route", workspace_id: "workspace-route", name: "Route Project", status: "draft",
+      });
+      const initial = metadata.energyIq.projectSetup.getDraft({
+        project_id: "project-route", user_id: "dev-user",
+      });
+      const duplicate = componentRouteDocument([
+        { scope_id: "c1", resource: "electricity", category: "load", meter_point_ids: ["m1", "m1"] },
+        { scope_id: "c2", resource: "electricity", category: "load", meter_point_ids: ["m2"] },
+        { scope_id: "l1", resource: "electricity", category: "load", meter_point_ids: ["m1", "m2"] },
+        { scope_id: "project", resource: "electricity", category: "load", meter_point_ids: ["m1", "m2"] },
+      ]);
+      const saved = metadata.energyIq.projectSetup.saveDraft({
+        project_id: "project-route",
+        expected_revision: initial.revision,
+        user_id: "dev-user",
+        document: duplicate,
+      });
+
+      expect(saved.document.meter_mapping?.official_aggregation_routes?.[0]?.meter_point_ids)
+        .toEqual(["m1", "m1"]);
+      expect(metadata.energyIq.projectSetup.validateDraft("project-route").issues)
+        .toContainEqual(expect.objectContaining({ code: "OFFICIAL_ROUTE_METER_DUPLICATE" }));
+      expect(() => metadata.energyIq.projectSetup.publishDraft({
+        project_id: "project-route",
+        expected_revision: saved.revision,
+        user_id: "dev-user",
+      })).toThrow("ENERGYIQ_SETUP_INVALID:OFFICIAL_ROUTE_METER_DUPLICATE");
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+});
+
+const componentRouteDocument = (
+  routes: NonNullable<EnergyIqMeterMappingDraft["official_aggregation_routes"]>,
+) => ({
+  project: { name: "Test", timezone: "Asia/Singapore" },
+  tier_structure_locked: true,
+  tiers: [
+    { id: "circuit", ordinal: 1, alias: "Circuit" },
+    { id: "level", ordinal: 2, alias: "Level" },
+  ],
+  nodes: [
+    { id: "l1", tier_definition_id: "level", name: "Level 1", sort_order: 1, metadata_status: "confirmed" as const },
+    { id: "c1", tier_definition_id: "circuit", parent_id: "l1", name: "Load 1", sort_order: 1, metadata_status: "confirmed" as const },
+    { id: "c2", tier_definition_id: "circuit", parent_id: "l1", name: "Load 2", sort_order: 2, metadata_status: "confirmed" as const },
+  ],
+  meter_mapping: {
+    schema_version: 2 as const,
+    source_kind: "excel" as const,
+    confirmed: true,
+    rows: [
+      { id: "m1", source_label: "Load 1", scope_id: "c1", navigation_scope_id: "c1", display_name: "Load 1", resource: "electricity" as const, category: "load" as const, coverage: "partial" as const, meter_role: "component" as const, aggregation_usage: "official" as const },
+      { id: "m2", source_label: "Load 2", scope_id: "c2", navigation_scope_id: "c2", display_name: "Load 2", resource: "electricity" as const, category: "load" as const, coverage: "partial" as const, meter_role: "component" as const, aggregation_usage: "official" as const },
+    ],
+    official_aggregation_routes: routes,
+  },
 });
