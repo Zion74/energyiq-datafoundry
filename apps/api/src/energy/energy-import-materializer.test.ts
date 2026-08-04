@@ -44,6 +44,9 @@ describe("buildEnergyExcelMaterialization", () => {
       mappingRevision: 4,
       timezone: "Asia/Singapore",
       materializerContractVersion: "energy-excel-cumulative-v1",
+      sourceSheetName: "Sheet1",
+      sourceRowCount: 3,
+      sourceLabels: ["Meter A"],
     });
     expect(result.summary.mappingFingerprint).toMatch(/^[a-f0-9]{64}$/);
     expect(result.summary.qualityCounts.boundary).toBe(1);

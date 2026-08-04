@@ -24,6 +24,11 @@ export type EnergyImportMaterializationSummary = {
   mappingFingerprint: string;
   timezone: string;
   materializerContractVersion: typeof ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION;
+  sourceSheetName: string;
+  sourceRowCount: number;
+  sourceLabels: string[];
+  sourceCoverageFrom?: string;
+  sourceCoverageTo?: string;
 };
 
 export const ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION = "energy-excel-cumulative-v1" as const;
@@ -248,6 +253,11 @@ export const buildEnergyExcelMaterialization = async (input: {
     mappingFingerprint: fingerprintEnergyIqMeterMapping(mapping),
     timezone: input.timezone,
     materializerContractVersion: ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION,
+    sourceSheetName: workbook.inspection.sheetName,
+    sourceRowCount: workbook.inspection.rowCount,
+    sourceLabels: workbook.inspection.sourceLabels.map((source) => source.label),
+    ...(workbook.inspection.coverageFrom ? { sourceCoverageFrom: workbook.inspection.coverageFrom } : {}),
+    ...(workbook.inspection.coverageTo ? { sourceCoverageTo: workbook.inspection.coverageTo } : {}),
   };
   return {
     write: {

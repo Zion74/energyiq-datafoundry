@@ -177,7 +177,7 @@ export type EnergyMeterMappingDraftDto = {
 };
 
 export type EnergyExcelImportInspectionDto = {
-  sheetName: string;
+  sheetName?: string;
   columns: string[];
   sourceLabels: Array<{ label: string; rowCount: number }>;
   rowCount: number;

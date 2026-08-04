@@ -784,9 +784,12 @@ const createDataSnapshotIdentity = (
     const materialization = parseJsonRecord(batch.materialization_json);
     return {
       sourceSha256: batch.source_sha256,
-      sheetName: optionalJsonString(inspection.sheetName),
-      coverageFrom: optionalJsonString(inspection.coverageFrom),
-      coverageTo: optionalJsonString(inspection.coverageTo),
+      sheetName: optionalJsonString(materialization.sourceSheetName)
+        ?? optionalJsonString(inspection.sheetName),
+      coverageFrom: optionalJsonString(materialization.sourceCoverageFrom)
+        ?? optionalJsonString(inspection.coverageFrom),
+      coverageTo: optionalJsonString(materialization.sourceCoverageTo)
+        ?? optionalJsonString(inspection.coverageTo),
       mappingRevision: optionalJsonNumber(materialization.mappingRevision),
       mappingFingerprint: optionalJsonString(materialization.mappingFingerprint),
       timezone: optionalJsonString(materialization.timezone),
