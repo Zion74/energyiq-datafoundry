@@ -148,7 +148,7 @@ describe("ProjectAnalysisResolver", () => {
     }
   });
 
-  it("offers the same fixed Ngee Ann Golden range for empty Project and Level periods", async () => {
+  it("offers the latest complete Ngee Ann range for empty Project and Level periods", async () => {
     const root = mkdtempSync(join(tmpdir(), "project-analysis-latest-period-"));
     const databasePath = join(root, "energy.duckdb");
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
@@ -157,10 +157,16 @@ describe("ProjectAnalysisResolver", () => {
       ensureEnergyIqBootstrap(metadata);
       await materializeNgeeAnnLatestPeriodFixture(databasePath, metadata);
       const user = metadata.users.getById({ user_id: "dev-user" });
-      const resolve = (scopeId: string, from: string, to: string, factsPath = databasePath) =>
+      const resolve = (
+        scopeId: string,
+        from: string,
+        to: string,
+        factsPath = databasePath,
+        dataGateway = gateway,
+      ) =>
         resolveProjectAnalysis({
           metadataStore: metadata,
-          dataGateway: gateway,
+          dataGateway,
           user,
           workspaceId: NGEE_ANN_WORKSPACE_ID,
           request: {
@@ -192,7 +198,50 @@ describe("ProjectAnalysisResolver", () => {
         projectResult.snapshot.latestAvailablePeriod,
       );
 
-      const noCandidateResult = await resolve("l6-light-left", "2026-08-01", "2026-08-07");
+      const multiWindowLevelResult = await resolve("level-7", "2026-08-01", "2026-08-07");
+      expect(multiWindowLevelResult.status).toBe("ready");
+      if (multiWindowLevelResult.status !== "ready") {
+        throw new Error("Expected ready multi-window Level analysis");
+      }
+      expect(multiWindowLevelResult.snapshot.latestAvailablePeriod).toEqual(
+        projectResult.snapshot.latestAvailablePeriod,
+      );
+
+      const qualityEventResult = await resolve("l7-front-light", "2026-08-01", "2026-08-07");
+      expect(qualityEventResult.status).toBe("ready");
+      if (qualityEventResult.status !== "ready") throw new Error("Expected quality-event analysis");
+      expect(qualityEventResult.snapshot.latestAvailablePeriod).toEqual({
+        period: "Custom",
+        from: "2026-06-03",
+        to: "2026-06-09",
+      });
+
+      const compensatingIntervalsResult = await resolve(
+        "l6-light-left",
+        "2026-08-01",
+        "2026-08-07",
+      );
+      expect(compensatingIntervalsResult.status).toBe("ready");
+      if (compensatingIntervalsResult.status !== "ready") {
+        throw new Error("Expected compensating-interval analysis");
+      }
+      expect(compensatingIntervalsResult.snapshot).not.toHaveProperty("latestAvailablePeriod");
+      const compensatingSelectedPeriod = await resolve(
+        "l6-light-left",
+        "2026-06-10",
+        "2026-06-16",
+      );
+      expect(compensatingSelectedPeriod.status).toBe("ready");
+      if (compensatingSelectedPeriod.status !== "ready") {
+        throw new Error("Expected selected compensating-interval analysis");
+      }
+      expect(compensatingSelectedPeriod.snapshot.analysis.dataHealth).toMatchObject({
+        validIntervalCount: 7 * 24 * 4,
+        expectedMeterIntervalCount: 7 * 24 * 4,
+        qualityEventCount: 0,
+      });
+
+      const noCandidateResult = await resolve("l6-light-right", "2026-08-01", "2026-08-07");
       expect(noCandidateResult.status).toBe("ready");
       if (noCandidateResult.status !== "ready") throw new Error("Expected ready Circuit analysis");
       expect(noCandidateResult.snapshot.analysis.summary.validIntervalCount).toBe(0);
@@ -207,6 +256,26 @@ describe("ProjectAnalysisResolver", () => {
       if (healthyResult.status !== "ready") throw new Error("Expected healthy Project analysis");
       expect(healthyResult.snapshot.analysis.summary.validIntervalCount).toBeGreaterThan(0);
       expect(healthyResult.snapshot).not.toHaveProperty("latestAvailablePeriod");
+
+      for (const message of [
+        "ENERGYIQ_SNAPSHOT_STALE:concurrent-snapshot",
+        "ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE",
+        "ENERGYIQ_LATEST_COMPLETE_PERIOD_UNKNOWN",
+      ]) {
+        const failingGateway = new LocalDataGateway(metadata);
+        const runSqlReadonly = failingGateway.runSqlReadonly.bind(failingGateway);
+        failingGateway.runSqlReadonly = async (request) => {
+          if (request.sql.includes("complete_day_count")) throw new Error(message);
+          return runSqlReadonly(request);
+        };
+        await expect(resolve(
+          "project",
+          "2026-08-01",
+          "2026-08-07",
+          databasePath,
+          failingGateway,
+        )).rejects.toThrow(message);
+      }
 
       await expect(resolve(
         "project",
@@ -493,30 +562,79 @@ const materializeNgeeAnnLatestPeriodFixture = async (
       scopeId: "level-6",
       sourceLabel: "Lvl 6 Total Office Light",
       category: "light" as const,
+      meterRole: "total" as const,
+      parentNodeId: "level-6",
+      pattern: "latest-seven" as const,
     },
     {
       id: "mapping-lvl-6-total-office-load-9",
       scopeId: "level-6",
       sourceLabel: "Lvl 6 Total Office Load",
       category: "load" as const,
+      meterRole: "total" as const,
+      parentNodeId: "level-6",
+      pattern: "latest-seven" as const,
     },
     {
       id: "mapping-lvl-7-total-office-light-17",
       scopeId: "level-7",
       sourceLabel: "Lvl 7 Total Office Light",
       category: "light" as const,
+      meterRole: "total" as const,
+      parentNodeId: "level-7",
+      pattern: "complete-fourteen" as const,
     },
     {
       id: "mapping-lvl-7-total-office-load-18",
       scopeId: "level-7",
       sourceLabel: "Lvl 7 Total Office Load",
       category: "load" as const,
+      meterRole: "total" as const,
+      parentNodeId: "level-7",
+      pattern: "complete-fourteen" as const,
+    },
+    {
+      id: "mapping-lvl-7-front-row-office-light-11",
+      scopeId: "l7-front-light",
+      sourceLabel: "Lvl 7 Front Row Office Light",
+      category: "light" as const,
+      meterRole: "component" as const,
+      parentNodeId: "level-7",
+      pattern: "quality-event" as const,
+    },
+    {
+      id: "mapping-lvl-6-office-light-left-external-1",
+      scopeId: "l6-light-left",
+      sourceLabel: "Lvl 6 Office Light-Left: External",
+      category: "light" as const,
+      meterRole: "component" as const,
+      parentNodeId: "level-6",
+      pattern: "compensating-intervals" as const,
     },
   ];
-  const intervalFacts: EnergyIntervalFactWrite[] = meters.flatMap((meter) =>
-    Array.from({ length: 14 * 24 * 4 }, (_, index) => {
-      const intervalStartMs = localFromMs + index * 15 * 60_000;
+  const intervalFacts: EnergyIntervalFactWrite[] = meters.flatMap((meter) => {
+    const firstIntervalIndex = meter.pattern === "latest-seven"
+      || meter.pattern === "compensating-intervals"
+      ? 7 * 24 * 4
+      : 0;
+    const intervalCount = meter.pattern === "latest-seven"
+      || meter.pattern === "compensating-intervals"
+      ? 7 * 24 * 4
+      : 14 * 24 * 4;
+    const intervalIndexes = Array.from(
+      { length: intervalCount },
+      (_, index) => firstIntervalIndex + index,
+    );
+    if (meter.pattern === "compensating-intervals") {
+      intervalIndexes.shift();
+      intervalIndexes.push(firstIntervalIndex + 24 * 4 + 0.5);
+    }
+    return intervalIndexes.map((intervalIndex, index) => {
+      const intervalStartMs = localFromMs + intervalIndex * 15 * 60_000;
       const local = new Date(intervalStartMs + 8 * 60 * 60_000);
+      const qualityStatus = meter.pattern === "quality-event" && intervalIndex === 7 * 24 * 4
+        ? "negative_delta"
+        : "ok";
       return {
         workspaceId: NGEE_ANN_GOLDEN.workspaceId,
         projectId: NGEE_ANN_GOLDEN.projectId,
@@ -524,19 +642,18 @@ const materializeNgeeAnnLatestPeriodFixture = async (
         resource: "electricity",
         meterPointId: meter.id,
         scopeId: meter.scopeId,
-        parentNodeId: meter.scopeId,
+        parentNodeId: meter.parentNodeId,
         sourceLabel: meter.sourceLabel,
         category: meter.category,
-        meterRole: "total",
+        meterRole: meter.meterRole,
         intervalStart: new Date(intervalStartMs).toISOString(),
         intervalEnd: new Date(intervalStartMs + 15 * 60_000).toISOString(),
         elapsedMinutes: 15,
         activeEnergyKwh: 1_000 + (index + 1) * 0.25,
         previousActiveEnergyKwh: 1_000 + index * 0.25,
         rawDeltaKwh: 0.25,
-        usageKwh: 0.25,
-        averageKw: 1,
-        qualityStatus: "ok",
+        ...(qualityStatus === "ok" ? { usageKwh: 0.25, averageKw: 1 } : {}),
+        qualityStatus,
         localDate: local.toISOString().slice(0, 10),
         localHour: local.getUTCHours(),
         dayType: [0, 6].includes(local.getUTCDay()) ? "weekend" : "weekday",
@@ -544,8 +661,8 @@ const materializeNgeeAnnLatestPeriodFixture = async (
         sourceSha256,
         sourceReadingKind: "interval_usage",
       } satisfies EnergyIntervalFactWrite;
-    }),
-  );
+    });
+  });
   const batches: EnergyFactMaterializationBatchWrite[] = [{
     importBatchId,
     sourceSha256,

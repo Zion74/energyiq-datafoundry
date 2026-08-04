@@ -181,6 +181,17 @@ export type EnergyGoldenSelection = {
   };
 };
 
+export type EnergyLatestCompletePeriodSelection = {
+  periodDays: 7;
+  intervalMinutes: number;
+  period: {
+    localFrom: string;
+    localToExclusive: string;
+    from: string;
+    to: string;
+  };
+};
+
 type MeterAggregate = {
   meterNodeId: string;
   scopeId: string;
@@ -204,78 +215,31 @@ type OperationalIntervalSeries = {
 const GOLDEN_SELECTION_POLICY =
   "highest current coverage, then previous-period coverage, then fewest quality events, then latest" as const;
 
-export const selectEnergyGoldenPeriod = async (input: {
+const LATEST_COMPLETE_PERIOD_DAYS = 7 as const;
+
+type EnergyPeriodSelectionInput = {
   metadataStore: MetadataStore;
   dataGateway: LocalDataGateway;
   userId: string;
   context: EnergyQueryContext;
   databasePath?: string;
+};
+
+type EnergyPeriodCoverageNotFoundCode =
+  | "ENERGYIQ_GOLDEN_COVERAGE_NOT_FOUND"
+  | "ENERGYIQ_LATEST_COMPLETE_PERIOD_COVERAGE_NOT_FOUND";
+
+export const selectEnergyGoldenPeriod = async (input: EnergyPeriodSelectionInput & {
   periodDays?: number;
 }): Promise<EnergyGoldenSelection> => {
   const periodDays = input.periodDays ?? 7;
   if (!Number.isInteger(periodDays) || periodDays < 1) {
     throw new Error("ENERGYIQ_GOLDEN_PERIOD_DAYS_INVALID");
   }
-  const databasePath = input.databasePath
-    ?? process.env.ENERGYIQ_DUCKDB_PATH
-    ?? join(resolve(dirname(fileURLToPath(import.meta.url)), "../../../.."), "storage", "energy", input.context.workspaceId, "energy.duckdb");
-  const coverage = await readEnergyFactCoverage({
-    metadataStore: input.metadataStore,
-    workspaceId: input.context.workspaceId,
-    projectId: input.context.projectId,
-    dataSnapshotId: input.context.dataSnapshotId,
-    resource: input.context.resource,
-    databasePath
-  });
-  if (!coverage) {
-    throw new Error("ENERGYIQ_GOLDEN_COVERAGE_NOT_FOUND");
-  }
-  const publishedMeterRoute = resolveEnergyPublishedMeterRoute({
-    metadataStore: input.metadataStore,
-    projectId: input.context.projectId,
-    hierarchyRevisionId: input.context.hierarchyRevisionId,
-    scopeId: input.context.scopeId,
-    resource: input.context.resource,
-    expectedMeterMappingRevisionId: input.context.meterMappingRevisionId
-  });
-  const scoped = await ensureEnergyScopedDataSource({
-    metadataStore: input.metadataStore,
-    userId: input.userId,
-    context: {
-      workspaceId: input.context.workspaceId,
-      projectId: input.context.projectId,
-      scopeId: input.context.scopeId,
-      meterAttachments: publishedMeterRoute.attachments,
-      resource: input.context.resource,
-      from: coverage.from,
-      to: coverage.to,
-      timezone: input.context.timezone,
-      hierarchyRevisionId: input.context.hierarchyRevisionId,
-      meterMappingRevisionId: publishedMeterRoute.meterMappingRevisionId,
-      meterFormulaRevisionId: input.context.meterFormulaRevisionId,
-      dataSnapshotId: input.context.dataSnapshotId,
-      metricVersion: input.context.metricVersion
-    },
-    databasePath
-  });
-  const meterResult = await input.dataGateway.runSqlReadonly({
-    user_id: input.userId,
-    workspace_id: input.context.workspaceId,
-    datasource_id: scoped.datasourceId,
-    sql: meterBreakdownSql(scoped.viewName),
-    limit: 1000
-  });
-  const meterAggregates = meterResult.rows.map(rowToMeterAggregate);
-  const hierarchy = resolveEnergyPublishedHierarchyNodes(
-    input.metadataStore,
-    input.context.projectId,
-    input.context.hierarchyRevisionId
+  const { scoped, aggregateMeterNodeIds } = await prepareEnergyPeriodSelection(
+    input,
+    "ENERGYIQ_GOLDEN_COVERAGE_NOT_FOUND",
   );
-  const selectedNode = hierarchy.find((node) => node.id === input.context.scopeId);
-  if (!selectedNode) {
-    throw new Error("ENERGYIQ_SCOPE_FORBIDDEN");
-  }
-  const aggregateMeterNodeIds = publishedMeterRoute.officialMeterPointIds ?? [];
   const selected = await input.dataGateway.runSqlReadonly({
     user_id: input.userId,
     workspace_id: input.context.workspaceId,
@@ -325,6 +289,99 @@ export const selectEnergyGoldenPeriod = async (input: {
       from: isoAt(dayRow, 1),
       to: isoAt(dayRow, 2)
     }
+  };
+};
+
+export const selectEnergyLatestCompletePeriod = async (
+  input: EnergyPeriodSelectionInput,
+): Promise<EnergyLatestCompletePeriodSelection> => {
+  const { scoped, aggregateMeterNodeIds } = await prepareEnergyPeriodSelection(
+    input,
+    "ENERGYIQ_LATEST_COMPLETE_PERIOD_COVERAGE_NOT_FOUND",
+  );
+  const selected = await input.dataGateway.runSqlReadonly({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: scoped.datasourceId,
+    sql: latestCompletePeriodSelectionSql(
+      scoped.viewName,
+      aggregateMeterNodeIds,
+      LATEST_COMPLETE_PERIOD_DAYS,
+      input.context.timezone,
+    ),
+    limit: 1,
+  });
+  const row = selected.rows[0];
+  if (!row) {
+    throw new Error("ENERGYIQ_LATEST_COMPLETE_PERIOD_NOT_FOUND");
+  }
+  return {
+    periodDays: LATEST_COMPLETE_PERIOD_DAYS,
+    intervalMinutes: numberAt(row, 4),
+    period: {
+      localFrom: stringAt(row, 0),
+      localToExclusive: stringAt(row, 1),
+      from: isoAt(row, 2),
+      to: isoAt(row, 3),
+    },
+  };
+};
+
+const prepareEnergyPeriodSelection = async (
+  input: EnergyPeriodSelectionInput,
+  coverageNotFoundCode: EnergyPeriodCoverageNotFoundCode,
+) => {
+  const databasePath = input.databasePath
+    ?? process.env.ENERGYIQ_DUCKDB_PATH
+    ?? join(resolve(dirname(fileURLToPath(import.meta.url)), "../../../.."), "storage", "energy", input.context.workspaceId, "energy.duckdb");
+  const coverage = await readEnergyFactCoverage({
+    metadataStore: input.metadataStore,
+    workspaceId: input.context.workspaceId,
+    projectId: input.context.projectId,
+    dataSnapshotId: input.context.dataSnapshotId,
+    resource: input.context.resource,
+    databasePath,
+  });
+  if (!coverage) throw new Error(coverageNotFoundCode);
+  const publishedMeterRoute = resolveEnergyPublishedMeterRoute({
+    metadataStore: input.metadataStore,
+    projectId: input.context.projectId,
+    hierarchyRevisionId: input.context.hierarchyRevisionId,
+    scopeId: input.context.scopeId,
+    resource: input.context.resource,
+    expectedMeterMappingRevisionId: input.context.meterMappingRevisionId,
+  });
+  const hierarchy = resolveEnergyPublishedHierarchyNodes(
+    input.metadataStore,
+    input.context.projectId,
+    input.context.hierarchyRevisionId,
+  );
+  if (!hierarchy.some((node) => node.id === input.context.scopeId)) {
+    throw new Error("ENERGYIQ_SCOPE_FORBIDDEN");
+  }
+  const scoped = await ensureEnergyScopedDataSource({
+    metadataStore: input.metadataStore,
+    userId: input.userId,
+    context: {
+      workspaceId: input.context.workspaceId,
+      projectId: input.context.projectId,
+      scopeId: input.context.scopeId,
+      meterAttachments: publishedMeterRoute.attachments,
+      resource: input.context.resource,
+      from: coverage.from,
+      to: coverage.to,
+      timezone: input.context.timezone,
+      hierarchyRevisionId: input.context.hierarchyRevisionId,
+      meterMappingRevisionId: publishedMeterRoute.meterMappingRevisionId,
+      meterFormulaRevisionId: input.context.meterFormulaRevisionId,
+      dataSnapshotId: input.context.dataSnapshotId,
+      metricVersion: input.context.metricVersion,
+    },
+    databasePath,
+  });
+  return {
+    scoped,
+    aggregateMeterNodeIds: publishedMeterRoute.officialMeterPointIds ?? [],
   };
 };
 
@@ -1182,6 +1239,57 @@ const goldenPeriodSelectionSql = (
     previous_valid_count / NULLIF(previous_expected_count, 0) DESC,
     current_quality_count ASC,
     local_date DESC
+  LIMIT 1
+`;
+
+const latestCompletePeriodSelectionSql = (
+  viewName: string,
+  meterNodeIds: string[],
+  periodDays: number,
+  timezone: string,
+): string => `
+  SELECT
+    STRFTIME(local_date, '%Y-%m-%d') AS local_from,
+    STRFTIME(local_date + INTERVAL ${periodDays} DAY, '%Y-%m-%d') AS local_to_exclusive,
+    EPOCH_MS(TIMEZONE(${sqlLiteral(timezone)}, CAST(local_date AS TIMESTAMP))) AS from_ms,
+    EPOCH_MS(TIMEZONE(
+      ${sqlLiteral(timezone)},
+      CAST(local_date + INTERVAL ${periodDays} DAY AS TIMESTAMP)
+    )) AS to_ms,
+    interval_minutes
+  FROM (
+    SELECT
+      daily_windows.*,
+      LEAD(local_date, ${periodDays - 1}) OVER (ORDER BY local_date) AS current_end_date,
+      COUNT(*) OVER (
+        ORDER BY local_date ROWS BETWEEN CURRENT ROW AND ${periodDays - 1} FOLLOWING
+      ) AS current_day_count,
+      SUM(CASE
+        WHEN valid_interval_count = expected_interval_count AND quality_event_count = 0 THEN 1
+        ELSE 0
+      END) OVER (
+        ORDER BY local_date ROWS BETWEEN CURRENT ROW AND ${periodDays - 1} FOLLOWING
+      ) AS complete_day_count
+    FROM (
+      SELECT
+        local_date,
+        COUNT(*) FILTER (WHERE quality_status = 'ok') AS valid_interval_count,
+        COUNT(*) FILTER (WHERE quality_status <> 'ok') AS quality_event_count,
+        COALESCE(MEDIAN(elapsed_minutes) FILTER (
+          WHERE quality_status = 'ok' AND elapsed_minutes > 0
+        ), 15) AS interval_minutes,
+        ${meterNodeIds.length} * ROUND(1440 / COALESCE(MEDIAN(elapsed_minutes) FILTER (
+          WHERE quality_status = 'ok' AND elapsed_minutes > 0
+        ), 15)) AS expected_interval_count
+      FROM ${quoteIdentifier(viewName)} source
+      WHERE ${meterNodeFilter(meterNodeIds)}
+      GROUP BY local_date
+    ) daily_windows
+  ) candidates
+  WHERE current_day_count = ${periodDays}
+    AND DATE_DIFF('day', local_date, current_end_date) = ${periodDays - 1}
+    AND complete_day_count = ${periodDays}
+  ORDER BY local_date DESC
   LIMIT 1
 `;
 

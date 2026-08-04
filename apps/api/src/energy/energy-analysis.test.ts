@@ -19,7 +19,8 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateEnergyAttention,
   executeEnergyScopeAnalysis,
-  selectEnergyGoldenPeriod
+  selectEnergyGoldenPeriod,
+  selectEnergyLatestCompletePeriod,
 } from "./energy-analysis.js";
 import { ensureEnergyIqBootstrap, PRESCHOOL_WORKSPACE_ID } from "./energy-bootstrap.js";
 import { resolveEnergyQueryContext } from "./energy-query-context.js";
@@ -161,6 +162,18 @@ describe("EnergyScopeAnalysis", () => {
         periodDays: NGEE_ANN_GOLDEN.selection.periodDays
       });
       expect(selected).toEqual(NGEE_ANN_GOLDEN.selection);
+      const latestComplete = await selectEnergyLatestCompletePeriod({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        context,
+        databasePath,
+      });
+      expect(latestComplete).toMatchObject({
+        periodDays: 7,
+        intervalMinutes: NGEE_ANN_GOLDEN.selection.intervalMinutes,
+        period: NGEE_ANN_GOLDEN.selection.period,
+      });
 
       const run = () => executeEnergyScopeAnalysis({
         metadataStore: metadata,

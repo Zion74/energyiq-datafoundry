@@ -10,7 +10,7 @@ import {
 
 import {
   executeEnergyScopeAnalysis,
-  selectEnergyGoldenPeriod,
+  selectEnergyLatestCompletePeriod,
   type EnergyScopeAnalysis,
 } from "./energy-analysis.js";
 import {
@@ -256,26 +256,25 @@ const resolveLatestAvailablePeriod = async (input: {
   databasePath?: string;
 }): Promise<NonNullable<ProjectAnalysisSnapshot["latestAvailablePeriod"]> | null> => {
   try {
-    const selected = await selectEnergyGoldenPeriod(input);
+    const selected = await selectEnergyLatestCompletePeriod(input);
     return {
       period: "Custom",
       from: selected.period.localFrom,
       to: inclusiveLocalDate(selected.period.localToExclusive),
     };
   } catch (error) {
-    if (isMissingGoldenCandidate(error)) return null;
+    if (isMissingLatestCompletePeriod(error)) return null;
     throw error;
   }
 };
 
-const MISSING_GOLDEN_CANDIDATE_ERRORS = new Set([
-  "ENERGYIQ_GOLDEN_COVERAGE_NOT_FOUND",
-  "ENERGYIQ_GOLDEN_PERIOD_NOT_FOUND",
-  "ENERGYIQ_GOLDEN_DAY_NOT_FOUND",
+const MISSING_LATEST_COMPLETE_PERIOD_ERRORS = new Set([
+  "ENERGYIQ_LATEST_COMPLETE_PERIOD_COVERAGE_NOT_FOUND",
+  "ENERGYIQ_LATEST_COMPLETE_PERIOD_NOT_FOUND",
 ]);
 
-const isMissingGoldenCandidate = (error: unknown): boolean =>
-  error instanceof Error && MISSING_GOLDEN_CANDIDATE_ERRORS.has(error.message);
+const isMissingLatestCompletePeriod = (error: unknown): boolean =>
+  error instanceof Error && MISSING_LATEST_COMPLETE_PERIOD_ERRORS.has(error.message);
 
 const inclusiveLocalDate = (localToExclusive: string): string => {
   const exclusive = new Date(`${localToExclusive}T00:00:00.000Z`);
