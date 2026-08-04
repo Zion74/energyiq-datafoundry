@@ -16,6 +16,8 @@ related:
 
 本轮完成 GitHub Issue #23（T03A）的本地数据底座验收：不直接改写 DuckDB，而是通过正式 Admin Import Batch、Source Manifest、Meter Mapping 和 production materializer，把四份权威 Ngee Ann workbook 固化为可审计、可重放的 composite Data Snapshot。
 
+本文第 2–3 节首先保留 #23 当时的 v2 验收证据。随后 #25 将运行时契约升级为“当前 Snapshot + 完整 manifest + 当前 fact state”的 v3 fail-closed 边界；v3 的代码证据与 live 重放证据在 3.7 节单独记录，不能用历史 v2 Snapshot 冒充本轮 live 结果。
+
 本轮范围包括：
 
 - 四份 workbook 的 SHA、sheet、row、source label 与 coverage lineage；
@@ -45,6 +47,8 @@ related:
 | `packages/metadata/src/energyiq-import-readiness.ts` | 修改 | 对 manifest、Mapping、contract、snapshot、canonical duplicates、missing/orphan facts 和 legacy rows fail closed。 |
 | `apps/api/src/energy/energy-api.ts` | 修改 | materialization 前验证 saved Source Manifest 与 18/18 saved confirmed Mapping；不满足时 409，且不读取 workbook、不修改 batch。 |
 | `apps/web/src/app/energyiq/admin/project-setup-workbench.tsx` | 修改 | 增加 `Pin current batches`、`Use all detected labels`、`Build all interval facts` 和 Composite Snapshot/readiness 状态。 |
+| `apps/api/src/energy/energy-project-materialization.ts` | #25 新增 | 串行执行 Project full-manifest prepare → DuckDB write → Metadata completion，并恢复 writer 已提交、Metadata 尚未推进的中断窗口。 |
+| `packages/data-gateway/src/energy-snapshot-guard.ts` | #25 新增 | 在 coverage 与每次 scoped query 中复核 Snapshot identity、manifest、writer contract、canonical count 与内容 digest。 |
 
 ### 2.2 项目级 canonical interval 修复
 
@@ -66,7 +70,7 @@ related:
 4. gap、irregular interval 和 negative delta 仍生成 non-ok fact，并重建对应项目级 quality event；
 5. direct `interval_usage` 不进入 cumulative rebuild；
 6. 显式传入已保存的 Project timezone，用 interval start 计算 `local_date/local_hour/day_type`；
-7. writer contract 升级为 `energy-fact-writer-project-canonical-v2`，强制旧 v1 四批全量重放并生成新的 immutable Snapshot ID；
+7. #23 当时的 writer contract 升级为 `energy-fact-writer-project-canonical-v2`，强制旧 v1 四批全量重放并生成新的 immutable Snapshot ID；#25 后续再升级为 v3，见 3.7；
 8. project audit 新增：
    - `canonicalMeterSeriesCount`
    - `adjacentReadingPairCount`
@@ -81,7 +85,9 @@ Integration 提交链：
 - `9553cda`：order-independent batch manifest；
 - `75afbaf`：semantic Mapping rollback；
 - `a17b22b`：不完整 saved Mapping 的 UI/API materialization guard；
-- `78c7d56`：项目级 canonical interval rebuild 与 readiness completeness gate。
+- `78c7d56`：项目级 canonical interval rebuild 与 readiness completeness gate；
+- `d3e1ddd`：把 canonical facts 绑定到精确 Snapshot manifest；
+- `05a814d`：在事实状态漂移、缺失或内容损坏时 fail closed，并删除旧单批写旁路。
 
 ## 3. 验证证据
 
@@ -94,7 +100,7 @@ Integration 提交链：
 | `Ngee Ann Poly Level 7 (21 April - 20 May).xlsx` | `0B1FB9613C596D3569F6BE93046A43737366649B5F8A4D45FC8CDEF073C30E5D` | 25,920 | 9 |
 | `Ngee Ann Poly Level 7 (19 May - 17 June).xlsx` | `3F41F94E229933A97CE8D02A0382D3A8192E3C26065BF0F48A04168EC90DD674` | 25,920 | 9 |
 
-四份 workbook 均为 `Sheet1`，固定列为 `Device Name / Time / Active Energy`，invalid rows 为 0，合并后为 18 个稳定 labels。较早创建的 Level 6 May–June Import Batch 的 immutable inspection JSON 没有 `sheetName`；v2 rematerialization summary 与 composite Snapshot manifest 已正式保存 `sourceSheetName/sheetName = Sheet1`。没有回写或伪造原历史 inspection。
+四份 workbook 均为 `Sheet1`，固定列为 `Device Name / Time / Active Energy`，invalid rows 为 0，合并后为 18 个稳定 labels。较早创建的 Level 6 May–June Import Batch 的 immutable inspection JSON 没有 `sheetName`；当时的 v2 rematerialization summary 与 composite Snapshot manifest 已正式保存 `sourceSheetName/sheetName = Sheet1`。没有回写或伪造原历史 inspection。
 
 正式 Setup 状态：
 
@@ -107,7 +113,7 @@ Integration 提交链：
 
 ### 3.2 新 Data Snapshot 与项目级审计
 
-正式 v2 replay 通过 Admin `Build all interval facts` 执行，结果为 `4 materialized / 0 reused`。
+以下是 #23 当时通过 Admin `Build all interval facts` 得到的正式 v2 replay，结果为 `4 materialized / 0 reused`；它是升级前历史证据，不是 #25 v3 live 证据。
 
 - Snapshot ID：`energy-snapshot-a7d17e899229aa8a482e139f`；
 - Mapping fingerprint：`4ac07fedc2b2c618504611514e9d1f0e39332b7eff90c51b64aa837a72c76a00`；
@@ -249,7 +255,7 @@ npm run build --workspace @datafoundry/web
 
 这里的 `READY` 只证明 #23 的本地 Setup、Data Snapshot 与 Mapping 已满足发布前置条件；它不代表 Tariff/Operating Calendar 已发布，也不代表 #19 的 Customer Release 已创建或切换。`Publish revision` 因此前置条件满足而可用，但本次没有点击。
 
-浏览器只启动了一次 v2 Build。重放过程中出现多个中间 Snapshot 且持续 `FACT_WRITER_CONTRACT_MISMATCH`，直到四批全部升级后才变为 ready，证明 mixed v1/v2 状态正确 fail closed。
+浏览器当时只启动了一次 v2 Build。重放过程中出现多个中间 Snapshot 且持续 `FACT_WRITER_CONTRACT_MISMATCH`，直到四批全部升级后才变为 ready，证明 mixed v1/v2 状态正确 fail closed。
 
 ### 3.6 备份与环境边界
 
@@ -263,6 +269,14 @@ npm run build --workspace @datafoundry/web
 - DuckDB SHA-256：`6DE09840603AB034C72BC9C0EAC8F77B77F723596620E6BFC70AC551B2247247`。
 
 Source root 与 Worker 不运行服务或共享 DuckDB；只有 Integration 的 8787/3000 服务被启动、核验和精确停止/重启。没有 reset、clean、stash 或直接数据库补写。
+
+### 3.7 #25 v3 当前 Snapshot 事实边界
+
+代码集成后 writer contract 为 `energy-fact-writer-snapshot-manifest-v3`。每次 Project materialization 必须一次提交完整 active manifest；DuckDB 在同一事务更新 canonical facts、当前 Snapshot/fingerprint、source SHA 集合、canonical interval count 和内容 SHA-256 digest。Metadata completion 用 expected previous/target Snapshot 做 CAS。Coverage、Overview 和 AI 查询先核对同一状态；旧 pointer 返回 stale，当前事实缺失、删行、等数量改值或状态损坏返回 facts unavailable。
+
+旧 single-batch writer、Metadata per-batch prepare/complete 和 completion shim 已全仓删除。自动化已通过 79 个定向测试、56 个跨层测试、root build/typecheck 与 diff-check；删一行和保持数量但篡改 `usage_kwh` 的回归均 fail closed，Ngee Ann fixture Golden 保持不变。
+
+本段在 live 重放前只证明代码契约。正式关闭 #25 前仍必须记录：新的可恢复备份路径与哈希、通过正式 API 触发的四 SHA v3 rematerialization、v3 Snapshot ID、fact-state count/digest、readiness/coverage/Overview/AI 对账、真实 Project/Level/Circuit Golden 与 Chrome/API 验收。上述证据完成前不得把 3.2 的历史 v2 Snapshot 当作 v3 当前状态。
 
 ## 4. 问题与取舍
 
