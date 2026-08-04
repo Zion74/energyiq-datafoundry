@@ -1576,6 +1576,26 @@ describe("Ngee Ann Overview ViewModel", () => {
     });
   });
 
+  it("uses the approved day grain for a single local day when the authoritative daily total is present", () => {
+    const view = buildNgeeAnnOverviewViewModel(
+      ngeeAnnSingleDaySnapshot(),
+      { trendGrain: "day" },
+    );
+
+    expect(view.energyTrend).toMatchObject({
+      status: "available",
+      grain: "day",
+      decisionQuestion: "When did accepted energy use change inside the selected Period?",
+      evidence: { queryIds: ["daily_totals_v1"] },
+    });
+    expect(view.energyTrend.scopes[0]!.points).toHaveLength(1);
+    expect(view.energyTrend.scopes[0]!.points[0]).toMatchObject({
+      localDate: "2026-06-16",
+      localHour: null,
+      usageKwh: "221.9982",
+    });
+  });
+
   it("selects and formats the server-owned Top 3 decision priorities without reranking them", () => {
     const view = buildNgeeAnnOverviewViewModel(ngeeAnnGoldenSnapshot());
 
@@ -1597,43 +1617,227 @@ describe("Ngee Ann Overview ViewModel", () => {
     });
   });
 
-  it.each([
-    { status: "empty", limitation: null },
-    {
+  it("accepts empty priorities only when the anomaly bundle has no triggered or suppressed outcomes", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    for (const scope of dailyAnomalyBundle(snapshot).scopes) {
+      for (const row of scope.rows) {
+        if (row.outcome === "triggered") row.outcome = "within_threshold";
+      }
+    }
+    snapshot.decisionPriorities = {
+      ...snapshot.decisionPriorities!,
+      status: "empty",
+      limitation: null,
+      items: [],
+    };
+
+    expect(buildNgeeAnnOverviewViewModel(snapshot).decisionPriorities).toMatchObject({
+      status: "empty",
+      limitation: null,
+      items: [],
+    });
+  });
+
+  it("accepts partial priorities only when the anomaly bundle contains suppressed outcomes", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const suppressed = dailyAnomalyBundle(snapshot).scopes[0]!.rows[0]!;
+    suppressed.outcome = "suppressed";
+    suppressed.suppressionReason = {
+      code: "CALENDAR_EXCEPTION_DATE",
+      message: "The date is excluded by the pinned Calendar.",
+    };
+    snapshot.decisionPriorities = {
+      ...snapshot.decisionPriorities!,
       status: "partial",
       limitation: {
         code: "SOME_CANDIDATE_DATES_SUPPRESSED",
         message: "Some candidate dates were suppressed.",
       },
-    },
-    {
+    };
+
+    expect(buildNgeeAnnOverviewViewModel(snapshot).decisionPriorities).toMatchObject({
+      status: "partial",
+      limitation: "Some candidate dates were suppressed.",
+      items: [{ rank: 1 }, { rank: 2 }, { rank: 3 }],
+    });
+  });
+
+  it("accepts suppressed priorities only when the anomaly bundle has suppressed but no triggered outcomes", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    for (const scope of dailyAnomalyBundle(snapshot).scopes) {
+      for (const row of scope.rows) {
+        row.outcome = "suppressed";
+        row.suppressionReason = {
+          code: "CALENDAR_EXCEPTION_DATE",
+          message: "The date is excluded by the pinned Calendar.",
+        };
+      }
+    }
+    snapshot.decisionPriorities = {
+      ...snapshot.decisionPriorities!,
       status: "suppressed",
       limitation: {
         code: "ALL_CANDIDATE_DATES_SUPPRESSED",
         message: "All candidate dates were suppressed.",
       },
-    },
-    {
-      status: "unavailable",
-      limitation: {
-        code: "DAILY_USAGE_ANOMALIES_UNAVAILABLE",
-        message: "The anomaly facts are unavailable.",
-      },
-    },
-  ] as const)("keeps the server-owned $status priority state fail closed", ({ status, limitation }) => {
-    const snapshot = ngeeAnnGoldenSnapshot();
-    snapshot.decisionPriorities = {
-      ...snapshot.decisionPriorities!,
-      status,
-      limitation,
       items: [],
     };
 
     expect(buildNgeeAnnOverviewViewModel(snapshot).decisionPriorities).toMatchObject({
-      status,
-      limitation: limitation?.message ?? null,
+      status: "suppressed",
+      limitation: "All candidate dates were suppressed.",
       items: [],
     });
+  });
+
+  it.each(["empty", "suppressed", "partial"] as const)(
+    "fails a forged zero-item %s state closed when the anomaly bundle has triggered outcomes",
+    (status) => {
+      const snapshot = ngeeAnnGoldenSnapshot();
+      snapshot.decisionPriorities = {
+        ...snapshot.decisionPriorities!,
+        status,
+        limitation: status === "empty" ? null : {
+          code: status === "suppressed"
+            ? "ALL_CANDIDATE_DATES_SUPPRESSED"
+            : "SOME_CANDIDATE_DATES_SUPPRESSED",
+          message: "Forged priority status.",
+        },
+        items: [],
+      };
+
+      expect(buildNgeeAnnOverviewViewModel(snapshot).decisionPriorities).toMatchObject({
+        status: "unavailable",
+        items: [],
+      });
+    },
+  );
+
+  it("fails priorities closed when supporting incident IDs omit an exact same-date sibling", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    snapshot.decisionPriorities!.items[0]!.evidence.supportingIncidentIds.pop();
+
+    expect(buildNgeeAnnOverviewViewModel(snapshot).decisionPriorities).toMatchObject({
+      status: "unavailable",
+      items: [],
+    });
+  });
+
+  it("fails a suppressed priority state closed when anomaly outcomes are mixed", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    for (const scope of dailyAnomalyBundle(snapshot).scopes) {
+      for (const row of scope.rows) {
+        if (row.outcome === "triggered") row.outcome = "within_threshold";
+      }
+    }
+    const mixedSuppressed = dailyAnomalyBundle(snapshot).scopes[0]!.rows[0]!;
+    mixedSuppressed.outcome = "suppressed";
+    mixedSuppressed.suppressionReason = {
+      code: "CALENDAR_EXCEPTION_DATE",
+      message: "The date is excluded by the pinned Calendar.",
+    };
+    snapshot.decisionPriorities = {
+      ...snapshot.decisionPriorities!,
+      status: "suppressed",
+      limitation: {
+        code: "ALL_CANDIDATE_DATES_SUPPRESSED",
+        message: "All candidate dates were suppressed.",
+      },
+      items: [],
+    };
+
+    expect(buildNgeeAnnOverviewViewModel(snapshot).decisionPriorities.status).toBe("unavailable");
+  });
+
+  it("fails SOME_CANDIDATE_DATES_SUPPRESSED closed for all-suppressed rows or items without a trigger", () => {
+    const allSuppressed = ngeeAnnGoldenSnapshot();
+    for (const scope of dailyAnomalyBundle(allSuppressed).scopes) {
+      for (const row of scope.rows) {
+        row.outcome = "suppressed";
+        row.suppressionReason = {
+          code: "CALENDAR_EXCEPTION_DATE",
+          message: "The date is excluded by the pinned Calendar.",
+        };
+      }
+    }
+    allSuppressed.decisionPriorities = {
+      ...allSuppressed.decisionPriorities!,
+      status: "partial",
+      limitation: {
+        code: "SOME_CANDIDATE_DATES_SUPPRESSED",
+        message: "Some candidate dates were suppressed.",
+      },
+      items: [],
+    };
+
+    const noTriggerWithItems = ngeeAnnGoldenSnapshot();
+    for (const scope of dailyAnomalyBundle(noTriggerWithItems).scopes) {
+      for (const row of scope.rows) {
+        if (row.outcome === "triggered") row.outcome = "within_threshold";
+      }
+    }
+    const suppressed = dailyAnomalyBundle(noTriggerWithItems).scopes[0]!.rows[0]!;
+    suppressed.outcome = "suppressed";
+    suppressed.suppressionReason = {
+      code: "CALENDAR_EXCEPTION_DATE",
+      message: "The date is excluded by the pinned Calendar.",
+    };
+    noTriggerWithItems.decisionPriorities!.status = "partial";
+    noTriggerWithItems.decisionPriorities!.limitation = {
+      code: "SOME_CANDIDATE_DATES_SUPPRESSED",
+      message: "Some candidate dates were suppressed.",
+    };
+
+    for (const snapshot of [allSuppressed, noTriggerWithItems]) {
+      expect(buildNgeeAnnOverviewViewModel(snapshot).decisionPriorities.status).toBe("unavailable");
+    }
+  });
+
+  it("fails available and SUPPORTING_EVIDENCE_PARTIAL states closed when confidence or suppression outcomes disagree", () => {
+    const availablePartialConfidence = ngeeAnnGoldenSnapshot();
+    const confidenceLimitation = {
+      code: "SUPPORTING_EVIDENCE_PARTIAL" as const,
+      message: "Supporting Evidence is partial.",
+    };
+    availablePartialConfidence.decisionPriorities!.items[0]!.confidence = {
+      status: "partial",
+      limitation: confidenceLimitation,
+    };
+
+    const availableWithSuppression = ngeeAnnGoldenSnapshot();
+    const availableSuppressedRow = dailyAnomalyBundle(availableWithSuppression).scopes[0]!.rows[0]!;
+    availableSuppressedRow.outcome = "suppressed";
+    availableSuppressedRow.suppressionReason = {
+      code: "CALENDAR_EXCEPTION_DATE",
+      message: "The date is excluded by the pinned Calendar.",
+    };
+
+    const partialWithSuppression = ngeeAnnGoldenSnapshot();
+    partialWithSuppression.decisionPriorities!.status = "partial";
+    partialWithSuppression.decisionPriorities!.limitation = confidenceLimitation;
+    partialWithSuppression.decisionPriorities!.items[0]!.confidence = {
+      status: "partial",
+      limitation: confidenceLimitation,
+    };
+    const suppressed = dailyAnomalyBundle(partialWithSuppression).scopes[0]!.rows[0]!;
+    suppressed.outcome = "suppressed";
+    suppressed.suppressionReason = {
+      code: "CALENDAR_EXCEPTION_DATE",
+      message: "The date is excluded by the pinned Calendar.",
+    };
+
+    const partialWithoutPartialConfidence = ngeeAnnGoldenSnapshot();
+    partialWithoutPartialConfidence.decisionPriorities!.status = "partial";
+    partialWithoutPartialConfidence.decisionPriorities!.limitation = confidenceLimitation;
+
+    for (const snapshot of [
+      availablePartialConfidence,
+      availableWithSuppression,
+      partialWithSuppression,
+      partialWithoutPartialConfidence,
+    ]) {
+      expect(buildNgeeAnnOverviewViewModel(snapshot).decisionPriorities.status).toBe("unavailable");
+    }
   });
 
   it("withholds only priorities when their order or anomaly Evidence contract is invalid", () => {

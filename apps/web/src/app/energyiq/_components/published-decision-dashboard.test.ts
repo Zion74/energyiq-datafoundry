@@ -18,7 +18,7 @@ import type {
 } from "../../../lib/config-api";
 import { configApi } from "../../../lib/config-api";
 import { buildEnergyTemplateRenderPlan } from "./energy-template-render-plan";
-import { ngeeAnnGoldenSnapshot } from "./ngee-ann-overview.test-fixture";
+import { ngeeAnnGoldenSnapshot, ngeeAnnSingleDaySnapshot } from "./ngee-ann-overview.test-fixture";
 import {
   overviewAnalysisRequest,
   overviewUrlWithView,
@@ -107,6 +107,31 @@ describe("published Overview URL reload", () => {
     expect(singleDay).toMatchObject({ grain: "hour", comparison: "average", category: "load" });
   });
 
+  it.each([
+    { grain: "day", label: "Daily totals", buckets: "1 daily buckets" },
+    { grain: "hour", label: "Hourly grid", buckets: "24 hourly buckets" },
+  ] as const)("restores the approved single-day $grain Trend grain after refresh", async ({ grain, label, buckets }) => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    window.history.replaceState(
+      {},
+      "",
+      `/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-06-16&to=2026-06-16&grain=${grain}&comparison=overlay&category=all`,
+    );
+    vi.spyOn(configApi, "resolveProjectAnalysis").mockResolvedValue({
+      status: "ready",
+      snapshot: dashboardNgeeAnnSnapshot(ngeeAnnSingleDaySnapshot()),
+    });
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    expect(container.textContent).toContain(label);
+    expect(container.textContent).toContain(buckets);
+  });
+
   it("restores anomaly controls and handoffs from URL, writes changes back, and keeps dialog state transient", async () => {
     const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
     mockedAccess.activeProject = ngeeAnn;
@@ -177,6 +202,13 @@ describe("published Overview URL reload", () => {
       limitation: null,
       items: [],
     };
+    if (snapshot.analysis.dailyUsageAnomalies?.status === "available") {
+      for (const scope of snapshot.analysis.dailyUsageAnomalies.scopes) {
+        for (const row of scope.rows) {
+          if (row.outcome === "triggered") row.outcome = "within_threshold";
+        }
+      }
+    }
     const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockResolvedValue({ status: "ready", snapshot });
 
@@ -1179,8 +1211,7 @@ function readyRangeResolution(): EnergyProjectAnalysisResolutionDto {
   } as EnergyProjectAnalysisResolutionDto;
 }
 
-function dashboardNgeeAnnSnapshot() {
-  const snapshot = ngeeAnnGoldenSnapshot();
+function dashboardNgeeAnnSnapshot(snapshot = ngeeAnnGoldenSnapshot()) {
   const qualityComponent = component("quality.data_coverage@1", "quality", "data_quality_summary_v1");
   snapshot.projectRelease.catalog = [qualityComponent];
   snapshot.projectRelease.document = {

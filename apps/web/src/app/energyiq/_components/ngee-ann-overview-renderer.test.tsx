@@ -37,6 +37,28 @@ describe("NgeeAnnOverviewRenderer", () => {
     { status: "unavailable", expected: "Decision priorities unavailable", code: "DAILY_USAGE_ANOMALIES_UNAVAILABLE" },
   ] as const)("renders the server-owned $status priority state without inventing a card", ({ status, expected, code }) => {
     const snapshot = ngeeAnnGoldenSnapshot();
+    if (snapshot.analysis.dailyUsageAnomalies?.status === "available" && status !== "unavailable") {
+      const rows = snapshot.analysis.dailyUsageAnomalies.scopes.flatMap((scope) => scope.rows);
+      for (const row of rows) {
+        if (row.outcome === "triggered") row.outcome = "within_threshold";
+      }
+      if (status === "partial") {
+        rows[0]!.outcome = "suppressed";
+        rows[0]!.suppressionReason = {
+          code: "CALENDAR_EXCEPTION_DATE",
+          message: "The date is excluded by the pinned Calendar.",
+        };
+      }
+      if (status === "suppressed") {
+        for (const row of rows) {
+          row.outcome = "suppressed";
+          row.suppressionReason = {
+            code: "CALENDAR_EXCEPTION_DATE",
+            message: "The date is excluded by the pinned Calendar.",
+          };
+        }
+      }
+    }
     snapshot.decisionPriorities = {
       ...snapshot.decisionPriorities!,
       status,

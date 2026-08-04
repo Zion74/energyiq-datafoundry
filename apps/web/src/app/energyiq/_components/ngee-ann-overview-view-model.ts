@@ -507,6 +507,7 @@ export function buildNgeeAnnOverviewViewModel(
   snapshot: EnergyProjectAnalysisSnapshotDto,
   hint: {
     latestAvailableRange?: NgeeAnnLatestAvailableRange | null;
+    trendGrain?: "day" | "hour";
   } = {},
 ): NgeeAnnOverviewViewModel {
   const { analysis, context, dataQuality } = snapshot;
@@ -595,7 +596,7 @@ export function buildNgeeAnnOverviewViewModel(
     ],
     decisionPriorities: buildDecisionPriorities(snapshot, dailyAnomalies),
     peakBreakdown: buildPeakBreakdown(snapshot, unavailable),
-    energyTrend: buildEnergyTrend(snapshot, unavailable),
+    energyTrend: buildEnergyTrend(snapshot, unavailable, hint.trendGrain),
     dailyAnomalies,
     dayProfile: buildDayProfile(snapshot, unavailable),
     usageHeatmap: buildUsageHeatmap(snapshot, unavailable),
@@ -1303,6 +1304,7 @@ function validDecisionPriorityEnvelope(
   const bundle = snapshot.analysis.dailyUsageAnomalies;
   if (source.status === "unavailable") return true;
   if (dailyAnomalies.status !== "available" || bundle?.status !== "available") return false;
+  if (!validDecisionPriorityOutcomeStatus(source, bundle)) return false;
   if (source.items.length === 0) return true;
   const incidents = new Map(bundle.scopes.flatMap((scope) => scope.rows.map((row) => [
     row.incidentId,
@@ -1354,18 +1356,52 @@ function validDecisionPriorityEnvelope(
       || primary.row.impactKwh !== item.impact.energy.deltaKwh
     ) return false;
     const supportingIds = new Set(item.evidence.supportingIncidentIds);
+    const expectedSupportingIds = bundle.scopes.flatMap((scope) => scope.rows)
+      .filter((row) => row.incidentId !== item.evidence.primaryIncidentId
+        && row.localDate === primary.row.localDate
+        && row.ruleRevisionId === primary.row.ruleRevisionId
+        && row.metricId === primary.row.metricId)
+      .map((row) => row.incidentId);
     if (
       supportingIds.size !== item.evidence.supportingIncidentIds.length
       || supportingIds.has(item.evidence.primaryIncidentId)
+      || supportingIds.size !== expectedSupportingIds.length
     ) return false;
-    return item.evidence.supportingIncidentIds.every((incidentId) => {
-      const supporting = incidents.get(incidentId);
-      return Boolean(supporting
-        && supporting.row.localDate === primary.row.localDate
-        && supporting.row.ruleRevisionId === primary.row.ruleRevisionId
-        && supporting.row.metricId === primary.row.metricId);
-    });
+    return expectedSupportingIds.every((incidentId) => supportingIds.has(incidentId));
   });
+}
+
+function validDecisionPriorityOutcomeStatus(
+  source: NonNullable<EnergyProjectAnalysisSnapshotDto["decisionPriorities"]>,
+  bundle: Extract<
+    NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["dailyUsageAnomalies"]>,
+    { status: "available" }
+  >,
+): boolean {
+  const rows = bundle.scopes.flatMap((scope) => scope.rows);
+  const hasTriggered = rows.some((row) => row.outcome === "triggered");
+  const hasSuppressed = rows.some((row) => row.outcome === "suppressed");
+  const allSuppressed = rows.length > 0 && rows.every((row) => row.outcome === "suppressed");
+  if (source.status === "available") {
+    return hasTriggered
+      && !hasSuppressed
+      && source.items.every((item) => item.confidence.status === "complete");
+  }
+  if (source.status === "empty") return !hasTriggered && !hasSuppressed;
+  if (source.status === "suppressed") return allSuppressed;
+  if (source.status === "partial") {
+    if (source.limitation?.code === "SOME_CANDIDATE_DATES_SUPPRESSED") {
+      const someButNotAllSuppressed = hasSuppressed && !allSuppressed;
+      return source.items.length > 0
+        ? someButNotAllSuppressed && hasTriggered
+        : someButNotAllSuppressed && !hasTriggered;
+    }
+    return !hasSuppressed
+      && hasTriggered
+      && source.items.length > 0
+      && source.items.some((item) => item.confidence.status === "partial");
+  }
+  return true;
 }
 
 function validDecisionPriorityEvidencePins(
@@ -2217,12 +2253,14 @@ function formatLocalHour(localHour: number): string {
 function buildEnergyTrend(
   snapshot: EnergyProjectAnalysisSnapshotDto,
   overviewUnavailable: boolean,
+  requestedGrain?: "day" | "hour",
 ): NgeeAnnEnergyTrendViewModel {
   const { analysis, context } = snapshot;
   const dailyTotals = analysis.dailyTotals;
   const timeBehaviour = analysis.timeBehaviour;
   const singleDay = isSingleLocalDayPeriod(context.primaryPeriod, context.timezone);
-  const queryId = singleDay ? "time_bucket_grid_v1" : "daily_totals_v1";
+  const grain = singleDay ? requestedGrain ?? "hour" : "day";
+  const queryId = grain === "hour" ? "time_bucket_grid_v1" : "daily_totals_v1";
   const evidence: NgeeAnnEnergyTrendViewModel["evidence"] = {
     snapshotId: snapshot.dataSnapshot.id,
     projectReleaseId: snapshot.projectRelease.id,
@@ -2230,13 +2268,13 @@ function buildEnergyTrend(
     meterFormulaRevisionId: analysis.provenance.meterFormulaRevisionId,
     metricId: "energy.total_usage_kwh@1",
     period: `[${context.primaryPeriod.start}, ${context.primaryPeriod.endExclusive})`,
-    timezone: singleDay ? timeBehaviour?.timezone ?? context.timezone : dailyTotals?.timezone ?? context.timezone,
+    timezone: grain === "hour" ? timeBehaviour?.timezone ?? context.timezone : dailyTotals?.timezone ?? context.timezone,
     unit: "kWh",
     queryIds: [queryId],
   };
   const unavailable = (reason: string): NgeeAnnEnergyTrendViewModel => ({
     status: "unavailable",
-    grain: singleDay ? "hour" : "day",
+    grain,
     decisionQuestion: "When did accepted energy use change inside the selected Period?",
     reason,
     scopes: [],
@@ -2249,7 +2287,7 @@ function buildEnergyTrend(
   if (context.scopeType !== "project") {
     return unavailable("Select the Project Scope to compare the Project, Level 7 and Level 6 trend.");
   }
-  if (singleDay) {
+  if (grain === "hour") {
     const grid = validTimeGrid(snapshot);
     if (!grid.valid) {
       return unavailable(grid.reason);

@@ -35,6 +35,7 @@ export function NgeeAnnOverviewRenderer({
   latestAvailableRange,
   projectExplorerHref,
   aiAnalystHref,
+  grain,
   comparison = "overlay",
   category = "all",
   onComparisonChange,
@@ -46,6 +47,7 @@ export function NgeeAnnOverviewRenderer({
   latestAvailableRange?: NgeeAnnLatestAvailableRange | null;
   projectExplorerHref?: string;
   aiAnalystHref?: string;
+  grain?: "day" | "hour";
   comparison?: "overlay" | "selected" | "average";
   category?: "all" | "load" | "light";
   onComparisonChange?: (comparison: "overlay" | "selected" | "average") => void;
@@ -57,6 +59,7 @@ export function NgeeAnnOverviewRenderer({
 
   const view = buildNgeeAnnOverviewViewModel(state.snapshot, {
     latestAvailableRange,
+    ...(grain ? { trendGrain: grain } : {}),
   });
   const statusTone = dataStatusTone(view.dataStatus.status);
 

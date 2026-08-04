@@ -86,6 +86,7 @@ type CustomerProjectRendererProps = ProjectRendererCommonProps & {
   state: ProjectRendererState;
   onViewLatestAvailableData?: (range: NgeeAnnLatestAvailableRange) => void;
   latestAvailableRange?: NgeeAnnLatestAvailableRange | null;
+  grain?: "day" | "hour";
   comparison?: "overlay" | "selected" | "average";
   category?: "all" | "load" | "light";
   onComparisonChange?: (comparison: "overlay" | "selected" | "average") => void;
@@ -176,6 +177,7 @@ export function ProjectRenderer(props: ProjectRendererProps): ReactNode {
           {...(props.onRetry ? { onRetry: props.onRetry } : {})}
           {...(props.onViewLatestAvailableData ? { onViewLatestAvailableData: props.onViewLatestAvailableData } : {})}
           {...(props.latestAvailableRange ? { latestAvailableRange: props.latestAvailableRange } : {})}
+          {...(props.grain ? { grain: props.grain } : {})}
           {...(props.comparison ? { comparison: props.comparison } : {})}
           {...(props.category ? { category: props.category } : {})}
           {...(props.onComparisonChange ? { onComparisonChange: props.onComparisonChange } : {})}

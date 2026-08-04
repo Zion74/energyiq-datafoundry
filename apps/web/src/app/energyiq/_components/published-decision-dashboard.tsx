@@ -482,6 +482,7 @@ function PublishedDecisionDashboardView({
               from: range.from,
               to: range.to,
             })}
+            grain={initialViewState.grain}
             comparison={initialViewState.comparison}
             category={initialViewState.category}
             onComparisonChange={(comparison) => navigateOverview({ comparison })}
