@@ -33,6 +33,36 @@ describe("Ngee Ann Overview ViewModel", () => {
       .toBe("Previous 1211.6773 kWh / +319.4911 kWh");
     expect(view.highlights.find((item) => item.id === "cost")?.detail)
       .toBe("Tariff tariff-v1 / 1 allocation");
+    expect(view.levelComparison).toMatchObject({
+      status: "available",
+      decisionQuestion: "Which Level needs attention first?",
+      rows: [
+        {
+          id: "level-7",
+          currentUsageKwh: "1054.1845",
+          projectShare: "68.8484%",
+          previousUsageKwh: "734.6257",
+          changeKwh: "+319.5588 kWh",
+          changePct: "+43.4995%",
+          coverage: "100% coverage",
+          intervals: "1,344 / 1,344",
+          qualityEvents: "0 quality events",
+        },
+        {
+          id: "level-6",
+          currentUsageKwh: "476.9838",
+          projectShare: "31.1516%",
+          previousUsageKwh: "477.0516",
+          changeKwh: "-0.0678 kWh",
+          changePct: "-0.0142%",
+        },
+      ],
+      evidence: {
+        snapshotId: "snapshot-ngee-ann-golden",
+        projectReleaseId: "release-ngee-ann-golden",
+        meterMappingRevisionId: "mapping-v1",
+      },
+    });
     expect(view.evidence).toMatchObject({
       snapshotId: "snapshot-ngee-ann-golden",
       projectReleaseId: "release-ngee-ann-golden",
@@ -71,6 +101,22 @@ describe("Ngee Ann Overview ViewModel", () => {
       }],
       queryIds: snapshot.analysis.provenance.queryIds,
       referenceIds: [],
+    });
+  });
+
+  it("fails the Level module closed for a legacy Snapshot without comparison facts", () => {
+    const view = buildNgeeAnnOverviewViewModel(ngeeAnnGoldenSnapshot({
+      levelFactsAvailable: false,
+    }));
+
+    expect(view.levelComparison).toMatchObject({
+      status: "unavailable",
+      reason: "This published Snapshot does not include the Level comparison and quality contract.",
+      rows: [],
+      evidence: {
+        snapshotId: "snapshot-ngee-ann-golden",
+        meterMappingRevisionId: "mapping-v1",
+      },
     });
   });
 

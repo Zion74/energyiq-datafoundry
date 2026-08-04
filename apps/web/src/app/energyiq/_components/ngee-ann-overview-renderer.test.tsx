@@ -26,6 +26,17 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("+26.3677%");
     expect(markup).toContain("Previous 1211.6773 kWh / +319.4911 kWh");
     expect(markup).toContain("489.973864 SGD");
+    expect(markup).toContain("Energy distribution");
+    expect(markup).toContain("Level comparison");
+    expect(markup).toContain("Which Level needs attention first?");
+    expect(markup).toContain("1054.1845");
+    expect(markup).toContain("68.8484%");
+    expect(markup).toContain("734.6257");
+    expect(markup).toContain("+43.4995%");
+    expect(markup).toContain("476.9838");
+    expect(markup).toContain("31.1516%");
+    expect(markup).toContain("-0.0142%");
+    expect(markup).toContain("mapping-v1");
     expect(markup).toContain("snapshot-ngee-ann-golden");
     expect(markup).toContain("View reproducible evidence");
     expect(markup).toContain("Comparison evidence");
@@ -53,6 +64,18 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(costEvidenceMarkup).not.toContain("href=");
     expect(costEvidenceMarkup).not.toContain("evidence:ngee-ann-golden:energy.total_usage_kwh@1");
     expect(markup).not.toContain("Published sections");
+  });
+
+  it("renders an honest unavailable Level module for a legacy Snapshot contract", () => {
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer
+        state={{ status: "ready", snapshot: ngeeAnnGoldenSnapshot({ levelFactsAvailable: false }) }}
+      />,
+    );
+
+    expect(markup).toContain("Level comparison unavailable");
+    expect(markup).toContain("does not include the Level comparison and quality contract");
+    expect(markup).not.toContain("1054.1845");
   });
 
   it("shows partial accepted values and fails closed for an unavailable selection", () => {

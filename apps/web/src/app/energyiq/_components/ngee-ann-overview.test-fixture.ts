@@ -10,6 +10,7 @@ export function ngeeAnnGoldenSnapshot(input: {
   expectedMeterIntervalCount?: number;
   lastSeenAt?: string | null;
   costAvailable?: boolean;
+  levelFactsAvailable?: boolean;
 } = {}): EnergyProjectAnalysisSnapshotDto {
   const dataStatus = input.dataStatus ?? "complete";
   const coveragePct = input.coveragePct ?? (dataStatus === "complete" ? 100 : dataStatus === "partial" ? 50 : 0);
@@ -67,7 +68,50 @@ export function ngeeAnnGoldenSnapshot(input: {
       changePct: 26.3677,
     },
     categories: [],
-    childScopes: [],
+    childScopes: [
+      {
+        nodeId: "level-7",
+        name: "Level 7",
+        nodeType: "level",
+        usageKwh: 1054.1845,
+        sharePct: 68.8484,
+        metadata: missingScopeMetadata("level-7", "Level 7", 1054.1845),
+        ...(input.levelFactsAvailable === false ? {} : {
+          comparison: {
+            usageKwh: 734.6257,
+            changeKwh: 319.5588,
+            changePct: 43.4995,
+          },
+          dataHealth: {
+            coveragePct: 100,
+            expectedMeterIntervalCount: 1_344,
+            validIntervalCount: 1_344,
+            qualityEventCount: 0,
+          },
+        }),
+      },
+      {
+        nodeId: "level-6",
+        name: "Level 6",
+        nodeType: "level",
+        usageKwh: 476.9838,
+        sharePct: 31.1516,
+        metadata: missingScopeMetadata("level-6", "Level 6", 476.9838),
+        ...(input.levelFactsAvailable === false ? {} : {
+          comparison: {
+            usageKwh: 477.0516,
+            changeKwh: -0.0678,
+            changePct: -0.0142,
+          },
+          dataHealth: {
+            coveragePct: 100,
+            expectedMeterIntervalCount: 1_344,
+            validIntervalCount: 1_344,
+            qualityEventCount: 0,
+          },
+        }),
+      },
+    ],
     circuits: [],
     topCircuits: [],
     virtualMeters: [],
@@ -195,6 +239,25 @@ export function ngeeAnnGoldenSnapshot(input: {
 }
 
 function missingMetadata(): EnergyProjectAnalysisMetadataDto {
+  return {
+    status: "missing",
+    hierarchyRevisionId: "hierarchy-v6",
+    timezone: "Asia/Singapore",
+    period: {
+      start: "2026-06-09T16:00:00.000Z",
+      endExclusive: "2026-06-16T16:00:00.000Z",
+    },
+    selectedScope: missingScopeMetadata("project", "Ngee Ann Polytechnic", 1531.168324),
+    comparisonScopes: [],
+    evidence: [],
+  };
+}
+
+function missingScopeMetadata(
+  scopeId: string,
+  scopeName: string,
+  usageKwh: number,
+): EnergyProjectAnalysisMetadataDto["selectedScope"] {
   const missingValue = (unit: "m2" | "people") => ({
     status: "missing" as const,
     value: null,
@@ -220,27 +283,16 @@ function missingMetadata(): EnergyProjectAnalysisMetadataDto {
     evidence: [],
   });
   return {
+    scopeId,
+    scopeName,
+    usageKwh,
     status: "missing",
-    hierarchyRevisionId: "hierarchy-v6",
-    timezone: "Asia/Singapore",
-    period: {
-      start: "2026-06-09T16:00:00.000Z",
-      endExclusive: "2026-06-16T16:00:00.000Z",
+    area: missingValue("m2"),
+    headcount: missingValue("people"),
+    normalisations: {
+      eui: missingNormalisation("energy.usage_per_sqm", "kWh/m2"),
+      perPax: missingNormalisation("energy.usage_per_person", "kWh/person"),
     },
-    selectedScope: {
-      scopeId: "project",
-      scopeName: "Ngee Ann Polytechnic",
-      usageKwh: 1531.168324,
-      status: "missing",
-      area: missingValue("m2"),
-      headcount: missingValue("people"),
-      normalisations: {
-        eui: missingNormalisation("energy.usage_per_sqm", "kWh/m2"),
-        perPax: missingNormalisation("energy.usage_per_person", "kWh/person"),
-      },
-      evidence: [],
-    },
-    comparisonScopes: [],
     evidence: [],
   };
 }

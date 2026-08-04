@@ -22,6 +22,31 @@ export type NgeeAnnLatestAvailableRange = {
   to: string;
 };
 
+export type NgeeAnnLevelComparisonViewModel = {
+  status: "available" | "unavailable";
+  decisionQuestion: string;
+  reason: string | null;
+  rows: Array<{
+    id: string;
+    name: string;
+    currentUsageKwh: string;
+    projectShare: string;
+    projectShareBar: string;
+    previousUsageKwh: string;
+    changeKwh: string;
+    changePct: string;
+    coverage: string;
+    intervals: string;
+    qualityEvents: string;
+  }>;
+  evidence: {
+    snapshotId: string;
+    projectReleaseId: string;
+    meterMappingRevisionId: string;
+    queryIds: string[];
+  };
+};
+
 export type NgeeAnnOverviewViewModel = {
   context: {
     projectName: string;
@@ -42,6 +67,7 @@ export type NgeeAnnOverviewViewModel = {
     lastSeen: string;
   };
   highlights: NgeeAnnOverviewHighlight[];
+  levelComparison: NgeeAnnLevelComparisonViewModel;
   evidence: {
     snapshotId: string;
     projectReleaseId: string;
@@ -184,6 +210,7 @@ export function buildNgeeAnnOverviewViewModel(
         available: costAvailable,
       },
     ],
+    levelComparison: buildLevelComparison(snapshot, unavailable),
     evidence: {
       snapshotId: snapshot.dataSnapshot.id,
       projectReleaseId: snapshot.projectRelease.id,
@@ -248,6 +275,57 @@ export function buildNgeeAnnOverviewViewModel(
         },
     },
     latestAvailableRange,
+  };
+}
+
+function buildLevelComparison(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  overviewUnavailable: boolean,
+): NgeeAnnLevelComparisonViewModel {
+  const evidence = {
+    snapshotId: snapshot.dataSnapshot.id,
+    projectReleaseId: snapshot.projectRelease.id,
+    meterMappingRevisionId: snapshot.analysis.provenance.meterMappingRevisionId,
+    queryIds: [...snapshot.analysis.provenance.queryIds],
+  };
+  const levelRows = snapshot.analysis.childScopes.filter((scope) => scope.nodeType === "level");
+  const hasCompleteContract = levelRows.length > 0
+    && levelRows.every((scope) => scope.comparison && scope.dataHealth);
+
+  if (overviewUnavailable || snapshot.context.scopeType !== "project" || !hasCompleteContract) {
+    return {
+      status: "unavailable",
+      decisionQuestion: "Which Level needs attention first?",
+      reason: overviewUnavailable
+        ? "No trusted intervals support a Level comparison for this Period."
+        : snapshot.context.scopeType !== "project"
+          ? "Select the Project Scope to compare Level 6 and Level 7."
+          : "This published Snapshot does not include the Level comparison and quality contract.",
+      rows: [],
+      evidence,
+    };
+  }
+
+  return {
+    status: "available",
+    decisionQuestion: "Which Level needs attention first?",
+    reason: null,
+    rows: levelRows.map((scope) => ({
+      id: scope.nodeId,
+      name: scope.name,
+      currentUsageKwh: formatDecimal(scope.usageKwh, 4),
+      projectShare: `${formatDecimal(scope.sharePct, 4)}%`,
+      projectShareBar: `${Math.min(Math.max(scope.sharePct, 0), 100)}%`,
+      previousUsageKwh: formatDecimal(scope.comparison!.usageKwh, 4),
+      changeKwh: `${signedDecimal(scope.comparison!.changeKwh, 4)} kWh`,
+      changePct: scope.comparison!.changePct === null
+        ? "Unavailable"
+        : `${scope.comparison!.changePct! >= 0 ? "+" : ""}${formatDecimal(scope.comparison!.changePct!, 4)}%`,
+      coverage: `${formatDecimal(scope.dataHealth!.coveragePct, 1)}% coverage`,
+      intervals: `${scope.dataHealth!.validIntervalCount.toLocaleString("en-SG")} / ${scope.dataHealth!.expectedMeterIntervalCount.toLocaleString("en-SG")}`,
+      qualityEvents: `${scope.dataHealth!.qualityEventCount.toLocaleString("en-SG")} quality events`,
+    })),
+    evidence,
   };
 }
 

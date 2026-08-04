@@ -2,6 +2,7 @@ import React from "react";
 
 import type { EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
 import { EnergyIcon } from "./icons";
+import { NgeeAnnLevelComparison } from "./ngee-ann-level-comparison";
 import {
   buildNgeeAnnOverviewViewModel,
   type NgeeAnnLatestAvailableRange,
@@ -117,6 +118,8 @@ export function NgeeAnnOverviewRenderer({
           </article>
         ))}
       </div>
+
+      <NgeeAnnLevelComparison view={view.levelComparison} />
 
       <div className="px-5 py-4 lg:px-7">
         <div>
