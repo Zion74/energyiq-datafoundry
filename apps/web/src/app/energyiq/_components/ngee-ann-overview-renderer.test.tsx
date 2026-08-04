@@ -71,6 +71,17 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("The 12.1718 kWh difference remains outside the component breakdown");
     expect(markup).toContain("it is not classified here as an anomaly, missing data or savings");
     expect(markup).toContain("Designated rows are rounded for display; the server-reconciled official total is authoritative.");
+    expect(markup).toContain("Derived meter trace");
+    expect(markup).toContain("Load 12 / Level 6 / Derived");
+    expect(markup).toContain("Result 49.0218 kWh");
+    expect(markup).toContain("Lvl 6 Office Load 1: L1P1-L3P6");
+    expect(markup).toContain("mapping-lvl-6-office-load-1-l1p1-l3p6-3");
+    expect(markup).toContain("+1 × 11.5379 kWh = 11.5379 kWh");
+    expect(markup).toContain("Lvl 6 Office Load 2: L1P7-L3P12");
+    expect(markup).toContain("mapping-lvl-6-office-load-2-l1p7-l3p12-4");
+    expect(markup).toContain("+1 × 37.4839 kWh = 37.4839 kWh");
+    expect(markup).toContain("Load 12 is not added separately to the official Project total.");
+    expect(markup).toContain("same Snapshot, Release, Mapping revision, Formula revision, Period, unit and query ids");
     expect(markup).toContain("Composition evidence");
     expect(markup).toContain("Circuit evidence");
     expect(markup).toContain("l7-load-4");
@@ -79,7 +90,11 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("[2026-06-09T16:00:00.000Z, 2026-06-16T16:00:00.000Z)");
     expect(markup.indexOf("Level comparison")).toBeLessThan(markup.indexOf("Energy composition"));
     expect(markup.indexOf("Energy composition")).toBeLessThan(markup.indexOf("Snapshot &amp; evidence"));
+    expect(markup.indexOf("Accounting trace")).toBeLessThan(markup.indexOf("Derived meter trace"));
+    expect(markup.indexOf("Derived meter trace")).toBeLessThan(markup.indexOf("Composition evidence"));
     expect(markup).toContain("mapping-v1");
+    expect(markup).toContain("formula-v1");
+    expect(markup).toContain("previous_meter_usage_v1");
     expect(markup).toContain("snapshot-ngee-ann-golden");
     expect(markup).toContain("View reproducible evidence");
     expect(markup).toContain("Comparison evidence");
@@ -138,6 +153,59 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Accounting trace unavailable");
     expect(markup).not.toContain("439.0972 kWh");
     expect(markup).not.toContain("1518.9965 kWh");
+  });
+
+  it("fails only the Derived subsection closed for legacy or wrongly marked traces", () => {
+    const legacySnapshot = ngeeAnnGoldenSnapshot();
+    delete legacySnapshot.analysis.virtualMeterTraces;
+    const wrongMarkerSnapshot = ngeeAnnGoldenSnapshot();
+    const wrongMarkerTrace = wrongMarkerSnapshot.analysis.virtualMeterTraces![0]! as {
+      includedInOfficialTotal: boolean;
+    };
+    wrongMarkerTrace.includedInOfficialTotal = true;
+
+    for (const snapshot of [legacySnapshot, wrongMarkerSnapshot]) {
+      const markup = renderToStaticMarkup(
+        <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+      );
+
+      expect(markup).toContain("1239.4239 kWh");
+      expect(markup).toContain("439.0972 kWh");
+      expect(markup).toContain("Component Circuits explain 1518.9965 kWh");
+      expect(markup).toContain("Derived meter trace unavailable");
+      expect(markup).not.toContain("Result 49.0218 kWh");
+      expect(markup).not.toContain("+1 × 11.5379 kWh = 11.5379 kWh");
+    }
+  });
+
+  it("renders affected identities for a partial trace without a result, zero or partial sum", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const trace = snapshot.analysis.virtualMeterTraces![0]!;
+    const affectedTerm = trace.terms[0]!;
+    trace.status = "partial";
+    trace.usageKwh = null;
+    trace.missingTermMeterNodeIds = [affectedTerm.meterNodeId];
+    affectedTerm.inputUsageKwh = null;
+    affectedTerm.contributionKwh = null;
+    affectedTerm.dataHealth = null;
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+    const derivedMarkup = markup.slice(
+      markup.indexOf("Derived meter trace"),
+      markup.indexOf("Composition evidence"),
+    );
+
+    expect(derivedMarkup).toContain("Load 12 / Level 6 / Derived");
+    expect(derivedMarkup).toContain("Partial");
+    expect(derivedMarkup).toContain("Derived result unavailable because required inputs are missing.");
+    expect(derivedMarkup).toContain("Lvl 6 Office Load 1: L1P1-L3P6");
+    expect(derivedMarkup).toContain("mapping-lvl-6-office-load-1-l1p1-l3p6-3");
+    expect(derivedMarkup).toContain("Load 12 is not added separately to the official Project total.");
+    expect(derivedMarkup).not.toContain("49.0218");
+    expect(derivedMarkup).not.toContain("Result");
+    expect(derivedMarkup).not.toContain(" kWh");
   });
 
   it("shows partial accepted values and fails closed for an unavailable selection", () => {

@@ -399,6 +399,26 @@ export type EnergyAnalysisDataHealthDto = {
   qualityEventCount: number;
 };
 
+export type EnergyVirtualMeterTraceTermDto = {
+  meterNodeId: string;
+  name: string;
+  coefficient: 1 | -1;
+  inputUsageKwh: number | null;
+  contributionKwh: number | null;
+  dataHealth: EnergyAnalysisDataHealthDto | null;
+};
+
+export type EnergyVirtualMeterTraceDto = {
+  meterNodeId: string;
+  name: string;
+  scopeId: string;
+  status: "available" | "partial";
+  usageKwh: number | null;
+  includedInOfficialTotal: false;
+  missingTermMeterNodeIds: string[];
+  terms: EnergyVirtualMeterTraceTermDto[];
+};
+
 export type EnergyCircuitAnalysisDto = {
   meterNodeId: string;
   name: string;
@@ -488,6 +508,7 @@ export type EnergyScopeAnalysisDto = {
     usageKwh: number;
     includedInOfficialTotal: false;
   }>;
+  virtualMeterTraces?: EnergyVirtualMeterTraceDto[];
   offHours: {
     status: "available";
     operatingKwh: number;

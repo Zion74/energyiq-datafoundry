@@ -155,10 +155,44 @@ describe("Ngee Ann Overview ViewModel", () => {
           componentMeterCount: 14,
         },
       },
+      derivedMeterTrace: {
+        status: "available",
+        reason: null,
+        meterNodeId: "ngee-ann-load-12-v1",
+        name: "Load 12",
+        scopeId: "level-6",
+        scopeName: "Level 6",
+        meterKind: "Derived",
+        resultUsageKwh: "49.0218",
+        includedInOfficialTotal: false,
+        terms: [
+          {
+            meterNodeId: "mapping-lvl-6-office-load-1-l1p1-l3p6-3",
+            name: "Lvl 6 Office Load 1: L1P1-L3P6",
+            coefficient: "+1",
+            inputUsageKwh: "11.5379",
+            contributionKwh: "11.5379",
+            quality: {
+              coverage: "100% coverage",
+              intervals: "672 / 672",
+              qualityEvents: "0 quality events",
+            },
+          },
+          {
+            meterNodeId: "mapping-lvl-6-office-load-2-l1p7-l3p12-4",
+            name: "Lvl 6 Office Load 2: L1P7-L3P12",
+            coefficient: "+1",
+            inputUsageKwh: "37.4839",
+            contributionKwh: "37.4839",
+          },
+        ],
+        impactedInputs: [],
+      },
       evidence: {
         snapshotId: "snapshot-ngee-ann-golden",
         projectReleaseId: "release-ngee-ann-golden",
         meterMappingRevisionId: "mapping-v1",
+        meterFormulaRevisionId: "formula-v1",
         period: "[2026-06-09T16:00:00.000Z, 2026-06-16T16:00:00.000Z)",
         unit: "kWh",
       },
@@ -291,6 +325,142 @@ describe("Ngee Ann Overview ViewModel", () => {
       componentUsageKwh: "1500",
       gapKwh: "500",
       ratioPct: "75%",
+    });
+  });
+
+  it("fails only the Derived meter trace closed for a legacy Snapshot without the optional trace", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    delete snapshot.analysis.virtualMeterTraces;
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.energyComposition.categories.status).toBe("available");
+    expect(view.energyComposition.circuits.status).toBe("available");
+    expect(view.energyComposition.accounting.status).toBe("available");
+    expect(view.energyComposition.derivedMeterTrace).toMatchObject({
+      status: "unavailable",
+      reason: "This published Snapshot does not include the server-derived meter trace contract.",
+      resultUsageKwh: null,
+      terms: [],
+      impactedInputs: [],
+    });
+  });
+
+  it("shows only affected input identities for a partial Derived meter trace", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const trace = snapshot.analysis.virtualMeterTraces![0]!;
+    const affectedTerm = trace.terms[0]!;
+    trace.status = "partial";
+    trace.usageKwh = null;
+    trace.missingTermMeterNodeIds = [affectedTerm.meterNodeId];
+    affectedTerm.inputUsageKwh = null;
+    affectedTerm.contributionKwh = null;
+    affectedTerm.dataHealth = null;
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.energyComposition.derivedMeterTrace).toEqual({
+      status: "partial",
+      reason: "Derived result unavailable because required inputs are missing.",
+      meterNodeId: "ngee-ann-load-12-v1",
+      name: "Load 12",
+      scopeId: "level-6",
+      scopeName: "Level 6",
+      meterKind: "Derived",
+      resultUsageKwh: null,
+      includedInOfficialTotal: false,
+      terms: [],
+      impactedInputs: [{
+        meterNodeId: "mapping-lvl-6-office-load-1-l1p1-l3p6-3",
+        name: "Lvl 6 Office Load 1: L1P1-L3P6",
+      }],
+    });
+  });
+
+  it("rejects duplicate or missing term identities, a missing result and a wrong total marker", () => {
+    const invalidSnapshots = [
+      (() => {
+        const snapshot = ngeeAnnGoldenSnapshot();
+        snapshot.analysis.virtualMeterTraces![0]!.terms[1]!.meterNodeId =
+          snapshot.analysis.virtualMeterTraces![0]!.terms[0]!.meterNodeId;
+        return snapshot;
+      })(),
+      (() => {
+        const snapshot = ngeeAnnGoldenSnapshot();
+        snapshot.analysis.virtualMeterTraces![0]!.terms[0]!.meterNodeId = "";
+        return snapshot;
+      })(),
+      (() => {
+        const snapshot = ngeeAnnGoldenSnapshot();
+        snapshot.analysis.virtualMeterTraces![0]!.usageKwh = null;
+        return snapshot;
+      })(),
+      (() => {
+        const snapshot = ngeeAnnGoldenSnapshot();
+        const trace = snapshot.analysis.virtualMeterTraces![0]! as { includedInOfficialTotal: boolean };
+        trace.includedInOfficialTotal = true;
+        return snapshot;
+      })(),
+      (() => {
+        const snapshot = ngeeAnnGoldenSnapshot();
+        const term = snapshot.analysis.virtualMeterTraces![0]!.terms[0]! as { coefficient: number };
+        term.coefficient = 2;
+        return snapshot;
+      })(),
+    ];
+
+    for (const snapshot of invalidSnapshots) {
+      const view = buildNgeeAnnOverviewViewModel(snapshot);
+      expect(view.energyComposition.categories.status).toBe("available");
+      expect(view.energyComposition.circuits.status).toBe("available");
+      expect(view.energyComposition.accounting.status).toBe("available");
+      expect(view.energyComposition.derivedMeterTrace).toMatchObject({
+        status: "unavailable",
+        resultUsageKwh: null,
+        terms: [],
+      });
+    }
+  });
+
+  it("rejects partial traces that retain a result or non-null facts for an affected input", () => {
+    const resultRetainedSnapshot = ngeeAnnGoldenSnapshot();
+    const resultRetainedTrace = resultRetainedSnapshot.analysis.virtualMeterTraces![0]!;
+    const resultRetainedTerm = resultRetainedTrace.terms[0]!;
+    resultRetainedTrace.status = "partial";
+    resultRetainedTrace.missingTermMeterNodeIds = [resultRetainedTerm.meterNodeId];
+    resultRetainedTerm.inputUsageKwh = null;
+    resultRetainedTerm.contributionKwh = null;
+    resultRetainedTerm.dataHealth = null;
+
+    const affectedFactsRetainedSnapshot = ngeeAnnGoldenSnapshot();
+    const affectedFactsRetainedTrace = affectedFactsRetainedSnapshot.analysis.virtualMeterTraces![0]!;
+    const affectedFactsRetainedTerm = affectedFactsRetainedTrace.terms[0]!;
+    affectedFactsRetainedTrace.status = "partial";
+    affectedFactsRetainedTrace.usageKwh = null;
+    affectedFactsRetainedTrace.missingTermMeterNodeIds = [affectedFactsRetainedTerm.meterNodeId];
+
+    for (const snapshot of [resultRetainedSnapshot, affectedFactsRetainedSnapshot]) {
+      expect(buildNgeeAnnOverviewViewModel(snapshot).energyComposition.derivedMeterTrace)
+        .toMatchObject({ status: "unavailable", resultUsageKwh: null, terms: [] });
+    }
+  });
+
+  it("formats server-provided Derived values without recomputing the formula result", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const trace = snapshot.analysis.virtualMeterTraces![0]!;
+    trace.usageKwh = 88;
+    trace.terms[0]!.contributionKwh = 7;
+    trace.terms[1]!.contributionKwh = 9;
+
+    const derived = buildNgeeAnnOverviewViewModel(snapshot).energyComposition.derivedMeterTrace;
+
+    expect(derived).toMatchObject({
+      status: "available",
+      resultUsageKwh: "88",
+      terms: [
+        { inputUsageKwh: "11.5379", contributionKwh: "7" },
+        { inputUsageKwh: "37.4839", contributionKwh: "9" },
+      ],
     });
   });
 

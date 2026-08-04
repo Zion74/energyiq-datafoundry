@@ -173,6 +173,7 @@ export function NgeeAnnEnergyComposition({
             </div>
           </>
         )}
+        <DerivedMeterTrace view={view} />
       </div>
 
       <details className="mt-5 border-t border-border pt-3 text-[10px] leading-4 text-muted">
@@ -186,6 +187,8 @@ export function NgeeAnnEnergyComposition({
           <dd className="break-all font-mono text-foreground">{view.evidence.projectReleaseId}</dd>
           <dt className="text-muted">Mapping</dt>
           <dd className="break-all font-mono text-foreground">{view.evidence.meterMappingRevisionId}</dd>
+          <dt className="text-muted">Formula</dt>
+          <dd className="break-all font-mono text-foreground">{view.evidence.meterFormulaRevisionId}</dd>
           <dt className="text-muted">Period / unit</dt>
           <dd className="break-words text-foreground">{view.evidence.period} · {view.evidence.unit}</dd>
           <dt className="text-muted">Queries</dt>
@@ -193,6 +196,95 @@ export function NgeeAnnEnergyComposition({
         </dl>
       </details>
     </section>
+  );
+}
+
+function DerivedMeterTrace({ view }: { view: NgeeAnnEnergyCompositionViewModel }) {
+  const trace = view.derivedMeterTrace;
+
+  return (
+    <div className="mt-5 border-t border-border pt-4" aria-labelledby="ngee-ann-derived-meter-trace">
+      <h5 id="ngee-ann-derived-meter-trace" className="text-xs font-semibold text-foreground">
+        Derived meter trace
+      </h5>
+      <p className="mt-1 text-[11px] leading-5 text-muted">
+        Server-provided term values explain the derived result; this view does not recalculate it.
+      </p>
+
+      {trace.status === "unavailable" ? (
+        <Unavailable title="Derived meter trace unavailable" reason={trace.reason} />
+      ) : trace.status === "partial" ? (
+        <div className="mt-3 bg-surface-subtle px-4 py-3" role="status">
+          <div className="flex min-w-0 flex-col gap-1 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+            <p className="min-w-0 break-words text-xs font-semibold text-foreground">
+              {trace.name} / {trace.scopeName} / {trace.meterKind}
+            </p>
+            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted">Partial</span>
+          </div>
+          <p className="mt-2 text-[11px] leading-5 text-muted">{trace.reason}</p>
+          <p className="mt-3 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted">Affected inputs</p>
+          <ul className="mt-1 space-y-1">
+            {trace.impactedInputs.map((input) => (
+              <li key={input.meterNodeId} className="min-w-0 text-[11px] leading-5 text-foreground">
+                <span className="font-semibold">{input.name}</span>
+                <span className="ml-2 break-all font-mono text-[10px] text-muted">{input.meterNodeId}</span>
+              </li>
+            ))}
+          </ul>
+          <DerivedTraceBoundaryCopy />
+        </div>
+      ) : (
+        <div className="mt-3">
+          <div className="flex min-w-0 flex-col gap-2 bg-surface-subtle px-4 py-3 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
+            <div className="min-w-0">
+              <p className="break-words text-xs font-semibold text-foreground">
+                {trace.name} / {trace.scopeName} / {trace.meterKind}
+              </p>
+              <p className="mt-1 break-all font-mono text-[10px] text-muted">{trace.meterNodeId}</p>
+            </div>
+            <p className="shrink-0 text-xs font-semibold tabular-nums text-foreground">
+              Result {trace.resultUsageKwh} kWh
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] border-collapse text-left">
+              <caption className="sr-only">Physical meter terms supplied for the Load 12 derived result</caption>
+              <thead className="border-y border-border text-[10px] font-medium uppercase tracking-[0.08em] text-muted">
+                <tr>
+                  <th scope="col" className="px-3 py-2.5">Physical meter</th>
+                  <th scope="col" className="px-3 py-2.5">Server trace</th>
+                  <th scope="col" className="px-3 py-2.5">Data quality</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {trace.terms.map((term) => (
+                  <tr key={term.meterNodeId}>
+                    <th scope="row" className="max-w-[360px] px-3 py-3 align-top">
+                      <p className="break-words text-xs font-semibold text-foreground">{term.name}</p>
+                      <p className="mt-1 break-all font-mono text-[10px] font-normal text-muted">{term.meterNodeId}</p>
+                    </th>
+                    <td className="px-3 py-3 align-top text-xs font-semibold tabular-nums text-foreground">
+                      {term.coefficient} × {term.inputUsageKwh} kWh = {term.contributionKwh} kWh
+                    </td>
+                    <td className="px-3 py-3 align-top"><Quality quality={term.quality} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <DerivedTraceBoundaryCopy />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DerivedTraceBoundaryCopy() {
+  return (
+    <div className="mt-3 text-[10px] leading-4 text-muted">
+      <p className="font-semibold text-foreground">Load 12 is not added separately to the official Project total.</p>
+      <p className="mt-1">Evidence uses the same Snapshot, Release, Mapping revision, Formula revision, Period, unit and query ids listed below.</p>
+    </div>
   );
 }
 

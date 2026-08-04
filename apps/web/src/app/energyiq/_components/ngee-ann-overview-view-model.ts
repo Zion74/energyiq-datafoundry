@@ -58,6 +58,20 @@ type CompositionQuality = {
   qualityEvents: string;
 };
 
+type DerivedMeterTraceTerm = {
+  meterNodeId: string;
+  name: string;
+  coefficient: string;
+  inputUsageKwh: string;
+  contributionKwh: string;
+  quality: CompositionQuality;
+};
+
+type DerivedMeterTraceInput = {
+  meterNodeId: string;
+  name: string;
+};
+
 export type NgeeAnnEnergyCompositionViewModel = {
   decisionQuestion: string;
   categories: CompositionStatus & {
@@ -111,10 +125,24 @@ export type NgeeAnnEnergyCompositionViewModel = {
       componentMeterCount: number;
     };
   };
+  derivedMeterTrace: {
+    status: "available" | "partial" | "unavailable";
+    reason: string | null;
+    meterNodeId: string | null;
+    name: string | null;
+    scopeId: string | null;
+    scopeName: string | null;
+    meterKind: "Derived" | null;
+    resultUsageKwh: string | null;
+    includedInOfficialTotal: false | null;
+    terms: DerivedMeterTraceTerm[];
+    impactedInputs: DerivedMeterTraceInput[];
+  };
   evidence: {
     snapshotId: string;
     projectReleaseId: string;
     meterMappingRevisionId: string;
+    meterFormulaRevisionId: string;
     queryIds: string[];
     period: string;
     unit: "kWh";
@@ -363,6 +391,7 @@ function buildEnergyComposition(
     snapshotId: snapshot.dataSnapshot.id,
     projectReleaseId: snapshot.projectRelease.id,
     meterMappingRevisionId: analysis.provenance.meterMappingRevisionId,
+    meterFormulaRevisionId: analysis.provenance.meterFormulaRevisionId,
     queryIds: [...analysis.provenance.queryIds],
     period: `[${snapshot.context.primaryPeriod.start}, ${snapshot.context.primaryPeriod.endExclusive})`,
     unit: "kWh",
@@ -503,13 +532,140 @@ function buildEnergyComposition(
       designatedTotals: [],
       reconciliation: null,
     };
+  const derivedMeterTrace = buildDerivedMeterTrace(analysis, unavailableReason, levelNames);
 
   return {
     decisionQuestion: "What explains the official Project total?",
     categories,
     circuits,
     accounting,
+    derivedMeterTrace,
     evidence,
+  };
+}
+
+function buildDerivedMeterTrace(
+  analysis: EnergyProjectAnalysisSnapshotDto["analysis"],
+  unavailableReason: string | null,
+  levelNames: Map<string, string>,
+): NgeeAnnEnergyCompositionViewModel["derivedMeterTrace"] {
+  const unavailable = (reason: string): NgeeAnnEnergyCompositionViewModel["derivedMeterTrace"] => ({
+    status: "unavailable",
+    reason,
+    meterNodeId: null,
+    name: null,
+    scopeId: null,
+    scopeName: null,
+    meterKind: null,
+    resultUsageKwh: null,
+    includedInOfficialTotal: null,
+    terms: [],
+    impactedInputs: [],
+  });
+
+  if (unavailableReason) return unavailable(unavailableReason);
+
+  const traces = analysis.virtualMeterTraces;
+  if (!traces) {
+    return unavailable("This published Snapshot does not include the server-derived meter trace contract.");
+  }
+
+  const matchingTraces = traces.filter((trace) => trace.meterNodeId === "ngee-ann-load-12-v1");
+  if (matchingTraces.length !== 1) {
+    return unavailable("This published Snapshot does not identify one authoritative Load 12 trace.");
+  }
+
+  const trace = matchingTraces[0]!;
+  const scopeName = levelNames.get(trace.scopeId);
+  const termIds = trace.terms.map((term) => term.meterNodeId);
+  const uniqueTermIds = new Set(termIds);
+  const hasValidIdentities = Boolean(trace.name)
+    && Boolean(trace.scopeId)
+    && Boolean(scopeName)
+    && trace.terms.length === 2
+    && uniqueTermIds.size === trace.terms.length
+    && trace.terms.every((term) =>
+      Boolean(term.meterNodeId)
+      && Boolean(term.name)
+      && (term.coefficient === 1 || term.coefficient === -1),
+    );
+
+  if (trace.includedInOfficialTotal !== false || !hasValidIdentities) {
+    return unavailable("The Load 12 trace is missing a unique identity, Level, term identity or exclusion marker.");
+  }
+
+  if (trace.status === "partial") {
+    const missingTermIds = trace.missingTermMeterNodeIds;
+    const uniqueMissingTermIds = new Set(missingTermIds);
+    const missingTerms = trace.terms.filter((term) => uniqueMissingTermIds.has(term.meterNodeId));
+    const hasValidMissingInputs = trace.usageKwh === null
+      && missingTermIds.length > 0
+      && uniqueMissingTermIds.size === missingTermIds.length
+      && missingTermIds.every((meterNodeId) => uniqueTermIds.has(meterNodeId))
+      && missingTerms.length === missingTermIds.length
+      && missingTerms.every((term) =>
+        term.inputUsageKwh === null
+        && term.contributionKwh === null
+        && term.dataHealth === null,
+      );
+
+    if (!hasValidMissingInputs) {
+      return unavailable("The partial Load 12 trace does not identify every affected input.");
+    }
+
+    return {
+      status: "partial",
+      reason: "Derived result unavailable because required inputs are missing.",
+      meterNodeId: trace.meterNodeId,
+      name: trace.name,
+      scopeId: trace.scopeId,
+      scopeName: scopeName!,
+      meterKind: "Derived",
+      resultUsageKwh: null,
+      includedInOfficialTotal: false,
+      terms: [],
+      impactedInputs: missingTerms.map((term) => ({
+        meterNodeId: term.meterNodeId,
+        name: term.name,
+      })),
+    };
+  }
+
+  const hasCompleteValues = trace.status === "available"
+    && trace.missingTermMeterNodeIds.length === 0
+    && trace.usageKwh !== null
+    && Number.isFinite(trace.usageKwh)
+    && trace.terms.every((term) =>
+      term.inputUsageKwh !== null
+      && Number.isFinite(term.inputUsageKwh)
+      && term.contributionKwh !== null
+      && Number.isFinite(term.contributionKwh)
+      && Boolean(term.dataHealth),
+    );
+
+  if (!hasCompleteValues) {
+    return unavailable("The authoritative Load 12 result, term values or data quality is incomplete.");
+  }
+
+  return {
+    status: "available",
+    reason: null,
+    meterNodeId: trace.meterNodeId,
+    name: trace.name,
+    scopeId: trace.scopeId,
+    scopeName: scopeName!,
+    meterKind: "Derived",
+    resultUsageKwh: formatDecimal(trace.usageKwh!, 4),
+    includedInOfficialTotal: false,
+    terms: trace.terms.map((term) => ({
+      meterNodeId: term.meterNodeId,
+      name: term.name,
+      coefficient: signedDecimal(term.coefficient, 4),
+      inputUsageKwh: formatDecimal(term.inputUsageKwh!, 4),
+      contributionKwh: formatDecimal(term.contributionKwh!, 4),
+      quality: compositionQuality(term.dataHealth!),
+    })),
+    impactedInputs: [],
   };
 }
 
