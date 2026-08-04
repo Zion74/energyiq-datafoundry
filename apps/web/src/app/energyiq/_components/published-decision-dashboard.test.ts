@@ -7,9 +7,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   EnergyAccessContextDto,
   EnergyComponentRevisionDto,
+  EnergyProjectAnalysisMetadataDto,
+  EnergyProjectAnalysisPayloadDto,
   EnergyProjectAnalysisResolutionDto,
   EnergyProjectHierarchyDto,
   EnergyProjectDto,
+  EnergyPublishedProjectReleaseDto,
+  EnergyQueryContextDto,
   EnergyTemplateDefinitionDto,
 } from "../../../lib/config-api";
 import { configApi } from "../../../lib/config-api";
@@ -94,6 +98,39 @@ describe("published Overview URL reload", () => {
     });
     expect(Array.from(container.querySelectorAll<HTMLInputElement>("input[type='date']"), (input) => input.value))
       .toEqual(["2026-06-10", "2026-06-16"]);
+  });
+
+  it.each([
+    ["Previous week", "Previous+week"],
+    ["Previous month", "Previous+month"],
+  ] as const)("uses a cold public %s URL for the first resolve after access hydration", async (period, encodedPeriod) => {
+    window.history.replaceState(
+      {},
+      "",
+      `/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=${encodedPeriod}`,
+    );
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+    expect(resolveProjectAnalysis).not.toHaveBeenCalled();
+
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
+    expect(resolveProjectAnalysis).toHaveBeenCalledWith({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "project",
+      resource: "electricity",
+      period,
+    });
   });
 
   it("atomically resolves new Custom dates after client navigation changes the public URL", async () => {
@@ -365,6 +402,38 @@ describe("published Overview URL reload", () => {
     });
   });
 
+  it("selects and restores Previous month through the server-authoritative URL contract", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Previous+week");
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    const previousMonth = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "Previous month");
+    await act(async () => previousMonth?.click());
+    const previousMonthUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Previous+month";
+    expect(mockedRouter.replace).toHaveBeenCalledWith(previousMonthUrl);
+
+    resolveProjectAnalysis.mockClear();
+    window.history.replaceState({}, "", previousMonthUrl);
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+    expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
+    expect(resolveProjectAnalysis).toHaveBeenCalledWith({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "project",
+      resource: "electricity",
+      period: "Previous month",
+    });
+  });
+
   it("preserves Previous week when Scope changes before the router rerenders", async () => {
     const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
     mockedAccess.activeProject = ngeeAnn;
@@ -406,30 +475,75 @@ describe("published Overview URL reload", () => {
     });
   });
 
-  it("keeps an empty Previous week explicit without auto-navigation or a second resolve", async () => {
+  it("preserves Previous month when Scope changes before the router rerenders", async () => {
     const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
     mockedAccess.activeProject = ngeeAnn;
     mockedAccess.access = accessContext([ngeeAnn]);
-    const previousWeekUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Previous+week";
-    window.history.replaceState({}, "", previousWeekUrl);
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Previous+week");
     const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
-      .mockResolvedValue(readyRangeResolution());
+      .mockReturnValue(new Promise<never>(() => undefined));
 
     await act(async () => {
       root.render(React.createElement(PublishedDecisionDashboard));
     });
 
+    const previousMonth = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "Previous month");
+    await act(async () => previousMonth?.click());
+    const scopeSelect = container.querySelector<HTMLButtonElement>("[role='combobox'][aria-label='Analysis Scope']");
+    await act(async () => scopeSelect?.click());
+    const totalCircuit = Array.from(document.querySelectorAll<HTMLButtonElement>("[role='option']"))
+      .find((option) => option.textContent?.endsWith("Level 6 / Total Office Load"));
+    await act(async () => totalCircuit?.click());
+
+    const previousMonthScopeUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Previous+month";
+    expect(mockedRouter.replace.mock.calls.map(([href]) => href)).toEqual([
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Previous+month",
+      previousMonthScopeUrl,
+    ]);
+
+    resolveProjectAnalysis.mockClear();
+    window.history.replaceState({}, "", previousMonthScopeUrl);
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
     expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
     expect(resolveProjectAnalysis).toHaveBeenCalledWith({
       projectId: "ngee-ann-polytechnic",
-      scopeId: "project",
+      scopeId: "l6-total-light",
       resource: "electricity",
-      period: "Previous week",
+      period: "Previous month",
     });
-    expect(mockedRouter.replace).not.toHaveBeenCalled();
-    expect(window.location.pathname + window.location.search).toBe(previousWeekUrl);
-    expect(container.textContent).toContain("Published analysis has no Project Template");
   });
+
+  it.each(["Previous week", "Previous month"] as const)(
+    "keeps ready zero-coverage %s explicit without auto-navigation or a second resolve",
+    async (period) => {
+      const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+      mockedAccess.activeProject = ngeeAnn;
+      mockedAccess.access = accessContext([ngeeAnn]);
+      const periodUrl = `/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=${period.replace(" ", "+")}`;
+      window.history.replaceState({}, "", periodUrl);
+      const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+        .mockResolvedValue(readyZeroCoverageResolution(period));
+
+      await act(async () => {
+        root.render(React.createElement(PublishedDecisionDashboard));
+      });
+
+      expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
+      expect(resolveProjectAnalysis).toHaveBeenCalledWith({
+        projectId: "ngee-ann-polytechnic",
+        scopeId: "project",
+        resource: "electricity",
+        period,
+      });
+      expect(mockedRouter.replace).not.toHaveBeenCalled();
+      expect(window.location.pathname + window.location.search).toBe(periodUrl);
+      expect(container.textContent).toContain("Partial data");
+      expect(container.textContent).toContain("0.0%");
+    },
+  );
 
   it("carries the server-resolved range when a standard Period changes to Custom", async () => {
     const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
@@ -910,4 +1024,199 @@ function readyRangeResolution(): EnergyProjectAnalysisResolutionDto {
       dataSnapshot: { id: "snapshot-1" },
     },
   } as EnergyProjectAnalysisResolutionDto;
+}
+
+function readyZeroCoverageResolution(
+  period: "Previous week" | "Previous month",
+): EnergyProjectAnalysisResolutionDto {
+  const qualityComponent = component("quality.data_coverage@1", "quality", "data_quality_summary_v1");
+  const quality = dataQuality(0);
+  const from = period === "Previous week"
+    ? "2026-07-26T16:00:00.000Z"
+    : "2026-06-30T16:00:00.000Z";
+  const to = period === "Previous week"
+    ? "2026-08-02T16:00:00.000Z"
+    : "2026-07-31T16:00:00.000Z";
+  const context: EnergyQueryContextDto = {
+    userId: "user-1",
+    workspaceId: "workspace-1",
+    projectId: "ngee-ann-polytechnic",
+    projectName: "Ngee Ann Polytechnic",
+    scopeId: "project",
+    scopeName: "Ngee Ann Polytechnic",
+    scopeType: "project",
+    resource: "electricity",
+    timezone: "Asia/Singapore",
+    from,
+    to,
+    endExclusive: true,
+    period,
+    hierarchyRevisionId: "hierarchy-v6",
+    meterMappingRevisionId: "mapping-v1",
+    meterFormulaRevisionId: "formula-v1",
+    dataSnapshotId: "snapshot-zero-coverage",
+    metricVersion: "metric-v1",
+    businessCalendarVersion: "calendar-v1",
+    tariffScheduleVersion: "tariff-v1",
+    resolvedAt: "2026-08-03T16:30:00.000Z",
+  };
+  const metadata: EnergyProjectAnalysisMetadataDto = {
+    status: "missing",
+    hierarchyRevisionId: context.hierarchyRevisionId,
+    timezone: context.timezone,
+    period: { start: from, endExclusive: to },
+    selectedScope: {
+      scopeId: context.scopeId,
+      scopeName: context.scopeName,
+      usageKwh: 0,
+      status: "missing",
+      area: {
+        status: "missing",
+        value: null,
+        unit: "m2",
+        reason: "not-configured",
+        guidance: "Configure area metadata.",
+        metadataRevisionIds: [],
+        hierarchyRevisionIds: [context.hierarchyRevisionId],
+        evidence: [],
+      },
+      headcount: {
+        status: "missing",
+        value: null,
+        unit: "people",
+        reason: "not-configured",
+        guidance: "Configure headcount metadata.",
+        metadataRevisionIds: [],
+        hierarchyRevisionIds: [context.hierarchyRevisionId],
+        evidence: [],
+      },
+      normalisations: {
+        eui: {
+          status: "missing",
+          metricId: "energy.usage_per_sqm",
+          value: null,
+          unit: "kWh/m2",
+          reason: "not-configured",
+          guidance: "Configure area metadata.",
+          metadataRevisionIds: [],
+          hierarchyRevisionIds: [context.hierarchyRevisionId],
+          evidence: [],
+        },
+        perPax: {
+          status: "missing",
+          metricId: "energy.usage_per_person",
+          value: null,
+          unit: "kWh/person",
+          reason: "not-configured",
+          guidance: "Configure headcount metadata.",
+          metadataRevisionIds: [],
+          hierarchyRevisionIds: [context.hierarchyRevisionId],
+          evidence: [],
+        },
+      },
+      evidence: [],
+    },
+    comparisonScopes: [],
+    evidence: [],
+  };
+  const analysis: EnergyProjectAnalysisPayloadDto = {
+    context,
+    summary: {
+      usageKwh: 0,
+      averageDailyUsageKwh: 0,
+      peakKw: 0,
+      validIntervalCount: 0,
+      qualityEventCount: 0,
+    },
+    hourlyProfile: [],
+    comparison: { from, to, usageKwh: 0, changeKwh: 0, changePct: null },
+    categories: [],
+    childScopes: [],
+    circuits: [],
+    topCircuits: [],
+    virtualMeters: [],
+    offHours: {
+      status: "unavailable",
+      reason: { code: "OPERATING_FACTS_UNAVAILABLE", message: "No accepted intervals." },
+      businessCalendarVersion: context.businessCalendarVersion,
+    },
+    cost: {
+      status: "unavailable",
+      reason: { code: "COST_FACTS_UNAVAILABLE", message: "No accepted intervals." },
+      tariffScheduleVersion: context.tariffScheduleVersion,
+    },
+    dataHealth: quality,
+    units: { usage: "kWh", demand: "kW", intervalMinutes: 15, timezone: context.timezone },
+    attention: [],
+    provenance: {
+      dataSnapshotId: context.dataSnapshotId,
+      hierarchyRevisionId: context.hierarchyRevisionId,
+      meterMappingRevisionId: context.meterMappingRevisionId,
+      meterFormulaRevisionId: context.meterFormulaRevisionId,
+      metricVersion: context.metricVersion,
+      ruleRevisionIds: [],
+      aggregationRule: "designated_total",
+      sourceView: "energy_scope_intervals",
+      queryIds: [
+        "scope_summary_v1",
+        "hourly_profile_v1",
+        "meter_breakdown_v1",
+        "operational_policy_scope_intervals_v1",
+        "operational_policy_meter_intervals_v1",
+      ],
+    },
+    metadata,
+  };
+  const projectRelease: EnergyPublishedProjectReleaseDto = {
+    id: "release-zero-coverage",
+    source: "template-revision",
+    projectId: context.projectId,
+    templateRevisionId: "template-zero-coverage",
+    templateRevisionSequence: 1,
+    recipe: { id: "energy-scope-analysis", version: "1" },
+    renderer: {
+      key: "ngee-ann-overview",
+      version: "1",
+      contractVersion: "project-analysis-snapshot@1",
+    },
+    hierarchyRevisionId: context.hierarchyRevisionId,
+    meterMappingRevisionId: context.meterMappingRevisionId,
+    meterFormulaRevisionId: context.meterFormulaRevisionId,
+    metricRevisionIds: [],
+    ruleRevisionIds: [],
+    businessCalendarVersion: context.businessCalendarVersion,
+    tariffScheduleVersion: context.tariffScheduleVersion,
+    publishedAt: "2026-08-03T00:00:00.000Z",
+    document: {
+      schema_version: 2,
+      templates: [{
+        template_id: "project",
+        target_kind: "project",
+        components: [{
+          component_revision_id: qualityComponent.revision_id,
+          enabled: true,
+        }],
+      }],
+    },
+    catalog: [qualityComponent],
+  };
+  return {
+    status: "ready",
+    snapshot: {
+      context: {
+        ...context,
+        primaryPeriod: { start: from, endExclusive: to },
+        projectReleaseId: projectRelease.id,
+      },
+      projectRelease,
+      recipe: projectRelease.recipe,
+      renderer: projectRelease.renderer,
+      dataSnapshot: { id: context.dataSnapshotId, importBatchIds: [], lastSeenAt: null },
+      dataQuality: quality,
+      evidence: [],
+      findings: [],
+      metadata,
+      analysis,
+    },
+  };
 }

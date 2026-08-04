@@ -386,6 +386,7 @@ export const extractEnergyQueryContextRequest = (
     || periodValue === "Last 7 days"
     || periodValue === "Last 30 days"
     || periodValue === "Previous week"
+    || periodValue === "Previous month"
     || periodValue === "Custom"
   )) {
     throw new Error("ENERGYIQ_PERIOD_INVALID");
@@ -394,6 +395,7 @@ export const extractEnergyQueryContextRequest = (
     || periodValue === "Last 7 days"
     || periodValue === "Last 30 days"
     || periodValue === "Previous week"
+    || periodValue === "Previous month"
     || periodValue === "Custom"
     ? periodValue
     : "Last 30 days";

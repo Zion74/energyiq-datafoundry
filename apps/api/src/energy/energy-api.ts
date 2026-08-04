@@ -1020,7 +1020,7 @@ const parseQueryContextRequest = (value: unknown): EnergyQueryContextRequest => 
     throw new Error("ENERGYIQ_PROJECT_REQUIRED");
   }
   const resource = value.resource === "water" ? "water" : "electricity";
-  const allowedPeriods = new Set(["Yesterday", "Last 7 days", "Last 30 days", "Previous week", "Custom"]);
+  const allowedPeriods = new Set(["Yesterday", "Last 7 days", "Last 30 days", "Previous week", "Previous month", "Custom"]);
   if (value.period !== undefined && (
     typeof value.period !== "string" || !allowedPeriods.has(value.period)
   )) {

@@ -52,10 +52,20 @@ describe("EnergyIQ UI regressions", () => {
     expect(adminSource).toContain("xl:grid-cols-[minmax(340px,400px)_minmax(0,1fr)]");
   });
 
-  it("restores the public Overview URL without shipping a demo range or fake previous month", () => {
+  it("restores the public Overview URL without shipping a demo range or browser month formula", () => {
     expect(overviewSource).not.toContain("demoRangeForProject");
     expect(overviewSource).not.toContain('value: "Last 30 days"');
-    expect(overviewSource).toContain('{ label: "Previous month", disabled: true');
+    expect(overviewSource).toContain('{ label: "Previous month", value: "Previous month" }');
+    expect(overviewViewStateFromSearchParams(new URLSearchParams(
+      "projectId=ngee-ann-polytechnic&scopeId=level-6&resource=electricity&period=Previous+month&from=2026-06-10&to=2026-06-16",
+    ))).toEqual({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "level-6",
+      resource: "electricity",
+      period: "Previous month",
+      from: "",
+      to: "",
+    });
     expect(overviewViewStateFromSearchParams(new URLSearchParams(
       "projectId=ngee-ann-polytechnic&scopeId=level-6&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16",
     ))).toEqual({

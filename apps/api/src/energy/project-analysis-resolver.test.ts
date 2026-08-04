@@ -77,7 +77,18 @@ describe("ProjectAnalysisResolver", () => {
     }
   });
 
-  it("returns configuration-required for an unregistered customer Project instead of a generic dashboard", async () => {
+  it.each([
+    {
+      period: "Previous week",
+      from: "2026-07-26T16:00:00.000Z",
+      to: "2026-08-02T16:00:00.000Z",
+    },
+    {
+      period: "Previous month",
+      from: "2026-06-30T16:00:00.000Z",
+      to: "2026-07-31T16:00:00.000Z",
+    },
+  ] as const)("returns configuration-required for an unregistered customer Project with $period", async ({ period, from, to }) => {
     const root = mkdtempSync(join(tmpdir(), "project-analysis-resolver-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
     const gateway = new LocalDataGateway(metadata);
@@ -106,7 +117,7 @@ describe("ProjectAnalysisResolver", () => {
           projectId: "customer-without-renderer",
           scopeId: "project",
           resource: "electricity",
-          period: "Previous week",
+          period,
         },
         now: new Date("2026-08-03T16:30:00.000Z"),
       });
@@ -116,10 +127,10 @@ describe("ProjectAnalysisResolver", () => {
         projectId: "customer-without-renderer",
         title: "Project analysis is not configured",
         context: {
-          period: "Previous week",
+          period,
           timezone: "Asia/Singapore",
-          from: "2026-07-26T16:00:00.000Z",
-          to: "2026-08-02T16:00:00.000Z",
+          from,
+          to,
           endExclusive: true,
         },
       });

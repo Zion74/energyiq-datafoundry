@@ -124,8 +124,8 @@ export function EnergyAnalysisWorkbench() {
 
 const normalizePeriod = (
   value: string | null,
-): "Yesterday" | "Last 7 days" | "Last 30 days" | "Previous week" | "Custom" => {
-  if (value === "Yesterday" || value === "Last 7 days" || value === "Previous week" || value === "Custom") {
+): "Yesterday" | "Last 7 days" | "Last 30 days" | "Previous week" | "Previous month" | "Custom" => {
+  if (value === "Yesterday" || value === "Last 7 days" || value === "Previous week" || value === "Previous month" || value === "Custom") {
     return value;
   }
   return "Last 30 days";

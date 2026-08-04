@@ -11,7 +11,7 @@ import type {
 import { energyIqPublishedMeterRoutingRevisionId } from "@datafoundry/metadata";
 
 export type EnergyResource = "electricity" | "water";
-export type EnergyPeriod = "Yesterday" | "Last 7 days" | "Last 30 days" | "Previous week" | "Custom";
+export type EnergyPeriod = "Yesterday" | "Last 7 days" | "Last 30 days" | "Previous week" | "Previous month" | "Custom";
 
 export type EnergyAccessContext = {
   role: EnergyIqRole;
@@ -450,6 +450,15 @@ const resolvePeriodRange = (input: {
     return {
       from: zonedStartOfDay(shiftDate(currentMonday, -7), input.timezone),
       to: zonedStartOfDay(currentMonday, input.timezone),
+    };
+  }
+  if (input.period === "Previous month") {
+    const currentMonthStart = `${today.slice(0, 7)}-01`;
+    const previousMonthEnd = shiftDate(currentMonthStart, -1);
+    const previousMonthStart = `${previousMonthEnd.slice(0, 7)}-01`;
+    return {
+      from: zonedStartOfDay(previousMonthStart, input.timezone),
+      to: zonedStartOfDay(currentMonthStart, input.timezone),
     };
   }
   const endDate = today;

@@ -213,6 +213,55 @@ describe("EnergyQueryContext", () => {
     }
   });
 
+  it.each([
+    {
+      name: "the current August date",
+      now: "2026-08-03T16:30:00.000Z",
+      from: "2026-06-30T16:00:00.000Z",
+      to: "2026-07-31T16:00:00.000Z",
+    },
+    {
+      name: "January crossing into the previous year",
+      now: "2026-01-14T16:30:00.000Z",
+      from: "2025-11-30T16:00:00.000Z",
+      to: "2025-12-31T16:00:00.000Z",
+    },
+    {
+      name: "March after leap-year February",
+      now: "2024-03-14T16:30:00.000Z",
+      from: "2024-01-31T16:00:00.000Z",
+      to: "2024-02-29T16:00:00.000Z",
+    },
+  ])("resolves Previous month in Singapore local calendar time for $name", ({ now, from, to }) => {
+    const root = mkdtempSync(join(tmpdir(), "energy-query-context-previous-month-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const context = resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user: metadata.users.getById({ user_id: "dev-user" }),
+        workspaceId: "default",
+        request: {
+          projectId: "ngee-ann-polytechnic",
+          period: "Previous month",
+        },
+        now: new Date(now),
+        env: {},
+      });
+
+      expect(context).toMatchObject({
+        period: "Previous month",
+        timezone: "Asia/Singapore",
+        from,
+        to,
+        endExclusive: true,
+      });
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
   it("pins Previous week range and resolvedAt to one instant across the Monday boundary", () => {
     const root = mkdtempSync(join(tmpdir(), "energy-query-context-previous-week-boundary-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
@@ -243,6 +292,45 @@ describe("EnergyQueryContext", () => {
       expect(context).toMatchObject({
         from: "2026-07-19T16:00:00.000Z",
         to: "2026-07-26T16:00:00.000Z",
+        resolvedAt: beforeBoundary,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
+  it("pins Previous month range and resolvedAt to one instant across the month boundary", () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-query-context-previous-month-boundary-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const NativeDate = Date;
+    const beforeBoundary = "2026-07-31T15:59:59.999Z";
+    const afterBoundary = "2026-07-31T16:00:00.001Z";
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const implicitInstants = [beforeBoundary, afterBoundary];
+      vi.stubGlobal("Date", class extends NativeDate {
+        constructor(value?: string | number) {
+          super(value ?? implicitInstants.shift() ?? afterBoundary);
+        }
+      });
+
+      const context = resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user: metadata.users.getById({ user_id: "dev-user" }),
+        workspaceId: "default",
+        request: {
+          projectId: "ngee-ann-polytechnic",
+          scopeId: "project",
+          resource: "electricity",
+          period: "Previous month",
+        },
+      });
+
+      expect(context).toMatchObject({
+        from: "2026-05-31T16:00:00.000Z",
+        to: "2026-06-30T16:00:00.000Z",
         resolvedAt: beforeBoundary,
       });
     } finally {

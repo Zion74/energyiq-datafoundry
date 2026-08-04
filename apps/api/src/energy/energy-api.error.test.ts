@@ -10,7 +10,7 @@ import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { ConfigApiContext } from "../routes/types.js";
 import { ensureEnergyIqBootstrap } from "./energy-bootstrap.js";
@@ -21,6 +21,60 @@ import {
 } from "./energy-api.js";
 
 describe("Energy API business error mapping", () => {
+  it.each([
+    {
+      period: "Previous week",
+      from: "2026-07-26T16:00:00.000Z",
+      to: "2026-08-02T16:00:00.000Z",
+    },
+    {
+      period: "Previous month",
+      from: "2026-06-30T16:00:00.000Z",
+      to: "2026-07-31T16:00:00.000Z",
+    },
+  ])("accepts canonical $period through the public query-context HTTP API", async ({ period, from, to }) => {
+    const root = mkdtempSync(join(tmpdir(), "energy-api-period-success-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-03T16:30:00.000Z"));
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const response = await handleEnergyApiRequest(
+        jsonPost({
+          projectId: "ngee-ann-polytechnic",
+          scopeId: "project",
+          resource: "electricity",
+          period,
+        }),
+        ["query-context", "resolve"],
+        {
+          metadataStore: metadata,
+          dataGateway: new LocalDataGateway(metadata),
+          userId: "dev-user",
+          workspaceId: "default",
+        } as Required<ConfigApiContext>,
+      );
+
+      expect(response).toMatchObject({
+        status: 200,
+        body: {
+          success: true,
+          data: {
+            period,
+            timezone: "Asia/Singapore",
+            from,
+            to,
+            endExclusive: true,
+          },
+        },
+      });
+    } finally {
+      vi.useRealTimers();
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
   it("rejects an explicitly unknown Period instead of silently using Last 30 days", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-api-period-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
