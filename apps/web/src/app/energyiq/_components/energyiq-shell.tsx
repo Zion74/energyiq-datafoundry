@@ -37,8 +37,8 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
   const showProjectSelector = !isAdminPage && publishedProjects.length > 1;
   const showStaticProjectContext = !isAdminPage && publishedProjects.length === 1 && activeProject;
   const selectProjectFromShell = (projectId: string) => {
-    selectProject(projectId);
     if (pathname !== "/energyiq/overview") {
+      selectProject(projectId);
       return;
     }
 

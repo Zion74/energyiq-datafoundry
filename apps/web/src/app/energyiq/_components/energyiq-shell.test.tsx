@@ -62,7 +62,7 @@ describe("EnergyIQ Shell Project navigation", () => {
     vi.unstubAllGlobals();
   });
 
-  it("switches the Overview Project in access and URL without carrying the old Scope", async () => {
+  it("switches the Overview Project through the URL without writing access state twice", async () => {
     await act(async () => {
       root.render(<EnergyIqShell><div>Overview</div></EnergyIqShell>);
     });
@@ -73,8 +73,7 @@ describe("EnergyIQ Shell Project navigation", () => {
       .find((option) => option.textContent?.includes("Project B"));
     await act(async () => projectBOption?.click());
 
-    expect(mockedAccess.selectProject).toHaveBeenCalledOnce();
-    expect(mockedAccess.selectProject).toHaveBeenCalledWith("project-b");
+    expect(mockedAccess.selectProject).not.toHaveBeenCalled();
     expect(navigation.replace).toHaveBeenCalledOnce();
     expect(navigation.replace).toHaveBeenCalledWith(
       "/energyiq/overview?projectId=project-b&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16",
