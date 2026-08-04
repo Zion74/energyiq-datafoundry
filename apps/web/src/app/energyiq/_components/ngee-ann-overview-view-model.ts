@@ -1395,22 +1395,30 @@ function invalidDailyAnomalyBundleReason(
   ) {
     return "The anomaly bundle identity, timezone, cutoff or pinned Rule is invalid.";
   }
-  const expectedScopes = [
-    { id: snapshot.context.scopeId, name: snapshot.context.scopeName, type: "project" },
-    ...snapshot.analysis.childScopes
-      .filter((scope) => scope.nodeType === "level")
-      .map((scope) => ({ id: scope.nodeId, name: scope.name, type: scope.nodeType })),
-  ];
+  const immediateLevels = snapshot.analysis.childScopes
+    .filter((scope) => scope.nodeType === "level");
+  const immediateLevelById = new Map(
+    immediateLevels.map((scope) => [scope.nodeId, scope]),
+  );
+  const projectScope = bundle.scopes[0];
+  const bundledLevelScopes = bundle.scopes.slice(1);
+  const bundledLevelIds = new Set<string>();
   if (
-    expectedScopes.length !== 3
-    || bundle.scopes.length !== expectedScopes.length
-    || bundle.scopes.some((scope, index) => {
-      const expected = expectedScopes[index];
-      return !expected
-        || scope.scopeId !== expected.id
-        || scope.scopeName !== expected.name
-        || scope.scopeType !== expected.type;
+    immediateLevels.length !== 2
+    || immediateLevelById.size !== immediateLevels.length
+    || bundle.scopes.length !== 3
+    || !projectScope
+    || projectScope.scopeId !== snapshot.context.scopeId
+    || projectScope.scopeName !== snapshot.context.scopeName
+    || projectScope.scopeType !== "project"
+    || bundledLevelScopes.length !== immediateLevelById.size
+    || bundledLevelScopes.some((scope) => {
+      const expected = immediateLevelById.get(scope.scopeId);
+      if (!expected || bundledLevelIds.has(scope.scopeId)) return true;
+      bundledLevelIds.add(scope.scopeId);
+      return scope.scopeName !== expected.name || scope.scopeType !== "level";
     })
+    || bundledLevelIds.size !== immediateLevelById.size
   ) {
     return "The anomaly Scope contract is incomplete or out of order.";
   }
@@ -1424,7 +1432,7 @@ function invalidDailyAnomalyBundleReason(
   const rowsValid = bundle.scopes.every((scope) => {
     const selectedScope = { id: scope.scopeId, name: scope.scopeName };
     const expectedImmediateLevels = scope.scopeType === "project"
-      ? expectedScopes.slice(1).map(({ id, name }) => ({ id, name }))
+      ? bundledLevelScopes.map(({ scopeId, scopeName }) => ({ id: scopeId, name: scopeName }))
       : [];
     return scope.rows.length === spine.length
       && scope.rows.every((row, index) => {

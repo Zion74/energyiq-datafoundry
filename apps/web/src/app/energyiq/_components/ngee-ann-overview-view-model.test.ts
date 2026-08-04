@@ -751,6 +751,66 @@ describe("Ngee Ann Overview ViewModel", () => {
     }
   });
 
+  it("uses the stable anomaly Scope order instead of usage-ranked childScopes for Project detail", () => {
+    const liveOrder = ngeeAnnGoldenSnapshot();
+    const liveBundle = dailyAnomalyBundle(liveOrder);
+    [liveBundle.scopes[1], liveBundle.scopes[2]] = [liveBundle.scopes[2]!, liveBundle.scopes[1]!];
+    for (const row of liveBundle.scopes[0]!.rows) {
+      if (row.outcome === "triggered") {
+        [row.detailSeries[1], row.detailSeries[2]] = [row.detailSeries[2]!, row.detailSeries[1]!];
+      }
+    }
+
+    expect(liveOrder.analysis.childScopes.map((scope) => scope.nodeId)).toEqual(["level-7", "level-6"]);
+    expect(liveBundle.scopes.map((scope) => scope.scopeId)).toEqual(["project", "level-6", "level-7"]);
+    expect(buildNgeeAnnOverviewViewModel(liveOrder).dailyAnomalies.status).toBe("available");
+
+    const mismatchedProjectDetail = ngeeAnnGoldenSnapshot();
+    const mismatchedBundle = dailyAnomalyBundle(mismatchedProjectDetail);
+    [mismatchedBundle.scopes[1], mismatchedBundle.scopes[2]] = [
+      mismatchedBundle.scopes[2]!,
+      mismatchedBundle.scopes[1]!,
+    ];
+
+    expect(buildNgeeAnnOverviewViewModel(mismatchedProjectDetail).dailyAnomalies).toMatchObject({
+      status: "unavailable",
+      incidents: [],
+    });
+  });
+
+  it.each([
+    {
+      name: "duplicate bundled Level",
+      mutate: (snapshot: GoldenSnapshot) => {
+        const scopes = dailyAnomalyBundle(snapshot).scopes;
+        scopes[2]!.scopeId = scopes[1]!.scopeId;
+        scopes[2]!.scopeName = scopes[1]!.scopeName;
+      },
+    },
+    {
+      name: "Level outside the immediate hierarchy",
+      mutate: (snapshot: GoldenSnapshot) => {
+        const level = dailyAnomalyBundle(snapshot).scopes[1]!;
+        level.scopeId = "level-8";
+        level.scopeName = "Level 8";
+      },
+    },
+    {
+      name: "missing immediate hierarchy Level",
+      mutate: (snapshot: GoldenSnapshot) => {
+        snapshot.analysis.childScopes.pop();
+      },
+    },
+  ])("fails the daily anomaly Scope set closed for a $name", ({ mutate }) => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    mutate(snapshot);
+
+    expect(buildNgeeAnnOverviewViewModel(snapshot).dailyAnomalies).toMatchObject({
+      status: "unavailable",
+      incidents: [],
+    });
+  });
+
   it("summarises triggered, within-threshold and suppressed rows without treating suppressed as normal", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     const suppressed = dailyAnomalyBundle(snapshot).scopes[0]!.rows[0]!;
