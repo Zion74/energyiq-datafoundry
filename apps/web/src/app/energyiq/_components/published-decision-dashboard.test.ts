@@ -540,10 +540,45 @@ describe("published Overview URL reload", () => {
       });
       expect(mockedRouter.replace).not.toHaveBeenCalled();
       expect(window.location.pathname + window.location.search).toBe(periodUrl);
-      expect(container.textContent).toContain("Partial data");
-      expect(container.textContent).toContain("0.0%");
+      expect(container.textContent).toContain("Unavailable");
+      expect(container.textContent).toContain("0% coverage");
     },
   );
+
+  it("keeps the default Last 7 days selected until the user chooses the Snapshot-provided latest range", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    const defaultUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity";
+    window.history.replaceState({}, "", defaultUrl);
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockResolvedValue(readyZeroCoverageResolution("Last 7 days"));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
+    expect(resolveProjectAnalysis).toHaveBeenCalledWith({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "project",
+      resource: "electricity",
+      period: "Last 7 days",
+    });
+    expect(mockedRouter.replace).not.toHaveBeenCalled();
+    expect(window.location.pathname + window.location.search).toBe(defaultUrl);
+    const latestButton = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent?.includes("View latest available data"));
+    expect(latestButton).toBeTruthy();
+
+    await act(async () => latestButton?.click());
+
+    expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
+    expect(mockedRouter.replace).toHaveBeenCalledOnce();
+    expect(mockedRouter.replace).toHaveBeenCalledWith(
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16",
+    );
+  });
 
   it("carries the server-resolved range when a standard Period changes to Custom", async () => {
     const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
@@ -1027,16 +1062,20 @@ function readyRangeResolution(): EnergyProjectAnalysisResolutionDto {
 }
 
 function readyZeroCoverageResolution(
-  period: "Previous week" | "Previous month",
+  period: "Last 7 days" | "Previous week" | "Previous month",
 ): EnergyProjectAnalysisResolutionDto {
   const qualityComponent = component("quality.data_coverage@1", "quality", "data_quality_summary_v1");
   const quality = dataQuality(0);
   const from = period === "Previous week"
     ? "2026-07-26T16:00:00.000Z"
-    : "2026-06-30T16:00:00.000Z";
+    : period === "Previous month"
+      ? "2026-06-30T16:00:00.000Z"
+      : "2026-07-27T16:00:00.000Z";
   const to = period === "Previous week"
     ? "2026-08-02T16:00:00.000Z"
-    : "2026-07-31T16:00:00.000Z";
+    : period === "Previous month"
+      ? "2026-07-31T16:00:00.000Z"
+      : "2026-08-03T16:00:00.000Z";
   const context: EnergyQueryContextDto = {
     userId: "user-1",
     workspaceId: "workspace-1",
@@ -1200,7 +1239,7 @@ function readyZeroCoverageResolution(
     },
     catalog: [qualityComponent],
   };
-  return {
+  const resolution: EnergyProjectAnalysisResolutionDto = {
     status: "ready",
     snapshot: {
       context: {
@@ -1219,4 +1258,10 @@ function readyZeroCoverageResolution(
       analysis,
     },
   };
+  if (resolution.status === "ready") {
+    Object.assign(resolution.snapshot, {
+      latestAvailablePeriod: { period: "Custom", from: "2026-06-10", to: "2026-06-16" },
+    });
+  }
+  return resolution;
 }

@@ -6,6 +6,14 @@ import {
   ProjectRenderer,
   selectProjectRenderer,
 } from "./project-renderer-registry";
+import { ngeeAnnGoldenSnapshot } from "./ngee-ann-overview.test-fixture";
+
+const emptyPlan = {
+  template_id: "project",
+  target_kind: "project" as const,
+  sections: [],
+  module_count: 0,
+};
 
 describe("Project Renderer Registry", () => {
   it("selects the registered Ngee Ann, Preschool and Admin Generic Preview renderers", () => {
@@ -37,5 +45,32 @@ describe("Project Renderer Registry", () => {
     );
     expect(markup).toContain("Project analysis is not configured");
     expect(markup).not.toContain("This generic dashboard must not render");
+  });
+
+  it("routes Ngee Ann to its independent Snapshot Renderer instead of forwarding to EnergyTemplateRenderer", () => {
+    const state = {
+      status: "ready" as const,
+      snapshot: ngeeAnnGoldenSnapshot(),
+      plan: emptyPlan,
+    };
+
+    const ngeeAnnMarkup = renderToStaticMarkup(
+      <ProjectRenderer
+        request={{ mode: "customer", rendererKey: "ngee-ann-overview" }}
+        state={state}
+      />,
+    );
+    const preschoolMarkup = renderToStaticMarkup(
+      <ProjectRenderer
+        request={{ mode: "customer", rendererKey: "preschool-overview" }}
+        state={state}
+      />,
+    );
+
+    expect(ngeeAnnMarkup).toContain("data-ngee-ann-overview=\"true\"");
+    expect(ngeeAnnMarkup).toContain("1531.1683");
+    expect(ngeeAnnMarkup).not.toContain("No modules are enabled");
+    expect(preschoolMarkup).toContain("No modules are enabled");
+    expect(preschoolMarkup).not.toContain("data-ngee-ann-overview");
   });
 });

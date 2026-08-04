@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   configApi,
+  type EnergyProjectAnalysisSnapshotDto,
   type EnergyProjectAnalysisResolutionDto,
   type EnergyProjectHierarchyDto,
   type EnergyQueryContextRequestDto,
@@ -25,7 +26,9 @@ import {
   applyProjectAnalysisQualityPolicy,
   ProjectRenderer,
   type ProjectAnalysisQualityPolicy,
+  type ProjectRendererState,
 } from "./project-renderer-registry";
+import type { NgeeAnnLatestAvailableRange } from "./ngee-ann-overview-view-model";
 import { ScopeMetadataStatus } from "./scope-metadata-status";
 
 const periodOptions: ReadonlyArray<{
@@ -200,6 +203,9 @@ function PublishedDecisionDashboardView({
   const currentResolution = resolution?.projectId === projectId ? resolution.value : null;
   const currentSnapshot = currentResolution?.status === "ready" ? currentResolution.snapshot : null;
   const currentAnalysis = currentSnapshot?.analysis ?? null;
+  const latestAvailableRange = currentSnapshot
+    ? readLatestAvailablePeriod(currentSnapshot)
+    : null;
   const projectTemplate = currentSnapshot?.projectRelease.document.templates
     .find((candidate) => candidate.template_id === "project") ?? null;
   const renderPlan = useMemo(
@@ -320,6 +326,10 @@ function PublishedDecisionDashboardView({
     : currentResolution?.status === "configuration-required"
       ? { mode: "customer" as const, rendererKey: null }
       : null;
+  const projectRendererState = rendererRequest
+    ? toProjectRendererState(rendererState, currentSnapshot)
+    : null;
+  const isNgeeAnnRenderer = rendererRequest?.rendererKey === "ngee-ann-overview";
   const publishedSections = rendererState.status === "ready" ? rendererState.plan.sections : [];
 
   return (
@@ -329,11 +339,15 @@ function PublishedDecisionDashboardView({
           <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted">
             <span>{selectedProject?.name ?? "Select a Project"}</span>
             <EnergyIcon name="chevron" className="h-3 w-3" />
-            <span>Published analysis</span>
+            <span>{isNgeeAnnRenderer ? "Published overview" : "Published analysis"}</span>
           </div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Energy analysis</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            {isNgeeAnnRenderer ? "Energy overview" : "Energy analysis"}
+          </h1>
           <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted">
-            A Project-specific decision view rendered from the published EnergyIQ Template Schema.
+            {isNgeeAnnRenderer
+              ? "A decision view of the selected Scope, Period and trusted Project facts."
+              : "A Project-specific decision view rendered from the published EnergyIQ Template Schema."}
           </p>
         </div>
 
@@ -361,6 +375,7 @@ function PublishedDecisionDashboardView({
               <button
                 key={item}
                 type="button"
+                aria-pressed={resource === item}
                 onClick={() => navigateOverview({
                   resource: item,
                 })}
@@ -379,6 +394,7 @@ function PublishedDecisionDashboardView({
               <button
                 key={item.label}
                 type="button"
+                aria-pressed={Boolean(item.value && period === item.value)}
                 onClick={() => item.value ? navigateOverview(item.value === "Custom"
                   ? {
                     period: item.value,
@@ -446,13 +462,27 @@ function PublishedDecisionDashboardView({
         </div>
       </div>
 
-      {currentSnapshot ? (
+      {currentSnapshot && !isNgeeAnnRenderer ? (
         <div className="mt-6">
           <ScopeMetadataStatus metadata={currentSnapshot.metadata} mode="interactive" />
         </div>
       ) : null}
 
-      {rendererState.status === "ready" ? (
+      {rendererState.status === "ready" && isNgeeAnnRenderer && rendererRequest && projectRendererState ? (
+        <div className="mt-6">
+          <ProjectRenderer
+            request={rendererRequest}
+            state={projectRendererState}
+            onRetry={() => setRefreshRevision((current) => current + 1)}
+            latestAvailableRange={latestAvailableRange}
+            onViewLatestAvailableData={(range) => navigateOverview({
+              period: "Custom",
+              from: range.from,
+              to: range.to,
+            })}
+          />
+        </div>
+      ) : rendererState.status === "ready" ? (
         <div className="mt-6 lg:grid lg:grid-cols-[200px_minmax(0,1fr)] lg:items-start lg:gap-8 xl:grid-cols-[220px_minmax(0,1fr)]">
           <aside className="lg:sticky lg:top-6">
             <p className="mb-2 hidden px-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-light lg:block">Published sections</p>
@@ -477,8 +507,8 @@ function PublishedDecisionDashboardView({
           </aside>
 
           <div className="min-w-0">
-            {rendererRequest ? (
-              <ProjectRenderer request={rendererRequest} state={rendererState} sectionIdPrefix="customer-overview" onRetry={() => setRefreshRevision((current) => current + 1)} />
+            {rendererRequest && projectRendererState ? (
+              <ProjectRenderer request={rendererRequest} state={projectRendererState} sectionIdPrefix="customer-overview" onRetry={() => setRefreshRevision((current) => current + 1)} />
             ) : (
               <EnergyTemplateRenderer state={rendererState} sectionIdPrefix="customer-overview" onRetry={() => setRefreshRevision((current) => current + 1)} />
             )}
@@ -486,8 +516,8 @@ function PublishedDecisionDashboardView({
         </div>
       ) : (
         <div className="mt-6">
-          {rendererRequest ? (
-            <ProjectRenderer request={rendererRequest} state={rendererState} onRetry={() => setRefreshRevision((current) => current + 1)} />
+          {rendererRequest && projectRendererState ? (
+            <ProjectRenderer request={rendererRequest} state={projectRendererState} onRetry={() => setRefreshRevision((current) => current + 1)} />
           ) : (
             <EnergyTemplateRenderer state={rendererState} onRetry={() => setRefreshRevision((current) => current + 1)} />
           )}
@@ -531,6 +561,39 @@ function resolveOverviewRendererState(input: {
     plan: input.plan,
     ...(input.advisories?.length ? { advisories: input.advisories } : {}),
   };
+}
+
+function toProjectRendererState(
+  state: EnergyTemplateRendererState,
+  snapshot: EnergyProjectAnalysisSnapshotDto | null,
+): ProjectRendererState {
+  if (state.status !== "ready") return state;
+  if (!snapshot) {
+    return {
+      status: "error",
+      title: "Published analysis is unavailable",
+      detail: "The Project Analysis Snapshot is missing. Refresh this same Project and Period.",
+    };
+  }
+  return {
+    status: "ready",
+    snapshot,
+    plan: state.plan,
+    ...(state.advisories?.length ? { advisories: state.advisories } : {}),
+  };
+}
+
+function readLatestAvailablePeriod(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+): NgeeAnnLatestAvailableRange | null {
+  if (!("latestAvailablePeriod" in snapshot)) return null;
+  const period = snapshot.latestAvailablePeriod;
+  if (!period || typeof period !== "object") return null;
+  if (!("period" in period) || period.period !== "Custom") return null;
+  if (!("from" in period) || typeof period.from !== "string") return null;
+  if (!("to" in period) || typeof period.to !== "string") return null;
+  if (!isValidDateInput(period.from) || !isValidDateInput(period.to) || period.from > period.to) return null;
+  return { from: period.from, to: period.to };
 }
 
 function DateField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {

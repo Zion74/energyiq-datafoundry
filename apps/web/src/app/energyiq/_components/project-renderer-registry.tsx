@@ -1,12 +1,20 @@
 import React, { type ReactNode } from "react";
 
-import type { EnergyScopeAnalysisDto } from "../../../lib/config-api";
+import type {
+  EnergyProjectAnalysisSnapshotDto,
+  EnergyScopeAnalysisDto,
+} from "../../../lib/config-api";
 import {
   EnergyTemplateRenderer,
   type EnergyTemplateRenderAdvisory,
   type EnergyTemplateRendererState,
 } from "./energy-template-renderer";
 import type { EnergyTemplateRenderPlan } from "./energy-template-render-plan";
+import {
+  NgeeAnnOverviewRenderer,
+  type NgeeAnnOverviewRendererState,
+} from "./ngee-ann-overview-renderer";
+import type { NgeeAnnLatestAvailableRange } from "./ngee-ann-overview-view-model";
 
 export type ProjectRendererRequest =
   | {
@@ -59,6 +67,34 @@ export type ProjectAnalysisQualityPolicy = {
   saveAllowed: boolean;
 };
 
+export type ProjectRendererState =
+  | Exclude<EnergyTemplateRendererState, { status: "ready" }>
+  | {
+    status: "ready";
+    snapshot: EnergyProjectAnalysisSnapshotDto;
+    plan: EnergyTemplateRenderPlan;
+    advisories?: readonly EnergyTemplateRenderAdvisory[];
+  };
+
+type ProjectRendererCommonProps = {
+  sectionIdPrefix?: string;
+  onRetry?: () => void;
+};
+
+type CustomerProjectRendererProps = ProjectRendererCommonProps & {
+  request: Extract<ProjectRendererRequest, { mode: "customer" }>;
+  state: ProjectRendererState;
+  onViewLatestAvailableData?: (range: NgeeAnnLatestAvailableRange) => void;
+  latestAvailableRange?: NgeeAnnLatestAvailableRange | null;
+};
+
+type AdminProjectRendererProps = ProjectRendererCommonProps & {
+  request: Extract<ProjectRendererRequest, { mode: "admin-preview" }>;
+  state: EnergyTemplateRendererState;
+};
+
+export type ProjectRendererProps = CustomerProjectRendererProps | AdminProjectRendererProps;
+
 export function applyProjectAnalysisQualityPolicy(input: {
   plan: EnergyTemplateRenderPlan;
   dataQuality: EnergyScopeAnalysisDto["dataHealth"];
@@ -98,18 +134,8 @@ export function selectProjectRenderer(request: ProjectRendererRequest): ProjectR
   return CONFIGURATION_REQUIRED;
 }
 
-export function ProjectRenderer({
-  request,
-  state,
-  sectionIdPrefix,
-  onRetry,
-}: {
-  request: ProjectRendererRequest;
-  state: EnergyTemplateRendererState;
-  sectionIdPrefix?: string;
-  onRetry?: () => void;
-}): ReactNode {
-  const selection = selectProjectRenderer(request);
+export function ProjectRenderer(props: ProjectRendererProps): ReactNode {
+  const selection = selectProjectRenderer(props.request);
   if (selection.status === "configuration-required") {
     return (
       <EnergyTemplateRenderer
@@ -121,13 +147,54 @@ export function ProjectRenderer({
       />
     );
   }
+  if (isAdminProjectRendererProps(props)) {
+    return (
+      <div data-project-renderer={selection.key} data-renderer-version={selection.version}>
+        <EnergyTemplateRenderer
+          state={props.state}
+          {...(props.sectionIdPrefix ? { sectionIdPrefix: props.sectionIdPrefix } : {})}
+          {...(props.onRetry ? { onRetry: props.onRetry } : {})}
+        />
+      </div>
+    );
+  }
+  const { state } = props;
+  if (selection.key === "ngee-ann-overview") {
+    const ngeeAnnState: NgeeAnnOverviewRendererState = state.status === "ready"
+      ? { status: "ready", snapshot: state.snapshot }
+      : state;
+    return (
+      <div data-project-renderer={selection.key} data-renderer-version={selection.version}>
+        <NgeeAnnOverviewRenderer
+          state={ngeeAnnState}
+          {...(props.onRetry ? { onRetry: props.onRetry } : {})}
+          {...(props.onViewLatestAvailableData ? { onViewLatestAvailableData: props.onViewLatestAvailableData } : {})}
+          {...(props.latestAvailableRange ? { latestAvailableRange: props.latestAvailableRange } : {})}
+        />
+      </div>
+    );
+  }
+  const genericState: EnergyTemplateRendererState = state.status === "ready"
+    ? {
+      status: "ready",
+      analysis: state.snapshot.analysis,
+      plan: state.plan,
+      ...(state.advisories?.length ? { advisories: state.advisories } : {}),
+    }
+    : state;
   return (
     <div data-project-renderer={selection.key} data-renderer-version={selection.version}>
       <EnergyTemplateRenderer
-        state={state}
-        {...(sectionIdPrefix ? { sectionIdPrefix } : {})}
-        {...(onRetry ? { onRetry } : {})}
+        state={genericState}
+        {...(props.sectionIdPrefix ? { sectionIdPrefix: props.sectionIdPrefix } : {})}
+        {...(props.onRetry ? { onRetry: props.onRetry } : {})}
       />
     </div>
   );
+}
+
+function isAdminProjectRendererProps(
+  props: ProjectRendererProps,
+): props is AdminProjectRendererProps {
+  return props.request.mode === "admin-preview";
 }
