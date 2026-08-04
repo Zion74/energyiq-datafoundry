@@ -416,6 +416,37 @@ export class EnergyIqOperationalPolicyStore {
     `).all(projectId).filter(isRecord).map(mapOperatingCalendarRevision);
   }
 
+  resolveOperatingCalendarExceptionDates(input: {
+    project_id: string;
+    scope_id: string;
+    version_id: string;
+    period: { from: string; to: string };
+  }): {
+    timezone: string;
+    business_calendar_version: string;
+    exception_dates: string[];
+  } | undefined {
+    const period = parsePeriod(input.period);
+    const scopeLineage = this.resolveScopeLineage(input.project_id, input.scope_id);
+    const row = this.db.prepare(`
+      SELECT * FROM energyiq_operating_calendar_revisions
+      WHERE version_id = ? AND project_id = ?
+    `).get(input.version_id, input.project_id);
+    if (!isRecord(row)) return undefined;
+    const revision = mapOperatingCalendarRevision(row);
+    const exceptionDates = resolveOperatingCalendarExceptionDates({
+      revision,
+      scopeLineage,
+      period,
+    });
+    if (!exceptionDates) return undefined;
+    return {
+      timezone: revision.timezone,
+      business_calendar_version: revision.version_id,
+      exception_dates: exceptionDates,
+    };
+  }
+
   activateProjectPolicies(input: {
     project_id: string;
     tariff_schedule_version?: string;
@@ -965,12 +996,11 @@ const resolveOperatingWindows = (input: {
   const lastDate = localDateAtInstant(input.period.toMs - 1, input.revision.timezone);
   const windows: EffectiveOperatingWindow[] = [];
   for (const date of localDateRange(firstDate, lastDate)) {
-    const candidates = input.revision.entries
-      .filter((entry) => entry.effective_from <= date && (!entry.effective_to || entry.effective_to > date))
-      .map((entry) => ({ entry, rank: ownerRank(entry.owner, input.scopeLineage) }))
-      .filter((candidate) => Number.isFinite(candidate.rank))
-      .sort((left, right) => left.rank - right.rank);
-    const selected = candidates[0]?.entry;
+    const selected = resolveOperatingCalendarEntryForDate({
+      entries: input.revision.entries,
+      scopeLineage: input.scopeLineage,
+      date,
+    });
     if (!selected) return undefined;
     const exception = selected.exceptions?.find((item) => item.date === date);
     const ranges = exception?.operating ?? selected.weekly[dayAtLocalDate(date)];
@@ -986,6 +1016,39 @@ const resolveOperatingWindows = (input: {
   }
   return windows;
 };
+
+const resolveOperatingCalendarExceptionDates = (input: {
+  revision: EnergyIqOperatingCalendarRevision;
+  scopeLineage: string[];
+  period: { fromMs: number; toMs: number };
+}): string[] | undefined => {
+  const firstDate = localDateAtInstant(input.period.fromMs, input.revision.timezone);
+  const lastDate = localDateAtInstant(input.period.toMs - 1, input.revision.timezone);
+  const exceptionDates: string[] = [];
+  for (const date of localDateRange(firstDate, lastDate)) {
+    const selected = resolveOperatingCalendarEntryForDate({
+      entries: input.revision.entries,
+      scopeLineage: input.scopeLineage,
+      date,
+    });
+    if (!selected) return undefined;
+    if (selected.exceptions?.some((exception) => exception.date === date)) {
+      exceptionDates.push(date);
+    }
+  }
+  return exceptionDates;
+};
+
+const resolveOperatingCalendarEntryForDate = (input: {
+  entries: EnergyIqOperatingCalendarEntry[];
+  scopeLineage: string[];
+  date: string;
+}): EnergyIqOperatingCalendarEntry | undefined => input.entries
+  .filter((entry) => entry.effective_from <= input.date
+    && (!entry.effective_to || entry.effective_to > input.date))
+  .map((entry) => ({ entry, rank: ownerRank(entry.owner, input.scopeLineage) }))
+  .filter((candidate) => Number.isFinite(candidate.rank))
+  .sort((left, right) => left.rank - right.rank)[0]?.entry;
 
 const canonicalizeIntervals = (
   intervals: EnergyIqAnalysisInterval[],

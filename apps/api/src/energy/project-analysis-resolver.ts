@@ -180,6 +180,7 @@ export const resolveProjectAnalysis = async (input: {
     dataGateway: input.dataGateway,
     userId: input.user.id,
     context: releasedContext,
+    projectReleaseId: projectRelease.id,
     includeTimeBehaviour: projectRelease.renderer.key === "ngee-ann-overview",
     ruleRevisions: input.metadataStore.energyIq.rules.listRevisions()
       .filter((rule) => projectRelease.ruleRevisionIds.includes(rule.revision_id)),

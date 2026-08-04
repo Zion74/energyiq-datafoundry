@@ -170,12 +170,34 @@ describe("EnergyScopeAnalysis", () => {
       );
       if (!anomalyRule) throw new Error("DAILY_USAGE_ABOVE_BASELINE_RULE_MISSING");
 
+      const invalidRuleAnalysis = await executeEnergyScopeAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        context,
+        databasePath,
+        projectReleaseId: "ngee-ann-test-release@1",
+        ruleRevisions: [{
+          ...anomalyRule,
+          revision_id: "comparison.daily_usage_above_baseline@2",
+          metric_revision_ids: ["energy.some_other_metric@1"],
+          parameters: { ...anomalyRule.parameters, relative_threshold_pct: 21 },
+        }],
+        includeTimeBehaviour: false,
+      });
+      expect(invalidRuleAnalysis.dailyUsageAnomalies).toMatchObject({
+        status: "unavailable",
+        reason: { code: "DAILY_USAGE_ANOMALY_RULE_INVALID" },
+      });
+      expect(invalidRuleAnalysis.provenance.queryIds).not.toContain("time_slot_anomaly_v1");
+
       const analysis = await executeEnergyScopeAnalysis({
         metadataStore: metadata,
         dataGateway: gateway,
         userId: "dev-user",
         context,
         databasePath,
+        projectReleaseId: "ngee-ann-test-release@1",
         ruleRevisions: [anomalyRule],
         includeTimeBehaviour: false,
       });
@@ -245,6 +267,7 @@ describe("EnergyScopeAnalysis", () => {
         userId: "dev-user",
         context,
         databasePath,
+        projectReleaseId: "ngee-ann-test-release@1",
         ruleRevisions: [anomalyRule],
         includeTimeBehaviour: false,
       });
@@ -268,11 +291,13 @@ describe("EnergyScopeAnalysis", () => {
           direction: "above",
         },
         evidencePins: {
+          projectReleaseId: "ngee-ann-test-release@1",
           dataSnapshotId: analysis.context.dataSnapshotId,
           hierarchyRevisionId: analysis.context.hierarchyRevisionId,
           meterMappingRevisionId: analysis.context.meterMappingRevisionId,
           meterFormulaRevisionId: analysis.context.meterFormulaRevisionId,
           metricVersion: analysis.context.metricVersion,
+          businessCalendarVersion: "sg-calendar-v1",
           queryIds: ["time_slot_anomaly_v1"],
         },
       });
@@ -333,7 +358,7 @@ describe("EnergyScopeAnalysis", () => {
       expect(level7Selected).toMatchObject({
         anomalyId: "daily-usage-above-baseline:level-7:2026-06-11",
         incidentId: expect.stringContaining(
-          ":comparison.daily_usage_above_baseline@1:level-7:2026-06-10:2026-06-11",
+          ":ngee-ann-test-release@1:sg-calendar-v1:comparison.daily_usage_above_baseline@1:level-7:2026-06-10:2026-06-11",
         ),
         ruleRevisionId: "comparison.daily_usage_above_baseline@1",
         metricId: "energy.total_usage_kwh@1",
@@ -388,6 +413,267 @@ describe("EnergyScopeAnalysis", () => {
       expect(projectSelected?.detailSeries.filter(
         (series) => series.relationship === "component_circuit",
       )).toHaveLength(14);
+    } finally {
+      metadata.close();
+      removeTemporaryEnergyFixture(root);
+    }
+  }, 30_000);
+
+  it("requires complete baseline days and rejects a partial-null official Day Type", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-analysis-anomaly-complete-baseline-"));
+    const databasePath = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const gateway = new LocalDataGateway(metadata);
+    const runSqlReadonly = gateway.runSqlReadonly.bind(gateway);
+    let projectPartialBaselineValidIntervalCount: number | null = null;
+    gateway.runSqlReadonly = async (request) => {
+      const result = await runSqlReadonly(request);
+      if (!request.sql.includes("series_definitions.series_id")) return result;
+      const projectRow = result.rows.find((row) => row[0] === "scope:project");
+      if (projectRow) {
+        const cells = JSON.parse(String(projectRow[1])) as Array<Record<string, unknown>>;
+        projectPartialBaselineValidIntervalCount = cells
+          .filter((cell) => cell.local_date === "2026-06-04")
+          .reduce((sum, cell) => sum + Number(cell.valid_interval_count), 0);
+      }
+      return result;
+    };
+    let removedBaselineInterval = false;
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      await materializeNgeeAnnGoldenFixture(databasePath, metadata, {
+        includeAnomalyHistory: true,
+        transformIntervalFacts: (facts) => facts.flatMap((fact) => {
+          if (!removedBaselineInterval
+            && fact.meterPointId === "mapping-lvl-7-total-office-load-18"
+            && fact.localDate === "2026-06-04"
+            && fact.localHour === 0) {
+            removedBaselineInterval = true;
+            return [];
+          }
+          if (fact.meterPointId === "mapping-lvl-7-total-office-load-18"
+            && fact.localDate === "2026-06-11"
+            && fact.localHour === 0) {
+            return [{ ...fact, dayType: null as unknown as string }];
+          }
+          return [fact];
+        }),
+      });
+      metadata.energyIq.operationalPolicy.publishOperatingCalendar({
+        version_id: "sg-calendar-v1",
+        project_id: NGEE_ANN_GOLDEN.projectId,
+        published_by: "dev-user",
+        entries: [{
+          id: "ngee-ann-anomaly-complete-baseline-calendar",
+          owner: { kind: "project" },
+          effective_from: "2026-04-01",
+          weekly: allDays("00:00", "24:00"),
+          exceptions: ["2026-05-31", "2026-06-01"]
+            .map((date) => ({ date, operating: [], label: "Ignored" })),
+        }],
+      });
+      const user = metadata.users.getById({ user_id: "dev-user" });
+      const context = resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user,
+        workspaceId: "default",
+        request: {
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "project",
+          resource: "electricity",
+          period: "Custom",
+          from: NGEE_ANN_GOLDEN.selection.period.localFrom,
+          to: "2026-06-11",
+        },
+      });
+      const anomalyRule = metadata.energyIq.rules.listRevisions().find(
+        (rule) => rule.revision_id === "comparison.daily_usage_above_baseline@1",
+      );
+      if (!anomalyRule) throw new Error("DAILY_USAGE_ABOVE_BASELINE_RULE_MISSING");
+      const analysis = await executeEnergyScopeAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        context,
+        databasePath,
+        projectReleaseId: "ngee-ann-test-release@1",
+        ruleRevisions: [anomalyRule],
+        includeTimeBehaviour: false,
+      });
+      if (analysis.dailyUsageAnomalies?.status !== "available") {
+        throw new Error("Expected available daily usage anomaly completeness checks");
+      }
+      const rows = (scopeId: string) => new Map(
+        analysis.dailyUsageAnomalies?.status === "available"
+          ? analysis.dailyUsageAnomalies.scopes.find((scope) => scope.scopeId === scopeId)
+            ?.rows.map((row) => [row.localDate, row])
+          : [],
+      );
+      expect(removedBaselineInterval).toBe(true);
+      expect(projectPartialBaselineValidIntervalCount).toBe(383);
+      expect(rows("project").get("2026-06-10")).toMatchObject({
+        expectedMeterIntervalCount: 384,
+        baselineDates: ["2026-06-05", "2026-06-08", "2026-06-09"],
+        baselineSampleCount: 3,
+        outcome: "suppressed",
+        suppressionReason: { code: "BASELINE_SAMPLE_COUNT_INSUFFICIENT" },
+      });
+      for (const scopeId of ["project", "level-7"]) {
+        expect(rows(scopeId).get("2026-06-11")).toMatchObject({
+          dayType: null,
+          outcome: "suppressed",
+          suppressionReason: { code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE" },
+        });
+      }
+    } finally {
+      metadata.close();
+      removeTemporaryEnergyFixture(root);
+    }
+  }, 30_000);
+
+  it("applies Calendar exceptions only to the authoritative entry for each official Scope", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-analysis-anomaly-scope-calendar-"));
+    const databasePath = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const gateway = new LocalDataGateway(metadata);
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      await materializeNgeeAnnGoldenFixture(databasePath, metadata, {
+        includeAnomalyHistory: true,
+      });
+      metadata.energyIq.operationalPolicy.publishOperatingCalendar({
+        version_id: "sg-calendar-v1",
+        project_id: NGEE_ANN_GOLDEN.projectId,
+        published_by: "dev-user",
+        entries: [
+          {
+            id: "ngee-ann-anomaly-project-calendar",
+            owner: { kind: "project" },
+            effective_from: "2026-04-01",
+            weekly: allDays("00:00", "24:00"),
+            exceptions: ["2026-05-31", "2026-06-01"]
+              .map((date) => ({ date, operating: [], label: "Project only" })),
+          },
+          {
+            id: "ngee-ann-anomaly-level-7-calendar",
+            owner: { kind: "scope", scope_id: "level-7" },
+            effective_from: "2026-04-01",
+            weekly: allDays("00:00", "24:00"),
+            exceptions: ["2026-05-31", "2026-06-01", "2026-06-12"]
+              .map((date) => ({ date, operating: [], label: "Level 7 only" })),
+          },
+        ],
+      });
+      const user = metadata.users.getById({ user_id: "dev-user" });
+      const context = resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user,
+        workspaceId: "default",
+        request: {
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "project",
+          resource: "electricity",
+          period: "Custom",
+          from: NGEE_ANN_GOLDEN.selection.period.localFrom,
+          to: "2026-06-12",
+        },
+      });
+      const anomalyRule = metadata.energyIq.rules.listRevisions().find(
+        (rule) => rule.revision_id === "comparison.daily_usage_above_baseline@1",
+      );
+      if (!anomalyRule) throw new Error("DAILY_USAGE_ABOVE_BASELINE_RULE_MISSING");
+      const analysis = await executeEnergyScopeAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        context,
+        databasePath,
+        projectReleaseId: "ngee-ann-test-release@1",
+        ruleRevisions: [anomalyRule],
+        includeTimeBehaviour: false,
+      });
+      if (analysis.dailyUsageAnomalies?.status !== "available") {
+        throw new Error("Expected available Scope-specific Calendar anomalies");
+      }
+      const row = (scopeId: string) => analysis.dailyUsageAnomalies?.status === "available"
+        ? analysis.dailyUsageAnomalies.scopes.find((scope) => scope.scopeId === scopeId)
+          ?.rows.find((candidate) => candidate.localDate === "2026-06-12")
+        : undefined;
+      expect(row("level-7")).toMatchObject({
+        outcome: "suppressed",
+        suppressionReason: { code: "CALENDAR_EXCEPTION_DATE" },
+      });
+      for (const scopeId of ["project", "level-6"]) {
+        expect(row(scopeId)?.suppressionReason?.code).not.toBe("CALENDAR_EXCEPTION_DATE");
+      }
+    } finally {
+      metadata.close();
+      removeTemporaryEnergyFixture(root);
+    }
+  }, 30_000);
+
+  it("keeps the Overview analysis available when the optional anomaly fact query fails", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-analysis-anomaly-query-failure-"));
+    const databasePath = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const gateway = new LocalDataGateway(metadata);
+    const runSqlReadonly = gateway.runSqlReadonly.bind(gateway);
+    gateway.runSqlReadonly = async (request) => {
+      if (request.sql.includes("series_definitions.series_id")) {
+        throw new Error("SQL_TIMEOUT");
+      }
+      return runSqlReadonly(request);
+    };
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      await materializeNgeeAnnGoldenFixture(databasePath, metadata);
+      metadata.energyIq.operationalPolicy.publishOperatingCalendar({
+        version_id: "sg-calendar-v1",
+        project_id: NGEE_ANN_GOLDEN.projectId,
+        published_by: "dev-user",
+        entries: [{
+          id: "ngee-ann-anomaly-query-failure-calendar",
+          owner: { kind: "project" },
+          effective_from: "2026-04-01",
+          weekly: allDays("00:00", "24:00"),
+        }],
+      });
+      const user = metadata.users.getById({ user_id: "dev-user" });
+      const context = resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user,
+        workspaceId: "default",
+        request: {
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "project",
+          resource: "electricity",
+          period: "Custom",
+          from: NGEE_ANN_GOLDEN.selection.period.localFrom,
+          to: "2026-06-16",
+        },
+      });
+      const anomalyRule = metadata.energyIq.rules.listRevisions().find(
+        (rule) => rule.revision_id === "comparison.daily_usage_above_baseline@1",
+      );
+      if (!anomalyRule) throw new Error("DAILY_USAGE_ABOVE_BASELINE_RULE_MISSING");
+      const analysis = await executeEnergyScopeAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        context,
+        databasePath,
+        projectReleaseId: "ngee-ann-test-release@1",
+        ruleRevisions: [anomalyRule],
+        includeTimeBehaviour: true,
+      });
+      expect(analysis.summary.usageKwh).toBe(NGEE_ANN_GOLDEN.period.usageKwh);
+      expect(analysis.dailyTotals?.scopes).toHaveLength(3);
+      expect(analysis.timeBehaviour?.scopes).toHaveLength(3);
+      expect(analysis.dailyUsageAnomalies).toMatchObject({
+        status: "unavailable",
+        reason: { code: "DAILY_USAGE_ANOMALY_FACTS_UNAVAILABLE" },
+      });
+      expect(analysis.provenance.queryIds).not.toContain("time_slot_anomaly_v1");
     } finally {
       metadata.close();
       removeTemporaryEnergyFixture(root);
@@ -475,6 +761,7 @@ describe("EnergyScopeAnalysis", () => {
         userId: "dev-user",
         context,
         databasePath,
+        projectReleaseId: "ngee-ann-test-release@1",
         ruleRevisions: [anomalyRule],
         includeTimeBehaviour: false,
       });
