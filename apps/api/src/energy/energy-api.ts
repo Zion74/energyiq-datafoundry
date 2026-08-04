@@ -45,6 +45,7 @@ import {
 } from "./project-analysis-resolver.js";
 import {
   resolveEnergyAccessContext,
+  resolveEnergyPublishedHierarchyNodes,
   resolveEnergyQueryContext,
   type EnergyPeriod,
   type EnergyQueryContextRequest
@@ -723,18 +724,37 @@ export const handleEnergyApiRequest = async (
     }
     if (segments[0] === "projects" && segments[2] === "hierarchy" && request.method === "GET") {
       const projectId = decodeURIComponent(segments[1] ?? "");
-      resolveEnergyQueryContext({
+      const access = resolveEnergyAccessContext({
         metadataStore: context.metadataStore,
         user,
-        workspaceId: context.workspaceId,
-        request: { projectId, scopeId: "project", period: "Yesterday" }
+        requestedWorkspaceId: context.workspaceId,
       });
+      const accessibleProject = access.projects.find((project) => project.id === projectId);
+      if (!accessibleProject || accessibleProject.workspaceId !== access.activeWorkspaceId) {
+        throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
+      }
+      if (accessibleProject.status !== "published" && access.role !== "admin") {
+        throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
+      }
+      const project = context.metadataStore.energyIq.getProject(projectId);
+      const templateRevision = context.metadataStore.energyIq.templates.getLatestProjectRevision(projectId);
+      const hierarchyRevisionId = templateRevision?.hierarchy_revision_id ?? project.hierarchy_revision_id;
+      const hierarchyRevision = context.metadataStore.energyIq.projectSetup.listHierarchyRevisions(projectId)
+        .find((revision) => revision.id === hierarchyRevisionId);
+      if (!hierarchyRevision) {
+        throw new Error(`ENERGYIQ_PUBLISHED_HIERARCHY_REVISION_REQUIRED:${hierarchyRevisionId}`);
+      }
+      const document = JSON.parse(hierarchyRevision.snapshot_json) as EnergyIqProjectSetupDocument;
       return {
         status: 200,
         body: createSuccessResult({
-          project: context.metadataStore.energyIq.getProject(projectId),
-          tiers: context.metadataStore.energyIq.listTierDefinitions(projectId),
-          nodes: context.metadataStore.energyIq.listProjectNodes(projectId)
+          project: { ...project, hierarchy_revision_id: hierarchyRevisionId },
+          tiers: document.tiers,
+          nodes: resolveEnergyPublishedHierarchyNodes(
+            context.metadataStore,
+            projectId,
+            hierarchyRevisionId,
+          ),
         })
       };
     }
