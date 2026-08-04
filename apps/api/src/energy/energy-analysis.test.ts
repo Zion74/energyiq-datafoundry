@@ -220,6 +220,7 @@ describe("EnergyScopeAnalysis", () => {
         {
           nodeId: "level-7",
           usageKwh: NGEE_ANN_GOLDEN.period.levelUsageKwh["level-7"],
+          sharePct: NGEE_ANN_GOLDEN.period.levels["level-7"].sharePct,
           comparison: {
             usageKwh: NGEE_ANN_GOLDEN.period.levels["level-7"].previousUsageKwh,
             changeKwh: NGEE_ANN_GOLDEN.period.levels["level-7"].changeKwh,
@@ -230,6 +231,7 @@ describe("EnergyScopeAnalysis", () => {
         {
           nodeId: "level-6",
           usageKwh: NGEE_ANN_GOLDEN.period.levelUsageKwh["level-6"],
+          sharePct: NGEE_ANN_GOLDEN.period.levels["level-6"].sharePct,
           comparison: {
             usageKwh: NGEE_ANN_GOLDEN.period.levels["level-6"].previousUsageKwh,
             changeKwh: NGEE_ANN_GOLDEN.period.levels["level-6"].changeKwh,

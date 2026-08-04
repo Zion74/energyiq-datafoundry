@@ -880,7 +880,7 @@ const buildChildScopes = (input: {
       name: child.name,
       nodeType: child.node_type,
       usageKwh: round(usageKwh, 4),
-      sharePct: percent(usageKwh, input.scopeUsageKwh),
+      sharePct: percent(usageKwh, input.scopeUsageKwh, 4),
       comparison: {
         usageKwh: round(previousUsageKwh, 4),
         changeKwh: round(usageKwh - previousUsageKwh, 4),
@@ -1498,8 +1498,8 @@ const isoAt = (row: unknown[], index: number): string => {
   throw new Error(`ENERGYIQ_GOLDEN_TIMESTAMP_INVALID:${index}`);
 };
 
-const percent = (part: number, total: number): number =>
-  total > 0 ? round((part / total) * 100, 2) : 0;
+const percent = (part: number, total: number, digits = 2): number =>
+  total > 0 ? round((part / total) * 100, digits) : 0;
 
 const round = (value: number, digits: number): number => {
   const factor = 10 ** digits;

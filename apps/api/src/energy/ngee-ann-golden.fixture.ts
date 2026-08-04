@@ -39,6 +39,7 @@ export const NGEE_ANN_GOLDEN = {
     levels: {
       "level-7": {
         usageKwh: 1054.1845,
+        sharePct: 68.8484,
         previousUsageKwh: 734.6257,
         changeKwh: 319.5588,
         changePct: 43.4995,
@@ -53,6 +54,7 @@ export const NGEE_ANN_GOLDEN = {
       },
       "level-6": {
         usageKwh: 476.9838,
+        sharePct: 31.1516,
         previousUsageKwh: 477.0516,
         changeKwh: -0.0678,
         changePct: -0.0142,
