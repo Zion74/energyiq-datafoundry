@@ -31,9 +31,13 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
   document: EnergyIqProjectSetupDocument;
   snapshot?: EnergyIqDataSnapshotRecord;
   expectedMaterializerContractVersion: string;
+  expectedFactWriterContractVersion: string;
 }): EnergyIqProjectDataReadiness => {
   const mapping = input.document.meter_mapping;
-  const requiresFormalData = input.batches.length > 0 || mapping !== undefined;
+  const sourceManifest = input.document.source_manifest;
+  const requiresFormalData = input.batches.length > 0
+    || mapping !== undefined
+    || sourceManifest !== undefined;
   if (!requiresFormalData) {
     return {
       status: "not_required",
@@ -67,9 +71,18 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
   if (input.batches.length === 0) blockingReasons.push("IMPORT_BATCH_REQUIRED");
   if (!mapping) blockingReasons.push("METER_MAPPING_REQUIRED");
   else if (!mapping.confirmed) blockingReasons.push("METER_MAPPING_NOT_CONFIRMED");
+  if (!sourceManifest) blockingReasons.push("SOURCE_MANIFEST_REQUIRED");
+  else if (!sourceManifest.confirmed) blockingReasons.push("SOURCE_MANIFEST_NOT_CONFIRMED");
   if (materializedBatches.length !== input.batches.length) blockingReasons.push("IMPORT_BATCH_NOT_MATERIALIZED");
   if (unmappedSourceLabels.length > 0) blockingReasons.push("SOURCE_LABEL_UNMAPPED");
   if (inactiveMappingSourceLabels.length > 0) blockingReasons.push("MAPPING_SOURCE_INACTIVE");
+  if (sourceManifest) {
+    const expectedSourceShas = [...new Set(sourceManifest.source_sha256.map(normaliseSha256))].sort();
+    const actualSourceShas = [...new Set(input.batches.map((batch) => normaliseSha256(batch.source_sha256)))].sort();
+    if (JSON.stringify(actualSourceShas) !== JSON.stringify(expectedSourceShas)) {
+      blockingReasons.push("SOURCE_MANIFEST_MISMATCH");
+    }
+  }
 
   const snapshot = input.snapshot;
   if (!snapshot || snapshot.id !== input.project.data_snapshot_id) {
@@ -79,9 +92,12 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
   const snapshotSourceShas = arrayRecords(snapshotManifest.batches)
     .map((batch) => stringValue(batch.sourceSha256))
     .filter((value): value is string => Boolean(value))
+    .map(normaliseSha256)
     .sort();
-  const batchSourceShas = materializedBatches.map((batch) => batch.source_sha256).sort();
-  if (snapshot && JSON.stringify(snapshotSourceShas) !== JSON.stringify(batchSourceShas)) {
+  const requiredSourceShas = (sourceManifest?.source_sha256 ?? input.batches.map((batch) => batch.source_sha256))
+    .map(normaliseSha256)
+    .sort();
+  if (snapshot && JSON.stringify(snapshotSourceShas) !== JSON.stringify(requiredSourceShas)) {
     blockingReasons.push("SNAPSHOT_BATCH_SET_MISMATCH");
   }
   if (mapping?.confirmed && materializedBatches.length > 0) {
@@ -93,7 +109,7 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
     }
     const timezones = new Set(materializedBatches.map((batch) =>
       stringValue(parseRecord(batch.materialization_json).timezone) ?? "<missing>"));
-    if (timezones.size !== 1 || !timezones.has(input.project.timezone)) {
+    if (timezones.size !== 1 || !timezones.has(input.document.project.timezone)) {
       blockingReasons.push("SNAPSHOT_TIMEZONE_MISMATCH");
     }
     const contractVersions = new Set(materializedBatches.map((batch) =>
@@ -104,10 +120,25 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
     ) {
       blockingReasons.push("MATERIALIZER_CONTRACT_MISMATCH");
     }
+    const factWriterContractVersions = new Set(materializedBatches.map((batch) =>
+      stringValue(parseRecord(batch.materialization_json).factWriterContractVersion) ?? "<missing>"));
+    if (
+      factWriterContractVersions.size !== 1
+      || !factWriterContractVersions.has(input.expectedFactWriterContractVersion)
+    ) {
+      blockingReasons.push("FACT_WRITER_CONTRACT_MISMATCH");
+    }
   }
 
   const audit = snapshot ? parseRecord(snapshot.audit_json) : undefined;
-  if (audit) {
+  const auditValid = audit !== undefined && REQUIRED_AUDIT_FIELDS.every((field) =>
+    isNonNegativeFiniteNumber(audit[field]));
+  if (snapshot && !auditValid) blockingReasons.push("SNAPSHOT_AUDIT_INVALID");
+  if (audit && auditValid) {
+    if (numberValue(audit.rawRowCount) <= 0 || numberValue(audit.normalizedReadingCount) <= 0) {
+      blockingReasons.push("FACT_STORE_EMPTY");
+    }
+    if (numberValue(audit.intervalFactCount) <= 0) blockingReasons.push("INTERVAL_FACTS_EMPTY");
     if (numberValue(audit.invalidRawRowCount) > 0) blockingReasons.push("INVALID_RAW_ROWS");
     if (numberValue(audit.unmappedRawRowCount) > 0) blockingReasons.push("UNMAPPED_RAW_ROWS");
     if (
@@ -115,7 +146,13 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
       || numberValue(audit.duplicateIntervalFactCount) > 0
     ) blockingReasons.push("CANONICAL_DUPLICATES");
     if (numberValue(audit.invalidIntervalDurationCount) > 0) blockingReasons.push("INVALID_INTERVAL_DURATION");
-    if (numberValue(audit.legacyCanonicalRowCount) > 0) blockingReasons.push("LEGACY_CANONICAL_ROWS");
+    if (numberValue(audit.negativeDeltaIntervalCount) > 0) blockingReasons.push("NEGATIVE_INTERVAL_DELTAS");
+    if (
+      numberValue(audit.legacyRawRowCount) > 0
+      || numberValue(audit.legacyNormalizedReadingCount) > 0
+      || numberValue(audit.legacyIntervalFactCount) > 0
+      || numberValue(audit.legacyCanonicalRowCount) > 0
+    ) blockingReasons.push("LEGACY_CANONICAL_ROWS");
     const overlapCount = numberValue(audit.rawOverlapConflictCount);
     if (overlapCount > 0) {
       warnings.push(`RAW_OVERLAP_CONFLICTS_RESOLVED_BY_LATER_COVERAGE:${overlapCount}`);
@@ -171,5 +208,25 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 const normaliseLabel = (value: string): string => value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+const normaliseSha256 = (value: string): string => value.trim().toLocaleLowerCase();
 const stringValue = (value: unknown): string | undefined => typeof value === "string" ? value : undefined;
 const numberValue = (value: unknown): number => typeof value === "number" && Number.isFinite(value) ? value : 0;
+const isNonNegativeFiniteNumber = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0;
+
+const REQUIRED_AUDIT_FIELDS = [
+  "rawRowCount",
+  "invalidRawRowCount",
+  "unmappedRawRowCount",
+  "rawOverlapConflictCount",
+  "normalizedReadingCount",
+  "intervalFactCount",
+  "duplicateNormalizedReadingCount",
+  "duplicateIntervalFactCount",
+  "invalidIntervalDurationCount",
+  "negativeDeltaIntervalCount",
+  "legacyRawRowCount",
+  "legacyNormalizedReadingCount",
+  "legacyIntervalFactCount",
+  "legacyCanonicalRowCount",
+] as const;

@@ -83,6 +83,7 @@ export {
   type EnergyScopedDataSourceContext
 } from "./energy-scoped-datasource.js";
 export {
+  ENERGY_FACT_WRITER_CONTRACT_VERSION,
   readEnergyFactProjectAudit,
   readEnergyFactMaterializationStats,
   writeEnergyFactMaterialization,

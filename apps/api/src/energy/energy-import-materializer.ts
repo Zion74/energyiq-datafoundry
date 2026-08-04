@@ -1,9 +1,10 @@
-import type {
-  EnergyFactMaterializationWrite,
-  EnergyIntervalFactWrite,
-  EnergyNormalizedReadingWrite,
-  EnergyQualityEventWrite,
-  EnergyRawReadingWrite,
+import {
+  ENERGY_FACT_WRITER_CONTRACT_VERSION,
+  type EnergyFactMaterializationWrite,
+  type EnergyIntervalFactWrite,
+  type EnergyNormalizedReadingWrite,
+  type EnergyQualityEventWrite,
+  type EnergyRawReadingWrite,
 } from "@datafoundry/data-gateway";
 import type {
   EnergyIqImportBatchRecord,
@@ -14,7 +15,6 @@ import { fingerprintEnergyIqMeterMapping } from "@datafoundry/metadata";
 import { readEnergyExcelWorkbook } from "./energy-excel-import.js";
 
 export type EnergyImportMaterializationSummary = {
-  snapshotId?: string;
   rawRowCount: number;
   normalizedReadingCount: number;
   intervalFactCount: number;
@@ -24,6 +24,7 @@ export type EnergyImportMaterializationSummary = {
   mappingFingerprint: string;
   timezone: string;
   materializerContractVersion: typeof ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION;
+  factWriterContractVersion: typeof ENERGY_FACT_WRITER_CONTRACT_VERSION;
   sourceSheetName: string;
   sourceRowCount: number;
   sourceLabels: string[];
@@ -51,7 +52,8 @@ export const isEnergyImportMaterializationCurrent = (input: {
   if (!isRecord(summary)) return false;
   return summary.mappingFingerprint === fingerprintEnergyIqMeterMapping(mapping)
     && summary.timezone === input.timezone
-    && summary.materializerContractVersion === ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION;
+    && summary.materializerContractVersion === ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION
+    && summary.factWriterContractVersion === ENERGY_FACT_WRITER_CONTRACT_VERSION;
 };
 
 export const buildEnergyExcelMaterialization = async (input: {
@@ -253,6 +255,7 @@ export const buildEnergyExcelMaterialization = async (input: {
     mappingFingerprint: fingerprintEnergyIqMeterMapping(mapping),
     timezone: input.timezone,
     materializerContractVersion: ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION,
+    factWriterContractVersion: ENERGY_FACT_WRITER_CONTRACT_VERSION,
     sourceSheetName: workbook.inspection.sheetName,
     sourceRowCount: workbook.inspection.rowCount,
     sourceLabels: workbook.inspection.sourceLabels.map((source) => source.label),

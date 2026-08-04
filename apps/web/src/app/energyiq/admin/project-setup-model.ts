@@ -219,7 +219,7 @@ export const createMeterMappingFromSourceLabels = (
   return {
     source_kind: "excel",
     rows,
-    ...resolveNgeeAnnVirtualMeters(document, rows, existingMapping),
+    ...resolveNgeeAnnVirtualMeters(rows, existingMapping),
     confirmed: false,
   };
 };
@@ -229,6 +229,22 @@ export const sourceLabelsAcrossImportBatches = (
 ): string[] => [...new Map(batches.flatMap((batch) => batch.inspection.sourceLabels)
   .map((source) => [normaliseDisplayName(source.label), source.label.trim()])).values()]
   .sort((left, right) => left.localeCompare(right));
+
+export const pinEnergySourceManifest = async (
+  batches: EnergyImportBatchDto[],
+): Promise<NonNullable<EnergyProjectSetupDocumentDto["source_manifest"]>> => {
+  const sourceSha256 = [...new Set(batches.map((batch) => batch.sourceSha256.trim().toLocaleLowerCase()))].sort();
+  const material = JSON.stringify({ version: 1, source_sha256: sourceSha256 });
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(material));
+  const fingerprint = [...new Uint8Array(digest)]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+  return {
+    id: `source-manifest-${fingerprint.slice(0, 24)}`,
+    source_sha256: sourceSha256,
+    confirmed: true,
+  };
+};
 
 export const inferMeterCategory = (label: string): EnergyMeterCategoryDto => {
   const value = label.toLocaleLowerCase();
@@ -364,18 +380,25 @@ const parseSourceLabel = (label: string): { locationName?: string; meterName: st
 };
 
 const resolveNgeeAnnVirtualMeters = (
-  document: EnergyProjectSetupDocumentDto,
   rows: EnergyMeterMappingRowDto[],
   existingMapping?: EnergyMeterMappingDraftDto,
 ): Pick<EnergyMeterMappingDraftDto, "virtual_meters"> | Record<string, never> => {
-  if (document.project.name !== "Ngee Ann Polytechnic") {
+  const load1SourceLabel = normaliseDisplayName("Lvl 6 Office Load 1: L1P1-L3P6");
+  const load2SourceLabel = normaliseDisplayName("Lvl 6 Office Load 2: L1P7-L3P12");
+  const hasNgeeAnnLoadSource = rows.some((row) => {
+    const sourceLabel = normaliseDisplayName(row.source_label);
+    return sourceLabel === load1SourceLabel || sourceLabel === load2SourceLabel;
+  });
+  const load1 = rows.find((row) =>
+    row.scope_id === "l6-load-1" && normaliseDisplayName(row.source_label) === load1SourceLabel);
+  const load2 = rows.find((row) =>
+    row.scope_id === "l6-load-2" && normaliseDisplayName(row.source_label) === load2SourceLabel);
+  if (!load1 || !load2) {
+    if (hasNgeeAnnLoadSource) return {};
     return existingMapping?.virtual_meters?.length
       ? { virtual_meters: existingMapping.virtual_meters }
       : {};
   }
-  const load1 = rows.find((row) => row.scope_id === "l6-load-1");
-  const load2 = rows.find((row) => row.scope_id === "l6-load-2");
-  if (!load1 || !load2) return {};
   const retained = (existingMapping?.virtual_meters ?? []).filter((meter) =>
     normaliseDisplayName(meter.display_name) !== "load 12"
     && meter.id !== "ngee-ann-load-12-v1");

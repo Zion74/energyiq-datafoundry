@@ -44,6 +44,7 @@ describe("buildEnergyExcelMaterialization", () => {
       mappingRevision: 4,
       timezone: "Asia/Singapore",
       materializerContractVersion: "energy-excel-cumulative-v1",
+      factWriterContractVersion: "energy-fact-writer-later-coverage-v1",
       sourceSheetName: "Sheet1",
       sourceRowCount: 3,
       sourceLabels: ["Meter A"],
@@ -60,6 +61,15 @@ describe("buildEnergyExcelMaterialization", () => {
       document: document(),
       timezone: "Asia/Singapore",
     })).toBe(true);
+    expect(isEnergyImportMaterializationCurrent({
+      batch: {
+        ...batch(),
+        status: "materialized",
+        materialization_json: JSON.stringify(result.summary),
+      },
+      document: document(),
+      timezone: "UTC",
+    })).toBe(false);
     expect(isEnergyImportMaterializationCurrent({
       batch: { ...batch(), status: "materialized", materialization_json: JSON.stringify({ intervalFactCount: 2 }) },
       document: document(),

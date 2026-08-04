@@ -67,6 +67,28 @@ export type EnergyIqMeterMappingDraft = {
   confirmed: boolean;
 };
 
+export type EnergyIqSourceManifest = {
+  id: string;
+  source_sha256: string[];
+  confirmed: boolean;
+};
+
+export const createEnergyIqSourceManifest = (
+  sourceSha256: readonly string[],
+  confirmed: boolean,
+): EnergyIqSourceManifest => {
+  const canonicalSha256 = [...new Set(sourceSha256.map((value) => value.trim().toLocaleLowerCase()))].sort();
+  const fingerprint = createHash("sha256").update(JSON.stringify({
+    version: 1,
+    source_sha256: canonicalSha256,
+  })).digest("hex");
+  return {
+    id: `source-manifest-${fingerprint.slice(0, 24)}`,
+    source_sha256: canonicalSha256,
+    confirmed,
+  };
+};
+
 export const fingerprintEnergyIqMeterMapping = (
   mapping: EnergyIqMeterMappingDraft,
 ): string => createHash("sha256").update(JSON.stringify({
@@ -107,6 +129,7 @@ export type EnergyIqProjectSetupDocument = {
   tier_structure_locked: boolean;
   tiers: EnergyIqTierDefinition[];
   nodes: EnergyIqProjectSetupNode[];
+  source_manifest?: EnergyIqSourceManifest;
   meter_mapping?: EnergyIqMeterMappingDraft;
 };
 
@@ -1001,6 +1024,20 @@ export const validateProjectSetupDocument = (
     }
   }
 
+  if (document.source_manifest) {
+    if (document.source_manifest.source_sha256.length === 0) {
+      push("SOURCE_MANIFEST_EMPTY", "error", "Source Manifest requires at least one source SHA-256.", "source_manifest.source_sha256");
+    }
+    for (const [index, sha256] of document.source_manifest.source_sha256.entries()) {
+      if (!/^[a-f0-9]{64}$/i.test(sha256)) {
+        push("SOURCE_MANIFEST_SHA_INVALID", "error", "Source Manifest contains an invalid SHA-256.", `source_manifest.source_sha256[${index}]`);
+      }
+    }
+    if (!document.source_manifest.confirmed) {
+      push("SOURCE_MANIFEST_NOT_CONFIRMED", "warning", "Confirm the pinned source batches before materialization.", "source_manifest.confirmed");
+    }
+  }
+
   return {
     blocking: issues.some((issue) => issue.severity === "error"),
     issues
@@ -1053,6 +1090,14 @@ const canonicalizeDocument = (
         }))
       : [],
     nodes,
+    ...(document.source_manifest ? {
+      source_manifest: createEnergyIqSourceManifest(
+        Array.isArray(document.source_manifest.source_sha256)
+          ? document.source_manifest.source_sha256.map((value) => String(value ?? ""))
+          : [],
+        document.source_manifest.confirmed === true,
+      ),
+    } : {}),
     ...(document.meter_mapping ? {
       meter_mapping: {
         source_kind: document.meter_mapping.source_kind === "tuya" ? "tuya" as const : "excel" as const,

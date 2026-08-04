@@ -108,8 +108,14 @@ export type EnergyFactProjectAudit = {
   duplicateNormalizedReadingCount: number;
   duplicateIntervalFactCount: number;
   invalidIntervalDurationCount: number;
+  negativeDeltaIntervalCount: number;
+  legacyRawRowCount: number;
+  legacyNormalizedReadingCount: number;
+  legacyIntervalFactCount: number;
   legacyCanonicalRowCount: number;
 };
+
+export const ENERGY_FACT_WRITER_CONTRACT_VERSION = "energy-fact-writer-later-coverage-v1" as const;
 
 export type EnergyFactMaterializationResult = EnergyFactMaterializationStats & {
   projectAudit: EnergyFactProjectAudit;
@@ -246,7 +252,7 @@ const readProjectAudit = async (
   const row = await duckDbGet(connection, `
     SELECT
       (SELECT COUNT(*) FROM raw_meter_readings WHERE project_id = ?) AS raw_rows,
-      (SELECT COUNT(*) FROM raw_meter_readings WHERE project_id = ? AND NOT is_valid) AS invalid_raw_rows,
+      (SELECT COUNT(*) FROM raw_meter_readings WHERE project_id = ? AND is_valid IS NOT TRUE) AS invalid_raw_rows,
       (SELECT COUNT(*) FROM raw_meter_readings WHERE project_id = ? AND is_valid AND meter_node_id IS NULL) AS unmapped_raw_rows,
       (SELECT COUNT(*) FROM raw_meter_readings WHERE project_id = ? AND is_overlap_conflict) AS raw_overlap_conflicts,
       (SELECT COUNT(*) FROM normalized_meter_readings WHERE project_id = ?) AS normalized_rows,
@@ -268,12 +274,31 @@ const readProjectAudit = async (
       (SELECT COUNT(*) FROM energy_interval_facts
         WHERE project_id = ? AND elapsed_minutes <> 15) AS invalid_interval_durations,
       (SELECT COUNT(*) FROM energy_interval_facts
+        WHERE project_id = ? AND quality_status = 'negative_delta') AS negative_delta_intervals,
+      (SELECT COUNT(*) FROM raw_meter_readings
         WHERE project_id = ? AND (
           import_batch_id IS NULL OR import_batch_id = '' OR import_batch_id = '<legacy>'
           OR source_sha256 IS NULL OR source_sha256 = '' OR source_sha256 = '<legacy>'
+          OR source_file IS NULL OR source_file = '' OR source_file = '<legacy>'
           OR LOWER(source_file) LIKE '%synthetic%'
-        )) AS legacy_canonical_rows
-  `, Array.from({ length: 10 }, () => projectId));
+        )) AS legacy_raw_rows,
+      (SELECT COUNT(*) FROM normalized_meter_readings
+        WHERE project_id = ? AND (
+          import_batch_id IS NULL OR import_batch_id = '' OR import_batch_id = '<legacy>'
+          OR source_sha256 IS NULL OR source_sha256 = '' OR source_sha256 = '<legacy>'
+          OR source_file IS NULL OR source_file = '' OR source_file = '<legacy>'
+          OR LOWER(source_file) LIKE '%synthetic%'
+        )) AS legacy_normalized_rows,
+      (SELECT COUNT(*) FROM energy_interval_facts
+        WHERE project_id = ? AND (
+          import_batch_id IS NULL OR import_batch_id = '' OR import_batch_id = '<legacy>'
+          OR source_sha256 IS NULL OR source_sha256 = '' OR source_sha256 = '<legacy>'
+          OR source_file IS NULL OR source_file = '' OR source_file = '<legacy>'
+          OR LOWER(source_file) LIKE '%synthetic%'
+        )) AS legacy_interval_facts
+  `, Array.from({ length: 13 }, () => projectId));
+  const legacyNormalizedReadingCount = Number(row.legacy_normalized_rows ?? 0);
+  const legacyIntervalFactCount = Number(row.legacy_interval_facts ?? 0);
   return {
     rawRowCount: Number(row.raw_rows ?? 0),
     invalidRawRowCount: Number(row.invalid_raw_rows ?? 0),
@@ -284,7 +309,11 @@ const readProjectAudit = async (
     duplicateNormalizedReadingCount: Number(row.duplicate_normalized_rows ?? 0),
     duplicateIntervalFactCount: Number(row.duplicate_interval_facts ?? 0),
     invalidIntervalDurationCount: Number(row.invalid_interval_durations ?? 0),
-    legacyCanonicalRowCount: Number(row.legacy_canonical_rows ?? 0),
+    negativeDeltaIntervalCount: Number(row.negative_delta_intervals ?? 0),
+    legacyRawRowCount: Number(row.legacy_raw_rows ?? 0),
+    legacyNormalizedReadingCount,
+    legacyIntervalFactCount,
+    legacyCanonicalRowCount: legacyNormalizedReadingCount + legacyIntervalFactCount,
   };
 };
 
@@ -367,6 +396,11 @@ const markRawOverlapConflicts = async (
   connection: DuckDbModule.Connection,
   projectId: string,
 ): Promise<void> => {
+  await duckDbRun(connection, `
+    UPDATE raw_meter_readings
+    SET is_overlap_conflict = FALSE
+    WHERE project_id = ?
+  `, [projectId]);
   await duckDbRun(connection, `
     UPDATE raw_meter_readings target
     SET is_overlap_conflict = TRUE

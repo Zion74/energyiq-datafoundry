@@ -202,12 +202,16 @@ export type EnergyImportBatchDto = {
   status: "inspected" | "materialized" | "failed";
   inspection: EnergyExcelImportInspectionDto;
   materialization?: {
-    snapshotId: string;
     rawRowCount: number;
     normalizedReadingCount: number;
     intervalFactCount: number;
     totalUsageKwh: number;
     qualityCounts: Record<string, number>;
+    mappingRevision: number;
+    mappingFingerprint: string;
+    timezone: string;
+    materializerContractVersion: string;
+    factWriterContractVersion: string;
   };
   materializedAt?: string;
   createdAt: string;
@@ -256,7 +260,14 @@ export type EnergyProjectSetupDocumentDto = {
   tier_structure_locked: boolean;
   tiers: EnergyTierDefinitionDto[];
   nodes: EnergyProjectSetupNodeDto[];
+  source_manifest?: EnergySourceManifestDto;
   meter_mapping?: EnergyMeterMappingDraftDto;
+};
+
+export type EnergySourceManifestDto = {
+  id: string;
+  source_sha256: string[];
+  confirmed: boolean;
 };
 
 export type EnergyProjectSetupDraftDto = {

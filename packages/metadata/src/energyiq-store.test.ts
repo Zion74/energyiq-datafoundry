@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { createMetadataStore } from "./index.js";
+import { createEnergyIqSourceManifest, createMetadataStore } from "./index.js";
 
 describe("EnergyIqStore", () => {
   it("stores the controlled component catalog and one draft per Project and Tier", () => {
@@ -434,6 +434,11 @@ describe("EnergyIqStore", () => {
         user_id: "dev-user",
         document: {
           project: { name: "Ngee Ann Test", timezone: "Asia/Singapore" },
+          source_manifest: {
+            id: "ignored-client-id",
+            source_sha256: ["B".repeat(64), "a".repeat(64), "b".repeat(64)],
+            confirmed: true,
+          },
           tier_structure_locked: true,
           tiers: [
             { id: "tier-circuit", ordinal: 1, alias: "Circuit" },
@@ -478,6 +483,10 @@ describe("EnergyIqStore", () => {
         }
       });
       expect(saved.revision).toBe(2);
+      expect(saved.document.source_manifest).toEqual(createEnergyIqSourceManifest([
+        "a".repeat(64),
+        "b".repeat(64),
+      ], true));
       expect(metadata.energyIq.listProjectNodes("project-setup")).toEqual([]);
       expect(metadata.energyIq.getProject("project-setup")).toMatchObject({
         status: "draft",
@@ -731,8 +740,8 @@ describe("EnergyIqStore", () => {
       expect(first.batch.status).toBe("materialized");
       expect(JSON.parse(first.batch.materialization_json ?? "{}")).toMatchObject({
         intervalFactCount: 9,
-        snapshotId: first.snapshot.id,
       });
+      expect(JSON.parse(first.batch.materialization_json ?? "{}")).not.toHaveProperty("snapshotId");
       expect(metadata.energyIq.getProject("project-import").data_snapshot_id).toBe(first.snapshot.id);
       expect(JSON.parse(first.snapshot.manifest_json)).toMatchObject({
         version: 1,
@@ -766,6 +775,24 @@ describe("EnergyIqStore", () => {
       });
       expect(JSON.parse(second.snapshot.audit_json)).toMatchObject({ rawOverlapConflictCount: 2 });
       expect(metadata.energyIq.getDataSnapshot(second.snapshot.id).id).toBe(second.snapshot.id);
+      expect(metadata.energyIq.completeImportBatchMaterialization({
+        batch_id: "batch-2",
+        project_id: "project-import",
+        summary: materializationSummary("mapping-sha-1"),
+        project_audit: projectAudit({ rawOverlapConflictCount: 2 }),
+      }).snapshot.id).toBe(second.snapshot.id);
+      expect(() => metadata.energyIq.completeImportBatchMaterialization({
+        batch_id: "batch-2",
+        project_id: "project-import",
+        summary: { ...materializationSummary("mapping-sha-1"), rawRowCount: 11 },
+        project_audit: projectAudit({ rawOverlapConflictCount: 2 }),
+      })).toThrow(`ENERGYIQ_DATA_SNAPSHOT_IMMUTABLE_CONFLICT:${second.snapshot.id}`);
+      expect(() => metadata.energyIq.completeImportBatchMaterialization({
+        batch_id: "batch-2",
+        project_id: "project-import",
+        summary: materializationSummary("mapping-sha-1"),
+        project_audit: projectAudit({ rawOverlapConflictCount: 3 }),
+      })).toThrow(`ENERGYIQ_DATA_SNAPSHOT_IMMUTABLE_CONFLICT:${second.snapshot.id}`);
 
       const replayRoot = mkdtempSync(join(tmpdir(), "energyiq-import-batch-replay-"));
       const replay = createMetadataStore({ database_path: join(replayRoot, "metadata.sqlite") });
@@ -809,6 +836,53 @@ describe("EnergyIqStore", () => {
         replay.close();
         rmSync(replayRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
       }
+
+      const reverseRoot = mkdtempSync(join(tmpdir(), "energyiq-import-batch-reverse-"));
+      const reverse = createMetadataStore({ database_path: join(reverseRoot, "metadata.sqlite") });
+      try {
+        reverse.workspaces.upsert({
+          id: "workspace-1",
+          owner_user_id: "dev-user",
+          name: "Customer Workspace",
+          kind: "customer",
+        });
+        reverse.energyIq.upsertProject({
+          id: "project-import",
+          workspace_id: "workspace-1",
+          name: "Import Project",
+          status: "draft",
+        });
+        let reverseFinalSnapshotId = "";
+        for (const input of [
+          { id: "batch-2", sha: "sha-2", filename: "meter-2.xlsx", coverage: "batch-2" },
+          { id: "batch-1", sha: "sha-1", filename: "meter.xlsx", coverage: "batch-1" },
+        ]) {
+          reverse.energyIq.createImportBatch({
+            id: input.id,
+            workspace_id: "workspace-1",
+            project_id: "project-import",
+            source_kind: "excel",
+            source_sha256: input.sha,
+            filename: input.filename,
+            status: "inspected",
+            inspection: importInspection(input.coverage),
+            created_by: "dev-user",
+          });
+          reverseFinalSnapshotId = reverse.energyIq.completeImportBatchMaterialization({
+            batch_id: input.id,
+            project_id: "project-import",
+            summary: materializationSummary("mapping-sha-1"),
+            project_audit: projectAudit({ rawOverlapConflictCount: input.id === "batch-1" ? 2 : 0 }),
+          }).snapshot.id;
+        }
+        const reverseFinal = reverse.energyIq.getDataSnapshot(reverseFinalSnapshotId);
+        expect(reverseFinal.id).toBe(second.snapshot.id);
+        expect(JSON.parse(reverseFinal.manifest_json)).toEqual(JSON.parse(second.snapshot.manifest_json));
+        expect(JSON.parse(reverseFinal.audit_json)).toEqual(JSON.parse(second.snapshot.audit_json));
+      } finally {
+        reverse.close();
+        rmSync(reverseRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      }
       expect(() => metadata.energyIq.createImportBatch({
         ...created,
         id: "batch-duplicate",
@@ -831,6 +905,7 @@ const materializationSummary = (mappingFingerprint: string) => ({
   mappingFingerprint,
   timezone: "Asia/Singapore",
   materializerContractVersion: "energy-excel-cumulative-v1",
+  factWriterContractVersion: "energy-fact-writer-later-coverage-v1",
 });
 
 const importInspection = (batchId: string) => ({
@@ -855,6 +930,10 @@ const projectAudit = (overrides: Record<string, number> = {}) => ({
   duplicateNormalizedReadingCount: 0,
   duplicateIntervalFactCount: 0,
   invalidIntervalDurationCount: 0,
+  negativeDeltaIntervalCount: 0,
+  legacyRawRowCount: 0,
+  legacyNormalizedReadingCount: 0,
+  legacyIntervalFactCount: 0,
   legacyCanonicalRowCount: 0,
   ...overrides,
 });

@@ -567,6 +567,7 @@ export class EnergyIqStore {
     project_id: string;
     summary: unknown;
     project_audit: unknown;
+    source_manifest_sha256?: readonly string[];
   }): EnergyIqImportMaterializationCompletion {
     const materializedAt = new Date().toISOString();
     const currentBatch = this.getImportBatch(input.batch_id);
@@ -574,6 +575,13 @@ export class EnergyIqStore {
       throw new Error(`ENERGYIQ_IMPORT_BATCH_NOT_FOUND:${input.batch_id}`);
     }
     const summary = requireJsonRecord(input.summary, "ENERGYIQ_IMPORT_MATERIALIZATION_SUMMARY_INVALID");
+    const projectAudit = requireJsonRecord(input.project_audit, "ENERGYIQ_PROJECT_AUDIT_INVALID");
+    const sourceManifestSha256 = input.source_manifest_sha256
+      ? new Set(input.source_manifest_sha256.map((value) => value.trim().toLocaleLowerCase()))
+      : undefined;
+    if (sourceManifestSha256 && !sourceManifestSha256.has(currentBatch.source_sha256.toLocaleLowerCase())) {
+      throw new Error(`ENERGYIQ_IMPORT_BATCH_NOT_PINNED:${input.batch_id}`);
+    }
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const provisionalResult = this.db.prepare(`
@@ -586,19 +594,20 @@ export class EnergyIqStore {
       }
 
       const batches = this.listImportBatches(input.project_id)
-        .filter((batch) => batch.status === "materialized")
+        .filter((batch) => batch.status === "materialized" && (
+          !sourceManifestSha256 || sourceManifestSha256.has(batch.source_sha256.toLocaleLowerCase())
+        ))
         .sort((left, right) => left.source_sha256.localeCompare(right.source_sha256));
       const identity = createDataSnapshotIdentity(input.project_id, batches);
       const snapshotId = `energy-snapshot-${createHash("sha256")
         .update(JSON.stringify(identity))
         .digest("hex")
         .slice(0, 24)}`;
-      const materialization = { ...summary, snapshotId };
       this.db.prepare(`
         UPDATE energyiq_import_batches
         SET materialization_json = ?
         WHERE id = ? AND project_id = ?
-      `).run(JSON.stringify(materialization), input.batch_id, input.project_id);
+      `).run(JSON.stringify(summary), input.batch_id, input.project_id);
 
       const manifest = {
         version: 1,
@@ -610,11 +619,13 @@ export class EnergyIqStore {
           filename: batch.filename,
           inspection: parseJsonRecord(batch.inspection_json),
           materialization: batch.id === input.batch_id
-            ? materialization
+            ? summary
             : parseJsonRecord(batch.materialization_json),
         })),
       };
-      this.db.prepare(`
+      const manifestJson = JSON.stringify(manifest);
+      const auditJson = JSON.stringify(projectAudit);
+      const insertResult = this.db.prepare(`
         INSERT OR IGNORE INTO energyiq_data_snapshots (
           id, workspace_id, project_id, manifest_json, audit_json, created_at
         ) VALUES (?, ?, ?, ?, ?, ?)
@@ -622,10 +633,16 @@ export class EnergyIqStore {
         snapshotId,
         currentBatch.workspace_id,
         input.project_id,
-        JSON.stringify(manifest),
-        JSON.stringify(input.project_audit),
+        manifestJson,
+        auditJson,
         materializedAt,
       );
+      if (insertResult.changes === 0) {
+        const existing = this.getDataSnapshot(snapshotId);
+        if (existing.manifest_json !== manifestJson || existing.audit_json !== auditJson) {
+          throw new Error(`ENERGYIQ_DATA_SNAPSHOT_IMMUTABLE_CONFLICT:${snapshotId}`);
+        }
+      }
       this.db.prepare(`
         UPDATE energyiq_projects
         SET data_snapshot_id = ?, updated_at = ?
@@ -783,17 +800,17 @@ const createDataSnapshotIdentity = (
     const inspection = parseJsonRecord(batch.inspection_json);
     const materialization = parseJsonRecord(batch.materialization_json);
     return {
-      sourceSha256: batch.source_sha256,
+      sourceSha256: batch.source_sha256.toLocaleLowerCase(),
       sheetName: optionalJsonString(materialization.sourceSheetName)
         ?? optionalJsonString(inspection.sheetName),
       coverageFrom: optionalJsonString(materialization.sourceCoverageFrom)
         ?? optionalJsonString(inspection.coverageFrom),
       coverageTo: optionalJsonString(materialization.sourceCoverageTo)
         ?? optionalJsonString(inspection.coverageTo),
-      mappingRevision: optionalJsonNumber(materialization.mappingRevision),
       mappingFingerprint: optionalJsonString(materialization.mappingFingerprint),
       timezone: optionalJsonString(materialization.timezone),
       materializerContractVersion: optionalJsonString(materialization.materializerContractVersion),
+      factWriterContractVersion: optionalJsonString(materialization.factWriterContractVersion),
     };
   }),
 });
@@ -811,6 +828,3 @@ const parseJsonRecord = (value: string | undefined): Record<string, unknown> => 
 
 const optionalJsonString = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
-
-const optionalJsonNumber = (value: unknown): number | null =>
-  typeof value === "number" && Number.isFinite(value) ? value : null;

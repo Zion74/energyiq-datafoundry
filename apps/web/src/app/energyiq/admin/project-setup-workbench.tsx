@@ -62,6 +62,7 @@ import {
   isTierStructureLocked,
   nodePathLabel,
   nodesForTierAndParent,
+  pinEnergySourceManifest,
   removeNodeAndDescendants,
   removeHighestTier,
   sourceLabelsAcrossImportBatches,
@@ -513,6 +514,7 @@ function renderAdminSection({
       <DataSourcesPage
         projectId={selectedProjectId}
         document={document}
+        savedDocument={setup.draft.document}
         changeDocument={changeDocument}
         setSection={setSection}
       />
@@ -1760,11 +1762,13 @@ function ReviewGate({ label, ready, detail }: { label: string; ready: boolean; d
 function DataSourcesPage({
   projectId,
   document,
+  savedDocument,
   changeDocument,
   setSection,
 }: {
   projectId: string;
   document: EnergyProjectSetupDocumentDto;
+  savedDocument: EnergyProjectSetupDocumentDto;
   changeDocument: (updater: (current: EnergyProjectSetupDocumentDto) => EnergyProjectSetupDocumentDto) => void;
   setSection: Dispatch<SetStateAction<AdminSection>>;
 }) {
@@ -1772,6 +1776,7 @@ function DataSourcesPage({
   const [dataReadiness, setDataReadiness] = useState<EnergyProjectDataReadinessDto | null>(null);
   const [loadingImports, setLoadingImports] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const [pinning, setPinning] = useState(false);
   const [materializing, setMaterializing] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importNotice, setImportNotice] = useState<string | null>(null);
@@ -1812,7 +1817,33 @@ function DataSourcesPage({
   };
 
   const latest = batches[0];
-  const mappingConfirmed = document.meter_mapping?.confirmed === true;
+  const mappingConfirmed = document.meter_mapping?.confirmed === true
+    && savedDocument.meter_mapping?.confirmed === true
+    && JSON.stringify(document.meter_mapping) === JSON.stringify(savedDocument.meter_mapping);
+  const currentSourceSha256 = [...new Set(batches.map((batch) => batch.sourceSha256.toLocaleLowerCase()))].sort();
+  const pinnedSourceSha256 = [...(document.source_manifest?.source_sha256 ?? [])].sort();
+  const sourceManifestMatches = document.source_manifest?.confirmed === true
+    && JSON.stringify(currentSourceSha256) === JSON.stringify(pinnedSourceSha256);
+  const sourceManifestSaved = sourceManifestMatches
+    && savedDocument.source_manifest?.id === document.source_manifest?.id
+    && savedDocument.source_manifest?.confirmed === true;
+  const materializationConfigSaved = sourceManifestSaved
+    && mappingConfirmed
+    && document.project.timezone === savedDocument.project.timezone;
+  const pinCurrentBatches = async () => {
+    if (batches.length === 0) return;
+    setPinning(true);
+    setImportError(null);
+    try {
+      const sourceManifest = await pinEnergySourceManifest(batches);
+      changeDocument((current) => ({ ...current, source_manifest: sourceManifest }));
+      setImportNotice(`${sourceManifest.source_sha256.length} batch SHA(s) pinned. Save Draft before building facts.`);
+    } catch (reason) {
+      setImportError(messageFrom(reason, "Failed to pin source batches"));
+    } finally {
+      setPinning(false);
+    }
+  };
   const useDetectedLabels = () => {
     if (batches.length === 0) return;
     const mapping = createMeterMappingFromSourceLabels(
@@ -1922,8 +1953,8 @@ function DataSourcesPage({
             {latest.materialization ? (
               <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
                 <ImportFact label="Raw readings" value={latest.materialization.rawRowCount.toLocaleString()} />
-                <ImportFact label="Normalized" value={latest.materialization.normalizedReadingCount.toLocaleString()} />
-                <ImportFact label="Interval facts" value={latest.materialization.intervalFactCount.toLocaleString()} />
+                <ImportFact label="Batch normalized at build" value={latest.materialization.normalizedReadingCount.toLocaleString()} />
+                <ImportFact label="Batch intervals at build" value={latest.materialization.intervalFactCount.toLocaleString()} />
                 <ImportFact label="All-meter deltas" value={`${latest.materialization.totalUsageKwh.toLocaleString("en-SG", { maximumFractionDigits: 3 })} kWh`} />
               </div>
             ) : null}
@@ -1942,12 +1973,18 @@ function DataSourcesPage({
                 ) : null}
               </div>
               <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => void pinCurrentBatches()} disabled={batches.length === 0 || pinning} className={secondaryButton}>
+                  {pinning ? "Pinning batches..." : "Pin current batches"}
+                </button>
                 <button type="button" onClick={useDetectedLabels} disabled={batches.length === 0} className={secondaryButton}>Use all detected labels</button>
-                <button type="button" onClick={() => void materializeAll()} disabled={!mappingConfirmed || materializing} className={primaryButton}>
+                <button type="button" onClick={() => void materializeAll()} disabled={!materializationConfigSaved || materializing} className={primaryButton}>
                   {materializing ? "Building facts..." : "Build all interval facts"}
                 </button>
               </div>
             </div>
+            {!materializationConfigSaved ? (
+              <p className="text-[10px] text-step-warning">Pin the current Import Batches, confirm Mapping and use the page-level Save Draft action before building facts.</p>
+            ) : null}
           </div>
         ) : (
           <div className="mt-5 rounded-lg border border-dashed border-border px-5 py-8 text-center">

@@ -16,6 +16,7 @@ import {
   isTierStructureLocked,
   nodePathLabel,
   nodesForTierAndParent,
+  pinEnergySourceManifest,
   removeNodeAndDescendants,
   removeHighestTier,
   sourceLabelsAcrossImportBatches,
@@ -182,7 +183,7 @@ describe("project setup model", () => {
     expect(imported.rows.find((row) => row.source_label === "Unknown Meter")?.scope_id).toBe("");
   });
 
-  it("unions all four Ngee Ann batches and corrects formal routes before confirmation", () => {
+  it("unions all four Ngee Ann batches and corrects formal routes before confirmation", async () => {
     const document = ngeeAnnDocument();
     const batches = [
       importBatch("l6-old", NGEE_ANN_LABELS.slice(0, 9)),
@@ -217,6 +218,15 @@ describe("project setup model", () => {
     expect(mapping.confirmed).toBe(false);
     expect(mapping.rows.filter((row) => row.meter_role === "total" && row.aggregation_usage === "official")).toHaveLength(4);
     expect(mapping.rows.filter((row) => row.meter_role === "component" && row.aggregation_usage === "excluded")).toHaveLength(14);
+    const actualTuples = mapping.rows.map((row) => [
+      row.source_label,
+      row.scope_id,
+      row.category,
+      row.coverage,
+      row.meter_role,
+      row.aggregation_usage,
+    ] as const).sort((left, right) => left[0].localeCompare(right[0]));
+    expect(actualTuples).toEqual([...NGEE_ANN_MAPPING_TUPLES].sort((left, right) => left[0].localeCompare(right[0])));
     expect(mapping.rows.find((row) => row.source_label === "Lvl 6 Office Load 1: L1P1-L3P6")).toMatchObject({
       id: existing.rows.find((row) => row.source_label === "Lvl 6 Office Load 1: L1P1-L3P6")?.id,
       scope_id: "l6-load-1",
@@ -241,6 +251,15 @@ describe("project setup model", () => {
         { mapping_row_id: mapping.rows.find((row) => row.scope_id === "l6-load-2")?.id, coefficient: 1 },
       ],
     }]);
+
+    const renamedDocument = { ...document, project: { ...document.project, name: "Campus A" } };
+    expect(createMeterMappingFromSourceLabels(renamedDocument, labels, mapping).virtual_meters)
+      .toEqual(mapping.virtual_meters);
+
+    const manifest = await pinEnergySourceManifest(batches);
+    expect(manifest).toMatchObject({ confirmed: true, source_sha256: [...batches.map((batch) => batch.sourceSha256)].sort() });
+    expect(manifest.id).toMatch(/^source-manifest-[a-f0-9]{24}$/);
+    await expect(pinEnergySourceManifest([...batches].reverse())).resolves.toEqual(manifest);
   });
 });
 
@@ -343,3 +362,24 @@ const NGEE_ANN_LABELS = [
   "Lvl 7 Office Load 3: L1P16-L3P21",
   "Lvl 7 Office Load 4: L1P22-L3P25 Fan ISOL1/2",
 ];
+
+const NGEE_ANN_MAPPING_TUPLES = [
+  ["Lvl 6 Total Office Light", "level-6", "light", "whole", "total", "official"],
+  ["Lvl 6 Office Light-Left: External", "l6-light-left", "light", "partial", "component", "excluded"],
+  ["Lvl 6 Office Light-Right: Internal", "l6-light-right", "light", "partial", "component", "excluded"],
+  ["Lvl 6 Total Office Load", "level-6", "load", "whole", "total", "official"],
+  ["Lvl 6 Office Load 1: L1P1-L3P6", "l6-load-1", "load", "partial", "component", "excluded"],
+  ["Lvl 6 Office Load 2: L1P7-L3P12", "l6-load-2", "load", "partial", "component", "excluded"],
+  ["Lvl 6 Office Load 3: L1P13-L3P18", "l6-load-3", "load", "partial", "component", "excluded"],
+  ["Lvl 6 Office Load 4: L1P19-L3P24", "l6-load-4", "load", "partial", "component", "excluded"],
+  ["Lvl 6 Office Load 5: L1P25-L3P29 Fan Isol 1/2", "l6-load-5", "load", "partial", "component", "excluded"],
+  ["Lvl 7 Middle Row Office Light", "l7-middle-light", "light", "partial", "component", "excluded"],
+  ["Lvl 7 Back Row Office Light", "l7-back-light", "light", "partial", "component", "excluded"],
+  ["Lvl 7 Front Row Office Light", "l7-front-light", "light", "partial", "component", "excluded"],
+  ["Lvl 7 Total Office Light", "level-7", "light", "whole", "total", "official"],
+  ["Lvl 7 Total Office Load", "level-7", "load", "whole", "total", "official"],
+  ["Lvl 7 Office Load 1: L1P1-L3P6", "l7-load-1", "load", "partial", "component", "excluded"],
+  ["Lvl 7 Office Load 2: L1P7-L3P15", "l7-load-2", "load", "partial", "component", "excluded"],
+  ["Lvl 7 Office Load 3: L1P16-L3P21", "l7-load-3", "load", "partial", "component", "excluded"],
+  ["Lvl 7 Office Load 4: L1P22-L3P25 Fan ISOL1/2", "l7-load-4", "load", "partial", "component", "excluded"],
+] as const;

@@ -1,5 +1,10 @@
 import { createErrorResult, createSuccessResult, type AppErrorCode } from "@datafoundry/contracts";
-import { readEnergyFactCoverage, resolveEnergyFactStorePath, writeEnergyFactMaterialization } from "@datafoundry/data-gateway";
+import {
+  ENERGY_FACT_WRITER_CONTRACT_VERSION,
+  readEnergyFactCoverage,
+  resolveEnergyFactStorePath,
+  writeEnergyFactMaterialization,
+} from "@datafoundry/data-gateway";
 import type {
   EnergyIqDataSnapshotRecord,
   EnergyIqImportBatchRecord,
@@ -15,6 +20,7 @@ import type {
 } from "@datafoundry/metadata";
 import {
   createDefaultTemplateDocument,
+  createEnergyIqSourceManifest,
   resolveEnergyIqProjectDataReadiness,
 } from "@datafoundry/metadata";
 import { createHash, randomUUID } from "node:crypto";
@@ -168,7 +174,18 @@ export const handleEnergyApiRequest = async (
           project_id: projectId,
           user_id: user.id,
         });
-        if (isEnergyImportMaterializationCurrent({ batch, document: draft.document, timezone: project.timezone })) {
+        const sourceManifest = draft.document.source_manifest;
+        if (!sourceManifest?.confirmed) throw new Error("ENERGYIQ_SOURCE_MANIFEST_NOT_CONFIRMED");
+        const registeredSourceSha256 = context.metadataStore.energyIq.listImportBatches(projectId)
+          .map((candidate) => candidate.source_sha256);
+        if (!sameSourceSha256Set(sourceManifest.source_sha256, registeredSourceSha256)) {
+          throw new Error("ENERGYIQ_SOURCE_MANIFEST_MISMATCH");
+        }
+        if (!sourceManifest.source_sha256.includes(batch.source_sha256.toLocaleLowerCase())) {
+          throw new Error("ENERGYIQ_IMPORT_BATCH_NOT_PINNED");
+        }
+        const draftTimezone = draft.document.project.timezone;
+        if (isEnergyImportMaterializationCurrent({ batch, document: draft.document, timezone: draftTimezone })) {
           const snapshot = context.metadataStore.energyIq.findCurrentDataSnapshot(projectId);
           const readiness = createProjectDataReadiness(context, projectId, draft.document);
           return {
@@ -194,7 +211,7 @@ export const handleEnergyApiRequest = async (
           batch,
           document: draft.document,
           mappingRevision: draft.revision,
-          timezone: project.timezone,
+          timezone: draftTimezone,
           databasePath: resolveEnergyFactStorePath(project.workspace_id),
         });
         const persisted = await writeEnergyFactMaterialization(materialization.write);
@@ -208,6 +225,7 @@ export const handleEnergyApiRequest = async (
             intervalFactCount: persisted.intervalFacts,
           },
           project_audit: persisted.projectAudit,
+          source_manifest_sha256: sourceManifest.source_sha256,
         });
         return {
           status: 200,
@@ -231,13 +249,7 @@ export const handleEnergyApiRequest = async (
           body: createSuccessResult({
             batches: batches.map(toEnergyImportBatchDto),
             ...(snapshot ? { dataSnapshot: toEnergyDataSnapshotDto(snapshot) } : {}),
-            readiness: resolveEnergyIqProjectDataReadiness({
-              project,
-              batches,
-              document: draft.document,
-              ...(snapshot ? { snapshot } : {}),
-              expectedMaterializerContractVersion: ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION,
-            }),
+            readiness: createProjectDataReadiness(context, projectId, draft.document),
           }),
         };
       }
@@ -746,7 +758,12 @@ export const handleEnergyApiRequest = async (
 export const toEnergyApiErrorResponse = (error: unknown): ConfigApiResponse => {
   const message = error instanceof Error ? error.message : String(error);
   const forbidden = message.includes("FORBIDDEN") || message.includes("ADMIN_REQUIRED");
-  const conflict = message.includes("CONFLICT") || message.startsWith("ENERGYIQ_PROJECT_DATA_NOT_READY");
+  const conflict = message.includes("CONFLICT")
+    || message === "ENERGYIQ_SOURCE_MANIFEST_NOT_CONFIRMED"
+    || message === "ENERGYIQ_SOURCE_MANIFEST_MISMATCH"
+    || message === "ENERGYIQ_IMPORT_BATCH_NOT_PINNED"
+    || message.startsWith("ENERGYIQ_DATA_SNAPSHOT_IMMUTABLE_CONFLICT:")
+    || message.startsWith("ENERGYIQ_PROJECT_DATA_NOT_READY");
   const invalid = message.includes("INVALID")
     || message.includes("REQUIRED")
     || message.includes("EXCEL_EMPTY")
@@ -847,7 +864,13 @@ const createProjectDataReadiness = (
     document,
     ...(snapshot ? { snapshot } : {}),
     expectedMaterializerContractVersion: ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION,
+    expectedFactWriterContractVersion: ENERGY_FACT_WRITER_CONTRACT_VERSION,
   });
+};
+
+const sameSourceSha256Set = (left: readonly string[], right: readonly string[]): boolean => {
+  const canonical = (values: readonly string[]) => [...new Set(values.map((value) => value.trim().toLocaleLowerCase()))].sort();
+  return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
 };
 
 const toEnergySavedAnalysisSummary = (record: EnergyIqSavedAnalysisRecord) => ({
@@ -996,6 +1019,9 @@ const parseProjectSetupDocument = (value: unknown): EnergyIqProjectSetupDocument
   const meterMapping = document.meter_mapping === undefined
     ? undefined
     : parseMeterMappingDraft(document.meter_mapping);
+  const sourceManifest = document.source_manifest === undefined
+    ? undefined
+    : parseSourceManifest(document.source_manifest);
   return {
     project: {
       name: requireNonEmptyString(project.name, "ENERGYIQ_PROJECT_NAME_REQUIRED"),
@@ -1043,8 +1069,29 @@ const parseProjectSetupDocument = (value: unknown): EnergyIqProjectSetupDocument
         ...(metadata ? { metadata } : {})
       };
     }),
+    ...(sourceManifest ? { source_manifest: sourceManifest } : {}),
     ...(meterMapping ? { meter_mapping: meterMapping } : {})
   };
+};
+
+const parseSourceManifest = (
+  value: unknown,
+): NonNullable<EnergyIqProjectSetupDocument["source_manifest"]> => {
+  const manifest = requireRecord(value, "ENERGYIQ_SOURCE_MANIFEST_INVALID");
+  if (!Array.isArray(manifest.source_sha256) || manifest.source_sha256.length === 0) {
+    throw new Error("ENERGYIQ_SOURCE_MANIFEST_REQUIRED");
+  }
+  const sourceSha256 = manifest.source_sha256.map((candidate, index) => {
+    const sha256 = requireNonEmptyString(
+      candidate,
+      `ENERGYIQ_SOURCE_MANIFEST_SHA_REQUIRED:${index}`,
+    ).toLocaleLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(sha256)) {
+      throw new Error(`ENERGYIQ_SOURCE_MANIFEST_SHA_INVALID:${index}`);
+    }
+    return sha256;
+  });
+  return createEnergyIqSourceManifest(sourceSha256, manifest.confirmed === true);
 };
 
 const parseTariffScheduleEntries = (value: unknown): EnergyIqTariffScheduleEntry[] => {
