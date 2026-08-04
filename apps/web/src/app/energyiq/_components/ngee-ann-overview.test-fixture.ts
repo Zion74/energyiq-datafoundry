@@ -21,6 +21,7 @@ export function ngeeAnnGoldenSnapshot(input: {
   const metadata = missingMetadata();
   const queryIds = [
     "scope_summary_v1",
+    "daily_totals_v1",
     "hourly_profile_v1",
     "meter_breakdown_v1",
     "previous_meter_usage_v1",
@@ -360,11 +361,12 @@ export function ngeeAnnGoldenSnapshot(input: {
       usageKwh: 1531.168324,
       averageDailyUsageKwh: 218.738332,
       peakKw: 20.673108,
-      peakAt: "2026-06-16T06:00:00.000Z",
+      peakAt: "2026-06-11T06:00:00.000Z",
       validIntervalCount,
       qualityEventCount: 0,
     },
     hourlyProfile: [],
+    dailyTotals: goldenDailyTotals(),
     comparison: {
       from: "2026-06-02T16:00:00.000Z",
       to: "2026-06-09T16:00:00.000Z",
@@ -602,6 +604,80 @@ export function ngeeAnnGoldenSnapshot(input: {
     metadata,
     analysis,
   };
+}
+
+function goldenDailyTotals(): NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["dailyTotals"]> {
+  return {
+    metricId: "energy.total_usage_kwh@1",
+    grain: "day",
+    timezone: "Asia/Singapore",
+    scopes: [
+      dailyScope(
+        "project",
+        "Ngee Ann Polytechnic",
+        "project",
+        [216.377441, 233.820074, 214.743162, 214.743162, 214.743162, 214.743162, 221.99816],
+        384,
+      ),
+      dailyScope(
+        "level-7",
+        "Level 7",
+        "level",
+        [148.95602, 157.372812, 148.611436, 148.611436, 148.611436, 148.611436, 153.409923],
+        192,
+      ),
+      dailyScope(
+        "level-6",
+        "Level 6",
+        "level",
+        [67.421421, 76.447263, 66.131726, 66.131726, 66.131726, 66.131726, 68.588237],
+        192,
+      ),
+    ],
+  };
+}
+
+function dailyScope(
+  scopeId: string,
+  scopeName: string,
+  scopeType: string,
+  usage: number[],
+  expectedMeterIntervalCount: number,
+): NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["dailyTotals"]>["scopes"][number] {
+  const dates = [
+    "2026-06-10",
+    "2026-06-11",
+    "2026-06-12",
+    "2026-06-13",
+    "2026-06-14",
+    "2026-06-15",
+    "2026-06-16",
+  ];
+
+  return {
+    scopeId,
+    scopeName,
+    scopeType,
+    rows: dates.map((localDate, index) => ({
+      localDate,
+      from: `${previousLocalDate(localDate)}T16:00:00.000Z`,
+      to: `${localDate}T16:00:00.000Z`,
+      usageKwh: usage[index]!,
+      dataHealth: {
+        status: "complete",
+        coveragePct: 100,
+        expectedMeterIntervalCount,
+        validIntervalCount: expectedMeterIntervalCount,
+        qualityEventCount: 0,
+      },
+    })),
+  };
+}
+
+function previousLocalDate(localDate: string): string {
+  return new Date(Date.parse(`${localDate}T00:00:00.000Z`) - 86_400_000)
+    .toISOString()
+    .slice(0, 10);
 }
 
 function missingMetadata(): EnergyProjectAnalysisMetadataDto {

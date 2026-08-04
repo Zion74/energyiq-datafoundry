@@ -399,6 +399,26 @@ export type EnergyAnalysisDataHealthDto = {
   qualityEventCount: number;
 };
 
+export type EnergyDailyTotalsDto = {
+  metricId: "energy.total_usage_kwh@1";
+  grain: "day";
+  timezone: string;
+  scopes: Array<{
+    scopeId: string;
+    scopeName: string;
+    scopeType: string;
+    rows: Array<{
+      localDate: string;
+      from: string;
+      to: string;
+      usageKwh: number | null;
+      dataHealth: EnergyAnalysisDataHealthDto & {
+        status: "complete" | "partial" | "unavailable";
+      };
+    }>;
+  }>;
+};
+
 export type EnergyVirtualMeterTraceTermDto = {
   meterNodeId: string;
   name: string;
@@ -508,6 +528,7 @@ export type EnergyScopeAnalysisDto = {
     usageKwh: number;
     includedInOfficialTotal: false;
   }>;
+  dailyTotals?: EnergyDailyTotalsDto;
   virtualMeterTraces?: EnergyVirtualMeterTraceDto[];
   offHours: {
     status: "available";
@@ -575,6 +596,7 @@ export type EnergyScopeAnalysisDto = {
     sourceView: string;
     queryIds: Array<
       | "scope_summary_v1"
+      | "daily_totals_v1"
       | "hourly_profile_v1"
       | "meter_breakdown_v1"
       | "previous_meter_usage_v1"

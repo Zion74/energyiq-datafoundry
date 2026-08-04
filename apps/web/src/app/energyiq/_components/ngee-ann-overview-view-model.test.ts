@@ -249,6 +249,104 @@ describe("Ngee Ann Overview ViewModel", () => {
     });
   });
 
+  it("projects the authoritative seven-day Project and Level trend without aggregating in Web", () => {
+    const view = buildNgeeAnnOverviewViewModel(ngeeAnnGoldenSnapshot());
+
+    expect(view.energyTrend).toMatchObject({
+      status: "available",
+      decisionQuestion: "When did accepted energy use change inside the selected Period?",
+      scopes: [
+        { id: "project", name: "Project", limitation: null },
+        { id: "level-7", name: "Level 7", limitation: null },
+        { id: "level-6", name: "Level 6", limitation: null },
+      ],
+      evidence: {
+        snapshotId: "snapshot-ngee-ann-golden",
+        projectReleaseId: "release-ngee-ann-golden",
+        meterMappingRevisionId: "mapping-v1",
+        meterFormulaRevisionId: "formula-v1",
+        metricId: "energy.total_usage_kwh@1",
+        timezone: "Asia/Singapore",
+        unit: "kWh",
+        queryIds: ["daily_totals_v1"],
+      },
+    });
+    expect(view.energyTrend.scopes[0]!.points).toHaveLength(7);
+    expect(view.energyTrend.scopes[0]!.points.map((point) => ({
+      localDate: point.localDate,
+      usageKwh: point.usageKwh,
+      status: point.status,
+    }))).toEqual([
+      { localDate: "2026-06-10", usageKwh: "216.3774", status: "complete" },
+      { localDate: "2026-06-11", usageKwh: "233.8201", status: "complete" },
+      { localDate: "2026-06-12", usageKwh: "214.7432", status: "complete" },
+      { localDate: "2026-06-13", usageKwh: "214.7432", status: "complete" },
+      { localDate: "2026-06-14", usageKwh: "214.7432", status: "complete" },
+      { localDate: "2026-06-15", usageKwh: "214.7432", status: "complete" },
+      { localDate: "2026-06-16", usageKwh: "221.9982", status: "complete" },
+    ]);
+  });
+
+  it("keeps partial accepted usage and an unavailable day on the authoritative date spine", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const rows = snapshot.analysis.dailyTotals!.scopes[0]!.rows;
+    rows[1]!.dataHealth = {
+      status: "partial",
+      coveragePct: 75,
+      expectedMeterIntervalCount: 384,
+      validIntervalCount: 288,
+      qualityEventCount: 2,
+    };
+    rows[2]!.usageKwh = null;
+    rows[2]!.dataHealth = {
+      status: "unavailable",
+      coveragePct: 0,
+      expectedMeterIntervalCount: 384,
+      validIntervalCount: 0,
+      qualityEventCount: 1,
+    };
+
+    const trend = buildNgeeAnnOverviewViewModel(snapshot).energyTrend;
+
+    expect(trend.status).toBe("available");
+    expect(trend.scopes[0]!.limitation).toContain("not zero-filled");
+    expect(trend.scopes[0]!.points[1]).toMatchObject({
+      usageKwh: "233.8201",
+      status: "partial",
+      statusLabel: "Partial",
+      coverage: "75% coverage",
+      intervals: "288 / 384 valid intervals",
+      qualityEvents: "2 quality events",
+    });
+    expect(trend.scopes[0]!.points[2]).toMatchObject({
+      localDate: "2026-06-12",
+      acceptedUsageKwh: null,
+      usageKwh: null,
+      status: "unavailable",
+      statusLabel: "Unavailable",
+    });
+  });
+
+  it("fails only Energy trend closed for absent or invalid optional daily totals", () => {
+    const absent = ngeeAnnGoldenSnapshot();
+    delete absent.analysis.dailyTotals;
+    const wrongQuery = ngeeAnnGoldenSnapshot();
+    wrongQuery.analysis.provenance.queryIds = wrongQuery.analysis.provenance.queryIds
+      .filter((queryId) => queryId !== "daily_totals_v1");
+    const brokenSpine = ngeeAnnGoldenSnapshot();
+    brokenSpine.analysis.dailyTotals!.scopes[1]!.rows[2]!.localDate = "2026-06-20";
+    const zeroFilledMissing = ngeeAnnGoldenSnapshot();
+    zeroFilledMissing.analysis.dailyTotals!.scopes[0]!.rows[2]!.dataHealth.status = "unavailable";
+    zeroFilledMissing.analysis.dailyTotals!.scopes[0]!.rows[2]!.usageKwh = 0;
+
+    for (const snapshot of [absent, wrongQuery, brokenSpine, zeroFilledMissing]) {
+      const view = buildNgeeAnnOverviewViewModel(snapshot);
+      expect(view.energyTrend).toMatchObject({ status: "unavailable", scopes: [] });
+      expect(view.levelComparison.status).toBe("available");
+      expect(view.energyComposition.categories.status).toBe("available");
+    }
+  });
+
   it("fails the Level module closed for a legacy Snapshot without comparison facts", () => {
     const view = buildNgeeAnnOverviewViewModel(ngeeAnnGoldenSnapshot({
       levelFactsAvailable: false,

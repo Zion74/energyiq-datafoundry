@@ -26,6 +26,12 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("+26.3677%");
     expect(markup).toContain("Previous 1211.6773 kWh / +319.4911 kWh");
     expect(markup).toContain("489.973864 SGD");
+    expect(markup).toContain("Energy trend");
+    expect(markup).toContain("When did accepted energy use change inside the selected Period?");
+    expect(markup).toContain("Energy trend Scope");
+    expect(markup).toContain("7 daily buckets");
+    expect(markup).toContain("Trend evidence / daily_totals_v1");
+    expect(markup).toContain("energy.total_usage_kwh@1");
     expect(markup).toContain("Energy distribution");
     expect(markup).toContain("Level comparison");
     expect(markup).toContain("Which Level needs attention first?");
@@ -88,6 +94,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("level-7");
     expect(markup).toContain("No · explanatory component");
     expect(markup).toContain("[2026-06-09T16:00:00.000Z, 2026-06-16T16:00:00.000Z)");
+    expect(markup.indexOf("Energy trend")).toBeLessThan(markup.indexOf("Level comparison"));
     expect(markup.indexOf("Level comparison")).toBeLessThan(markup.indexOf("Energy composition"));
     expect(markup.indexOf("Energy composition")).toBeLessThan(markup.indexOf("Snapshot &amp; evidence"));
     expect(markup.indexOf("Accounting trace")).toBeLessThan(markup.indexOf("Derived meter trace"));
@@ -101,6 +108,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Previous period uses [from, to): start inclusive, end exclusive.");
     expect(markup).toContain("Previous period range");
     expect(markup).not.toContain("Baseline");
+    expect(markup).not.toContain("Peak 1h Consumption");
     expect(markup).toContain("[03 Jun 2026, 00:00, 10 Jun 2026, 00:00)");
     expect(markup).toContain("1531.1683 kWh");
     expect(markup).toContain("1211.6773 kWh");
@@ -134,6 +142,21 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Level comparison unavailable");
     expect(markup).toContain("does not include the Level comparison and quality contract");
     expect(markup).not.toContain("1054.1845");
+  });
+
+  it("fails only Energy trend closed for a legacy Snapshot without daily totals", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    delete snapshot.analysis.dailyTotals;
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+
+    expect(markup).toContain("Energy trend unavailable");
+    expect(markup).toContain("does not include the authoritative daily totals contract");
+    expect(markup).toContain("Energy distribution");
+    expect(markup).toContain("Energy composition");
+    expect(markup).toContain("1531.1683");
   });
 
   it("keeps Category facts visible when explicit Circuit and accounting evidence is unavailable", () => {
@@ -293,6 +316,75 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     return Array.from(fieldset?.querySelectorAll("button") ?? [])
       .find((candidate) => candidate.textContent === label) as HTMLButtonElement | undefined;
   };
+
+  it("switches authoritative trend Scopes and exposes point detail through focus and keyboard selection", async () => {
+    await renderGolden();
+
+    const projectButton = filterButton("Energy trend Scope", "Project")!;
+    const level7Button = filterButton("Energy trend Scope", "Level 7")!;
+    expect(projectButton.getAttribute("aria-pressed")).toBe("true");
+    expect(level7Button.getAttribute("aria-pressed")).toBe("false");
+
+    const projectPoint = container.querySelector<HTMLButtonElement>(
+      'button[aria-label^="Wed 10 Jun: 216.3774 kWh"]',
+    )!;
+    await act(async () => projectPoint.focus());
+    expect(container.textContent).toContain("216.3774 kWh");
+    expect(container.textContent).toContain("Complete / 100% coverage / 384 / 384 valid intervals");
+
+    await activateNativeButton(projectPoint, "Enter");
+    await act(async () => projectPoint.blur());
+    expect(projectPoint.getAttribute("aria-pressed")).toBe("true");
+    expect(container.textContent).toContain("216.3774 kWh");
+
+    await activateNativeButton(level7Button, " ");
+    expect(projectButton.getAttribute("aria-pressed")).toBe("false");
+    expect(level7Button.getAttribute("aria-pressed")).toBe("true");
+    expect(container.textContent).toContain("Hover or focus a day to inspect accepted usage and coverage.");
+
+    const level7Point = container.querySelector<HTMLButtonElement>(
+      'button[aria-label^="Wed 10 Jun: 148.956 kWh"]',
+    )!;
+    await act(async () => level7Point.focus());
+    expect(container.textContent).toContain("148.956 kWh");
+  });
+
+  it("keeps partial and missing daily buckets visible without zero-filling them", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const rows = snapshot.analysis.dailyTotals!.scopes[0]!.rows;
+    rows[1]!.dataHealth = {
+      status: "partial",
+      coveragePct: 75,
+      expectedMeterIntervalCount: 384,
+      validIntervalCount: 288,
+      qualityEventCount: 2,
+    };
+    rows[2]!.usageKwh = null;
+    rows[2]!.dataHealth = {
+      status: "unavailable",
+      coveragePct: 0,
+      expectedMeterIntervalCount: 384,
+      validIntervalCount: 0,
+      qualityEventCount: 1,
+    };
+    await renderGolden(snapshot);
+
+    expect(container.textContent).toContain("not zero-filled");
+    const partialPoint = container.querySelector<HTMLButtonElement>(
+      'button[aria-label*="233.8201 kWh; Partial; 75% coverage"]',
+    )!;
+    const missingPoint = container.querySelector<HTMLButtonElement>(
+      'button[aria-label*="no accepted facts; Unavailable; 0% coverage"]',
+    )!;
+    expect(partialPoint).toBeTruthy();
+    expect(missingPoint).toBeTruthy();
+
+    await act(async () => partialPoint.click());
+    expect(container.textContent).toContain("Partial / 75% coverage / 288 / 384 valid intervals / 2 quality events");
+    await act(async () => missingPoint.click());
+    expect(container.textContent).toContain("No accepted facts");
+    expect(container.textContent).not.toContain("2026-06-12 / 0 kWh");
+  });
 
   it("filters the same ViewModel rows and expands All before returning to Top 5", async () => {
     await renderGolden();
