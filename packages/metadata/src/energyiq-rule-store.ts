@@ -3,7 +3,12 @@ import type { DatabaseSync } from "node:sqlite";
 import { markEnergyIqProjectConfigurationChanged } from "./energyiq-project-change-tracker.js";
 
 export type EnergyIqRuleFamily = "data_quality" | "time" | "comparison";
-export type EnergyIqRuleRequirement = "always" | "operating_hours" | "children" | "area_peers" | "people_peers";
+export type EnergyIqRuleRequirement = "always"
+  | "operating_hours"
+  | "children"
+  | "area_peers"
+  | "people_peers"
+  | "historical_baseline";
 
 export type EnergyIqRuleRevisionRecord = {
   revision_id: string;
@@ -95,6 +100,28 @@ const BUILT_IN_RULES: readonly Omit<EnergyIqRuleRevisionRecord, "created_at">[] 
     parameters: { median_ratio: 1.2, minimum_peers: 3 },
     requirement: "people_peers",
   },
+  {
+    revision_id: "comparison.daily_usage_above_baseline@1",
+    rule_id: "comparison.daily_usage_above_baseline",
+    version: 1,
+    display_name: "Daily usage above comparable baseline",
+    description: "Flag complete local days whose usage exceeds a frozen comparable-day baseline by both relative and absolute materiality thresholds.",
+    family: "comparison",
+    severity: "warning",
+    evaluation_key: "DAILY_USAGE_ABOVE_BASELINE",
+    metric_revision_ids: ["energy.total_usage_kwh@1"],
+    parameters: {
+      relative_threshold_pct: 20,
+      absolute_impact_kwh: 20,
+      minimum_coverage_pct: 95,
+      minimum_sample_count: 4,
+      maximum_quality_event_count: 0,
+      maximum_lookback_days: 60,
+      direction: "above",
+      baseline_method: "mean_of_complete_comparable_days_by_local_hour",
+    },
+    requirement: "historical_baseline",
+  },
 ];
 
 export const initializeEnergyIqRuleSchema = (db: DatabaseSync): void => {
@@ -110,7 +137,7 @@ export const initializeEnergyIqRuleSchema = (db: DatabaseSync): void => {
       evaluation_key TEXT NOT NULL,
       metric_revision_ids_json TEXT NOT NULL,
       parameters_json TEXT NOT NULL,
-      requirement TEXT NOT NULL CHECK (requirement IN ('always', 'operating_hours', 'children', 'area_peers', 'people_peers')),
+      requirement TEXT NOT NULL CHECK (requirement IN ('always', 'operating_hours', 'children', 'area_peers', 'people_peers', 'historical_baseline')),
       created_at TEXT NOT NULL,
       UNIQUE (rule_id, version)
     );
@@ -126,6 +153,8 @@ export const initializeEnergyIqRuleSchema = (db: DatabaseSync): void => {
       FOREIGN KEY (updated_by) REFERENCES users(id)
     );
   `);
+
+  ensureEnergyIqHistoricalBaselineRuleRequirementSchema(db);
 
   const insert = db.prepare(`
     INSERT OR IGNORE INTO energyiq_rule_revisions (
@@ -170,7 +199,9 @@ export class EnergyIqRuleStore {
     return {
       project_id: projectId,
       revision: 0,
-      selected_rule_revision_ids: this.listRevisions().map((rule) => rule.revision_id),
+      selected_rule_revision_ids: this.listRevisions()
+        .filter((rule) => rule.requirement !== "historical_baseline")
+        .map((rule) => rule.revision_id),
     };
   }
 
@@ -216,6 +247,56 @@ export class EnergyIqRuleStore {
     return this.getProjectConfig(input.project_id);
   }
 }
+
+export const ensureEnergyIqHistoricalBaselineRuleRequirementSchema = (
+  db: DatabaseSync,
+): void => {
+  const row = db.prepare(`
+    SELECT sql FROM sqlite_master
+    WHERE type = 'table' AND name = 'energyiq_rule_revisions'
+  `).get();
+  const sql = isRecord(row) && typeof row.sql === "string" ? row.sql : "";
+  if (!sql || sql.includes("historical_baseline")) return;
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.exec(`
+      ALTER TABLE energyiq_rule_revisions
+        RENAME TO energyiq_rule_revisions_legacy_requirement;
+
+      CREATE TABLE energyiq_rule_revisions (
+        revision_id TEXT PRIMARY KEY,
+        rule_id TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        display_name TEXT NOT NULL,
+        description TEXT NOT NULL,
+        family TEXT NOT NULL CHECK (family IN ('data_quality', 'time', 'comparison')),
+        severity TEXT NOT NULL CHECK (severity IN ('info', 'warning')),
+        evaluation_key TEXT NOT NULL,
+        metric_revision_ids_json TEXT NOT NULL,
+        parameters_json TEXT NOT NULL,
+        requirement TEXT NOT NULL CHECK (requirement IN ('always', 'operating_hours', 'children', 'area_peers', 'people_peers', 'historical_baseline')),
+        created_at TEXT NOT NULL,
+        UNIQUE (rule_id, version)
+      );
+
+      INSERT INTO energyiq_rule_revisions (
+        revision_id, rule_id, version, display_name, description, family, severity,
+        evaluation_key, metric_revision_ids_json, parameters_json, requirement, created_at
+      )
+      SELECT
+        revision_id, rule_id, version, display_name, description, family, severity,
+        evaluation_key, metric_revision_ids_json, parameters_json, requirement, created_at
+      FROM energyiq_rule_revisions_legacy_requirement;
+
+      DROP TABLE energyiq_rule_revisions_legacy_requirement;
+    `);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+};
 
 const mapRuleRevision = (row: unknown): EnergyIqRuleRevisionRecord => {
   if (!isRecord(row)) throw new Error("Invalid EnergyIQ rule revision row");

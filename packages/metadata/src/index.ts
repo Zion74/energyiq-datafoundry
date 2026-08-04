@@ -22,7 +22,10 @@ import {
   initializeEnergyIqOperationalPolicySchema
 } from "./energyiq-operational-policy-store.js";
 import { initializeEnergyIqProjectSetupSchema } from "./energyiq-project-setup-store.js";
-import { initializeEnergyIqRuleSchema } from "./energyiq-rule-store.js";
+import {
+  ensureEnergyIqHistoricalBaselineRuleRequirementSchema,
+  initializeEnergyIqRuleSchema
+} from "./energyiq-rule-store.js";
 import { initializeEnergyIqSavedAnalysisSchema } from "./energyiq-saved-analysis-store.js";
 import { initializeEnergyIqTemplateRevisionSchema, initializeEnergyIqTemplateSchema } from "./energyiq-template-store.js";
 
@@ -4017,6 +4020,9 @@ const runMigrations = (db: DatabaseSync): void => {
   });
   runSchemaMigration(db, "0027_workspace_default_model_profile", "Bind a server-side Workspace default model profile", () => {
     initializeWorkspaceDefaultModelProfileSchema(db);
+  });
+  runSchemaMigration(db, "0028_energyiq_historical_baseline_rule_requirement", "Allow historical baseline EnergyIQ rules", () => {
+    ensureEnergyIqHistoricalBaselineRuleRequirementSchema(db);
   });
 };
 

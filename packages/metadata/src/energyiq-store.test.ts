@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 
 import { createEnergyIqSourceManifest, createMetadataStore } from "./index.js";
@@ -309,9 +310,28 @@ describe("EnergyIqStore", () => {
       const catalog = metadata.energyIq.rules.listRevisions();
       expect(catalog.map((rule) => rule.revision_id)).toContain("time.high_off_hours_share@1");
       expect(catalog.map((rule) => rule.revision_id)).toContain("comparison.people_intensity_outlier@1");
+      expect(catalog.find((rule) => (
+        rule.revision_id === "comparison.daily_usage_above_baseline@1"
+      ))).toMatchObject({
+        evaluation_key: "DAILY_USAGE_ABOVE_BASELINE",
+        requirement: "historical_baseline",
+        metric_revision_ids: ["energy.total_usage_kwh@1"],
+        parameters: {
+          relative_threshold_pct: 20,
+          absolute_impact_kwh: 20,
+          minimum_coverage_pct: 95,
+          minimum_sample_count: 4,
+          maximum_quality_event_count: 0,
+          maximum_lookback_days: 60,
+          direction: "above",
+          baseline_method: "mean_of_complete_comparable_days_by_local_hour",
+        },
+      });
       expect(metadata.energyIq.rules.getProjectConfig("rules-project")).toMatchObject({
         revision: 0,
-        selected_rule_revision_ids: catalog.map((rule) => rule.revision_id),
+        selected_rule_revision_ids: catalog
+          .filter((rule) => rule.requirement !== "historical_baseline")
+          .map((rule) => rule.revision_id),
       });
 
       const saved = metadata.energyIq.rules.saveProjectConfig({
@@ -338,6 +358,76 @@ describe("EnergyIqStore", () => {
       })).toThrow("ENERGYIQ_RULE_REVISION_NOT_FOUND");
 
       metadata.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
+  it("migrates the rule requirement CHECK without losing immutable revisions", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-rule-requirement-migration-"));
+    const databasePath = join(root, "metadata.sqlite");
+    try {
+      const legacy = new DatabaseSync(databasePath);
+      legacy.exec(`
+        CREATE TABLE energyiq_rule_revisions (
+          revision_id TEXT PRIMARY KEY,
+          rule_id TEXT NOT NULL,
+          version INTEGER NOT NULL,
+          display_name TEXT NOT NULL,
+          description TEXT NOT NULL,
+          family TEXT NOT NULL CHECK (family IN ('data_quality', 'time', 'comparison')),
+          severity TEXT NOT NULL CHECK (severity IN ('info', 'warning')),
+          evaluation_key TEXT NOT NULL,
+          metric_revision_ids_json TEXT NOT NULL,
+          parameters_json TEXT NOT NULL,
+          requirement TEXT NOT NULL CHECK (requirement IN ('always', 'operating_hours', 'children', 'area_peers', 'people_peers')),
+          created_at TEXT NOT NULL,
+          UNIQUE (rule_id, version)
+        );
+      `);
+      legacy.prepare(`
+        INSERT INTO energyiq_rule_revisions (
+          revision_id, rule_id, version, display_name, description, family, severity,
+          evaluation_key, metric_revision_ids_json, parameters_json, requirement, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        "comparison.legacy_custom@1",
+        "comparison.legacy_custom",
+        1,
+        "Legacy custom",
+        "Preserved migration fixture",
+        "comparison",
+        "info",
+        "LEGACY_CUSTOM",
+        "[]",
+        "{}",
+        "always",
+        "2026-08-01T00:00:00.000Z",
+      );
+      legacy.close();
+
+      const metadata = createMetadataStore({ database_path: databasePath });
+      expect(metadata.energyIq.rules.listRevisions().map((rule) => rule.revision_id)).toEqual(
+        expect.arrayContaining([
+          "comparison.legacy_custom@1",
+          "comparison.daily_usage_above_baseline@1",
+        ]),
+      );
+      metadata.close();
+
+      const migrated = new DatabaseSync(databasePath);
+      const schema = migrated.prepare(`
+        SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'energyiq_rule_revisions'
+      `).get() as { sql: string };
+      expect(schema.sql).toContain("historical_baseline");
+      expect(() => migrated.prepare(`
+        INSERT INTO energyiq_rule_revisions (
+          revision_id, rule_id, version, display_name, description, family, severity,
+          evaluation_key, metric_revision_ids_json, parameters_json, requirement, created_at
+        ) VALUES ('invalid@1', 'invalid', 1, 'Invalid', 'Invalid', 'comparison', 'info',
+          'INVALID', '[]', '{}', 'unsupported', '2026-08-01T00:00:00.000Z')
+      `).run()).toThrow();
+      migrated.close();
     } finally {
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
