@@ -174,6 +174,17 @@ Golden 使用本地半开区间 `[2026-06-10 00:00, 2026-06-17 00:00)`，即 UTC
 | Coverage | 100% | 100% |
 | Virtual `Load 12` | 49.021767 kWh | 49.0218 kWh |
 
+四个 designated-total Circuit 由覆盖 Golden period 的两份 May–Jun 权威 Excel（Level 6、Level 7 各一份）独立复算，不使用 legacy mixed evidence：
+
+| Total Circuit Scope | DuckDB 独立 oracle | 正式 Analysis API |
+| --- | ---: | ---: |
+| `l6-total-light` | 111.688071 kWh | 111.6881 kWh |
+| `l6-total-load` | 365.295756 kWh | 365.2958 kWh |
+| `l7-total-light` | 180.056316 kWh | 180.0563 kWh |
+| `l7-total-load` | 874.128181 kWh | 874.1282 kWh |
+
+精确 reconciliation 为：Level 6 `111.688071 + 365.295756 = 476.983827`；Level 7 `180.056316 + 874.128181 = 1,054.184497`；Light `111.688071 + 180.056316 = 291.744387`；Load `365.295756 + 874.128181 = 1,239.423937`；四个 totals 合计 `1,531.168324`。14 个 components 合计 `1,518.996480`，18 个 Meter 全加为 `3,050.164804`，因此正式 Project 汇总必须只走四个 total routes，不能把 component 再加一次。
+
 14 个 physical component Circuit 逐一通过正式 Analysis API 与 DuckDB oracle 对账；每个 Scope 均为 672 个有效区间、100% coverage、0 quality events，并 pin 到 `energy-snapshot-a7d17e899229aa8a482e139f`：
 
 | Component Circuit Scope | DuckDB usage | API usage | DuckDB peak | API peak |

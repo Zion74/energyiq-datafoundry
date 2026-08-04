@@ -31,7 +31,7 @@ Mapping schema v2 分开保存三件事：
 - 14 个 component Circuit 均可通过 own-Circuit route 查询，但不进入 Level/Project 官方汇总；
 - Level 6、Level 7 与 Project 分别使用 light/load 分类 routes，官方成员只有 4 个 totals；
 - Virtual `Load 12` 保持可追溯公式，但不进入官方 Project/Level totals；
-- 4 个 total Circuit 均参数化固定 raw/API Golden：L6 Light `110.974382 / 110.9744`、L6 Load `366.009445 / 366.0094`、L7 Light `180.770005 / 180.77`、L7 Load `873.414492 / 873.4145` kWh；测试分别对 raw 与统一四位 API 输出做精确断言，不用宽松 tolerance 混淆精度边界；
+- 4 个 total Circuit 均参数化固定 raw/API Golden：L6 Light `111.688071 / 111.6881`、L6 Load `365.295756 / 365.2958`、L7 Light `180.056316 / 180.0563`、L7 Load `874.128181 / 874.1282` kWh；四值来自覆盖 `[2026-06-10, 2026-06-17)` 的 Level 6/7 May–Jun 权威 Excel 独立 oracle，不再沿用 legacy mixed evidence；测试分别对 raw 与统一四位 API 输出做精确断言，并显式验证 Project/Level/category reconciliation，不用宽松 tolerance 混淆精度边界；
 - Golden fixture 中 14 个 component facts 的 role 与 Published Mapping 一致为 `component`。
 
 ## 4. Release 与历史边界

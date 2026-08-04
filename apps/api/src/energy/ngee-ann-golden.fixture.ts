@@ -68,10 +68,10 @@ export const NGEE_ANN_GOLDEN = {
       peakKw: 3.5307
     },
     totalCircuits: [
-      { scopeId: "l6-total-light", meterNodeId: "mapping-lvl-6-total-office-light-8", rawUsageKwh: 110.974382, apiUsageKwh: 110.9744 },
-      { scopeId: "l6-total-load", meterNodeId: "mapping-lvl-6-total-office-load-9", rawUsageKwh: 366.009445, apiUsageKwh: 366.0094 },
-      { scopeId: "l7-total-light", meterNodeId: "mapping-lvl-7-total-office-light-17", rawUsageKwh: 180.770005, apiUsageKwh: 180.77 },
-      { scopeId: "l7-total-load", meterNodeId: "mapping-lvl-7-total-office-load-18", rawUsageKwh: 873.414492, apiUsageKwh: 873.4145 }
+      { scopeId: "l6-total-light", meterNodeId: "mapping-lvl-6-total-office-light-8", rawUsageKwh: 111.688071, apiUsageKwh: 111.6881 },
+      { scopeId: "l6-total-load", meterNodeId: "mapping-lvl-6-total-office-load-9", rawUsageKwh: 365.295756, apiUsageKwh: 365.2958 },
+      { scopeId: "l7-total-light", meterNodeId: "mapping-lvl-7-total-office-light-17", rawUsageKwh: 180.056316, apiUsageKwh: 180.0563 },
+      { scopeId: "l7-total-load", meterNodeId: "mapping-lvl-7-total-office-load-18", rawUsageKwh: 874.128181, apiUsageKwh: 874.1282 }
     ],
     dataHealth: {
       status: "complete",
@@ -158,7 +158,10 @@ export const NGEE_ANN_GOLDEN = {
     includedInOfficialTotal: false
   },
   invariants: {
-    allMeterUsageKwh: 3050.1648,
+    officialUsageKwh: 1531.168324,
+    componentUsageKwh: 1518.996480,
+    allMeterRawUsageKwh: 3050.164804,
+    allMeterApiCircuitUsageKwh: 3050.1649,
     cumulativeDeltaMismatchCount: 0,
     averageKwMismatchCount: 0,
     invalidIntervalDurationCount: 0,

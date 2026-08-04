@@ -170,6 +170,10 @@ describe("EnergyScopeAnalysis", () => {
         { category: "load", usageKwh: NGEE_ANN_GOLDEN.period.categoryUsageKwh.load },
         { category: "light", usageKwh: NGEE_ANN_GOLDEN.period.categoryUsageKwh.light }
       ]);
+      expect(roundForGolden(analysis.childScopes.reduce((sum, scope) => sum + scope.usageKwh, 0)))
+        .toBe(NGEE_ANN_GOLDEN.period.usageKwh);
+      expect(roundForGolden(analysis.categories.reduce((sum, category) => sum + category.usageKwh, 0)))
+        .toBe(NGEE_ANN_GOLDEN.period.usageKwh);
       expect(analysis.topCircuits[0]).toMatchObject({
         meterNodeId: NGEE_ANN_GOLDEN.period.topCircuit.meterNodeId,
         usageKwh: NGEE_ANN_GOLDEN.period.topCircuit.usageKwh,
@@ -201,8 +205,8 @@ describe("EnergyScopeAnalysis", () => {
         invalidIntervalDurationCount: NGEE_ANN_GOLDEN.invariants.invalidIntervalDurationCount
       });
       expect(roundForGolden(analysis.circuits.reduce((sum, meter) => sum + meter.usageKwh, 0)))
-        .toBe(NGEE_ANN_GOLDEN.invariants.allMeterUsageKwh);
-      expect(analysis.summary.usageKwh).not.toBe(NGEE_ANN_GOLDEN.invariants.allMeterUsageKwh);
+        .toBe(NGEE_ANN_GOLDEN.invariants.allMeterApiCircuitUsageKwh);
+      expect(analysis.summary.usageKwh).not.toBe(NGEE_ANN_GOLDEN.invariants.allMeterApiCircuitUsageKwh);
       expect(analysis.units).toEqual({
         usage: NGEE_ANN_GOLDEN.invariants.usageUnit,
         demand: NGEE_ANN_GOLDEN.invariants.demandUnit,
@@ -315,6 +319,21 @@ describe("EnergyScopeAnalysis", () => {
         ["l7-total-light", level7Total * totalCircuitGolden("l7-total-light").rawUsageKwh / 1054.184497],
         ["l7-total-load", level7Total * totalCircuitGolden("l7-total-load").rawUsageKwh / 1054.184497],
       ]);
+      const rawUsage = (scopeId: string): number => rawUsageByScope.get(scopeId) ?? 0;
+      expect(roundForOracle(rawUsage("l6-total-light") + rawUsage("l6-total-load")))
+        .toBe(476.983827);
+      expect(roundForOracle(rawUsage("l7-total-light") + rawUsage("l7-total-load")))
+        .toBe(1054.184497);
+      expect(roundForOracle(rawUsage("l6-total-light") + rawUsage("l7-total-light")))
+        .toBe(291.744387);
+      expect(roundForOracle(rawUsage("l6-total-load") + rawUsage("l7-total-load")))
+        .toBe(1239.423937);
+      expect(roundForOracle([...rawUsageByScope.values()].reduce((sum, usage) => sum + usage, 0)))
+        .toBe(NGEE_ANN_GOLDEN.invariants.officialUsageKwh);
+      expect(roundForOracle(
+        NGEE_ANN_GOLDEN.invariants.officialUsageKwh
+          + NGEE_ANN_GOLDEN.invariants.componentUsageKwh
+      )).toBe(NGEE_ANN_GOLDEN.invariants.allMeterRawUsageKwh);
       for (const golden of NGEE_ANN_GOLDEN.period.totalCircuits) {
         expect(Math.round((rawUsageByScope.get(golden.scopeId) ?? 0) * 1_000_000) / 1_000_000)
           .toBe(golden.rawUsageKwh);
@@ -716,6 +735,7 @@ const expectedHourlyProfile = (
 }));
 
 const roundForGolden = (value: number): number => Math.round((value + Number.EPSILON) * 10_000) / 10_000;
+const roundForOracle = (value: number): number => Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;
 
 const removeTemporaryEnergyFixture = (root: string): void => {
   try {
