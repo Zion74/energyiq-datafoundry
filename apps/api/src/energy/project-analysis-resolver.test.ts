@@ -147,8 +147,8 @@ describe("ProjectAnalysisResolver", () => {
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
     const gateway = new LocalDataGateway(metadata);
     try {
-      await materializePreschoolGoldenFixture(databasePath);
       ensureEnergyIqBootstrap(metadata);
+      const preschoolSnapshot = await materializePreschoolGoldenFixture(databasePath, metadata);
       const result = await resolveProjectAnalysis({
         metadataStore: metadata,
         dataGateway: gateway,
@@ -193,7 +193,7 @@ describe("ProjectAnalysisResolver", () => {
         },
         dataQuality: { status: "partial", coveragePct: 3.2258 },
         dataSnapshot: {
-          id: "preschool-26b85b9c0b95e090",
+          id: preschoolSnapshot.id,
         },
         analysis: {
           summary: { usageKwh: PRESCHOOL_GOLDEN.period.usageKwh },

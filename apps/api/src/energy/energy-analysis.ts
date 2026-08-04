@@ -220,8 +220,10 @@ export const selectEnergyGoldenPeriod = async (input: {
     ?? process.env.ENERGYIQ_DUCKDB_PATH
     ?? join(resolve(dirname(fileURLToPath(import.meta.url)), "../../../.."), "storage", "energy", input.context.workspaceId, "energy.duckdb");
   const coverage = await readEnergyFactCoverage({
+    metadataStore: input.metadataStore,
     workspaceId: input.context.workspaceId,
     projectId: input.context.projectId,
+    dataSnapshotId: input.context.dataSnapshotId,
     resource: input.context.resource,
     databasePath
   });

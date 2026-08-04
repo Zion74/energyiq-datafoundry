@@ -1,7 +1,10 @@
 import writeXlsxFile from "write-excel-file/node";
 import { describe, expect, it } from "vitest";
 
-import { writeEnergyFactMaterialization, type EnergyFactMaterializationWrite } from "@datafoundry/data-gateway";
+import {
+  writeEnergyFactProjectMaterialization,
+  type EnergyFactMaterializationBatchWrite,
+} from "@datafoundry/data-gateway";
 import type { EnergyIqImportBatchRecord, EnergyIqProjectSetupDocument } from "@datafoundry/metadata";
 import {
   buildEnergyExcelMaterialization,
@@ -28,7 +31,6 @@ describe("buildEnergyExcelMaterialization", () => {
         document: document(),
         mappingRevision: 4,
         timezone: "Asia/Singapore",
-        databasePath: ":memory:",
       }),
       later: await buildEnergyExcelMaterialization({
         content: laterWorkbook,
@@ -36,19 +38,17 @@ describe("buildEnergyExcelMaterialization", () => {
         document: document(),
         mappingRevision: 4,
         timezone: "Asia/Singapore",
-        databasePath: ":memory:",
       }),
     });
 
     const forwardInputs = await materialize("project-real-workbooks-forward");
     expect(forwardInputs.earlier.summary.intervalFactCount).toBe(1);
     expect(forwardInputs.later.summary.intervalFactCount).toBe(1);
-    await writeEnergyFactMaterialization(scopedWrite(forwardInputs.earlier.write, "snapshot-forward-a", ["a".repeat(64)]));
-    const forward = await writeEnergyFactMaterialization(scopedWrite(
-      forwardInputs.later.write,
+    const forward = await writeProjectFacts(
+      [forwardInputs.earlier.write, forwardInputs.later.write],
       "snapshot-forward-ab",
-      ["a".repeat(64), "b".repeat(64)],
-    ));
+      "project-real-workbooks-forward",
+    );
     expect(forward.projectAudit).toMatchObject({
       normalizedReadingCount: 4,
       intervalFactCount: 3,
@@ -57,21 +57,20 @@ describe("buildEnergyExcelMaterialization", () => {
       missingAdjacentIntervalCount: 0,
       orphanIntervalFactCount: 0,
     });
-    await expect(writeEnergyFactMaterialization(scopedWrite(
-      forwardInputs.earlier.write,
+    await expect(writeProjectFacts(
+      [forwardInputs.earlier.write, forwardInputs.later.write],
       "snapshot-forward-ab",
-      ["a".repeat(64), "b".repeat(64)],
-    ))).resolves.toMatchObject({
+      "project-real-workbooks-forward",
+    )).resolves.toMatchObject({
       projectAudit: forward.projectAudit,
     });
 
     const reverseInputs = await materialize("project-real-workbooks-reverse");
-    await writeEnergyFactMaterialization(scopedWrite(reverseInputs.later.write, "snapshot-reverse-b", ["b".repeat(64)]));
-    const reverse = await writeEnergyFactMaterialization(scopedWrite(
-      reverseInputs.earlier.write,
+    const reverse = await writeProjectFacts(
+      [reverseInputs.later.write, reverseInputs.earlier.write],
       "snapshot-reverse-ab",
-      ["a".repeat(64), "b".repeat(64)],
-    ));
+      "project-real-workbooks-reverse",
+    );
     expect(reverse.projectAudit).toEqual(forward.projectAudit);
   });
 
@@ -88,7 +87,6 @@ describe("buildEnergyExcelMaterialization", () => {
       document: document(),
       mappingRevision: 4,
       timezone: "Asia/Singapore",
-      databasePath: "ignored.duckdb",
     });
 
     expect(result.write.rawReadings).toHaveLength(3);
@@ -192,25 +190,41 @@ describe("buildEnergyExcelMaterialization", () => {
       document: unconfirmed,
       mappingRevision: 4,
       timezone: "Asia/Singapore",
-      databasePath: "ignored.duckdb",
     })).rejects.toThrow("ENERGYIQ_METER_MAPPING_NOT_CONFIRMED");
   });
 });
 
-const scopedWrite = (
-  write: Omit<EnergyFactMaterializationWrite, "snapshotFactScope">,
+const writeProjectFacts = async (
+  writes: EnergyFactMaterializationBatchWrite[],
   dataSnapshotId: string,
-  sourceSha256: string[],
-): EnergyFactMaterializationWrite => ({
-  ...write,
-  snapshotFactScope: {
-    workspaceId: "workspace-1",
-    projectId: write.projectId,
-    dataSnapshotId,
-    manifestFingerprint: `fingerprint-${dataSnapshotId}`,
-    sourceSha256,
-  },
-});
+  projectId: string,
+) => {
+  const first = writes[0];
+  if (!first) throw new Error("TEST_PROJECT_MATERIALIZATION_EMPTY");
+  const sourceSha256 = writes.map((write) => write.sourceSha256)
+    .sort((left, right) => left.localeCompare(right));
+  return writeEnergyFactProjectMaterialization({
+    databasePath: ":memory:",
+    projectId,
+    timezone: "Asia/Singapore",
+    expectedPreviousDataSnapshotId: "unavailable",
+    snapshotFactScope: {
+      workspaceId: "workspace-1",
+      projectId,
+      dataSnapshotId,
+      manifestFingerprint: `fingerprint-${dataSnapshotId}`,
+      sourceSha256,
+    },
+    batches: writes.map((write) => ({
+      importBatchId: write.importBatchId,
+      sourceSha256: write.sourceSha256,
+      rawReadings: write.rawReadings,
+      normalizedReadings: write.normalizedReadings,
+      intervalFacts: write.intervalFacts,
+      qualityEvents: write.qualityEvents,
+    })),
+  });
+};
 
 const batch = (
   id = "batch-1",

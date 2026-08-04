@@ -1,13 +1,224 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { getDuckDbDatabase } from "./duckdb-database-cache.js";
 
 import {
   ENERGY_FACT_WRITER_CONTRACT_VERSION,
+  probeEnergyFactProjectStateForMaterialization,
   readEnergyFactMaterializationStats,
   readEnergyFactProjectState,
-  writeEnergyFactMaterialization,
+  writeEnergyFactProjectMaterialization,
+  type EnergyFactMaterializationBatchWrite,
 } from "./energy-fact-writer.js";
 
-describe("writeEnergyFactMaterialization", () => {
+describe("writeEnergyFactProjectMaterialization", () => {
+  it("treats a pre-integrity v3 state schema as uninitialized for full rematerialization", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-legacy-rematerialization-"));
+    const databasePath = join(root, "legacy.duckdb");
+    const projectId = "project-legacy-rematerialization";
+    try {
+      const database = await getDuckDbDatabase(databasePath);
+      const connection = database.connect();
+      await new Promise<void>((resolve, reject) => {
+        connection.run(legacyFactSchemaSql, (error) =>
+          error ? reject(error) : resolve());
+      });
+      await new Promise<void>((resolve, reject) => {
+        connection.close((error) => error ? reject(error) : resolve());
+      });
+      await expect(probeEnergyFactProjectStateForMaterialization({ databasePath, projectId })).resolves.toBeNull();
+
+      const source = boundaryBatch({
+        databasePath,
+        projectId,
+        importBatchId: "legacy-a",
+        sourceSha256: "legacy-sha-a",
+        readings: [["2026-05-01T00:00:00.000Z", 100], ["2026-05-01T00:15:00.000Z", 101]],
+      });
+      await writeEnergyFactProjectMaterialization({
+        databasePath,
+        projectId,
+        timezone: "Asia/Singapore",
+        expectedPreviousDataSnapshotId: "unavailable",
+        snapshotFactScope: testFactScope(projectId, "snapshot-a", ["legacy-sha-a"]),
+        batches: [projectBatch(source)],
+      });
+      await expect(readEnergyFactProjectState({ databasePath, projectId }))
+        .resolves.toMatchObject({ dataSnapshotId: "snapshot-a" });
+    } finally {
+      try {
+        rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+      } catch (error) {
+        if (process.platform !== "win32" || !(error instanceof Error) || !("code" in error)
+          || (error.code !== "EPERM" && error.code !== "EBUSY")) throw error;
+      }
+    }
+  });
+
+  it.each([
+    { label: "empty", sourceSha256: [], batches: [] },
+    {
+      label: "duplicate",
+      sourceSha256: ["duplicate-sha", "duplicate-sha"],
+      batches: [projectBatch(boundaryBatch({
+        databasePath: ":memory:",
+        projectId: "project-invalid-manifest",
+        importBatchId: "duplicate-a",
+        sourceSha256: "duplicate-sha",
+        readings: [["2026-05-01T00:00:00.000Z", 100], ["2026-05-01T00:15:00.000Z", 101]],
+      }))],
+    },
+  ])("rejects a $label Project source manifest", async ({ sourceSha256, batches }) => {
+    await expect(writeEnergyFactProjectMaterialization({
+      databasePath: ":memory:",
+      projectId: "project-invalid-manifest",
+      timezone: "Asia/Singapore",
+      expectedPreviousDataSnapshotId: "unavailable",
+      snapshotFactScope: testFactScope("project-invalid-manifest", "snapshot-invalid", sourceSha256),
+      batches,
+    })).rejects.toThrow("ENERGYIQ_SNAPSHOT_MANIFEST_MATERIALIZATION_INCOMPLETE");
+  });
+
+  it("rejects rows whose provenance does not match the declared batch source", async () => {
+    const source = boundaryBatch({
+      databasePath: ":memory:",
+      projectId: "project-row-provenance",
+      importBatchId: "provenance-a",
+      sourceSha256: "provenance-sha-a",
+      readings: [["2026-05-01T00:00:00.000Z", 100], ["2026-05-01T00:15:00.000Z", 101]],
+    });
+    const contaminated = {
+      ...source,
+      normalizedReadings: source.normalizedReadings.map((row, index) => index === 0
+        ? { ...row, sourceSha256: "provenance-sha-b" }
+        : row),
+    };
+    await expect(writeEnergyFactProjectMaterialization({
+      databasePath: ":memory:",
+      projectId: source.projectId,
+      timezone: source.timezone,
+      expectedPreviousDataSnapshotId: "unavailable",
+      snapshotFactScope: testFactScope(source.projectId, "snapshot-a", [source.sourceSha256]),
+      batches: [projectBatch(contaminated)],
+    })).rejects.toThrow("ENERGYIQ_SNAPSHOT_FACT_SCOPE_MISMATCH");
+  });
+
+  it("fails closed instead of recreating a missing canonical table on a read", async () => {
+    const databasePath = ":memory:";
+    const projectId = "project-damaged-canonical-table";
+    const source = boundaryBatch({
+      databasePath,
+      projectId,
+      importBatchId: "damaged-a",
+      sourceSha256: "damaged-sha-a",
+      readings: [["2026-05-01T00:00:00.000Z", 100], ["2026-05-01T00:15:00.000Z", 101]],
+    });
+    await writeEnergyFactProjectMaterialization({
+      databasePath,
+      projectId,
+      timezone: "Asia/Singapore",
+      expectedPreviousDataSnapshotId: "unavailable",
+      snapshotFactScope: testFactScope(projectId, "snapshot-a", ["damaged-sha-a"]),
+      batches: [projectBatch(source)],
+    });
+    const database = await getDuckDbDatabase(databasePath);
+    const connection = database.connect();
+    await new Promise<void>((resolve, reject) => {
+      connection.run("DROP TABLE energy_interval_facts", (error) => error ? reject(error) : resolve());
+    });
+    await new Promise<void>((resolve, reject) => {
+      connection.close((error) => error ? reject(error) : resolve());
+    });
+
+    await expect(readEnergyFactProjectState({ databasePath, projectId }))
+      .rejects.toThrow("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  });
+
+  it("maps malformed persisted fact state to the stable unavailable error", async () => {
+    const databasePath = ":memory:";
+    const projectId = "project-malformed-fact-state";
+    const source = boundaryBatch({
+      databasePath,
+      projectId,
+      importBatchId: "malformed-a",
+      sourceSha256: "malformed-sha-a",
+      readings: [["2026-05-01T00:00:00.000Z", 100], ["2026-05-01T00:15:00.000Z", 101]],
+    });
+    await writeEnergyFactProjectMaterialization({
+      databasePath,
+      projectId,
+      timezone: "Asia/Singapore",
+      expectedPreviousDataSnapshotId: "unavailable",
+      snapshotFactScope: testFactScope(projectId, "snapshot-a", ["malformed-sha-a"]),
+      batches: [projectBatch(source)],
+    });
+    const database = await getDuckDbDatabase(databasePath);
+    const connection = database.connect();
+    await new Promise<void>((resolve, reject) => {
+      connection.run(
+        `UPDATE energy_project_fact_state SET source_sha256_json = '{"bad":true}' WHERE project_id = ?`,
+        projectId,
+        (error) => error ? reject(error) : resolve(),
+      );
+    });
+    await new Promise<void>((resolve, reject) => {
+      connection.close((error) => error ? reject(error) : resolve());
+    });
+
+    await expect(readEnergyFactProjectState({ databasePath, projectId }))
+      .rejects.toThrow("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  });
+
+  it("writes a complete manifest atomically and rejects a new write over an uncompleted fact state", async () => {
+    const databasePath = ":memory:";
+    const projectId = "project-full-manifest";
+    const sourceA = boundaryBatch({
+      databasePath,
+      projectId,
+      importBatchId: "full-a",
+      sourceSha256: "full-sha-a",
+      readings: [["2026-05-01T00:00:00.000Z", 100], ["2026-05-01T00:15:00.000Z", 101]],
+    });
+    const sourceB = boundaryBatch({
+      databasePath,
+      projectId,
+      importBatchId: "full-b",
+      sourceSha256: "full-sha-b",
+      readings: [["2026-05-01T00:30:00.000Z", 102], ["2026-05-01T00:45:00.000Z", 103]],
+    });
+    const snapshotB = testFactScope(projectId, "snapshot-b", ["full-sha-a", "full-sha-b"]);
+    const writtenB = await writeEnergyFactProjectMaterialization({
+      databasePath,
+      projectId,
+      timezone: "Asia/Singapore",
+      expectedPreviousDataSnapshotId: "unavailable",
+      snapshotFactScope: snapshotB,
+      batches: [projectBatch(sourceA), projectBatch(sourceB)],
+    });
+    expect(writtenB.projectAudit.intervalFactCount).toBe(3);
+
+    const sourceC = boundaryBatch({
+      databasePath,
+      projectId,
+      importBatchId: "full-c",
+      sourceSha256: "full-sha-c",
+      readings: [["2026-05-01T01:00:00.000Z", 104], ["2026-05-01T01:15:00.000Z", 105]],
+    });
+    await expect(writeEnergyFactProjectMaterialization({
+      databasePath,
+      projectId,
+      timezone: "Asia/Singapore",
+      expectedPreviousDataSnapshotId: "snapshot-a",
+      snapshotFactScope: testFactScope(projectId, "snapshot-c", ["full-sha-c"]),
+      batches: [projectBatch(sourceC)],
+    })).rejects.toThrow("ENERGYIQ_SNAPSHOT_STALE:snapshot-b");
+    await expect(readEnergyFactProjectState({ databasePath, projectId })).resolves.toMatchObject({
+      dataSnapshotId: "snapshot-b",
+    });
+  });
+
   it("canonicalizes only the prepared manifest sources and commits their Project fact state", async () => {
     const databasePath = ":memory:";
     const projectId = "project-manifest-scope";
@@ -42,19 +253,88 @@ describe("writeEnergyFactMaterialization", () => {
       ],
     });
 
-    await writeEnergyFactMaterialization(withFactScope(sourceC, "snapshot-c", ["sha-c"]));
-    await writeEnergyFactMaterialization(withFactScope(sourceA, "snapshot-a", ["sha-a"]));
-    const result = await writeEnergyFactMaterialization(withFactScope(sourceB, "snapshot-ab", ["sha-a", "sha-b"]));
+    await writeProjectSnapshot(sourceC, [sourceC], "snapshot-c", ["sha-c"], "unavailable");
+    await writeProjectSnapshot(sourceA, [sourceA], "snapshot-a", ["sha-a"], "snapshot-c");
+    const result = await writeProjectSnapshot(
+      sourceB,
+      [sourceA, sourceB],
+      "snapshot-ab",
+      ["sha-a", "sha-b"],
+      "snapshot-a",
+    );
 
     expect(result.projectAudit.intervalFactCount).toBe(3);
-    await expect(readEnergyFactProjectState({ databasePath, projectId })).resolves.toEqual({
+    await expect(readEnergyFactProjectState({ databasePath, projectId })).resolves.toMatchObject({
       workspaceId: "workspace-1",
       projectId,
       dataSnapshotId: "snapshot-ab",
       manifestFingerprint: "fingerprint-snapshot-ab",
       sourceSha256: ["sha-a", "sha-b"],
       factWriterContractVersion: ENERGY_FACT_WRITER_CONTRACT_VERSION,
+      canonicalIntervalCount: 3,
+      canonicalIntervalDigest: expect.stringMatching(/^[a-f0-9]{64}$/u),
     });
+  });
+
+  it("excludes retained off-manifest raw evidence from active overlap audit", async () => {
+    const databasePath = ":memory:";
+    const projectId = "project-active-raw-audit";
+    const withRaw = (input: ReturnType<typeof boundaryBatch>) => ({
+      ...input,
+      rawReadings: input.normalizedReadings.map((reading) => ({
+        workspaceId: reading.workspaceId,
+        projectId: reading.projectId,
+        importBatchId: reading.importBatchId,
+        resource: reading.resource,
+        sourceLabel: reading.sourceLabel,
+        meterPointId: reading.meterPointId,
+        scopeId: reading.scopeId,
+        eventTime: reading.eventTime,
+        activeEnergyKwh: reading.activeEnergyKwh,
+        sourceFile: reading.sourceFile,
+        sourceSha256: reading.sourceSha256,
+        sourceRowNumber: reading.sourceRowNumber,
+        sourceReadingKind: reading.sourceReadingKind,
+        isValid: true,
+        isOverlapConflict: false,
+      })),
+    });
+    const sourceA = withRaw(boundaryBatch({
+      databasePath,
+      projectId,
+      importBatchId: "audit-a",
+      sourceSha256: "audit-sha-a",
+      readings: [["2026-05-01T00:00:00.000Z", 100], ["2026-05-01T00:15:00.000Z", 101]],
+    }));
+    const sourceB = withRaw(boundaryBatch({
+      databasePath,
+      projectId,
+      importBatchId: "audit-b",
+      sourceSha256: "audit-sha-b",
+      readings: [["2026-05-01T00:15:00.000Z", 100.9], ["2026-05-01T00:30:00.000Z", 101.9]],
+    }));
+
+    const both = await writeEnergyFactProjectMaterialization({
+      databasePath,
+      projectId,
+      timezone: "Asia/Singapore",
+      expectedPreviousDataSnapshotId: "unavailable",
+      snapshotFactScope: testFactScope(projectId, "snapshot-a-b", ["audit-sha-a", "audit-sha-b"]),
+      batches: [projectBatch(sourceA), projectBatch(sourceB)],
+    });
+    expect(both.projectAudit.rawOverlapConflictCount).toBe(2);
+
+    const activeA = await writeEnergyFactProjectMaterialization({
+      databasePath,
+      projectId,
+      timezone: "Asia/Singapore",
+      expectedPreviousDataSnapshotId: "snapshot-a-b",
+      snapshotFactScope: testFactScope(projectId, "snapshot-a", ["audit-sha-a"]),
+      batches: [projectBatch(sourceA)],
+    });
+    expect(activeA.projectAudit).toMatchObject({ rawRowCount: 2, rawOverlapConflictCount: 0 });
+    await expect(readEnergyFactMaterializationStats({ databasePath, importBatchId: "audit-b" }))
+      .resolves.toMatchObject({ rawRows: 2 });
   });
 
   it("restores the manifest winner after an off-manifest source previously replaced it", async () => {
@@ -95,22 +375,28 @@ describe("writeEnergyFactMaterialization", () => {
       ],
     });
 
-    await writeEnergyFactMaterialization(withFactScope(sourceA, "snapshot-a", ["restore-sha-a"]));
-    const original = await writeEnergyFactMaterialization(withFactScope(
+    await writeProjectSnapshot(sourceA, [sourceA], "snapshot-a", ["restore-sha-a"], "unavailable");
+    const original = await writeProjectSnapshot(
       sourceB,
+      [sourceA, sourceB],
       "snapshot-ab",
       ["restore-sha-a", "restore-sha-b"],
-    ));
-    await writeEnergyFactMaterialization(withFactScope(
+      "snapshot-a",
+    );
+    await writeProjectSnapshot(
       sourceC,
+      [sourceA, sourceB, sourceC],
       "snapshot-abc",
       ["restore-sha-a", "restore-sha-b", "restore-sha-c"],
-    ));
-    const restored = await writeEnergyFactMaterialization(withFactScope(
+      "snapshot-ab",
+    );
+    const restored = await writeProjectSnapshot(
       sourceA,
+      [sourceA, sourceB],
       "snapshot-ab-restored",
       ["restore-sha-a", "restore-sha-b"],
-    ));
+      "snapshot-abc",
+    );
 
     expect(restored.projectAudit).toEqual(original.projectAudit);
   });
@@ -139,8 +425,14 @@ describe("writeEnergyFactMaterialization", () => {
         ["2026-05-01T00:45:00.000Z", 103],
       ],
     });
-    await writeEnergyFactMaterialization(earlier);
-    const result = await writeEnergyFactMaterialization(withFactScope(later, "snapshot-ab", ["sha-a", "sha-b"]));
+    await writeProjectSnapshot(earlier, [earlier], "snapshot-a", ["sha-a"], "unavailable");
+    const result = await writeProjectSnapshot(
+      later,
+      [earlier, later],
+      "snapshot-ab",
+      ["sha-a", "sha-b"],
+      "snapshot-a",
+    );
 
     expect(result.projectAudit).toMatchObject({
       normalizedReadingCount: 4,
@@ -152,24 +444,34 @@ describe("writeEnergyFactMaterialization", () => {
       missingAdjacentIntervalCount: 0,
       orphanIntervalFactCount: 0,
     });
-    await expect(writeEnergyFactMaterialization(withFactScope(earlier, "snapshot-ab", ["sha-a", "sha-b"]))).resolves.toMatchObject({
+    await expect(writeProjectSnapshot(
+      earlier,
+      [earlier, later],
+      "snapshot-ab",
+      ["sha-a", "sha-b"],
+      "snapshot-ab",
+    )).resolves.toMatchObject({
       projectAudit: result.projectAudit,
     });
 
     const reverseProjectId = "project-cross-batch-boundary-reverse";
-    await writeEnergyFactMaterialization(withProjectId(later, reverseProjectId));
-    const reverse = await writeEnergyFactMaterialization(withFactScope(
-      withProjectId(earlier, reverseProjectId),
+    const reverseEarlier = withProjectId(earlier, reverseProjectId);
+    const reverseLater = withProjectId(later, reverseProjectId);
+    await writeProjectSnapshot(reverseLater, [reverseLater], "snapshot-b", ["sha-b"], "unavailable");
+    const reverse = await writeProjectSnapshot(
+      reverseEarlier,
+      [reverseEarlier, reverseLater],
       "snapshot-reverse-ab",
       ["sha-a", "sha-b"],
-    ));
+      "snapshot-b",
+    );
     expect(reverse.projectAudit).toEqual(result.projectAudit);
   });
 
   it("keeps project-wide gaps and resets as non-ok canonical facts", async () => {
     const databasePath = ":memory:";
     const projectId = "project-cross-batch-quality";
-    await writeEnergyFactMaterialization(boundaryBatch({
+    const sourceA = boundaryBatch({
       databasePath,
       projectId,
       importBatchId: "quality-a",
@@ -178,8 +480,8 @@ describe("writeEnergyFactMaterialization", () => {
         ["2026-05-01T00:00:00.000Z", 100],
         ["2026-05-01T00:15:00.000Z", 101],
       ],
-    }));
-    const result = await writeEnergyFactMaterialization(withFactScope(boundaryBatch({
+    });
+    const sourceB = boundaryBatch({
       databasePath,
       projectId,
       importBatchId: "quality-b",
@@ -189,7 +491,15 @@ describe("writeEnergyFactMaterialization", () => {
         ["2026-05-01T01:00:00.000Z", 90],
         ["2026-05-01T01:15:00.000Z", 91],
       ],
-    }), "snapshot-quality-ab", ["quality-sha-a", "quality-sha-b"]));
+    });
+    await writeProjectSnapshot(sourceA, [sourceA], "snapshot-quality-a", ["quality-sha-a"], "unavailable");
+    const result = await writeProjectSnapshot(
+      sourceB,
+      [sourceA, sourceB],
+      "snapshot-quality-ab",
+      ["quality-sha-a", "quality-sha-b"],
+      "snapshot-quality-a",
+    );
 
     expect(result.projectAudit).toMatchObject({
       normalizedReadingCount: 5,
@@ -232,12 +542,14 @@ describe("writeEnergyFactMaterialization", () => {
         ["2026-05-01T00:45:00.000Z", 102.9],
       ],
     });
-    await writeEnergyFactMaterialization(later);
-    const result = await writeEnergyFactMaterialization(withFactScope(
+    await writeProjectSnapshot(later, [later], "snapshot-cumulative-later", ["cumulative-sha-later"], "unavailable");
+    const result = await writeProjectSnapshot(
       earlier,
+      [earlier, later],
       "snapshot-cumulative-ab",
       ["cumulative-sha-earlier", "cumulative-sha-later"],
-    ));
+      "snapshot-cumulative-later",
+    );
 
     expect(result.projectAudit).toMatchObject({
       normalizedReadingCount: 4,
@@ -252,12 +564,16 @@ describe("writeEnergyFactMaterialization", () => {
       .resolves.toMatchObject({ normalizedRows: 1, intervalFacts: 0 });
 
     const forwardProjectId = "project-cumulative-overlap-forward";
-    await writeEnergyFactMaterialization(withProjectId(earlier, forwardProjectId));
-    const forward = await writeEnergyFactMaterialization(withFactScope(
-      withProjectId(later, forwardProjectId),
+    const forwardEarlier = withProjectId(earlier, forwardProjectId);
+    const forwardLater = withProjectId(later, forwardProjectId);
+    await writeProjectSnapshot(forwardEarlier, [forwardEarlier], "snapshot-cumulative-forward-a", ["cumulative-sha-earlier"], "unavailable");
+    const forward = await writeProjectSnapshot(
+      forwardLater,
+      [forwardEarlier, forwardLater],
       "snapshot-cumulative-forward-ab",
       ["cumulative-sha-earlier", "cumulative-sha-later"],
-    ));
+      "snapshot-cumulative-forward-a",
+    );
     expect(forward.projectAudit).toEqual(result.projectAudit);
   });
 
@@ -343,14 +659,14 @@ describe("writeEnergyFactMaterialization", () => {
       snapshotFactScope: testFactScope("project-1", "snapshot-1", ["sha-1"]),
     };
 
-    await writeEnergyFactMaterialization(input);
-    await writeEnergyFactMaterialization(input);
+    await writeProjectSnapshot(input, [input], "snapshot-1", ["sha-1"], "unavailable");
+    await writeProjectSnapshot(input, [input], "snapshot-1", ["sha-1"], "snapshot-1");
     await expect(readEnergyFactMaterializationStats({
       databasePath: ":memory:",
       importBatchId: "batch-1",
     })).resolves.toEqual({ rawRows: 1, normalizedRows: 1, intervalFacts: 1, qualityEvents: 1 });
     const legacyProjectId = "project-legacy";
-    await expect(writeEnergyFactMaterialization({
+    const invalid = {
       ...input,
       projectId: legacyProjectId,
       importBatchId: "",
@@ -380,7 +696,14 @@ describe("writeEnergyFactMaterialization", () => {
         qualityStatus: "negative_delta",
       })),
       qualityEvents: [],
-    })).rejects.toThrow("ENERGYIQ_SNAPSHOT_FACT_SCOPE_EMPTY");
+    };
+    await expect(writeProjectSnapshot(
+      invalid,
+      [invalid],
+      "snapshot-legacy",
+      [""],
+      "unavailable",
+    )).rejects.toThrow("ENERGYIQ_SNAPSHOT_FACT_SCOPE_EMPTY");
   });
 
   it("keeps the source with the later coverage end at an overlapping timestamp", async () => {
@@ -452,11 +775,10 @@ describe("writeEnergyFactMaterialization", () => {
       sourceReadingKind: "interval_usage" as const,
     });
 
-    await writeEnergyFactMaterialization({
+    const laterBatch = {
       ...base,
       importBatchId: "later",
       sourceSha256: "sha-later",
-      snapshotFactScope: testFactScope("project-overlap", "snapshot-later", ["sha-later"]),
       rawReadings: [
         raw("later", "sha-later", "2026-05-01T00:15:00.000Z", 101),
         raw("later", "sha-later", "2026-05-01T00:30:00.000Z", 102),
@@ -469,12 +791,11 @@ describe("writeEnergyFactMaterialization", () => {
         fact("later", "sha-later", "2026-05-01T00:00:00.000Z", "2026-05-01T00:15:00.000Z", 1),
         fact("later", "sha-later", "2026-05-01T00:15:00.000Z", "2026-05-01T00:30:00.000Z", 1),
       ],
-    });
-    const materialized = await writeEnergyFactMaterialization({
+    };
+    const earlierBatch = {
       ...base,
       importBatchId: "earlier",
       sourceSha256: "sha-earlier",
-      snapshotFactScope: testFactScope("project-overlap", "snapshot-overlap", ["sha-earlier", "sha-later"]),
       rawReadings: [
         raw("earlier", "sha-earlier", "2026-05-01T00:15:00.000Z", 100.9),
       ],
@@ -484,7 +805,15 @@ describe("writeEnergyFactMaterialization", () => {
       intervalFacts: [
         fact("earlier", "sha-earlier", "2026-05-01T00:00:00.000Z", "2026-05-01T00:15:00.000Z", 0.9),
       ],
-    });
+    };
+    await writeProjectSnapshot(laterBatch, [laterBatch], "snapshot-later", ["sha-later"], "unavailable");
+    const materialized = await writeProjectSnapshot(
+      earlierBatch,
+      [earlierBatch, laterBatch],
+      "snapshot-overlap",
+      ["sha-earlier", "sha-later"],
+      "snapshot-later",
+    );
 
     await expect(readEnergyFactMaterializationStats({ databasePath, importBatchId: "later" }))
       .resolves.toMatchObject({ normalizedRows: 2, intervalFacts: 2 });
@@ -512,22 +841,20 @@ describe("writeEnergyFactMaterialization", () => {
     });
 
     const reverseProjectId = "project-overlap-reverse";
-    await writeEnergyFactMaterialization({
+    const reverseEarlierBatch = {
       ...base,
       projectId: reverseProjectId,
       importBatchId: "earlier-reverse",
       sourceSha256: "sha-earlier",
-      snapshotFactScope: testFactScope(reverseProjectId, "snapshot-earlier-reverse", ["sha-earlier"]),
       rawReadings: [raw("earlier-reverse", "sha-earlier", "2026-05-01T00:15:00.000Z", 100.9, reverseProjectId)],
       normalizedReadings: [normalized("earlier-reverse", "sha-earlier", "2026-05-01T00:15:00.000Z", 100.9, reverseProjectId)],
       intervalFacts: [fact("earlier-reverse", "sha-earlier", "2026-05-01T00:00:00.000Z", "2026-05-01T00:15:00.000Z", 0.9, reverseProjectId)],
-    });
-    const reverseMaterialized = await writeEnergyFactMaterialization({
+    };
+    const reverseLaterBatch = {
       ...base,
       projectId: reverseProjectId,
       importBatchId: "later-reverse",
       sourceSha256: "sha-later",
-      snapshotFactScope: testFactScope(reverseProjectId, "snapshot-overlap-reverse", ["sha-earlier", "sha-later"]),
       rawReadings: [
         raw("later-reverse", "sha-later", "2026-05-01T00:15:00.000Z", 101, reverseProjectId),
         raw("later-reverse", "sha-later", "2026-05-01T00:30:00.000Z", 102, reverseProjectId),
@@ -540,18 +867,31 @@ describe("writeEnergyFactMaterialization", () => {
         fact("later-reverse", "sha-later", "2026-05-01T00:00:00.000Z", "2026-05-01T00:15:00.000Z", 1, reverseProjectId),
         fact("later-reverse", "sha-later", "2026-05-01T00:15:00.000Z", "2026-05-01T00:30:00.000Z", 1, reverseProjectId),
       ],
-    });
+    };
+    await writeProjectSnapshot(
+      reverseEarlierBatch,
+      [reverseEarlierBatch],
+      "snapshot-earlier-reverse",
+      ["sha-earlier"],
+      "unavailable",
+    );
+    const reverseMaterialized = await writeProjectSnapshot(
+      reverseLaterBatch,
+      [reverseEarlierBatch, reverseLaterBatch],
+      "snapshot-overlap-reverse",
+      ["sha-earlier", "sha-later"],
+      "snapshot-earlier-reverse",
+    );
     expect(reverseMaterialized.projectAudit).toEqual(materialized.projectAudit);
     await expect(readEnergyFactMaterializationStats({ databasePath, importBatchId: "later-reverse" }))
       .resolves.toMatchObject({ normalizedRows: 2, intervalFacts: 2 });
     await expect(readEnergyFactMaterializationStats({ databasePath, importBatchId: "earlier-reverse" }))
       .resolves.toMatchObject({ normalizedRows: 0, intervalFacts: 0 });
 
-    const replayed = await writeEnergyFactMaterialization({
+    const replayEarlierBatch = {
       ...base,
       importBatchId: "earlier",
       sourceSha256: "sha-earlier",
-      snapshotFactScope: testFactScope("project-overlap", "snapshot-overlap-replay", ["sha-earlier", "sha-later"]),
       rawReadings: [
         raw("earlier", "sha-earlier", "2026-05-01T00:15:00.000Z", 101),
       ],
@@ -561,7 +901,14 @@ describe("writeEnergyFactMaterialization", () => {
       intervalFacts: [
         fact("earlier", "sha-earlier", "2026-05-01T00:00:00.000Z", "2026-05-01T00:15:00.000Z", 1),
       ],
-    });
+    };
+    const replayed = await writeProjectSnapshot(
+      replayEarlierBatch,
+      [replayEarlierBatch, laterBatch],
+      "snapshot-overlap-replay",
+      ["sha-earlier", "sha-later"],
+      "snapshot-overlap",
+    );
     expect(replayed.projectAudit.rawOverlapConflictCount).toBe(0);
     await expect(readEnergyFactMaterializationStats({ databasePath, importBatchId: "later" }))
       .resolves.toMatchObject({ normalizedRows: 2, intervalFacts: 2 });
@@ -634,6 +981,46 @@ const boundaryBatch = (input: {
   snapshotFactScope: testFactScope(input.projectId, `snapshot-${input.importBatchId}`, [input.sourceSha256]),
 });
 
+const legacyFactSchemaSql = `
+  CREATE TABLE raw_meter_readings (
+    workspace_id VARCHAR, project_id VARCHAR, resource VARCHAR, device_name VARCHAR,
+    event_time TIMESTAMPTZ, active_energy_kwh DOUBLE, source_file VARCHAR,
+    source_sha256 VARCHAR, source_row_number INTEGER, is_valid BOOLEAN,
+    validation_error VARCHAR, is_overlap_conflict BOOLEAN
+  );
+  CREATE TABLE normalized_meter_readings (
+    workspace_id VARCHAR, project_id VARCHAR, resource VARCHAR, meter_node_id VARCHAR,
+    level_node_id VARCHAR, device_name VARCHAR, category VARCHAR, meter_role VARCHAR,
+    event_time TIMESTAMPTZ, active_energy_kwh DOUBLE, source_file VARCHAR,
+    source_sha256 VARCHAR, source_row_number INTEGER
+  );
+  CREATE TABLE energy_interval_facts (
+    workspace_id VARCHAR, project_id VARCHAR, resource VARCHAR, meter_node_id VARCHAR,
+    parent_node_id VARCHAR, level_node_id VARCHAR, device_name VARCHAR, appliance VARCHAR,
+    circuit_name VARCHAR, category VARCHAR, meter_role VARCHAR,
+    interval_start TIMESTAMPTZ, interval_end TIMESTAMPTZ, elapsed_minutes DOUBLE,
+    active_energy_kwh DOUBLE, previous_active_energy_kwh DOUBLE, raw_delta_kwh DOUBLE,
+    usage_kwh DOUBLE, average_kw DOUBLE, quality_status VARCHAR, local_date DATE,
+    local_hour INTEGER, day_type VARCHAR, is_operating BOOLEAN, source_file VARCHAR,
+    source_sha256 VARCHAR
+  );
+  CREATE TABLE energy_quality_events (
+    workspace_id VARCHAR NOT NULL, project_id VARCHAR NOT NULL,
+    import_batch_id VARCHAR NOT NULL, meter_node_id VARCHAR, source_label VARCHAR,
+    event_time TIMESTAMPTZ, code VARCHAR NOT NULL, severity VARCHAR NOT NULL,
+    details_json JSON NOT NULL
+  );
+  CREATE TABLE energy_project_fact_state (
+    project_id VARCHAR PRIMARY KEY,
+    workspace_id VARCHAR NOT NULL,
+    data_snapshot_id VARCHAR NOT NULL,
+    manifest_fingerprint VARCHAR NOT NULL,
+    source_sha256_json JSON NOT NULL,
+    fact_writer_contract_version VARCHAR NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+  );
+`;
+
 const withProjectId = (
   input: ReturnType<typeof boundaryBatch>,
   projectId: string,
@@ -647,19 +1034,34 @@ const withProjectId = (
   qualityEvents: [],
 });
 
-const withFactScope = (
-  input: ReturnType<typeof boundaryBatch>,
-  dataSnapshotId: string,
-  sourceSha256: string[],
-) => ({
-  ...input,
-  snapshotFactScope: testFactScope(input.projectId, dataSnapshotId, sourceSha256),
-});
-
 const testFactScope = (projectId: string, dataSnapshotId: string, sourceSha256: string[]) => ({
   workspaceId: "workspace-1",
   projectId,
   dataSnapshotId,
   manifestFingerprint: `fingerprint-${dataSnapshotId}`,
   sourceSha256,
+});
+
+const writeProjectSnapshot = (
+  context: { databasePath: string; projectId: string; timezone: string },
+  batches: EnergyFactMaterializationBatchWrite[],
+  dataSnapshotId: string,
+  sourceSha256: string[],
+  expectedPreviousDataSnapshotId: string,
+) => writeEnergyFactProjectMaterialization({
+  databasePath: context.databasePath,
+  projectId: context.projectId,
+  timezone: context.timezone,
+  expectedPreviousDataSnapshotId,
+  snapshotFactScope: testFactScope(context.projectId, dataSnapshotId, sourceSha256),
+  batches: batches.map(projectBatch),
+});
+
+const projectBatch = (input: EnergyFactMaterializationBatchWrite): EnergyFactMaterializationBatchWrite => ({
+  importBatchId: input.importBatchId,
+  sourceSha256: input.sourceSha256,
+  rawReadings: input.rawReadings,
+  normalizedReadings: input.normalizedReadings,
+  intervalFacts: input.intervalFacts,
+  qualityEvents: input.qualityEvents,
 });

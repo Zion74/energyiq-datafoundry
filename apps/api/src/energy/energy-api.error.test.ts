@@ -1,7 +1,12 @@
-import { LocalDataGateway, writeEnergyFactMaterialization } from "@datafoundry/data-gateway";
+import {
+  ensureEnergyScopedDataSource,
+  LocalDataGateway,
+  writeEnergyFactProjectMaterialization,
+} from "@datafoundry/data-gateway";
 import {
   createMetadataStore,
   createEnergyIqSourceManifest,
+  resolveEnergyIqSnapshotFactScope,
   type EnergyIqImportBatchRecord,
   type EnergyIqProjectSetupDocument,
 } from "@datafoundry/metadata";
@@ -14,6 +19,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { ConfigApiContext } from "../routes/types.js";
 import { ensureEnergyIqBootstrap } from "./energy-bootstrap.js";
+import { materializeTestProjectSnapshot } from "./energy-test-materialization.js";
 import {
   handleEnergyApiRequest,
   requireEnergyImportMaterializationPreconditions,
@@ -85,16 +91,20 @@ describe("Energy API business error mapping", () => {
     vi.setSystemTime(new Date("2026-08-03T16:30:00.000Z"));
     try {
       ensureEnergyIqBootstrap(metadata);
-      await writeEnergyFactMaterialization({
+      await materializeTestProjectSnapshot({
+        metadataStore: metadata,
         databasePath,
+        workspaceId: "default",
         projectId: "ngee-ann-polytechnic",
-        importBatchId: "ngee-ann-empty-previous-month",
-        sourceSha256: "0".repeat(64),
         timezone: "Asia/Singapore",
-        rawReadings: [],
-        normalizedReadings: [],
-        intervalFacts: [],
-        qualityEvents: [],
+        batches: [{
+          importBatchId: "ngee-ann-empty-previous-month",
+          sourceSha256: "0".repeat(64),
+          rawReadings: [],
+          normalizedReadings: [],
+          intervalFacts: [],
+          qualityEvents: [],
+        }],
       });
 
       const response = await handleEnergyApiRequest(
@@ -207,12 +217,251 @@ describe("Energy API business error mapping", () => {
     "ENERGYIQ_SOURCE_MANIFEST_MISMATCH",
     "ENERGYIQ_IMPORT_BATCH_NOT_PINNED",
     "ENERGYIQ_IMPORT_BATCH_NOT_PINNED:batch-1",
+    "ENERGYIQ_SNAPSHOT_STALE",
+    "ENERGYIQ_SNAPSHOT_STALE:energy-snapshot-b",
+    "ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE",
+    "ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE:energy-snapshot-a",
     "ENERGYIQ_DATA_SNAPSHOT_IMMUTABLE_CONFLICT:energy-snapshot-test",
   ])("returns a diagnosable 409 for materialization precondition %s", (message) => {
     expect(toEnergyApiErrorResponse(new Error(message))).toMatchObject({
       status: 409,
       body: { success: false, error: { code: "CONFLICT", message } },
     });
+  });
+
+  it("extracts a stable Snapshot conflict from a DuckDB error prefix", () => {
+    expect(toEnergyApiErrorResponse(new Error(
+      "Invalid Input Error: ENERGYIQ_SNAPSHOT_STALE\nLINE 1: SELECT ...",
+    ))).toMatchObject({
+      status: 409,
+      body: {
+        success: false,
+        error: { code: "CONFLICT", message: "ENERGYIQ_SNAPSHOT_STALE" },
+      },
+    });
+  });
+
+  it("returns the exact unavailable Snapshot code as HTTP 409 from data coverage", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-api-unavailable-snapshot-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const previousDatabasePath = process.env.ENERGYIQ_DUCKDB_PATH;
+    process.env.ENERGYIQ_DUCKDB_PATH = join(root, "missing.duckdb");
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const response = await handleEnergyApiRequest(
+        requestWithMethod("GET"),
+        ["projects", "ngee-ann-polytechnic", "data-coverage"],
+        {
+          metadataStore: metadata,
+          dataGateway: new LocalDataGateway(metadata),
+          userId: "dev-user",
+          workspaceId: "default",
+        } as Required<ConfigApiContext>,
+      );
+      expect(response).toMatchObject({
+        status: 409,
+        body: {
+          success: false,
+          error: { code: "CONFLICT", message: "ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE" },
+        },
+      });
+    } finally {
+      if (previousDatabasePath === undefined) delete process.env.ENERGYIQ_DUCKDB_PATH;
+      else process.env.ENERGYIQ_DUCKDB_PATH = previousDatabasePath;
+      metadata.close();
+      removeTemporaryEnergyFixture(root);
+    }
+  });
+
+  it("returns the diagnostic stale Snapshot code as HTTP 409 from data coverage", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-api-stale-snapshot-"));
+    const databasePath = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const previousDatabasePath = process.env.ENERGYIQ_DUCKDB_PATH;
+    process.env.ENERGYIQ_DUCKDB_PATH = databasePath;
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const sourceSha256 = "1".repeat(64);
+      const snapshot = await materializeTestProjectSnapshot({
+        metadataStore: metadata,
+        databasePath,
+        workspaceId: "default",
+        projectId: "ngee-ann-polytechnic",
+        timezone: "Asia/Singapore",
+        batches: [{
+          importBatchId: "ngee-ann-stale-fixture",
+          sourceSha256,
+          rawReadings: [],
+          normalizedReadings: [],
+          intervalFacts: [],
+          qualityEvents: [],
+        }],
+      });
+      const scope = resolveEnergyIqSnapshotFactScope(snapshot);
+      const guardedGateway = new LocalDataGateway(metadata);
+      const scoped = await ensureEnergyScopedDataSource({
+        metadataStore: metadata,
+        userId: "dev-user",
+        databasePath,
+        context: {
+          workspaceId: "default",
+          projectId: "ngee-ann-polytechnic",
+          scopeId: "project",
+          meterAttachments: [],
+          resource: "electricity",
+          from: "2026-05-01T00:00:00.000Z",
+          to: "2026-05-02T00:00:00.000Z",
+          timezone: "Asia/Singapore",
+          hierarchyRevisionId: "hierarchy-v1",
+          meterMappingRevisionId: "mapping-v1",
+          meterFormulaRevisionId: "formula-v1",
+          dataSnapshotId: scope.dataSnapshotId,
+          metricVersion: "metrics-v1",
+        },
+      });
+      const currentEmpty = await handleEnergyApiRequest(
+        requestWithMethod("GET"),
+        ["projects", "ngee-ann-polytechnic", "imports"],
+        {
+          metadataStore: metadata,
+          dataGateway: new LocalDataGateway(metadata),
+          userId: "dev-user",
+          workspaceId: "default",
+        } as Required<ConfigApiContext>,
+      );
+      expect(currentEmpty).toMatchObject({
+        status: 200,
+        body: {
+          success: true,
+          data: {
+            readiness: {
+              blockingReasons: expect.not.arrayContaining([
+                "SNAPSHOT_FACT_STATE_STALE",
+                "SNAPSHOT_FACT_STATE_UNAVAILABLE",
+              ]),
+            },
+          },
+        },
+      });
+      await writeEnergyFactProjectMaterialization({
+        databasePath,
+        projectId: "ngee-ann-polytechnic",
+        timezone: "Asia/Singapore",
+        expectedPreviousDataSnapshotId: snapshot.id,
+        snapshotFactScope: {
+          ...scope,
+          dataSnapshotId: "energy-snapshot-b",
+          manifestFingerprint: "fingerprint-b",
+        },
+        batches: [{
+          importBatchId: "ngee-ann-stale-fixture",
+          sourceSha256,
+          rawReadings: [],
+          normalizedReadings: [],
+          intervalFacts: [],
+          qualityEvents: [],
+        }],
+      });
+      let gatewayError: unknown;
+      try {
+        await guardedGateway.runSqlReadonly({
+          user_id: "dev-user",
+          datasource_id: scoped.datasourceId,
+          sql: `SELECT COUNT(*) AS interval_count FROM ${scoped.viewName}`,
+        });
+      } catch (error) {
+        gatewayError = error;
+      }
+      expect(gatewayError).toBeInstanceOf(Error);
+      expect((gatewayError as Error).message).toContain("Invalid Input Error: ENERGYIQ_SNAPSHOT_STALE");
+      expect(toEnergyApiErrorResponse(gatewayError)).toMatchObject({
+        status: 409,
+        body: {
+          success: false,
+          error: { code: "CONFLICT", message: "ENERGYIQ_SNAPSHOT_STALE" },
+        },
+      });
+      const response = await handleEnergyApiRequest(
+        requestWithMethod("GET"),
+        ["projects", "ngee-ann-polytechnic", "data-coverage"],
+        {
+          metadataStore: metadata,
+          dataGateway: new LocalDataGateway(metadata),
+          userId: "dev-user",
+          workspaceId: "default",
+        } as Required<ConfigApiContext>,
+      );
+      expect(response).toMatchObject({
+        status: 409,
+        body: {
+          success: false,
+          error: { code: "CONFLICT", message: "ENERGYIQ_SNAPSHOT_STALE:energy-snapshot-b" },
+        },
+      });
+      const imports = await handleEnergyApiRequest(
+        requestWithMethod("GET"),
+        ["projects", "ngee-ann-polytechnic", "imports"],
+        {
+          metadataStore: metadata,
+          dataGateway: new LocalDataGateway(metadata),
+          userId: "dev-user",
+          workspaceId: "default",
+        } as Required<ConfigApiContext>,
+      );
+      expect(imports).toMatchObject({
+        status: 200,
+        body: {
+          success: true,
+          data: { readiness: { blockingReasons: expect.arrayContaining(["SNAPSHOT_FACT_STATE_STALE"]) } },
+        },
+      });
+      const publish = await handleEnergyApiRequest(
+        jsonPost({}),
+        ["projects", "ngee-ann-polytechnic", "setup", "publish"],
+        {
+          metadataStore: metadata,
+          dataGateway: new LocalDataGateway(metadata),
+          userId: "dev-user",
+          workspaceId: "default",
+        } as Required<ConfigApiContext>,
+      );
+      expect(publish).toMatchObject({
+        status: 409,
+        body: {
+          success: false,
+          error: {
+            code: "CONFLICT",
+            message: expect.stringContaining("SNAPSHOT_FACT_STATE_STALE"),
+          },
+        },
+      });
+
+      process.env.ENERGYIQ_DUCKDB_PATH = join(root, "missing-state.duckdb");
+      const unavailableImports = await handleEnergyApiRequest(
+        requestWithMethod("GET"),
+        ["projects", "ngee-ann-polytechnic", "imports"],
+        {
+          metadataStore: metadata,
+          dataGateway: new LocalDataGateway(metadata),
+          userId: "dev-user",
+          workspaceId: "default",
+        } as Required<ConfigApiContext>,
+      );
+      expect(unavailableImports).toMatchObject({
+        status: 200,
+        body: {
+          success: true,
+          data: {
+            readiness: { blockingReasons: expect.arrayContaining(["SNAPSHOT_FACT_STATE_UNAVAILABLE"]) },
+          },
+        },
+      });
+    } finally {
+      if (previousDatabasePath === undefined) delete process.env.ENERGYIQ_DUCKDB_PATH;
+      else process.env.ENERGYIQ_DUCKDB_PATH = previousDatabasePath;
+      metadata.close();
+      removeTemporaryEnergyFixture(root);
+    }
   });
 
   it.each([
@@ -270,6 +519,13 @@ const jsonPost = (body: unknown): IncomingMessage => {
     headers: { "content-type": "application/json" },
   });
   request.end(JSON.stringify(body));
+  return request as unknown as IncomingMessage;
+};
+
+const requestWithMethod = (method: "GET"): IncomingMessage => {
+  const request = new PassThrough();
+  Object.assign(request, { method, headers: {} });
+  request.end();
   return request as unknown as IncomingMessage;
 };
 

@@ -1,9 +1,10 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import type * as DuckDbModule from "duckdb";
 import type { EnergyIqSnapshotFactScope } from "@datafoundry/metadata";
 
 import { getDuckDbDatabase } from "./duckdb-database-cache.js";
+import { energyCanonicalIntervalIntegritySql } from "./energy-snapshot-guard.js";
 
 export type EnergyRawReadingWrite = {
   workspaceId: string;
@@ -84,16 +85,17 @@ export type EnergyQualityEventWrite = {
   sourceReadingKind: "cumulative_energy" | "interval_usage";
 };
 
-export type EnergyFactMaterializationWrite = {
-  databasePath: string;
-  projectId: string;
+export type EnergyFactMaterializationBatchWrite = {
   importBatchId: string;
   sourceSha256: string;
-  timezone: string;
   rawReadings: EnergyRawReadingWrite[];
   normalizedReadings: EnergyNormalizedReadingWrite[];
   intervalFacts: EnergyIntervalFactWrite[];
   qualityEvents: EnergyQualityEventWrite[];
+};
+
+type EnergyFactScopedBatchWrite = EnergyFactMaterializationBatchWrite & {
+  projectId: string;
   snapshotFactScope: EnergyIqSnapshotFactScope;
 };
 
@@ -127,45 +129,60 @@ export type EnergyFactProjectAudit = {
 
 export const ENERGY_FACT_WRITER_CONTRACT_VERSION = "energy-fact-writer-snapshot-manifest-v3" as const;
 
-export type EnergyFactMaterializationResult = EnergyFactMaterializationStats & {
+export type EnergyFactProjectMaterializationWrite = {
+  databasePath: string;
+  projectId: string;
+  timezone: string;
+  expectedPreviousDataSnapshotId: string;
+  snapshotFactScope: EnergyIqSnapshotFactScope;
+  batches: EnergyFactMaterializationBatchWrite[];
+};
+
+export type EnergyFactProjectMaterializationResult = {
+  batchStats: Record<string, EnergyFactMaterializationStats>;
   projectAudit: EnergyFactProjectAudit;
 };
 
 export type EnergyFactProjectState = EnergyIqSnapshotFactScope & {
   factWriterContractVersion: typeof ENERGY_FACT_WRITER_CONTRACT_VERSION;
+  canonicalIntervalCount: number;
+  canonicalIntervalDigest: string;
 };
 
-export const writeEnergyFactMaterialization = async (
-  input: EnergyFactMaterializationWrite,
-): Promise<EnergyFactMaterializationResult> => {
+export const writeEnergyFactProjectMaterialization = async (
+  input: EnergyFactProjectMaterializationWrite,
+): Promise<EnergyFactProjectMaterializationResult> => {
   const databasePath = input.databasePath === ":memory:" ? input.databasePath : resolve(input.databasePath);
   if (databasePath !== ":memory:") mkdirSync(dirname(databasePath), { recursive: true });
+  validateProjectMaterializationInput(input);
   const database = await getDuckDbDatabase(databasePath);
   const connection = database.connect();
   try {
     await ensureFactSchema(connection);
     await duckDbRun(connection, "BEGIN TRANSACTION");
-    await deleteExistingBatch(connection, input);
-    await updateHistoricalMappings(connection, input.normalizedReadings);
-    await insertRows(connection, "raw_meter_readings", RAW_COLUMNS, input.rawReadings.map(rawValues));
-    await insertRows(connection, "energy_source_normalized_readings", NORMALIZED_COLUMNS, input.normalizedReadings.map(normalizedValues));
-    await insertRows(connection, "energy_source_interval_facts", FACT_COLUMNS, input.intervalFacts.map(factValues));
-    await insertRows(connection, "energy_source_quality_events", QUALITY_COLUMNS, input.qualityEvents.map((event) => qualityValues(event, input.sourceSha256)));
-    validateSnapshotFactScope(input);
-    await rebuildCanonicalNormalizedReadings(connection, input.projectId, input.snapshotFactScope.sourceSha256);
-    await rebuildCanonicalSourceIntervals(connection, input.projectId, input.snapshotFactScope.sourceSha256);
-    await rebuildCanonicalSourceQualityEvents(connection, input.projectId, input.snapshotFactScope.sourceSha256);
-    await markRawOverlapConflicts(connection, input.projectId);
-    await deduplicateCanonicalRows(connection, input.projectId);
-    await rebuildProjectCumulativeIntervals(connection, input.projectId, input.timezone);
-    await rebuildProjectCumulativeQualityEvents(connection, input.projectId);
-    await writeProjectFactState(connection, input.snapshotFactScope);
+    await assertExpectedPreviousFactState(connection, input);
+    for (const batch of input.batches) {
+      const write: EnergyFactScopedBatchWrite = {
+        projectId: input.projectId,
+        snapshotFactScope: input.snapshotFactScope,
+        ...batch,
+      };
+      await deleteExistingBatch(connection, write);
+      await updateHistoricalMappings(connection, write.normalizedReadings);
+      await insertRows(connection, "raw_meter_readings", RAW_COLUMNS, write.rawReadings.map(rawValues));
+      await insertRows(connection, "energy_source_normalized_readings", NORMALIZED_COLUMNS, write.normalizedReadings.map(normalizedValues));
+      await insertRows(connection, "energy_source_interval_facts", FACT_COLUMNS, write.intervalFacts.map(factValues));
+      await insertRows(connection, "energy_source_quality_events", QUALITY_COLUMNS, write.qualityEvents.map((event) => qualityValues(event, write.sourceSha256)));
+    }
+    await publishCanonicalProjectFacts(connection, input.projectId, input.timezone, input.snapshotFactScope);
+    const batchStats: Record<string, EnergyFactMaterializationStats> = {};
+    for (const batch of input.batches) {
+      batchStats[batch.importBatchId] = await readMaterializationStats(connection, batch.importBatchId);
+    }
+    const projectAudit = await readProjectAudit(connection, input.projectId, input.snapshotFactScope.sourceSha256);
     await duckDbRun(connection, "COMMIT");
     await duckDbRun(connection, "CHECKPOINT");
-    return {
-      ...await readMaterializationStats(connection, input.importBatchId),
-      projectAudit: await readProjectAudit(connection, input.projectId),
-    };
+    return { batchStats, projectAudit };
   } catch (error) {
     await duckDbRun(connection, "ROLLBACK").catch(() => undefined);
     throw error;
@@ -179,20 +196,22 @@ export const readEnergyFactProjectState = async (input: {
   projectId: string;
 }): Promise<EnergyFactProjectState | null> => {
   const databasePath = input.databasePath === ":memory:" ? input.databasePath : resolve(input.databasePath);
+  if (databasePath !== ":memory:" && !existsSync(databasePath)) return null;
   const database = await getDuckDbDatabase(databasePath);
   const connection = database.connect();
   try {
-    await ensureFactSchema(connection);
+    await assertFactReadSchema(connection);
     const row = await duckDbGet(connection, `
       SELECT workspace_id, project_id, data_snapshot_id, manifest_fingerprint,
-        source_sha256_json, fact_writer_contract_version
+        source_sha256_json, fact_writer_contract_version,
+        canonical_interval_count, canonical_interval_digest
       FROM energy_project_fact_state
       WHERE project_id = ?
     `, [input.projectId]);
     if (typeof row.project_id !== "string") return null;
     const sourceSha256 = JSON.parse(String(row.source_sha256_json)) as unknown;
     if (!Array.isArray(sourceSha256) || !sourceSha256.every((value) => typeof value === "string")) {
-      throw new Error(`ENERGYIQ_SNAPSHOT_FACT_STATE_INVALID:${input.projectId}`);
+      throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
     }
     return {
       workspaceId: String(row.workspace_id),
@@ -201,10 +220,52 @@ export const readEnergyFactProjectState = async (input: {
       manifestFingerprint: String(row.manifest_fingerprint),
       sourceSha256,
       factWriterContractVersion: String(row.fact_writer_contract_version) as typeof ENERGY_FACT_WRITER_CONTRACT_VERSION,
+      canonicalIntervalCount: requiredNonNegativeInteger(row.canonical_interval_count),
+      canonicalIntervalDigest: requiredSha256(row.canonical_interval_digest),
     };
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE")) {
+      throw error;
+    }
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
   } finally {
     await duckDbClose(connection).catch(ignoreAlreadyClosed);
   }
+};
+
+/** Materialization-only probe: legacy databases without the v3 state table are uninitialized. */
+export const probeEnergyFactProjectStateForMaterialization = async (input: {
+  databasePath: string;
+  projectId: string;
+}): Promise<EnergyFactProjectState | null> => {
+  const databasePath = input.databasePath === ":memory:" ? input.databasePath : resolve(input.databasePath);
+  if (databasePath !== ":memory:" && !existsSync(databasePath)) return null;
+  const database = await getDuckDbDatabase(databasePath);
+  const connection = database.connect();
+  let hasCurrentStateSchema = false;
+  try {
+    const row = await duckDbGet(connection, `
+      SELECT COUNT(DISTINCT column_name) AS column_count
+      FROM information_schema.columns
+      WHERE table_schema = 'main'
+        AND table_name = 'energy_project_fact_state'
+        AND column_name IN (
+          'project_id',
+          'workspace_id',
+          'data_snapshot_id',
+          'manifest_fingerprint',
+          'source_sha256_json',
+          'fact_writer_contract_version',
+          'canonical_interval_count',
+          'canonical_interval_digest'
+        )
+    `);
+    hasCurrentStateSchema = Number(row.column_count ?? 0) === 8;
+  } finally {
+    await duckDbClose(connection).catch(ignoreAlreadyClosed);
+  }
+  if (!hasCurrentStateSchema) return null;
+  return readEnergyFactProjectState({ databasePath, projectId: input.projectId });
 };
 
 export const readEnergyFactProjectAudit = async (input: {
@@ -215,7 +276,7 @@ export const readEnergyFactProjectAudit = async (input: {
   const database = await getDuckDbDatabase(databasePath);
   const connection = database.connect();
   try {
-    await ensureFactSchema(connection);
+    await assertFactReadSchema(connection);
     return await readProjectAudit(connection, input.projectId);
   } finally {
     await duckDbClose(connection).catch(ignoreAlreadyClosed);
@@ -302,13 +363,19 @@ const readMaterializationStats = async (
 const readProjectAudit = async (
   connection: DuckDbModule.Connection,
   projectId: string,
+  sourceSha256?: readonly string[],
 ): Promise<EnergyFactProjectAudit> => {
+  const normalizedSources = sourceSha256?.map((value) => value.toLocaleLowerCase());
+  const rawManifestClause = normalizedSources && normalizedSources.length > 0
+    ? ` AND lower(source_sha256) IN (${normalizedSources.map(() => "?").join(", ")})`
+    : "";
+  const rawParameters = (): string[] => [projectId, ...(normalizedSources ?? [])];
   const row = await duckDbGet(connection, `
     SELECT
-      (SELECT COUNT(*) FROM raw_meter_readings WHERE project_id = ?) AS raw_rows,
-      (SELECT COUNT(*) FROM raw_meter_readings WHERE project_id = ? AND is_valid IS NOT TRUE) AS invalid_raw_rows,
-      (SELECT COUNT(*) FROM raw_meter_readings WHERE project_id = ? AND is_valid AND meter_node_id IS NULL) AS unmapped_raw_rows,
-      (SELECT COUNT(*) FROM raw_meter_readings WHERE project_id = ? AND is_overlap_conflict) AS raw_overlap_conflicts,
+      (SELECT COUNT(*) FROM raw_meter_readings WHERE project_id = ?${rawManifestClause}) AS raw_rows,
+      (SELECT COUNT(*) FROM raw_meter_readings WHERE project_id = ?${rawManifestClause} AND is_valid IS NOT TRUE) AS invalid_raw_rows,
+      (SELECT COUNT(*) FROM raw_meter_readings WHERE project_id = ?${rawManifestClause} AND is_valid AND meter_node_id IS NULL) AS unmapped_raw_rows,
+      (SELECT COUNT(*) FROM raw_meter_readings WHERE project_id = ?${rawManifestClause} AND is_overlap_conflict) AS raw_overlap_conflicts,
       (SELECT COUNT(*) FROM normalized_meter_readings WHERE project_id = ?) AS normalized_rows,
       (SELECT COUNT(*) FROM energy_interval_facts WHERE project_id = ?) AS interval_facts,
       (SELECT COALESCE(SUM(row_count - 1), 0) FROM (
@@ -330,7 +397,7 @@ const readProjectAudit = async (
       (SELECT COUNT(*) FROM energy_interval_facts
         WHERE project_id = ? AND quality_status = 'negative_delta') AS negative_delta_intervals,
       (SELECT COUNT(*) FROM raw_meter_readings
-        WHERE project_id = ? AND (
+        WHERE project_id = ?${rawManifestClause} AND (
           import_batch_id IS NULL OR import_batch_id = '' OR import_batch_id = '<legacy>'
           OR source_sha256 IS NULL OR source_sha256 = '' OR source_sha256 = '<legacy>'
           OR source_file IS NULL OR source_file = '' OR source_file = '<legacy>'
@@ -350,7 +417,16 @@ const readProjectAudit = async (
           OR source_file IS NULL OR source_file = '' OR source_file = '<legacy>'
           OR LOWER(source_file) LIKE '%synthetic%'
         )) AS legacy_interval_facts
-  `, Array.from({ length: 13 }, () => projectId));
+  `, [
+    ...rawParameters(),
+    ...rawParameters(),
+    ...rawParameters(),
+    ...rawParameters(),
+    ...Array.from({ length: 6 }, () => projectId),
+    ...rawParameters(),
+    projectId,
+    projectId,
+  ]);
   const completeness = await duckDbGet(connection, `
     WITH ordered_readings AS (
       SELECT
@@ -487,8 +563,12 @@ const ensureFactSchema = async (connection: DuckDbModule.Connection): Promise<vo
       manifest_fingerprint VARCHAR NOT NULL,
       source_sha256_json JSON NOT NULL,
       fact_writer_contract_version VARCHAR NOT NULL,
+      canonical_interval_count UBIGINT,
+      canonical_interval_digest VARCHAR,
       updated_at TIMESTAMPTZ NOT NULL
     );
+  `);
+  await duckDbRun(connection, `
     ALTER TABLE raw_meter_readings ADD COLUMN IF NOT EXISTS import_batch_id VARCHAR;
     ALTER TABLE raw_meter_readings ADD COLUMN IF NOT EXISTS meter_node_id VARCHAR;
     ALTER TABLE raw_meter_readings ADD COLUMN IF NOT EXISTS scope_id VARCHAR;
@@ -497,8 +577,13 @@ const ensureFactSchema = async (connection: DuckDbModule.Connection): Promise<vo
     ALTER TABLE normalized_meter_readings ADD COLUMN IF NOT EXISTS source_reading_kind VARCHAR;
     ALTER TABLE energy_interval_facts ADD COLUMN IF NOT EXISTS import_batch_id VARCHAR;
     ALTER TABLE energy_interval_facts ADD COLUMN IF NOT EXISTS scope_id VARCHAR;
+    ALTER TABLE energy_interval_facts ADD COLUMN IF NOT EXISTS source_reading_kind VARCHAR;
     ALTER TABLE energy_quality_events ADD COLUMN IF NOT EXISTS source_reading_kind VARCHAR;
     ALTER TABLE energy_quality_events ADD COLUMN IF NOT EXISTS source_sha256 VARCHAR;
+    ALTER TABLE energy_project_fact_state ADD COLUMN IF NOT EXISTS canonical_interval_count UBIGINT;
+    ALTER TABLE energy_project_fact_state ADD COLUMN IF NOT EXISTS canonical_interval_digest VARCHAR;
+  `);
+  await duckDbRun(connection, `
     UPDATE normalized_meter_readings SET scope_id = meter_node_id WHERE scope_id IS NULL;
     UPDATE normalized_meter_readings
     SET source_reading_kind = 'cumulative_energy'
@@ -524,16 +609,43 @@ const ensureFactSchema = async (connection: DuckDbModule.Connection): Promise<vo
   `);
 };
 
-const validateSnapshotFactScope = (input: EnergyFactMaterializationWrite): void => {
+const assertFactReadSchema = async (connection: DuckDbModule.Connection): Promise<void> => {
+  const row = await duckDbGet(connection, `
+    SELECT COUNT(DISTINCT table_name) AS table_count
+    FROM information_schema.tables
+    WHERE table_schema = 'main'
+      AND table_type = 'BASE TABLE'
+      AND table_name IN (
+        'energy_project_fact_state',
+        'normalized_meter_readings',
+        'energy_interval_facts',
+        'energy_quality_events'
+      )
+  `);
+  if (Number(row.table_count ?? 0) !== 4) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+};
+
+const validateSnapshotFactScope = (input: EnergyFactScopedBatchWrite): void => {
   const scope = input.snapshotFactScope!;
-  const rowWorkspaceIds = new Set([
-    ...input.rawReadings.map((row) => row.workspaceId),
-    ...input.normalizedReadings.map((row) => row.workspaceId),
-    ...input.intervalFacts.map((row) => row.workspaceId),
-    ...input.qualityEvents.map((row) => row.workspaceId),
-  ]);
-  if (scope.projectId !== input.projectId
-    || [...rowWorkspaceIds].some((workspaceId) => workspaceId !== scope.workspaceId)) {
+  const rows = [
+    ...input.rawReadings,
+    ...input.normalizedReadings,
+    ...input.intervalFacts,
+    ...input.qualityEvents,
+  ];
+  const sourcedRows = [
+    ...input.rawReadings,
+    ...input.normalizedReadings,
+    ...input.intervalFacts,
+  ];
+  if (scope.projectId !== input.projectId || rows.some((row) =>
+    row.workspaceId !== scope.workspaceId
+    || row.projectId !== input.projectId
+    || row.importBatchId !== input.importBatchId)
+    || sourcedRows.some((row) =>
+      row.sourceSha256.toLocaleLowerCase() !== input.sourceSha256.toLocaleLowerCase())) {
     throw new Error("ENERGYIQ_SNAPSHOT_FACT_SCOPE_MISMATCH");
   }
   const manifestSources = new Set(scope.sourceSha256.map((value) => value.toLocaleLowerCase()));
@@ -542,6 +654,62 @@ const validateSnapshotFactScope = (input: EnergyFactMaterializationWrite): void 
   }
   if (!manifestSources.has(input.sourceSha256.toLocaleLowerCase())) {
     throw new Error(`ENERGYIQ_IMPORT_BATCH_NOT_PINNED:${input.importBatchId}`);
+  }
+};
+
+const validateProjectMaterializationInput = (input: EnergyFactProjectMaterializationWrite): void => {
+  const snapshotSources = input.snapshotFactScope.sourceSha256.map((value) => value.toLocaleLowerCase());
+  const batchSources = input.batches.map((batch) => batch.sourceSha256.toLocaleLowerCase());
+  const expectedSources = [...new Set(snapshotSources)]
+    .sort((left, right) => left.localeCompare(right));
+  const providedSources = [...new Set(batchSources)]
+    .sort((left, right) => left.localeCompare(right));
+  if (input.snapshotFactScope.projectId !== input.projectId
+    || snapshotSources.length === 0
+    || expectedSources.length !== snapshotSources.length
+    || providedSources.length !== batchSources.length
+    || expectedSources.length !== input.batches.length
+    || JSON.stringify(providedSources) !== JSON.stringify(expectedSources)) {
+    throw new Error("ENERGYIQ_SNAPSHOT_MANIFEST_MATERIALIZATION_INCOMPLETE");
+  }
+  for (const batch of input.batches) {
+    validateSnapshotFactScope({
+      projectId: input.projectId,
+      snapshotFactScope: input.snapshotFactScope,
+      ...batch,
+    });
+  }
+};
+
+const publishCanonicalProjectFacts = async (
+  connection: DuckDbModule.Connection,
+  projectId: string,
+  timezone: string,
+  snapshotFactScope: EnergyIqSnapshotFactScope,
+): Promise<void> => {
+  await rebuildCanonicalNormalizedReadings(connection, projectId, snapshotFactScope.sourceSha256);
+  await rebuildCanonicalSourceIntervals(connection, projectId, snapshotFactScope.sourceSha256);
+  await rebuildCanonicalSourceQualityEvents(connection, projectId, snapshotFactScope.sourceSha256);
+  await markRawOverlapConflicts(connection, projectId, snapshotFactScope.sourceSha256);
+  await deduplicateCanonicalRows(connection, projectId);
+  await rebuildProjectCumulativeIntervals(connection, projectId, timezone);
+  await rebuildProjectCumulativeQualityEvents(connection, projectId);
+  await writeProjectFactState(connection, snapshotFactScope);
+};
+
+const assertExpectedPreviousFactState = async (
+  connection: DuckDbModule.Connection,
+  input: EnergyFactProjectMaterializationWrite,
+): Promise<void> => {
+  const row = await duckDbGet(connection, `
+    SELECT data_snapshot_id
+    FROM energy_project_fact_state
+    WHERE project_id = ?
+  `, [input.projectId]);
+  if (typeof row.data_snapshot_id !== "string") return;
+  if (row.data_snapshot_id !== input.expectedPreviousDataSnapshotId
+    && row.data_snapshot_id !== input.snapshotFactScope.dataSnapshotId) {
+    throw new Error(`ENERGYIQ_SNAPSHOT_STALE:${row.data_snapshot_id}`);
   }
 };
 
@@ -594,17 +762,23 @@ const writeProjectFactState = async (
   connection: DuckDbModule.Connection,
   scope: EnergyIqSnapshotFactScope,
 ): Promise<void> => {
+  const integrity = await duckDbGet(connection, energyCanonicalIntervalIntegritySql(scope));
+  const canonicalIntervalCount = requiredNonNegativeInteger(integrity.canonical_interval_count);
+  const canonicalIntervalDigest = requiredSha256(integrity.canonical_interval_digest);
   await duckDbRun(connection, `
     INSERT INTO energy_project_fact_state (
       project_id, workspace_id, data_snapshot_id, manifest_fingerprint,
-      source_sha256_json, fact_writer_contract_version, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, current_timestamp)
+      source_sha256_json, fact_writer_contract_version,
+      canonical_interval_count, canonical_interval_digest, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
     ON CONFLICT (project_id) DO UPDATE SET
       workspace_id = excluded.workspace_id,
       data_snapshot_id = excluded.data_snapshot_id,
       manifest_fingerprint = excluded.manifest_fingerprint,
       source_sha256_json = excluded.source_sha256_json,
       fact_writer_contract_version = excluded.fact_writer_contract_version,
+      canonical_interval_count = excluded.canonical_interval_count,
+      canonical_interval_digest = excluded.canonical_interval_digest,
       updated_at = excluded.updated_at
   `, [
     scope.projectId,
@@ -613,12 +787,29 @@ const writeProjectFactState = async (
     scope.manifestFingerprint,
     JSON.stringify(scope.sourceSha256.map((value) => value.toLocaleLowerCase())),
     ENERGY_FACT_WRITER_CONTRACT_VERSION,
+    canonicalIntervalCount,
+    canonicalIntervalDigest,
   ]);
+};
+
+const requiredNonNegativeInteger = (value: unknown): number => {
+  const numeric = typeof value === "bigint" ? Number(value) : Number(value);
+  if (!Number.isSafeInteger(numeric) || numeric < 0) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+  return numeric;
+};
+
+const requiredSha256 = (value: unknown): string => {
+  if (typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value)) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+  return value;
 };
 
 const deleteExistingBatch = async (
   connection: DuckDbModule.Connection,
-  input: EnergyFactMaterializationWrite,
+  input: EnergyFactScopedBatchWrite,
 ): Promise<void> => {
   for (const table of [
     "raw_meter_readings",
@@ -644,7 +835,10 @@ const deleteExistingBatch = async (
 const markRawOverlapConflicts = async (
   connection: DuckDbModule.Connection,
   projectId: string,
+  sourceSha256: readonly string[],
 ): Promise<void> => {
+  const normalizedSources = sourceSha256.map((value) => value.toLocaleLowerCase());
+  const manifestPlaceholders = normalizedSources.map(() => "?").join(", ");
   await duckDbRun(connection, `
     UPDATE raw_meter_readings
     SET is_overlap_conflict = FALSE
@@ -654,16 +848,18 @@ const markRawOverlapConflicts = async (
     UPDATE raw_meter_readings target
     SET is_overlap_conflict = TRUE
     WHERE target.project_id = ?
+      AND lower(target.source_sha256) IN (${manifestPlaceholders})
       AND target.event_time IS NOT NULL
       AND EXISTS (
         SELECT 1
         FROM raw_meter_readings candidate
         WHERE candidate.project_id = target.project_id
+          AND lower(candidate.source_sha256) IN (${manifestPlaceholders})
           AND candidate.meter_node_id = target.meter_node_id
           AND candidate.event_time = target.event_time
           AND candidate.active_energy_kwh <> target.active_energy_kwh
       )
-  `, [projectId]);
+  `, [projectId, ...normalizedSources, ...normalizedSources]);
 };
 
 const deduplicateCanonicalRows = async (

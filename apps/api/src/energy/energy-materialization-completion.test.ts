@@ -5,69 +5,42 @@ import { describe, expect, it } from "vitest";
 
 import {
   ENERGY_FACT_WRITER_CONTRACT_VERSION,
-  writeEnergyFactMaterialization,
-  type EnergyFactMaterializationResult,
-  type EnergyFactMaterializationWrite,
+  writeEnergyFactProjectMaterialization,
+  type EnergyFactMaterializationBatchWrite,
+  type EnergyFactProjectMaterializationResult,
 } from "@datafoundry/data-gateway";
 import { createMetadataStore, type EnergyIqDataSnapshotRecord } from "@datafoundry/metadata";
 
 import {
-  createEnergyImportCompletionInput,
   ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION,
   type EnergyImportMaterializationSummary,
 } from "./energy-import-materializer.js";
 
 describe("Energy import completion", () => {
-  it("keeps the final immutable Snapshot identical across real writer completion orders", async () => {
-    const earlierFirst = await runWriterOrder("writer-earlier-first", ["earlier", "later"]);
-    const laterFirst = await runWriterOrder("writer-later-first", ["later", "earlier"]);
+  it("publishes one identical immutable Snapshot for either full-manifest batch order", async () => {
+    const earlierFirst = await materializeManifest(["earlier", "later"]);
+    const laterFirst = await materializeManifest(["later", "earlier"]);
 
-    expect(earlierFirst.results.earlier.persisted.normalizedRows).toBe(1);
-    expect(laterFirst.results.earlier.persisted.normalizedRows).toBe(0);
-    expect(earlierFirst.results.earlier.completion.summary.normalizedReadingCount).toBe(1);
-    expect(laterFirst.results.earlier.completion.summary.normalizedReadingCount).toBe(1);
-    expect(earlierFirst.finalAudit).toEqual(laterFirst.finalAudit);
-
-    const left = persistCompletionOrder(["earlier", "later"], earlierFirst.results);
-    const right = persistCompletionOrder(["later", "earlier"], laterFirst.results);
-    expect(left.id).toBe(right.id);
-    expect(JSON.parse(left.manifest_json)).toEqual(JSON.parse(right.manifest_json));
-    expect(JSON.parse(left.audit_json)).toEqual(JSON.parse(right.audit_json));
+    expect(earlierFirst.persisted.projectAudit).toEqual(laterFirst.persisted.projectAudit);
+    expect(earlierFirst.persisted.batchStats).toEqual(laterFirst.persisted.batchStats);
+    expect(earlierFirst.snapshot.id).toBe(laterFirst.snapshot.id);
+    expect(JSON.parse(earlierFirst.snapshot.manifest_json)).toEqual(JSON.parse(laterFirst.snapshot.manifest_json));
+    expect(JSON.parse(earlierFirst.snapshot.audit_json)).toEqual(JSON.parse(laterFirst.snapshot.audit_json));
   });
 });
 
 type SourceKey = "earlier" | "later";
-type WriterResult = {
-  persisted: EnergyFactMaterializationResult;
-  completion: ReturnType<typeof createEnergyImportCompletionInput>;
-};
 
 const SOURCE_SHA = {
   earlier: "a".repeat(64),
   later: "b".repeat(64),
 } as const;
 
-const runWriterOrder = async (
-  projectId: string,
-  order: SourceKey[],
-): Promise<{ results: Record<SourceKey, WriterResult>; finalAudit: EnergyFactMaterializationResult["projectAudit"] }> => {
-  const results = {} as Record<SourceKey, WriterResult>;
-  for (const source of order) {
-    const write = sourceWrite(projectId, source);
-    const persisted = await writeEnergyFactMaterialization(write);
-    results[source] = {
-      persisted,
-      completion: createEnergyImportCompletionInput(sourceSummary(source, write), persisted),
-    };
-  }
-  return { results, finalAudit: results[order.at(-1)!].persisted.projectAudit };
-};
-
-const persistCompletionOrder = (
-  order: SourceKey[],
-  results: Record<SourceKey, WriterResult>,
-): EnergyIqDataSnapshotRecord => {
-  const root = mkdtempSync(join(tmpdir(), "energy-import-completion-order-"));
+const materializeManifest = async (order: SourceKey[]): Promise<{
+  snapshot: EnergyIqDataSnapshotRecord;
+  persisted: EnergyFactProjectMaterializationResult;
+}> => {
+  const root = mkdtempSync(join(tmpdir(), "energy-import-full-manifest-"));
   const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
   try {
     metadata.workspaces.upsert({
@@ -95,30 +68,54 @@ const persistCompletionOrder = (
           sheetName: "Sheet1",
           rowCount: source === "earlier" ? 1 : 2,
           sourceLabels: [{ label: "Meter A", rowCount: source === "earlier" ? 1 : 2 }],
-          coverageFrom: source === "earlier" ? "2026-05-01T00:15:00.000Z" : "2026-05-01T00:15:00.000Z",
+          coverageFrom: "2026-05-01T00:15:00.000Z",
           coverageTo: source === "earlier" ? "2026-05-01T00:15:00.000Z" : "2026-05-01T00:30:00.000Z",
         },
         created_by: "dev-user",
       });
     }
-    let snapshot: EnergyIqDataSnapshotRecord | undefined;
-    for (const source of order) {
-      snapshot = metadata.energyIq.completeImportBatchMaterialization({
-        batch_id: `batch-${source}`,
-        project_id: "project-order",
-        ...results[source].completion,
-        source_manifest_sha256: Object.values(SOURCE_SHA),
-      }).snapshot;
-    }
-    return snapshot!;
+    const writes = Object.fromEntries(
+      (["earlier", "later"] as const).map((source) => [source, sourceWrite("project-order", source)]),
+    ) as Record<SourceKey, EnergyFactMaterializationBatchWrite>;
+    const materializations = (["earlier", "later"] as const).map((source) => ({
+      batch_id: `batch-${source}`,
+      summary: sourceSummary(source, writes[source]),
+    }));
+    const prepared = metadata.energyIq.prepareProjectManifestMaterialization({
+      project_id: "project-order",
+      materializations,
+      source_manifest_sha256: Object.values(SOURCE_SHA),
+    });
+    const persisted = await writeEnergyFactProjectMaterialization({
+      databasePath: join(root, "energy.duckdb"),
+      projectId: "project-order",
+      timezone: "Asia/Singapore",
+      expectedPreviousDataSnapshotId: prepared.expected_previous_snapshot_id,
+      snapshotFactScope: prepared.fact_scope,
+      batches: order.map((source) => writes[source]),
+    });
+    const completed = metadata.energyIq.completeProjectManifestMaterialization({
+      project_id: "project-order",
+      materializations,
+      project_audit: persisted.projectAudit,
+      source_manifest_sha256: Object.values(SOURCE_SHA),
+      expected_snapshot_id: prepared.expected_snapshot_id,
+      expected_previous_snapshot_id: prepared.expected_previous_snapshot_id,
+    });
+    return { snapshot: completed.snapshot, persisted };
   } finally {
     metadata.close();
-    rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    try {
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch (error) {
+      if (process.platform !== "win32" || !(error instanceof Error) || !("code" in error)
+        || (error.code !== "EPERM" && error.code !== "EBUSY")) throw error;
+    }
   }
 };
 
-const sourceWrite = (projectId: string, source: SourceKey): EnergyFactMaterializationWrite => {
-  const batchId = `${projectId}-${source}`;
+const sourceWrite = (projectId: string, source: SourceKey): EnergyFactMaterializationBatchWrite => {
+  const batchId = `batch-${source}`;
   const sourceSha256 = SOURCE_SHA[source];
   const sourceFile = `${source}.xlsx`;
   const points = source === "earlier"
@@ -134,69 +131,27 @@ const sourceWrite = (projectId: string, source: SourceKey): EnergyFactMaterializ
         { start: "2026-05-01T00:15:00.000Z", end: "2026-05-01T00:30:00.000Z", usage: 1 },
       ];
   return {
-    databasePath: ":memory:",
-    projectId,
     importBatchId: batchId,
     sourceSha256,
-    timezone: "Asia/Singapore",
     rawReadings: points.map((point, index) => ({
-      workspaceId: "workspace-1",
-      projectId,
-      importBatchId: batchId,
-      resource: "electricity",
-      sourceLabel: "Meter A",
-      meterPointId: "meter-a",
-      scopeId: "scope-a",
-      eventTime: point.time,
-      activeEnergyKwh: point.value,
-      sourceFile,
-      sourceSha256,
-      sourceRowNumber: index + 2,
-      isValid: true,
-      isOverlapConflict: false,
+      workspaceId: "workspace-1", projectId, importBatchId: batchId, resource: "electricity",
+      sourceLabel: "Meter A", meterPointId: "meter-a", scopeId: "scope-a", eventTime: point.time,
+      activeEnergyKwh: point.value, sourceFile, sourceSha256, sourceRowNumber: index + 2,
+      isValid: true, isOverlapConflict: false,
     })),
     normalizedReadings: points.map((point, index) => ({
-      workspaceId: "workspace-1",
-      projectId,
-      importBatchId: batchId,
-      resource: "electricity",
-      meterPointId: "meter-a",
-      scopeId: "scope-a",
-      sourceLabel: "Meter A",
-      category: "load",
-      meterRole: "total",
-      eventTime: point.time,
-      activeEnergyKwh: point.value,
-      sourceFile,
-      sourceSha256,
-      sourceRowNumber: index + 2,
-      sourceReadingKind: "cumulative_energy",
+      workspaceId: "workspace-1", projectId, importBatchId: batchId, resource: "electricity",
+      meterPointId: "meter-a", scopeId: "scope-a", sourceLabel: "Meter A", category: "load",
+      meterRole: "total", eventTime: point.time, activeEnergyKwh: point.value, sourceFile, sourceSha256,
+      sourceRowNumber: index + 2, sourceReadingKind: "cumulative_energy",
     })),
     intervalFacts: facts.map((fact) => ({
-      workspaceId: "workspace-1",
-      projectId,
-      importBatchId: batchId,
-      resource: "electricity",
-      meterPointId: "meter-a",
-      scopeId: "scope-a",
-      sourceLabel: "Meter A",
-      category: "load",
-      meterRole: "total",
-      intervalStart: fact.start,
-      intervalEnd: fact.end,
-      elapsedMinutes: 15,
-      activeEnergyKwh: 101,
-      previousActiveEnergyKwh: 100,
-      rawDeltaKwh: fact.usage,
-      usageKwh: fact.usage,
-      averageKw: fact.usage * 4,
-      qualityStatus: "ok",
-      localDate: "2026-05-01",
-      localHour: 8,
-      dayType: "weekday",
-      sourceFile,
-      sourceSha256,
-      sourceReadingKind: "cumulative_energy",
+      workspaceId: "workspace-1", projectId, importBatchId: batchId, resource: "electricity",
+      meterPointId: "meter-a", scopeId: "scope-a", sourceLabel: "Meter A", category: "load",
+      meterRole: "total", intervalStart: fact.start, intervalEnd: fact.end, elapsedMinutes: 15,
+      activeEnergyKwh: 101, previousActiveEnergyKwh: 100, rawDeltaKwh: fact.usage, usageKwh: fact.usage,
+      averageKw: fact.usage * 4, qualityStatus: "ok", localDate: "2026-05-01", localHour: 8,
+      dayType: "weekday", sourceFile, sourceSha256, sourceReadingKind: "cumulative_energy",
     })),
     qualityEvents: [],
   };
@@ -204,7 +159,7 @@ const sourceWrite = (projectId: string, source: SourceKey): EnergyFactMaterializ
 
 const sourceSummary = (
   source: SourceKey,
-  write: EnergyFactMaterializationWrite,
+  write: EnergyFactMaterializationBatchWrite,
 ): EnergyImportMaterializationSummary => ({
   rawRowCount: write.rawReadings.length,
   normalizedReadingCount: write.normalizedReadings.length,

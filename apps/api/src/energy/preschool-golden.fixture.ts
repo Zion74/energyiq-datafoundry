@@ -1,7 +1,8 @@
 import {
-  writeEnergyFactMaterialization,
   type EnergyIntervalFactWrite,
 } from "@datafoundry/data-gateway";
+import type { MetadataStore } from "@datafoundry/metadata";
+import { materializeTestProjectSnapshot } from "./energy-test-materialization.js";
 
 export const PRESCHOOL_GOLDEN = {
   workspaceId: "preschool-demo-org",
@@ -50,7 +51,10 @@ const operatingIntervalCount = intervalCount - nonOperatingIntervalCount;
 const localStartMs = Date.UTC(2026, 4, 1);
 const utcStartMs = Date.UTC(2026, 3, 30, 16);
 
-export const materializePreschoolGoldenFixture = async (databasePath: string): Promise<void> => {
+export const materializePreschoolGoldenFixture = async (
+  databasePath: string,
+  metadataStore: MetadataStore,
+) => {
   const intervalFacts: EnergyIntervalFactWrite[] = [];
   centreCodes.forEach((centreCode, centreIndex) => {
     const centreId = `preschool-centre-${centreCode}`;
@@ -103,16 +107,20 @@ export const materializePreschoolGoldenFixture = async (databasePath: string): P
     });
   });
 
-  await writeEnergyFactMaterialization({
+  return materializeTestProjectSnapshot({
+    metadataStore,
     databasePath,
+    workspaceId: PRESCHOOL_GOLDEN.workspaceId,
     projectId: PRESCHOOL_GOLDEN.projectId,
-    importBatchId: "preschool-golden-may-2026",
-    sourceSha256: "preschool-golden-may-2026",
     timezone: "Asia/Singapore",
-    rawReadings: [],
-    normalizedReadings: [],
-    intervalFacts,
-    qualityEvents: [],
+    batches: [{
+      importBatchId: "preschool-golden-may-2026",
+      sourceSha256: "preschool-golden-may-2026",
+      rawReadings: [],
+      normalizedReadings: [],
+      intervalFacts,
+      qualityEvents: [],
+    }],
   });
 };
 

@@ -75,6 +75,7 @@ import { join } from "node:path";
 
 export { createDemoDuckDbConfig, demoDuckDbPath } from "./demo-duckdb.js";
 export {
+  assertEnergyCurrentSnapshotFacts,
   ensureEnergyScopedDataSource,
   readEnergyFactCoverage,
   resolveEnergyFactStorePath,
@@ -84,13 +85,15 @@ export {
 } from "./energy-scoped-datasource.js";
 export {
   ENERGY_FACT_WRITER_CONTRACT_VERSION,
+  probeEnergyFactProjectStateForMaterialization,
   readEnergyFactProjectAudit,
   readEnergyFactProjectState,
   readEnergyFactMaterializationStats,
-  writeEnergyFactMaterialization,
-  type EnergyFactMaterializationWrite,
-  type EnergyFactMaterializationResult,
+  writeEnergyFactProjectMaterialization,
+  type EnergyFactMaterializationBatchWrite,
   type EnergyFactProjectAudit,
+  type EnergyFactProjectMaterializationResult,
+  type EnergyFactProjectMaterializationWrite,
   type EnergyFactProjectState,
   type EnergyIntervalFactWrite,
   type EnergyNormalizedReadingWrite,

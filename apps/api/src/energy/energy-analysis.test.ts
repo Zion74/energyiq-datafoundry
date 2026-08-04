@@ -1,10 +1,16 @@
 import {
+  readEnergyFactProjectState,
   LocalDataGateway,
-  writeEnergyFactMaterialization,
+  type EnergyFactMaterializationBatchWrite,
   type EnergyIntervalFactWrite,
   type EnergyNormalizedReadingWrite
 } from "@datafoundry/data-gateway";
-import { createMetadataStore, type EnergyIqRuleRevisionRecord } from "@datafoundry/metadata";
+import {
+  createMetadataStore,
+  resolveEnergyIqSnapshotFactScope,
+  type EnergyIqRuleRevisionRecord,
+  type MetadataStore,
+} from "@datafoundry/metadata";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +25,7 @@ import { ensureEnergyIqBootstrap, PRESCHOOL_WORKSPACE_ID } from "./energy-bootst
 import { resolveEnergyQueryContext } from "./energy-query-context.js";
 import { NGEE_ANN_GOLDEN } from "./ngee-ann-golden.fixture.js";
 import { materializePreschoolGoldenFixture, PRESCHOOL_GOLDEN } from "./preschool-golden.fixture.js";
+import { materializeTestProjectSnapshot } from "./energy-test-materialization.js";
 
 describe("EnergyScopeAnalysis", () => {
   it("calculates reproducible Preschool portfolio and circuit drill-down facts", async () => {
@@ -27,8 +34,8 @@ describe("EnergyScopeAnalysis", () => {
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
     const gateway = new LocalDataGateway(metadata);
     try {
-      await materializePreschoolGoldenFixture(databasePath);
       ensureEnergyIqBootstrap(metadata);
+      const preschoolSnapshot = await materializePreschoolGoldenFixture(databasePath, metadata);
       configurePreschoolOperationalPolicy(metadata);
       const user = metadata.users.getById({ user_id: "dev-user" });
       const context = resolveEnergyQueryContext({
@@ -73,7 +80,7 @@ describe("EnergyScopeAnalysis", () => {
       expect(portfolio.childScopes.reduce((sum, child) => sum + child.usageKwh, 0))
         .toBeCloseTo(portfolio.summary.usageKwh, 4);
       expect(portfolio.provenance).toMatchObject({
-        dataSnapshotId: "preschool-26b85b9c0b95e090",
+        dataSnapshotId: preschoolSnapshot.id,
         hierarchyRevisionId: "preschool-hierarchy-v4",
         meterFormulaRevisionId: "preschool-meter-formula-v2",
         aggregationRule: "component"
@@ -113,11 +120,24 @@ describe("EnergyScopeAnalysis", () => {
   it("repeats the selected Ngee Ann golden period without contending with the live API DuckDB", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-analysis-ngee-ann-"));
     const databasePath = join(root, "energy.duckdb");
-    await materializeNgeeAnnGoldenFixture(databasePath);
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
     const gateway = new LocalDataGateway(metadata);
     try {
       ensureEnergyIqBootstrap(metadata);
+      const ngeeAnnSnapshot = await materializeNgeeAnnGoldenFixture(databasePath, metadata);
+      const authoritativeSourceSha256 = [
+        "e4d788af0135281c8ba519f04fa3c44751206ce0812e15e434da6cb8fda44f70",
+        "64502f6369dad96f3dc6cbc650b28b3f108bb655e7a95ca078b9aa616966413f",
+        "0b1fb9613c596d3569f6be93046a43737366649b5f8a4d45fc8cdef073c30e5d",
+        "3f41f94e229933a97ce8d02a0382d3a8192e3c26065bf0f48a04168ec90dd674",
+      ].sort((left, right) => left.localeCompare(right));
+      expect(resolveEnergyIqSnapshotFactScope(ngeeAnnSnapshot).sourceSha256)
+        .toEqual(authoritativeSourceSha256);
+      await expect(readEnergyFactProjectState({ databasePath, projectId: NGEE_ANN_GOLDEN.projectId }))
+        .resolves.toMatchObject({
+          dataSnapshotId: ngeeAnnSnapshot.id,
+          sourceSha256: authoritativeSourceSha256,
+        });
       const user = metadata.users.getById({ user_id: "dev-user" });
       const context = resolveEnergyQueryContext({
         metadataStore: metadata,
@@ -151,6 +171,27 @@ describe("EnergyScopeAnalysis", () => {
       });
       const analysis = await run();
       const repeated = await run();
+
+      const overlap = await executeEnergyScopeAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        context: resolveEnergyQueryContext({
+          metadataStore: metadata,
+          user,
+          workspaceId: "default",
+          request: {
+            projectId: "ngee-ann-polytechnic",
+            scopeId: "project",
+            resource: "electricity",
+            period: "Custom",
+            from: "2026-05-19",
+            to: "2026-05-19",
+          },
+        }),
+        databasePath,
+      });
+      expect(overlap.summary.usageKwh).toBe(2.468);
 
       expect(repeated).toEqual(analysis);
       expect(analysis.summary.usageKwh).toBe(NGEE_ANN_GOLDEN.period.usageKwh);
@@ -448,7 +489,10 @@ type GoldenMeter = {
   usage: number[];
 };
 
-const materializeNgeeAnnGoldenFixture = async (databasePath: string): Promise<void> => {
+const materializeNgeeAnnGoldenFixture = async (
+  databasePath: string,
+  metadataStore: MetadataStore,
+) => {
   const currentRootUsage = buildCurrentRootUsage();
   const currentLevel6Usage = allocateLevel6Usage(currentRootUsage);
   const currentLevel7Usage = currentRootUsage.map((usage, index) => usage - currentLevel6Usage[index]!);
@@ -456,8 +500,11 @@ const materializeNgeeAnnGoldenFixture = async (databasePath: string): Promise<vo
   const previousLevel7Usage = constantUsage(734.625651, 7 * 24 * 4);
   const currentFrom = Date.parse(NGEE_ANN_GOLDEN.selection.period.from);
   const previousFrom = currentFrom - 7 * 86_400_000;
+  const overlapSentinelFrom = Date.parse("2026-05-18T16:00:00.000Z");
   const level7BatchId = NGEE_ANN_GOLDEN.period.dataHealth.importBatchIds[0];
   const level6BatchId = NGEE_ANN_GOLDEN.period.dataHealth.importBatchIds[1];
+  const earlierLevel6BatchId = "ngee-ann-l6-apr-may-fixture";
+  const earlierLevel7BatchId = "ngee-ann-l7-apr-may-fixture";
   const level6LightShare = totalCircuitGolden("l6-total-light").rawUsageKwh / 476.983827;
   const level7LightShare = totalCircuitGolden("l7-total-light").rawUsageKwh / 1054.184497;
   const meters: GoldenMeter[] = [
@@ -500,6 +547,7 @@ const materializeNgeeAnnGoldenFixture = async (databasePath: string): Promise<vo
     ...circuitMeters(level6BatchId, level7BatchId)
   ];
 
+  const writes: EnergyFactMaterializationBatchWrite[] = [];
   for (const importBatchId of [level7BatchId, level6BatchId]) {
     const sourceSha256 = fixtureSha(importBatchId);
     const batchMeters = meters.filter((meter) => meter.importBatchId === importBatchId);
@@ -509,6 +557,9 @@ const materializeNgeeAnnGoldenFixture = async (databasePath: string): Promise<vo
         : currentFrom + index * 15 * 60_000;
       return factFor(meter, usage, index, intervalStartMs);
     }));
+    const sentinelMeter = batchMeters.find((meter) => meter.meterRole === "total");
+    if (!sentinelMeter) throw new Error(`NGEE_ANN_GOLDEN_SENTINEL_METER_MISSING:${importBatchId}`);
+    intervalFacts.push(factFor(sentinelMeter, 1.234, 0, overlapSentinelFrom));
     const normalizedReadings = batchMeters.map((meter): EnergyNormalizedReadingWrite => ({
       workspaceId: NGEE_ANN_GOLDEN.workspaceId,
       projectId: NGEE_ANN_GOLDEN.projectId,
@@ -527,18 +578,39 @@ const materializeNgeeAnnGoldenFixture = async (databasePath: string): Promise<vo
       sourceRowNumber: 1,
       sourceReadingKind: "interval_usage",
     }));
-    await writeEnergyFactMaterialization({
-      databasePath,
-      projectId: NGEE_ANN_GOLDEN.projectId,
+    writes.push({
       importBatchId,
       sourceSha256,
-      timezone: "Asia/Singapore",
       rawReadings: [],
       normalizedReadings,
       intervalFacts,
       qualityEvents: []
     });
   }
+  for (const [earlierBatchId, laterBatchId] of [
+    [earlierLevel6BatchId, level6BatchId],
+    [earlierLevel7BatchId, level7BatchId],
+  ] as const) {
+    const sentinelMeter = meters.find((meter) => meter.importBatchId === laterBatchId && meter.meterRole === "total");
+    if (!sentinelMeter) throw new Error(`NGEE_ANN_GOLDEN_SENTINEL_METER_MISSING:${earlierBatchId}`);
+    const earlierMeter = { ...sentinelMeter, importBatchId: earlierBatchId };
+    writes.push({
+      importBatchId: earlierBatchId,
+      sourceSha256: fixtureSha(earlierBatchId),
+      rawReadings: [],
+      normalizedReadings: [],
+      intervalFacts: [factFor(earlierMeter, 999, 0, overlapSentinelFrom)],
+      qualityEvents: [],
+    });
+  }
+  return materializeTestProjectSnapshot({
+    metadataStore,
+    databasePath,
+    workspaceId: NGEE_ANN_GOLDEN.workspaceId,
+    projectId: NGEE_ANN_GOLDEN.projectId,
+    timezone: NGEE_ANN_GOLDEN.timezone,
+    batches: writes,
+  });
 };
 
 const officialMeter = (input: {
@@ -707,6 +779,12 @@ const factFor = (
 };
 
 const fixtureSha = (importBatchId: string): string => {
+  if (importBatchId === "ngee-ann-l6-apr-may-fixture") {
+    return "e4d788af0135281c8ba519f04fa3c44751206ce0812e15e434da6cb8fda44f70";
+  }
+  if (importBatchId === "ngee-ann-l7-apr-may-fixture") {
+    return "0b1fb9613c596d3569f6be93046a43737366649b5f8a4d45fc8cdef073c30e5d";
+  }
   if (importBatchId === NGEE_ANN_GOLDEN.period.dataHealth.importBatchIds[0]) {
     return "3f41f94e229933a97ce8d02a0382d3a8192e3c26065bf0f48a04168ec90dd674";
   }
@@ -717,6 +795,12 @@ const fixtureSha = (importBatchId: string): string => {
 };
 
 const fixtureSourceFile = (importBatchId: string): string => {
+  if (importBatchId === "ngee-ann-l6-apr-may-fixture") {
+    return "Ngee Ann Poly Level 6 (21 April - 20 May).xlsx";
+  }
+  if (importBatchId === "ngee-ann-l7-apr-may-fixture") {
+    return "Ngee Ann Poly Level 7 (21 April - 20 May).xlsx";
+  }
   if (importBatchId === NGEE_ANN_GOLDEN.period.dataHealth.importBatchIds[0]) {
     return "Ngee Ann Poly Level 7 (19 May - 17 June).xlsx";
   }

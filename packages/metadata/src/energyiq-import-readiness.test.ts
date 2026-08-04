@@ -81,12 +81,42 @@ describe("resolveEnergyIqProjectDataReadiness", () => {
       status: "ready",
       ready: true,
       importBatchCount: 4,
+      activeImportBatchCount: 4,
       materializedBatchCount: 4,
+      activeMaterializedBatchCount: 4,
       sourceLabelCount: 18,
       mappedSourceLabelCount: 18,
       blockingReasons: [],
     });
     expect(readiness.warnings).toEqual(["RAW_OVERLAP_CONFLICTS_RESOLVED_BY_LATER_COVERAGE:32"]);
+  });
+
+  it("gates only active manifest batches while retaining extra registered batches as evidence", () => {
+    const active = batch("batch-a", FORMAL_SOURCE_SHAS[0], NGEE_ANN_LABELS);
+    const retained = batch("batch-b", FORMAL_SOURCE_SHAS[1], NGEE_ANN_LABELS);
+    const snapshot = dataSnapshot([active]);
+    const readiness = resolveEnergyIqProjectDataReadiness({
+      project: project(snapshot.id),
+      batches: [active, retained],
+      document: {
+        ...document(),
+        source_manifest: createEnergyIqSourceManifest([FORMAL_SOURCE_SHAS[0]], true),
+        meter_mapping: meterMapping(),
+      },
+      snapshot,
+      expectedMaterializerContractVersion: "energy-excel-cumulative-v1",
+      expectedFactWriterContractVersion: "energy-fact-writer-project-canonical-v2",
+    });
+
+    expect(readiness).toMatchObject({
+      status: "ready",
+      ready: true,
+      importBatchCount: 2,
+      activeImportBatchCount: 1,
+      materializedBatchCount: 2,
+      activeMaterializedBatchCount: 1,
+      blockingReasons: [],
+    });
   });
 
   it("blocks stale Mapping materialization, incomplete batches, inactive rows and legacy canonical facts", () => {
@@ -104,7 +134,7 @@ describe("resolveEnergyIqProjectDataReadiness", () => {
       batches,
       document: {
         ...document(),
-        source_manifest: createEnergyIqSourceManifest(FORMAL_SOURCE_SHAS, true),
+        source_manifest: createEnergyIqSourceManifest(["sha-l6", "sha-l7", "sha-missing"], true),
         meter_mapping: mapping,
       },
       snapshot,
@@ -194,7 +224,7 @@ describe("resolveEnergyIqProjectDataReadiness", () => {
       snapshot,
       expectedMaterializerContractVersion: "energy-excel-cumulative-v1",
       expectedFactWriterContractVersion: "energy-fact-writer-project-canonical-v2",
-    }).blockingReasons).toContain("SOURCE_MANIFEST_MISMATCH");
+    }).blockingReasons).not.toContain("SOURCE_MANIFEST_MISMATCH");
   });
 });
 

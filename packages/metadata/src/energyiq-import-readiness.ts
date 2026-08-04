@@ -12,8 +12,14 @@ export type EnergyIqProjectDataReadiness = {
   status: "not_required" | "blocked" | "ready";
   ready: boolean;
   requiresFormalData: boolean;
+  /** All registered imports retained as source evidence, including inactive history. */
   importBatchCount: number;
+  /** Imports selected by the current exact Source Manifest and used by readiness gates. */
+  activeImportBatchCount: number;
+  /** All registered imports with completed materialization, retained for DTO compatibility. */
   materializedBatchCount: number;
+  /** Materialized imports selected by the current exact Source Manifest. */
+  activeMaterializedBatchCount: number;
   sourceLabelCount: number;
   mappedSourceLabelCount: number;
   unmappedSourceLabels: string[];
@@ -44,7 +50,9 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
       ready: true,
       requiresFormalData: false,
       importBatchCount: 0,
+      activeImportBatchCount: 0,
       materializedBatchCount: 0,
+      activeMaterializedBatchCount: 0,
       sourceLabelCount: 0,
       mappedSourceLabelCount: 0,
       unmappedSourceLabels: [],
@@ -55,7 +63,8 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
     };
   }
 
-  const sourceLabels = sourceLabelsAcrossEnergyIqImportBatches(input.batches);
+  const activeBatches = activeEnergyIqImportBatches(input.batches, input.document);
+  const sourceLabels = sourceLabelsAcrossEnergyIqImportBatches(activeBatches);
   const sourceByKey = new Map(sourceLabels.map((label) => [normaliseLabel(label), label]));
   const mappingByKey = new Map((mapping?.rows ?? []).map((row) => [normaliseLabel(row.source_label), row.source_label]));
   const unmappedSourceLabels = [...sourceByKey.entries()]
@@ -64,14 +73,15 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
   const inactiveMappingSourceLabels = [...mappingByKey.entries()]
     .filter(([key]) => !sourceByKey.has(key))
     .map(([, label]) => label);
-  const materializedBatches = input.batches.filter((batch) => batch.status === "materialized");
+  const materializedBatches = activeBatches.filter((batch) => batch.status === "materialized");
+  const allMaterializedBatches = input.batches.filter((batch) => batch.status === "materialized");
   const blockingReasons = resolveEnergyIqMaterializationBlockingReasons({
-    batches: input.batches,
+    batches: activeBatches,
     document: input.document,
   });
   const warnings: string[] = [];
 
-  if (materializedBatches.length !== input.batches.length) blockingReasons.push("IMPORT_BATCH_NOT_MATERIALIZED");
+  if (materializedBatches.length !== activeBatches.length) blockingReasons.push("IMPORT_BATCH_NOT_MATERIALIZED");
 
   const snapshot = input.snapshot;
   if (!snapshot || snapshot.id !== input.project.data_snapshot_id) {
@@ -158,7 +168,9 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
     ready: uniqueBlockingReasons.length === 0,
     requiresFormalData: true,
     importBatchCount: input.batches.length,
-    materializedBatchCount: materializedBatches.length,
+    activeImportBatchCount: activeBatches.length,
+    materializedBatchCount: allMaterializedBatches.length,
+    activeMaterializedBatchCount: materializedBatches.length,
     sourceLabelCount: sourceLabels.length,
     mappedSourceLabelCount: sourceLabels.length - unmappedSourceLabels.length,
     unmappedSourceLabels,
@@ -168,6 +180,16 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
     blockingReasons: uniqueBlockingReasons,
     warnings,
   };
+};
+
+export const activeEnergyIqImportBatches = (
+  batches: EnergyIqImportBatchRecord[],
+  document: EnergyIqProjectSetupDocument,
+): EnergyIqImportBatchRecord[] => {
+  const sourceManifest = document.source_manifest;
+  if (!sourceManifest) return batches;
+  const activeSourceSha256 = new Set(sourceManifest.source_sha256.map(normaliseSha256));
+  return batches.filter((batch) => activeSourceSha256.has(normaliseSha256(batch.source_sha256)));
 };
 
 export const resolveEnergyIqMaterializationBlockingReasons = (input: {

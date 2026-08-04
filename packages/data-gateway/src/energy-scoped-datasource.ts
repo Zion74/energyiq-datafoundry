@@ -1,6 +1,5 @@
 import {
   resolveEnergyIqSnapshotFactScope,
-  type EnergyIqSnapshotFactScope,
   type MetadataStore,
 } from "@datafoundry/metadata";
 import { createHash } from "node:crypto";
@@ -13,6 +12,10 @@ import {
   ENERGY_FACT_WRITER_CONTRACT_VERSION,
   readEnergyFactProjectState,
 } from "./energy-fact-writer.js";
+import {
+  energySnapshotGuardSql,
+  type EnergySnapshotGuardScope,
+} from "./energy-snapshot-guard.js";
 
 export type EnergyScopedDataSourceContext = {
   workspaceId: string;
@@ -104,9 +107,6 @@ export const readEnergyFactCoverage = async (input: {
       to: new Date(toMs).toISOString(),
       intervalCount: numericValue(row.interval_count) ?? 0,
     };
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("energy_interval_facts does not exist")) return null;
-    throw error;
   } finally {
     await duckDbClose(connection).catch(ignoreAlreadyClosed);
   }
@@ -127,7 +127,7 @@ export const ensureEnergyScopedDataSource = async (input: {
     ? resolve(input.databasePath)
     : resolveEnergyFactStorePath(input.context.workspaceId);
   if (!existsSync(databasePath)) {
-    throw new Error(`ENERGYIQ_FACT_STORE_NOT_FOUND:${databasePath}`);
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
   }
   const factScope = await resolveValidatedSnapshotFactScope({
     metadataStore: input.metadataStore,
@@ -179,6 +179,8 @@ export const ensureEnergyScopedDataSource = async (input: {
       manifestFingerprint: factScope.manifestFingerprint,
       sourceSha256: factScope.sourceSha256,
       factWriterContractVersion: ENERGY_FACT_WRITER_CONTRACT_VERSION,
+      canonicalIntervalCount: factScope.canonicalIntervalCount,
+      canonicalIntervalDigest: factScope.canonicalIntervalDigest,
       metricVersion: input.context.metricVersion
     }
   };
@@ -209,7 +211,7 @@ const createScopedView = async (
   databasePath: string,
   viewName: string,
   context: EnergyScopedDataSourceContext,
-  factScope: EnergyIqSnapshotFactScope,
+  factScope: EnergySnapshotGuardScope,
 ): Promise<void> => {
   const attachments = [...new Map((context.meterAttachments ?? []).map((attachment) => [
     attachment.meterPointId,
@@ -281,16 +283,40 @@ const createScopedView = async (
   }
 };
 
+export const assertEnergyCurrentSnapshotFacts = async (input: {
+  metadataStore: MetadataStore;
+  workspaceId: string;
+  projectId: string;
+  dataSnapshotId: string;
+  databasePath?: string;
+}): Promise<void> => {
+  const databasePath = input.databasePath === ":memory:"
+    ? input.databasePath
+    : input.databasePath
+      ? resolve(input.databasePath)
+      : resolveEnergyFactStorePath(input.workspaceId);
+  if (!existsSync(databasePath)) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+  await resolveValidatedSnapshotFactScope({
+    metadataStore: input.metadataStore,
+    databasePath,
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    dataSnapshotId: input.dataSnapshotId,
+  });
+};
+
 const resolveValidatedSnapshotFactScope = async (input: {
   metadataStore: MetadataStore;
   workspaceId: string;
   projectId: string;
   dataSnapshotId: string;
   databasePath: string;
-}): Promise<EnergyIqSnapshotFactScope> => {
+}): Promise<EnergySnapshotGuardScope> => {
   const project = input.metadataStore.energyIq.getProject(input.projectId);
   if (project.workspace_id !== input.workspaceId || project.data_snapshot_id !== input.dataSnapshotId) {
-    throw new Error("ENERGYIQ_SNAPSHOT_STALE");
+    throw new Error(`ENERGYIQ_SNAPSHOT_STALE:${project.data_snapshot_id}`);
   }
   let snapshot;
   try {
@@ -301,10 +327,17 @@ const resolveValidatedSnapshotFactScope = async (input: {
   if (snapshot.workspace_id !== input.workspaceId || snapshot.project_id !== input.projectId) {
     throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
   }
-  const factScope = resolveEnergyIqSnapshotFactScope(snapshot);
+  let factScope: ReturnType<typeof resolveEnergyIqSnapshotFactScope>;
+  try {
+    factScope = resolveEnergyIqSnapshotFactScope(snapshot);
+  } catch {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
   const state = await readEnergyFactProjectState({ databasePath: input.databasePath, projectId: input.projectId });
   if (!state) throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
-  if (state.dataSnapshotId !== input.dataSnapshotId) throw new Error("ENERGYIQ_SNAPSHOT_STALE");
+  if (state.dataSnapshotId !== input.dataSnapshotId) {
+    throw new Error(`ENERGYIQ_SNAPSHOT_STALE:${state.dataSnapshotId}`);
+  }
   if (state.workspaceId !== factScope.workspaceId
     || state.projectId !== factScope.projectId
     || state.manifestFingerprint !== factScope.manifestFingerprint
@@ -312,25 +345,15 @@ const resolveValidatedSnapshotFactScope = async (input: {
     || JSON.stringify(state.sourceSha256) !== JSON.stringify(factScope.sourceSha256)) {
     throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
   }
-  return factScope;
+  return {
+    ...factScope,
+    factWriterContractVersion: ENERGY_FACT_WRITER_CONTRACT_VERSION,
+    canonicalIntervalCount: state.canonicalIntervalCount,
+    canonicalIntervalDigest: state.canonicalIntervalDigest,
+  };
 };
 
-const snapshotGuardSql = (scope: EnergyIqSnapshotFactScope): string => `(
-  SELECT CASE
-    WHEN COUNT(*) = 0 THEN error('ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE')
-    WHEN bool_or(data_snapshot_id <> ${sqlLiteral(scope.dataSnapshotId)})
-      THEN error('ENERGYIQ_SNAPSHOT_STALE')
-    WHEN bool_and(
-      workspace_id = ${sqlLiteral(scope.workspaceId)}
-      AND manifest_fingerprint = ${sqlLiteral(scope.manifestFingerprint)}
-      AND source_sha256_json = ${sqlLiteral(JSON.stringify(scope.sourceSha256))}
-      AND fact_writer_contract_version = ${sqlLiteral(ENERGY_FACT_WRITER_CONTRACT_VERSION)}
-    ) THEN TRUE
-    ELSE error('ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE')
-  END
-  FROM energy_project_fact_state
-  WHERE project_id = ${sqlLiteral(scope.projectId)}
-)`;
+const snapshotGuardSql = (scope: EnergySnapshotGuardScope): string => energySnapshotGuardSql(scope);
 
 const sqlLiteral = (value: string): string => `'${value.replaceAll("'", "''")}'`;
 const quoteIdentifier = (value: string): string => `"${value.replaceAll('"', '""')}"`;

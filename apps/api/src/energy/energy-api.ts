@@ -1,9 +1,8 @@
 import { createErrorResult, createSuccessResult, type AppErrorCode } from "@datafoundry/contracts";
 import {
+  assertEnergyCurrentSnapshotFacts,
   ENERGY_FACT_WRITER_CONTRACT_VERSION,
   readEnergyFactCoverage,
-  resolveEnergyFactStorePath,
-  writeEnergyFactMaterialization,
 } from "@datafoundry/data-gateway";
 import type {
   EnergyIqDataSnapshotRecord,
@@ -33,11 +32,9 @@ import { readMultipartUpload } from "../upload-parser.js";
 import { executeEnergyScopeAnalysis, type EnergyScopeAnalysis } from "./energy-analysis.js";
 import { inspectEnergyExcelWorkbook } from "./energy-excel-import.js";
 import {
-  buildEnergyExcelMaterialization,
-  createEnergyImportCompletionInput,
   ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION,
-  isEnergyImportMaterializationCurrent,
 } from "./energy-import-materializer.js";
+import { materializeEnergyProjectManifest } from "./energy-project-materialization.js";
 import { EnergyAdminAccessService } from "./energy-admin-access.js";
 import {
   resolveProjectAnalysis,
@@ -171,62 +168,19 @@ export const handleEnergyApiRequest = async (
       const project = context.metadataStore.energyIq.getProject(projectId);
       if (segments.length === 5 && segments[4] === "materialize" && request.method === "POST") {
         const batchId = decodeURIComponent(segments[3] ?? "");
-        const batch = context.metadataStore.energyIq.getImportBatch(batchId);
-        if (batch.project_id !== projectId) throw new Error("ENERGYIQ_IMPORT_BATCH_FORBIDDEN");
-        const draft = context.metadataStore.energyIq.projectSetup.getDraft({
-          project_id: projectId,
-          user_id: user.id,
-        });
-        const registeredBatches = context.metadataStore.energyIq.listImportBatches(projectId);
-        requireEnergyImportMaterializationPreconditions(registeredBatches, draft.document);
-        const sourceManifest = draft.document.source_manifest!;
-        if (!sourceManifest.source_sha256.includes(batch.source_sha256.toLocaleLowerCase())) {
-          throw new Error("ENERGYIQ_IMPORT_BATCH_NOT_PINNED");
-        }
-        const draftTimezone = draft.document.project.timezone;
-        if (isEnergyImportMaterializationCurrent({ batch, document: draft.document, timezone: draftTimezone })) {
-          const snapshot = context.metadataStore.energyIq.findCurrentDataSnapshot(projectId);
-          const readiness = createProjectDataReadiness(context, projectId, draft.document);
-          return {
-            status: 200,
-            body: createSuccessResult({
-              batch: toEnergyImportBatchDto(batch),
-              ...(snapshot ? { dataSnapshot: toEnergyDataSnapshotDto(snapshot) } : {}),
-              readiness,
-              duplicate: true,
-            }),
-          };
-        }
-        if (batch.source_kind !== "excel" || !batch.file_asset_ref_id) {
-          throw new Error("ENERGYIQ_IMPORT_BATCH_INVALID");
-        }
-        const original = context.fileAssetService.readRef({
-          user_id: batch.created_by,
-          workspace_id: batch.workspace_id,
-          id: batch.file_asset_ref_id,
-        });
-        const materialization = await buildEnergyExcelMaterialization({
-          content: original.body,
-          batch,
-          document: draft.document,
-          mappingRevision: draft.revision,
-          timezone: draftTimezone,
-          databasePath: resolveEnergyFactStorePath(project.workspace_id),
-        });
-        const persisted = await writeEnergyFactMaterialization(materialization.write);
-        const completed = context.metadataStore.energyIq.completeImportBatchMaterialization({
-          batch_id: batch.id,
-          project_id: projectId,
-          ...createEnergyImportCompletionInput(materialization.summary, persisted),
-          source_manifest_sha256: sourceManifest.source_sha256,
+        const materialized = await materializeEnergyProjectManifest({
+          context,
+          userId: user.id,
+          projectId,
+          requestedBatchId: batchId,
         });
         return {
           status: 200,
           body: createSuccessResult({
-            batch: toEnergyImportBatchDto(completed.batch),
-            dataSnapshot: toEnergyDataSnapshotDto(completed.snapshot),
-            readiness: createProjectDataReadiness(context, projectId, draft.document),
-            duplicate: false,
+            batch: toEnergyImportBatchDto(materialized.batch),
+            dataSnapshot: toEnergyDataSnapshotDto(materialized.snapshot),
+            readiness: await createProjectDataReadiness(context, projectId, materialized.document),
+            duplicate: materialized.duplicate,
           }),
         };
       }
@@ -242,7 +196,7 @@ export const handleEnergyApiRequest = async (
           body: createSuccessResult({
             batches: batches.map(toEnergyImportBatchDto),
             ...(snapshot ? { dataSnapshot: toEnergyDataSnapshotDto(snapshot) } : {}),
-            readiness: createProjectDataReadiness(context, projectId, draft.document),
+            readiness: await createProjectDataReadiness(context, projectId, draft.document),
           }),
         };
       }
@@ -301,8 +255,10 @@ export const handleEnergyApiRequest = async (
         status: 200,
         body: createSuccessResult({
           coverage: await readEnergyFactCoverage({
+            metadataStore: context.metadataStore,
             workspaceId: project.workspace_id,
             projectId,
+            dataSnapshotId: project.data_snapshot_id,
             resource: "electricity",
           }),
         }),
@@ -405,7 +361,7 @@ export const handleEnergyApiRequest = async (
           project_id: projectId,
           user_id: user.id,
         });
-        const readiness = createProjectDataReadiness(context, projectId, draft.document);
+        const readiness = await createProjectDataReadiness(context, projectId, draft.document);
         if (readiness.requiresFormalData && !readiness.ready) {
           throw new Error(`ENERGYIQ_PROJECT_DATA_NOT_READY:${readiness.blockingReasons.join(",")}`);
         }
@@ -774,13 +730,16 @@ export const handleEnergyApiRequest = async (
 };
 
 export const toEnergyApiErrorResponse = (error: unknown): ConfigApiResponse => {
-  const message = error instanceof Error ? error.message : String(error);
+  const rawMessage = error instanceof Error ? error.message : String(error);
+  const message = rawMessage.match(/ENERGYIQ_[A-Z0-9_]+(?::[^\s]+)?/)?.[0] ?? rawMessage;
   const forbidden = message.includes("FORBIDDEN") || message.includes("ADMIN_REQUIRED");
   const conflict = message.includes("CONFLICT")
     || message === "ENERGYIQ_SOURCE_MANIFEST_NOT_CONFIRMED"
     || message === "ENERGYIQ_SOURCE_MANIFEST_MISMATCH"
     || message.startsWith("ENERGYIQ_IMPORT_BATCH_NOT_PINNED")
     || message.startsWith("ENERGYIQ_IMPORT_MATERIALIZATION_NOT_READY:")
+    || message.startsWith("ENERGYIQ_SNAPSHOT_STALE")
+    || message.startsWith("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE")
     || message.startsWith("ENERGYIQ_DATA_SNAPSHOT_IMMUTABLE_CONFLICT:")
     || message.startsWith("ENERGYIQ_PROJECT_DATA_NOT_READY");
   const invalid = message.includes("INVALID")
@@ -873,11 +832,19 @@ const createProjectDataReadiness = (
   context: Required<ConfigApiContext>,
   projectId: string,
   document: EnergyIqProjectSetupDocument,
-) => {
+): Promise<ReturnType<typeof resolveEnergyIqProjectDataReadiness>> => {
+  return createProjectDataReadinessAsync(context, projectId, document);
+};
+
+const createProjectDataReadinessAsync = async (
+  context: Required<ConfigApiContext>,
+  projectId: string,
+  document: EnergyIqProjectSetupDocument,
+): Promise<ReturnType<typeof resolveEnergyIqProjectDataReadiness>> => {
   const project = context.metadataStore.energyIq.getProject(projectId);
   const batches = context.metadataStore.energyIq.listImportBatches(projectId);
   const snapshot = context.metadataStore.energyIq.findCurrentDataSnapshot(projectId);
-  return resolveEnergyIqProjectDataReadiness({
+  const readiness = resolveEnergyIqProjectDataReadiness({
     project,
     batches,
     document,
@@ -885,6 +852,33 @@ const createProjectDataReadiness = (
     expectedMaterializerContractVersion: ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION,
     expectedFactWriterContractVersion: ENERGY_FACT_WRITER_CONTRACT_VERSION,
   });
+  if (!readiness.requiresFormalData || !snapshot || snapshot.id !== project.data_snapshot_id) {
+    return readiness;
+  }
+  let factStateReason: "SNAPSHOT_FACT_STATE_STALE" | "SNAPSHOT_FACT_STATE_UNAVAILABLE" | undefined;
+  try {
+    await assertEnergyCurrentSnapshotFacts({
+      metadataStore: context.metadataStore,
+      workspaceId: project.workspace_id,
+      projectId,
+      dataSnapshotId: snapshot.id,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("ENERGYIQ_SNAPSHOT_STALE")) factStateReason = "SNAPSHOT_FACT_STATE_STALE";
+    else if (message.includes("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE")) {
+      factStateReason = "SNAPSHOT_FACT_STATE_UNAVAILABLE";
+    } else {
+      throw error;
+    }
+  }
+  if (!factStateReason) return readiness;
+  return {
+    ...readiness,
+    status: "blocked",
+    ready: false,
+    blockingReasons: [...new Set([...readiness.blockingReasons, factStateReason])],
+  };
 };
 
 export const requireEnergyImportMaterializationPreconditions = (

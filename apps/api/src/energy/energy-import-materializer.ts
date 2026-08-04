@@ -1,7 +1,6 @@
 import {
   ENERGY_FACT_WRITER_CONTRACT_VERSION,
-  type EnergyFactMaterializationWrite,
-  type EnergyFactMaterializationResult,
+  type EnergyFactMaterializationBatchWrite,
   type EnergyIntervalFactWrite,
   type EnergyNormalizedReadingWrite,
   type EnergyQualityEventWrite,
@@ -33,17 +32,7 @@ export type EnergyImportMaterializationSummary = {
   sourceCoverageTo?: string;
 };
 
-export type EnergyFactMaterializationDraft = Omit<EnergyFactMaterializationWrite, "snapshotFactScope">;
-
 export const ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION = "energy-excel-cumulative-v1" as const;
-
-export const createEnergyImportCompletionInput = (
-  summary: EnergyImportMaterializationSummary,
-  persisted: EnergyFactMaterializationResult,
-): { summary: EnergyImportMaterializationSummary; project_audit: EnergyFactMaterializationResult["projectAudit"] } => ({
-  summary,
-  project_audit: persisted.projectAudit,
-});
 
 export const isEnergyImportMaterializationCurrent = (input: {
   batch: EnergyIqImportBatchRecord;
@@ -73,9 +62,8 @@ export const buildEnergyExcelMaterialization = async (input: {
   document: EnergyIqProjectSetupDocument;
   mappingRevision: number;
   timezone: string;
-  databasePath: string;
 }): Promise<{
-  write: EnergyFactMaterializationDraft;
+  write: EnergyFactMaterializationBatchWrite;
   summary: EnergyImportMaterializationSummary;
 }> => {
   const mapping = input.document.meter_mapping;
@@ -277,11 +265,8 @@ export const buildEnergyExcelMaterialization = async (input: {
   };
   return {
     write: {
-      databasePath: input.databasePath,
-      projectId: input.batch.project_id,
       importBatchId: input.batch.id,
       sourceSha256: input.batch.source_sha256,
-      timezone: input.timezone,
       rawReadings,
       normalizedReadings,
       intervalFacts,

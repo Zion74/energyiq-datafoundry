@@ -25,9 +25,9 @@ describe("saved analysis decision-quality boundary", () => {
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
     const gateway = new LocalDataGateway(metadata);
     try {
-      await materializePreschoolGoldenFixture(databasePath);
       vi.stubEnv("ENERGYIQ_DUCKDB_PATH", databasePath);
       ensureEnergyIqBootstrap(metadata);
+      await materializePreschoolGoldenFixture(databasePath, metadata);
       const project = metadata.energyIq.getProject("preschool-demo");
       const templateRevision = metadata.energyIq.templates.publishProjectRevisionWithinTransaction({
         project_id: project.id,
@@ -104,9 +104,9 @@ describe("saved analysis decision-quality boundary", () => {
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
     const gateway = new LocalDataGateway(metadata);
     try {
-      await materializePreschoolGoldenFixture(databasePath);
       vi.stubEnv("ENERGYIQ_DUCKDB_PATH", databasePath);
       ensureEnergyIqBootstrap(metadata);
+      await materializePreschoolGoldenFixture(databasePath, metadata);
       const project = metadata.energyIq.getProject("preschool-demo");
       const templateRevision = metadata.energyIq.templates.publishProjectRevisionWithinTransaction({
         project_id: project.id,
@@ -254,6 +254,25 @@ describe("saved analysis decision-quality boundary", () => {
       });
       expect(latestAnalysis.cost).not.toEqual(firstAnalysis.cost);
       expect(latestAnalysis.offHours).not.toEqual(firstAnalysis.offHours);
+
+      metadata.energyIq.upsertProject({
+        ...metadata.energyIq.getProject(project.id),
+        data_snapshot_id: "missing-current-snapshot",
+      });
+      const unavailableRerun = await handleEnergyApiRequest(
+        jsonPost({}),
+        ["projects", project.id, "saved-analyses", first?.id ?? "", "rerun"],
+        context,
+      );
+      expect(unavailableRerun).toMatchObject({
+        status: 409,
+        body: {
+          success: false,
+          error: { code: "CONFLICT", message: "ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE" },
+        },
+      });
+      expect(metadata.energyIq.savedAnalyses.listProject(project.id)).toHaveLength(2);
+      expect(metadata.energyIq.savedAnalyses.get(first?.id ?? "").analysis_json).toBe(frozenAnalysisJson);
     } finally {
       metadata.close();
       removeTemporaryFixture(root);

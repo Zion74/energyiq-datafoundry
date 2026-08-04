@@ -1,6 +1,5 @@
 import {
   LocalDataGateway,
-  writeEnergyFactMaterialization,
   type EnergyIntervalFactWrite,
 } from "@datafoundry/data-gateway";
 import {
@@ -16,6 +15,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { executeEnergyScopeAnalysis } from "./energy-analysis.js";
 import type { EnergyQueryContext } from "./energy-query-context.js";
+import { materializeTestProjectSnapshot } from "./energy-test-materialization.js";
 
 describe("EnergyScopeAnalysis operational policy", () => {
   it("uses complete Release-pinned Tariff and Calendar versions for cost and standby facts", async () => {
@@ -26,7 +26,7 @@ describe("EnergyScopeAnalysis operational policy", () => {
         metadataStore: fixture.metadata,
         dataGateway: fixture.gateway,
         userId: "dev-user",
-        context: policyContext("tariff-v1", "calendar-v1"),
+        context: policyContext("tariff-v1", "calendar-v1", fixture.dataSnapshotId),
         databasePath: fixture.databasePath,
         ruleRevisions: [offHoursRule],
       });
@@ -88,7 +88,7 @@ describe("EnergyScopeAnalysis operational policy", () => {
         metadataStore: fixture.metadata,
         dataGateway: fixture.gateway,
         userId: "dev-user",
-        context: policyContext("missing-tariff", "missing-calendar"),
+        context: policyContext("missing-tariff", "missing-calendar", fixture.dataSnapshotId),
         databasePath: fixture.databasePath,
         ruleRevisions: [offHoursRule],
       });
@@ -134,7 +134,7 @@ describe("EnergyScopeAnalysis operational policy", () => {
         metadataStore: fixture.metadata,
         dataGateway: fixture.gateway,
         userId: "dev-user",
-        context: policyContext("tariff-v1", "calendar-v1"),
+        context: policyContext("tariff-v1", "calendar-v1", fixture.dataSnapshotId),
         databasePath: fixture.databasePath,
         ruleRevisions: [],
       })).rejects.toThrow(
@@ -154,7 +154,7 @@ describe("EnergyScopeAnalysis operational policy", () => {
         metadataStore: fixture.metadata,
         dataGateway: fixture.gateway,
         userId: "dev-user",
-        context: policyContext("tariff-v1", "calendar-v1"),
+        context: policyContext("tariff-v1", "calendar-v1", fixture.dataSnapshotId),
         databasePath: fixture.databasePath,
         ruleRevisions: [],
       });
@@ -165,7 +165,7 @@ describe("EnergyScopeAnalysis operational policy", () => {
         metadataStore: fixture.metadata,
         dataGateway: fixture.gateway,
         userId: "dev-user",
-        context: policyContext("tariff-v1", "calendar-v1"),
+        context: policyContext("tariff-v1", "calendar-v1", fixture.dataSnapshotId),
         databasePath: fixture.databasePath,
         ruleRevisions: [],
       });
@@ -173,7 +173,7 @@ describe("EnergyScopeAnalysis operational policy", () => {
         metadataStore: fixture.metadata,
         dataGateway: fixture.gateway,
         userId: "dev-user",
-        context: policyContext("tariff-v2", "calendar-v2"),
+        context: policyContext("tariff-v2", "calendar-v2", fixture.dataSnapshotId),
         databasePath: fixture.databasePath,
         ruleRevisions: [],
       });
@@ -263,21 +263,26 @@ const createOperationalFixture = async () => {
     fact("2026-06-30T16:00:00.000Z", "2026-06-30T20:00:00.000Z", 4),
     fact("2026-07-01T00:00:00.000Z", "2026-07-01T04:00:00.000Z", 6),
   ];
-  await writeEnergyFactMaterialization({
+  const snapshot = await materializeTestProjectSnapshot({
+    metadataStore: metadata,
     databasePath,
+    workspaceId: "workspace-policy",
     projectId: "project-policy",
-    importBatchId: "policy-fixture",
-    sourceSha256: "policy-fixture-sha",
     timezone: "Asia/Singapore",
-    rawReadings: [],
-    normalizedReadings: [],
-    intervalFacts: intervals,
-    qualityEvents: [],
+    batches: [{
+      importBatchId: "policy-fixture",
+      sourceSha256: "policy-fixture-sha",
+      rawReadings: [],
+      normalizedReadings: [],
+      intervalFacts: intervals,
+      qualityEvents: [],
+    }],
   });
   return {
     metadata,
     gateway,
     databasePath,
+    dataSnapshotId: snapshot.id,
     close: () => {
       metadata.close();
       try {
@@ -332,6 +337,7 @@ const fact = (
 const policyContext = (
   tariffScheduleVersion: string,
   businessCalendarVersion: string,
+  dataSnapshotId: string,
 ): EnergyQueryContext => ({
   userId: "dev-user",
   workspaceId: "workspace-policy",
@@ -349,7 +355,7 @@ const policyContext = (
   hierarchyRevisionId: "hierarchy-v1",
   meterMappingRevisionId: energyIqPublishedMeterRoutingRevisionId(POLICY_MAPPING),
   meterFormulaRevisionId: "meter-formula-v1",
-  dataSnapshotId: "snapshot-v1",
+  dataSnapshotId,
   metricVersion: "metric-v1",
   businessCalendarVersion,
   tariffScheduleVersion,

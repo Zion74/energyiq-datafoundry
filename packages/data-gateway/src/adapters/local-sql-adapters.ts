@@ -9,6 +9,10 @@ import type {
 import { DatabaseSync } from "node:sqlite";
 import type * as DuckDbModule from "duckdb";
 import { getDuckDbDatabase } from "../duckdb-database-cache.js";
+import {
+  energySnapshotGuardSql,
+  type EnergySnapshotGuardScope,
+} from "../energy-snapshot-guard.js";
 
 export class SQLiteAdapter implements DataSourceAdapter {
   constructor(private readonly config: Record<string, unknown>) {}
@@ -118,16 +122,7 @@ export class DuckDbAdapter implements DataSourceAdapter {
   }
 }
 
-type EnergySnapshotScope = {
-  workspaceId: string;
-  projectId: string;
-  dataSnapshotId: string;
-  manifestFingerprint: string;
-  sourceSha256: string[];
-  factWriterContractVersion: string;
-};
-
-const energySnapshotScope = (value: unknown): EnergySnapshotScope | undefined => {
+const energySnapshotScope = (value: unknown): EnergySnapshotGuardScope | undefined => {
   if (!isRecord(value)) return undefined;
   const sourceSha256 = value.sourceSha256;
   if (typeof value.workspaceId !== "string"
@@ -135,6 +130,11 @@ const energySnapshotScope = (value: unknown): EnergySnapshotScope | undefined =>
     || typeof value.dataSnapshotId !== "string"
     || typeof value.manifestFingerprint !== "string"
     || typeof value.factWriterContractVersion !== "string"
+    || typeof value.canonicalIntervalCount !== "number"
+    || !Number.isSafeInteger(value.canonicalIntervalCount)
+    || value.canonicalIntervalCount < 0
+    || typeof value.canonicalIntervalDigest !== "string"
+    || !/^[a-f0-9]{64}$/u.test(value.canonicalIntervalDigest)
     || !Array.isArray(sourceSha256)
     || !sourceSha256.every((source) => typeof source === "string")) {
     throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
@@ -146,33 +146,18 @@ const energySnapshotScope = (value: unknown): EnergySnapshotScope | undefined =>
     manifestFingerprint: value.manifestFingerprint,
     sourceSha256,
     factWriterContractVersion: value.factWriterContractVersion,
+    canonicalIntervalCount: value.canonicalIntervalCount,
+    canonicalIntervalDigest: value.canonicalIntervalDigest,
   };
 };
 
 const assertEnergySnapshotState = async (
   connection: DuckDbModule.Connection,
-  scope: EnergySnapshotScope,
+  scope: EnergySnapshotGuardScope,
   signal?: AbortSignal,
 ): Promise<void> => {
-  await duckDbAll(connection, `
-    SELECT CASE
-      WHEN COUNT(*) = 0 THEN error('ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE')
-      WHEN bool_or(data_snapshot_id <> ${sqlLiteral(scope.dataSnapshotId)})
-        THEN error('ENERGYIQ_SNAPSHOT_STALE')
-      WHEN bool_and(
-        workspace_id = ${sqlLiteral(scope.workspaceId)}
-        AND manifest_fingerprint = ${sqlLiteral(scope.manifestFingerprint)}
-        AND source_sha256_json = ${sqlLiteral(JSON.stringify(scope.sourceSha256))}
-        AND fact_writer_contract_version = ${sqlLiteral(scope.factWriterContractVersion)}
-      ) THEN TRUE
-      ELSE error('ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE')
-    END AS snapshot_valid
-    FROM energy_project_fact_state
-    WHERE project_id = ${sqlLiteral(scope.projectId)}
-  `, signal);
+  await duckDbAll(connection, `SELECT ${energySnapshotGuardSql(scope)} AS snapshot_valid`, signal);
 };
-
-const sqlLiteral = (value: string): string => `'${value.replaceAll("'", "''")}'`;
 
 const duckDbAll = async (
   connection: DuckDbModule.Connection,

@@ -5,14 +5,48 @@ import { describe, expect, it } from "vitest";
 
 import { createMetadataStore } from "@datafoundry/metadata";
 import { LocalDataGateway } from "./index.js";
+import { getDuckDbDatabase } from "./duckdb-database-cache.js";
 import {
   ENERGY_FACT_WRITER_CONTRACT_VERSION,
-  writeEnergyFactMaterialization,
-  type EnergyFactMaterializationWrite,
+  writeEnergyFactProjectMaterialization,
+  type EnergyFactMaterializationBatchWrite,
 } from "./energy-fact-writer.js";
-import { ensureEnergyScopedDataSource } from "./energy-scoped-datasource.js";
+import {
+  ensureEnergyScopedDataSource,
+  readEnergyFactCoverage,
+} from "./energy-scoped-datasource.js";
 
 describe("Energy scoped datasource Snapshot guard", () => {
+  it("fails closed with the stable facts-unavailable code when the fact store is missing", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-scoped-missing-store-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      await expect(ensureEnergyScopedDataSource({
+        metadataStore: metadata,
+        userId: "dev-user",
+        databasePath: join(root, "missing.duckdb"),
+        context: {
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          scopeId: "scope-a",
+          meterAttachments: [],
+          resource: "electricity",
+          from: "2026-05-01T00:00:00.000Z",
+          to: "2026-05-02T00:00:00.000Z",
+          timezone: "Asia/Singapore",
+          hierarchyRevisionId: "hierarchy-v1",
+          meterMappingRevisionId: "mapping-v1",
+          meterFormulaRevisionId: "formula-v1",
+          dataSnapshotId: "snapshot-a",
+          metricVersion: "metrics-v1",
+        },
+      })).rejects.toThrow("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects every query from an old datasource after the DuckDB fact state advances", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-scoped-snapshot-"));
     const databasePath = join(root, "energy.duckdb");
@@ -20,17 +54,32 @@ describe("Energy scoped datasource Snapshot guard", () => {
     try {
       metadata.workspaces.upsert({ id: "workspace-1", owner_user_id: "dev-user", name: "Workspace", kind: "customer" });
       metadata.energyIq.upsertProject({ id: "project-1", workspace_id: "workspace-1", name: "Project", status: "draft" });
-      const preparedA = prepareBatch(metadata, "batch-a", "sha-a");
-      const persistedA = await writeEnergyFactMaterialization({
-        ...factWrite(databasePath, "batch-a", "sha-a", "2026-05-01T00:00:00.000Z"),
-        snapshotFactScope: preparedA.fact_scope,
-      });
-      metadata.energyIq.completeImportBatchMaterialization({
-        batch_id: "batch-a",
+      createBatch(metadata, "batch-a", "sha-a");
+      createBatch(metadata, "batch-b", "sha-b");
+      const materializationsA = [{ batch_id: "batch-a", summary: summary("sha-a") }];
+      const preparedA = metadata.energyIq.prepareProjectManifestMaterialization({
         project_id: "project-1",
-        summary: summary("sha-a"),
+        materializations: materializationsA,
+        source_manifest_sha256: ["sha-a"],
+      });
+      const writeA = projectBatch(factWrite(
+        "batch-a",
+        "sha-a",
+        "2026-05-01T00:00:00.000Z",
+      ));
+      const persistedA = await writeEnergyFactProjectMaterialization({
+        databasePath,
+        projectId: "project-1",
+        timezone: "Asia/Singapore",
+        expectedPreviousDataSnapshotId: preparedA.expected_previous_snapshot_id,
+        snapshotFactScope: preparedA.fact_scope,
+        batches: [writeA],
+      });
+      metadata.energyIq.completeProjectManifestMaterialization({
+        project_id: "project-1",
+        materializations: materializationsA,
         project_audit: persistedA.projectAudit,
-        source_manifest_sha256: ["sha-a", "sha-b"],
+        source_manifest_sha256: ["sha-a"],
         expected_snapshot_id: preparedA.expected_snapshot_id,
         expected_previous_snapshot_id: preparedA.expected_previous_snapshot_id,
       });
@@ -75,14 +124,84 @@ describe("Energy scoped datasource Snapshot guard", () => {
           metricVersion: "metrics-v1",
         },
       });
+      const gateway = new LocalDataGateway(metadata);
 
-      const preparedB = prepareBatch(metadata, "batch-b", "sha-b");
-      await writeEnergyFactMaterialization({
-        ...factWrite(databasePath, "batch-b", "sha-b", "2026-05-01T00:15:00.000Z"),
-        snapshotFactScope: preparedB.fact_scope,
+      await runDuckDbSql(databasePath, `
+        DELETE FROM energy_interval_facts
+        WHERE project_id = 'project-1'
+          AND interval_start = TIMESTAMPTZ '2026-05-01T00:00:00.000Z'
+      `);
+      await expect(gateway.runSqlReadonly({
+        user_id: "dev-user",
+        datasource_id: scopedA.datasourceId,
+        sql: `SELECT COUNT(*) AS interval_count FROM ${scopedA.viewName}`,
+      })).rejects.toThrow("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+      await expect(readEnergyFactCoverage({
+        metadataStore: metadata,
+        databasePath,
+        workspaceId: "workspace-1",
+        projectId: "project-1",
+        dataSnapshotId: preparedA.expected_snapshot_id,
+        resource: "electricity",
+      })).rejects.toThrow("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+
+      await writeEnergyFactProjectMaterialization({
+        databasePath,
+        projectId: "project-1",
+        timezone: "Asia/Singapore",
+        expectedPreviousDataSnapshotId: preparedA.expected_snapshot_id,
+        snapshotFactScope: preparedA.fact_scope,
+        batches: [writeA],
+      });
+      await runDuckDbSql(databasePath, `
+        UPDATE energy_interval_facts
+        SET usage_kwh = usage_kwh + 1
+        WHERE project_id = 'project-1'
+      `);
+      await expect(gateway.runSqlReadonly({
+        user_id: "dev-user",
+        datasource_id: scopedA.datasourceId,
+        sql: `SELECT SUM(usage_kwh) AS usage_kwh FROM ${scopedA.viewName}`,
+      })).rejects.toThrow("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+      await expect(readEnergyFactCoverage({
+        metadataStore: metadata,
+        databasePath,
+        workspaceId: "workspace-1",
+        projectId: "project-1",
+        dataSnapshotId: preparedA.expected_snapshot_id,
+        resource: "electricity",
+      })).rejects.toThrow("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+
+      await writeEnergyFactProjectMaterialization({
+        databasePath,
+        projectId: "project-1",
+        timezone: "Asia/Singapore",
+        expectedPreviousDataSnapshotId: preparedA.expected_snapshot_id,
+        snapshotFactScope: preparedA.fact_scope,
+        batches: [writeA],
       });
 
-      const gateway = new LocalDataGateway(metadata);
+      const materializationsB = [
+        { batch_id: "batch-a", summary: summary("sha-a") },
+        { batch_id: "batch-b", summary: summary("sha-b") },
+      ];
+      const preparedB = metadata.energyIq.prepareProjectManifestMaterialization({
+        project_id: "project-1",
+        materializations: materializationsB,
+        source_manifest_sha256: ["sha-a", "sha-b"],
+      });
+      await writeEnergyFactProjectMaterialization({
+        databasePath,
+        projectId: "project-1",
+        timezone: "Asia/Singapore",
+        expectedPreviousDataSnapshotId: preparedB.expected_previous_snapshot_id,
+        snapshotFactScope: preparedB.fact_scope,
+        batches: [
+          projectBatch(factWrite("batch-a", "sha-a", "2026-05-01T00:00:00.000Z")),
+          projectBatch(factWrite("batch-b", "sha-b", "2026-05-01T00:15:00.000Z")),
+        ],
+      });
+
       await expect(gateway.runSqlReadonly({
         user_id: "dev-user",
         datasource_id: scopedA.datasourceId,
@@ -107,11 +226,11 @@ describe("Energy scoped datasource Snapshot guard", () => {
   });
 });
 
-const prepareBatch = (
+const createBatch = (
   metadata: ReturnType<typeof createMetadataStore>,
   batchId: string,
   sourceSha256: string,
-) => {
+): void => {
   metadata.energyIq.createImportBatch({
     id: batchId,
     workspace_id: "workspace-1",
@@ -122,12 +241,6 @@ const prepareBatch = (
     status: "inspected",
     inspection: { sheetName: "Sheet1" },
     created_by: "dev-user",
-  });
-  return metadata.energyIq.prepareImportBatchMaterialization({
-    batch_id: batchId,
-    project_id: "project-1",
-    summary: summary(sourceSha256),
-    source_manifest_sha256: ["sha-a", "sha-b"],
   });
 };
 
@@ -142,16 +255,12 @@ const summary = (sourceSha256: string) => ({
 });
 
 const factWrite = (
-  databasePath: string,
   importBatchId: string,
   sourceSha256: string,
   intervalStart: string,
-): EnergyFactMaterializationWrite => ({
-  databasePath,
-  projectId: "project-1",
+): EnergyFactMaterializationBatchWrite => ({
   importBatchId,
   sourceSha256,
-  timezone: "Asia/Singapore",
   rawReadings: [],
   normalizedReadings: [],
   intervalFacts: [{
@@ -181,11 +290,27 @@ const factWrite = (
     sourceReadingKind: "interval_usage",
   }],
   qualityEvents: [],
-  snapshotFactScope: {
-    workspaceId: "workspace-1",
-    projectId: "project-1",
-    dataSnapshotId: `placeholder-${importBatchId}`,
-    manifestFingerprint: `placeholder-${importBatchId}`,
-    sourceSha256: [sourceSha256],
-  },
 });
+
+const projectBatch = (input: EnergyFactMaterializationBatchWrite): EnergyFactMaterializationBatchWrite => ({
+  importBatchId: input.importBatchId,
+  sourceSha256: input.sourceSha256,
+  rawReadings: input.rawReadings,
+  normalizedReadings: input.normalizedReadings,
+  intervalFacts: input.intervalFacts,
+  qualityEvents: input.qualityEvents,
+});
+
+const runDuckDbSql = async (databasePath: string, sql: string): Promise<void> => {
+  const database = await getDuckDbDatabase(databasePath);
+  const connection = database.connect();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      connection.run(sql, (error) => error ? reject(error) : resolve());
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      connection.close((error) => error ? reject(error) : resolve());
+    });
+  }
+};

@@ -6,6 +6,52 @@ import { describe, expect, it } from "vitest";
 import { createEnergyIqSourceManifest, createMetadataStore } from "./index.js";
 
 describe("EnergyIqStore", () => {
+  it("publishes all prepared manifest batches in one Metadata transaction", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-project-manifest-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.workspaces.upsert({ id: "workspace-1", owner_user_id: "dev-user", name: "Workspace", kind: "customer" });
+      metadata.energyIq.upsertProject({ id: "project-manifest", workspace_id: "workspace-1", name: "Manifest", status: "draft" });
+      for (const [batchId, sha] of [["manifest-a", "sha-a"], ["manifest-b", "sha-b"]] as const) {
+        metadata.energyIq.createImportBatch({
+          id: batchId,
+          workspace_id: "workspace-1",
+          project_id: "project-manifest",
+          source_kind: "excel",
+          source_sha256: sha,
+          filename: `${batchId}.xlsx`,
+          status: "inspected",
+          inspection: importInspection(batchId),
+          created_by: "dev-user",
+        });
+      }
+      const materializations = [
+        { batch_id: "manifest-a", summary: materializationSummary("mapping-sha-1") },
+        { batch_id: "manifest-b", summary: materializationSummary("mapping-sha-1") },
+      ];
+      const prepared = metadata.energyIq.prepareProjectManifestMaterialization({
+        project_id: "project-manifest",
+        materializations,
+        source_manifest_sha256: ["sha-a", "sha-b"],
+      });
+      const completed = metadata.energyIq.completeProjectManifestMaterialization({
+        project_id: "project-manifest",
+        materializations,
+        project_audit: projectAudit(),
+        source_manifest_sha256: ["sha-a", "sha-b"],
+        expected_snapshot_id: prepared.expected_snapshot_id,
+        expected_previous_snapshot_id: prepared.expected_previous_snapshot_id,
+      });
+
+      expect(completed.batches.map((batch) => batch.status)).toEqual(["materialized", "materialized"]);
+      expect(completed.snapshot.id).toBe(prepared.expected_snapshot_id);
+      expect(metadata.energyIq.getProject("project-manifest").data_snapshot_id).toBe(prepared.expected_snapshot_id);
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
   it("prepares the Snapshot identity before fact writes and rejects completion after pointer drift", () => {
     const root = mkdtempSync(join(tmpdir(), "energyiq-snapshot-prepare-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
@@ -34,10 +80,13 @@ describe("EnergyIqStore", () => {
         created_by: "dev-user",
       });
 
-      const prepared = metadata.energyIq.prepareImportBatchMaterialization({
+      const materializations = [{
         batch_id: "batch-prepare",
-        project_id: "project-snapshot-prepare",
         summary: materializationSummary("mapping-sha-1"),
+      }];
+      const prepared = metadata.energyIq.prepareProjectManifestMaterialization({
+        project_id: "project-snapshot-prepare",
+        materializations,
         source_manifest_sha256: ["sha-prepare"],
       });
 
@@ -51,19 +100,26 @@ describe("EnergyIqStore", () => {
         },
       });
 
+      expect(() => metadata.energyIq.completeProjectManifestMaterialization({
+        project_id: "project-snapshot-prepare",
+        materializations,
+        project_audit: projectAudit(),
+        source_manifest_sha256: ["sha-prepare"],
+      } as never)).toThrow("ENERGYIQ_DATA_SNAPSHOT_EXPECTATION_REQUIRED");
+      expect(metadata.energyIq.getImportBatch("batch-prepare").status).toBe("inspected");
+
       metadata.energyIq.upsertProject({
         ...metadata.energyIq.getProject("project-snapshot-prepare"),
         data_snapshot_id: "concurrent-snapshot",
       });
-      expect(() => metadata.energyIq.completeImportBatchMaterialization({
-        batch_id: "batch-prepare",
+      expect(() => metadata.energyIq.completeProjectManifestMaterialization({
         project_id: "project-snapshot-prepare",
-        summary: materializationSummary("mapping-sha-1"),
+        materializations,
         project_audit: projectAudit(),
         source_manifest_sha256: ["sha-prepare"],
         expected_snapshot_id: prepared.expected_snapshot_id,
         expected_previous_snapshot_id: prepared.expected_previous_snapshot_id,
-      })).toThrow("ENERGYIQ_DATA_SNAPSHOT_STALE:concurrent-snapshot");
+      })).toThrow("ENERGYIQ_SNAPSHOT_STALE:concurrent-snapshot");
       expect(metadata.energyIq.getImportBatch("batch-prepare").status).toBe("inspected");
     } finally {
       metadata.close();
@@ -796,7 +852,9 @@ describe("EnergyIqStore", () => {
         source_sha256: "sha-1",
       })?.id).toBe("batch-1");
       expect(metadata.energyIq.listImportBatches("project-import")).toHaveLength(1);
-      const first = metadata.energyIq.completeImportBatchMaterialization({
+      const complete = (input: ProjectManifestCompletionInput) =>
+        completePreparedProjectManifest(metadata.energyIq, input);
+      const first = complete({
         batch_id: "batch-1",
         project_id: "project-import",
         summary: materializationSummary("mapping-sha-1"),
@@ -825,7 +883,7 @@ describe("EnergyIqStore", () => {
         inspection: importInspection("batch-2"),
         created_by: "dev-user",
       });
-      const second = metadata.energyIq.completeImportBatchMaterialization({
+      const second = complete({
         batch_id: "batch-2",
         project_id: "project-import",
         summary: materializationSummary("mapping-sha-1"),
@@ -840,21 +898,21 @@ describe("EnergyIqStore", () => {
       });
       expect(JSON.parse(second.snapshot.audit_json)).toMatchObject({ rawOverlapConflictCount: 2 });
       expect(metadata.energyIq.getDataSnapshot(second.snapshot.id).id).toBe(second.snapshot.id);
-      expect(metadata.energyIq.completeImportBatchMaterialization({
+      expect(complete({
         batch_id: "batch-2",
         project_id: "project-import",
         summary: materializationSummary("mapping-sha-1"),
         project_audit: projectAudit({ rawOverlapConflictCount: 2 }),
       }).snapshot.id).toBe(second.snapshot.id);
       expect(JSON.stringify(JSON.parse(second.snapshot.manifest_json))).not.toContain("mappingRevision");
-      const mappingB = metadata.energyIq.completeImportBatchMaterialization({
+      const mappingB = complete({
         batch_id: "batch-2",
         project_id: "project-import",
         summary: materializationSummary("mapping-sha-2", 4),
         project_audit: projectAudit({ rawOverlapConflictCount: 2 }),
       });
       expect(mappingB.snapshot.id).not.toBe(second.snapshot.id);
-      const rolledBack = metadata.energyIq.completeImportBatchMaterialization({
+      const rolledBack = complete({
         batch_id: "batch-2",
         project_id: "project-import",
         summary: materializationSummary("mapping-sha-1", 5),
@@ -863,7 +921,7 @@ describe("EnergyIqStore", () => {
       expect(rolledBack.snapshot.id).toBe(second.snapshot.id);
       expect(JSON.parse(rolledBack.snapshot.manifest_json)).toEqual(JSON.parse(second.snapshot.manifest_json));
       expect(JSON.parse(rolledBack.batch.materialization_json ?? "{}")).toMatchObject({ mappingRevision: 5 });
-      const legacyWriterContract = metadata.energyIq.completeImportBatchMaterialization({
+      const legacyWriterContract = complete({
         batch_id: "batch-2",
         project_id: "project-import",
         summary: {
@@ -873,20 +931,20 @@ describe("EnergyIqStore", () => {
         project_audit: projectAudit({ rawOverlapConflictCount: 2 }),
       });
       expect(legacyWriterContract.snapshot.id).not.toBe(second.snapshot.id);
-      const upgradedWriterContract = metadata.energyIq.completeImportBatchMaterialization({
+      const upgradedWriterContract = complete({
         batch_id: "batch-2",
         project_id: "project-import",
         summary: materializationSummary("mapping-sha-1", 5),
         project_audit: projectAudit({ rawOverlapConflictCount: 2 }),
       });
       expect(upgradedWriterContract.snapshot.id).toBe(second.snapshot.id);
-      expect(() => metadata.energyIq.completeImportBatchMaterialization({
+      expect(() => complete({
         batch_id: "batch-2",
         project_id: "project-import",
         summary: { ...materializationSummary("mapping-sha-1"), rawRowCount: 11 },
         project_audit: projectAudit({ rawOverlapConflictCount: 2 }),
       })).toThrow(`ENERGYIQ_DATA_SNAPSHOT_IMMUTABLE_CONFLICT:${second.snapshot.id}`);
-      expect(() => metadata.energyIq.completeImportBatchMaterialization({
+      expect(() => complete({
         batch_id: "batch-2",
         project_id: "project-import",
         summary: materializationSummary("mapping-sha-1"),
@@ -923,7 +981,7 @@ describe("EnergyIqStore", () => {
             inspection: importInspection(input.coverage),
             created_by: "dev-user",
           });
-          replay.energyIq.completeImportBatchMaterialization({
+          completePreparedProjectManifest(replay.energyIq, {
             batch_id: input.id,
             project_id: "project-import",
             summary: materializationSummary("mapping-sha-1"),
@@ -967,7 +1025,7 @@ describe("EnergyIqStore", () => {
             inspection: importInspection(input.coverage),
             created_by: "dev-user",
           });
-          reverseFinalSnapshotId = reverse.energyIq.completeImportBatchMaterialization({
+          reverseFinalSnapshotId = completePreparedProjectManifest(reverse.energyIq, {
             batch_id: input.id,
             project_id: "project-import",
             summary: materializationSummary("mapping-sha-1"),
@@ -993,6 +1051,56 @@ describe("EnergyIqStore", () => {
     }
   });
 });
+
+type EnergyIqMetadataApi = ReturnType<typeof createMetadataStore>["energyIq"];
+type ProjectManifestCompletionInput = {
+  batch_id: string;
+  project_id: string;
+  summary: unknown;
+  project_audit: unknown;
+  source_manifest_sha256?: readonly string[];
+};
+
+const completePreparedProjectManifest = (
+  energyIq: EnergyIqMetadataApi,
+  input: ProjectManifestCompletionInput,
+) => {
+  const batches = energyIq.listImportBatches(input.project_id);
+  const materializations = batches.map((batch) => ({
+    batch_id: batch.id,
+    summary: batch.id === input.batch_id
+      ? input.summary
+      : requireTestMaterializationSummary(batch.id, batch.materialization_json),
+  }));
+  const sourceManifestSha256 = input.source_manifest_sha256
+    ?? batches.map((batch) => batch.source_sha256);
+  const prepared = energyIq.prepareProjectManifestMaterialization({
+    project_id: input.project_id,
+    materializations,
+    source_manifest_sha256: sourceManifestSha256,
+  });
+  const completed = energyIq.completeProjectManifestMaterialization({
+    project_id: input.project_id,
+    materializations,
+    project_audit: input.project_audit,
+    source_manifest_sha256: sourceManifestSha256,
+    expected_snapshot_id: prepared.expected_snapshot_id,
+    expected_previous_snapshot_id: prepared.expected_previous_snapshot_id,
+  });
+  const batch = completed.batches.find((candidate) => candidate.id === input.batch_id);
+  if (!batch) throw new Error(`TEST_IMPORT_BATCH_NOT_COMPLETED:${input.batch_id}`);
+  return { batch, snapshot: completed.snapshot };
+};
+
+const requireTestMaterializationSummary = (
+  batchId: string,
+  materializationJson: string | null | undefined,
+): unknown => {
+  if (materializationJson === null || materializationJson === undefined) {
+    throw new Error(`TEST_IMPORT_MATERIALIZATION_MISSING:${batchId}`);
+  }
+  return JSON.parse(materializationJson) as unknown;
+};
 
 const materializationSummary = (mappingFingerprint: string, mappingRevision = 3) => ({
   rawRowCount: 10,
