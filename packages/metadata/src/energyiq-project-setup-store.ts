@@ -347,9 +347,8 @@ export class EnergyIqProjectSetupStore {
     }
 
     const project = this.requireProject(input.project_id);
-    const document = this.buildDocumentFromPublished(input.project_id, project);
+    const published = this.buildDocumentFromPublished(input.project_id, project);
     const now = new Date().toISOString();
-    const basedOn = asString(project.hierarchy_revision_id);
     this.db.prepare(`
       INSERT INTO energyiq_project_setup_drafts (
         project_id, revision, based_on_hierarchy_revision_id,
@@ -357,8 +356,8 @@ export class EnergyIqProjectSetupStore {
       ) VALUES (?, 1, ?, ?, ?, ?)
     `).run(
       input.project_id,
-      basedOn || null,
-      JSON.stringify(document),
+      published.hierarchy_revision_id ?? null,
+      JSON.stringify(published.document),
       input.user_id,
       now
     );
@@ -662,7 +661,24 @@ export class EnergyIqProjectSetupStore {
   private buildDocumentFromPublished(
     projectId: string,
     project: Record<string, unknown>
-  ): EnergyIqProjectSetupDocument {
+  ): {
+    hierarchy_revision_id?: string;
+    document: EnergyIqProjectSetupDocument;
+  } {
+    const latestRevision = this.db.prepare(`
+      SELECT id, snapshot_json
+      FROM energyiq_hierarchy_revisions
+      WHERE project_id = ?
+      ORDER BY sequence DESC
+      LIMIT 1
+    `).get(projectId);
+    if (isRecord(latestRevision)) {
+      return {
+        hierarchy_revision_id: requiredString(latestRevision, "id"),
+        document: parseDocument(requiredString(latestRevision, "snapshot_json")),
+      };
+    }
+
     const tiers = this.listTierDefinitions(projectId).map((tier) => ({
       id: tier.id,
       ordinal: tier.ordinal,
@@ -696,15 +712,19 @@ export class EnergyIqProjectSetupStore {
         ...(metadataJson ? { metadata: parseRecord(metadataJson) } : {})
       } satisfies EnergyIqProjectSetupNode;
     });
-    return canonicalizeDocument({
-      project: {
-        name: requiredString(project, "name"),
-        timezone: requiredString(project, "timezone")
-      },
-      tier_structure_locked: tiers.length > 0,
-      tiers,
-      nodes
-    });
+    const hierarchyRevisionId = asString(project.hierarchy_revision_id);
+    return {
+      ...(hierarchyRevisionId ? { hierarchy_revision_id: hierarchyRevisionId } : {}),
+      document: canonicalizeDocument({
+        project: {
+          name: requiredString(project, "name"),
+          timezone: requiredString(project, "timezone")
+        },
+        tier_structure_locked: tiers.length > 0,
+        tiers,
+        nodes
+      }),
+    };
   }
 
   private materializePublishedDocument(input: {

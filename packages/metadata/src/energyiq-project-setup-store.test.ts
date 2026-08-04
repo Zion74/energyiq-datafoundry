@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { createMetadataStore } from "./index.js";
 
 import {
+  createEnergyIqSourceManifest,
   energyIqPublishedMeterRoutingRevisionId,
   fingerprintEnergyIqMeterMapping,
   validateProjectSetupDocument,
@@ -369,6 +370,54 @@ describe("validateProjectSetupDocument sibling names", () => {
         expected_revision: saved.revision,
         user_id: "dev-user",
       })).toThrow("ENERGYIQ_SETUP_INVALID:OFFICIAL_ROUTE_METER_DUPLICATE");
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
+  it("builds the first Draft from the latest immutable hierarchy snapshot", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-draft-from-snapshot-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.workspaces.upsert({
+        id: "workspace-snapshot", owner_user_id: "dev-user", name: "Snapshot Workspace", kind: "customer",
+      });
+      const sourceManifest = createEnergyIqSourceManifest(["a".repeat(64)], true);
+      const document = {
+        ...componentRouteDocument([
+          { scope_id: "c1", resource: "electricity" as const, category: "load" as const, meter_point_ids: ["m1"] },
+          { scope_id: "c2", resource: "electricity" as const, category: "load" as const, meter_point_ids: ["m2"] },
+          { scope_id: "l1", resource: "electricity" as const, category: "load" as const, meter_point_ids: ["m1", "m2"] },
+          { scope_id: "project", resource: "electricity" as const, category: "load" as const, meter_point_ids: ["m1", "m2"] },
+        ]),
+        source_manifest: sourceManifest,
+      };
+      metadata.energyIq.projectSetup.bootstrapPublished({
+        project: {
+          id: "project-snapshot",
+          workspace_id: "workspace-snapshot",
+          name: "Snapshot Project",
+          timezone: "Asia/Singapore",
+          hierarchy_revision_id: "project-snapshot-hierarchy-v1",
+          meter_formula_revision_id: "meter-formula-v1",
+          root_scope_id: "project",
+        },
+        document,
+        published_by: "dev-user",
+      });
+
+      const draft = metadata.energyIq.projectSetup.getDraft({
+        project_id: "project-snapshot",
+        user_id: "dev-user",
+      });
+
+      expect(draft.based_on_hierarchy_revision_id).toBe("project-snapshot-hierarchy-v1");
+      expect(draft.document.source_manifest).toEqual(sourceManifest);
+      expect(draft.document.meter_mapping).toEqual(document.meter_mapping);
+      expect(draft.document.meter_mapping?.official_aggregation_routes).toEqual(
+        document.meter_mapping.official_aggregation_routes,
+      );
     } finally {
       metadata.close();
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

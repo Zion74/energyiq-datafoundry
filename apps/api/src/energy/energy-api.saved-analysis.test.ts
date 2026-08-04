@@ -207,13 +207,23 @@ describe("saved analysis decision-quality boundary", () => {
         expected_revision: draft.revision,
         user_id: "dev-user",
       });
+      const publishedV2Hierarchy = metadata.energyIq.projectSetup.listHierarchyRevisions(project.id)
+        .find((revision) => revision.id === publishedV2.hierarchy_revision_id);
+      const publishedV2Document = JSON.parse(publishedV2Hierarchy?.snapshot_json ?? "null") as {
+        meter_mapping?: { schema_version?: number; confirmed?: boolean; official_aggregation_routes?: unknown[] };
+      };
+      expect(publishedV2Document.meter_mapping).toMatchObject({
+        schema_version: 2,
+        confirmed: true,
+      });
+      expect(publishedV2Document.meter_mapping?.official_aggregation_routes?.length).toBeGreaterThan(0);
 
       const rerun = await handleEnergyApiRequest(
         jsonPost({}),
         ["projects", project.id, "saved-analyses", first?.id ?? "", "rerun"],
         context,
       );
-      expect(rerun.status).toBe(201);
+      expect(rerun.status, JSON.stringify(rerun.body)).toBe(201);
       const records = metadata.energyIq.savedAnalyses.listProject(project.id);
       expect(records).toHaveLength(2);
       expect(records[0]).toMatchObject({
