@@ -38,6 +38,7 @@ export type EnergyNormalizedReadingWrite = {
   sourceFile: string;
   sourceSha256: string;
   sourceRowNumber: number;
+  sourceReadingKind: "cumulative_energy" | "interval_usage";
 };
 
 export type EnergyIntervalFactWrite = {
@@ -66,6 +67,7 @@ export type EnergyIntervalFactWrite = {
   isOperating?: boolean;
   sourceFile: string;
   sourceSha256: string;
+  sourceReadingKind: "cumulative_energy" | "interval_usage";
 };
 
 export type EnergyQualityEventWrite = {
@@ -78,6 +80,7 @@ export type EnergyQualityEventWrite = {
   code: string;
   severity: "warning" | "error";
   details: unknown;
+  sourceReadingKind: "cumulative_energy" | "interval_usage";
 };
 
 export type EnergyFactMaterializationWrite = {
@@ -85,6 +88,7 @@ export type EnergyFactMaterializationWrite = {
   projectId: string;
   importBatchId: string;
   sourceSha256: string;
+  timezone: string;
   rawReadings: EnergyRawReadingWrite[];
   normalizedReadings: EnergyNormalizedReadingWrite[];
   intervalFacts: EnergyIntervalFactWrite[];
@@ -113,9 +117,13 @@ export type EnergyFactProjectAudit = {
   legacyNormalizedReadingCount: number;
   legacyIntervalFactCount: number;
   legacyCanonicalRowCount: number;
+  canonicalMeterSeriesCount: number;
+  adjacentReadingPairCount: number;
+  missingAdjacentIntervalCount: number;
+  orphanIntervalFactCount: number;
 };
 
-export const ENERGY_FACT_WRITER_CONTRACT_VERSION = "energy-fact-writer-later-coverage-v1" as const;
+export const ENERGY_FACT_WRITER_CONTRACT_VERSION = "energy-fact-writer-project-canonical-v2" as const;
 
 export type EnergyFactMaterializationResult = EnergyFactMaterializationStats & {
   projectAudit: EnergyFactProjectAudit;
@@ -139,6 +147,8 @@ export const writeEnergyFactMaterialization = async (
     await insertRows(connection, "energy_quality_events", QUALITY_COLUMNS, input.qualityEvents.map(qualityValues));
     await markRawOverlapConflicts(connection, input.projectId);
     await deduplicateCanonicalRows(connection, input.projectId);
+    await rebuildProjectCumulativeIntervals(connection, input.projectId, input.timezone);
+    await rebuildProjectCumulativeQualityEvents(connection, input.projectId);
     await duckDbRun(connection, "COMMIT");
     await duckDbRun(connection, "CHECKPOINT");
     return {
@@ -297,6 +307,51 @@ const readProjectAudit = async (
           OR LOWER(source_file) LIKE '%synthetic%'
         )) AS legacy_interval_facts
   `, Array.from({ length: 13 }, () => projectId));
+  const completeness = await duckDbGet(connection, `
+    WITH ordered_readings AS (
+      SELECT
+        project_id, resource, meter_node_id, event_time AS interval_end,
+        LAG(event_time) OVER (
+          PARTITION BY project_id, resource, meter_node_id
+          ORDER BY event_time
+        ) AS interval_start
+      FROM normalized_meter_readings
+      WHERE project_id = ? AND source_reading_kind = 'cumulative_energy'
+    ), adjacent_pairs AS (
+      SELECT project_id, resource, meter_node_id, interval_start, interval_end
+      FROM ordered_readings
+      WHERE interval_start IS NOT NULL
+    )
+    SELECT
+      (SELECT COUNT(*) FROM (
+        SELECT resource, meter_node_id
+        FROM normalized_meter_readings
+        WHERE project_id = ? AND source_reading_kind = 'cumulative_energy'
+        GROUP BY resource, meter_node_id
+      )) AS canonical_meter_series,
+      (SELECT COUNT(*) FROM adjacent_pairs) AS adjacent_reading_pairs,
+      (SELECT COUNT(*) FROM adjacent_pairs pair
+        WHERE NOT EXISTS (
+          SELECT 1 FROM energy_interval_facts fact
+          WHERE fact.project_id = pair.project_id
+            AND fact.resource = pair.resource
+            AND fact.meter_node_id = pair.meter_node_id
+            AND fact.source_reading_kind = 'cumulative_energy'
+            AND fact.interval_start = pair.interval_start
+            AND fact.interval_end = pair.interval_end
+        )) AS missing_adjacent_intervals,
+      (SELECT COUNT(*) FROM energy_interval_facts fact
+        WHERE fact.project_id = ?
+          AND fact.source_reading_kind = 'cumulative_energy'
+          AND NOT EXISTS (
+            SELECT 1 FROM adjacent_pairs pair
+            WHERE pair.project_id = fact.project_id
+              AND pair.resource = fact.resource
+              AND pair.meter_node_id = fact.meter_node_id
+              AND pair.interval_start = fact.interval_start
+              AND pair.interval_end = fact.interval_end
+          )) AS orphan_interval_facts
+  `, [projectId, projectId, projectId]);
   const legacyNormalizedReadingCount = Number(row.legacy_normalized_rows ?? 0);
   const legacyIntervalFactCount = Number(row.legacy_interval_facts ?? 0);
   return {
@@ -314,6 +369,10 @@ const readProjectAudit = async (
     legacyNormalizedReadingCount,
     legacyIntervalFactCount,
     legacyCanonicalRowCount: legacyNormalizedReadingCount + legacyIntervalFactCount,
+    canonicalMeterSeriesCount: Number(completeness.canonical_meter_series ?? 0),
+    adjacentReadingPairCount: Number(completeness.adjacent_reading_pairs ?? 0),
+    missingAdjacentIntervalCount: Number(completeness.missing_adjacent_intervals ?? 0),
+    orphanIntervalFactCount: Number(completeness.orphan_interval_facts ?? 0),
   };
 };
 
@@ -341,15 +400,6 @@ const ensureFactSchema = async (connection: DuckDbModule.Connection): Promise<vo
       local_hour INTEGER, day_type VARCHAR, is_operating BOOLEAN, source_file VARCHAR,
       source_sha256 VARCHAR
     );
-    ALTER TABLE raw_meter_readings ADD COLUMN IF NOT EXISTS import_batch_id VARCHAR;
-    ALTER TABLE raw_meter_readings ADD COLUMN IF NOT EXISTS meter_node_id VARCHAR;
-    ALTER TABLE raw_meter_readings ADD COLUMN IF NOT EXISTS scope_id VARCHAR;
-    ALTER TABLE normalized_meter_readings ADD COLUMN IF NOT EXISTS import_batch_id VARCHAR;
-    ALTER TABLE normalized_meter_readings ADD COLUMN IF NOT EXISTS scope_id VARCHAR;
-    ALTER TABLE energy_interval_facts ADD COLUMN IF NOT EXISTS import_batch_id VARCHAR;
-    ALTER TABLE energy_interval_facts ADD COLUMN IF NOT EXISTS scope_id VARCHAR;
-    UPDATE normalized_meter_readings SET scope_id = meter_node_id WHERE scope_id IS NULL;
-    UPDATE energy_interval_facts SET scope_id = meter_node_id WHERE scope_id IS NULL;
     CREATE TABLE IF NOT EXISTS energy_quality_events (
       workspace_id VARCHAR NOT NULL,
       project_id VARCHAR NOT NULL,
@@ -359,8 +409,29 @@ const ensureFactSchema = async (connection: DuckDbModule.Connection): Promise<vo
       event_time TIMESTAMPTZ,
       code VARCHAR NOT NULL,
       severity VARCHAR NOT NULL,
-      details_json JSON NOT NULL
+      details_json JSON NOT NULL,
+      source_reading_kind VARCHAR
     );
+    ALTER TABLE raw_meter_readings ADD COLUMN IF NOT EXISTS import_batch_id VARCHAR;
+    ALTER TABLE raw_meter_readings ADD COLUMN IF NOT EXISTS meter_node_id VARCHAR;
+    ALTER TABLE raw_meter_readings ADD COLUMN IF NOT EXISTS scope_id VARCHAR;
+    ALTER TABLE normalized_meter_readings ADD COLUMN IF NOT EXISTS import_batch_id VARCHAR;
+    ALTER TABLE normalized_meter_readings ADD COLUMN IF NOT EXISTS scope_id VARCHAR;
+    ALTER TABLE normalized_meter_readings ADD COLUMN IF NOT EXISTS source_reading_kind VARCHAR;
+    ALTER TABLE energy_interval_facts ADD COLUMN IF NOT EXISTS import_batch_id VARCHAR;
+    ALTER TABLE energy_interval_facts ADD COLUMN IF NOT EXISTS scope_id VARCHAR;
+    ALTER TABLE energy_quality_events ADD COLUMN IF NOT EXISTS source_reading_kind VARCHAR;
+    UPDATE normalized_meter_readings SET scope_id = meter_node_id WHERE scope_id IS NULL;
+    UPDATE normalized_meter_readings
+    SET source_reading_kind = 'cumulative_energy'
+    WHERE source_reading_kind IS NULL OR source_reading_kind = '';
+    UPDATE energy_interval_facts SET scope_id = meter_node_id WHERE scope_id IS NULL;
+    UPDATE energy_interval_facts
+    SET source_reading_kind = 'cumulative_energy'
+    WHERE source_reading_kind IS NULL OR source_reading_kind = '';
+    UPDATE energy_quality_events
+    SET source_reading_kind = 'cumulative_energy'
+    WHERE source_reading_kind IS NULL OR source_reading_kind = '';
     CREATE OR REPLACE VIEW energy_daily_facts AS
     SELECT
       workspace_id, project_id, resource, meter_node_id, scope_id,
@@ -436,6 +507,107 @@ const deduplicateCanonicalRows = async (
   });
 };
 
+const rebuildProjectCumulativeIntervals = async (
+  connection: DuckDbModule.Connection,
+  projectId: string,
+  timezone: string,
+): Promise<void> => {
+  await duckDbRun(connection, `
+    CREATE OR REPLACE TEMP TABLE canonical_cumulative_pairs AS
+    WITH ordered_readings AS (
+      SELECT *,
+        LAG(event_time) OVER series_order AS previous_event_time,
+        LAG(active_energy_kwh) OVER series_order AS previous_active_energy_kwh
+      FROM normalized_meter_readings
+      WHERE project_id = ? AND source_reading_kind = 'cumulative_energy'
+      WINDOW series_order AS (
+        PARTITION BY project_id, resource, meter_node_id
+        ORDER BY event_time
+      )
+    ), adjacent_pairs AS (
+      SELECT *,
+        date_diff('millisecond', previous_event_time, event_time) / 60000.0 AS elapsed_minutes,
+        active_energy_kwh - previous_active_energy_kwh AS raw_delta_kwh
+      FROM ordered_readings
+      WHERE previous_event_time IS NOT NULL
+    )
+    SELECT *, CASE
+      WHEN raw_delta_kwh < 0 THEN 'negative_delta'
+      WHEN elapsed_minutes > 15.1 THEN 'gap'
+      WHEN elapsed_minutes < 14.9 THEN 'irregular_interval'
+      ELSE 'ok'
+    END AS quality_status
+    FROM adjacent_pairs
+  `, [projectId]);
+
+  await duckDbRun(connection, `
+    DELETE FROM energy_interval_facts
+    WHERE project_id = ? AND source_reading_kind = 'cumulative_energy'
+  `, [projectId]);
+  await duckDbRun(connection, `
+    INSERT INTO energy_interval_facts (${FACT_COLUMNS.join(", ")})
+    SELECT
+      workspace_id, project_id, import_batch_id, resource, meter_node_id, scope_id,
+      level_node_id AS parent_node_id, level_node_id, device_name,
+      category AS appliance, device_name AS circuit_name, category, meter_role,
+      'cumulative_energy' AS source_reading_kind,
+      previous_event_time AS interval_start, event_time AS interval_end, elapsed_minutes,
+      active_energy_kwh, previous_active_energy_kwh, raw_delta_kwh,
+      CASE WHEN quality_status = 'ok' THEN raw_delta_kwh ELSE NULL END AS usage_kwh,
+      CASE WHEN quality_status = 'ok' THEN raw_delta_kwh / (elapsed_minutes / 60.0) ELSE NULL END AS average_kw,
+      quality_status,
+      CAST(timezone(?, previous_event_time) AS DATE) AS local_date,
+      CAST(date_part('hour', timezone(?, previous_event_time)) AS INTEGER) AS local_hour,
+      CASE WHEN date_part('isodow', timezone(?, previous_event_time)) IN (6, 7)
+        THEN 'weekend' ELSE 'weekday' END AS day_type,
+      NULL AS is_operating,
+      source_file, source_sha256
+    FROM canonical_cumulative_pairs
+  `, [timezone, timezone, timezone]);
+};
+
+const rebuildProjectCumulativeQualityEvents = async (
+  connection: DuckDbModule.Connection,
+  projectId: string,
+): Promise<void> => {
+  await duckDbRun(connection, `
+    DELETE FROM energy_quality_events
+    WHERE project_id = ?
+      AND source_reading_kind = 'cumulative_energy'
+      AND code IN ('boundary', 'gap', 'irregular_interval', 'negative_delta')
+  `, [projectId]);
+  await duckDbRun(connection, `
+    INSERT INTO energy_quality_events (${QUALITY_COLUMNS.join(", ")})
+    WITH ranked_readings AS (
+      SELECT *, ROW_NUMBER() OVER (
+        PARTITION BY project_id, resource, meter_node_id
+        ORDER BY event_time
+      ) AS reading_rank
+      FROM normalized_meter_readings
+      WHERE project_id = ? AND source_reading_kind = 'cumulative_energy'
+    )
+    SELECT
+      workspace_id, project_id, import_batch_id, meter_node_id, device_name, event_time,
+      'boundary' AS code, 'warning' AS severity,
+      json_object('reason', 'No previous canonical cumulative reading exists in this Project.') AS details_json,
+      'cumulative_energy' AS source_reading_kind
+    FROM ranked_readings
+    WHERE reading_rank = 1
+  `, [projectId]);
+  await duckDbRun(connection, `
+    INSERT INTO energy_quality_events (${QUALITY_COLUMNS.join(", ")})
+    SELECT
+      workspace_id, project_id, import_batch_id, meter_node_id, device_name, event_time,
+      quality_status AS code,
+      CASE WHEN quality_status = 'negative_delta' THEN 'error' ELSE 'warning' END AS severity,
+      json_object('elapsedMinutes', elapsed_minutes, 'rawDeltaKwh', raw_delta_kwh) AS details_json,
+      'cumulative_energy' AS source_reading_kind
+    FROM canonical_cumulative_pairs
+    WHERE quality_status <> 'ok'
+  `);
+  await duckDbRun(connection, "DROP TABLE canonical_cumulative_pairs");
+};
+
 const replaceProjectRowsWithPreferredSource = async (
   connection: DuckDbModule.Connection,
   input: {
@@ -484,6 +656,7 @@ const RAW_COLUMNS = [
 const NORMALIZED_COLUMNS = [
   "workspace_id", "project_id", "import_batch_id", "resource", "meter_node_id", "scope_id", "level_node_id",
   "device_name", "category", "meter_role", "event_time", "active_energy_kwh", "source_file", "source_sha256", "source_row_number",
+  "source_reading_kind",
 ] as const;
 const FACT_COLUMNS = [
   "workspace_id", "project_id", "import_batch_id", "resource", "meter_node_id", "scope_id", "parent_node_id", "level_node_id",
@@ -494,6 +667,7 @@ const FACT_COLUMNS = [
 ] as const;
 const QUALITY_COLUMNS = [
   "workspace_id", "project_id", "import_batch_id", "meter_node_id", "source_label", "event_time", "code", "severity", "details_json",
+  "source_reading_kind",
 ] as const;
 
 const rawValues = (row: EnergyRawReadingWrite): unknown[] => [
@@ -506,11 +680,12 @@ const normalizedValues = (row: EnergyNormalizedReadingWrite): unknown[] => [
   row.workspaceId, row.projectId, row.importBatchId, row.resource, row.meterPointId,
   row.scopeId, row.parentNodeId ?? null, row.sourceLabel, row.category, row.meterRole,
   row.eventTime, row.activeEnergyKwh, row.sourceFile, row.sourceSha256, row.sourceRowNumber,
+  row.sourceReadingKind,
 ];
 const factValues = (row: EnergyIntervalFactWrite): unknown[] => [
   row.workspaceId, row.projectId, row.importBatchId, row.resource, row.meterPointId, row.scopeId,
   row.parentNodeId ?? null, row.parentNodeId ?? null, row.sourceLabel, row.category, row.sourceLabel,
-  row.category, row.meterRole, "cumulative_energy", row.intervalStart, row.intervalEnd,
+  row.category, row.meterRole, row.sourceReadingKind, row.intervalStart, row.intervalEnd,
   row.elapsedMinutes, row.activeEnergyKwh, row.previousActiveEnergyKwh, row.rawDeltaKwh,
   row.usageKwh ?? null, row.averageKw ?? null, row.qualityStatus, row.localDate, row.localHour,
   row.dayType, row.isOperating ?? null, row.sourceFile, row.sourceSha256,
@@ -518,6 +693,7 @@ const factValues = (row: EnergyIntervalFactWrite): unknown[] => [
 const qualityValues = (row: EnergyQualityEventWrite): unknown[] => [
   row.workspaceId, row.projectId, row.importBatchId, row.meterPointId ?? null,
   row.sourceLabel ?? null, row.eventTime ?? null, row.code, row.severity, JSON.stringify(row.details),
+  row.sourceReadingKind,
 ];
 
 const insertRows = async (

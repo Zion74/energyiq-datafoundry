@@ -477,13 +477,15 @@ const materializeNgeeAnnGoldenFixture = async (databasePath: string): Promise<vo
       activeEnergyKwh: 1000 + meter.usage.reduce((sum, usage) => sum + usage, 0),
       sourceFile: "ngee-ann-golden.xlsx",
       sourceSha256,
-      sourceRowNumber: 1
+      sourceRowNumber: 1,
+      sourceReadingKind: "interval_usage",
     }));
     await writeEnergyFactMaterialization({
       databasePath,
       projectId: NGEE_ANN_GOLDEN.projectId,
       importBatchId,
       sourceSha256,
+      timezone: "Asia/Singapore",
       rawReadings: [],
       normalizedReadings,
       intervalFacts,
@@ -713,7 +715,8 @@ const factFor = (
     localHour: local.getUTCHours(),
     dayType: [0, 6].includes(local.getUTCDay()) ? "weekend" : "weekday",
     sourceFile: "ngee-ann-golden.xlsx",
-    sourceSha256: fixtureSha(meter.importBatchId)
+    sourceSha256: fixtureSha(meter.importBatchId),
+    sourceReadingKind: "interval_usage",
   };
 };
 

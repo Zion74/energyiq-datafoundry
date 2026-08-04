@@ -798,6 +798,23 @@ describe("EnergyIqStore", () => {
       expect(rolledBack.snapshot.id).toBe(second.snapshot.id);
       expect(JSON.parse(rolledBack.snapshot.manifest_json)).toEqual(JSON.parse(second.snapshot.manifest_json));
       expect(JSON.parse(rolledBack.batch.materialization_json ?? "{}")).toMatchObject({ mappingRevision: 5 });
+      const legacyWriterContract = metadata.energyIq.completeImportBatchMaterialization({
+        batch_id: "batch-2",
+        project_id: "project-import",
+        summary: {
+          ...materializationSummary("mapping-sha-1", 5),
+          factWriterContractVersion: "energy-fact-writer-later-coverage-v1",
+        },
+        project_audit: projectAudit({ rawOverlapConflictCount: 2 }),
+      });
+      expect(legacyWriterContract.snapshot.id).not.toBe(second.snapshot.id);
+      const upgradedWriterContract = metadata.energyIq.completeImportBatchMaterialization({
+        batch_id: "batch-2",
+        project_id: "project-import",
+        summary: materializationSummary("mapping-sha-1", 5),
+        project_audit: projectAudit({ rawOverlapConflictCount: 2 }),
+      });
+      expect(upgradedWriterContract.snapshot.id).toBe(second.snapshot.id);
       expect(() => metadata.energyIq.completeImportBatchMaterialization({
         batch_id: "batch-2",
         project_id: "project-import",
@@ -922,7 +939,7 @@ const materializationSummary = (mappingFingerprint: string, mappingRevision = 3)
   mappingFingerprint,
   timezone: "Asia/Singapore",
   materializerContractVersion: "energy-excel-cumulative-v1",
-  factWriterContractVersion: "energy-fact-writer-later-coverage-v1",
+  factWriterContractVersion: "energy-fact-writer-project-canonical-v2",
 });
 
 const importInspection = (batchId: string) => ({
@@ -952,5 +969,9 @@ const projectAudit = (overrides: Record<string, number> = {}) => ({
   legacyNormalizedReadingCount: 0,
   legacyIntervalFactCount: 0,
   legacyCanonicalRowCount: 0,
+  canonicalMeterSeriesCount: 1,
+  adjacentReadingPairCount: 9,
+  missingAdjacentIntervalCount: 0,
+  orphanIntervalFactCount: 0,
   ...overrides,
 });

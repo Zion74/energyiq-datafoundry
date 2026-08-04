@@ -97,6 +97,7 @@ export const materializePreschoolGoldenFixture = async (databasePath: string): P
           isOperating,
           sourceFile: "preschool-golden-may-2026.fixture",
           sourceSha256: "preschool-golden-may-2026",
+          sourceReadingKind: "interval_usage",
         });
       }
     });
@@ -107,6 +108,7 @@ export const materializePreschoolGoldenFixture = async (databasePath: string): P
     projectId: PRESCHOOL_GOLDEN.projectId,
     importBatchId: "preschool-golden-may-2026",
     sourceSha256: "preschool-golden-may-2026",
+    timezone: "Asia/Singapore",
     rawReadings: [],
     normalizedReadings: [],
     intervalFacts,

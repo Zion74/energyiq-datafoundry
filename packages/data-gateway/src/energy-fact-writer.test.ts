@@ -4,12 +4,147 @@ import { readEnergyFactMaterializationStats, writeEnergyFactMaterialization } fr
 import { readEnergyFactCoverage } from "./energy-scoped-datasource.js";
 
 describe("writeEnergyFactMaterialization", () => {
+  it("rebuilds the interval that crosses adjacent canonical batch boundaries", async () => {
+    const databasePath = ":memory:";
+    const projectId = "project-cross-batch-boundary";
+
+    const earlier = boundaryBatch({
+      databasePath,
+      projectId,
+      importBatchId: "batch-a",
+      sourceSha256: "sha-a",
+      readings: [
+        ["2026-05-01T00:00:00.000Z", 100],
+        ["2026-05-01T00:15:00.000Z", 101],
+      ],
+    });
+    const later = boundaryBatch({
+      databasePath,
+      projectId,
+      importBatchId: "batch-b",
+      sourceSha256: "sha-b",
+      readings: [
+        ["2026-05-01T00:30:00.000Z", 102],
+        ["2026-05-01T00:45:00.000Z", 103],
+      ],
+    });
+    await writeEnergyFactMaterialization(earlier);
+    const result = await writeEnergyFactMaterialization(later);
+
+    expect(result.projectAudit).toMatchObject({
+      normalizedReadingCount: 4,
+      intervalFactCount: 3,
+      invalidIntervalDurationCount: 0,
+      negativeDeltaIntervalCount: 0,
+      canonicalMeterSeriesCount: 1,
+      adjacentReadingPairCount: 3,
+      missingAdjacentIntervalCount: 0,
+      orphanIntervalFactCount: 0,
+    });
+    await expect(writeEnergyFactMaterialization(earlier)).resolves.toMatchObject({
+      projectAudit: result.projectAudit,
+    });
+
+    const reverseProjectId = "project-cross-batch-boundary-reverse";
+    await writeEnergyFactMaterialization(withProjectId(later, reverseProjectId));
+    const reverse = await writeEnergyFactMaterialization(withProjectId(earlier, reverseProjectId));
+    expect(reverse.projectAudit).toEqual(result.projectAudit);
+  });
+
+  it("keeps project-wide gaps and resets as non-ok canonical facts", async () => {
+    const databasePath = ":memory:";
+    const projectId = "project-cross-batch-quality";
+    await writeEnergyFactMaterialization(boundaryBatch({
+      databasePath,
+      projectId,
+      importBatchId: "quality-a",
+      sourceSha256: "quality-sha-a",
+      readings: [
+        ["2026-05-01T00:00:00.000Z", 100],
+        ["2026-05-01T00:15:00.000Z", 101],
+      ],
+    }));
+    const result = await writeEnergyFactMaterialization(boundaryBatch({
+      databasePath,
+      projectId,
+      importBatchId: "quality-b",
+      sourceSha256: "quality-sha-b",
+      readings: [
+        ["2026-05-01T00:45:00.000Z", 102],
+        ["2026-05-01T01:00:00.000Z", 90],
+        ["2026-05-01T01:15:00.000Z", 91],
+      ],
+    }));
+
+    expect(result.projectAudit).toMatchObject({
+      normalizedReadingCount: 5,
+      intervalFactCount: 4,
+      invalidIntervalDurationCount: 1,
+      negativeDeltaIntervalCount: 1,
+      canonicalMeterSeriesCount: 1,
+      adjacentReadingPairCount: 4,
+      missingAdjacentIntervalCount: 0,
+      orphanIntervalFactCount: 0,
+    });
+    await expect(readEnergyFactMaterializationStats({ databasePath, importBatchId: "quality-a" }))
+      .resolves.toMatchObject({ intervalFacts: 1, qualityEvents: 1 });
+    await expect(readEnergyFactMaterializationStats({ databasePath, importBatchId: "quality-b" }))
+      .resolves.toMatchObject({ intervalFacts: 3, qualityEvents: 2 });
+  });
+
+  it("rebuilds from the later-coverage canonical winner at overlapping cumulative timestamps", async () => {
+    const databasePath = ":memory:";
+    const projectId = "project-cumulative-overlap";
+    const earlier = boundaryBatch({
+      databasePath,
+      projectId,
+      importBatchId: "cumulative-earlier",
+      sourceSha256: "cumulative-sha-earlier",
+      readings: [
+        ["2026-05-01T00:00:00.000Z", 100],
+        ["2026-05-01T00:15:00.000Z", 101],
+        ["2026-05-01T00:30:00.000Z", 102],
+      ],
+    });
+    const later = boundaryBatch({
+      databasePath,
+      projectId,
+      importBatchId: "cumulative-later",
+      sourceSha256: "cumulative-sha-later",
+      readings: [
+        ["2026-05-01T00:15:00.000Z", 100.9],
+        ["2026-05-01T00:30:00.000Z", 101.9],
+        ["2026-05-01T00:45:00.000Z", 102.9],
+      ],
+    });
+    await writeEnergyFactMaterialization(later);
+    const result = await writeEnergyFactMaterialization(earlier);
+
+    expect(result.projectAudit).toMatchObject({
+      normalizedReadingCount: 4,
+      intervalFactCount: 3,
+      adjacentReadingPairCount: 3,
+      missingAdjacentIntervalCount: 0,
+      orphanIntervalFactCount: 0,
+    });
+    await expect(readEnergyFactMaterializationStats({ databasePath, importBatchId: "cumulative-later" }))
+      .resolves.toMatchObject({ normalizedRows: 3, intervalFacts: 3 });
+    await expect(readEnergyFactMaterializationStats({ databasePath, importBatchId: "cumulative-earlier" }))
+      .resolves.toMatchObject({ normalizedRows: 1, intervalFacts: 0 });
+
+    const forwardProjectId = "project-cumulative-overlap-forward";
+    await writeEnergyFactMaterialization(withProjectId(earlier, forwardProjectId));
+    const forward = await writeEnergyFactMaterialization(withProjectId(later, forwardProjectId));
+    expect(forward.projectAudit).toEqual(result.projectAudit);
+  });
+
   it("writes a batch idempotently into the canonical fact tables", async () => {
     const input = {
       databasePath: ":memory:",
       projectId: "project-1",
       importBatchId: "batch-1",
       sourceSha256: "sha-1",
+      timezone: "Asia/Singapore",
       rawReadings: [{
         workspaceId: "workspace-1",
         projectId: "project-1",
@@ -23,6 +158,7 @@ describe("writeEnergyFactMaterialization", () => {
         sourceFile: "meter.xlsx",
         sourceSha256: "sha-1",
         sourceRowNumber: 2,
+        sourceReadingKind: "interval_usage" as const,
         isValid: true,
         isOverlapConflict: false,
       }],
@@ -40,6 +176,7 @@ describe("writeEnergyFactMaterialization", () => {
         activeEnergyKwh: 100,
         sourceFile: "meter.xlsx",
         sourceSha256: "sha-1",
+        sourceReadingKind: "interval_usage" as const,
         sourceRowNumber: 2,
       }],
       intervalFacts: [{
@@ -66,6 +203,7 @@ describe("writeEnergyFactMaterialization", () => {
         dayType: "weekday",
         sourceFile: "meter.xlsx",
         sourceSha256: "sha-1",
+        sourceReadingKind: "interval_usage" as const,
       }],
       qualityEvents: [{
         workspaceId: "workspace-1",
@@ -77,6 +215,7 @@ describe("writeEnergyFactMaterialization", () => {
         code: "boundary",
         severity: "warning" as const,
         details: {},
+        sourceReadingKind: "interval_usage" as const,
       }],
     };
 
@@ -143,6 +282,7 @@ describe("writeEnergyFactMaterialization", () => {
     const base = {
       databasePath,
       projectId: "project-overlap",
+      timezone: "Asia/Singapore",
       qualityEvents: [],
     };
     const raw = (batch: string, sha: string, time: string, value: number, projectId = "project-overlap") => ({
@@ -158,6 +298,7 @@ describe("writeEnergyFactMaterialization", () => {
       sourceFile: `${batch}.xlsx`,
       sourceSha256: sha,
       sourceRowNumber: 2,
+      sourceReadingKind: "interval_usage" as const,
       isValid: true,
       isOverlapConflict: false,
     });
@@ -175,6 +316,7 @@ describe("writeEnergyFactMaterialization", () => {
       activeEnergyKwh: value,
       sourceFile: `${batch}.xlsx`,
       sourceSha256: sha,
+      sourceReadingKind: "interval_usage" as const,
       sourceRowNumber: 2,
     });
     const fact = (batch: string, sha: string, start: string, end: string, usage: number, projectId = "project-overlap") => ({
@@ -201,6 +343,7 @@ describe("writeEnergyFactMaterialization", () => {
       dayType: "weekday",
       sourceFile: `${batch}.xlsx`,
       sourceSha256: sha,
+      sourceReadingKind: "interval_usage" as const,
     });
 
     await writeEnergyFactMaterialization({
@@ -254,6 +397,10 @@ describe("writeEnergyFactMaterialization", () => {
       legacyNormalizedReadingCount: 0,
       legacyIntervalFactCount: 0,
       legacyCanonicalRowCount: 0,
+      canonicalMeterSeriesCount: 0,
+      adjacentReadingPairCount: 0,
+      missingAdjacentIntervalCount: 0,
+      orphanIntervalFactCount: 0,
     });
 
     const reverseProjectId = "project-overlap-reverse";
@@ -310,4 +457,79 @@ describe("writeEnergyFactMaterialization", () => {
     await expect(readEnergyFactMaterializationStats({ databasePath, importBatchId: "earlier" }))
       .resolves.toMatchObject({ normalizedRows: 0, intervalFacts: 0 });
   });
+});
+
+const boundaryBatch = (input: {
+  databasePath: string;
+  projectId: string;
+  importBatchId: string;
+  sourceSha256: string;
+  readings: Array<[time: string, value: number]>;
+}) => ({
+  databasePath: input.databasePath,
+  projectId: input.projectId,
+  importBatchId: input.importBatchId,
+  sourceSha256: input.sourceSha256,
+  timezone: "Asia/Singapore",
+  rawReadings: [],
+  normalizedReadings: input.readings.map(([eventTime, activeEnergyKwh], index) => ({
+    workspaceId: "workspace-1",
+    projectId: input.projectId,
+    importBatchId: input.importBatchId,
+    resource: "electricity" as const,
+    meterPointId: "meter-a",
+    scopeId: "scope-a",
+    sourceLabel: "Meter A",
+    category: "load",
+    meterRole: "total",
+    eventTime,
+    activeEnergyKwh,
+    sourceFile: `${input.importBatchId}.xlsx`,
+    sourceSha256: input.sourceSha256,
+    sourceRowNumber: index + 2,
+    sourceReadingKind: "cumulative_energy" as const,
+  })),
+  intervalFacts: input.readings.slice(1).map(([intervalEnd, activeEnergyKwh], index) => {
+    const [intervalStart, previousActiveEnergyKwh] = input.readings[index]!;
+    const rawDeltaKwh = activeEnergyKwh - previousActiveEnergyKwh;
+    return {
+      workspaceId: "workspace-1",
+      projectId: input.projectId,
+      importBatchId: input.importBatchId,
+      resource: "electricity" as const,
+      meterPointId: "meter-a",
+      scopeId: "scope-a",
+      sourceLabel: "Meter A",
+      category: "load",
+      meterRole: "total",
+      intervalStart,
+      intervalEnd,
+      elapsedMinutes: 15,
+      activeEnergyKwh,
+      previousActiveEnergyKwh,
+      rawDeltaKwh,
+      usageKwh: rawDeltaKwh,
+      averageKw: rawDeltaKwh * 4,
+      qualityStatus: rawDeltaKwh < 0 ? "negative_delta" : "ok",
+      localDate: "2026-05-01",
+      localHour: 8,
+      dayType: "weekday",
+      sourceFile: `${input.importBatchId}.xlsx`,
+      sourceSha256: input.sourceSha256,
+      sourceReadingKind: "cumulative_energy" as const,
+    };
+  }),
+  qualityEvents: [],
+});
+
+const withProjectId = (
+  input: ReturnType<typeof boundaryBatch>,
+  projectId: string,
+): ReturnType<typeof boundaryBatch> => ({
+  ...input,
+  projectId,
+  rawReadings: [],
+  normalizedReadings: input.normalizedReadings.map((row) => ({ ...row, projectId })),
+  intervalFacts: input.intervalFacts.map((row) => ({ ...row, projectId })),
+  qualityEvents: [],
 });

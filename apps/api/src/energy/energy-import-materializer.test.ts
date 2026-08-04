@@ -1,6 +1,7 @@
 import writeXlsxFile from "write-excel-file/node";
 import { describe, expect, it } from "vitest";
 
+import { writeEnergyFactMaterialization } from "@datafoundry/data-gateway";
 import type { EnergyIqImportBatchRecord, EnergyIqProjectSetupDocument } from "@datafoundry/metadata";
 import {
   buildEnergyExcelMaterialization,
@@ -8,6 +9,60 @@ import {
 } from "./energy-import-materializer.js";
 
 describe("buildEnergyExcelMaterialization", () => {
+  it("builds the project-canonical interval across two real workbooks in either completion order", async () => {
+    const earlierWorkbook = await writeXlsxFile([
+      [text("Device Name"), text("Time"), text("Active Energy")],
+      [text("Meter A"), date("2026-05-01T00:00:00Z"), number(100)],
+      [text("Meter A"), date("2026-05-01T00:15:00Z"), number(101)],
+    ]).toBuffer();
+    const laterWorkbook = await writeXlsxFile([
+      [text("Device Name"), text("Time"), text("Active Energy")],
+      [text("Meter A"), date("2026-05-01T00:30:00Z"), number(102)],
+      [text("Meter A"), date("2026-05-01T00:45:00Z"), number(103)],
+    ]).toBuffer();
+
+    const materialize = async (projectId: string) => ({
+      earlier: await buildEnergyExcelMaterialization({
+        content: earlierWorkbook,
+        batch: batch("batch-a", projectId, "a".repeat(64)),
+        document: document(),
+        mappingRevision: 4,
+        timezone: "Asia/Singapore",
+        databasePath: ":memory:",
+      }),
+      later: await buildEnergyExcelMaterialization({
+        content: laterWorkbook,
+        batch: batch("batch-b", projectId, "b".repeat(64)),
+        document: document(),
+        mappingRevision: 4,
+        timezone: "Asia/Singapore",
+        databasePath: ":memory:",
+      }),
+    });
+
+    const forwardInputs = await materialize("project-real-workbooks-forward");
+    expect(forwardInputs.earlier.summary.intervalFactCount).toBe(1);
+    expect(forwardInputs.later.summary.intervalFactCount).toBe(1);
+    await writeEnergyFactMaterialization(forwardInputs.earlier.write);
+    const forward = await writeEnergyFactMaterialization(forwardInputs.later.write);
+    expect(forward.projectAudit).toMatchObject({
+      normalizedReadingCount: 4,
+      intervalFactCount: 3,
+      canonicalMeterSeriesCount: 1,
+      adjacentReadingPairCount: 3,
+      missingAdjacentIntervalCount: 0,
+      orphanIntervalFactCount: 0,
+    });
+    await expect(writeEnergyFactMaterialization(forwardInputs.earlier.write)).resolves.toMatchObject({
+      projectAudit: forward.projectAudit,
+    });
+
+    const reverseInputs = await materialize("project-real-workbooks-reverse");
+    await writeEnergyFactMaterialization(reverseInputs.later.write);
+    const reverse = await writeEnergyFactMaterialization(reverseInputs.earlier.write);
+    expect(reverse.projectAudit).toEqual(forward.projectAudit);
+  });
+
   it("turns mapped Singapore cumulative readings into traceable interval facts", async () => {
     const workbook = await writeXlsxFile([
       [text("Device Name"), text("Time"), text("Active Energy")],
@@ -44,7 +99,7 @@ describe("buildEnergyExcelMaterialization", () => {
       mappingRevision: 4,
       timezone: "Asia/Singapore",
       materializerContractVersion: "energy-excel-cumulative-v1",
-      factWriterContractVersion: "energy-fact-writer-later-coverage-v1",
+      factWriterContractVersion: "energy-fact-writer-project-canonical-v2",
       sourceSheetName: "Sheet1",
       sourceRowCount: 3,
       sourceLabels: ["Meter A"],
@@ -72,6 +127,18 @@ describe("buildEnergyExcelMaterialization", () => {
     })).toBe(false);
     expect(isEnergyImportMaterializationCurrent({
       batch: { ...batch(), status: "materialized", materialization_json: JSON.stringify({ intervalFactCount: 2 }) },
+      document: document(),
+      timezone: "Asia/Singapore",
+    })).toBe(false);
+    expect(isEnergyImportMaterializationCurrent({
+      batch: {
+        ...batch(),
+        status: "materialized",
+        materialization_json: JSON.stringify({
+          ...result.summary,
+          factWriterContractVersion: "energy-fact-writer-later-coverage-v1",
+        }),
+      },
       document: document(),
       timezone: "Asia/Singapore",
     })).toBe(false);
@@ -106,12 +173,16 @@ describe("buildEnergyExcelMaterialization", () => {
   });
 });
 
-const batch = (): EnergyIqImportBatchRecord => ({
-  id: "batch-1",
+const batch = (
+  id = "batch-1",
+  projectId = "project-1",
+  sourceSha256 = "a".repeat(64),
+): EnergyIqImportBatchRecord => ({
+  id,
   workspace_id: "workspace-1",
-  project_id: "project-1",
+  project_id: projectId,
   source_kind: "excel",
-  source_sha256: "a".repeat(64),
+  source_sha256: sourceSha256,
   filename: "meter.xlsx",
   status: "inspected",
   inspection_json: "{}",

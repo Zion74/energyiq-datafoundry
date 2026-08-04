@@ -126,6 +126,7 @@ export const buildEnergyExcelMaterialization = async (input: {
       sourceFile: input.batch.filename,
       sourceSha256: input.batch.source_sha256,
       sourceRowNumber: row.sourceRowNumber,
+      sourceReadingKind: "cumulative_energy",
     };
     candidateBySourceRow.set(row.sourceRowNumber, candidate);
     const key = `${mapped.id}\u0000${eventTime}`;
@@ -214,6 +215,7 @@ export const buildEnergyExcelMaterialization = async (input: {
         dayType: local.dayType,
         sourceFile: current.sourceFile,
         sourceSha256: current.sourceSha256,
+        sourceReadingKind: "cumulative_energy",
       });
       if (qualityStatus !== "ok") {
         qualityEvents.push(qualityEvent(input.batch, {
@@ -277,6 +279,7 @@ export const buildEnergyExcelMaterialization = async (input: {
       projectId: input.batch.project_id,
       importBatchId: input.batch.id,
       sourceSha256: input.batch.source_sha256,
+      timezone: input.timezone,
       rawReadings,
       normalizedReadings,
       intervalFacts,
@@ -288,11 +291,12 @@ export const buildEnergyExcelMaterialization = async (input: {
 
 const qualityEvent = (
   batch: EnergyIqImportBatchRecord,
-  event: Omit<EnergyQualityEventWrite, "workspaceId" | "projectId" | "importBatchId">,
+  event: Omit<EnergyQualityEventWrite, "workspaceId" | "projectId" | "importBatchId" | "sourceReadingKind">,
 ): EnergyQualityEventWrite => ({
   workspaceId: batch.workspace_id,
   projectId: batch.project_id,
   importBatchId: batch.id,
+  sourceReadingKind: "cumulative_energy",
   ...event,
 });
 

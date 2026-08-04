@@ -19,7 +19,7 @@ describe("resolveEnergyIqProjectDataReadiness", () => {
       batches: [],
       document: document(),
       expectedMaterializerContractVersion: "energy-excel-cumulative-v1",
-      expectedFactWriterContractVersion: "energy-fact-writer-later-coverage-v1",
+      expectedFactWriterContractVersion: "energy-fact-writer-project-canonical-v2",
     })).toMatchObject({ status: "not_required", ready: true, requiresFormalData: false });
   });
 
@@ -29,7 +29,7 @@ describe("resolveEnergyIqProjectDataReadiness", () => {
       batches: [],
       document: { ...document(), source_manifest: createEnergyIqSourceManifest(FORMAL_SOURCE_SHAS, true) },
       expectedMaterializerContractVersion: "energy-excel-cumulative-v1",
-      expectedFactWriterContractVersion: "energy-fact-writer-later-coverage-v1",
+      expectedFactWriterContractVersion: "energy-fact-writer-project-canonical-v2",
     });
 
     expect(readiness).toMatchObject({ status: "blocked", ready: false, requiresFormalData: true });
@@ -48,7 +48,7 @@ describe("resolveEnergyIqProjectDataReadiness", () => {
       batches,
       document: { ...document(), meter_mapping: meterMapping() },
       expectedMaterializerContractVersion: "energy-excel-cumulative-v1",
-      expectedFactWriterContractVersion: "energy-fact-writer-later-coverage-v1",
+      expectedFactWriterContractVersion: "energy-fact-writer-project-canonical-v2",
     });
 
     expect(readiness.blockingReasons).toContain("SOURCE_MANIFEST_REQUIRED");
@@ -73,7 +73,7 @@ describe("resolveEnergyIqProjectDataReadiness", () => {
       },
       snapshot,
       expectedMaterializerContractVersion: "energy-excel-cumulative-v1",
-      expectedFactWriterContractVersion: "energy-fact-writer-later-coverage-v1",
+      expectedFactWriterContractVersion: "energy-fact-writer-project-canonical-v2",
     });
 
     expect(sourceLabelsAcrossEnergyIqImportBatches(batches)).toHaveLength(18);
@@ -109,7 +109,7 @@ describe("resolveEnergyIqProjectDataReadiness", () => {
       },
       snapshot,
       expectedMaterializerContractVersion: "energy-excel-cumulative-v1",
-      expectedFactWriterContractVersion: "energy-fact-writer-later-coverage-v1",
+      expectedFactWriterContractVersion: "energy-fact-writer-project-canonical-v2",
     });
 
     expect(readiness.ready).toBe(false);
@@ -140,7 +140,7 @@ describe("resolveEnergyIqProjectDataReadiness", () => {
       },
       snapshot,
       expectedMaterializerContractVersion: "energy-excel-cumulative-v1",
-      expectedFactWriterContractVersion: "energy-fact-writer-later-coverage-v1",
+      expectedFactWriterContractVersion: "energy-fact-writer-project-canonical-v2",
     });
 
     expect(resolve({ ...base, audit_json: "{" }).blockingReasons).toContain("SNAPSHOT_AUDIT_INVALID");
@@ -152,6 +152,10 @@ describe("resolveEnergyIqProjectDataReadiness", () => {
       .toContain("FACT_STORE_EMPTY");
     expect(resolve(dataSnapshot(batches, { negativeDeltaIntervalCount: 1 })).blockingReasons)
       .toContain("NEGATIVE_INTERVAL_DELTAS");
+    expect(resolve(dataSnapshot(batches, { missingAdjacentIntervalCount: 1 })).blockingReasons)
+      .toContain("MISSING_ADJACENT_INTERVAL_FACTS");
+    expect(resolve(dataSnapshot(batches, { orphanIntervalFactCount: 1 })).blockingReasons)
+      .toContain("ORPHAN_INTERVAL_FACTS");
   });
 
   it("uses the draft timezone and requires the exact Ngee Ann source manifest", () => {
@@ -174,7 +178,7 @@ describe("resolveEnergyIqProjectDataReadiness", () => {
       document: changedTimezoneDocument,
       snapshot,
       expectedMaterializerContractVersion: "energy-excel-cumulative-v1",
-      expectedFactWriterContractVersion: "energy-fact-writer-later-coverage-v1",
+      expectedFactWriterContractVersion: "energy-fact-writer-project-canonical-v2",
     });
 
     expect(readiness.blockingReasons).toContain("SNAPSHOT_TIMEZONE_MISMATCH");
@@ -189,7 +193,7 @@ describe("resolveEnergyIqProjectDataReadiness", () => {
       },
       snapshot,
       expectedMaterializerContractVersion: "energy-excel-cumulative-v1",
-      expectedFactWriterContractVersion: "energy-fact-writer-later-coverage-v1",
+      expectedFactWriterContractVersion: "energy-fact-writer-project-canonical-v2",
     }).blockingReasons).toContain("SOURCE_MANIFEST_MISMATCH");
   });
 });
@@ -243,7 +247,7 @@ const batch = (
       mappingRevision: 4,
       timezone: "Asia/Singapore",
       materializerContractVersion: "energy-excel-cumulative-v1",
-      factWriterContractVersion: "energy-fact-writer-later-coverage-v1",
+      factWriterContractVersion: "energy-fact-writer-project-canonical-v2",
     }),
     materialized_at: "2026-08-04T00:00:00.000Z",
   } : {}),
@@ -278,6 +282,10 @@ const dataSnapshot = (
     legacyNormalizedReadingCount: 0,
     legacyIntervalFactCount: 0,
     legacyCanonicalRowCount: 0,
+    canonicalMeterSeriesCount: 18,
+    adjacentReadingPairCount: 100_205,
+    missingAdjacentIntervalCount: 0,
+    orphanIntervalFactCount: 0,
     ...auditOverrides,
   }),
   created_at: "2026-08-04T00:00:00.000Z",

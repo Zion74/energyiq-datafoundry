@@ -136,6 +136,10 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
     ) blockingReasons.push("CANONICAL_DUPLICATES");
     if (numberValue(audit.invalidIntervalDurationCount) > 0) blockingReasons.push("INVALID_INTERVAL_DURATION");
     if (numberValue(audit.negativeDeltaIntervalCount) > 0) blockingReasons.push("NEGATIVE_INTERVAL_DELTAS");
+    if (numberValue(audit.missingAdjacentIntervalCount) > 0) {
+      blockingReasons.push("MISSING_ADJACENT_INTERVAL_FACTS");
+    }
+    if (numberValue(audit.orphanIntervalFactCount) > 0) blockingReasons.push("ORPHAN_INTERVAL_FACTS");
     if (
       numberValue(audit.legacyRawRowCount) > 0
       || numberValue(audit.legacyNormalizedReadingCount) > 0
@@ -253,4 +257,8 @@ const REQUIRED_AUDIT_FIELDS = [
   "legacyNormalizedReadingCount",
   "legacyIntervalFactCount",
   "legacyCanonicalRowCount",
+  "canonicalMeterSeriesCount",
+  "adjacentReadingPairCount",
+  "missingAdjacentIntervalCount",
+  "orphanIntervalFactCount",
 ] as const;

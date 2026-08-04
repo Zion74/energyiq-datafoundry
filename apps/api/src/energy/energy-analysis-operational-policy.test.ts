@@ -229,6 +229,7 @@ const createOperationalFixture = async () => {
     projectId: "project-policy",
     importBatchId: "policy-fixture",
     sourceSha256: "policy-fixture-sha",
+    timezone: "Asia/Singapore",
     rawReadings: [],
     normalizedReadings: [],
     intervalFacts: intervals,
@@ -286,6 +287,7 @@ const fact = (
   isOperating: true,
   sourceFile: "policy-fixture.csv",
   sourceSha256: "policy-fixture-sha",
+  sourceReadingKind: "interval_usage",
 });
 
 const policyContext = (

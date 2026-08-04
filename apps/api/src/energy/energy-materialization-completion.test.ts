@@ -138,6 +138,7 @@ const sourceWrite = (projectId: string, source: SourceKey): EnergyFactMaterializ
     projectId,
     importBatchId: batchId,
     sourceSha256,
+    timezone: "Asia/Singapore",
     rawReadings: points.map((point, index) => ({
       workspaceId: "workspace-1",
       projectId,
@@ -169,6 +170,7 @@ const sourceWrite = (projectId: string, source: SourceKey): EnergyFactMaterializ
       sourceFile,
       sourceSha256,
       sourceRowNumber: index + 2,
+      sourceReadingKind: "cumulative_energy",
     })),
     intervalFacts: facts.map((fact) => ({
       workspaceId: "workspace-1",
@@ -194,6 +196,7 @@ const sourceWrite = (projectId: string, source: SourceKey): EnergyFactMaterializ
       dayType: "weekday",
       sourceFile,
       sourceSha256,
+      sourceReadingKind: "cumulative_energy",
     })),
     qualityEvents: [],
   };
