@@ -63,7 +63,7 @@
 | [2026-08-02 Admin Component Catalog 与 Template Draft 实施记录](2026-08-02-Admin-Component-Catalog与Template-Draft实施记录.md) | 受控组件目录、Project/Tier 模板草稿、真实事实预览、时区处理与双项目浏览器证据 |
 | [2026-08-03 Admin Preview 与客户 Overview 统一渲染实施记录](2026-08-03-Admin-Preview与客户-Overview统一渲染实施记录.md) | Template Schema v2、共享 Render Plan、受控布局视觉协议、双端 Renderer 与兼容发布策略 |
 | [2026-08-03 AI Analyst 可信问数与受控图表实施记录](2026-08-03-AI-Analyst可信问数与受控图表实施记录.md) | Qwen/DeepSeek Provider、权威 Energy Query Context、Ngee Ann 可信 SQL、Task Console completed 与 168 点后端 ChartPreview |
-| [2026-08-04 Tariff 与营业日历持久化实施记录](2026-08-04-Tariff与营业日历持久化实施记录.md) | 不可变 Tariff/Calendar Revision、Project/Scope 生效、显式 active/Release 来源、Unavailable 与历史冻结边界 |
+| [2026-08-04 Tariff 与营业日历持久化实施记录](2026-08-04-Tariff与营业日历持久化实施记录.md) | 不可变 Tariff/Calendar、Published Release Resolver、API/Web/Saved serialized 集成、显式 Unavailable，以及待完成的 Ngee Ann #24-first Golden |
 | [2026-08-04 T03/T04/T13 集成实施记录](2026-08-04-T03-T04-T13集成实施记录.md) | Runtime policy、Period-effective metadata、Workspace 默认模型、公开 API/持久化契约，以及 T13 尚未通过的 live 产品门禁 |
 | [2026-08-03 DeepSeek V4 Flash 与 DataFoundry 实测记录](2026-08-03-DeepSeek-V4-Flash与DataFoundry实测记录.md) | Flash 连接和工具链可运行，但同一问数产生过两种结果；记录时区 SQL、图表触发、60 秒超时和用户级模型配置等真实缺口 |
 | [2026-08-01 Ngee Ann 源到事实契约原型](2026-08-01-Ngee-Ann-源到事实契约原型记录.md) | 统一 Adapter、SHA 幂等、实际时长 Fact、Virtual Load 12、冲突与官方汇总排重的可运行证据 |
