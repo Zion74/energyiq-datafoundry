@@ -17,6 +17,7 @@ const baseContext = {
   endExclusive: true as const,
   period: "Last 7 days" as const,
   hierarchyRevisionId: "hierarchy-v1",
+  meterMappingRevisionId: "meter-routing-v1",
   meterFormulaRevisionId: "formula-v1",
   dataSnapshotId: "snapshot-v1",
   metricVersion: "metrics-v1",

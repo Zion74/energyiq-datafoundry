@@ -134,7 +134,7 @@ describe("project setup model", () => {
     expect(result.document.nodes.at(-1)?.name).toBe("Room 4");
   });
 
-  it("creates a deterministic pilot Mapping and moves labelled totals to their parent Scope", () => {
+  it("creates a deterministic pilot Mapping with Circuit attachments and explicit ancestor routes", () => {
     const document: EnergyProjectSetupDocumentDto = {
       project: { name: "Test", timezone: "Asia/Singapore" },
       tier_structure_locked: true,
@@ -153,13 +153,26 @@ describe("project setup model", () => {
 
     const mapping = createInitialMeterMapping(document);
     expect(mapping.rows.find((row) => row.source_label === "Total Office Load")).toMatchObject({
-      scope_id: "l6",
+      scope_id: "total-load",
+      navigation_scope_id: "total-load",
       category: "load",
       coverage: "whole",
       meter_role: "total",
       aggregation_usage: "official",
     });
     expect(mapping.rows.find((row) => row.source_label === "Level 6 / Office Load 1")?.scope_id).toBe("load-1");
+    expect(mapping.rows.find((row) => row.source_label === "Level 6 / Office Load 1")).toMatchObject({
+      meter_role: "component",
+      aggregation_usage: "excluded",
+    });
+    expect(mapping.official_aggregation_routes?.find((route) =>
+      route.scope_id === "l6" && route.category === "load")?.meter_point_ids).toEqual([
+      "mapping-total-load",
+    ]);
+    expect(mapping.official_aggregation_routes?.find((route) =>
+      route.scope_id === "load-1" && route.category === "load")?.meter_point_ids).toEqual([
+      "mapping-load-1",
+    ]);
     expect(mapping.rows.find((row) => row.source_label === "Level 7 / Office Load 1")?.scope_id).toBe("load-1-l7");
     expect(nodePathLabel(document, "load-1-l7")).toBe("Level 7 / Office Load 1");
     expect(inferMeterCategory("Kitchen Lighting")).toBe("light");
@@ -172,7 +185,8 @@ describe("project setup model", () => {
       "Unknown Meter",
     ]);
     expect(imported.rows.find((row) => row.source_label === "Lvl 6 Total Office Load")).toMatchObject({
-      scope_id: "l6",
+      scope_id: "total-load",
+      navigation_scope_id: "total-load",
       display_name: "Total Office Load",
       category: "load",
     });
@@ -182,6 +196,12 @@ describe("project setup model", () => {
     });
     expect(imported.rows.find((row) => row.source_label === "Lvl 7 Office Load 1")?.scope_id).toBe("load-1-l7");
     expect(imported.rows.find((row) => row.source_label === "Unknown Meter")?.scope_id).toBe("");
+    expect(mapping.official_aggregation_routes).toContainEqual({
+      scope_id: "l6",
+      resource: "electricity",
+      category: "load",
+      meter_point_ids: ["mapping-total-load"],
+    });
   });
 
   it("unions all four Ngee Ann batches and corrects formal routes before confirmation", async () => {
@@ -236,7 +256,8 @@ describe("project setup model", () => {
       aggregation_usage: "excluded",
     });
     expect(mapping.rows.find((row) => row.source_label === "Lvl 7 Total Office Load")).toMatchObject({
-      scope_id: "level-7",
+      scope_id: "l7-total-load",
+      navigation_scope_id: "l7-total-load",
       category: "load",
       meter_role: "total",
       aggregation_usage: "official",
@@ -404,10 +425,10 @@ const NGEE_ANN_LABELS = [
 ];
 
 const NGEE_ANN_MAPPING_TUPLES = [
-  ["Lvl 6 Total Office Light", "level-6", "light", "whole", "total", "official"],
+  ["Lvl 6 Total Office Light", "l6-total-light", "light", "whole", "total", "official"],
   ["Lvl 6 Office Light-Left: External", "l6-light-left", "light", "partial", "component", "excluded"],
   ["Lvl 6 Office Light-Right: Internal", "l6-light-right", "light", "partial", "component", "excluded"],
-  ["Lvl 6 Total Office Load", "level-6", "load", "whole", "total", "official"],
+  ["Lvl 6 Total Office Load", "l6-total-load", "load", "whole", "total", "official"],
   ["Lvl 6 Office Load 1: L1P1-L3P6", "l6-load-1", "load", "partial", "component", "excluded"],
   ["Lvl 6 Office Load 2: L1P7-L3P12", "l6-load-2", "load", "partial", "component", "excluded"],
   ["Lvl 6 Office Load 3: L1P13-L3P18", "l6-load-3", "load", "partial", "component", "excluded"],
@@ -416,8 +437,8 @@ const NGEE_ANN_MAPPING_TUPLES = [
   ["Lvl 7 Middle Row Office Light", "l7-middle-light", "light", "partial", "component", "excluded"],
   ["Lvl 7 Back Row Office Light", "l7-back-light", "light", "partial", "component", "excluded"],
   ["Lvl 7 Front Row Office Light", "l7-front-light", "light", "partial", "component", "excluded"],
-  ["Lvl 7 Total Office Light", "level-7", "light", "whole", "total", "official"],
-  ["Lvl 7 Total Office Load", "level-7", "load", "whole", "total", "official"],
+  ["Lvl 7 Total Office Light", "l7-total-light", "light", "whole", "total", "official"],
+  ["Lvl 7 Total Office Load", "l7-total-load", "load", "whole", "total", "official"],
   ["Lvl 7 Office Load 1: L1P1-L3P6", "l7-load-1", "load", "partial", "component", "excluded"],
   ["Lvl 7 Office Load 2: L1P7-L3P15", "l7-load-2", "load", "partial", "component", "excluded"],
   ["Lvl 7 Office Load 3: L1P16-L3P21", "l7-load-3", "load", "partial", "component", "excluded"],

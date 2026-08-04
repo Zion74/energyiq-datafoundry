@@ -13,6 +13,7 @@ import {
   PRESCHOOL_WORKSPACE_ID,
 } from "./energy-bootstrap.js";
 import { handleEnergyApiRequest } from "./energy-api.js";
+import { resolveEnergyPublishedMeterRoute } from "./energy-query-context.js";
 import { materializePreschoolGoldenFixture } from "./preschool-golden.fixture.js";
 
 describe("saved analysis decision-quality boundary", () => {
@@ -32,6 +33,7 @@ describe("saved analysis decision-quality boundary", () => {
         project_id: project.id,
         tier_definition_ids: metadata.energyIq.listTierDefinitions(project.id).map((tier) => tier.id),
         hierarchy_revision_id: project.hierarchy_revision_id,
+        meter_mapping_revision_id: resolveEnergyPublishedMeterRoute({ metadataStore: metadata, projectId: project.id, hierarchyRevisionId: project.hierarchy_revision_id, scopeId: project.root_scope_id, resource: "electricity" }).meterMappingRevisionId,
         published_by: "dev-user",
         published_at: "2026-08-04T00:00:00.000Z",
       });
@@ -110,6 +112,7 @@ describe("saved analysis decision-quality boundary", () => {
         project_id: project.id,
         tier_definition_ids: metadata.energyIq.listTierDefinitions(project.id).map((tier) => tier.id),
         hierarchy_revision_id: project.hierarchy_revision_id,
+        meter_mapping_revision_id: resolveEnergyPublishedMeterRoute({ metadataStore: metadata, projectId: project.id, hierarchyRevisionId: project.hierarchy_revision_id, scopeId: project.root_scope_id, resource: "electricity" }).meterMappingRevisionId,
         published_by: "dev-user",
         published_at: "2026-08-04T00:00:00.000Z",
       });
@@ -258,6 +261,7 @@ describe("saved analysis decision-quality boundary", () => {
         project_id: project.id,
         tier_definition_ids: metadata.energyIq.listTierDefinitions(project.id).map((tier) => tier.id),
         hierarchy_revision_id: project.hierarchy_revision_id,
+        meter_mapping_revision_id: resolveEnergyPublishedMeterRoute({ metadataStore: metadata, projectId: project.id, hierarchyRevisionId: project.hierarchy_revision_id, scopeId: project.root_scope_id, resource: "electricity" }).meterMappingRevisionId,
         published_by: "dev-user",
         published_at: "2026-08-04T00:00:00.000Z",
       });

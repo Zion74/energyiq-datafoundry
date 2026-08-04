@@ -50,6 +50,7 @@ describe("Energy import materialization guard", () => {
           ...draft.document,
           source_manifest: createEnergyIqSourceManifest(sourceSha256, true),
           meter_mapping: {
+            schema_version: 2,
             source_kind: "excel",
             confirmed: true,
             rows: [{

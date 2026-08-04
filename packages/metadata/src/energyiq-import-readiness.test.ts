@@ -206,6 +206,7 @@ const document = (): EnergyIqProjectSetupDocument => ({
 });
 
 const meterMapping = (): EnergyIqMeterMappingDraft => ({
+  schema_version: 2,
   source_kind: "excel",
   confirmed: true,
   rows: NGEE_ANN_LABELS.map((label, index) => ({

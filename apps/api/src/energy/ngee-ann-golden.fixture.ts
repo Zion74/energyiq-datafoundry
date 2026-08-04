@@ -20,8 +20,8 @@ export const NGEE_ANN_GOLDEN = {
     }
   },
   officialMeterNodeIds: [
-    "l7-total-light",
-    "l7-total-load",
+    "mapping-lvl-7-total-office-light-17",
+    "mapping-lvl-7-total-office-load-18",
     "mapping-lvl-6-total-office-light-8",
     "mapping-lvl-6-total-office-load-9"
   ],
@@ -59,12 +59,19 @@ export const NGEE_ANN_GOLDEN = {
       load: 1239.4239
     },
     topCircuit: {
-      meterNodeId: "l7-load-4",
+      scopeId: "l7-load-4",
+      meterNodeId: "mapping-lvl-7-office-load-4-l1p22-l3p25-fan-isol1-2-16",
       usageKwh: 439.0972,
       previousUsageKwh: 247.9813,
       changeKwh: 191.1159,
       changePct: 77.0687,
       peakKw: 3.5307
+    },
+    totalCircuit: {
+      scopeId: "l6-total-load",
+      meterNodeId: "mapping-lvl-6-total-office-load-9",
+      rawUsageKwh: 366.009445,
+      apiUsageKwh: 366.0094
     },
     dataHealth: {
       status: "complete",
@@ -140,7 +147,7 @@ export const NGEE_ANN_GOLDEN = {
     ]
   },
   virtualMeter: {
-    meterNodeId: "virtual-1785647019538",
+    meterNodeId: "ngee-ann-load-12-v1",
     name: "Load 12",
     scopeId: "level-6",
     termMeterNodeIds: [

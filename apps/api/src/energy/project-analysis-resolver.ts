@@ -19,6 +19,7 @@ import {
   type ProjectAnalysisPayload,
 } from "./project-analysis-metadata.js";
 import {
+  resolveEnergyAccessContext,
   resolveEnergyQueryContext,
   type EnergyQueryContext,
   type EnergyQueryContextRequest,
@@ -50,6 +51,7 @@ export type PublishedProjectRelease = {
     contractVersion: "project-analysis-snapshot@1";
   };
   hierarchyRevisionId: string;
+  meterMappingRevisionId: string;
   meterFormulaRevisionId: string;
   metricRevisionIds: string[];
   ruleRevisionIds: string[];
@@ -120,16 +122,28 @@ export const resolveProjectAnalysis = async (input: {
   now?: Date;
   env?: Record<string, string | undefined>;
 }): Promise<ProjectAnalysisResolution> => {
-  const context = resolveEnergyQueryContext({
+  const access = resolveEnergyAccessContext({
     metadataStore: input.metadataStore,
     user: input.user,
-    workspaceId: input.workspaceId,
-    request: input.request,
-    ...(input.now ? { now: input.now } : {}),
+    requestedWorkspaceId: input.workspaceId,
     ...(input.env ? { env: input.env } : {}),
   });
-  const projectRelease = resolvePublishedProjectRelease(input.metadataStore, context);
-  if (!projectRelease) {
+  const accessibleProject = access.projects.find((project) => project.id === input.request.projectId);
+  if (!accessibleProject || accessibleProject.workspaceId !== access.activeWorkspaceId) {
+    throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
+  }
+  const templateRevision = input.metadataStore.energyIq.templates.getLatestProjectRevision(input.request.projectId);
+  const legacyProfile = LEGACY_PROJECT_PROFILES[input.request.projectId];
+  if (!legacyProfile) {
+    const context = resolveEnergyQueryContext({
+      metadataStore: input.metadataStore,
+      user: input.user,
+      workspaceId: input.workspaceId,
+      request: input.request,
+      allowUnconfigured: true,
+      ...(input.now ? { now: input.now } : {}),
+      ...(input.env ? { env: input.env } : {}),
+    });
     return {
       status: "configuration-required",
       context,
@@ -138,6 +152,22 @@ export const resolveProjectAnalysis = async (input: {
       detail: "Publish a Project Template Revision and register its customer Renderer before opening the customer Overview.",
     };
   }
+  const context = resolveEnergyQueryContext({
+    metadataStore: input.metadataStore,
+    user: input.user,
+    workspaceId: input.workspaceId,
+    request: input.request,
+    ...(templateRevision ? {
+      releasePins: {
+        hierarchyRevisionId: templateRevision.hierarchy_revision_id,
+        meterMappingRevisionId: templateRevision.meter_mapping_revision_id,
+      }
+    } : {}),
+    ...(input.now ? { now: input.now } : {}),
+    ...(input.env ? { env: input.env } : {}),
+  });
+  const projectRelease = resolvePublishedProjectRelease(input.metadataStore, context);
+  if (!projectRelease) throw new Error("ENERGYIQ_PROJECT_RELEASE_REQUIRED");
   const releasedContext = bindPublishedReleaseContext(context, projectRelease);
   const scopeAnalysis = await executeEnergyScopeAnalysis({
     metadataStore: input.metadataStore,
@@ -208,6 +238,7 @@ const bindPublishedReleaseContext = (
 ): EnergyQueryContext => ({
   ...context,
   hierarchyRevisionId: release.hierarchyRevisionId,
+  meterMappingRevisionId: release.meterMappingRevisionId,
   meterFormulaRevisionId: release.meterFormulaRevisionId,
   metricVersion: `metric-revisions:${[...release.metricRevisionIds]
     .sort((left, right) => left.localeCompare(right))
@@ -242,6 +273,7 @@ const releaseFromTemplateRevision = (
     templateRevisionId: revision.revision_id,
     templateRevisionSequence: revision.sequence,
     hierarchyRevisionId: revision.hierarchy_revision_id,
+    meterMappingRevisionId: revision.meter_mapping_revision_id,
     meterFormulaRevisionId: revision.meter_formula_revision_id,
     metricRevisionIds: revision.selected_metric_revision_ids,
     ruleRevisionIds: revision.selected_rule_revision_ids,
@@ -267,6 +299,7 @@ const releaseFromLegacyProfile = (
     templateRevisionId: null,
     templateRevisionSequence: null,
     hierarchyRevisionId: context.hierarchyRevisionId,
+    meterMappingRevisionId: context.meterMappingRevisionId,
     meterFormulaRevisionId: context.meterFormulaRevisionId,
     metricRevisionIds: metadataStore.energyIq.metrics
       .getProjectConfig(context.projectId).selected_metric_revision_ids,

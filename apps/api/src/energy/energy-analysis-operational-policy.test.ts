@@ -5,6 +5,8 @@ import {
 } from "@datafoundry/data-gateway";
 import {
   createMetadataStore,
+  energyIqPublishedMeterRoutingRevisionId,
+  type EnergyIqMeterMappingDraft,
   type EnergyIqRuleRevisionRecord,
 } from "@datafoundry/metadata";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -195,6 +197,28 @@ describe("EnergyScopeAnalysis operational policy", () => {
   });
 });
 
+const POLICY_MAPPING: EnergyIqMeterMappingDraft = {
+  schema_version: 2,
+  source_kind: "excel",
+  confirmed: true,
+  rows: [{
+    id: "meter-1",
+    source_label: "Meter 1",
+    scope_id: "policy-circuit-1",
+    navigation_scope_id: "policy-circuit-1",
+    display_name: "Meter 1",
+    resource: "electricity",
+    category: "overall",
+    coverage: "whole",
+    meter_role: "total",
+    aggregation_usage: "official",
+  }],
+  official_aggregation_routes: [
+    { scope_id: "policy-circuit-1", resource: "electricity", category: "overall", meter_point_ids: ["meter-1"] },
+    { scope_id: "project", resource: "electricity", category: "overall", meter_point_ids: ["meter-1"] },
+  ],
+};
+
 const createOperationalFixture = async () => {
   const root = mkdtempSync(join(tmpdir(), "energy-analysis-policy-"));
   const databasePath = join(root, "energy.duckdb");
@@ -206,19 +230,34 @@ const createOperationalFixture = async () => {
     name: "Operational Policy Workspace",
     kind: "customer",
   });
-  metadata.energyIq.upsertProject({
-    id: "project-policy",
-    workspace_id: "workspace-policy",
-    name: "Operational Policy Project",
-    status: "published",
-    timezone: "Asia/Singapore",
-    root_scope_id: "project-policy-root",
-  });
-  metadata.energyIq.upsertProjectNode({
-    id: "project-policy-root",
-    project_id: "project-policy",
-    name: "Operational Policy Project",
-    node_type: "project",
+  metadata.energyIq.projectSetup.bootstrapPublished({
+    project: {
+      id: "project-policy",
+      workspace_id: "workspace-policy",
+      name: "Operational Policy Project",
+      timezone: "Asia/Singapore",
+      hierarchy_revision_id: "hierarchy-v1",
+      meter_formula_revision_id: "meter-formula-v1",
+      data_snapshot_id: "snapshot-v1",
+      metric_version: "metric-v1",
+      business_calendar_version: "calendar-v1",
+      tariff_schedule_version: "tariff-v1",
+      root_scope_id: "project-policy-root",
+    },
+    document: {
+      project: { name: "Operational Policy Project", timezone: "Asia/Singapore" },
+      tier_structure_locked: true,
+      tiers: [{ id: "policy-tier-circuit", ordinal: 1, alias: "Circuit" }],
+      nodes: [{
+        id: "policy-circuit-1",
+        tier_definition_id: "policy-tier-circuit",
+        name: "Meter 1",
+        sort_order: 1,
+        metadata_status: "confirmed",
+      }],
+      meter_mapping: POLICY_MAPPING,
+    },
+    published_by: "dev-user",
   });
   const intervals: EnergyIntervalFactWrite[] = [
     fact("2026-06-30T16:00:00.000Z", "2026-06-30T20:00:00.000Z", 4),
@@ -267,7 +306,7 @@ const fact = (
   importBatchId: "policy-fixture",
   resource: "electricity",
   meterPointId: "meter-1",
-  scopeId: "project-policy-root",
+  scopeId: "policy-circuit-1",
   parentNodeId: "project-policy-root",
   sourceLabel: "Meter 1",
   category: "overall",
@@ -308,6 +347,7 @@ const policyContext = (
   endExclusive: true,
   period: "Custom",
   hierarchyRevisionId: "hierarchy-v1",
+  meterMappingRevisionId: energyIqPublishedMeterRoutingRevisionId(POLICY_MAPPING),
   meterFormulaRevisionId: "meter-formula-v1",
   dataSnapshotId: "snapshot-v1",
   metricVersion: "metric-v1",

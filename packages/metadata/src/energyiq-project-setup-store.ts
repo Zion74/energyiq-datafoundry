@@ -37,13 +37,23 @@ export type EnergyIqAggregationUsage = "official" | "excluded";
 export type EnergyIqMeterMappingRow = {
   id: string;
   source_label: string;
+  /** Scope captured on materialized facts. Kept stable unless facts are rebuilt. */
   scope_id: string;
+  /** User-facing Scope that owns this Meter for navigation and analysis. */
+  navigation_scope_id?: string;
   display_name: string;
   resource: "electricity" | "water";
   category: EnergyIqMeterCategory;
   coverage: EnergyIqMeterCoverage;
   meter_role: EnergyIqMeterRole;
   aggregation_usage: EnergyIqAggregationUsage;
+};
+
+export type EnergyIqOfficialAggregationRoute = {
+  scope_id: string;
+  resource: "electricity" | "water";
+  category: EnergyIqMeterCategory;
+  meter_point_ids: string[];
 };
 
 export type EnergyIqVirtualMeterTerm = {
@@ -61,8 +71,10 @@ export type EnergyIqVirtualMeter = {
 };
 
 export type EnergyIqMeterMappingDraft = {
+  schema_version: 2;
   source_kind: "excel" | "tuya";
   rows: EnergyIqMeterMappingRow[];
+  official_aggregation_routes?: EnergyIqOfficialAggregationRoute[];
   virtual_meters?: EnergyIqVirtualMeter[];
   confirmed: boolean;
 };
@@ -92,6 +104,7 @@ export const createEnergyIqSourceManifest = (
 export const fingerprintEnergyIqMeterMapping = (
   mapping: EnergyIqMeterMappingDraft,
 ): string => createHash("sha256").update(JSON.stringify({
+  schema_version: mapping.schema_version,
   source_kind: mapping.source_kind,
   confirmed: mapping.confirmed,
   rows: [...mapping.rows]
@@ -106,6 +119,15 @@ export const fingerprintEnergyIqMeterMapping = (
       coverage: row.coverage,
       meter_role: row.meter_role,
       aggregation_usage: row.aggregation_usage,
+      navigation_scope_id: row.navigation_scope_id ?? row.scope_id,
+    })),
+  official_aggregation_routes: [...(mapping.official_aggregation_routes ?? [])]
+    .sort((left, right) => routeKey(left).localeCompare(routeKey(right)))
+    .map((route) => ({
+      scope_id: route.scope_id,
+      resource: route.resource,
+      category: route.category,
+      meter_point_ids: [...new Set(route.meter_point_ids)].sort(),
     })),
   virtual_meters: [...(mapping.virtual_meters ?? [])]
     .sort((left, right) => left.id.localeCompare(right.id))
@@ -120,6 +142,31 @@ export const fingerprintEnergyIqMeterMapping = (
         .map((term) => ({ mapping_row_id: term.mapping_row_id, coefficient: term.coefficient })),
     })),
 })).digest("hex");
+
+export const fingerprintEnergyIqPublishedMeterRouting = (
+  mapping: EnergyIqMeterMappingDraft,
+): string => createHash("sha256").update(JSON.stringify({
+  version: 2,
+  materialization_mapping_fingerprint: fingerprintEnergyIqMeterMapping(mapping),
+  navigation_attachments: [...mapping.rows]
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map((row) => ({
+      meter_point_id: row.id,
+      navigation_scope_id: row.navigation_scope_id ?? row.scope_id,
+    })),
+  official_aggregation_routes: [...(mapping.official_aggregation_routes ?? [])]
+    .sort((left, right) => routeKey(left).localeCompare(routeKey(right)))
+    .map((route) => ({
+      scope_id: route.scope_id,
+      resource: route.resource,
+      category: route.category,
+      meter_point_ids: [...new Set(route.meter_point_ids)].sort(),
+    })),
+})).digest("hex");
+
+export const energyIqPublishedMeterRoutingRevisionId = (
+  mapping: EnergyIqMeterMappingDraft,
+): string => `meter-routing-${fingerprintEnergyIqPublishedMeterRouting(mapping).slice(0, 24)}`;
 
 export type EnergyIqProjectSetupDocument = {
   project: {
@@ -429,6 +476,9 @@ export class EnergyIqProjectSetupStore {
           .sort((left, right) => right.ordinal - left.ordinal)
           .map((tier) => tier.id),
         hierarchy_revision_id: hierarchyRevisionId,
+        meter_mapping_revision_id: draft.document.meter_mapping
+          ? energyIqPublishedMeterRoutingRevisionId(draft.document.meter_mapping)
+          : "meter-routing-unavailable",
         published_by: input.user_id,
         published_at: now,
         ...(input.expected_template_draft_revision !== undefined
@@ -958,6 +1008,9 @@ export const validateProjectSetupDocument = (
   }
 
   if (document.meter_mapping) {
+    if (document.meter_mapping.schema_version !== 2) {
+      push("METER_MAPPING_SCHEMA_UNSUPPORTED", "error", "Published Meter Routing requires Mapping schema v2.", "meter_mapping.schema_version");
+    }
     const rowIds = new Set<string>();
     const sourceLabels = new Set<string>();
     const wholeCoverage = new Map<string, number>();
@@ -974,10 +1027,17 @@ export const validateProjectSetupDocument = (
       if (!nodesById.has(row.scope_id)) {
         push("METER_SCOPE_NOT_FOUND", "error", "Mapped Scope must already exist in Structure.", `meter_mapping.rows[${index}].scope_id`);
       }
+      if (row.navigation_scope_id && !nodesById.has(row.navigation_scope_id)) {
+        push("METER_NAVIGATION_SCOPE_NOT_FOUND", "error", "Navigation Scope must already exist in Structure.", `meter_mapping.rows[${index}].navigation_scope_id`);
+      }
       if (row.meter_role === "standalone" && row.aggregation_usage === "official") {
         push("STANDALONE_METER_OFFICIAL", "error", "A standalone meter cannot enter the official aggregation route.", `meter_mapping.rows[${index}].aggregation_usage`);
       }
-      if (row.meter_role === "total" && row.aggregation_usage === "official") {
+      if (
+        !document.meter_mapping.official_aggregation_routes
+        && row.meter_role === "total"
+        && row.aggregation_usage === "official"
+      ) {
         const routeKey = `${row.scope_id}:${row.resource}:${row.category}`;
         wholeCoverage.set(routeKey, (wholeCoverage.get(routeKey) ?? 0) + 1);
       }
@@ -990,6 +1050,53 @@ export const validateProjectSetupDocument = (
     const virtualIds = new Set<string>();
     const virtualNames = new Set<string>();
     const mappingRowsById = new Map(document.meter_mapping.rows.map((row) => [row.id, row]));
+    const routeKeys = new Set<string>();
+    if (document.meter_mapping.confirmed && !document.meter_mapping.official_aggregation_routes) {
+      push("OFFICIAL_ROUTES_REQUIRED", "error", "Confirmed Meter Mapping requires explicit per-Scope official routes.", "meter_mapping.official_aggregation_routes");
+    }
+    for (const [index, route] of (document.meter_mapping.official_aggregation_routes ?? []).entries()) {
+      const key = routeKey(route);
+      if (routeKeys.has(key)) {
+        push("OFFICIAL_ROUTE_DUPLICATE", "error", "Each Scope/resource/category may have only one official route.", `meter_mapping.official_aggregation_routes[${index}]`);
+      }
+      routeKeys.add(key);
+      if (route.scope_id !== "project" && !nodesById.has(route.scope_id)) {
+        push("OFFICIAL_ROUTE_SCOPE_NOT_FOUND", "error", "Official route Scope must already exist in Structure.", `meter_mapping.official_aggregation_routes[${index}].scope_id`);
+      }
+      if (route.meter_point_ids.length === 0) {
+        push("OFFICIAL_ROUTE_EMPTY", "error", "Official route requires at least one Meter Point.", `meter_mapping.official_aggregation_routes[${index}].meter_point_ids`);
+      }
+      const memberIds = new Set<string>();
+      for (const [memberIndex, meterPointId] of route.meter_point_ids.entries()) {
+        const meter = mappingRowsById.get(meterPointId);
+        if (!meter || memberIds.has(meterPointId)) {
+          push("OFFICIAL_ROUTE_METER_INVALID", "error", "Official route members must reference unique physical Meter Points.", `meter_mapping.official_aggregation_routes[${index}].meter_point_ids[${memberIndex}]`);
+        } else if (meter.resource !== route.resource) {
+          push("OFFICIAL_ROUTE_RESOURCE_MISMATCH", "error", "Official route members must use the route resource.", `meter_mapping.official_aggregation_routes[${index}].meter_point_ids[${memberIndex}]`);
+        } else if (route.category !== "overall" && meter.category !== route.category) {
+          push("OFFICIAL_ROUTE_CATEGORY_MISMATCH", "error", "Official route members must use the route category.", `meter_mapping.official_aggregation_routes[${index}].meter_point_ids[${memberIndex}]`);
+        } else if (
+          route.scope_id !== "project"
+          && !nodeIsWithinScope(meter.navigation_scope_id ?? meter.scope_id, route.scope_id, nodesById)
+        ) {
+          push("OFFICIAL_ROUTE_ATTACHMENT_MISMATCH", "error", "Official route members must navigate inside the route Scope.", `meter_mapping.official_aggregation_routes[${index}].meter_point_ids[${memberIndex}]`);
+        }
+        memberIds.add(meterPointId);
+      }
+    }
+    if (document.meter_mapping.official_aggregation_routes) {
+      for (const [index, row] of document.meter_mapping.rows.entries()) {
+        const navigationScopeId = row.navigation_scope_id ?? row.scope_id;
+        const ownRoute = document.meter_mapping.official_aggregation_routes.find((route) =>
+          route.scope_id === navigationScopeId
+          && route.resource === row.resource
+          && route.category === row.category
+          && route.meter_point_ids.includes(row.id));
+        if (!ownRoute) {
+          push("METER_NAVIGATION_ROUTE_REQUIRED", "error", "Each navigable physical Meter needs an own-Scope official route.", `meter_mapping.rows[${index}].navigation_scope_id`);
+        }
+      }
+    }
     for (const [index, virtualMeter] of (document.meter_mapping.virtual_meters ?? []).entries()) {
       if (!virtualMeter.id || virtualIds.has(virtualMeter.id)) {
         push("VIRTUAL_METER_ID_DUPLICATE", "error", "Virtual Meter IDs must be unique.", `meter_mapping.virtual_meters[${index}].id`);
@@ -1100,6 +1207,7 @@ const canonicalizeDocument = (
     } : {}),
     ...(document.meter_mapping ? {
       meter_mapping: {
+        schema_version: document.meter_mapping.schema_version,
         source_kind: document.meter_mapping.source_kind === "tuya" ? "tuya" as const : "excel" as const,
         confirmed: document.meter_mapping.confirmed === true,
         rows: Array.isArray(document.meter_mapping.rows)
@@ -1107,6 +1215,9 @@ const canonicalizeDocument = (
               id: String(row.id ?? "").trim(),
               source_label: normaliseDisplayNameForStorage(String(row.source_label ?? "")),
               scope_id: String(row.scope_id ?? "").trim(),
+              ...(row.navigation_scope_id?.trim()
+                ? { navigation_scope_id: row.navigation_scope_id.trim() }
+                : {}),
               display_name: normaliseDisplayNameForStorage(String(row.display_name ?? "")),
               resource: row.resource === "water" ? "water" as const : "electricity" as const,
               category: normalizeMeterCategory(row.category),
@@ -1115,6 +1226,16 @@ const canonicalizeDocument = (
               aggregation_usage: row.aggregation_usage === "official" ? "official" as const : "excluded" as const
             }))
           : [],
+        ...(Array.isArray(document.meter_mapping.official_aggregation_routes) ? {
+          official_aggregation_routes: document.meter_mapping.official_aggregation_routes.map((route) => ({
+            scope_id: String(route.scope_id ?? "").trim(),
+            resource: route.resource === "water" ? "water" as const : "electricity" as const,
+            category: normalizeMeterCategory(route.category),
+            meter_point_ids: Array.isArray(route.meter_point_ids)
+              ? [...new Set(route.meter_point_ids.map((meterPointId) => String(meterPointId ?? "").trim()))]
+              : []
+          }))
+        } : {}),
         ...(Array.isArray(document.meter_mapping.virtual_meters) ? {
           virtual_meters: document.meter_mapping.virtual_meters.map((virtualMeter) => ({
             id: String(virtualMeter.id ?? "").trim(),
@@ -1145,6 +1266,24 @@ const normalizeMeterCoverage = (value: unknown): EnergyIqMeterCoverage =>
 
 const normalizeMeterRole = (value: unknown): EnergyIqMeterRole =>
   value === "total" || value === "component" ? value : "standalone";
+
+const routeKey = (route: Pick<EnergyIqOfficialAggregationRoute, "scope_id" | "resource" | "category">): string =>
+  `${route.scope_id}:${route.resource}:${route.category}`;
+
+const nodeIsWithinScope = (
+  nodeId: string,
+  scopeId: string,
+  nodesById: Map<string, EnergyIqProjectSetupNode>
+): boolean => {
+  let current = nodesById.get(nodeId);
+  const visited = new Set<string>();
+  while (current && !visited.has(current.id)) {
+    if (current.id === scopeId) return true;
+    visited.add(current.id);
+    current = current.parent_id ? nodesById.get(current.parent_id) : undefined;
+  }
+  return false;
+};
 
 const ensureColumn = (
   db: DatabaseSync,

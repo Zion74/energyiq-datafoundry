@@ -548,12 +548,18 @@ export const handleEnergyApiRequest = async (
     }
     if (segments[0] === "projects" && segments[2] === "saved-analyses") {
       const projectId = decodeURIComponent(segments[1] ?? "");
-      const projectAccessContext = resolveEnergyQueryContext({
+      const projectAccessContext = resolveEnergyAccessContext({
         metadataStore: context.metadataStore,
         user,
-        workspaceId: context.workspaceId,
-        request: { projectId, scopeId: "project", period: "Yesterday" },
+        requestedWorkspaceId: context.workspaceId,
       });
+      const projectAccess = projectAccessContext.projects.find((project) => project.id === projectId);
+      if (!projectAccess || projectAccess.workspaceId !== projectAccessContext.activeWorkspaceId) {
+        throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
+      }
+      if (projectAccess.status !== "published" && projectAccessContext.role !== "admin") {
+        throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
+      }
       if (segments.length === 3 && request.method === "GET") {
         return {
           status: 200,
@@ -583,7 +589,7 @@ export const handleEnergyApiRequest = async (
           id: `saved-analysis-${randomUUID()}`,
           series_id: `saved-analysis-series-${randomUUID()}`,
           project_id: projectId,
-          workspace_id: projectAccessContext.workspaceId,
+          workspace_id: projectAccessContext.activeWorkspaceId,
           scope_id: energyContext.scopeId,
           scope_name: energyContext.scopeName,
           resource: "electricity",
@@ -1326,7 +1332,11 @@ const parseMeterMappingDraft = (
   if (!Array.isArray(mapping.rows)) {
     throw new Error("ENERGYIQ_METER_MAPPING_ROWS_INVALID");
   }
+  if (mapping.schema_version !== 2) {
+    throw new Error("ENERGYIQ_METER_MAPPING_SCHEMA_UNSUPPORTED");
+  }
   return {
+    schema_version: 2,
     source_kind: mapping.source_kind === "tuya" ? "tuya" : "excel",
     confirmed: mapping.confirmed === true,
     rows: mapping.rows.map((value, index) => {
@@ -1351,6 +1361,9 @@ const parseMeterMappingDraft = (
         id: requireNonEmptyString(row.id, `ENERGYIQ_METER_MAPPING_ID_REQUIRED:${index}`),
         source_label: requireNonEmptyString(row.source_label, `ENERGYIQ_SOURCE_LABEL_REQUIRED:${index}`),
         scope_id: requireNonEmptyString(row.scope_id, `ENERGYIQ_METER_SCOPE_REQUIRED:${index}`),
+        ...(typeof row.navigation_scope_id === "string" && row.navigation_scope_id.trim()
+          ? { navigation_scope_id: row.navigation_scope_id.trim() }
+          : {}),
         display_name: requireNonEmptyString(row.display_name, `ENERGYIQ_METER_NAME_REQUIRED:${index}`),
         resource: row.resource === "water" ? "water" : "electricity",
         category,
@@ -1359,6 +1372,25 @@ const parseMeterMappingDraft = (
         aggregation_usage: aggregationUsage
       };
     }),
+    ...(Array.isArray(mapping.official_aggregation_routes) ? {
+      official_aggregation_routes: mapping.official_aggregation_routes.map((value, index) => {
+        const route = requireRecord(value, `ENERGYIQ_OFFICIAL_ROUTE_INVALID:${index}`);
+        if (!Array.isArray(route.meter_point_ids)) {
+          throw new Error(`ENERGYIQ_OFFICIAL_ROUTE_METERS_INVALID:${index}`);
+        }
+        const category = route.category;
+        if (category !== "overall" && category !== "load" && category !== "light" && category !== "aircon" && category !== "other") {
+          throw new Error(`ENERGYIQ_OFFICIAL_ROUTE_CATEGORY_INVALID:${index}`);
+        }
+        return {
+          scope_id: requireNonEmptyString(route.scope_id, `ENERGYIQ_OFFICIAL_ROUTE_SCOPE_REQUIRED:${index}`),
+          resource: route.resource === "water" ? "water" as const : "electricity" as const,
+          category,
+          meter_point_ids: route.meter_point_ids.map((meterPointId, memberIndex) =>
+            requireNonEmptyString(meterPointId, `ENERGYIQ_OFFICIAL_ROUTE_METER_REQUIRED:${index}:${memberIndex}`))
+        };
+      })
+    } : {}),
     ...(Array.isArray(mapping.virtual_meters) ? {
       virtual_meters: mapping.virtual_meters.map((value, index) => {
         const virtualMeter = requireRecord(value, `ENERGYIQ_VIRTUAL_METER_INVALID:${index}`);

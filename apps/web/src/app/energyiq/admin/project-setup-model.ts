@@ -143,22 +143,31 @@ export const createInitialMeterMapping = (
   const rows = sourceNodes
     .map((node): EnergyMeterMappingRowDto => {
       const category = inferMeterCategory(node.name);
-      const representsParentTotal = /^total\b/i.test(node.name) && Boolean(node.parent_id);
+      const configuredMeterRole = stringMetadata(node.metadata?.meterRole);
+      const representsDesignatedTotal = configuredMeterRole === "total"
+        || (configuredMeterRole !== "submeter" && /^total\b/i.test(node.name));
       const duplicateName = (nameCounts.get(node.name.trim().toLocaleLowerCase()) ?? 0) > 1;
       return {
         id: `mapping-${node.id}`,
         source_label: duplicateName ? nodePathLabel(document, node.id) : node.name,
-        scope_id: representsParentTotal ? node.parent_id! : node.id,
+        scope_id: node.id,
+        navigation_scope_id: node.id,
         display_name: node.name,
         resource: "electricity",
         category,
-        coverage: "whole",
-        meter_role: "total",
-        aggregation_usage: "official",
+        coverage: representsDesignatedTotal ? "whole" : "partial",
+        meter_role: representsDesignatedTotal ? "total" : "component",
+        aggregation_usage: representsDesignatedTotal ? "official" : "excluded",
       };
     })
     .sort((left, right) => left.source_label.localeCompare(right.source_label));
-  return { source_kind: "excel", rows, confirmed: false };
+  return {
+    schema_version: 2,
+    source_kind: "excel",
+    rows,
+    official_aggregation_routes: buildOfficialAggregationRoutes(document, rows),
+    confirmed: false
+  };
 };
 
 export const createMeterMappingFromSourceLabels = (
@@ -198,16 +207,16 @@ export const createMeterMappingFromSourceLabels = (
       const existing = existingByLabel.get(normaliseDisplayName(sourceLabel));
       if (!matched && existing) return existing;
       const configuredMeterRole = stringMetadata(matched?.metadata?.meterRole);
-      const representsParentTotal = (
-        configuredMeterRole === "total" || /^total\b/i.test(parsed.meterName)
-      ) && Boolean(matched?.parent_id);
-      const representsComponent = configuredMeterRole === "submeter";
-      const scopeId = representsParentTotal ? matched!.parent_id! : matched?.id ?? "";
+      const representsDesignatedTotal = configuredMeterRole === "total"
+        || (configuredMeterRole !== "submeter" && /^total\b/i.test(parsed.meterName));
+      const representsComponent = !representsDesignatedTotal;
+      const scopeId = matched?.id ?? "";
       const configuredCategory = meterCategoryMetadata(matched?.metadata?.category);
       return {
         id: existing?.id ?? `mapping-${slug(sourceLabel)}-${index + 1}`,
         source_label: sourceLabel,
         scope_id: scopeId,
+        ...(matched ? { navigation_scope_id: matched.id } : {}),
         display_name: matched?.name ?? parsed.meterName,
         resource: "electricity",
         category: configuredCategory ?? inferMeterCategory(parsed.meterName),
@@ -217,11 +226,55 @@ export const createMeterMappingFromSourceLabels = (
       };
     });
   return {
+    schema_version: 2,
     source_kind: "excel",
     rows,
+    official_aggregation_routes: buildOfficialAggregationRoutes(document, rows),
     ...resolveNgeeAnnVirtualMeters(rows, existingMapping),
     confirmed: false,
   };
+};
+
+const buildOfficialAggregationRoutes = (
+  document: EnergyProjectSetupDocumentDto,
+  rows: EnergyMeterMappingRowDto[],
+): NonNullable<EnergyMeterMappingDraftDto["official_aggregation_routes"]> => {
+  const nodesById = new Map(document.nodes.map((node) => [node.id, node]));
+  const routeMembers = new Map<string, Set<string>>();
+  const add = (scopeId: string, row: EnergyMeterMappingRowDto) => {
+    const key = `${scopeId}\u0000${row.resource}\u0000${row.category}`;
+    const members = routeMembers.get(key) ?? new Set<string>();
+    members.add(row.id);
+    routeMembers.set(key, members);
+  };
+  for (const row of rows) {
+    const navigationScopeId = row.navigation_scope_id ?? row.scope_id;
+    if (!navigationScopeId || !nodesById.has(navigationScopeId)) continue;
+    add(navigationScopeId, row);
+    if (row.aggregation_usage !== "official") continue;
+    let current = nodesById.get(navigationScopeId);
+    const visited = new Set<string>();
+    while (current?.parent_id && !visited.has(current.parent_id)) {
+      visited.add(current.parent_id);
+      add(current.parent_id, row);
+      current = nodesById.get(current.parent_id);
+    }
+    add("project", row);
+  }
+  return [...routeMembers.entries()]
+    .map(([key, members]) => {
+      const [scopeId = "", resource = "electricity", category = "other"] = key.split("\u0000");
+      return {
+        scope_id: scopeId,
+        resource: resource === "water" ? "water" as const : "electricity" as const,
+        category: category === "overall" || category === "load" || category === "light" || category === "aircon"
+          ? category
+          : "other" as const,
+        meter_point_ids: [...members].sort(),
+      };
+    })
+    .sort((left, right) => left.scope_id.localeCompare(right.scope_id)
+      || left.resource.localeCompare(right.resource));
 };
 
 export const sourceLabelsAcrossImportBatches = (
@@ -296,23 +349,42 @@ export const buildAggregationReview = (
   document: EnergyProjectSetupDocumentDto,
   mapping: EnergyMeterMappingDraftDto,
 ): EnergyAggregationReview[] => {
-  const groups = new Map<string, EnergyMeterMappingRowDto[]>();
-  for (const row of mapping.rows) {
-    const key = `${row.scope_id}:${row.resource}:${row.category}`;
-    groups.set(key, [...(groups.get(key) ?? []), row]);
-  }
-  return [...groups.entries()].map(([key, rows]): EnergyAggregationReview => {
-    const officialTotals = rows.filter((row) => row.meter_role === "total" && row.aggregation_usage === "official");
-    const officialComponents = rows.filter((row) => row.meter_role === "component" && row.aggregation_usage === "official");
-    const excluded = rows.filter((row) => row.aggregation_usage === "excluded");
+  const rowsById = new Map(mapping.rows.map((row) => [row.id, row]));
+  const nodesById = new Map(document.nodes.map((node) => [node.id, node]));
+  const withinScope = (row: EnergyMeterMappingRowDto, scopeId: string): boolean => {
+    if (scopeId === "project") return true;
+    let current = nodesById.get(row.navigation_scope_id ?? row.scope_id);
+    const visited = new Set<string>();
+    while (current && !visited.has(current.id)) {
+      if (current.id === scopeId) return true;
+      visited.add(current.id);
+      current = current.parent_id ? nodesById.get(current.parent_id) : undefined;
+    }
+    return false;
+  };
+  return (mapping.official_aggregation_routes ?? []).map((route): EnergyAggregationReview => {
+    const rows = route.meter_point_ids.flatMap((meterPointId) => {
+      const row = rowsById.get(meterPointId);
+      return row ? [row] : [];
+    });
+    const officialTotals = rows.filter((row) => row.meter_role === "total");
+    const officialComponents = rows.filter((row) => row.meter_role === "component");
+    const selectedIds = new Set(route.meter_point_ids);
+    const excluded = mapping.rows.filter((row) =>
+      row.resource === route.resource
+      && row.category === route.category
+      && withinScope(row, route.scope_id)
+      && !selectedIds.has(row.id));
     return {
-      key,
-      scopeId: rows[0]!.scope_id,
-      scopeName: document.nodes.some((node) => node.id === rows[0]!.scope_id)
-        ? nodePathLabel(document, rows[0]!.scope_id)
-        : "Missing Scope",
-      resource: rows[0]!.resource,
-      category: rows[0]!.category,
+      key: `${route.scope_id}:${route.resource}:${route.category}`,
+      scopeId: route.scope_id,
+      scopeName: route.scope_id === "project"
+        ? document.project.name
+        : document.nodes.some((node) => node.id === route.scope_id)
+          ? nodePathLabel(document, route.scope_id)
+          : "Missing Scope",
+      resource: route.resource,
+      category: route.category,
       officialTotals,
       officialComponents,
       excluded,

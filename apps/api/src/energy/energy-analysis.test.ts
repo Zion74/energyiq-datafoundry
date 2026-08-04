@@ -118,7 +118,6 @@ describe("EnergyScopeAnalysis", () => {
     const gateway = new LocalDataGateway(metadata);
     try {
       ensureEnergyIqBootstrap(metadata);
-      configureNgeeAnnGoldenVirtualMeter(metadata);
       const user = metadata.users.getById({ user_id: "dev-user" });
       const context = resolveEnergyQueryContext({
         metadataStore: metadata,
@@ -213,6 +212,8 @@ describe("EnergyScopeAnalysis", () => {
       expect(analysis.virtualMeters).toContainEqual(expect.objectContaining(NGEE_ANN_GOLDEN.virtualMeter));
       expect(analysis.provenance).toMatchObject({
         hierarchyRevisionId: context.hierarchyRevisionId,
+        meterMappingRevisionId: context.meterMappingRevisionId,
+        meterFormulaRevisionId: context.meterFormulaRevisionId,
         aggregationRule: "designated_total"
       });
 
@@ -291,7 +292,7 @@ describe("EnergyScopeAnalysis", () => {
           qualityEventCount: 0
         });
       }
-      const topCircuit = await analyzeScope(NGEE_ANN_GOLDEN.period.topCircuit.meterNodeId);
+      const topCircuit = await analyzeScope(NGEE_ANN_GOLDEN.period.topCircuit.scopeId);
       expect(topCircuit.summary).toMatchObject({
         usageKwh: NGEE_ANN_GOLDEN.period.topCircuit.usageKwh,
         peakKw: NGEE_ANN_GOLDEN.period.topCircuit.peakKw
@@ -300,6 +301,24 @@ describe("EnergyScopeAnalysis", () => {
         usageKwh: NGEE_ANN_GOLDEN.period.topCircuit.previousUsageKwh,
         changeKwh: NGEE_ANN_GOLDEN.period.topCircuit.changeKwh,
         changePct: NGEE_ANN_GOLDEN.period.topCircuit.changePct
+      });
+      expect(topCircuit.provenance.aggregationRule).toBe("component");
+
+      const rawLevel6Usage = allocateLevel6Usage(buildCurrentRootUsage());
+      const rawLevel6LoadUsage = rawLevel6Usage.reduce((sum, usage) => sum + usage, 0)
+        * (1 - 110.974382 / 476.983827);
+      expect(Math.round(rawLevel6LoadUsage * 1_000_000) / 1_000_000)
+        .toBe(NGEE_ANN_GOLDEN.period.totalCircuit.rawUsageKwh);
+
+      const totalCircuit = await analyzeScope(NGEE_ANN_GOLDEN.period.totalCircuit.scopeId);
+      expect(totalCircuit.summary.usageKwh).toBe(NGEE_ANN_GOLDEN.period.totalCircuit.apiUsageKwh);
+      expect(totalCircuit.circuits.map((meter) => meter.meterNodeId)).toEqual([
+        NGEE_ANN_GOLDEN.period.totalCircuit.meterNodeId
+      ]);
+      expect(totalCircuit.provenance).toMatchObject({
+        meterMappingRevisionId: context.meterMappingRevisionId,
+        meterFormulaRevisionId: context.meterFormulaRevisionId,
+        aggregationRule: "designated_total"
       });
     } finally {
       metadata.close();
@@ -411,7 +430,7 @@ const materializeNgeeAnnGoldenFixture = async (databasePath: string): Promise<vo
   const previousFrom = currentFrom - 7 * 86_400_000;
   const legacyBatchId = NGEE_ANN_GOLDEN.period.dataHealth.importBatchIds[0];
   const currentBatchId = NGEE_ANN_GOLDEN.period.dataHealth.importBatchIds[1];
-  const level6LightShare = 110.974382 / 476.983827;
+  const level6LightShare = 1 - NGEE_ANN_GOLDEN.period.totalCircuit.rawUsageKwh / 476.983827;
   const level7LightShare = 180.770005 / 1054.184497;
   const meters: GoldenMeter[] = [
     officialMeter({
@@ -433,7 +452,7 @@ const materializeNgeeAnnGoldenFixture = async (databasePath: string): Promise<vo
       current: currentLevel6Usage.map((usage) => usage * (1 - level6LightShare))
     }),
     officialMeter({
-      id: "l7-total-light",
+      id: "mapping-lvl-7-total-office-light-17",
       scopeId: "level-7",
       name: "Total Office Light",
       category: "light",
@@ -442,7 +461,7 @@ const materializeNgeeAnnGoldenFixture = async (databasePath: string): Promise<vo
       current: currentLevel7Usage.map((usage) => usage * level7LightShare)
     }),
     officialMeter({
-      id: "l7-total-load",
+      id: "mapping-lvl-7-total-office-load-18",
       scopeId: "level-7",
       name: "Total Office Load",
       category: "load",
@@ -494,67 +513,6 @@ const materializeNgeeAnnGoldenFixture = async (databasePath: string): Promise<vo
   }
 };
 
-const configureNgeeAnnGoldenVirtualMeter = (
-  metadata: ReturnType<typeof createMetadataStore>
-): void => {
-  const draft = metadata.energyIq.projectSetup.getDraft({
-    project_id: NGEE_ANN_GOLDEN.projectId,
-    user_id: "dev-user"
-  });
-  const saved = metadata.energyIq.projectSetup.saveDraft({
-    project_id: NGEE_ANN_GOLDEN.projectId,
-    expected_revision: draft.revision,
-    user_id: "dev-user",
-    document: {
-      ...draft.document,
-      meter_mapping: {
-        source_kind: "excel",
-        confirmed: true,
-        rows: [
-          {
-            id: NGEE_ANN_GOLDEN.virtualMeter.termMeterNodeIds[0],
-            source_label: "Lvl 6 Office Load 1: L1P1-L3P6",
-            scope_id: "l6-load-1",
-            display_name: "Office Load 1",
-            resource: "electricity",
-            category: "load",
-            coverage: "whole",
-            meter_role: "total",
-            aggregation_usage: "official"
-          },
-          {
-            id: NGEE_ANN_GOLDEN.virtualMeter.termMeterNodeIds[1],
-            source_label: "Lvl 6 Office Load 2: L1P7-L3P12",
-            scope_id: "l6-load-2",
-            display_name: "Office Load 2",
-            resource: "electricity",
-            category: "load",
-            coverage: "whole",
-            meter_role: "total",
-            aggregation_usage: "official"
-          }
-        ],
-        virtual_meters: [{
-          id: NGEE_ANN_GOLDEN.virtualMeter.meterNodeId,
-          display_name: NGEE_ANN_GOLDEN.virtualMeter.name,
-          scope_id: NGEE_ANN_GOLDEN.virtualMeter.scopeId,
-          resource: "electricity",
-          category: "load",
-          terms: NGEE_ANN_GOLDEN.virtualMeter.termMeterNodeIds.map((mappingRowId) => ({
-            mapping_row_id: mappingRowId,
-            coefficient: 1 as const
-          }))
-        }]
-      }
-    }
-  });
-  metadata.energyIq.projectSetup.publishDraft({
-    project_id: NGEE_ANN_GOLDEN.projectId,
-    expected_revision: saved.revision,
-    user_id: "dev-user"
-  });
-};
-
 const officialMeter = (input: {
   id: string;
   scopeId: string;
@@ -578,14 +536,14 @@ const circuitMeters = (currentBatchId: string, legacyBatchId: string): GoldenMet
   circuitMeter("mapping-lvl-6-office-load-3-l1p13-l3p18-5", "l6-load-3", "Lvl 6 Office Load 3: L1P13-L3P18", "load", "total", 13.52915, currentBatchId),
   circuitMeter("mapping-lvl-6-office-load-4-l1p19-l3p24-6", "l6-load-4", "Lvl 6 Office Load 4: L1P19-L3P24", "load", "total", 255.153879, currentBatchId),
   circuitMeter("mapping-lvl-6-office-load-5-l1p25-l3p29-fan-isol-1-2-7", "l6-load-5", "Lvl 6 Office Load 5: L1P25-L3P29 Fan Isol 1/2", "load", "total", 42.335467, currentBatchId),
-  circuitMeter("l7-front-light", "l7-front-light", "Front Row Office Light", "light", "submeter", 107.019997, legacyBatchId),
-  circuitMeter("l7-middle-light", "l7-middle-light", "Middle Row Office Light", "light", "submeter", 20.767825, legacyBatchId),
-  circuitMeter("l7-back-light", "l7-back-light", "Back Row Office Light", "light", "submeter", 48.904264, legacyBatchId),
-  circuitMeter("l7-load-1", "l7-load-1", "Office Load 1", "load", "submeter", 28.122014, legacyBatchId),
-  circuitMeter("l7-load-2", "l7-load-2", "Office Load 2", "load", "submeter", 66.168234, legacyBatchId),
-  circuitMeter("l7-load-3", "l7-load-3", "Office Load 3", "load", "submeter", 337.902316, legacyBatchId),
+  circuitMeter("mapping-lvl-7-front-row-office-light-11", "l7-front-light", "Front Row Office Light", "light", "submeter", 107.019997, legacyBatchId),
+  circuitMeter("mapping-lvl-7-middle-row-office-light-12", "l7-middle-light", "Middle Row Office Light", "light", "submeter", 20.767825, legacyBatchId),
+  circuitMeter("mapping-lvl-7-back-row-office-light-10", "l7-back-light", "Back Row Office Light", "light", "submeter", 48.904264, legacyBatchId),
+  circuitMeter("mapping-lvl-7-office-load-1-l1p1-l3p6-13", "l7-load-1", "Office Load 1", "load", "submeter", 28.122014, legacyBatchId),
+  circuitMeter("mapping-lvl-7-office-load-2-l1p7-l3p15-14", "l7-load-2", "Office Load 2", "load", "submeter", 66.168234, legacyBatchId),
+  circuitMeter("mapping-lvl-7-office-load-3-l1p16-l3p21-15", "l7-load-3", "Office Load 3", "load", "submeter", 337.902316, legacyBatchId),
   circuitMeter(
-    "l7-load-4",
+    "mapping-lvl-7-office-load-4-l1p22-l3p25-fan-isol1-2-16",
     "l7-load-4",
     "Office Load 4 Fan ISOL 1/2",
     "load",

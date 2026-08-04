@@ -110,6 +110,7 @@ export type EnergyIqTemplateRevisionRecord = {
   source_template_draft_revision: number;
   document: EnergyIqTemplateDraftDocument;
   hierarchy_revision_id: string;
+  meter_mapping_revision_id: string;
   meter_formula_revision_id: string;
   metric_config_revision: number;
   selected_metric_revision_ids: string[];
@@ -362,6 +363,7 @@ export const initializeEnergyIqTemplateRevisionSchema = (db: DatabaseSync): void
       source_template_draft_revision INTEGER NOT NULL,
       document_json TEXT NOT NULL,
       hierarchy_revision_id TEXT NOT NULL,
+      meter_mapping_revision_id TEXT NOT NULL,
       meter_formula_revision_id TEXT NOT NULL,
       metric_config_revision INTEGER NOT NULL,
       selected_metric_revision_ids_json TEXT NOT NULL,
@@ -379,6 +381,12 @@ export const initializeEnergyIqTemplateRevisionSchema = (db: DatabaseSync): void
     CREATE INDEX IF NOT EXISTS idx_energyiq_template_revisions_project
       ON energyiq_template_revisions(project_id, sequence DESC);
   `);
+  ensureColumn(
+    db,
+    "energyiq_template_revisions",
+    "meter_mapping_revision_id",
+    "TEXT NOT NULL DEFAULT 'meter-routing-unavailable'",
+  );
 };
 
 export class EnergyIqTemplateStore {
@@ -489,6 +497,7 @@ export class EnergyIqTemplateStore {
     project_id: string;
     tier_definition_ids: string[];
     hierarchy_revision_id: string;
+    meter_mapping_revision_id: string;
     published_by: string;
     published_at: string;
     expected_template_draft_revision?: number;
@@ -530,11 +539,11 @@ export class EnergyIqTemplateStore {
     this.db.prepare(`
       INSERT INTO energyiq_template_revisions (
         revision_id, project_id, sequence, source_template_draft_revision,
-        document_json, hierarchy_revision_id, meter_formula_revision_id,
+        document_json, hierarchy_revision_id, meter_mapping_revision_id, meter_formula_revision_id,
         metric_config_revision, selected_metric_revision_ids_json,
         rule_config_revision, selected_rule_revision_ids_json,
         business_calendar_version, tariff_schedule_version, published_by, published_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       revisionId,
       input.project_id,
@@ -542,6 +551,7 @@ export class EnergyIqTemplateStore {
       draft.revision,
       JSON.stringify(draft.document),
       input.hierarchy_revision_id,
+      input.meter_mapping_revision_id,
       requiredString(project, "meter_formula_revision_id"),
       metricConfig.revision,
       JSON.stringify(metricConfig.selectedRevisionIds),
@@ -1056,6 +1066,7 @@ const mapTemplateRevision = (row: unknown): EnergyIqTemplateRevisionRecord => {
     source_template_draft_revision: requiredNumber(row, "source_template_draft_revision"),
     document: parsedDocument as EnergyIqTemplateDraftDocument,
     hierarchy_revision_id: requiredString(row, "hierarchy_revision_id"),
+    meter_mapping_revision_id: requiredString(row, "meter_mapping_revision_id"),
     meter_formula_revision_id: requiredString(row, "meter_formula_revision_id"),
     metric_config_revision: requiredNumber(row, "metric_config_revision"),
     selected_metric_revision_ids: parseStringArray(requiredString(row, "selected_metric_revision_ids_json")),

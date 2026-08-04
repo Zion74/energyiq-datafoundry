@@ -69,6 +69,7 @@ const snapshot = (): ProjectAnalysisSnapshot => ({
     endExclusive: true,
     period: "Custom",
     hierarchyRevisionId: "hierarchy@1",
+    meterMappingRevisionId: "meter-routing@1",
     meterFormulaRevisionId: "formula@1",
     dataSnapshotId: "snapshot-1",
     metricVersion: "energy.total_usage_kwh@1",
@@ -90,6 +91,7 @@ const snapshot = (): ProjectAnalysisSnapshot => ({
     recipe: { id: "energy-scope-analysis", version: "1" },
     renderer: { key: "ngee-ann-overview", version: "1", contractVersion: "project-analysis-snapshot@1" },
     hierarchyRevisionId: "hierarchy@1",
+    meterMappingRevisionId: "meter-routing@1",
     meterFormulaRevisionId: "formula@1",
     metricRevisionIds: ["energy.total_usage_kwh@1"],
     ruleRevisionIds: [],
@@ -151,7 +153,7 @@ const snapshot = (): ProjectAnalysisSnapshot => ({
     metadata: {} as never,
     attention: [],
     provenance: {
-      dataSnapshotId: "snapshot-1", hierarchyRevisionId: "hierarchy@1", meterFormulaRevisionId: "formula@1",
+      dataSnapshotId: "snapshot-1", hierarchyRevisionId: "hierarchy@1", meterMappingRevisionId: "meter-routing@1", meterFormulaRevisionId: "formula@1",
       metricVersion: "energy.total_usage_kwh@1", ruleRevisionIds: [], aggregationRule: "designated_total",
       sourceView: "energy_scope_deadbeef",
       queryIds: [

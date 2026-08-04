@@ -21,22 +21,27 @@ try {
       workspaceId: "default",
       projectId: "ngee-ann-polytechnic",
       scopeId: "level-7",
-      scopeNodeIds: [
-        "l7-total-light",
-        "l7-total-load",
-        "l7-front-light",
-        "l7-middle-light",
-        "l7-back-light",
-        "l7-load-1",
-        "l7-load-2",
-        "l7-load-3",
-        "l7-load-4"
-      ],
+      meterAttachments: [
+        ["mapping-lvl-7-total-office-light-17", "l7-total-light", true],
+        ["mapping-lvl-7-total-office-load-18", "l7-total-load", true],
+        ["mapping-lvl-7-front-row-office-light-11", "l7-front-light", false],
+        ["mapping-lvl-7-middle-row-office-light-12", "l7-middle-light", false],
+        ["mapping-lvl-7-back-row-office-light-10", "l7-back-light", false],
+        ["mapping-lvl-7-office-load-1-l1p1-l3p6-13", "l7-load-1", false],
+        ["mapping-lvl-7-office-load-2-l1p7-l3p15-14", "l7-load-2", false],
+        ["mapping-lvl-7-office-load-3-l1p16-l3p21-15", "l7-load-3", false],
+        ["mapping-lvl-7-office-load-4-l1p22-l3p25-fan-isol1-2-16", "l7-load-4", false]
+      ].map(([meterPointId, scopeId, officialAggregation]) => ({
+        meterPointId,
+        scopeId,
+        officialAggregation
+      })),
       resource: "electricity",
       from: "2026-05-01T00:00:00.000Z",
       to: "2026-06-01T00:00:00.000Z",
       timezone: "Asia/Singapore",
       hierarchyRevisionId: "ngee-ann-hierarchy-v1",
+      meterMappingRevisionId: "smoke-published-routing-v2",
       meterFormulaRevisionId: "ngee-ann-meter-formula-v1",
       dataSnapshotId: "ngee-ann-4bac1177eca62cdb",
       metricVersion: "energy-metrics-v1"
@@ -91,12 +96,17 @@ try {
       workspaceId: "default",
       projectId: "preschool-demo",
       scopeId: "preschool-centre-a",
-      scopeNodeIds: preschoolScopeNodeIds,
+      meterAttachments: preschoolScopeNodeIds.map((meterPointId) => ({
+        meterPointId,
+        scopeId: meterPointId,
+        officialAggregation: true
+      })),
       resource: "electricity",
       from: "2026-04-30T16:00:00.000Z",
       to: "2026-05-31T16:00:00.000Z",
       timezone: "Asia/Singapore",
       hierarchyRevisionId: "preschool-hierarchy-v3",
+      meterMappingRevisionId: "smoke-published-routing-v2",
       meterFormulaRevisionId: "preschool-meter-formula-v2",
       dataSnapshotId: "preschool-26b85b9c0b95e090",
       metricVersion: "energy-metrics-v1"

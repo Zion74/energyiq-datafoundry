@@ -82,10 +82,10 @@ import { TaskPlanProjector } from "./task-plan-projector.js";
 import { ToolCallResultBridge } from "./tool-call-result-bridge.js";
 import { compileTrustedEnergyRunContract } from "./trusted-energy-run-contract.js";
 import { ensureEnergyIqBootstrap } from "./energy/energy-bootstrap.js";
-import { resolveEnergyAccessContext } from "./energy/energy-query-context.js";
 import {
-  resolveEnergyQueryContext,
-  resolveEnergyScopeMeterNodeIds
+  resolveEnergyAccessContext,
+  resolveEnergyPublishedMeterRoute,
+  resolveEnergyQueryContext
 } from "./energy/energy-query-context.js";
 import {
   createEnergyQueryContextItem,
@@ -535,7 +535,17 @@ class DataFoundryAgUiAgent extends AbstractAgent {
                 request: energyRequest
               })
             : undefined;
-          const energyScopedDataSource = energyQueryContext
+          const publishedMeterRoute = energyQueryContext
+            ? resolveEnergyPublishedMeterRoute({
+                metadataStore: this.input.metadataStore,
+                projectId: energyQueryContext.projectId,
+                hierarchyRevisionId: energyQueryContext.hierarchyRevisionId,
+                scopeId: energyQueryContext.scopeId,
+                resource: energyQueryContext.resource,
+                expectedMeterMappingRevisionId: energyQueryContext.meterMappingRevisionId
+              })
+            : undefined;
+          const energyScopedDataSource = energyQueryContext && publishedMeterRoute
             ? await ensureEnergyScopedDataSource({
                 metadataStore: this.input.metadataStore,
                 userId: this.input.user.id,
@@ -543,16 +553,13 @@ class DataFoundryAgUiAgent extends AbstractAgent {
                   workspaceId: energyQueryContext.workspaceId,
                   projectId: energyQueryContext.projectId,
                   scopeId: energyQueryContext.scopeId,
-                  scopeNodeIds: resolveEnergyScopeMeterNodeIds(
-                    this.input.metadataStore,
-                    energyQueryContext.projectId,
-                    energyQueryContext.scopeId
-                  ),
+                  meterAttachments: publishedMeterRoute.attachments,
                   resource: energyQueryContext.resource,
                   from: energyQueryContext.from,
                   to: energyQueryContext.to,
                   timezone: energyQueryContext.timezone,
                   hierarchyRevisionId: energyQueryContext.hierarchyRevisionId,
+                  meterMappingRevisionId: publishedMeterRoute.meterMappingRevisionId,
                   meterFormulaRevisionId: energyQueryContext.meterFormulaRevisionId,
                   dataSnapshotId: energyQueryContext.dataSnapshotId,
                   metricVersion: energyQueryContext.metricVersion

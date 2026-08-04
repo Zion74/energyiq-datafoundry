@@ -113,6 +113,7 @@ const setupDocument = (mappingLabels: string[]): EnergyIqProjectSetupDocument =>
   }],
   source_manifest: createEnergyIqSourceManifest(importBatches().map((batch) => batch.source_sha256), true),
   meter_mapping: {
+    schema_version: 2,
     source_kind: "excel",
     confirmed: true,
     rows: mappingLabels.map((label, index) => ({

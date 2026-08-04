@@ -14,6 +14,7 @@ import {
   PRESCHOOL_GOLDEN,
 } from "./preschool-golden.fixture.js";
 import { resolveProjectAnalysis } from "./project-analysis-resolver.js";
+import { resolveEnergyPublishedMeterRoute } from "./energy-query-context.js";
 
 describe("ProjectAnalysisResolver", () => {
   it("rejects a Project outside the user's Workspace Membership before resolving its Scope", async () => {
@@ -291,6 +292,7 @@ describe("ProjectAnalysisResolver", () => {
         tier_definition_ids: metadata.energyIq.listTierDefinitions("preschool-demo")
           .map((tier) => tier.id),
         hierarchy_revision_id: project.hierarchy_revision_id,
+        meter_mapping_revision_id: resolveEnergyPublishedMeterRoute({ metadataStore: metadata, projectId: project.id, hierarchyRevisionId: project.hierarchy_revision_id, scopeId: project.root_scope_id, resource: "electricity" }).meterMappingRevisionId,
         published_by: "dev-user",
         published_at: "2026-08-04T00:00:00.000Z",
       });

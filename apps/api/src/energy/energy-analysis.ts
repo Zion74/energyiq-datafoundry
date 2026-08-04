@@ -16,7 +16,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  resolveEnergyScopeMeterNodeIds,
+  resolveEnergyPublishedMeterRoute,
+  resolveEnergyPublishedHierarchyNodes,
   type EnergyQueryContext
 } from "./energy-query-context.js";
 
@@ -147,6 +148,7 @@ export type EnergyScopeAnalysis = {
   provenance: {
     dataSnapshotId: string;
     hierarchyRevisionId: string;
+    meterMappingRevisionId: string;
     meterFormulaRevisionId: string;
     metricVersion: string;
     ruleRevisionIds: string[];
@@ -226,11 +228,14 @@ export const selectEnergyGoldenPeriod = async (input: {
   if (!coverage) {
     throw new Error("ENERGYIQ_GOLDEN_COVERAGE_NOT_FOUND");
   }
-  const scopeNodeIds = resolveEnergyScopeMeterNodeIds(
-    input.metadataStore,
-    input.context.projectId,
-    input.context.scopeId
-  );
+  const publishedMeterRoute = resolveEnergyPublishedMeterRoute({
+    metadataStore: input.metadataStore,
+    projectId: input.context.projectId,
+    hierarchyRevisionId: input.context.hierarchyRevisionId,
+    scopeId: input.context.scopeId,
+    resource: input.context.resource,
+    expectedMeterMappingRevisionId: input.context.meterMappingRevisionId
+  });
   const scoped = await ensureEnergyScopedDataSource({
     metadataStore: input.metadataStore,
     userId: input.userId,
@@ -238,12 +243,13 @@ export const selectEnergyGoldenPeriod = async (input: {
       workspaceId: input.context.workspaceId,
       projectId: input.context.projectId,
       scopeId: input.context.scopeId,
-      scopeNodeIds,
+      meterAttachments: publishedMeterRoute.attachments,
       resource: input.context.resource,
       from: coverage.from,
       to: coverage.to,
       timezone: input.context.timezone,
       hierarchyRevisionId: input.context.hierarchyRevisionId,
+      meterMappingRevisionId: publishedMeterRoute.meterMappingRevisionId,
       meterFormulaRevisionId: input.context.meterFormulaRevisionId,
       dataSnapshotId: input.context.dataSnapshotId,
       metricVersion: input.context.metricVersion
@@ -258,16 +264,16 @@ export const selectEnergyGoldenPeriod = async (input: {
     limit: 1000
   });
   const meterAggregates = meterResult.rows.map(rowToMeterAggregate);
-  const hierarchy = input.metadataStore.energyIq.listProjectNodes(input.context.projectId);
+  const hierarchy = resolveEnergyPublishedHierarchyNodes(
+    input.metadataStore,
+    input.context.projectId,
+    input.context.hierarchyRevisionId
+  );
   const selectedNode = hierarchy.find((node) => node.id === input.context.scopeId);
   if (!selectedNode) {
     throw new Error("ENERGYIQ_SCOPE_FORBIDDEN");
   }
-  const aggregateMeterNodeIds = selectAggregateMetersForScope(
-    selectedNode.id,
-    meterAggregates,
-    hierarchy
-  ).map((meter) => meter.meterNodeId);
+  const aggregateMeterNodeIds = publishedMeterRoute.officialMeterPointIds ?? [];
   const selected = await input.dataGateway.runSqlReadonly({
     user_id: input.userId,
     workspace_id: input.context.workspaceId,
@@ -328,11 +334,14 @@ export const executeEnergyScopeAnalysis = async (input: {
   databasePath?: string;
   ruleRevisions?: readonly EnergyIqRuleRevisionRecord[];
 }): Promise<EnergyScopeAnalysis> => {
-  const scopeNodeIds = resolveEnergyScopeMeterNodeIds(
-    input.metadataStore,
-    input.context.projectId,
-    input.context.scopeId
-  );
+  const publishedMeterRoute = resolveEnergyPublishedMeterRoute({
+    metadataStore: input.metadataStore,
+    projectId: input.context.projectId,
+    hierarchyRevisionId: input.context.hierarchyRevisionId,
+    scopeId: input.context.scopeId,
+    resource: input.context.resource,
+    expectedMeterMappingRevisionId: input.context.meterMappingRevisionId
+  });
   const scoped = await ensureEnergyScopedDataSource({
     metadataStore: input.metadataStore,
     userId: input.userId,
@@ -340,12 +349,13 @@ export const executeEnergyScopeAnalysis = async (input: {
       workspaceId: input.context.workspaceId,
       projectId: input.context.projectId,
       scopeId: input.context.scopeId,
-      scopeNodeIds,
+      meterAttachments: publishedMeterRoute.attachments,
       resource: input.context.resource,
       from: input.context.from,
       to: input.context.to,
       timezone: input.context.timezone,
       hierarchyRevisionId: input.context.hierarchyRevisionId,
+      meterMappingRevisionId: publishedMeterRoute.meterMappingRevisionId,
       meterFormulaRevisionId: input.context.meterFormulaRevisionId,
       dataSnapshotId: input.context.dataSnapshotId,
       metricVersion: input.context.metricVersion
@@ -363,18 +373,21 @@ export const executeEnergyScopeAnalysis = async (input: {
     limit: 1000
   });
   const meterAggregates = meterResult.rows.map(rowToMeterAggregate);
-  const hierarchy = input.metadataStore.energyIq.listProjectNodes(input.context.projectId);
+  const hierarchy = resolveEnergyPublishedHierarchyNodes(
+    input.metadataStore,
+    input.context.projectId,
+    input.context.hierarchyRevisionId
+  );
   const selectedNode = hierarchy.find((node) => node.id === input.context.scopeId);
   if (!selectedNode) {
     throw new Error("ENERGYIQ_SCOPE_FORBIDDEN");
   }
-  const aggregateMeters = selectAggregateMetersForScope(
-    selectedNode.id,
-    meterAggregates,
-    hierarchy
-  );
-  const aggregateMeterNodeIds = aggregateMeters.map((meter) => meter.meterNodeId);
-  const aggregationRule = aggregationRuleForMeters(aggregateMeters);
+  const aggregateMeterNodeIds = publishedMeterRoute.officialMeterPointIds ?? [];
+  const aggregateMeterIds = new Set(aggregateMeterNodeIds);
+  const aggregateMeters = meterAggregates.filter((meter) => aggregateMeterIds.has(meter.meterNodeId));
+  const aggregationRule = publishedMeterRoute.officialMeterRoles
+    ? aggregationRuleForRoles(publishedMeterRoute.officialMeterRoles)
+    : aggregationRuleForMeters(aggregateMeters);
   const periodDurationMs = Date.parse(input.context.to) - Date.parse(input.context.from);
   const previousFrom = new Date(Date.parse(input.context.from) - periodDurationMs).toISOString();
   const previousTo = input.context.from;
@@ -385,12 +398,13 @@ export const executeEnergyScopeAnalysis = async (input: {
       workspaceId: input.context.workspaceId,
       projectId: input.context.projectId,
       scopeId: input.context.scopeId,
-      scopeNodeIds,
+      meterAttachments: publishedMeterRoute.attachments,
       resource: input.context.resource,
       from: previousFrom,
       to: previousTo,
       timezone: input.context.timezone,
       hierarchyRevisionId: input.context.hierarchyRevisionId,
+      meterMappingRevisionId: publishedMeterRoute.meterMappingRevisionId,
       meterFormulaRevisionId: input.context.meterFormulaRevisionId,
       dataSnapshotId: input.context.dataSnapshotId,
       metricVersion: input.context.metricVersion
@@ -513,6 +527,11 @@ export const executeEnergyScopeAnalysis = async (input: {
   );
   const scopeDimensions = resolveScopeDimensions(selectedNode.id, hierarchy);
   const childScopes = buildChildScopes({
+    metadataStore: input.metadataStore,
+    projectId: input.context.projectId,
+    hierarchyRevisionId: input.context.hierarchyRevisionId,
+    meterMappingRevisionId: input.context.meterMappingRevisionId,
+    resource: input.context.resource,
     scopeNodeId: selectedNode.id,
     hierarchy,
     meterAggregates,
@@ -642,6 +661,7 @@ export const executeEnergyScopeAnalysis = async (input: {
     provenance: {
       dataSnapshotId: input.context.dataSnapshotId,
       hierarchyRevisionId: input.context.hierarchyRevisionId,
+      meterMappingRevisionId: publishedMeterRoute.meterMappingRevisionId,
       meterFormulaRevisionId: input.context.meterFormulaRevisionId,
       metricVersion: input.context.metricVersion,
       ruleRevisionIds: ruleRevisions.map((rule) => rule.revision_id),
@@ -727,6 +747,11 @@ const mapOperatingEvaluation = (
     };
 
 const buildChildScopes = (input: {
+  metadataStore: MetadataStore;
+  projectId: string;
+  hierarchyRevisionId: string;
+  meterMappingRevisionId: string;
+  resource: "electricity" | "water";
   scopeNodeId: string;
   hierarchy: ReturnType<MetadataStore["energyIq"]["listProjectNodes"]>;
   meterAggregates: MeterAggregate[];
@@ -737,7 +762,20 @@ const buildChildScopes = (input: {
     const descendantIds = collectDescendantIds(child.id, input.hierarchy);
     descendantIds.add(child.id);
     const meters = input.meterAggregates.filter((meter) => descendantIds.has(meter.scopeId));
-    const aggregateMeters = selectAggregateMetersForScope(child.id, meters, input.hierarchy);
+    const publishedRoute = resolveEnergyPublishedMeterRoute({
+      metadataStore: input.metadataStore,
+      projectId: input.projectId,
+      hierarchyRevisionId: input.hierarchyRevisionId,
+      scopeId: child.id,
+      resource: input.resource,
+      expectedMeterMappingRevisionId: input.meterMappingRevisionId
+    });
+    const officialIds = publishedRoute.officialMeterPointIds
+      ? new Set(publishedRoute.officialMeterPointIds)
+      : undefined;
+    const aggregateMeters = officialIds
+      ? meters.filter((meter) => officialIds.has(meter.meterNodeId))
+      : [];
     const usageKwh = aggregateMeters.reduce((sum, meter) => sum + meter.usageKwh, 0);
     const breakdownMeters = meters.filter((meter) => meter.scopeId !== child.id);
     const topCircuit = maxBy(breakdownMeters, (meter) => meter.usageKwh);
@@ -952,66 +990,6 @@ const collectDescendantIds = (
     pending.push(...(byParent.get(current) ?? []));
   }
   return descendants;
-};
-
-const selectMetersWithinScope = (meters: MeterAggregate[]): MeterAggregate[] => {
-  const totals = meters.filter((meter) => meter.meterRole === "total");
-  if (totals.length > 0) return totals;
-  const components = meters.filter((meter) => meter.meterRole === "component");
-  if (components.length > 0) return components;
-  return meters.filter((meter) => meter.meterRole === "submeter");
-};
-
-const selectAggregateMetersForScope = (
-  scopeId: string,
-  meters: MeterAggregate[],
-  hierarchy: ReturnType<MetadataStore["energyIq"]["listProjectNodes"]>
-): MeterAggregate[] => {
-  const parentById = new Map(hierarchy.map((node) => [node.id, node.parent_id]));
-  const candidates = meters.flatMap((meter) => {
-    const path = pathFromScope(scopeId, meter.scopeId, parentById);
-    return path ? [{ meter, depth: path.length - 1, branchId: path[1] ?? scopeId }] : [];
-  });
-  const direct = candidates.filter((candidate) => candidate.depth === 0).map((candidate) => candidate.meter);
-  if (direct.length > 0) return selectMetersWithinScope(direct);
-
-  const byBranch = new Map<string, typeof candidates>();
-  for (const candidate of candidates) {
-    const branch = byBranch.get(candidate.branchId) ?? [];
-    branch.push(candidate);
-    byBranch.set(candidate.branchId, branch);
-  }
-  const selected: MeterAggregate[] = [];
-  for (const branch of byBranch.values()) {
-    const minimumDepth = Math.min(...branch.map((candidate) => candidate.depth));
-    const nearest = branch.filter((candidate) => candidate.depth === minimumDepth);
-    const byScope = new Map<string, MeterAggregate[]>();
-    for (const candidate of nearest) {
-      const scopeMeters = byScope.get(candidate.meter.scopeId) ?? [];
-      scopeMeters.push(candidate.meter);
-      byScope.set(candidate.meter.scopeId, scopeMeters);
-    }
-    for (const scopeMeters of byScope.values()) {
-      selected.push(...selectMetersWithinScope(scopeMeters));
-    }
-  }
-  return selected;
-};
-
-const pathFromScope = (
-  ancestorId: string,
-  nodeId: string,
-  parentById: Map<string, string | undefined>
-): string[] | undefined => {
-  const reversed = [nodeId];
-  let current = nodeId;
-  while (current !== ancestorId) {
-    const parent = parentById.get(current);
-    if (!parent) return undefined;
-    reversed.push(parent);
-    current = parent;
-  }
-  return reversed.reverse();
 };
 
 const rowToMeterAggregate = (row: unknown[]): MeterAggregate => ({
@@ -1314,9 +1292,15 @@ const operationalPolicyMeterIntervalsSql = (
 const aggregationRuleForMeters = (
   meters: MeterAggregate[]
 ): EnergyScopeAnalysis["provenance"]["aggregationRule"] => {
-  if (meters.some((meter) => meter.meterRole === "total")) return "designated_total";
-  if (meters.some((meter) => meter.meterRole === "component")) return "component";
-  if (meters.some((meter) => meter.meterRole === "submeter")) return "submeter";
+  return aggregationRuleForRoles(meters.map((meter) => meter.meterRole));
+};
+
+const aggregationRuleForRoles = (
+  roles: string[]
+): EnergyScopeAnalysis["provenance"]["aggregationRule"] => {
+  if (roles.some((role) => role === "total")) return "designated_total";
+  if (roles.some((role) => role === "component")) return "component";
+  if (roles.some((role) => role === "submeter")) return "submeter";
   return "none";
 };
 

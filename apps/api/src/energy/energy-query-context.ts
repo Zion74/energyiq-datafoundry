@@ -1,10 +1,14 @@
 import type {
+  EnergyIqMeterMappingDraft,
+  EnergyIqProjectNodeRecord,
+  EnergyIqProjectSetupDocument,
   EnergyIqProjectRecord,
   EnergyIqRole,
   MetadataStore,
   UserRecord,
   WorkspaceRecord
 } from "@datafoundry/metadata";
+import { energyIqPublishedMeterRoutingRevisionId } from "@datafoundry/metadata";
 
 export type EnergyResource = "electricity" | "water";
 export type EnergyPeriod = "Yesterday" | "Last 7 days" | "Last 30 days" | "Custom";
@@ -56,12 +60,21 @@ export type EnergyQueryContext = {
   endExclusive: true;
   period: EnergyPeriod;
   hierarchyRevisionId: string;
+  meterMappingRevisionId: string;
   meterFormulaRevisionId: string;
   dataSnapshotId: string;
   metricVersion: string;
   businessCalendarVersion: string;
   tariffScheduleVersion: string;
   resolvedAt: string;
+};
+
+export type EnergyPublishedMeterRoute = {
+  source: "published";
+  meterMappingRevisionId: string;
+  attachments: Array<{ meterPointId: string; scopeId: string; officialAggregation: boolean }>;
+  officialMeterPointIds?: string[];
+  officialMeterRoles?: string[];
 };
 
 export const ensureEnergyIqUserRole = (
@@ -154,6 +167,11 @@ export const resolveEnergyQueryContext = (input: {
   request: EnergyQueryContextRequest;
   now?: Date;
   env?: Record<string, string | undefined>;
+  releasePins?: {
+    hierarchyRevisionId: string;
+    meterMappingRevisionId: string;
+  };
+  allowUnconfigured?: boolean;
 }): EnergyQueryContext => {
   const access = resolveEnergyAccessContext({
     metadataStore: input.metadataStore,
@@ -169,7 +187,10 @@ export const resolveEnergyQueryContext = (input: {
     throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
   }
   const projectRecord = input.metadataStore.energyIq.getProject(project.id);
-  const nodes = input.metadataStore.energyIq.listProjectNodes(project.id);
+  const hierarchyRevisionId = input.releasePins?.hierarchyRevisionId ?? projectRecord.hierarchy_revision_id;
+  const nodes = input.allowUnconfigured
+    ? input.metadataStore.energyIq.listProjectNodes(project.id)
+    : resolveEnergyPublishedHierarchyNodes(input.metadataStore, project.id, hierarchyRevisionId);
   const root = nodes.find((node) =>
     node.id === projectRecord.root_scope_id && !node.parent_id
   );
@@ -191,6 +212,18 @@ export const resolveEnergyQueryContext = (input: {
     ...(input.request.to ? { to: input.request.to } : {}),
     now: input.now ?? new Date()
   });
+  const publishedMeterRoute = input.allowUnconfigured
+    ? undefined
+    : resolveEnergyPublishedMeterRoute({
+        metadataStore: input.metadataStore,
+        projectId: projectRecord.id,
+        hierarchyRevisionId,
+        scopeId: scope.id,
+        resource: input.request.resource ?? "electricity",
+        ...(input.releasePins
+          ? { expectedMeterMappingRevisionId: input.releasePins.meterMappingRevisionId }
+          : {})
+      });
   return {
     userId: input.user.id,
     workspaceId: access.activeWorkspaceId,
@@ -205,7 +238,8 @@ export const resolveEnergyQueryContext = (input: {
     to: range.to,
     endExclusive: true,
     period,
-    hierarchyRevisionId: projectRecord.hierarchy_revision_id,
+    hierarchyRevisionId,
+    meterMappingRevisionId: publishedMeterRoute?.meterMappingRevisionId ?? "meter-routing-unconfigured",
     meterFormulaRevisionId: projectRecord.meter_formula_revision_id,
     dataSnapshotId: projectRecord.data_snapshot_id,
     metricVersion: projectRecord.metric_version,
@@ -215,12 +249,157 @@ export const resolveEnergyQueryContext = (input: {
   };
 };
 
+export const resolveEnergyPublishedHierarchyNodes = (
+  metadataStore: MetadataStore,
+  projectId: string,
+  hierarchyRevisionId: string
+): EnergyIqProjectNodeRecord[] => {
+  const revision = metadataStore.energyIq.projectSetup.listHierarchyRevisions(projectId)
+    .find((candidate) => candidate.id === hierarchyRevisionId);
+  if (!revision) throw new Error(`ENERGYIQ_PUBLISHED_HIERARCHY_REVISION_REQUIRED:${hierarchyRevisionId}`);
+  const document = JSON.parse(revision.snapshot_json) as EnergyIqProjectSetupDocument;
+  const project = metadataStore.energyIq.getProject(projectId);
+  const tiersById = new Map(document.tiers.map((tier) => [tier.id, tier]));
+  const highestOrdinal = Math.max(...document.tiers.map((tier) => tier.ordinal));
+  const now = revision.published_at;
+  const root: EnergyIqProjectNodeRecord = {
+    id: project.root_scope_id,
+    project_id: projectId,
+    name: document.project.name,
+    node_type: "project",
+    sort_order: 0,
+    metadata_status: "confirmed",
+    hierarchy_revision_id: hierarchyRevisionId,
+    created_at: now,
+    updated_at: now,
+  };
+  return [root, ...document.nodes.map((node): EnergyIqProjectNodeRecord => {
+    const tier = tiersById.get(node.tier_definition_id);
+    if (!tier) throw new Error(`ENERGYIQ_PUBLISHED_HIERARCHY_TIER_INVALID:${node.tier_definition_id}`);
+    const parentId = tier.ordinal === highestOrdinal ? project.root_scope_id : node.parent_id;
+    return {
+      id: node.id,
+      project_id: projectId,
+      ...(parentId ? { parent_id: parentId } : {}),
+      name: node.name,
+      node_type: tier.alias.trim().toLocaleLowerCase(),
+      tier_definition_id: node.tier_definition_id,
+      hierarchy_revision_id: hierarchyRevisionId,
+      sort_order: node.sort_order,
+      ...(node.area_sqm === undefined ? {} : { area_sqm: node.area_sqm }),
+      ...(node.occupant_count === undefined ? {} : { occupant_count: node.occupant_count }),
+      ...(node.metadata ? { metadata_json: JSON.stringify(node.metadata) } : {}),
+      metadata_status: node.metadata_status,
+      ...(node.effective_from ? { effective_from: node.effective_from } : {}),
+      ...(node.effective_to ? { effective_to: node.effective_to } : {}),
+      ...(node.independent_reason ? { independent_reason: node.independent_reason } : {}),
+      created_at: now,
+      updated_at: now,
+    };
+  })];
+};
+
+export const resolveEnergyPublishedMeterRoute = (input: {
+  metadataStore: MetadataStore;
+  projectId: string;
+  hierarchyRevisionId: string;
+  scopeId: string;
+  resource: EnergyResource;
+  expectedMeterMappingRevisionId?: string;
+}): EnergyPublishedMeterRoute => {
+  const revision = input.metadataStore.energyIq.projectSetup
+    .listHierarchyRevisions(input.projectId)
+    .find((candidate) => candidate.id === input.hierarchyRevisionId);
+  if (!revision) {
+    throw new Error(`ENERGYIQ_PUBLISHED_MAPPING_REVISION_REQUIRED:${input.hierarchyRevisionId}`);
+  }
+  const document = JSON.parse(revision.snapshot_json) as {
+    meter_mapping?: EnergyIqMeterMappingDraft;
+  };
+  const mapping = document.meter_mapping;
+  if (mapping?.schema_version !== 2 || !mapping.confirmed || !mapping.official_aggregation_routes) {
+    throw new Error(`ENERGYIQ_PUBLISHED_MAPPING_ROUTE_REQUIRED:${input.hierarchyRevisionId}`);
+  }
+  const hierarchy = resolveEnergyPublishedHierarchyNodes(
+    input.metadataStore,
+    input.projectId,
+    input.hierarchyRevisionId
+  );
+  const includedScopeIds = new Set(resolveScopeNodeIds(hierarchy, input.scopeId));
+  const rows = mapping.rows.filter((row) => row.resource === input.resource);
+  const attachments = rows.flatMap((row) => {
+    const scopeId = row.navigation_scope_id ?? row.scope_id;
+    return includedScopeIds.has(scopeId) ? [{ meterPointId: row.id, scopeId }] : [];
+  });
+  const selectedNode = hierarchy.find((node) => node.id === input.scopeId);
+  const routeScopeId = selectedNode && !selectedNode.parent_id ? "project" : input.scopeId;
+  const routes = mapping.official_aggregation_routes.filter((candidate) =>
+    candidate.scope_id === routeScopeId
+    && candidate.resource === input.resource);
+  if (routes.length === 0) {
+    throw new Error(`ENERGYIQ_PUBLISHED_METER_ROUTE_REQUIRED:${input.scopeId}:${input.resource}`);
+  }
+  const routeCategories = new Set<string>();
+  for (const route of routes) {
+    if (routeCategories.has(route.category)) {
+      throw new Error(`ENERGYIQ_PUBLISHED_METER_ROUTE_DUPLICATE:${input.scopeId}:${input.resource}:${route.category}`);
+    }
+    routeCategories.add(route.category);
+  }
+  const rowsById = new Map(rows.map((row) => [row.id, row]));
+  const attachedIds = new Set(attachments.map((attachment) => attachment.meterPointId));
+  const officialMeterPointIds: string[] = [];
+  for (const route of routes) {
+    for (const meterPointId of route.meter_point_ids) {
+      const row = rowsById.get(meterPointId);
+      if (
+        !row
+        || !attachedIds.has(meterPointId)
+        || (route.category !== "overall" && route.category !== row.category)
+      ) {
+        throw new Error(`ENERGYIQ_PUBLISHED_METER_ROUTE_INVALID:${input.scopeId}:${meterPointId}`);
+      }
+      officialMeterPointIds.push(meterPointId);
+    }
+  }
+  if (new Set(officialMeterPointIds).size !== officialMeterPointIds.length) {
+    throw new Error(`ENERGYIQ_PUBLISHED_METER_ROUTE_OVERLAP:${input.scopeId}:${input.resource}`);
+  }
+  const meterMappingRevisionId = energyIqPublishedMeterRoutingRevisionId(mapping);
+  if (
+    input.expectedMeterMappingRevisionId
+    && input.expectedMeterMappingRevisionId !== meterMappingRevisionId
+  ) {
+    throw new Error(
+      `ENERGYIQ_PUBLISHED_MAPPING_REVISION_MISMATCH:${input.expectedMeterMappingRevisionId}:${meterMappingRevisionId}`
+    );
+  }
+  return {
+    source: "published",
+    meterMappingRevisionId,
+    attachments: attachments.map((attachment) => ({
+      ...attachment,
+      officialAggregation: officialMeterPointIds.includes(attachment.meterPointId)
+    })),
+    officialMeterPointIds,
+    officialMeterRoles: [...new Set(officialMeterPointIds.map((meterPointId) =>
+      rowsById.get(meterPointId)?.meter_role ?? "standalone"))]
+  };
+};
+
 export const resolveEnergyScopeMeterNodeIds = (
   metadataStore: MetadataStore,
   projectId: string,
   scopeId: string
 ): string[] => {
   const nodes = metadataStore.energyIq.listProjectNodes(projectId);
+  return resolveScopeNodeIds(nodes, scopeId);
+};
+
+const resolveScopeNodeIds = (
+  nodes: EnergyIqProjectNodeRecord[],
+  scopeId: string
+): string[] => {
   const byParent = new Map<string, string[]>();
   for (const node of nodes) {
     if (!node.parent_id) continue;

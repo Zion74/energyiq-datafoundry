@@ -147,12 +147,20 @@ export type EnergyMeterMappingRowDto = {
   id: string;
   source_label: string;
   scope_id: string;
+  navigation_scope_id?: string;
   display_name: string;
   resource: "electricity" | "water";
   category: EnergyMeterCategoryDto;
   coverage: EnergyMeterCoverageDto;
   meter_role: EnergyMeterRoleDto;
   aggregation_usage: EnergyAggregationUsageDto;
+};
+
+export type EnergyOfficialAggregationRouteDto = {
+  scope_id: string;
+  resource: "electricity" | "water";
+  category: EnergyMeterCategoryDto;
+  meter_point_ids: string[];
 };
 
 export type EnergyVirtualMeterTermDto = {
@@ -170,8 +178,10 @@ export type EnergyVirtualMeterDto = {
 };
 
 export type EnergyMeterMappingDraftDto = {
+  schema_version: 2;
   source_kind: "excel" | "tuya";
   rows: EnergyMeterMappingRowDto[];
+  official_aggregation_routes?: EnergyOfficialAggregationRouteDto[];
   virtual_meters?: EnergyVirtualMeterDto[];
   confirmed: boolean;
 };
@@ -353,6 +363,7 @@ export type EnergyQueryContextDto = {
   endExclusive: true;
   period: EnergyQueryContextRequestDto["period"];
   hierarchyRevisionId: string;
+  meterMappingRevisionId: string;
   meterFormulaRevisionId: string;
   dataSnapshotId: string;
   metricVersion: string;
@@ -502,6 +513,7 @@ export type EnergyScopeAnalysisDto = {
   provenance: {
     dataSnapshotId: string;
     hierarchyRevisionId: string;
+    meterMappingRevisionId: string;
     meterFormulaRevisionId: string;
     metricVersion: string;
     ruleRevisionIds: string[];
@@ -718,6 +730,7 @@ export type EnergyPublishedProjectReleaseDto = {
     contractVersion: "project-analysis-snapshot@1";
   };
   hierarchyRevisionId: string;
+  meterMappingRevisionId: string;
   meterFormulaRevisionId: string;
   metricRevisionIds: string[];
   ruleRevisionIds: string[];

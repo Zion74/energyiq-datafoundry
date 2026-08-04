@@ -10,6 +10,7 @@ import {
 } from "./energy-bootstrap.js";
 import {
   resolveEnergyAccessContext,
+  resolveEnergyPublishedMeterRoute,
   resolveEnergyQueryContext,
   resolveEnergyScopeMeterNodeIds
 } from "./energy-query-context.js";
@@ -56,8 +57,35 @@ describe("EnergyQueryContext", () => {
         to: "2026-07-30T16:00:00.000Z",
         endExclusive: true,
         hierarchyRevisionId: "ngee-ann-hierarchy-v2",
+        meterMappingRevisionId: expect.stringMatching(/^meter-routing-[a-f0-9]{24}$/),
         dataSnapshotId: "ngee-ann-4bac1177eca62cdb"
       });
+      const levelRoute = resolveEnergyPublishedMeterRoute({
+        metadataStore: metadata,
+        projectId: "ngee-ann-polytechnic",
+        hierarchyRevisionId: context.hierarchyRevisionId,
+        scopeId: "level-7",
+        resource: "electricity",
+      });
+      expect(levelRoute.officialMeterPointIds).toEqual([
+        "mapping-lvl-7-total-office-light-17",
+        "mapping-lvl-7-total-office-load-18",
+      ]);
+      expect(levelRoute.attachments.find((attachment) =>
+        attachment.meterPointId === "mapping-lvl-7-total-office-load-18"))
+        .toEqual({
+          meterPointId: "mapping-lvl-7-total-office-load-18",
+          scopeId: "l7-total-load",
+          officialAggregation: true,
+        });
+      expect(() => resolveEnergyPublishedMeterRoute({
+        metadataStore: metadata,
+        projectId: "ngee-ann-polytechnic",
+        hierarchyRevisionId: context.hierarchyRevisionId,
+        scopeId: "level-7",
+        resource: "electricity",
+        expectedMeterMappingRevisionId: "meter-routing-stale-release-pin",
+      })).toThrow("ENERGYIQ_PUBLISHED_MAPPING_REVISION_MISMATCH");
       expect(resolveEnergyScopeMeterNodeIds(metadata, "ngee-ann-polytechnic", "level-7"))
         .toEqual([
           "level-7",

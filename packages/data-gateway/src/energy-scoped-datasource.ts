@@ -10,12 +10,14 @@ export type EnergyScopedDataSourceContext = {
   workspaceId: string;
   projectId: string;
   scopeId: string;
-  scopeNodeIds: string[];
+  /** Published Meter identities and their navigation attachment for this Scope. */
+  meterAttachments: Array<{ meterPointId: string; scopeId: string; officialAggregation: boolean }>;
   resource: "electricity" | "water";
   from: string;
   to: string;
   timezone: string;
   hierarchyRevisionId: string;
+  meterMappingRevisionId: string;
   meterFormulaRevisionId: string;
   dataSnapshotId: string;
   metricVersion: string;
@@ -106,7 +108,8 @@ export const ensureEnergyScopedDataSource = async (input: {
   const signature = createHash("sha256")
     .update(JSON.stringify({
       ...input.context,
-      scopeNodeIds: [...new Set(input.context.scopeNodeIds)].sort()
+      meterAttachments: [...(input.context.meterAttachments ?? [])]
+        .sort((left, right) => left.meterPointId.localeCompare(right.meterPointId)),
     }))
     .digest("hex")
     .slice(0, 20);
@@ -138,6 +141,7 @@ export const ensureEnergyScopedDataSource = async (input: {
       to: input.context.to,
       endExclusive: true,
       hierarchyRevisionId: input.context.hierarchyRevisionId,
+      meterMappingRevisionId: input.context.meterMappingRevisionId,
       meterFormulaRevisionId: input.context.meterFormulaRevisionId,
       dataSnapshotId: input.context.dataSnapshotId,
       metricVersion: input.context.metricVersion
@@ -171,31 +175,33 @@ const createScopedView = async (
   viewName: string,
   context: EnergyScopedDataSourceContext
 ): Promise<void> => {
-  const meterNodeIds = [...new Set(context.scopeNodeIds)];
-  const nodeFilter = meterNodeIds.length > 0
-    ? `scope_id IN (${meterNodeIds.map(sqlLiteral).join(", ")})`
+  const attachments = [...new Map((context.meterAttachments ?? []).map((attachment) => [
+    attachment.meterPointId,
+    attachment
+  ])).values()];
+  const meterPointIds = attachments.map((attachment) => attachment.meterPointId);
+  const nodeFilter = meterPointIds.length > 0
+    ? `meter_node_id IN (${meterPointIds.map(sqlLiteral).join(", ")})`
+    : "FALSE";
+  const navigationScope = attachments.length > 0
+    ? `CASE meter_node_id ${attachments.map((attachment) =>
+        `WHEN ${sqlLiteral(attachment.meterPointId)} THEN ${sqlLiteral(attachment.scopeId)}`).join(" ")} ELSE scope_id END`
+    : "scope_id";
+  const officialAggregation = attachments.length > 0
+    ? `CASE meter_node_id ${attachments.map((attachment) =>
+        `WHEN ${sqlLiteral(attachment.meterPointId)} THEN ${attachment.officialAggregation ? "TRUE" : "FALSE"}`).join(" ")} ELSE FALSE END`
     : "FALSE";
   const database = await getDuckDbDatabase(databasePath);
   const connection = database.connect();
   try {
-    await duckDbRun(connection, "ALTER TABLE energy_interval_facts ADD COLUMN IF NOT EXISTS scope_id VARCHAR");
-    await duckDbRun(connection, "ALTER TABLE energy_interval_facts ADD COLUMN IF NOT EXISTS import_batch_id VARCHAR");
-    await duckDbRun(connection, "UPDATE energy_interval_facts SET scope_id = meter_node_id WHERE scope_id IS NULL");
-    await duckDbRun(connection, `
-      UPDATE energy_interval_facts
-      SET scope_id = level_node_id
-      WHERE import_batch_id IS NULL
-        AND meter_role = 'total'
-        AND meter_node_id NOT LIKE 'mapping-%'
-        AND level_node_id IS NOT NULL
-    `);
     await duckDbRun(connection, `
       CREATE OR REPLACE VIEW ${quoteIdentifier(viewName)} AS
       SELECT
         project_id,
         resource,
         meter_node_id,
-        scope_id,
+        ${navigationScope} AS scope_id,
+        ${officialAggregation} AS official_aggregation_eligible,
         parent_node_id,
         level_node_id,
         device_name,

@@ -196,6 +196,7 @@ const document = (): EnergyIqProjectSetupDocument => ({
   tiers: [{ id: "tier-1", ordinal: 1, alias: "Circuit" }],
   nodes: [{ id: "scope-a", tier_definition_id: "tier-1", name: "Circuit A", sort_order: 1, metadata_status: "confirmed" }],
   meter_mapping: {
+    schema_version: 2,
     source_kind: "excel",
     confirmed: true,
     rows: [{
