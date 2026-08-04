@@ -33,6 +33,7 @@ import { executeEnergyScopeAnalysis, type EnergyScopeAnalysis } from "./energy-a
 import { inspectEnergyExcelWorkbook } from "./energy-excel-import.js";
 import {
   buildEnergyExcelMaterialization,
+  createEnergyImportCompletionInput,
   ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION,
   isEnergyImportMaterializationCurrent,
 } from "./energy-import-materializer.js";
@@ -218,13 +219,7 @@ export const handleEnergyApiRequest = async (
         const completed = context.metadataStore.energyIq.completeImportBatchMaterialization({
           batch_id: batch.id,
           project_id: projectId,
-          summary: {
-            ...materialization.summary,
-            rawRowCount: persisted.rawRows,
-            normalizedReadingCount: persisted.normalizedRows,
-            intervalFactCount: persisted.intervalFacts,
-          },
-          project_audit: persisted.projectAudit,
+          ...createEnergyImportCompletionInput(materialization.summary, persisted),
           source_manifest_sha256: sourceManifest.source_sha256,
         });
         return {

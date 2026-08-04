@@ -1952,10 +1952,10 @@ function DataSourcesPage({
             </div>
             {latest.materialization ? (
               <div className="grid gap-3 border-t border-border pt-4 sm:grid-cols-2 lg:grid-cols-4">
-                <ImportFact label="Raw readings" value={latest.materialization.rawRowCount.toLocaleString()} />
-                <ImportFact label="Batch normalized at build" value={latest.materialization.normalizedReadingCount.toLocaleString()} />
-                <ImportFact label="Batch intervals at build" value={latest.materialization.intervalFactCount.toLocaleString()} />
-                <ImportFact label="All-meter deltas" value={`${latest.materialization.totalUsageKwh.toLocaleString("en-SG", { maximumFractionDigits: 3 })} kWh`} />
+                <ImportFact label="Source rows produced" value={latest.materialization.rawRowCount.toLocaleString()} />
+                <ImportFact label="Source normalized produced" value={latest.materialization.normalizedReadingCount.toLocaleString()} />
+                <ImportFact label="Source intervals produced" value={latest.materialization.intervalFactCount.toLocaleString()} />
+                <ImportFact label="Source valid deltas" value={`${latest.materialization.totalUsageKwh.toLocaleString("en-SG", { maximumFractionDigits: 3 })} kWh`} />
               </div>
             ) : null}
             {latest.inspection.issues.length > 0 ? (

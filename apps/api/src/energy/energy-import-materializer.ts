@@ -1,6 +1,7 @@
 import {
   ENERGY_FACT_WRITER_CONTRACT_VERSION,
   type EnergyFactMaterializationWrite,
+  type EnergyFactMaterializationResult,
   type EnergyIntervalFactWrite,
   type EnergyNormalizedReadingWrite,
   type EnergyQualityEventWrite,
@@ -33,6 +34,14 @@ export type EnergyImportMaterializationSummary = {
 };
 
 export const ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION = "energy-excel-cumulative-v1" as const;
+
+export const createEnergyImportCompletionInput = (
+  summary: EnergyImportMaterializationSummary,
+  persisted: EnergyFactMaterializationResult,
+): { summary: EnergyImportMaterializationSummary; project_audit: EnergyFactMaterializationResult["projectAudit"] } => ({
+  summary,
+  project_audit: persisted.projectAudit,
+});
 
 export const isEnergyImportMaterializationCurrent = (input: {
   batch: EnergyIqImportBatchRecord;
