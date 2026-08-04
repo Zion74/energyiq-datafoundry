@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   configApi,
@@ -128,6 +128,23 @@ function PublishedDecisionDashboardView({
     effectiveCustomRange.to,
   );
   const requestedProjectId = requestedProject?.id ?? "";
+  const pendingUrlSearchRef = useRef(urlSearch);
+
+  useEffect(() => {
+    pendingUrlSearchRef.current = urlSearch;
+  }, [urlSearch]);
+
+  const navigateOverview = (update: Partial<OverviewUrlViewState>) => {
+    const base = overviewViewStateFromSearchParams(new URLSearchParams(pendingUrlSearchRef.current));
+    const nextView = {
+      ...base,
+      ...update,
+      projectId: update.projectId ?? (base.projectId || projectId),
+    };
+    const href = overviewUrlWithView(pendingUrlSearchRef.current, nextView);
+    pendingUrlSearchRef.current = href.slice(href.indexOf("?") + 1);
+    router.replace(href);
+  };
 
   useEffect(() => {
     if (!requestedProjectId || requestedProjectId === activeProject?.id) return;
@@ -323,14 +340,9 @@ function PublishedDecisionDashboardView({
               ariaLabel="Analysis Scope"
               value={scopeId}
               options={scopeOptions}
-              onValueChange={(nextScopeId) => router.replace(overviewUrlWithView(urlSearch, {
-                projectId,
+              onValueChange={(nextScopeId) => navigateOverview({
                 scopeId: nextScopeId,
-                resource,
-                period,
-                from: effectiveCustomRange.from,
-                to: effectiveCustomRange.to,
-              }))}
+              })}
               size="small"
               disabled={!projectId || hierarchyLoading || Boolean(hierarchyError)}
               triggerClassName="sm:w-[260px]"
@@ -346,14 +358,9 @@ function PublishedDecisionDashboardView({
               <button
                 key={item}
                 type="button"
-                onClick={() => router.replace(overviewUrlWithView(urlSearch, {
-                  projectId,
-                  scopeId,
+                onClick={() => navigateOverview({
                   resource: item,
-                  period,
-                  from: effectiveCustomRange.from,
-                  to: effectiveCustomRange.to,
-                }))}
+                })}
                 className={[
                   "flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors",
                   resource === item ? "bg-primary text-white" : "text-muted hover:bg-surface-subtle hover:text-foreground",
@@ -369,14 +376,13 @@ function PublishedDecisionDashboardView({
               <button
                 key={item.label}
                 type="button"
-                onClick={() => item.value ? router.replace(overviewUrlWithView(urlSearch, {
-                  projectId,
-                  scopeId,
-                  resource,
-                  period: item.value,
-                  from: effectiveCustomRange.from,
-                  to: effectiveCustomRange.to,
-                })) : undefined}
+                onClick={() => item.value ? navigateOverview(item.value === "Custom"
+                  ? {
+                    period: item.value,
+                    from: effectiveCustomRange.from,
+                    to: effectiveCustomRange.to,
+                  }
+                  : { period: item.value }) : undefined}
                 disabled={item.disabled}
                 title={item.title}
                 className={[
@@ -410,22 +416,12 @@ function PublishedDecisionDashboardView({
 
       {period === "Custom" ? (
         <div className="mt-4 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface px-4 py-3">
-          <DateField label="From" value={effectiveCustomRange.from} onChange={(from) => router.replace(overviewUrlWithView(urlSearch, {
-            projectId,
-            scopeId,
-            resource,
-            period,
+          <DateField label="From" value={effectiveCustomRange.from} onChange={(from) => navigateOverview({
             from,
-            to: effectiveCustomRange.to,
-          }))} />
-          <DateField label="To, inclusive" value={effectiveCustomRange.to} onChange={(to) => router.replace(overviewUrlWithView(urlSearch, {
-            projectId,
-            scopeId,
-            resource,
-            period,
-            from: effectiveCustomRange.from,
+          })} />
+          <DateField label="To, inclusive" value={effectiveCustomRange.to} onChange={(to) => navigateOverview({
             to,
-          }))} />
+          })} />
           <p className="pb-2 text-[10px] text-muted-light">Changing the range reuses the published template and runs only the scoped queries.</p>
         </div>
       ) : null}

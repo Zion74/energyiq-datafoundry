@@ -282,6 +282,30 @@ describe("published Overview URL reload", () => {
     );
   });
 
+  it("composes consecutive Resource and Period changes before the router rerenders", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
+    vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>("button"));
+    const water = buttons.find((button) => button.textContent === "Water");
+    const lastSevenDays = buttons.find((button) => button.textContent === "Last 7 days");
+    await act(async () => water?.click());
+    await act(async () => lastSevenDays?.click());
+
+    expect(mockedRouter.replace.mock.calls.map(([href]) => href)).toEqual([
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=water&period=Custom&from=2026-06-10&to=2026-06-16",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=water&period=Last+7+days",
+    ]);
+  });
+
   it("writes Period changes to the public URL with only the effective date range", async () => {
     const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
     mockedAccess.activeProject = ngeeAnn;
@@ -390,6 +414,35 @@ describe("published Overview URL reload", () => {
       from: "2026-06-11",
       to: "2026-06-17",
     });
+  });
+
+  it("composes consecutive Custom date changes before the router rerenders", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
+    vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    const inputValueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    const [fromInput, toInput] = Array.from(container.querySelectorAll<HTMLInputElement>("input[type='date']"));
+    await act(async () => {
+      inputValueSetter?.call(fromInput, "2026-06-11");
+      fromInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      inputValueSetter?.call(toInput, "2026-06-17");
+      toInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    expect(mockedRouter.replace.mock.calls.map(([href]) => href)).toEqual([
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-11&to=2026-06-16",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-11&to=2026-06-17",
+    ]);
   });
 
   it("switches from Project to a published hierarchy Scope through the public URL", async () => {
