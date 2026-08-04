@@ -286,7 +286,7 @@ function ConsumptionOverview({ analysis }: { analysis: EnergyScopeAnalysisDto })
   const cards = [
     { label: "Total consumption", value: `${formatNumber(summary.usageKwh, 2)} kWh`, note: `${context.scopeName} · selected period` },
     { label: "Previous-period change", value: comparisonValue, note: comparisonNote },
-    { label: "Average daily use", value: `${formatNumber(summary.averageDailyUsageKwh, 2)} kWh`, note: "Selected-period daily average" },
+    { label: "Average daily use", value: `${formatNumber(summary.averageDailyUsageKwh, 2)} kWh/day`, note: "Selected-period daily average" },
     { label: "Peak demand", value: `${formatNumber(summary.peakKw, 2)} kW`, note: peakNote },
     {
       label: "Energy cost",

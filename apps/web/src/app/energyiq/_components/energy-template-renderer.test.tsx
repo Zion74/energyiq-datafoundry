@@ -157,6 +157,26 @@ describe("EnergyTemplateRenderer states", () => {
     expect(operatingMarkup).toContain("Calendar calendar-v1");
     expect(operatingMarkup).toContain("Asia/Singapore project timezone");
   });
+
+  it("renders rate-aware units for average daily use and peak interval-average power", () => {
+    const analysis = analysisFixture();
+    const plan = renderPlanFixture();
+    plan.sections[0]!.modules[0]!.component = {
+      ...plan.sections[0]!.modules[0]!.component,
+      revision_id: "consumption.overview@1",
+      component_id: "consumption.overview",
+      display_name: "Consumption overview",
+      view_key: "consumption_overview_v1",
+      family: "overview",
+    };
+
+    const markup = renderToStaticMarkup(<EnergyTemplateRenderer state={{ status: "ready", analysis, plan }} />);
+
+    expect(markup).toContain("Average daily use");
+    expect(markup).toContain("10.00 kWh/day");
+    expect(markup).toContain("Peak demand");
+    expect(markup).toContain("8.00 kW");
+  });
 });
 
 function analysisFixture(): EnergyScopeAnalysisDto {
