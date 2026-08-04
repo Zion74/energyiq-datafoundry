@@ -647,17 +647,70 @@ export const executeEnergyScopeAnalysis = async (input: {
     },
     databasePath: scoped.databasePath
   });
-  const summaryResult = await input.dataGateway.runSqlReadonly({
+  const summaryResultPromise = input.dataGateway.runSqlReadonly({
     user_id: input.userId,
     workspace_id: input.context.workspaceId,
     datasource_id: scoped.datasourceId,
     sql: scopeSummarySql(scoped.viewName, aggregateMeterNodeIds),
   });
-  const summaryRow = summaryResult.rows[0] ?? [];
-  const usageKwh = numberAt(summaryRow, 0);
-  const peakKw = numberAt(summaryRow, 1);
-  const peakAt = optionalStringAt(summaryRow, 2);
+  const profileResultPromise = input.dataGateway.runSqlReadonly({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: scoped.datasourceId,
+    sql: hourlyProfileSql(scoped.viewName, aggregateMeterNodeIds)
+  });
+  const dailyTotalsResultPromise = input.dataGateway.runSqlReadonly({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: scoped.datasourceId,
+    sql: dailyTotalsSql(scoped.viewName, dailyTotalScopes),
+    limit: Math.max(1, dailyTotalScopes.length * dailyDateBuckets.length),
+  });
+  const healthResultPromise = input.dataGateway.runSqlReadonly({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: scoped.datasourceId,
+    sql: scopeHealthSql(scoped.viewName, aggregateMeterNodeIds)
+  });
+  const previousMeterUsageResultPromise = input.dataGateway.runSqlReadonly({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: previousScoped.datasourceId,
+    sql: previousMeterUsageSql(
+      previousScoped.viewName,
+      meterAggregates.map((meter) => meter.meterNodeId),
+    ),
+    limit: 1000,
+  });
+  const operationalScopeIntervalResultPromise = input.dataGateway.runSqlReadonly({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: scoped.datasourceId,
+    sql: operationalPolicyScopeIntervalsSql(scoped.viewName, aggregateMeterNodeIds),
+    limit: 1,
+  });
+  const operationalMeterIntervalResultPromise = input.dataGateway.runSqlReadonly({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: scoped.datasourceId,
+    sql: operationalPolicyMeterIntervalsSql(
+      scoped.viewName,
+      meterAggregates.map((meter) => meter.meterNodeId),
+    ),
+    limit: Math.max(1, meterAggregates.length),
+  });
+  const peakBreakdownResultPromise = summaryResultPromise.then((summaryResult) => {
+    const peakAt = optionalStringAt(summaryResult.rows[0] ?? [], 2);
+    return input.dataGateway.runSqlReadonly({
+      user_id: input.userId,
+      workspace_id: input.context.workspaceId,
+      datasource_id: scoped.datasourceId,
+      sql: peakBreakdownSql(scoped.viewName, peakAt),
+      limit: 1000,
+    });
+  });
   const [
+    summaryResult,
     profileResult,
     dailyTotalsResult,
     peakBreakdownResult,
@@ -666,60 +719,19 @@ export const executeEnergyScopeAnalysis = async (input: {
     operationalScopeIntervalResult,
     operationalMeterIntervalResult,
   ] = await Promise.all([
-    input.dataGateway.runSqlReadonly({
-      user_id: input.userId,
-      workspace_id: input.context.workspaceId,
-      datasource_id: scoped.datasourceId,
-      sql: hourlyProfileSql(scoped.viewName, aggregateMeterNodeIds)
-    }),
-    input.dataGateway.runSqlReadonly({
-      user_id: input.userId,
-      workspace_id: input.context.workspaceId,
-      datasource_id: scoped.datasourceId,
-      sql: dailyTotalsSql(scoped.viewName, dailyTotalScopes),
-      limit: Math.max(1, dailyTotalScopes.length * dailyDateBuckets.length),
-    }),
-    input.dataGateway.runSqlReadonly({
-      user_id: input.userId,
-      workspace_id: input.context.workspaceId,
-      datasource_id: scoped.datasourceId,
-      sql: peakBreakdownSql(scoped.viewName, peakAt),
-      limit: 1000,
-    }),
-    input.dataGateway.runSqlReadonly({
-      user_id: input.userId,
-      workspace_id: input.context.workspaceId,
-      datasource_id: scoped.datasourceId,
-      sql: scopeHealthSql(scoped.viewName, aggregateMeterNodeIds)
-    }),
-    input.dataGateway.runSqlReadonly({
-      user_id: input.userId,
-      workspace_id: input.context.workspaceId,
-      datasource_id: previousScoped.datasourceId,
-      sql: previousMeterUsageSql(
-        previousScoped.viewName,
-        meterAggregates.map((meter) => meter.meterNodeId),
-      ),
-      limit: 1000,
-    }),
-    input.dataGateway.runSqlReadonly({
-      user_id: input.userId,
-      workspace_id: input.context.workspaceId,
-      datasource_id: scoped.datasourceId,
-      sql: operationalPolicyScopeIntervalsSql(scoped.viewName, aggregateMeterNodeIds),
-      limit: 1,
-    }),
-    input.dataGateway.runSqlReadonly({
-      user_id: input.userId,
-      workspace_id: input.context.workspaceId,
-      datasource_id: scoped.datasourceId,
-      sql: operationalPolicyMeterIntervalsSql(
-        scoped.viewName,
-        meterAggregates.map((meter) => meter.meterNodeId),
-      ),
-      limit: Math.max(1, meterAggregates.length),
-    }),
+    summaryResultPromise,
+    profileResultPromise,
+    dailyTotalsResultPromise,
+    peakBreakdownResultPromise,
+    healthResultPromise,
+    previousMeterUsageResultPromise,
+    operationalScopeIntervalResultPromise,
+    operationalMeterIntervalResultPromise,
   ]);
+  const summaryRow = summaryResult.rows[0] ?? [];
+  const usageKwh = numberAt(summaryRow, 0);
+  const peakKw = numberAt(summaryRow, 1);
+  const peakAt = optionalStringAt(summaryRow, 2);
   const healthRow = healthResult.rows[0] ?? [];
   const validIntervalCount = numberAt(healthRow, 0);
   const qualityEventCount = numberAt(healthRow, 1);
