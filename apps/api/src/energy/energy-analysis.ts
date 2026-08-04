@@ -46,6 +46,29 @@ export type EnergyScopeAnalysis = {
     peakKw: number;
     observationCount: number;
   }>;
+  dailyTotals?: {
+    metricId: "energy.total_usage_kwh@1";
+    grain: "day";
+    timezone: string;
+    scopes: Array<{
+      scopeId: string;
+      scopeName: string;
+      scopeType: string;
+      rows: Array<{
+        localDate: string;
+        from: string;
+        to: string;
+        usageKwh: number | null;
+        dataHealth: {
+          status: "complete" | "partial" | "unavailable";
+          coveragePct: number;
+          expectedMeterIntervalCount: number;
+          validIntervalCount: number;
+          qualityEventCount: number;
+        };
+      }>;
+    }>;
+  };
   comparison: {
     from: string;
     to: string;
@@ -226,6 +249,7 @@ export type EnergyScopeAnalysis = {
     queryIds: [
       "scope_summary_v1",
       "hourly_profile_v1",
+      "daily_totals_v1",
       "meter_breakdown_v1",
       "previous_meter_usage_v1",
       "operational_policy_scope_intervals_v1",
@@ -273,6 +297,19 @@ type MeterAggregate = {
   peakKw: number;
   validIntervalCount: number;
   qualityEventCount: number;
+};
+
+type DailyTotalScope = {
+  scopeId: string;
+  scopeName: string;
+  scopeType: string;
+  meterNodeIds: string[];
+};
+
+type DailyDateBucket = {
+  localDate: string;
+  from: string;
+  to: string;
 };
 
 type OperationalIntervalSeries = {
@@ -514,6 +551,18 @@ export const executeEnergyScopeAnalysis = async (input: {
   const aggregateMeterNodeIds = publishedMeterRoute.officialMeterPointIds ?? [];
   const aggregateMeterIds = new Set(aggregateMeterNodeIds);
   const aggregateMeters = meterAggregates.filter((meter) => aggregateMeterIds.has(meter.meterNodeId));
+  const dailyTotalScopes = resolveDailyTotalScopes({
+    metadataStore: input.metadataStore,
+    projectId: input.context.projectId,
+    hierarchyRevisionId: input.context.hierarchyRevisionId,
+    meterMappingRevisionId: input.context.meterMappingRevisionId,
+    resource: input.context.resource,
+    selectedNode,
+    hierarchy,
+    meterAggregates,
+    aggregateMeterNodeIds,
+  });
+  const dailyDateBuckets = buildDailyDateBuckets(input.context);
   const aggregationRule = publishedMeterRoute.officialMeterRoles
     ? aggregationRuleForRoles(publishedMeterRoute.officialMeterRoles)
     : aggregationRuleForMeters(aggregateMeters);
@@ -543,6 +592,7 @@ export const executeEnergyScopeAnalysis = async (input: {
   const [
     summaryResult,
     profileResult,
+    dailyTotalsResult,
     healthResult,
     previousMeterUsageResult,
     operationalScopeIntervalResult,
@@ -559,6 +609,13 @@ export const executeEnergyScopeAnalysis = async (input: {
       workspace_id: input.context.workspaceId,
       datasource_id: scoped.datasourceId,
       sql: hourlyProfileSql(scoped.viewName, aggregateMeterNodeIds)
+    }),
+    input.dataGateway.runSqlReadonly({
+      user_id: input.userId,
+      workspace_id: input.context.workspaceId,
+      datasource_id: scoped.datasourceId,
+      sql: dailyTotalsSql(scoped.viewName, dailyTotalScopes),
+      limit: Math.max(1, dailyTotalScopes.length * dailyDateBuckets.length),
     }),
     input.dataGateway.runSqlReadonly({
       user_id: input.userId,
@@ -612,6 +669,49 @@ export const executeEnergyScopeAnalysis = async (input: {
   const cumulativeDeltaMismatchCount = numberAt(healthRow, 5);
   const averageKwMismatchCount = numberAt(healthRow, 6);
   const invalidIntervalDurationCount = numberAt(healthRow, 7);
+  const dailyFactsByScopeAndDate = new Map(
+    dailyTotalsResult.rows.map((row) => [`${stringAt(row, 0)}:${stringAt(row, 3)}`, row]),
+  );
+  const dailyTotals: NonNullable<EnergyScopeAnalysis["dailyTotals"]> = {
+    metricId: "energy.total_usage_kwh@1",
+    grain: "day",
+    timezone: input.context.timezone,
+    scopes: dailyTotalScopes.map((scope) => ({
+      scopeId: scope.scopeId,
+      scopeName: scope.scopeName,
+      scopeType: scope.scopeType,
+      rows: dailyDateBuckets.map((bucket) => {
+        const row = dailyFactsByScopeAndDate.get(`${scope.scopeId}:${bucket.localDate}`);
+        const validIntervalCount = row ? numberAt(row, 5) : 0;
+        const qualityEventCount = row ? numberAt(row, 6) : 0;
+        const expectedMeterIntervalCount = scope.meterNodeIds.length * Math.round(
+          (Date.parse(bucket.to) - Date.parse(bucket.from)) / (intervalMinutes * 60_000),
+        );
+        const status = validIntervalCount === 0
+          ? "unavailable" as const
+          : validIntervalCount >= expectedMeterIntervalCount && qualityEventCount === 0
+            ? "complete" as const
+            : "partial" as const;
+        return {
+          localDate: bucket.localDate,
+          from: bucket.from,
+          to: bucket.to,
+          usageKwh: row && row[4] !== null && row[4] !== undefined
+            ? round(numberAt(row, 4), 4)
+            : null,
+          dataHealth: {
+            status,
+            coveragePct: expectedMeterIntervalCount > 0
+              ? round(Math.min(validIntervalCount / expectedMeterIntervalCount, 1) * 100, 4)
+              : 0,
+            expectedMeterIntervalCount,
+            validIntervalCount,
+            qualityEventCount,
+          },
+        };
+      }),
+    })),
+  };
   const previousMeterUsageById = new Map(
     previousMeterUsageResult.rows.map((row) => [stringAt(row, 0), numberAt(row, 1)]),
   );
@@ -867,6 +967,7 @@ export const executeEnergyScopeAnalysis = async (input: {
       peakKw: round(numberAt(row, 3), 4),
       observationCount: numberAt(row, 4)
     })),
+    dailyTotals,
     categories,
     childScopes,
     circuits,
@@ -899,6 +1000,7 @@ export const executeEnergyScopeAnalysis = async (input: {
       queryIds: [
         "scope_summary_v1",
         "hourly_profile_v1",
+        "daily_totals_v1",
         "meter_breakdown_v1",
         "previous_meter_usage_v1",
         "operational_policy_scope_intervals_v1",
@@ -1057,6 +1159,113 @@ const buildChildScopes = (input: {
       } : {})
     };
   }).sort((left, right) => right.usageKwh - left.usageKwh);
+};
+
+const resolveDailyTotalScopes = (input: {
+  metadataStore: MetadataStore;
+  projectId: string;
+  hierarchyRevisionId: string;
+  meterMappingRevisionId: string;
+  resource: "electricity" | "water";
+  selectedNode: ReturnType<MetadataStore["energyIq"]["listProjectNodes"]>[number];
+  hierarchy: ReturnType<MetadataStore["energyIq"]["listProjectNodes"]>;
+  meterAggregates: MeterAggregate[];
+  aggregateMeterNodeIds: string[];
+}): DailyTotalScope[] => {
+  const children = input.hierarchy
+    .filter((node) => node.parent_id === input.selectedNode.id)
+    .map((child) => {
+      const publishedRoute = resolveEnergyPublishedMeterRoute({
+        metadataStore: input.metadataStore,
+        projectId: input.projectId,
+        hierarchyRevisionId: input.hierarchyRevisionId,
+        scopeId: child.id,
+        resource: input.resource,
+        expectedMeterMappingRevisionId: input.meterMappingRevisionId,
+      });
+      const meterNodeIds = publishedRoute.officialMeterPointIds ?? [];
+      const officialIds = new Set(meterNodeIds);
+      const usageKwh = input.meterAggregates
+        .filter((meter) => officialIds.has(meter.meterNodeId))
+        .reduce((sum, meter) => sum + meter.usageKwh, 0);
+      return {
+        scopeId: child.id,
+        scopeName: child.name,
+        scopeType: child.node_type,
+        meterNodeIds,
+        usageKwh,
+      };
+    })
+    .sort((left, right) => right.usageKwh - left.usageKwh)
+    .map(({ usageKwh: _usageKwh, ...scope }) => scope);
+  return [{
+    scopeId: input.selectedNode.id,
+    scopeName: input.selectedNode.name,
+    scopeType: input.selectedNode.node_type,
+    meterNodeIds: input.aggregateMeterNodeIds,
+  }, ...children];
+};
+
+const buildDailyDateBuckets = (context: EnergyQueryContext): DailyDateBucket[] => {
+  const firstDate = formatLocalDate(context.from, context.timezone);
+  const endDateExclusive = formatLocalDate(context.to, context.timezone);
+  const buckets: DailyDateBucket[] = [];
+  for (let localDate = firstDate; localDate < endDateExclusive; localDate = shiftLocalDate(localDate, 1)) {
+    buckets.push({
+      localDate,
+      from: zonedStartOfLocalDay(localDate, context.timezone),
+      to: zonedStartOfLocalDay(shiftLocalDate(localDate, 1), context.timezone),
+    });
+  }
+  return buckets;
+};
+
+const formatLocalDate = (value: string, timezone: string): string => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(value));
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+};
+
+const shiftLocalDate = (value: string, days: number): string => {
+  const [year, month, day] = value.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1));
+  shifted.setUTCDate(shifted.getUTCDate() + days);
+  return shifted.toISOString().slice(0, 10);
+};
+
+const zonedStartOfLocalDay = (value: string, timezone: string): string => {
+  const [year, month, day] = value.split("-").map(Number);
+  const targetUtc = Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1);
+  let candidate = targetUtc;
+  for (let index = 0; index < 3; index += 1) {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date(candidate));
+    const part = (type: Intl.DateTimeFormatPartTypes) =>
+      Number(parts.find((item) => item.type === type)?.value ?? 0);
+    candidate += targetUtc - Date.UTC(
+      part("year"),
+      part("month") - 1,
+      part("day"),
+      part("hour"),
+      part("minute"),
+      part("second"),
+    );
+  }
+  return new Date(candidate).toISOString();
 };
 
 const buildVirtualMeters = (input: {
@@ -1422,6 +1631,24 @@ const hourlyProfileSql = (viewName: string, meterNodeIds: string[]): string => `
   GROUP BY local_hour
   ORDER BY local_hour
 `;
+
+const dailyTotalsSql = (
+  viewName: string,
+  scopes: DailyTotalScope[],
+): string => scopes.map((scope, index) => `
+  SELECT
+    ${sqlLiteral(scope.scopeId)} AS scope_id,
+    ${sqlLiteral(scope.scopeName)} AS scope_name,
+    ${sqlLiteral(scope.scopeType)} AS scope_type,
+    STRFTIME(CAST(source.local_interval_start AS DATE), '%Y-%m-%d') AS local_date,
+    SUM(source.usage_kwh) FILTER (WHERE source.quality_status = 'ok') AS usage_kwh,
+    COUNT(*) FILTER (WHERE source.quality_status = 'ok') AS valid_interval_count,
+    COUNT(*) FILTER (WHERE source.quality_status <> 'ok') AS quality_event_count,
+    ${index} AS scope_order
+  FROM ${quoteIdentifier(viewName)} source
+  WHERE ${meterNodeFilter(scope.meterNodeIds)}
+  GROUP BY CAST(source.local_interval_start AS DATE)
+`).join(" UNION ALL ") + " ORDER BY scope_order, local_date";
 
 const scopeHealthSql = (viewName: string, meterNodeIds: string[]): string => `
   SELECT

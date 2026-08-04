@@ -323,6 +323,18 @@ describe("EnergyScopeAnalysis", () => {
       expect(analysis.hourlyProfile).toEqual(
         expectedHourlyProfile(NGEE_ANN_GOLDEN.period.hourlyProfile, 28)
       );
+      expect(analysis.dailyTotals).toEqual(expectedNgeeAnnDailyTotals());
+      for (const scope of analysis.dailyTotals?.scopes ?? []) {
+        const expectedUsageKwh = scope.scopeId === "project"
+          ? NGEE_ANN_GOLDEN.period.usageKwh
+          : NGEE_ANN_GOLDEN.period.levelUsageKwh[
+            scope.scopeId as keyof typeof NGEE_ANN_GOLDEN.period.levelUsageKwh
+          ];
+        expect(roundForGolden(scope.rows.reduce(
+          (sum, row) => sum + (row.usageKwh ?? 0),
+          0,
+        ))).toBeCloseTo(expectedUsageKwh, 3);
+      }
       expect(analysis.offHours).toEqual({
         status: NGEE_ANN_GOLDEN.invariants.offHoursStatus,
         reason: {
@@ -397,6 +409,11 @@ describe("EnergyScopeAnalysis", () => {
       expect(day.hourlyProfile).toEqual(
         expectedHourlyProfile(NGEE_ANN_GOLDEN.day.hourlyProfile, 4)
       );
+      expect(day.dailyTotals?.scopes).toHaveLength(3);
+      expect(day.dailyTotals?.scopes.every((scope) => (
+        scope.rows.length === 1
+        && scope.rows[0]?.localDate === NGEE_ANN_GOLDEN.selection.day.localDate
+      ))).toBe(true);
 
       const analyzeScope = async (scopeId: string) => {
         const scopeContext = resolveEnergyQueryContext({
@@ -492,6 +509,96 @@ describe("EnergyScopeAnalysis", () => {
           aggregationRule: "designated_total"
         });
       }
+    } finally {
+      metadata.close();
+      removeTemporaryEnergyFixture(root);
+    }
+  }, 30_000);
+
+  it("preserves the date spine and reports partial and unavailable daily totals", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-analysis-daily-health-"));
+    const databasePath = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const gateway = new LocalDataGateway(metadata);
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      await materializeNgeeAnnGoldenFixture(databasePath, metadata, {
+        transformIntervalFacts: (facts) => facts.filter((fact) => (
+          fact.localDate !== "2026-06-12"
+          && !(fact.localDate === "2026-06-13"
+            && fact.meterPointId === "mapping-lvl-6-total-office-light-8")
+        )),
+      });
+      const user = metadata.users.getById({ user_id: "dev-user" });
+      const context = resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user,
+        workspaceId: NGEE_ANN_GOLDEN.workspaceId,
+        request: {
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "project",
+          resource: "electricity",
+          period: "Custom",
+          from: NGEE_ANN_GOLDEN.selection.period.localFrom,
+          to: "2026-06-16",
+        },
+      });
+
+      const analysis = await executeEnergyScopeAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        context,
+        databasePath,
+      });
+      const scope = (scopeId: string) => analysis.dailyTotals?.scopes.find(
+        (candidate) => candidate.scopeId === scopeId,
+      );
+      const row = (scopeId: string, localDate: string) => scope(scopeId)?.rows.find(
+        (candidate) => candidate.localDate === localDate,
+      );
+
+      expect(scope("project")?.rows).toHaveLength(7);
+      expect(row("project", "2026-06-12")).toEqual({
+        localDate: "2026-06-12",
+        from: "2026-06-11T16:00:00.000Z",
+        to: "2026-06-12T16:00:00.000Z",
+        usageKwh: null,
+        dataHealth: {
+          status: "unavailable",
+          coveragePct: 0,
+          expectedMeterIntervalCount: 384,
+          validIntervalCount: 0,
+          qualityEventCount: 0,
+        },
+      });
+      expect(row("project", "2026-06-13")).toMatchObject({
+        usageKwh: expect.any(Number),
+        dataHealth: {
+          status: "partial",
+          coveragePct: 75,
+          expectedMeterIntervalCount: 384,
+          validIntervalCount: 288,
+          qualityEventCount: 0,
+        },
+      });
+      expect(row("level-7", "2026-06-13")?.dataHealth).toEqual({
+        status: "complete",
+        coveragePct: 100,
+        expectedMeterIntervalCount: 192,
+        validIntervalCount: 192,
+        qualityEventCount: 0,
+      });
+      expect(row("level-6", "2026-06-13")).toMatchObject({
+        usageKwh: expect.any(Number),
+        dataHealth: {
+          status: "partial",
+          coveragePct: 50,
+          expectedMeterIntervalCount: 192,
+          validIntervalCount: 96,
+          qualityEventCount: 0,
+        },
+      });
     } finally {
       metadata.close();
       removeTemporaryEnergyFixture(root);
@@ -752,6 +859,9 @@ type GoldenMeter = {
 const materializeNgeeAnnGoldenFixture = async (
   databasePath: string,
   metadataStore: MetadataStore,
+  options: {
+    transformIntervalFacts?: (facts: EnergyIntervalFactWrite[]) => EnergyIntervalFactWrite[];
+  } = {},
 ) => {
   const currentRootUsage = buildCurrentRootUsage();
   const currentLevel6Usage = allocateLevel6Usage(currentRootUsage);
@@ -820,6 +930,7 @@ const materializeNgeeAnnGoldenFixture = async (
     const sentinelMeter = batchMeters.find((meter) => meter.meterRole === "total");
     if (!sentinelMeter) throw new Error(`NGEE_ANN_GOLDEN_SENTINEL_METER_MISSING:${importBatchId}`);
     intervalFacts.push(factFor(sentinelMeter, 1.234, 0, overlapSentinelFrom));
+    const transformedIntervalFacts = options.transformIntervalFacts?.(intervalFacts) ?? intervalFacts;
     const normalizedReadings = batchMeters.map((meter): EnergyNormalizedReadingWrite => ({
       workspaceId: NGEE_ANN_GOLDEN.workspaceId,
       projectId: NGEE_ANN_GOLDEN.projectId,
@@ -843,7 +954,7 @@ const materializeNgeeAnnGoldenFixture = async (
       sourceSha256,
       rawReadings: [],
       normalizedReadings,
-      intervalFacts,
+      intervalFacts: transformedIntervalFacts,
       qualityEvents: []
     });
   }
@@ -1094,6 +1205,22 @@ const expectedHourlyProfile = (
   peakKw: roundForGolden(peakKw),
   observationCount
 }));
+
+const expectedNgeeAnnDailyTotals = (): NonNullable<EnergyScopeAnalysis["dailyTotals"]> => ({
+  metricId: "energy.total_usage_kwh@1",
+  grain: "day",
+  timezone: NGEE_ANN_GOLDEN.timezone,
+  scopes: NGEE_ANN_GOLDEN.period.dailyTotals.scopes.map((scope) => ({
+    scopeId: scope.scopeId,
+    scopeName: scope.scopeName,
+    scopeType: scope.scopeType,
+    rows: NGEE_ANN_GOLDEN.period.dailyTotals.dateSpine.map((date, index) => ({
+      ...date,
+      usageKwh: scope.usageKwh[index] ?? null,
+      dataHealth: scope.dataHealth,
+    })),
+  })),
+});
 
 const roundForGolden = (value: number): number => Math.round((value + Number.EPSILON) * 10_000) / 10_000;
 const roundForOracle = (value: number): number => Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000;

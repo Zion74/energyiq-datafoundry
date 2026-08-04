@@ -114,6 +114,7 @@ const snapshot = (): ProjectAnalysisSnapshot => ({
     queryIds: [
       "scope_summary_v1",
       "hourly_profile_v1",
+      "daily_totals_v1",
       "meter_breakdown_v1",
       "previous_meter_usage_v1",
       "operational_policy_scope_intervals_v1",
@@ -169,6 +170,7 @@ const snapshot = (): ProjectAnalysisSnapshot => ({
       queryIds: [
         "scope_summary_v1",
         "hourly_profile_v1",
+        "daily_totals_v1",
         "meter_breakdown_v1",
         "previous_meter_usage_v1",
         "operational_policy_scope_intervals_v1",

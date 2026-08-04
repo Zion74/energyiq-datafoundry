@@ -246,7 +246,59 @@ export const NGEE_ANN_GOLDEN = {
       [21, 39.09562, 5.585089, 6.298508],
       [22, 38.341055, 5.477294, 5.980136],
       [23, 37.297852, 5.328265, 5.671996]
-    ]
+    ],
+    dailyTotals: {
+      dateSpine: [
+        { localDate: "2026-06-10", from: "2026-06-09T16:00:00.000Z", to: "2026-06-10T16:00:00.000Z" },
+        { localDate: "2026-06-11", from: "2026-06-10T16:00:00.000Z", to: "2026-06-11T16:00:00.000Z" },
+        { localDate: "2026-06-12", from: "2026-06-11T16:00:00.000Z", to: "2026-06-12T16:00:00.000Z" },
+        { localDate: "2026-06-13", from: "2026-06-12T16:00:00.000Z", to: "2026-06-13T16:00:00.000Z" },
+        { localDate: "2026-06-14", from: "2026-06-13T16:00:00.000Z", to: "2026-06-14T16:00:00.000Z" },
+        { localDate: "2026-06-15", from: "2026-06-14T16:00:00.000Z", to: "2026-06-15T16:00:00.000Z" },
+        { localDate: "2026-06-16", from: "2026-06-15T16:00:00.000Z", to: "2026-06-16T16:00:00.000Z" }
+      ],
+      scopes: [
+        {
+          scopeId: "project",
+          scopeName: "Ngee Ann Polytechnic",
+          scopeType: "project",
+          usageKwh: [216.3774, 233.8201, 214.7432, 214.7432, 214.7432, 214.7432, 221.9982],
+          dataHealth: {
+            status: "complete",
+            coveragePct: 100,
+            expectedMeterIntervalCount: 384,
+            validIntervalCount: 384,
+            qualityEventCount: 0
+          }
+        },
+        {
+          scopeId: "level-7",
+          scopeName: "Level 7",
+          scopeType: "level",
+          usageKwh: [148.956, 157.3728, 148.6114, 148.6114, 148.6114, 148.6114, 153.4099],
+          dataHealth: {
+            status: "complete",
+            coveragePct: 100,
+            expectedMeterIntervalCount: 192,
+            validIntervalCount: 192,
+            qualityEventCount: 0
+          }
+        },
+        {
+          scopeId: "level-6",
+          scopeName: "Level 6",
+          scopeType: "level",
+          usageKwh: [67.4214, 76.4473, 66.1317, 66.1317, 66.1317, 66.1317, 68.5882],
+          dataHealth: {
+            status: "complete",
+            coveragePct: 100,
+            expectedMeterIntervalCount: 192,
+            validIntervalCount: 192,
+            qualityEventCount: 0
+          }
+        }
+      ]
+    }
   },
   day: {
     usageKwh: 221.9982,
