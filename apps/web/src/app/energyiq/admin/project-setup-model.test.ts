@@ -10,6 +10,7 @@ import {
   canLockTierStructure,
   createInitialMeterMapping,
   createMeterMappingFromSourceLabels,
+  evaluateEnergyImportMaterializationGuard,
   hasSiblingNameConflict,
   inferMeterCategory,
   initialTierSelection,
@@ -260,6 +261,45 @@ describe("project setup model", () => {
     expect(manifest).toMatchObject({ confirmed: true, source_sha256: [...batches.map((batch) => batch.sourceSha256)].sort() });
     expect(manifest.id).toMatch(/^source-manifest-[a-f0-9]{24}$/);
     await expect(pinEnergySourceManifest([...batches].reverse())).resolves.toEqual(manifest);
+
+    const partialSavedDocument = {
+      ...document,
+      source_manifest: manifest,
+      meter_mapping: { ...existing, confirmed: true },
+    };
+    expect(evaluateEnergyImportMaterializationGuard({
+      document: partialSavedDocument,
+      savedDocument: partialSavedDocument,
+      batches,
+    })).toMatchObject({ ready: false, reasons: ["SOURCE_LABEL_UNMAPPED"] });
+
+    const completeSavedDocument = {
+      ...document,
+      source_manifest: manifest,
+      meter_mapping: { ...mapping, confirmed: true },
+    };
+    expect(evaluateEnergyImportMaterializationGuard({
+      document: completeSavedDocument,
+      savedDocument: completeSavedDocument,
+      batches,
+    })).toEqual({ ready: true, reasons: [] });
+
+    const inactiveSavedDocument = {
+      ...completeSavedDocument,
+      meter_mapping: {
+        ...completeSavedDocument.meter_mapping,
+        rows: [...completeSavedDocument.meter_mapping.rows, {
+          ...completeSavedDocument.meter_mapping.rows[0]!,
+          id: "inactive",
+          source_label: "Inactive source",
+        }],
+      },
+    };
+    expect(evaluateEnergyImportMaterializationGuard({
+      document: inactiveSavedDocument,
+      savedDocument: inactiveSavedDocument,
+      batches,
+    }).reasons).toContain("MAPPING_SOURCE_INACTIVE");
   });
 });
 

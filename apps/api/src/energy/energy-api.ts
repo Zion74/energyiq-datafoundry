@@ -21,6 +21,7 @@ import type {
 import {
   createDefaultTemplateDocument,
   createEnergyIqSourceManifest,
+  resolveEnergyIqMaterializationBlockingReasons,
   resolveEnergyIqProjectDataReadiness,
 } from "@datafoundry/metadata";
 import { createHash, randomUUID } from "node:crypto";
@@ -175,13 +176,9 @@ export const handleEnergyApiRequest = async (
           project_id: projectId,
           user_id: user.id,
         });
-        const sourceManifest = draft.document.source_manifest;
-        if (!sourceManifest?.confirmed) throw new Error("ENERGYIQ_SOURCE_MANIFEST_NOT_CONFIRMED");
-        const registeredSourceSha256 = context.metadataStore.energyIq.listImportBatches(projectId)
-          .map((candidate) => candidate.source_sha256);
-        if (!sameSourceSha256Set(sourceManifest.source_sha256, registeredSourceSha256)) {
-          throw new Error("ENERGYIQ_SOURCE_MANIFEST_MISMATCH");
-        }
+        const registeredBatches = context.metadataStore.energyIq.listImportBatches(projectId);
+        requireEnergyImportMaterializationPreconditions(registeredBatches, draft.document);
+        const sourceManifest = draft.document.source_manifest!;
         if (!sourceManifest.source_sha256.includes(batch.source_sha256.toLocaleLowerCase())) {
           throw new Error("ENERGYIQ_IMPORT_BATCH_NOT_PINNED");
         }
@@ -757,6 +754,7 @@ export const toEnergyApiErrorResponse = (error: unknown): ConfigApiResponse => {
     || message === "ENERGYIQ_SOURCE_MANIFEST_NOT_CONFIRMED"
     || message === "ENERGYIQ_SOURCE_MANIFEST_MISMATCH"
     || message.startsWith("ENERGYIQ_IMPORT_BATCH_NOT_PINNED")
+    || message.startsWith("ENERGYIQ_IMPORT_MATERIALIZATION_NOT_READY:")
     || message.startsWith("ENERGYIQ_DATA_SNAPSHOT_IMMUTABLE_CONFLICT:")
     || message.startsWith("ENERGYIQ_PROJECT_DATA_NOT_READY");
   const invalid = message.includes("INVALID")
@@ -863,9 +861,14 @@ const createProjectDataReadiness = (
   });
 };
 
-const sameSourceSha256Set = (left: readonly string[], right: readonly string[]): boolean => {
-  const canonical = (values: readonly string[]) => [...new Set(values.map((value) => value.trim().toLocaleLowerCase()))].sort();
-  return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
+export const requireEnergyImportMaterializationPreconditions = (
+  batches: EnergyIqImportBatchRecord[],
+  document: EnergyIqProjectSetupDocument,
+): void => {
+  const reasons = resolveEnergyIqMaterializationBlockingReasons({ batches, document });
+  if (reasons.length > 0) {
+    throw new Error(`ENERGYIQ_IMPORT_MATERIALIZATION_NOT_READY:${reasons.join(",")}`);
+  }
 };
 
 const toEnergySavedAnalysisSummary = (record: EnergyIqSavedAnalysisRecord) => ({

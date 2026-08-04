@@ -57,6 +57,7 @@ import {
   canLockTierStructure,
   buildAggregationReview,
   createMeterMappingFromSourceLabels,
+  evaluateEnergyImportMaterializationGuard,
   hasSiblingNameConflict,
   initialTierSelection,
   isTierStructureLocked,
@@ -1817,19 +1818,12 @@ function DataSourcesPage({
   };
 
   const latest = batches[0];
-  const mappingConfirmed = document.meter_mapping?.confirmed === true
-    && savedDocument.meter_mapping?.confirmed === true
-    && JSON.stringify(document.meter_mapping) === JSON.stringify(savedDocument.meter_mapping);
-  const currentSourceSha256 = [...new Set(batches.map((batch) => batch.sourceSha256.toLocaleLowerCase()))].sort();
-  const pinnedSourceSha256 = [...(document.source_manifest?.source_sha256 ?? [])].sort();
-  const sourceManifestMatches = document.source_manifest?.confirmed === true
-    && JSON.stringify(currentSourceSha256) === JSON.stringify(pinnedSourceSha256);
-  const sourceManifestSaved = sourceManifestMatches
-    && savedDocument.source_manifest?.id === document.source_manifest?.id
-    && savedDocument.source_manifest?.confirmed === true;
-  const materializationConfigSaved = sourceManifestSaved
-    && mappingConfirmed
-    && document.project.timezone === savedDocument.project.timezone;
+  const mappingConfirmed = savedDocument.meter_mapping?.confirmed === true;
+  const materializationGuard = evaluateEnergyImportMaterializationGuard({
+    document,
+    savedDocument,
+    batches,
+  });
   const pinCurrentBatches = async () => {
     if (batches.length === 0) return;
     setPinning(true);
@@ -1977,13 +1971,15 @@ function DataSourcesPage({
                   {pinning ? "Pinning batches..." : "Pin current batches"}
                 </button>
                 <button type="button" onClick={useDetectedLabels} disabled={batches.length === 0} className={secondaryButton}>Use all detected labels</button>
-                <button type="button" onClick={() => void materializeAll()} disabled={!materializationConfigSaved || materializing} className={primaryButton}>
+                <button type="button" onClick={() => void materializeAll()} disabled={!materializationGuard.ready || materializing} className={primaryButton}>
                   {materializing ? "Building facts..." : "Build all interval facts"}
                 </button>
               </div>
             </div>
-            {!materializationConfigSaved ? (
-              <p className="text-[10px] text-step-warning">Pin the current Import Batches, confirm Mapping and use the page-level Save Draft action before building facts.</p>
+            {!materializationGuard.ready ? (
+              <p className="text-[10px] text-step-warning">
+                Build blocked: {materializationGuard.reasons.join(" · ")}. Pin current batches, complete Mapping and Save Draft.
+              </p>
             ) : null}
           </div>
         ) : (

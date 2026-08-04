@@ -65,24 +65,13 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
     .filter(([key]) => !sourceByKey.has(key))
     .map(([, label]) => label);
   const materializedBatches = input.batches.filter((batch) => batch.status === "materialized");
-  const blockingReasons: string[] = [];
+  const blockingReasons = resolveEnergyIqMaterializationBlockingReasons({
+    batches: input.batches,
+    document: input.document,
+  });
   const warnings: string[] = [];
 
-  if (input.batches.length === 0) blockingReasons.push("IMPORT_BATCH_REQUIRED");
-  if (!mapping) blockingReasons.push("METER_MAPPING_REQUIRED");
-  else if (!mapping.confirmed) blockingReasons.push("METER_MAPPING_NOT_CONFIRMED");
-  if (!sourceManifest) blockingReasons.push("SOURCE_MANIFEST_REQUIRED");
-  else if (!sourceManifest.confirmed) blockingReasons.push("SOURCE_MANIFEST_NOT_CONFIRMED");
   if (materializedBatches.length !== input.batches.length) blockingReasons.push("IMPORT_BATCH_NOT_MATERIALIZED");
-  if (unmappedSourceLabels.length > 0) blockingReasons.push("SOURCE_LABEL_UNMAPPED");
-  if (inactiveMappingSourceLabels.length > 0) blockingReasons.push("MAPPING_SOURCE_INACTIVE");
-  if (sourceManifest) {
-    const expectedSourceShas = [...new Set(sourceManifest.source_sha256.map(normaliseSha256))].sort();
-    const actualSourceShas = [...new Set(input.batches.map((batch) => normaliseSha256(batch.source_sha256)))].sort();
-    if (JSON.stringify(actualSourceShas) !== JSON.stringify(expectedSourceShas)) {
-      blockingReasons.push("SOURCE_MANIFEST_MISMATCH");
-    }
-  }
 
   const snapshot = input.snapshot;
   if (!snapshot || snapshot.id !== input.project.data_snapshot_id) {
@@ -175,6 +164,41 @@ export const resolveEnergyIqProjectDataReadiness = (input: {
     blockingReasons: uniqueBlockingReasons,
     warnings,
   };
+};
+
+export const resolveEnergyIqMaterializationBlockingReasons = (input: {
+  batches: EnergyIqImportBatchRecord[];
+  document: EnergyIqProjectSetupDocument;
+}): string[] => {
+  const reasons: string[] = [];
+  const mapping = input.document.meter_mapping;
+  const sourceManifest = input.document.source_manifest;
+  if (input.batches.length === 0) reasons.push("IMPORT_BATCH_REQUIRED");
+  if (!sourceManifest) reasons.push("SOURCE_MANIFEST_REQUIRED");
+  else if (!sourceManifest.confirmed) reasons.push("SOURCE_MANIFEST_NOT_CONFIRMED");
+  if (!mapping) reasons.push("METER_MAPPING_REQUIRED");
+  else if (!mapping.confirmed) reasons.push("METER_MAPPING_NOT_CONFIRMED");
+
+  if (sourceManifest) {
+    const expectedSourceShas = [...new Set(sourceManifest.source_sha256.map(normaliseSha256))].sort();
+    const actualSourceShas = [...new Set(input.batches.map((batch) => normaliseSha256(batch.source_sha256)))].sort();
+    if (JSON.stringify(actualSourceShas) !== JSON.stringify(expectedSourceShas)) {
+      reasons.push("SOURCE_MANIFEST_MISMATCH");
+    }
+  }
+  if (mapping) {
+    const sourceLabels = sourceLabelsAcrossEnergyIqImportBatches(input.batches);
+    const sourceKeys = new Set(sourceLabels.map(normaliseLabel));
+    const mappingKeys = new Set(mapping.rows.map((row) => normaliseLabel(row.source_label)));
+    if (mappingKeys.size !== mapping.rows.length) reasons.push("SOURCE_LABEL_DUPLICATE");
+    if (sourceLabels.some((label) => !mappingKeys.has(normaliseLabel(label)))) {
+      reasons.push("SOURCE_LABEL_UNMAPPED");
+    }
+    if (mapping.rows.some((row) => !sourceKeys.has(normaliseLabel(row.source_label)))) {
+      reasons.push("MAPPING_SOURCE_INACTIVE");
+    }
+  }
+  return [...new Set(reasons)];
 };
 
 export const sourceLabelsAcrossEnergyIqImportBatches = (

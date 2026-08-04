@@ -246,6 +246,44 @@ export const pinEnergySourceManifest = async (
   };
 };
 
+export const evaluateEnergyImportMaterializationGuard = (input: {
+  document: EnergyProjectSetupDocumentDto;
+  savedDocument: EnergyProjectSetupDocumentDto;
+  batches: EnergyImportBatchDto[];
+}): { ready: boolean; reasons: string[] } => {
+  const reasons: string[] = [];
+  const currentSourceSha256 = [...new Set(input.batches
+    .map((batch) => batch.sourceSha256.trim().toLocaleLowerCase()))].sort();
+  const savedManifest = input.savedDocument.source_manifest;
+  if (input.batches.length === 0) reasons.push("IMPORT_BATCH_REQUIRED");
+  if (!savedManifest?.confirmed) reasons.push("SOURCE_MANIFEST_NOT_CONFIRMED");
+  else if (JSON.stringify([...new Set(savedManifest.source_sha256
+    .map((sha256) => sha256.trim().toLocaleLowerCase()))].sort()) !== JSON.stringify(currentSourceSha256)) {
+    reasons.push("SOURCE_MANIFEST_MISMATCH");
+  }
+  if (JSON.stringify(input.document.source_manifest) !== JSON.stringify(savedManifest)) {
+    reasons.push("SOURCE_MANIFEST_UNSAVED");
+  }
+
+  const savedMapping = input.savedDocument.meter_mapping;
+  if (!savedMapping?.confirmed) reasons.push("METER_MAPPING_NOT_CONFIRMED");
+  if (JSON.stringify(input.document.meter_mapping) !== JSON.stringify(savedMapping)) {
+    reasons.push("METER_MAPPING_UNSAVED");
+  }
+  if (input.document.project.timezone !== input.savedDocument.project.timezone) {
+    reasons.push("PROJECT_TIMEZONE_UNSAVED");
+  }
+  if (savedMapping) {
+    const sourceKeys = new Set(sourceLabelsAcrossImportBatches(input.batches).map(normaliseDisplayName));
+    const mappingKeys = new Set(savedMapping.rows.map((row) => normaliseDisplayName(row.source_label)));
+    if (mappingKeys.size !== savedMapping.rows.length) reasons.push("SOURCE_LABEL_DUPLICATE");
+    if ([...sourceKeys].some((key) => !mappingKeys.has(key))) reasons.push("SOURCE_LABEL_UNMAPPED");
+    if ([...mappingKeys].some((key) => !sourceKeys.has(key))) reasons.push("MAPPING_SOURCE_INACTIVE");
+  }
+  const uniqueReasons = [...new Set(reasons)];
+  return { ready: uniqueReasons.length === 0, reasons: uniqueReasons };
+};
+
 export const inferMeterCategory = (label: string): EnergyMeterCategoryDto => {
   const value = label.toLocaleLowerCase();
   if (/air\s*con|aircon|a\/c/.test(value)) return "aircon";
