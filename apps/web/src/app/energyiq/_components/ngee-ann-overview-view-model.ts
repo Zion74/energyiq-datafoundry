@@ -1,5 +1,11 @@
 import type { EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
 
+const COMPARISON_EVIDENCE_METRIC_IDS = new Set([
+  "energy.total_usage_kwh",
+  "energy.comparison_change_kwh",
+  "energy.comparison_change_pct",
+]);
+
 export type NgeeAnnOverviewDataStatus = "ready" | "partial" | "unavailable";
 
 export type NgeeAnnOverviewHighlight = {
@@ -49,6 +55,43 @@ export type NgeeAnnOverviewViewModel = {
     }>;
     importBatchCount: number;
     metadataStatus: string;
+    comparison: {
+      status: "available" | "unavailable";
+      from: string;
+      to: string;
+      range: string;
+      currentUsageKwh: string;
+      previousUsageKwh: string;
+      changeKwh: string;
+      changePct: string;
+      queryIds: string[];
+      referenceIds: string[];
+    };
+    cost:
+      | {
+        status: "available";
+        amount: string;
+        currency: string;
+        tariffScheduleVersion: string;
+        allocations: Array<{
+          from: string;
+          to: string;
+          range: string;
+          ratePerKwh: string;
+          usageKwh: string;
+          cost: string;
+        }>;
+        queryIds: string[];
+        referenceIds: string[];
+      }
+      | {
+        status: "unavailable";
+        reason: string;
+        tariffScheduleVersion: string | null;
+        allocations: [];
+        queryIds: string[];
+        referenceIds: string[];
+      };
   };
   latestAvailableRange: NgeeAnnLatestAvailableRange | null;
 };
@@ -70,6 +113,8 @@ export function buildNgeeAnnOverviewViewModel(
     ?? null;
 
   const latestAvailableRange = unavailable ? hint.latestAvailableRange ?? null : null;
+  const evidenceQueryIds = [...analysis.provenance.queryIds];
+  const comparisonReferenceIds = comparisonEvidenceReferences(snapshot);
 
   return {
     context: {
@@ -145,7 +190,7 @@ export function buildNgeeAnnOverviewViewModel(
       projectRelease: snapshot.projectRelease.templateRevisionSequence === null
         ? snapshot.projectRelease.id
         : `Revision ${snapshot.projectRelease.templateRevisionSequence}`,
-      queryIds: [...analysis.provenance.queryIds],
+      queryIds: evidenceQueryIds,
       references: snapshot.evidence.map((item) => ({
         id: item.id,
         metricId: item.metricId,
@@ -154,6 +199,53 @@ export function buildNgeeAnnOverviewViewModel(
       })),
       importBatchCount: snapshot.dataSnapshot.importBatchIds.length,
       metadataStatus: snapshot.metadata.status,
+      comparison: {
+        status: comparisonAvailable ? "available" : "unavailable",
+        from: analysis.comparison.from,
+        to: analysis.comparison.to,
+        range: formatEvidenceRange(
+          analysis.comparison.from,
+          analysis.comparison.to,
+          context.timezone,
+        ),
+        currentUsageKwh: formatDecimal(analysis.summary.usageKwh, 4),
+        previousUsageKwh: formatDecimal(analysis.comparison.usageKwh, 4),
+        changeKwh: signedDecimal(analysis.comparison.changeKwh, 4),
+        changePct: analysis.comparison.changePct === null
+          ? "Unavailable"
+          : `${analysis.comparison.changePct >= 0 ? "+" : ""}${formatDecimal(analysis.comparison.changePct, 4)}%`,
+        queryIds: evidenceQueryIds,
+        referenceIds: comparisonReferenceIds,
+      },
+      cost: analysis.cost.status === "available" && !unavailable
+        ? {
+          status: "available",
+          amount: formatDecimal(analysis.cost.amount, 6),
+          currency: analysis.cost.currency,
+          tariffScheduleVersion: analysis.cost.tariffScheduleVersion,
+          allocations: analysis.cost.allocations.map((allocation) => ({
+            from: allocation.from,
+            to: allocation.to,
+            range: formatEvidenceRange(allocation.from, allocation.to, context.timezone),
+            ratePerKwh: formatDecimal(allocation.ratePerKwh, 6),
+            usageKwh: formatDecimal(allocation.usageKwh, 6),
+            cost: formatDecimal(allocation.cost, 6),
+          })),
+          queryIds: evidenceQueryIds,
+          referenceIds: [],
+        }
+        : {
+          status: "unavailable",
+          reason: unavailable
+            ? "No trusted intervals support a Cost for this Period."
+            : analysis.cost.status === "unavailable"
+              ? analysis.cost.reason.message
+              : "No effective Tariff covers this Period.",
+          tariffScheduleVersion: analysis.cost.tariffScheduleVersion ?? null,
+          allocations: [],
+          queryIds: evidenceQueryIds,
+          referenceIds: [],
+        },
     },
     latestAvailableRange,
   };
@@ -235,4 +327,16 @@ function formatTimestamp(value: string, timezone: string): string {
     minute: "2-digit",
     hour12: false,
   }).format(new Date(value));
+}
+
+function formatEvidenceRange(from: string, to: string, timezone: string): string {
+  return `[${formatTimestamp(from, timezone)}, ${formatTimestamp(to, timezone)})`;
+}
+
+function comparisonEvidenceReferences(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+): string[] {
+  return snapshot.evidence
+    .filter((reference) => COMPARISON_EVIDENCE_METRIC_IDS.has(reference.metricId))
+    .map((reference) => reference.id);
 }

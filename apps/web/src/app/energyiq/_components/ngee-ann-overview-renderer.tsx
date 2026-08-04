@@ -6,6 +6,7 @@ import {
   buildNgeeAnnOverviewViewModel,
   type NgeeAnnLatestAvailableRange,
   type NgeeAnnOverviewDataStatus,
+  type NgeeAnnOverviewViewModel,
 } from "./ngee-ann-overview-view-model";
 
 export type NgeeAnnOverviewRendererState =
@@ -144,10 +145,28 @@ export function NgeeAnnOverviewRenderer({
             <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
               View reproducible evidence
             </summary>
-            <div className="mt-3 space-y-3 text-[10px] leading-4 text-muted">
-              <p className="break-words">Queries: {view.evidence.queryIds.join(", ")}</p>
+            <div className="mt-3 space-y-4 text-[10px] leading-4 text-muted">
+              <div className="grid divide-y divide-border border-y border-border lg:grid-cols-2 lg:divide-x lg:divide-y-0">
+                <ComparisonEvidence
+                  evidence={view.evidence.comparison}
+                  snapshotId={view.evidence.snapshotId}
+                  projectReleaseId={view.evidence.projectReleaseId}
+                />
+                <CostEvidence
+                  evidence={view.evidence.cost}
+                  snapshotId={view.evidence.snapshotId}
+                  projectReleaseId={view.evidence.projectReleaseId}
+                />
+              </div>
+              <div className="border-t border-border pt-3">
+                <p className="break-words">Shared queries: {view.evidence.queryIds.join(", ")}</p>
+              </div>
               {view.evidence.references.map((reference) => (
-                <div key={reference.id} className="border-t border-border pt-2 first:border-t-0 first:pt-0">
+                <div
+                  key={reference.id}
+                  id={evidenceReferenceDomId(reference.id)}
+                  className="scroll-mt-24 border-t border-border pt-2"
+                >
                   <p className="break-all font-mono text-foreground">{reference.id}</p>
                   <p>{reference.metricId} / {reference.queryIds.join(", ")}</p>
                   {reference.queryReceiptId ? <p className="break-all">Receipt: {reference.queryReceiptId}</p> : null}
@@ -159,6 +178,157 @@ export function NgeeAnnOverviewRenderer({
       </div>
     </section>
   );
+}
+
+function ComparisonEvidence({
+  evidence,
+  snapshotId,
+  projectReleaseId,
+}: {
+  evidence: NgeeAnnOverviewViewModel["evidence"]["comparison"];
+  snapshotId: string;
+  projectReleaseId: string;
+}) {
+  return (
+    <section aria-labelledby="ngee-ann-comparison-evidence" className="min-w-0 py-4 lg:pr-5">
+      <h4 id="ngee-ann-comparison-evidence" className="text-xs font-semibold text-foreground">
+        Comparison evidence
+      </h4>
+      {evidence.status === "available" ? (
+        <>
+          <p className="mt-1 text-[10px] text-muted-light">Baseline uses [from, to): start inclusive, end exclusive.</p>
+          <dl className="mt-3 grid grid-cols-[104px_minmax(0,1fr)] gap-x-3 gap-y-2">
+            <dt className="text-muted-light">Baseline range</dt>
+            <dd className="break-words text-foreground" title={`${evidence.from} / ${evidence.to}`}>
+              {evidence.range}
+            </dd>
+            <dt className="text-muted-light">Current usage</dt>
+            <dd className="tabular-nums text-foreground">{evidence.currentUsageKwh} kWh</dd>
+            <dt className="text-muted-light">Previous usage</dt>
+            <dd className="tabular-nums text-foreground">{evidence.previousUsageKwh} kWh</dd>
+            <dt className="text-muted-light">Change</dt>
+            <dd className="tabular-nums text-foreground">{evidence.changeKwh} kWh</dd>
+            <dt className="text-muted-light">Change rate</dt>
+            <dd className="tabular-nums text-foreground">{evidence.changePct}</dd>
+          </dl>
+        </>
+      ) : (
+        <p className="mt-2 text-foreground">No trusted comparison is available for this Period.</p>
+      )}
+      <EvidenceTrace
+        snapshotId={snapshotId}
+        projectReleaseId={projectReleaseId}
+        queryIds={evidence.queryIds}
+        referenceIds={evidence.referenceIds}
+      />
+    </section>
+  );
+}
+
+function CostEvidence({
+  evidence,
+  snapshotId,
+  projectReleaseId,
+}: {
+  evidence: NgeeAnnOverviewViewModel["evidence"]["cost"];
+  snapshotId: string;
+  projectReleaseId: string;
+}) {
+  return (
+    <section aria-labelledby="ngee-ann-cost-evidence" className="min-w-0 py-4 lg:pl-5">
+      <h4 id="ngee-ann-cost-evidence" className="text-xs font-semibold text-foreground">Cost evidence</h4>
+      {evidence.status === "available" ? (
+        <>
+          <dl className="mt-3 grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-2">
+            <dt className="text-muted-light">Cost total</dt>
+            <dd className="tabular-nums text-foreground">{evidence.amount} {evidence.currency}</dd>
+            <dt className="text-muted-light">Tariff</dt>
+            <dd className="break-all text-foreground">{evidence.tariffScheduleVersion}</dd>
+          </dl>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[620px] border-collapse text-left">
+              <caption className="mb-2 text-left text-[10px] font-semibold text-foreground">Tariff allocations</caption>
+              <thead className="border-y border-border text-muted-light">
+                <tr>
+                  <th scope="col" className="py-2 pr-3 font-medium">Range [from, to)</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Rate</th>
+                  <th scope="col" className="px-3 py-2 font-medium">Usage</th>
+                  <th scope="col" className="py-2 pl-3 font-medium">Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {evidence.allocations.map((allocation, index) => (
+                  <tr key={`${allocation.from}:${allocation.to}:${index}`} className="border-b border-border last:border-b-0">
+                    <td className="py-2 pr-3 text-foreground" title={`${allocation.from} / ${allocation.to}`}>{allocation.range}</td>
+                    <td className="px-3 py-2 tabular-nums text-foreground">{allocation.ratePerKwh} {evidence.currency}/kWh</td>
+                    <td className="px-3 py-2 tabular-nums text-foreground">{allocation.usageKwh} kWh</td>
+                    <td className="py-2 pl-3 tabular-nums text-foreground">{allocation.cost} {evidence.currency}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : (
+        <dl className="mt-3 grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-2">
+          <dt className="text-muted-light">Status</dt>
+          <dd className="font-semibold text-foreground">Unavailable</dd>
+          <dt className="text-muted-light">Reason</dt>
+          <dd className="text-foreground">{evidence.reason}</dd>
+          <dt className="text-muted-light">Tariff</dt>
+          <dd className="break-all text-foreground">{evidence.tariffScheduleVersion ?? "Unavailable"}</dd>
+          <dt className="text-muted-light">Allocations</dt>
+          <dd className="text-foreground">No allocation rows are available.</dd>
+        </dl>
+      )}
+      <EvidenceTrace
+        snapshotId={snapshotId}
+        projectReleaseId={projectReleaseId}
+        queryIds={evidence.queryIds}
+        referenceIds={evidence.referenceIds}
+      />
+    </section>
+  );
+}
+
+function EvidenceTrace({
+  snapshotId,
+  projectReleaseId,
+  queryIds,
+  referenceIds,
+}: {
+  snapshotId: string;
+  projectReleaseId: string;
+  queryIds: readonly string[];
+  referenceIds: readonly string[];
+}) {
+  return (
+    <div className="mt-3 border-t border-border pt-3">
+      <p className="break-all">Snapshot: <span className="font-mono text-foreground">{snapshotId}</span></p>
+      <p className="mt-1 break-all">Release: <span className="font-mono text-foreground">{projectReleaseId}</span></p>
+      <p className="mt-1 break-words">Snapshot queries: {queryIds.join(", ")}</p>
+      {referenceIds.length > 0 ? (
+        <ul className="mt-1 space-y-1" aria-label="Evidence references">
+          {referenceIds.map((referenceId) => (
+            <li key={referenceId}>
+              <a
+                href={`#${evidenceReferenceDomId(referenceId)}`}
+                className="break-all font-mono text-foreground underline decoration-border underline-offset-2 hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+              >
+                {referenceId}
+              </a>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-1">No dedicated Evidence reference is attached; use the Snapshot and query provenance above.</p>
+      )}
+    </div>
+  );
+}
+
+function evidenceReferenceDomId(referenceId: string): string {
+  return `ngee-ann-evidence-ref-${encodeURIComponent(referenceId).replaceAll("%", "_")}`;
 }
 
 function NgeeAnnRendererState({

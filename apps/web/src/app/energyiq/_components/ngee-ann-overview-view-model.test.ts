@@ -43,6 +43,34 @@ describe("Ngee Ann Overview ViewModel", () => {
       id: "evidence:ngee-ann-golden:energy.total_usage_kwh",
       queryReceiptId: "receipt-ngee-ann-golden",
     })]);
+    expect(view.evidence.comparison).toEqual({
+      status: "available",
+      from: "2026-06-02T16:00:00.000Z",
+      to: "2026-06-09T16:00:00.000Z",
+      range: "[03 Jun 2026, 00:00, 10 Jun 2026, 00:00)",
+      currentUsageKwh: "1531.1683",
+      previousUsageKwh: "1211.6773",
+      changeKwh: "+319.4911",
+      changePct: "+26.3677%",
+      queryIds: snapshot.analysis.provenance.queryIds,
+      referenceIds: ["evidence:ngee-ann-golden:energy.total_usage_kwh"],
+    });
+    expect(view.evidence.cost).toEqual({
+      status: "available",
+      amount: "489.973864",
+      currency: "SGD",
+      tariffScheduleVersion: "tariff-v1",
+      allocations: [{
+        from: "2026-06-09T16:00:00.000Z",
+        to: "2026-06-16T16:00:00.000Z",
+        range: "[10 Jun 2026, 00:00, 17 Jun 2026, 00:00)",
+        ratePerKwh: "0.32",
+        usageKwh: "1531.168324",
+        cost: "489.973864",
+      }],
+      queryIds: snapshot.analysis.provenance.queryIds,
+      referenceIds: [],
+    });
   });
 
   it("keeps accepted partial values visible with an actionable incomplete-data status", () => {
@@ -93,6 +121,13 @@ describe("Ngee Ann Overview ViewModel", () => {
       "Unavailable",
     ]);
     expect(view.latestAvailableRange).toEqual({ from: "2026-06-10", to: "2026-06-16" });
+    expect(view.evidence.comparison.status).toBe("unavailable");
+    expect(view.evidence.cost).toMatchObject({
+      status: "unavailable",
+      reason: "No trusted intervals support a Cost for this Period.",
+      allocations: [],
+      referenceIds: [],
+    });
   });
 
   it("shows Cost as Unavailable when the Snapshot has no effective Tariff", () => {
@@ -103,5 +138,13 @@ describe("Ngee Ann Overview ViewModel", () => {
       available: false,
       detail: "No effective Tariff covers the selected period.",
     }));
+    expect(view.evidence.cost).toEqual({
+      status: "unavailable",
+      reason: "No effective Tariff covers the selected period.",
+      tariffScheduleVersion: "tariff-v1",
+      allocations: [],
+      queryIds: view.evidence.queryIds,
+      referenceIds: [],
+    });
   });
 });
