@@ -485,8 +485,7 @@ export const executeEnergyScopeAnalysis = async (input: {
     summaryResult,
     profileResult,
     healthResult,
-    previousSummaryResult,
-    previousMeterResult,
+    previousMeterUsageResult,
     operationalScopeIntervalResult,
     operationalMeterIntervalResult,
   ] = await Promise.all([
@@ -512,13 +511,7 @@ export const executeEnergyScopeAnalysis = async (input: {
       user_id: input.userId,
       workspace_id: input.context.workspaceId,
       datasource_id: previousScoped.datasourceId,
-      sql: scopeSummarySql(previousScoped.viewName, aggregateMeterNodeIds)
-    }),
-    input.dataGateway.runSqlReadonly({
-      user_id: input.userId,
-      workspace_id: input.context.workspaceId,
-      datasource_id: previousScoped.datasourceId,
-      sql: meterBreakdownSql(previousScoped.viewName),
+      sql: previousMeterUsageSql(previousScoped.viewName, aggregateMeterNodeIds),
       limit: 1000,
     }),
     input.dataGateway.runSqlReadonly({
@@ -557,8 +550,11 @@ export const executeEnergyScopeAnalysis = async (input: {
   const cumulativeDeltaMismatchCount = numberAt(healthRow, 5);
   const averageKwMismatchCount = numberAt(healthRow, 6);
   const invalidIntervalDurationCount = numberAt(healthRow, 7);
-  const previousUsageKwh = numberAt(previousSummaryResult.rows[0] ?? [], 0);
-  const previousMeterAggregates = previousMeterResult.rows.map(rowToMeterAggregate);
+  const previousMeterUsageById = new Map(
+    previousMeterUsageResult.rows.map((row) => [stringAt(row, 0), numberAt(row, 1)]),
+  );
+  const previousUsageKwh = aggregateMeterNodeIds
+    .reduce((sum, meterNodeId) => sum + (previousMeterUsageById.get(meterNodeId) ?? 0), 0);
   const operationalSeries = [
     ...operationalScopeIntervalResult.rows,
     ...operationalMeterIntervalResult.rows,
@@ -614,7 +610,7 @@ export const executeEnergyScopeAnalysis = async (input: {
     scopeNodeId: selectedNode.id,
     hierarchy,
     meterAggregates,
-    previousMeterAggregates,
+    previousMeterUsageById,
     scopeUsageKwh: usageKwh,
     periodDurationMs,
     intervalMinutes,
@@ -837,7 +833,7 @@ const buildChildScopes = (input: {
   scopeNodeId: string;
   hierarchy: ReturnType<MetadataStore["energyIq"]["listProjectNodes"]>;
   meterAggregates: MeterAggregate[];
-  previousMeterAggregates: MeterAggregate[];
+  previousMeterUsageById: ReadonlyMap<string, number>;
   scopeUsageKwh: number;
   periodDurationMs: number;
   intervalMinutes: number;
@@ -863,9 +859,8 @@ const buildChildScopes = (input: {
       : [];
     const usageKwh = aggregateMeters.reduce((sum, meter) => sum + meter.usageKwh, 0);
     const previousUsageKwh = officialIds
-      ? input.previousMeterAggregates
-        .filter((meter) => officialIds.has(meter.meterNodeId))
-        .reduce((sum, meter) => sum + meter.usageKwh, 0)
+      ? [...officialIds]
+        .reduce((sum, meterNodeId) => sum + (input.previousMeterUsageById.get(meterNodeId) ?? 0), 0)
       : 0;
     const expectedMeterIntervalCount = (officialIds?.size ?? 0) * Math.round(
       input.periodDurationMs / (input.intervalMinutes * 60_000),
@@ -1392,6 +1387,16 @@ const meterBreakdownSql = (viewName: string): string => `
     COUNT(*) FILTER (WHERE quality_status = 'ok') AS valid_interval_count,
     COUNT(*) FILTER (WHERE quality_status <> 'ok') AS quality_event_count
   FROM ${quoteIdentifier(viewName)}
+  GROUP BY meter_node_id
+  ORDER BY meter_node_id
+`;
+
+const previousMeterUsageSql = (viewName: string, meterNodeIds: string[]): string => `
+  SELECT
+    meter_node_id,
+    COALESCE(SUM(usage_kwh) FILTER (WHERE quality_status = 'ok'), 0) AS usage_kwh
+  FROM ${quoteIdentifier(viewName)} source
+  WHERE ${meterNodeFilter(meterNodeIds)}
   GROUP BY meter_node_id
   ORDER BY meter_node_id
 `;
