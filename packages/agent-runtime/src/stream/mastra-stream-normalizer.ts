@@ -125,8 +125,11 @@ export function wrapAgentForAgUi<TAgent extends object>(
   options: MastraAgentForAgUiOptions = {}
 ): TAgent {
   return new Proxy(agent, {
-    get(target, prop, receiver) {
-      const value = Reflect.get(target, prop, receiver);
+    get(target, prop) {
+      // Class private fields are branded to the original instance. Passing the
+      // Proxy as the receiver makes accessors such as Mastra Agent#agent read
+      // `#durable` from the wrong object and throw during agent registration.
+      const value = Reflect.get(target, prop, target);
 
       if ((prop === "stream" || prop === "resumeStream") && typeof value === "function") {
         return async (...args: unknown[]) => {
@@ -136,15 +139,18 @@ export function wrapAgentForAgUi<TAgent extends object>(
           }
 
           return new Proxy(response as object, {
-            get(responseTarget, responseProp, responseReceiver) {
+            get(responseTarget, responseProp) {
               if (responseProp === "fullStream") {
-                const fullStream = Reflect.get(responseTarget, responseProp, responseReceiver);
+                const fullStream = Reflect.get(responseTarget, responseProp, responseTarget);
                 if (fullStream && typeof (fullStream as AsyncIterable<MastraStreamChunk>)[Symbol.asyncIterator] === "function") {
                   return normalizeMastraFullStream(fullStream as AsyncIterable<MastraStreamChunk>, hooks);
                 }
                 return fullStream;
               }
-              return Reflect.get(responseTarget, responseProp, responseReceiver);
+              const responseValue = Reflect.get(responseTarget, responseProp, responseTarget);
+              return typeof responseValue === "function"
+                ? responseValue.bind(responseTarget)
+                : responseValue;
             }
           });
         };
