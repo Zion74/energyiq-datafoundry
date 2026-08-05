@@ -407,32 +407,6 @@ export type EnergyDailyTotalsDto = {
     scopeId: string;
     scopeName: string;
     scopeType: string;
-    rollingComparisons: Array<{
-      horizon: "rolling_7d" | "rolling_28d";
-      cutoffLocalDate: string;
-      current: {
-        fromLocalDate: string;
-        toLocalDate: string;
-        totalKwh: number | null;
-        completeDayCount: number;
-      };
-      baseline: {
-        fromLocalDate: string;
-        toLocalDate: string;
-        totalKwh: number | null;
-        completeDayCount: number;
-      };
-    } & ({
-      status: "available";
-      deltaKwh: number;
-      relativePct: number;
-    } | {
-      status: "unavailable";
-      reason: {
-        code: "INCOMPLETE_HORIZON_EVIDENCE" | "NON_POSITIVE_HORIZON_BASELINE";
-        message: string;
-      };
-    })>;
     rows: Array<{
       localDate: string;
       from: string;
@@ -531,6 +505,32 @@ export type EnergyDailyUsageAnomaliesDto = {
     scopeId: string;
     scopeName: string;
     scopeType: string;
+    rollingComparisons: Array<{
+      horizon: "rolling_7d" | "rolling_28d";
+      cutoffLocalDate: string;
+      current: {
+        fromLocalDate: string;
+        toLocalDate: string;
+        totalKwh: number | null;
+        completeDayCount: number;
+      };
+      baseline: {
+        fromLocalDate: string;
+        toLocalDate: string;
+        totalKwh: number | null;
+        completeDayCount: number;
+      };
+    } & ({
+      status: "available";
+      deltaKwh: number;
+      relativePct: number;
+    } | {
+      status: "unavailable";
+      reason: {
+        code: "INCOMPLETE_HORIZON_EVIDENCE" | "NON_POSITIVE_HORIZON_BASELINE";
+        message: string;
+      };
+    })>;
     rows: Array<{
       anomalyId: string;
       incidentId: string;
