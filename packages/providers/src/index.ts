@@ -90,6 +90,12 @@ export const createModelRuntimeProviderOptions = (
     };
   }
 
+  if (input.providerId === "openai-compatible" && input.reasoningEnabled === false) {
+    options.openaiCompatible = {
+      reasoningEffort: "low"
+    };
+  }
+
   if (providerIds.has("openai")) {
     options.openai = {
       systemMessageMode: "system"
