@@ -390,7 +390,7 @@ function buildAgentPrompt(input: NgeeAnnAiRunInput): string {
     "For every Finding state whether it supports, challenges, or is independent of the deterministic projection. Answer What, Why, How, and How to verify.",
     "How must state the next investigation or operational action. It must not restate What, Why, or the numeric Evidence in different words. How to verify must name the observed outcome, metric, or dimension that would confirm or challenge the Finding.",
     "whyKind must be Evidence, Hypothesis, or Missing Evidence. Do not invent a cause, owner, saving, ROI, device state, or commitment.",
-    "Every Finding must cite one or more exact Discovery item ids in evidenceRefs. Cite evidenceSqlIndexes [1] only when that Finding actually uses the successful SQL result; otherwise omit evidenceSqlIndexes. The SQL must not be attributed to unrelated Findings.",
+    "Every Finding must cite one or more exact Discovery item ids in evidenceRefs. Every value declared in that Finding's horizons array must cite its exact matching deterministic Evidence id: 1d requires horizon:1d, 7d requires horizon:7d, and 28d requires horizon:28d. Cite evidenceSqlIndexes [1] only when that Finding actually uses the successful SQL result; otherwise omit evidenceSqlIndexes. The SQL must not be attributed to unrelated Findings.",
     "Finding text may use only numeric values directly present in that Finding's cited Discovery Evidence items or cited SQL result, or a single-step sum, difference, ratio, or percentage computed from those values. Never report a multi-step derived number such as normalizing values and then comparing the normalized results.",
     "In how and howToVerify, never invent a numeric threshold, target, tolerance, percentage, duration, or time window that is absent from that Finding's cited Evidence. Verification may name the metric or dimension to monitor, but it must not introduce a new number.",
     "Include the relevant quality status or coverage fields in the SQL result used as Evidence. The supplied deterministic Overview quality summary covers only its primary period and must not be claimed as the quality of the full AI lookback.",
@@ -464,6 +464,14 @@ export function resolveNgeeAnnAiEventStream(input: {
   const generated = parseGeneratedFindings(answer);
   if (!generated) {
     return { status: "unavailable", reason: "The AI response could not be verified against this Snapshot." };
+  }
+  if (generated.some((finding) => finding.horizons.some(
+    (horizon) => !finding.evidenceRefs.includes(`horizon:${horizon}`),
+  ))) {
+    return {
+      status: "unavailable",
+      reason: "A Finding declared a Horizon without its matching deterministic Evidence.",
+    };
   }
   const evidenceById = new Map(input.input.discoveryEvidence.items.map((item) => [item.id, item]));
   const selectedEvidence = generated.map((finding) => finding.evidenceRefs

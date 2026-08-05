@@ -137,6 +137,9 @@ describe("Ngee Ann AI Run", () => {
     expect(JSON.stringify(body)).toContain("Bounded Ngee Ann Discovery Evidence Bundle");
     expect(JSON.stringify(body)).toContain("category:load");
     expect(JSON.stringify(body)).toContain("evidenceRefs");
+    expect(JSON.stringify(body)).toContain(
+      "1d requires horizon:1d, 7d requires horizon:7d, and 28d requires horizon:28d",
+    );
     expect(JSON.stringify(body)).not.toContain("execute exactly the following concise cross-horizon Level query");
     expect(JSON.stringify(body)).not.toContain("Leave every additional dimension or follow-up query to Ask AI deeper");
     expect(JSON.stringify(body)).toContain("Do not use WITH/CTEs or EXTRACT syntax");
@@ -224,6 +227,7 @@ describe("Ngee Ann AI Run", () => {
       },
     });
     expect(result.findings[1]!.evidence.deterministic.map((item) => item.id)).toEqual([
+      "horizon:7d",
       "horizon:28d",
       "category:load",
     ]);
@@ -234,7 +238,7 @@ describe("Ngee Ann AI Run", () => {
 
   it("rejects a Finding that cites Discovery Evidence outside the current bundle", () => {
     const findings = generatedFindings();
-    findings[1]!.evidenceRefs = ["category:not-present"];
+    findings[1]!.evidenceRefs = ["horizon:7d", "horizon:28d", "category:not-present"];
 
     const result = resolveNgeeAnnAiEventStream({
       eventStream: successfulEventStream(findings),
@@ -247,6 +251,36 @@ describe("Ngee Ann AI Run", () => {
       status: "unavailable",
       reason: "A Finding cited deterministic Evidence that is not present in this Snapshot.",
     });
+  });
+
+  it("rejects a declared 28d Horizon without the matching deterministic Evidence", () => {
+    const findings = generatedFindings();
+    findings[2]!.evidenceRefs = ["peak:project", "limitation:external-operational-evidence"];
+
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result).toEqual({
+      status: "unavailable",
+      reason: "A Finding declared a Horizon without its matching deterministic Evidence.",
+    });
+  });
+
+  it("accepts a declared 28d Horizon with the exact matching deterministic Evidence", () => {
+    const findings = generatedFindings();
+
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
   });
 
   it("rejects a numeric claim copied from an uncited Discovery Evidence item", () => {
@@ -306,6 +340,7 @@ describe("Ngee Ann AI Run", () => {
     const findings = generatedFindings();
     findings[1]!.what = "Office Load 4 Fan ISOL 1/2 is the leading changed Circuit.";
     findings[1]!.evidenceRefs = [
+      "horizon:7d",
       "horizon:28d",
       "circuit:mapping-lvl-7-office-load-4-l1p22-l3p25-fan-isol1-2-16",
     ];
@@ -845,7 +880,7 @@ function generatedFindings() {
       how: "Separate occupied and unoccupied periods for investigation.",
       howToVerify: "Compare the segmented averages using the same cutoff.",
       evidenceNote: "The cited average challenges magnitude, while causality is unproven.",
-      evidenceRefs: ["horizon:28d", "category:load"],
+      evidenceRefs: ["horizon:7d", "horizon:28d", "category:load"],
     },
     {
       relationship: "independent",
@@ -857,7 +892,7 @@ function generatedFindings() {
       how: "Review the coincident circuit and operating context.",
       howToVerify: "Re-run the peak query after the suspected condition is changed.",
       evidenceNote: "The cited maximum identifies timing, not a confirmed driver.",
-      evidenceRefs: ["peak:project", "limitation:external-operational-evidence"],
+      evidenceRefs: ["horizon:28d", "peak:project", "limitation:external-operational-evidence"],
     },
   ];
 }
