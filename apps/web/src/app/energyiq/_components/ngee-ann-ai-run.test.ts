@@ -114,6 +114,34 @@ describe("Ngee Ann AI Run", () => {
     }));
   });
 
+  it("keeps the autonomous analysis contract compact without duplicating governed Horizon facts", () => {
+    const body = buildAgentRunBody(requiredInput(), "profile-1", "run-1", "thread-1");
+    const prompt = ((body.body as { messages: Array<{ content: string }> }).messages[0]?.content) ?? "";
+    const projectionText = prompt.split("Official deterministic projection:\n\n")[1] ?? "";
+    const projection = JSON.parse(projectionText) as Array<Record<string, unknown>>;
+
+    expect(prompt.length).toBeLessThan(5_500);
+    expect(projection).toHaveLength(1);
+    expect(Object.keys(projection[0] ?? {}).sort()).toEqual([
+      "action",
+      "confidence",
+      "confidenceLimitation",
+      "driver",
+      "evidence",
+      "finding",
+      "impact",
+      "nextCheck",
+      "verificationMetric",
+    ]);
+    expect(projectionText).not.toContain("priorityId");
+    expect(projectionText).not.toContain("targetIncidentId");
+    expect(projectionText).not.toContain("horizons");
+    expect(prompt).toContain("The fixed SQL filters to quality_status='ok'");
+    expect(prompt).toContain("does not establish full AI lookback coverage");
+    expect(prompt).not.toContain("Include the relevant quality status or coverage fields in the SQL result");
+    expect(prompt).toContain("Keep every Finding field to one short sentence");
+  });
+
   it("accepts three distinct Findings with collective horizon coverage and Finding-specific SQL Evidence", () => {
     const input = requiredInput();
     const result = resolveNgeeAnnAiEventStream({

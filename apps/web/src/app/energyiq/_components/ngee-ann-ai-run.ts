@@ -66,6 +66,19 @@ type HorizonEvidence = {
   relativePct: number;
 };
 
+type DeterministicProjectionItem = Pick<
+  NgeeAnnDecisionPrioritiesViewModel["items"][number],
+  | "finding"
+  | "evidence"
+  | "impact"
+  | "action"
+  | "confidence"
+  | "confidenceLimitation"
+  | "driver"
+  | "nextCheck"
+  | "verificationMetric"
+>;
+
 export type NgeeAnnAiRunInput = {
   identityKey: string;
   projectId: string;
@@ -79,7 +92,7 @@ export type NgeeAnnAiRunInput = {
   dataCutoff: string;
   analysisFrom: string;
   analysisTo: string;
-  deterministicProjection: unknown;
+  deterministicProjection: DeterministicProjectionItem[];
   dataQuality: NgeeAnnAiDataQuality;
   horizons: [HorizonEvidence, HorizonEvidence, HorizonEvidence];
 };
@@ -181,7 +194,17 @@ export function buildNgeeAnnAiRunInput(
     dataCutoff,
     analysisFrom: shiftLocalDate(dataCutoff, -55),
     analysisTo: dataCutoff,
-    deterministicProjection: decisionPriorities,
+    deterministicProjection: decisionPriorities.items.map((item) => ({
+      finding: item.finding,
+      evidence: item.evidence,
+      impact: item.impact,
+      action: item.action,
+      confidence: item.confidence,
+      confidenceLimitation: item.confidenceLimitation,
+      driver: item.driver,
+      nextCheck: item.nextCheck,
+      verificationMetric: item.verificationMetric,
+    })),
     dataQuality: buildAiDataQuality(snapshot),
     horizons,
   };
@@ -291,23 +314,21 @@ function buildAgentPrompt(input: NgeeAnnAiRunInput): string {
   return [
     `Act as an autonomous energy analyst for ${input.projectName}, Scope ${input.scopeName}.`,
     `The governed analysis window is ${input.analysisFrom} through ${input.analysisTo} in ${input.timezone}; data cutoff is ${input.dataCutoff}.`,
-    "Inspect the scoped schema first, then query the inspected physical table directly with conditional aggregation. Do not call list_data_sources or preview_table. Do not use WITH/CTEs or EXTRACT syntax.",
-    "Make at most two total run_sql_readonly attempts; rejected or failed calls count toward this limit. Stop after the first successful SQL call and number it 1. Do not run a second successful query or inspect the schema again after success.",
-    "The supplied deterministic Horizon facts are the authoritative official totals and comparison baselines; do not query or replace them. Never report an unfiltered SUM(usage_kwh) as a Project total and never add total and component rows together.",
-    "Before writing Findings, check every supplied deterministic Horizon. When status is available, you must not describe that Horizon or any supplied value as missing, unavailable, or not provided. You may challenge its meaning or add an independent angle, but must acknowledge the supplied authoritative value.",
-    "On the first SQL plan, include every runtime assertion_id listed for each requirement_id, including manual assertions. If the first SQL is rejected, simplify it and retry only once. After the first successful SQL result, immediately produce the final JSON and never make another tool call.",
-    "Use the official deterministic projection as context, not as a script. Independently inspect the data and return exactly three useful, semantically different Findings.",
-    "Across the three Findings, collectively cover the 1d, 7d and 28d horizons. A Finding can cover more than one horizon; do not force one Finding per horizon and do not repeat the same angle or action.",
-    "For every Finding state whether it supports, challenges, or is independent of the deterministic projection. Answer What, Why, How, and How to verify.",
+    "Inspect the scoped schema first, then query its physical table. Do not call list_data_sources or preview_table. Do not use WITH/CTEs or EXTRACT syntax.",
+    "Make at most two total run_sql_readonly attempts; rejected or failed calls count toward this limit. Stop after the first successful SQL call, number it 1, and make no more tool calls.",
+    "The deterministic Horizon ledger is authoritative for official totals and baselines; do not query or replace it, report an unfiltered Project SUM(usage_kwh), or add total and component rows.",
+    "Before Findings, check every supplied deterministic Horizon. When available, you must not describe that Horizon or any supplied value as missing, unavailable, or not provided. You may challenge its meaning or add an independent angle, but acknowledge its value.",
+    "On the first SQL plan, include every runtime assertion_id for each requirement_id, including manual assertions. If rejected, simplify and retry only once; after success, return final JSON.",
+    "Use the deterministic projection as context, not a script. Return exactly three useful, semantically different Findings that collectively cover 1d, 7d and 28d; do not force one per horizon or repeat an angle or action.",
+    "For each Finding state supports, challenges, or independent; answer What, Why, How, and How to verify. Keep every Finding field to one short sentence.",
     "How must state the next investigation or operational action. It must not restate What, Why, or the numeric Evidence in different words. How to verify must name the observed outcome, metric, or dimension that would confirm or challenge the Finding.",
     "whyKind must be Evidence, Hypothesis, or Missing Evidence. Do not invent a cause, owner, saving, ROI, device state, or commitment.",
-    "Every numeric claim must be verifiable from either the successful SQL result or the supplied deterministic Horizon, quality, and projection facts. Cite evidenceSqlIndexes [1] for each Finding and state whether its number comes from the SQL driver result or the authoritative deterministic context.",
-    "Finding text may use only numeric values directly present in the successful SQL result or authoritative deterministic context, or a single-step sum, difference, ratio, or percentage computed from those values. Never report a multi-step derived number such as normalizing values and then comparing the normalized results.",
-    "In how and howToVerify, never invent a numeric threshold, target, tolerance, percentage, duration, or time window that is absent from the successful SQL result and authoritative deterministic context. Verification may name the metric or dimension to monitor, but it must not introduce a new number.",
-    "Include the relevant quality status or coverage fields in the SQL result used as Evidence. The supplied deterministic Overview quality summary covers only its primary period and must not be claimed as the quality of the full AI lookback.",
+    "Every numeric claim must use only numeric values directly present in the successful SQL result or authoritative deterministic context, or a single-step sum, difference, ratio, or percentage. Never report a multi-step derived number. Cite evidenceSqlIndexes [1] and name SQL or deterministic context in evidenceNote.",
+    "In how and howToVerify, never invent a numeric threshold, target, tolerance, percentage, duration, or time window. Verification may name the metric or dimension to monitor, but it must not introduce a new number.",
+    "The fixed SQL filters to quality_status='ok' but does not establish full AI lookback coverage; do not claim that it does.",
     "After inspect_schema, replace <INSPECTED_TABLE> with the inspected physical table name and execute exactly the following concise cross-horizon Level query without redesigning or expanding it:",
     recommendedSql,
-    "Use that result together with the authoritative Horizon facts for three semantically different cross-horizon Findings and immediately return the required strict JSON. Leave every additional dimension or follow-up query to Ask AI deeper; do not execute a second successful SQL.",
+    "Use that result with the Horizon ledger, then return strict JSON. Leave every additional dimension or follow-up query to Ask AI deeper; do not execute a second successful SQL.",
     "Return only strict JSON with no markdown or commentary using this shape:",
     '{"findings":[{"relationship":"supports","horizons":["1d","7d"],"title":"...","what":"...","whyKind":"Evidence","why":"...","how":"...","howToVerify":"...","evidenceNote":"what the cited SQL supports or cannot prove","evidenceSqlIndexes":[1]}]}',
     "Authoritative deterministic Horizon ledger:",
