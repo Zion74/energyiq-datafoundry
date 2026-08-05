@@ -31,11 +31,13 @@ Charles 首版验收边界同时包含：
 
 ### 1.1 Current Overview 时间表面补充边界
 
-Ngee Ann 客户 Overview 不再提供控制整页的 Yesterday、Last 7 days、Previous week、Previous month、Custom 与可编辑日期。它默认请求服务端选择的 Project 级 latest-complete 7-day window，再以同一 Data Snapshot、Published Release 与 cutoff 解析所选 Scope；Scope 切换不得重新选择另一个 cutoff。
+Ngee Ann 客户 Overview 不再提供控制整页的 Yesterday、Last 7 days、Previous week、Previous month、Custom 与可编辑日期。服务端先在 Project 级选择最新完整日作为统一 data cutoff，再把 Overview 主观察窗口固定为截至该 cutoff 的滚动 28 天；不得为了得到“完整 28 天”向前搜索旧窗口。窗口内存在缺口时保留真实日期并显示 `Partial`/Data Status，不回退、不补零。随后以同一 Data Snapshot、Published Release、cutoff 与 `from/to` 解析所选 Scope；Scope 切换不得重新选择另一个 cutoff。
 
 页面必须只读显示实际分析窗口和 data-through 日期。保留的旧 Period/Custom 深链接按其原始日期解析，但同样只读显示窗口，并提供返回 Current Overview 的入口；切换 Project 时不得继承旧 Project 的隐藏日期。Save 必须将 Snapshot 已解析的实际 `from/to` 冻结为 Custom 查询，Explorer、Saved/rerun、完整 AI Analyst handoff 与通用 Renderer 继续使用既有 Period/Custom 合同。
 
-本补充只收窄 Ngee Ann 客户表面并增加一个窄的 `latest-complete-7d` 解析意图，不删除底层时间合同，不改变各模块的 1d/7d/28d Horizon，也不引入 Cadence、Scheduler 或通用 Horizon 平台。
+首版多时间尺度结构固定为：最新状态使用最新完整 1 天，短期变化使用滚动 7 天，Overview 的 Total、Daily Average、Peak、Trend/Anomaly、Level/Category/Circuit 贡献与 previous-period comparison 以滚动 28 天为主观察范围；AI 综合 1d/7d/28d。日内曲线继续复用最新完整日与现有典型工作日/周末/节假日投影。只有具体探索模块日后证明需要时才增加局部时间切换；局部切换不得重算整页或触发全部 AI。
+
+本补充只收窄 Ngee Ann 客户表面并增加一个窄的 `current-overview-28d` 解析意图，不删除底层时间合同，不改变既有 1d/7d/28d Kernel，也不引入 Cadence、Scheduler 或通用 Horizon 平台。
 
 ## 2. 为什么需要调整旧顺序
 
