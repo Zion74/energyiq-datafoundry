@@ -174,6 +174,29 @@ describe("Ngee Ann AI Run", () => {
     expect(result.status).toBe("available");
   });
 
+  it("accepts one-last-place display rounding for a server-recomputed percentage", () => {
+    const input = requiredInput();
+    const findings = generatedFindings();
+    findings[0]!.what = "Level 7 accounts for 68.9% of the rolling total.";
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(
+        findings,
+        [],
+        [],
+        sqlEvents(
+          "sql-1",
+          "SELECT SUM(usage_kwh) AS level_usage_kwh FROM energy_intervals",
+          1054.184497,
+        ),
+      ),
+      input,
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+  });
+
   it("rejects a second successful SQL query even when every Finding cites the first", () => {
     const input = requiredInput();
     const result = resolveNgeeAnnAiEventStream({

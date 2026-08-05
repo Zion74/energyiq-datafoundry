@@ -587,7 +587,7 @@ function numericClaimIsVerified(
         right - left,
         ...(right !== 0 ? [left / right, (left / right) * 100, ((left - right) / right) * 100] : []),
       ];
-      if (candidates.some((value) => Number.isFinite(value) && numericValuesMatch(claim, value))) {
+      if (candidates.some((value) => Number.isFinite(value) && derivedNumericValueMatches(claim, value))) {
         return true;
       }
     }
@@ -601,6 +601,15 @@ function numericValuesMatch(
 ): boolean {
   const tolerance = (0.5 * (10 ** -claim.precision)) + Number.EPSILON;
   return Math.abs(evidence - claim.value) <= tolerance;
+}
+
+function derivedNumericValueMatches(
+  claim: { precision: number; value: number },
+  evidence: number,
+): boolean {
+  const tolerance = 10 ** -claim.precision;
+  // A candidate exactly one displayed unit away is not supporting Evidence.
+  return Math.abs(evidence - claim.value) < tolerance;
 }
 
 function toNumericTokens(value: string): Array<{ precision: number; value: number }> {
