@@ -6,7 +6,8 @@ const source = (path: string) => {
   const cwdPath = join(process.cwd(), path);
   const webWorkspacePath = join(process.cwd(), "apps/web", path);
 
-  return readFileSync(existsSync(cwdPath) ? cwdPath : webWorkspacePath, "utf8");
+  return readFileSync(existsSync(cwdPath) ? cwdPath : webWorkspacePath, "utf8")
+    .replaceAll("\r\n", "\n");
 };
 
 describe("DataTasksApp initial composer draft", () => {
