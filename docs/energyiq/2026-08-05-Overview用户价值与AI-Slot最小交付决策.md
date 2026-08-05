@@ -130,7 +130,11 @@ AI 可以用 Pack 作为调查先验，得出 `supports`、`challenges` 或 `ind
 
 首版 AI Slot 执行真实 DataFoundry Run，并允许模型按需使用现有 schema inspection 与服务端 Scope 限制的只读 SQL datasource。SQL 结果必须来自当前授权 Workspace、Project、Scope 与同一 Snapshot，禁止写入、跨租户、跨 Project 或绕开服务端 Context。
 
-确定性 Overview 仍是官方 KPI、Rule 和 Decision Theme 的权威层。AI 可以重新查询以验证或发现关系，但不能把自己的计算覆盖到官方卡片；Findings 中的数字必须能回到工具结果和 Evidence。需要的数据不存在时应明确 `Missing Evidence`，而不是心算、猜测或扩大权限。
+为先验证分析价值，Ngee Ann 首版同时向模型提供一个由当前 Renderer Snapshot 生成的、有上限的跨维度 Discovery Evidence projection。它只选择同一 cutoff 下已经确定性算出的 1d/7d/28d、Level、Category、Circuit、daily/time、peak、operating-hours、quality 与 limitation Evidence，不携带原始 Excel，也不新增计算口径。模型可在这些 Evidence 中自主选择调查角度，并只执行一次最有价值的只读 SQL 交叉核查；不得恢复为固定 Level 查询或为每张卡重复查数。
+
+确定性 Overview 仍是官方 KPI、Rule 和 Decision Theme 的唯一权威层。AI Finding 的数字必须逐项引用同一 Snapshot 的确定性 Evidence 或该次只读 SQL result；SQL Evidence 与 Deterministic Snapshot Evidence 在页面中分开显示，模型不能把自己的计算覆盖到官方卡片。需要的数据不存在时应明确 `Missing Evidence`，而不是心算、猜测或扩大权限。
+
+上述 projection 是 Charles MVP 的非权威适配层：当前由浏览器根据服务端返回的 Snapshot 构造，Run 仍由服务端重新校验 Workspace/Project/Scope/Snapshot pin 与 datasource 权限，但服务端尚未重新构造或逐项签名该 projection。因此它可以支持可追溯的候选 Finding，不能提升为官方 KPI，也不能作为多租户生产防篡改完成的证据。只有真实客户部署需要跨会话共享或服务端信任 AI Artifact 时，才按实际风险把 projection 改为服务端重建/校验；本轮不建设通用 Artifact 或第二套版本系统。
 
 ### 5.3 Preschool Pack 只确认内容，不接 Runtime
 
@@ -150,7 +154,7 @@ Run 使用服务端从登录身份、Membership、Project Release 和当前请�
 - 当前授权 datasource 和只读工具集合；
 - `ngee-ann-analysis-pack@v1` 的 `packId` 与 `revision`。
 
-Hover、弹窗、选中 heatmap cell、滚动位置和局部图表切换不触发整页 AI Run。浏览器传入的 Workspace、Pack、Snapshot 或 Renderer 只能作为请求线索，服务端必须重新解析并校验。
+Hover、弹窗、选中 heatmap cell、滚动位置和局部图表切换不触发整页 AI Run。浏览器传入的 Workspace、Pack、Snapshot 或 Renderer 只能作为请求线索，服务端必须重新解析并校验；首版 Discovery Evidence projection 的例外和非权威限制见 5.2，不得用它覆盖服务端 Context 或官方确定性层。
 
 ### 6.2 Finding 输出
 
@@ -221,7 +225,7 @@ Run 只向模型提供 Context、Pack 和模型完成调查所需的工具结果
 
 ### 10.2 可信性与故障隔离
 
-- 官方 KPI、Rule 与 Decision Theme 只来自确定性 Snapshot/Evidence；AI Finding 中的数字来自同一 Snapshot 的只读 SQL/tool result，不覆盖官方层；
+- 官方 KPI、Rule 与 Decision Theme 只来自确定性 Snapshot/Evidence；AI Finding 中的数字逐项引用同一 Snapshot 的 Deterministic Snapshot Evidence 或只读 SQL/tool result，不覆盖官方层；
 - Fact、Attribution、Hypothesis 和 Missing Evidence 可区分；
 - Context、Snapshot、Published Renderer、Pack revision、模型与工具调用可追溯；
 - Context 变化后旧结果不再显示成当前结论；
