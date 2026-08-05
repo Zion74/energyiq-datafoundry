@@ -143,7 +143,6 @@ export const resolveProjectAnalysis = async (input: {
   if (!accessibleProject || accessibleProject.workspaceId !== access.activeWorkspaceId) {
     throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
   }
-  const templateRevision = input.metadataStore.energyIq.templates.getLatestProjectRevision(input.request.projectId);
   const legacyProfile = LEGACY_PROJECT_PROFILES[input.request.projectId];
   if (!legacyProfile) {
     const context = resolveEnergyQueryContext({
@@ -163,23 +162,17 @@ export const resolveProjectAnalysis = async (input: {
       detail: "Publish a Project Template Revision and register its customer Renderer before opening the customer Overview.",
     };
   }
-  const context = resolveEnergyQueryContext({
+  const publishedRunContext = resolvePublishedEnergyQueryContext({
     metadataStore: input.metadataStore,
     user: input.user,
     workspaceId: input.workspaceId,
     request: input.request,
-    ...(templateRevision ? {
-      releasePins: {
-        hierarchyRevisionId: templateRevision.hierarchy_revision_id,
-        meterMappingRevisionId: templateRevision.meter_mapping_revision_id,
-      }
-    } : {}),
     ...(input.now ? { now: input.now } : {}),
     ...(input.env ? { env: input.env } : {}),
   });
-  const projectRelease = resolvePublishedProjectRelease(input.metadataStore, context);
+  const releasedContext = publishedRunContext.context;
+  const projectRelease = publishedRunContext.projectRelease;
   if (!projectRelease) throw new Error("ENERGYIQ_PROJECT_RELEASE_REQUIRED");
-  const releasedContext = bindPublishedReleaseContext(context, projectRelease);
   const scopeAnalysis = await executeEnergyScopeAnalysis({
     metadataStore: input.metadataStore,
     dataGateway: input.dataGateway,
@@ -362,6 +355,42 @@ export const resolvePublishedEnergyRunContext = (input: {
       : input.context,
     projectRelease,
   };
+};
+
+export const resolvePublishedEnergyQueryContext = (input: {
+  metadataStore: MetadataStore;
+  user: UserRecord;
+  workspaceId: string;
+  request: EnergyQueryContextRequest;
+  now?: Date;
+  env?: Record<string, string | undefined>;
+}): {
+  context: EnergyQueryContext;
+  projectRelease: PublishedProjectRelease | null;
+} => {
+  const templateRevision = input.metadataStore.energyIq.templates
+    .getLatestProjectRevision(input.request.projectId);
+  const context = resolveEnergyQueryContext({
+    metadataStore: input.metadataStore,
+    user: input.user,
+    workspaceId: input.workspaceId,
+    request: input.request,
+    ...(templateRevision ? {
+      releasePins: {
+        hierarchyRevisionId: templateRevision.hierarchy_revision_id,
+        meterMappingRevisionId: templateRevision.meter_mapping_revision_id,
+      },
+    } : {}),
+    ...(input.now ? { now: input.now } : {}),
+    ...(input.env ? { env: input.env } : {}),
+  });
+  return resolvePublishedEnergyRunContext({
+    metadataStore: input.metadataStore,
+    context,
+    ...(input.request.expectedProjectReleaseId
+      ? { expectedProjectReleaseId: input.request.expectedProjectReleaseId }
+      : {}),
+  });
 };
 
 const releaseFromTemplateRevision = (

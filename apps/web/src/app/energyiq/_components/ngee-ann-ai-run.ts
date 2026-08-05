@@ -38,6 +38,8 @@ export type NgeeAnnAiFinding = {
 
 export type NgeeAnnAiDataQuality = {
   status: "complete" | "partial" | "unavailable";
+  scope: "deterministic-overview-period";
+  period: { from: string; to: string };
   coveragePct: number;
   validIntervalCount: number;
   expectedMeterIntervalCount: number;
@@ -193,11 +195,6 @@ export function getOrStartNgeeAnnAiRun(input: NgeeAnnAiRunInput): Promise<NgeeAn
     reason: readableError(error),
   }));
   currentRuns.set(input.identityKey, current);
-  void current.then((result) => {
-    if (result.status === "unavailable" && currentRuns.get(input.identityKey) === current) {
-      currentRuns.delete(input.identityKey);
-    }
-  });
   return current;
 }
 
@@ -284,6 +281,7 @@ function buildAgentPrompt(input: NgeeAnnAiRunInput): string {
     "For every Finding state whether it supports, challenges, or is independent of the deterministic projection. Answer What, Why, How, and How to verify.",
     "whyKind must be Evidence, Hypothesis, or Missing Evidence. Do not invent a cause, owner, saving, ROI, device state, or commitment.",
     "Every numeric claim must appear in the result of a successful SQL call from this Run. Cite only the 1-based evidenceSqlIndexes that actually support that Finding. A single SQL result may support multiple Findings. Never attach every SQL call to every Finding by default.",
+    "Include the relevant quality status or coverage fields in the SQL result used as Evidence. The supplied deterministic Overview quality summary covers only its primary period and must not be claimed as the quality of the full AI lookback.",
     "As soon as the first successful SQL result provides enough Evidence, immediately return the required strict JSON. Execute the second SQL only when one specific missing Evidence field blocks a Finding. Do not continue exploring after Evidence is sufficient.",
     "Return only strict JSON with no markdown or commentary using this shape:",
     '{"findings":[{"relationship":"supports","horizons":["1d","7d"],"title":"...","what":"...","whyKind":"Evidence","why":"...","how":"...","howToVerify":"...","evidenceNote":"what the cited SQL supports or cannot prove","evidenceSqlIndexes":[1]}]}',
@@ -565,11 +563,16 @@ function buildAiDataQuality(snapshot: EnergyProjectAnalysisSnapshotDto): NgeeAnn
       : "Snapshot data quality is unavailable; AI Findings cannot be treated as complete Evidence.";
   return {
     status: quality.status,
+    scope: "deterministic-overview-period",
+    period: {
+      from: snapshot.context.primaryPeriod.start,
+      to: snapshot.context.primaryPeriod.endExclusive,
+    },
     coveragePct: quality.coveragePct,
     validIntervalCount: quality.validIntervalCount,
     expectedMeterIntervalCount: quality.expectedMeterIntervalCount,
     qualityEventCount: quality.qualityEventCount,
-    limitation,
+    limitation: `${limitation} This summary covers only the deterministic Overview primary period, not the full AI lookback; use each cited SQL result for query-specific quality.`,
   };
 }
 

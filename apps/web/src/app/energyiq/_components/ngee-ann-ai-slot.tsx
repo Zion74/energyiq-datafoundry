@@ -39,7 +39,6 @@ export function NgeeAnnAiSlot({
   const inputRef = useRef(input);
   const startRunRef = useRef(startRun);
   const [settled, setSettled] = useState<SettledRun | null>(null);
-  const [retryRevision, setRetryRevision] = useState(0);
   inputRef.current = input;
   startRunRef.current = startRun;
 
@@ -68,7 +67,7 @@ export function NgeeAnnAiSlot({
     return () => {
       active = false;
     };
-  }, [identityKey, retryRevision]);
+  }, [identityKey]);
 
   if (!input) {
     return (
@@ -101,13 +100,7 @@ export function NgeeAnnAiSlot({
   if (settled.result.status === "unavailable") {
     return (
       <AiSlotFrame>
-        <AiUnavailable
-          detail={settled.result.reason}
-          onRetry={() => {
-            setSettled(null);
-            setRetryRevision((current) => current + 1);
-          }}
-        />
+        <AiUnavailable detail={settled.result.reason} />
       </AiSlotFrame>
     );
   }
@@ -155,21 +148,12 @@ function AiSlotFrame({ children }: { children: React.ReactNode }) {
   );
 }
 
-function AiUnavailable({ detail, onRetry }: { detail: string; onRetry?: () => void }) {
+function AiUnavailable({ detail }: { detail: string }) {
   return (
     <div className="rounded-lg border border-border bg-surface-subtle px-4 py-4" role="status">
       <p className="text-xs font-semibold text-foreground">AI analysis unavailable</p>
       <p className="mt-1 text-[11px] leading-5 text-muted">{detail}</p>
       <p className="mt-1 text-[10px] leading-4 text-muted-light">The deterministic Overview remains available and unchanged.</p>
-      {onRetry ? (
-        <button
-          type="button"
-          onClick={onRetry}
-          className="mt-3 inline-flex h-8 items-center justify-center rounded-md border border-border bg-surface px-3 text-[11px] font-semibold text-foreground transition-colors hover:border-primary/30 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
-        >
-          Retry AI analysis
-        </button>
-      ) : null}
     </div>
   );
 }
@@ -298,6 +282,12 @@ function AiFindingCard({
               <EvidencePin label="Data cutoff" value={finding.evidence.dataCutoff} />
               <EvidencePin label="Horizon" value={finding.horizons.join(" / ")} />
               <EvidencePin label="Relationship" value={relationshipLabel(finding.relationship)} />
+              <EvidencePin label="Quality scope" value="Deterministic Overview period" />
+              <EvidencePin
+                label="Quality period"
+                value={`${finding.evidence.dataQuality.period.from} / ${finding.evidence.dataQuality.period.to}`}
+                mono
+              />
               <EvidencePin label="Data quality" value={titleCase(finding.evidence.dataQuality.status)} />
               <EvidencePin label="Coverage" value={`${finding.evidence.dataQuality.coveragePct.toLocaleString("en-SG")}%`} />
               <EvidencePin

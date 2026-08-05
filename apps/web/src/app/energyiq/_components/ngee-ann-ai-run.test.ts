@@ -86,6 +86,11 @@ describe("Ngee Ann AI Run", () => {
         dataCutoff: input.dataCutoff,
         dataQuality: {
           status: "complete",
+          scope: "deterministic-overview-period",
+          period: {
+            from: "2026-06-09T16:00:00.000Z",
+            to: "2026-06-16T16:00:00.000Z",
+          },
           coveragePct: 100,
           qualityEventCount: 0,
         },
@@ -255,23 +260,21 @@ describe("Ngee Ann AI Run", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("evicts unavailable results so a retry can start a new request", async () => {
+  it("keeps an unavailable result idempotent for the same page identity", async () => {
     const input = requiredInput();
     vi.spyOn(configApi, "getRunDefaults").mockResolvedValue({ activeLlmProfileId: "profile-1" } as never);
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response("", { status: 503 }))
-      .mockResolvedValueOnce(new Response(successfulEventStream(), {
-        status: 200,
-        headers: { "Content-Type": "text/event-stream" },
-      }));
+    const fetchMock = vi.fn().mockResolvedValue(new Response("", { status: 503 }));
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(getOrStartNgeeAnnAiRun(input)).resolves.toEqual({
       status: "unavailable",
       reason: "AI Analyst request failed (503).",
     });
-    await expect(getOrStartNgeeAnnAiRun(input)).resolves.toMatchObject({ status: "available" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await expect(getOrStartNgeeAnnAiRun(input)).resolves.toEqual({
+      status: "unavailable",
+      reason: "AI Analyst request failed (503).",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -14,7 +14,7 @@ import {
 } from "./energy-context-item.js";
 import { resolveEnergyQueryContext } from "./energy-query-context.js";
 import {
-  resolvePublishedEnergyRunContext,
+  resolvePublishedEnergyQueryContext,
   resolvePublishedProjectRelease,
 } from "./project-analysis-resolver.js";
 
@@ -117,7 +117,7 @@ describe("createEnergyQueryContextItem", () => {
     }
   });
 
-  it("fails closed on Project Release drift and binds the server Context Package to the accepted Release", () => {
+  it("resolves Scope and routing from the accepted Release before binding the server Context Package", () => {
     const root = mkdtempSync(join(tmpdir(), "energy-release-bound-context-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
     try {
@@ -145,27 +145,47 @@ describe("createEnergyQueryContextItem", () => {
         published_by: context.userId,
         published_at: "2026-08-05T00:00:00.000Z",
       });
-      const driftedContext = {
-        ...context,
-        meterFormulaRevisionId: `${project.meter_formula_revision_id}-draft-drift`,
-        metricVersion: `${project.metric_version}-draft-drift`,
-        businessCalendarVersion: `${project.business_calendar_version}-draft-drift`,
-        tariffScheduleVersion: `${project.tariff_schedule_version}-draft-drift`,
+      metadata.energyIq.upsertProject({
+        ...project,
+        hierarchy_revision_id: "unpublished-hierarchy-drift",
+        meter_formula_revision_id: `${project.meter_formula_revision_id}-draft-drift`,
+        metric_version: `${project.metric_version}-draft-drift`,
+        business_calendar_version: `${project.business_calendar_version}-draft-drift`,
+        tariff_schedule_version: `${project.tariff_schedule_version}-draft-drift`,
+      });
+
+      const request = {
+        projectId: context.projectId,
+        scopeId: "level-7",
+        resource: "electricity" as const,
+        period: "Custom" as const,
+        from: "2026-06-10",
+        to: "2026-06-16",
       };
 
-      expect(() => resolvePublishedEnergyRunContext({
+      expect(() => resolvePublishedEnergyQueryContext({
         metadataStore: metadata,
-        context: driftedContext,
-        expectedProjectReleaseId: "stale-overview-release",
+        user: metadata.users.getById({ user_id: "dev-user" }),
+        workspaceId: NGEE_ANN_WORKSPACE_ID,
+        request: {
+          ...request,
+          expectedProjectReleaseId: "stale-overview-release",
+        },
       })).toThrow("ENERGYIQ_PROJECT_RELEASE_MISMATCH");
 
-      const resolved = resolvePublishedEnergyRunContext({
+      const resolved = resolvePublishedEnergyQueryContext({
         metadataStore: metadata,
-        context: driftedContext,
-        expectedProjectReleaseId: publishedRevision.revision_id,
+        user: metadata.users.getById({ user_id: "dev-user" }),
+        workspaceId: NGEE_ANN_WORKSPACE_ID,
+        request: {
+          ...request,
+          expectedProjectReleaseId: publishedRevision.revision_id,
+        },
       });
       expect(resolved.projectRelease?.id).toBe(publishedRevision.revision_id);
       expect(resolved.context).toMatchObject({
+        scopeId: "level-7",
+        scopeName: "Level 7",
         hierarchyRevisionId: publishedRevision.hierarchy_revision_id,
         meterMappingRevisionId: publishedRevision.meter_mapping_revision_id,
         meterFormulaRevisionId: publishedRevision.meter_formula_revision_id,
@@ -188,6 +208,27 @@ describe("createEnergyQueryContextItem", () => {
       expect(items[1]?.metadata).toMatchObject({
         projectReleaseId: publishedRevision.revision_id,
       });
+
+      metadata.users.upsertDevUser({
+        id: "preschool-only-user",
+        email: "preschool-only@example.com",
+        display_name: "Preschool Only",
+        dev_token: "preschool-only-token",
+      });
+      metadata.workspaceMemberships.upsert({
+        workspace_id: "preschool-demo-org",
+        user_id: "preschool-only-user",
+        role: "member",
+      });
+      expect(() => resolvePublishedEnergyQueryContext({
+        metadataStore: metadata,
+        user: metadata.users.getById({ user_id: "preschool-only-user" }),
+        workspaceId: NGEE_ANN_WORKSPACE_ID,
+        request: {
+          ...request,
+          expectedProjectReleaseId: "stale-overview-release",
+        },
+      })).toThrow("ENERGYIQ_WORKSPACE_FORBIDDEN");
     } finally {
       metadata.close();
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });

@@ -76,10 +76,12 @@ describe("NgeeAnnAiSlot", () => {
     expect(dialog?.textContent).toContain("Finding Evidence");
     expect(dialog?.textContent).toContain("snapshot-1");
     expect(dialog?.textContent).toContain("Data quality");
+    expect(dialog?.textContent).toContain("Deterministic Overview period");
+    expect(dialog?.textContent).toContain("2026-06-09T16:00:00.000Z");
     expect(dialog?.textContent).toContain("100%");
     expect(dialog?.textContent).toContain("2,688 / 2,688");
     expect(dialog?.textContent).toContain("Quality events0");
-    expect(dialog?.textContent).toContain("No data-quality limitation is declared for this Snapshot.");
+    expect(dialog?.textContent).toContain("not the full AI lookback");
     expect(dialog?.textContent).toContain("SELECT 150 AS usage_kwh");
     expect(dialog?.textContent).not.toContain("SELECT 21.4 AS average_kwh");
   });
@@ -135,28 +137,7 @@ describe("NgeeAnnAiSlot", () => {
     expect(container.textContent).toContain("AI analysis unavailable");
     expect(container.textContent).toContain("Model timeout");
     expect(container.textContent).toContain("The deterministic Overview remains available and unchanged");
-    expect(container.textContent).toContain("Retry AI analysis");
-  });
-
-  it("retries an unavailable Run without affecting the deterministic surface", async () => {
-    const snapshot = ngeeAnnGoldenSnapshot();
-    const startRun = vi.fn()
-      .mockResolvedValueOnce({ status: "unavailable", reason: "Temporary model timeout" })
-      .mockResolvedValueOnce(availableResult());
-    await act(async () => {
-      root.render(
-        <NgeeAnnAiSlot snapshot={snapshot} decisionPriorities={decisionPrioritiesFor(snapshot)} startRun={startRun} />,
-      );
-    });
-    const retry = Array.from(container.querySelectorAll("button"))
-      .find((candidate) => candidate.textContent?.includes("Retry AI analysis"));
-    if (!retry) throw new Error("Expected a Retry AI analysis button");
-
-    await act(async () => retry.click());
-
-    expect(startRun).toHaveBeenCalledTimes(2);
-    expect(container.textContent).toContain("Supports theme");
-    expect(container.textContent).not.toContain("Temporary model timeout");
+    expect(container.textContent).not.toContain("Retry AI analysis");
   });
 
   it("does not start when the Renderer-validated decision priorities are unavailable", async () => {
@@ -227,11 +208,16 @@ function finding(
       dataCutoff: "2026-06-16",
       dataQuality: {
         status: "complete",
+        scope: "deterministic-overview-period",
+        period: {
+          from: "2026-06-09T16:00:00.000Z",
+          to: "2026-06-16T16:00:00.000Z",
+        },
         coveragePct: 100,
         validIntervalCount: 2_688,
         expectedMeterIntervalCount: 2_688,
         qualityEventCount: 0,
-        limitation: "No data-quality limitation is declared for this Snapshot.",
+        limitation: "No data-quality limitation is declared for this Snapshot. This summary covers only the deterministic Overview primary period, not the full AI lookback; use each cited SQL result for query-specific quality.",
       },
       tools: [{
         toolCallId,

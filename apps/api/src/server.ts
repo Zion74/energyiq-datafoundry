@@ -84,13 +84,12 @@ import { compileTrustedEnergyRunContract } from "./trusted-energy-run-contract.j
 import { ensureEnergyIqBootstrap } from "./energy/energy-bootstrap.js";
 import {
   resolveEnergyAccessContext,
-  resolveEnergyPublishedMeterRoute,
-  resolveEnergyQueryContext
+  resolveEnergyPublishedMeterRoute
 } from "./energy/energy-query-context.js";
 import { createEnergyAuthoritativeContextItems } from "./energy/energy-context-item.js";
 import {
   resolveProjectAnalysis,
-  resolvePublishedEnergyRunContext,
+  resolvePublishedEnergyQueryContext,
   type PublishedProjectRelease
 } from "./energy/project-analysis-resolver.js";
 
@@ -529,21 +528,12 @@ class DataFoundryAgUiAgent extends AbstractAgent {
           if (trustedTextIntent && !energyRequest) {
             throw new Error("TRUSTED_ENERGY_TEXT_CONTEXT_REQUIRED");
           }
-          energyQueryContext = energyRequest
-            ? resolveEnergyQueryContext({
-                metadataStore: this.input.metadataStore,
-                user: this.input.metadataStore.users.getById({ user_id: this.input.user.id }),
-                workspaceId: this.input.workspaceId,
-                request: energyRequest
-              })
-            : undefined;
-          if (energyQueryContext) {
-            const publishedRunContext = resolvePublishedEnergyRunContext({
+          if (energyRequest) {
+            const publishedRunContext = resolvePublishedEnergyQueryContext({
               metadataStore: this.input.metadataStore,
-              context: energyQueryContext,
-              ...(energyRequest?.expectedProjectReleaseId
-                ? { expectedProjectReleaseId: energyRequest.expectedProjectReleaseId }
-                : {})
+              user: this.input.metadataStore.users.getById({ user_id: this.input.user.id }),
+              workspaceId: this.input.workspaceId,
+              request: energyRequest
             });
             energyQueryContext = publishedRunContext.context;
             publishedProjectRelease = publishedRunContext.projectRelease;
