@@ -335,7 +335,7 @@ function FindingField({ label, text }: { label: string; text: string }) {
   return (
     <div className="mt-3">
       <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-light">{label}</p>
-      <p className="mt-1 text-[11px] leading-5 text-muted">{text}</p>
+      <p className="mt-1 text-xs leading-5 text-foreground/80">{text}</p>
     </div>
   );
 }

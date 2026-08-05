@@ -57,6 +57,12 @@ describe("NgeeAnnAiSlot", () => {
     expect(container.textContent).toContain("How to verify");
     expect(container.querySelectorAll("article")).toHaveLength(3);
     expect(startRun).toHaveBeenCalledTimes(1);
+
+    const whatLabel = [...container.querySelectorAll("article p")]
+      .find((element) => element.textContent === "What");
+    const whatText = whatLabel?.parentElement?.querySelectorAll("p")[1];
+    expect(whatText?.className).toContain("text-xs");
+    expect(whatText?.className).toContain("text-foreground/80");
   });
 
   it("stops the Thinking pulse when reduced motion is requested", async () => {

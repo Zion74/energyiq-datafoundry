@@ -141,7 +141,9 @@ describe("NgeeAnnOverviewRenderer", () => {
 
     expect(markup).toContain("data-ngee-ann-overview=\"true\"");
     expect(markup).toContain("Ngee Ann Polytechnic");
-    expect(markup).toContain("Custom energy position");
+    expect(markup).toContain("Energy decision overview");
+    expect(markup).toContain("Scope · Whole project");
+    expect(markup).not.toContain("Custom energy position");
     expect(markup).toContain("Ready");
     expect(markup).toContain("100% coverage");
     expect(markup).toContain("2,688 / 2,688 valid intervals");

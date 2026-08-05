@@ -367,7 +367,7 @@ export function resolveNgeeAnnAiEventStream(input: {
     .trim();
   const generated = parseGeneratedFindings(answer);
   if (!generated) {
-    return { status: "unavailable", reason: "The AI Analyst returned an invalid three-Finding result." };
+    return { status: "unavailable", reason: "The AI response could not be verified against this Snapshot." };
   }
   const selectedTools = generated.map((finding) => finding.evidenceSqlIndexes
     .map((index) => sqlTools[index - 1])

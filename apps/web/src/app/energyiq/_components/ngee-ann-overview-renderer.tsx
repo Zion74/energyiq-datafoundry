@@ -76,10 +76,10 @@ export function NgeeAnnOverviewRenderer({
           <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
             <span className="font-semibold text-foreground">{view.context.projectName}</span>
             <EnergyIcon name="chevron" className="h-3 w-3 text-muted-light" />
-            <span>{view.context.scopeType} / {view.context.scopeName}</span>
+            <span>Scope · {view.context.scopeType === "project" ? "Whole project" : view.context.scopeName}</span>
           </div>
           <h2 className="mt-2 text-xl font-semibold tracking-[-0.02em] text-foreground">
-            {view.context.period} energy position
+            Energy decision overview
           </h2>
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted">
             <span className="inline-flex items-center gap-1.5">

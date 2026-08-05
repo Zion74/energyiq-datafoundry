@@ -212,7 +212,7 @@ describe("Ngee Ann AI Run", () => {
 
     expect(result).toEqual({
       status: "unavailable",
-      reason: "The AI Analyst returned an invalid three-Finding result.",
+      reason: "The AI response could not be verified against this Snapshot.",
     });
   });
 
