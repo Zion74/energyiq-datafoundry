@@ -329,12 +329,25 @@ describe("EnergyScopeAnalysis", () => {
           deltaKwh: 319.491,
           relativePct: 26.3677,
         },
-        expect.objectContaining({
+        {
           horizon: "rolling_28d",
           cutoffLocalDate: "2026-06-16",
-          status: "unavailable",
-          reason: expect.objectContaining({ code: "INCOMPLETE_HORIZON_EVIDENCE" }),
-        }),
+          current: {
+            fromLocalDate: "2026-05-20",
+            toLocalDate: "2026-06-16",
+            totalKwh: 4904.8659,
+            completeDayCount: 28,
+          },
+          baseline: {
+            fromLocalDate: "2026-04-22",
+            toLocalDate: "2026-05-19",
+            totalKwh: 4831.5555,
+            completeDayCount: 28,
+          },
+          status: "available",
+          deltaKwh: 73.3104,
+          relativePct: 1.5173,
+        },
       ]);
       const expectationByScope = {
         project: {
@@ -2050,7 +2063,9 @@ const materializeNgeeAnnGoldenFixture = async (
     : constantUsage(734.625651, 7 * 24 * 4);
   const currentFrom = Date.parse(NGEE_ANN_GOLDEN.selection.period.from);
   const previousFrom = currentFrom - 7 * 86_400_000;
-  const overlapSentinelFrom = Date.parse("2026-05-18T16:00:00.000Z");
+  const overlapSentinelFrom = Date.parse(options.includeAnomalyHistory
+    ? "2026-04-20T16:00:00.000Z"
+    : "2026-05-18T16:00:00.000Z");
   const level7BatchId = NGEE_ANN_GOLDEN.period.dataHealth.importBatchIds[0];
   const level6BatchId = NGEE_ANN_GOLDEN.period.dataHealth.importBatchIds[1];
   const earlierLevel6BatchId = "ngee-ann-l6-apr-may-fixture";
@@ -2118,12 +2133,43 @@ const materializeNgeeAnnGoldenFixture = async (
       return factFor(meter, usage, index, intervalStartMs);
     }));
     if (options.includeAnomalyHistory) {
-      const extraOfficialDailyUsage = new Map([
+      const currentWindowMissingDates = [
+        "2026-05-20",
+        "2026-05-21",
+        "2026-05-22",
+        "2026-05-23",
+        "2026-05-25",
+        "2026-05-26",
+        "2026-05-27",
+        "2026-05-28",
+        "2026-05-29",
+        "2026-06-02",
+      ];
+      const priorWindowDates = Array.from({ length: 28 }, (_, index) => new Date(
+        Date.parse("2026-04-22T00:00:00.000Z") + index * 86_400_000,
+      ).toISOString().slice(0, 10));
+      const currentMissingProjectDailyUsage = (
+        4904.8659
+        - 1531.1683
+        - 1211.6773
+        - 63.3385 * 3
+        - 218.885
+      ) / currentWindowMissingDates.length;
+      const priorProjectDailyUsage = 4831.5555 / priorWindowDates.length;
+      const extraOfficialDailyUsage = new Map<string, { "level-7": number; "level-6": number }>([
         ["2026-05-24", { "level-7": 26.6704, "level-6": 36.6681 }],
         ["2026-05-30", { "level-7": 26.6704, "level-6": 36.6681 }],
         ["2026-05-31", { "level-7": 26.6704, "level-6": 36.6681 }],
         ["2026-06-01", { "level-7": 138.8777, "level-6": 80.0073 }],
-      ] as const);
+        ...currentWindowMissingDates.map((localDate) => [localDate, {
+          "level-7": currentMissingProjectDailyUsage - 80.0073,
+          "level-6": 80.0073,
+        }] as const),
+        ...priorWindowDates.map((localDate) => [localDate, {
+          "level-7": priorProjectDailyUsage - 80.0073,
+          "level-6": 80.0073,
+        }] as const),
+      ]);
       const componentBaselineDates = [
         "2026-05-24",
         "2026-05-30",

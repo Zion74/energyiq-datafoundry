@@ -688,13 +688,13 @@ function goldenDecisionPriorities(): NonNullable<EnergyProjectAnalysisSnapshotDt
         {
           horizon: "rolling_28d",
           label: "Rolling 28 days",
-          status: "unavailable",
+          status: "available",
           period: { fromLocalDate: "2026-05-20", toLocalDate: "2026-06-16" },
-          actualKwh: null,
-          baselineKwh: null,
-          deltaKwh: null,
-          relativePct: null,
-          limitation: "28 complete current days and 28 complete prior days are required.",
+          actualKwh: 4904.8659,
+          baselineKwh: 4831.5555,
+          deltaKwh: 73.3104,
+          relativePct: 1.5173,
+          limitation: null,
         },
       ],
       driver: {
@@ -1241,17 +1241,27 @@ function goldenDailyUsageAnomalies(
           deltaKwh: scope.scopeId === "project" ? 319.491 : scope.scopeId === "level-7" ? 319.5588 : -0.0678,
           relativePct: scope.scopeId === "project" ? 26.3677 : scope.scopeId === "level-7" ? 43.4995 : -0.0142,
         },
-        {
-          horizon: "rolling_28d" as const,
-          cutoffLocalDate: "2026-06-16",
-          current: { fromLocalDate: "2026-05-20", toLocalDate: "2026-06-16", totalKwh: null, completeDayCount: 14 },
-          baseline: { fromLocalDate: "2026-04-22", toLocalDate: "2026-05-19", totalKwh: null, completeDayCount: 0 },
-          status: "unavailable" as const,
-          reason: {
-            code: "INCOMPLETE_HORIZON_EVIDENCE" as const,
-            message: "28 complete current days and 28 complete prior days are required.",
-          },
-        },
+        scope.scopeId === "project"
+          ? {
+              horizon: "rolling_28d" as const,
+              cutoffLocalDate: "2026-06-16",
+              current: { fromLocalDate: "2026-05-20", toLocalDate: "2026-06-16", totalKwh: 4904.8659, completeDayCount: 28 },
+              baseline: { fromLocalDate: "2026-04-22", toLocalDate: "2026-05-19", totalKwh: 4831.5555, completeDayCount: 28 },
+              status: "available" as const,
+              deltaKwh: 73.3104,
+              relativePct: 1.5173,
+            }
+          : {
+              horizon: "rolling_28d" as const,
+              cutoffLocalDate: "2026-06-16",
+              current: { fromLocalDate: "2026-05-20", toLocalDate: "2026-06-16", totalKwh: null, completeDayCount: 14 },
+              baseline: { fromLocalDate: "2026-04-22", toLocalDate: "2026-05-19", totalKwh: null, completeDayCount: 0 },
+              status: "unavailable" as const,
+              reason: {
+                code: "INCOMPLETE_HORIZON_EVIDENCE" as const,
+                message: "28 complete current days and 28 complete prior days are required.",
+              },
+            },
       ],
       rows: dateSpine.map(({ localDate, from, to }, dateIndex) => {
         const day = new Date(`${localDate}T00:00:00.000Z`).getUTCDay();
