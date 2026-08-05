@@ -4,6 +4,7 @@ import { configApi } from "../../../lib/config-api";
 import {
   buildAgentRunBody,
   buildNgeeAnnAiRunInput,
+  executeNgeeAnnAiRun,
   getOrStartNgeeAnnAiRun,
   resetNgeeAnnAiRunsForTests,
   resolveNgeeAnnAiEventStream,
@@ -467,6 +468,73 @@ describe("Ngee Ann AI Run", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("reports only complete tool-event stages from chunked SSE and keeps the full verified result", async () => {
+    const input = requiredInput();
+    const stages: string[] = [];
+    vi.spyOn(configApi, "getRunDefaults").mockResolvedValue({ activeLlmProfileId: "profile-1" } as never);
+    const eventStream = successfulEventStream();
+    const splitPoints = [13, 71, 149, 311, Math.floor(eventStream.length / 2), eventStream.length - 9];
+    const chunks = splitTextAt(eventStream, splitPoints);
+    const fetchMock = vi.fn().mockResolvedValue(chunkedSseResponse(chunks));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await executeNgeeAnnAiRun(input, (stage) => stages.push(stage));
+
+    expect(stages).toEqual(["inspecting", "querying", "drafting"]);
+    expect(result).toMatchObject({
+      status: "available",
+      providerProfileId: "profile-1",
+      findings: [
+        { relationship: "supports" },
+        { relationship: "challenges" },
+        { relationship: "independent" },
+      ],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to buffered text when the response body cannot be streamed", async () => {
+    const input = requiredInput();
+    const stages: string[] = [];
+    const text = vi.fn().mockResolvedValue(successfulEventStream());
+    vi.spyOn(configApi, "getRunDefaults").mockResolvedValue({ activeLlmProfileId: "profile-1" } as never);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: null,
+      text,
+    } as Response));
+
+    const result = await executeNgeeAnnAiRun(input, (stage) => stages.push(stage));
+
+    expect(text).toHaveBeenCalledTimes(1);
+    expect(stages).toEqual(["inspecting", "querying", "drafting"]);
+    expect(result).toMatchObject({ status: "available", findings: expect.any(Array) });
+  });
+
+  it("shares progress with repeated callers without starting another request", async () => {
+    const input = requiredInput();
+    const firstStages: string[] = [];
+    const secondStages: string[] = [];
+    vi.spyOn(configApi, "getRunDefaults").mockResolvedValue({ activeLlmProfileId: "profile-1" } as never);
+    let releaseResponse!: () => void;
+    const responseReady = new Promise<Response>((resolve) => {
+      releaseResponse = () => resolve(chunkedSseResponse(splitTextAt(successfulEventStream(), [97, 263])));
+    });
+    const fetchMock = vi.fn(() => responseReady);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = getOrStartNgeeAnnAiRun(input, (stage) => firstStages.push(stage));
+    const second = getOrStartNgeeAnnAiRun(input, (stage) => secondStages.push(stage));
+    releaseResponse();
+
+    expect(first).toBe(second);
+    await expect(first).resolves.toMatchObject({ status: "available" });
+    expect(firstStages).toEqual(["inspecting", "querying", "drafting"]);
+    expect(secondStages).toEqual(["inspecting", "querying", "drafting"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps an unavailable result idempotent for the same page identity", async () => {
     const input = requiredInput();
     vi.spyOn(configApi, "getRunDefaults").mockResolvedValue({ activeLlmProfileId: "profile-1" } as never);
@@ -544,6 +612,25 @@ function sqlEvents(toolCallId: string, sql: string, value: number): Array<Record
       },
     },
   ];
+}
+
+function splitTextAt(text: string, points: number[]): string[] {
+  const positions = [0, ...points.filter((point) => point > 0 && point < text.length), text.length]
+    .sort((left, right) => left - right);
+  return positions.slice(1).map((end, index) => text.slice(positions[index], end));
+}
+
+function chunkedSseResponse(chunks: string[]): Response {
+  const encoder = new TextEncoder();
+  return new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+      controller.close();
+    },
+  }), {
+    status: 200,
+    headers: { "Content-Type": "text/event-stream" },
+  });
 }
 
 function generatedFindings() {

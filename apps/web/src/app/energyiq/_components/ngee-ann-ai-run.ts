@@ -7,6 +7,8 @@ import type { NgeeAnnDecisionPrioritiesViewModel } from "./ngee-ann-overview-vie
 export type NgeeAnnAiHorizon = "1d" | "7d" | "28d";
 export type NgeeAnnAiWhyKind = "Evidence" | "Hypothesis" | "Missing Evidence";
 export type NgeeAnnAiRelationship = "supports" | "challenges" | "independent";
+export type NgeeAnnAiProgress = "inspecting" | "querying" | "drafting";
+export type NgeeAnnAiProgressCallback = (progress: NgeeAnnAiProgress) => void;
 
 export type NgeeAnnAiToolEvidence = {
   toolCallId: string;
@@ -96,7 +98,14 @@ type CollectedToolEvidence = NgeeAnnAiToolEvidence & {
   numericEvidence: string;
 };
 
-const currentRuns = new Map<string, Promise<NgeeAnnAiRunResult>>();
+type CurrentRun = {
+  promise: Promise<NgeeAnnAiRunResult>;
+  progress: NgeeAnnAiProgress;
+  listeners: Set<NgeeAnnAiProgressCallback>;
+  settled: boolean;
+};
+
+const currentRuns = new Map<string, CurrentRun>();
 
 export function resetNgeeAnnAiRunsForTests(): void {
   currentRuns.clear();
@@ -187,18 +196,51 @@ export function buildNgeeAnnAiRunInput(
   };
 }
 
-export function getOrStartNgeeAnnAiRun(input: NgeeAnnAiRunInput): Promise<NgeeAnnAiRunResult> {
+export function getOrStartNgeeAnnAiRun(
+  input: NgeeAnnAiRunInput,
+  onProgress?: NgeeAnnAiProgressCallback,
+): Promise<NgeeAnnAiRunResult> {
   const existing = currentRuns.get(input.identityKey);
-  if (existing) return existing;
-  const current = executeNgeeAnnAiRun(input).catch((error: unknown) => ({
+  if (existing) {
+    onProgress?.(existing.progress);
+    if (onProgress && !existing.settled) existing.listeners.add(onProgress);
+    return existing.promise;
+  }
+  const listeners = new Set<NgeeAnnAiProgressCallback>();
+  if (onProgress) listeners.add(onProgress);
+  const current: CurrentRun = {
+    promise: Promise.resolve({ status: "unavailable", reason: "The AI Analyst did not start." }),
+    progress: "inspecting",
+    listeners,
+    settled: false,
+  };
+  const reportProgress = (progress: NgeeAnnAiProgress) => {
+    current.progress = progress;
+    for (const listener of current.listeners) listener(progress);
+  };
+  current.promise = executeNgeeAnnAiRun(input, reportProgress).catch((error: unknown) => ({
     status: "unavailable" as const,
     reason: readableError(error),
-  }));
+  })).finally(() => {
+    current.settled = true;
+    current.listeners.clear();
+  });
   currentRuns.set(input.identityKey, current);
-  return current;
+  return current.promise;
 }
 
-export async function executeNgeeAnnAiRun(input: NgeeAnnAiRunInput): Promise<NgeeAnnAiRunResult> {
+export async function executeNgeeAnnAiRun(
+  input: NgeeAnnAiRunInput,
+  onProgress?: NgeeAnnAiProgressCallback,
+): Promise<NgeeAnnAiRunResult> {
+  let progress: NgeeAnnAiProgress | null = null;
+  const reportProgress = (next: NgeeAnnAiProgress) => {
+    const order: Record<NgeeAnnAiProgress, number> = { inspecting: 0, querying: 1, drafting: 2 };
+    if (progress && order[next] <= order[progress]) return;
+    progress = next;
+    onProgress?.(next);
+  };
+  reportProgress("inspecting");
   const defaults = await configApi.getRunDefaults();
   if (!defaults.activeLlmProfileId) {
     return { status: "unavailable", reason: "No current Workspace model profile is configured." };
@@ -216,16 +258,75 @@ export async function executeNgeeAnnAiRun(input: NgeeAnnAiRunInput): Promise<Nge
     body: JSON.stringify(buildAgentRunBody(input, defaults.activeLlmProfileId, runId, threadId)),
     signal: AbortSignal.timeout(200_000),
   });
-  const eventStream = await response.text();
   if (!response.ok) {
     return { status: "unavailable", reason: `AI Analyst request failed (${response.status}).` };
   }
+  const eventStream = await readAgUiEventStream(response, (event) => {
+    const toolName = stringValue(event.toolCallName) ?? stringValue(event.tool_call_name);
+    if (event.type === "TOOL_CALL_START" && toolName === "inspect_schema") {
+      reportProgress("inspecting");
+    }
+    if (event.type === "TOOL_CALL_START" && toolName === "run_sql_readonly") {
+      reportProgress("querying");
+    }
+    if (
+      event.type === "TOOL_CALL_RESULT"
+      && toolName === "run_sql_readonly"
+      && parseSqlToolResult(event.result ?? event.content)
+    ) {
+      reportProgress("drafting");
+    }
+  });
   return resolveNgeeAnnAiEventStream({
     eventStream,
     input,
     providerProfileId: defaults.activeLlmProfileId,
     runId,
   });
+}
+
+async function readAgUiEventStream(
+  response: Response,
+  onEvent: (event: AgUiEvent) => void,
+): Promise<string> {
+  const readBufferedFallback = async () => {
+    const text = await response.text();
+    for (const event of parseAgUiEventStream(text)) onEvent(event);
+    return text;
+  };
+  if (!response.body) return readBufferedFallback();
+  let reader: ReadableStreamDefaultReader<Uint8Array>;
+  try {
+    reader = response.body.getReader();
+  } catch {
+    return readBufferedFallback();
+  }
+  const decoder = new TextDecoder();
+  let eventStream = "";
+  let pending = "";
+  const consumeCompleteEvents = (flush = false) => {
+    while (pending) {
+      const separator = /\r?\n\r?\n/u.exec(pending);
+      if (!separator && !flush) return;
+      const end = separator ? separator.index + separator[0].length : pending.length;
+      const completeEvent = pending.slice(0, end);
+      pending = pending.slice(end);
+      for (const event of parseAgUiEventStream(completeEvent)) onEvent(event);
+    }
+  };
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    const text = decoder.decode(value, { stream: true });
+    eventStream += text;
+    pending += text;
+    consumeCompleteEvents();
+  }
+  const trailing = decoder.decode();
+  eventStream += trailing;
+  pending += trailing;
+  consumeCompleteEvents(true);
+  return eventStream;
 }
 
 export function buildAgentRunBody(

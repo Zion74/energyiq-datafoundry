@@ -9,6 +9,8 @@ import {
   buildNgeeAnnAiRunInput,
   getOrStartNgeeAnnAiRun,
   type NgeeAnnAiFinding,
+  type NgeeAnnAiProgress,
+  type NgeeAnnAiProgressCallback,
   type NgeeAnnAiRelationship,
   type NgeeAnnAiRunInput,
   type NgeeAnnAiRunResult,
@@ -20,6 +22,11 @@ type SettledRun = {
   result: NgeeAnnAiRunResult;
 };
 
+type RunProgress = {
+  identityKey: string;
+  stage: NgeeAnnAiProgress;
+};
+
 export function NgeeAnnAiSlot({
   snapshot,
   decisionPriorities,
@@ -29,7 +36,7 @@ export function NgeeAnnAiSlot({
   snapshot: EnergyProjectAnalysisSnapshotDto;
   decisionPriorities: NgeeAnnDecisionPrioritiesViewModel;
   aiAnalystHref?: string;
-  startRun?: (input: NgeeAnnAiRunInput) => Promise<NgeeAnnAiRunResult>;
+  startRun?: (input: NgeeAnnAiRunInput, onProgress?: NgeeAnnAiProgressCallback) => Promise<NgeeAnnAiRunResult>;
 }) {
   const input = useMemo(
     () => buildNgeeAnnAiRunInput(snapshot, decisionPriorities),
@@ -39,6 +46,7 @@ export function NgeeAnnAiSlot({
   const inputRef = useRef(input);
   const startRunRef = useRef(startRun);
   const [settled, setSettled] = useState<SettledRun | null>(null);
+  const [progress, setProgress] = useState<RunProgress | null>(null);
   inputRef.current = input;
   startRunRef.current = startRun;
 
@@ -47,7 +55,10 @@ export function NgeeAnnAiSlot({
     const currentInput = inputRef.current;
     if (!currentInput) return;
     let active = true;
-    void startRunRef.current(currentInput)
+    const onProgress: NgeeAnnAiProgressCallback = (stage) => {
+      if (active) setProgress({ identityKey, stage });
+    };
+    void startRunRef.current(currentInput, onProgress)
       .then((result) => {
         if (active) setSettled({ identityKey, result });
       })
@@ -78,6 +89,7 @@ export function NgeeAnnAiSlot({
   }
 
   if (!settled || settled.identityKey !== input.identityKey) {
+    const stage = progress?.identityKey === input.identityKey ? progress.stage : "inspecting";
     return (
       <AiSlotFrame>
         <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-4" role="status" aria-live="polite">
@@ -86,9 +98,9 @@ export function NgeeAnnAiSlot({
               <EnergyIcon name="spark" className="h-4 w-4" />
             </span>
             <div>
-              <p className="text-xs font-semibold text-foreground">Analyzing / Thinking…</p>
+              <p className="text-xs font-semibold text-foreground">{progressLabel(stage)}</p>
               <p className="mt-1 text-[11px] leading-5 text-muted">
-                The deterministic Overview is ready. The AI energy analyst is independently querying this pinned Snapshot in the background.
+                The deterministic Overview is ready. The AI energy analyst is independently working against this pinned Snapshot in the background.
               </p>
             </div>
           </div>
@@ -122,6 +134,17 @@ export function NgeeAnnAiSlot({
       </p>
     </AiSlotFrame>
   );
+}
+
+function progressLabel(progress: NgeeAnnAiProgress): string {
+  switch (progress) {
+    case "querying":
+      return "Querying Snapshot…";
+    case "drafting":
+      return "Drafting findings…";
+    default:
+      return "Inspecting scoped data…";
+  }
 }
 
 function AiSlotFrame({ children }: { children: React.ReactNode }) {

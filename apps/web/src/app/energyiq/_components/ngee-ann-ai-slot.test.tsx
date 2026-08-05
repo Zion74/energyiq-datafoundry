@@ -5,7 +5,12 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NgeeAnnAiSlot, buildAskAiDeeperHref } from "./ngee-ann-ai-slot";
-import type { NgeeAnnAiFinding, NgeeAnnAiRunResult } from "./ngee-ann-ai-run";
+import type {
+  NgeeAnnAiFinding,
+  NgeeAnnAiProgress,
+  NgeeAnnAiProgressCallback,
+  NgeeAnnAiRunResult,
+} from "./ngee-ann-ai-run";
 import { ngeeAnnGoldenSnapshot } from "./ngee-ann-overview.test-fixture";
 import { buildNgeeAnnOverviewViewModel } from "./ngee-ann-overview-view-model";
 
@@ -31,8 +36,10 @@ describe("NgeeAnnAiSlot", () => {
   it("shows the deterministic-safe analyzing state immediately, then three Findings", async () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     let finishRun!: (result: NgeeAnnAiRunResult) => void;
-    const startRun = vi.fn(() => new Promise<NgeeAnnAiRunResult>((resolve) => {
+    let reportProgress!: NgeeAnnAiProgressCallback;
+    const startRun = vi.fn((_input, onProgress?: NgeeAnnAiProgressCallback) => new Promise<NgeeAnnAiRunResult>((resolve) => {
       finishRun = resolve;
+      reportProgress = onProgress ?? (() => undefined);
     }));
     await act(async () => {
       root.render(
@@ -45,7 +52,17 @@ describe("NgeeAnnAiSlot", () => {
       );
     });
 
-    expect(container.textContent).toContain("Analyzing / Thinking");
+    expect(container.textContent).toContain("Inspecting scoped data…");
+    expect(container.textContent).toContain("The deterministic Overview is ready");
+
+    await act(async () => reportProgress("querying" satisfies NgeeAnnAiProgress));
+    expect(container.textContent).toContain("Querying Snapshot…");
+    expect(container.querySelectorAll("article")).toHaveLength(0);
+    expect(container.textContent).toContain("The deterministic Overview is ready");
+
+    await act(async () => reportProgress("drafting" satisfies NgeeAnnAiProgress));
+    expect(container.textContent).toContain("Drafting findings…");
+    expect(container.querySelectorAll("article")).toHaveLength(0);
     expect(container.textContent).toContain("The deterministic Overview is ready");
 
     await act(async () => finishRun(availableResult()));
