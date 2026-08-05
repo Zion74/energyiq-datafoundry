@@ -274,6 +274,10 @@ function buildAgentPrompt(input: NgeeAnnAiRunInput): string {
   const latest = input.horizons.find((horizon) => horizon.horizon === "1d")!;
   const rolling7 = input.horizons.find((horizon) => horizon.horizon === "7d")!;
   const rolling28 = input.horizons.find((horizon) => horizon.horizon === "28d")!;
+  const authoritativeHorizonLedger = input.horizons.map((horizon) => ({
+    ...horizon,
+    status: "available" as const,
+  }));
   const recommendedSql = [
     "SELECT level_node_id,",
     `SUM(CASE WHEN local_date BETWEEN DATE '${latest.period.fromLocalDate}' AND DATE '${latest.period.toLocalDate}' THEN usage_kwh ELSE 0 END) AS usage_1d_kwh,`,
@@ -290,6 +294,7 @@ function buildAgentPrompt(input: NgeeAnnAiRunInput): string {
     "Inspect the scoped schema first, then query the inspected physical table directly with conditional aggregation. Do not call list_data_sources or preview_table. Do not use WITH/CTEs or EXTRACT syntax.",
     "Make at most two total run_sql_readonly attempts; rejected or failed calls count toward this limit. Stop after the first successful SQL call and number it 1. Do not run a second successful query or inspect the schema again after success.",
     "The supplied deterministic Horizon facts are the authoritative official totals and comparison baselines; do not query or replace them. Never report an unfiltered SUM(usage_kwh) as a Project total and never add total and component rows together.",
+    "Before writing Findings, check every supplied deterministic Horizon. When status is available, you must not describe that Horizon or any supplied value as missing, unavailable, or not provided. You may challenge its meaning or add an independent angle, but must acknowledge the supplied authoritative value.",
     "On the first SQL plan, include every runtime assertion_id listed for each requirement_id, including manual assertions. If the first SQL is rejected, simplify it and retry only once. After the first successful SQL result, immediately produce the final JSON and never make another tool call.",
     "Use the official deterministic projection as context, not as a script. Independently inspect the data and return exactly three useful, semantically different Findings.",
     "Across the three Findings, collectively cover the 1d, 7d and 28d horizons. A Finding can cover more than one horizon; do not force one Finding per horizon and do not repeat the same angle or action.",
@@ -305,6 +310,8 @@ function buildAgentPrompt(input: NgeeAnnAiRunInput): string {
     "Use that result together with the authoritative Horizon facts for three semantically different cross-horizon Findings and immediately return the required strict JSON. Leave every additional dimension or follow-up query to Ask AI deeper; do not execute a second successful SQL.",
     "Return only strict JSON with no markdown or commentary using this shape:",
     '{"findings":[{"relationship":"supports","horizons":["1d","7d"],"title":"...","what":"...","whyKind":"Evidence","why":"...","how":"...","howToVerify":"...","evidenceNote":"what the cited SQL supports or cannot prove","evidenceSqlIndexes":[1]}]}',
+    "Authoritative deterministic Horizon ledger:",
+    JSON.stringify(authoritativeHorizonLedger),
     "Official deterministic projection:",
     JSON.stringify(input.deterministicProjection),
   ].join("\n\n");

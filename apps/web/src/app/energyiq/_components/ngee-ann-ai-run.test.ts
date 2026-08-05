@@ -93,6 +93,27 @@ describe("Ngee Ann AI Run", () => {
     );
   });
 
+  it("requires Findings to acknowledge every available deterministic Horizon value", () => {
+    const body = buildAgentRunBody(requiredInput(), "profile-1", "run-1", "thread-1");
+    const prompt = ((body.body as { messages: Array<{ content: string }> }).messages[0]?.content) ?? "";
+    const ledgerText = prompt
+      .split("Authoritative deterministic Horizon ledger:\n\n")[1]
+      ?.split("\n\nOfficial deterministic projection:")[0];
+
+    expect(prompt).toContain("check every supplied deterministic Horizon");
+    expect(prompt).toContain(
+      "must not describe that Horizon or any supplied value as missing, unavailable, or not provided",
+    );
+    expect(prompt).toContain("may challenge its meaning or add an independent angle");
+    expect(ledgerText).toBeTruthy();
+    expect(JSON.parse(ledgerText ?? "[]")).toContainEqual(expect.objectContaining({
+      horizon: "28d",
+      status: "available",
+      actualKwh: 4904.8659,
+      baselineKwh: 4831.5555,
+    }));
+  });
+
   it("accepts three distinct Findings with collective horizon coverage and Finding-specific SQL Evidence", () => {
     const input = requiredInput();
     const result = resolveNgeeAnnAiEventStream({
