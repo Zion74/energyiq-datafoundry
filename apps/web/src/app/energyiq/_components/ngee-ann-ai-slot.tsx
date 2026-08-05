@@ -82,7 +82,7 @@ export function NgeeAnnAiSlot({
       <AiSlotFrame>
         <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-4" role="status" aria-live="polite">
           <div className="flex items-start gap-3">
-            <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 animate-pulse items-center justify-center rounded-full bg-primary/10 text-primary">
+            <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 animate-pulse items-center justify-center rounded-full bg-primary/10 text-primary motion-reduce:animate-none">
               <EnergyIcon name="spark" className="h-4 w-4" />
             </span>
             <div>
@@ -225,7 +225,7 @@ function AiFindingCard({
       <h4 className="mt-3 text-sm font-semibold leading-5 text-foreground">{finding.title}</h4>
       <FindingField label="What" text={finding.what} />
       <FindingField label={`Why · ${finding.why.kind}`} text={finding.why.text} />
-      <FindingField label="How" text={finding.how} />
+      <FindingField label="Next investigation" text={finding.how} />
       <FindingField label="How to verify" text={finding.howToVerify} />
       <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-border pt-3">
         <button

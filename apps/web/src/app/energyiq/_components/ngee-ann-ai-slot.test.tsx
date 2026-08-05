@@ -53,9 +53,27 @@ describe("NgeeAnnAiSlot", () => {
     expect(container.textContent).toContain("Supports theme");
     expect(container.textContent).toContain("Challenges theme");
     expect(container.textContent).toContain("Independent theme");
+    expect(container.textContent).toContain("Next investigation");
     expect(container.textContent).toContain("How to verify");
     expect(container.querySelectorAll("article")).toHaveLength(3);
     expect(startRun).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops the Thinking pulse when reduced motion is requested", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const startRun = vi.fn(() => new Promise<NgeeAnnAiRunResult>(() => undefined));
+    await act(async () => {
+      root.render(
+        <NgeeAnnAiSlot
+          snapshot={snapshot}
+          decisionPriorities={decisionPrioritiesFor(snapshot)}
+          startRun={startRun}
+        />,
+      );
+    });
+
+    expect(container.querySelector(".animate-pulse")?.className)
+      .toContain("motion-reduce:animate-none");
   });
 
   it("opens Finding-specific SQL Evidence in one click", async () => {
@@ -86,17 +104,101 @@ describe("NgeeAnnAiSlot", () => {
     expect(dialog?.textContent).not.toContain("SELECT 21.4 AS average_kwh");
   });
 
-  it("does not start a new Run for local UI href changes", async () => {
+  it("moves focus into AI Evidence and restores its trigger after Close", async () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     const startRun = vi.fn().mockResolvedValue(availableResult());
     await act(async () => {
       root.render(
-        <NgeeAnnAiSlot snapshot={snapshot} decisionPriorities={decisionPrioritiesFor(snapshot)} aiAnalystHref="/energyiq/ai?period=Custom" startRun={startRun} />,
+        <NgeeAnnAiSlot snapshot={snapshot} decisionPriorities={decisionPrioritiesFor(snapshot)} startRun={startRun} />,
       );
     });
+    const trigger = firstEvidenceTrigger(container);
+    trigger.focus();
+
+    await act(async () => trigger.click());
+
+    const close = evidenceCloseButton();
+    expect(document.activeElement).toBe(close);
+
+    await act(async () => close.click());
+
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("closes AI Evidence through Escape or its backdrop and restores trigger focus", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const startRun = vi.fn().mockResolvedValue(availableResult());
     await act(async () => {
       root.render(
-        <NgeeAnnAiSlot snapshot={snapshot} decisionPriorities={decisionPrioritiesFor(snapshot)} aiAnalystHref="/energyiq/ai?period=Yesterday" startRun={startRun} />,
+        <NgeeAnnAiSlot snapshot={snapshot} decisionPriorities={decisionPrioritiesFor(snapshot)} startRun={startRun} />,
+      );
+    });
+    const trigger = firstEvidenceTrigger(container);
+
+    await act(async () => trigger.click());
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+
+    await act(async () => trigger.click());
+    const backdrop = document.body.querySelector<HTMLElement>('[role="presentation"]');
+    if (!backdrop) throw new Error("Expected the AI Evidence backdrop");
+    await act(async () => {
+      backdrop.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("traps forward and reverse Tab focus inside AI Evidence", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const startRun = vi.fn().mockResolvedValue(availableResult());
+    await act(async () => {
+      root.render(
+        <NgeeAnnAiSlot snapshot={snapshot} decisionPriorities={decisionPrioritiesFor(snapshot)} startRun={startRun} />,
+      );
+    });
+    await act(async () => firstEvidenceTrigger(container).click());
+    const close = evidenceCloseButton();
+
+    const forward = new KeyboardEvent("keydown", {
+      key: "Tab",
+      bubbles: true,
+      cancelable: true,
+    });
+    await act(async () => document.dispatchEvent(forward));
+    expect(forward.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(close);
+
+    const reverse = new KeyboardEvent("keydown", {
+      key: "Tab",
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    await act(async () => document.dispatchEvent(reverse));
+    expect(reverse.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(close);
+  });
+
+  it("does not start a new Run for local comparison/category or Evidence expansion", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const startRun = vi.fn().mockResolvedValue(availableResult());
+    await act(async () => {
+      root.render(
+        <NgeeAnnAiSlot snapshot={snapshot} decisionPriorities={decisionPrioritiesFor(snapshot)} aiAnalystHref="/energyiq/ai?comparison=overlay&category=all" startRun={startRun} />,
+      );
+    });
+
+    await act(async () => firstEvidenceTrigger(container).click());
+    await act(async () => evidenceCloseButton().click());
+
+    await act(async () => {
+      root.render(
+        <NgeeAnnAiSlot snapshot={snapshot} decisionPriorities={decisionPrioritiesFor(snapshot)} aiAnalystHref="/energyiq/ai?comparison=selected&category=load" startRun={startRun} />,
       );
     });
 
@@ -234,4 +336,18 @@ function finding(
 
 function decisionPrioritiesFor(snapshot: ReturnType<typeof ngeeAnnGoldenSnapshot>) {
   return buildNgeeAnnOverviewViewModel(snapshot).decisionPriorities;
+}
+
+function firstEvidenceTrigger(container: HTMLElement): HTMLButtonElement {
+  const trigger = Array.from(container.querySelectorAll("button"))
+    .find((candidate) => candidate.textContent?.includes("View evidence"));
+  if (!trigger) throw new Error("Expected a View evidence button");
+  return trigger;
+}
+
+function evidenceCloseButton(): HTMLButtonElement {
+  const close = Array.from(document.body.querySelectorAll<HTMLButtonElement>('[role="dialog"] button'))
+    .find((candidate) => candidate.textContent === "Close");
+  if (!close) throw new Error("Expected the AI Evidence Close button");
+  return close;
 }
