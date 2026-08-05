@@ -8,6 +8,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ngeeAnnGoldenSnapshot, ngeeAnnSingleDaySnapshot } from "./ngee-ann-overview.test-fixture";
 import { NgeeAnnOverviewRenderer } from "./ngee-ann-overview-renderer";
 
+vi.mock("./ngee-ann-ai-run", async () => {
+  const actual = await vi.importActual<typeof import("./ngee-ann-ai-run")>("./ngee-ann-ai-run");
+  return {
+    ...actual,
+    getOrStartNgeeAnnAiRun: vi.fn(() => new Promise<never>(() => {})),
+  };
+});
+
 describe("NgeeAnnOverviewRenderer", () => {
   it("shows one deterministic theme across latest day, rolling 7 days and rolling 28 days", () => {
     const markup = renderToStaticMarkup(
@@ -41,6 +49,9 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("href=\"#incident-project-2026-06-13\"");
     expect(markup).toContain("Open Project Explorer");
     expect(markup).toContain("Ask AI Analyst");
+    expect(markup).toContain("AI energy analyst");
+    expect(markup).toContain("Analyzing / Thinking");
+    expect(markup.indexOf("Decision themes")).toBeLessThan(markup.indexOf("AI energy analyst"));
     expect(markup.indexOf("Decision themes")).toBeLessThan(markup.indexOf("Key highlights"));
   });
 

@@ -87,11 +87,12 @@ import {
   resolveEnergyPublishedMeterRoute,
   resolveEnergyQueryContext
 } from "./energy/energy-query-context.js";
+import { createEnergyAuthoritativeContextItems } from "./energy/energy-context-item.js";
 import {
-  createEnergyQueryContextItem,
-  createTrustedEnergyTextContextItem
-} from "./energy/energy-context-item.js";
-import { resolveProjectAnalysis } from "./energy/project-analysis-resolver.js";
+  resolveProjectAnalysis,
+  resolvePublishedProjectRelease,
+  type PublishedProjectRelease
+} from "./energy/project-analysis-resolver.js";
 
 const DEV_USER: MeResponse = {
   id: "dev-user",
@@ -520,6 +521,7 @@ class DataFoundryAgUiAgent extends AbstractAgent {
         let selectedSkills;
         let skillSelection;
         let energyQueryContext;
+        let publishedProjectRelease: PublishedProjectRelease | null = null;
         let trustedEnergyTextContract: TrustedEnergyTextQueryContract | undefined;
         try {
           const energyRequest = extractEnergyQueryContextRequest(normalizedRunInput);
@@ -535,6 +537,9 @@ class DataFoundryAgUiAgent extends AbstractAgent {
                 request: energyRequest
               })
             : undefined;
+          publishedProjectRelease = energyQueryContext
+            ? resolvePublishedProjectRelease(this.input.metadataStore, energyQueryContext)
+            : null;
           const publishedMeterRoute = energyQueryContext
             ? resolveEnergyPublishedMeterRoute({
                 metadataStore: this.input.metadataStore,
@@ -720,15 +725,13 @@ class DataFoundryAgUiAgent extends AbstractAgent {
           workspaceId: this.input.workspaceId
         });
         const authoritativeContextItems = [
-          ...(trustedEnergyTextContract
-            ? [createTrustedEnergyTextContextItem(
-                trustedEnergyTextContract,
-                sessionId,
-                this.input.user.id
-              )]
-            : energyQueryContext
-              ? [createEnergyQueryContextItem(energyQueryContext, sessionId)]
-              : []),
+          ...createEnergyAuthoritativeContextItems({
+            ...(energyQueryContext ? { context: energyQueryContext } : {}),
+            ...(publishedProjectRelease ? { projectRelease: publishedProjectRelease } : {}),
+            sessionId,
+            ...(trustedEnergyTextContract ? { trustedTextContract: trustedEnergyTextContract } : {}),
+            userId: this.input.user.id
+          }),
           ...evidenceContext.items
         ];
         const taskPlanProjector = new TaskPlanProjector(runContext);

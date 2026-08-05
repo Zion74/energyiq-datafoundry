@@ -2,6 +2,7 @@ import React from "react";
 
 import type { EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
 import { EnergyIcon } from "./icons";
+import { NgeeAnnAiSlot } from "./ngee-ann-ai-slot";
 import { NgeeAnnDayProfile } from "./ngee-ann-day-profile";
 import { NgeeAnnDailyAnomalies } from "./ngee-ann-daily-anomalies";
 import { NgeeAnnDecisionPriorities } from "./ngee-ann-decision-priorities";
@@ -135,6 +136,8 @@ export function NgeeAnnOverviewRenderer({
         projectExplorerHref={projectExplorerHref}
         aiAnalystHref={aiAnalystHref}
       />
+
+      <NgeeAnnAiSlot snapshot={state.snapshot} aiAnalystHref={aiAnalystHref} />
 
       <OverviewSectionHeading eyebrow="At a glance" title="Key highlights" />
 

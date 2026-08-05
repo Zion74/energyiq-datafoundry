@@ -6,6 +6,10 @@ import {
 import type { TrustedEnergyTextQueryContract } from "@datafoundry/agent-runtime";
 
 import type { EnergyQueryContext } from "./energy-query-context.js";
+import {
+  createProjectAnalysisPackContextItem,
+  type ProjectAnalysisPackReleaseBinding,
+} from "./project-analysis-pack.js";
 
 export const createEnergyQueryContextItem = (
   context: EnergyQueryContext,
@@ -115,6 +119,35 @@ export const createTrustedEnergyTextContextItem = (
   }, { atomic: true, groupKind: "source" })
 });
 
+export const createEnergyAuthoritativeContextItems = (input: {
+  context?: EnergyQueryContext;
+  projectRelease?: ProjectAnalysisPackReleaseBinding | null;
+  sessionId: string;
+  trustedTextContract?: TrustedEnergyTextQueryContract;
+  userId: string;
+}): AgentContextItem[] => {
+  if (input.trustedTextContract) {
+    return [createTrustedEnergyTextContextItem(
+      input.trustedTextContract,
+      input.sessionId,
+      input.userId,
+    )];
+  }
+  if (!input.context) return [];
+
+  const packItem = input.projectRelease
+    ? createProjectAnalysisPackContextItem({
+        context: input.context,
+        release: input.projectRelease,
+        sessionId: input.sessionId,
+      })
+    : null;
+  return [
+    createEnergyQueryContextItem(input.context, input.sessionId),
+    ...(packItem ? [packItem] : []),
+  ];
+};
+
 const ngeeAnnAnalysisPolicy = (context: EnergyQueryContext): string[] =>
   context.projectId === "ngee-ann-polytechnic"
     ? [
@@ -130,6 +163,6 @@ const ngeeAnnAnalysisPolicy = (context: EnergyQueryContext): string[] =>
         "Do not answer tariff cost, carbon, forecast or water questions unless authoritative values are explicitly present in the current evidence.",
         "Every answer must state Scope, inclusive-exclusive Period, timezone, unit, aggregation route, material limitations, and the SQL/tool evidence used.",
         "Use SQL-produced table evidence for exact figures. Controlled line, bar or pie charts may only reuse columns returned by a tool result; never create new chart values or arbitrary chart code.",
-        "When evidence is insufficient, return the precise limitation and the next required data. Never generate mock figures, business anomalies, root causes or action priorities."
+        "When evidence is insufficient, return the precise limitation and the next required data. Never generate mock figures, business anomalies or root causes. Do not modify deterministic official action priorities; evidence-backed next investigations or actions are allowed when clearly identified as AI proposals."
       ]
     : [];

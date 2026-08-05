@@ -325,7 +325,7 @@ const bindPublishedReleaseContext = (
   tariffScheduleVersion: release.tariffScheduleVersion,
 });
 
-const resolvePublishedProjectRelease = (
+export const resolvePublishedProjectRelease = (
   metadataStore: MetadataStore,
   context: EnergyQueryContext,
 ): PublishedProjectRelease | null => {
