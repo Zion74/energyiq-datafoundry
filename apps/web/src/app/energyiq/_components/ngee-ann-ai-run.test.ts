@@ -61,6 +61,8 @@ describe("Ngee Ann AI Run", () => {
     expect(JSON.stringify(body)).toContain("at most two total run_sql_readonly attempts");
     expect(JSON.stringify(body)).toContain("rejected or failed calls count toward this limit");
     expect(JSON.stringify(body)).toContain("Do not use WITH/CTEs or EXTRACT syntax");
+    expect(JSON.stringify(body)).toContain("official_aggregation_eligible=TRUE");
+    expect(JSON.stringify(body)).toContain("A successful SQL call consumes its schema authorization");
     expect(JSON.stringify(body)).toContain("include every runtime assertion_id");
     expect(JSON.stringify(body)).toContain("retry only once");
   });
@@ -121,6 +123,28 @@ describe("Ngee Ann AI Run", () => {
       status: "unavailable",
       reason: "The AI Analyst returned a numeric claim without Finding-specific SQL Evidence.",
     });
+  });
+
+  it("accepts display rounding of a number that is present in Finding-specific SQL Evidence", () => {
+    const input = requiredInput();
+    const findings = generatedFindings();
+    findings[0]!.what = "Usage reached 168.96 kWh.";
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(
+        findings,
+        [],
+        [],
+        [
+          ...sqlEvents("sql-1", "SELECT SUM(usage_kwh) AS usage_kwh FROM energy_intervals", 168.9645),
+          ...sqlEvents("sql-2", "SELECT AVG(usage_kwh) AS average_kwh FROM energy_intervals", 21.4),
+        ],
+      ),
+      input,
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
   });
 
   it("does not accept attaching every completed SQL call to every Finding", () => {

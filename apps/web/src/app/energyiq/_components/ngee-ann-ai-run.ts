@@ -274,7 +274,9 @@ function buildAgentPrompt(input: NgeeAnnAiRunInput): string {
   return [
     `Act as an autonomous energy analyst for ${input.projectName}, Scope ${input.scopeName}.`,
     `The governed analysis window is ${input.analysisFrom} through ${input.analysisTo} in ${input.timezone}; data cutoff is ${input.dataCutoff}.`,
-    "Inspect the scoped schema first. Make at most two total run_sql_readonly attempts; rejected or failed calls count toward this limit. Query the inspected physical table directly with conditional aggregation. Do not use WITH/CTEs or EXTRACT syntax. Number only successful SQL calls in execution order starting at 1.",
+    "Inspect the scoped schema first, then query the inspected physical table directly with conditional aggregation. Do not call list_data_sources or preview_table. Do not use WITH/CTEs or EXTRACT syntax.",
+    "Make at most two total run_sql_readonly attempts; rejected or failed calls count toward this limit. A successful SQL call consumes its schema authorization, so if a second SQL is genuinely required, call inspect_schema again immediately before it. Number only successful SQL calls in execution order starting at 1.",
+    "For every official total, filter quality_status='ok' AND official_aggregation_eligible=TRUE. Never report an unfiltered SUM(usage_kwh) as a Project total. For explanatory Level, category, or Circuit breakdowns, filter quality_status='ok', keep them separate from the official total, and never add total and component rows together.",
     "On the first SQL plan, include every runtime assertion_id listed for each requirement_id, including manual assertions. If the first SQL is rejected, simplify it and retry only once. Never make another SQL attempt after that retry.",
     "Use the official deterministic projection as context, not as a script. Independently inspect the data and return exactly three useful, semantically different Findings.",
     "Across the three Findings, collectively cover the 1d, 7d and 28d horizons. A Finding can cover more than one horizon; do not force one Finding per horizon and do not repeat the same angle or action.",
@@ -282,7 +284,7 @@ function buildAgentPrompt(input: NgeeAnnAiRunInput): string {
     "whyKind must be Evidence, Hypothesis, or Missing Evidence. Do not invent a cause, owner, saving, ROI, device state, or commitment.",
     "Every numeric claim must appear in the result of a successful SQL call from this Run. Cite only the 1-based evidenceSqlIndexes that actually support that Finding. A single SQL result may support multiple Findings. Never attach every SQL call to every Finding by default.",
     "Include the relevant quality status or coverage fields in the SQL result used as Evidence. The supplied deterministic Overview quality summary covers only its primary period and must not be claimed as the quality of the full AI lookback.",
-    "As soon as the first successful SQL result provides enough Evidence, immediately return the required strict JSON. Execute the second SQL only when one specific missing Evidence field blocks a Finding. Do not continue exploring after Evidence is sufficient.",
+    "Design the first SQL to return the 1d, 7d and 28d official totals, compatible comparison baselines, and lookback quality fields together. As soon as it provides enough Evidence, immediately return the required strict JSON. Execute a second SQL only for one specific explanatory driver or missing Evidence field; inspect_schema again first. Do not continue exploring after Evidence is sufficient.",
     "Return only strict JSON with no markdown or commentary using this shape:",
     '{"findings":[{"relationship":"supports","horizons":["1d","7d"],"title":"...","what":"...","whyKind":"Evidence","why":"...","how":"...","howToVerify":"...","evidenceNote":"what the cited SQL supports or cannot prove","evidenceSqlIndexes":[1]}]}',
     "Official deterministic projection:",
@@ -543,14 +545,22 @@ function narrativeHasUnsupportedNumber(
     finding.howToVerify,
     finding.evidenceNote,
   ].join(" ");
-  const evidenceNumbers = new Set(toNumericTokens(tools.map((tool) => tool.numericEvidence).join(" ")));
-  return toNumericTokens(narrative).some((token) => !evidenceNumbers.has(token));
+  const evidenceNumbers = toNumericTokens(tools.map((tool) => tool.numericEvidence).join(" "))
+    .map((token) => token.value);
+  return toNumericTokens(narrative).some((token) => !evidenceNumbers.some((evidence) => (
+    Math.abs(evidence - token.value) <= (0.5 * (10 ** -token.precision)) + Number.EPSILON
+  )));
 }
 
-function toNumericTokens(value: string): string[] {
-  return (value.match(/[-+]?\d[\d,]*(?:\.\d+)?/gu) ?? []).map((token) => {
-    const parsed = Number(token.replace(/,/gu, ""));
-    return Number.isFinite(parsed) ? String(parsed) : token;
+function toNumericTokens(value: string): Array<{ precision: number; value: number }> {
+  return (value.match(/[-+]?\d[\d,]*(?:\.\d+)?/gu) ?? []).flatMap((token) => {
+    const normalized = token.replace(/,/gu, "");
+    const parsed = Number(normalized);
+    if (!Number.isFinite(parsed)) return [];
+    return [{
+      precision: normalized.includes(".") ? normalized.split(".")[1]!.length : 0,
+      value: parsed,
+    }];
   });
 }
 

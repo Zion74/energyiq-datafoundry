@@ -50,7 +50,7 @@ import {
   type TaskStateRuntime
 } from "./memory/task-state-runtime.js";
 import { CONVERSATION_WORKING_MEMORY_CONFIG } from "./memory/conversation-memory-bridge.js";
-import type { RuntimeContextSource } from "./context/source/runtime-context-source.js";
+import { createEvidenceFocusRuntimeSource } from "./context/source/evidence-focus-context-source.js";
 import {
   createContextItem,
   type ContextItem,
@@ -725,16 +725,6 @@ export const createDataFoundry = async (
     },
     workspaceDir: runWorkspace.runDir,
     sessionDir: runWorkspace.sessionDir
-  };
-};
-
-const createEvidenceFocusRuntimeSource = (items: AgentContextItem[]): RuntimeContextSource | undefined => {
-  if (items.length === 0) {
-    return undefined;
-  }
-  return {
-    sourceType: "evidence-focus",
-    collect: () => items
   };
 };
 
