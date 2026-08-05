@@ -231,6 +231,104 @@ describe("ProjectAnalysisResolver", () => {
         to: currentProjectResult.snapshot.context.to,
         dataSnapshotId: currentProjectResult.snapshot.context.dataSnapshotId,
       });
+
+      const pinnedLevelResult = await resolveProjectAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        user,
+        workspaceId: NGEE_ANN_WORKSPACE_ID,
+        request: {
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "level-7",
+          resource: "electricity",
+          analysisWindow: "latest-complete-7d",
+          from: NGEE_ANN_GOLDEN.selection.period.localFrom,
+          to: "2026-06-16",
+          expectedDataSnapshotId: currentProjectResult.snapshot.context.dataSnapshotId,
+          expectedProjectReleaseId: currentProjectResult.snapshot.projectRelease.id,
+        },
+        databasePath,
+        now: new Date("2026-08-06T00:00:00.000Z"),
+      });
+      expect(pinnedLevelResult.status).toBe("ready");
+      if (pinnedLevelResult.status !== "ready") throw new Error("Expected pinned Level analysis");
+      expect(pinnedLevelResult.snapshot.context).toMatchObject({
+        period: "Custom",
+        from: currentProjectResult.snapshot.context.from,
+        to: currentProjectResult.snapshot.context.to,
+        dataSnapshotId: currentProjectResult.snapshot.context.dataSnapshotId,
+      });
+      expect(pinnedLevelResult.snapshot.projectRelease.id)
+        .toBe(currentProjectResult.snapshot.projectRelease.id);
+
+      await expect(resolveProjectAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        user,
+        workspaceId: NGEE_ANN_WORKSPACE_ID,
+        request: {
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "level-7",
+          resource: "electricity",
+          analysisWindow: "latest-complete-7d",
+          from: NGEE_ANN_GOLDEN.selection.period.localFrom,
+          to: "2026-06-16",
+          expectedDataSnapshotId: "stale-snapshot",
+          expectedProjectReleaseId: currentProjectResult.snapshot.projectRelease.id,
+        },
+        databasePath,
+      })).rejects.toThrow("ENERGYIQ_DATA_SNAPSHOT_MISMATCH");
+
+      await expect(resolveProjectAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        user,
+        workspaceId: NGEE_ANN_WORKSPACE_ID,
+        request: {
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "level-7",
+          resource: "electricity",
+          analysisWindow: "latest-complete-7d",
+          from: NGEE_ANN_GOLDEN.selection.period.localFrom,
+          to: "2026-06-16",
+          expectedDataSnapshotId: currentProjectResult.snapshot.context.dataSnapshotId,
+          expectedProjectReleaseId: "stale-release",
+        },
+        databasePath,
+      })).rejects.toThrow("ENERGYIQ_PROJECT_RELEASE_MISMATCH");
+
+      await expect(resolveProjectAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        user,
+        workspaceId: NGEE_ANN_WORKSPACE_ID,
+        request: {
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "level-7",
+          resource: "electricity",
+          analysisWindow: "latest-complete-7d",
+          expectedDataSnapshotId: currentProjectResult.snapshot.context.dataSnapshotId,
+        },
+        databasePath,
+      })).rejects.toThrow("ENERGYIQ_CURRENT_OVERVIEW_PIN_INCOMPLETE");
+
+      await expect(resolveProjectAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        user,
+        workspaceId: NGEE_ANN_WORKSPACE_ID,
+        request: {
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "level-7",
+          resource: "electricity",
+          analysisWindow: "latest-complete-7d",
+          from: "2026-06-09",
+          to: "2026-06-15",
+          expectedDataSnapshotId: currentProjectResult.snapshot.context.dataSnapshotId,
+          expectedProjectReleaseId: currentProjectResult.snapshot.projectRelease.id,
+        },
+        databasePath,
+      })).rejects.toThrow("ENERGYIQ_CURRENT_OVERVIEW_WINDOW_MISMATCH");
       const resolve = (
         scopeId: string,
         from: string,

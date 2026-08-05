@@ -280,10 +280,65 @@ const resolveLatestCompleteOverviewContext = async (input: {
 }) => {
   const {
     analysisWindow: _analysisWindow,
-    from: _requestedFrom,
-    to: _requestedTo,
+    expectedDataSnapshotId,
+    expectedProjectReleaseId,
+    from,
+    to,
     ...requestedContext
   } = input.request;
+  const suppliedPinParts = [from, to, expectedDataSnapshotId, expectedProjectReleaseId]
+    .filter((value) => value !== undefined).length;
+  if (suppliedPinParts > 0 && suppliedPinParts < 4) {
+    throw new Error("ENERGYIQ_CURRENT_OVERVIEW_PIN_INCOMPLETE");
+  }
+  if (suppliedPinParts === 4) {
+    if (!from || !to || !expectedDataSnapshotId || !expectedProjectReleaseId) {
+      throw new Error("ENERGYIQ_CURRENT_OVERVIEW_PIN_INCOMPLETE");
+    }
+    const pinnedProjectContext = resolvePublishedEnergyQueryContext({
+      metadataStore: input.metadataStore,
+      user: input.user,
+      workspaceId: input.workspaceId,
+      request: {
+        ...requestedContext,
+        scopeId: "project",
+        period: "Last 7 days",
+        expectedDataSnapshotId,
+        expectedProjectReleaseId,
+      },
+      ...(input.now ? { now: input.now } : {}),
+      ...(input.env ? { env: input.env } : {}),
+    });
+    if (pinnedProjectContext.projectRelease?.renderer.key !== "ngee-ann-overview") {
+      throw new Error("ENERGYIQ_ANALYSIS_WINDOW_UNSUPPORTED");
+    }
+    const selected = await selectEnergyLatestCompletePeriod({
+      metadataStore: input.metadataStore,
+      dataGateway: input.dataGateway,
+      userId: input.user.id,
+      context: pinnedProjectContext.context,
+      ...(input.databasePath ? { databasePath: input.databasePath } : {}),
+    });
+    if (from !== selected.period.localFrom
+      || to !== inclusiveLocalDate(selected.period.localToExclusive)) {
+      throw new Error("ENERGYIQ_CURRENT_OVERVIEW_WINDOW_MISMATCH");
+    }
+    return resolvePublishedEnergyQueryContext({
+      metadataStore: input.metadataStore,
+      user: input.user,
+      workspaceId: input.workspaceId,
+      request: {
+        ...requestedContext,
+        period: "Custom",
+        from,
+        to,
+        expectedDataSnapshotId,
+        expectedProjectReleaseId,
+      },
+      ...(input.now ? { now: input.now } : {}),
+      ...(input.env ? { env: input.env } : {}),
+    });
+  }
   const projectContext = resolvePublishedEnergyQueryContext({
     metadataStore: input.metadataStore,
     user: input.user,

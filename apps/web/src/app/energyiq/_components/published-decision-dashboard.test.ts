@@ -20,6 +20,7 @@ import { configApi } from "../../../lib/config-api";
 import { buildEnergyTemplateRenderPlan } from "./energy-template-render-plan";
 import { ngeeAnnGoldenSnapshot, ngeeAnnSingleDaySnapshot } from "./ngee-ann-overview.test-fixture";
 import {
+  currentOverviewUrlWithView,
   currentOverviewAnalysisRequest,
   overviewAnalysisRequest,
   overviewUrlWithView,
@@ -244,7 +245,12 @@ describe("published Overview URL reload", () => {
         to: "2026-06-16",
       }),
     );
-    expect(mockedRouter.replace).not.toHaveBeenCalled();
+    expect(mockedRouter.replace).toHaveBeenCalledWith(expect.stringContaining(
+      `currentDataSnapshotId=${encodeURIComponent(snapshot.context.dataSnapshotId)}`,
+    ));
+    expect(mockedRouter.replace).toHaveBeenCalledWith(expect.stringContaining(
+      `currentProjectReleaseId=${encodeURIComponent(snapshot.projectRelease.id)}`,
+    ));
   });
 
   it("uses the public Custom URL for the first trusted resolve after Project access loads", async () => {
@@ -725,8 +731,9 @@ describe("published Overview URL reload", () => {
     mockedAccess.access = accessContext([ngeeAnn]);
     const defaultUrl = "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity";
     window.history.replaceState({}, "", defaultUrl);
+    const zeroCoverage = readyZeroCoverageResolution("Last 7 days");
     const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
-      .mockResolvedValue(readyZeroCoverageResolution("Last 7 days"));
+      .mockResolvedValue(zeroCoverage);
 
     await act(async () => {
       root.render(React.createElement(PublishedDecisionDashboard));
@@ -739,12 +746,14 @@ describe("published Overview URL reload", () => {
       resource: "electricity",
       analysisWindow: "latest-complete-7d",
     });
-    expect(mockedRouter.replace).not.toHaveBeenCalled();
+    expect(mockedRouter.replace).toHaveBeenCalledWith(expect.stringContaining(
+      "currentFrom=2026-07-28&currentTo=2026-08-03",
+    ));
     expect(window.location.pathname + window.location.search).toBe(defaultUrl);
     const latestButton = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
       .find((button) => button.textContent?.includes("View latest available data"));
     expect(latestButton).toBeFalsy();
-    expect(mockedRouter.replace).not.toHaveBeenCalled();
+    expect(mockedRouter.replace).toHaveBeenCalledOnce();
   });
 
   it("carries the server-resolved range when a standard Period changes to Custom", async () => {
@@ -1016,6 +1025,66 @@ describe("published Overview URL reload", () => {
     expect(container.textContent).not.toContain("Analysis scopes unavailable");
   });
 
+  it("fails closed on a stale current pin and refreshes only by clearing the whole-page pin", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    window.history.replaceState(
+      {},
+      "",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=level-7&resource=electricity&currentFrom=2026-06-10&currentTo=2026-06-16&currentDataSnapshotId=stale-snapshot&currentProjectReleaseId=release-v1",
+    );
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockRejectedValue(new Error("ENERGYIQ_DATA_SNAPSHOT_MISMATCH"));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    expect(resolveProjectAnalysis).toHaveBeenCalledWith(expect.objectContaining({
+      analysisWindow: "latest-complete-7d",
+      from: "2026-06-10",
+      to: "2026-06-16",
+      expectedDataSnapshotId: "stale-snapshot",
+      expectedProjectReleaseId: "release-v1",
+    }));
+    expect(container.textContent).toContain("ENERGYIQ_DATA_SNAPSHOT_MISMATCH");
+    const refresh = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "Refresh current overview");
+    await act(async () => refresh?.click());
+
+    expect(mockedRouter.replace).toHaveBeenCalledWith(
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=level-7&resource=electricity&grain=day&comparison=overlay&category=all",
+    );
+  });
+
+  it("keeps the current cutoff pin while changing Scope", async () => {
+    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = ngeeAnn;
+    mockedAccess.access = accessContext([ngeeAnn]);
+    window.history.replaceState(
+      {},
+      "",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&currentFrom=2026-06-10&currentTo=2026-06-16&currentDataSnapshotId=snapshot-v1&currentProjectReleaseId=release-v1",
+    );
+    vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    const scopeSelect = container.querySelector<HTMLButtonElement>("[role='combobox'][aria-label='Analysis Scope']");
+    await act(async () => scopeSelect?.click());
+    const nextScope = Array.from(document.querySelectorAll<HTMLButtonElement>("[role='option']"))
+      .find((option) => option.getAttribute("aria-selected") !== "true");
+    await act(async () => nextScope?.click());
+
+    expect(mockedRouter.replace).toHaveBeenCalledWith(expect.stringContaining(
+      "currentFrom=2026-06-10&currentTo=2026-06-16&currentDataSnapshotId=snapshot-v1&currentProjectReleaseId=release-v1",
+    ));
+  });
+
 });
 
 describe("published Overview date inputs", () => {
@@ -1047,6 +1116,36 @@ describe("published Overview date inputs", () => {
       resource: "electricity",
       analysisWindow: "latest-complete-7d",
     });
+  });
+
+  it("round-trips the server-validated current window pin and restores it on reload", () => {
+    const view = overviewViewStateFromSearchParams(new URLSearchParams(
+      "projectId=ngee-ann-polytechnic&scopeId=level-7&resource=electricity&currentFrom=2026-06-10&currentTo=2026-06-16&currentDataSnapshotId=snapshot-v1&currentProjectReleaseId=release-v1",
+    ));
+
+    expect(view.currentOverviewPin).toEqual({
+      from: "2026-06-10",
+      to: "2026-06-16",
+      dataSnapshotId: "snapshot-v1",
+      projectReleaseId: "release-v1",
+    });
+    expect(currentOverviewAnalysisRequest("ngee-ann-polytechnic", {
+      scopeId: view.scopeId,
+      resource: view.resource,
+      currentOverviewPin: view.currentOverviewPin,
+    })).toEqual({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "level-7",
+      resource: "electricity",
+      analysisWindow: "latest-complete-7d",
+      from: "2026-06-10",
+      to: "2026-06-16",
+      expectedDataSnapshotId: "snapshot-v1",
+      expectedProjectReleaseId: "release-v1",
+    });
+    expect(currentOverviewUrlWithView(view)).toContain(
+      "currentFrom=2026-06-10&currentTo=2026-06-16&currentDataSnapshotId=snapshot-v1&currentProjectReleaseId=release-v1",
+    );
   });
 
   it("shows partial charts and advisory while suppressing action modules and Save below 95% coverage", () => {

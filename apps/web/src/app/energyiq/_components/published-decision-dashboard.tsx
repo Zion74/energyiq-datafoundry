@@ -46,6 +46,12 @@ type OverviewPeriod = "Yesterday" | "Last 7 days" | "Previous week" | "Previous 
 type ResourceType = "electricity" | "water";
 export type OverviewComparison = "overlay" | "selected" | "average";
 export type OverviewCategory = "all" | "load" | "light";
+export type CurrentOverviewPin = {
+  from: string;
+  to: string;
+  dataSnapshotId: string;
+  projectReleaseId: string;
+};
 export type OverviewUrlViewState = {
   projectId: string;
   scopeId: string;
@@ -56,6 +62,7 @@ export type OverviewUrlViewState = {
   grain: "day" | "hour";
   comparison: OverviewComparison;
   category: OverviewCategory;
+  currentOverviewPin?: CurrentOverviewPin;
 };
 
 type LoadedResolution = {
@@ -74,6 +81,10 @@ export function PublishedDecisionDashboard() {
     initialViewState.period,
     initialViewState.from,
     initialViewState.to,
+    initialViewState.currentOverviewPin?.from ?? "",
+    initialViewState.currentOverviewPin?.to ?? "",
+    initialViewState.currentOverviewPin?.dataSnapshotId ?? "",
+    initialViewState.currentOverviewPin?.projectReleaseId ?? "",
     hasExplicitPeriod ? "legacy-window" : "current-window",
   ].join(":");
   return (
@@ -161,6 +172,20 @@ function PublishedDecisionDashboardView({
     router.replace(href);
   };
 
+  const refreshOverview = () => {
+    if (!usesCurrentOverviewWindow || !initialViewState.currentOverviewPin) {
+      setRefreshRevision((current) => current + 1);
+      return;
+    }
+    const href = currentOverviewUrlWithView({
+      ...initialViewState,
+      projectId,
+      currentOverviewPin: undefined,
+    });
+    pendingUrlSearchRef.current = href.slice(href.indexOf("?") + 1);
+    router.replace(href);
+  };
+
   useEffect(() => {
     if (!requestedProjectId || requestedProjectId === activeProject?.id) return;
     selectProject(requestedProjectId);
@@ -241,7 +266,11 @@ function PublishedDecisionDashboardView({
     if (!projectId || resource !== "electricity" || projectSelectionError || queryValidationError) return;
     let cancelled = false;
     const request = usesCurrentOverviewWindow
-      ? currentOverviewAnalysisRequest(projectId, { scopeId, resource })
+      ? currentOverviewAnalysisRequest(projectId, {
+          scopeId,
+          resource,
+          currentOverviewPin: initialViewState.currentOverviewPin,
+        })
       : overviewAnalysisRequest(projectId, period, requestCustomRange, { scopeId, resource });
     setRunning(true);
     setAnalysisError(null);
@@ -255,6 +284,20 @@ function PublishedDecisionDashboardView({
           from: toDateInput(result.snapshot.context.from, result.snapshot.context.timezone),
           to: toDateInput(new Date(Date.parse(result.snapshot.context.to) - 1).toISOString(), result.snapshot.context.timezone),
         });
+        if (usesCurrentOverviewWindow && !initialViewState.currentOverviewPin) {
+          const range = snapshotLocalDateRange(result.snapshot);
+          const href = currentOverviewUrlWithView({
+            ...initialViewState,
+            projectId,
+            currentOverviewPin: {
+              ...range,
+              dataSnapshotId: result.snapshot.context.dataSnapshotId,
+              projectReleaseId: result.snapshot.projectRelease.id,
+            },
+          });
+          pendingUrlSearchRef.current = href.slice(href.indexOf("?") + 1);
+          router.replace(href);
+        }
       })
       .catch((reason) => {
         if (cancelled) return;
@@ -267,7 +310,7 @@ function PublishedDecisionDashboardView({
     return () => {
       cancelled = true;
     };
-  }, [period, projectId, projectSelectionError, queryValidationError, refreshRevision, requestCustomRange.from, requestCustomRange.to, resource, scopeId, usesCurrentOverviewWindow]);
+  }, [initialViewState, period, projectId, projectSelectionError, queryValidationError, refreshRevision, requestCustomRange.from, requestCustomRange.to, resource, router, scopeId, usesCurrentOverviewWindow]);
 
   useEffect(() => {
     const firstSectionId = renderPlanForDisplay?.sections[0]?.section_id ?? "";
@@ -438,11 +481,11 @@ function PublishedDecisionDashboardView({
           ) : null}
           <button
             type="button"
-            onClick={() => setRefreshRevision((current) => current + 1)}
+            onClick={refreshOverview}
             disabled={running || resource === "water"}
             className="h-10 rounded-lg bg-primary px-4 text-xs font-semibold text-white transition-colors hover:bg-primary-light disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {running ? "Refreshing…" : "Refresh view"}
+            {running ? "Refreshing…" : usesCurrentOverviewWindow ? "Refresh current overview" : "Refresh view"}
           </button>
           <button
             type="button"
@@ -475,7 +518,10 @@ function PublishedDecisionDashboardView({
           <span className="text-muted">{formatAnalysisWindow(currentSnapshot)}</span>
           <span className="text-muted">Data through {formatDataThrough(currentSnapshot)}</span>
           {!usesCurrentOverviewWindow ? (
-            <Link href={currentOverviewUrlWithView(initialViewState)} className="font-semibold text-primary hover:underline">
+            <Link href={currentOverviewUrlWithView({
+              ...initialViewState,
+              currentOverviewPin: undefined,
+            })} className="font-semibold text-primary hover:underline">
               Return to current overview
             </Link>
           ) : null}
@@ -510,7 +556,7 @@ function PublishedDecisionDashboardView({
           <ProjectRenderer
             request={rendererRequest}
             state={projectRendererState}
-            onRetry={() => setRefreshRevision((current) => current + 1)}
+            onRetry={refreshOverview}
             latestAvailableRange={usesCurrentOverviewWindow ? null : latestAvailableRange}
             onViewLatestAvailableData={(range) => navigateOverview({
               period: "Custom",
@@ -656,13 +702,23 @@ export function overviewAnalysisRequest(
 
 export function currentOverviewAnalysisRequest(
   projectId: string,
-  view: { scopeId?: string; resource?: ResourceType } = {},
+  view: {
+    scopeId?: string;
+    resource?: ResourceType;
+    currentOverviewPin?: CurrentOverviewPin;
+  } = {},
 ): EnergyQueryContextRequestDto {
   return {
     projectId,
     scopeId: view.scopeId?.trim() || "project",
     resource: view.resource ?? "electricity",
     analysisWindow: "latest-complete-7d",
+    ...(view.currentOverviewPin ? {
+      from: view.currentOverviewPin.from,
+      to: view.currentOverviewPin.to,
+      expectedDataSnapshotId: view.currentOverviewPin.dataSnapshotId,
+      expectedProjectReleaseId: view.currentOverviewPin.projectReleaseId,
+    } : {}),
   };
 }
 
@@ -688,6 +744,18 @@ export function overviewViewStateFromSearchParams(searchParams: Pick<URLSearchPa
   const category = requestedCategory === "load" || requestedCategory === "light"
     ? requestedCategory
     : "all";
+  const pinFrom = searchParams.get("currentFrom")?.trim() || "";
+  const pinTo = searchParams.get("currentTo")?.trim() || "";
+  const pinDataSnapshotId = searchParams.get("currentDataSnapshotId")?.trim() || "";
+  const pinProjectReleaseId = searchParams.get("currentProjectReleaseId")?.trim() || "";
+  const currentOverviewPin = pinFrom && pinTo && pinDataSnapshotId && pinProjectReleaseId
+    ? {
+        from: pinFrom,
+        to: pinTo,
+        dataSnapshotId: pinDataSnapshotId,
+        projectReleaseId: pinProjectReleaseId,
+      }
+    : undefined;
   return {
     projectId: searchParams.get("projectId")?.trim() || "",
     scopeId: searchParams.get("scopeId")?.trim() || "project",
@@ -698,6 +766,7 @@ export function overviewViewStateFromSearchParams(searchParams: Pick<URLSearchPa
     grain,
     comparison,
     category,
+    ...(currentOverviewPin ? { currentOverviewPin } : {}),
   };
 }
 
@@ -736,7 +805,7 @@ export function overviewUrlWithView(
   return `/energyiq/overview?${next.toString()}`;
 }
 
-function currentOverviewUrlWithView(view: OverviewUrlViewState): string {
+export function currentOverviewUrlWithView(view: OverviewUrlViewState): string {
   const next = new URLSearchParams();
   if (view.projectId) next.set("projectId", view.projectId);
   next.set("scopeId", view.scopeId || "project");
@@ -744,6 +813,12 @@ function currentOverviewUrlWithView(view: OverviewUrlViewState): string {
   next.set("grain", "day");
   next.set("comparison", view.comparison);
   next.set("category", view.category);
+  if (view.currentOverviewPin) {
+    next.set("currentFrom", view.currentOverviewPin.from);
+    next.set("currentTo", view.currentOverviewPin.to);
+    next.set("currentDataSnapshotId", view.currentOverviewPin.dataSnapshotId);
+    next.set("currentProjectReleaseId", view.currentOverviewPin.projectReleaseId);
+  }
   return `/energyiq/overview?${next.toString()}`;
 }
 

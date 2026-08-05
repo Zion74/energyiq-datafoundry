@@ -48,6 +48,10 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
     nextSearchParams.delete("period");
     nextSearchParams.delete("from");
     nextSearchParams.delete("to");
+    nextSearchParams.delete("currentFrom");
+    nextSearchParams.delete("currentTo");
+    nextSearchParams.delete("currentDataSnapshotId");
+    nextSearchParams.delete("currentProjectReleaseId");
     nextSearchParams.set("grain", "day");
     router.replace(`${pathname}?${nextSearchParams.toString()}`);
   };

@@ -47,7 +47,7 @@ describe("EnergyIQ Shell Project navigation", () => {
     mockedAccess.selectOrganisation.mockReset();
     mockedAccess.selectProject.mockReset();
     navigation.pathname = "/energyiq/overview";
-    navigation.search = "projectId=project-a&scopeId=level-6&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16";
+    navigation.search = "projectId=project-a&scopeId=level-6&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&currentFrom=2026-06-10&currentTo=2026-06-16&currentDataSnapshotId=snapshot-v1&currentProjectReleaseId=release-v1";
     window.history.replaceState({}, "", `/energyiq/overview?${navigation.search}`);
     navigation.replace.mockReset();
     container = document.createElement("div");

@@ -1034,6 +1034,12 @@ const parseQueryContextRequest = (value: unknown): EnergyQueryContextRequest => 
     ...(typeof value.from === "string" ? { from: value.from } : {}),
     ...(typeof value.to === "string" ? { to: value.to } : {}),
     ...(value.analysisWindow === "latest-complete-7d" ? { analysisWindow: value.analysisWindow } : {}),
+    ...(typeof value.expectedDataSnapshotId === "string"
+      ? { expectedDataSnapshotId: value.expectedDataSnapshotId }
+      : {}),
+    ...(typeof value.expectedProjectReleaseId === "string"
+      ? { expectedProjectReleaseId: value.expectedProjectReleaseId }
+      : {}),
   };
 };
 
