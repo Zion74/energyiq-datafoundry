@@ -283,9 +283,8 @@ function buildAgentPrompt(input: NgeeAnnAiRunInput): string {
     "For every Finding state whether it supports, challenges, or is independent of the deterministic projection. Answer What, Why, How, and How to verify.",
     "whyKind must be Evidence, Hypothesis, or Missing Evidence. Do not invent a cause, owner, saving, ROI, device state, or commitment.",
     "Every numeric claim must appear in the result of a successful SQL call from this Run. Cite only the 1-based evidenceSqlIndexes that actually support that Finding. A single SQL result may support multiple Findings. Never attach every SQL call to every Finding by default.",
-    "Numeric claims include dates, period boundaries, counts, deltas, ratios, and percentages. Return each one as a SQL result column before mentioning it. Do not calculate new arithmetic after SQL, and do not copy a number from the deterministic projection unless the same number is present in your cited SQL result.",
     "Include the relevant quality status or coverage fields in the SQL result used as Evidence. The supplied deterministic Overview quality summary covers only its primary period and must not be claimed as the quality of the full AI lookback.",
-    "Design the first SQL to return the 1d, 7d and 28d period_from, period_to, baseline_from, baseline_to, official_total_kwh, baseline_kwh, delta_kwh, relative_pct, and lookback quality fields together. If a second SQL is needed for a driver, return its period boundaries, accepted total, contribution kWh, and share_pct as SQL columns. As soon as Evidence is sufficient, immediately return the required strict JSON. Inspect_schema again before the second SQL. Do not continue exploring after Evidence is sufficient.",
+    "Design the first SQL to return the 1d, 7d and 28d official totals, compatible comparison baselines, and lookback quality fields together. As soon as it provides enough Evidence, immediately return the required strict JSON. Execute a second SQL only for one specific explanatory driver or missing Evidence field; inspect_schema again first. Do not continue exploring after Evidence is sufficient.",
     "Return only strict JSON with no markdown or commentary using this shape:",
     '{"findings":[{"relationship":"supports","horizons":["1d","7d"],"title":"...","what":"...","whyKind":"Evidence","why":"...","how":"...","howToVerify":"...","evidenceNote":"what the cited SQL supports or cannot prove","evidenceSqlIndexes":[1]}]}',
     "Official deterministic projection:",
@@ -354,7 +353,11 @@ export function resolveNgeeAnnAiEventStream(input: {
   if (sqlTools.length > 1 && selectedTools.every((selection) => selection.length === sqlTools.length)) {
     return { status: "unavailable", reason: "The AI Analyst did not associate SQL Evidence with individual Findings." };
   }
-  if (generated.some((finding, index) => narrativeHasUnsupportedNumber(finding, selectedTools[index]!))) {
+  if (generated.some((finding, index) => narrativeHasUnsupportedNumber(
+    finding,
+    selectedTools[index]!,
+    input.input,
+  ))) {
     return { status: "unavailable", reason: "The AI Analyst returned a numeric claim without Finding-specific SQL Evidence." };
   }
   const findings = generated.map<NgeeAnnAiFinding>((finding, index) => ({
@@ -537,6 +540,7 @@ function parseEvidenceIndexes(value: unknown): number[] {
 function narrativeHasUnsupportedNumber(
   finding: GeneratedFinding,
   tools: CollectedToolEvidence[],
+  input: NgeeAnnAiRunInput,
 ): boolean {
   const narrative = [
     finding.title,
@@ -546,11 +550,43 @@ function narrativeHasUnsupportedNumber(
     finding.howToVerify,
     finding.evidenceNote,
   ].join(" ");
-  const evidenceNumbers = toNumericTokens(tools.map((tool) => tool.numericEvidence).join(" "))
+  const evidenceNumbers = toNumericTokens([
+    ...tools.map((tool) => tool.numericEvidence),
+    JSON.stringify(input.horizons),
+    JSON.stringify(input.dataQuality),
+    JSON.stringify(input.deterministicProjection),
+  ].join(" "))
     .map((token) => token.value);
-  return toNumericTokens(narrative).some((token) => !evidenceNumbers.some((evidence) => (
-    Math.abs(evidence - token.value) <= (0.5 * (10 ** -token.precision)) + Number.EPSILON
-  )));
+  return toNumericTokens(narrative).some((token) => !numericClaimIsVerified(token, evidenceNumbers));
+}
+
+function numericClaimIsVerified(
+  claim: { precision: number; value: number },
+  evidence: number[],
+): boolean {
+  if (evidence.some((value) => numericValuesMatch(claim, value))) return true;
+  for (const left of evidence) {
+    for (const right of evidence) {
+      const candidates = [
+        left + right,
+        left - right,
+        right - left,
+        ...(right !== 0 ? [left / right, (left / right) * 100, ((left - right) / right) * 100] : []),
+      ];
+      if (candidates.some((value) => Number.isFinite(value) && numericValuesMatch(claim, value))) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function numericValuesMatch(
+  claim: { precision: number; value: number },
+  evidence: number,
+): boolean {
+  const tolerance = (0.5 * (10 ** -claim.precision)) + Number.EPSILON;
+  return Math.abs(evidence - claim.value) <= tolerance;
 }
 
 function toNumericTokens(value: string): Array<{ precision: number; value: number }> {

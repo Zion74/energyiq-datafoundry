@@ -63,8 +63,6 @@ describe("Ngee Ann AI Run", () => {
     expect(JSON.stringify(body)).toContain("Do not use WITH/CTEs or EXTRACT syntax");
     expect(JSON.stringify(body)).toContain("official_aggregation_eligible=TRUE");
     expect(JSON.stringify(body)).toContain("A successful SQL call consumes its schema authorization");
-    expect(JSON.stringify(body)).toContain("Do not calculate new arithmetic after SQL");
-    expect(JSON.stringify(body)).toContain("period_from, period_to, baseline_from, baseline_to");
     expect(JSON.stringify(body)).toContain("include every runtime assertion_id");
     expect(JSON.stringify(body)).toContain("retry only once");
   });
@@ -141,6 +139,20 @@ describe("Ngee Ann AI Run", () => {
           ...sqlEvents("sql-2", "SELECT AVG(usage_kwh) AS average_kwh FROM energy_intervals", 21.4),
         ],
       ),
+      input,
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+  });
+
+  it("accepts server-recomputed arithmetic from pinned Horizon facts", () => {
+    const input = requiredInput();
+    const findings = generatedFindings();
+    findings[0]!.what = "The rolling window increased by 319.49 kWh and 26.4%.";
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(findings),
       input,
       providerProfileId: "profile-1",
       runId: "run-1",
