@@ -1255,6 +1255,7 @@ type DailyAnomalyBundle = Extract<
   { status: "available" }
 >;
 type DailyAnomalyRow = DailyAnomalyBundle["scopes"][number]["rows"][number];
+type DailyAnomalyRollingComparison = DailyAnomalyBundle["scopes"][number]["rollingComparisons"][number];
 
 const DAILY_ANOMALY_SUPPRESSION_CODES = new Set([
   "CALENDAR_EXCEPTION_DATE",
@@ -1455,7 +1456,10 @@ function decisionThemeHorizonsMatchSource(
 ): boolean {
   const latest = scope.rows.slice().sort((left, right) => right.localDate.localeCompare(left.localDate))[0];
   const latestHorizon = horizons[0];
-  if (!latest || !latestHorizon || latestHorizon.period.fromLocalDate !== latest.localDate) return false;
+  if (!latest
+    || !latestHorizon
+    || latestHorizon.period.fromLocalDate !== latest.localDate
+    || latestHorizon.period.toLocalDate !== latest.localDate) return false;
   if (latestHorizon.status === "available" && (
     latestHorizon.actualKwh !== latest.actualKwh
     || latestHorizon.baselineKwh !== latest.baselineKwh
@@ -1464,7 +1468,11 @@ function decisionThemeHorizonsMatchSource(
   )) return false;
   return horizons.slice(1).every((horizon) => {
     const comparison = scope.rollingComparisons.find((candidate) => candidate.horizon === horizon.horizon);
-    if (!comparison || comparison.status !== horizon.status) return false;
+    if (!comparison
+      || comparison.status !== horizon.status
+      || !validRollingComparisonBoundaries(comparison, latest.localDate)
+      || horizon.period.fromLocalDate !== comparison.current.fromLocalDate
+      || horizon.period.toLocalDate !== comparison.current.toLocalDate) return false;
     if (comparison.status === "unavailable") {
       return horizon.actualKwh === comparison.current.totalKwh
         && horizon.baselineKwh === comparison.baseline.totalKwh
@@ -1477,6 +1485,36 @@ function decisionThemeHorizonsMatchSource(
   });
 }
 
+function validRollingComparisonBoundaries(
+  comparison: DailyAnomalyRollingComparison,
+  latestLocalDate: string,
+): boolean {
+  const horizonDays = comparison.horizon === "rolling_7d" ? 7 : 28;
+  const expectedCurrentFrom = shiftIsoLocalDate(latestLocalDate, -(horizonDays - 1));
+  if (!expectedCurrentFrom) return false;
+  const expectedBaselineTo = shiftIsoLocalDate(expectedCurrentFrom, -1);
+  const expectedBaselineFrom = shiftIsoLocalDate(expectedCurrentFrom, -horizonDays);
+  return comparison.cutoffLocalDate === latestLocalDate
+    && comparison.current.fromLocalDate === expectedCurrentFrom
+    && comparison.current.toLocalDate === latestLocalDate
+    && comparison.baseline.fromLocalDate === expectedBaselineFrom
+    && comparison.baseline.toLocalDate === expectedBaselineTo;
+}
+
+function shiftIsoLocalDate(localDate: string, days: number): string | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(localDate);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (date.getUTCFullYear() !== year
+    || date.getUTCMonth() !== month - 1
+    || date.getUTCDate() !== day) return null;
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 function validDecisionThemeDriver(
   driver: NonNullable<EnergyProjectAnalysisSnapshotDto["decisionPriorities"]>["items"][number]["driver"],
 ): boolean {
@@ -1484,6 +1522,7 @@ function validDecisionThemeDriver(
   return Boolean(driver.scopeId.trim())
     && Boolean(driver.label.trim())
     && finiteNumber(driver.impactKwh)
+    && driver.impactKwh > 0
     && driver.limitation === "Evidence only; not a confirmed root cause.";
 }
 

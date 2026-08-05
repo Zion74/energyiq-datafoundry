@@ -5,6 +5,7 @@ import { buildNgeeAnnDecisionPriorities } from "./ngee-ann-decision-priorities.j
 
 type AvailableAnomalies = Extract<EnergyDailyUsageAnomalies, { status: "available" }>;
 type AnomalyRow = AvailableAnomalies["scopes"][number]["rows"][number];
+type AnomalyDetailSeries = AnomalyRow["detailSeries"][number];
 
 const evidencePins: AvailableAnomalies["evidencePins"] = {
   projectReleaseId: "release@1",
@@ -52,6 +53,25 @@ const anomalyRow = (input: {
   outcome: input.outcome ?? "triggered",
   hourlyComparison: [],
   detailSeries: [],
+});
+
+const driverSeries = (impactKwh: number): AnomalyDetailSeries => ({
+  seriesId: `driver:${String(impactKwh)}`,
+  relationship: "immediate_level",
+  kind: "official_scope",
+  scopeId: "level-7",
+  scopeName: "Level 7",
+  includedInOfficialTotal: true,
+  status: "available",
+  selectedTotalKwh: 100,
+  baselineTotalKwh: 100,
+  impactKwh,
+  relativePct: 0,
+  coveragePct: 100,
+  expectedMeterIntervalCount: 96,
+  validIntervalCount: 96,
+  qualityEventCount: 0,
+  points: [],
 });
 
 const anomalies = (scopes: Array<
@@ -277,6 +297,51 @@ describe("Ngee Ann decision priorities", () => {
       rank: 1,
       evidence: { primaryIncidentId: "project-16" },
       impact: { energy: { deltaKwh: 50 } },
+    });
+  });
+
+  it.each([
+    ["zero", 0],
+    ["negative", -1],
+    ["NaN", Number.NaN],
+    ["positive infinity", Number.POSITIVE_INFINITY],
+  ])("withholds a %s-impact supporting driver", (_name, impactKwh) => {
+    const row = anomalyRow({ incidentId: "project-16", impactKwh: 50 });
+    row.detailSeries = [driverSeries(impactKwh)];
+
+    const result = build(anomalies([{
+      scopeId: "project",
+      scopeName: "Ngee Ann Polytechnic",
+      scopeType: "project",
+      rows: [row],
+    }]));
+
+    expect(result.items[0]?.driver).toMatchObject({
+      status: "unavailable",
+    });
+  });
+
+  it("selects only the strongest finite positive supporting driver", () => {
+    const row = anomalyRow({ incidentId: "project-16", impactKwh: 50 });
+    row.detailSeries = [
+      driverSeries(Number.POSITIVE_INFINITY),
+      driverSeries(0),
+      driverSeries(-10),
+      driverSeries(12),
+      { ...driverSeries(25), seriesId: "driver:25" },
+    ];
+
+    const result = build(anomalies([{
+      scopeId: "project",
+      scopeName: "Ngee Ann Polytechnic",
+      scopeType: "project",
+      rows: [row],
+    }]));
+
+    expect(result.items[0]?.driver).toMatchObject({
+      status: "available",
+      scopeId: "level-7",
+      impactKwh: 25,
     });
   });
 

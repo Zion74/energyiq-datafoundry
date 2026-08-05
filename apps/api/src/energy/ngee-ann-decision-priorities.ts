@@ -219,7 +219,9 @@ export const buildNgeeAnnDecisionPriorities = (input: {
     const driver = themePrimary.row.detailSeries
       .filter((series) => series.relationship !== "selected_scope"
         && series.status === "available"
-        && series.impactKwh !== null)
+        && series.impactKwh !== null
+        && Number.isFinite(series.impactKwh)
+        && series.impactKwh > 0)
       .sort((left, right) => (right.impactKwh ?? 0) - (left.impactKwh ?? 0)
         || left.seriesId.localeCompare(right.seriesId))[0];
     return {

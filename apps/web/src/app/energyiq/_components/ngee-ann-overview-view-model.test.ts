@@ -15,6 +15,56 @@ function dailyAnomalyBundle(snapshot: GoldenSnapshot): AvailableDailyAnomalies {
   return bundle;
 }
 
+const rollingBoundaryTamperCases: Array<{
+  name: string;
+  mutate: (snapshot: GoldenSnapshot) => void;
+}> = [
+  {
+    name: "rolling_7d cutoff",
+    mutate: (snapshot) => {
+      const comparison = dailyAnomalyBundle(snapshot).scopes[0]!.rollingComparisons[0]!;
+      comparison.cutoffLocalDate = "2026-06-15";
+    },
+  },
+  {
+    name: "rolling_7d current period",
+    mutate: (snapshot) => {
+      const comparison = dailyAnomalyBundle(snapshot).scopes[0]!.rollingComparisons[0]!;
+      comparison.current.fromLocalDate = "2026-06-09";
+      snapshot.decisionPriorities!.items[0]!.horizons[1]!.period.fromLocalDate = "2026-06-09";
+    },
+  },
+  {
+    name: "rolling_7d baseline period",
+    mutate: (snapshot) => {
+      const comparison = dailyAnomalyBundle(snapshot).scopes[0]!.rollingComparisons[0]!;
+      comparison.baseline.toLocalDate = "2026-06-08";
+    },
+  },
+  {
+    name: "rolling_28d cutoff",
+    mutate: (snapshot) => {
+      const comparison = dailyAnomalyBundle(snapshot).scopes[0]!.rollingComparisons[1]!;
+      comparison.cutoffLocalDate = "2026-06-15";
+    },
+  },
+  {
+    name: "rolling_28d current period",
+    mutate: (snapshot) => {
+      const comparison = dailyAnomalyBundle(snapshot).scopes[0]!.rollingComparisons[1]!;
+      comparison.current.fromLocalDate = "2026-05-19";
+      snapshot.decisionPriorities!.items[0]!.horizons[2]!.period.fromLocalDate = "2026-05-19";
+    },
+  },
+  {
+    name: "rolling_28d baseline period",
+    mutate: (snapshot) => {
+      const comparison = dailyAnomalyBundle(snapshot).scopes[0]!.rollingComparisons[1]!;
+      comparison.baseline.toLocalDate = "2026-05-18";
+    },
+  },
+];
+
 const peakEvidencePinMismatchCases: Array<{
   name: string;
   mutate: (snapshot: GoldenSnapshot) => void;
@@ -1615,13 +1665,33 @@ describe("Ngee Ann Overview ViewModel", () => {
           horizons: [
             { label: "Latest complete day", comparison: "222 kWh vs 218.88 kWh (+1.4%)" },
             { label: "Rolling 7 days", comparison: "1531.17 kWh vs 1211.68 kWh (+26.4%)" },
-            { label: "Rolling 28 days", status: "unavailable" },
+            {
+              label: "Rolling 28 days",
+              status: "available",
+              comparison: "4904.87 kWh vs 4831.56 kWh (+1.5%)",
+            },
           ],
           driver: "Level 7: +88.1 kWh; Evidence only; not a confirmed root cause.",
         },
       ],
     });
   });
+
+  it.each(rollingBoundaryTamperCases)(
+    "fails decision priorities closed for tampered $name boundaries",
+    ({ mutate }) => {
+      const snapshot = ngeeAnnGoldenSnapshot();
+      mutate(snapshot);
+
+      const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+      expect(view.dailyAnomalies.status).toBe("available");
+      expect(view.decisionPriorities).toMatchObject({
+        status: "unavailable",
+        items: [],
+      });
+    },
+  );
 
   it("accepts empty priorities only when the anomaly bundle has no triggered or suppressed outcomes", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
