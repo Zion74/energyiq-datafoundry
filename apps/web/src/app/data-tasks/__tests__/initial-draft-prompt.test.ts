@@ -31,6 +31,8 @@ describe("DataTasksApp initial composer draft", () => {
     const prefillEffect = chatInput.slice(effectStart, effectEnd);
 
     expect(prefillEffect).toContain("draftPromptRequest.text");
+    expect(prefillEffect).toContain("requestAnimationFrame(applyDraft)");
+    expect(prefillEffect).toContain("cancelAnimationFrame(frameId)");
     expect(prefillEffect).toContain("dispatchEvent(new Event(\"input\"");
     expect(prefillEffect).toContain("onDraftPromptConsumed(draftPromptRequest.id)");
     expect(prefillEffect).not.toContain("onSubmitMessage");

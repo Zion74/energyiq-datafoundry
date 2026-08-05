@@ -288,30 +288,45 @@ function DataTaskChatInputLayout({
   useEffect(() => {
     if (!draftPromptRequest || mode !== "input") return;
 
-    const container = attachmentsApi.containerRef.current;
-    const textarea =
-      container?.querySelector<HTMLTextAreaElement>(
-        "[data-testid=copilot-chat-textarea]",
-      ) ?? container?.querySelector<HTMLTextAreaElement>("textarea");
-    if (!textarea) return;
+    let cancelled = false;
+    let frameId = 0;
+    let remainingAttempts = 20;
+    const applyDraft = () => {
+      if (cancelled) return;
+      const container = attachmentsApi.containerRef.current;
+      const textarea =
+        container?.querySelector<HTMLTextAreaElement>(
+          "[data-testid=copilot-chat-textarea]",
+        ) ?? container?.querySelector<HTMLTextAreaElement>("textarea");
+      if (!textarea) {
+        remainingAttempts -= 1;
+        if (remainingAttempts > 0) frameId = requestAnimationFrame(applyDraft);
+        return;
+      }
 
-    const valueSetter = Object.getOwnPropertyDescriptor(
-      window.HTMLTextAreaElement.prototype,
-      "value",
-    )?.set;
-    if (valueSetter) {
-      valueSetter.call(textarea, draftPromptRequest.text);
-    } else {
-      textarea.value = draftPromptRequest.text;
-    }
-    textarea.dispatchEvent(new Event("input", { bubbles: true }));
-    textarea.focus({ preventScroll: true });
-    textarea.setSelectionRange(
-      draftPromptRequest.text.length,
-      draftPromptRequest.text.length,
-    );
-    requestAnimationFrame(scheduleChatTextareaResize);
-    onDraftPromptConsumed(draftPromptRequest.id);
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      if (valueSetter) {
+        valueSetter.call(textarea, draftPromptRequest.text);
+      } else {
+        textarea.value = draftPromptRequest.text;
+      }
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      textarea.focus({ preventScroll: true });
+      textarea.setSelectionRange(
+        draftPromptRequest.text.length,
+        draftPromptRequest.text.length,
+      );
+      requestAnimationFrame(scheduleChatTextareaResize);
+      onDraftPromptConsumed(draftPromptRequest.id);
+    };
+    frameId = requestAnimationFrame(applyDraft);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frameId);
+    };
   }, [
     attachmentsApi.containerRef,
     draftPromptRequest,
