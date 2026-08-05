@@ -12,6 +12,13 @@ type ViewMode = "overlay" | "selected" | "average";
 
 const ALL_SCOPES = "all-scopes";
 
+export const NGEE_ANN_OPEN_INCIDENT_EVENT = "energyiq:ngee-ann-open-incident";
+
+export type NgeeAnnOpenIncidentEventDetail = {
+  incidentId: string;
+  trigger: HTMLElement;
+};
+
 export function NgeeAnnDailyAnomalies({
   view,
   comparison = "overlay",
@@ -29,7 +36,7 @@ export function NgeeAnnDailyAnomalies({
   const [viewMode, setViewMode] = useState<ViewMode>(comparison);
   const [selectedScopeId, setSelectedScopeId] = useState(ALL_SCOPES);
   const [selectedCategory, setSelectedCategory] = useState<"all" | "load" | "light">(category);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const triggerRef = useRef<HTMLElement | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
 
@@ -46,6 +53,22 @@ export function NgeeAnnDailyAnomalies({
     setViewMode(comparison);
     setSelectedCategory(category);
   }, [category, comparison, openIncidentId]);
+
+  useEffect(() => {
+    const openRequestedIncident = (event: Event) => {
+      if (!(event instanceof CustomEvent)) return;
+      const detail = event.detail as Partial<NgeeAnnOpenIncidentEventDetail> | null;
+      if (!detail
+        || typeof detail.incidentId !== "string"
+        || !(detail.trigger instanceof HTMLElement)
+        || !view.incidents.some((candidate) => candidate.incidentId === detail.incidentId)) return;
+      event.preventDefault();
+      triggerRef.current = detail.trigger;
+      setOpenIncidentId(detail.incidentId);
+    };
+    document.addEventListener(NGEE_ANN_OPEN_INCIDENT_EVENT, openRequestedIncident);
+    return () => document.removeEventListener(NGEE_ANN_OPEN_INCIDENT_EVENT, openRequestedIncident);
+  }, [view.incidents]);
 
   useEffect(() => {
     if (!openIncidentId) return;

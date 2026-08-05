@@ -1,5 +1,11 @@
+"use client";
+
 import React from "react";
 
+import {
+  NGEE_ANN_OPEN_INCIDENT_EVENT,
+  type NgeeAnnOpenIncidentEventDetail,
+} from "./ngee-ann-daily-anomalies";
 import type { NgeeAnnDecisionPrioritiesViewModel } from "./ngee-ann-overview-view-model";
 import { anomalyIncidentDomId } from "./ngee-ann-overview-links";
 
@@ -81,6 +87,19 @@ export function NgeeAnnDecisionPriorities({
               ) : null}
               <a
                 href={`#${anomalyIncidentDomId(item.targetIncidentId)}`}
+                onClick={(event) => {
+                  const handled = !document.dispatchEvent(new CustomEvent<NgeeAnnOpenIncidentEventDetail>(
+                    NGEE_ANN_OPEN_INCIDENT_EVENT,
+                    {
+                      cancelable: true,
+                      detail: {
+                        incidentId: item.targetIncidentId,
+                        trigger: event.currentTarget,
+                      },
+                    },
+                  ));
+                  if (handled) event.preventDefault();
+                }}
                 className="mt-4 inline-flex min-h-9 items-center justify-center rounded-lg border border-primary/25 px-3 text-xs font-semibold text-primary transition-colors hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
               >
                 View evidence

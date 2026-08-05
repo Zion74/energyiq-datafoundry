@@ -572,6 +572,9 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
   const anomalyTriggers = () => Array.from(container.querySelectorAll("button"))
     .filter((candidate) => candidate.textContent === "Open incident detail") as HTMLButtonElement[];
 
+  const decisionEvidenceTrigger = () => Array.from(container.querySelectorAll<HTMLAnchorElement>("a"))
+    .find((candidate) => candidate.textContent === "View evidence") as HTMLAnchorElement;
+
   const anomalyDialog = () => document.querySelector<HTMLDivElement>(
     '[role="dialog"][aria-labelledby="ngee-ann-anomaly-dialog-title"]',
   );
@@ -839,6 +842,24 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
     });
     expect(document.activeElement).toBe(first);
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    });
+    expect(anomalyDialog()).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("opens the primary incident dialog directly from its Decision theme and restores that link", async () => {
+    await renderGolden();
+    const trigger = decisionEvidenceTrigger();
+    expect(trigger.getAttribute("href")).toBe("#incident-project-2026-06-13");
+
+    await act(async () => trigger.click());
+    const dialog = anomalyDialog()!;
+    expect(dialog).toBeTruthy();
+    expect(dialog.textContent).toContain("Project / Sat 13 Jun");
+    expect((document.activeElement as HTMLElement)?.textContent).toBe("Close");
+
     await act(async () => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     });
