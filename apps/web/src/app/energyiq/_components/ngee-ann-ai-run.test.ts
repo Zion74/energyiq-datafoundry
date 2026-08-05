@@ -72,6 +72,13 @@ describe("Ngee Ann AI Run", () => {
       "never invent a numeric threshold, target, tolerance, percentage, duration, or time window",
     );
     expect(JSON.stringify(body)).toContain(
+      "only numeric values directly present in the successful SQL result or authoritative deterministic context",
+    );
+    expect(JSON.stringify(body)).toContain(
+      "a single-step sum, difference, ratio, or percentage",
+    );
+    expect(JSON.stringify(body)).toContain("Never report a multi-step derived number");
+    expect(JSON.stringify(body)).toContain(
       "Verification may name the metric or dimension to monitor, but it must not introduce a new number.",
     );
   });
