@@ -13,7 +13,10 @@ import {
   createEnergyQueryContextItem,
 } from "./energy-context-item.js";
 import { resolveEnergyQueryContext } from "./energy-query-context.js";
-import { resolvePublishedProjectRelease } from "./project-analysis-resolver.js";
+import {
+  resolvePublishedEnergyRunContext,
+  resolvePublishedProjectRelease,
+} from "./project-analysis-resolver.js";
 
 const baseContext = {
   userId: "user-1",
@@ -107,6 +110,83 @@ describe("createEnergyQueryContextItem", () => {
           projectReleaseId: projectRelease?.id,
           sourceOwner: "server",
         },
+      });
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
+  it("fails closed on Project Release drift and binds the server Context Package to the accepted Release", () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-release-bound-context-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const context = resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user: metadata.users.getById({ user_id: "dev-user" }),
+        workspaceId: NGEE_ANN_WORKSPACE_ID,
+        request: {
+          projectId: "ngee-ann-polytechnic",
+          scopeId: "project",
+          resource: "electricity",
+          period: "Custom",
+          from: "2026-06-10",
+          to: "2026-06-16",
+        },
+      });
+      const project = metadata.energyIq.getProject(context.projectId);
+      const publishedRevision = metadata.energyIq.templates.publishProjectRevisionWithinTransaction({
+        project_id: context.projectId,
+        tier_definition_ids: metadata.energyIq.listTierDefinitions(context.projectId)
+          .map((tier) => tier.id),
+        hierarchy_revision_id: context.hierarchyRevisionId,
+        meter_mapping_revision_id: context.meterMappingRevisionId,
+        published_by: context.userId,
+        published_at: "2026-08-05T00:00:00.000Z",
+      });
+      const driftedContext = {
+        ...context,
+        meterFormulaRevisionId: `${project.meter_formula_revision_id}-draft-drift`,
+        metricVersion: `${project.metric_version}-draft-drift`,
+        businessCalendarVersion: `${project.business_calendar_version}-draft-drift`,
+        tariffScheduleVersion: `${project.tariff_schedule_version}-draft-drift`,
+      };
+
+      expect(() => resolvePublishedEnergyRunContext({
+        metadataStore: metadata,
+        context: driftedContext,
+        expectedProjectReleaseId: "stale-overview-release",
+      })).toThrow("ENERGYIQ_PROJECT_RELEASE_MISMATCH");
+
+      const resolved = resolvePublishedEnergyRunContext({
+        metadataStore: metadata,
+        context: driftedContext,
+        expectedProjectReleaseId: publishedRevision.revision_id,
+      });
+      expect(resolved.projectRelease?.id).toBe(publishedRevision.revision_id);
+      expect(resolved.context).toMatchObject({
+        hierarchyRevisionId: publishedRevision.hierarchy_revision_id,
+        meterMappingRevisionId: publishedRevision.meter_mapping_revision_id,
+        meterFormulaRevisionId: publishedRevision.meter_formula_revision_id,
+        metricVersion: `metric-revisions:${[...publishedRevision.selected_metric_revision_ids]
+          .sort((left, right) => left.localeCompare(right))
+          .join(",") || "none"}`,
+        businessCalendarVersion: publishedRevision.business_calendar_version,
+        tariffScheduleVersion: publishedRevision.tariff_schedule_version,
+      });
+
+      const items = createEnergyAuthoritativeContextItems({
+        context: resolved.context,
+        projectRelease: resolved.projectRelease,
+        sessionId: "session-release-bound",
+        userId: resolved.context.userId,
+      });
+      expect(String(items[0]?.content)).toContain(
+        `hierarchy_revision_id=${publishedRevision.hierarchy_revision_id}`,
+      );
+      expect(items[1]?.metadata).toMatchObject({
+        projectReleaseId: publishedRevision.revision_id,
       });
     } finally {
       metadata.close();

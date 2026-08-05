@@ -44,6 +44,7 @@ export type EnergyQueryContextRequest = {
   from?: string;
   to?: string;
   expectedDataSnapshotId?: string;
+  expectedProjectReleaseId?: string;
 };
 
 export type EnergyQueryContext = {

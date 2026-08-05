@@ -61,6 +61,9 @@ describe("createProjectAnalysisPackContextItem", () => {
     expect(content).toContain("supports, challenges, or is independent");
     expect(content).toContain("1-day short-term movement");
     expect(content).toContain("Daily averages require complete days");
+    expect(content).toContain("official_aggregation_eligible");
+    expect(content).toContain("official totals only from eligible rows");
+    expect(content).toContain("Non-eligible breakdown rows may explain the official total but must never be added to it");
     expect(content).toContain("what happened");
     expect(content).toContain("AI proposals");
     expect(content).not.toContain("SQL");

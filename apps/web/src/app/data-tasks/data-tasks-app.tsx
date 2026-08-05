@@ -973,15 +973,24 @@ export type DataTasksExternalContext = {
   to?: string;
 };
 
+export function createInitialDraftPromptRequest(
+  initialDraftPrompt?: string,
+): { id: number; text: string } | null {
+  const text = initialDraftPrompt?.trim();
+  return text ? { id: 1, text } : null;
+}
+
 export default function DataTasksApp({
   viewport = "standalone",
   accessMode = "admin",
   externalContext,
+  initialDraftPrompt,
   inheritIdentity = false,
 }: {
   viewport?: "standalone" | "embedded";
   accessMode?: "admin" | "user";
   externalContext?: DataTasksExternalContext;
+  initialDraftPrompt?: string;
   inheritIdentity?: boolean;
 }) {
   const shell = (
@@ -989,6 +998,7 @@ export default function DataTasksApp({
       viewport={viewport}
       accessMode={accessMode}
       externalContext={externalContext}
+      initialDraftPrompt={initialDraftPrompt}
     />
   );
 
@@ -1003,10 +1013,12 @@ function DataTasksCopilotShell({
   viewport,
   accessMode,
   externalContext,
+  initialDraftPrompt,
 }: {
   viewport: "standalone" | "embedded";
   accessMode: "admin" | "user";
   externalContext?: DataTasksExternalContext;
+  initialDraftPrompt?: string;
 }) {
   const [copilotProperties, setCopilotProperties] = useState<Record<string, unknown>>(
     {},
@@ -1061,6 +1073,7 @@ function DataTasksCopilotShell({
             viewport={viewport}
             accessMode={accessMode}
             externalContext={externalContext}
+            initialDraftPrompt={initialDraftPrompt}
             onCopilotPropertiesChange={setCopilotProperties}
           />
         </LiveRunProvider>
@@ -1074,12 +1087,14 @@ function DataTaskWorkspace({
   viewport,
   accessMode,
   externalContext,
+  initialDraftPrompt,
   onCopilotPropertiesChange,
 }: {
   identityScopeKey: string;
   viewport: "standalone" | "embedded";
   accessMode: "admin" | "user";
   externalContext?: DataTasksExternalContext;
+  initialDraftPrompt?: string;
   onCopilotPropertiesChange: (properties: Record<string, unknown>) => void;
 }) {
   const t = useT();
@@ -1147,7 +1162,7 @@ function DataTaskWorkspace({
   const [draftPromptRequest, setDraftPromptRequest] = useState<{
     id: number;
     text: string;
-  } | null>(null);
+  } | null>(() => createInitialDraftPromptRequest(initialDraftPrompt));
   const consumeDraftPromptRequest = useCallback((id: number) => {
     setDraftPromptRequest((current) => (current?.id === id ? null : current));
   }, []);

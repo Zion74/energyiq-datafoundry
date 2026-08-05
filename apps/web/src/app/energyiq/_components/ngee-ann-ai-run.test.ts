@@ -10,6 +10,7 @@ import {
   type NgeeAnnAiRunInput,
 } from "./ngee-ann-ai-run";
 import { ngeeAnnGoldenSnapshot } from "./ngee-ann-overview.test-fixture";
+import { buildNgeeAnnOverviewViewModel } from "./ngee-ann-overview-view-model";
 
 describe("Ngee Ann AI Run", () => {
   afterEach(() => {
@@ -24,6 +25,18 @@ describe("Ngee Ann AI Run", () => {
 
     expect(input.identityKey).toContain(input.snapshotId);
     expect(input.identityKey).toContain(input.dataCutoff);
+    for (const identityPart of [
+      input.projectReleaseId,
+      "ngee-ann-overview",
+      "hierarchy-v6",
+      "mapping-v1",
+      "formula-v1",
+      "metric-v1",
+      "calendar-v1",
+      "tariff-v1",
+    ]) {
+      expect(input.identityKey).toContain(identityPart);
+    }
     expect(body).toMatchObject({
       method: "agent/run",
       params: { agentId: "dataFoundry" },
@@ -40,13 +53,16 @@ describe("Ngee Ann AI Run", () => {
             from: input.analysisFrom,
             to: input.analysisTo,
             expectedDataSnapshotId: input.snapshotId,
+            expectedProjectReleaseId: input.projectReleaseId,
           },
         },
       },
     });
-    expect(JSON.stringify(body)).toContain("at most two successful high-information read-only SQL calls");
-    expect(JSON.stringify(body)).toContain("the current validator rejects CTE and EXTRACT syntax");
-    expect(JSON.stringify(body)).toContain("Do not execute a third SQL call");
+    expect(JSON.stringify(body)).toContain("at most two total run_sql_readonly attempts");
+    expect(JSON.stringify(body)).toContain("rejected or failed calls count toward this limit");
+    expect(JSON.stringify(body)).toContain("Do not use WITH/CTEs or EXTRACT syntax");
+    expect(JSON.stringify(body)).toContain("include every runtime assertion_id");
+    expect(JSON.stringify(body)).toContain("retry only once");
   });
 
   it("accepts three distinct Findings with collective horizon coverage and Finding-specific SQL Evidence", () => {
@@ -68,6 +84,11 @@ describe("Ngee Ann AI Run", () => {
       evidence: {
         snapshotId: input.snapshotId,
         dataCutoff: input.dataCutoff,
+        dataQuality: {
+          status: "complete",
+          coveragePct: 100,
+          qualityEventCount: 0,
+        },
         tools: [{ toolCallId: "sql-1" }],
       },
     });
@@ -130,11 +151,11 @@ describe("Ngee Ann AI Run", () => {
 
     expect(result).toEqual({
       status: "unavailable",
-      reason: "The AI Analyst did not complete schema and read-only SQL Evidence.",
+      reason: "The AI Analyst exceeded the two-attempt SQL limit.",
     });
   });
 
-  it("numbers Evidence by successful SQL calls and ignores rejected attempts", () => {
+  it("counts a rejected SQL toward the limit while numbering Evidence only by the successful SQL", () => {
     const input = requiredInput();
     const rejectedAttempt = [
       { type: "TOOL_CALL_START", toolCallId: "sql-rejected", toolCallName: "run_sql_readonly", args: { sql: "WITH invalid AS (...)" } },
@@ -147,9 +168,10 @@ describe("Ngee Ann AI Run", () => {
     ];
     const result = resolveNgeeAnnAiEventStream({
       eventStream: successfulEventStream(
-        generatedFindings(),
+        generatedFindings().map((finding) => ({ ...finding, evidenceSqlIndexes: [1] })),
         [],
         rejectedAttempt,
+        sqlEvents("sql-1", "SELECT SUM(usage_kwh) AS usage_kwh FROM energy_intervals", 150),
       ),
       input,
       providerProfileId: "profile-1",
@@ -160,6 +182,60 @@ describe("Ngee Ann AI Run", () => {
     if (result.status !== "available") return;
     expect(result.findings.flatMap((finding) => finding.evidence.tools))
       .not.toContainEqual(expect.objectContaining({ toolCallId: "sql-rejected" }));
+  });
+
+  it("fails closed when one rejected SQL is followed by two successful SQL calls", () => {
+    const input = requiredInput();
+    const rejectedAttempt = [
+      { type: "TOOL_CALL_START", toolCallId: "sql-rejected", toolCallName: "run_sql_readonly", args: { sql: "WITH invalid AS (...)" } },
+      {
+        type: "TOOL_CALL_RESULT",
+        toolCallId: "sql-rejected",
+        toolCallName: "run_sql_readonly",
+        result: { error: "QUERY_VALIDATION_FAILED" },
+      },
+    ];
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(generatedFindings(), [], rejectedAttempt),
+      input,
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result).toEqual({
+      status: "unavailable",
+      reason: "The AI Analyst exceeded the two-attempt SQL limit.",
+    });
+  });
+
+  it("fails closed when inspect_schema returns an error payload", () => {
+    const input = requiredInput();
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(
+        generatedFindings(),
+        [],
+        [],
+        undefined,
+        { ok: false, error: { code: "SCHEMA_UNAVAILABLE" } },
+      ),
+      input,
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result).toEqual({
+      status: "unavailable",
+      reason: "The AI Analyst did not complete schema and read-only SQL Evidence.",
+    });
+  });
+
+  it("does not start from a Renderer-validated unavailable decision priority ViewModel", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    snapshot.decisionPriorities!.items[0]!.rank = 2;
+    const decisionPriorities = buildNgeeAnnOverviewViewModel(snapshot).decisionPriorities;
+
+    expect(decisionPriorities.status).toBe("unavailable");
+    expect(buildNgeeAnnAiRunInput(snapshot, decisionPriorities)).toBeNull();
   });
 
   it("starts only one actual request for repeated callers with the same identity", async () => {
@@ -178,10 +254,33 @@ describe("Ngee Ann AI Run", () => {
     await expect(first).resolves.toMatchObject({ status: "available" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("evicts unavailable results so a retry can start a new request", async () => {
+    const input = requiredInput();
+    vi.spyOn(configApi, "getRunDefaults").mockResolvedValue({ activeLlmProfileId: "profile-1" } as never);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("", { status: 503 }))
+      .mockResolvedValueOnce(new Response(successfulEventStream(), {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getOrStartNgeeAnnAiRun(input)).resolves.toEqual({
+      status: "unavailable",
+      reason: "AI Analyst request failed (503).",
+    });
+    await expect(getOrStartNgeeAnnAiRun(input)).resolves.toMatchObject({ status: "available" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });
 
 function requiredInput(): NgeeAnnAiRunInput {
-  const input = buildNgeeAnnAiRunInput(ngeeAnnGoldenSnapshot());
+  const snapshot = ngeeAnnGoldenSnapshot();
+  const input = buildNgeeAnnAiRunInput(
+    snapshot,
+    buildNgeeAnnOverviewViewModel(snapshot).decisionPriorities,
+  );
   if (!input) throw new Error("Expected the Golden Snapshot to support an AI Run");
   return input;
 }
@@ -190,6 +289,8 @@ function successfulEventStream(
   findings = generatedFindings(),
   extraSqlEvents: Array<Record<string, unknown>> = [],
   beforeSqlEvents: Array<Record<string, unknown>> = [],
+  successfulSqlEvents: Array<Record<string, unknown>> | undefined = undefined,
+  schemaResult: unknown = { tables: [{ name: "energy_intervals", columns: [{ name: "usage_kwh", type: "DOUBLE" }] }] },
 ): string {
   const events: Array<Record<string, unknown>> = [
     { type: "TOOL_CALL_START", toolCallId: "schema-1", toolCallName: "inspect_schema" },
@@ -197,11 +298,13 @@ function successfulEventStream(
       type: "TOOL_CALL_RESULT",
       toolCallId: "schema-1",
       toolCallName: "inspect_schema",
-      result: { tables: [{ name: "energy_intervals", columns: [{ name: "usage_kwh", type: "DOUBLE" }] }] },
+      result: schemaResult,
     },
     ...beforeSqlEvents,
-    ...sqlEvents("sql-1", "SELECT SUM(usage_kwh) AS usage_kwh FROM energy_intervals", 150),
-    ...sqlEvents("sql-2", "SELECT AVG(usage_kwh) AS average_kwh FROM energy_intervals", 21.4),
+    ...(successfulSqlEvents ?? [
+      ...sqlEvents("sql-1", "SELECT SUM(usage_kwh) AS usage_kwh FROM energy_intervals", 150),
+      ...sqlEvents("sql-2", "SELECT AVG(usage_kwh) AS average_kwh FROM energy_intervals", 21.4),
+    ]),
     ...extraSqlEvents,
     { type: "TEXT_MESSAGE_CONTENT", delta: JSON.stringify({ findings }) },
     { type: "RUN_FINISHED" },

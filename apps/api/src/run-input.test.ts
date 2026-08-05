@@ -64,7 +64,7 @@ describe("trusted Energy text run input", () => {
     });
   });
 
-  it("preserves an optional expected Snapshot pin for server-authoritative comparison", () => {
+  it("preserves optional expected Snapshot and Project Release pins for server-authoritative comparison", () => {
     const input = createInput({});
     input.forwardedProps = {
       externalContext: {
@@ -74,6 +74,7 @@ describe("trusted Energy text run input", () => {
         resource: "electricity",
         period: "Last 7 days",
         expectedDataSnapshotId: "snapshot-from-overview",
+        expectedProjectReleaseId: "release-from-overview",
       },
     };
 
@@ -83,6 +84,7 @@ describe("trusted Energy text run input", () => {
       resource: "electricity",
       period: "Last 7 days",
       expectedDataSnapshotId: "snapshot-from-overview",
+      expectedProjectReleaseId: "release-from-overview",
     });
   });
 

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NgeeAnnAiSlot, buildAskAiDeeperHref } from "./ngee-ann-ai-slot";
 import type { NgeeAnnAiFinding, NgeeAnnAiRunResult } from "./ngee-ann-ai-run";
 import { ngeeAnnGoldenSnapshot } from "./ngee-ann-overview.test-fixture";
+import { buildNgeeAnnOverviewViewModel } from "./ngee-ann-overview-view-model";
 
 describe("NgeeAnnAiSlot", () => {
   let container: HTMLDivElement;
@@ -28,6 +29,7 @@ describe("NgeeAnnAiSlot", () => {
   });
 
   it("shows the deterministic-safe analyzing state immediately, then three Findings", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
     let finishRun!: (result: NgeeAnnAiRunResult) => void;
     const startRun = vi.fn(() => new Promise<NgeeAnnAiRunResult>((resolve) => {
       finishRun = resolve;
@@ -35,7 +37,8 @@ describe("NgeeAnnAiSlot", () => {
     await act(async () => {
       root.render(
         <NgeeAnnAiSlot
-          snapshot={ngeeAnnGoldenSnapshot()}
+          snapshot={snapshot}
+          decisionPriorities={decisionPrioritiesFor(snapshot)}
           aiAnalystHref="/energyiq/ai?projectId=ngee-ann-polytechnic&period=Custom"
           startRun={startRun}
         />,
@@ -56,9 +59,12 @@ describe("NgeeAnnAiSlot", () => {
   });
 
   it("opens Finding-specific SQL Evidence in one click", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
     const startRun = vi.fn().mockResolvedValue(availableResult());
     await act(async () => {
-      root.render(<NgeeAnnAiSlot snapshot={ngeeAnnGoldenSnapshot()} startRun={startRun} />);
+      root.render(
+        <NgeeAnnAiSlot snapshot={snapshot} decisionPriorities={decisionPrioritiesFor(snapshot)} startRun={startRun} />,
+      );
     });
     const button = Array.from(container.querySelectorAll("button"))
       .find((candidate) => candidate.textContent?.includes("View evidence"));
@@ -69,6 +75,11 @@ describe("NgeeAnnAiSlot", () => {
     const dialog = document.body.querySelector('[role="dialog"]');
     expect(dialog?.textContent).toContain("Finding Evidence");
     expect(dialog?.textContent).toContain("snapshot-1");
+    expect(dialog?.textContent).toContain("Data quality");
+    expect(dialog?.textContent).toContain("100%");
+    expect(dialog?.textContent).toContain("2,688 / 2,688");
+    expect(dialog?.textContent).toContain("Quality events0");
+    expect(dialog?.textContent).toContain("No data-quality limitation is declared for this Snapshot.");
     expect(dialog?.textContent).toContain("SELECT 150 AS usage_kwh");
     expect(dialog?.textContent).not.toContain("SELECT 21.4 AS average_kwh");
   });
@@ -77,41 +88,93 @@ describe("NgeeAnnAiSlot", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     const startRun = vi.fn().mockResolvedValue(availableResult());
     await act(async () => {
-      root.render(<NgeeAnnAiSlot snapshot={snapshot} aiAnalystHref="/energyiq/ai?period=Custom" startRun={startRun} />);
+      root.render(
+        <NgeeAnnAiSlot snapshot={snapshot} decisionPriorities={decisionPrioritiesFor(snapshot)} aiAnalystHref="/energyiq/ai?period=Custom" startRun={startRun} />,
+      );
     });
     await act(async () => {
-      root.render(<NgeeAnnAiSlot snapshot={snapshot} aiAnalystHref="/energyiq/ai?period=Yesterday" startRun={startRun} />);
+      root.render(
+        <NgeeAnnAiSlot snapshot={snapshot} decisionPriorities={decisionPrioritiesFor(snapshot)} aiAnalystHref="/energyiq/ai?period=Yesterday" startRun={startRun} />,
+      );
     });
 
     expect(startRun).toHaveBeenCalledTimes(1);
   });
 
-  it("starts a new Run when the authoritative Snapshot identity changes", async () => {
+  it("starts a new Run when an authoritative revision in the Run identity changes", async () => {
     const firstSnapshot = ngeeAnnGoldenSnapshot();
     const nextSnapshot = ngeeAnnGoldenSnapshot();
-    nextSnapshot.dataSnapshot.id = "snapshot-next";
-    nextSnapshot.context.dataSnapshotId = "snapshot-next";
+    nextSnapshot.context.tariffScheduleVersion = "tariff-next";
+    nextSnapshot.analysis.context.tariffScheduleVersion = "tariff-next";
+    nextSnapshot.projectRelease.tariffScheduleVersion = "tariff-next";
     const startRun = vi.fn().mockResolvedValue(availableResult());
     await act(async () => {
-      root.render(<NgeeAnnAiSlot snapshot={firstSnapshot} startRun={startRun} />);
+      root.render(
+        <NgeeAnnAiSlot snapshot={firstSnapshot} decisionPriorities={decisionPrioritiesFor(firstSnapshot)} startRun={startRun} />,
+      );
     });
     await act(async () => {
-      root.render(<NgeeAnnAiSlot snapshot={nextSnapshot} startRun={startRun} />);
+      root.render(
+        <NgeeAnnAiSlot snapshot={nextSnapshot} decisionPriorities={decisionPrioritiesFor(nextSnapshot)} startRun={startRun} />,
+      );
     });
 
     expect(startRun).toHaveBeenCalledTimes(2);
-    expect(startRun.mock.calls[1]![0].snapshotId).toBe("snapshot-next");
+    expect(startRun.mock.calls[1]![0].identityKey).toContain("tariff-next");
   });
 
   it("keeps an AI failure isolated from the deterministic Overview", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
     const startRun = vi.fn().mockResolvedValue({ status: "unavailable", reason: "Model timeout" });
     await act(async () => {
-      root.render(<NgeeAnnAiSlot snapshot={ngeeAnnGoldenSnapshot()} startRun={startRun} />);
+      root.render(
+        <NgeeAnnAiSlot snapshot={snapshot} decisionPriorities={decisionPrioritiesFor(snapshot)} startRun={startRun} />,
+      );
     });
 
     expect(container.textContent).toContain("AI analysis unavailable");
     expect(container.textContent).toContain("Model timeout");
     expect(container.textContent).toContain("The deterministic Overview remains available and unchanged");
+    expect(container.textContent).toContain("Retry AI analysis");
+  });
+
+  it("retries an unavailable Run without affecting the deterministic surface", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const startRun = vi.fn()
+      .mockResolvedValueOnce({ status: "unavailable", reason: "Temporary model timeout" })
+      .mockResolvedValueOnce(availableResult());
+    await act(async () => {
+      root.render(
+        <NgeeAnnAiSlot snapshot={snapshot} decisionPriorities={decisionPrioritiesFor(snapshot)} startRun={startRun} />,
+      );
+    });
+    const retry = Array.from(container.querySelectorAll("button"))
+      .find((candidate) => candidate.textContent?.includes("Retry AI analysis"));
+    if (!retry) throw new Error("Expected a Retry AI analysis button");
+
+    await act(async () => retry.click());
+
+    expect(startRun).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain("Supports theme");
+    expect(container.textContent).not.toContain("Temporary model timeout");
+  });
+
+  it("does not start when the Renderer-validated decision priorities are unavailable", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    snapshot.decisionPriorities!.items[0]!.rank = 2;
+    const decisionPriorities = decisionPrioritiesFor(snapshot);
+    const startRun = vi.fn().mockResolvedValue(availableResult());
+
+    await act(async () => {
+      root.render(
+        <NgeeAnnAiSlot snapshot={snapshot} decisionPriorities={decisionPriorities} startRun={startRun} />,
+      );
+    });
+
+    expect(decisionPriorities.status).toBe("unavailable");
+    expect(startRun).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("AI analysis unavailable");
+    expect(container.textContent).not.toContain("Retry AI analysis");
   });
 
   it("passes only Project, Finding and Evidence into Ask AI deeper", () => {
@@ -162,6 +225,14 @@ function finding(
     evidence: {
       snapshotId: "snapshot-1",
       dataCutoff: "2026-06-16",
+      dataQuality: {
+        status: "complete",
+        coveragePct: 100,
+        validIntervalCount: 2_688,
+        expectedMeterIntervalCount: 2_688,
+        qualityEventCount: 0,
+        limitation: "No data-quality limitation is declared for this Snapshot.",
+      },
       tools: [{
         toolCallId,
         toolName: "run_sql_readonly",
@@ -173,4 +244,8 @@ function finding(
       }],
     },
   };
+}
+
+function decisionPrioritiesFor(snapshot: ReturnType<typeof ngeeAnnGoldenSnapshot>) {
+  return buildNgeeAnnOverviewViewModel(snapshot).decisionPriorities;
 }

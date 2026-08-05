@@ -1,7 +1,8 @@
 import type { EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
 import { configApi, getAgentRuntimeUrl } from "../../../lib/config-api";
 import { configApiIdentityHeaders, isPasswordAuthMode } from "../../../lib/config-api/client";
-import { parseSqlToolResult, sqlFromToolPayload } from "../../data-tasks/tool-result-normalize";
+import { parseSchemaToolResult, parseSqlToolResult, sqlFromToolPayload } from "../../data-tasks/tool-result-normalize";
+import type { NgeeAnnDecisionPrioritiesViewModel } from "./ngee-ann-overview-view-model";
 
 export type NgeeAnnAiHorizon = "1d" | "7d" | "28d";
 export type NgeeAnnAiWhyKind = "Evidence" | "Hypothesis" | "Missing Evidence";
@@ -30,8 +31,18 @@ export type NgeeAnnAiFinding = {
   evidence: {
     snapshotId: string;
     dataCutoff: string;
+    dataQuality: NgeeAnnAiDataQuality;
     tools: NgeeAnnAiToolEvidence[];
   };
+};
+
+export type NgeeAnnAiDataQuality = {
+  status: "complete" | "partial" | "unavailable";
+  coveragePct: number;
+  validIntervalCount: number;
+  expectedMeterIntervalCount: number;
+  qualityEventCount: number;
+  limitation: string;
 };
 
 export type NgeeAnnAiRunResult = {
@@ -62,10 +73,12 @@ export type NgeeAnnAiRunInput = {
   resource: "electricity";
   timezone: string;
   snapshotId: string;
+  projectReleaseId: string;
   dataCutoff: string;
   analysisFrom: string;
   analysisTo: string;
   deterministicProjection: unknown;
+  dataQuality: NgeeAnnAiDataQuality;
   horizons: [HorizonEvidence, HorizonEvidence, HorizonEvidence];
 };
 
@@ -89,10 +102,11 @@ export function resetNgeeAnnAiRunsForTests(): void {
 
 export function buildNgeeAnnAiRunInput(
   snapshot: EnergyProjectAnalysisSnapshotDto,
+  decisionPriorities: NgeeAnnDecisionPrioritiesViewModel,
 ): NgeeAnnAiRunInput | null {
-  if (snapshot.context.resource !== "electricity") return null;
+  if (snapshot.context.resource !== "electricity" || decisionPriorities.status === "unavailable") return null;
   const item = snapshot.decisionPriorities?.items[0];
-  if (!item) return null;
+  if (!item || !decisionPriorities.items[0]) return null;
   const horizonMap = new Map(item.horizons.map((horizon) => [horizon.horizon, horizon]));
   const latest = horizonMap.get("latest_complete_day");
   const rolling7 = horizonMap.get("rolling_7d");
@@ -142,6 +156,15 @@ export function buildNgeeAnnAiRunInput(
     snapshot.context.resource,
     snapshot.dataSnapshot.id,
     dataCutoff,
+    snapshot.projectRelease.id,
+    snapshot.renderer.key,
+    snapshot.renderer.version,
+    snapshot.context.hierarchyRevisionId,
+    snapshot.context.meterMappingRevisionId,
+    snapshot.context.meterFormulaRevisionId,
+    snapshot.context.metricVersion,
+    snapshot.context.businessCalendarVersion,
+    snapshot.context.tariffScheduleVersion,
   ].join(":");
   return {
     identityKey,
@@ -152,10 +175,12 @@ export function buildNgeeAnnAiRunInput(
     resource: "electricity",
     timezone: snapshot.context.timezone,
     snapshotId: snapshot.dataSnapshot.id,
+    projectReleaseId: snapshot.projectRelease.id,
     dataCutoff,
     analysisFrom: shiftLocalDate(dataCutoff, -55),
     analysisTo: dataCutoff,
-    deterministicProjection: snapshot.decisionPriorities,
+    deterministicProjection: decisionPriorities,
+    dataQuality: buildAiDataQuality(snapshot),
     horizons,
   };
 }
@@ -168,6 +193,11 @@ export function getOrStartNgeeAnnAiRun(input: NgeeAnnAiRunInput): Promise<NgeeAn
     reason: readableError(error),
   }));
   currentRuns.set(input.identityKey, current);
+  void current.then((result) => {
+    if (result.status === "unavailable" && currentRuns.get(input.identityKey) === current) {
+      currentRuns.delete(input.identityKey);
+    }
+  });
   return current;
 }
 
@@ -227,6 +257,7 @@ export function buildAgentRunBody(
           from: input.analysisFrom,
           to: input.analysisTo,
           expectedDataSnapshotId: input.snapshotId,
+          expectedProjectReleaseId: input.projectReleaseId,
         },
         run_config: {
           protocol: { id: "data-analysis", version: "1" },
@@ -246,13 +277,14 @@ function buildAgentPrompt(input: NgeeAnnAiRunInput): string {
   return [
     `Act as an autonomous energy analyst for ${input.projectName}, Scope ${input.scopeName}.`,
     `The governed analysis window is ${input.analysisFrom} through ${input.analysisTo} in ${input.timezone}; data cutoff is ${input.dataCutoff}.`,
-    "Inspect the scoped schema first. Then execute at most two successful high-information read-only SQL calls against the provided DuckDB datasource. Prefer direct aggregate queries with conditional aggregation; the current validator rejects CTE and EXTRACT syntax. Number only successful SQL calls in execution order starting at 1.",
+    "Inspect the scoped schema first. Make at most two total run_sql_readonly attempts; rejected or failed calls count toward this limit. Query the inspected physical table directly with conditional aggregation. Do not use WITH/CTEs or EXTRACT syntax. Number only successful SQL calls in execution order starting at 1.",
+    "On the first SQL plan, include every runtime assertion_id listed for each requirement_id, including manual assertions. If the first SQL is rejected, simplify it and retry only once. Never make another SQL attempt after that retry.",
     "Use the official deterministic projection as context, not as a script. Independently inspect the data and return exactly three useful, semantically different Findings.",
     "Across the three Findings, collectively cover the 1d, 7d and 28d horizons. A Finding can cover more than one horizon; do not force one Finding per horizon and do not repeat the same angle or action.",
     "For every Finding state whether it supports, challenges, or is independent of the deterministic projection. Answer What, Why, How, and How to verify.",
     "whyKind must be Evidence, Hypothesis, or Missing Evidence. Do not invent a cause, owner, saving, ROI, device state, or commitment.",
     "Every numeric claim must appear in the result of a successful SQL call from this Run. Cite only the 1-based evidenceSqlIndexes that actually support that Finding. A single SQL result may support multiple Findings. Never attach every SQL call to every Finding by default.",
-    "As soon as the first or second SQL result provides enough Evidence, immediately return the required JSON. Do not execute a third SQL call and do not continue exploring after Evidence is sufficient.",
+    "As soon as the first successful SQL result provides enough Evidence, immediately return the required strict JSON. Execute the second SQL only when one specific missing Evidence field blocks a Finding. Do not continue exploring after Evidence is sufficient.",
     "Return only strict JSON with no markdown or commentary using this shape:",
     '{"findings":[{"relationship":"supports","horizons":["1d","7d"],"title":"...","what":"...","whyKind":"Evidence","why":"...","how":"...","howToVerify":"...","evidenceNote":"what the cited SQL supports or cannot prove","evidenceSqlIndexes":[1]}]}',
     "Official deterministic projection:",
@@ -294,9 +326,13 @@ export function resolveNgeeAnnAiEventStream(input: {
   if (!events.some((event) => event.type === "RUN_FINISHED")) {
     return { status: "unavailable", reason: "The AI Analyst Run did not finish." };
   }
-  const tools = collectToolEvidence(events);
+  const collected = collectToolEvidence(events);
+  if (collected.sqlAttemptCount > 2) {
+    return { status: "unavailable", reason: "The AI Analyst exceeded the two-attempt SQL limit." };
+  }
+  const tools = collected.tools;
   const sqlTools = tools.filter((tool) => tool.toolName === "run_sql_readonly");
-  if (!tools.some((tool) => tool.toolName === "inspect_schema") || sqlTools.length === 0 || sqlTools.length > 2) {
+  if (!collected.schemaValid || sqlTools.length === 0 || sqlTools.length > 2) {
     return { status: "unavailable", reason: "The AI Analyst did not complete schema and read-only SQL Evidence." };
   }
   const answer = events
@@ -333,6 +369,7 @@ export function resolveNgeeAnnAiEventStream(input: {
     evidence: {
       snapshotId: input.input.snapshotId,
       dataCutoff: input.input.dataCutoff,
+      dataQuality: input.input.dataQuality,
       tools: selectedTools[index]!.map(toPublicToolEvidence),
     },
   })) as [NgeeAnnAiFinding, NgeeAnnAiFinding, NgeeAnnAiFinding];
@@ -344,7 +381,11 @@ export function resolveNgeeAnnAiEventStream(input: {
   };
 }
 
-function collectToolEvidence(events: AgUiEvent[]): CollectedToolEvidence[] {
+function collectToolEvidence(events: AgUiEvent[]): {
+  tools: CollectedToolEvidence[];
+  schemaValid: boolean;
+  sqlAttemptCount: number;
+} {
   const accumulators = new Map<string, ToolAccumulator>();
   for (const event of events) {
     const id = stringValue(event.toolCallId) ?? stringValue(event.tool_call_id);
@@ -367,7 +408,8 @@ function collectToolEvidence(events: AgUiEvent[]): CollectedToolEvidence[] {
     }
     accumulators.set(id, existing);
   }
-  return [...accumulators.values()].flatMap<CollectedToolEvidence>((tool) => {
+  const attempts = [...accumulators.values()];
+  const tools = attempts.flatMap<CollectedToolEvidence>((tool) => {
     if (tool.name !== "inspect_schema" && tool.name !== "run_sql_readonly") return [];
     if (tool.argsText && !tool.args) {
       try {
@@ -376,7 +418,9 @@ function collectToolEvidence(events: AgUiEvent[]): CollectedToolEvidence[] {
       } catch {}
     }
     if (tool.result === undefined) return [];
+    const parsedSchema = tool.name === "inspect_schema" ? parseSchemaToolResult(tool.result) : null;
     const parsedSql = tool.name === "run_sql_readonly" ? parseSqlToolResult(tool.result) : null;
+    if (tool.name === "inspect_schema" && !parsedSchema) return [];
     if (tool.name === "run_sql_readonly" && !parsedSql) return [];
     const preview = typeof tool.result === "string" ? tool.result : JSON.stringify(tool.result);
     return [{
@@ -390,6 +434,11 @@ function collectToolEvidence(events: AgUiEvent[]): CollectedToolEvidence[] {
       numericEvidence: parsedSql ? JSON.stringify(parsedSql.rows) : "",
     }];
   });
+  return {
+    tools,
+    schemaValid: tools.some((tool) => tool.toolName === "inspect_schema"),
+    sqlAttemptCount: attempts.filter((tool) => tool.name === "run_sql_readonly").length,
+  };
 }
 
 function toPublicToolEvidence(tool: CollectedToolEvidence): NgeeAnnAiToolEvidence {
@@ -505,6 +554,23 @@ function toNumericTokens(value: string): string[] {
     const parsed = Number(token.replace(/,/gu, ""));
     return Number.isFinite(parsed) ? String(parsed) : token;
   });
+}
+
+function buildAiDataQuality(snapshot: EnergyProjectAnalysisSnapshotDto): NgeeAnnAiDataQuality {
+  const quality = snapshot.dataQuality;
+  const limitation = quality.status === "complete"
+    ? "No data-quality limitation is declared for this Snapshot."
+    : quality.status === "partial"
+      ? "Coverage or quality events make this Snapshot partial; interpret AI Findings within that limitation."
+      : "Snapshot data quality is unavailable; AI Findings cannot be treated as complete Evidence.";
+  return {
+    status: quality.status,
+    coveragePct: quality.coveragePct,
+    validIntervalCount: quality.validIntervalCount,
+    expectedMeterIntervalCount: quality.expectedMeterIntervalCount,
+    qualityEventCount: quality.qualityEventCount,
+    limitation,
+  };
 }
 
 function shiftLocalDate(localDate: string, days: number): string {

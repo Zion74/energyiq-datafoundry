@@ -137,7 +137,11 @@ export function NgeeAnnOverviewRenderer({
         aiAnalystHref={aiAnalystHref}
       />
 
-      <NgeeAnnAiSlot snapshot={state.snapshot} aiAnalystHref={aiAnalystHref} />
+      <NgeeAnnAiSlot
+        snapshot={state.snapshot}
+        decisionPriorities={view.decisionPriorities}
+        aiAnalystHref={aiAnalystHref}
+      />
 
       <OverviewSectionHeading eyebrow="At a glance" title="Key highlights" />
 

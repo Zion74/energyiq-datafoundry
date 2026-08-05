@@ -90,7 +90,7 @@ import {
 import { createEnergyAuthoritativeContextItems } from "./energy/energy-context-item.js";
 import {
   resolveProjectAnalysis,
-  resolvePublishedProjectRelease,
+  resolvePublishedEnergyRunContext,
   type PublishedProjectRelease
 } from "./energy/project-analysis-resolver.js";
 
@@ -537,9 +537,17 @@ class DataFoundryAgUiAgent extends AbstractAgent {
                 request: energyRequest
               })
             : undefined;
-          publishedProjectRelease = energyQueryContext
-            ? resolvePublishedProjectRelease(this.input.metadataStore, energyQueryContext)
-            : null;
+          if (energyQueryContext) {
+            const publishedRunContext = resolvePublishedEnergyRunContext({
+              metadataStore: this.input.metadataStore,
+              context: energyQueryContext,
+              ...(energyRequest?.expectedProjectReleaseId
+                ? { expectedProjectReleaseId: energyRequest.expectedProjectReleaseId }
+                : {})
+            });
+            energyQueryContext = publishedRunContext.context;
+            publishedProjectRelease = publishedRunContext.projectRelease;
+          }
           const publishedMeterRoute = energyQueryContext
             ? resolveEnergyPublishedMeterRoute({
                 metadataStore: this.input.metadataStore,

@@ -310,20 +310,25 @@ const inclusiveLocalDate = (localToExclusive: string): string => {
   return exclusive.toISOString().slice(0, 10);
 };
 
-const bindPublishedReleaseContext = (
+export const bindPublishedReleaseContext = (
   context: EnergyQueryContext,
   release: PublishedProjectRelease,
-): EnergyQueryContext => ({
-  ...context,
-  hierarchyRevisionId: release.hierarchyRevisionId,
-  meterMappingRevisionId: release.meterMappingRevisionId,
-  meterFormulaRevisionId: release.meterFormulaRevisionId,
-  metricVersion: `metric-revisions:${[...release.metricRevisionIds]
-    .sort((left, right) => left.localeCompare(right))
-    .join(",") || "none"}`,
-  businessCalendarVersion: release.businessCalendarVersion,
-  tariffScheduleVersion: release.tariffScheduleVersion,
-});
+): EnergyQueryContext => {
+  if (context.projectId !== release.projectId) {
+    throw new Error("ENERGYIQ_PROJECT_RELEASE_MISMATCH");
+  }
+  return {
+    ...context,
+    hierarchyRevisionId: release.hierarchyRevisionId,
+    meterMappingRevisionId: release.meterMappingRevisionId,
+    meterFormulaRevisionId: release.meterFormulaRevisionId,
+    metricVersion: `metric-revisions:${[...release.metricRevisionIds]
+      .sort((left, right) => left.localeCompare(right))
+      .join(",") || "none"}`,
+    businessCalendarVersion: release.businessCalendarVersion,
+    tariffScheduleVersion: release.tariffScheduleVersion,
+  };
+};
 
 export const resolvePublishedProjectRelease = (
   metadataStore: MetadataStore,
@@ -336,6 +341,27 @@ export const resolvePublishedProjectRelease = (
   return revision
     ? releaseFromTemplateRevision(revision, legacyProfile.rendererKey, catalog)
     : releaseFromLegacyProfile(metadataStore, context, legacyProfile, catalog);
+};
+
+export const resolvePublishedEnergyRunContext = (input: {
+  metadataStore: MetadataStore;
+  context: EnergyQueryContext;
+  expectedProjectReleaseId?: string;
+}): {
+  context: EnergyQueryContext;
+  projectRelease: PublishedProjectRelease | null;
+} => {
+  const projectRelease = resolvePublishedProjectRelease(input.metadataStore, input.context);
+  if (input.expectedProjectReleaseId
+    && input.expectedProjectReleaseId !== projectRelease?.id) {
+    throw new Error("ENERGYIQ_PROJECT_RELEASE_MISMATCH");
+  }
+  return {
+    context: projectRelease
+      ? bindPublishedReleaseContext(input.context, projectRelease)
+      : input.context,
+    projectRelease,
+  };
 };
 
 const releaseFromTemplateRevision = (

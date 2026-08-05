@@ -403,6 +403,7 @@ export const extractEnergyQueryContextRequest = (
   const from = stringFromRecord(candidate, "from");
   const to = stringFromRecord(candidate, "to");
   const expectedDataSnapshotId = stringFromRecord(candidate, "expectedDataSnapshotId");
+  const expectedProjectReleaseId = stringFromRecord(candidate, "expectedProjectReleaseId");
   return {
     projectId,
     ...(scopeId ? { scopeId } : {}),
@@ -410,7 +411,8 @@ export const extractEnergyQueryContextRequest = (
     period,
     ...(from ? { from } : {}),
     ...(to ? { to } : {}),
-    ...(expectedDataSnapshotId ? { expectedDataSnapshotId } : {})
+    ...(expectedDataSnapshotId ? { expectedDataSnapshotId } : {}),
+    ...(expectedProjectReleaseId ? { expectedProjectReleaseId } : {})
   };
 };
 

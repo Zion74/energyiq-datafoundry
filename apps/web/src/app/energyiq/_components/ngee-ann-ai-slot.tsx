@@ -13,6 +13,7 @@ import {
   type NgeeAnnAiRunInput,
   type NgeeAnnAiRunResult,
 } from "./ngee-ann-ai-run";
+import type { NgeeAnnDecisionPrioritiesViewModel } from "./ngee-ann-overview-view-model";
 
 type SettledRun = {
   identityKey: string;
@@ -21,18 +22,24 @@ type SettledRun = {
 
 export function NgeeAnnAiSlot({
   snapshot,
+  decisionPriorities,
   aiAnalystHref,
   startRun = getOrStartNgeeAnnAiRun,
 }: {
   snapshot: EnergyProjectAnalysisSnapshotDto;
+  decisionPriorities: NgeeAnnDecisionPrioritiesViewModel;
   aiAnalystHref?: string;
   startRun?: (input: NgeeAnnAiRunInput) => Promise<NgeeAnnAiRunResult>;
 }) {
-  const input = useMemo(() => buildNgeeAnnAiRunInput(snapshot), [snapshot]);
+  const input = useMemo(
+    () => buildNgeeAnnAiRunInput(snapshot, decisionPriorities),
+    [decisionPriorities, snapshot],
+  );
   const identityKey = input?.identityKey ?? null;
   const inputRef = useRef(input);
   const startRunRef = useRef(startRun);
   const [settled, setSettled] = useState<SettledRun | null>(null);
+  const [retryRevision, setRetryRevision] = useState(0);
   inputRef.current = input;
   startRunRef.current = startRun;
 
@@ -41,13 +48,27 @@ export function NgeeAnnAiSlot({
     const currentInput = inputRef.current;
     if (!currentInput) return;
     let active = true;
-    void startRunRef.current(currentInput).then((result) => {
-      if (active) setSettled({ identityKey, result });
-    });
+    void startRunRef.current(currentInput)
+      .then((result) => {
+        if (active) setSettled({ identityKey, result });
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setSettled({
+            identityKey,
+            result: {
+              status: "unavailable",
+              reason: error instanceof Error && error.message.trim()
+                ? error.message
+                : "The AI Analyst is unavailable for this Snapshot.",
+            },
+          });
+        }
+      });
     return () => {
       active = false;
     };
-  }, [identityKey]);
+  }, [identityKey, retryRevision]);
 
   if (!input) {
     return (
@@ -80,7 +101,13 @@ export function NgeeAnnAiSlot({
   if (settled.result.status === "unavailable") {
     return (
       <AiSlotFrame>
-        <AiUnavailable detail={settled.result.reason} />
+        <AiUnavailable
+          detail={settled.result.reason}
+          onRetry={() => {
+            setSettled(null);
+            setRetryRevision((current) => current + 1);
+          }}
+        />
       </AiSlotFrame>
     );
   }
@@ -128,12 +155,21 @@ function AiSlotFrame({ children }: { children: React.ReactNode }) {
   );
 }
 
-function AiUnavailable({ detail }: { detail: string }) {
+function AiUnavailable({ detail, onRetry }: { detail: string; onRetry?: () => void }) {
   return (
     <div className="rounded-lg border border-border bg-surface-subtle px-4 py-4" role="status">
       <p className="text-xs font-semibold text-foreground">AI analysis unavailable</p>
       <p className="mt-1 text-[11px] leading-5 text-muted">{detail}</p>
       <p className="mt-1 text-[10px] leading-4 text-muted-light">The deterministic Overview remains available and unchanged.</p>
+      {onRetry ? (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-3 inline-flex h-8 items-center justify-center rounded-md border border-border bg-surface px-3 text-[11px] font-semibold text-foreground transition-colors hover:border-primary/30 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
+        >
+          Retry AI analysis
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -262,7 +298,18 @@ function AiFindingCard({
               <EvidencePin label="Data cutoff" value={finding.evidence.dataCutoff} />
               <EvidencePin label="Horizon" value={finding.horizons.join(" / ")} />
               <EvidencePin label="Relationship" value={relationshipLabel(finding.relationship)} />
+              <EvidencePin label="Data quality" value={titleCase(finding.evidence.dataQuality.status)} />
+              <EvidencePin label="Coverage" value={`${finding.evidence.dataQuality.coveragePct.toLocaleString("en-SG")}%`} />
+              <EvidencePin
+                label="Valid intervals"
+                value={`${finding.evidence.dataQuality.validIntervalCount.toLocaleString("en-SG")} / ${finding.evidence.dataQuality.expectedMeterIntervalCount.toLocaleString("en-SG")}`}
+              />
+              <EvidencePin label="Quality events" value={finding.evidence.dataQuality.qualityEventCount.toLocaleString("en-SG")} />
             </dl>
+            <div className="mt-4 rounded-lg border border-border bg-surface-subtle px-4 py-3" role="note">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-light">Data-quality limitation</p>
+              <p className="mt-1 text-xs leading-5 text-muted">{finding.evidence.dataQuality.limitation}</p>
+            </div>
             <div className="mt-4 rounded-lg border border-border bg-surface-subtle px-4 py-3">
               <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-light">Evidence note</p>
               <p className="mt-1 text-xs leading-5 text-muted">{finding.evidenceNote}</p>
@@ -331,6 +378,7 @@ export function buildAskAiDeeperHref(
       snapshotId: finding.evidence.snapshotId,
       dataCutoff: finding.evidence.dataCutoff,
       note: finding.evidenceNote,
+      dataQuality: finding.evidence.dataQuality,
       toolCallIds: finding.evidence.tools.map((tool) => tool.toolCallId),
       auditLogIds: finding.evidence.tools.flatMap((tool) => tool.auditLogId ? [tool.auditLogId] : []),
     }),
@@ -348,4 +396,8 @@ function relationshipTone(relationship: NgeeAnnAiRelationship): string {
   if (relationship === "supports") return "bg-step-success/10 text-step-success";
   if (relationship === "challenges") return "bg-step-warning/10 text-step-warning";
   return "bg-primary/10 text-primary";
+}
+
+function titleCase(value: string): string {
+  return value.slice(0, 1).toUpperCase() + value.slice(1);
 }
