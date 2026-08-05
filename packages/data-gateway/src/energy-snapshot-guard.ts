@@ -9,6 +9,31 @@ export type EnergySnapshotGuardScope = {
   canonicalIntervalDigest: string;
 };
 
+/**
+ * Validate the immutable materialization receipt without rescanning canonical
+ * interval rows. The controlled writer computes the count and digest before it
+ * commits this state; request-scoped deterministic reads only need to pin that
+ * committed receipt once inside their DuckDB transaction.
+ */
+export const energySnapshotStateGuardSql = (scope: EnergySnapshotGuardScope): string => `(
+  SELECT CASE
+    WHEN COUNT(*) = 0 THEN error('ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE')
+    WHEN bool_or(state.data_snapshot_id <> ${sqlLiteral(scope.dataSnapshotId)})
+      THEN error('ENERGYIQ_SNAPSHOT_STALE')
+    WHEN bool_and(
+      state.workspace_id = ${sqlLiteral(scope.workspaceId)}
+      AND state.manifest_fingerprint = ${sqlLiteral(scope.manifestFingerprint)}
+      AND state.source_sha256_json = ${sqlLiteral(JSON.stringify(scope.sourceSha256))}
+      AND state.fact_writer_contract_version = ${sqlLiteral(scope.factWriterContractVersion)}
+      AND state.canonical_interval_count = ${scope.canonicalIntervalCount}
+      AND state.canonical_interval_digest = ${sqlLiteral(scope.canonicalIntervalDigest)}
+    ) THEN TRUE
+    ELSE error('ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE')
+  END
+  FROM energy_project_fact_state state
+  WHERE state.project_id = ${sqlLiteral(scope.projectId)}
+)`;
+
 export const energySnapshotGuardSql = (scope: EnergySnapshotGuardScope): string => `(
   SELECT CASE
     WHEN COUNT(*) = 0 THEN error('ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE')

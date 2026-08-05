@@ -813,7 +813,10 @@ describe("EnergyScopeAnalysis", () => {
     const runSqlReadonly = gateway.runSqlReadonly.bind(gateway);
     let activeReadonlyQueries = 0;
     let maximumReadonlyQueryConcurrency = 0;
+    let readonlyQueryCount = 0;
+    let snapshotReadSessionCount = 0;
     gateway.runSqlReadonly = async (request) => {
+      readonlyQueryCount += 1;
       activeReadonlyQueries += 1;
       maximumReadonlyQueryConcurrency = Math.max(
         maximumReadonlyQueryConcurrency,
@@ -824,6 +827,11 @@ describe("EnergyScopeAnalysis", () => {
       } finally {
         activeReadonlyQueries -= 1;
       }
+    };
+    const withEnergySnapshotReadSession = gateway.withEnergySnapshotReadSession.bind(gateway);
+    gateway.withEnergySnapshotReadSession = async (request, execute) => {
+      snapshotReadSessionCount += 1;
+      return await withEnergySnapshotReadSession(request, execute);
     };
     try {
       ensureEnergyIqBootstrap(metadata);
@@ -884,8 +892,28 @@ describe("EnergyScopeAnalysis", () => {
         context,
         databasePath
       });
+      const queryCountBeforeMeasuredRun = readonlyQueryCount;
+      const sessionCountBeforeMeasuredRun = snapshotReadSessionCount;
+      const measuredRunStartedAt = performance.now();
       const analysis = await run();
+      const measuredRunElapsedMs = performance.now() - measuredRunStartedAt;
+      const measuredRunQueryCount = readonlyQueryCount - queryCountBeforeMeasuredRun;
+      const measuredRunSessionCount = snapshotReadSessionCount - sessionCountBeforeMeasuredRun;
+      const measuredPayloadBytes = Buffer.byteLength(JSON.stringify(analysis));
+      const repeatedRunStartedAt = performance.now();
       const repeated = await run();
+      const repeatedRunElapsedMs = performance.now() - repeatedRunStartedAt;
+      if (process.env.ENERGYIQ_OVERVIEW_PERFORMANCE === "1") {
+        console.info("ENERGYIQ_OVERVIEW_PERFORMANCE", JSON.stringify({
+          analysisElapsedMs: Math.round(measuredRunElapsedMs),
+          repeatedElapsedMs: Math.round(repeatedRunElapsedMs),
+          readonlyQueryCount: measuredRunQueryCount,
+          snapshotReadSessionCount: measuredRunSessionCount,
+          payloadBytes: measuredPayloadBytes,
+        }));
+        expect(measuredRunElapsedMs).toBeLessThan(3_000);
+        expect(repeatedRunElapsedMs).toBeLessThan(3_000);
+      }
 
       const overlap = await executeEnergyScopeAnalysis({
         metadataStore: metadata,
@@ -910,6 +938,8 @@ describe("EnergyScopeAnalysis", () => {
 
       expect(repeated).toEqual(analysis);
       expect(maximumReadonlyQueryConcurrency).toBeLessThanOrEqual(3);
+      expect(measuredRunQueryCount).toBe(10);
+      expect(measuredRunSessionCount).toBe(1);
       expect(analysis.summary.usageKwh).toBe(NGEE_ANN_GOLDEN.period.usageKwh);
       expect(analysis.summary.peakKw).toBe(NGEE_ANN_GOLDEN.period.peakKw);
       expect(analysis.summary.peakAt).toBe(NGEE_ANN_GOLDEN.period.peakAt);

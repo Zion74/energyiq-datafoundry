@@ -126,6 +126,66 @@ describe("Energy scoped datasource Snapshot guard", () => {
       });
       const gateway = new LocalDataGateway(metadata);
 
+      const [scopedView] = await queryDuckDbSql(databasePath, `
+        SELECT sql
+        FROM duckdb_views()
+        WHERE view_name = '${scopedA.viewName}'
+      `);
+      expect(String(scopedView?.sql ?? "")).not.toContain("energy_project_fact_state");
+      expect(String(scopedView?.sql ?? "")).not.toContain("canonical_interval_digest");
+      const scopedRecord = metadata.dataSources.get({
+        user_id: "dev-user",
+        datasource_id: scopedA.datasourceId,
+      });
+      const scopedConfig = JSON.parse(scopedRecord.config_json) as Record<string, unknown>;
+      const scopedEnergyQueryScope = scopedConfig.energyQueryScope as Record<string, unknown>;
+      metadata.dataSources.create({
+        user_id: "dev-user",
+        id: "energy-scope-different-snapshot",
+        name: "Different snapshot scope",
+        type: "duckdb",
+        config: {
+          ...scopedConfig,
+          energyQueryScope: {
+            ...scopedEnergyQueryScope,
+            dataSnapshotId: "snapshot-other",
+          },
+        },
+      });
+      await expect(gateway.withEnergySnapshotReadSession({
+        user_id: "dev-user",
+        workspace_id: "workspace-1",
+        datasource_id: scopedA.datasourceId,
+      }, async () => {
+        const results = await Promise.all([
+          gateway.runSqlReadonly({
+            user_id: "dev-user",
+            workspace_id: "workspace-1",
+            datasource_id: scopedA.datasourceId,
+            sql: `SELECT COUNT(*) AS interval_count FROM ${scopedA.viewName}`,
+          }),
+          gateway.withEnergySnapshotReadSession({
+            user_id: "dev-user",
+            workspace_id: "workspace-1",
+            datasource_id: scopedEmptyA.datasourceId,
+          }, async () => await gateway.runSqlReadonly({
+            user_id: "dev-user",
+            workspace_id: "workspace-1",
+            datasource_id: scopedEmptyA.datasourceId,
+            sql: `SELECT COUNT(*) AS interval_count FROM ${scopedEmptyA.viewName}`,
+          })),
+        ]);
+        await expect(gateway.withEnergySnapshotReadSession({
+          user_id: "dev-user",
+          workspace_id: "workspace-1",
+          datasource_id: "energy-scope-different-snapshot",
+        }, async () => undefined)).rejects.toThrow("ENERGYIQ_SNAPSHOT_STALE:snapshot-other");
+        return results;
+      })).resolves.toMatchObject([
+        { rows: [[1]] },
+        { rows: [[0]] },
+      ]);
+
       await runDuckDbSql(databasePath, `
         DELETE FROM energy_interval_facts
         WHERE project_id = 'project-1'
@@ -207,6 +267,16 @@ describe("Energy scoped datasource Snapshot guard", () => {
         datasource_id: scopedA.datasourceId,
         sql: `SELECT COUNT(*) AS interval_count FROM ${scopedA.viewName}`,
       })).rejects.toThrow("ENERGYIQ_SNAPSHOT_STALE");
+      await expect(gateway.withEnergySnapshotReadSession({
+        user_id: "dev-user",
+        workspace_id: "workspace-1",
+        datasource_id: scopedA.datasourceId,
+      }, async () => await gateway.runSqlReadonly({
+        user_id: "dev-user",
+        workspace_id: "workspace-1",
+        datasource_id: scopedA.datasourceId,
+        sql: `SELECT COUNT(*) AS interval_count FROM ${scopedA.viewName}`,
+      }))).rejects.toThrow("ENERGYIQ_SNAPSHOT_STALE");
       for (const aggregate of ["COUNT(*)", "SUM(usage_kwh)"]) {
         await expect(gateway.runSqlReadonly({
           user_id: "dev-user",
@@ -214,6 +284,15 @@ describe("Energy scoped datasource Snapshot guard", () => {
           sql: `SELECT ${aggregate} AS aggregate_value FROM ${scopedEmptyA.viewName}`,
         })).rejects.toThrow("ENERGYIQ_SNAPSHOT_STALE");
       }
+      await runDuckDbSql(databasePath, `
+        DELETE FROM energy_project_fact_state
+        WHERE project_id = 'project-1'
+      `);
+      await expect(gateway.withEnergySnapshotReadSession({
+        user_id: "dev-user",
+        workspace_id: "workspace-1",
+        datasource_id: scopedA.datasourceId,
+      }, async () => undefined)).rejects.toThrow("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
     } finally {
       metadata.close();
       try {
@@ -307,6 +386,25 @@ const runDuckDbSql = async (databasePath: string, sql: string): Promise<void> =>
   try {
     await new Promise<void>((resolve, reject) => {
       connection.run(sql, (error) => error ? reject(error) : resolve());
+    });
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      connection.close((error) => error ? reject(error) : resolve());
+    });
+  }
+};
+
+const queryDuckDbSql = async (
+  databasePath: string,
+  sql: string,
+): Promise<Array<Record<string, unknown>>> => {
+  const database = await getDuckDbDatabase(databasePath);
+  const connection = database.connect();
+  try {
+    return await new Promise((resolve, reject) => {
+      connection.all(sql, (error, rows) => error
+        ? reject(error)
+        : resolve(rows as Array<Record<string, unknown>>));
     });
   } finally {
     await new Promise<void>((resolve, reject) => {

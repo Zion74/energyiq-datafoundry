@@ -1,6 +1,7 @@
 import {
   ensureEnergyScopedDataSource,
   readEnergyFactCoverage,
+  type EnergyScopedDataSource,
   type LocalDataGateway
 } from "@datafoundry/data-gateway";
 import type {
@@ -598,6 +599,18 @@ type DailyUsageAnomalyLoadResult = {
   rows: unknown[][];
 };
 
+type DailyUsageAnomalyPreparation = Extract<
+  DailyUsageAnomalyLoadResult,
+  { status: "absent" | "unavailable" }
+> | {
+  status: "ready";
+  projectReleaseId: string;
+  businessCalendarVersion: string;
+  ruleRevision: EnergyIqRuleRevisionRecord;
+  rule: DailyUsageAnomalyRule;
+  historicalFrom: string;
+};
+
 type DailyUsageAnomalyDayFact = {
   localDate: string;
   dayType: "weekday" | "weekend" | null;
@@ -829,14 +842,6 @@ export const executeEnergyScopeAnalysis = async (input: {
       ?? join(resolve(dirname(fileURLToPath(import.meta.url)), "../../../.."), "storage", "energy", input.context.workspaceId, "energy.duckdb")
   });
 
-  const meterResult = await input.dataGateway.runSqlReadonly({
-    user_id: input.userId,
-    workspace_id: input.context.workspaceId,
-    datasource_id: scoped.datasourceId,
-    sql: meterBreakdownSql(scoped.viewName),
-    limit: 1000
-  });
-  const meterAggregates = meterResult.rows.map(rowToMeterAggregate);
   const hierarchy = resolveEnergyPublishedHierarchyNodes(
     input.metadataStore,
     input.context.projectId,
@@ -846,37 +851,6 @@ export const executeEnergyScopeAnalysis = async (input: {
   if (!selectedNode) {
     throw new Error("ENERGYIQ_SCOPE_FORBIDDEN");
   }
-  const aggregateMeterNodeIds = publishedMeterRoute.officialMeterPointIds ?? [];
-  const aggregateMeterIds = new Set(aggregateMeterNodeIds);
-  const aggregateMeters = meterAggregates.filter((meter) => aggregateMeterIds.has(meter.meterNodeId));
-  const dailyTotalScopes = resolveDailyTotalScopes({
-    metadataStore: input.metadataStore,
-    projectId: input.context.projectId,
-    hierarchyRevisionId: input.context.hierarchyRevisionId,
-    meterMappingRevisionId: input.context.meterMappingRevisionId,
-    resource: input.context.resource,
-    selectedNode,
-    hierarchy,
-    meterAggregates,
-    aggregateMeterNodeIds,
-  });
-  const dailyDateBuckets = buildDailyDateBuckets(input.context);
-  const dailyUsageAnomalyLoadInput = {
-    metadataStore: input.metadataStore,
-    dataGateway: input.dataGateway,
-    userId: input.userId,
-    context: input.context,
-    ...(input.projectReleaseId ? { projectReleaseId: input.projectReleaseId } : {}),
-    databasePath: scoped.databasePath,
-    meterAttachments: publishedMeterRoute.attachments,
-    ruleRevisions,
-    dailyTotalScopes,
-    hierarchy,
-    meterAggregates,
-  };
-  const aggregationRule = publishedMeterRoute.officialMeterRoles
-    ? aggregationRuleForRoles(publishedMeterRoute.officialMeterRoles)
-    : aggregationRuleForMeters(aggregateMeters);
   const periodDurationMs = Date.parse(input.context.to) - Date.parse(input.context.from);
   const previousFrom = new Date(Date.parse(input.context.from) - periodDurationMs).toISOString();
   const previousTo = input.context.from;
@@ -900,6 +874,78 @@ export const executeEnergyScopeAnalysis = async (input: {
     },
     databasePath: scoped.databasePath
   });
+  const dailyUsageAnomalyPreparation = prepareDailyUsageAnomaly({
+    metadataStore: input.metadataStore,
+    context: input.context,
+    ...(input.projectReleaseId ? { projectReleaseId: input.projectReleaseId } : {}),
+    ruleRevisions,
+  });
+  const historicalScoped = dailyUsageAnomalyPreparation.status === "ready"
+    ? await ensureEnergyScopedDataSource({
+        metadataStore: input.metadataStore,
+        userId: input.userId,
+        context: {
+          workspaceId: input.context.workspaceId,
+          projectId: input.context.projectId,
+          scopeId: input.context.scopeId,
+          meterAttachments: publishedMeterRoute.attachments,
+          resource: input.context.resource,
+          from: dailyUsageAnomalyPreparation.historicalFrom,
+          to: input.context.to,
+          timezone: input.context.timezone,
+          hierarchyRevisionId: input.context.hierarchyRevisionId,
+          meterMappingRevisionId: input.context.meterMappingRevisionId,
+          meterFormulaRevisionId: input.context.meterFormulaRevisionId,
+          dataSnapshotId: input.context.dataSnapshotId,
+          metricVersion: input.context.metricVersion,
+        },
+        databasePath: scoped.databasePath,
+      })
+    : undefined;
+
+  return await input.dataGateway.withEnergySnapshotReadSession({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: scoped.datasourceId,
+  }, async () => {
+
+  const meterResult = await input.dataGateway.runSqlReadonly({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: scoped.datasourceId,
+    sql: meterBreakdownSql(scoped.viewName),
+    limit: 1000
+  });
+  const meterAggregates = meterResult.rows.map(rowToMeterAggregate);
+  const aggregateMeterNodeIds = publishedMeterRoute.officialMeterPointIds ?? [];
+  const aggregateMeterIds = new Set(aggregateMeterNodeIds);
+  const aggregateMeters = meterAggregates.filter((meter) => aggregateMeterIds.has(meter.meterNodeId));
+  const dailyTotalScopes = resolveDailyTotalScopes({
+    metadataStore: input.metadataStore,
+    projectId: input.context.projectId,
+    hierarchyRevisionId: input.context.hierarchyRevisionId,
+    meterMappingRevisionId: input.context.meterMappingRevisionId,
+    resource: input.context.resource,
+    selectedNode,
+    hierarchy,
+    meterAggregates,
+    aggregateMeterNodeIds,
+  });
+  const dailyDateBuckets = buildDailyDateBuckets(input.context);
+  const dailyUsageAnomalyLoadInput = {
+    metadataStore: input.metadataStore,
+    dataGateway: input.dataGateway,
+    userId: input.userId,
+    context: input.context,
+    dailyTotalScopes,
+    hierarchy,
+    meterAggregates,
+    preparation: dailyUsageAnomalyPreparation,
+    historicalScoped,
+  };
+  const aggregationRule = publishedMeterRoute.officialMeterRoles
+    ? aggregationRuleForRoles(publishedMeterRoute.officialMeterRoles)
+    : aggregationRuleForMeters(aggregateMeters);
   // Keep Snapshot-backed scans in explicit bounded batches. The optional anomaly query runs in
   // its own final batch so enabling it cannot push the shared DuckDB connection fan-out above 3.
   const [summaryResult, profileResult, healthResult] = await Promise.all([
@@ -1372,25 +1418,15 @@ export const executeEnergyScopeAnalysis = async (input: {
       ]
     }
   };
+  });
 };
 
-const loadDailyUsageAnomalyFacts = async (input: {
+const prepareDailyUsageAnomaly = (input: {
   metadataStore: MetadataStore;
-  dataGateway: LocalDataGateway;
-  userId: string;
   context: EnergyQueryContext;
   projectReleaseId?: string;
-  databasePath: string;
-  meterAttachments: Array<{
-    meterPointId: string;
-    scopeId: string;
-    officialAggregation: boolean;
-  }>;
   ruleRevisions: readonly EnergyIqRuleRevisionRecord[];
-  dailyTotalScopes: DailyTotalScope[];
-  hierarchy: ReturnType<MetadataStore["energyIq"]["listProjectNodes"]>;
-  meterAggregates: MeterAggregate[];
-}): Promise<DailyUsageAnomalyLoadResult> => {
+}): DailyUsageAnomalyPreparation => {
   const matchingRules = input.ruleRevisions.filter(
     (rule) => rule.revision_id === DAILY_USAGE_ANOMALY_RULE_REVISION_ID
       || rule.evaluation_key === "DAILY_USAGE_ABOVE_BASELINE",
@@ -1447,17 +1483,45 @@ const loadDailyUsageAnomalyFacts = async (input: {
       },
     };
   }
+  const baselineCutoff = formatLocalDate(input.context.from, input.context.timezone);
+  return {
+    status: "ready",
+    projectReleaseId,
+    businessCalendarVersion: calendarVersion,
+    ruleRevision,
+    rule,
+    historicalFrom: zonedStartOfLocalDay(
+      shiftLocalDate(baselineCutoff, -rule.maximumLookbackDays),
+      input.context.timezone,
+    ),
+  };
+};
+
+const loadDailyUsageAnomalyFacts = async (input: {
+  metadataStore: MetadataStore;
+  dataGateway: LocalDataGateway;
+  userId: string;
+  context: EnergyQueryContext;
+  dailyTotalScopes: DailyTotalScope[];
+  hierarchy: ReturnType<MetadataStore["energyIq"]["listProjectNodes"]>;
+  meterAggregates: MeterAggregate[];
+  preparation: DailyUsageAnomalyPreparation;
+  historicalScoped?: EnergyScopedDataSource;
+}): Promise<DailyUsageAnomalyLoadResult> => {
+  if (input.preparation.status !== "ready") return input.preparation;
+  const {
+    businessCalendarVersion: calendarVersion,
+    historicalFrom,
+    projectReleaseId,
+    rule,
+    ruleRevision,
+  } = input.preparation;
   const series = buildDailyUsageAnomalySeries({
     dailyTotalScopes: input.dailyTotalScopes,
     hierarchy: input.hierarchy,
     meterAggregates: input.meterAggregates,
   });
   if (series.length === 0) return { status: "absent" };
-  const baselineCutoff = formatLocalDate(input.context.from, input.context.timezone);
-  const historicalFrom = zonedStartOfLocalDay(
-    shiftLocalDate(baselineCutoff, -rule.maximumLookbackDays),
-    input.context.timezone,
-  );
   const exceptionDatesByScopeId = new Map<string, Set<string>>();
   for (const scopeId of series
     .filter((definition) => definition.kind === "official_scope")
@@ -1491,26 +1555,13 @@ const loadDailyUsageAnomalyFacts = async (input: {
     }
     exceptionDatesByScopeId.set(scopeId, new Set(resolved.exception_dates));
   }
-  const historicalScoped = await ensureEnergyScopedDataSource({
-    metadataStore: input.metadataStore,
-    userId: input.userId,
-    context: {
-      workspaceId: input.context.workspaceId,
-      projectId: input.context.projectId,
-      scopeId: input.context.scopeId,
-      meterAttachments: input.meterAttachments,
-      resource: input.context.resource,
-      from: historicalFrom,
-      to: input.context.to,
-      timezone: input.context.timezone,
-      hierarchyRevisionId: input.context.hierarchyRevisionId,
-      meterMappingRevisionId: input.context.meterMappingRevisionId,
-      meterFormulaRevisionId: input.context.meterFormulaRevisionId,
-      dataSnapshotId: input.context.dataSnapshotId,
-      metricVersion: input.context.metricVersion,
-    },
-    databasePath: input.databasePath,
-  });
+  const historicalScoped = input.historicalScoped;
+  if (!historicalScoped) {
+    return dailyUsageAnomalyFactsUnavailable(
+      ruleRevision.revision_id,
+      "The optional daily usage anomaly fact scope was unavailable.",
+    );
+  }
   let result: Awaited<ReturnType<LocalDataGateway["runSqlReadonly"]>>;
   try {
     result = await input.dataGateway.runSqlReadonly({

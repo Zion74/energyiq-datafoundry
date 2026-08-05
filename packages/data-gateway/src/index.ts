@@ -327,6 +327,22 @@ export class LocalDataGateway implements DataGateway {
     }
   }
 
+  async withEnergySnapshotReadSession<T>(input: {
+    user_id: string;
+    workspace_id: string;
+    datasource_id: string;
+  }, execute: () => Promise<T>): Promise<T> {
+    const dataSource = this.metadataStore.dataSources.get({
+      user_id: input.user_id,
+      datasource_id: input.datasource_id,
+    });
+    const adapter = this.createAdapter(dataSource, input.workspace_id);
+    if (!(adapter instanceof DuckDbAdapter)) {
+      throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+    }
+    return await adapter.withEnergySnapshotReadSession(execute);
+  }
+
   async createArtifact(input: CreateArtifactInput): Promise<ArtifactSummary> {
     return this.artifactService.createArtifact(input);
   }

@@ -234,9 +234,6 @@ const createScopedView = async (
   try {
     await duckDbRun(connection, `
       CREATE OR REPLACE VIEW ${quoteIdentifier(viewName)} AS
-      WITH snapshot_guard AS MATERIALIZED (
-        SELECT ${snapshotGuardSql(factScope)} AS snapshot_valid
-      )
       SELECT
         project_id,
         resource,
@@ -267,10 +264,8 @@ const createScopedView = async (
         usage_kwh,
         average_kw,
         quality_status
-      FROM snapshot_guard
-      CROSS JOIN energy_interval_facts
-      WHERE snapshot_guard.snapshot_valid
-        AND workspace_id = ${sqlLiteral(context.workspaceId)}
+      FROM energy_interval_facts
+      WHERE workspace_id = ${sqlLiteral(context.workspaceId)}
         AND project_id = ${sqlLiteral(context.projectId)}
         AND resource = ${sqlLiteral(context.resource)}
         AND lower(source_sha256) IN (${factScope.sourceSha256.map(sqlLiteral).join(", ")})

@@ -8,11 +8,23 @@ import type {
 } from "../types.js";
 import { DatabaseSync } from "node:sqlite";
 import type * as DuckDbModule from "duckdb";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { resolve } from "node:path";
 import { getDuckDbDatabase } from "../duckdb-database-cache.js";
 import {
   energySnapshotGuardSql,
+  energySnapshotStateGuardSql,
   type EnergySnapshotGuardScope,
 } from "../energy-snapshot-guard.js";
+
+type EnergySnapshotReadSessionState = {
+  connection: DuckDbModule.Connection;
+  databasePath: string;
+  scope: EnergySnapshotGuardScope;
+  tail: Promise<void>;
+};
+
+const energySnapshotReadSession = new AsyncLocalStorage<EnergySnapshotReadSessionState>();
 
 export class SQLiteAdapter implements DataSourceAdapter {
   constructor(private readonly config: Record<string, unknown>) {}
@@ -104,10 +116,48 @@ export class DuckDbAdapter implements DataSourceAdapter {
     return rowsToTableResult(await this.query(applyStandardLimit(input.sql, input.limit), input.signal));
   }
 
-  private async query(sql: string, signal?: AbortSignal | undefined): Promise<Record<string, unknown>[]> {
-    const database = await getDuckDbDatabase(stringConfig(this.config, "path"));
-    const connection = database.connect();
+  async withEnergySnapshotReadSession<T>(execute: () => Promise<T>): Promise<T> {
+    const databasePath = resolve(stringConfig(this.config, "path"));
     const snapshotScope = energySnapshotScope(this.config.energyQueryScope);
+    if (!snapshotScope) throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+    const existing = energySnapshotReadSession.getStore();
+    if (existing) {
+      assertSameEnergySnapshotSession(existing, databasePath, snapshotScope);
+      return await execute();
+    }
+    const database = await getDuckDbDatabase(databasePath);
+    const connection = database.connect();
+    const session: EnergySnapshotReadSessionState = {
+      connection,
+      databasePath,
+      scope: snapshotScope,
+      tail: Promise.resolve(),
+    };
+    try {
+      await duckDbAll(connection, "BEGIN TRANSACTION");
+      await assertEnergySnapshotStateReceipt(connection, snapshotScope);
+      return await energySnapshotReadSession.run(session, execute);
+    } finally {
+      await session.tail.catch(() => undefined);
+      await duckDbAll(connection, "ROLLBACK").catch(() => undefined);
+      await duckDbClose(connection).catch(ignoreAlreadyClosed);
+    }
+  }
+
+  private async query(sql: string, signal?: AbortSignal | undefined): Promise<Record<string, unknown>[]> {
+    const databasePath = resolve(stringConfig(this.config, "path"));
+    const snapshotScope = energySnapshotScope(this.config.energyQueryScope);
+    const session = energySnapshotReadSession.getStore();
+    if (session) {
+      if (!snapshotScope) throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+      assertSameEnergySnapshotSession(session, databasePath, snapshotScope);
+      const pending = session.tail.then(async () =>
+        await duckDbAll(session.connection, sql, signal));
+      session.tail = pending.then(() => undefined, () => undefined);
+      return (await pending).filter(isRecord);
+    }
+    const database = await getDuckDbDatabase(databasePath);
+    const connection = database.connect();
     try {
       if (snapshotScope) {
         await duckDbAll(connection, "BEGIN TRANSACTION", signal);
@@ -151,12 +201,41 @@ const energySnapshotScope = (value: unknown): EnergySnapshotGuardScope | undefin
   };
 };
 
+const assertSameEnergySnapshotSession = (
+  session: EnergySnapshotReadSessionState,
+  databasePath: string,
+  scope: EnergySnapshotGuardScope,
+): void => {
+  if (session.databasePath !== databasePath) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+  if (session.scope.dataSnapshotId !== scope.dataSnapshotId) {
+    throw new Error(`ENERGYIQ_SNAPSHOT_STALE:${scope.dataSnapshotId}`);
+  }
+  if (session.scope.workspaceId !== scope.workspaceId
+    || session.scope.projectId !== scope.projectId
+    || session.scope.manifestFingerprint !== scope.manifestFingerprint
+    || session.scope.factWriterContractVersion !== scope.factWriterContractVersion
+    || session.scope.canonicalIntervalCount !== scope.canonicalIntervalCount
+    || session.scope.canonicalIntervalDigest !== scope.canonicalIntervalDigest
+    || JSON.stringify(session.scope.sourceSha256) !== JSON.stringify(scope.sourceSha256)) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+};
+
 const assertEnergySnapshotState = async (
   connection: DuckDbModule.Connection,
   scope: EnergySnapshotGuardScope,
   signal?: AbortSignal,
 ): Promise<void> => {
   await duckDbAll(connection, `SELECT ${energySnapshotGuardSql(scope)} AS snapshot_valid`, signal);
+};
+
+const assertEnergySnapshotStateReceipt = async (
+  connection: DuckDbModule.Connection,
+  scope: EnergySnapshotGuardScope,
+): Promise<void> => {
+  await duckDbAll(connection, `SELECT ${energySnapshotStateGuardSql(scope)} AS snapshot_valid`);
 };
 
 const duckDbAll = async (
