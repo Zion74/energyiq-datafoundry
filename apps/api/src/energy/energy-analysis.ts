@@ -964,7 +964,7 @@ export const executeEnergyScopeAnalysis = async (input: {
     hierarchy,
     meterAggregates,
     preparation: dailyUsageAnomalyPreparation,
-    historicalScoped,
+    ...(historicalScoped ? { historicalScoped } : {}),
   };
   const aggregationRule = publishedMeterRoute.officialMeterRoles
     ? aggregationRuleForRoles(publishedMeterRoute.officialMeterRoles)
