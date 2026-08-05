@@ -486,15 +486,7 @@ type GeneratedFinding = {
 };
 
 function parseGeneratedFindings(answer: string): [GeneratedFinding, GeneratedFinding, GeneratedFinding] | null {
-  const firstBrace = answer.indexOf("{");
-  const lastBrace = answer.lastIndexOf("}");
-  if (firstBrace < 0 || lastBrace <= firstBrace) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(answer.slice(firstBrace, lastBrace + 1));
-  } catch {
-    return null;
-  }
+  const parsed = findLastFindingsEnvelope(answer);
   if (!isRecord(parsed) || !Array.isArray(parsed.findings) || parsed.findings.length !== 3) return null;
   const findings = parsed.findings.flatMap<GeneratedFinding>((value) => {
     if (!isRecord(value)) return [];
@@ -534,6 +526,48 @@ function parseGeneratedFindings(answer: string): [GeneratedFinding, GeneratedFin
     .trim());
   if (new Set(semanticKeys).size !== semanticKeys.length) return null;
   return findings as [GeneratedFinding, GeneratedFinding, GeneratedFinding];
+}
+
+function findLastFindingsEnvelope(answer: string): Record<string, unknown> | null {
+  for (let start = answer.lastIndexOf("{"); start >= 0; start = answer.lastIndexOf("{", start - 1)) {
+    const parsed = parseJsonObjectAt(answer, start);
+    if (isRecord(parsed) && Object.hasOwn(parsed, "findings")) return parsed;
+  }
+  return null;
+}
+
+function parseJsonObjectAt(value: string, start: number): unknown {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < value.length; index += 1) {
+    const character = value[index]!;
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (character === "\"") {
+      inString = true;
+    } else if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          return JSON.parse(value.slice(start, index + 1));
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
 }
 
 function parseHorizons(value: unknown): NgeeAnnAiHorizon[] {

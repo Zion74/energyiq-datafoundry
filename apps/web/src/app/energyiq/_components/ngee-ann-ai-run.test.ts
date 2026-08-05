@@ -130,6 +130,98 @@ describe("Ngee Ann AI Run", () => {
     expect(new Set(result.findings.flatMap((finding) => finding.horizons))).toEqual(new Set(["1d", "7d", "28d"]));
   });
 
+  it("extracts the final Findings object after reasoning that contains JSON and braces", () => {
+    const findings = generatedFindings();
+    findings[0]!.how = "Inspect the literal marker \"{level}\" before action.";
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(
+        findings,
+        [],
+        [],
+        undefined,
+        undefined,
+        [
+          "Planning assertions: {\"assertions\":[{\"id\":\"R1.A1\"}]}\n",
+          `Final answer: ${JSON.stringify({ findings })}`,
+        ],
+      ),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.findings[0].how).toBe("Inspect the literal marker \"{level}\" before action.");
+  });
+
+  it("extracts a valid Findings object before trailing model text", () => {
+    const findings = generatedFindings();
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(
+        findings,
+        [],
+        [],
+        undefined,
+        undefined,
+        [`${JSON.stringify({ findings })}\nAnalysis complete.`],
+      ),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+  });
+
+  it("fails closed when the model text contains no valid Findings object", () => {
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(
+        generatedFindings(),
+        [],
+        [],
+        undefined,
+        undefined,
+        ["Planning assertions only: {\"assertions\":[{\"id\":\"R1.A1\"}]}"],
+      ),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result).toEqual({
+      status: "unavailable",
+      reason: "The AI Analyst returned an invalid three-Finding result.",
+    });
+  });
+
+  it("selects the last Findings object when the model emits multiple valid candidates", () => {
+    const earlierFindings = generatedFindings();
+    earlierFindings[0]!.title = "Earlier candidate";
+    const finalFindings = generatedFindings();
+    finalFindings[0]!.title = "Final candidate";
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(
+        finalFindings,
+        [],
+        [],
+        undefined,
+        undefined,
+        [
+          JSON.stringify({ findings: earlierFindings }),
+          `\n${JSON.stringify({ findings: finalFindings })}`,
+        ],
+      ),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.findings[0].title).toBe("Final candidate");
+  });
+
   it("fails the AI layer closed when a numeric claim is absent from that Finding's SQL result", () => {
     const input = requiredInput();
     const findings = generatedFindings();
@@ -388,6 +480,7 @@ function successfulEventStream(
   beforeSqlEvents: Array<Record<string, unknown>> = [],
   successfulSqlEvents: Array<Record<string, unknown>> | undefined = undefined,
   schemaResult: unknown = { tables: [{ name: "energy_intervals", columns: [{ name: "usage_kwh", type: "DOUBLE" }] }] },
+  textDeltas: string[] | undefined = undefined,
 ): string {
   const events: Array<Record<string, unknown>> = [
     { type: "TOOL_CALL_START", toolCallId: "schema-1", toolCallName: "inspect_schema" },
@@ -404,7 +497,10 @@ function successfulEventStream(
       150,
     )),
     ...extraSqlEvents,
-    { type: "TEXT_MESSAGE_CONTENT", delta: JSON.stringify({ findings }) },
+    ...(textDeltas ?? [JSON.stringify({ findings })]).map((delta) => ({
+      type: "TEXT_MESSAGE_CONTENT",
+      delta,
+    })),
     { type: "RUN_FINISHED" },
   ];
   return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
