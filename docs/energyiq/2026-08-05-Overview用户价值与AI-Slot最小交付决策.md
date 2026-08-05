@@ -1,0 +1,268 @@
+---
+title: "2026-08-05 决策：Overview 用户价值与 AI Slot 最小交付"
+summary: "把快速、可信的确定性 Ngee Ann Overview 与一次真实、异步、可降级的 DataFoundry 自主分析 Run 共同纳入 Charles 首版验收，并以最小 Project Analysis Prior 提升分析价值。"
+doc_type: decision
+tags: [Overview, Ngee Ann, AI Slot, DataFoundry, Evidence]
+updated_at: "2026-08-05"
+related:
+  - "决策-Overview改造与AI-Analysis打通最终方案.md"
+  - "决策-项目Renderer-Recipe与时间上下文.md"
+  - "2026-08-05-Ngee-Ann-Overview-Interaction-Matrix.md"
+  - "2026-08-04-T03-T04-T13集成实施记录.md"
+status: accepted
+---
+
+# Overview 用户价值与 AI Slot 最小交付决策
+
+## 1. 结论
+
+本次独立复核对补充风险审查的判断是：**修改后接受**。
+
+Ngee Ann 当前北极星不是单独交付一个结构化模板，也不是先建设完整 AI 平台，而是跑通同一条客户价值链：
+
+> Boss/FM 在 60 秒内判断截至当前 data cutoff 的近期、重复和结构性用能机会；若存在，能理解主要问题、影响、证据、下一步核查对象和验证方式；若不存在，系统诚实显示没有足够的重要发现，不强行凑满三条。
+
+Charles 首版验收边界同时包含：
+
+1. **确定性 Overview**：快速首屏、真实数字、决策主题、Actual vs Baseline、Level/Circuit/time Evidence 和可操作下钻；
+2. **真实 AI Slot**：在同一权威 Context、Snapshot 和只读 datasource 上执行一次真实 DataFoundry Run；AI 使用 SQL 工具主动调查、验证和组织 0–3 个有价值 Finding，模型不可用时不影响确定性页面。
+
+这项决定只调整 Ngee Ann 首版的**执行顺序与验收边界**。既有架构仍然成立：Energy Data Foundation/Kernel 是数字权威，项目专属 Snapshot/ViewModel/Renderer 负责页面表达，DataFoundry 是可替换的 AI Runtime。
+
+## 2. 为什么需要调整旧顺序
+
+[《Overview 改造与 AI Analysis 打通最终方案》](决策-Overview改造与AI-Analysis打通最终方案.md)原先将完整 AI 上下文跳转排在 AI Slot 前，并把 AI Slot 放到较后批次。该顺序适合降低早期风险，但已不符合当前确认的 Charles 首版目标：**AI Slot 本身也是要交付和验证的产品价值，不应在 #9 验收完成后才首次出现。**
+
+因此，本决策替代的仅是以下旧执行顺序：
+
+- 不再要求完整对话式 AI Analyst #16 全部完成后，才能实现首版嵌入式 AI Slot；
+- 不再让 #17 被最终 Charles 验收 #9 反向阻塞；
+- #9 应在确定性页面、首屏性能和最小真实 AI Slot 都具备后，承担最终组装与人工验收。
+
+本决策不改变以下边界：
+
+- AI 不改写或覆盖官方 KPI；AI 可以调用服务端授权的只读 SQL 工具验证数字和寻找额外角度；
+- AI 不成为 Overview Renderer；
+- 模型停机时确定性 Overview 仍完整可用；
+- 完整 AI Analyst 的自由追问、Task Console 和上下文跳转仍由 #14/#16 负责。
+
+## 3. 当前证据与问题
+
+### 3.1 当前页面已经可信，但还没有形成完整决策闭环
+
+固定 Ngee Ann Golden Period 的当前页面可以正确显示 Project/Scope/Period、Data Status、KPI、异常、Level/Circuit/time Evidence，并保持 Snapshot/Release/Rule 等版本边界。
+
+但首屏三个 Decision Priority 实际来自同一个 `daily_usage_above_baseline` 规则，使用同一个 `INSPECT_DAILY_USAGE_DRIVERS` 行动模板，只是日期和影响不同。它们能回答“哪几天异常”，却没有合并成“最值得先处理的决策主题”。
+
+当前 Golden 中可支持更有价值叙事的确定性证据包括：
+
+- Period 总能耗为 `1531.1683 kWh`；
+- 非营业时段能耗为 `684.5044 kWh`，占 `44.7%`；
+- Level 7 的 Fan ISOL1/2 对非营业时段贡献 `260.742 kWh`；
+- 11、13、14 Jun 的主要 Circuit driver 一致，而当前页面把三个日期拆成三张近似卡片。
+
+这些事实说明：页面已达到“可信异常发现”，但仍需把重复日期异常组织成少量决策主题，并明确下一步核查和复核指标，才达到“决策就绪”。
+
+### 3.2 DataFoundry 基础可复用，但 AI Slot 尚未存在
+
+当前代码已经提供：
+
+- Workspace 默认模型与 fallback-off 解析；
+- 服务端权威 Energy Query Context；
+- Scope 限制的只读 datasource；
+- 可显式选择的 Skill、工具策略、Run、事件、Trace 与持久化能力；
+- Run request fingerprint 和已有 Run replay。
+
+当前仍缺的是一个直接面向 Charles 首版价值的垂直切片：服务端把权威 Ngee Ann Context、当前 Snapshot pin 和最小项目调查先验交给一次真实 Run；Run 使用现有 schema inspection 与只读 SQL 工具形成 Finding、Evidence、Impact、Action，并把运行状态和结果显示在 Overview。首版不以前置建设专用 Bundle、持久 Insight Artifact、Claim Validator 或通用复用平台为条件。
+
+因此，DataFoundry 足以承载首版真实自主分析，但“Runtime 已存在”仍不等于“AI Slot 已完成”；必须用真实 Provider、真实工具调用、真实页面状态和 Chrome 结果共同证明。
+
+## 4. 评估过的方案
+
+| 方案 | 优点 | 主要问题 | 结论 |
+| --- | --- | --- | --- |
+| A. 先完成确定性 Overview，AI Slot 留到 #9 之后 | 风险最低、页面先可用 | 无法在当前验收中验证 AI 是否创造真实用户价值 | 不采用 |
+| B. 先完成 #14/#16 的完整 AI Analyst，再做 AI Slot | 共用能力最完整 | 重新形成平台优先的瀑布，延迟第一张真实 AI 页面 | 不采用 |
+| C. 在确定性页面之上交付一次真实、异步、受 Snapshot 与 Evidence 约束的自主 DataFoundry Run | 能直接验证 AI 是否会主动查数并形成客户价值，同时保留故障隔离 | 需要严格固定授权 Context、只读工具和项目调查边界 | **采用** |
+
+## 5. 最小架构
+
+~~~mermaid
+flowchart LR
+  A["Published Release + current Data Snapshot"] --> B["Deterministic Overview renders first"]
+  A --> C["Server-authoritative Energy Query Context"]
+  D["ngee-ann-analysis-pack@v1"] --> C
+  C --> E["One real DataFoundry Run"]
+  E --> F["Schema inspection + scoped read-only SQL"]
+  F --> G["0-3 Evidence-backed Findings"]
+  G --> H["Async AI Slot"]
+  E -. "timeout or failure" .-> I["AI unavailable; deterministic Overview remains"]
+~~~
+
+首版只有一个页面级 AI Run，不为三个视觉位置分别调用模型。Renderer 只消费 Run 状态和 Finding ViewModel，不了解 Mastra、Prompt、Skill 内部或 Provider API。Run 必须 pin 当前 `dataSnapshotId`；Snapshot 漂移或 datasource 不可用时 fail closed。
+
+### 5.1 最小 Project Analysis Prior
+
+首版不新增一套通用 Skill taxonomy。继续复用现有 `data-analysis` guidance，只增加一个由服务端拥有、可追溯的项目调查先验：
+
+> `ngee-ann-analysis-pack@v1`
+
+它只包含：
+
+1. 值得调查的问题，例如整体偏差、1d 近期信号、7d 重复模式、28d 结构性迹象，以及 Level、Category、Circuit、time 和 peak driver；
+2. 推荐调查顺序，例如先确认整体与可比基线，再下钻空间、回路和时间证据；
+3. 分析边界，例如官方总量只由 Aggregate 口径决定，Sub-meter 只用于解释；
+4. 缺失 Evidence，例如没有排班、设备状态、天气或维修记录时只能提出 Hypothesis 和下一步核查。
+
+Pack **不包含** SQL、公式、阈值、当前数字、官方 Finding 或答案模板，也不成为第二套 Recipe。服务端按已授权 Project 与当前 Published Renderer/Release 显式选择 Pack，并把 `packId` 与 `revision` 记录在同一次 Context Package/Trace；浏览器不能自行选择或覆盖。
+
+AI 可以用 Pack 作为调查先验，得出 `supports`、`challenges` 或 `independent` 的 Evidence-backed Finding。首版不强迫模型必须“创新”；没有可靠新角度时允许只支持或反证已有主题，但不得把三张确定性卡片简单改写成长摘要。
+
+### 5.2 首版 AI 使用现有只读工具主动查数
+
+首版 AI Slot 执行真实 DataFoundry Run，并允许模型按需使用现有 schema inspection 与服务端 Scope 限制的只读 SQL datasource。SQL 结果必须来自当前授权 Workspace、Project、Scope 与同一 Snapshot，禁止写入、跨租户、跨 Project 或绕开服务端 Context。
+
+确定性 Overview 仍是官方 KPI、Rule 和 Decision Theme 的权威层。AI 可以重新查询以验证或发现关系，但不能把自己的计算覆盖到官方卡片；Findings 中的数字必须能回到工具结果和 Evidence。需要的数据不存在时应明确 `Missing Evidence`，而不是心算、猜测或扩大权限。
+
+### 5.3 Preschool Pack 只确认内容，不接 Runtime
+
+`preschool-analysis-pack@v1` 的首版调查范围先固定为 Portfolio 总览、Centre ranking、EUI/per-pax、P75 benchmark、quadrant、standby/off-hours、operating pattern 和 Centre → Circuit 下钻。它同样只保存问题、顺序、边界和缺失 Evidence，不保存 SQL、公式、阈值或当前数字。
+
+在 Preschool 独立 Renderer、确定性 Recipe 与 Published Mapping 尚未形成可验收闭环前，不注册、不选择也不执行该 Pack；Ngee Ann #17/#9 不等待 Preschool。只有真实 Preschool 页面证明这些维度具备权威口径后，才把 Pack 接入 Runtime，并据两项目实际重复点判断是否抽取通用 Policy。
+
+## 6. 输入、输出与可信边界
+
+### 6.1 服务端权威 Context Package
+
+Run 使用服务端从登录身份、Membership、Project Release 和当前请求解析出的权威 Context，至少固定：
+
+- `workspaceId`、`projectId`、`scopeId`、`resource` 与 Project timezone；
+- 统一的 data cutoff，以及 Finding 可使用的 1d、7d、28d 分析窗口；
+- `dataSnapshotId`、`projectReleaseId` 与 Published Renderer key；
+- 当前授权 datasource 和只读工具集合；
+- `ngee-ann-analysis-pack@v1` 的 `packId` 与 `revision`。
+
+Hover、弹窗、选中 heatmap cell、滚动位置和局部图表切换不触发整页 AI Run。浏览器传入的 Workspace、Pack、Snapshot 或 Renderer 只能作为请求线索，服务端必须重新解析并校验。
+
+### 6.2 Finding 输出
+
+首版返回 0–3 个互不重复的 Finding；三条合计应覆盖近期信号、重复模式和较长周期结构，但不要求机械地“一条对应一个 Horizon”。每条至少回答：
+
+- `what`：发生了什么；
+- `why`：为什么重要，以及原因是 Fact、Attribution 还是 Hypothesis；
+- `action`：下一步调查或行动方向；
+- `verification`：如何在下一可比周期验证；
+- `evidence`：所用 SQL/tool result、Scope、窗口与关键数字；
+- `relationship`：`supports`、`challenges` 或 `independent`。
+
+`relationship` 用于解释 AI 与确定性主题的关系，不是创新配额。若数据不足以支持额外角度，模型不得为了填满 `independent` 而编造结论。无 Evidence 的数字、已确认根因、节省金额、ROI、负责人或承诺不展示。
+
+## 7. 页面生命周期
+
+1. Ngee Ann Renderer 和确定性首屏立即出现；
+2. 核心数据返回后，AI Slot 显示 `AI analysis queued` 或 `AI analysis in progress`；
+3. 同一次稳定 Context 只启动一个 Run；首版不为复用结果建设页面业务缓存、持久 Insight Artifact 或跨用户共享机制；
+4. Run 完成后显示 0–3 个 Finding，并标注生成时间、Snapshot、Pack revision、关系和限制；
+5. 模型超时、失败或 Provider 未批准时显示明确的 unavailable 状态，不覆盖指标、图表和规则 Finding；
+6. Project、Scope、data cutoff 或 Snapshot 改变后，旧结果立即隐藏或标记 `Outdated context`，不得冒充当前结论；
+7. 首版只在稳定主上下文加载后自动运行，或由用户点击 Refresh AI；Hover 和局部浏览交互不触发 Run。
+
+首版直接复用现有 DataFoundry Run、事件和 Trace；不新增独立 Runtime、Scheduler、Cadence DSL、Insight 仓库、跨用户缓存、分布式 lease 或页面级 Artifact 平台。后续追问进入完整 AI Analyst，并把选中的 Finding、Context pins 与必要工具证据带入已有 Session；首版不为此重做会话系统。
+
+## 8. Provider 与数据治理
+
+本地开发和 Charles 首版验证复用当前 Workspace 模型配置、密钥隔离和授权 datasource，不把治理建设扩成当前 Ticket。客户正式环境仍须记录 Provider/endpoint、发送字段范围及适用的留存/地域约束；未配置或不允许外发时 AI Slot 诚实显示 unavailable，确定性 Overview 正常工作。
+
+Run 只向模型提供 Context、Pack 和模型完成调查所需的工具结果，不发送原始 Excel、密钥或无关 Workspace 数据。“模型已连接”仍不等于客户生产授权已经完成，证据必须区分本地真实 Provider 与客户生产验收。
+
+## 9. Ticket 与依赖调整建议
+
+以下边界已于 2026-08-05 同步到 GitHub #17/#9/#10/#18；若后续 Issue 正文与本文再次出现冲突，应先按本文北极星复核，再保留更小、可见交付优先的执行切片。
+
+### 9.1 建议的执行链
+
+1. **#26 / T08A**：保留已完成的性能优化和剩余 `<3s` 证据，不让小幅性能余量重新阻塞客户可见价值；
+2. **#27 / T08B**：保留已完成的 1d/7d/28d 确定性多时间尺度主题、Actual vs Baseline、driver 与直接 Evidence 路径；
+3. **#17 / T16**：交付一个真实 DataFoundry 自主 Run、服务端 `ngee-ann-analysis-pack@v1`、当前 Snapshot pin、只读 SQL 工具证据、异步 AI Slot 和 honest unavailable；不依赖完整 #16；
+4. **#9 / T08**：在 #17 后完成 1440/1920 Chrome、全页价值/视觉/交互、真实 Provider 结果和 Charles 人工验收；
+5. **#14/#16**：继续完成 Overview Finding → 完整 AI Analyst 的带上下文追问，不作为最小嵌入式 Slot 的前置；
+6. **Preschool**：先完成确定性 Renderer 与数据合同，再由后续 Ticket 接入 `preschool-analysis-pack@v1`；不得阻塞 Ngee Ann #17/#9。
+
+本轮直接优化现有 #17，不再为 Pack、Artifact、Scheduler 或自主分析另建新 Ticket。
+
+### 9.2 第一项客户可见交付物
+
+第一项交付物不是后端 Schema 或 Prompt，而是一张可在 Chrome 直接检查的 Ngee Ann 页面：
+
+- 确定性 Overview 已先显示；
+- 重复日期异常已经合并成少量主题；
+- AI Slot 真实经历 queued/running/available 或 honest unavailable；
+- 至少一个 AI Finding 引用同一 Snapshot 的真实 SQL/tool Evidence；
+- 1440px 与 1920px 截图同时记录 Context、生成状态和限制。
+
+该截图应由调整后的最小 #17 交付，#9 再做整页最终验收；截图中的 AI Finding 必须来自一次真实 Provider + 只读 SQL 工具 Run，并可查看 Snapshot、Pack revision 与 Evidence。Fixture/Mock 截图不能冒充真实 Provider E2E。
+
+## 10. 验收标准
+
+### 10.1 用户价值
+
+- Boss 在 60 秒内能说出发生了什么、影响多大、谁应先核查什么、如何在下一可比周期复核；
+- FM 从主题一次操作即可看到预筛选的 Level/Circuit/time Evidence；
+- 0–3 个主题互不重复；没有重要发现时不凑数；
+- AI 不是更长的摘要，而是会主动查数、验证或挑战已有主题，并补充受 Evidence 支持的调查角度、缺失 Evidence 和可验证行动。
+
+### 10.2 可信性与故障隔离
+
+- 官方 KPI、Rule 与 Decision Theme 只来自确定性 Snapshot/Evidence；AI Finding 中的数字来自同一 Snapshot 的只读 SQL/tool result，不覆盖官方层；
+- Fact、Attribution、Hypothesis 和 Missing Evidence 可区分；
+- Context、Snapshot、Published Renderer、Pack revision、模型与工具调用可追溯；
+- Context 变化后旧结果不再显示成当前结论；
+- AI 超时、失败、Snapshot 漂移、工具拒绝或 Provider 未配置时，确定性页面仍完整可用。
+
+### 10.3 工程证据
+
+- 服务端 Project/Published Renderer → Pack 选择、跨项目拒绝与 Pack revision Trace 自动测试；
+- `expectedDataSnapshotId` 漂移 fail closed、只读 SQL Scope/授权隔离和 stale 降级测试；
+- 固定 Golden 的 Renderer/Chrome 视觉回归；
+- 同一 Snapshot、模型与任务做一次有 Pack/无 Pack 的真实 Provider 对照，比较 Charles Matrix 覆盖、重复度、证据质量和行动价值；不做逐字文案 Golden；
+- Charles 对信息价值、分析深度和行动可用性的独立人工验收；
+- 清楚区分代码、Fixture、Chrome、本地真实 Provider 和客户验收证据。
+
+## 11. 最大剩余风险与反证条件
+
+最大风险不是 Prompt 写得不够漂亮，而是能耗 Evidence 只能支持异常定位和调查优先级，却让模型把排班、设备故障或人员行为写成已确认根因。没有门禁、门禁记录、设备状态、控制策略、天气或维修记录时，AI 必须停在“有依据的假设 + 下一步验证”。
+
+以下任一情况出现，应暂停扩张并重新审查：
+
+1. 最小 Slot 必须重建 DataFoundry Runtime 或先完成完整 #14/#16 才能运行；
+2. Run 无法把模型关键数字追溯到同一 Snapshot 的只读 SQL/tool result；
+3. 真实 Provider 多次运行仍频繁编造数字、合并错误主题或把假设写成事实；
+4. 必须把模型放入确定性首屏同步链才能展示页面；
+5. Ngee Ann Pack 开始复制指标算法或形成第二套 Recipe；
+6. 第一张真实结果仍只是三条日期异常的同义复述；
+7. #26 后继续出现新的跨 Metadata、DuckDB、API、Web 的通用底座 Ticket，且不能直接说明其阻塞哪个 Ngee Ann 页面/AI 验收项。
+8. 为接入 Pack 必须先建设持久 Insight 仓库、通用 Scheduler/DSL 或第二套 Runtime。
+
+## 12. 明确停止项
+
+首版不做：
+
+- 不新建第二套 Agent Runtime；
+- 不建设通用 Query Receipt、历史 Snapshot 回放、持久 Insight Artifact、Scheduler/Cadence DSL 或跨项目缓存平台；
+- 不先设计所有项目的 Skill taxonomy；
+- 不创建 5–8 个 Ngee Ann 专属 Skill；
+- 不在首版建设 section 级 Claim 状态机、流式 Token UI 或自动取消旧 Run 的复杂状态机；
+- 不做跨用户、跨项目或跨 Workspace 的 AI 结果缓存；
+- 不把完整 Overview Snapshot 或原始 Excel 发给模型；
+- 不开放写入 SQL、跨 Scope datasource、任意外部工具、图表代码或 React/HTML 生成；
+- 不让模型修改官方 KPI、Recipe、Rule priority 或 Renderer 布局；
+- 不把 Pack 写成答案模板，也不强迫模型必须提出 `independent` 新角度或永远生成三条洞察；
+- 不在 Ngee Ann #17/#9 前接入 Preschool Pack Runtime；
+- 不在 Provider 数据治理未批准时自动发送客户数据；
+- 不让 AI Run 阻塞确定性首屏；
+- 不用静态 Mock、合法 JSON 或更长文案冒充真实价值与真实 Provider E2E；
+- 不用 AI 文字掩盖确定性图表、Actual vs Baseline、driver 和 Evidence 路径不足。
+
+## 13. 当前未决输入
+
+当前本地开发继续使用已配置 Workspace/用户模型完成真实 Provider 验证。客户正式环境发布前仍需确认发送字段范围及对应 Provider 的留存和处理地域；这项确认不触发通用治理平台建设，也不阻塞 Ngee Ann 本地 Charles 验收。

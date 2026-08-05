@@ -3,7 +3,7 @@ title: "Overview 改造与 AI Analysis 打通最终方案"
 summary: "确定项目专属 Recipe + React Renderer 的 Overview 路线，并将 DataFoundry 限定为可替换的 AI Analyst Runtime。"
 doc_type: decision
 tags: [Overview, Recipe, Renderer, AI Analyst, DataFoundry, MVP]
-updated_at: "2026-08-03"
+updated_at: "2026-08-05"
 related:
   - "2026-08-03-NetZero-Prototype完整理解与复用审计.md"
   - "决策-项目Renderer-Recipe与时间上下文.md"
@@ -12,6 +12,8 @@ status: accepted
 ---
 
 # Overview 改造与 AI Analysis 打通最终方案
+
+> **2026-08-05 执行顺序更新：** Ngee Ann 首版 Charles 验收现已把一个最小、真实、异步且可降级的 AI Slot 纳入交付边界；它不再等待完整对话式 AI Analyst 全部完成。本文的架构职责仍然有效，新的执行依赖、输入/输出合同和停止项以[《Overview 用户价值与 AI Slot 最小交付决策》](2026-08-05-Overview用户价值与AI-Slot最小交付决策.md)为准。
 
 ## 1. 最终决定
 
