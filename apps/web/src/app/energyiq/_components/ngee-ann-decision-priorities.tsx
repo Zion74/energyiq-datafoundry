@@ -19,6 +19,7 @@ export function NgeeAnnDecisionPriorities({
   aiAnalystHref?: string;
 }) {
   const stateMessage = priorityStateMessage(view);
+  const singleTheme = view.items.length === 1;
   return (
     <section aria-labelledby="ngee-ann-decision-priorities" className="border-b border-border bg-surface-subtle/45 px-5 py-6 lg:px-7">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -47,7 +48,7 @@ export function NgeeAnnDecisionPriorities({
       ) : null}
 
       {view.items.length > 0 ? (
-        <div className="mt-4 grid gap-3 xl:grid-cols-3">
+        <div className={singleTheme ? "mt-4 grid grid-cols-1 gap-3" : "mt-4 grid gap-3 xl:grid-cols-3"}>
           {view.items.map((item) => (
             <article key={item.priorityId} className="flex min-w-0 flex-col rounded-xl border border-border bg-surface p-4 shadow-[var(--shadow-card)]">
               <div className="flex items-start justify-between gap-3">
@@ -63,11 +64,13 @@ export function NgeeAnnDecisionPriorities({
               </div>
               <PriorityField label="Finding" value={item.finding} />
               <PriorityField label="Evidence" value={item.evidence} />
-              <PriorityField label="Impact" value={item.impact} />
+              <PriorityField label="Primary incident impact" value={item.impact} />
               <p className="mt-3 text-[11px] font-semibold text-muted">
                 {item.recurrenceDayCount} distinct exception days; linked Level and Circuit Evidence is preserved
               </p>
-              <div className="mt-3 grid gap-2 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
+              <div className={singleTheme
+                ? "mt-3 grid gap-2 sm:grid-cols-3"
+                : "mt-3 grid gap-2 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3"}>
                 {item.horizons.map((horizon) => (
                   <div key={horizon.label} className="rounded-lg border border-border bg-surface-subtle px-3 py-2">
                     <p className="text-[11px] font-semibold text-foreground">{horizon.label}</p>

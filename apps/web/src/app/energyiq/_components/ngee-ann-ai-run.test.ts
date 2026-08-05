@@ -83,6 +83,16 @@ describe("Ngee Ann AI Run", () => {
     );
   });
 
+  it("requires How to be a next investigation or action instead of a repeated summary", () => {
+    const prompt = JSON.stringify(buildAgentRunBody(requiredInput(), "profile-1", "run-1", "thread-1"));
+
+    expect(prompt).toContain("How must state the next investigation or operational action");
+    expect(prompt).toContain("It must not restate What, Why, or the numeric Evidence in different words");
+    expect(prompt).toContain(
+      "How to verify must name the observed outcome, metric, or dimension that would confirm or challenge the Finding",
+    );
+  });
+
   it("accepts three distinct Findings with collective horizon coverage and Finding-specific SQL Evidence", () => {
     const input = requiredInput();
     const result = resolveNgeeAnnAiEventStream({

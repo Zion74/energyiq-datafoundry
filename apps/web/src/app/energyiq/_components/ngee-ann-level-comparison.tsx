@@ -15,6 +15,16 @@ export function NgeeAnnLevelComparison({
             Energy distribution
           </h3>
           <p className="mt-1 text-xs leading-5 text-muted">Level comparison · {view.decisionQuestion}</p>
+          {view.rows.length > 0 ? (
+            <ul aria-label="Level colour key" className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted">
+              {view.rows.map((row) => (
+                <li key={row.id} className="inline-flex items-center gap-1.5">
+                  <span aria-hidden="true" className={`h-2 w-2 rounded-full ${levelColour(row.id)}`} />
+                  {row.name}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
         <p className="max-w-xl text-[11px] leading-5 text-muted">
           Official-route energy, adjacent-period movement and accepted interval quality from one published Snapshot.
@@ -46,7 +56,7 @@ export function NgeeAnnLevelComparison({
                   <th scope="row" className="w-[180px] px-3 py-4 align-top">
                     <p className="text-xs font-semibold text-foreground">{row.name}</p>
                     <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true">
-                      <div className="h-full rounded-full bg-primary" style={{ width: row.projectShareBar }} />
+                      <div className={`h-full rounded-full ${levelColour(row.id)}`} style={{ width: row.projectShareBar }} />
                     </div>
                   </th>
                   <td className="px-3 py-4 align-top text-sm font-semibold tabular-nums text-foreground">
@@ -84,4 +94,10 @@ export function NgeeAnnLevelComparison({
       </details>
     </section>
   );
+}
+
+function levelColour(levelId: string): string {
+  if (levelId.toLocaleLowerCase().includes("7")) return "bg-blue-600";
+  if (levelId.toLocaleLowerCase().includes("6")) return "bg-teal-700";
+  return "bg-primary";
 }

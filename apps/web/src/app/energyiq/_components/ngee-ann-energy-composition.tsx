@@ -63,6 +63,16 @@ export function NgeeAnnEnergyComposition({
         <p className="mt-1 text-[11px] leading-5 text-muted">
           Load and Light use the official Project total as their shared denominator.
         </p>
+        {view.categories.rows.length > 0 ? (
+          <ul aria-label="Category colour key" className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted">
+            {view.categories.rows.map((row) => (
+              <li key={row.id} className="inline-flex items-center gap-1.5">
+                <span aria-hidden="true" className={`h-2 w-2 rounded-full ${categoryColour(row.id)}`} />
+                {row.name}
+              </li>
+            ))}
+          </ul>
+        ) : null}
         {view.categories.status === "unavailable" ? (
           <Unavailable title="Category comparison unavailable" reason={view.categories.reason} />
         ) : (
@@ -82,7 +92,12 @@ export function NgeeAnnEnergyComposition({
               <tbody className="divide-y divide-border">
                 {view.categories.rows.map((row) => (
                   <tr key={row.id}>
-                    <th scope="row" className="px-3 py-3.5 text-xs font-semibold text-foreground">{row.name}</th>
+                    <th scope="row" className="px-3 py-3.5 text-xs font-semibold text-foreground">
+                      <span className="inline-flex items-center gap-2">
+                        <span aria-hidden="true" className={`h-2 w-2 rounded-full ${categoryColour(row.id)}`} />
+                        {row.name}
+                      </span>
+                    </th>
                     <td className="px-3 py-3.5 text-xs font-semibold tabular-nums text-foreground">{row.currentUsageKwh} kWh</td>
                     <td className="px-3 py-3.5 text-xs tabular-nums text-foreground">{row.projectShare}</td>
                     <td className="px-3 py-3.5 text-xs tabular-nums text-foreground">{row.previousUsageKwh} kWh</td>
@@ -348,6 +363,12 @@ function uniqueCircuitOptions(options: Array<{ id: string; label: string }>) {
     }
   }
   return [...unique].map(([id, label]) => ({ id, label }));
+}
+
+function categoryColour(categoryId: string): string {
+  if (categoryId.toLocaleLowerCase() === "load") return "bg-violet-600";
+  if (categoryId.toLocaleLowerCase() === "light") return "bg-amber-600";
+  return "bg-primary";
 }
 
 function DerivedMeterTrace({

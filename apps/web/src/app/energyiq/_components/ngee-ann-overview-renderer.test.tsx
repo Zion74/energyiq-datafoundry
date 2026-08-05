@@ -27,6 +27,9 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Rolling 7 days");
     expect(markup).toContain("Rolling 28 days");
     expect(markup).toContain("3 distinct exception days; linked Level and Circuit Evidence is preserved");
+    expect(markup).toContain("Primary incident impact");
+    expect(markup).toContain("mt-4 grid grid-cols-1 gap-3");
+    expect(markup).toContain("mt-3 grid gap-2 sm:grid-cols-3");
     expect(markup.match(/View evidence/g)).toHaveLength(1);
   });
 
@@ -42,7 +45,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Decision themes");
     expect(markup).toContain("Finding");
     expect(markup).toContain("Evidence");
-    expect(markup).toContain("Impact");
+    expect(markup).toContain("Primary incident impact");
     expect(markup).toContain("Next check");
     expect(markup).toContain("Verification metric");
     expect(markup).toContain("Complete Evidence");
@@ -51,8 +54,9 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Ask AI Analyst");
     expect(markup).toContain("AI energy analyst");
     expect(markup).toContain("Analyzing / Thinking");
-    expect(markup.indexOf("Decision themes")).toBeLessThan(markup.indexOf("AI energy analyst"));
     expect(markup.indexOf("Decision themes")).toBeLessThan(markup.indexOf("Key highlights"));
+    expect(markup.indexOf("Key highlights")).toBeLessThan(markup.indexOf("AI energy analyst"));
+    expect(markup.indexOf("AI energy analyst")).toBeLessThan(markup.indexOf("What changed"));
   });
 
   it.each([
@@ -169,6 +173,9 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("energy.total_usage_kwh@1");
     expect(markup).toContain("Energy distribution");
     expect(markup).toContain("Level comparison");
+    expect(markup).toContain('aria-label="Level colour key"');
+    expect(markup).toContain("bg-blue-600");
+    expect(markup).toContain("bg-teal-700");
     expect(markup).toContain("Which Level needs attention first?");
     expect(markup).toContain("1054.1845");
     expect(markup).toContain("68.8484%");
@@ -180,6 +187,9 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Energy composition");
     expect(markup).toContain("What explains the official Project total?");
     expect(markup).toContain("Official categories");
+    expect(markup).toContain('aria-label="Category colour key"');
+    expect(markup).toContain("bg-violet-600");
+    expect(markup).toContain("bg-amber-600");
     expect(markup).toContain("1239.4239 kWh");
     expect(markup).toContain("80.9463%");
     expect(markup).toContain("887.217 kWh");

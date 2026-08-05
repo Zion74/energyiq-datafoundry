@@ -137,12 +137,6 @@ export function NgeeAnnOverviewRenderer({
         aiAnalystHref={aiAnalystHref}
       />
 
-      <NgeeAnnAiSlot
-        snapshot={state.snapshot}
-        decisionPriorities={view.decisionPriorities}
-        aiAnalystHref={aiAnalystHref}
-      />
-
       <OverviewSectionHeading eyebrow="At a glance" title="Key highlights" />
 
       <div className="grid border-b border-border sm:grid-cols-2 xl:grid-cols-5 xl:divide-x xl:divide-border">
@@ -164,6 +158,12 @@ export function NgeeAnnOverviewRenderer({
           </article>
         ))}
       </div>
+
+      <NgeeAnnAiSlot
+        snapshot={state.snapshot}
+        decisionPriorities={view.decisionPriorities}
+        aiAnalystHref={aiAnalystHref}
+      />
 
       <OverviewSectionHeading eyebrow="Change" title="What changed" />
 
