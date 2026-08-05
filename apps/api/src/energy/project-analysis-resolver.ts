@@ -162,14 +162,16 @@ export const resolveProjectAnalysis = async (input: {
       detail: "Publish a Project Template Revision and register its customer Renderer before opening the customer Overview.",
     };
   }
-  const publishedRunContext = resolvePublishedEnergyQueryContext({
-    metadataStore: input.metadataStore,
-    user: input.user,
-    workspaceId: input.workspaceId,
-    request: input.request,
-    ...(input.now ? { now: input.now } : {}),
-    ...(input.env ? { env: input.env } : {}),
-  });
+  const publishedRunContext = input.request.analysisWindow === "latest-complete-7d"
+    ? await resolveLatestCompleteOverviewContext(input)
+    : resolvePublishedEnergyQueryContext({
+        metadataStore: input.metadataStore,
+        user: input.user,
+        workspaceId: input.workspaceId,
+        request: input.request,
+        ...(input.now ? { now: input.now } : {}),
+        ...(input.env ? { env: input.env } : {}),
+      });
   const releasedContext = publishedRunContext.context;
   const projectRelease = publishedRunContext.projectRelease;
   if (!projectRelease) throw new Error("ENERGYIQ_PROJECT_RELEASE_REQUIRED");
@@ -264,6 +266,61 @@ export const resolveProjectAnalysis = async (input: {
       analysis,
     },
   };
+};
+
+const resolveLatestCompleteOverviewContext = async (input: {
+  metadataStore: MetadataStore;
+  dataGateway: LocalDataGateway;
+  user: UserRecord;
+  workspaceId: string;
+  request: EnergyQueryContextRequest;
+  databasePath?: string;
+  now?: Date;
+  env?: Record<string, string | undefined>;
+}) => {
+  const {
+    analysisWindow: _analysisWindow,
+    from: _requestedFrom,
+    to: _requestedTo,
+    ...requestedContext
+  } = input.request;
+  const projectContext = resolvePublishedEnergyQueryContext({
+    metadataStore: input.metadataStore,
+    user: input.user,
+    workspaceId: input.workspaceId,
+    request: {
+      ...requestedContext,
+      scopeId: "project",
+      period: "Last 7 days",
+    },
+    ...(input.now ? { now: input.now } : {}),
+    ...(input.env ? { env: input.env } : {}),
+  });
+  if (projectContext.projectRelease?.renderer.key !== "ngee-ann-overview") {
+    throw new Error("ENERGYIQ_ANALYSIS_WINDOW_UNSUPPORTED");
+  }
+  const selected = await selectEnergyLatestCompletePeriod({
+    metadataStore: input.metadataStore,
+    dataGateway: input.dataGateway,
+    userId: input.user.id,
+    context: projectContext.context,
+    ...(input.databasePath ? { databasePath: input.databasePath } : {}),
+  });
+  return resolvePublishedEnergyQueryContext({
+    metadataStore: input.metadataStore,
+    user: input.user,
+    workspaceId: input.workspaceId,
+    request: {
+      ...requestedContext,
+      period: "Custom",
+      from: selected.period.localFrom,
+      to: inclusiveLocalDate(selected.period.localToExclusive),
+      expectedDataSnapshotId: projectContext.context.dataSnapshotId,
+      expectedProjectReleaseId: projectContext.projectRelease.id,
+    },
+    ...(input.now ? { now: input.now } : {}),
+    ...(input.env ? { env: input.env } : {}),
+  });
 };
 
 const resolveLatestAvailablePeriod = async (input: {

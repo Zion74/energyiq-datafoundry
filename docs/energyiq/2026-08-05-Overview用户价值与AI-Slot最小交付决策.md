@@ -29,6 +29,14 @@ Charles 首版验收边界同时包含：
 
 这项决定只调整 Ngee Ann 首版的**执行顺序与验收边界**。既有架构仍然成立：Energy Data Foundation/Kernel 是数字权威，项目专属 Snapshot/ViewModel/Renderer 负责页面表达，DataFoundry 是可替换的 AI Runtime。
 
+### 1.1 Current Overview 时间表面补充边界
+
+Ngee Ann 客户 Overview 不再提供控制整页的 Yesterday、Last 7 days、Previous week、Previous month、Custom 与可编辑日期。它默认请求服务端选择的 Project 级 latest-complete 7-day window，再以同一 Data Snapshot、Published Release 与 cutoff 解析所选 Scope；Scope 切换不得重新选择另一个 cutoff。
+
+页面必须只读显示实际分析窗口和 data-through 日期。保留的旧 Period/Custom 深链接按其原始日期解析，但同样只读显示窗口，并提供返回 Current Overview 的入口；切换 Project 时不得继承旧 Project 的隐藏日期。Save 必须将 Snapshot 已解析的实际 `from/to` 冻结为 Custom 查询，Explorer、Saved/rerun、完整 AI Analyst handoff 与通用 Renderer 继续使用既有 Period/Custom 合同。
+
+本补充只收窄 Ngee Ann 客户表面并增加一个窄的 `latest-complete-7d` 解析意图，不删除底层时间合同，不改变各模块的 1d/7d/28d Horizon，也不引入 Cadence、Scheduler 或通用 Horizon 平台。
+
 ## 2. 为什么需要调整旧顺序
 
 [《Overview 改造与 AI Analysis 打通最终方案》](决策-Overview改造与AI-Analysis打通最终方案.md)原先将完整 AI 上下文跳转排在 AI Slot 前，并把 AI Slot 放到较后批次。该顺序适合降低早期风险，但已不符合当前确认的 Charles 首版目标：**AI Slot 本身也是要交付和验证的产品价值，不应在 #9 验收完成后才首次出现。**

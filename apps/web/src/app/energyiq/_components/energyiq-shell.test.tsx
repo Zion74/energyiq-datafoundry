@@ -76,7 +76,7 @@ describe("EnergyIQ Shell Project navigation", () => {
     expect(mockedAccess.selectProject).not.toHaveBeenCalled();
     expect(navigation.replace).toHaveBeenCalledOnce();
     expect(navigation.replace).toHaveBeenCalledWith(
-      "/energyiq/overview?projectId=project-b&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16",
+      "/energyiq/overview?projectId=project-b&scopeId=project&resource=electricity&grain=day",
     );
   });
 

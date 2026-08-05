@@ -45,6 +45,10 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
     const nextSearchParams = new URLSearchParams(window.location.search);
     nextSearchParams.set("projectId", projectId);
     nextSearchParams.set("scopeId", "project");
+    nextSearchParams.delete("period");
+    nextSearchParams.delete("from");
+    nextSearchParams.delete("to");
+    nextSearchParams.set("grain", "day");
     router.replace(`${pathname}?${nextSearchParams.toString()}`);
   };
 

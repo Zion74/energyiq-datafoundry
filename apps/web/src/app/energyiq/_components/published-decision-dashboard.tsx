@@ -66,6 +66,7 @@ type LoadedResolution = {
 export function PublishedDecisionDashboard() {
   const searchParams = useSearchParams();
   const initialViewState = overviewViewStateFromSearchParams(searchParams);
+  const hasExplicitPeriod = searchParams.has("period");
   const viewStateKey = [
     initialViewState.projectId,
     initialViewState.scopeId,
@@ -73,11 +74,13 @@ export function PublishedDecisionDashboard() {
     initialViewState.period,
     initialViewState.from,
     initialViewState.to,
+    hasExplicitPeriod ? "legacy-window" : "current-window",
   ].join(":");
   return (
     <PublishedDecisionDashboardView
       key={viewStateKey}
       initialViewState={initialViewState}
+      hasExplicitPeriod={hasExplicitPeriod}
       urlSearch={searchParams.toString()}
     />
   );
@@ -85,9 +88,11 @@ export function PublishedDecisionDashboard() {
 
 function PublishedDecisionDashboardView({
   initialViewState,
+  hasExplicitPeriod,
   urlSearch,
 }: {
   initialViewState: OverviewUrlViewState;
+  hasExplicitPeriod: boolean;
   urlSearch: string;
 }) {
   const router = useRouter();
@@ -122,6 +127,8 @@ function PublishedDecisionDashboardView({
   const [hierarchyLoading, setHierarchyLoading] = useState(false);
 
   const projectId = selectedProject?.id ?? "";
+  const isNgeeAnnProject = projectId === "ngee-ann-polytechnic";
+  const usesCurrentOverviewWindow = isNgeeAnnProject && !hasExplicitPeriod;
   const effectiveCustomRange = period === "Custom"
     ? { projectId, from: initialViewState.from, to: initialViewState.to }
     : resolvedRange.projectId === projectId
@@ -130,11 +137,9 @@ function PublishedDecisionDashboardView({
   const requestCustomRange = period === "Custom"
     ? { from: effectiveCustomRange.from, to: effectiveCustomRange.to }
     : { from: "", to: "" };
-  const queryValidationError = validateOverviewCustomRange(
-    period,
-    effectiveCustomRange.from,
-    effectiveCustomRange.to,
-  );
+  const queryValidationError = usesCurrentOverviewWindow
+    ? null
+    : validateOverviewCustomRange(period, effectiveCustomRange.from, effectiveCustomRange.to);
   const requestedProjectId = requestedProject?.id ?? "";
   const pendingUrlSearchRef = useRef(urlSearch);
 
@@ -149,7 +154,9 @@ function PublishedDecisionDashboardView({
       ...update,
       projectId: update.projectId ?? (base.projectId || projectId),
     };
-    const href = overviewUrlWithView(nextView);
+    const href = usesCurrentOverviewWindow
+      ? currentOverviewUrlWithView(nextView)
+      : overviewUrlWithView(nextView);
     pendingUrlSearchRef.current = href.slice(href.indexOf("?") + 1);
     router.replace(href);
   };
@@ -233,10 +240,9 @@ function PublishedDecisionDashboardView({
   useEffect(() => {
     if (!projectId || resource !== "electricity" || projectSelectionError || queryValidationError) return;
     let cancelled = false;
-    const request = overviewAnalysisRequest(projectId, period, requestCustomRange, {
-      scopeId,
-      resource,
-    });
+    const request = usesCurrentOverviewWindow
+      ? currentOverviewAnalysisRequest(projectId, { scopeId, resource })
+      : overviewAnalysisRequest(projectId, period, requestCustomRange, { scopeId, resource });
     setRunning(true);
     setAnalysisError(null);
     void configApi.resolveProjectAnalysis(request)
@@ -261,7 +267,7 @@ function PublishedDecisionDashboardView({
     return () => {
       cancelled = true;
     };
-  }, [period, projectId, projectSelectionError, queryValidationError, refreshRevision, requestCustomRange.from, requestCustomRange.to, resource, scopeId]);
+  }, [period, projectId, projectSelectionError, queryValidationError, refreshRevision, requestCustomRange.from, requestCustomRange.to, resource, scopeId, usesCurrentOverviewWindow]);
 
   useEffect(() => {
     const firstSectionId = renderPlanForDisplay?.sections[0]?.section_id ?? "";
@@ -274,16 +280,17 @@ function PublishedDecisionDashboardView({
   }, [period, projectId, requestCustomRange.from, requestCustomRange.to, resource]);
 
   const saveCurrentAnalysis = async () => {
-    if (!projectId || !currentAnalysis || !saveAllowed || resource !== "electricity") return;
+    if (!projectId || !currentAnalysis || !currentSnapshot || !saveAllowed || resource !== "electricity") return;
     setSaving(true);
     setSaveError(null);
     try {
+      const resolvedSnapshotRange = snapshotLocalDateRange(currentSnapshot);
+      const request = isNgeeAnnProject
+        ? overviewAnalysisRequest(projectId, "Custom", resolvedSnapshotRange, { scopeId, resource })
+        : overviewAnalysisRequest(projectId, period, requestCustomRange, { scopeId, resource });
       const saved = await configApi.saveEnergyAnalysis(projectId, {
-        ...overviewAnalysisRequest(projectId, period, requestCustomRange, {
-          scopeId,
-          resource,
-        }),
-        title: `${currentAnalysis.context.scopeName} · ${period}`,
+        ...request,
+        title: `${currentAnalysis.context.scopeName} · ${formatAnalysisWindow(currentSnapshot)}`,
       });
       setSavedAnalysis(saved);
     } catch (reason) {
@@ -332,6 +339,17 @@ function PublishedDecisionDashboardView({
     ? toProjectRendererState(rendererState, currentSnapshot)
     : null;
   const isNgeeAnnRenderer = rendererRequest?.rendererKey === "ngee-ann-overview";
+  const resolvedHandoffView = currentSnapshot && isNgeeAnnProject
+    ? {
+        ...initialViewState,
+        period: "Custom" as const,
+        ...snapshotLocalDateRange(currentSnapshot),
+      }
+    : {
+        ...initialViewState,
+        from: effectiveCustomRange.from,
+        to: effectiveCustomRange.to,
+      };
   const publishedSections = rendererState.status === "ready" ? rendererState.plan.sections : [];
 
   return (
@@ -348,7 +366,7 @@ function PublishedDecisionDashboardView({
           </h1>
           <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted">
             {isNgeeAnnRenderer
-              ? "A decision view of the selected Scope, Period and trusted Project facts."
+              ? "A current decision view of the selected Scope and trusted Project facts."
               : "A Project-specific decision view rendered from the published EnergyIQ Template Schema."}
           </p>
         </div>
@@ -391,31 +409,33 @@ function PublishedDecisionDashboardView({
               </button>
             ))}
           </div>
-          <div className="flex max-w-full overflow-x-auto rounded-lg border border-border bg-surface p-1">
-            {periodOptions.map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                aria-pressed={Boolean(item.value && period === item.value)}
-                onClick={() => item.value ? navigateOverview(item.value === "Custom"
-                  ? {
-                    period: item.value,
-                    from: effectiveCustomRange.from,
-                    to: effectiveCustomRange.to,
-                  }
-                  : { period: item.value }) : undefined}
-                disabled={item.disabled}
-                title={item.title}
-                className={[
-                  "h-8 whitespace-nowrap rounded-md px-2.5 text-xs font-medium transition-colors",
-                  item.value && period === item.value ? "bg-surface-subtle text-foreground shadow-sm" : "text-muted hover:text-foreground",
-                  item.disabled ? "cursor-not-allowed opacity-45 hover:text-muted" : "",
-                ].join(" ")}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
+          {!isNgeeAnnProject ? (
+            <div className="flex max-w-full overflow-x-auto rounded-lg border border-border bg-surface p-1">
+              {periodOptions.map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  aria-pressed={Boolean(item.value && period === item.value)}
+                  onClick={() => item.value ? navigateOverview(item.value === "Custom"
+                    ? {
+                      period: item.value,
+                      from: effectiveCustomRange.from,
+                      to: effectiveCustomRange.to,
+                    }
+                    : { period: item.value }) : undefined}
+                  disabled={item.disabled}
+                  title={item.title}
+                  className={[
+                    "h-8 whitespace-nowrap rounded-md px-2.5 text-xs font-medium transition-colors",
+                    item.value && period === item.value ? "bg-surface-subtle text-foreground shadow-sm" : "text-muted hover:text-foreground",
+                    item.disabled ? "cursor-not-allowed opacity-45 hover:text-muted" : "",
+                  ].join(" ")}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <button
             type="button"
             onClick={() => setRefreshRevision((current) => current + 1)}
@@ -435,7 +455,7 @@ function PublishedDecisionDashboardView({
         </div>
       </section>
 
-      {period === "Custom" ? (
+      {!isNgeeAnnProject && period === "Custom" ? (
         <div className="mt-4 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface px-4 py-3">
           <DateField label="From" value={effectiveCustomRange.from} onChange={(from) => navigateOverview({
             from,
@@ -444,6 +464,21 @@ function PublishedDecisionDashboardView({
             to,
           })} />
           <p className="pb-2 text-[10px] text-muted-light">Changing the range reuses the published template and runs only the scoped queries.</p>
+        </div>
+      ) : null}
+
+      {isNgeeAnnProject && currentSnapshot ? (
+        <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 border-y border-border py-3 text-xs" aria-label="Read-only analysis window">
+          <span className="font-semibold text-foreground">
+            {usesCurrentOverviewWindow ? "Current complete 7-day window" : "Linked analysis window"}
+          </span>
+          <span className="text-muted">{formatAnalysisWindow(currentSnapshot)}</span>
+          <span className="text-muted">Data through {formatDataThrough(currentSnapshot)}</span>
+          {!usesCurrentOverviewWindow ? (
+            <Link href={currentOverviewUrlWithView(initialViewState)} className="font-semibold text-primary hover:underline">
+              Return to current overview
+            </Link>
+          ) : null}
         </div>
       ) : null}
 
@@ -476,7 +511,7 @@ function PublishedDecisionDashboardView({
             request={rendererRequest}
             state={projectRendererState}
             onRetry={() => setRefreshRevision((current) => current + 1)}
-            latestAvailableRange={latestAvailableRange}
+            latestAvailableRange={usesCurrentOverviewWindow ? null : latestAvailableRange}
             onViewLatestAvailableData={(range) => navigateOverview({
               period: "Custom",
               from: range.from,
@@ -488,16 +523,12 @@ function PublishedDecisionDashboardView({
             onComparisonChange={(comparison) => navigateOverview({ comparison })}
             onCategoryChange={(category) => navigateOverview({ category })}
             projectExplorerHref={overviewHandoffHref("/energyiq/explorer", {
-              ...initialViewState,
+              ...resolvedHandoffView,
               projectId,
-              from: effectiveCustomRange.from,
-              to: effectiveCustomRange.to,
             })}
             aiAnalystHref={overviewHandoffHref("/energyiq/ai", {
-              ...initialViewState,
+              ...resolvedHandoffView,
               projectId,
-              from: effectiveCustomRange.from,
-              to: effectiveCustomRange.to,
             })}
           />
         </div>
@@ -623,6 +654,18 @@ export function overviewAnalysisRequest(
   return { projectId, scopeId, resource, period, from: customRange.from, to: customRange.to };
 }
 
+export function currentOverviewAnalysisRequest(
+  projectId: string,
+  view: { scopeId?: string; resource?: ResourceType } = {},
+): EnergyQueryContextRequestDto {
+  return {
+    projectId,
+    scopeId: view.scopeId?.trim() || "project",
+    resource: view.resource ?? "electricity",
+    analysisWindow: "latest-complete-7d",
+  };
+}
+
 export function overviewViewStateFromSearchParams(searchParams: Pick<URLSearchParams, "get">): OverviewUrlViewState {
   const requestedPeriod = searchParams.get("period");
   const period = requestedPeriod === "Yesterday"
@@ -693,6 +736,17 @@ export function overviewUrlWithView(
   return `/energyiq/overview?${next.toString()}`;
 }
 
+function currentOverviewUrlWithView(view: OverviewUrlViewState): string {
+  const next = new URLSearchParams();
+  if (view.projectId) next.set("projectId", view.projectId);
+  next.set("scopeId", view.scopeId || "project");
+  next.set("resource", view.resource);
+  next.set("grain", "day");
+  next.set("comparison", view.comparison);
+  next.set("category", view.category);
+  return `/energyiq/overview?${next.toString()}`;
+}
+
 function isHourGrainCompatible(period: OverviewPeriod, from: string, to: string): boolean {
   return period === "Yesterday" || (period === "Custom" && Boolean(from) && from === to);
 }
@@ -738,6 +792,37 @@ function formatRunPeriod(analysis: EnergyScopeAnalysisDto): string {
   const from = formatter.format(new Date(analysis.context.from));
   const to = formatter.format(new Date(new Date(analysis.context.to).getTime() - 1));
   return `${analysis.context.projectName} · ${from}–${to}`;
+}
+
+function snapshotLocalDateRange(snapshot: EnergyProjectAnalysisSnapshotDto): { from: string; to: string } {
+  return {
+    from: toDateInput(snapshot.context.from, snapshot.context.timezone),
+    to: toDateInput(
+      new Date(Date.parse(snapshot.context.to) - 1).toISOString(),
+      snapshot.context.timezone,
+    ),
+  };
+}
+
+function formatAnalysisWindow(snapshot: EnergyProjectAnalysisSnapshotDto): string {
+  const formatter = new Intl.DateTimeFormat("en-SG", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: snapshot.context.timezone,
+  });
+  const from = formatter.format(new Date(snapshot.context.from));
+  const to = formatter.format(new Date(Date.parse(snapshot.context.to) - 1));
+  return `${from}–${to}`;
+}
+
+function formatDataThrough(snapshot: EnergyProjectAnalysisSnapshotDto): string {
+  return new Intl.DateTimeFormat("en-SG", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: snapshot.context.timezone,
+  }).format(new Date(Date.parse(snapshot.context.to) - 1));
 }
 
 function sectionDomId(sectionId: string): string {

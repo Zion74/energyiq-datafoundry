@@ -186,6 +186,51 @@ describe("ProjectAnalysisResolver", () => {
         }],
       });
       const user = metadata.users.getById({ user_id: "dev-user" });
+      const currentProjectResult = await resolveProjectAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        user,
+        workspaceId: NGEE_ANN_WORKSPACE_ID,
+        request: {
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "project",
+          resource: "electricity",
+          analysisWindow: "latest-complete-7d",
+        },
+        databasePath,
+        now: new Date("2026-08-05T00:00:00.000Z"),
+      });
+      expect(currentProjectResult.status).toBe("ready");
+      if (currentProjectResult.status !== "ready") throw new Error("Expected current Project analysis");
+      expect(currentProjectResult.snapshot.context).toMatchObject({
+        period: "Custom",
+        from: NGEE_ANN_GOLDEN.selection.period.from,
+        to: NGEE_ANN_GOLDEN.selection.period.to,
+      });
+      expect(currentProjectResult.snapshot.analysis.summary.validIntervalCount).toBeGreaterThan(0);
+
+      const currentLevelResult = await resolveProjectAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        user,
+        workspaceId: NGEE_ANN_WORKSPACE_ID,
+        request: {
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "level-7",
+          resource: "electricity",
+          analysisWindow: "latest-complete-7d",
+        },
+        databasePath,
+        now: new Date("2026-08-05T00:00:00.000Z"),
+      });
+      expect(currentLevelResult.status).toBe("ready");
+      if (currentLevelResult.status !== "ready") throw new Error("Expected current Level analysis");
+      expect(currentLevelResult.snapshot.context).toMatchObject({
+        period: "Custom",
+        from: currentProjectResult.snapshot.context.from,
+        to: currentProjectResult.snapshot.context.to,
+        dataSnapshotId: currentProjectResult.snapshot.context.dataSnapshotId,
+      });
       const resolve = (
         scopeId: string,
         from: string,

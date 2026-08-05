@@ -1020,6 +1020,9 @@ const parseQueryContextRequest = (value: unknown): EnergyQueryContextRequest => 
   )) {
     throw new Error("ENERGYIQ_PERIOD_INVALID");
   }
+  if (value.analysisWindow !== undefined && value.analysisWindow !== "latest-complete-7d") {
+    throw new Error("ENERGYIQ_ANALYSIS_WINDOW_INVALID");
+  }
   const period: EnergyPeriod = value.period === undefined
     ? "Last 30 days"
     : value.period as EnergyPeriod;
@@ -1029,7 +1032,8 @@ const parseQueryContextRequest = (value: unknown): EnergyQueryContextRequest => 
     resource,
     period,
     ...(typeof value.from === "string" ? { from: value.from } : {}),
-    ...(typeof value.to === "string" ? { to: value.to } : {})
+    ...(typeof value.to === "string" ? { to: value.to } : {}),
+    ...(value.analysisWindow === "latest-complete-7d" ? { analysisWindow: value.analysisWindow } : {}),
   };
 };
 
