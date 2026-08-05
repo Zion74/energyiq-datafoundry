@@ -54,7 +54,10 @@ const anomalyRow = (input: {
   detailSeries: [],
 });
 
-const anomalies = (scopes: AvailableAnomalies["scopes"]): AvailableAnomalies => ({
+const anomalies = (scopes: Array<
+  Omit<AvailableAnomalies["scopes"][number], "rollingComparisons">
+  & { rollingComparisons?: AvailableAnomalies["scopes"][number]["rollingComparisons"] }
+>): AvailableAnomalies => ({
   status: "available",
   bundleId: "daily-usage-anomalies:snapshot@1:release@1:calendar@1",
   metricId: "energy.total_usage_kwh@1",
@@ -73,7 +76,29 @@ const anomalies = (scopes: AvailableAnomalies["scopes"]): AvailableAnomalies => 
     baselineMethod: "mean_of_complete_comparable_days_by_local_hour",
   },
   evidencePins,
-  scopes,
+  scopes: scopes.map((scope) => ({
+    ...scope,
+    rollingComparisons: scope.rollingComparisons ?? [
+      {
+        horizon: "rolling_7d",
+        cutoffLocalDate: "2026-06-16",
+        current: { fromLocalDate: "2026-06-10", toLocalDate: "2026-06-16", totalKwh: 770, completeDayCount: 7 },
+        baseline: { fromLocalDate: "2026-06-03", toLocalDate: "2026-06-09", totalKwh: 700, completeDayCount: 7 },
+        status: "available",
+        deltaKwh: 70,
+        relativePct: 10,
+      },
+      {
+        horizon: "rolling_28d",
+        cutoffLocalDate: "2026-06-16",
+        current: { fromLocalDate: "2026-05-20", toLocalDate: "2026-06-16", totalKwh: 3080, completeDayCount: 28 },
+        baseline: { fromLocalDate: "2026-04-22", toLocalDate: "2026-05-19", totalKwh: 2800, completeDayCount: 28 },
+        status: "available",
+        deltaKwh: 280,
+        relativePct: 10,
+      },
+    ],
+  })),
 });
 
 const build = (
@@ -91,6 +116,42 @@ const build = (
   });
 
 describe("Ngee Ann decision priorities", () => {
+  it("assembles repeated daily exceptions into one multi-horizon decision theme", () => {
+    const result = build(anomalies([{
+      scopeId: "project",
+      scopeName: "Ngee Ann Polytechnic",
+      scopeType: "project",
+      rows: [
+        anomalyRow({ incidentId: "project-14", localDate: "2026-06-14", impactKwh: 60 }),
+        anomalyRow({ incidentId: "project-15", localDate: "2026-06-15", impactKwh: 70 }),
+        anomalyRow({ incidentId: "project-16", localDate: "2026-06-16", impactKwh: 50 }),
+      ],
+    }]));
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      sourceOccurrenceIds: ["project-14", "project-15", "project-16"],
+      recurrenceDayCount: 3,
+      horizons: [
+        { horizon: "latest_complete_day", label: "Latest complete day" },
+        { horizon: "rolling_7d", label: "Rolling 7 days" },
+        {
+          horizon: "rolling_28d",
+          label: "Rolling 28 days",
+          status: "available",
+          actualKwh: 3080,
+          baselineKwh: 2800,
+          deltaKwh: 280,
+          relativePct: 10,
+        },
+      ],
+      action: {
+        targetRef: { kind: "daily_usage_incident", id: "project-15" },
+        verificationMetricRef: { metricId: "energy.total_usage_kwh@1" },
+      },
+    });
+  });
+
   it("deduplicates Project and Level occurrences on the same rule, metric and local date", () => {
     const result = build(anomalies([
       {
@@ -174,7 +235,7 @@ describe("Ngee Ann decision priorities", () => {
     });
   });
 
-  it("ranks stable Top 3 by primary impact without summing Parent and Level impacts", () => {
+  it("keeps one selected-Scope theme without summing Parent and Level impacts", () => {
     const result = build(anomalies([
       {
         scopeId: "project",
@@ -210,17 +271,13 @@ describe("Ngee Ann decision priorities", () => {
     ]));
 
     expect(result.status).toBe("available");
-    expect(result.items.map((item) => ({
-      rank: item.rank,
-      incidentId: item.evidence.primaryIncidentId,
-      impactKwh: item.impact.energy.deltaKwh,
-    }))).toEqual([
-      { rank: 1, incidentId: "level-z-15", impactKwh: 70 },
-      { rank: 2, incidentId: "level-a-14", impactKwh: 60 },
-      { rank: 3, incidentId: "level-z-13", impactKwh: 60 },
-    ]);
-    expect(result.items.map((item) => item.evidence.primaryIncidentId))
-      .not.toContain("project-16");
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]?.recurrenceDayCount).toBe(1);
+    expect(result.items[0]).toMatchObject({
+      rank: 1,
+      evidence: { primaryIncidentId: "project-16" },
+      impact: { energy: { deltaKwh: 50 } },
+    });
   });
 
   it.each([

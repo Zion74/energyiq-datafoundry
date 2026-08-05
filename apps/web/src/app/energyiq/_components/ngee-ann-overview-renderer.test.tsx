@@ -9,6 +9,19 @@ import { ngeeAnnGoldenSnapshot, ngeeAnnSingleDaySnapshot } from "./ngee-ann-over
 import { NgeeAnnOverviewRenderer } from "./ngee-ann-overview-renderer";
 
 describe("NgeeAnnOverviewRenderer", () => {
+  it("shows one deterministic theme across latest day, rolling 7 days and rolling 28 days", () => {
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot: ngeeAnnGoldenSnapshot() }} />,
+    );
+
+    expect(markup).toContain("Decision theme");
+    expect(markup).toContain("Latest complete day");
+    expect(markup).toContain("Rolling 7 days");
+    expect(markup).toContain("Rolling 28 days");
+    expect(markup).toContain("3 distinct exception days; linked Level and Circuit Evidence is preserved");
+    expect(markup.match(/View evidence/g)).toHaveLength(1);
+  });
+
   it("places the server-owned decision priorities after Data Status and before Key highlights", () => {
     const markup = renderToStaticMarkup(
       <NgeeAnnOverviewRenderer
@@ -18,23 +31,24 @@ describe("NgeeAnnOverviewRenderer", () => {
       />,
     );
 
-    expect(markup).toContain("Decision priorities");
+    expect(markup).toContain("Decision themes");
     expect(markup).toContain("Finding");
     expect(markup).toContain("Evidence");
     expect(markup).toContain("Impact");
-    expect(markup).toContain("Action");
+    expect(markup).toContain("Next check");
+    expect(markup).toContain("Verification metric");
     expect(markup).toContain("Complete Evidence");
     expect(markup).toContain("href=\"#incident-project-2026-06-13\"");
     expect(markup).toContain("Open Project Explorer");
     expect(markup).toContain("Ask AI Analyst");
-    expect(markup.indexOf("Decision priorities")).toBeLessThan(markup.indexOf("Key highlights"));
+    expect(markup.indexOf("Decision themes")).toBeLessThan(markup.indexOf("Key highlights"));
   });
 
   it.each([
-    { status: "empty", expected: "No deterministic priority for this Period", code: null },
-    { status: "partial", expected: "No complete priority conclusion", code: "SOME_CANDIDATE_DATES_SUPPRESSED" },
-    { status: "suppressed", expected: "Priority conclusion suppressed", code: "ALL_CANDIDATE_DATES_SUPPRESSED" },
-    { status: "unavailable", expected: "Decision priorities unavailable", code: "DAILY_USAGE_ANOMALIES_UNAVAILABLE" },
+    { status: "empty", expected: "No deterministic theme for this Period", code: null },
+    { status: "partial", expected: "No complete theme conclusion", code: "SOME_CANDIDATE_DATES_SUPPRESSED" },
+    { status: "suppressed", expected: "Theme conclusion suppressed", code: "ALL_CANDIDATE_DATES_SUPPRESSED" },
+    { status: "unavailable", expected: "Decision themes unavailable", code: "DAILY_USAGE_ANOMALIES_UNAVAILABLE" },
   ] as const)("renders the server-owned $status priority state without inventing a card", ({ status, expected, code }) => {
     const snapshot = ngeeAnnGoldenSnapshot();
     if (snapshot.analysis.dailyUsageAnomalies?.status === "available" && status !== "unavailable") {
@@ -70,19 +84,19 @@ describe("NgeeAnnOverviewRenderer", () => {
     );
 
     expect(markup).toContain(expected);
-    expect(markup).toContain("0 of 3 priorities");
+    expect(markup).toContain("0 deterministic themes");
     expect(markup).not.toContain("View evidence");
     expect(markup).toContain("Key highlights");
   });
 
   it("fails invalid priorities closed while leaving the rest of the Golden Overview visible", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
-    snapshot.decisionPriorities!.items[1]!.rank = 1;
+    snapshot.decisionPriorities!.items[0]!.rank = 2;
     const markup = renderToStaticMarkup(
       <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
     );
 
-    expect(markup).toContain("Decision priorities unavailable");
+    expect(markup).toContain("Decision themes unavailable");
     expect(markup).toContain("order or Evidence contract is invalid");
     expect(markup).toContain("1531.17");
     expect(markup).toContain("Energy trend");

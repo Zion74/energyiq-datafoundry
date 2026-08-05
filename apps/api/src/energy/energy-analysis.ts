@@ -26,6 +26,33 @@ import {
   type EnergyQueryContext
 } from "./energy-query-context.js";
 
+export type EnergyRollingUsageComparison = {
+  horizon: "rolling_7d" | "rolling_28d";
+  cutoffLocalDate: string;
+  current: {
+    fromLocalDate: string;
+    toLocalDate: string;
+    totalKwh: number | null;
+    completeDayCount: number;
+  };
+  baseline: {
+    fromLocalDate: string;
+    toLocalDate: string;
+    totalKwh: number | null;
+    completeDayCount: number;
+  };
+} & ({
+  status: "available";
+  deltaKwh: number;
+  relativePct: number;
+} | {
+  status: "unavailable";
+  reason: {
+    code: "INCOMPLETE_HORIZON_EVIDENCE" | "NON_POSITIVE_HORIZON_BASELINE";
+    message: string;
+  };
+});
+
 export type EnergyDailyUsageAnomalies = {
   status: "available";
   bundleId: string;
@@ -58,6 +85,7 @@ export type EnergyDailyUsageAnomalies = {
     scopeId: string;
     scopeName: string;
     scopeType: string;
+    rollingComparisons: EnergyRollingUsageComparison[];
     rows: Array<{
       anomalyId: string;
       incidentId: string;
@@ -1859,6 +1887,11 @@ const buildDailyUsageAnomalies = (input: {
         scopeId: series.scopeId,
         scopeName: series.scopeName,
         scopeType: series.scopeType,
+        rollingComparisons: [7, 28].map((horizonDays) => buildRollingUsageComparison({
+          days,
+          cutoffLocalDate: input.dateBuckets.at(-1)?.localDate ?? baselineCutoff,
+          horizonDays: horizonDays as 7 | 28,
+        })),
         rows: input.dateBuckets.map((bucket) => buildDailyUsageAnomalyRow({
           dateBucket: bucket,
           series,
@@ -1876,6 +1909,90 @@ const buildDailyUsageAnomalies = (input: {
     }),
   };
 };
+
+const buildRollingUsageComparison = (input: {
+  days: Map<string, DailyUsageAnomalyDayFact>;
+  cutoffLocalDate: string;
+  horizonDays: 7 | 28;
+}): EnergyRollingUsageComparison => {
+  const current = summarizeRollingUsageWindow(
+    input.days,
+    shiftLocalDate(input.cutoffLocalDate, -(input.horizonDays - 1)),
+    input.cutoffLocalDate,
+  );
+  const baseline = summarizeRollingUsageWindow(
+    input.days,
+    shiftLocalDate(current.fromLocalDate, -input.horizonDays),
+    shiftLocalDate(current.toLocalDate, -input.horizonDays),
+  );
+  const common = {
+    horizon: `rolling_${input.horizonDays}d` as "rolling_7d" | "rolling_28d",
+    cutoffLocalDate: input.cutoffLocalDate,
+    current,
+    baseline,
+  };
+  if (current.completeDayCount !== input.horizonDays
+    || baseline.completeDayCount !== input.horizonDays
+    || current.totalKwh === null
+    || baseline.totalKwh === null) {
+    return {
+      ...common,
+      status: "unavailable",
+      reason: {
+        code: "INCOMPLETE_HORIZON_EVIDENCE",
+        message: `${input.horizonDays} complete current days and ${input.horizonDays} complete prior days are required.`,
+      },
+    };
+  }
+  if (baseline.totalKwh <= 0) {
+    return {
+      ...common,
+      status: "unavailable",
+      reason: {
+        code: "NON_POSITIVE_HORIZON_BASELINE",
+        message: `The prior ${input.horizonDays}-day total must be positive.`,
+      },
+    };
+  }
+  const deltaKwh = current.totalKwh - baseline.totalKwh;
+  return {
+    ...common,
+    status: "available",
+    deltaKwh: round(deltaKwh, 4),
+    relativePct: round(deltaKwh / baseline.totalKwh * 100, 4),
+  };
+};
+
+const summarizeRollingUsageWindow = (
+  days: Map<string, DailyUsageAnomalyDayFact>,
+  fromLocalDate: string,
+  toLocalDate: string,
+): EnergyRollingUsageComparison["current"] => {
+  const windowDays: DailyUsageAnomalyDayFact[] = [];
+  for (let localDate = fromLocalDate; localDate <= toLocalDate; localDate = shiftLocalDate(localDate, 1)) {
+    const day = days.get(localDate);
+    if (day
+      && day.totalKwh !== null
+      && day.expectedMeterIntervalCount > 0
+      && day.validIntervalCount === day.expectedMeterIntervalCount
+      && day.qualityEventCount === 0) {
+      windowDays.push(day);
+    }
+  }
+  const expectedDayCount = localDateDistanceInclusive(fromLocalDate, toLocalDate);
+  return {
+    fromLocalDate,
+    toLocalDate,
+    totalKwh: windowDays.length === expectedDayCount
+      ? round(windowDays.reduce((sum, day) => sum + (day.totalKwh ?? 0), 0), 4)
+      : null,
+    completeDayCount: windowDays.length,
+  };
+};
+
+const localDateDistanceInclusive = (fromLocalDate: string, toLocalDate: string): number => (
+  Math.round((Date.parse(`${toLocalDate}T00:00:00.000Z`) - Date.parse(`${fromLocalDate}T00:00:00.000Z`)) / 86_400_000) + 1
+);
 
 const buildDailyUsageAnomalyRow = (input: {
   dateBucket: DailyDateBucket;

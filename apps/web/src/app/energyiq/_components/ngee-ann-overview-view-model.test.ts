@@ -1596,7 +1596,7 @@ describe("Ngee Ann Overview ViewModel", () => {
     });
   });
 
-  it("selects and formats the server-owned Top 3 decision priorities without reranking them", () => {
+  it("formats one grouped recurrence theme with three deterministic Evidence horizons", () => {
     const view = buildNgeeAnnOverviewViewModel(ngeeAnnGoldenSnapshot());
 
     expect(view.decisionPriorities).toMatchObject({
@@ -1605,14 +1605,20 @@ describe("Ngee Ann Overview ViewModel", () => {
       items: [
         {
           rank: 1,
-          finding: "Ngee Ann Polytechnic used 105.626 kWh above its comparable-day baseline on 2026-06-13.",
+          finding: "Ngee Ann Polytechnic recorded 3 distinct daily usage exceptions in this Snapshot.",
           evidence: "Project / 13 Jun / 168.96 kWh vs 63.34 kWh baseline (+166.8%)",
           impact: "+105.63 kWh above baseline; incident cost unavailable",
           targetIncidentId: "incident:project:2026-06-13",
           confidence: "Complete Evidence",
+          sourceOccurrenceCount: 7,
+          recurrenceDayCount: 3,
+          horizons: [
+            { label: "Latest complete day", comparison: "222 kWh vs 218.88 kWh (+1.4%)" },
+            { label: "Rolling 7 days", comparison: "1531.17 kWh vs 1211.68 kWh (+26.4%)" },
+            { label: "Rolling 28 days", status: "unavailable" },
+          ],
+          driver: "Level 7: +88.1 kWh; Evidence only; not a confirmed root cause.",
         },
-        { rank: 2, targetIncidentId: "incident:project:2026-06-14" },
-        { rank: 3, targetIncidentId: "incident:project:2026-06-11" },
       ],
     });
   });
@@ -1658,7 +1664,7 @@ describe("Ngee Ann Overview ViewModel", () => {
     expect(buildNgeeAnnOverviewViewModel(snapshot).decisionPriorities).toMatchObject({
       status: "partial",
       limitation: "Some candidate dates were suppressed.",
-      items: [{ rank: 1 }, { rank: 2 }, { rank: 3 }],
+      items: [{ rank: 1 }],
     });
   });
 
@@ -1842,9 +1848,11 @@ describe("Ngee Ann Overview ViewModel", () => {
 
   it("withholds only priorities when their order or anomaly Evidence contract is invalid", () => {
     const invalidRank = ngeeAnnGoldenSnapshot();
-    invalidRank.decisionPriorities!.items[1]!.rank = 1;
+    invalidRank.decisionPriorities!.items[0]!.rank = 2;
     const invalidPins = ngeeAnnGoldenSnapshot();
     invalidPins.decisionPriorities!.evidencePins.dataSnapshotId = "snapshot-other";
+    const invalidHorizon = ngeeAnnGoldenSnapshot();
+    invalidHorizon.decisionPriorities!.items[0]!.horizons[1]!.actualKwh = 1;
     const invalidEmptySource = ngeeAnnGoldenSnapshot();
     invalidEmptySource.decisionPriorities = {
       ...invalidEmptySource.decisionPriorities!,
@@ -1854,7 +1862,7 @@ describe("Ngee Ann Overview ViewModel", () => {
     };
     invalidEmptySource.analysis.dailyUsageAnomalies!.ruleRevisionId = "rule-other";
 
-    for (const snapshot of [invalidRank, invalidPins]) {
+    for (const snapshot of [invalidRank, invalidPins, invalidHorizon]) {
       const view = buildNgeeAnnOverviewViewModel(snapshot);
       expect(view.decisionPriorities).toMatchObject({
         status: "unavailable",

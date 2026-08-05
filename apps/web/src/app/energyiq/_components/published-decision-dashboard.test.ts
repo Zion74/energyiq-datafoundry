@@ -216,7 +216,7 @@ describe("published Overview URL reload", () => {
       root.render(React.createElement(PublishedDecisionDashboard));
     });
 
-    expect(container.textContent).toContain("No deterministic priority for this Period");
+    expect(container.textContent).toContain("No deterministic theme for this Period");
     expect(container.textContent).toContain("Key highlights");
     expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
     expect(mockedRouter.replace).not.toHaveBeenCalled();

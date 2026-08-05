@@ -626,67 +626,16 @@ export function ngeeAnnGoldenSnapshot(input: {
 }
 
 function goldenDecisionPriorities(): NonNullable<EnergyProjectAnalysisSnapshotDto["decisionPriorities"]> {
-  const item = (input: {
-    rank: 1 | 2 | 3;
-    localDate: string;
-    from: string;
-    to: string;
-    actualKwh: number;
-    baselineKwh: number;
-    relativePct: number;
-    deltaKwh: number;
-    supportingIncidentIds: string[];
-  }): NonNullable<EnergyProjectAnalysisSnapshotDto["decisionPriorities"]>["items"][number] => {
-    const primaryIncidentId = `incident:project:${input.localDate}`;
-    return {
-      priorityId: `decision-priority:anomaly-bundle-ngee-ann-golden:comparison.daily_usage_above_baseline@1:energy.total_usage_kwh@1:${input.localDate}`,
-      rank: input.rank,
-      source: "daily_usage_anomaly",
-      finding: {
-        code: "DAILY_USAGE_ABOVE_BASELINE",
-        title: `Ngee Ann Polytechnic used ${input.deltaKwh} kWh above its comparable-day baseline on ${input.localDate}.`,
-        actualKwh: input.actualKwh,
-        baselineKwh: input.baselineKwh,
-        relativePct: input.relativePct,
-      },
-      evidence: {
-        bundleId: "anomaly-bundle-ngee-ann-golden",
-        metricId: "energy.total_usage_kwh@1",
-        queryIds: ["time_slot_anomaly_v1"],
-        ruleRevisionId: "comparison.daily_usage_above_baseline@1",
-        period: {
-          from: "2026-06-09T16:00:00.000Z",
-          to: "2026-06-16T16:00:00.000Z",
-        },
-        occurrence: {
-          scopeId: "project",
-          scopeName: "Ngee Ann Polytechnic",
-          scopeType: "project",
-          localDate: input.localDate,
-          from: input.from,
-          to: input.to,
-        },
-        primaryIncidentId,
-        supportingIncidentIds: input.supportingIncidentIds,
-      },
-      impact: {
-        energy: { status: "available", deltaKwh: input.deltaKwh },
-        cost: {
-          status: "unavailable",
-          reason: {
-            code: "INCIDENT_COST_NOT_SUPPORTED_BY_CURRENT_EVIDENCE",
-            message: "The current daily anomaly Evidence does not calculate an incident-level cost delta.",
-          },
-        },
-      },
-      action: {
-        code: "INSPECT_DAILY_USAGE_DRIVERS",
-        label: "Review the hourly and Circuit Evidence for this date before changing schedules or equipment.",
-        targetIncidentId: primaryIncidentId,
-      },
-      confidence: { status: "complete", limitation: null },
-    };
-  };
+  const primaryIncidentId = "incident:project:2026-06-13";
+  const sourceOccurrenceIds = [
+    "incident:level-7:2026-06-11",
+    "incident:level-7:2026-06-12",
+    "incident:level-7:2026-06-13",
+    "incident:level-7:2026-06-14",
+    "incident:project:2026-06-11",
+    primaryIncidentId,
+    "incident:project:2026-06-14",
+  ];
   return {
     status: "available",
     limitation: null,
@@ -700,41 +649,102 @@ function goldenDecisionPriorities(): NonNullable<EnergyProjectAnalysisSnapshotDt
       businessCalendarVersion: "calendar-v1",
       queryIds: ["time_slot_anomaly_v1"],
     },
-    items: [
-      item({
-        rank: 1,
-        localDate: "2026-06-13",
-        from: "2026-06-12T16:00:00.000Z",
-        to: "2026-06-13T16:00:00.000Z",
+    items: [{
+      priorityId: "decision-theme:anomaly-bundle-ngee-ann-golden:comparison.daily_usage_above_baseline@1:energy.total_usage_kwh@1:project",
+      rank: 1,
+      source: "daily_usage_anomaly",
+      finding: {
+        code: "DAILY_USAGE_ABOVE_BASELINE",
+        title: "Ngee Ann Polytechnic recorded 3 distinct daily usage exceptions in this Snapshot.",
         actualKwh: 168.9645,
         baselineKwh: 63.3385,
         relativePct: 166.7643,
-        deltaKwh: 105.626,
-        supportingIncidentIds: ["incident:level-7:2026-06-13", "incident:level-6:2026-06-13"],
-      }),
-      item({
-        rank: 2,
-        localDate: "2026-06-14",
-        from: "2026-06-13T16:00:00.000Z",
-        to: "2026-06-14T16:00:00.000Z",
-        actualKwh: 127.9387,
-        baselineKwh: 63.3385,
-        relativePct: 101.992,
-        deltaKwh: 64.6002,
-        supportingIncidentIds: ["incident:level-7:2026-06-14", "incident:level-6:2026-06-14"],
-      }),
-      item({
-        rank: 3,
-        localDate: "2026-06-11",
-        from: "2026-06-10T16:00:00.000Z",
-        to: "2026-06-11T16:00:00.000Z",
-        actualKwh: 268.399,
-        baselineKwh: 218.885,
-        relativePct: 22.621,
-        deltaKwh: 49.514,
-        supportingIncidentIds: ["incident:level-7:2026-06-11", "incident:level-6:2026-06-11"],
-      }),
-    ],
+      },
+      sourceOccurrenceIds,
+      recurrenceDayCount: 3,
+      horizons: [
+        {
+          horizon: "latest_complete_day",
+          label: "Latest complete day",
+          status: "available",
+          period: { fromLocalDate: "2026-06-16", toLocalDate: "2026-06-16" },
+          actualKwh: 221.9982,
+          baselineKwh: 218.885,
+          deltaKwh: 3.1132,
+          relativePct: 1.4223,
+          limitation: null,
+        },
+        {
+          horizon: "rolling_7d",
+          label: "Rolling 7 days",
+          status: "available",
+          period: { fromLocalDate: "2026-06-10", toLocalDate: "2026-06-16" },
+          actualKwh: 1531.1683,
+          baselineKwh: 1211.6773,
+          deltaKwh: 319.491,
+          relativePct: 26.3677,
+          limitation: null,
+        },
+        {
+          horizon: "rolling_28d",
+          label: "Rolling 28 days",
+          status: "unavailable",
+          period: { fromLocalDate: "2026-05-20", toLocalDate: "2026-06-16" },
+          actualKwh: null,
+          baselineKwh: null,
+          deltaKwh: null,
+          relativePct: null,
+          limitation: "28 complete current days and 28 complete prior days are required.",
+        },
+      ],
+      driver: {
+        status: "available",
+        kind: "official_scope",
+        scopeId: "level-7",
+        label: "Level 7",
+        impactKwh: 88.098,
+        limitation: "Evidence only; not a confirmed root cause.",
+      },
+      evidence: {
+        bundleId: "anomaly-bundle-ngee-ann-golden",
+        metricId: "energy.total_usage_kwh@1",
+        queryIds: ["time_slot_anomaly_v1"],
+        ruleRevisionId: "comparison.daily_usage_above_baseline@1",
+        period: { from: "2026-06-09T16:00:00.000Z", to: "2026-06-16T16:00:00.000Z" },
+        occurrence: {
+          scopeId: "project",
+          scopeName: "Ngee Ann Polytechnic",
+          scopeType: "project",
+          localDate: "2026-06-13",
+          from: "2026-06-12T16:00:00.000Z",
+          to: "2026-06-13T16:00:00.000Z",
+        },
+        primaryIncidentId,
+        supportingIncidentIds: sourceOccurrenceIds.filter((id) => id !== primaryIncidentId),
+      },
+      impact: {
+        energy: { status: "available", deltaKwh: 105.626 },
+        cost: {
+          status: "unavailable",
+          reason: {
+            code: "INCIDENT_COST_NOT_SUPPORTED_BY_CURRENT_EVIDENCE",
+            message: "The current daily anomaly Evidence does not calculate an incident-level cost delta.",
+          },
+        },
+      },
+      action: {
+        code: "INSPECT_DAILY_USAGE_DRIVERS",
+        label: "Review the strongest supported Level, Circuit and hourly Evidence before changing schedules or equipment.",
+        targetIncidentId: primaryIncidentId,
+        targetRef: { kind: "daily_usage_incident", id: primaryIncidentId },
+        nextCheck: "Open the primary incident and compare its hourly and Circuit Evidence with the pinned baseline.",
+        verificationMetricRef: {
+          metricId: "energy.total_usage_kwh@1",
+          label: "Daily and rolling total usage versus the pinned baseline",
+        },
+      },
+      confidence: { status: "complete", limitation: null },
+    }],
   };
 }
 
@@ -1211,6 +1221,38 @@ function goldenDailyUsageAnomalies(
       scopeId: scope.scopeId,
       scopeName: scope.scopeName,
       scopeType: scope.scopeType,
+      rollingComparisons: [
+        {
+          horizon: "rolling_7d" as const,
+          cutoffLocalDate: "2026-06-16",
+          current: {
+            fromLocalDate: "2026-06-10",
+            toLocalDate: "2026-06-16",
+            totalKwh: roundFixture(scope.dailyUsage.reduce((sum, value) => sum + value, 0)),
+            completeDayCount: 7,
+          },
+          baseline: {
+            fromLocalDate: "2026-06-03",
+            toLocalDate: "2026-06-09",
+            totalKwh: scope.scopeId === "project" ? 1211.6773 : scope.scopeId === "level-7" ? 734.6257 : 477.0516,
+            completeDayCount: 7,
+          },
+          status: "available" as const,
+          deltaKwh: scope.scopeId === "project" ? 319.491 : scope.scopeId === "level-7" ? 319.5588 : -0.0678,
+          relativePct: scope.scopeId === "project" ? 26.3677 : scope.scopeId === "level-7" ? 43.4995 : -0.0142,
+        },
+        {
+          horizon: "rolling_28d" as const,
+          cutoffLocalDate: "2026-06-16",
+          current: { fromLocalDate: "2026-05-20", toLocalDate: "2026-06-16", totalKwh: null, completeDayCount: 14 },
+          baseline: { fromLocalDate: "2026-04-22", toLocalDate: "2026-05-19", totalKwh: null, completeDayCount: 0 },
+          status: "unavailable" as const,
+          reason: {
+            code: "INCOMPLETE_HORIZON_EVIDENCE" as const,
+            message: "28 complete current days and 28 complete prior days are required.",
+          },
+        },
+      ],
       rows: dateSpine.map(({ localDate, from, to }, dateIndex) => {
         const day = new Date(`${localDate}T00:00:00.000Z`).getUTCDay();
         const dayType = day === 0 || day === 6 ? "weekend" as const : "weekday" as const;

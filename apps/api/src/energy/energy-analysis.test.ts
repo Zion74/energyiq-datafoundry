@@ -306,6 +306,36 @@ describe("EnergyScopeAnalysis", () => {
       }
       expect(analysis.dailyUsageAnomalies.scopes.map((scope) => scope.scopeId))
         .toEqual(["project", "level-6", "level-7"]);
+      const projectHorizonEvidence = analysis.dailyUsageAnomalies.scopes.find(
+        (scope) => scope.scopeId === "project",
+      )?.rollingComparisons;
+      expect(projectHorizonEvidence).toEqual([
+        {
+          horizon: "rolling_7d",
+          cutoffLocalDate: "2026-06-16",
+          current: {
+            fromLocalDate: "2026-06-10",
+            toLocalDate: "2026-06-16",
+            totalKwh: 1531.1683,
+            completeDayCount: 7,
+          },
+          baseline: {
+            fromLocalDate: "2026-06-03",
+            toLocalDate: "2026-06-09",
+            totalKwh: 1211.6773,
+            completeDayCount: 7,
+          },
+          status: "available",
+          deltaKwh: 319.491,
+          relativePct: 26.3677,
+        },
+        expect.objectContaining({
+          horizon: "rolling_28d",
+          cutoffLocalDate: "2026-06-16",
+          status: "unavailable",
+          reason: expect.objectContaining({ code: "INCOMPLETE_HORIZON_EVIDENCE" }),
+        }),
+      ]);
       const expectationByScope = {
         project: {
           weekdayBaseline: 218.885,

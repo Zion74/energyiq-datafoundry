@@ -19,14 +19,14 @@ export function NgeeAnnDecisionPriorities({
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.11em] text-primary">Act first</p>
           <h3 id="ngee-ann-decision-priorities" className="mt-1 text-base font-semibold text-foreground">
-            Decision priorities
+            Decision themes
           </h3>
           <p className="mt-1 max-w-3xl text-[11px] leading-5 text-muted">
             Server-ranked exceptions from this Snapshot. Evidence is shown before any operational change is made.
           </p>
         </div>
         <span className="rounded-full border border-border bg-surface px-2.5 py-1 text-[11px] font-medium text-muted">
-          {view.items.length} of 3 priorities
+          {view.items.length} deterministic {view.items.length === 1 ? "theme" : "themes"}
         </span>
       </div>
 
@@ -45,7 +45,7 @@ export function NgeeAnnDecisionPriorities({
           {view.items.map((item) => (
             <article key={item.priorityId} className="flex min-w-0 flex-col rounded-xl border border-border bg-surface p-4 shadow-[var(--shadow-card)]">
               <div className="flex items-start justify-between gap-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-primary">Priority {item.rank}</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-primary">Decision theme {item.rank}</p>
                 <span className={[
                   "rounded-full px-2 py-1 text-[11px] font-semibold",
                   item.confidence === "Complete Evidence"
@@ -58,7 +58,24 @@ export function NgeeAnnDecisionPriorities({
               <PriorityField label="Finding" value={item.finding} />
               <PriorityField label="Evidence" value={item.evidence} />
               <PriorityField label="Impact" value={item.impact} />
-              <PriorityField label="Action" value={item.action} />
+              <p className="mt-3 text-[11px] font-semibold text-muted">
+                {item.recurrenceDayCount} distinct exception days; linked Level and Circuit Evidence is preserved
+              </p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3">
+                {item.horizons.map((horizon) => (
+                  <div key={horizon.label} className="rounded-lg border border-border bg-surface-subtle px-3 py-2">
+                    <p className="text-[11px] font-semibold text-foreground">{horizon.label}</p>
+                    <p className="mt-0.5 text-[10px] text-muted">{horizon.period}</p>
+                    <p className="mt-1 text-xs font-semibold tabular-nums text-foreground">{horizon.comparison}</p>
+                    {horizon.limitation ? (
+                      <p className="mt-1 text-[10px] leading-4 text-step-warning">{horizon.limitation}</p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+              <PriorityField label="Strongest supported driver" value={item.driver} />
+              <PriorityField label="Next check" value={item.nextCheck} />
+              <PriorityField label="Verification metric" value={item.verificationMetric} />
               {item.confidenceLimitation ? (
                 <p className="mt-3 text-[11px] leading-5 text-step-warning">Limitation: {item.confidenceLimitation}</p>
               ) : null}
@@ -102,24 +119,24 @@ function priorityStateMessage(view: NgeeAnnDecisionPrioritiesViewModel): { title
   if (view.status === "available") return null;
   if (view.status === "empty") {
     return {
-      title: "No deterministic priority for this Period",
+      title: "No deterministic theme for this Period",
       detail: "The released daily rule found no eligible exception to rank from the current Evidence.",
     };
   }
   if (view.status === "suppressed") {
     return {
-      title: "Priority conclusion suppressed",
+      title: "Theme conclusion suppressed",
       detail: view.limitation ?? "Candidate dates did not pass the released Calendar, coverage, quality or baseline gates.",
     };
   }
   if (view.status === "partial") {
     return {
-      title: view.items.length > 0 ? "Priorities use partial supporting Evidence" : "No complete priority conclusion",
+      title: view.items.length > 0 ? "Themes use partial supporting Evidence" : "No complete theme conclusion",
       detail: view.limitation ?? "Some candidate Evidence is suppressed, partial or unavailable.",
     };
   }
   return {
-    title: "Decision priorities unavailable",
+    title: "Decision themes unavailable",
     detail: view.limitation ?? "The server-owned priority contract is unavailable for this Snapshot.",
   };
 }

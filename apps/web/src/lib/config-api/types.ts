@@ -407,6 +407,32 @@ export type EnergyDailyTotalsDto = {
     scopeId: string;
     scopeName: string;
     scopeType: string;
+    rollingComparisons: Array<{
+      horizon: "rolling_7d" | "rolling_28d";
+      cutoffLocalDate: string;
+      current: {
+        fromLocalDate: string;
+        toLocalDate: string;
+        totalKwh: number | null;
+        completeDayCount: number;
+      };
+      baseline: {
+        fromLocalDate: string;
+        toLocalDate: string;
+        totalKwh: number | null;
+        completeDayCount: number;
+      };
+    } & ({
+      status: "available";
+      deltaKwh: number;
+      relativePct: number;
+    } | {
+      status: "unavailable";
+      reason: {
+        code: "INCOMPLETE_HORIZON_EVIDENCE" | "NON_POSITIVE_HORIZON_BASELINE";
+        message: string;
+      };
+    })>;
     rows: Array<{
       localDate: string;
       from: string;
@@ -620,6 +646,30 @@ export type NgeeAnnDecisionPriorityDto = {
     baselineKwh: number;
     relativePct: number;
   };
+  sourceOccurrenceIds: string[];
+  recurrenceDayCount: number;
+  horizons: Array<{
+    horizon: "latest_complete_day" | "rolling_7d" | "rolling_28d";
+    label: "Latest complete day" | "Rolling 7 days" | "Rolling 28 days";
+    status: "available" | "unavailable";
+    period: { fromLocalDate: string; toLocalDate: string };
+    actualKwh: number | null;
+    baselineKwh: number | null;
+    deltaKwh: number | null;
+    relativePct: number | null;
+    limitation: string | null;
+  }>;
+  driver: {
+    status: "available";
+    kind: "official_scope" | "component_circuit";
+    scopeId: string;
+    label: string;
+    impactKwh: number;
+    limitation: "Evidence only; not a confirmed root cause.";
+  } | {
+    status: "unavailable";
+    limitation: string;
+  };
   evidence: {
     bundleId: string;
     metricId: "energy.total_usage_kwh@1";
@@ -651,6 +701,12 @@ export type NgeeAnnDecisionPriorityDto = {
     code: "INSPECT_DAILY_USAGE_DRIVERS";
     label: string;
     targetIncidentId: string;
+    targetRef: { kind: "daily_usage_incident"; id: string };
+    nextCheck: string;
+    verificationMetricRef: {
+      metricId: "energy.total_usage_kwh@1";
+      label: string;
+    };
   };
   confidence: {
     status: "complete" | "partial";

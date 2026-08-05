@@ -33,6 +33,30 @@ export type NgeeAnnDecisionPriority = {
     baselineKwh: number;
     relativePct: number;
   };
+  sourceOccurrenceIds: string[];
+  recurrenceDayCount: number;
+  horizons: Array<{
+    horizon: "latest_complete_day" | "rolling_7d" | "rolling_28d";
+    label: "Latest complete day" | "Rolling 7 days" | "Rolling 28 days";
+    status: "available" | "unavailable";
+    period: { fromLocalDate: string; toLocalDate: string };
+    actualKwh: number | null;
+    baselineKwh: number | null;
+    deltaKwh: number | null;
+    relativePct: number | null;
+    limitation: string | null;
+  }>;
+  driver: {
+    status: "available";
+    kind: "official_scope" | "component_circuit";
+    scopeId: string;
+    label: string;
+    impactKwh: number;
+    limitation: "Evidence only; not a confirmed root cause.";
+  } | {
+    status: "unavailable";
+    limitation: string;
+  };
   evidence: {
     bundleId: string;
     metricId: "energy.total_usage_kwh@1";
@@ -70,6 +94,12 @@ export type NgeeAnnDecisionPriority = {
     code: "INSPECT_DAILY_USAGE_DRIVERS";
     label: string;
     targetIncidentId: string;
+    targetRef: { kind: "daily_usage_incident"; id: string };
+    nextCheck: string;
+    verificationMetricRef: {
+      metricId: "energy.total_usage_kwh@1";
+      label: string;
+    };
   };
   confidence: {
     status: "complete" | "partial";
@@ -85,7 +115,7 @@ export type NgeeAnnDecisionPriorities = {
 };
 
 type AnomalyOccurrence = {
-  scope: Omit<DailyUsageAnomalyScope, "rows">;
+  scope: Pick<DailyUsageAnomalyScope, "scopeId" | "scopeName" | "scopeType">;
   row: DailyUsageAnomalyRow;
 };
 
@@ -154,54 +184,138 @@ export const buildNgeeAnnDecisionPriorities = (input: {
     },
     row,
   })));
-  const grouped = new Map<string, AnomalyOccurrence[]>();
-  for (const occurrence of occurrences) {
-    const key = [occurrence.row.ruleRevisionId, occurrence.row.metricId, occurrence.row.localDate]
-      .join(":");
-    grouped.set(key, [...(grouped.get(key) ?? []), occurrence]);
-  }
-
-  const candidates = [...grouped.values()].flatMap((group) => {
-    const triggered = group.filter(isCompleteTriggeredOccurrence);
-    if (triggered.length === 0) return [];
-    const selectedOccurrence = triggered.find(
-      (occurrence) => occurrence.scope.scopeId === input.selectedScopeId,
-    );
-    const highestImpactLevel = triggered
-      .filter((occurrence) => occurrence.scope.scopeType.toLocaleLowerCase() === "level")
-      .sort(compareOccurrenceImpact)[0];
-    const primary = selectedOccurrence
-      ?? highestImpactLevel;
-    if (!primary) return [];
-    const supporting = group
-      .filter((occurrence) => occurrence.scope.scopeId !== primary.scope.scopeId)
-      .sort(compareOccurrenceImpact);
-    return [{ primary, supporting, group }];
-  }).sort((left, right) => compareOccurrenceImpact(left.primary, right.primary));
-
-  const items = candidates.slice(0, 3).map<NgeeAnnDecisionPriority>((candidate, index) => {
-    const { primary } = candidate;
-    const confidencePartial = candidate.group.some((occurrence) => (
+  const triggered = occurrences.filter(isCompleteTriggeredOccurrence);
+  const selectedTriggered = triggered
+    .filter((occurrence) => occurrence.scope.scopeId === input.selectedScopeId)
+    .sort(compareOccurrenceImpact);
+  const highestImpactLevels = triggered
+    .filter((occurrence) => occurrence.scope.scopeType.toLocaleLowerCase() === "level")
+    .sort(compareOccurrenceImpact);
+  const primary = selectedTriggered[0] ?? highestImpactLevels[0];
+  const items = primary ? [primary].map<NgeeAnnDecisionPriority>((themePrimary) => {
+    const primaryScope = source.scopes.find((scope) => scope.scopeId === themePrimary.scope.scopeId);
+    const supporting = triggered
+      .filter((occurrence) => occurrence.row.incidentId !== themePrimary.row.incidentId)
+      .sort((left, right) => left.row.localDate.localeCompare(right.row.localDate)
+        || compareOccurrenceImpact(left, right));
+    const sourceOccurrenceIds = [themePrimary, ...supporting]
+      .map((occurrence) => occurrence.row.incidentId)
+      .sort((left, right) => left.localeCompare(right));
+    const recurrenceDayCount = new Set(
+      triggered
+        .filter((occurrence) => occurrence.scope.scopeId === themePrimary.scope.scopeId)
+        .map((occurrence) => occurrence.row.localDate),
+    ).size;
+    const confidencePartial = occurrences.some((occurrence) => (
       occurrence.row.outcome === "suppressed"
       || occurrence.row.detailSeries.some((series) => series.status !== "available")
     ));
+    const latest = primaryScope?.rows
+      .slice()
+      .sort((left, right) => right.localDate.localeCompare(left.localDate))[0];
+    const rollingByHorizon = new Map(
+      (primaryScope?.rollingComparisons ?? []).map((comparison) => [comparison.horizon, comparison]),
+    );
+    const driver = themePrimary.row.detailSeries
+      .filter((series) => series.relationship !== "selected_scope"
+        && series.status === "available"
+        && series.impactKwh !== null)
+      .sort((left, right) => (right.impactKwh ?? 0) - (left.impactKwh ?? 0)
+        || left.seriesId.localeCompare(right.seriesId))[0];
     return {
       priorityId: [
-        "decision-priority",
+        "decision-theme",
         source.bundleId,
         source.ruleRevisionId,
         source.metricId,
-        primary.row.localDate,
+        themePrimary.scope.scopeId,
       ].join(":"),
-      rank: (index + 1) as 1 | 2 | 3,
+      rank: 1,
       source: "daily_usage_anomaly",
       finding: {
         code: "DAILY_USAGE_ABOVE_BASELINE",
-        title: `${primary.scope.scopeName} used ${primary.row.impactKwh} kWh above its comparable-day baseline on ${primary.row.localDate}.`,
-        actualKwh: primary.row.actualKwh,
-        baselineKwh: primary.row.baselineKwh,
-        relativePct: primary.row.relativePct,
+        title: `${themePrimary.scope.scopeName} recorded ${recurrenceDayCount} distinct daily usage exception${recurrenceDayCount === 1 ? "" : "s"} in this Snapshot.`,
+        actualKwh: themePrimary.row.actualKwh,
+        baselineKwh: themePrimary.row.baselineKwh,
+        relativePct: themePrimary.row.relativePct,
       },
+      sourceOccurrenceIds,
+      recurrenceDayCount,
+      horizons: [
+        latest && latest.outcome !== "suppressed" && hasCompleteTriggeredValues(latest)
+          ? {
+              horizon: "latest_complete_day",
+              label: "Latest complete day",
+              status: "available",
+              period: { fromLocalDate: latest.localDate, toLocalDate: latest.localDate },
+              actualKwh: latest.actualKwh,
+              baselineKwh: latest.baselineKwh,
+              deltaKwh: latest.impactKwh,
+              relativePct: latest.relativePct,
+              limitation: null,
+            }
+          : {
+              horizon: "latest_complete_day",
+              label: "Latest complete day",
+              status: "unavailable",
+              period: {
+                fromLocalDate: latest?.localDate ?? source.baselineCutoff,
+                toLocalDate: latest?.localDate ?? source.baselineCutoff,
+              },
+              actualKwh: null,
+              baselineKwh: null,
+              deltaKwh: null,
+              relativePct: null,
+              limitation: latest?.suppressionReason?.message ?? "Complete latest-day Evidence is unavailable.",
+            },
+        ...(["rolling_7d", "rolling_28d"] as const).map((horizon) => {
+          const comparison = rollingByHorizon.get(horizon);
+          const label = horizon === "rolling_7d" ? "Rolling 7 days" as const : "Rolling 28 days" as const;
+          if (!comparison || comparison.status === "unavailable") {
+            return {
+              horizon,
+              label,
+              status: "unavailable" as const,
+              period: {
+                fromLocalDate: comparison?.current.fromLocalDate ?? source.baselineCutoff,
+                toLocalDate: comparison?.current.toLocalDate ?? source.baselineCutoff,
+              },
+              actualKwh: comparison?.current.totalKwh ?? null,
+              baselineKwh: comparison?.baseline.totalKwh ?? null,
+              deltaKwh: null,
+              relativePct: null,
+              limitation: comparison?.reason.message ?? `${label} Evidence is unavailable.`,
+            };
+          }
+          return {
+            horizon,
+            label,
+            status: "available" as const,
+            period: {
+              fromLocalDate: comparison.current.fromLocalDate,
+              toLocalDate: comparison.current.toLocalDate,
+            },
+            actualKwh: comparison.current.totalKwh,
+            baselineKwh: comparison.baseline.totalKwh,
+            deltaKwh: comparison.deltaKwh,
+            relativePct: comparison.relativePct,
+            limitation: null,
+          };
+        }),
+      ],
+      driver: driver
+        ? {
+            status: "available",
+            kind: driver.kind,
+            scopeId: driver.scopeId,
+            label: driver.scopeName,
+            impactKwh: driver.impactKwh!,
+            limitation: "Evidence only; not a confirmed root cause.",
+          }
+        : {
+            status: "unavailable",
+            limitation: "No complete Level or Circuit driver Evidence is available for the primary occurrence.",
+          },
       evidence: {
         bundleId: source.bundleId,
         metricId: DAILY_USAGE_METRIC_ID,
@@ -212,20 +326,20 @@ export const buildNgeeAnnDecisionPriorities = (input: {
           to: input.primaryPeriod.endExclusive,
         },
         occurrence: {
-          scopeId: primary.scope.scopeId,
-          scopeName: primary.scope.scopeName,
-          scopeType: primary.scope.scopeType,
-          localDate: primary.row.localDate,
-          from: primary.row.from,
-          to: primary.row.to,
+          scopeId: themePrimary.scope.scopeId,
+          scopeName: themePrimary.scope.scopeName,
+          scopeType: themePrimary.scope.scopeType,
+          localDate: themePrimary.row.localDate,
+          from: themePrimary.row.from,
+          to: themePrimary.row.to,
         },
-        primaryIncidentId: primary.row.incidentId,
-        supportingIncidentIds: candidate.supporting.map((occurrence) => occurrence.row.incidentId),
+        primaryIncidentId: themePrimary.row.incidentId,
+        supportingIncidentIds: supporting.map((occurrence) => occurrence.row.incidentId),
       },
       impact: {
         energy: {
           status: "available",
-          deltaKwh: primary.row.impactKwh,
+          deltaKwh: themePrimary.row.impactKwh,
         },
         cost: {
           status: "unavailable",
@@ -237,8 +351,14 @@ export const buildNgeeAnnDecisionPriorities = (input: {
       },
       action: {
         code: "INSPECT_DAILY_USAGE_DRIVERS",
-        label: "Review the hourly and Circuit Evidence for this date before changing schedules or equipment.",
-        targetIncidentId: primary.row.incidentId,
+        label: "Review the strongest supported Level, Circuit and hourly Evidence before changing schedules or equipment.",
+        targetIncidentId: themePrimary.row.incidentId,
+        targetRef: { kind: "daily_usage_incident", id: themePrimary.row.incidentId },
+        nextCheck: "Open the primary incident and compare its hourly and Circuit Evidence with the pinned baseline.",
+        verificationMetricRef: {
+          metricId: DAILY_USAGE_METRIC_ID,
+          label: "Daily and rolling total usage versus the pinned baseline",
+        },
       },
       confidence: confidencePartial
         ? {
@@ -250,7 +370,7 @@ export const buildNgeeAnnDecisionPriorities = (input: {
           }
         : { status: "complete", limitation: null },
     };
-  });
+  }) : [];
 
   const suppressedCount = occurrences.filter((occurrence) => occurrence.row.outcome === "suppressed").length;
   if (items.length === 0) {

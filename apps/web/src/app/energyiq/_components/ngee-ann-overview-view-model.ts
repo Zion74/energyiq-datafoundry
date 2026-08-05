@@ -240,6 +240,18 @@ export type NgeeAnnDecisionPrioritiesViewModel = {
     confidence: "Complete Evidence" | "Partial Evidence";
     confidenceLimitation: string | null;
     targetIncidentId: string;
+    sourceOccurrenceCount: number;
+    recurrenceDayCount: number;
+    horizons: Array<{
+      label: string;
+      status: "available" | "unavailable";
+      period: string;
+      comparison: string;
+      limitation: string | null;
+    }>;
+    driver: string;
+    nextCheck: string;
+    verificationMetric: string;
   }>;
 };
 
@@ -1290,6 +1302,24 @@ function buildDecisionPriorities(
       confidence: item.confidence.status === "complete" ? "Complete Evidence" : "Partial Evidence",
       confidenceLimitation: item.confidence.limitation?.message ?? null,
       targetIncidentId: item.action.targetIncidentId,
+      sourceOccurrenceCount: item.sourceOccurrenceIds.length,
+      recurrenceDayCount: item.recurrenceDayCount,
+      horizons: item.horizons.map((horizon) => ({
+        label: horizon.label,
+        status: horizon.status,
+        period: horizon.period.fromLocalDate === horizon.period.toLocalDate
+          ? formatLocalDate(horizon.period.fromLocalDate)
+          : `${formatLocalDate(horizon.period.fromLocalDate)} – ${formatLocalDate(horizon.period.toLocalDate)}`,
+        comparison: horizon.status === "available"
+          ? `${formatDecimal(horizon.actualKwh!, 2)} kWh vs ${formatDecimal(horizon.baselineKwh!, 2)} kWh (${signedDecimal(horizon.relativePct!, 1)}%)`
+          : "Unavailable",
+        limitation: horizon.limitation,
+      })),
+      driver: item.driver.status === "available"
+        ? `${item.driver.label}: ${signedDecimal(item.driver.impactKwh, 2)} kWh; ${item.driver.limitation}`
+        : item.driver.limitation,
+      nextCheck: item.action.nextCheck,
+      verificationMetric: item.action.verificationMetricRef.label,
     })),
   };
 }
@@ -1322,6 +1352,12 @@ function validDecisionPriorityEnvelope(
       || !finiteNumber(item.finding.actualKwh)
       || !finiteNumber(item.finding.baselineKwh)
       || !finiteNumber(item.finding.relativePct)
+      || item.sourceOccurrenceIds.length === 0
+      || new Set(item.sourceOccurrenceIds).size !== item.sourceOccurrenceIds.length
+      || !Number.isSafeInteger(item.recurrenceDayCount)
+      || item.recurrenceDayCount < 1
+      || !validDecisionThemeHorizons(item.horizons)
+      || !validDecisionThemeDriver(item.driver)
       || item.evidence.bundleId !== bundle.bundleId
       || item.evidence.metricId !== bundle.metricId
       || item.evidence.queryIds.length !== 1
@@ -1337,6 +1373,11 @@ function validDecisionPriorityEnvelope(
       || item.action.code !== "INSPECT_DAILY_USAGE_DRIVERS"
       || !item.action.label.trim()
       || item.action.targetIncidentId !== item.evidence.primaryIncidentId
+      || item.action.targetRef.kind !== "daily_usage_incident"
+      || item.action.targetRef.id !== item.action.targetIncidentId
+      || !item.action.nextCheck.trim()
+      || item.action.verificationMetricRef.metricId !== item.evidence.metricId
+      || !item.action.verificationMetricRef.label.trim()
       || !validDecisionPriorityConfidence(item.confidence)
     ) return false;
     priorityIds.add(item.priorityId);
@@ -1354,21 +1395,96 @@ function validDecisionPriorityEnvelope(
       || primary.row.baselineKwh !== item.finding.baselineKwh
       || primary.row.relativePct !== item.finding.relativePct
       || primary.row.impactKwh !== item.impact.energy.deltaKwh
+      || !decisionThemeHorizonsMatchSource(item.horizons, primary.scope)
     ) return false;
     const supportingIds = new Set(item.evidence.supportingIncidentIds);
-    const expectedSupportingIds = bundle.scopes.flatMap((scope) => scope.rows)
-      .filter((row) => row.incidentId !== item.evidence.primaryIncidentId
-        && row.localDate === primary.row.localDate
+    const expectedSourceIds = bundle.scopes.flatMap((scope) => scope.rows)
+      .filter((row) => row.outcome === "triggered"
         && row.ruleRevisionId === primary.row.ruleRevisionId
         && row.metricId === primary.row.metricId)
       .map((row) => row.incidentId);
+    const expectedSupportingIds = expectedSourceIds
+      .filter((incidentId) => incidentId !== item.evidence.primaryIncidentId);
+    const expectedRecurrenceDayCount = new Set(
+      primary.scope.rows
+        .filter((row) => row.outcome === "triggered")
+        .map((row) => row.localDate),
+    ).size;
     if (
       supportingIds.size !== item.evidence.supportingIncidentIds.length
       || supportingIds.has(item.evidence.primaryIncidentId)
       || supportingIds.size !== expectedSupportingIds.length
+      || item.sourceOccurrenceIds.length !== expectedSourceIds.length
+      || item.recurrenceDayCount !== expectedRecurrenceDayCount
     ) return false;
-    return expectedSupportingIds.every((incidentId) => supportingIds.has(incidentId));
+    const sourceIds = new Set(item.sourceOccurrenceIds);
+    return expectedSupportingIds.every((incidentId) => supportingIds.has(incidentId))
+      && expectedSourceIds.every((incidentId) => sourceIds.has(incidentId));
   });
+}
+
+function validDecisionThemeHorizons(
+  horizons: NonNullable<EnergyProjectAnalysisSnapshotDto["decisionPriorities"]>["items"][number]["horizons"],
+): boolean {
+  const expected = ["latest_complete_day", "rolling_7d", "rolling_28d"];
+  if (horizons.length !== expected.length) return false;
+  return horizons.every((horizon, index) => {
+    if (horizon.horizon !== expected[index]
+      || !horizon.label.trim()
+      || !horizon.period.fromLocalDate
+      || !horizon.period.toLocalDate) return false;
+    if (horizon.status === "unavailable") {
+      return horizon.deltaKwh === null
+        && horizon.relativePct === null
+        && Boolean(horizon.limitation?.trim());
+    }
+    return finiteNumber(horizon.actualKwh!)
+      && finiteNumber(horizon.baselineKwh!)
+      && finiteNumber(horizon.deltaKwh!)
+      && finiteNumber(horizon.relativePct!)
+      && horizon.limitation === null;
+  });
+}
+
+function decisionThemeHorizonsMatchSource(
+  horizons: NonNullable<EnergyProjectAnalysisSnapshotDto["decisionPriorities"]>["items"][number]["horizons"],
+  scope: Extract<
+    NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["dailyUsageAnomalies"]>,
+    { status: "available" }
+  >["scopes"][number],
+): boolean {
+  const latest = scope.rows.slice().sort((left, right) => right.localDate.localeCompare(left.localDate))[0];
+  const latestHorizon = horizons[0];
+  if (!latest || !latestHorizon || latestHorizon.period.fromLocalDate !== latest.localDate) return false;
+  if (latestHorizon.status === "available" && (
+    latestHorizon.actualKwh !== latest.actualKwh
+    || latestHorizon.baselineKwh !== latest.baselineKwh
+    || latestHorizon.deltaKwh !== latest.impactKwh
+    || latestHorizon.relativePct !== latest.relativePct
+  )) return false;
+  return horizons.slice(1).every((horizon) => {
+    const comparison = scope.rollingComparisons.find((candidate) => candidate.horizon === horizon.horizon);
+    if (!comparison || comparison.status !== horizon.status) return false;
+    if (comparison.status === "unavailable") {
+      return horizon.actualKwh === comparison.current.totalKwh
+        && horizon.baselineKwh === comparison.baseline.totalKwh
+        && horizon.limitation === comparison.reason.message;
+    }
+    return horizon.actualKwh === comparison.current.totalKwh
+      && horizon.baselineKwh === comparison.baseline.totalKwh
+      && horizon.deltaKwh === comparison.deltaKwh
+      && horizon.relativePct === comparison.relativePct;
+  });
+}
+
+function validDecisionThemeDriver(
+  driver: NonNullable<EnergyProjectAnalysisSnapshotDto["decisionPriorities"]>["items"][number]["driver"],
+): boolean {
+  if (driver.status === "unavailable") return Boolean(driver.limitation.trim());
+  return Boolean(driver.scopeId.trim())
+    && Boolean(driver.label.trim())
+    && finiteNumber(driver.impactKwh)
+    && driver.limitation === "Evidence only; not a confirmed root cause.";
 }
 
 function validDecisionPriorityOutcomeStatus(
