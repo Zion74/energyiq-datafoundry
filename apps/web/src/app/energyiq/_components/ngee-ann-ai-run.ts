@@ -275,16 +275,16 @@ function buildAgentPrompt(input: NgeeAnnAiRunInput): string {
     `Act as an autonomous energy analyst for ${input.projectName}, Scope ${input.scopeName}.`,
     `The governed analysis window is ${input.analysisFrom} through ${input.analysisTo} in ${input.timezone}; data cutoff is ${input.dataCutoff}.`,
     "Inspect the scoped schema first, then query the inspected physical table directly with conditional aggregation. Do not call list_data_sources or preview_table. Do not use WITH/CTEs or EXTRACT syntax.",
-    "Make at most two total run_sql_readonly attempts; rejected or failed calls count toward this limit. A successful SQL call consumes its schema authorization, so if a second SQL is genuinely required, call inspect_schema again immediately before it. Number only successful SQL calls in execution order starting at 1.",
+    "Make at most two total run_sql_readonly attempts; rejected or failed calls count toward this limit. Stop after the first successful SQL call and number it 1. Do not run a second successful query or inspect the schema again after success.",
     "For every official total, filter quality_status='ok' AND official_aggregation_eligible=TRUE. Never report an unfiltered SUM(usage_kwh) as a Project total. For explanatory Level, category, or Circuit breakdowns, filter quality_status='ok', keep them separate from the official total, and never add total and component rows together.",
-    "On the first SQL plan, include every runtime assertion_id listed for each requirement_id, including manual assertions. If the first SQL is rejected, simplify it and retry only once. Never make another SQL attempt after that retry.",
+    "On the first SQL plan, include every runtime assertion_id listed for each requirement_id, including manual assertions. If the first SQL is rejected, simplify it and retry only once. After the first successful SQL result, immediately produce the final JSON and never make another tool call.",
     "Use the official deterministic projection as context, not as a script. Independently inspect the data and return exactly three useful, semantically different Findings.",
     "Across the three Findings, collectively cover the 1d, 7d and 28d horizons. A Finding can cover more than one horizon; do not force one Finding per horizon and do not repeat the same angle or action.",
     "For every Finding state whether it supports, challenges, or is independent of the deterministic projection. Answer What, Why, How, and How to verify.",
     "whyKind must be Evidence, Hypothesis, or Missing Evidence. Do not invent a cause, owner, saving, ROI, device state, or commitment.",
     "Every numeric claim must appear in the result of a successful SQL call from this Run. Cite only the 1-based evidenceSqlIndexes that actually support that Finding. A single SQL result may support multiple Findings. Never attach every SQL call to every Finding by default.",
     "Include the relevant quality status or coverage fields in the SQL result used as Evidence. The supplied deterministic Overview quality summary covers only its primary period and must not be claimed as the quality of the full AI lookback.",
-    "Design the first SQL to return the 1d, 7d and 28d official totals, compatible comparison baselines, and lookback quality fields together. As soon as it provides enough Evidence, immediately return the required strict JSON. Execute a second SQL only for one specific explanatory driver or missing Evidence field; inspect_schema again first. Do not continue exploring after Evidence is sufficient.",
+    "Design the only successful SQL to return the 1d, 7d and 28d official totals, compatible comparison baselines, delta_kwh, relative_pct, and lookback quality fields together. Use that single result for three semantically different cross-horizon Findings and immediately return the required strict JSON. Leave driver exploration to Ask AI deeper; do not execute a second successful SQL.",
     "Return only strict JSON with no markdown or commentary using this shape:",
     '{"findings":[{"relationship":"supports","horizons":["1d","7d"],"title":"...","what":"...","whyKind":"Evidence","why":"...","how":"...","howToVerify":"...","evidenceNote":"what the cited SQL supports or cannot prove","evidenceSqlIndexes":[1]}]}',
     "Official deterministic projection:",
@@ -332,8 +332,8 @@ export function resolveNgeeAnnAiEventStream(input: {
   }
   const tools = collected.tools;
   const sqlTools = tools.filter((tool) => tool.toolName === "run_sql_readonly");
-  if (!collected.schemaValid || sqlTools.length === 0 || sqlTools.length > 2) {
-    return { status: "unavailable", reason: "The AI Analyst did not complete schema and read-only SQL Evidence." };
+  if (!collected.schemaValid || sqlTools.length !== 1) {
+    return { status: "unavailable", reason: "The AI Analyst did not complete exactly one successful read-only SQL Evidence query." };
   }
   const answer = events
     .filter((event) => event.type === "TEXT_MESSAGE_CONTENT")
@@ -349,9 +349,6 @@ export function resolveNgeeAnnAiEventStream(input: {
     .filter((tool): tool is CollectedToolEvidence => Boolean(tool)));
   if (selectedTools.some((selection, index) => selection.length !== generated[index]!.evidenceSqlIndexes.length)) {
     return { status: "unavailable", reason: "A Finding cited SQL Evidence that is not present in this Run." };
-  }
-  if (sqlTools.length > 1 && selectedTools.every((selection) => selection.length === sqlTools.length)) {
-    return { status: "unavailable", reason: "The AI Analyst did not associate SQL Evidence with individual Findings." };
   }
   if (generated.some((finding, index) => narrativeHasUnsupportedNumber(
     finding,

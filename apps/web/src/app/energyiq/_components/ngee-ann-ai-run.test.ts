@@ -60,9 +60,10 @@ describe("Ngee Ann AI Run", () => {
     });
     expect(JSON.stringify(body)).toContain("at most two total run_sql_readonly attempts");
     expect(JSON.stringify(body)).toContain("rejected or failed calls count toward this limit");
+    expect(JSON.stringify(body)).toContain("Stop after the first successful SQL call");
+    expect(JSON.stringify(body)).toContain("Leave driver exploration to Ask AI deeper");
     expect(JSON.stringify(body)).toContain("Do not use WITH/CTEs or EXTRACT syntax");
     expect(JSON.stringify(body)).toContain("official_aggregation_eligible=TRUE");
-    expect(JSON.stringify(body)).toContain("A successful SQL call consumes its schema authorization");
     expect(JSON.stringify(body)).toContain("include every runtime assertion_id");
     expect(JSON.stringify(body)).toContain("retry only once");
   });
@@ -99,8 +100,8 @@ describe("Ngee Ann AI Run", () => {
         tools: [{ toolCallId: "sql-1" }],
       },
     });
-    expect(result.findings[1]!.evidence.tools.map((tool) => tool.toolCallId)).toEqual(["sql-2"]);
-    expect(result.findings[2]!.evidence.tools.map((tool) => tool.toolCallId)).toEqual(["sql-2"]);
+    expect(result.findings[1]!.evidence.tools.map((tool) => tool.toolCallId)).toEqual(["sql-1"]);
+    expect(result.findings[2]!.evidence.tools.map((tool) => tool.toolCallId)).toEqual(["sql-1"]);
     expect(new Set(result.findings.flatMap((finding) => finding.horizons))).toEqual(new Set(["1d", "7d", "28d"]));
   });
 
@@ -134,10 +135,7 @@ describe("Ngee Ann AI Run", () => {
         findings,
         [],
         [],
-        [
-          ...sqlEvents("sql-1", "SELECT SUM(usage_kwh) AS usage_kwh FROM energy_intervals", 168.9645),
-          ...sqlEvents("sql-2", "SELECT AVG(usage_kwh) AS average_kwh FROM energy_intervals", 21.4),
-        ],
+        sqlEvents("sql-1", "SELECT SUM(usage_kwh) AS usage_kwh FROM energy_intervals", 168.9645),
       ),
       input,
       providerProfileId: "profile-1",
@@ -161,14 +159,13 @@ describe("Ngee Ann AI Run", () => {
     expect(result.status).toBe("available");
   });
 
-  it("does not accept attaching every completed SQL call to every Finding", () => {
+  it("rejects a second successful SQL query even when every Finding cites the first", () => {
     const input = requiredInput();
-    const findings = generatedFindings().map((finding) => ({
-      ...finding,
-      evidenceSqlIndexes: [1, 2],
-    }));
     const result = resolveNgeeAnnAiEventStream({
-      eventStream: successfulEventStream(findings),
+      eventStream: successfulEventStream(
+        generatedFindings(),
+        sqlEvents("sql-2", "SELECT AVG(usage_kwh) AS average_kwh FROM energy_intervals", 21.4),
+      ),
       input,
       providerProfileId: "profile-1",
       runId: "run-1",
@@ -176,7 +173,7 @@ describe("Ngee Ann AI Run", () => {
 
     expect(result).toEqual({
       status: "unavailable",
-      reason: "The AI Analyst did not associate SQL Evidence with individual Findings.",
+      reason: "The AI Analyst did not complete exactly one successful read-only SQL Evidence query.",
     });
   });
 
@@ -185,7 +182,10 @@ describe("Ngee Ann AI Run", () => {
     const result = resolveNgeeAnnAiEventStream({
       eventStream: successfulEventStream(
         generatedFindings(),
-        sqlEvents("sql-3", "SELECT MAX(usage_kwh) AS peak_kwh FROM energy_intervals", 34.2),
+        [
+          ...sqlEvents("sql-2", "SELECT AVG(usage_kwh) AS average_kwh FROM energy_intervals", 21.4),
+          ...sqlEvents("sql-3", "SELECT MAX(usage_kwh) AS peak_kwh FROM energy_intervals", 34.2),
+        ],
       ),
       input,
       providerProfileId: "profile-1",
@@ -239,7 +239,15 @@ describe("Ngee Ann AI Run", () => {
       },
     ];
     const result = resolveNgeeAnnAiEventStream({
-      eventStream: successfulEventStream(generatedFindings(), [], rejectedAttempt),
+      eventStream: successfulEventStream(
+        generatedFindings(),
+        [],
+        rejectedAttempt,
+        [
+          ...sqlEvents("sql-1", "SELECT SUM(usage_kwh) AS usage_kwh FROM energy_intervals", 150),
+          ...sqlEvents("sql-2", "SELECT AVG(usage_kwh) AS average_kwh FROM energy_intervals", 21.4),
+        ],
+      ),
       input,
       providerProfileId: "profile-1",
       runId: "run-1",
@@ -268,7 +276,7 @@ describe("Ngee Ann AI Run", () => {
 
     expect(result).toEqual({
       status: "unavailable",
-      reason: "The AI Analyst did not complete schema and read-only SQL Evidence.",
+      reason: "The AI Analyst did not complete exactly one successful read-only SQL Evidence query.",
     });
   });
 
@@ -342,10 +350,11 @@ function successfulEventStream(
       result: schemaResult,
     },
     ...beforeSqlEvents,
-    ...(successfulSqlEvents ?? [
-      ...sqlEvents("sql-1", "SELECT SUM(usage_kwh) AS usage_kwh FROM energy_intervals", 150),
-      ...sqlEvents("sql-2", "SELECT AVG(usage_kwh) AS average_kwh FROM energy_intervals", 21.4),
-    ]),
+    ...(successfulSqlEvents ?? sqlEvents(
+      "sql-1",
+      "SELECT SUM(usage_kwh) AS usage_kwh FROM energy_intervals",
+      150,
+    )),
     ...extraSqlEvents,
     { type: "TEXT_MESSAGE_CONTENT", delta: JSON.stringify({ findings }) },
     { type: "RUN_FINISHED" },
@@ -396,7 +405,7 @@ function generatedFindings() {
       how: "Separate occupied and unoccupied periods for investigation.",
       howToVerify: "Compare the segmented averages using the same cutoff.",
       evidenceNote: "The cited average challenges magnitude, while causality is unproven.",
-      evidenceSqlIndexes: [2],
+      evidenceSqlIndexes: [1],
     },
     {
       relationship: "independent",
@@ -408,7 +417,7 @@ function generatedFindings() {
       how: "Review the coincident circuit and operating context.",
       howToVerify: "Re-run the peak query after the suspected condition is changed.",
       evidenceNote: "The cited maximum identifies timing, not a confirmed driver.",
-      evidenceSqlIndexes: [2],
+      evidenceSqlIndexes: [1],
     },
   ];
 }
