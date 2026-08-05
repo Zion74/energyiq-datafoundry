@@ -18,6 +18,8 @@ describe("Ngee Ann AI Run", () => {
     resetNgeeAnnAiRunsForTests();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
+    delete process.env.NEXT_PUBLIC_DATAFOUNDRY_AUTH_MODE;
+    delete process.env.NEXT_PUBLIC_CONFIG_API_URL;
   });
 
   it("projects bounded cross-dimensional Discovery Evidence from one pinned Snapshot", () => {
@@ -772,6 +774,37 @@ describe("Ngee Ann AI Run", () => {
       reason: "AI Analyst request failed (503).",
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends the password-auth CSRF token when starting an AI Run", async () => {
+    process.env.NEXT_PUBLIC_DATAFOUNDRY_AUTH_MODE = "password";
+    process.env.NEXT_PUBLIC_CONFIG_API_URL = "";
+    vi.stubGlobal("document", { cookie: "df_csrf=csrf-token" });
+    vi.spyOn(configApi, "getRunDefaults").mockResolvedValue({ activeLlmProfileId: "profile-1" } as never);
+    const fetchMock = vi.fn().mockResolvedValue(new Response("", { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await executeNgeeAnnAiRun(requiredInput());
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/copilotkit",
+      expect.objectContaining({
+        credentials: "same-origin",
+        headers: expect.objectContaining({
+          "X-CSRF-Token": "csrf-token",
+        }),
+      }),
+    );
+  });
+
+  it("allows the background AI Run enough time for provider tool round trips", async () => {
+    vi.spyOn(configApi, "getRunDefaults").mockResolvedValue({ activeLlmProfileId: "profile-1" } as never);
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 503 })));
+
+    await executeNgeeAnnAiRun(requiredInput());
+
+    expect(timeoutSpy).toHaveBeenCalledWith(300_000);
   });
 });
 

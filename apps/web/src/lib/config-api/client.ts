@@ -131,7 +131,7 @@ export function getAgentRuntimeUrl(): string {
   );
 }
 
-function csrfHeader(method: string | undefined): Record<string, string> {
+export function configApiCsrfHeaders(method: string | undefined): Record<string, string> {
   if (!isPasswordAuthMode() || !isUnsafeMethod(method)) {
     return {};
   }
@@ -184,7 +184,7 @@ async function requestEnvelope<T>(
     headers: {
       Accept: "application/json",
       ...identityHeaders,
-      ...csrfHeader(init?.method),
+      ...configApiCsrfHeaders(init?.method),
       ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
       ...init?.headers,
     },
@@ -208,7 +208,7 @@ async function requestRaw(path: string, init?: RequestInit): Promise<Response> {
     ...(isPasswordAuthMode() ? { credentials: "same-origin" as RequestCredentials } : {}),
     headers: {
       ...configApiIdentityHeaders(),
-      ...csrfHeader(init?.method),
+      ...configApiCsrfHeaders(init?.method),
       ...init?.headers,
     },
   });

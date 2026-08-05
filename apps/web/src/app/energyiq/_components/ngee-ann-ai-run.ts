@@ -1,6 +1,10 @@
 import type { EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
 import { configApi, getAgentRuntimeUrl } from "../../../lib/config-api";
-import { configApiIdentityHeaders, isPasswordAuthMode } from "../../../lib/config-api/client";
+import {
+  configApiCsrfHeaders,
+  configApiIdentityHeaders,
+  isPasswordAuthMode,
+} from "../../../lib/config-api/client";
 import { parseSchemaToolResult, parseSqlToolResult, sqlFromToolPayload } from "../../data-tasks/tool-result-normalize";
 import {
   buildNgeeAnnDiscoveryEvidenceBundle,
@@ -259,9 +263,10 @@ export async function executeNgeeAnnAiRun(
       Accept: "text/event-stream",
       "Content-Type": "application/json",
       ...configApiIdentityHeaders(),
+      ...configApiCsrfHeaders("POST"),
     },
     body: JSON.stringify(buildAgentRunBody(input, defaults.activeLlmProfileId, runId, threadId)),
-    signal: AbortSignal.timeout(200_000),
+    signal: AbortSignal.timeout(300_000),
   });
   if (!response.ok) {
     return { status: "unavailable", reason: `AI Analyst request failed (${response.status}).` };
