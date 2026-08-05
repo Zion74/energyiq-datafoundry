@@ -123,6 +123,10 @@ describe("NgeeAnnAiSlot", () => {
     expect(dialog?.textContent).toContain("2,688 / 2,688");
     expect(dialog?.textContent).toContain("Quality events0");
     expect(dialog?.textContent).toContain("not the full AI lookback");
+    expect(dialog?.textContent).toContain("Deterministic Snapshot Evidence");
+    expect(dialog?.textContent).toContain("category:load");
+    expect(dialog?.textContent).toContain("Primary Period comparison only");
+    expect(dialog?.textContent).toContain("SQL Evidence 1");
     expect(dialog?.textContent).toContain("SELECT 150 AS usage_kwh");
     expect(dialog?.textContent).not.toContain("SELECT 21.4 AS average_kwh");
   });
@@ -252,7 +256,7 @@ describe("NgeeAnnAiSlot", () => {
 
   it("keeps an AI failure isolated from the deterministic Overview", async () => {
     const snapshot = ngeeAnnGoldenSnapshot();
-    const startRun = vi.fn().mockResolvedValue({ status: "unavailable", reason: "Model timeout" });
+    const startRun = vi.fn().mockResolvedValue({ status: "unavailable", reason: "SECRET_MASTER_KEY_REQUIRED" });
     await act(async () => {
       root.render(
         <NgeeAnnAiSlot snapshot={snapshot} decisionPriorities={decisionPrioritiesFor(snapshot)} startRun={startRun} />,
@@ -260,7 +264,8 @@ describe("NgeeAnnAiSlot", () => {
     });
 
     expect(container.textContent).toContain("AI analysis unavailable");
-    expect(container.textContent).toContain("Model timeout");
+    expect(container.textContent).toContain("AI analysis is temporarily unavailable. The verified Overview remains available.");
+    expect(container.textContent).not.toContain("SECRET_MASTER_KEY_REQUIRED");
     expect(container.textContent).toContain("The deterministic Overview remains available and unchanged");
     expect(container.textContent).not.toContain("Retry AI analysis");
   });
@@ -295,6 +300,7 @@ describe("NgeeAnnAiSlot", () => {
     expect(url.searchParams.get("projectId")).toBe("ngee-ann-polytechnic");
     expect(url.searchParams.get("finding")).toContain("How to verify");
     expect(url.searchParams.get("evidence")).toContain("snapshot-1");
+    expect(url.searchParams.get("evidence")).toContain("category:load");
   });
 });
 
@@ -344,6 +350,17 @@ function finding(
         qualityEventCount: 0,
         limitation: "No data-quality limitation is declared for this Snapshot. This summary covers only the deterministic Overview primary period, not the full AI lookback; use each cited SQL result for query-specific quality.",
       },
+      deterministic: [{
+        id: "category:load",
+        kind: "category",
+        label: "Load",
+        period: "primary",
+        unit: "kWh",
+        values: { changeKwh: 352.2069, comparisonKind: "previous-primary-period" },
+        quality: null,
+        queryIds: ["meter_breakdown_v1", "previous_meter_usage_v1"],
+        limitation: "Primary Period comparison only.",
+      }],
       tools: [{
         toolCallId,
         toolName: "run_sql_readonly",

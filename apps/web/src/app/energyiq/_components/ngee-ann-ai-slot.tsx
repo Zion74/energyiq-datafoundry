@@ -8,6 +8,7 @@ import { EnergyIcon } from "./icons";
 import {
   buildNgeeAnnAiRunInput,
   getOrStartNgeeAnnAiRun,
+  toFriendlyNgeeAnnAiUnavailableReason,
   type NgeeAnnAiFinding,
   type NgeeAnnAiProgress,
   type NgeeAnnAiProgressCallback,
@@ -68,9 +69,9 @@ export function NgeeAnnAiSlot({
             identityKey,
             result: {
               status: "unavailable",
-              reason: error instanceof Error && error.message.trim()
+              reason: toFriendlyNgeeAnnAiUnavailableReason(error instanceof Error && error.message.trim()
                 ? error.message
-                : "The AI Analyst is unavailable for this Snapshot.",
+                : "The AI Analyst is unavailable for this Snapshot."),
             },
           });
         }
@@ -112,7 +113,7 @@ export function NgeeAnnAiSlot({
   if (settled.result.status === "unavailable") {
     return (
       <AiSlotFrame>
-        <AiUnavailable detail={settled.result.reason} />
+        <AiUnavailable detail={toFriendlyNgeeAnnAiUnavailableReason(settled.result.reason)} />
       </AiSlotFrame>
     );
   }
@@ -130,7 +131,7 @@ export function NgeeAnnAiSlot({
         ))}
       </div>
       <p className="mt-3 text-[10px] leading-4 text-muted-light">
-        AI-generated candidates can support, challenge, or extend the deterministic theme. SQL Evidence remains pinned to Snapshot {input.snapshotId} through {input.dataCutoff}.
+        AI-generated candidates can support, challenge, or extend the deterministic theme. Deterministic Snapshot and scoped SQL Evidence remain pinned to Snapshot {input.snapshotId} through {input.dataCutoff}.
       </p>
     </AiSlotFrame>
   );
@@ -161,7 +162,7 @@ function AiSlotFrame({ children }: { children: React.ReactNode }) {
             </span>
           </div>
           <p className="mt-1 text-xs leading-5 text-muted">
-            Three autonomous, SQL-backed angles prepared from the current Project Snapshot.
+            Three autonomous, evidence-backed angles prepared from the current Project Snapshot.
           </p>
         </div>
         <p className="text-[10px] leading-4 text-muted-light">Optional layer / deterministic KPIs stay authoritative</p>
@@ -327,6 +328,45 @@ function AiFindingCard({
               <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-light">Evidence note</p>
               <p className="mt-1 text-xs leading-5 text-muted">{finding.evidenceNote}</p>
             </div>
+            {finding.evidence.deterministic.length > 0 ? (
+              <div className="mt-4 space-y-3" aria-label="Deterministic Snapshot Evidence">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-primary">
+                  Deterministic Snapshot Evidence
+                </p>
+                {finding.evidence.deterministic.map((item) => (
+                  <section key={item.id} className="rounded-lg border border-border p-4" aria-label={`Deterministic Evidence ${item.id}`}>
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold text-foreground">{item.label}</p>
+                        <p className="mt-1 font-mono text-[10px] text-muted-light">{item.id}</p>
+                      </div>
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                        {titleCase(item.kind)}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-[10px] text-muted-light">
+                      {item.period === "primary"
+                        ? "Primary Period"
+                        : item.period
+                          ? `${item.period.from} / ${item.period.to}`
+                          : "Not period-bound"}
+                      {item.unit ? ` / ${item.unit}` : ""}
+                    </p>
+                    <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border bg-surface-subtle px-3 py-2 font-mono text-[10px] leading-5 text-muted">
+                      {JSON.stringify(item.values, null, 2)}
+                    </pre>
+                    {item.queryIds.length > 0 ? (
+                      <p className="mt-2 break-words font-mono text-[10px] text-muted-light">
+                        Queries: {item.queryIds.join(" / ")}
+                      </p>
+                    ) : null}
+                    {item.limitation ? (
+                      <p className="mt-2 text-[10px] leading-4 text-muted">{item.limitation}</p>
+                    ) : null}
+                  </section>
+                ))}
+              </div>
+            ) : null}
             <div className="mt-4 space-y-3">
               {finding.evidence.tools.map((tool, index) => (
                 <section key={tool.toolCallId} className="rounded-lg border border-border p-4" aria-label={`SQL Evidence ${index + 1}`}>
@@ -392,6 +432,7 @@ export function buildAskAiDeeperHref(
       dataCutoff: finding.evidence.dataCutoff,
       note: finding.evidenceNote,
       dataQuality: finding.evidence.dataQuality,
+      deterministicEvidenceIds: finding.evidence.deterministic.map((item) => item.id),
       toolCallIds: finding.evidence.tools.map((tool) => tool.toolCallId),
       auditLogIds: finding.evidence.tools.flatMap((tool) => tool.auditLogId ? [tool.auditLogId] : []),
     }),

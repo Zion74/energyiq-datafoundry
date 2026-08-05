@@ -20,6 +20,77 @@ describe("Ngee Ann AI Run", () => {
     vi.unstubAllGlobals();
   });
 
+  it("projects bounded cross-dimensional Discovery Evidence from one pinned Snapshot", () => {
+    const input = requiredInput();
+    const bundle = input.discoveryEvidence;
+    const ids = bundle.items.map((item) => item.id);
+
+    expect(bundle.identity).toEqual({
+      snapshotId: "snapshot-ngee-ann-golden",
+      dataCutoff: "2026-06-16",
+      projectReleaseId: "release-ngee-ann-golden",
+      hierarchyRevisionId: "hierarchy-v6",
+      meterMappingRevisionId: "mapping-v1",
+      meterFormulaRevisionId: "formula-v1",
+      metricVersion: "metric-v1",
+      businessCalendarVersion: "calendar-v1",
+      timezone: "Asia/Singapore",
+      primaryPeriod: {
+        from: "2026-06-09T16:00:00.000Z",
+        to: "2026-06-16T16:00:00.000Z",
+      },
+    });
+    expect(bundle.items.length).toBeGreaterThan(0);
+    expect(bundle.items.length).toBeLessThanOrEqual(20);
+    expect(JSON.stringify(bundle).length).toBeLessThanOrEqual(6_000);
+    expect(ids).toEqual(expect.arrayContaining([
+      "horizon:1d",
+      "horizon:7d",
+      "horizon:28d",
+      "level:level-7",
+      "category:load",
+      "circuit:mapping-lvl-7-office-load-4-l1p22-l3p25-fan-isol1-2-16",
+      "peak:project",
+      "operating:project",
+      "quality:primary-period",
+      "limitation:external-operational-evidence",
+    ]));
+    expect(ids.filter((id) => id.startsWith("level:"))).toEqual(["level:level-7"]);
+    expect(ids.filter((id) => id.startsWith("category:"))).toEqual(["category:load"]);
+    expect(ids.filter((id) => id.startsWith("circuit:"))).toEqual([
+      "circuit:mapping-lvl-7-office-load-4-l1p22-l3p25-fan-isol1-2-16",
+    ]);
+    expect(bundle.items.find((item) => item.id === "category:load")?.period).toBe("primary");
+    expect(bundle.items.find((item) => item.id === "category:load")?.values).toMatchObject({
+      changeKwh: 352.2069,
+      comparisonKind: "previous-primary-period",
+    });
+  });
+
+  it("omits unavailable discovery dimensions and records Missing Evidence without zero filling", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const validatedPriorities = buildNgeeAnnOverviewViewModel(snapshot).decisionPriorities;
+    snapshot.analysis.categories = [];
+    snapshot.analysis.circuits = [];
+    snapshot.analysis.topCircuits = [];
+    snapshot.analysis.timeBehaviour = undefined;
+    snapshot.analysis.peakBreakdown = {
+      status: "unavailable",
+      reason: { code: "PEAK_INTERVAL_FACTS_UNAVAILABLE", message: "Peak facts unavailable." },
+    };
+    snapshot.analysis.offHours = {
+      status: "unavailable",
+      reason: { code: "BUSINESS_CALENDAR_VERSION_NOT_FOUND", message: "Calendar unavailable." },
+    };
+    const input = buildNgeeAnnAiRunInput(snapshot, validatedPriorities);
+
+    expect(input).not.toBeNull();
+    const items = input!.discoveryEvidence.items;
+    expect(items.some((item) => ["category", "circuit", "time", "peak", "operating"].includes(item.kind))).toBe(false);
+    expect(items.find((item) => item.id === "limitation:external-operational-evidence")?.values)
+      .toMatchObject({ evidenceStatus: "Missing Evidence" });
+  });
+
   it("pins the real Run to the current user, Snapshot and cutoff identity", () => {
     const input = requiredInput();
     const body = buildAgentRunBody(input, "profile-1", "run-1", "thread-1");
@@ -62,9 +133,12 @@ describe("Ngee Ann AI Run", () => {
     expect(JSON.stringify(body)).toContain("at most two total run_sql_readonly attempts");
     expect(JSON.stringify(body)).toContain("rejected or failed calls count toward this limit");
     expect(JSON.stringify(body)).toContain("Stop after the first successful SQL call");
-    expect(JSON.stringify(body)).toContain("execute exactly the following concise cross-horizon Level query");
-    expect(JSON.stringify(body)).toContain("FROM <INSPECTED_TABLE>");
-    expect(JSON.stringify(body)).toContain("Leave every additional dimension or follow-up query to Ask AI deeper");
+    expect(JSON.stringify(body)).toContain("choose the single most decision-useful cross-check");
+    expect(JSON.stringify(body)).toContain("Bounded Ngee Ann Discovery Evidence Bundle");
+    expect(JSON.stringify(body)).toContain("category:load");
+    expect(JSON.stringify(body)).toContain("evidenceRefs");
+    expect(JSON.stringify(body)).not.toContain("execute exactly the following concise cross-horizon Level query");
+    expect(JSON.stringify(body)).not.toContain("Leave every additional dimension or follow-up query to Ask AI deeper");
     expect(JSON.stringify(body)).toContain("Do not use WITH/CTEs or EXTRACT syntax");
     expect(JSON.stringify(body)).toContain("official_aggregation_eligible=TRUE");
     expect(JSON.stringify(body)).toContain("include every runtime assertion_id");
@@ -73,7 +147,7 @@ describe("Ngee Ann AI Run", () => {
       "never invent a numeric threshold, target, tolerance, percentage, duration, or time window",
     );
     expect(JSON.stringify(body)).toContain(
-      "only numeric values directly present in the successful SQL result or authoritative deterministic context",
+      "only numeric values directly present in that Finding's cited Discovery Evidence items or cited SQL result",
     );
     expect(JSON.stringify(body)).toContain(
       "a single-step sum, difference, ratio, or percentage",
@@ -97,25 +171,23 @@ describe("Ngee Ann AI Run", () => {
   it("requires Findings to acknowledge every available deterministic Horizon value", () => {
     const body = buildAgentRunBody(requiredInput(), "profile-1", "run-1", "thread-1");
     const prompt = ((body.body as { messages: Array<{ content: string }> }).messages[0]?.content) ?? "";
-    const ledgerText = prompt
-      .split("Authoritative deterministic Horizon ledger:\n\n")[1]
+    const bundleText = prompt
+      .split("Bounded Ngee Ann Discovery Evidence Bundle:\n\n")[1]
       ?.split("\n\nOfficial deterministic projection:")[0];
 
-    expect(prompt).toContain("check every supplied deterministic Horizon");
+    expect(prompt).toContain("check every supplied kind=horizon item");
     expect(prompt).toContain(
-      "must not describe that Horizon or any supplied value as missing, unavailable, or not provided",
+      "must not describe an available Horizon value as missing, unavailable, or not provided",
     );
     expect(prompt).toContain("may challenge its meaning or add an independent angle");
-    expect(ledgerText).toBeTruthy();
-    expect(JSON.parse(ledgerText ?? "[]")).toContainEqual(expect.objectContaining({
-      horizon: "28d",
-      status: "available",
-      actualKwh: 4904.8659,
-      baselineKwh: 4831.5555,
+    expect(bundleText).toBeTruthy();
+    expect(JSON.parse(bundleText ?? "{}").items).toContainEqual(expect.objectContaining({
+      id: "horizon:28d",
+      values: expect.objectContaining({ actualKwh: 4904.8659, baselineKwh: 4831.5555 }),
     }));
   });
 
-  it("accepts three distinct Findings with collective horizon coverage and Finding-specific SQL Evidence", () => {
+  it("accepts three distinct Findings with Finding-specific deterministic and optional SQL Evidence", () => {
     const input = requiredInput();
     const result = resolveNgeeAnnAiEventStream({
       eventStream: successfulEventStream(),
@@ -144,12 +216,127 @@ describe("Ngee Ann AI Run", () => {
           coveragePct: 100,
           qualityEventCount: 0,
         },
+        deterministic: expect.arrayContaining([
+          expect.objectContaining({ id: "horizon:1d" }),
+          expect.objectContaining({ id: "level:level-7" }),
+        ]),
         tools: [{ toolCallId: "sql-1" }],
       },
     });
-    expect(result.findings[1]!.evidence.tools.map((tool) => tool.toolCallId)).toEqual(["sql-1"]);
-    expect(result.findings[2]!.evidence.tools.map((tool) => tool.toolCallId)).toEqual(["sql-1"]);
+    expect(result.findings[1]!.evidence.deterministic.map((item) => item.id)).toEqual([
+      "horizon:28d",
+      "category:load",
+    ]);
+    expect(result.findings[1]!.evidence.tools).toEqual([]);
+    expect(result.findings[2]!.evidence.tools).toEqual([]);
     expect(new Set(result.findings.flatMap((finding) => finding.horizons))).toEqual(new Set(["1d", "7d", "28d"]));
+  });
+
+  it("rejects a Finding that cites Discovery Evidence outside the current bundle", () => {
+    const findings = generatedFindings();
+    findings[1]!.evidenceRefs = ["category:not-present"];
+
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result).toEqual({
+      status: "unavailable",
+      reason: "A Finding cited deterministic Evidence that is not present in this Snapshot.",
+    });
+  });
+
+  it("rejects a numeric claim copied from an uncited Discovery Evidence item", () => {
+    const findings = generatedFindings();
+    findings[0]!.what = "Category change was 352.2069 kWh.";
+
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result).toEqual({
+      status: "unavailable",
+      reason: "The AI Analyst returned a numeric claim without Finding-specific Evidence.",
+    });
+  });
+
+  it("fails closed when the Discovery Evidence pins drift from the Run Snapshot", () => {
+    const input = requiredInput();
+    input.discoveryEvidence.identity.snapshotId = "another-snapshot";
+
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(),
+      input,
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result).toEqual({
+      status: "unavailable",
+      reason: "The deterministic Discovery Evidence does not match this Run identity.",
+    });
+  });
+
+  it("rejects Horizon-only filler when below-Level or time/operating Evidence is available", () => {
+    const findings = generatedFindings().map((finding) => ({
+      ...finding,
+      evidenceRefs: ["horizon:1d", "horizon:7d", "horizon:28d"],
+    }));
+
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result).toEqual({
+      status: "unavailable",
+      reason: "The AI response did not use the available below-Level or time/operating Evidence.",
+    });
+  });
+
+  it("accepts digits that are part of a cited Level or Circuit identity", () => {
+    const findings = generatedFindings();
+    findings[1]!.what = "Office Load 4 Fan ISOL 1/2 is the leading changed Circuit.";
+    findings[1]!.evidenceRefs = [
+      "horizon:28d",
+      "circuit:mapping-lvl-7-office-load-4-l1p22-l3p25-fan-isol1-2-16",
+    ];
+
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+  });
+
+  it("maps raw runtime error codes to a customer-safe unavailable reason", () => {
+    const eventStream = [
+      { type: "RUN_ERROR", message: "SECRET_MASTER_KEY_REQUIRED" },
+      { type: "RUN_FINISHED" },
+    ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
+
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream,
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result).toEqual({
+      status: "unavailable",
+      reason: "AI analysis is temporarily unavailable. The verified Overview remains available.",
+    });
   });
 
   it("extracts the final Findings object after reasoning that contains JSON and braces", () => {
@@ -261,7 +448,7 @@ describe("Ngee Ann AI Run", () => {
 
     expect(result).toEqual({
       status: "unavailable",
-      reason: "The AI Analyst returned a numeric claim without Finding-specific SQL Evidence.",
+      reason: "The AI Analyst returned a numeric claim without Finding-specific Evidence.",
     });
   });
 
@@ -645,6 +832,7 @@ function generatedFindings() {
       how: "Inspect operations that overlap the elevated period.",
       howToVerify: "Check the next complete day after the operating review.",
       evidenceNote: "The cited aggregation supports the direction, not the root cause.",
+      evidenceRefs: ["horizon:1d", "horizon:7d", "level:level-7"],
       evidenceSqlIndexes: [1],
     },
     {
@@ -657,7 +845,7 @@ function generatedFindings() {
       how: "Separate occupied and unoccupied periods for investigation.",
       howToVerify: "Compare the segmented averages using the same cutoff.",
       evidenceNote: "The cited average challenges magnitude, while causality is unproven.",
-      evidenceSqlIndexes: [1],
+      evidenceRefs: ["horizon:28d", "category:load"],
     },
     {
       relationship: "independent",
@@ -669,7 +857,7 @@ function generatedFindings() {
       how: "Review the coincident circuit and operating context.",
       howToVerify: "Re-run the peak query after the suspected condition is changed.",
       evidenceNote: "The cited maximum identifies timing, not a confirmed driver.",
-      evidenceSqlIndexes: [1],
+      evidenceRefs: ["peak:project", "limitation:external-operational-evidence"],
     },
   ];
 }
