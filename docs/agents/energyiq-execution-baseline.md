@@ -115,6 +115,40 @@ module ownership before implementation.
 - Do not stop or modify services belonging to the deprecated
   `energyiq-rebuild` checkout as part of EnergyIQ DataFoundry ticket work.
 
+### Reproducible Overview restart
+
+Run the tracked restart command only from the Integration Worktree after its API
+and Web production builds are current:
+
+```powershell
+Set-Location D:\Projects\energyiq-datafoundry-integration
+.\scripts\energyiq\restart-overview.ps1 -PreflightOnly
+.\scripts\energyiq\restart-overview.ps1
+```
+
+The command loads a local `.env` into the API child process without copying,
+printing, or forwarding server secrets to the Web child process. It
+prefers the Integration `.env`; when that file is absent, it recognises the
+authorised sibling source checkout at `..\energyiq-datafoundry\.env`. Use
+`-EnvFile <absolute-path>` to select another user-approved local file. Startup
+output reports only `secretMasterKeyConfigured: true/false` about the secret;
+it never emits the value.
+
+The API must pass both `/healthz` and `/ready`; the Web must make
+`/energyiq/overview` reachable on port 3000. On failure, the command terminates
+only the PIDs it created. It refuses to stop a listener whose absolute command
+does not identify this Integration Worktree.
+
+The first migration from an older relative-command restart requires an explicit
+operator check. Inspect the listener PID and command before passing the exact
+PID once as `-ExpectedExistingApiPid` or `-ExpectedExistingWebPid`; never pass a
+PID based on the port number alone. Subsequent restarts use absolute command
+paths and need no migration arguments.
+
+This command does not build, seed, materialise, migrate or validate a real model
+Run. After restart, run the ticket-specific API/AI acceptance separately and
+keep its evidence distinct from process readiness.
+
 ## Cleanup guard
 
 Never use reset, clean, or checkout to discard work. Before reusing or removing
