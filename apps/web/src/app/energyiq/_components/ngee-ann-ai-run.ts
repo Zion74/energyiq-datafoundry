@@ -271,20 +271,35 @@ export function buildAgentRunBody(
 }
 
 function buildAgentPrompt(input: NgeeAnnAiRunInput): string {
+  const latest = input.horizons.find((horizon) => horizon.horizon === "1d")!;
+  const rolling7 = input.horizons.find((horizon) => horizon.horizon === "7d")!;
+  const rolling28 = input.horizons.find((horizon) => horizon.horizon === "28d")!;
+  const recommendedSql = [
+    "SELECT level_node_id,",
+    `SUM(CASE WHEN local_date BETWEEN DATE '${latest.period.fromLocalDate}' AND DATE '${latest.period.toLocalDate}' THEN usage_kwh ELSE 0 END) AS usage_1d_kwh,`,
+    `SUM(CASE WHEN local_date BETWEEN DATE '${rolling7.period.fromLocalDate}' AND DATE '${rolling7.period.toLocalDate}' THEN usage_kwh ELSE 0 END) AS usage_7d_kwh,`,
+    `SUM(CASE WHEN local_date BETWEEN DATE '${rolling28.period.fromLocalDate}' AND DATE '${rolling28.period.toLocalDate}' THEN usage_kwh ELSE 0 END) AS usage_28d_kwh`,
+    "FROM <INSPECTED_TABLE>",
+    `WHERE local_date BETWEEN DATE '${rolling28.period.fromLocalDate}' AND DATE '${rolling28.period.toLocalDate}'`,
+    "AND quality_status='ok' AND official_aggregation_eligible=TRUE",
+    "GROUP BY level_node_id ORDER BY usage_28d_kwh DESC",
+  ].join(" ");
   return [
     `Act as an autonomous energy analyst for ${input.projectName}, Scope ${input.scopeName}.`,
     `The governed analysis window is ${input.analysisFrom} through ${input.analysisTo} in ${input.timezone}; data cutoff is ${input.dataCutoff}.`,
     "Inspect the scoped schema first, then query the inspected physical table directly with conditional aggregation. Do not call list_data_sources or preview_table. Do not use WITH/CTEs or EXTRACT syntax.",
     "Make at most two total run_sql_readonly attempts; rejected or failed calls count toward this limit. Stop after the first successful SQL call and number it 1. Do not run a second successful query or inspect the schema again after success.",
-    "For every official total, filter quality_status='ok' AND official_aggregation_eligible=TRUE. Never report an unfiltered SUM(usage_kwh) as a Project total. For explanatory Level, category, or Circuit breakdowns, filter quality_status='ok', keep them separate from the official total, and never add total and component rows together.",
+    "The supplied deterministic Horizon facts are the authoritative official totals and comparison baselines; do not query or replace them. Never report an unfiltered SUM(usage_kwh) as a Project total and never add total and component rows together.",
     "On the first SQL plan, include every runtime assertion_id listed for each requirement_id, including manual assertions. If the first SQL is rejected, simplify it and retry only once. After the first successful SQL result, immediately produce the final JSON and never make another tool call.",
     "Use the official deterministic projection as context, not as a script. Independently inspect the data and return exactly three useful, semantically different Findings.",
     "Across the three Findings, collectively cover the 1d, 7d and 28d horizons. A Finding can cover more than one horizon; do not force one Finding per horizon and do not repeat the same angle or action.",
     "For every Finding state whether it supports, challenges, or is independent of the deterministic projection. Answer What, Why, How, and How to verify.",
     "whyKind must be Evidence, Hypothesis, or Missing Evidence. Do not invent a cause, owner, saving, ROI, device state, or commitment.",
-    "Every numeric claim must appear in the result of a successful SQL call from this Run. Cite only the 1-based evidenceSqlIndexes that actually support that Finding. A single SQL result may support multiple Findings. Never attach every SQL call to every Finding by default.",
+    "Every numeric claim must be verifiable from either the successful SQL result or the supplied deterministic Horizon, quality, and projection facts. Cite evidenceSqlIndexes [1] for each Finding and state whether its number comes from the SQL driver result or the authoritative deterministic context.",
     "Include the relevant quality status or coverage fields in the SQL result used as Evidence. The supplied deterministic Overview quality summary covers only its primary period and must not be claimed as the quality of the full AI lookback.",
-    "Design the only successful SQL to return the 1d, 7d and 28d official totals, compatible comparison baselines, delta_kwh, relative_pct, and lookback quality fields together. Use that single result for three semantically different cross-horizon Findings and immediately return the required strict JSON. Leave driver exploration to Ask AI deeper; do not execute a second successful SQL.",
+    "After inspect_schema, replace <INSPECTED_TABLE> with the inspected physical table name and execute exactly the following concise cross-horizon Level query without redesigning or expanding it:",
+    recommendedSql,
+    "Use that result together with the authoritative Horizon facts for three semantically different cross-horizon Findings and immediately return the required strict JSON. Leave every additional dimension or follow-up query to Ask AI deeper; do not execute a second successful SQL.",
     "Return only strict JSON with no markdown or commentary using this shape:",
     '{"findings":[{"relationship":"supports","horizons":["1d","7d"],"title":"...","what":"...","whyKind":"Evidence","why":"...","how":"...","howToVerify":"...","evidenceNote":"what the cited SQL supports or cannot prove","evidenceSqlIndexes":[1]}]}',
     "Official deterministic projection:",

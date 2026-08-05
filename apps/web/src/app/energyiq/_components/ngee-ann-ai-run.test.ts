@@ -61,7 +61,9 @@ describe("Ngee Ann AI Run", () => {
     expect(JSON.stringify(body)).toContain("at most two total run_sql_readonly attempts");
     expect(JSON.stringify(body)).toContain("rejected or failed calls count toward this limit");
     expect(JSON.stringify(body)).toContain("Stop after the first successful SQL call");
-    expect(JSON.stringify(body)).toContain("Leave driver exploration to Ask AI deeper");
+    expect(JSON.stringify(body)).toContain("execute exactly the following concise cross-horizon Level query");
+    expect(JSON.stringify(body)).toContain("FROM <INSPECTED_TABLE>");
+    expect(JSON.stringify(body)).toContain("Leave every additional dimension or follow-up query to Ask AI deeper");
     expect(JSON.stringify(body)).toContain("Do not use WITH/CTEs or EXTRACT syntax");
     expect(JSON.stringify(body)).toContain("official_aggregation_eligible=TRUE");
     expect(JSON.stringify(body)).toContain("include every runtime assertion_id");
