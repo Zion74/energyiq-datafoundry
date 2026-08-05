@@ -93,7 +93,7 @@ export function buildNgeeAnnDiscoveryEvidenceBundle(input: {
     id: `level:${scope.nodeId}`,
     kind: "level" as const,
     label: scope.name,
-    period: "primary",
+    period: "primary" as const,
     unit: "kWh" as const,
     values: {
       usageKwh: scope.usageKwh,
@@ -113,7 +113,7 @@ export function buildNgeeAnnDiscoveryEvidenceBundle(input: {
       id: `category:${category.category}`,
       kind: "category" as const,
       label: category.category,
-      period: "primary",
+      period: "primary" as const,
       unit: "kWh" as const,
       values: {
         usageKwh: category.usageKwh,
@@ -136,7 +136,7 @@ export function buildNgeeAnnDiscoveryEvidenceBundle(input: {
     id: `circuit:${circuit.meterNodeId}`,
     kind: "circuit" as const,
     label: circuit.name,
-    period: "primary",
+    period: "primary" as const,
     unit: "kWh" as const,
     values: {
       parentScopeId: circuit.parentScopeId ?? null,
@@ -186,15 +186,18 @@ export function buildNgeeAnnDiscoveryEvidenceBundle(input: {
   const timeBehaviour = analysis.timeBehaviour;
   if (timeBehaviour) {
     const profiles = timeBehaviour.dayProfiles
-      .filter((profile) => profile.scopeId === context.scopeId && profile.status === "available")
+      .filter((profile): profile is Extract<
+        (typeof timeBehaviour.dayProfiles)[number],
+        { status: "available" }
+      > => profile.status === "available" && profile.scopeId === context.scopeId)
       .slice(0, 1);
     for (const profile of profiles) {
       const peak = profile.values.reduce((best, candidate) => candidate.usageKwh > best.usageKwh ? candidate : best);
       items.push({
         id: `time:${profile.scopeId}:${profile.dayType}`,
         kind: "time",
-        label: `${profile.dayType} Project day profile`,
-        period: "primary",
+        label: `${profile.dayType} ${profile.scopeName} day profile`,
+        period: "primary" as const,
         unit: "kWh",
         values: {
           dayType: profile.dayType,
@@ -241,7 +244,7 @@ export function buildNgeeAnnDiscoveryEvidenceBundle(input: {
       id: "operating:project",
       kind: "operating",
       label: "Operating versus non-operating energy",
-      period: "primary",
+      period: "primary" as const,
       unit: "kWh",
       values: {
         operatingKwh: analysis.offHours.operatingKwh,
@@ -260,7 +263,7 @@ export function buildNgeeAnnDiscoveryEvidenceBundle(input: {
     id: "quality:primary-period",
     kind: "quality",
     label: "Primary Period data quality",
-    period: "primary",
+    period: "primary" as const,
     unit: null,
     values: { status: analysis.dataHealth.status },
     quality: qualityFromAnomaly(analysis.dataHealth),
