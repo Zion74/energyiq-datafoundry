@@ -9,30 +9,26 @@ export type EnergySnapshotGuardScope = {
   canonicalIntervalDigest: string;
 };
 
-/**
- * Validate the immutable materialization receipt without rescanning canonical
- * interval rows. The controlled writer computes the count and digest before it
- * commits this state; request-scoped deterministic reads only need to pin that
- * committed receipt once inside their DuckDB transaction.
- */
-export const energySnapshotStateGuardSql = (scope: EnergySnapshotGuardScope): string => `(
-  SELECT CASE
-    WHEN COUNT(*) = 0 THEN error('ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE')
-    WHEN bool_or(state.data_snapshot_id <> ${sqlLiteral(scope.dataSnapshotId)})
-      THEN error('ENERGYIQ_SNAPSHOT_STALE')
-    WHEN bool_and(
-      state.workspace_id = ${sqlLiteral(scope.workspaceId)}
-      AND state.manifest_fingerprint = ${sqlLiteral(scope.manifestFingerprint)}
-      AND state.source_sha256_json = ${sqlLiteral(JSON.stringify(scope.sourceSha256))}
-      AND state.fact_writer_contract_version = ${sqlLiteral(scope.factWriterContractVersion)}
-      AND state.canonical_interval_count = ${scope.canonicalIntervalCount}
-      AND state.canonical_interval_digest = ${sqlLiteral(scope.canonicalIntervalDigest)}
-    ) THEN TRUE
-    ELSE error('ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE')
-  END
-  FROM energy_project_fact_state state
-  WHERE state.project_id = ${sqlLiteral(scope.projectId)}
-)`;
+export type EnergySnapshotIdentityScope = Omit<
+  EnergySnapshotGuardScope,
+  "canonicalIntervalCount" | "canonicalIntervalDigest"
+>;
+
+export const assertEnergySnapshotReceipt = (
+  expected: EnergySnapshotIdentityScope,
+  actual: EnergySnapshotGuardScope,
+): void => {
+  if (actual.dataSnapshotId !== expected.dataSnapshotId) {
+    throw new Error(`ENERGYIQ_SNAPSHOT_STALE:${expected.dataSnapshotId}`);
+  }
+  if (actual.workspaceId !== expected.workspaceId
+    || actual.projectId !== expected.projectId
+    || actual.manifestFingerprint !== expected.manifestFingerprint
+    || actual.factWriterContractVersion !== expected.factWriterContractVersion
+    || JSON.stringify(actual.sourceSha256) !== JSON.stringify(expected.sourceSha256)) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+};
 
 export const energySnapshotGuardSql = (scope: EnergySnapshotGuardScope): string => `(
   SELECT CASE
@@ -40,12 +36,7 @@ export const energySnapshotGuardSql = (scope: EnergySnapshotGuardScope): string 
     WHEN bool_or(state.data_snapshot_id <> ${sqlLiteral(scope.dataSnapshotId)})
       THEN error('ENERGYIQ_SNAPSHOT_STALE')
     WHEN bool_and(
-      state.workspace_id = ${sqlLiteral(scope.workspaceId)}
-      AND state.manifest_fingerprint = ${sqlLiteral(scope.manifestFingerprint)}
-      AND state.source_sha256_json = ${sqlLiteral(JSON.stringify(scope.sourceSha256))}
-      AND state.fact_writer_contract_version = ${sqlLiteral(scope.factWriterContractVersion)}
-      AND state.canonical_interval_count = ${scope.canonicalIntervalCount}
-      AND state.canonical_interval_digest = ${sqlLiteral(scope.canonicalIntervalDigest)}
+      ${energySnapshotReceiptPredicateSql(scope, "state")}
       AND integrity.canonical_interval_count = state.canonical_interval_count
       AND integrity.canonical_interval_digest = state.canonical_interval_digest
     ) THEN TRUE
@@ -57,6 +48,16 @@ export const energySnapshotGuardSql = (scope: EnergySnapshotGuardScope): string 
   ) integrity
   WHERE state.project_id = ${sqlLiteral(scope.projectId)}
 )`;
+
+const energySnapshotReceiptPredicateSql = (
+  scope: EnergySnapshotGuardScope,
+  alias: string,
+): string => `${alias}.workspace_id = ${sqlLiteral(scope.workspaceId)}
+      AND ${alias}.manifest_fingerprint = ${sqlLiteral(scope.manifestFingerprint)}
+      AND ${alias}.source_sha256_json = ${sqlLiteral(JSON.stringify(scope.sourceSha256))}
+      AND ${alias}.fact_writer_contract_version = ${sqlLiteral(scope.factWriterContractVersion)}
+      AND ${alias}.canonical_interval_count = ${scope.canonicalIntervalCount}
+      AND ${alias}.canonical_interval_digest = ${sqlLiteral(scope.canonicalIntervalDigest)}`;
 
 export const energyCanonicalIntervalIntegritySql = (scope: Pick<
   EnergySnapshotGuardScope,

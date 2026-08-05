@@ -13,8 +13,10 @@ import {
   readEnergyFactProjectState,
 } from "./energy-fact-writer.js";
 import {
+  assertEnergySnapshotReceipt,
   energySnapshotGuardSql,
   type EnergySnapshotGuardScope,
+  type EnergySnapshotIdentityScope,
 } from "./energy-snapshot-guard.js";
 
 export type EnergyScopedDataSourceContext = {
@@ -39,6 +41,12 @@ export type EnergyScopedDataSource = {
   revision: number;
   viewName: string;
   databasePath: string;
+};
+
+export type EnergyPreparedScopedDataSource = Omit<EnergyScopedDataSource, "revision"> & {
+  context: EnergyScopedDataSourceContext;
+  expectedSnapshotScope: EnergySnapshotIdentityScope;
+  sessionDatasourceId: string;
 };
 
 export type EnergyFactCoverage = {
@@ -123,18 +131,39 @@ export const ensureEnergyScopedDataSource = async (input: {
   context: EnergyScopedDataSourceContext;
   databasePath?: string;
 }): Promise<EnergyScopedDataSource> => {
-  const databasePath = input.databasePath
-    ? resolve(input.databasePath)
-    : resolveEnergyFactStorePath(input.context.workspaceId);
-  if (!existsSync(databasePath)) {
-    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
-  }
+  const prepared = await prepareEnergyScopedDataSource(input);
   const factScope = await resolveValidatedSnapshotFactScope({
     metadataStore: input.metadataStore,
     workspaceId: input.context.workspaceId,
     projectId: input.context.projectId,
     dataSnapshotId: input.context.dataSnapshotId,
-    databasePath,
+    databasePath: prepared.databasePath,
+  });
+  return registerPreparedEnergyScopedDataSource({
+    metadataStore: input.metadataStore,
+    userId: input.userId,
+    prepared,
+    factScope,
+  });
+};
+
+export const prepareEnergyScopedDataSource = async (input: {
+  metadataStore: MetadataStore;
+  userId: string;
+  context: EnergyScopedDataSourceContext;
+  databasePath?: string;
+}): Promise<EnergyPreparedScopedDataSource> => {
+  const databasePath = normalizeEnergyFactStorePath(
+    input.databasePath ?? resolveEnergyFactStorePath(input.context.workspaceId),
+  );
+  if (databasePath !== ":memory:" && !existsSync(databasePath)) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+  const expectedSnapshotScope = resolveSnapshotIdentityScope({
+    metadataStore: input.metadataStore,
+    workspaceId: input.context.workspaceId,
+    projectId: input.context.projectId,
+    dataSnapshotId: input.context.dataSnapshotId,
   });
 
   const signature = createHash("sha256")
@@ -147,7 +176,57 @@ export const ensureEnergyScopedDataSource = async (input: {
     .slice(0, 20);
   const viewName = `energy_scope_${signature}`;
   const datasourceId = `energy-scope-${signature}`;
-  await createScopedView(databasePath, viewName, input.context, factScope);
+  const sessionSignature = createHash("sha256")
+    .update(JSON.stringify({ databasePath, expectedSnapshotScope }))
+    .digest("hex")
+    .slice(0, 20);
+  const sessionDatasourceId = `energy-snapshot-session-${sessionSignature}`;
+  try {
+    await createScopedView(databasePath, viewName, input.context, expectedSnapshotScope);
+  } catch {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+  const sessionConfig = {
+    path: databasePath,
+    mode: "readonly",
+    defaultEnabled: false,
+    queryPolicy: { maxRows: 1, timeoutMs: 10000 },
+    introspection: { tableAllowlist: [] },
+    energyQueryScope: expectedSnapshotScope,
+  };
+  const existingSession = input.metadataStore.dataSources.find({
+    user_id: input.userId,
+    datasource_id: sessionDatasourceId,
+  });
+  if (existingSession?.config_json !== JSON.stringify(sessionConfig)) {
+    input.metadataStore.dataSources.create({
+      user_id: input.userId,
+      id: sessionDatasourceId,
+      name: `EnergyIQ snapshot session · ${input.context.projectId}`,
+      type: "duckdb",
+      config: sessionConfig,
+      description: "Server-resolved bootstrap for one trusted EnergyIQ Snapshot read session.",
+    });
+  }
+
+  return {
+    datasourceId,
+    viewName,
+    databasePath,
+    context: input.context,
+    expectedSnapshotScope,
+    sessionDatasourceId,
+  };
+};
+
+export const registerPreparedEnergyScopedDataSource = (input: {
+  metadataStore: MetadataStore;
+  userId: string;
+  prepared: EnergyPreparedScopedDataSource;
+  factScope: EnergySnapshotGuardScope;
+}): EnergyScopedDataSource => {
+  assertEnergySnapshotReceipt(input.prepared.expectedSnapshotScope, input.factScope);
+  const { context, databasePath, datasourceId, viewName } = input.prepared;
 
   const config = {
     path: databasePath,
@@ -165,23 +244,23 @@ export const ensureEnergyScopedDataSource = async (input: {
       tableAllowlist: [viewName]
     },
     energyQueryScope: {
-      workspaceId: input.context.workspaceId,
-      projectId: input.context.projectId,
-      scopeId: input.context.scopeId,
-      resource: input.context.resource,
-      from: input.context.from,
-      to: input.context.to,
+      workspaceId: context.workspaceId,
+      projectId: context.projectId,
+      scopeId: context.scopeId,
+      resource: context.resource,
+      from: context.from,
+      to: context.to,
       endExclusive: true,
-      hierarchyRevisionId: input.context.hierarchyRevisionId,
-      meterMappingRevisionId: input.context.meterMappingRevisionId,
-      meterFormulaRevisionId: input.context.meterFormulaRevisionId,
-      dataSnapshotId: input.context.dataSnapshotId,
-      manifestFingerprint: factScope.manifestFingerprint,
-      sourceSha256: factScope.sourceSha256,
-      factWriterContractVersion: ENERGY_FACT_WRITER_CONTRACT_VERSION,
-      canonicalIntervalCount: factScope.canonicalIntervalCount,
-      canonicalIntervalDigest: factScope.canonicalIntervalDigest,
-      metricVersion: input.context.metricVersion
+      hierarchyRevisionId: context.hierarchyRevisionId,
+      meterMappingRevisionId: context.meterMappingRevisionId,
+      meterFormulaRevisionId: context.meterFormulaRevisionId,
+      dataSnapshotId: context.dataSnapshotId,
+      manifestFingerprint: input.factScope.manifestFingerprint,
+      sourceSha256: input.factScope.sourceSha256,
+      factWriterContractVersion: input.factScope.factWriterContractVersion,
+      canonicalIntervalCount: input.factScope.canonicalIntervalCount,
+      canonicalIntervalDigest: input.factScope.canonicalIntervalDigest,
+      metricVersion: context.metricVersion
     }
   };
   const existing = input.metadataStore.dataSources.find({
@@ -193,7 +272,7 @@ export const ensureEnergyScopedDataSource = async (input: {
     : input.metadataStore.dataSources.create({
         user_id: input.userId,
         id: datasourceId,
-        name: `EnergyIQ trusted scope · ${input.context.projectId}`,
+        name: `EnergyIQ trusted scope · ${context.projectId}`,
         type: "duckdb",
         config,
         description: "Server-resolved EnergyIQ project, hierarchy, resource, and time scope."
@@ -211,7 +290,7 @@ const createScopedView = async (
   databasePath: string,
   viewName: string,
   context: EnergyScopedDataSourceContext,
-  factScope: EnergySnapshotGuardScope,
+  factScope: Pick<EnergySnapshotIdentityScope, "sourceSha256">,
 ): Promise<void> => {
   const attachments = [...new Map((context.meterAttachments ?? []).map((attachment) => [
     attachment.meterPointId,
@@ -290,7 +369,7 @@ export const assertEnergyCurrentSnapshotFacts = async (input: {
     : input.databasePath
       ? resolve(input.databasePath)
       : resolveEnergyFactStorePath(input.workspaceId);
-  if (!existsSync(databasePath)) {
+  if (databasePath !== ":memory:" && !existsSync(databasePath)) {
     throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
   }
   await resolveValidatedSnapshotFactScope({
@@ -309,6 +388,19 @@ const resolveValidatedSnapshotFactScope = async (input: {
   dataSnapshotId: string;
   databasePath: string;
 }): Promise<EnergySnapshotGuardScope> => {
+  const expected = resolveSnapshotIdentityScope(input);
+  const state = await readEnergyFactProjectState({ databasePath: input.databasePath, projectId: input.projectId });
+  if (!state) throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  assertEnergySnapshotReceipt(expected, state);
+  return state;
+};
+
+const resolveSnapshotIdentityScope = (input: {
+  metadataStore: MetadataStore;
+  workspaceId: string;
+  projectId: string;
+  dataSnapshotId: string;
+}): EnergySnapshotIdentityScope => {
   const project = input.metadataStore.energyIq.getProject(input.projectId);
   if (project.workspace_id !== input.workspaceId || project.data_snapshot_id !== input.dataSnapshotId) {
     throw new Error(`ENERGYIQ_SNAPSHOT_STALE:${project.data_snapshot_id}`);
@@ -328,25 +420,14 @@ const resolveValidatedSnapshotFactScope = async (input: {
   } catch {
     throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
   }
-  const state = await readEnergyFactProjectState({ databasePath: input.databasePath, projectId: input.projectId });
-  if (!state) throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
-  if (state.dataSnapshotId !== input.dataSnapshotId) {
-    throw new Error(`ENERGYIQ_SNAPSHOT_STALE:${state.dataSnapshotId}`);
-  }
-  if (state.workspaceId !== factScope.workspaceId
-    || state.projectId !== factScope.projectId
-    || state.manifestFingerprint !== factScope.manifestFingerprint
-    || state.factWriterContractVersion !== ENERGY_FACT_WRITER_CONTRACT_VERSION
-    || JSON.stringify(state.sourceSha256) !== JSON.stringify(factScope.sourceSha256)) {
-    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
-  }
   return {
     ...factScope,
     factWriterContractVersion: ENERGY_FACT_WRITER_CONTRACT_VERSION,
-    canonicalIntervalCount: state.canonicalIntervalCount,
-    canonicalIntervalDigest: state.canonicalIntervalDigest,
   };
 };
+
+const normalizeEnergyFactStorePath = (databasePath: string): string =>
+  databasePath === ":memory:" ? databasePath : resolve(databasePath);
 
 const snapshotGuardSql = (scope: EnergySnapshotGuardScope): string => energySnapshotGuardSql(scope);
 

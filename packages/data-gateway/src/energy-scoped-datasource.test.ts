@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { createMetadataStore } from "@datafoundry/metadata";
 import { LocalDataGateway } from "./index.js";
+import { DuckDbAdapter } from "./adapters/local-sql-adapters.js";
 import { getDuckDbDatabase } from "./duckdb-database-cache.js";
 import {
   ENERGY_FACT_WRITER_CONTRACT_VERSION,
@@ -17,6 +18,52 @@ import {
 } from "./energy-scoped-datasource.js";
 
 describe("Energy scoped datasource Snapshot guard", () => {
+  it("preserves the DuckDB :memory: sentinel instead of resolving it as a filesystem path", async () => {
+    const adapter = new DuckDbAdapter({ path: ":memory:" });
+    await expect(adapter.runSqlReadonly({
+      sql: "SELECT 1 AS sentinel_value",
+      limit: 10,
+    })).resolves.toMatchObject({ rows: [[1]] });
+  });
+
+  it("settles an executing DuckDB timeout before releasing its connection", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-duckdb-timeout-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.workspaces.upsert({ id: "workspace-timeout", owner_user_id: "dev-user", name: "Timeout", kind: "customer" });
+      metadata.dataSources.create({
+        user_id: "dev-user",
+        id: "duckdb-timeout",
+        name: "DuckDB timeout",
+        type: "duckdb",
+        config: { path: join(root, "timeout.duckdb") },
+      });
+      const gateway = new LocalDataGateway(metadata);
+      await expect(gateway.runSqlReadonly({
+        user_id: "dev-user",
+        workspace_id: "workspace-timeout",
+        datasource_id: "duckdb-timeout",
+        sql: "SELECT SUM(i) AS total FROM range(100000000) values(i)",
+        timeout_ms: 20,
+      })).rejects.toThrow("SQL_TIMEOUT");
+      await expect(gateway.runSqlReadonly({
+        user_id: "dev-user",
+        workspace_id: "workspace-timeout",
+        datasource_id: "duckdb-timeout",
+        sql: "SELECT 1 AS released",
+        timeout_ms: 1_000,
+      })).resolves.toMatchObject({ rows: [[1]] });
+    } finally {
+      metadata.close();
+      try {
+        rmSync(root, { recursive: true, force: true });
+      } catch (error) {
+        if (!(process.platform === "win32" && error instanceof Error && "code" in error
+          && (error.code === "EPERM" || error.code === "EBUSY"))) throw error;
+      }
+    }
+  });
+
   it("fails closed with the stable facts-unavailable code when the fact store is missing", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-scoped-missing-store-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
@@ -152,6 +199,22 @@ describe("Energy scoped datasource Snapshot guard", () => {
           },
         },
       });
+      let queuedSqlExecutionCount = 0;
+      const timeoutDatabase = await getDuckDbDatabase(databasePath);
+      timeoutDatabase.register_udf("t08a_queued_sql_probe", "INTEGER", () => {
+        queuedSqlExecutionCount += 1;
+        return 1;
+      });
+      metadata.dataSources.create({
+        user_id: "dev-user",
+        id: "energy-scope-timeout",
+        name: "Timeout snapshot scope",
+        type: "duckdb",
+        config: {
+          ...scopedConfig,
+          introspection: { tableAllowlist: [] },
+        },
+      });
       await expect(gateway.withEnergySnapshotReadSession({
         user_id: "dev-user",
         workspace_id: "workspace-1",
@@ -185,6 +248,58 @@ describe("Energy scoped datasource Snapshot guard", () => {
         { rows: [[1]] },
         { rows: [[0]] },
       ]);
+
+      const timeoutSessionStartedAt = performance.now();
+      await expect(gateway.withEnergySnapshotReadSession({
+        user_id: "dev-user",
+        workspace_id: "workspace-1",
+        datasource_id: "energy-scope-timeout",
+      }, async () => {
+        const executing = gateway.runSqlReadonly({
+          user_id: "dev-user",
+          workspace_id: "workspace-1",
+          datasource_id: "energy-scope-timeout",
+          sql: "SELECT SUM(i) AS total FROM range(100000000) values(i)",
+          timeout_ms: 100,
+        });
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
+        const queued = gateway.runSqlReadonly({
+          user_id: "dev-user",
+          workspace_id: "workspace-1",
+          datasource_id: "energy-scope-timeout",
+          sql: "SELECT t08a_queued_sql_probe() AS forbidden_execution",
+          timeout_ms: 20,
+        });
+        const cancellation = new AbortController();
+        const cancelledWhileQueued = gateway.runSqlReadonly({
+          user_id: "dev-user",
+          workspace_id: "workspace-1",
+          datasource_id: "energy-scope-timeout",
+          sql: "SELECT t08a_queued_sql_probe() AS forbidden_cancelled_execution",
+          signal: cancellation.signal,
+        });
+        cancellation.abort(new Error("RUN_CANCELLED"));
+        const [executingResult, queuedResult, cancelledResult] = await Promise.allSettled([
+          executing,
+          queued,
+          cancelledWhileQueued,
+        ]);
+        expect(executingResult).toMatchObject({ status: "rejected", reason: { message: "SQL_TIMEOUT" } });
+        expect(queuedResult).toMatchObject({ status: "rejected", reason: { message: "SQL_TIMEOUT" } });
+        expect(cancelledResult).toMatchObject({ status: "rejected", reason: { message: "RUN_CANCELLED" } });
+      })).resolves.toBeUndefined();
+      expect(performance.now() - timeoutSessionStartedAt).toBeLessThan(2_000);
+      expect(queuedSqlExecutionCount).toBe(0);
+      await expect(gateway.withEnergySnapshotReadSession({
+        user_id: "dev-user",
+        workspace_id: "workspace-1",
+        datasource_id: scopedA.datasourceId,
+      }, async () => await gateway.runSqlReadonly({
+        user_id: "dev-user",
+        workspace_id: "workspace-1",
+        datasource_id: scopedA.datasourceId,
+        sql: `SELECT COUNT(*) AS interval_count FROM ${scopedA.viewName}`,
+      }))).resolves.toMatchObject({ rows: [[1]] });
 
       await runDuckDbSql(databasePath, `
         DELETE FROM energy_interval_facts

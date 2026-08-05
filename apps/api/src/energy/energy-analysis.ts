@@ -1,5 +1,7 @@
 import {
   ensureEnergyScopedDataSource,
+  prepareEnergyScopedDataSource,
+  registerPreparedEnergyScopedDataSource,
   readEnergyFactCoverage,
   type EnergyScopedDataSource,
   type LocalDataGateway
@@ -819,7 +821,10 @@ export const executeEnergyScopeAnalysis = async (input: {
     resource: input.context.resource,
     expectedMeterMappingRevisionId: input.context.meterMappingRevisionId
   });
-  const scoped = await ensureEnergyScopedDataSource({
+  const databasePath = input.databasePath
+    ?? process.env.ENERGYIQ_DUCKDB_PATH
+    ?? join(resolve(dirname(fileURLToPath(import.meta.url)), "../../../.."), "storage", "energy", input.context.workspaceId, "energy.duckdb");
+  const scopedPrepared = await prepareEnergyScopedDataSource({
     metadataStore: input.metadataStore,
     userId: input.userId,
     context: {
@@ -837,9 +842,7 @@ export const executeEnergyScopeAnalysis = async (input: {
       dataSnapshotId: input.context.dataSnapshotId,
       metricVersion: input.context.metricVersion
     },
-    databasePath: input.databasePath
-      ?? process.env.ENERGYIQ_DUCKDB_PATH
-      ?? join(resolve(dirname(fileURLToPath(import.meta.url)), "../../../.."), "storage", "energy", input.context.workspaceId, "energy.duckdb")
+    databasePath,
   });
 
   const hierarchy = resolveEnergyPublishedHierarchyNodes(
@@ -854,7 +857,7 @@ export const executeEnergyScopeAnalysis = async (input: {
   const periodDurationMs = Date.parse(input.context.to) - Date.parse(input.context.from);
   const previousFrom = new Date(Date.parse(input.context.from) - periodDurationMs).toISOString();
   const previousTo = input.context.from;
-  const previousScoped = await ensureEnergyScopedDataSource({
+  const previousScopedPrepared = await prepareEnergyScopedDataSource({
     metadataStore: input.metadataStore,
     userId: input.userId,
     context: {
@@ -872,7 +875,7 @@ export const executeEnergyScopeAnalysis = async (input: {
       dataSnapshotId: input.context.dataSnapshotId,
       metricVersion: input.context.metricVersion
     },
-    databasePath: scoped.databasePath
+    databasePath: scopedPrepared.databasePath
   });
   const dailyUsageAnomalyPreparation = prepareDailyUsageAnomaly({
     metadataStore: input.metadataStore,
@@ -880,8 +883,8 @@ export const executeEnergyScopeAnalysis = async (input: {
     ...(input.projectReleaseId ? { projectReleaseId: input.projectReleaseId } : {}),
     ruleRevisions,
   });
-  const historicalScoped = dailyUsageAnomalyPreparation.status === "ready"
-    ? await ensureEnergyScopedDataSource({
+  const historicalScopedPrepared = dailyUsageAnomalyPreparation.status === "ready"
+    ? await prepareEnergyScopedDataSource({
         metadataStore: input.metadataStore,
         userId: input.userId,
         context: {
@@ -899,15 +902,35 @@ export const executeEnergyScopeAnalysis = async (input: {
           dataSnapshotId: input.context.dataSnapshotId,
           metricVersion: input.context.metricVersion,
         },
-        databasePath: scoped.databasePath,
+        databasePath: scopedPrepared.databasePath,
       })
     : undefined;
 
   return await input.dataGateway.withEnergySnapshotReadSession({
     user_id: input.userId,
     workspace_id: input.context.workspaceId,
-    datasource_id: scoped.datasourceId,
-  }, async () => {
+    datasource_id: scopedPrepared.sessionDatasourceId,
+  }, async (factScope) => {
+  const scoped = registerPreparedEnergyScopedDataSource({
+    metadataStore: input.metadataStore,
+    userId: input.userId,
+    prepared: scopedPrepared,
+    factScope,
+  });
+  const previousScoped = registerPreparedEnergyScopedDataSource({
+    metadataStore: input.metadataStore,
+    userId: input.userId,
+    prepared: previousScopedPrepared,
+    factScope,
+  });
+  const historicalScoped = historicalScopedPrepared
+    ? registerPreparedEnergyScopedDataSource({
+        metadataStore: input.metadataStore,
+        userId: input.userId,
+        prepared: historicalScopedPrepared,
+        factScope,
+      })
+    : undefined;
 
   const meterResult = await input.dataGateway.runSqlReadonly({
     user_id: input.userId,
