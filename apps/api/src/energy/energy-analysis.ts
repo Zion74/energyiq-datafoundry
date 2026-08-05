@@ -528,6 +528,18 @@ export type EnergyLatestCompletePeriodSelection = {
   };
 };
 
+export type EnergyCurrentOverviewPeriodSelection = {
+  periodDays: 28;
+  cutoffLocalDate: string;
+  intervalMinutes: number;
+  period: {
+    localFrom: string;
+    localToExclusive: string;
+    from: string;
+    to: string;
+  };
+};
+
 type MeterAggregate = {
   meterNodeId: string;
   scopeId: string;
@@ -659,6 +671,7 @@ const GOLDEN_SELECTION_POLICY =
   "highest current coverage, then previous-period coverage, then fewest quality events, then latest" as const;
 
 const LATEST_COMPLETE_PERIOD_DAYS = 7 as const;
+const CURRENT_OVERVIEW_PERIOD_DAYS = 28 as const;
 
 type EnergyPeriodSelectionInput = {
   metadataStore: MetadataStore;
@@ -670,7 +683,8 @@ type EnergyPeriodSelectionInput = {
 
 type EnergyPeriodCoverageNotFoundCode =
   | "ENERGYIQ_GOLDEN_COVERAGE_NOT_FOUND"
-  | "ENERGYIQ_LATEST_COMPLETE_PERIOD_COVERAGE_NOT_FOUND";
+  | "ENERGYIQ_LATEST_COMPLETE_PERIOD_COVERAGE_NOT_FOUND"
+  | "ENERGYIQ_CURRENT_OVERVIEW_COVERAGE_NOT_FOUND";
 
 export const selectEnergyGoldenPeriod = async (input: EnergyPeriodSelectionInput & {
   periodDays?: number;
@@ -766,6 +780,42 @@ export const selectEnergyLatestCompletePeriod = async (
       localToExclusive: stringAt(row, 1),
       from: isoAt(row, 2),
       to: isoAt(row, 3),
+    },
+  };
+};
+
+export const selectEnergyCurrentOverviewPeriod = async (
+  input: EnergyPeriodSelectionInput,
+): Promise<EnergyCurrentOverviewPeriodSelection> => {
+  const { scoped, aggregateMeterNodeIds } = await prepareEnergyPeriodSelection(
+    input,
+    "ENERGYIQ_CURRENT_OVERVIEW_COVERAGE_NOT_FOUND",
+  );
+  const selected = await input.dataGateway.runSqlReadonly({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: scoped.datasourceId,
+    sql: currentOverviewPeriodSelectionSql(
+      scoped.viewName,
+      aggregateMeterNodeIds,
+      CURRENT_OVERVIEW_PERIOD_DAYS,
+      input.context.timezone,
+    ),
+    limit: 1,
+  });
+  const row = selected.rows[0];
+  if (!row) {
+    throw new Error("ENERGYIQ_CURRENT_OVERVIEW_PERIOD_NOT_FOUND");
+  }
+  return {
+    periodDays: CURRENT_OVERVIEW_PERIOD_DAYS,
+    cutoffLocalDate: stringAt(row, 0),
+    intervalMinutes: numberAt(row, 5),
+    period: {
+      localFrom: stringAt(row, 1),
+      localToExclusive: stringAt(row, 2),
+      from: isoAt(row, 3),
+      to: isoAt(row, 4),
     },
   };
 };
@@ -3743,6 +3793,46 @@ const latestCompletePeriodSelectionSql = (
   WHERE current_day_count = ${periodDays}
     AND DATE_DIFF('day', local_date, current_end_date) = ${periodDays - 1}
     AND complete_day_count = ${periodDays}
+  ORDER BY local_date DESC
+  LIMIT 1
+`;
+
+const currentOverviewPeriodSelectionSql = (
+  viewName: string,
+  meterNodeIds: string[],
+  periodDays: number,
+  timezone: string,
+): string => `
+  SELECT
+    STRFTIME(local_date, '%Y-%m-%d') AS cutoff_local_date,
+    STRFTIME(local_date - INTERVAL ${periodDays - 1} DAY, '%Y-%m-%d') AS local_from,
+    STRFTIME(local_date + INTERVAL 1 DAY, '%Y-%m-%d') AS local_to_exclusive,
+    EPOCH_MS(TIMEZONE(
+      ${sqlLiteral(timezone)},
+      CAST(local_date - INTERVAL ${periodDays - 1} DAY AS TIMESTAMP)
+    )) AS from_ms,
+    EPOCH_MS(TIMEZONE(
+      ${sqlLiteral(timezone)},
+      CAST(local_date + INTERVAL 1 DAY AS TIMESTAMP)
+    )) AS to_ms,
+    interval_minutes
+  FROM (
+    SELECT
+      local_date,
+      COUNT(*) FILTER (WHERE quality_status = 'ok') AS valid_interval_count,
+      COUNT(*) FILTER (WHERE quality_status <> 'ok') AS quality_event_count,
+      COALESCE(MEDIAN(elapsed_minutes) FILTER (
+        WHERE quality_status = 'ok' AND elapsed_minutes > 0
+      ), 15) AS interval_minutes,
+      ${meterNodeIds.length} * ROUND(1440 / COALESCE(MEDIAN(elapsed_minutes) FILTER (
+        WHERE quality_status = 'ok' AND elapsed_minutes > 0
+      ), 15)) AS expected_interval_count
+    FROM ${quoteIdentifier(viewName)} source
+    WHERE ${meterNodeFilter(meterNodeIds)}
+    GROUP BY local_date
+  ) candidate_days
+  WHERE valid_interval_count = expected_interval_count
+    AND quality_event_count = 0
   ORDER BY local_date DESC
   LIMIT 1
 `;

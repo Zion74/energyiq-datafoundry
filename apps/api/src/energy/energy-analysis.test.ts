@@ -22,6 +22,7 @@ import {
   buildEnergyVirtualMeterTraces,
   evaluateEnergyAttention,
   executeEnergyScopeAnalysis,
+  selectEnergyCurrentOverviewPeriod,
   selectEnergyGoldenPeriod,
   selectEnergyLatestCompletePeriod,
   type EnergyScopeAnalysis,
@@ -926,6 +927,24 @@ describe("EnergyScopeAnalysis", () => {
         periodDays: 7,
         intervalMinutes: NGEE_ANN_GOLDEN.selection.intervalMinutes,
         period: NGEE_ANN_GOLDEN.selection.period,
+      });
+      const currentOverview = await selectEnergyCurrentOverviewPeriod({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        context,
+        databasePath,
+      });
+      expect(currentOverview).toEqual({
+        periodDays: 28,
+        cutoffLocalDate: "2026-06-16",
+        intervalMinutes: NGEE_ANN_GOLDEN.selection.intervalMinutes,
+        period: {
+          localFrom: "2026-05-20",
+          localToExclusive: "2026-06-17",
+          from: "2026-05-19T16:00:00.000Z",
+          to: "2026-06-16T16:00:00.000Z",
+        },
       });
 
       const run = () => executeEnergyScopeAnalysis({

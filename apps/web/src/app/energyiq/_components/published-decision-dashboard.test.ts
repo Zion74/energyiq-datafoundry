@@ -196,6 +196,14 @@ describe("published Overview URL reload", () => {
       "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&grain=day&comparison=overlay&category=all",
     );
     const snapshot = dashboardNgeeAnnSnapshot();
+    snapshot.context.from = "2026-05-19T16:00:00.000Z";
+    snapshot.context.to = "2026-06-16T16:00:00.000Z";
+    snapshot.context.primaryPeriod = {
+      start: snapshot.context.from,
+      endExclusive: snapshot.context.to,
+    };
+    snapshot.analysis.context.from = snapshot.context.from;
+    snapshot.analysis.context.to = snapshot.context.to;
     snapshot.decisionPriorities = {
       ...snapshot.decisionPriorities!,
       status: "empty",
@@ -218,10 +226,10 @@ describe("published Overview URL reload", () => {
       root.render(React.createElement(PublishedDecisionDashboard));
     });
 
-    expect(container.textContent).toContain("No deterministic theme for this Period");
+    expect(container.textContent).toContain("Decision themes unavailable");
     expect(container.textContent).toContain("Key highlights");
-    expect(container.textContent).toContain("Current complete 7-day window");
-    expect(container.textContent).toContain("10 Jun 2026–16 Jun 2026");
+    expect(container.textContent).toContain("Rolling 28-day decision window");
+    expect(container.textContent).toContain("20 May 2026–16 Jun 2026");
     expect(Array.from(container.querySelectorAll("button"), (button) => button.textContent)).not.toContain("Last 7 days");
     expect(container.querySelectorAll("input[type='date']")).toHaveLength(0);
     expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
@@ -229,11 +237,11 @@ describe("published Overview URL reload", () => {
       projectId: "ngee-ann-polytechnic",
       scopeId: "project",
       resource: "electricity",
-      analysisWindow: "latest-complete-7d",
+      analysisWindow: "current-overview-28d",
     });
     const explorer = Array.from(container.querySelectorAll<HTMLAnchorElement>("a"))
       .find((anchor) => anchor.textContent?.includes("Open Project Explorer"));
-    expect(explorer?.getAttribute("href")).toContain("period=Custom&from=2026-06-10&to=2026-06-16");
+    expect(explorer?.getAttribute("href")).toContain("period=Custom&from=2026-05-20&to=2026-06-16");
     const save = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
       .find((button) => button.textContent === "Save analysis");
     await act(async () => save?.click());
@@ -241,7 +249,7 @@ describe("published Overview URL reload", () => {
       "ngee-ann-polytechnic",
       expect.objectContaining({
         period: "Custom",
-        from: "2026-06-10",
+        from: "2026-05-20",
         to: "2026-06-16",
       }),
     );
@@ -744,7 +752,7 @@ describe("published Overview URL reload", () => {
       projectId: "ngee-ann-polytechnic",
       scopeId: "project",
       resource: "electricity",
-      analysisWindow: "latest-complete-7d",
+      analysisWindow: "current-overview-28d",
     });
     expect(mockedRouter.replace).toHaveBeenCalledWith(expect.stringContaining(
       "currentFrom=2026-07-28&currentTo=2026-08-03",
@@ -1032,7 +1040,7 @@ describe("published Overview URL reload", () => {
     window.history.replaceState(
       {},
       "",
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=level-7&resource=electricity&currentFrom=2026-06-10&currentTo=2026-06-16&currentDataSnapshotId=stale-snapshot&currentProjectReleaseId=release-v1",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=level-7&resource=electricity&currentFrom=2026-05-20&currentTo=2026-06-16&currentDataSnapshotId=stale-snapshot&currentProjectReleaseId=release-v1",
     );
     const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockRejectedValue(new Error("ENERGYIQ_DATA_SNAPSHOT_MISMATCH"));
@@ -1042,8 +1050,8 @@ describe("published Overview URL reload", () => {
     });
 
     expect(resolveProjectAnalysis).toHaveBeenCalledWith(expect.objectContaining({
-      analysisWindow: "latest-complete-7d",
-      from: "2026-06-10",
+      analysisWindow: "current-overview-28d",
+      from: "2026-05-20",
       to: "2026-06-16",
       expectedDataSnapshotId: "stale-snapshot",
       expectedProjectReleaseId: "release-v1",
@@ -1065,7 +1073,7 @@ describe("published Overview URL reload", () => {
     window.history.replaceState(
       {},
       "",
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&currentFrom=2026-06-10&currentTo=2026-06-16&currentDataSnapshotId=snapshot-v1&currentProjectReleaseId=release-v1",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&currentFrom=2026-05-20&currentTo=2026-06-16&currentDataSnapshotId=snapshot-v1&currentProjectReleaseId=release-v1",
     );
     vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockReturnValue(new Promise<never>(() => undefined));
@@ -1081,7 +1089,7 @@ describe("published Overview URL reload", () => {
     await act(async () => nextScope?.click());
 
     expect(mockedRouter.replace).toHaveBeenCalledWith(expect.stringContaining(
-      "currentFrom=2026-06-10&currentTo=2026-06-16&currentDataSnapshotId=snapshot-v1&currentProjectReleaseId=release-v1",
+      "currentFrom=2026-05-20&currentTo=2026-06-16&currentDataSnapshotId=snapshot-v1&currentProjectReleaseId=release-v1",
     ));
   });
 
@@ -1106,7 +1114,7 @@ describe("published Overview date inputs", () => {
     });
   });
 
-  it("asks the server for the canonical latest-complete Ngee Ann window without client dates", () => {
+  it("asks the server for the canonical rolling 28-day Ngee Ann window without client dates", () => {
     expect(currentOverviewAnalysisRequest("ngee-ann-polytechnic", {
       scopeId: "level-7",
       resource: "electricity",
@@ -1114,17 +1122,17 @@ describe("published Overview date inputs", () => {
       projectId: "ngee-ann-polytechnic",
       scopeId: "level-7",
       resource: "electricity",
-      analysisWindow: "latest-complete-7d",
+      analysisWindow: "current-overview-28d",
     });
   });
 
   it("round-trips the server-validated current window pin and restores it on reload", () => {
     const view = overviewViewStateFromSearchParams(new URLSearchParams(
-      "projectId=ngee-ann-polytechnic&scopeId=level-7&resource=electricity&currentFrom=2026-06-10&currentTo=2026-06-16&currentDataSnapshotId=snapshot-v1&currentProjectReleaseId=release-v1",
+      "projectId=ngee-ann-polytechnic&scopeId=level-7&resource=electricity&currentFrom=2026-05-20&currentTo=2026-06-16&currentDataSnapshotId=snapshot-v1&currentProjectReleaseId=release-v1",
     ));
 
     expect(view.currentOverviewPin).toEqual({
-      from: "2026-06-10",
+      from: "2026-05-20",
       to: "2026-06-16",
       dataSnapshotId: "snapshot-v1",
       projectReleaseId: "release-v1",
@@ -1137,14 +1145,14 @@ describe("published Overview date inputs", () => {
       projectId: "ngee-ann-polytechnic",
       scopeId: "level-7",
       resource: "electricity",
-      analysisWindow: "latest-complete-7d",
-      from: "2026-06-10",
+      analysisWindow: "current-overview-28d",
+      from: "2026-05-20",
       to: "2026-06-16",
       expectedDataSnapshotId: "snapshot-v1",
       expectedProjectReleaseId: "release-v1",
     });
     expect(currentOverviewUrlWithView(view)).toContain(
-      "currentFrom=2026-06-10&currentTo=2026-06-16&currentDataSnapshotId=snapshot-v1&currentProjectReleaseId=release-v1",
+      "currentFrom=2026-05-20&currentTo=2026-06-16&currentDataSnapshotId=snapshot-v1&currentProjectReleaseId=release-v1",
     );
   });
 

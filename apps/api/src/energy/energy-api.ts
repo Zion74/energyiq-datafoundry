@@ -1020,7 +1020,9 @@ const parseQueryContextRequest = (value: unknown): EnergyQueryContextRequest => 
   )) {
     throw new Error("ENERGYIQ_PERIOD_INVALID");
   }
-  if (value.analysisWindow !== undefined && value.analysisWindow !== "latest-complete-7d") {
+  if (value.analysisWindow !== undefined
+    && value.analysisWindow !== "latest-complete-7d"
+    && value.analysisWindow !== "current-overview-28d") {
     throw new Error("ENERGYIQ_ANALYSIS_WINDOW_INVALID");
   }
   const period: EnergyPeriod = value.period === undefined
@@ -1033,7 +1035,9 @@ const parseQueryContextRequest = (value: unknown): EnergyQueryContextRequest => 
     period,
     ...(typeof value.from === "string" ? { from: value.from } : {}),
     ...(typeof value.to === "string" ? { to: value.to } : {}),
-    ...(value.analysisWindow === "latest-complete-7d" ? { analysisWindow: value.analysisWindow } : {}),
+    ...(value.analysisWindow === "latest-complete-7d" || value.analysisWindow === "current-overview-28d"
+      ? { analysisWindow: value.analysisWindow }
+      : {}),
     ...(typeof value.expectedDataSnapshotId === "string"
       ? { expectedDataSnapshotId: value.expectedDataSnapshotId }
       : {}),

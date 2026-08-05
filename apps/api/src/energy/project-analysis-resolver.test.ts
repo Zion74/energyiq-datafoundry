@@ -148,7 +148,7 @@ describe("ProjectAnalysisResolver", () => {
     }
   });
 
-  it("offers the latest complete Ngee Ann range for empty Project and Level periods", async () => {
+  it("pins the latest complete Project day to one rolling 28-day Ngee Ann range across Scopes", async () => {
     const root = mkdtempSync(join(tmpdir(), "project-analysis-latest-period-"));
     const databasePath = join(root, "energy.duckdb");
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
@@ -195,7 +195,7 @@ describe("ProjectAnalysisResolver", () => {
           projectId: NGEE_ANN_GOLDEN.projectId,
           scopeId: "project",
           resource: "electricity",
-          analysisWindow: "latest-complete-7d",
+          analysisWindow: "current-overview-28d",
         },
         databasePath,
         now: new Date("2026-08-05T00:00:00.000Z"),
@@ -204,10 +204,17 @@ describe("ProjectAnalysisResolver", () => {
       if (currentProjectResult.status !== "ready") throw new Error("Expected current Project analysis");
       expect(currentProjectResult.snapshot.context).toMatchObject({
         period: "Custom",
-        from: NGEE_ANN_GOLDEN.selection.period.from,
+        from: "2026-05-19T16:00:00.000Z",
         to: NGEE_ANN_GOLDEN.selection.period.to,
       });
       expect(currentProjectResult.snapshot.analysis.summary.validIntervalCount).toBeGreaterThan(0);
+      expect(currentProjectResult.snapshot.analysis.dataHealth.status).toBe("partial");
+      expect(currentProjectResult.snapshot.analysis.dailyTotals?.scopes[0]?.rows).toHaveLength(28);
+      expect(currentProjectResult.snapshot.analysis.dailyTotals?.scopes[0]?.rows[0]).toMatchObject({
+        localDate: "2026-05-20",
+        usageKwh: null,
+        dataHealth: { status: "unavailable", validIntervalCount: 0 },
+      });
 
       const currentLevelResult = await resolveProjectAnalysis({
         metadataStore: metadata,
@@ -218,7 +225,7 @@ describe("ProjectAnalysisResolver", () => {
           projectId: NGEE_ANN_GOLDEN.projectId,
           scopeId: "level-7",
           resource: "electricity",
-          analysisWindow: "latest-complete-7d",
+          analysisWindow: "current-overview-28d",
         },
         databasePath,
         now: new Date("2026-08-05T00:00:00.000Z"),
@@ -241,8 +248,8 @@ describe("ProjectAnalysisResolver", () => {
           projectId: NGEE_ANN_GOLDEN.projectId,
           scopeId: "level-7",
           resource: "electricity",
-          analysisWindow: "latest-complete-7d",
-          from: NGEE_ANN_GOLDEN.selection.period.localFrom,
+          analysisWindow: "current-overview-28d",
+          from: "2026-05-20",
           to: "2026-06-16",
           expectedDataSnapshotId: currentProjectResult.snapshot.context.dataSnapshotId,
           expectedProjectReleaseId: currentProjectResult.snapshot.projectRelease.id,
@@ -270,8 +277,8 @@ describe("ProjectAnalysisResolver", () => {
           projectId: NGEE_ANN_GOLDEN.projectId,
           scopeId: "level-7",
           resource: "electricity",
-          analysisWindow: "latest-complete-7d",
-          from: NGEE_ANN_GOLDEN.selection.period.localFrom,
+          analysisWindow: "current-overview-28d",
+          from: "2026-05-20",
           to: "2026-06-16",
           expectedDataSnapshotId: "stale-snapshot",
           expectedProjectReleaseId: currentProjectResult.snapshot.projectRelease.id,
@@ -288,8 +295,8 @@ describe("ProjectAnalysisResolver", () => {
           projectId: NGEE_ANN_GOLDEN.projectId,
           scopeId: "level-7",
           resource: "electricity",
-          analysisWindow: "latest-complete-7d",
-          from: NGEE_ANN_GOLDEN.selection.period.localFrom,
+          analysisWindow: "current-overview-28d",
+          from: "2026-05-20",
           to: "2026-06-16",
           expectedDataSnapshotId: currentProjectResult.snapshot.context.dataSnapshotId,
           expectedProjectReleaseId: "stale-release",
@@ -306,7 +313,7 @@ describe("ProjectAnalysisResolver", () => {
           projectId: NGEE_ANN_GOLDEN.projectId,
           scopeId: "level-7",
           resource: "electricity",
-          analysisWindow: "latest-complete-7d",
+          analysisWindow: "current-overview-28d",
           expectedDataSnapshotId: currentProjectResult.snapshot.context.dataSnapshotId,
         },
         databasePath,
@@ -321,8 +328,8 @@ describe("ProjectAnalysisResolver", () => {
           projectId: NGEE_ANN_GOLDEN.projectId,
           scopeId: "level-7",
           resource: "electricity",
-          analysisWindow: "latest-complete-7d",
-          from: "2026-06-09",
+          analysisWindow: "current-overview-28d",
+          from: "2026-05-21",
           to: "2026-06-15",
           expectedDataSnapshotId: currentProjectResult.snapshot.context.dataSnapshotId,
           expectedProjectReleaseId: currentProjectResult.snapshot.projectRelease.id,

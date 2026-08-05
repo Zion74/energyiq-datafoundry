@@ -10,6 +10,7 @@ import {
 
 import {
   executeEnergyScopeAnalysis,
+  selectEnergyCurrentOverviewPeriod,
   selectEnergyLatestCompletePeriod,
   type EnergyScopeAnalysis,
 } from "./energy-analysis.js";
@@ -163,7 +164,8 @@ export const resolveProjectAnalysis = async (input: {
     };
   }
   const publishedRunContext = input.request.analysisWindow === "latest-complete-7d"
-    ? await resolveLatestCompleteOverviewContext(input)
+    || input.request.analysisWindow === "current-overview-28d"
+    ? await resolveCurrentOverviewContext(input)
     : resolvePublishedEnergyQueryContext({
         metadataStore: input.metadataStore,
         user: input.user,
@@ -268,7 +270,7 @@ export const resolveProjectAnalysis = async (input: {
   };
 };
 
-const resolveLatestCompleteOverviewContext = async (input: {
+const resolveCurrentOverviewContext = async (input: {
   metadataStore: MetadataStore;
   dataGateway: LocalDataGateway;
   user: UserRecord;
@@ -279,13 +281,16 @@ const resolveLatestCompleteOverviewContext = async (input: {
   env?: Record<string, string | undefined>;
 }) => {
   const {
-    analysisWindow: _analysisWindow,
+    analysisWindow,
     expectedDataSnapshotId,
     expectedProjectReleaseId,
     from,
     to,
     ...requestedContext
   } = input.request;
+  const selectOverviewPeriod = analysisWindow === "current-overview-28d"
+    ? selectEnergyCurrentOverviewPeriod
+    : selectEnergyLatestCompletePeriod;
   const suppliedPinParts = [from, to, expectedDataSnapshotId, expectedProjectReleaseId]
     .filter((value) => value !== undefined).length;
   if (suppliedPinParts > 0 && suppliedPinParts < 4) {
@@ -312,7 +317,7 @@ const resolveLatestCompleteOverviewContext = async (input: {
     if (pinnedProjectContext.projectRelease?.renderer.key !== "ngee-ann-overview") {
       throw new Error("ENERGYIQ_ANALYSIS_WINDOW_UNSUPPORTED");
     }
-    const selected = await selectEnergyLatestCompletePeriod({
+    const selected = await selectOverviewPeriod({
       metadataStore: input.metadataStore,
       dataGateway: input.dataGateway,
       userId: input.user.id,
@@ -354,7 +359,7 @@ const resolveLatestCompleteOverviewContext = async (input: {
   if (projectContext.projectRelease?.renderer.key !== "ngee-ann-overview") {
     throw new Error("ENERGYIQ_ANALYSIS_WINDOW_UNSUPPORTED");
   }
-  const selected = await selectEnergyLatestCompletePeriod({
+  const selected = await selectOverviewPeriod({
     metadataStore: input.metadataStore,
     dataGateway: input.dataGateway,
     userId: input.user.id,

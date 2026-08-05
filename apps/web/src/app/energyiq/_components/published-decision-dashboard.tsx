@@ -513,7 +513,7 @@ function PublishedDecisionDashboardView({
       {isNgeeAnnProject && currentSnapshot ? (
         <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 border-y border-border py-3 text-xs" aria-label="Read-only analysis window">
           <span className="font-semibold text-foreground">
-            {usesCurrentOverviewWindow ? "Current complete 7-day window" : "Linked analysis window"}
+            {usesCurrentOverviewWindow ? "Rolling 28-day decision window" : "Linked analysis window"}
           </span>
           <span className="text-muted">{formatAnalysisWindow(currentSnapshot)}</span>
           <span className="text-muted">Data through {formatDataThrough(currentSnapshot)}</span>
@@ -712,7 +712,7 @@ export function currentOverviewAnalysisRequest(
     projectId,
     scopeId: view.scopeId?.trim() || "project",
     resource: view.resource ?? "electricity",
-    analysisWindow: "latest-complete-7d",
+    analysisWindow: "current-overview-28d",
     ...(view.currentOverviewPin ? {
       from: view.currentOverviewPin.from,
       to: view.currentOverviewPin.to,
