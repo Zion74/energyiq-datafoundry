@@ -53,7 +53,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Open Project Explorer");
     expect(markup).toContain("Ask AI Analyst");
     expect(markup).toContain("AI energy analyst");
-    expect(markup).toContain("Analyzing / Thinking");
+    expect(markup).toContain("Inspecting scoped data");
     expect(markup.indexOf("Decision themes")).toBeLessThan(markup.indexOf("Key highlights"));
     expect(markup.indexOf("Key highlights")).toBeLessThan(markup.indexOf("AI energy analyst"));
     expect(markup.indexOf("AI energy analyst")).toBeLessThan(markup.indexOf("What changed"));
