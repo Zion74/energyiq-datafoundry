@@ -12,8 +12,19 @@ export const getDuckDbDatabase = async (path: string): Promise<DuckDbModule.Data
   if (existing) {
     return await existing;
   }
+  const opening = openDuckDbDatabase(path);
+  databases.set(path, opening);
+  try {
+    return await opening;
+  } catch (error) {
+    databases.delete(path);
+    throw error;
+  }
+};
+
+export const openDuckDbDatabase = async (path: string): Promise<DuckDbModule.Database> => {
   const duckdb = await loadDuckDb();
-  const opening = new Promise<DuckDbModule.Database>((resolve, reject) => {
+  return await new Promise<DuckDbModule.Database>((resolve, reject) => {
     const database = new duckdb.Database(path, (error) => {
       if (error) {
         reject(error);
@@ -22,13 +33,6 @@ export const getDuckDbDatabase = async (path: string): Promise<DuckDbModule.Data
       }
     });
   });
-  databases.set(path, opening);
-  try {
-    return await opening;
-  } catch (error) {
-    databases.delete(path);
-    throw error;
-  }
 };
 
 const loadDuckDb = async (): Promise<typeof DuckDbModule> => {

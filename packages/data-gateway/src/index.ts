@@ -617,7 +617,7 @@ const withTimeout = async <T>(
   timeoutMs: number,
   signal?: AbortSignal | undefined,
   onTimeout?: (error: Error) => void,
-  settleAfterInterruption = false,
+  detachSettlementAfterInterruption = false,
 ): Promise<T> => {
   throwIfAborted(signal);
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -639,9 +639,9 @@ const withTimeout = async <T>(
     try {
       return await Promise.race(aborted ? [promise, timeout, aborted] : [promise, timeout]);
     } catch (error) {
-      if (settleAfterInterruption
+      if (detachSettlementAfterInterruption
         && (signal?.aborted || (error instanceof Error && error.message === "SQL_TIMEOUT"))) {
-        await promise.catch(() => undefined);
+        void promise.catch(() => undefined);
       }
       throw error;
     }

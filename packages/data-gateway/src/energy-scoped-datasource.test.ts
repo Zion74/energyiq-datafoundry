@@ -26,7 +26,7 @@ describe("Energy scoped datasource Snapshot guard", () => {
     })).resolves.toMatchObject({ rows: [[1]] });
   });
 
-  it("settles an executing DuckDB timeout before releasing its connection", async () => {
+  it("returns a DuckDB timeout promptly and releases its connection after background settlement", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-duckdb-timeout-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
     try {
@@ -39,6 +39,7 @@ describe("Energy scoped datasource Snapshot guard", () => {
         config: { path: join(root, "timeout.duckdb") },
       });
       const gateway = new LocalDataGateway(metadata);
+      const timeoutStartedAt = performance.now();
       await expect(gateway.runSqlReadonly({
         user_id: "dev-user",
         workspace_id: "workspace-timeout",
@@ -46,6 +47,8 @@ describe("Energy scoped datasource Snapshot guard", () => {
         sql: "SELECT SUM(i) AS total FROM range(100000000) values(i)",
         timeout_ms: 20,
       })).rejects.toThrow("SQL_TIMEOUT");
+      expect(performance.now() - timeoutStartedAt).toBeLessThan(100);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 250));
       await expect(gateway.runSqlReadonly({
         user_id: "dev-user",
         workspace_id: "workspace-timeout",
@@ -94,7 +97,7 @@ describe("Energy scoped datasource Snapshot guard", () => {
     }
   });
 
-  it("rejects every query from an old datasource after the DuckDB fact state advances", async () => {
+  it("rejects every query from an old datasource and detaches timed-out session cleanup", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-scoped-snapshot-"));
     const databasePath = join(root, "energy.duckdb");
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
@@ -249,19 +252,25 @@ describe("Energy scoped datasource Snapshot guard", () => {
         { rows: [[0]] },
       ]);
 
-      const timeoutSessionStartedAt = performance.now();
+      let timeoutCallbackCompletedAt = 0;
       await expect(gateway.withEnergySnapshotReadSession({
         user_id: "dev-user",
         workspace_id: "workspace-1",
         datasource_id: "energy-scope-timeout",
       }, async () => {
+        const timeoutQueryStartedAt = performance.now();
         const executing = gateway.runSqlReadonly({
           user_id: "dev-user",
           workspace_id: "workspace-1",
           datasource_id: "energy-scope-timeout",
-          sql: "SELECT SUM(i) AS total FROM range(100000000) values(i)",
+          sql: "SELECT SUM(sin(i)) AS total FROM range(20000000) values(i)",
           timeout_ms: 100,
         });
+        let executingReturnedAt = 0;
+        void executing.then(
+          () => { executingReturnedAt = performance.now(); },
+          () => { executingReturnedAt = performance.now(); },
+        );
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 5));
         const queued = gateway.runSqlReadonly({
           user_id: "dev-user",
@@ -287,8 +296,11 @@ describe("Energy scoped datasource Snapshot guard", () => {
         expect(executingResult).toMatchObject({ status: "rejected", reason: { message: "SQL_TIMEOUT" } });
         expect(queuedResult).toMatchObject({ status: "rejected", reason: { message: "SQL_TIMEOUT" } });
         expect(cancelledResult).toMatchObject({ status: "rejected", reason: { message: "RUN_CANCELLED" } });
+        expect(executingReturnedAt - timeoutQueryStartedAt).toBeLessThan(150);
+        timeoutCallbackCompletedAt = performance.now();
       })).resolves.toBeUndefined();
-      expect(performance.now() - timeoutSessionStartedAt).toBeLessThan(2_000);
+      expect(performance.now() - timeoutCallbackCompletedAt).toBeLessThan(50);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 500));
       expect(queuedSqlExecutionCount).toBe(0);
       await expect(gateway.withEnergySnapshotReadSession({
         user_id: "dev-user",

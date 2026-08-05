@@ -10,7 +10,7 @@ import { DatabaseSync } from "node:sqlite";
 import type * as DuckDbModule from "duckdb";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { resolve } from "node:path";
-import { getDuckDbDatabase } from "../duckdb-database-cache.js";
+import { getDuckDbDatabase, openDuckDbDatabase } from "../duckdb-database-cache.js";
 import {
   assertEnergySnapshotReceipt,
   energySnapshotGuardSql,
@@ -21,6 +21,7 @@ import {
 type EnergySnapshotReadSessionState = {
   connection: DuckDbModule.Connection;
   databasePath: string;
+  detachCleanup: boolean;
   scope: EnergySnapshotGuardScope;
   tail: Promise<void>;
 };
@@ -91,6 +92,8 @@ export class SQLiteAdapter implements DataSourceAdapter {
 }
 
 export class DuckDbAdapter implements DataSourceAdapter {
+  private memoryDatabase: Promise<DuckDbModule.Database> | undefined;
+
   constructor(private readonly config: Record<string, unknown>) {}
 
   async inspectSchema(input: AdapterExecutionInput = {}): Promise<Omit<SchemaSummary, "datasource_id">> {
@@ -126,7 +129,7 @@ export class DuckDbAdapter implements DataSourceAdapter {
       assertSameEnergySnapshotSession(existing, databasePath, expectedScope);
       return await execute(existing.scope);
     }
-    const database = await getDuckDbDatabase(databasePath);
+    const database = await this.database(databasePath);
     const connection = database.connect();
     let session: EnergySnapshotReadSessionState | undefined;
     try {
@@ -135,14 +138,22 @@ export class DuckDbAdapter implements DataSourceAdapter {
       session = {
         connection,
         databasePath,
+        detachCleanup: false,
         scope,
         tail: Promise.resolve(),
       };
       return await energySnapshotReadSession.run(session, () => execute(scope));
     } finally {
-      await session?.tail.catch(() => undefined);
-      await duckDbAll(connection, "ROLLBACK").catch(() => undefined);
-      await duckDbClose(connection).catch(ignoreAlreadyClosed);
+      const cleanup = async (): Promise<void> => {
+        await session?.tail.catch(() => undefined);
+        await duckDbAll(connection, "ROLLBACK").catch(() => undefined);
+        await duckDbClose(connection).catch(ignoreAlreadyClosed);
+      };
+      if (session?.detachCleanup) {
+        void cleanup().catch(() => undefined);
+      } else {
+        await cleanup();
+      }
     }
   }
 
@@ -155,15 +166,24 @@ export class DuckDbAdapter implements DataSourceAdapter {
       assertSameEnergySnapshotSession(session, databasePath, snapshotScope);
       const prior = session.tail;
       let started = false;
+      const markDetachedCleanup = (): void => {
+        if (isSessionInterruption(signal?.reason)) session.detachCleanup = true;
+      };
+      signal?.addEventListener("abort", markDetachedCleanup, { once: true });
+      if (signal?.aborted) markDetachedCleanup();
       const completion = prior.then(async () => {
         started = true;
         throwIfAborted(signal);
         return await duckDbAll(session.connection, sql, signal);
       });
+      void completion.then(
+        () => signal?.removeEventListener("abort", markDetachedCleanup),
+        () => signal?.removeEventListener("abort", markDetachedCleanup),
+      );
       session.tail = completion.then(() => undefined, () => undefined);
       return (await rejectIfAbortedWhileQueued(completion, signal, () => started)).filter(isRecord);
     }
-    const database = await getDuckDbDatabase(databasePath);
+    const database = await this.database(databasePath);
     const connection = database.connect();
     try {
       if (snapshotScope) {
@@ -176,6 +196,12 @@ export class DuckDbAdapter implements DataSourceAdapter {
       if (snapshotScope) await duckDbAll(connection, "ROLLBACK").catch(() => undefined);
       await duckDbClose(connection).catch(ignoreAlreadyClosed);
     }
+  }
+
+  private async database(databasePath: string): Promise<DuckDbModule.Database> {
+    if (databasePath !== ":memory:") return await getDuckDbDatabase(databasePath);
+    this.memoryDatabase ??= openDuckDbDatabase(databasePath);
+    return await this.memoryDatabase;
   }
 }
 
@@ -354,6 +380,10 @@ const duckDbAll = async (
 
 const abortReason = (signal?: AbortSignal): Error =>
   signal?.reason instanceof Error ? signal.reason : new Error("RUN_CANCELLED");
+
+const isSessionInterruption = (reason: unknown): boolean =>
+  reason instanceof Error
+  && (reason.message === "SQL_TIMEOUT" || reason.message === "RUN_CANCELLED" || reason.name === "AbortError");
 
 const sqlLiteral = (value: string): string => `'${value.replaceAll("'", "''")}'`;
 
