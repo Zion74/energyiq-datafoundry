@@ -68,6 +68,12 @@ describe("Ngee Ann AI Run", () => {
     expect(JSON.stringify(body)).toContain("official_aggregation_eligible=TRUE");
     expect(JSON.stringify(body)).toContain("include every runtime assertion_id");
     expect(JSON.stringify(body)).toContain("retry only once");
+    expect(JSON.stringify(body)).toContain(
+      "never invent a numeric threshold, target, tolerance, percentage, duration, or time window",
+    );
+    expect(JSON.stringify(body)).toContain(
+      "Verification may name the metric or dimension to monitor, but it must not introduce a new number.",
+    );
   });
 
   it("accepts three distinct Findings with collective horizon coverage and Finding-specific SQL Evidence", () => {
