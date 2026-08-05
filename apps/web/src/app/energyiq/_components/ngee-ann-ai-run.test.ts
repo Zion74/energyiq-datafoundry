@@ -63,6 +63,8 @@ describe("Ngee Ann AI Run", () => {
     expect(JSON.stringify(body)).toContain("Do not use WITH/CTEs or EXTRACT syntax");
     expect(JSON.stringify(body)).toContain("official_aggregation_eligible=TRUE");
     expect(JSON.stringify(body)).toContain("A successful SQL call consumes its schema authorization");
+    expect(JSON.stringify(body)).toContain("Do not calculate new arithmetic after SQL");
+    expect(JSON.stringify(body)).toContain("period_from, period_to, baseline_from, baseline_to");
     expect(JSON.stringify(body)).toContain("include every runtime assertion_id");
     expect(JSON.stringify(body)).toContain("retry only once");
   });
