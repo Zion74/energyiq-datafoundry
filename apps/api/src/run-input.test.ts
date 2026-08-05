@@ -64,6 +64,28 @@ describe("trusted Energy text run input", () => {
     });
   });
 
+  it("preserves an optional expected Snapshot pin for server-authoritative comparison", () => {
+    const input = createInput({});
+    input.forwardedProps = {
+      externalContext: {
+        source: "energyiq",
+        projectId: "ngee-ann-polytechnic",
+        scopeId: "project",
+        resource: "electricity",
+        period: "Last 7 days",
+        expectedDataSnapshotId: "snapshot-from-overview",
+      },
+    };
+
+    expect(extractEnergyQueryContextRequest(input)).toEqual({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "project",
+      resource: "electricity",
+      period: "Last 7 days",
+      expectedDataSnapshotId: "snapshot-from-overview",
+    });
+  });
+
   it("rejects an explicitly unknown Period instead of silently using Last 30 days", () => {
     const input = createInput({});
     input.forwardedProps = {

@@ -43,6 +43,7 @@ export type EnergyQueryContextRequest = {
   period?: EnergyPeriod;
   from?: string;
   to?: string;
+  expectedDataSnapshotId?: string;
 };
 
 export type EnergyQueryContext = {
@@ -225,6 +226,11 @@ export const resolveEnergyQueryContext = (input: {
           ? { expectedMeterMappingRevisionId: input.releasePins.meterMappingRevisionId }
           : {})
       });
+  const dataSnapshotId = projectRecord.data_snapshot_id;
+  if (input.request.expectedDataSnapshotId
+    && input.request.expectedDataSnapshotId !== dataSnapshotId) {
+    throw new Error("ENERGYIQ_DATA_SNAPSHOT_MISMATCH");
+  }
   return {
     userId: input.user.id,
     workspaceId: access.activeWorkspaceId,
@@ -242,7 +248,7 @@ export const resolveEnergyQueryContext = (input: {
     hierarchyRevisionId,
     meterMappingRevisionId: publishedMeterRoute?.meterMappingRevisionId ?? "meter-routing-unconfigured",
     meterFormulaRevisionId: projectRecord.meter_formula_revision_id,
-    dataSnapshotId: projectRecord.data_snapshot_id,
+    dataSnapshotId,
     metricVersion: projectRecord.metric_version,
     businessCalendarVersion: projectRecord.business_calendar_version,
     tariffScheduleVersion: projectRecord.tariff_schedule_version,

@@ -163,6 +163,57 @@ describe("EnergyQueryContext", () => {
     }
   });
 
+  it("fails closed when the expected Snapshot differs from the current authorized Project Snapshot", () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-query-context-snapshot-pin-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const user = metadata.users.getById({ user_id: "dev-user" });
+      const currentSnapshotId = metadata.energyIq
+        .getProject("ngee-ann-polytechnic").data_snapshot_id;
+      const request = {
+        projectId: "ngee-ann-polytechnic",
+        scopeId: "project",
+        resource: "electricity" as const,
+        period: "Last 7 days" as const,
+      };
+
+      expect(resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user,
+        workspaceId: "default",
+        request: {
+          ...request,
+          expectedDataSnapshotId: currentSnapshotId,
+        },
+      }).dataSnapshotId).toBe(currentSnapshotId);
+
+      expect(() => resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user,
+        workspaceId: "default",
+        request: {
+          ...request,
+          expectedDataSnapshotId: "snapshot-from-stale-overview",
+        },
+      })).toThrow("ENERGYIQ_DATA_SNAPSHOT_MISMATCH");
+
+      expect(() => resolveEnergyQueryContext({
+        metadataStore: metadata,
+        user,
+        workspaceId: "default",
+        request: {
+          ...request,
+          scopeId: "preschool-project",
+          expectedDataSnapshotId: "snapshot-from-stale-overview",
+        },
+      })).toThrow("ENERGYIQ_SCOPE_FORBIDDEN");
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
   it.each([
     {
       name: "the fixed 2026-08-04 acceptance date",
