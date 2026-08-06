@@ -78,6 +78,13 @@ import { wrapAgentForAgUi } from "./stream/mastra-stream-normalizer.js";
 import type { AgentRunContext, AgentRunContextInput, AgUiEventEmitter } from "./types.js";
 import { createCustomEvent } from "./events.js";
 import { createTool, type ToolAction } from "@mastra/core/tools";
+
+export {
+  MODEL_PROVIDER_TOOL_CONTRACT_BUNDLE_REVISION,
+  probeModelProviderToolContract,
+  type ModelProviderToolContractProbeDiagnostic,
+  type ModelProviderToolContractProbeResult
+} from "./model-provider-tool-contract-probe.js";
 import { z } from "zod";
 import {
   createRunProtocolBoundary,
@@ -763,7 +770,7 @@ export const probeModelProvider = async (
   const output = await agent.generate("Reply with OK only.", {
     abortSignal: AbortSignal.timeout(timeoutMs),
     maxSteps: 1,
-    modelSettings: { maxOutputTokens: 16, temperature: 0 }
+    modelSettings: { maxOutputTokens: 16 }
   });
   return { model: provider.model_name, text: output.text.trim() };
 };

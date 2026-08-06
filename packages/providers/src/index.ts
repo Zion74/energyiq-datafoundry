@@ -3,6 +3,24 @@ import { createDeepSeek } from "@ai-sdk/deepseek";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createEnvConfig } from "@datafoundry/contracts";
+import {
+  resolveProviderToolContractCompatibility,
+  type ProviderToolContractAccess
+} from "./tool-contract-compatibility.js";
+
+export {
+  classifyProviderToolContractFailure,
+  prepareProviderToolContract,
+  resolveProviderToolContractCompatibility
+} from "./tool-contract-compatibility.js";
+export type {
+  CanonicalToolInputValidator,
+  ProviderToolContractAccess,
+  ProviderToolContractCompatibility,
+  ProviderToolContractFailureKind,
+  ProviderToolContractFailureStage,
+  ProviderToolContractOptions
+} from "./tool-contract-compatibility.js";
 
 export type ChatProviderConfig = {
   provider: string;
@@ -42,24 +60,42 @@ export type ModelPromptCompatibility = {
   requires_non_empty_message_content?: boolean;
 };
 
+/** Keep structured helper sampling compatible without leaking model names into callers. */
+export const createModelHelperSettings = (input: {
+  modelName: string;
+  maxOutputTokens: number;
+}) => ({
+  maxOutputTokens: input.maxOutputTokens,
+  temperature: input.modelName === "kimi-k3" ? 1 : 0
+});
+
 /**
  * Keep deterministic helper calls fast and bounded even when the selected chat
  * model defaults to extended reasoning. Vendor-specific option names stay in
  * the provider package instead of leaking into the Agent runtime.
  */
-export const createModelHelperProviderOptions = () => ({
+export const createModelHelperProviderOptions = (input: {
+  providerId: ModelProviderId;
+  modelName: string;
+}) => ({
   alibaba: {
     enableThinking: false
   },
   deepseek: {
     thinking: { type: "disabled" as const }
-  }
+  },
+  ...(input.providerId === "openai-compatible" && input.modelName === "kimi-k3"
+    ? { openaiCompatible: { reasoningEffort: "low" } }
+    : {})
 });
 
 export type ModelRuntimeProviderOptionsInput = {
   providerId: ModelProviderId;
   providerIds?: readonly ModelProviderId[];
+  modelName?: string;
   reasoningEnabled?: boolean;
+  toolAccess?: ProviderToolContractAccess;
+  toolBundleEligible?: boolean;
 };
 
 type ProviderOptionValue = null | string | number | boolean | ProviderOptionObject | ProviderOptionValue[];
@@ -94,6 +130,28 @@ export const createModelRuntimeProviderOptions = (
     options.openaiCompatible = {
       reasoningEffort: "low"
     };
+  }
+
+  if (
+    input.modelName !== undefined
+    && input.toolAccess !== undefined
+    && input.toolBundleEligible !== undefined
+  ) {
+    const compatibility = resolveProviderToolContractCompatibility({
+      providerId: input.providerId,
+      modelName: input.modelName,
+      toolAccess: input.toolAccess,
+      toolBundleEligible: input.toolBundleEligible
+    });
+    if (!compatibility.eligible) {
+      throw new Error("KIMI_NON_STRICT_TOOL_BUNDLE_NOT_ELIGIBLE");
+    }
+    if (compatibility.providerOptions?.openaiCompatible) {
+      options.openaiCompatible = {
+        ...(options.openaiCompatible ?? {}),
+        ...compatibility.providerOptions.openaiCompatible
+      };
+    }
   }
 
   if (providerIds.has("openai")) {

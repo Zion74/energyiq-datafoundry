@@ -9,7 +9,6 @@ import {
 import {
   createModelProviderFromEnv,
   createModelProviderFromProfile,
-  probeModelProvider,
   resolveSkillCacheDir,
   resolveSessionWorkspaceDir,
   resolveWorkspaceDir,
@@ -67,6 +66,7 @@ import {
   modelProfileTestFailureMessage,
   modelProfileTestSuccessReason
 } from "./model-profile-test.js";
+import { probeModelProfileCapabilities } from "./model-profile-capability-test.js";
 import { handleCapabilitiesRequest } from "./routes/capabilities.js";
 import type { ConfigApiContext, ConfigApiResponse } from "./routes/types.js";
 import {
@@ -1582,10 +1582,13 @@ const handleGenericResourceRequest = async (
       });
     }
     if (kind === "model-profile") {
-      let probe: { model: string; text: string };
+      let tested: Awaited<ReturnType<typeof probeModelProfileCapabilities>>;
       try {
         const provider = resolveProfileProvider(resource, context);
-        probe = await probeModelProvider(provider, numberValue(resource.payload.timeoutMs) ?? 30000);
+        tested = await probeModelProfileCapabilities({
+          provider,
+          timeoutMs: numberValue(resource.payload.timeoutMs) ?? 30000
+        });
       } catch (error) {
         // Persist failed status best-effort; never let a revision race mask the probe reason.
         try {
@@ -1603,7 +1606,7 @@ const handleGenericResourceRequest = async (
       }
       const payload: Record<string, unknown> = {
         ...resource.payload,
-        capabilities: { reasoning: "unknown", toolCall: "untested" }
+        capabilities: tested.capabilities
       };
       if (resource.id === "server-default") {
         payload.llmEnvFingerprint = llmEnvFingerprint(process.env);
@@ -1615,14 +1618,15 @@ const handleGenericResourceRequest = async (
         payload
       });
       const reason = modelProfileTestSuccessReason({
-        model: probe.model,
-        response: probe.text
+        model: tested.connectivity.model,
+        response: tested.connectivity.text
       });
       return ok({
+        capabilities: tested.capabilities,
         id,
         latencyMs: Date.now() - startedAt,
-        model: probe.model,
-        response: probe.text,
+        model: tested.connectivity.model,
+        response: tested.connectivity.text,
         reason,
         status: "connected",
         revision: updated.revision

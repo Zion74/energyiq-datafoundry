@@ -26,25 +26,27 @@ export type CreateAnalysisRequirementsCommitToolInput = {
   trustedEnergy: boolean;
 };
 
+export const analysisRequirementsCommitInputSchema = z.object({
+  claims: z.array(z.object({
+    requirement_id: z.string().min(1),
+    claim: z.string().min(1),
+    values: z.array(z.object({
+      name: z.string().min(1),
+      value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
+      unit: z.string().optional()
+    })).max(AGENT_RUNTIME_LIMITS.requirementCommitMaxOutputFields).optional(),
+    evidence_refs: z.array(z.string().min(1)).optional(),
+    evidence_requirement_ids: z.array(z.string().min(1)).optional()
+  })).min(1).max(AGENT_RUNTIME_LIMITS.requirementCommitMaxClaims)
+});
+
 /** The adapter is deliberately inside execute's catch boundary so bad model input is one observation. */
 export const createAnalysisRequirementsCommitTool = (
   input: CreateAnalysisRequirementsCommitToolInput
 ) => createTool({
   id: "analysis_requirements_commit",
   description: "Commit final claims for analysis requirements using artifact evidence from successful SQL results.",
-  inputSchema: z.object({
-    claims: z.array(z.object({
-      requirement_id: z.string().min(1),
-      claim: z.string().min(1),
-      values: z.array(z.object({
-        name: z.string().min(1),
-        value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
-        unit: z.string().optional()
-      })).max(AGENT_RUNTIME_LIMITS.requirementCommitMaxOutputFields).optional(),
-      evidence_refs: z.array(z.string().min(1)).optional(),
-      evidence_requirement_ids: z.array(z.string().min(1)).optional()
-    })).min(1).max(AGENT_RUNTIME_LIMITS.requirementCommitMaxClaims)
-  }),
+  inputSchema: analysisRequirementsCommitInputSchema,
   execute: async (toolInput, options) => {
     const toolCallId = typeof options?.agent?.toolCallId === "string" && options.agent.toolCallId.length > 0
       ? options.agent.toolCallId

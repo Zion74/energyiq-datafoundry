@@ -1,5 +1,9 @@
 import { Agent } from "@mastra/core/agent";
-import { createModelHelperProviderOptions, type ModelProvider } from "@datafoundry/providers";
+import {
+  createModelHelperProviderOptions,
+  createModelHelperSettings,
+  type ModelProvider
+} from "@datafoundry/providers";
 import { z } from "zod";
 
 import { AGENT_RUNTIME_LIMITS } from "../config/agent-runtime-limits.js";
@@ -168,11 +172,14 @@ export const createModelAnalysisContractGrounder = (
     for (let attempt = 0; attempt < AGENT_RUNTIME_LIMITS.contractGrounderMaxAttempts; attempt += 1) {
       const output = await agent.generate(`${prompt}${retryInstruction}`, {
         maxSteps: AGENT_RUNTIME_LIMITS.modelHelperMaxSteps,
-        modelSettings: {
-          maxOutputTokens: AGENT_RUNTIME_LIMITS.contractGrounderMaxOutputTokens,
-          temperature: 0
-        },
-        providerOptions: createModelHelperProviderOptions()
+        modelSettings: createModelHelperSettings({
+          modelName: provider.model_name,
+          maxOutputTokens: AGENT_RUNTIME_LIMITS.contractGrounderMaxOutputTokens
+        }),
+        providerOptions: createModelHelperProviderOptions({
+          providerId: provider.provider_id,
+          modelName: provider.model_name
+        })
       });
       try {
         return parseAnalysisContractGroundingText(output.text, input.requirements, input.physicalSchema);

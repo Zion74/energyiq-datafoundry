@@ -1,5 +1,9 @@
 import { Agent } from "@mastra/core/agent";
-import { createModelHelperProviderOptions, type ModelProvider } from "@datafoundry/providers";
+import {
+  createModelHelperProviderOptions,
+  createModelHelperSettings,
+  type ModelProvider
+} from "@datafoundry/providers";
 import { z } from "zod";
 
 import { AGENT_RUNTIME_LIMITS } from "../config/agent-runtime-limits.js";
@@ -87,11 +91,14 @@ export const createModelAnalysisRequirementExtractor = (
         : "\n上次输出不是合法 JSON。请缩短描述，确保所有字符串闭合，并严格返回紧凑 JSON。";
       const output = await agent.generate(`${basePrompt}${retryInstruction}`, {
         maxSteps: AGENT_RUNTIME_LIMITS.modelHelperMaxSteps,
-        modelSettings: {
-          maxOutputTokens: AGENT_RUNTIME_LIMITS.requirementExtractorMaxOutputTokens,
-          temperature: 0
-        },
-        providerOptions: createModelHelperProviderOptions()
+        modelSettings: createModelHelperSettings({
+          modelName: provider.model_name,
+          maxOutputTokens: AGENT_RUNTIME_LIMITS.requirementExtractorMaxOutputTokens
+        }),
+        providerOptions: createModelHelperProviderOptions({
+          providerId: provider.provider_id,
+          modelName: provider.model_name
+        })
       });
       try {
         return parseAnalysisRequirementExtractionText(output.text);
