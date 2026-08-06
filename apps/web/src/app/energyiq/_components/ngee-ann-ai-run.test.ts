@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { configApi } from "../../../lib/config-api";
+import { ConfigApiError, configApi } from "../../../lib/config-api";
 import {
   buildAgentRunBody,
   buildNgeeAnnAiRunInput,
@@ -14,6 +14,12 @@ import { ngeeAnnGoldenSnapshot } from "./ngee-ann-overview.test-fixture";
 import { buildNgeeAnnOverviewViewModel } from "./ngee-ann-overview-view-model";
 
 describe("Ngee Ann AI Run", () => {
+  beforeEach(() => {
+    vi.spyOn(configApi, "getSessionConversation").mockRejectedValue(
+      new ConfigApiError("RESOURCE_NOT_FOUND", "Session not found", 404),
+    );
+  });
+
   afterEach(() => {
     resetNgeeAnnAiRunsForTests();
     vi.restoreAllMocks();
@@ -785,6 +791,76 @@ describe("Ngee Ann AI Run", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("restores a completed same-identity Run after memory reset without another Agent POST", async () => {
+    const input = requiredInput();
+    const persistedRunId = "ngee-ann-overview-persisted";
+    const findings = generatedFindings();
+    vi.mocked(configApi.getSessionConversation).mockResolvedValue({
+      sessionId: "persisted-session",
+      messages: [{
+        id: "assistant-final",
+        runId: persistedRunId,
+        role: "assistant",
+        source: "agent",
+        contentText: "[conversation message truncated: original_chars=12000]",
+        position: 1,
+        createdAt: "2026-08-06T00:00:02.000Z",
+      }],
+      runEventRefs: [{ runId: persistedRunId, eventCount: 6, firstSeq: 1, lastSeq: 6 }],
+      checkpoints: [{
+        runId: persistedRunId,
+        status: "completed",
+        terminalEvent: "RUN_FINISHED",
+        firstEventSeq: 1,
+        lastEventSeq: 6,
+        startedAt: "2026-08-06T00:00:00.000Z",
+        finishedAt: "2026-08-06T00:00:02.000Z",
+      }],
+      toolCalls: [],
+    });
+    vi.spyOn(configApi, "getSessionTraceDag").mockResolvedValue({
+      sessionId: "persisted-session",
+      edges: [],
+      sections: [],
+      nodes: [
+        {
+          id: `${persistedRunId}:context`,
+          kind: "context",
+          label: "Compiled context",
+          runId: persistedRunId,
+          eventSeq: 0,
+          detail: { type: "context", assistantOutput: JSON.stringify({ findings }) },
+        },
+        traceToolNode(persistedRunId, "schema-1", "inspect_schema", 1, {}, {
+          tables: [{ name: "energy_intervals", columns: [{ name: "usage_kwh", type: "DOUBLE" }] }],
+        }),
+        traceToolNode(persistedRunId, "sql-1", "run_sql_readonly", 2, {
+          sql: "SELECT SUM(usage_kwh) AS usage_kwh FROM energy_intervals",
+        }, {
+          sql: "SELECT SUM(usage_kwh) AS usage_kwh FROM energy_intervals",
+          columns: ["value"],
+          rows: [[150]],
+          row_count: 1,
+          audit_log_id: "audit-sql-1",
+          elapsed_ms: 12,
+        }),
+      ],
+    });
+    const fetchMock = vi.fn(() => {
+      throw new Error("A restored result must not start another Agent Run");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    resetNgeeAnnAiRunsForTests();
+    await expect(getOrStartNgeeAnnAiRun(input)).resolves.toMatchObject({
+      status: "available",
+      runId: persistedRunId,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(configApi.getSessionConversation).toHaveBeenCalledTimes(1);
+    expect(configApi.getSessionTraceDag).toHaveBeenCalledTimes(1);
+  });
+
   it("sends the password-auth CSRF token when starting an AI Run", async () => {
     process.env.NEXT_PUBLIC_DATAFOUNDRY_AUTH_MODE = "password";
     process.env.NEXT_PUBLIC_CONFIG_API_URL = "";
@@ -876,6 +952,32 @@ function sqlEvents(toolCallId: string, sql: string, value: number): Array<Record
       },
     },
   ];
+}
+
+function traceToolNode(
+  runId: string,
+  toolCallId: string,
+  toolName: string,
+  eventSeq: number,
+  args: Record<string, unknown>,
+  result: Record<string, unknown>,
+) {
+  return {
+    id: `${runId}:${toolCallId}`,
+    kind: "tool" as const,
+    label: `Tool: ${toolName}`,
+    runId,
+    toolCallId,
+    eventSeq,
+    detail: {
+      type: "tool" as const,
+      toolName,
+      arguments: args,
+      argumentsText: JSON.stringify(args),
+      result,
+      resultText: JSON.stringify(result),
+    },
+  };
 }
 
 function splitTextAt(text: string, points: number[]): string[] {

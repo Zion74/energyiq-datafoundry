@@ -1,5 +1,9 @@
-import type { EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
-import { configApi, getAgentRuntimeUrl } from "../../../lib/config-api";
+import type {
+  EnergyProjectAnalysisSnapshotDto,
+  SessionConversationDto,
+  TraceDagDto,
+} from "../../../lib/config-api";
+import { ConfigApiError, configApi, getAgentRuntimeUrl } from "../../../lib/config-api";
 import {
   configApiCsrfHeaders,
   configApiIdentityHeaders,
@@ -96,6 +100,12 @@ type CurrentRun = {
 
 const currentRuns = new Map<string, CurrentRun>();
 const FRIENDLY_UNAVAILABLE = "AI analysis is temporarily unavailable. The verified Overview remains available.";
+const PRESCHOOL_AI_PACK_ID = "preschool-analysis-pack" as const;
+const PRESCHOOL_AI_PACK_REVISION = "v1" as const;
+const PRESCHOOL_AI_OUTPUT_CONTRACT_REVISION = "v4";
+const PERSISTED_WORKSPACE_PROFILE_ID = "workspace-default";
+const ACTIVE_RUN_POLL_INTERVAL_MS = 1_500;
+const ACTIVE_RUN_POLL_LIMIT = 200;
 
 export function resetPreschoolAiRunsForTests(): void {
   currentRuns.clear();
@@ -125,6 +135,8 @@ export function buildPreschoolAiRunInput(
     snapshot.context.metricVersion,
     snapshot.context.businessCalendarVersion,
     snapshot.context.tariffScheduleVersion,
+    `${PRESCHOOL_AI_PACK_ID}@${PRESCHOOL_AI_PACK_REVISION}`,
+    `preschool-ai-output-contract@${PRESCHOOL_AI_OUTPUT_CONTRACT_REVISION}`,
     analysisFrom,
     analysisTo,
   ].join(":");
@@ -164,10 +176,11 @@ export function getOrStartPreschoolAiRun(
     settled: false,
   };
   const report = (progress: PreschoolAiProgress) => {
+    if (run.progress === progress) return;
     run.progress = progress;
     for (const listener of run.listeners) listener(progress);
   };
-  run.promise = executePreschoolAiRun(input, report).catch((error: unknown) => ({
+  run.promise = restoreOrExecutePreschoolAiRun(input, report).catch((error: unknown) => ({
     status: "unavailable" as const,
     reason: friendlyReason(error instanceof Error ? error.message : "AI Analyst unavailable."),
   })).finally(() => {
@@ -181,6 +194,7 @@ export function getOrStartPreschoolAiRun(
 export async function executePreschoolAiRun(
   input: PreschoolAiRunInput,
   onProgress?: ProgressCallback,
+  prepared: { profileId?: string; threadId?: string } = {},
 ): Promise<PreschoolAiRunResult> {
   let last: PreschoolAiProgress | null = null;
   const report = (progress: PreschoolAiProgress) => {
@@ -190,10 +204,10 @@ export async function executePreschoolAiRun(
     onProgress?.(progress);
   };
   report("inspecting");
-  const defaults = await configApi.getRunDefaults();
-  if (!defaults.activeLlmProfileId) return { status: "unavailable", reason: "No current Workspace model profile is configured." };
+  const profileId = prepared.profileId ?? (await configApi.getRunDefaults()).activeLlmProfileId;
+  if (!profileId) return { status: "unavailable", reason: "No current Workspace model profile is configured." };
   const runId = `preschool-overview-${crypto.randomUUID()}`;
-  const threadId = `preschool-overview-${crypto.randomUUID()}`;
+  const threadId = prepared.threadId ?? await buildPreschoolAiSessionId(input);
   const response = await fetch(getAgentRuntimeUrl(), {
     method: "POST",
     ...(isPasswordAuthMode() ? { credentials: "same-origin" as RequestCredentials } : {}),
@@ -203,7 +217,7 @@ export async function executePreschoolAiRun(
       ...configApiIdentityHeaders(),
       ...configApiCsrfHeaders("POST"),
     },
-    body: JSON.stringify(buildPreschoolAgentRunBody(input, defaults.activeLlmProfileId, runId, threadId)),
+    body: JSON.stringify(buildPreschoolAgentRunBody(input, profileId, runId, threadId)),
     signal: AbortSignal.timeout(300_000),
   });
   if (!response.ok) return { status: "unavailable", reason: `AI Analyst request failed (${response.status}).` };
@@ -218,7 +232,134 @@ export async function executePreschoolAiRun(
     }
   });
   if (successfulSqlCount > 0) report("drafting");
-  return resolvePreschoolAiEventStream({ eventStream, input, providerProfileId: defaults.activeLlmProfileId, runId });
+  return resolvePreschoolAiEventStream({ eventStream, input, providerProfileId: profileId, runId });
+}
+
+async function restoreOrExecutePreschoolAiRun(
+  input: PreschoolAiRunInput,
+  onProgress?: ProgressCallback,
+): Promise<PreschoolAiRunResult> {
+  onProgress?.("inspecting");
+  const threadId = await buildPreschoolAiSessionId(input);
+  let persisted = await probePersistedPreschoolAiRun(input, threadId);
+  if (persisted.result) {
+    onProgress?.("validating");
+    onProgress?.("drafting");
+    return persisted.result;
+  }
+  for (let attempt = 0; persisted.active && attempt < ACTIVE_RUN_POLL_LIMIT; attempt += 1) {
+    await delay(ACTIVE_RUN_POLL_INTERVAL_MS);
+    persisted = await probePersistedPreschoolAiRun(input, threadId);
+    if (persisted.result) {
+      onProgress?.("validating");
+      onProgress?.("drafting");
+      return persisted.result;
+    }
+  }
+  if (persisted.active) {
+    return { status: "unavailable", reason: "The existing AI analysis did not finish within the bounded wait." };
+  }
+  const defaults = await configApi.getRunDefaults();
+  if (!defaults.activeLlmProfileId) {
+    return { status: "unavailable", reason: "No current Workspace model profile is configured." };
+  }
+  return executePreschoolAiRun(input, onProgress, {
+    profileId: defaults.activeLlmProfileId,
+    threadId,
+  });
+}
+
+async function buildPreschoolAiSessionId(input: PreschoolAiRunInput): Promise<string> {
+  const bytes = new TextEncoder().encode(`preschool-overview-ai-slot\u0000${input.identityKey}`);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const suffix = [...new Uint8Array(digest)].slice(0, 16)
+    .map((value) => value.toString(16).padStart(2, "0")).join("");
+  return `energyiq-overview-slot-${input.projectId}-${suffix}`;
+}
+
+async function probePersistedPreschoolAiRun(
+  input: PreschoolAiRunInput,
+  threadId: string,
+): Promise<{ active: boolean; result: Extract<PreschoolAiRunResult, { status: "available" }> | null }> {
+  let conversation: SessionConversationDto;
+  try {
+    conversation = await configApi.getSessionConversation(threadId, 200);
+  } catch (error) {
+    if (error instanceof ConfigApiError && error.status === 404) {
+      return { active: false, result: null };
+    }
+    throw error;
+  }
+  const completed = [...(conversation.checkpoints ?? [])]
+    .filter((checkpoint) => checkpoint.status === "completed" && checkpoint.terminalEvent === "RUN_FINISHED")
+    .sort((left, right) => (right.finishedAt ?? "").localeCompare(left.finishedAt ?? ""));
+  if (completed.length === 0) {
+    return { active: Boolean(conversation.activeRun), result: null };
+  }
+  const trace = await configApi.getSessionTraceDag(threadId, 200);
+  for (const checkpoint of completed) {
+    const eventStream = persistedEventStream(conversation, trace, checkpoint.runId);
+    const result = resolvePreschoolAiEventStream({
+      eventStream,
+      input,
+      providerProfileId: PERSISTED_WORKSPACE_PROFILE_ID,
+      runId: checkpoint.runId,
+    });
+    if (result.status === "available") {
+      return { active: Boolean(conversation.activeRun), result };
+    }
+  }
+  return { active: Boolean(conversation.activeRun), result: null };
+}
+
+function persistedEventStream(
+  conversation: SessionConversationDto,
+  trace: TraceDagDto,
+  runId: string,
+): string {
+  const toolEvents = trace.nodes
+    .filter((node) => node.runId === runId && node.kind === "tool" && node.detail?.type === "tool")
+    .sort((left, right) => (left.eventSeq ?? 0) - (right.eventSeq ?? 0))
+    .flatMap<AgUiEvent>((node) => {
+      if (node.detail?.type !== "tool") return [];
+      const toolCallId = node.toolCallId ?? node.id;
+      const toolCallName = node.detail.toolName ?? node.label.replace(/^Tool:\s*/u, "");
+      const result = node.detail.result ?? node.detail.resultText;
+      return [
+        {
+          type: "TOOL_CALL_START",
+          toolCallId,
+          toolCallName,
+          ...(node.detail.arguments !== undefined ? { args: node.detail.arguments } : {}),
+          ...(node.detail.argumentsText ? { argsText: node.detail.argumentsText } : {}),
+        },
+        {
+          type: "TOOL_CALL_RESULT",
+          toolCallId,
+          toolCallName,
+          result,
+        },
+      ];
+    });
+  const traceMessageEvents = trace.nodes
+    .filter((node) => node.runId === runId
+      && node.kind === "context"
+      && node.detail?.type === "context"
+      && Boolean(node.detail.assistantOutput))
+    .sort((left, right) => (left.eventSeq ?? 0) - (right.eventSeq ?? 0))
+    .flatMap<AgUiEvent>((node) => node.detail?.type === "context" && node.detail.assistantOutput
+      ? [{ type: "TEXT_MESSAGE_CONTENT", delta: node.detail.assistantOutput }]
+      : []);
+  const messageEvents = traceMessageEvents.length > 0 ? traceMessageEvents : conversation.messages
+    .filter((message) => message.runId === runId && message.role === "assistant" && message.contentText)
+    .sort((left, right) => left.position - right.position)
+    .map<AgUiEvent>((message) => ({ type: "TEXT_MESSAGE_CONTENT", delta: message.contentText }));
+  return [...toolEvents, ...messageEvents, { type: "RUN_FINISHED" }]
+    .map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 export function buildPreschoolAgentRunBody(
@@ -321,27 +462,43 @@ export function resolvePreschoolAiEventStream(args: {
     return { status: "unavailable", reason: "Each displayed Preschool Finding must cite at least two successful SQL Evidence operations." };
   }
   const evidenceById = new Map(args.input.discoveryEvidence.items.map((item) => [item.id, item]));
-  const selectedEvidence = generated.map((finding) => finding.evidenceRefs
+  const originallySelectedEvidence = generated.map((finding) => finding.evidenceRefs
     .map((id) => evidenceById.get(id)).filter((item): item is PreschoolDiscoveryEvidenceItem => Boolean(item)));
-  if (selectedEvidence.some((items, index) => items.length !== generated[index]!.evidenceRefs.length)) {
+  if (originallySelectedEvidence.some((items, index) => items.length !== generated[index]!.evidenceRefs.length)) {
     return { status: "unavailable", reason: "A Preschool Finding cited Evidence that is not present in this Snapshot." };
   }
-  const selectedTools = generated.map((finding) => finding.evidenceSqlIndexes
+  const originallySelectedTools = generated.map((finding) => finding.evidenceSqlIndexes
     .map((index) => collected.sql[index - 1]).filter((tool): tool is CollectedSqlEvidence => Boolean(tool)));
-  if (selectedTools.some((items, index) => items.length !== generated[index]!.evidenceSqlIndexes.length)) {
+  if (originallySelectedTools.some((items, index) => items.length !== generated[index]!.evidenceSqlIndexes.length)) {
     return { status: "unavailable", reason: "A Preschool Finding cited SQL Evidence that is not present in this Run." };
   }
+  const verifiedFindings = generated.map((finding, index) => repairFindingEvidenceBindings(
+    finding,
+    originallySelectedEvidence[index]!,
+    originallySelectedTools[index]!,
+    collected.sql,
+    args.input,
+  ));
+  const selectedEvidence = verifiedFindings.map((finding) => finding.evidenceRefs
+    .map((id) => evidenceById.get(id)).filter((item): item is PreschoolDiscoveryEvidenceItem => Boolean(item)));
+  const selectedTools = verifiedFindings.map((finding) => finding.evidenceSqlIndexes
+    .map((index) => collected.sql[index - 1]).filter((tool): tool is CollectedSqlEvidence => Boolean(tool)));
   if (selectedTools.some((tools) => new Set(
     tools.flatMap((tool) => tool.normalizedSql ? [tool.normalizedSql] : []),
   ).size < 2)) {
     return { status: "unavailable", reason: "Each displayed Preschool Finding must cite at least two distinct SQL queries." };
   }
-  if (generated.some((finding, index) => unsupportedNumber(
+  const displayable = verifiedFindings.flatMap((finding, index) => unsupportedNumber(
     finding,
     selectedEvidence[index]!,
     selectedTools[index]!,
     args.input,
-  ))) {
+  ) ? [] : [{
+    finding,
+    evidence: selectedEvidence[index]!,
+    tools: selectedTools[index]!,
+  }]);
+  if (verifiedFindings.length > 0 && displayable.length === 0) {
     return { status: "unavailable", reason: "The AI Analyst returned a numeric claim without Finding-specific Evidence." };
   }
   return {
@@ -350,7 +507,7 @@ export function resolvePreschoolAiEventStream(args: {
     runId: args.runId,
     packId: "preschool-analysis-pack",
     packRevision: "v1",
-    findings: generated.map((finding, index) => ({
+    findings: displayable.map(({ finding, evidence, tools }, index) => ({
       id: `preschool-ai-finding-${index + 1}`,
       relationship: finding.relationship,
       title: finding.title,
@@ -364,11 +521,65 @@ export function resolvePreschoolAiEventStream(args: {
       evidence: {
         snapshotId: args.input.snapshotId,
         period: { from: args.input.analysisFrom, to: args.input.analysisTo },
-        deterministic: selectedEvidence[index]!,
-        tools: selectedTools[index]!.map(({ numericEvidence: _, normalizedSql: __, returnedRowCount: ___, ...tool }) => tool),
+        deterministic: evidence,
+        tools: tools.map(({ numericEvidence: _, normalizedSql: __, returnedRowCount: ___, ...tool }) => tool),
       },
     })),
   };
+}
+
+function repairFindingEvidenceBindings(
+  finding: GeneratedFinding,
+  evidence: PreschoolDiscoveryEvidenceItem[],
+  selectedTools: CollectedSqlEvidence[],
+  allTools: CollectedSqlEvidence[],
+  input: PreschoolAiRunInput,
+): GeneratedFinding {
+  if (!unsupportedNumber(finding, evidence, selectedTools, input)) return finding;
+  const narrative = removeAllowedStructuralReferences(
+    [finding.title, finding.what, finding.why, finding.how, finding.expectedIfAct,
+      finding.ifIgnored, finding.howToVerify, finding.evidenceNote].join(" "),
+    input,
+    finding.evidenceSqlIndexes,
+  );
+  const evidenceNarrative = removeCitedSqlPredicateReferences(narrative, selectedTools);
+  const deterministicValues = evidence.flatMap((item) => collectNumericValues(item.values));
+  const selectedValues = selectedTools.flatMap((tool) => tool.numericEvidence);
+  const unsupportedClaims = numericTokens(evidenceNarrative).filter((claim) => {
+    if (deterministicValues.some((value) => numericMatches(claim, value))) return false;
+    return !selectedValues.some((cell) => numericMatches(claim, cell.value)
+      && sqlColumnSupportsClaim(cell.column, claim.context));
+  });
+  if (unsupportedClaims.length === 0) return finding;
+  const indexes = new Set(finding.evidenceSqlIndexes);
+  const evidenceRefs = new Set(finding.evidenceRefs);
+  for (const claim of unsupportedClaims) {
+    // Do not turn dates, ids, or an uncited "Evidence index N" phrase into an
+    // Evidence binding. Automatic repair is restricted to typed business facts.
+    if (!hasExplicitUnit(claim.context) || /(?:sql\s+)?evidence\s+index\s*$/u.test(claim.context)) {
+      return finding;
+    }
+    const sqlMatches = allTools.flatMap((tool, index) => tool.numericEvidence.some((cell) =>
+      numericMatches(claim, cell.value) && sqlColumnSupportsClaim(cell.column, claim.context))
+      ? [index + 1]
+      : []);
+    const deterministicMatches = input.discoveryEvidence.items.filter((item) =>
+      collectTypedNumericEvidence(item.values).some((cell) => numericMatches(claim, cell.value)
+        && sqlColumnSupportsClaim(cell.field, claim.context)));
+    if (sqlMatches.length === 0 && deterministicMatches.length === 0) return finding;
+    for (const index of sqlMatches) indexes.add(index);
+    for (const item of deterministicMatches) evidenceRefs.add(item.id);
+  }
+  const repaired = {
+    ...finding,
+    evidenceRefs: [...evidenceRefs],
+    evidenceSqlIndexes: [...indexes].sort((left, right) => left - right),
+  };
+  const repairedEvidence = repaired.evidenceRefs.map((id) => input.discoveryEvidence.items
+    .find((item) => item.id === id)).filter((item): item is PreschoolDiscoveryEvidenceItem => Boolean(item));
+  const repairedTools = repaired.evidenceSqlIndexes.map((index) => allTools[index - 1]!)
+    .filter(Boolean);
+  return unsupportedNumber(repaired, repairedEvidence, repairedTools, input) ? finding : repaired;
 }
 
 type GeneratedFinding = {
@@ -474,18 +685,59 @@ function unsupportedNumber(
   tools: CollectedSqlEvidence[],
   input: PreschoolAiRunInput,
 ): boolean {
+  const rawNarrative = [finding.title, finding.what, finding.why, finding.how, finding.expectedIfAct,
+    finding.ifIgnored, finding.howToVerify, finding.evidenceNote].join(" ");
+  if (hasMismatchedPinnedReference(rawNarrative, "Snapshot", input.snapshotId)
+    || hasMismatchedPinnedReference(rawNarrative, "Release", input.projectReleaseId)) {
+    return true;
+  }
   const narrative = removeAllowedStructuralReferences(
-    [finding.title, finding.what, finding.why, finding.how, finding.expectedIfAct, finding.ifIgnored, finding.howToVerify, finding.evidenceNote].join(" "),
+    rawNarrative,
     input,
     finding.evidenceSqlIndexes,
   );
+  const evidenceNarrative = removeCitedSqlPredicateReferences(narrative, tools);
   const deterministicValues = evidence.flatMap((item) => collectNumericValues(item.values));
   const sqlValues = tools.flatMap((tool) => tool.numericEvidence);
-  return numericTokens(narrative).some((claim) => {
+  return numericTokens(evidenceNarrative).some((claim) => {
     if (deterministicValues.some((value) => numericMatches(claim, value))) return false;
     return !sqlValues.some((cell) => numericMatches(claim, cell.value)
       && sqlColumnSupportsClaim(cell.column, claim.context));
   });
+}
+
+function removeCitedSqlPredicateReferences(narrative: string, tools: CollectedSqlEvidence[]): string {
+  const citedSql = tools.flatMap((tool) => tool.sql ? [tool.sql] : []);
+  const hasPredicate = (column: string, operator: string, value: string) => citedSql.some((sql) => {
+    const pattern = new RegExp(
+      `\\b${escapeRegExp(column)}\\s*${escapeRegExp(operator)}\\s*${escapeRegExp(value)}(?![\\d.])`,
+      "iu",
+    );
+    return pattern.test(sql);
+  });
+  let remaining = narrative.replace(
+    /\b(local_hour|hour_of_day)\s*(<=|>=|=|<|>)\s*(-?\d+(?:\.\d+)?)\s+or\s+(<=|>=|=|<|>)\s*(-?\d+(?:\.\d+)?)/giu,
+    (full, column: string, firstOperator: string, firstValue: string, secondOperator: string, secondValue: string) =>
+      hasPredicate(column, firstOperator, firstValue) && hasPredicate(column, secondOperator, secondValue)
+        ? `${column}${firstOperator} or ${secondOperator}`
+        : full,
+  );
+  remaining = remaining.replace(
+    /\b(local_hour|hour_of_day)\s*(<=|>=|=|<|>)\s*(-?\d+(?:\.\d+)?)/giu,
+    (full, column: string, operator: string, value: string) => hasPredicate(column, operator, value)
+      ? `${column}${operator}`
+      : full,
+  );
+  return remaining;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+function hasMismatchedPinnedReference(narrative: string, label: "Release" | "Snapshot", expected: string): boolean {
+  const pattern = new RegExp(`\\b${label}\\s+([A-Za-z0-9_-]*\\d[A-Za-z0-9_-]*)`, "giu");
+  return [...narrative.matchAll(pattern)].some((match) => match[1] !== expected);
 }
 
 function removeAllowedStructuralReferences(
@@ -515,6 +767,10 @@ function removeAllowedStructuralReferences(
       "Evidence",
     );
   }
+  remaining = remaining.replace(
+    /\btop[- ]\d+\s+(?:scan|query|result|list)\b/giu,
+    "ranked query",
+  );
   return remaining;
 }
 
@@ -586,6 +842,16 @@ function collectNumericValues(value: unknown): number[] {
   return [];
 }
 
+function collectTypedNumericEvidence(
+  value: unknown,
+  field = "",
+): Array<{ field: string | null; value: number }> {
+  if (typeof value === "number") return Number.isFinite(value) ? [{ field: field || null, value }] : [];
+  if (Array.isArray(value)) return value.flatMap((item) => collectTypedNumericEvidence(item, field));
+  if (isRecord(value)) return Object.entries(value).flatMap(([key, item]) => collectTypedNumericEvidence(item, key));
+  return [];
+}
+
 function collectSqlNumericEvidence(
   columns: string[],
   rows: unknown[],
@@ -606,7 +872,7 @@ function collectSqlNumericEvidence(
 }
 
 function numericTokens(value: string): Array<{ context: string; precision: number; value: number }> {
-  return [...value.matchAll(/[-+]?\d[\d,]*(?:\.\d+)?/gu)].flatMap((match) => {
+  return [...value.matchAll(/(?<![A-Za-z0-9])[-+]?\d[\d,]*(?:\.\d+)?(?![A-Za-z0-9])/gu)].flatMap((match) => {
     const token = match[0];
     const normalized = token.replaceAll(",", "");
     const parsed = Number(normalized);

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { configApi } from "../../../lib/config-api";
+import { ConfigApiError, configApi } from "../../../lib/config-api";
 import {
   buildPreschoolAgentRunBody,
   buildPreschoolAiRunInput,
@@ -202,7 +202,7 @@ describe("Preschool AI Run", () => {
   });
 
   it("rejects a displayed Finding that does not cite at least two investigation operations", () => {
-    const findings = generatedFindings();
+    const findings = generatedFindings().slice(0, 1);
     findings[0]!.evidenceSqlIndexes = [1];
     const result = resolvePreschoolAiEventStream({
       eventStream: successfulEventStream(findings),
@@ -269,7 +269,7 @@ describe("Preschool AI Run", () => {
   });
 
   it("rejects unsupported numeric claims and Snapshot pin drift", () => {
-    const findings = generatedFindings();
+    const findings = generatedFindings().slice(0, 1);
     findings[0]!.what = "Centre G used 999 kWh.";
     const unsupported = resolvePreschoolAiEventStream({
       eventStream: successfulEventStream(findings),
@@ -307,7 +307,7 @@ describe("Preschool AI Run", () => {
       runId: "run-1",
     }).status).toBe("available");
 
-    const mismatched = generatedFindings();
+    const mismatched = generatedFindings().slice(0, 1);
     mismatched[0]!.relationship = "independent";
     mismatched[0]!.evidenceRefs = [];
     mismatched[0]!.what = "The drill-down returned 62.4 Centres.";
@@ -323,7 +323,7 @@ describe("Preschool AI Run", () => {
   });
 
   it("accepts the exact pinned Run dates and an actually cited SQL Evidence index as structural references", () => {
-    const findings = generatedFindings();
+    const findings = generatedFindings().slice(0, 1);
     findings[0]!.what = "From 2026-05-01 through 2026-05-31, SQL Evidence index 1 supports the same Centre direction.";
 
     const result = resolvePreschoolAiEventStream({
@@ -338,7 +338,7 @@ describe("Preschool AI Run", () => {
 
   it("accepts the verified Discovery Period in exact and equivalent UTC ISO presentations", () => {
     const input = requiredInput();
-    const findings = generatedFindings();
+    const findings = generatedFindings().slice(0, 1);
     findings[0]!.what = [
       "The verified Discovery Period runs from",
       "2026-04-30T16:00:00Z through 2026-05-31T16:00:00.000Z.",
@@ -355,7 +355,7 @@ describe("Preschool AI Run", () => {
   });
 
   it("rejects a nearby UTC instant that is not the verified Discovery Period", () => {
-    const findings = generatedFindings();
+    const findings = generatedFindings().slice(0, 1);
     findings[0]!.what = "The Discovery Period began at 2026-04-30T17:00:00Z.";
 
     expect(resolvePreschoolAiEventStream({
@@ -404,7 +404,7 @@ describe("Preschool AI Run", () => {
     input.projectReleaseId = "preschool-demo-template-v2";
     input.discoveryEvidence.identity.snapshotId = input.snapshotId;
     input.discoveryEvidence.identity.projectReleaseId = input.projectReleaseId;
-    const findings = generatedFindings();
+    const findings = generatedFindings().slice(0, 1);
     findings[0]!.what = what;
 
     expect(resolvePreschoolAiEventStream({
@@ -419,10 +419,9 @@ describe("Preschool AI Run", () => {
   });
 
   it("rejects an SQL Evidence index that the same Finding did not cite", () => {
-    const findings = generatedFindings();
+    const findings = generatedFindings().slice(0, 1);
     findings[0]!.what = "SQL Evidence index 1 supports the same Centre direction.";
     findings[0]!.evidenceSqlIndexes = [2, 3];
-    findings[1]!.evidenceSqlIndexes = [1, 2];
 
     expect(resolvePreschoolAiEventStream({
       eventStream: successfulEventStream(findings, [
@@ -439,11 +438,96 @@ describe("Preschool AI Run", () => {
     });
   });
 
+  it("repairs a missing SQL Evidence index when every numeric claim has an exact governed source", () => {
+    const findings = generatedFindings().slice(0, 1);
+    findings[0]!.what = "Centre E records 870 kWh while Centres G, M and J record 816, 813 and 824 kWh.";
+    findings[0]!.why = "The cited Centre usage rows support the comparison.";
+    findings[0]!.evidenceRefs = [];
+    findings[0]!.evidenceSqlIndexes = [1, 2, 4];
+    const sqlEvidence = [
+      ...namedSqlEvents("sql-1", "SELECT total usage", ["total_usage_kwh"], [[24_922]]),
+      ...namedSqlEvents("sql-2", "SELECT top centres", ["centre", "usage_kwh"], [["E", 870], ["N", 869], ["L", 863]]),
+      ...namedSqlEvents("sql-3", "SELECT priority centres", ["centre", "usage_kwh"], [["G", 816], ["M", 813], ["J", 824]]),
+      ...namedSqlEvents("sql-4", "SELECT validation centres", ["centre", "usage_kwh"], [["E", 870], ["N", 869], ["L", 863]]),
+    ];
+
+    const result = resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(findings, sqlEvidence),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status === "available") {
+      expect(result.findings[0]!.evidence.tools.map((tool) => tool.toolCallId)).toEqual([
+        "sql-1",
+        "sql-2",
+        "sql-3",
+        "sql-4",
+      ]);
+    }
+  });
+
+  it("keeps verified Findings when a sibling Finding has an unsupported numeric claim", () => {
+    const findings = generatedFindings();
+    findings[0]!.what = "This unsupported action would reduce usage by 67%.";
+
+    const result = resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status === "available") {
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings[0]!.title).toBe(findings[1]!.title);
+    }
+  });
+
+  it("does not treat a cited ranked-query label or P75 benchmark name as a business number", () => {
+    const findings = generatedFindings().slice(0, 1);
+    findings[0]!.what = "The top-10 scan returned 62.4 kWh for the selected hour.";
+    findings[0]!.ifIgnored = "A later P75 comparison could inherit an unchecked input.";
+    findings[0]!.evidenceRefs = [];
+
+    expect(resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    }).status).toBe("available");
+  });
+
+  it("binds an exact Bundle field and treats an actually cited SQL predicate as method context", () => {
+    const findings = generatedFindings().slice(0, 1);
+    findings[0]!.what = "The validation should cover all 30 Centres.";
+    findings[0]!.how = "Compare local_hour<7 or >=19 in the cited query.";
+    const sqlEvidence = [
+      ...namedSqlEvents("sql-1", "SELECT 843.0985 AS usage_kwh WHERE local_hour<7 OR local_hour>=19", ["usage_kwh"], [[843.0985]]),
+      ...namedSqlEvents("sql-2", "SELECT 62.4 AS usage_kwh", ["usage_kwh"], [[62.4]]),
+    ];
+
+    const result = resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(findings, sqlEvidence),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status === "available") {
+      expect(result.findings[0]!.evidence.deterministic.map((item) => item.id)).toContain("portfolio:may");
+    }
+  });
+
   it.each([
     ["an arbitrary date", "The pattern was visible on 2026-05-30."],
     ["a UUID", "The artifact was 550e8400-e29b-41d4-a716-446655440000."],
   ])("rejects %s even when the Finding cites valid SQL", (_name, what) => {
-    const findings = generatedFindings();
+    const findings = generatedFindings().slice(0, 1);
     findings[0]!.what = what;
 
     expect(resolvePreschoolAiEventStream({
@@ -458,7 +542,7 @@ describe("Preschool AI Run", () => {
   });
 
   it("does not let a version string in cited values authorize an unrelated percentage", () => {
-    const findings = generatedFindings();
+    const findings = generatedFindings().slice(0, 1);
     findings[0]!.what = "Estimated savings are 1%.";
     findings[0]!.evidenceRefs = ["operating:portfolio"];
 
@@ -474,7 +558,7 @@ describe("Preschool AI Run", () => {
   });
 
   it("does not remove an authorized date embedded inside an artifact id", () => {
-    const findings = generatedFindings();
+    const findings = generatedFindings().slice(0, 1);
     findings[0]!.what = "Artifact artifact_2026-05-01 was selected.";
 
     expect(resolvePreschoolAiEventStream({
@@ -489,7 +573,7 @@ describe("Preschool AI Run", () => {
   });
 
   it("does not remove a cited Evidence index phrase that is only a prefix of a longer numeric token", () => {
-    const findings = generatedFindings();
+    const findings = generatedFindings().slice(0, 1);
     findings[0]!.what = "SQL Evidence index 1843.0985 was selected.";
 
     expect(resolvePreschoolAiEventStream({
@@ -559,6 +643,9 @@ describe("Preschool AI Run", () => {
 
   it("single-flights identical page identities and fails soft", async () => {
     const input = requiredInput();
+    vi.spyOn(configApi, "getSessionConversation").mockRejectedValue(
+      new ConfigApiError("RESOURCE_NOT_FOUND", "Session not found", 404),
+    );
     vi.spyOn(configApi, "getRunDefaults").mockResolvedValue({ activeLlmProfileId: "profile-1" } as never);
     const fetchMock = vi.fn().mockResolvedValue(new Response(successfulEventStream(), {
       status: 200,
@@ -580,6 +667,87 @@ describe("Preschool AI Run", () => {
       status: "unavailable",
       reason: "AI Analyst request failed (503).",
     });
+  });
+
+  it("restores a completed same-identity Run after memory reset without another Agent POST", async () => {
+    const input = requiredInput();
+    const persistedRunId = "preschool-overview-persisted";
+    const findings = generatedFindings();
+    vi.spyOn(configApi, "getSessionConversation").mockResolvedValue({
+      sessionId: "persisted-session",
+      messages: [{
+        id: "assistant-final",
+        runId: persistedRunId,
+        role: "assistant",
+        source: "agent",
+        contentText: "[conversation message truncated: original_chars=12755]",
+        position: 1,
+        createdAt: "2026-08-06T00:00:02.000Z",
+      }],
+      runEventRefs: [{ runId: persistedRunId, eventCount: 8, firstSeq: 1, lastSeq: 8 }],
+      checkpoints: [{
+        runId: persistedRunId,
+        status: "completed",
+        terminalEvent: "RUN_FINISHED",
+        firstEventSeq: 1,
+        lastEventSeq: 8,
+        startedAt: "2026-08-06T00:00:00.000Z",
+        finishedAt: "2026-08-06T00:00:02.000Z",
+      }],
+      toolCalls: [],
+    });
+    vi.spyOn(configApi, "getSessionTraceDag").mockResolvedValue({
+      sessionId: "persisted-session",
+      edges: [],
+      sections: [],
+      nodes: [
+        {
+          id: `${persistedRunId}:context`,
+          kind: "context",
+          label: "Compiled context",
+          runId: persistedRunId,
+          eventSeq: 0,
+          detail: {
+            type: "context",
+            assistantOutput: JSON.stringify({ findings }),
+          },
+        },
+        traceToolNode(persistedRunId, "schema-1", "inspect_schema", 1, { datasource_id: "energy-scope" }, {
+          tables: [{ name: "energy_intervals", columns: [{ name: "usage_kwh", type: "DOUBLE" }] }],
+        }),
+        traceToolNode(persistedRunId, "sql-1", "run_sql_readonly", 2, {
+          sql: "SELECT parent_node_id, SUM(usage_kwh) AS usage_kwh FROM energy_intervals GROUP BY parent_node_id",
+        }, {
+          columns: ["parent_node_id", "usage_kwh"],
+          rows: [["preschool-centre-7", 843.0985]],
+          row_count: 1,
+          audit_log_id: "audit-sql-1",
+          elapsed_ms: 12,
+        }),
+        traceToolNode(persistedRunId, "sql-2", "run_sql_readonly", 3, {
+          sql: "SELECT hour_of_day, SUM(usage_kwh) AS usage_kwh FROM energy_intervals GROUP BY hour_of_day LIMIT 3",
+        }, {
+          columns: ["hour_of_day", "usage_kwh"],
+          rows: [[9, 62.4], [10, 59.1], [8, 57.8]],
+          row_count: 3,
+          audit_log_id: "audit-sql-2",
+          elapsed_ms: 14,
+        }),
+      ],
+    });
+    const fetchMock = vi.fn(() => {
+      throw new Error("A restored result must not start another Agent Run");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    resetPreschoolAiRunsForTests();
+    await expect(getOrStartPreschoolAiRun(input)).resolves.toMatchObject({
+      status: "available",
+      runId: persistedRunId,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(configApi.getSessionConversation).toHaveBeenCalledTimes(1);
+    expect(configApi.getSessionTraceDag).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -632,6 +800,56 @@ function sqlEvents(toolCallId: string, value: number): Array<Record<string, unkn
     { type: "TOOL_CALL_START", toolCallId, toolCallName: "run_sql_readonly", args: { sql } },
     { type: "TOOL_CALL_RESULT", toolCallId, toolCallName: "run_sql_readonly", result: { sql, columns: ["parent_node_id", "usage_kwh"], rows: [["preschool-centre-7", value]], row_count: 1, audit_log_id: `audit-${toolCallId}`, elapsed_ms: 12 } },
   ];
+}
+
+function namedSqlEvents(
+  toolCallId: string,
+  sql: string,
+  columns: string[],
+  rows: unknown[][],
+): Array<Record<string, unknown>> {
+  return [
+    { type: "TOOL_CALL_START", toolCallId, toolCallName: "run_sql_readonly", args: { sql } },
+    {
+      type: "TOOL_CALL_RESULT",
+      toolCallId,
+      toolCallName: "run_sql_readonly",
+      result: {
+        sql,
+        columns,
+        rows,
+        row_count: rows.length,
+        audit_log_id: `audit-${toolCallId}`,
+        elapsed_ms: 12,
+      },
+    },
+  ];
+}
+
+function traceToolNode(
+  runId: string,
+  toolCallId: string,
+  toolName: string,
+  eventSeq: number,
+  args: Record<string, unknown>,
+  result: Record<string, unknown>,
+) {
+  return {
+    id: `${runId}:${toolCallId}`,
+    kind: "tool" as const,
+    label: `Tool: ${toolName}`,
+    runId,
+    toolCallId,
+    eventSeq,
+    detail: {
+      type: "tool" as const,
+      toolName,
+      arguments: args,
+      argumentsText: JSON.stringify(args),
+      result,
+      resultText: JSON.stringify(result),
+    },
+  };
 }
 
 function generatedFindings() {

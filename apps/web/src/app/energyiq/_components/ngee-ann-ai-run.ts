@@ -1,5 +1,9 @@
-import type { EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
-import { configApi, getAgentRuntimeUrl } from "../../../lib/config-api";
+import type {
+  EnergyProjectAnalysisSnapshotDto,
+  SessionConversationDto,
+  TraceDagDto,
+} from "../../../lib/config-api";
+import { ConfigApiError, configApi, getAgentRuntimeUrl } from "../../../lib/config-api";
 import {
   configApiCsrfHeaders,
   configApiIdentityHeaders,
@@ -114,6 +118,10 @@ type CurrentRun = {
 
 const currentRuns = new Map<string, CurrentRun>();
 const FRIENDLY_AI_UNAVAILABLE_REASON = "AI analysis is temporarily unavailable. The verified Overview remains available.";
+const NGEE_ANN_AI_OUTPUT_CONTRACT_REVISION = "v1";
+const PERSISTED_WORKSPACE_PROFILE_ID = "workspace-default";
+const ACTIVE_RUN_POLL_INTERVAL_MS = 1_500;
+const ACTIVE_RUN_POLL_LIMIT = 200;
 
 export function resetNgeeAnnAiRunsForTests(): void {
   currentRuns.clear();
@@ -184,6 +192,7 @@ export function buildNgeeAnnAiRunInput(
     snapshot.context.metricVersion,
     snapshot.context.businessCalendarVersion,
     snapshot.context.tariffScheduleVersion,
+    `ngee-ann-ai-output-contract@${NGEE_ANN_AI_OUTPUT_CONTRACT_REVISION}`,
   ].join(":");
   return {
     identityKey,
@@ -223,11 +232,13 @@ export function getOrStartNgeeAnnAiRun(
     listeners,
     settled: false,
   };
+  onProgress?.("inspecting");
   const reportProgress = (progress: NgeeAnnAiProgress) => {
+    if (current.progress === progress) return;
     current.progress = progress;
     for (const listener of current.listeners) listener(progress);
   };
-  current.promise = executeNgeeAnnAiRun(input, reportProgress).catch((error: unknown) => ({
+  current.promise = restoreOrExecuteNgeeAnnAiRun(input, reportProgress).catch((error: unknown) => ({
     status: "unavailable" as const,
     reason: toFriendlyNgeeAnnAiUnavailableReason(readableError(error)),
   })).finally(() => {
@@ -241,6 +252,7 @@ export function getOrStartNgeeAnnAiRun(
 export async function executeNgeeAnnAiRun(
   input: NgeeAnnAiRunInput,
   onProgress?: NgeeAnnAiProgressCallback,
+  prepared: { profileId?: string; threadId?: string } = {},
 ): Promise<NgeeAnnAiRunResult> {
   let progress: NgeeAnnAiProgress | null = null;
   const reportProgress = (next: NgeeAnnAiProgress) => {
@@ -250,12 +262,12 @@ export async function executeNgeeAnnAiRun(
     onProgress?.(next);
   };
   reportProgress("inspecting");
-  const defaults = await configApi.getRunDefaults();
-  if (!defaults.activeLlmProfileId) {
+  const profileId = prepared.profileId ?? (await configApi.getRunDefaults()).activeLlmProfileId;
+  if (!profileId) {
     return { status: "unavailable", reason: "No current Workspace model profile is configured." };
   }
   const runId = `ngee-ann-overview-${crypto.randomUUID()}`;
-  const threadId = `ngee-ann-overview-${crypto.randomUUID()}`;
+  const threadId = prepared.threadId ?? await buildNgeeAnnAiSessionId(input);
   const response = await fetch(getAgentRuntimeUrl(), {
     method: "POST",
     ...(isPasswordAuthMode() ? { credentials: "same-origin" as RequestCredentials } : {}),
@@ -265,7 +277,7 @@ export async function executeNgeeAnnAiRun(
       ...configApiIdentityHeaders(),
       ...configApiCsrfHeaders("POST"),
     },
-    body: JSON.stringify(buildAgentRunBody(input, defaults.activeLlmProfileId, runId, threadId)),
+    body: JSON.stringify(buildAgentRunBody(input, profileId, runId, threadId)),
     signal: AbortSignal.timeout(300_000),
   });
   if (!response.ok) {
@@ -290,9 +302,127 @@ export async function executeNgeeAnnAiRun(
   return resolveNgeeAnnAiEventStream({
     eventStream,
     input,
-    providerProfileId: defaults.activeLlmProfileId,
+    providerProfileId: profileId,
     runId,
   });
+}
+
+async function restoreOrExecuteNgeeAnnAiRun(
+  input: NgeeAnnAiRunInput,
+  onProgress?: NgeeAnnAiProgressCallback,
+): Promise<NgeeAnnAiRunResult> {
+  const threadId = await buildNgeeAnnAiSessionId(input);
+  let persisted = await probePersistedNgeeAnnAiRun(input, threadId);
+  if (persisted.result) {
+    onProgress?.("drafting");
+    return persisted.result;
+  }
+  for (let attempt = 0; persisted.active && attempt < ACTIVE_RUN_POLL_LIMIT; attempt += 1) {
+    await delay(ACTIVE_RUN_POLL_INTERVAL_MS);
+    persisted = await probePersistedNgeeAnnAiRun(input, threadId);
+    if (persisted.result) {
+      onProgress?.("drafting");
+      return persisted.result;
+    }
+  }
+  if (persisted.active) {
+    return { status: "unavailable", reason: "The existing AI analysis did not finish within the bounded wait." };
+  }
+  const defaults = await configApi.getRunDefaults();
+  if (!defaults.activeLlmProfileId) {
+    return { status: "unavailable", reason: "No current Workspace model profile is configured." };
+  }
+  return executeNgeeAnnAiRun(input, onProgress, {
+    profileId: defaults.activeLlmProfileId,
+    threadId,
+  });
+}
+
+async function buildNgeeAnnAiSessionId(input: NgeeAnnAiRunInput): Promise<string> {
+  const bytes = new TextEncoder().encode(`ngee-ann-overview-ai-slot\u0000${input.identityKey}`);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const suffix = [...new Uint8Array(digest)].slice(0, 16)
+    .map((value) => value.toString(16).padStart(2, "0")).join("");
+  return `energyiq-overview-slot-${input.projectId}-${suffix}`;
+}
+
+async function probePersistedNgeeAnnAiRun(
+  input: NgeeAnnAiRunInput,
+  threadId: string,
+): Promise<{ active: boolean; result: Extract<NgeeAnnAiRunResult, { status: "available" }> | null }> {
+  let conversation: SessionConversationDto;
+  try {
+    conversation = await configApi.getSessionConversation(threadId, 200);
+  } catch (error) {
+    if (error instanceof ConfigApiError && error.status === 404) {
+      return { active: false, result: null };
+    }
+    throw error;
+  }
+  const completed = [...(conversation.checkpoints ?? [])]
+    .filter((checkpoint) => checkpoint.status === "completed" && checkpoint.terminalEvent === "RUN_FINISHED")
+    .sort((left, right) => (right.finishedAt ?? "").localeCompare(left.finishedAt ?? ""));
+  if (completed.length === 0) {
+    return { active: Boolean(conversation.activeRun), result: null };
+  }
+  const trace = await configApi.getSessionTraceDag(threadId, 200);
+  for (const checkpoint of completed) {
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: persistedEventStream(conversation, trace, checkpoint.runId),
+      input,
+      providerProfileId: PERSISTED_WORKSPACE_PROFILE_ID,
+      runId: checkpoint.runId,
+    });
+    if (result.status === "available") {
+      return { active: Boolean(conversation.activeRun), result };
+    }
+  }
+  return { active: Boolean(conversation.activeRun), result: null };
+}
+
+function persistedEventStream(
+  conversation: SessionConversationDto,
+  trace: TraceDagDto,
+  runId: string,
+): string {
+  const toolEvents = trace.nodes
+    .filter((node) => node.runId === runId && node.kind === "tool" && node.detail?.type === "tool")
+    .sort((left, right) => (left.eventSeq ?? 0) - (right.eventSeq ?? 0))
+    .flatMap<AgUiEvent>((node) => {
+      if (node.detail?.type !== "tool") return [];
+      const toolCallId = node.toolCallId ?? node.id;
+      const toolCallName = node.detail.toolName ?? node.label.replace(/^Tool:\s*/u, "");
+      const result = node.detail.result ?? node.detail.resultText;
+      return [
+        {
+          type: "TOOL_CALL_START",
+          toolCallId,
+          toolCallName,
+          ...(node.detail.arguments !== undefined ? { args: node.detail.arguments } : {}),
+          ...(node.detail.argumentsText ? { argsText: node.detail.argumentsText } : {}),
+        },
+        { type: "TOOL_CALL_RESULT", toolCallId, toolCallName, result },
+      ];
+    });
+  const traceMessageEvents = trace.nodes
+    .filter((node) => node.runId === runId
+      && node.kind === "context"
+      && node.detail?.type === "context"
+      && Boolean(node.detail.assistantOutput))
+    .sort((left, right) => (left.eventSeq ?? 0) - (right.eventSeq ?? 0))
+    .flatMap<AgUiEvent>((node) => node.detail?.type === "context" && node.detail.assistantOutput
+      ? [{ type: "TEXT_MESSAGE_CONTENT", delta: node.detail.assistantOutput }]
+      : []);
+  const messageEvents = traceMessageEvents.length > 0 ? traceMessageEvents : conversation.messages
+    .filter((message) => message.runId === runId && message.role === "assistant" && message.contentText)
+    .sort((left, right) => left.position - right.position)
+    .map<AgUiEvent>((message) => ({ type: "TEXT_MESSAGE_CONTENT", delta: message.contentText }));
+  return [...toolEvents, ...messageEvents, { type: "RUN_FINISHED" }]
+    .map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 async function readAgUiEventStream(
