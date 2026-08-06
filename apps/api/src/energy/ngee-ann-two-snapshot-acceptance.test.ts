@@ -1,9 +1,8 @@
 import { createHash } from "node:crypto";
-import { readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
-import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 
 import {
@@ -60,7 +59,10 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
 
   it("keeps saved A reproducible while the same Release and Mapping advance current Overview to B", async () => {
     const mark = phaseTimer();
-    const root = mkdtempSync(join(tmpdir(), "ngee-ann-two-snapshot-"));
+    const retainedRoot = process.env.ENERGYIQ_TWO_SNAPSHOT_ACCEPTANCE_ROOT?.trim();
+    const root = retainedRoot
+      ? createRetainedFixtureRoot(retainedRoot)
+      : mkdtempSync(join(tmpdir(), "ngee-ann-two-snapshot-"));
     const databasePath = join(root, "energy.duckdb");
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
     const fileAssets = new LocalFileAssetService(metadata, { storageRoot: join(root, "files") });
@@ -262,7 +264,13 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
       mark("read saved A after B");
     } finally {
       metadata.close();
-      removeTemporaryFixture(root);
+      if (retainedRoot) {
+        if (process.env.ENERGYIQ_ACCEPTANCE_TIMINGS === "1") {
+          console.info(`[ngee-ann-two-snapshot] retained fixture: ${root}`);
+        }
+      } else {
+        removeTemporaryFixture(root);
+      }
     }
   }, 360_000);
 });
@@ -410,4 +418,10 @@ const removeTemporaryFixture = (root: string): void => {
     ) return;
     throw error;
   }
+};
+
+const createRetainedFixtureRoot = (requestedRoot: string): string => {
+  const root = resolve(requestedRoot);
+  mkdirSync(root);
+  return root;
 };
