@@ -791,6 +791,78 @@ describe("Ngee Ann AI Run", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("prefers an untruncated Conversation result when Trace assistant output has damaged numeric token boundaries", async () => {
+    const input = requiredInput();
+    const persistedRunId = "ngee-ann-overview-conversation-source";
+    const findings = generatedFindings();
+    const damagedTraceFindings = generatedFindings();
+    damagedTraceFindings[0]!.what = "The latest pattern is at549.3591 kWh.";
+    vi.mocked(configApi.getSessionConversation).mockResolvedValue({
+      sessionId: "persisted-session",
+      messages: [{
+        id: "assistant-final",
+        runId: persistedRunId,
+        role: "assistant",
+        source: "agent",
+        contentText: JSON.stringify({ findings }),
+        position: 1,
+        createdAt: "2026-08-06T00:00:02.000Z",
+      }],
+      runEventRefs: [{ runId: persistedRunId, eventCount: 6, firstSeq: 1, lastSeq: 6 }],
+      checkpoints: [{
+        runId: persistedRunId,
+        status: "completed",
+        terminalEvent: "RUN_FINISHED",
+        firstEventSeq: 1,
+        lastEventSeq: 6,
+        startedAt: "2026-08-06T00:00:00.000Z",
+        finishedAt: "2026-08-06T00:00:02.000Z",
+      }],
+      toolCalls: [],
+    });
+    vi.spyOn(configApi, "getSessionTraceDag").mockResolvedValue({
+      sessionId: "persisted-session",
+      edges: [],
+      sections: [],
+      nodes: [
+        {
+          id: `${persistedRunId}:context`,
+          kind: "context",
+          label: "Compiled context",
+          runId: persistedRunId,
+          eventSeq: 0,
+          detail: { type: "context", assistantOutput: JSON.stringify({ findings: damagedTraceFindings }) },
+        },
+        traceToolNode(persistedRunId, "schema-1", "inspect_schema", 1, {}, {
+          tables: [{ name: "energy_intervals", columns: [{ name: "usage_kwh", type: "DOUBLE" }] }],
+        }),
+        traceToolNode(persistedRunId, "sql-1", "run_sql_readonly", 2, {
+          sql: "SELECT SUM(usage_kwh) AS usage_kwh FROM energy_intervals",
+        }, {
+          sql: "SELECT SUM(usage_kwh) AS usage_kwh FROM energy_intervals",
+          columns: ["value"],
+          rows: [[150]],
+          row_count: 1,
+          audit_log_id: "audit-sql-1",
+          elapsed_ms: 12,
+        }),
+      ],
+    });
+    const fetchMock = vi.fn(() => {
+      throw new Error("A restored result must not start another Agent Run");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    resetNgeeAnnAiRunsForTests();
+    const result = await getOrStartNgeeAnnAiRun(input);
+    expect(result).toMatchObject({
+      status: "available",
+      runId: persistedRunId,
+    });
+    expect(result.status === "available" ? result.findings[0].what : null).toBe(findings[0]!.what);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("restores a completed same-identity Run after memory reset without another Agent POST", async () => {
     const input = requiredInput();
     const persistedRunId = "ngee-ann-overview-persisted";

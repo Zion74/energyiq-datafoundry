@@ -102,7 +102,7 @@ const currentRuns = new Map<string, CurrentRun>();
 const FRIENDLY_UNAVAILABLE = "AI analysis is temporarily unavailable. The verified Overview remains available.";
 const PRESCHOOL_AI_PACK_ID = "preschool-analysis-pack" as const;
 const PRESCHOOL_AI_PACK_REVISION = "v1" as const;
-const PRESCHOOL_AI_OUTPUT_CONTRACT_REVISION = "v4";
+const PRESCHOOL_AI_OUTPUT_CONTRACT_REVISION = "v6";
 const PERSISTED_WORKSPACE_PROFILE_ID = "workspace-default";
 const ACTIVE_RUN_POLL_INTERVAL_MS = 1_500;
 const ACTIVE_RUN_POLL_LIMIT = 200;
@@ -350,10 +350,14 @@ function persistedEventStream(
     .flatMap<AgUiEvent>((node) => node.detail?.type === "context" && node.detail.assistantOutput
       ? [{ type: "TEXT_MESSAGE_CONTENT", delta: node.detail.assistantOutput }]
       : []);
-  const messageEvents = traceMessageEvents.length > 0 ? traceMessageEvents : conversation.messages
+  const conversationMessages = conversation.messages
     .filter((message) => message.runId === runId && message.role === "assistant" && message.contentText)
-    .sort((left, right) => left.position - right.position)
-    .map<AgUiEvent>((message) => ({ type: "TEXT_MESSAGE_CONTENT", delta: message.contentText }));
+    .sort((left, right) => left.position - right.position);
+  const conversationIsComplete = conversationMessages.length > 0
+    && conversationMessages.every((message) => !message.contentText.includes("[conversation message truncated:"));
+  const messageEvents = conversationIsComplete
+    ? conversationMessages.map<AgUiEvent>((message) => ({ type: "TEXT_MESSAGE_CONTENT", delta: message.contentText }))
+    : traceMessageEvents;
   return [...toolEvents, ...messageEvents, { type: "RUN_FINISHED" }]
     .map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
 }
@@ -416,12 +420,13 @@ function buildPrompt(input: PreschoolAiRunInput): string {
     `Act as an autonomous energy analyst for ${input.projectName}, Scope ${input.scopeName}.`,
     `Analyse only ${input.analysisFrom} through ${input.analysisTo} in ${input.timezone}, pinned to Snapshot ${input.snapshotId} and Release ${input.projectReleaseId}.`,
     "Your first action must be an immediate inspect_schema Tool call. Before that call, do not restate, explain, plan, summarize, or precompute the task or contract, and do not output prose. After inspect_schema returns, investigate autonomously through an observation scan, a targeted drill-down, and a validation or contradiction check. Make at most four total run_sql_readonly attempts; rejected or failed calls count toward this limit. Number only successful SQL results consecutively as SQL Evidence indexes 1 through 4.",
-    "On every SQL plan, include every runtime assertion_id listed for each requirement_id, including manual assertions. Do not call analysis_requirements_commit; satisfy the Runtime gate through the required assertions attached to each SQL plan. Use the next SQL to follow evidence from the prior result, not to repeat the same aggregate with different wording. Stop early with zero Findings if the first valid observation does not justify a useful drill-down. Otherwise use two to four successful operations and make the final operation test, contrast, or refute the candidate before returning JSON. Do not add an explanation or task plan around the final JSON.",
+    "The grounded Preschool requirements in this Run are manual assertions. Include only the requirement_ids that each SQL query materially supports and omit assertion_ids from every run_sql_readonly call; the Runtime binds the matching manual assertions. Do not call analysis_requirements_commit. Use the next SQL to follow evidence from the prior result, not to repeat the same aggregate with different wording. Stop early with zero Findings if the first valid observation does not justify a useful drill-down. Otherwise use two to four successful operations and make the final operation test, contrast, or refute the candidate before returning JSON. Do not add an explanation or task plan around the final JSON.",
     "A successful SQL may return one aggregate row or a bounded grouped, ranked, or Top-N result. Do not request more than 10 rows from one SQL Evidence operation. Multi-row output is Evidence only for the rows actually returned; omitted or truncated rows remain unavailable.",
     "Never use row position, rank, Top N size, LIMIT value, or row count in a Finding as Evidence or a numeric claim unless that quantity is returned as a real named SQL column value in the cited SQL result.",
     "Never estimate, sum, extrapolate, approximate, or infer values from truncated, previewed, omitted, or remaining rows. Every number in a Finding must appear directly in that Finding's cited bundle item values or cited SQL row; derived numbers and near matches are forbidden even when the arithmetic seems obvious.",
     "Except for the exact authorized structural references below, every non-SQL number must appear in the actual values of a bundle item cited by that same Finding. For example, stating 100% coverage requires citing quality:may in that same Finding. This is an Evidence-binding example, not a required Finding or theme.",
     "Do not use digits copied from artifact ids, audit ids, query ids, version strings, Snapshot ids, or dates as Finding numbers. Exact pinned Period, Snapshot, Release, and derived full-period presentation may appear only as structural context. Return zero Findings when no directly cited Evidence supports a useful candidate.",
+    "When filtering interval_start, which is TIMESTAMPTZ, use an ISO-8601 string or TIMESTAMPTZ literal for the pinned UTC bounds. Never compare interval_start with a TIMESTAMP literal that contains Z because that literal is timezone-naive and can shift the authorized window. If SQL and the published bundle differ, do not calculate or narrate a gap unless the gap itself is returned as a named column by a bounded reconciliation query.",
     "For Centre aggregation use parent_node_id, not scope_id. Only include quality_status='ok' and official_aggregation_eligible=TRUE. Do not add Project totals to component rows.",
     "The Bounded Preschool Discovery Evidence Bundle is authoritative for published Portfolio, Centre, Benchmark, Calendar, Spike and Circuit values. SQL is one independent cross-check, not a replacement truth source.",
     "Return zero to three distinct Findings. Do not force novelty and do not repeat the official themes as prose. Each displayed Finding must cite the first successful SQL observation and the final successful validation, plus any drill-down it uses, as distinct SQL Evidence indexes.",
@@ -462,20 +467,34 @@ export function resolvePreschoolAiEventStream(args: {
     return { status: "unavailable", reason: "Each displayed Preschool Finding must cite at least two successful SQL Evidence operations." };
   }
   const evidenceById = new Map(args.input.discoveryEvidence.items.map((item) => [item.id, item]));
-  const originallySelectedEvidence = generated.map((finding) => finding.evidenceRefs
-    .map((id) => evidenceById.get(id)).filter((item): item is PreschoolDiscoveryEvidenceItem => Boolean(item)));
-  if (originallySelectedEvidence.some((items, index) => items.length !== generated[index]!.evidenceRefs.length)) {
-    return { status: "unavailable", reason: "A Preschool Finding cited Evidence that is not present in this Snapshot." };
+  let missingSnapshotEvidence = false;
+  let missingSqlEvidence = false;
+  const referenceValidFindings = generated.flatMap((finding) => {
+    const evidence = finding.evidenceRefs
+      .map((id) => evidenceById.get(id)).filter((item): item is PreschoolDiscoveryEvidenceItem => Boolean(item));
+    if (evidence.length !== finding.evidenceRefs.length) {
+      missingSnapshotEvidence = true;
+      return [];
+    }
+    const tools = finding.evidenceSqlIndexes
+      .map((index) => collected.sql[index - 1]).filter((tool): tool is CollectedSqlEvidence => Boolean(tool));
+    if (tools.length !== finding.evidenceSqlIndexes.length) {
+      missingSqlEvidence = true;
+      return [];
+    }
+    return [{ finding, evidence, tools }];
+  });
+  if (generated.length > 0 && referenceValidFindings.length === 0) {
+    return missingSnapshotEvidence
+      ? { status: "unavailable", reason: "A Preschool Finding cited Evidence that is not present in this Snapshot." }
+      : { status: "unavailable", reason: missingSqlEvidence
+        ? "A Preschool Finding cited SQL Evidence that is not present in this Run."
+        : "The AI Analyst returned no Finding with current Snapshot Evidence." };
   }
-  const originallySelectedTools = generated.map((finding) => finding.evidenceSqlIndexes
-    .map((index) => collected.sql[index - 1]).filter((tool): tool is CollectedSqlEvidence => Boolean(tool)));
-  if (originallySelectedTools.some((items, index) => items.length !== generated[index]!.evidenceSqlIndexes.length)) {
-    return { status: "unavailable", reason: "A Preschool Finding cited SQL Evidence that is not present in this Run." };
-  }
-  const verifiedFindings = generated.map((finding, index) => repairFindingEvidenceBindings(
+  const verifiedFindings = referenceValidFindings.map(({ finding, evidence, tools }) => repairFindingEvidenceBindings(
     finding,
-    originallySelectedEvidence[index]!,
-    originallySelectedTools[index]!,
+    evidence,
+    tools,
     collected.sql,
     args.input,
   ));

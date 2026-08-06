@@ -42,6 +42,7 @@ describe("Preschool AI Run", () => {
       "metric-revisions:energy.total_usage_kwh@1,energy.usage_per_person,energy.usage_per_sqm",
       "sg-preschool-calendar-v1",
     ]) expect(input.identityKey).toContain(pin);
+    expect(input.identityKey).toContain("preschool-ai-output-contract@v6");
     expect(body).toMatchObject({
       method: "agent/run",
       params: { agentId: "dataFoundry" },
@@ -79,8 +80,11 @@ describe("Preschool AI Run", () => {
     );
     expect(serialized).toContain("Each displayed Finding must cite the first successful SQL observation and the final successful validation");
     expect(serialized).toContain(
-      "include every runtime assertion_id listed for each requirement_id, including manual assertions",
+      "omit assertion_ids from every run_sql_readonly call",
     );
+    expect(serialized).toContain("The grounded Preschool requirements in this Run are manual assertions");
+    expect(serialized).toContain("use an ISO-8601 string or TIMESTAMPTZ literal");
+    expect(serialized).toContain("Never compare interval_start with a TIMESTAMP literal that contains Z");
     expect(serialized).toContain("Make at most four total run_sql_readonly attempts");
     expect(serialized).toContain(
       "observation scan, a targeted drill-down, and a validation or contradiction check",
@@ -487,6 +491,24 @@ describe("Preschool AI Run", () => {
     }
   });
 
+  it("keeps verified Findings when a sibling cites Evidence outside the current Snapshot", () => {
+    const findings = generatedFindings();
+    findings[0]!.evidenceRefs = ["operational:standby", "sop:breaching"];
+
+    const result = resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status === "available") {
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings[0]!.title).toBe(findings[1]!.title);
+    }
+  });
+
   it("does not treat a cited ranked-query label or P75 benchmark name as a business number", () => {
     const findings = generatedFindings().slice(0, 1);
     findings[0]!.what = "The top-10 scan returned 62.4 kWh for the selected hour.";
@@ -748,6 +770,88 @@ describe("Preschool AI Run", () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect(configApi.getSessionConversation).toHaveBeenCalledTimes(1);
     expect(configApi.getSessionTraceDag).toHaveBeenCalledTimes(1);
+  });
+
+  it("prefers complete Conversation text when Trace chunk joins would corrupt numeric Evidence", async () => {
+    const input = requiredInput();
+    const persistedRunId = "preschool-overview-conversation-source";
+    const findings = generatedFindings();
+    findings[0]!.what = "Centre G used 843.0985 kWh in the scoped comparison.";
+    const corruptedTraceFindings = structuredClone(findings);
+    corruptedTraceFindings[0]!.what = "Centre G used at843.0985 kWh in the scoped comparison.";
+    vi.spyOn(configApi, "getSessionConversation").mockResolvedValue({
+      sessionId: "persisted-session",
+      messages: [{
+        id: "assistant-final",
+        runId: persistedRunId,
+        role: "assistant",
+        source: "agent",
+        contentText: JSON.stringify({ findings }),
+        position: 1,
+        createdAt: "2026-08-06T00:00:02.000Z",
+      }],
+      runEventRefs: [{ runId: persistedRunId, eventCount: 8, firstSeq: 1, lastSeq: 8 }],
+      checkpoints: [{
+        runId: persistedRunId,
+        status: "completed",
+        terminalEvent: "RUN_FINISHED",
+        firstEventSeq: 1,
+        lastEventSeq: 8,
+        startedAt: "2026-08-06T00:00:00.000Z",
+        finishedAt: "2026-08-06T00:00:02.000Z",
+      }],
+      toolCalls: [],
+    });
+    vi.spyOn(configApi, "getSessionTraceDag").mockResolvedValue({
+      sessionId: "persisted-session",
+      edges: [],
+      sections: [],
+      nodes: [
+        {
+          id: `${persistedRunId}:context`,
+          kind: "context",
+          label: "Compiled context",
+          runId: persistedRunId,
+          eventSeq: 0,
+          detail: {
+            type: "context",
+            assistantOutput: JSON.stringify({ findings: corruptedTraceFindings }),
+          },
+        },
+        traceToolNode(persistedRunId, "schema-1", "inspect_schema", 1, { datasource_id: "energy-scope" }, {
+          tables: [{ name: "energy_intervals", columns: [{ name: "usage_kwh", type: "DOUBLE" }] }],
+        }),
+        traceToolNode(persistedRunId, "sql-1", "run_sql_readonly", 2, {
+          sql: "SELECT parent_node_id, SUM(usage_kwh) AS usage_kwh FROM energy_intervals GROUP BY parent_node_id",
+        }, {
+          columns: ["parent_node_id", "usage_kwh"],
+          rows: [["preschool-centre-7", 843.0985]],
+          row_count: 1,
+          audit_log_id: "audit-sql-1",
+          elapsed_ms: 12,
+        }),
+        traceToolNode(persistedRunId, "sql-2", "run_sql_readonly", 3, {
+          sql: "SELECT hour_of_day, SUM(usage_kwh) AS usage_kwh FROM energy_intervals GROUP BY hour_of_day LIMIT 3",
+        }, {
+          columns: ["hour_of_day", "usage_kwh"],
+          rows: [[9, 62.4], [10, 59.1], [8, 57.8]],
+          row_count: 3,
+          audit_log_id: "audit-sql-2",
+          elapsed_ms: 14,
+        }),
+      ],
+    });
+    const fetchMock = vi.fn(() => {
+      throw new Error("A restored result must not start another Agent Run");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    resetPreschoolAiRunsForTests();
+    await expect(getOrStartPreschoolAiRun(input)).resolves.toMatchObject({
+      status: "available",
+      runId: persistedRunId,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

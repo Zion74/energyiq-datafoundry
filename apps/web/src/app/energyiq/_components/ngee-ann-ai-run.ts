@@ -413,10 +413,14 @@ function persistedEventStream(
     .flatMap<AgUiEvent>((node) => node.detail?.type === "context" && node.detail.assistantOutput
       ? [{ type: "TEXT_MESSAGE_CONTENT", delta: node.detail.assistantOutput }]
       : []);
-  const messageEvents = traceMessageEvents.length > 0 ? traceMessageEvents : conversation.messages
+  const conversationMessages = conversation.messages
     .filter((message) => message.runId === runId && message.role === "assistant" && message.contentText)
-    .sort((left, right) => left.position - right.position)
-    .map<AgUiEvent>((message) => ({ type: "TEXT_MESSAGE_CONTENT", delta: message.contentText }));
+    .sort((left, right) => left.position - right.position);
+  const conversationIsComplete = conversationMessages.length > 0
+    && conversationMessages.every((message) => !message.contentText.includes("[conversation message truncated:"));
+  const messageEvents = conversationIsComplete
+    ? conversationMessages.map<AgUiEvent>((message) => ({ type: "TEXT_MESSAGE_CONTENT", delta: message.contentText }))
+    : traceMessageEvents;
   return [...toolEvents, ...messageEvents, { type: "RUN_FINISHED" }]
     .map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
 }
