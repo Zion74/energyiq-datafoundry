@@ -129,6 +129,15 @@ describe("Ngee Ann AI Run", () => {
             expectedDataSnapshotId: input.snapshotId,
             expectedProjectReleaseId: input.projectReleaseId,
           },
+          run_config: {
+            skillPolicy: {
+              allowedToolNames: ["inspect_schema", "run_sql_readonly"],
+              deniedToolNames: ["list_data_sources", "preview_table", "skill", "skill_search", "skill_read"],
+              maxSkills: 1,
+              requireUserInvocable: true,
+              strictSkillTools: true,
+            },
+          },
         },
       },
     });

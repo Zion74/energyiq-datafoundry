@@ -985,9 +985,17 @@ describe("Ngee Ann Overview ViewModel", () => {
 
     expect(view.usageHeatmap).toMatchObject({
       status: "available",
-      defaultView: "date-hour",
+      defaultView: "level-hour",
       evidence: { queryIds: ["time_bucket_grid_v1"] },
     });
+    expect(view.usageHeatmap.averageProfiles).toHaveLength(6);
+    expect(view.usageHeatmap.averageProfiles.find((profile) => profile.id === "project:weekday")).toMatchObject({
+      dayTypeLabel: "Weekday",
+      scopeName: "Project",
+      sampleDayCount: 5,
+      values: expect.any(Array),
+    });
+    expect(view.usageHeatmap.averageProfiles.find((profile) => profile.id === "project:weekday")?.values).toHaveLength(24);
     expect(view.usageHeatmap.dates).toHaveLength(7);
     expect(view.usageHeatmap.scopes).toHaveLength(3);
     expect(view.usageHeatmap.scopes[0]!.cells).toHaveLength(168);

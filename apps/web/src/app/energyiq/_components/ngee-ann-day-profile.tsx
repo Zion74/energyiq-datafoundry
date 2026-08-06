@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 
+import { NgeeAnnHourAxis } from "./ngee-ann-hour-axis";
 import type { NgeeAnnDayProfileViewModel } from "./ngee-ann-overview-view-model";
 
 export function NgeeAnnDayProfile({ view }: { view: NgeeAnnDayProfileViewModel }) {
@@ -31,6 +32,13 @@ export function NgeeAnnDayProfile({ view }: { view: NgeeAnnDayProfileViewModel }
   for (const point of profile.values) {
     if (point.acceptedUsageKwh > maximumUsageKwh) maximumUsageKwh = point.acceptedUsageKwh;
   }
+  const averageUsageKwh = profile.values.length === 0
+    ? 0
+    : profile.values.reduce((total, point) => total + point.acceptedUsageKwh, 0) / profile.values.length;
+  const averageHeight = maximumUsageKwh <= 0 ? 0 : averageUsageKwh / maximumUsageKwh * 100;
+  const activeDifferencePct = activePoint && averageUsageKwh > 0
+    ? (activePoint.acceptedUsageKwh - averageUsageKwh) / averageUsageKwh * 100
+    : null;
 
   const resetPoint = () => {
     setActivePointId(null);
@@ -115,40 +123,52 @@ export function NgeeAnnDayProfile({ view }: { view: NgeeAnnDayProfileViewModel }
                 <span>Mean accepted energy / kWh</span>
                 <span>{profile.sampleDayCount} complete {profile.sampleDayCount === 1 ? "day" : "days"} / 24 server values</span>
               </div>
-              <div
-                className="grid h-52 items-end gap-1 border-b border-border px-2"
-                style={{ gridTemplateColumns: "repeat(24, minmax(32px, 1fr))" }}
-              >
-                {profile.values.map((point) => {
-                  const selected = selectedPointId === point.id;
-                  const height = maximumUsageKwh <= 0 ? 0 : Math.max(4, (point.acceptedUsageKwh / maximumUsageKwh) * 100);
-                  return (
-                    <button
-                      key={point.id}
-                      type="button"
-                      aria-label={`${profile.dayTypeLabel} ${profile.scopeName} ${point.hourLabel}: ${point.usageKwh} kWh`}
-                      aria-pressed={selected}
-                      className="group flex h-full min-w-0 flex-col justify-end rounded-t px-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-                      onMouseEnter={() => setActivePointId(point.id)}
-                      onMouseLeave={() => setActivePointId(null)}
-                      onFocus={() => setActivePointId(point.id)}
-                      onBlur={() => setActivePointId(null)}
-                      onClick={() => setSelectedPointId(point.id)}
-                    >
-                      <span className="relative flex min-h-0 flex-1 items-end justify-center">
+              <div data-hour-plot="day-profile" className="relative h-52 border-b border-border">
+                <div
+                  className="grid h-full items-end gap-1 px-2"
+                  style={{ gridTemplateColumns: "repeat(24, minmax(32px, 1fr))" }}
+                >
+                  {profile.values.map((point) => {
+                    const selected = selectedPointId === point.id;
+                    const aboveAverage = point.acceptedUsageKwh > averageUsageKwh;
+                    const height = maximumUsageKwh <= 0 ? 0 : Math.max(4, (point.acceptedUsageKwh / maximumUsageKwh) * 100);
+                    return (
+                      <button
+                        key={point.id}
+                        type="button"
+                        aria-label={`${profile.dayTypeLabel} ${profile.scopeName} ${point.hourLabel}: ${point.usageKwh} kWh`}
+                        aria-pressed={selected}
+                        className="group relative z-10 flex h-full min-w-0 items-end justify-center rounded-t px-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                        onMouseEnter={() => setActivePointId(point.id)}
+                        onMouseLeave={() => setActivePointId(null)}
+                        onFocus={() => setActivePointId(point.id)}
+                        onBlur={() => setActivePointId(null)}
+                        onClick={() => setSelectedPointId(point.id)}
+                      >
                         <span
-                          className="w-full rounded-t bg-primary/65 group-hover:bg-primary group-focus-visible:bg-primary"
+                          className={aboveAverage
+                            ? "w-full rounded-t bg-step-inspect/75 group-hover:bg-step-inspect group-focus-visible:bg-step-inspect"
+                            : "w-full rounded-t bg-primary/35 group-hover:bg-primary/70 group-focus-visible:bg-primary/70"}
                           style={{ height: `${height}%` }}
                           aria-hidden="true"
                         />
-                      </span>
-                      <span className="mt-2 pb-2 text-[9px] text-muted">
-                        {point.localHour % 3 === 0 ? point.hourLabel : ""}
-                      </span>
-                    </button>
-                  );
-                })}
+                      </button>
+                    );
+                  })}
+                </div>
+                {averageHeight > 0 ? (
+                  <div
+                    className="pointer-events-none absolute inset-x-2 z-20 border-t border-dashed border-step-inspect/70"
+                    style={{ bottom: `${averageHeight}%` }}
+                    aria-hidden="true"
+                  >
+                    <span className="absolute -top-4 right-0 bg-surface px-1 text-[9px] font-semibold text-step-inspect">
+                      Mean {averageUsageKwh.toFixed(2)} kWh
+                    </span>
+                  </div>
+                ) : null}
               </div>
+              <NgeeAnnHourAxis points={profile.values} axis="day-profile" />
             </div>
           </div>
           <div className="mt-4 min-h-[78px] rounded-lg bg-surface-subtle px-4 py-3" aria-live="polite" aria-atomic="true">
@@ -158,7 +178,14 @@ export function NgeeAnnDayProfile({ view }: { view: NgeeAnnDayProfileViewModel }
                   <p className="text-xs font-semibold text-foreground">{profile.dayTypeLabel} / {profile.scopeName}</p>
                   <p className="mt-1 text-[10px] text-muted">{profile.sampleDayCount} complete-day samples / mean_of_complete_local_days</p>
                 </div>
-                <p className="text-sm font-semibold tabular-nums text-foreground">{activePoint.hourLabel} / {activePoint.usageKwh} kWh</p>
+                <div className="text-right">
+                  <p className="text-sm font-semibold tabular-nums text-foreground">{activePoint.hourLabel} / {activePoint.usageKwh} kWh</p>
+                  {activeDifferencePct !== null ? (
+                    <p className={activeDifferencePct > 0 ? "mt-1 text-[10px] font-semibold text-step-inspect" : "mt-1 text-[10px] text-muted"}>
+                      {activeDifferencePct > 0 ? "+" : ""}{activeDifferencePct.toFixed(1)}% vs profile mean
+                    </p>
+                  ) : null}
+                </div>
               </div>
             ) : (
               <p className="text-[11px] leading-5 text-muted">

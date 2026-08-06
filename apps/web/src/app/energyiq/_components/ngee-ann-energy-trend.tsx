@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 
+import { NgeeAnnHourAxis } from "./ngee-ann-hour-axis";
 import type { NgeeAnnEnergyTrendViewModel } from "./ngee-ann-overview-view-model";
 
 export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel }) {
@@ -88,6 +89,7 @@ export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel
             <span>{selectedScope.points.length} {view.grain === "hour" ? "hourly" : "daily"} buckets</span>
           </div>
           <div
+            data-hour-plot={view.grain === "hour" ? "energy-trend" : undefined}
             className="grid h-56 items-end gap-2 border-b border-border px-2"
             style={{ gridTemplateColumns: `repeat(${selectedScope.points.length}, minmax(32px, 1fr))` }}
           >
@@ -123,16 +125,23 @@ export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel
                       />
                     )}
                   </span>
-                  <span className="mt-2 text-[10px] font-semibold text-foreground">
-                    {view.grain === "hour" ? point.dateLabel : point.weekday}
-                  </span>
-                  <span className="pb-2 text-[10px] text-muted">
-                    {view.grain === "hour" ? point.localHour! % 3 === 0 ? point.weekday : "" : point.dateLabel}
-                  </span>
+                  {view.grain === "day" ? (
+                    <>
+                      <span className="mt-2 text-[10px] font-semibold text-foreground">{point.weekday}</span>
+                      <span className="pb-2 text-[10px] text-muted">{point.dateLabel}</span>
+                    </>
+                  ) : null}
                 </button>
               );
             })}
           </div>
+          {view.grain === "hour" ? (
+            <NgeeAnnHourAxis
+              points={selectedScope.points.map((point) => ({ localHour: point.localHour!, hourLabel: point.dateLabel }))}
+              axis="energy-trend"
+              gap="wide"
+            />
+          ) : null}
         </div>
       </div>
 

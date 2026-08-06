@@ -169,7 +169,9 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("5 complete days / 24 server values");
     expect(markup).toContain("Day Profile evidence / time_bucket_grid_v1");
     expect(markup).toContain("Usage heatmap");
-    expect(markup).toContain("Which local date, Level and hour cell needs inspection?");
+    expect(markup).toContain("Which recurring local hour pattern or individual date needs inspection?");
+    expect(markup).toContain("Level × hour average");
+    expect(markup).toContain("Average day type");
     expect(markup).toContain("Date × hour");
     expect(markup).toContain("Heatmap evidence / time_bucket_grid_v1");
     expect(markup).toContain("energy.total_usage_kwh@1");
@@ -822,6 +824,13 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(dialog.textContent).not.toContain("路");
 
     let point = dialog.querySelector<HTMLButtonElement>('[data-anomaly-series="scope:project"] button')!;
+    const anomalySeries = dialog.querySelector<HTMLElement>('[data-anomaly-series="scope:project"]')!;
+    const anomalyPlot = anomalySeries.querySelector<HTMLElement>("[data-hour-plot='anomaly-series']");
+    const anomalyAxis = anomalySeries.querySelector<HTMLElement>("[data-hour-axis='anomaly-series']");
+    expect(anomalyPlot?.nextElementSibling).toBe(anomalyAxis);
+    expect(point.textContent).toBe("");
+    expect(anomalyAxis?.textContent).toContain("00:00");
+    expect(anomalyAxis?.textContent).toContain("21:00");
     expect(point.getAttribute("aria-label")).toContain("selected");
     expect(point.getAttribute("aria-label")).toContain("average");
     await act(async () => point.focus());
@@ -975,6 +984,12 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     const firstHour = container.querySelector<HTMLButtonElement>(
       'button[aria-label^="16 Jun 00:00: 5.3565 kWh"]',
     )!;
+    const trendPlot = container.querySelector<HTMLElement>("[data-hour-plot='energy-trend']");
+    const trendAxis = container.querySelector<HTMLElement>("[data-hour-axis='energy-trend']");
+    expect(trendPlot?.nextElementSibling).toBe(trendAxis);
+    expect(firstHour.textContent).toBe("");
+    expect(trendAxis?.textContent).toContain("00:00");
+    expect(trendAxis?.textContent).toContain("21:00");
     await act(async () => firstHour.focus());
     expect(container.textContent).toContain("5.3565 kWh");
     expect(container.textContent).toContain("Complete / 100% coverage / 16 / 16 valid intervals");
@@ -998,6 +1013,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
       'button[aria-label^="Weekend Level 7 00:00:"]',
     )!;
     await act(async () => profilePoint.click());
+    await act(async () => filterButton("Heatmap view", "Date × hour")?.click());
     await act(async () => filterButton("Heatmap Level", "Level 7")?.click());
     const heatmapCell = container.querySelector<HTMLButtonElement>(
       'button[aria-label^="Wed 10 Jun / Wed 10 Jun 00:00:"]',
@@ -1020,7 +1036,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(filterButton("Energy trend Scope", "Project")?.getAttribute("aria-pressed")).toBe("true");
     expect(filterButton("Day Profile type", "Weekday")?.getAttribute("aria-pressed")).toBe("true");
     expect(filterButton("Day Profile Scope", "Project")?.getAttribute("aria-pressed")).toBe("true");
-    expect(filterButton("Heatmap view", "Level × hour")?.getAttribute("aria-pressed")).toBe("true");
+    expect(filterButton("Heatmap view", "Level × hour average")?.getAttribute("aria-pressed")).toBe("true");
     expect(container.querySelector<HTMLButtonElement>(
       'button[aria-label^="16 Jun 00:00: 5.3565 kWh"]',
     )?.getAttribute("aria-pressed")).toBe("false");
@@ -1086,6 +1102,14 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     const profileHour = container.querySelector<HTMLButtonElement>(
       'button[aria-label^="Weekend Level 7 00:00:"]',
     )!;
+    const profilePlot = container.querySelector<HTMLElement>("[data-hour-plot='day-profile']");
+    const profileTimeAxis = container.querySelector<HTMLElement>("[data-hour-axis='day-profile']");
+    expect(profilePlot).toBeTruthy();
+    expect(profileTimeAxis).toBeTruthy();
+    expect(profilePlot?.nextElementSibling).toBe(profileTimeAxis);
+    expect(profileHour.textContent).toBe("");
+    expect(profileTimeAxis?.textContent).toContain("00:00");
+    expect(profileTimeAxis?.textContent).toContain("21:00");
     await act(async () => profileHour.focus());
     expect(container.textContent).toContain("Weekend / Level 7");
     expect(container.textContent).toContain("2 complete-day samples / mean_of_complete_local_days");
@@ -1107,12 +1131,25 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     await renderGolden();
 
     const dateHour = filterButton("Heatmap view", "Date × hour")!;
-    const levelHour = filterButton("Heatmap view", "Level × hour")!;
+    const levelHour = filterButton("Heatmap view", "Level × hour average")!;
+    const weekday = filterButton("Average day type", "Weekday")!;
+    expect(levelHour.getAttribute("aria-pressed")).toBe("true");
+    expect(weekday.getAttribute("aria-pressed")).toBe("true");
+    expect(filterButton("Heatmap Level", "Project")).toBeUndefined();
+    const averageCell = container.querySelector<HTMLButtonElement>(
+      'button[aria-label^="Project / Weekday 00:00: mean"]',
+    )!;
+    await act(async () => averageCell.focus());
+    expect(container.textContent).toContain("Project / Weekday / 00:00");
+    expect(container.textContent).toContain("5 complete-day samples / mean_of_complete_local_days");
+    await activateNativeButton(averageCell, "Enter");
+    await act(async () => averageCell.blur());
+    expect(averageCell.getAttribute("aria-pressed")).toBe("true");
+
+    await act(async () => dateHour.click());
     const project = filterButton("Heatmap Level", "Project")!;
     const level7 = filterButton("Heatmap Level", "Level 7")!;
-    expect(dateHour.getAttribute("aria-pressed")).toBe("true");
     expect(project.getAttribute("aria-pressed")).toBe("true");
-
     await act(async () => level7.click());
     expect(level7.getAttribute("aria-pressed")).toBe("true");
     const dateCell = container.querySelector<HTMLButtonElement>(
@@ -1127,16 +1164,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
 
     await act(async () => levelHour.click());
     expect(levelHour.getAttribute("aria-pressed")).toBe("true");
-    expect(container.textContent).toContain("Hover or keyboard-focus a cell");
-    const dateSelector = filterButton("Heatmap date", "Wed 10 Jun")!;
-    await act(async () => dateSelector.click());
-    const levelCell = container.querySelector<HTMLButtonElement>(
-      'button[aria-label^="Level 6 / Wed 10 Jun 00:00:"]',
-    )!;
-    await act(async () => levelCell.focus());
-    expect(container.textContent).toContain("Level 6 / Wed 10 Jun / 00:00");
-
-    await act(async () => dateHour.click());
+    expect(filterButton("Heatmap Level", "Project")).toBeUndefined();
     expect(container.textContent).toContain("Hover or keyboard-focus a cell");
   });
 
@@ -1159,6 +1187,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
       qualityEventCount: 2,
     };
     await renderGolden(snapshot);
+    await act(async () => filterButton("Heatmap view", "Date × hour")?.click());
 
     const partial = container.querySelector<HTMLButtonElement>(
       'button[aria-label*="00:00:"][aria-label*="Partial; 75% coverage"]',

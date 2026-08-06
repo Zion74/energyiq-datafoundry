@@ -6,11 +6,18 @@ import type { NgeeAnnUsageHeatmapViewModel } from "./ngee-ann-overview-view-mode
 import { filterClassName, TimeEvidence, TimeModuleUnavailable } from "./ngee-ann-day-profile";
 
 type HeatmapCell = NgeeAnnUsageHeatmapViewModel["scopes"][number]["cells"][number];
+type AverageProfile = NgeeAnnUsageHeatmapViewModel["averageProfiles"][number];
+type AverageCell = AverageProfile["values"][number] & {
+  scopeId: string;
+  scopeName: string;
+  dayTypeLabel: "Weekday" | "Weekend";
+  sampleDayCount: number;
+};
 
 export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewModel }) {
   const [viewMode, setViewMode] = useState<"date-hour" | "level-hour">(view.defaultView);
   const [selectedScopeId, setSelectedScopeId] = useState(view.scopes[0]?.id ?? "");
-  const [selectedDate, setSelectedDate] = useState(view.dates.at(-1)?.id ?? "");
+  const [selectedDayType, setSelectedDayType] = useState<"weekday" | "weekend">("weekday");
   const [activeCellId, setActiveCellId] = useState<string | null>(null);
   const [selectedCellId, setSelectedCellId] = useState<string | null>(null);
 
@@ -26,21 +33,40 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
   }
 
   const selectedScope = view.scopes.find((scope) => scope.id === selectedScopeId) ?? view.scopes[0]!;
-  const visibleRows = viewMode === "date-hour"
-    ? view.dates.map((date) => ({
+  const dateRows = view.dates.map((date) => ({
       id: date.id,
       label: `${date.weekday} ${date.label}`,
       cells: selectedScope.cells.filter((cell) => cell.localDate === date.id),
-    }))
-    : view.scopes.map((scope) => ({
-      id: scope.id,
-      label: scope.name,
-      cells: scope.cells.filter((cell) => cell.localDate === selectedDate),
     }));
-  const visibleCells = visibleRows.flatMap((row) => row.cells);
-  const activeCell = visibleCells.find((cell) => cell.id === activeCellId)
-    ?? visibleCells.find((cell) => cell.id === selectedCellId)
-    ?? null;
+  const averageRows = view.scopes.flatMap((scope) => {
+    const profile = view.averageProfiles.find((candidate) => (
+      candidate.scopeId === scope.id && candidate.dayType === selectedDayType
+    ));
+    return profile ? [{
+      id: profile.id,
+      label: scope.name,
+      cells: profile.values.map((value): AverageCell => ({
+        ...value,
+        scopeId: scope.id,
+        scopeName: scope.name,
+        dayTypeLabel: profile.dayTypeLabel,
+        sampleDayCount: profile.sampleDayCount,
+      })),
+    }] : [];
+  });
+  const dateCells = dateRows.flatMap((row) => row.cells);
+  const averageCells = averageRows.flatMap((row) => row.cells);
+  const visibleCells = viewMode === "date-hour" ? dateCells : averageCells;
+  const activeCell = viewMode === "date-hour"
+    ? dateCells.find((cell) => cell.id === activeCellId)
+      ?? dateCells.find((cell) => cell.id === selectedCellId)
+      ?? null
+    : null;
+  const activeAverageCell = viewMode === "level-hour"
+    ? averageCells.find((cell) => cell.id === activeCellId)
+      ?? averageCells.find((cell) => cell.id === selectedCellId)
+      ?? null
+    : null;
   let maximumUsageKwh = 0;
   for (const cell of visibleCells) {
     if (cell.acceptedUsageKwh !== null && cell.acceptedUsageKwh > maximumUsageKwh) {
@@ -62,7 +88,9 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
           </h3>
           <p className="mt-1 text-xs leading-5 text-muted">{view.decisionQuestion}</p>
         </div>
-        <p className="text-[11px] leading-5 text-muted">Server hourly cells / {view.evidence.timezone} / {view.evidence.unit}</p>
+        <p className="text-[11px] leading-5 text-muted">
+          {viewMode === "level-hour" ? "Server-provided complete-day means" : "Server hourly cells"} / {view.evidence.timezone} / {view.evidence.unit}
+        </p>
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
@@ -83,7 +111,7 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
                     resetCell();
                   }}
                 >
-                  {mode === "date-hour" ? "Date × hour" : "Level × hour"}
+                  {mode === "date-hour" ? "Date × hour" : "Level × hour average"}
                 </button>
               );
             })}
@@ -116,23 +144,23 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
           </fieldset>
         ) : (
           <fieldset>
-            <legend className="mb-2 text-[10px] font-semibold text-muted">Heatmap date</legend>
-            <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
-              {view.dates.map((date) => {
-                const selected = selectedDate === date.id;
+            <legend className="mb-2 text-[10px] font-semibold text-muted">Average day type</legend>
+            <div className="flex flex-wrap gap-1.5">
+              {(["weekday", "weekend"] as const).map((dayType) => {
+                const selected = selectedDayType === dayType;
                 return (
                   <button
-                    key={date.id}
+                    key={dayType}
                     type="button"
                     aria-pressed={selected}
                     aria-controls="ngee-ann-usage-heatmap-grid"
                     className={filterClassName(selected)}
                     onClick={() => {
-                      setSelectedDate(date.id);
+                      setSelectedDayType(dayType);
                       resetCell();
                     }}
                   >
-                    {date.weekday} {date.label}
+                    {dayType === "weekday" ? "Weekday" : "Weekend"}
                   </button>
                 );
               })}
@@ -148,28 +176,56 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
             {Array.from({ length: 24 }, (_, hour) => (
               <span key={hour} className="pb-1 text-center">{hour % 3 === 0 ? `${String(hour).padStart(2, "0")}:00` : ""}</span>
             ))}
-            {visibleRows.map((row) => (
-              <React.Fragment key={row.id}>
-                <span className="flex min-h-9 items-center pr-2 text-[10px] font-semibold text-foreground">{row.label}</span>
-                {row.cells.map((cell) => (
-                  <HeatmapCellButton
-                    key={cell.id}
-                    cell={cell}
-                    rowLabel={row.label}
-                    maximumUsageKwh={maximumUsageKwh}
-                    selected={selectedCellId === cell.id}
-                    onActivate={setActiveCellId}
-                    onSelect={setSelectedCellId}
-                  />
-                ))}
-              </React.Fragment>
-            ))}
+            {viewMode === "date-hour"
+              ? dateRows.map((row) => (
+                <React.Fragment key={row.id}>
+                  <span className="flex min-h-9 items-center pr-2 text-[10px] font-semibold text-foreground">{row.label}</span>
+                  {row.cells.map((cell) => (
+                    <HeatmapCellButton
+                      key={cell.id}
+                      cell={cell}
+                      rowLabel={row.label}
+                      maximumUsageKwh={maximumUsageKwh}
+                      selected={selectedCellId === cell.id}
+                      onActivate={setActiveCellId}
+                      onSelect={setSelectedCellId}
+                    />
+                  ))}
+                </React.Fragment>
+              ))
+              : averageRows.map((row) => (
+                <React.Fragment key={row.id}>
+                  <span className="flex min-h-9 items-center pr-2 text-[10px] font-semibold text-foreground">{row.label}</span>
+                  {row.cells.map((cell) => (
+                    <AverageHeatmapCellButton
+                      key={cell.id}
+                      cell={cell}
+                      maximumUsageKwh={maximumUsageKwh}
+                      selected={selectedCellId === cell.id}
+                      onActivate={setActiveCellId}
+                      onSelect={setSelectedCellId}
+                    />
+                  ))}
+                </React.Fragment>
+              ))}
           </div>
         </div>
       </div>
 
       <div className="mt-4 min-h-[96px] rounded-lg bg-surface-subtle px-4 py-3" aria-live="polite" aria-atomic="true">
-        {activeCell ? (
+        {activeAverageCell ? (
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold text-foreground">
+                {activeAverageCell.scopeName} / {activeAverageCell.dayTypeLabel} / {activeAverageCell.hourLabel}
+              </p>
+              <p className="mt-1 text-[10px] text-muted">
+                {activeAverageCell.sampleDayCount} complete-day samples / mean_of_complete_local_days
+              </p>
+            </div>
+            <p className="text-sm font-semibold tabular-nums text-foreground">{activeAverageCell.usageKwh} kWh</p>
+          </div>
+        ) : activeCell ? (
           <>
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
@@ -188,7 +244,7 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
           </>
         ) : (
           <p className="text-[11px] leading-5 text-muted">
-            Hover or keyboard-focus a cell to inspect the same server fact. Press Enter or Space to keep its detail open.
+            Hover or keyboard-focus a cell to inspect the {viewMode === "level-hour" ? "server-provided mean" : "same server fact"}. Press Enter or Space to keep its detail open.
           </p>
         )}
       </div>
@@ -241,6 +297,41 @@ function HeatmapCellButton({
         <span className="absolute inset-0 bg-primary" style={{ opacity: intensity }} aria-hidden="true" />
       ) : null}
       <span className="sr-only">{label}</span>
+    </button>
+  );
+}
+
+function AverageHeatmapCellButton({
+  cell,
+  maximumUsageKwh,
+  selected,
+  onActivate,
+  onSelect,
+}: {
+  cell: AverageCell;
+  maximumUsageKwh: number;
+  selected: boolean;
+  onActivate: (id: string | null) => void;
+  onSelect: (id: string) => void;
+}) {
+  const intensity = maximumUsageKwh <= 0 ? 0 : 0.18 + cell.acceptedUsageKwh / maximumUsageKwh * 0.72;
+  return (
+    <button
+      type="button"
+      aria-label={`${cell.scopeName} / ${cell.dayTypeLabel} ${cell.hourLabel}: mean ${cell.usageKwh} kWh across ${cell.sampleDayCount} complete days`}
+      aria-pressed={selected}
+      className={[
+        "relative h-9 overflow-hidden rounded border border-step-inspect/15 bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-step-inspect/50",
+        selected ? "ring-2 ring-step-inspect/40" : "",
+      ].join(" ")}
+      onMouseEnter={() => onActivate(cell.id)}
+      onMouseLeave={() => onActivate(null)}
+      onFocus={() => onActivate(cell.id)}
+      onBlur={() => onActivate(null)}
+      onClick={() => onSelect(cell.id)}
+    >
+      <span className="absolute inset-0 bg-step-inspect" style={{ opacity: intensity }} aria-hidden="true" />
+      <span className="sr-only">Mean {cell.usageKwh} kWh</span>
     </button>
   );
 }

@@ -111,6 +111,21 @@ export type NgeeAnnUsageHeatmapViewModel = {
   reason: string | null;
   defaultView: "date-hour" | "level-hour";
   dates: Array<{ id: string; label: string; weekday: string }>;
+  averageProfiles: Array<{
+    id: string;
+    dayType: "weekday" | "weekend";
+    dayTypeLabel: "Weekday" | "Weekend";
+    scopeId: string;
+    scopeName: string;
+    sampleDayCount: number;
+    values: Array<{
+      id: string;
+      localHour: number;
+      hourLabel: string;
+      acceptedUsageKwh: number;
+      usageKwh: string;
+    }>;
+  }>;
   scopes: Array<{
     id: string;
     name: string;
@@ -2186,6 +2201,7 @@ function buildUsageHeatmap(
     reason,
     defaultView: "date-hour",
     dates: [],
+    averageProfiles: [],
     scopes: [],
     evidence,
   });
@@ -2200,6 +2216,22 @@ function buildUsageHeatmap(
     return unavailable(grid.reason);
   }
   const firstScope = grid.scopes[0]!;
+  const dayProfile = buildDayProfile(snapshot, false);
+  const averageProfiles = dayProfile.status === "available"
+    ? dayProfile.profiles.flatMap((profile) => (
+      profile.status === "available" && (profile.dayType === "weekday" || profile.dayType === "weekend")
+        ? [{
+            id: profile.id,
+            dayType: profile.dayType,
+            dayTypeLabel: profile.dayType === "weekday" ? "Weekday" as const : "Weekend" as const,
+            scopeId: profile.scopeId,
+            scopeName: profile.scopeName,
+            sampleDayCount: profile.sampleDayCount!,
+            values: profile.values,
+          }]
+        : []
+    ))
+    : [];
   const dates = firstScope.cells
     .filter((cell) => cell.localHour === 0)
     .map((cell) => ({
@@ -2210,10 +2242,11 @@ function buildUsageHeatmap(
 
   return {
     status: "available",
-    decisionQuestion: "Which local date, Level and hour cell needs inspection?",
+    decisionQuestion: "Which recurring local hour pattern or individual date needs inspection?",
     reason: null,
-    defaultView: dates.length === 1 ? "level-hour" : "date-hour",
+    defaultView: averageProfiles.length > 0 ? "level-hour" : "date-hour",
     dates,
+    averageProfiles,
     scopes: grid.scopes.map((scope) => ({
       id: scope.scopeId,
       name: scope.scopeType === "project" ? "Project" : scope.scopeName,

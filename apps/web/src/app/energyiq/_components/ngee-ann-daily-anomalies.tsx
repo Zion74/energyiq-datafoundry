@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+import { NgeeAnnHourAxis } from "./ngee-ann-hour-axis";
 import type { NgeeAnnDailyAnomalyViewModel } from "./ngee-ann-overview-view-model";
 import { anomalyIncidentDomId } from "./ngee-ann-overview-links";
 
@@ -394,19 +395,19 @@ function SeriesChart({ series, viewMode }: { series: Series; viewMode: ViewMode 
       ) : (
         <div className="mt-4 overflow-x-auto pb-1">
           <div className="min-w-[1040px]">
-            <div className="grid h-44 items-end gap-1 border-b border-border px-2" style={{ gridTemplateColumns: "repeat(24, minmax(32px, 1fr))" }}>
+            <div data-hour-plot="anomaly-series" className="grid h-44 items-end gap-1 border-b border-border px-2" style={{ gridTemplateColumns: "repeat(24, minmax(32px, 1fr))" }}>
               {series.points.map((point) => (
                 <button
                   key={point.localHour}
                   type="button"
                   aria-label={seriesPointLabel(series, point, viewMode)}
-                  className="group flex h-full flex-col justify-end rounded-t px-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                  className="group flex h-full items-end justify-center rounded-t px-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
                   onMouseEnter={() => setActiveHour(point.localHour)}
                   onMouseLeave={() => setActiveHour(null)}
                   onFocus={() => setActiveHour(point.localHour)}
                   onBlur={() => setActiveHour(null)}
                 >
-                  <span className="flex min-h-0 flex-1 items-end justify-center gap-px">
+                  <span className="flex h-full min-h-0 items-end justify-center gap-px">
                     {viewMode !== "average" ? (
                       <ChartBar value={point.selectedKwh} maximum={maximum} tone="selected" />
                     ) : null}
@@ -414,10 +415,10 @@ function SeriesChart({ series, viewMode }: { series: Series; viewMode: ViewMode 
                       <ChartBar value={point.baselineKwh} maximum={maximum} tone="baseline" />
                     ) : null}
                   </span>
-                  <span className="mt-2 pb-2 text-[9px] text-muted">{point.localHour % 3 === 0 ? point.hourLabel : ""}</span>
                 </button>
               ))}
             </div>
+            <NgeeAnnHourAxis points={series.points} axis="anomaly-series" />
           </div>
         </div>
       )}
