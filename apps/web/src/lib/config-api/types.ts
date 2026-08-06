@@ -1175,6 +1175,150 @@ export type EnergyPublishedProjectReleaseDto = {
   catalog: EnergyComponentRevisionDto[];
 };
 
+export type PreschoolBenchmarkProjectionDto = {
+  status: "provisional";
+  contract: {
+    id: "preschool-may-2026-benchmark";
+    version: "1";
+    annualisationFactor: 12;
+  };
+  period: {
+    start: string;
+    endExclusive: string;
+    timezone: string;
+  };
+  sampleSize: number;
+  portfolio: {
+    eui: { p50: number; p75: number; unit: "kWh/m2/year" };
+    perPax: { p50: number; p75: number; unit: "kWh/person/month" };
+  };
+  cohorts: Array<{
+    name: string;
+    sampleSize: number;
+    eui: { p50: number; p75: number; unit: "kWh/m2/year" };
+    perPax: { p50: number; p75: number; unit: "kWh/person/month" };
+  }>;
+  centres: Array<{
+    scopeId: string;
+    centreCode: string;
+    name: string;
+    cohort: string;
+    usageKwh: number;
+    annualisedEuiKwhPerSqmYear: number;
+    mayKwhPerPerson: number;
+    quadrant: "priority" | "eui-intensive" | "people-intensive" | "lower-intensity";
+    priority: boolean;
+  }>;
+  priorityCentreCodes: string[];
+  evidence: {
+    projectReleaseId: string;
+    dataSnapshotId: string;
+    hierarchyRevisionId: string;
+    meterMappingRevisionId: string;
+    metricRevisionIds: string[];
+    metadataRevisionIds: string[];
+    sourceQueryIds: string[];
+    projectionRecipeIds: [
+      "preschool-eui-benchmark-v1",
+      "preschool-per-pax-benchmark-v1",
+      "preschool-quadrant-v1",
+    ];
+    cohortSource: "published-hierarchy-node-metadata";
+    metadataStatus: "provisional";
+    normalisation: {
+      eui: "May usage kWh * 12 / published comparison area m2";
+      perPax: "May usage kWh / published representative headcount";
+    };
+  };
+};
+
+export type PreschoolOperationalProjectionDto = {
+  status: "available";
+  contract: {
+    id: "preschool-may-2026-operational-behaviour";
+    version: "1";
+    spikeThresholdPct: 50;
+  };
+  period: {
+    start: string;
+    endExclusive: string;
+    timezone: string;
+  };
+  energy: {
+    totalKwh: number;
+    standbyKwh: number;
+    standbySharePct: number;
+    operatingKwh: number;
+  };
+  spikes: Record<"standby" | "operating", {
+    count: number;
+    centreCount: number;
+    centres: Array<{
+      scopeId: string;
+      centreCode: string;
+      name: string;
+      centreType: string | null;
+      spikeCount: number;
+      worstSpike: {
+        localDate: string;
+        localHour: number;
+        dayType: "weekday" | "weekend" | "calendar_exception";
+        usageKwh: number;
+        baselineKwh: number;
+        impactKwh: number;
+        variancePct: number;
+        leadingCircuitName: string;
+        leadingCircuitKwh: number;
+        leadingCircuitSharePct: number;
+      };
+    }>;
+  }>;
+  sop: {
+    status: "provisional";
+    label: "Provisional after-hours SOP signal";
+    baselineScore: 100;
+    deductionPerStandbySpike: 1;
+    breachingCentreCodes: string[];
+    centres: Array<{
+      scopeId: string;
+      centreCode: string;
+      name: string;
+      centreType: string | null;
+      standbySpikeCount: number;
+      score: number;
+    }>;
+  };
+  evidence: {
+    projectReleaseId: string;
+    dataSnapshotId: string;
+    hierarchyRevisionId: string;
+    meterMappingRevisionId: string;
+    metricRevisionIds: string[];
+    businessCalendarVersion: string;
+    sourceQueryIds: string[];
+    projectionQueryId: "preschool_centre_hour_cells_v1";
+    projectionRecipeIds: [
+      "preschool-hour-slot-spike-v1",
+      "preschool-after-hours-sop-signal-v1",
+    ];
+    baseline: "same-centre same-hour-slot mean within operating state";
+  };
+} | {
+  status: "unavailable";
+  reason: {
+    code: "PRESCHOOL_OPERATING_CALENDAR_UNAVAILABLE"
+      | "PRESCHOOL_OPERATIONAL_CONTRACT_UNSUPPORTED"
+      | "PRESCHOOL_OPERATIONAL_FACTS_UNAVAILABLE"
+      | "PRESCHOOL_OPERATIONAL_EVIDENCE_MISMATCH";
+    message: string;
+  };
+  evidence: {
+    projectReleaseId: string;
+    dataSnapshotId: string;
+    businessCalendarVersion: string;
+  };
+};
+
 export type EnergyProjectAnalysisSnapshotDto = {
   context: EnergyQueryContextDto & {
     primaryPeriod: {
@@ -1207,6 +1351,8 @@ export type EnergyProjectAnalysisSnapshotDto = {
   metadata: EnergyProjectAnalysisMetadataDto;
   analysis: EnergyProjectAnalysisPayloadDto;
   decisionPriorities?: NgeeAnnDecisionPrioritiesDto;
+  preschoolBenchmark?: PreschoolBenchmarkProjectionDto;
+  preschoolOperational?: PreschoolOperationalProjectionDto;
 };
 
 export type EnergyProjectAnalysisResolutionDto =

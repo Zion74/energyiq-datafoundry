@@ -15,6 +15,10 @@ import {
   type NgeeAnnOverviewRendererState,
 } from "./ngee-ann-overview-renderer";
 import type { NgeeAnnLatestAvailableRange } from "./ngee-ann-overview-view-model";
+import {
+  PreschoolOverviewRenderer,
+  type PreschoolOverviewRendererState,
+} from "./preschool-overview-renderer";
 
 export type ProjectRendererRequest =
   | {
@@ -183,6 +187,20 @@ export function ProjectRenderer(props: ProjectRendererProps): ReactNode {
           {...(props.onComparisonChange ? { onComparisonChange: props.onComparisonChange } : {})}
           {...(props.onCategoryChange ? { onCategoryChange: props.onCategoryChange } : {})}
           {...(props.projectExplorerHref ? { projectExplorerHref: props.projectExplorerHref } : {})}
+          {...(props.aiAnalystHref ? { aiAnalystHref: props.aiAnalystHref } : {})}
+        />
+      </div>
+    );
+  }
+  if (selection.key === "preschool-overview") {
+    const preschoolState: PreschoolOverviewRendererState = state.status === "ready"
+      ? { status: "ready", snapshot: state.snapshot }
+      : state;
+    return (
+      <div data-project-renderer={selection.key} data-renderer-version={selection.version}>
+        <PreschoolOverviewRenderer
+          state={preschoolState}
+          {...(props.onRetry ? { onRetry: props.onRetry } : {})}
           {...(props.aiAnalystHref ? { aiAnalystHref: props.aiAnalystHref } : {})}
         />
       </div>

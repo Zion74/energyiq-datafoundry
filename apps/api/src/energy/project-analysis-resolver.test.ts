@@ -7,7 +7,7 @@ import { createMetadataStore } from "@datafoundry/metadata";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   ensureEnergyIqBootstrap,
@@ -517,6 +517,88 @@ describe("ProjectAnalysisResolver", () => {
     }
   }, 30_000);
 
+  it("reuses a fully pinned Ngee Ann current Overview without repeating Period or fact SQL", async () => {
+    const root = mkdtempSync(join(tmpdir(), "project-analysis-pinned-cache-"));
+    const databasePath = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const gateway = new LocalDataGateway(metadata);
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      await materializeNgeeAnnLatestPeriodFixture(databasePath, metadata);
+      const user = metadata.users.getById({ user_id: "dev-user" });
+      const runSqlReadonly = vi.spyOn(gateway, "runSqlReadonly");
+      const current = await resolveProjectAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        user,
+        workspaceId: NGEE_ANN_WORKSPACE_ID,
+        request: {
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "project",
+          resource: "electricity",
+          analysisWindow: "current-overview-28d",
+        },
+        databasePath,
+        now: new Date("2026-08-06T00:00:00.000Z"),
+      });
+      expect(current.status).toBe("ready");
+      if (current.status !== "ready") throw new Error("Expected current Ngee Ann analysis");
+      const pinnedInput = {
+        metadataStore: metadata,
+        dataGateway: gateway,
+        user,
+        workspaceId: NGEE_ANN_WORKSPACE_ID,
+        request: {
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "level-6",
+          resource: "electricity" as const,
+          analysisWindow: "current-overview-28d" as const,
+          from: "2026-05-20",
+          to: "2026-06-16",
+          expectedDataSnapshotId: current.snapshot.context.dataSnapshotId,
+          expectedProjectReleaseId: current.snapshot.projectRelease.id,
+        },
+        databasePath,
+        now: new Date("2026-08-06T00:00:00.000Z"),
+      };
+      const baselineSqlCount = runSqlReadonly.mock.calls.length;
+
+      const coldStartedAt = performance.now();
+      const cold = await resolveProjectAnalysis(pinnedInput);
+      const coldDurationMs = performance.now() - coldStartedAt;
+      const coldSqlCount = runSqlReadonly.mock.calls.length;
+      expect(cold).toMatchObject({ status: "ready" });
+      expect(coldSqlCount).toBeGreaterThan(baselineSqlCount);
+
+      const hitStartedAt = performance.now();
+      const hit = await resolveProjectAnalysis(pinnedInput);
+      const hitDurationMs = performance.now() - hitStartedAt;
+      expect(hit).toEqual(cold);
+      expect(runSqlReadonly).toHaveBeenCalledTimes(coldSqlCount);
+      expect(hitDurationMs).toBeLessThan(coldDurationMs / 5);
+
+      const refreshStartedAt = performance.now();
+      const refreshed = await resolveProjectAnalysis({ ...pinnedInput, bypassCache: true });
+      const refreshDurationMs = performance.now() - refreshStartedAt;
+      expect(refreshed).toMatchObject({ status: "ready" });
+      expect(runSqlReadonly.mock.calls.length).toBeGreaterThan(coldSqlCount);
+      expect(refreshDurationMs).toBeGreaterThan(hitDurationMs * 5);
+
+      await expect(resolveProjectAnalysis({
+        ...pinnedInput,
+        request: {
+          ...pinnedInput.request,
+          from: "2026-05-21",
+          to: "2026-06-15",
+        },
+      })).rejects.toThrow("ENERGYIQ_CURRENT_OVERVIEW_WINDOW_MISMATCH");
+    } finally {
+      vi.restoreAllMocks();
+      metadata.close();
+      removeTemporaryFixture(root);
+    }
+  }, 30_000);
+
   it("returns a versioned Preschool Snapshot from one trusted Resolver Interface", async () => {
     const root = mkdtempSync(join(tmpdir(), "project-analysis-resolver-"));
     const databasePath = join(root, "energy.duckdb");
@@ -587,8 +669,23 @@ describe("ProjectAnalysisResolver", () => {
         .toBe(result.snapshot.evidence.length);
       expect(result.snapshot.findings).toEqual(result.snapshot.analysis.attention);
       expect(result.snapshot).not.toHaveProperty("decisionPriorities");
+      const completeProjectDays = result.snapshot.analysis.dailyTotals?.scopes
+        .find((scope) => scope.scopeId === "preschool-project")?.rows
+        .filter((row) => row.dataHealth.status === "complete") ?? [];
+      expect(completeProjectDays.length).toBeLessThan(28);
+      expect(result.snapshot).not.toHaveProperty("preschoolBenchmark");
+      expect(result.snapshot.preschoolOperational).toMatchObject({
+        status: "unavailable",
+        reason: { code: "PRESCHOOL_OPERATING_CALENDAR_UNAVAILABLE" },
+        evidence: {
+          projectReleaseId: "legacy-profile:preschool-demo:1",
+          dataSnapshotId: preschoolSnapshot.id,
+        },
+      });
       expect(result.snapshot.analysis.timeBehaviour).toBeUndefined();
       expect(result.snapshot.analysis.provenance.queryIds).not.toContain("time_bucket_grid_v1");
+      expect(result.snapshot.analysis.provenance.queryIds)
+        .not.toContain("operational_policy_meter_intervals_v1");
       expect(result.snapshot.metadata).toMatchObject({
         hierarchyRevisionId: "preschool-hierarchy-v4",
         timezone: "Asia/Singapore",

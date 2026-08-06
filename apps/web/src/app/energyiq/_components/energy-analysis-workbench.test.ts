@@ -1,8 +1,46 @@
 import { describe, expect, it } from "vitest";
 
-import { buildEnergyAiHandoffInitialDraftPrompt } from "./energy-analysis-workbench";
+import {
+  buildEnergyAiHandoffInitialDraftPrompt,
+  toEnergyAnalysisExternalContext,
+} from "./energy-analysis-workbench";
 
 describe("EnergyIQ AI Analyst handoff", () => {
+  it("projects the server-resolved Snapshot and data cutoff into the visible Analyst context", () => {
+    const context = toEnergyAnalysisExternalContext({
+      userId: "user-1",
+      workspaceId: "workspace-1",
+      projectId: "ngee-ann-polytechnic",
+      projectName: "Ngee Ann Polytechnic",
+      scopeId: "project",
+      scopeName: "Whole project",
+      scopeType: "project",
+      resource: "electricity",
+      timezone: "Asia/Singapore",
+      from: "2026-05-19T16:00:00.000Z",
+      to: "2026-06-16T16:00:00.000Z",
+      endExclusive: true,
+      period: "Custom",
+      hierarchyRevisionId: "hierarchy-1",
+      meterMappingRevisionId: "mapping-1",
+      meterFormulaRevisionId: "formula-1",
+      dataSnapshotId: "snapshot-1",
+      metricVersion: "metric-1",
+      businessCalendarVersion: "calendar-1",
+      tariffScheduleVersion: "tariff-1",
+      resolvedAt: "2026-08-06T00:00:00.000Z",
+    });
+
+    expect(context).toMatchObject({
+      projectId: "ngee-ann-polytechnic",
+      period: "Custom",
+      from: "2026-05-19T16:00:00.000Z",
+      to: "2026-06-16T16:00:00.000Z",
+      dataCutoff: "2026-06-16",
+      dataSnapshotId: "snapshot-1",
+    });
+  });
+
   it("turns bounded Finding and Evidence URL parameters into an untrusted verification draft", () => {
     const params = new URLSearchParams({
       projectId: "ngee-ann-polytechnic",
@@ -32,6 +70,34 @@ describe("EnergyIQ AI Analyst handoff", () => {
     expect(prompt).toContain("current authorized Project, Scope, resource, and Snapshot");
     expect(prompt).toContain("scoped read-only SQL Evidence");
     expect(prompt).toContain("Missing Evidence");
+  });
+
+  it("accepts a deterministic-only Overview finding and keeps it subject to verification", () => {
+    const params = new URLSearchParams({
+      projectId: "preschool-demo",
+      finding: JSON.stringify({
+        title: "Standby is a separate angle",
+        what: "A scoped pattern is visible.",
+        why: { kind: "Hypothesis", text: "The cited Evidence supports an investigation." },
+        how: "Inspect the operating context and leading Circuit.",
+        howToVerify: "Repeat the same scoped comparison after investigation.",
+      }),
+      evidence: JSON.stringify({
+        snapshotId: "snapshot-1",
+        dataCutoff: "2026-05-31",
+        note: "This is not a confirmed root cause.",
+        deterministicEvidenceIds: ["operating:portfolio"],
+        toolCallIds: [],
+        auditLogIds: [],
+      }),
+    });
+
+    const prompt = buildEnergyAiHandoffInitialDraftPrompt(params);
+
+    expect(prompt).toContain("Standby is a separate angle");
+    expect(prompt).toContain("Deterministic Evidence IDs: operating:portfolio");
+    expect(prompt).toContain("Tool call IDs: not supplied");
+    expect(prompt).toContain("scoped read-only SQL Evidence");
   });
 
   it.each([

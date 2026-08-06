@@ -1,4 +1,7 @@
-import type { LocalDataGateway } from "@datafoundry/data-gateway";
+import {
+  resolveEnergyFactStorePath,
+  type LocalDataGateway,
+} from "@datafoundry/data-gateway";
 import {
   createDefaultTemplateDocument,
   type EnergyIqComponentRevisionRecord,
@@ -7,6 +10,8 @@ import {
   type MetadataStore,
   type UserRecord,
 } from "@datafoundry/metadata";
+import { existsSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 
 import {
   executeEnergyScopeAnalysis,
@@ -25,11 +30,25 @@ import {
   type NgeeAnnDecisionPriorities,
 } from "./ngee-ann-decision-priorities.js";
 import {
+  hasCompletePreschoolBenchmarkWindow,
+  resolvePreschoolBenchmarkProjection,
+  type PreschoolBenchmarkProjection,
+} from "./preschool-benchmark-projection.js";
+import {
+  loadPreschoolOperationalProjection,
+  type PreschoolOperationalProjection,
+} from "./preschool-operational-projection.js";
+import {
   resolveEnergyAccessContext,
   resolveEnergyQueryContext,
   type EnergyQueryContext,
   type EnergyQueryContextRequest,
 } from "./energy-query-context.js";
+import {
+  createProjectAnalysisCacheKey,
+  createProjectAnalysisResultCache,
+  type ProjectAnalysisResultCache,
+} from "./project-analysis-result-cache.js";
 
 export type ProjectRendererKey = "ngee-ann-overview" | "preschool-overview";
 
@@ -88,6 +107,8 @@ export type ProjectAnalysisSnapshot = {
   }>;
   findings: EnergyScopeAnalysis["attention"];
   decisionPriorities?: NgeeAnnDecisionPriorities;
+  preschoolBenchmark?: PreschoolBenchmarkProjection;
+  preschoolOperational?: PreschoolOperationalProjection;
   dataSnapshot: {
     id: string;
     importBatchIds: string[];
@@ -115,6 +136,40 @@ export type ProjectAnalysisResolution =
     detail: string;
   };
 
+type ReadyProjectAnalysisResolution = Extract<ProjectAnalysisResolution, { status: "ready" }>;
+type PublishedRunContext = {
+  context: EnergyQueryContext;
+  projectRelease: PublishedProjectRelease | null;
+  validatePinnedOverviewPeriod?: () => Promise<void>;
+};
+
+const PROJECT_ANALYSIS_CACHE_CAPACITY = 6;
+const PROJECT_ANALYSIS_CACHE_TTL_MS = 120_000;
+const PROJECT_ANALYSIS_CACHES = new WeakMap<
+  MetadataStore,
+  WeakMap<LocalDataGateway, ProjectAnalysisResultCache<ReadyProjectAnalysisResolution>>
+>();
+
+const projectAnalysisCacheFor = (
+  metadataStore: MetadataStore,
+  dataGateway: LocalDataGateway,
+): ProjectAnalysisResultCache<ReadyProjectAnalysisResolution> => {
+  let gatewayCaches = PROJECT_ANALYSIS_CACHES.get(metadataStore);
+  if (!gatewayCaches) {
+    gatewayCaches = new WeakMap();
+    PROJECT_ANALYSIS_CACHES.set(metadataStore, gatewayCaches);
+  }
+  let cache = gatewayCaches.get(dataGateway);
+  if (!cache) {
+    cache = createProjectAnalysisResultCache({
+      capacity: PROJECT_ANALYSIS_CACHE_CAPACITY,
+      ttlMs: PROJECT_ANALYSIS_CACHE_TTL_MS,
+    });
+    gatewayCaches.set(dataGateway, cache);
+  }
+  return cache;
+};
+
 type LegacyProjectProfile = {
   rendererKey: ProjectRendererKey;
 };
@@ -131,6 +186,7 @@ export const resolveProjectAnalysis = async (input: {
   workspaceId: string;
   request: EnergyQueryContextRequest;
   databasePath?: string;
+  bypassCache?: boolean;
   now?: Date;
   env?: Record<string, string | undefined>;
 }): Promise<ProjectAnalysisResolution> => {
@@ -163,7 +219,7 @@ export const resolveProjectAnalysis = async (input: {
       detail: "Publish a Project Template Revision and register its customer Renderer before opening the customer Overview.",
     };
   }
-  const publishedRunContext = input.request.analysisWindow === "latest-complete-7d"
+  const publishedRunContext: PublishedRunContext = input.request.analysisWindow === "latest-complete-7d"
     || input.request.analysisWindow === "current-overview-28d"
     ? await resolveCurrentOverviewContext(input)
     : resolvePublishedEnergyQueryContext({
@@ -177,97 +233,171 @@ export const resolveProjectAnalysis = async (input: {
   const releasedContext = publishedRunContext.context;
   const projectRelease = publishedRunContext.projectRelease;
   if (!projectRelease) throw new Error("ENERGYIQ_PROJECT_RELEASE_REQUIRED");
-  const scopeAnalysis = await executeEnergyScopeAnalysis({
-    metadataStore: input.metadataStore,
-    dataGateway: input.dataGateway,
+  const analysisDatabasePath = input.databasePath === ":memory:"
+    ? input.databasePath
+    : input.databasePath
+      ? resolvePath(input.databasePath)
+      : resolveEnergyFactStorePath(releasedContext.workspaceId);
+  if (analysisDatabasePath !== ":memory:" && !existsSync(analysisDatabasePath)) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+  const cacheKey = createProjectAnalysisCacheKey({
     userId: input.user.id,
-    context: releasedContext,
-    projectReleaseId: projectRelease.id,
-    includeTimeBehaviour: projectRelease.renderer.key === "ngee-ann-overview",
-    ruleRevisions: input.metadataStore.energyIq.rules.listRevisions()
-      .filter((rule) => projectRelease.ruleRevisionIds.includes(rule.revision_id)),
-    ...(input.databasePath ? { databasePath: input.databasePath } : {}),
-  });
-  const snapshotContext: ProjectAnalysisSnapshot["context"] = {
-    ...releasedContext,
-    primaryPeriod: {
-      start: releasedContext.from,
-      endExclusive: releasedContext.to,
-    },
-    projectReleaseId: projectRelease.id,
-  };
-  const evidenceMetricIds = [...(
-    projectRelease.metricRevisionIds.length > 0
-      ? projectRelease.metricRevisionIds
-      : [scopeAnalysis.provenance.metricVersion]
-  )].sort((left, right) => left.localeCompare(right));
-  const metadata = resolveProjectAnalysisMetadata({
-    metadataStore: input.metadataStore,
+    workspaceId: releasedContext.workspaceId,
     projectId: releasedContext.projectId,
-    hierarchyRevisionId: releasedContext.hierarchyRevisionId,
+    scopeId: releasedContext.scopeId,
+    resource: releasedContext.resource,
+    analysisWindow: input.request.analysisWindow ?? null,
+    period: releasedContext.period,
     timezone: releasedContext.timezone,
-    period: snapshotContext.primaryPeriod,
-    analysis: scopeAnalysis,
+    from: releasedContext.from,
+    to: releasedContext.to,
+    dataSnapshotId: releasedContext.dataSnapshotId,
+    projectReleaseId: projectRelease.id,
+    hierarchyRevisionId: projectRelease.hierarchyRevisionId,
+    meterMappingRevisionId: projectRelease.meterMappingRevisionId,
+    meterFormulaRevisionId: projectRelease.meterFormulaRevisionId,
+    metricVersion: releasedContext.metricVersion,
+    businessCalendarVersion: projectRelease.businessCalendarVersion,
+    tariffScheduleVersion: projectRelease.tariffScheduleVersion,
+    rendererKey: projectRelease.renderer.key,
+    rendererVersion: projectRelease.renderer.version,
+    rendererContractVersion: projectRelease.renderer.contractVersion,
+    recipeId: projectRelease.recipe.id,
+    recipeVersion: projectRelease.recipe.version,
+    metricRevisionIds: projectRelease.metricRevisionIds,
+    ruleRevisionIds: projectRelease.ruleRevisionIds,
+    databasePath: analysisDatabasePath,
   });
-  const analysis = projectAnalysisPayload({ analysis: scopeAnalysis, metadata });
-  const decisionPriorities = projectRelease.renderer.key === "ngee-ann-overview"
-    ? buildNgeeAnnDecisionPriorities({
-        selectedScopeId: releasedContext.scopeId,
-        primaryPeriod: snapshotContext.primaryPeriod,
-        expectedEvidencePins: {
-          projectReleaseId: projectRelease.id,
-          dataSnapshotId: analysis.provenance.dataSnapshotId,
-          hierarchyRevisionId: projectRelease.hierarchyRevisionId,
-          meterMappingRevisionId: projectRelease.meterMappingRevisionId,
-          meterFormulaRevisionId: projectRelease.meterFormulaRevisionId,
-          metricVersion: releasedContext.metricVersion,
-          businessCalendarVersion: projectRelease.businessCalendarVersion,
-          queryIds: ["time_slot_anomaly_v1"],
-        },
-        dailyUsageAnomalies: analysis.dailyUsageAnomalies,
-      })
-    : undefined;
-  const latestAvailablePeriod = analysis.summary.validIntervalCount === 0
-    ? await resolveLatestAvailablePeriod({
+  return projectAnalysisCacheFor(input.metadataStore, input.dataGateway).resolve(
+    cacheKey,
+    async () => {
+      await publishedRunContext.validatePinnedOverviewPeriod?.();
+      const scopeAnalysis = await executeEnergyScopeAnalysis({
         metadataStore: input.metadataStore,
         dataGateway: input.dataGateway,
         userId: input.user.id,
         context: releasedContext,
-        ...(input.databasePath ? { databasePath: input.databasePath } : {}),
-      })
-    : null;
-  return {
-    status: "ready",
-    snapshot: {
-      context: snapshotContext,
-      projectRelease,
-      recipe: projectRelease.recipe,
-      renderer: projectRelease.renderer,
-      dataQuality: analysis.dataHealth,
-      evidence: evidenceMetricIds.map((metricId) => ({
-        id: [
-          "evidence",
-          analysis.provenance.dataSnapshotId,
-          releasedContext.scopeId,
-          releasedContext.from,
-          releasedContext.to,
-          metricId,
-        ].join(":"),
-        metricId,
-        queryIds: [...analysis.provenance.queryIds],
-      })),
-      findings: analysis.attention,
-      ...(decisionPriorities ? { decisionPriorities } : {}),
-      dataSnapshot: {
-        id: analysis.provenance.dataSnapshotId,
-        importBatchIds: analysis.dataHealth.importBatchIds,
-        lastSeenAt: analysis.dataHealth.lastSeenAt ?? null,
-      },
-      ...(latestAvailablePeriod ? { latestAvailablePeriod } : {}),
-      metadata,
-      analysis,
+        projectReleaseId: projectRelease.id,
+        includeTimeBehaviour: projectRelease.renderer.key === "ngee-ann-overview",
+        includeMeterOperationalBreakdown: projectRelease.renderer.key !== "preschool-overview",
+        ruleRevisions: input.metadataStore.energyIq.rules.listRevisions()
+          .filter((rule) => projectRelease.ruleRevisionIds.includes(rule.revision_id)),
+        databasePath: analysisDatabasePath,
+      });
+      const snapshotContext: ProjectAnalysisSnapshot["context"] = {
+        ...releasedContext,
+        primaryPeriod: {
+          start: releasedContext.from,
+          endExclusive: releasedContext.to,
+        },
+        projectReleaseId: projectRelease.id,
+      };
+      const evidenceMetricIds = [...(
+        projectRelease.metricRevisionIds.length > 0
+          ? projectRelease.metricRevisionIds
+          : [scopeAnalysis.provenance.metricVersion]
+      )].sort((left, right) => left.localeCompare(right));
+      const metadata = resolveProjectAnalysisMetadata({
+        metadataStore: input.metadataStore,
+        projectId: releasedContext.projectId,
+        hierarchyRevisionId: releasedContext.hierarchyRevisionId,
+        timezone: releasedContext.timezone,
+        period: snapshotContext.primaryPeriod,
+        analysis: scopeAnalysis,
+      });
+      const analysis = projectAnalysisPayload({ analysis: scopeAnalysis, metadata });
+      const decisionPriorities = projectRelease.renderer.key === "ngee-ann-overview"
+        ? buildNgeeAnnDecisionPriorities({
+            selectedScopeId: releasedContext.scopeId,
+            primaryPeriod: snapshotContext.primaryPeriod,
+            expectedEvidencePins: {
+              projectReleaseId: projectRelease.id,
+              dataSnapshotId: analysis.provenance.dataSnapshotId,
+              hierarchyRevisionId: projectRelease.hierarchyRevisionId,
+              meterMappingRevisionId: projectRelease.meterMappingRevisionId,
+              meterFormulaRevisionId: projectRelease.meterFormulaRevisionId,
+              metricVersion: releasedContext.metricVersion,
+              businessCalendarVersion: projectRelease.businessCalendarVersion,
+              queryIds: ["time_slot_anomaly_v1"],
+            },
+            dailyUsageAnomalies: analysis.dailyUsageAnomalies,
+          })
+        : undefined;
+      const preschoolBenchmark = projectRelease.renderer.key === "preschool-overview"
+        && releasedContext.scopeId === input.metadataStore.energyIq.getProject(releasedContext.projectId).root_scope_id
+        && snapshotContext.primaryPeriod.start === "2026-04-30T16:00:00.000Z"
+        && snapshotContext.primaryPeriod.endExclusive === "2026-05-31T16:00:00.000Z"
+        && hasCompletePreschoolBenchmarkWindow(analysis, releasedContext.scopeId)
+          ? resolvePreschoolBenchmarkProjection({
+              metadataStore: input.metadataStore,
+              projectRelease,
+              dataSnapshotId: analysis.provenance.dataSnapshotId,
+              period: snapshotContext.primaryPeriod,
+              timezone: releasedContext.timezone,
+              analysis,
+            })
+          : undefined;
+      const preschoolOperational = projectRelease.renderer.key === "preschool-overview"
+        && releasedContext.scopeId === input.metadataStore.energyIq.getProject(releasedContext.projectId).root_scope_id
+        && snapshotContext.primaryPeriod.start === "2026-04-30T16:00:00.000Z"
+        && snapshotContext.primaryPeriod.endExclusive === "2026-05-31T16:00:00.000Z"
+          ? await loadPreschoolOperationalProjection({
+              metadataStore: input.metadataStore,
+              dataGateway: input.dataGateway,
+              userId: input.user.id,
+              projectRelease,
+              context: releasedContext,
+              analysis,
+              databasePath: analysisDatabasePath,
+            })
+          : undefined;
+      const latestAvailablePeriod = analysis.summary.validIntervalCount === 0
+        ? await resolveLatestAvailablePeriod({
+            metadataStore: input.metadataStore,
+            dataGateway: input.dataGateway,
+            userId: input.user.id,
+            context: releasedContext,
+            databasePath: analysisDatabasePath,
+          })
+        : null;
+      return {
+        status: "ready",
+        snapshot: {
+          context: snapshotContext,
+          projectRelease,
+          recipe: projectRelease.recipe,
+          renderer: projectRelease.renderer,
+          dataQuality: analysis.dataHealth,
+          evidence: evidenceMetricIds.map((metricId) => ({
+            id: [
+              "evidence",
+              analysis.provenance.dataSnapshotId,
+              releasedContext.scopeId,
+              releasedContext.from,
+              releasedContext.to,
+              metricId,
+            ].join(":"),
+            metricId,
+            queryIds: [...analysis.provenance.queryIds],
+          })),
+          findings: analysis.attention,
+          ...(decisionPriorities ? { decisionPriorities } : {}),
+          ...(preschoolBenchmark ? { preschoolBenchmark } : {}),
+          ...(preschoolOperational ? { preschoolOperational } : {}),
+          dataSnapshot: {
+            id: analysis.provenance.dataSnapshotId,
+            importBatchIds: analysis.dataHealth.importBatchIds,
+            lastSeenAt: analysis.dataHealth.lastSeenAt ?? null,
+          },
+          ...(latestAvailablePeriod ? { latestAvailablePeriod } : {}),
+          metadata,
+          analysis,
+        },
+      };
     },
-  };
+    { bypass: input.bypassCache === true || analysisDatabasePath === ":memory:" },
+  );
 };
 
 const resolveCurrentOverviewContext = async (input: {
@@ -279,7 +409,7 @@ const resolveCurrentOverviewContext = async (input: {
   databasePath?: string;
   now?: Date;
   env?: Record<string, string | undefined>;
-}) => {
+}): Promise<PublishedRunContext> => {
   const {
     analysisWindow,
     expectedDataSnapshotId,
@@ -317,18 +447,7 @@ const resolveCurrentOverviewContext = async (input: {
     if (pinnedProjectContext.projectRelease?.renderer.key !== "ngee-ann-overview") {
       throw new Error("ENERGYIQ_ANALYSIS_WINDOW_UNSUPPORTED");
     }
-    const selected = await selectOverviewPeriod({
-      metadataStore: input.metadataStore,
-      dataGateway: input.dataGateway,
-      userId: input.user.id,
-      context: pinnedProjectContext.context,
-      ...(input.databasePath ? { databasePath: input.databasePath } : {}),
-    });
-    if (from !== selected.period.localFrom
-      || to !== inclusiveLocalDate(selected.period.localToExclusive)) {
-      throw new Error("ENERGYIQ_CURRENT_OVERVIEW_WINDOW_MISMATCH");
-    }
-    return resolvePublishedEnergyQueryContext({
+    const releasedPinnedContext = resolvePublishedEnergyQueryContext({
       metadataStore: input.metadataStore,
       user: input.user,
       workspaceId: input.workspaceId,
@@ -343,6 +462,22 @@ const resolveCurrentOverviewContext = async (input: {
       ...(input.now ? { now: input.now } : {}),
       ...(input.env ? { env: input.env } : {}),
     });
+    return {
+      ...releasedPinnedContext,
+      validatePinnedOverviewPeriod: async () => {
+        const selected = await selectOverviewPeriod({
+          metadataStore: input.metadataStore,
+          dataGateway: input.dataGateway,
+          userId: input.user.id,
+          context: pinnedProjectContext.context,
+          ...(input.databasePath ? { databasePath: input.databasePath } : {}),
+        });
+        if (from !== selected.period.localFrom
+          || to !== inclusiveLocalDate(selected.period.localToExclusive)) {
+          throw new Error("ENERGYIQ_CURRENT_OVERVIEW_WINDOW_MISMATCH");
+        }
+      },
+    };
   }
   const projectContext = resolvePublishedEnergyQueryContext({
     metadataStore: input.metadataStore,

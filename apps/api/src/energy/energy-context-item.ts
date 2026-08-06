@@ -30,9 +30,10 @@ export const createEnergyQueryContextItem = (
     "usage_kwh is canonical interval consumption. source_reading_kind states whether it came from a cumulative-energy delta or a supplied interval-usage value.",
     "The datasource exposes only published Meter attachments. Use official_aggregation_eligible for Scope totals; never infer or replace that route from scope_id or meter_role.",
     "Use appliance for Aircon, Heater, Lighting and Plugload analysis; category is the simplified aircon, light or load business classification.",
-    "is_operating comes from the published operating schedule. Compare non-operating usage, per-person usage and per-area usage only when the relevant metadata is available.",
+    "The run-scoped fact table does not expose Calendar-derived operating or standby values. Use only deterministic Evidence pinned to business_calendar_version for those figures; do not infer them from local_hour, day_type or raw facts.",
     "Rows with quality_status other than 'ok' are evidence of data quality events and must not be counted as consumption.",
     ...ngeeAnnAnalysisPolicy(context),
+    ...preschoolAnalysisPolicy(context),
     `workspace_id=${context.workspaceId}`,
     `project_id=${context.projectId}`,
     `project_name=${context.projectName}`,
@@ -159,10 +160,24 @@ const ngeeAnnAnalysisPolicy = (context: EnergyQueryContext): string[] =>
         "Compare Workday, Weekend and Public Holiday only for day_type values actually present in the inspected result. An absent slice is unavailable, not zero.",
         "Previous-period change and own-history normal level require rows for those comparison windows. This scoped datasource contains only the authoritative from-to range; when required rows fall outside it, say the comparison is unavailable instead of extrapolating.",
         "Per-area and per-person results require authoritative metadata in the current context or tool evidence. If those dimensions are absent, say unavailable and do not infer them from names or typical values.",
-        "Off-hours conclusions require authoritative is_operating values and adequate coverage. If schedule or coverage cannot be established, describe observed rows only and do not label usage as avoidable waste.",
+        "Off-hours conclusions require deterministic Calendar-bound Evidence and adequate coverage. If that Evidence is absent, describe observed rows only and do not label usage as avoidable waste.",
         "Do not answer tariff cost, carbon, forecast or water questions unless authoritative values are explicitly present in the current evidence.",
         "Every answer must state Scope, inclusive-exclusive Period, timezone, unit, aggregation route, material limitations, and the SQL/tool evidence used.",
         "Use SQL-produced table evidence for exact figures. Controlled line, bar or pie charts may only reuse columns returned by a tool result; never create new chart values or arbitrary chart code.",
         "When evidence is insufficient, return the precise limitation and the next required data. Never generate mock figures, business anomalies or root causes. Do not modify deterministic official action priorities; evidence-backed next investigations or actions are allowed when clearly identified as AI proposals."
+      ]
+    : [];
+
+const preschoolAnalysisPolicy = (context: EnergyQueryContext): string[] =>
+  context.projectId === "preschool-demo"
+    ? [
+        "Preschool analysis policy:",
+        "Start with inspect_schema, then use run_sql_readonly only against the run-scoped table. Use an aggregated query; do not request raw Portfolio facts.",
+        "For Centre totals, group official rows by parent_node_id. The scoped scope_id identifies the published navigation attachment and must not be treated as the Centre identity.",
+        "For every energy aggregation, filter quality_status='ok' and official_aggregation_eligible=TRUE. Use Circuit and appliance rows only within the same published route and do not double-count them.",
+        "EUI and per-pax comparisons require the published Benchmark Evidence and its metadata status. Do not derive area, headcount, cohort or normalised results from labels or from the scoped fact table.",
+        "Standby, operating, Spike and SOP results are provisional Calendar-bound investigation signals. They do not prove waste, non-compliance, device state or root cause.",
+        "Forecast, tariff cost, savings, ROI, owner and commitment are unavailable unless separately supplied as authoritative Evidence. Do not infer them from May energy data.",
+        "Use only the current Project, May Period, Snapshot and Published Release. Cite the exact deterministic Evidence item or successful scoped query result for every displayed number.",
       ]
     : [];

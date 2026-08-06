@@ -42,6 +42,24 @@ const NGEE_ANN_ANALYSIS_PACK: ProjectAnalysisPack = {
   ],
 };
 
+const PRESCHOOL_ANALYSIS_PACK: ProjectAnalysisPack = {
+  id: "preschool-analysis-pack",
+  revision: "v1",
+  projectId: "preschool-demo",
+  rendererKey: "preschool-overview",
+  investigationPrior: [
+    "Treat the published Portfolio, Benchmark and Operational themes as investigation starting points, not as an answer template. A candidate Finding may support, challenge or be independent of those themes when its Evidence warrants that relationship.",
+    "Start with the published Portfolio total and data quality, then investigate concentration by Centre, comparable cohort, appliance, Circuit, local time and operating state when those dimensions are available.",
+    "Use the published EUI and per-pax Evidence only for peer comparison. Preserve its provisional metadata status and distinguish a P75 screening signal from a confirmed operational problem.",
+    "Use standby and off-hours Evidence only with the published Calendar. A closed-hour observation is an investigation target, not automatically waste, savings or non-compliance.",
+    "Treat operating and standby Spikes as governed comparison signals. Inspect the strongest Centre, hour and leading Circuit Evidence without promoting a signal to a root cause.",
+    "Use Circuit rows to explain a Centre or Portfolio pattern. Do not double-count the same official route, and disclose incomplete reconciliation rather than forcing a contribution story.",
+    "Prefer a small set of semantically different Findings that change a decision: what happened, why it matters or may have happened, what to investigate or do next, and how to verify the outcome.",
+    "Surface Missing Evidence when equipment state, occupancy, maintenance, weather, confirmed schedules or other operational facts are required to support a cause.",
+    "Do not change deterministic KPI values, Benchmark classifications, Spike results, provisional SOP signals or official theme priority. Evidence-backed next investigations and actions must remain visibly AI proposals.",
+  ],
+};
+
 export const createProjectAnalysisPackContextItem = (input: {
   context: EnergyQueryContext;
   release: ProjectAnalysisPackReleaseBinding;
@@ -108,8 +126,12 @@ export const createProjectAnalysisPackContextItem = (input: {
 const selectProjectAnalysisPack = (
   projectId: string,
   rendererKey: string,
-): ProjectAnalysisPack | null =>
-  projectId === NGEE_ANN_ANALYSIS_PACK.projectId
+): ProjectAnalysisPack | null => {
+  if (projectId === NGEE_ANN_ANALYSIS_PACK.projectId
     && rendererKey === NGEE_ANN_ANALYSIS_PACK.rendererKey
-    ? NGEE_ANN_ANALYSIS_PACK
-    : null;
+  ) return NGEE_ANN_ANALYSIS_PACK;
+  if (projectId === PRESCHOOL_ANALYSIS_PACK.projectId
+    && rendererKey === PRESCHOOL_ANALYSIS_PACK.rendererKey
+  ) return PRESCHOOL_ANALYSIS_PACK;
+  return null;
+};

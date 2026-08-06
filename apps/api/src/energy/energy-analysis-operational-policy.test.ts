@@ -1,4 +1,5 @@
 import {
+  ensureEnergyScopedDataSource,
   LocalDataGateway,
   type EnergyIntervalFactWrite,
 } from "@datafoundry/data-gateway";
@@ -28,6 +29,7 @@ describe("EnergyScopeAnalysis operational policy", () => {
         userId: "dev-user",
         context: policyContext("tariff-v1", "calendar-v1", fixture.dataSnapshotId),
         databasePath: fixture.databasePath,
+        includeTimeBehaviour: false,
         ruleRevisions: [offHoursRule],
       });
 
@@ -81,6 +83,110 @@ describe("EnergyScopeAnalysis operational policy", () => {
     }
   });
 
+  it("does not expose a raw operating flag as a competing truth for Release-pinned Calendar results", async () => {
+    const fixture = await createOperationalFixture();
+    try {
+      publishPolicyV1(fixture.metadata);
+      const context = policyContext("tariff-v1", "calendar-v1", fixture.dataSnapshotId);
+      const analysis = await executeEnergyScopeAnalysis({
+        metadataStore: fixture.metadata,
+        dataGateway: fixture.gateway,
+        userId: "dev-user",
+        context,
+        databasePath: fixture.databasePath,
+        includeTimeBehaviour: false,
+        includeMeterOperationalBreakdown: false,
+        ruleRevisions: [offHoursRule],
+      });
+      const scoped = await ensureEnergyScopedDataSource({
+        metadataStore: fixture.metadata,
+        userId: "dev-user",
+        databasePath: fixture.databasePath,
+        context: {
+          workspaceId: context.workspaceId,
+          projectId: context.projectId,
+          scopeId: context.scopeId,
+          meterAttachments: [{
+            meterPointId: "meter-1",
+            scopeId: "policy-circuit-1",
+            officialAggregation: true,
+          }],
+          resource: context.resource,
+          from: context.from,
+          to: context.to,
+          timezone: context.timezone,
+          hierarchyRevisionId: context.hierarchyRevisionId,
+          meterMappingRevisionId: context.meterMappingRevisionId,
+          meterFormulaRevisionId: context.meterFormulaRevisionId,
+          dataSnapshotId: context.dataSnapshotId,
+          metricVersion: context.metricVersion,
+        },
+      });
+
+      expect(analysis.offHours).toMatchObject({
+        status: "available",
+        operatingKwh: 3,
+        standbyKwh: 7,
+        businessCalendarVersion: "calendar-v1",
+      });
+      await expect(fixture.gateway.runSqlReadonly({
+        user_id: "dev-user",
+        workspace_id: context.workspaceId,
+        datasource_id: scoped.datasourceId,
+        sql: `
+          SELECT
+            SUM(CASE WHEN is_operating THEN usage_kwh ELSE 0 END) AS operating_kwh,
+            SUM(CASE WHEN NOT is_operating THEN usage_kwh ELSE 0 END) AS standby_kwh
+          FROM ${scoped.viewName}
+        `,
+      })).rejects.toThrow(/is_operating/i);
+    } finally {
+      fixture.close();
+    }
+  });
+
+  it("omits the optional meter-level operating breakdown when the caller will not consume it", async () => {
+    const fixture = await createOperationalFixture();
+    try {
+      publishPolicyV1(fixture.metadata);
+      const runSqlReadonly = vi.spyOn(fixture.gateway, "runSqlReadonly");
+
+      const analysis = await executeEnergyScopeAnalysis({
+        metadataStore: fixture.metadata,
+        dataGateway: fixture.gateway,
+        userId: "dev-user",
+        context: policyContext("tariff-v1", "calendar-v1", fixture.dataSnapshotId),
+        databasePath: fixture.databasePath,
+        includeTimeBehaviour: false,
+        ruleRevisions: [offHoursRule],
+        includeMeterOperationalBreakdown: false,
+      });
+
+      expect(runSqlReadonly.mock.calls.some(([request]) => (
+        request.sql.includes("'meter' AS series_kind")
+      ))).toBe(false);
+      expect(analysis.summary).toMatchObject({
+        usageKwh: 10,
+        nonOperatingKwh: 7,
+        nonOperatingSharePct: 70,
+      });
+      expect(analysis.offHours).toMatchObject({
+        status: "available",
+        operatingKwh: 3,
+        standbyKwh: 7,
+      });
+      expect(analysis.circuits[0]).not.toHaveProperty("nonOperatingKwh");
+      expect(analysis.attention).toContainEqual(expect.objectContaining({
+        code: "NON_OPERATING_SHARE",
+        evidence: "7 kWh occurred outside operating hours.",
+      }));
+      expect(analysis.provenance.queryIds).not.toContain("operational_policy_meter_intervals_v1");
+    } finally {
+      vi.restoreAllMocks();
+      fixture.close();
+    }
+  });
+
   it("returns explicit unavailable policy results and suppresses legacy off-hours findings", async () => {
     const fixture = await createOperationalFixture();
     try {
@@ -90,6 +196,7 @@ describe("EnergyScopeAnalysis operational policy", () => {
         userId: "dev-user",
         context: policyContext("missing-tariff", "missing-calendar", fixture.dataSnapshotId),
         databasePath: fixture.databasePath,
+        includeTimeBehaviour: false,
         ruleRevisions: [offHoursRule],
       });
 
@@ -136,6 +243,7 @@ describe("EnergyScopeAnalysis operational policy", () => {
         userId: "dev-user",
         context: policyContext("tariff-v1", "calendar-v1", fixture.dataSnapshotId),
         databasePath: fixture.databasePath,
+        includeTimeBehaviour: false,
         ruleRevisions: [],
       })).rejects.toThrow(
         "ENERGYIQ_OPERATIONAL_POLICY_METER_INTERVALS_INCOMPLETE:meter-1",
@@ -156,6 +264,7 @@ describe("EnergyScopeAnalysis operational policy", () => {
         userId: "dev-user",
         context: policyContext("tariff-v1", "calendar-v1", fixture.dataSnapshotId),
         databasePath: fixture.databasePath,
+        includeTimeBehaviour: false,
         ruleRevisions: [],
       });
       const serializedHistorical = JSON.stringify(historical);
@@ -167,6 +276,7 @@ describe("EnergyScopeAnalysis operational policy", () => {
         userId: "dev-user",
         context: policyContext("tariff-v1", "calendar-v1", fixture.dataSnapshotId),
         databasePath: fixture.databasePath,
+        includeTimeBehaviour: false,
         ruleRevisions: [],
       });
       const latest = await executeEnergyScopeAnalysis({
@@ -175,6 +285,7 @@ describe("EnergyScopeAnalysis operational policy", () => {
         userId: "dev-user",
         context: policyContext("tariff-v2", "calendar-v2", fixture.dataSnapshotId),
         databasePath: fixture.databasePath,
+        includeTimeBehaviour: false,
         ruleRevisions: [],
       });
 

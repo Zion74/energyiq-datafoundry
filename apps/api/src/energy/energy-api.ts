@@ -666,7 +666,7 @@ export const handleEnergyApiRequest = async (
       };
     }
     if (segments[0] === "analysis" && segments[1] === "resolve" && request.method === "POST") {
-      const body = await readJsonBody(request);
+      const body = requireRecord(await readJsonBody(request));
       return {
         status: 200,
         body: createSuccessResult(await resolveProjectAnalysis({
@@ -675,6 +675,7 @@ export const handleEnergyApiRequest = async (
           user,
           workspaceId: context.workspaceId,
           request: parseQueryContextRequest(body),
+          bypassCache: body.bypassCache === true,
         })),
       };
     }

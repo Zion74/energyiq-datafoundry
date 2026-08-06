@@ -335,7 +335,6 @@ const createScopedView = async (
         local_date,
         local_hour,
         day_type,
-        is_operating,
         elapsed_minutes,
         active_energy_kwh,
         previous_active_energy_kwh,

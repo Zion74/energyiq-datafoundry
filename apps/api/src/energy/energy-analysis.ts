@@ -887,6 +887,7 @@ export const executeEnergyScopeAnalysis = async (input: {
   projectReleaseId?: string;
   ruleRevisions?: readonly EnergyIqRuleRevisionRecord[];
   includeTimeBehaviour?: boolean;
+  includeMeterOperationalBreakdown?: boolean;
 }): Promise<EnergyScopeAnalysis> => {
   const ruleRevisions = input.ruleRevisions
     ?? input.metadataStore.energyIq.rules.listRevisions()
@@ -1117,16 +1118,18 @@ export const executeEnergyScopeAnalysis = async (input: {
       sql: operationalPolicyScopeIntervalsSql(scoped.viewName, aggregateMeterNodeIds),
       limit: 1,
     }),
-    input.dataGateway.runSqlReadonly({
-      user_id: input.userId,
-      workspace_id: input.context.workspaceId,
-      datasource_id: scoped.datasourceId,
-      sql: operationalPolicyMeterIntervalsSql(
-        scoped.viewName,
-        meterAggregates.map((meter) => meter.meterNodeId),
-      ),
-      limit: Math.max(1, meterAggregates.length),
-    }),
+    input.includeMeterOperationalBreakdown === false
+      ? Promise.resolve(undefined)
+      : input.dataGateway.runSqlReadonly({
+          user_id: input.userId,
+          workspace_id: input.context.workspaceId,
+          datasource_id: scoped.datasourceId,
+          sql: operationalPolicyMeterIntervalsSql(
+            scoped.viewName,
+            meterAggregates.map((meter) => meter.meterNodeId),
+          ),
+          limit: Math.max(1, meterAggregates.length),
+        }),
   ]);
   const dailyUsageAnomalyLoad = await loadDailyUsageAnomalyFacts(dailyUsageAnomalyLoadInput);
   const summaryRow = summaryResult.rows[0] ?? [];
@@ -1211,7 +1214,7 @@ export const executeEnergyScopeAnalysis = async (input: {
     .reduce((sum, meterNodeId) => sum + (previousMeterUsageById.get(meterNodeId) ?? 0), 0);
   const operationalSeries = [
     ...operationalScopeIntervalResult.rows,
-    ...operationalMeterIntervalResult.rows,
+    ...(operationalMeterIntervalResult?.rows ?? []),
   ].map(rowToOperationalIntervalSeries);
   const scopeOperationalSeries = operationalSeries.find((series) => series.kind === "scope");
   if (!scopeOperationalSeries) {
@@ -1224,7 +1227,10 @@ export const executeEnergyScopeAnalysis = async (input: {
     intervals: scopeOperationalSeries.intervals,
   });
   const circuitOperatingByMeterId = new Map<string, EnergyIqOperatingEvaluation>();
-  if (operationalPolicy.operating.status === "available") {
+  if (
+    input.includeMeterOperationalBreakdown !== false
+    && operationalPolicy.operating.status === "available"
+  ) {
     const meterSeriesByMeterId = new Map(
       operationalSeries
         .filter((series): series is OperationalIntervalSeries & { meterNodeId: string } =>
@@ -1514,7 +1520,9 @@ export const executeEnergyScopeAnalysis = async (input: {
         "meter_breakdown_v1",
         "previous_meter_usage_v1",
         "operational_policy_scope_intervals_v1",
-        "operational_policy_meter_intervals_v1",
+        ...(operationalMeterIntervalResult
+          ? ["operational_policy_meter_intervals_v1" as const]
+          : []),
         ...(dailyUsageAnomalyLoad.status === "loaded" ? ["time_slot_anomaly_v1" as const] : []),
       ]
     }

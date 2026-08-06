@@ -36,6 +36,23 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
   const showWorkspaceSelector = !isAdminPage && (access?.workspaces.length ?? 0) > 1;
   const showProjectSelector = !isAdminPage && publishedProjects.length > 1;
   const showStaticProjectContext = !isAdminPage && publishedProjects.length === 1 && activeProject;
+  const selectWorkspaceFromShell = async (workspaceId: string) => {
+    await selectOrganisation(workspaceId);
+    if (pathname !== "/energyiq/overview") return;
+
+    const nextSearchParams = new URLSearchParams(window.location.search);
+    nextSearchParams.delete("projectId");
+    nextSearchParams.set("scopeId", "project");
+    nextSearchParams.delete("period");
+    nextSearchParams.delete("from");
+    nextSearchParams.delete("to");
+    nextSearchParams.delete("currentFrom");
+    nextSearchParams.delete("currentTo");
+    nextSearchParams.delete("currentDataSnapshotId");
+    nextSearchParams.delete("currentProjectReleaseId");
+    nextSearchParams.set("grain", "day");
+    router.replace(`${pathname}?${nextSearchParams.toString()}`);
+  };
   const selectProjectFromShell = (projectId: string) => {
     if (pathname !== "/energyiq/overview") {
       selectProject(projectId);
@@ -77,7 +94,7 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
                 value: workspace.id,
                 label: `Workspace · ${workspace.name}${workspace.disabled ? " (disabled)" : ""}`,
               }))}
-              onValueChange={(workspaceId) => void selectOrganisation(workspaceId)}
+              onValueChange={selectWorkspaceFromShell}
               leadingIcon={<EnergyIcon name="building" className="h-3.5 w-3.5" />}
               placeholder="No organisations"
               className="max-w-40 sm:max-w-52"

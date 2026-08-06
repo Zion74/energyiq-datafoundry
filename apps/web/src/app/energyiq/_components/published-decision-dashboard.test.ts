@@ -18,7 +18,8 @@ import type {
 } from "../../../lib/config-api";
 import { configApi } from "../../../lib/config-api";
 import { buildEnergyTemplateRenderPlan } from "./energy-template-render-plan";
-import { ngeeAnnGoldenSnapshot, ngeeAnnSingleDaySnapshot } from "./ngee-ann-overview.test-fixture";
+import { ngeeAnnGoldenSnapshot } from "./ngee-ann-overview.test-fixture";
+import { preschoolGoldenSnapshot } from "./preschool-overview.test-fixture";
 import {
   currentOverviewUrlWithView,
   currentOverviewAnalysisRequest,
@@ -109,31 +110,6 @@ describe("published Overview URL reload", () => {
     expect(singleDay).toMatchObject({ grain: "hour", comparison: "average", category: "load" });
   });
 
-  it.each([
-    { grain: "day", label: "Daily totals", buckets: "1 daily buckets" },
-    { grain: "hour", label: "Hourly grid", buckets: "24 hourly buckets" },
-  ] as const)("restores the approved single-day $grain Trend grain after refresh", async ({ grain, label, buckets }) => {
-    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
-    mockedAccess.activeProject = ngeeAnn;
-    mockedAccess.access = accessContext([ngeeAnn]);
-    window.history.replaceState(
-      {},
-      "",
-      `/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-06-16&to=2026-06-16&grain=${grain}&comparison=overlay&category=all`,
-    );
-    vi.spyOn(configApi, "resolveProjectAnalysis").mockResolvedValue({
-      status: "ready",
-      snapshot: dashboardNgeeAnnSnapshot(ngeeAnnSingleDaySnapshot()),
-    });
-
-    await act(async () => {
-      root.render(React.createElement(PublishedDecisionDashboard));
-    });
-
-    expect(container.textContent).toContain(label);
-    expect(container.textContent).toContain(buckets);
-  });
-
   it("restores anomaly controls and handoffs from URL, writes changes back, and keeps dialog state transient", async () => {
     const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
     mockedAccess.activeProject = ngeeAnn;
@@ -141,7 +117,7 @@ describe("published Overview URL reload", () => {
     window.history.replaceState(
       {},
       "",
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=average&category=load",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&grain=day&comparison=average&category=load",
     );
     const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockResolvedValue({ status: "ready", snapshot: dashboardNgeeAnnSnapshot() });
@@ -179,10 +155,14 @@ describe("published Overview URL reload", () => {
       .find((button) => button.textContent === "Close");
     await act(async () => close?.click());
 
-    expect(mockedRouter.replace.mock.calls.map(([href]) => href)).toEqual([
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=selected&category=load",
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=selected&category=light",
-    ]);
+    const navigations = mockedRouter.replace.mock.calls.map(([href]) => href);
+    expect(navigations).toHaveLength(3);
+    expect(navigations[1]).toContain("scopeId=project&resource=electricity&grain=day&comparison=selected&category=load");
+    expect(navigations[1]).toContain("currentDataSnapshotId=");
+    expect(navigations[1]).not.toContain("period=");
+    expect(navigations[2]).toContain("scopeId=project&resource=electricity&grain=day&comparison=selected&category=light");
+    expect(navigations[2]).toContain("currentDataSnapshotId=");
+    expect(navigations[2]).not.toContain("period=");
     expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
   });
 
@@ -230,7 +210,10 @@ describe("published Overview URL reload", () => {
     expect(container.textContent).toContain("Key highlights");
     expect(container.textContent).toContain("Rolling 28-day decision window");
     expect(container.textContent).toContain("20 May 2026–16 Jun 2026");
-    expect(Array.from(container.querySelectorAll("button"), (button) => button.textContent)).not.toContain("Last 7 days");
+    expect(container.querySelector("[role='combobox'][aria-label='Analysis Scope']")).toBeNull();
+    expect(Array.from(container.querySelectorAll("button"), (button) => button.textContent)).not.toEqual(
+      expect.arrayContaining(["Yesterday", "Last 7 days", "Previous week", "Previous month", "Custom"]),
+    );
     expect(container.querySelectorAll("input[type='date']")).toHaveLength(0);
     expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
     expect(resolveProjectAnalysis).toHaveBeenCalledWith({
@@ -261,8 +244,8 @@ describe("published Overview URL reload", () => {
     ));
   });
 
-  it("uses the public Custom URL for the first trusted resolve after Project access loads", async () => {
-    window.history.replaceState({}, "", "/energyiq/overview?period=Custom&from=2026-06-10&to=2026-06-16");
+  it("normalizes a legacy Ngee Ann Custom deep link to the current Project overview", async () => {
+    window.history.replaceState({}, "", "/energyiq/overview?scopeId=level-7&period=Custom&from=2026-06-10&to=2026-06-16");
     const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockReturnValue(new Promise<never>(() => undefined));
 
@@ -281,11 +264,100 @@ describe("published Overview URL reload", () => {
       projectId: "ngee-ann-polytechnic",
       scopeId: "project",
       resource: "electricity",
-      period: "Custom",
-      from: "2026-06-10",
-      to: "2026-06-16",
+      analysisWindow: "current-overview-28d",
     });
+    expect(container.querySelector("[role='combobox'][aria-label='Analysis Scope']")).toBeNull();
     expect(container.querySelectorAll("input[type='date']")).toHaveLength(0);
+  });
+
+  it("uses the dedicated Preschool shell and bypasses only the user-triggered Refresh request", async () => {
+    const preschool = project("preschool-demo", "Preschool Portfolio");
+    mockedAccess.activeProject = preschool;
+    mockedAccess.access = accessContext([preschool]);
+    window.history.replaceState(
+      {},
+      "",
+      "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Custom&from=2026-05-01&to=2026-05-31&grain=day&comparison=overlay&category=all",
+    );
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockResolvedValue({ status: "ready", snapshot: dashboardNgeeAnnSnapshot(preschoolGoldenSnapshot()) });
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
+    expect(resolveProjectAnalysis).toHaveBeenCalledWith({
+      projectId: "preschool-demo",
+      scopeId: "project",
+      resource: "electricity",
+      period: "Custom",
+      from: "2026-05-01",
+      to: "2026-05-31",
+    });
+    expect(container.querySelector("[data-preschool-overview='true']")).not.toBeNull();
+    expect(container.querySelector("[role='combobox'][aria-label='Analysis Scope']")).toBeNull();
+    expect(container.querySelector("[aria-label='Area and headcount metadata']")).toBeNull();
+    expect(container.querySelectorAll("input[type='date']")).toHaveLength(0);
+    expect(container.textContent).not.toContain("Published sections");
+    expect(Array.from(container.querySelectorAll("button"), (button) => button.textContent)).not.toEqual(
+      expect.arrayContaining(["Yesterday", "Last 7 days", "Previous week", "Previous month", "Custom"]),
+    );
+    expect(Array.from(
+      container.querySelector("[aria-label='Resource type']")?.querySelectorAll("button") ?? [],
+      (button) => button.textContent,
+    )).toEqual(["Electricity"]);
+    expect(container.textContent).toContain("Refresh view");
+    expect(container.textContent).toContain("Save analysis");
+    expect(mockedRouter.replace).not.toHaveBeenCalled();
+
+    const refresh = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "Refresh view");
+    await act(async () => refresh?.click());
+
+    expect(resolveProjectAnalysis).toHaveBeenCalledTimes(2);
+    expect(resolveProjectAnalysis).toHaveBeenNthCalledWith(2, {
+      projectId: "preschool-demo",
+      scopeId: "project",
+      resource: "electricity",
+      period: "Custom",
+      from: "2026-05-01",
+      to: "2026-05-31",
+    }, { bypassCache: true });
+  });
+
+  it.each([
+    ["a URL without Period", "/energyiq/overview?projectId=preschool-demo&scopeId=level-7&resource=electricity"],
+    ["an old arbitrary Custom range", "/energyiq/overview?projectId=preschool-demo&scopeId=level-7&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16"],
+    ["an old Water resource", "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=water&period=Custom&from=2026-05-01&to=2026-05-31"],
+  ] as const)("canonicalizes Preschool %s to the published May Project overview", async (_label, href) => {
+    const preschool = project("preschool-demo", "Preschool Portfolio");
+    mockedAccess.activeProject = preschool;
+    mockedAccess.access = accessContext([preschool]);
+    window.history.replaceState({}, "", href);
+    const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
+      .mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
+    expect(resolveProjectAnalysis).toHaveBeenCalledWith({
+      projectId: "preschool-demo",
+      scopeId: "project",
+      resource: "electricity",
+      period: "Custom",
+      from: "2026-05-01",
+      to: "2026-05-31",
+    });
+    expect(mockedRouter.replace).toHaveBeenCalledOnce();
+    expect(mockedRouter.replace).toHaveBeenCalledWith(
+      "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Custom&from=2026-05-01&to=2026-05-31&grain=day&comparison=overlay&category=all",
+    );
+    expect(container.querySelector("[role='combobox'][aria-label='Analysis Scope']")).toBeNull();
+    expect(container.querySelectorAll("input[type='date']")).toHaveLength(0);
+    expect(configApi.getEnergyProjectHierarchy).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -295,7 +367,7 @@ describe("published Overview URL reload", () => {
     window.history.replaceState(
       {},
       "",
-      `/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=${encodedPeriod}`,
+      `/energyiq/overview?projectId=generic-demo&scopeId=project&resource=electricity&period=${encodedPeriod}`,
     );
     const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockReturnValue(new Promise<never>(() => undefined));
@@ -305,16 +377,16 @@ describe("published Overview URL reload", () => {
     });
     expect(resolveProjectAnalysis).not.toHaveBeenCalled();
 
-    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
-    mockedAccess.activeProject = ngeeAnn;
-    mockedAccess.access = accessContext([ngeeAnn]);
+    const preschool = project("generic-demo", "Generic Project");
+    mockedAccess.activeProject = preschool;
+    mockedAccess.access = accessContext([preschool]);
     await act(async () => {
       root.render(React.createElement(PublishedDecisionDashboard));
     });
 
     expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
     expect(resolveProjectAnalysis).toHaveBeenCalledWith({
-      projectId: "ngee-ann-polytechnic",
+      projectId: "generic-demo",
       scopeId: "project",
       resource: "electricity",
       period,
@@ -322,7 +394,7 @@ describe("published Overview URL reload", () => {
   });
 
   it("atomically resolves new Custom dates after client navigation changes the public URL", async () => {
-    mockedAccess.activeProject = project("preschool-demo", "Preschool Demo");
+    mockedAccess.activeProject = project("generic-demo", "Generic Project");
     window.history.replaceState({}, "", "/energyiq/overview?period=Custom&from=2026-06-01&to=2026-06-07");
     const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockReturnValue(new Promise<never>(() => undefined));
@@ -331,7 +403,7 @@ describe("published Overview URL reload", () => {
       root.render(React.createElement(PublishedDecisionDashboard));
     });
     expect(resolveProjectAnalysis).toHaveBeenCalledWith({
-      projectId: "preschool-demo",
+      projectId: "generic-demo",
       scopeId: "project",
       resource: "electricity",
       period: "Custom",
@@ -347,7 +419,7 @@ describe("published Overview URL reload", () => {
 
     expect(resolveProjectAnalysis).toHaveBeenCalledTimes(1);
     expect(resolveProjectAnalysis).toHaveBeenCalledWith({
-      projectId: "preschool-demo",
+      projectId: "generic-demo",
       scopeId: "project",
       resource: "electricity",
       period: "Custom",
@@ -359,7 +431,7 @@ describe("published Overview URL reload", () => {
   });
 
   it("does not resolve an incomplete Custom URL and explains which dates are required", async () => {
-    mockedAccess.activeProject = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = project("generic-demo", "Generic Project");
     window.history.replaceState({}, "", "/energyiq/overview?period=Custom&from=2026-06-10");
     const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockReturnValue(new Promise<never>(() => undefined));
@@ -374,7 +446,7 @@ describe("published Overview URL reload", () => {
   });
 
   it("does not resolve a reversed Custom URL and explains the accepted date order", async () => {
-    mockedAccess.activeProject = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = project("generic-demo", "Generic Project");
     window.history.replaceState({}, "", "/energyiq/overview?period=Custom&from=2026-06-16&to=2026-06-10");
     const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockReturnValue(new Promise<never>(() => undefined));
@@ -389,7 +461,7 @@ describe("published Overview URL reload", () => {
   });
 
   it("does not resolve invalid Custom URL dates", async () => {
-    mockedAccess.activeProject = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
+    mockedAccess.activeProject = project("generic-demo", "Generic Project");
     window.history.replaceState({}, "", "/energyiq/overview?period=Custom&from=2026-06-10&to=not-a-date");
     const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockReturnValue(new Promise<never>(() => undefined));
@@ -404,7 +476,7 @@ describe("published Overview URL reload", () => {
   });
 
   it("uses an authorized published URL Project and Scope before the different active Project", async () => {
-    const preschool = project("preschool-demo", "Preschool Demo");
+    const preschool = project("generic-demo", "Generic Project");
     const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
     mockedAccess.activeProject = preschool;
     mockedAccess.access = accessContext([preschool, ngeeAnn]);
@@ -419,20 +491,18 @@ describe("published Overview URL reload", () => {
     expect(resolveProjectAnalysis).toHaveBeenCalledTimes(1);
     expect(resolveProjectAnalysis).toHaveBeenCalledWith({
       projectId: "ngee-ann-polytechnic",
-      scopeId: "level-6",
+      scopeId: "project",
       resource: "electricity",
-      period: "Custom",
-      from: "2026-06-10",
-      to: "2026-06-16",
+      analysisWindow: "current-overview-28d",
     });
     expect(mockedAccess.selectProject).toHaveBeenCalledOnce();
     expect(mockedAccess.selectProject).toHaveBeenCalledWith("ngee-ann-polytechnic");
     expect(container.textContent).toContain("Ngee Ann Polytechnic");
-    expect(container.textContent).not.toContain("Preschool Demo");
+    expect(container.textContent).not.toContain("Generic Project");
   });
 
   it("does not fall back to the active Project when the URL Project is unavailable", async () => {
-    const preschool = project("preschool-demo", "Preschool Demo");
+    const preschool = project("generic-demo", "Generic Project");
     mockedAccess.activeProject = preschool;
     mockedAccess.access = accessContext([preschool]);
     window.history.replaceState({}, "", "/energyiq/overview?projectId=unknown-project&period=Last%207%20days");
@@ -447,11 +517,11 @@ describe("published Overview URL reload", () => {
     const alert = container.querySelector("[role='alert']");
     expect(alert).not.toBeNull();
     expect(alert?.textContent).toContain("Requested Project is unavailable in the active workspace.");
-    expect(container.textContent).not.toContain("Preschool Demo");
+    expect(container.textContent).not.toContain("Generic Project");
   });
 
   it("rejects a published URL Project outside the active workspace", async () => {
-    const preschool = project("preschool-demo", "Preschool Demo");
+    const preschool = project("generic-demo", "Generic Project");
     const otherWorkspaceProject = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic", "workspace-2");
     mockedAccess.activeProject = preschool;
     mockedAccess.access = accessContext([preschool, otherWorkspaceProject]);
@@ -469,7 +539,7 @@ describe("published Overview URL reload", () => {
       .toContain("Requested Project is unavailable in the active workspace.");
   });
 
-  it("restores water as an explicit unsupported URL resource without resolving", async () => {
+  it("normalizes a legacy Ngee Ann Water URL to the electricity-only current Overview", async () => {
     const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
     mockedAccess.activeProject = ngeeAnn;
     mockedAccess.access = accessContext([ngeeAnn]);
@@ -481,15 +551,28 @@ describe("published Overview URL reload", () => {
       root.render(React.createElement(PublishedDecisionDashboard));
     });
 
-    expect(resolveProjectAnalysis).not.toHaveBeenCalled();
-    expect(container.textContent).toContain("Water analysis is not configured");
+    expect(resolveProjectAnalysis).toHaveBeenCalledWith({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "project",
+      resource: "electricity",
+      analysisWindow: "current-overview-28d",
+    });
+    expect(mockedRouter.replace).toHaveBeenCalledWith(
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&grain=day&comparison=overlay&category=all",
+    );
+    const resourceButtons = Array.from(
+      container.querySelector("[aria-label='Resource type']")?.querySelectorAll("button") ?? [],
+      (button) => button.textContent,
+    );
+    expect(resourceButtons).toEqual(["Electricity"]);
+    expect(container.textContent).not.toContain("Water analysis is not configured");
   });
 
   it("writes a Resource change to the public URL without losing the current view", async () => {
-    const preschool = project("preschool-demo", "Preschool Demo");
+    const preschool = project("generic-demo", "Generic Project");
     mockedAccess.activeProject = preschool;
     mockedAccess.access = accessContext([preschool]);
-    window.history.replaceState({}, "", "/energyiq/overview?projectId=preschool-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
     vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockReturnValue(new Promise<never>(() => undefined));
 
@@ -497,21 +580,24 @@ describe("published Overview URL reload", () => {
       root.render(React.createElement(PublishedDecisionDashboard));
     });
 
-    const water = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
-      .find((button) => button.textContent === "Water");
+    const resourceButtons = Array.from(
+      container.querySelector("[aria-label='Resource type']")?.querySelectorAll<HTMLButtonElement>("button") ?? [],
+    );
+    expect(resourceButtons.map((button) => button.textContent)).toEqual(["Electricity", "Water"]);
+    const water = resourceButtons.find((button) => button.textContent === "Water");
     await act(async () => water?.click());
 
     expect(mockedRouter.replace).toHaveBeenCalledOnce();
     expect(mockedRouter.replace).toHaveBeenCalledWith(
-      "/energyiq/overview?projectId=preschool-demo&scopeId=l6-total-light&resource=water&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
+      "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=water&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
     );
   });
 
   it("composes consecutive Resource and Period changes before the router rerenders", async () => {
-    const preschool = project("preschool-demo", "Preschool Demo");
+    const preschool = project("generic-demo", "Generic Project");
     mockedAccess.activeProject = preschool;
     mockedAccess.access = accessContext([preschool]);
-    window.history.replaceState({}, "", "/energyiq/overview?projectId=preschool-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
     vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockReturnValue(new Promise<never>(() => undefined));
 
@@ -526,16 +612,16 @@ describe("published Overview URL reload", () => {
     await act(async () => lastSevenDays?.click());
 
     expect(mockedRouter.replace.mock.calls.map(([href]) => href)).toEqual([
-      "/energyiq/overview?projectId=preschool-demo&scopeId=l6-total-light&resource=water&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
-      "/energyiq/overview?projectId=preschool-demo&scopeId=l6-total-light&resource=water&period=Last+7+days&grain=day&comparison=overlay&category=all",
+      "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=water&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
+      "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=water&period=Last+7+days&grain=day&comparison=overlay&category=all",
     ]);
   });
 
   it("writes Period changes to the public URL with only the effective date range", async () => {
-    const preschool = project("preschool-demo", "Preschool Demo");
+    const preschool = project("generic-demo", "Generic Project");
     mockedAccess.activeProject = preschool;
     mockedAccess.access = accessContext([preschool]);
-    window.history.replaceState({}, "", "/energyiq/overview?projectId=preschool-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
     vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockReturnValue(new Promise<never>(() => undefined));
 
@@ -552,17 +638,17 @@ describe("published Overview URL reload", () => {
     await act(async () => custom?.click());
 
     expect(mockedRouter.replace.mock.calls.map(([href]) => href)).toEqual([
-      "/energyiq/overview?projectId=preschool-demo&scopeId=l6-total-light&resource=electricity&period=Last+7+days&grain=day&comparison=overlay&category=all",
-      "/energyiq/overview?projectId=preschool-demo&scopeId=l6-total-light&resource=electricity&period=Yesterday&grain=day&comparison=overlay&category=all",
-      "/energyiq/overview?projectId=preschool-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
+      "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=electricity&period=Last+7+days&grain=day&comparison=overlay&category=all",
+      "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=electricity&period=Yesterday&grain=day&comparison=overlay&category=all",
+      "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
     ]);
   });
 
   it("selects and restores Previous week through the server-authoritative URL contract", async () => {
-    const preschool = project("preschool-demo", "Preschool Demo");
+    const preschool = project("generic-demo", "Generic Project");
     mockedAccess.activeProject = preschool;
     mockedAccess.access = accessContext([preschool]);
-    window.history.replaceState({}, "", "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Last%207%20days");
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=generic-demo&scopeId=project&resource=electricity&period=Last%207%20days");
     const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockReturnValue(new Promise<never>(() => undefined));
 
@@ -573,7 +659,7 @@ describe("published Overview URL reload", () => {
     const previousWeek = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
       .find((button) => button.textContent === "Previous week");
     await act(async () => previousWeek?.click());
-    const previousWeekUrl = "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Previous+week&grain=day&comparison=overlay&category=all";
+    const previousWeekUrl = "/energyiq/overview?projectId=generic-demo&scopeId=project&resource=electricity&period=Previous+week&grain=day&comparison=overlay&category=all";
     expect(mockedRouter.replace).toHaveBeenCalledWith(previousWeekUrl);
 
     resolveProjectAnalysis.mockClear();
@@ -583,7 +669,7 @@ describe("published Overview URL reload", () => {
     });
     expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
     expect(resolveProjectAnalysis).toHaveBeenCalledWith({
-      projectId: "preschool-demo",
+      projectId: "generic-demo",
       scopeId: "project",
       resource: "electricity",
       period: "Previous week",
@@ -591,10 +677,10 @@ describe("published Overview URL reload", () => {
   });
 
   it("selects and restores Previous month through the server-authoritative URL contract", async () => {
-    const preschool = project("preschool-demo", "Preschool Demo");
+    const preschool = project("generic-demo", "Generic Project");
     mockedAccess.activeProject = preschool;
     mockedAccess.access = accessContext([preschool]);
-    window.history.replaceState({}, "", "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Previous+week");
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=generic-demo&scopeId=project&resource=electricity&period=Previous+week");
     const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockReturnValue(new Promise<never>(() => undefined));
 
@@ -605,7 +691,7 @@ describe("published Overview URL reload", () => {
     const previousMonth = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
       .find((button) => button.textContent === "Previous month");
     await act(async () => previousMonth?.click());
-    const previousMonthUrl = "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Previous+month&grain=day&comparison=overlay&category=all";
+    const previousMonthUrl = "/energyiq/overview?projectId=generic-demo&scopeId=project&resource=electricity&period=Previous+month&grain=day&comparison=overlay&category=all";
     expect(mockedRouter.replace).toHaveBeenCalledWith(previousMonthUrl);
 
     resolveProjectAnalysis.mockClear();
@@ -615,7 +701,7 @@ describe("published Overview URL reload", () => {
     });
     expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
     expect(resolveProjectAnalysis).toHaveBeenCalledWith({
-      projectId: "preschool-demo",
+      projectId: "generic-demo",
       scopeId: "project",
       resource: "electricity",
       period: "Previous month",
@@ -623,10 +709,10 @@ describe("published Overview URL reload", () => {
   });
 
   it("preserves Previous week when Scope changes before the router rerenders", async () => {
-    const preschool = project("preschool-demo", "Preschool Demo");
+    const preschool = project("generic-demo", "Generic Project");
     mockedAccess.activeProject = preschool;
     mockedAccess.access = accessContext([preschool]);
-    window.history.replaceState({}, "", "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Last%207%20days");
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=generic-demo&scopeId=project&resource=electricity&period=Last%207%20days");
     const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockReturnValue(new Promise<never>(() => undefined));
 
@@ -643,9 +729,9 @@ describe("published Overview URL reload", () => {
       .find((option) => option.textContent?.endsWith("Level 6 / Total Office Load"));
     await act(async () => totalCircuit?.click());
 
-    const previousWeekScopeUrl = "/energyiq/overview?projectId=preschool-demo&scopeId=l6-total-light&resource=electricity&period=Previous+week&grain=day&comparison=overlay&category=all";
+    const previousWeekScopeUrl = "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=electricity&period=Previous+week&grain=day&comparison=overlay&category=all";
     expect(mockedRouter.replace.mock.calls.map(([href]) => href)).toEqual([
-      "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Previous+week&grain=day&comparison=overlay&category=all",
+      "/energyiq/overview?projectId=generic-demo&scopeId=project&resource=electricity&period=Previous+week&grain=day&comparison=overlay&category=all",
       previousWeekScopeUrl,
     ]);
 
@@ -656,7 +742,7 @@ describe("published Overview URL reload", () => {
     });
     expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
     expect(resolveProjectAnalysis).toHaveBeenCalledWith({
-      projectId: "preschool-demo",
+      projectId: "generic-demo",
       scopeId: "l6-total-light",
       resource: "electricity",
       period: "Previous week",
@@ -664,10 +750,10 @@ describe("published Overview URL reload", () => {
   });
 
   it("preserves Previous month when Scope changes before the router rerenders", async () => {
-    const preschool = project("preschool-demo", "Preschool Demo");
+    const preschool = project("generic-demo", "Generic Project");
     mockedAccess.activeProject = preschool;
     mockedAccess.access = accessContext([preschool]);
-    window.history.replaceState({}, "", "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Previous+week");
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=generic-demo&scopeId=project&resource=electricity&period=Previous+week");
     const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockReturnValue(new Promise<never>(() => undefined));
 
@@ -684,9 +770,9 @@ describe("published Overview URL reload", () => {
       .find((option) => option.textContent?.endsWith("Level 6 / Total Office Load"));
     await act(async () => totalCircuit?.click());
 
-    const previousMonthScopeUrl = "/energyiq/overview?projectId=preschool-demo&scopeId=l6-total-light&resource=electricity&period=Previous+month&grain=day&comparison=overlay&category=all";
+    const previousMonthScopeUrl = "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=electricity&period=Previous+month&grain=day&comparison=overlay&category=all";
     expect(mockedRouter.replace.mock.calls.map(([href]) => href)).toEqual([
-      "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Previous+month&grain=day&comparison=overlay&category=all",
+      "/energyiq/overview?projectId=generic-demo&scopeId=project&resource=electricity&period=Previous+month&grain=day&comparison=overlay&category=all",
       previousMonthScopeUrl,
     ]);
 
@@ -697,7 +783,7 @@ describe("published Overview URL reload", () => {
     });
     expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
     expect(resolveProjectAnalysis).toHaveBeenCalledWith({
-      projectId: "preschool-demo",
+      projectId: "generic-demo",
       scopeId: "l6-total-light",
       resource: "electricity",
       period: "Previous month",
@@ -707,10 +793,10 @@ describe("published Overview URL reload", () => {
   it.each(["Previous week", "Previous month"] as const)(
     "keeps ready zero-coverage %s explicit without auto-navigation or a second resolve",
     async (period) => {
-      const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
-      mockedAccess.activeProject = ngeeAnn;
-      mockedAccess.access = accessContext([ngeeAnn]);
-      const periodUrl = `/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=${period.replace(" ", "+")}`;
+      const preschool = project("generic-demo", "Generic Project");
+      mockedAccess.activeProject = preschool;
+      mockedAccess.access = accessContext([preschool]);
+      const periodUrl = `/energyiq/overview?projectId=generic-demo&scopeId=project&resource=electricity&period=${period.replace(" ", "+")}`;
       window.history.replaceState({}, "", periodUrl);
       const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
         .mockResolvedValue(readyZeroCoverageResolution(period));
@@ -721,7 +807,7 @@ describe("published Overview URL reload", () => {
 
       expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
       expect(resolveProjectAnalysis).toHaveBeenCalledWith({
-        projectId: "ngee-ann-polytechnic",
+        projectId: "generic-demo",
         scopeId: "project",
         resource: "electricity",
         period,
@@ -765,10 +851,10 @@ describe("published Overview URL reload", () => {
   });
 
   it("carries the server-resolved range when a standard Period changes to Custom", async () => {
-    const preschool = project("preschool-demo", "Preschool Demo");
+    const preschool = project("generic-demo", "Generic Project");
     mockedAccess.activeProject = preschool;
     mockedAccess.access = accessContext([preschool]);
-    window.history.replaceState({}, "", "/energyiq/overview?projectId=preschool-demo&scopeId=l6-total-light&resource=electricity&period=Last%207%20days");
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=electricity&period=Last%207%20days");
     vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockResolvedValue(readyRangeResolution());
 
@@ -781,15 +867,15 @@ describe("published Overview URL reload", () => {
     await act(async () => custom?.click());
 
     expect(mockedRouter.replace).toHaveBeenCalledWith(
-      "/energyiq/overview?projectId=preschool-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
+      "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
     );
   });
 
   it("writes each Custom date to the public URL before resolving the rerendered view", async () => {
-    const preschool = project("preschool-demo", "Preschool Demo");
+    const preschool = project("generic-demo", "Generic Project");
     mockedAccess.activeProject = preschool;
     mockedAccess.access = accessContext([preschool]);
-    const initialUrl = "/energyiq/overview?projectId=preschool-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16";
+    const initialUrl = "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16";
     window.history.replaceState({}, "", initialUrl);
     const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockReturnValue(new Promise<never>(() => undefined));
@@ -806,7 +892,7 @@ describe("published Overview URL reload", () => {
       initialFrom.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
-    const fromUrl = "/energyiq/overview?projectId=preschool-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-11&to=2026-06-16&grain=day&comparison=overlay&category=all";
+    const fromUrl = "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-11&to=2026-06-16&grain=day&comparison=overlay&category=all";
     expect(mockedRouter.replace).toHaveBeenLastCalledWith(fromUrl);
     window.history.replaceState({}, "", fromUrl);
     await act(async () => {
@@ -814,7 +900,7 @@ describe("published Overview URL reload", () => {
     });
     expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
     expect(resolveProjectAnalysis).toHaveBeenLastCalledWith({
-      projectId: "preschool-demo",
+      projectId: "generic-demo",
       scopeId: "l6-total-light",
       resource: "electricity",
       period: "Custom",
@@ -830,7 +916,7 @@ describe("published Overview URL reload", () => {
       rerenderedTo.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
-    const toUrl = "/energyiq/overview?projectId=preschool-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-11&to=2026-06-17&grain=day&comparison=overlay&category=all";
+    const toUrl = "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-11&to=2026-06-17&grain=day&comparison=overlay&category=all";
     expect(mockedRouter.replace).toHaveBeenLastCalledWith(toUrl);
     window.history.replaceState({}, "", toUrl);
     await act(async () => {
@@ -838,7 +924,7 @@ describe("published Overview URL reload", () => {
     });
     expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
     expect(resolveProjectAnalysis).toHaveBeenLastCalledWith({
-      projectId: "preschool-demo",
+      projectId: "generic-demo",
       scopeId: "l6-total-light",
       resource: "electricity",
       period: "Custom",
@@ -848,10 +934,10 @@ describe("published Overview URL reload", () => {
   });
 
   it("composes consecutive Custom date changes before the router rerenders", async () => {
-    const preschool = project("preschool-demo", "Preschool Demo");
+    const preschool = project("generic-demo", "Generic Project");
     mockedAccess.activeProject = preschool;
     mockedAccess.access = accessContext([preschool]);
-    window.history.replaceState({}, "", "/energyiq/overview?projectId=preschool-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
     vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockReturnValue(new Promise<never>(() => undefined));
 
@@ -871,16 +957,16 @@ describe("published Overview URL reload", () => {
     });
 
     expect(mockedRouter.replace.mock.calls.map(([href]) => href)).toEqual([
-      "/energyiq/overview?projectId=preschool-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-11&to=2026-06-16&grain=day&comparison=overlay&category=all",
-      "/energyiq/overview?projectId=preschool-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-11&to=2026-06-17&grain=day&comparison=overlay&category=all",
+      "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-11&to=2026-06-16&grain=day&comparison=overlay&category=all",
+      "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-11&to=2026-06-17&grain=day&comparison=overlay&category=all",
     ]);
   });
 
   it("switches from Project to a published hierarchy Scope through the public URL", async () => {
-    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
-    mockedAccess.activeProject = ngeeAnn;
-    mockedAccess.access = accessContext([ngeeAnn]);
-    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
+    const preschool = project("generic-demo", "Generic Project");
+    mockedAccess.activeProject = preschool;
+    mockedAccess.access = accessContext([preschool]);
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=generic-demo&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
     const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockReturnValue(new Promise<never>(() => undefined));
 
@@ -893,7 +979,7 @@ describe("published Overview URL reload", () => {
     await act(async () => scopeSelect?.click());
     const options = Array.from(document.querySelectorAll<HTMLButtonElement>("[role='option']"));
     expect(options.map((option) => option.textContent)).toEqual([
-      "Project · Ngee Ann Polytechnic",
+      "Project · Generic Project",
       "Level · Level 6",
       "Circuit · Level 6 / L6 Light Left",
       "Circuit · Level 6 / Total Office Load",
@@ -905,17 +991,17 @@ describe("published Overview URL reload", () => {
     await act(async () => totalCircuit?.click());
     expect(mockedRouter.replace).toHaveBeenCalledOnce();
     expect(mockedRouter.replace).toHaveBeenCalledWith(
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
+      "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
     );
 
     resolveProjectAnalysis.mockClear();
-    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16");
     await act(async () => {
       root.render(React.createElement(PublishedDecisionDashboard));
     });
     expect(resolveProjectAnalysis).toHaveBeenCalledTimes(1);
     expect(resolveProjectAnalysis).toHaveBeenCalledWith({
-      projectId: "ngee-ann-polytechnic",
+      projectId: "generic-demo",
       scopeId: "l6-total-light",
       resource: "electricity",
       period: "Custom",
@@ -925,9 +1011,9 @@ describe("published Overview URL reload", () => {
   });
 
   it("bounds Scope display paths when hierarchy parents are missing or cyclic", async () => {
-    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
-    mockedAccess.activeProject = ngeeAnn;
-    mockedAccess.access = accessContext([ngeeAnn]);
+    const preschool = project("generic-demo", "Generic Project");
+    mockedAccess.activeProject = preschool;
+    mockedAccess.access = accessContext([preschool]);
     const malformedHierarchy = projectHierarchy();
     malformedHierarchy.nodes.push(
       {
@@ -978,10 +1064,10 @@ describe("published Overview URL reload", () => {
   });
 
   it("preserves the URL-backed resource, period and Custom range when Scope changes", async () => {
-    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
-    mockedAccess.activeProject = ngeeAnn;
-    mockedAccess.access = accessContext([ngeeAnn]);
-    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=water&period=Custom&from=2026-06-10&to=2026-06-16");
+    const preschool = project("generic-demo", "Generic Project");
+    mockedAccess.activeProject = preschool;
+    mockedAccess.access = accessContext([preschool]);
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=generic-demo&scopeId=project&resource=water&period=Custom&from=2026-06-10&to=2026-06-16");
     const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockReturnValue(new Promise<never>(() => undefined));
 
@@ -998,15 +1084,15 @@ describe("published Overview URL reload", () => {
 
     expect(mockedRouter.replace).toHaveBeenCalledOnce();
     expect(mockedRouter.replace).toHaveBeenCalledWith(
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=l6-total-light&resource=water&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
+      "/energyiq/overview?projectId=generic-demo&scopeId=l6-total-light&resource=water&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
     );
   });
 
   it("shows a disabled Scope selector when hierarchy loading fails and retries on Refresh", async () => {
-    const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
-    mockedAccess.activeProject = ngeeAnn;
-    mockedAccess.access = accessContext([ngeeAnn]);
-    window.history.replaceState({}, "", "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Last%207%20days");
+    const preschool = project("generic-demo", "Generic Project");
+    mockedAccess.activeProject = preschool;
+    mockedAccess.access = accessContext([preschool]);
+    window.history.replaceState({}, "", "/energyiq/overview?projectId=generic-demo&scopeId=project&resource=electricity&period=Last%207%20days");
     const loadHierarchy = vi.mocked(configApi.getEnergyProjectHierarchy)
       .mockRejectedValueOnce(new Error("Hierarchy service unavailable"))
       .mockResolvedValue(projectHierarchy());
@@ -1033,7 +1119,7 @@ describe("published Overview URL reload", () => {
     expect(container.textContent).not.toContain("Analysis scopes unavailable");
   });
 
-  it("fails closed on a stale current pin and refreshes only by clearing the whole-page pin", async () => {
+  it("fails closed on a stale current pin and bypasses it only for the user-triggered Refresh request", async () => {
     const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
     mockedAccess.activeProject = ngeeAnn;
     mockedAccess.access = accessContext([ngeeAnn]);
@@ -1050,6 +1136,7 @@ describe("published Overview URL reload", () => {
     });
 
     expect(resolveProjectAnalysis).toHaveBeenCalledWith(expect.objectContaining({
+      scopeId: "project",
       analysisWindow: "current-overview-28d",
       from: "2026-05-20",
       to: "2026-06-16",
@@ -1061,19 +1148,24 @@ describe("published Overview URL reload", () => {
       .find((button) => button.textContent === "Refresh current overview");
     await act(async () => refresh?.click());
 
-    expect(mockedRouter.replace).toHaveBeenCalledWith(
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=level-7&resource=electricity&grain=day&comparison=overlay&category=all",
-    );
+    expect(resolveProjectAnalysis).toHaveBeenCalledTimes(2);
+    expect(resolveProjectAnalysis).toHaveBeenNthCalledWith(2, {
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "project",
+      resource: "electricity",
+      analysisWindow: "current-overview-28d",
+    }, { bypassCache: true });
+    expect(mockedRouter.replace).not.toHaveBeenCalled();
   });
 
-  it("keeps the current cutoff pin while changing Scope", async () => {
+  it("keeps the current cutoff pin while forcing a legacy Ngee Ann Scope to Project", async () => {
     const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
     mockedAccess.activeProject = ngeeAnn;
     mockedAccess.access = accessContext([ngeeAnn]);
     window.history.replaceState(
       {},
       "",
-      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&currentFrom=2026-05-20&currentTo=2026-06-16&currentDataSnapshotId=snapshot-v1&currentProjectReleaseId=release-v1",
+      "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=level-7&resource=electricity&currentFrom=2026-05-20&currentTo=2026-06-16&currentDataSnapshotId=snapshot-v1&currentProjectReleaseId=release-v1",
     );
     vi.spyOn(configApi, "resolveProjectAnalysis")
       .mockReturnValue(new Promise<never>(() => undefined));
@@ -1082,15 +1174,17 @@ describe("published Overview URL reload", () => {
       root.render(React.createElement(PublishedDecisionDashboard));
     });
 
-    const scopeSelect = container.querySelector<HTMLButtonElement>("[role='combobox'][aria-label='Analysis Scope']");
-    await act(async () => scopeSelect?.click());
-    const nextScope = Array.from(document.querySelectorAll<HTMLButtonElement>("[role='option']"))
-      .find((option) => option.getAttribute("aria-selected") !== "true");
-    await act(async () => nextScope?.click());
-
-    expect(mockedRouter.replace).toHaveBeenCalledWith(expect.stringContaining(
-      "currentFrom=2026-05-20&currentTo=2026-06-16&currentDataSnapshotId=snapshot-v1&currentProjectReleaseId=release-v1",
-    ));
+    expect(container.querySelector("[role='combobox'][aria-label='Analysis Scope']")).toBeNull();
+    expect(configApi.resolveProjectAnalysis).toHaveBeenCalledWith({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "project",
+      resource: "electricity",
+      analysisWindow: "current-overview-28d",
+      from: "2026-05-20",
+      to: "2026-06-16",
+      expectedDataSnapshotId: "snapshot-v1",
+      expectedProjectReleaseId: "release-v1",
+    });
   });
 
 });
@@ -1103,11 +1197,11 @@ describe("published Overview date inputs", () => {
 
   it("asks the server to resolve the Project root instead of hard-coding a customer Scope", () => {
     expect(overviewAnalysisRequest(
-      "preschool-demo",
+      "generic-demo",
       "Last 7 days",
       { from: "", to: "" },
     )).toEqual({
-      projectId: "preschool-demo",
+      projectId: "generic-demo",
       scopeId: "project",
       resource: "electricity",
       period: "Last 7 days",
@@ -1379,7 +1473,7 @@ function readyZeroCoverageResolution(
   const context: EnergyQueryContextDto = {
     userId: "user-1",
     workspaceId: "workspace-1",
-      projectId: "preschool-demo",
+      projectId: "generic-demo",
     projectName: "Ngee Ann Polytechnic",
     scopeId: "project",
     scopeName: "Ngee Ann Polytechnic",

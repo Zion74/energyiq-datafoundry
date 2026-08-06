@@ -70,6 +70,33 @@ describe("createEnergyQueryContextItem", () => {
     expect(String(otherProject.content)).not.toContain("Ngee Ann analysis policy");
   });
 
+  it("adds the Preschool Centre and provisional-evidence query policy without changing other projects", () => {
+    const item = createEnergyQueryContextItem({
+      ...baseContext,
+      workspaceId: "preschool-demo-org",
+      projectId: "preschool-demo",
+      projectName: "Preschool Portfolio",
+      scopeId: "preschool-project",
+      scopeName: "Preschool Portfolio",
+      scopeType: "project",
+    }, "session-preschool");
+    const content = String(item.content);
+
+    expect(content).toContain("Preschool analysis policy");
+    expect(content).toContain("parent_node_id");
+    expect(content).toContain("quality_status='ok'");
+    expect(content).toContain("official_aggregation_eligible=TRUE");
+    expect(content).toContain("EUI and per-pax");
+    expect(content).toContain("provisional");
+    expect(content).toContain("Forecast, tariff cost, savings, ROI");
+    expect(content).toContain("does not expose Calendar-derived operating or standby values");
+    expect(content).toContain("deterministic Evidence pinned to business_calendar_version");
+    expect(content).not.toContain("is_operating comes from the published operating schedule");
+
+    const otherProject = createEnergyQueryContextItem(baseContext, "session-1");
+    expect(String(otherProject.content)).not.toContain("Preschool analysis policy");
+  });
+
   it("assembles the authorized Ngee Ann query context and Pack for the server Context Package", () => {
     const root = mkdtempSync(join(tmpdir(), "energy-authoritative-context-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });

@@ -44,6 +44,12 @@ const periodOptions: ReadonlyArray<{
 ];
 type OverviewPeriod = "Yesterday" | "Last 7 days" | "Previous week" | "Previous month" | "Custom";
 type ResourceType = "electricity" | "water";
+const ALL_OVERVIEW_RESOURCES = ["electricity", "water"] as const;
+const ELECTRICITY_ONLY_RESOURCES = ["electricity"] as const;
+const PRESCHOOL_OVERVIEW_RANGE = {
+  from: "2026-05-01",
+  to: "2026-05-31",
+} as const;
 export type OverviewComparison = "overlay" | "selected" | "average";
 export type OverviewCategory = "all" | "load" | "light";
 export type CurrentOverviewPin = {
@@ -91,7 +97,6 @@ export function PublishedDecisionDashboard() {
     <PublishedDecisionDashboardView
       key={viewStateKey}
       initialViewState={initialViewState}
-      hasExplicitPeriod={hasExplicitPeriod}
       urlSearch={searchParams.toString()}
     />
   );
@@ -99,11 +104,9 @@ export function PublishedDecisionDashboard() {
 
 function PublishedDecisionDashboardView({
   initialViewState,
-  hasExplicitPeriod,
   urlSearch,
 }: {
   initialViewState: OverviewUrlViewState;
-  hasExplicitPeriod: boolean;
   urlSearch: string;
 }) {
   const router = useRouter();
@@ -117,9 +120,6 @@ function PublishedDecisionDashboardView({
   const projectSelectionError = initialViewState.projectId && access && !requestedProject
     ? "Requested Project is unavailable in the active workspace."
     : null;
-  const scopeId = initialViewState.scopeId;
-  const resource = initialViewState.resource;
-  const period = initialViewState.period;
   const [resolvedRange, setResolvedRange] = useState({
     projectId: "",
     from: "",
@@ -139,12 +139,19 @@ function PublishedDecisionDashboardView({
 
   const projectId = selectedProject?.id ?? "";
   const isNgeeAnnProject = projectId === "ngee-ann-polytechnic";
-  const usesCurrentOverviewWindow = isNgeeAnnProject && !hasExplicitPeriod;
-  const effectiveCustomRange = period === "Custom"
-    ? { projectId, from: initialViewState.from, to: initialViewState.to }
-    : resolvedRange.projectId === projectId
-      ? resolvedRange
-      : { projectId, from: "", to: "" };
+  const isPreschoolProject = projectId === "preschool-demo";
+  const isDedicatedOverviewProject = isNgeeAnnProject || isPreschoolProject;
+  const resource = isDedicatedOverviewProject ? "electricity" : initialViewState.resource;
+  const scopeId = isDedicatedOverviewProject ? "project" : initialViewState.scopeId;
+  const period = isPreschoolProject ? "Custom" : initialViewState.period;
+  const usesCurrentOverviewWindow = isNgeeAnnProject;
+  const effectiveCustomRange = isPreschoolProject
+    ? { projectId, ...PRESCHOOL_OVERVIEW_RANGE }
+    : period === "Custom"
+      ? { projectId, from: initialViewState.from, to: initialViewState.to }
+      : resolvedRange.projectId === projectId
+        ? resolvedRange
+        : { projectId, from: "", to: "" };
   const requestCustomRange = period === "Custom"
     ? { from: effectiveCustomRange.from, to: effectiveCustomRange.to }
     : { from: "", to: "" };
@@ -153,10 +160,45 @@ function PublishedDecisionDashboardView({
     : validateOverviewCustomRange(period, effectiveCustomRange.from, effectiveCustomRange.to);
   const requestedProjectId = requestedProject?.id ?? "";
   const pendingUrlSearchRef = useRef(urlSearch);
+  const refreshRequestRevisionRef = useRef<number | null>(null);
+  const refreshBypassPendingRef = useRef(false);
 
   useEffect(() => {
     pendingUrlSearchRef.current = urlSearch;
   }, [urlSearch]);
+
+  useEffect(() => {
+    if (!isNgeeAnnProject || initialViewState.resource !== "water") return;
+    const href = currentOverviewUrlWithView({
+      ...initialViewState,
+      projectId,
+      scopeId: "project",
+      resource: "electricity",
+    });
+    pendingUrlSearchRef.current = href.slice(href.indexOf("?") + 1);
+    router.replace(href);
+  }, [initialViewState, isNgeeAnnProject, projectId, router]);
+
+  useEffect(() => {
+    if (!isPreschoolProject) return;
+    const hasCanonicalPreschoolView = initialViewState.projectId === projectId
+      && initialViewState.scopeId === "project"
+      && initialViewState.resource === "electricity"
+      && initialViewState.period === "Custom"
+      && initialViewState.from === PRESCHOOL_OVERVIEW_RANGE.from
+      && initialViewState.to === PRESCHOOL_OVERVIEW_RANGE.to;
+    if (hasCanonicalPreschoolView) return;
+    const href = overviewUrlWithView({
+      ...initialViewState,
+      projectId,
+      scopeId: "project",
+      resource: "electricity",
+      period: "Custom",
+      ...PRESCHOOL_OVERVIEW_RANGE,
+    });
+    pendingUrlSearchRef.current = href.slice(href.indexOf("?") + 1);
+    router.replace(href);
+  }, [initialViewState, isPreschoolProject, projectId, router]);
 
   const navigateOverview = (update: Partial<OverviewUrlViewState>) => {
     const base = overviewViewStateFromSearchParams(new URLSearchParams(pendingUrlSearchRef.current));
@@ -164,6 +206,7 @@ function PublishedDecisionDashboardView({
       ...base,
       ...update,
       projectId: update.projectId ?? (base.projectId || projectId),
+      scopeId: isDedicatedOverviewProject ? "project" : update.scopeId ?? base.scopeId,
     };
     const href = usesCurrentOverviewWindow
       ? currentOverviewUrlWithView(nextView)
@@ -173,17 +216,10 @@ function PublishedDecisionDashboardView({
   };
 
   const refreshOverview = () => {
-    if (!usesCurrentOverviewWindow || !initialViewState.currentOverviewPin) {
-      setRefreshRevision((current) => current + 1);
-      return;
-    }
-    const href = currentOverviewUrlWithView({
-      ...initialViewState,
-      projectId,
-      currentOverviewPin: undefined,
-    });
-    pendingUrlSearchRef.current = href.slice(href.indexOf("?") + 1);
-    router.replace(href);
+    const nextRevision = refreshRevision + 1;
+    refreshRequestRevisionRef.current = nextRevision;
+    refreshBypassPendingRef.current = true;
+    setRefreshRevision(nextRevision);
   };
 
   useEffect(() => {
@@ -192,7 +228,7 @@ function PublishedDecisionDashboardView({
   }, [activeProject?.id, requestedProjectId, selectProject]);
 
   useEffect(() => {
-    if (!projectId) {
+    if (!projectId || isDedicatedOverviewProject) {
       setHierarchy(null);
       setHierarchyError(null);
       setHierarchyLoading(false);
@@ -217,7 +253,7 @@ function PublishedDecisionDashboardView({
     return () => {
       cancelled = true;
     };
-  }, [projectId, refreshRevision]);
+  }, [isDedicatedOverviewProject, projectId, refreshRevision]);
 
   const scopeOptions = useMemo(() => {
     const hierarchyNodes = hierarchy?.nodes ?? [];
@@ -265,16 +301,23 @@ function PublishedDecisionDashboardView({
   useEffect(() => {
     if (!projectId || resource !== "electricity" || projectSelectionError || queryValidationError) return;
     let cancelled = false;
+    const isUserRefresh = refreshRevision > 0
+      && refreshRequestRevisionRef.current === refreshRevision;
+    const bypassCache = isUserRefresh && refreshBypassPendingRef.current;
+    if (bypassCache) refreshBypassPendingRef.current = false;
     const request = usesCurrentOverviewWindow
       ? currentOverviewAnalysisRequest(projectId, {
           scopeId,
           resource,
-          currentOverviewPin: initialViewState.currentOverviewPin,
+          currentOverviewPin: isUserRefresh ? undefined : initialViewState.currentOverviewPin,
         })
       : overviewAnalysisRequest(projectId, period, requestCustomRange, { scopeId, resource });
     setRunning(true);
     setAnalysisError(null);
-    void configApi.resolveProjectAnalysis(request)
+    const resolutionRequest = bypassCache
+      ? configApi.resolveProjectAnalysis(request, { bypassCache: true })
+      : configApi.resolveProjectAnalysis(request);
+    void resolutionRequest
       .then((result) => {
         if (cancelled) return;
         setResolution({ projectId, value: result });
@@ -284,11 +327,12 @@ function PublishedDecisionDashboardView({
           from: toDateInput(result.snapshot.context.from, result.snapshot.context.timezone),
           to: toDateInput(new Date(Date.parse(result.snapshot.context.to) - 1).toISOString(), result.snapshot.context.timezone),
         });
-        if (usesCurrentOverviewWindow && !initialViewState.currentOverviewPin) {
+        if (usesCurrentOverviewWindow && (!initialViewState.currentOverviewPin || isUserRefresh)) {
           const range = snapshotLocalDateRange(result.snapshot);
           const href = currentOverviewUrlWithView({
             ...initialViewState,
             projectId,
+            scopeId: "project",
             currentOverviewPin: {
               ...range,
               dataSnapshotId: result.snapshot.context.dataSnapshotId,
@@ -382,14 +426,20 @@ function PublishedDecisionDashboardView({
     ? toProjectRendererState(rendererState, currentSnapshot)
     : null;
   const isNgeeAnnRenderer = rendererRequest?.rendererKey === "ngee-ann-overview";
+  const isPreschoolRenderer = rendererRequest?.rendererKey === "preschool-overview";
+  const isDedicatedOverviewRenderer = isNgeeAnnRenderer || isPreschoolRenderer;
+  const isDedicatedOverviewShell = isDedicatedOverviewProject || isPreschoolRenderer;
   const resolvedHandoffView = currentSnapshot && isNgeeAnnProject
     ? {
         ...initialViewState,
         period: "Custom" as const,
+        scopeId: "project",
         ...snapshotLocalDateRange(currentSnapshot),
       }
     : {
         ...initialViewState,
+        scopeId: isPreschoolProject ? "project" : initialViewState.scopeId,
+        period: isPreschoolProject ? "Custom" : initialViewState.period,
         from: effectiveCustomRange.from,
         to: effectiveCustomRange.to,
       };
@@ -402,39 +452,43 @@ function PublishedDecisionDashboardView({
           <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted">
             <span>{selectedProject?.name ?? "Select a Project"}</span>
             <EnergyIcon name="chevron" className="h-3 w-3" />
-            <span>{isNgeeAnnRenderer ? "Published overview" : "Published analysis"}</span>
+            <span>{isDedicatedOverviewRenderer ? "Published overview" : "Published analysis"}</span>
           </div>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            {isNgeeAnnRenderer ? "Energy overview" : "Energy analysis"}
+            {isDedicatedOverviewRenderer ? "Energy overview" : "Energy analysis"}
           </h1>
           <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted">
             {isNgeeAnnRenderer
-              ? "A current decision view of the selected Scope and trusted Project facts."
-              : "A Project-specific decision view rendered from the published EnergyIQ Template Schema."}
+              ? "A rolling 28-day Project view with 1-day and 7-day decision signals."
+              : isPreschoolRenderer
+                ? "A Project-wide portfolio view built from the published Preschool Snapshot and governed projections."
+                : "A Project-specific decision view rendered from the published EnergyIQ Template Schema."}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="w-full min-w-[220px] sm:w-auto">
-            <EnergySelect
-              ariaLabel="Analysis Scope"
-              value={scopeId}
-              options={scopeOptions}
-              onValueChange={(nextScopeId) => navigateOverview({
-                scopeId: nextScopeId,
-              })}
-              size="small"
-              disabled={!projectId || hierarchyLoading || Boolean(hierarchyError)}
-              triggerClassName="sm:w-[260px]"
-            />
-            {hierarchyError ? (
-              <p role="alert" className="mt-1 text-[10px] leading-4 text-step-error">
-                Analysis scopes unavailable: {hierarchyError}
-              </p>
-            ) : null}
-          </div>
+          {!isDedicatedOverviewShell ? (
+            <div className="w-full min-w-[220px] sm:w-auto">
+              <EnergySelect
+                ariaLabel="Analysis Scope"
+                value={scopeId}
+                options={scopeOptions}
+                onValueChange={(nextScopeId) => navigateOverview({
+                  scopeId: nextScopeId,
+                })}
+                size="small"
+                disabled={!projectId || hierarchyLoading || Boolean(hierarchyError)}
+                triggerClassName="sm:w-[260px]"
+              />
+              {hierarchyError ? (
+                <p role="alert" className="mt-1 text-[10px] leading-4 text-step-error">
+                  Analysis scopes unavailable: {hierarchyError}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           <div className="flex rounded-lg border border-border bg-surface p-1" aria-label="Resource type">
-            {(["electricity", "water"] as const).map((item) => (
+            {(isDedicatedOverviewShell ? ELECTRICITY_ONLY_RESOURCES : ALL_OVERVIEW_RESOURCES).map((item) => (
               <button
                 key={item}
                 type="button"
@@ -452,7 +506,7 @@ function PublishedDecisionDashboardView({
               </button>
             ))}
           </div>
-          {!isNgeeAnnProject ? (
+          {!isDedicatedOverviewShell ? (
             <div className="flex max-w-full overflow-x-auto rounded-lg border border-border bg-surface p-1">
               {periodOptions.map((item) => (
                 <button
@@ -498,7 +552,7 @@ function PublishedDecisionDashboardView({
         </div>
       </section>
 
-      {!isNgeeAnnProject && period === "Custom" ? (
+      {!isDedicatedOverviewShell && period === "Custom" ? (
         <div className="mt-4 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface px-4 py-3">
           <DateField label="From" value={effectiveCustomRange.from} onChange={(from) => navigateOverview({
             from,
@@ -513,18 +567,10 @@ function PublishedDecisionDashboardView({
       {isNgeeAnnProject && currentSnapshot ? (
         <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 border-y border-border py-3 text-xs" aria-label="Read-only analysis window">
           <span className="font-semibold text-foreground">
-            {usesCurrentOverviewWindow ? "Rolling 28-day decision window" : "Linked analysis window"}
+            Rolling 28-day decision window
           </span>
           <span className="text-muted">{formatAnalysisWindow(currentSnapshot)}</span>
           <span className="text-muted">Data through {formatDataThrough(currentSnapshot)}</span>
-          {!usesCurrentOverviewWindow ? (
-            <Link href={currentOverviewUrlWithView({
-              ...initialViewState,
-              currentOverviewPin: undefined,
-            })} className="font-semibold text-primary hover:underline">
-              Return to current overview
-            </Link>
-          ) : null}
         </div>
       ) : null}
 
@@ -545,13 +591,13 @@ function PublishedDecisionDashboardView({
         </div>
       </div>
 
-      {currentSnapshot && !isNgeeAnnRenderer ? (
+      {currentSnapshot && !isDedicatedOverviewRenderer ? (
         <div className="mt-6">
           <ScopeMetadataStatus metadata={currentSnapshot.metadata} mode="interactive" />
         </div>
       ) : null}
 
-      {rendererState.status === "ready" && isNgeeAnnRenderer && rendererRequest && projectRendererState ? (
+      {rendererState.status === "ready" && isDedicatedOverviewRenderer && rendererRequest && projectRendererState ? (
         <div className="mt-6">
           <ProjectRenderer
             request={rendererRequest}
@@ -604,18 +650,18 @@ function PublishedDecisionDashboardView({
 
           <div className="min-w-0">
             {rendererRequest && projectRendererState ? (
-              <ProjectRenderer request={rendererRequest} state={projectRendererState} sectionIdPrefix="customer-overview" onRetry={() => setRefreshRevision((current) => current + 1)} />
+              <ProjectRenderer request={rendererRequest} state={projectRendererState} sectionIdPrefix="customer-overview" onRetry={refreshOverview} />
             ) : (
-              <EnergyTemplateRenderer state={rendererState} sectionIdPrefix="customer-overview" onRetry={() => setRefreshRevision((current) => current + 1)} />
+              <EnergyTemplateRenderer state={rendererState} sectionIdPrefix="customer-overview" onRetry={refreshOverview} />
             )}
           </div>
         </div>
       ) : (
         <div className="mt-6">
           {rendererRequest && projectRendererState ? (
-            <ProjectRenderer request={rendererRequest} state={projectRendererState} onRetry={() => setRefreshRevision((current) => current + 1)} />
+            <ProjectRenderer request={rendererRequest} state={projectRendererState} onRetry={refreshOverview} />
           ) : (
-            <EnergyTemplateRenderer state={rendererState} onRetry={() => setRefreshRevision((current) => current + 1)} />
+            <EnergyTemplateRenderer state={rendererState} onRetry={refreshOverview} />
           )}
         </div>
       )}

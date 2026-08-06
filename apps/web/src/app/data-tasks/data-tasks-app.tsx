@@ -18,7 +18,7 @@ import {
 } from "@copilotkit/react-core/v2";
 import type { EvidenceRef } from "@datafoundry/contracts";
 import nextDynamic from "next/dynamic";
-import { Children, cloneElement, isValidElement, useCallback, createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Children, cloneElement, Fragment, isValidElement, useCallback, createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ComponentType, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { z } from "zod";
 import {
@@ -971,6 +971,9 @@ export type DataTasksExternalContext = {
   period?: string;
   from?: string;
   to?: string;
+  timezone?: string;
+  dataCutoff?: string;
+  dataSnapshotId?: string;
 };
 
 export function createInitialDraftPromptRequest(
@@ -7682,13 +7685,7 @@ function ChatWelcomeOverlay({
           variant={externalContext ? "energy" : "default"}
           contextLabel={
             externalContext
-              ? [
-                  externalContext.projectName,
-                  externalContext.scopeName,
-                  externalContext.period,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")
+              ? energyExternalContextLabels(externalContext).join(" · ")
               : undefined
           }
         />
@@ -7989,15 +7986,12 @@ function ChatPane({
           <div className="mt-0.5">
             {externalContext ? (
               <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-light">
-                <span className="truncate">
-                  {externalContext.projectName ?? externalContext.projectId}
-                </span>
-                <span aria-hidden>·</span>
-                <span className="truncate">
-                  {externalContext.scopeName ?? externalContext.scopeId}
-                </span>
-                <span aria-hidden>·</span>
-                <span className="shrink-0">{externalContext.period}</span>
+                {energyExternalContextLabels(externalContext).map((label, index) => (
+                  <Fragment key={`${index}:${label}`}>
+                    {index > 0 ? <span aria-hidden>·</span> : null}
+                    <span className={index < 2 ? "truncate" : "shrink-0"}>{label}</span>
+                  </Fragment>
+                ))}
               </div>
             ) : (
               <SessionHeaderResourceChips
@@ -8068,6 +8062,17 @@ function ChatPane({
       </ChatRunStatusContext.Provider>
     </main>
   );
+}
+
+export function energyExternalContextLabels(
+  context: DataTasksExternalContext,
+): string[] {
+  return [
+    context.projectName ?? context.projectId,
+    context.scopeName ?? context.scopeId,
+    context.period,
+    context.dataCutoff ? `Data through ${context.dataCutoff}` : undefined,
+  ].filter((value): value is string => Boolean(value));
 }
 
 function formatPayload(value: unknown): string {

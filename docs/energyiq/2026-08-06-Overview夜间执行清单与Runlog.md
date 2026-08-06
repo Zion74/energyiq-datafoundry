@@ -1,0 +1,250 @@
+---
+title: "2026-08-06 开发记录：Overview 夜间执行清单"
+summary: "收口 Ngee Ann 与 Preschool 客户可见 Overview、Preschool AI Slot 代码边界和真实 Provider 验收；记录确定性性能优化、缓存/Resource 后续切片与明确停止项。"
+doc_type: runlog
+tags: [Overview, Ngee-Ann, AI-Slot, Preschool, 开发记录]
+updated_at: "2026-08-06"
+related:
+  - "2026-08-05-Overview用户价值与AI-Slot最小交付决策.md"
+  - "决策-NgeeAnn首个试点路线与页面边界.md"
+  - "决策-Preschool-Portfolio数据集接入.md"
+---
+
+# 2026-08-06 Overview 夜间执行清单与 Runlog
+
+## 1. 今晚目标与执行边界
+
+北极星：先把 Ngee Ann 做成无需切换整页 Scope/Period 的多时间尺度 Project 决策页；自动化和真实 Chrome 收口后，推进 AI 可信链路与 Preschool 垂直切片。
+
+范围内新问题可以直接修复，但必须直接改善当前 Ngee Ann/Preschool 页面、可自动回归、且不引入第二套 Runtime、Snapshot、Scheduler、Cadence DSL 或通用 Insight 平台。范围外问题只进入停车场，明天讨论。
+
+## 2. 任务顺序与状态
+
+状态：`TODO` / `DOING` / `BLOCKED` / `DONE`。
+
+| 顺序 | Ticket / 切片 | 状态 | 交付与验收边界 |
+| --- | --- | --- | --- |
+| 1 | #9 / Ngee Ann 页面外壳 | DONE | Ngee Ann 固定 Project Scope、滚动 28 天；隐藏整页 Scope/Period/Custom 日期控件；旧深链规范化到同一 current Overview；非 Ngee Ann 兼容合同保留。 |
+| 2 | #9 / 所有小时条形图坐标轴 | DONE | Day profile、单日 Hourly Energy trend、Incident 24-hour evidence 的柱体与 00:00–21:00 时间轴分成相邻独立行；日期粒度图未做无依据改写。 |
+| 3 | #9 / Day profile 信息价值 | DONE | 增加 Profile mean 参考线、高于均值的语义蓝色、相对均值百分比；没有把“高于均值”误称为异常。 |
+| 4 | #9 / Heatmap | DONE | 默认显示服务端 `mean_of_complete_local_days` 合同的 Level × hour average；提供 Weekday/Weekend；Date × hour 仍可局部查看；平均视图无日期选择器。 |
+| 5 | #9 / AI 卡片排版 | DONE | 评估后保留底部纵向操作区：当前标题宽度、移动端和键盘顺序更稳；用户已说明这项可保持现状。 |
+| 6 | #9 / 自动化验收 | DONE | 定向、Web 全量、AI 定向、生产构建和 Impeccable 机械审查通过。 |
+| 7 | #9 / 运行服务与 Chrome | DONE | Integration 生产服务已更新；旧 URL 在真实 Chrome 规范化；1440/1920 验证全局控件消失、28d/7d/1d 结构、小时轴和平均 Heatmap。Charles 最终人工签字不在自动化完成声明内。 |
+| 8 | #17 / 真实 Provider Evidence | DONE | #17 已证明 Ngee Ann 页面级自主 Run、Snapshot/cutoff pin、只读 SQL、Evidence dialog 与 fail-soft UI 可以端到端工作，Issue 已关闭。后续同 Snapshot 复测证明 Provider 不稳定，但不会因此重开或扩张 #17。 |
+| 9 | #14/#16 / Finding → AI Analyst 继续追问 | DONE | Overview 已带入 Finding、Evidence、Project、Snapshot；补入 timezone/data cutoff，并在 Analyst 中展示 Data through。没有建设通用 Session/lineage 平台；旧回答在上下文变化后的自动失效进入停车场。 |
+| 10 | #10 / Preschool 真实数据与独立 Overview | DONE | 已从权威 May Excel 生成 270 个 series、200,880 条小时事实，完成 Mapping、materialization、Project Publish 和独立 `PreschoolOverviewRenderer`；固定 2026-05-01..31，不暴露全局 Scope/Period。 |
+| 11 | #11 / Preschool Benchmark 与效率四象限 | DONE | 服务端权威计算 Portfolio/Cohort P50/P75、EUI × Per-Pax 四象限和 G/M/J Priority；Renderer 只展示投影，不在客户端重算 percentile。数值 Golden、30 点 SVG、定向测试与 1440/1920 Chrome 回归均通过。 |
+| 12 | #12A / Operating Calendar 与 Standby/Operating | DONE | 发布 Project Calendar：Mon–Fri 07:00–19:00、周末关闭、5 月 1/27 日关闭；Project Release v2 继续 pin 同一 Snapshot。真实 Golden：Operating 21,818.0283 kWh，Standby 3,103.7840 kWh / 12.45%。 |
+| 13 | #12B / Spike 与 provisional SOP signal | DONE | 完成 Preschool 专属 same-Centre/same-hour-slot Spike 与 `Provisional after-hours SOP signal`；真实 Golden、Evidence pins、定向测试与 Chrome 均通过，没有建设通用 anomaly/SOP DSL。 |
+| 14 | #13 / Preschool 最终组装 | DONE（自动化部分） | 把已有 Benchmark 与 Operational 投影组装为 3 张 Finding → Why → Action → Verify 决策卡；Forecast 只显示 Reference-only / Unavailable。自动化、构建和 Chrome 已通过；Charles 人工终验仍保留。 |
+| 15 | #18 / Preschool AI Pack/Slot | DONE（代码）/ BLOCKED（Provider） | `preschool-analysis-pack@v1`、受控 Discovery Evidence Bundle、真实自动 Run、严格 JSON/Evidence guard、AI-labelled Slot 与 fail-soft 已完成。固定 StepFun Profile 三次验收为 0 次有用 Finding、1 次 accepted-empty、2 次 fail-closed，未达到至少 2/3 accepted；不以放松 Evidence 换通过。 |
+
+## 3. Ngee Ann 已完成改动
+
+- `published-decision-dashboard.tsx`：Ngee Ann 固定 Project/current 28d，移除全局 Scope/Period 表面并规范化旧深链。
+- `ngee-ann-hour-axis.tsx`：三个小时条形图共用的独立窄时间轴。
+- `ngee-ann-day-profile.tsx`：柱体/时间轴拆分、Profile mean 与语义色。
+- `ngee-ann-energy-trend.tsx`：仅小时粒度使用独立时间轴。
+- `ngee-ann-daily-anomalies.tsx`：Incident 24-hour evidence 使用独立时间轴。
+- `ngee-ann-overview-view-model.ts`、`ngee-ann-usage-heatmap.tsx`：使用已验证服务端 Day Profile mean 合同生成 28d Weekday/Weekend Level × hour average，不从原始格子猜算。
+- `ngee-ann-ai-run.ts`：AI Run 只暴露 schema inspection 与只读 SQL 工具；拒绝无关 workspace/file/skill 工具。
+- 对应 `*.test.ts(x)`：锁定 current 28d、旧深链、Project Scope、独立时间轴、平均 Heatmap 和 AI 工具边界。
+
+## 4. 已取得验收证据
+
+### 自动化
+
+- ViewModel/Renderer 定向回归：184/184 passed。
+- Web 全量：85 files，935/935 passed。
+- AI 定向：2 files，46/46 passed。
+- `npm run build:web`：passed。
+- `git diff --check`：passed（仅既有 CRLF 提示）。
+- Impeccable detector：`[]`，未发现高优先级机械 UI 问题。
+
+### 最终集成回归（含 Preschool #10–#13）
+
+- Preschool/Ngee/API 定向回归：8 files，250/250 passed。
+- Web 全量：86 files，945/945 passed。
+- `npm run typecheck`、`npm run build`、`npm run build:web`：passed。
+- `git diff --check`：passed（仅既有 CRLF 提示）。
+
+### 运行与 Chrome
+
+- API `127.0.0.1:8787` 和 Web `127.0.0.1:3000` 均来自 Integration；Overview HTTP 200。
+- 旧 `Custom 2026-06-10..16` URL 自动变为 Project current Overview，固定窗口为 2026-05-20..2026-06-16，Snapshot `energy-snapshot-03499dcda183ae28c47f7d66`。
+- DOM：`Analysis Scope` 0；Yesterday/Last 7/Previous week/Previous month/Custom 按钮 0；全局 date input 0；rolling 28d 标记 1。
+- Day profile：独立时间轴 1；柱体内部可见小时文本 0；Profile mean 可见。
+- Heatmap：默认 average=true、Weekday=true，平均视图 date selector 0。
+- 截图：
+  - `.scratch/overview-acceptance/ngee-ann-current-overview-1920-top.png`
+  - `.scratch/overview-acceptance/ngee-ann-day-profile-axis-1920.png`
+  - `.scratch/overview-acceptance/ngee-ann-day-profile-axis-1440.png`
+  - `.scratch/overview-acceptance/ngee-ann-heatmap-average-1920.png`
+
+### AI Provider 当前边界
+
+- Ngee Ann #17 已有一次真实 StepFun accepted Run，证明端到端链路可工作；同 Snapshot 后续 StepFun/DeepSeek 复测不稳定，因此 #17 保持关闭但 Provider reproducibility 不得宣称通过。
+- Preschool #18 固定 Snapshot `energy-snapshot-52ca9611e48b0d71c2efe7b7`、Workspace 默认 StepFun 3.7 Flash Profile 与同一代码连续跑三次：
+  - Run 1：确定性页面约 `5.1s`；模型在第一次成功 SQL 后继续调用并超过两次 SQL 尝试上限；约 `240s` 后 fail closed。
+  - Run 2：确定性页面约 `4.0s`；模型自行派生“约 45%”并把错误 Scope 过滤得到的零行解释为数据缺失；约 `135s` 后 numeric Evidence guard fail closed。
+  - Run 3：确定性页面约 `3.9s`；约 `125s` 返回 `accepted-empty`，诚实显示没有值得补充的额外 Evidence-backed candidate。
+- 结果：`0/3` 次产生可交付的非空 Finding，`1/3` 次被接受为空结果，`2/3` 次被守卫拒绝。当前 Flash Profile 不满足“稳定产生客户价值”的 Provider gate。
+- 数字守卫只从 Finding 实际引用的 bundle `values` 与 SQL rows 中的 number 类型取白名单；字符串 ID、日期和 version 不再贡献数字。日期/Evidence index 只按完整结构引用剔除；保留合理显示精度容差，不建设单位语义引擎。
+- 确定性 Overview 始终先显示并保持权威；下一次 Provider 验收只在有可用的更强 Profile/凭据后，用同一 Snapshot 再跑三次，不继续 Prompt churn，也不静默 fallback。
+
+### 确定性性能测量与最小优化
+
+- 优化前 Preschool warm 三次为 `8731 / 8699 / 8092 ms`，median `8699 ms`。
+- 计时定位到 Preschool Renderer 未消费的 270-meter operational breakdown：每个 Meter 仍生成 JSON/policy evaluation，约占 `3.4s`；它不是 AI、React 或每条 SQL 重算 Snapshot SHA。
+- Resolver 增加可选 `includeMeterOperationalBreakdown`，Preschool 明确关闭，默认保持开启；Ngee Ann Project off-hours 与 Preschool Centre-hour 投影、Snapshot/Evidence/Golden 均未改变。
+- 优化后 warm 三次为 `5294 / 5950 / 4923 ms`，median `5294 ms`，约改善 `39%`。
+- 最终定向 Suite：9/9 files、63/63 tests；其中 Preschool trusted Resolver 测试约 `8.29s`，Ngee Ann rolling-28d across scopes 测试约 `18.04s`。测试夹具耗时不等同页面 warm latency，但继续提示后续模块不能线性叠加未消费 Projection。
+
+## 5. Preschool 已完成与正在收口的切片
+
+### 真实 May 数据链路（#10）
+
+- 权威来源：`Preschool_Database_30centres_May2026.xlsx`，30 centres × 31 days × 9 meters，小时累计表。
+- 规范化产物：270 series、201,150 readings；materialization 生成 200,880 条小时事实，invalid/unmapped/duplicate/gap/orphan 均为 0。
+- Published Snapshot：`energy-snapshot-52ca9611e48b0d71c2efe7b7`；真实总量 `24,921.8123 kWh`，coverage 100%。
+- 独立 `PreschoolOverviewRenderer` 固定 May 2026 Project 视图；旧/无 Period URL 统一规范化；全局 Scope/Period/日期与通用 Area/headcount/section-nav 不向客户展示。
+- 首版 Chrome 证据：
+  - `.scratch/overview-acceptance/preschool-overview-may-1440.png`
+  - `.scratch/overview-acceptance/preschool-overview-may-1920.png`
+  - `.scratch/overview-acceptance/preschool-overview-may-1920-evidence.png`
+
+### Benchmark / Matrix（#11）
+
+- 服务端 `preschool-may-2026-benchmark@1` 使用同一 Release/Snapshot/Hierarchy/Mapping，读取 Published hierarchy 的 provisional area、headcount、facilityType。
+- EUI 定义：`May usage × 12 / published comparison area`；Per-Pax 定义：`May usage / published representative headcount`。
+- Portfolio Golden：EUI P75 `10.525439076 kWh/m²/year`；Per-Pax P75 `20.84584375 kWh/person/month`；Priority centres `G / M / J`。
+- 页面展示 Portfolio crosshair、Cohort P50/P75、Centre 指标、四象限和 Evidence recipe ids；缺少服务端投影时诚实 Unavailable。
+- 定向回归：Benchmark、Resolver、ViewModel、Renderer registry 共 14/14 passed。
+- 最终 Chrome 证据：
+  - `.scratch/overview-acceptance/preschool-final-1440-full.png`
+  - `.scratch/overview-acceptance/preschool-final-1920-full.png`
+  - `.scratch/overview-acceptance/preschool-final-benchmark-1920.png`
+  - `.scratch/overview-acceptance/preschool-final-operating-1920.png`
+  - `.scratch/overview-acceptance/preschool-final-forecast-1920.png`
+- 最终 1440/1920 DOM：3 张 Decision cards、30 个 Benchmark points、2 条 P75 axes、0px page-level horizontal overflow；没有来自 `127.0.0.1:3000` 的 browser error log。
+
+### Operating Calendar（#12A）
+
+- 创建 immutable Calendar `calendar-a3c5b3e9-0dce-4349-97a0-c018e75f2b86`，发布为 `preschool-demo-template-v2` / `preschool-demo-hierarchy-v6`。
+- Calendar：Mon–Fri `07:00–19:00`；Saturday/Sunday closed；`2026-05-01` 与 `2026-05-27` closure。
+- Snapshot 未重算也未漂移，仍为 `energy-snapshot-52ca9611e48b0d71c2efe7b7`。
+- 真实 May API 回读：Total `24,921.8123 kWh`；Operating `21,818.0283 kWh`；Standby `3,103.7840 kWh`；Standby share `12.45%`。
+- 原生确认框与受控 time/date input 的浏览器自动化兼容性只影响 Admin UI 自动化；最终发布通过同一个正式 API 边界完成，没有直接写 SQLite，也没有生成重复 revision。发布后恢复 password-mode API/Web，只有一个 API writer。
+
+### Spike / provisional SOP signal（#12B）
+
+- 服务端 `preschool-operational-projection` 使用同一 Release/Snapshot/Hierarchy/Mapping 与已发布 Calendar，只增加一条 Snapshot-scoped Centre-hour 查询。
+- Spike 基线是同一 Centre、同一 hour-slot、同一 operating state 的均值；门槛为高于基线 50%，不是通用异常引擎。
+- 真实 Golden：Standby `7 Spikes / 3 Centres`；Operating `21 Spikes / 14 Centres`；provisional SOP signal `L / E / N`，分数 `96 / 98 / 99`。
+- 页面展示事件时间、usage、baseline、variance 与 leading Circuit；明确说明 Spike 可能来自合法活动或 override，不自动等同浪费。
+
+### 最终决策组装（#13）
+
+- 页面首屏按固定优先级显示 3 张 Evidence-backed 卡片：After-hours、Efficiency、Operating exceptions。
+- 每张卡片回答 Finding、Why it matters、Top action、Verify，并链接到同一页面的 Evidence；没有合成 Impact score、root cause 或 savings claim。
+- Demo Forecast 明确为 `Reference demo only — not published`；Live Forecast 为 `Unavailable`，缺口是 June metered actual、Published Forecast Recipe、充分历史与 backtest。页面不展示原 Demo 的 `28,011`、模拟 Actual 或未发布 Cost。
+- Snapshot 为 partial 或相关服务端投影缺失时，只隐藏对应决策卡，不在 Web 端补算。
+- Durable Ticket evidence：
+  - #11 `https://github.com/Zion74/energyiq-datafoundry/issues/11#issuecomment-5197077235`
+  - #12 `https://github.com/Zion74/energyiq-datafoundry/issues/12#issuecomment-5197077519`
+  - #13 `https://github.com/Zion74/energyiq-datafoundry/issues/13#issuecomment-5197077742`
+- 最终运行态：password-mode API/Web 已重启；`/ready` 200、Overview 200，端口 8787/3000 各只有一个 listener，保持单 API writer。
+
+### Preschool AI Pack / Slot（#18）
+
+- API Analysis Pack、Energy Context、受控 Discovery Evidence Bundle、独立 `PreschoolAiSlot`、Renderer registry 与 fail-soft 状态已接通；Agent 只允许 `inspect_schema` 与 `run_sql_readonly`。
+- SQL 由 Agent 自主选择决策角度，但成功结果必须是恰好一行的真实聚合；最多两次尝试、第一次成功后立即输出，排名、Top N、行位置和 LIMIT 数字不能冒充 Evidence。
+- 任何非空 Finding 必须逐条绑定当前 Snapshot/Period、引用的 bundle item 与恰好一次成功 SQL Evidence；无依据数字、跨 Snapshot、额外 SQL、无 schema inspection 均 fail closed。
+- 1440/1920 页面无横向溢出、无 Runtime/Log error；确定性卡片、AI-labelled 空结果、Benchmark 和 Operating behaviour 保持可见。截图：
+  - `.scratch/overview-acceptance/preschool-ai-final-1440.png`
+  - `.scratch/overview-acceptance/preschool-ai-final-1440-slot.png`
+  - `.scratch/overview-acceptance/preschool-ai-final-1920.png`
+  - `.scratch/overview-acceptance/preschool-ai-final-1920-slot.png`
+- 因三次真实 Run 没有被接受的非空 Finding，本轮没有伪造 AI Evidence dialog 截图；该人工验收项随 Provider gate 保留。
+
+## 6. 缓存、Resource 与 Spike 旁路复核结论
+
+独立结论：部分同意。旁路文档正确指出重复进入没有 Resolver result cache/in-flight 去重，以及无 Published Water 的专属 Overview 仍显示 Water；但其“性能根因尚未计时”已经过时，当前主要未消费 Projection 已被实测并修复。
+
+- 旁路复核发生时还没有可复用的确定性 Resolver Cache。AI `currentRuns` 只做同一浏览器文档内的 module-level single-flight，不缓存确定性 Overview；它可覆盖正常 SPA 离开/返回，但不承诺硬刷新、新标签页或 Web 重启后的 AI 复用。
+- 后续缓存必须位于重新授权之后，只缓存成功的确定性 Resolver 结果和同 key in-flight；不得缓存 AI、错误、权限失败或跨 Workspace payload。建议有限 LRU `4–8` 条、短 TTL、Refresh bypass，不做持久化/分布式缓存。
+- 完整 key 至少包含 user authorization identity、Workspace、Project、Scope、Resource、analysis from/to/cutoff、Snapshot、Project Release、Hierarchy、Meter Mapping、Meter Formula、Metric version、Calendar、Tariff、Renderer/Recipe/Contract revision。只用 Snapshot SHA 不足。
+- Ngee Ann/Preschool 当前只有 Electricity Published capability；专属 Overview 应隐藏 Water，并把旧 `resource=water` 深链规范化回 Electricity。通用页面和未来真正发布 Water 的 Project 不应被全局删除 Water。
+- Charles 首版 Spike 继续使用同 Centre、同 hour-slot mean 的 `>50%` 规则以保持 parity；页面已标记 `Provisional SOP signal`，主要展示 Spike、影响 kWh、最严重偏差、Centre/Circuit 和调查动作。`100 - Spike Count` 只可作为弱化的 Charles/provisional score，不得称为正式 Compliance。
+- #16 继续是 post-v1 Custom Period/模块 handoff，不恢复控制整页的全局 Period，也不承担 cache/scheduler/artifact 平台。
+
+### #28 有界 Resolver Cache 与 Resource capability 已实施
+
+- Cache 位于服务端重新授权之后，只缓存成功的确定性 Resolver 结果；错误、权限失败、配置失败和 `:memory:` 测试数据库均不缓存。实现为进程内 LRU `6` 条、TTL `120s`，带同 key in-flight 去重与 generation-safe Refresh bypass，不引入持久化或分布式平台。
+- Key 固定授权身份、Workspace、Project、Scope、Resource、窗口/timezone、Snapshot、Release、Hierarchy、Mapping、Formula、Metric、Calendar、Tariff、Renderer、Recipe 与 Contract；对象 deep-freeze，MetadataStore/DataGateway 实例隔离。
+- Ngee Ann server-issued pin 快路径：cold `3862.18ms / 11 SQL`；cache hit `3.92ms / 0 SQL`；manual refresh `3144.41ms / 11 SQL`。缓存命中不再扫描整份事实，但仍先重新授权并核对完整 pin；篡改日期的 cold miss 仍以 `ENERGYIQ_CURRENT_OVERVIEW_WINDOW_MISMATCH` fail closed。
+- Preschool fixture：cold `1711.98ms / 8 SQL`；cache hit `8.01ms / 0 SQL`；refresh `1570.89ms / 8 SQL`。
+- 权限回归：viewer 暖缓存后把 Project 改为 Draft，同 key 在缓存前返回 `ENERGYIQ_PROJECT_FORBIDDEN`，SQL 不增加；恢复 Published 后才能继续命中。
+- Ngee Ann 与 Preschool 只暴露 Electricity；旧 `resource=water` 链接自动规范化为 Electricity。通用 Project 继续保留 Electricity + Water，不做全局删除。
+- 自动化：Cache/API/UI 聚焦 Suite `7 files / 89 tests` passed；Water/dashboard Worker Suite `47/47` passed；`npm run typecheck`、`npm run build`、`npm run build:web` 均 passed。
+- 当前 Chrome：Ngee Ann 旧 Water 链接规范化到 rolling 28d Electricity，热导航到 Ready 约 `2668ms`；Preschool 旧 Water 链接规范化到 May Electricity，热导航约 `2754ms` 且 Complete data 已显示。两页 Water、全局 Period、Analysis Scope 均为 0。
+- 本次 Header/Water 修改后的真实 Chrome 重新验收：Ngee Ann 在 `1440×900` 的 `innerWidth / document scrollWidth = 1440 / 1430`、`1920×1080 = 1920 / 1910`；Preschool 分别为 `1440 / 1440`、`1920 / 1920`。四档均只有一个 Electricity 控件，Water、Last Week 与 Analysis Scope 均为 0，无 page-level 横向溢出。新证据：
+  - `.scratch/overview-acceptance/issue-28-ngee-ann-water-header-1440x900.jpg`
+  - `.scratch/overview-acceptance/issue-28-ngee-ann-water-header-1920x1080.jpg`
+  - `.scratch/overview-acceptance/issue-28-preschool-water-header-1440x900.jpg`
+  - `.scratch/overview-acceptance/issue-28-preschool-water-header-1920x1080.jpg`
+- 同一浏览器文档内真实 SPA 返回验收：两项目分别从 Overview 进入 Saved analyses 再返回同一 Snapshot。只读 Metadata `runs` 计数保持 Ngee Ann `66 → 66`、Preschool `26 → 26`，证明没有第二个页面 AI Run。这个承诺明确不覆盖硬刷新、新标签或 Web 重启；覆盖这些场景将需要 AI result persistence/replay，与 #28 的 No AI cache/Artifact 非目标冲突。
+
+### Kimi K3 Provider 验收与停止结论
+
+- 已在默认与 Preschool Workspace 创建 `openai-compatible / kimi-k3` Profile，官方 Base URL 为 `https://api.moonshot.cn/v1`；密钥仅进入服务端 secret store，本文、Issue 与代码均不保存密钥。Preschool连通性 probe 为 `connected`，约 `5024ms`。
+- K3 固定采样兼容：连通性 probe 不再强制 `temperature: 0`；Kimi 的结构化 helper 使用固定 `temperature: 1`，并把 `reasoning_effort` 限制为 `low`。StepFun、DeepSeek、Alibaba 行为保持不变；相关 focused tests `33/33` passed，全仓 typecheck/build passed。
+- 真实 Preschool 同 Snapshot 依次暴露三个层次的兼容问题：
+  - 未归一化固定温度时，正式 Run 立即返回 `invalid temperature: only 1 is allowed for this model`；
+  - helper 未继承 low reasoning 时，`162s` 仍停在 Inspecting；修正后不再出现该高思考卡住；
+  - 低思考 Run 依次在 `table_names`（约 `63s`）、`claims[].values`（约 `47s`）和通用 `skillNames`（约 `45s`）被 Moonshot flavored JSON Schema 拒绝，均为 optional array 在服务端转换后发生 parent `items` 与 `anyOf` branch `items` 冲突。
+- 当同类错误从 Energy 工具扩散到治理工具和通用 Skill 工具时，已触发停止条件：继续需要建设统一的 Moonshot tool-schema normalizer 或改整套 Agent 工具 Schema，超出 Overview MVP。两轮局部 nullable Schema 试修已完整撤回，不把未完成的兼容层留在代码中。
+- Kimi Profile 保留为已连接候选，但不设为 Workspace 默认。Preschool 已恢复 `Workspace default · EnergyIQ StepFun 3.7 Flash Primary`（binding revision `3`）；默认 Workspace 从未切离 StepFun。Kimi 本轮 `0` 个可验证 Finding，不能宣称 AI Slot Provider gate 通过。
+- 后续若重新评估 Kimi，应单独建立 Provider compatibility Ticket，先用全工具 Schema fixture 做一次静态兼容审计，再决定是否实现统一 normalizer；不得继续在 Overview Ticket 内逐字段追补，也不得放松 Evidence guard。
+
+### DeepSeek V4 Flash 固定 Profile 复测与协议分层校准
+
+- 本轮经用户授权，为 Preschool Workspace 配置并连通 `DeepSeek V4 Flash`；连通性 probe 约 `1305ms`。当前 Preschool Workspace 默认绑定已改为 DeepSeek（binding revision `4`），固定 Profile 验收期间 fallback 保持关闭，未建立 `DeepSeek → StepFun → Kimi` 自动链。
+- 同一 Preschool Snapshot、cutoff、Pack、Profile revision 连续三次真实 Run 均通过 Tool Schema 注册，均完成 `inspect_schema` 与一条只读 SQL；因此 DeepSeek 本轮失败不属于 Tool Schema/线协议失败。
+- 结果为 `1/3` accepted non-empty、`2/3` Finding-specific numeric Evidence fail closed，未达到 `>=2/3` 可交付门槛。通过的一次同时识别到 SQL 聚合与发布 Calendar 的 operating/standby 口径不一致；失败守卫未放宽。
+- 独立代码复核确认口径分裂：Preschool cumulative Fact Writer 写入 `NULL AS is_operating`，AI scoped datasource 原样透传；确定性 Overview 则使用 Release-pinned Calendar 动态计算 operating/standby。最小 MVP 先停止把 scoped `is_operating` 描述为 Calendar 权威字段，Published operating/standby 数值只使用同 Snapshot deterministic Evidence；若未来需要 Agent 自主按 operating state SQL，再复用同一 Calendar window resolver 建 run-scoped overlay，不回写事实、不把 NULL 当 standby。
+- Provider 兼容性独立研究已沉淀为 `docs/energyiq/2026-08-06-AI-Tool-Schema-Provider兼容性独立研究.md`。后续把 `provider_schema_rejected`、`tool_arguments_invalid`、`tool_execution_failed` 与 `result_evidence_rejected` 分开记录；只有通过当前 Tool Bundle 预检的 Profile 才能进入 fallback。
+
+明确停止：不做浏览器全局 Analysis Provider、跨用户/跨 Workspace cache、分布式 cache、并行多 DuckDB connection、历史 Snapshot 回放、通用 Scheduler/Cadence DSL、单位语义验证平台；不删除 Snapshot fail-closed，也不为了 Provider 接受率放松 Evidence。
+
+## 7. 范围外停车场（明天讨论）
+
+- Kimi 已证明当前阻塞是系统性 Tool JSON Schema 兼容，而不是单纯模型强弱；不再在 #18 内继续换模型或微调 Pack。下一 Provider 前沿先校准 #14 为 provider-neutral、固定 Profile revision、无 silent fallback 的可信问数/工具合同验收。
+- #28 的 bounded Resolver cache、in-flight、Resource capability、当前 1440/1920 Chrome 与同文档 SPA AI 去重证据均已形成。Owner 仍需消除其与 #19 的 `T18` 编号冲突，并移除把 #13 Charles 人工门当作整票技术 blocker 的错误依赖。
+- Spike/SOP 分数标签进一步弱化为 Charles/provisional score；当前已有 `Provisional SOP signal`，不阻塞页面价值。
+- 是否把 28d 平均 Heatmap 下沉成新的服务端确定性 contract；当前已复用 Day Profile 的权威 mean。
+- AI Finding 的共享、版本化 Insight Artifact 是否有真实多用户复用需求。
+- 半年/一年数据积累后，Overview 内新增的长期结构模块与基线定义。
+- Preschool Portfolio/Centre 中哪些指标在两个真实项目验证后才值得提取为共享 Kernel。
+- Benchmark 缺少任一 centre metadata 时，目前 project-specific 投影 fail closed；是否细化成模块级 Unavailable，等真实缺失场景出现后再决定。
+- Admin 原生确认框与受控 date/time input 的 Chrome 自动化兼容性；不阻塞客户 Overview，也不为此建设第二套 Admin 提交机制。
+- Preschool warm median 已由约 `8.7s` 降至约 `5.3s`；cold/warm/cache-return 仍需分开记录。后续 cache 只解决重复进入，不冒充首次计算优化。
+- 通用 Scheduler/Cadence DSL、历史 Snapshot 回放、第二套 Query Receipt/Version 仓库：明确停止。
+
+## 8. 完成标准
+
+- [x] 本文可作为压缩后的恢复入口，记录顺序、状态、证据、阻塞和停车场。
+- [x] Ngee Ann #9 客户可见修复、测试、构建与 1440/1920 Chrome 证据齐全。
+- [x] #14/#16 形成可验证的 Finding → AI Analyst 最小链路结论或修复。
+- [x] Preschool 形成真实数据到独立 Renderer、Benchmark 和 Operating Calendar 的垂直可见切片。
+- [x] #12B Spike/SOP 代码、数值 Golden、全量测试/构建与 1440/1920 Chrome 证据完成。
+- [x] #13 自动化最终组装完成；Charles 人工终验保留为外部验收门。
+- [x] #18 代码、严格 Evidence guard、三次固定 Profile 真实验收与 1440/1920 fail-soft 页面证据完成；Provider 接受率未通过并明确保留。
+- [x] Preschool 确定性 warm median 约改善 39%，未删除 Snapshot fail-closed，也未改变 Golden。
+- [x] #28 有界 Resolver Cache、in-flight、Refresh bypass、授权回归、Water capability 与 Chrome 验收完成；Issue 因 `Blocked by #13` 和 Charles 人工门保持 open。
+- [x] Kimi K3 Profile 与固定温度/low-reasoning seam 已验证；真实 Agent Run 因系统性 Moonshot tool-schema 不兼容未通过，已恢复 StepFun 默认并停止逐字段追补。
+- [x] 缓存/Water/Spike 旁路意见已独立复核并落成最小切片与明确停止项。
+- [x] Durable tracker 已更新：#18 Provider 证据、#13 性能边界与独立后续 #28；当前账号无权把 #18 workflow label 从 `ready-for-agent` 改为 `needs-info`，也无权给 #28 添加 `ready-for-agent`，以 Issue body/comment 记录真实状态。
+- [x] 所有范围外问题仅登记，没有扩建通用平台。
+- [x] 文档未写入任何密钥、Cookie 或 token。

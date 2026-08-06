@@ -573,10 +573,11 @@ export const configApi = {
 
   resolveProjectAnalysis(
     body: EnergyQueryContextRequestDto,
+    options?: { bypassCache?: boolean },
   ): Promise<EnergyProjectAnalysisResolutionDto> {
     return requestEnvelope<EnergyProjectAnalysisResolutionDto>("/api/v1/energy/analysis/resolve", {
       method: "POST",
-      body: JSON.stringify(body),
+      body: JSON.stringify(options?.bypassCache ? { ...body, bypassCache: true } : body),
     });
   },
 

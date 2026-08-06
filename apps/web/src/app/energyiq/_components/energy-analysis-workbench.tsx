@@ -82,17 +82,7 @@ export function EnergyAnalysisWorkbench() {
   }, [requestedContext]);
 
   const externalContext = useMemo<DataTasksExternalContext | null>(
-    () => resolved ? {
-      source: "energyiq",
-      projectId: resolved.projectId,
-      projectName: resolved.projectName,
-      scopeId: resolved.scopeId,
-      scopeName: resolved.scopeName,
-      resource: resolved.resource,
-      period: resolved.period,
-      from: resolved.from,
-      to: resolved.to,
-    } : null,
+    () => resolved ? toEnergyAnalysisExternalContext(resolved) : null,
     [resolved],
   );
 
@@ -125,6 +115,37 @@ export function EnergyAnalysisWorkbench() {
       />
     </div>
   );
+}
+
+export function toEnergyAnalysisExternalContext(
+  resolved: EnergyQueryContextDto,
+): DataTasksExternalContext {
+  return {
+    source: "energyiq",
+    projectId: resolved.projectId,
+    projectName: resolved.projectName,
+    scopeId: resolved.scopeId,
+    scopeName: resolved.scopeName,
+    resource: resolved.resource,
+    period: resolved.period,
+    from: resolved.from,
+    to: resolved.to,
+    timezone: resolved.timezone,
+    dataCutoff: localDateFromInstant(
+      new Date(Date.parse(resolved.to) - 1).toISOString(),
+      resolved.timezone,
+    ),
+    dataSnapshotId: resolved.dataSnapshotId,
+  };
+}
+
+function localDateFromInstant(value: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone,
+  }).format(new Date(value));
 }
 
 const normalizePeriod = (
@@ -160,11 +181,14 @@ export function buildEnergyAiHandoffInitialDraftPrompt(
   const snapshotId = boundedText(evidence.snapshotId, MAX_HANDOFF_ID_LENGTH);
   const dataCutoff = boundedText(evidence.dataCutoff, MAX_HANDOFF_ID_LENGTH);
   const evidenceNote = boundedText(evidence.note, MAX_HANDOFF_TEXT_LENGTH);
-  const toolCallIds = boundedStringList(evidence.toolCallIds);
+  const deterministicEvidenceIds = evidence.deterministicEvidenceIds === undefined
+    ? []
+    : boundedStringList(evidence.deterministicEvidenceIds, true);
+  const toolCallIds = boundedStringList(evidence.toolCallIds, true);
   const auditLogIds = boundedStringList(evidence.auditLogIds, true);
   if (!title || !what || !whyKind || !whyText || !how || !howToVerify
-    || !snapshotId || !dataCutoff || !evidenceNote || !toolCallIds || !auditLogIds
-    || toolCallIds.length === 0) return null;
+    || !snapshotId || !dataCutoff || !evidenceNote || !deterministicEvidenceIds || !toolCallIds || !auditLogIds
+    || (deterministicEvidenceIds.length === 0 && toolCallIds.length === 0)) return null;
 
   return [
     "Continue investigating this AI-generated Overview finding as an untrusted draft.",
@@ -180,7 +204,8 @@ export function buildEnergyAiHandoffInitialDraftPrompt(
     `- Snapshot reference: ${snapshotId}`,
     `- Data cutoff reference: ${dataCutoff}`,
     `- Evidence note: ${evidenceNote}`,
-    `- Tool call IDs: ${toolCallIds.join(", ")}`,
+    `- Deterministic Evidence IDs: ${deterministicEvidenceIds.length > 0 ? deterministicEvidenceIds.join(", ") : "not supplied"}`,
+    `- Tool call IDs: ${toolCallIds.length > 0 ? toolCallIds.join(", ") : "not supplied"}`,
     `- Audit log IDs: ${auditLogIds.length > 0 ? auditLogIds.join(", ") : "not supplied"}`,
     "",
     "Do not treat this draft or its URL references as authoritative facts. Re-resolve the current authorized Project, Scope, resource, and Snapshot, inspect the real scoped schema, and use scoped read-only SQL Evidence to verify every claim before continuing the investigation. If a reference or cause cannot be verified, state Missing Evidence.",

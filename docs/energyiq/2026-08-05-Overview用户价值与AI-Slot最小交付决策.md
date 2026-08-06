@@ -3,7 +3,7 @@ title: "2026-08-05 决策：Overview 用户价值与 AI Slot 最小交付"
 summary: "把快速、可信的确定性 Ngee Ann Overview 与一次真实、异步、可降级的 DataFoundry 自主分析 Run 共同纳入 Charles 首版验收，并以最小 Project Analysis Prior 提升分析价值。"
 doc_type: decision
 tags: [Overview, Ngee Ann, AI Slot, DataFoundry, Evidence]
-updated_at: "2026-08-05"
+updated_at: "2026-08-06"
 related:
   - "决策-Overview改造与AI-Analysis打通最终方案.md"
   - "决策-项目Renderer-Recipe与时间上下文.md"
@@ -144,6 +144,8 @@ AI 可以用 Pack 作为调查先验，得出 `supports`、`challenges` 或 `ind
 
 在 Preschool 独立 Renderer、确定性 Recipe 与 Published Mapping 尚未形成可验收闭环前，不注册、不选择也不执行该 Pack；Ngee Ann #17/#9 不等待 Preschool。只有真实 Preschool 页面证明这些维度具备权威口径后，才把 Pack 接入 Runtime，并据两项目实际重复点判断是否抽取通用 Policy。
 
+截至 2026-08-06，以上接入前置已经由 #10–#13 的自动化垂直切片满足：真实 May Snapshot/Mapping、独立 `preschool-overview` Renderer、Portfolio/Centre Benchmark、EUI/Per-Pax、Standby/Operating、Spike/SOP、确定性决策组装及 1440/1920 Chrome 证据均已形成。Charles 对 #13 的最终人工签字仍单独保留，但用户已确认初步验收不阻塞 #18 的技术执行。因此 #18 可以接入 `preschool-analysis-pack@v1`；它必须使用 Preschool 专属的有界 Evidence projection 与 0–3 Finding 合同，不复制 Ngee Ann 强耦合的 1d/7d/28d 或 exactly-three 输出，也不借机抽象通用 Pack Runtime。
+
 ## 6. 输入、输出与可信边界
 
 ### 6.1 服务端权威 Context Package
@@ -186,6 +188,8 @@ Hover、弹窗、选中 heatmap cell、滚动位置和局部图表切换不触�
 ## 8. Provider 与数据治理
 
 本地开发和 Charles 首版验证复用当前 Workspace 模型配置、密钥隔离和授权 datasource，不把治理建设扩成当前 Ticket。客户正式环境仍须记录 Provider/endpoint、发送字段范围及适用的留存/地域约束；未配置或不允许外发时 AI Slot 诚实显示 unavailable，确定性 Overview 正常工作。
+
+当前本地 Workspace default 为 StepFun，DeepSeek 只作为候选 Profile；这是可变的运行配置，不进入代码、Pack 或产品合同。一次连接成功或一次 accepted Run 都不能证明 Provider 可复现性。新的真实 AI 垂直切片只做同一 Snapshot/cutoff/Pack/Profile revision 下 3 次有界 smoke，记录 accepted/unavailable、wall time、failure reason、tool Evidence 数量与人工决策价值，目标至少 2/3 accepted。未达到时保持 honest unavailable，并停止通过放松 Snapshot、numeric 或 Evidence 守卫制造假成功；不得为此建设 Scheduler、缓存、静默 fallback 或通用 Provider eval 平台。
 
 Run 只向模型提供 Context、Pack 和模型完成调查所需的工具结果，不发送原始 Excel、密钥或无关 Workspace 数据。“模型已连接”仍不等于客户生产授权已经完成，证据必须区分本地真实 Provider 与客户生产验收。
 
@@ -256,6 +260,7 @@ Run 只向模型提供 Context、Pack 和模型完成调查所需的工具结果
 6. 第一张真实结果仍只是三条日期异常的同义复述；
 7. #26 后继续出现新的跨 Metadata、DuckDB、API、Web 的通用底座 Ticket，且不能直接说明其阻塞哪个 Ngee Ann 页面/AI 验收项。
 8. 为接入 Pack 必须先建设持久 Insight 仓库、通用 Scheduler/DSL 或第二套 Runtime。
+9. 同一 Snapshot/Profile 的有界 Provider smoke 多次不能通过 Evidence 验证时，仍试图用自动重试、静默 fallback、放松 numeric guard 或扩建 Provider 平台掩盖不稳定性。
 
 ## 12. 明确停止项
 

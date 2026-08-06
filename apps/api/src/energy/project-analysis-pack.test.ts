@@ -27,6 +27,19 @@ const context: EnergyQueryContext = {
   resolvedAt: "2026-06-17T00:00:00.000Z",
 };
 
+const preschoolContext: EnergyQueryContext = {
+  ...context,
+  workspaceId: "preschool-demo-org",
+  projectId: "preschool-demo",
+  projectName: "Preschool Portfolio",
+  scopeId: "preschool-project",
+  scopeName: "Preschool Portfolio",
+  hierarchyRevisionId: "preschool-hierarchy-v6",
+  meterMappingRevisionId: "preschool-mapping-v2",
+  dataSnapshotId: "preschool-snapshot-may-2026",
+  businessCalendarVersion: "preschool-calendar-v1",
+};
+
 describe("createProjectAnalysisPackContextItem", () => {
   it("materializes the server-selected Ngee Ann Pack as a traceable authoritative source", () => {
     const item = createProjectAnalysisPackContextItem({
@@ -68,6 +81,49 @@ describe("createProjectAnalysisPackContextItem", () => {
     expect(content).toContain("AI proposals");
     expect(content).not.toContain("SQL");
     expect(content).not.toContain("```sql");
+    expect(content).not.toContain("kWh");
+    expect(content).not.toContain("threshold");
+    expect(content).not.toContain("formula");
+  });
+
+  it("materializes the server-selected Preschool Pack without embedding answers or calculation logic", () => {
+    const item = createProjectAnalysisPackContextItem({
+      context: preschoolContext,
+      release: {
+        id: "preschool-release-v2",
+        projectId: preschoolContext.projectId,
+        renderer: { key: "preschool-overview", version: "1" },
+      },
+      sessionId: "session-preschool",
+    });
+
+    expect(item).not.toBeNull();
+    expect(item).toMatchObject({
+      id: "project-analysis-pack:preschool-analysis-pack@v1:preschool-release-v2",
+      sourceType: "project-analysis-pack",
+      sourceId: "preschool-analysis-pack@v1",
+      groupId: "project-analysis-pack:preschool-analysis-pack@v1",
+      trust: "tool",
+      visibility: "model",
+      metadata: {
+        analysisPackId: "preschool-analysis-pack",
+        analysisPackRevision: "v1",
+        sourceOwner: "server",
+        projectReleaseId: "preschool-release-v2",
+        rendererKey: "preschool-overview",
+      },
+    });
+    const content = String(item?.content);
+    expect(content).toContain("Portfolio");
+    expect(content).toContain("Centre");
+    expect(content).toContain("EUI");
+    expect(content).toContain("per-pax");
+    expect(content).toContain("P75");
+    expect(content).toContain("standby");
+    expect(content).toContain("operating");
+    expect(content).toContain("Circuit");
+    expect(content).toContain("Missing Evidence");
+    expect(content).not.toContain("SQL");
     expect(content).not.toContain("kWh");
     expect(content).not.toContain("threshold");
     expect(content).not.toContain("formula");
