@@ -147,6 +147,8 @@ export const buildEnergyExcelMaterialization = async (input: {
       || left.eventTime.localeCompare(right.eventTime),
   );
   const intervalFacts: EnergyIntervalFactWrite[] = [];
+  const typicalIntervalMinutes = workbook.inspection.typicalIntervalMinutes ?? 15;
+  const intervalToleranceMinutes = Math.max(0.1, typicalIntervalMinutes * 0.01);
   const readingsByMeter = new Map<string, EnergyNormalizedReadingWrite[]>();
   for (const reading of normalizedReadings) {
     readingsByMeter.set(reading.meterPointId, [...(readingsByMeter.get(reading.meterPointId) ?? []), reading]);
@@ -171,9 +173,9 @@ export const buildEnergyExcelMaterialization = async (input: {
       const rawDeltaKwh = current.activeEnergyKwh - previous.activeEnergyKwh;
       const qualityStatus = rawDeltaKwh < 0
         ? "negative_delta"
-        : elapsedMinutes > 15.1
+        : elapsedMinutes > typicalIntervalMinutes + intervalToleranceMinutes
           ? "gap"
-          : elapsedMinutes < 14.9
+          : elapsedMinutes < typicalIntervalMinutes - intervalToleranceMinutes
             ? "irregular_interval"
             : "ok";
       const usageKwh = qualityStatus === "ok" ? rawDeltaKwh : undefined;

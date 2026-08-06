@@ -177,6 +177,31 @@ describe("buildEnergyExcelMaterialization", () => {
     })).toBe(false);
   });
 
+  it("preserves a regular hourly source cadence without fabricating 15-minute readings", async () => {
+    const workbook = await writeXlsxFile([
+      [text("Device Name"), text("Time"), text("Active Energy")],
+      [text("Meter A"), date("2026-05-01T00:00:00Z"), number(100)],
+      [text("Meter A"), date("2026-05-01T01:00:00Z"), number(101.25)],
+      [text("Meter A"), date("2026-05-01T02:00:00Z"), number(103)],
+    ]).toBuffer();
+
+    const result = await buildEnergyExcelMaterialization({
+      content: workbook,
+      batch: batch("batch-hourly", "project-hourly", "h".repeat(64)),
+      document: document(),
+      mappingRevision: 4,
+      timezone: "Asia/Singapore",
+    });
+
+    expect(result.write.normalizedReadings).toHaveLength(3);
+    expect(result.write.intervalFacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ elapsedMinutes: 60, usageKwh: 1.25, averageKw: 1.25, qualityStatus: "ok" }),
+      expect.objectContaining({ elapsedMinutes: 60, usageKwh: 1.75, averageKw: 1.75, qualityStatus: "ok" }),
+    ]));
+    expect(result.summary).toMatchObject({ intervalFactCount: 2, totalUsageKwh: 3 });
+    expect(result.summary.qualityCounts).not.toHaveProperty("gap");
+  });
+
   it("requires a confirmed Mapping", async () => {
     const workbook = await writeXlsxFile([
       [text("Device Name"), text("Time"), text("Active Energy")],

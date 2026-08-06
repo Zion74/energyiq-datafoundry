@@ -392,8 +392,16 @@ const readProjectAudit = async (
         GROUP BY meter_node_id, interval_start
         HAVING COUNT(*) > 1
       )) AS duplicate_interval_facts,
-      (SELECT COUNT(*) FROM energy_interval_facts
-        WHERE project_id = ? AND elapsed_minutes <> 15) AS invalid_interval_durations,
+      (SELECT COUNT(*) FROM (
+        SELECT elapsed_minutes, median(elapsed_minutes) OVER (
+          PARTITION BY resource, meter_node_id
+        ) AS typical_elapsed_minutes
+        FROM energy_interval_facts
+        WHERE project_id = ?
+      ) durations
+        WHERE elapsed_minutes <= 0
+          OR abs(elapsed_minutes - typical_elapsed_minutes) > greatest(0.1, typical_elapsed_minutes * 0.01)
+      ) AS invalid_interval_durations,
       (SELECT COUNT(*) FROM energy_interval_facts
         WHERE project_id = ? AND quality_status = 'negative_delta') AS negative_delta_intervals,
       (SELECT COUNT(*) FROM raw_meter_readings
@@ -898,17 +906,22 @@ const rebuildProjectCumulativeIntervals = async (
         PARTITION BY project_id, resource, meter_node_id
         ORDER BY event_time
       )
-    ), adjacent_pairs AS (
+    ), adjacent_pairs_unclassified AS (
       SELECT *,
         date_diff('millisecond', previous_event_time, event_time) / 60000.0 AS elapsed_minutes,
         active_energy_kwh - previous_active_energy_kwh AS raw_delta_kwh
       FROM ordered_readings
       WHERE previous_event_time IS NOT NULL
+    ), adjacent_pairs AS (
+      SELECT *, median(elapsed_minutes) OVER (
+        PARTITION BY project_id, resource, meter_node_id
+      ) AS typical_elapsed_minutes
+      FROM adjacent_pairs_unclassified
     )
     SELECT *, CASE
       WHEN raw_delta_kwh < 0 THEN 'negative_delta'
-      WHEN elapsed_minutes > 15.1 THEN 'gap'
-      WHEN elapsed_minutes < 14.9 THEN 'irregular_interval'
+      WHEN elapsed_minutes > typical_elapsed_minutes + greatest(0.1, typical_elapsed_minutes * 0.01) THEN 'gap'
+      WHEN elapsed_minutes < typical_elapsed_minutes - greatest(0.1, typical_elapsed_minutes * 0.01) THEN 'irregular_interval'
       ELSE 'ok'
     END AS quality_status
     FROM adjacent_pairs

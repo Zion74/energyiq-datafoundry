@@ -57,6 +57,40 @@ describe("writeEnergyFactProjectMaterialization", () => {
     }
   });
 
+  it("keeps a regular hourly cumulative series canonical without synthetic quarter-hour facts", async () => {
+    const projectId = "project-hourly-cadence";
+    const source = boundaryBatch({
+      databasePath: ":memory:",
+      projectId,
+      importBatchId: "hourly-a",
+      sourceSha256: "hourly-sha-a",
+      readings: [
+        ["2026-05-01T00:00:00.000Z", 100],
+        ["2026-05-01T01:00:00.000Z", 101.25],
+        ["2026-05-01T02:00:00.000Z", 103],
+      ],
+    });
+
+    const written = await writeEnergyFactProjectMaterialization({
+      databasePath: ":memory:",
+      projectId,
+      timezone: "Asia/Singapore",
+      expectedPreviousDataSnapshotId: "unavailable",
+      snapshotFactScope: testFactScope(projectId, "snapshot-hourly", [source.sourceSha256]),
+      batches: [projectBatch(source)],
+    });
+
+    expect(written.projectAudit).toMatchObject({
+      intervalFactCount: 2,
+      invalidIntervalDurationCount: 0,
+      negativeDeltaIntervalCount: 0,
+      adjacentReadingPairCount: 2,
+      missingAdjacentIntervalCount: 0,
+    });
+    await expect(readEnergyFactMaterializationStats({ databasePath: ":memory:", importBatchId: "hourly-a" }))
+      .resolves.toMatchObject({ normalizedRows: 3, intervalFacts: 2, qualityEvents: 1 });
+  });
+
   it.each([
     { label: "empty", sourceSha256: [], batches: [] },
     {
