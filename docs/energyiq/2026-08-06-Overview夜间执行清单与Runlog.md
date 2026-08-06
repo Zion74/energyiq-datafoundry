@@ -1,9 +1,9 @@
 ---
 title: "2026-08-06 开发记录：Overview 夜间执行清单"
-summary: "收口 Ngee Ann 与 Preschool 客户可见 Overview、Preschool AI Slot 代码边界和真实 Provider 验收；记录确定性性能优化、缓存/Resource 后续切片与明确停止项。"
+summary: "收口 Ngee Ann 与 Preschool 客户可见 Overview；冻结 2026-08-07 主 Agent 确定性 Overview 与侧边 Agent AI Analyst 的夜间双线执行边界。"
 doc_type: runlog
 tags: [Overview, Ngee-Ann, AI-Slot, Preschool, 开发记录]
-updated_at: "2026-08-06"
+updated_at: "2026-08-07"
 related:
   - "2026-08-05-Overview用户价值与AI-Slot最小交付决策.md"
   - "决策-NgeeAnn首个试点路线与页面边界.md"
@@ -248,3 +248,52 @@ related:
 - [x] Durable tracker 已更新：#18 Provider 证据、#13 性能边界与独立后续 #28；当前账号无权把 #18 workflow label 从 `ready-for-agent` 改为 `needs-info`，也无权给 #28 添加 `ready-for-agent`，以 Issue body/comment 记录真实状态。
 - [x] 所有范围外问题仅登记，没有扩建通用平台。
 - [x] 文档未写入任何密钥、Cookie 或 token。
+
+## 9. 2026-08-07 夜间双线执行合同
+
+### 9.1 唯一北极星与 Owner
+
+今晚只证明两件客户可见的事：同一套 Overview 能随真实新增数据稳定更新；AI Analyst 能在不篡改确定性权威层的前提下提供可验证的补充分析。
+
+| 线路 | Owner | 负责范围 | 不负责范围 |
+| --- | --- | --- | --- |
+| 主线 | 主 Agent | #9 两批真实数据连续演示、Ngee Ann/Preschool 确定性 Overview、Saved A/current B、Chrome/Evidence、#28 跟踪收口 | Provider、Prompt、Tool Schema、AI Finding 生成质量 |
+| AI 线 | 侧边任务 Agent | #14 → #18 → #16 的可信工具链、Provider 固定验收、AI Finding 与 Ask AI deeper/Session continuation | Renderer/ViewModel、Excel materialization、Mapping、Snapshot A/B、确定性 KPI/Evidence |
+
+同一文件族只能由一条线路修改。侧边 Agent 不直接修改 Integration 工作树、不重启或写入主线共享数据库；交付必须是隔离 Worktree/Branch、精确 commit、改动清单、测试和真实 Run 证据，由主 Agent审核后集成。
+
+### 9.2 主 Agent 夜间顺序
+
+| 顺序 | Ticket / 切片 | 今晚状态 | 验收边界 |
+| --- | --- | --- | --- |
+| M1 | #28 跟踪校准 | TODO | 将重复编号改为唯一编号，移除已失效的 `Blocked by #13`，在现有自动化/Chrome 证据不变的前提下关闭；不再扩写缓存。 |
+| M2 | #9 A/B 数据预检 | DOING | 在隔离验收环境核对四份 Ngee Ann Excel 的覆盖、SHA、映射和 19–20 May 重叠去重语义；固定 Snapshot A/B cutoff 和预期事实行数，不改当前客户 Published Snapshot。 |
+| M3 | #9 Snapshot A | TODO | 只导入 21 Apr–20 May 的 Level 6/7 批次，使用正式 Mapping/materialization/publish 路径生成 A，并保存 A 分析。 |
+| M4 | #9 Snapshot B | TODO | 追加 19 May–17 Jun 的 Level 6/7 批次；重叠读数幂等去重，不双算；同一 Workspace/Project/Release/Mapping/Renderer 生成 B。 |
+| M5 | #9 最小连续状态 | TODO | 只补齐 B 当前值、A 保存值和 New/Recurring/Structural/Mitigated/Resolved/no-longer-supported 中实际有证据的状态；不建设历史 Snapshot 平台。 |
+| M6 | #9 自动化与 Chrome | TODO | 证明 A 可复现、B 为 current、A/B Evidence 不混用、相同 Recipe/Renderer、确定性首屏、1440/1920 无溢出/Console error。AI 只消费侧边线已有合同，不在主线修 Prompt/Provider。 |
+| M7 | #13 非 AI 回归 | TODO（仅 M1–M6 通过后） | 回归 Preschool 确定性卡片、Benchmark、Operating/Spike、Leading Circuit-as-Appliance alias 与 Chrome；Charles 人工门保持 open。 |
+
+主线停止条件：A/B Golden 无法稳定复现；重叠导入会改写现有 Published 数据；必须新增通用版本库/历史回放/Scheduler/第二套 Evidence；需要修改侧边 Agent 正在占用的 AI 文件。触发后只记录证据并停止该切片，不用临时架构掩盖。
+
+### 9.3 侧边 AI Agent 夜间顺序
+
+| 顺序 | Ticket / 切片 | 验收边界 |
+| --- | --- | --- |
+| A1 | #14 Provider-neutral Tool Bundle 预检 | 用小型 canonical Schema、一次无害强制工具调用、本地参数校验和 result replay，把失败明确分成 `provider_schema_rejected`、`tool_arguments_invalid`、`tool_execution_failed`、`result_evidence_rejected`；固定 Profile revision，单次 Run 内禁止 silent fallback。 |
+| A2 | #18 Preschool 固定 Profile 验收 | DeepSeek V4 Flash、thinking disabled、fallback off、同一 Snapshot/Pack/Profile 连跑 3 次；记录 Run/Session、工具次数、延迟、token 和 accepted/fail-closed 原因。目标至少 2/3 产生非空、有用、Finding-specific Evidence；不放松数字/Evidence 守卫。 |
+| A3 | #16 Ask AI deeper 最小连续性 | 从页面带入 Project/Scope/Window/Snapshot/Finding/Evidence；服务端重新授权并在 Snapshot 漂移时标记 outdated；允许用户编辑后提交，禁止自动提交。只复用现有 Session/AG-UI，不建设通用分支/Artifact/Cadence 平台。 |
+| A4 | 交付主 Agent 审核 | 提供隔离 branch/worktree、精确 commits、改动文件、定向测试、真实 Provider 证据和未解决风险；不自行合并 Integration，不自行关闭 #9/#13。 |
+
+侧边线停止条件：需要弱化授权/只读 SQL/Snapshot/Evidence；需要通用 Provider Router 或全工具 Schema 平台；连续失败的根因已经属于模型质量而不是合同缺陷；与主线 Renderer、materialization、A/B 文件发生冲突。
+
+### 9.4 文件与环境所有权
+
+- 主线优先占用：Ngee Ann/Preschool Renderer、ViewModel、确定性 Resolver/Projection、Import/Mapping/Snapshot A/B 测试与验收脚本。
+- AI 线优先占用：Provider adapter、Tool Bundle/Schema、AI Run/validator、AG-UI Session continuation；若必须触碰 Renderer，只提交接口需求，不直接改主线文件。
+- Integration 是主 Agent 唯一审核/合并环境；两条线各用 `codex/` 分支和隔离 Worktree。不得 `reset --hard`、`clean`、`stash`、批量格式化或吸收无关脏改动。
+- 本地服务/端口/数据库由主 Agent统一调度；侧边 Agent 的真实 Run 使用隔离配置，密钥不得进入文档、Issue、日志或 commit。
+
+### 9.5 早晨交付格式
+
+主 Agent 与侧边 Agent 都必须按以下格式交付：`完成结果 → commit/文件 → 自动化证据 → 真实运行/Chrome 证据 → 未完成项 → 是否触发停止条件`。用户睡眠期间不宣称 Charles 人工验收，也不因无人在线而扩大 scope。
