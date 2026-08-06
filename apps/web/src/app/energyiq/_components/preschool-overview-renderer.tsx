@@ -87,15 +87,12 @@ export function PreschoolOverviewRenderer({
       </div>
 
       <section aria-labelledby="preschool-decision-summary" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h3 id="preschool-decision-summary" className="text-base font-semibold text-foreground">Key findings &amp; top actions</h3>
-            <p className="mt-1 text-xs leading-5 text-muted">Up to three Evidence-backed priorities assembled from the current published Benchmark and Operational projections.</p>
-          </div>
-          <p className="text-[11px] text-muted-light">Snapshot {view.evidence.snapshotId}</p>
+        <div>
+          <h3 id="preschool-decision-summary" className="text-base font-semibold text-foreground">Key findings &amp; top actions</h3>
+          <p className="mt-1 text-xs leading-5 text-muted">Only the supported priorities that need attention now. Unsupported themes stay hidden.</p>
         </div>
         {view.decisionSummary.items.length > 0 ? (
-          <div className="mt-4 grid gap-4 xl:grid-cols-3">
+          <div className="mt-4 space-y-3">
             {view.decisionSummary.items.map((item) => (
               <DecisionSummaryCard key={item.id} item={item} />
             ))}
@@ -370,26 +367,74 @@ function DecisionSummaryCard({ item }: { item: PreschoolDecisionSummaryItem }) {
     : item.id === "efficiency"
       ? "border-step-error/30 bg-step-error-soft/30"
       : "border-border bg-surface-subtle";
+  const signalClass = item.id === "after-hours"
+    ? "fill-step-warning"
+    : item.id === "efficiency"
+      ? "fill-step-error"
+      : "fill-primary";
   return (
-    <article className={`min-w-0 rounded-lg border p-4 ${toneClass}`} data-decision-priority={item.id}>
-      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-light">Priority {item.priority} · {item.label}</p>
-      <h4 className="mt-2 text-sm font-semibold leading-5 text-foreground">{item.finding}</h4>
-      <dl className="mt-4 space-y-3 text-[11px] leading-5">
-        <div>
-          <dt className="font-semibold text-foreground">Why it matters</dt>
-          <dd className="mt-0.5 text-muted">{item.why}</dd>
+    <article
+      className={`grid min-w-0 gap-5 rounded-lg border p-4 lg:grid-cols-[minmax(240px,0.72fr)_minmax(0,1.5fr)] lg:p-5 ${toneClass}`}
+      data-decision-priority={item.id}
+    >
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <h4 className="text-base font-semibold leading-6 text-foreground">{item.finding}</h4>
+          <span className="shrink-0 rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] font-semibold text-muted">
+            {item.priority}. {item.label}
+          </span>
         </div>
-        <div>
-          <dt className="font-semibold text-foreground">Top action</dt>
-          <dd className="mt-0.5 text-muted">{item.action}</dd>
+        <div
+          className="mt-4"
+          data-decision-signal={item.id}
+          role="img"
+          aria-label={`${item.signal.label}: ${item.signal.valueLabel} ${item.signal.referenceLabel}`}
+        >
+          <div className="flex items-baseline justify-between gap-3 text-[11px]">
+            <span className="font-semibold text-foreground">{item.signal.label}</span>
+            <span className="shrink-0 tabular-nums text-muted"><strong className="font-semibold text-foreground">{item.signal.valueLabel}</strong> {item.signal.referenceLabel}</span>
+          </div>
+          <svg
+            viewBox={`0 0 ${item.signal.max} 6`}
+            preserveAspectRatio="none"
+            aria-hidden="true"
+            className="mt-2 h-1.5 w-full overflow-hidden rounded-full"
+          >
+            <rect width={item.signal.max} height="6" rx="3" className="fill-border" />
+            <rect width={item.signal.value} height="6" rx="3" className={signalClass} />
+          </svg>
         </div>
-        <div>
-          <dt className="font-semibold text-foreground">Verify</dt>
-          <dd className="mt-0.5 text-muted">{item.verification}</dd>
-        </div>
-      </dl>
-      <PreschoolEvidenceLink label={item.evidenceLabel} />
+      </div>
+      <div className="min-w-0">
+        <dl className="grid gap-x-6 gap-y-3 text-xs leading-5 sm:grid-cols-2">
+          <DecisionField label="What" value={item.what} />
+          <DecisionField label="Why" value={item.why} />
+          <DecisionField label="Next step" value={item.action} className="sm:col-span-2" />
+          <DecisionField label="If acted" value={item.ifActed} />
+          <DecisionField label="If ignored" value={item.ifIgnored} />
+          <DecisionField label="Verify" value={item.verification} />
+          <DecisionField label="Limitation" value={item.limitation} />
+        </dl>
+        <PreschoolEvidenceLink label="View calculation" />
+      </div>
     </article>
+  );
+}
+
+function DecisionField({
+  label,
+  value,
+  className = "",
+}: {
+  label: string;
+  value: string;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      <dt className="font-semibold text-foreground">{label}</dt>
+      <dd className="mt-0.5 text-muted">{value}</dd>
+    </div>
   );
 }
 

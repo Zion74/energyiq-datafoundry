@@ -37,16 +37,21 @@ describe("PreschoolAiSlot", () => {
     }));
     await renderSlot(startRun);
 
-    expect(container.textContent).toContain("Inspecting scoped data…");
+    expect(container.textContent).toContain("AI analysis queued…");
     expect(container.textContent).toContain("deterministic Overview is ready");
     await act(async () => report("querying"));
     expect(container.textContent).toContain("Querying Snapshot…");
+    await act(async () => report("validating"));
+    expect(container.textContent).toContain("Validating the investigation…");
     await act(async () => report("drafting"));
     expect(container.textContent).toContain("Drafting findings…");
     await act(async () => finish(availableResult()));
     expect(container.querySelectorAll("article")).toHaveLength(2);
     expect(container.textContent).toContain("Next investigation");
+    expect(container.textContent).toContain("Expected if acted on");
+    expect(container.textContent).toContain("If ignored");
     expect(container.textContent).toContain("How to verify");
+    expect(container.textContent).toContain("Limitations");
   });
 
   it("shows an honest no-additional-finding state instead of filler", async () => {
@@ -157,6 +162,8 @@ function finding(
     what: "A scoped pattern is visible.",
     why: { kind: withSql ? "Evidence" : "Hypothesis", text: "The cited Evidence supports an investigation." },
     how: "Inspect the operating context and leading Circuit.",
+    expectedIfAct: "The review should isolate the operating condition behind the pattern.",
+    ifIgnored: "The unresolved pattern may continue without an accountable investigation.",
     howToVerify: "Repeat the same scoped comparison after investigation.",
     evidenceNote: "This is not a confirmed root cause.",
     evidence: {

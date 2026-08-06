@@ -77,13 +77,13 @@ describe("Preschool AI Run", () => {
     expect(serialized).toContain(
       "do not restate, explain, plan, summarize, or precompute the task or contract",
     );
-    expect(serialized).toContain("at least one Finding must cite SQL Evidence index 1");
+    expect(serialized).toContain("Each displayed Finding must cite the first successful SQL observation and the final successful validation");
     expect(serialized).toContain(
       "include every runtime assertion_id listed for each requirement_id, including manual assertions",
     );
-    expect(serialized).toContain("If the first SQL is rejected, simplify it and retry only once");
+    expect(serialized).toContain("Make at most four total run_sql_readonly attempts");
     expect(serialized).toContain(
-      "After the first successful SQL result, immediately produce the final JSON and never make another tool call",
+      "observation scan, a targeted drill-down, and a validation or contradiction check",
     );
     expect(serialized).toContain(
       "stating 100% coverage requires citing quality:may in that same Finding",
@@ -93,15 +93,15 @@ describe("Preschool AI Run", () => {
     );
     expect(serialized).toContain("Do not call analysis_requirements_commit");
     expect(serialized).toContain(
-      "must return exactly one row produced by a decision-useful aggregate that you choose autonomously",
+      "A successful SQL may return one aggregate row or a bounded grouped, ranked, or Top-N result",
     );
     expect(serialized).toContain(
-      "A ranked row, Top N result, LIMIT 1 selection, or preview is not an aggregate",
+      "Do not request more than 10 rows from one SQL Evidence operation",
     );
     expect(serialized).toContain(
       "Never use row position, rank, Top N size, LIMIT value, or row count in a Finding as Evidence or a numeric claim unless that quantity is returned as a real named SQL column value",
     );
-    expect(serialized).not.toContain("prefer one aggregate row or at most 10 rows");
+    expect(serialized).not.toContain("must return exactly one row");
     expect(serialized).toContain(
       "Never estimate, sum, extrapolate, approximate, or infer values from truncated, previewed, omitted, or remaining rows",
     );
@@ -119,6 +119,7 @@ describe("Preschool AI Run", () => {
     expect(serialized).toContain("official_aggregation_eligible=TRUE");
     expect(serialized).toContain("quality_status='ok'");
     expect(serialized).toContain("Bounded Preschool Discovery Evidence Bundle");
+    expect(serialized).toContain("evidenceRefs may be empty for an independent SQL-only angle");
     expect(serialized).not.toContain("exactly three Findings");
     expect(serialized).not.toContain("horizons");
     expect(serialized).not.toContain("forecastKwh");
@@ -126,9 +127,19 @@ describe("Preschool AI Run", () => {
     expect(serialized.length).toBeLessThan(16_000);
   });
 
-  it("accepts zero Findings after the one governed SQL cross-check", () => {
+  it("keeps autonomous discovery available when no deterministic theme is publishable", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    const emptyThemes = {
+      ...buildPreschoolOverviewViewModel(snapshot).decisionSummary,
+      items: [],
+    };
+
+    expect(buildPreschoolAiRunInput(snapshot, emptyThemes)).not.toBeNull();
+  });
+
+  it("accepts zero Findings after one governed observation when no useful path survives", () => {
     const result = resolvePreschoolAiEventStream({
-      eventStream: successfulEventStream([]),
+      eventStream: successfulEventStream([], sqlEvents("sql-1", 843.0985)),
       input: requiredInput(),
       providerProfileId: "profile-1",
       runId: "run-1",
@@ -162,14 +173,37 @@ describe("Preschool AI Run", () => {
       evidence: {
         snapshotId: input.snapshotId,
         deterministic: [expect.objectContaining({ id: "benchmark:priority-centre:G" })],
-        tools: [expect.objectContaining({ toolCallId: "sql-1" })],
+        tools: [
+          expect.objectContaining({ toolCallId: "sql-1" }),
+          expect.objectContaining({ toolCallId: "sql-2" }),
+        ],
       },
     });
-    expect(result.findings[1]!.evidence.tools).toEqual([]);
+    expect(result.findings[1]!.evidence.tools).toHaveLength(2);
   });
 
-  it("rejects a non-empty response when no Finding cites the real SQL Evidence", () => {
-    const findings = generatedFindings().map((finding) => ({ ...finding, evidenceSqlIndexes: [] }));
+  it("accepts an independent SQL-only angle without forcing an official bundle theme", () => {
+    const finding = generatedFindings()[0]!;
+    finding.relationship = "independent";
+    finding.title = "A separate operating pattern warrants review";
+    finding.what = "The observation and validation queries expose a separate operating pattern.";
+    finding.evidenceRefs = [];
+    const result = resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream([finding]),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.findings[0]!.evidence.deterministic).toEqual([]);
+    expect(result.findings[0]!.evidence.tools).toHaveLength(2);
+  });
+
+  it("rejects a displayed Finding that does not cite at least two investigation operations", () => {
+    const findings = generatedFindings();
+    findings[0]!.evidenceSqlIndexes = [1];
     const result = resolvePreschoolAiEventStream({
       eventStream: successfulEventStream(findings),
       input: requiredInput(),
@@ -179,7 +213,58 @@ describe("Preschool AI Run", () => {
 
     expect(result).toEqual({
       status: "unavailable",
-      reason: "At least one Preschool Finding must cite the successful SQL Evidence.",
+      reason: "Each displayed Preschool Finding must cite at least two successful SQL Evidence operations.",
+    });
+  });
+
+  it.each([
+    ["a duplicated Evidence index", [1, 1]],
+    ["only one Evidence index", [1]],
+  ])("rejects %s after unique-index normalization", (_name, evidenceSqlIndexes) => {
+    const findings = generatedFindings();
+    findings[0]!.evidenceSqlIndexes = evidenceSqlIndexes;
+    expect(resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    })).toEqual({
+      status: "unavailable",
+      reason: "Each displayed Preschool Finding must cite at least two successful SQL Evidence operations.",
+    });
+  });
+
+  it("rejects two Evidence indexes when they repeat the same normalized SQL", () => {
+    const repeatedSql = [
+      ...sqlEvents("sql-1", 843.0985),
+      ...sqlEvents("sql-2", 62.4),
+    ];
+    expect(resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(generatedFindings(), repeatedSql),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    })).toEqual({
+      status: "unavailable",
+      reason: "Each displayed Preschool Finding must cite at least two distinct SQL queries.",
+    });
+  });
+
+  it.each([
+    ["declared row count", oversizedSqlEvents("sql-2", 11, 1)],
+    ["returned rows", oversizedSqlEvents("sql-2", 1, 11)],
+  ])("rejects SQL Evidence whose %s exceeds ten", (_name, oversized) => {
+    expect(resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(generatedFindings(), [
+        ...sqlEvents("sql-1", 843.0985),
+        ...oversized,
+      ]),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    })).toEqual({
+      status: "unavailable",
+      reason: "The AI Analyst exceeded the ten-row SQL Evidence limit.",
     });
   });
 
@@ -207,6 +292,33 @@ describe("Preschool AI Run", () => {
     })).toEqual({
       status: "unavailable",
       reason: "The Preschool Discovery Evidence does not match this Run identity.",
+    });
+  });
+
+  it("binds an SQL-only numeric claim to the cited column meaning", () => {
+    const valid = generatedFindings();
+    valid[0]!.relationship = "independent";
+    valid[0]!.evidenceRefs = [];
+    valid[0]!.what = "The drill-down returned 62.4 kWh for the selected hour.";
+    expect(resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(valid),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    }).status).toBe("available");
+
+    const mismatched = generatedFindings();
+    mismatched[0]!.relationship = "independent";
+    mismatched[0]!.evidenceRefs = [];
+    mismatched[0]!.what = "The drill-down returned 62.4 Centres.";
+    expect(resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(mismatched),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    })).toEqual({
+      status: "unavailable",
+      reason: "The AI Analyst returned a numeric claim without Finding-specific Evidence.",
     });
   });
 
@@ -309,11 +421,15 @@ describe("Preschool AI Run", () => {
   it("rejects an SQL Evidence index that the same Finding did not cite", () => {
     const findings = generatedFindings();
     findings[0]!.what = "SQL Evidence index 1 supports the same Centre direction.";
-    findings[0]!.evidenceSqlIndexes = [];
-    findings[1]!.evidenceSqlIndexes = [1];
+    findings[0]!.evidenceSqlIndexes = [2, 3];
+    findings[1]!.evidenceSqlIndexes = [1, 2];
 
     expect(resolvePreschoolAiEventStream({
-      eventStream: successfulEventStream(findings),
+      eventStream: successfulEventStream(findings, [
+        ...sqlEvents("sql-1", 843.0985),
+        ...multiRowSqlEvents("sql-2"),
+        ...sqlEvents("sql-3", 42),
+      ]),
       input: requiredInput(),
       providerProfileId: "profile-1",
       runId: "run-1",
@@ -402,32 +518,42 @@ describe("Preschool AI Run", () => {
     });
   });
 
-  it("enforces schema plus exactly one successful SQL within two attempts", () => {
-    const secondSql = sqlEvents("sql-2", 42);
-    expect(resolvePreschoolAiEventStream({
-      eventStream: successfulEventStream(generatedFindings(), secondSql),
+  it("accepts two to four successful bounded operations, including multi-row drill-down Evidence", () => {
+    const findings = generatedFindings();
+    findings[0]!.evidenceSqlIndexes = [1, 2, 3, 4];
+    const sqlEvidence = [
+      ...sqlEvents("sql-1", 843.0985),
+      ...multiRowSqlEvents("sql-2"),
+      ...sqlEvents("sql-3", 42),
+      ...sqlEvents("sql-4", 24),
+    ];
+    const result = resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(findings, sqlEvidence),
       input: requiredInput(),
       providerProfileId: "profile-1",
       runId: "run-1",
-    })).toEqual({
-      status: "unavailable",
-      reason: "The AI Analyst did not complete exactly one successful read-only SQL Evidence query.",
     });
+    expect(result.status).toBe("available");
+    if (result.status === "available") expect(result.findings[0]!.evidence.tools).toHaveLength(4);
+  });
 
+  it("counts rejected SQL calls toward the four-attempt investigation budget", () => {
     const rejected = [
       { type: "TOOL_CALL_START", toolCallId: "sql-bad", toolCallName: "run_sql_readonly", args: { sql: "WITH bad AS (...)" } },
       { type: "TOOL_CALL_RESULT", toolCallId: "sql-bad", toolCallName: "run_sql_readonly", result: { error: "QUERY_VALIDATION_FAILED" } },
       { type: "TOOL_CALL_START", toolCallId: "sql-third", toolCallName: "run_sql_readonly", args: { sql: "SELECT 3" } },
       { type: "TOOL_CALL_RESULT", toolCallId: "sql-third", toolCallName: "run_sql_readonly", result: { error: "QUERY_VALIDATION_FAILED" } },
+      { type: "TOOL_CALL_START", toolCallId: "sql-fourth", toolCallName: "run_sql_readonly", args: { sql: "SELECT 4" } },
+      { type: "TOOL_CALL_RESULT", toolCallId: "sql-fourth", toolCallName: "run_sql_readonly", result: { error: "QUERY_VALIDATION_FAILED" } },
     ];
     expect(resolvePreschoolAiEventStream({
-      eventStream: successfulEventStream(generatedFindings(), [], rejected),
+      eventStream: successfulEventStream(generatedFindings(), undefined, rejected),
       input: requiredInput(),
       providerProfileId: "profile-1",
       runId: "run-1",
     })).toEqual({
       status: "unavailable",
-      reason: "The AI Analyst exceeded the two-attempt SQL limit.",
+      reason: "The AI Analyst exceeded the four-attempt SQL limit.",
     });
   });
 
@@ -440,11 +566,13 @@ describe("Preschool AI Run", () => {
     }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const first = getOrStartPreschoolAiRun(input);
+    const progress: PreschoolAiProgress[] = [];
+    const first = getOrStartPreschoolAiRun(input, (stage) => progress.push(stage));
     const second = getOrStartPreschoolAiRun(input);
     expect(first).toBe(second);
     await expect(first).resolves.toMatchObject({ status: "available" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(progress).toEqual(["inspecting", "querying", "validating", "drafting"]);
 
     resetPreschoolAiRunsForTests();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 503 })));
@@ -464,19 +592,38 @@ function requiredInput(): PreschoolAiRunInput {
 
 function successfulEventStream(
   findings = generatedFindings(),
-  extraSqlEvents: Array<Record<string, unknown>> = [],
+  sqlEvidenceEvents: Array<Record<string, unknown>> = [
+    ...sqlEvents("sql-1", 843.0985),
+    ...multiRowSqlEvents("sql-2"),
+  ],
   beforeSqlEvents: Array<Record<string, unknown>> = [],
 ): string {
   const events = [
     { type: "TOOL_CALL_START", toolCallId: "schema-1", toolCallName: "inspect_schema" },
     { type: "TOOL_CALL_RESULT", toolCallId: "schema-1", toolCallName: "inspect_schema", result: { tables: [{ name: "energy_intervals", columns: [{ name: "usage_kwh", type: "DOUBLE" }] }] } },
     ...beforeSqlEvents,
-    ...sqlEvents("sql-1", 843.0985),
-    ...extraSqlEvents,
+    ...sqlEvidenceEvents,
     { type: "TEXT_MESSAGE_CONTENT", delta: JSON.stringify({ findings }) },
     { type: "RUN_FINISHED" },
   ];
   return events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
+}
+
+function multiRowSqlEvents(toolCallId: string): Array<Record<string, unknown>> {
+  const sql = "SELECT hour_of_day, SUM(usage_kwh) AS usage_kwh FROM energy_intervals WHERE quality_status='ok' AND official_aggregation_eligible=TRUE GROUP BY hour_of_day ORDER BY usage_kwh DESC LIMIT 3";
+  return [
+    { type: "TOOL_CALL_START", toolCallId, toolCallName: "run_sql_readonly", args: { sql } },
+    { type: "TOOL_CALL_RESULT", toolCallId, toolCallName: "run_sql_readonly", result: { sql, columns: ["hour_of_day", "usage_kwh"], rows: [[9, 62.4], [10, 59.1], [8, 57.8]], row_count: 3, audit_log_id: `audit-${toolCallId}`, elapsed_ms: 14 } },
+  ];
+}
+
+function oversizedSqlEvents(toolCallId: string, rowCount: number, returnedRows: number): Array<Record<string, unknown>> {
+  const sql = "SELECT hour_of_day, usage_kwh FROM energy_intervals ORDER BY usage_kwh DESC LIMIT 11";
+  const rows = Array.from({ length: returnedRows }, (_, index) => [index, 100 - index]);
+  return [
+    { type: "TOOL_CALL_START", toolCallId, toolCallName: "run_sql_readonly", args: { sql } },
+    { type: "TOOL_CALL_RESULT", toolCallId, toolCallName: "run_sql_readonly", result: { sql, columns: ["hour_of_day", "usage_kwh"], rows, row_count: rowCount, audit_log_id: `audit-${toolCallId}`, elapsed_ms: 14 } },
+  ];
 }
 
 function sqlEvents(toolCallId: string, value: number): Array<Record<string, unknown>> {
@@ -498,8 +645,10 @@ function generatedFindings() {
       how: "Inspect the Centre schedule and the highest contributing Circuit.",
       howToVerify: "Repeat the same scoped comparison after the operating review.",
       evidenceNote: "This supports prioritisation, not a confirmed root cause.",
+      expectedIfAct: "The next review should isolate the operating condition behind the pattern.",
+      ifIgnored: "The unresolved pattern may continue without an accountable investigation.",
       evidenceRefs: ["benchmark:priority-centre:G"],
-      evidenceSqlIndexes: [1],
+      evidenceSqlIndexes: [1, 2],
     },
     {
       relationship: "independent",
@@ -510,7 +659,10 @@ function generatedFindings() {
       how: "Compare the leading standby Circuit with the published operating schedule.",
       howToVerify: "Check whether the same pattern recurs under the same Calendar classification.",
       evidenceNote: "The Evidence identifies a pattern but cannot prove waste.",
+      expectedIfAct: "The review should distinguish scheduled use from avoidable standby.",
+      ifIgnored: "Standby and operating use will remain mixed in the same decision path.",
       evidenceRefs: ["operating:portfolio", "circuit:standby:L"],
+      evidenceSqlIndexes: [1, 2],
     },
   ];
 }

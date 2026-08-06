@@ -13,7 +13,7 @@ import {
 } from "./preschool-ai-discovery-evidence";
 import type { PreschoolOverviewViewModel } from "./preschool-overview-view-model";
 
-export type PreschoolAiProgress = "inspecting" | "querying" | "drafting";
+export type PreschoolAiProgress = "queued" | "inspecting" | "querying" | "validating" | "drafting";
 export type PreschoolAiRelationship = "supports" | "challenges" | "independent";
 export type PreschoolAiWhyKind = "Evidence" | "Hypothesis" | "Missing Evidence";
 
@@ -33,6 +33,8 @@ export type PreschoolAiFinding = {
   what: string;
   why: { kind: PreschoolAiWhyKind; text: string };
   how: string;
+  expectedIfAct: string;
+  ifIgnored: string;
   howToVerify: string;
   evidenceNote: string;
   evidence: {
@@ -79,7 +81,11 @@ type ToolAccumulator = {
   argsText: string;
   result: unknown;
 };
-type CollectedSqlEvidence = PreschoolAiToolEvidence & { numericEvidence: number[] };
+type CollectedSqlEvidence = PreschoolAiToolEvidence & {
+  numericEvidence: Array<{ column: string | null; row: number; value: number }>;
+  normalizedSql: string | null;
+  returnedRowCount: number;
+};
 type ProgressCallback = (progress: PreschoolAiProgress) => void;
 type CurrentRun = {
   promise: Promise<PreschoolAiRunResult>;
@@ -100,7 +106,7 @@ export function buildPreschoolAiRunInput(
   officialThemes: PreschoolOverviewViewModel["decisionSummary"],
 ): PreschoolAiRunInput | null {
   const discoveryEvidence = buildPreschoolDiscoveryEvidenceBundle(snapshot);
-  if (!discoveryEvidence || officialThemes.items.length === 0 || snapshot.context.resource !== "electricity") return null;
+  if (!discoveryEvidence || snapshot.context.resource !== "electricity") return null;
   const analysisFrom = localDate(new Date(discoveryEvidence.identity.period.from), snapshot.context.timezone);
   const analysisTo = localDate(new Date(Date.parse(discoveryEvidence.identity.period.to) - 1), snapshot.context.timezone);
   const identityKey = [
@@ -153,7 +159,7 @@ export function getOrStartPreschoolAiRun(
   if (onProgress) listeners.add(onProgress);
   const run: CurrentRun = {
     promise: Promise.resolve({ status: "unavailable", reason: "The AI Analyst did not start." }),
-    progress: "inspecting",
+    progress: "queued",
     listeners,
     settled: false,
   };
@@ -178,7 +184,7 @@ export async function executePreschoolAiRun(
 ): Promise<PreschoolAiRunResult> {
   let last: PreschoolAiProgress | null = null;
   const report = (progress: PreschoolAiProgress) => {
-    const rank = { inspecting: 0, querying: 1, drafting: 2 } satisfies Record<PreschoolAiProgress, number>;
+    const rank = { queued: 0, inspecting: 1, querying: 2, validating: 3, drafting: 4 } satisfies Record<PreschoolAiProgress, number>;
     if (last && rank[progress] <= rank[last]) return;
     last = progress;
     onProgress?.(progress);
@@ -201,11 +207,17 @@ export async function executePreschoolAiRun(
     signal: AbortSignal.timeout(300_000),
   });
   if (!response.ok) return { status: "unavailable", reason: `AI Analyst request failed (${response.status}).` };
+  let successfulSqlCount = 0;
   const eventStream = await readEventStream(response, (event) => {
     const toolName = stringValue(event.toolCallName) ?? stringValue(event.tool_call_name);
-    if (event.type === "TOOL_CALL_START" && toolName === "run_sql_readonly") report("querying");
-    if (event.type === "TOOL_CALL_RESULT" && toolName === "run_sql_readonly" && parseSqlToolResult(event.result ?? event.content)) report("drafting");
+    if (event.type === "TOOL_CALL_START" && toolName === "run_sql_readonly") {
+      report(successfulSqlCount === 0 ? "querying" : "validating");
+    }
+    if (event.type === "TOOL_CALL_RESULT" && toolName === "run_sql_readonly" && parseSqlToolResult(event.result ?? event.content)) {
+      successfulSqlCount += 1;
+    }
   });
+  if (successfulSqlCount > 0) report("drafting");
   return resolvePreschoolAiEventStream({ eventStream, input, providerProfileId: defaults.activeLlmProfileId, runId });
 }
 
@@ -262,19 +274,19 @@ function buildPrompt(input: PreschoolAiRunInput): string {
   return [
     `Act as an autonomous energy analyst for ${input.projectName}, Scope ${input.scopeName}.`,
     `Analyse only ${input.analysisFrom} through ${input.analysisTo} in ${input.timezone}, pinned to Snapshot ${input.snapshotId} and Release ${input.projectReleaseId}.`,
-    "Your first action must be an immediate inspect_schema Tool call. Before that call, do not restate, explain, plan, summarize, or precompute the task or contract, and do not output prose. After inspect_schema returns, choose the single most decision-useful SQL cross-check autonomously. Make at most two total run_sql_readonly attempts; rejected or failed calls count toward this limit. Stop after the first successful SQL and number it Evidence index 1.",
-    "On the first SQL plan, include every runtime assertion_id listed for each requirement_id, including manual assertions. Do not call analysis_requirements_commit; satisfy the Runtime gate through the required assertions attached to the SQL plan. If the first SQL is rejected, simplify it and retry only once. After the first successful SQL result, immediately produce the final JSON and never make another tool call. Do not add an explanation or task plan around the final JSON.",
-    "The successful SQL must return exactly one row produced by a decision-useful aggregate that you choose autonomously. A ranked row, Top N result, LIMIT 1 selection, or preview is not an aggregate.",
-    "Never use row position, rank, Top N size, LIMIT value, or row count in a Finding as Evidence or a numeric claim unless that quantity is returned as a real named SQL column value in the cited one-row result.",
+    "Your first action must be an immediate inspect_schema Tool call. Before that call, do not restate, explain, plan, summarize, or precompute the task or contract, and do not output prose. After inspect_schema returns, investigate autonomously through an observation scan, a targeted drill-down, and a validation or contradiction check. Make at most four total run_sql_readonly attempts; rejected or failed calls count toward this limit. Number only successful SQL results consecutively as SQL Evidence indexes 1 through 4.",
+    "On every SQL plan, include every runtime assertion_id listed for each requirement_id, including manual assertions. Do not call analysis_requirements_commit; satisfy the Runtime gate through the required assertions attached to each SQL plan. Use the next SQL to follow evidence from the prior result, not to repeat the same aggregate with different wording. Stop early with zero Findings if the first valid observation does not justify a useful drill-down. Otherwise use two to four successful operations and make the final operation test, contrast, or refute the candidate before returning JSON. Do not add an explanation or task plan around the final JSON.",
+    "A successful SQL may return one aggregate row or a bounded grouped, ranked, or Top-N result. Do not request more than 10 rows from one SQL Evidence operation. Multi-row output is Evidence only for the rows actually returned; omitted or truncated rows remain unavailable.",
+    "Never use row position, rank, Top N size, LIMIT value, or row count in a Finding as Evidence or a numeric claim unless that quantity is returned as a real named SQL column value in the cited SQL result.",
     "Never estimate, sum, extrapolate, approximate, or infer values from truncated, previewed, omitted, or remaining rows. Every number in a Finding must appear directly in that Finding's cited bundle item values or cited SQL row; derived numbers and near matches are forbidden even when the arithmetic seems obvious.",
     "Except for the exact authorized structural references below, every non-SQL number must appear in the actual values of a bundle item cited by that same Finding. For example, stating 100% coverage requires citing quality:may in that same Finding. This is an Evidence-binding example, not a required Finding or theme.",
     "Do not use digits copied from artifact ids, audit ids, query ids, version strings, Snapshot ids, or dates as Finding numbers. Exact pinned Period, Snapshot, Release, and derived full-period presentation may appear only as structural context. Return zero Findings when no directly cited Evidence supports a useful candidate.",
     "For Centre aggregation use parent_node_id, not scope_id. Only include quality_status='ok' and official_aggregation_eligible=TRUE. Do not add Project totals to component rows.",
     "The Bounded Preschool Discovery Evidence Bundle is authoritative for published Portfolio, Centre, Benchmark, Calendar, Spike and Circuit values. SQL is one independent cross-check, not a replacement truth source.",
-    "Return zero to three distinct Findings. Do not force novelty and do not repeat the official themes as prose. If Findings is non-empty, at least one Finding must cite SQL Evidence index 1.",
-    "A Finding may support, challenge, or be independent of the official themes. Each must answer What, Why, How, and How to verify. whyKind must be Evidence, Hypothesis, or Missing Evidence.",
-    "Every Finding must cite exact bundle item ids in evidenceRefs. Cite evidenceSqlIndexes [1] only when that Finding uses the SQL result. Use numbers only from that Finding's cited bundle items or cited SQL. Do not invent causes, equipment state, tariff, cost, savings, ROI, forecast, owner, commitment, target, threshold, duration, or time window.",
-    "Return only strict JSON: {\"findings\":[{\"relationship\":\"supports\",\"title\":\"...\",\"what\":\"...\",\"whyKind\":\"Evidence\",\"why\":\"...\",\"how\":\"...\",\"howToVerify\":\"...\",\"evidenceNote\":\"...\",\"evidenceRefs\":[\"benchmark:priority-centre:G\"],\"evidenceSqlIndexes\":[1]}]}",
+    "Return zero to three distinct Findings. Do not force novelty and do not repeat the official themes as prose. Each displayed Finding must cite the first successful SQL observation and the final successful validation, plus any drill-down it uses, as distinct SQL Evidence indexes.",
+    "A Finding may support, challenge, or be independent of the official themes. Each must answer What, Why, the next investigation, expected result if acted on, consequence if ignored, how to verify, and limitations. whyKind must be Evidence, Hypothesis, or Missing Evidence. expectedIfAct and ifIgnored describe decision consequences supported by the investigation; they must not invent savings, certainty, or operational outcomes. Use evidenceNote to state what the cited Evidence cannot prove.",
+    "Cite every SQL result a Finding uses in evidenceSqlIndexes. Cite exact bundle item ids in evidenceRefs whenever the Finding uses published bundle values; evidenceRefs may be empty for an independent SQL-only angle backed by at least two cited SQL operations. Use numbers only from that Finding's cited bundle items or cited SQL. Do not invent causes, equipment state, tariff, cost, savings, ROI, forecast, owner, commitment, target, threshold, duration, or time window.",
+    "Return only strict JSON: {\"findings\":[{\"relationship\":\"supports\",\"title\":\"...\",\"what\":\"...\",\"whyKind\":\"Evidence\",\"why\":\"...\",\"how\":\"...\",\"expectedIfAct\":\"...\",\"ifIgnored\":\"...\",\"howToVerify\":\"...\",\"evidenceNote\":\"...\",\"evidenceRefs\":[\"benchmark:priority-centre:G\"],\"evidenceSqlIndexes\":[1,2]}]}",
     "Bounded Preschool Discovery Evidence Bundle:",
     JSON.stringify(input.discoveryEvidence),
     "Official deterministic themes (context, not a script):",
@@ -293,17 +305,20 @@ export function resolvePreschoolAiEventStream(args: {
   if (runError) return { status: "unavailable", reason: friendlyReason(stringValue(runError.message) ?? "AI Analyst Run failed.") };
   if (!events.some((event) => event.type === "RUN_FINISHED")) return { status: "unavailable", reason: "The AI Analyst Run did not finish." };
   const collected = collectTools(events);
-  if (collected.sqlAttemptCount > 2) return { status: "unavailable", reason: "The AI Analyst exceeded the two-attempt SQL limit." };
-  if (!collected.schemaValid || collected.sql.length !== 1) {
-    return { status: "unavailable", reason: "The AI Analyst did not complete exactly one successful read-only SQL Evidence query." };
+  if (collected.sqlAttemptCount > 4) return { status: "unavailable", reason: "The AI Analyst exceeded the four-attempt SQL limit." };
+  if (!collected.schemaValid || collected.sql.length < 1 || collected.sql.length > 4) {
+    return { status: "unavailable", reason: "The AI Analyst did not complete a bounded read-only SQL investigation." };
+  }
+  if (collected.sql.some((tool) => Math.max(tool.rowCount ?? 0, tool.returnedRowCount) > 10)) {
+    return { status: "unavailable", reason: "The AI Analyst exceeded the ten-row SQL Evidence limit." };
   }
   if (!discoveryMatchesInput(args.input)) return { status: "unavailable", reason: "The Preschool Discovery Evidence does not match this Run identity." };
   const answer = events.filter((event) => event.type === "TEXT_MESSAGE_CONTENT")
     .map((event) => stringValue(event.delta) ?? "").join("").trim();
   const generated = parseFindings(answer);
   if (!generated) return { status: "unavailable", reason: "The AI response could not be verified against this Snapshot." };
-  if (generated.length > 0 && !generated.some((finding) => finding.evidenceSqlIndexes.includes(1))) {
-    return { status: "unavailable", reason: "At least one Preschool Finding must cite the successful SQL Evidence." };
+  if (generated.some((finding) => finding.evidenceSqlIndexes.length < 2)) {
+    return { status: "unavailable", reason: "Each displayed Preschool Finding must cite at least two successful SQL Evidence operations." };
   }
   const evidenceById = new Map(args.input.discoveryEvidence.items.map((item) => [item.id, item]));
   const selectedEvidence = generated.map((finding) => finding.evidenceRefs
@@ -315,6 +330,11 @@ export function resolvePreschoolAiEventStream(args: {
     .map((index) => collected.sql[index - 1]).filter((tool): tool is CollectedSqlEvidence => Boolean(tool)));
   if (selectedTools.some((items, index) => items.length !== generated[index]!.evidenceSqlIndexes.length)) {
     return { status: "unavailable", reason: "A Preschool Finding cited SQL Evidence that is not present in this Run." };
+  }
+  if (selectedTools.some((tools) => new Set(
+    tools.flatMap((tool) => tool.normalizedSql ? [tool.normalizedSql] : []),
+  ).size < 2)) {
+    return { status: "unavailable", reason: "Each displayed Preschool Finding must cite at least two distinct SQL queries." };
   }
   if (generated.some((finding, index) => unsupportedNumber(
     finding,
@@ -337,13 +357,15 @@ export function resolvePreschoolAiEventStream(args: {
       what: finding.what,
       why: { kind: finding.whyKind, text: finding.why },
       how: finding.how,
+      expectedIfAct: finding.expectedIfAct,
+      ifIgnored: finding.ifIgnored,
       howToVerify: finding.howToVerify,
       evidenceNote: finding.evidenceNote,
       evidence: {
         snapshotId: args.input.snapshotId,
         period: { from: args.input.analysisFrom, to: args.input.analysisTo },
         deterministic: selectedEvidence[index]!,
-        tools: selectedTools[index]!.map(({ numericEvidence: _, ...tool }) => tool),
+        tools: selectedTools[index]!.map(({ numericEvidence: _, normalizedSql: __, returnedRowCount: ___, ...tool }) => tool),
       },
     })),
   };
@@ -356,6 +378,8 @@ type GeneratedFinding = {
   whyKind: PreschoolAiWhyKind;
   why: string;
   how: string;
+  expectedIfAct: string;
+  ifIgnored: string;
   howToVerify: string;
   evidenceNote: string;
   evidenceRefs: string[];
@@ -375,13 +399,15 @@ function parseFindings(answer: string): GeneratedFinding[] | null {
     const what = cleanText(candidate.what);
     const why = cleanText(candidate.why);
     const how = cleanText(candidate.how);
+    const expectedIfAct = cleanText(candidate.expectedIfAct);
+    const ifIgnored = cleanText(candidate.ifIgnored);
     const howToVerify = cleanText(candidate.howToVerify);
     const evidenceNote = cleanText(candidate.evidenceNote);
     if ((relationship !== "supports" && relationship !== "challenges" && relationship !== "independent")
       || (whyKind !== "Evidence" && whyKind !== "Hypothesis" && whyKind !== "Missing Evidence")
-      || !title || !what || !why || !how || !howToVerify || !evidenceNote
-      || evidenceRefs.length === 0 || evidenceSqlIndexes === null) return [];
-    return [{ relationship, title, what, whyKind, why, how, howToVerify, evidenceNote, evidenceRefs, evidenceSqlIndexes }];
+      || !title || !what || !why || !how || !expectedIfAct || !ifIgnored || !howToVerify || !evidenceNote
+      || evidenceSqlIndexes === null) return [];
+    return [{ relationship, title, what, whyKind, why, how, expectedIfAct, ifIgnored, howToVerify, evidenceNote, evidenceRefs, evidenceSqlIndexes }];
   });
   if (findings.length !== envelope.findings.length) return null;
   const semantic = findings.map((finding) => `${finding.title} ${finding.what}`.toLowerCase().replace(/[^a-z0-9]+/gu, " ").trim());
@@ -413,17 +439,33 @@ function collectTools(events: AgUiEvent[]): { schemaValid: boolean; sqlAttemptCo
     const parsed = parseSqlToolResult(tool.result);
     if (!parsed) return [];
     const preview = typeof tool.result === "string" ? tool.result : JSON.stringify(tool.result);
+    const sql = sqlFromToolPayload(tool.args, tool.result) ?? null;
     return [{
       toolCallId: tool.id,
-      sql: sqlFromToolPayload(tool.args, tool.result) ?? null,
+      sql,
       rowCount: parsed.row_count ?? null,
       auditLogId: parsed.audit_log_id ?? null,
       elapsedMs: parsed.elapsed_ms ?? null,
       resultPreview: preview.slice(0, 2_000),
-      numericEvidence: collectNumericValues(parsed.rows),
+      numericEvidence: collectSqlNumericEvidence(parsed.columns, parsed.rows),
+      normalizedSql: normalizeSql(sql),
+      returnedRowCount: parsed.rows.length,
     }];
   });
   return { schemaValid, sqlAttemptCount: attempts.filter((tool) => tool.name === "run_sql_readonly").length, sql };
+}
+
+function normalizeSql(sql: string | null): string | null {
+  if (!sql) return null;
+  const normalized = sql
+    .replace(/\/\*[\s\S]*?\*\//gu, " ")
+    .replace(/--[^\r\n]*/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .replace(/;+$/gu, "")
+    .trim()
+    .toLowerCase();
+  return normalized || null;
 }
 
 function unsupportedNumber(
@@ -433,15 +475,17 @@ function unsupportedNumber(
   input: PreschoolAiRunInput,
 ): boolean {
   const narrative = removeAllowedStructuralReferences(
-    [finding.title, finding.what, finding.why, finding.how, finding.howToVerify, finding.evidenceNote].join(" "),
+    [finding.title, finding.what, finding.why, finding.how, finding.expectedIfAct, finding.ifIgnored, finding.howToVerify, finding.evidenceNote].join(" "),
     input,
     finding.evidenceSqlIndexes,
   );
-  const permitted = [
-    ...evidence.flatMap((item) => collectNumericValues(item.values)),
-    ...tools.flatMap((tool) => tool.numericEvidence),
-  ];
-  return numericTokens(narrative).some((claim) => !permitted.some((value) => numericMatches(claim, value)));
+  const deterministicValues = evidence.flatMap((item) => collectNumericValues(item.values));
+  const sqlValues = tools.flatMap((tool) => tool.numericEvidence);
+  return numericTokens(narrative).some((claim) => {
+    if (deterministicValues.some((value) => numericMatches(claim, value))) return false;
+    return !sqlValues.some((cell) => numericMatches(claim, cell.value)
+      && sqlColumnSupportsClaim(cell.column, claim.context));
+  });
 }
 
 function removeAllowedStructuralReferences(
@@ -542,16 +586,57 @@ function collectNumericValues(value: unknown): number[] {
   return [];
 }
 
-function numericTokens(value: string): Array<{ precision: number; value: number }> {
-  return (value.match(/[-+]?\d[\d,]*(?:\.\d+)?/gu) ?? []).flatMap((token) => {
+function collectSqlNumericEvidence(
+  columns: string[],
+  rows: unknown[],
+): Array<{ column: string | null; row: number; value: number }> {
+  return rows.flatMap((row, rowIndex) => {
+    if (Array.isArray(row)) {
+      return row.flatMap((value, columnIndex) => typeof value === "number" && Number.isFinite(value)
+        ? [{ column: columns[columnIndex] ?? null, row: rowIndex, value }]
+        : []);
+    }
+    if (isRecord(row)) {
+      return Object.entries(row).flatMap(([column, value]) => typeof value === "number" && Number.isFinite(value)
+        ? [{ column, row: rowIndex, value }]
+        : []);
+    }
+    return [];
+  });
+}
+
+function numericTokens(value: string): Array<{ context: string; precision: number; value: number }> {
+  return [...value.matchAll(/[-+]?\d[\d,]*(?:\.\d+)?/gu)].flatMap((match) => {
+    const token = match[0];
     const normalized = token.replaceAll(",", "");
     const parsed = Number(normalized);
-    return Number.isFinite(parsed) ? [{ precision: normalized.includes(".") ? normalized.split(".")[1]!.length : 0, value: parsed }] : [];
+    const start = Math.max(0, (match.index ?? 0) - 20);
+    const end = Math.min(value.length, (match.index ?? 0) + token.length + 20);
+    return Number.isFinite(parsed) ? [{
+      context: value.slice(start, end).toLowerCase(),
+      precision: normalized.includes(".") ? normalized.split(".")[1]!.length : 0,
+      value: parsed,
+    }] : [];
   });
 }
 
 function numericMatches(claim: { precision: number; value: number }, evidence: number): boolean {
   return Math.abs(claim.value - evidence) <= (0.5 * (10 ** -claim.precision)) + Number.EPSILON;
+}
+
+function sqlColumnSupportsClaim(column: string | null, context: string): boolean {
+  if (!column) return !hasExplicitUnit(context);
+  const normalizedColumn = column.toLowerCase();
+  if (/\b(?:kwh|kilowatt[- ]?hours?)\b/u.test(context)) return /(?:^|_)kwh(?:_|$)|usage|energy/u.test(normalizedColumn);
+  if (/%|\bpercent(?:age)?\b/u.test(context)) return /pct|percent|share|rate|ratio/u.test(normalizedColumn);
+  if (/\bcentres?\b/u.test(context)) return /centre.*count|count.*centre/u.test(normalizedColumn);
+  if (/\b(?:spikes?|events?)\b/u.test(context)) return /spike.*count|event.*count|count.*spike|count.*event/u.test(normalizedColumn);
+  if (/\b(?:people|persons?|pax)\b/u.test(context)) return /pax|people|person|headcount/u.test(normalizedColumn);
+  return true;
+}
+
+function hasExplicitUnit(context: string): boolean {
+  return /%|\b(?:kwh|kilowatt[- ]?hours?|percent(?:age)?|centres?|spikes?|events?|people|persons?|pax)\b/u.test(context);
 }
 
 function discoveryMatchesInput(input: PreschoolAiRunInput): boolean {

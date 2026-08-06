@@ -58,7 +58,7 @@ export function PreschoolAiSlot({
 
   if (!input) return <AiFrame><Unavailable detail="AI analysis needs one complete, release-pinned Preschool Snapshot." /></AiFrame>;
   if (!settled || settled.identityKey !== input.identityKey) {
-    const stage = progress?.identityKey === input.identityKey ? progress.stage : "inspecting";
+    const stage = progress?.identityKey === input.identityKey ? progress.stage : "queued";
     return (
       <AiFrame>
         <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-4" role="status" aria-live="polite">
@@ -167,7 +167,10 @@ function FindingCard({
       <Field label="What" value={finding.what} />
       <Field label={`Why · ${finding.why.kind}`} value={finding.why.text} />
       <Field label="Next investigation" value={finding.how} />
+      <Field label="Expected if acted on" value={finding.expectedIfAct} />
+      <Field label="If ignored" value={finding.ifIgnored} />
       <Field label="How to verify" value={finding.howToVerify} />
+      <Field label="Limitations" value={finding.evidenceNote} />
       <div className="mt-auto flex flex-wrap gap-2 border-t border-border pt-3">
         <button ref={triggerRef} type="button" onClick={() => setEvidenceOpen(true)} className="h-8 rounded-md border border-border bg-surface px-3 text-[11px] font-semibold text-foreground">
           View evidence
@@ -225,7 +228,9 @@ function Pin({ label, value }: { label: string; value: string }) {
 }
 
 function progressLabel(progress: PreschoolAiProgress): string {
+  if (progress === "queued") return "AI analysis queued…";
   if (progress === "querying") return "Querying Snapshot…";
+  if (progress === "validating") return "Validating the investigation…";
   if (progress === "drafting") return "Drafting findings…";
   return "Inspecting scoped data…";
 }
@@ -249,6 +254,8 @@ function buildAskHref(base: string, projectId: string, finding: PreschoolAiFindi
     what: finding.what,
     why: finding.why,
     how: finding.how,
+    expectedIfAct: finding.expectedIfAct,
+    ifIgnored: finding.ifIgnored,
     howToVerify: finding.howToVerify,
   }));
   params.set("evidence", JSON.stringify({

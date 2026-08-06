@@ -19,9 +19,20 @@ export type PreschoolDecisionSummaryItem = {
   priority: 1 | 2 | 3;
   label: string;
   finding: string;
+  signal: {
+    label: string;
+    value: number;
+    max: number;
+    valueLabel: string;
+    referenceLabel: string;
+  };
+  what: string;
   why: string;
   action: string;
+  ifActed: string;
+  ifIgnored: string;
   verification: string;
+  limitation: string;
   evidenceLabel: string;
 };
 
@@ -535,7 +546,7 @@ function buildPreschoolDecisionSummary(
     };
   }
 
-  const items: PreschoolDecisionSummaryItem[] = [];
+  const candidates: Array<Omit<PreschoolDecisionSummaryItem, "priority">> = [];
   const operational = snapshot.preschoolOperational?.status === "available"
     ? snapshot.preschoolOperational
     : null;
@@ -544,49 +555,84 @@ function buildPreschoolDecisionSummary(
     && operational.spikes.standby.count > 0
     && operational.sop.breachingCentreCodes.length > 0
   ) {
-    items.push({
+    candidates.push({
       id: "after-hours",
-      priority: 1,
-      label: "After-hours priority",
-      finding: `${formatNumber(operational.energy.standbyKwh, 2)} kWh (${formatNumber(operational.energy.standbySharePct, 1)}%) fell outside published operating hours; ${formatNumber(operational.spikes.standby.count, 0)} Spikes involved ${formatNumber(operational.spikes.standby.centreCount, 0)} Centres: ${operational.sop.breachingCentreCodes.join(" · ")}.`,
-      why: "The published Calendar marks these hour slots closed. The standby total is an investigation boundary, not a savings estimate, and the after-hours signal remains provisional.",
-      action: "Inspect each flagged Centre's worst time and leading Appliance, then confirm the Calendar and on-site operating procedure before changing controls.",
-      verification: "Rerun the same hour-slot recipe for the next comparable complete period and confirm the flagged events fall without shifting usage into operating hours.",
+      label: "After-hours energy",
+      finding: `${operational.sop.breachingCentreCodes.join(" · ")} need after-hours checks first.`,
+      signal: {
+        label: "Outside published hours",
+        value: operational.energy.standbySharePct,
+        max: 100,
+        valueLabel: `${formatNumber(operational.energy.standbySharePct, 1)}%`,
+        referenceLabel: "of Portfolio energy",
+      },
+      what: `${formatNumber(operational.energy.standbyKwh, 2)} kWh fell outside published hours, with ${formatNumber(operational.spikes.standby.count, 0)} Spikes across ${formatNumber(operational.spikes.standby.centreCount, 0)} Centres.`,
+      why: "Closed-hour load can persist without appearing in operating-hour checks.",
+      action: `Check the worst time and leading Appliance at ${operational.sop.breachingCentreCodes.join(" · ")}; confirm the Calendar and local SOP.`,
+      ifActed: "The review can separate Calendar errors, legitimate activity and controllable load.",
+      ifIgnored: "The same closed-hour load may recur; avoidable savings are not yet proven.",
+      verification: "Next complete period: compare standby kWh and same-hour Spike count.",
+      limitation: "Meter data cannot confirm why equipment was on; Calendar and site checks are required.",
       evidenceLabel: operational.evidence.projectionRecipeIds.join(" · "),
     });
   }
 
   const benchmark = snapshot.preschoolBenchmark;
-  if (benchmark && benchmark.priorityCentreCodes.length > 0) {
-    items.push({
+  if (benchmark && benchmark.priorityCentreCodes.length > 0 && benchmark.sampleSize > 0) {
+    candidates.push({
       id: "efficiency",
-      priority: 2,
-      label: "Efficiency priority",
-      finding: `${benchmark.priorityCentreCodes.join(" · ")} sit above both Portfolio P75 cross-hairs for annualised EUI and May per-pax energy.`,
-      why: "The same Centres are high under two normalisations, but provisional area and headcount prevent a confirmed efficiency judgement.",
-      action: "Confirm area and headcount, then audit these Centres against their published cohort and leading Appliances before selecting an intervention.",
-      verification: "After metadata confirmation and any intervention, compare the same metrics against the same published cohort in a later complete period.",
+      label: "Efficiency review",
+      finding: `${benchmark.priorityCentreCodes.join(" · ")} need metadata and Appliance review first.`,
+      signal: {
+        label: "Above both Portfolio P75 lines",
+        value: benchmark.priorityCentreCodes.length,
+        max: benchmark.sampleSize,
+        valueLabel: `${benchmark.priorityCentreCodes.length} / ${benchmark.sampleSize}`,
+        referenceLabel: "Centres",
+      },
+      what: "Each sits above Portfolio P75 for both annualised EUI and May energy per person.",
+      why: "Two normalisations point to the same Centres, reducing size-only bias.",
+      action: "Confirm area and headcount, then compare cohort position and leading Appliances.",
+      ifActed: "The review can separate building intensity, occupancy and Appliance priorities.",
+      ifIgnored: "Priorities remain based on provisional metadata and may misclassify efficiency.",
+      verification: "Next complete period: compare the same metrics against the same cohort after metadata confirmation and action.",
+      limitation: "Area and headcount are provisional; this is a review priority, not confirmed inefficiency.",
       evidenceLabel: benchmark.evidence.projectionRecipeIds.join(" · "),
     });
   }
 
-  if (operational && operational.spikes.operating.count > 0) {
-    items.push({
+  if (operational && operational.spikes.operating.count > 0 && snapshot.analysis.childScopes.length > 0) {
+    candidates.push({
       id: "operating",
-      priority: 3,
       label: "Operating exceptions",
-      finding: `${formatNumber(operational.spikes.operating.count, 0)} operating-hour Spikes were found across ${formatNumber(operational.spikes.operating.centreCount, 0)} Centres.`,
-      why: "Same-Centre, same-hour-slot deviation identifies unusual events, but legitimate activities or overrides remain possible.",
-      action: "Review the highest-variance events with site operators, starting from the recorded time, baseline and leading Appliance; record the operational explanation.",
-      verification: "Rerun the same recipe in the next comparable period and retain only repeated, unexplained events as action candidates.",
+      finding: `${formatNumber(operational.spikes.operating.centreCount, 0)} Centres need operating-hour event review.`,
+      signal: {
+        label: "Centres with operating Spikes",
+        value: operational.spikes.operating.centreCount,
+        max: snapshot.analysis.childScopes.length,
+        valueLabel: `${operational.spikes.operating.centreCount} / ${snapshot.analysis.childScopes.length}`,
+        referenceLabel: "Portfolio Centres",
+      },
+      what: `${formatNumber(operational.spikes.operating.count, 0)} events exceeded each Centre's same-hour baseline during operating hours.`,
+      why: "Repeated unexplained events justify checking for overrides or process drift; scheduled activity may also explain them.",
+      action: "Start with the highest-variance events; record the operator explanation, time, baseline and leading Appliance.",
+      ifActed: "Explained events can be closed; repeated unexplained events become targeted action candidates.",
+      ifIgnored: "Recurring exceptions remain mixed with legitimate activity, weakening future priorities.",
+      verification: "Next complete period: retain only repeated events without an operational explanation.",
+      limitation: "Meter data alone cannot distinguish an override from legitimate activity.",
       evidenceLabel: operational.evidence.projectionRecipeIds[0],
     });
   }
 
+  const items = candidates.slice(0, 3).map((item, index) => ({
+    ...item,
+    priority: (index + 1) as 1 | 2 | 3,
+  }));
+
   return {
     items,
     detail: items.length > 0
-      ? "Priorities are assembled from the available server projections; no cross-theme savings score or root cause is inferred."
+      ? "Only themes supported by this complete Snapshot are shown."
       : "No Evidence-backed priority is shown because the current Snapshot has no available Benchmark or Operational exception projection.",
   };
 }

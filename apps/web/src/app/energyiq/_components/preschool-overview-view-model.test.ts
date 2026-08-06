@@ -131,22 +131,45 @@ describe("Preschool Overview ViewModel", () => {
     ]);
     expect(view.decisionSummary.items[0]).toMatchObject({
       priority: 1,
-      finding: "3,103.78 kWh (12.5%) fell outside published operating hours; 7 Spikes involved 3 Centres: L · E · N.",
+      finding: "L · E · N need after-hours checks first.",
+      signal: {
+        label: "Outside published hours",
+        value: 12.45,
+        max: 100,
+        valueLabel: "12.5%",
+      },
+      what: "3,103.78 kWh fell outside published hours, with 7 Spikes across 3 Centres.",
       evidenceLabel: "preschool-hour-slot-spike-v1 · preschool-after-hours-sop-signal-v1",
     });
     expect(view.decisionSummary.items[1]).toMatchObject({
       priority: 2,
-      finding: "G · M · J sit above both Portfolio P75 cross-hairs for annualised EUI and May per-pax energy.",
+      finding: "G · M · J need metadata and Appliance review first.",
+      signal: {
+        label: "Above both Portfolio P75 lines",
+        value: 3,
+        max: 30,
+        valueLabel: "3 / 30",
+      },
     });
     expect(view.decisionSummary.items[2]).toMatchObject({
       priority: 3,
-      finding: "21 operating-hour Spikes were found across 14 Centres.",
+      finding: "14 Centres need operating-hour event review.",
+      signal: {
+        label: "Centres with operating Spikes",
+        value: 14,
+        max: 30,
+        valueLabel: "14 / 30",
+      },
       evidenceLabel: "preschool-hour-slot-spike-v1",
     });
     expect(view.decisionSummary.items.every((item) => (
-      item.why.length > 0
+      item.what.length > 0
+      && item.why.length > 0
       && item.action.length > 0
+      && item.ifActed.length > 0
+      && item.ifIgnored.length > 0
       && item.verification.length > 0
+      && item.limitation.length > 0
       && item.evidenceLabel.length > 0
     ))).toBe(true);
     expect(view.forecastReadiness).toEqual({
@@ -223,6 +246,7 @@ describe("Preschool Overview ViewModel", () => {
     });
     expect(view.evidence.operationalRecipeIds).toEqual([]);
     expect(view.decisionSummary.items.map((item) => item.id)).toEqual(["efficiency"]);
+    expect(view.decisionSummary.items.map((item) => item.priority)).toEqual([1]);
   });
 
   it("does not calculate percentiles in the browser when the server projection is absent", () => {
@@ -234,6 +258,7 @@ describe("Preschool Overview ViewModel", () => {
     expect(view.benchmark.detail).toContain("No client-side percentile");
     expect(view.centres.every((centre) => centre.eui === null && centre.perPax === null)).toBe(true);
     expect(view.decisionSummary.items.map((item) => item.id)).toEqual(["after-hours", "operating"]);
+    expect(view.decisionSummary.items.map((item) => item.priority)).toEqual([1, 2]);
   });
 
   it("does not calculate an Appliance ranking in the browser when the server projection is absent", () => {
