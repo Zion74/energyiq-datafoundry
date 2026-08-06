@@ -117,6 +117,48 @@ export function PreschoolOverviewRenderer({
         {...(aiAnalystHref ? { aiAnalystHref } : {})}
       />
 
+      <section aria-labelledby="preschool-appliance-ranking" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h3 id="preschool-appliance-ranking" className="text-base font-semibold text-foreground">Where energy goes</h3>
+            <p className="mt-1 text-xs leading-5 text-muted">Portfolio contribution by customer Appliance name for the complete May Snapshot.</p>
+          </div>
+          {view.appliances.status === "available" ? (
+            <p className="text-xs font-semibold tabular-nums text-foreground">{view.appliances.totalEnergy} · 9 Appliances</p>
+          ) : null}
+        </div>
+        {view.appliances.status === "available" ? (
+          <div className="mt-4">
+            <div className="divide-y divide-border border-y border-border" role="list" aria-label="Portfolio Appliance energy ranking">
+              {view.appliances.rows.map((appliance, index) => (
+                <div key={appliance.name} className="grid gap-2 py-3 sm:grid-cols-[minmax(150px,0.8fr)_minmax(220px,1.5fr)_170px] sm:items-center sm:gap-4" role="listitem">
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-semibold text-foreground">{index + 1}. {appliance.name}</p>
+                    <p className="mt-0.5 text-[10px] text-muted-light">{appliance.applianceGroup} · {appliance.centreCount} Centres</p>
+                  </div>
+                  <div className="h-2.5 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true">
+                    <div
+                      className={`h-full rounded-full ${applianceBarClass(appliance.applianceGroup)}`}
+                      style={{ width: `${Math.max(2, appliance.relativeToTopPct)}%` }}
+                    />
+                  </div>
+                  <div className="flex items-baseline justify-between gap-3 tabular-nums sm:justify-end">
+                    <span className="text-xs font-semibold text-foreground">{appliance.energy}</span>
+                    <span className="w-12 text-right text-[11px] text-muted">{appliance.share}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 text-[10px] leading-4 text-muted-light">{view.appliances.detail}</p>
+          </div>
+        ) : (
+          <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
+            <p className="text-xs font-semibold text-muted">Appliance ranking unavailable</p>
+            <p className="mt-2 text-[11px] leading-5 text-muted">{view.appliances.detail}</p>
+          </div>
+        )}
+      </section>
+
       {view.benchmark.status === "provisional" ? (
         <section aria-labelledby="preschool-efficiency-benchmark" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
           <div className="flex flex-wrap items-end justify-between gap-3">
@@ -278,7 +320,7 @@ export function PreschoolOverviewRenderer({
                   <th className="px-3 py-2.5 text-right font-semibold">Annualised EUI</th>
                   <th className="px-3 py-2.5 text-right font-semibold">May per pax</th>
                   <th className="px-3 py-2.5 font-semibold">Quadrant</th>
-                  <th className="px-3 py-2.5 font-semibold">Leading circuit</th>
+                  <th className="px-3 py-2.5 font-semibold">Leading appliance</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -311,6 +353,8 @@ export function PreschoolOverviewRenderer({
               <ReadinessRow label="Import batches" value={String(view.evidence.importBatchCount)} />
               <ReadinessRow label="Queries" value={view.evidence.queryIds.join(", ") || "Unavailable"} mono />
               <ReadinessRow label="Benchmark" value={view.evidence.benchmarkRecipeIds.join(", ") || "Unavailable"} mono />
+              <ReadinessRow label="Appliances" value={view.evidence.applianceRecipeIds.join(", ") || "Unavailable"} mono />
+              <ReadinessRow label="Appliance source" value="Published Circuit aliases" />
               <ReadinessRow label="Operations" value={view.evidence.operationalRecipeIds.join(", ") || "Unavailable"} mono />
             </dl>
           </details>
@@ -622,7 +666,7 @@ function OperationalSpikePanel({
               <span className="text-[11px] font-semibold tabular-nums text-step-error">{centre.worst.variance}</span>
             </div>
             <p className="mt-1 text-[10px] text-muted">{centre.worst.when} · {centre.worst.dayType} · {centre.worst.usage} · {centre.worst.baseline}</p>
-            <p className="mt-1 text-[10px] text-muted-light">Leading circuit: {centre.worst.leadingCircuit}</p>
+            <p className="mt-1 text-[10px] text-muted-light">Leading appliance: {centre.worst.leadingCircuit}</p>
           </div>
         ))}
       </div>
@@ -669,6 +713,13 @@ function ReadinessRow({ label, value, mono = false }: { label: string; value: st
       <dd className={`${mono ? "break-all font-mono" : "break-words"} text-foreground`}>{value}</dd>
     </div>
   );
+}
+
+function applianceBarClass(applianceGroup: string): string {
+  if (applianceGroup === "Aircon") return "bg-primary";
+  if (applianceGroup === "Lighting") return "bg-step-inspect";
+  if (applianceGroup === "Plugload") return "bg-step-warning";
+  return "bg-step-success";
 }
 
 function titleCase(value: string): string {

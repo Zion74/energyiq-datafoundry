@@ -100,6 +100,17 @@ export function preschoolGoldenSnapshot(): EnergyProjectAnalysisSnapshotDto {
   };
   const standbySpikeCounts = new Map([["L", 4], ["E", 2], ["N", 1]]);
   const operatingSpikeCounts = new Map(centreCodes.slice(0, 14).map((code, index) => [code, index === 0 ? 8 : 1]));
+  const applianceUsage = [
+    ["Aircon 1", "Aircon", 5_200],
+    ["Aircon 2", "Aircon", 4_500],
+    ["Heater", "Heater", 3_000],
+    ["Kitchen Lighting", "Lighting", 2_500],
+    ["Living Room Lighting", "Lighting", 2_400],
+    ["Other Lighting3", "Lighting", 2_300],
+    ["Kitchen Plug Load", "Plugload", 1_900],
+    ["Living Area Plug Load", "Plugload", 1_700],
+    ["Plug Load3", "Plugload", 1_421.8123],
+  ] as const;
 
   return {
     ...base,
@@ -202,6 +213,39 @@ export function preschoolGoldenSnapshot(): EnergyProjectAnalysisSnapshotDto {
           eui: "May usage kWh * 12 / published comparison area m2",
           perPax: "May usage kWh / published representative headcount",
         },
+      },
+    },
+    preschoolAppliances: {
+      status: "available",
+      contract: {
+        id: "preschool-may-2026-appliance-ranking",
+        version: "1",
+        aliasContractId: "preschool-circuit-as-appliance-v1",
+        sourceKind: "circuit",
+      },
+      period: {
+        start: "2026-04-30T16:00:00.000Z",
+        endExclusive: "2026-05-31T16:00:00.000Z",
+        timezone: "Asia/Singapore",
+      },
+      totalKwh: 24_921.8123,
+      appliances: applianceUsage.map(([name, applianceGroup, usageKwh], applianceIndex) => ({
+        name,
+        applianceGroup,
+        usageKwh,
+        sharePct: (usageKwh / 24_921.8123) * 100,
+        centreCount: 30,
+        sourceCircuitIds: centreCodes.map((code) => `preschool-centre-${code.toLowerCase()}-${applianceIndex + 1}`),
+      })),
+      evidence: {
+        projectReleaseId: "legacy-profile:preschool-demo:1",
+        dataSnapshotId: "preschool-26b85b9c0b95e090",
+        hierarchyRevisionId: "preschool-hierarchy-v4",
+        meterMappingRevisionId: "preschool-mapping-v4",
+        sourceQueryIds: ["scope_summary_v1", "meter_breakdown_v1"],
+        projectionRecipeId: "preschool-appliance-ranking-v1",
+        sourceKind: "circuit",
+        reconciliationGapKwh: 0,
       },
     },
     preschoolOperational: {

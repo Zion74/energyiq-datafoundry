@@ -88,6 +88,20 @@ describe("Preschool Overview ViewModel", () => {
       .find((cohort) => cohort.name === "Senior Care Center")?.points
       .find((point) => point.centreCode === "J"))
       .toMatchObject({ centreCode: "J", name: "Centre J", aboveP75: true });
+    expect(view.appliances).toMatchObject({
+      status: "available",
+      totalEnergy: "24,921.81 kWh",
+    });
+    if (view.appliances.status !== "available") throw new Error(view.appliances.detail);
+    expect(view.appliances.rows).toHaveLength(9);
+    expect(view.appliances.rows[0]).toMatchObject({
+      name: "Aircon 1",
+      applianceGroup: "Aircon",
+      energy: "5,200.00 kWh",
+      centreCount: 30,
+      relativeToTopPct: 100,
+    });
+    expect(view.appliances.rows.reduce((sum, row) => sum + row.usageKwh, 0)).toBe(24_921.8123);
     expect(view.operational).toMatchObject({
       status: "available",
       standby: { energy: "3,103.78 kWh", share: "12.5%", spikeCount: 7, centreCount: 3 },
@@ -163,6 +177,7 @@ describe("Preschool Overview ViewModel", () => {
       "preschool-hour-slot-spike-v1",
       "preschool-after-hours-sop-signal-v1",
     ]);
+    expect(view.evidence.applianceRecipeIds).toEqual(["preschool-appliance-ranking-v1"]);
   });
 
   it("presents a Calendar exception honestly without labelling it a public holiday", () => {
@@ -219,6 +234,17 @@ describe("Preschool Overview ViewModel", () => {
     expect(view.benchmark.detail).toContain("No client-side percentile");
     expect(view.centres.every((centre) => centre.eui === null && centre.perPax === null)).toBe(true);
     expect(view.decisionSummary.items.map((item) => item.id)).toEqual(["after-hours", "operating"]);
+  });
+
+  it("does not calculate an Appliance ranking in the browser when the server projection is absent", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    delete snapshot.preschoolAppliances;
+
+    const view = buildPreschoolOverviewViewModel(snapshot);
+
+    expect(view.appliances).toMatchObject({ status: "unavailable" });
+    expect(view.appliances.detail).toContain("server-authoritative Appliance ranking");
+    expect(view.evidence.applianceRecipeIds).toEqual([]);
   });
 
   it("withholds all decision priorities when the Snapshot is partial", () => {

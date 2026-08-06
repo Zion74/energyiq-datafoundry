@@ -133,6 +133,12 @@ describe("Project Renderer Registry", () => {
     expect(preschoolMarkup).toContain("3,103.78 kWh (12.5%) fell outside published operating hours");
     expect(preschoolMarkup).toContain("G · M · J sit above both Portfolio P75 cross-hairs");
     expect(preschoolMarkup).toContain("21 operating-hour Spikes were found across 14 Centres");
+    expect(preschoolMarkup).toContain("Where energy goes");
+    expect(preschoolMarkup).toContain("5,200.00 kWh");
+    expect(preschoolMarkup).toContain("9 Appliances");
+    expect(preschoolMarkup).toContain("Leading appliance");
+    expect(preschoolMarkup).not.toContain("Leading circuit");
+    expect(preschoolMarkup).toContain("Published Circuit aliases");
     const afterHoursPriority = preschoolMarkup.indexOf('data-decision-priority="after-hours"');
     const efficiencyPriority = preschoolMarkup.indexOf('data-decision-priority="efficiency"');
     const operatingPriority = preschoolMarkup.indexOf('data-decision-priority="operating"');

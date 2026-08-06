@@ -128,6 +128,24 @@ export type PreschoolOverviewViewModel = {
     status: "unavailable";
     detail: string;
   };
+  appliances: {
+    status: "available";
+    totalEnergy: string;
+    rows: Array<{
+      name: string;
+      applianceGroup: string;
+      usageKwh: number;
+      energy: string;
+      sharePct: number;
+      share: string;
+      centreCount: number;
+      relativeToTopPct: number;
+    }>;
+    detail: string;
+  } | {
+    status: "unavailable";
+    detail: string;
+  };
   operational: {
     status: "available";
     standby: {
@@ -168,6 +186,7 @@ export type PreschoolOverviewViewModel = {
     referenceCount: number;
     importBatchCount: number;
     benchmarkRecipeIds: string[];
+    applianceRecipeIds: string[];
     operationalRecipeIds: string[];
   };
 };
@@ -372,6 +391,29 @@ export function buildPreschoolOverviewViewModel(
           status: "unavailable",
           detail: "The current Snapshot does not contain the published May benchmark projection. No client-side percentile is inferred.",
         },
+    appliances: snapshot.preschoolAppliances?.status === "available"
+      ? {
+          status: "available",
+          totalEnergy: `${formatNumber(snapshot.preschoolAppliances.totalKwh, 2)} kWh`,
+          rows: snapshot.preschoolAppliances.appliances.map((appliance, _index, rows) => ({
+            name: appliance.name,
+            applianceGroup: appliance.applianceGroup,
+            usageKwh: appliance.usageKwh,
+            energy: `${formatNumber(appliance.usageKwh, 2)} kWh`,
+            sharePct: appliance.sharePct,
+            share: `${formatNumber(appliance.sharePct, 1)}%`,
+            centreCount: appliance.centreCount,
+            relativeToTopPct: rows[0]?.usageKwh
+              ? (appliance.usageKwh / rows[0].usageKwh) * 100
+              : 0,
+          })),
+          detail: "Customer Appliance names are project-specific aliases for published Circuit labels; the nine rows reconcile to the Portfolio total.",
+        }
+      : {
+          status: "unavailable",
+          detail: snapshot.preschoolAppliances?.reason.message
+            ?? "The current Snapshot does not contain a server-authoritative Appliance ranking.",
+        },
     operational: snapshot.preschoolOperational?.status === "available"
       ? {
           status: "available",
@@ -417,6 +459,9 @@ export function buildPreschoolOverviewViewModel(
       referenceCount: snapshot.evidence.length,
       importBatchCount: snapshot.dataSnapshot.importBatchIds.length,
       benchmarkRecipeIds: snapshot.preschoolBenchmark?.evidence.projectionRecipeIds ?? [],
+      applianceRecipeIds: snapshot.preschoolAppliances?.status === "available"
+        ? [snapshot.preschoolAppliances.evidence.projectionRecipeId]
+        : [],
       operationalRecipeIds: snapshot.preschoolOperational?.status === "available"
         ? snapshot.preschoolOperational.evidence.projectionRecipeIds
         : [],
@@ -505,7 +550,7 @@ function buildPreschoolDecisionSummary(
       label: "After-hours priority",
       finding: `${formatNumber(operational.energy.standbyKwh, 2)} kWh (${formatNumber(operational.energy.standbySharePct, 1)}%) fell outside published operating hours; ${formatNumber(operational.spikes.standby.count, 0)} Spikes involved ${formatNumber(operational.spikes.standby.centreCount, 0)} Centres: ${operational.sop.breachingCentreCodes.join(" · ")}.`,
       why: "The published Calendar marks these hour slots closed. The standby total is an investigation boundary, not a savings estimate, and the after-hours signal remains provisional.",
-      action: "Inspect each flagged Centre's worst time and leading Circuit, then confirm the Calendar and on-site operating procedure before changing controls.",
+      action: "Inspect each flagged Centre's worst time and leading Appliance, then confirm the Calendar and on-site operating procedure before changing controls.",
       verification: "Rerun the same hour-slot recipe for the next comparable complete period and confirm the flagged events fall without shifting usage into operating hours.",
       evidenceLabel: operational.evidence.projectionRecipeIds.join(" · "),
     });
@@ -519,7 +564,7 @@ function buildPreschoolDecisionSummary(
       label: "Efficiency priority",
       finding: `${benchmark.priorityCentreCodes.join(" · ")} sit above both Portfolio P75 cross-hairs for annualised EUI and May per-pax energy.`,
       why: "The same Centres are high under two normalisations, but provisional area and headcount prevent a confirmed efficiency judgement.",
-      action: "Confirm area and headcount, then audit these Centres against their published cohort and leading Circuits before selecting an intervention.",
+      action: "Confirm area and headcount, then audit these Centres against their published cohort and leading Appliances before selecting an intervention.",
       verification: "After metadata confirmation and any intervention, compare the same metrics against the same published cohort in a later complete period.",
       evidenceLabel: benchmark.evidence.projectionRecipeIds.join(" · "),
     });
@@ -532,7 +577,7 @@ function buildPreschoolDecisionSummary(
       label: "Operating exceptions",
       finding: `${formatNumber(operational.spikes.operating.count, 0)} operating-hour Spikes were found across ${formatNumber(operational.spikes.operating.centreCount, 0)} Centres.`,
       why: "Same-Centre, same-hour-slot deviation identifies unusual events, but legitimate activities or overrides remain possible.",
-      action: "Review the highest-variance events with site operators, starting from the recorded time, baseline and leading Circuit; record the operational explanation.",
+      action: "Review the highest-variance events with site operators, starting from the recorded time, baseline and leading Appliance; record the operational explanation.",
       verification: "Rerun the same recipe in the next comparable period and retain only repeated, unexplained events as action candidates.",
       evidenceLabel: operational.evidence.projectionRecipeIds[0],
     });

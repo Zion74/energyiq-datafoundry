@@ -1319,6 +1319,56 @@ export type PreschoolOperationalProjectionDto = {
   };
 };
 
+export type PreschoolApplianceProjectionDto = {
+  status: "available";
+  contract: {
+    id: "preschool-may-2026-appliance-ranking";
+    version: "1";
+    aliasContractId: "preschool-circuit-as-appliance-v1";
+    sourceKind: "circuit";
+  };
+  period: {
+    start: string;
+    endExclusive: string;
+    timezone: string;
+  };
+  totalKwh: number;
+  appliances: Array<{
+    name: string;
+    applianceGroup: string;
+    usageKwh: number;
+    sharePct: number;
+    centreCount: number;
+    sourceCircuitIds: string[];
+  }>;
+  evidence: {
+    projectReleaseId: string;
+    dataSnapshotId: string;
+    hierarchyRevisionId: string;
+    meterMappingRevisionId: string;
+    sourceQueryIds: string[];
+    projectionRecipeId: "preschool-appliance-ranking-v1";
+    sourceKind: "circuit";
+    reconciliationGapKwh: number;
+  };
+} | {
+  status: "unavailable";
+  reason: {
+    code: "PRESCHOOL_APPLIANCE_SNAPSHOT_INCOMPLETE"
+      | "PRESCHOOL_APPLIANCE_EVIDENCE_MISMATCH"
+      | "PRESCHOOL_APPLIANCE_ALIAS_CONTRACT_UNSUPPORTED"
+      | "PRESCHOOL_APPLIANCE_RECONCILIATION_FAILED";
+    message: string;
+  };
+  evidence: {
+    projectReleaseId: string;
+    dataSnapshotId: string;
+    hierarchyRevisionId: string;
+    meterMappingRevisionId: string;
+    sourceKind: "circuit";
+  };
+};
+
 export type EnergyProjectAnalysisSnapshotDto = {
   context: EnergyQueryContextDto & {
     primaryPeriod: {
@@ -1352,6 +1402,7 @@ export type EnergyProjectAnalysisSnapshotDto = {
   analysis: EnergyProjectAnalysisPayloadDto;
   decisionPriorities?: NgeeAnnDecisionPrioritiesDto;
   preschoolBenchmark?: PreschoolBenchmarkProjectionDto;
+  preschoolAppliances?: PreschoolApplianceProjectionDto;
   preschoolOperational?: PreschoolOperationalProjectionDto;
 };
 
@@ -2160,6 +2211,8 @@ export type SessionConversationDto = {
 export type SessionListItemDto = {
   id: string;
   threadId: string;
+  workspaceId?: string;
+  projectId?: string;
   title?: string;
   titleSource?: string;
   createdAt?: string;

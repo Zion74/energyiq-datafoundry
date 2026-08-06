@@ -35,6 +35,10 @@ import {
   type PreschoolBenchmarkProjection,
 } from "./preschool-benchmark-projection.js";
 import {
+  buildPreschoolApplianceProjection,
+  type PreschoolApplianceProjection,
+} from "./preschool-appliance-projection.js";
+import {
   loadPreschoolOperationalProjection,
   type PreschoolOperationalProjection,
 } from "./preschool-operational-projection.js";
@@ -108,6 +112,7 @@ export type ProjectAnalysisSnapshot = {
   findings: EnergyScopeAnalysis["attention"];
   decisionPriorities?: NgeeAnnDecisionPriorities;
   preschoolBenchmark?: PreschoolBenchmarkProjection;
+  preschoolAppliances?: PreschoolApplianceProjection;
   preschoolOperational?: PreschoolOperationalProjection;
   dataSnapshot: {
     id: string;
@@ -338,6 +343,17 @@ export const resolveProjectAnalysis = async (input: {
               analysis,
             })
           : undefined;
+      const preschoolAppliances = projectRelease.renderer.key === "preschool-overview"
+        && releasedContext.scopeId === input.metadataStore.energyIq.getProject(releasedContext.projectId).root_scope_id
+        && snapshotContext.primaryPeriod.start === "2026-04-30T16:00:00.000Z"
+        && snapshotContext.primaryPeriod.endExclusive === "2026-05-31T16:00:00.000Z"
+          ? buildPreschoolApplianceProjection({
+              projectRelease,
+              period: snapshotContext.primaryPeriod,
+              timezone: releasedContext.timezone,
+              analysis,
+            })
+          : undefined;
       const preschoolOperational = projectRelease.renderer.key === "preschool-overview"
         && releasedContext.scopeId === input.metadataStore.energyIq.getProject(releasedContext.projectId).root_scope_id
         && snapshotContext.primaryPeriod.start === "2026-04-30T16:00:00.000Z"
@@ -384,6 +400,7 @@ export const resolveProjectAnalysis = async (input: {
           findings: analysis.attention,
           ...(decisionPriorities ? { decisionPriorities } : {}),
           ...(preschoolBenchmark ? { preschoolBenchmark } : {}),
+          ...(preschoolAppliances ? { preschoolAppliances } : {}),
           ...(preschoolOperational ? { preschoolOperational } : {}),
           dataSnapshot: {
             id: analysis.provenance.dataSnapshotId,
