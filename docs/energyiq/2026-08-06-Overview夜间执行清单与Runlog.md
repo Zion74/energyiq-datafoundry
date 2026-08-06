@@ -266,10 +266,10 @@ related:
 
 | 顺序 | Ticket / 切片 | 今晚状态 | 验收边界 |
 | --- | --- | --- | --- |
-| M1 | #28 跟踪校准 | TODO | 将重复编号改为唯一编号，移除已失效的 `Blocked by #13`，在现有自动化/Chrome 证据不变的前提下关闭；不再扩写缓存。 |
-| M2 | #9 A/B 数据预检 | DOING | 在隔离验收环境核对四份 Ngee Ann Excel 的覆盖、SHA、映射和 19–20 May 重叠去重语义；固定 Snapshot A/B cutoff 和预期事实行数，不改当前客户 Published Snapshot。 |
-| M3 | #9 Snapshot A | TODO | 只导入 21 Apr–20 May 的 Level 6/7 批次，使用正式 Mapping/materialization/publish 路径生成 A，并保存 A 分析。 |
-| M4 | #9 Snapshot B | TODO | 追加 19 May–17 Jun 的 Level 6/7 批次；重叠读数幂等去重，不双算；同一 Workspace/Project/Release/Mapping/Renderer 生成 B。 |
+| M1 | #28 跟踪校准 | DONE | 已改名为唯一的 `T17A`、移除失效依赖、补充最终证据并关闭；没有继续扩写缓存。 |
+| M2 | #9 A/B 数据预检 | DONE | 四份权威 Excel 已用生产解析器核对覆盖、SHA、映射与重叠去重语义；A/B Golden oracle 已固定，当前客户 Published Snapshot 未改动。 |
+| M3 | #9 Snapshot A | DOING | 只导入 21 Apr–20 May 的 Level 6/7 批次，使用正式 Mapping/materialization/publish 路径生成 A，并保存 A 分析。 |
+| M4 | #9 Snapshot B | DOING（与 M3 同一聚焦验收链） | 追加 19 May–17 Jun 的 Level 6/7 批次；重叠读数幂等去重，不双算；同一 Workspace/Project/Release/Mapping/Renderer 生成 B。 |
 | M5 | #9 最小连续状态 | TODO | 只补齐 B 当前值、A 保存值和 New/Recurring/Structural/Mitigated/Resolved/no-longer-supported 中实际有证据的状态；不建设历史 Snapshot 平台。 |
 | M6 | #9 自动化与 Chrome | TODO | 证明 A 可复现、B 为 current、A/B Evidence 不混用、相同 Recipe/Renderer、确定性首屏、1440/1920 无溢出/Console error。AI 只消费侧边线已有合同，不在主线修 Prompt/Provider。 |
 | M7 | #13 非 AI 回归 | TODO（仅 M1–M6 通过后） | 回归 Preschool 确定性卡片、Benchmark、Operating/Spike、Leading Circuit-as-Appliance alias 与 Chrome；Charles 人工门保持 open。 |
@@ -297,3 +297,10 @@ related:
 ### 9.5 早晨交付格式
 
 主 Agent 与侧边 Agent 都必须按以下格式交付：`完成结果 → commit/文件 → 自动化证据 → 真实运行/Chrome 证据 → 未完成项 → 是否触发停止条件`。用户睡眠期间不宣称 Charles 人工验收，也不因无人在线而扩大 scope。
+
+### 9.6 夜间 Goal 与监督规则
+
+- 已创建活动 Goal：在不修改 AI Analyst Provider、Prompt、Tool、Session 与结果恢复实现的前提下，完成 #9 的 Ngee Ann 两批真实数据 A→B 连续验收，并在通过后回归 Preschool 非 AI Overview。
+- Goal 完成必须同时满足：Runlog 与 GitHub Ticket 保持同步；Saved A 固定、Current B 更新且 A/B Snapshot/Evidence 不混用；只处理明确阻塞 #9 的最小确定性缺口；Preschool 确定性回归有测试或 Chrome 证据；早晨交接明确区分自动化、真实运行与人工验收。
+- 每完成一个切片即更新本表；发现新问题时，范围内且直接阻塞当前交付才修复，范围外写入停车场。不得以“顺便完善”为由建设历史 Snapshot、通用 Cache、Scheduler、Provider Router、Insight Artifact 或第二套 Evidence 平台。
+- Goal 只在上述工程目标全部完成且没有 required work 时标记完成；若同一停止条件连续出现并达到 Goal 的 blocked 规则，才标记 blocked。等待用户/Charles 人工验收本身不冒充工程完成，也不冒充阻塞。
