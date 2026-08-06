@@ -10,14 +10,15 @@
 2. [MVP 底座 + 双功能 + 协同架构](决策-MVP底座双功能协同架构.md)：当前最高优先级与复杂度边界；
 3. [Overview 改造与 AI Analysis 打通最终方案](决策-Overview改造与AI-Analysis打通最终方案.md)：项目专属 Recipe/Renderer、DataFoundry AI 边界和最终实施顺序；
 4. [Overview 用户价值与 AI Slot 最小交付决策](2026-08-05-Overview用户价值与AI-Slot最小交付决策.md)：Ngee Ann 首版北极星、真实自主只读 SQL Run、最小 Project Analysis Prior 和最新 Ticket 顺序；
-5. [项目 Renderer、Recipe 与时间上下文](决策-项目Renderer-Recipe与时间上下文.md)：全局主时间、Benchmark、四象限和 AI 上下文契约；
-6. [Ngee Ann 首个试点路线与页面边界](决策-NgeeAnn首个试点路线与页面边界.md)：Ngee Ann 模块、交互/保存语义，以及 Overview/Explorer/AI 的最新边界；
-7. [三 Agent MVP 最终执行与重置包](2026-08-03-三Agent-MVP最终执行与重置包.md)：唯一有效派工入口及三个可复制 Prompt；
-8. [三 Agent MVP 执行手册](2026-08-03-三Agent-MVP执行手册.md)：Data Foundation、Structured Template 和 AI Analyst 的责任、并行依赖与验收；
-9. [DataFoundry Agent Harness 复用边界](说明-DataFoundry-Agent-Harness与EnergyIQ复用边界.md)：解释已有 Runtime、Task Console、Knowledge/MCP/Tools 和受控图表，不重复建设；
-10. [领域词汇表](CONTEXT.md)：Project、Tier、Scope、Meter、Fact、Template、Run 和 Data Health 的统一用语；
-11. [开发计划：Admin 与模板运行闭环](开发计划-Admin与模板运行闭环.md)：已有 Admin/模板能力与当前 Ngee Ann MVP 批次；
-12. [最新 MVP PRD](PRD-EnergyIQ-MVP.md)：客户页面、Admin、数据、模板与验收。
+5. [Charles 系统价值复核与两批数据连续演示决策](2026-08-06-Charles系统价值复核与连续数据演示决策.md)：用连续 Snapshot、简洁洞察、图文协同和行动后果证明系统相对一次性 Claude HTML 的价值；
+6. [项目 Renderer、Recipe 与时间上下文](决策-项目Renderer-Recipe与时间上下文.md)：全局主时间、Benchmark、四象限和 AI 上下文契约；
+7. [Ngee Ann 首个试点路线与页面边界](决策-NgeeAnn首个试点路线与页面边界.md)：Ngee Ann 模块、交互/保存语义，以及 Overview/Explorer/AI 的最新边界；
+8. [三 Agent MVP 最终执行与重置包](2026-08-03-三Agent-MVP最终执行与重置包.md)：唯一派工入口及三个可复制 Prompt；
+9. [三 Agent MVP 执行手册](2026-08-03-三Agent-MVP执行手册.md)：Data Foundation、Structured Template 和 AI Analyst 的责任、并行依赖与验收；
+10. [DataFoundry Agent Harness 复用边界](说明-DataFoundry-Agent-Harness与EnergyIQ复用边界.md)：解释已有 Runtime、Task Console、Knowledge/MCP/Tools 和受控图表，不重复建设；
+11. [领域词汇表](CONTEXT.md)：Project、Tier、Scope、Meter、Fact、Template、Run 和 Data Health 的统一用语；
+12. [开发计划：Admin 与模板运行闭环](开发计划-Admin与模板运行闭环.md)：已有 Admin/模板能力与当前 Ngee Ann MVP 批次；
+13. [最新 MVP PRD](PRD-EnergyIQ-MVP.md)：客户页面、Admin、数据、模板与验收。
 
 若旧聊天或旧文档冲突，以“当前共识与新会话入口”及其链接的 accepted 专题为准。
 
@@ -37,6 +38,7 @@
 | [项目 Renderer、Recipe 与时间上下文](决策-项目Renderer-Recipe与时间上下文.md) | 已确认的统一主时间、受控局部时间、Benchmark 周期、正确四象限和 AI 上下文契约 |
 | [Overview 改造与 AI Analysis 打通最终方案](决策-Overview改造与AI-Analysis打通最终方案.md) | 项目专属 Recipe + React Renderer、DataFoundry AI Runtime 边界、上下文跳转、AI Slot 与实施顺序 |
 | [Overview 用户价值与 AI Slot 最小交付决策](2026-08-05-Overview用户价值与AI-Slot最小交付决策.md) | Ngee Ann 首版把快速确定性 Overview 与一次真实自主 DataFoundry Run 合并验收，并固定服务端 Analysis Pack、Snapshot、只读 SQL 与 Evidence 边界 |
+| [Charles 系统价值复核与两批数据连续演示决策](2026-08-06-Charles系统价值复核与连续数据演示决策.md) | 承认一次性 Claude HTML 的适用场景，并以两批数据连续更新、0–3 条精炼洞察、图文协同和行动后果定义下一项客户价值验收 |
 | [项目配置、数据接入与模板发布流程](流程-项目配置与模板发布.md) | Admin 从 Project Draft 到 Published 的操作与发布门槛 |
 | [Preschool 数据与三层目标结构](决策-Preschool-Portfolio数据集接入.md) | 区分 Centre×Circuit 现有事实与 Block→Room→Circuit 目标映射 |
 | [Ngee Ann 模板吸收方案](评估-Ngee-Ann模板吸收方案.md) | 原型可直接吸收、需参数化、延期模块与 golden baseline |

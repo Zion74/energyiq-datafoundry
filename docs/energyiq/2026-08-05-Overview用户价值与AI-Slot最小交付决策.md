@@ -9,10 +9,13 @@ related:
   - "决策-项目Renderer-Recipe与时间上下文.md"
   - "2026-08-05-Ngee-Ann-Overview-Interaction-Matrix.md"
   - "2026-08-04-T03-T04-T13集成实施记录.md"
+  - "2026-08-06-Charles系统价值复核与连续数据演示决策.md"
 status: accepted
 ---
 
 # Overview 用户价值与 AI Slot 最小交付决策
+
+> **2026-08-06 客户价值补充：** [Charles 系统价值复核与两批数据连续演示决策](2026-08-06-Charles系统价值复核与连续数据演示决策.md)进一步要求用两批真实增量数据证明系统相对“一次性 Claude HTML”的连续价值，并收紧最终页面的信息密度：#9 默认显示 0–3 条有价值 Finding，不为版式机械填满三条；原 #17 exactly-three 只保留为当时 Provider/tool-chain 验收证据。
 
 ## 1. 结论
 
