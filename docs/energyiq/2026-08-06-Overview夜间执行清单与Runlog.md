@@ -268,11 +268,11 @@ related:
 | --- | --- | --- | --- |
 | M1 | #28 跟踪校准 | DONE | 已改名为唯一的 `T17A`、移除失效依赖、补充最终证据并关闭；没有继续扩写缓存。 |
 | M2 | #9 A/B 数据预检 | DONE | 四份权威 Excel 已用生产解析器核对覆盖、SHA、映射与重叠去重语义；A/B Golden oracle 已固定，当前客户 Published Snapshot 未改动。 |
-| M3 | #9 Snapshot A | DOING | 只导入 21 Apr–20 May 的 Level 6/7 批次，使用正式 Mapping/materialization/publish 路径生成 A，并保存 A 分析。 |
-| M4 | #9 Snapshot B | DOING（与 M3 同一聚焦验收链） | 追加 19 May–17 Jun 的 Level 6/7 批次；重叠读数幂等去重，不双算；同一 Workspace/Project/Release/Mapping/Renderer 生成 B。 |
-| M5 | #9 最小连续状态 | TODO | 只补齐 B 当前值、A 保存值和 New/Recurring/Structural/Mitigated/Resolved/no-longer-supported 中实际有证据的状态；不建设历史 Snapshot 平台。 |
-| M6 | #9 自动化与 Chrome | TODO | 证明 A 可复现、B 为 current、A/B Evidence 不混用、相同 Recipe/Renderer、确定性首屏、1440/1920 无溢出/Console error。AI 只消费侧边线已有合同，不在主线修 Prompt/Provider。 |
-| M7 | #13 非 AI 回归 | TODO（仅 M1–M6 通过后） | 回归 Preschool 确定性卡片、Benchmark、Operating/Spike、Leading Circuit-as-Appliance alias 与 Chrome；Charles 人工门保持 open。 |
+| M3 | #9 Snapshot A | DONE | 隔离 fixture 只导入第一批 Level 6/7 Excel，沿正式 Register → Mapping → materialization → Published Overview 路径生成 A；保存分析后冻结其 Snapshot、序列化 Analysis、Evidence 与 Release provenance。 |
+| M4 | #9 Snapshot B | DONE | 在同一隔离 Workspace/Project/Release/Mapping/Renderer 追加第二批 Level 6/7 Excel；重叠读数幂等去重，不双算；生成新的 Current B Snapshot。 |
+| M5 | #9 最小连续状态 | DONE（确定性边界） | Current B 的 28d 值更新为 `4,904.8659 kWh`，前一 28d 与 Saved A 的 `4,831.5555 kWh` 一致；Saved A 仍指向自己的 Snapshot/Evidence。AI Finding lifecycle 仍由侧边 AI 线负责，主线没有建设历史 Snapshot/Insight 平台。 |
+| M6 | #9 自动化与 Chrome | DONE（工程证据） | 新增真实四 Excel 的 A→B 验收测试；隔离 Chrome 回读 Current B 与 Saved A，验证 Snapshot/Evidence 不混用、同一 Release/Recipe/Renderer、确定性首屏及 1440/1920 无横向溢出。隔离 dev-auth 首次壳层 hydration warning 已登记，不冒充正式 password-mode Console 结论。 |
+| M7 | #13 非 AI 回归 | DONE（工程证据） | 5 个 Preschool 确定性测试文件 `65/65` 通过；共享 password-mode Chrome 回读 May Portfolio、Benchmark、Operating/Spike 与 Leading Circuit-as-Appliance alias，1440/1920 无横向溢出且本次 error log 为空。Charles 人工门保持 open。 |
 
 主线停止条件：A/B Golden 无法稳定复现；重叠导入会改写现有 Published 数据；必须新增通用版本库/历史回放/Scheduler/第二套 Evidence；需要修改侧边 Agent 正在占用的 AI 文件。触发后只记录证据并停止该切片，不用临时架构掩盖。
 
@@ -304,3 +304,36 @@ related:
 - Goal 完成必须同时满足：Runlog 与 GitHub Ticket 保持同步；Saved A 固定、Current B 更新且 A/B Snapshot/Evidence 不混用；只处理明确阻塞 #9 的最小确定性缺口；Preschool 确定性回归有测试或 Chrome 证据；早晨交接明确区分自动化、真实运行与人工验收。
 - 每完成一个切片即更新本表；发现新问题时，范围内且直接阻塞当前交付才修复，范围外写入停车场。不得以“顺便完善”为由建设历史 Snapshot、通用 Cache、Scheduler、Provider Router、Insight Artifact 或第二套 Evidence 平台。
 - Goal 只在上述工程目标全部完成且没有 required work 时标记完成；若同一停止条件连续出现并达到 Goal 的 blocked 规则，才标记 blocked。等待用户/Charles 人工验收本身不冒充工程完成，也不冒充阻塞。
+
+### 9.7 主线夜间完成证据
+
+#### A→B 自动化与保留 fixture
+
+- 新增验收测试：`apps/api/src/energy/ngee-ann-two-snapshot-acceptance.test.ts`。它直接读取四份真实 Level 6/7 Excel，调用生产 Register、Mapping、materialization、Published Overview 与 Saved Analysis 路径，不复制计算公式，也不直接修改 Metadata/DuckDB。
+- Integration commits：`e2a0287`（A→B 连续性）、`9c674b0`（可保留隔离 fixture）、`445b666`（A/B 固定 Calendar/Tariff）。聚焦 worker branch 为 `codex/t09-two-snapshot-demo`。
+- 最终保留 fixture：`.scratch/overview-acceptance/ngee-ann-two-snapshot-20260807-0240`。正式验收 `1/1` 通过，总耗时约 `234.18s`：A materialization `64.716s`、A resolve `2.713s`、B materialization `156.892s`、B resolve `3.983s`、B 后回读 Saved A `0.010s`。
+- Snapshot A：`energy-snapshot-50a0a3e83467ca65b07bca63`，28d `4,831.5555 kWh`，latest complete day `2026-05-19`。Snapshot B：`energy-snapshot-03499dcda183ae28c47f7d66`，28d `4,904.8659 kWh`，latest complete day `2026-06-16`。
+- B 的 previous 28d 精确等于 A current 28d；B rolling 7d 为 `1,531.168324 kWh`，前 7d 为 `1,211.677268 kWh`，约 `+26.4%`。A/B 使用同一 Template Release、Renderer、Recipe、Hierarchy、Mapping、Calendar `sg-calendar-v1`、Tariff `sg-tariff-v1` 与 timezone。
+- 第二批重叠导入检出 `3,455` 个重复键与 `16` 个冲突键，生产 materialization 去重后 B facts 为 `100,205`；没有 double-count、gap、negative delta 或 orphan。
+- Saved A `saved-analysis-0e09b34e-5cf8-4af0-8e4e-16d87dc7aded` 在 B 发布后仍保留 A 的 Snapshot、序列化结果、序列、query、Evidence IDs 与 Template revision；Current B 使用自己的 Snapshot/Evidence。没有创建通用历史回放或第二套 Evidence。
+
+#### 隔离 Chrome 与环境边界
+
+- 隔离 API/Web 使用 `8788/3001` 和上述保留 fixture；共享 `8787/3000` 未停止、未改写。早晨可直接检查 Current B 与 Saved A。
+- Current B：`http://127.0.0.1:3001/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity`。Saved A：`http://127.0.0.1:3001/energyiq/saved/saved-analysis-0e09b34e-5cf8-4af0-8e4e-16d87dc7aded`。
+- Current B 在 CSS 1440/1920 下分别为 `innerWidth/document scrollWidth = 1440/1427`、`1920/1907`；Saved A 分别为 `1440/1440`、`1920/1920`，均无 page-level 横向溢出。
+- 可读首屏证据：`.scratch/overview-acceptance/ngee-ann-two-snapshot-20260807-0240/current-b-top.png` 与 `saved-a-top.png`。精确 1440/1920 是 DOM 测量证据；CDP 全页截图超时，因此不把文件名带 `1440/1920` 的中间截图冒充精确尺寸证据。
+- 隔离 dev-auth 首次打开会出现一次壳层 hydration mismatch；它发生在 `DevSignedOutScreen` 与已登录 shell 交接，不影响 A/B 数据、Renderer 或 Evidence。该问题不在 #9 内修；正式 shared password-mode 的既有 Chrome 证据仍需与此隔离 harness 限制分开陈述。
+
+#### Preschool 非 AI 回归
+
+- 聚焦测试：`preschool-appliance-projection`、`preschool-benchmark-projection`、`preschool-operational-projection`、`preschool-overview-view-model`、`published-decision-dashboard` 共 `5 files / 65 tests` 通过。测试 stderr 中两个未 mock 的 AI result resume `401` 已登记给 AI 线，测试本身通过，主线没有修改 Session/Result resume。
+- 共享 password-mode Chrome 回读 `preschool-demo`：May Portfolio `24,921.81 kWh`、30 Centres、Standby `3,103.78 kWh / 12.5%`、Benchmark `G/M/J`、Operating/Spike 与 9 个 customer Appliance alias 均可见。
+- CSS 1440/1920 的 `innerWidth/document/body scrollWidth` 分别为 `1440/1440/1440` 与 `1920/1920/1920`；本次 browser error log 为空。首屏证据：`.scratch/overview-acceptance/preschool-night-top-20260807.jpg`。
+
+### 9.8 早晨交接与未完成边界
+
+- 主线工程 Goal 已满足：A→B、Saved A/Current B、Snapshot/Evidence、Preschool 非 AI 回归、Runlog 与 Ticket 证据均已形成；没有触发停止条件，也没有修改 AI Analyst Provider、Prompt、Tool、Session 或 Result resume。
+- 侧边 AI 线的 A1–A4 仍由侧边任务 Agent 独立交付；在收到 branch/commit/真实 Run 证据前，主 Agent 不声明 AI 质量、连续追问或恢复问题完成。
+- #9 与 #13 不关闭：Charles 人工价值/可读性验收、侧边 AI 结果以及两批数据的现场演示仍是明早人工检查项。工程通过、真实 Chrome 与人工验收保持三个独立证据层级。
+- 早晨优先顺序：先在隔离 `3001` 对照 Saved A/Current B；再看共享 `3000` Preschool；最后审核侧边 AI Agent 交付。若客户信息价值仍不足，只切下一张可见模块，不回到通用底座扩建。
