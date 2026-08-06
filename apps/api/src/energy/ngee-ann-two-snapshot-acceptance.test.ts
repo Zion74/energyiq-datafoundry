@@ -70,6 +70,7 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
     try {
       vi.stubEnv("ENERGYIQ_DUCKDB_PATH", databasePath);
       ensureEnergyIqBootstrap(metadata);
+      configureNgeeAnnOperationalPolicy(metadata);
       const user = metadata.users.getById({ user_id: "dev-user" });
       const project = metadata.energyIq.getProject(PROJECT_ID);
       const publishedTemplate = metadata.energyIq.templates.publishProjectRevisionWithinTransaction({
@@ -142,6 +143,8 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
       });
       expect(analysisA.snapshot.analysis.summary.usageKwh).toBe(4_831.5555);
       expect(analysisA.snapshot.analysis.summary.validIntervalCount).toBeGreaterThan(0);
+      expect(analysisA.snapshot.analysis.cost.status).toBe("available");
+      expect(analysisA.snapshot.analysis.offHours.status).toBe("available");
       expectEvidencePins(analysisA.snapshot.evidence, materializedA.snapshot.id);
       const releaseIdentityA = releaseIdentity(analysisA.snapshot);
 
@@ -222,6 +225,9 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
         to: analysisA.snapshot.context.to,
         usageKwh: analysisA.snapshot.analysis.summary.usageKwh,
       });
+      expect(analysisB.snapshot.analysis.cost.status).toBe("available");
+      expect(analysisB.snapshot.analysis.offHours.status).toBe("available");
+      expect(analysisB.snapshot.decisionPriorities?.status).not.toBe("unavailable");
       expect(releaseIdentity(analysisB.snapshot)).toEqual(releaseIdentityA);
       expectEvidencePins(analysisB.snapshot.evidence, materializedB.snapshot.id);
       expect(new Set(analysisA.snapshot.evidence.map((item) => item.id)))
@@ -366,6 +372,8 @@ const releaseIdentity = (snapshot: Awaited<ReturnType<typeof resolveCurrentOverv
   hierarchyRevisionId: snapshot.projectRelease.hierarchyRevisionId,
   meterMappingRevisionId: snapshot.projectRelease.meterMappingRevisionId,
   meterFormulaRevisionId: snapshot.projectRelease.meterFormulaRevisionId,
+  businessCalendarVersion: snapshot.projectRelease.businessCalendarVersion,
+  tariffScheduleVersion: snapshot.projectRelease.tariffScheduleVersion,
   renderer: snapshot.renderer,
   recipe: snapshot.recipe,
 });
@@ -390,6 +398,42 @@ const phaseTimer = () => {
     }
     previous = current;
   };
+};
+
+const configureNgeeAnnOperationalPolicy = (
+  metadata: ReturnType<typeof createMetadataStore>,
+): void => {
+  metadata.energyIq.operationalPolicy.publishTariffSchedule({
+    version_id: "sg-tariff-v1",
+    project_id: PROJECT_ID,
+    published_by: "dev-user",
+    entries: [{
+      id: "sg-tariff-v1-flat",
+      owner: { kind: "project" },
+      effective_from: "2026-03-31T16:00:00.000Z",
+      currency: "SGD",
+      rate_per_kwh: 0.32,
+    }],
+  });
+  metadata.energyIq.operationalPolicy.publishOperatingCalendar({
+    version_id: "sg-calendar-v1",
+    project_id: PROJECT_ID,
+    published_by: "dev-user",
+    entries: [{
+      id: "sg-calendar-v1-office-hours",
+      owner: { kind: "project" },
+      effective_from: "2026-03-01",
+      weekly: {
+        monday: [{ from: "08:00", to: "18:00" }],
+        tuesday: [{ from: "08:00", to: "18:00" }],
+        wednesday: [{ from: "08:00", to: "18:00" }],
+        thursday: [{ from: "08:00", to: "18:00" }],
+        friday: [{ from: "08:00", to: "18:00" }],
+        saturday: [],
+        sunday: [],
+      },
+    }],
+  });
 };
 
 const jsonPost = (body: unknown): IncomingMessage => {
