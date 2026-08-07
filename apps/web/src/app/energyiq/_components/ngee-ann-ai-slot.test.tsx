@@ -71,6 +71,7 @@ describe("NgeeAnnAiSlot", () => {
     expect(startRun).not.toHaveBeenCalled();
     expect(container.querySelector("[data-saved-ai-result='true']")?.textContent).toContain("run-1");
     expect(container.querySelectorAll("article")).toHaveLength(3);
+    expect(container.querySelector("[data-ai-presentation='true']")?.textContent).toContain("Current period");
   });
 
   it("shows the deterministic-safe analyzing state immediately, then three Findings", async () => {
@@ -381,6 +382,17 @@ function finding(
     how: "Inspect the relevant operating condition.",
     howToVerify: "How to verify this Finding after an operational change.",
     evidenceNote: "This is Finding-specific SQL Evidence.",
+    ...(id === "finding-1" ? {
+      presentation: {
+        version: "1" as const,
+        blocks: [{
+          type: "comparison" as const,
+          title: "Current period comparison",
+          unit: "kWh",
+          items: [{ label: "Current period", value: 352.2069 }, { label: "SQL check", value: 150 }],
+        }],
+      },
+    } : {}),
     evidence: {
       snapshotId: "snapshot-1",
       dataCutoff: "2026-06-16",

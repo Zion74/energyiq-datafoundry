@@ -17,6 +17,11 @@ import {
   type NgeeAnnDiscoveryHorizon,
 } from "./ngee-ann-ai-discovery-evidence";
 import type { NgeeAnnDecisionPrioritiesViewModel } from "./ngee-ann-overview-view-model";
+import {
+  aiFindingPresentationEvidenceText,
+  parseAiFindingPresentation,
+  type AiFindingPresentation,
+} from "./ai-finding-presentation";
 
 export type { NgeeAnnDiscoveryEvidenceItem } from "./ngee-ann-ai-discovery-evidence";
 
@@ -46,6 +51,7 @@ export type NgeeAnnAiFinding = {
   how: string;
   howToVerify: string;
   evidenceNote: string;
+  presentation?: AiFindingPresentation;
   evidence: {
     snapshotId: string;
     dataCutoff: string;
@@ -118,7 +124,7 @@ type CurrentRun = {
 
 const currentRuns = new Map<string, CurrentRun>();
 const FRIENDLY_AI_UNAVAILABLE_REASON = "AI analysis is temporarily unavailable. The verified Overview remains available.";
-const NGEE_ANN_AI_OUTPUT_CONTRACT_REVISION = "v1";
+const NGEE_ANN_AI_OUTPUT_CONTRACT_REVISION = "v2";
 const PERSISTED_WORKSPACE_PROFILE_ID = "workspace-default";
 const ACTIVE_RUN_POLL_INTERVAL_MS = 1_500;
 const ACTIVE_RUN_POLL_LIMIT = 200;
@@ -542,8 +548,10 @@ function buildAgentPrompt(input: NgeeAnnAiRunInput): string {
     "Include the relevant quality status or coverage fields in the SQL result used as Evidence. The supplied deterministic Overview quality summary covers only its primary period and must not be claimed as the quality of the full AI lookback.",
     "When Category, Circuit, daily, time or operating Evidence items are available, at least one Finding must use one of those dimensions. Prefer the strongest decision-relevant change or pattern, not the largest absolute consumer by default. Do not claim Category or Circuit has complete 1d/7d/28d deltas when the cited item says Primary Period only.",
     "Use the bounded Evidence and the one cross-check for three semantically different Findings, then immediately return the required strict JSON.",
+    "For each Finding, decide whether a visual improves understanding. Omit presentation when prose is clearer; otherwise compose any useful presentation v1 blocks. There is no chart quota. Blocks inherit the Finding's cited Evidence, and must not contain unsupported claims or executable HTML/JS/CSS/React.",
+    "Block shapes: metric {type,label,value,unit?,context?}; comparison/ranking/share/distribution {type,title?,unit?,items:[{label,value}]}; trend {type,title?,unit?,points:[{label,value}]}; heatmap {type,title?,unit?,xLabels,yLabels,values}; table {type,title?,columns,rows}; callout {type,tone,text}.",
     "Return only strict JSON with no markdown or commentary using this shape:",
-    '{"findings":[{"relationship":"supports","horizons":["1d","7d"],"title":"...","what":"...","whyKind":"Evidence","why":"...","how":"...","howToVerify":"...","evidenceNote":"what the cited Evidence supports or cannot prove","evidenceRefs":["horizon:1d","category:load"],"evidenceSqlIndexes":[1]}]}',
+    '{"findings":[{"relationship":"supports","horizons":["1d","7d"],"title":"...","what":"...","whyKind":"Evidence","why":"...","how":"...","howToVerify":"...","evidenceNote":"what the cited Evidence supports or cannot prove","evidenceRefs":["horizon:1d","category:load"],"evidenceSqlIndexes":[1],"presentation":{"version":"1","blocks":[{"type":"comparison","title":"Current versus previous","unit":"kWh","items":[{"label":"Current","value":0},{"label":"Previous","value":0}]}]}}]}',
     "Bounded Ngee Ann Discovery Evidence Bundle:",
     JSON.stringify(input.discoveryEvidence),
     "Official deterministic projection:",
@@ -655,6 +663,7 @@ export function resolveNgeeAnnAiEventStream(input: {
     how: finding.how,
     howToVerify: finding.howToVerify,
     evidenceNote: finding.evidenceNote,
+    ...(finding.presentation ? { presentation: finding.presentation } : {}),
     evidence: {
       snapshotId: input.input.snapshotId,
       dataCutoff: input.input.dataCutoff,
@@ -755,6 +764,7 @@ type GeneratedFinding = {
   evidenceNote: string;
   evidenceRefs: string[];
   evidenceSqlIndexes: number[];
+  presentation?: AiFindingPresentation;
 };
 
 function parseGeneratedFindings(answer: string): [GeneratedFinding, GeneratedFinding, GeneratedFinding] | null {
@@ -773,6 +783,7 @@ function parseGeneratedFindings(answer: string): [GeneratedFinding, GeneratedFin
     const how = cleanText(value.how);
     const howToVerify = cleanText(value.howToVerify);
     const evidenceNote = cleanText(value.evidenceNote);
+    const presentation = parseAiFindingPresentation(value.presentation);
     if ((relationship !== "supports" && relationship !== "challenges" && relationship !== "independent")
       || (whyKind !== "Evidence" && whyKind !== "Hypothesis" && whyKind !== "Missing Evidence")
       || horizons.length === 0 || evidenceRefs.length === 0 || evidenceSqlIndexes === null
@@ -789,6 +800,7 @@ function parseGeneratedFindings(answer: string): [GeneratedFinding, GeneratedFin
       evidenceNote,
       evidenceRefs,
       evidenceSqlIndexes,
+      ...(presentation ? { presentation } : {}),
     }];
   });
   if (findings.length !== 3) return null;
@@ -882,6 +894,7 @@ function narrativeHasUnsupportedNumber(
     finding.how,
     finding.howToVerify,
     finding.evidenceNote,
+    aiFindingPresentationEvidenceText(finding.presentation),
   ].join(" ");
   const evidenceNumbers = toNumericTokens([
     ...tools.map((tool) => tool.numericEvidence),

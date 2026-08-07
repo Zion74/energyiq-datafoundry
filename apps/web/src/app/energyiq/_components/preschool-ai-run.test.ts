@@ -42,7 +42,7 @@ describe("Preschool AI Run", () => {
       "metric-revisions:energy.total_usage_kwh@1,energy.usage_per_person,energy.usage_per_sqm",
       "sg-preschool-calendar-v1",
     ]) expect(input.identityKey).toContain(pin);
-    expect(input.identityKey).toContain("preschool-ai-output-contract@v6");
+    expect(input.identityKey).toContain("preschool-ai-output-contract@v7");
     expect(body).toMatchObject({
       method: "agent/run",
       params: { agentId: "dataFoundry" },
@@ -184,6 +184,42 @@ describe("Preschool AI Run", () => {
       },
     });
     expect(result.findings[1]!.evidence.tools).toHaveLength(2);
+  });
+
+  it("accepts an Agent-selected visual backed by the same Finding SQL Evidence", () => {
+    const findings = generatedFindings().slice(0, 1);
+    findings[0]!.presentation = {
+      version: "1",
+      blocks: [{
+        type: "comparison",
+        title: "Two observed energy values",
+        unit: "kWh",
+        items: [{ label: "Centre usage", value: 843.0985 }, { label: "Hour 9 usage", value: 62.4 }],
+      }],
+    };
+    const result = resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status === "available") expect(result.findings[0]!.presentation?.blocks).toHaveLength(1);
+  });
+
+  it("rejects an Agent-selected visual value without Finding-specific Evidence", () => {
+    const findings = generatedFindings().slice(0, 1);
+    findings[0]!.presentation = {
+      version: "1",
+      blocks: [{ type: "metric", label: "Unsupported saving", value: 999_999, unit: "kWh" }],
+    };
+    expect(resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    })).toMatchObject({ status: "unavailable" });
   });
 
   it("accepts an independent SQL-only angle without forcing an official bundle theme", () => {

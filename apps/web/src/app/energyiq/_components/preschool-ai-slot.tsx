@@ -14,6 +14,7 @@ import {
   type PreschoolAiRunResult,
 } from "./preschool-ai-run";
 import type { PreschoolOverviewViewModel } from "./preschool-overview-view-model";
+import { AiFindingPresentationView } from "./ai-finding-presentation-view";
 
 type ProgressCallback = (progress: PreschoolAiProgress) => void;
 type Settled = { identityKey: string; result: PreschoolAiRunResult };
@@ -205,6 +206,8 @@ function FindingCard({
         <p className="text-xs font-semibold text-muted">What the data shows</p>
         <p className="mt-1.5 max-w-[75ch] text-base font-semibold leading-7 text-foreground">{finding.what}</p>
       </div>
+
+      <AiFindingPresentationView presentation={finding.presentation} />
 
       <div className="mt-5 grid gap-5 border-t border-border pt-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
         <div>

@@ -61,6 +61,7 @@ describe("PreschoolAiSlot", () => {
     expect(startRun).not.toHaveBeenCalled();
     expect(container.querySelector("[data-saved-ai-result='true']")?.textContent).toContain("run-1");
     expect(container.querySelectorAll("article")).toHaveLength(2);
+    expect(container.querySelector("[data-ai-presentation='true']")?.textContent).toContain("Centre G");
   });
 
   it("keeps the deterministic Overview ready while analysis progresses", async () => {
@@ -205,6 +206,16 @@ function finding(
     ifIgnored: "The unresolved pattern may continue without an accountable investigation.",
     howToVerify: "Repeat the same scoped comparison after investigation.",
     evidenceNote: "This is not a confirmed root cause.",
+    ...(withSql ? {
+      presentation: {
+        version: "1" as const,
+        blocks: [{
+          type: "metric" as const,
+          label: "Centre G EUI",
+          value: 12.6,
+        }],
+      },
+    } : {}),
     evidence: {
       snapshotId: "preschool-26b85b9c0b95e090",
       period: { from: "2026-05-01", to: "2026-05-31" },

@@ -270,6 +270,43 @@ describe("Ngee Ann AI Run", () => {
     });
   });
 
+  it("accepts an Agent-selected visual when its values are supported by the same Finding Evidence", () => {
+    const findings = generatedFindings();
+    findings[0]!.evidenceRefs.push("category:load");
+    findings[0]!.presentation = {
+      version: "1",
+      blocks: [{
+        type: "comparison",
+        title: "Current comparison",
+        unit: "kWh",
+        items: [{ label: "Level change", value: 352.2069 }, { label: "SQL check", value: 150 }],
+      }],
+    };
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status === "available") expect(result.findings[0]!.presentation?.blocks).toHaveLength(1);
+  });
+
+  it("rejects a visual value that is not supported by the Finding Evidence", () => {
+    const findings = generatedFindings();
+    findings[0]!.presentation = {
+      version: "1",
+      blocks: [{ type: "metric", label: "Unsupported saving", value: 999_999, unit: "kWh" }],
+    };
+    expect(resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    })).toMatchObject({ status: "unavailable" });
+  });
+
   it("rejects a declared 28d Horizon without the matching deterministic Evidence", () => {
     const findings = generatedFindings();
     findings[2]!.evidenceRefs = ["peak:project", "limitation:external-operational-evidence"];
