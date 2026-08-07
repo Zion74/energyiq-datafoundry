@@ -250,12 +250,31 @@ describe("Ngee Ann AI Run", () => {
     expect(new Set(result.findings.flatMap((finding) => finding.horizons))).toEqual(new Set(["1d", "7d", "28d"]));
   });
 
-  it("rejects a Finding that cites Discovery Evidence outside the current bundle", () => {
+  it("drops a Finding that cites Discovery Evidence outside the current bundle while preserving verified siblings", () => {
     const findings = generatedFindings();
     findings[1]!.evidenceRefs = ["horizon:7d", "horizon:28d", "category:not-present"];
 
     const result = resolveNgeeAnnAiEventStream({
       eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.findings.map((finding) => finding.title)).toEqual([
+      findings[0]!.title,
+      findings[2]!.title,
+    ]);
+  });
+
+  it("fails closed when every Finding cites Discovery Evidence outside the current bundle", () => {
+    const finding = generatedFindings()[1]!;
+    finding.evidenceRefs = ["horizon:7d", "horizon:28d", "category:not-present"];
+
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream([finding]),
       input: requiredInput(),
       providerProfileId: "profile-1",
       runId: "run-1",
@@ -353,12 +372,31 @@ describe("Ngee Ann AI Run", () => {
     if (result.status === "available") expect(result.findings[0]!.presentation).toBeUndefined();
   });
 
-  it("rejects a declared 28d Horizon without the matching deterministic Evidence", () => {
+  it("drops a declared 28d Horizon without the matching deterministic Evidence while preserving verified siblings", () => {
     const findings = generatedFindings();
     findings[2]!.evidenceRefs = ["peak:project", "limitation:external-operational-evidence"];
 
     const result = resolveNgeeAnnAiEventStream({
       eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.findings.map((finding) => finding.title)).toEqual([
+      findings[0]!.title,
+      findings[1]!.title,
+    ]);
+  });
+
+  it("fails closed when every Finding declares a Horizon without matching deterministic Evidence", () => {
+    const finding = generatedFindings()[2]!;
+    finding.evidenceRefs = ["peak:project", "limitation:external-operational-evidence"];
+
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream([finding]),
       input: requiredInput(),
       providerProfileId: "profile-1",
       runId: "run-1",
@@ -383,7 +421,7 @@ describe("Ngee Ann AI Run", () => {
     expect(result.status).toBe("available");
   });
 
-  it("rejects a numeric claim copied from an uncited Discovery Evidence item", () => {
+  it("drops a numeric claim copied from uncited Discovery Evidence while preserving verified siblings", () => {
     const findings = generatedFindings();
     findings[0]!.what = "Category change was 352.2069 kWh.";
 
@@ -394,10 +432,12 @@ describe("Ngee Ann AI Run", () => {
       runId: "run-1",
     });
 
-    expect(result).toEqual({
-      status: "unavailable",
-      reason: "The AI Analyst returned a numeric claim without Finding-specific Evidence.",
-    });
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.findings.map((finding) => finding.title)).toEqual([
+      findings[1]!.title,
+      findings[2]!.title,
+    ]);
   });
 
   it("fails closed when the Discovery Evidence pins drift from the Run Snapshot", () => {
@@ -563,7 +603,7 @@ describe("Ngee Ann AI Run", () => {
     expect(result.findings[0].title).toBe("Final candidate");
   });
 
-  it("fails the AI layer closed when a numeric claim is absent from that Finding's SQL result", () => {
+  it("drops a Finding when its numeric claim is absent from that Finding's SQL result", () => {
     const input = requiredInput();
     const findings = generatedFindings();
     findings[0]!.what = "Usage rose by 999 kWh.";
@@ -578,9 +618,68 @@ describe("Ngee Ann AI Run", () => {
       runId: "run-1",
     });
 
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.findings.map((finding) => finding.title)).toEqual([
+      findings[1]!.title,
+      findings[2]!.title,
+    ]);
+  });
+
+  it("fails the AI layer closed when no Finding has supported numeric Evidence", () => {
+    const input = requiredInput();
+    const finding = generatedFindings()[0]!;
+    finding.what = "Usage rose by 999 kWh.";
+    const eventStream = successfulEventStream([finding]).replaceAll(
+      "SELECT SUM(usage_kwh) AS usage_kwh FROM energy_intervals",
+      "SELECT 999 AS decoy FROM energy_intervals",
+    );
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream,
+      input,
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
     expect(result).toEqual({
       status: "unavailable",
       reason: "The AI Analyst returned a numeric claim without Finding-specific Evidence.",
+    });
+  });
+
+  it("drops a Finding that cites missing SQL Evidence while preserving verified siblings", () => {
+    const findings = generatedFindings();
+    findings[1]!.evidenceSqlIndexes = [2];
+
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.findings.map((finding) => finding.title)).toEqual([
+      findings[0]!.title,
+      findings[2]!.title,
+    ]);
+  });
+
+  it("fails closed when every Finding cites SQL Evidence that is missing from the Run", () => {
+    const finding = generatedFindings()[1]!;
+    finding.evidenceSqlIndexes = [2];
+
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream([finding]),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result).toEqual({
+      status: "unavailable",
+      reason: "A Finding cited SQL Evidence that is not present in this Run.",
     });
   });
 
@@ -601,6 +700,64 @@ describe("Ngee Ann AI Run", () => {
     });
 
     expect(result.status).toBe("available");
+  });
+
+  it("keeps adjacent numeric SQL array cells distinct when verifying a Finding", () => {
+    const finding = {
+      ...generatedFindings()[0]!,
+      horizons: [],
+      title: "Component route covers 98.8% of the official total",
+      what: "The component route is 9,619.4663 kWh versus 9,736.4214 kWh, leaving 116.9551 kWh.",
+      why: "Both routes report 21,504 valid intervals and 0 quality exceptions.",
+      evidenceRefs: [],
+      evidenceSqlIndexes: [1],
+      presentation: {
+        version: "1",
+        blocks: [{
+          type: "comparison",
+          title: "Route reconciliation",
+          unit: "kWh",
+          items: [
+            { label: "Official", value: 9736.4214 },
+            { label: "Component", value: 9619.4663 },
+            { label: "Gap", value: 116.9551 },
+          ],
+          evidenceSqlIndexes: [1],
+        }],
+      },
+    };
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(
+        [finding],
+        [],
+        [],
+        [
+          { type: "TOOL_CALL_START", toolCallId: "sql-1", toolCallName: "run_sql_readonly", args: { sql: "SELECT route totals" } },
+          {
+            type: "TOOL_CALL_RESULT",
+            toolCallId: "sql-1",
+            toolCallName: "run_sql_readonly",
+            result: {
+              sql: "SELECT route totals",
+              columns: ["route", "row_count", "usage_kwh", "quality_events"],
+              rows: [
+                ["component", 75264, 9619.4663, 0],
+                ["total", 21504, 9736.4214, 0],
+              ],
+              row_count: 2,
+              audit_log_id: "audit-sql-1",
+              elapsed_ms: 12,
+            },
+          },
+        ],
+      ),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status === "available") expect(result.findings[0]!.presentation?.blocks).toHaveLength(1);
   });
 
   it("accepts server-recomputed arithmetic from pinned Horizon facts", () => {

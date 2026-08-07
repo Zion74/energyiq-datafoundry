@@ -68,8 +68,8 @@ Overview AI Slot 与 Full AI Analyst 均遵守以上职责。项目 Analysis Pac
 
 1. #36/Harness 已合入 Integration；Ngee Ann 固定 Snapshot 的真实 DeepSeek pass@3 已完成，Preschool 连续追问仍需真实登录环境。
 2. #30 当前 `insightQuality` 主要依赖关键词命中，不能充分判断逻辑、可读性和决策价值。
-3. Ngee Ann AI Slot 仍强制“一次成功 SQL + 恰好三条 Finding”；Preschool 仍要求固定 2–4 SQL 调查路线，与 #34 原则冲突。
-4. #35 Presentation Blocks 已补服务端 materialization、Block 级 Evidence 绑定与无障碍语义；仍需两项目真实 Provider 和 1440/1920/tablet 验收。
+3. 两项目固定 SQL/强制 Finding 路线已移除；真实 Provider 仍可能产生单条错误 Evidence 引用，必须逐条拒绝并保留同批已验证 Finding。
+4. #35 Presentation Blocks 已补服务端 materialization、Block 级 Evidence 绑定与无障碍语义；Ngee Ann 已完成一次真实 Provider、Evidence 和 1440/1920 验收，Preschool 与 tablet 仍待完成。
 5. GitHub Issue 正文勾选状态滞后，必须用 commit、测试、Provider 和 Chrome 证据校准，不能仅看 checkbox。
 
 ## 4. 执行任务板
@@ -82,7 +82,7 @@ Overview AI Slot 与 Full AI Analyst 均遵守以上职责。项目 Analysis Pac
 | 4 | 增加重复调查与回答冗长的诊断遥测，不设效率硬门槛 | 本侧边任务 | completed | `7fb6977`；真实 pass@3 无重复 SQL，平均 701 词 |
 | 5 | 校准 Ngee Ann/Preschool AI Slot 的固定 SQL/强制 Finding 路线 | 主 Agent | implemented；Provider pending | 0–3 Findings；Agent 自主调查；Evidence guard 不弱化 |
 | 6 | 补齐 Ngee Ann 的 acted/ignored/verify 决策后果 | 主 Agent | planned | 两项目共享 Finding 语义；项目 Pack 保持独立 |
-| 7 | 完成 #35 Provider 与 Presentation browser acceptance | 主 Agent + 本侧边复核 | contract implemented；runtime acceptance pending | 两项目各有 useful visual 和正确 no-visual 案例 |
+| 7 | 完成 #35 Provider 与 Presentation browser acceptance | 主 Agent + 本侧边复核 | Ngee Ann useful visual passed；Preschool running；no-visual/tablet pending | 两项目各有 useful visual 和正确 no-visual 案例 |
 | 8 | 校准并关闭已完成 Ticket | 主 Agent | partial；#33 closed | #30/#36/#18/#35 继续按证据关闭 |
 | 9 | #15 完整受控图表注册表 | 后续 | deferred | 仅在 Full Analyst 试点明确需要时推进 |
 | 10 | #21 Charles/试点验收 | 用户/Charles | blocked by prior tasks | 人工确认信息价值、可读性、深度和行动价值 |
@@ -159,8 +159,8 @@ Ngee Ann 与 Preschool 各运行至少三次固定 Profile/Snapshot：
 1. [x] #36/Harness commits 合入并通过自动回归；
 2. [x] #36 Ngee Ann real pass@3；Preschool same-session 保留为真实登录环境验收；
 3. [x] #30 结构化质量 Rubric 与报告回归；
-4. [x] AI Slot 固定路线完成代码校准；两项目 Provider 仍待运行；
-5. [ ] #35 真实 visual/no-visual 与浏览器验收；
+4. [x] AI Slot 固定路线完成代码校准；Ngee Ann 已有真实运行证据，Preschool 继续验收；
+5. [ ] #35 Ngee Ann useful visual、Evidence、1440/1920 已通过；Preschool、no-visual 与 tablet 待验；
 6. [ ] #20 History keyboard/1440/1920 验收；
 7. [x] 关闭已合入的 #33（`26d2fd1`；专项回归 4 files / 53 tests）；
 8. [ ] 校准 #30/#36/#18/#35 正文或评论；
@@ -348,3 +348,24 @@ Ngee Ann 与 Preschool 的页面级 AI Slot 已从固定调查脚本改为受控
 自动证据：两项目 Run/Slot、Saved Analysis 共 5 files / 105 tests passed，根 typecheck 与 build passed。
 该证据不等于真实模型价值验收；下一步仍需用相同授权 Profile/Snapshot 连续运行，并分别记录 0–3 Finding、
 查询深度、数字 Evidence、延迟和人工决策价值。
+
+### #18/#35 真实 Ngee Ann Run 收口
+
+真实 DeepSeek V4 Flash Run `ngee-ann-overview-56d0add1-673c-4672-87ce-cfa9e534854b` 在同一授权
+Ngee Ann Snapshot 上完成，耗时约 224 秒，执行 1 次 Schema 与 8 次只读 SQL。模型返回 3 条候选：前两条使用了
+不存在的 path-like Discovery Evidence id；第 3 条为 SQL-only 的 Circuit reconciliation Finding，引用 SQL 2/6/7，
+指出 14 个 component Circuits 合计 9,619.4663 kWh，相对 official 9,736.4214 kWh 有 116.9551 kWh 差额。
+
+运行时复核暴露并修复三个窄问题：
+
+1. Ngee Ann 原先任一候选校验失败会隐藏整批结果；现改为逐条拒绝 Horizon、deterministic ref、SQL ref 或数字
+   Evidence 无效的 Finding，保留同批已验证 sibling；如果全部失败，AI 层仍 fail closed，确定性 Overview 不受影响；
+2. SQL array rows 的紧凑 JSON 逗号曾被数字 tokenizer 误当千位分隔符，导致工具已返回的精确数字被误拒；现用有
+   whitespace 边界的序列化并增加多列数组行回归；
+3. 持久化 Trace 曾过滤模型流中的 whitespace-only chunk，恢复后会出现 `covers98.8%`；Trace 现完整保留原始文本
+   chunk。该项自动回归通过，但当前 8787 实例未能在安全策略下重启，因此浏览器运行态复验要等正常 API 重启。
+
+自动证据：Ngee Ann Run 与 Trace 2 files / 49 tests passed，根 typecheck passed。Chrome 已确认旧 Run 无需重新调用
+模型即可恢复第 3 条有效 Finding；1440/1920 布局无横向裁切，AI-selected comparison visual、Snapshot、3 条 SQL、
+Audit ids 与 Finding-specific Evidence 对话框一致。当前旧 API 实例仍显示修复前的空格缺失，不能把自动修复冒充为
+运行态已发布。

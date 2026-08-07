@@ -617,40 +617,59 @@ export function resolveNgeeAnnAiEventStream(input: {
   if (!generated) {
     return { status: "unavailable", reason: "The AI response could not be verified against this Snapshot." };
   }
-  if (generated.some((finding) => finding.horizons.some(
-    (horizon) => !finding.evidenceRefs.includes(`horizon:${horizon}`),
-  ))) {
-    return {
-      status: "unavailable",
-      reason: "A Finding declared a Horizon without its matching deterministic Evidence.",
-    };
-  }
   const evidenceById = new Map(input.input.discoveryEvidence.items.map((item) => [item.id, item]));
-  const selectedEvidence = generated.map((finding) => finding.evidenceRefs
-    .map((reference) => evidenceById.get(reference))
-    .filter((item): item is NgeeAnnDiscoveryEvidenceItem => Boolean(item)));
-  if (selectedEvidence.some((selection, index) => selection.length !== generated[index]!.evidenceRefs.length)) {
-    return { status: "unavailable", reason: "A Finding cited deterministic Evidence that is not present in this Snapshot." };
-  }
-  const selectedTools = generated.map((finding) => finding.evidenceSqlIndexes
-    .map((index) => sqlTools[index - 1])
-    .filter((tool): tool is CollectedToolEvidence => Boolean(tool)));
-  if (selectedTools.some((selection, index) => selection.length !== generated[index]!.evidenceSqlIndexes.length)) {
-    return { status: "unavailable", reason: "A Finding cited SQL Evidence that is not present in this Run." };
-  }
-  for (const finding of generated) {
+  const rejected = {
+    horizon: false,
+    deterministicEvidence: false,
+    sqlEvidence: false,
+    numericEvidence: false,
+  };
+  const verified = generated.flatMap((finding) => {
+    if (finding.horizons.some((horizon) => !finding.evidenceRefs.includes(`horizon:${horizon}`))) {
+      rejected.horizon = true;
+      return [];
+    }
+    const deterministic = finding.evidenceRefs
+      .map((reference) => evidenceById.get(reference))
+      .filter((item): item is NgeeAnnDiscoveryEvidenceItem => Boolean(item));
+    if (deterministic.length !== finding.evidenceRefs.length) {
+      rejected.deterministicEvidence = true;
+      return [];
+    }
+    const findingTools = finding.evidenceSqlIndexes
+      .map((index) => sqlTools[index - 1])
+      .filter((tool): tool is CollectedToolEvidence => Boolean(tool));
+    if (findingTools.length !== finding.evidenceSqlIndexes.length) {
+      rejected.sqlEvidence = true;
+      return [];
+    }
     const presentation = materializeNgeeAnnPresentation(finding, evidenceById, sqlTools);
     if (presentation) finding.presentation = presentation;
     else delete finding.presentation;
+    if (narrativeHasUnsupportedNumber(finding, deterministic, findingTools)) {
+      rejected.numericEvidence = true;
+      return [];
+    }
+    return [{ finding, deterministic, tools: findingTools }];
+  });
+  if (generated.length > 0 && verified.length === 0) {
+    if (rejected.horizon) {
+      return {
+        status: "unavailable",
+        reason: "A Finding declared a Horizon without its matching deterministic Evidence.",
+      };
+    }
+    if (rejected.deterministicEvidence) {
+      return { status: "unavailable", reason: "A Finding cited deterministic Evidence that is not present in this Snapshot." };
+    }
+    if (rejected.sqlEvidence) {
+      return { status: "unavailable", reason: "A Finding cited SQL Evidence that is not present in this Run." };
+    }
+    if (rejected.numericEvidence) {
+      return { status: "unavailable", reason: "The AI Analyst returned a numeric claim without Finding-specific Evidence." };
+    }
   }
-  if (generated.some((finding, index) => narrativeHasUnsupportedNumber(
-    finding,
-    selectedEvidence[index]!,
-    selectedTools[index]!,
-  ))) {
-    return { status: "unavailable", reason: "The AI Analyst returned a numeric claim without Finding-specific Evidence." };
-  }
-  const findings = generated.map<NgeeAnnAiFinding>((finding, index) => ({
+  const findings = verified.map<NgeeAnnAiFinding>(({ finding, deterministic, tools: findingTools }, index) => ({
     id: `ai-finding-${index + 1}`,
     relationship: finding.relationship,
     horizons: finding.horizons,
@@ -665,8 +684,8 @@ export function resolveNgeeAnnAiEventStream(input: {
       snapshotId: input.input.snapshotId,
       dataCutoff: input.input.dataCutoff,
       dataQuality: input.input.dataQuality,
-      deterministic: selectedEvidence[index]!,
-      tools: selectedTools[index]!.map((tool, toolIndex) => toPublicToolEvidence(
+      deterministic,
+      tools: findingTools.map((tool, toolIndex) => toPublicToolEvidence(
         tool,
         finding.evidenceSqlIndexes[toolIndex]!,
       )),
@@ -730,7 +749,10 @@ function collectToolEvidence(events: AgUiEvent[]): {
       auditLogId: parsedSql?.audit_log_id ?? null,
       elapsedMs: parsedSql?.elapsed_ms ?? null,
       resultPreview: preview.slice(0, 2_000),
-      numericEvidence: parsedSql ? JSON.stringify(parsedSql.rows) : "",
+      // Keep adjacent array cells separated by whitespace. Compact JSON such as
+      // `[96768,0,9736.4214]` makes the numeric tokenizer interpret cell
+      // delimiters as thousands separators and hides otherwise exact Evidence.
+      numericEvidence: parsedSql ? JSON.stringify(parsedSql.rows, null, 1) : "",
     }];
   });
   return {
