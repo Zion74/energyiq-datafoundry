@@ -36,6 +36,9 @@ const executionOptionsFromMastra = (
 
 type TokenUsageCorrelationStore = ReturnType<typeof createTokenUsageCorrelationStore>;
 
+const CHART_MAX_POINTS = 500;
+const CHART_RESULT_COMPLETENESS_LIMIT = CHART_MAX_POINTS + 1;
+
 type SchemaCapability = {
   datasource_id: string;
   dialect?: string;
@@ -205,7 +208,20 @@ export const createDataFoundryToolRegistry = (input: CreateDataFoundryToolRegist
       const issue = dialectIssues[0];
       throw new Error(`SQL_DIALECT_UNSUPPORTED:${issue?.dialect}:${issue?.code}:${issue?.hint}`);
     }
-    const cacheKey = sqlCacheKey(toolInput);
+    const chartResultRequired = Boolean(
+      input.artifactService
+      && input.runContext.energy_query_context
+      && isChartRequested(input.runContext.user_input)
+    );
+    // Fetch one sentinel row beyond chart capacity so the backend can distinguish a complete
+    // chartable result from a result truncated by the transport cap. SQL still owns semantic top-N.
+    const executionLimit = chartResultRequired
+      ? Math.max(toolInput.limit ?? 0, CHART_RESULT_COMPLETENESS_LIMIT)
+      : toolInput.limit;
+    const cacheKey = sqlCacheKey({
+      ...toolInput,
+      ...(executionLimit !== undefined ? { limit: executionLimit } : {})
+    });
     const cached = sqlResultCache.get(cacheKey);
     if (cached) {
       const rawResult = { ...cached, cache_hit: true as const };
@@ -241,7 +257,7 @@ export const createDataFoundryToolRegistry = (input: CreateDataFoundryToolRegist
         run_id: input.runContext.run_id,
         datasource_id: datasourceId,
         sql: toolInput.sql,
-        ...(toolInput.limit ? { limit: toolInput.limit } : {}),
+        ...(executionLimit !== undefined ? { limit: executionLimit } : {}),
         ...(toolInput.timeout_ms ? { timeout_ms: toolInput.timeout_ms } : {}),
         ...(input.abortSignal ? { signal: input.abortSignal } : {}),
         // R-018: let the produced table artifact record its origin so the Detail view
@@ -262,7 +278,6 @@ export const createDataFoundryToolRegistry = (input: CreateDataFoundryToolRegist
         emitter: input.emitter,
         result,
         runContext: input.runContext,
-        ...(toolInput.limit !== undefined ? { requestedLimit: toolInput.limit } : {}),
         state,
         stepId,
         ...(options?.toolCallId ? { toolCallId: options.toolCallId } : {})
@@ -364,7 +379,6 @@ const maybeCreateEnergyChartArtifact = async (input: {
   emitter: AgUiEventEmitter;
   result: SqlExecutionResult;
   runContext: AgentRunContext;
-  requestedLimit?: number;
   state: ToolRegistry["state"];
   stepId: string;
   toolCallId?: string;
@@ -377,10 +391,19 @@ const maybeCreateEnergyChartArtifact = async (input: {
   ) {
     return undefined;
   }
-  const preview = chartPreviewFromSqlResult(input.result, input.runContext.user_input);
-  if (input.requestedLimit === undefined || input.requestedLimit < input.result.row_count) {
+  if (!input.result.artifact_id) {
+    emitChartPreviewSkipped(input, "SOURCE_TABLE_ARTIFACT_REQUIRED");
     return undefined;
   }
+  if (input.result.rows.length !== input.result.row_count) {
+    emitChartPreviewSkipped(input, "SOURCE_TABLE_INCOMPLETE");
+    return undefined;
+  }
+  if (input.result.row_count > CHART_MAX_POINTS) {
+    emitChartPreviewSkipped(input, "SOURCE_TABLE_TOO_LARGE");
+    return undefined;
+  }
+  const preview = chartPreviewFromSqlResult(input.result, input.runContext.user_input);
   if (!preview) {
     return undefined;
   }
@@ -396,6 +419,8 @@ const maybeCreateEnergyChartArtifact = async (input: {
       metadata_json: {
         source_artifact_id: input.result.artifact_id,
         audit_log_id: input.result.audit_log_id,
+        source_result_complete: true,
+        source_row_count: input.result.row_count,
         step_id: input.stepId,
         ...(input.toolCallId ? { tool_call_id: input.toolCallId } : {}),
         generated_by: "energyiq-rule-based-chart"
@@ -414,6 +439,17 @@ const maybeCreateEnergyChartArtifact = async (input: {
   }
 };
 
+const emitChartPreviewSkipped = (
+  input: Pick<Parameters<typeof maybeCreateEnergyChartArtifact>[0], "emitter" | "runContext" | "stepId">,
+  reason: string,
+): void => {
+  input.emitter.emit(createCustomEvent("chart.preview.skipped", {
+    reason,
+    run_id: input.runContext.run_id,
+    step_id: input.stepId
+  }));
+};
+
 const chartPreviewFromSqlResult = (
   result: SqlExecutionResult,
   userInput: string
@@ -423,7 +459,7 @@ const chartPreviewFromSqlResult = (
   points: Array<{ label: string; value: number }>;
   unit?: string;
 } | undefined => {
-  if (result.columns.length !== 2 || result.rows.length < 2 || result.rows.length > 500) {
+  if (result.columns.length !== 2 || result.rows.length < 2 || result.rows.length > CHART_MAX_POINTS) {
     return undefined;
   }
   const [labelColumn, valueColumn] = result.columns;

@@ -1054,9 +1054,10 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
         + "an artifact. "
         + (chartRequested
           ? "The user explicitly requested a chart. Make the first chartable analytical SQL result exactly two columns: "
-            + "one label/time column and one numeric metric column, with 2 to 500 exact rows, and set the "
-            + "run_sql_readonly limit argument to 500 so the result is not truncated. The backend automatically "
-            + "creates the validated chart preview from those SQL rows. Never use write_file or execute_command to build "
+            + "one label/time column and one numeric metric column, with 2 to 500 exact rows. The backend automatically "
+            + "reserves enough result rows and creates the validated Table and Chart Artifacts from the same complete SQL "
+            + "result; do not manipulate the tool limit to trigger chart creation. If the analytical question itself needs "
+            + "a top-N result, express that semantic limit in SQL. Never use write_file or execute_command to build "
             + "HTML, CSV, JavaScript, SVG, or simulated chart values; never interpolate, repeat, or invent points. For an "
             + "hourly trend across a multi-day period, the first chart query must group by the full local hourly timestamp "
             + "(for example date_trunc('hour', local_interval_start) AS local_hour_start), not return raw interval rows and "
