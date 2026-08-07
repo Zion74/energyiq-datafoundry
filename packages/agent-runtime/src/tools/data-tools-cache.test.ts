@@ -51,10 +51,16 @@ describe("data tool SQL reuse", () => {
   it("creates one exact backend chart artifact for an EnergyIQ chart request", async () => {
     const emitted: unknown[] = [];
     const chartInputs: unknown[] = [];
+    const sqlInputs: Array<{ limit?: number; sql: string }> = [];
+    const hourlyRows = Array.from({ length: 168 }, (_, index) => [
+      new Date(Date.UTC(2026, 5, 3, index)).toISOString(),
+      index + 1.25
+    ]);
     const dataGateway = {
       inspectSchema: async () => ({ datasource_id: "energy", dialect: "duckdb", tables: [] }),
-      runSqlReadonly: async (input: { sql: string }) => input.sql.includes("local_interval_start")
-        ? {
+      runSqlReadonly: async (input: { limit?: number; sql: string }) => {
+        sqlInputs.push(input);
+        return input.sql.includes("local_interval_start") ? {
             columns: ["local_interval_start", "usage_kwh"],
             rows: [["2026-06-03 00:00", 0.25], ["2026-06-03 00:15", 0.5]],
             row_count: 2,
@@ -82,27 +88,30 @@ describe("data tool SQL reuse", () => {
             }
           : {
             columns: ["hour_ts", "hourly_usage_kwh"],
-            rows: [["2026-06-03 00:00", 1.25], ["2026-06-03 01:00", 2.5]],
-            row_count: 2,
+            rows: hourlyRows,
+            row_count: hourlyRows.length,
             audit_log_id: "audit-energy",
             artifact_id: "table-energy",
             elapsed_ms: 1
-          }
+          };
+      }
     } as unknown as DataGateway;
     const artifactService = {
       createChartArtifact: async (input: unknown) => {
         chartInputs.push(input);
+        const chartInput = input as {
+          chartType: "bar" | "line" | "pie";
+          points: Array<{ label: string; value: number }>;
+          unit?: string;
+        };
         return {
           id: "chart-energy",
           type: "chart" as const,
           name: "Hourly Usage Kwh by Hour Start",
           preview_json: {
-            chartType: "line",
-            unit: "kWh",
-            points: [
-              { label: "2026-06-03 00:00", value: 1.25 },
-              { label: "2026-06-03 01:00", value: 2.5 }
-            ]
+            chartType: chartInput.chartType,
+            unit: chartInput.unit,
+            points: chartInput.points
           }
         };
       }
@@ -154,8 +163,7 @@ describe("data tool SQL reuse", () => {
     });
     const result = await registry.runSqlReadonly({
       schema_id: schema.schema_id,
-      sql: "SELECT hour_ts, hourly_usage_kwh FROM energy_fact",
-      limit: 10
+      sql: "SELECT hour_ts, hourly_usage_kwh FROM energy_fact"
     });
 
     expect(intervalResult.chart_artifact).toBeUndefined();
@@ -166,14 +174,98 @@ describe("data tool SQL reuse", () => {
     expect(chartInputs[0]).toMatchObject({
       chartType: "line",
       unit: "kWh",
-      points: [
-        { label: "2026-06-03 00:00", value: 1.25 },
-        { label: "2026-06-03 01:00", value: 2.5 }
-      ]
+      metadata_json: {
+        audit_log_id: "audit-energy",
+        source_artifact_id: "table-energy",
+        source_result_complete: true,
+        source_row_count: 168
+      }
     });
+    expect((chartInputs[0] as { points: unknown[] }).points).toHaveLength(168);
+    expect((chartInputs[0] as { points: Array<{ label: string; value: number }> }).points[0]).toEqual({
+      label: "2026-06-03T00:00:00.000Z",
+      value: 1.25
+    });
+    expect((chartInputs[0] as { points: Array<{ label: string; value: number }> }).points.at(-1)).toEqual({
+      label: "2026-06-09T23:00:00.000Z",
+      value: 168.25
+    });
+    expect(sqlInputs.at(-1)).toMatchObject({ limit: 501 });
     expect(registry.state.chart_artifact_ids).toEqual(["chart-energy"]);
     expect(emitted).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "CUSTOM", name: "artifact" })
+    ]));
+  });
+
+  it("fails chart materialization closed when the source table rows are incomplete", async () => {
+    const emitted: unknown[] = [];
+    let chartCreateCount = 0;
+    const previewRows = Array.from({ length: 20 }, (_, index) => [
+      new Date(Date.UTC(2026, 5, 3, index)).toISOString(),
+      index + 0.25
+    ]);
+    const dataGateway = {
+      inspectSchema: async () => ({ datasource_id: "energy", dialect: "duckdb", tables: [] }),
+      runSqlReadonly: async () => ({
+        columns: ["hour_ts", "hourly_usage_kwh"],
+        rows: previewRows,
+        row_count: 168,
+        audit_log_id: "audit-incomplete",
+        artifact_id: "table-incomplete",
+        elapsed_ms: 1
+      })
+    } as unknown as DataGateway;
+    const artifactService = {
+      createChartArtifact: async () => {
+        chartCreateCount += 1;
+        return { id: "chart-should-not-exist", type: "chart" as const };
+      }
+    } as unknown as ArtifactService;
+    const registry = createDataFoundryToolRegistry({
+      artifactService,
+      dataGateway,
+      emitter: { emit: (event) => emitted.push(event) },
+      runContext: {
+        user_id: "user-1",
+        workspace_id: "workspace-1",
+        session_id: "session-incomplete",
+        run_id: "run-incomplete",
+        user_input: "Create an hourly trend chart across the period",
+        chat_mode: "copilotkit",
+        enabled_datasource_ids: ["energy"],
+        selected_datasource_id: "energy",
+        model_name: "test-model",
+        energy_query_context: {
+          projectId: "project-1",
+          projectName: "Project 1",
+          scopeId: "scope-1",
+          scopeName: "Scope 1",
+          scopeType: "circuit",
+          resource: "electricity",
+          timezone: "Asia/Singapore",
+          from: "2026-06-02T16:00:00.000Z",
+          to: "2026-06-09T16:00:00.000Z",
+          endExclusive: true,
+          period: "Custom"
+        }
+      }
+    });
+    const schema = await registry.inspectSchema({ datasource_id: "energy" });
+
+    const result = await registry.runSqlReadonly({
+      schema_id: schema.schema_id,
+      sql: "SELECT hour_ts, hourly_usage_kwh FROM energy_fact",
+      limit: 500
+    });
+
+    expect(result.chart_artifact).toBeUndefined();
+    expect(chartCreateCount).toBe(0);
+    expect(emitted).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "CUSTOM",
+        name: "chart.preview.skipped",
+        value: expect.objectContaining({ reason: "SOURCE_TABLE_INCOMPLETE" })
+      })
     ]));
   });
 });

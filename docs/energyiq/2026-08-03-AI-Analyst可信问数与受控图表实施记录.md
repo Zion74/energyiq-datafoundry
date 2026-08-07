@@ -3,7 +3,7 @@ title: "2026-08-03 开发记录：AI Analyst 可信问数与受控图表"
 summary: "复用 DataFoundry 原生 Harness 打通 Ngee Ann 可信问数、Qwen/DeepSeek 模型链、权威 Energy 语义上下文和 168 点受控图表。"
 doc_type: runlog
 tags: [AI Analyst, 可信问数, 受控图表, DataFoundry]
-updated_at: "2026-08-03"
+updated_at: "2026-08-08"
 related:
   - "说明-DataFoundry-Agent-Harness与EnergyIQ复用边界.md"
   - "2026-08-03-三Agent-MVP执行手册.md"
@@ -57,7 +57,8 @@ DataFoundry 原来已经有 `ChartPreview`、`createChartArtifact` 和前端 bar
 
 - 仅 EnergyIQ 且用户明确要求 chart/graph/plot/趋势图时触发；
 - SQL 结果必须恰好两列：label/time + numeric metric；
-- 只接受 2–500 个完整结果点，查询必须显式提供足够的 `limit`；
+- 只接受 2–500 个完整结果点；模型无需传递特殊 `limit`，服务端在用户明确要求图表时自动读取最多 501 行，以额外一行作为“超过图表容量”的哨兵；
+- Chart 只从同一次完整 SQL Table Artifact 物化；缺少 Table Artifact、返回行不完整或结果超过 500 点时 fail closed，并记录 `chart.preview.skipped` 原因；
 - hourly trend 必须使用真实小时 timestamp，且相邻时间至少 60 分钟；不能把 15 分钟数据改名成 `hour_start` 蒙混；
 - daily/weekly/monthly 使用相同的粒度检查思路；
 - 图表每个点直接来自成功 SQL 结果，模型不得插值、重复模式、模拟波动或手写 HTML/CSV/JavaScript；
@@ -141,3 +142,21 @@ npm run smoke:energyiq-qwen-chart
 3. 定义 AI Analyst 到 Structured Template 的最小协同合同：`scope + period + metric + query artifact + chart preview`；
 4. 下一阶段只允许 Agent 产出受控 Template Patch，不允许任意前端代码生成；
 5. 继续补 Boss 常问问题集，但每个问题先以 Ngee Ann golden period 跑通，再扩展通用能力。
+
+## 9. 2026-08-08：#15 完整 Table Artifact 物化收口
+
+本次没有新增图表 DSL、Renderer 或 Dashboard 平台，只收紧现有 Data Tool → Table Artifact → Chart Artifact 的可信连接：
+
+- 移除模型必须重复传递 `requestedLimit` 的隐含条件；
+- 用户明确要求图表时，服务端将 SQL transport limit 至少提高到 501 行，用第 501 行识别“结果超过 500 点”，语义上的 Top-N 仍必须写在 SQL 中；
+- Chart 创建前要求 Table Artifact 存在，且 `rows.length === row_count`、`row_count <= 500`；否则 fail closed；
+- Chart Metadata 固定记录 `source_artifact_id`、`audit_log_id`、`source_row_count` 和 `source_result_complete=true`，用于刷新恢复和对账。
+
+真实 Ngee Ann Golden 使用隔离 API `8792` 和 DeepSeek V4 Flash 完成：
+
+- Run：`energyiq-qwen-smoke-1786126543631`，状态 `completed`；
+- Table Artifact：`d23902c4-e9de-4cb3-b80f-6ac9c57bf1b7`，168 行，有持久化 CSV；
+- Chart Artifact：`fbdc699b-9a58-4772-bffb-c41d5fd2d25d`，168 点；
+- Table 与 Chart 共用 Audit ID `24dec8ab-1c9a-471c-bdbe-739ca8c3e600`；
+- 重新读取 Session Conversation 返回完成态 checkpoint，并能恢复上述 Table、Chart 和 168 点标记；
+- 自动验证：TypeScript 构建通过，`data-tools-cache`、`energyiq-harness-eval`、`live-run-state` 共 88 项测试通过。
