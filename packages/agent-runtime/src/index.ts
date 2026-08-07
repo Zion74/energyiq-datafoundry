@@ -1608,6 +1608,8 @@ export type * from "./protocol/protocol-runtime.js";
 export type * from "./protocol/types.js";
 export { DataLinkSemanticProvider } from "./semantic/datalink-semantic-provider.js";
 export { EnergyQuerySemanticProvider } from "./semantic/energy-query-semantic-provider.js";
+export { createEnergyAnalysisContractGrounder } from "./semantic/energy-analysis-contract-grounder.js";
+export type { EnergyAnalysisSemantics } from "./semantic/energy-analysis-contract-grounder.js";
 export {
   executeTrustedEnergyText,
   projectAnalysisSnapshotToTrustedText

@@ -3,6 +3,7 @@ import {
   type EnergyScopedDataSource,
   type EnergyScopedScopeDimension,
 } from "@datafoundry/data-gateway";
+import type { EnergyAnalysisSemantics } from "@datafoundry/agent-runtime";
 import type {
   EnergyIqProjectSetupDocument,
   MetadataStore,
@@ -25,6 +26,7 @@ export type EnergyIqAnalysisWorkspace = {
   };
   scopedDatasource: EnergyScopedDataSource;
   scopeDimensions: EnergyScopedScopeDimension[];
+  semantics: EnergyAnalysisSemantics;
 };
 
 /**
@@ -71,6 +73,12 @@ export const ensureEnergyIqAnalysisWorkspace = async (input: {
   if (!scopedDatasource.metadataViewName) {
     throw new Error("ENERGYIQ_ANALYSIS_WORKSPACE_METADATA_UNAVAILABLE");
   }
+  const semantics = createEnergyIqAnalysisSemantics({
+    projectId: input.context.projectId,
+    factsRelation: scopedDatasource.viewName,
+    scopeMetadataRelation: scopedDatasource.metadataViewName,
+    scopeDimensions,
+  });
   return {
     identity: {
       workspaceId: input.context.workspaceId,
@@ -83,8 +91,65 @@ export const ensureEnergyIqAnalysisWorkspace = async (input: {
     },
     scopedDatasource,
     scopeDimensions,
+    semantics,
   };
 };
+
+export const createEnergyIqAnalysisSemantics = (input: {
+  projectId: string;
+  factsRelation: string;
+  scopeMetadataRelation: string;
+  scopeDimensions: EnergyScopedScopeDimension[];
+}): EnergyAnalysisSemantics => ({
+  contract: "energyiq-analysis-semantics@1",
+  relations: {
+    facts: {
+      relation: input.factsRelation,
+      usageColumn: "usage_kwh",
+      qualityStatusColumn: "quality_status",
+      officialAggregationColumn: "official_aggregation_eligible",
+    },
+    scopeMetadata: {
+      relation: input.scopeMetadataRelation,
+      scopeIdColumn: "scope_id",
+      scopeTypeColumn: "scope_type",
+      facilityTypeColumn: "facility_type",
+      metadataStatusColumn: "metadata_status",
+      publishedFacilityTypes: [...new Set(input.scopeDimensions.flatMap((dimension) =>
+        dimension.facilityType ? [dimension.facilityType] : []))]
+        .sort((left, right) => left.localeCompare(right)),
+    },
+  },
+  measureAuthorities: [
+    {
+      id: "energy.usage_kwh",
+      authority: "queryable",
+      source: "facts",
+      unit: "kWh",
+    },
+    {
+      id: "metadata.centre_count",
+      authority: "queryable",
+      source: "scope-metadata",
+    },
+    ...(input.projectId === "preschool-demo"
+      ? [
+          {
+            id: "preschool.benchmark.eui",
+            authority: "deterministic-evidence" as const,
+            source: "project-analysis-snapshot" as const,
+            unit: "kWh/m2/yr",
+          },
+          {
+            id: "preschool.benchmark.per_pax",
+            authority: "deterministic-evidence" as const,
+            source: "project-analysis-snapshot" as const,
+            unit: "kWh/person/month",
+          },
+        ]
+      : []),
+  ],
+});
 
 export const resolveEnergyIqPublishedScopeDimensions = (input: {
   metadataStore: MetadataStore;

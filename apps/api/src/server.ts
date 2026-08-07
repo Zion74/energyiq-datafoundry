@@ -6,6 +6,7 @@ import {
 } from "@copilotkit/runtime";
 import {
   CONVERSATION_WORKING_MEMORY_CONFIG,
+  createEnergyAnalysisContractGrounder,
   createTaskStateRuntime,
   createCustomEvent,
   parseAgentMemoryMode,
@@ -761,13 +762,8 @@ class DataFoundryAgUiAgent extends AbstractAgent {
         });
         const authoritativeContextItems = [
           ...createEnergyAuthoritativeContextItems({
-            ...(energyAnalysisWorkspace?.scopedDatasource.metadataViewName
-              ? {
-                  analysisWorkspace: {
-                    factsRelation: energyAnalysisWorkspace.scopedDatasource.viewName,
-                    scopeMetadataRelation: energyAnalysisWorkspace.scopedDatasource.metadataViewName,
-                  },
-                }
+            ...(energyAnalysisWorkspace
+              ? { analysisWorkspace: energyAnalysisWorkspace.semantics }
               : {}),
             ...(energyQueryContext ? { context: energyQueryContext } : {}),
             ...(projectAnalysisSnapshot ? { projectAnalysisSnapshot } : {}),
@@ -826,10 +822,12 @@ class DataFoundryAgUiAgent extends AbstractAgent {
                 // allowlisted contract for this project/scope/time range.
                 // Preserve Data Foundry's downstream SQL validation without a
                 // second model call that can drift from the trusted boundary.
-                analysisContractGrounder: async (groundingInput) => ({
-                  requirements: groundingInput.requirements,
-                  findings: []
-                })
+                analysisContractGrounder: energyAnalysisWorkspace
+                  ? createEnergyAnalysisContractGrounder(energyAnalysisWorkspace.semantics)
+                  : async (groundingInput) => ({
+                      requirements: groundingInput.requirements,
+                      findings: []
+                    })
               }
             : {}),
           abortSignal: runAbortController.signal,

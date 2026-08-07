@@ -5,7 +5,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { ensureEnergyIqBootstrap } from "./energy-bootstrap.js";
-import { resolveEnergyIqPublishedScopeDimensions } from "./energy-analysis-workspace.js";
+import {
+  createEnergyIqAnalysisSemantics,
+  resolveEnergyIqPublishedScopeDimensions,
+} from "./energy-analysis-workspace.js";
 
 describe("EnergyIQ Analysis Workspace", () => {
   it("keeps a Ngee Ann Level workspace inside its published subtree", () => {
@@ -54,6 +57,39 @@ describe("EnergyIQ Analysis Workspace", () => {
         "Active Aging Center": 8,
         Preschool: 8,
         "Senior Care Center": 14,
+      });
+      expect(createEnergyIqAnalysisSemantics({
+        projectId: project.id,
+        factsRelation: "energy_scope_preschool",
+        scopeMetadataRelation: "energy_scope_preschool_metadata",
+        scopeDimensions: portfolio,
+      })).toMatchObject({
+        contract: "energyiq-analysis-semantics@1",
+        relations: {
+          facts: { relation: "energy_scope_preschool", usageColumn: "usage_kwh" },
+          scopeMetadata: {
+            relation: "energy_scope_preschool_metadata",
+            publishedFacilityTypes: [
+              "Active Aging Center",
+              "Preschool",
+              "Senior Care Center",
+            ],
+          },
+        },
+        measureAuthorities: [
+          { id: "energy.usage_kwh", authority: "queryable", source: "facts" },
+          { id: "metadata.centre_count", authority: "queryable", source: "scope-metadata" },
+          {
+            id: "preschool.benchmark.eui",
+            authority: "deterministic-evidence",
+            source: "project-analysis-snapshot",
+          },
+          {
+            id: "preschool.benchmark.per_pax",
+            authority: "deterministic-evidence",
+            source: "project-analysis-snapshot",
+          },
+        ],
       });
       expect(centreDimensions.every((dimension) =>
         dimension.hierarchyRevisionId === project.hierarchy_revision_id)).toBe(true);

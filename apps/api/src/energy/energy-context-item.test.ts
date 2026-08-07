@@ -85,8 +85,32 @@ describe("createEnergyQueryContextItem", () => {
       scopeName: "Preschool Portfolio",
       scopeType: "project",
     }, "session-preschool", {
-      factsRelation: "energy_scope_123",
-      scopeMetadataRelation: "energy_scope_123_metadata",
+      contract: "energyiq-analysis-semantics@1",
+      relations: {
+        facts: {
+          relation: "energy_scope_123",
+          usageColumn: "usage_kwh",
+          qualityStatusColumn: "quality_status",
+          officialAggregationColumn: "official_aggregation_eligible",
+        },
+        scopeMetadata: {
+          relation: "energy_scope_123_metadata",
+          scopeIdColumn: "scope_id",
+          scopeTypeColumn: "scope_type",
+          facilityTypeColumn: "facility_type",
+          metadataStatusColumn: "metadata_status",
+          publishedFacilityTypes: ["Active Aging Center", "Preschool", "Senior Care Center"],
+        },
+      },
+      measureAuthorities: [
+        { id: "energy.usage_kwh", authority: "queryable", source: "facts", unit: "kWh" },
+        {
+          id: "preschool.benchmark.eui",
+          authority: "deterministic-evidence",
+          source: "project-analysis-snapshot",
+          unit: "kWh/m2/yr",
+        },
+      ],
     });
     const content = String(item.content);
 
@@ -99,9 +123,10 @@ describe("createEnergyQueryContextItem", () => {
     expect(content).toContain("Forecast, tariff cost, savings, ROI");
     expect(content).toContain("does not expose Calendar-derived operating or standby values");
     expect(content).toContain("deterministic Evidence pinned to business_calendar_version");
-    expect(content).toContain("scope_metadata_relation=energy_scope_123_metadata");
+    expect(content).toContain('"relation":"energy_scope_123_metadata"');
     expect(content).toContain("facility_type");
-    expect(content).toContain("must not be interpreted as a business count of zero");
+    expect(content).toContain("not a business count of zero");
+    expect(content).toContain('"authority":"deterministic-evidence"');
     expect(content).not.toContain("is_operating comes from the published operating schedule");
 
     const otherProject = createEnergyQueryContextItem(baseContext, "session-1");

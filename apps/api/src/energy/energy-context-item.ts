@@ -1,7 +1,8 @@
 import {
   createAgentContextItem,
   createAgentContextSourceMetadata,
-  type AgentContextItem
+  type AgentContextItem,
+  type EnergyAnalysisSemantics,
 } from "@datafoundry/agent-runtime";
 import type { TrustedEnergyTextQueryContract } from "@datafoundry/agent-runtime";
 
@@ -12,15 +13,10 @@ import {
   type ProjectAnalysisPackReleaseBinding,
 } from "./project-analysis-pack.js";
 
-export type EnergyAnalysisWorkspaceRelations = {
-  factsRelation: string;
-  scopeMetadataRelation: string;
-};
-
 export const createEnergyQueryContextItem = (
   context: EnergyQueryContext,
   sessionId: string,
-  analysisWorkspace?: EnergyAnalysisWorkspaceRelations,
+  analysisWorkspace?: EnergyAnalysisSemantics,
 ): AgentContextItem => createAgentContextItem({
   id: `energy-query-context:${context.projectId}:${context.scopeId}:${context.dataSnapshotId}`,
   sourceType: "energy-query-context",
@@ -38,11 +34,9 @@ export const createEnergyQueryContextItem = (
     "The datasource exposes only published Meter attachments. Use official_aggregation_eligible for Scope totals; never infer or replace that route from scope_id or meter_role.",
     ...(analysisWorkspace
       ? [
-          "The datasource also exposes a server-authorized, hierarchy-pinned Scope metadata relation. Use it for Scope counts, names, Centre codes, facility_type, area_sqm, occupant_count and metadata_status.",
-          "Join facts to the metadata relation only by the published Scope identity. A missing metadata relation, missing facility_type, or unavailable dimension must not be interpreted as a business count of zero.",
-          "Published Metadata means the relation is pinned to the accepted Project Release. metadata_status is a readiness flag for individual dimensions; provisional values remain present and countable when the question asks how many published Scopes have a facility_type, but disclose that status.",
-          `facts_relation=${analysisWorkspace.factsRelation}`,
-          `scope_metadata_relation=${analysisWorkspace.scopeMetadataRelation}`,
+          "Use queryable measures through scoped SQL. Use deterministic-evidence measures from the current ProjectAnalysisSnapshot and never recalculate them from Metadata.",
+          "A missing Metadata relation, facility_type or dimension is Missing Evidence, not a business count of zero. Disclose metadata_status when using provisional values.",
+          `analysis_semantics=${JSON.stringify(analysisWorkspace)}`,
         ]
       : []),
     "Use appliance for Aircon, Heater, Lighting and Plugload analysis; category is the simplified aircon, light or load business classification.",
@@ -269,7 +263,7 @@ const compactPreschoolOperational = (
 };
 
 export const createEnergyAuthoritativeContextItems = (input: {
-  analysisWorkspace?: EnergyAnalysisWorkspaceRelations;
+  analysisWorkspace?: EnergyAnalysisSemantics;
   context?: EnergyQueryContext;
   projectAnalysisSnapshot?: ProjectAnalysisSnapshot;
   projectRelease?: ProjectAnalysisPackReleaseBinding | null;
