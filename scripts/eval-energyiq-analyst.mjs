@@ -21,22 +21,50 @@ if (args.embedded === "true") {
   if (!process.env.STORAGE_ROOT_DIR) throw new Error("--embedded requires an explicit STORAGE_ROOT_DIR fixture");
   process.env.DATAFOUNDRY_AUTH_MODE = "dev";
   const { createServer } = await import("../apps/api/dist/server.js");
-  embeddedServer = await createServer();
+  // Trace summaries are asynchronous presentation artifacts, not part of the
+  // Analyst answer contract. Disable them so embedded Eval shutdown cannot
+  // close SQLite while a background summarizer is still writing.
+  embeddedServer = await createServer({ traceSectionSummaries: false });
   await new Promise((resolveListen) => embeddedServer.listen(0, "127.0.0.1", resolveListen));
   const address = embeddedServer.address();
   if (!address || typeof address !== "object") throw new Error("Embedded API did not expose a TCP address");
   baseUrl = `http://127.0.0.1:${address.port}`;
 }
 
+let runError = null;
 try {
   await runAndWriteReport();
+} catch (error) {
+  runError = error;
+  process.exitCode = 1;
+  console.error(error);
 } finally {
-  if (embeddedServer) {
-    await new Promise((resolveClose, rejectClose) => {
-      embeddedServer.close((error) => error ? rejectClose(error) : resolveClose());
-      setImmediate(() => embeddedServer.closeAllConnections?.());
+  if (embeddedServer) await closeEmbeddedServer(embeddedServer);
+}
+if (embeddedServer) {
+  // Embedded Eval owns the whole process. Provider SDKs may retain idle
+  // handles after the report and server are closed, so exit explicitly only
+  // after all acceptance artifacts and console output have been flushed.
+  await new Promise((resolveFlush) => process.stdout.write("", resolveFlush));
+  await new Promise((resolveFlush) => process.stderr.write("", resolveFlush));
+  process.exit(process.exitCode ?? 0);
+}
+if (runError) throw runError;
+
+async function closeEmbeddedServer(server) {
+  let closed = false;
+  const gracefulClose = new Promise((resolveClose) => {
+    server.close(() => {
+      closed = true;
+      resolveClose();
     });
-  }
+  });
+  server.closeAllConnections?.();
+  await Promise.race([
+    gracefulClose,
+    new Promise((resolveTimeout) => setTimeout(resolveTimeout, 2_000)),
+  ]);
+  if (!closed) server.closeAllConnections?.();
 }
 
 async function runAndWriteReport() {
@@ -83,73 +111,116 @@ async function runLiveCase(evalCase, { attempt }) {
   const runId = `energyiq-harness-eval-${evalCase.id}-${stamp}`;
   const threadId = `energyiq-harness-eval-thread-${evalCase.id}-${stamp}`;
   const startedAt = Date.now();
-  const response = await fetch(`${baseUrl}/api/copilotkit`, {
-    method: "POST",
-    headers: {
-      Accept: "text/event-stream",
-      Authorization: `Bearer ${authToken}`,
-      "Content-Type": "application/json",
-      "X-Workspace-Id": evalCase.workspaceId,
-    },
-    body: JSON.stringify({
-      method: "agent/run",
-      params: { agentId: "dataFoundry" },
-      body: {
-        threadId,
-        runId,
-        state: {},
-        messages: [{ id: `${runId}:user`, role: "user", content: evalCase.question }],
-        tools: [],
-        context: [],
-        forwardedProps: {
-          externalContext: {
-            source: "energyiq",
-            projectId: evalCase.projectId,
-            scopeId: evalCase.scopeId,
-            resource: evalCase.resource,
-            period: "Custom",
-            from: evalCase.from,
-            to: evalCase.to,
-          },
-          run_config: {
-            protocol: { id: "data-analysis", version: "1" },
-            activeLlmProfileId: profileId,
-            activeSkillId: "data-analysis",
-            enabledDatasourceIds: [],
-            enabledKnowledgeIds: [],
-            enabledMcpServerIds: [],
-            enabledSkillIds: ["data-analysis"],
+  const timeoutMs = 5 * 60 * 1000;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort(new Error(`ENERGYIQ_HARNESS_EVAL_TIMEOUT:${timeoutMs}`));
+  }, timeoutMs);
+  try {
+    const response = await fetch(`${baseUrl}/api/copilotkit`, {
+      method: "POST",
+      headers: {
+        Accept: "text/event-stream",
+        Authorization: `Bearer ${authToken}`,
+        "Content-Type": "application/json",
+        "X-Workspace-Id": evalCase.workspaceId,
+      },
+      body: JSON.stringify({
+        method: "agent/run",
+        params: { agentId: "dataFoundry" },
+        body: {
+          threadId,
+          runId,
+          state: {},
+          messages: [{ id: `${runId}:user`, role: "user", content: evalCase.question }],
+          tools: [],
+          context: [],
+          forwardedProps: {
+            externalContext: {
+              source: "energyiq",
+              projectId: evalCase.projectId,
+              scopeId: evalCase.scopeId,
+              resource: evalCase.resource,
+              period: "Custom",
+              from: evalCase.from,
+              to: evalCase.to,
+            },
+            run_config: {
+              protocol: { id: "data-analysis", version: "1" },
+              activeLlmProfileId: profileId,
+              activeSkillId: "data-analysis",
+              enabledDatasourceIds: [],
+              enabledKnowledgeIds: [],
+              enabledMcpServerIds: [],
+              enabledSkillIds: ["data-analysis"],
+            },
           },
         },
-      },
-    }),
-    signal: AbortSignal.timeout(5 * 60 * 1000),
-  });
-  const responseBody = await response.text();
-  if (!response.ok) throw new Error(`Agent HTTP failure (${response.status}): ${responseBody.slice(0, 2_000)}`);
-  return {
-    events: parseEventStream(responseBody),
-    elapsedMs: Date.now() - startedAt,
-    runId,
-    threadId,
-  };
+      }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const responseBody = await response.text();
+      throw new Error(`Agent HTTP failure (${response.status}): ${responseBody.slice(0, 2_000)}`);
+    }
+    return {
+      events: await readEventStreamUntilTerminal(response),
+      elapsedMs: Date.now() - startedAt,
+      runId,
+      threadId,
+    };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
-function parseEventStream(text) {
-  return text
-    .split(/\r?\n\r?\n/gu)
-    .map((chunk) => chunk.split(/\r?\n/gu)
-      .filter((line) => line.startsWith("data: "))
-      .map((line) => line.slice("data: ".length))
-      .join("\n"))
-    .filter((chunk) => chunk && chunk !== "[DONE]")
-    .map((chunk) => JSON.parse(chunk));
+async function readEventStreamUntilTerminal(response) {
+  if (!response.body) throw new Error("ENERGYIQ_HARNESS_EVAL_STREAM_MISSING");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const events = [];
+  let buffer = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+      const parsed = consumeEventStreamChunks(buffer, done);
+      buffer = parsed.remainder;
+      for (const event of parsed.events) {
+        events.push(event);
+        if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR") {
+          await reader.cancel();
+          return events;
+        }
+      }
+      if (done) throw new Error("ENERGYIQ_HARNESS_EVAL_TERMINAL_EVENT_MISSING");
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function consumeEventStreamChunks(buffer, flush) {
+  const chunks = buffer.split(/\r?\n\r?\n/gu);
+  const remainder = flush ? "" : (chunks.pop() ?? "");
+  const completeChunks = flush && chunks.at(-1) === "" ? chunks.slice(0, -1) : chunks;
+  return {
+    remainder,
+    events: completeChunks.flatMap((chunk) => {
+      const payload = chunk.split(/\r?\n/gu)
+        .filter((line) => line.startsWith("data:"))
+        .map((line) => line.slice("data:".length).trimStart())
+        .join("\n");
+      if (!payload || payload === "[DONE]") return [];
+      return [JSON.parse(payload)];
+    }),
+  };
 }
 
 function renderMarkdown(value, delta) {
   const rows = value.cases.map((entry) => {
     const failed = entry.assertions.filter((assertion) => !assertion.passed).map((assertion) => assertion.id).join(", ") || "-";
-    return `| ${escapeCell(entry.caseId)} | ${entry.attempt} | ${entry.status} | ${entry.metrics.elapsedMs} | ${entry.metrics.sqlCalls} | ${entry.metrics.reasoningRounds} | ${entry.metrics.insightQuality ?? "-"} | ${escapeCell(failed)} |`;
+    return `| ${escapeCell(entry.caseId)} | ${entry.attempt} | ${entry.status} | ${entry.metrics.elapsedMs} | ${entry.metrics.sqlCalls} | ${entry.metrics.reasoningRounds} | ${entry.metrics.failedToolCalls} | ${entry.metrics.recoveredToolFailures} | ${entry.snapshotIds.length} | ${entry.metrics.insightQuality ?? "-"} | ${escapeCell(failed)} |`;
   });
   return [
     `# EnergyIQ Analyst Harness Eval — ${value.candidateVersion}`,
@@ -163,12 +234,13 @@ function renderMarkdown(value, delta) {
     `- Average SQL / reasoning rounds: ${value.summary.averageSqlCalls.toFixed(2)} / ${value.summary.averageReasoningRounds.toFixed(2)}`,
     `- Average insight quality: ${value.summary.averageInsightQuality ?? "n/a"}/10`,
     `- Hard failures: ${value.summary.hardFailures}`,
+    `- Failed / recovered tool calls: ${value.summary.totalFailedToolCalls} / ${value.summary.totalRecoveredToolFailures}`,
     ...(delta ? ["", "## Candidate vs baseline", "", "```json", JSON.stringify(delta, null, 2), "```"] : []),
     "",
     "## Cases",
     "",
-    "| Case | Attempt | Status | Latency ms | SQL | Reasoning | Insight /10 | Failed assertions |",
-    "|---|---:|---|---:|---:|---:|---:|---|",
+    "| Case | Attempt | Status | Latency ms | SQL | Reasoning | Failed tools | Recovered | Snapshots | Insight /10 | Failed assertions |",
+    "|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---|",
     ...rows,
     "",
     "## Answers",

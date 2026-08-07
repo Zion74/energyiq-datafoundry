@@ -196,6 +196,7 @@ export type CreateServerOptions = {
   memoryExtractionTimeoutMs?: number | undefined;
   metadataStore?: MetadataStore;
   taskStateRuntime?: TaskStateRuntime;
+  traceSectionSummaries?: boolean;
 };
 
 export const createServer = async (options: CreateServerOptions = {}): Promise<Server> => {
@@ -374,7 +375,8 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
             ?? envConfig.memory.completed_extraction_timeout_ms,
           runCancelRegistry,
           user: authContext.user,
-          workspaceId: authContext.workspaceId
+          workspaceId: authContext.workspaceId,
+          traceSectionSummaries: options.traceSectionSummaries !== false
         });
         return;
       }
@@ -427,6 +429,7 @@ type HandleCopilotKitRequestInput = {
   memoryExtractionTimeoutMs: number;
   runCancelRegistry: RunCancelRegistry;
   taskStateRuntime: TaskStateRuntime;
+  traceSectionSummaries: boolean;
   user: MeResponse;
   workspaceId: string;
 };
@@ -444,6 +447,7 @@ const handleCopilotKitRequest = async ({
   memoryExtractionTimeoutMs,
   runCancelRegistry,
   taskStateRuntime,
+  traceSectionSummaries,
   user,
   workspaceId
 }: HandleCopilotKitRequestInput): Promise<void> => {
@@ -460,6 +464,7 @@ const handleCopilotKitRequest = async ({
         metadataStore,
         runCancelRegistry,
         taskStateRuntime,
+        traceSectionSummaries,
         user,
         workspaceId,
         workspaceRoot: process.env.WORKSPACE_ROOT ?? join(process.env.STORAGE_ROOT_DIR ?? "storage", "workspaces")
@@ -495,6 +500,7 @@ type DataFoundryAgUiAgentInput = {
   memoryExtractionTimeoutMs: number;
   runCancelRegistry: RunCancelRegistry;
   taskStateRuntime: TaskStateRuntime;
+  traceSectionSummaries: boolean;
   user: MeResponse;
   workspaceId: string;
   workspaceRoot: string;
@@ -782,11 +788,13 @@ class DataFoundryAgUiAgent extends AbstractAgent {
         const taskPlanProjector = new TaskPlanProjector(runContext);
         const toolCallResultBridge = new ToolCallResultBridge();
         const checkpointProjector = new RunCheckpointProjector(this.input.metadataStore, this.input.user.id);
-        const traceSectionCoordinator = new TraceSectionCoordinator(
-          this.input.metadataStore,
-          modelProvider,
-          this.input.user.id
-        );
+        const traceSectionCoordinator = this.input.traceSectionSummaries === false
+          ? undefined
+          : new TraceSectionCoordinator(
+            this.input.metadataStore,
+            modelProvider,
+            this.input.user.id
+          );
         const contextPackageRecorder = createMetadataContextPackageRecorder({
           metadataStore: this.input.metadataStore,
           runId,
@@ -811,7 +819,7 @@ class DataFoundryAgUiAgent extends AbstractAgent {
           runId,
           sessionId,
           taskPlanProjector,
-          traceSectionCoordinator,
+          ...(traceSectionCoordinator ? { traceSectionCoordinator } : {}),
           toolCallResultBridge,
           userId: this.input.user.id,
           sink: (event) => subscriber.next(event)
