@@ -428,8 +428,8 @@ function buildPrompt(input: PreschoolAiRunInput): string {
   return [
     `Act as an autonomous energy analyst for ${input.projectName}, Scope ${input.scopeName}.`,
     `Analyse only ${input.analysisFrom} through ${input.analysisTo} in ${input.timezone}, pinned to Snapshot ${input.snapshotId} and Release ${input.projectReleaseId}.`,
-    "Your first action must be an immediate inspect_schema Tool call. Before that call, do not restate, explain, plan, summarize, or precompute the task or contract, and do not output prose. After inspect_schema returns, investigate autonomously through an observation scan, a targeted drill-down, and a validation or contradiction check. Make at most four total run_sql_readonly attempts; rejected or failed calls count toward this limit. Number only successful SQL results consecutively as SQL Evidence indexes 1 through 4.",
-    "The grounded Preschool requirements in this Run are manual assertions. Include only the requirement_ids that each SQL query materially supports and omit assertion_ids from every run_sql_readonly call; the Runtime binds the matching manual assertions. Do not call analysis_requirements_commit. Use the next SQL to follow evidence from the prior result, not to repeat the same aggregate with different wording. Stop early with zero Findings if the first valid observation does not justify a useful drill-down. Otherwise use two to four successful operations and make the final operation test, contrast, or refute the candidate before returning JSON. Do not add an explanation or task plan around the final JSON.",
+    "Your first action must be an immediate inspect_schema Tool call. Before that call, do not restate, explain, plan, summarize, or precompute the task or contract, and do not output prose. After inspect_schema returns, choose the investigation order and depth from the Evidence you observe. A simple question may need one successful SQL query; a complex question may need multiple distinct queries. Stop when another query would not change the conclusion, next action, or material uncertainty. Number successful SQL results consecutively from 1.",
+    "The grounded Preschool requirements in this Run are manual assertions. Include only the requirement_ids that each SQL query materially supports and omit assertion_ids from every run_sql_readonly call; the Runtime binds the matching manual assertions. Do not call analysis_requirements_commit. Use each next SQL to follow Evidence from the prior result, test a material uncertainty, or investigate a different valuable angle; do not repeat the same aggregate with different wording. Return zero Findings when no decision-useful candidate survives. Do not add an explanation or task plan around the final JSON.",
     "A successful SQL may return one aggregate row or a bounded grouped, ranked, or Top-N result. Do not request more than 10 rows from one SQL Evidence operation. Multi-row output is Evidence only for the rows actually returned; omitted or truncated rows remain unavailable.",
     "Never use row position, rank, Top N size, LIMIT value, or row count in a Finding as Evidence or a numeric claim unless that quantity is returned as a real named SQL column value in the cited SQL result.",
     "Never estimate, sum, extrapolate, approximate, or infer values from truncated, previewed, omitted, or remaining rows. Every number in a Finding must appear directly in that Finding's cited bundle item values or cited SQL row; derived numbers and near matches are forbidden even when the arithmetic seems obvious.",
@@ -438,9 +438,9 @@ function buildPrompt(input: PreschoolAiRunInput): string {
     "When filtering interval_start, which is TIMESTAMPTZ, use an ISO-8601 string or TIMESTAMPTZ literal for the pinned UTC bounds. Never compare interval_start with a TIMESTAMP literal that contains Z because that literal is timezone-naive and can shift the authorized window. If SQL and the published bundle differ, do not calculate or narrate a gap unless the gap itself is returned as a named column by a bounded reconciliation query.",
     "For Centre aggregation use parent_node_id, not scope_id. Only include quality_status='ok' and official_aggregation_eligible=TRUE. Do not add Project totals to component rows.",
     "The Bounded Preschool Discovery Evidence Bundle is authoritative for published Portfolio, Centre, Benchmark, Calendar, Spike and Circuit values. SQL is one independent cross-check, not a replacement truth source.",
-    "Return zero to three distinct Findings. Do not force novelty and do not repeat the official themes as prose. Each displayed Finding must cite the first successful SQL observation and the final successful validation, plus any drill-down it uses, as distinct SQL Evidence indexes.",
+    "Return zero to three distinct Findings. Do not force novelty and do not repeat the official themes as prose. Each displayed Finding must cite only the successful SQL Evidence operations it actually uses; one sufficient query is valid, while a claim that needs validation should cite the additional query that tests it.",
     "A Finding may support, challenge, or be independent of the official themes. Each must answer What, Why, the next investigation, expected result if acted on, consequence if ignored, how to verify, and limitations. whyKind must be Evidence, Hypothesis, or Missing Evidence. expectedIfAct and ifIgnored describe decision consequences supported by the investigation; they must not invent savings, certainty, or operational outcomes. Use evidenceNote to state what the cited Evidence cannot prove.",
-    "Cite every SQL result a Finding uses in evidenceSqlIndexes. Cite exact bundle item ids in evidenceRefs whenever the Finding uses published bundle values; evidenceRefs may be empty for an independent SQL-only angle backed by at least two cited SQL operations. Use numbers only from that Finding's cited bundle items or cited SQL. Do not invent causes, equipment state, tariff, cost, savings, ROI, forecast, owner, commitment, target, threshold, duration, or time window.",
+    "Cite every SQL result a Finding uses in evidenceSqlIndexes. Cite exact bundle item ids in evidenceRefs whenever the Finding uses published bundle values; evidenceRefs may be empty for an independent SQL-only angle backed by sufficient cited SQL Evidence. Use numbers only from that Finding's cited bundle items or cited SQL. Do not invent causes, equipment state, tariff, cost, savings, ROI, forecast, owner, commitment, target, threshold, duration, or time window.",
     AI_FINDING_PRESENTATION_PROMPT,
     "Return only strict JSON: {\"findings\":[{\"relationship\":\"supports\",\"title\":\"...\",\"what\":\"...\",\"whyKind\":\"Evidence\",\"why\":\"...\",\"how\":\"...\",\"expectedIfAct\":\"...\",\"ifIgnored\":\"...\",\"howToVerify\":\"...\",\"evidenceNote\":\"...\",\"evidenceRefs\":[\"benchmark:priority-centre:G\"],\"evidenceSqlIndexes\":[1,2],\"presentation\":{\"version\":\"1\",\"blocks\":[{\"type\":\"ranking\",\"unit\":\"kWh\",\"items\":[{\"label\":\"Centre E\",\"value\":0}],\"evidenceRefs\":[\"benchmark:priority-centre:G\"],\"evidenceSqlIndexes\":[1]}]}}]}",
     "Bounded Preschool Discovery Evidence Bundle:",
@@ -461,9 +461,8 @@ export function resolvePreschoolAiEventStream(args: {
   if (runError) return { status: "unavailable", reason: friendlyReason(stringValue(runError.message) ?? "AI Analyst Run failed.") };
   if (!events.some((event) => event.type === "RUN_FINISHED")) return { status: "unavailable", reason: "The AI Analyst Run did not finish." };
   const collected = collectTools(events);
-  if (collected.sqlAttemptCount > 4) return { status: "unavailable", reason: "The AI Analyst exceeded the four-attempt SQL limit." };
-  if (!collected.schemaValid || collected.sql.length < 1 || collected.sql.length > 4) {
-    return { status: "unavailable", reason: "The AI Analyst did not complete a bounded read-only SQL investigation." };
+  if (!collected.schemaValid || collected.sql.length < 1) {
+    return { status: "unavailable", reason: "The AI Analyst did not complete a grounded read-only SQL investigation." };
   }
   if (collected.sql.some((tool) => Math.max(tool.rowCount ?? 0, tool.returnedRowCount) > 10)) {
     return { status: "unavailable", reason: "The AI Analyst exceeded the ten-row SQL Evidence limit." };
@@ -473,9 +472,6 @@ export function resolvePreschoolAiEventStream(args: {
     .map((event) => stringValue(event.delta) ?? "").join("").trim();
   const generated = parseFindings(answer);
   if (!generated) return { status: "unavailable", reason: "The AI response could not be verified against this Snapshot." };
-  if (generated.some((finding) => finding.evidenceSqlIndexes.length < 2)) {
-    return { status: "unavailable", reason: "Each displayed Preschool Finding must cite at least two successful SQL Evidence operations." };
-  }
   const evidenceById = new Map(args.input.discoveryEvidence.items.map((item) => [item.id, item]));
   let missingSnapshotEvidence = false;
   let missingSqlEvidence = false;
@@ -512,11 +508,6 @@ export function resolvePreschoolAiEventStream(args: {
     .map((id) => evidenceById.get(id)).filter((item): item is PreschoolDiscoveryEvidenceItem => Boolean(item)));
   const selectedTools = verifiedFindings.map((finding) => finding.evidenceSqlIndexes
     .map((index) => collected.sql[index - 1]).filter((tool): tool is CollectedSqlEvidence => Boolean(tool)));
-  if (selectedTools.some((tools) => new Set(
-    tools.flatMap((tool) => tool.normalizedSql ? [tool.normalizedSql] : []),
-  ).size < 2)) {
-    return { status: "unavailable", reason: "Each displayed Preschool Finding must cite at least two distinct SQL queries." };
-  }
   for (const finding of verifiedFindings) {
     const presentation = materializePreschoolPresentation(finding, evidenceById, collected.sql, args.input);
     if (presentation) finding.presentation = presentation;
@@ -666,7 +657,7 @@ function parseFindings(answer: string): GeneratedFinding[] | null {
   return new Set(semantic).size === semantic.length ? findings : null;
 }
 
-function collectTools(events: AgUiEvent[]): { schemaValid: boolean; sqlAttemptCount: number; sql: CollectedSqlEvidence[] } {
+function collectTools(events: AgUiEvent[]): { schemaValid: boolean; sql: CollectedSqlEvidence[] } {
   const tools = new Map<string, ToolAccumulator>();
   for (const event of events) {
     const id = stringValue(event.toolCallId) ?? stringValue(event.tool_call_id);
@@ -704,7 +695,7 @@ function collectTools(events: AgUiEvent[]): { schemaValid: boolean; sqlAttemptCo
       returnedRowCount: parsed.rows.length,
     }];
   });
-  return { schemaValid, sqlAttemptCount: attempts.filter((tool) => tool.name === "run_sql_readonly").length, sql };
+  return { schemaValid, sql };
 }
 
 function normalizeSql(sql: string | null): string | null {

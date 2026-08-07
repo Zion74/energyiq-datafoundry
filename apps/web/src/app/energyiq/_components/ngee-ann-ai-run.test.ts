@@ -105,7 +105,7 @@ describe("Ngee Ann AI Run", () => {
 
     expect(input.identityKey).toContain(input.snapshotId);
     expect(input.identityKey).toContain(input.dataCutoff);
-    expect(input.identityKey).toContain("ngee-ann-ai-output-contract@v3");
+    expect(input.identityKey).toContain("ngee-ann-ai-output-contract@v4");
     for (const identityPart of [
       input.projectReleaseId,
       "ngee-ann-overview",
@@ -148,22 +148,21 @@ describe("Ngee Ann AI Run", () => {
         },
       },
     });
-    expect(JSON.stringify(body)).toContain("at most two total run_sql_readonly attempts");
-    expect(JSON.stringify(body)).toContain("rejected or failed calls count toward this limit");
-    expect(JSON.stringify(body)).toContain("Stop after the first successful SQL call");
-    expect(JSON.stringify(body)).toContain("choose the single most decision-useful cross-check");
+    expect(JSON.stringify(body)).toContain("first action must be inspect_schema");
+    expect(JSON.stringify(body)).toContain("A simple question may need one successful SQL query");
+    expect(JSON.stringify(body)).toContain("a complex question may need multiple distinct queries");
+    expect(JSON.stringify(body)).toContain("would not change the conclusion, next action, or material uncertainty");
+    expect(JSON.stringify(body)).not.toContain("at most two total run_sql_readonly attempts");
+    expect(JSON.stringify(body)).not.toContain("Stop after the first successful SQL call");
     expect(JSON.stringify(body)).toContain("Bounded Ngee Ann Discovery Evidence Bundle");
     expect(JSON.stringify(body)).toContain("category:load");
     expect(JSON.stringify(body)).toContain("evidenceRefs");
-    expect(JSON.stringify(body)).toContain(
-      "1d requires horizon:1d, 7d requires horizon:7d, and 28d requires horizon:28d",
-    );
+    expect(JSON.stringify(body)).toContain("Every declared Horizon must cite its matching horizon Evidence id");
     expect(JSON.stringify(body)).not.toContain("execute exactly the following concise cross-horizon Level query");
     expect(JSON.stringify(body)).not.toContain("Leave every additional dimension or follow-up query to Ask AI deeper");
     expect(JSON.stringify(body)).toContain("Do not use WITH/CTEs or EXTRACT syntax");
     expect(JSON.stringify(body)).toContain("official_aggregation_eligible=TRUE");
-    expect(JSON.stringify(body)).toContain("include every runtime assertion_id");
-    expect(JSON.stringify(body)).toContain("retry only once");
+    expect(JSON.stringify(body)).toContain("every listed assertion_id");
     expect(JSON.stringify(body)).toContain(
       "never invent a numeric threshold, target, tolerance, percentage, duration, or time window",
     );
@@ -189,18 +188,15 @@ describe("Ngee Ann AI Run", () => {
     );
   });
 
-  it("requires Findings to acknowledge every available deterministic Horizon value", () => {
+  it("keeps every deterministic Horizon available without forcing mechanical coverage", () => {
     const body = buildAgentRunBody(requiredInput(), "profile-1", "run-1", "thread-1");
     const prompt = ((body.body as { messages: Array<{ content: string }> }).messages[0]?.content) ?? "";
     const bundleText = prompt
       .split("Bounded Ngee Ann Discovery Evidence Bundle:\n\n")[1]
       ?.split("\n\nOfficial deterministic projection:")[0];
 
-    expect(prompt).toContain("check every supplied kind=horizon item");
-    expect(prompt).toContain(
-      "must not describe an available Horizon value as missing, unavailable, or not provided",
-    );
-    expect(prompt).toContain("may challenge its meaning or add an independent angle");
+    expect(prompt).toContain("Use a 1d, 7d, or 28d Horizon only when it materially supports that Finding");
+    expect(prompt).toContain("Do not mechanically cover every Horizon");
     expect(bundleText).toBeTruthy();
     expect(JSON.parse(bundleText ?? "{}").items).toContainEqual(expect.objectContaining({
       id: "horizon:28d",
@@ -269,6 +265,22 @@ describe("Ngee Ann AI Run", () => {
       status: "unavailable",
       reason: "A Finding cited deterministic Evidence that is not present in this Snapshot.",
     });
+  });
+
+  it.each([
+    ["zero", []],
+    ["one", generatedFindings().slice(0, 1)],
+  ])("accepts %s decision-useful Findings without filling a quota", (_label, findings) => {
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.findings).toHaveLength(findings.length);
   });
 
   it("accepts an Agent-selected visual when its values are supported by the same Finding Evidence", () => {
@@ -405,7 +417,7 @@ describe("Ngee Ann AI Run", () => {
     });
   });
 
-  it("rejects Horizon-only filler when below-Level or time/operating Evidence is available", () => {
+  it("does not force a below-Level or time dimension when the Agent selected a supported Horizon angle", () => {
     const findings = generatedFindings().map((finding) => ({
       ...finding,
       evidenceRefs: ["horizon:1d", "horizon:7d", "horizon:28d"],
@@ -418,10 +430,7 @@ describe("Ngee Ann AI Run", () => {
       runId: "run-1",
     });
 
-    expect(result).toEqual({
-      status: "unavailable",
-      reason: "The AI response did not use the available below-Level or time/operating Evidence.",
-    });
+    expect(result.status).toBe("available");
   });
 
   it("accepts digits that are part of a cited Level or Circuit identity", () => {
@@ -631,7 +640,7 @@ describe("Ngee Ann AI Run", () => {
     expect(result.status).toBe("available");
   });
 
-  it("rejects a second successful SQL query even when every Finding cites the first", () => {
+  it("allows a second successful SQL query when the final Findings only cite the Evidence they use", () => {
     const input = requiredInput();
     const result = resolveNgeeAnnAiEventStream({
       eventStream: successfulEventStream(
@@ -643,13 +652,10 @@ describe("Ngee Ann AI Run", () => {
       runId: "run-1",
     });
 
-    expect(result).toEqual({
-      status: "unavailable",
-      reason: "The AI Analyst did not complete exactly one successful read-only SQL Evidence query.",
-    });
+    expect(result.status).toBe("available");
   });
 
-  it("rejects a Run that continues to a third SQL call", () => {
+  it("allows a deeper investigation to continue to a third successful SQL call", () => {
     const input = requiredInput();
     const result = resolveNgeeAnnAiEventStream({
       eventStream: successfulEventStream(
@@ -664,13 +670,10 @@ describe("Ngee Ann AI Run", () => {
       runId: "run-1",
     });
 
-    expect(result).toEqual({
-      status: "unavailable",
-      reason: "The AI Analyst exceeded the two-attempt SQL limit.",
-    });
+    expect(result.status).toBe("available");
   });
 
-  it("counts a rejected SQL toward the limit while numbering Evidence only by the successful SQL", () => {
+  it("excludes a rejected SQL while numbering Evidence only by successful SQL", () => {
     const input = requiredInput();
     const rejectedAttempt = [
       { type: "TOOL_CALL_START", toolCallId: "sql-rejected", toolCallName: "run_sql_readonly", args: { sql: "WITH invalid AS (...)" } },
@@ -699,7 +702,7 @@ describe("Ngee Ann AI Run", () => {
       .not.toContainEqual(expect.objectContaining({ toolCallId: "sql-rejected" }));
   });
 
-  it("fails closed when one rejected SQL is followed by two successful SQL calls", () => {
+  it("allows replanning after one rejected SQL followed by two successful SQL calls", () => {
     const input = requiredInput();
     const rejectedAttempt = [
       { type: "TOOL_CALL_START", toolCallId: "sql-rejected", toolCallName: "run_sql_readonly", args: { sql: "WITH invalid AS (...)" } },
@@ -725,10 +728,7 @@ describe("Ngee Ann AI Run", () => {
       runId: "run-1",
     });
 
-    expect(result).toEqual({
-      status: "unavailable",
-      reason: "The AI Analyst exceeded the two-attempt SQL limit.",
-    });
+    expect(result.status).toBe("available");
   });
 
   it("fails closed when inspect_schema returns an error payload", () => {
@@ -748,7 +748,7 @@ describe("Ngee Ann AI Run", () => {
 
     expect(result).toEqual({
       status: "unavailable",
-      reason: "The AI Analyst did not complete exactly one successful read-only SQL Evidence query.",
+      reason: "The AI Analyst did not complete a grounded read-only SQL investigation.",
     });
   });
 

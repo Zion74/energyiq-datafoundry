@@ -74,6 +74,31 @@ describe("NgeeAnnAiSlot", () => {
     expect(container.querySelector("[data-ai-presentation='true']")?.textContent).toContain("Current period");
   });
 
+  it("shows an honest accepted-empty state instead of a blank AI section", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const emptyResult: Extract<NgeeAnnAiRunResult, { status: "available" }> = {
+      status: "available",
+      providerProfileId: "profile-1",
+      runId: "run-empty",
+      findings: [],
+    };
+    const startRun = vi.fn().mockResolvedValue(emptyResult);
+
+    await act(async () => {
+      root.render(
+        <NgeeAnnAiSlot
+          snapshot={snapshot}
+          decisionPriorities={decisionPrioritiesFor(snapshot)}
+          startRun={startRun}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("No additional Evidence-backed candidates");
+    expect(container.textContent).toContain("did not find a distinct angle worth adding");
+    expect(container.querySelectorAll("article")).toHaveLength(0);
+  });
+
   it("shows the deterministic-safe analyzing state immediately, then three Findings", async () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     let finishRun!: (result: NgeeAnnAiRunResult) => void;

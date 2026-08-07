@@ -145,6 +145,24 @@ export function NgeeAnnAiSlot({
     );
   }
 
+  if (displayedResult.findings.length === 0) {
+    return (
+      <AiSlotFrame>
+        <div className="rounded-lg border border-border bg-surface-subtle px-4 py-4" role="status">
+          <p className="text-xs font-semibold text-foreground">No additional Evidence-backed candidates</p>
+          <p className="mt-1 text-[11px] leading-5 text-muted">
+            The AI Analyst did not find a distinct angle worth adding to the deterministic Overview for this Snapshot.
+          </p>
+        </div>
+        {mode === "saved" ? (
+          <p className="mt-3 text-[10px] font-medium text-muted" data-saved-ai-result="true">
+            Saved AI result · Run {displayedResult.runId}
+          </p>
+        ) : null}
+      </AiSlotFrame>
+    );
+  }
+
   return (
     <AiSlotFrame>
       <div className="space-y-4" aria-label="AI energy analyst findings">

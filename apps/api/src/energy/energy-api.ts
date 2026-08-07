@@ -1173,7 +1173,7 @@ const parseSavedAnalysisAiArtifactInput = (
       && finding.evidence.snapshotId === snapshot.dataSnapshot.id)) {
     throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
   }
-  if (snapshot.renderer.key === "ngee-ann-overview" && value.result.findings.length !== 3) {
+  if (snapshot.renderer.key === "ngee-ann-overview" && value.result.findings.length > 3) {
     throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
   }
   if (snapshot.renderer.key === "preschool-overview"

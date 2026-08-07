@@ -80,7 +80,7 @@ Overview AI Slot 与 Full AI Analyst 均遵守以上职责。项目 Analysis Pac
 | 2 | 运行 #36 DeepSeek critical pass@3 + 固定三轮 same-session | 本侧边任务 | Ngee Ann pass@3 completed；Preschool real-auth blocked | Ngee Ann 3/3；Preschool CLI 被真实登录 401 阻止 |
 | 3 | 将 #30 质量评分升级为结构化 Rubric，并保留确定性 hard gates | 本侧边任务 | implemented；real Candidate comparison pending | `7fb6977`；报告新增八维质量分解 |
 | 4 | 增加重复调查与回答冗长的诊断遥测，不设效率硬门槛 | 本侧边任务 | completed | `7fb6977`；真实 pass@3 无重复 SQL，平均 701 词 |
-| 5 | 校准 Ngee Ann/Preschool AI Slot 的固定 SQL/强制 Finding 路线 | 主 Agent | in progress after #35 checkpoint | 0–3 Findings；Agent 自主调查；Evidence guard 不弱化 |
+| 5 | 校准 Ngee Ann/Preschool AI Slot 的固定 SQL/强制 Finding 路线 | 主 Agent | implemented；Provider pending | 0–3 Findings；Agent 自主调查；Evidence guard 不弱化 |
 | 6 | 补齐 Ngee Ann 的 acted/ignored/verify 决策后果 | 主 Agent | planned | 两项目共享 Finding 语义；项目 Pack 保持独立 |
 | 7 | 完成 #35 Provider 与 Presentation browser acceptance | 主 Agent + 本侧边复核 | contract implemented；runtime acceptance pending | 两项目各有 useful visual 和正确 no-visual 案例 |
 | 8 | 校准并关闭已完成 Ticket | 主 Agent | partial；#33 closed | #30/#36/#18/#35 继续按证据关闭 |
@@ -159,7 +159,7 @@ Ngee Ann 与 Preschool 各运行至少三次固定 Profile/Snapshot：
 1. [x] #36/Harness commits 合入并通过自动回归；
 2. [x] #36 Ngee Ann real pass@3；Preschool same-session 保留为真实登录环境验收；
 3. [x] #30 结构化质量 Rubric 与报告回归；
-4. [ ] AI Slot 固定路线校准后跑两项目 Provider；
+4. [x] AI Slot 固定路线完成代码校准；两项目 Provider 仍待运行；
 5. [ ] #35 真实 visual/no-visual 与浏览器验收；
 6. [ ] #20 History keyboard/1440/1920 验收；
 7. [x] 关闭已合入的 #33（`26d2fd1`；专项回归 4 files / 53 tests）；
@@ -328,3 +328,23 @@ metric、comparison、ranking、share、distribution、trend、heatmap、table �
 自动证据：共享 contracts build、根 typecheck、Presentation/两项目 AI Slot/Saved Analysis 聚焦回归
 7 files / 107 tests passed，`git diff --check` passed。该证据只证明代码合同和回归；真实 Provider 是否自主选择
 有用 visual 或正确 no-visual、以及 1440/1920/tablet 的人工阅读效果，仍作为 #35 未完成的运行时验收。
+
+远程检查点为 `27b0b0a`，服务端 materialization、Block 级 Evidence 与无障碍闭环为 `1da1690`，均位于
+`codex/t35-presentation-checkpoint`。未包含本地生成物、凭据、私有 Excel 或并行工作树漂移。
+
+### #18 自主调查路线校准
+
+Ngee Ann 与 Preschool 的页面级 AI Slot 已从固定调查脚本改为受控自主调查：
+
+- inspect-first、授权 Project/Scope/Release/Snapshot、只读 SQL 和 Finding-specific 数字 Evidence 继续硬性执行；
+- 简单问题允许一条成功 SQL，复杂问题允许多条不同查询；SQL 被拒后可根据 Tool feedback 重规划；
+- 当新增查询不会改变结论、下一步行动或实质不确定性时，由 Agent 判断停止；
+- 两项目均返回 0–3 条非重复 Finding，证据不足时允许 0，不再填满三条；
+- Ngee Ann 不再机械覆盖 1d/7d/28d，也不强制使用 Category/Circuit/time 维度；声明某个 Horizon 时仍必须引用对应 Evidence；
+- Preschool 不再硬编码 observation → drill-down → validation，不再要求每条 Finding 至少两条 SQL 或总共 2–4 条；
+- 单条 SQL Evidence 仍最多返回 10 行，避免把大结果集当页面 Evidence；安全与可复现边界未放宽；
+- Saved Analysis 对 Ngee Ann 的结果数量同步允许 0–3，恢复时仍使用同一净化后的 Artifact。
+
+自动证据：两项目 Run/Slot、Saved Analysis 共 5 files / 105 tests passed，根 typecheck 与 build passed。
+该证据不等于真实模型价值验收；下一步仍需用相同授权 Profile/Snapshot 连续运行，并分别记录 0–3 Finding、
+查询深度、数字 Evidence、延迟和人工决策价值。

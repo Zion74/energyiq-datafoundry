@@ -79,7 +79,7 @@ export type NgeeAnnAiRunResult = {
   status: "available";
   providerProfileId: string;
   runId: string;
-  findings: [NgeeAnnAiFinding, NgeeAnnAiFinding, NgeeAnnAiFinding];
+  findings: NgeeAnnAiFinding[];
 } | {
   status: "unavailable";
   reason: string;
@@ -127,7 +127,7 @@ type CurrentRun = {
 
 const currentRuns = new Map<string, CurrentRun>();
 const FRIENDLY_AI_UNAVAILABLE_REASON = "AI analysis is temporarily unavailable. The verified Overview remains available.";
-const NGEE_ANN_AI_OUTPUT_CONTRACT_REVISION = "v3";
+const NGEE_ANN_AI_OUTPUT_CONTRACT_REVISION = "v4";
 const PERSISTED_WORKSPACE_PROFILE_ID = "workspace-default";
 const ACTIVE_RUN_POLL_INTERVAL_MS = 1_500;
 const ACTIVE_RUN_POLL_LIMIT = 200;
@@ -535,22 +535,21 @@ function buildAgentPrompt(input: NgeeAnnAiRunInput): string {
   return [
     `Act as an autonomous energy analyst for ${input.projectName}, Scope ${input.scopeName}.`,
     `The governed analysis window is ${input.analysisFrom} through ${input.analysisTo} in ${input.timezone}; data cutoff is ${input.dataCutoff}.`,
-    "Inspect the scoped schema first, then choose the single most decision-useful cross-check for the bounded Discovery Evidence. Query the inspected physical table directly. Do not call list_data_sources or preview_table. Do not use WITH/CTEs or EXTRACT syntax.",
-    "Make at most two total run_sql_readonly attempts; rejected or failed calls count toward this limit. Stop after the first successful SQL call and number it 1. Do not run a second successful query or inspect the schema again after success.",
+    "Your first action must be inspect_schema. Then investigate the most decision-useful question with scoped read-only SQL against the inspected physical table. Do not call list_data_sources or preview_table. Do not use WITH/CTEs or EXTRACT syntax.",
+    "Choose the investigation order and depth from the Evidence you observe. A simple question may need one successful SQL query; a complex question may need multiple distinct queries. Stop when another query would not change the conclusion, next action, or material uncertainty. Number successful SQL results consecutively from 1.",
     "The supplied deterministic Discovery Evidence is the authoritative source for official totals, comparisons, dimensions and limitations; the SQL is one autonomous cross-check, not a second truth source. Never report an unfiltered SUM(usage_kwh) as a Project total and never add total and component rows together. When calculating an official total, require quality_status='ok' and official_aggregation_eligible=TRUE.",
-    "Before writing Findings, check every supplied kind=horizon item. You must not describe an available Horizon value as missing, unavailable, or not provided. You may challenge its meaning or add an independent angle, but must acknowledge the supplied authoritative value.",
-    "On the first SQL plan, include every runtime assertion_id listed for each requirement_id, including manual assertions. If the first SQL is rejected, simplify it and retry only once. After the first successful SQL result, immediately produce the final JSON and never make another tool call.",
-    "Use the official deterministic projection as context, not as a script. Independently inspect the data and return exactly three useful, semantically different Findings.",
-    "Across the three Findings, collectively cover the 1d, 7d and 28d horizons. A Finding can cover more than one horizon; do not force one Finding per horizon and do not repeat the same angle or action.",
+    "For each SQL plan, include the runtime requirement_ids it materially supports and every listed assertion_id for those requirements, including manual assertions. If a query is rejected, replan from the Tool feedback instead of repeating it.",
+    "Use the official deterministic projection as context, not as a script. Return zero to three useful, semantically different Findings. Return zero when the investigation does not produce a decision-relevant, Evidence-backed angle.",
+    "Use a 1d, 7d, or 28d Horizon only when it materially supports that Finding. Do not mechanically cover every Horizon, and do not repeat one angle across time scales.",
     "For every Finding state whether it supports, challenges, or is independent of the deterministic projection. Answer What, Why, How, and How to verify.",
     "How must state the next investigation or operational action. It must not restate What, Why, or the numeric Evidence in different words. How to verify must name the observed outcome, metric, or dimension that would confirm or challenge the Finding.",
     "whyKind must be Evidence, Hypothesis, or Missing Evidence. Do not invent a cause, owner, saving, ROI, device state, or commitment.",
-    "Every Finding must cite one or more exact Discovery item ids in evidenceRefs. Every value declared in that Finding's horizons array must cite its exact matching deterministic Evidence id: 1d requires horizon:1d, 7d requires horizon:7d, and 28d requires horizon:28d. Cite evidenceSqlIndexes [1] only when that Finding actually uses the successful SQL result; otherwise omit evidenceSqlIndexes. The SQL must not be attributed to unrelated Findings.",
+    "Every Finding must cite the exact Evidence it actually uses. Cite Discovery item ids in evidenceRefs and successful SQL result numbers in evidenceSqlIndexes. An independent SQL-only Finding may leave evidenceRefs empty. Every declared Horizon must cite its matching horizon Evidence id. Do not attribute SQL to an unrelated Finding.",
     "Finding text may use only numeric values directly present in that Finding's cited Discovery Evidence items or cited SQL result, or a single-step sum, difference, ratio, or percentage computed from those values. Never report a multi-step derived number such as normalizing values and then comparing the normalized results.",
     "In how and howToVerify, never invent a numeric threshold, target, tolerance, percentage, duration, or time window that is absent from that Finding's cited Evidence. Verification may name the metric or dimension to monitor, but it must not introduce a new number.",
     "Include the relevant quality status or coverage fields in the SQL result used as Evidence. The supplied deterministic Overview quality summary covers only its primary period and must not be claimed as the quality of the full AI lookback.",
-    "When Category, Circuit, daily, time or operating Evidence items are available, at least one Finding must use one of those dimensions. Prefer the strongest decision-relevant change or pattern, not the largest absolute consumer by default. Do not claim Category or Circuit has complete 1d/7d/28d deltas when the cited item says Primary Period only.",
-    "Use the bounded Evidence and the one cross-check for three semantically different Findings, then immediately return the required strict JSON.",
+    "Category, Circuit, daily, time and operating dimensions are available investigation options, not quotas. Prefer the strongest decision-relevant change or pattern, not the largest absolute consumer by default. Do not claim Category or Circuit has complete 1d/7d/28d deltas when the cited item says Primary Period only.",
+    "After the useful investigation is complete, return the required strict JSON without commentary.",
     AI_FINDING_PRESENTATION_PROMPT,
     "Return only strict JSON with no markdown or commentary using this shape:",
     '{"findings":[{"relationship":"supports","horizons":["1d","7d"],"title":"...","what":"...","whyKind":"Evidence","why":"...","how":"...","howToVerify":"...","evidenceNote":"what the cited Evidence supports or cannot prove","evidenceRefs":["horizon:1d","category:load"],"evidenceSqlIndexes":[1],"presentation":{"version":"1","blocks":[{"type":"comparison","title":"Current versus previous","unit":"kWh","items":[{"label":"Current","value":0},{"label":"Previous","value":0}],"evidenceRefs":["horizon:1d"],"evidenceSqlIndexes":[1]}]}}]}',
@@ -601,13 +600,10 @@ export function resolveNgeeAnnAiEventStream(input: {
     return { status: "unavailable", reason: "The AI Analyst Run did not finish." };
   }
   const collected = collectToolEvidence(events);
-  if (collected.sqlAttemptCount > 2) {
-    return { status: "unavailable", reason: "The AI Analyst exceeded the two-attempt SQL limit." };
-  }
   const tools = collected.tools;
   const sqlTools = tools.filter((tool) => tool.toolName === "run_sql_readonly");
-  if (!collected.schemaValid || sqlTools.length !== 1) {
-    return { status: "unavailable", reason: "The AI Analyst did not complete exactly one successful read-only SQL Evidence query." };
+  if (!collected.schemaValid || sqlTools.length < 1) {
+    return { status: "unavailable", reason: "The AI Analyst did not complete a grounded read-only SQL investigation." };
   }
   if (!discoveryEvidenceMatchesInput(input.input)) {
     return { status: "unavailable", reason: "The deterministic Discovery Evidence does not match this Run identity." };
@@ -647,12 +643,6 @@ export function resolveNgeeAnnAiEventStream(input: {
     if (presentation) finding.presentation = presentation;
     else delete finding.presentation;
   }
-  const decisionDimensions = new Set(["category", "circuit", "daily", "time", "operating"]);
-  const hasDecisionDimension = input.input.discoveryEvidence.items.some((item) => decisionDimensions.has(item.kind));
-  const usesDecisionDimension = selectedEvidence.some((items) => items.some((item) => decisionDimensions.has(item.kind)));
-  if (hasDecisionDimension && !usesDecisionDimension) {
-    return { status: "unavailable", reason: "The AI response did not use the available below-Level or time/operating Evidence." };
-  }
   if (generated.some((finding, index) => narrativeHasUnsupportedNumber(
     finding,
     selectedEvidence[index]!,
@@ -681,7 +671,7 @@ export function resolveNgeeAnnAiEventStream(input: {
         finding.evidenceSqlIndexes[toolIndex]!,
       )),
     },
-  })) as [NgeeAnnAiFinding, NgeeAnnAiFinding, NgeeAnnAiFinding];
+  }));
   return {
     status: "available",
     providerProfileId: input.providerProfileId,
@@ -778,9 +768,9 @@ type GeneratedFinding = {
   presentation?: AiFindingPresentation;
 };
 
-function parseGeneratedFindings(answer: string): [GeneratedFinding, GeneratedFinding, GeneratedFinding] | null {
+function parseGeneratedFindings(answer: string): GeneratedFinding[] | null {
   const parsed = findLastFindingsEnvelope(answer);
-  if (!isRecord(parsed) || !Array.isArray(parsed.findings) || parsed.findings.length !== 3) return null;
+  if (!isRecord(parsed) || !Array.isArray(parsed.findings) || parsed.findings.length > 3) return null;
   const findings = parsed.findings.flatMap<GeneratedFinding>((value) => {
     if (!isRecord(value)) return [];
     const relationship = stringValue(value.relationship);
@@ -797,7 +787,8 @@ function parseGeneratedFindings(answer: string): [GeneratedFinding, GeneratedFin
     const presentation = parseAiFindingPresentation(value.presentation);
     if ((relationship !== "supports" && relationship !== "challenges" && relationship !== "independent")
       || (whyKind !== "Evidence" && whyKind !== "Hypothesis" && whyKind !== "Missing Evidence")
-      || horizons.length === 0 || evidenceRefs.length === 0 || evidenceSqlIndexes === null
+      || horizons === null || evidenceRefs === null || evidenceSqlIndexes === null
+      || (evidenceRefs.length === 0 && evidenceSqlIndexes.length === 0)
       || !title || !what || !why || !how || !howToVerify || !evidenceNote) return [];
     return [{
       relationship,
@@ -814,15 +805,13 @@ function parseGeneratedFindings(answer: string): [GeneratedFinding, GeneratedFin
       ...(presentation ? { presentation } : {}),
     }];
   });
-  if (findings.length !== 3) return null;
-  const coveredHorizons = new Set(findings.flatMap((finding) => finding.horizons));
-  if (!coveredHorizons.has("1d") || !coveredHorizons.has("7d") || !coveredHorizons.has("28d")) return null;
+  if (findings.length !== parsed.findings.length) return null;
   const semanticKeys = findings.map((finding) => `${finding.title} ${finding.what}`
     .toLocaleLowerCase()
     .replace(/[^a-z0-9]+/gu, " ")
     .trim());
   if (new Set(semanticKeys).size !== semanticKeys.length) return null;
-  return findings as [GeneratedFinding, GeneratedFinding, GeneratedFinding];
+  return findings;
 }
 
 function findLastFindingsEnvelope(answer: string): Record<string, unknown> | null {
@@ -867,12 +856,12 @@ function parseJsonObjectAt(value: string, start: number): unknown {
   return null;
 }
 
-function parseHorizons(value: unknown): NgeeAnnAiHorizon[] {
-  if (!Array.isArray(value)) return [];
+function parseHorizons(value: unknown): NgeeAnnAiHorizon[] | null {
+  if (!Array.isArray(value)) return null;
   const horizons = value.filter((candidate): candidate is NgeeAnnAiHorizon => (
     candidate === "1d" || candidate === "7d" || candidate === "28d"
   ));
-  return horizons.length === value.length ? [...new Set(horizons)] : [];
+  return horizons.length === value.length ? [...new Set(horizons)] : null;
 }
 
 function parseOptionalEvidenceIndexes(value: unknown): number[] | null {
@@ -884,13 +873,13 @@ function parseOptionalEvidenceIndexes(value: unknown): number[] | null {
   return indexes.length === value.length ? [...new Set(indexes)] : null;
 }
 
-function parseEvidenceRefs(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
+function parseEvidenceRefs(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
   const references = value.flatMap((candidate) => {
     const reference = cleanText(candidate);
     return reference ? [reference] : [];
   });
-  return references.length === value.length ? [...new Set(references)] : [];
+  return references.length === value.length ? [...new Set(references)] : null;
 }
 
 function narrativeHasUnsupportedNumber(

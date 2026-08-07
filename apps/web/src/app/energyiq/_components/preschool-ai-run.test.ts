@@ -78,17 +78,18 @@ describe("Preschool AI Run", () => {
     expect(serialized).toContain(
       "do not restate, explain, plan, summarize, or precompute the task or contract",
     );
-    expect(serialized).toContain("Each displayed Finding must cite the first successful SQL observation and the final successful validation");
+    expect(serialized).toContain("Each displayed Finding must cite only the successful SQL Evidence operations it actually uses");
     expect(serialized).toContain(
       "omit assertion_ids from every run_sql_readonly call",
     );
     expect(serialized).toContain("The grounded Preschool requirements in this Run are manual assertions");
     expect(serialized).toContain("use an ISO-8601 string or TIMESTAMPTZ literal");
     expect(serialized).toContain("Never compare interval_start with a TIMESTAMP literal that contains Z");
-    expect(serialized).toContain("Make at most four total run_sql_readonly attempts");
-    expect(serialized).toContain(
-      "observation scan, a targeted drill-down, and a validation or contradiction check",
-    );
+    expect(serialized).toContain("A simple question may need one successful SQL query");
+    expect(serialized).toContain("a complex question may need multiple distinct queries");
+    expect(serialized).toContain("would not change the conclusion, next action, or material uncertainty");
+    expect(serialized).not.toContain("Make at most four total run_sql_readonly attempts");
+    expect(serialized).not.toContain("observation scan, a targeted drill-down, and a validation or contradiction check");
     expect(serialized).toContain(
       "stating 100% coverage requires citing quality:may in that same Finding",
     );
@@ -251,7 +252,7 @@ describe("Preschool AI Run", () => {
     expect(result.findings[0]!.evidence.tools).toHaveLength(2);
   });
 
-  it("rejects a displayed Finding that does not cite at least two investigation operations", () => {
+  it("accepts a displayed Finding backed by one sufficient SQL operation", () => {
     const findings = generatedFindings().slice(0, 1);
     findings[0]!.evidenceSqlIndexes = [1];
     const result = resolvePreschoolAiEventStream({
@@ -261,43 +262,38 @@ describe("Preschool AI Run", () => {
       runId: "run-1",
     });
 
-    expect(result).toEqual({
-      status: "unavailable",
-      reason: "Each displayed Preschool Finding must cite at least two successful SQL Evidence operations.",
-    });
+    expect(result.status).toBe("available");
+    if (result.status !== "available") return;
+    expect(result.findings[0]!.evidence.tools).toHaveLength(1);
   });
 
   it.each([
     ["a duplicated Evidence index", [1, 1]],
     ["only one Evidence index", [1]],
-  ])("rejects %s after unique-index normalization", (_name, evidenceSqlIndexes) => {
+  ])("accepts %s after safe unique-index normalization", (_name, evidenceSqlIndexes) => {
     const findings = generatedFindings();
     findings[0]!.evidenceSqlIndexes = evidenceSqlIndexes;
-    expect(resolvePreschoolAiEventStream({
+    const result = resolvePreschoolAiEventStream({
       eventStream: successfulEventStream(findings),
       input: requiredInput(),
       providerProfileId: "profile-1",
       runId: "run-1",
-    })).toEqual({
-      status: "unavailable",
-      reason: "Each displayed Preschool Finding must cite at least two successful SQL Evidence operations.",
     });
+    expect(result.status).toBe("available");
   });
 
-  it("rejects two Evidence indexes when they repeat the same normalized SQL", () => {
+  it("does not use repeated normalized SQL as a hard quality rejection", () => {
     const repeatedSql = [
       ...sqlEvents("sql-1", 843.0985),
       ...sqlEvents("sql-2", 62.4),
     ];
-    expect(resolvePreschoolAiEventStream({
+    const result = resolvePreschoolAiEventStream({
       eventStream: successfulEventStream(generatedFindings(), repeatedSql),
       input: requiredInput(),
       providerProfileId: "profile-1",
       runId: "run-1",
-    })).toEqual({
-      status: "unavailable",
-      reason: "Each displayed Preschool Finding must cite at least two distinct SQL queries.",
     });
+    expect(result.status).toBe("available");
   });
 
   it.each([
@@ -670,7 +666,7 @@ describe("Preschool AI Run", () => {
     });
   });
 
-  it("accepts two to four successful bounded operations, including multi-row drill-down Evidence", () => {
+  it("accepts multiple useful operations, including multi-row drill-down Evidence", () => {
     const findings = generatedFindings();
     findings[0]!.evidenceSqlIndexes = [1, 2, 3, 4];
     const sqlEvidence = [
@@ -689,7 +685,7 @@ describe("Preschool AI Run", () => {
     if (result.status === "available") expect(result.findings[0]!.evidence.tools).toHaveLength(4);
   });
 
-  it("counts rejected SQL calls toward the four-attempt investigation budget", () => {
+  it("allows the Agent to replan after rejected SQL calls without a fixed attempt gate", () => {
     const rejected = [
       { type: "TOOL_CALL_START", toolCallId: "sql-bad", toolCallName: "run_sql_readonly", args: { sql: "WITH bad AS (...)" } },
       { type: "TOOL_CALL_RESULT", toolCallId: "sql-bad", toolCallName: "run_sql_readonly", result: { error: "QUERY_VALIDATION_FAILED" } },
@@ -698,15 +694,13 @@ describe("Preschool AI Run", () => {
       { type: "TOOL_CALL_START", toolCallId: "sql-fourth", toolCallName: "run_sql_readonly", args: { sql: "SELECT 4" } },
       { type: "TOOL_CALL_RESULT", toolCallId: "sql-fourth", toolCallName: "run_sql_readonly", result: { error: "QUERY_VALIDATION_FAILED" } },
     ];
-    expect(resolvePreschoolAiEventStream({
+    const result = resolvePreschoolAiEventStream({
       eventStream: successfulEventStream(generatedFindings(), undefined, rejected),
       input: requiredInput(),
       providerProfileId: "profile-1",
       runId: "run-1",
-    })).toEqual({
-      status: "unavailable",
-      reason: "The AI Analyst exceeded the four-attempt SQL limit.",
     });
+    expect(result.status).toBe("available");
   });
 
   it("single-flights identical page identities and fails soft", async () => {
