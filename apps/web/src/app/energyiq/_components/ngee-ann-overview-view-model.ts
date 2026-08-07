@@ -2174,16 +2174,19 @@ function validDailyAnomalyDerivedValues(
   ) return false;
   const expectedImpact = row.actualKwh - row.baselineKwh;
   const expectedRelativePct = (expectedImpact / row.baselineKwh) * 100;
-  if (!approximatelyEqual(row.impactKwh, expectedImpact)
-    || !approximatelyEqual(row.relativePct, expectedRelativePct)) return false;
+  // The server serializes actual, baseline and derived values independently to
+  // four decimals. Re-deriving from those serialized inputs can differ by one
+  // final decimal without changing the governed rule result.
+  if (!approximatelyEqual(row.impactKwh, expectedImpact, 0.0002)
+    || !approximatelyEqual(row.relativePct, expectedRelativePct, 0.001)) return false;
   const shouldTrigger = expectedImpact >= rule.absoluteImpactKwh
     && expectedRelativePct >= rule.relativeThresholdPct;
   return shouldTrigger ? row.outcome === "triggered" : row.outcome === "within_threshold";
 }
 
-function approximatelyEqual(left: number, right: number): boolean {
+function approximatelyEqual(left: number, right: number, absoluteTolerance: number): boolean {
   return Math.abs(left - right) <= Math.max(
-    0.0001,
+    absoluteTolerance,
     Math.max(1, Math.abs(left), Math.abs(right)) * 1e-9,
   );
 }

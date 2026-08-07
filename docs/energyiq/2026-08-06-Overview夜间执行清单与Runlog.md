@@ -488,3 +488,7 @@ Workspace 复核结论：先前“Preschool 被 Ngee Ann Workspace 限制”不�
 - 需复核日期使用紧凑圆点，避免 28 天窄列中的文字标签互相遮挡；聚焦日期后可直接跳到同一 frozen incident Evidence。这个切片不新增 SQL、Kernel 指标、AI 推理或浏览器端异常计算。
 - 聚焦自动化：ViewModel + Renderer `2 files / 198 tests` 通过；仓库 typecheck、diff check 与 Web production build（17 pages）通过。当前切片的新鲜 1440/1920 Chrome 仍需在下一验收层单独记录，不能沿用较早截图冒充本次视觉证据。
 - #19 的停止原因不是一般工程洁癖，而是现有事实存储无法同时服务 A 与 B：写入 B 后 A 的事实已经不存在，Metadata 指针不能恢复它。不得在未获产品授权时把 #19 扩成通用历史 Snapshot 仓库，也不得交付不能真实回读 A 的伪 rollback。
+
+2026-08-07 后续产品校准：当前 MVP 不要求完整事实 A/B 即时切换，#19 已关闭为 `not planned / wontfix`，并从 #20 依赖中移除。MVP 保留的是成功日更 Current、失败不混入半成品、Saved A 固定、Rerun B 新建的连续数据闭环。
+
+同日真实 28 天 Chrome 验收发现，四位小数分别序列化的 actual、baseline、impact 与 percentage 在 Web 反算时产生最大 `0.0001 kWh`、`0.000297 percentage points` 的尾差，原 `0.0001` 统一容差误将 17 行合法 Evidence 判为无效。修复只把 impact 容差校准为 `0.0002 kWh`、percentage 容差校准为 `0.001 percentage points`；1 kWh / 1 percentage point 篡改测试仍 fail closed，不影响规则阈值、Snapshot、Scope 或权限守卫。
