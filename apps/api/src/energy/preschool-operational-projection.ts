@@ -25,6 +25,28 @@ const SPIKE_THRESHOLD_PCT = 50;
 const EXPECTED_CENTRE_COUNT = 30;
 const EXPECTED_CELL_COUNT = EXPECTED_CENTRE_COUNT * 31 * 24;
 const CELL_QUERY_ID = "preschool_centre_hour_cells_v1" as const;
+const DAILY_TOTALS_QUERY_ID = "daily_totals_v1" as const;
+const PRESCHOOL_MAY_COMPLETE_WEEK_STARTS = [
+  "2026-05-04",
+  "2026-05-11",
+  "2026-05-18",
+  "2026-05-25",
+] as const;
+const PRESCHOOL_JUNE_PERIOD = {
+  start: "2026-06-01",
+  endInclusive: "2026-06-30",
+  days: 30,
+} as const;
+const PRESCHOOL_DEMO_TARIFF_REFERENCE = {
+  sourceName: "SP Group",
+  sourceUrl: "https://www.spgroup.com.sg/about-us/media-resources/news-and-media-releases/Electricity-Tariff-Revision-for-the-Period-1-April-to-30-June-2026",
+  appendixUrl: "https://www.spgroup.com.sg/dam/spgroup/images/news-media-releases/2026/Appendix-2---Q2-2026.png0",
+  supplyClass: "Low tension, non-domestic",
+  appliesFrom: "2026-04-01",
+  appliesTo: "2026-06-30",
+  beforeGstSgdPerKwh: 0.2727,
+  withGstSgdPerKwh: 0.2972,
+} as const;
 
 type PreschoolOperatingState = "standby" | "operating";
 export type PreschoolOperationalDayType = "weekday" | "weekend" | "calendar_exception";
@@ -59,6 +81,60 @@ export type PreschoolOperationalProjection = {
     standbyKwh: number;
     standbySharePct: number;
     operatingKwh: number;
+  };
+  hourlyProfile: {
+    completeDayCount: 31;
+    unit: "mean kWh per complete day";
+    rows: Array<{
+      localHour: number;
+      operatingKwh: number;
+      closedHourKwh: number;
+      totalKwh: number;
+    }>;
+  };
+  planningOutlook: {
+    status: "provisional";
+    contract: {
+      id: "preschool-june-2026-naive-weekly-baseline";
+      version: "1";
+      method: "mean of four complete Monday-Sunday weeks";
+    };
+    targetPeriod: typeof PRESCHOOL_JUNE_PERIOD;
+    sourceWeeks: Array<{
+      start: string;
+      endInclusive: string;
+      usageKwh: number;
+    }>;
+    weeklyBaseline: {
+      averageKwh: number;
+      minimumKwh: number;
+      maximumKwh: number;
+    };
+    usageEstimate: {
+      projectedKwh: number;
+      lowerKwh: number;
+      upperKwh: number;
+    };
+    costEstimate: {
+      currency: "SGD";
+      currentPeriodBeforeGstSgd: number;
+      projectedBeforeGstSgd: number;
+      lowerBeforeGstSgd: number;
+      upperBeforeGstSgd: number;
+    };
+    tariffReference: typeof PRESCHOOL_DEMO_TARIFF_REFERENCE;
+    evidence: {
+      dataSnapshotId: string;
+      queryId: "daily_totals_v1";
+      recipeId: "preschool-naive-weekly-planning-baseline-v1";
+    };
+    limitations: string[];
+  } | {
+    status: "unavailable";
+    reason: {
+      code: "PRESCHOOL_PLANNING_BASELINE_INCOMPLETE";
+      message: string;
+    };
   };
   spikes: Record<PreschoolOperatingState, {
     count: number;
@@ -241,7 +317,10 @@ export const buildPreschoolOperationalProjection = (input: {
   dataSnapshotId: string;
   period: { start: string; endExclusive: string };
   timezone: string;
-  analysis: Pick<ProjectAnalysisPayload, "offHours" | "provenance">;
+  analysis: Pick<ProjectAnalysisPayload, "offHours" | "provenance"> & {
+    context?: Pick<ProjectAnalysisPayload["context"], "scopeId">;
+    dailyTotals?: ProjectAnalysisPayload["dailyTotals"];
+  };
   calendar: EnergyIqOperatingCalendarRevision;
   centres: PreschoolCentre[];
   cells: PreschoolOperationalCell[];
@@ -385,6 +464,23 @@ export const buildPreschoolOperationalProjection = (input: {
   }).sort((left, right) => left.score - right.score
     || right.standbySpikeCount - left.standbySpikeCount
     || left.centreCode.localeCompare(right.centreCode));
+  const completeDayCount = new Set(classified.map((cell) => cell.localDate)).size;
+  const hourlyProfile = Array.from({ length: 24 }, (_, localHour) => {
+    const hourCells = classified.filter((cell) => cell.localHour === localHour);
+    const operatingKwh = hourCells
+      .filter((cell) => cell.operatingState === "operating")
+      .reduce((total, cell) => total + cell.usageKwh, 0) / completeDayCount;
+    const closedHourKwh = hourCells
+      .filter((cell) => cell.operatingState === "standby")
+      .reduce((total, cell) => total + cell.usageKwh, 0) / completeDayCount;
+    return {
+      localHour,
+      operatingKwh: round(operatingKwh),
+      closedHourKwh: round(closedHourKwh),
+      totalKwh: round(operatingKwh + closedHourKwh),
+    };
+  });
+  const planningOutlook = buildPreschoolPlanningOutlook(input.analysis);
 
   return {
     status: "available",
@@ -400,6 +496,12 @@ export const buildPreschoolOperationalProjection = (input: {
       standbySharePct: input.analysis.offHours.sharePct,
       operatingKwh: input.analysis.offHours.operatingKwh,
     },
+    hourlyProfile: {
+      completeDayCount: 31,
+      unit: "mean kWh per complete day",
+      rows: hourlyProfile,
+    },
+    planningOutlook,
     spikes: { standby, operating },
     sop: {
       status: "provisional",
@@ -426,6 +528,96 @@ export const buildPreschoolOperationalProjection = (input: {
       ],
       baseline: "same-centre same-hour-slot mean within operating state",
     },
+  };
+};
+
+const buildPreschoolPlanningOutlook = (
+  analysis: Pick<ProjectAnalysisPayload, "offHours" | "provenance">
+    & {
+      context?: Pick<ProjectAnalysisPayload["context"], "scopeId">;
+      dailyTotals?: ProjectAnalysisPayload["dailyTotals"];
+    },
+): Extract<PreschoolOperationalProjection, { status: "available" }>["planningOutlook"] => {
+  const dailyTotals = analysis.dailyTotals;
+  const scopeId = analysis.context?.scopeId;
+  const unavailable = (): Extract<PreschoolOperationalProjection, { status: "available" }>["planningOutlook"] => ({
+    status: "unavailable",
+    reason: {
+      code: "PRESCHOOL_PLANNING_BASELINE_INCOMPLETE",
+      message: "June planning baseline needs four complete Monday-Sunday weeks from the same accepted May Snapshot.",
+    },
+  });
+  if (analysis.offHours.status !== "available") return unavailable();
+  if (
+    !dailyTotals
+    || !scopeId
+    || dailyTotals.timezone !== PRESCHOOL_MAY_PERIOD.timezone
+    || !analysis.provenance.queryIds.includes(DAILY_TOTALS_QUERY_ID)
+  ) return unavailable();
+  const scope = dailyTotals.scopes.find((candidate) => candidate.scopeId === scopeId);
+  if (!scope) return unavailable();
+  const rowByDate = new Map(scope.rows.map((row) => [row.localDate, row]));
+  const sourceWeeks = PRESCHOOL_MAY_COMPLETE_WEEK_STARTS.flatMap((start) => {
+    const rows = Array.from({ length: 7 }, (_, offset) => {
+      const date = new Date(`${start}T00:00:00.000Z`);
+      date.setUTCDate(date.getUTCDate() + offset);
+      return rowByDate.get(date.toISOString().slice(0, 10));
+    });
+    if (rows.some((row) => row?.dataHealth.status !== "complete" || typeof row.usageKwh !== "number")) {
+      return [];
+    }
+    const typedRows = rows as Array<NonNullable<typeof rows[number]>>;
+    return [{
+      start,
+      endInclusive: typedRows[typedRows.length - 1]!.localDate,
+      usageKwh: round(typedRows.reduce((total, row) => total + (row.usageKwh ?? 0), 0)),
+    }];
+  });
+  if (sourceWeeks.length !== PRESCHOOL_MAY_COMPLETE_WEEK_STARTS.length) return unavailable();
+  const weeklyValues = sourceWeeks.map((week) => week.usageKwh);
+  const weeklyAverageKwh = weeklyValues.reduce((total, value) => total + value, 0) / weeklyValues.length;
+  const targetScale = PRESCHOOL_JUNE_PERIOD.days / 7;
+  const projectedKwh = weeklyAverageKwh * targetScale;
+  const lowerKwh = Math.min(...weeklyValues) * targetScale;
+  const upperKwh = Math.max(...weeklyValues) * targetScale;
+  const rate = PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh;
+  return {
+    status: "provisional",
+    contract: {
+      id: "preschool-june-2026-naive-weekly-baseline",
+      version: "1",
+      method: "mean of four complete Monday-Sunday weeks",
+    },
+    targetPeriod: PRESCHOOL_JUNE_PERIOD,
+    sourceWeeks,
+    weeklyBaseline: {
+      averageKwh: round(weeklyAverageKwh),
+      minimumKwh: round(Math.min(...weeklyValues)),
+      maximumKwh: round(Math.max(...weeklyValues)),
+    },
+    usageEstimate: {
+      projectedKwh: round(projectedKwh),
+      lowerKwh: round(lowerKwh),
+      upperKwh: round(upperKwh),
+    },
+    costEstimate: {
+      currency: "SGD",
+      currentPeriodBeforeGstSgd: round(analysis.offHours.usageKwh * rate),
+      projectedBeforeGstSgd: round(projectedKwh * rate),
+      lowerBeforeGstSgd: round(lowerKwh * rate),
+      upperBeforeGstSgd: round(upperKwh * rate),
+    },
+    tariffReference: PRESCHOOL_DEMO_TARIFF_REFERENCE,
+    evidence: {
+      dataSnapshotId: analysis.provenance.dataSnapshotId,
+      queryId: DAILY_TOTALS_QUERY_ID,
+      recipeId: "preschool-naive-weekly-planning-baseline-v1",
+    },
+    limitations: [
+      "Planning baseline only; it is not an AI or validated statistical forecast.",
+      "Weather, occupancy, holidays, operational changes and tariff-plan differences are not modelled.",
+      "Cost uses the SP regulated low-tension non-domestic reference before GST, not the customer's contract or bill.",
+    ],
   };
 };
 

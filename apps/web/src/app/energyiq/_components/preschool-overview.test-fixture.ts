@@ -266,6 +266,65 @@ export function preschoolGoldenSnapshot(): EnergyProjectAnalysisSnapshotDto {
         standbySharePct: 12.45,
         operatingKwh: 21_818.0283,
       },
+      hourlyProfile: {
+        completeDayCount: 31,
+        unit: "mean kWh per complete day",
+        rows: Array.from({ length: 24 }, (_, localHour) => {
+          const businessHour = localHour >= 7 && localHour < 19;
+          const operatingKwh = businessHour ? 30 + (localHour >= 11 && localHour <= 15 ? 10 : 4) : 0;
+          const closedHourKwh = businessHour ? 5 : 10 + (localHour <= 5 ? 3 : 0);
+          return {
+            localHour,
+            operatingKwh,
+            closedHourKwh,
+            totalKwh: operatingKwh + closedHourKwh,
+          };
+        }),
+      },
+      planningOutlook: {
+        status: "provisional",
+        contract: {
+          id: "preschool-june-2026-naive-weekly-baseline",
+          version: "1",
+          method: "mean of four complete Monday-Sunday weeks",
+        },
+        targetPeriod: { start: "2026-06-01", endInclusive: "2026-06-30", days: 30 },
+        sourceWeeks: [
+          { start: "2026-05-04", endInclusive: "2026-05-10", usageKwh: 5_500 },
+          { start: "2026-05-11", endInclusive: "2026-05-17", usageKwh: 5_750 },
+          { start: "2026-05-18", endInclusive: "2026-05-24", usageKwh: 5_675 },
+          { start: "2026-05-25", endInclusive: "2026-05-31", usageKwh: 5_800 },
+        ],
+        weeklyBaseline: { averageKwh: 5_681.25, minimumKwh: 5_500, maximumKwh: 5_800 },
+        usageEstimate: { projectedKwh: 24_348.2143, lowerKwh: 23_571.4286, upperKwh: 24_857.1429 },
+        costEstimate: {
+          currency: "SGD",
+          currentPeriodBeforeGstSgd: 6_796.1782,
+          projectedBeforeGstSgd: 6_639.7591,
+          lowerBeforeGstSgd: 6_427.9286,
+          upperBeforeGstSgd: 6_778.5429,
+        },
+        tariffReference: {
+          sourceName: "SP Group",
+          sourceUrl: "https://www.spgroup.com.sg/about-us/media-resources/news-and-media-releases/Electricity-Tariff-Revision-for-the-Period-1-April-to-30-June-2026",
+          appendixUrl: "https://www.spgroup.com.sg/dam/spgroup/images/news-media-releases/2026/Appendix-2---Q2-2026.png0",
+          supplyClass: "Low tension, non-domestic",
+          appliesFrom: "2026-04-01",
+          appliesTo: "2026-06-30",
+          beforeGstSgdPerKwh: 0.2727,
+          withGstSgdPerKwh: 0.2972,
+        },
+        evidence: {
+          dataSnapshotId: "preschool-26b85b9c0b95e090",
+          queryId: "daily_totals_v1",
+          recipeId: "preschool-naive-weekly-planning-baseline-v1",
+        },
+        limitations: [
+          "Planning baseline only; it is not an AI or validated statistical forecast.",
+          "Weather, occupancy, holidays, operational changes and tariff-plan differences are not modelled.",
+          "Cost uses the SP regulated low-tension non-domestic reference before GST, not the customer's contract or bill.",
+        ],
+      },
       spikes: {
         standby: {
           count: 7,

@@ -1250,6 +1250,73 @@ export type PreschoolOperationalProjectionDto = {
     standbySharePct: number;
     operatingKwh: number;
   };
+  hourlyProfile: {
+    completeDayCount: 31;
+    unit: "mean kWh per complete day";
+    rows: Array<{
+      localHour: number;
+      operatingKwh: number;
+      closedHourKwh: number;
+      totalKwh: number;
+    }>;
+  };
+  planningOutlook: {
+    status: "provisional";
+    contract: {
+      id: "preschool-june-2026-naive-weekly-baseline";
+      version: "1";
+      method: "mean of four complete Monday-Sunday weeks";
+    };
+    targetPeriod: {
+      start: "2026-06-01";
+      endInclusive: "2026-06-30";
+      days: 30;
+    };
+    sourceWeeks: Array<{
+      start: string;
+      endInclusive: string;
+      usageKwh: number;
+    }>;
+    weeklyBaseline: {
+      averageKwh: number;
+      minimumKwh: number;
+      maximumKwh: number;
+    };
+    usageEstimate: {
+      projectedKwh: number;
+      lowerKwh: number;
+      upperKwh: number;
+    };
+    costEstimate: {
+      currency: "SGD";
+      currentPeriodBeforeGstSgd: number;
+      projectedBeforeGstSgd: number;
+      lowerBeforeGstSgd: number;
+      upperBeforeGstSgd: number;
+    };
+    tariffReference: {
+      sourceName: "SP Group";
+      sourceUrl: string;
+      appendixUrl: string;
+      supplyClass: "Low tension, non-domestic";
+      appliesFrom: "2026-04-01";
+      appliesTo: "2026-06-30";
+      beforeGstSgdPerKwh: 0.2727;
+      withGstSgdPerKwh: 0.2972;
+    };
+    evidence: {
+      dataSnapshotId: string;
+      queryId: "daily_totals_v1";
+      recipeId: "preschool-naive-weekly-planning-baseline-v1";
+    };
+    limitations: string[];
+  } | {
+    status: "unavailable";
+    reason: {
+      code: "PRESCHOOL_PLANNING_BASELINE_INCOMPLETE";
+      message: string;
+    };
+  };
   spikes: Record<"standby" | "operating", {
     count: number;
     centreCount: number;

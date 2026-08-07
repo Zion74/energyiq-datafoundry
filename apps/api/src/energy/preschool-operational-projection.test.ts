@@ -74,6 +74,16 @@ describe("Preschool operational projection", () => {
       standbySharePct: 12.45,
       operatingKwh: 21_818.0283,
     });
+    expect(projection.hourlyProfile).toMatchObject({
+      completeDayCount: 31,
+      unit: "mean kWh per complete day",
+    });
+    expect(projection.hourlyProfile.rows).toHaveLength(24);
+    expect(projection.hourlyProfile.rows[7]).toMatchObject({ localHour: 7 });
+    expect(projection.planningOutlook).toMatchObject({
+      status: "unavailable",
+      reason: { code: "PRESCHOOL_PLANNING_BASELINE_INCOMPLETE" },
+    });
     expect(projection.spikes.standby).toMatchObject({ count: 7, centreCount: 3 });
     expect(projection.spikes.operating).toMatchObject({ count: 21, centreCount: 14 });
     expect(projection.spikes.standby.centres.map((centre) => [centre.centreCode, centre.spikeCount]))
@@ -98,6 +108,63 @@ describe("Preschool operational projection", () => {
         "preschool-hour-slot-spike-v1",
         "preschool-after-hours-sop-signal-v1",
       ],
+    });
+  });
+
+  it("builds a transparent June planning baseline from four complete May weeks and the official demo tariff reference", () => {
+    const projection = buildPreschoolOperationalProjection({
+      projectRelease: release(),
+      dataSnapshotId: "preschool-snapshot-may-2026",
+      period: {
+        start: "2026-04-30T16:00:00.000Z",
+        endExclusive: "2026-05-31T16:00:00.000Z",
+      },
+      timezone: "Asia/Singapore",
+      analysis: planningAnalysis(),
+      calendar: calendar(),
+      centres: centreCodes.map((code) => ({
+        scopeId: scopeId(code),
+        centreCode: code,
+        name: `Centre ${code}`,
+        centreType: null,
+      })),
+      cells: mayCells(),
+    });
+
+    if (projection.status !== "available") throw new Error(projection.reason.message);
+    expect(projection.planningOutlook).toMatchObject({
+      status: "provisional",
+      contract: {
+        id: "preschool-june-2026-naive-weekly-baseline",
+        method: "mean of four complete Monday-Sunday weeks",
+      },
+      sourceWeeks: [
+        { start: "2026-05-04", endInclusive: "2026-05-10", usageKwh: 749 },
+        { start: "2026-05-11", endInclusive: "2026-05-17", usageKwh: 798 },
+        { start: "2026-05-18", endInclusive: "2026-05-24", usageKwh: 847 },
+        { start: "2026-05-25", endInclusive: "2026-05-31", usageKwh: 896 },
+      ],
+      weeklyBaseline: { averageKwh: 822.5, minimumKwh: 749, maximumKwh: 896 },
+      usageEstimate: { projectedKwh: 3_525, lowerKwh: 3_210, upperKwh: 3_840 },
+      costEstimate: {
+        currentPeriodBeforeGstSgd: 6_796.1782,
+        projectedBeforeGstSgd: 961.2675,
+        lowerBeforeGstSgd: 875.367,
+        upperBeforeGstSgd: 1_047.168,
+      },
+      tariffReference: {
+        sourceName: "SP Group",
+        supplyClass: "Low tension, non-domestic",
+        appliesFrom: "2026-04-01",
+        appliesTo: "2026-06-30",
+        beforeGstSgdPerKwh: 0.2727,
+        withGstSgdPerKwh: 0.2972,
+      },
+      evidence: {
+        dataSnapshotId: "preschool-snapshot-may-2026",
+        queryId: "daily_totals_v1",
+        recipeId: "preschool-naive-weekly-planning-baseline-v1",
+      },
     });
   });
 
@@ -378,6 +445,45 @@ const analysis = (): Pick<ProjectAnalysisPayload, "offHours" | "provenance"> => 
     aggregationRule: "component",
     sourceView: "energy_scope_fixture",
     queryIds: ["scope_summary_v1", "operational_policy_scope_intervals_v1"],
+  },
+});
+
+const planningAnalysis = (): Pick<ProjectAnalysisPayload, "offHours" | "provenance"> & {
+  context: Pick<ProjectAnalysisPayload["context"], "scopeId">;
+  dailyTotals: NonNullable<ProjectAnalysisPayload["dailyTotals"]>;
+} => ({
+  ...analysis(),
+  provenance: {
+    ...analysis().provenance,
+    queryIds: [...analysis().provenance.queryIds, "daily_totals_v1"],
+  },
+  context: { scopeId: "preschool-project" },
+  dailyTotals: {
+    metricId: "energy.total_usage_kwh@1",
+    grain: "day",
+    timezone: "Asia/Singapore",
+    scopes: [{
+      scopeId: "preschool-project",
+      scopeName: "Preschool Portfolio",
+      scopeType: "project",
+      rows: Array.from({ length: 31 }, (_, index) => {
+        const day = index + 1;
+        const localDate = `2026-05-${String(day).padStart(2, "0")}`;
+        return {
+          localDate,
+          from: `${localDate}T00:00:00.000+08:00`,
+          to: `${localDate}T23:59:59.999+08:00`,
+          usageKwh: 100 + day,
+          dataHealth: {
+            status: "complete" as const,
+            coveragePct: 100,
+            expectedMeterIntervalCount: 2_880,
+            validIntervalCount: 2_880,
+            qualityEventCount: 0,
+          },
+        };
+      }),
+    }],
   },
 });
 
