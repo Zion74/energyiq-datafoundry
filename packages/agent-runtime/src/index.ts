@@ -1203,7 +1203,9 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
   policies.push(
     "Runtime circuit breakers exist only to stop runaway execution; they are not an analysis budget or a reason to "
       + "answer early. Continue until the requirement is supported by sufficient Evidence or the unresolved gap is "
-      + "explicit. Prefer focused, non-duplicative queries and use validation feedback to refine the investigation. "
+      + "explicit. When another query would not change the conclusion, next action, or material uncertainty, finish "
+      + "the investigation and answer; this is a judgment principle, not a fixed query or step limit. Prefer focused, "
+      + "non-duplicative queries and use validation feedback to refine the investigation. "
       + `(SQL longer than ${SQL_MAX_SQL_CHARS} chars is truncated from view.)`
   );
   if (commandExecutionEnabled) {
