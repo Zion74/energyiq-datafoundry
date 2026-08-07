@@ -284,6 +284,10 @@ Ngee Ann 与 Preschool 各运行至少三次固定 Profile/Snapshot：
 它已把 3-run 平均 701 词显著压短，但 DeepSeek 仍可能超过 300 词目标。今晚不增加第二个总结模型或
 通用 Prompt 平台；AI Slot 的卡片级裁剪继续由 Presentation/renderer 负责。
 
+提交 `5b094ff feat(agent): clarify autonomous stopping judgment` 补齐柔性停止原则：当新增查询不会改变
+结论、下一步行动或实质不确定性时，Agent 可以结束调查。这一原则明确不是固定 query/step limit，
+不会替 Agent 选择路线。聚焦回归 5 files / 9 tests 与根 build 通过。
+
 ### Preschool same-session 的诚实边界
 
 对当前 `127.0.0.1:8787` 运行 fixed three-turn continuity 时，CLI 在进入模型前收到 `401 Authentication required`。
