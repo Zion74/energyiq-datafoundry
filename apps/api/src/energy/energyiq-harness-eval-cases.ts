@@ -94,7 +94,11 @@ export const ENERGYIQ_HARNESS_FAST_CASES: EnergyIqHarnessEvalCase[] = [
     contract: {
       requiredTools: ["inspect_schema", "run_sql_readonly", "analysis_requirements_commit"],
       forbiddenTools: COMMON_FORBIDDEN_TOOLS,
-      answerAllOf: ["2026-06-03", "2026-06-09", "\\bkWh\\b"],
+      answerAllOf: [
+        "(?:2026-06-03|3(?:rd)?\\s+June\\s+2026|June\\s+3(?:rd)?,?\\s+2026)",
+        "(?:2026-06-09|9(?:th)?\\s+June\\s+2026|June\\s+9(?:th)?,?\\s+2026)",
+        "\\bkWh\\b",
+      ],
       chart: { type: "line", pointCount: 168 },
     },
   },

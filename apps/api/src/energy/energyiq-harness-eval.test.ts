@@ -186,15 +186,17 @@ describe("EnergyIQ Harness Eval", () => {
   it("checks chart type and exact point count at the backend artifact boundary", () => {
     const evalCase = ENERGYIQ_HARNESS_FAST_CASES.find((entry) => entry.id === "ngee-hourly-chart")!;
     const points = Array.from({ length: 168 }, (_, index) => ({ label: String(index), value: index }));
-    const events = successfulEvents("The period is 2026-06-03 to 2026-06-09. The peak is 9.1 kWh. Open Outputs for the chart preview.")
+    const events = successfulEvents("The period is 3 June 2026 to 9 June 2026. The peak is 9.1 kWh. Open Outputs for the chart preview.")
       .map((event) => event.type === "TOOL_CALL_RESULT"
         && (event as { toolCallName?: string }).toolCallName === "run_sql_readonly"
         ? {
             ...event,
             content: JSON.stringify({
-              result: {
-                columns: ["local_hour_start", "energy_kwh"],
-                rows: points.map((point) => [point.label, point.value]),
+              columns: ["local_hour_start", "energy_kwh"],
+              rows: points.slice(0, 20).map((point) => [point.label, point.value]),
+              row_count: 168,
+              context: {
+                truncation: { truncated: true, originalSize: 168, returnedSize: 20 },
               },
             }),
           }
@@ -203,6 +205,19 @@ describe("EnergyIQ Harness Eval", () => {
       elapsedMs: 40_000,
       events: [
         ...events,
+        {
+          type: "CUSTOM",
+          name: "artifact",
+          value: {
+            type: "table",
+            tool_call_id: "call-1",
+            preview_json: {
+              columns: ["local_hour_start", "energy_kwh"],
+              rows: points.map((point) => [point.label, point.value]),
+              row_count: 168,
+            },
+          },
+        },
         { type: "CUSTOM", name: "artifact", value: { type: "chart", preview_json: { chartType: "line", points } } },
       ],
     });
@@ -214,6 +229,47 @@ describe("EnergyIQ Harness Eval", () => {
       expect.objectContaining({ id: "chart.matches-sql", passed: true }),
     ]));
     expect(report.status).toBe("passed");
+  });
+
+  it("does not accept a full table artifact that is unrelated to the SQL tool call", () => {
+    const evalCase = ENERGYIQ_HARNESS_FAST_CASES.find((entry) => entry.id === "ngee-hourly-chart")!;
+    const points = Array.from({ length: 168 }, (_, index) => ({ label: String(index), value: index }));
+    const events = successfulEvents("The period is 3 June 2026 to 9 June 2026. The peak is 9.1 kWh.")
+      .map((event) => event.type === "TOOL_CALL_RESULT"
+        && (event as { toolCallName?: string }).toolCallName === "run_sql_readonly"
+        ? {
+            ...event,
+            content: JSON.stringify({
+              columns: ["local_hour_start", "energy_kwh"],
+              rows: points.slice(0, 20).map((point) => [point.label, point.value]),
+              row_count: 168,
+            }),
+          }
+        : event);
+    const report = evaluateEnergyIqHarnessObservation(evalCase, {
+      elapsedMs: 40_000,
+      events: [
+        ...events,
+        {
+          type: "CUSTOM",
+          name: "artifact",
+          value: {
+            type: "table",
+            tool_call_id: "unrelated-call",
+            preview_json: {
+              columns: ["local_hour_start", "energy_kwh"],
+              rows: points.map((point) => [point.label, point.value]),
+            },
+          },
+        },
+        { type: "CUSTOM", name: "artifact", value: { type: "chart", preview_json: { chartType: "line", points } } },
+      ],
+    });
+
+    expect(report.assertions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "chart.matches-sql", passed: false, hard: true }),
+    ]));
+    expect(report.hardFailure).toBe(true);
   });
 
   it("scores actionable insight across What, Evidence, Why, Action, and Verify", () => {
