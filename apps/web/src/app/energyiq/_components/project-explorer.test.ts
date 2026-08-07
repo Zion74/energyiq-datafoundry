@@ -34,6 +34,7 @@ describe("Project Explorer trusted view state", () => {
       to: "2026-06-16",
       dataSnapshotId: "snapshot-a",
       projectReleaseId: "release-a",
+      chartView: "daily",
     });
 
     expect(buildExplorerAnalysisRequest(view)).toEqual({
@@ -74,6 +75,7 @@ describe("Project Explorer trusted view state", () => {
       to: "",
       dataSnapshotId: "snapshot-p",
       projectReleaseId: "release-p",
+      chartView: "daily",
     })).toBe(
       "/energyiq/explorer?projectId=preschool-demo&scopeId=centre-12&resource=electricity&period=Previous+month&dataSnapshotId=snapshot-p&projectReleaseId=release-p",
     );
@@ -89,14 +91,25 @@ describe("Project Explorer trusted view state", () => {
       to: "2026-06-16",
       dataSnapshotId: "snapshot-a",
       projectReleaseId: "release-a",
+      chartView: "hourly" as const,
     };
 
     expect(isExplorerPinnedContextMismatch("ENERGYIQ_DATA_SNAPSHOT_MISMATCH")).toBe(true);
     expect(isExplorerPinnedContextMismatch("ENERGYIQ_PROJECT_RELEASE_MISMATCH")).toBe(true);
     expect(isExplorerPinnedContextMismatch("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE")).toBe(false);
     expect(explorerCurrentFactsUrl(pinnedView)).toBe(
-      "/energyiq/explorer?projectId=ngee-ann-polytechnic&scopeId=l7-load-4&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16",
+      "/energyiq/explorer?projectId=ngee-ann-polytechnic&scopeId=l7-load-4&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&view=hourly",
     );
+  });
+
+  it("restores the local 24-hour chart without changing the trusted analysis request", () => {
+    const view = explorerViewStateFromSearchParams(new URLSearchParams(
+      "projectId=ngee-ann-polytechnic&scopeId=level-7&period=Last+7+days&view=hourly&dataSnapshotId=snapshot-a&projectReleaseId=release-a",
+    ));
+
+    expect(view.chartView).toBe("hourly");
+    expect(explorerUrlWithView(view)).toContain("view=hourly");
+    expect(buildExplorerAnalysisRequest(view)).not.toHaveProperty("view");
   });
 
   it("does not present an empty trusted response as zero consumption", () => {

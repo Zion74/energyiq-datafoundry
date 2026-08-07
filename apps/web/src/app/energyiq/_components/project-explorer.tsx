@@ -43,6 +43,7 @@ export type ExplorerUrlViewState = {
   to: string;
   dataSnapshotId: string;
   projectReleaseId: string;
+  chartView: ExplorerChartView;
 };
 
 const explorerPeriodOptions: ReadonlyArray<{
@@ -79,6 +80,7 @@ export function ProjectExplorer() {
     initialViewState.to,
     initialViewState.dataSnapshotId,
     initialViewState.projectReleaseId,
+    initialViewState.chartView,
   ].join(":");
   return <ProjectExplorerView key={viewStateKey} initialViewState={initialViewState} />;
 }
@@ -103,7 +105,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [periodSelection, setPeriodSelection] = useState<ExplorerPeriod>(initialViewState.period);
-  const [chartView, setChartView] = useState<ExplorerChartView>("daily");
+  const [chartView, setChartView] = useState<ExplorerChartView>(initialViewState.chartView);
   const [customRange, setCustomRange] = useState({
     projectId: initialViewState.projectId,
     from: initialViewState.from,
@@ -238,6 +240,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
     to: periodSelection === "Custom" && customRange.projectId === activeProjectId ? customRange.to : "",
     dataSnapshotId: initialViewState.dataSnapshotId,
     projectReleaseId: initialViewState.projectReleaseId,
+    chartView,
   });
   const analysisCircuitById = new Map(
     (analysis?.circuits ?? []).map((circuit) => [circuit.meterNodeId, circuit]),
@@ -311,6 +314,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
       to: periodSelection === "Custom" ? range.to : "",
       dataSnapshotId: initialViewState.dataSnapshotId,
       projectReleaseId: initialViewState.projectReleaseId,
+      chartView,
     });
     if (`${window.location.pathname}${window.location.search}` === nextUrl) return;
     window.history.replaceState(window.history.state, "", nextUrl);
@@ -1129,6 +1133,7 @@ export function explorerViewStateFromSearchParams(
     to: hasValidCustomRange ? requestedTo : "",
     dataSnapshotId: searchParams.get("dataSnapshotId")?.trim() || "",
     projectReleaseId: searchParams.get("projectReleaseId")?.trim() || "",
+    chartView: searchParams.get("view") === "hourly" ? "hourly" : "daily",
   };
 }
 
@@ -1144,6 +1149,7 @@ export function explorerUrlWithView(view: ExplorerUrlViewState): string {
   }
   if (view.dataSnapshotId) next.set("dataSnapshotId", view.dataSnapshotId);
   if (view.projectReleaseId) next.set("projectReleaseId", view.projectReleaseId);
+  if (view.chartView === "hourly") next.set("view", "hourly");
   return `/energyiq/explorer?${next.toString()}`;
 }
 
