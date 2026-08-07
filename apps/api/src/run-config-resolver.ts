@@ -2,6 +2,7 @@ import type { RunAgentInput } from "@ag-ui/client";
 import {
   createModelProviderFromEnv,
   createModelProviderFromProfile,
+  ModelContextProfileRegistry,
   STATIC_AGENT_TOOL_NAMES,
   type AgentModelContextProfile
 } from "@datafoundry/agent-runtime";
@@ -100,18 +101,19 @@ export const resolveRunConfig = (input: ResolveRunConfigInput): ResolvedRunConfi
     input.userId,
     input.workspaceId
   );
-  const modelSettings = resolveModelSettings(
-    effectiveRunConfig.activeLlmProfileId,
-    input.metadataStore,
-    input.userId,
-    input.workspaceId
-  );
   const modelContextProfile = resolveModelContextProfile(
     effectiveRunConfig.activeLlmProfileId,
     modelProvider.model_name,
     input.metadataStore,
     input.userId,
     input.workspaceId
+  );
+  const modelSettings = resolveModelSettings(
+    effectiveRunConfig.activeLlmProfileId,
+    input.metadataStore,
+    input.userId,
+    input.workspaceId,
+    modelContextProfile
   );
   const reasoningModel = resolveReasoningModel(
     effectiveRunConfig.activeLlmProfileId,
@@ -398,7 +400,8 @@ const resolveModelSettings = (
   profileId: string | undefined,
   metadataStore: MetadataStore,
   userId: string,
-  workspaceId: string
+  workspaceId: string,
+  modelContextProfile: AgentModelContextProfile
 ): ResolvedRunConfig["modelSettings"] | undefined => {
   if (!profileId || profileId === "server-default") {
     return undefined;
@@ -410,10 +413,6 @@ const resolveModelSettings = (
     numericRecordValue(profile.payload, "frequencyPenalty") ?? numericRecordValue(profile.payload, "frequency_penalty");
   const presencePenalty =
     numericRecordValue(profile.payload, "presencePenalty") ?? numericRecordValue(profile.payload, "presence_penalty");
-  const verifiedCapability = resolveVerifiedModelCapability(profile);
-  const maxOutputTokens = numericRecordValue(profile.payload, "maxTokens")
-    ?? numericRecordValue(profile.payload, "maxOutputTokens")
-    ?? verifiedCapability?.maxOutputTokens;
   return {
     ...(temperature !== undefined ? { temperature: Math.max(0, Math.min(2, temperature)) } : {}),
     ...(topP !== undefined ? { topP: Math.max(0, Math.min(1, topP)) } : {}),
@@ -421,9 +420,7 @@ const resolveModelSettings = (
       ? { frequencyPenalty: Math.max(-2, Math.min(2, frequencyPenalty)) }
       : {}),
     ...(presencePenalty !== undefined ? { presencePenalty: Math.max(-2, Math.min(2, presencePenalty)) } : {}),
-    ...(maxOutputTokens !== undefined
-      ? { maxOutputTokens: Math.max(1, Math.min(100000, Math.floor(maxOutputTokens))) }
-      : {})
+    maxOutputTokens: modelContextProfile.maxOutputTokens
   };
 };
 
@@ -433,9 +430,9 @@ const resolveModelContextProfile = (
   metadataStore: MetadataStore,
   userId: string,
   workspaceId: string
-): AgentModelContextProfile | undefined => {
+): AgentModelContextProfile => {
   if (!profileId || profileId === "server-default") {
-    return undefined;
+    return new ModelContextProfileRegistry().resolve(modelName);
   }
   const profile = resolvePrimaryModelProfile(profileId, metadataStore, userId, workspaceId);
   const explicitContextLength = numericRecordValue(profile.payload, "contextLength")
@@ -443,7 +440,7 @@ const resolveModelContextProfile = (
   const verifiedCapability = resolveVerifiedModelCapability(profile);
   const contextLength = explicitContextLength ?? verifiedCapability?.contextWindow;
   if (contextLength === undefined) {
-    return undefined;
+    return new ModelContextProfileRegistry().resolve(modelName);
   }
   const contextWindow = Math.max(8192, Math.min(2_000_000, Math.floor(contextLength)));
   const maxOutputTokens = numericRecordValue(profile.payload, "maxTokens")

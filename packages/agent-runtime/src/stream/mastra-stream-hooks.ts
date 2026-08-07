@@ -18,7 +18,7 @@ export const createMastraStreamNormalizerHooks = (
     onWorkspaceMetadata?: (metadata: unknown) => Promise<void> | void;
   } = {},
 ): MastraStreamNormalizerHooks => {
-  const emittedStepUsageKeys = new Set<string>();
+  let previousEmittedUsage: { key: string; chunkType: string } | undefined;
   let completedSteps = 0;
 
   return {
@@ -45,10 +45,16 @@ export const createMastraStreamNormalizerHooks = (
         String(usageEvent.output_tokens ?? 0),
         stringValue(usageEvent.model) ?? "",
       ].join("|");
-      if (emittedStepUsageKeys.has(dedupeKey)) {
+      // Mastra versions may emit both aliases for one completed step. Only collapse
+      // the adjacent cross-alias duplicate; a later real step is allowed to have
+      // exactly the same token counts and tool metadata.
+      if (
+        previousEmittedUsage?.key === dedupeKey
+        && previousEmittedUsage.chunkType !== type
+      ) {
         return;
       }
-      emittedStepUsageKeys.add(dedupeKey);
+      previousEmittedUsage = { key: dedupeKey, chunkType: type };
 
       completedSteps += 1;
       usageEvent.step_number = completedSteps;

@@ -89,6 +89,19 @@ Clients render using AG-UI event semantics—no custom SSE/chat protocol require
 
 Clients should retain `runId`, `threadId`, tool call IDs, and artifact IDs for details, cancel, and restore.
 
+### Context and token diagnostics
+
+The runtime emits backward-compatible Custom events for Context budget and usage diagnostics:
+
+| Event | Important fields | Meaning |
+| --- | --- | --- |
+| `run.config.resolved` | `context_window`, `max_output_tokens`, `input_budget`, `capability_source` | The model budget selected for the run. The source is `explicit-profile`, `verified-model-default`, or `conservative-fallback`. |
+| `context.compiled` | `checkpoint_schema_version`, `package_revision`, `plan_id`, `token_report`, `group_token_costs`, `source_snapshot_hashes`, `high_water_mark` | The deterministic Context Package/Plan checkpoint for one model step. |
+| `context.prompt-verified` | `prompt_tokens`, `input_budget`, `remaining_tokens`, `high_water_mark` | The final provider prompt count checked immediately before the request. |
+| `token_usage` | `step_number`, `input_tokens`, `output_tokens`, `cache_telemetry_available`, optional cache hit/miss tokens | Provider-reported usage for one completed model step. Missing cache telemetry is unavailable, not zero. |
+
+`normal`, `diagnostic`, and `review` high-water marks are observability signals. They do not impose SQL, reasoning-round, elapsed-time, or answer-length limits. The final prompt guard still fails closed when the effective input budget is exceeded.
+
 ## Cancel, errors, and restore
 
 | Scenario | Client action |

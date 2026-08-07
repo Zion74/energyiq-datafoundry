@@ -417,7 +417,9 @@ export const evaluateEnergyIqHarnessObservation = (
       outputTokens: tokenTotals.output,
       maxPromptTokens: Math.max(0, ...steps.map((step) => step.promptTokens)),
       maxBudgetUtilization: maximumOptional(steps.map((step) => step.budgetUtilization)),
-      contextCheckpointCount: steps.filter((step) => step.inputBudget !== null).length,
+      contextCheckpointCount: events.filter((event) => (
+        stringValue(event.type) === "CUSTOM" && stringValue(event.name) === "context.compiled"
+      )).length,
       cacheTelemetrySteps: steps.filter((step) => step.cacheTelemetryAvailable).length,
       cacheHitTokens: sum(steps.map((step) => step.cacheHitTokens ?? 0)),
       cacheMissTokens: sum(steps.map((step) => step.cacheMissTokens ?? 0)),

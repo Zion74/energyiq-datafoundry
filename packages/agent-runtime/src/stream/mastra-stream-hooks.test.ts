@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { tokenUsageEventFromChunk } from "./mastra-stream-hooks.js";
+import {
+  createMastraStreamNormalizerHooks,
+  tokenUsageEventFromChunk,
+} from "./mastra-stream-hooks.js";
 
 describe("tokenUsageEventFromChunk", () => {
   it("preserves DeepSeek prompt cache telemetry when the provider exposes it", () => {
@@ -47,5 +50,34 @@ describe("tokenUsageEventFromChunk", () => {
     expect(event).toMatchObject({ cache_telemetry_available: false });
     expect(event).not.toHaveProperty("cache_hit_tokens");
     expect(event).not.toHaveProperty("cache_miss_tokens");
+  });
+
+  it("keeps distinct steps when their usage totals happen to be identical", () => {
+    const events: Array<Record<string, unknown>> = [];
+    const hooks = createMastraStreamNormalizerHooks({
+      emit: (event) => events.push(event as unknown as Record<string, unknown>),
+    });
+    const chunk = {
+      type: "step-finish",
+      usage: { inputTokens: 100, outputTokens: 10 },
+    };
+
+    hooks.onChunk?.(chunk);
+    hooks.onChunk?.(chunk);
+
+    expect(events.map((event) => (event.value as Record<string, unknown>).step_number)).toEqual([1, 2]);
+  });
+
+  it("collapses adjacent step-end aliases for the same usage record", () => {
+    const events: Array<Record<string, unknown>> = [];
+    const hooks = createMastraStreamNormalizerHooks({
+      emit: (event) => events.push(event as unknown as Record<string, unknown>),
+    });
+    const usage = { inputTokens: 100, outputTokens: 10 };
+
+    hooks.onChunk?.({ type: "step-finish", usage });
+    hooks.onChunk?.({ type: "finish-step", usage });
+
+    expect(events).toHaveLength(1);
   });
 });

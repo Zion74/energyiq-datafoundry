@@ -63,8 +63,12 @@ describe("Workspace default model profile runtime", () => {
     expect(resolved.effectiveRunConfig.activeLlmProfileId).toBe("workspace-default");
     expect(resolved.modelProvider.model_name).toBe("deepseek-v4-flash");
     expect(resolved.modelProvider).not.toHaveProperty("provider_ids");
-    expect(resolved.modelContextProfile).toBeUndefined();
-    expect(resolved.modelSettings).not.toHaveProperty("maxOutputTokens");
+    expect(resolved.modelContextProfile).toMatchObject({
+      capabilitySource: "conservative-fallback",
+      contextWindow: 128_000,
+      maxOutputTokens: 4096
+    });
+    expect(resolved.modelSettings).toMatchObject({ maxOutputTokens: 4096 });
     expect(metadata.configResources.list({
       workspace_id: "customer-1", user_id: "normal-user", kind: "model-profile"
     })).toEqual([]);
@@ -230,8 +234,13 @@ describe("Workspace default model profile runtime", () => {
     expect(explicit.modelSettings).toMatchObject({ maxOutputTokens: 16_000 });
 
     const unverified = resolveProfile("unverified-proxy");
-    expect(unverified.modelContextProfile).toBeUndefined();
-    expect(unverified.modelSettings).not.toHaveProperty("maxOutputTokens");
+    expect(unverified.modelContextProfile).toMatchObject({
+      capabilitySource: "conservative-fallback",
+      contextWindow: 128_000,
+      maxOutputTokens: 4096,
+      outputReserve: 4096
+    });
+    expect(unverified.modelSettings).toMatchObject({ maxOutputTokens: 4096 });
 
     metadata.db.close();
     rmSync(root, { recursive: true, force: true });
