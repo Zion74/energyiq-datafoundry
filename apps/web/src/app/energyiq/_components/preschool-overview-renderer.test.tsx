@@ -31,7 +31,7 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     );
 
     expect(markup).toContain("Top 5 of 30 Centres");
-    expect(markup).toContain("View the remaining 25 Centres");
+    expect(markup).toContain("View all 30 Centres and normalised metrics");
     expect(markup.match(/data-centre-row=/g)).toHaveLength(30);
   });
 });

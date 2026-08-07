@@ -491,7 +491,7 @@ export const buildPreschoolOperationalProjection = (input: {
     },
     period: { ...input.period, timezone: input.timezone },
     energy: {
-      totalKwh: input.analysis.offHours.usageKwh,
+      totalKwh: round(input.analysis.offHours.operatingKwh + input.analysis.offHours.standbyKwh),
       standbyKwh: input.analysis.offHours.standbyKwh,
       standbySharePct: input.analysis.offHours.sharePct,
       operatingKwh: input.analysis.offHours.operatingKwh,
@@ -557,6 +557,15 @@ const buildPreschoolPlanningOutlook = (
   const scope = dailyTotals.scopes.find((candidate) => candidate.scopeId === scopeId);
   if (!scope) return unavailable();
   const rowByDate = new Map(scope.rows.map((row) => [row.localDate, row]));
+  const currentPeriodRows = Array.from({ length: 31 }, (_, offset) => {
+    const localDate = `2026-05-${String(offset + 1).padStart(2, "0")}`;
+    return rowByDate.get(localDate);
+  });
+  if (currentPeriodRows.some((row) => row?.dataHealth.status !== "complete" || typeof row.usageKwh !== "number")) {
+    return unavailable();
+  }
+  const currentPeriodUsageKwh = (currentPeriodRows as Array<NonNullable<typeof currentPeriodRows[number]>>)
+    .reduce((total, row) => total + (row.usageKwh ?? 0), 0);
   const sourceWeeks = PRESCHOOL_MAY_COMPLETE_WEEK_STARTS.flatMap((start) => {
     const rows = Array.from({ length: 7 }, (_, offset) => {
       const date = new Date(`${start}T00:00:00.000Z`);
@@ -602,7 +611,7 @@ const buildPreschoolPlanningOutlook = (
     },
     costEstimate: {
       currency: "SGD",
-      currentPeriodBeforeGstSgd: round(analysis.offHours.usageKwh * rate),
+      currentPeriodBeforeGstSgd: round(currentPeriodUsageKwh * rate),
       projectedBeforeGstSgd: round(projectedKwh * rate),
       lowerBeforeGstSgd: round(lowerKwh * rate),
       upperBeforeGstSgd: round(upperKwh * rate),

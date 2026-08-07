@@ -685,9 +685,9 @@ function BenchmarkDistributionPlot({ distribution }: { distribution: BenchmarkDi
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h5 className="text-xs font-semibold text-foreground">{distribution.label}</h5>
-          <p className="mt-1 text-[10px] text-muted">Shared cohort axis · {distribution.unit}</p>
+          <p className="mt-1 text-xs text-muted">Shared cohort axis · {distribution.unit}</p>
         </div>
-        <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2 py-0.5 text-[9px] font-semibold text-step-warning">Provisional</span>
+        <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2 py-0.5 text-xs font-semibold text-step-warning">Provisional</span>
       </div>
       <svg
         viewBox={`0 0 ${width} ${height}`}
@@ -702,13 +702,13 @@ function BenchmarkDistributionPlot({ distribution }: { distribution: BenchmarkDi
           const visual = benchmarkCohortVisual(cohort.name);
           return (
             <g key={cohort.name} data-benchmark-lane={`${distribution.id}:${cohort.name}`}>
-              <text x={margin.left - 12} y={laneY - 4} textAnchor="end" className="fill-foreground text-[10px] font-semibold">{cohort.name}</text>
-              <text x={margin.left - 12} y={laneY + 11} textAnchor="end" className="fill-muted-light text-[9px]">n={cohort.sampleSize}</text>
+              <text x={margin.left - 12} y={laneY - 4} textAnchor="end" className="fill-foreground text-xs font-semibold">{cohort.name}</text>
+              <text x={margin.left - 12} y={laneY + 11} textAnchor="end" className="fill-muted text-[10px]">n={cohort.sampleSize}</text>
               <line x1={margin.left} y1={laneY} x2={width - margin.right} y2={laneY} stroke="currentColor" className="text-border" />
               <line x1={x(cohort.p50Value)} y1={laneY - 14} x2={x(cohort.p50Value)} y2={laneY + 14} stroke="currentColor" strokeWidth={1.5} className="text-primary" />
               <line x1={x(cohort.p75Value)} y1={laneY - 14} x2={x(cohort.p75Value)} y2={laneY + 14} stroke="currentColor" strokeWidth={1.5} strokeDasharray="3 3" className="text-step-warning" />
-              <text x={x(cohort.p50Value)} y={laneY - 18} textAnchor="middle" className="fill-primary text-[8px] font-semibold">P50 {cohort.p50}</text>
-              <text x={x(cohort.p75Value)} y={laneY + 25} textAnchor="middle" className="fill-step-warning text-[8px] font-semibold">P75 {cohort.p75}</text>
+              <text x={x(cohort.p50Value)} y={laneY - 18} textAnchor="middle" className="fill-primary text-[10px] font-semibold">P50 {cohort.p50}</text>
+              <text x={x(cohort.p75Value)} y={laneY + 25} textAnchor="middle" className="fill-step-warning text-[10px] font-semibold">P75 {cohort.p75}</text>
               {cohort.points.map((point, pointIndex) => {
                 const cx = x(point.value);
                 const cy = laneY + offsets[pointIndex % offsets.length]!;
@@ -726,10 +726,10 @@ function BenchmarkDistributionPlot({ distribution }: { distribution: BenchmarkDi
             </g>
           );
         })}
-        <text x={margin.left} y={height - 12} className="fill-muted-light text-[9px]">{distribution.axis.min}</text>
-        <text x={width - margin.right} y={height - 12} textAnchor="end" className="fill-muted-light text-[9px]">{distribution.axis.max} {distribution.unit}</text>
+        <text x={margin.left} y={height - 12} className="fill-muted text-[10px]">{distribution.axis.min}</text>
+        <text x={width - margin.right} y={height - 12} textAnchor="end" className="fill-muted text-[10px]">{distribution.axis.max} {distribution.unit}</text>
       </svg>
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[9px] text-muted">
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-muted">
         <span><strong className="font-semibold text-primary">Typical (P50)</strong> · solid marker</span>
         <span><strong className="font-semibold text-step-warning">Review above (P75)</strong> · dashed marker</span>
       </div>

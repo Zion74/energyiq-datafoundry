@@ -86,7 +86,7 @@ describe("Project Renderer Registry", () => {
     expect(preschoolMarkup).toContain("Centre A");
     expect(preschoolMarkup).toContain("Efficiency benchmark");
     expect(preschoolMarkup).not.toContain("P50 / P75 peer benchmark");
-    expect(preschoolMarkup).toContain("Priority: G · M · J");
+    expect(preschoolMarkup).toContain("Review first: G · M · J");
     expect(preschoolMarkup).toContain("10.53 kWh/m²/yr");
     expect(preschoolMarkup).toContain("20.8 kWh/person");
     expect(preschoolMarkup).toContain("data-benchmark-plot=\"eui-x-per-pax-y\"");
@@ -114,7 +114,7 @@ describe("Project Renderer Registry", () => {
     expect(preschoolMarkup).toContain("Typical (P50)");
     expect(preschoolMarkup).toContain("Review above (P75)");
     expect(preschoolMarkup).not.toMatch(/Std Dev|Mean \(μ\)/i);
-    expect(preschoolMarkup).toContain("Operating behaviour");
+    expect(preschoolMarkup).toContain("Operating patterns");
     expect(preschoolMarkup).toContain('data-operating-profile="hourly-calendar-split"');
     expect(preschoolMarkup.match(/data-profile-hour=/g)).toHaveLength(24);
     expect(preschoolMarkup).toContain("Average hourly energy split by operating and closed hours");
@@ -130,7 +130,7 @@ describe("Project Renderer Registry", () => {
     expect(preschoolMarkup).not.toContain("Public Holiday");
     expect(preschoolMarkup).toContain("data-sop-centre-type=\"Preschool\"");
     expect(preschoolMarkup).toContain("L · E · N");
-    expect(preschoolMarkup).toContain("Key findings &amp; top actions");
+    expect(preschoolMarkup).toContain("Takeaways and next decisions");
     expect(preschoolMarkup).toContain("AI energy analyst");
     expect(preschoolMarkup).toContain("AI analysis queued…");
     expect(preschoolMarkup).toContain("deterministic Overview is ready");
@@ -141,7 +141,7 @@ describe("Project Renderer Registry", () => {
     expect(preschoolMarkup).toContain("12.5%</strong> of Portfolio energy");
     expect(preschoolMarkup).toContain("3 / 30</strong> Centres");
     expect(preschoolMarkup).toContain("14 / 30</strong> Portfolio Centres");
-    expect(preschoolMarkup).toContain("Next step");
+    expect(preschoolMarkup).toContain("Do next");
     expect(preschoolMarkup).toContain("If acted");
     expect(preschoolMarkup).toContain("If ignored");
     expect(preschoolMarkup).toContain("Limitation");
@@ -160,7 +160,7 @@ describe("Project Renderer Registry", () => {
     expect(operatingPriority).toBeGreaterThan(efficiencyPriority);
     expect(aiSlot).toBeGreaterThan(operatingPriority);
     const decisionMarkup = preschoolMarkup.slice(afterHoursPriority, aiSlot);
-    expect(decisionMarkup).toContain("Evidence · View calculation");
+    expect(decisionMarkup).toContain("Evidence · View supporting evidence");
     expect(decisionMarkup).not.toContain("preschool-hour-slot-spike-v1");
     expect(preschoolMarkup).toContain("June planning baseline");
     expect(preschoolMarkup).toContain('data-planning-baseline="naive-weekly-average"');

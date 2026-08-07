@@ -147,7 +147,7 @@ describe("Preschool operational projection", () => {
       weeklyBaseline: { averageKwh: 822.5, minimumKwh: 749, maximumKwh: 896 },
       usageEstimate: { projectedKwh: 3_525, lowerKwh: 3_210, upperKwh: 3_840 },
       costEstimate: {
-        currentPeriodBeforeGstSgd: 6_796.1782,
+        currentPeriodBeforeGstSgd: 980.6292,
         projectedBeforeGstSgd: 961.2675,
         lowerBeforeGstSgd: 875.367,
         upperBeforeGstSgd: 1_047.168,
@@ -430,7 +430,7 @@ const analysis = (): Pick<ProjectAnalysisPayload, "offHours" | "provenance"> => 
     status: "available",
     operatingKwh: 21_818.0283,
     standbyKwh: 3_103.784,
-    usageKwh: 24_921.8123,
+    usageKwh: 3_103.784,
     sharePct: 12.45,
     timezone: "Asia/Singapore",
     businessCalendarVersion: "preschool-calendar-v1",

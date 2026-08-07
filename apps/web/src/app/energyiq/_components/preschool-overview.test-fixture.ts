@@ -406,7 +406,7 @@ export function preschoolGoldenSnapshot(): EnergyProjectAnalysisSnapshotDto {
         status: "available",
         operatingKwh: 21_818.0283,
         standbyKwh: 3_103.784,
-        usageKwh: 24_921.8123,
+        usageKwh: 3_103.784,
         sharePct: 12.45,
         timezone: "Asia/Singapore",
         businessCalendarVersion: "sg-preschool-calendar-v1",
