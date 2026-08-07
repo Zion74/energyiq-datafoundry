@@ -93,6 +93,7 @@ import {
 import type { ProtocolClassifier, ProtocolIdentity } from "./protocol/protocol-router.js";
 import { createModelProtocolClassifier } from "./protocol/model-protocol-classifier.js";
 import {
+  createEnergyAnalysisRequirementExtractor,
   createModelAnalysisRequirementExtractor,
   type AnalysisRequirementExtractor
 } from "./protocol/model-analysis-requirement-extractor.js";
@@ -299,6 +300,8 @@ export const createDataFoundry = async (
   flushProtocolEvents(): void;
   destroyWorkspace(): Promise<void>;
 }> => {
+  const energyIqRun = Boolean(input.runContext.energy_query_context);
+  const maxSteps = energyIqRun ? Math.min(AGENT_MAX_STEPS, 10) : AGENT_MAX_STEPS;
   const toolObservationBoundary = createToolObservationBoundary({
     identity: {
       resourceId: input.runContext.user_id,
@@ -486,9 +489,14 @@ export const createDataFoundry = async (
     input.skillSelection,
     alwaysAllowTools
   );
+  const harnessSelectedTools = energyIqRun
+    ? Object.fromEntries(Object.entries(selectedPolicyTools).filter(([name]) =>
+        name === "inspect_schema" || name === "run_sql_readonly"))
+    : selectedPolicyTools;
+  const selectedMcpTools = energyIqRun ? {} : (input.mcpTools ?? {});
   const selectedTools = {
-    ...selectedPolicyTools,
-    ...(input.mcpTools ?? {})
+    ...harnessSelectedTools,
+    ...selectedMcpTools
   };
   const selectedDatasourceId = input.runContext.selected_datasource_id;
   const deferredProtocolEvents: ProtocolEvent[] = [];
@@ -525,7 +533,9 @@ export const createDataFoundry = async (
     ...(input.explicitProtocol ? { explicitProtocol: input.explicitProtocol } : {}),
     classifier: input.protocolClassifier ?? createModelProtocolClassifier(input.modelProvider),
     requirementExtractor: input.analysisRequirementExtractor
-      ?? createModelAnalysisRequirementExtractor(input.modelProvider),
+      ?? (energyIqRun
+        ? createEnergyAnalysisRequirementExtractor()
+        : createModelAnalysisRequirementExtractor(input.modelProvider)),
     analysisContractGrounder: input.analysisContractGrounder
       ?? createModelAnalysisContractGrounder(input.modelProvider),
     ...(input.protocolStateStore ? { stateStore: input.protocolStateStore } : {}),
@@ -645,6 +655,7 @@ export const createDataFoundry = async (
       mcpToolNames: input.mcpToolNames ?? [],
       protocolId: protocolState.protocolId,
       analysisRequirements,
+      maxSteps,
       workspaceAttachments
     }),
     model: input.modelProvider.model as never,
@@ -661,7 +672,7 @@ export const createDataFoundry = async (
     ],
     outputProcessors: mastraContextProcessors.outputProcessors,
     defaultOptions: {
-      maxSteps: AGENT_MAX_STEPS,
+      maxSteps,
       ...(input.modelSettings ? { modelSettings: input.modelSettings } : {}),
       ...(runtimeProviderOptions ? { providerOptions: runtimeProviderOptions } : {})
     }
@@ -788,6 +799,7 @@ type AgentInstructionsInput = {
   toolNames: string[];
   /** MCP tools injected through AG-UI clientTools for this run. */
   mcpToolNames: string[];
+  maxSteps: number;
   protocolId: string;
   analysisRequirements: AnalysisRequirement[];
   workspaceAttachments: MaterializedWorkspaceAttachment[];
@@ -959,11 +971,32 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
         + `"${energyContext.period}"; its local calendar display range is ${localRangeStart} through `
         + `${localRangeEnd}. Treat that scope and period as authoritative and show the local calendar range, not raw UTC. `
         + "Do not call list_data_sources, list_files, preview_table, workspace file tools, or direct database clients "
-        + "to rediscover data. Inspect the selected datasource schema once, then reuse its schema_id. Prefer one "
+        + "to rediscover data. Inspect the selected datasource schema once, then reuse its schema_id. "
+        + "In every new run, inspect_schema must happen before the first run_sql_readonly call. Schema IDs and table "
+        + "names found in prior messages, deterministic Evidence, examples, or earlier runs are reference-only and "
+        + "must never be executed in the current run. The run-scoped relation is already restricted to the authoritative "
+        + "period, so do not add a redundant time filter. If a boundary audit truly requires one, compare a TIMESTAMPTZ "
+        + "column only with explicit TIMESTAMPTZ UTC literals; never compare it with an unzoned TIMESTAMP literal. Prefer one "
         + "focused aggregate SQL query that supplies all requested figures; for simple aggregates, query the inspected "
         + "physical table directly and avoid CTEs or derived table aliases. Use at most three successful SQL queries "
         + "unless the user explicitly asks for a deeper investigation. If a validation error occurs, correct the "
         + "rejected query instead of exploring unrelated tables. Commit evidenced analysis requirements promptly. "
+        + "For one count, total, lookup, or direct comparison, take the shortest complete path: inspect once, run one "
+        + "focused SQL query when the requested value belongs to an exposed relation, commit once, and answer. "
+        + "When reporting a share or percentage, make the full requested denominator explicit in the SQL result, for "
+        + "example with a conditional total or a window total. Preserve NULL or Unknown dimension values as an explicit "
+        + "bucket or disclose the unreconciled amount; never use only the displayed non-null groups as the parent total. "
+        + "Prefer an authoritative deterministic Evidence item when it already answers the question. Business "
+        + "classifications such as facility type must come from an explicit Metadata field or authoritative Evidence. "
+        + "Never infer a classification or a zero count from project titles, ID prefixes, Scope names, device labels, "
+        + "or the absence of matching words in energy facts. If the required dimension is not exposed, return Missing "
+        + "Evidence or Unavailable instead of searching similar labels or guessing. Do not enumerate a large Evidence "
+        + "bundle in reasoning when one Evidence item or query can verify the answer. For an explanatory or discovery "
+        + "question, state the current Evidence gap, run one observation query, and add no more than two targeted "
+        + "follow-ups; every follow-up must test a specific candidate explanation or decision. Stop when the user can "
+        + "act or verify the result. Keep the visible reasoning useful and brief: name the question, the Evidence gap, "
+        + "the next check, and what the result changed. Use at most one short progress note per tool decision. Do not "
+        + "repeat the Prompt, policy, schema, protocol contract, or the same finding in multiple reasoning rounds. "
         + (noDeclaredClaimValues
           ? "This run declares no claim value names, so every analysis_requirements_commit claim must omit its values field entirely. "
           : "Include only claim value names explicitly declared in the requirement assertions. ")
@@ -982,9 +1015,14 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
             + "run_sql_readonly limit argument to 500 so the result is not truncated. The backend automatically "
             + "creates the validated chart preview from those SQL rows. Never use write_file or execute_command to build "
             + "HTML, CSV, JavaScript, SVG, or simulated chart values; never interpolate, repeat, or invent points. For an "
-            + "hourly trend across a multi-day period, group by the full local hourly timestamp (for example date_trunc "
-            + "to hour), not by hour-of-day or EXTRACT(hour); a complete seven-day hourly timeline has 168 ordered points, "
-            + "not 24 aggregated clock-hour buckets. Mention a generated chart preview only when the successful SQL tool "
+            + "hourly trend across a multi-day period, the first chart query must group by the full local hourly timestamp "
+            + "(for example date_trunc('hour', local_interval_start) AS local_hour_start), not return raw interval rows and "
+            + "not group by hour-of-day or EXTRACT(hour); a complete seven-day hourly timeline has 168 ordered points, "
+            + "not 24 aggregated clock-hour buckets. Reuse that chart result to identify the peak. If the chart result "
+            + "preview is truncated and the exact peak is not visible, run at most one focused follow-up using the same "
+            + "hourly aggregation ordered by the hourly metric descending with LIMIT 1; never use MAX on a raw interval "
+            + "row as the hourly peak. Do not add a total query unless the user asked for a total. Mention a generated "
+            + "chart preview only when the successful SQL tool "
             + "result explicitly reports that the backend created a chart artifact. When it exists, tell the user that "
             + "the chart is available in Task Console > Outputs > Preview; do not say chart below because charts are not "
             + "currently embedded inline in the answer. If no chart artifact exists, correct the SQL and retry within the "
@@ -1094,10 +1132,15 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
       + "requires the other registered protocol (general-task@1 or data-analysis@1). Provide stable reasonCodes and "
       + "all unresolvedGoals. Never hand off to bypass schema, SQL validation, evidence, policy, or completion gates."
   );
-  policies.push(
-    "Reply in the same natural language as the user's latest request. If the user mixes languages, use the dominant "
-      + "language from the request. Keep SQL, code, table names, column names, and other technical identifiers "
-      + "unchanged."
+  policies.push(context.energy_query_context
+    ? "For EnergyIQ, write the final customer answer in plain English even when the question is in Chinese. Lead with "
+      + "the answer or finding, then explain What happened, Why it matters or may have happened, What to do next, and "
+      + "How to verify when those sections are useful. Avoid protocol jargon and unexplained technical terms. Visible "
+      + "reasoning may use the model's natural working language. Do not invent external definitions, classifications, "
+      + "causes, or operational facts that are absent from authoritative Context or successful Tool Evidence. Keep SQL, "
+      + "table names, and column names unchanged."
+    : "Reply in the same natural language as the user's latest request. If the user mixes languages, use the dominant "
+      + "language from the request. Keep SQL, code, table names, column names, and other technical identifiers unchanged."
   );
   policies.push(
     "Always finish a run with a brief natural-language message to the user that summarizes what you did and the "
@@ -1107,7 +1150,7 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
       + "restating raw tool output."
   );
   policies.push(
-    `Respect limits. This run allows at most ${AGENT_MAX_STEPS} steps and `
+    `Respect limits. This run allows at most ${input.maxSteps} steps and `
       + `${SQL_MAX_EXECUTION_COUNT} SQL executions total `
       + `(SQL longer than ${SQL_MAX_SQL_CHARS} chars is truncated from view). `
       + "Prefer one focused query per datasource before refining."

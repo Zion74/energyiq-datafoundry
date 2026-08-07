@@ -81,7 +81,7 @@ describe("data tool SQL reuse", () => {
               elapsed_ms: 1
             }
           : {
-            columns: ["hour_start", "hourly_usage_kwh"],
+            columns: ["hour_ts", "hourly_usage_kwh"],
             rows: [["2026-06-03 00:00", 1.25], ["2026-06-03 01:00", 2.5]],
             row_count: 2,
             audit_log_id: "audit-energy",
@@ -154,7 +154,7 @@ describe("data tool SQL reuse", () => {
     });
     const result = await registry.runSqlReadonly({
       schema_id: schema.schema_id,
-      sql: "SELECT hour_start, hourly_usage_kwh FROM energy_fact",
+      sql: "SELECT hour_ts, hourly_usage_kwh FROM energy_fact",
       limit: 10
     });
 

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 const { agentConfigs, generate } = vi.hoisted(() => ({
   agentConfigs: [] as Array<Record<string, unknown>>,
@@ -16,7 +17,7 @@ vi.mock("@mastra/core/agent", () => ({
 }));
 
 import { probeModelProvider, probeModelProviderToolContract } from "./index.js";
-import { analysisRequirementsCommitInputSchema } from "./protocol/analysis-requirements-commit-tool.js";
+import { modelProviderToolContractCommitInputSchema } from "./model-provider-tool-contract-probe.js";
 
 describe("model provider probe", () => {
   beforeEach(() => {
@@ -96,9 +97,30 @@ describe("model provider probe", () => {
     expect(tools.analysis_requirements_commit?.strict).toBe(false);
     expect(tools.inspect_schema?.inputSchema).toBeDefined();
     expect(tools.run_sql_readonly?.inputSchema).toBeDefined();
-    expect(tools.analysis_requirements_commit?.inputSchema).toBe(analysisRequirementsCommitInputSchema);
-    expect(analysisRequirementsCommitInputSchema.safeParse({ claims: [] }).success).toBe(false);
-    expect(generate.mock.calls[0]?.[1]).toMatchObject({ toolChoice: "auto" });
+    expect(tools.analysis_requirements_commit?.inputSchema).toBe(modelProviderToolContractCommitInputSchema);
+    expect(modelProviderToolContractCommitInputSchema.safeParse({ claims: [] }).success).toBe(false);
+    expect(modelProviderToolContractCommitInputSchema.safeParse({
+      claims: [{
+        requirement_id: "R1",
+        claim: "The fixture is valid",
+        values: [{ name: "invented_value", value: 1 }]
+      }]
+    }).success).toBe(false);
+    expect(generate.mock.calls[0]?.[1]).toMatchObject({
+      maxSteps: 5,
+      modelSettings: { maxOutputTokens: 512 },
+      toolChoice: "auto"
+    });
+  });
+
+  it("keeps the active commit preflight schema flat and free of undeclared values", () => {
+    const schemaJson = JSON.stringify(z.toJSONSchema(modelProviderToolContractCommitInputSchema));
+
+    expect(schemaJson).not.toContain('"values"');
+    expect(schemaJson).not.toContain('"oneOf"');
+    expect(schemaJson).not.toContain('"anyOf"');
+    expect(schemaJson).toContain('"requirement_id"');
+    expect(schemaJson).toContain('"R1"');
   });
 
   it("classifies provider-side schema rejection before any Function Tool executes", async () => {

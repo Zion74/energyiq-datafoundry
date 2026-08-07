@@ -73,6 +73,14 @@ export const createFallbackAnalysisRequirements = (userText: string): AnalysisRe
   acceptanceCriteria: ["回答请求中的全部可量化问题，并为结论绑定审计证据"]
 }]);
 
+/**
+ * EnergyIQ already has a server-pinned Project/Scope/Snapshot contract. Keep
+ * the user's exact question as one auditable requirement instead of spending
+ * another model turn paraphrasing it before the real analysis starts.
+ */
+export const createEnergyAnalysisRequirementExtractor = (): AnalysisRequirementExtractor =>
+  async ({ userText }) => createFallbackAnalysisRequirements(userText);
+
 /** Create a tool-free structured requirement extractor backed by the configured run model. */
 export const createModelAnalysisRequirementExtractor = (
   provider: Exclude<ModelProvider, { kind: "mock" }>

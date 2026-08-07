@@ -47,7 +47,7 @@ describe("probeModelProfileCapabilities", () => {
     });
 
     expect(order).toEqual(["connectivity", "tool-contract"]);
-    expect(MODEL_PROFILE_TOOL_BUNDLE_REVISION).toBe("overview-readonly-tools-v2");
+    expect(MODEL_PROFILE_TOOL_BUNDLE_REVISION).toBe("overview-readonly-tools-v3");
     expect(result).toEqual({
       connectivity: { model: "test-model", text: "OK" },
       capabilities: {

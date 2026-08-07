@@ -9,9 +9,18 @@ import {
   type ProviderToolContractFailureStage
 } from "@datafoundry/providers";
 import { z } from "zod";
-import { analysisRequirementsCommitInputSchema } from "./protocol/analysis-requirements-commit-tool.js";
+import { buildAnalysisRequirementsCommitInputSchema } from "./protocol/analysis-requirements-commit-tool.js";
+import { createUserAnalysisRequirements } from "./protocol/analysis-requirements.js";
 
-export const MODEL_PROVIDER_TOOL_CONTRACT_BUNDLE_REVISION = "overview-readonly-tools-v2" as const;
+export const MODEL_PROVIDER_TOOL_CONTRACT_BUNDLE_REVISION = "overview-readonly-tools-v3" as const;
+
+export const modelProviderToolContractCommitInputSchema = buildAnalysisRequirementsCommitInputSchema(
+  createUserAnalysisRequirements([{
+    kind: "validation",
+    description: "Return one Evidence-backed answer",
+    acceptanceCriteria: ["Cite the successful read-only result"]
+  }])
+);
 
 const inspectSchemaInput = z.object({
   datasource_id: z.string().min(1).optional(),
@@ -158,7 +167,7 @@ export const probeModelProviderToolContract = async (
   });
   const commitContract = prepareProviderToolContract({
     ...compatibilityInput,
-    inputSchema: analysisRequirementsCommitInputSchema
+    inputSchema: modelProviderToolContractCommitInputSchema
   });
   if (!inspectContract.eligible || !sqlContract.eligible || !commitContract.eligible) {
     return {
@@ -220,7 +229,7 @@ export const probeModelProviderToolContract = async (
     const analysisRequirementsCommitTool = createTool({
       id: "analysis_requirements_commit",
       description: "Validate the production claim commit schema without side effects.",
-      inputSchema: analysisRequirementsCommitInputSchema,
+      inputSchema: modelProviderToolContractCommitInputSchema,
       ...(commitContract.strict !== undefined ? { strict: commitContract.strict } : {}),
       execute: async (toolInput) => {
         const validation = commitContract.validateArguments(toolInput);
@@ -251,8 +260,8 @@ export const probeModelProviderToolContract = async (
       "Run the fixed read-only Tool Contract probe now.",
       {
         abortSignal: AbortSignal.timeout(timeoutMs),
-        maxSteps: 3,
-        modelSettings: { maxOutputTokens: 128 },
+        maxSteps: 5,
+        modelSettings: { maxOutputTokens: 512 },
         toolChoice: "auto"
       }
     );

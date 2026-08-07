@@ -483,7 +483,7 @@ const requestedTimeGrainMatches = (userInput: string, labelColumn: string): bool
   const requestsTimeline = /\b(?:trend|timeline|over\s+the\s+period|across\s+the\s+period)\b|\u8d8b\u52bf|\u65f6\u95f4\u7ebf/iu
     .test(userInput);
   if (requestedGrain === "hour" && requestsTimeline) {
-    return /(?:timestamp|start|date|datetime|time)/iu.test(normalizedLabel)
+    return /(?:timestamp|start|date|datetime|time|(?:^|_)ts(?:$|_))/iu.test(normalizedLabel)
       && !/(?:^|_)(?:local_)?hour(?:_of_day)?$/iu.test(normalizedLabel);
   }
   return true;
