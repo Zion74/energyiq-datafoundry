@@ -27,17 +27,35 @@ describe("AiFindingPresentationView", () => {
     await act(async () => root.render(<AiFindingPresentationView presentation={{
       version: "1",
       blocks: [
-        { type: "metric", label: "Latest day", value: 418.2, unit: "kWh" },
+        { type: "metric", label: "Latest day", value: 418.2, unit: "kWh", evidenceRefs: ["horizon:1d"] },
         {
           type: "comparison",
           title: "Current versus previous",
           items: [{ label: "Current", value: 2801 }, { label: "Previous", value: 2450 }],
           unit: "kWh",
+          evidenceRefs: ["horizon:28d"],
         },
         {
           type: "trend",
           title: "Seven-day pattern",
           points: [{ label: "Mon", value: 10 }, { label: "Tue", value: 14 }, { label: "Wed", value: 12 }],
+          evidenceSqlIndexes: [1],
+        },
+        {
+          type: "heatmap",
+          title: "Centre by hour",
+          unit: "kWh",
+          xLabels: ["09:00", "10:00"],
+          yLabels: ["Centre A"],
+          values: [[8, 9]],
+          evidenceSqlIndexes: [2],
+        },
+        {
+          type: "table",
+          title: "Priority centres",
+          columns: ["Centre", "Usage"],
+          rows: [["Centre A", 8]],
+          evidenceRefs: ["centre:A"],
         },
       ],
     }} />));
@@ -46,5 +64,10 @@ describe("AiFindingPresentationView", () => {
     expect(container.querySelector("[data-presentation-type='metric']")?.textContent).toContain("418.2 kWh");
     expect(container.querySelector("[data-presentation-type='comparison']")?.textContent).toContain("Previous");
     expect(container.querySelector("[data-presentation-type='trend'] svg")).not.toBeNull();
+    expect(container.querySelector("[data-presentation-a11y='trend']")?.textContent).toContain("Tue: 14");
+    expect(container.querySelector("[data-presentation-type='heatmap'] [role='gridcell']")?.getAttribute("aria-label"))
+      .toBe("Centre A, 09:00: 8 kWh");
+    expect(container.querySelector("[data-presentation-type='table'] caption")?.textContent).toBe("Priority centres");
+    expect(container.querySelector("[data-presentation-type='table'] th")?.getAttribute("scope")).toBe("col");
   });
 });

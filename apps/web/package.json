@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@datafoundry/contracts": "0.2.0",
     "@copilotkit/react-core": "1.60.1",
     "next": "^15.5.19",
     "react": "19.2.7",

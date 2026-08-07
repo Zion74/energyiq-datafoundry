@@ -17,7 +17,9 @@ import {
 } from "./preschool-ai-discovery-evidence";
 import type { PreschoolOverviewViewModel } from "./preschool-overview-view-model";
 import {
+  AI_FINDING_PRESENTATION_PROMPT,
   aiFindingPresentationEvidenceText,
+  filterAiFindingPresentationEvidence,
   parseAiFindingPresentation,
   type AiFindingPresentation,
 } from "./ai-finding-presentation";
@@ -27,6 +29,7 @@ export type PreschoolAiRelationship = "supports" | "challenges" | "independent";
 export type PreschoolAiWhyKind = "Evidence" | "Hypothesis" | "Missing Evidence";
 
 export type PreschoolAiToolEvidence = {
+  evidenceIndex: number;
   toolCallId: string;
   sql: string | null;
   rowCount: number | null;
@@ -108,7 +111,7 @@ const currentRuns = new Map<string, CurrentRun>();
 const FRIENDLY_UNAVAILABLE = "AI analysis is temporarily unavailable. The verified Overview remains available.";
 const PRESCHOOL_AI_PACK_ID = "preschool-analysis-pack" as const;
 const PRESCHOOL_AI_PACK_REVISION = "v1" as const;
-const PRESCHOOL_AI_OUTPUT_CONTRACT_REVISION = "v7";
+const PRESCHOOL_AI_OUTPUT_CONTRACT_REVISION = "v8";
 const PERSISTED_WORKSPACE_PROFILE_ID = "workspace-default";
 const ACTIVE_RUN_POLL_INTERVAL_MS = 1_500;
 const ACTIVE_RUN_POLL_LIMIT = 200;
@@ -438,9 +441,8 @@ function buildPrompt(input: PreschoolAiRunInput): string {
     "Return zero to three distinct Findings. Do not force novelty and do not repeat the official themes as prose. Each displayed Finding must cite the first successful SQL observation and the final successful validation, plus any drill-down it uses, as distinct SQL Evidence indexes.",
     "A Finding may support, challenge, or be independent of the official themes. Each must answer What, Why, the next investigation, expected result if acted on, consequence if ignored, how to verify, and limitations. whyKind must be Evidence, Hypothesis, or Missing Evidence. expectedIfAct and ifIgnored describe decision consequences supported by the investigation; they must not invent savings, certainty, or operational outcomes. Use evidenceNote to state what the cited Evidence cannot prove.",
     "Cite every SQL result a Finding uses in evidenceSqlIndexes. Cite exact bundle item ids in evidenceRefs whenever the Finding uses published bundle values; evidenceRefs may be empty for an independent SQL-only angle backed by at least two cited SQL operations. Use numbers only from that Finding's cited bundle items or cited SQL. Do not invent causes, equipment state, tariff, cost, savings, ROI, forecast, owner, commitment, target, threshold, duration, or time window.",
-    "For each Finding, decide whether a visual improves understanding. Omit presentation when prose is clearer; otherwise compose any useful presentation v1 blocks. There is no chart quota. Blocks inherit the Finding's cited Evidence, and must not contain unsupported claims or executable HTML/JS/CSS/React.",
-    "Block shapes: metric {type,label,value,unit?,context?}; comparison/ranking/share/distribution {type,title?,unit?,items:[{label,value}]}; trend {type,title?,unit?,points:[{label,value}]}; heatmap {type,title?,unit?,xLabels,yLabels,values}; table {type,title?,columns,rows}; callout {type,tone,text}.",
-    "Return only strict JSON: {\"findings\":[{\"relationship\":\"supports\",\"title\":\"...\",\"what\":\"...\",\"whyKind\":\"Evidence\",\"why\":\"...\",\"how\":\"...\",\"expectedIfAct\":\"...\",\"ifIgnored\":\"...\",\"howToVerify\":\"...\",\"evidenceNote\":\"...\",\"evidenceRefs\":[\"benchmark:priority-centre:G\"],\"evidenceSqlIndexes\":[1,2],\"presentation\":{\"version\":\"1\",\"blocks\":[{\"type\":\"ranking\",\"unit\":\"kWh\",\"items\":[{\"label\":\"Centre E\",\"value\":0}]}]}}]}",
+    AI_FINDING_PRESENTATION_PROMPT,
+    "Return only strict JSON: {\"findings\":[{\"relationship\":\"supports\",\"title\":\"...\",\"what\":\"...\",\"whyKind\":\"Evidence\",\"why\":\"...\",\"how\":\"...\",\"expectedIfAct\":\"...\",\"ifIgnored\":\"...\",\"howToVerify\":\"...\",\"evidenceNote\":\"...\",\"evidenceRefs\":[\"benchmark:priority-centre:G\"],\"evidenceSqlIndexes\":[1,2],\"presentation\":{\"version\":\"1\",\"blocks\":[{\"type\":\"ranking\",\"unit\":\"kWh\",\"items\":[{\"label\":\"Centre E\",\"value\":0}],\"evidenceRefs\":[\"benchmark:priority-centre:G\"],\"evidenceSqlIndexes\":[1]}]}}]}",
     "Bounded Preschool Discovery Evidence Bundle:",
     JSON.stringify(input.discoveryEvidence),
     "Official deterministic themes (context, not a script):",
@@ -515,6 +517,11 @@ export function resolvePreschoolAiEventStream(args: {
   ).size < 2)) {
     return { status: "unavailable", reason: "Each displayed Preschool Finding must cite at least two distinct SQL queries." };
   }
+  for (const finding of verifiedFindings) {
+    const presentation = materializePreschoolPresentation(finding, evidenceById, collected.sql, args.input);
+    if (presentation) finding.presentation = presentation;
+    else delete finding.presentation;
+  }
   const displayable = verifiedFindings.flatMap((finding, index) => unsupportedNumber(
     finding,
     selectedEvidence[index]!,
@@ -550,7 +557,10 @@ export function resolvePreschoolAiEventStream(args: {
         snapshotId: args.input.snapshotId,
         period: { from: args.input.analysisFrom, to: args.input.analysisTo },
         deterministic: evidence,
-        tools: tools.map(({ numericEvidence: _, normalizedSql: __, returnedRowCount: ___, ...tool }) => tool),
+        tools: tools.map(({ numericEvidence: _, normalizedSql: __, returnedRowCount: ___, ...tool }, toolIndex) => ({
+          evidenceIndex: finding.evidenceSqlIndexes[toolIndex]!,
+          ...tool,
+        })),
       },
     })),
   };
@@ -719,6 +729,47 @@ function unsupportedNumber(
   const rawNarrative = [finding.title, finding.what, finding.why, finding.how, finding.expectedIfAct,
     finding.ifIgnored, finding.howToVerify, finding.evidenceNote,
     aiFindingPresentationEvidenceText(finding.presentation)].join(" ");
+  return unsupportedNarrative(rawNarrative, evidence, tools, input, finding.evidenceSqlIndexes);
+}
+
+function materializePreschoolPresentation(
+  finding: GeneratedFinding,
+  evidenceById: ReadonlyMap<string, PreschoolDiscoveryEvidenceItem>,
+  allTools: CollectedSqlEvidence[],
+  input: PreschoolAiRunInput,
+): AiFindingPresentation | null {
+  const scoped = filterAiFindingPresentationEvidence(finding.presentation, {
+    evidenceRefs: finding.evidenceRefs,
+    evidenceSqlIndexes: finding.evidenceSqlIndexes,
+  });
+  if (!scoped) return null;
+  const blocks = scoped.blocks.filter((block) => {
+    const evidence = (block.evidenceRefs ?? []).flatMap((reference) => {
+      const item = evidenceById.get(reference);
+      return item ? [item] : [];
+    });
+    const tools = (block.evidenceSqlIndexes ?? []).flatMap((index) => {
+      const tool = allTools[index - 1];
+      return tool ? [tool] : [];
+    });
+    return !unsupportedNarrative(
+      aiFindingPresentationEvidenceText({ version: "1", blocks: [block] }),
+      evidence,
+      tools,
+      input,
+      block.evidenceSqlIndexes ?? [],
+    );
+  });
+  return blocks.length > 0 ? { version: "1", blocks } : null;
+}
+
+function unsupportedNarrative(
+  rawNarrative: string,
+  evidence: PreschoolDiscoveryEvidenceItem[],
+  tools: CollectedSqlEvidence[],
+  input: PreschoolAiRunInput,
+  evidenceSqlIndexes: number[],
+): boolean {
   if (hasMismatchedPinnedReference(rawNarrative, "Snapshot", input.snapshotId)
     || hasMismatchedPinnedReference(rawNarrative, "Release", input.projectReleaseId)) {
     return true;
@@ -726,7 +777,7 @@ function unsupportedNumber(
   const narrative = removeAllowedStructuralReferences(
     rawNarrative,
     input,
-    finding.evidenceSqlIndexes,
+    evidenceSqlIndexes,
   );
   const evidenceNarrative = removeCitedSqlPredicateReferences(narrative, tools);
   const deterministicValues = evidence.flatMap((item) => collectNumericValues(item.values));

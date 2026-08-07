@@ -105,6 +105,7 @@ describe("Ngee Ann AI Run", () => {
 
     expect(input.identityKey).toContain(input.snapshotId);
     expect(input.identityKey).toContain(input.dataCutoff);
+    expect(input.identityKey).toContain("ngee-ann-ai-output-contract@v3");
     for (const identityPart of [
       input.projectReleaseId,
       "ngee-ann-overview",
@@ -280,6 +281,8 @@ describe("Ngee Ann AI Run", () => {
         title: "Current comparison",
         unit: "kWh",
         items: [{ label: "Level change", value: 352.2069 }, { label: "SQL check", value: 150 }],
+        evidenceRefs: ["category:load"],
+        evidenceSqlIndexes: [1],
       }],
     };
     const result = resolveNgeeAnnAiEventStream({
@@ -293,18 +296,49 @@ describe("Ngee Ann AI Run", () => {
     if (result.status === "available") expect(result.findings[0]!.presentation?.blocks).toHaveLength(1);
   });
 
-  it("rejects a visual value that is not supported by the Finding Evidence", () => {
+  it("drops an unsupported visual value without hiding the verified Finding", () => {
     const findings = generatedFindings();
     findings[0]!.presentation = {
       version: "1",
-      blocks: [{ type: "metric", label: "Unsupported saving", value: 999_999, unit: "kWh" }],
+      blocks: [{
+        type: "metric",
+        label: "Unsupported saving",
+        value: 999_999,
+        unit: "kWh",
+        evidenceRefs: ["horizon:1d"],
+      }],
     };
-    expect(resolveNgeeAnnAiEventStream({
+    const result = resolveNgeeAnnAiEventStream({
       eventStream: successfulEventStream(findings),
       input: requiredInput(),
       providerProfileId: "profile-1",
       runId: "run-1",
-    })).toMatchObject({ status: "unavailable" });
+    });
+    expect(result.status).toBe("available");
+    if (result.status === "available") expect(result.findings[0]!.presentation).toBeUndefined();
+  });
+
+  it("drops only the block when its number is not supported by that block's cited Evidence", () => {
+    const findings = generatedFindings();
+    findings[0]!.presentation = {
+      version: "1",
+      blocks: [{
+        type: "metric",
+        label: "SQL-only value relabelled as a Horizon metric",
+        value: 150,
+        unit: "kWh",
+        evidenceRefs: ["horizon:1d"],
+      }],
+    };
+    const result = resolveNgeeAnnAiEventStream({
+      eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status === "available") expect(result.findings[0]!.presentation).toBeUndefined();
   });
 
   it("rejects a declared 28d Horizon without the matching deterministic Evidence", () => {

@@ -94,6 +94,8 @@ function TrendBlock({ block }: { block: Extract<AiPresentationBlock, { type: "tr
         <p className="text-xs tabular-nums text-muted">{formatWithUnit(values.at(-1) ?? 0, block.unit)}</p>
       </div>
       <svg viewBox="0 0 600 180" role="img" aria-label={block.title ?? "AI-selected trend"} className="mt-3 h-auto w-full overflow-visible">
+        <title>{block.title ?? "AI-selected trend"}</title>
+        <desc>{block.points.map((point) => `${point.label}: ${formatWithUnit(point.value, block.unit)}`).join("; ")}</desc>
         <line x1="24" y1="150" x2="576" y2="150" className="stroke-border" strokeWidth="1" />
         <polyline points={points} fill="none" className="stroke-primary" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
         {block.points.map((point, index) => {
@@ -101,6 +103,11 @@ function TrendBlock({ block }: { block: Extract<AiPresentationBlock, { type: "tr
           return <circle key={`${point.label}-${index}`} cx={x} cy={y} r="4" className="fill-surface stroke-primary" strokeWidth="3" />;
         })}
       </svg>
+      <ul className="sr-only" data-presentation-a11y="trend">
+        {block.points.map((point, index) => (
+          <li key={`${point.label}-accessible-${index}`}>{point.label}: {formatWithUnit(point.value, block.unit)}</li>
+        ))}
+      </ul>
       <div className="mt-1 flex justify-between gap-4 text-[10px] text-muted">
         <span>{block.points[0]?.label}</span>
         <span>{block.points.at(-1)?.label}</span>
@@ -117,20 +124,28 @@ function HeatmapBlock({ block }: { block: Extract<AiPresentationBlock, { type: "
   return (
     <section data-presentation-type={block.type} className="overflow-x-auto rounded-xl border border-border bg-surface-subtle px-4 py-4 sm:col-span-2">
       {block.title ? <h5 className="text-sm font-semibold text-foreground">{block.title}</h5> : null}
-      <div className="mt-4 min-w-max" style={{ display: "grid", gridTemplateColumns: `minmax(72px, auto) repeat(${block.xLabels.length}, minmax(24px, 1fr))`, gap: "4px" }}>
+      <div
+        className="mt-4 min-w-max"
+        role="grid"
+        aria-label={block.title ?? "AI-selected heatmap"}
+        style={{ display: "grid", gridTemplateColumns: `minmax(72px, auto) repeat(${block.xLabels.length}, minmax(24px, 1fr))`, gap: "4px" }}
+      >
         <span />
-        {block.xLabels.map((label) => <span key={label} className="text-center text-[9px] text-muted">{label}</span>)}
+        {block.xLabels.map((label) => <span key={label} role="columnheader" className="text-center text-[9px] text-muted">{label}</span>)}
         {block.yLabels.flatMap((label, rowIndex) => [
-          <span key={`${label}-label`} className="self-center truncate pr-2 text-[10px] font-medium text-muted">{label}</span>,
+          <span key={`${label}-label`} role="rowheader" className="self-center truncate pr-2 text-[10px] font-medium text-muted">{label}</span>,
           ...block.values[rowIndex]!.map((value, columnIndex) => {
             const intensity = 0.12 + ((value - minimum) / range) * 0.72;
+            const accessibleLabel = `${label}, ${block.xLabels[columnIndex]}: ${formatWithUnit(value, block.unit)}`;
             return (
               <span
                 key={`${label}-${columnIndex}`}
-                title={`${label}, ${block.xLabels[columnIndex]}: ${formatWithUnit(value, block.unit)}`}
+                role="gridcell"
+                aria-label={accessibleLabel}
+                title={accessibleLabel}
                 className="aspect-square min-h-6 rounded-[3px]"
                 style={{ backgroundColor: `rgba(37, 99, 235, ${intensity})` }}
-              />
+              ><span className="sr-only">{accessibleLabel}</span></span>
             );
           }),
         ])}
@@ -144,7 +159,8 @@ function TableBlock({ block }: { block: Extract<AiPresentationBlock, { type: "ta
     <section data-presentation-type={block.type} className="overflow-x-auto rounded-xl border border-border bg-surface-subtle px-4 py-4 sm:col-span-2">
       {block.title ? <h5 className="text-sm font-semibold text-foreground">{block.title}</h5> : null}
       <table className={`${block.title ? "mt-3" : ""} w-full min-w-[420px] text-left text-xs`}>
-        <thead><tr>{block.columns.map((column) => <th key={column} className="border-b border-border px-2 py-2 font-semibold text-muted">{column}</th>)}</tr></thead>
+        <caption className="sr-only">{block.title ?? "AI-selected data table"}</caption>
+        <thead><tr>{block.columns.map((column) => <th key={column} scope="col" className="border-b border-border px-2 py-2 font-semibold text-muted">{column}</th>)}</tr></thead>
         <tbody>{block.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex} className="border-b border-border/70 px-2 py-2.5 tabular-nums text-foreground">{typeof cell === "number" ? formatValue(cell) : cell}</td>)}</tr>)}</tbody>
       </table>
     </section>

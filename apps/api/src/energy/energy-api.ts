@@ -1,4 +1,10 @@
-import { createErrorResult, createSuccessResult, type AppErrorCode } from "@datafoundry/contracts";
+import {
+  createErrorResult,
+  createSuccessResult,
+  filterAiFindingPresentationEvidence,
+  parseAiFindingPresentation,
+  type AppErrorCode,
+} from "@datafoundry/contracts";
 import {
   assertEnergyCurrentSnapshotFacts,
   ENERGY_FACT_WRITER_CONTRACT_VERSION,
@@ -1176,9 +1182,46 @@ const parseSavedAnalysisAiArtifactInput = (
       || value.result.findings.length > 3)) {
     throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
   }
-  const serialized = JSON.stringify(value);
+  const input = value as SavedAnalysisAiArtifactInput;
+  const artifact: SavedAnalysisAiArtifactInput = {
+    ...input,
+    result: {
+      ...input.result,
+      findings: input.result.findings.map(materializeSavedAiFinding),
+    },
+  };
+  const serialized = JSON.stringify(artifact);
   if (serialized.length > 262_144) throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_TOO_LARGE");
-  return value as SavedAnalysisAiArtifactInput;
+  return artifact;
+};
+
+const materializeSavedAiFinding = (finding: Record<string, unknown>): Record<string, unknown> => {
+  const { presentation: _untrustedPresentation, ...findingWithoutPresentation } = finding;
+  const presentation = parseAiFindingPresentation(finding.presentation);
+  if (!presentation || !isRecord(finding.evidence)) return findingWithoutPresentation;
+  const deterministicIds = Array.isArray(finding.evidence.deterministic)
+    ? finding.evidence.deterministic.flatMap((item) => (
+        isRecord(item) && typeof item.id === "string" && item.id.trim() ? [item.id] : []
+      ))
+    : [];
+  const sqlIndexes = Array.isArray(finding.evidence.tools)
+    ? finding.evidence.tools.flatMap((tool) => (
+        isRecord(tool)
+        && typeof tool.evidenceIndex === "number"
+        && Number.isSafeInteger(tool.evidenceIndex)
+        && tool.evidenceIndex > 0
+          ? [tool.evidenceIndex]
+          : []
+      ))
+    : [];
+  const materialized = filterAiFindingPresentationEvidence(presentation, {
+    evidenceRefs: deterministicIds,
+    evidenceSqlIndexes: sqlIndexes,
+  });
+  return {
+    ...findingWithoutPresentation,
+    ...(materialized ? { presentation: materialized } : {}),
+  };
 };
 
 const parseSavedAnalysisSnapshot = (

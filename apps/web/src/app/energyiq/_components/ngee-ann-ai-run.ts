@@ -18,7 +18,9 @@ import {
 } from "./ngee-ann-ai-discovery-evidence";
 import type { NgeeAnnDecisionPrioritiesViewModel } from "./ngee-ann-overview-view-model";
 import {
+  AI_FINDING_PRESENTATION_PROMPT,
   aiFindingPresentationEvidenceText,
+  filterAiFindingPresentationEvidence,
   parseAiFindingPresentation,
   type AiFindingPresentation,
 } from "./ai-finding-presentation";
@@ -32,6 +34,7 @@ export type NgeeAnnAiProgress = "inspecting" | "querying" | "drafting";
 export type NgeeAnnAiProgressCallback = (progress: NgeeAnnAiProgress) => void;
 
 export type NgeeAnnAiToolEvidence = {
+  evidenceIndex: number;
   toolCallId: string;
   toolName: "inspect_schema" | "run_sql_readonly";
   sql: string | null;
@@ -124,7 +127,7 @@ type CurrentRun = {
 
 const currentRuns = new Map<string, CurrentRun>();
 const FRIENDLY_AI_UNAVAILABLE_REASON = "AI analysis is temporarily unavailable. The verified Overview remains available.";
-const NGEE_ANN_AI_OUTPUT_CONTRACT_REVISION = "v2";
+const NGEE_ANN_AI_OUTPUT_CONTRACT_REVISION = "v3";
 const PERSISTED_WORKSPACE_PROFILE_ID = "workspace-default";
 const ACTIVE_RUN_POLL_INTERVAL_MS = 1_500;
 const ACTIVE_RUN_POLL_LIMIT = 200;
@@ -548,10 +551,9 @@ function buildAgentPrompt(input: NgeeAnnAiRunInput): string {
     "Include the relevant quality status or coverage fields in the SQL result used as Evidence. The supplied deterministic Overview quality summary covers only its primary period and must not be claimed as the quality of the full AI lookback.",
     "When Category, Circuit, daily, time or operating Evidence items are available, at least one Finding must use one of those dimensions. Prefer the strongest decision-relevant change or pattern, not the largest absolute consumer by default. Do not claim Category or Circuit has complete 1d/7d/28d deltas when the cited item says Primary Period only.",
     "Use the bounded Evidence and the one cross-check for three semantically different Findings, then immediately return the required strict JSON.",
-    "For each Finding, decide whether a visual improves understanding. Omit presentation when prose is clearer; otherwise compose any useful presentation v1 blocks. There is no chart quota. Blocks inherit the Finding's cited Evidence, and must not contain unsupported claims or executable HTML/JS/CSS/React.",
-    "Block shapes: metric {type,label,value,unit?,context?}; comparison/ranking/share/distribution {type,title?,unit?,items:[{label,value}]}; trend {type,title?,unit?,points:[{label,value}]}; heatmap {type,title?,unit?,xLabels,yLabels,values}; table {type,title?,columns,rows}; callout {type,tone,text}.",
+    AI_FINDING_PRESENTATION_PROMPT,
     "Return only strict JSON with no markdown or commentary using this shape:",
-    '{"findings":[{"relationship":"supports","horizons":["1d","7d"],"title":"...","what":"...","whyKind":"Evidence","why":"...","how":"...","howToVerify":"...","evidenceNote":"what the cited Evidence supports or cannot prove","evidenceRefs":["horizon:1d","category:load"],"evidenceSqlIndexes":[1],"presentation":{"version":"1","blocks":[{"type":"comparison","title":"Current versus previous","unit":"kWh","items":[{"label":"Current","value":0},{"label":"Previous","value":0}]}]}}]}',
+    '{"findings":[{"relationship":"supports","horizons":["1d","7d"],"title":"...","what":"...","whyKind":"Evidence","why":"...","how":"...","howToVerify":"...","evidenceNote":"what the cited Evidence supports or cannot prove","evidenceRefs":["horizon:1d","category:load"],"evidenceSqlIndexes":[1],"presentation":{"version":"1","blocks":[{"type":"comparison","title":"Current versus previous","unit":"kWh","items":[{"label":"Current","value":0},{"label":"Previous","value":0}],"evidenceRefs":["horizon:1d"],"evidenceSqlIndexes":[1]}]}}]}',
     "Bounded Ngee Ann Discovery Evidence Bundle:",
     JSON.stringify(input.discoveryEvidence),
     "Official deterministic projection:",
@@ -640,6 +642,11 @@ export function resolveNgeeAnnAiEventStream(input: {
   if (selectedTools.some((selection, index) => selection.length !== generated[index]!.evidenceSqlIndexes.length)) {
     return { status: "unavailable", reason: "A Finding cited SQL Evidence that is not present in this Run." };
   }
+  for (const finding of generated) {
+    const presentation = materializeNgeeAnnPresentation(finding, evidenceById, sqlTools);
+    if (presentation) finding.presentation = presentation;
+    else delete finding.presentation;
+  }
   const decisionDimensions = new Set(["category", "circuit", "daily", "time", "operating"]);
   const hasDecisionDimension = input.input.discoveryEvidence.items.some((item) => decisionDimensions.has(item.kind));
   const usesDecisionDimension = selectedEvidence.some((items) => items.some((item) => decisionDimensions.has(item.kind)));
@@ -669,7 +676,10 @@ export function resolveNgeeAnnAiEventStream(input: {
       dataCutoff: input.input.dataCutoff,
       dataQuality: input.input.dataQuality,
       deterministic: selectedEvidence[index]!,
-      tools: selectedTools[index]!.map(toPublicToolEvidence),
+      tools: selectedTools[index]!.map((tool, toolIndex) => toPublicToolEvidence(
+        tool,
+        finding.evidenceSqlIndexes[toolIndex]!,
+      )),
     },
   })) as [NgeeAnnAiFinding, NgeeAnnAiFinding, NgeeAnnAiFinding];
   return {
@@ -740,8 +750,9 @@ function collectToolEvidence(events: AgUiEvent[]): {
   };
 }
 
-function toPublicToolEvidence(tool: CollectedToolEvidence): NgeeAnnAiToolEvidence {
+function toPublicToolEvidence(tool: CollectedToolEvidence, evidenceIndex: number): NgeeAnnAiToolEvidence {
   return {
+    evidenceIndex,
     toolCallId: tool.toolCallId,
     toolName: tool.toolName,
     sql: tool.sql,
@@ -896,6 +907,42 @@ function narrativeHasUnsupportedNumber(
     finding.evidenceNote,
     aiFindingPresentationEvidenceText(finding.presentation),
   ].join(" ");
+  return textHasUnsupportedNumber(narrative, evidenceItems, tools);
+}
+
+function materializeNgeeAnnPresentation(
+  finding: GeneratedFinding,
+  evidenceById: ReadonlyMap<string, NgeeAnnDiscoveryEvidenceItem>,
+  sqlTools: CollectedToolEvidence[],
+): AiFindingPresentation | null {
+  const scoped = filterAiFindingPresentationEvidence(finding.presentation, {
+    evidenceRefs: finding.evidenceRefs,
+    evidenceSqlIndexes: finding.evidenceSqlIndexes,
+  });
+  if (!scoped) return null;
+  const blocks = scoped.blocks.filter((block) => {
+    const evidenceItems = (block.evidenceRefs ?? []).flatMap((reference) => {
+      const item = evidenceById.get(reference);
+      return item ? [item] : [];
+    });
+    const tools = (block.evidenceSqlIndexes ?? []).flatMap((index) => {
+      const tool = sqlTools[index - 1];
+      return tool ? [tool] : [];
+    });
+    return !textHasUnsupportedNumber(
+      aiFindingPresentationEvidenceText({ version: "1", blocks: [block] }),
+      evidenceItems,
+      tools,
+    );
+  });
+  return blocks.length > 0 ? { version: "1", blocks } : null;
+}
+
+function textHasUnsupportedNumber(
+  narrative: string,
+  evidenceItems: NgeeAnnDiscoveryEvidenceItem[],
+  tools: CollectedToolEvidence[],
+): boolean {
   const evidenceNumbers = toNumericTokens([
     ...tools.map((tool) => tool.numericEvidence),
     ...evidenceItems.map((item) => JSON.stringify({

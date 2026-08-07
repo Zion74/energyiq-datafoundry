@@ -66,10 +66,10 @@ Overview AI Slot 与 Full AI Analyst 均遵守以上职责。项目 Analysis Pac
 
 ### 真实剩余问题
 
-1. #36 六个提交尚未合入 Integration，真实 DeepSeek pass@3 与连续追问尚未在一致 Snapshot 候选实例运行。
+1. #36/Harness 已合入 Integration；Ngee Ann 固定 Snapshot 的真实 DeepSeek pass@3 已完成，Preschool 连续追问仍需真实登录环境。
 2. #30 当前 `insightQuality` 主要依赖关键词命中，不能充分判断逻辑、可读性和决策价值。
 3. Ngee Ann AI Slot 仍强制“一次成功 SQL + 恰好三条 Finding”；Preschool 仍要求固定 2–4 SQL 调查路线，与 #34 原则冲突。
-4. #35 Presentation Blocks 仍需真实 Provider、服务端 materialization/Evidence 绑定和 1440/1920/tablet 验收。
+4. #35 Presentation Blocks 已补服务端 materialization、Block 级 Evidence 绑定与无障碍语义；仍需两项目真实 Provider 和 1440/1920/tablet 验收。
 5. GitHub Issue 正文勾选状态滞后，必须用 commit、测试、Provider 和 Chrome 证据校准，不能仅看 checkbox。
 
 ## 4. 执行任务板
@@ -80,9 +80,9 @@ Overview AI Slot 与 Full AI Analyst 均遵守以上职责。项目 Analysis Pac
 | 2 | 运行 #36 DeepSeek critical pass@3 + 固定三轮 same-session | 本侧边任务 | Ngee Ann pass@3 completed；Preschool real-auth blocked | Ngee Ann 3/3；Preschool CLI 被真实登录 401 阻止 |
 | 3 | 将 #30 质量评分升级为结构化 Rubric，并保留确定性 hard gates | 本侧边任务 | implemented；real Candidate comparison pending | `7fb6977`；报告新增八维质量分解 |
 | 4 | 增加重复调查与回答冗长的诊断遥测，不设效率硬门槛 | 本侧边任务 | completed | `7fb6977`；真实 pass@3 无重复 SQL，平均 701 词 |
-| 5 | 校准 Ngee Ann/Preschool AI Slot 的固定 SQL/强制 Finding 路线 | 主 Agent或其提交后由侧边分支 | blocked by dirty Integration | 0–3 Findings；Agent 自主调查；Evidence guard 不弱化 |
+| 5 | 校准 Ngee Ann/Preschool AI Slot 的固定 SQL/强制 Finding 路线 | 主 Agent | in progress after #35 checkpoint | 0–3 Findings；Agent 自主调查；Evidence guard 不弱化 |
 | 6 | 补齐 Ngee Ann 的 acted/ignored/verify 决策后果 | 主 Agent | planned | 两项目共享 Finding 语义；项目 Pack 保持独立 |
-| 7 | 完成 #35 Provider 与 Presentation browser acceptance | 主 Agent + 本侧边复核 | pending | 两项目各有 useful visual 和正确 no-visual 案例 |
+| 7 | 完成 #35 Provider 与 Presentation browser acceptance | 主 Agent + 本侧边复核 | contract implemented；runtime acceptance pending | 两项目各有 useful visual 和正确 no-visual 案例 |
 | 8 | 校准并关闭已完成 Ticket | 主 Agent | partial；#33 closed | #30/#36/#18/#35 继续按证据关闭 |
 | 9 | #15 完整受控图表注册表 | 后续 | deferred | 仅在 Full Analyst 试点明确需要时推进 |
 | 10 | #21 Charles/试点验收 | 用户/Charles | blocked by prior tasks | 人工确认信息价值、可读性、深度和行动价值 |
@@ -309,3 +309,22 @@ DeepSeek 单次复核也通过：correctness 1.00、Insight 10、decision qualit
 这些规则超出了安全/Evidence 边界，确实会限制 Agent 自主调查。但相关文件正包含主 Agent 的 Presentation WIP，
 侧边分支不直接改动，避免覆盖或制造难解冲突。安全切片应在该 WIP 提交后单独完成：保留 inspect-first、只读、
 Snapshot pin、数字 Evidence 与 fail-closed；删除固定调查状态机、成功 SQL 数和“恰好三条”要求，允许 0–3 条有价值 Finding。
+
+### #35 Presentation Blocks 可信闭环
+
+当前实现采用一个小型、版本化的共享 Presentation contract，不引入可执行模型代码或通用页面 DSL。模型只能在
+metric、comparison、ranking、share、distribution、trend、heatmap、table 与 callout 这组安全 Block 中自主选用；
+图表是可选表达，系统不设置图表配额。
+
+本切片补齐：
+
+- 定量 Block 必须携带属于当前 Finding 的 `evidenceRefs` 或 `evidenceSqlIndexes`；
+- API 在保存和恢复前重新 parse、过滤和 materialize，不能持久化任意 HTML、脚本或未引用数字；
+- 每个 Block 只用它自己绑定的 Evidence 校验数字，单个无效 Block 局部降级，不隐藏整个 Finding；
+- Saved Analysis/Resume 读取同一份净化后的 Presentation Artifact，不触发新模型运行；
+- trend、heatmap 与 table 提供非颜色依赖的辅助技术语义；
+- Ngee Ann 与 Preschool 复用同一 contract 和 prompt 片段，项目分析逻辑仍保持独立。
+
+自动证据：共享 contracts build、根 typecheck、Presentation/两项目 AI Slot/Saved Analysis 聚焦回归
+7 files / 107 tests passed，`git diff --check` passed。该证据只证明代码合同和回归；真实 Provider 是否自主选择
+有用 visual 或正确 no-visual、以及 1440/1920/tablet 的人工阅读效果，仍作为 #35 未完成的运行时验收。

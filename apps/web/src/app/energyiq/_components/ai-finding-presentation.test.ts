@@ -7,7 +7,7 @@ describe("parseAiFindingPresentation", () => {
     expect(parseAiFindingPresentation({
       version: "1",
       blocks: [
-        { type: "metric", label: "Latest day", value: 418.2, unit: "kWh" },
+        { type: "metric", label: "Latest day", value: 418.2, unit: "kWh", evidenceRefs: ["horizon:1d"] },
         {
           type: "comparison",
           title: "Current versus previous period",
@@ -16,6 +16,7 @@ describe("parseAiFindingPresentation", () => {
             { label: "Current", value: 2801 },
             { label: "Previous", value: 2450 },
           ],
+          evidenceRefs: ["horizon:28d"],
         },
         {
           type: "callout",
@@ -26,7 +27,7 @@ describe("parseAiFindingPresentation", () => {
     })).toEqual({
       version: "1",
       blocks: [
-        { type: "metric", label: "Latest day", value: 418.2, unit: "kWh" },
+        { type: "metric", label: "Latest day", value: 418.2, unit: "kWh", evidenceRefs: ["horizon:1d"] },
         {
           type: "comparison",
           title: "Current versus previous period",
@@ -35,6 +36,7 @@ describe("parseAiFindingPresentation", () => {
             { label: "Current", value: 2801 },
             { label: "Previous", value: 2450 },
           ],
+          evidenceRefs: ["horizon:28d"],
         },
         {
           type: "callout",
@@ -56,6 +58,7 @@ describe("parseAiFindingPresentation", () => {
             { label: "Centre E", value: 549.36 },
             { label: "Centre N", value: 544.05 },
           ],
+          evidenceSqlIndexes: [1],
         },
       ],
     })).toEqual({
@@ -66,7 +69,21 @@ describe("parseAiFindingPresentation", () => {
           { label: "Centre E", value: 549.36 },
           { label: "Centre N", value: 544.05 },
         ],
+        evidenceSqlIndexes: [1],
       }],
+    });
+  });
+
+  it("drops a quantitative block without its own Evidence binding", () => {
+    expect(parseAiFindingPresentation({
+      version: "1",
+      blocks: [
+        { type: "metric", label: "Unbound number", value: 42, unit: "kWh" },
+        { type: "callout", tone: "insight", text: "Investigate the operating pattern." },
+      ],
+    })).toEqual({
+      version: "1",
+      blocks: [{ type: "callout", tone: "insight", text: "Investigate the operating pattern." }],
     });
   });
 

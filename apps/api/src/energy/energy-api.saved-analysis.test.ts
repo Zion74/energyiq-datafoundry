@@ -147,7 +147,34 @@ describe("saved analysis decision-quality boundary", () => {
             runId: "saved-analysis-ai-run-v1",
             packId: "preschool-analysis-pack",
             packRevision: "v1",
-            findings: [{ id: "finding-v1", evidence: { snapshotId: project.data_snapshot_id } }],
+            findings: [{
+              id: "finding-v1",
+              evidence: {
+                snapshotId: project.data_snapshot_id,
+                deterministic: [{ id: "benchmark:priority-centre:G", values: { usageKwh: 843.0985 } }],
+                tools: [],
+              },
+              presentation: {
+                version: "1",
+                blocks: [
+                  {
+                    type: "metric",
+                    label: "Priority score",
+                    value: 843.1,
+                    unit: "kWh",
+                    evidenceRefs: ["benchmark:priority-centre:G"],
+                  },
+                  {
+                    type: "metric",
+                    label: "Unbound score",
+                    value: 999,
+                    unit: "kWh",
+                    evidenceRefs: ["benchmark:not-cited"],
+                  },
+                  { type: "html", value: "<script>unsafe()</script>" },
+                ],
+              },
+            }],
           },
         },
       } as const;
@@ -188,7 +215,19 @@ describe("saved analysis decision-quality boundary", () => {
             rendererKey: "preschool-overview",
             snapshotId: project.data_snapshot_id,
             projectReleaseId: templateRevision.revision_id,
-            result: { runId: query.aiArtifact.result.runId },
+            result: {
+              runId: query.aiArtifact.result.runId,
+              findings: [{
+                presentation: {
+                  version: "1",
+                  blocks: [{
+                    type: "metric",
+                    label: "Priority score",
+                    evidenceRefs: ["benchmark:priority-centre:G"],
+                  }],
+                },
+              }],
+            },
             runProvenance: {
               modelProvider: "openai-compatible",
               modelName: "test-model-v1",
@@ -208,6 +247,8 @@ describe("saved analysis decision-quality boundary", () => {
       const frozenSnapshotJson = first?.snapshot_json;
       const frozenAiResultJson = first?.ai_result_json;
       expect(frozenAiResultJson).toContain(query.aiArtifact.result.runId);
+      expect(frozenAiResultJson).not.toContain("benchmark:not-cited");
+      expect(frozenAiResultJson).not.toContain("<script>");
       const firstAnalysis = JSON.parse(first?.analysis_json ?? "null") as {
         context: Record<string, unknown>;
         provenance: Record<string, unknown>;

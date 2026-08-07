@@ -1,5 +1,7 @@
 import type { BaseEvent, EventType } from "@ag-ui/core";
 
+export * from "./energyiq-ai-presentation.js";
+
 export type ApiResult<T> = {
   success: boolean;
   data?: T;
