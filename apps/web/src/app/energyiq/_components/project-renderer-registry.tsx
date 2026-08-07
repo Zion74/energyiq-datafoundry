@@ -1,6 +1,8 @@
 import React, { type ReactNode } from "react";
 
 import type {
+  EnergySavedAnalysisAiArtifactDto,
+  EnergySavedAnalysisAiArtifactInputDto,
   EnergyProjectAnalysisSnapshotDto,
   EnergyScopeAnalysisDto,
 } from "../../../lib/config-api";
@@ -83,7 +85,9 @@ export type ProjectRendererState =
 type ProjectRendererCommonProps = {
   sectionIdPrefix?: string;
   onRetry?: () => void;
-  aiSlotMode?: "live" | "saved-unavailable";
+  aiSlotMode?: "live" | "saved";
+  savedAiArtifact?: EnergySavedAnalysisAiArtifactDto;
+  onAiArtifactChange?: (artifact: EnergySavedAnalysisAiArtifactInputDto | null) => void;
 };
 
 type CustomerProjectRendererProps = ProjectRendererCommonProps & {
@@ -190,6 +194,8 @@ export function ProjectRenderer(props: ProjectRendererProps): ReactNode {
           {...(props.projectExplorerHref ? { projectExplorerHref: props.projectExplorerHref } : {})}
           {...(props.aiAnalystHref ? { aiAnalystHref: props.aiAnalystHref } : {})}
           {...(props.aiSlotMode ? { aiSlotMode: props.aiSlotMode } : {})}
+          {...(props.savedAiArtifact ? { savedAiArtifact: props.savedAiArtifact } : {})}
+          {...(props.onAiArtifactChange ? { onAiArtifactChange: props.onAiArtifactChange } : {})}
         />
       </div>
     );
@@ -206,6 +212,8 @@ export function ProjectRenderer(props: ProjectRendererProps): ReactNode {
           {...(props.projectExplorerHref ? { projectExplorerHref: props.projectExplorerHref } : {})}
           {...(props.aiAnalystHref ? { aiAnalystHref: props.aiAnalystHref } : {})}
           {...(props.aiSlotMode ? { aiSlotMode: props.aiSlotMode } : {})}
+          {...(props.savedAiArtifact ? { savedAiArtifact: props.savedAiArtifact } : {})}
+          {...(props.onAiArtifactChange ? { onAiArtifactChange: props.onAiArtifactChange } : {})}
         />
       </div>
     );

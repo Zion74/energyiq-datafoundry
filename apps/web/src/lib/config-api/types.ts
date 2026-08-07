@@ -1585,6 +1585,30 @@ export type EnergySavedAnalysisViewStateDto = {
   category: "all" | "load" | "light";
 };
 
+export type EnergySavedAnalysisAiArtifactInputDto = {
+  contract: "energyiq-saved-ai-result@1";
+  rendererKey: EnergyProjectRendererKeyDto;
+  snapshotId: string;
+  projectReleaseId: string;
+  result: {
+    status: "available";
+    providerProfileId: string;
+    runId: string;
+    findings: Array<Record<string, unknown>>;
+    [key: string]: unknown;
+  };
+};
+
+export type EnergySavedAnalysisAiArtifactDto = EnergySavedAnalysisAiArtifactInputDto & {
+  completedAt: string;
+  runProvenance?: {
+    modelProvider: string;
+    modelName: string;
+    requestFingerprint?: string;
+    contextSha256: string;
+  };
+};
+
 export type EnergySavedAnalysisDetailDto = EnergySavedAnalysisSummaryDto & {
   query: EnergyQueryContextRequestDto;
   analysis: Omit<EnergyScopeAnalysisDto, "childScopes"> & {
@@ -1595,6 +1619,7 @@ export type EnergySavedAnalysisDetailDto = EnergySavedAnalysisSummaryDto & {
   };
   snapshot?: EnergyProjectAnalysisSnapshotDto;
   viewState?: EnergySavedAnalysisViewStateDto;
+  aiArtifact?: EnergySavedAnalysisAiArtifactDto;
   templateRevision: EnergyTemplateRevisionDto;
   catalog: EnergyComponentRevisionDto[];
 };

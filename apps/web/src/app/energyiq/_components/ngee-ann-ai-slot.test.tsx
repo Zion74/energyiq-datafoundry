@@ -42,7 +42,7 @@ describe("NgeeAnnAiSlot", () => {
         <NgeeAnnAiSlot
           snapshot={snapshot}
           decisionPriorities={decisionPrioritiesFor(snapshot)}
-          mode="saved-unavailable"
+          mode="saved"
           startRun={startRun}
         />,
       );
@@ -53,10 +53,31 @@ describe("NgeeAnnAiSlot", () => {
     expect(container.textContent).toContain("never starts a new AI run");
   });
 
+  it("restores a frozen AI result without starting a new Run", async () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const startRun = vi.fn();
+    await act(async () => {
+      root.render(
+        <NgeeAnnAiSlot
+          snapshot={snapshot}
+          decisionPriorities={decisionPrioritiesFor(snapshot)}
+          mode="saved"
+          savedResult={availableResult()}
+          startRun={startRun}
+        />,
+      );
+    });
+
+    expect(startRun).not.toHaveBeenCalled();
+    expect(container.querySelector("[data-saved-ai-result='true']")?.textContent).toContain("run-1");
+    expect(container.querySelectorAll("article")).toHaveLength(3);
+  });
+
   it("shows the deterministic-safe analyzing state immediately, then three Findings", async () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     let finishRun!: (result: NgeeAnnAiRunResult) => void;
     let reportProgress!: NgeeAnnAiProgressCallback;
+    const onCompletedResult = vi.fn();
     const startRun = vi.fn((_input, onProgress?: NgeeAnnAiProgressCallback) => new Promise<NgeeAnnAiRunResult>((resolve) => {
       finishRun = resolve;
       reportProgress = onProgress ?? (() => undefined);
@@ -68,6 +89,7 @@ describe("NgeeAnnAiSlot", () => {
           decisionPriorities={decisionPrioritiesFor(snapshot)}
           aiAnalystHref="/energyiq/ai?projectId=ngee-ann-polytechnic&period=Custom"
           startRun={startRun}
+          onCompletedResult={onCompletedResult}
         />,
       );
     });
@@ -86,6 +108,8 @@ describe("NgeeAnnAiSlot", () => {
     expect(container.textContent).toContain("The deterministic Overview is ready");
 
     await act(async () => finishRun(availableResult()));
+
+    expect(onCompletedResult).toHaveBeenCalledWith(availableResult());
 
     expect(container.textContent).toContain("Supports theme");
     expect(container.textContent).toContain("Challenges theme");

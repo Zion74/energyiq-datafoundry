@@ -1,6 +1,10 @@
 import React from "react";
 
-import type { EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
+import type {
+  EnergyProjectAnalysisSnapshotDto,
+  EnergySavedAnalysisAiArtifactDto,
+  EnergySavedAnalysisAiArtifactInputDto,
+} from "../../../lib/config-api";
 import { EnergyIcon } from "./icons";
 import { NgeeAnnAiSlot } from "./ngee-ann-ai-slot";
 import { NgeeAnnDayProfile } from "./ngee-ann-day-profile";
@@ -37,6 +41,8 @@ export function NgeeAnnOverviewRenderer({
   projectExplorerHref,
   aiAnalystHref,
   aiSlotMode = "live",
+  savedAiArtifact,
+  onAiArtifactChange,
   grain,
   comparison = "overlay",
   category = "all",
@@ -49,7 +55,9 @@ export function NgeeAnnOverviewRenderer({
   latestAvailableRange?: NgeeAnnLatestAvailableRange | null;
   projectExplorerHref?: string;
   aiAnalystHref?: string;
-  aiSlotMode?: "live" | "saved-unavailable";
+  aiSlotMode?: "live" | "saved";
+  savedAiArtifact?: EnergySavedAnalysisAiArtifactDto;
+  onAiArtifactChange?: (artifact: EnergySavedAnalysisAiArtifactInputDto | null) => void;
   grain?: "day" | "hour";
   comparison?: "overlay" | "selected" | "average";
   category?: "all" | "load" | "light";
@@ -176,6 +184,18 @@ export function NgeeAnnOverviewRenderer({
           decisionPriorities={view.decisionPriorities}
           aiAnalystHref={aiAnalystHref}
           mode={aiSlotMode}
+          {...(savedAiArtifact?.rendererKey === "ngee-ann-overview"
+            ? { savedResult: savedAiArtifact.result as unknown as Extract<import("./ngee-ann-ai-run").NgeeAnnAiRunResult, { status: "available" }> }
+            : {})}
+          {...(onAiArtifactChange ? {
+            onCompletedResult: (result: Extract<import("./ngee-ann-ai-run").NgeeAnnAiRunResult, { status: "available" }>) => onAiArtifactChange({
+              contract: "energyiq-saved-ai-result@1",
+              rendererKey: "ngee-ann-overview",
+              snapshotId: state.snapshot.dataSnapshot.id,
+              projectReleaseId: state.snapshot.projectRelease.id,
+              result,
+            }),
+          } : {})}
         />
       </div>
 

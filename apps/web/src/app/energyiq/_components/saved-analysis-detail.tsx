@@ -11,6 +11,7 @@ import { useEnergyIqAccess } from "./energyiq-access";
 import { EnergyIcon } from "./icons";
 import { ProjectRenderer, type ProjectRendererState } from "./project-renderer-registry";
 import { ScopeMetadataStatus } from "./scope-metadata-status";
+import { runSavedAnalysisAiForSnapshot } from "./saved-analysis-ai";
 
 export function SavedAnalysisDetail() {
   const params = useParams<{ id: string }>();
@@ -20,6 +21,7 @@ export function SavedAnalysisDetail() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rerunning, setRerunning] = useState(false);
+  const [rerunPhase, setRerunPhase] = useState<"data" | "ai" | null>(null);
   const projectId = activeProject?.id ?? "";
   const analysisId = params.id;
   const frozenExplorerHref = detail ? savedAnalysisExplorerHref({
@@ -93,14 +95,27 @@ export function SavedAnalysisDetail() {
   const rerun = async () => {
     if (!projectId || !detail) return;
     setRerunning(true);
+    setRerunPhase("data");
     setError(null);
     try {
-      const next = await configApi.rerunEnergySavedAnalysis(projectId, detail.id);
+      let next = await configApi.rerunEnergySavedAnalysis(projectId, detail.id);
+      if (next.snapshot) {
+        setRerunPhase("ai");
+        try {
+          const aiArtifact = await runSavedAnalysisAiForSnapshot(next.snapshot);
+          if (aiArtifact) {
+            next = await configApi.attachEnergySavedAnalysisAiArtifact(projectId, next.id, aiArtifact);
+          }
+        } catch {
+          // AI is optional: retain and open the newly created deterministic version.
+        }
+      }
       router.push(`/energyiq/saved/${next.id}`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to rerun saved analysis");
     } finally {
       setRerunning(false);
+      setRerunPhase(null);
     }
   };
 
@@ -150,7 +165,11 @@ export function SavedAnalysisDetail() {
               className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-xs font-semibold text-white hover:bg-primary-light disabled:cursor-not-allowed disabled:opacity-50"
             >
               <EnergyIcon name="analysis" className="h-3.5 w-3.5" />
-              {rerunning ? "Rerunning…" : "Rerun with latest data"}
+              {rerunPhase === "data"
+                ? "Preparing latest data…"
+                : rerunPhase === "ai"
+                  ? "Preparing latest AI…"
+                  : "Rerun with latest data"}
             </button>
             <button
               type="button"
@@ -187,7 +206,8 @@ export function SavedAnalysisDetail() {
             comparison={savedViewState.comparison}
             category={savedViewState.category}
             projectExplorerHref={frozenExplorerHref}
-            aiSlotMode="saved-unavailable"
+            aiSlotMode="saved"
+            {...(detail.aiArtifact ? { savedAiArtifact: detail.aiArtifact } : {})}
           />
         ) : (
           <EnergyTemplateRenderer state={rendererState} />

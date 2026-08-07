@@ -103,7 +103,8 @@ describe("EnergyIQ UI regressions", () => {
     expect(savedDetailSource).toContain("Read-only saved result");
     expect(savedDetailSource).toContain("rerunEnergySavedAnalysis");
     expect(savedDetailSource).toContain("<ProjectRenderer");
-    expect(savedDetailSource).toContain('aiSlotMode="saved-unavailable"');
+    expect(savedDetailSource).toContain('aiSlotMode="saved"');
+    expect(savedDetailSource).toContain("savedAiArtifact");
     expect(savedDetailSource).toContain("window.print()");
     expect(savedDetailSource).not.toContain("contentEditable");
   });

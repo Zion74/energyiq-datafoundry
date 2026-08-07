@@ -1,6 +1,10 @@
 import React from "react";
 
-import type { EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
+import type {
+  EnergyProjectAnalysisSnapshotDto,
+  EnergySavedAnalysisAiArtifactDto,
+  EnergySavedAnalysisAiArtifactInputDto,
+} from "../../../lib/config-api";
 import { EnergyIcon } from "./icons";
 import { projectExplorerHrefForScope } from "./overview-explorer-handoff";
 import { PreschoolEvidenceLink } from "./preschool-evidence-link";
@@ -30,12 +34,16 @@ export function PreschoolOverviewRenderer({
   projectExplorerHref,
   aiAnalystHref,
   aiSlotMode = "live",
+  savedAiArtifact,
+  onAiArtifactChange,
 }: {
   state: PreschoolOverviewRendererState;
   onRetry?: () => void;
   projectExplorerHref?: string;
   aiAnalystHref?: string;
-  aiSlotMode?: "live" | "saved-unavailable";
+  aiSlotMode?: "live" | "saved";
+  savedAiArtifact?: EnergySavedAnalysisAiArtifactDto;
+  onAiArtifactChange?: (artifact: EnergySavedAnalysisAiArtifactInputDto | null) => void;
 }) {
   if (state.status !== "ready") {
     return (
@@ -121,6 +129,18 @@ export function PreschoolOverviewRenderer({
           snapshot={state.snapshot}
           decisionSummary={view.decisionSummary}
           mode={aiSlotMode}
+          {...(savedAiArtifact?.rendererKey === "preschool-overview"
+            ? { savedResult: savedAiArtifact.result as unknown as Extract<import("./preschool-ai-run").PreschoolAiRunResult, { status: "available" }> }
+            : {})}
+          {...(onAiArtifactChange ? {
+            onCompletedResult: (result: Extract<import("./preschool-ai-run").PreschoolAiRunResult, { status: "available" }>) => onAiArtifactChange({
+              contract: "energyiq-saved-ai-result@1",
+              rendererKey: "preschool-overview",
+              snapshotId: state.snapshot.dataSnapshot.id,
+              projectReleaseId: state.snapshot.projectRelease.id,
+              result,
+            }),
+          } : {})}
           {...(aiAnalystHref ? { aiAnalystHref } : {})}
         />
       </div>

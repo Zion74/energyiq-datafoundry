@@ -26,6 +26,7 @@ describe("EnergyIqSavedAnalysisStore", () => {
         analysis_json: JSON.stringify({ summary: { usageKwh: 100 } }),
         snapshot_json: JSON.stringify({ dataSnapshot: { id: "snapshot-v1" } }),
         view_state_json: JSON.stringify({ grain: "day", comparison: "overlay", category: "all" }),
+        ai_result_json: JSON.stringify({ snapshotId: "snapshot-v1", runId: "run-v1" }),
         template_revision_id: "template-v1",
         data_snapshot_id: "snapshot-v1",
         created_by: "dev-user",
@@ -58,9 +59,20 @@ describe("EnergyIqSavedAnalysisStore", () => {
         analysis_json: first.analysis_json,
         snapshot_json: first.snapshot_json,
         view_state_json: first.view_state_json,
+        ai_result_json: first.ai_result_json,
       });
       expect(JSON.parse(metadata.energyIq.savedAnalyses.get(first.id).analysis_json)).toMatchObject({ summary: { usageKwh: 100 } });
       expect(metadata.energyIq.savedAnalyses.listProject("saved-project").map((item) => item.id)).toEqual(["analysis-v2", "analysis-v1"]);
+
+      const finalizedRerun = metadata.energyIq.savedAnalyses.attachAiResult({
+        id: rerun.id,
+        ai_result_json: JSON.stringify({ snapshotId: "snapshot-v2", runId: "run-v2" }),
+      });
+      expect(finalizedRerun.ai_result_json).toContain("run-v2");
+      expect(() => metadata.energyIq.savedAnalyses.attachAiResult({
+        id: rerun.id,
+        ai_result_json: JSON.stringify({ snapshotId: "snapshot-v2", runId: "different-run" }),
+      })).toThrow("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_IMMUTABLE");
       metadata.close();
     } finally {
       rmSync(root, { recursive: true, force: true });

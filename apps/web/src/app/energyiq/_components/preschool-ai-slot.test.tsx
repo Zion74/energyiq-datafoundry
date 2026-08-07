@@ -35,7 +35,7 @@ describe("PreschoolAiSlot", () => {
       <PreschoolAiSlot
         snapshot={snapshot}
         decisionSummary={buildPreschoolOverviewViewModel(snapshot).decisionSummary}
-        mode="saved-unavailable"
+        mode="saved"
         startRun={startRun}
       />,
     ));
@@ -43,6 +43,24 @@ describe("PreschoolAiSlot", () => {
     expect(startRun).not.toHaveBeenCalled();
     expect(container.textContent).toContain("No completed AI result was attached");
     expect(container.textContent).toContain("never starts a new AI run");
+  });
+
+  it("restores a frozen AI result without starting a new Run", async () => {
+    const snapshot = preschoolGoldenSnapshot();
+    const startRun = vi.fn();
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={snapshot}
+        decisionSummary={buildPreschoolOverviewViewModel(snapshot).decisionSummary}
+        mode="saved"
+        savedResult={availableResult()}
+        startRun={startRun}
+      />,
+    ));
+
+    expect(startRun).not.toHaveBeenCalled();
+    expect(container.querySelector("[data-saved-ai-result='true']")?.textContent).toContain("run-1");
+    expect(container.querySelectorAll("article")).toHaveLength(2);
   });
 
   it("keeps the deterministic Overview ready while analysis progresses", async () => {

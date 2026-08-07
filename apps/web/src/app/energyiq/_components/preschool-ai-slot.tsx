@@ -23,24 +23,30 @@ export function PreschoolAiSlot({
   decisionSummary,
   aiAnalystHref,
   mode = "live",
+  savedResult,
+  onCompletedResult,
   startRun = getOrStartPreschoolAiRun,
 }: {
   snapshot: EnergyProjectAnalysisSnapshotDto;
   decisionSummary: PreschoolOverviewViewModel["decisionSummary"];
   aiAnalystHref?: string;
-  mode?: "live" | "saved-unavailable";
+  mode?: "live" | "saved";
+  savedResult?: Extract<PreschoolAiRunResult, { status: "available" }>;
+  onCompletedResult?: (result: Extract<PreschoolAiRunResult, { status: "available" }>) => void;
   startRun?: (input: PreschoolAiRunInput, onProgress?: ProgressCallback) => Promise<PreschoolAiRunResult>;
 }) {
   const input = useMemo(() => buildPreschoolAiRunInput(snapshot, decisionSummary), [decisionSummary, snapshot]);
   const inputRef = useRef(input);
   const startRunRef = useRef(startRun);
+  const onCompletedResultRef = useRef(onCompletedResult);
   const [settled, setSettled] = useState<Settled | null>(null);
   const [progress, setProgress] = useState<{ identityKey: string; stage: PreschoolAiProgress } | null>(null);
   inputRef.current = input;
   startRunRef.current = startRun;
+  onCompletedResultRef.current = onCompletedResult;
 
   useEffect(() => {
-    if (mode === "saved-unavailable") return;
+    if (mode === "saved") return;
     if (!input) return;
     const currentInput = inputRef.current;
     if (!currentInput) return;
@@ -49,7 +55,10 @@ export function PreschoolAiSlot({
     void startRunRef.current(currentInput, (stage) => {
       if (active) setProgress({ identityKey, stage });
     }).then((result) => {
-      if (active) setSettled({ identityKey, result });
+      if (active) {
+        setSettled({ identityKey, result });
+        if (result.status === "available") onCompletedResultRef.current?.(result);
+      }
     }).catch(() => {
       if (active) setSettled({
         identityKey,
@@ -59,7 +68,7 @@ export function PreschoolAiSlot({
     return () => { active = false; };
   }, [input?.identityKey, mode]);
 
-  if (mode === "saved-unavailable") {
+  if (mode === "saved" && !savedResult) {
     return (
       <AiFrame>
         <Unavailable detail="No completed AI result was attached when this analysis was saved. Opening a saved result never starts a new AI run." />
@@ -68,7 +77,12 @@ export function PreschoolAiSlot({
   }
 
   if (!input) return <AiFrame><Unavailable detail="AI analysis needs one complete, release-pinned Preschool Snapshot." /></AiFrame>;
-  if (!settled || settled.identityKey !== input.identityKey) {
+  const displayedResult = mode === "saved"
+    ? savedResult
+    : settled?.identityKey === input.identityKey
+      ? settled.result
+      : null;
+  if (!displayedResult) {
     const stage = progress?.identityKey === input.identityKey ? progress.stage : "queued";
     return (
       <AiFrame>
@@ -88,8 +102,8 @@ export function PreschoolAiSlot({
       </AiFrame>
     );
   }
-  if (settled.result.status === "unavailable") return <AiFrame><Unavailable detail={settled.result.reason} /></AiFrame>;
-  const availableResult = settled.result;
+  if (displayedResult.status === "unavailable") return <AiFrame><Unavailable detail={displayedResult.reason} /></AiFrame>;
+  const availableResult = displayedResult;
   if (availableResult.findings.length === 0) {
     return (
       <AiFrame>
@@ -97,6 +111,11 @@ export function PreschoolAiSlot({
           <p className="text-xs font-semibold text-foreground">No additional Evidence-backed candidates</p>
           <p className="mt-1 text-[11px] leading-5 text-muted">The AI Analyst did not find a distinct angle worth adding to the deterministic themes for this Snapshot.</p>
         </div>
+        {mode === "saved" ? (
+          <p className="mt-3 text-[10px] font-medium text-muted" data-saved-ai-result="true">
+            Saved AI result · Run {availableResult.runId}
+          </p>
+        ) : null}
       </AiFrame>
     );
   }
@@ -116,6 +135,11 @@ export function PreschoolAiSlot({
           />
         ))}
       </div>
+      {mode === "saved" ? (
+        <p className="mt-3 text-[10px] font-medium text-muted" data-saved-ai-result="true">
+          Saved AI result · Run {availableResult.runId}
+        </p>
+      ) : null}
       <p className="mt-3 text-[10px] leading-4 text-muted-light">
         AI-generated candidates may support, challenge, or extend the deterministic themes. Published Snapshot and governed projections remain authoritative.
       </p>

@@ -136,7 +136,37 @@ describe("saved analysis decision-quality boundary", () => {
           comparison: "selected",
           category: "load",
         },
+        aiArtifact: {
+          contract: "energyiq-saved-ai-result@1",
+          rendererKey: "preschool-overview",
+          snapshotId: project.data_snapshot_id,
+          projectReleaseId: templateRevision.revision_id,
+          result: {
+            status: "available",
+            providerProfileId: "profile-test",
+            runId: "saved-analysis-ai-run-v1",
+            packId: "preschool-analysis-pack",
+            packRevision: "v1",
+            findings: [{ id: "finding-v1", evidence: { snapshotId: project.data_snapshot_id } }],
+          },
+        },
       } as const;
+      metadata.sessions.create({ user_id: "dev-user", id: "saved-analysis-ai-session-v1", title: "Saved AI v1" });
+      metadata.runs.create({
+        id: query.aiArtifact.result.runId,
+        user_id: "dev-user",
+        session_id: "saved-analysis-ai-session-v1",
+        status: "running",
+        user_input: `Snapshot ${project.data_snapshot_id}; Release ${templateRevision.revision_id}`,
+        model_provider: "openai-compatible",
+        model_name: "test-model-v1",
+        request_fingerprint: "request-fingerprint-v1",
+      });
+      metadata.runs.updateStatus({
+        user_id: "dev-user",
+        run_id: query.aiArtifact.result.runId,
+        status: "completed",
+      });
       const context = {
         metadataStore: metadata,
         dataGateway: gateway,
@@ -154,6 +184,18 @@ describe("saved analysis decision-quality boundary", () => {
         success: true,
         data: {
           viewState: query.viewState,
+          aiArtifact: {
+            rendererKey: "preschool-overview",
+            snapshotId: project.data_snapshot_id,
+            projectReleaseId: templateRevision.revision_id,
+            result: { runId: query.aiArtifact.result.runId },
+            runProvenance: {
+              modelProvider: "openai-compatible",
+              modelName: "test-model-v1",
+              requestFingerprint: "request-fingerprint-v1",
+              contextSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+            },
+          },
           snapshot: {
             renderer: { key: "preschool-overview" },
             dataSnapshot: { id: project.data_snapshot_id },
@@ -164,6 +206,8 @@ describe("saved analysis decision-quality boundary", () => {
       expect(first?.template_revision_id).toBe(templateRevision.revision_id);
       const frozenAnalysisJson = first?.analysis_json;
       const frozenSnapshotJson = first?.snapshot_json;
+      const frozenAiResultJson = first?.ai_result_json;
+      expect(frozenAiResultJson).toContain(query.aiArtifact.result.runId);
       const firstAnalysis = JSON.parse(first?.analysis_json ?? "null") as {
         context: Record<string, unknown>;
         provenance: Record<string, unknown>;
@@ -258,6 +302,74 @@ describe("saved analysis decision-quality boundary", () => {
       });
       expect(records.find((record) => record.id === first?.id)?.analysis_json).toBe(frozenAnalysisJson);
       expect(records.find((record) => record.id === first?.id)?.snapshot_json).toBe(frozenSnapshotJson);
+      expect(records.find((record) => record.id === first?.id)?.ai_result_json).toBe(frozenAiResultJson);
+      expect(records[0]?.ai_result_json).toBeUndefined();
+
+      metadata.sessions.create({ user_id: "dev-user", id: "saved-analysis-ai-session-v2", title: "Saved AI v2" });
+      metadata.runs.create({
+        id: "saved-analysis-ai-run-v2",
+        user_id: "dev-user",
+        session_id: "saved-analysis-ai-session-v2",
+        status: "running",
+        user_input: `Snapshot ${project.data_snapshot_id}; Release ${publishedV2.template_revision_id}`,
+        model_provider: "openai-compatible",
+        model_name: "test-model-v2",
+        request_fingerprint: "request-fingerprint-v2",
+      });
+      metadata.runs.updateStatus({
+        user_id: "dev-user",
+        run_id: "saved-analysis-ai-run-v2",
+        status: "completed",
+      });
+      const aiArtifactV2 = {
+        contract: "energyiq-saved-ai-result@1",
+        rendererKey: "preschool-overview",
+        snapshotId: project.data_snapshot_id,
+        projectReleaseId: publishedV2.template_revision_id,
+        result: {
+          status: "available",
+          providerProfileId: "profile-test",
+          runId: "saved-analysis-ai-run-v2",
+          packId: "preschool-analysis-pack",
+          packRevision: "v1",
+          findings: [{ id: "finding-v2", evidence: { snapshotId: project.data_snapshot_id } }],
+        },
+      } as const;
+      const mismatchedAttachment = await handleEnergyApiRequest(
+        jsonPost({ aiArtifact: { ...aiArtifactV2, snapshotId: "different-snapshot" } }),
+        ["projects", project.id, "saved-analyses", records[0]?.id ?? "", "ai-result"],
+        context,
+      );
+      expect(mismatchedAttachment).toMatchObject({
+        status: 400,
+        body: { success: false, error: { message: "ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID" } },
+      });
+      expect(metadata.energyIq.savedAnalyses.get(records[0]?.id ?? "").ai_result_json).toBeUndefined();
+      const attached = await handleEnergyApiRequest(
+        jsonPost({ aiArtifact: aiArtifactV2 }),
+        ["projects", project.id, "saved-analyses", records[0]?.id ?? "", "ai-result"],
+        context,
+      );
+      expect(attached).toMatchObject({
+        status: 200,
+        body: {
+          success: true,
+          data: {
+            id: records[0]?.id,
+            aiArtifact: {
+              projectReleaseId: publishedV2.template_revision_id,
+              result: { runId: "saved-analysis-ai-run-v2" },
+              runProvenance: {
+                modelProvider: "openai-compatible",
+                modelName: "test-model-v2",
+                requestFingerprint: "request-fingerprint-v2",
+                contextSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
+              },
+            },
+          },
+        },
+      });
+      expect(metadata.energyIq.savedAnalyses.get(first?.id ?? "").ai_result_json).toBe(frozenAiResultJson);
       const latestAnalysis = JSON.parse(records[0]?.analysis_json ?? "null") as {
         context: Record<string, unknown>;
         cost: Record<string, unknown>;

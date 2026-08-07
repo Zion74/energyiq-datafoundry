@@ -39,6 +39,7 @@ import type {
   EnergyQueryContextRequestDto,
   EnergyScopeAnalysisDto,
   EnergySavedAnalysisDetailDto,
+  EnergySavedAnalysisAiArtifactInputDto,
   EnergySavedAnalysisSummaryDto,
   EnergyTariffScheduleEntryInputDto,
   EnergyTariffScheduleRevisionDto,
@@ -517,6 +518,7 @@ export const configApi = {
         comparison: "overlay" | "selected" | "average";
         category: "all" | "load" | "light";
       };
+      aiArtifact?: EnergySavedAnalysisAiArtifactInputDto;
     },
   ): Promise<EnergySavedAnalysisDetailDto> {
     return requestEnvelope(
@@ -586,6 +588,17 @@ export const configApi = {
       method: "POST",
       body: JSON.stringify(options?.bypassCache ? { ...body, bypassCache: true } : body),
     });
+  },
+
+  attachEnergySavedAnalysisAiArtifact(
+    projectId: string,
+    analysisId: string,
+    aiArtifact: EnergySavedAnalysisAiArtifactInputDto,
+  ): Promise<EnergySavedAnalysisDetailDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/saved-analyses/${encodeURIComponent(analysisId)}/ai-result`,
+      { method: "POST", body: JSON.stringify({ aiArtifact }) },
+    );
   },
 
   listEnergyImportBatches(projectId: string): Promise<EnergyImportBatchesResponseDto> {

@@ -14,6 +14,7 @@ export type EnergyIqSavedAnalysisRecord = {
   analysis_json: string;
   snapshot_json?: string;
   view_state_json?: string;
+  ai_result_json?: string;
   template_revision_id: string;
   data_snapshot_id: string;
   rerun_of_id?: string;
@@ -37,6 +38,7 @@ export const initializeEnergyIqSavedAnalysisSchema = (db: DatabaseSync): void =>
       analysis_json TEXT NOT NULL,
       snapshot_json TEXT,
       view_state_json TEXT,
+      ai_result_json TEXT,
       template_revision_id TEXT NOT NULL,
       data_snapshot_id TEXT NOT NULL,
       rerun_of_id TEXT,
@@ -55,6 +57,7 @@ export const initializeEnergyIqSavedAnalysisSchema = (db: DatabaseSync): void =>
   `);
   ensureColumn(db, "energyiq_saved_analyses", "snapshot_json", "TEXT");
   ensureColumn(db, "energyiq_saved_analyses", "view_state_json", "TEXT");
+  ensureColumn(db, "energyiq_saved_analyses", "ai_result_json", "TEXT");
 };
 
 export class EnergyIqSavedAnalysisStore {
@@ -73,6 +76,7 @@ export class EnergyIqSavedAnalysisStore {
     analysis_json: string;
     snapshot_json?: string;
     view_state_json?: string;
+    ai_result_json?: string;
     template_revision_id: string;
     data_snapshot_id: string;
     rerun_of_id?: string;
@@ -92,9 +96,9 @@ export class EnergyIqSavedAnalysisStore {
         INSERT INTO energyiq_saved_analyses (
           id, series_id, sequence, project_id, workspace_id, scope_id,
           scope_name, resource, title, query_json, analysis_json,
-          snapshot_json, view_state_json, template_revision_id, data_snapshot_id,
-          rerun_of_id, created_by, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          snapshot_json, view_state_json, ai_result_json, template_revision_id,
+          data_snapshot_id, rerun_of_id, created_by, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         input.id,
         input.series_id,
@@ -109,6 +113,7 @@ export class EnergyIqSavedAnalysisStore {
         input.analysis_json,
         input.snapshot_json ?? null,
         input.view_state_json ?? null,
+        input.ai_result_json ?? null,
         input.template_revision_id,
         input.data_snapshot_id,
         input.rerun_of_id ?? null,
@@ -136,6 +141,31 @@ export class EnergyIqSavedAnalysisStore {
       ORDER BY created_at DESC, sequence DESC
     `).all(projectId).map(mapSavedAnalysis);
   }
+
+  attachAiResult(input: { id: string; ai_result_json: string }): EnergyIqSavedAnalysisRecord {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const current = this.get(input.id);
+      if (current.ai_result_json) {
+        if (current.ai_result_json !== input.ai_result_json) {
+          throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_IMMUTABLE");
+        }
+        this.db.exec("COMMIT");
+        return current;
+      }
+      this.db.prepare(`
+        UPDATE energyiq_saved_analyses
+        SET ai_result_json = ?
+        WHERE id = ? AND ai_result_json IS NULL
+      `).run(input.ai_result_json, input.id);
+      const updated = this.get(input.id);
+      this.db.exec("COMMIT");
+      return updated;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
 }
 
 const mapSavedAnalysis = (value: unknown): EnergyIqSavedAnalysisRecord => {
@@ -145,6 +175,7 @@ const mapSavedAnalysis = (value: unknown): EnergyIqSavedAnalysisRecord => {
   const rerunOfId = optionalStringField(value, "rerun_of_id");
   const snapshotJson = optionalStringField(value, "snapshot_json");
   const viewStateJson = optionalStringField(value, "view_state_json");
+  const aiResultJson = optionalStringField(value, "ai_result_json");
   return {
     id: stringField(value, "id"),
     series_id: stringField(value, "series_id"),
@@ -159,6 +190,7 @@ const mapSavedAnalysis = (value: unknown): EnergyIqSavedAnalysisRecord => {
     analysis_json: stringField(value, "analysis_json"),
     ...(snapshotJson ? { snapshot_json: snapshotJson } : {}),
     ...(viewStateJson ? { view_state_json: viewStateJson } : {}),
+    ...(aiResultJson ? { ai_result_json: aiResultJson } : {}),
     template_revision_id: stringField(value, "template_revision_id"),
     data_snapshot_id: stringField(value, "data_snapshot_id"),
     ...(rerunOfId ? { rerun_of_id: rerunOfId } : {}),

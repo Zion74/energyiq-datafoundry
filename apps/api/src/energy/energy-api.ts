@@ -544,6 +544,12 @@ export const handleEnergyApiRequest = async (
         requireDecisionGradeCoverage(analysis);
         const templateRevision = requireSnapshotTemplateRevision(context, resolution.snapshot);
         const viewState = parseRequestedSavedAnalysisViewState(body.viewState);
+        const aiArtifact = parseRequestedSavedAnalysisAiArtifact(
+          body.aiArtifact,
+          resolution.snapshot,
+          context,
+          user.id,
+        );
         const rerunQuery = savedAnalysisRerunQuery(query);
         const record = context.metadataStore.energyIq.savedAnalyses.create({
           id: `saved-analysis-${randomUUID()}`,
@@ -558,6 +564,7 @@ export const handleEnergyApiRequest = async (
           analysis_json: JSON.stringify(analysis),
           snapshot_json: JSON.stringify(resolution.snapshot),
           ...(viewState ? { view_state_json: JSON.stringify(viewState) } : {}),
+          ...(aiArtifact ? { ai_result_json: JSON.stringify(aiArtifact) } : {}),
           template_revision_id: templateRevision.revision_id,
           data_snapshot_id: analysis.provenance.dataSnapshotId,
           created_by: user.id,
@@ -569,6 +576,32 @@ export const handleEnergyApiRequest = async (
       }
       if (segments[3] && segments.length === 4 && request.method === "GET") {
         const record = requireSavedAnalysisForProject(context, projectId, decodeURIComponent(segments[3]));
+        return {
+          status: 200,
+          body: createSuccessResult(toEnergySavedAnalysisDetail(
+            record,
+            requireSavedAnalysisTemplateRevision(context, record),
+            context,
+          )),
+        };
+      }
+      if (segments[3] && segments[4] === "ai-result" && segments.length === 5 && request.method === "POST") {
+        const previous = requireSavedAnalysisForProject(context, projectId, decodeURIComponent(segments[3]));
+        if (previous.created_by !== user.id) throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_FORBIDDEN");
+        const snapshot = parseSavedAnalysisSnapshot(previous);
+        if (!snapshot) throw new Error("ENERGYIQ_SAVED_ANALYSIS_SNAPSHOT_INVALID");
+        const body = requireRecord(await readJsonBody(request));
+        const aiArtifact = parseRequestedSavedAnalysisAiArtifact(
+          body.aiArtifact,
+          snapshot,
+          context,
+          user.id,
+        );
+        if (!aiArtifact) throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+        const record = context.metadataStore.energyIq.savedAnalyses.attachAiResult({
+          id: previous.id,
+          ai_result_json: JSON.stringify(aiArtifact),
+        });
         return {
           status: 200,
           body: createSuccessResult(toEnergySavedAnalysisDetail(
@@ -924,12 +957,14 @@ const toEnergySavedAnalysisDetail = (
 ) => {
   const snapshot = parseSavedAnalysisSnapshot(record);
   const viewState = parseStoredSavedAnalysisViewState(record);
+  const aiArtifact = snapshot ? parseStoredSavedAnalysisAiArtifact(record, snapshot) : undefined;
   return {
     ...toEnergySavedAnalysisSummary(record),
     query: parseSavedAnalysisQuery(record),
     analysis: JSON.parse(record.analysis_json) as unknown,
     ...(snapshot ? { snapshot } : {}),
     ...(viewState ? { viewState } : {}),
+    ...(aiArtifact ? { aiArtifact } : {}),
     templateRevision,
     catalog: context.metadataStore.energyIq.templates.listComponentRevisions(),
   };
@@ -1022,6 +1057,128 @@ const parseSavedAnalysisViewState = (value: unknown): SavedAnalysisViewState => 
     throw new Error("ENERGYIQ_SAVED_ANALYSIS_VIEW_STATE_INVALID");
   }
   return { grain, comparison, category };
+};
+
+type SavedAnalysisAiArtifactInput = {
+  contract: "energyiq-saved-ai-result@1";
+  rendererKey: "ngee-ann-overview" | "preschool-overview";
+  snapshotId: string;
+  projectReleaseId: string;
+  result: Record<string, unknown> & {
+    status: "available";
+    providerProfileId: string;
+    runId: string;
+    findings: Record<string, unknown>[];
+  };
+};
+
+type SavedAnalysisAiArtifact = SavedAnalysisAiArtifactInput & {
+  completedAt: string;
+  runProvenance?: {
+    modelProvider: string;
+    modelName: string;
+    requestFingerprint?: string;
+    contextSha256: string;
+  };
+};
+
+const parseRequestedSavedAnalysisAiArtifact = (
+  value: unknown,
+  snapshot: ProjectAnalysisSnapshot,
+  context: Required<ConfigApiContext>,
+  userId: string,
+): SavedAnalysisAiArtifact | undefined => {
+  if (value === undefined) return undefined;
+  const artifact = parseSavedAnalysisAiArtifactInput(value, snapshot);
+  const run = context.metadataStore.runs.find({ user_id: userId, run_id: artifact.result.runId });
+  if (!run
+    || run.status !== "completed"
+    || !run.finished_at
+    || !run.user_input.includes(artifact.snapshotId)
+    || !run.user_input.includes(artifact.projectReleaseId)) {
+    throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_RUN_INVALID");
+  }
+  return {
+    ...artifact,
+    completedAt: run.finished_at,
+    runProvenance: {
+      modelProvider: run.model_provider ?? "unrecorded",
+      modelName: run.model_name ?? "unrecorded",
+      ...(run.request_fingerprint ? { requestFingerprint: run.request_fingerprint } : {}),
+      contextSha256: createHash("sha256").update(run.user_input).digest("hex"),
+    },
+  };
+};
+
+const parseStoredSavedAnalysisAiArtifact = (
+  record: EnergyIqSavedAnalysisRecord,
+  snapshot: ProjectAnalysisSnapshot,
+): SavedAnalysisAiArtifact | undefined => {
+  if (!record.ai_result_json) return undefined;
+  let value: unknown;
+  try {
+    value = JSON.parse(record.ai_result_json) as unknown;
+  } catch {
+    throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+  }
+  const artifact = parseSavedAnalysisAiArtifactInput(value, snapshot);
+  if (!isRecord(value) || typeof value.completedAt !== "string" || !Number.isFinite(Date.parse(value.completedAt))) {
+    throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+  }
+  const runProvenance = parseSavedAnalysisAiRunProvenance(value.runProvenance);
+  return { ...artifact, completedAt: value.completedAt, ...(runProvenance ? { runProvenance } : {}) };
+};
+
+const parseSavedAnalysisAiRunProvenance = (
+  value: unknown,
+): NonNullable<SavedAnalysisAiArtifact["runProvenance"]> | undefined => {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)
+    || typeof value.modelProvider !== "string"
+    || !value.modelProvider.trim()
+    || typeof value.modelName !== "string"
+    || !value.modelName.trim()
+    || (value.requestFingerprint !== undefined && typeof value.requestFingerprint !== "string")
+    || typeof value.contextSha256 !== "string"
+    || !/^[a-f0-9]{64}$/u.test(value.contextSha256)) {
+    throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+  }
+  return value as NonNullable<SavedAnalysisAiArtifact["runProvenance"]>;
+};
+
+const parseSavedAnalysisAiArtifactInput = (
+  value: unknown,
+  snapshot: ProjectAnalysisSnapshot,
+): SavedAnalysisAiArtifactInput => {
+  if (!isRecord(value)
+    || value.contract !== "energyiq-saved-ai-result@1"
+    || value.rendererKey !== snapshot.renderer.key
+    || value.snapshotId !== snapshot.dataSnapshot.id
+    || value.projectReleaseId !== snapshot.projectRelease.id
+    || !isRecord(value.result)
+    || value.result.status !== "available"
+    || typeof value.result.providerProfileId !== "string"
+    || !value.result.providerProfileId.trim()
+    || typeof value.result.runId !== "string"
+    || !value.result.runId.trim()
+    || !Array.isArray(value.result.findings)
+    || !value.result.findings.every((finding) => isRecord(finding)
+      && isRecord(finding.evidence)
+      && finding.evidence.snapshotId === snapshot.dataSnapshot.id)) {
+    throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+  }
+  if (snapshot.renderer.key === "ngee-ann-overview" && value.result.findings.length !== 3) {
+    throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+  }
+  if (snapshot.renderer.key === "preschool-overview"
+    && (value.result.packId !== "preschool-analysis-pack"
+      || value.result.packRevision !== "v1"
+      || value.result.findings.length > 3)) {
+    throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+  }
+  const serialized = JSON.stringify(value);
+  if (serialized.length > 262_144) throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_TOO_LARGE");
+  return value as SavedAnalysisAiArtifactInput;
 };
 
 const parseSavedAnalysisSnapshot = (

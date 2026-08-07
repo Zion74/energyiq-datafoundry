@@ -33,12 +33,16 @@ export function NgeeAnnAiSlot({
   decisionPriorities,
   aiAnalystHref,
   mode = "live",
+  savedResult,
+  onCompletedResult,
   startRun = getOrStartNgeeAnnAiRun,
 }: {
   snapshot: EnergyProjectAnalysisSnapshotDto;
   decisionPriorities: NgeeAnnDecisionPrioritiesViewModel;
   aiAnalystHref?: string;
-  mode?: "live" | "saved-unavailable";
+  mode?: "live" | "saved";
+  savedResult?: Extract<NgeeAnnAiRunResult, { status: "available" }>;
+  onCompletedResult?: (result: Extract<NgeeAnnAiRunResult, { status: "available" }>) => void;
   startRun?: (input: NgeeAnnAiRunInput, onProgress?: NgeeAnnAiProgressCallback) => Promise<NgeeAnnAiRunResult>;
 }) {
   const input = useMemo(
@@ -48,13 +52,15 @@ export function NgeeAnnAiSlot({
   const identityKey = input?.identityKey ?? null;
   const inputRef = useRef(input);
   const startRunRef = useRef(startRun);
+  const onCompletedResultRef = useRef(onCompletedResult);
   const [settled, setSettled] = useState<SettledRun | null>(null);
   const [progress, setProgress] = useState<RunProgress | null>(null);
   inputRef.current = input;
   startRunRef.current = startRun;
+  onCompletedResultRef.current = onCompletedResult;
 
   useEffect(() => {
-    if (mode === "saved-unavailable") return;
+    if (mode === "saved") return;
     if (!identityKey) return;
     const currentInput = inputRef.current;
     if (!currentInput) return;
@@ -64,7 +70,10 @@ export function NgeeAnnAiSlot({
     };
     void startRunRef.current(currentInput, onProgress)
       .then((result) => {
-        if (active) setSettled({ identityKey, result });
+        if (active) {
+          setSettled({ identityKey, result });
+          if (result.status === "available") onCompletedResultRef.current?.(result);
+        }
       })
       .catch((error: unknown) => {
         if (active) {
@@ -84,7 +93,7 @@ export function NgeeAnnAiSlot({
     };
   }, [identityKey, mode]);
 
-  if (mode === "saved-unavailable") {
+  if (mode === "saved" && !savedResult) {
     return (
       <AiSlotFrame>
         <AiUnavailable detail="No completed AI result was attached when this analysis was saved. Opening a saved result never starts a new AI run." />
@@ -100,7 +109,13 @@ export function NgeeAnnAiSlot({
     );
   }
 
-  if (!settled || settled.identityKey !== input.identityKey) {
+  const displayedResult = mode === "saved"
+    ? savedResult
+    : settled?.identityKey === input.identityKey
+      ? settled.result
+      : null;
+
+  if (!displayedResult) {
     const stage = progress?.identityKey === input.identityKey ? progress.stage : "inspecting";
     return (
       <AiSlotFrame>
@@ -121,10 +136,10 @@ export function NgeeAnnAiSlot({
     );
   }
 
-  if (settled.result.status === "unavailable") {
+  if (displayedResult.status === "unavailable") {
     return (
       <AiSlotFrame>
-        <AiUnavailable detail={toFriendlyNgeeAnnAiUnavailableReason(settled.result.reason)} />
+        <AiUnavailable detail={toFriendlyNgeeAnnAiUnavailableReason(displayedResult.reason)} />
       </AiSlotFrame>
     );
   }
@@ -132,7 +147,7 @@ export function NgeeAnnAiSlot({
   return (
     <AiSlotFrame>
       <div className="grid gap-3 xl:grid-cols-3" aria-label="AI energy analyst findings">
-        {settled.result.findings.map((finding) => (
+        {displayedResult.findings.map((finding) => (
           <AiFindingCard
             key={finding.id}
             finding={finding}
@@ -141,6 +156,11 @@ export function NgeeAnnAiSlot({
           />
         ))}
       </div>
+      {mode === "saved" ? (
+        <p className="mt-3 text-[10px] font-medium text-muted" data-saved-ai-result="true">
+          Saved AI result · Run {displayedResult.runId}
+        </p>
+      ) : null}
       <p className="mt-3 text-[10px] leading-4 text-muted-light">
         AI-generated candidates can support, challenge, or extend the deterministic theme. Deterministic Snapshot and scoped SQL Evidence remain pinned to Snapshot {input.snapshotId} through {input.dataCutoff}.
       </p>

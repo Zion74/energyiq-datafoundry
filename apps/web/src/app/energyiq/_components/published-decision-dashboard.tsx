@@ -11,6 +11,7 @@ import {
   type EnergyProjectHierarchyDto,
   type EnergyQueryContextRequestDto,
   type EnergySavedAnalysisDetailDto,
+  type EnergySavedAnalysisAiArtifactInputDto,
   type EnergyScopeAnalysisDto,
 } from "../../../lib/config-api";
 import {
@@ -156,6 +157,7 @@ function PublishedDecisionDashboardView({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAnalysis, setSavedAnalysis] = useState<EnergySavedAnalysisDetailDto | null>(null);
+  const [aiArtifact, setAiArtifact] = useState<EnergySavedAnalysisAiArtifactInputDto | null>(null);
   const [hierarchy, setHierarchy] = useState<EnergyProjectHierarchyDto | null>(null);
   const [hierarchyError, setHierarchyError] = useState<string | null>(null);
   const [hierarchyLoading, setHierarchyLoading] = useState(false);
@@ -409,6 +411,11 @@ function PublishedDecisionDashboardView({
           comparison: initialViewState.comparison,
           category: initialViewState.category,
         },
+        ...(aiArtifact?.snapshotId === currentSnapshot.dataSnapshot.id
+          && aiArtifact.rendererKey === currentSnapshot.renderer.key
+          && aiArtifact.projectReleaseId === currentSnapshot.projectRelease.id
+          ? { aiArtifact }
+          : {}),
       });
       setSavedAnalysis(saved);
     } catch (reason) {
@@ -596,6 +603,9 @@ function PublishedDecisionDashboardView({
             type="button"
             onClick={() => void saveCurrentAnalysis()}
             disabled={saving || rendererState.status !== "ready" || !saveAllowed}
+            title={aiArtifact?.snapshotId === currentSnapshot?.dataSnapshot.id
+              ? "Save the deterministic report with its completed AI result."
+              : "Save the deterministic report now. A still-running AI result is not attached."}
             className="h-10 rounded-lg border border-border bg-surface px-4 text-xs font-semibold text-foreground transition-colors hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving ? "Saving…" : "Save analysis"}
@@ -680,6 +690,7 @@ function PublishedDecisionDashboardView({
                   ...resolvedHandoffView,
                   projectId,
                 })}
+                onAiArtifactChange={setAiArtifact}
               />
             ) : rendererRequest && projectRendererState ? (
               <ProjectRenderer request={rendererRequest} state={projectRendererState} sectionIdPrefix="customer-overview" onRetry={refreshOverview} />
