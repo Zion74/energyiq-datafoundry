@@ -504,3 +504,12 @@ Workspace 复核结论：先前“Preschool 被 Ngee Ann Workspace 限制”不�
 - 自动化：AI Artifact 接入后的聚焦回归 `8 files / 83 tests`、仓库 typecheck、Web production build（17 pages）通过；真实 A→B→Rerun 验收 `1/1` 通过（约 183 秒）。真实 Chrome 新建并回读 Ngee Ann 与 Preschool Saved result，分别确认专属 Renderer、原 Snapshot、无新 AI progress、1440/1920 无横向溢出和 console 0 warning/error；打印媒体下 header/action 隐藏、main/shell overflow visible。
 - 真实完成 AI 结果验收使用 Preschool Snapshot `energy-snapshot-52ca9611e48b0d71c2efe7b7`：保存后打开 `saved-analysis-cdbe7b98-2179-4947-a2df-dbe155f4cf4f`，冻结 Run `preschool-overview-d7082e0f-319f-4347-90aa-7f779786f77c`。刷新 Saved 页面后卡片全文和 Run 标识逐字一致，页面没有 `Thinking / Running / Inspecting`。Ngee Ann 当前固定 Session 中的既有 Provider Run 未完成，作为 Provider/Session 运行问题单独处理，不影响本次 Preschool 真实链路与两项目自动化合同结论。
 - #20 已达到工程关闭边界；Charles/人工信息价值、打印效果和两项目连续操作验收继续属于 #21，不能由自动化或本次 Chrome 证据代替。
+
+### 11.11 AI Slot 决策阅读层级
+
+- 2026-08-07 用户验收指出，原 AI Slot 虽然字段完整，但把 `What / Why / Next / Expected / Ignored / Verify / Limitations` 等量铺开，形成长段模型输出；用户需要先读完文字才能找到结论和行动。这不是单纯字号问题，而是信息优先级错误。
+- Ngee Ann 与 Preschool 现统一采用 `AI analyst briefing`：每条 Finding 使用全宽纵向决策单元，不再把三条长文本压进三列。默认阅读顺序固定为标题 → `What the data shows` → `Why this matters` → 黑底 `Recommended next check`；Preschool 继续直接显示 `Expected if acted on / If ignored` 的决策后果。
+- Relationship 与可信度改成普通用户可理解的状态：`Reinforces a known issue / Challenges the current view / New investigation angle`，以及 `Evidence-backed / Hypothesis / Needs more evidence`。技术性的 `theme` 和孤立 `Evidence` 标签不再占据正文阅读路径。
+- `How to verify`、限制和技术说明默认收进 `Verification and limitations`；Finding-specific Evidence 弹窗和 `Ask AI deeper` 仍保留。改造不修改 AI Run、Finding JSON、Snapshot、Evidence、保存/恢复或权限合同，也不在 React 重写模型结论。
+- 自动化：两项目 AI Slot `20/20` 通过；含 Saved Analysis/API/Renderer 的聚焦回归 `8 files / 83 tests` 通过；Impeccable UI detector `0` 条发现；仓库 typecheck 与 Web production build（17 pages）通过。
+- 真实 Admin Chrome 在 Preschool 完成结果上验收：当前 `1600×789` viewport 中标题为 18px、核心数据与行动为 16px，次要详情默认闭合，无横向溢出，console 为空。Ngee Ann 的既有 Provider Run 仍停留在进行中，因此真实完成卡片不能冒充验收；三条 Finding 的同构阅读层级由组件/Renderer 测试覆盖，待 Provider 结果可用后再做人工内容验收。

@@ -82,11 +82,14 @@ describe("PreschoolAiSlot", () => {
     expect(container.textContent).toContain("Drafting findings…");
     await act(async () => finish(availableResult()));
     expect(container.querySelectorAll("article")).toHaveLength(2);
-    expect(container.textContent).toContain("Next investigation");
+    expect(container.textContent).toContain("Recommended next check");
     expect(container.textContent).toContain("Expected if acted on");
     expect(container.textContent).toContain("If ignored");
     expect(container.textContent).toContain("How to verify");
     expect(container.textContent).toContain("Limitations");
+    expect(container.querySelectorAll("[data-ai-primary-takeaway='true']")).toHaveLength(2);
+    expect(container.querySelectorAll("[data-ai-primary-action='true']")).toHaveLength(2);
+    expect(container.querySelector("[data-ai-secondary-details='true']")?.hasAttribute("open")).toBe(false);
   });
 
   it("shows an honest no-additional-finding state instead of filler", async () => {
@@ -146,16 +149,17 @@ describe("PreschoolAiSlot", () => {
     expect(askUrl.searchParams.has("evidenceSnapshotId")).toBe(false);
   });
 
-  it("uses a three-column desktop grid only when three Findings are returned", async () => {
+  it("keeps three Findings in a full-width scannable decision flow", async () => {
     const result = availableResult();
     result.findings.push(finding("preschool-ai-finding-3", "independent", false));
     await renderSlot(vi.fn().mockResolvedValue(result));
     await act(async () => undefined);
 
     const grid = container.querySelector('[aria-label="Preschool AI energy analyst findings"]')!;
-    expect(grid.className).toContain("lg:grid-cols-2");
-    expect(grid.className).toContain("xl:grid-cols-3");
+    expect(grid.className).toContain("space-y-4");
+    expect(grid.className).not.toContain("grid-cols");
     expect(container.querySelectorAll("article")).toHaveLength(3);
+    expect(container.querySelectorAll("[data-ai-primary-takeaway='true']")).toHaveLength(3);
   });
 
   async function renderSlot(startRun: Parameters<typeof PreschoolAiSlot>[0]["startRun"]) {

@@ -122,7 +122,7 @@ export function PreschoolAiSlot({
   return (
     <AiFrame>
       <div
-        className={`grid gap-3 ${availableResult.findings.length > 1 ? "lg:grid-cols-2" : ""} ${availableResult.findings.length === 3 ? "xl:grid-cols-3" : ""}`}
+        className="space-y-4"
         aria-label="Preschool AI energy analyst findings"
       >
         {availableResult.findings.map((finding) => (
@@ -140,8 +140,8 @@ export function PreschoolAiSlot({
           Saved AI result · Run {availableResult.runId}
         </p>
       ) : null}
-      <p className="mt-3 text-[10px] leading-4 text-muted-light">
-        AI-generated candidates may support, challenge, or extend the deterministic themes. Published Snapshot and governed projections remain authoritative.
+      <p className="mt-4 text-xs leading-5 text-muted-light">
+        AI suggestions are based on this pinned Snapshot. Verified KPIs and Evidence remain authoritative.
       </p>
     </AiFrame>
   );
@@ -150,15 +150,14 @@ export function PreschoolAiSlot({
 function AiFrame({ children }: { children: React.ReactNode }) {
   return (
     <section aria-labelledby="preschool-ai-slot" className="border-b border-border bg-surface px-5 py-5 lg:px-7 lg:py-6">
-      <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+      <div className="mb-5">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h3 id="preschool-ai-slot" className="text-base font-semibold text-foreground">AI energy analyst</h3>
+            <h3 id="preschool-ai-slot" className="text-xl font-semibold tracking-[-0.02em] text-foreground">AI analyst briefing</h3>
             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-primary">AI-generated</span>
           </div>
-          <p className="mt-1 text-xs leading-5 text-muted">Up to three autonomous, Evidence-backed investigation angles for the current Preschool Snapshot.</p>
+          <p className="mt-1.5 text-sm leading-6 text-muted">What stands out, why it matters, and what to check next.</p>
         </div>
-        <p className="text-[10px] leading-4 text-muted-light">Optional layer · deterministic KPIs stay authoritative</p>
       </div>
       {children}
     </section>
@@ -194,19 +193,51 @@ function FindingCard({
   }, []);
   const askHref = aiAnalystHref ? buildAskHref(aiAnalystHref, projectId, finding) : null;
   return (
-    <article className="flex min-w-0 flex-col rounded-lg border border-border bg-surface-subtle px-4 py-4">
-      <span className={`w-fit rounded-full px-2 py-0.5 text-[10px] font-semibold ${relationshipClass(finding.relationship)}`}>
-        {titleCase(finding.relationship)} theme
-      </span>
-      <h4 className="mt-3 text-sm font-semibold leading-5 text-foreground">{finding.title}</h4>
-      <Field label="What" value={finding.what} />
-      <Field label={`Why · ${finding.why.kind}`} value={finding.why.text} />
-      <Field label="Next investigation" value={finding.how} />
-      <Field label="Expected if acted on" value={finding.expectedIfAct} />
-      <Field label="If ignored" value={finding.ifIgnored} />
-      <Field label="How to verify" value={finding.howToVerify} />
-      <Field label="Limitations" value={finding.evidenceNote} />
-      <div className="mt-auto flex flex-wrap gap-2 border-t border-border pt-3">
+    <article className="min-w-0 rounded-xl border border-border bg-surface px-5 py-5 lg:px-6 lg:py-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <h4 className="max-w-5xl text-lg font-semibold leading-7 tracking-[-0.015em] text-foreground">{finding.title}</h4>
+        <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${relationshipClass(finding.relationship)}`}>
+          {relationshipLabel(finding.relationship)}
+        </span>
+      </div>
+
+      <div className="mt-5" data-ai-primary-takeaway="true">
+        <p className="text-xs font-semibold text-muted">What the data shows</p>
+        <p className="mt-1.5 max-w-[75ch] text-base font-semibold leading-7 text-foreground">{finding.what}</p>
+      </div>
+
+      <div className="mt-5 grid gap-5 border-t border-border pt-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs font-semibold text-muted">Why this matters</p>
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${whyKindClass(finding.why.kind)}`}>
+              {whyKindLabel(finding.why.kind)}
+            </span>
+          </div>
+          <p className="mt-1.5 max-w-[70ch] text-sm leading-6 text-foreground/80">{finding.why.text}</p>
+        </div>
+        <div className="rounded-xl bg-primary px-5 py-4 text-white" data-ai-primary-action="true">
+          <p className="text-xs font-semibold text-white/70">Recommended next check</p>
+          <p className="mt-1.5 text-base font-semibold leading-6">{finding.how}</p>
+        </div>
+      </div>
+
+      <dl className="mt-5 grid gap-5 border-t border-border pt-5 sm:grid-cols-2">
+        <DecisionOutcome label="Expected if acted on" value={finding.expectedIfAct} tone="positive" />
+        <DecisionOutcome label="If ignored" value={finding.ifIgnored} tone="warning" />
+      </dl>
+
+      <details className="mt-5 border-t border-border pt-4" data-ai-secondary-details="true">
+        <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+          Verification and limitations
+        </summary>
+        <dl className="mt-4 grid gap-5 text-sm leading-6 sm:grid-cols-2">
+          <DecisionDetail label="How to verify" value={finding.howToVerify} />
+          <DecisionDetail label="Limitations" value={finding.evidenceNote} />
+        </dl>
+      </details>
+
+      <div className="mt-5 flex flex-wrap gap-2 border-t border-border pt-4">
         <button ref={triggerRef} type="button" onClick={() => setEvidenceOpen(true)} className="h-8 rounded-md border border-border bg-surface px-3 text-[11px] font-semibold text-foreground">
           View evidence
         </button>
@@ -254,8 +285,25 @@ function FindingCard({
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
-  return <div className="mt-3"><p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-light">{label}</p><p className="mt-1 text-xs leading-5 text-foreground/80">{value}</p></div>;
+function DecisionOutcome({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: "positive" | "warning";
+}) {
+  return (
+    <div>
+      <dt className={tone === "positive" ? "font-semibold text-step-success" : "font-semibold text-step-warning"}>{label}</dt>
+      <dd className="mt-1.5 max-w-[65ch] text-sm leading-6 text-foreground/80">{value}</dd>
+    </div>
+  );
+}
+
+function DecisionDetail({ label, value }: { label: string; value: string }) {
+  return <div><dt className="font-semibold text-foreground">{label}</dt><dd className="mt-1 text-muted">{value}</dd></div>;
 }
 
 function Pin({ label, value }: { label: string; value: string }) {
@@ -274,6 +322,24 @@ function relationshipClass(relationship: PreschoolAiFinding["relationship"]): st
   if (relationship === "challenges") return "bg-step-warning-soft text-step-warning";
   if (relationship === "independent") return "bg-primary/10 text-primary";
   return "bg-step-success-soft text-step-success";
+}
+
+function relationshipLabel(relationship: PreschoolAiFinding["relationship"]): string {
+  if (relationship === "challenges") return "Challenges the current view";
+  if (relationship === "independent") return "New investigation angle";
+  return "Reinforces a known issue";
+}
+
+function whyKindLabel(kind: PreschoolAiFinding["why"]["kind"]): string {
+  if (kind === "Evidence") return "Evidence-backed";
+  if (kind === "Hypothesis") return "Hypothesis";
+  return "Needs more evidence";
+}
+
+function whyKindClass(kind: PreschoolAiFinding["why"]["kind"]): string {
+  if (kind === "Evidence") return "bg-step-success-soft text-step-success";
+  if (kind === "Hypothesis") return "bg-step-warning-soft text-step-warning";
+  return "bg-surface-subtle text-muted";
 }
 
 function titleCase(value: string): string {

@@ -146,7 +146,7 @@ export function NgeeAnnAiSlot({
 
   return (
     <AiSlotFrame>
-      <div className="grid gap-3 xl:grid-cols-3" aria-label="AI energy analyst findings">
+      <div className="space-y-4" aria-label="AI energy analyst findings">
         {displayedResult.findings.map((finding) => (
           <AiFindingCard
             key={finding.id}
@@ -161,8 +161,8 @@ export function NgeeAnnAiSlot({
           Saved AI result · Run {displayedResult.runId}
         </p>
       ) : null}
-      <p className="mt-3 text-[10px] leading-4 text-muted-light">
-        AI-generated candidates can support, challenge, or extend the deterministic theme. Deterministic Snapshot and scoped SQL Evidence remain pinned to Snapshot {input.snapshotId} through {input.dataCutoff}.
+      <p className="mt-4 text-xs leading-5 text-muted-light">
+        AI suggestions are based on Snapshot {input.snapshotId} through {input.dataCutoff}. Verified KPIs and Evidence remain authoritative.
       </p>
     </AiSlotFrame>
   );
@@ -182,21 +182,20 @@ function progressLabel(progress: NgeeAnnAiProgress): string {
 function AiSlotFrame({ children }: { children: React.ReactNode }) {
   return (
     <section aria-labelledby="ngee-ann-ai-slot" className="border-b border-border bg-surface px-5 py-5 lg:px-7 lg:py-6">
-      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+      <div className="mb-5">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h3 id="ngee-ann-ai-slot" className="text-base font-semibold tracking-[-0.015em] text-foreground">
-              AI energy analyst
+            <h3 id="ngee-ann-ai-slot" className="text-xl font-semibold tracking-[-0.02em] text-foreground">
+              AI analyst briefing
             </h3>
             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-primary">
               AI-generated
             </span>
           </div>
-          <p className="mt-1 text-xs leading-5 text-muted">
-            Three autonomous, evidence-backed angles prepared from the current Project Snapshot.
+          <p className="mt-1.5 text-sm leading-6 text-muted">
+            What stands out, why it matters, and what to check next.
           </p>
         </div>
-        <p className="text-[10px] leading-4 text-muted-light">Optional layer / deterministic KPIs stay authoritative</p>
       </div>
       {children}
     </section>
@@ -266,23 +265,53 @@ function AiFindingCard({
     : null;
 
   return (
-    <article className="flex min-w-0 flex-col rounded-lg border border-border bg-surface-subtle px-4 py-4">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${relationshipTone(finding.relationship)}`}>
-          {relationshipLabel(finding.relationship)} theme
-        </span>
-        {finding.horizons.map((horizon) => (
-          <span key={horizon} className="rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-muted">
-            {horizon}
+    <article className="min-w-0 rounded-xl border border-border bg-surface px-5 py-5 lg:px-6 lg:py-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <h4 className="max-w-5xl text-lg font-semibold leading-7 tracking-[-0.015em] text-foreground">{finding.title}</h4>
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${relationshipTone(finding.relationship)}`}>
+            {relationshipSummary(finding.relationship)}
           </span>
-        ))}
+          {finding.horizons.map((horizon) => (
+            <span key={horizon} className="rounded-full border border-border bg-surface-subtle px-2.5 py-1 text-xs font-medium text-muted">
+              {horizonLabel(horizon)}
+            </span>
+          ))}
+        </div>
       </div>
-      <h4 className="mt-3 text-sm font-semibold leading-5 text-foreground">{finding.title}</h4>
-      <FindingField label="What" text={finding.what} />
-      <FindingField label={`Why · ${finding.why.kind}`} text={finding.why.text} />
-      <FindingField label="Next investigation" text={finding.how} />
-      <FindingField label="How to verify" text={finding.howToVerify} />
-      <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-border pt-3">
+
+      <div className="mt-5" data-ai-primary-takeaway="true">
+        <p className="text-xs font-semibold text-muted">What the data shows</p>
+        <p className="mt-1.5 max-w-[75ch] text-base font-semibold leading-7 text-foreground">{finding.what}</p>
+      </div>
+
+      <div className="mt-5 grid gap-5 border-t border-border pt-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs font-semibold text-muted">Why this matters</p>
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${whyKindTone(finding.why.kind)}`}>
+              {whyKindLabel(finding.why.kind)}
+            </span>
+          </div>
+          <p className="mt-1.5 max-w-[70ch] text-sm leading-6 text-foreground/80">{finding.why.text}</p>
+        </div>
+        <div className="rounded-xl bg-primary px-5 py-4 text-white" data-ai-primary-action="true">
+          <p className="text-xs font-semibold text-white/70">Recommended next check</p>
+          <p className="mt-1.5 text-base font-semibold leading-6">{finding.how}</p>
+        </div>
+      </div>
+
+      <details className="mt-5 border-t border-border pt-4" data-ai-secondary-details="true">
+        <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+          Verification and limitations
+        </summary>
+        <dl className="mt-4 grid gap-5 text-sm leading-6 sm:grid-cols-2">
+          <FindingDetail label="How to verify" text={finding.howToVerify} />
+          <FindingDetail label="What to keep in mind" text={finding.evidenceNote} />
+        </dl>
+      </details>
+
+      <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-border pt-4">
         <button
           ref={triggerRef}
           type="button"
@@ -425,11 +454,11 @@ function AiFindingCard({
   );
 }
 
-function FindingField({ label, text }: { label: string; text: string }) {
+function FindingDetail({ label, text }: { label: string; text: string }) {
   return (
-    <div className="mt-3">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-light">{label}</p>
-      <p className="mt-1 text-xs leading-5 text-foreground/80">{text}</p>
+    <div>
+      <dt className="font-semibold text-foreground">{label}</dt>
+      <dd className="mt-1 text-muted">{text}</dd>
     </div>
   );
 }
@@ -481,6 +510,30 @@ function relationshipTone(relationship: NgeeAnnAiRelationship): string {
   if (relationship === "supports") return "bg-step-success/10 text-step-success";
   if (relationship === "challenges") return "bg-step-warning/10 text-step-warning";
   return "bg-primary/10 text-primary";
+}
+
+function relationshipSummary(relationship: NgeeAnnAiRelationship): string {
+  if (relationship === "supports") return "Reinforces a known issue";
+  if (relationship === "challenges") return "Challenges the current view";
+  return "New investigation angle";
+}
+
+function horizonLabel(horizon: NgeeAnnAiFinding["horizons"][number]): string {
+  if (horizon === "1d") return "Latest day";
+  if (horizon === "7d") return "Recent 7 days";
+  return "Rolling 28 days";
+}
+
+function whyKindLabel(kind: NgeeAnnAiFinding["why"]["kind"]): string {
+  if (kind === "Evidence") return "Evidence-backed";
+  if (kind === "Hypothesis") return "Hypothesis";
+  return "Needs more evidence";
+}
+
+function whyKindTone(kind: NgeeAnnAiFinding["why"]["kind"]): string {
+  if (kind === "Evidence") return "bg-step-success-soft text-step-success";
+  if (kind === "Hypothesis") return "bg-step-warning-soft text-step-warning";
+  return "bg-surface-subtle text-muted";
 }
 
 function titleCase(value: string): string {
