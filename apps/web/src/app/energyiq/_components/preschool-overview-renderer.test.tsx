@@ -19,7 +19,8 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup).toContain("Do next");
     expect(markup).toContain("Verify with");
     expect(markup).toContain("Expected outcome, evidence and limits");
-    expect(markup).toContain("Why forecast is not part of this report");
+    expect(markup).toContain("June planning baseline");
+    expect(markup).toContain("not an AI forecast or customer bill");
     expect(markup).toContain("View normalisation and evidence");
     expect(markup.indexOf("Takeaways and next decisions")).toBeLessThan(markup.indexOf("Where energy goes"));
   });

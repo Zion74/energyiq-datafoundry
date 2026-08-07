@@ -15,6 +15,11 @@ describe("Preschool Overview ViewModel", () => {
     });
     expect(view.highlights.find((item) => item.id === "energy")?.value).toBe("24,921.81 kWh");
     expect(view.highlights.find((item) => item.id === "off-hours")?.value).toBe("12.5%");
+    expect(view.highlights.find((item) => item.id === "cost")).toMatchObject({
+      label: "Estimated May cost",
+      value: "S$6,796.18",
+      available: true,
+    });
     expect(view.centres).toHaveLength(30);
     expect(view.centres[0]).toMatchObject({
       rank: 1,
@@ -104,6 +109,11 @@ describe("Preschool Overview ViewModel", () => {
     expect(view.appliances.rows.reduce((sum, row) => sum + row.usageKwh, 0)).toBe(24_921.8123);
     expect(view.operational).toMatchObject({
       status: "available",
+      hourlyProfile: {
+        completeDayCount: 31,
+        unit: "mean kWh per complete day",
+        peakHourLabel: "11:00–12:00",
+      },
       standby: { energy: "3,103.78 kWh", share: "12.5%", spikeCount: 7, centreCount: 3 },
       operating: { energy: "21,818.03 kWh", spikeCount: 21, centreCount: 14 },
       sop: {
@@ -117,6 +127,13 @@ describe("Preschool Overview ViewModel", () => {
       },
     });
     if (view.operational.status !== "available") throw new Error(view.operational.detail);
+    expect(view.operational.hourlyProfile.rows).toHaveLength(24);
+    expect(view.operational.hourlyProfile.rows[0]).toMatchObject({
+      hour: 0,
+      label: "00:00–01:00",
+      operatingKwh: 0,
+      closedHourKwh: 13,
+    });
     expect(view.operational.standby.centres[0]).toMatchObject({
       centreCode: "L",
       centreType: "Preschool",
@@ -172,19 +189,27 @@ describe("Preschool Overview ViewModel", () => {
       && item.limitation.length > 0
       && item.evidenceLabel.length > 0
     ))).toBe(true);
-    expect(view.forecastReadiness).toEqual({
-      demo: {
-        status: "reference-only",
-        label: "Reference demo only — not published",
-        detail: "Reference demo inputs are outside the current published Snapshot and Release, so no demo value, chart or cost is rendered here.",
-      },
-      live: {
-        status: "unavailable",
-        label: "Unavailable",
-        detail: "Live Forecast requires metered June actuals, a published Forecast Recipe, sufficient complete history and backtesting. No forecast value or cost is shown.",
-      },
+    expect(view.planningOutlook).toMatchObject({
+      status: "provisional",
+      targetPeriod: "1–30 Jun 2026",
+      weeklyAverage: "5,681 kWh/week",
+      projectedUsage: "24,348 kWh",
+      projectedRange: "23,571–24,857 kWh",
+      currentPeriodCost: "S$6,796",
+      projectedCost: "S$6,640",
+      projectedCostRange: "S$6,428–S$6,779",
+      tariffRate: "27.27¢/kWh before GST",
+      sourceWeeks: [
+        { label: "4 May–10 May", usage: "5,500 kWh" },
+        { label: "11 May–17 May", usage: "5,750 kWh" },
+        { label: "18 May–24 May", usage: "5,675 kWh" },
+        { label: "25 May–31 May", usage: "5,800 kWh" },
+      ],
     });
-    expect(JSON.stringify(view.forecastReadiness)).not.toMatch(/28,011|7,639|simulated actual/i);
+    expect(view.liveForecast).toMatchObject({ status: "unavailable", label: "Unavailable" });
+    if (view.planningOutlook.status !== "provisional") throw new Error(view.planningOutlook.detail);
+    expect(view.planningOutlook.limitations.join(" ")).toContain("not the customer's contract or bill");
+    expect(JSON.stringify(view.planningOutlook)).not.toMatch(/28,011|7,639|simulated actual/i);
     if (view.operational.status !== "available") throw new Error("Expected operational view");
     expect(view.operational.standby.centres[0]?.worst).toMatchObject({
       when: "25 May · 01:00–02:00",
@@ -200,6 +225,7 @@ describe("Preschool Overview ViewModel", () => {
       "preschool-hour-slot-spike-v1",
       "preschool-after-hours-sop-signal-v1",
     ]);
+    expect(view.evidence.planningRecipeIds).toEqual(["preschool-naive-weekly-planning-baseline-v1"]);
     expect(view.evidence.applianceRecipeIds).toEqual(["preschool-appliance-ranking-v1"]);
   });
 
@@ -244,6 +270,7 @@ describe("Preschool Overview ViewModel", () => {
       status: "unavailable",
       detail: "No release-pinned operating Calendar is available.",
     });
+    expect(view.planningOutlook).toMatchObject({ status: "unavailable" });
     expect(view.evidence.operationalRecipeIds).toEqual([]);
     expect(view.decisionSummary.items.map((item) => item.id)).toEqual(["efficiency"]);
     expect(view.decisionSummary.items.map((item) => item.priority)).toEqual([1]);

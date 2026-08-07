@@ -5,7 +5,9 @@ export type PreschoolOverviewCentre = {
   rank: number;
   name: string;
   usageKwh: string;
+  usageKwhValue: number;
   sharePct: string;
+  sharePctValue: number;
   eui: string | null;
   perPax: string | null;
   cohort: string | null;
@@ -82,17 +84,36 @@ export type PreschoolOverviewViewModel = {
     items: PreschoolDecisionSummaryItem[];
     detail: string;
   };
-  forecastReadiness: {
-    demo: {
-      status: "reference-only";
-      label: "Reference demo only — not published";
-      detail: string;
-    };
-    live: {
-      status: "unavailable";
-      label: "Unavailable";
-      detail: string;
-    };
+  planningOutlook: {
+    status: "provisional";
+    targetPeriod: string;
+    method: string;
+    sourceWeeks: Array<{
+      label: string;
+      usageKwh: number;
+      usage: string;
+    }>;
+    weeklyAverageKwh: number;
+    weeklyAverage: string;
+    projectedUsage: string;
+    projectedRange: string;
+    currentPeriodCost: string;
+    projectedCost: string;
+    projectedCostRange: string;
+    tariffRate: string;
+    tariffLabel: string;
+    tariffSourceUrl: string;
+    tariffAppendixUrl: string;
+    evidenceLabel: string;
+    limitations: string[];
+  } | {
+    status: "unavailable";
+    detail: string;
+  };
+  liveForecast: {
+    status: "unavailable";
+    label: "Unavailable";
+    detail: string;
   };
   centres: PreschoolOverviewCentre[];
   normalisation: {
@@ -159,6 +180,18 @@ export type PreschoolOverviewViewModel = {
   };
   operational: {
     status: "available";
+    hourlyProfile: {
+      completeDayCount: number;
+      unit: string;
+      peakHourLabel: string;
+      rows: Array<{
+        hour: number;
+        label: string;
+        operatingKwh: number;
+        closedHourKwh: number;
+        totalKwh: number;
+      }>;
+    };
     standby: {
       energy: string;
       share: string;
@@ -199,6 +232,7 @@ export type PreschoolOverviewViewModel = {
     benchmarkRecipeIds: string[];
     applianceRecipeIds: string[];
     operationalRecipeIds: string[];
+    planningRecipeIds: string[];
   };
 };
 
@@ -235,7 +269,9 @@ export function buildPreschoolOverviewViewModel(
       rank: index + 1,
       name: centre.name,
       usageKwh: formatNumber(centre.usageKwh, 2),
+      usageKwhValue: centre.usageKwh,
       sharePct: `${formatNumber(centre.sharePct, 1)}%`,
+      sharePctValue: centre.sharePct,
       eui: benchmarkCentre
         ? `${formatNumber(benchmarkCentre.annualisedEuiKwhPerSqmYear, 2)} kWh/m²/yr`
         : null,
@@ -321,26 +357,59 @@ export function buildPreschoolOverviewViewModel(
             detail: `Tariff ${analysis.cost.tariffScheduleVersion}.`,
             available: true,
           }
-        : {
-            id: "cost",
-            label: "Estimated cost",
-            value: "Unavailable",
-            detail: analysis.cost.reason.message,
-            available: false,
-        },
+        : snapshot.preschoolOperational?.status === "available"
+          && snapshot.preschoolOperational.planningOutlook.status === "provisional"
+          ? {
+              id: "cost",
+              label: "Estimated May cost",
+              value: `S$${formatNumber(snapshot.preschoolOperational.planningOutlook.costEstimate.currentPeriodBeforeGstSgd, 2)}`,
+              detail: "Provisional SP low-tension non-domestic reference before GST; not the customer bill.",
+              available: true,
+            }
+          : {
+              id: "cost",
+              label: "Estimated cost",
+              value: "Unavailable",
+              detail: analysis.cost.reason.message,
+              available: false,
+            },
     ],
     decisionSummary,
-    forecastReadiness: {
-      demo: {
-        status: "reference-only",
-        label: "Reference demo only — not published",
-        detail: "Reference demo inputs are outside the current published Snapshot and Release, so no demo value, chart or cost is rendered here.",
-      },
-      live: {
-        status: "unavailable",
-        label: "Unavailable",
-        detail: "Live Forecast requires metered June actuals, a published Forecast Recipe, sufficient complete history and backtesting. No forecast value or cost is shown.",
-      },
+    planningOutlook: snapshot.preschoolOperational?.status === "available"
+      && snapshot.preschoolOperational.planningOutlook.status === "provisional"
+      ? {
+          status: "provisional",
+          targetPeriod: "1–30 Jun 2026",
+          method: "Average of four complete Monday–Sunday weeks from the accepted May Snapshot.",
+          sourceWeeks: snapshot.preschoolOperational.planningOutlook.sourceWeeks.map((week) => ({
+            label: `${formatShortDate(week.start)}–${formatShortDate(week.endInclusive)}`,
+            usageKwh: week.usageKwh,
+            usage: `${formatNumber(week.usageKwh, 0)} kWh`,
+          })),
+          weeklyAverageKwh: snapshot.preschoolOperational.planningOutlook.weeklyBaseline.averageKwh,
+          weeklyAverage: `${formatNumber(snapshot.preschoolOperational.planningOutlook.weeklyBaseline.averageKwh, 0)} kWh/week`,
+          projectedUsage: `${formatNumber(snapshot.preschoolOperational.planningOutlook.usageEstimate.projectedKwh, 0)} kWh`,
+          projectedRange: `${formatNumber(snapshot.preschoolOperational.planningOutlook.usageEstimate.lowerKwh, 0)}–${formatNumber(snapshot.preschoolOperational.planningOutlook.usageEstimate.upperKwh, 0)} kWh`,
+          currentPeriodCost: `S$${formatNumber(snapshot.preschoolOperational.planningOutlook.costEstimate.currentPeriodBeforeGstSgd, 0)}`,
+          projectedCost: `S$${formatNumber(snapshot.preschoolOperational.planningOutlook.costEstimate.projectedBeforeGstSgd, 0)}`,
+          projectedCostRange: `S$${formatNumber(snapshot.preschoolOperational.planningOutlook.costEstimate.lowerBeforeGstSgd, 0)}–S$${formatNumber(snapshot.preschoolOperational.planningOutlook.costEstimate.upperBeforeGstSgd, 0)}`,
+          tariffRate: `${formatNumber(snapshot.preschoolOperational.planningOutlook.tariffReference.beforeGstSgdPerKwh * 100, 2)}¢/kWh before GST`,
+          tariffLabel: `${snapshot.preschoolOperational.planningOutlook.tariffReference.sourceName} regulated ${snapshot.preschoolOperational.planningOutlook.tariffReference.supplyClass.toLowerCase()} reference · 1 Apr–30 Jun 2026`,
+          tariffSourceUrl: snapshot.preschoolOperational.planningOutlook.tariffReference.sourceUrl,
+          tariffAppendixUrl: snapshot.preschoolOperational.planningOutlook.tariffReference.appendixUrl,
+          evidenceLabel: `${snapshot.preschoolOperational.planningOutlook.evidence.queryId} · ${snapshot.preschoolOperational.planningOutlook.evidence.recipeId}`,
+          limitations: snapshot.preschoolOperational.planningOutlook.limitations,
+        }
+      : {
+          status: "unavailable",
+          detail: snapshot.preschoolOperational?.status === "available"
+            ? snapshot.preschoolOperational.planningOutlook.reason.message
+            : "June planning baseline is unavailable because the release-pinned May operational projection is unavailable.",
+        },
+    liveForecast: {
+      status: "unavailable",
+      label: "Unavailable",
+      detail: "A validated live Forecast still requires more history, a published Forecast Recipe and backtesting. The planning baseline above is not an AI forecast.",
     },
     centres,
     normalisation: {
@@ -428,6 +497,19 @@ export function buildPreschoolOverviewViewModel(
     operational: snapshot.preschoolOperational?.status === "available"
       ? {
           status: "available",
+          hourlyProfile: {
+            completeDayCount: snapshot.preschoolOperational.hourlyProfile.completeDayCount,
+            unit: snapshot.preschoolOperational.hourlyProfile.unit,
+            peakHourLabel: formatHourRange(snapshot.preschoolOperational.hourlyProfile.rows
+              .reduce((peak, row) => row.totalKwh > peak.totalKwh ? row : peak).localHour),
+            rows: snapshot.preschoolOperational.hourlyProfile.rows.map((row) => ({
+              hour: row.localHour,
+              label: formatHourRange(row.localHour),
+              operatingKwh: row.operatingKwh,
+              closedHourKwh: row.closedHourKwh,
+              totalKwh: row.totalKwh,
+            })),
+          },
           standby: {
             energy: `${formatNumber(snapshot.preschoolOperational.energy.standbyKwh, 2)} kWh`,
             share: `${formatNumber(snapshot.preschoolOperational.energy.standbySharePct, 1)}%`,
@@ -475,6 +557,10 @@ export function buildPreschoolOverviewViewModel(
         : [],
       operationalRecipeIds: snapshot.preschoolOperational?.status === "available"
         ? snapshot.preschoolOperational.evidence.projectionRecipeIds
+        : [],
+      planningRecipeIds: snapshot.preschoolOperational?.status === "available"
+        && snapshot.preschoolOperational.planningOutlook.status === "provisional"
+        ? [snapshot.preschoolOperational.planningOutlook.evidence.recipeId]
         : [],
     },
   };

@@ -207,7 +207,7 @@ export function PreschoolOverviewRenderer({
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
                 <h4 className="text-base font-semibold text-foreground">Peer benchmark distributions</h4>
-                <p className="mt-1 text-sm leading-6 text-muted">Each dot is one Centre. P50 shows the typical range; P75 marks where review should begin.</p>
+                <p className="mt-1 text-sm leading-6 text-muted">Empirical distribution — not a fitted bell curve. Each dot is one Centre; P50 shows the typical range and P75 marks where review should begin.</p>
               </div>
               <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-step-warning">Provisional</span>
             </div>
@@ -244,47 +244,52 @@ export function PreschoolOverviewRenderer({
         </div>
 
         {view.operational.status === "available" ? (
-          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_320px]">
-            <OperationalSpikePanel
-              title="Standby / closed hours"
-              energy={`${view.operational.standby.energy} · ${view.operational.standby.share}`}
-              spikeCount={view.operational.standby.spikeCount}
-              centreCount={view.operational.standby.centreCount}
-              centres={view.operational.standby.centres}
-              tone="warning"
-            />
-            <OperationalSpikePanel
-              title="Operating hours"
-              energy={view.operational.operating.energy}
-              spikeCount={view.operational.operating.spikeCount}
-              centreCount={view.operational.operating.centreCount}
-              centres={view.operational.operating.centres}
-              tone="default"
-            />
-            <div className="rounded-lg border border-step-warning/30 bg-step-warning-soft p-4">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-step-warning">{view.operational.sop.label}</p>
-              <p className="mt-2 text-xl font-semibold tabular-nums text-foreground">
-                {view.operational.sop.breachingCentreCodes.join(" · ") || "No signal"}
-              </p>
-              <div className="mt-3 space-y-2">
-                {view.operational.sop.centres.map((centre) => (
-                  <div
-                    key={centre.centreCode}
-                    data-sop-centre-type={centre.centreType ?? "Unavailable"}
-                    className="flex items-center justify-between gap-3 rounded-md border border-step-warning/20 bg-surface/70 px-3 py-2 text-xs"
-                  >
-                    <span className="min-w-0">
-                      <span className="block font-semibold text-foreground">{centre.centreCode}</span>
-                      <span className="mt-0.5 block truncate text-[9px] text-muted-light">{centre.centreType ?? "Type unavailable"}</span>
-                    </span>
-                    <span className="text-muted">{centre.standbySpikeCount} Spike{centre.standbySpikeCount === 1 ? "" : "s"}</span>
-                    <span className="font-semibold tabular-nums text-step-warning">{centre.score}</span>
-                  </div>
-                ))}
-              </div>
-              <p className="mt-3 text-[10px] leading-4 text-muted">{view.operational.sop.detail}</p>
+          <>
+            <div className="mt-4">
+              <OperatingProfileChart profile={view.operational.hourlyProfile} />
             </div>
-          </div>
+            <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_320px]">
+              <OperationalSpikePanel
+                title="Standby / closed hours"
+                energy={`${view.operational.standby.energy} · ${view.operational.standby.share}`}
+                spikeCount={view.operational.standby.spikeCount}
+                centreCount={view.operational.standby.centreCount}
+                centres={view.operational.standby.centres}
+                tone="warning"
+              />
+              <OperationalSpikePanel
+                title="Operating hours"
+                energy={view.operational.operating.energy}
+                spikeCount={view.operational.operating.spikeCount}
+                centreCount={view.operational.operating.centreCount}
+                centres={view.operational.operating.centres}
+                tone="default"
+              />
+              <div className="rounded-lg border border-step-warning/30 bg-step-warning-soft p-4">
+                <p className="text-xs font-semibold text-step-warning">{view.operational.sop.label}</p>
+                <p className="mt-2 text-xl font-semibold tabular-nums text-foreground">
+                  {view.operational.sop.breachingCentreCodes.join(" · ") || "No signal"}
+                </p>
+                <div className="mt-3 space-y-2">
+                  {view.operational.sop.centres.map((centre) => (
+                    <div
+                      key={centre.centreCode}
+                      data-sop-centre-type={centre.centreType ?? "Unavailable"}
+                      className="flex items-center justify-between gap-3 rounded-md border border-step-warning/20 bg-surface/70 px-3 py-2 text-xs"
+                    >
+                      <span className="min-w-0">
+                        <span className="block font-semibold text-foreground">{centre.centreCode}</span>
+                        <span className="mt-0.5 block truncate text-[10px] text-muted-light">{centre.centreType ?? "Type unavailable"}</span>
+                      </span>
+                      <span className="text-muted">{centre.standbySpikeCount} Spike{centre.standbySpikeCount === 1 ? "" : "s"}</span>
+                      <span className="font-semibold tabular-nums text-step-warning">{centre.score}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-3 text-[11px] leading-5 text-muted">{view.operational.sop.detail}</p>
+              </div>
+            </div>
+          </>
         ) : (
           <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
             <p className="text-xs font-semibold text-muted">Unavailable</p>
@@ -293,26 +298,56 @@ export function PreschoolOverviewRenderer({
         )}
       </section>
 
-      <section aria-labelledby="preschool-forecast-readiness" className="border-b border-border bg-surface-subtle/35 px-5 py-6 lg:px-7">
-        <div>
-          <h3 id="preschool-forecast-readiness" className="text-base font-semibold text-foreground">Forecast readiness</h3>
-          <p className="mt-1 text-sm leading-6 text-muted">No live forecast is used in the decisions above until its inputs and validation are published.</p>
-        </div>
-        <details className="mt-3">
-          <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Why forecast is not part of this report</summary>
-          <div className="mt-4 grid gap-4 lg:grid-cols-2">
-            <div className="rounded-lg bg-surface p-4" data-forecast-state={view.forecastReadiness.demo.status}>
-              <p className="text-xs font-semibold text-muted">Demo Forecast</p>
-              <p className="mt-2 text-sm font-semibold text-foreground">{view.forecastReadiness.demo.label}</p>
-              <p className="mt-2 text-xs leading-5 text-muted">{view.forecastReadiness.demo.detail}</p>
+      <section aria-labelledby="preschool-planning-outlook" className="border-b border-border bg-surface-subtle/35 px-5 py-7 lg:px-7 lg:py-8">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 id="preschool-planning-outlook" className="text-lg font-semibold tracking-[-0.015em] text-foreground">June planning baseline</h3>
+              {view.planningOutlook.status === "provisional" ? (
+                <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2.5 py-1 text-xs font-semibold text-step-warning">Estimated · Provisional</span>
+              ) : null}
             </div>
-            <div className="rounded-lg bg-surface p-4" data-forecast-state={view.forecastReadiness.live.status}>
-              <p className="text-xs font-semibold text-muted">Live Forecast</p>
-              <p className="mt-2 text-sm font-semibold text-muted">{view.forecastReadiness.live.label}</p>
-              <p className="mt-2 text-xs leading-5 text-muted">{view.forecastReadiness.live.detail}</p>
+            <p className="mt-1.5 text-sm leading-6 text-muted">A transparent planning reference from accepted May facts — not an AI forecast or customer bill.</p>
+          </div>
+          <span className="text-xs text-muted">Live Forecast: {view.liveForecast.label}</span>
+        </div>
+        {view.planningOutlook.status === "provisional" ? (
+          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
+            <PlanningBaselineChart outlook={view.planningOutlook} />
+            <div className="rounded-lg border border-step-warning/30 bg-step-warning-soft/30 p-4">
+              <p className="text-sm font-semibold text-foreground">If May's complete-week pattern repeats</p>
+              <dl className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                <div>
+                  <dt className="text-xs text-muted">June energy</dt>
+                  <dd className="mt-1 text-xl font-semibold tabular-nums text-foreground">{view.planningOutlook.projectedUsage}</dd>
+                  <dd className="mt-1 text-xs text-muted">Observed-week range {view.planningOutlook.projectedRange}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted">June cost before GST</dt>
+                  <dd className="mt-1 text-xl font-semibold tabular-nums text-foreground">{view.planningOutlook.projectedCost}</dd>
+                  <dd className="mt-1 text-xs text-muted">Reference range {view.planningOutlook.projectedCostRange}</dd>
+                </div>
+              </dl>
+              <div className="mt-4 border-t border-step-warning/20 pt-4 text-xs leading-5 text-muted">
+                <p><strong className="font-semibold text-foreground">Rate:</strong> {view.planningOutlook.tariffRate}</p>
+                <p className="mt-1">{view.planningOutlook.tariffLabel}</p>
+                <a className="mt-2 inline-flex font-semibold text-primary hover:underline" href={view.planningOutlook.tariffSourceUrl} target="_blank" rel="noreferrer">View official SP tariff source</a>
+              </div>
+              <details className="mt-4 border-t border-step-warning/20 pt-3">
+                <summary className="cursor-pointer text-xs font-semibold text-foreground">Assumptions and limitations</summary>
+                <ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-5 text-muted">
+                  {view.planningOutlook.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}
+                </ul>
+              </details>
             </div>
           </div>
-        </details>
+        ) : (
+          <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
+            <p className="text-sm font-semibold text-muted">Planning baseline unavailable</p>
+            <p className="mt-2 text-sm leading-6 text-muted">{view.planningOutlook.detail}</p>
+          </div>
+        )}
+        <p className="mt-3 text-xs leading-5 text-muted">{view.liveForecast.detail}</p>
       </section>
 
       <div className="grid gap-0 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -324,8 +359,24 @@ export function PreschoolOverviewRenderer({
             </div>
             <span className="text-xs text-muted">Top 5 of {view.centres.length} Centres</span>
           </div>
-          <div className="mt-4 overflow-x-auto rounded-lg border border-border">
-            <table className="min-w-[1020px] w-full border-collapse text-left text-xs">
+          <div className="mt-4 grid gap-3" role="list" aria-label="Top five Centres by Portfolio energy contribution">
+            {view.centres.slice(0, 5).map((centre) => (
+              <div key={centre.id} className="grid gap-2 sm:grid-cols-[minmax(180px,0.7fr)_minmax(220px,1.5fr)_160px] sm:items-center sm:gap-4" role="listitem">
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-semibold text-foreground">{centre.rank}. {centre.name}</p>
+                  <p className="mt-0.5 text-[11px] text-muted">{centre.cohort ?? "Cohort unavailable"} · {centre.topCircuit ?? "Leading appliance unavailable"}</p>
+                </div>
+                <div className="h-3 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true">
+                  <div className="h-full rounded-full bg-primary" style={{ width: `${Math.max(4, (centre.usageKwhValue / (view.centres[0]?.usageKwhValue ?? 1)) * 100)}%` }} />
+                </div>
+                <p className="text-right text-xs tabular-nums text-foreground"><strong className="font-semibold">{centre.usageKwh} kWh</strong> · {centre.sharePct}</p>
+              </div>
+            ))}
+          </div>
+          <details className="mt-5 rounded-lg border border-border bg-surface-subtle/40">
+            <summary className="cursor-pointer px-4 py-3 text-xs font-semibold text-foreground">View all {view.centres.length} Centres and normalised metrics</summary>
+            <div className="overflow-x-auto border-t border-border">
+              <table className="min-w-[1020px] w-full border-collapse text-left text-xs">
               <thead className="bg-surface-subtle text-[10px] uppercase tracking-[0.07em] text-muted-light">
                 <tr>
                   <th className="px-3 py-2.5 font-semibold">Rank</th>
@@ -340,37 +391,11 @@ export function PreschoolOverviewRenderer({
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {view.centres.slice(0, 5).map((centre) => <CentreRow key={centre.id} centre={centre} />)}
+                {view.centres.map((centre) => <CentreRow key={centre.id} centre={centre} />)}
               </tbody>
-            </table>
-          </div>
-          {view.centres.length > 5 ? (
-            <details className="mt-4 border-t border-border pt-4">
-              <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
-                View the remaining {view.centres.length - 5} Centres
-              </summary>
-              <div className="mt-4 overflow-x-auto rounded-lg border border-border">
-                <table className="min-w-[1020px] w-full border-collapse text-left text-xs">
-                  <thead className="bg-surface-subtle text-xs text-muted">
-                    <tr>
-                      <th className="px-3 py-2.5 font-semibold">Rank</th>
-                      <th className="px-3 py-2.5 font-semibold">Centre</th>
-                      <th className="px-3 py-2.5 font-semibold">Cohort</th>
-                      <th className="px-3 py-2.5 text-right font-semibold">Energy</th>
-                      <th className="px-3 py-2.5 text-right font-semibold">Share</th>
-                      <th className="px-3 py-2.5 text-right font-semibold">Annualised EUI</th>
-                      <th className="px-3 py-2.5 text-right font-semibold">May per pax</th>
-                      <th className="px-3 py-2.5 font-semibold">Quadrant</th>
-                      <th className="px-3 py-2.5 font-semibold">Leading appliance</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {view.centres.slice(5).map((centre) => <CentreRow key={centre.id} centre={centre} />)}
-                  </tbody>
-                </table>
-              </div>
-            </details>
-          ) : null}
+              </table>
+            </div>
+          </details>
         </section>
 
         <aside className="border-t border-border bg-surface-subtle px-5 py-5 xl:border-l xl:border-t-0 lg:px-7 lg:py-6">
@@ -392,6 +417,7 @@ export function PreschoolOverviewRenderer({
               <ReadinessRow label="Appliances" value={view.evidence.applianceRecipeIds.join(", ") || "Unavailable"} mono />
               <ReadinessRow label="Appliance source" value="Published Circuit aliases" />
               <ReadinessRow label="Operations" value={view.evidence.operationalRecipeIds.join(", ") || "Unavailable"} mono />
+              <ReadinessRow label="Planning" value={view.evidence.planningRecipeIds.join(", ") || "Unavailable"} mono />
             </dl>
           </details>
         </aside>
@@ -720,6 +746,96 @@ function benchmarkQuadrantLabel(quadrant: BenchmarkView["scatter"]["points"][num
 
 function roundSvg(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+type OperationalView = Extract<PreschoolOverviewViewModel["operational"], { status: "available" }>;
+
+function OperatingProfileChart({ profile }: { profile: OperationalView["hourlyProfile"] }) {
+  const width = 960;
+  const height = 270;
+  const margin = { top: 28, right: 24, bottom: 48, left: 54 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const columnWidth = plotWidth / profile.rows.length;
+  const barWidth = Math.max(8, columnWidth - 8);
+  const maxValue = Math.max(1, ...profile.rows.map((row) => row.totalKwh));
+
+  return (
+    <article className="overflow-hidden rounded-lg border border-border bg-surface-subtle p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h4 className="text-sm font-semibold text-foreground">When energy is used</h4>
+          <p className="mt-1 text-[11px] leading-5 text-muted">Average complete day across the Portfolio; Calendar-classified closed-hour energy is highlighted.</p>
+        </div>
+        <p className="text-[11px] text-muted"><strong className="font-semibold text-foreground">Peak average hour:</strong> {profile.peakHourLabel}</p>
+      </div>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-labelledby="preschool-operating-profile-title preschool-operating-profile-description"
+        data-operating-profile="hourly-calendar-split"
+        className="mt-3 h-auto w-full"
+      >
+        <title id="preschool-operating-profile-title">Average hourly energy split by operating and closed hours</title>
+        <desc id="preschool-operating-profile-description">Twenty-four stacked bars show average operating energy in blue and closed-hour energy in amber across thirty-one complete May days.</desc>
+        <line x1={margin.left} y1={margin.top + plotHeight} x2={width - margin.right} y2={margin.top + plotHeight} stroke="currentColor" className="text-border" />
+        <text x={margin.left - 8} y={margin.top + 4} textAnchor="end" className="fill-muted-light text-[9px]">{Math.ceil(maxValue)}</text>
+        <text x={margin.left - 8} y={margin.top + plotHeight} textAnchor="end" className="fill-muted-light text-[9px]">0</text>
+        {profile.rows.map((row) => {
+          const x = margin.left + row.hour * columnWidth + (columnWidth - barWidth) / 2;
+          const operatingHeight = (row.operatingKwh / maxValue) * plotHeight;
+          const closedHeight = (row.closedHourKwh / maxValue) * plotHeight;
+          const operatingY = margin.top + plotHeight - operatingHeight;
+          const closedY = operatingY - closedHeight;
+          return (
+            <g key={row.hour} data-profile-hour={row.hour}>
+              <title>{`${row.label}: ${row.totalKwh.toFixed(1)} kWh mean; ${row.operatingKwh.toFixed(1)} operating and ${row.closedHourKwh.toFixed(1)} closed-hour`}</title>
+              <rect x={x} y={operatingY} width={barWidth} height={operatingHeight} rx="2" className="fill-primary" />
+              <rect x={x} y={closedY} width={barWidth} height={closedHeight} rx="2" className="fill-step-warning" />
+              {row.hour % 3 === 0 ? (
+                <text x={x + barWidth / 2} y={margin.top + plotHeight + 22} textAnchor="middle" className="fill-muted text-[10px]">{String(row.hour).padStart(2, "0")}:00</text>
+              ) : null}
+            </g>
+          );
+        })}
+        <text x={16} y={margin.top + plotHeight / 2} textAnchor="middle" transform={`rotate(-90 16 ${margin.top + plotHeight / 2})`} className="fill-muted text-[10px] font-semibold">Mean kWh / complete day</text>
+      </svg>
+      <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2 text-[11px] text-muted">
+        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm bg-primary" aria-hidden="true" />Operating energy</span>
+        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm bg-step-warning" aria-hidden="true" />Closed-hour energy</span>
+        <span>{profile.completeDayCount} complete days</span>
+      </div>
+    </article>
+  );
+}
+
+type PlanningOutlookView = Extract<PreschoolOverviewViewModel["planningOutlook"], { status: "provisional" }>;
+
+function PlanningBaselineChart({ outlook }: { outlook: PlanningOutlookView }) {
+  const maximum = Math.max(1, ...outlook.sourceWeeks.map((week) => week.usageKwh));
+  return (
+    <article className="rounded-lg border border-border bg-surface-subtle p-4" data-planning-baseline="naive-weekly-average">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h4 className="text-sm font-semibold text-foreground">Four complete May weeks</h4>
+          <p className="mt-1 text-[11px] leading-5 text-muted">{outlook.method}</p>
+        </div>
+        <p className="text-xs tabular-nums text-foreground"><strong className="font-semibold">{outlook.weeklyAverage}</strong> average</p>
+      </div>
+      <div className="mt-5 space-y-3" role="img" aria-label={`Four complete May week totals with an average of ${outlook.weeklyAverage}`}>
+        {outlook.sourceWeeks.map((week) => (
+          <div key={week.label} className="grid grid-cols-[100px_minmax(0,1fr)_92px] items-center gap-3 text-[11px]">
+            <span className="text-muted">{week.label}</span>
+            <span className="h-3 overflow-hidden rounded-full bg-surface" aria-hidden="true">
+              <span className="block h-full rounded-full bg-primary" style={{ width: `${Math.max(4, (week.usageKwh / maximum) * 100)}%` }} />
+            </span>
+            <span className="text-right font-semibold tabular-nums text-foreground">{week.usage}</span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-5 border-t border-border pt-3 text-[11px] leading-5 text-muted">The observed weekly spread becomes the displayed June reference range. No trend, weather or occupancy adjustment is applied.</p>
+    </article>
+  );
 }
 
 function OperationalSpikePanel({
