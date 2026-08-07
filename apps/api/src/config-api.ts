@@ -66,6 +66,7 @@ import {
   modelProfileTestFailureMessage,
   modelProfileTestSuccessReason
 } from "./model-profile-test.js";
+import { isEnergyIqOverviewSlotSessionId } from "./energy/energy-session-surface.js";
 import { probeModelProfileCapabilities } from "./model-profile-capability-test.js";
 import { handleCapabilitiesRequest } from "./routes/capabilities.js";
 import type { ConfigApiContext, ConfigApiResponse } from "./routes/types.js";
@@ -468,11 +469,21 @@ const handleSessionRequest = async (
     const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
     const limit = clampInteger(Number.parseInt(requestUrl.searchParams.get("limit") ?? "", 10), 1, 200, 50);
     const cursor = requestUrl.searchParams.get("cursor");
-    const records = context.metadataStore.sessions.list({
+    const projectId = requestUrl.searchParams.get("projectId")?.trim();
+    const listedRecords = context.metadataStore.sessions.list({
       user_id: context.userId,
       limit,
+      ...(projectId
+        ? {
+            workspace_id: context.workspaceId,
+            project_id: projectId
+          }
+        : {}),
       ...(cursor ? { cursor } : {})
     });
+    const records = projectId
+      ? listedRecords.filter((session) => !isEnergyIqOverviewSlotSessionId(session.id))
+      : listedRecords;
     return ok({
       sessions: records.map((session) =>
         sessionListDto(
@@ -485,7 +496,9 @@ const handleSessionRequest = async (
           })
         )
       ),
-      ...(records.length === limit ? { nextCursor: encodeSessionCursor(records.at(-1) as SessionRecord) } : {})
+      ...(listedRecords.length === limit
+        ? { nextCursor: encodeSessionCursor(listedRecords.at(-1) as SessionRecord) }
+        : {})
     });
   }
   if (!sessionId) {
@@ -2473,6 +2486,8 @@ const sessionListDto = (
 ): Record<string, unknown> => ({
   id: session.id,
   threadId: session.id,
+  ...(session.workspace_id ? { workspaceId: session.workspace_id } : {}),
+  ...(session.project_id ? { projectId: session.project_id } : {}),
   title: session.title ?? "",
   titleSource: session.title_source ?? "fallback",
   createdAt: session.created_at,

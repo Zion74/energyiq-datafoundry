@@ -29,6 +29,8 @@ import {
   createChatSession,
   createClientId,
   createWorkspaceConfigItem,
+  dataTaskRuntimeHeaders,
+  dataTaskSessionScopeKey,
   defaultSettingsForKind,
   applyAutoTitle,
   deleteChatSession,
@@ -51,6 +53,7 @@ import {
   persistActiveLlmId,
   persistChatSessions,
   isWorkspaceConfigItemValid,
+  isEnergyIqOverviewSlotSessionId,
   renameChatSession,
   serverSessionDtoToChatSession,
   normalizeSkillSettings,
@@ -963,6 +966,7 @@ function sanitizeWorkspaceConfig(
 
 export type DataTasksExternalContext = {
   source: "energyiq";
+  workspaceId: string;
   projectId: string;
   projectName?: string;
   scopeId?: string;
@@ -1027,17 +1031,26 @@ function DataTasksCopilotShell({
     {},
   );
   const { authHeaders, scopeKey } = useDataTaskIdentity();
+  const sessionScopeKey = dataTaskSessionScopeKey(
+    scopeKey,
+    externalContext
+      ? {
+          workspaceId: externalContext.workspaceId,
+          projectId: externalContext.projectId,
+        }
+      : undefined,
+  );
 
   useEffect(() => {
     setCopilotProperties({});
-  }, [scopeKey]);
+  }, [sessionScopeKey]);
 
   return (
     <CopilotKit
-      key={scopeKey}
+      key={sessionScopeKey}
       runtimeUrl={runtimeUrl}
       agent={runtimeAgentId}
-      headers={() => authHeaders}
+      headers={() => dataTaskRuntimeHeaders(authHeaders, externalContext)}
       useSingleEndpoint
       showDevConsole={false}
       enableInspector={false}
@@ -1071,8 +1084,8 @@ function DataTasksCopilotShell({
       <CollaborationResponsesProvider>
         <LiveRunProvider>
           <DataTaskWorkspace
-            key={scopeKey}
-            identityScopeKey={scopeKey}
+            key={sessionScopeKey}
+            identityScopeKey={sessionScopeKey}
             viewport={viewport}
             accessMode={accessMode}
             externalContext={externalContext}
@@ -1178,6 +1191,7 @@ function DataTaskWorkspace({
   const stopActiveChatRunRef = useRef<(() => void) | undefined>(undefined);
   const [chatColumnWidth, setChatColumnWidth] = useState(1280);
   const [layoutHydrated, setLayoutHydrated] = useState(false);
+  const energyIqSessionMode = externalContext !== undefined;
 
   useEffect(() => {
     setLayoutHydrated(true);
@@ -1379,7 +1393,9 @@ function DataTaskWorkspace({
   }, [canDockRightPanel, isConsoleDrawerOpen]);
 
   useEffect(() => {
-    const stored = loadChatSessions(identityScopeKey);
+    const stored = loadChatSessions(identityScopeKey).filter(
+      (session) => !energyIqSessionMode || !isEnergyIqOverviewSlotSessionId(session.id),
+    );
     if (stored.length > 0) {
       setSessions(stored);
       setActiveSessionId(stored[0].id);
@@ -1388,11 +1404,14 @@ function DataTaskWorkspace({
     const first = createChatSession(defaultSessionTitle);
     setSessions([first]);
     setActiveSessionId(first.id);
-  }, [defaultSessionTitle, identityScopeKey]);
+  }, [defaultSessionTitle, energyIqSessionMode, identityScopeKey]);
 
   useEffect(() => {
     let cancelled = false;
-    void configApi.listSessions({ limit: 50 })
+    void configApi.listSessions({
+      limit: 50,
+      ...(externalContext ? { projectId: externalContext.projectId } : {}),
+    })
       .then((response) => {
         if (cancelled) return;
         if (response.sessions.length === 0) {
@@ -1423,7 +1442,7 @@ function DataTaskWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [defaultSessionTitle, identityScopeKey]);
+  }, [defaultSessionTitle, externalContext?.projectId, identityScopeKey]);
 
   useEffect(() => {
     if (sessions.length > 0) persistChatSessions(sessions, identityScopeKey);
@@ -1910,6 +1929,12 @@ function DataTaskWorkspace({
 
   const visibleArtifacts = liveRun.artifacts;
   const visibleTimelineEvents = liveRun.events;
+  const energyAnalystProtocol = useMemo(
+    () => externalContext
+      ? { protocolId: "data-analysis", protocolVersion: "1" }
+      : undefined,
+    [externalContext],
+  );
 
   const runConfigPayload = useMemo(
     () =>
@@ -1920,10 +1945,12 @@ function DataTaskWorkspace({
         perRunSelection,
         perRunFiles,
         evidenceRefs: selectedEvidenceRefs,
+        ...(energyAnalystProtocol ? { protocol: energyAnalystProtocol } : {}),
       }),
     [
       activeLlmId,
       activeSession,
+      energyAnalystProtocol,
       perRunFiles,
       perRunSelection,
       runDefaults?.activeDatasourceId,
@@ -1953,6 +1980,7 @@ function DataTaskWorkspace({
     runDefaultsActiveDatasourceId: runDefaults?.activeDatasourceId,
     activeThreadId,
     pendingCheckpointResume,
+    energyAnalystProtocol,
   });
   runConfigInputsRef.current = {
     workspaceConfig,
@@ -1965,6 +1993,7 @@ function DataTaskWorkspace({
     runDefaultsActiveDatasourceId: runDefaults?.activeDatasourceId,
     activeThreadId,
     pendingCheckpointResume,
+    energyAnalystProtocol,
   };
 
   const getRunForwardedProps = useCallback(() => {
@@ -1976,6 +2005,7 @@ function DataTaskWorkspace({
       perRunSelection: inputs.perRunSelection,
       perRunFiles: inputs.perRunFiles,
       evidenceRefs: inputs.selectedEvidenceRefs,
+      ...(inputs.energyAnalystProtocol ? { protocol: inputs.energyAnalystProtocol } : {}),
     });
     const checkpointId =
       inputs.pendingCheckpointResume?.sessionId === inputs.activeThreadId

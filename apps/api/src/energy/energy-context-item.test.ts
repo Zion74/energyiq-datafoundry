@@ -10,12 +10,14 @@ import {
 } from "./energy-bootstrap.js";
 import {
   createEnergyAuthoritativeContextItems,
+  createProjectAnalysisSnapshotContextItem,
   createEnergyQueryContextItem,
 } from "./energy-context-item.js";
 import { resolveEnergyQueryContext } from "./energy-query-context.js";
 import {
   resolvePublishedEnergyQueryContext,
   resolvePublishedProjectRelease,
+  type ProjectAnalysisSnapshot,
 } from "./project-analysis-resolver.js";
 
 const baseContext = {
@@ -79,7 +81,10 @@ describe("createEnergyQueryContextItem", () => {
       scopeId: "preschool-project",
       scopeName: "Preschool Portfolio",
       scopeType: "project",
-    }, "session-preschool");
+    }, "session-preschool", {
+      factsRelation: "energy_scope_123",
+      scopeMetadataRelation: "energy_scope_123_metadata",
+    });
     const content = String(item.content);
 
     expect(content).toContain("Preschool analysis policy");
@@ -91,10 +96,107 @@ describe("createEnergyQueryContextItem", () => {
     expect(content).toContain("Forecast, tariff cost, savings, ROI");
     expect(content).toContain("does not expose Calendar-derived operating or standby values");
     expect(content).toContain("deterministic Evidence pinned to business_calendar_version");
+    expect(content).toContain("scope_metadata_relation=energy_scope_123_metadata");
+    expect(content).toContain("facility_type");
+    expect(content).toContain("must not be interpreted as a business count of zero");
     expect(content).not.toContain("is_operating comes from the published operating schedule");
 
     const otherProject = createEnergyQueryContextItem(baseContext, "session-1");
     expect(String(otherProject.content)).not.toContain("Preschool analysis policy");
+  });
+
+  it("projects bounded deterministic Preschool Evidence into the full Analyst context", () => {
+    const item = createProjectAnalysisSnapshotContextItem({
+      snapshot: {
+        context: {
+          ...baseContext,
+          primaryPeriod: { start: baseContext.from, endExclusive: baseContext.to },
+          projectReleaseId: "preschool-release-v1",
+        },
+        projectRelease: {
+          id: "preschool-release-v1",
+          hierarchyRevisionId: "hierarchy-v1",
+          meterMappingRevisionId: "meter-routing-v1",
+          meterFormulaRevisionId: "formula-v1",
+          metricRevisionIds: ["energy.total_usage_kwh@1"],
+          ruleRevisionIds: [],
+          businessCalendarVersion: "calendar-v1",
+          tariffScheduleVersion: "tariff-v1",
+        },
+        dataSnapshot: { id: "snapshot-v1", importBatchIds: ["batch-v1"], lastSeenAt: "2026-06-01T00:00:00.000Z" },
+        dataQuality: { status: "complete" },
+        evidence: [{ id: "preschool-benchmark", metricId: "energy.total_usage_kwh@1", queryIds: [] }],
+        findings: [],
+        analysis: {
+          summary: { usageKwh: 24_921.8123, peakKw: 1_000 },
+          comparison: { usageKwh: 0, changeKwh: 0, changePct: null },
+          categories: [],
+          childScopes: [{
+            nodeId: "preschool-centre-e",
+            name: "Centre E",
+            nodeType: "centre",
+            usageKwh: 870.4991,
+            sharePct: 3.4929,
+            comparison: { usageKwh: 0, changeKwh: 870.4991, changePct: null },
+            dataHealth: { status: "complete", coveragePct: 100 },
+            areaSqm: 1_621,
+            occupantCount: 54,
+            kwhPerSqm: 0.537,
+            kwhPerPerson: 16.12,
+            metadata: {
+              status: "provisional",
+              evidence: [{ internalPayload: "do-not-copy-complete-metadata-evidence" }],
+            },
+          }],
+          topCircuits: [],
+          offHours: { status: "unavailable", reason: { message: "not supplied" } },
+        },
+        preschoolBenchmark: {
+          status: "provisional",
+          sampleSize: 30,
+          cohorts: [{ name: "Active Aging Center", sampleSize: 8 }],
+        },
+        preschoolAppliances: {
+          status: "available",
+          appliances: [{
+            name: "Kitchen Plug Load",
+            applianceGroup: "Plugload",
+            usageKwh: 4_819.292,
+            sharePct: 19.3376,
+            centreCount: 30,
+            sourceCircuitIds: ["internal-source-circuit-a", "internal-source-circuit-b"],
+          }],
+        },
+        preschoolOperational: {
+          status: "available",
+          sop: {
+            status: "provisional",
+            baselineScore: 100,
+            deductionPerStandbySpike: 1,
+            breachingCentreCodes: ["E"],
+            centres: [
+              { centreCode: "E", standbySpikeCount: 2, score: 98 },
+              { centreCode: "A", standbySpikeCount: 0, score: 100 },
+            ],
+          },
+        },
+      } as unknown as ProjectAnalysisSnapshot,
+      sessionId: "session-preschool",
+      userId: "user-1",
+    });
+    const content = String(item.content);
+
+    expect(item.sourceType).toBe("project-analysis-snapshot");
+    expect(content).toContain('"dataSnapshotId":"snapshot-v1"');
+    expect(content).toContain('"name":"Active Aging Center","sampleSize":8');
+    expect(content).toContain('"sourceCircuitCount":2');
+    expect(content).toContain('"scoredCentreCount":2');
+    expect(content).toContain('"centreCode":"E","standbySpikeCount":2');
+    expect(content).not.toContain("do-not-copy-complete-metadata-evidence");
+    expect(content).not.toContain("internal-source-circuit-a");
+    expect(content).not.toContain('"centreCode":"A","standbySpikeCount":0');
+    expect(content.length).toBeLessThan(15_000);
+    expect(content).toContain("Deterministic Evidence is authoritative");
   });
 
   it("assembles the authorized Ngee Ann query context and Pack for the server Context Package", () => {

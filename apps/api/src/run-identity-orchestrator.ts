@@ -23,6 +23,10 @@ export type RunIdentityResolution =
     };
 
 type ResolveRunIdentityInput = {
+  energySessionScope?: {
+    projectId: string;
+    workspaceId: string;
+  };
   effectiveRunConfig: EffectiveRunConfig;
   interactionResume?: InteractionResume | undefined;
   metadataStore: MetadataStore;
@@ -44,6 +48,21 @@ export const resolveRunIdentity = (input: ResolveRunIdentityInput): RunIdentityR
     user_id: input.userId,
     run_id: runId
   });
+  if (existingRun && input.energySessionScope) {
+    const existingSession = input.metadataStore.sessions.get({
+      user_id: input.userId,
+      session_id: sessionId
+    });
+    if (!existingSession.workspace_id || !existingSession.project_id) {
+      throw new Error("ENERGYIQ_SESSION_SCOPE_REQUIRED");
+    }
+    if (existingSession.workspace_id !== input.energySessionScope.workspaceId) {
+      throw new Error("ENERGYIQ_SESSION_WORKSPACE_MISMATCH");
+    }
+    if (existingSession.project_id !== input.energySessionScope.projectId) {
+      throw new Error("ENERGYIQ_SESSION_PROJECT_MISMATCH");
+    }
+  }
   const selectedDatasourceId = resume && existingRun?.datasource_id
     ? existingRun.datasource_id
     : input.effectiveRunConfig.activeDatasourceId;
@@ -123,6 +142,12 @@ export const resolveRunIdentity = (input: ResolveRunIdentityInput): RunIdentityR
     input.metadataStore.sessions.create({
       user_id: input.userId,
       id: sessionId,
+      ...(input.energySessionScope
+        ? {
+            workspace_id: input.energySessionScope.workspaceId,
+            project_id: input.energySessionScope.projectId
+          }
+        : {}),
       ...(selectedDatasourceId ? { selected_datasource_id: selectedDatasourceId } : {})
     });
     const claim = input.metadataStore.runs.claim({

@@ -124,6 +124,8 @@ export type AuthAuditEventRecord = {
 export type SessionRecord = {
   id: string;
   user_id: string;
+  workspace_id?: string;
+  project_id?: string;
   title?: string;
   title_source?: "llm" | "fallback" | "user";
   last_message_at?: string;
@@ -432,6 +434,8 @@ export type MetadataStoreOptions = {
 export type CreateSessionInput = {
   user_id: string;
   id: string;
+  workspace_id?: string;
+  project_id?: string;
   title?: string;
   title_source?: "llm" | "fallback" | "user";
   selected_datasource_id?: string;
@@ -1349,15 +1353,40 @@ export class SessionRepository {
   create(input: CreateSessionInput): SessionRecord {
     const now = new Date().toISOString();
 
+    if ((input.workspace_id && !input.project_id) || (!input.workspace_id && input.project_id)) {
+      throw new Error("ENERGYIQ_SESSION_SCOPE_INCOMPLETE");
+    }
+    const existing = mapSessionRow(
+      this.db.prepare("SELECT * FROM sessions WHERE user_id = ? AND id = ?").get(input.user_id, input.id)
+    );
+    if (existing && input.workspace_id && input.project_id) {
+      if (existing.workspace_id && existing.workspace_id !== input.workspace_id) {
+        throw new Error("ENERGYIQ_SESSION_WORKSPACE_MISMATCH");
+      }
+      if (existing.project_id && existing.project_id !== input.project_id) {
+        throw new Error("ENERGYIQ_SESSION_PROJECT_MISMATCH");
+      }
+      if (!existing.workspace_id && !existing.project_id) {
+        const hasRunHistory = this.db.prepare(`
+          SELECT 1 FROM runs WHERE user_id = ? AND session_id = ? LIMIT 1
+        `).get(input.user_id, input.id);
+        if (hasRunHistory) {
+          throw new Error("ENERGYIQ_SESSION_SCOPE_REQUIRED");
+        }
+      }
+    }
+
     this.db
       .prepare(
         `
         INSERT INTO sessions (
-          id, user_id, title, title_source, selected_datasource_id, selected_collection_id,
-          created_at, updated_at
+          id, user_id, workspace_id, project_id, title, title_source,
+          selected_datasource_id, selected_collection_id, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id, id) DO UPDATE SET
+          workspace_id = COALESCE(sessions.workspace_id, excluded.workspace_id),
+          project_id = COALESCE(sessions.project_id, excluded.project_id),
           title = COALESCE(excluded.title, sessions.title),
           title_source = COALESCE(excluded.title_source, sessions.title_source),
           selected_datasource_id = COALESCE(excluded.selected_datasource_id, sessions.selected_datasource_id),
@@ -1368,6 +1397,8 @@ export class SessionRepository {
       .run(
         input.id,
         input.user_id,
+        input.workspace_id ?? null,
+        input.project_id ?? null,
         input.title ?? null,
         input.title_source ?? null,
         input.selected_datasource_id ?? null,
@@ -1391,34 +1422,41 @@ export class SessionRepository {
     return session;
   }
 
-  list(input: { cursor?: string; limit?: number; user_id: string }): SessionRecord[] {
+  list(input: {
+    cursor?: string;
+    limit?: number;
+    project_id?: string;
+    user_id: string;
+    workspace_id?: string;
+  }): SessionRecord[] {
     const limit = Math.max(1, Math.min(input.limit ?? 50, 200));
+    if ((input.workspace_id && !input.project_id) || (!input.workspace_id && input.project_id)) {
+      throw new Error("ENERGYIQ_SESSION_SCOPE_INCOMPLETE");
+    }
+    const where = ["user_id = ?"];
+    const params: Array<string | number> = [input.user_id];
+    if (input.workspace_id && input.project_id) {
+      where.push("workspace_id = ?", "project_id = ?");
+      params.push(input.workspace_id, input.project_id);
+    }
     if (input.cursor) {
       const cursor = decodeSessionCursor(input.cursor);
       if (cursor) {
-        return this.db
-          .prepare(`
-            SELECT * FROM sessions
-            WHERE user_id = ?
-              AND (
-                COALESCE(last_message_at, updated_at) < ?
-                OR (COALESCE(last_message_at, updated_at) = ? AND id < ?)
-              )
-            ORDER BY COALESCE(last_message_at, updated_at) DESC, id DESC
-            LIMIT ?
-          `)
-          .all(input.user_id, cursor.sort_at, cursor.sort_at, cursor.id, limit)
-          .map(mapRequiredSessionRow);
+        where.push(`(
+          COALESCE(last_message_at, updated_at) < ?
+          OR (COALESCE(last_message_at, updated_at) = ? AND id < ?)
+        )`);
+        params.push(cursor.sort_at, cursor.sort_at, cursor.id);
       }
     }
     return this.db
       .prepare(`
         SELECT * FROM sessions
-        WHERE user_id = ?
+        WHERE ${where.join(" AND ")}
         ORDER BY COALESCE(last_message_at, updated_at) DESC, id DESC
         LIMIT ?
       `)
-      .all(input.user_id, limit)
+      .all(...params, limit)
       .map(mapRequiredSessionRow);
   }
 
@@ -3560,6 +3598,8 @@ const runMigrations = (db: DatabaseSync): void => {
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT NOT NULL,
       user_id TEXT NOT NULL,
+      workspace_id TEXT,
+      project_id TEXT,
       title TEXT,
       title_source TEXT,
       last_message_at TEXT,
@@ -4024,6 +4064,9 @@ const runMigrations = (db: DatabaseSync): void => {
   runSchemaMigration(db, "0028_energyiq_historical_baseline_rule_requirement", "Allow historical baseline EnergyIQ rules", () => {
     ensureEnergyIqHistoricalBaselineRuleRequirementSchema(db);
   });
+  runSchemaMigration(db, "0029_energyiq_session_scope", "Bind EnergyIQ Sessions to Workspace and Project", () => {
+    initializeEnergyIqSessionScopeSchema(db);
+  });
 };
 
 const initializeSchemaMigrationTable = (db: DatabaseSync): void => {
@@ -4312,6 +4355,15 @@ const initializeSessionBranchSchema = (db: DatabaseSync): void => {
     );
     CREATE INDEX IF NOT EXISTS idx_session_branches_parent_fork
       ON session_branches(user_id, parent_session_id, fork_run_id, created_at);
+  `);
+};
+
+const initializeEnergyIqSessionScopeSchema = (db: DatabaseSync): void => {
+  ensureColumn(db, "sessions", "workspace_id", "TEXT");
+  ensureColumn(db, "sessions", "project_id", "TEXT");
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_sessions_energyiq_scope
+      ON sessions(user_id, workspace_id, project_id, last_message_at, updated_at);
   `);
 };
 
@@ -4804,10 +4856,14 @@ const mapSessionRow = (row: unknown): Optional<SessionRecord> => {
   const lastMessageAt = optionalString(row.last_message_at);
   const selectedDatasourceId = optionalString(row.selected_datasource_id);
   const selectedCollectionId = optionalString(row.selected_collection_id);
+  const workspaceId = optionalString(row.workspace_id);
+  const projectId = optionalString(row.project_id);
 
   return {
     id: requiredString(row, "id"),
     user_id: requiredString(row, "user_id"),
+    ...(workspaceId ? { workspace_id: workspaceId } : {}),
+    ...(projectId ? { project_id: projectId } : {}),
     ...(title ? { title } : {}),
     ...(titleSource ? { title_source: titleSource } : {}),
     ...(lastMessageAt ? { last_message_at: lastMessageAt } : {}),

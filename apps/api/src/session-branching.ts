@@ -137,6 +137,12 @@ export function createSessionBranch(input: {
   const session = input.metadataStore.sessions.create({
     user_id: input.userId,
     id: childSessionId,
+    ...(parentSession.workspace_id && parentSession.project_id
+      ? {
+          workspace_id: parentSession.workspace_id,
+          project_id: parentSession.project_id
+        }
+      : {}),
     title: input.title?.trim().slice(0, 80) || parentSession.title || "Branched conversation",
     title_source: input.title?.trim() ? "user" : parentSession.title_source ?? "fallback",
     ...(parentSession.selected_datasource_id ? { selected_datasource_id: parentSession.selected_datasource_id } : {}),

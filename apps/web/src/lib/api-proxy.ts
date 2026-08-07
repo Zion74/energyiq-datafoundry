@@ -32,6 +32,74 @@ export function isStreamingContentType(contentType: string | null): boolean {
   return Boolean(contentType?.toLowerCase().includes("text/event-stream"));
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function visibleStructuredText(content: unknown[]): string {
+  const parts: string[] = [];
+
+  for (const part of content) {
+    if (typeof part === "string") {
+      parts.push(part);
+      continue;
+    }
+    if (isRecord(part) && part.type === "text" && typeof part.text === "string") {
+      parts.push(part.text);
+    }
+  }
+
+  return parts.join("");
+}
+
+function containsUserAttachment(content: unknown[]): boolean {
+  const attachmentTypes = new Set(["image", "audio", "video", "document", "binary"]);
+  return content.some(
+    (part) => isRecord(part) && typeof part.type === "string" && attachmentTypes.has(part.type),
+  );
+}
+
+function normalizeMessageContainer(
+  container: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  if (!Array.isArray(container.messages)) return undefined;
+
+  let changed = false;
+  const messages = container.messages.map((message) => {
+    if (!isRecord(message) || !Array.isArray(message.content)) {
+      return message;
+    }
+    // Preserve actual user attachments, but reduce text-only arrays produced
+    // by newer CopilotKit clients for the older Runtime's string contract.
+    if (message.role === "user" && containsUserAttachment(message.content)) return message;
+    changed = true;
+    return { ...message, content: visibleStructuredText(message.content) };
+  });
+
+  return changed ? { ...container, messages } : undefined;
+}
+
+function normalizeCopilotKitRequestBody(body: ArrayBuffer, contentType: string | null): BodyInit {
+  if (!contentType?.toLowerCase().includes("application/json") || body.byteLength === 0) {
+    return body;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(body));
+    if (!isRecord(parsed)) return body;
+
+    const direct = normalizeMessageContainer(parsed);
+    if (direct) return JSON.stringify(direct);
+
+    // CopilotKit's single-route transport wraps RunAgentInput inside `body`.
+    if (!isRecord(parsed.body)) return body;
+    const nested = normalizeMessageContainer(parsed.body);
+    return nested ? JSON.stringify({ ...parsed, body: nested }) : body;
+  } catch {
+    return body;
+  }
+}
+
 /**
  * Apply hop-by-hop cleanup and SSE anti-buffering headers on a proxied response.
  * Keeps `upstream.body` as a ReadableStream — never buffer the response body.
@@ -76,7 +144,10 @@ export async function proxyToApi(request: Request, pathname: string): Promise<Re
   if (request.method !== "GET" && request.method !== "HEAD") {
     // Agent run bodies are small JSON; buffering the request is fine.
     // Response body must remain a stream (see buildProxyResponseHeaders).
-    init.body = await request.arrayBuffer();
+    const body = await request.arrayBuffer();
+    init.body = isStreamingProxyPath(pathname)
+      ? normalizeCopilotKitRequestBody(body, request.headers.get("content-type"))
+      : body;
   }
 
   const upstream = await fetch(targetUrl, init);

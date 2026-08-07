@@ -3,6 +3,7 @@ const toolActionLabels: Record<string, string> = {
   inspect_schema: "Inspect schema",
   preview_table: "Preview data",
   run_sql_readonly: "Run query",
+  analysis_requirements_commit: "Verify evidence",
   retrieve_knowledge: "Retrieve knowledge",
   read_file: "Read file",
   edit_file: "Edit file",

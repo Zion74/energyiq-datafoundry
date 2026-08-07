@@ -32,6 +32,7 @@ describe("EnergyIQ AI Analyst handoff", () => {
     });
 
     expect(context).toMatchObject({
+      workspaceId: "workspace-1",
       projectId: "ngee-ann-polytechnic",
       period: "Custom",
       from: "2026-05-19T16:00:00.000Z",

@@ -16,7 +16,7 @@ import {
 } from "@datafoundry/agent-runtime";
 import { LocalArtifactService, SessionOutputService } from "@datafoundry/artifacts";
 import { type MeResponse, createEnvConfig, createErrorResult, createSuccessResult } from "@datafoundry/contracts";
-import { ensureEnergyScopedDataSource, LocalDataGateway } from "@datafoundry/data-gateway";
+import { LocalDataGateway } from "@datafoundry/data-gateway";
 import { LocalFileAssetService } from "@datafoundry/files";
 import { LocalKnowledgeService } from "@datafoundry/knowledge";
 import {
@@ -83,6 +83,10 @@ import { ToolCallResultBridge } from "./tool-call-result-bridge.js";
 import { compileTrustedEnergyRunContract } from "./trusted-energy-run-contract.js";
 import { ensureEnergyIqBootstrap } from "./energy/energy-bootstrap.js";
 import {
+  ensureEnergyIqAnalysisWorkspace,
+  type EnergyIqAnalysisWorkspace,
+} from "./energy/energy-analysis-workspace.js";
+import {
   resolveEnergyAccessContext,
   resolveEnergyPublishedMeterRoute
 } from "./energy/energy-query-context.js";
@@ -90,6 +94,7 @@ import { createEnergyAuthoritativeContextItems } from "./energy/energy-context-i
 import {
   resolveProjectAnalysis,
   resolvePublishedEnergyQueryContext,
+  type ProjectAnalysisSnapshot,
   type PublishedProjectRelease
 } from "./energy/project-analysis-resolver.js";
 
@@ -123,6 +128,10 @@ const emitEarlyRunFailure = (
 };
 
 const persistEarlyFailedUserMessage = (input: {
+  energySessionScope?: {
+    projectId: string;
+    workspaceId: string;
+  };
   errorMessage: string;
   isResume: boolean;
   metadataStore: MetadataStore;
@@ -138,7 +147,13 @@ const persistEarlyFailedUserMessage = (input: {
   try {
     input.metadataStore.sessions.create({
       user_id: input.userId,
-      id: input.sessionId
+      id: input.sessionId,
+      ...(input.energySessionScope
+        ? {
+            workspace_id: input.energySessionScope.workspaceId,
+            project_id: input.energySessionScope.projectId
+          }
+        : {})
     });
     input.metadataStore.runs.claim({
       user_id: input.userId,
@@ -520,6 +535,8 @@ class DataFoundryAgUiAgent extends AbstractAgent {
         let selectedSkills;
         let skillSelection;
         let energyQueryContext;
+        let energyAnalysisWorkspace: EnergyIqAnalysisWorkspace | undefined;
+        let projectAnalysisSnapshot: ProjectAnalysisSnapshot | undefined;
         let publishedProjectRelease: PublishedProjectRelease | null = null;
         let trustedEnergyTextContract: TrustedEnergyTextQueryContract | undefined;
         try {
@@ -548,28 +565,16 @@ class DataFoundryAgUiAgent extends AbstractAgent {
                 expectedMeterMappingRevisionId: energyQueryContext.meterMappingRevisionId
               })
             : undefined;
-          const energyScopedDataSource = energyQueryContext && publishedMeterRoute
-            ? await ensureEnergyScopedDataSource({
+          energyAnalysisWorkspace = energyQueryContext && publishedMeterRoute
+            ? await ensureEnergyIqAnalysisWorkspace({
                 metadataStore: this.input.metadataStore,
                 userId: this.input.user.id,
-                context: {
-                  workspaceId: energyQueryContext.workspaceId,
-                  projectId: energyQueryContext.projectId,
-                  scopeId: energyQueryContext.scopeId,
-                  meterAttachments: publishedMeterRoute.attachments,
-                  resource: energyQueryContext.resource,
-                  from: energyQueryContext.from,
-                  to: energyQueryContext.to,
-                  timezone: energyQueryContext.timezone,
-                  hierarchyRevisionId: energyQueryContext.hierarchyRevisionId,
-                  meterMappingRevisionId: publishedMeterRoute.meterMappingRevisionId,
-                  meterFormulaRevisionId: energyQueryContext.meterFormulaRevisionId,
-                  dataSnapshotId: energyQueryContext.dataSnapshotId,
-                  metricVersion: energyQueryContext.metricVersion
-                }
+                context: energyQueryContext,
+                publishedMeterRoute,
               })
             : undefined;
-          if (trustedTextIntent && energyRequest && energyScopedDataSource) {
+          const energyScopedDataSource = energyAnalysisWorkspace?.scopedDatasource;
+          if (energyRequest && energyScopedDataSource) {
             const resolution = await resolveProjectAnalysis({
               metadataStore: this.input.metadataStore,
               dataGateway: this.input.dataGateway,
@@ -577,13 +582,20 @@ class DataFoundryAgUiAgent extends AbstractAgent {
               workspaceId: this.input.workspaceId,
               request: energyRequest
             });
-            if (resolution.status !== "ready") {
+            if (resolution.status === "ready") {
+              projectAnalysisSnapshot = resolution.snapshot;
+            } else if (trustedTextIntent) {
+              throw new Error("TRUSTED_ENERGY_TEXT_PROJECT_ANALYSIS_NOT_CONFIGURED");
+            }
+          }
+          if (trustedTextIntent && energyRequest && energyScopedDataSource) {
+            if (!projectAnalysisSnapshot) {
               throw new Error("TRUSTED_ENERGY_TEXT_PROJECT_ANALYSIS_NOT_CONFIGURED");
             }
             trustedEnergyTextContract = compileTrustedEnergyRunContract({
               intent: trustedTextIntent,
               metadataStore: this.input.metadataStore,
-              snapshot: resolution.snapshot,
+              snapshot: projectAnalysisSnapshot,
               scopedDatasource: energyScopedDataSource
             });
             // A generic Agent response is not a trusted result. Enable this
@@ -625,6 +637,14 @@ class DataFoundryAgUiAgent extends AbstractAgent {
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           persistEarlyFailedUserMessage({
+            ...(energyQueryContext
+              ? {
+                  energySessionScope: {
+                    workspaceId: energyQueryContext.workspaceId,
+                    projectId: energyQueryContext.projectId
+                  }
+                }
+              : {}),
             errorMessage: message,
             isResume: Boolean(interactionResume),
             metadataStore: this.input.metadataStore,
@@ -639,6 +659,14 @@ class DataFoundryAgUiAgent extends AbstractAgent {
         }
         const runEventWriter = new RunEventWriter(this.input.metadataStore.runEvents);
         const identity = resolveRunIdentity({
+          ...(energyQueryContext
+            ? {
+                energySessionScope: {
+                  workspaceId: energyQueryContext.workspaceId,
+                  projectId: energyQueryContext.projectId
+                }
+              }
+            : {}),
           effectiveRunConfig,
           ...(interactionResume ? { interactionResume } : {}),
           metadataStore: this.input.metadataStore,
@@ -666,6 +694,14 @@ class DataFoundryAgUiAgent extends AbstractAgent {
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           persistEarlyFailedUserMessage({
+            ...(energyQueryContext
+              ? {
+                  energySessionScope: {
+                    workspaceId: energyQueryContext.workspaceId,
+                    projectId: energyQueryContext.projectId
+                  }
+                }
+              : {}),
             errorMessage: message,
             isResume: Boolean(interactionResume),
             metadataStore: this.input.metadataStore,
@@ -724,7 +760,16 @@ class DataFoundryAgUiAgent extends AbstractAgent {
         });
         const authoritativeContextItems = [
           ...createEnergyAuthoritativeContextItems({
+            ...(energyAnalysisWorkspace?.scopedDatasource.metadataViewName
+              ? {
+                  analysisWorkspace: {
+                    factsRelation: energyAnalysisWorkspace.scopedDatasource.viewName,
+                    scopeMetadataRelation: energyAnalysisWorkspace.scopedDatasource.metadataViewName,
+                  },
+                }
+              : {}),
             ...(energyQueryContext ? { context: energyQueryContext } : {}),
+            ...(projectAnalysisSnapshot ? { projectAnalysisSnapshot } : {}),
             ...(publishedProjectRelease ? { projectRelease: publishedProjectRelease } : {}),
             sessionId,
             ...(trustedEnergyTextContract ? { trustedTextContract: trustedEnergyTextContract } : {}),

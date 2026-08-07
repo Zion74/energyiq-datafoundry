@@ -143,6 +143,19 @@ describe("Energy scoped datasource Snapshot guard", () => {
           projectId: "project-1",
           scopeId: "scope-a",
           meterAttachments: [{ meterPointId: "meter-a", scopeId: "scope-a", officialAggregation: true }],
+          scopeDimensions: [{
+            scopeId: "scope-a",
+            parentScopeId: "project-1-project",
+            scopeName: "Centre A",
+            scopeType: "centre",
+            tierDefinitionId: "centre-tier",
+            centreCode: "A",
+            facilityType: "Active Aging Center",
+            areaSqm: 100,
+            occupantCount: 20,
+            metadataStatus: "provisional",
+            hierarchyRevisionId: "hierarchy-v1",
+          }],
           resource: "electricity",
           from: "2026-05-01T00:00:00.000Z",
           to: "2026-05-02T00:00:00.000Z",
@@ -189,6 +202,16 @@ describe("Energy scoped datasource Snapshot guard", () => {
       });
       const scopedConfig = JSON.parse(scopedRecord.config_json) as Record<string, unknown>;
       const scopedEnergyQueryScope = scopedConfig.energyQueryScope as Record<string, unknown>;
+      expect(scopedA.metadataViewName).toBeTruthy();
+      expect((scopedConfig.introspection as { tableAllowlist: string[] }).tableAllowlist)
+        .toEqual([scopedA.viewName, scopedA.metadataViewName]);
+      await expect(gateway.runSqlReadonly({
+        user_id: "dev-user",
+        workspace_id: "workspace-1",
+        datasource_id: scopedA.datasourceId,
+        sql: `SELECT COUNT(*) AS centre_count FROM ${scopedA.metadataViewName}
+          WHERE facility_type = 'Active Aging Center'`,
+      })).resolves.toMatchObject({ rows: [[1]] });
       metadata.dataSources.create({
         user_id: "dev-user",
         id: "energy-scope-different-snapshot",

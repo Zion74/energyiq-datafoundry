@@ -87,7 +87,8 @@ export {
   type EnergyFactCoverage,
   type EnergyPreparedScopedDataSource,
   type EnergyScopedDataSource,
-  type EnergyScopedDataSourceContext
+  type EnergyScopedDataSourceContext,
+  type EnergyScopedScopeDimension
 } from "./energy-scoped-datasource.js";
 export {
   ENERGY_FACT_WRITER_CONTRACT_VERSION,

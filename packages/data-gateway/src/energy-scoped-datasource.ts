@@ -25,6 +25,8 @@ export type EnergyScopedDataSourceContext = {
   scopeId: string;
   /** Published Meter identities and their navigation attachment for this Scope. */
   meterAttachments: Array<{ meterPointId: string; scopeId: string; officialAggregation: boolean }>;
+  /** Published, hierarchy-pinned business dimensions visible inside this authorized Scope. */
+  scopeDimensions?: EnergyScopedScopeDimension[];
   resource: "electricity" | "water";
   from: string;
   to: string;
@@ -36,10 +38,25 @@ export type EnergyScopedDataSourceContext = {
   metricVersion: string;
 };
 
+export type EnergyScopedScopeDimension = {
+  scopeId: string;
+  parentScopeId?: string;
+  scopeName: string;
+  scopeType: string;
+  tierDefinitionId?: string;
+  centreCode?: string;
+  facilityType?: string;
+  areaSqm?: number;
+  occupantCount?: number;
+  metadataStatus: "provisional" | "confirmed";
+  hierarchyRevisionId: string;
+};
+
 export type EnergyScopedDataSource = {
   datasourceId: string;
   revision: number;
   viewName: string;
+  metadataViewName?: string;
   databasePath: string;
 };
 
@@ -166,15 +183,25 @@ export const prepareEnergyScopedDataSource = async (input: {
     dataSnapshotId: input.context.dataSnapshotId,
   });
 
+  const canonicalContext = {
+    ...input.context,
+    meterAttachments: [...(input.context.meterAttachments ?? [])]
+      .sort((left, right) => left.meterPointId.localeCompare(right.meterPointId)),
+    ...(input.context.scopeDimensions === undefined
+      ? {}
+      : {
+          scopeDimensions: [...input.context.scopeDimensions]
+            .sort((left, right) => left.scopeId.localeCompare(right.scopeId)),
+        }),
+  };
   const signature = createHash("sha256")
-    .update(JSON.stringify({
-      ...input.context,
-      meterAttachments: [...(input.context.meterAttachments ?? [])]
-        .sort((left, right) => left.meterPointId.localeCompare(right.meterPointId)),
-    }))
+    .update(JSON.stringify(canonicalContext))
     .digest("hex")
     .slice(0, 20);
   const viewName = `energy_scope_${signature}`;
+  const metadataViewName = input.context.scopeDimensions === undefined
+    ? undefined
+    : `${viewName}_metadata`;
   const datasourceId = `energy-scope-${signature}`;
   const sessionSignature = createHash("sha256")
     .update(JSON.stringify({ databasePath, expectedSnapshotScope }))
@@ -182,7 +209,13 @@ export const prepareEnergyScopedDataSource = async (input: {
     .slice(0, 20);
   const sessionDatasourceId = `energy-snapshot-session-${sessionSignature}`;
   try {
-    await createScopedView(databasePath, viewName, input.context, expectedSnapshotScope);
+    await createScopedViews(
+      databasePath,
+      viewName,
+      metadataViewName,
+      input.context,
+      expectedSnapshotScope,
+    );
   } catch {
     throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
   }
@@ -212,6 +245,7 @@ export const prepareEnergyScopedDataSource = async (input: {
   return {
     datasourceId,
     viewName,
+    ...(metadataViewName ? { metadataViewName } : {}),
     databasePath,
     context: input.context,
     expectedSnapshotScope,
@@ -226,7 +260,7 @@ export const registerPreparedEnergyScopedDataSource = (input: {
   factScope: EnergySnapshotGuardScope;
 }): EnergyScopedDataSource => {
   assertEnergySnapshotReceipt(input.prepared.expectedSnapshotScope, input.factScope);
-  const { context, databasePath, datasourceId, viewName } = input.prepared;
+  const { context, databasePath, datasourceId, viewName, metadataViewName } = input.prepared;
 
   const config = {
     path: databasePath,
@@ -241,7 +275,7 @@ export const registerPreparedEnergyScopedDataSource = (input: {
       maxSampleRows: 100
     },
     introspection: {
-      tableAllowlist: [viewName]
+      tableAllowlist: [viewName, ...(metadataViewName ? [metadataViewName] : [])]
     },
     energyQueryScope: {
       workspaceId: context.workspaceId,
@@ -282,13 +316,15 @@ export const registerPreparedEnergyScopedDataSource = (input: {
     datasourceId,
     revision: record.revision,
     viewName,
+    ...(metadataViewName ? { metadataViewName } : {}),
     databasePath
   };
 };
 
-const createScopedView = async (
+const createScopedViews = async (
   databasePath: string,
   viewName: string,
+  metadataViewName: string | undefined,
   context: EnergyScopedDataSourceContext,
   factScope: Pick<EnergySnapshotIdentityScope, "sourceSha256">,
 ): Promise<void> => {
@@ -351,9 +387,65 @@ const createScopedView = async (
         AND interval_start < CAST(${sqlLiteral(context.to)} AS TIMESTAMPTZ)
         AND ${nodeFilter}
     `);
+    if (metadataViewName) {
+      await duckDbRun(connection, scopeDimensionsViewSql(
+        metadataViewName,
+        context.scopeDimensions ?? [],
+      ));
+    }
   } finally {
     await duckDbClose(connection).catch(ignoreAlreadyClosed);
   }
+};
+
+const scopeDimensionsViewSql = (
+  viewName: string,
+  dimensions: EnergyScopedScopeDimension[],
+): string => {
+  const columns = [
+    "scope_id",
+    "parent_scope_id",
+    "scope_name",
+    "scope_type",
+    "tier_definition_id",
+    "centre_code",
+    "facility_type",
+    "area_sqm",
+    "occupant_count",
+    "metadata_status",
+    "hierarchy_revision_id",
+  ];
+  const rows = dimensions.map((dimension) => `(
+    ${sqlLiteral(dimension.scopeId)},
+    ${sqlNullableLiteral(dimension.parentScopeId)},
+    ${sqlLiteral(dimension.scopeName)},
+    ${sqlLiteral(dimension.scopeType)},
+    ${sqlNullableLiteral(dimension.tierDefinitionId)},
+    ${sqlNullableLiteral(dimension.centreCode)},
+    ${sqlNullableLiteral(dimension.facilityType)},
+    ${sqlNullableNumber(dimension.areaSqm)},
+    ${sqlNullableNumber(dimension.occupantCount)},
+    ${sqlLiteral(dimension.metadataStatus)},
+    ${sqlLiteral(dimension.hierarchyRevisionId)}
+  )`).join(",\n");
+  const values = rows || "(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)";
+  return `
+    CREATE OR REPLACE VIEW ${quoteIdentifier(viewName)} AS
+    SELECT
+      CAST(scope_id AS VARCHAR) AS scope_id,
+      CAST(parent_scope_id AS VARCHAR) AS parent_scope_id,
+      CAST(scope_name AS VARCHAR) AS scope_name,
+      CAST(scope_type AS VARCHAR) AS scope_type,
+      CAST(tier_definition_id AS VARCHAR) AS tier_definition_id,
+      CAST(centre_code AS VARCHAR) AS centre_code,
+      CAST(facility_type AS VARCHAR) AS facility_type,
+      CAST(area_sqm AS DOUBLE) AS area_sqm,
+      CAST(occupant_count AS DOUBLE) AS occupant_count,
+      CAST(metadata_status AS VARCHAR) AS metadata_status,
+      CAST(hierarchy_revision_id AS VARCHAR) AS hierarchy_revision_id
+    FROM (VALUES ${values}) AS dimensions(${columns.join(", ")})
+    ${rows ? "" : "WHERE FALSE"}
+  `;
 };
 
 export const assertEnergyCurrentSnapshotFacts = async (input: {
@@ -431,6 +523,10 @@ const normalizeEnergyFactStorePath = (databasePath: string): string =>
 const snapshotGuardSql = (scope: EnergySnapshotGuardScope): string => energySnapshotGuardSql(scope);
 
 const sqlLiteral = (value: string): string => `'${value.replaceAll("'", "''")}'`;
+const sqlNullableLiteral = (value: string | undefined): string =>
+  value === undefined ? "NULL" : sqlLiteral(value);
+const sqlNullableNumber = (value: number | undefined): string =>
+  value === undefined ? "NULL" : String(value);
 const quoteIdentifier = (value: string): string => `"${value.replaceAll('"', '""')}"`;
 
 const duckDbRun = async (

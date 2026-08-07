@@ -503,13 +503,17 @@ describe("config api adapter", () => {
       },
     }), { headers: { "Content-Type": "application/json" }, status: 200 }));
 
-    const list = await configApi.listSessions({ limit: 20, cursor: "cursor-1" });
+    const list = await configApi.listSessions({
+      limit: 20,
+      cursor: "cursor-1",
+      projectId: "preschool-demo",
+    });
     const patched = await configApi.patchSessionTitle("thread-1", "我的复盘");
     const deleted = await configApi.deleteSession("thread-1");
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "http://config.test/api/v1/sessions?limit=20&cursor=cursor-1",
+      "http://config.test/api/v1/sessions?limit=20&cursor=cursor-1&projectId=preschool-demo",
       expect.objectContaining({ headers: expect.objectContaining({ Accept: "application/json" }) }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(

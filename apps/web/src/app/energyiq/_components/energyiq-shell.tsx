@@ -38,7 +38,7 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
   const showStaticProjectContext = !isAdminPage && publishedProjects.length === 1 && activeProject;
   const selectWorkspaceFromShell = async (workspaceId: string) => {
     await selectOrganisation(workspaceId);
-    if (pathname !== "/energyiq/overview") return;
+    if (pathname !== "/energyiq/overview" && pathname !== "/energyiq/ai") return;
 
     const nextSearchParams = new URLSearchParams(window.location.search);
     nextSearchParams.delete("projectId");
@@ -50,14 +50,18 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
     nextSearchParams.delete("currentTo");
     nextSearchParams.delete("currentDataSnapshotId");
     nextSearchParams.delete("currentProjectReleaseId");
-    nextSearchParams.set("grain", "day");
+    nextSearchParams.delete("finding");
+    nextSearchParams.delete("evidence");
+    if (pathname === "/energyiq/overview") {
+      nextSearchParams.set("grain", "day");
+    } else {
+      nextSearchParams.delete("grain");
+    }
     router.replace(`${pathname}?${nextSearchParams.toString()}`);
   };
   const selectProjectFromShell = (projectId: string) => {
-    if (pathname !== "/energyiq/overview") {
-      selectProject(projectId);
-      return;
-    }
+    selectProject(projectId);
+    if (pathname !== "/energyiq/overview" && pathname !== "/energyiq/ai") return;
 
     const nextSearchParams = new URLSearchParams(window.location.search);
     nextSearchParams.set("projectId", projectId);
@@ -69,7 +73,13 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
     nextSearchParams.delete("currentTo");
     nextSearchParams.delete("currentDataSnapshotId");
     nextSearchParams.delete("currentProjectReleaseId");
-    nextSearchParams.set("grain", "day");
+    nextSearchParams.delete("finding");
+    nextSearchParams.delete("evidence");
+    if (pathname === "/energyiq/overview") {
+      nextSearchParams.set("grain", "day");
+    } else {
+      nextSearchParams.delete("grain");
+    }
     router.replace(`${pathname}?${nextSearchParams.toString()}`);
   };
 

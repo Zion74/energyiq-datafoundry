@@ -6,14 +6,21 @@ import {
 import type { TrustedEnergyTextQueryContract } from "@datafoundry/agent-runtime";
 
 import type { EnergyQueryContext } from "./energy-query-context.js";
+import type { ProjectAnalysisSnapshot } from "./project-analysis-resolver.js";
 import {
   createProjectAnalysisPackContextItem,
   type ProjectAnalysisPackReleaseBinding,
 } from "./project-analysis-pack.js";
 
+export type EnergyAnalysisWorkspaceRelations = {
+  factsRelation: string;
+  scopeMetadataRelation: string;
+};
+
 export const createEnergyQueryContextItem = (
   context: EnergyQueryContext,
-  sessionId: string
+  sessionId: string,
+  analysisWorkspace?: EnergyAnalysisWorkspaceRelations,
 ): AgentContextItem => createAgentContextItem({
   id: `energy-query-context:${context.projectId}:${context.scopeId}:${context.dataSnapshotId}`,
   sourceType: "energy-query-context",
@@ -29,6 +36,15 @@ export const createEnergyQueryContextItem = (
     "The enabled DuckDB datasource is a server-filtered view for exactly this context; do not use another datasource.",
     "usage_kwh is canonical interval consumption. source_reading_kind states whether it came from a cumulative-energy delta or a supplied interval-usage value.",
     "The datasource exposes only published Meter attachments. Use official_aggregation_eligible for Scope totals; never infer or replace that route from scope_id or meter_role.",
+    ...(analysisWorkspace
+      ? [
+          "The datasource also exposes a server-authorized, hierarchy-pinned Scope metadata relation. Use it for Scope counts, names, Centre codes, facility_type, area_sqm, occupant_count and metadata_status.",
+          "Join facts to the metadata relation only by the published Scope identity. A missing metadata relation, missing facility_type, or unavailable dimension must not be interpreted as a business count of zero.",
+          "Published Metadata means the relation is pinned to the accepted Project Release. metadata_status is a readiness flag for individual dimensions; provisional values remain present and countable when the question asks how many published Scopes have a facility_type, but disclose that status.",
+          `facts_relation=${analysisWorkspace.factsRelation}`,
+          `scope_metadata_relation=${analysisWorkspace.scopeMetadataRelation}`,
+        ]
+      : []),
     "Use appliance for Aircon, Heater, Lighting and Plugload analysis; category is the simplified aircon, light or load business classification.",
     "The run-scoped fact table does not expose Calendar-derived operating or standby values. Use only deterministic Evidence pinned to business_calendar_version for those figures; do not infer them from local_hour, day_type or raw facts.",
     "Rows with quality_status other than 'ok' are evidence of data quality events and must not be counted as consumption.",
@@ -120,8 +136,129 @@ export const createTrustedEnergyTextContextItem = (
   }, { atomic: true, groupKind: "source" })
 });
 
+/**
+ * Project the bounded, deterministic part of the current Overview Snapshot into
+ * the full Analyst Context Package. Raw interval rows stay in DuckDB; this item
+ * carries released calculations and their pins so the model does not
+ * rediscover Benchmark or Calendar semantics from labels.
+ */
+export const createProjectAnalysisSnapshotContextItem = (input: {
+  snapshot: ProjectAnalysisSnapshot;
+  sessionId: string;
+  userId: string;
+}): AgentContextItem => {
+  const snapshot = input.snapshot;
+  const bundle = {
+    contract: "energyiq-deterministic-evidence@1",
+    projectId: snapshot.context.projectId,
+    scopeId: snapshot.context.scopeId,
+    resource: snapshot.context.resource,
+    dataSnapshotId: snapshot.dataSnapshot.id,
+    dataCutoff: snapshot.context.primaryPeriod.endExclusive,
+    projectReleaseId: snapshot.context.projectReleaseId,
+    hierarchyRevisionId: snapshot.context.hierarchyRevisionId,
+    meterMappingRevisionId: snapshot.context.meterMappingRevisionId,
+    metricVersion: snapshot.context.metricVersion,
+    businessCalendarVersion: snapshot.context.businessCalendarVersion,
+    dataQuality: snapshot.dataQuality,
+    evidence: snapshot.evidence,
+    findings: snapshot.findings,
+    analysis: {
+      summary: snapshot.analysis.summary,
+      comparison: snapshot.analysis.comparison,
+      categories: snapshot.analysis.categories,
+      childScopes: snapshot.analysis.childScopes.map((scope) => ({
+        nodeId: scope.nodeId,
+        name: scope.name,
+        nodeType: scope.nodeType,
+        usageKwh: scope.usageKwh,
+        sharePct: scope.sharePct,
+        comparison: scope.comparison,
+        dataHealth: scope.dataHealth,
+        topCircuitName: scope.topCircuitName,
+        topCircuitUsageKwh: scope.topCircuitUsageKwh,
+        areaSqm: scope.areaSqm,
+        occupantCount: scope.occupantCount,
+        kwhPerSqm: scope.kwhPerSqm,
+        kwhPerPerson: scope.kwhPerPerson,
+        metadataStatus: scope.metadata.status,
+      })),
+      topCircuits: snapshot.analysis.topCircuits,
+      offHours: snapshot.analysis.offHours,
+    },
+    decisionPriorities: snapshot.decisionPriorities,
+    preschoolBenchmark: snapshot.preschoolBenchmark,
+    preschoolAppliances: compactPreschoolAppliances(snapshot.preschoolAppliances),
+    preschoolOperational: compactPreschoolOperational(snapshot.preschoolOperational),
+  };
+  return createAgentContextItem({
+    id: `project-analysis-snapshot:${snapshot.context.projectId}:${snapshot.dataSnapshot.id}`,
+    sourceType: "project-analysis-snapshot",
+    sourceId: snapshot.context.projectId,
+    groupId: "project-analysis-snapshot",
+    visibility: "model",
+    trust: "tool",
+    retention: "active",
+    priority: 95,
+    content: [
+      "Authoritative bounded EnergyIQ deterministic Evidence for the current Analysis Workspace.",
+      "Deterministic Evidence is authoritative for released KPI, Benchmark, Calendar and official theme values. It may be explained or challenged with new tool Evidence, but it must not be silently recalculated or modified.",
+      "Use the scoped DuckDB relations for new investigation. If a required value is absent from both this bundle and successful scoped tool Evidence, return Missing Evidence or Unavailable rather than zero.",
+      `deterministic_evidence_bundle=${JSON.stringify(bundle)}`,
+    ].join("\n"),
+    metadata: createAgentContextSourceMetadata({
+      dedupeKeys: ["project-analysis-snapshot"],
+      exclusivityKey: "project-analysis-snapshot",
+      overlapKeys: [
+        `project:${snapshot.context.projectId}`,
+        `scope:${snapshot.context.scopeId}`,
+        `snapshot:${snapshot.dataSnapshot.id}`,
+      ],
+      scope: {
+        datasourceId: snapshot.dataSnapshot.id,
+        sessionId: input.sessionId,
+        userId: input.userId,
+      },
+      sourceKind: "project-analysis-snapshot",
+      sourceOwner: "server",
+    }, {
+      atomic: true,
+      groupKind: "source",
+    }),
+  });
+};
+
+const compactPreschoolAppliances = (
+  projection: ProjectAnalysisSnapshot["preschoolAppliances"],
+): unknown => {
+  if (!projection || projection.status === "unavailable") return projection;
+  return {
+    ...projection,
+    appliances: projection.appliances.map(({ sourceCircuitIds, ...appliance }) => ({
+      ...appliance,
+      sourceCircuitCount: sourceCircuitIds.length,
+    })),
+  };
+};
+
+const compactPreschoolOperational = (
+  projection: ProjectAnalysisSnapshot["preschoolOperational"],
+): unknown => {
+  if (!projection || projection.status === "unavailable") return projection;
+  return {
+    ...projection,
+    sop: {
+      ...projection.sop,
+      scoredCentreCount: projection.sop.centres.length,
+      centres: projection.sop.centres.filter((centre) => centre.standbySpikeCount > 0),
+    },
+  };
+};
+
 export const createEnergyAuthoritativeContextItems = (input: {
+  analysisWorkspace?: EnergyAnalysisWorkspaceRelations;
   context?: EnergyQueryContext;
+  projectAnalysisSnapshot?: ProjectAnalysisSnapshot;
   projectRelease?: ProjectAnalysisPackReleaseBinding | null;
   sessionId: string;
   trustedTextContract?: TrustedEnergyTextQueryContract;
@@ -144,7 +281,14 @@ export const createEnergyAuthoritativeContextItems = (input: {
       })
     : null;
   return [
-    createEnergyQueryContextItem(input.context, input.sessionId),
+    createEnergyQueryContextItem(input.context, input.sessionId, input.analysisWorkspace),
+    ...(input.projectAnalysisSnapshot
+      ? [createProjectAnalysisSnapshotContextItem({
+          snapshot: input.projectAnalysisSnapshot,
+          sessionId: input.sessionId,
+          userId: input.userId,
+        })]
+      : []),
     ...(packItem ? [packItem] : []),
   ];
 };
@@ -175,7 +319,8 @@ const preschoolAnalysisPolicy = (context: EnergyQueryContext): string[] =>
         "Start with inspect_schema, then use run_sql_readonly only against the run-scoped table. Use an aggregated query; do not request raw Portfolio facts.",
         "For Centre totals, group official rows by parent_node_id. The scoped scope_id identifies the published navigation attachment and must not be treated as the Centre identity.",
         "For every energy aggregation, filter quality_status='ok' and official_aggregation_eligible=TRUE. Use Circuit and appliance rows only within the same published route and do not double-count them.",
-        "EUI and per-pax comparisons require the published Benchmark Evidence and its metadata status. Do not derive area, headcount, cohort or normalised results from labels or from the scoped fact table.",
+        "Use the hierarchy-pinned Scope metadata relation for Centre counts, centre_code, facility_type, area_sqm, occupant_count and metadata_status. Do not infer those dimensions from fact labels.",
+        "EUI and per-pax comparisons require the published Benchmark Evidence and its metadata status. The metadata relation supplies dimensions but does not replace the released Benchmark calculation.",
         "Standby, operating, Spike and SOP results are provisional Calendar-bound investigation signals. They do not prove waste, non-compliance, device state or root cause.",
         "Forecast, tariff cost, savings, ROI, owner and commitment are unavailable unless separately supplied as authoritative Evidence. Do not infer them from May energy data.",
         "Use only the current Project, May Period, Snapshot and Published Release. Cite the exact deterministic Evidence item or successful scoped query result for every displayed number.",

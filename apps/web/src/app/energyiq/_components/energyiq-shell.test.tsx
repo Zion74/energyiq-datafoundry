@@ -63,7 +63,7 @@ describe("EnergyIQ Shell Project navigation", () => {
     vi.unstubAllGlobals();
   });
 
-  it("switches the Overview Project through the URL without writing access state twice", async () => {
+  it("switches the Overview Project in access state and the URL together", async () => {
     await act(async () => {
       root.render(<EnergyIqShell><div>Overview</div></EnergyIqShell>);
     });
@@ -74,7 +74,8 @@ describe("EnergyIQ Shell Project navigation", () => {
       .find((option) => option.textContent?.includes("Project B"));
     await act(async () => projectBOption?.click());
 
-    expect(mockedAccess.selectProject).not.toHaveBeenCalled();
+    expect(mockedAccess.selectProject).toHaveBeenCalledOnce();
+    expect(mockedAccess.selectProject).toHaveBeenCalledWith("project-b");
     expect(navigation.replace).toHaveBeenCalledOnce();
     expect(navigation.replace).toHaveBeenCalledWith(
       "/energyiq/overview?projectId=project-b&scopeId=project&resource=electricity&grain=day",
@@ -96,6 +97,27 @@ describe("EnergyIQ Shell Project navigation", () => {
     expect(mockedAccess.selectProject).toHaveBeenCalledOnce();
     expect(mockedAccess.selectProject).toHaveBeenCalledWith("project-b");
     expect(navigation.replace).not.toHaveBeenCalled();
+  });
+
+  it("switches the AI Analyst Project and removes the previous handoff context", async () => {
+    navigation.pathname = "/energyiq/ai";
+    navigation.search = "projectId=project-a&scopeId=level-6&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&finding=old-finding&evidence=old-evidence";
+    window.history.replaceState({}, "", `/energyiq/ai?${navigation.search}`);
+    await act(async () => {
+      root.render(<EnergyIqShell><div>AI Analyst</div></EnergyIqShell>);
+    });
+
+    const trigger = container.querySelector<HTMLButtonElement>("[role='combobox'][aria-label='Energy project']");
+    await act(async () => trigger?.click());
+    const projectBOption = Array.from(document.querySelectorAll<HTMLButtonElement>("[role='option']"))
+      .find((option) => option.textContent?.includes("Project B"));
+    await act(async () => projectBOption?.click());
+
+    expect(mockedAccess.selectProject).toHaveBeenCalledOnce();
+    expect(mockedAccess.selectProject).toHaveBeenCalledWith("project-b");
+    expect(navigation.replace).toHaveBeenCalledWith(
+      "/energyiq/ai?projectId=project-b&scopeId=project&resource=electricity",
+    );
   });
 
   it("clears the stale Overview Project identity after switching Workspace", async () => {

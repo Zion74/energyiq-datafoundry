@@ -698,10 +698,11 @@ export const configApi = {
     });
   },
 
-  listSessions(options: { limit?: number; cursor?: string } = {}): Promise<SessionListResponseDto> {
+  listSessions(options: { limit?: number; cursor?: string; projectId?: string } = {}): Promise<SessionListResponseDto> {
     const params = new URLSearchParams();
     if (options.limit !== undefined) params.set("limit", String(options.limit));
     if (options.cursor) params.set("cursor", options.cursor);
+    if (options.projectId) params.set("projectId", options.projectId);
     return requestEnvelope<SessionListResponseDto>(`/api/v1/sessions${queryString(params)}`);
   },
 

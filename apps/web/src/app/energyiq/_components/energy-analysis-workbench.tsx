@@ -34,7 +34,7 @@ export function EnergyAnalysisWorkbench() {
   const requestedContext = useMemo<EnergyQueryContextRequestDto>(
     () => {
       const projectId =
-        searchParams.get("projectId") ?? activeProject?.id ?? "ngee-ann-polytechnic";
+        activeProject?.id ?? searchParams.get("projectId") ?? "ngee-ann-polytechnic";
       const explicitPeriod = searchParams.get("period");
       const usePreschoolDemoWindow =
         projectId === "preschool-demo" && explicitPeriod === null;
@@ -122,6 +122,7 @@ export function toEnergyAnalysisExternalContext(
 ): DataTasksExternalContext {
   return {
     source: "energyiq",
+    workspaceId: resolved.workspaceId,
     projectId: resolved.projectId,
     projectName: resolved.projectName,
     scopeId: resolved.scopeId,
