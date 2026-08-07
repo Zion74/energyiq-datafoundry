@@ -6648,7 +6648,7 @@ function ModelConfigList({
                         {item.id === "workspace-default"
                           ? t("configPanel.systemDefault")
                           : item.enabled
-                            ? t("configPanel.workspaceDefault")
+                            ? t("configPanel.availableProfile")
                             : t("configPanel.disabledByDefault")}
                       </span>
                       {item.builtin ? (

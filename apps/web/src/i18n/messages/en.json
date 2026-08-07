@@ -336,6 +336,7 @@
     "startFromGallery": "Start from the adapter gallery to create one.",
     "workspaceDefault": "Workspace default",
     "systemDefault": "System default",
+    "availableProfile": "Available profile",
     "disabledByDefault": "Disabled by default",
     "secretSaved": "Secret saved",
     "testConnection": "Test connection",
