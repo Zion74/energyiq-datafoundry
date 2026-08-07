@@ -83,6 +83,7 @@ export type ProjectRendererState =
 type ProjectRendererCommonProps = {
   sectionIdPrefix?: string;
   onRetry?: () => void;
+  aiSlotMode?: "live" | "saved-unavailable";
 };
 
 type CustomerProjectRendererProps = ProjectRendererCommonProps & {
@@ -188,6 +189,7 @@ export function ProjectRenderer(props: ProjectRendererProps): ReactNode {
           {...(props.onCategoryChange ? { onCategoryChange: props.onCategoryChange } : {})}
           {...(props.projectExplorerHref ? { projectExplorerHref: props.projectExplorerHref } : {})}
           {...(props.aiAnalystHref ? { aiAnalystHref: props.aiAnalystHref } : {})}
+          {...(props.aiSlotMode ? { aiSlotMode: props.aiSlotMode } : {})}
         />
       </div>
     );
@@ -203,6 +205,7 @@ export function ProjectRenderer(props: ProjectRendererProps): ReactNode {
           {...(props.onRetry ? { onRetry: props.onRetry } : {})}
           {...(props.projectExplorerHref ? { projectExplorerHref: props.projectExplorerHref } : {})}
           {...(props.aiAnalystHref ? { aiAnalystHref: props.aiAnalystHref } : {})}
+          {...(props.aiSlotMode ? { aiSlotMode: props.aiSlotMode } : {})}
         />
       </div>
     );

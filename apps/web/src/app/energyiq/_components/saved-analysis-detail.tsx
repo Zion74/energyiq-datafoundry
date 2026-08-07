@@ -9,6 +9,7 @@ import { buildEnergyTemplateRenderPlan } from "./energy-template-render-plan";
 import { EnergyTemplateRenderer, type EnergyTemplateRendererState } from "./energy-template-renderer";
 import { useEnergyIqAccess } from "./energyiq-access";
 import { EnergyIcon } from "./icons";
+import { ProjectRenderer, type ProjectRendererState } from "./project-renderer-registry";
 import { ScopeMetadataStatus } from "./scope-metadata-status";
 
 export function SavedAnalysisDetail() {
@@ -67,8 +68,10 @@ export function SavedAnalysisDetail() {
 
   const plan = useMemo(() => {
     if (!detail) return null;
-    const template = detail.templateRevision.document.templates.find((candidate) => candidate.template_id === "project");
-    return template ? buildEnergyTemplateRenderPlan({ template, catalog: detail.catalog }) : null;
+    const document = detail.snapshot?.projectRelease.document ?? detail.templateRevision.document;
+    const catalog = detail.snapshot?.projectRelease.catalog ?? detail.catalog;
+    const template = document.templates.find((candidate) => candidate.template_id === "project");
+    return template ? buildEnergyTemplateRenderPlan({ template, catalog }) : null;
   }, [detail]);
 
   const rendererState: EnergyTemplateRendererState = loading || (!detail && !error)
@@ -78,6 +81,14 @@ export function SavedAnalysisDetail() {
       : detail && plan
         ? { status: "ready", analysis: detail.analysis, plan }
         : { status: "empty", title: "Saved analysis is incomplete", detail: "The pinned Project Template cannot be rendered." };
+  const projectRendererState: ProjectRendererState | null = detail?.snapshot && plan
+    ? { status: "ready", snapshot: detail.snapshot, plan }
+    : null;
+  const savedViewState = detail?.viewState ?? {
+    grain: "day" as const,
+    comparison: "overlay" as const,
+    category: "all" as const,
+  };
 
   const rerun = async () => {
     if (!projectId || !detail) return;
@@ -94,9 +105,12 @@ export function SavedAnalysisDetail() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-[1320px] px-4 py-6 lg:px-8 lg:py-8">
+    <div
+      data-energyiq-saved-report="true"
+      className="mx-auto w-full max-w-[1320px] px-4 py-6 lg:px-8 lg:py-8"
+    >
       <div className="border-b border-border pb-6">
-        <Link href="/energyiq/saved" className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline">
+        <Link data-print-exclude="true" href="/energyiq/saved" className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline">
           ← Saved analyses
         </Link>
         <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -112,7 +126,7 @@ export function SavedAnalysisDetail() {
               </p>
             ) : null}
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div data-print-exclude="true" className="flex flex-wrap items-center gap-2">
             {detail ? (
               <>
                 <Link
@@ -138,6 +152,14 @@ export function SavedAnalysisDetail() {
               <EnergyIcon name="analysis" className="h-3.5 w-3.5" />
               {rerunning ? "Rerunning…" : "Rerun with latest data"}
             </button>
+            <button
+              type="button"
+              onClick={() => window.print()}
+              disabled={!detail}
+              className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-surface px-3.5 text-xs font-semibold text-foreground hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Print / Save as PDF
+            </button>
           </div>
         </div>
         {detail ? (
@@ -157,7 +179,19 @@ export function SavedAnalysisDetail() {
       ) : null}
 
       <div className="mt-7">
-        <EnergyTemplateRenderer state={rendererState} />
+        {detail?.snapshot && projectRendererState ? (
+          <ProjectRenderer
+            request={{ mode: "customer", rendererKey: detail.snapshot.renderer.key }}
+            state={projectRendererState}
+            grain={savedViewState.grain}
+            comparison={savedViewState.comparison}
+            category={savedViewState.category}
+            projectExplorerHref={frozenExplorerHref}
+            aiSlotMode="saved-unavailable"
+          />
+        ) : (
+          <EnergyTemplateRenderer state={rendererState} />
+        )}
       </div>
     </div>
   );

@@ -150,6 +150,42 @@ body {
   }
 }
 
+@media print {
+  @page {
+    margin: 10mm;
+  }
+
+  [data-energyiq-shell="true"] {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: white !important;
+  }
+
+  [data-energyiq-shell="true"] > header,
+  [data-print-exclude="true"] {
+    display: none !important;
+  }
+
+  [data-energyiq-shell="true"] > main {
+    overflow: visible !important;
+  }
+
+  [data-energyiq-saved-report="true"] {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  [data-energyiq-saved-report="true"] details {
+    break-inside: avoid;
+  }
+
+  [data-energyiq-saved-report="true"] svg,
+  [data-energyiq-saved-report="true"] canvas {
+    max-width: 100% !important;
+  }
+}
+
 nextjs-portal {
   display: none;
 }

@@ -29,11 +29,13 @@ export function PreschoolOverviewRenderer({
   onRetry,
   projectExplorerHref,
   aiAnalystHref,
+  aiSlotMode = "live",
 }: {
   state: PreschoolOverviewRendererState;
   onRetry?: () => void;
   projectExplorerHref?: string;
   aiAnalystHref?: string;
+  aiSlotMode?: "live" | "saved-unavailable";
 }) {
   if (state.status !== "ready") {
     return (
@@ -118,6 +120,7 @@ export function PreschoolOverviewRenderer({
         <PreschoolAiSlot
           snapshot={state.snapshot}
           decisionSummary={view.decisionSummary}
+          mode={aiSlotMode}
           {...(aiAnalystHref ? { aiAnalystHref } : {})}
         />
       </div>

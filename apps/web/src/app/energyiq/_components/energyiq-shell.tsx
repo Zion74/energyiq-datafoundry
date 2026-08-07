@@ -84,7 +84,7 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className="flex h-dvh flex-col overflow-hidden bg-surface-subtle text-foreground">
+    <div data-energyiq-shell="true" className="flex h-dvh flex-col overflow-hidden bg-surface-subtle text-foreground">
       <header className="sticky top-0 z-40 shrink-0 border-b border-border bg-surface/95 backdrop-blur">
         <div className="flex h-14 items-center gap-4 px-4 lg:px-6">
           <Link href="/energyiq/overview" className="flex shrink-0 items-center gap-2.5">

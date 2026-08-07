@@ -1579,6 +1579,12 @@ export type EnergySavedAnalysisSummaryDto = {
   createdAt: string;
 };
 
+export type EnergySavedAnalysisViewStateDto = {
+  grain: "day" | "hour";
+  comparison: "overlay" | "selected" | "average";
+  category: "all" | "load" | "light";
+};
+
 export type EnergySavedAnalysisDetailDto = EnergySavedAnalysisSummaryDto & {
   query: EnergyQueryContextRequestDto;
   analysis: Omit<EnergyScopeAnalysisDto, "childScopes"> & {
@@ -1587,6 +1593,8 @@ export type EnergySavedAnalysisDetailDto = EnergySavedAnalysisSummaryDto & {
       metadata?: EnergyProjectAnalysisScopeMetadataDto;
     }>;
   };
+  snapshot?: EnergyProjectAnalysisSnapshotDto;
+  viewState?: EnergySavedAnalysisViewStateDto;
   templateRevision: EnergyTemplateRevisionDto;
   catalog: EnergyComponentRevisionDto[];
 };

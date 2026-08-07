@@ -250,9 +250,16 @@ describe("published Overview URL reload", () => {
     expect(saveEnergyAnalysis).toHaveBeenCalledWith(
       "ngee-ann-polytechnic",
       expect.objectContaining({
-        period: "Custom",
+        analysisWindow: "current-overview-28d",
         from: "2026-05-20",
         to: "2026-06-16",
+        expectedDataSnapshotId: snapshot.context.dataSnapshotId,
+        expectedProjectReleaseId: snapshot.projectRelease.id,
+        viewState: {
+          grain: "day",
+          comparison: "overlay",
+          category: "all",
+        },
       }),
     );
     expect(mockedRouter.replace).toHaveBeenCalledWith(expect.stringContaining(

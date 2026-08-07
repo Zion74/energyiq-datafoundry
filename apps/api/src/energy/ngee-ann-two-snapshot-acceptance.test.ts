@@ -165,9 +165,13 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
       if (!savedA) throw new Error("SAVED_ANALYSIS_A_MISSING");
       const frozenAnalysisJson = savedA.analysis_json;
       const frozenQueryJson = savedA.query_json;
+      const frozenSnapshotJson = savedA.snapshot_json;
       expect(savedA).toMatchObject({
         data_snapshot_id: materializedA.snapshot.id,
         template_revision_id: publishedTemplate.revision_id,
+      });
+      expect(JSON.parse(frozenQueryJson)).toMatchObject({
+        analysisWindow: "current-overview-28d",
       });
 
       const laterSources = await registerSources(
@@ -261,6 +265,7 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
         template_revision_id: savedA.template_revision_id,
         analysis_json: frozenAnalysisJson,
         query_json: frozenQueryJson,
+        snapshot_json: frozenSnapshotJson,
       });
       const frozenAnalysis = JSON.parse(savedAfterB.analysis_json) as {
         provenance: { dataSnapshotId: string };
@@ -283,10 +288,48 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
             analysis: {
               provenance: { dataSnapshotId: materializedA.snapshot.id },
             },
+            snapshot: {
+              renderer: { key: "ngee-ann-overview" },
+              dataSnapshot: { id: materializedA.snapshot.id },
+            },
           },
         },
       });
       mark("read saved A after B");
+
+      const rerunResponse = await handleEnergyApiRequest(
+        jsonPost({}),
+        ["projects", PROJECT_ID, "saved-analyses", savedA.id, "rerun"],
+        context,
+      );
+      expect(rerunResponse).toMatchObject({
+        status: 201,
+        body: {
+          success: true,
+          data: {
+            rerunOfId: savedA.id,
+            dataSnapshotId: materializedB.snapshot.id,
+            snapshot: {
+              renderer: { key: "ngee-ann-overview" },
+              dataSnapshot: { id: materializedB.snapshot.id },
+            },
+          },
+        },
+      });
+      const rerunRecords = metadata.energyIq.savedAnalyses.listProject(PROJECT_ID);
+      expect(rerunRecords).toHaveLength(2);
+      expect(rerunRecords[0]).toMatchObject({
+        series_id: savedA.series_id,
+        sequence: 2,
+        rerun_of_id: savedA.id,
+        data_snapshot_id: materializedB.snapshot.id,
+      });
+      expect(metadata.energyIq.savedAnalyses.get(savedA.id)).toMatchObject({
+        analysis_json: frozenAnalysisJson,
+        query_json: frozenQueryJson,
+        snapshot_json: frozenSnapshotJson,
+      });
+      mark("rerun B from saved A");
     } finally {
       metadata.close();
       if (retainedRoot) {

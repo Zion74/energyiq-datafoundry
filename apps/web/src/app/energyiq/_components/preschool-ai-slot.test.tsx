@@ -28,6 +28,23 @@ describe("PreschoolAiSlot", () => {
     vi.unstubAllGlobals();
   });
 
+  it("does not start a new AI Run when a saved result is reopened", async () => {
+    const snapshot = preschoolGoldenSnapshot();
+    const startRun = vi.fn().mockResolvedValue(availableResult());
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={snapshot}
+        decisionSummary={buildPreschoolOverviewViewModel(snapshot).decisionSummary}
+        mode="saved-unavailable"
+        startRun={startRun}
+      />,
+    ));
+
+    expect(startRun).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("No completed AI result was attached");
+    expect(container.textContent).toContain("never starts a new AI run");
+  });
+
   it("keeps the deterministic Overview ready while analysis progresses", async () => {
     let finish!: (result: PreschoolAiRunResult) => void;
     let report!: (progress: PreschoolAiProgress) => void;

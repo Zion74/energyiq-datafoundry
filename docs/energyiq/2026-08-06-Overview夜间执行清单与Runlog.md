@@ -473,7 +473,7 @@ AI Analyst 的 #30/#18/#15 继续由侧边任务 Agent 执行；不得修改本�
 | V2：#31 Explorer | DONE（工程验收） | Overview 已从 Ngee Ann 结论准确跳到主要贡献 Scope，并从 Preschool Top 5 准确跳到 Centre；Project/Scope/Resource/Period/Snapshot/Release 全部保留。Explorer 已提供服务端 Daily / Week / Month、24h profile、子 Scope 健康摘要和叶子 Meter/Circuit 最新 accepted cumulative reading；技术 provenance 默认折叠。Week/Month 复用同一 `daily_totals_v1` 在 API 聚合，没有新增 DuckDB 查询，边界周/月明确按 partial calendar period 处理。旧 Snapshot/Release 链接 fail closed，并要求用户显式切换到 Current。 |
 | V3：#13 Preschool visuals | DONE（工程验收） | 已加入经验分布、24h operating/closed 结构、Centre Top 5、四个完整周均值形成的 June demo baseline，以及使用 SP 2026 Q2 低压非住宅公开参考价的 provisional cost。修复了把 standby/off-hours 用量误当作五月总用量的成本语义错误。 |
 | V4：#5 校准 | DONE | 同一 Chrome 完成 Preschool Current → Save → Saved 回读：Current 与 Saved 均固定 Snapshot `energy-snapshot-52ca9611e48b0d71c2efe7b7`；Saved `saved-analysis-39829006-b056-476b-baa6-4dde4b05dd5d` 保留根 Scope Missing、30 个比较 Scope 与 Provisional Area/Headcount/EUI/Per-pax，不读取 Current 元数据重算。#5 已关闭。 |
-| V5：#19 → #20 → #21 | NEEDS INFO | #19 已确认当前 DuckDB 事实是每 Project 单槽；materialization 会替换旧事实，因此只增加 Metadata active-release 指针会形成“可回滚”的假象。#19 已停在实施前并标记 `needs-info`，等待选择有限的 active+candidate/previous 事实保留，或明确推迟真正 rollback；#20/#21 不以伪回滚为前提继续扩张。 |
+| V5：#19 → #20 → #21 | IN PROGRESS | #19 已作为 Post-MVP `wontfix` 关闭；MVP 不建设完整事实 A/B 即时切换。#20 的确定性 Saved Snapshot、项目专属 Renderer 恢复、latest-data Rerun 与浏览器打印已完成；已完成 AI Artifact 的冻结/恢复仍待 #17/#18 合同接入，随后进入 #21 人工试点验收。 |
 
 自动化证据：Web 相关 `6 files / 117 tests` 通过；API/Data Gateway/可信执行定向回归 `30/30` 通过，Calendar/reading 生产路径定向回归 `1/1` 通过；仓库 typecheck、API build 与 Web production build 通过（17 pages）。完整 `energy-analysis.test.ts` 为 `17/19`：最新 accepted cumulative reading 和两项目核心事实均通过；两条既有 anomaly baseline 用例仍因样本数期望（3 vs 4）不一致失败，本轮没有修改 anomaly 代码，作为独立测试债记录，不扩大 #31。真实 Chrome：Ngee Ann 与 Preschool 的精准下钻、叶子累计读数、子 Scope 健康、Daily/Week/Month URL 恢复和 stale Release fail-closed 已完成回读。
 
@@ -492,3 +492,13 @@ Workspace 复核结论：先前“Preschool 被 Ngee Ann Workspace 限制”不�
 2026-08-07 后续产品校准：当前 MVP 不要求完整事实 A/B 即时切换，#19 已关闭为 `not planned / wontfix`，并从 #20 依赖中移除。MVP 保留的是成功日更 Current、失败不混入半成品、Saved A 固定、Rerun B 新建的连续数据闭环。
 
 同日真实 28 天 Chrome 验收发现，四位小数分别序列化的 actual、baseline、impact 与 percentage 在 Web 反算时产生最大 `0.0001 kWh`、`0.000297 percentage points` 的尾差，原 `0.0001` 统一容差误将 17 行合法 Evidence 判为无效。修复只把 impact 容差校准为 `0.0002 kWh`、percentage 容差校准为 `0.001 percentage points`；1 kWh / 1 percentage point 篡改测试仍 fail closed，不影响规则阈值、Snapshot、Scope 或权限守卫。
+
+### 11.10 #20 Saved Analysis / Rerun / browser print
+
+- 新保存的 Analysis Run 除原有不可变 query、analysis、Template Revision 与 Data Snapshot 外，同时冻结完整 `ProjectAnalysisSnapshot` 和有限的决策视图状态（grain、comparison、category）。旧记录没有完整 Snapshot 时继续进入原通用只读兼容页，不伪造项目专属投影。
+- Saved Ngee Ann 与 Preschool 结果现在复用各自正式 Project Renderer，不再以通用 `EnergyTemplateRenderer` 代替。服务端回读会校验 Snapshot 内的 Project、Scope、Resource、Template Revision、Data Snapshot 和 analysis provenance；任一身份漂移均 fail closed。
+- Saved 页面明确使用 `saved-unavailable` AI Slot：若保存时没有附着已完成 AI 结果，页面诚实说明未保存 AI，并且不会在打开历史结果时启动新 AI Run。已完成 AI Artifact 的冻结与回读仍由 #17/#18 后续合同接入，本切片不重复建设 AI Result 平台。
+- Ngee Ann 保存时用当前 Snapshot/Release pin 证明保存内容就是屏幕上的 A；持久化给 Rerun 的仍是 `current-overview-28d` 语义，而不是 A 的固定日期。真实两批 Excel 验收证明 Current 从 A 推进到 B 后，Rerun 创建同 series 的 sequence 2、记录 `rerun_of_id` 并使用 B，A 的 analysis/query/snapshot JSON 保持不变。
+- 浏览器打印采用轻量 `window.print()` 与 print CSS：隐藏导航和操作按钮，解除 Shell 固定高度及滚动裁切，保留报告、图表和 Evidence；没有引入服务端 PDF 服务。
+- 自动化：聚焦 `8 files / 81 tests`、仓库 typecheck、Web production build（17 pages）通过；真实 A→B→Rerun 验收 `1/1` 通过（约 183 秒）。真实 Chrome 新建并回读 Ngee Ann 与 Preschool Saved result，分别确认专属 Renderer、原 Snapshot、无新 AI progress、1440/1920 无横向溢出和 console 0 warning/error；打印媒体下 header/action 隐藏、main/shell overflow visible。
+- #20 暂不关闭：完成 AI 结果冻结合同前保持 open；Charles/人工信息价值验收仍属于 #21。

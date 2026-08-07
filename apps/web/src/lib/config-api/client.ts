@@ -510,7 +510,14 @@ export const configApi = {
 
   saveEnergyAnalysis(
     projectId: string,
-    body: EnergyQueryContextRequestDto & { title?: string },
+    body: EnergyQueryContextRequestDto & {
+      title?: string;
+      viewState?: {
+        grain: "day" | "hour";
+        comparison: "overlay" | "selected" | "average";
+        category: "all" | "load" | "light";
+      };
+    },
   ): Promise<EnergySavedAnalysisDetailDto> {
     return requestEnvelope(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/saved-analyses`,

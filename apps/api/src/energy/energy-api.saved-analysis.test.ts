@@ -131,6 +131,11 @@ describe("saved analysis decision-quality boundary", () => {
         period: "Custom",
         from: "2026-05-01",
         to: "2026-05-01",
+        viewState: {
+          grain: "day",
+          comparison: "selected",
+          category: "load",
+        },
       } as const;
       const context = {
         metadataStore: metadata,
@@ -145,9 +150,20 @@ describe("saved analysis decision-quality boundary", () => {
         context,
       );
       expect(creation.status, JSON.stringify(creation.body)).toBe(201);
+      expect(creation.body).toMatchObject({
+        success: true,
+        data: {
+          viewState: query.viewState,
+          snapshot: {
+            renderer: { key: "preschool-overview" },
+            dataSnapshot: { id: project.data_snapshot_id },
+          },
+        },
+      });
       const first = metadata.energyIq.savedAnalyses.listProject(project.id)[0];
       expect(first?.template_revision_id).toBe(templateRevision.revision_id);
       const frozenAnalysisJson = first?.analysis_json;
+      const frozenSnapshotJson = first?.snapshot_json;
       const firstAnalysis = JSON.parse(first?.analysis_json ?? "null") as {
         context: Record<string, unknown>;
         provenance: Record<string, unknown>;
@@ -224,6 +240,14 @@ describe("saved analysis decision-quality boundary", () => {
         context,
       );
       expect(rerun.status, JSON.stringify(rerun.body)).toBe(201);
+      expect(rerun.body).toMatchObject({
+        success: true,
+        data: {
+          rerunOfId: first?.id,
+          viewState: query.viewState,
+          snapshot: { renderer: { key: "preschool-overview" } },
+        },
+      });
       const records = metadata.energyIq.savedAnalyses.listProject(project.id);
       expect(records).toHaveLength(2);
       expect(records[0]).toMatchObject({
@@ -233,6 +257,7 @@ describe("saved analysis decision-quality boundary", () => {
         template_revision_id: publishedV2.template_revision_id,
       });
       expect(records.find((record) => record.id === first?.id)?.analysis_json).toBe(frozenAnalysisJson);
+      expect(records.find((record) => record.id === first?.id)?.snapshot_json).toBe(frozenSnapshotJson);
       const latestAnalysis = JSON.parse(records[0]?.analysis_json ?? "null") as {
         context: Record<string, unknown>;
         cost: Record<string, unknown>;

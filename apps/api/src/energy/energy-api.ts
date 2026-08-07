@@ -543,6 +543,8 @@ export const handleEnergyApiRequest = async (
         const { analysis, context: energyContext } = resolution.snapshot;
         requireDecisionGradeCoverage(analysis);
         const templateRevision = requireSnapshotTemplateRevision(context, resolution.snapshot);
+        const viewState = parseRequestedSavedAnalysisViewState(body.viewState);
+        const rerunQuery = savedAnalysisRerunQuery(query);
         const record = context.metadataStore.energyIq.savedAnalyses.create({
           id: `saved-analysis-${randomUUID()}`,
           series_id: `saved-analysis-series-${randomUUID()}`,
@@ -552,8 +554,10 @@ export const handleEnergyApiRequest = async (
           scope_name: energyContext.scopeName,
           resource: "electricity",
           title: optionalString(body.title) ?? `${energyContext.scopeName} · ${query.period ?? "Custom"}`,
-          query_json: JSON.stringify(query),
+          query_json: JSON.stringify(rerunQuery),
           analysis_json: JSON.stringify(analysis),
+          snapshot_json: JSON.stringify(resolution.snapshot),
+          ...(viewState ? { view_state_json: JSON.stringify(viewState) } : {}),
           template_revision_id: templateRevision.revision_id,
           data_snapshot_id: analysis.provenance.dataSnapshotId,
           created_by: user.id,
@@ -599,6 +603,8 @@ export const handleEnergyApiRequest = async (
           title: previous.title,
           query_json: previous.query_json,
           analysis_json: JSON.stringify(analysis),
+          snapshot_json: JSON.stringify(resolution.snapshot),
+          ...(previous.view_state_json ? { view_state_json: previous.view_state_json } : {}),
           template_revision_id: templateRevision.revision_id,
           data_snapshot_id: analysis.provenance.dataSnapshotId,
           rerun_of_id: previous.id,
@@ -915,13 +921,19 @@ const toEnergySavedAnalysisDetail = (
   record: EnergyIqSavedAnalysisRecord,
   templateRevision: EnergyIqTemplateRevisionRecord,
   context: Required<ConfigApiContext>,
-) => ({
-  ...toEnergySavedAnalysisSummary(record),
-  query: parseSavedAnalysisQuery(record),
-  analysis: JSON.parse(record.analysis_json) as unknown,
-  templateRevision,
-  catalog: context.metadataStore.energyIq.templates.listComponentRevisions(),
-});
+) => {
+  const snapshot = parseSavedAnalysisSnapshot(record);
+  const viewState = parseStoredSavedAnalysisViewState(record);
+  return {
+    ...toEnergySavedAnalysisSummary(record),
+    query: parseSavedAnalysisQuery(record),
+    analysis: JSON.parse(record.analysis_json) as unknown,
+    ...(snapshot ? { snapshot } : {}),
+    ...(viewState ? { viewState } : {}),
+    templateRevision,
+    catalog: context.metadataStore.energyIq.templates.listComponentRevisions(),
+  };
+};
 
 const requireSavedAnalysisForProject = (
   context: Required<ConfigApiContext>,
@@ -963,6 +975,86 @@ const parseSavedAnalysisQuery = (record: EnergyIqSavedAnalysisRecord): EnergyQue
   } catch {
     throw new Error("ENERGYIQ_SAVED_ANALYSIS_QUERY_INVALID");
   }
+};
+
+const savedAnalysisRerunQuery = (
+  query: EnergyQueryContextRequest,
+): EnergyQueryContextRequest => {
+  if (!query.analysisWindow) return query;
+  const {
+    from: _from,
+    to: _to,
+    expectedDataSnapshotId: _expectedDataSnapshotId,
+    expectedProjectReleaseId: _expectedProjectReleaseId,
+    ...semanticQuery
+  } = query;
+  return semanticQuery;
+};
+
+type SavedAnalysisViewState = {
+  grain: "day" | "hour";
+  comparison: "overlay" | "selected" | "average";
+  category: "all" | "load" | "light";
+};
+
+const parseRequestedSavedAnalysisViewState = (value: unknown): SavedAnalysisViewState | undefined => {
+  if (value === undefined) return undefined;
+  return parseSavedAnalysisViewState(value);
+};
+
+const parseStoredSavedAnalysisViewState = (
+  record: EnergyIqSavedAnalysisRecord,
+): SavedAnalysisViewState | undefined => {
+  if (!record.view_state_json) return undefined;
+  try {
+    return parseSavedAnalysisViewState(JSON.parse(record.view_state_json) as unknown);
+  } catch {
+    throw new Error("ENERGYIQ_SAVED_ANALYSIS_VIEW_STATE_INVALID");
+  }
+};
+
+const parseSavedAnalysisViewState = (value: unknown): SavedAnalysisViewState => {
+  if (!isRecord(value)) throw new Error("ENERGYIQ_SAVED_ANALYSIS_VIEW_STATE_INVALID");
+  const { grain, comparison, category } = value;
+  if ((grain !== "day" && grain !== "hour")
+    || (comparison !== "overlay" && comparison !== "selected" && comparison !== "average")
+    || (category !== "all" && category !== "load" && category !== "light")) {
+    throw new Error("ENERGYIQ_SAVED_ANALYSIS_VIEW_STATE_INVALID");
+  }
+  return { grain, comparison, category };
+};
+
+const parseSavedAnalysisSnapshot = (
+  record: EnergyIqSavedAnalysisRecord,
+): ProjectAnalysisSnapshot | undefined => {
+  if (!record.snapshot_json) return undefined;
+  let value: unknown;
+  try {
+    value = JSON.parse(record.snapshot_json) as unknown;
+  } catch {
+    throw new Error("ENERGYIQ_SAVED_ANALYSIS_SNAPSHOT_INVALID");
+  }
+  if (!isRecord(value)
+    || !isRecord(value.context)
+    || !isRecord(value.projectRelease)
+    || !isRecord(value.renderer)
+    || !isRecord(value.dataSnapshot)
+    || !isRecord(value.analysis)
+    || !isRecord(value.analysis.provenance)) {
+    throw new Error("ENERGYIQ_SAVED_ANALYSIS_SNAPSHOT_INVALID");
+  }
+  const rendererKey = value.renderer.key;
+  if (value.context.projectId !== record.project_id
+    || value.context.scopeId !== record.scope_id
+    || value.context.resource !== record.resource
+    || value.context.dataSnapshotId !== record.data_snapshot_id
+    || value.projectRelease.templateRevisionId !== record.template_revision_id
+    || value.dataSnapshot.id !== record.data_snapshot_id
+    || value.analysis.provenance.dataSnapshotId !== record.data_snapshot_id
+    || (rendererKey !== "ngee-ann-overview" && rendererKey !== "preschool-overview")) {
+    throw new Error("ENERGYIQ_SAVED_ANALYSIS_SNAPSHOT_INVALID");
+  }
+  return value as ProjectAnalysisSnapshot;
 };
 
 const requireEnergyAdmin = (

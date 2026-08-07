@@ -12,6 +12,8 @@ export type EnergyIqSavedAnalysisRecord = {
   title: string;
   query_json: string;
   analysis_json: string;
+  snapshot_json?: string;
+  view_state_json?: string;
   template_revision_id: string;
   data_snapshot_id: string;
   rerun_of_id?: string;
@@ -33,6 +35,8 @@ export const initializeEnergyIqSavedAnalysisSchema = (db: DatabaseSync): void =>
       title TEXT NOT NULL,
       query_json TEXT NOT NULL,
       analysis_json TEXT NOT NULL,
+      snapshot_json TEXT,
+      view_state_json TEXT,
       template_revision_id TEXT NOT NULL,
       data_snapshot_id TEXT NOT NULL,
       rerun_of_id TEXT,
@@ -49,6 +53,8 @@ export const initializeEnergyIqSavedAnalysisSchema = (db: DatabaseSync): void =>
     CREATE INDEX IF NOT EXISTS idx_energyiq_saved_analyses_series
       ON energyiq_saved_analyses(series_id, sequence DESC);
   `);
+  ensureColumn(db, "energyiq_saved_analyses", "snapshot_json", "TEXT");
+  ensureColumn(db, "energyiq_saved_analyses", "view_state_json", "TEXT");
 };
 
 export class EnergyIqSavedAnalysisStore {
@@ -65,6 +71,8 @@ export class EnergyIqSavedAnalysisStore {
     title: string;
     query_json: string;
     analysis_json: string;
+    snapshot_json?: string;
+    view_state_json?: string;
     template_revision_id: string;
     data_snapshot_id: string;
     rerun_of_id?: string;
@@ -84,8 +92,9 @@ export class EnergyIqSavedAnalysisStore {
         INSERT INTO energyiq_saved_analyses (
           id, series_id, sequence, project_id, workspace_id, scope_id,
           scope_name, resource, title, query_json, analysis_json,
-          template_revision_id, data_snapshot_id, rerun_of_id, created_by, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          snapshot_json, view_state_json, template_revision_id, data_snapshot_id,
+          rerun_of_id, created_by, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         input.id,
         input.series_id,
@@ -98,6 +107,8 @@ export class EnergyIqSavedAnalysisStore {
         input.title,
         input.query_json,
         input.analysis_json,
+        input.snapshot_json ?? null,
+        input.view_state_json ?? null,
         input.template_revision_id,
         input.data_snapshot_id,
         input.rerun_of_id ?? null,
@@ -132,6 +143,8 @@ const mapSavedAnalysis = (value: unknown): EnergyIqSavedAnalysisRecord => {
   const resource = stringField(value, "resource");
   if (resource !== "electricity") throw new Error("ENERGYIQ_SAVED_ANALYSIS_RESOURCE_INVALID");
   const rerunOfId = optionalStringField(value, "rerun_of_id");
+  const snapshotJson = optionalStringField(value, "snapshot_json");
+  const viewStateJson = optionalStringField(value, "view_state_json");
   return {
     id: stringField(value, "id"),
     series_id: stringField(value, "series_id"),
@@ -144,12 +157,26 @@ const mapSavedAnalysis = (value: unknown): EnergyIqSavedAnalysisRecord => {
     title: stringField(value, "title"),
     query_json: stringField(value, "query_json"),
     analysis_json: stringField(value, "analysis_json"),
+    ...(snapshotJson ? { snapshot_json: snapshotJson } : {}),
+    ...(viewStateJson ? { view_state_json: viewStateJson } : {}),
     template_revision_id: stringField(value, "template_revision_id"),
     data_snapshot_id: stringField(value, "data_snapshot_id"),
     ...(rerunOfId ? { rerun_of_id: rerunOfId } : {}),
     created_by: stringField(value, "created_by"),
     created_at: stringField(value, "created_at"),
   };
+};
+
+const ensureColumn = (
+  db: DatabaseSync,
+  table: string,
+  column: string,
+  definition: string,
+): void => {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (!columns.some((candidate) => isRecord(candidate) && candidate.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

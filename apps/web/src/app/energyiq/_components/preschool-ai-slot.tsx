@@ -22,11 +22,13 @@ export function PreschoolAiSlot({
   snapshot,
   decisionSummary,
   aiAnalystHref,
+  mode = "live",
   startRun = getOrStartPreschoolAiRun,
 }: {
   snapshot: EnergyProjectAnalysisSnapshotDto;
   decisionSummary: PreschoolOverviewViewModel["decisionSummary"];
   aiAnalystHref?: string;
+  mode?: "live" | "saved-unavailable";
   startRun?: (input: PreschoolAiRunInput, onProgress?: ProgressCallback) => Promise<PreschoolAiRunResult>;
 }) {
   const input = useMemo(() => buildPreschoolAiRunInput(snapshot, decisionSummary), [decisionSummary, snapshot]);
@@ -38,6 +40,7 @@ export function PreschoolAiSlot({
   startRunRef.current = startRun;
 
   useEffect(() => {
+    if (mode === "saved-unavailable") return;
     if (!input) return;
     const currentInput = inputRef.current;
     if (!currentInput) return;
@@ -54,7 +57,15 @@ export function PreschoolAiSlot({
       });
     });
     return () => { active = false; };
-  }, [input?.identityKey]);
+  }, [input?.identityKey, mode]);
+
+  if (mode === "saved-unavailable") {
+    return (
+      <AiFrame>
+        <Unavailable detail="No completed AI result was attached when this analysis was saved. Opening a saved result never starts a new AI run." />
+      </AiFrame>
+    );
+  }
 
   if (!input) return <AiFrame><Unavailable detail="AI analysis needs one complete, release-pinned Preschool Snapshot." /></AiFrame>;
   if (!settled || settled.identityKey !== input.identityKey) {

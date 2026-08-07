@@ -32,11 +32,13 @@ export function NgeeAnnAiSlot({
   snapshot,
   decisionPriorities,
   aiAnalystHref,
+  mode = "live",
   startRun = getOrStartNgeeAnnAiRun,
 }: {
   snapshot: EnergyProjectAnalysisSnapshotDto;
   decisionPriorities: NgeeAnnDecisionPrioritiesViewModel;
   aiAnalystHref?: string;
+  mode?: "live" | "saved-unavailable";
   startRun?: (input: NgeeAnnAiRunInput, onProgress?: NgeeAnnAiProgressCallback) => Promise<NgeeAnnAiRunResult>;
 }) {
   const input = useMemo(
@@ -52,6 +54,7 @@ export function NgeeAnnAiSlot({
   startRunRef.current = startRun;
 
   useEffect(() => {
+    if (mode === "saved-unavailable") return;
     if (!identityKey) return;
     const currentInput = inputRef.current;
     if (!currentInput) return;
@@ -79,7 +82,15 @@ export function NgeeAnnAiSlot({
     return () => {
       active = false;
     };
-  }, [identityKey]);
+  }, [identityKey, mode]);
+
+  if (mode === "saved-unavailable") {
+    return (
+      <AiSlotFrame>
+        <AiUnavailable detail="No completed AI result was attached when this analysis was saved. Opening a saved result never starts a new AI run." />
+      </AiSlotFrame>
+    );
+  }
 
   if (!input) {
     return (

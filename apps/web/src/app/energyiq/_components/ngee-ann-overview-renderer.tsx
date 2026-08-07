@@ -36,6 +36,7 @@ export function NgeeAnnOverviewRenderer({
   latestAvailableRange,
   projectExplorerHref,
   aiAnalystHref,
+  aiSlotMode = "live",
   grain,
   comparison = "overlay",
   category = "all",
@@ -48,6 +49,7 @@ export function NgeeAnnOverviewRenderer({
   latestAvailableRange?: NgeeAnnLatestAvailableRange | null;
   projectExplorerHref?: string;
   aiAnalystHref?: string;
+  aiSlotMode?: "live" | "saved-unavailable";
   grain?: "day" | "hour";
   comparison?: "overlay" | "selected" | "average";
   category?: "all" | "load" | "light";
@@ -173,6 +175,7 @@ export function NgeeAnnOverviewRenderer({
           snapshot={state.snapshot}
           decisionPriorities={view.decisionPriorities}
           aiAnalystHref={aiAnalystHref}
+          mode={aiSlotMode}
         />
       </div>
 

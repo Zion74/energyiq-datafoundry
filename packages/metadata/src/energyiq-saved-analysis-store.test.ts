@@ -24,6 +24,8 @@ describe("EnergyIqSavedAnalysisStore", () => {
         title: "Last 7 days",
         query_json: JSON.stringify({ period: "Last 7 days" }),
         analysis_json: JSON.stringify({ summary: { usageKwh: 100 } }),
+        snapshot_json: JSON.stringify({ dataSnapshot: { id: "snapshot-v1" } }),
+        view_state_json: JSON.stringify({ grain: "day", comparison: "overlay", category: "all" }),
         template_revision_id: "template-v1",
         data_snapshot_id: "snapshot-v1",
         created_by: "dev-user",
@@ -40,6 +42,8 @@ describe("EnergyIqSavedAnalysisStore", () => {
         title: first.title,
         query_json: first.query_json,
         analysis_json: JSON.stringify({ summary: { usageKwh: 120 } }),
+        snapshot_json: JSON.stringify({ dataSnapshot: { id: "snapshot-v2" } }),
+        view_state_json: first.view_state_json!,
         template_revision_id: "template-v2",
         data_snapshot_id: "snapshot-v2",
         rerun_of_id: first.id,
@@ -50,6 +54,11 @@ describe("EnergyIqSavedAnalysisStore", () => {
       expect(first.sequence).toBe(1);
       expect(rerun.sequence).toBe(2);
       expect(rerun.rerun_of_id).toBe(first.id);
+      expect(metadata.energyIq.savedAnalyses.get(first.id)).toMatchObject({
+        analysis_json: first.analysis_json,
+        snapshot_json: first.snapshot_json,
+        view_state_json: first.view_state_json,
+      });
       expect(JSON.parse(metadata.energyIq.savedAnalyses.get(first.id).analysis_json)).toMatchObject({ summary: { usageKwh: 100 } });
       expect(metadata.energyIq.savedAnalyses.listProject("saved-project").map((item) => item.id)).toEqual(["analysis-v2", "analysis-v1"]);
       metadata.close();

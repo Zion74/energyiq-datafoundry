@@ -391,11 +391,24 @@ function PublishedDecisionDashboardView({
     try {
       const resolvedSnapshotRange = snapshotLocalDateRange(currentSnapshot);
       const request = isNgeeAnnProject
-        ? overviewAnalysisRequest(projectId, "Custom", resolvedSnapshotRange, { scopeId, resource })
+        ? currentOverviewAnalysisRequest(projectId, {
+            scopeId,
+            resource,
+            currentOverviewPin: {
+              ...resolvedSnapshotRange,
+              dataSnapshotId: currentSnapshot.context.dataSnapshotId,
+              projectReleaseId: currentSnapshot.projectRelease.id,
+            },
+          })
         : overviewAnalysisRequest(projectId, period, requestCustomRange, { scopeId, resource });
       const saved = await configApi.saveEnergyAnalysis(projectId, {
         ...request,
         title: `${currentAnalysis.context.scopeName} · ${formatAnalysisWindow(currentSnapshot)}`,
+        viewState: {
+          grain: initialViewState.grain,
+          comparison: initialViewState.comparison,
+          category: initialViewState.category,
+        },
       });
       setSavedAnalysis(saved);
     } catch (reason) {
