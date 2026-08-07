@@ -1,9 +1,9 @@
 ---
 title: "2026-08-06 开发记录：Overview 夜间执行清单"
-summary: "收口 Ngee Ann 与 Preschool 客户可见 Overview；冻结 2026-08-07 主 Agent 确定性 Overview 与侧边 Agent AI Analyst 的夜间双线执行边界。"
+summary: "收口 Ngee Ann 与 Preschool 客户可见 Overview；维护主 Agent 确定性 Overview、侧边 AI 审核与两项目试点预验收的夜间执行边界。"
 doc_type: runlog
 tags: [Overview, Ngee-Ann, AI-Slot, Preschool, 开发记录]
-updated_at: "2026-08-07"
+updated_at: "2026-08-08"
 related:
   - "2026-08-05-Overview用户价值与AI-Slot最小交付决策.md"
   - "决策-NgeeAnn首个试点路线与页面边界.md"
@@ -513,3 +513,81 @@ Workspace 复核结论：先前“Preschool 被 Ngee Ann Workspace 限制”不�
 - `How to verify`、限制和技术说明默认收进 `Verification and limitations`；Finding-specific Evidence 弹窗和 `Ask AI deeper` 仍保留。改造不修改 AI Run、Finding JSON、Snapshot、Evidence、保存/恢复或权限合同，也不在 React 重写模型结论。
 - 自动化：两项目 AI Slot `20/20` 通过；含 Saved Analysis/API/Renderer 的聚焦回归 `8 files / 83 tests` 通过；Impeccable UI detector `0` 条发现；仓库 typecheck 与 Web production build（17 pages）通过。
 - 真实 Admin Chrome 在 Preschool 完成结果上验收：当前 `1600×789` viewport 中标题为 18px、核心数据与行动为 16px，次要详情默认闭合，无横向溢出，console 为空。Ngee Ann 的既有 Provider Run 仍停留在进行中，因此真实完成卡片不能冒充验收；三条 Finding 的同构阅读层级由组件/Renderer 测试覆盖，待 Provider 结果可用后再做人工内容验收。
+
+## 12. 2026-08-08 夜间收口路线与追踪表
+
+### 12.1 本轮目的
+
+不再扩大 Overview 模块数量。本轮把已经存在的 Ngee Ann、Preschool、AI Finding 表达和 Saved/Explorer 能力组织成可试点验收的两项目产品，并明确哪些结果已经由工程证明、哪些仍必须由 Charles/用户人工判断。
+
+执行顺序固定为：
+
+1. **#9 Ngee Ann 阅读路径**：完成 Level/Composition 减负后的 60 秒阅读复核，验证 Takeaway → Verified figures → Change → Contributors → Time patterns → Evidence 的顺序，以及 1440/1920、默认折叠、无全页横向溢出和无 console error。
+2. **#13 Preschool 回归**：确认近期共享 AI、History、Explorer 和样式改动没有破坏 Portfolio、Benchmark、Operating、Appliance、June demo baseline 与 provisional cost；不重复建设已经完成的页面模块。
+3. **#35/#36 审核与 #15 校准**：审核侧边 Agent 的 AI Finding 表达画板、Context budget/cache/checkpoint 是否满足既有合同且没有变成通用平台；只保留 #15 仍未被 #35/#36 覆盖的真实客户可见交付。
+4. **#21 两项目试点预验收**：形成 Ngee Ann 与 Preschool 的同一套演示步骤、证据清单、人工问题和停止条件；不把工程通过冒充 Charles 签收。
+
+### 12.2 实时状态
+
+状态：`TODO` / `DOING` / `DONE` / `BLOCKED`。
+
+| 顺序 | Ticket / 切片 | 状态 | 完成判据 |
+| --- | --- | --- | --- |
+| N1 | #9 Level/Composition 客户阅读层 | DONE | `ca4d170`：主层统一为 1–2 位显示精度；Level/Category/Circuit 使用占比、当前值和较上期变化；四位精度、Quality 与技术 ID 留在折叠明细；Accounting/Derived 默认折叠。专项 `199/199`，真实 Chrome 28-day 数据与交互通过。 |
+| N2 | #9 60 秒阅读路径与 1440/1920 | DONE（工程预验收） | 新鲜 Chrome 已验证首要信息、Contributor、时间图、Evidence、折叠、溢出和 console；AI 后台状态不阻塞确定性页面。Charles 人工价值验收仍未完成。 |
+| P1 | #13 Preschool 确定性回归 | DONE（工程预验收） | API Projection、ViewModel、Renderer 与 Dashboard `70/70`，仓库 typecheck 通过；新鲜 Chrome 关键模块、公开参考价/Forecast 边界、History 和双分辨率未回退。#18 与 Charles 人工门槛仍独立开放。 |
+| A1 | #35/#36 只读审核 | DONE（审核） | #35 方向正确但缺服务端 Block 校验、语义 Evidence、可访问性与真实 Provider/多尺寸证据；#36 发现显式 output budget 被 4096 fallback 覆盖的回归，修复前不合并。 |
+| A2 | #15 剩余范围校准 | DONE（决策） | #15 只保留“完整 SQL/Table Artifact 物化受控图表、168 点 Golden 与刷新恢复”；不再作为 Overview #21 的完整硬阻塞，不建设第二套图表平台。 |
+| T1 | #21 两项目试点预验收 | DONE（工程清单） | 两项目演示清单、现有证据、工程缺口、12 个 Boss/FM 问题与停止条件齐全；真实 Provider、目标环境与 Charles 人工签收仍阻止关闭 #21。 |
+| R1 | 提交与 Issue 更新 | DONE | UI 收口提交 `e71fa89`；本 Runlog 独立提交。#9/#13/#35/#36 已追加 UTF-8 复核证据，#15/#21 正文按真实剩余范围校准；未带入侧边 AI、tsconfig、next-env 或 `.scratch` WIP。 |
+
+### 12.3 60 秒人工阅读问题
+
+两个项目都必须让非技术用户无需打开 Evidence 就能回答：
+
+1. 现在最值得注意的事情是什么？
+2. 影响多大，是 1 天、7 天还是 28 天问题？
+3. 哪个 Level、Centre、Circuit 或 Appliance 最值得先查？
+4. 图表直接证明了什么，哪些解释仍只是调查方向？
+5. 下一步做什么；做了和不做可能看到什么差异？
+6. 用哪个指标、在什么窗口验证？
+7. 需要核查时能否一键到同 Snapshot 的 Explorer/Evidence？
+
+### 12.4 证据分层
+
+- **自动化证据**：Golden、ViewModel、Renderer、API projection、Snapshot/Evidence 守卫和交互测试。
+- **运行/Chrome 证据**：已登录真实 Workspace、当前 Published Snapshot、1440/1920、无全页横向溢出、无 console error、关键折叠/跳转可操作。
+- **人工价值证据**：Charles/用户是否能在 60 秒内说出结论、影响、下一步和验证方式。前两层不能替代这一层。
+
+### 12.5 停止条件
+
+- 不为关闭 Ticket 而伪造 AI Finding、Forecast、Tariff、节省额或根因。
+- 不修改侧边 Agent 正在编辑的 AI 文件；审核发现冲突时先记录并等待其稳定交接。
+- 不恢复控制整页的全局 Scope/Period；局部探索不触发整页或全部 AI 重算。
+- 不把 #36 扩成通用 Prompt/Context cache、分布式 checkpoint 或 Provider Router。
+- 不把 #35 扩成任意 HTML/JS 执行画布；允许 Agent 选择受控表达原语，但确定性 KPI/Evidence 仍权威。
+- 不在没有 Charles/用户明确签收时关闭 #9、#13 或 #21 的人工验收门。
+
+### 12.6 本轮工程与 Chrome 结果
+
+- Ngee Ann 主阅读路径为 `Takeaways → Verified figures → AI briefing → Change over time → Main contributors → Time patterns → Evidence`；1d/7d/28d 共用同一 cutoff/Snapshot。Accounting、Derived、原始技术 ID 和完整 Metadata 说明默认折叠；主层 Metadata 提示压缩为“标准化 Benchmark 暂不可用，但能耗、对比和成本仍有效”。
+- 专属 Overview 不再在标题下重复展示 Run message 与 Release ID；这些审计信息继续保留在折叠 Evidence。共享通用 Renderer 保持原行为。
+- Ngee Ann 新鲜 Chrome：CSS `1440×900`、`1920×1080` 均为全页/主区/模块横向溢出 `0`，19 个技术详情默认关闭，无全局 Period/Scope 控件。AI 当时处于后台分析，确定性页面已完整可读；不能冒充 AI Available 验收。
+- Preschool 新鲜 Chrome：CSS `1440×900`、`1920×1080` 均为全页/主区/模块横向溢出 `0`，console warning/error `0`，8 个详情默认关闭，无全局 Period 控件。页面回读 `24,921.81 kWh`、`30 Centres`、`3,103.78 kWh / 12.5%` standby、9 个 Appliance aliases、June `26,240 kWh` demo baseline 与 `27.27 cents/kWh` 公开参考价。History 弹窗可打开并关闭，Current Overview 留在背景；AI 后台分析不阻塞确定性结果。
+- 自动化：本轮 Ngee Ann Renderer + Published Dashboard `96/96`；Preschool Projection/ViewModel/Renderer/Dashboard `70/70`；仓库 typecheck、diff check 通过；Impeccable detector `0` 条发现。Dashboard 测试仍有两条既有的 AI resume `401` stderr，属于 #18 测试隔离，不归入 #9/#13 确定性改造。
+
+### 12.7 #35、#36 与 #15 校准结论
+
+- **#35 保持打开**：受控 Presentation Blocks、Agent 自选有图/无图、非法 Block 局部降级和禁止任意代码方向成立，聚焦回归 `105/105`。关闭前仍需最小服务端 Block 校验、Block 到 Evidence 的语义绑定、非颜色单一表达，以及两个项目真实 Provider 的有图/无图与多尺寸证据。当前 12 个文件仍为侧边 Agent 未提交 WIP，主 Agent不选择性吸收。
+- **#36 保持打开且暂不合并**：现实现复用已有 Context Package/Plan/Checkpoint，没有新增平台，聚焦回归 `28/28`；但 `27df662` 会在 Profile 只有显式 `maxTokens/maxOutputTokens`、没有 `contextLength` 时把 Output 设置错误降为 `4096`。必须先让显式 Output 与保守 Context fallback 解耦并补回归测试；真实 DeepSeek pass@3、same-session 与 Cache 证据仍需完成。
+- **#15 缩窄且不阻塞当前 Overview 试点**：已具备 Task Console、刷新恢复、168 小时点和受控 line/bar/pie。剩余只做从完整 SQL/Table Artifact 物化图表，移除模型重复传隐含 limit 的依赖，并保留一个 168 点 Golden；其他图型只在试点出现真实决策问题时增加。#15 复用 #35 的受控表达 seam，不建设第二套通用图表平台。
+
+### 12.8 #21 两项目试点最小检查表
+
+1. 固定两个 Workspace/Project、Published Release、Snapshot、timezone 和模型 Profile；关闭 fallback，明确目标试点环境后才发布。
+2. Ngee Ann：60 秒看出问题、影响、贡献者、下一步与验证；核对 1d/7d/28d、Top exceptions、Trend、Level/Composition、Day profile 与 Heatmap；History 打开 Saved A 不重算。
+3. Ngee Ann A→B：只用正式 Register → Mapping → materialization → Publish → Overview → Save/Rerun；B 更新 Current，Saved A 字节稳定，A/B Snapshot 与 Evidence 不混。
+4. Preschool：核对总量、30 Centres、standby、Top 5、9 个 aliases、Benchmark distribution、Operating/closed profile 和 June demo；公开参考价必须明确不是客户 Tariff 或账单。
+5. 两项目浏览器：CSS `1440×900`、`1920×1080`、无横向溢出、无应用 console error/warning；验证 Evidence、History、Explorer、AI deeper、Escape、焦点返回与 AI `Analyzing / Available / Unavailable`。
+6. 固定 12 个 Boss/FM 问题，逐题保存数字、Evidence、Run、耗时和人工判断；验收标准是正确、同 Snapshot、说人话和有决策价值，不是“模型有回答”。
+7. #21 只有在工程证据、真实 Provider 证据和 Charles/用户人工价值验收三栏全部完成后才能关闭。当前真实阻塞为 #18/#35 Provider 证据、目标试点环境和 Charles 对 #9/#13 的人工签收；#36 不作为试点阻塞。
