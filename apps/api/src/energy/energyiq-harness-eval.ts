@@ -12,6 +12,32 @@ export type EnergyIqHarnessObservation = {
   threadId?: string;
 };
 
+export type EnergyIqHarnessStepMetrics = {
+  stepNumber: number;
+  promptTokens: number;
+  compiledPromptTokens: number | null;
+  verifiedPromptTokens: number | null;
+  remainingTokens: number | null;
+  inputBudget: number | null;
+  contextWindow: number | null;
+  budgetUtilization: number | null;
+  highWaterMark: string | null;
+  capabilitySource: string | null;
+  systemTokens: number;
+  toolTokens: number;
+  messageTokens: number;
+  selectedGroupTokens: number;
+  omittedGroupTokens: number;
+  sourceHashCount: number;
+  authoritativeSourceHashes: Record<string, string>;
+  artifactRefCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheTelemetryAvailable: boolean;
+  cacheHitTokens: number | null;
+  cacheMissTokens: number | null;
+};
+
 export type EnergyIqHarnessCaseReport = {
   caseId: string;
   title: string;
@@ -21,6 +47,7 @@ export type EnergyIqHarnessCaseReport = {
   answer: string;
   snapshotIds: string[];
   assertions: Array<{ id: string; passed: boolean; hard: boolean; detail: string }>;
+  steps: EnergyIqHarnessStepMetrics[];
   metrics: {
     elapsedMs: number;
     toolCalls: number;
@@ -30,6 +57,13 @@ export type EnergyIqHarnessCaseReport = {
     reasoningRounds: number;
     inputTokens: number;
     outputTokens: number;
+    maxPromptTokens: number;
+    maxBudgetUtilization: number | null;
+    contextCheckpointCount: number;
+    cacheTelemetrySteps: number;
+    cacheHitTokens: number;
+    cacheMissTokens: number;
+    authoritativePinDrift: boolean;
     correctnessRatio: number;
     insightQuality: number | null;
   };
@@ -60,6 +94,12 @@ export type EnergyIqHarnessSuiteReport = {
     totalRecoveredToolFailures: number;
     totalInputTokens: number;
     totalOutputTokens: number;
+    maxPromptTokens: number;
+    maxBudgetUtilization: number | null;
+    totalContextCheckpoints: number;
+    totalCacheTelemetrySteps: number;
+    totalCacheHitTokens: number;
+    totalCacheMissTokens: number;
   };
   cases: EnergyIqHarnessCaseReport[];
 };
@@ -108,6 +148,7 @@ export const runEnergyIqHarnessEval = async (
           hardFailure: true,
           answer: "",
           snapshotIds: [],
+          steps: [],
           assertions: [{ id: "runner.completed", passed: false, hard: true, detail }],
           metrics: {
             elapsedMs: 0,
@@ -118,6 +159,13 @@ export const runEnergyIqHarnessEval = async (
             reasoningRounds: 0,
             inputTokens: 0,
             outputTokens: 0,
+            maxPromptTokens: 0,
+            maxBudgetUtilization: null,
+            contextCheckpointCount: 0,
+            cacheTelemetrySteps: 0,
+            cacheHitTokens: 0,
+            cacheMissTokens: 0,
+            authoritativePinDrift: false,
             correctnessRatio: 0,
             insightQuality: null,
           },
@@ -155,6 +203,12 @@ export const runEnergyIqHarnessEval = async (
       totalRecoveredToolFailures: sum(reports.map((report) => report.metrics.recoveredToolFailures)),
       totalInputTokens: sum(reports.map((report) => report.metrics.inputTokens)),
       totalOutputTokens: sum(reports.map((report) => report.metrics.outputTokens)),
+      maxPromptTokens: Math.max(0, ...reports.map((report) => report.metrics.maxPromptTokens)),
+      maxBudgetUtilization: maximumOptional(reports.map((report) => report.metrics.maxBudgetUtilization)),
+      totalContextCheckpoints: sum(reports.map((report) => report.metrics.contextCheckpointCount)),
+      totalCacheTelemetrySteps: sum(reports.map((report) => report.metrics.cacheTelemetrySteps)),
+      totalCacheHitTokens: sum(reports.map((report) => report.metrics.cacheHitTokens)),
+      totalCacheMissTokens: sum(reports.map((report) => report.metrics.cacheMissTokens)),
     },
     cases: reports,
   };
@@ -229,6 +283,13 @@ export const evaluateEnergyIqHarnessObservation = (
   }
 
   const snapshotIds = extractSnapshotIds(events);
+  const authoritativePinDrift = detectAuthoritativePinDrift(events);
+  assert(
+    "context.authoritative-pin-stable",
+    !authoritativePinDrift,
+    authoritativePinDrift ? "authoritative source hash changed within one run" : "authoritative source hashes stable",
+    true,
+  );
   if (evalCase.contract.requireSingleSnapshot) {
     assert("context.single-snapshot", snapshotIds.length === 1, `snapshot_ids=${snapshotIds.join(",") || "missing"}`, true);
     const resolvedWorkspaceId = extractResolvedWorkspaceId(events);
@@ -298,6 +359,7 @@ export const evaluateEnergyIqHarnessObservation = (
         output: total.output + numberValue(value.output_tokens ?? value.outputTokens),
       };
     }, { input: 0, output: 0 });
+  const steps = extractStepMetrics(events);
   const hardFailure = assertions.some((entry) => !entry.passed && entry.hard);
   const correctnessAssertions = assertions.filter((entry) => isCorrectnessAssertion(entry.id));
   const passedCorrectnessAssertions = correctnessAssertions.filter((entry) => entry.passed).length;
@@ -310,6 +372,7 @@ export const evaluateEnergyIqHarnessObservation = (
     answer,
     snapshotIds,
     assertions,
+    steps,
     metrics: {
       elapsedMs: observation.elapsedMs,
       toolCalls: toolNames.length,
@@ -319,6 +382,13 @@ export const evaluateEnergyIqHarnessObservation = (
       reasoningRounds,
       inputTokens: tokenTotals.input,
       outputTokens: tokenTotals.output,
+      maxPromptTokens: Math.max(0, ...steps.map((step) => step.promptTokens)),
+      maxBudgetUtilization: maximumOptional(steps.map((step) => step.budgetUtilization)),
+      contextCheckpointCount: steps.filter((step) => step.inputBudget !== null).length,
+      cacheTelemetrySteps: steps.filter((step) => step.cacheTelemetryAvailable).length,
+      cacheHitTokens: sum(steps.map((step) => step.cacheHitTokens ?? 0)),
+      cacheMissTokens: sum(steps.map((step) => step.cacheMissTokens ?? 0)),
+      authoritativePinDrift,
       correctnessRatio: ratio(passedCorrectnessAssertions, correctnessAssertions.length),
       insightQuality,
     },
@@ -342,7 +412,157 @@ export const compareEnergyIqHarnessReports = (
       ? null
       : candidate.summary.averageInsightQuality - baseline.summary.averageInsightQuality,
   hardFailureDelta: candidate.summary.hardFailures - baseline.summary.hardFailures,
+  totalInputTokensDelta: candidate.summary.totalInputTokens - baseline.summary.totalInputTokens,
+  totalOutputTokensDelta: candidate.summary.totalOutputTokens - baseline.summary.totalOutputTokens,
+  maxPromptTokensDelta: candidate.summary.maxPromptTokens - baseline.summary.maxPromptTokens,
+  maxBudgetUtilizationDelta:
+    candidate.summary.maxBudgetUtilization === null || baseline.summary.maxBudgetUtilization === null
+      ? null
+      : candidate.summary.maxBudgetUtilization - baseline.summary.maxBudgetUtilization,
 });
+
+const extractStepMetrics = (events: EventRecord[]): EnergyIqHarnessStepMetrics[] => {
+  const steps = new Map<number, EnergyIqHarnessStepMetrics>();
+  const ensureStep = (stepNumber: number): EnergyIqHarnessStepMetrics => {
+    const existing = steps.get(stepNumber);
+    if (existing) return existing;
+    const created: EnergyIqHarnessStepMetrics = {
+      stepNumber,
+      promptTokens: 0,
+      compiledPromptTokens: null,
+      verifiedPromptTokens: null,
+      remainingTokens: null,
+      inputBudget: null,
+      contextWindow: null,
+      budgetUtilization: null,
+      highWaterMark: null,
+      capabilitySource: null,
+      systemTokens: 0,
+      toolTokens: 0,
+      messageTokens: 0,
+      selectedGroupTokens: 0,
+      omittedGroupTokens: 0,
+      sourceHashCount: 0,
+      authoritativeSourceHashes: {},
+      artifactRefCount: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheTelemetryAvailable: false,
+      cacheHitTokens: null,
+      cacheMissTokens: null,
+    };
+    steps.set(stepNumber, created);
+    return created;
+  };
+
+  let compiledFallbackStep = 0;
+  let usageFallbackStep = 0;
+  for (const event of events) {
+    if (stringValue(event.type) !== "CUSTOM" || !isRecord(event.value)) continue;
+    const value = event.value;
+    if (stringValue(event.name) === "context.compiled") {
+      compiledFallbackStep += 1;
+      const stepNumber = optionalNumberValue(value.step_number) ?? compiledFallbackStep;
+      const step = ensureStep(stepNumber);
+      const budget = isRecord(value.budget) ? value.budget : {};
+      const tokenReport = isRecord(value.token_report) ? value.token_report : {};
+      step.promptTokens = optionalNumberValue(value.prompt_tokens)
+        ?? optionalNumberValue(tokenReport.totalInputTokens)
+        ?? 0;
+      step.compiledPromptTokens = step.promptTokens;
+      step.remainingTokens = optionalNumberValue(value.remaining_tokens)
+        ?? optionalNumberValue(tokenReport.remainingTokens)
+        ?? null;
+      step.inputBudget = optionalNumberValue(value.budget_tokens)
+        ?? optionalNumberValue(budget.inputBudget)
+        ?? null;
+      step.contextWindow = optionalNumberValue(budget.contextWindow) ?? null;
+      step.budgetUtilization = optionalNumberValue(value.budget_utilization)
+        ?? (step.inputBudget && step.inputBudget > 0 ? step.promptTokens / step.inputBudget : null);
+      step.highWaterMark = nullableStringValue(value.high_water_mark);
+      step.capabilitySource = nullableStringValue(budget.capabilitySource);
+      step.systemTokens = optionalNumberValue(tokenReport.systemTokens) ?? 0;
+      step.toolTokens = optionalNumberValue(tokenReport.toolTokens) ?? 0;
+      step.messageTokens = optionalNumberValue(tokenReport.messageTokens) ?? 0;
+      const groupCosts = Array.isArray(value.group_token_costs) ? value.group_token_costs.filter(isRecord) : [];
+      step.selectedGroupTokens = sum(groupCosts
+        .filter((group) => group.selected === true)
+        .map((group) => optionalNumberValue(group.tokenCost) ?? 0));
+      step.omittedGroupTokens = sum(groupCosts
+        .filter((group) => group.selected !== true)
+        .map((group) => optionalNumberValue(group.tokenCost) ?? 0));
+      step.sourceHashCount = Array.isArray(value.source_snapshot_hashes) ? value.source_snapshot_hashes.length : 0;
+      step.authoritativeSourceHashes = authoritativeSourceHashes(value.source_snapshot_hashes);
+      step.artifactRefCount = Array.isArray(value.artifact_refs) ? value.artifact_refs.length : 0;
+      continue;
+    }
+    if (stringValue(event.name) === "context.prompt-verified") {
+      const stepNumber = optionalNumberValue(value.step_number) ?? Math.max(compiledFallbackStep, 1);
+      const step = ensureStep(stepNumber);
+      const verifiedPromptTokens = optionalNumberValue(value.prompt_tokens);
+      step.verifiedPromptTokens = verifiedPromptTokens ?? null;
+      step.promptTokens = Math.max(step.promptTokens, verifiedPromptTokens ?? 0);
+      step.inputBudget = optionalNumberValue(value.input_budget ?? value.budget_tokens) ?? step.inputBudget;
+      step.contextWindow = optionalNumberValue(value.context_window) ?? step.contextWindow;
+      step.remainingTokens = optionalNumberValue(value.remaining_tokens) ?? step.remainingTokens;
+      step.budgetUtilization = optionalNumberValue(value.budget_utilization) ?? step.budgetUtilization;
+      step.highWaterMark = nullableStringValue(value.high_water_mark) ?? step.highWaterMark;
+      step.capabilitySource = nullableStringValue(value.capability_source) ?? step.capabilitySource;
+      continue;
+    }
+    if (stringValue(event.name) === "token_usage") {
+      usageFallbackStep += 1;
+      const stepNumber = optionalNumberValue(value.step_number) ?? usageFallbackStep;
+      const step = ensureStep(stepNumber);
+      step.inputTokens += optionalNumberValue(value.input_tokens ?? value.inputTokens) ?? 0;
+      step.outputTokens += optionalNumberValue(value.output_tokens ?? value.outputTokens) ?? 0;
+      const cacheAvailable = value.cache_telemetry_available === true
+        || optionalNumberValue(value.cache_hit_tokens) !== undefined
+        || optionalNumberValue(value.cache_miss_tokens) !== undefined;
+      step.cacheTelemetryAvailable ||= cacheAvailable;
+      const cacheHitTokens = optionalNumberValue(value.cache_hit_tokens);
+      const cacheMissTokens = optionalNumberValue(value.cache_miss_tokens);
+      if (cacheHitTokens !== undefined) step.cacheHitTokens = (step.cacheHitTokens ?? 0) + cacheHitTokens;
+      if (cacheMissTokens !== undefined) step.cacheMissTokens = (step.cacheMissTokens ?? 0) + cacheMissTokens;
+    }
+  }
+  return [...steps.values()].sort((left, right) => left.stepNumber - right.stepNumber);
+};
+
+const AUTHORITATIVE_CONTEXT_SOURCE_TYPES = new Set([
+  "energy-query-context",
+  "project-analysis-snapshot",
+  "project-analysis-pack",
+]);
+
+const authoritativeSourceHashes = (value: unknown): Record<string, string> => Object.fromEntries(
+  (Array.isArray(value) ? value : [])
+    .filter(isRecord)
+    .flatMap((entry) => {
+      const sourceType = stringValue(entry.source_type);
+      const contentHash = stringValue(entry.content_hash);
+      return AUTHORITATIVE_CONTEXT_SOURCE_TYPES.has(sourceType) && contentHash
+        ? [[sourceType, contentHash] as const]
+        : [];
+    }),
+);
+
+const detectAuthoritativePinDrift = (events: EventRecord[]): boolean => {
+  const observed = new Map<string, string>();
+  for (const event of events) {
+    if (stringValue(event.type) !== "CUSTOM"
+      || stringValue(event.name) !== "context.compiled"
+      || !isRecord(event.value)) continue;
+    for (const [sourceType, contentHash] of Object.entries(
+      authoritativeSourceHashes(event.value.source_snapshot_hashes),
+    )) {
+      const previous = observed.get(sourceType);
+      if (previous !== undefined && previous !== contentHash) return true;
+      observed.set(sourceType, contentHash);
+    }
+  }
+  return false;
+};
 
 const extractFinalAnswer = (events: EventRecord[]): string => {
   const messages = new Map<string, string>();
@@ -538,9 +758,18 @@ const findLastEvent = (
 };
 const isRecord = (value: unknown): value is EventRecord => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const stringValue = (value: unknown): string => typeof value === "string" ? value : "";
+const nullableStringValue = (value: unknown): string | null => typeof value === "string" ? value : null;
 const numberValue = (value: unknown): number => Number.isFinite(Number(value)) ? Number(value) : 0;
+const optionalNumberValue = (value: unknown): number | undefined => {
+  const parsed = Number(value);
+  return value !== null && value !== undefined && Number.isFinite(parsed) ? parsed : undefined;
+};
 const sum = (values: number[]): number => values.reduce((total, value) => total + value, 0);
 const average = (values: number[]): number => values.length > 0 ? sum(values) / values.length : 0;
+const maximumOptional = (values: Array<number | null>): number | null => {
+  const present = values.filter((value): value is number => value !== null);
+  return present.length > 0 ? Math.max(...present) : null;
+};
 const ratio = (numerator: number, denominator: number): number => denominator > 0 ? numerator / denominator : 0;
 const percentile = (sortedValues: number[], fraction: number): number => {
   if (sortedValues.length === 0) return 0;
