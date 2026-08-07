@@ -22,15 +22,17 @@ describe("NgeeAnnOverviewRenderer", () => {
       <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot: ngeeAnnGoldenSnapshot() }} />,
     );
 
-    expect(markup).toContain("Decision theme");
+    expect(markup).toContain("Takeaways and next decisions");
+    expect(markup).toContain("Priority 1");
     expect(markup).toContain("Latest complete day");
     expect(markup).toContain("Rolling 7 days");
     expect(markup).toContain("Rolling 28 days");
-    expect(markup).toContain("3 distinct exception days; linked Level and Circuit Evidence is preserved");
-    expect(markup).toContain("Primary incident impact");
-    expect(markup).toContain("mt-4 grid grid-cols-1 gap-3");
-    expect(markup).toContain("mt-3 grid gap-2 sm:grid-cols-3");
-    expect(markup.match(/View evidence/g)).toHaveLength(1);
+    expect(markup).toContain("Seen on 3 distinct exception days. Linked Level and Circuit evidence is preserved.");
+    expect(markup).toContain("Why it matters");
+    expect(markup).toContain("Do next");
+    expect(markup).toContain("Verify with");
+    expect(markup).toContain("Details, evidence and limitations");
+    expect(markup.match(/View supporting evidence/g)).toHaveLength(1);
   });
 
   it("places the server-owned decision priorities after Data Status and before Key highlights", () => {
@@ -42,21 +44,20 @@ describe("NgeeAnnOverviewRenderer", () => {
       />,
     );
 
-    expect(markup).toContain("Decision themes");
-    expect(markup).toContain("Finding");
-    expect(markup).toContain("Evidence");
-    expect(markup).toContain("Primary incident impact");
-    expect(markup).toContain("Next check");
-    expect(markup).toContain("Verification metric");
+    expect(markup).toContain("Takeaways and next decisions");
+    expect(markup).toContain("Supporting evidence");
+    expect(markup).toContain("Why it matters");
+    expect(markup).toContain("Do next");
+    expect(markup).toContain("Verify with");
     expect(markup).toContain("Complete Evidence");
     expect(markup).toContain("href=\"#incident-project-2026-06-13\"");
     expect(markup).toContain("Open Project Explorer");
     expect(markup).toContain("Ask AI Analyst");
     expect(markup).toContain("AI energy analyst");
     expect(markup).toContain("Inspecting scoped data");
-    expect(markup.indexOf("Decision themes")).toBeLessThan(markup.indexOf("Key highlights"));
-    expect(markup.indexOf("Key highlights")).toBeLessThan(markup.indexOf("AI energy analyst"));
-    expect(markup.indexOf("AI energy analyst")).toBeLessThan(markup.indexOf("What changed"));
+    expect(markup.indexOf("Takeaways and next decisions")).toBeLessThan(markup.indexOf("Verified figures"));
+    expect(markup.indexOf("Verified figures")).toBeLessThan(markup.indexOf("AI energy analyst"));
+    expect(markup.indexOf("AI energy analyst")).toBeLessThan(markup.indexOf("Change over time"));
   });
 
   it.each([
@@ -99,9 +100,9 @@ describe("NgeeAnnOverviewRenderer", () => {
     );
 
     expect(markup).toContain(expected);
-    expect(markup).toContain("0 deterministic themes");
-    expect(markup).not.toContain("View evidence");
-    expect(markup).toContain("Key highlights");
+    expect(markup).toContain("0 verified priorities");
+    expect(markup).not.toContain("View supporting evidence");
+    expect(markup).toContain("Verified figures");
   });
 
   it("fails invalid priorities closed while leaving the rest of the Golden Overview visible", () => {
@@ -131,7 +132,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     );
 
     expect(markup).toContain("bg-step-warning/10 text-step-warning\">Partial Evidence");
-    expect(markup).toContain("Limitation: Supporting Circuit Evidence is partial.");
+    expect(markup).toContain("Limitation.</span> Supporting Circuit Evidence is partial.");
   });
 
   it("keeps the Golden context, status, highlights and evidence in one compact dedicated surface", () => {
@@ -249,14 +250,14 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup.indexOf("Level comparison")).toBeLessThan(markup.indexOf("Energy composition"));
     expect(markup.indexOf("Energy composition")).toBeLessThan(markup.indexOf("Day profile"));
     expect(markup.indexOf("Day profile")).toBeLessThan(markup.indexOf("Usage heatmap"));
-    expect(markup.indexOf("Usage heatmap")).toBeLessThan(markup.indexOf("Snapshot &amp; evidence"));
+    expect(markup.indexOf("Usage heatmap")).toBeLessThan(markup.indexOf("Evidence and calculation details"));
     expect(markup.indexOf("Accounting trace")).toBeLessThan(markup.indexOf("Derived meter trace"));
     expect(markup.indexOf("Derived meter trace")).toBeLessThan(markup.indexOf("Composition evidence"));
     expect(markup).toContain("mapping-v1");
     expect(markup).toContain("formula-v1");
     expect(markup).toContain("previous_meter_usage_v1");
     expect(markup).toContain("snapshot-ngee-ann-golden");
-    expect(markup).toContain("View reproducible evidence");
+    expect(markup).toContain("View reproducible evidence and technical IDs");
     expect(markup).toContain("Comparison evidence");
     expect(markup).toContain("Previous period uses [from, to): start inclusive, end exclusive.");
     expect(markup).toContain("Previous period range");
@@ -598,7 +599,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     .filter((candidate) => candidate.textContent === "Open incident detail") as HTMLButtonElement[];
 
   const decisionEvidenceTrigger = () => Array.from(container.querySelectorAll<HTMLAnchorElement>("a"))
-    .find((candidate) => candidate.textContent === "View evidence") as HTMLAnchorElement;
+    .find((candidate) => candidate.textContent === "View supporting evidence") as HTMLAnchorElement;
 
   const anomalyDialog = () => document.querySelector<HTMLDivElement>(
     '[role="dialog"][aria-labelledby="ngee-ann-anomaly-dialog-title"]',

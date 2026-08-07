@@ -21,6 +21,10 @@ import { buildEnergyTemplateRenderPlan } from "./energy-template-render-plan";
 import { EnergySelect } from "./energy-select";
 import { useEnergyIqAccess } from "./energyiq-access";
 import { EnergyIcon } from "./icons";
+import {
+  OverviewSectionNavigation,
+  type OverviewNavigationSection,
+} from "./overview-section-navigation";
 import { orderProjectNodesDepthFirst } from "./project-tree-model";
 import {
   applyProjectAnalysisQualityPolicy,
@@ -50,6 +54,24 @@ const PRESCHOOL_OVERVIEW_RANGE = {
   from: "2026-05-01",
   to: "2026-05-31",
 } as const;
+const NGEE_ANN_OVERVIEW_SECTIONS: ReadonlyArray<OverviewNavigationSection> = [
+  { id: "ngee-ann-takeaways", label: "Takeaways" },
+  { id: "ngee-ann-key-highlights", label: "Verified figures" },
+  { id: "ngee-ann-ai-analysis", label: "AI analysis" },
+  { id: "ngee-ann-change", label: "Change over time" },
+  { id: "ngee-ann-location", label: "Main contributors" },
+  { id: "ngee-ann-timing", label: "Time patterns" },
+  { id: "ngee-ann-evidence", label: "Evidence" },
+] as const;
+const PRESCHOOL_OVERVIEW_SECTIONS: ReadonlyArray<OverviewNavigationSection> = [
+  { id: "preschool-decision-summary", label: "Takeaways" },
+  { id: "preschool-ai-analysis", label: "AI analysis" },
+  { id: "preschool-appliance-ranking", label: "Energy drivers" },
+  { id: "preschool-efficiency-benchmark", label: "Efficiency" },
+  { id: "preschool-operational-behaviour", label: "Operating patterns" },
+  { id: "preschool-centre-ranking", label: "Centre detail" },
+  { id: "preschool-evidence", label: "Evidence" },
+] as const;
 export type OverviewComparison = "overlay" | "selected" | "average";
 export type OverviewCategory = "all" | "load" | "light";
 export type CurrentOverviewPin = {
@@ -357,11 +379,6 @@ function PublishedDecisionDashboardView({
   }, [initialViewState, period, projectId, projectSelectionError, queryValidationError, refreshRevision, requestCustomRange.from, requestCustomRange.to, resource, router, scopeId, usesCurrentOverviewWindow]);
 
   useEffect(() => {
-    const firstSectionId = renderPlanForDisplay?.sections[0]?.section_id ?? "";
-    setActiveSection(firstSectionId);
-  }, [projectId, renderPlanForDisplay]);
-
-  useEffect(() => {
     setSavedAnalysis(null);
     setSaveError(null);
   }, [period, projectId, requestCustomRange.from, requestCustomRange.to, resource]);
@@ -387,23 +404,6 @@ function PublishedDecisionDashboardView({
       setSaving(false);
     }
   };
-
-  useEffect(() => {
-    if (!renderPlanForDisplay) return;
-    const elements = renderPlanForDisplay.sections
-      .map((section) => document.getElementById(sectionDomId(section.section_id)))
-      .filter((element): element is HTMLElement => Boolean(element));
-    if (elements.length === 0) return;
-    const scrollContainer = elements[0]?.closest("main");
-    if (!scrollContainer) return;
-    const updateActiveSection = () => {
-      const passed = elements.filter((element) => element.getBoundingClientRect().top <= 168);
-      setActiveSection((passed.at(-1) ?? elements[0]).id.replace("customer-overview-", ""));
-    };
-    updateActiveSection();
-    scrollContainer.addEventListener("scroll", updateActiveSection, { passive: true });
-    return () => scrollContainer.removeEventListener("scroll", updateActiveSection);
-  }, [renderPlanForDisplay]);
 
   const runMessage = currentAnalysis
     ? `${formatRunPeriod(currentAnalysis)} · ${currentSnapshot?.dataSnapshot.id ?? currentAnalysis.provenance.dataSnapshotId}`
@@ -444,6 +444,34 @@ function PublishedDecisionDashboardView({
         to: effectiveCustomRange.to,
       };
   const publishedSections = rendererState.status === "ready" ? rendererState.plan.sections : [];
+  const navigationSections = useMemo<ReadonlyArray<OverviewNavigationSection>>(() => {
+    if (isNgeeAnnRenderer) return NGEE_ANN_OVERVIEW_SECTIONS;
+    if (isPreschoolRenderer) return PRESCHOOL_OVERVIEW_SECTIONS;
+    return publishedSections.map((section) => ({
+      id: sectionDomId(section.section_id),
+      label: section.navigation_label,
+    }));
+  }, [isNgeeAnnRenderer, isPreschoolRenderer, publishedSections]);
+
+  useEffect(() => {
+    setActiveSection(navigationSections[0]?.id ?? "");
+  }, [projectId, navigationSections]);
+
+  useEffect(() => {
+    const elements = navigationSections
+      .map((section) => document.getElementById(section.id))
+      .filter((element): element is HTMLElement => Boolean(element));
+    if (elements.length === 0) return;
+    const scrollContainer = elements[0]?.closest("main");
+    if (!scrollContainer) return;
+    const updateActiveSection = () => {
+      const passed = elements.filter((element) => element.getBoundingClientRect().top <= 168);
+      setActiveSection((passed.at(-1) ?? elements[0]).id);
+    };
+    updateActiveSection();
+    scrollContainer.addEventListener("scroll", updateActiveSection, { passive: true });
+    return () => scrollContainer.removeEventListener("scroll", updateActiveSection);
+  }, [navigationSections]);
 
   return (
     <div className="mx-auto w-full max-w-[1480px] px-4 py-6 lg:px-8 lg:py-8">
@@ -597,59 +625,40 @@ function PublishedDecisionDashboardView({
         </div>
       ) : null}
 
-      {rendererState.status === "ready" && isDedicatedOverviewRenderer && rendererRequest && projectRendererState ? (
-        <div className="mt-6">
-          <ProjectRenderer
-            request={rendererRequest}
-            state={projectRendererState}
-            onRetry={refreshOverview}
-            latestAvailableRange={usesCurrentOverviewWindow ? null : latestAvailableRange}
-            onViewLatestAvailableData={(range) => navigateOverview({
-              period: "Custom",
-              from: range.from,
-              to: range.to,
-            })}
-            grain={initialViewState.grain}
-            comparison={initialViewState.comparison}
-            category={initialViewState.category}
-            onComparisonChange={(comparison) => navigateOverview({ comparison })}
-            onCategoryChange={(category) => navigateOverview({ category })}
-            projectExplorerHref={overviewHandoffHref("/energyiq/explorer", {
-              ...resolvedHandoffView,
-              projectId,
-            })}
-            aiAnalystHref={overviewHandoffHref("/energyiq/ai", {
-              ...resolvedHandoffView,
-              projectId,
-            })}
+      {rendererState.status === "ready" ? (
+        <div className="mt-4 xl:grid xl:grid-cols-[200px_minmax(0,1fr)] xl:items-start xl:gap-8 2xl:grid-cols-[220px_minmax(0,1fr)]">
+          <OverviewSectionNavigation
+            sections={navigationSections}
+            activeSectionId={activeSection}
+            onSelect={setActiveSection}
           />
-        </div>
-      ) : rendererState.status === "ready" ? (
-        <div className="mt-6 lg:grid lg:grid-cols-[200px_minmax(0,1fr)] lg:items-start lg:gap-8 xl:grid-cols-[220px_minmax(0,1fr)]">
-          <aside className="lg:sticky lg:top-6">
-            <p className="mb-2 hidden px-3 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-light lg:block">Published sections</p>
-            <nav className="flex max-w-full gap-1 overflow-x-auto rounded-lg border border-border bg-surface p-1 lg:flex-col lg:overflow-visible" aria-label="Published analysis sections">
-              {publishedSections.map((section, index) => (
-                <a
-                  key={section.section_id}
-                  href={`#${sectionDomId(section.section_id)}`}
-                  onClick={() => setActiveSection(section.section_id)}
-                  aria-current={activeSection === section.section_id ? "location" : undefined}
-                  className={[
-                    "flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-xs font-medium transition-colors lg:min-h-10 lg:w-full",
-                    activeSection === section.section_id ? "bg-primary text-white" : "text-muted hover:bg-surface-subtle hover:text-foreground",
-                  ].join(" ")}
-                >
-                  <span className={activeSection === section.section_id ? "text-[10px] text-white/65" : "text-[10px] text-muted-light"}>{String(index + 1).padStart(2, "0")}</span>
-                  <span>{section.navigation_label}</span>
-                </a>
-              ))}
-            </nav>
-            <p className="mt-3 hidden px-3 text-[11px] leading-5 text-muted-light lg:block">This navigation is generated from the same published template used by Admin Preview.</p>
-          </aside>
-
           <div className="min-w-0">
-            {rendererRequest && projectRendererState ? (
+            {isDedicatedOverviewRenderer && rendererRequest && projectRendererState ? (
+              <ProjectRenderer
+                request={rendererRequest}
+                state={projectRendererState}
+                onRetry={refreshOverview}
+                latestAvailableRange={usesCurrentOverviewWindow ? null : latestAvailableRange}
+                onViewLatestAvailableData={(range) => navigateOverview({
+                  period: "Custom",
+                  from: range.from,
+                  to: range.to,
+                })}
+                grain={initialViewState.grain}
+                comparison={initialViewState.comparison}
+                category={initialViewState.category}
+                onComparisonChange={(comparison) => navigateOverview({ comparison })}
+                onCategoryChange={(category) => navigateOverview({ category })}
+                projectExplorerHref={overviewHandoffHref("/energyiq/explorer", {
+                  ...resolvedHandoffView,
+                  projectId,
+                })}
+                aiAnalystHref={overviewHandoffHref("/energyiq/ai", {
+                  ...resolvedHandoffView,
+                  projectId,
+                })}
+              />
+            ) : rendererRequest && projectRendererState ? (
               <ProjectRenderer request={rendererRequest} state={projectRendererState} sectionIdPrefix="customer-overview" onRetry={refreshOverview} />
             ) : (
               <EnergyTemplateRenderer state={rendererState} sectionIdPrefix="customer-overview" onRetry={refreshOverview} />

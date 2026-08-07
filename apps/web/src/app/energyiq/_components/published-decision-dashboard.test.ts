@@ -207,7 +207,7 @@ describe("published Overview URL reload", () => {
     });
 
     expect(container.textContent).toContain("Decision themes unavailable");
-    expect(container.textContent).toContain("Key highlights");
+    expect(container.textContent).toContain("Verified figures");
     expect(container.textContent).toContain("Rolling 28-day decision window");
     expect(container.textContent).toContain("20 May 2026–16 Jun 2026");
     expect(container.querySelector("[role='combobox'][aria-label='Analysis Scope']")).toBeNull();
@@ -215,6 +215,20 @@ describe("published Overview URL reload", () => {
       expect.arrayContaining(["Yesterday", "Last 7 days", "Previous week", "Previous month", "Custom"]),
     );
     expect(container.querySelectorAll("input[type='date']")).toHaveLength(0);
+    const contents = container.querySelector("[aria-label='Overview contents']");
+    expect(contents).not.toBeNull();
+    expect(Array.from(contents?.querySelectorAll<HTMLAnchorElement>("a") ?? [], (anchor) => [
+      anchor.textContent,
+      anchor.getAttribute("href"),
+    ])).toEqual([
+      ["Takeaways", "#ngee-ann-takeaways"],
+      ["Verified figures", "#ngee-ann-key-highlights"],
+      ["AI analysis", "#ngee-ann-ai-analysis"],
+      ["Change over time", "#ngee-ann-change"],
+      ["Main contributors", "#ngee-ann-location"],
+      ["Time patterns", "#ngee-ann-timing"],
+      ["Evidence", "#ngee-ann-evidence"],
+    ]);
     expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
     expect(resolveProjectAnalysis).toHaveBeenCalledWith({
       projectId: "ngee-ann-polytechnic",
@@ -299,7 +313,17 @@ describe("published Overview URL reload", () => {
     expect(container.querySelector("[role='combobox'][aria-label='Analysis Scope']")).toBeNull();
     expect(container.querySelector("[aria-label='Area and headcount metadata']")).toBeNull();
     expect(container.querySelectorAll("input[type='date']")).toHaveLength(0);
-    expect(container.textContent).not.toContain("Published sections");
+    expect(container.textContent).toContain("Overview contents");
+    const contents = container.querySelector("[aria-label='Overview contents']");
+    expect(Array.from(contents?.querySelectorAll<HTMLAnchorElement>("a") ?? [], (anchor) => anchor.textContent)).toEqual([
+      "Takeaways",
+      "AI analysis",
+      "Energy drivers",
+      "Efficiency",
+      "Operating patterns",
+      "Centre detail",
+      "Evidence",
+    ]);
     expect(Array.from(container.querySelectorAll("button"), (button) => button.textContent)).not.toEqual(
       expect.arrayContaining(["Yesterday", "Last 7 days", "Previous week", "Previous month", "Custom"]),
     );

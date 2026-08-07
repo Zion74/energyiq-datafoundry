@@ -73,15 +73,15 @@ export function NgeeAnnOverviewRenderer({
     >
       <header className="grid gap-5 border-b border-border px-5 py-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:px-7">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
             <span className="font-semibold text-foreground">{view.context.projectName}</span>
             <EnergyIcon name="chevron" className="h-3 w-3 text-muted-light" />
             <span>Scope · {view.context.scopeType === "project" ? "Whole project" : view.context.scopeName}</span>
           </div>
-          <h2 className="mt-2 text-xl font-semibold tracking-[-0.02em] text-foreground">
+          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.025em] text-foreground">
             Energy decision overview
           </h2>
-          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted">
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted">
             <span className="inline-flex items-center gap-1.5">
               <EnergyIcon name="calendar" className="h-3.5 w-3.5 text-muted-light" />
               {view.context.periodRange}
@@ -95,13 +95,18 @@ export function NgeeAnnOverviewRenderer({
             <EnergyIcon name={statusTone.icon} className={`mt-0.5 h-4 w-4 shrink-0 ${statusTone.text}`} />
             <div>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <p className={`text-xs font-semibold ${statusTone.text}`}>{view.dataStatus.label}</p>
-                <span className="text-[11px] text-muted">{view.dataStatus.coverage}</span>
+                <p className={`text-sm font-semibold ${statusTone.text}`}>{view.dataStatus.label}</p>
+                <span className="text-xs text-muted">{view.dataStatus.coverage}</span>
               </div>
-              <p className="mt-1 text-[11px] leading-5 text-muted">{view.dataStatus.summary}</p>
-              <p className="mt-1 text-[11px] leading-4 text-muted-light">
-                {view.dataStatus.intervals} / {view.dataStatus.qualityEvents} / {view.dataStatus.lastSeen}
-              </p>
+              <p className="mt-1 text-xs leading-5 text-muted">{view.dataStatus.summary}</p>
+              <details className="mt-1">
+                <summary className="cursor-pointer text-xs font-medium text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+                  Data details
+                </summary>
+                <p className="mt-1 text-xs leading-5 text-muted">
+                  {view.dataStatus.intervals} / {view.dataStatus.qualityEvents} / {view.dataStatus.lastSeen}
+                </p>
+              </details>
             </div>
           </div>
         </div>
@@ -125,7 +130,7 @@ export function NgeeAnnOverviewRenderer({
 
       {view.metadataLimitation ? (
         <div className="border-b border-border bg-surface px-5 py-3 lg:px-7" role="note">
-          <p className="text-[11px] leading-5 text-muted">
+          <p className="text-xs leading-5 text-muted">
             <span className="font-semibold text-foreground">Metadata limitation.</span> {view.metadataLimitation}
           </p>
         </div>
@@ -137,7 +142,11 @@ export function NgeeAnnOverviewRenderer({
         aiAnalystHref={aiAnalystHref}
       />
 
-      <OverviewSectionHeading eyebrow="At a glance" title="Key highlights" />
+      <OverviewSectionHeading
+        id="ngee-ann-key-highlights"
+        title="Verified figures"
+        description="The small set of numbers that anchors the decisions above."
+      />
 
       <div className="grid border-b border-border sm:grid-cols-2 xl:grid-cols-5 xl:divide-x xl:divide-border">
         {view.highlights.map((highlight) => (
@@ -145,27 +154,33 @@ export function NgeeAnnOverviewRenderer({
             key={highlight.id}
             className="min-w-0 border-b border-border px-5 py-5 last:border-b-0 sm:[&:nth-last-child(-n+2)]:border-b-0 xl:border-b-0"
           >
-            <p className="text-[11px] font-medium text-muted">{highlight.label}</p>
+            <p className="text-xs font-medium text-muted">{highlight.label}</p>
             <p className={[
-              "mt-2 break-words text-xl font-semibold tracking-[-0.025em] tabular-nums",
+              "mt-2 break-words text-2xl font-semibold tracking-[-0.025em] tabular-nums",
               highlight.available ? "text-foreground" : "text-muted-light",
             ].join(" ")}>
               {highlight.value}
-              {highlight.unit ? <span className="ml-1 text-xs font-medium tracking-normal text-muted">{highlight.unit}</span> : null}
+              {highlight.unit ? <span className="ml-1 text-sm font-medium tracking-normal text-muted">{highlight.unit}</span> : null}
             </p>
-            <p className="mt-2 text-[11px] leading-4 text-muted-light">{highlight.detail}</p>
+            <p className="mt-2 text-xs leading-5 text-muted">{highlight.detail}</p>
             {highlight.id === "peak" ? <NgeeAnnPeakBreakdown view={view.peakBreakdown} /> : null}
           </article>
         ))}
       </div>
 
-      <NgeeAnnAiSlot
-        snapshot={state.snapshot}
-        decisionPriorities={view.decisionPriorities}
-        aiAnalystHref={aiAnalystHref}
-      />
+      <div id="ngee-ann-ai-analysis" className="scroll-mt-28">
+        <NgeeAnnAiSlot
+          snapshot={state.snapshot}
+          decisionPriorities={view.decisionPriorities}
+          aiAnalystHref={aiAnalystHref}
+        />
+      </div>
 
-      <OverviewSectionHeading eyebrow="Change" title="What changed" />
+      <OverviewSectionHeading
+        id="ngee-ann-change"
+        title="Change over time"
+        description="See when usage moved away from its comparison and which days need investigation."
+      />
 
       <NgeeAnnEnergyTrend key={`trend:${view.energyTrend.evidence.period}`} view={view.energyTrend} />
 
@@ -185,7 +200,11 @@ export function NgeeAnnOverviewRenderer({
       />
 
 
-      <OverviewSectionHeading eyebrow="Location" title="Where" />
+      <OverviewSectionHeading
+        id="ngee-ann-location"
+        title="Main contributors"
+        description="Locate the Levels, categories and Circuits that explain the Project result."
+      />
 
       <NgeeAnnLevelComparison view={view.levelComparison} />
 
@@ -195,40 +214,47 @@ export function NgeeAnnOverviewRenderer({
         onCategoryChange={onCategoryChange}
       />
 
-      <OverviewSectionHeading eyebrow="Timing" title="When" />
+      <OverviewSectionHeading
+        id="ngee-ann-timing"
+        title="Time patterns"
+        description="Use the daily shape and recurring hour patterns to plan the next operational check."
+      />
 
       <NgeeAnnDayProfile key={`profile:${view.dayProfile.evidence.period}`} view={view.dayProfile} />
 
       <NgeeAnnUsageHeatmap key={`heatmap:${view.usageHeatmap.evidence.period}`} view={view.usageHeatmap} />
 
-      <div className="px-5 py-4 lg:px-7">
+      <div id="ngee-ann-evidence" className="scroll-mt-28 px-5 py-5 lg:px-7 lg:py-6">
         <div>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h3 className="text-sm font-semibold text-foreground">Snapshot & evidence</h3>
-              <p className="mt-1 text-[11px] text-muted">
-                {view.evidence.projectRelease} / {view.evidence.importBatchCount} import batches / Metadata {view.evidence.metadataStatus}
+              <h3 className="text-lg font-semibold tracking-[-0.015em] text-foreground">Evidence and calculation details</h3>
+              <p className="mt-1.5 text-sm leading-6 text-muted">
+                Open this section when you need to verify the Snapshot, Release or calculation route.
               </p>
             </div>
-            <span className="rounded-md bg-surface-subtle px-2 py-1 text-[11px] font-medium text-muted">
+            <span className="rounded-md bg-surface-subtle px-2.5 py-1.5 text-xs font-medium text-muted">
               {view.evidence.references.length} references
             </span>
           </div>
-          <dl className="mt-3 space-y-2 text-[11px]">
-            <div className="grid grid-cols-[72px_minmax(0,1fr)] gap-2">
-              <dt className="text-muted-light">Snapshot</dt>
-              <dd className="break-all font-mono text-foreground">{view.evidence.snapshotId}</dd>
-            </div>
-            <div className="grid grid-cols-[72px_minmax(0,1fr)] gap-2">
-              <dt className="text-muted-light">Release</dt>
-              <dd className="break-all font-mono text-foreground">{view.evidence.projectReleaseId}</dd>
-            </div>
-          </dl>
-          <details className="mt-3 border-t border-border pt-3">
-            <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
-              View reproducible evidence
+          <p className="mt-3 text-sm text-muted">
+            {view.evidence.projectRelease} · {view.evidence.importBatchCount} import batches · Metadata {view.evidence.metadataStatus}
+          </p>
+          <details className="mt-4 border-t border-border pt-4">
+            <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+              View reproducible evidence and technical IDs
             </summary>
-            <div className="mt-3 space-y-4 text-[11px] leading-4 text-muted">
+            <div className="mt-4 space-y-4 text-xs leading-5 text-muted">
+              <dl className="space-y-2">
+                <div className="grid grid-cols-[72px_minmax(0,1fr)] gap-2">
+                  <dt className="text-muted">Snapshot</dt>
+                  <dd className="break-all font-mono text-foreground">{view.evidence.snapshotId}</dd>
+                </div>
+                <div className="grid grid-cols-[72px_minmax(0,1fr)] gap-2">
+                  <dt className="text-muted">Release</dt>
+                  <dd className="break-all font-mono text-foreground">{view.evidence.projectReleaseId}</dd>
+                </div>
+              </dl>
               <div className="grid divide-y divide-border border-y border-border lg:grid-cols-2 lg:divide-x lg:divide-y-0">
                 <ComparisonEvidence
                   evidence={view.evidence.comparison}
@@ -263,11 +289,19 @@ export function NgeeAnnOverviewRenderer({
   );
 }
 
-function OverviewSectionHeading({ eyebrow, title }: { eyebrow: string; title: string }) {
+function OverviewSectionHeading({
+  id,
+  title,
+  description,
+}: {
+  id: string;
+  title: string;
+  description: string;
+}) {
   return (
-    <div className="border-b border-border bg-surface px-5 pb-3 pt-5 lg:px-7">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.11em] text-muted-light">{eyebrow}</p>
-      <h3 className="mt-1 text-base font-semibold text-foreground">{title}</h3>
+    <div id={id} className="scroll-mt-28 border-b border-border bg-surface px-5 pb-4 pt-7 lg:px-7 lg:pt-8">
+      <h3 className="text-lg font-semibold tracking-[-0.015em] text-foreground">{title}</h3>
+      <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">{description}</p>
     </div>
   );
 }

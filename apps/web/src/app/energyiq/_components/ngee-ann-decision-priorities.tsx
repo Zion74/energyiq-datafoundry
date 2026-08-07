@@ -19,28 +19,30 @@ export function NgeeAnnDecisionPriorities({
   aiAnalystHref?: string;
 }) {
   const stateMessage = priorityStateMessage(view);
-  const singleTheme = view.items.length === 1;
   return (
-    <section aria-labelledby="ngee-ann-decision-priorities" className="border-b border-border bg-surface-subtle/45 px-5 py-6 lg:px-7">
+    <section
+      id="ngee-ann-takeaways"
+      aria-labelledby="ngee-ann-decision-priorities"
+      className="scroll-mt-28 border-b border-border bg-surface-subtle/45 px-5 py-7 lg:px-7 lg:py-8"
+    >
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.11em] text-primary">Act first</p>
-          <h3 id="ngee-ann-decision-priorities" className="mt-1 text-base font-semibold text-foreground">
-            Decision themes
+          <h3 id="ngee-ann-decision-priorities" className="text-lg font-semibold tracking-[-0.015em] text-foreground">
+            Takeaways and next decisions
           </h3>
-          <p className="mt-1 max-w-3xl text-[11px] leading-5 text-muted">
-            Server-ranked exceptions from this Snapshot. Evidence is shown before any operational change is made.
+          <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">
+            Start here: what changed, why it matters, and the next check to make.
           </p>
         </div>
-        <span className="rounded-full border border-border bg-surface px-2.5 py-1 text-[11px] font-medium text-muted">
-          {view.items.length} deterministic {view.items.length === 1 ? "theme" : "themes"}
+        <span className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-muted">
+          {view.items.length} verified {view.items.length === 1 ? "priority" : "priorities"}
         </span>
       </div>
 
       {stateMessage ? (
         <div
           role="status"
-          className="mt-4 rounded-lg border border-border bg-surface px-4 py-3 text-[11px] leading-5 text-muted"
+          className="mt-5 rounded-lg border border-border bg-surface px-4 py-3 text-sm leading-6 text-muted"
         >
           <p className="font-semibold text-foreground">{stateMessage.title}</p>
           <p className="mt-0.5">{stateMessage.detail}</p>
@@ -48,13 +50,16 @@ export function NgeeAnnDecisionPriorities({
       ) : null}
 
       {view.items.length > 0 ? (
-        <div className={singleTheme ? "mt-4 grid grid-cols-1 gap-3" : "mt-4 grid gap-3 xl:grid-cols-3"}>
+        <div className="mt-5 space-y-4">
           {view.items.map((item) => (
-            <article key={item.priorityId} className="flex min-w-0 flex-col rounded-xl border border-border bg-surface p-4 shadow-[var(--shadow-card)]">
+            <article key={item.priorityId} className="min-w-0 rounded-xl border border-border bg-surface p-5 shadow-[var(--shadow-card)] lg:p-6">
               <div className="flex items-start justify-between gap-3">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-primary">Decision theme {item.rank}</p>
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-primary">Priority {item.rank}</p>
+                  <h4 className="mt-1.5 max-w-4xl text-lg font-semibold leading-7 text-foreground">{item.finding}</h4>
+                </div>
                 <span className={[
-                  "rounded-full px-2 py-1 text-[11px] font-semibold",
+                  "shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold",
                   item.confidence === "Complete Evidence"
                     ? "bg-step-success-light text-step-success"
                     : "bg-step-warning/10 text-step-warning",
@@ -62,32 +67,36 @@ export function NgeeAnnDecisionPriorities({
                   {item.confidence}
                 </span>
               </div>
-              <PriorityField label="Finding" value={item.finding} />
-              <PriorityField label="Evidence" value={item.evidence} />
-              <PriorityField label="Primary incident impact" value={item.impact} />
-              <p className="mt-3 text-[11px] font-semibold text-muted">
-                {item.recurrenceDayCount} distinct exception days; linked Level and Circuit Evidence is preserved
-              </p>
-              <div className={singleTheme
-                ? "mt-3 grid gap-2 sm:grid-cols-3"
-                : "mt-3 grid gap-2 sm:grid-cols-3 xl:grid-cols-1 2xl:grid-cols-3"}>
+              <div className="mt-5 grid gap-3 sm:grid-cols-3">
                 {item.horizons.map((horizon) => (
-                  <div key={horizon.label} className="rounded-lg border border-border bg-surface-subtle px-3 py-2">
-                    <p className="text-[11px] font-semibold text-foreground">{horizon.label}</p>
-                    <p className="mt-0.5 text-[10px] text-muted">{horizon.period}</p>
-                    <p className="mt-1 text-xs font-semibold tabular-nums text-foreground">{horizon.comparison}</p>
+                  <div key={horizon.label} className="rounded-lg bg-surface-subtle px-4 py-3">
+                    <p className="text-xs font-semibold text-foreground">{horizon.label}</p>
+                    <p className="mt-1 text-xs text-muted">{horizon.period}</p>
+                    <p className="mt-2 text-base font-semibold tabular-nums text-foreground">{horizon.comparison}</p>
                     {horizon.limitation ? (
-                      <p className="mt-1 text-[10px] leading-4 text-step-warning">{horizon.limitation}</p>
+                      <p className="mt-1 text-xs leading-5 text-step-warning">{horizon.limitation}</p>
                     ) : null}
                   </div>
                 ))}
               </div>
-              <PriorityField label="Strongest supported driver" value={item.driver} />
-              <PriorityField label="Next check" value={item.nextCheck} />
-              <PriorityField label="Verification metric" value={item.verificationMetric} />
-              {item.confidenceLimitation ? (
-                <p className="mt-3 text-[11px] leading-5 text-step-warning">Limitation: {item.confidenceLimitation}</p>
-              ) : null}
+              <dl className="mt-5 grid gap-x-8 gap-y-4 text-sm leading-6 md:grid-cols-2">
+                <PriorityField label="Why it matters" value={item.impact} />
+                <PriorityField label="Main supported driver" value={item.driver} />
+                <PriorityField label="Do next" value={item.nextCheck} />
+                <PriorityField label="Verify with" value={item.verificationMetric} />
+              </dl>
+              <details className="mt-5 border-t border-border pt-4">
+                <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+                  Details, evidence and limitations
+                </summary>
+                <div className="mt-4 text-sm leading-6 text-muted">
+                  <p><span className="font-semibold text-foreground">Supporting evidence.</span> {item.evidence}</p>
+                  <p className="mt-2">Seen on {item.recurrenceDayCount} distinct exception days. Linked Level and Circuit evidence is preserved.</p>
+                  {item.confidenceLimitation ? (
+                    <p className="mt-2 text-step-warning"><span className="font-semibold">Limitation.</span> {item.confidenceLimitation}</p>
+                  ) : null}
+                </div>
+              </details>
               <a
                 href={`#${anomalyIncidentDomId(item.targetIncidentId)}`}
                 onClick={(event) => {
@@ -103,9 +112,9 @@ export function NgeeAnnDecisionPriorities({
                   ));
                   if (handled) event.preventDefault();
                 }}
-                className="mt-4 inline-flex min-h-9 items-center justify-center rounded-lg border border-primary/25 px-3 text-xs font-semibold text-primary transition-colors hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
+                className="mt-4 inline-flex min-h-10 items-center justify-center rounded-lg border border-primary/25 px-3.5 text-sm font-semibold text-primary transition-colors hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
               >
-                View evidence
+                View supporting evidence
               </a>
             </article>
           ))}
@@ -130,9 +139,9 @@ export function NgeeAnnDecisionPriorities({
 
 function PriorityField({ label, value }: { label: string; value: string }) {
   return (
-    <div className="mt-3">
-      <p className="text-[11px] font-semibold text-muted">{label}</p>
-      <p className="mt-1 text-xs leading-5 text-foreground">{value}</p>
+    <div>
+      <dt className="font-semibold text-foreground">{label}</dt>
+      <dd className="mt-1 text-muted">{value}</dd>
     </div>
   );
 }
