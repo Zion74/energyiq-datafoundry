@@ -27,6 +27,7 @@ export type EnergyIqHarnessEvalCase = {
       why: string[];
       action: string[];
       verify: string[];
+      consequence?: string[];
     };
   };
 };
@@ -45,6 +46,10 @@ const COMMON_INSIGHT_SIGNALS = {
   why: ["\\b(?:matters|important|impact|because|risk|contributes?)\\b", "\\b(?:cost|waste|load|share|demand|operation)\\b"],
   action: ["\\b(?:check|inspect|review|investigate|schedule|adjust|reduce|prioriti[sz]e)\\b", "\\b(?:meter|circuit|equipment|controls?|operating hours?|team)\\b"],
   verify: ["\\b(?:verify|validate|confirm|monitor|recheck|compare)\\b", "\\b(?:next|after|before|baseline|day|week|reading|trend)\\b"],
+  consequence: [
+    "\\b(?:if (?:we|you|the team) (?:act|do this)|if implemented|expected (?:signal|result|outcome)|should (?:show|reduce|confirm))\\b",
+    "\\b(?:if (?:we|you|the team) (?:do not|don't|ignore)|if ignored|otherwise|may (?:continue|recur|remain|worsen))\\b",
+  ],
 };
 
 export const ENERGYIQ_HARNESS_FAST_CASES: EnergyIqHarnessEvalCase[] = [

@@ -265,7 +265,10 @@ function renderMarkdown(value, delta, continuity) {
     const cache = entry.metrics.cacheTelemetrySteps > 0
       ? `${entry.metrics.cacheHitTokens}/${entry.metrics.cacheMissTokens}`
       : "unavailable";
-    return `| ${escapeCell(entry.caseId)} | ${entry.attempt} | ${entry.status} | ${entry.metrics.elapsedMs} | ${entry.metrics.sqlCalls} | ${entry.metrics.reasoningRounds} | ${entry.metrics.maxPromptTokens} | ${utilization} | ${cache} | ${entry.snapshotIds.length} | ${entry.metrics.insightQuality ?? "-"} | ${escapeCell(failed)} |`;
+    const decisionQuality = entry.metrics.decisionQuality
+      ? `${entry.metrics.decisionQuality.total}/${entry.metrics.decisionQuality.maximum}`
+      : "-";
+    return `| ${escapeCell(entry.caseId)} | ${entry.attempt} | ${entry.status} | ${entry.metrics.elapsedMs} | ${entry.metrics.sqlCalls} | ${entry.metrics.repeatedSqlCalls} | ${entry.metrics.reasoningRounds} | ${entry.metrics.maxPromptTokens} | ${utilization} | ${cache} | ${entry.snapshotIds.length} | ${entry.metrics.answerWordCount} | ${decisionQuality} | ${escapeCell(failed)} |`;
   });
   const continuitySection = continuity ? [
     "",
@@ -293,6 +296,8 @@ function renderMarkdown(value, delta, continuity) {
     `- P50 / P95 latency: ${value.summary.p50ElapsedMs} / ${value.summary.p95ElapsedMs} ms`,
     `- Average SQL / reasoning rounds: ${value.summary.averageSqlCalls.toFixed(2)} / ${value.summary.averageReasoningRounds.toFixed(2)}`,
     `- Average insight quality: ${value.summary.averageInsightQuality ?? "n/a"}/10`,
+    `- Average decision quality: ${value.summary.averageDecisionQualityRatio === null ? "n/a" : `${(value.summary.averageDecisionQualityRatio * 100).toFixed(1)}%`}`,
+    `- Average answer words / repeated SQL: ${value.summary.averageAnswerWordCount.toFixed(1)} / ${value.summary.totalRepeatedSqlCalls}`,
     `- Hard failures: ${value.summary.hardFailures}`,
     `- Failed / recovered tool calls: ${value.summary.totalFailedToolCalls} / ${value.summary.totalRecoveredToolFailures}`,
     `- Max prompt / budget utilization: ${value.summary.maxPromptTokens} / ${value.summary.maxBudgetUtilization === null ? "n/a" : `${(value.summary.maxBudgetUtilization * 100).toFixed(1)}%`}`,
@@ -301,8 +306,8 @@ function renderMarkdown(value, delta, continuity) {
     "",
     "## Cases",
     "",
-    "| Case | Attempt | Status | Latency ms | SQL | Reasoning | Max prompt | Budget | Cache hit/miss | Snapshots | Insight /10 | Failed assertions |",
-    "|---|---:|---|---:|---:|---:|---:|---:|---|---:|---:|---|",
+    "| Case | Attempt | Status | Latency ms | SQL | Repeated SQL | Reasoning | Max prompt | Budget | Cache hit/miss | Snapshots | Words | Decision quality | Failed assertions |",
+    "|---|---:|---|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---|",
     ...rows,
     ...continuitySection,
     "",

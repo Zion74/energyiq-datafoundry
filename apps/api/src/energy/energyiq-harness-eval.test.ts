@@ -479,7 +479,44 @@ describe("EnergyIQ Harness Eval", () => {
     });
 
     expect(report.metrics.insightQuality).toBe(10);
+    expect(report.metrics.decisionQuality).toMatchObject({
+      takeaway: 2,
+      evidenceUse: 2,
+      decisionRelevance: 2,
+      action: 2,
+      verification: 2,
+      causalDiscipline: 2,
+      readability: 2,
+      consequence: 0,
+      total: 14,
+      maximum: 16,
+    });
+    expect(report.metrics.answerWordCount).toBeGreaterThan(40);
+    expect(report.metrics.openingWordCount).toBeLessThan(report.metrics.answerWordCount);
     expect(report.status).toBe("passed");
+  });
+
+  it("reports repeated SQL as efficiency telemetry without restricting a correct investigation", () => {
+    const evalCase = ENERGYIQ_HARNESS_FAST_CASES[0]!;
+    const answer = "The whole project used 1,531.1683 kWh from 2026-06-10 to 2026-06-16. The result is calculated from the scoped interval evidence.";
+    const sql = "SELECT SUM(usage_kwh) FROM canonical_interval WHERE quality_status = 'ok';";
+    const events = successfulEvents(answer).map((event) => (
+      event.type === "TOOL_CALL_START" && event.toolCallName === "run_sql_readonly"
+        ? { ...event, args: { sql } }
+        : event
+    ));
+    const answerIndex = events.findIndex((event) => event.type === "TEXT_MESSAGE_CONTENT");
+    events.splice(answerIndex, 0,
+      { type: "TOOL_CALL_START", toolCallName: "run_sql_readonly", toolCallId: "duplicate-sql", args: { sql: `  ${sql.toUpperCase()}  ` } },
+      { type: "TOOL_CALL_RESULT", toolCallName: "run_sql_readonly", toolCallId: "duplicate-sql", content: JSON.stringify({ success: true }) },
+    );
+
+    const report = evaluateEnergyIqHarnessObservation(evalCase, { elapsedMs: 90_000, events });
+
+    expect(report.status).toBe("passed");
+    expect(report.metrics.sqlCalls).toBe(2);
+    expect(report.metrics.repeatedSqlCalls).toBe(1);
+    expect(report.assertions.some((assertion) => assertion.id.startsWith("efficiency."))).toBe(false);
   });
 });
 
