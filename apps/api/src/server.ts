@@ -1098,6 +1098,10 @@ class DataFoundryAgUiAgent extends AbstractAgent {
                 ...(modelContextProfile
                   ? {
                       context_window: modelContextProfile.contextWindow,
+                      max_output_tokens: modelContextProfile.maxOutputTokens,
+                      output_reserve: modelContextProfile.outputReserve,
+                      safety_margin: modelContextProfile.safetyMargin,
+                      capability_source: modelContextProfile.capabilitySource,
                       input_budget: Math.max(
                         modelContextProfile.contextWindow
                           - modelContextProfile.outputReserve

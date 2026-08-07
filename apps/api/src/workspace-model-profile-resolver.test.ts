@@ -63,6 +63,8 @@ describe("Workspace default model profile runtime", () => {
     expect(resolved.effectiveRunConfig.activeLlmProfileId).toBe("workspace-default");
     expect(resolved.modelProvider.model_name).toBe("deepseek-v4-flash");
     expect(resolved.modelProvider).not.toHaveProperty("provider_ids");
+    expect(resolved.modelContextProfile).toBeUndefined();
+    expect(resolved.modelSettings).not.toHaveProperty("maxOutputTokens");
     expect(metadata.configResources.list({
       workspace_id: "customer-1", user_id: "normal-user", kind: "model-profile"
     })).toEqual([]);
@@ -140,6 +142,96 @@ describe("Workspace default model profile runtime", () => {
     expect(() => resolveModelProfileChain({
       metadataStore: metadata, profileId: "workspace-default", userId: "normal-user", workspaceId: "customer-1"
     })).toThrow("WORKSPACE_DEFAULT_MODEL_PROFILE_SOURCE_UNAVAILABLE");
+
+    metadata.db.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("uses the verified DeepSeek V4 Flash budget only on the official endpoint", () => {
+    const root = mkdtempSync(join(tmpdir(), "verified-model-capability-"));
+    const metadata = createMetadataStore({
+      database_path: join(root, "metadata.sqlite"),
+      secret_master_key: "test-key"
+    });
+    metadata.workspaces.upsert({ id: "default", owner_user_id: "dev-user", name: "EnergyIQ", kind: "personal" });
+    metadata.users.upsertDevUser({
+      id: "dev-user",
+      email: "dev@example.test",
+      display_name: "Developer",
+      dev_token: "dev-token"
+    });
+
+    const addProfile = (id: string, payload: Record<string, unknown>): void => {
+      const secretRef = metadata.secrets.put({
+        workspace_id: "default",
+        user_id: "dev-user",
+        owner_kind: "model-profile",
+        owner_id: id,
+        value: { apiKey: `${id}-secret` }
+      });
+      metadata.configResources.upsert({
+        id,
+        workspace_id: "default",
+        user_id: "dev-user",
+        kind: "model-profile",
+        name: id,
+        payload,
+        secret_ref: secretRef,
+        default_enabled: true,
+        status: "connected"
+      });
+    };
+    addProfile("official-deepseek", {
+      provider: "openai-compatible",
+      modelName: "deepseek-v4-flash",
+      baseUrl: "https://api.deepseek.com/v1"
+    });
+    addProfile("explicit-proxy", {
+      provider: "openai-compatible",
+      modelName: "deepseek-v4-flash",
+      baseUrl: "https://proxy.example.test/v1",
+      contextLength: 500_000,
+      maxOutputTokens: 16_000
+    });
+    addProfile("unverified-proxy", {
+      provider: "openai-compatible",
+      modelName: "deepseek-v4-flash",
+      baseUrl: "https://proxy.example.test/v1"
+    });
+
+    const resolveProfile = (profileId: string) => resolveRunConfig({
+      metadataStore: metadata,
+      runInput: {
+        ...emptyRunInput(),
+        forwardedProps: { run_config: { activeLlmProfileId: profileId } }
+      } as RunAgentInput,
+      userId: "dev-user",
+      userInput: "Investigate energy use",
+      workspaceId: "default"
+    });
+
+    const official = resolveProfile("official-deepseek");
+    expect(official.modelContextProfile).toMatchObject({
+      capabilitySource: "verified-model-default",
+      contextWindow: 1_000_000,
+      maxOutputTokens: 32_000,
+      outputReserve: 32_000,
+      safetyMargin: 4096
+    });
+    expect(official.modelSettings).toMatchObject({ maxOutputTokens: 32_000 });
+
+    const explicit = resolveProfile("explicit-proxy");
+    expect(explicit.modelContextProfile).toMatchObject({
+      capabilitySource: "explicit-profile",
+      contextWindow: 500_000,
+      maxOutputTokens: 16_000,
+      outputReserve: 16_000
+    });
+    expect(explicit.modelSettings).toMatchObject({ maxOutputTokens: 16_000 });
+
+    const unverified = resolveProfile("unverified-proxy");
+    expect(unverified.modelContextProfile).toBeUndefined();
+    expect(unverified.modelSettings).not.toHaveProperty("maxOutputTokens");
 
     metadata.db.close();
     rmSync(root, { recursive: true, force: true });

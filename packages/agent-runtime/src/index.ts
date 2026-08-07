@@ -132,7 +132,9 @@ export type AgentContextSourceMetadata = ContextSourceMetadata;
 export type CreateAgentContextItemInput = CreateContextItemInput;
 export type AgentModelContextProfile = {
   id: string;
+  capabilitySource: "conservative-fallback" | "explicit-profile" | "verified-model-default";
   contextWindow: number;
+  maxOutputTokens: number;
   outputReserve: number;
   safetyMargin: number;
   messageOverhead: number;
