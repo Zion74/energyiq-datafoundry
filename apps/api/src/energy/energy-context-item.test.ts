@@ -244,6 +244,8 @@ describe("createEnergyQueryContextItem", () => {
     expect(content).not.toContain("do-not-copy-complete-metadata-evidence");
     expect(content).not.toContain("internal-source-circuit-a");
     expect(content).not.toContain('"centreCode":"A","standbySpikeCount":0');
+    expect(content).not.toContain('"evidenceRefs"');
+    expect(content.match(/preschool-benchmark/gu)).toHaveLength(1);
     expect(content.length).toBeLessThan(15_000);
     expect(content).toContain("Deterministic Evidence is authoritative");
   });

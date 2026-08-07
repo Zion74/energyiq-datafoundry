@@ -160,6 +160,20 @@ export const createProjectAnalysisSnapshotContextItem = (input: {
   const snapshot = input.snapshot;
   const contextEvidenceCatalog = input.contextEvidenceCatalog
     ?? createProjectAnalysisContextEvidenceCatalog(snapshot);
+  const promptContextEvidenceCatalog = {
+    contract: contextEvidenceCatalog.contract,
+    sourceId: contextEvidenceCatalog.sourceId,
+    pins: contextEvidenceCatalog.pins,
+    facts: contextEvidenceCatalog.facts.map((fact) => ({
+      id: fact.id,
+      label: fact.label,
+      metricId: fact.metricId,
+      value: fact.value,
+      ...(fact.unit ? { unit: fact.unit } : {}),
+      status: fact.status,
+      dimensions: fact.dimensions,
+    })),
+  };
   const bundle = {
     contract: "energyiq-deterministic-evidence@1",
     projectId: snapshot.context.projectId,
@@ -194,7 +208,7 @@ export const createProjectAnalysisSnapshotContextItem = (input: {
       "Use the scoped DuckDB relations for new investigation. If a required value is absent from both this bundle and successful scoped tool Evidence, return Missing Evidence or Unavailable rather than zero.",
       "For released scalar claims, use fact ids from context_evidence_catalog with analysis_requirements_commit. New drivers and custom investigation still require scoped SQL Evidence.",
       "When a Context Evidence fact is partial or provisional, keep that status visible in the answer; do not present it as complete or confirmed.",
-      `context_evidence_catalog=${JSON.stringify(contextEvidenceCatalog)}`,
+      `context_evidence_catalog=${JSON.stringify(promptContextEvidenceCatalog)}`,
       `deterministic_evidence_bundle=${JSON.stringify(bundle)}`,
     ].join("\n"),
     metadata: createAgentContextSourceMetadata({

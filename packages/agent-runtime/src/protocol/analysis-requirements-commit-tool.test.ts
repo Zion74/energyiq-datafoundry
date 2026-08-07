@@ -234,6 +234,120 @@ describe("analysis requirements commit tool", () => {
     }));
   });
 
+  it("does not let query evidence replace required released Context Evidence", async () => {
+    const contextRequirements = createUserAnalysisRequirements([{
+      kind: "metric",
+      description: "What is Centre A EUI?",
+      acceptanceCriteria: ["Use released EUI"],
+    }]);
+    contextRequirements[0]!.contextEvidence = {
+      mode: "sufficient",
+      factIds: ["centre-a.eui", "cohort.eui.p50"],
+    };
+    const executeAction = vi.fn();
+    const tool = createAnalysisRequirementsCommitTool({
+      analysisRequirements: contextRequirements,
+      contextEvidenceCatalog: {
+        contract: "analysis-context-evidence@1",
+        sourceId: "snapshot-source",
+        pins: {
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          scopeId: "project",
+          dataSnapshotId: "snapshot-1",
+          dataCutoff: "2026-06-01T00:00:00.000Z",
+          projectReleaseId: "release-1",
+          metricVersion: "metrics-1",
+        },
+        facts: [],
+      },
+      executeAction,
+      getAnalysisRequirements: () => contextRequirements,
+      getVerifiedRequirementValues: () => [{
+        name: "query-only-value",
+        value: 13.62,
+        tolerance: 0.0001,
+        assertionId: "QUERY:R1",
+      }],
+      runId: "run-context-required",
+      segmentId: "segment-context-required",
+      trustedEnergy: true,
+    });
+
+    const result = await tool.execute?.({ claims: [{
+      requirement_id: "R1",
+      claim: "Centre A EUI is 13.62.",
+    }] }, { agent: { toolCallId: "call-context-required" } } as never);
+
+    expect(result).toMatchObject({ ok: false, isError: true });
+    expect(JSON.stringify(result)).toContain("ANALYSIS_CONTEXT_EVIDENCE_REQUIRED:R1");
+    expect(JSON.stringify(result)).toContain("centre-a.eui");
+    expect(executeAction).not.toHaveBeenCalled();
+  });
+
+  it("carries verified query evidence into a supporting Context Evidence commit", async () => {
+    const contextRequirements = createUserAnalysisRequirements([{
+      kind: "decision",
+      description: "Which centre should I investigate first?",
+      acceptanceCriteria: ["Use released priority and investigate a driver"],
+    }]);
+    contextRequirements[0]!.status = "evidenced";
+    contextRequirements[0]!.contextEvidence = {
+      mode: "supporting",
+      factIds: ["centre-g.priority"],
+    };
+    const executeAction = vi.fn(async (action) => ({ observation: action.input }));
+    const tool = createAnalysisRequirementsCommitTool({
+      analysisRequirements: contextRequirements,
+      contextEvidenceCatalog: {
+        contract: "analysis-context-evidence@1",
+        sourceId: "snapshot-source",
+        pins: {
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          scopeId: "project",
+          dataSnapshotId: "snapshot-1",
+          dataCutoff: "2026-06-01T00:00:00.000Z",
+          projectReleaseId: "release-1",
+          metricVersion: "metrics-1",
+        },
+        facts: [{
+          id: "centre-g.priority",
+          label: "Centre G priority",
+          metricId: "preschool.benchmark.priority",
+          value: true,
+          status: "provisional",
+          evidenceRefs: ["evidence-priority"],
+          dimensions: { scopeId: "centre-g" },
+        }],
+      },
+      executeAction,
+      getAnalysisRequirements: () => contextRequirements,
+      runId: "run-context-supporting",
+      segmentId: "segment-context-supporting",
+      trustedEnergy: true,
+    });
+
+    const result = await tool.execute?.({ claims: [{
+      requirement_id: "R1",
+      claim: "Investigate Centre G first based on released priority and the verified driver query.",
+      context_fact_ids: ["centre-g.priority"],
+    }] }, { agent: { toolCallId: "call-context-supporting" } } as never);
+
+    expect(result).toMatchObject({ claims: [{
+      requirement_id: "R1",
+      evidence_requirement_ids: ["R1"],
+    }] });
+    expect((result as { claims: Array<{ evidence_refs?: string[] }> }).claims[0]?.evidence_refs).toBeUndefined();
+    expect(executeAction).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      actionName: "analysis.requirements.commit",
+      input: expect.objectContaining({ claims: [expect.objectContaining({
+        evidence_requirement_ids: ["R1"],
+        evidence_refs: undefined,
+      })] }),
+    }));
+  });
+
   it("rejects unknown or ungrounded context facts before changing protocol state", async () => {
     const contextRequirements = createUserAnalysisRequirements([{
       kind: "metric",

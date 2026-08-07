@@ -115,7 +115,7 @@ export const createAnalysisRequirementsCommitTool = (
   return createTool({
     id: "analysis_requirements_commit",
     description: input.contextEvidenceCatalog
-      ? "Commit final claims using audited SQL Evidence and/or authorized current-Snapshot context_fact_ids. Use only fact ids listed for the requirement in analysis_contract."
+      ? "Commit final claims using audited SQL Evidence and/or authorized current-Snapshot context_fact_ids. When analysis_contract lists context_evidence for a requirement, include only that requirement's listed fact ids; SQL Evidence does not replace those released facts."
       : "Commit final claims for analysis requirements using artifact evidence from successful SQL results.",
     inputSchema,
     execute: async (toolInput, options) => {
@@ -159,7 +159,14 @@ const bindContextEvidence = async (input: CreateAnalysisRequirementsCommitToolIn
   const claims: TrustedEnergyRequirementsCommitInput["claims"] = [];
   for (const [index, claim] of input.claims.entries()) {
     const factIds = claim.context_fact_ids ?? [];
+    const requirement = requirementsById.get(claim.requirement_id);
     if (factIds.length === 0) {
+      if (requirement?.contextEvidence) {
+        throw new Error([
+          `ANALYSIS_CONTEXT_EVIDENCE_REQUIRED:${claim.requirement_id}`,
+          `ALLOWED_FACT_IDS:${requirement.contextEvidence.factIds.join(",")}`,
+        ].join(":"));
+      }
       const verifiedValues = input.getVerifiedRequirementValues?.(claim.requirement_id) ?? [];
       const canonicalValues = verifiedValues.map((value) => ({
         name: value.name,
@@ -172,15 +179,19 @@ const bindContextEvidence = async (input: CreateAnalysisRequirementsCommitToolIn
       continue;
     }
     if (!catalog) throw new Error("ANALYSIS_CONTEXT_EVIDENCE_CATALOG_UNAVAILABLE");
-    const requirement = requirementsById.get(claim.requirement_id);
     if (!requirement?.contextEvidence) {
       throw new Error(`ANALYSIS_CONTEXT_EVIDENCE_NOT_AUTHORIZED:${claim.requirement_id}`);
     }
     if (requirement.contextEvidence.mode === "supporting" && requirement.status !== "evidenced") {
       throw new Error(`ANALYSIS_CONTEXT_EVIDENCE_SUPPORTING_REQUIRES_QUERY:${claim.requirement_id}`);
     }
-    if (factIds.some((factId) => !requirement.contextEvidence?.factIds.includes(factId))) {
-      throw new Error(`ANALYSIS_CONTEXT_EVIDENCE_NOT_AUTHORIZED:${claim.requirement_id}`);
+    const unauthorizedFactIds = factIds.filter((factId) => !requirement.contextEvidence?.factIds.includes(factId));
+    if (unauthorizedFactIds.length > 0) {
+      throw new Error([
+        `ANALYSIS_CONTEXT_EVIDENCE_NOT_AUTHORIZED:${claim.requirement_id}`,
+        `UNAUTHORIZED_FACT_IDS:${unauthorizedFactIds.join(",")}`,
+        `ALLOWED_FACT_IDS:${requirement.contextEvidence.factIds.join(",")}`,
+      ].join(":"));
     }
     const facts = resolveContextEvidenceFacts(catalog, factIds);
     const verifiedValues = contextEvidenceVerifiedValues(facts);
@@ -209,10 +220,24 @@ const bindContextEvidence = async (input: CreateAnalysisRequirementsCommitToolIn
       value: value.value,
       ...(value.unit ? { unit: value.unit } : {}),
     }));
+    const supportingContextEvidence = requirement.contextEvidence.mode === "supporting";
     claims.push({
       ...claim,
       values: mergeClaimValues(claim.values ?? [], canonicalValues),
-      evidence_refs: [...new Set([...(claim.evidence_refs ?? []), ...evidenceRefs])],
+      ...(supportingContextEvidence
+        ? {
+            // Let the protocol select every verified binding for this requirement.
+            // An explicit Context-only reference would otherwise filter out the
+            // already-verified query evidence that supporting mode requires.
+            evidence_refs: undefined,
+            evidence_requirement_ids: [...new Set([
+              ...(claim.evidence_requirement_ids ?? []),
+              claim.requirement_id,
+            ])],
+          }
+        : {
+            evidence_refs: [...new Set([...(claim.evidence_refs ?? []), ...evidenceRefs])],
+          }),
     });
   }
   return { claims };
