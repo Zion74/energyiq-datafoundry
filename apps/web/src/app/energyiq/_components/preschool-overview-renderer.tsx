@@ -62,34 +62,37 @@ export function PreschoolOverviewRenderer({
     >
       <header className="grid gap-5 border-b border-border px-5 py-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:px-7">
         <div className="min-w-0">
-          <p className="text-xs font-semibold text-foreground">{view.context.projectName}</p>
-          <h2 className="mt-2 text-xl font-semibold tracking-[-0.02em] text-foreground">Portfolio energy overview</h2>
-          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted">
+          <p className="text-sm font-semibold text-foreground">{view.context.projectName}</p>
+          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.025em] text-foreground">Portfolio energy overview</h2>
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted">
             <span className="inline-flex items-center gap-1.5"><EnergyIcon name="calendar" className="h-3.5 w-3.5 text-muted-light" />{view.context.period}</span>
             <span>{view.context.timezone}</span>
           </div>
         </div>
         <div className={`rounded-lg border px-4 py-3 ${statusClass}`} role="status">
-          <p className="text-xs font-semibold">{view.dataStatus.label}</p>
-          <p className="mt-1 text-[11px] text-muted">{view.dataStatus.coverage}</p>
-          <p className="mt-1 text-[10px] text-muted-light">{view.dataStatus.intervals} · {view.dataStatus.qualityEvents}</p>
+          <p className="text-sm font-semibold">{view.dataStatus.label}</p>
+          <p className="mt-1 text-xs text-muted">{view.dataStatus.coverage}</p>
+          <details className="mt-1">
+            <summary className="cursor-pointer text-xs font-medium text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Data details</summary>
+            <p className="mt-1 text-xs leading-5 text-muted">{view.dataStatus.intervals} · {view.dataStatus.qualityEvents}</p>
+          </details>
         </div>
       </header>
 
       <div className="grid divide-y divide-border border-b border-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-5">
         {view.highlights.map((highlight) => (
           <div key={highlight.id} className="min-w-0 px-5 py-4">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-light">{highlight.label}</p>
-            <p className={`mt-2 text-xl font-semibold tabular-nums ${highlight.available ? "text-foreground" : "text-muted"}`}>{highlight.value}</p>
-            <p className="mt-2 text-[11px] leading-4 text-muted">{highlight.detail}</p>
+            <p className="text-xs font-semibold text-muted">{highlight.label}</p>
+            <p className={`mt-2 text-2xl font-semibold tabular-nums ${highlight.available ? "text-foreground" : "text-muted"}`}>{highlight.value}</p>
+            <p className="mt-2 text-xs leading-5 text-muted">{highlight.detail}</p>
           </div>
         ))}
       </div>
 
-      <section aria-labelledby="preschool-decision-summary" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
+      <section id="preschool-decision-summary" aria-labelledby="preschool-decision-summary-heading" className="scroll-mt-28 border-b border-border bg-surface-subtle/45 px-5 py-7 lg:px-7 lg:py-8">
         <div>
-          <h3 id="preschool-decision-summary" className="text-base font-semibold text-foreground">Key findings &amp; top actions</h3>
-          <p className="mt-1 text-xs leading-5 text-muted">Only the supported priorities that need attention now. Unsupported themes stay hidden.</p>
+          <h3 id="preschool-decision-summary-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Takeaways and next decisions</h3>
+          <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Start here: the Portfolio issues worth attention and the next check for each one.</p>
         </div>
         {view.decisionSummary.items.length > 0 ? (
           <div className="mt-4 space-y-3">
@@ -99,26 +102,28 @@ export function PreschoolOverviewRenderer({
           </div>
         ) : (
           <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
-            <p className="text-xs font-semibold text-muted">Decision summary unavailable</p>
-            <p className="mt-2 text-[11px] leading-5 text-muted">{view.decisionSummary.detail}</p>
+            <p className="text-sm font-semibold text-muted">Decision summary unavailable</p>
+            <p className="mt-2 text-sm leading-6 text-muted">{view.decisionSummary.detail}</p>
           </div>
         )}
         {view.decisionSummary.items.length > 0 ? (
-          <p className="mt-3 text-[10px] leading-4 text-muted-light">{view.decisionSummary.detail}</p>
+          <p className="mt-4 text-xs leading-5 text-muted">{view.decisionSummary.detail}</p>
         ) : null}
       </section>
 
-      <PreschoolAiSlot
-        snapshot={state.snapshot}
-        decisionSummary={view.decisionSummary}
-        {...(aiAnalystHref ? { aiAnalystHref } : {})}
-      />
+      <div id="preschool-ai-analysis" className="scroll-mt-28">
+        <PreschoolAiSlot
+          snapshot={state.snapshot}
+          decisionSummary={view.decisionSummary}
+          {...(aiAnalystHref ? { aiAnalystHref } : {})}
+        />
+      </div>
 
-      <section aria-labelledby="preschool-appliance-ranking" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
+      <section id="preschool-appliance-ranking" aria-labelledby="preschool-appliance-ranking-heading" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h3 id="preschool-appliance-ranking" className="text-base font-semibold text-foreground">Where energy goes</h3>
-            <p className="mt-1 text-xs leading-5 text-muted">Portfolio contribution by customer Appliance name for the complete May Snapshot.</p>
+            <h3 id="preschool-appliance-ranking-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Where energy goes</h3>
+            <p className="mt-1.5 text-sm leading-6 text-muted">See which Appliances contribute most before choosing where to investigate.</p>
           </div>
           {view.appliances.status === "available" ? (
             <p className="text-xs font-semibold tabular-nums text-foreground">{view.appliances.totalEnergy} · 9 Appliances</p>
@@ -130,8 +135,8 @@ export function PreschoolOverviewRenderer({
               {view.appliances.rows.map((appliance, index) => (
                 <div key={appliance.name} className="grid gap-2 py-3 sm:grid-cols-[minmax(150px,0.8fr)_minmax(220px,1.5fr)_170px] sm:items-center sm:gap-4" role="listitem">
                   <div className="min-w-0">
-                    <p className="truncate text-xs font-semibold text-foreground">{index + 1}. {appliance.name}</p>
-                    <p className="mt-0.5 text-[10px] text-muted-light">{appliance.applianceGroup} · {appliance.centreCount} Centres</p>
+                    <p className="truncate text-sm font-semibold text-foreground">{index + 1}. {appliance.name}</p>
+                    <p className="mt-0.5 text-xs text-muted">{appliance.applianceGroup} · {appliance.centreCount} Centres</p>
                   </div>
                   <div className="h-2.5 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true">
                     <div
@@ -140,13 +145,16 @@ export function PreschoolOverviewRenderer({
                     />
                   </div>
                   <div className="flex items-baseline justify-between gap-3 tabular-nums sm:justify-end">
-                    <span className="text-xs font-semibold text-foreground">{appliance.energy}</span>
-                    <span className="w-12 text-right text-[11px] text-muted">{appliance.share}</span>
+                    <span className="text-sm font-semibold text-foreground">{appliance.energy}</span>
+                    <span className="w-14 text-right text-xs text-muted">{appliance.share}</span>
                   </div>
                 </div>
               ))}
             </div>
-            <p className="mt-3 text-[10px] leading-4 text-muted-light">{view.appliances.detail}</p>
+            <details className="mt-4 border-t border-border pt-3">
+              <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Appliance calculation note</summary>
+              <p className="mt-2 text-xs leading-5 text-muted">{view.appliances.detail}</p>
+            </details>
           </div>
         ) : (
           <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
@@ -156,19 +164,20 @@ export function PreschoolOverviewRenderer({
         )}
       </section>
 
-      {view.benchmark.status === "provisional" ? (
-        <section aria-labelledby="preschool-efficiency-benchmark" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
+      <section id="preschool-efficiency-benchmark" aria-labelledby="preschool-efficiency-benchmark-heading" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
+        {view.benchmark.status === "provisional" ? (
+          <>
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
-                <h3 id="preschool-efficiency-benchmark" className="text-base font-semibold text-foreground">Efficiency benchmark</h3>
-                <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2 py-0.5 text-[10px] font-semibold text-step-warning">Provisional</span>
+                <h3 id="preschool-efficiency-benchmark-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Efficiency benchmark</h3>
+                <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2.5 py-1 text-xs font-semibold text-step-warning">Provisional</span>
               </div>
-              <p className="mt-1 text-xs leading-5 text-muted">Portfolio P75 cross-hairs identify Centres high on both annualised EUI and May per-pax usage.</p>
+              <p className="mt-1.5 text-sm leading-6 text-muted">Find Centres that are high on both annualised EUI and May per-pax usage.</p>
             </div>
-            <p className="text-xs font-semibold text-step-error">Priority: {view.benchmark.priorityCentreCodes.join(" · ")}</p>
+            <p className="text-sm font-semibold text-step-error">Review first: {view.benchmark.priorityCentreCodes.join(" · ")}</p>
           </div>
-          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
             <div className="min-w-0">
               <BenchmarkScatterPlot benchmark={view.benchmark} />
               <div className="mt-3 grid overflow-hidden rounded-lg border border-border sm:grid-cols-2 xl:grid-cols-4">
@@ -197,8 +206,8 @@ export function PreschoolOverviewRenderer({
           <div className="mt-5 border-t border-border pt-5">
             <div className="flex flex-wrap items-end justify-between gap-3">
               <div>
-                <h4 className="text-sm font-semibold text-foreground">Peer benchmark distributions</h4>
-                <p className="mt-1 text-[11px] leading-5 text-muted">Each dot is one Centre. Typical (P50) and Review above (P75) use the published cohort projection.</p>
+                <h4 className="text-base font-semibold text-foreground">Peer benchmark distributions</h4>
+                <p className="mt-1 text-sm leading-6 text-muted">Each dot is one Centre. P50 shows the typical range; P75 marks where review should begin.</p>
               </div>
               <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-step-warning">Provisional</span>
             </div>
@@ -208,19 +217,26 @@ export function PreschoolOverviewRenderer({
               ))}
             </div>
           </div>
-        </section>
-      ) : null}
+          </>
+        ) : (
+          <div role="status">
+            <h3 id="preschool-efficiency-benchmark-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Efficiency benchmark</h3>
+            <p className="mt-1.5 text-sm leading-6 text-muted">This Snapshot does not yet support a reliable peer comparison.</p>
+            <p className="mt-3 text-sm leading-6 text-muted">{view.benchmark.detail}</p>
+          </div>
+        )}
+      </section>
 
-      <section aria-labelledby="preschool-operational-behaviour" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
+      <section id="preschool-operational-behaviour" aria-labelledby="preschool-operational-behaviour-heading" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h3 id="preschool-operational-behaviour" className="text-base font-semibold text-foreground">Operating behaviour</h3>
+              <h3 id="preschool-operational-behaviour-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Operating patterns</h3>
               {view.operational.status === "available" ? (
                 <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2 py-0.5 text-[10px] font-semibold text-step-warning">Provisional SOP signal</span>
               ) : null}
             </div>
-            <p className="mt-1 text-xs leading-5 text-muted">Release-pinned Calendar separates closed-hour standby from operating load; each Spike is compared with the same Centre and hour slot.</p>
+            <p className="mt-1.5 text-sm leading-6 text-muted">See where energy use continues outside operating hours and which Centres repeat the same hourly Spike.</p>
           </div>
           {view.operational.status === "available" ? (
             <p className="text-[11px] text-muted-light">Calendar {view.operational.calendarVersion} · {view.operational.threshold}</p>
@@ -277,33 +293,36 @@ export function PreschoolOverviewRenderer({
         )}
       </section>
 
-      <section aria-labelledby="preschool-forecast-readiness" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
+      <section aria-labelledby="preschool-forecast-readiness" className="border-b border-border bg-surface-subtle/35 px-5 py-6 lg:px-7">
         <div>
           <h3 id="preschool-forecast-readiness" className="text-base font-semibold text-foreground">Forecast readiness</h3>
-          <p className="mt-1 text-xs leading-5 text-muted">Forecast remains outside the current deterministic May analysis until its inputs and validation are published.</p>
+          <p className="mt-1 text-sm leading-6 text-muted">No live forecast is used in the decisions above until its inputs and validation are published.</p>
         </div>
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-          <div className="rounded-lg border border-border bg-surface-subtle p-4" data-forecast-state={view.forecastReadiness.demo.status}>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-light">Demo Forecast</p>
-            <p className="mt-2 text-sm font-semibold text-foreground">{view.forecastReadiness.demo.label}</p>
-            <p className="mt-2 text-[11px] leading-5 text-muted">{view.forecastReadiness.demo.detail}</p>
+        <details className="mt-3">
+          <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Why forecast is not part of this report</summary>
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <div className="rounded-lg bg-surface p-4" data-forecast-state={view.forecastReadiness.demo.status}>
+              <p className="text-xs font-semibold text-muted">Demo Forecast</p>
+              <p className="mt-2 text-sm font-semibold text-foreground">{view.forecastReadiness.demo.label}</p>
+              <p className="mt-2 text-xs leading-5 text-muted">{view.forecastReadiness.demo.detail}</p>
+            </div>
+            <div className="rounded-lg bg-surface p-4" data-forecast-state={view.forecastReadiness.live.status}>
+              <p className="text-xs font-semibold text-muted">Live Forecast</p>
+              <p className="mt-2 text-sm font-semibold text-muted">{view.forecastReadiness.live.label}</p>
+              <p className="mt-2 text-xs leading-5 text-muted">{view.forecastReadiness.live.detail}</p>
+            </div>
           </div>
-          <div className="rounded-lg border border-border bg-surface-subtle p-4" data-forecast-state={view.forecastReadiness.live.status}>
-            <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-light">Live Forecast</p>
-            <p className="mt-2 text-sm font-semibold text-muted">{view.forecastReadiness.live.label}</p>
-            <p className="mt-2 text-[11px] leading-5 text-muted">{view.forecastReadiness.live.detail}</p>
-          </div>
-        </div>
+        </details>
       </section>
 
       <div className="grid gap-0 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <section aria-labelledby="preschool-centre-ranking" className="min-w-0 px-5 py-5 lg:px-7 lg:py-6">
+        <section id="preschool-centre-ranking" aria-labelledby="preschool-centre-ranking-heading" className="min-w-0 scroll-mt-28 px-5 py-7 lg:px-7 lg:py-8">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h3 id="preschool-centre-ranking" className="text-base font-semibold text-foreground">Centre ranking</h3>
-              <p className="mt-1 text-xs leading-5 text-muted">Server-ranked Portfolio contribution with provisional Centre normalisations.</p>
+              <h3 id="preschool-centre-ranking-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Centre detail</h3>
+              <p className="mt-1.5 text-sm leading-6 text-muted">Start with the five largest contributors; open the remaining Centres only when you need them.</p>
             </div>
-            <span className="text-[11px] text-muted-light">{view.centres.length} Centres · all rows available below</span>
+            <span className="text-xs text-muted">Top 5 of {view.centres.length} Centres</span>
           </div>
           <div className="mt-4 overflow-x-auto rounded-lg border border-border">
             <table className="min-w-[1020px] w-full border-collapse text-left text-xs">
@@ -321,28 +340,48 @@ export function PreschoolOverviewRenderer({
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {view.centres.map((centre) => <CentreRow key={centre.id} centre={centre} />)}
+                {view.centres.slice(0, 5).map((centre) => <CentreRow key={centre.id} centre={centre} />)}
               </tbody>
             </table>
           </div>
+          {view.centres.length > 5 ? (
+            <details className="mt-4 border-t border-border pt-4">
+              <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+                View the remaining {view.centres.length - 5} Centres
+              </summary>
+              <div className="mt-4 overflow-x-auto rounded-lg border border-border">
+                <table className="min-w-[1020px] w-full border-collapse text-left text-xs">
+                  <thead className="bg-surface-subtle text-xs text-muted">
+                    <tr>
+                      <th className="px-3 py-2.5 font-semibold">Rank</th>
+                      <th className="px-3 py-2.5 font-semibold">Centre</th>
+                      <th className="px-3 py-2.5 font-semibold">Cohort</th>
+                      <th className="px-3 py-2.5 text-right font-semibold">Energy</th>
+                      <th className="px-3 py-2.5 text-right font-semibold">Share</th>
+                      <th className="px-3 py-2.5 text-right font-semibold">Annualised EUI</th>
+                      <th className="px-3 py-2.5 text-right font-semibold">May per pax</th>
+                      <th className="px-3 py-2.5 font-semibold">Quadrant</th>
+                      <th className="px-3 py-2.5 font-semibold">Leading appliance</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {view.centres.slice(5).map((centre) => <CentreRow key={centre.id} centre={centre} />)}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          ) : null}
         </section>
 
         <aside className="border-t border-border bg-surface-subtle px-5 py-5 xl:border-l xl:border-t-0 lg:px-7 lg:py-6">
-          <h3 className="text-sm font-semibold text-foreground">Normalisation readiness</h3>
-          <dl className="mt-4 space-y-3 text-xs">
-            <ReadinessRow label="EUI" value={`${view.normalisation.euiAvailableCount} / ${view.normalisation.totalCentreCount} Centres`} />
-            <ReadinessRow label="Per pax" value={`${view.normalisation.perPaxAvailableCount} / ${view.normalisation.totalCentreCount} Centres`} />
-            <ReadinessRow label="Metadata" value={titleCase(view.normalisation.status)} />
-          </dl>
-          {view.benchmark.status === "unavailable" ? (
-            <div className="mt-5 border-t border-border pt-5">
-              <p className="text-xs font-semibold text-muted">Peer benchmark unavailable</p>
-              <p className="mt-2 text-[11px] leading-5 text-muted">{view.benchmark.detail}</p>
-            </div>
-          ) : null}
-          <details id="preschool-evidence" tabIndex={-1} className="mt-5 scroll-mt-24 border-t border-border pt-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
-            <summary className="cursor-pointer text-xs font-semibold text-foreground">Snapshot &amp; evidence</summary>
-            <dl className="mt-3 space-y-2 text-[11px]">
+          <h3 className="text-base font-semibold text-foreground">Data confidence</h3>
+          <p className="mt-1.5 text-sm leading-6 text-muted">The decisions use the same published Snapshot. Technical IDs stay available when you need to audit them.</p>
+          <details id="preschool-evidence" tabIndex={-1} className="mt-5 scroll-mt-28 border-t border-border pt-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
+            <summary className="cursor-pointer text-sm font-semibold text-foreground">View normalisation and evidence</summary>
+            <dl className="mt-4 space-y-3 text-xs">
+              <ReadinessRow label="EUI coverage" value={`${view.normalisation.euiAvailableCount} / ${view.normalisation.totalCentreCount} Centres`} />
+              <ReadinessRow label="Per-pax coverage" value={`${view.normalisation.perPaxAvailableCount} / ${view.normalisation.totalCentreCount} Centres`} />
+              <ReadinessRow label="Metadata" value={titleCase(view.normalisation.status)} />
               <ReadinessRow label="Period" value={view.context.period} />
               <ReadinessRow label="Snapshot" value={view.evidence.snapshotId} mono />
               <ReadinessRow label="Release" value={view.evidence.projectReleaseId} mono />
@@ -374,23 +413,25 @@ function DecisionSummaryCard({ item }: { item: PreschoolDecisionSummaryItem }) {
       : "fill-primary";
   return (
     <article
-      className={`grid min-w-0 gap-5 rounded-lg border p-4 lg:grid-cols-[minmax(240px,0.72fr)_minmax(0,1.5fr)] lg:p-5 ${toneClass}`}
+      className={`min-w-0 rounded-xl border p-5 lg:p-6 ${toneClass}`}
       data-decision-priority={item.id}
     >
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-start justify-between gap-2">
-          <h4 className="text-base font-semibold leading-6 text-foreground">{item.finding}</h4>
-          <span className="shrink-0 rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] font-semibold text-muted">
-            {item.priority}. {item.label}
-          </span>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-primary">Priority {item.priority}</p>
+          <h4 className="mt-1.5 max-w-4xl text-lg font-semibold leading-7 text-foreground">{item.finding}</h4>
         </div>
+        <span className="shrink-0 rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-muted">
+          {item.label}
+        </span>
+      </div>
+      <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(240px,0.72fr)_minmax(0,1.5fr)]">
         <div
-          className="mt-4"
           data-decision-signal={item.id}
           role="img"
           aria-label={`${item.signal.label}: ${item.signal.valueLabel} ${item.signal.referenceLabel}`}
         >
-          <div className="flex items-baseline justify-between gap-3 text-[11px]">
+          <div className="flex items-baseline justify-between gap-3 text-sm">
             <span className="font-semibold text-foreground">{item.signal.label}</span>
             <span className="shrink-0 tabular-nums text-muted"><strong className="font-semibold text-foreground">{item.signal.valueLabel}</strong> {item.signal.referenceLabel}</span>
           </div>
@@ -404,19 +445,24 @@ function DecisionSummaryCard({ item }: { item: PreschoolDecisionSummaryItem }) {
             <rect width={item.signal.value} height="6" rx="3" className={signalClass} />
           </svg>
         </div>
+        <dl className="grid min-w-0 gap-x-8 gap-y-4 text-sm leading-6 sm:grid-cols-2">
+          <DecisionField label="Why it matters" value={item.why} />
+          <DecisionField label="Do next" value={item.action} />
+          <DecisionField label="Verify with" value={item.verification} className="sm:col-span-2" />
+        </dl>
       </div>
-      <div className="min-w-0">
-        <dl className="grid gap-x-6 gap-y-3 text-xs leading-5 sm:grid-cols-2">
-          <DecisionField label="What" value={item.what} />
-          <DecisionField label="Why" value={item.why} />
-          <DecisionField label="Next step" value={item.action} className="sm:col-span-2" />
-          <DecisionField label="If acted" value={item.ifActed} />
+      <details className="mt-5 border-t border-border/80 pt-4">
+        <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+          Expected outcome, evidence and limits
+        </summary>
+        <dl className="mt-4 grid gap-x-8 gap-y-4 text-sm leading-6 sm:grid-cols-2">
+          <DecisionField label="What the data shows" value={item.what} />
+          <DecisionField label="If acted on" value={item.ifActed} />
           <DecisionField label="If ignored" value={item.ifIgnored} />
-          <DecisionField label="Verify" value={item.verification} />
           <DecisionField label="Limitation" value={item.limitation} />
         </dl>
-        <PreschoolEvidenceLink label="View calculation" />
-      </div>
+      </details>
+      <PreschoolEvidenceLink label="View supporting evidence" />
     </article>
   );
 }
@@ -433,7 +479,7 @@ function DecisionField({
   return (
     <div className={className}>
       <dt className="font-semibold text-foreground">{label}</dt>
-      <dd className="mt-0.5 text-muted">{value}</dd>
+      <dd className="mt-1 text-muted">{value}</dd>
     </div>
   );
 }
@@ -721,7 +767,7 @@ function OperationalSpikePanel({
 
 function CentreRow({ centre }: { centre: PreschoolOverviewCentre }) {
   return (
-    <tr className="bg-surface text-foreground">
+    <tr className="bg-surface text-foreground" data-centre-row={centre.id}>
       <td className="px-3 py-3 tabular-nums text-muted">{centre.rank}</td>
       <td className="px-3 py-3 font-semibold">{centre.name}</td>
       <td className="px-3 py-3 text-muted">{centre.cohort ?? "Unavailable"}</td>
