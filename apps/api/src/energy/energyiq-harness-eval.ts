@@ -191,10 +191,7 @@ export const evaluateEnergyIqHarnessObservation = (
     && !candidate.failed
   ))).length;
   const sqlCalls = toolNames.filter((name) => name === "run_sql_readonly").length;
-  const reasoningRounds = events.filter((event) => (
-    stringValue(event.type) === "REASONING_START"
-    || stringValue(event.type) === "REASONING_MESSAGE_START"
-  )).length;
+  const reasoningRounds = countReasoningRounds(events);
   const answer = extractFinalAnswer(events);
   const assertions: EnergyIqHarnessCaseReport["assertions"] = [];
   const assert = (id: string, passed: boolean, detail: string, hard = false) => {
@@ -374,6 +371,24 @@ const extractResolvedWorkspaceId = (events: EventRecord[]): string => {
     stringValue(candidate.type) === "CUSTOM" && stringValue(candidate.name) === "run.config.resolved"
   ));
   return isRecord(event?.value) ? stringValue(event.value.workspace_id) : "";
+};
+
+const countReasoningRounds = (events: EventRecord[]): number => {
+  const reasoningEvents = events.filter((event) => (
+    stringValue(event.type) === "REASONING_START"
+    || stringValue(event.type) === "REASONING_MESSAGE_START"
+  ));
+  const identifiedRounds = new Set(reasoningEvents
+    .map((event) => stringValue(event.messageId))
+    .filter(Boolean));
+  const anonymousStarts = reasoningEvents.filter((event) => (
+    stringValue(event.type) === "REASONING_START"
+    && !stringValue(event.messageId)
+  )).length;
+  const anonymousMessageStarts = reasoningEvents.some((event) => stringValue(event.type) === "REASONING_START")
+    ? 0
+    : reasoningEvents.filter((event) => !stringValue(event.messageId)).length;
+  return identifiedRounds.size + anonymousStarts + anonymousMessageStarts;
 };
 
 type ChartPoint = { label: string; value: number };
