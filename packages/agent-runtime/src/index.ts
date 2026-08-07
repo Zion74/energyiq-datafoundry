@@ -126,6 +126,7 @@ export {
 } from "./protocol/analysis-context-evidence.js";
 export type { ContextPackage } from "./context/inventory/context-package.js";
 export type { ContextPlan } from "./context/inventory/context-plan.js";
+export { ModelContextProfileRegistry } from "./context/policy/model-context-profile.js";
 export type { ContextPackageRecorder } from "./context/protocol/mastra/mastra-context-budget-processor.js";
 export type AgentContextItem = ContextItem;
 export type AgentContextSourceMetadata = ContextSourceMetadata;
