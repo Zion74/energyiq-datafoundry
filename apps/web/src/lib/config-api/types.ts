@@ -422,6 +422,29 @@ export type EnergyDailyTotalsDto = {
   }>;
 };
 
+export type EnergyCalendarTotalsDto = {
+  metricId: "energy.total_usage_kwh@1";
+  timezone: string;
+  derivedFromQueryId: "daily_totals_v1";
+  scopes: Array<{
+    scopeId: string;
+    scopeName: string;
+    scopeType: string;
+    weeks: EnergyCalendarTotalRowDto[];
+    months: EnergyCalendarTotalRowDto[];
+  }>;
+};
+
+export type EnergyCalendarTotalRowDto = {
+  localFrom: string;
+  localToInclusive: string;
+  from: string;
+  to: string;
+  usageKwh: number | null;
+  isPartialCalendarPeriod: boolean;
+  dataHealth: EnergyTimeBucketDataHealthDto;
+};
+
 export type EnergyTimeBucketDataHealthDto = EnergyAnalysisDataHealthDto & {
   status: "complete" | "partial" | "unavailable";
 };
@@ -909,6 +932,7 @@ export type EnergyScopeAnalysisDto = {
     includedInOfficialTotal: false;
   }>;
   dailyTotals?: EnergyDailyTotalsDto;
+  calendarTotals?: EnergyCalendarTotalsDto;
   timeBehaviour?: EnergyTimeBehaviourDto;
   dailyUsageAnomalies?: EnergyDailyUsageAnomaliesDto;
   peakBreakdown?: EnergyPeakBreakdownDto;

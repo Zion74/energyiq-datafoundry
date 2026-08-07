@@ -113,6 +113,17 @@ describe("Project Explorer trusted view state", () => {
     expect(buildExplorerAnalysisRequest(view)).not.toHaveProperty("view");
   });
 
+  it("round-trips server-provided Week and Month chart views without changing the analysis request", () => {
+    for (const chartView of ["weekly", "monthly"] as const) {
+      const view = explorerViewStateFromSearchParams(new URLSearchParams(
+        `projectId=preschool-demo&scopeId=centre-e&period=Previous+month&view=${chartView}`,
+      ));
+      expect(view.chartView).toBe(chartView);
+      expect(explorerUrlWithView(view)).toContain(`view=${chartView}`);
+      expect(buildExplorerAnalysisRequest(view)).not.toHaveProperty("view");
+    }
+  });
+
   it("presents latest cumulative readings without inventing a value for unsupported Scopes", () => {
     expect(explorerLatestReadingPresentation({
       status: "available",
@@ -175,6 +186,39 @@ describe("Project Explorer trusted view state", () => {
       { date: "2026-06-15", usageKwh: null, coveragePct: 0 },
       { date: "2026-06-16", usageKwh: 18, coveragePct: 100 },
     ]);
+
+    analysis.calendarTotals = {
+      metricId: "energy.total_usage_kwh@1",
+      timezone: "Asia/Singapore",
+      derivedFromQueryId: "daily_totals_v1",
+      scopes: [{
+        scopeId: "project",
+        scopeName: "Ngee Ann Polytechnic",
+        scopeType: "project",
+        weeks: [{
+          localFrom: "2026-06-14",
+          localToInclusive: "2026-06-16",
+          from: "2026-06-14T00:00:00.000Z",
+          to: "2026-06-16T23:59:59.999Z",
+          usageKwh: 30,
+          isPartialCalendarPeriod: true,
+          dataHealth: {
+            status: "partial",
+            coveragePct: 66.6667,
+            expectedMeterIntervalCount: 288,
+            validIntervalCount: 192,
+            qualityEventCount: 0,
+          },
+        }],
+        months: [],
+      }],
+    };
+    expect(explorerTrendSeries(analysis, "weekly")).toEqual([{
+      date: "2026-06-14",
+      usageKwh: 30,
+      coveragePct: 66.6667,
+      isPartialCalendarPeriod: true,
+    }]);
   });
 
   it("summarises child Scope health without treating valid zero usage as missing", () => {

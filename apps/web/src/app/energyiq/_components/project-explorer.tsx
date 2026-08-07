@@ -32,7 +32,7 @@ type ProjectNode = {
 };
 
 type ExplorerPeriod = "Yesterday" | "Last 7 days" | "Previous week" | "Previous month" | "Custom";
-type ExplorerChartView = "daily" | "hourly";
+type ExplorerChartView = "daily" | "weekly" | "monthly" | "hourly";
 
 export type ExplorerUrlViewState = {
   projectId: string;
@@ -282,16 +282,34 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
   const latestReadingPresentation = analysis
     ? explorerLatestReadingPresentation(analysis.latestAcceptedReading, analysis.context.timezone)
     : null;
-  const selectedTrend = useMemo(
+  const hourlyTrend = useMemo(
     () => (analysis?.hourlyProfile ?? []).map((point) => ({
       time: `${String(point.hour).padStart(2, "0")}:00`,
       averagePowerKw: point.averageKw,
     })),
     [analysis],
   );
-  const dailyTrend = useMemo(() => explorerTrendSeries(analysis), [analysis]);
+  const dailyTrend = useMemo(() => explorerTrendSeries(analysis, "daily"), [analysis]);
+  const weeklyTrend = useMemo(() => explorerTrendSeries(analysis, "weekly"), [analysis]);
+  const monthlyTrend = useMemo(() => explorerTrendSeries(analysis, "monthly"), [analysis]);
   const childScopeHealth = useMemo(() => explorerChildScopeHealth(analysis), [analysis]);
-  const selectedChartView = chartView === "daily" && dailyTrend.length > 1 ? "daily" : "hourly";
+  const requestedEnergyTrend = chartView === "weekly"
+    ? weeklyTrend
+    : chartView === "monthly"
+      ? monthlyTrend
+      : dailyTrend;
+  const selectedChartView = chartView === "hourly"
+    ? "hourly"
+    : requestedEnergyTrend.length > 0
+      ? chartView
+      : dailyTrend.length > 1
+        ? "daily"
+        : "hourly";
+  const selectedEnergyTrend = selectedChartView === "weekly"
+    ? weeklyTrend
+    : selectedChartView === "monthly"
+      ? monthlyTrend
+      : dailyTrend;
   const showLatestAvailable = () => {
     const latest = analysis?.latestAvailablePeriod;
     if (!activeProjectId || !latest) return;
@@ -633,17 +651,15 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                 <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                   <div>
                     <h2 className="text-sm font-semibold text-foreground">
-                      {selectedChartView === "daily" ? "Daily energy trend" : "24-hour operating profile"}
+                      {explorerChartTitle(selectedChartView)}
                     </h2>
                     <p className="mt-1 text-xs text-muted-light">
-                      {selectedChartView === "daily"
-                        ? "Server-provided daily energy for this Scope and selected period"
-                        : "Server-provided interval-average power grouped by local hour"}
+                      {explorerChartDescription(selectedChartView)}
                     </p>
                   </div>
-                  <div className="flex items-center gap-3">
-                    {dailyTrend.length > 1 ? (
-                      <div className="flex rounded-lg border border-border bg-surface p-1" aria-label="Explorer chart view">
+                  <div className="flex flex-wrap items-center justify-end gap-3">
+                    {dailyTrend.length > 1 || weeklyTrend.length > 0 || monthlyTrend.length > 0 ? (
+                      <div className="flex flex-wrap rounded-lg border border-border bg-surface p-1" aria-label="Explorer chart view">
                         <button
                           type="button"
                           aria-pressed={selectedChartView === "daily"}
@@ -655,6 +671,32 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                         >
                           Daily trend
                         </button>
+                        {weeklyTrend.length > 0 ? (
+                          <button
+                            type="button"
+                            aria-pressed={selectedChartView === "weekly"}
+                            onClick={() => setChartView("weekly")}
+                            className={[
+                              "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                              selectedChartView === "weekly" ? "bg-surface-subtle text-foreground" : "text-muted hover:text-foreground",
+                            ].join(" ")}
+                          >
+                            Week
+                          </button>
+                        ) : null}
+                        {monthlyTrend.length > 0 ? (
+                          <button
+                            type="button"
+                            aria-pressed={selectedChartView === "monthly"}
+                            onClick={() => setChartView("monthly")}
+                            className={[
+                              "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                              selectedChartView === "monthly" ? "bg-surface-subtle text-foreground" : "text-muted hover:text-foreground",
+                            ].join(" ")}
+                          >
+                            Month
+                          </button>
+                        ) : null}
                         <button
                           type="button"
                           aria-pressed={selectedChartView === "hourly"}
@@ -669,7 +711,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                       </div>
                     ) : null}
                     <span className="text-xs text-muted-light">
-                      {selectedChartView === "daily" ? "Energy · kWh" : "Average power · kW"}
+                      {selectedChartView === "hourly" ? "Average power · kW" : "Energy · kWh"}
                     </span>
                   </div>
                 </div>
@@ -689,9 +731,9 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                         </p>
                       </div>
                     </div>
-                  ) : selectedChartView === "daily" ? (
+                  ) : selectedChartView !== "hourly" ? (
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={dailyTrend} margin={{ top: 8, right: 12, left: -8, bottom: 8 }}>
+                      <AreaChart data={selectedEnergyTrend} margin={{ top: 8, right: 12, left: -8, bottom: 8 }}>
                         <defs>
                           <linearGradient id="explorer-daily-fill" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor="#3f827f" stopOpacity={0.22} />
@@ -715,8 +757,8 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                             boxShadow: "0 8px 24px rgba(13,13,13,.08)",
                             fontSize: 12,
                           }}
-                          labelFormatter={(label) => formatExplorerTrendTooltipDate(String(label))}
-                          formatter={(value) => [value === null ? "No accepted facts" : `${Number(value).toFixed(2)} kWh`, "Daily energy"]}
+                          labelFormatter={(label) => formatExplorerTrendTooltipLabel(String(label), selectedChartView)}
+                          formatter={(value) => [value === null ? "No accepted facts" : `${Number(value).toFixed(2)} kWh`, explorerChartSeriesLabel(selectedChartView)]}
                         />
                         <Area
                           type="monotone"
@@ -732,7 +774,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                     </ResponsiveContainer>
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={selectedTrend} margin={{ top: 8, right: 12, left: -8, bottom: 8 }}>
+                      <AreaChart data={hourlyTrend} margin={{ top: 8, right: 12, left: -8, bottom: 8 }}>
                         <defs>
                           <linearGradient id="explorer-fill" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor="#3f827f" stopOpacity={0.2} />
@@ -1142,6 +1184,12 @@ export function explorerViewStateFromSearchParams(
   const requestedTo = period === "Custom" ? searchParams.get("to") ?? "" : "";
   const hasValidCustomRange = period !== "Custom"
     || (validDateInput(requestedFrom) && validDateInput(requestedTo) && requestedFrom <= requestedTo);
+  const requestedChartView = searchParams.get("view");
+  const chartView: ExplorerChartView = requestedChartView === "weekly"
+    || requestedChartView === "monthly"
+    || requestedChartView === "hourly"
+    ? requestedChartView
+    : "daily";
   return {
     projectId: searchParams.get("projectId")?.trim() || "",
     scopeId: searchParams.get("scopeId")?.trim() || "project",
@@ -1151,7 +1199,7 @@ export function explorerViewStateFromSearchParams(
     to: hasValidCustomRange ? requestedTo : "",
     dataSnapshotId: searchParams.get("dataSnapshotId")?.trim() || "",
     projectReleaseId: searchParams.get("projectReleaseId")?.trim() || "",
-    chartView: searchParams.get("view") === "hourly" ? "hourly" : "daily",
+    chartView,
   };
 }
 
@@ -1167,7 +1215,7 @@ export function explorerUrlWithView(view: ExplorerUrlViewState): string {
   }
   if (view.dataSnapshotId) next.set("dataSnapshotId", view.dataSnapshotId);
   if (view.projectReleaseId) next.set("projectReleaseId", view.projectReleaseId);
-  if (view.chartView === "hourly") next.set("view", "hourly");
+  if (view.chartView !== "daily") next.set("view", view.chartView);
   return `/energyiq/explorer?${next.toString()}`;
 }
 
@@ -1207,12 +1255,28 @@ export function hasExplorerFacts(
   return Boolean(analysis && analysis.summary.validIntervalCount > 0);
 }
 
-export function explorerTrendSeries(analysis: EnergyScopeAnalysisDto | null): Array<{
+export function explorerTrendSeries(
+  analysis: EnergyScopeAnalysisDto | null,
+  grain: "daily" | "weekly" | "monthly" = "daily",
+): Array<{
   date: string;
   usageKwh: number | null;
   coveragePct: number;
+  isPartialCalendarPeriod?: boolean;
 }> {
   if (!analysis || !hasExplorerFacts(analysis)) return [];
+  if (grain !== "daily") {
+    const selectedScope = analysis.calendarTotals?.scopes.find(
+      (candidate) => candidate.scopeId === analysis.context.scopeId,
+    );
+    const rows = grain === "weekly" ? selectedScope?.weeks : selectedScope?.months;
+    return (rows ?? []).map((row) => ({
+      date: row.localFrom,
+      usageKwh: row.usageKwh,
+      coveragePct: row.dataHealth.coveragePct,
+      isPartialCalendarPeriod: row.isPartialCalendarPeriod,
+    }));
+  }
   const selectedScope = analysis.dailyTotals?.scopes.find(
     (candidate) => candidate.scopeId === analysis.context.scopeId,
   );
@@ -1374,6 +1438,40 @@ function formatExplorerTrendTooltipDate(value: string): string {
     year: "numeric",
     timeZone: "UTC",
   }).format(parsed);
+}
+
+function formatExplorerTrendTooltipLabel(value: string, view: ExplorerChartView): string {
+  if (view === "weekly") return `Week of ${formatExplorerTrendTooltipDate(value)}`;
+  if (view === "monthly") {
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    if (Number.isNaN(parsed.valueOf())) return value;
+    return new Intl.DateTimeFormat("en-SG", {
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(parsed);
+  }
+  return formatExplorerTrendTooltipDate(value);
+}
+
+function explorerChartTitle(view: ExplorerChartView): string {
+  if (view === "weekly") return "Calendar-week energy trend";
+  if (view === "monthly") return "Calendar-month energy trend";
+  if (view === "hourly") return "24-hour operating profile";
+  return "Daily energy trend";
+}
+
+function explorerChartDescription(view: ExplorerChartView): string {
+  if (view === "weekly") return "Server-aggregated Monday–Sunday totals; boundary weeks may be partial";
+  if (view === "monthly") return "Server-aggregated calendar-month totals; boundary months may be partial";
+  if (view === "hourly") return "Server-provided interval-average power grouped by local hour";
+  return "Server-provided daily energy for this Scope and selected period";
+}
+
+function explorerChartSeriesLabel(view: ExplorerChartView): string {
+  if (view === "weekly") return "Calendar-week energy";
+  if (view === "monthly") return "Calendar-month energy";
+  return "Daily energy";
 }
 
 function compactEvidenceId(value: string): string {

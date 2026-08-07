@@ -256,6 +256,34 @@ export type EnergyScopeAnalysis = {
       }>;
     }>;
   };
+  calendarTotals?: {
+    metricId: "energy.total_usage_kwh@1";
+    timezone: string;
+    derivedFromQueryId: "daily_totals_v1";
+    scopes: Array<{
+      scopeId: string;
+      scopeName: string;
+      scopeType: string;
+      weeks: Array<{
+        localFrom: string;
+        localToInclusive: string;
+        from: string;
+        to: string;
+        usageKwh: number | null;
+        isPartialCalendarPeriod: boolean;
+        dataHealth: TimeBucketDataHealth;
+      }>;
+      months: Array<{
+        localFrom: string;
+        localToInclusive: string;
+        from: string;
+        to: string;
+        usageKwh: number | null;
+        isPartialCalendarPeriod: boolean;
+        dataHealth: TimeBucketDataHealth;
+      }>;
+    }>;
+  };
   timeBehaviour?: {
     metricId: "energy.total_usage_kwh@1";
     grain: "hour";
@@ -1253,6 +1281,11 @@ export const executeEnergyScopeAnalysis = async (input: {
       }),
     })),
   };
+  const calendarTotals = buildCalendarTotals({
+    timezone: input.context.timezone,
+    selectedScopeId: input.context.scopeId,
+    dailyTotals,
+  });
   const timeBehaviour = timeBucketGridResult
     ? buildTimeBehaviour({
         timezone: input.context.timezone,
@@ -1541,6 +1574,7 @@ export const executeEnergyScopeAnalysis = async (input: {
       observationCount: numberAt(row, 4)
     })),
     dailyTotals,
+    calendarTotals,
     ...(timeBehaviour ? { timeBehaviour } : {}),
     ...(dailyUsageAnomalies ? { dailyUsageAnomalies } : {}),
     ...(peakBreakdown ? { peakBreakdown } : {}),
@@ -2702,6 +2736,111 @@ const buildDailyDateBuckets = (context: EnergyQueryContext): DailyDateBucket[] =
     });
   }
   return buckets;
+};
+
+const buildCalendarTotals = (input: {
+  timezone: string;
+  selectedScopeId: string;
+  dailyTotals: NonNullable<EnergyScopeAnalysis["dailyTotals"]>;
+}): NonNullable<EnergyScopeAnalysis["calendarTotals"]> => {
+  const selectedScope = input.dailyTotals.scopes.find(
+    (scope) => scope.scopeId === input.selectedScopeId,
+  );
+  return {
+    metricId: "energy.total_usage_kwh@1",
+    timezone: input.timezone,
+    derivedFromQueryId: "daily_totals_v1",
+    scopes: selectedScope ? [{
+      scopeId: selectedScope.scopeId,
+      scopeName: selectedScope.scopeName,
+      scopeType: selectedScope.scopeType,
+      weeks: aggregateDailyRowsByCalendarPeriod(selectedScope.rows, "week"),
+      months: aggregateDailyRowsByCalendarPeriod(selectedScope.rows, "month"),
+    }] : [],
+  };
+};
+
+const aggregateDailyRowsByCalendarPeriod = (
+  rows: NonNullable<EnergyScopeAnalysis["dailyTotals"]>["scopes"][number]["rows"],
+  grain: "week" | "month",
+): NonNullable<EnergyScopeAnalysis["calendarTotals"]>["scopes"][number]["weeks"] => {
+  const groups = new Map<string, {
+    fullFrom: string;
+    fullToInclusive: string;
+    rows: typeof rows;
+  }>();
+  for (const row of rows) {
+    const bounds = calendarPeriodBounds(row.localDate, grain);
+    const group = groups.get(bounds.fullFrom) ?? { ...bounds, rows: [] };
+    group.rows.push(row);
+    groups.set(bounds.fullFrom, group);
+  }
+  return [...groups.values()]
+    .sort((left, right) => left.fullFrom.localeCompare(right.fullFrom))
+    .map((group) => {
+      const groupedRows = [...group.rows].sort((left, right) => left.localDate.localeCompare(right.localDate));
+      const first = groupedRows[0]!;
+      const last = groupedRows[groupedRows.length - 1]!;
+      const expectedMeterIntervalCount = groupedRows.reduce(
+        (sum, row) => sum + row.dataHealth.expectedMeterIntervalCount,
+        0,
+      );
+      const validIntervalCount = groupedRows.reduce(
+        (sum, row) => sum + row.dataHealth.validIntervalCount,
+        0,
+      );
+      const qualityEventCount = groupedRows.reduce(
+        (sum, row) => sum + row.dataHealth.qualityEventCount,
+        0,
+      );
+      const usageRows = groupedRows.filter(
+        (row): row is typeof row & { usageKwh: number } => row.usageKwh !== null,
+      );
+      const status = validIntervalCount === 0
+        ? "unavailable" as const
+        : validIntervalCount === expectedMeterIntervalCount && qualityEventCount === 0
+          ? "complete" as const
+          : "partial" as const;
+      return {
+        localFrom: first.localDate,
+        localToInclusive: last.localDate,
+        from: first.from,
+        to: last.to,
+        usageKwh: usageRows.length > 0
+          ? round(usageRows.reduce((sum, row) => sum + row.usageKwh, 0), 4)
+          : null,
+        isPartialCalendarPeriod: first.localDate !== group.fullFrom
+          || last.localDate !== group.fullToInclusive,
+        dataHealth: {
+          status,
+          coveragePct: expectedMeterIntervalCount > 0
+            ? round(Math.min(validIntervalCount / expectedMeterIntervalCount, 1) * 100, 4)
+            : 0,
+          expectedMeterIntervalCount,
+          validIntervalCount,
+          qualityEventCount,
+        },
+      };
+    });
+};
+
+const calendarPeriodBounds = (
+  localDate: string,
+  grain: "week" | "month",
+): { fullFrom: string; fullToInclusive: string } => {
+  const [year, month, day] = localDate.split("-").map(Number);
+  const date = new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1));
+  if (grain === "week") {
+    const daysSinceMonday = (date.getUTCDay() + 6) % 7;
+    const fullFrom = shiftLocalDate(localDate, -daysSinceMonday);
+    return { fullFrom, fullToInclusive: shiftLocalDate(fullFrom, 6) };
+  }
+  const fullFrom = `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
+  const lastDay = new Date(Date.UTC(year ?? 0, month ?? 1, 0)).getUTCDate();
+  return {
+    fullFrom,
+    fullToInclusive: `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`,
+  };
 };
 
 const buildTimeBehaviour = (input: {

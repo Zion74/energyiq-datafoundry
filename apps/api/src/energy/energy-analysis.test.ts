@@ -199,6 +199,21 @@ describe("EnergyScopeAnalysis", () => {
         },
       });
       expect(project.provenance.queryIds).not.toContain("latest_accepted_reading_v1");
+      expect(project.calendarTotals).toMatchObject({
+        metricId: "energy.total_usage_kwh@1",
+        timezone: "Asia/Singapore",
+        derivedFromQueryId: "daily_totals_v1",
+      });
+      const projectCalendarScope = project.calendarTotals?.scopes[0];
+      expect(projectCalendarScope?.weeks).toHaveLength(5);
+      expect(projectCalendarScope?.weeks.some((row) => row.isPartialCalendarPeriod)).toBe(true);
+      expect(projectCalendarScope?.months).toHaveLength(1);
+      expect(projectCalendarScope?.months[0]).toMatchObject({
+        localFrom: "2026-05-01",
+        localToInclusive: "2026-05-31",
+        isPartialCalendarPeriod: false,
+      });
+      expect(projectCalendarScope?.months[0]?.usageKwh).toBeCloseTo(project.summary.usageKwh, 4);
 
       const centre = await analyzeScope(PRESCHOOL_GOLDEN.centreA.scopeId);
       expect(centre.latestAcceptedReading).toMatchObject({
