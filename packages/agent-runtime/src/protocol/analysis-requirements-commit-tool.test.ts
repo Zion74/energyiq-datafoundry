@@ -85,6 +85,48 @@ describe("analysis requirements commit tool", () => {
     }).success).toBe(false);
   });
 
+  it("keeps server-owned Context Evidence fact ids out of the model schema", () => {
+    const contextRequirements = createUserAnalysisRequirements([{
+      kind: "metric",
+      description: "What is Centre A EUI?",
+      acceptanceCriteria: ["Use released EUI"],
+    }]);
+    contextRequirements[0]!.contextEvidence = { mode: "sufficient", factIds: ["centre-a.eui"] };
+    const schema = buildAnalysisRequirementsCommitInputSchema(contextRequirements, {
+      contract: "analysis-context-evidence@1",
+      sourceId: "snapshot-source",
+      pins: {
+        workspaceId: "workspace-1",
+        projectId: "project-1",
+        scopeId: "project",
+        dataSnapshotId: "snapshot-1",
+        dataCutoff: "2026-06-01T00:00:00.000Z",
+        projectReleaseId: "release-1",
+        metricVersion: "metrics-1",
+      },
+      facts: [{
+        id: "centre-a.eui",
+        label: "Centre A EUI",
+        metricId: "preschool.benchmark.eui",
+        value: 13.62,
+        unit: "kWh/m2/year",
+        status: "provisional",
+        evidenceRefs: ["evidence-eui"],
+        dimensions: { scopeId: "centre-a" },
+      }],
+    });
+
+    expect(schema.safeParse({ claims: [{ requirement_id: "R1", claim: "Centre A EUI is 13.62." }] }).success)
+      .toBe(true);
+    expect(schema.safeParse({
+      claims: [{
+        requirement_id: "R1",
+        claim: "Centre A EUI is 13.62.",
+        context_fact_ids: ["centre-a.eui"],
+      }],
+    }).success).toBe(false);
+  });
+
   it("keeps per-requirement value validation inside the controlled observation boundary", async () => {
     const executeAction = vi.fn();
     const tool = createAnalysisRequirementsCommitTool({
@@ -354,7 +396,7 @@ describe("analysis requirements commit tool", () => {
     }));
   });
 
-  it("rejects unknown or ungrounded context facts before changing protocol state", async () => {
+  it("rejects model-supplied Context Evidence ids before changing protocol state", async () => {
     const contextRequirements = createUserAnalysisRequirements([{
       kind: "metric",
       description: "What is Centre A EUI?",
@@ -400,7 +442,10 @@ describe("analysis requirements commit tool", () => {
       context_fact_ids: ["invented.eui"],
     }] }, { agent: { toolCallId: "call-invalid-context" } } as never);
 
-    expect(result).toMatchObject({ ok: false, isError: true });
+    expect(result).toMatchObject({
+      error: true,
+      message: expect.stringContaining('Unrecognized key: "context_fact_ids"'),
+    });
     expect(executeAction).not.toHaveBeenCalled();
   });
 });
