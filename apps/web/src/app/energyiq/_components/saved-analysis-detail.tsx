@@ -21,6 +21,26 @@ export function SavedAnalysisDetail() {
   const [rerunning, setRerunning] = useState(false);
   const projectId = activeProject?.id ?? "";
   const analysisId = params.id;
+  const frozenExplorerHref = detail ? savedAnalysisExplorerHref({
+    projectId: detail.projectId,
+    scopeId: detail.scopeId,
+    resource: detail.resource,
+    from: detail.analysis.context.from,
+    to: detail.analysis.context.to,
+    timezone: detail.analysis.context.timezone,
+    dataSnapshotId: detail.dataSnapshotId,
+    projectReleaseId: detail.templateRevisionId,
+  }, "frozen") : "";
+  const currentExplorerHref = detail ? savedAnalysisExplorerHref({
+    projectId: detail.projectId,
+    scopeId: detail.scopeId,
+    resource: detail.resource,
+    from: detail.analysis.context.from,
+    to: detail.analysis.context.to,
+    timezone: detail.analysis.context.timezone,
+    dataSnapshotId: detail.dataSnapshotId,
+    projectReleaseId: detail.templateRevisionId,
+  }, "current") : "";
 
   useEffect(() => {
     if (!projectId || !analysisId) return;
@@ -92,15 +112,33 @@ export function SavedAnalysisDetail() {
               </p>
             ) : null}
           </div>
-          <button
-            type="button"
-            onClick={() => void rerun()}
-            disabled={!detail || rerunning}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-xs font-semibold text-white hover:bg-primary-light disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <EnergyIcon name="analysis" className="h-3.5 w-3.5" />
-            {rerunning ? "Rerunning…" : "Rerun with latest data"}
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {detail ? (
+              <>
+                <Link
+                  href={frozenExplorerHref}
+                  className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-surface px-3.5 text-xs font-semibold text-foreground hover:bg-surface-subtle"
+                >
+                  Inspect frozen data context
+                </Link>
+                <Link
+                  href={currentExplorerHref}
+                  className="inline-flex h-10 items-center justify-center rounded-lg border border-border bg-surface px-3.5 text-xs font-semibold text-foreground hover:bg-surface-subtle"
+                >
+                  View current facts
+                </Link>
+              </>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => void rerun()}
+              disabled={!detail || rerunning}
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-xs font-semibold text-white hover:bg-primary-light disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <EnergyIcon name="analysis" className="h-3.5 w-3.5" />
+              {rerunning ? "Rerunning…" : "Rerun with latest data"}
+            </button>
+          </div>
         </div>
         {detail ? (
           <dl className="mt-5 grid gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
@@ -145,4 +183,40 @@ function formatSavedAt(value: string): string {
     minute: "2-digit",
     hour12: false,
   }).format(new Date(value));
+}
+
+type SavedExplorerLinkInput = {
+  projectId: string;
+  scopeId: string;
+  resource: "electricity";
+  from: string;
+  to: string;
+  timezone: string;
+  dataSnapshotId: string;
+  projectReleaseId: string;
+};
+
+export function savedAnalysisExplorerHref(
+  input: SavedExplorerLinkInput,
+  mode: "frozen" | "current",
+): string {
+  const dateFormatter = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone: input.timezone,
+  });
+  const next = new URLSearchParams({
+    projectId: input.projectId,
+    scopeId: input.scopeId,
+    resource: input.resource,
+    period: "Custom",
+    from: dateFormatter.format(new Date(input.from)),
+    to: dateFormatter.format(new Date(Date.parse(input.to) - 1)),
+  });
+  if (mode === "frozen") {
+    next.set("dataSnapshotId", input.dataSnapshotId);
+    next.set("projectReleaseId", input.projectReleaseId);
+  }
+  return `/energyiq/explorer?${next.toString()}`;
 }

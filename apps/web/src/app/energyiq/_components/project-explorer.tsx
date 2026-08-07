@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -227,6 +228,17 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
   );
   const explorerMetricsPending = analysisLoading || !analysis;
   const selectedPeriodHasFacts = hasExplorerFacts(analysis);
+  const pinnedContextMismatch = isExplorerPinnedContextMismatch(analysisError);
+  const currentFactsHref = explorerCurrentFactsUrl({
+    projectId: activeProjectId ?? initialViewState.projectId,
+    scopeId: selectedId || initialViewState.scopeId,
+    resource,
+    period: periodSelection,
+    from: periodSelection === "Custom" && customRange.projectId === activeProjectId ? customRange.from : "",
+    to: periodSelection === "Custom" && customRange.projectId === activeProjectId ? customRange.to : "",
+    dataSnapshotId: initialViewState.dataSnapshotId,
+    projectReleaseId: initialViewState.projectReleaseId,
+  });
   const analysisCircuitById = new Map(
     (analysis?.circuits ?? []).map((circuit) => [circuit.meterNodeId, circuit]),
   );
@@ -502,7 +514,22 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
               </div>
             ) : null}
 
-            {analysisError ? (
+            {pinnedContextMismatch ? (
+              <div role="alert" className="mt-4 flex flex-col gap-3 rounded-xl border border-step-warning/25 bg-step-warning/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">This Explorer link is outdated</p>
+                  <p className="mt-1 text-sm leading-5 text-muted">
+                    Its pinned Snapshot or Project Release no longer matches the published data. No current facts were mixed into this view.
+                  </p>
+                </div>
+                <Link
+                  href={currentFactsHref}
+                  className="inline-flex shrink-0 items-center justify-center rounded-lg bg-primary px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                >
+                  Open current Project data
+                </Link>
+              </div>
+            ) : analysisError ? (
               <p className="mt-4 rounded-lg border border-step-warning/25 bg-step-warning/5 p-3 text-xs leading-5 text-step-warning">
                 Scope analysis unavailable: {analysisError}
               </p>
@@ -1077,6 +1104,20 @@ export function explorerUrlWithView(view: ExplorerUrlViewState): string {
   if (view.dataSnapshotId) next.set("dataSnapshotId", view.dataSnapshotId);
   if (view.projectReleaseId) next.set("projectReleaseId", view.projectReleaseId);
   return `/energyiq/explorer?${next.toString()}`;
+}
+
+export function explorerCurrentFactsUrl(view: ExplorerUrlViewState): string {
+  return explorerUrlWithView({
+    ...view,
+    dataSnapshotId: "",
+    projectReleaseId: "",
+  });
+}
+
+export function isExplorerPinnedContextMismatch(message: string | null): boolean {
+  if (!message) return false;
+  return message.includes("ENERGYIQ_DATA_SNAPSHOT_MISMATCH")
+    || message.includes("ENERGYIQ_PROJECT_RELEASE_MISMATCH");
 }
 
 export function buildExplorerAnalysisRequest(

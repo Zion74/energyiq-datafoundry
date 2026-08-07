@@ -4,11 +4,13 @@ import type { EnergyScopeAnalysisDto } from "../../../lib/config-api";
 
 import {
   buildExplorerAnalysisRequest,
+  explorerCurrentFactsUrl,
   explorerTrendSeries,
   explorerUrlWithView,
   explorerViewStateFromSearchParams,
   formatDateInput,
   hasExplorerFacts,
+  isExplorerPinnedContextMismatch,
 } from "./project-explorer";
 
 describe("Project Explorer trusted view state", () => {
@@ -73,6 +75,26 @@ describe("Project Explorer trusted view state", () => {
       projectReleaseId: "release-p",
     })).toBe(
       "/energyiq/explorer?projectId=preschool-demo&scopeId=centre-12&resource=electricity&period=Previous+month&dataSnapshotId=snapshot-p&projectReleaseId=release-p",
+    );
+  });
+
+  it("requires an explicit user choice before dropping stale Snapshot and Release pins", () => {
+    const pinnedView = {
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "l7-load-4",
+      resource: "electricity" as const,
+      period: "Custom" as const,
+      from: "2026-06-10",
+      to: "2026-06-16",
+      dataSnapshotId: "snapshot-a",
+      projectReleaseId: "release-a",
+    };
+
+    expect(isExplorerPinnedContextMismatch("ENERGYIQ_DATA_SNAPSHOT_MISMATCH")).toBe(true);
+    expect(isExplorerPinnedContextMismatch("ENERGYIQ_PROJECT_RELEASE_MISMATCH")).toBe(true);
+    expect(isExplorerPinnedContextMismatch("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE")).toBe(false);
+    expect(explorerCurrentFactsUrl(pinnedView)).toBe(
+      "/energyiq/explorer?projectId=ngee-ann-polytechnic&scopeId=l7-load-4&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16",
     );
   });
 
