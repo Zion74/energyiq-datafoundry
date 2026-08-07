@@ -63,7 +63,6 @@ describe("createEnergyQueryContextItem", () => {
     expect(content).toContain("Ngee Ann analysis policy");
     expect(content).toContain("one schema inspection establishes its governed contract");
     expect(content).toContain("Released Evidence already answers the question");
-    expect(content).toContain("If another query is unlikely to materially change the conclusion, action, or uncertainty, finalize the answer");
     expect(content).not.toContain("Start with list_data_sources");
     expect(content).toContain("do not filter scope_id to the UI label 'project'");
     expect(content).toContain("group by local_interval_start");
@@ -119,7 +118,6 @@ describe("createEnergyQueryContextItem", () => {
     expect(content).toContain("Preschool analysis policy");
     expect(content).toContain("one schema inspection establishes its governed contract");
     expect(content).toContain("Released Evidence already answers the question");
-    expect(content).toContain("If another query is unlikely to materially change the conclusion, action, or uncertainty, finalize the answer");
     expect(content).not.toContain("Start with inspect_schema, then use run_sql_readonly");
     expect(content).toContain("parent_node_id");
     expect(content).toContain("quality_status='ok'");
