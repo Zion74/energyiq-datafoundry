@@ -112,9 +112,14 @@ const isSqlExecutionResult = (value: unknown): value is SqlExecutionResult => {
 
 const safeSerialize = (value: unknown): string => {
   try {
-    return JSON.stringify(value);
+    const serialized = JSON.stringify(value);
+    return typeof serialized === "string" ? serialized : String(value);
   } catch {
-    return String(value);
+    try {
+      return String(value);
+    } catch {
+      return "[unserializable tool observation]";
+    }
   }
 };
 
