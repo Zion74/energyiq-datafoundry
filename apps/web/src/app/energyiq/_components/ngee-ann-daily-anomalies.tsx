@@ -12,6 +12,7 @@ type Series = Incident["series"][number];
 type ViewMode = "overlay" | "selected" | "average";
 
 const ALL_SCOPES = "all-scopes";
+const PRIORITY_INCIDENT_LIMIT = 3;
 
 export const NGEE_ANN_OPEN_INCIDENT_EVENT = "energyiq:ngee-ann-open-incident";
 
@@ -103,99 +104,165 @@ export function NgeeAnnDailyAnomalies({
 
   if (view.status === "unavailable") {
     return (
-      <section aria-labelledby="ngee-ann-daily-anomalies" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
-        <h3 id="ngee-ann-daily-anomalies" className="text-base font-semibold tracking-[-0.015em] text-foreground">
-          Daily usage anomalies
+      <section aria-labelledby="ngee-ann-daily-anomalies" className="border-b border-border px-5 py-7 lg:px-7 lg:py-8">
+        <h3 id="ngee-ann-daily-anomalies" className="text-lg font-semibold tracking-[-0.015em] text-foreground">
+          Priority usage exceptions
         </h3>
-        <p className="mt-1 text-xs leading-5 text-muted">{view.decisionQuestion}</p>
+        <p className="mt-1.5 text-sm leading-6 text-muted">{view.decisionQuestion}</p>
         <div className="mt-4 rounded-lg border border-border bg-surface-subtle px-4 py-4" role="status">
-          <p className="text-xs font-semibold text-foreground">Daily anomaly analysis unavailable</p>
-          <p className="mt-1 text-[11px] leading-5 text-muted">{view.reason}</p>
+          <p className="text-sm font-semibold text-foreground">Usage exception analysis unavailable</p>
+          <p className="mt-1 text-sm leading-6 text-muted">{view.reason}</p>
         </div>
       </section>
     );
   }
 
   const incident = view.incidents.find((candidate) => candidate.incidentId === openIncidentId) ?? null;
+  const rankedIncidents = [...view.incidents].sort((left, right) => (
+    Math.abs(right.impactKwhValue) - Math.abs(left.impactKwhValue)
+    || right.localDate.localeCompare(left.localDate)
+    || left.incidentId.localeCompare(right.incidentId)
+  ));
+  const priorityIncidents = rankedIncidents.slice(0, PRIORITY_INCIDENT_LIMIT);
+  const largestIncident = priorityIncidents[0] ?? null;
+  const largestImpact = largestIncident ? Math.max(1, Math.abs(largestIncident.impactKwhValue)) : 1;
+  const openIncident = (incidentId: string, trigger: HTMLElement) => {
+    triggerRef.current = trigger;
+    setOpenIncidentId(incidentId);
+  };
 
   return (
-    <section aria-labelledby="ngee-ann-daily-anomalies" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
+    <section aria-labelledby="ngee-ann-daily-anomalies" className="border-b border-border px-5 py-7 lg:px-7 lg:py-8">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <h3 id="ngee-ann-daily-anomalies" className="text-base font-semibold tracking-[-0.015em] text-foreground">
-            Daily usage anomalies
+        <div className="max-w-3xl">
+          <h3 id="ngee-ann-daily-anomalies" className="text-lg font-semibold tracking-[-0.015em] text-foreground">
+            Priority usage exceptions
           </h3>
-          <p className="mt-1 text-xs leading-5 text-muted">{view.decisionQuestion}</p>
-        </div>
-        <p className="text-[11px] leading-5 text-muted">
-          Triggered only / pinned Rule {view.rule?.ruleRevisionId}
-        </p>
-      </div>
-
-      <div className="mt-4 rounded-lg border border-border bg-surface-subtle px-4 py-3" aria-label="Scope-date evaluation outcome summary">
-        <p className="text-[10px] font-medium text-muted">Scope-date evaluations</p>
-        <p className="text-[11px] font-semibold tabular-nums text-foreground">
-          {view.outcomeSummary.triggered} triggered / {view.outcomeSummary.withinThreshold} within threshold / {view.outcomeSummary.suppressed} suppressed
-        </p>
-        {view.outcomeSummary.suppressed > 0 ? (
-          <p className="mt-1 text-[10px] leading-4 text-step-warning">
-            Suppressed evaluations are not classified as within threshold.
+          <p className="mt-1.5 text-sm leading-6 text-muted">
+            Focus on the largest gaps from comparable days; open the full record only when you need to investigate the pattern.
           </p>
+        </div>
+        {view.incidents.length > 0 ? (
+          <span className="w-fit rounded-full bg-step-warning/10 px-3 py-1.5 text-xs font-semibold text-step-warning">
+            {view.incidents.length} flagged checks
+          </span>
         ) : null}
       </div>
 
       {view.incidents.length > 0 ? (
-        <div className="mt-4 grid gap-3 lg:grid-cols-2 xl:grid-cols-3" aria-label="Server-triggered daily incidents">
-          {view.incidents.map((item) => (
-            <article
-              key={item.incidentId}
-              id={anomalyIncidentDomId(item.incidentId)}
-              className="scroll-mt-24 rounded-lg border border-border bg-surface p-4"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold text-foreground">{item.scopeName}</p>
-                  <p className="mt-1 text-[10px] text-muted">{item.weekday} {item.dateLabel} / {item.dayType}</p>
-                </div>
-                <span className="rounded-md bg-step-warning/10 px-2 py-1 text-[10px] font-semibold text-step-warning">
-                  Triggered
-                </span>
+        <>
+          <div className="mt-5 grid gap-5 border-y border-border py-5 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)] lg:gap-8">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">What needs attention</p>
+              <p className="mt-2 text-3xl font-semibold tracking-[-0.03em] tabular-nums text-foreground">
+                {view.incidents.length}
+                <span className="ml-2 text-base font-medium tracking-normal text-muted">daily checks</span>
+              </p>
+              <p className="mt-2 max-w-md text-sm leading-6 text-muted">
+                Crossed the published comparison rule across the Project and Levels. This is a review queue, not {view.incidents.length} confirmed root causes.
+              </p>
+            </div>
+            {largestIncident ? (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">Largest gap to review first</p>
+                <p className="mt-2 text-3xl font-semibold tracking-[-0.03em] tabular-nums text-step-warning">
+                  {formatSignedKwh(largestIncident.impactKwhValue)}
+                </p>
+                <p className="mt-1 text-base font-semibold text-foreground">
+                  {largestIncident.scopeName} · {largestIncident.weekday} {largestIncident.dateLabel}
+                </p>
+                <p className="mt-1 text-sm leading-6 text-muted">
+                  {formatSignedPercent(largestIncident.relativePctValue)} versus comparable {largestIncident.dayType.toLowerCase()} days. Check the operating context and the largest contributing circuits before deciding on an intervention.
+                </p>
               </div>
-              <dl className="mt-3 grid grid-cols-2 gap-3 text-[10px]">
-                <div><dt className="text-muted">Actual</dt><dd className="mt-1 font-semibold tabular-nums text-foreground">{item.actualKwh} kWh</dd></div>
-                <div><dt className="text-muted">Baseline</dt><dd className="mt-1 font-semibold tabular-nums text-foreground">{item.baselineKwh} kWh</dd></div>
-                <div><dt className="text-muted">Impact</dt><dd className="mt-1 font-semibold tabular-nums text-foreground">{item.impactKwh} kWh</dd></div>
-                <div><dt className="text-muted">Relative</dt><dd className="mt-1 font-semibold tabular-nums text-foreground">{item.relativePct}</dd></div>
-              </dl>
-              <button
-                type="button"
-                aria-haspopup="dialog"
-                onClick={(event) => {
-                  triggerRef.current = event.currentTarget;
-                  setOpenIncidentId(item.incidentId);
-                }}
-                className="mt-4 min-h-11 w-full rounded-lg border border-border px-3 py-2 text-[11px] font-semibold text-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-              >
-                Open incident detail
-              </button>
-            </article>
-          ))}
-        </div>
+            ) : null}
+          </div>
+
+          <div className="mt-6" aria-label="Highest-impact usage exceptions">
+            <div className="flex flex-wrap items-end justify-between gap-2">
+              <div>
+                <h4 className="text-base font-semibold text-foreground">Highest-impact exceptions</h4>
+                <p className="mt-1 text-sm leading-6 text-muted">Start with these three; impact is the accepted usage above the comparable-day baseline.</p>
+              </div>
+              <p className="text-xs font-medium text-muted">Showing {priorityIncidents.length} of {rankedIncidents.length}</p>
+            </div>
+            <div className="mt-3 divide-y divide-border border-y border-border">
+              {priorityIncidents.map((item, index) => (
+                <article key={item.incidentId} className="grid gap-3 py-4 md:grid-cols-[2rem_minmax(11rem,0.9fr)_minmax(12rem,1.4fr)_minmax(8rem,0.65fr)_auto] md:items-center md:gap-4">
+                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-surface-subtle text-xs font-semibold text-muted" aria-hidden="true">{index + 1}</span>
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">{item.scopeName}</p>
+                    <p className="mt-0.5 text-xs text-muted">{item.weekday} {item.dateLabel} · {item.dayType}</p>
+                  </div>
+                  <div
+                    role="img"
+                    aria-label={`${item.scopeName} ${item.dateLabel}: ${formatSignedKwh(item.impactKwhValue)} above comparable-day baseline`}
+                    className="h-2.5 overflow-hidden rounded-full bg-surface-subtle"
+                  >
+                    <span className="block h-full rounded-full bg-step-warning/70" style={{ width: `${Math.max(6, Math.abs(item.impactKwhValue) / largestImpact * 100)}%` }} />
+                  </div>
+                  <div>
+                    <p className="text-base font-semibold tabular-nums text-foreground">{formatSignedKwh(item.impactKwhValue)}</p>
+                    <p className="mt-0.5 text-xs tabular-nums text-muted">{formatSignedPercent(item.relativePctValue)} vs baseline</p>
+                  </div>
+                  <button
+                    type="button"
+                    data-priority-anomaly-trigger="true"
+                    aria-haspopup="dialog"
+                    onClick={(event) => openIncident(item.incidentId, event.currentTarget)}
+                    className="min-h-10 rounded-lg border border-primary/25 px-3.5 text-sm font-semibold text-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                  >
+                    Investigate
+                  </button>
+                </article>
+              ))}
+            </div>
+          </div>
+
+          <details className="mt-5 rounded-lg border border-border bg-surface-subtle/50 px-4 py-3">
+            <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+              View all {rankedIncidents.length} flagged checks
+            </summary>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">
+              Complete audit list in the published server order. Open a row only when you need its 24-hour comparison and frozen Evidence.
+            </p>
+            <div className="mt-3 divide-y divide-border border-y border-border bg-surface">
+              {view.incidents.map((item) => (
+                <button
+                  key={item.incidentId}
+                  id={anomalyIncidentDomId(item.incidentId)}
+                  type="button"
+                  data-anomaly-trigger="true"
+                  aria-haspopup="dialog"
+                  onClick={(event) => openIncident(item.incidentId, event.currentTarget)}
+                  className="grid min-h-14 w-full scroll-mt-24 gap-1 px-3 py-3 text-left hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 sm:grid-cols-[minmax(10rem,1fr)_minmax(11rem,1fr)_auto] sm:items-center sm:gap-4"
+                >
+                  <span>
+                    <span className="block text-sm font-semibold text-foreground">{item.scopeName}</span>
+                    <span className="mt-0.5 block text-xs text-muted">{item.weekday} {item.dateLabel} · {item.dayType}</span>
+                  </span>
+                  <span className="text-xs tabular-nums text-muted">Actual {formatKwh(item.actualKwhValue)} · baseline {formatKwh(item.baselineKwhValue)}</span>
+                  <span className="text-sm font-semibold tabular-nums text-primary">{formatSignedKwh(item.impactKwhValue)}</span>
+                </button>
+              ))}
+            </div>
+          </details>
+        </>
       ) : (
         <div className="mt-4 rounded-lg border border-border bg-surface-subtle px-4 py-4" role="status">
-          <p className="text-xs font-semibold text-foreground">
+          <p className="text-sm font-semibold text-foreground">
             {view.allSuppressed
-              ? "All Scope-date evaluations were suppressed"
+              ? "No daily check was eligible for a conclusion"
               : view.outcomeSummary.suppressed > 0
-                ? "No triggered incidents; some Scope-date evaluations were suppressed"
-                : "No server-triggered daily usage incidents"}
+                ? "No confirmed exception; some daily checks remain inconclusive"
+                : "No daily usage exception crossed the published rule"}
           </p>
-          <p className="mt-1 text-[11px] leading-5 text-muted">
+          <p className="mt-1 text-sm leading-6 text-muted">
             {view.allSuppressed
-              ? "Coverage, quality, Calendar or comparable-sample gates prevented a business anomaly conclusion for every evaluation."
+              ? "Coverage, quality, Calendar or comparable-day gates prevented a trustworthy conclusion for every check."
               : view.outcomeSummary.suppressed > 0
-                ? "Only server-classified within-threshold evaluations are normal; suppressed evaluations remain inconclusive."
-                : "No row in this Snapshot crossed both pinned relative and absolute thresholds."}
+                ? "Checks that passed the rule stayed within threshold; suppressed checks are not being described as normal."
+                : "No eligible Project or Level day crossed both the published relative and absolute thresholds."}
           </p>
         </div>
       )}
@@ -215,11 +282,11 @@ export function NgeeAnnDailyAnomalies({
           >
             <header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-border bg-surface px-5 py-4 sm:px-6">
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted">Pinned daily usage incident</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Daily usage evidence</p>
                 <h2 id="ngee-ann-anomaly-dialog-title" className="mt-1 text-lg font-semibold tracking-[-0.02em] text-foreground">
                   {incident.scopeName} / {incident.weekday} {incident.dateLabel}
                 </h2>
-                <p id="ngee-ann-anomaly-dialog-question" className="mt-1 max-w-3xl text-xs leading-5 text-muted">
+                <p id="ngee-ann-anomaly-dialog-question" className="mt-1 max-w-3xl text-sm leading-6 text-muted">
                   Selected day and frozen comparable-day baseline from the same server incident payload.
                 </p>
               </div>
@@ -238,7 +305,7 @@ export function NgeeAnnDailyAnomalies({
 
               <div className="grid gap-4 xl:grid-cols-3">
                 <fieldset>
-                  <legend className="mb-2 text-[10px] font-semibold text-muted">Incident view</legend>
+                  <legend className="mb-2 text-xs font-semibold text-muted">Comparison view</legend>
                   <div className="flex flex-wrap gap-1.5">
                     {(["overlay", "selected", "average"] as const).map((mode) => (
                       <FilterButton
@@ -256,7 +323,7 @@ export function NgeeAnnDailyAnomalies({
                   </div>
                 </fieldset>
                 <fieldset>
-                  <legend className="mb-2 text-[10px] font-semibold text-muted">Incident Scope</legend>
+                  <legend className="mb-2 text-xs font-semibold text-muted">Scope</legend>
                   <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
                     <FilterButton selected={selectedScopeId === ALL_SCOPES} controls="ngee-ann-anomaly-series" onClick={() => setSelectedScopeId(ALL_SCOPES)}>
                       All
@@ -269,7 +336,7 @@ export function NgeeAnnDailyAnomalies({
                   </div>
                 </fieldset>
                 <fieldset>
-                  <legend className="mb-2 text-[10px] font-semibold text-muted">Incident Category</legend>
+                  <legend className="mb-2 text-xs font-semibold text-muted">Category</legend>
                   <div className="flex flex-wrap gap-1.5">
                     {(["all", "load", "light"] as const).map((category) => (
                       <FilterButton
@@ -309,11 +376,11 @@ function IncidentSummary({ incident }: { incident: Incident }) {
     <section aria-labelledby="ngee-ann-anomaly-summary" className="rounded-lg border border-border bg-surface-subtle p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h3 id="ngee-ann-anomaly-summary" className="text-xs font-semibold text-foreground">Triggered daily incident</h3>
-          <p className="mt-1 text-[11px] text-muted">{incident.range} / {incident.dayType}</p>
-          <p className="mt-1 text-[10px] text-muted-light">{incident.coverage} / {incident.intervals} / {incident.qualityEvents}</p>
+          <h3 id="ngee-ann-anomaly-summary" className="text-sm font-semibold text-foreground">Why this day was flagged</h3>
+          <p className="mt-1 text-sm text-muted">{incident.range} / {incident.dayType}</p>
+          <p className="mt-1 text-xs text-muted-light">{incident.coverage} / {incident.intervals} / {incident.qualityEvents}</p>
         </div>
-        <dl className="grid grid-cols-2 gap-x-5 gap-y-2 text-right text-[10px]">
+        <dl className="grid grid-cols-2 gap-x-5 gap-y-2 text-right text-xs">
           <div><dt className="text-muted">Actual</dt><dd className="mt-1 text-base font-semibold tabular-nums text-foreground">{incident.actualKwh} kWh</dd></div>
           <div><dt className="text-muted">Baseline</dt><dd className="mt-1 text-base font-semibold tabular-nums text-foreground">{incident.baselineKwh} kWh</dd></div>
           <div><dt className="text-muted">Impact</dt><dd className="font-semibold tabular-nums text-foreground">{incident.impactKwh} kWh</dd></div>
@@ -344,18 +411,18 @@ function IncidentSeries({
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h3 id="ngee-ann-anomaly-series-heading" className="text-sm font-semibold text-foreground">24-hour incident evidence</h3>
-          <p className="mt-1 text-[11px] leading-5 text-muted">
+          <p className="mt-1 text-sm leading-6 text-muted">
             {viewMode === "overlay" ? "Selected and baseline" : viewMode === "selected" ? "Selected day only" : "Frozen baseline average only"}; server series remain in server order.
           </p>
         </div>
-        <span className="text-[10px] text-muted">{visible.length} server series</span>
+        <span className="text-xs text-muted">{visible.length} evidence series</span>
       </div>
       {visible.length > 0 ? (
         <div className="mt-4 space-y-4">
           {visible.map((series) => <SeriesChart key={series.seriesId} series={series} viewMode={viewMode} />)}
         </div>
       ) : (
-        <p className="mt-4 rounded-lg border border-border bg-surface-subtle px-4 py-4 text-[11px] text-muted" role="status">
+        <p className="mt-4 rounded-lg border border-border bg-surface-subtle px-4 py-4 text-sm text-muted" role="status">
           No server series matches this Scope and Category selection.
         </p>
       )}
@@ -425,7 +492,7 @@ function SeriesChart({ series, viewMode }: { series: Series; viewMode: ViewMode 
 
       <div className="mt-3 min-h-14 rounded-lg bg-surface-subtle px-3 py-2" aria-live="polite" aria-atomic="true">
         {active ? (
-          <p className="text-[10px] leading-5 text-muted">
+          <p className="text-xs leading-5 text-muted">
             <span className="font-semibold text-foreground">{active.hourLabel}</span>
             {viewMode !== "average" ? ` / Selected ${formatChartValue(active.selectedKwh)}` : ""}
             {viewMode !== "selected" ? ` / Average ${formatChartValue(active.baselineKwh)}` : ""}
@@ -434,7 +501,7 @@ function SeriesChart({ series, viewMode }: { series: Series; viewMode: ViewMode 
               : ` / Impact ${active.impactKwh >= 0 ? "+" : ""}${active.impactKwh.toFixed(4)} kWh`}
           </p>
         ) : (
-          <p className="text-[10px] leading-5 text-muted">Hover or keyboard-focus an hour for the exact server points.</p>
+          <p className="text-xs leading-5 text-muted">Hover or keyboard-focus an hour for the exact server points.</p>
         )}
       </div>
     </article>
@@ -479,10 +546,13 @@ function IncidentEvidence({ incident, view }: { incident: Incident; view: NgeeAn
 
 function AnomalyEvidence({ view }: { view: NgeeAnnDailyAnomalyViewModel }) {
   return (
-    <details className="mt-4 border-t border-border pt-3 text-[10px] leading-4 text-muted">
-      <summary className="cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
-        Anomaly Rule & evidence / time_slot_anomaly_v1
+    <details className="mt-5 border-t border-border pt-4 text-[10px] leading-4 text-muted">
+      <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+        How these exceptions were selected
       </summary>
+      <p className="mt-3 max-w-3xl text-xs leading-5 text-muted">
+        {view.outcomeSummary.triggered} checks crossed both published thresholds; {view.outcomeSummary.withinThreshold} stayed within threshold; {view.outcomeSummary.suppressed} could not be classified. Suppressed checks are not counted as normal.
+      </p>
       <dl className="mt-2 grid gap-x-3 gap-y-1 sm:grid-cols-[104px_minmax(0,1fr)]">
         <dt>Snapshot</dt><dd className="break-all font-mono text-foreground">{view.evidence.snapshotId}</dd>
         <dt>Release</dt><dd className="break-all font-mono text-foreground">{view.evidence.projectReleaseId}</dd>
@@ -513,8 +583,8 @@ function FilterButton({ selected, controls, onClick, children }: {
       aria-controls={controls}
       onClick={onClick}
       className={selected
-        ? "min-h-11 rounded-lg border border-primary bg-primary/10 px-3 py-2 text-[11px] font-semibold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-        : "min-h-11 rounded-lg border border-border px-3 py-2 text-[11px] font-semibold text-muted hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"}
+        ? "min-h-11 rounded-lg border border-primary bg-primary/10 px-3 py-2 text-xs font-semibold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+        : "min-h-11 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"}
     >
       {children}
     </button>
@@ -540,4 +610,22 @@ function seriesPointLabel(series: Series, point: Series["points"][number], viewM
 
 function formatChartValue(value: number | null): string {
   return value === null ? "unavailable" : `${value.toFixed(4)} kWh`;
+}
+
+function formatKwh(value: number): string {
+  return `${new Intl.NumberFormat("en-SG", { maximumFractionDigits: 1 }).format(value)} kWh`;
+}
+
+function formatSignedKwh(value: number): string {
+  const magnitude = formatKwh(Math.abs(value));
+  if (value > 0) return `+${magnitude}`;
+  if (value < 0) return `-${magnitude}`;
+  return magnitude;
+}
+
+function formatSignedPercent(value: number): string {
+  const magnitude = new Intl.NumberFormat("en-SG", { maximumFractionDigits: 1 }).format(Math.abs(value));
+  if (value > 0) return `+${magnitude}%`;
+  if (value < 0) return `-${magnitude}%`;
+  return `${magnitude}%`;
 }

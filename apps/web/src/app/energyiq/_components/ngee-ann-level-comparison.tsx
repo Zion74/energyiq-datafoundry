@@ -11,12 +11,12 @@ export function NgeeAnnLevelComparison({
     <section aria-labelledby="ngee-ann-level-comparison" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h3 id="ngee-ann-level-comparison" className="text-base font-semibold tracking-[-0.015em] text-foreground">
+          <h3 id="ngee-ann-level-comparison" className="text-lg font-semibold tracking-[-0.015em] text-foreground">
             Energy distribution
           </h3>
-          <p className="mt-1 text-xs leading-5 text-muted">Level comparison · {view.decisionQuestion}</p>
+          <p className="mt-1.5 text-sm leading-6 text-muted">{view.decisionQuestion}</p>
           {view.rows.length > 0 ? (
-            <ul aria-label="Level colour key" className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted">
+            <ul aria-label="Level colour key" className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
               {view.rows.map((row) => (
                 <li key={row.id} className="inline-flex items-center gap-1.5">
                   <span aria-hidden="true" className={`h-2 w-2 rounded-full ${levelColour(row.id)}`} />
@@ -26,7 +26,7 @@ export function NgeeAnnLevelComparison({
             </ul>
           ) : null}
         </div>
-        <p className="max-w-xl text-[11px] leading-5 text-muted">
+        <p className="max-w-xl text-xs leading-5 text-muted">
           Official-route energy, adjacent-period movement and accepted interval quality from one published Snapshot.
         </p>
       </div>
@@ -34,13 +34,13 @@ export function NgeeAnnLevelComparison({
       {view.status === "unavailable" ? (
         <div className="mt-4 rounded-lg border border-border bg-surface-subtle px-4 py-4" role="status">
           <p className="text-xs font-semibold text-foreground">Level comparison unavailable</p>
-          <p className="mt-1 text-[11px] leading-5 text-muted">{view.reason}</p>
+          <p className="mt-1 text-sm leading-6 text-muted">{view.reason}</p>
         </div>
       ) : (
         <div className="mt-4 overflow-x-auto">
           <table className="w-full min-w-[860px] border-collapse text-left">
             <caption className="sr-only">Level 6 and Level 7 official energy comparison</caption>
-            <thead className="border-y border-border bg-surface-subtle text-[10px] font-medium uppercase tracking-[0.08em] text-muted">
+            <thead className="border-y border-border bg-surface-subtle text-xs font-medium uppercase tracking-[0.06em] text-muted">
               <tr>
                 <th scope="col" className="px-3 py-2.5">Level</th>
                 <th scope="col" className="px-3 py-2.5">Current</th>

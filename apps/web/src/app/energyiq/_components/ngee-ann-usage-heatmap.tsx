@@ -83,19 +83,19 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
     <section aria-labelledby="ngee-ann-usage-heatmap" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h3 id="ngee-ann-usage-heatmap" className="text-base font-semibold tracking-[-0.015em] text-foreground">
+          <h3 id="ngee-ann-usage-heatmap" className="text-lg font-semibold tracking-[-0.015em] text-foreground">
             Usage heatmap
           </h3>
-          <p className="mt-1 text-xs leading-5 text-muted">{view.decisionQuestion}</p>
+          <p className="mt-1.5 text-sm leading-6 text-muted">{view.decisionQuestion}</p>
         </div>
-        <p className="text-[11px] leading-5 text-muted">
+        <p className="text-xs leading-5 text-muted">
           {viewMode === "level-hour" ? "Server-provided complete-day means" : "Server hourly cells"} / {view.evidence.timezone} / {view.evidence.unit}
         </p>
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <fieldset>
-          <legend className="mb-2 text-[10px] font-semibold text-muted">Heatmap view</legend>
+          <legend className="mb-2 text-xs font-semibold text-muted">Heatmap view</legend>
           <div className="flex flex-wrap gap-1.5">
             {(["date-hour", "level-hour"] as const).map((mode) => {
               const selected = viewMode === mode;
@@ -120,7 +120,7 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
 
         {viewMode === "date-hour" ? (
           <fieldset>
-            <legend className="mb-2 text-[10px] font-semibold text-muted">Heatmap Level</legend>
+            <legend className="mb-2 text-xs font-semibold text-muted">Heatmap Level</legend>
             <div className="flex flex-wrap gap-1.5">
               {view.scopes.map((scope) => {
                 const selected = scope.id === selectedScope.id;
@@ -144,7 +144,7 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
           </fieldset>
         ) : (
           <fieldset>
-            <legend className="mb-2 text-[10px] font-semibold text-muted">Average day type</legend>
+            <legend className="mb-2 text-xs font-semibold text-muted">Average day type</legend>
             <div className="flex flex-wrap gap-1.5">
               {(["weekday", "weekend"] as const).map((dayType) => {
                 const selected = selectedDayType === dayType;

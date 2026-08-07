@@ -37,6 +37,7 @@ const mockedAccess = vi.hoisted(() => ({
   selectProject: vi.fn<(projectId: string) => void>(),
 }));
 const mockedRouter = vi.hoisted(() => ({
+  push: vi.fn<(href: string) => void>(),
   replace: vi.fn<(href: string) => void>(),
 }));
 
@@ -63,6 +64,7 @@ describe("published Overview URL reload", () => {
     mockedAccess.access = null;
     mockedAccess.activeProject = null;
     mockedAccess.selectProject.mockReset();
+    mockedRouter.push.mockReset();
     mockedRouter.replace.mockReset();
     vi.spyOn(configApi, "getEnergyProjectHierarchy").mockResolvedValue(projectHierarchy());
     window.history.replaceState({}, "", "/energyiq/overview");
@@ -95,6 +97,30 @@ describe("published Overview URL reload", () => {
     });
     expect(overviewUrlWithView(view)).toBe(
       "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=overlay&category=all",
+    );
+  });
+
+  it("opens Project-scoped History over the Current Overview without dropping its URL context", async () => {
+    const preschool = project("preschool-demo", "Preschool Demo");
+    mockedAccess.activeProject = preschool;
+    mockedAccess.access = accessContext([preschool]);
+    window.history.replaceState(
+      {},
+      "",
+      "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&grain=day&comparison=overlay&category=all",
+    );
+    vi.spyOn(configApi, "resolveProjectAnalysis").mockReturnValue(new Promise<never>(() => undefined));
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    const history = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent?.includes("History"));
+    await act(async () => history?.click());
+
+    expect(mockedRouter.push).toHaveBeenCalledWith(
+      "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Custom&from=2026-05-01&to=2026-05-31&grain=day&comparison=overlay&category=all&history=1",
     );
   });
 
@@ -137,8 +163,7 @@ describe("published Overview URL reload", () => {
     );
     expect(analyst?.getAttribute("href")).toBe(`/energyiq/ai?${expectedQuery}`);
 
-    const openIncident = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
-      .find((button) => button.textContent?.includes("Open incident detail"));
+    const openIncident = container.querySelector<HTMLButtonElement>('button[data-anomaly-trigger="true"]');
     await act(async () => openIncident?.click());
     const dialog = document.querySelector<HTMLElement>("[role='dialog']");
     const average = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])

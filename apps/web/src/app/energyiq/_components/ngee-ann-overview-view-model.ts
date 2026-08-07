@@ -188,6 +188,10 @@ export type NgeeAnnDailyAnomalyViewModel = {
     weekday: string;
     dayType: "Weekday" | "Weekend";
     range: string;
+    actualKwhValue: number;
+    baselineKwhValue: number;
+    impactKwhValue: number;
+    relativePctValue: number;
     actualKwh: string;
     baselineKwh: string;
     impactKwh: string;
@@ -1831,7 +1835,7 @@ function buildDailyAnomalies(
   };
   const unavailable = (reason: string): NgeeAnnDailyAnomalyViewModel => ({
     status: "unavailable",
-    decisionQuestion: "Which complete local days crossed the pinned usage rule and need investigation?",
+    decisionQuestion: "Which daily exceptions deserve investigation first?",
     reason,
     allSuppressed: false,
     outcomeSummary: { triggered: 0, withinThreshold: 0, suppressed: 0 },
@@ -1873,6 +1877,10 @@ function buildDailyAnomalies(
       weekday: formatLocalWeekday(row.localDate),
       dayType: row.dayType === "weekday" ? "Weekday" as const : "Weekend" as const,
       range: formatEvidenceRange(row.from, row.to, bundle.timezone),
+      actualKwhValue: row.actualKwh!,
+      baselineKwhValue: row.baselineKwh!,
+      impactKwhValue: row.impactKwh!,
+      relativePctValue: row.relativePct!,
       actualKwh: formatDecimal(row.actualKwh!, 4),
       baselineKwh: formatDecimal(row.baselineKwh!, 4),
       impactKwh: signedDecimal(row.impactKwh!, 4),
@@ -1929,7 +1937,7 @@ function buildDailyAnomalies(
 
   return {
     status: "available",
-    decisionQuestion: "Which complete local days crossed the pinned usage rule and need investigation?",
+    decisionQuestion: "Which daily exceptions deserve investigation first?",
     reason: null,
     allSuppressed: allRows.length > 0 && outcomeSummary.suppressed === allRows.length,
     outcomeSummary,

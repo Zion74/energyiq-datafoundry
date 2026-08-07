@@ -14,13 +14,13 @@ export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel
   if (view.status === "unavailable") {
     return (
       <section aria-labelledby="ngee-ann-energy-trend" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
-        <h3 id="ngee-ann-energy-trend" className="text-base font-semibold tracking-[-0.015em] text-foreground">
+        <h3 id="ngee-ann-energy-trend" className="text-lg font-semibold tracking-[-0.015em] text-foreground">
           Energy trend
         </h3>
-        <p className="mt-1 text-xs leading-5 text-muted">{view.decisionQuestion}</p>
+        <p className="mt-1.5 text-sm leading-6 text-muted">{view.decisionQuestion}</p>
         <div className="mt-4 rounded-lg border border-border bg-surface-subtle px-4 py-4" role="status">
           <p className="text-xs font-semibold text-foreground">Energy trend unavailable</p>
-          <p className="mt-1 text-[11px] leading-5 text-muted">{view.reason}</p>
+          <p className="mt-1 text-sm leading-6 text-muted">{view.reason}</p>
         </div>
       </section>
     );
@@ -43,18 +43,18 @@ export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel
     <section aria-labelledby="ngee-ann-energy-trend" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h3 id="ngee-ann-energy-trend" className="text-base font-semibold tracking-[-0.015em] text-foreground">
+          <h3 id="ngee-ann-energy-trend" className="text-lg font-semibold tracking-[-0.015em] text-foreground">
             Energy trend
           </h3>
-          <p className="mt-1 text-xs leading-5 text-muted">{view.decisionQuestion}</p>
+          <p className="mt-1.5 text-sm leading-6 text-muted">{view.decisionQuestion}</p>
         </div>
-        <p className="text-[11px] leading-5 text-muted">
+        <p className="text-xs leading-5 text-muted">
           {view.grain === "hour" ? "Hourly grid" : "Daily totals"} / {view.evidence.timezone} / {view.evidence.unit}
         </p>
       </div>
 
       <fieldset className="mt-4">
-        <legend className="mb-2 text-[10px] font-semibold text-muted">Energy trend Scope</legend>
+        <legend className="mb-2 text-xs font-semibold text-muted">Energy trend Scope</legend>
         <div className="flex flex-wrap gap-1.5">
           {view.scopes.map((scope) => {
             const selected = scope.id === selectedScope.id;
@@ -63,8 +63,8 @@ export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel
                 key={scope.id}
                 type="button"
                 className={selected
-                  ? "min-h-11 rounded-lg border border-primary bg-primary/10 px-3 py-2 text-[11px] font-semibold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-                  : "min-h-11 rounded-lg border border-border px-3 py-2 text-[11px] font-semibold text-muted hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"}
+                  ? "min-h-11 rounded-lg border border-primary bg-primary/10 px-3 py-2 text-xs font-semibold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                  : "min-h-11 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"}
                 aria-pressed={selected}
                 aria-controls="ngee-ann-energy-trend-chart"
                 onClick={() => {
@@ -81,13 +81,13 @@ export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel
       </fieldset>
 
       {selectedScope.limitation ? (
-        <p className="mt-3 rounded-lg border border-step-warning/25 bg-step-warning/5 px-3 py-2 text-[11px] leading-5 text-step-warning" role="status">
+        <p className="mt-3 rounded-lg border border-step-warning/25 bg-step-warning/5 px-3 py-2 text-xs leading-5 text-step-warning" role="status">
           {selectedScope.limitation}
         </p>
       ) : null}
 
       {view.grain === "day" && view.baselineOverlay.status === "unavailable" ? (
-        <p className="mt-3 rounded-lg border border-border bg-surface-subtle px-3 py-2 text-[11px] leading-5 text-muted" role="status">
+        <p className="mt-3 rounded-lg border border-border bg-surface-subtle px-3 py-2 text-xs leading-5 text-muted" role="status">
           {view.baselineOverlay.reason} Accepted usage remains available.
         </p>
       ) : null}

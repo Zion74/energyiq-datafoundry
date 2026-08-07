@@ -48,10 +48,10 @@ export function NgeeAnnEnergyComposition({
     <section aria-labelledby="ngee-ann-energy-composition" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h3 id="ngee-ann-energy-composition" className="text-base font-semibold tracking-[-0.015em] text-foreground">
+          <h3 id="ngee-ann-energy-composition" className="text-lg font-semibold tracking-[-0.015em] text-foreground">
             Energy composition
           </h3>
-          <p className="mt-1 text-xs leading-5 text-muted">{view.decisionQuestion}</p>
+          <p className="mt-1.5 text-sm leading-6 text-muted">{view.decisionQuestion}</p>
         </div>
         <p className="max-w-xl text-[11px] leading-5 text-muted">
           Official categories and designated totals stay separate from explanatory component Circuits.
@@ -64,7 +64,7 @@ export function NgeeAnnEnergyComposition({
           Load and Light use the official Project total as their shared denominator.
         </p>
         {view.categories.rows.length > 0 ? (
-          <ul aria-label="Category colour key" className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted">
+          <ul aria-label="Category colour key" className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
             {view.categories.rows.map((row) => (
               <li key={row.id} className="inline-flex items-center gap-1.5">
                 <span aria-hidden="true" className={`h-2 w-2 rounded-full ${categoryColour(row.id)}`} />
@@ -79,7 +79,7 @@ export function NgeeAnnEnergyComposition({
           <div className="mt-3 overflow-x-auto">
             <table className="w-full min-w-[820px] border-collapse text-left">
               <caption className="sr-only">Load and Light official energy comparison</caption>
-              <thead className="border-y border-border bg-surface-subtle text-[10px] font-medium uppercase tracking-[0.08em] text-muted">
+              <thead className="border-y border-border bg-surface-subtle text-xs font-medium uppercase tracking-[0.06em] text-muted">
                 <tr>
                   <th scope="col" className="px-3 py-2.5">Category</th>
                   <th scope="col" className="px-3 py-2.5">Current</th>

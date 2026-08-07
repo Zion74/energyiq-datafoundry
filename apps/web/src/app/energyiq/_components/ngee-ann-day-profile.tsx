@@ -49,19 +49,19 @@ export function NgeeAnnDayProfile({ view }: { view: NgeeAnnDayProfileViewModel }
     <section aria-labelledby="ngee-ann-day-profile" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h3 id="ngee-ann-day-profile" className="text-base font-semibold tracking-[-0.015em] text-foreground">
+          <h3 id="ngee-ann-day-profile" className="text-lg font-semibold tracking-[-0.015em] text-foreground">
             Day profile
           </h3>
-          <p className="mt-1 text-xs leading-5 text-muted">{view.decisionQuestion}</p>
+          <p className="mt-1.5 text-sm leading-6 text-muted">{view.decisionQuestion}</p>
         </div>
-        <p className="text-[11px] leading-5 text-muted">
+        <p className="text-xs leading-5 text-muted">
           Mean of complete local days / {view.evidence.timezone} / {view.evidence.unit}
         </p>
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <fieldset>
-          <legend className="mb-2 text-[10px] font-semibold text-muted">Day Profile type</legend>
+          <legend className="mb-2 text-xs font-semibold text-muted">Day Profile type</legend>
           <div className="flex flex-wrap gap-1.5">
             {(["weekday", "weekend", "public_holiday"] as const).map((dayType) => {
               const selected = profile.dayType === dayType;
@@ -85,7 +85,7 @@ export function NgeeAnnDayProfile({ view }: { view: NgeeAnnDayProfileViewModel }
           </div>
         </fieldset>
         <fieldset>
-          <legend className="mb-2 text-[10px] font-semibold text-muted">Day Profile Scope</legend>
+          <legend className="mb-2 text-xs font-semibold text-muted">Day Profile Scope</legend>
           <div className="flex flex-wrap gap-1.5">
             {view.scopes.map((scope) => {
               const selected = scope.id === profile.scopeId;
@@ -214,8 +214,8 @@ function TimeModuleUnavailable({
 }) {
   return (
     <section aria-labelledby={headingId} className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
-      <h3 id={headingId} className="text-base font-semibold tracking-[-0.015em] text-foreground">{heading}</h3>
-      <p className="mt-1 text-xs leading-5 text-muted">{question}</p>
+      <h3 id={headingId} className="text-lg font-semibold tracking-[-0.015em] text-foreground">{heading}</h3>
+      <p className="mt-1.5 text-sm leading-6 text-muted">{question}</p>
       <div className="mt-4 rounded-lg border border-border bg-surface-subtle px-4 py-4" role="status">
         <p className="text-xs font-semibold text-foreground">{heading} unavailable</p>
         <p className="mt-1 text-[11px] leading-5 text-muted">{reason}</p>
@@ -253,8 +253,8 @@ function TimeEvidence({
 
 function filterClassName(selected: boolean): string {
   return selected
-    ? "min-h-11 rounded-lg border border-primary bg-primary/10 px-3 py-2 text-[11px] font-semibold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-    : "min-h-11 rounded-lg border border-border px-3 py-2 text-[11px] font-semibold text-muted hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30";
+    ? "min-h-11 rounded-lg border border-primary bg-primary/10 px-3 py-2 text-xs font-semibold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+    : "min-h-11 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30";
 }
 
 export { TimeEvidence, TimeModuleUnavailable, filterClassName };
