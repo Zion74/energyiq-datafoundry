@@ -77,4 +77,32 @@ describe("default tool observation adapters", () => {
     ]));
     expect(JSON.stringify(contextPackage)).not.toContain('"committed":true');
   });
+
+  it("bounds a missing SQL observation instead of crashing the context processor", () => {
+    const runScope = {
+      modelName: "test-model",
+      resourceId: "user-1",
+      runId: "run-1",
+      sessionId: "session-1",
+    };
+    const boundary = createToolObservationBoundary({ identity: runScope });
+
+    const contextPackage = boundary.packager.packageToolObservation({
+      toolName: "run_sql_readonly",
+      rawResult: undefined,
+      runScope,
+    });
+
+    expect(contextPackage.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sourceType: "sql",
+        visibility: "model",
+        content: expect.objectContaining({
+          tool_result_invalid: true,
+          tool_name: "run_sql_readonly",
+          preview: "undefined",
+        }),
+      }),
+    ]));
+  });
 });
