@@ -85,7 +85,20 @@ export const createEnergyQueryContextItem = (
     sourceOwner: "server"
   }, {
     atomic: true,
-    groupKind: "source"
+    groupKind: "source",
+    energyQueryContext: {
+      workspaceId: context.workspaceId,
+      projectId: context.projectId,
+      projectName: context.projectName,
+      scopeId: context.scopeId,
+      scopeName: context.scopeName,
+      scopeType: context.scopeType,
+      resource: context.resource,
+      timezone: context.timezone,
+      from: context.from,
+      to: context.to,
+      dataSnapshotId: context.dataSnapshotId,
+    },
   })
 });
 

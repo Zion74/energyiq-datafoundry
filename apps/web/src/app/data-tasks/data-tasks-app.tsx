@@ -201,7 +201,10 @@ import {
   SessionBusyPrompt,
   SessionRemoteBusyBanner,
 } from "./components/chat/SessionBusyPrompt";
-import type { SessionActiveRunDto } from "../../lib/config-api/types";
+import type {
+  SessionActiveRunDto,
+  SessionEnergyContextDto,
+} from "../../lib/config-api/types";
 import { scheduleChatTextareaResize } from "./components/chat/use-chat-textarea-autoresize";
 import { invokeWithReportedError } from "./invoke-with-reported-error";
 import { formatRunErrorMessage } from "./run-error-message";
@@ -978,6 +981,8 @@ export type DataTasksExternalContext = {
   timezone?: string;
   dataCutoff?: string;
   dataSnapshotId?: string;
+  historyStatus?: "outdated";
+  historyStatusReason?: string;
 };
 
 export function createInitialDraftPromptRequest(
@@ -992,12 +997,14 @@ export default function DataTasksApp({
   accessMode = "admin",
   externalContext,
   initialDraftPrompt,
+  onSessionEnergyContextRestored,
   inheritIdentity = false,
 }: {
   viewport?: "standalone" | "embedded";
   accessMode?: "admin" | "user";
   externalContext?: DataTasksExternalContext;
   initialDraftPrompt?: string;
+  onSessionEnergyContextRestored?: (context: SessionEnergyContextDto | null) => void;
   inheritIdentity?: boolean;
 }) {
   const shell = (
@@ -1006,6 +1013,7 @@ export default function DataTasksApp({
       accessMode={accessMode}
       externalContext={externalContext}
       initialDraftPrompt={initialDraftPrompt}
+      onSessionEnergyContextRestored={onSessionEnergyContextRestored}
     />
   );
 
@@ -1021,11 +1029,13 @@ function DataTasksCopilotShell({
   accessMode,
   externalContext,
   initialDraftPrompt,
+  onSessionEnergyContextRestored,
 }: {
   viewport: "standalone" | "embedded";
   accessMode: "admin" | "user";
   externalContext?: DataTasksExternalContext;
   initialDraftPrompt?: string;
+  onSessionEnergyContextRestored?: (context: SessionEnergyContextDto | null) => void;
 }) {
   const [copilotProperties, setCopilotProperties] = useState<Record<string, unknown>>(
     {},
@@ -1090,6 +1100,7 @@ function DataTasksCopilotShell({
             accessMode={accessMode}
             externalContext={externalContext}
             initialDraftPrompt={initialDraftPrompt}
+            onSessionEnergyContextRestored={onSessionEnergyContextRestored}
             onCopilotPropertiesChange={setCopilotProperties}
           />
         </LiveRunProvider>
@@ -1104,6 +1115,7 @@ function DataTaskWorkspace({
   accessMode,
   externalContext,
   initialDraftPrompt,
+  onSessionEnergyContextRestored,
   onCopilotPropertiesChange,
 }: {
   identityScopeKey: string;
@@ -1111,6 +1123,7 @@ function DataTaskWorkspace({
   accessMode: "admin" | "user";
   externalContext?: DataTasksExternalContext;
   initialDraftPrompt?: string;
+  onSessionEnergyContextRestored?: (context: SessionEnergyContextDto | null) => void;
   onCopilotPropertiesChange: (properties: Record<string, unknown>) => void;
 }) {
   const t = useT();
@@ -2394,6 +2407,7 @@ function DataTaskWorkspace({
         workspaceConfig={workspaceConfig}
         activeSession={activeSession}
         externalContext={externalContext}
+        onSessionEnergyContextRestored={onSessionEnergyContextRestored}
         liveRunStatus={liveRun.runStatus}
         liveRun={liveRun}
         runningThreadIds={runningThreadIds}
@@ -7795,6 +7809,7 @@ function SessionChatRuntime({
   onToolGroupsChange,
   onUseExamplePrompt,
   externalContext,
+  onSessionEnergyContextRestored,
 }: {
   threadId: string;
   isActive: boolean;
@@ -7807,6 +7822,7 @@ function SessionChatRuntime({
   onToolGroupsChange: (groups: ProcessToolGroup[]) => void;
   onUseExamplePrompt: (prompt: string) => void;
   externalContext?: DataTasksExternalContext;
+  onSessionEnergyContextRestored?: (context: SessionEnergyContextDto | null) => void;
 }) {
   const agentId = dataTaskSessionAgentId(threadId);
   const { liveRun } = useLiveRun(threadId);
@@ -7825,6 +7841,8 @@ function SessionChatRuntime({
       <SessionConversationRestore
         agentId={agentId}
         capabilitiesReady={capabilitiesReady}
+        isActive={isActive}
+        onEnergyContextRestored={onSessionEnergyContextRestored}
       />
       {isActive ? <SessionConversationScrollRestore agentId={agentId} /> : null}
       {isActive ? (
@@ -7900,6 +7918,7 @@ function ChatPane({
   workspaceConfig,
   activeSession,
   externalContext,
+  onSessionEnergyContextRestored,
   liveRunStatus,
   liveRun,
   runningThreadIds,
@@ -7922,6 +7941,7 @@ function ChatPane({
   workspaceConfig: WorkspaceConfigStore;
   activeSession: ChatSession | null;
   externalContext?: DataTasksExternalContext;
+  onSessionEnergyContextRestored?: (context: SessionEnergyContextDto | null) => void;
   liveRunStatus: LiveRun["runStatus"];
   liveRun: LiveRun;
   runningThreadIds: ReadonlySet<string>;
@@ -8046,6 +8066,14 @@ function ChatPane({
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {externalContext?.historyStatus === "outdated" ? (
+            <span
+              className="rounded-full border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800"
+              title={externalContext.historyStatusReason}
+            >
+              Outdated
+            </span>
+          ) : null}
           <RunStatusPill status={liveRunStatus} />
           {!rightPanelOpen ? (
             <ChatOpenConsoleButton onOpenRightPanel={onOpenRightPanel} />
@@ -8082,6 +8110,7 @@ function ChatPane({
                     onToolGroupsChange={onToolGroupsChange}
                     onUseExamplePrompt={onUseExamplePrompt}
                     externalContext={externalContext}
+                    onSessionEnergyContextRestored={onSessionEnergyContextRestored}
                   />
                 </div>
               );

@@ -2191,6 +2191,21 @@ export type SessionActiveRunDto = {
   userInputPreview: string;
 };
 
+export type SessionEnergyContextDto = {
+  sourceRunId: string;
+  workspaceId: string;
+  projectId: string;
+  projectName: string;
+  scopeId: string;
+  scopeName: string;
+  scopeType: string;
+  resource: "electricity" | "water";
+  timezone: string;
+  from: string;
+  to: string;
+  dataSnapshotId: string;
+};
+
 export type SessionConversationDto = {
   sessionId: string;
   title?: string;
@@ -2206,6 +2221,7 @@ export type SessionConversationDto = {
   pendingInteractions?: PendingInteractionDto[];
   restorableCustomEvents?: RestorableCustomEventDto[];
   activeRun?: SessionActiveRunDto | null;
+  energyContext?: SessionEnergyContextDto;
 };
 
 export type SessionListItemDto = {

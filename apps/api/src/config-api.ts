@@ -67,6 +67,7 @@ import {
   modelProfileTestSuccessReason
 } from "./model-profile-test.js";
 import { isEnergyIqOverviewSlotSessionId } from "./energy/energy-session-surface.js";
+import { sessionEnergyContextFromSnapshot } from "./energy/session-energy-context.js";
 import { probeModelProfileCapabilities } from "./model-profile-capability-test.js";
 import { handleCapabilitiesRequest } from "./routes/capabilities.js";
 import type { ConfigApiContext, ConfigApiResponse } from "./routes/types.js";
@@ -666,6 +667,15 @@ const handleSessionRequest = async (
     userId: context.userId,
     sessionId
   });
+  const energyContext = latestVisibleSessionEnergyContext({
+    metadataStore: context.metadataStore,
+    userId: context.userId,
+    runIds: [...new Set([
+      ...[...messages].reverse().map((message) => message.run_id),
+      ...[...pendingInteractions].reverse().map((interaction) => interaction.run_id),
+      ...(latestSummary?.source_run_id ? [latestSummary.source_run_id] : [])
+    ])]
+  });
 
   return ok({
     sessionId,
@@ -683,8 +693,26 @@ const handleSessionRequest = async (
     restorableCustomEvents: runEventGroups.flatMap(({ runId, events }) =>
       restorableCustomEventDtos(runId, events)
     ),
-    ...(activeRun ? { activeRun: sessionActiveRunDto(activeRun) } : {})
+    ...(activeRun ? { activeRun: sessionActiveRunDto(activeRun) } : {}),
+    ...(energyContext ? { energyContext } : {})
   });
+};
+
+const latestVisibleSessionEnergyContext = (input: {
+  metadataStore: MetadataStore;
+  userId: string;
+  runIds: string[];
+}) => {
+  for (const runId of input.runIds) {
+    const snapshot = input.metadataStore.contextPackageSnapshots.latestByRun({
+      user_id: input.userId,
+      run_id: runId
+    });
+    if (!snapshot) continue;
+    const context = sessionEnergyContextFromSnapshot(snapshot);
+    if (context) return context;
+  }
+  return undefined;
 };
 
 const handleCheckpointRequest = async (

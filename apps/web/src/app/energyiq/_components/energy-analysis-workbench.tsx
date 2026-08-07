@@ -1,15 +1,20 @@
 "use client";
 
 import nextDynamic from "next/dynamic";
-import { useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type { DataTasksExternalContext } from "../../data-tasks/data-tasks-app";
 import {
   configApi,
   type EnergyQueryContextDto,
   type EnergyQueryContextRequestDto,
+  type SessionEnergyContextDto,
 } from "../../../lib/config-api";
+import {
+  energySessionContextStatus,
+  restoredEnergySessionHref,
+} from "./energy-session-context";
 import { useEnergyIqAccess } from "./energyiq-access";
 
 const DataTasksApp = nextDynamic(
@@ -26,7 +31,9 @@ const DataTasksApp = nextDynamic(
 
 export function EnergyAnalysisWorkbench() {
   const searchParams = useSearchParams();
-  const { activeProject } = useEnergyIqAccess();
+  const pathname = usePathname();
+  const router = useRouter();
+  const { access, activeProject } = useEnergyIqAccess();
   const initialDraftPrompt = useMemo(
     () => buildEnergyAiHandoffInitialDraftPrompt(searchParams),
     [searchParams],
@@ -62,6 +69,26 @@ export function EnergyAnalysisWorkbench() {
   );
   const [resolved, setResolved] = useState<EnergyQueryContextDto | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sessionContext, setSessionContext] = useState<SessionEnergyContextDto | null>(null);
+
+  const handleSessionEnergyContextRestored = useCallback((context: SessionEnergyContextDto | null) => {
+    if (!context) {
+      setSessionContext(null);
+      return;
+    }
+    if (
+      context.workspaceId !== access?.activeWorkspaceId
+      || context.projectId !== activeProject?.id
+    ) {
+      setSessionContext(null);
+      return;
+    }
+    setSessionContext(context);
+    const restoredHref = restoredEnergySessionHref(pathname, searchParams, context);
+    if (restoredHref) {
+      router.replace(restoredHref, { scroll: false });
+    }
+  }, [access?.activeWorkspaceId, activeProject?.id, pathname, router, searchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,8 +109,21 @@ export function EnergyAnalysisWorkbench() {
   }, [requestedContext]);
 
   const externalContext = useMemo<DataTasksExternalContext | null>(
-    () => resolved ? toEnergyAnalysisExternalContext(resolved) : null,
-    [resolved],
+    () => {
+      if (!resolved) return null;
+      const base = toEnergyAnalysisExternalContext(resolved);
+      if (!sessionContext) return base;
+      if (restoredEnergySessionHref(pathname, searchParams, sessionContext)) return base;
+      const status = energySessionContextStatus(sessionContext, resolved);
+      return status.status === "outdated"
+        ? {
+            ...base,
+            historyStatus: "outdated",
+            historyStatusReason: status.reason,
+          }
+        : base;
+    },
+    [pathname, resolved, searchParams, sessionContext],
   );
 
   if (error) {
@@ -110,6 +150,7 @@ export function EnergyAnalysisWorkbench() {
         viewport="embedded"
         accessMode="user"
         externalContext={externalContext}
+        onSessionEnergyContextRestored={handleSessionEnergyContextRestored}
         {...(initialDraftPrompt ? { initialDraftPrompt } : {})}
         inheritIdentity
       />

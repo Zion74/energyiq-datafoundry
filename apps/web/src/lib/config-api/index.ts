@@ -151,6 +151,7 @@ export type {
   RunCancelDto,
   RunDefaultsDto,
   SessionActiveRunDto,
+  SessionEnergyContextDto,
   SessionConversationDto,
   SessionListItemDto,
   SessionListResponseDto,

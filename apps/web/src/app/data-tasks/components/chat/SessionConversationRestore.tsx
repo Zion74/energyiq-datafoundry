@@ -3,6 +3,7 @@
 import { useAgent, useCopilotChatConfiguration } from "@copilotkit/react-core/v2";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { configApi } from "../../../../lib/config-api/client";
+import type { SessionEnergyContextDto } from "../../../../lib/config-api/types";
 import { getRuntimeCapabilities } from "../../../../lib/config-api/capabilities";
 import {
   collaborationResponsesFromConversation,
@@ -39,9 +40,13 @@ import {
 export function SessionConversationRestore({
   agentId,
   capabilitiesReady,
+  isActive,
+  onEnergyContextRestored,
 }: {
   agentId: string;
   capabilitiesReady: boolean;
+  isActive: boolean;
+  onEnergyContextRestored?: (context: SessionEnergyContextDto | null) => void;
 }) {
   const chatConfig = useCopilotChatConfiguration();
   const threadId = chatConfig?.threadId;
@@ -56,11 +61,22 @@ export function SessionConversationRestore({
   const fetchGenerationRef = useRef(0);
   const prevThreadIdRef = useRef<string | undefined>(undefined);
   const agentRef = useRef(agent);
+  const restoredEnergyContextRef = useRef<SessionEnergyContextDto | null | undefined>(undefined);
+  const isActiveRef = useRef(isActive);
+  const onEnergyContextRestoredRef = useRef(onEnergyContextRestored);
   agentRef.current = agent;
+  isActiveRef.current = isActive;
+  onEnergyContextRestoredRef.current = onEnergyContextRestored;
   const restoreRunActive = isConversationRestoreRunActive({
     agentIsRunning: Boolean(agent.isRunning),
     liveRunStatus: liveRun.runStatus,
   });
+
+  useEffect(() => {
+    if (isActive && restoredEnergyContextRef.current !== undefined) {
+      onEnergyContextRestoredRef.current?.(restoredEnergyContextRef.current);
+    }
+  }, [isActive]);
 
   useLayoutEffect(() => {
     if (!threadId) {
@@ -132,6 +148,10 @@ export function SessionConversationRestore({
           return;
         }
         setConversationBranchSnapshot(threadId, conversation);
+        restoredEnergyContextRef.current = conversation.energyContext ?? null;
+        if (isActiveRef.current) {
+          onEnergyContextRestoredRef.current?.(restoredEnergyContextRef.current);
+        }
 
         const currentAgent = agentRef.current;
         if (
