@@ -410,8 +410,10 @@ const resolveModelSettings = (
     numericRecordValue(profile.payload, "frequencyPenalty") ?? numericRecordValue(profile.payload, "frequency_penalty");
   const presencePenalty =
     numericRecordValue(profile.payload, "presencePenalty") ?? numericRecordValue(profile.payload, "presence_penalty");
+  const verifiedCapability = resolveVerifiedModelCapability(profile);
   const maxOutputTokens = numericRecordValue(profile.payload, "maxTokens")
-    ?? numericRecordValue(profile.payload, "maxOutputTokens");
+    ?? numericRecordValue(profile.payload, "maxOutputTokens")
+    ?? verifiedCapability?.maxOutputTokens;
   return {
     ...(temperature !== undefined ? { temperature: Math.max(0, Math.min(2, temperature)) } : {}),
     ...(topP !== undefined ? { topP: Math.max(0, Math.min(1, topP)) } : {}),
@@ -436,28 +438,73 @@ const resolveModelContextProfile = (
     return undefined;
   }
   const profile = resolvePrimaryModelProfile(profileId, metadataStore, userId, workspaceId);
-  const contextLength = numericRecordValue(profile.payload, "contextLength")
+  const explicitContextLength = numericRecordValue(profile.payload, "contextLength")
     ?? numericRecordValue(profile.payload, "context_length");
+  const verifiedCapability = resolveVerifiedModelCapability(profile);
+  const contextLength = explicitContextLength ?? verifiedCapability?.contextWindow;
   if (contextLength === undefined) {
     return undefined;
   }
   const contextWindow = Math.max(8192, Math.min(2_000_000, Math.floor(contextLength)));
   const maxOutputTokens = numericRecordValue(profile.payload, "maxTokens")
-    ?? numericRecordValue(profile.payload, "maxOutputTokens");
+    ?? numericRecordValue(profile.payload, "maxOutputTokens")
+    ?? verifiedCapability?.maxOutputTokens
+    ?? 4096;
   const outputReserve = Math.max(
     256,
-    Math.min(Math.floor(contextWindow * 0.4), Math.floor(maxOutputTokens ?? 4096))
+    Math.min(Math.floor(contextWindow * 0.4), Math.floor(maxOutputTokens))
   );
   const safetyMargin = Math.max(512, Math.min(4096, Math.floor(contextWindow * 0.05)));
   return {
     id: `profile:${profileId}`,
     modelPattern: modelName || "*",
+    capabilitySource: explicitContextLength !== undefined ? "explicit-profile" : "verified-model-default",
     contextWindow,
+    maxOutputTokens: outputReserve,
     outputReserve,
     safetyMargin,
     messageOverhead: 4,
     toolSchemaOverhead: 32
   };
+};
+
+type VerifiedModelCapability = {
+  contextWindow: number;
+  maxOutputTokens: number;
+};
+
+const resolveVerifiedModelCapability = (
+  profile: ConfigResourceRecord
+): VerifiedModelCapability | undefined => {
+  const modelName = (
+    stringRecordValue(profile.payload, "modelName")
+    ?? stringRecordValue(profile.payload, "model")
+    ?? ""
+  ).trim().toLowerCase();
+  if (modelName !== "deepseek-v4-flash") {
+    return undefined;
+  }
+  const baseUrl = stringRecordValue(profile.payload, "baseUrl")
+    ?? stringRecordValue(profile.payload, "base_url");
+  if (!isOfficialDeepSeekBaseUrl(baseUrl)) {
+    return undefined;
+  }
+  return {
+    contextWindow: 1_000_000,
+    maxOutputTokens: 32_000
+  };
+};
+
+const isOfficialDeepSeekBaseUrl = (baseUrl: string | undefined): boolean => {
+  if (!baseUrl) {
+    return false;
+  }
+  try {
+    const url = new URL(baseUrl);
+    return url.protocol === "https:" && url.hostname.toLowerCase() === "api.deepseek.com";
+  } catch {
+    return false;
+  }
 };
 
 const resolveReasoningModel = (
