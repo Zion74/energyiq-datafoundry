@@ -335,6 +335,7 @@
     "addDataSource": "添加数据源",
     "startFromGallery": "从适配器图库开始创建。",
     "workspaceDefault": "工作区默认",
+    "systemDefault": "系统默认",
     "disabledByDefault": "默认禁用",
     "secretSaved": "密钥已保存",
     "testConnection": "测试连接",

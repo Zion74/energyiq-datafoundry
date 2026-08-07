@@ -18,8 +18,15 @@ import {
 
 import type { PolicyMcpClientConfig, PolicyMcpToolConfig } from "./policy-mcp-middleware.js";
 
-import { resolveEffectiveRunConfig, type EffectiveRunConfig } from "./run-input.js";
-import { resolveModelProfileChain } from "./workspace-model-profile-resolver.js";
+import {
+  resolveEffectiveRunConfig,
+  type EffectiveRunConfig,
+  type ModelSelectionPolicy
+} from "./run-input.js";
+import {
+  resolveModelProfileChain,
+  systemDefaultModelProfileRevision
+} from "./workspace-model-profile-resolver.js";
 
 export type ResolvedRunConfig = {
   effectiveRunConfig: EffectiveRunConfig;
@@ -49,6 +56,7 @@ export type McpRuntime = {
 type ResolveRunConfigInput = {
   defaultDatasourceId?: string;
   metadataStore: MetadataStore;
+  modelSelection?: ModelSelectionPolicy;
   runInput: RunAgentInput;
   userId: string;
   userInput: string;
@@ -62,7 +70,8 @@ export const resolveRunConfig = (input: ResolveRunConfigInput): ResolvedRunConfi
     input.metadataStore,
     input.userId,
     input.defaultDatasourceId,
-    input.workspaceId
+    input.workspaceId,
+    input.modelSelection
   );
   const skillSelection = selectSkillsForRun({
     metadataStore: input.metadataStore,
@@ -77,6 +86,9 @@ export const resolveRunConfig = (input: ResolveRunConfigInput): ResolvedRunConfi
     explicitRunConfig: explicitRunConfigKeys(input.runInput),
     selectedSkills: skillSelection.selectedSkills
   });
+  if (input.modelSelection === "system-default") {
+    effectiveRunConfig.activeLlmProfileId = WORKSPACE_DEFAULT_MODEL_PROFILE_ID;
+  }
   validateEffectiveResources(effectiveRunConfig, input.metadataStore, input.userId, input.workspaceId);
   effectiveRunConfig.resourceRevisions = {
     ...resolveEffectiveResourceRevisions(effectiveRunConfig, input.metadataStore, input.userId, input.workspaceId),
@@ -236,7 +248,7 @@ const resolveEffectiveResourceRevisions = (
     }
     if (config.activeLlmProfileId === WORKSPACE_DEFAULT_MODEL_PROFILE_ID) {
       revisions[`model-profile-binding:${WORKSPACE_DEFAULT_MODEL_PROFILE_ID}`] =
-        metadataStore.workspaceDefaultModelProfiles.get(workspaceId).revision;
+        systemDefaultModelProfileRevision(metadataStore);
     }
   }
   return revisions;
@@ -263,7 +275,7 @@ const resolveRunModelProvider = (
     const credentials = profile.secret_ref
       ? metadataStore.secrets.get({
           ref: profile.secret_ref,
-          workspace_id: workspaceId,
+          workspace_id: resolved.ownerWorkspaceId,
           user_id: resolved.ownerUserId
         })
       : {};

@@ -335,6 +335,7 @@
     "addDataSource": "Add data source",
     "startFromGallery": "Start from the adapter gallery to create one.",
     "workspaceDefault": "Workspace default",
+    "systemDefault": "System default",
     "disabledByDefault": "Disabled by default",
     "secretSaved": "Secret saved",
     "testConnection": "Test connection",

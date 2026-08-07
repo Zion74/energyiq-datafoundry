@@ -61,6 +61,8 @@ describe("createEnergyQueryContextItem", () => {
     const content = String(item.content);
 
     expect(content).toContain("Ngee Ann analysis policy");
+    expect(content).toContain("Start with inspect_schema");
+    expect(content).not.toContain("Start with list_data_sources");
     expect(content).toContain("group by local_interval_start");
     expect(content).toContain("comparison is unavailable");
     expect(content).toContain("never create new chart values");

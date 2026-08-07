@@ -297,7 +297,7 @@ const ngeeAnnAnalysisPolicy = (context: EnergyQueryContext): string[] =>
   context.projectId === "ngee-ann-polytechnic"
     ? [
         "Ngee Ann analysis policy:",
-        "Start with list_data_sources, inspect_schema and preview_table. Use run_sql_readonly only after inspecting the run-local schema, and cite the resulting tool call or artifact for every reported number.",
+        "Start with inspect_schema, then use run_sql_readonly only against the run-scoped table. Wait for each tool result before continuing, and cite the resulting tool call or artifact for every reported number.",
         "For Project or Level totals, filter quality_status='ok' and use only the published Official Aggregation Route. Meter role is descriptive evidence, not permission to alter the route.",
         "For Circuit or category contribution, query non-total breakdown rows separately and compare them with the corresponding designated total. If the breakdown does not reconcile with that total, disclose the mismatch instead of forcing shares to 100%.",
         "For peak interval-average power, group by local_interval_start, sum average_kw across the designated totals, and then take the maximum. Never use MAX(average_kw) across individual meter rows as the Project peak.",

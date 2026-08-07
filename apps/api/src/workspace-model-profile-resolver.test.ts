@@ -22,15 +22,16 @@ describe("Workspace default model profile runtime", () => {
       database_path: join(root, "metadata.sqlite"),
       secret_master_key: "test-key"
     });
+    metadata.workspaces.upsert({ id: "default", owner_user_id: "dev-user", name: "EnergyIQ", kind: "personal" });
     metadata.workspaces.upsert({ id: "customer-1", owner_user_id: "dev-user", name: "Customer", kind: "customer" });
     metadata.users.upsertDevUser({ id: "normal-user", email: "user@example.test", display_name: "Normal User", dev_token: "normal-token" });
     metadata.workspaceMemberships.upsert({ workspace_id: "customer-1", user_id: "normal-user", role: "member" });
     const secretRef = metadata.secrets.put({
-      workspace_id: "customer-1", user_id: "dev-user", owner_kind: "model-profile", owner_id: "deepseek-v4-flash",
+      workspace_id: "default", user_id: "dev-user", owner_kind: "model-profile", owner_id: "deepseek-v4-flash",
       value: { apiKey: "server-only-test-secret" }
     });
     metadata.configResources.upsert({
-      id: "deepseek-v4-flash", workspace_id: "customer-1", user_id: "dev-user", kind: "model-profile",
+      id: "deepseek-v4-flash", workspace_id: "default", user_id: "dev-user", kind: "model-profile",
       name: "DeepSeek V4 Flash", payload: {
         provider: "openai-compatible", modelName: "deepseek-v4-flash", baseUrl: "https://api.example.test/v1"
       }, secret_ref: secretRef, default_enabled: true, status: "connected"
@@ -65,6 +66,38 @@ describe("Workspace default model profile runtime", () => {
     expect(metadata.configResources.list({
       workspace_id: "customer-1", user_id: "normal-user", kind: "model-profile"
     })).toEqual([]);
+
+    const localSecretRef = metadata.secrets.put({
+      workspace_id: "customer-1", user_id: "normal-user", owner_kind: "model-profile", owner_id: "local-model",
+      value: { apiKey: "local-test-secret" }
+    });
+    metadata.configResources.upsert({
+      id: "local-model", workspace_id: "customer-1", user_id: "normal-user", kind: "model-profile",
+      name: "Local model", payload: {
+        provider: "openai-compatible", modelName: "local-model", baseUrl: "https://local.example.test/v1"
+      }, secret_ref: localSecretRef, default_enabled: true, status: "connected"
+    });
+    const explicitLocalInput = {
+      ...emptyRunInput(),
+      forwardedProps: { run_config: { activeLlmProfileId: "local-model" } }
+    } as RunAgentInput;
+    expect(resolveRunConfig({
+      metadataStore: metadata,
+      runInput: explicitLocalInput,
+      userId: "normal-user",
+      userInput: "Generic data task",
+      workspaceId: "customer-1"
+    }).modelProvider.model_name).toBe("local-model");
+    const energyResolved = resolveRunConfig({
+      metadataStore: metadata,
+      modelSelection: "system-default",
+      runInput: explicitLocalInput,
+      userId: "normal-user",
+      userInput: "EnergyIQ task",
+      workspaceId: "customer-1"
+    });
+    expect(energyResolved.effectiveRunConfig.activeLlmProfileId).toBe("workspace-default");
+    expect(energyResolved.modelProvider.model_name).toBe("deepseek-v4-flash");
     const dto = workspaceDefaultModelProfileDto({
       context: userContext,
       isAdmin: false
@@ -75,7 +108,7 @@ describe("Workspace default model profile runtime", () => {
     expect(dto).not.toHaveProperty("sourceProfileId");
 
     const source = metadata.configResources.get({
-      id: "deepseek-v4-flash", workspace_id: "customer-1", user_id: "dev-user", kind: "model-profile"
+      id: "deepseek-v4-flash", workspace_id: "default", user_id: "dev-user", kind: "model-profile"
     });
     metadata.configResources.upsert({
       ...source,
@@ -98,7 +131,7 @@ describe("Workspace default model profile runtime", () => {
     })).toThrow("WORKSPACE_DEFAULT_MODEL_PROFILE_NOT_CONNECTED");
 
     metadata.configResources.delete({
-      id: "deepseek-v4-flash", workspace_id: "customer-1", user_id: "dev-user", kind: "model-profile"
+      id: "deepseek-v4-flash", workspace_id: "default", user_id: "dev-user", kind: "model-profile"
     });
     expect(workspaceDefaultModelProfileDto({
       context: userContext,

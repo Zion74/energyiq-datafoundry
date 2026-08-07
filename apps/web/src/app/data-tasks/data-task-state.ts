@@ -78,6 +78,7 @@ const toolDisplayTitles: Record<string, string> = {
   inspect_schema: "Inspect data source schema",
   preview_table: "Preview table",
   run_sql_readonly: "Run SQL query",
+  analysis_requirements_commit: "Verify evidence",
   retrieve_knowledge: "Retrieve knowledge",
   read_file: "Read file",
   edit_file: "Edit file",

@@ -15,6 +15,7 @@ import {
 } from "@datafoundry/agent-runtime";
 import {
   resolveModelProfileChain,
+  systemDefaultModelProfileRevision,
   workspaceDefaultModelProfileConfigured
 } from "./workspace-model-profile-resolver.js";
 
@@ -27,6 +28,8 @@ export type RunConfigDefaults = {
   enabledMcpServerIds: string[];
   enabledSkillIds: string[];
 };
+
+export type ModelSelectionPolicy = "request-or-workspace" | "system-default";
 
 export type EffectiveRunConfig = {
   activeDatasourceId?: string;
@@ -180,10 +183,14 @@ export const resolveEffectiveRunConfig = (
   metadataStore: MetadataStore,
   userId: string,
   defaultDatasourceId?: string,
-  workspaceId = "default"
+  workspaceId = "default",
+  modelSelection: ModelSelectionPolicy = "request-or-workspace"
 ): EffectiveRunConfig => {
   const defaults = loadWorkspaceRunDefaults(metadataStore, userId, workspaceId);
   const config = extractEffectiveRunConfig(input, defaultDatasourceId, defaults);
+  if (modelSelection === "system-default") {
+    config.activeLlmProfileId = WORKSPACE_DEFAULT_MODEL_PROFILE_ID;
+  }
   return {
     ...config,
     resourceRevisions: resolveResourceRevisions(config, metadataStore, userId, workspaceId)
@@ -261,7 +268,7 @@ const resolveResourceRevisions = (
     }
     if (config.activeLlmProfileId === WORKSPACE_DEFAULT_MODEL_PROFILE_ID) {
       revisions[`model-profile-binding:${WORKSPACE_DEFAULT_MODEL_PROFILE_ID}`] =
-        metadataStore.workspaceDefaultModelProfiles.get(workspaceId).revision;
+        systemDefaultModelProfileRevision(metadataStore);
     }
   }
   return revisions;

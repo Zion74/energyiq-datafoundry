@@ -6645,7 +6645,11 @@ function ModelConfigList({
                     <p className="mt-2 truncate text-xs text-slate-600">{summary || item.description}</p>
                     <div className="mt-3 flex flex-wrap gap-1.5 text-[10px] text-slate-500">
                       <span className="rounded-full border border-border bg-slate-50 px-2 py-0.5">
-                        {item.enabled ? t("configPanel.workspaceDefault") : t("configPanel.disabledByDefault")}
+                        {item.id === "workspace-default"
+                          ? t("configPanel.systemDefault")
+                          : item.enabled
+                            ? t("configPanel.workspaceDefault")
+                            : t("configPanel.disabledByDefault")}
                       </span>
                       {item.builtin ? (
                         <span className="rounded-full border border-border bg-slate-50 px-2 py-0.5">

@@ -7,6 +7,7 @@ import type { IncomingMessage } from "node:http";
 
 import { resolveEnergyAccessContext } from "./energy/energy-query-context.js";
 import type { ConfigApiContext, ConfigApiResponse } from "./routes/types.js";
+import { ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID } from "./workspace-model-profile-resolver.js";
 
 export const handleWorkspaceDefaultModelProfileRequest = async (
   request: IncomingMessage,
@@ -35,7 +36,7 @@ export const handleWorkspaceDefaultModelProfileRequest = async (
     const profileId = requiredString(body.profileId, "WORKSPACE_DEFAULT_MODEL_PROFILE_ID_REQUIRED");
     const expectedRevision = optionalInteger(body.expectedRevision);
     context.metadataStore.workspaceDefaultModelProfiles.set({
-      workspace_id: access.activeWorkspaceId,
+      workspace_id: ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID,
       profile_id: profileId,
       profile_owner_user_id: context.userId,
       configured_by_user_id: context.userId,
@@ -50,7 +51,7 @@ export const handleWorkspaceDefaultModelProfileRequest = async (
     const body = await readJsonBody(request);
     const expectedRevision = optionalInteger(body.expectedRevision);
     context.metadataStore.workspaceDefaultModelProfiles.clear({
-      workspace_id: access.activeWorkspaceId,
+      workspace_id: ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID,
       ...(expectedRevision !== undefined ? { expected_revision: expectedRevision } : {})
     });
     return { status: 200, body: createSuccessResult({ configured: false }) };
@@ -61,16 +62,18 @@ export const handleWorkspaceDefaultModelProfileRequest = async (
   };
 };
 
-/** Read-safe Workspace proxy. It never includes the source profile id for users or any secret reference. */
+/** Read-safe system model proxy. It never includes the source profile id or secret for users. */
 export const workspaceDefaultModelProfileDto = (input: {
   context: Required<ConfigApiContext>;
   isAdmin: boolean;
 }): Record<string, unknown> => {
-  const binding = input.context.metadataStore.workspaceDefaultModelProfiles.find(input.context.workspaceId);
+  const binding = input.context.metadataStore.workspaceDefaultModelProfiles.find(
+    ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID
+  );
   if (!binding) return { configured: false };
   const profile = input.context.metadataStore.configResources.find({
     id: binding.profile_id,
-    workspace_id: binding.workspace_id,
+    workspace_id: ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID,
     user_id: binding.profile_owner_user_id,
     kind: "model-profile"
   });
@@ -97,8 +100,8 @@ const unavailableProxy = (
   configured: true,
   available: false,
   id: WORKSPACE_DEFAULT_MODEL_PROFILE_ID,
-  name: "Workspace default · unavailable",
-  description: "The configured source profile is unavailable. An admin must repair the binding.",
+  name: "EnergyIQ system default · unavailable",
+  description: "The configured EnergyIQ system model is unavailable. An admin must repair it.",
   connectionStatus: "unavailable",
   defaultEnabled: false,
   fallbackPolicy: "disabled",
@@ -119,8 +122,8 @@ const toWorkspaceProxy = (
   configured: true,
   available: true,
   id: WORKSPACE_DEFAULT_MODEL_PROFILE_ID,
-  name: `Workspace default · ${profile.name}`,
-  description: "Admin-managed Workspace model. Credentials remain server-side.",
+  name: `EnergyIQ system default · ${profile.name}`,
+  description: "Admin-managed EnergyIQ model shared by every Project. Credentials remain server-side.",
   provider: safeString(profile.payload.provider),
   modelName: safeString(profile.payload.modelName) ?? safeString(profile.payload.model),
   connectionStatus: profile.status,

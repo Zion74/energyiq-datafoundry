@@ -3,9 +3,13 @@ import { WORKSPACE_DEFAULT_MODEL_PROFILE_ID } from "@datafoundry/metadata";
 
 export type ResolvedModelProfile = {
   exposedId: string;
+  ownerWorkspaceId: string;
   ownerUserId: string;
   resource: ConfigResourceRecord;
 };
+
+/** Backing Workspace for the single server-managed EnergyIQ model profile. */
+export const ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID = "default";
 
 export const resolveModelProfileChain = (input: {
   metadataStore: MetadataStore;
@@ -14,10 +18,10 @@ export const resolveModelProfileChain = (input: {
   workspaceId: string;
 }): ResolvedModelProfile[] => {
   if (input.profileId === WORKSPACE_DEFAULT_MODEL_PROFILE_ID) {
-    const binding = input.metadataStore.workspaceDefaultModelProfiles.get(input.workspaceId);
+    const binding = input.metadataStore.workspaceDefaultModelProfiles.get(ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID);
     const resource = input.metadataStore.configResources.find({
       id: binding.profile_id,
-      workspace_id: input.workspaceId,
+      workspace_id: ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID,
       user_id: binding.profile_owner_user_id,
       kind: "model-profile"
     });
@@ -29,6 +33,7 @@ export const resolveModelProfileChain = (input: {
     }
     return [{
       exposedId: WORKSPACE_DEFAULT_MODEL_PROFILE_ID,
+      ownerWorkspaceId: ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID,
       ownerUserId: binding.profile_owner_user_id,
       resource
     }];
@@ -46,7 +51,12 @@ export const resolveModelProfileChain = (input: {
       user_id: input.userId,
       kind: "model-profile"
     });
-    profiles.push({ exposedId: currentId, ownerUserId: input.userId, resource });
+    profiles.push({
+      exposedId: currentId,
+      ownerWorkspaceId: input.workspaceId,
+      ownerUserId: input.userId,
+      resource
+    });
     currentId = stringValue(resource.payload.fallbackProfileId);
   }
   return profiles;
@@ -54,8 +64,11 @@ export const resolveModelProfileChain = (input: {
 
 export const workspaceDefaultModelProfileConfigured = (
   metadataStore: MetadataStore,
-  workspaceId: string,
-): boolean => metadataStore.workspaceDefaultModelProfiles.find(workspaceId) !== undefined;
+  _workspaceId: string,
+): boolean => metadataStore.workspaceDefaultModelProfiles.find(ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID) !== undefined;
+
+export const systemDefaultModelProfileRevision = (metadataStore: MetadataStore): number =>
+  metadataStore.workspaceDefaultModelProfiles.get(ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID).revision;
 
 const stringValue = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() ? value.trim() : undefined;

@@ -618,6 +618,7 @@ class DataFoundryAgUiAgent extends AbstractAgent {
               ? { defaultDatasourceId: energyScopedDataSource?.datasourceId ?? this.input.defaultDatasourceId }
               : {}),
             metadataStore: this.input.metadataStore,
+            modelSelection: energyRequest ? "system-default" : "request-or-workspace",
             runInput: normalizedRunInput,
             userId: this.input.user.id,
             userInput,

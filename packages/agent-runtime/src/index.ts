@@ -971,8 +971,9 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
         + `"${energyContext.period}"; its local calendar display range is ${localRangeStart} through `
         + `${localRangeEnd}. Treat that scope and period as authoritative and show the local calendar range, not raw UTC. `
         + "Do not call list_data_sources, list_files, preview_table, workspace file tools, or direct database clients "
-        + "to rediscover data. Inspect the selected datasource schema once, then reuse its schema_id. "
-        + "In every new run, inspect_schema must happen before the first run_sql_readonly call. Schema IDs and table "
+        + "to rediscover data. Call inspect_schema alone as the first tool action, wait for its result, then reuse its "
+        + "schema_id in run_sql_readonly. Do not call analysis_requirements_commit until at least one successful "
+        + "run_sql_readonly result in the current run supports that requirement. Schema IDs and table "
         + "names found in prior messages, deterministic Evidence, examples, or earlier runs are reference-only and "
         + "must never be executed in the current run. The run-scoped relation is already restricted to the authoritative "
         + "period, so do not add a redundant time filter. If a boundary audit truly requires one, compare a TIMESTAMPTZ "
