@@ -167,7 +167,7 @@ describe("analysis requirements commit tool", () => {
     }));
   });
 
-  it("binds authorized context facts and injects canonical values before commit", async () => {
+  it("automatically binds authorized sufficient Context Evidence when fact ids are omitted", async () => {
     const contextRequirements = createUserAnalysisRequirements([{
       kind: "metric",
       description: "What is Centre A EUI?",
@@ -214,7 +214,6 @@ describe("analysis requirements commit tool", () => {
     const result = await tool.execute?.({ claims: [{
       requirement_id: "R1",
       claim: "Centre A released EUI is 13.62 kWh/m2/year and is provisional.",
-      context_fact_ids: ["centre-a.eui"],
     }] }, { agent: { toolCallId: "call-context" } } as never);
 
     expect(result).toMatchObject({ claims: [{
@@ -280,18 +279,16 @@ describe("analysis requirements commit tool", () => {
     }] }, { agent: { toolCallId: "call-context-required" } } as never);
 
     expect(result).toMatchObject({ ok: false, isError: true });
-    expect(JSON.stringify(result)).toContain("ANALYSIS_CONTEXT_EVIDENCE_REQUIRED:R1");
-    expect(JSON.stringify(result)).toContain("centre-a.eui");
+    expect(JSON.stringify(result)).toContain("ANALYSIS_CONTEXT_EVIDENCE_FACT_NOT_FOUND:centre-a.eui");
     expect(executeAction).not.toHaveBeenCalled();
   });
 
-  it("carries verified query evidence into a supporting Context Evidence commit", async () => {
+  it("auto-binds supporting Context Evidence only after Query Evidence is complete", async () => {
     const contextRequirements = createUserAnalysisRequirements([{
       kind: "decision",
       description: "Which centre should I investigate first?",
       acceptanceCriteria: ["Use released priority and investigate a driver"],
     }]);
-    contextRequirements[0]!.status = "evidenced";
     contextRequirements[0]!.contextEvidence = {
       mode: "supporting",
       factIds: ["centre-g.priority"],
@@ -328,10 +325,19 @@ describe("analysis requirements commit tool", () => {
       trustedEnergy: true,
     });
 
+    const earlyResult = await tool.execute?.({ claims: [{
+      requirement_id: "R1",
+      claim: "Investigate Centre G first based on released priority.",
+    }] }, { agent: { toolCallId: "call-context-supporting-early" } } as never);
+
+    expect(earlyResult).toMatchObject({ ok: false, isError: true });
+    expect(JSON.stringify(earlyResult)).toContain("ANALYSIS_CONTEXT_EVIDENCE_SUPPORTING_REQUIRES_QUERY:R1");
+    expect(executeAction).not.toHaveBeenCalled();
+
+    contextRequirements[0]!.status = "evidenced";
     const result = await tool.execute?.({ claims: [{
       requirement_id: "R1",
       claim: "Investigate Centre G first based on released priority and the verified driver query.",
-      context_fact_ids: ["centre-g.priority"],
     }] }, { agent: { toolCallId: "call-context-supporting" } } as never);
 
     expect(result).toMatchObject({ claims: [{

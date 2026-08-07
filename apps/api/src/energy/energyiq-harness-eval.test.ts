@@ -75,7 +75,7 @@ describe("EnergyIQ Harness Eval", () => {
     expect(report.metrics.recoveredToolFailures).toBe(1);
   });
 
-  it("requires a released-only EUI answer to bind Context Evidence without SQL", () => {
+  it("accepts a released EUI answer after contract setup without forcing SQL", () => {
     const evalCase = ENERGYIQ_HARNESS_FAST_CASES.find((entry) => entry.id === "preschool-released-eui")!;
     const answer = "Centre A's released EUI is 13.62 kWh/m²/year, provisional. Its Senior Care Center cohort P50 is 6.75 and P75 is 9.20 kWh/m²/year.";
     const report = evaluateEnergyIqHarnessObservation(evalCase, {
@@ -88,8 +88,42 @@ describe("EnergyIQ Harness Eval", () => {
     expect(report.snapshotIds).toEqual(["energy-snapshot-52ca9611e48b0d71c2efe7b7"]);
     expect(report.assertions).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: "protocol.analysis.context.evidence.bind", passed: true }),
-      expect.objectContaining({ id: "protocol.forbidden.analysis.evidence.bind", passed: true }),
       expect.objectContaining({ id: "context.single-snapshot", passed: true, hard: true }),
+    ]));
+  });
+
+  it("records optional released-EUI investigation as telemetry without rejecting the evidenced answer", () => {
+    const evalCase = ENERGYIQ_HARNESS_FAST_CASES.find((entry) => entry.id === "preschool-released-eui")!;
+    const answer = "Centre A's released EUI is 13.62 kWh/m²/year, provisional. Its Senior Care Center cohort P50 is 6.75 and P75 is 9.20 kWh/m²/year.";
+    const report = evaluateEnergyIqHarnessObservation(evalCase, {
+      elapsedMs: 70_000,
+      events: contextEvidenceEvents(answer, [
+        "analysis.evidence.bind",
+        "analysis.context.evidence.bind",
+        "analysis.requirements.commit",
+      ], { includeSql: true }),
+    });
+
+    expect(report.status).toBe("passed");
+    expect(report.hardFailure).toBe(false);
+    expect(report.metrics.sqlCalls).toBe(1);
+    expect(report.assertions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "protocol.analysis.context.evidence.bind", passed: true }),
+      expect.objectContaining({ id: "context.single-snapshot", passed: true, hard: true }),
+    ]));
+  });
+
+  it("still rejects a released EUI answer that omits Context Evidence binding", () => {
+    const evalCase = ENERGYIQ_HARNESS_FAST_CASES.find((entry) => entry.id === "preschool-released-eui")!;
+    const answer = "Centre A's released EUI is 13.62 kWh/m²/year, provisional. Its Senior Care Center cohort P50 is 6.75 and P75 is 9.20 kWh/m²/year.";
+    const report = evaluateEnergyIqHarnessObservation(evalCase, {
+      elapsedMs: 45_000,
+      events: contextEvidenceEvents(answer, ["analysis.requirements.commit"]),
+    });
+
+    expect(report.status).toBe("failed");
+    expect(report.assertions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "protocol.analysis.context.evidence.bind", passed: false }),
     ]));
   });
 
@@ -100,7 +134,7 @@ describe("EnergyIQ Harness Eval", () => {
       "analysis.evidence.bind",
       "analysis.context.evidence.bind",
       "analysis.requirements.commit",
-    ], true);
+    ], { includeSql: true });
     const report = evaluateEnergyIqHarnessObservation(evalCase, { elapsedMs: 95_000, events });
 
     expect(report.status).toBe("passed");
@@ -218,10 +252,14 @@ const successfulEvents = (answer: string, extraTools: string[] = []): Array<Reco
 const contextEvidenceEvents = (
   answer: string,
   protocolActions: string[],
-  includeSql = false,
+  options: { includeSql?: boolean } = {},
 ): Array<Record<string, unknown>> => {
   const snapshotId = "energy-snapshot-52ca9611e48b0d71c2efe7b7";
-  const tools = ["inspect_schema", ...(includeSql ? ["run_sql_readonly"] : []), "analysis_requirements_commit"];
+  const tools = [
+    "inspect_schema",
+    ...(options.includeSql ? ["run_sql_readonly"] : []),
+    "analysis_requirements_commit",
+  ];
   return [
     { type: "RUN_STARTED" },
     { type: "REASONING_START" },

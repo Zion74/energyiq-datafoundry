@@ -475,6 +475,7 @@ describe("createRunProtocolBoundary", () => {
     expect(result.observation).toMatchObject({
       schema_id: "schema-shipments",
       analysis_contract: {
+        instruction: expect.stringContaining("Requirements with sufficient context_evidence may be committed directly"),
         requirements: [{
           requirement_id: "R1",
           assertions: [{
@@ -488,6 +489,8 @@ describe("createRunProtocolBoundary", () => {
         }]
       }
     });
+    expect((result.observation as { analysis_contract: { instruction: string } }).analysis_contract.instruction)
+      .not.toContain("below in run_sql_readonly");
 
     await expect(boundary.actionRouter.execute({
       runId: "run-contract-grounding",

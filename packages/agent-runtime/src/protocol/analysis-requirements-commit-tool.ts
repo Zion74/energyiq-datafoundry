@@ -115,7 +115,7 @@ export const createAnalysisRequirementsCommitTool = (
   return createTool({
     id: "analysis_requirements_commit",
     description: input.contextEvidenceCatalog
-      ? "Commit final claims using audited SQL Evidence and/or authorized current-Snapshot context_fact_ids. When analysis_contract lists context_evidence for a requirement, include only that requirement's listed fact ids; SQL Evidence does not replace those released facts."
+      ? "Commit final claims using audited SQL Evidence and/or authorized current-Snapshot Context Evidence. The server automatically binds Context Evidence declared for each requirement. Scoped SQL may add investigation evidence, but it must not silently replace released facts."
       : "Commit final claims for analysis requirements using artifact evidence from successful SQL results.",
     inputSchema,
     execute: async (toolInput, options) => {
@@ -158,15 +158,11 @@ const bindContextEvidence = async (input: CreateAnalysisRequirementsCommitToolIn
   const requirementsById = new Map(input.analysisRequirements.map((requirement) => [requirement.id, requirement]));
   const claims: TrustedEnergyRequirementsCommitInput["claims"] = [];
   for (const [index, claim] of input.claims.entries()) {
-    const factIds = claim.context_fact_ids ?? [];
     const requirement = requirementsById.get(claim.requirement_id);
+    const factIds = claim.context_fact_ids?.length
+      ? claim.context_fact_ids
+      : requirement?.contextEvidence?.factIds ?? [];
     if (factIds.length === 0) {
-      if (requirement?.contextEvidence) {
-        throw new Error([
-          `ANALYSIS_CONTEXT_EVIDENCE_REQUIRED:${claim.requirement_id}`,
-          `ALLOWED_FACT_IDS:${requirement.contextEvidence.factIds.join(",")}`,
-        ].join(":"));
-      }
       const verifiedValues = input.getVerifiedRequirementValues?.(claim.requirement_id) ?? [];
       const canonicalValues = verifiedValues.map((value) => ({
         name: value.name,
