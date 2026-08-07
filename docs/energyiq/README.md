@@ -48,7 +48,7 @@
 
 | 文档 | 状态 |
 | --- | --- |
-| [2026-08-06 Overview 夜间执行清单与 Runlog](2026-08-06-Overview夜间执行清单与Runlog.md) | in progress；按 #9 可见收口 → #17/#14/#16 → Preschool 最小垂直切片推进，范围外问题进入停车场 |
+| [2026-08-06 Overview 夜间执行清单与 Runlog](2026-08-06-Overview夜间执行清单与Runlog.md) | in progress；第 11 节为 2026-08-07 当前行动方案：Overview takeaway-first 阅读体验 → #31 Explorer 精准下钻与设备趋势 → Preschool 演示型图表 → #5/#19/#20/#21 收口；AI 侧线保持隔离 |
 | [三 Agent MVP 最终执行与重置包](2026-08-03-三Agent-MVP最终执行与重置包.md) | accepted；唯一派工入口，含共同基线和三个最终 Prompt |
 | [三 Agent MVP 执行手册](2026-08-03-三Agent-MVP执行手册.md) | accepted；三个 Agent 的责任、并行节奏、MVP 边界与验收 Owner 已确认 |
 | [开发计划：Admin 与模板运行闭环](开发计划-Admin与模板运行闭环.md) | in progress；按 Ngee Ann MVP 路线收口，不再横向扩建平台 |

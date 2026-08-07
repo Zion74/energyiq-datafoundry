@@ -380,3 +380,87 @@ related:
 - #16 仍有一个明确剩余项：切回 Ngee Ann 时页面顶部当前 Context 会重置为 Project 默认 `Last 30 days / Data through 2026-08-06`，而历史 Answer 仍属于 `2026-06-03..09`。当前未发生跨 Project 数据混用，但 UI 必须恢复原 Context 或把旧 Answer 标记为 Outdated；该项不并入 #14，也不以本轮临时架构掩盖。
 - 三轮各约 `62k–65k` input tokens，说明当前 Context/Schema 每轮重复输入仍偏重；记录为后续性能/成本切片，不阻塞本次可信闭环，也不在本轮建设通用 Context 缓存平台。
 - 不新增 Workspace 模型配置、通用 Provider Router、自动 fallback 链、历史 Snapshot 回放、Scheduler/Cadence DSL 或第二套 Evidence 平台。
+
+## 11. 2026-08-07 Overview 与 Project Explorer 体验收口行动方案
+
+### 11.1 北极星与用户阅读顺序
+
+本轮唯一目标不是增加报表数量，而是让 Boss/FM 不需要寻找，就能按以下顺序取得价值：
+
+1. **结果是什么**：先给一句可理解的 takeaway 和一个关键数字；
+2. **为什么重要**：用最合适的一张图说明变化、贡献或影响；
+3. **要做什么**：给出下一步、做与不做的预期差异和验证指标；
+4. **如何证明**：Evidence 可展开，但技术版本、公式、SQL、Mapping 和 Import Batch 不占主阅读路径。
+
+图表是解释信息的形式，不是交付目标。每张图必须回答一个明确问题；不能回答用户问题的图不进入 MVP。
+
+### 11.2 Overview 信息架构与视觉边界
+
+- 页面先展示 0–3 个真正值得处理的主题；每个主题默认只保留：一句结论、关键数字、一个主要贡献者、一张解释图、下一步与验证指标。
+- `Why`、做与不做的后果、限制和详细 Evidence 分成清楚的小段，并按重要性渐进展开；不再把完整技术报告塞在一张卡里。
+- 桌面端使用可见的章节目录，支持 `Priorities / What changed / Where / When / Evidence` 跳转；复用现有 generated section navigation，避免第二套竞争导航。窄屏退化为顶部横向/折叠菜单。
+- 正文和辅助文字提高到可读字号，减少 `10px/11px` 技术说明；标题、结论、证据和辅助信息形成稳定层级。
+- 颜色只表达状态：严重异常、待调查、已验证/正常、缺失/不可用；不为了“好看”把所有图染色。
+- 技术细节默认折叠；用户应能在不理解 Snapshot、Recipe、SQL 或 Mapping 的情况下完成阅读和决策。
+
+### 11.3 图表任务与决策问题
+
+| 项目 | 图表/改造 | 必须回答的问题 | 边界 |
+| --- | --- | --- | --- |
+| Ngee Ann | 1d/7d/28d current-vs-previous 差异条 | 变化发生在哪个时间尺度，值得立即关注还是结构性问题？ | 使用同一 Snapshot 的现有确定性结果 |
+| Ngee Ann | 带 baseline、异常点和关键日期的日趋势 | 变化从哪一天开始，是否重复出现？ | 不把高于均值自动称为异常 |
+| Ngee Ann | Level/Category 变化条或 dumbbell | 哪个 Level/Category 对变化贡献最大？ | 取代长表的主视图，完整表保留在 Evidence |
+| Ngee Ann | New / Recurring / Resolved 状态条 | 新数据进来后，问题是新出现、持续还是已缓解？ | 只使用 A→B 可证明的状态，不建设通用历史平台 |
+| Preschool | Appliance 与 Centre Top 5 | 能耗主要集中在哪里，先检查谁？ | 全量排名可展开，不重复堆图 |
+| Preschool | Operating/closed profile 或 Centre×Hour 视图 | 哪些时段、哪些 Centre 反复出现非营业用能或 Spike？ | 必须来自服务端 Projection；数据不足时退化为受影响 Centre 条形图 |
+| Preschool | Empirical distribution / Bell-curve-style view | 某 Centre 位于同类分布什么位置，偏离有多明显？ | 优先真实经验分布；不强行假设正态，不在浏览器计算 percentile |
+| Preschool | June naive baseline | 如果五月模式不变，六月大约处于什么范围？ | 使用历史完整周平均/日型，明确 `Demo estimate`、假设、区间和不可作为正式 Forecast |
+| Preschool | Provisional cost | 当前能耗按公开参考电价大约对应多少费用？ | 采用 2026 Q2 SP 低压非住宅参考价，标记非客户合同 Tariff/非账单 |
+
+Preschool May Demo 的公开参考价固定为 SP Group 2026-04-01 至 2026-06-30 低压非住宅 tariff：`27.27 cents/kWh before GST`（含 9% GST 为 `29.72 cents/kWh`）。页面默认使用税前参考价，并显示来源、期间和 `Provisional estimate`；它不能写入正式客户 Tariff 配置，也不能用于 Ngee Ann。
+
+### 11.4 Project Explorer 最小产品结构
+
+Project Explorer 只回答“这是哪个设备/Scope、在选定时间用了多少、曲线怎样、数据是否可信、来源在哪里”。
+
+- Overview → Explorer 精准携带 Project、Scope、Resource、Period、data cutoff 与 Snapshot/Release 语境；服务端重新授权。
+- 直接进入时显示最新可用完整数据窗口；所选窗口无事实时显示明确 empty state 和 `View latest available`，不得把无数据渲染成真实 `0 kWh / 0%`。
+- 主区展示设备/层级信息、最新 accepted reading、energy、interval-average power、coverage，以及一张日/周/月或传入窗口的服务端趋势。
+- Formula、Mapping、Import Batch、Source ID 和完整质量事件放入可展开 Evidence；默认只用普通语言说明数据来源与健康状态。
+- 不加入同级 Benchmark、AI 总结、成本或节能建议，不复制 Overview。
+
+对应执行 Ticket：[#31](https://github.com/Zion74/energyiq-datafoundry/issues/31)。
+
+### 11.5 执行顺序与所有权
+
+| 顺序 | 所有者 | Ticket/切片 | 完成条件 |
+| --- | --- | --- | --- |
+| V1 | 主 Agent + Overview 子 Agent | #9/#13 阅读体验与目录 | takeaway-first、段落层级、可读字号、技术细节折叠、1440/1920 |
+| V2 | 主 Agent + Explorer 子 Agent | #31 Explorer 上下文与趋势 | 精准下钻、诚实 empty state、日/周/月事实趋势、无内部裁切 |
+| V3 | 主 Agent + Preschool 子 Agent | #13 Demo visuals | Top 5、运营时段、经验分布、naive June baseline、Provisional tariff 均有明确语义与假设 |
+| V4 | 主 Agent | #5 校准与关闭复核 | Area/Headcount/Provisional 的当前与 Saved Analysis 闭环有自动化和 Chrome 证据 |
+| V5 | 主 Agent | #19 → #20 → #21 | Release/rollback → Saved/Rerun/export → 两项目试点验收 |
+
+AI Analyst 的 #30/#18/#15 继续由侧边任务 Agent 执行；不得修改本轮确定性 Renderer、Explorer 或官方指标。
+
+### 11.6 验收问题
+
+每个项目的首屏必须让一个不了解技术的用户在约 60 秒内回答：
+
+1. 最值得注意的事情是什么？
+2. 影响多大？
+3. 哪个 Scope/Centre/Circuit/Appliance 贡献最大？
+4. 这是今天、短期还是结构性问题？
+5. 下一步做什么？
+6. 做了以后看哪个指标，多久复核？
+7. 如果需要核查，能否一键到准确 Explorer Evidence？
+
+自动测试、Chrome 证据和 Charles/用户人工价值验收继续分开记录。
+
+### 11.7 明确停止项
+
+- 不建设通用 Dashboard/Chart DSL，不用新增图表数量衡量进度。
+- 不在 React 重算官方 KPI、percentile、Tariff、Forecast 或 Evidence。
+- 不把公开电价估算冒充客户合同 Tariff，不把 naive baseline 冒充正式 Forecast。
+- 不恢复控制整页的全局 Period/Scope 选择器；Explorer 的日/周/月只影响局部设备事实查看。
+- 不因视觉改造修改 Snapshot、权限、AI Tool、Provider、Session 或第二套数据平台。
