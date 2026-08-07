@@ -304,7 +304,7 @@ const ngeeAnnAnalysisPolicy = (context: EnergyQueryContext): string[] =>
   context.projectId === "ngee-ann-polytechnic"
     ? [
         "Ngee Ann analysis policy:",
-        "Start with inspect_schema, then use run_sql_readonly only against the run-scoped table. Wait for each tool result before continuing, and cite the resulting tool call or artifact for every reported number.",
+        "After the run's one schema inspection establishes its governed contract, use run_sql_readonly only against the run-scoped table when it adds Evidence; if Released Evidence already answers the question, use it directly. Cite the resulting Context Evidence, tool call or artifact for every reported number.",
         "The relation is already bound to the selected UI Scope. For a Project total, do not filter scope_id to the UI label 'project'; scope_id values are published hierarchy nodes. Sum quality_status='ok' rows on the Official Aggregation Route across those nodes.",
         "For Project or Level totals, filter quality_status='ok' and use only the published Official Aggregation Route. Meter role is descriptive evidence, not permission to alter the route.",
         "For Circuit or category contribution, query non-total breakdown rows separately and compare them with the corresponding designated total. If the breakdown does not reconcile with that total, disclose the mismatch instead of forcing shares to 100%.",
@@ -324,7 +324,7 @@ const preschoolAnalysisPolicy = (context: EnergyQueryContext): string[] =>
   context.projectId === "preschool-demo"
     ? [
         "Preschool analysis policy:",
-        "Start with inspect_schema, then use run_sql_readonly only against the run-scoped table. Use an aggregated query; do not request raw Portfolio facts.",
+        "After the run's one schema inspection establishes its governed contract, use run_sql_readonly only against the run-scoped table when it adds Evidence; if Released Evidence already answers the question, use it directly. Use aggregated queries and do not request raw Portfolio facts.",
         "For Centre totals, group official rows by parent_node_id. The scoped scope_id identifies the published navigation attachment and must not be treated as the Centre identity.",
         "For every energy aggregation, filter quality_status='ok' and official_aggregation_eligible=TRUE. Use Circuit and appliance rows only within the same published route and do not double-count them.",
         "Use the hierarchy-pinned Scope metadata relation for Centre counts, centre_code, facility_type, area_sqm, occupant_count and metadata_status. Do not infer those dimensions from fact labels.",

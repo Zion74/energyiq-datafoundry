@@ -373,8 +373,9 @@ const projectGroundedSchemaObservation = (
     ...schemaObservation,
     analysis_contract: {
       instruction: [
-        "Use the exact requirement_id, assertion_id, aggregate aliases, and expected columns below in",
-        "run_sql_readonly. Do not invent or rename contract fields."
+        "Use the exact requirement_id, assertion_id, aggregate aliases, and expected columns below when producing Evidence.",
+        "Requirements with sufficient context_evidence may be committed directly. Use run_sql_readonly when scoped",
+        "investigation adds Evidence, and do not invent or rename contract fields."
       ].join(" "),
       requirements: state.requirements
         .filter((requirement) => requirement.source === "user")

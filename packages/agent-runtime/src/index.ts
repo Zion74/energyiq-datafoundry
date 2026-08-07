@@ -1004,10 +1004,13 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
         + `"${energyContext.period}"; its local calendar display range is ${localRangeStart} through `
         + `${localRangeEnd}. Treat that scope and period as authoritative and show the local calendar range, not raw UTC. `
         + "Do not call list_data_sources, list_files, preview_table, workspace file tools, or direct database clients "
-        + "to rediscover data. Call inspect_schema alone as the first tool action, wait for its result, then reuse its "
-        + "schema_id in run_sql_readonly. A requirement whose analysis_contract declares sufficient context_evidence "
-        + "may be committed with only its authorized context_fact_ids; do not recalculate those released values in SQL. "
-        + "Other requirements need at least one successful run_sql_readonly result in the current run. Schema IDs and table "
+        + "to rediscover data. Call inspect_schema alone as the initial governed-contract setup action and wait for its "
+        + "result. This one setup action does not require a SQL investigation. If scoped SQL can add explanation, reduce "
+        + "uncertainty, verify a new angle, or change the action, reuse that inspection's schema_id in run_sql_readonly. "
+        + "A requirement whose analysis_contract declares sufficient context_evidence may be committed directly; the server "
+        + "binds its authorized current-Snapshot Context Evidence. Scoped SQL may investigate relevant context but must not "
+        + "silently replace released values. Requirements without sufficient context evidence need at least one successful "
+        + "run_sql_readonly result in the current run. Schema IDs and table "
         + "names found in prior messages, deterministic Evidence, examples, or earlier runs are reference-only and "
         + "must never be executed in the current run. The run-scoped relation is already restricted to the authoritative "
         + "period, so do not add a redundant time filter. If a boundary audit truly requires one, compare a TIMESTAMPTZ "
