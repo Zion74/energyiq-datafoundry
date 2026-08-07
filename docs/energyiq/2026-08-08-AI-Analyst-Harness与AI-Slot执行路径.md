@@ -366,7 +366,8 @@ Ngee Ann Snapshot 上完成，耗时约 224 秒，执行 1 次 Schema 与 8 次�
    chunk。该项自动回归通过，但当前 8787 实例未能在安全策略下重启，因此浏览器运行态复验要等正常 API 重启。
 
 自动证据：Ngee Ann Run 与 Trace 2 files / 49 tests passed，根 typecheck passed。Chrome 已确认旧 Run 无需重新调用
-模型即可恢复第 3 条有效 Finding；1440/1920 布局无横向裁切，AI-selected comparison visual、Snapshot、3 条 SQL、
+模型即可恢复第 3 条有效 Finding；1440/1920 与 768px 基本 tablet 布局无横向裁切，当前代码刷新后的控制台无新增错误；
+AI-selected comparison visual、Snapshot、3 条 SQL、
 Audit ids 与 Finding-specific Evidence 对话框一致。当前旧 API 实例仍显示修复前的空格缺失，不能把自动修复冒充为
 运行态已发布。
 
