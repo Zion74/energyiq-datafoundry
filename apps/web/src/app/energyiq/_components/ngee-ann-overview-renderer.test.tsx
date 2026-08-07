@@ -6,7 +6,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ngeeAnnGoldenSnapshot, ngeeAnnSingleDaySnapshot } from "./ngee-ann-overview.test-fixture";
+import { NgeeAnnDecisionPriorities } from "./ngee-ann-decision-priorities";
 import { NgeeAnnOverviewRenderer } from "./ngee-ann-overview-renderer";
+import { buildNgeeAnnOverviewViewModel } from "./ngee-ann-overview-view-model";
 
 vi.mock("./ngee-ann-ai-run", async () => {
   const actual = await vi.importActual<typeof import("./ngee-ann-ai-run")>("./ngee-ann-ai-run");
@@ -30,7 +32,9 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("How each horizon compares with its governed baseline");
     expect(markup).toContain('data-horizon-label="Rolling 7 days"');
     expect(markup).toContain('data-direction="increase"');
-    expect(markup).toContain('aria-label="Rolling 7 days, 10 Jun – 16 Jun: 1531.17 kWh versus 1211.68 kWh governed baseline; +319.49 kWh, +26.4%"');
+    expect(markup).toContain('aria-label="Rolling 7 days, 10 Jun – 16 Jun: 1,531.17 kWh versus 1,211.68 kWh governed baseline; +319.49 kWh, +26.4%"');
+    expect(markup).toContain("Bar length is relative to the largest visible change.");
+    expect(markup).toContain("1,531.17 vs 1,211.68 kWh");
     expect(markup).toContain("+319.49 kWh vs baseline");
     expect(markup).toContain("Seen on 3 distinct exception days. Linked Level and Circuit evidence is preserved.");
     expect(markup).toContain("Why it matters");
@@ -38,6 +42,43 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Verify with");
     expect(markup).toContain("Details, evidence and limitations");
     expect(markup.match(/View supporting evidence/g)).toHaveLength(1);
+  });
+
+  it("keeps decrease, flat and unavailable horizons distinct without inventing zero values", () => {
+    const view = buildNgeeAnnOverviewViewModel(ngeeAnnGoldenSnapshot()).decisionPriorities;
+    const horizons = view.items[0]!.horizons;
+    Object.assign(horizons[0], {
+      actualKwh: 100,
+      baselineKwh: 125,
+      deltaKwh: -25,
+      relativePct: -20,
+    });
+    Object.assign(horizons[1], {
+      actualKwh: 200,
+      baselineKwh: 200,
+      deltaKwh: 0,
+      relativePct: 0,
+    });
+    Object.assign(horizons[2], {
+      status: "unavailable",
+      actualKwh: null,
+      baselineKwh: null,
+      deltaKwh: null,
+      relativePct: null,
+      limitation: "No governed 28-day baseline is available.",
+    });
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnDecisionPriorities view={view} />,
+    );
+
+    expect(markup).toContain('data-direction="decrease"');
+    expect(markup).toContain('data-direction="flat"');
+    expect(markup).toContain('data-direction="unavailable"');
+    expect(markup).toContain("-25 kWh vs baseline");
+    expect(markup).toContain("0 kWh vs baseline");
+    expect(markup).toContain("No governed 28-day baseline is available.");
+    expect(markup).not.toContain("Rolling 28 days, 20 May – 16 Jun: 0 kWh");
   });
 
   it("places the server-owned decision priorities after Data Status and before Key highlights", () => {

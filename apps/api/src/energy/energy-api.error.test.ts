@@ -237,6 +237,69 @@ describe("Energy API business error mapping", () => {
     }
   });
 
+  it("executes an ordinary published analysis without requiring an explicit Release pin", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-api-current-release-"));
+    const databasePath = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const previousDatabasePath = process.env.ENERGYIQ_DUCKDB_PATH;
+    process.env.ENERGYIQ_DUCKDB_PATH = databasePath;
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const snapshot = await materializeTestProjectSnapshot({
+        metadataStore: metadata,
+        databasePath,
+        workspaceId: "default",
+        projectId: "ngee-ann-polytechnic",
+        timezone: "Asia/Singapore",
+        batches: [{
+          importBatchId: "ngee-ann-current-release-fixture",
+          sourceSha256: "2".repeat(64),
+          rawReadings: [],
+          normalizedReadings: [],
+          intervalFacts: [],
+          qualityEvents: [],
+        }],
+      });
+      const publishedProject = metadata.energyIq.getProject("ngee-ann-polytechnic");
+
+      const response = await handleEnergyApiRequest(
+        jsonPost({
+          projectId: "ngee-ann-polytechnic",
+          scopeId: "project",
+          resource: "electricity",
+          period: "Custom",
+          from: "2026-05-01",
+          to: "2026-05-02",
+        }),
+        ["analysis", "execute"],
+        {
+          metadataStore: metadata,
+          dataGateway: new LocalDataGateway(metadata),
+          userId: "dev-user",
+          workspaceId: "default",
+        } as Required<ConfigApiContext>,
+      );
+
+      expect(response).toMatchObject({
+        status: 200,
+        body: {
+          success: true,
+          data: {
+            context: {
+              hierarchyRevisionId: publishedProject.hierarchy_revision_id,
+              dataSnapshotId: snapshot.id,
+            },
+          },
+        },
+      });
+    } finally {
+      if (previousDatabasePath === undefined) delete process.env.ENERGYIQ_DUCKDB_PATH;
+      else process.env.ENERGYIQ_DUCKDB_PATH = previousDatabasePath;
+      metadata.close();
+      removeTemporaryEnergyFixture(root);
+    }
+  });
+
   it("returns a diagnosable 409 when Project publication is blocked by data readiness", () => {
     expect(toEnergyApiErrorResponse(new Error(
       "ENERGYIQ_PROJECT_DATA_NOT_READY:IMPORT_BATCH_NOT_MATERIALIZED,SNAPSHOT_MAPPING_MISMATCH",
@@ -437,7 +500,7 @@ describe("Energy API business error mapping", () => {
         status: 409,
         body: {
           success: false,
-          error: { code: "CONFLICT", message: "ENERGYIQ_SNAPSHOT_STALE:energy-snapshot-b" },
+          error: { code: "CONFLICT", message: `ENERGYIQ_SNAPSHOT_STALE:${snapshot.id}` },
         },
       });
       const imports = await handleEnergyApiRequest(

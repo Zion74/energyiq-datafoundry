@@ -141,9 +141,12 @@ function HorizonComparison({
         <p className="text-sm font-semibold text-foreground">
           How each horizon compares with its governed baseline
         </p>
-        <div className="flex gap-5 text-xs font-medium text-muted" aria-hidden="true">
-          <span>Below baseline</span>
-          <span>Above baseline</span>
+        <div className="text-right text-xs leading-5 text-muted">
+          <div className="flex justify-end gap-5 font-medium" aria-hidden="true">
+            <span>Below baseline</span>
+            <span>Above baseline</span>
+          </div>
+          <p>Bar length is relative to the largest visible change.</p>
         </div>
       </div>
       <div className="mt-4 space-y-4">
@@ -201,10 +204,7 @@ function HorizonComparisonRow({
         <span className="absolute inset-y-0 left-1/2 w-px bg-muted/45" />
         {available && magnitude > 0 ? (
           <span
-            className={[
-              "absolute inset-y-0 rounded-full",
-              direction === "increase" ? "bg-step-warning" : "bg-teal-700",
-            ].join(" ")}
+            className="absolute inset-y-0 rounded-full bg-primary/70"
             style={{ left: `${left}%`, width: `${magnitude}%` }}
           />
         ) : null}
@@ -228,14 +228,22 @@ function HorizonComparisonRow({
 }
 
 function formatKwh(value: number): string {
-  return value.toFixed(2).replace(/\.?0+$/u, "");
+  return formatNumber(value, 2);
 }
 
 function formatSigned(value: number, maximumFractionDigits = 2): string {
-  const formatted = Math.abs(value).toFixed(maximumFractionDigits).replace(/\.?0+$/u, "");
+  const formatted = formatNumber(Math.abs(value), maximumFractionDigits);
   if (value > 0) return `+${formatted}`;
   if (value < 0) return `-${formatted}`;
   return formatted;
+}
+
+function formatNumber(value: number, maximumFractionDigits: number): string {
+  return new Intl.NumberFormat("en-SG", {
+    maximumFractionDigits,
+    minimumFractionDigits: 0,
+    useGrouping: true,
+  }).format(value);
 }
 
 function PriorityField({ label, value }: { label: string; value: string }) {
