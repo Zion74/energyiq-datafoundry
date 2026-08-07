@@ -113,5 +113,33 @@ describe("createEvidenceFocusRuntimeSource", () => {
         })
       })
     ]);
+
+    const firstStepMessages = (result as { messages?: unknown[] }).messages ?? [];
+    expect(firstStepMessages.length).toBeGreaterThan(0);
+
+    const secondResult = budgetProcessor.processInputStep({
+      messages: [
+        ...firstStepMessages,
+        {
+          id: "question-1",
+          role: "user",
+          createdAt: new Date("2026-08-07T00:00:00.000Z"),
+          content: {
+            format: 2,
+            parts: [{ type: "text", text: "Which centre should I investigate?" }]
+          }
+        }
+      ],
+      stepNumber: 1,
+      systemMessages: []
+    } as never);
+
+    expect(
+      JSON.stringify(secondResult).match(/Authoritative EnergyIQ query context/gu) ?? []
+    ).toHaveLength(1);
+    expect(runState.plans.at(-1)?.selectedGroupIds).not.toContain(
+      "turn-context:energy-query-context"
+    );
+    expect(JSON.stringify(secondResult)).toContain("Which centre should I investigate?");
   });
 });
