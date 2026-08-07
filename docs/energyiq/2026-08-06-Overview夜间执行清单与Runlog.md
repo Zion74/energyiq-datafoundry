@@ -376,5 +376,7 @@ related:
 ### 10.4 未完成与停止项
 
 - 三轮正确不等于信息价值与语言质量已获 Charles 验收；用户已明确把“人类真正需要的信息及展现形式”留到后续专项讨论，本轮不擅自扩大。
+- Chrome Workspace 切换证明 Session/数据仍隔离：Ngee Ann → Preschool 只显示 Preschool 会话并恢复 8 个 Active Aging Centers 等既有答案；切回 Ngee Ann 后只恢复 Ngee 会话及 `1,211.68 kWh` Answer，且没有新增 Provider Run。模型选择不随 Workspace 改变。
+- #16 仍有一个明确剩余项：切回 Ngee Ann 时页面顶部当前 Context 会重置为 Project 默认 `Last 30 days / Data through 2026-08-06`，而历史 Answer 仍属于 `2026-06-03..09`。当前未发生跨 Project 数据混用，但 UI 必须恢复原 Context 或把旧 Answer 标记为 Outdated；该项不并入 #14，也不以本轮临时架构掩盖。
 - 三轮各约 `62k–65k` input tokens，说明当前 Context/Schema 每轮重复输入仍偏重；记录为后续性能/成本切片，不阻塞本次可信闭环，也不在本轮建设通用 Context 缓存平台。
 - 不新增 Workspace 模型配置、通用 Provider Router、自动 fallback 链、历史 Snapshot 回放、Scheduler/Cadence DSL 或第二套 Evidence 平台。
