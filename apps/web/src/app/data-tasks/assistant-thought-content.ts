@@ -272,7 +272,9 @@ export function resolveAssistantThoughtContent(
     return foldedReasoning;
   }
 
-  const assistantText = messageTextContent(message.content);
+  const assistantText = stripTrivialText(
+    dedupeRepeatedText(messageTextContent(message.content)),
+  );
   const messageIndex = messages.findIndex((item) => item.id === message.id);
 
   const reasoningTexts: string[] = [];
@@ -292,9 +294,16 @@ export function resolveAssistantThoughtContent(
   }
 
   const reasoningText = reasoningTexts.join("\n\n").trim();
-  if (reasoningText && hasMeaningfulText(reasoningText)) return reasoningText;
+  if (reasoningText && hasMeaningfulText(reasoningText)) {
+    // A provider may emit one final reasoning-only transition after its last
+    // tool call and then stream a separate customer answer. Keep the reasoning
+    // for empty/duplicated assistant turns, but never replace a distinct answer
+    // with that transition text.
+    if (!assistantText || assistantText === reasoningText) return reasoningText;
+    return assistantText;
+  }
 
-  return stripTrivialText(dedupeRepeatedText(assistantText));
+  return assistantText;
 }
 
 /** True when a text-only assistant turn should fold into the next tool step card. */

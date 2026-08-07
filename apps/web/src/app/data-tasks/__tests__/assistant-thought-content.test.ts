@@ -109,6 +109,25 @@ describe("assistant-thought-content", () => {
     expect(content).toBe(thought);
   });
 
+  it("keeps a distinct final answer after a post-tool reasoning transition", () => {
+    const transition = "The requirement is committed. Now provide the final answer.";
+    const answer = "Total official electricity consumption was 1,211.68 kWh.";
+    const messages = [
+      { id: "user-1", role: "user", content: "What was total consumption?" },
+      {
+        id: "assistant-tool",
+        role: "assistant",
+        content: "Evidence verified.",
+        toolCalls: [{ id: "tc-1", function: { name: "analysis_requirements_commit" } }],
+      },
+      { id: "reasoning-final", role: "reasoning", content: transition },
+      { id: "assistant-final", role: "assistant", content: answer },
+    ];
+
+    expect(resolveAssistantThoughtContent(messages[3], messages)).toBe(answer);
+    expect(resolveToolStepThoughtContent(messages[3], messages)).toBe(answer);
+  });
+
   it("merges a preceding text-only assistant preamble into the following tool step", () => {
     const preamble = "我将并行Call list_data_sources 三次。";
     const messages = [
