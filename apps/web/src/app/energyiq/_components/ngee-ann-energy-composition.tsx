@@ -14,8 +14,8 @@ export function NgeeAnnEnergyComposition({
   const [selectedLevelId, setSelectedLevelId] = useState("all");
   const [selectedCategoryId, setSelectedCategoryId] = useState<"all" | "load" | "light">(category);
   const [showAllCircuits, setShowAllCircuits] = useState(false);
-  const [accountingExpanded, setAccountingExpanded] = useState(true);
-  const [derivedExpanded, setDerivedExpanded] = useState(true);
+  const [accountingExpanded, setAccountingExpanded] = useState(false);
+  const [derivedExpanded, setDerivedExpanded] = useState(false);
   const levelOptions = uniqueCircuitOptions(
     view.circuits.rows.map((row) => ({ id: row.levelId, label: row.levelName })),
   );
@@ -43,6 +43,12 @@ export function NgeeAnnEnergyComposition({
     }
     setShowAllCircuits(() => false);
   };
+  const toggleAccounting = () => {
+    setAccountingExpanded((expanded) => {
+      if (expanded) setDerivedExpanded(false);
+      return !expanded;
+    });
+  };
 
   return (
     <section aria-labelledby="ngee-ann-energy-composition" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
@@ -53,65 +59,57 @@ export function NgeeAnnEnergyComposition({
           </h3>
           <p className="mt-1.5 text-sm leading-6 text-muted">{view.decisionQuestion}</p>
         </div>
-        <p className="max-w-xl text-[11px] leading-5 text-muted">
-          Official categories and designated totals stay separate from explanatory component Circuits.
+        <p className="max-w-md text-xs leading-5 text-muted">
+          Start with the split, then inspect the largest component Circuits.
         </p>
       </div>
 
       <div className="mt-5">
-        <h4 className="text-xs font-semibold text-foreground">Official categories</h4>
-        <p className="mt-1 text-[11px] leading-5 text-muted">
-          Load and Light use the official Project total as their shared denominator.
+        <h4 className="text-sm font-semibold text-foreground">Where the energy went</h4>
+        <p className="mt-1 text-xs leading-5 text-muted">
+          Load and lighting split the same official Project total.
         </p>
-        {view.categories.rows.length > 0 ? (
-          <ul aria-label="Category colour key" className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
-            {view.categories.rows.map((row) => (
-              <li key={row.id} className="inline-flex items-center gap-1.5">
-                <span aria-hidden="true" className={`h-2 w-2 rounded-full ${categoryColour(row.id)}`} />
-                {row.name}
-              </li>
-            ))}
-          </ul>
-        ) : null}
         {view.categories.status === "unavailable" ? (
           <Unavailable title="Category comparison unavailable" reason={view.categories.reason} />
         ) : (
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[820px] border-collapse text-left">
-              <caption className="sr-only">Load and Light official energy comparison</caption>
-              <thead className="border-y border-border bg-surface-subtle text-xs font-medium uppercase tracking-[0.06em] text-muted">
-                <tr>
-                  <th scope="col" className="px-3 py-2.5">Category</th>
-                  <th scope="col" className="px-3 py-2.5">Current</th>
-                  <th scope="col" className="px-3 py-2.5">Project share</th>
-                  <th scope="col" className="px-3 py-2.5">Previous</th>
-                  <th scope="col" className="px-3 py-2.5">Change</th>
-                  <th scope="col" className="px-3 py-2.5">Data quality</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {view.categories.rows.map((row) => (
-                  <tr key={row.id}>
-                    <th scope="row" className="px-3 py-3.5 text-xs font-semibold text-foreground">
-                      <span className="inline-flex items-center gap-2">
-                        <span aria-hidden="true" className={`h-2 w-2 rounded-full ${categoryColour(row.id)}`} />
-                        {row.name}
-                      </span>
-                    </th>
-                    <td className="px-3 py-3.5 text-xs font-semibold tabular-nums text-foreground">{row.currentUsageKwh} kWh</td>
-                    <td className="px-3 py-3.5 text-xs tabular-nums text-foreground">{row.projectShare}</td>
-                    <td className="px-3 py-3.5 text-xs tabular-nums text-foreground">{row.previousUsageKwh} kWh</td>
-                    <td className="px-3 py-3.5">
-                      <p className="text-xs font-semibold tabular-nums text-foreground">{row.changePct}</p>
-                      <p className="mt-1 text-[10px] tabular-nums text-muted">{row.changeKwh}</p>
-                    </td>
-                    <td className="px-3 py-3.5">
-                      <Quality quality={row.quality} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="mt-3 divide-y divide-border border-y border-border">
+            {view.categories.rows.map((row) => (
+              <article key={row.id} className="grid gap-4 py-4 lg:grid-cols-[minmax(220px,1fr)_180px_200px] lg:items-center lg:gap-7">
+                <div className="min-w-0">
+                  <div className="flex items-center justify-between gap-4">
+                    <h5 className="inline-flex items-center gap-2 text-sm font-semibold text-foreground">
+                      <span aria-hidden="true" className={`h-2.5 w-2.5 rounded-full ${categoryColour(row.id)}`} />
+                      {row.name}
+                    </h5>
+                    <span className="text-xs font-semibold tabular-nums text-muted">{row.projectShare}</span>
+                  </div>
+                  <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true">
+                    <div className={`h-full rounded-full ${categoryColour(row.id)}`} style={{ width: row.projectShare }} />
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs text-muted">Current window</p>
+                  <p className="mt-1 text-xl font-semibold tabular-nums tracking-[-0.02em] text-foreground">
+                    {row.currentUsageKwh} <span className="text-xs font-medium tracking-normal text-muted">kWh</span>
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted">Versus previous window</p>
+                  <p className={`mt-1 text-base font-semibold tabular-nums ${changeTone(row.changePct)}`}>{row.changePct}</p>
+                  <p className="mt-0.5 text-xs tabular-nums text-muted">{row.changeKwh}</p>
+                  <details className="mt-2 text-xs text-muted">
+                    <summary className="cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Comparison details</summary>
+                    <dl className="mt-2 grid grid-cols-[92px_minmax(0,1fr)] gap-x-3 gap-y-1.5">
+                      <dt>Previous</dt><dd className="tabular-nums text-foreground">{row.previousUsageKwh} kWh</dd>
+                      <dt>Coverage</dt><dd className="text-foreground">{row.quality.coverage}</dd>
+                      <dt>Intervals</dt><dd className="text-foreground">{row.quality.intervals} valid</dd>
+                      <dt>Quality</dt><dd className="text-foreground">{row.quality.qualityEvents}</dd>
+                      <dt>Exact values</dt><dd className="tabular-nums text-foreground">Current {row.exact.currentUsageKwh} kWh · share {row.exact.projectShare} · previous {row.exact.previousUsageKwh} kWh · change {row.exact.changeKwh} ({row.exact.changePct})</dd>
+                    </dl>
+                  </details>
+                </div>
+              </article>
+            ))}
           </div>
         )}
       </div>
@@ -119,14 +117,14 @@ export function NgeeAnnEnergyComposition({
       <div className="mt-6 border-t border-border pt-5">
         <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between sm:gap-4">
           <div>
-            <h4 className="text-xs font-semibold text-foreground">
-              {showAllCircuits ? "All available component Circuits" : "Top 5 component Circuits"}
+            <h4 className="text-sm font-semibold text-foreground">
+              {showAllCircuits ? "All available component Circuits" : "Largest component Circuits"}
             </h4>
-            <p className="mt-1 text-[11px] leading-5 text-muted">
-              Ranked by current usage. These are explanatory components and are not added separately to the official Project total.
+            <p className="mt-1 text-xs leading-5 text-muted">
+              Ranked by current usage. Use these Circuits to decide where to investigate first.
             </p>
           </div>
-          <span className="text-[10px] font-medium text-muted">Share denominator: Project official total</span>
+          <span className="text-xs font-medium text-muted">Share of official Project total</span>
         </div>
         {view.circuits.status === "unavailable" ? (
           <Unavailable title="Component Circuit ranking unavailable" reason={view.circuits.reason} />
@@ -172,43 +170,58 @@ export function NgeeAnnEnergyComposition({
                 reason="Choose All or another Level and Category combination to restore the Snapshot rows."
               />
             ) : (
-              <div className="mt-3 overflow-x-auto">
-                <table className="w-full min-w-[1040px] border-collapse text-left">
-                  <caption className="sr-only">Filtered explanatory component Circuits</caption>
-                  <thead className="border-y border-border bg-surface-subtle text-[10px] font-medium uppercase tracking-[0.08em] text-muted">
-                    <tr>
-                      <th scope="col" className="px-3 py-2.5">Rank / Circuit</th>
-                      <th scope="col" className="px-3 py-2.5">Level</th>
-                      <th scope="col" className="px-3 py-2.5">Category</th>
-                      <th scope="col" className="px-3 py-2.5">Current</th>
-                      <th scope="col" className="px-3 py-2.5">Project official share</th>
-                      <th scope="col" className="px-3 py-2.5">Change</th>
-                      <th scope="col" className="px-3 py-2.5">Data quality</th>
-                      <th scope="col" className="px-3 py-2.5">Accounting</th>
-                    </tr>
-                  </thead>
-                  <tbody id="ngee-ann-component-circuit-rows" className="divide-y divide-border">
-                    {visibleCircuits.map((row) => (
-                      <tr key={row.meterNodeId} data-circuit-row data-level-id={row.levelId} data-category-id={row.categoryId}>
-                        <th scope="row" className="max-w-[260px] px-3 py-3.5 align-top">
-                          <p className="text-xs font-semibold text-foreground">{row.rank}. {row.name}</p>
-                          <CircuitEvidence row={row} evidence={view.evidence} />
-                        </th>
-                        <td className="px-3 py-3.5 align-top text-xs text-foreground">{row.levelName}</td>
-                        <td className="px-3 py-3.5 align-top text-xs text-foreground">{row.category}</td>
-                        <td className="px-3 py-3.5 align-top text-xs font-semibold tabular-nums text-foreground">{row.currentUsageKwh} kWh</td>
-                        <td className="px-3 py-3.5 align-top text-xs tabular-nums text-foreground">{row.projectShare}</td>
-                        <td className="px-3 py-3.5 align-top">
-                          <p className="text-xs font-semibold tabular-nums text-foreground">{row.changePct}</p>
-                          <p className="mt-1 text-[10px] tabular-nums text-muted">{row.changeKwh}</p>
-                          <p className="mt-1 text-[10px] tabular-nums text-muted">Previous {row.previousUsageKwh} kWh</p>
-                        </td>
-                        <td className="px-3 py-3.5 align-top"><Quality quality={row.quality} /></td>
-                        <td className="px-3 py-3.5 align-top text-[10px] font-semibold text-muted">Explanatory only</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div id="ngee-ann-component-circuit-rows" className="mt-3 divide-y divide-border border-y border-border">
+                {visibleCircuits.map((row) => (
+                  <article
+                    key={row.meterNodeId}
+                    data-circuit-row
+                    data-level-id={row.levelId}
+                    data-category-id={row.categoryId}
+                    className="py-4"
+                  >
+                    <div className="grid gap-4 lg:grid-cols-[minmax(260px,1fr)_180px_200px] lg:items-center lg:gap-7">
+                      <div className="min-w-0">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="min-w-0">
+                            <h5 className="truncate text-sm font-semibold text-foreground">{row.rank}. {row.name}</h5>
+                            <p className="mt-1 text-xs text-muted">{row.levelName} · {row.category}</p>
+                          </div>
+                          <span className="shrink-0 text-xs font-semibold tabular-nums text-muted">{row.projectShare}</span>
+                        </div>
+                        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true">
+                          <div className={`h-full rounded-full ${categoryColour(row.categoryId)}`} style={{ width: row.projectShare }} />
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted">Current window</p>
+                        <p className="mt-1 text-lg font-semibold tabular-nums tracking-[-0.015em] text-foreground">
+                          {row.currentUsageKwh} <span className="text-xs font-medium tracking-normal text-muted">kWh</span>
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-muted">Versus previous window</p>
+                        <p className={`mt-1 text-sm font-semibold tabular-nums ${changeTone(row.changePct)}`}>{row.changePct}</p>
+                        <p className="mt-0.5 text-xs tabular-nums text-muted">{row.changeKwh}</p>
+                      </div>
+                    </div>
+                    <details className="mt-3 text-xs text-muted">
+                      <summary className="cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+                        Circuit details and Evidence
+                      </summary>
+                      <div className="mt-2 grid gap-4 lg:grid-cols-2">
+                        <dl className="grid grid-cols-[92px_minmax(0,1fr)] gap-x-3 gap-y-1.5">
+                          <dt>Previous</dt><dd className="tabular-nums text-foreground">{row.previousUsageKwh} kWh</dd>
+                          <dt>Coverage</dt><dd className="text-foreground">{row.quality.coverage}</dd>
+                          <dt>Intervals</dt><dd className="text-foreground">{row.quality.intervals} valid</dd>
+                          <dt>Quality</dt><dd className="text-foreground">{row.quality.qualityEvents}</dd>
+                          <dt>Accounting</dt><dd className="text-foreground">Explanatory only</dd>
+                          <dt>Exact values</dt><dd className="tabular-nums text-foreground">Current {row.exact.currentUsageKwh} kWh · share {row.exact.projectShare} · previous {row.exact.previousUsageKwh} kWh · change {row.exact.changeKwh} ({row.exact.changePct})</dd>
+                        </dl>
+                        <CircuitEvidenceDetails row={row} evidence={view.evidence} />
+                      </div>
+                    </details>
+                  </article>
+                ))}
               </div>
             )}
           </>
@@ -223,7 +236,7 @@ export function NgeeAnnEnergyComposition({
             className="flex min-h-10 w-full items-center justify-between gap-4 text-left text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
             aria-expanded={accountingExpanded}
             aria-controls="ngee-ann-accounting-trace-panel"
-            onClick={() => setAccountingExpanded((expanded) => !expanded)}
+            onClick={toggleAccounting}
           >
             <span>Accounting trace</span>
             <span className="text-[10px] font-semibold text-muted">{accountingExpanded ? "Hide" : "Show"}</span>
@@ -332,7 +345,7 @@ function CircuitFilter({
 }) {
   return (
     <fieldset>
-      <legend className="mb-1 text-[10px] font-semibold text-muted">{label}</legend>
+      <legend className="mb-1 text-xs font-semibold text-muted">{label}</legend>
       <div className="flex flex-wrap gap-1.5">
         {[{ id: "all", label: "All" }, ...options].map((option) => {
           const selected = selectedId === option.id;
@@ -341,8 +354,8 @@ function CircuitFilter({
               key={option.id}
               type="button"
               className={selected
-                ? "min-h-10 rounded-lg border border-primary bg-primary/10 px-3 py-2 text-[11px] font-semibold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-                : "min-h-10 rounded-lg border border-border px-3 py-2 text-[11px] font-semibold text-muted hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"}
+                ? "min-h-10 rounded-lg border border-primary bg-primary/10 px-3 py-2 text-xs font-semibold text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                : "min-h-10 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"}
               aria-pressed={selected}
               onClick={() => onSelect(option.id)}
             >
@@ -369,6 +382,12 @@ function categoryColour(categoryId: string): string {
   if (categoryId.toLocaleLowerCase() === "load") return "bg-violet-600";
   if (categoryId.toLocaleLowerCase() === "light") return "bg-amber-600";
   return "bg-primary";
+}
+
+function changeTone(changePct: string): string {
+  if (changePct.startsWith("+")) return "text-step-warning";
+  if (changePct.startsWith("-")) return "text-teal-700";
+  return "text-foreground";
 }
 
 function DerivedMeterTrace({
@@ -507,7 +526,7 @@ function Unavailable({ title, reason }: { title: string; reason: string | null }
   );
 }
 
-function CircuitEvidence({
+function CircuitEvidenceDetails({
   row,
   evidence,
 }: {
@@ -515,11 +534,7 @@ function CircuitEvidence({
   evidence: NgeeAnnEnergyCompositionViewModel["evidence"];
 }) {
   return (
-    <details className="mt-2 text-[10px] font-normal leading-4 text-muted">
-      <summary className="cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
-        Circuit evidence
-      </summary>
-      <dl className="mt-1 grid grid-cols-[64px_minmax(0,1fr)] gap-x-2 gap-y-0.5">
+      <dl className="grid grid-cols-[76px_minmax(0,1fr)] gap-x-3 gap-y-1.5">
         <dt>Meter point</dt><dd className="break-all font-mono text-foreground">{row.meterNodeId}</dd>
         <dt>Scope</dt><dd className="break-all font-mono text-foreground">{row.scopeId}</dd>
         <dt>Parent</dt><dd className="break-all font-mono text-foreground">{row.parentScopeId}</dd>
@@ -530,6 +545,5 @@ function CircuitEvidence({
         <dt>Quality</dt><dd className="text-foreground">{row.quality.coverage}; {row.quality.intervals} valid; {row.quality.qualityEvents}</dd>
         <dt>Snapshot</dt><dd className="break-all font-mono text-foreground">{evidence.snapshotId}</dd>
       </dl>
-    </details>
   );
 }

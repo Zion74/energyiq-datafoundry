@@ -15,19 +15,9 @@ export function NgeeAnnLevelComparison({
             Energy distribution
           </h3>
           <p className="mt-1.5 text-sm leading-6 text-muted">{view.decisionQuestion}</p>
-          {view.rows.length > 0 ? (
-            <ul aria-label="Level colour key" className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
-              {view.rows.map((row) => (
-                <li key={row.id} className="inline-flex items-center gap-1.5">
-                  <span aria-hidden="true" className={`h-2 w-2 rounded-full ${levelColour(row.id)}`} />
-                  {row.name}
-                </li>
-              ))}
-            </ul>
-          ) : null}
         </div>
-        <p className="max-w-xl text-xs leading-5 text-muted">
-          Official-route energy, adjacent-period movement and accepted interval quality from one published Snapshot.
+        <p className="max-w-md text-xs leading-5 text-muted">
+          Compare each Level with the previous window.
         </p>
       </div>
 
@@ -37,47 +27,46 @@ export function NgeeAnnLevelComparison({
           <p className="mt-1 text-sm leading-6 text-muted">{view.reason}</p>
         </div>
       ) : (
-        <div className="mt-4 overflow-x-auto">
-          <table className="w-full min-w-[860px] border-collapse text-left">
-            <caption className="sr-only">Level 6 and Level 7 official energy comparison</caption>
-            <thead className="border-y border-border bg-surface-subtle text-xs font-medium uppercase tracking-[0.06em] text-muted">
-              <tr>
-                <th scope="col" className="px-3 py-2.5">Level</th>
-                <th scope="col" className="px-3 py-2.5">Current</th>
-                <th scope="col" className="px-3 py-2.5">Project share</th>
-                <th scope="col" className="px-3 py-2.5">Previous</th>
-                <th scope="col" className="px-3 py-2.5">Change</th>
-                <th scope="col" className="px-3 py-2.5">Data quality</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {view.rows.map((row) => (
-                <tr key={row.id}>
-                  <th scope="row" className="w-[180px] px-3 py-4 align-top">
-                    <p className="text-xs font-semibold text-foreground">{row.name}</p>
-                    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true">
-                      <div className={`h-full rounded-full ${levelColour(row.id)}`} style={{ width: row.projectShareBar }} />
-                    </div>
-                  </th>
-                  <td className="px-3 py-4 align-top text-sm font-semibold tabular-nums text-foreground">
-                    {row.currentUsageKwh} <span className="text-[10px] font-medium text-muted">kWh</span>
-                  </td>
-                  <td className="px-3 py-4 align-top text-xs font-semibold tabular-nums text-foreground">{row.projectShare}</td>
-                  <td className="px-3 py-4 align-top text-xs tabular-nums text-foreground">
-                    {row.previousUsageKwh} <span className="text-[10px] text-muted">kWh</span>
-                  </td>
-                  <td className="px-3 py-4 align-top">
-                    <p className="text-xs font-semibold tabular-nums text-foreground">{row.changePct}</p>
-                    <p className="mt-1 text-[10px] tabular-nums text-muted">{row.changeKwh}</p>
-                  </td>
-                  <td className="px-3 py-4 align-top">
-                    <p className="text-xs font-semibold text-foreground">{row.coverage}</p>
-                    <p className="mt-1 text-[10px] text-muted">{row.intervals} valid / {row.qualityEvents}</p>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="mt-4 divide-y divide-border border-y border-border">
+          {view.rows.map((row) => (
+            <article key={row.id} className="grid gap-4 py-4 lg:grid-cols-[minmax(220px,1fr)_180px_200px] lg:items-center lg:gap-7">
+              <div className="min-w-0">
+                <div className="flex items-center justify-between gap-4">
+                  <h4 className="inline-flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <span aria-hidden="true" className={`h-2.5 w-2.5 rounded-full ${levelColour(row.id)}`} />
+                    {row.name}
+                  </h4>
+                  <span className="text-xs font-semibold tabular-nums text-muted">{row.projectShare} of Project</span>
+                </div>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true">
+                  <div className={`h-full rounded-full ${levelColour(row.id)}`} style={{ width: row.projectShareBar }} />
+                </div>
+              </div>
+              <div>
+                <p className="text-xs text-muted">Current window</p>
+                <p className="mt-1 text-xl font-semibold tabular-nums tracking-[-0.02em] text-foreground">
+                  {row.currentUsageKwh} <span className="text-xs font-medium tracking-normal text-muted">kWh</span>
+                </p>
+              </div>
+              <div>
+                <p className="text-xs text-muted">Versus previous window</p>
+                <p className={`mt-1 text-base font-semibold tabular-nums ${changeTone(row.changePct)}`}>{row.changePct}</p>
+                <p className="mt-0.5 text-xs tabular-nums text-muted">{row.changeKwh}</p>
+                <details className="mt-2 text-xs text-muted">
+                  <summary className="cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+                    Comparison details
+                  </summary>
+                  <dl className="mt-2 grid grid-cols-[92px_minmax(0,1fr)] gap-x-3 gap-y-1.5">
+                    <dt>Previous</dt><dd className="tabular-nums text-foreground">{row.previousUsageKwh} kWh</dd>
+                    <dt>Coverage</dt><dd className="text-foreground">{row.coverage}</dd>
+                    <dt>Intervals</dt><dd className="text-foreground">{row.intervals} valid</dd>
+                    <dt>Quality</dt><dd className="text-foreground">{row.qualityEvents}</dd>
+                    <dt>Exact values</dt><dd className="tabular-nums text-foreground">Current {row.exact.currentUsageKwh} kWh · share {row.exact.projectShare} · previous {row.exact.previousUsageKwh} kWh · change {row.exact.changeKwh} ({row.exact.changePct})</dd>
+                  </dl>
+                </details>
+              </div>
+            </article>
+          ))}
         </div>
       )}
 
@@ -100,4 +89,10 @@ function levelColour(levelId: string): string {
   if (levelId.toLocaleLowerCase().includes("7")) return "bg-blue-600";
   if (levelId.toLocaleLowerCase().includes("6")) return "bg-teal-700";
   return "bg-primary";
+}
+
+function changeTone(changePct: string): string {
+  if (changePct.startsWith("+")) return "text-step-warning";
+  if (changePct.startsWith("-")) return "text-teal-700";
+  return "text-foreground";
 }

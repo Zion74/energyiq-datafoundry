@@ -386,6 +386,13 @@ export type NgeeAnnLevelComparisonViewModel = {
     coverage: string;
     intervals: string;
     qualityEvents: string;
+    exact: {
+      currentUsageKwh: string;
+      projectShare: string;
+      previousUsageKwh: string;
+      changeKwh: string;
+      changePct: string;
+    };
   }>;
   evidence: {
     snapshotId: string;
@@ -432,6 +439,13 @@ export type NgeeAnnEnergyCompositionViewModel = {
       changeKwh: string;
       changePct: string;
       quality: CompositionQuality;
+      exact: {
+        currentUsageKwh: string;
+        projectShare: string;
+        previousUsageKwh: string;
+        changeKwh: string;
+        changePct: string;
+      };
     }>;
   };
   circuits: CompositionStatus & {
@@ -452,6 +466,13 @@ export type NgeeAnnEnergyCompositionViewModel = {
       changePct: string;
       includedInOfficialTotal: false;
       quality: CompositionQuality;
+      exact: {
+        currentUsageKwh: string;
+        projectShare: string;
+        previousUsageKwh: string;
+        changeKwh: string;
+        changePct: string;
+      };
     }>;
   };
   accounting: CompositionStatus & {
@@ -787,14 +808,21 @@ function buildEnergyComposition(
       rows: analysis.categories.map((category) => ({
         id: category.category,
         name: compositionCategoryName(category.category),
-        currentUsageKwh: formatDecimal(category.usageKwh, 4),
-        projectShare: `${formatDecimal(category.sharePct, 4)}%`,
-        previousUsageKwh: formatDecimal(category.comparison!.usageKwh, 4),
-        changeKwh: `${signedDecimal(category.comparison!.changeKwh, 4)} kWh`,
-        changePct: category.comparison!.changePct === null
-          ? "Rate unavailable"
-          : `${category.comparison!.changePct! >= 0 ? "+" : ""}${formatDecimal(category.comparison!.changePct!, 4)}%`,
+        currentUsageKwh: formatDecimal(category.usageKwh, 2),
+        projectShare: `${formatDecimal(category.sharePct, 1)}%`,
+        previousUsageKwh: formatDecimal(category.comparison!.usageKwh, 2),
+        changeKwh: `${signedDecimal(category.comparison!.changeKwh, 2)} kWh`,
+        changePct: signedDisplayPercent(category.comparison!.changePct, "Rate unavailable"),
         quality: compositionQuality(category.dataHealth!),
+        exact: {
+          currentUsageKwh: formatDecimal(category.usageKwh, 4),
+          projectShare: `${formatDecimal(category.sharePct, 4)}%`,
+          previousUsageKwh: formatDecimal(category.comparison!.usageKwh, 4),
+          changeKwh: `${signedDecimal(category.comparison!.changeKwh, 4)} kWh`,
+          changePct: category.comparison!.changePct === null
+            ? "Rate unavailable"
+            : `${category.comparison!.changePct! >= 0 ? "+" : ""}${formatDecimal(category.comparison!.changePct!, 4)}%`,
+        },
       })),
     }
     : {
@@ -842,15 +870,22 @@ function buildEnergyComposition(
         levelName: levelNames.get(circuit.parentScopeId!)!,
         categoryId: circuit.category,
         category: compositionCategoryName(circuit.category),
-        currentUsageKwh: formatDecimal(circuit.usageKwh, 4),
-        projectShare: `${formatDecimal(circuit.sharePct, 4)}%`,
-        previousUsageKwh: formatDecimal(circuit.comparison!.usageKwh, 4),
-        changeKwh: `${signedDecimal(circuit.comparison!.changeKwh, 4)} kWh`,
-        changePct: circuit.comparison!.changePct === null
-          ? "Rate unavailable"
-          : `${circuit.comparison!.changePct! >= 0 ? "+" : ""}${formatDecimal(circuit.comparison!.changePct!, 4)}%`,
+        currentUsageKwh: formatDecimal(circuit.usageKwh, 2),
+        projectShare: `${formatDecimal(circuit.sharePct, 1)}%`,
+        previousUsageKwh: formatDecimal(circuit.comparison!.usageKwh, 2),
+        changeKwh: `${signedDecimal(circuit.comparison!.changeKwh, 2)} kWh`,
+        changePct: signedDisplayPercent(circuit.comparison!.changePct, "Rate unavailable"),
         includedInOfficialTotal: false,
         quality: compositionQuality(circuit.dataHealth!),
+        exact: {
+          currentUsageKwh: formatDecimal(circuit.usageKwh, 4),
+          projectShare: `${formatDecimal(circuit.sharePct, 4)}%`,
+          previousUsageKwh: formatDecimal(circuit.comparison!.usageKwh, 4),
+          changeKwh: `${signedDecimal(circuit.comparison!.changeKwh, 4)} kWh`,
+          changePct: circuit.comparison!.changePct === null
+            ? "Rate unavailable"
+            : `${circuit.comparison!.changePct! >= 0 ? "+" : ""}${formatDecimal(circuit.comparison!.changePct!, 4)}%`,
+        },
       })),
     }
     : {
@@ -3022,17 +3057,24 @@ function buildLevelComparison(
     rows: levelRows.map((scope) => ({
       id: scope.nodeId,
       name: scope.name,
-      currentUsageKwh: formatDecimal(scope.usageKwh, 4),
-      projectShare: `${formatDecimal(scope.sharePct, 4)}%`,
+      currentUsageKwh: formatDecimal(scope.usageKwh, 2),
+      projectShare: `${formatDecimal(scope.sharePct, 1)}%`,
       projectShareBar: `${Math.min(Math.max(scope.sharePct, 0), 100)}%`,
-      previousUsageKwh: formatDecimal(scope.comparison!.usageKwh, 4),
-      changeKwh: `${signedDecimal(scope.comparison!.changeKwh, 4)} kWh`,
-      changePct: scope.comparison!.changePct === null
-        ? "Unavailable"
-        : `${scope.comparison!.changePct! >= 0 ? "+" : ""}${formatDecimal(scope.comparison!.changePct!, 4)}%`,
+      previousUsageKwh: formatDecimal(scope.comparison!.usageKwh, 2),
+      changeKwh: `${signedDecimal(scope.comparison!.changeKwh, 2)} kWh`,
+      changePct: signedDisplayPercent(scope.comparison!.changePct, "Unavailable"),
       coverage: `${formatDecimal(scope.dataHealth!.coveragePct, 1)}% coverage`,
       intervals: `${scope.dataHealth!.validIntervalCount.toLocaleString("en-SG")} / ${scope.dataHealth!.expectedMeterIntervalCount.toLocaleString("en-SG")}`,
       qualityEvents: `${scope.dataHealth!.qualityEventCount.toLocaleString("en-SG")} quality events`,
+      exact: {
+        currentUsageKwh: formatDecimal(scope.usageKwh, 4),
+        projectShare: `${formatDecimal(scope.sharePct, 4)}%`,
+        previousUsageKwh: formatDecimal(scope.comparison!.usageKwh, 4),
+        changeKwh: `${signedDecimal(scope.comparison!.changeKwh, 4)} kWh`,
+        changePct: scope.comparison!.changePct === null
+          ? "Unavailable"
+          : `${scope.comparison!.changePct! >= 0 ? "+" : ""}${formatDecimal(scope.comparison!.changePct!, 4)}%`,
+      },
     })),
     evidence,
   };
@@ -3107,6 +3149,13 @@ function formatDecimal(value: number, maximumFractionDigits: number): string {
 
 function signedDecimal(value: number, maximumFractionDigits: number): string {
   return `${value >= 0 ? "+" : ""}${formatDecimal(value, maximumFractionDigits)}`;
+}
+
+function signedDisplayPercent(value: number | null, unavailable: string): string {
+  if (value === null) return unavailable;
+  const rounded = Number(value.toFixed(1));
+  if (Object.is(rounded, -0) || rounded === 0) return "0%";
+  return `${rounded > 0 ? "+" : ""}${formatDecimal(rounded, 1)}%`;
 }
 
 function formatPeriodRange(start: string, endExclusive: string, timezone: string): string {

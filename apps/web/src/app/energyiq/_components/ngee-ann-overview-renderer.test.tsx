@@ -319,8 +319,6 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Heatmap evidence / time_bucket_grid_v1");
     expect(markup).toContain("energy.total_usage_kwh@1");
     expect(markup).toContain("Energy distribution");
-    expect(markup).toContain("Energy distribution");
-    expect(markup).toContain('aria-label="Level colour key"');
     expect(markup).toContain("bg-blue-600");
     expect(markup).toContain("bg-teal-700");
     expect(markup).toContain("Which Level needs attention first?");
@@ -333,8 +331,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("-0.0142%");
     expect(markup).toContain("Energy composition");
     expect(markup).toContain("What explains the official Project total?");
-    expect(markup).toContain("Official categories");
-    expect(markup).toContain('aria-label="Category colour key"');
+    expect(markup).toContain("Where the energy went");
     expect(markup).toContain("bg-violet-600");
     expect(markup).toContain("bg-amber-600");
     expect(markup).toContain("1239.4239 kWh");
@@ -347,18 +344,18 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("324.4602 kWh");
     expect(markup).toContain("-32.7158 kWh");
     expect(markup).toContain("-10.0832%");
-    expect(markup).toContain("Top 5 component Circuits");
-    expect(markup).toContain("These are explanatory components and are not added separately to the official Project total.");
+    expect(markup).toContain("Largest component Circuits");
+    expect(markup).toContain("Ranked by current usage. Use these Circuits to decide where to investigate first.");
     expect(markup).toContain("439.0972 kWh");
     expect(markup).toContain("28.6773%");
     expect(markup).toContain("70.6873 kWh");
     expect(markup).toContain("4.6166%");
     for (const comparison of [
-      ["Previous 247.9813 kWh", "+191.1159 kWh", "+77.0687%"],
-      ["Previous 166.7234 kWh", "+171.1789 kWh", "+102.6724%"],
-      ["Previous 262.7359 kWh", "-7.5821 kWh", "-2.8858%"],
-      ["Previous 124.28 kWh", "-17.26 kWh", "-13.888%"],
-      ["Previous 76.9724 kWh", "-6.2851 kWh", "-8.1653%"],
+      ["previous 247.9813 kWh", "+191.1159 kWh", "+77.0687%"],
+      ["previous 166.7234 kWh", "+171.1789 kWh", "+102.6724%"],
+      ["previous 262.7359 kWh", "-7.5821 kWh", "-2.8858%"],
+      ["previous 124.28 kWh", "-17.26 kWh", "-13.888%"],
+      ["previous 76.9724 kWh", "-6.2851 kWh", "-8.1653%"],
     ]) {
       for (const expected of comparison) expect(markup).toContain(expected);
     }
@@ -381,7 +378,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Load 12 is not added separately to the official Project total.");
     expect(markup).toContain("same Snapshot, Release, Mapping revision, Formula revision, Period, unit and query ids");
     expect(markup).toContain("Composition evidence");
-    expect(markup).toContain("Circuit evidence");
+    expect(markup).toContain("Circuit details and Evidence");
     expect(markup).toContain("l7-load-4");
     expect(markup).toContain("level-7");
     expect(markup).toContain("No · explanatory component");
@@ -608,7 +605,7 @@ describe("NgeeAnnOverviewRenderer", () => {
       <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
     );
 
-    expect(markup).toContain("Official categories");
+    expect(markup).toContain("Where the energy went");
     expect(markup).toContain("1239.4239 kWh");
     expect(markup).toContain("291.7444 kWh");
     expect(markup).toContain("Component Circuit ranking unavailable");
@@ -1411,7 +1408,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
 
     await act(async () => showAllButton.click());
     expect(circuitRows()).toHaveLength(5);
-    expect(container.textContent).toContain("Top 5 component Circuits");
+    expect(container.textContent).toContain("Largest component Circuits");
 
     const level6Button = filterButton("Filter component Circuits by Level", "Level 6");
     expect(level6Button?.tagName).toBe("BUTTON");
@@ -1489,16 +1486,10 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
 
     expect(accountingButton.tagName).toBe("BUTTON");
     expect(derivedButton.tagName).toBe("BUTTON");
-    expect(accountingButton.getAttribute("aria-expanded")).toBe("true");
-    expect(derivedButton.getAttribute("aria-expanded")).toBe("true");
-
-    await activateNativeButton(derivedButton, "Enter");
-    expect(derivedButton.getAttribute("aria-expanded")).toBe("false");
-    expect(derivedPanel.hidden).toBe(true);
-
-    await activateNativeButton(accountingButton, " ");
     expect(accountingButton.getAttribute("aria-expanded")).toBe("false");
+    expect(derivedButton.getAttribute("aria-expanded")).toBe("false");
     expect(accountingPanel.hidden).toBe(true);
+    expect(derivedPanel.hidden).toBe(true);
 
     await activateNativeButton(accountingButton, " ");
     expect(accountingButton.getAttribute("aria-expanded")).toBe("true");
@@ -1509,6 +1500,12 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(derivedButton.getAttribute("aria-expanded")).toBe("true");
     expect(derivedPanel.hidden).toBe(false);
     expect(derivedPanel.textContent).toContain("Result 49.0218 kWh");
+
+    await activateNativeButton(accountingButton, " ");
+    expect(accountingButton.getAttribute("aria-expanded")).toBe("false");
+    expect(derivedButton.getAttribute("aria-expanded")).toBe("false");
+    expect(accountingPanel.hidden).toBe(true);
+    expect(derivedPanel.hidden).toBe(true);
   });
 
   it("preserves partial and unavailable Derived fail-closed states through disclosure toggles", async () => {
