@@ -298,11 +298,11 @@ export function PreschoolOverviewRenderer({
         )}
       </section>
 
-      <section aria-labelledby="preschool-planning-outlook" className="border-b border-border bg-surface-subtle/35 px-5 py-7 lg:px-7 lg:py-8">
+      <section id="preschool-planning-outlook" aria-labelledby="preschool-planning-outlook-heading" className="scroll-mt-28 border-b border-border bg-surface-subtle/35 px-5 py-7 lg:px-7 lg:py-8">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h3 id="preschool-planning-outlook" className="text-lg font-semibold tracking-[-0.015em] text-foreground">June planning baseline</h3>
+              <h3 id="preschool-planning-outlook-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">June planning baseline</h3>
               {view.planningOutlook.status === "provisional" ? (
                 <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2.5 py-1 text-xs font-semibold text-step-warning">Estimated · Provisional</span>
               ) : null}

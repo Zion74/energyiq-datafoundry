@@ -69,6 +69,7 @@ const PRESCHOOL_OVERVIEW_SECTIONS: ReadonlyArray<OverviewNavigationSection> = [
   { id: "preschool-appliance-ranking", label: "Energy drivers" },
   { id: "preschool-efficiency-benchmark", label: "Efficiency" },
   { id: "preschool-operational-behaviour", label: "Operating patterns" },
+  { id: "preschool-planning-outlook", label: "June plan" },
   { id: "preschool-centre-ranking", label: "Centre detail" },
   { id: "preschool-evidence", label: "Evidence" },
 ] as const;

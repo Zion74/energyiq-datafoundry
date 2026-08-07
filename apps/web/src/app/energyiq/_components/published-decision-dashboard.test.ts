@@ -326,6 +326,7 @@ describe("published Overview URL reload", () => {
       "Energy drivers",
       "Efficiency",
       "Operating patterns",
+      "June plan",
       "Centre detail",
       "Evidence",
     ]);
