@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -22,6 +21,12 @@ import { buildEnergyTemplateRenderPlan } from "./energy-template-render-plan";
 import { EnergySelect } from "./energy-select";
 import { useEnergyIqAccess } from "./energyiq-access";
 import { EnergyIcon } from "./icons";
+import { OverviewHistoryDialog } from "./overview-history-dialog";
+import {
+  overviewHistoryStateFromSearchParams,
+  overviewUrlWithHistory,
+  type OverviewHistoryState,
+} from "./overview-history-state";
 import {
   OverviewSectionNavigation,
   type OverviewNavigationSection,
@@ -103,6 +108,7 @@ type LoadedResolution = {
 export function PublishedDecisionDashboard() {
   const searchParams = useSearchParams();
   const initialViewState = overviewViewStateFromSearchParams(searchParams);
+  const historyState = overviewHistoryStateFromSearchParams(searchParams);
   const hasExplicitPeriod = searchParams.has("period");
   const viewStateKey = [
     initialViewState.projectId,
@@ -122,6 +128,7 @@ export function PublishedDecisionDashboard() {
       key={viewStateKey}
       initialViewState={initialViewState}
       urlSearch={searchParams.toString()}
+      historyState={historyState}
     />
   );
 }
@@ -129,9 +136,11 @@ export function PublishedDecisionDashboard() {
 function PublishedDecisionDashboardView({
   initialViewState,
   urlSearch,
+  historyState,
 }: {
   initialViewState: OverviewUrlViewState;
   urlSearch: string;
+  historyState: OverviewHistoryState;
 }) {
   const router = useRouter();
   const { access, activeProject, selectProject } = useEnergyIqAccess();
@@ -187,10 +196,21 @@ function PublishedDecisionDashboardView({
   const pendingUrlSearchRef = useRef(urlSearch);
   const refreshRequestRevisionRef = useRef<number | null>(null);
   const refreshBypassPendingRef = useRef(false);
+  const historyButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     pendingUrlSearchRef.current = urlSearch;
   }, [urlSearch]);
+
+  const navigateHistory = (
+    nextHistoryState: OverviewHistoryState,
+    mode: "push" | "replace" = "push",
+  ) => {
+    const href = overviewUrlWithHistory(pendingUrlSearchRef.current, nextHistoryState);
+    pendingUrlSearchRef.current = href.includes("?") ? href.slice(href.indexOf("?") + 1) : "";
+    if (mode === "replace") router.replace(href);
+    else router.push(href);
+  };
 
   useEffect(() => {
     if (!isNgeeAnnProject || initialViewState.resource !== "water") return;
@@ -504,7 +524,12 @@ function PublishedDecisionDashboardView({
   }, [navigationSections]);
 
   return (
-    <div className="mx-auto w-full max-w-[1480px] px-4 py-6 lg:px-8 lg:py-8">
+    <>
+    <div
+      data-energyiq-current-overview="true"
+      data-print-exclude={historyState.open ? "true" : undefined}
+      className="mx-auto w-full max-w-[1480px] px-4 py-6 lg:px-8 lg:py-8"
+    >
       <section className="flex flex-col gap-5 border-b border-border pb-6 xl:flex-row xl:items-end xl:justify-between">
         <div>
           <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted">
@@ -592,6 +617,16 @@ function PublishedDecisionDashboardView({
             </div>
           ) : null}
           <button
+            ref={historyButtonRef}
+            type="button"
+            onClick={() => navigateHistory({ open: true, selectedAnalysisId: null })}
+            disabled={!projectId}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-surface px-4 text-xs font-semibold text-foreground transition-colors hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <EnergyIcon name="calendar" className="h-3.5 w-3.5" />
+            History
+          </button>
+          <button
             type="button"
             onClick={refreshOverview}
             disabled={running || resource === "water"}
@@ -640,9 +675,13 @@ function PublishedDecisionDashboardView({
         <div className="flex flex-wrap items-center gap-3">
           {saveError ? <span className="text-step-error">Save failed: {saveError}</span> : null}
           {savedAnalysis ? (
-            <Link href={`/energyiq/saved/${savedAnalysis.id}`} className="font-semibold text-primary hover:underline">
+            <button
+              type="button"
+              onClick={() => navigateHistory({ open: true, selectedAnalysisId: savedAnalysis.id })}
+              className="font-semibold text-primary hover:underline"
+            >
               Saved as version {savedAnalysis.sequence} →
-            </Link>
+            </button>
           ) : null}
           {currentSnapshot ? (
             <span className="font-mono">
@@ -709,6 +748,17 @@ function PublishedDecisionDashboardView({
         </div>
       )}
     </div>
+    {historyState.open ? (
+      <OverviewHistoryDialog
+        projectName={selectedProject?.name ?? "Current Project"}
+        selectedAnalysisId={historyState.selectedAnalysisId}
+        onSelect={(analysisId) => navigateHistory({ open: true, selectedAnalysisId: analysisId })}
+        onBackToHistory={() => navigateHistory({ open: true, selectedAnalysisId: null }, "replace")}
+        onClose={() => navigateHistory({ open: false, selectedAnalysisId: null }, "replace")}
+        returnFocusRef={historyButtonRef}
+      />
+    ) : null}
+    </>
   );
 }
 

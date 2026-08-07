@@ -13,7 +13,17 @@ import { ProjectRenderer, type ProjectRendererState } from "./project-renderer-r
 import { ScopeMetadataStatus } from "./scope-metadata-status";
 import { runSavedAnalysisAiForSnapshot } from "./saved-analysis-ai";
 
-export function SavedAnalysisDetail() {
+export function SavedAnalysisDetail({
+  analysisId: providedAnalysisId,
+  presentation = "page",
+  onBack,
+  onAnalysisChange,
+}: {
+  analysisId?: string;
+  presentation?: "page" | "dialog";
+  onBack?: () => void;
+  onAnalysisChange?: (analysisId: string) => void;
+} = {}) {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { activeProject } = useEnergyIqAccess();
@@ -23,7 +33,7 @@ export function SavedAnalysisDetail() {
   const [rerunning, setRerunning] = useState(false);
   const [rerunPhase, setRerunPhase] = useState<"data" | "ai" | null>(null);
   const projectId = activeProject?.id ?? "";
-  const analysisId = params.id;
+  const analysisId = providedAnalysisId ?? params.id;
   const frozenExplorerHref = detail ? savedAnalysisExplorerHref({
     projectId: detail.projectId,
     scopeId: detail.scopeId,
@@ -50,6 +60,7 @@ export function SavedAnalysisDetail() {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setDetail(null);
     void configApi.getEnergySavedAnalysis(projectId, analysisId)
       .then((result) => {
         if (!cancelled) setDetail(result);
@@ -110,7 +121,8 @@ export function SavedAnalysisDetail() {
           // AI is optional: retain and open the newly created deterministic version.
         }
       }
-      router.push(`/energyiq/saved/${next.id}`);
+      if (onAnalysisChange) onAnalysisChange(next.id);
+      else router.push(`/energyiq/saved/${next.id}`);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to rerun saved analysis");
     } finally {
@@ -122,19 +134,31 @@ export function SavedAnalysisDetail() {
   return (
     <div
       data-energyiq-saved-report="true"
-      className="mx-auto w-full max-w-[1320px] px-4 py-6 lg:px-8 lg:py-8"
+      className={presentation === "dialog"
+        ? "w-full px-5 py-5 lg:px-7 lg:py-6"
+        : "mx-auto w-full max-w-[1320px] px-4 py-6 lg:px-8 lg:py-8"}
     >
       <div className="border-b border-border pb-6">
-        <Link data-print-exclude="true" href="/energyiq/saved" className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline">
-          ← Saved analyses
-        </Link>
+        {presentation === "dialog" && onBack ? (
+          <button data-print-exclude="true" type="button" onClick={onBack} className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25">
+            ← Analysis history
+          </button>
+        ) : (
+          <Link data-print-exclude="true" href="/energyiq/saved" className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline">
+            ← Saved analyses
+          </Link>
+        )}
         <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full border border-border bg-surface px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted">Read-only saved result</span>
               {detail ? <span className="text-xs text-muted">Version {detail.sequence}</span> : null}
             </div>
-            <h1 className="mt-3 text-2xl font-semibold tracking-tight">{detail?.title ?? "Saved analysis"}</h1>
+            {presentation === "dialog" ? (
+              <h3 className="mt-3 text-2xl font-semibold tracking-tight">{detail?.title ?? "Saved analysis"}</h3>
+            ) : (
+              <h1 className="mt-3 text-2xl font-semibold tracking-tight">{detail?.title ?? "Saved analysis"}</h1>
+            )}
             {detail ? (
               <p className="mt-1.5 text-sm text-muted">
                 {formatPeriod(detail)} · saved {formatSavedAt(detail.createdAt)}

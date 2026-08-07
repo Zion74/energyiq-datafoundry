@@ -99,6 +99,18 @@ describe("EnergyIQ Shell Project navigation", () => {
     expect(navigation.replace).not.toHaveBeenCalled();
   });
 
+  it("keeps Saved Analysis inside Overview instead of primary navigation", async () => {
+    await act(async () => {
+      root.render(<EnergyIqShell><div>Overview</div></EnergyIqShell>);
+    });
+
+    const mainNavigation = container.querySelector("nav[aria-label='Main navigation']");
+    expect(mainNavigation?.textContent).toContain("Overview");
+    expect(mainNavigation?.textContent).toContain("AI Analyst");
+    expect(mainNavigation?.textContent).toContain("Project Explorer");
+    expect(mainNavigation?.textContent).not.toContain("Saved analyses");
+  });
+
   it("switches the AI Analyst Project and removes the previous handoff context", async () => {
     navigation.pathname = "/energyiq/ai";
     navigation.search = "projectId=project-a&scopeId=level-6&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&finding=old-finding&evidence=old-evidence";

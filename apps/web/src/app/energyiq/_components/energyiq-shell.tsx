@@ -16,7 +16,6 @@ const navigation: Array<{
   icon: EnergyIconName;
 }> = [
   { href: "/energyiq/overview", label: "Overview", shortLabel: "Overview", icon: "analysis" },
-  { href: "/energyiq/saved", label: "Saved analyses", shortLabel: "Saved", icon: "calendar" },
   { href: "/energyiq/ai", label: "AI Analyst", shortLabel: "AI Analyst", icon: "ask" },
   { href: "/energyiq/explorer", label: "Project Explorer", shortLabel: "Explorer", icon: "explorer" },
 ];
@@ -52,6 +51,8 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
     nextSearchParams.delete("currentProjectReleaseId");
     nextSearchParams.delete("finding");
     nextSearchParams.delete("evidence");
+    nextSearchParams.delete("history");
+    nextSearchParams.delete("savedAnalysisId");
     if (pathname === "/energyiq/overview") {
       nextSearchParams.set("grain", "day");
     } else {
@@ -75,6 +76,8 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
     nextSearchParams.delete("currentProjectReleaseId");
     nextSearchParams.delete("finding");
     nextSearchParams.delete("evidence");
+    nextSearchParams.delete("history");
+    nextSearchParams.delete("savedAnalysisId");
     if (pathname === "/energyiq/overview") {
       nextSearchParams.set("grain", "day");
     } else {

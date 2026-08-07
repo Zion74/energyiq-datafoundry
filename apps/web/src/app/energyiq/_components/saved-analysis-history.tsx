@@ -7,7 +7,13 @@ import { configApi, type EnergySavedAnalysisSummaryDto } from "../../../lib/conf
 import { useEnergyIqAccess } from "./energyiq-access";
 import { EnergyIcon } from "./icons";
 
-export function SavedAnalysisHistory() {
+export function SavedAnalysisHistory({
+  presentation = "page",
+  onSelect,
+}: {
+  presentation?: "page" | "dialog";
+  onSelect?: (analysisId: string) => void;
+} = {}) {
   const { activeProject } = useEnergyIqAccess();
   const [items, setItems] = useState<EnergySavedAnalysisSummaryDto[]>([]);
   const [loading, setLoading] = useState(false);
@@ -45,9 +51,10 @@ export function SavedAnalysisHistory() {
     return latest;
   }, [items]);
 
-  return (
-    <div className="mx-auto w-full max-w-[1120px] px-4 py-6 lg:px-8 lg:py-8">
-      <div className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between">
+  const historyContent = (
+    <>
+      {presentation === "page" ? (
+        <div className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-medium text-muted">{activeProject?.name ?? "Select a Project"}</p>
           <h1 className="mt-2 text-2xl font-semibold tracking-tight">Saved analyses</h1>
@@ -59,7 +66,12 @@ export function SavedAnalysisHistory() {
           <EnergyIcon name="analysis" className="h-3.5 w-3.5" />
           Open Overview
         </Link>
-      </div>
+        </div>
+      ) : (
+        <p className="max-w-3xl text-sm leading-6 text-muted">
+          Immutable versions saved from this Project. Opening one keeps the Current Overview in place behind this window.
+        </p>
+      )}
 
       {error ? <p className="mt-6 rounded-lg border border-step-error/25 bg-step-error/5 p-4 text-xs text-step-error">{error}</p> : null}
 
@@ -75,11 +87,41 @@ export function SavedAnalysisHistory() {
           {items.map((item) => {
             const latest = latestBySeries.get(item.seriesId) === item.sequence;
             return (
-              <Link
+              <HistoryItem
                 key={item.id}
-                href={`/energyiq/saved/${item.id}`}
-                className="grid gap-3 border-b border-border px-5 py-4 transition-colors last:border-b-0 hover:bg-surface-subtle sm:grid-cols-[minmax(0,1fr)_160px_150px_auto] sm:items-center"
-              >
+                item={item}
+                latest={latest}
+                {...(presentation === "dialog" && onSelect
+                  ? { onSelect: () => onSelect(item.id) }
+                  : { href: `/energyiq/saved/${item.id}` })}
+              />
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+
+  return presentation === "dialog" ? (
+    <div className="w-full px-5 py-5 lg:px-7 lg:py-6">{historyContent}</div>
+  ) : (
+    <div className="mx-auto w-full max-w-[1120px] px-4 py-6 lg:px-8 lg:py-8">{historyContent}</div>
+  );
+}
+
+function HistoryItem({
+  item,
+  latest,
+  href,
+  onSelect,
+}: {
+  item: EnergySavedAnalysisSummaryDto;
+  latest: boolean;
+  href?: string;
+  onSelect?: () => void;
+}) {
+  const content = (
+    <>
                 <span className="min-w-0">
                   <span className="flex flex-wrap items-center gap-2">
                     <strong className="truncate text-sm">{item.title}</strong>
@@ -90,12 +132,13 @@ export function SavedAnalysisHistory() {
                 <span className="text-xs text-muted">Version {item.sequence}</span>
                 <span className="text-xs text-muted">{formatSavedAt(item.createdAt)}</span>
                 <span className="flex items-center justify-end gap-1 text-xs font-semibold text-primary">View <EnergyIcon name="arrow" className="h-3.5 w-3.5" /></span>
-              </Link>
-            );
-          })}
-        </div>
-      )}
-    </div>
+    </>
+  );
+  const className = "grid w-full gap-3 border-b border-border px-5 py-4 text-left transition-colors last:border-b-0 hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/25 sm:grid-cols-[minmax(0,1fr)_160px_150px_auto] sm:items-center";
+  return onSelect ? (
+    <button type="button" onClick={onSelect} className={className}>{content}</button>
+  ) : (
+    <Link href={href ?? "/energyiq/overview"} className={className}>{content}</Link>
   );
 }
 
