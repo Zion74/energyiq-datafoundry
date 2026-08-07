@@ -5,6 +5,7 @@ import type { EnergyScopeAnalysisDto } from "../../../lib/config-api";
 import {
   buildExplorerAnalysisRequest,
   explorerCurrentFactsUrl,
+  explorerChildScopeHealth,
   explorerTrendSeries,
   explorerUrlWithView,
   explorerViewStateFromSearchParams,
@@ -130,7 +131,59 @@ describe("Project Explorer trusted view state", () => {
       { date: "2026-06-16", usageKwh: 18, coveragePct: 100 },
     ]);
   });
+
+  it("summarises child Scope health without treating valid zero usage as missing", () => {
+    const analysis = analysisFixture({
+      usageKwh: 30,
+      validIntervalCount: 288,
+      expectedMeterIntervalCount: 288,
+      coveragePct: 100,
+      dailyRows: [],
+    });
+    analysis.childScopes = [
+      childScope("healthy-zero", "Healthy zero", 0, 96, 100, 0),
+      childScope("partial", "Partial", 12, 80, 83.33, 0),
+      childScope("flagged", "Flagged", 9, 96, 100, 2),
+      childScope("missing", "Missing", 0, 0, 0, 0),
+    ];
+
+    expect(explorerChildScopeHealth(analysis)).toMatchObject({
+      total: 4,
+      validated: 1,
+      review: 2,
+      unavailable: 1,
+      needsAttention: 3,
+      attention: [
+        { nodeId: "missing", status: "unavailable" },
+        { nodeId: "partial", status: "review" },
+        { nodeId: "flagged", status: "review" },
+      ],
+    });
+  });
 });
+
+function childScope(
+  nodeId: string,
+  name: string,
+  usageKwh: number,
+  validIntervalCount: number,
+  coveragePct: number,
+  qualityEventCount: number,
+): EnergyScopeAnalysisDto["childScopes"][number] {
+  return {
+    nodeId,
+    name,
+    nodeType: "centre",
+    usageKwh,
+    sharePct: 0,
+    dataHealth: {
+      coveragePct,
+      expectedMeterIntervalCount: 96,
+      validIntervalCount,
+      qualityEventCount,
+    },
+  };
+}
 
 function analysisFixture(input: {
   usageKwh: number;

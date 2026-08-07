@@ -284,6 +284,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
     [analysis],
   );
   const dailyTrend = useMemo(() => explorerTrendSeries(analysis), [analysis]);
+  const childScopeHealth = useMemo(() => explorerChildScopeHealth(analysis), [analysis]);
   const selectedChartView = chartView === "daily" && dailyTrend.length > 1 ? "daily" : "hourly";
   const showLatestAvailable = () => {
     const latest = analysis?.latestAvailablePeriod;
@@ -820,6 +821,46 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
               </div>
             </div>
 
+            {childScopeHealth ? (
+              <section className="mt-8 rounded-xl border border-border bg-surface p-5 shadow-[var(--shadow-card)]" aria-label="Child Scope health">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <h2 className="text-sm font-semibold text-foreground">Child Scope health</h2>
+                    <p className="mt-1 text-xs leading-5 text-muted">
+                      {childScopeHealth.total.toLocaleString()} direct child Scopes checked · {childScopeHealth.needsAttention.toLocaleString()} need attention
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-[11px] font-semibold">
+                    <span className="rounded-full bg-step-success/10 px-2.5 py-1 text-step-success">{childScopeHealth.validated} validated</span>
+                    {childScopeHealth.review > 0 ? <span className="rounded-full bg-step-warning/10 px-2.5 py-1 text-step-warning">{childScopeHealth.review} review</span> : null}
+                    {childScopeHealth.unavailable > 0 ? <span className="rounded-full bg-muted/10 px-2.5 py-1 text-muted">{childScopeHealth.unavailable} unavailable</span> : null}
+                  </div>
+                </div>
+                {childScopeHealth.attention.length > 0 ? (
+                  <div className="mt-4 divide-y divide-border border-t border-border">
+                    {childScopeHealth.attention.slice(0, 5).map((scope) => (
+                      <button
+                        key={scope.nodeId}
+                        type="button"
+                        onClick={() => setSelectedId(scope.nodeId)}
+                        className="grid w-full gap-1 py-3 text-left hover:text-primary sm:grid-cols-[minmax(0,1fr)_140px_140px] sm:items-center sm:gap-4"
+                      >
+                        <span className="truncate text-xs font-semibold text-foreground">{scope.name}</span>
+                        <span className="text-xs tabular-nums text-muted">{scope.coveragePct.toFixed(1)}% coverage</span>
+                        <span className={scope.status === "unavailable" ? "text-xs font-semibold text-muted" : "text-xs font-semibold text-step-warning"}>
+                          {scope.status === "unavailable" ? "No accepted facts" : `${scope.qualityEventCount} quality events`}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-4 border-t border-border pt-3 text-xs leading-5 text-muted">
+                    Every direct child Scope has accepted facts with at least 95% coverage and no flagged quality events in this period.
+                  </p>
+                )}
+              </section>
+            ) : null}
+
             <section className="mt-8">
               <div className="mb-3 flex items-end justify-between">
                 <div>
@@ -1156,6 +1197,56 @@ export function explorerTrendSeries(analysis: EnergyScopeAnalysisDto | null): Ar
     usageKwh: row.usageKwh,
     coveragePct: row.dataHealth.coveragePct,
   }));
+}
+
+export type ExplorerChildScopeHealth = {
+  total: number;
+  validated: number;
+  review: number;
+  unavailable: number;
+  needsAttention: number;
+  attention: Array<{
+    nodeId: string;
+    name: string;
+    coveragePct: number;
+    qualityEventCount: number;
+    status: "review" | "unavailable";
+  }>;
+};
+
+export function explorerChildScopeHealth(
+  analysis: EnergyScopeAnalysisDto | null,
+): ExplorerChildScopeHealth | null {
+  if (!analysis || analysis.childScopes.length === 0) return null;
+  const scopes = analysis.childScopes.map((scope) => {
+    const health = scope.dataHealth;
+    const unavailable = !health || health.validIntervalCount === 0;
+    const review = !unavailable && (health.coveragePct < 95 || health.qualityEventCount > 0);
+    return {
+      nodeId: scope.nodeId,
+      name: scope.name,
+      coveragePct: health?.coveragePct ?? 0,
+      qualityEventCount: health?.qualityEventCount ?? 0,
+      status: unavailable ? "unavailable" as const : review ? "review" as const : "validated" as const,
+    };
+  });
+  const attention = scopes
+    .filter((scope): scope is typeof scope & { status: "review" | "unavailable" } => scope.status !== "validated")
+    .sort((left, right) => {
+      if (left.status !== right.status) return left.status === "unavailable" ? -1 : 1;
+      if (left.coveragePct !== right.coveragePct) return left.coveragePct - right.coveragePct;
+      return left.name.localeCompare(right.name);
+    });
+  const unavailable = scopes.filter((scope) => scope.status === "unavailable").length;
+  const review = scopes.filter((scope) => scope.status === "review").length;
+  return {
+    total: scopes.length,
+    validated: scopes.length - unavailable - review,
+    review,
+    unavailable,
+    needsAttention: unavailable + review,
+    attention,
+  };
 }
 
 function validDateInput(value: string): boolean {
