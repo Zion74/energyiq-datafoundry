@@ -469,14 +469,22 @@ AI Analyst 的 #30/#18/#15 继续由侧边任务 Agent 执行；不得修改本�
 
 | 切片 | 状态 | 已形成的可验证结果 |
 | --- | --- | --- |
-| V1：#9/#13 阅读体验 | DONE（工程验收） | Ngee Ann 与 Preschool 均采用 takeaway-first 阅读顺序；桌面左侧目录、窄屏顶部目录、较大字号、分段决策卡和折叠 Evidence 已落地。Ngee Ann 首要主题已使用同一零轴展示 1d/7d/28d 与各自治理基线的差异；数值直接来自服务端 Snapshot，条长只做卡内相对缩放并明确说明。A→B New/Recurring/Resolved 仍等待权威跨 Snapshot 结果合同，不在 React 推断。 |
+| V1：#9/#13 阅读体验 | DONE（工程验收） | Ngee Ann 与 Preschool 均采用 takeaway-first 阅读顺序；桌面左侧目录、窄屏顶部目录、较大字号、分段决策卡和折叠 Evidence 已落地。Ngee Ann 首要主题已使用同一零轴展示 1d/7d/28d 与各自治理基线的差异；数值直接来自服务端 Snapshot，条长只做卡内相对缩放并明确说明。A→B `New / Newly supported / Recurring / Resolved / No longer supported` 已由服务端在兼容 Saved A 与 Current B 之间计算；React 只展示结果，不推断生命周期。日趋势进一步叠加同一 Snapshot/Release/Scope/date 的治理基线和需复核日期，accepted usage 始终保持权威主图。 |
 | V2：#31 Explorer | DONE（工程验收） | Overview 已从 Ngee Ann 结论准确跳到主要贡献 Scope，并从 Preschool Top 5 准确跳到 Centre；Project/Scope/Resource/Period/Snapshot/Release 全部保留。Explorer 已提供服务端 Daily / Week / Month、24h profile、子 Scope 健康摘要和叶子 Meter/Circuit 最新 accepted cumulative reading；技术 provenance 默认折叠。Week/Month 复用同一 `daily_totals_v1` 在 API 聚合，没有新增 DuckDB 查询，边界周/月明确按 partial calendar period 处理。旧 Snapshot/Release 链接 fail closed，并要求用户显式切换到 Current。 |
 | V3：#13 Preschool visuals | DONE（工程验收） | 已加入经验分布、24h operating/closed 结构、Centre Top 5、四个完整周均值形成的 June demo baseline，以及使用 SP 2026 Q2 低压非住宅公开参考价的 provisional cost。修复了把 standby/off-hours 用量误当作五月总用量的成本语义错误。 |
 | V4：#5 校准 | DONE | 同一 Chrome 完成 Preschool Current → Save → Saved 回读：Current 与 Saved 均固定 Snapshot `energy-snapshot-52ca9611e48b0d71c2efe7b7`；Saved `saved-analysis-39829006-b056-476b-baa6-4dde4b05dd5d` 保留根 Scope Missing、30 个比较 Scope 与 Provisional Area/Headcount/EUI/Per-pax，不读取 Current 元数据重算。#5 已关闭。 |
-| V5：#19 → #20 → #21 | PENDING | 保持原顺序：Release/rollback → Saved/Rerun/打印或 PDF → 两项目完整试点与 Charles 人工价值验收。 |
+| V5：#19 → #20 → #21 | NEEDS INFO | #19 已确认当前 DuckDB 事实是每 Project 单槽；materialization 会替换旧事实，因此只增加 Metadata active-release 指针会形成“可回滚”的假象。#19 已停在实施前并标记 `needs-info`，等待选择有限的 active+candidate/previous 事实保留，或明确推迟真正 rollback；#20/#21 不以伪回滚为前提继续扩张。 |
 
 自动化证据：Web 相关 `6 files / 117 tests` 通过；API/Data Gateway/可信执行定向回归 `30/30` 通过，Calendar/reading 生产路径定向回归 `1/1` 通过；仓库 typecheck、API build 与 Web production build 通过（17 pages）。完整 `energy-analysis.test.ts` 为 `17/19`：最新 accepted cumulative reading 和两项目核心事实均通过；两条既有 anomaly baseline 用例仍因样本数期望（3 vs 4）不一致失败，本轮没有修改 anomaly 代码，作为独立测试债记录，不扩大 #31。真实 Chrome：Ngee Ann 与 Preschool 的精准下钻、叶子累计读数、子 Scope 健康、Daily/Week/Month URL 恢复和 stale Release fail-closed 已完成回读。
 
 新增收口证据：`cda2a15` 将 `/analysis/execute` 固定到已发布 Project 上下文，旧 Overview/Explorer 的 Release 或 Snapshot 漂移会在 DuckDB 前以 409 fail closed；`82f0d8c` 保留 Saved/Explorer 的冻结 Evidence 边界；`4adc03e` 将两项目可见结论链接到准确 Scope；`c18cfa0` 增加子 Scope 健康摘要；`6442617` 增加 Snapshot-guarded 叶子累计读数合同；`29ba4f2` 与 `2ce9a5d` 让局部图表视图写入 URL 并在刷新后恢复；`c7cf0f7` 增加服务端权威自然周/自然月趋势，同样不触发 Overview 或 AI 重算。Chrome 已证实 Ngee Ann `Level 7 → Total Office Light` 显示 `1,667.38 kWh` 与原 Excel 来源，并显示 5 个自然周点；Preschool `Centre E → Plug Load3` 显示 `202.48 kWh` 与 normalized cumulative 来源，Week/Month 均可刷新恢复；伪造 `stale-release` 时只显示 outdated 状态，当前事实没有混入。
 
 Workspace 复核结论：先前“Preschool 被 Ngee Ann Workspace 限制”不是 Renderer 或 API 缺失，而是共享 Chrome 仍处于 Ngee Ann Workspace 且保留旧 Project URL。使用 Admin 账号将 Workspace 切换为 `Preschool Demo`，再进入 `preschool-demo` Project 后，Portfolio、Benchmark、Operating、June plan 与 Centre detail 均正常显示。切换 Workspace 后若保留旧 Project URL，应显示上下文不匹配而不是跨 Workspace 读取，这属于正确隔离行为。
+
+### 11.9 #9 日趋势解释层与 #19 停止条件
+
+- Ngee Ann 日趋势现在以 accepted daily totals 为主图，并在严格匹配同一 Snapshot、Release、Project/Scope、local date、事实区间、actual usage 与质量身份时，显示治理基线、差值、规则结果和需复核标记。任何匹配或公式校验失败只让 overlay fail closed；不会隐藏或重算 accepted usage。
+- 非 suppressed 行会校验 `impact = actual - baseline`、相对变化率和 20%/20 kWh 双阈值结果。主阅读区只显示两位小数与一位百分比，原始数值、query、rule revision、bundle、cutoff 和 baseline method 保留在折叠 Trend Evidence。
+- 需复核日期使用紧凑圆点，避免 28 天窄列中的文字标签互相遮挡；聚焦日期后可直接跳到同一 frozen incident Evidence。这个切片不新增 SQL、Kernel 指标、AI 推理或浏览器端异常计算。
+- 聚焦自动化：ViewModel + Renderer `2 files / 198 tests` 通过；仓库 typecheck、diff check 与 Web production build（17 pages）通过。当前切片的新鲜 1440/1920 Chrome 仍需在下一验收层单独记录，不能沿用较早截图冒充本次视觉证据。
+- #19 的停止原因不是一般工程洁癖，而是现有事实存储无法同时服务 A 与 B：写入 B 后 A 的事实已经不存在，Metadata 指针不能恢复它。不得在未获产品授权时把 #19 扩成通用历史 Snapshot 仓库，也不得交付不能真实回读 A 的伪 rollback。

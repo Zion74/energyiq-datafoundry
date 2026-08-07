@@ -27,6 +27,11 @@ export type NgeeAnnEnergyTrendViewModel = {
   grain: "day" | "hour";
   decisionQuestion: string;
   reason: string | null;
+  baselineOverlay: {
+    status: "available" | "unavailable" | "not_applicable";
+    reason: string | null;
+    ruleRevisionId: string | null;
+  };
   scopes: Array<{
     id: string;
     name: string;
@@ -45,6 +50,16 @@ export type NgeeAnnEnergyTrendViewModel = {
       coverage: string;
       intervals: string;
       qualityEvents: string;
+      baseline: {
+        outcome: "triggered" | "within_threshold" | "suppressed";
+        outcomeLabel: "Above-baseline rule triggered" | "Within rule threshold" | "No rule conclusion — Evidence incomplete";
+        baselineKwh: number | null;
+        baselineUsageKwh: string | null;
+        deltaUsageKwh: string | null;
+        relativePctLabel: string | null;
+        incidentId: string | null;
+        limitation: string | null;
+      } | null;
     }>;
   }>;
   evidence: {
@@ -57,6 +72,13 @@ export type NgeeAnnEnergyTrendViewModel = {
     timezone: string;
     unit: "kWh";
     queryIds: ["daily_totals_v1"] | ["time_bucket_grid_v1"];
+    baseline: {
+      bundleId: string;
+      queryId: "time_slot_anomaly_v1";
+      ruleRevisionId: string;
+      baselineCutoff: string;
+      baselineMethod: "mean_of_complete_comparable_days_by_local_hour";
+    } | null;
   };
 };
 
@@ -2121,6 +2143,7 @@ function validDailyAnomalyRow(
       || !Number.isFinite(row.impactKwh)
       || !Number.isFinite(row.relativePct)
     ) return false;
+    if (!validDailyAnomalyDerivedValues(row, bundle.rule)) return false;
   } else if (
     !finiteNonNegativeOrNull(row.actualKwh)
     || !finiteNonNegativeOrNull(row.baselineKwh)
@@ -2136,6 +2159,33 @@ function validDailyAnomalyRow(
     ))
   ) return false;
   return validTriggeredDetailSeries(row, selectedScope, expectedImmediateLevels);
+}
+
+function validDailyAnomalyDerivedValues(
+  row: DailyAnomalyRow,
+  rule: DailyAnomalyBundle["rule"],
+): boolean {
+  if (
+    row.actualKwh === null
+    || row.baselineKwh === null
+    || row.impactKwh === null
+    || row.relativePct === null
+    || row.baselineKwh <= 0
+  ) return false;
+  const expectedImpact = row.actualKwh - row.baselineKwh;
+  const expectedRelativePct = (expectedImpact / row.baselineKwh) * 100;
+  if (!approximatelyEqual(row.impactKwh, expectedImpact)
+    || !approximatelyEqual(row.relativePct, expectedRelativePct)) return false;
+  const shouldTrigger = expectedImpact >= rule.absoluteImpactKwh
+    && expectedRelativePct >= rule.relativeThresholdPct;
+  return shouldTrigger ? row.outcome === "triggered" : row.outcome === "within_threshold";
+}
+
+function approximatelyEqual(left: number, right: number): boolean {
+  return Math.abs(left - right) <= Math.max(
+    0.0001,
+    Math.max(1, Math.abs(left), Math.abs(right)) * 1e-9,
+  );
 }
 
 function validEligibleBaselineSample(
@@ -2607,12 +2657,14 @@ function buildEnergyTrend(
     timezone: grain === "hour" ? timeBehaviour?.timezone ?? context.timezone : dailyTotals?.timezone ?? context.timezone,
     unit: "kWh",
     queryIds: [queryId],
+    baseline: null,
   };
   const unavailable = (reason: string): NgeeAnnEnergyTrendViewModel => ({
     status: "unavailable",
     grain,
     decisionQuestion: "When did accepted energy use change inside the selected Period?",
     reason,
+    baselineOverlay: { status: "unavailable", reason, ruleRevisionId: null },
     scopes: [],
     evidence,
   });
@@ -2633,6 +2685,7 @@ function buildEnergyTrend(
       grain: "hour",
       decisionQuestion: "Which accepted local hours drove energy use on the selected day?",
       reason: null,
+      baselineOverlay: { status: "not_applicable", reason: null, ruleRevisionId: null },
       scopes: grid.scopes.map((scope) => ({
         id: scope.scopeId,
         name: scope.scopeType === "project" ? "Project" : scope.scopeName,
@@ -2646,6 +2699,7 @@ function buildEnergyTrend(
           range: formatEvidenceRange(cell.from, cell.to, timeBehaviour!.timezone),
           acceptedUsageKwh: cell.usageKwh,
           usageKwh: cell.usageKwh === null ? null : formatDecimal(cell.usageKwh, 4),
+          baseline: null,
           ...timePointQuality(cell.dataHealth),
         })),
       })),
@@ -2697,11 +2751,14 @@ function buildEnergyTrend(
     return unavailable("The daily totals rows do not share one valid authoritative date spine.");
   }
 
+  const dailyBaseline = buildDailyTrendBaseline(snapshot, dailyTotals);
+
   return {
     status: "available",
     grain: "day",
     decisionQuestion: "When did accepted energy use change inside the selected Period?",
     reason: null,
+    baselineOverlay: dailyBaseline.overlay,
     scopes: dailyTotals.scopes.map((scope) => {
       const hasUnavailable = scope.rows.some((row) => row.dataHealth.status === "unavailable");
       const hasPartial = scope.rows.some((row) => row.dataHealth.status === "partial");
@@ -2731,10 +2788,103 @@ function buildEnergyTrend(
           coverage: `${formatDecimal(row.dataHealth.coveragePct, 1)}% coverage`,
           intervals: `${row.dataHealth.validIntervalCount.toLocaleString("en-SG")} / ${row.dataHealth.expectedMeterIntervalCount.toLocaleString("en-SG")} valid intervals`,
           qualityEvents: `${row.dataHealth.qualityEventCount.toLocaleString("en-SG")} quality events`,
+          baseline: dailyBaseline.points.get(scope.scopeId)?.get(row.localDate) ?? null,
         })),
       };
     }),
-    evidence,
+    evidence: { ...evidence, baseline: dailyBaseline.evidence },
+  };
+}
+
+type DailyTotals = NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["dailyTotals"]>;
+type DailyTrendBaseline = NonNullable<
+  NgeeAnnEnergyTrendViewModel["scopes"][number]["points"][number]["baseline"]
+>;
+
+function buildDailyTrendBaseline(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  dailyTotals: DailyTotals,
+): {
+  overlay: NgeeAnnEnergyTrendViewModel["baselineOverlay"];
+  evidence: NonNullable<NgeeAnnEnergyTrendViewModel["evidence"]["baseline"]> | null;
+  points: Map<string, Map<string, DailyTrendBaseline>>;
+} {
+  const unavailable = (reason: string) => ({
+    overlay: {
+      status: "unavailable" as const,
+      reason: `Governed baseline overlay unavailable: ${reason}`,
+      ruleRevisionId: null,
+    },
+    evidence: null,
+    points: new Map<string, Map<string, DailyTrendBaseline>>(),
+  });
+  const bundle = snapshot.analysis.dailyUsageAnomalies;
+  if (!bundle) {
+    return unavailable("this Snapshot does not include the authoritative daily anomaly contract.");
+  }
+  if (bundle.status === "unavailable") return unavailable(bundle.reason.message);
+  const invalidReason = invalidDailyAnomalyBundleReason(snapshot, bundle);
+  if (invalidReason) return unavailable(invalidReason);
+
+  const anomalyScopes = new Map(bundle.scopes.map((scope) => [scope.scopeId, scope]));
+  const points = new Map<string, Map<string, DailyTrendBaseline>>();
+  for (const scope of dailyTotals.scopes) {
+    const anomalyScope = anomalyScopes.get(scope.scopeId);
+    if (
+      !anomalyScope
+      || anomalyScope.scopeName !== scope.scopeName
+      || anomalyScope.scopeType !== scope.scopeType
+      || anomalyScope.rows.length !== scope.rows.length
+    ) {
+      return unavailable("the anomaly Scope identity does not align with the daily totals Scope.");
+    }
+    const anomalyRows = new Map(anomalyScope.rows.map((row) => [row.localDate, row]));
+    const scopePoints = new Map<string, DailyTrendBaseline>();
+    for (const row of scope.rows) {
+      const anomalyRow = anomalyRows.get(row.localDate);
+      if (
+        !anomalyRow
+        || anomalyRow.from !== row.from
+        || anomalyRow.to !== row.to
+        || anomalyRow.actualKwh !== row.usageKwh
+        || anomalyRow.coveragePct !== row.dataHealth.coveragePct
+        || anomalyRow.expectedMeterIntervalCount !== row.dataHealth.expectedMeterIntervalCount
+        || anomalyRow.validIntervalCount !== row.dataHealth.validIntervalCount
+        || anomalyRow.qualityEventCount !== row.dataHealth.qualityEventCount
+        || (anomalyRow.outcome !== "suppressed" && row.dataHealth.status !== "complete")
+      ) {
+        return unavailable("the anomaly Scope, local date, accepted actual or quality identity does not align with daily totals.");
+      }
+      scopePoints.set(row.localDate, {
+        outcome: anomalyRow.outcome,
+        outcomeLabel: anomalyRow.outcome === "triggered"
+          ? "Above-baseline rule triggered"
+          : anomalyRow.outcome === "within_threshold"
+            ? "Within rule threshold"
+            : "No rule conclusion — Evidence incomplete",
+        baselineKwh: anomalyRow.baselineKwh,
+        baselineUsageKwh: anomalyRow.baselineKwh === null ? null : formatDecimal(anomalyRow.baselineKwh, 2),
+        deltaUsageKwh: anomalyRow.impactKwh === null ? null : signedDecimal(anomalyRow.impactKwh, 2),
+        relativePctLabel: anomalyRow.relativePct === null ? null : `${signedDecimal(anomalyRow.relativePct, 1)}%`,
+        incidentId: anomalyRow.outcome === "triggered" ? anomalyRow.incidentId : null,
+        limitation: anomalyRow.suppressionReason?.message ?? null,
+      });
+    }
+    points.set(scope.scopeId, scopePoints);
+  }
+  if (anomalyScopes.size !== dailyTotals.scopes.length) {
+    return unavailable("the anomaly Scope set does not align with the daily totals Scope set.");
+  }
+  return {
+    overlay: { status: "available", reason: null, ruleRevisionId: bundle.ruleRevisionId },
+    evidence: {
+      bundleId: bundle.bundleId,
+      queryId: bundle.queryId,
+      ruleRevisionId: bundle.ruleRevisionId,
+      baselineCutoff: bundle.baselineCutoff,
+      baselineMethod: bundle.rule.baselineMethod,
+    },
+    points,
   };
 }
 

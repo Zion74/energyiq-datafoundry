@@ -15,6 +15,16 @@ function dailyAnomalyBundle(snapshot: GoldenSnapshot): AvailableDailyAnomalies {
   return bundle;
 }
 
+type DailyAnomalyRow = AvailableDailyAnomalies["scopes"][number]["rows"][number];
+
+function makeWithinThreshold(row: DailyAnomalyRow): void {
+  if (row.outcome !== "triggered" || row.actualKwh === null) return;
+  row.outcome = "within_threshold";
+  row.baselineKwh = row.actualKwh;
+  row.impactKwh = 0;
+  row.relativePct = 0;
+}
+
 const rollingBoundaryTamperCases: Array<{
   name: string;
   mutate: (snapshot: GoldenSnapshot) => void;
@@ -625,6 +635,118 @@ describe("Ngee Ann Overview ViewModel", () => {
     ]);
   });
 
+  it("maps each governed daily baseline and outcome onto the matching trend Scope-date point", () => {
+    const trend = buildNgeeAnnOverviewViewModel(ngeeAnnGoldenSnapshot()).energyTrend;
+
+    expect(trend.baselineOverlay).toEqual({
+      status: "available",
+      reason: null,
+      ruleRevisionId: "comparison.daily_usage_above_baseline@1",
+    });
+    expect(trend.scopes[0]!.points[0]!.baseline).toEqual({
+      outcome: "within_threshold",
+      outcomeLabel: "Within rule threshold",
+      baselineKwh: 218.885,
+      baselineUsageKwh: "218.88",
+      deltaUsageKwh: "+34.82",
+      relativePctLabel: "+15.9%",
+      incidentId: null,
+      limitation: null,
+    });
+    expect(trend.scopes[0]!.points[1]!.baseline).toMatchObject({
+      outcome: "triggered",
+      outcomeLabel: "Above-baseline rule triggered",
+      baselineKwh: 218.885,
+      deltaUsageKwh: "+49.51",
+      relativePctLabel: "+22.6%",
+      incidentId: "incident:project:2026-06-11",
+    });
+    expect(trend.scopes[1]!.points[0]!.baseline).toMatchObject({
+      outcome: "within_threshold",
+      baselineKwh: 138.8777,
+      deltaUsageKwh: "+18.25",
+    });
+    expect(trend.evidence.baseline).toEqual({
+      bundleId: "anomaly-bundle-ngee-ann-golden",
+      queryId: "time_slot_anomaly_v1",
+      ruleRevisionId: "comparison.daily_usage_above_baseline@1",
+      baselineCutoff: "2026-06-10",
+      baselineMethod: "mean_of_complete_comparable_days_by_local_hour",
+    });
+  });
+
+  it.each([
+    {
+      name: "Snapshot identity",
+      mutate: (snapshot: GoldenSnapshot) => {
+        dailyAnomalyBundle(snapshot).evidencePins.dataSnapshotId = "snapshot-mismatch";
+      },
+    },
+    {
+      name: "Release identity",
+      mutate: (snapshot: GoldenSnapshot) => {
+        dailyAnomalyBundle(snapshot).evidencePins.projectReleaseId = "release-mismatch";
+      },
+    },
+    {
+      name: "Scope identity",
+      mutate: (snapshot: GoldenSnapshot) => {
+        dailyAnomalyBundle(snapshot).scopes[1]!.scopeId = "level-mismatch";
+      },
+    },
+    {
+      name: "local date",
+      mutate: (snapshot: GoldenSnapshot) => {
+        dailyAnomalyBundle(snapshot).scopes[0]!.rows[0]!.localDate = "2026-06-09";
+      },
+    },
+    {
+      name: "accepted actual",
+      mutate: (snapshot: GoldenSnapshot) => {
+        dailyAnomalyBundle(snapshot).scopes[0]!.rows[0]!.actualKwh = 999;
+      },
+    },
+    {
+      name: "derived impact",
+      mutate: (snapshot: GoldenSnapshot) => {
+        dailyAnomalyBundle(snapshot).scopes[0]!.rows[0]!.impactKwh! += 1;
+      },
+    },
+    {
+      name: "derived percentage",
+      mutate: (snapshot: GoldenSnapshot) => {
+        dailyAnomalyBundle(snapshot).scopes[0]!.rows[0]!.relativePct! += 1;
+      },
+    },
+    {
+      name: "rule outcome",
+      mutate: (snapshot: GoldenSnapshot) => {
+        dailyAnomalyBundle(snapshot).scopes[0]!.rows[0]!.outcome = "triggered";
+      },
+    },
+  ])("hides only the daily baseline overlay for a mismatched $name", ({ mutate }) => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    mutate(snapshot);
+
+    const trend = buildNgeeAnnOverviewViewModel(snapshot).energyTrend;
+
+    expect(trend).toMatchObject({
+      status: "available",
+      grain: "day",
+      baselineOverlay: {
+        status: "unavailable",
+        reason: expect.stringMatching(/baseline overlay|anomaly/i),
+        ruleRevisionId: null,
+      },
+    });
+    expect(trend.scopes).toHaveLength(3);
+    expect(trend.scopes[0]!.points[0]).toMatchObject({
+      acceptedUsageKwh: 253.7018,
+      usageKwh: "253.7018",
+      baseline: null,
+    });
+  });
+
   it("uses the authoritative 24-hour grid for a single local day without depending on dailyTotals", () => {
     const snapshot = ngeeAnnSingleDaySnapshot({ includeDailyTotals: false });
 
@@ -634,6 +756,7 @@ describe("Ngee Ann Overview ViewModel", () => {
       status: "available",
       grain: "hour",
       decisionQuestion: "Which accepted local hours drove energy use on the selected day?",
+      baselineOverlay: { status: "not_applicable", reason: null, ruleRevisionId: null },
       evidence: { queryIds: ["time_bucket_grid_v1"] },
     });
     expect(view.energyTrend.scopes[0]!.points).toHaveLength(24);
@@ -643,6 +766,7 @@ describe("Ngee Ann Overview ViewModel", () => {
       dateLabel: "00:00",
       acceptedUsageKwh: 5.3565,
       usageKwh: "5.3565",
+      baseline: null,
       status: "complete",
       intervals: "16 / 16 valid intervals",
     });
@@ -1261,6 +1385,10 @@ describe("Ngee Ann Overview ViewModel", () => {
 
     expect(trend.status).toBe("available");
     expect(trend.scopes[0]!.limitation).toContain("not zero-filled");
+    expect(trend.baselineOverlay).toMatchObject({
+      status: "unavailable",
+      reason: expect.stringMatching(/baseline overlay|daily totals/i),
+    });
     expect(trend.scopes[0]!.points[1]).toMatchObject({
       usageKwh: "268.399",
       status: "partial",
@@ -1268,6 +1396,7 @@ describe("Ngee Ann Overview ViewModel", () => {
       coverage: "75% coverage",
       intervals: "288 / 384 valid intervals",
       qualityEvents: "2 quality events",
+      baseline: null,
     });
     expect(trend.scopes[0]!.points[2]).toMatchObject({
       localDate: "2026-06-12",
@@ -1275,6 +1404,7 @@ describe("Ngee Ann Overview ViewModel", () => {
       usageKwh: null,
       status: "unavailable",
       statusLabel: "Unavailable",
+      baseline: null,
     });
   });
 
@@ -1725,7 +1855,7 @@ describe("Ngee Ann Overview ViewModel", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     for (const scope of dailyAnomalyBundle(snapshot).scopes) {
       for (const row of scope.rows) {
-        if (row.outcome === "triggered") row.outcome = "within_threshold";
+        makeWithinThreshold(row);
       }
     }
     snapshot.decisionPriorities = {
@@ -1831,7 +1961,7 @@ describe("Ngee Ann Overview ViewModel", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     for (const scope of dailyAnomalyBundle(snapshot).scopes) {
       for (const row of scope.rows) {
-        if (row.outcome === "triggered") row.outcome = "within_threshold";
+        makeWithinThreshold(row);
       }
     }
     const mixedSuppressed = dailyAnomalyBundle(snapshot).scopes[0]!.rows[0]!;
@@ -1877,7 +2007,7 @@ describe("Ngee Ann Overview ViewModel", () => {
     const noTriggerWithItems = ngeeAnnGoldenSnapshot();
     for (const scope of dailyAnomalyBundle(noTriggerWithItems).scopes) {
       for (const row of scope.rows) {
-        if (row.outcome === "triggered") row.outcome = "within_threshold";
+        makeWithinThreshold(row);
       }
     }
     const suppressed = dailyAnomalyBundle(noTriggerWithItems).scopes[0]!.rows[0]!;

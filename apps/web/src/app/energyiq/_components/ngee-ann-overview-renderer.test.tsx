@@ -18,6 +18,20 @@ vi.mock("./ngee-ann-ai-run", async () => {
   };
 });
 
+type GoldenSnapshot = ReturnType<typeof ngeeAnnGoldenSnapshot>;
+type DailyAnomalyRow = Extract<
+  NonNullable<GoldenSnapshot["analysis"]["dailyUsageAnomalies"]>,
+  { status: "available" }
+>["scopes"][number]["rows"][number];
+
+function makeWithinThreshold(row: DailyAnomalyRow): void {
+  if (row.outcome !== "triggered" || row.actualKwh === null) return;
+  row.outcome = "within_threshold";
+  row.baselineKwh = row.actualKwh;
+  row.impactKwh = 0;
+  row.relativePct = 0;
+}
+
 describe("NgeeAnnOverviewRenderer", () => {
   it("shows one deterministic theme across latest day, rolling 7 days and rolling 28 days", () => {
     const markup = renderToStaticMarkup(
@@ -52,7 +66,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     if (snapshot.analysis.dailyUsageAnomalies?.status !== "available") throw new Error("GOLDEN_ANOMALY_BUNDLE_REQUIRED");
     for (const row of snapshot.analysis.dailyUsageAnomalies.scopes.flatMap((scope) => scope.rows)) {
-      row.outcome = "within_threshold";
+      makeWithinThreshold(row);
     }
     snapshot.decisionPriorities = {
       ...snapshot.decisionPriorities!,
@@ -194,7 +208,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     if (snapshot.analysis.dailyUsageAnomalies?.status === "available" && status !== "unavailable") {
       const rows = snapshot.analysis.dailyUsageAnomalies.scopes.flatMap((scope) => scope.rows);
       for (const row of rows) {
-        if (row.outcome === "triggered") row.outcome = "within_threshold";
+        makeWithinThreshold(row);
       }
       if (status === "partial") {
         rows[0]!.outcome = "suppressed";
@@ -436,6 +450,38 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Energy distribution");
     expect(markup).toContain("Energy composition");
     expect(markup).toContain("1531.1683");
+  });
+
+  it("renders accepted daily bars with governed baseline markers and triggered key dates", () => {
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot: ngeeAnnGoldenSnapshot() }} />,
+    );
+
+    expect(markup).toContain("Accepted usage");
+    expect(markup).toContain("Governed baseline");
+    expect(markup).toContain('data-trend-baseline-marker="true"');
+    expect(markup).toContain('data-trend-outcome="triggered"');
+    expect(markup).toContain("Needs review");
+    expect(markup).toContain('aria-label="Thu 11 Jun: current 268.399 kWh; governed baseline 218.88 kWh; delta +49.51 kWh (+22.6%); Above-baseline rule triggered; Complete; 100% coverage"');
+    expect(markup).toContain("Baseline query");
+    expect(markup).toContain("time_slot_anomaly_v1");
+    expect(markup).toContain("comparison.daily_usage_above_baseline@1");
+  });
+
+  it("keeps accepted daily bars available while honestly hiding a mismatched baseline overlay", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    if (snapshot.analysis.dailyUsageAnomalies?.status !== "available") throw new Error("GOLDEN_ANOMALY_BUNDLE_REQUIRED");
+    snapshot.analysis.dailyUsageAnomalies.scopes[0]!.rows[0]!.actualKwh = 999;
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+
+    expect(markup).toContain("7 daily buckets");
+    expect(markup).toContain("253.7018 kWh");
+    expect(markup).toContain("Governed baseline overlay unavailable");
+    expect(markup).toContain("Accepted usage remains available");
+    expect(markup).not.toContain('data-trend-baseline-marker="true"');
   });
 
   it("fails only the new time modules closed for an absent authoritative hourly grid", () => {
@@ -911,10 +957,13 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(level7Button.getAttribute("aria-pressed")).toBe("false");
 
     const projectPoint = container.querySelector<HTMLButtonElement>(
-      'button[aria-label^="Wed 10 Jun: 253.7018 kWh"]',
+      'button[aria-label^="Wed 10 Jun: current 253.7018 kWh"]',
     )!;
     await act(async () => projectPoint.focus());
     expect(container.textContent).toContain("253.7018 kWh");
+    expect(container.textContent).toContain("Governed baseline 218.88 kWh");
+    expect(container.textContent).toContain("Delta +34.82 kWh (+15.9%)");
+    expect(container.textContent).toContain("Within rule threshold");
     expect(container.textContent).toContain("Complete / 100% coverage / 384 / 384 valid intervals");
 
     await activateNativeButton(projectPoint, "Enter");
@@ -922,16 +971,26 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(projectPoint.getAttribute("aria-pressed")).toBe("true");
     expect(container.textContent).toContain("253.7018 kWh");
 
+    const triggeredPoint = container.querySelector<HTMLButtonElement>(
+      'button[aria-label^="Thu 11 Jun: current 268.399 kWh"]',
+    )!;
+    await act(async () => triggeredPoint.focus());
+    const ruleEvidenceLink = Array.from(container.querySelectorAll<HTMLAnchorElement>("a"))
+      .find((link) => link.textContent?.includes("Open rule evidence"));
+    expect(ruleEvidenceLink?.getAttribute("href")).toBe("#incident-project-2026-06-11");
+    await act(async () => triggeredPoint.blur());
+
     await activateNativeButton(level7Button, " ");
     expect(projectButton.getAttribute("aria-pressed")).toBe("false");
     expect(level7Button.getAttribute("aria-pressed")).toBe("true");
     expect(container.textContent).toContain("Hover or focus a day to inspect accepted usage and coverage.");
 
     const level7Point = container.querySelector<HTMLButtonElement>(
-      'button[aria-label^="Wed 10 Jun: 157.1325 kWh"]',
+      'button[aria-label^="Wed 10 Jun: current 157.1325 kWh"]',
     )!;
     await act(async () => level7Point.focus());
     expect(container.textContent).toContain("157.1325 kWh");
+    expect(container.textContent).toContain("Governed baseline 138.88 kWh");
   });
 
   it("opens a frozen daily incident, switches exact server modes, closes and restores trigger focus", async () => {
@@ -1130,7 +1189,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
   it("clears Trend, Day Profile and Heatmap selections when the authoritative Period changes", async () => {
     await renderGolden();
     const trendPoint = container.querySelector<HTMLButtonElement>(
-      'button[aria-label^="Wed 10 Jun: 253.7018 kWh"]',
+      'button[aria-label^="Wed 10 Jun: current 253.7018 kWh"]',
     )!;
     await act(async () => trendPoint.click());
     await act(async () => filterButton("Day Profile type", "Weekend")?.click());
