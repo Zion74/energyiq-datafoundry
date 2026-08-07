@@ -12,6 +12,30 @@ export type EnergyIqHarnessObservation = {
   threadId?: string;
 };
 
+export type EnergyIqHarnessContinuityTurnObservation = EnergyIqHarnessObservation & {
+  question: string;
+  turn: number;
+};
+
+export type EnergyIqHarnessContinuityReport = {
+  status: "passed" | "failed";
+  threadId: string | null;
+  snapshotIds: string[];
+  assertions: Array<{ id: string; passed: boolean; hard: boolean; detail: string }>;
+  turns: Array<{
+    turn: number;
+    question: string;
+    answer: string;
+    elapsedMs: number;
+    toolCalls: number;
+    sqlCalls: number;
+    contextCheckpoints: number;
+    snapshotIds: string[];
+    steps: EnergyIqHarnessStepMetrics[];
+    runId?: string;
+  }>;
+};
+
 export type EnergyIqHarnessStepMetrics = {
   stepNumber: number;
   promptTokens: number;
@@ -26,6 +50,8 @@ export type EnergyIqHarnessStepMetrics = {
   systemTokens: number;
   toolTokens: number;
   messageTokens: number;
+  selectedGroupIds: string[];
+  repeatedSelectedGroupIds: string[];
   selectedGroupTokens: number;
   omittedGroupTokens: number;
   sourceHashCount: number;
@@ -33,6 +59,7 @@ export type EnergyIqHarnessStepMetrics = {
   artifactRefCount: number;
   inputTokens: number;
   outputTokens: number;
+  toolNames: string[];
   cacheTelemetryAvailable: boolean;
   cacheHitTokens: number | null;
   cacheMissTokens: number | null;
@@ -63,6 +90,7 @@ export type EnergyIqHarnessCaseReport = {
     cacheTelemetrySteps: number;
     cacheHitTokens: number;
     cacheMissTokens: number;
+    cacheHitRatio: number | null;
     authoritativePinDrift: boolean;
     correctnessRatio: number;
     insightQuality: number | null;
@@ -100,6 +128,7 @@ export type EnergyIqHarnessSuiteReport = {
     totalCacheTelemetrySteps: number;
     totalCacheHitTokens: number;
     totalCacheMissTokens: number;
+    cacheHitRatio: number | null;
   };
   cases: EnergyIqHarnessCaseReport[];
 };
@@ -165,6 +194,7 @@ export const runEnergyIqHarnessEval = async (
             cacheTelemetrySteps: 0,
             cacheHitTokens: 0,
             cacheMissTokens: 0,
+            cacheHitRatio: null,
             authoritativePinDrift: false,
             correctnessRatio: 0,
             insightQuality: null,
@@ -180,6 +210,8 @@ export const runEnergyIqHarnessEval = async (
     .filter((score): score is number => score !== null);
   const passedRuns = reports.filter((report) => report.status === "passed").length;
   const hardFailures = reports.filter((report) => report.hardFailure).length;
+  const totalCacheHitTokens = sum(reports.map((report) => report.metrics.cacheHitTokens));
+  const totalCacheMissTokens = sum(reports.map((report) => report.metrics.cacheMissTokens));
   return {
     schemaVersion: 1,
     suiteId: input.suiteId,
@@ -207,8 +239,9 @@ export const runEnergyIqHarnessEval = async (
       maxBudgetUtilization: maximumOptional(reports.map((report) => report.metrics.maxBudgetUtilization)),
       totalContextCheckpoints: sum(reports.map((report) => report.metrics.contextCheckpointCount)),
       totalCacheTelemetrySteps: sum(reports.map((report) => report.metrics.cacheTelemetrySteps)),
-      totalCacheHitTokens: sum(reports.map((report) => report.metrics.cacheHitTokens)),
-      totalCacheMissTokens: sum(reports.map((report) => report.metrics.cacheMissTokens)),
+      totalCacheHitTokens,
+      totalCacheMissTokens,
+      cacheHitRatio: cacheHitRatio(totalCacheHitTokens, totalCacheMissTokens),
     },
     cases: reports,
   };
@@ -388,6 +421,10 @@ export const evaluateEnergyIqHarnessObservation = (
       cacheTelemetrySteps: steps.filter((step) => step.cacheTelemetryAvailable).length,
       cacheHitTokens: sum(steps.map((step) => step.cacheHitTokens ?? 0)),
       cacheMissTokens: sum(steps.map((step) => step.cacheMissTokens ?? 0)),
+      cacheHitRatio: cacheHitRatio(
+        sum(steps.map((step) => step.cacheHitTokens ?? 0)),
+        sum(steps.map((step) => step.cacheMissTokens ?? 0)),
+      ),
       authoritativePinDrift,
       correctnessRatio: ratio(passedCorrectnessAssertions, correctnessAssertions.length),
       insightQuality,
@@ -419,7 +456,101 @@ export const compareEnergyIqHarnessReports = (
     candidate.summary.maxBudgetUtilization === null || baseline.summary.maxBudgetUtilization === null
       ? null
       : candidate.summary.maxBudgetUtilization - baseline.summary.maxBudgetUtilization,
+  cacheHitRatioDelta:
+    candidate.summary.cacheHitRatio === null || baseline.summary.cacheHitRatio === null
+      ? null
+      : candidate.summary.cacheHitRatio - baseline.summary.cacheHitRatio,
 });
+
+export const evaluateEnergyIqSameSessionContinuity = (
+  observations: EnergyIqHarnessContinuityTurnObservation[],
+): EnergyIqHarnessContinuityReport => {
+  const assertions: EnergyIqHarnessContinuityReport["assertions"] = [];
+  const assert = (id: string, passed: boolean, detail: string, hard = true): void => {
+    assertions.push({ id, passed, hard, detail });
+  };
+  const threadIds = [...new Set(observations.map((observation) => observation.threadId).filter(Boolean))] as string[];
+  assert("continuity.three-turns", observations.length === 3, `turns=${observations.length}`);
+  assert("continuity.same-thread", threadIds.length === 1, `thread_ids=${threadIds.join(",") || "missing"}`);
+
+  const turns = observations.map((observation) => {
+    const events = observation.events.filter(isRecord);
+    const answer = extractFinalAnswer(events);
+    const snapshotIds = extractSnapshotIds(events);
+    const terminal = findLastEvent(events, (event) => (
+      stringValue(event.type) === "RUN_FINISHED" || stringValue(event.type) === "RUN_ERROR"
+    ));
+    const toolCalls = events.filter((event) => stringValue(event.type) === "TOOL_CALL_START");
+    const sqlCalls = toolCalls.filter((event) => stringValue(event.toolCallName) === "run_sql_readonly").length;
+    const contextCheckpoints = events.filter((event) => (
+      stringValue(event.type) === "CUSTOM" && stringValue(event.name) === "context.compiled"
+    )).length;
+    assert(
+      `continuity.turn-${observation.turn}.finished`,
+      stringValue(terminal?.type) === "RUN_FINISHED",
+      `terminal=${stringValue(terminal?.type) || "missing"}`,
+    );
+    assert(
+      `continuity.turn-${observation.turn}.answer`,
+      answer.length > 0,
+      `answer_chars=${answer.length}`,
+    );
+    assert(
+      `continuity.turn-${observation.turn}.checkpoint`,
+      contextCheckpoints > 0,
+      `context_checkpoints=${contextCheckpoints}`,
+    );
+    assert(
+      `continuity.turn-${observation.turn}.snapshot`,
+      snapshotIds.length === 1,
+      `snapshot_ids=${snapshotIds.join(",") || "missing"}`,
+    );
+    return {
+      turn: observation.turn,
+      question: observation.question,
+      answer,
+      elapsedMs: observation.elapsedMs,
+      toolCalls: toolCalls.length,
+      sqlCalls,
+      contextCheckpoints,
+      snapshotIds,
+      steps: extractStepMetrics(events),
+      ...(observation.runId ? { runId: observation.runId } : {}),
+    };
+  });
+  const snapshotIds = [...new Set(turns.flatMap((turn) => turn.snapshotIds))].sort();
+  assert(
+    "continuity.snapshot-stable",
+    snapshotIds.length === 1,
+    `snapshot_ids=${snapshotIds.join(",") || "missing"}`,
+  );
+  assert(
+    "continuity.authoritative-pins-stable",
+    !detectAuthoritativePinDrift(observations.flatMap((observation) => observation.events.filter(isRecord))),
+    "authoritative Context source hashes must remain stable across turns",
+  );
+  const evidenceAnswer = turns.find((turn) => turn.turn === 2)?.answer ?? "";
+  assert(
+    "continuity.evidence-follow-up",
+    /\b(?:evidence|measured|calculated|observed|data|snapshot|period)\b/iu.test(evidenceAnswer),
+    "turn 2 should explain supporting Evidence",
+  );
+  const actionAnswer = turns.find((turn) => turn.turn === 3)?.answer ?? "";
+  assert(
+    "continuity.action-follow-up",
+    /\b(?:check|inspect|review|investigate|adjust|reduce|action)\b/iu.test(actionAnswer)
+      && /\b(?:verify|validate|confirm|monitor|compare|recheck)\b/iu.test(actionAnswer),
+    "turn 3 should state an action and how to verify it",
+  );
+
+  return {
+    status: assertions.every((entry) => entry.passed) ? "passed" : "failed",
+    threadId: threadIds.length === 1 ? threadIds[0] ?? null : null,
+    snapshotIds,
+    assertions,
+    turns,
+  };
+};
 
 const extractStepMetrics = (events: EventRecord[]): EnergyIqHarnessStepMetrics[] => {
   const steps = new Map<number, EnergyIqHarnessStepMetrics>();
@@ -440,6 +571,8 @@ const extractStepMetrics = (events: EventRecord[]): EnergyIqHarnessStepMetrics[]
       systemTokens: 0,
       toolTokens: 0,
       messageTokens: 0,
+      selectedGroupIds: [],
+      repeatedSelectedGroupIds: [],
       selectedGroupTokens: 0,
       omittedGroupTokens: 0,
       sourceHashCount: 0,
@@ -447,6 +580,7 @@ const extractStepMetrics = (events: EventRecord[]): EnergyIqHarnessStepMetrics[]
       artifactRefCount: 0,
       inputTokens: 0,
       outputTokens: 0,
+      toolNames: [],
       cacheTelemetryAvailable: false,
       cacheHitTokens: null,
       cacheMissTokens: null,
@@ -484,6 +618,9 @@ const extractStepMetrics = (events: EventRecord[]): EnergyIqHarnessStepMetrics[]
       step.systemTokens = optionalNumberValue(tokenReport.systemTokens) ?? 0;
       step.toolTokens = optionalNumberValue(tokenReport.toolTokens) ?? 0;
       step.messageTokens = optionalNumberValue(tokenReport.messageTokens) ?? 0;
+      step.selectedGroupIds = Array.isArray(value.selected_group_ids)
+        ? value.selected_group_ids.filter((groupId): groupId is string => typeof groupId === "string")
+        : [];
       const groupCosts = Array.isArray(value.group_token_costs) ? value.group_token_costs.filter(isRecord) : [];
       step.selectedGroupTokens = sum(groupCosts
         .filter((group) => group.selected === true)
@@ -524,9 +661,18 @@ const extractStepMetrics = (events: EventRecord[]): EnergyIqHarnessStepMetrics[]
       const cacheMissTokens = optionalNumberValue(value.cache_miss_tokens);
       if (cacheHitTokens !== undefined) step.cacheHitTokens = (step.cacheHitTokens ?? 0) + cacheHitTokens;
       if (cacheMissTokens !== undefined) step.cacheMissTokens = (step.cacheMissTokens ?? 0) + cacheMissTokens;
+      const toolName = nullableStringValue(value.tool_name);
+      if (toolName && !step.toolNames.includes(toolName)) step.toolNames.push(toolName);
     }
   }
-  return [...steps.values()].sort((left, right) => left.stepNumber - right.stepNumber);
+  const seenGroups = new Set<string>();
+  return [...steps.values()]
+    .sort((left, right) => left.stepNumber - right.stepNumber)
+    .map((step) => {
+      step.repeatedSelectedGroupIds = step.selectedGroupIds.filter((groupId) => seenGroups.has(groupId));
+      step.selectedGroupIds.forEach((groupId) => seenGroups.add(groupId));
+      return step;
+    });
 };
 
 const AUTHORITATIVE_CONTEXT_SOURCE_TYPES = new Set([
@@ -769,6 +915,10 @@ const average = (values: number[]): number => values.length > 0 ? sum(values) / 
 const maximumOptional = (values: Array<number | null>): number | null => {
   const present = values.filter((value): value is number => value !== null);
   return present.length > 0 ? Math.max(...present) : null;
+};
+const cacheHitRatio = (hitTokens: number, missTokens: number): number | null => {
+  const total = hitTokens + missTokens;
+  return total > 0 ? hitTokens / total : null;
 };
 const ratio = (numerator: number, denominator: number): number => denominator > 0 ? numerator / denominator : 0;
 const percentile = (sortedValues: number[], fraction: number): number => {

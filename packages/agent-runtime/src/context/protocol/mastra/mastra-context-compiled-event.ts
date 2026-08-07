@@ -9,6 +9,7 @@ import {
 import type { ContextSourcePolicyDecision } from "../../policy/context-source-policy.js";
 
 export type MastraContextCompiledEventPayload = {
+  checkpoint_schema_version: 1;
   budget: ContextPlan["budget"];
   decisions: ContextDecision[];
   omitted_group_ids: string[];
@@ -41,6 +42,7 @@ export const createMastraContextCompiledEventPayload = (
   plan: ContextPlan,
   modelName?: string
 ): MastraContextCompiledEventPayload => ({
+  checkpoint_schema_version: 1,
   package_id: contextPackage.packageId,
   package_revision: plan.packageRevision,
   plan_id: plan.planId,

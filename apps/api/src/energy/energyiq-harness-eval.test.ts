@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { ENERGYIQ_HARNESS_FAST_CASES } from "./energyiq-harness-eval-cases.js";
-import { evaluateEnergyIqHarnessObservation } from "./energyiq-harness-eval.js";
+import {
+  evaluateEnergyIqHarnessObservation,
+  evaluateEnergyIqSameSessionContinuity,
+} from "./energyiq-harness-eval.js";
 
 describe("EnergyIQ Harness Eval", () => {
   it("keeps the fast suite small, product-specific, and uniquely named", () => {
@@ -49,6 +52,45 @@ describe("EnergyIQ Harness Eval", () => {
     expect(report.metrics.reasoningRounds).toBe(7);
     expect(report.metrics.elapsedMs).toBe(180_000);
     expect(report.assertions.some((assertion) => assertion.id.startsWith("efficiency."))).toBe(false);
+  });
+
+  it("accepts a three-turn same-session follow-up with stable Snapshot pins", () => {
+    const answers = [
+      "Centre G is the priority investigation target in the current snapshot.",
+      "It matters because the measured data and Snapshot evidence show a provisional high-intensity result for the period.",
+      "Inspect Centre G occupancy and equipment schedules first; verify the action by comparing the next week with the current baseline.",
+    ];
+    const observations = answers.map((answer, index) => ({
+      turn: index + 1,
+      question: `question-${index + 1}`,
+      elapsedMs: 1_000,
+      runId: `run-${index + 1}`,
+      threadId: "shared-thread",
+      events: [
+        { type: "RUN_STARTED" },
+        {
+          type: "CUSTOM",
+          name: "context.compiled",
+          value: {
+            step_number: 1,
+            source_snapshot_hashes: [{
+              source_type: "project-analysis-snapshot",
+              content_hash: "sha256:stable",
+              item_ids: ["project-analysis-snapshot:preschool-demo:energy-snapshot-stable"],
+            }],
+          },
+        },
+        { type: "TEXT_MESSAGE_CONTENT", messageId: `answer-${index + 1}`, delta: answer },
+        { type: "RUN_FINISHED" },
+      ],
+    }));
+
+    const report = evaluateEnergyIqSameSessionContinuity(observations);
+
+    expect(report.status).toBe("passed");
+    expect(report.threadId).toBe("shared-thread");
+    expect(report.snapshotIds).toEqual(["energy-snapshot-stable"]);
+    expect(report.turns).toHaveLength(3);
   });
 
   it("records per-step context budget, checkpoint, and cache telemetry without grading it", () => {
@@ -139,6 +181,7 @@ describe("EnergyIQ Harness Eval", () => {
       cacheTelemetrySteps: 1,
       cacheHitTokens: 600,
       cacheMissTokens: 300,
+      cacheHitRatio: 2 / 3,
     });
   });
 

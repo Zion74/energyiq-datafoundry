@@ -3,8 +3,10 @@ import { resolve } from "node:path";
 
 import {
   compareEnergyIqHarnessReports,
+  evaluateEnergyIqSameSessionContinuity,
   runEnergyIqHarnessEval,
 } from "../apps/api/dist/energy/energyiq-harness-eval.js";
+import { getEnergyIqHarnessEvalSuite } from "../apps/api/dist/energy/energyiq-harness-eval-cases.js";
 
 const args = parseArgs(process.argv.slice(2));
 const suiteId = args.suite ?? "fast";
@@ -77,6 +79,9 @@ async function runAndWriteReport() {
     caseIds,
     runCase: async (evalCase, context) => runLiveCase(evalCase, context),
   });
+  const continuity = args.continuity === "true"
+    ? await runSameSessionContinuity()
+    : null;
 
   let comparison = null;
   if (args.baseline) {
@@ -89,8 +94,8 @@ async function runAndWriteReport() {
   const baseName = `${suiteId}-${profileId}-${stamp}`;
   const jsonPath = resolve(outputDir, `${baseName}.json`);
   const markdownPath = resolve(outputDir, `${baseName}.md`);
-  await writeFile(jsonPath, `${JSON.stringify({ ...report, comparison }, null, 2)}\n`, "utf8");
-  await writeFile(markdownPath, renderMarkdown(report, comparison), "utf8");
+  await writeFile(jsonPath, `${JSON.stringify({ ...report, comparison, continuity }, null, 2)}\n`, "utf8");
+  await writeFile(markdownPath, renderMarkdown(report, comparison, continuity), "utf8");
 
   console.log(JSON.stringify({
     status: report.status,
@@ -99,17 +104,51 @@ async function runAndWriteReport() {
     candidateVersion,
     summary: report.summary,
     comparison,
+    continuity,
     jsonPath,
     markdownPath,
   }, null, 2));
 
-  if (report.status !== "passed") process.exitCode = 1;
+  if (report.status !== "passed" || continuity?.status === "failed") process.exitCode = 1;
 }
 
 async function runLiveCase(evalCase, { attempt }) {
   const stamp = `${Date.now()}-${attempt}`;
-  const runId = `energyiq-harness-eval-${evalCase.id}-${stamp}`;
-  const threadId = `energyiq-harness-eval-thread-${evalCase.id}-${stamp}`;
+  return runLiveTurn(evalCase, {
+    question: evalCase.question,
+    runId: `energyiq-harness-eval-${evalCase.id}-${stamp}`,
+    threadId: `energyiq-harness-eval-thread-${evalCase.id}-${stamp}`,
+  });
+}
+
+async function runSameSessionContinuity() {
+  const caseId = args["continuity-case"] ?? "preschool-released-plus-query-investigation";
+  const evalCase = getEnergyIqHarnessEvalSuite(suiteId).find((candidate) => candidate.id === caseId);
+  if (!evalCase) throw new Error(`ENERGYIQ_CONTINUITY_CASE_UNKNOWN:${caseId}`);
+  const stamp = Date.now();
+  const threadId = `energyiq-continuity-thread-${caseId}-${stamp}`;
+  const questions = [
+    "Which centre should I investigate first? Identify the priority target using the current Project and Snapshot.",
+    "Why does that priority matter? Show me the supporting Evidence and distinguish measured facts from hypotheses.",
+    "What action should I take next, and how should I verify whether it worked? Reuse prior Evidence when valid; investigate again only if needed.",
+  ];
+  const observations = [];
+  for (const [index, question] of questions.entries()) {
+    const turn = index + 1;
+    observations.push({
+      ...await runLiveTurn(evalCase, {
+        question,
+        runId: `energyiq-continuity-${caseId}-turn-${turn}-${stamp}`,
+        threadId,
+      }),
+      question,
+      turn,
+    });
+  }
+  return evaluateEnergyIqSameSessionContinuity(observations);
+}
+
+async function runLiveTurn(evalCase, { question, runId, threadId }) {
   const startedAt = Date.now();
   const timeoutMs = 5 * 60 * 1000;
   const controller = new AbortController();
@@ -132,7 +171,7 @@ async function runLiveCase(evalCase, { attempt }) {
           threadId,
           runId,
           state: {},
-          messages: [{ id: `${runId}:user`, role: "user", content: evalCase.question }],
+          messages: [{ id: `${runId}:user`, role: "user", content: question }],
           tools: [],
           context: [],
           forwardedProps: {
@@ -217,11 +256,32 @@ function consumeEventStreamChunks(buffer, flush) {
   };
 }
 
-function renderMarkdown(value, delta) {
+function renderMarkdown(value, delta, continuity) {
   const rows = value.cases.map((entry) => {
     const failed = entry.assertions.filter((assertion) => !assertion.passed).map((assertion) => assertion.id).join(", ") || "-";
-    return `| ${escapeCell(entry.caseId)} | ${entry.attempt} | ${entry.status} | ${entry.metrics.elapsedMs} | ${entry.metrics.sqlCalls} | ${entry.metrics.reasoningRounds} | ${entry.metrics.failedToolCalls} | ${entry.metrics.recoveredToolFailures} | ${entry.snapshotIds.length} | ${entry.metrics.insightQuality ?? "-"} | ${escapeCell(failed)} |`;
+    const utilization = entry.metrics.maxBudgetUtilization === null
+      ? "-"
+      : `${(entry.metrics.maxBudgetUtilization * 100).toFixed(1)}%`;
+    const cache = entry.metrics.cacheTelemetrySteps > 0
+      ? `${entry.metrics.cacheHitTokens}/${entry.metrics.cacheMissTokens}`
+      : "unavailable";
+    return `| ${escapeCell(entry.caseId)} | ${entry.attempt} | ${entry.status} | ${entry.metrics.elapsedMs} | ${entry.metrics.sqlCalls} | ${entry.metrics.reasoningRounds} | ${entry.metrics.maxPromptTokens} | ${utilization} | ${cache} | ${entry.snapshotIds.length} | ${entry.metrics.insightQuality ?? "-"} | ${escapeCell(failed)} |`;
   });
+  const continuitySection = continuity ? [
+    "",
+    "## Same-session continuity",
+    "",
+    `- Status: **${continuity.status}**`,
+    `- Thread: \`${continuity.threadId ?? "missing"}\``,
+    `- Snapshot IDs: ${continuity.snapshotIds.join(", ") || "missing"}`,
+    "",
+    "| Turn | Latency ms | Tools | SQL | Checkpoints | Answer |",
+    "|---:|---:|---:|---:|---:|---|",
+    ...continuity.turns.map((turn) =>
+      `| ${turn.turn} | ${turn.elapsedMs} | ${turn.toolCalls} | ${turn.sqlCalls} | ${turn.contextCheckpoints} | ${escapeCell(turn.answer)} |`
+    ),
+    "",
+  ] : [];
   return [
     `# EnergyIQ Analyst Harness Eval — ${value.candidateVersion}`,
     "",
@@ -235,13 +295,16 @@ function renderMarkdown(value, delta) {
     `- Average insight quality: ${value.summary.averageInsightQuality ?? "n/a"}/10`,
     `- Hard failures: ${value.summary.hardFailures}`,
     `- Failed / recovered tool calls: ${value.summary.totalFailedToolCalls} / ${value.summary.totalRecoveredToolFailures}`,
+    `- Max prompt / budget utilization: ${value.summary.maxPromptTokens} / ${value.summary.maxBudgetUtilization === null ? "n/a" : `${(value.summary.maxBudgetUtilization * 100).toFixed(1)}%`}`,
+    `- Cache hit / miss tokens: ${value.summary.totalCacheTelemetrySteps > 0 ? `${value.summary.totalCacheHitTokens} / ${value.summary.totalCacheMissTokens}` : "unavailable"}`,
     ...(delta ? ["", "## Candidate vs baseline", "", "```json", JSON.stringify(delta, null, 2), "```"] : []),
     "",
     "## Cases",
     "",
-    "| Case | Attempt | Status | Latency ms | SQL | Reasoning | Failed tools | Recovered | Snapshots | Insight /10 | Failed assertions |",
-    "|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---|",
+    "| Case | Attempt | Status | Latency ms | SQL | Reasoning | Max prompt | Budget | Cache hit/miss | Snapshots | Insight /10 | Failed assertions |",
+    "|---|---:|---|---:|---:|---:|---:|---:|---|---:|---:|---|",
     ...rows,
+    ...continuitySection,
     "",
     "## Answers",
     "",
