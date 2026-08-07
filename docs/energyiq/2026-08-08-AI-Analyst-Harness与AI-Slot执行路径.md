@@ -76,7 +76,7 @@ Overview AI Slot 与 Full AI Analyst 均遵守以上职责。项目 Analysis Pac
 
 | 顺序 | 任务 | Owner | 状态 | 完成证据 |
 | ---: | --- | --- | --- | --- |
-| 1 | 将 #36 六个独立提交合入最新 Integration | 主 Agent | pending | cherry-pick 成功；聚焦测试与 build 通过 |
+| 1 | 将 #36/Harness 独立提交合入最新 Integration | 本侧边任务 | completed | Integration `7edd177`；7 files / 32 tests；build passed |
 | 2 | 运行 #36 DeepSeek critical pass@3 + 固定三轮 same-session | 本侧边任务 | Ngee Ann pass@3 completed；Preschool real-auth blocked | Ngee Ann 3/3；Preschool CLI 被真实登录 401 阻止 |
 | 3 | 将 #30 质量评分升级为结构化 Rubric，并保留确定性 hard gates | 本侧边任务 | implemented；real Candidate comparison pending | `7fb6977`；报告新增八维质量分解 |
 | 4 | 增加重复调查与回答冗长的诊断遥测，不设效率硬门槛 | 本侧边任务 | completed | `7fb6977`；真实 pass@3 无重复 SQL，平均 701 词 |
@@ -156,7 +156,7 @@ Ngee Ann 与 Preschool 各运行至少三次固定 Profile/Snapshot：
 
 ## 7. 验收与关闭顺序
 
-1. [ ] #36 commits 合入并通过自动回归；
+1. [x] #36/Harness commits 合入并通过自动回归；
 2. [x] #36 Ngee Ann real pass@3；Preschool same-session 保留为真实登录环境验收；
 3. [x] #30 结构化质量 Rubric 与报告回归；
 4. [ ] AI Slot 固定路线校准后跑两项目 Provider；
@@ -199,7 +199,7 @@ Ngee Ann 与 Preschool 各运行至少三次固定 Profile/Snapshot：
 
 ## 11. 2026-08-08 当前执行记录
 
-### #36 已完成代码提交，待合入/真实验收
+### #36 已完成代码提交与 Integration 合入
 
 按顺序：
 
@@ -210,7 +210,8 @@ Ngee Ann 与 Preschool 各运行至少三次固定 Profile/Snapshot：
 5. `2dc959f`：加入固定三轮 same-session continuity；
 6. `27df662`：修复预算一致性、Token 去重和 checkpoint 计数。
 
-以上提交尚未进入 Integration；不得对旧 API 运行结果宣称候选验收通过。
+以上提交及后续 #30/稳定性/表达切片已按顺序进入 Integration `7edd177`。合入后聚焦回归
+7 files / 32 tests 与根 build 通过；主 Agent 的未提交 Overview/Presentation 文件未被 stage、commit 或覆盖。
 
 ### #30 质量诊断切片
 
