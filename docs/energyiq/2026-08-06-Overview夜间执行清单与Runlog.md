@@ -337,3 +337,44 @@ related:
 - 侧边 AI 线的 A1–A4 仍由侧边任务 Agent 独立交付；在收到 branch/commit/真实 Run 证据前，主 Agent 不声明 AI 质量、连续追问或恢复问题完成。
 - #9 与 #13 不关闭：Charles 人工价值/可读性验收、侧边 AI 结果以及两批数据的现场演示仍是明早人工检查项。工程通过、真实 Chrome 与人工验收保持三个独立证据层级。
 - 早晨优先顺序：先在隔离 `3001` 对照 Saved A/Current B；再看共享 `3000` Preschool；最后审核侧边 AI Agent 交付。若客户信息价值仍不足，只切下一张可见模块，不回到通用底座扩建。
+
+## 10. 2026-08-07 AI Analyst 合并、统一模型与 Golden 验收
+
+### 10.1 模型配置产品决策
+
+- EnergyIQ 只维护一个 Admin 管理的系统默认模型与密钥；所有 Workspace 和 Project 统一继承，不提供按 Workspace 绑定或覆盖模型的产品行为。
+- Workspace 仍是数据授权、Project、会话和历史结果的隔离边界，不再是模型选择边界。普通用户不能看到或读取系统密钥。
+- 代码内部保留 `workspace-default` 作为兼容 ID，避免不必要的数据库迁移；用户界面统一显示 `EnergyIQ system default` / `System default`，它不再表达“每个 Workspace 有一个默认模型”。
+- 当前系统默认已指向 Admin 加密保存的 `deepseek-v4-flash` Profile，`reasoningEnabled=false`，单次 Run 禁止静默 fallback。以后更换同一 Provider 密钥只更新一次系统 Secret；更换 Provider/Model 也只切换一次系统 Profile，不逐个修改 Workspace。
+
+相关 Integration commits：`51bf075`、`83f8292`、`e34254a`、`e5da432`。
+
+### 10.2 Ngee Ann 真实 Provider Golden
+
+- 权威问题：2026-06-03 至 2026-06-09（Asia/Singapore）Ngee Ann Project official electricity consumption。
+- Golden：`1,211.6773 kWh`，展示精度 `1,211.68 kWh`；`2,688` 条有效 interval facts；7 个完整日；quality events 为 0。
+- 修正旧交接中的 `477.05 kWh`：该值是 Level 6 的 Light + Load 小计，不是 Project total，不能继续作为本问题 Golden。
+- Scope 合同已明确：AI relation 已按当前 Project/Scope/Period 绑定；Project total 不得再加 `scope_id='project'`，而应沿 official aggregation route 聚合已发布 hierarchy nodes。
+
+同一代码、Snapshot、Profile 下三轮真实 DeepSeek Run 均为 `completed`，且工具顺序一致为 `inspect_schema → run_sql_readonly → analysis_requirements_commit`：
+
+| Run | 结果 | 工具数 | 客户答案 |
+| --- | --- | ---: | --- |
+| `f23068d3-19f4-42be-bd3f-6f2eaf76d804` | `1,211.6773 kWh / 2,688` | 3 | 已持久化并可恢复 |
+| `784fd8ce-3c42-4954-9b4c-f04646df7af5` | `1,211.6773 kWh / 2,688` | 3 | 已持久化并可恢复 |
+| `7762b7c5-803d-437e-b7b3-4ffecfbae2f0` | `1,211.6773 kWh / 2,688` | 3 | 已持久化；显示缺口修复后可恢复 |
+
+### 10.3 最终答案显示缺口与最小修复
+
+- 第三轮 Provider 实际生成并持久化了 `1,209` 字符的完整客户答案，但模型在最后工具之后先产生一条 reasoning transition。Web 的 thought resolver 错误地用该 transition 替换了后续独立 assistant 正文，导致 Chrome 只看到 Thinking。
+- 最小修复：assistant 自己有独立正文时优先正文；只有正文为空或与 reasoning 重复时才折叠 reasoning。没有修改 Provider、SQL、Evidence、Session、缓存或 AG-UI 协议。
+- Commit：`6b214da fix(web): preserve final answer after reasoning`。
+- 自动化：`assistant-thought-content`、`step-assistant-state`、`conversation-restore` 共 `3 files / 100 tests` 通过；Web production build 通过并生成 17 个页面。
+- 正式重启：API `8787` 与 Web `3000` 来自 Integration；`/healthz`、`/ready`、Overview 均为 HTTP 200。
+- 真实 Chrome：重新打开第三轮既有会话，没有再次调用模型；页面显示完整 `Answer`、`1,211.68 kWh`、period/scope/unit/caveats 与 Evidence 验证说明。
+
+### 10.4 未完成与停止项
+
+- 三轮正确不等于信息价值与语言质量已获 Charles 验收；用户已明确把“人类真正需要的信息及展现形式”留到后续专项讨论，本轮不擅自扩大。
+- 三轮各约 `62k–65k` input tokens，说明当前 Context/Schema 每轮重复输入仍偏重；记录为后续性能/成本切片，不阻塞本次可信闭环，也不在本轮建设通用 Context 缓存平台。
+- 不新增 Workspace 模型配置、通用 Provider Router、自动 fallback 链、历史 Snapshot 回放、Scheduler/Cadence DSL 或第二套 Evidence 平台。
