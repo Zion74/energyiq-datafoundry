@@ -400,6 +400,7 @@ describe("createRunProtocolBoundary", () => {
           requirements: input.requirements.map((requirement) => requirement.id === "R1"
             ? {
                 ...requirement,
+                contextEvidence: { mode: "sufficient" as const, factIds: ["shipment-count.release"] },
                 assertions: [{
                   id: "R1.A1",
                   requirementId: "R1",
@@ -478,6 +479,7 @@ describe("createRunProtocolBoundary", () => {
         instruction: expect.stringContaining("Requirements with sufficient context_evidence may be committed directly"),
         requirements: [{
           requirement_id: "R1",
+          context_evidence: { mode: "sufficient" },
           assertions: [{
             assertion_id: "R1.A1",
             sql_constraints: [expect.objectContaining({
@@ -491,6 +493,9 @@ describe("createRunProtocolBoundary", () => {
     });
     expect((result.observation as { analysis_contract: { instruction: string } }).analysis_contract.instruction)
       .not.toContain("below in run_sql_readonly");
+    expect((result.observation as {
+      analysis_contract: { requirements: Array<{ context_evidence?: Record<string, unknown> }> };
+    }).analysis_contract.requirements[0]?.context_evidence).not.toHaveProperty("fact_ids");
 
     await expect(boundary.actionRouter.execute({
       runId: "run-contract-grounding",

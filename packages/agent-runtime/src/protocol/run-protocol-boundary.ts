@@ -397,7 +397,6 @@ const projectGroundedSchemaObservation = (
             ? {
                 context_evidence: {
                   mode: requirement.contextEvidence.mode,
-                  fact_ids: [...requirement.contextEvidence.factIds]
                 }
               }
             : {})

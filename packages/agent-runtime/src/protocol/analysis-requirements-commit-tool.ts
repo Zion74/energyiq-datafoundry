@@ -55,7 +55,6 @@ export const analysisRequirementsCommitInputSchema = z.object({
     })).max(AGENT_RUNTIME_LIMITS.requirementCommitMaxOutputFields).optional(),
     evidence_refs: z.array(z.string().min(1)).optional(),
     evidence_requirement_ids: z.array(z.string().min(1)).optional(),
-    context_fact_ids: z.array(z.string().min(1)).optional()
   })).min(1).max(AGENT_RUNTIME_LIMITS.requirementCommitMaxClaims)
 });
 
@@ -71,7 +70,7 @@ const stringEnum = (values: string[]) =>
  */
 export const buildAnalysisRequirementsCommitInputSchema = (
   requirements: AnalysisRequirement[],
-  contextEvidenceCatalog?: AnalysisContextEvidenceCatalog,
+  _contextEvidenceCatalog?: AnalysisContextEvidenceCatalog,
 ) => {
   const requirementIds = requirements.map((requirement) => requirement.id);
   if (requirementIds.length === 0) {
@@ -93,9 +92,6 @@ export const buildAnalysisRequirementsCommitInputSchema = (
     ...(valueSchema ? { values: valueSchema } : {}),
     evidence_refs: z.array(z.string().min(1)).optional(),
     evidence_requirement_ids: z.array(stringEnum(requirementIds)).optional(),
-    ...(contextEvidenceCatalog?.facts.length
-      ? { context_fact_ids: z.array(z.string().min(1)).min(1).max(64).optional() }
-      : {})
   };
   return z.object({
     claims: z.array(z.object(claimShape).strict())
