@@ -101,7 +101,10 @@ import {
   createModelAnalysisContractGrounder,
   type AnalysisContractGrounder
 } from "./protocol/model-analysis-contract-grounder.js";
-import type { AnalysisRequirement } from "./protocol/analysis-requirements.js";
+import type {
+  AnalysisQueryEvidenceBinding,
+  AnalysisRequirement,
+} from "./protocol/analysis-requirements.js";
 import { createAnalysisRequirementsCommitTool } from "./protocol/analysis-requirements-commit-tool.js";
 import type { DataAnalysisState } from "./protocol/protocols/data-analysis.js";
 import type { AnalysisContextEvidenceCatalog } from "./protocol/analysis-context-evidence.js";
@@ -616,6 +619,19 @@ export const createDataFoundry = async (
               ? ((current.domain as DataAnalysisState).requirements ?? []).filter((requirement) =>
                   requirement.source === "user")
               : [];
+          },
+          getVerifiedRequirementValues: (requirementId) => {
+            const current = protocol.protocolRuntime.getState(input.runContext.run_id, protocol.segmentId);
+            if (current.protocolId !== "data-analysis") return [];
+            const state = current.domain as DataAnalysisState;
+            const evidencedAttemptIds = new Set((state.evidenceBindings ?? []).flatMap((binding) => {
+              if (binding.requirementId !== requirementId || binding.source === "context") return [];
+              return [(binding as AnalysisQueryEvidenceBinding).queryAttemptId];
+            }));
+            return [...new Map((state.queryAttempts ?? [])
+              .filter((attempt) => evidencedAttemptIds.has(attempt.id))
+              .flatMap((attempt) => attempt.verifiedValues)
+              .map((value) => [value.name, value])).values()];
           },
           runId: input.runContext.run_id,
           segmentId: protocol.segmentId,

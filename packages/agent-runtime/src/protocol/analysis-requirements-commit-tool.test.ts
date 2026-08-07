@@ -120,6 +120,53 @@ describe("analysis requirements commit tool", () => {
     expect(executeAction).not.toHaveBeenCalled();
   });
 
+  it("injects late-grounded values only from an evidenced query result", async () => {
+    const initialRequirements = createUserAnalysisRequirements([{
+      kind: "metric",
+      description: "Count Active Aging Center facilities",
+      acceptanceCriteria: ["Return the exact count"],
+    }]);
+    const groundedRequirements = createUserAnalysisRequirements([{
+      kind: "metric",
+      description: "Count Active Aging Center facilities",
+      acceptanceCriteria: ["Return the exact count"],
+      assertions: [{
+        kind: "metric",
+        description: "Validated count",
+        claimValues: [{ name: "centre_count", field: "centre_count", required: true }],
+      }],
+    }]);
+    const executeAction = vi.fn(async (action) => ({ observation: action.input }));
+    const tool = createAnalysisRequirementsCommitTool({
+      analysisRequirements: initialRequirements,
+      executeAction,
+      getAnalysisRequirements: () => groundedRequirements,
+      getVerifiedRequirementValues: (requirementId) => requirementId === "R1"
+        ? [{ name: "centre_count", value: 8, tolerance: 0, assertionId: "R1.A1" }]
+        : [],
+      runId: "run-late-grounding",
+      segmentId: "segment-late-grounding",
+      trustedEnergy: true,
+    });
+
+    const result = await tool.execute?.({ claims: [{
+      requirement_id: "R1",
+      claim: "There are 8 Active Aging Center facilities.",
+    }] }, { agent: { toolCallId: "call-late-grounding" } } as never);
+
+    expect(result).toMatchObject({ claims: [{
+      requirement_id: "R1",
+      values: [{ name: "centre_count", value: 8 }],
+    }] });
+    expect(executeAction).toHaveBeenCalledOnce();
+    expect(executeAction).toHaveBeenCalledWith(expect.objectContaining({
+      actionName: "analysis.requirements.commit",
+      input: expect.objectContaining({ claims: [expect.objectContaining({
+        values: [{ name: "centre_count", value: 8 }],
+      })] }),
+    }));
+  });
+
   it("binds authorized context facts and injects canonical values before commit", async () => {
     const contextRequirements = createUserAnalysisRequirements([{
       kind: "metric",

@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { AGENT_RUNTIME_LIMITS } from "../config/agent-runtime-limits.js";
 import { toolErrorObservation } from "../errors/tool-execution-error.js";
+import type { AnalysisVerifiedValue } from "./analysis-contract.js";
 import type { AnalysisRequirement } from "./analysis-requirements.js";
 import {
   contextEvidenceVerifiedValues,
@@ -37,6 +38,7 @@ export type CreateAnalysisRequirementsCommitToolInput = {
   contextEvidenceCatalog?: AnalysisContextEvidenceCatalog;
   executeAction(input: RequirementsCommitActionInput | ContextEvidenceBindActionInput): Promise<{ observation: unknown }>;
   getAnalysisRequirements?(): AnalysisRequirement[];
+  getVerifiedRequirementValues?(requirementId: string): AnalysisVerifiedValue[];
   runId: string;
   segmentId: string;
   trustedEnergy: boolean;
@@ -158,7 +160,15 @@ const bindContextEvidence = async (input: CreateAnalysisRequirementsCommitToolIn
   for (const [index, claim] of input.claims.entries()) {
     const factIds = claim.context_fact_ids ?? [];
     if (factIds.length === 0) {
-      claims.push(claim);
+      const verifiedValues = input.getVerifiedRequirementValues?.(claim.requirement_id) ?? [];
+      const canonicalValues = verifiedValues.map((value) => ({
+        name: value.name,
+        value: value.value,
+        ...(value.unit ? { unit: value.unit } : {}),
+      }));
+      claims.push(canonicalValues.length > 0
+        ? { ...claim, values: mergeClaimValues(claim.values ?? [], canonicalValues) }
+        : claim);
       continue;
     }
     if (!catalog) throw new Error("ANALYSIS_CONTEXT_EVIDENCE_CATALOG_UNAVAILABLE");
