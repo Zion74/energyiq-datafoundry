@@ -48,6 +48,7 @@
 
 | 文档 | 状态 |
 | --- | --- |
+| [AI Analyst Harness 与 AI Slot 执行路径](2026-08-08-AI-Analyst-Harness与AI-Slot执行路径.md) | in progress；统一跟踪 #30/#36、两项目 AI Slot、Presentation Blocks、Provider/Chrome 验收和 Ticket 关闭顺序，不扩建通用 Agent 平台 |
 | [2026-08-06 Overview 夜间执行清单与 Runlog](2026-08-06-Overview夜间执行清单与Runlog.md) | in progress；第 11 节为 2026-08-07 当前行动方案：Overview takeaway-first 阅读体验 → #31 Explorer 精准下钻与设备趋势 → Preschool 演示型图表 → #5/#19/#20/#21 收口；AI 侧线保持隔离 |
 | [三 Agent MVP 最终执行与重置包](2026-08-03-三Agent-MVP最终执行与重置包.md) | accepted；唯一派工入口，含共同基线和三个最终 Prompt |
 | [三 Agent MVP 执行手册](2026-08-03-三Agent-MVP执行手册.md) | accepted；三个 Agent 的责任、并行节奏、MVP 边界与验收 Owner 已确认 |
