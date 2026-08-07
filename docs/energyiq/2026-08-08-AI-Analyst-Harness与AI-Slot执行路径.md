@@ -369,3 +369,22 @@ Ngee Ann Snapshot 上完成，耗时约 224 秒，执行 1 次 Schema 与 8 次�
 模型即可恢复第 3 条有效 Finding；1440/1920 布局无横向裁切，AI-selected comparison visual、Snapshot、3 条 SQL、
 Audit ids 与 Finding-specific Evidence 对话框一致。当前旧 API 实例仍显示修复前的空格缺失，不能把自动修复冒充为
 运行态已发布。
+
+### #35 真实 Preschool Run 边界
+
+登录态 Chrome 使用同一 Preschool Snapshot 完成两次真实 DeepSeek V4 Flash 运行，没有修改确定性 Overview：
+
+1. Run `preschool-overview-cd5eec65-de9e-45f0-ba69-7e559d282bb0` 约 214 秒完成，执行 1 次 Schema 与 9 次只读
+   SQL。三个候选中，前两个引用了不存在的 path-like Discovery Evidence id；第三个虽只引用 SQL，却把 Top-N
+   返回行数“10”写成业务结论，而该数量并不是 SQL 返回的命名字段。Finding-specific 守卫按合同拒绝整批，未把
+   未验证数字或伪 Evidence 显示给用户；
+2. 页面重新加载后启动的 Run `preschool-overview-706701e9-476a-4759-8774-5197f52ae92a` 在 300 秒边界超时，
+   已完成 7 次工具结果但未形成可验证最终 Artifact。页面保持 fail-soft，确定性 Overview 继续可用；不通过增加
+   固定 SQL/轮次限制、提高超时或放宽 Evidence 守卫制造通过；
+3. 超时链曾把 `BodyStreamBuffer was aborted` 暴露给用户。现将内部 timeout、错误码、网络与 abort 类错误统一
+   映射为客户安全的暂时不可用提示，并增加 `RUN_TIMEOUT:300000` 与 stream abort 回归。业务校验失败原因仍保留，
+   便于区分“模型结果不可验证”和“运行时暂时失败”。
+
+本轮不会再触发第三次 Provider Run。当前结论是：Ngee Ann 已有一条真实 visual Finding 的 Chrome 证据；Preschool
+仍缺少一次同时通过可信合同与客户表达的真实 Run，因此 #35 不能关闭。完成但全部候选被拒的 Run 在重新加载时会
+再次尝试，是后续 Resume/Retry policy 的独立窄问题，不在本切片扩成调度或通用缓存平台。

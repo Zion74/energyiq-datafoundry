@@ -1105,7 +1105,7 @@ function cleanText(value: unknown): string | null {
 function friendlyReason(reason: string): string {
   const trimmed = reason.trim();
   return /\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/u.test(trimmed)
-    || /\b(?:timeout|timed out|network error|failed to fetch)\b/iu.test(trimmed)
+    || /\b(?:timeout|timed out|network error|failed to fetch|abort(?:ed|ing)?)\b/iu.test(trimmed)
     ? FRIENDLY_UNAVAILABLE
     : trimmed || FRIENDLY_UNAVAILABLE;
 }

@@ -142,6 +142,23 @@ describe("Preschool AI Run", () => {
     expect(buildPreschoolAiRunInput(snapshot, emptyThemes)).not.toBeNull();
   });
 
+  it.each([
+    "BodyStreamBuffer was aborted",
+    "RUN_TIMEOUT:300000",
+  ])("does not expose an internal runtime failure: %s", (message) => {
+    const eventStream = `data: ${JSON.stringify({ type: "RUN_ERROR", message })}\n\n`;
+
+    expect(resolvePreschoolAiEventStream({
+      eventStream,
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    })).toEqual({
+      status: "unavailable",
+      reason: "AI analysis is temporarily unavailable. The verified Overview remains available.",
+    });
+  });
+
   it("accepts zero Findings after one governed observation when no useful path survives", () => {
     const result = resolvePreschoolAiEventStream({
       eventStream: successfulEventStream([], sqlEvents("sql-1", 843.0985)),
