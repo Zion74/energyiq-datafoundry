@@ -107,6 +107,13 @@ export class ContextStepPlanner {
       omittedGroupIds: groups.filter((group) => !selectedGroupIds.has(group.id)).map((group) => group.id),
       selectedSourceItemIds: input.sourceItemIds ?? [],
       omittedSourceItemIds: input.omittedSourceItemIds ?? [],
+      groupTokenCosts: groups.map((group) => ({
+        groupId: group.id,
+        mandatory: group.mandatory,
+        retention: group.retention,
+        selected: selectedGroupIds.has(group.id),
+        tokenCost: group.tokenCost
+      })),
       decisions,
       budget: createBudget(profile),
       tokenReport: report
@@ -186,7 +193,9 @@ export class ContextStepPlanner {
 }
 
 const createBudget = (profile: ModelContextProfile): GlobalContextBudget => ({
+  capabilitySource: profile.capabilitySource,
   contextWindow: profile.contextWindow,
+  maxOutputTokens: profile.maxOutputTokens,
   outputReserve: profile.outputReserve,
   safetyMargin: profile.safetyMargin,
   inputBudget: Math.max(profile.contextWindow - profile.outputReserve - profile.safetyMargin, 0)

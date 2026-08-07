@@ -362,7 +362,9 @@ const profileRegistry = new ModelContextProfileRegistry({
   defaultProfile: {
     id: "context-smoke-small",
     modelPattern: "*",
+    capabilitySource: "explicit-profile",
     contextWindow: 420,
+    maxOutputTokens: 40,
     outputReserve: 40,
     safetyMargin: 20,
     messageOverhead: 4,
@@ -752,6 +754,18 @@ if (typeof compiledValue.prompt_tokens !== "number") {
 }
 if (typeof compiledValue.remaining_tokens !== "number") {
   throw new Error("context.compiled must expose top-level remaining_tokens (R-017)");
+}
+if (!Array.isArray(compiledValue.group_token_costs) || compiledValue.group_token_costs.length === 0) {
+  throw new Error("context.compiled must expose per-group token costs");
+}
+if (!Array.isArray(compiledValue.source_snapshot_hashes)) {
+  throw new Error("context.compiled must expose stable source snapshot hashes");
+}
+if (typeof compiledValue.budget_utilization !== "number") {
+  throw new Error("context.compiled must expose effective input budget utilization");
+}
+if (!["normal", "diagnostic", "review"].includes(compiledValue.high_water_mark)) {
+  throw new Error("context.compiled must expose a diagnostic high-water mark");
 }
 
 const compactProcessorState = new ContextRunState({ ...identity, runId: "context-compact-memory-run" });
