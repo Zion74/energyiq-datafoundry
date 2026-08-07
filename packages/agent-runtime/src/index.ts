@@ -30,7 +30,7 @@ import {
   type ModelProvider
 } from "@datafoundry/providers";
 
-import { AGENT_MAX_STEPS, SQL_MAX_EXECUTION_COUNT } from "./runtime-limits.js";
+import { AGENT_MAX_STEPS } from "./runtime-limits.js";
 import { AGENT_RUNTIME_LIMITS } from "./config/agent-runtime-limits.js";
 import { SQL_MAX_SQL_CHARS } from "./context/inventory/context-limits.js";
 import { createToolObservationBoundary } from "./context/tool-observation/tool-observation-boundary.js";
@@ -301,7 +301,7 @@ export const createDataFoundry = async (
   destroyWorkspace(): Promise<void>;
 }> => {
   const energyIqRun = Boolean(input.runContext.energy_query_context);
-  const maxSteps = energyIqRun ? Math.min(AGENT_MAX_STEPS, 10) : AGENT_MAX_STEPS;
+  const maxSteps = AGENT_MAX_STEPS;
   const toolObservationBoundary = createToolObservationBoundary({
     identity: {
       resourceId: input.runContext.user_id,
@@ -655,7 +655,6 @@ export const createDataFoundry = async (
       mcpToolNames: input.mcpToolNames ?? [],
       protocolId: protocolState.protocolId,
       analysisRequirements,
-      maxSteps,
       workspaceAttachments
     }),
     model: input.modelProvider.model as never,
@@ -799,7 +798,6 @@ type AgentInstructionsInput = {
   toolNames: string[];
   /** MCP tools injected through AG-UI clientTools for this run. */
   mcpToolNames: string[];
-  maxSteps: number;
   protocolId: string;
   analysisRequirements: AnalysisRequirement[];
   workspaceAttachments: MaterializedWorkspaceAttachment[];
@@ -979,11 +977,12 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
         + "period, so do not add a redundant time filter. If a boundary audit truly requires one, compare a TIMESTAMPTZ "
         + "column only with explicit TIMESTAMPTZ UTC literals; never compare it with an unzoned TIMESTAMP literal. Prefer one "
         + "focused aggregate SQL query that supplies all requested figures; for simple aggregates, query the inspected "
-        + "physical table directly and avoid CTEs or derived table aliases. Use at most three successful SQL queries "
-        + "unless the user explicitly asks for a deeper investigation. If a validation error occurs, correct the "
-        + "rejected query instead of exploring unrelated tables. Commit evidenced analysis requirements promptly. "
-        + "For one count, total, lookup, or direct comparison, take the shortest complete path: inspect once, run one "
-        + "focused SQL query when the requested value belongs to an exposed relation, commit once, and answer. "
+        + "physical table directly and avoid CTEs or derived table aliases when that is the clearest correct query. "
+        + "Use as many focused SQL queries as the question and Evidence require. Avoid redundant repeats, but never "
+        + "stop investigating merely to meet a query, step, latency, or token target. If a validation error occurs, "
+        + "use its feedback to repair the query or choose a better supported path. Commit evidenced analysis requirements "
+        + "when they are sufficiently verified. For one count, total, lookup, or direct comparison, start with the "
+        + "smallest sufficient query. If it does not fully answer and verify the request, continue investigating. "
         + "When reporting a share or percentage, make the full requested denominator explicit in the SQL result, for "
         + "example with a conditional total or a window total. Preserve NULL or Unknown dimension values as an explicit "
         + "bucket or disclose the unreconciled amount; never use only the displayed non-null groups as the parent total. "
@@ -993,10 +992,11 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
         + "or the absence of matching words in energy facts. If the required dimension is not exposed, return Missing "
         + "Evidence or Unavailable instead of searching similar labels or guessing. Do not enumerate a large Evidence "
         + "bundle in reasoning when one Evidence item or query can verify the answer. For an explanatory or discovery "
-        + "question, state the current Evidence gap, run one observation query, and add no more than two targeted "
-        + "follow-ups; every follow-up must test a specific candidate explanation or decision. Stop when the user can "
-        + "act or verify the result. Keep the visible reasoning useful and brief: name the question, the Evidence gap, "
-        + "the next check, and what the result changed. Use at most one short progress note per tool decision. Do not "
+        + "question, begin with the strongest available observation and use targeted follow-ups to test candidate "
+        + "explanations, comparisons, and decisions. Continue while another check can materially improve correctness, "
+        + "reduce uncertainty, or change the recommended action. Finish only when the requirements are supported by "
+        + "sufficient Evidence, or when the remaining Evidence gap is stated honestly with a useful verification path. "
+        + "Keep visible reasoning useful: name the question, the Evidence gap, the next check, and what the result changed. Do not "
         + "repeat the Prompt, policy, schema, protocol contract, or the same finding in multiple reasoning rounds. "
         + (noDeclaredClaimValues
           ? "This run declares no claim value names, so every analysis_requirements_commit claim must omit its values field entirely. "
@@ -1020,14 +1020,14 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
             + "(for example date_trunc('hour', local_interval_start) AS local_hour_start), not return raw interval rows and "
             + "not group by hour-of-day or EXTRACT(hour); a complete seven-day hourly timeline has 168 ordered points, "
             + "not 24 aggregated clock-hour buckets. Reuse that chart result to identify the peak. If the chart result "
-            + "preview is truncated and the exact peak is not visible, run at most one focused follow-up using the same "
+            + "preview is truncated and the exact peak is not visible, run a focused follow-up using the same "
             + "hourly aggregation ordered by the hourly metric descending with LIMIT 1; never use MAX on a raw interval "
             + "row as the hourly peak. Do not add a total query unless the user asked for a total. Mention a generated "
             + "chart preview only when the successful SQL tool "
             + "result explicitly reports that the backend created a chart artifact. When it exists, tell the user that "
             + "the chart is available in Task Console > Outputs > Preview; do not say chart below because charts are not "
-            + "currently embedded inline in the answer. If no chart artifact exists, correct the SQL and retry within the "
-            + "query budget; otherwise state plainly that no chart was generated."
+            + "currently embedded inline in the answer. If no chart artifact exists, use the validation feedback to "
+            + "correct the SQL and retry; otherwise state plainly that no chart was generated."
           : "")
     );
     }
@@ -1057,8 +1057,10 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
     }).join("\n");
     toolGroups.push("Analysis requirement tool: analysis_requirements_commit.");
     policies.push(
-      "Analysis requirements are mandatory completion conditions:\n"
+      "Analysis requirements are mandatory minimum completion conditions, not an exhaustive boundary on investigation:\n"
         + requirementList
+        + "\nThe Analyst may pursue additional Evidence-backed angles when they can improve correctness, reduce uncertainty, "
+        + "or create decision value. Additional investigation must not replace or weaken the user's required claims. "
         + "\nWhen using task_write, include the relevant requirement IDs in each task content. Every run_sql_readonly call "
         + "must include requirement_ids for the claims it supports and expected_columns for its result contract. "
         + "For every non-manual structured requirement, also include its exact assertion_ids; the runtime rejects SQL "
@@ -1072,8 +1074,8 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
         + "include the full requested end date. Compute threshold crossings from row-level SQL, never estimates. "
         + "Do not defer every claim until the final step. As soon as a requirement has sufficient validated evidence, "
         + "call analysis_requirements_commit for that requirement before starting more optional drill-downs. Commit any "
-        + "remaining evidenced requirements before writing final report files, and reserve the last two steps for task_check "
-        + "and the closing answer. Runtime resolves validated evidence already bound to that requirement, so do not guess "
+        + "remaining evidenced requirements before writing final report files or the closing answer. Runtime resolves "
+        + "validated evidence already bound to that requirement, so do not guess "
         + "artifact IDs. Every required claimValues entry must be copied into the claim values array with the exact "
         + "verified name, numeric value, and unit; the runtime rejects unverified or mismatched values. "
         + "For a derived claim, use evidence_requirement_ids to name the upstream requirement IDs that "
@@ -1151,10 +1153,10 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
       + "restating raw tool output."
   );
   policies.push(
-    `Respect limits. This run allows at most ${input.maxSteps} steps and `
-      + `${SQL_MAX_EXECUTION_COUNT} SQL executions total `
-      + `(SQL longer than ${SQL_MAX_SQL_CHARS} chars is truncated from view). `
-      + "Prefer one focused query per datasource before refining."
+    "Runtime circuit breakers exist only to stop runaway execution; they are not an analysis budget or a reason to "
+      + "answer early. Continue until the requirement is supported by sufficient Evidence or the unresolved gap is "
+      + "explicit. Prefer focused, non-duplicative queries and use validation feedback to refine the investigation. "
+      + `(SQL longer than ${SQL_MAX_SQL_CHARS} chars is truncated from view.)`
   );
   if (commandExecutionEnabled) {
     const workspacePromotionPolicy = promoteWorkspaceFileEnabled

@@ -9,11 +9,8 @@ export type EnergyIqHarnessEvalCase = {
   to: string;
   question: string;
   contract: {
-    expectedTools: string[];
+    requiredTools: string[];
     forbiddenTools: string[];
-    maxSqlCalls: number;
-    maxReasoningRounds: number;
-    maxElapsedMs: number;
     answerAllOf?: string[];
     answerAnyOf?: string[];
     answerNoneOf?: string[];
@@ -59,11 +56,8 @@ export const ENERGYIQ_HARNESS_FAST_CASES: EnergyIqHarnessEvalCase[] = [
     to: "2026-06-16",
     question: "How much electricity did the whole project use in the selected period? Give the exact result, period, and evidence in plain English.",
     contract: {
-      expectedTools: ["inspect_schema", "run_sql_readonly", "analysis_requirements_commit"],
+      requiredTools: ["inspect_schema", "run_sql_readonly", "analysis_requirements_commit"],
       forbiddenTools: COMMON_FORBIDDEN_TOOLS,
-      maxSqlCalls: 2,
-      maxReasoningRounds: 5,
-      maxElapsedMs: 60_000,
       answerAllOf: ["\\b1[, ]?531(?:\\.(?:1|16|168|1683|17))?\\s*kWh\\b", "2026-06-10", "2026-06-16"],
     },
   },
@@ -78,11 +72,8 @@ export const ENERGYIQ_HARNESS_FAST_CASES: EnergyIqHarnessEvalCase[] = [
     to: "2026-06-16",
     question: "Which circuit contributed the most electricity in the selected period? Give its energy and share, then suggest one sensible investigation step.",
     contract: {
-      expectedTools: ["inspect_schema", "run_sql_readonly", "analysis_requirements_commit"],
+      requiredTools: ["inspect_schema", "run_sql_readonly", "analysis_requirements_commit"],
       forbiddenTools: COMMON_FORBIDDEN_TOOLS,
-      maxSqlCalls: 3,
-      maxReasoningRounds: 6,
-      maxElapsedMs: 75_000,
       answerAllOf: ["(?:Load\\s*4|l7-load-4)", "\\b439(?:\\.0?9(?:7(?:2)?)?)?\\s*kWh\\b"],
       answerAnyOf: ["28\\.7\\s*%", "28\\.67\\s*%", "28\\.677\\s*%"],
     },
@@ -98,11 +89,8 @@ export const ENERGYIQ_HARNESS_FAST_CASES: EnergyIqHarnessEvalCase[] = [
     to: "2026-06-09",
     question: "Create a line chart of hourly electricity use for this scope and selected period. State the period and the peak in plain English, and keep every hourly point.",
     contract: {
-      expectedTools: ["inspect_schema", "run_sql_readonly", "analysis_requirements_commit"],
+      requiredTools: ["inspect_schema", "run_sql_readonly", "analysis_requirements_commit"],
       forbiddenTools: COMMON_FORBIDDEN_TOOLS,
-      maxSqlCalls: 3,
-      maxReasoningRounds: 6,
-      maxElapsedMs: 90_000,
       answerAllOf: ["2026-06-03", "2026-06-09", "\\bkWh\\b"],
       chart: { type: "line", pointCount: 168 },
     },
@@ -118,11 +106,8 @@ export const ENERGYIQ_HARNESS_FAST_CASES: EnergyIqHarnessEvalCase[] = [
     to: "2026-05-31",
     question: "How many Active Aging Centers are in this project? Verify it from Published Metadata and explain the basis briefly.",
     contract: {
-      expectedTools: ["inspect_schema", "run_sql_readonly", "analysis_requirements_commit"],
+      requiredTools: ["inspect_schema", "run_sql_readonly", "analysis_requirements_commit"],
       forbiddenTools: COMMON_FORBIDDEN_TOOLS,
-      maxSqlCalls: 2,
-      maxReasoningRounds: 5,
-      maxElapsedMs: 60_000,
       answerAllOf: ["Active Aging Center", "(^|\\D)8(\\D|$)", "(?:metadata|facility[_ ]type)"],
       answerNoneOf: ["(?:count|number|total|there are)[^.!\\n]{0,20}(?:is|are|:)?\\s*0\\b", "adapter_missing"],
     },
@@ -138,11 +123,8 @@ export const ENERGYIQ_HARNESS_FAST_CASES: EnergyIqHarnessEvalCase[] = [
     to: "2026-05-31",
     question: "How much electricity did Centre E use in May, and what share of the portfolio was that? Use the project data and answer briefly.",
     contract: {
-      expectedTools: ["inspect_schema", "run_sql_readonly", "analysis_requirements_commit"],
+      requiredTools: ["inspect_schema", "run_sql_readonly", "analysis_requirements_commit"],
       forbiddenTools: COMMON_FORBIDDEN_TOOLS,
-      maxSqlCalls: 2,
-      maxReasoningRounds: 5,
-      maxElapsedMs: 60_000,
       answerAllOf: ["Centre E", "\\b870(?:\\.5(?:0)?)?\\s*kWh\\b"],
       answerAnyOf: ["3\\.5\\s*%", "3\\.49\\s*%"],
     },
@@ -158,11 +140,8 @@ export const ENERGYIQ_HARNESS_FAST_CASES: EnergyIqHarnessEvalCase[] = [
     to: "2026-05-31",
     question: "Which centre type used the most electricity in May? Give the number of centres, total energy, portfolio share, and one useful comparison.",
     contract: {
-      expectedTools: ["inspect_schema", "run_sql_readonly", "analysis_requirements_commit"],
+      requiredTools: ["inspect_schema", "run_sql_readonly", "analysis_requirements_commit"],
       forbiddenTools: COMMON_FORBIDDEN_TOOLS,
-      maxSqlCalls: 3,
-      maxReasoningRounds: 6,
-      maxElapsedMs: 75_000,
       answerAllOf: ["Senior Care Center", "(^|\\D)14(\\D|$)"],
       answerAnyOf: ["11[, ]?657\\s*kWh", "46\\.8\\s*%"],
     },
@@ -178,11 +157,8 @@ export const ENERGYIQ_HARNESS_FAST_CASES: EnergyIqHarnessEvalCase[] = [
     to: "2026-06-16",
     question: "Act as my energy analyst. Find the most important issue in this period and explain what happened, why it matters, what I should investigate next, and how I can verify the result. Use evidence and do not claim an unproven cause.",
     contract: {
-      expectedTools: ["inspect_schema", "run_sql_readonly", "analysis_requirements_commit"],
+      requiredTools: ["inspect_schema", "run_sql_readonly", "analysis_requirements_commit"],
       forbiddenTools: COMMON_FORBIDDEN_TOOLS,
-      maxSqlCalls: 4,
-      maxReasoningRounds: 7,
-      maxElapsedMs: 105_000,
       answerAnyOf: ["(?:Load\\s*4|l7-load-4)", "Level 7", "26\\.3", "439"],
       answerNoneOf: ["definitely caused by", "proves? that"],
       insightSignals: COMMON_INSIGHT_SIGNALS,
@@ -199,11 +175,8 @@ export const ENERGYIQ_HARNESS_FAST_CASES: EnergyIqHarnessEvalCase[] = [
     to: "2026-05-31",
     question: "Prove which equipment failure caused the worst non-operating-hour spike in May. If the available data cannot prove the cause, explain what it does show and how the team should verify it.",
     contract: {
-      expectedTools: ["inspect_schema", "run_sql_readonly", "analysis_requirements_commit"],
+      requiredTools: ["inspect_schema", "run_sql_readonly", "analysis_requirements_commit"],
       forbiddenTools: COMMON_FORBIDDEN_TOOLS,
-      maxSqlCalls: 4,
-      maxReasoningRounds: 7,
-      maxElapsedMs: 105_000,
       answerAllOf: ["(?:cannot|can't|not enough|does not prove|unable to prove|cannot confirm)", "(?:verify|confirm|inspect|check)"],
       answerNoneOf: ["definitely caused by", "proves? that"],
       insightSignals: COMMON_INSIGHT_SIGNALS,

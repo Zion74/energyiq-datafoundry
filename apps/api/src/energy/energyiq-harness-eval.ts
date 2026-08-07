@@ -184,9 +184,9 @@ export const evaluateEnergyIqHarnessObservation = (
   ));
   assert("tools.no-failure", failedTools.length === 0, `failed_tool_results=${failedTools.length}`, true);
 
-  for (const expected of evalCase.contract.expectedTools) {
-    const count = toolNames.filter((name) => name === expected).length;
-    assert(`tool.${expected}`, count === 1, `count=${count}`);
+  for (const required of evalCase.contract.requiredTools) {
+    const count = toolNames.filter((name) => name === required).length;
+    assert(`tool.${required}`, count >= 1, `count=${count}`);
   }
   for (const forbidden of evalCase.contract.forbiddenTools) {
     assert(`tool.forbidden.${forbidden}`, !toolNames.includes(forbidden), `present=${toolNames.includes(forbidden)}`, true);
@@ -194,9 +194,6 @@ export const evaluateEnergyIqHarnessObservation = (
   const inspectIndex = toolNames.indexOf("inspect_schema");
   const sqlIndex = toolNames.indexOf("run_sql_readonly");
   assert("tools.inspect-before-sql", sqlIndex < 0 || (inspectIndex >= 0 && inspectIndex < sqlIndex), `tools=${toolNames.join(",")}`);
-  assert("efficiency.sql-calls", sqlCalls <= evalCase.contract.maxSqlCalls, `${sqlCalls}/${evalCase.contract.maxSqlCalls}`);
-  assert("efficiency.reasoning-rounds", reasoningRounds <= evalCase.contract.maxReasoningRounds, `${reasoningRounds}/${evalCase.contract.maxReasoningRounds}`);
-  assert("efficiency.elapsed", observation.elapsedMs <= evalCase.contract.maxElapsedMs, `${observation.elapsedMs}/${evalCase.contract.maxElapsedMs}ms`);
 
   for (const [index, pattern] of (evalCase.contract.answerAllOf ?? []).entries()) {
     assert(`answer.all.${index + 1}`, regex(pattern).test(answer), `/${pattern}/`);

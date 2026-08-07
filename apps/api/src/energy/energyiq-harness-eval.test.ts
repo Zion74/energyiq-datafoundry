@@ -9,7 +9,7 @@ describe("EnergyIQ Harness Eval", () => {
     expect(new Set(ENERGYIQ_HARNESS_FAST_CASES.map((evalCase) => evalCase.id)).size).toBe(8);
   });
 
-  it("accepts an exact, bounded Ngee Ann answer", () => {
+  it("accepts an exact, evidenced Ngee Ann answer", () => {
     const evalCase = ENERGYIQ_HARNESS_FAST_CASES[0];
     expect(evalCase?.id).toBe("ngee-total-energy");
     const report = evaluateEnergyIqHarnessObservation(evalCase!, {
@@ -23,6 +23,32 @@ describe("EnergyIQ Harness Eval", () => {
     expect(report.hardFailure).toBe(false);
     expect(report.metrics.sqlCalls).toBe(1);
     expect(report.metrics.correctnessRatio).toBe(1);
+  });
+
+  it("records extra investigation as efficiency telemetry without failing a correct answer", () => {
+    const evalCase = ENERGYIQ_HARNESS_FAST_CASES[0]!;
+    const answer = "The whole project used 1,531.1683 kWh from 2026-06-10 to 2026-06-16. The result is calculated from the scoped interval evidence.";
+    const baseEvents = successfulEvents(answer);
+    const extraInvestigationEvents = Array.from({ length: 6 }, (_, index) => [
+      { type: "REASONING_START" },
+      { type: "TOOL_CALL_START", toolCallName: "run_sql_readonly", toolCallId: `follow-up-${index}` },
+      { type: "TOOL_CALL_RESULT", toolCallName: "run_sql_readonly", toolCallId: `follow-up-${index}`, content: JSON.stringify({ success: true }) },
+    ]).flat();
+    const terminalIndex = baseEvents.findIndex((event) => event.type === "TEXT_MESSAGE_CONTENT");
+    const report = evaluateEnergyIqHarnessObservation(evalCase, {
+      elapsedMs: 180_000,
+      events: [
+        ...baseEvents.slice(0, terminalIndex),
+        ...extraInvestigationEvents,
+        ...baseEvents.slice(terminalIndex),
+      ],
+    });
+
+    expect(report.status).toBe("passed");
+    expect(report.metrics.sqlCalls).toBe(7);
+    expect(report.metrics.reasoningRounds).toBe(7);
+    expect(report.metrics.elapsedMs).toBe(180_000);
+    expect(report.assertions.some((assertion) => assertion.id.startsWith("efficiency."))).toBe(false);
   });
 
   it("treats internal errors and forbidden execution tools as hard failures", () => {
