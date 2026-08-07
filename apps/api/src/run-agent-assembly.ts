@@ -8,6 +8,7 @@ import {
   type AgentContextItem,
   type AgUiEventEmitter,
   type AnalysisContractGrounder,
+  type AnalysisContextEvidenceCatalog,
   type ContextPackage,
   type ContextPackageRecorder,
   type GoalRuntimeAdapter,
@@ -62,6 +63,7 @@ type CreateRunAgentContextInput = {
 
 type CreateRunAgentAssemblyInput = {
   analysisContractGrounder?: AnalysisContractGrounder;
+  contextEvidenceCatalog?: AnalysisContextEvidenceCatalog;
   abortSignal?: AbortSignal | undefined;
   artifactService: ArtifactService;
   dataGateway: DataGateway;
@@ -161,6 +163,9 @@ export const createRunAgentAssembly = async (
   } = await createDataFoundry({
     ...(input.analysisContractGrounder
       ? { analysisContractGrounder: input.analysisContractGrounder }
+      : {}),
+    ...(input.contextEvidenceCatalog
+      ? { contextEvidenceCatalog: input.contextEvidenceCatalog }
       : {}),
     ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
     artifactService: input.artifactService,

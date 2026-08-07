@@ -15,6 +15,11 @@ import {
 } from "../analysis-contract.js";
 import { validateSqlSemantics } from "../sql-semantic-validator.js";
 import type { AgentProtocolDefinition } from "../types.js";
+import {
+  evidencePinsEqual,
+  type AnalysisContextEvidenceCatalog,
+  type AnalysisEvidencePins,
+} from "../analysis-context-evidence.js";
 
 const DATA_ACTIONS = new Set(["list_data_sources", "inspect_schema", "preview_table", "run_sql_readonly"]);
 
@@ -42,11 +47,14 @@ export type DataAnalysisState = {
   evidenceBindings: AnalysisEvidenceBinding[];
   reportedClaims: AnalysisReportedClaim[];
   taskRequirementLinks: TaskRequirementLink[];
+  evidencePins?: AnalysisEvidencePins;
+  contextEvidenceSourceId?: string;
 };
 
 export const createDataAnalysisProtocol = (
   availableActionNames: string[],
-  userRequirements: AnalysisRequirement[] = []
+  userRequirements: AnalysisRequirement[] = [],
+  contextEvidenceCatalog?: AnalysisContextEvidenceCatalog,
 ): AgentProtocolDefinition<DataAnalysisState> => {
   const commonActions = unique([
     ...availableActionNames.filter((actionName) => !DATA_ACTIONS.has(actionName)),
@@ -85,9 +93,17 @@ export const createDataAnalysisProtocol = (
           "preview_table",
           "semantic.context.resolve",
           "data.query.plan",
-          "data.query.validate"
+          "data.query.validate",
+          "analysis.context.evidence.bind"
         ]),
-        transitions: [{ targetPhase: "execution", when: ({ state }) => state.currentQueryValidated }]
+        transitions: [
+          { targetPhase: "execution", when: ({ state }) => state.currentQueryValidated },
+          {
+            targetPhase: "synthesis",
+            when: ({ actionName, state }) => actionName === "analysis.context.evidence.bind"
+              && hasSufficientContextEvidence(state)
+          }
+        ]
       },
       execution: {
         allowedActions: unique([
@@ -114,6 +130,7 @@ export const createDataAnalysisProtocol = (
           "preview_table",
           "data.query.plan",
           "analysis.result.validate",
+          "analysis.context.evidence.bind",
           "analysis.evidence.bind",
           "analysis.requirements.commit"
         ]),
@@ -133,6 +150,7 @@ export const createDataAnalysisProtocol = (
           "preview_table",
           "data.query.plan",
           "analysis.result.validate",
+          "analysis.context.evidence.bind",
           "analysis.evidence.bind",
           "analysis.requirements.commit"
         ]),
@@ -159,17 +177,21 @@ export const createDataAnalysisProtocol = (
       queryAttempts: [],
       evidenceBindings: [],
       reportedClaims: [],
-      taskRequirementLinks: []
+      taskRequirementLinks: [],
+      ...(contextEvidenceCatalog
+        ? {
+            evidencePins: structuredClone(contextEvidenceCatalog.pins),
+            contextEvidenceSourceId: contextEvidenceCatalog.sourceId,
+          }
+        : {})
     }),
     completionPolicy: ({ contextPackageRef, state }) => {
       const requirementReasons = incompleteRequirementReasons(state);
+      const evidenceRouteReady = queryEvidenceRouteReady(state) || hasSufficientContextEvidence(state);
       if (
         state.semanticResolved
         && state.contractGrounded
-        && state.queryPlanned
-        && state.currentQueryValidated
-        && state.queryExecuted
-        && state.validationPassed
+        && evidenceRouteReady
         && (state.currentEvidenceRefs ?? []).length > 0
         && requirementReasons.length === 0
       ) {
@@ -193,10 +215,7 @@ export const createDataAnalysisProtocol = (
         ...(state.schemaInspected ? [] : ["SCHEMA_GROUNDING_REQUIRED"]),
         ...(state.semanticResolved ? [] : ["SEMANTIC_GROUNDING_REQUIRED"]),
         ...(state.contractGrounded ? [] : ["ANALYSIS_CONTRACT_GROUNDING_REQUIRED"]),
-        ...(state.queryPlanned ? [] : ["QUERY_PLAN_REQUIRED"]),
-        ...(state.currentQueryValidated ? [] : ["QUERY_VALIDATION_REQUIRED"]),
-        ...(state.queryExecuted ? [] : ["QUERY_EXECUTION_REQUIRED"]),
-        ...(state.validationPassed ? [] : ["RESULT_VALIDATION_REQUIRED"]),
+        ...(evidenceRouteReady ? [] : ["VALIDATED_EVIDENCE_ROUTE_REQUIRED"]),
         ...((state.evidenceRefs ?? []).length > 0 ? [] : ["EVIDENCE_BINDING_REQUIRED"]),
         ...requirementReasons
       ];
@@ -414,6 +433,68 @@ export const reduceDataAnalysisAction = (
     }));
     return updateCoreRequirement(next, "CORE_EVIDENCE", "evidenced");
   }
+  if (actionName === "analysis.context.evidence.bind") {
+    const requirementId = recordString(result, "requirement_id");
+    const contextSourceId = recordString(result, "context_source_id");
+    const factIds = recordStrings(result, "fact_ids");
+    const evidenceRefs = recordStrings(result, "evidence_refs");
+    const completionMode = recordString(result, "completion_mode");
+    const pins = parseEvidencePins(recordValue(result, "pins"));
+    const verifiedValues = recordArray(result, "verified_values").filter(isAnalysisVerifiedValue);
+    if (
+      !requirementId
+      || !contextSourceId
+      || factIds.length === 0
+      || evidenceRefs.length === 0
+      || verifiedValues.length !== factIds.length
+      || factIds.some((factId) => !verifiedValues.some((value) => value.name === factId))
+      || (completionMode !== "sufficient" && completionMode !== "supporting")
+      || !pins
+    ) {
+      throw new Error("ANALYSIS_CONTEXT_EVIDENCE_BINDING_INCOMPLETE");
+    }
+    assertRequirementIds(state, [requirementId]);
+    if (!evidencePinsEqual(state.evidencePins, pins)) {
+      throw new Error("ANALYSIS_CONTEXT_EVIDENCE_PINS_MISMATCH");
+    }
+    if (contextSourceId !== state.contextEvidenceSourceId) {
+      throw new Error("ANALYSIS_CONTEXT_EVIDENCE_SOURCE_MISMATCH");
+    }
+    const requirement = normalizedRequirements(state).find((candidate) => candidate.id === requirementId);
+    if (
+      !requirement?.contextEvidence
+      || requirement.contextEvidence.mode !== completionMode
+      || factIds.some((factId) => !requirement.contextEvidence?.factIds.includes(factId))
+    ) {
+      throw new Error(`ANALYSIS_CONTEXT_EVIDENCE_NOT_AUTHORIZED:${requirementId}`);
+    }
+    const binding: AnalysisEvidenceBinding = {
+      id: `E${normalizedEvidenceBindings(state).length + 1}`,
+      source: "context",
+      requirementId,
+      contextSourceId,
+      factIds,
+      evidenceRefs,
+      verifiedValues,
+      pins,
+      completionMode,
+      validationStatus: "passed",
+    };
+    let next = {
+      ...state,
+      currentEvidenceRefs: unique([...(state.currentEvidenceRefs ?? []), ...evidenceRefs]),
+      evidenceRefs: unique([...(state.evidenceRefs ?? []), ...evidenceRefs]),
+      evidenceBindings: [...normalizedEvidenceBindings(state), binding],
+    };
+    if (completionMode === "sufficient") {
+      next = updateRequirements(next, [requirementId], (item) => ({
+        ...item,
+        status: advanceStatus(item.status, "evidenced"),
+        evidenceBindingIds: unique([...item.evidenceBindingIds, binding.id]),
+      }));
+    }
+    return updateCoreRequirement(next, "CORE_EVIDENCE", "evidenced");
+  }
   if (actionName === "analysis.requirements.commit") {
     return commitReportedClaims(state, result);
   }
@@ -427,7 +508,12 @@ const allowedRecoveryActions = (state: DataAnalysisState): string[] => {
   if (!state.schemaInspected) return ["inspect_schema", "semantic.context.resolve"];
   if (!state.semanticResolved) return ["semantic.context.resolve"];
   if (!state.contractGrounded) return ["analysis.contract.ground"];
-  if (!state.queryPlanned) return ["data.query.plan"];
+  if (!state.queryPlanned && !hasSufficientContextEvidence(state)) {
+    return ["analysis.context.evidence.bind", "data.query.plan"];
+  }
+  if (hasSufficientContextEvidence(state) && incompleteRequirementReasons(state).length > 0) {
+    return ["analysis.requirements.commit", "data.query.plan"];
+  }
   if (!state.currentQueryValidated) return ["data.query.validate"];
   if (!state.queryExecuted) {
     return ["inspect_schema", "preview_table", "data.query.plan", "data.query.validate", "run_sql_readonly"];
@@ -458,6 +544,10 @@ const incompleteRequirementReasons = (state: DataAnalysisState): string[] => nor
   (requirement) => {
     if (!requirement.required) return [];
     if (requirement.source === "protocol") {
+      if (
+        hasSufficientContextEvidence(state)
+        && (requirement.id === "CORE_QUERY" || requirement.id === "CORE_RESULT")
+      ) return [];
       return requirement.status === "pending" || requirement.status === "queried"
         ? [`ANALYSIS_CORE_REQUIREMENT_PENDING:${requirement.id}`]
         : [];
@@ -521,11 +611,13 @@ const createEvidenceBindings = (
   const offset = normalizedEvidenceBindings(state).length;
   return attempt.requirementIds.map((requirementId, index) => ({
     id: `E${offset + index + 1}`,
+    source: "query" as const,
     requirementId,
     queryAttemptId: attempt.id,
     artifactId,
     auditLogId,
     resultFields: resultFields.length > 0 ? resultFields : attempt.resultFields,
+    ...(state.evidencePins ? { pins: structuredClone(state.evidencePins) } : {}),
     validationStatus: "passed"
   }));
 };
@@ -554,7 +646,8 @@ const commitReportedClaims = (state: DataAnalysisState, result: unknown): DataAn
     const hasExplicitEvidence = evidenceBindingIds.length > 0 || evidenceRefs.length > 0;
     let validBindings = hasExplicitEvidence
       ? candidateBindings.filter((binding) =>
-          evidenceBindingIds.includes(binding.id) || evidenceRefs.includes(binding.artifactId))
+          evidenceBindingIds.includes(binding.id)
+          || bindingEvidenceRefs(binding).some((reference) => evidenceRefs.includes(reference)))
       : candidateBindings;
     if (validBindings.length === 0 && candidateBindings.length > 0) {
       validBindings = candidateBindings;
@@ -566,14 +659,22 @@ const commitReportedClaims = (state: DataAnalysisState, result: unknown): DataAn
         `ANALYSIS_REQUIREMENT_EVIDENCE_INVALID:${requirementId}:${invalidId ?? invalidRef ?? "missing"}`
       );
     }
+    if (!validBindings.some((binding) =>
+      binding.source === "query" || binding.completionMode === "sufficient")) {
+      throw new Error(`ANALYSIS_REQUIREMENT_EVIDENCE_SUPPORTING_ONLY:${requirementId}`);
+    }
     const values = recordArray(value, "values").map(parseClaimValue);
-    const boundAttemptIds = new Set(validBindings.map((binding) => binding.queryAttemptId));
+    const boundAttemptIds = new Set(validBindings.flatMap((binding) =>
+      binding.source === "query" ? [binding.queryAttemptId] : []));
     const boundAttempts = normalizedQueryAttempts(next).filter((attempt) => boundAttemptIds.has(attempt.id));
     const requirementAssertionIds = new Set(boundAttempts.flatMap((attempt) => attempt.assertions
       .filter((assertion) => assertion.requirementId === requirementId)
       .map((assertion) => assertion.id)));
-    const verifiedValues = boundAttempts.flatMap((attempt) => attempt.verifiedValues ?? [])
-      .filter((verifiedValue) => requirementAssertionIds.has(verifiedValue.assertionId));
+    const verifiedValues = [
+      ...boundAttempts.flatMap((attempt) => attempt.verifiedValues ?? [])
+        .filter((verifiedValue) => requirementAssertionIds.has(verifiedValue.assertionId)),
+      ...validBindings.flatMap((binding) => binding.source === "context" ? binding.verifiedValues : []),
+    ];
     const requiredValueSpecs = (requirement?.assertions ?? []).flatMap((assertion) =>
       assertion.required && assertion.kind !== "manual"
         ? assertion.claimValues.filter((spec) => spec.required).map((spec) => ({
@@ -613,6 +714,18 @@ const commitReportedClaims = (state: DataAnalysisState, result: unknown): DataAn
 const uniqueBindings = (bindings: AnalysisEvidenceBinding[]): AnalysisEvidenceBinding[] => [...new Map(
   bindings.map((binding) => [binding.id, binding])
 ).values()];
+
+const bindingEvidenceRefs = (binding: AnalysisEvidenceBinding): string[] => binding.source === "query"
+  ? [binding.artifactId]
+  : binding.evidenceRefs;
+
+const queryEvidenceRouteReady = (state: DataAnalysisState): boolean => state.queryPlanned
+  && state.currentQueryValidated
+  && state.queryExecuted
+  && state.validationPassed;
+
+const hasSufficientContextEvidence = (state: DataAnalysisState): boolean => normalizedEvidenceBindings(state)
+  .some((binding) => binding.source === "context" && binding.completionMode === "sufficient");
 
 const linkTasksToRequirements = (state: DataAnalysisState, result: unknown): DataAnalysisState => {
   const tasks = recordArray(result, "tasks");
@@ -655,7 +768,15 @@ const cloneRequirements = (requirements: AnalysisRequirement[]): AnalysisRequire
     taskIds: [...requirement.taskIds],
     queryAttemptIds: [...requirement.queryAttemptIds],
     evidenceBindingIds: [...requirement.evidenceBindingIds],
-    reportedClaimIds: [...requirement.reportedClaimIds]
+    reportedClaimIds: [...requirement.reportedClaimIds],
+    ...(requirement.contextEvidence
+      ? {
+          contextEvidence: {
+            mode: requirement.contextEvidence.mode,
+            factIds: [...requirement.contextEvidence.factIds],
+          },
+        }
+      : {})
   })
 );
 
@@ -670,7 +791,14 @@ const cloneAssertions = (assertions: AnalysisAssertion[]): AnalysisAssertion[] =
 
 const normalizedRequirements = (state: DataAnalysisState): AnalysisRequirement[] => state.requirements ?? [];
 const normalizedQueryAttempts = (state: DataAnalysisState): AnalysisQueryAttempt[] => state.queryAttempts ?? [];
-const normalizedEvidenceBindings = (state: DataAnalysisState): AnalysisEvidenceBinding[] => state.evidenceBindings ?? [];
+const normalizedEvidenceBindings = (state: DataAnalysisState): AnalysisEvidenceBinding[] =>
+  (state.evidenceBindings ?? []).map((binding) => {
+    if (typeof (binding as AnalysisEvidenceBinding & { source?: string }).source === "string") return binding;
+    return {
+      ...binding,
+      source: "query" as const,
+    } as AnalysisEvidenceBinding;
+  });
 const normalizedReportedClaims = (state: DataAnalysisState): AnalysisReportedClaim[] => state.reportedClaims ?? [];
 const normalizedTaskLinks = (state: DataAnalysisState): TaskRequirementLink[] => state.taskRequirementLinks ?? [];
 
@@ -706,6 +834,19 @@ const recordStrings = (value: unknown, key: string): string[] => {
 const recordArray = (value: unknown, key: string): unknown[] => {
   const field = recordValue(value, key);
   return Array.isArray(field) ? field : [];
+};
+
+const parseEvidencePins = (value: unknown): AnalysisEvidencePins | undefined => {
+  const workspaceId = recordString(value, "workspaceId");
+  const projectId = recordString(value, "projectId");
+  const scopeId = recordString(value, "scopeId");
+  const dataSnapshotId = recordString(value, "dataSnapshotId");
+  const dataCutoff = recordString(value, "dataCutoff");
+  const projectReleaseId = recordString(value, "projectReleaseId");
+  const metricVersion = recordString(value, "metricVersion");
+  return workspaceId && projectId && scopeId && dataSnapshotId && dataCutoff && projectReleaseId && metricVersion
+    ? { workspaceId, projectId, scopeId, dataSnapshotId, dataCutoff, projectReleaseId, metricVersion }
+    : undefined;
 };
 
 const parseClaimValue = (value: unknown): AnalysisClaimValue => {

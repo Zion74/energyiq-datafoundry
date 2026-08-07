@@ -2,6 +2,7 @@ import {
   createAgentContextItem,
   createAgentContextSourceMetadata,
   type AgentContextItem,
+  type AnalysisContextEvidenceCatalog,
   type EnergyAnalysisSemantics,
 } from "@datafoundry/agent-runtime";
 import type { TrustedEnergyTextQueryContract } from "@datafoundry/agent-runtime";
@@ -12,6 +13,7 @@ import {
   createProjectAnalysisPackContextItem,
   type ProjectAnalysisPackReleaseBinding,
 } from "./project-analysis-pack.js";
+import { createProjectAnalysisContextEvidenceCatalog } from "./project-analysis-context-evidence.js";
 
 export const createEnergyQueryContextItem = (
   context: EnergyQueryContext,
@@ -150,11 +152,14 @@ export const createTrustedEnergyTextContextItem = (
  * rediscover Benchmark or Calendar semantics from labels.
  */
 export const createProjectAnalysisSnapshotContextItem = (input: {
+  contextEvidenceCatalog?: AnalysisContextEvidenceCatalog;
   snapshot: ProjectAnalysisSnapshot;
   sessionId: string;
   userId: string;
 }): AgentContextItem => {
   const snapshot = input.snapshot;
+  const contextEvidenceCatalog = input.contextEvidenceCatalog
+    ?? createProjectAnalysisContextEvidenceCatalog(snapshot);
   const bundle = {
     contract: "energyiq-deterministic-evidence@1",
     projectId: snapshot.context.projectId,
@@ -170,31 +175,7 @@ export const createProjectAnalysisSnapshotContextItem = (input: {
     dataQuality: snapshot.dataQuality,
     evidence: snapshot.evidence,
     findings: snapshot.findings,
-    analysis: {
-      summary: snapshot.analysis.summary,
-      comparison: snapshot.analysis.comparison,
-      categories: snapshot.analysis.categories,
-      childScopes: snapshot.analysis.childScopes.map((scope) => ({
-        nodeId: scope.nodeId,
-        name: scope.name,
-        nodeType: scope.nodeType,
-        usageKwh: scope.usageKwh,
-        sharePct: scope.sharePct,
-        comparison: scope.comparison,
-        dataHealth: scope.dataHealth,
-        topCircuitName: scope.topCircuitName,
-        topCircuitUsageKwh: scope.topCircuitUsageKwh,
-        areaSqm: scope.areaSqm,
-        occupantCount: scope.occupantCount,
-        kwhPerSqm: scope.kwhPerSqm,
-        kwhPerPerson: scope.kwhPerPerson,
-        metadataStatus: scope.metadata.status,
-      })),
-      topCircuits: snapshot.analysis.topCircuits,
-      offHours: snapshot.analysis.offHours,
-    },
     decisionPriorities: snapshot.decisionPriorities,
-    preschoolBenchmark: snapshot.preschoolBenchmark,
     preschoolAppliances: compactPreschoolAppliances(snapshot.preschoolAppliances),
     preschoolOperational: compactPreschoolOperational(snapshot.preschoolOperational),
   };
@@ -211,6 +192,9 @@ export const createProjectAnalysisSnapshotContextItem = (input: {
       "Authoritative bounded EnergyIQ deterministic Evidence for the current Analysis Workspace.",
       "Deterministic Evidence is authoritative for released KPI, Benchmark, Calendar and official theme values. It may be explained or challenged with new tool Evidence, but it must not be silently recalculated or modified.",
       "Use the scoped DuckDB relations for new investigation. If a required value is absent from both this bundle and successful scoped tool Evidence, return Missing Evidence or Unavailable rather than zero.",
+      "For released scalar claims, use fact ids from context_evidence_catalog with analysis_requirements_commit. New drivers and custom investigation still require scoped SQL Evidence.",
+      "When a Context Evidence fact is partial or provisional, keep that status visible in the answer; do not present it as complete or confirmed.",
+      `context_evidence_catalog=${JSON.stringify(contextEvidenceCatalog)}`,
       `deterministic_evidence_bundle=${JSON.stringify(bundle)}`,
     ].join("\n"),
     metadata: createAgentContextSourceMetadata({
@@ -264,6 +248,7 @@ const compactPreschoolOperational = (
 
 export const createEnergyAuthoritativeContextItems = (input: {
   analysisWorkspace?: EnergyAnalysisSemantics;
+  contextEvidenceCatalog?: AnalysisContextEvidenceCatalog;
   context?: EnergyQueryContext;
   projectAnalysisSnapshot?: ProjectAnalysisSnapshot;
   projectRelease?: ProjectAnalysisPackReleaseBinding | null;
@@ -291,6 +276,7 @@ export const createEnergyAuthoritativeContextItems = (input: {
     createEnergyQueryContextItem(input.context, input.sessionId, input.analysisWorkspace),
     ...(input.projectAnalysisSnapshot
       ? [createProjectAnalysisSnapshotContextItem({
+          ...(input.contextEvidenceCatalog ? { contextEvidenceCatalog: input.contextEvidenceCatalog } : {}),
           snapshot: input.projectAnalysisSnapshot,
           sessionId: input.sessionId,
           userId: input.userId,

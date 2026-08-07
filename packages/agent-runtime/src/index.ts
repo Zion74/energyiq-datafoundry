@@ -104,6 +104,7 @@ import {
 import type { AnalysisRequirement } from "./protocol/analysis-requirements.js";
 import { createAnalysisRequirementsCommitTool } from "./protocol/analysis-requirements-commit-tool.js";
 import type { DataAnalysisState } from "./protocol/protocols/data-analysis.js";
+import type { AnalysisContextEvidenceCatalog } from "./protocol/analysis-context-evidence.js";
 import { createDefaultSemanticProvider } from "./semantic/default-semantic-provider.js";
 import { EnergyQuerySemanticProvider } from "./semantic/energy-query-semantic-provider.js";
 import type { TrustedEnergyTextQueryContract } from "./semantic/trusted-energy-text.js";
@@ -112,6 +113,14 @@ import type { ContextPackageRef, ProtocolStateStore } from "./protocol/types.js"
 import { toolErrorObservation as createToolErrorObservation } from "./errors/tool-execution-error.js";
 
 export type { AgentRunContext, AgentRunContextInput, AgUiEventEmitter } from "./types.js";
+export {
+  contextEvidenceVerifiedValues,
+  evidencePinsEqual,
+  resolveContextEvidenceFacts,
+  type AnalysisContextEvidenceCatalog,
+  type AnalysisContextEvidenceFact,
+  type AnalysisEvidencePins,
+} from "./protocol/analysis-context-evidence.js";
 export type { ContextPackage } from "./context/inventory/context-package.js";
 export type { ContextPlan } from "./context/inventory/context-plan.js";
 export type { ContextPackageRecorder } from "./context/protocol/mastra/mastra-context-budget-processor.js";
@@ -265,6 +274,7 @@ export type CreateDataFoundryInput = {
   protocolClassifier?: ProtocolClassifier;
   analysisRequirementExtractor?: AnalysisRequirementExtractor;
   analysisContractGrounder?: AnalysisContractGrounder;
+  contextEvidenceCatalog?: AnalysisContextEvidenceCatalog;
   onProtocolEvent?(event: ProtocolEvent): void;
   protocolStateStore?: ProtocolStateStore;
   resourceRevisions?: Record<string, number>;
@@ -538,6 +548,7 @@ export const createDataFoundry = async (
         : createModelAnalysisRequirementExtractor(input.modelProvider)),
     analysisContractGrounder: input.analysisContractGrounder
       ?? createModelAnalysisContractGrounder(input.modelProvider),
+    ...(input.contextEvidenceCatalog ? { contextEvidenceCatalog: input.contextEvidenceCatalog } : {}),
     ...(input.protocolStateStore ? { stateStore: input.protocolStateStore } : {}),
     projectContext: ({ actionName, rawResult }) => {
       if (isProtocolRuntimeAction(actionName)) {
@@ -597,7 +608,15 @@ export const createDataFoundry = async (
     ? {
         analysis_requirements_commit: createAnalysisRequirementsCommitTool({
           analysisRequirements,
+          ...(input.contextEvidenceCatalog ? { contextEvidenceCatalog: input.contextEvidenceCatalog } : {}),
           executeAction: (action) => protocol.actionRouter.execute(action),
+          getAnalysisRequirements: () => {
+            const current = protocol.protocolRuntime.getState(input.runContext.run_id, protocol.segmentId);
+            return current.protocolId === "data-analysis"
+              ? ((current.domain as DataAnalysisState).requirements ?? []).filter((requirement) =>
+                  requirement.source === "user")
+              : [];
+          },
           runId: input.runContext.run_id,
           segmentId: protocol.segmentId,
           trustedEnergy: Boolean(input.runContext.energy_query_context)
@@ -970,8 +989,9 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
         + `${localRangeEnd}. Treat that scope and period as authoritative and show the local calendar range, not raw UTC. `
         + "Do not call list_data_sources, list_files, preview_table, workspace file tools, or direct database clients "
         + "to rediscover data. Call inspect_schema alone as the first tool action, wait for its result, then reuse its "
-        + "schema_id in run_sql_readonly. Do not call analysis_requirements_commit until at least one successful "
-        + "run_sql_readonly result in the current run supports that requirement. Schema IDs and table "
+        + "schema_id in run_sql_readonly. A requirement whose analysis_contract declares sufficient context_evidence "
+        + "may be committed with only its authorized context_fact_ids; do not recalculate those released values in SQL. "
+        + "Other requirements need at least one successful run_sql_readonly result in the current run. Schema IDs and table "
         + "names found in prior messages, deterministic Evidence, examples, or earlier runs are reference-only and "
         + "must never be executed in the current run. The run-scoped relation is already restricted to the authoritative "
         + "period, so do not add a redundant time filter. If a boundary audit truly requires one, compare a TIMESTAMPTZ "

@@ -5,6 +5,7 @@ import {
   buildAnalysisRequirementsCommitInputSchema,
   createAnalysisRequirementsCommitTool
 } from "./analysis-requirements-commit-tool.js";
+import type { AnalysisContextEvidenceCatalog } from "./analysis-context-evidence.js";
 
 const requirements = createUserAnalysisRequirements([{
   kind: "metric",
@@ -116,6 +117,123 @@ describe("analysis requirements commit tool", () => {
         avoid: [expect.stringContaining("Do not repeat analysis_requirements_commit unchanged")]
       }
     });
+    expect(executeAction).not.toHaveBeenCalled();
+  });
+
+  it("binds authorized context facts and injects canonical values before commit", async () => {
+    const contextRequirements = createUserAnalysisRequirements([{
+      kind: "metric",
+      description: "What is Centre A EUI?",
+      acceptanceCriteria: ["Use released EUI"],
+    }]);
+    contextRequirements[0]!.contextEvidence = {
+      mode: "sufficient",
+      factIds: ["centre-a.eui"],
+    };
+    const catalog: AnalysisContextEvidenceCatalog = {
+      contract: "analysis-context-evidence@1",
+      sourceId: "project-analysis-snapshot:project-1:snapshot-1",
+      pins: {
+        workspaceId: "workspace-1",
+        projectId: "project-1",
+        scopeId: "project",
+        dataSnapshotId: "snapshot-1",
+        dataCutoff: "2026-06-01T00:00:00.000Z",
+        projectReleaseId: "release-1",
+        metricVersion: "metrics-1",
+      },
+      facts: [{
+        id: "centre-a.eui",
+        label: "Centre A EUI",
+        metricId: "preschool.benchmark.eui",
+        value: 13.62,
+        unit: "kWh/m2/year",
+        status: "provisional",
+        evidenceRefs: ["evidence-eui"],
+        dimensions: { scopeId: "centre-a" },
+      }],
+    };
+    const executeAction = vi.fn(async (action) => ({ observation: action.input }));
+    const tool = createAnalysisRequirementsCommitTool({
+      analysisRequirements: contextRequirements,
+      contextEvidenceCatalog: catalog,
+      executeAction,
+      getAnalysisRequirements: () => contextRequirements,
+      runId: "run-context",
+      segmentId: "segment-context",
+      trustedEnergy: true,
+    });
+
+    const result = await tool.execute?.({ claims: [{
+      requirement_id: "R1",
+      claim: "Centre A released EUI is 13.62 kWh/m2/year and is provisional.",
+      context_fact_ids: ["centre-a.eui"],
+    }] }, { agent: { toolCallId: "call-context" } } as never);
+
+    expect(result).toMatchObject({ claims: [{
+      requirement_id: "R1",
+      values: [{ name: "centre-a.eui", value: 13.62, unit: "kWh/m2/year" }],
+      evidence_refs: ["evidence-eui"],
+    }] });
+    expect(executeAction).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      actionName: "analysis.context.evidence.bind",
+      input: expect.objectContaining({
+        fact_ids: ["centre-a.eui"],
+        completion_mode: "sufficient",
+      }),
+    }));
+    expect(executeAction).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      actionName: "analysis.requirements.commit",
+    }));
+  });
+
+  it("rejects unknown or ungrounded context facts before changing protocol state", async () => {
+    const contextRequirements = createUserAnalysisRequirements([{
+      kind: "metric",
+      description: "What is Centre A EUI?",
+      acceptanceCriteria: [],
+    }]);
+    contextRequirements[0]!.contextEvidence = { mode: "sufficient", factIds: ["centre-a.eui"] };
+    const executeAction = vi.fn();
+    const tool = createAnalysisRequirementsCommitTool({
+      analysisRequirements: contextRequirements,
+      contextEvidenceCatalog: {
+        contract: "analysis-context-evidence@1",
+        sourceId: "snapshot-source",
+        pins: {
+          workspaceId: "workspace-1",
+          projectId: "project-1",
+          scopeId: "project",
+          dataSnapshotId: "snapshot-1",
+          dataCutoff: "2026-06-01T00:00:00.000Z",
+          projectReleaseId: "release-1",
+          metricVersion: "metrics-1",
+        },
+        facts: [{
+          id: "centre-a.eui",
+          label: "Centre A EUI",
+          metricId: "preschool.benchmark.eui",
+          value: 13.62,
+          unit: "kWh/m2/year",
+          status: "provisional",
+          evidenceRefs: ["evidence-eui"],
+          dimensions: { scopeId: "centre-a" },
+        }],
+      },
+      executeAction,
+      getAnalysisRequirements: () => contextRequirements,
+      runId: "run-context",
+      segmentId: "segment-context",
+      trustedEnergy: true,
+    });
+
+    const result = await tool.execute?.({ claims: [{
+      requirement_id: "R1",
+      claim: "Invented EUI",
+      context_fact_ids: ["invented.eui"],
+    }] }, { agent: { toolCallId: "call-invalid-context" } } as never);
+
+    expect(result).toMatchObject({ ok: false, isError: true });
     expect(executeAction).not.toHaveBeenCalled();
   });
 });

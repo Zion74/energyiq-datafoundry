@@ -152,6 +152,12 @@ describe("createEnergyQueryContextItem", () => {
           tariffScheduleVersion: "tariff-v1",
         },
         dataSnapshot: { id: "snapshot-v1", importBatchIds: ["batch-v1"], lastSeenAt: "2026-06-01T00:00:00.000Z" },
+        metadata: {
+          status: "provisional",
+          selectedScope: { status: "missing" },
+          comparisonScopes: [],
+          evidence: [],
+        },
         dataQuality: { status: "complete" },
         evidence: [{ id: "preschool-benchmark", metricId: "energy.total_usage_kwh@1", queryIds: [] }],
         findings: [],
@@ -181,8 +187,22 @@ describe("createEnergyQueryContextItem", () => {
         },
         preschoolBenchmark: {
           status: "provisional",
+          contract: { id: "preschool-may-2026-benchmark", version: "1", annualisationFactor: 12 },
+          period: { start: baseContext.from, endExclusive: baseContext.to, timezone: baseContext.timezone },
           sampleSize: 30,
-          cohorts: [{ name: "Active Aging Center", sampleSize: 8 }],
+          portfolio: {
+            eui: { p50: 6.8, p75: 10.5, unit: "kWh/m2/year" },
+            perPax: { p50: 18.1, p75: 20.7, unit: "kWh/person/month" },
+          },
+          cohorts: [{
+            name: "Active Aging Center",
+            sampleSize: 8,
+            eui: { p50: 6.72, p75: 15.13, unit: "kWh/m2/year" },
+            perPax: { p50: 17.2, p75: 22.5, unit: "kWh/person/month" },
+          }],
+          centres: [],
+          priorityCentreCodes: [],
+          evidence: {},
         },
         preschoolAppliances: {
           status: "available",
@@ -216,7 +236,8 @@ describe("createEnergyQueryContextItem", () => {
 
     expect(item.sourceType).toBe("project-analysis-snapshot");
     expect(content).toContain('"dataSnapshotId":"snapshot-v1"');
-    expect(content).toContain('"name":"Active Aging Center","sampleSize":8');
+    expect(content).toContain("preschool.benchmark.cohorts.active%20aging%20center.eui.p50");
+    expect(content).toContain('"cohort":"Active Aging Center","sampleSize":"8"');
     expect(content).toContain('"sourceCircuitCount":2');
     expect(content).toContain('"scoredCentreCount":2');
     expect(content).toContain('"centreCode":"E","standbySpikeCount":2');

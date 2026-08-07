@@ -12,6 +12,7 @@ import {
   parseAgentMemoryMode,
   resolveSkillCacheDir,
   type AgentMemoryMode,
+  type AnalysisContextEvidenceCatalog,
   type TaskStateRuntime,
   type TrustedEnergyTextQueryContract
 } from "@datafoundry/agent-runtime";
@@ -92,6 +93,7 @@ import {
   resolveEnergyPublishedMeterRoute
 } from "./energy/energy-query-context.js";
 import { createEnergyAuthoritativeContextItems } from "./energy/energy-context-item.js";
+import { createProjectAnalysisContextEvidenceCatalog } from "./energy/project-analysis-context-evidence.js";
 import {
   resolveProjectAnalysis,
   resolvePublishedEnergyQueryContext,
@@ -537,6 +539,7 @@ class DataFoundryAgUiAgent extends AbstractAgent {
         let skillSelection;
         let energyQueryContext;
         let energyAnalysisWorkspace: EnergyIqAnalysisWorkspace | undefined;
+        let contextEvidenceCatalog: AnalysisContextEvidenceCatalog | undefined;
         let projectAnalysisSnapshot: ProjectAnalysisSnapshot | undefined;
         let publishedProjectRelease: PublishedProjectRelease | null = null;
         let trustedEnergyTextContract: TrustedEnergyTextQueryContract | undefined;
@@ -585,6 +588,7 @@ class DataFoundryAgUiAgent extends AbstractAgent {
             });
             if (resolution.status === "ready") {
               projectAnalysisSnapshot = resolution.snapshot;
+              contextEvidenceCatalog = createProjectAnalysisContextEvidenceCatalog(resolution.snapshot);
             } else if (trustedTextIntent) {
               throw new Error("TRUSTED_ENERGY_TEXT_PROJECT_ANALYSIS_NOT_CONFIGURED");
             }
@@ -767,6 +771,7 @@ class DataFoundryAgUiAgent extends AbstractAgent {
               : {}),
             ...(energyQueryContext ? { context: energyQueryContext } : {}),
             ...(projectAnalysisSnapshot ? { projectAnalysisSnapshot } : {}),
+            ...(contextEvidenceCatalog ? { contextEvidenceCatalog } : {}),
             ...(publishedProjectRelease ? { projectRelease: publishedProjectRelease } : {}),
             sessionId,
             ...(trustedEnergyTextContract ? { trustedTextContract: trustedEnergyTextContract } : {}),
@@ -823,7 +828,10 @@ class DataFoundryAgUiAgent extends AbstractAgent {
                 // Preserve Data Foundry's downstream SQL validation without a
                 // second model call that can drift from the trusted boundary.
                 analysisContractGrounder: energyAnalysisWorkspace
-                  ? createEnergyAnalysisContractGrounder(energyAnalysisWorkspace.semantics)
+                  ? createEnergyAnalysisContractGrounder(
+                      energyAnalysisWorkspace.semantics,
+                      contextEvidenceCatalog,
+                    )
                   : async (groundingInput) => ({
                       requirements: groundingInput.requirements,
                       findings: []
@@ -831,6 +839,7 @@ class DataFoundryAgUiAgent extends AbstractAgent {
               }
             : {}),
           abortSignal: runAbortController.signal,
+          ...(contextEvidenceCatalog ? { contextEvidenceCatalog } : {}),
           contextPackageRecorder,
           contextPackageExists: (reference) => Boolean(
             this.input.metadataStore.contextPackageSnapshots.findByPackageRevision({

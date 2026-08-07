@@ -11,6 +11,7 @@ export type TrustedEnergyCommitClaim = {
   }> | undefined;
   evidence_refs?: string[] | undefined;
   evidence_requirement_ids?: string[] | undefined;
+  context_fact_ids?: string[] | undefined;
 };
 
 export type TrustedEnergyRequirementsCommitInput = {
@@ -58,6 +59,9 @@ export const adaptTrustedEnergyRequirementsCommit = (
           : {}),
         ...(claim.evidence_requirement_ids && claim.evidence_requirement_ids.length > 0
           ? { evidence_requirement_ids: [...claim.evidence_requirement_ids] }
+          : {}),
+        ...(claim.context_fact_ids && claim.context_fact_ids.length > 0
+          ? { context_fact_ids: [...claim.context_fact_ids] }
           : {})
       };
     })

@@ -5,11 +5,16 @@ import { AGENT_RUNTIME_LIMITS } from "../config/agent-runtime-limits.js";
 import { toolErrorObservation } from "../errors/tool-execution-error.js";
 import type { AnalysisRequirement } from "./analysis-requirements.js";
 import {
+  contextEvidenceVerifiedValues,
+  resolveContextEvidenceFacts,
+  type AnalysisContextEvidenceCatalog,
+} from "./analysis-context-evidence.js";
+import {
   adaptTrustedEnergyRequirementsCommit,
   type TrustedEnergyRequirementsCommitInput
 } from "./trusted-energy-requirements-commit-adapter.js";
 
-type CommitActionInput = {
+type RequirementsCommitActionInput = {
   runId: string;
   segmentId: string;
   actionId: string;
@@ -18,9 +23,20 @@ type CommitActionInput = {
   idempotencyKey: string;
 };
 
+type ContextEvidenceBindActionInput = {
+  runId: string;
+  segmentId: string;
+  actionId: string;
+  actionName: "analysis.context.evidence.bind";
+  input: Record<string, unknown>;
+  idempotencyKey: string;
+};
+
 export type CreateAnalysisRequirementsCommitToolInput = {
   analysisRequirements: AnalysisRequirement[];
-  executeAction(input: CommitActionInput): Promise<{ observation: unknown }>;
+  contextEvidenceCatalog?: AnalysisContextEvidenceCatalog;
+  executeAction(input: RequirementsCommitActionInput | ContextEvidenceBindActionInput): Promise<{ observation: unknown }>;
+  getAnalysisRequirements?(): AnalysisRequirement[];
   runId: string;
   segmentId: string;
   trustedEnergy: boolean;
@@ -36,7 +52,8 @@ export const analysisRequirementsCommitInputSchema = z.object({
       unit: z.string().optional()
     })).max(AGENT_RUNTIME_LIMITS.requirementCommitMaxOutputFields).optional(),
     evidence_refs: z.array(z.string().min(1)).optional(),
-    evidence_requirement_ids: z.array(z.string().min(1)).optional()
+    evidence_requirement_ids: z.array(z.string().min(1)).optional(),
+    context_fact_ids: z.array(z.string().min(1)).optional()
   })).min(1).max(AGENT_RUNTIME_LIMITS.requirementCommitMaxClaims)
 });
 
@@ -51,7 +68,8 @@ const stringEnum = (values: string[]) =>
  * ids and value names that the server can never accept.
  */
 export const buildAnalysisRequirementsCommitInputSchema = (
-  requirements: AnalysisRequirement[]
+  requirements: AnalysisRequirement[],
+  contextEvidenceCatalog?: AnalysisContextEvidenceCatalog,
 ) => {
   const requirementIds = requirements.map((requirement) => requirement.id);
   if (requirementIds.length === 0) {
@@ -72,7 +90,10 @@ export const buildAnalysisRequirementsCommitInputSchema = (
     claim: z.string().min(1),
     ...(valueSchema ? { values: valueSchema } : {}),
     evidence_refs: z.array(z.string().min(1)).optional(),
-    evidence_requirement_ids: z.array(stringEnum(requirementIds)).optional()
+    evidence_requirement_ids: z.array(stringEnum(requirementIds)).optional(),
+    ...(contextEvidenceCatalog?.facts.length
+      ? { context_fact_ids: z.array(z.string().min(1)).min(1).max(64).optional() }
+      : {})
   };
   return z.object({
     claims: z.array(z.object(claimShape).strict())
@@ -85,10 +106,15 @@ export const buildAnalysisRequirementsCommitInputSchema = (
 export const createAnalysisRequirementsCommitTool = (
   input: CreateAnalysisRequirementsCommitToolInput
 ) => {
-  const inputSchema = buildAnalysisRequirementsCommitInputSchema(input.analysisRequirements);
+  const inputSchema = buildAnalysisRequirementsCommitInputSchema(
+    input.analysisRequirements,
+    input.contextEvidenceCatalog,
+  );
   return createTool({
     id: "analysis_requirements_commit",
-    description: "Commit final claims for analysis requirements using artifact evidence from successful SQL results.",
+    description: input.contextEvidenceCatalog
+      ? "Commit final claims using audited SQL Evidence and/or authorized current-Snapshot context_fact_ids. Use only fact ids listed for the requirement in analysis_contract."
+      : "Commit final claims for analysis requirements using artifact evidence from successful SQL results.",
     inputSchema,
     execute: async (toolInput, options) => {
       const toolCallId = typeof options?.agent?.toolCallId === "string" && options.agent.toolCallId.length > 0
@@ -96,9 +122,16 @@ export const createAnalysisRequirementsCommitTool = (
         : undefined;
       try {
         const parsedToolInput = inputSchema.parse(toolInput);
-        const commitInput = input.trustedEnergy
-          ? adaptTrustedEnergyRequirementsCommit(parsedToolInput, input.analysisRequirements)
+        const currentRequirements = input.getAnalysisRequirements?.() ?? input.analysisRequirements;
+        const adaptedInput = input.trustedEnergy
+          ? adaptTrustedEnergyRequirementsCommit(parsedToolInput, currentRequirements)
           : parsedToolInput;
+        const commitInput = await bindContextEvidence({
+          ...input,
+          analysisRequirements: currentRequirements,
+          claims: adaptedInput.claims,
+          ...(toolCallId ? { toolCallId } : {}),
+        });
         const result = await input.executeAction({
           runId: input.runId,
           segmentId: input.segmentId,
@@ -114,3 +147,68 @@ export const createAnalysisRequirementsCommitTool = (
     }
   });
 };
+
+const bindContextEvidence = async (input: CreateAnalysisRequirementsCommitToolInput & {
+  claims: TrustedEnergyRequirementsCommitInput["claims"];
+  toolCallId?: string;
+}): Promise<TrustedEnergyRequirementsCommitInput> => {
+  const catalog = input.contextEvidenceCatalog;
+  const requirementsById = new Map(input.analysisRequirements.map((requirement) => [requirement.id, requirement]));
+  const claims: TrustedEnergyRequirementsCommitInput["claims"] = [];
+  for (const [index, claim] of input.claims.entries()) {
+    const factIds = claim.context_fact_ids ?? [];
+    if (factIds.length === 0) {
+      claims.push(claim);
+      continue;
+    }
+    if (!catalog) throw new Error("ANALYSIS_CONTEXT_EVIDENCE_CATALOG_UNAVAILABLE");
+    const requirement = requirementsById.get(claim.requirement_id);
+    if (!requirement?.contextEvidence) {
+      throw new Error(`ANALYSIS_CONTEXT_EVIDENCE_NOT_AUTHORIZED:${claim.requirement_id}`);
+    }
+    if (requirement.contextEvidence.mode === "supporting" && requirement.status !== "evidenced") {
+      throw new Error(`ANALYSIS_CONTEXT_EVIDENCE_SUPPORTING_REQUIRES_QUERY:${claim.requirement_id}`);
+    }
+    if (factIds.some((factId) => !requirement.contextEvidence?.factIds.includes(factId))) {
+      throw new Error(`ANALYSIS_CONTEXT_EVIDENCE_NOT_AUTHORIZED:${claim.requirement_id}`);
+    }
+    const facts = resolveContextEvidenceFacts(catalog, factIds);
+    const verifiedValues = contextEvidenceVerifiedValues(facts);
+    const evidenceRefs = [...new Set(facts.flatMap((fact) => fact.evidenceRefs))];
+    const bindingInput = {
+      requirement_id: claim.requirement_id,
+      context_source_id: catalog.sourceId,
+      fact_ids: facts.map((fact) => fact.id),
+      evidence_refs: evidenceRefs,
+      verified_values: verifiedValues,
+      pins: structuredClone(catalog.pins),
+      completion_mode: requirement.contextEvidence.mode,
+    };
+    await input.executeAction({
+      runId: input.runId,
+      segmentId: input.segmentId,
+      actionId: input.toolCallId
+        ? `${input.toolCallId}:context:${index + 1}`
+        : `analysis-context-evidence-bind:${Date.now()}:${index + 1}`,
+      actionName: "analysis.context.evidence.bind",
+      input: bindingInput,
+      idempotencyKey: JSON.stringify(bindingInput),
+    });
+    const canonicalValues = verifiedValues.map((value) => ({
+      name: value.name,
+      value: value.value,
+      ...(value.unit ? { unit: value.unit } : {}),
+    }));
+    claims.push({
+      ...claim,
+      values: mergeClaimValues(claim.values ?? [], canonicalValues),
+      evidence_refs: [...new Set([...(claim.evidence_refs ?? []), ...evidenceRefs])],
+    });
+  }
+  return { claims };
+};
+
+const mergeClaimValues = (
+  left: NonNullable<TrustedEnergyRequirementsCommitInput["claims"][number]["values"]>,
+  right: NonNullable<TrustedEnergyRequirementsCommitInput["claims"][number]["values"]>,
+) => [...new Map([...left, ...right].map((value) => [value.name, value])).values()];

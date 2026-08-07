@@ -258,6 +258,14 @@ describe("formal protocols", () => {
       }]
     });
     expect(stateWithSourceRequirement.reportedClaims[0]?.evidenceBindingIds).toEqual([evidenceId]);
+    const legacyState = {
+      ...state,
+      evidenceBindings: state.evidenceBindings.map(({ source: _source, ...binding }) => binding),
+    } as unknown as typeof state;
+    const stateWithLegacyQueryBinding = reduceDataAnalysisAction(legacyState, "analysis.requirements.commit", {
+      claims: [{ requirement_id: "R1", claim: "利润公式错误数为 0" }],
+    });
+    expect(stateWithLegacyQueryBinding.reportedClaims[0]?.evidenceBindingIds).toEqual([evidenceId]);
     state = reduceDataAnalysisAction(state, "analysis.requirements.commit", {
       claims: [{ requirement_id: "R1", claim: "利润公式错误数为 0", evidence_binding_ids: [evidenceId] }]
     });
@@ -484,5 +492,178 @@ describe("formal protocols", () => {
     expect(() => reduceDataAnalysisAction(initial, "analysis.requirements.commit", {
       claims: [{ requirement_id: "R1", claim: "profit", evidence_binding_ids: ["E404"] }]
     })).toThrow("ANALYSIS_REQUIREMENT_EVIDENCE_INVALID:R1:E404");
+  });
+
+  it("completes a released KPI requirement from pinned Context Evidence without a fake query", () => {
+    const requirements = createUserAnalysisRequirements([{
+      kind: "metric",
+      description: "What is Centre A released EUI?",
+      acceptanceCriteria: ["Use current Snapshot Evidence"],
+    }]);
+    requirements[0]!.contextEvidence = { mode: "sufficient", factIds: ["centre-a.eui"] };
+    const catalog = {
+      contract: "analysis-context-evidence@1" as const,
+      sourceId: "project-analysis-snapshot:project-1:snapshot-1",
+      pins: {
+        workspaceId: "workspace-1",
+        projectId: "project-1",
+        scopeId: "project",
+        dataSnapshotId: "snapshot-1",
+        dataCutoff: "2026-06-01T00:00:00.000Z",
+        projectReleaseId: "release-1",
+        metricVersion: "metrics-1",
+      },
+      facts: [],
+    };
+    const protocol = createDataAnalysisProtocol([], requirements, catalog);
+    let state = protocol.createInitialState({ contextPackageRef, runId: "run-context-evidence" });
+    state = reduceDataAnalysisAction(state, "inspect_schema", { schema_id: "schema-1" });
+    state = reduceDataAnalysisAction(state, "semantic.context.resolve", {
+      mode: "live",
+      trust: "authoritative",
+      datasourceRevision: "1",
+    });
+    state = reduceDataAnalysisAction(state, "analysis.contract.ground", {
+      schema_id: "schema-1",
+      datasourceRevision: "1",
+      requirements,
+    });
+    state = reduceDataAnalysisAction(state, "analysis.context.evidence.bind", {
+      requirement_id: "R1",
+      context_source_id: catalog.sourceId,
+      fact_ids: ["centre-a.eui"],
+      evidence_refs: ["evidence-eui"],
+      verified_values: [{
+        name: "centre-a.eui",
+        value: 13.62,
+        unit: "kWh/m2/year",
+        tolerance: 0.0001,
+        assertionId: "CONTEXT:centre-a.eui",
+      }],
+      pins: catalog.pins,
+      completion_mode: "sufficient",
+    });
+    state = reduceDataAnalysisAction(state, "analysis.requirements.commit", {
+      claims: [{
+        requirement_id: "R1",
+        claim: "Centre A released EUI is 13.62 kWh/m2/year.",
+        values: [{ name: "centre-a.eui", value: 13.62, unit: "kWh/m2/year" }],
+        evidence_refs: ["evidence-eui"],
+      }],
+    });
+
+    expect(state.queryAttempts).toEqual([]);
+    expect(state.evidenceBindings).toEqual([expect.objectContaining({
+      source: "context",
+      factIds: ["centre-a.eui"],
+      pins: catalog.pins,
+    })]);
+    expect(protocol.completionPolicy({ contextPackageRef, state }).status).toBe("completed");
+
+    expect(() => reduceDataAnalysisAction(state, "analysis.context.evidence.bind", {
+      requirement_id: "R1",
+      context_source_id: catalog.sourceId,
+      fact_ids: ["centre-a.eui"],
+      evidence_refs: ["evidence-eui"],
+      verified_values: [{
+        name: "centre-a.eui",
+        value: 13.62,
+        unit: "kWh/m2/year",
+        tolerance: 0.0001,
+        assertionId: "CONTEXT:centre-a.eui",
+      }],
+      pins: { ...catalog.pins, dataSnapshotId: "snapshot-old" },
+      completion_mode: "sufficient",
+    })).toThrow("ANALYSIS_CONTEXT_EVIDENCE_PINS_MISMATCH");
+  });
+
+  it("keeps supporting Context Evidence insufficient until autonomous SQL Evidence is bound", () => {
+    const requirements = createUserAnalysisRequirements([{
+      kind: "decision",
+      description: "Which centre should I investigate first and why?",
+      acceptanceCriteria: ["Use released Benchmark and investigate a driver"],
+    }]);
+    requirements[0]!.contextEvidence = { mode: "supporting", factIds: ["centre-a.priority"] };
+    const catalog = {
+      contract: "analysis-context-evidence@1" as const,
+      sourceId: "project-analysis-snapshot:project-1:snapshot-1",
+      pins: {
+        workspaceId: "workspace-1",
+        projectId: "project-1",
+        scopeId: "project",
+        dataSnapshotId: "snapshot-1",
+        dataCutoff: "2026-06-01T00:00:00.000Z",
+        projectReleaseId: "release-1",
+        metricVersion: "metrics-1",
+      },
+      facts: [],
+    };
+    const protocol = createDataAnalysisProtocol([], requirements, catalog);
+    let state = protocol.createInitialState({ contextPackageRef, runId: "run-combined-evidence" });
+    state = reduceDataAnalysisAction(state, "inspect_schema", { schema_id: "schema-1", dialect: "duckdb" });
+    state = reduceDataAnalysisAction(state, "semantic.context.resolve", {
+      mode: "live",
+      trust: "authoritative",
+      datasourceRevision: "1",
+    });
+    state = reduceDataAnalysisAction(state, "analysis.contract.ground", {
+      schema_id: "schema-1",
+      datasourceRevision: "1",
+      requirements,
+    });
+    state = reduceDataAnalysisAction(state, "analysis.context.evidence.bind", {
+      requirement_id: "R1",
+      context_source_id: catalog.sourceId,
+      fact_ids: ["centre-a.priority"],
+      evidence_refs: ["evidence-benchmark"],
+      verified_values: [{
+        name: "centre-a.priority",
+        value: true,
+        tolerance: 0,
+        assertionId: "CONTEXT:centre-a.priority",
+      }],
+      pins: catalog.pins,
+      completion_mode: "supporting",
+    });
+    expect(() => reduceDataAnalysisAction(state, "analysis.requirements.commit", {
+      claims: [{
+        requirement_id: "R1",
+        claim: "Centre A should be investigated.",
+        values: [{ name: "centre-a.priority", value: true }],
+        evidence_refs: ["evidence-benchmark"],
+      }],
+    })).toThrow("ANALYSIS_REQUIREMENT_EVIDENCE_SUPPORTING_ONLY:R1");
+
+    state = reduceDataAnalysisAction(state, "data.query.plan", {
+      requirement_ids: ["R1"],
+      sql: "select 1 as driver_check",
+      expected_columns: ["driver_check"],
+    });
+    state = reduceDataAnalysisAction(state, "data.query.validate", { valid: true });
+    state = reduceDataAnalysisAction(state, "run_sql_readonly", {
+      result: {
+        artifact_id: "artifact-driver",
+        audit_log_id: "audit-driver",
+        columns: ["driver_check"],
+      },
+    });
+    state = reduceDataAnalysisAction(state, "analysis.result.validate", { valid: true });
+    state = reduceDataAnalysisAction(state, "analysis.evidence.bind", {
+      artifact_id: "artifact-driver",
+      audit_log_id: "audit-driver",
+      evidence_refs: ["artifact-driver"],
+      result_fields: ["driver_check"],
+    });
+    state = reduceDataAnalysisAction(state, "analysis.requirements.commit", {
+      claims: [{
+        requirement_id: "R1",
+        claim: "Centre A is a released priority and the driver check supports investigation.",
+        values: [{ name: "centre-a.priority", value: true }],
+        evidence_refs: ["evidence-benchmark", "artifact-driver"],
+      }],
+    });
+
+    expect(state.reportedClaims[0]?.evidenceBindingIds).toHaveLength(2);
+    expect(protocol.completionPolicy({ contextPackageRef, state }).status).toBe("completed");
   });
 });

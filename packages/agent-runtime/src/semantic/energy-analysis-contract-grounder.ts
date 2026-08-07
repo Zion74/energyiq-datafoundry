@@ -5,6 +5,10 @@ import type {
   AnalysisContractGroundingResult,
 } from "../protocol/model-analysis-contract-grounder.js";
 import type { AnalysisRequirement } from "../protocol/analysis-requirements.js";
+import type {
+  AnalysisContextEvidenceCatalog,
+  AnalysisContextEvidenceFact,
+} from "../protocol/analysis-context-evidence.js";
 
 export type EnergyAnalysisSemantics = {
   contract: "energyiq-analysis-semantics@1";
@@ -39,14 +43,21 @@ export type EnergyAnalysisSemantics = {
  */
 export const createEnergyAnalysisContractGrounder = (
   semantics: EnergyAnalysisSemantics,
+  contextEvidenceCatalog?: AnalysisContextEvidenceCatalog,
 ): AnalysisContractGrounder => async (input): Promise<AnalysisContractGroundingResult> => {
   const findings: AnalysisContractGroundingFinding[] = [];
   const availableTables = physicalTableNames(input.physicalSchema);
   const requirements = input.requirements.map((requirement) => {
     if (requirement.source !== "user") return cloneRequirement(requirement);
+    const contextEvidence = contextEvidenceCatalog
+      ? contextEvidenceForRequirement(requirement.description, contextEvidenceCatalog)
+      : undefined;
     const facilityType = requestedFacilityType(requirement.description, semantics);
     if (!facilityType || !isCountQuestion(requirement.description)) {
-      return cloneRequirement(requirement);
+      return {
+        ...cloneRequirement(requirement),
+        ...(contextEvidence ? { contextEvidence } : {}),
+      };
     }
     const metadata = semantics.relations.scopeMetadata;
     if (!availableTables.has(normalize(metadata.relation))) {
@@ -90,6 +101,100 @@ export const createEnergyAnalysisContractGrounder = (
   });
   return { requirements, findings };
 };
+
+const contextEvidenceForRequirement = (
+  question: string,
+  catalog: AnalysisContextEvidenceCatalog,
+): AnalysisRequirement["contextEvidence"] => {
+  const normalized = normalize(question);
+  const investigation = /\b(?:investigat|prioriti|why|driver|cause|check next|what should)\w*\b|调查|优先|原因|为什么|下一步/iu
+    .test(question);
+  const selected = investigation
+    ? investigationFacts(catalog.facts)
+    : directQuestionFacts(normalized, catalog.facts);
+  return selected.length > 0
+    ? { mode: investigation ? "supporting" : "sufficient", factIds: selected.map((fact) => fact.id) }
+    : undefined;
+};
+
+const directQuestionFacts = (
+  normalizedQuestion: string,
+  facts: AnalysisContextEvidenceFact[],
+): AnalysisContextEvidenceFact[] => {
+  const releasedBenchmark = /\b(?:released|annualis(?:ed|ation)|annualiz(?:ed|ation)|benchmark|cohort|peer|p50|p75)\b|发布|年化|基准|同类/iu
+    .test(normalizedQuestion);
+  const metricPatterns: Array<[RegExp, (fact: AnalysisContextEvidenceFact) => boolean]> = [
+    [/\beui\b|energy\s+use\s+intensity/iu, (fact) => releasedBenchmark
+      ? fact.metricId === "preschool.benchmark.eui"
+      : fact.metricId.includes("eui")],
+    [/kwh\s*\/\s*m2|单位面积/iu, (fact) => releasedBenchmark
+      ? fact.metricId === "preschool.benchmark.eui"
+      : fact.metricId.includes("kwh_per_sqm")],
+    [/per[\s-]?pax|per\s+person|kwh\s*\/\s*person|人均/iu, (fact) => releasedBenchmark
+      ? fact.metricId === "preschool.benchmark.per_pax"
+      : fact.metricId.includes("per_pax") || fact.metricId.includes("per_person")],
+    [/off[\s-]?hours?|non[\s-]?operating|非营业/iu, (fact) => fact.metricId.includes("off_hours")],
+    [/\bpeak\b|峰值/iu, (fact) => fact.metricId.includes("peak")],
+    [/\bchange\b|previous\s+period|相比|变化/iu, (fact) => fact.metricId.includes("change") || fact.id.includes("previous_usage")],
+    [/\busage\b|energy\s+use|consumption|用电|能耗/iu, (fact) => fact.metricId.includes("usage")],
+  ];
+  const selectors = metricPatterns.filter(([pattern]) => pattern.test(normalizedQuestion)).map(([, select]) => select);
+  if (selectors.length === 0) return [];
+  let selected = facts.filter((fact) => selectors.some((select) => select(fact)));
+  const centre = selectedCentre(normalizedQuestion, facts);
+  if (centre) {
+    selected = selected.filter((fact) => fact.dimensions.scopeId === centre.scopeId);
+    if (/\b(?:cohort|peer|benchmark|compare|p50|p75)\b|同类|基准|比较/iu.test(normalizedQuestion)) {
+      selected.push(...facts.filter((fact) =>
+        fact.dimensions.cohort === centre.cohort
+        && (fact.dimensions.percentile === "p50" || fact.dimensions.percentile === "p75")
+        && selectors.some((select) => select(fact))));
+    }
+  } else if (/\b(?:cohort|peer|benchmark|p50|p75)\b|同类|基准/iu.test(normalizedQuestion)) {
+    selected = selected.filter((fact) => Boolean(fact.dimensions.percentile));
+  } else {
+    selected = selected.filter((fact) => fact.id.startsWith("analysis.summary.") || fact.id.startsWith("analysis.comparison."));
+  }
+  return uniqueFacts(selected);
+};
+
+const investigationFacts = (facts: AnalysisContextEvidenceFact[]): AnalysisContextEvidenceFact[] => {
+  const priorityCentres = new Set(facts
+    .filter((fact) => fact.metricId === "preschool.benchmark.priority" && fact.value === true)
+    .map((fact) => fact.dimensions.scopeId));
+  if (priorityCentres.size === 0) return [];
+  return uniqueFacts(facts.filter((fact) =>
+    priorityCentres.has(fact.dimensions.scopeId)
+    && [
+      "preschool.benchmark.priority",
+      "preschool.benchmark.quadrant",
+      "preschool.benchmark.eui",
+      "preschool.benchmark.per_pax",
+    ].includes(fact.metricId)));
+};
+
+const selectedCentre = (
+  normalizedQuestion: string,
+  facts: AnalysisContextEvidenceFact[],
+): { scopeId: string; cohort?: string } | undefined => {
+  const centreDimensions = uniqueDimensions(facts.filter((fact) => fact.dimensions.scopeId));
+  const matches = centreDimensions.filter((dimensions) => [
+    dimensions.scopeName,
+    dimensions.centreCode ? `centre ${dimensions.centreCode}` : undefined,
+    dimensions.centreCode ? `center ${dimensions.centreCode}` : undefined,
+  ].some((value) => value && normalizedQuestion.includes(normalize(value))));
+  return matches.length === 1
+    ? { scopeId: matches[0]!.scopeId!, ...(matches[0]!.cohort ? { cohort: matches[0]!.cohort } : {}) }
+    : undefined;
+};
+
+const uniqueDimensions = (facts: AnalysisContextEvidenceFact[]): Array<Record<string, string>> => [...new Map(
+  facts.map((fact) => [fact.dimensions.scopeId, fact.dimensions]),
+).values()];
+
+const uniqueFacts = (facts: AnalysisContextEvidenceFact[]): AnalysisContextEvidenceFact[] => [...new Map(
+  facts.map((fact) => [fact.id, fact]),
+).values()];
 
 const isCountQuestion = (value: string): boolean =>
   /\bhow\s+many\b|\bcount\b|\bnumber\s+of\b|多少|几个/iu.test(value);

@@ -7,6 +7,7 @@ import {
   type AnalysisValidationFinding,
   type AnalysisVerifiedValue
 } from "./analysis-contract.js";
+import type { AnalysisEvidencePins } from "./analysis-context-evidence.js";
 
 export const ANALYSIS_REQUIREMENT_KINDS = [
   "data_quality",
@@ -35,6 +36,10 @@ export type AnalysisRequirement = {
   queryAttemptIds: string[];
   evidenceBindingIds: string[];
   reportedClaimIds: string[];
+  contextEvidence?: {
+    mode: "sufficient" | "supporting";
+    factIds: string[];
+  };
 };
 
 export type AnalysisQueryAttempt = {
@@ -54,15 +59,32 @@ export type AnalysisQueryAttempt = {
   verifiedValues: AnalysisVerifiedValue[];
 };
 
-export type AnalysisEvidenceBinding = {
+export type AnalysisQueryEvidenceBinding = {
   id: string;
+  source: "query";
   requirementId: string;
   queryAttemptId: string;
   artifactId: string;
   auditLogId: string;
   resultFields: string[];
+  pins?: AnalysisEvidencePins;
   validationStatus: "passed";
 };
+
+export type AnalysisContextEvidenceBinding = {
+  id: string;
+  source: "context";
+  requirementId: string;
+  contextSourceId: string;
+  factIds: string[];
+  evidenceRefs: string[];
+  verifiedValues: AnalysisVerifiedValue[];
+  pins: AnalysisEvidencePins;
+  completionMode: "sufficient" | "supporting";
+  validationStatus: "passed";
+};
+
+export type AnalysisEvidenceBinding = AnalysisQueryEvidenceBinding | AnalysisContextEvidenceBinding;
 
 export type AnalysisReportedClaim = {
   id: string;
