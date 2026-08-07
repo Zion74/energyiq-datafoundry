@@ -815,6 +815,30 @@ export type EnergyScopeAnalysisDto = {
     from: string;
     to: string;
   };
+  latestAcceptedReading: {
+    status: "available";
+    valueKwh: number;
+    recordedAt: string;
+    meterNodeId: string;
+    sourceFile: string;
+    sourceSha256: string;
+    sourceReadingKind: "cumulative_energy";
+    queryId: "latest_accepted_reading_v1";
+  } | {
+    status: "not_applicable";
+    queryId: "latest_accepted_reading_v1";
+    reason: {
+      code: "LEAF_METER_REQUIRED" | "INTERVAL_USAGE_SOURCE";
+      message: string;
+    };
+  } | {
+    status: "unavailable";
+    queryId: "latest_accepted_reading_v1";
+    reason: {
+      code: "ACCEPTED_CUMULATIVE_READING_UNAVAILABLE";
+      message: string;
+    };
+  };
   summary: {
     usageKwh: number;
     averageDailyUsageKwh: number;
@@ -964,6 +988,7 @@ export type EnergyScopeAnalysisDto = {
       | "previous_meter_usage_v1"
       | "operational_policy_scope_intervals_v1"
       | "operational_policy_meter_intervals_v1"
+      | "latest_accepted_reading_v1"
     >;
   };
 };

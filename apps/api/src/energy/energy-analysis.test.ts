@@ -145,6 +145,108 @@ describe("EnergyScopeAnalysis", () => {
     }
   }, 30_000);
 
+  it("returns the latest accepted cumulative register only for an eligible leaf Circuit", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-analysis-latest-reading-"));
+    const databasePath = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const gateway = new LocalDataGateway(metadata);
+    const availableMeterNodeId = "preschool-centre-a-aircon-1";
+    const unavailableMeterNodeId = "preschool-centre-a-aircon-2";
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      await materializePreschoolGoldenFixture(databasePath, metadata, {
+        transformIntervalFacts: (facts) => facts.filter(
+          (fact) => fact.meterPointId !== availableMeterNodeId
+            && fact.meterPointId !== unavailableMeterNodeId,
+        ),
+        normalizedReadings: [
+          cumulativeReading(availableMeterNodeId, "Aircon 1", "2026-05-01T15:00:00.000Z", 1_001, 1),
+          cumulativeReading(availableMeterNodeId, "Aircon 1", "2026-05-01T16:00:00.000Z", 1_005, 2),
+          cumulativeReading(unavailableMeterNodeId, "Aircon 2", "2026-05-01T16:00:00.000Z", 2_001, 3),
+        ],
+      });
+      const user = metadata.users.getById({ user_id: "dev-user" });
+      const analyzeScope = async (scopeId: string) => await executeEnergyScopeAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        context: resolveEnergyQueryContext({
+          metadataStore: metadata,
+          user,
+          workspaceId: PRESCHOOL_WORKSPACE_ID,
+          request: {
+            projectId: PRESCHOOL_GOLDEN.projectId,
+            scopeId,
+            resource: "electricity",
+            period: "Custom",
+            from: PRESCHOOL_GOLDEN.period.localFrom,
+            to: PRESCHOOL_GOLDEN.period.localToInclusive,
+          },
+        }),
+        databasePath,
+        ruleRevisions: [],
+        includeTimeBehaviour: false,
+        includeMeterOperationalBreakdown: false,
+      });
+
+      const project = await analyzeScope("preschool-project");
+      expect(project.latestAcceptedReading).toEqual({
+        status: "not_applicable",
+        queryId: "latest_accepted_reading_v1",
+        reason: {
+          code: "LEAF_METER_REQUIRED",
+          message: "Select a leaf Meter or Circuit to view its latest accepted cumulative reading.",
+        },
+      });
+      expect(project.provenance.queryIds).not.toContain("latest_accepted_reading_v1");
+
+      const centre = await analyzeScope(PRESCHOOL_GOLDEN.centreA.scopeId);
+      expect(centre.latestAcceptedReading).toMatchObject({
+        status: "not_applicable",
+        reason: { code: "LEAF_METER_REQUIRED" },
+      });
+
+      const available = await analyzeScope(availableMeterNodeId);
+      expect(available.latestAcceptedReading).toMatchObject({
+        status: "available",
+        recordedAt: "2026-05-01T16:00:00.000Z",
+        meterNodeId: availableMeterNodeId,
+        sourceFile: "preschool-golden-may-2026.fixture",
+        sourceSha256: "preschool-golden-may-2026",
+        sourceReadingKind: "cumulative_energy",
+        queryId: "latest_accepted_reading_v1",
+      });
+      expect(available.latestAcceptedReading.status).toBe("available");
+      if (available.latestAcceptedReading.status === "available") {
+        expect(available.latestAcceptedReading.valueKwh).toBeGreaterThan(1_000);
+      }
+      expect(available.provenance.queryIds).toContain("latest_accepted_reading_v1");
+
+      const unavailable = await analyzeScope(unavailableMeterNodeId);
+      expect(unavailable.latestAcceptedReading).toEqual({
+        status: "unavailable",
+        queryId: "latest_accepted_reading_v1",
+        reason: {
+          code: "ACCEPTED_CUMULATIVE_READING_UNAVAILABLE",
+          message: "No accepted cumulative register reading is available in the selected period.",
+        },
+      });
+
+      const intervalUsage = await analyzeScope("preschool-centre-a-heater");
+      expect(intervalUsage.latestAcceptedReading).toEqual({
+        status: "not_applicable",
+        queryId: "latest_accepted_reading_v1",
+        reason: {
+          code: "INTERVAL_USAGE_SOURCE",
+          message: "This Meter is supplied as interval usage, so a cumulative register reading does not apply.",
+        },
+      });
+    } finally {
+      metadata.close();
+      removeTemporaryEnergyFixture(root);
+    }
+  }, 30_000);
+
   it("fails daily usage anomalies closed without the release-pinned Calendar", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-analysis-anomaly-calendar-"));
     const databasePath = join(root, "energy.duckdb");
@@ -2863,6 +2965,31 @@ const expectedNgeeAnnPeakBreakdown = (): NonNullable<EnergyScopeAnalysis["peakBr
       },
     })),
   })),
+});
+
+const cumulativeReading = (
+  meterPointId: string,
+  sourceLabel: string,
+  eventTime: string,
+  activeEnergyKwh: number,
+  sourceRowNumber: number,
+): EnergyNormalizedReadingWrite => ({
+  workspaceId: PRESCHOOL_GOLDEN.workspaceId,
+  projectId: PRESCHOOL_GOLDEN.projectId,
+  importBatchId: "preschool-golden-may-2026",
+  resource: "electricity",
+  meterPointId,
+  scopeId: meterPointId,
+  parentNodeId: PRESCHOOL_GOLDEN.centreA.scopeId,
+  sourceLabel,
+  category: "aircon",
+  meterRole: "component",
+  eventTime,
+  activeEnergyKwh,
+  sourceFile: "preschool-golden-may-2026.fixture",
+  sourceSha256: "preschool-golden-may-2026",
+  sourceRowNumber,
+  sourceReadingKind: "cumulative_energy",
 });
 
 const roundForGolden = (value: number): number => Math.round((value + Number.EPSILON) * 10_000) / 10_000;

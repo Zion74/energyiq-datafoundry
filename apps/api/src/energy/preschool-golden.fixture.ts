@@ -1,5 +1,6 @@
 import {
   type EnergyIntervalFactWrite,
+  type EnergyNormalizedReadingWrite,
 } from "@datafoundry/data-gateway";
 import type { MetadataStore } from "@datafoundry/metadata";
 import { materializeTestProjectSnapshot } from "./energy-test-materialization.js";
@@ -54,6 +55,10 @@ const utcStartMs = Date.UTC(2026, 3, 30, 16);
 export const materializePreschoolGoldenFixture = async (
   databasePath: string,
   metadataStore: MetadataStore,
+  options: {
+    transformIntervalFacts?: (facts: EnergyIntervalFactWrite[]) => EnergyIntervalFactWrite[];
+    normalizedReadings?: EnergyNormalizedReadingWrite[];
+  } = {},
 ) => {
   const intervalFacts: EnergyIntervalFactWrite[] = [];
   centreCodes.forEach((centreCode, centreIndex) => {
@@ -117,8 +122,8 @@ export const materializePreschoolGoldenFixture = async (
       importBatchId: "preschool-golden-may-2026",
       sourceSha256: "preschool-golden-may-2026",
       rawReadings: [],
-      normalizedReadings: [],
-      intervalFacts,
+      normalizedReadings: options.normalizedReadings ?? [],
+      intervalFacts: options.transformIntervalFacts?.(intervalFacts) ?? intervalFacts,
       qualityEvents: [],
     }],
   });

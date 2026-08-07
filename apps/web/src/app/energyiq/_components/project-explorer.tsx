@@ -279,6 +279,9 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
   };
 
   const selectedValue = selectedPeriodHasFacts ? analysis?.summary.usageKwh ?? null : null;
+  const latestReadingPresentation = analysis
+    ? explorerLatestReadingPresentation(analysis.latestAcceptedReading, analysis.context.timezone)
+    : null;
   const selectedTrend = useMemo(
     () => (analysis?.hourlyProfile ?? []).map((point) => ({
       time: `${String(point.hour).padStart(2, "0")}:00`,
@@ -599,8 +602,9 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                   />
                   <MetricCell
                     label="Latest cumulative reading"
-                    value="Unavailable"
-                    note="Raw Reading is not included in this response yet"
+                    value={latestReadingPresentation!.value}
+                    note={latestReadingPresentation!.note}
+                    tone={latestReadingPresentation!.tone}
                   />
                   <MetricCell
                     label="Average power"
@@ -817,6 +821,15 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                           <EvidenceRow label="Valid intervals" value={`${analysis!.dataHealth.validIntervalCount.toLocaleString()} / ${analysis!.dataHealth.expectedMeterIntervalCount.toLocaleString()}`} />
                           <EvidenceRow label="Quality events" value={analysis!.dataHealth.qualityEventCount.toLocaleString()} />
                           <EvidenceRow label="Import batches" value={analysis!.dataHealth.importBatchIds.join(", ") || "Not provided"} />
+                          {analysis!.latestAcceptedReading.status === "available" ? (
+                            <>
+                              <EvidenceRow label="Reading source" value={analysis!.latestAcceptedReading.sourceFile} />
+                              <EvidenceRow label="Source SHA" value={analysis!.latestAcceptedReading.sourceSha256} />
+                              <EvidenceRow label="Reading query" value={analysis!.latestAcceptedReading.queryId} />
+                            </>
+                          ) : (
+                            <EvidenceRow label="Latest reading" value={analysis!.latestAcceptedReading.reason.message} />
+                          )}
                         </dl>
                       </details>
                     </>
@@ -852,7 +865,11 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                         <span className="truncate text-xs font-semibold text-foreground">{scope.name}</span>
                         <span className="text-xs tabular-nums text-muted">{scope.coveragePct.toFixed(1)}% coverage</span>
                         <span className={scope.status === "unavailable" ? "text-xs font-semibold text-muted" : "text-xs font-semibold text-step-warning"}>
-                          {scope.status === "unavailable" ? "No accepted facts" : `${scope.qualityEventCount} quality events`}
+                          {scope.status === "unavailable"
+                            ? "No accepted facts"
+                            : scope.qualityEventCount > 0
+                              ? `${scope.qualityEventCount} quality events`
+                              : "Coverage below 95%"}
                         </span>
                       </button>
                     ))}
@@ -1252,6 +1269,24 @@ export function explorerChildScopeHealth(
     unavailable,
     needsAttention: unavailable + review,
     attention,
+  };
+}
+
+export function explorerLatestReadingPresentation(
+  reading: EnergyScopeAnalysisDto["latestAcceptedReading"],
+  timeZone: string,
+): { value: string; note: string; tone: "muted" | "warning" | "success" } {
+  if (reading.status === "available") {
+    return {
+      value: `${reading.valueKwh.toLocaleString("en-SG", { maximumFractionDigits: 2 })} kWh`,
+      note: `${formatExplorerTimestamp(reading.recordedAt, timeZone)} · ${reading.sourceFile}`,
+      tone: "success",
+    };
+  }
+  return {
+    value: reading.status === "not_applicable" ? "Not applicable" : "Unavailable",
+    note: reading.reason.message,
+    tone: reading.status === "not_applicable" ? "muted" : "warning",
   };
 }
 

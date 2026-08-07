@@ -6,6 +6,7 @@ import {
   buildExplorerAnalysisRequest,
   explorerCurrentFactsUrl,
   explorerChildScopeHealth,
+  explorerLatestReadingPresentation,
   explorerTrendSeries,
   explorerUrlWithView,
   explorerViewStateFromSearchParams,
@@ -110,6 +111,37 @@ describe("Project Explorer trusted view state", () => {
     expect(view.chartView).toBe("hourly");
     expect(explorerUrlWithView(view)).toContain("view=hourly");
     expect(buildExplorerAnalysisRequest(view)).not.toHaveProperty("view");
+  });
+
+  it("presents latest cumulative readings without inventing a value for unsupported Scopes", () => {
+    expect(explorerLatestReadingPresentation({
+      status: "available",
+      valueKwh: 1005.1234,
+      recordedAt: "2026-05-01T16:00:00.000Z",
+      meterNodeId: "meter-a",
+      sourceFile: "meter-a.xlsx",
+      sourceSha256: "sha-a",
+      sourceReadingKind: "cumulative_energy",
+      queryId: "latest_accepted_reading_v1",
+    }, "Asia/Singapore")).toEqual({
+      value: "1,005.12 kWh",
+      note: "02 May 2026, 00:00 · meter-a.xlsx",
+      tone: "success",
+    });
+    expect(explorerLatestReadingPresentation({
+      status: "not_applicable",
+      queryId: "latest_accepted_reading_v1",
+      reason: { code: "LEAF_METER_REQUIRED", message: "Select a leaf Meter." },
+    }, "Asia/Singapore")).toEqual({
+      value: "Not applicable",
+      note: "Select a leaf Meter.",
+      tone: "muted",
+    });
+    expect(explorerLatestReadingPresentation({
+      status: "unavailable",
+      queryId: "latest_accepted_reading_v1",
+      reason: { code: "ACCEPTED_CUMULATIVE_READING_UNAVAILABLE", message: "No accepted reading." },
+    }, "Asia/Singapore").value).toBe("Unavailable");
   });
 
   it("does not present an empty trusted response as zero consumption", () => {
@@ -228,6 +260,14 @@ function analysisFixture(input: {
       businessCalendarVersion: "calendar-v1",
       tariffScheduleVersion: "tariff-v1",
       resolvedAt: "2026-06-17T00:00:00.000Z",
+    },
+    latestAcceptedReading: {
+      status: "not_applicable",
+      queryId: "latest_accepted_reading_v1",
+      reason: {
+        code: "LEAF_METER_REQUIRED",
+        message: "Select a leaf Meter or Circuit to view its latest accepted cumulative reading.",
+      },
     },
     summary: {
       usageKwh: input.usageKwh,

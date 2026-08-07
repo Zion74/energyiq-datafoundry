@@ -188,6 +188,30 @@ export type EnergyScopeAnalysis = {
     from: string;
     to: string;
   };
+  latestAcceptedReading: {
+    status: "available";
+    valueKwh: number;
+    recordedAt: string;
+    meterNodeId: string;
+    sourceFile: string;
+    sourceSha256: string;
+    sourceReadingKind: "cumulative_energy";
+    queryId: "latest_accepted_reading_v1";
+  } | {
+    status: "not_applicable";
+    queryId: "latest_accepted_reading_v1";
+    reason: {
+      code: "LEAF_METER_REQUIRED" | "INTERVAL_USAGE_SOURCE";
+      message: string;
+    };
+  } | {
+    status: "unavailable";
+    queryId: "latest_accepted_reading_v1";
+    reason: {
+      code: "ACCEPTED_CUMULATIVE_READING_UNAVAILABLE";
+      message: string;
+    };
+  };
   summary: {
     usageKwh: number;
     averageDailyUsageKwh: number;
@@ -500,6 +524,7 @@ export type EnergyScopeAnalysis = {
       | "previous_meter_usage_v1"
       | "operational_policy_scope_intervals_v1"
       | "operational_policy_meter_intervals_v1"
+      | "latest_accepted_reading_v1"
       | "time_slot_anomaly_v1"
     >;
   };
@@ -1180,6 +1205,11 @@ export const executeEnergyScopeAnalysis = async (input: {
   const cumulativeDeltaMismatchCount = numberAt(healthRow, 5);
   const averageKwMismatchCount = numberAt(healthRow, 6);
   const invalidIntervalDurationCount = numberAt(healthRow, 7);
+  const leafMeterScope = isLeafMeterScope(selectedNode, hierarchy);
+  const latestAcceptedReading = buildLatestAcceptedReading({
+    leafMeterScope,
+    row: healthRow,
+  });
   const dailyFactsByScopeAndDate = new Map(
     dailyTotalsResult.rows.map((row) => [`${stringAt(row, 0)}:${stringAt(row, 3)}`, row]),
   );
@@ -1500,6 +1530,7 @@ export const executeEnergyScopeAnalysis = async (input: {
     : undefined;
   return {
     context: input.context,
+    latestAcceptedReading,
     summary,
     comparison,
     hourlyProfile: profileResult.rows.map((row) => ({
@@ -1554,6 +1585,7 @@ export const executeEnergyScopeAnalysis = async (input: {
         ...(operationalMeterIntervalResult
           ? ["operational_policy_meter_intervals_v1" as const]
           : []),
+        ...(leafMeterScope ? ["latest_accepted_reading_v1" as const] : []),
         ...(dailyUsageAnomalyLoad.status === "loaded" ? ["time_slot_anomaly_v1" as const] : []),
       ]
     }
@@ -3235,6 +3267,77 @@ const collectDescendantIds = (
   return descendants;
 };
 
+const isLeafMeterScope = (
+  selectedNode: ReturnType<MetadataStore["energyIq"]["listProjectNodes"]>[number],
+  hierarchy: ReturnType<MetadataStore["energyIq"]["listProjectNodes"]>,
+): boolean => {
+  const nodeType = selectedNode.node_type.trim().toLowerCase();
+  return (nodeType === "meter" || nodeType === "circuit")
+    && !hierarchy.some((node) => node.parent_id === selectedNode.id);
+};
+
+const buildLatestAcceptedReading = (input: {
+  leafMeterScope: boolean;
+  row: unknown[];
+}): EnergyScopeAnalysis["latestAcceptedReading"] => {
+  if (!input.leafMeterScope) {
+    return {
+      status: "not_applicable",
+      queryId: "latest_accepted_reading_v1",
+      reason: {
+        code: "LEAF_METER_REQUIRED",
+        message: "Select a leaf Meter or Circuit to view its latest accepted cumulative reading.",
+      },
+    };
+  }
+
+  const valueKwh = optionalNumberAt(input.row, 8);
+  const recordedAt = optionalIsoAt(input.row, 9);
+  const meterNodeId = optionalStringAt(input.row, 10);
+  const sourceFile = optionalStringAt(input.row, 11);
+  const sourceSha256 = optionalStringAt(input.row, 12);
+  const sourceReadingKind = optionalStringAt(input.row, 13);
+  if (
+    valueKwh !== null
+    && recordedAt
+    && meterNodeId
+    && sourceFile
+    && sourceSha256
+    && sourceReadingKind === "cumulative_energy"
+  ) {
+    return {
+      status: "available",
+      valueKwh,
+      recordedAt,
+      meterNodeId,
+      sourceFile,
+      sourceSha256,
+      sourceReadingKind,
+      queryId: "latest_accepted_reading_v1",
+    };
+  }
+
+  if (numberAt(input.row, 14) > 0) {
+    return {
+      status: "not_applicable",
+      queryId: "latest_accepted_reading_v1",
+      reason: {
+        code: "INTERVAL_USAGE_SOURCE",
+        message: "This Meter is supplied as interval usage, so a cumulative register reading does not apply.",
+      },
+    };
+  }
+
+  return {
+    status: "unavailable",
+    queryId: "latest_accepted_reading_v1",
+    reason: {
+      code: "ACCEPTED_CUMULATIVE_READING_UNAVAILABLE",
+      message: "No accepted cumulative register reading is available in the selected period.",
+    },
+  };
+};
+
 const rowToMeterAggregate = (row: unknown[]): MeterAggregate => ({
   meterNodeId: stringAt(row, 0),
   scopeId: stringAt(row, 1),
@@ -3696,34 +3799,72 @@ const peakBreakdownSql = (viewName: string, peakAt?: string): string => `
   ORDER BY source.meter_node_id, source.interval_end, source.quality_status
 `;
 
-const scopeHealthSql = (viewName: string, meterNodeIds: string[]): string => `
+const scopeHealthSql = (viewName: string, meterNodeIds: string[]): string => {
+  const acceptedCumulativeReading = `
+    source.quality_status = 'ok'
+    AND source.source_reading_kind = 'cumulative_energy'
+    AND source.active_energy_kwh IS NOT NULL
+    AND source.usage_kwh IS NOT NULL
+    AND source.source_file IS NOT NULL
+    AND TRIM(source.source_file) <> ''
+    AND source.source_sha256 IS NOT NULL
+    AND TRIM(source.source_sha256) <> ''
+  `;
+  const latestReadingOrder = `STRUCT_PACK(
+    recorded_at := source.interval_end,
+    meter_node_id := source.meter_node_id
+  )`;
+  return `
   SELECT
-    COUNT(*) FILTER (WHERE quality_status = 'ok') AS valid_interval_count,
-    COUNT(*) FILTER (WHERE quality_status <> 'ok') AS quality_event_count,
-    COALESCE(MEDIAN(elapsed_minutes) FILTER (
-      WHERE quality_status = 'ok' AND elapsed_minutes > 0
+    COUNT(*) FILTER (WHERE source.quality_status = 'ok') AS valid_interval_count,
+    COUNT(*) FILTER (WHERE source.quality_status <> 'ok') AS quality_event_count,
+    COALESCE(MEDIAN(source.elapsed_minutes) FILTER (
+      WHERE source.quality_status = 'ok' AND source.elapsed_minutes > 0
     ), 15) AS interval_minutes,
-    MAX(interval_end) FILTER (WHERE quality_status = 'ok') AS last_seen_at,
+    MAX(source.interval_end) FILTER (WHERE source.quality_status = 'ok') AS last_seen_at,
     COALESCE(STRING_AGG(
-      DISTINCT COALESCE(import_batch_id, '<legacy>'),
+      DISTINCT COALESCE(source.import_batch_id, '<legacy>'),
       ','
-    ) FILTER (WHERE quality_status = 'ok'), '') AS import_batch_ids,
+    ) FILTER (WHERE source.quality_status = 'ok'), '') AS import_batch_ids,
     COUNT(*) FILTER (
-      WHERE source_reading_kind = 'cumulative_energy'
-        AND quality_status = 'ok'
-        AND ABS((active_energy_kwh - previous_active_energy_kwh) - raw_delta_kwh) > 0.000001
+      WHERE source.source_reading_kind = 'cumulative_energy'
+        AND source.quality_status = 'ok'
+        AND ABS((source.active_energy_kwh - source.previous_active_energy_kwh) - source.raw_delta_kwh) > 0.000001
     ) AS cumulative_delta_mismatch_count,
     COUNT(*) FILTER (
-      WHERE quality_status = 'ok'
-        AND elapsed_minutes > 0
-        AND ABS(average_kw - usage_kwh * 60 / elapsed_minutes) > 0.000001
+      WHERE source.quality_status = 'ok'
+        AND source.elapsed_minutes > 0
+        AND ABS(source.average_kw - source.usage_kwh * 60 / source.elapsed_minutes) > 0.000001
     ) AS average_kw_mismatch_count,
     COUNT(*) FILTER (
-      WHERE quality_status = 'ok' AND elapsed_minutes <> 15
-    ) AS invalid_interval_duration_count
+      WHERE source.quality_status = 'ok' AND source.elapsed_minutes <> 15
+    ) AS invalid_interval_duration_count,
+    ARG_MAX(source.active_energy_kwh, ${latestReadingOrder}) FILTER (
+      WHERE ${acceptedCumulativeReading}
+    ) AS latest_active_energy_kwh,
+    EPOCH_MS(ARG_MAX(source.interval_end, ${latestReadingOrder}) FILTER (
+      WHERE ${acceptedCumulativeReading}
+    )) AS latest_recorded_at_ms,
+    ARG_MAX(source.meter_node_id, ${latestReadingOrder}) FILTER (
+      WHERE ${acceptedCumulativeReading}
+    ) AS latest_meter_node_id,
+    ARG_MAX(source.source_file, ${latestReadingOrder}) FILTER (
+      WHERE ${acceptedCumulativeReading}
+    ) AS latest_source_file,
+    ARG_MAX(source.source_sha256, ${latestReadingOrder}) FILTER (
+      WHERE ${acceptedCumulativeReading}
+    ) AS latest_source_sha256,
+    ARG_MAX(source.source_reading_kind, ${latestReadingOrder}) FILTER (
+      WHERE ${acceptedCumulativeReading}
+    ) AS latest_source_reading_kind,
+    COUNT(*) FILTER (
+      WHERE source.quality_status = 'ok'
+        AND source.source_reading_kind = 'interval_usage'
+    ) AS accepted_interval_usage_count
   FROM ${quoteIdentifier(viewName)} source
   WHERE ${meterNodeFilter(meterNodeIds)}
-`;
+  `;
+};
 
 const goldenPeriodSelectionSql = (
   viewName: string,
@@ -4054,6 +4195,11 @@ const isoAt = (row: unknown[], index: number): string => {
   }
   if (value instanceof Date) return value.toISOString();
   throw new Error(`ENERGYIQ_GOLDEN_TIMESTAMP_INVALID:${index}`);
+};
+
+const optionalIsoAt = (row: unknown[], index: number): string | undefined => {
+  if (row[index] === null || row[index] === undefined || row[index] === "") return undefined;
+  return isoAt(row, index);
 };
 
 const percent = (part: number, total: number, digits = 2): number =>

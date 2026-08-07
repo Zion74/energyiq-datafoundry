@@ -128,6 +128,14 @@ const snapshot = (): ProjectAnalysisSnapshot => ({
   metadata: {} as never,
   analysis: {
     context: {} as never,
+    latestAcceptedReading: {
+      status: "not_applicable",
+      queryId: "latest_accepted_reading_v1",
+      reason: {
+        code: "LEAF_METER_REQUIRED",
+        message: "Select a leaf Meter or Circuit to view its latest accepted cumulative reading.",
+      },
+    },
     summary: {
       usageKwh: 1531.1, averageDailyUsageKwh: 218.7, peakKw: 85.3,
       nonOperatingKwh: 0, nonOperatingSharePct: 0, validIntervalCount: 672, qualityEventCount: 0

@@ -377,7 +377,9 @@ const createScopedViews = async (
         raw_delta_kwh,
         usage_kwh,
         average_kw,
-        quality_status
+        quality_status,
+        source_file,
+        source_sha256
       FROM energy_interval_facts
       WHERE workspace_id = ${sqlLiteral(context.workspaceId)}
         AND project_id = ${sqlLiteral(context.projectId)}
