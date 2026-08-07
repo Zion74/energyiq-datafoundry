@@ -286,7 +286,10 @@ Ngee Ann 与 Preschool 各运行至少三次固定 Profile/Snapshot：
 
 提交 `5b094ff feat(agent): clarify autonomous stopping judgment` 补齐柔性停止原则：当新增查询不会改变
 结论、下一步行动或实质不确定性时，Agent 可以结束调查。这一原则明确不是固定 query/step limit，
-不会替 Agent 选择路线。聚焦回归 5 files / 9 tests 与根 build 通过。
+不会替 Agent 选择路线。聚焦回归 5 files / 9 tests 与根 build 通过。相同隔离 Snapshot 的真实
+DeepSeek 单次复核也通过：correctness 1.00、Insight 10、decision quality 0.8125、323 words、
+107.3s、13 SQL、9 reasoning rounds、重复 SQL 0、max budget utilization 3.38%。因此没有观察到
+柔性停止导致的过早回答或质量下降。
 
 ### Preschool same-session 的诚实边界
 
