@@ -1185,7 +1185,7 @@ export function isExplorerPinnedContextMismatch(message: string | null): boolean
 }
 
 export function buildExplorerAnalysisRequest(
-  view: ExplorerUrlViewState,
+  view: Omit<ExplorerUrlViewState, "chartView">,
 ): Parameters<typeof configApi.executeEnergyScopeAnalysis>[0] {
   return {
     projectId: view.projectId,

@@ -1600,6 +1600,14 @@ function readyZeroCoverageResolution(
   };
   const analysis: EnergyProjectAnalysisPayloadDto = {
     context,
+    latestAcceptedReading: {
+      status: "not_applicable",
+      queryId: "latest_accepted_reading_v1",
+      reason: {
+        code: "LEAF_METER_REQUIRED",
+        message: "Select a leaf Meter or Circuit to view its latest accepted cumulative reading.",
+      },
+    },
     summary: {
       usageKwh: 0,
       averageDailyUsageKwh: 0,

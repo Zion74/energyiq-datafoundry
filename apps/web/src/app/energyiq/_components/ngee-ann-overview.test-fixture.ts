@@ -361,6 +361,14 @@ export function ngeeAnnGoldenSnapshot(input: {
       tariffScheduleVersion: "tariff-v1",
       resolvedAt: "2026-08-04T00:00:00.000Z",
     },
+    latestAcceptedReading: {
+      status: "not_applicable",
+      queryId: "latest_accepted_reading_v1",
+      reason: {
+        code: "LEAF_METER_REQUIRED",
+        message: "Select a leaf Meter or Circuit to view its latest accepted cumulative reading.",
+      },
+    },
     summary: {
       usageKwh: 1531.168324,
       averageDailyUsageKwh: 218.738332,
