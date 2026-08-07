@@ -298,8 +298,9 @@ describe("published Overview URL reload", () => {
       "",
       "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Custom&from=2026-05-01&to=2026-05-31&grain=day&comparison=overlay&category=all",
     );
+    const snapshot = dashboardNgeeAnnSnapshot(preschoolGoldenSnapshot());
     const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
-      .mockResolvedValue({ status: "ready", snapshot: dashboardNgeeAnnSnapshot(preschoolGoldenSnapshot()) });
+      .mockResolvedValue({ status: "ready", snapshot });
 
     await act(async () => {
       root.render(React.createElement(PublishedDecisionDashboard));
@@ -318,6 +319,21 @@ describe("published Overview URL reload", () => {
     expect(container.querySelector("[role='combobox'][aria-label='Analysis Scope']")).toBeNull();
     expect(container.querySelector("[aria-label='Area and headcount metadata']")).toBeNull();
     expect(container.querySelectorAll("input[type='date']")).toHaveLength(0);
+    const centreExplorerLink = container.querySelector<HTMLAnchorElement>("[data-centre-explorer-link]");
+    expect(centreExplorerLink).not.toBeNull();
+    const linkedScopeId = centreExplorerLink!.dataset.centreExplorerLink;
+    expect(linkedScopeId).toBeTruthy();
+    const centreExplorerUrl = new URL(centreExplorerLink!.href);
+    expect(Object.fromEntries(centreExplorerUrl.searchParams)).toMatchObject({
+      projectId: "preschool-demo",
+      scopeId: linkedScopeId,
+      resource: "electricity",
+      period: "Custom",
+      from: "2026-05-01",
+      to: "2026-05-31",
+      dataSnapshotId: snapshot.context.dataSnapshotId,
+      projectReleaseId: snapshot.projectRelease.id,
+    });
     expect(container.textContent).toContain("Overview contents");
     const contents = container.querySelector("[aria-label='Overview contents']");
     expect(Array.from(contents?.querySelectorAll<HTMLAnchorElement>("a") ?? [], (anchor) => anchor.textContent)).toEqual([

@@ -8,6 +8,7 @@ import {
 } from "./ngee-ann-daily-anomalies";
 import type { NgeeAnnDecisionPrioritiesViewModel } from "./ngee-ann-overview-view-model";
 import { anomalyIncidentDomId } from "./ngee-ann-overview-links";
+import { projectExplorerHrefForScope } from "./overview-explorer-handoff";
 
 export function NgeeAnnDecisionPriorities({
   view,
@@ -86,25 +87,28 @@ export function NgeeAnnDecisionPriorities({
                   ) : null}
                 </div>
               </details>
-              <a
-                href={`#${anomalyIncidentDomId(item.targetIncidentId)}`}
-                onClick={(event) => {
-                  const handled = !document.dispatchEvent(new CustomEvent<NgeeAnnOpenIncidentEventDetail>(
-                    NGEE_ANN_OPEN_INCIDENT_EVENT,
-                    {
-                      cancelable: true,
-                      detail: {
-                        incidentId: item.targetIncidentId,
-                        trigger: event.currentTarget,
+              <div className="mt-4 flex flex-wrap gap-2">
+                <a
+                  href={`#${anomalyIncidentDomId(item.targetIncidentId)}`}
+                  onClick={(event) => {
+                    const handled = !document.dispatchEvent(new CustomEvent<NgeeAnnOpenIncidentEventDetail>(
+                      NGEE_ANN_OPEN_INCIDENT_EVENT,
+                      {
+                        cancelable: true,
+                        detail: {
+                          incidentId: item.targetIncidentId,
+                          trigger: event.currentTarget,
+                        },
                       },
-                    },
-                  ));
-                  if (handled) event.preventDefault();
-                }}
-                className="mt-4 inline-flex min-h-10 items-center justify-center rounded-lg border border-primary/25 px-3.5 text-sm font-semibold text-primary transition-colors hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
-              >
-                View supporting evidence
-              </a>
+                    ));
+                    if (handled) event.preventDefault();
+                  }}
+                  className="inline-flex min-h-10 items-center justify-center rounded-lg border border-primary/25 px-3.5 text-sm font-semibold text-primary transition-colors hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
+                >
+                  View supporting evidence
+                </a>
+                <PriorityExplorerLink item={item} baseHref={projectExplorerHref} />
+              </div>
             </article>
           ))}
         </div>
@@ -123,6 +127,26 @@ export function NgeeAnnDecisionPriorities({
         ) : null}
       </div>
     </section>
+  );
+}
+
+function PriorityExplorerLink({
+  item,
+  baseHref,
+}: {
+  item: NgeeAnnDecisionPrioritiesViewModel["items"][number];
+  baseHref?: string;
+}) {
+  const href = projectExplorerHrefForScope(baseHref, item.explorerScopeId);
+  if (!href) return null;
+  return (
+    <a
+      href={href}
+      data-explorer-scope={item.explorerScopeId}
+      className="inline-flex min-h-10 items-center justify-center rounded-lg border border-border bg-surface px-3.5 text-sm font-semibold text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25"
+    >
+      Inspect {item.explorerScopeName} in Project Explorer
+    </a>
   );
 }
 

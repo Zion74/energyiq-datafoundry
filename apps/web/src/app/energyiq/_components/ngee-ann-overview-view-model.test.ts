@@ -1667,6 +1667,8 @@ describe("Ngee Ann Overview ViewModel", () => {
           evidence: "Project / 13 Jun / 168.96 kWh vs 63.34 kWh baseline (+166.8%)",
           impact: "+105.63 kWh above baseline; incident cost unavailable",
           targetIncidentId: "incident:project:2026-06-13",
+          explorerScopeId: "level-7",
+          explorerScopeName: "Level 7",
           confidence: "Complete Evidence",
           sourceOccurrenceCount: 7,
           recurrenceDayCount: 3,

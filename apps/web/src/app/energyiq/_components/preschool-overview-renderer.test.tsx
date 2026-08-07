@@ -34,4 +34,42 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup).toContain("View all 30 Centres and normalised metrics");
     expect(markup.match(/data-centre-row=/g)).toHaveLength(30);
   });
+
+  it("links a visible Centre to its exact Explorer Scope without dropping Snapshot pins", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    const projectExplorerHref = [
+      "/energyiq/explorer?projectId=preschool-demo",
+      "scopeId=project",
+      "resource=electricity",
+      "period=Custom",
+      "from=2026-05-01",
+      "to=2026-05-31",
+      `dataSnapshotId=${encodeURIComponent(snapshot.context.dataSnapshotId)}`,
+      `projectReleaseId=${encodeURIComponent(snapshot.projectRelease.id)}`,
+    ].join("&");
+    const markup = renderToStaticMarkup(
+      <PreschoolOverviewRenderer
+        state={{ status: "ready", snapshot }}
+        projectExplorerHref={projectExplorerHref}
+      />,
+    );
+
+    const container = document.createElement("div");
+    container.innerHTML = markup;
+    const centreLink = container.querySelector<HTMLAnchorElement>("[data-centre-explorer-link]");
+    expect(centreLink).not.toBeNull();
+    const linkedScopeId = centreLink!.dataset.centreExplorerLink;
+    expect(linkedScopeId).toBeTruthy();
+    const centreUrl = new URL(centreLink!.href);
+    expect(Object.fromEntries(centreUrl.searchParams)).toMatchObject({
+      projectId: "preschool-demo",
+      scopeId: linkedScopeId,
+      resource: "electricity",
+      period: "Custom",
+      from: "2026-05-01",
+      to: "2026-05-31",
+      dataSnapshotId: snapshot.context.dataSnapshotId,
+      projectReleaseId: snapshot.projectRelease.id,
+    });
+  });
 });

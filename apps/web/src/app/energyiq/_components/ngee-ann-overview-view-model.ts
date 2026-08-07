@@ -255,6 +255,8 @@ export type NgeeAnnDecisionPrioritiesViewModel = {
     confidence: "Complete Evidence" | "Partial Evidence";
     confidenceLimitation: string | null;
     targetIncidentId: string;
+    explorerScopeId: string;
+    explorerScopeName: string;
     sourceOccurrenceCount: number;
     recurrenceDayCount: number;
     horizons: Array<{
@@ -1322,6 +1324,12 @@ function buildDecisionPriorities(
       confidence: item.confidence.status === "complete" ? "Complete Evidence" : "Partial Evidence",
       confidenceLimitation: item.confidence.limitation?.message ?? null,
       targetIncidentId: item.action.targetIncidentId,
+      explorerScopeId: item.driver.status === "available"
+        ? item.driver.scopeId
+        : item.evidence.occurrence.scopeId,
+      explorerScopeName: item.driver.status === "available"
+        ? item.driver.label
+        : item.evidence.occurrence.scopeName,
       sourceOccurrenceCount: item.sourceOccurrenceIds.length,
       recurrenceDayCount: item.recurrenceDayCount,
       horizons: item.horizons.map((horizon) => ({

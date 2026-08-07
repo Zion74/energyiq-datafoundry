@@ -82,10 +82,21 @@ describe("NgeeAnnOverviewRenderer", () => {
   });
 
   it("places the server-owned decision priorities after Data Status and before Key highlights", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const projectExplorerHref = [
+      "/energyiq/explorer?projectId=ngee-ann-polytechnic",
+      "scopeId=project",
+      "resource=electricity",
+      "period=Custom",
+      "from=2026-06-10",
+      "to=2026-06-16",
+      `dataSnapshotId=${encodeURIComponent(snapshot.context.dataSnapshotId)}`,
+      `projectReleaseId=${encodeURIComponent(snapshot.projectRelease.id)}`,
+    ].join("&");
     const markup = renderToStaticMarkup(
       <NgeeAnnOverviewRenderer
-        state={{ status: "ready", snapshot: ngeeAnnGoldenSnapshot() }}
-        projectExplorerHref="/energyiq/explorer?projectId=ngee-ann-polytechnic"
+        state={{ status: "ready", snapshot }}
+        projectExplorerHref={projectExplorerHref}
         aiAnalystHref="/energyiq/ai?projectId=ngee-ann-polytechnic"
       />,
     );
@@ -97,6 +108,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Verify with");
     expect(markup).toContain("Complete Evidence");
     expect(markup).toContain("href=\"#incident-project-2026-06-13\"");
+    expect(markup).toContain("Inspect Level 7 in Project Explorer");
     expect(markup).toContain("Open Project Explorer");
     expect(markup).toContain("Ask AI Analyst");
     expect(markup).toContain("AI energy analyst");
@@ -104,6 +116,22 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup.indexOf("Takeaways and next decisions")).toBeLessThan(markup.indexOf("Verified figures"));
     expect(markup.indexOf("Verified figures")).toBeLessThan(markup.indexOf("AI energy analyst"));
     expect(markup.indexOf("AI energy analyst")).toBeLessThan(markup.indexOf("Change over time"));
+
+    const container = document.createElement("div");
+    container.innerHTML = markup;
+    const preciseExplorerLink = container.querySelector<HTMLAnchorElement>("[data-explorer-scope='level-7']");
+    expect(preciseExplorerLink).not.toBeNull();
+    const preciseUrl = new URL(preciseExplorerLink!.href);
+    expect(Object.fromEntries(preciseUrl.searchParams)).toMatchObject({
+      projectId: "ngee-ann-polytechnic",
+      scopeId: "level-7",
+      resource: "electricity",
+      period: "Custom",
+      from: "2026-06-10",
+      to: "2026-06-16",
+      dataSnapshotId: snapshot.context.dataSnapshotId,
+      projectReleaseId: snapshot.projectRelease.id,
+    });
   });
 
   it.each([

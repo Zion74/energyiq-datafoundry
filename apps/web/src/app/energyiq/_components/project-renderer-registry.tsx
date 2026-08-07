@@ -201,6 +201,7 @@ export function ProjectRenderer(props: ProjectRendererProps): ReactNode {
         <PreschoolOverviewRenderer
           state={preschoolState}
           {...(props.onRetry ? { onRetry: props.onRetry } : {})}
+          {...(props.projectExplorerHref ? { projectExplorerHref: props.projectExplorerHref } : {})}
           {...(props.aiAnalystHref ? { aiAnalystHref: props.aiAnalystHref } : {})}
         />
       </div>

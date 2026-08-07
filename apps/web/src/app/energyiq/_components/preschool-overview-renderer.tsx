@@ -2,6 +2,7 @@ import React from "react";
 
 import type { EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
 import { EnergyIcon } from "./icons";
+import { projectExplorerHrefForScope } from "./overview-explorer-handoff";
 import { PreschoolEvidenceLink } from "./preschool-evidence-link";
 import { PreschoolAiSlot } from "./preschool-ai-slot";
 import {
@@ -26,10 +27,12 @@ export type PreschoolOverviewRendererState =
 export function PreschoolOverviewRenderer({
   state,
   onRetry,
+  projectExplorerHref,
   aiAnalystHref,
 }: {
   state: PreschoolOverviewRendererState;
   onRetry?: () => void;
+  projectExplorerHref?: string;
   aiAnalystHref?: string;
 }) {
   if (state.status !== "ready") {
@@ -361,16 +364,12 @@ export function PreschoolOverviewRenderer({
           </div>
           <div className="mt-4 grid gap-3" role="list" aria-label="Top five Centres by Portfolio energy contribution">
             {view.centres.slice(0, 5).map((centre) => (
-              <div key={centre.id} className="grid gap-2 sm:grid-cols-[minmax(180px,0.7fr)_minmax(220px,1.5fr)_160px] sm:items-center sm:gap-4" role="listitem">
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-semibold text-foreground">{centre.rank}. {centre.name}</p>
-                  <p className="mt-0.5 text-[11px] text-muted">{centre.cohort ?? "Cohort unavailable"} · {centre.topCircuit ?? "Leading appliance unavailable"}</p>
-                </div>
-                <div className="h-3 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true">
-                  <div className="h-full rounded-full bg-primary" style={{ width: `${Math.max(4, (centre.usageKwhValue / (view.centres[0]?.usageKwhValue ?? 1)) * 100)}%` }} />
-                </div>
-                <p className="text-right text-xs tabular-nums text-foreground"><strong className="font-semibold">{centre.usageKwh} kWh</strong> · {centre.sharePct}</p>
-              </div>
+              <CentreContributionRow
+                key={centre.id}
+                centre={centre}
+                maximumUsageKwh={view.centres[0]?.usageKwhValue ?? 1}
+                projectExplorerHref={projectExplorerHref}
+              />
             ))}
           </div>
           <details className="mt-5 rounded-lg border border-border bg-surface-subtle/40">
@@ -877,6 +876,40 @@ function OperationalSpikePanel({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function CentreContributionRow({
+  centre,
+  maximumUsageKwh,
+  projectExplorerHref,
+}: {
+  centre: PreschoolOverviewCentre;
+  maximumUsageKwh: number;
+  projectExplorerHref?: string;
+}) {
+  const explorerHref = projectExplorerHrefForScope(projectExplorerHref, centre.id);
+  return (
+    <div className="grid gap-2 sm:grid-cols-[minmax(180px,0.7fr)_minmax(220px,1.5fr)_160px] sm:items-center sm:gap-4" role="listitem">
+      <div className="min-w-0">
+        {explorerHref ? (
+          <a
+            href={explorerHref}
+            data-centre-explorer-link={centre.id}
+            className="block truncate text-xs font-semibold text-foreground hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+          >
+            {centre.rank}. {centre.name}
+          </a>
+        ) : (
+          <p className="truncate text-xs font-semibold text-foreground">{centre.rank}. {centre.name}</p>
+        )}
+        <p className="mt-0.5 text-[11px] text-muted">{centre.cohort ?? "Cohort unavailable"} · {centre.topCircuit ?? "Leading appliance unavailable"}</p>
+      </div>
+      <div className="h-3 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true">
+        <div className="h-full rounded-full bg-primary" style={{ width: `${Math.max(4, (centre.usageKwhValue / maximumUsageKwh) * 100)}%` }} />
+      </div>
+      <p className="text-right text-xs tabular-nums text-foreground"><strong className="font-semibold">{centre.usageKwh} kWh</strong> · {centre.sharePct}</p>
     </div>
   );
 }
