@@ -404,23 +404,45 @@ const extractSqlChartPointSets = (events: EventRecord[]): ChartPoint[][] => {
     .filter(Boolean));
   const pointSets: ChartPoint[][] = [];
   for (const event of events) {
-    if (stringValue(event.type) !== "TOOL_CALL_RESULT") continue;
-    const toolName = stringValue(event.toolCallName);
-    const toolCallId = stringValue(event.toolCallId);
-    if (toolName !== "run_sql_readonly" && !sqlCallIds.has(toolCallId)) continue;
-    for (const candidate of eventPayloadCandidates(event)) {
-      const payload = isRecord(candidate.result) ? candidate.result : candidate;
-      if (!Array.isArray(payload.columns) || payload.columns.length !== 2 || !Array.isArray(payload.rows)) continue;
-      const points = payload.rows.flatMap((row) => {
-        if (!Array.isArray(row) || row.length < 2) return [];
-        const label = chartPointLabel(row[0]);
-        const value = Number(row[1]);
-        return label && Number.isFinite(value) ? [{ label, value }] : [];
-      });
-      if (points.length === payload.rows.length && points.length > 0) pointSets.push(points);
+    if (stringValue(event.type) === "TOOL_CALL_RESULT") {
+      const toolName = stringValue(event.toolCallName);
+      const toolCallId = stringValue(event.toolCallId);
+      if (toolName !== "run_sql_readonly" && !sqlCallIds.has(toolCallId)) continue;
+      for (const candidate of eventPayloadCandidates(event)) {
+        const points = tabularChartPoints(isRecord(candidate.result) ? candidate.result : candidate);
+        if (points.length > 0) pointSets.push(points);
+      }
+      continue;
     }
+
+    if (stringValue(event.type) !== "CUSTOM"
+      || stringValue(event.name) !== "artifact"
+      || !isRecord(event.value)
+      || stringValue(event.value.type) !== "table"
+      || !sqlCallIds.has(stringValue(event.value.tool_call_id))) continue;
+    const points = tabularChartPoints(parseJsonRecord(event.value.preview_json));
+    if (points.length > 0) pointSets.push(points);
   }
   return pointSets;
+};
+
+const tabularChartPoints = (payload: EventRecord | null): ChartPoint[] => {
+  if (!payload || !Array.isArray(payload.columns) || payload.columns.length !== 2 || !Array.isArray(payload.rows)) return [];
+  const points = payload.rows.flatMap((row) => {
+    if (!Array.isArray(row) || row.length < 2) return [];
+    const label = chartPointLabel(row[0]);
+    const value = Number(row[1]);
+    return label && Number.isFinite(value) ? [{ label, value }] : [];
+  });
+  return points.length === payload.rows.length && points.length > 0 ? points : [];
+};
+
+const parseJsonRecord = (value: unknown): EventRecord | null => {
+  let parsed = value;
+  if (typeof parsed === "string") {
+    try { parsed = JSON.parse(parsed); } catch { return null; }
+  }
+  return isRecord(parsed) ? parsed : null;
 };
 
 const eventPayloadCandidates = (event: EventRecord): EventRecord[] => [event.result, event.content, event.value]
