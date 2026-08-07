@@ -323,6 +323,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
     window.history.replaceState(window.history.state, "", nextUrl);
   }, [
     activeProjectId,
+    chartView,
     customRange,
     initialViewState.dataSnapshotId,
     initialViewState.projectReleaseId,
