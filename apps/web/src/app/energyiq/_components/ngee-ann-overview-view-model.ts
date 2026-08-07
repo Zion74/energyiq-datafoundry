@@ -261,6 +261,10 @@ export type NgeeAnnDecisionPrioritiesViewModel = {
       label: string;
       status: "available" | "unavailable";
       period: string;
+      actualKwh: number | null;
+      baselineKwh: number | null;
+      deltaKwh: number | null;
+      relativePct: number | null;
       comparison: string;
       limitation: string | null;
     }>;
@@ -1326,6 +1330,10 @@ function buildDecisionPriorities(
         period: horizon.period.fromLocalDate === horizon.period.toLocalDate
           ? formatLocalDate(horizon.period.fromLocalDate)
           : `${formatLocalDate(horizon.period.fromLocalDate)} – ${formatLocalDate(horizon.period.toLocalDate)}`,
+        actualKwh: horizon.actualKwh,
+        baselineKwh: horizon.baselineKwh,
+        deltaKwh: horizon.deltaKwh,
+        relativePct: horizon.relativePct,
         comparison: horizon.status === "available"
           ? `${formatDecimal(horizon.actualKwh!, 2)} kWh vs ${formatDecimal(horizon.baselineKwh!, 2)} kWh (${signedDecimal(horizon.relativePct!, 1)}%)`
           : "Unavailable",
@@ -2781,7 +2789,14 @@ function buildMetadataLimitation(snapshot: EnergyProjectAnalysisSnapshotDto): st
   if (area.status === "missing") missing.push("Area");
   if (headcount.status === "missing") missing.push("headcount");
   if (missing.length === 0) return null;
-  return `${missing.join(" and ")} metadata ${missing.length === 1 ? "is" : "are"} missing. This does not affect Total energy, Daily average, Peak interval-average power, Comparison or Cost; normalised metrics remain unavailable.`;
+  const guidance = [...new Set([
+    ...(area.status === "missing" ? [area.guidance] : []),
+    ...(headcount.status === "missing" ? [headcount.guidance] : []),
+  ].filter(Boolean))];
+  return [
+    `${missing.join(" and ")} metadata ${missing.length === 1 ? "is" : "are"} missing. This does not affect Total energy, Daily average, Peak interval-average power, Comparison or Cost; normalised metrics remain unavailable.`,
+    ...guidance,
+  ].join(" ");
 }
 
 function formatDecimal(value: number, maximumFractionDigits: number): string {

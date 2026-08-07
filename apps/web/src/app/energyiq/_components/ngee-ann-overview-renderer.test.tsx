@@ -27,6 +27,11 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Latest complete day");
     expect(markup).toContain("Rolling 7 days");
     expect(markup).toContain("Rolling 28 days");
+    expect(markup).toContain("How each horizon compares with its governed baseline");
+    expect(markup).toContain('data-horizon-label="Rolling 7 days"');
+    expect(markup).toContain('data-direction="increase"');
+    expect(markup).toContain('aria-label="Rolling 7 days, 10 Jun – 16 Jun: 1531.17 kWh versus 1211.68 kWh governed baseline; +319.49 kWh, +26.4%"');
+    expect(markup).toContain("+319.49 kWh vs baseline");
     expect(markup).toContain("Seen on 3 distinct exception days. Linked Level and Circuit evidence is preserved.");
     expect(markup).toContain("Why it matters");
     expect(markup).toContain("Do next");
@@ -155,6 +160,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Current 1531.17 kWh vs previous 1211.68 kWh");
     expect(markup).toContain("S$489.97");
     expect(markup).toContain("Area and headcount metadata are missing");
+    expect(markup).toContain("Configure area metadata. Configure headcount metadata.");
     expect(markup).toContain("Energy trend");
     expect(markup).toContain("When did accepted energy use change inside the selected Period?");
     expect(markup).toContain("Energy trend Scope");

@@ -67,18 +67,7 @@ export function NgeeAnnDecisionPriorities({
                   {item.confidence}
                 </span>
               </div>
-              <div className="mt-5 grid gap-3 sm:grid-cols-3">
-                {item.horizons.map((horizon) => (
-                  <div key={horizon.label} className="rounded-lg bg-surface-subtle px-4 py-3">
-                    <p className="text-xs font-semibold text-foreground">{horizon.label}</p>
-                    <p className="mt-1 text-xs text-muted">{horizon.period}</p>
-                    <p className="mt-2 text-base font-semibold tabular-nums text-foreground">{horizon.comparison}</p>
-                    {horizon.limitation ? (
-                      <p className="mt-1 text-xs leading-5 text-step-warning">{horizon.limitation}</p>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
+              <HorizonComparison horizons={item.horizons} />
               <dl className="mt-5 grid gap-x-8 gap-y-4 text-sm leading-6 md:grid-cols-2">
                 <PriorityField label="Why it matters" value={item.impact} />
                 <PriorityField label="Main supported driver" value={item.driver} />
@@ -135,6 +124,118 @@ export function NgeeAnnDecisionPriorities({
       </div>
     </section>
   );
+}
+
+function HorizonComparison({
+  horizons,
+}: {
+  horizons: NgeeAnnDecisionPrioritiesViewModel["items"][number]["horizons"];
+}) {
+  const maxMagnitude = Math.max(
+    1,
+    ...horizons.flatMap((horizon) => horizon.relativePct === null ? [] : [Math.abs(horizon.relativePct)]),
+  );
+  return (
+    <div className="mt-5 border-y border-border py-4">
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <p className="text-sm font-semibold text-foreground">
+          How each horizon compares with its governed baseline
+        </p>
+        <div className="flex gap-5 text-xs font-medium text-muted" aria-hidden="true">
+          <span>Below baseline</span>
+          <span>Above baseline</span>
+        </div>
+      </div>
+      <div className="mt-4 space-y-4">
+        {horizons.map((horizon) => (
+          <HorizonComparisonRow key={horizon.label} horizon={horizon} maxMagnitude={maxMagnitude} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function HorizonComparisonRow({
+  horizon,
+  maxMagnitude,
+}: {
+  horizon: NgeeAnnDecisionPrioritiesViewModel["items"][number]["horizons"][number];
+  maxMagnitude: number;
+}) {
+  const available = horizon.status === "available"
+    && horizon.actualKwh !== null
+    && horizon.baselineKwh !== null
+    && horizon.deltaKwh !== null
+    && horizon.relativePct !== null;
+  const direction = !available
+    ? "unavailable"
+    : horizon.relativePct! > 0
+      ? "increase"
+      : horizon.relativePct! < 0
+        ? "decrease"
+        : "flat";
+  const magnitude = available ? Math.min(50, Math.abs(horizon.relativePct!) / maxMagnitude * 50) : 0;
+  const left = direction === "decrease" ? 50 - magnitude : 50;
+  const accessibleLabel = available
+    ? `${horizon.label}, ${horizon.period}: ${formatKwh(horizon.actualKwh!)} kWh versus ${formatKwh(horizon.baselineKwh!)} kWh governed baseline; ${formatSigned(horizon.deltaKwh!)} kWh, ${formatSigned(horizon.relativePct!, 1)}%`
+    : `${horizon.label}, ${horizon.period}: unavailable${horizon.limitation ? `; ${horizon.limitation}` : ""}`;
+
+  return (
+    <div
+      role="img"
+      aria-label={accessibleLabel}
+      data-horizon-label={horizon.label}
+      data-direction={direction}
+      className="grid gap-2 sm:grid-cols-[minmax(9.5rem,13rem)_minmax(12rem,1fr)_minmax(8rem,10rem)] sm:items-center sm:gap-4"
+    >
+      <div className="min-w-0">
+        <p className="text-sm font-semibold text-foreground">{horizon.label}</p>
+        <p className="mt-0.5 text-xs leading-5 text-muted">{horizon.period}</p>
+        {available ? (
+          <p className="mt-0.5 text-xs tabular-nums text-muted">
+            {formatKwh(horizon.actualKwh!)} vs {formatKwh(horizon.baselineKwh!)} kWh
+          </p>
+        ) : null}
+      </div>
+      <div className="relative h-3 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true">
+        <span className="absolute inset-y-0 left-1/2 w-px bg-muted/45" />
+        {available && magnitude > 0 ? (
+          <span
+            className={[
+              "absolute inset-y-0 rounded-full",
+              direction === "increase" ? "bg-step-warning" : "bg-teal-700",
+            ].join(" ")}
+            style={{ left: `${left}%`, width: `${magnitude}%` }}
+          />
+        ) : null}
+      </div>
+      {available ? (
+        <div className="text-left sm:text-right">
+          <p className="text-base font-semibold tabular-nums text-foreground">
+            {formatSigned(horizon.relativePct!, 1)}%
+          </p>
+          <p className="mt-0.5 text-xs tabular-nums text-muted">
+            {formatSigned(horizon.deltaKwh!)} kWh vs baseline
+          </p>
+        </div>
+      ) : (
+        <p className="text-sm leading-5 text-step-warning sm:text-right">
+          {horizon.limitation ?? "Unavailable"}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function formatKwh(value: number): string {
+  return value.toFixed(2).replace(/\.?0+$/u, "");
+}
+
+function formatSigned(value: number, maximumFractionDigits = 2): string {
+  const formatted = Math.abs(value).toFixed(maximumFractionDigits).replace(/\.?0+$/u, "");
+  if (value > 0) return `+${formatted}`;
+  if (value < 0) return `-${formatted}`;
+  return formatted;
 }
 
 function PriorityField({ label, value }: { label: string; value: string }) {
