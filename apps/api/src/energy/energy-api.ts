@@ -29,7 +29,7 @@ import type { IncomingMessage } from "node:http";
 import type { ConfigApiContext, ConfigApiResponse } from "../routes/types.js";
 import { AuthError } from "../auth/service.js";
 import { readMultipartUpload } from "../upload-parser.js";
-import { executeEnergyScopeAnalysis, type EnergyScopeAnalysis } from "./energy-analysis.js";
+import { executeEnergyScopeAnalysisWithLatestAvailable, type EnergyScopeAnalysis } from "./energy-analysis.js";
 import { inspectEnergyExcelWorkbook } from "./energy-excel-import.js";
 import {
   ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION,
@@ -657,7 +657,7 @@ export const handleEnergyApiRequest = async (
       });
       return {
         status: 200,
-        body: createSuccessResult(await executeEnergyScopeAnalysis({
+        body: createSuccessResult(await executeEnergyScopeAnalysisWithLatestAvailable({
           metadataStore: context.metadataStore,
           dataGateway: context.dataGateway,
           userId: context.userId,

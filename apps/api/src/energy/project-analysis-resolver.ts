@@ -14,7 +14,7 @@ import { existsSync } from "node:fs";
 import { resolve as resolvePath } from "node:path";
 
 import {
-  executeEnergyScopeAnalysis,
+  executeEnergyScopeAnalysisWithLatestAvailable,
   selectEnergyCurrentOverviewPeriod,
   selectEnergyLatestCompletePeriod,
   type EnergyScopeAnalysis,
@@ -278,7 +278,7 @@ export const resolveProjectAnalysis = async (input: {
     cacheKey,
     async () => {
       await publishedRunContext.validatePinnedOverviewPeriod?.();
-      const scopeAnalysis = await executeEnergyScopeAnalysis({
+      const scopeAnalysis = await executeEnergyScopeAnalysisWithLatestAvailable({
         metadataStore: input.metadataStore,
         dataGateway: input.dataGateway,
         userId: input.user.id,
@@ -368,15 +368,7 @@ export const resolveProjectAnalysis = async (input: {
               databasePath: analysisDatabasePath,
             })
           : undefined;
-      const latestAvailablePeriod = analysis.summary.validIntervalCount === 0
-        ? await resolveLatestAvailablePeriod({
-            metadataStore: input.metadataStore,
-            dataGateway: input.dataGateway,
-            userId: input.user.id,
-            context: releasedContext,
-            databasePath: analysisDatabasePath,
-          })
-        : null;
+      const latestAvailablePeriod = scopeAnalysis.latestAvailablePeriod ?? null;
       return {
         status: "ready",
         snapshot: {
@@ -534,34 +526,6 @@ const resolveCurrentOverviewContext = async (input: {
     ...(input.env ? { env: input.env } : {}),
   });
 };
-
-const resolveLatestAvailablePeriod = async (input: {
-  metadataStore: MetadataStore;
-  dataGateway: LocalDataGateway;
-  userId: string;
-  context: EnergyQueryContext;
-  databasePath?: string;
-}): Promise<NonNullable<ProjectAnalysisSnapshot["latestAvailablePeriod"]> | null> => {
-  try {
-    const selected = await selectEnergyLatestCompletePeriod(input);
-    return {
-      period: "Custom",
-      from: selected.period.localFrom,
-      to: inclusiveLocalDate(selected.period.localToExclusive),
-    };
-  } catch (error) {
-    if (isMissingLatestCompletePeriod(error)) return null;
-    throw error;
-  }
-};
-
-const MISSING_LATEST_COMPLETE_PERIOD_ERRORS = new Set([
-  "ENERGYIQ_LATEST_COMPLETE_PERIOD_COVERAGE_NOT_FOUND",
-  "ENERGYIQ_LATEST_COMPLETE_PERIOD_NOT_FOUND",
-]);
-
-const isMissingLatestCompletePeriod = (error: unknown): boolean =>
-  error instanceof Error && MISSING_LATEST_COMPLETE_PERIOD_ERRORS.has(error.message);
 
 const inclusiveLocalDate = (localToExclusive: string): string => {
   const exclusive = new Date(`${localToExclusive}T00:00:00.000Z`);

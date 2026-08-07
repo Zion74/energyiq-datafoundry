@@ -810,6 +810,11 @@ export type EnergyCircuitAnalysisDto = {
 
 export type EnergyScopeAnalysisDto = {
   context: EnergyQueryContextDto;
+  latestAvailablePeriod?: {
+    period: "Custom";
+    from: string;
+    to: string;
+  };
   summary: {
     usageKwh: number;
     averageDailyUsageKwh: number;

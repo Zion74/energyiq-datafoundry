@@ -119,8 +119,9 @@ describe("published Overview URL reload", () => {
       "",
       "/energyiq/overview?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&grain=day&comparison=average&category=load",
     );
+    const snapshot = dashboardNgeeAnnSnapshot();
     const resolveProjectAnalysis = vi.spyOn(configApi, "resolveProjectAnalysis")
-      .mockResolvedValue({ status: "ready", snapshot: dashboardNgeeAnnSnapshot() });
+      .mockResolvedValue({ status: "ready", snapshot });
 
     await act(async () => {
       root.render(React.createElement(PublishedDecisionDashboard));
@@ -131,7 +132,9 @@ describe("published Overview URL reload", () => {
     const analyst = Array.from(container.querySelectorAll<HTMLAnchorElement>("a"))
       .find((anchor) => anchor.textContent?.includes("Ask AI Analyst"));
     const expectedQuery = "projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&grain=day&comparison=average&category=load";
-    expect(explorer?.getAttribute("href")).toBe(`/energyiq/explorer?${expectedQuery}`);
+    expect(explorer?.getAttribute("href")).toBe(
+      `/energyiq/explorer?${expectedQuery}&dataSnapshotId=${encodeURIComponent(snapshot.context.dataSnapshotId)}&projectReleaseId=${encodeURIComponent(snapshot.projectRelease.id)}`,
+    );
     expect(analyst?.getAttribute("href")).toBe(`/energyiq/ai?${expectedQuery}`);
 
     const openIncident = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
@@ -239,6 +242,8 @@ describe("published Overview URL reload", () => {
     const explorer = Array.from(container.querySelectorAll<HTMLAnchorElement>("a"))
       .find((anchor) => anchor.textContent?.includes("Open Project Explorer"));
     expect(explorer?.getAttribute("href")).toContain("period=Custom&from=2026-05-20&to=2026-06-16");
+    expect(explorer?.getAttribute("href")).toContain(`dataSnapshotId=${encodeURIComponent(snapshot.context.dataSnapshotId)}`);
+    expect(explorer?.getAttribute("href")).toContain(`projectReleaseId=${encodeURIComponent(snapshot.projectRelease.id)}`);
     const save = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
       .find((button) => button.textContent === "Save analysis");
     await act(async () => save?.click());

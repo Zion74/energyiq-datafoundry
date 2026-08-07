@@ -22,6 +22,7 @@ import {
   buildEnergyVirtualMeterTraces,
   evaluateEnergyAttention,
   executeEnergyScopeAnalysis,
+  executeEnergyScopeAnalysisWithLatestAvailable,
   selectEnergyCurrentOverviewPeriod,
   selectEnergyGoldenPeriod,
   selectEnergyLatestCompletePeriod,
@@ -997,6 +998,33 @@ describe("EnergyScopeAnalysis", () => {
         databasePath,
       });
       expect(overlap.summary.usageKwh).toBe(2.468);
+
+      const emptyWindow = await executeEnergyScopeAnalysisWithLatestAvailable({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        context: resolveEnergyQueryContext({
+          metadataStore: metadata,
+          user,
+          workspaceId: "default",
+          request: {
+            projectId: "ngee-ann-polytechnic",
+            scopeId: "project",
+            resource: "electricity",
+            period: "Custom",
+            from: "2026-07-01",
+            to: "2026-07-07",
+          },
+        }),
+        databasePath,
+      });
+      expect(emptyWindow.summary.validIntervalCount).toBe(0);
+      expect(emptyWindow.summary.usageKwh).toBe(0);
+      expect(emptyWindow.latestAvailablePeriod).toEqual({
+        period: "Custom",
+        from: NGEE_ANN_GOLDEN.selection.period.localFrom,
+        to: "2026-06-16",
+      });
 
       expect(repeated).toEqual(analysis);
       expect(maximumReadonlyQueryConcurrency).toBeLessThanOrEqual(3);

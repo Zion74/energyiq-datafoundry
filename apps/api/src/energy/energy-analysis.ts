@@ -183,6 +183,11 @@ type DailyUsageAnomalySuppressionCode =
 
 export type EnergyScopeAnalysis = {
   context: EnergyQueryContext;
+  latestAvailablePeriod?: {
+    period: "Custom";
+    from: string;
+    to: string;
+  };
   summary: {
     usageKwh: number;
     averageDailyUsageKwh: number;
@@ -782,6 +787,32 @@ export const selectEnergyLatestCompletePeriod = async (
       to: isoAt(row, 3),
     },
   };
+};
+
+export const resolveEnergyLatestAvailablePeriod = async (
+  input: EnergyPeriodSelectionInput,
+): Promise<NonNullable<EnergyScopeAnalysis["latestAvailablePeriod"]> | null> => {
+  try {
+    const selected = await selectEnergyLatestCompletePeriod(input);
+    const exclusive = new Date(`${selected.period.localToExclusive}T00:00:00.000Z`);
+    if (Number.isNaN(exclusive.valueOf())) {
+      throw new Error("ENERGYIQ_LATEST_COMPLETE_PERIOD_DATE_INVALID");
+    }
+    exclusive.setUTCDate(exclusive.getUTCDate() - 1);
+    return {
+      period: "Custom",
+      from: selected.period.localFrom,
+      to: exclusive.toISOString().slice(0, 10),
+    };
+  } catch (error) {
+    if (error instanceof Error && (
+      error.message === "ENERGYIQ_LATEST_COMPLETE_PERIOD_COVERAGE_NOT_FOUND"
+      || error.message === "ENERGYIQ_LATEST_COMPLETE_PERIOD_NOT_FOUND"
+    )) {
+      return null;
+    }
+    throw error;
+  }
 };
 
 export const selectEnergyCurrentOverviewPeriod = async (
@@ -1528,6 +1559,15 @@ export const executeEnergyScopeAnalysis = async (input: {
     }
   };
   });
+};
+
+export const executeEnergyScopeAnalysisWithLatestAvailable = async (
+  input: Parameters<typeof executeEnergyScopeAnalysis>[0],
+): Promise<EnergyScopeAnalysis> => {
+  const analysis = await executeEnergyScopeAnalysis(input);
+  if (analysis.summary.validIntervalCount > 0) return analysis;
+  const latestAvailablePeriod = await resolveEnergyLatestAvailablePeriod(input);
+  return latestAvailablePeriod ? { ...analysis, latestAvailablePeriod } : analysis;
 };
 
 const prepareDailyUsageAnomaly = (input: {

@@ -31,6 +31,7 @@ type ProjectNode = {
 };
 
 type ExplorerPeriod = "Yesterday" | "Last 7 days" | "Previous week" | "Previous month" | "Custom";
+type ExplorerChartView = "daily" | "hourly";
 
 export type ExplorerUrlViewState = {
   projectId: string;
@@ -39,6 +40,8 @@ export type ExplorerUrlViewState = {
   period: ExplorerPeriod;
   from: string;
   to: string;
+  dataSnapshotId: string;
+  projectReleaseId: string;
 };
 
 const explorerPeriodOptions: ReadonlyArray<{
@@ -73,6 +76,8 @@ export function ProjectExplorer() {
     initialViewState.period,
     initialViewState.from,
     initialViewState.to,
+    initialViewState.dataSnapshotId,
+    initialViewState.projectReleaseId,
   ].join(":");
   return <ProjectExplorerView key={viewStateKey} initialViewState={initialViewState} />;
 }
@@ -97,6 +102,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [periodSelection, setPeriodSelection] = useState<ExplorerPeriod>(initialViewState.period);
+  const [chartView, setChartView] = useState<ExplorerChartView>("daily");
   const [customRange, setCustomRange] = useState({
     projectId: initialViewState.projectId,
     from: initialViewState.from,
@@ -170,13 +176,16 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
     }
     setAnalysisLoading(true);
     setAnalysisError(null);
-    void configApi.executeEnergyScopeAnalysis({
+    void configApi.executeEnergyScopeAnalysis(buildExplorerAnalysisRequest({
       projectId: activeProjectId,
       scopeId: selectedId,
       resource,
       period: periodSelection,
-      ...(periodSelection === "Custom" ? { from: range.from, to: range.to } : {}),
-    }).then((result) => {
+      from: periodSelection === "Custom" ? range.from : "",
+      to: periodSelection === "Custom" ? range.to : "",
+      dataSnapshotId: initialViewState.dataSnapshotId,
+      projectReleaseId: initialViewState.projectReleaseId,
+    })).then((result) => {
       if (cancelled) return;
       setAnalysis(result);
       setCustomRange((current) => current.projectId === activeProjectId && current.from && current.to
@@ -196,7 +205,17 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
     return () => {
       cancelled = true;
     };
-  }, [activeProjectId, customRange.from, customRange.projectId, customRange.to, periodSelection, resource, selectedId]);
+  }, [
+    activeProjectId,
+    customRange.from,
+    customRange.projectId,
+    customRange.to,
+    initialViewState.dataSnapshotId,
+    initialViewState.projectReleaseId,
+    periodSelection,
+    resource,
+    selectedId,
+  ]);
 
   const projectNodes = hierarchyNodes ?? [];
   const selected = projectNodes.find((node) => node.id === selectedId)
@@ -207,6 +226,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
     (node) => node.parentId === selected.id && isMeterNode(node),
   );
   const explorerMetricsPending = analysisLoading || !analysis;
+  const selectedPeriodHasFacts = hasExplorerFacts(analysis);
   const analysisCircuitById = new Map(
     (analysis?.circuits ?? []).map((circuit) => [circuit.meterNodeId, circuit]),
   );
@@ -243,11 +263,53 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
     });
   };
 
-  const selectedValue = analysis?.summary.usageKwh ?? 0;
-  const selectedTrend = (analysis?.hourlyProfile ?? []).map((point) => ({
-    time: `${String(point.hour).padStart(2, "0")}:00`,
-    averagePowerKw: point.averageKw,
-  }));
+  const selectedValue = selectedPeriodHasFacts ? analysis?.summary.usageKwh ?? null : null;
+  const selectedTrend = useMemo(
+    () => (analysis?.hourlyProfile ?? []).map((point) => ({
+      time: `${String(point.hour).padStart(2, "0")}:00`,
+      averagePowerKw: point.averageKw,
+    })),
+    [analysis],
+  );
+  const dailyTrend = useMemo(() => explorerTrendSeries(analysis), [analysis]);
+  const selectedChartView = chartView === "daily" && dailyTrend.length > 1 ? "daily" : "hourly";
+  const showLatestAvailable = () => {
+    const latest = analysis?.latestAvailablePeriod;
+    if (!activeProjectId || !latest) return;
+    setCustomRange({
+      projectId: activeProjectId,
+      from: latest.from,
+      to: latest.to,
+    });
+    setPeriodSelection("Custom");
+  };
+
+  useEffect(() => {
+    if (!activeProjectId || !selectedId) return;
+    const range = customRange.projectId === activeProjectId
+      ? customRange
+      : { from: "", to: "" };
+    const nextUrl = explorerUrlWithView({
+      projectId: activeProjectId,
+      scopeId: selectedId,
+      resource,
+      period: periodSelection,
+      from: periodSelection === "Custom" ? range.from : "",
+      to: periodSelection === "Custom" ? range.to : "",
+      dataSnapshotId: initialViewState.dataSnapshotId,
+      projectReleaseId: initialViewState.projectReleaseId,
+    });
+    if (`${window.location.pathname}${window.location.search}` === nextUrl) return;
+    window.history.replaceState(window.history.state, "", nextUrl);
+  }, [
+    activeProjectId,
+    customRange,
+    initialViewState.dataSnapshotId,
+    initialViewState.projectReleaseId,
+    periodSelection,
+    resource,
+    selectedId,
+  ]);
 
   return (
     <div className="mx-auto grid min-h-[calc(100vh-56px)] w-full max-w-[1680px] lg:grid-cols-[300px_minmax(0,1fr)]">
@@ -446,6 +508,26 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
               </p>
             ) : null}
 
+            {analysis && !selectedPeriodHasFacts ? (
+              <div role="status" className="mt-4 flex flex-col gap-3 rounded-xl border border-step-warning/25 bg-step-warning/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-foreground">No energy facts in this period</p>
+                  <p className="mt-1 text-sm leading-5 text-muted">
+                    This Scope has no accepted intervals between {formatExplorerDate(analysis.context.from, analysis.context.timezone)} and {formatExplorerDate(new Date(Date.parse(analysis.context.to) - 1).toISOString(), analysis.context.timezone)}. Zero consumption is not assumed.
+                  </p>
+                </div>
+                {analysis.latestAvailablePeriod ? (
+                  <button
+                    type="button"
+                    onClick={showLatestAvailable}
+                    className="shrink-0 rounded-lg bg-primary px-3.5 py-2 text-sm font-semibold text-white transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                  >
+                    View latest available data
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+
             <div className="mt-6 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 xl:grid-cols-5">
               {explorerMetricsPending ? (
                 <>
@@ -479,23 +561,25 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                 <>
                   <MetricCell
                     label="Period consumption"
-                    value={`${selectedValue.toLocaleString(undefined, { maximumFractionDigits: 2 })} kWh`}
-                    note={`${analysis!.context.scopeName} · selected period`}
+                    value={selectedValue === null ? "No data" : `${selectedValue.toLocaleString(undefined, { maximumFractionDigits: 2 })} kWh`}
+                    note={selectedValue === null ? "No accepted interval facts in this period" : `${analysis!.context.scopeName} · selected period`}
+                    tone={selectedValue === null ? "warning" : "muted"}
                   />
                   <MetricCell
                     label="Latest cumulative reading"
-                    value="Not provided"
-                    note="Requires the latest accepted Raw Reading from Data Foundation"
+                    value="Unavailable"
+                    note="Raw Reading is not included in this response yet"
                   />
                   <MetricCell
                     label="Average power"
-                    value="Hourly series"
-                    note={`${analysis!.hourlyProfile.length} server-provided hourly averages`}
+                    value={selectedPeriodHasFacts ? "24h profile" : "No data"}
+                    note={selectedPeriodHasFacts ? `${analysis!.hourlyProfile.length} server-provided hourly averages` : "No accepted intervals to profile"}
+                    tone={selectedPeriodHasFacts ? "muted" : "warning"}
                   />
                   <MetricCell
                     label="Source"
-                    value={analysis!.provenance.sourceView}
-                    note={`Snapshot ${analysis!.provenance.dataSnapshotId}`}
+                    value="Canonical facts"
+                    note={`Snapshot ${compactEvidenceId(analysis!.provenance.dataSnapshotId)}`}
                   />
                   <MetricCell
                     label="Data health"
@@ -509,55 +593,136 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
 
             <div className="mt-7 grid gap-6 xl:grid-cols-[1.4fr_0.8fr]">
               <div>
-                <div className="mb-3 flex items-end justify-between">
+                <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                   <div>
-                    <h2 className="text-sm font-semibold text-foreground">Hourly operating profile</h2>
-                    <p className="mt-1 text-xs text-muted-light">Server-provided interval-average power by hour across the selected period</p>
+                    <h2 className="text-sm font-semibold text-foreground">
+                      {selectedChartView === "daily" ? "Daily energy trend" : "24-hour operating profile"}
+                    </h2>
+                    <p className="mt-1 text-xs text-muted-light">
+                      {selectedChartView === "daily"
+                        ? "Server-provided daily energy for this Scope and selected period"
+                        : "Server-provided interval-average power grouped by local hour"}
+                    </p>
                   </div>
-                  <span className="text-[11px] text-muted-light">Average power · kW</span>
+                  <div className="flex items-center gap-3">
+                    {dailyTrend.length > 1 ? (
+                      <div className="flex rounded-lg border border-border bg-surface p-1" aria-label="Explorer chart view">
+                        <button
+                          type="button"
+                          aria-pressed={selectedChartView === "daily"}
+                          onClick={() => setChartView("daily")}
+                          className={[
+                            "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                            selectedChartView === "daily" ? "bg-surface-subtle text-foreground" : "text-muted hover:text-foreground",
+                          ].join(" ")}
+                        >
+                          Daily trend
+                        </button>
+                        <button
+                          type="button"
+                          aria-pressed={selectedChartView === "hourly"}
+                          onClick={() => setChartView("hourly")}
+                          className={[
+                            "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+                            selectedChartView === "hourly" ? "bg-surface-subtle text-foreground" : "text-muted hover:text-foreground",
+                          ].join(" ")}
+                        >
+                          24h profile
+                        </button>
+                      </div>
+                    ) : null}
+                    <span className="text-xs text-muted-light">
+                      {selectedChartView === "daily" ? "Energy · kWh" : "Average power · kW"}
+                    </span>
+                  </div>
                 </div>
                 <div className="h-[300px] rounded-xl border border-border bg-surface p-4 shadow-[var(--shadow-card)]">
-                  {explorerMetricsPending ? (
+                  {explorerMetricsPending || !selectedPeriodHasFacts ? (
                     <div className="grid h-full place-items-center text-center">
                       <div>
                         <p className="text-sm font-medium text-foreground">
-                          {analysisLoading ? "Loading trusted interval facts" : analysisError ? "Trusted interval facts are unavailable" : "No validated interval facts"}
+                          {analysisLoading ? "Loading trusted interval facts" : analysisError ? "Trusted interval facts are unavailable" : "No accepted intervals in this period"}
                         </p>
                         <p className="mt-1 max-w-sm text-xs leading-5 text-muted">
-                          {analysisError ? "Resolve the Data Foundation error shown above, then retry this exact Scope and period." : "The chart uses the exact Project, Scope and period shown above."}
+                          {analysisError
+                            ? "Resolve the Data Foundation error shown above, then retry this exact Scope and period."
+                            : analysis?.latestAvailablePeriod
+                              ? "Use View latest available data above to inspect the most recent complete window."
+                              : "Choose another period or check the selected Scope's data status."}
                         </p>
                       </div>
                     </div>
+                  ) : selectedChartView === "daily" ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={dailyTrend} margin={{ top: 8, right: 12, left: -8, bottom: 8 }}>
+                        <defs>
+                          <linearGradient id="explorer-daily-fill" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#3f827f" stopOpacity={0.22} />
+                            <stop offset="100%" stopColor="#3f827f" stopOpacity={0.03} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid stroke="#ececf0" strokeDasharray="3 4" vertical={false} />
+                        <XAxis
+                          dataKey="date"
+                          axisLine={false}
+                          tickLine={false}
+                          minTickGap={24}
+                          tick={{ fontSize: 11, fill: "#6f6f7b" }}
+                          tickFormatter={formatExplorerTrendDate}
+                        />
+                        <YAxis axisLine={false} tickLine={false} width={48} tick={{ fontSize: 11, fill: "#6f6f7b" }} />
+                        <Tooltip
+                          contentStyle={{
+                            border: "1px solid #ececf0",
+                            borderRadius: 8,
+                            boxShadow: "0 8px 24px rgba(13,13,13,.08)",
+                            fontSize: 12,
+                          }}
+                          labelFormatter={(label) => formatExplorerTrendTooltipDate(String(label))}
+                          formatter={(value) => [value === null ? "No accepted facts" : `${Number(value).toFixed(2)} kWh`, "Daily energy"]}
+                        />
+                        <Area
+                          type="monotone"
+                          dataKey="usageKwh"
+                          stroke="#3f827f"
+                          strokeWidth={2}
+                          fill="url(#explorer-daily-fill)"
+                          dot={{ r: 2.5, fill: "#3f827f", strokeWidth: 0 }}
+                          activeDot={{ r: 4 }}
+                          connectNulls={false}
+                        />
+                      </AreaChart>
+                    </ResponsiveContainer>
                   ) : (
                     <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={selectedTrend} margin={{ top: 8, right: 12, left: -18, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="explorer-fill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#3f827f" stopOpacity={0.2} />
-                          <stop offset="100%" stopColor="#3f827f" stopOpacity={0.02} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid stroke="#ececf0" strokeDasharray="3 4" vertical={false} />
-                      <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "#8a8a99" }} />
-                      <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: "#8a8a99" }} />
-                      <Tooltip
-                        contentStyle={{
-                          border: "1px solid #ececf0",
-                          borderRadius: 8,
-                          boxShadow: "0 8px 24px rgba(13,13,13,.08)",
-                          fontSize: 12,
-                        }}
-                        formatter={(value) => [`${Number(value).toFixed(1)} kW`, "Hourly average"]}
-                      />
-                      <Area
-                        type="monotone"
-                        dataKey="averagePowerKw"
-                        stroke="#3f827f"
-                        strokeWidth={2}
-                        fill="url(#explorer-fill)"
-                        dot={false}
-                      />
-                    </AreaChart>
+                      <AreaChart data={selectedTrend} margin={{ top: 8, right: 12, left: -8, bottom: 8 }}>
+                        <defs>
+                          <linearGradient id="explorer-fill" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#3f827f" stopOpacity={0.2} />
+                            <stop offset="100%" stopColor="#3f827f" stopOpacity={0.02} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid stroke="#ececf0" strokeDasharray="3 4" vertical={false} />
+                        <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: "#6f6f7b" }} />
+                        <YAxis axisLine={false} tickLine={false} width={48} tick={{ fontSize: 11, fill: "#6f6f7b" }} />
+                        <Tooltip
+                          contentStyle={{
+                            border: "1px solid #ececf0",
+                            borderRadius: 8,
+                            boxShadow: "0 8px 24px rgba(13,13,13,.08)",
+                            fontSize: 12,
+                          }}
+                          formatter={(value) => [`${Number(value).toFixed(1)} kW`, "Hourly average"]}
+                        />
+                        <Area
+                          type="monotone"
+                          dataKey="averagePowerKw"
+                          stroke="#3f827f"
+                          strokeWidth={2}
+                          fill="url(#explorer-fill)"
+                          dot={false}
+                        />
+                      </AreaChart>
                     </ResponsiveContainer>
                   )}
                 </div>
@@ -566,7 +731,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
               <div>
                 <div className="mb-3">
                   <h2 className="text-sm font-semibold text-foreground">Source & Data Health</h2>
-                  <p className="mt-1 text-xs text-muted-light">Trace the selected facts without making a decision claim</p>
+                  <p className="mt-1 text-xs text-muted-light">A plain-language status first; technical trace remains available below</p>
                 </div>
                 <div className="rounded-xl border border-border bg-surface p-5 shadow-[var(--shadow-card)]">
                   {explorerMetricsPending ? (
@@ -578,17 +743,51 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                           : "No source evidence was returned for this selection."}
                     </p>
                   ) : (
-                    <dl className="space-y-3 text-xs">
-                      <EvidenceRow label="Source view" value={analysis!.provenance.sourceView} />
-                      <EvidenceRow label="Data Snapshot" value={analysis!.provenance.dataSnapshotId} />
-                      <EvidenceRow label="Hierarchy" value={analysis!.provenance.hierarchyRevisionId} />
-                      <EvidenceRow label="Meter formula" value={analysis!.provenance.meterFormulaRevisionId} />
-                      <EvidenceRow label="Coverage" value={`${analysis!.dataHealth.coveragePct.toFixed(1)}%`} />
-                      <EvidenceRow label="Valid intervals" value={`${analysis!.dataHealth.validIntervalCount.toLocaleString()} / ${analysis!.dataHealth.expectedMeterIntervalCount.toLocaleString()}`} />
-                      <EvidenceRow label="Quality events" value={analysis!.dataHealth.qualityEventCount.toLocaleString()} />
-                      <EvidenceRow label="Last interval" value={analysis!.dataHealth.lastSeenAt ? formatExplorerTimestamp(analysis!.dataHealth.lastSeenAt, analysis!.context.timezone) : "Not provided"} />
-                      <EvidenceRow label="Import batches" value={analysis!.dataHealth.importBatchIds.join(", ") || "Not provided"} />
-                    </dl>
+                    <>
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">
+                            {analysis!.dataHealth.status === "complete"
+                              ? "Data is complete for this period"
+                              : analysis!.dataHealth.status === "partial"
+                                ? "Some expected intervals need review"
+                                : "No accepted intervals in this period"}
+                          </p>
+                          <p className="mt-1 text-xs leading-5 text-muted">
+                            {analysis!.dataHealth.coveragePct.toFixed(1)}% coverage · {analysis!.dataHealth.qualityEventCount.toLocaleString()} quality events
+                          </p>
+                        </div>
+                        <span className={[
+                          "rounded-full px-2.5 py-1 text-xs font-semibold",
+                          analysis!.dataHealth.status === "complete"
+                            ? "bg-step-success/10 text-step-success"
+                            : "bg-step-warning/10 text-step-warning",
+                        ].join(" ")}
+                        >
+                          {analysis!.dataHealth.status === "complete" ? "Validated" : analysis!.dataHealth.status === "partial" ? "Review" : "Unavailable"}
+                        </span>
+                      </div>
+                      <p className="mt-4 text-xs leading-5 text-muted">
+                        Last accepted interval: {analysis!.dataHealth.lastSeenAt
+                          ? formatExplorerTimestamp(analysis!.dataHealth.lastSeenAt, analysis!.context.timezone)
+                          : "Not provided by the current fact response"}
+                      </p>
+                      <details className="mt-4 border-t border-border pt-3">
+                        <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+                          Technical provenance
+                        </summary>
+                        <dl className="mt-3 space-y-3 text-xs">
+                          <EvidenceRow label="Source view" value={analysis!.provenance.sourceView} />
+                          <EvidenceRow label="Data Snapshot" value={analysis!.provenance.dataSnapshotId} />
+                          <EvidenceRow label="Hierarchy" value={analysis!.provenance.hierarchyRevisionId} />
+                          <EvidenceRow label="Meter formula" value={analysis!.provenance.meterFormulaRevisionId} />
+                          <EvidenceRow label="Coverage" value={`${analysis!.dataHealth.coveragePct.toFixed(1)}%`} />
+                          <EvidenceRow label="Valid intervals" value={`${analysis!.dataHealth.validIntervalCount.toLocaleString()} / ${analysis!.dataHealth.expectedMeterIntervalCount.toLocaleString()}`} />
+                          <EvidenceRow label="Quality events" value={analysis!.dataHealth.qualityEventCount.toLocaleString()} />
+                          <EvidenceRow label="Import batches" value={analysis!.dataHealth.importBatchIds.join(", ") || "Not provided"} />
+                        </dl>
+                      </details>
+                    </>
                   )}
                 </div>
               </div>
@@ -617,7 +816,8 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                   </div>
                   {directMeters.map((meter) => {
                     const circuit = analysisCircuitById.get(meter.id);
-                    const hasQualityIssue = (circuit?.qualityEventCount ?? 0) > 0;
+                    const circuitHasFacts = selectedPeriodHasFacts && Boolean(circuit);
+                    const hasQualityIssue = circuitHasFacts && (circuit?.qualityEventCount ?? 0) > 0;
                     return (
                       <button
                       key={meter.id}
@@ -638,16 +838,16 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                         {meter.role}
                       </span>
                       <span className="tabular text-xs font-medium text-foreground">
-                        {circuit ? `${circuit.usageKwh.toFixed(2)} kWh` : analysisLoading ? "Loading…" : "No data"}
+                        {circuitHasFacts && circuit ? `${circuit.usageKwh.toFixed(2)} kWh` : analysisLoading ? "Loading…" : "No data"}
                       </span>
                       <span
                         className={[
                           "flex items-center gap-1.5 text-[11px] font-medium",
-                          hasQualityIssue ? "text-step-warning" : "text-step-success",
+                          !circuitHasFacts ? "text-muted" : hasQualityIssue ? "text-step-warning" : "text-step-success",
                         ].join(" ")}
                       >
                         <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                        {circuit ? (hasQualityIssue ? "review" : "validated") : "not returned"}
+                        {circuitHasFacts ? (hasQualityIssue ? "review" : "validated") : "not returned"}
                       </span>
                       </button>
                     );
@@ -859,7 +1059,62 @@ export function explorerViewStateFromSearchParams(
     period,
     from: hasValidCustomRange ? requestedFrom : "",
     to: hasValidCustomRange ? requestedTo : "",
+    dataSnapshotId: searchParams.get("dataSnapshotId")?.trim() || "",
+    projectReleaseId: searchParams.get("projectReleaseId")?.trim() || "",
   };
+}
+
+export function explorerUrlWithView(view: ExplorerUrlViewState): string {
+  const next = new URLSearchParams();
+  if (view.projectId) next.set("projectId", view.projectId);
+  next.set("scopeId", view.scopeId || "project");
+  next.set("resource", view.resource);
+  next.set("period", view.period);
+  if (view.period === "Custom" && view.from && view.to) {
+    next.set("from", view.from);
+    next.set("to", view.to);
+  }
+  if (view.dataSnapshotId) next.set("dataSnapshotId", view.dataSnapshotId);
+  if (view.projectReleaseId) next.set("projectReleaseId", view.projectReleaseId);
+  return `/energyiq/explorer?${next.toString()}`;
+}
+
+export function buildExplorerAnalysisRequest(
+  view: ExplorerUrlViewState,
+): Parameters<typeof configApi.executeEnergyScopeAnalysis>[0] {
+  return {
+    projectId: view.projectId,
+    scopeId: view.scopeId || "project",
+    resource: view.resource,
+    period: view.period,
+    ...(view.period === "Custom" && view.from && view.to
+      ? { from: view.from, to: view.to }
+      : {}),
+    ...(view.dataSnapshotId ? { expectedDataSnapshotId: view.dataSnapshotId } : {}),
+    ...(view.projectReleaseId ? { expectedProjectReleaseId: view.projectReleaseId } : {}),
+  };
+}
+
+export function hasExplorerFacts(
+  analysis: EnergyScopeAnalysisDto | null,
+): analysis is EnergyScopeAnalysisDto {
+  return Boolean(analysis && analysis.summary.validIntervalCount > 0);
+}
+
+export function explorerTrendSeries(analysis: EnergyScopeAnalysisDto | null): Array<{
+  date: string;
+  usageKwh: number | null;
+  coveragePct: number;
+}> {
+  if (!hasExplorerFacts(analysis)) return [];
+  const selectedScope = analysis.dailyTotals?.scopes.find(
+    (candidate) => candidate.scopeId === analysis.context.scopeId,
+  );
+  return (selectedScope?.rows ?? []).map((row) => ({
+    date: row.localDate,
+    usageKwh: row.usageKwh,
+    coveragePct: row.dataHealth.coveragePct,
+  }));
 }
 
 function validDateInput(value: string): boolean {
@@ -921,11 +1176,41 @@ function formatExplorerTimestamp(value: string, timeZone: string): string {
   }).format(new Date(value));
 }
 
+function formatExplorerDate(value: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-SG", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    timeZone,
+  }).format(new Date(value));
+}
+
+function formatExplorerTrendDate(value: string): string {
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.valueOf())) return value;
+  return new Intl.DateTimeFormat("en-SG", { day: "numeric", month: "short", timeZone: "UTC" }).format(parsed);
+}
+
+function formatExplorerTrendTooltipDate(value: string): string {
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.valueOf())) return value;
+  return new Intl.DateTimeFormat("en-SG", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(parsed);
+}
+
+function compactEvidenceId(value: string): string {
+  return value.length <= 24 ? value : `${value.slice(0, 12)}…${value.slice(-8)}`;
+}
+
 function EvidenceRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="grid grid-cols-[100px_minmax(0,1fr)] gap-3">
+    <div className="grid min-w-0 grid-cols-[100px_minmax(0,1fr)] gap-3">
       <dt className="text-muted-light">{label}</dt>
-      <dd className="truncate text-right font-mono text-[11px] text-foreground" title={value}>{value}</dd>
+      <dd className="break-all text-right font-mono text-[11px] leading-4 text-foreground">{value}</dd>
     </div>
   );
 }
@@ -942,12 +1227,12 @@ function MetricCell({
   tone?: "muted" | "warning" | "success";
 }) {
   return (
-    <div className="bg-surface px-5 py-4">
-      <p className="text-[11px] font-medium text-muted-light">{label}</p>
-      <p className="mt-2 tabular text-xl font-semibold tracking-tight text-foreground">{value}</p>
+    <div className="min-w-0 bg-surface px-5 py-4">
+      <p className="text-xs font-medium text-muted-light">{label}</p>
+      <p className="mt-2 break-words tabular text-lg font-semibold leading-tight tracking-tight text-foreground">{value}</p>
       <p
         className={[
-          "mt-1 text-[11px]",
+          "mt-1 break-words text-xs leading-4",
           tone === "warning" ? "text-step-warning" : tone === "success" ? "text-step-success" : "text-muted-light",
         ].join(" ")}
       >

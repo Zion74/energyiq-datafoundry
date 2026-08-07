@@ -429,12 +429,20 @@ function PublishedDecisionDashboardView({
   const isPreschoolRenderer = rendererRequest?.rendererKey === "preschool-overview";
   const isDedicatedOverviewRenderer = isNgeeAnnRenderer || isPreschoolRenderer;
   const isDedicatedOverviewShell = isDedicatedOverviewProject || isPreschoolRenderer;
+  const currentHandoffPin = currentSnapshot
+    ? {
+        ...snapshotLocalDateRange(currentSnapshot),
+        dataSnapshotId: currentSnapshot.context.dataSnapshotId,
+        projectReleaseId: currentSnapshot.projectRelease.id,
+      }
+    : initialViewState.currentOverviewPin;
   const resolvedHandoffView = currentSnapshot && isNgeeAnnProject
     ? {
         ...initialViewState,
         period: "Custom" as const,
         scopeId: "project",
         ...snapshotLocalDateRange(currentSnapshot),
+        ...(currentHandoffPin ? { currentOverviewPin: currentHandoffPin } : {}),
       }
     : {
         ...initialViewState,
@@ -442,6 +450,7 @@ function PublishedDecisionDashboardView({
         period: isPreschoolProject ? "Custom" : initialViewState.period,
         from: effectiveCustomRange.from,
         to: effectiveCustomRange.to,
+        ...(currentHandoffPin ? { currentOverviewPin: currentHandoffPin } : {}),
       };
   const publishedSections = rendererState.status === "ready" ? rendererState.plan.sections : [];
   const navigationSections = useMemo<ReadonlyArray<OverviewNavigationSection>>(() => {
@@ -885,7 +894,13 @@ function overviewHandoffHref(
   pathname: "/energyiq/explorer" | "/energyiq/ai",
   view: OverviewUrlViewState,
 ): string {
-  return overviewUrlWithView(view).replace("/energyiq/overview", pathname);
+  const handoff = overviewUrlWithView(view).replace("/energyiq/overview", pathname);
+  if (pathname !== "/energyiq/explorer" || !view.currentOverviewPin) return handoff;
+  const [path, query = ""] = handoff.split("?");
+  const next = new URLSearchParams(query);
+  next.set("dataSnapshotId", view.currentOverviewPin.dataSnapshotId);
+  next.set("projectReleaseId", view.currentOverviewPin.projectReleaseId);
+  return `${path}?${next.toString()}`;
 }
 
 function scopeNodeDisplayPath(
