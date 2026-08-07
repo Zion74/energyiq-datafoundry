@@ -83,7 +83,7 @@ Overview AI Slot 与 Full AI Analyst 均遵守以上职责。项目 Analysis Pac
 | 5 | 校准 Ngee Ann/Preschool AI Slot 的固定 SQL/强制 Finding 路线 | 主 Agent或其提交后由侧边分支 | blocked by dirty Integration | 0–3 Findings；Agent 自主调查；Evidence guard 不弱化 |
 | 6 | 补齐 Ngee Ann 的 acted/ignored/verify 决策后果 | 主 Agent | planned | 两项目共享 Finding 语义；项目 Pack 保持独立 |
 | 7 | 完成 #35 Provider 与 Presentation browser acceptance | 主 Agent + 本侧边复核 | pending | 两项目各有 useful visual 和正确 no-visual 案例 |
-| 8 | 校准并关闭已完成 Ticket | 主 Agent | pending | #33 先关闭；#30/#36/#18/#35 按证据关闭 |
+| 8 | 校准并关闭已完成 Ticket | 主 Agent | partial；#33 closed | #30/#36/#18/#35 继续按证据关闭 |
 | 9 | #15 完整受控图表注册表 | 后续 | deferred | 仅在 Full Analyst 试点明确需要时推进 |
 | 10 | #21 Charles/试点验收 | 用户/Charles | blocked by prior tasks | 人工确认信息价值、可读性、深度和行动价值 |
 
@@ -162,7 +162,7 @@ Ngee Ann 与 Preschool 各运行至少三次固定 Profile/Snapshot：
 4. [ ] AI Slot 固定路线校准后跑两项目 Provider；
 5. [ ] #35 真实 visual/no-visual 与浏览器验收；
 6. [ ] #20 History keyboard/1440/1920 验收；
-7. [ ] 关闭已合入的 #33；
+7. [x] 关闭已合入的 #33（`26d2fd1`；专项回归 4 files / 53 tests）；
 8. [ ] 校准 #30/#36/#18/#35 正文或评论；
 9. [ ] 最后进入 #21 Charles/试点验收。
 
@@ -233,3 +233,9 @@ Ngee Ann 与 Preschool 各运行至少三次固定 Profile/Snapshot：
 - Eval script syntax 与 `git diff --check` passed。
 
 限制：当前八维自动分解仍是透明的规则型 diagnostic，不等于人类价值判断。真实 Candidate/Baseline、可选 LLM judge 与 Charles 抽查仍待后续证据。
+
+### Ticket 维护
+
+- #30 进度证据：<https://github.com/Zion74/energyiq-datafoundry/issues/30#issuecomment-5219684498>
+- #36 最新合入交接：<https://github.com/Zion74/energyiq-datafoundry/issues/36#issuecomment-5219684718>
+- #33 已验证并关闭：<https://github.com/Zion74/energyiq-datafoundry/issues/33#issuecomment-5219684918>
