@@ -42,6 +42,56 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Verify with");
     expect(markup).toContain("Details, evidence and limitations");
     expect(markup.match(/View supporting evidence/g)).toHaveLength(1);
+    expect(markup).toContain("Compared with saved result from");
+    expect(markup).toContain("Newly supported in current B");
+    expect(markup).toContain("This does not prove the issue itself began in B.");
+    expect(markup).toContain('data-decision-lifecycle-kind="newly_supported"');
+  });
+
+  it("shows a prior theme as resolved only when current B has complete no-trigger Evidence", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    if (snapshot.analysis.dailyUsageAnomalies?.status !== "available") throw new Error("GOLDEN_ANOMALY_BUNDLE_REQUIRED");
+    for (const row of snapshot.analysis.dailyUsageAnomalies.scopes.flatMap((scope) => scope.rows)) {
+      row.outcome = "within_threshold";
+    }
+    snapshot.decisionPriorities = {
+      ...snapshot.decisionPriorities!,
+      status: "empty",
+      limitation: null,
+      items: [],
+    };
+    snapshot.decisionLifecycle = {
+      ...snapshot.decisionLifecycle!,
+      reference: {
+        ...snapshot.decisionLifecycle!.reference!,
+        evidenceStatus: "available",
+      },
+      items: [{
+        ...snapshot.decisionLifecycle!.items[0]!,
+        kind: "resolved",
+        currentPriorityId: null,
+      }],
+    };
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+
+    expect(markup).toContain("Resolved in the current 28-day window");
+    expect(markup).toContain('data-decision-lifecycle-kind="resolved"');
+    expect(markup).not.toContain("Priority 1");
+  });
+
+  it("hides cross-Snapshot labels when the lifecycle contract points at another current Snapshot", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    snapshot.decisionLifecycle!.currentDataSnapshotId = "snapshot-other";
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+
+    expect(markup).not.toContain("Compared with saved result from");
+    expect(markup).not.toContain("Newly supported in current B");
   });
 
   it("keeps decrease, flat and unavailable horizons distinct without inventing zero values", () => {

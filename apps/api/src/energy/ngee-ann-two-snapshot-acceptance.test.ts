@@ -228,6 +228,25 @@ describe("Ngee Ann two-Snapshot customer-value acceptance", () => {
       expect(analysisB.snapshot.analysis.cost.status).toBe("available");
       expect(analysisB.snapshot.analysis.offHours.status).toBe("available");
       expect(analysisB.snapshot.decisionPriorities?.status).not.toBe("unavailable");
+      expect(analysisB.snapshot.decisionLifecycle).toMatchObject({
+        status: "available",
+        currentDataSnapshotId: materializedB.snapshot.id,
+        reference: {
+          savedAnalysisId: savedA.id,
+          dataSnapshotId: materializedA.snapshot.id,
+          evidenceStatus: "unavailable",
+        },
+        items: [{
+          kind: "newly_supported",
+          previousBundleId: null,
+        }],
+        limitation: null,
+      });
+      expect(analysisB.snapshot.decisionLifecycle?.items[0]?.currentBundleId).toBe(
+        analysisB.snapshot.analysis.dailyUsageAnomalies?.status === "available"
+          ? analysisB.snapshot.analysis.dailyUsageAnomalies.bundleId
+          : null,
+      );
       expect(releaseIdentity(analysisB.snapshot)).toEqual(releaseIdentityA);
       expectEvidencePins(analysisB.snapshot.evidence, materializedB.snapshot.id);
       expect(new Set(analysisA.snapshot.evidence.map((item) => item.id)))

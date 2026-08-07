@@ -747,6 +747,28 @@ export type NgeeAnnDecisionPrioritiesDto = {
   items: NgeeAnnDecisionPriorityDto[];
 };
 
+export type NgeeAnnDecisionLifecycleDto = {
+  status: "available" | "unavailable";
+  reference: {
+    savedAnalysisId: string;
+    dataSnapshotId: string;
+    createdAt: string;
+    evidenceStatus: "available" | "incomplete" | "unavailable";
+  } | null;
+  currentDataSnapshotId: string;
+  items: Array<{
+    themeKey: string;
+    kind: "new" | "newly_supported" | "recurring" | "resolved" | "no_longer_supported";
+    currentPriorityId: string | null;
+    currentBundleId: string | null;
+    previousBundleId: string | null;
+  }>;
+  limitation: {
+    code: "NO_COMPATIBLE_SAVED_ANALYSIS" | "CURRENT_THEME_EVIDENCE_INCOMPLETE";
+    message: string;
+  } | null;
+};
+
 export type EnergyPeakIntervalDataHealthDto = EnergyAnalysisDataHealthDto & {
   status: "complete" | "unavailable";
 };
@@ -1522,6 +1544,7 @@ export type EnergyProjectAnalysisSnapshotDto = {
   metadata: EnergyProjectAnalysisMetadataDto;
   analysis: EnergyProjectAnalysisPayloadDto;
   decisionPriorities?: NgeeAnnDecisionPrioritiesDto;
+  decisionLifecycle?: NgeeAnnDecisionLifecycleDto;
   preschoolBenchmark?: PreschoolBenchmarkProjectionDto;
   preschoolAppliances?: PreschoolApplianceProjectionDto;
   preschoolOperational?: PreschoolOperationalProjectionDto;

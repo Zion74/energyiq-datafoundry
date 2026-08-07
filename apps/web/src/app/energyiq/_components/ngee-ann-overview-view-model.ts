@@ -245,6 +245,20 @@ export type NgeeAnnDailyAnomalyViewModel = {
 export type NgeeAnnDecisionPrioritiesViewModel = {
   status: "available" | "empty" | "partial" | "suppressed" | "unavailable";
   limitation: string | null;
+  lifecycle: {
+    status: "available" | "unavailable";
+    referenceLabel: string | null;
+    referenceDetail: string | null;
+    previousSavedAnalysisId: string | null;
+    previousSnapshotId: string | null;
+    historicalItems: Array<{
+      themeKey: string;
+      kind: "resolved" | "no_longer_supported";
+      label: string;
+      detail: string;
+      tone: "success" | "warning";
+    }>;
+  };
   items: Array<{
     priorityId: string;
     rank: 1 | 2 | 3;
@@ -273,6 +287,12 @@ export type NgeeAnnDecisionPrioritiesViewModel = {
     driver: string;
     nextCheck: string;
     verificationMetric: string;
+    lifecycle: {
+      kind: "new" | "newly_supported" | "recurring";
+      label: string;
+      detail: string;
+      tone: "info" | "warning";
+    } | null;
   }>;
 };
 
@@ -1297,6 +1317,7 @@ function buildDecisionPriorities(
   const unavailable = (limitation: string): NgeeAnnDecisionPrioritiesViewModel => ({
     status: "unavailable",
     limitation,
+    lifecycle: unavailableDecisionLifecycleView(),
     items: [],
   });
   if (!source) {
@@ -1305,9 +1326,11 @@ function buildDecisionPriorities(
   if (!validDecisionPriorityEnvelope(snapshot, source, dailyAnomalies)) {
     return unavailable("Decision priorities were withheld because their order or Evidence contract is invalid.");
   }
+  const lifecycle = buildDecisionLifecycleView(snapshot, source);
   return {
     status: source.status,
     limitation: source.limitation?.message ?? null,
+    lifecycle,
     items: source.items.map((item) => ({
       priorityId: item.priorityId,
       rank: item.rank,
@@ -1352,7 +1375,116 @@ function buildDecisionPriorities(
         : item.driver.limitation,
       nextCheck: item.action.nextCheck,
       verificationMetric: item.action.verificationMetricRef.label,
+      lifecycle: lifecycleForPriority(snapshot, lifecycle, item.priorityId),
     })),
+  };
+}
+
+function buildDecisionLifecycleView(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  priorities: NonNullable<EnergyProjectAnalysisSnapshotDto["decisionPriorities"]>,
+): NgeeAnnDecisionPrioritiesViewModel["lifecycle"] {
+  const source = snapshot.decisionLifecycle;
+  if (!source || source.currentDataSnapshotId !== snapshot.dataSnapshot.id) {
+    return unavailableDecisionLifecycleView();
+  }
+  if (source.status === "unavailable") return unavailableDecisionLifecycleView();
+  if (!source.reference
+    || source.reference.dataSnapshotId === snapshot.dataSnapshot.id
+    || source.items.some((item) => !validDecisionLifecycleItem(snapshot, priorities, item))) {
+    return unavailableDecisionLifecycleView();
+  }
+  const historicalItems: NgeeAnnDecisionPrioritiesViewModel["lifecycle"]["historicalItems"] = [];
+  for (const item of source.items) {
+    if (item.currentPriorityId !== null) continue;
+    if (item.kind === "resolved") {
+      historicalItems.push({
+        themeKey: item.themeKey,
+        kind: item.kind,
+        label: "Resolved in the current 28-day window",
+        detail: "Saved A supported this daily-usage theme; current B has complete Evidence with no eligible exception.",
+        tone: "success",
+      });
+    } else if (item.kind === "no_longer_supported") {
+      historicalItems.push({
+        themeKey: item.themeKey,
+        kind: item.kind,
+        label: "No longer supported by current Evidence",
+        detail: source.limitation?.message
+          ?? "The current Evidence is incomplete, so disappearance from the page does not prove resolution.",
+        tone: "warning",
+      });
+    }
+  }
+  return {
+    status: "available",
+    referenceLabel: `Compared with saved result from ${formatTimestamp(source.reference.createdAt, snapshot.context.timezone)}`,
+    referenceDetail: source.reference.evidenceStatus === "available"
+      ? "The same published Template is applied to saved A and current B."
+      : "Saved A is retained, but its theme Evidence was incomplete or unavailable.",
+    previousSavedAnalysisId: source.reference.savedAnalysisId,
+    previousSnapshotId: source.reference.dataSnapshotId,
+    historicalItems,
+  };
+}
+
+function lifecycleForPriority(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  lifecycle: NgeeAnnDecisionPrioritiesViewModel["lifecycle"],
+  priorityId: string,
+): NgeeAnnDecisionPrioritiesViewModel["items"][number]["lifecycle"] {
+  if (lifecycle.status !== "available") return null;
+  const item = snapshot.decisionLifecycle?.items.find((candidate) => candidate.currentPriorityId === priorityId);
+  if (!item) return null;
+  if (item.kind === "new") {
+    return {
+      kind: item.kind,
+      label: "New since saved result",
+      detail: "Saved A had complete comparable Evidence and did not contain this theme.",
+      tone: "info",
+    };
+  }
+  if (item.kind === "newly_supported") {
+    return {
+      kind: item.kind,
+      label: "Newly supported in current B",
+      detail: "Saved A could not support this conclusion; B now has enough governed Evidence. This does not prove the issue itself began in B.",
+      tone: "warning",
+    };
+  }
+  if (item.kind === "recurring") {
+    return {
+      kind: item.kind,
+      label: "Recurring across A and B",
+      detail: "The same rule-backed theme is supported in both the saved result and the current Snapshot.",
+      tone: "warning",
+    };
+  }
+  return null;
+}
+
+function validDecisionLifecycleItem(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  priorities: NonNullable<EnergyProjectAnalysisSnapshotDto["decisionPriorities"]>,
+  item: NonNullable<EnergyProjectAnalysisSnapshotDto["decisionLifecycle"]>["items"][number],
+): boolean {
+  if (!item.themeKey.trim()) return false;
+  if (item.currentPriorityId !== null
+    && !priorities.items.some((priority) => priority.priorityId === item.currentPriorityId)) return false;
+  const bundle = snapshot.analysis.dailyUsageAnomalies;
+  if (item.currentBundleId !== null
+    && (bundle?.status !== "available" || item.currentBundleId !== bundle.bundleId)) return false;
+  return item.previousBundleId === null || Boolean(item.previousBundleId.trim());
+}
+
+function unavailableDecisionLifecycleView(): NgeeAnnDecisionPrioritiesViewModel["lifecycle"] {
+  return {
+    status: "unavailable",
+    referenceLabel: null,
+    referenceDetail: null,
+    previousSavedAnalysisId: null,
+    previousSnapshotId: null,
+    historicalItems: [],
   };
 }
 

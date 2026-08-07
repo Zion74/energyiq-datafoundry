@@ -30,6 +30,10 @@ import {
   type NgeeAnnDecisionPriorities,
 } from "./ngee-ann-decision-priorities.js";
 import {
+  buildNgeeAnnDecisionLifecycle,
+  type NgeeAnnDecisionLifecycle,
+} from "./ngee-ann-decision-lifecycle.js";
+import {
   hasCompletePreschoolBenchmarkWindow,
   resolvePreschoolBenchmarkProjection,
   type PreschoolBenchmarkProjection,
@@ -111,6 +115,7 @@ export type ProjectAnalysisSnapshot = {
   }>;
   findings: EnergyScopeAnalysis["attention"];
   decisionPriorities?: NgeeAnnDecisionPriorities;
+  decisionLifecycle?: NgeeAnnDecisionLifecycle;
   preschoolBenchmark?: PreschoolBenchmarkProjection;
   preschoolAppliances?: PreschoolApplianceProjection;
   preschoolOperational?: PreschoolOperationalProjection;
@@ -274,7 +279,7 @@ export const resolveProjectAnalysis = async (input: {
     ruleRevisionIds: projectRelease.ruleRevisionIds,
     databasePath: analysisDatabasePath,
   });
-  return projectAnalysisCacheFor(input.metadataStore, input.dataGateway).resolve(
+  const resolution = await projectAnalysisCacheFor(input.metadataStore, input.dataGateway).resolve(
     cacheKey,
     async () => {
       await publishedRunContext.validatePinnedOverviewPeriod?.();
@@ -407,6 +412,28 @@ export const resolveProjectAnalysis = async (input: {
     },
     { bypass: input.bypassCache === true || analysisDatabasePath === ":memory:" },
   );
+  if (resolution.snapshot.renderer.key !== "ngee-ann-overview"
+    || !resolution.snapshot.decisionPriorities) return resolution;
+  const decisionLifecycle = buildNgeeAnnDecisionLifecycle({
+    projectId: resolution.snapshot.context.projectId,
+    workspaceId: resolution.snapshot.context.workspaceId,
+    scopeId: resolution.snapshot.context.scopeId,
+    resource: "electricity",
+    templateRevisionId: resolution.snapshot.projectRelease.templateRevisionId,
+    currentDataSnapshotId: resolution.snapshot.dataSnapshot.id,
+    currentPriorities: resolution.snapshot.decisionPriorities,
+    currentDailyUsageAnomalies: resolution.snapshot.analysis.dailyUsageAnomalies,
+    savedAnalyses: input.metadataStore.energyIq.savedAnalyses.listProject(
+      resolution.snapshot.context.projectId,
+    ),
+  });
+  return {
+    ...resolution,
+    snapshot: {
+      ...resolution.snapshot,
+      decisionLifecycle,
+    },
+  };
 };
 
 const resolveCurrentOverviewContext = async (input: {

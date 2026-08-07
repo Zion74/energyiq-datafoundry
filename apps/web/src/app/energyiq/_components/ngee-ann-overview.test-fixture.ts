@@ -628,6 +628,24 @@ export function ngeeAnnGoldenSnapshot(input: {
       lastSeenAt,
     },
     decisionPriorities: goldenDecisionPriorities(),
+    decisionLifecycle: {
+      status: "available",
+      reference: {
+        savedAnalysisId: "saved-analysis-ngee-ann-a",
+        dataSnapshotId: "snapshot-ngee-ann-a",
+        createdAt: "2026-06-17T01:00:00.000Z",
+        evidenceStatus: "unavailable",
+      },
+      currentDataSnapshotId: "snapshot-ngee-ann-golden",
+      items: [{
+        themeKey: "decision-theme:daily_usage_anomaly:comparison.daily_usage_above_baseline@1:energy.total_usage_kwh@1:project",
+        kind: "newly_supported",
+        currentPriorityId: "decision-theme:anomaly-bundle-ngee-ann-golden:comparison.daily_usage_above_baseline@1:energy.total_usage_kwh@1:project",
+        currentBundleId: "anomaly-bundle-ngee-ann-golden",
+        previousBundleId: null,
+      }],
+      limitation: null,
+    },
     metadata,
     analysis,
   };

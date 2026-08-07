@@ -40,6 +40,44 @@ export function NgeeAnnDecisionPriorities({
         </span>
       </div>
 
+      {view.lifecycle.status === "available" ? (
+        <div className="mt-5 border-y border-border py-4" data-decision-lifecycle="available">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="max-w-3xl">
+              <p className="text-sm font-semibold text-foreground">{view.lifecycle.referenceLabel}</p>
+              <p className="mt-1 text-sm leading-6 text-muted">{view.lifecycle.referenceDetail}</p>
+            </div>
+            <details className="shrink-0 text-right">
+              <summary className="cursor-pointer text-xs font-semibold text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+                Comparison evidence
+              </summary>
+              <p className="mt-2 max-w-sm break-all text-xs leading-5 text-muted">
+                Saved result {view.lifecycle.previousSavedAnalysisId}<br />
+                Previous Snapshot {view.lifecycle.previousSnapshotId}
+              </p>
+            </details>
+          </div>
+        </div>
+      ) : null}
+
+      {view.lifecycle.historicalItems.length > 0 ? (
+        <div className="mt-5 space-y-3">
+          {view.lifecycle.historicalItems.map((item) => (
+            <div
+              key={item.themeKey}
+              data-decision-lifecycle-kind={item.kind}
+              className="border-y border-border py-4"
+            >
+              <p className={[
+                "text-sm font-semibold",
+                item.tone === "success" ? "text-step-success" : "text-step-warning",
+              ].join(" ")}>{item.label}</p>
+              <p className="mt-1 max-w-3xl text-sm leading-6 text-muted">{item.detail}</p>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       {stateMessage ? (
         <div
           role="status"
@@ -54,20 +92,38 @@ export function NgeeAnnDecisionPriorities({
         <div className="mt-5 space-y-4">
           {view.items.map((item) => (
             <article key={item.priorityId} className="min-w-0 rounded-xl border border-border bg-surface p-5 shadow-[var(--shadow-card)] lg:p-6">
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-xs font-semibold text-primary">Priority {item.rank}</p>
                   <h4 className="mt-1.5 max-w-4xl text-lg font-semibold leading-7 text-foreground">{item.finding}</h4>
                 </div>
-                <span className={[
-                  "shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold",
-                  item.confidence === "Complete Evidence"
-                    ? "bg-step-success-light text-step-success"
-                    : "bg-step-warning/10 text-step-warning",
-                ].join(" ")}>
-                  {item.confidence}
-                </span>
+                <div className="flex flex-wrap justify-end gap-2">
+                  {item.lifecycle ? (
+                    <span
+                      data-decision-lifecycle-kind={item.lifecycle.kind}
+                      className={[
+                        "shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold",
+                        item.lifecycle.tone === "info"
+                          ? "bg-primary/10 text-primary"
+                          : "bg-step-warning/10 text-step-warning",
+                      ].join(" ")}
+                    >
+                      {item.lifecycle.label}
+                    </span>
+                  ) : null}
+                  <span className={[
+                    "shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold",
+                    item.confidence === "Complete Evidence"
+                      ? "bg-step-success-light text-step-success"
+                      : "bg-step-warning/10 text-step-warning",
+                  ].join(" ")}>
+                    {item.confidence}
+                  </span>
+                </div>
               </div>
+              {item.lifecycle ? (
+                <p className="mt-3 max-w-3xl text-sm leading-6 text-muted">{item.lifecycle.detail}</p>
+              ) : null}
               <HorizonComparison horizons={item.horizons} />
               <dl className="mt-5 grid gap-x-8 gap-y-4 text-sm leading-6 md:grid-cols-2">
                 <PriorityField label="Why it matters" value={item.impact} />
