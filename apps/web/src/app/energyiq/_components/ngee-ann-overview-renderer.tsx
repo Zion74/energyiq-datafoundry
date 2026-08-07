@@ -141,8 +141,15 @@ export function NgeeAnnOverviewRenderer({
       {view.metadataLimitation ? (
         <div className="border-b border-border bg-surface px-5 py-3 lg:px-7" role="note">
           <p className="text-xs leading-5 text-muted">
-            <span className="font-semibold text-foreground">Metadata limitation.</span> {view.metadataLimitation}
+            <span className="font-semibold text-foreground">Normalised benchmarks unavailable.</span>{" "}
+            Area and headcount are not configured. Core energy, comparison and cost figures remain valid.
           </p>
+          <details className="mt-1.5 text-xs leading-5 text-muted">
+            <summary className="cursor-pointer font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+              Why, and how to enable them
+            </summary>
+            <p className="mt-1 max-w-4xl">{view.metadataLimitation}</p>
+          </details>
         </div>
       ) : null}
 

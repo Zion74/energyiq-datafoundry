@@ -293,6 +293,9 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Current 1531.17 kWh vs previous 1211.68 kWh");
     expect(markup).toContain("S$489.97");
     expect(markup).toContain("Area and headcount metadata are missing");
+    expect(markup).toContain("Normalised benchmarks unavailable.");
+    expect(markup).toContain("Core energy, comparison and cost figures remain valid.");
+    expect(markup).toContain("Why, and how to enable them");
     expect(markup).toContain("Configure area metadata. Configure headcount metadata.");
     expect(markup).toContain("Energy trend");
     expect(markup).toContain("When did accepted energy use change inside the selected Period?");

@@ -670,26 +670,28 @@ function PublishedDecisionDashboardView({
         </div>
       ) : null}
 
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-light">
-        <span>{runMessage}</span>
-        <div className="flex flex-wrap items-center gap-3">
-          {saveError ? <span className="text-step-error">Save failed: {saveError}</span> : null}
-          {savedAnalysis ? (
-            <button
-              type="button"
-              onClick={() => navigateHistory({ open: true, selectedAnalysisId: savedAnalysis.id })}
-              className="font-semibold text-primary hover:underline"
-            >
-              Saved as version {savedAnalysis.sequence} →
-            </button>
-          ) : null}
-          {currentSnapshot ? (
-            <span className="font-mono">
-              {currentSnapshot.projectRelease.id}
-            </span>
-          ) : null}
+      {!isDedicatedOverviewRenderer || saveError || savedAnalysis ? (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-light">
+          {!isDedicatedOverviewRenderer ? <span>{runMessage}</span> : <span />}
+          <div className="flex flex-wrap items-center gap-3">
+            {saveError ? <span className="text-step-error">Save failed: {saveError}</span> : null}
+            {savedAnalysis ? (
+              <button
+                type="button"
+                onClick={() => navigateHistory({ open: true, selectedAnalysisId: savedAnalysis.id })}
+                className="font-semibold text-primary hover:underline"
+              >
+                Saved as version {savedAnalysis.sequence} →
+              </button>
+            ) : null}
+            {currentSnapshot && !isDedicatedOverviewRenderer ? (
+              <span className="font-mono">
+                {currentSnapshot.projectRelease.id}
+              </span>
+            ) : null}
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {currentSnapshot && !isDedicatedOverviewRenderer ? (
         <div className="mt-6">
