@@ -15,7 +15,7 @@ import {
 
 import { EnergyIcon, type EnergyIconName } from "./icons";
 import { useEnergyIqAccess } from "./energyiq-access";
-import { orderProjectNodesDepthFirst } from "./project-tree-model";
+import { orderProjectNodesDepthFirst, revealProjectTreeSelection } from "./project-tree-model";
 import {
   configApi,
   type EnergyProjectNodeDto,
@@ -145,9 +145,14 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
         const mapped = hierarchy.nodes.map((node) =>
           mapHierarchyNode(node),
         );
+        const selection = revealProjectTreeSelection(
+          mapped,
+          defaultExpandedIds(mapped),
+          requestedScopeId(mapped, initialViewState.scopeId),
+        );
         setHierarchyNodes(mapped);
-        setSelectedId(requestedScopeId(mapped, initialViewState.scopeId));
-        setExpandedIds(defaultExpandedIds(mapped));
+        setSelectedId(selection.selectedId);
+        setExpandedIds(selection.expandedIds);
       })
       .catch((reason) => {
         if (cancelled) return;
@@ -264,16 +269,19 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
     }
     return projectNodes.filter((node) => matchingIds.has(node.id));
   }, [projectNodes, search]);
-  const handleNodeSelect = (nodeId: string) => {
+  const revealNodeSelection = (nodeId: string) => {
     setSelectedId(nodeId);
-    if (!projectNodes.some((node) => node.parentId === nodeId)) return;
     setExpandedIds((current) => {
-      const next = new Set(current);
-      if (next.has(nodeId)) {
-        next.delete(nodeId);
-      } else {
-        next.add(nodeId);
-      }
+      return revealProjectTreeSelection(projectNodes, current, nodeId).expandedIds;
+    });
+  };
+  const handleTreeNodeSelect = (nodeId: string) => {
+    setSelectedId(nodeId);
+    setExpandedIds((current) => {
+      const next = revealProjectTreeSelection(projectNodes, current, nodeId).expandedIds;
+      if (!projectNodes.some((node) => node.parentId === nodeId)) return next;
+      if (current.has(nodeId)) next.delete(nodeId);
+      else next.add(nodeId);
       return next;
     });
   };
@@ -456,7 +464,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                   selectedId={selectedId}
                   expandedIds={expandedIds}
                   searchActive={search.trim().length > 0}
-                  onSelect={handleNodeSelect}
+                  onSelect={handleTreeNodeSelect}
                 />
               </div>
             </>
@@ -487,7 +495,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                       {index > 0 ? <EnergyIcon name="chevron" className="h-3 w-3" /> : null}
                       <button
                         type="button"
-                        onClick={() => setSelectedId(node.id)}
+                        onClick={() => revealNodeSelection(node.id)}
                         className="hover:text-foreground hover:underline"
                       >
                         {node.name}
@@ -902,7 +910,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                       <button
                         key={scope.nodeId}
                         type="button"
-                        onClick={() => setSelectedId(scope.nodeId)}
+                        onClick={() => revealNodeSelection(scope.nodeId)}
                         className="grid w-full gap-1 py-3 text-left hover:text-primary sm:grid-cols-[minmax(0,1fr)_140px_140px] sm:items-center sm:gap-4"
                       >
                         <span className="truncate text-xs font-semibold text-foreground">{scope.name}</span>
@@ -954,7 +962,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                       <button
                       key={meter.id}
                       type="button"
-                      onClick={() => setSelectedId(meter.id)}
+                      onClick={() => revealNodeSelection(meter.id)}
                       className="grid w-full gap-2 border-b border-border px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-surface-subtle md:grid-cols-[minmax(0,1fr)_100px_110px_100px] md:items-center md:gap-4"
                     >
                       <span className="flex min-w-0 items-center gap-3">

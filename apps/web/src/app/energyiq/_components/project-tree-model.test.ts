@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { orderProjectNodesDepthFirst } from "./project-tree-model";
+import { orderProjectNodesDepthFirst, revealProjectTreeSelection } from "./project-tree-model";
 
 describe("orderProjectNodesDepthFirst", () => {
   it("places each level's circuits directly beneath that level", () => {
@@ -45,5 +45,25 @@ describe("orderProjectNodesDepthFirst", () => {
       "room-b",
       "circuit-b",
     ]);
+  });
+});
+
+describe("revealProjectTreeSelection", () => {
+  it("keeps an attached Meter visible by expanding its Centre ancestry", () => {
+    const nodes = [
+      { id: "project", parentId: null },
+      { id: "centre-b", parentId: "project" },
+      { id: "centre-c", parentId: "project" },
+      { id: "meter-c-load", parentId: "centre-c" },
+    ];
+
+    const result = revealProjectTreeSelection(
+      nodes,
+      new Set(["project", "centre-b"]),
+      "meter-c-load",
+    );
+
+    expect(result.selectedId).toBe("meter-c-load");
+    expect([...result.expandedIds]).toEqual(["project", "centre-b", "centre-c"]);
   });
 });

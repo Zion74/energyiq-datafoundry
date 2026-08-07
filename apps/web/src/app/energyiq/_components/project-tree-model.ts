@@ -3,6 +3,30 @@ export type ProjectTreeNode = {
   parentId: string | null;
 };
 
+export type ProjectTreeSelection = {
+  selectedId: string;
+  expandedIds: Set<string>;
+};
+
+export function revealProjectTreeSelection<T extends ProjectTreeNode>(
+  nodes: T[],
+  expandedIds: ReadonlySet<string>,
+  selectedId: string,
+): ProjectTreeSelection {
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const nextExpandedIds = new Set(expandedIds);
+  const visited = new Set<string>();
+  let node = nodesById.get(selectedId);
+
+  while (node?.parentId && !visited.has(node.parentId)) {
+    visited.add(node.parentId);
+    nextExpandedIds.add(node.parentId);
+    node = nodesById.get(node.parentId);
+  }
+
+  return { selectedId, expandedIds: nextExpandedIds };
+}
+
 export function orderProjectNodesDepthFirst<T extends ProjectTreeNode>(nodes: T[]): T[] {
   const nodeIds = new Set(nodes.map((node) => node.id));
   const childrenByParentId = new Map<string | null, T[]>();
