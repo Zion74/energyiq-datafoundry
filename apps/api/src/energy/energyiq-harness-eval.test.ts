@@ -51,6 +51,138 @@ describe("EnergyIQ Harness Eval", () => {
     expect(report.assertions.some((assertion) => assertion.id.startsWith("efficiency."))).toBe(false);
   });
 
+  it("records per-step context budget, checkpoint, and cache telemetry without grading it", () => {
+    const evalCase = ENERGYIQ_HARNESS_FAST_CASES[0]!;
+    const answer = "The whole project used 1,531.1683 kWh from 2026-06-10 to 2026-06-16. The result is calculated from the scoped interval evidence.";
+    const events = successfulEvents(answer).map((event) => (
+      event.type === "CUSTOM" && event.name === "token_usage"
+        ? {
+            ...event,
+            value: {
+              input_tokens: 900,
+              output_tokens: 120,
+              step_number: 1,
+              cache_telemetry_available: true,
+              cache_hit_tokens: 600,
+              cache_miss_tokens: 300,
+            },
+          }
+        : event
+    ));
+    events.splice(events.length - 1, 0, {
+      type: "CUSTOM",
+      name: "context.compiled",
+      value: {
+        step_number: 1,
+        prompt_tokens: 510_000,
+        budget_tokens: 963_904,
+        budget_utilization: 510_000 / 963_904,
+        high_water_mark: "diagnostic",
+        budget: {
+          capabilitySource: "verified-model-default",
+          contextWindow: 1_000_000,
+          inputBudget: 963_904,
+        },
+        token_report: { systemTokens: 10_000, toolTokens: 20_000, messageTokens: 480_000 },
+        group_token_costs: [
+          { tokenCost: 470_000, selected: true },
+          { tokenCost: 10_000, selected: false },
+        ],
+        source_snapshot_hashes: [{
+          source_type: "project-analysis-pack",
+          content_hash: "sha256:test",
+          item_ids: ["project-analysis-pack:ngee-ann-polytechnic:energy-snapshot-test"],
+        }],
+        artifact_refs: ["artifact-1"],
+      },
+    });
+    events.splice(events.length - 1, 0, {
+      type: "CUSTOM",
+      name: "context.prompt-verified",
+      value: {
+        step_number: 1,
+        prompt_tokens: 515_000,
+        input_budget: 963_904,
+        remaining_tokens: 448_904,
+        context_window: 1_000_000,
+        budget_utilization: 515_000 / 963_904,
+        high_water_mark: "diagnostic",
+        capability_source: "verified-model-default",
+      },
+    });
+
+    const report = evaluateEnergyIqHarnessObservation(evalCase, { elapsedMs: 25_000, events });
+
+    expect(report.status).toBe("passed");
+    expect(report.steps).toEqual([expect.objectContaining({
+      stepNumber: 1,
+      promptTokens: 515_000,
+      compiledPromptTokens: 510_000,
+      verifiedPromptTokens: 515_000,
+      remainingTokens: 448_904,
+      inputBudget: 963_904,
+      contextWindow: 1_000_000,
+      highWaterMark: "diagnostic",
+      capabilitySource: "verified-model-default",
+      selectedGroupTokens: 470_000,
+      omittedGroupTokens: 10_000,
+      sourceHashCount: 1,
+      authoritativeSourceHashes: { "project-analysis-pack": "sha256:test" },
+      artifactRefCount: 1,
+      cacheTelemetryAvailable: true,
+      cacheHitTokens: 600,
+      cacheMissTokens: 300,
+    })]);
+    expect(report.metrics).toMatchObject({
+      maxPromptTokens: 515_000,
+      contextCheckpointCount: 1,
+      cacheTelemetrySteps: 1,
+      cacheHitTokens: 600,
+      cacheMissTokens: 300,
+    });
+  });
+
+  it("fails closed when an authoritative Context source drifts within one run", () => {
+    const evalCase = ENERGYIQ_HARNESS_FAST_CASES[0]!;
+    const answer = "The whole project used 1,531.1683 kWh from 2026-06-10 to 2026-06-16. The result is calculated from the scoped interval evidence.";
+    const events = successfulEvents(answer);
+    events.splice(events.length - 1, 0,
+      {
+        type: "CUSTOM",
+        name: "context.compiled",
+        value: {
+          step_number: 1,
+          source_snapshot_hashes: [{
+            source_type: "project-analysis-snapshot",
+            content_hash: "sha256:snapshot-a",
+          }],
+        },
+      },
+      {
+        type: "CUSTOM",
+        name: "context.compiled",
+        value: {
+          step_number: 2,
+          source_snapshot_hashes: [{
+            source_type: "project-analysis-snapshot",
+            content_hash: "sha256:snapshot-b",
+          }],
+        },
+      },
+    );
+
+    const report = evaluateEnergyIqHarnessObservation(evalCase, { elapsedMs: 25_000, events });
+
+    expect(report.status).toBe("failed");
+    expect(report.hardFailure).toBe(true);
+    expect(report.metrics.authoritativePinDrift).toBe(true);
+    expect(report.assertions).toContainEqual(expect.objectContaining({
+      id: "context.authoritative-pin-stable",
+      passed: false,
+      hard: true,
+    }));
+  });
+
   it("counts one reasoning round per message when AG-UI emits both start event variants", () => {
     const evalCase = ENERGYIQ_HARNESS_FAST_CASES[0]!;
     const answer = "The whole project used 1,531.1683 kWh from 2026-06-10 to 2026-06-16. The result is calculated from the scoped interval evidence.";
