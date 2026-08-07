@@ -469,12 +469,14 @@ AI Analyst 的 #30/#18/#15 继续由侧边任务 Agent 执行；不得修改本�
 
 | 切片 | 状态 | 已形成的可验证结果 |
 | --- | --- | --- |
-| V1：#9/#13 阅读体验 | DONE（工程验收） | Ngee Ann 与 Preschool 均采用 takeaway-first 阅读顺序；桌面左侧目录、窄屏顶部目录、较大字号、分段决策卡和折叠 Evidence 已落地。Ngee Ann 的 1d/7d/28d、更丰富的变化图与 A→B 状态表达仍作为 #9 后续视觉切片，不冒充本轮已完成。 |
+| V1：#9/#13 阅读体验 | DONE（工程验收） | Ngee Ann 与 Preschool 均采用 takeaway-first 阅读顺序；桌面左侧目录、窄屏顶部目录、较大字号、分段决策卡和折叠 Evidence 已落地。Ngee Ann 首要主题已使用同一零轴展示 1d/7d/28d 与各自治理基线的差异；数值直接来自服务端 Snapshot，条长只做卡内相对缩放并明确说明。A→B New/Recurring/Resolved 仍等待权威跨 Snapshot 结果合同，不在 React 推断。 |
 | V2：#31 Explorer | DONE（本轮切片） | Overview 精准携带 Project/Scope/Resource/Period/Snapshot/Release；Explorer 使用服务端日趋势与 24h profile；空窗口诚实显示 No data；技术 provenance 默认折叠。服务端尚无最新累计原始读数合同，因此页面明确显示 unavailable，没有前端猜算。 |
 | V3：#13 Preschool visuals | DONE（工程验收） | 已加入经验分布、24h operating/closed 结构、Centre Top 5、四个完整周均值形成的 June demo baseline，以及使用 SP 2026 Q2 低压非住宅公开参考价的 provisional cost。修复了把 standby/off-hours 用量误当作五月总用量的成本语义错误。 |
-| V4：#5 校准 | PENDING | 定向测试已通过；在关闭 #5 前仍需完成 Current 与 Saved Analysis 的同一浏览器回读，确认 Area/Headcount/Provisional 不漂移。 |
+| V4：#5 校准 | DONE | 同一 Chrome 完成 Preschool Current → Save → Saved 回读：Current 与 Saved 均固定 Snapshot `energy-snapshot-52ca9611e48b0d71c2efe7b7`；Saved `saved-analysis-39829006-b056-476b-baa6-4dde4b05dd5d` 保留根 Scope Missing、30 个比较 Scope 与 Provisional Area/Headcount/EUI/Per-pax，不读取 Current 元数据重算。#5 已关闭。 |
 | V5：#19 → #20 → #21 | PENDING | 保持原顺序：Release/rollback → Saved/Rerun/打印或 PDF → 两项目完整试点与 Charles 人工价值验收。 |
 
 自动化证据：Web 相关 `5 files / 101 tests` 通过，Preschool 定向 `4 files / 21 tests` 通过，API empty→latest 定向测试通过，仓库 typecheck、build 与 Web production build 通过（17 pages）。真实 Chrome：Ngee Ann 与 Preschool 的 1440/1920 页面均完成回读；Preschool 当前浏览器 error log 为空；Ngee Ann Overview → Explorer 的 Snapshot/Release 精准下钻已回读通过。
+
+新增收口证据：`cda2a15` 将 `/analysis/execute` 固定到已发布 Project 上下文，旧 Overview/Explorer 的 Release 或 Snapshot 漂移会在 DuckDB 前以 409 fail closed；`36e3e36` 增加普通 Current 执行回归、动态 stale-Snapshot 断言，以及 horizon 的 decrease/flat/unavailable 降级测试。API `25/25`、Renderer `47/47`、ViewModel `138/138`、TypeScript、API build 与 17-page Web build 均通过。Ngee Ann Chrome 1440/1920 无横向溢出，页面没有整页 Period 控件，1d/7d/28d exact aria labels 与千位分隔已回读。
 
 Workspace 复核结论：先前“Preschool 被 Ngee Ann Workspace 限制”不是 Renderer 或 API 缺失，而是共享 Chrome 仍处于 Ngee Ann Workspace 且保留旧 Project URL。使用 Admin 账号将 Workspace 切换为 `Preschool Demo`，再进入 `preschool-demo` Project 后，Portfolio、Benchmark、Operating、June plan 与 Centre detail 均正常显示。切换 Workspace 后若保留旧 Project URL，应显示上下文不匹配而不是跨 Workspace 读取，这属于正确隔离行为。
