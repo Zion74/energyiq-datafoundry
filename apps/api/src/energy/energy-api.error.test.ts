@@ -197,6 +197,46 @@ describe("Energy API business error mapping", () => {
     }
   });
 
+  it("fails an Explorer analysis link closed when its published Project Release is stale", async () => {
+    const root = mkdtempSync(join(tmpdir(), "energy-api-stale-release-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const response = await handleEnergyApiRequest(
+        jsonPost({
+          projectId: "ngee-ann-polytechnic",
+          scopeId: "project",
+          resource: "electricity",
+          period: "Custom",
+          from: "2026-06-10",
+          to: "2026-06-16",
+          expectedProjectReleaseId: "stale-overview-release",
+        }),
+        ["analysis", "execute"],
+        {
+          metadataStore: metadata,
+          dataGateway: new LocalDataGateway(metadata),
+          userId: "dev-user",
+          workspaceId: "default",
+        } as Required<ConfigApiContext>,
+      );
+
+      expect(response).toMatchObject({
+        status: 409,
+        body: {
+          success: false,
+          error: {
+            code: "CONFLICT",
+            message: "ENERGYIQ_PROJECT_RELEASE_MISMATCH",
+          },
+        },
+      });
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
   it("returns a diagnosable 409 when Project publication is blocked by data readiness", () => {
     expect(toEnergyApiErrorResponse(new Error(
       "ENERGYIQ_PROJECT_DATA_NOT_READY:IMPORT_BATCH_NOT_MATERIALIZED,SNAPSHOT_MAPPING_MISMATCH",
@@ -222,6 +262,8 @@ describe("Energy API business error mapping", () => {
     "ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE",
     "ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE:energy-snapshot-a",
     "ENERGYIQ_DATA_SNAPSHOT_IMMUTABLE_CONFLICT:energy-snapshot-test",
+    "ENERGYIQ_DATA_SNAPSHOT_MISMATCH",
+    "ENERGYIQ_PROJECT_RELEASE_MISMATCH",
   ])("returns a diagnosable 409 for materialization precondition %s", (message) => {
     expect(toEnergyApiErrorResponse(new Error(message))).toMatchObject({
       status: 409,

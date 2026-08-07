@@ -38,6 +38,7 @@ import { materializeEnergyProjectManifest } from "./energy-project-materializati
 import { EnergyAdminAccessService } from "./energy-admin-access.js";
 import {
   resolveProjectAnalysis,
+  resolvePublishedEnergyQueryContext,
   type ProjectAnalysisSnapshot,
 } from "./project-analysis-resolver.js";
 import {
@@ -649,12 +650,12 @@ export const handleEnergyApiRequest = async (
     }
     if (segments[0] === "analysis" && segments[1] === "execute" && request.method === "POST") {
       const body = await readJsonBody(request);
-      const energyContext = resolveEnergyQueryContext({
+      const energyContext = resolvePublishedEnergyQueryContext({
         metadataStore: context.metadataStore,
         user,
         workspaceId: context.workspaceId,
         request: parseQueryContextRequest(body)
-      });
+      }).context;
       return {
         status: 200,
         body: createSuccessResult(await executeEnergyScopeAnalysisWithLatestAvailable({
@@ -741,6 +742,8 @@ export const toEnergyApiErrorResponse = (error: unknown): ConfigApiResponse => {
     || message.startsWith("ENERGYIQ_IMPORT_MATERIALIZATION_NOT_READY:")
     || message.startsWith("ENERGYIQ_SNAPSHOT_STALE")
     || message.startsWith("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE")
+    || message === "ENERGYIQ_DATA_SNAPSHOT_MISMATCH"
+    || message === "ENERGYIQ_PROJECT_RELEASE_MISMATCH"
     || message.startsWith("ENERGYIQ_DATA_SNAPSHOT_IMMUTABLE_CONFLICT:")
     || message.startsWith("ENERGYIQ_PROJECT_DATA_NOT_READY");
   const invalid = message.includes("INVALID")
