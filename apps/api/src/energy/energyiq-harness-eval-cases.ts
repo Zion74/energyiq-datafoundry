@@ -11,6 +11,9 @@ export type EnergyIqHarnessEvalCase = {
   contract: {
     requiredTools: string[];
     forbiddenTools: string[];
+    requiredProtocolActions?: string[];
+    forbiddenProtocolActions?: string[];
+    requireSingleSnapshot?: boolean;
     answerAllOf?: string[];
     answerAnyOf?: string[];
     answerNoneOf?: string[];
@@ -113,6 +116,26 @@ export const ENERGYIQ_HARNESS_FAST_CASES: EnergyIqHarnessEvalCase[] = [
     },
   },
   {
+    id: "preschool-released-eui",
+    title: "Preschool Released EUI Context Evidence",
+    workspaceId: "preschool-demo-org",
+    projectId: "preschool-demo",
+    scopeId: "preschool-project",
+    resource: "electricity",
+    from: "2026-05-01",
+    to: "2026-05-31",
+    question: "What is the released EUI for Centre A and how does it compare with its cohort? Use the current released Snapshot evidence, preserve its status, and do not recalculate the released EUI.",
+    contract: {
+      requiredTools: ["inspect_schema", "analysis_requirements_commit"],
+      forbiddenTools: [...COMMON_FORBIDDEN_TOOLS, "run_sql_readonly"],
+      requiredProtocolActions: ["analysis.context.evidence.bind", "analysis.requirements.commit"],
+      forbiddenProtocolActions: ["analysis.evidence.bind"],
+      requireSingleSnapshot: true,
+      answerAllOf: ["Centre A", "13\\.6(?:1|2)", "kWh/m(?:²|2)/(?:year|yr)", "provisional", "Senior Care Center"],
+      answerAnyOf: ["6\\.75", "9\\.20", "P50", "P75"],
+    },
+  },
+  {
     id: "preschool-centre-e-contribution",
     title: "Preschool Centre E contribution",
     workspaceId: "preschool-demo-org",
@@ -144,6 +167,30 @@ export const ENERGYIQ_HARNESS_FAST_CASES: EnergyIqHarnessEvalCase[] = [
       forbiddenTools: COMMON_FORBIDDEN_TOOLS,
       answerAllOf: ["Senior Care Center", "(^|\\D)14(\\D|$)"],
       answerAnyOf: ["11[, ]?657\\s*kWh", "46\\.8\\s*%"],
+    },
+  },
+  {
+    id: "preschool-released-plus-query-investigation",
+    title: "Preschool Released facts plus scoped investigation",
+    workspaceId: "preschool-demo-org",
+    projectId: "preschool-demo",
+    scopeId: "preschool-project",
+    resource: "electricity",
+    from: "2026-05-01",
+    to: "2026-05-31",
+    question: "Which centre should I investigate first, why, and what should I check next? Use released facts as the starting point, investigate new drivers with the scoped project data, distinguish facts from hypotheses, and preserve the current Snapshot boundary.",
+    contract: {
+      requiredTools: ["inspect_schema", "run_sql_readonly", "analysis_requirements_commit"],
+      forbiddenTools: COMMON_FORBIDDEN_TOOLS,
+      requiredProtocolActions: [
+        "analysis.context.evidence.bind",
+        "analysis.evidence.bind",
+        "analysis.requirements.commit",
+      ],
+      requireSingleSnapshot: true,
+      answerAllOf: ["Centre G", "provisional", "(?:area|occupant|occupancy)", "(?:check|verify|confirm)"],
+      answerNoneOf: ["definitely caused by", "proves? that"],
+      insightSignals: COMMON_INSIGHT_SIGNALS,
     },
   },
   {

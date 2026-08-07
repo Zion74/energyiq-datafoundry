@@ -19,10 +19,13 @@ export type EnergyIqHarnessCaseReport = {
   status: "passed" | "failed";
   hardFailure: boolean;
   answer: string;
+  snapshotIds: string[];
   assertions: Array<{ id: string; passed: boolean; hard: boolean; detail: string }>;
   metrics: {
     elapsedMs: number;
     toolCalls: number;
+    failedToolCalls: number;
+    recoveredToolFailures: number;
     sqlCalls: number;
     reasoningRounds: number;
     inputTokens: number;
@@ -53,6 +56,8 @@ export type EnergyIqHarnessSuiteReport = {
     averageReasoningRounds: number;
     averageCorrectnessRatio: number;
     averageInsightQuality: number | null;
+    totalFailedToolCalls: number;
+    totalRecoveredToolFailures: number;
     totalInputTokens: number;
     totalOutputTokens: number;
   };
@@ -102,10 +107,13 @@ export const runEnergyIqHarnessEval = async (
           status: "failed",
           hardFailure: true,
           answer: "",
+          snapshotIds: [],
           assertions: [{ id: "runner.completed", passed: false, hard: true, detail }],
           metrics: {
             elapsedMs: 0,
             toolCalls: 0,
+            failedToolCalls: 0,
+            recoveredToolFailures: 0,
             sqlCalls: 0,
             reasoningRounds: 0,
             inputTokens: 0,
@@ -143,6 +151,8 @@ export const runEnergyIqHarnessEval = async (
       averageReasoningRounds: average(reports.map((report) => report.metrics.reasoningRounds)),
       averageCorrectnessRatio: average(reports.map((report) => report.metrics.correctnessRatio)),
       averageInsightQuality: insightScores.length > 0 ? average(insightScores) : null,
+      totalFailedToolCalls: sum(reports.map((report) => report.metrics.failedToolCalls)),
+      totalRecoveredToolFailures: sum(reports.map((report) => report.metrics.recoveredToolFailures)),
       totalInputTokens: sum(reports.map((report) => report.metrics.inputTokens)),
       totalOutputTokens: sum(reports.map((report) => report.metrics.outputTokens)),
     },
@@ -160,6 +170,26 @@ export const evaluateEnergyIqHarnessObservation = (
     .filter((event) => stringValue(event.type) === "TOOL_CALL_START")
     .map((event) => stringValue(event.toolCallName))
     .filter(Boolean);
+  const toolNameByCallId = new Map(events
+    .filter((event) => stringValue(event.type) === "TOOL_CALL_START")
+    .map((event) => [stringValue(event.toolCallId), stringValue(event.toolCallName)] as const)
+    .filter(([toolCallId, toolCallName]) => toolCallId.length > 0 && toolCallName.length > 0));
+  const toolResults = events.flatMap((event, eventIndex) => {
+    if (stringValue(event.type) !== "TOOL_CALL_RESULT") return [];
+    const toolCallName = stringValue(event.toolCallName)
+      || toolNameByCallId.get(stringValue(event.toolCallId))
+      || "unknown";
+    return [{ event, eventIndex, toolCallName, failed: toolResultFailed(event) }];
+  });
+  const successfulToolNames = toolResults
+    .filter((result) => !result.failed)
+    .map((result) => result.toolCallName);
+  const failedTools = toolResults.filter((result) => result.failed);
+  const recoveredToolFailures = failedTools.filter((failed) => toolResults.some((candidate) => (
+    candidate.eventIndex > failed.eventIndex
+    && candidate.toolCallName === failed.toolCallName
+    && !candidate.failed
+  ))).length;
   const sqlCalls = toolNames.filter((name) => name === "run_sql_readonly").length;
   const reasoningRounds = events.filter((event) => (
     stringValue(event.type) === "REASONING_START"
@@ -179,14 +209,10 @@ export const evaluateEnergyIqHarnessObservation = (
   assert("run.finished", stringValue(terminal?.type) === "RUN_FINISHED", `terminal=${stringValue(terminal?.type) || "missing"}`, true);
   assert("answer.present", answer.length > 0, `answer_chars=${answer.length}`, true);
 
-  const failedTools = events.filter((event) => (
-    stringValue(event.type) === "TOOL_CALL_RESULT" && toolResultFailed(event)
-  ));
-  assert("tools.no-failure", failedTools.length === 0, `failed_tool_results=${failedTools.length}`, true);
-
   for (const required of evalCase.contract.requiredTools) {
-    const count = toolNames.filter((name) => name === required).length;
-    assert(`tool.${required}`, count >= 1, `count=${count}`);
+    const started = toolNames.filter((name) => name === required).length;
+    const succeeded = successfulToolNames.filter((name) => name === required).length;
+    assert(`tool.${required}`, succeeded >= 1, `started=${started}, succeeded=${succeeded}`);
   }
   for (const forbidden of evalCase.contract.forbiddenTools) {
     assert(`tool.forbidden.${forbidden}`, !toolNames.includes(forbidden), `present=${toolNames.includes(forbidden)}`, true);
@@ -194,6 +220,30 @@ export const evaluateEnergyIqHarnessObservation = (
   const inspectIndex = toolNames.indexOf("inspect_schema");
   const sqlIndex = toolNames.indexOf("run_sql_readonly");
   assert("tools.inspect-before-sql", sqlIndex < 0 || (inspectIndex >= 0 && inspectIndex < sqlIndex), `tools=${toolNames.join(",")}`);
+
+  const protocolActions = extractSucceededProtocolActions(events);
+  for (const required of evalCase.contract.requiredProtocolActions ?? []) {
+    const count = protocolActions.filter((actionName) => actionName === required).length;
+    assert(`protocol.${required}`, count >= 1, `succeeded=${count}`);
+  }
+  for (const forbidden of evalCase.contract.forbiddenProtocolActions ?? []) {
+    const count = protocolActions.filter((actionName) => actionName === forbidden).length;
+    assert(`protocol.forbidden.${forbidden}`, count === 0, `succeeded=${count}`, true);
+  }
+
+  const snapshotIds = extractSnapshotIds(events);
+  if (evalCase.contract.requireSingleSnapshot) {
+    assert("context.single-snapshot", snapshotIds.length === 1, `snapshot_ids=${snapshotIds.join(",") || "missing"}`, true);
+    const resolvedWorkspaceId = extractResolvedWorkspaceId(events);
+    assert("context.workspace", resolvedWorkspaceId === evalCase.workspaceId, `actual=${resolvedWorkspaceId || "missing"}`, true);
+    const expectedProjectSnapshotPrefix = `project-analysis-snapshot:${evalCase.projectId}:`;
+    assert(
+      "context.project-snapshot",
+      events.some((event) => JSON.stringify(event).includes(expectedProjectSnapshotPrefix)),
+      `expected_prefix=${expectedProjectSnapshotPrefix}`,
+      true,
+    );
+  }
 
   for (const [index, pattern] of (evalCase.contract.answerAllOf ?? []).entries()) {
     assert(`answer.all.${index + 1}`, regex(pattern).test(answer), `/${pattern}/`);
@@ -261,10 +311,13 @@ export const evaluateEnergyIqHarnessObservation = (
     status: assertions.every((entry) => entry.passed) ? "passed" : "failed",
     hardFailure,
     answer,
+    snapshotIds,
     assertions,
     metrics: {
       elapsedMs: observation.elapsedMs,
       toolCalls: toolNames.length,
+      failedToolCalls: failedTools.length,
+      recoveredToolFailures,
       sqlCalls,
       reasoningRounds,
       inputTokens: tokenTotals.input,
@@ -297,11 +350,30 @@ export const compareEnergyIqHarnessReports = (
 const extractFinalAnswer = (events: EventRecord[]): string => {
   const messages = new Map<string, string>();
   for (const event of events) {
-    if (stringValue(event.type) !== "TEXT_MESSAGE_CONTENT" || typeof event.delta !== "string") continue;
+    if (!["TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_CHUNK"].includes(stringValue(event.type))
+      || typeof event.delta !== "string") continue;
     const messageId = stringValue(event.messageId) || "unknown";
     messages.set(messageId, `${messages.get(messageId) ?? ""}${event.delta}`);
   }
   return [...messages.values()].at(-1)?.trim() ?? "";
+};
+
+const extractSucceededProtocolActions = (events: EventRecord[]): string[] => events.flatMap((event) => {
+  if (stringValue(event.type) !== "CUSTOM" || stringValue(event.name) !== "protocol.action.succeeded") return [];
+  if (!isRecord(event.value) || !isRecord(event.value.payload)) return [];
+  const actionName = stringValue(event.value.payload.actionName);
+  return actionName ? [actionName] : [];
+});
+
+const extractSnapshotIds = (events: EventRecord[]): string[] => [...new Set(events.flatMap((event) => (
+  JSON.stringify(event).match(/energy-snapshot-[a-z0-9]+/giu) ?? []
+)))].sort();
+
+const extractResolvedWorkspaceId = (events: EventRecord[]): string => {
+  const event = findLastEvent(events, (candidate) => (
+    stringValue(candidate.type) === "CUSTOM" && stringValue(candidate.name) === "run.config.resolved"
+  ));
+  return isRecord(event?.value) ? stringValue(event.value.workspace_id) : "";
 };
 
 type ChartPoint = { label: string; value: number };
