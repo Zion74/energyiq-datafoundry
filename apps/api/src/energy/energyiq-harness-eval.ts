@@ -65,6 +65,20 @@ export type EnergyIqHarnessStepMetrics = {
   cacheMissTokens: number | null;
 };
 
+export type EnergyIqDecisionQualityBreakdown = {
+  takeaway: number;
+  evidenceUse: number;
+  decisionRelevance: number;
+  action: number;
+  verification: number;
+  causalDiscipline: number;
+  readability: number;
+  consequence: number;
+  total: number;
+  maximum: number;
+  ratio: number;
+};
+
 export type EnergyIqHarnessCaseReport = {
   caseId: string;
   title: string;
@@ -94,6 +108,10 @@ export type EnergyIqHarnessCaseReport = {
     authoritativePinDrift: boolean;
     correctnessRatio: number;
     insightQuality: number | null;
+    decisionQuality: EnergyIqDecisionQualityBreakdown | null;
+    answerWordCount: number;
+    openingWordCount: number;
+    repeatedSqlCalls: number;
   };
   runId?: string;
   threadId?: string;
@@ -118,6 +136,9 @@ export type EnergyIqHarnessSuiteReport = {
     averageReasoningRounds: number;
     averageCorrectnessRatio: number;
     averageInsightQuality: number | null;
+    averageDecisionQualityRatio: number | null;
+    averageAnswerWordCount: number;
+    totalRepeatedSqlCalls: number;
     totalFailedToolCalls: number;
     totalRecoveredToolFailures: number;
     totalInputTokens: number;
@@ -198,6 +219,10 @@ export const runEnergyIqHarnessEval = async (
             authoritativePinDrift: false,
             correctnessRatio: 0,
             insightQuality: null,
+            decisionQuality: null,
+            answerWordCount: 0,
+            openingWordCount: 0,
+            repeatedSqlCalls: 0,
           },
         });
       }
@@ -207,6 +232,9 @@ export const runEnergyIqHarnessEval = async (
   const elapsed = reports.map((report) => report.metrics.elapsedMs).sort((a, b) => a - b);
   const insightScores = reports
     .map((report) => report.metrics.insightQuality)
+    .filter((score): score is number => score !== null);
+  const decisionQualityRatios = reports
+    .map((report) => report.metrics.decisionQuality?.ratio ?? null)
     .filter((score): score is number => score !== null);
   const passedRuns = reports.filter((report) => report.status === "passed").length;
   const hardFailures = reports.filter((report) => report.hardFailure).length;
@@ -231,6 +259,9 @@ export const runEnergyIqHarnessEval = async (
       averageReasoningRounds: average(reports.map((report) => report.metrics.reasoningRounds)),
       averageCorrectnessRatio: average(reports.map((report) => report.metrics.correctnessRatio)),
       averageInsightQuality: insightScores.length > 0 ? average(insightScores) : null,
+      averageDecisionQualityRatio: decisionQualityRatios.length > 0 ? average(decisionQualityRatios) : null,
+      averageAnswerWordCount: average(reports.map((report) => report.metrics.answerWordCount)),
+      totalRepeatedSqlCalls: sum(reports.map((report) => report.metrics.repeatedSqlCalls)),
       totalFailedToolCalls: sum(reports.map((report) => report.metrics.failedToolCalls)),
       totalRecoveredToolFailures: sum(reports.map((report) => report.metrics.recoveredToolFailures)),
       totalInputTokens: sum(reports.map((report) => report.metrics.inputTokens)),
@@ -375,6 +406,9 @@ export const evaluateEnergyIqHarnessObservation = (
   const insightQuality = evalCase.contract.insightSignals
     ? scoreInsight(answer, evalCase.contract.insightSignals)
     : null;
+  const decisionQuality = evalCase.contract.insightSignals
+    ? scoreDecisionQuality(answer, evalCase.contract.insightSignals)
+    : null;
   if (insightQuality !== null) {
     assert("insight.quality", insightQuality >= 7, `${insightQuality}/10`);
     const evidenceScore = scoreSignal(answer, evalCase.contract.insightSignals?.evidence ?? []);
@@ -393,6 +427,9 @@ export const evaluateEnergyIqHarnessObservation = (
       };
     }, { input: 0, output: 0 });
   const steps = extractStepMetrics(events);
+  const answerWordCount = countWords(answer);
+  const openingWordCount = countWords(answerOpening(answer));
+  const repeatedSqlCalls = countRepeatedSqlCalls(events);
   const hardFailure = assertions.some((entry) => !entry.passed && entry.hard);
   const correctnessAssertions = assertions.filter((entry) => isCorrectnessAssertion(entry.id));
   const passedCorrectnessAssertions = correctnessAssertions.filter((entry) => entry.passed).length;
@@ -430,6 +467,10 @@ export const evaluateEnergyIqHarnessObservation = (
       authoritativePinDrift,
       correctnessRatio: ratio(passedCorrectnessAssertions, correctnessAssertions.length),
       insightQuality,
+      decisionQuality,
+      answerWordCount,
+      openingWordCount,
+      repeatedSqlCalls,
     },
     ...(observation.runId ? { runId: observation.runId } : {}),
     ...(observation.threadId ? { threadId: observation.threadId } : {}),
@@ -450,6 +491,18 @@ export const compareEnergyIqHarnessReports = (
     candidate.summary.averageInsightQuality === null || baseline.summary.averageInsightQuality === null
       ? null
       : candidate.summary.averageInsightQuality - baseline.summary.averageInsightQuality,
+  averageDecisionQualityRatioDelta: optionalMetricDelta(
+    candidate.summary.averageDecisionQualityRatio,
+    baseline.summary.averageDecisionQualityRatio,
+  ),
+  averageAnswerWordCountDelta: optionalMetricDelta(
+    candidate.summary.averageAnswerWordCount,
+    baseline.summary.averageAnswerWordCount,
+  ),
+  totalRepeatedSqlCallsDelta: optionalMetricDelta(
+    candidate.summary.totalRepeatedSqlCalls,
+    baseline.summary.totalRepeatedSqlCalls,
+  ),
   hardFailureDelta: candidate.summary.hardFailures - baseline.summary.hardFailures,
   totalInputTokensDelta: candidate.summary.totalInputTokens - baseline.summary.totalInputTokens,
   totalOutputTokensDelta: candidate.summary.totalOutputTokens - baseline.summary.totalOutputTokens,
@@ -867,10 +920,90 @@ const scoreInsight = (
   scoreSignal(answer, signals.verify),
 ]);
 
+const scoreDecisionQuality = (
+  answer: string,
+  signals: NonNullable<EnergyIqHarnessEvalCase["contract"]["insightSignals"]>,
+): EnergyIqDecisionQualityBreakdown => {
+  const opening = answerOpening(answer);
+  const wordCount = countWords(answer);
+  const openingWords = countWords(opening);
+  const causalDiscipline = unsafeCausalClaim(answer)
+    ? 0
+    : /\b(?:hypothes(?:is|es)|cannot|can't|does not prove|not enough|uncertain|needs? (?:more )?evidence|verify|confirm)\b/iu.test(answer)
+      ? 2
+      : 1;
+  const readability = wordCount <= 220 && openingWords <= 80
+    ? 2
+    : wordCount <= 350 && openingWords <= 140
+      ? 1
+      : 0;
+  const consequence = signals.consequence ? scoreSignal(answer, signals.consequence) : 0;
+  const dimensions = {
+    takeaway: scoreSignal(opening, signals.what),
+    evidenceUse: scoreSignal(answer, signals.evidence),
+    decisionRelevance: scoreSignal(answer, signals.why),
+    action: scoreSignal(answer, signals.action),
+    verification: scoreSignal(answer, signals.verify),
+    causalDiscipline,
+    readability,
+    consequence,
+  };
+  const maximum = 16;
+  const total = sum(Object.values(dimensions));
+  return { ...dimensions, total, maximum, ratio: ratio(total, maximum) };
+};
+
 const scoreSignal = (answer: string, patterns: string[]): number => Math.min(
   2,
   patterns.filter((pattern) => regex(pattern).test(answer)).length,
 );
+
+const answerOpening = (answer: string): string => {
+  const sentences = answer.trim().split(/(?<=[.!?。！？])\s+/u).filter(Boolean);
+  return sentences.slice(0, 2).join(" ") || answer.slice(0, 500);
+};
+
+const countWords = (value: string): number => {
+  const latinWords = value.match(/[\p{Script=Latin}\p{N}]+(?:['’-][\p{Script=Latin}\p{N}]+)*/gu) ?? [];
+  const cjkCharacters = value.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/gu) ?? [];
+  return latinWords.length + cjkCharacters.length;
+};
+
+const unsafeCausalClaim = (answer: string): boolean => /\b(?:definitely caused by|proves? that|certainly caused by|the root cause is)\b/iu.test(answer);
+
+const countRepeatedSqlCalls = (events: EventRecord[]): number => {
+  const sqlByCallId = new Map<string, { name: string; argsText: string; args: unknown }>();
+  for (const event of events) {
+    const callId = stringValue(event.toolCallId ?? event.tool_call_id);
+    if (!callId) continue;
+    const current = sqlByCallId.get(callId) ?? { name: "", argsText: "", args: undefined };
+    current.name = stringValue(event.toolCallName ?? event.tool_call_name) || current.name;
+    if (stringValue(event.type) === "TOOL_CALL_ARGS") current.argsText += stringValue(event.delta);
+    if (event.args !== undefined) current.args = event.args;
+    if (event.parameters !== undefined) current.args = event.parameters;
+    sqlByCallId.set(callId, current);
+  }
+  const normalized = [...sqlByCallId.values()].flatMap((call) => {
+    if (call.name !== "run_sql_readonly") return [];
+    let args = call.args;
+    if (!isRecord(args) && call.argsText.trim()) {
+      try { args = JSON.parse(call.argsText); } catch { return []; }
+    }
+    if (!isRecord(args)) return [];
+    const sql = stringValue(args.sql ?? args.query);
+    if (!sql) return [];
+    const canonical = sql
+      .replace(/\/\*[\s\S]*?\*\//gu, " ")
+      .replace(/--[^\r\n]*/gu, " ")
+      .replace(/\s+/gu, " ")
+      .trim()
+      .replace(/;+$/gu, "")
+      .trim()
+      .toLowerCase();
+    return canonical ? [canonical] : [];
+  });
+  return normalized.length - new Set(normalized).size;
+};
 
 const toolResultFailed = (event: EventRecord): boolean => {
   const candidates = [event.result, event.content, event.value];
@@ -918,6 +1051,12 @@ const maximumOptional = (values: Array<number | null>): number | null => {
   const present = values.filter((value): value is number => value !== null);
   return present.length > 0 ? Math.max(...present) : null;
 };
+const optionalMetricDelta = (candidate: unknown, baseline: unknown): number | null => (
+  typeof candidate === "number" && Number.isFinite(candidate)
+  && typeof baseline === "number" && Number.isFinite(baseline)
+    ? candidate - baseline
+    : null
+);
 const cacheHitRatio = (hitTokens: number, missTokens: number): number | null => {
   const total = hitTokens + missTokens;
   return total > 0 ? hitTokens / total : null;
