@@ -51,6 +51,24 @@ describe("EnergyIQ Harness Eval", () => {
     expect(report.assertions.some((assertion) => assertion.id.startsWith("efficiency."))).toBe(false);
   });
 
+  it("counts one reasoning round per message when AG-UI emits both start event variants", () => {
+    const evalCase = ENERGYIQ_HARNESS_FAST_CASES[0]!;
+    const answer = "The whole project used 1,531.1683 kWh from 2026-06-10 to 2026-06-16. The result is calculated from the scoped interval evidence.";
+    const events = successfulEvents(answer).flatMap((event) => event.type === "REASONING_START"
+      ? [
+          { type: "REASONING_START", messageId: "reasoning-1" },
+          { type: "REASONING_MESSAGE_START", messageId: "reasoning-1" },
+          { type: "REASONING_START", messageId: "reasoning-2" },
+          { type: "REASONING_MESSAGE_START", messageId: "reasoning-2" },
+        ]
+      : [event]);
+
+    const report = evaluateEnergyIqHarnessObservation(evalCase, { elapsedMs: 25_000, events });
+
+    expect(report.status).toBe("passed");
+    expect(report.metrics.reasoningRounds).toBe(2);
+  });
+
   it("records a recovered tool failure without turning a correct completed run into a hard failure", () => {
     const evalCase = ENERGYIQ_HARNESS_FAST_CASES[0]!;
     const answer = "The whole project used 1,531.1683 kWh from 2026-06-10 to 2026-06-16. The result is calculated from the scoped interval evidence.";
