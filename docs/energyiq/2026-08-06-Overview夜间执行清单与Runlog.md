@@ -464,3 +464,17 @@ AI Analyst 的 #30/#18/#15 继续由侧边任务 Agent 执行；不得修改本�
 - 不把公开电价估算冒充客户合同 Tariff，不把 naive baseline 冒充正式 Forecast。
 - 不恢复控制整页的全局 Period/Scope 选择器；Explorer 的日/周/月只影响局部设备事实查看。
 - 不因视觉改造修改 Snapshot、权限、AI Tool、Provider、Session 或第二套数据平台。
+
+### 11.8 2026-08-07 执行与复核结果
+
+| 切片 | 状态 | 已形成的可验证结果 |
+| --- | --- | --- |
+| V1：#9/#13 阅读体验 | DONE（工程验收） | Ngee Ann 与 Preschool 均采用 takeaway-first 阅读顺序；桌面左侧目录、窄屏顶部目录、较大字号、分段决策卡和折叠 Evidence 已落地。Ngee Ann 的 1d/7d/28d、更丰富的变化图与 A→B 状态表达仍作为 #9 后续视觉切片，不冒充本轮已完成。 |
+| V2：#31 Explorer | DONE（本轮切片） | Overview 精准携带 Project/Scope/Resource/Period/Snapshot/Release；Explorer 使用服务端日趋势与 24h profile；空窗口诚实显示 No data；技术 provenance 默认折叠。服务端尚无最新累计原始读数合同，因此页面明确显示 unavailable，没有前端猜算。 |
+| V3：#13 Preschool visuals | DONE（工程验收） | 已加入经验分布、24h operating/closed 结构、Centre Top 5、四个完整周均值形成的 June demo baseline，以及使用 SP 2026 Q2 低压非住宅公开参考价的 provisional cost。修复了把 standby/off-hours 用量误当作五月总用量的成本语义错误。 |
+| V4：#5 校准 | PENDING | 定向测试已通过；在关闭 #5 前仍需完成 Current 与 Saved Analysis 的同一浏览器回读，确认 Area/Headcount/Provisional 不漂移。 |
+| V5：#19 → #20 → #21 | PENDING | 保持原顺序：Release/rollback → Saved/Rerun/打印或 PDF → 两项目完整试点与 Charles 人工价值验收。 |
+
+自动化证据：Web 相关 `5 files / 101 tests` 通过，Preschool 定向 `4 files / 21 tests` 通过，API empty→latest 定向测试通过，仓库 typecheck、build 与 Web production build 通过（17 pages）。真实 Chrome：Ngee Ann 与 Preschool 的 1440/1920 页面均完成回读；Preschool 当前浏览器 error log 为空；Ngee Ann Overview → Explorer 的 Snapshot/Release 精准下钻已回读通过。
+
+Workspace 复核结论：先前“Preschool 被 Ngee Ann Workspace 限制”不是 Renderer 或 API 缺失，而是共享 Chrome 仍处于 Ngee Ann Workspace 且保留旧 Project URL。使用 Admin 账号将 Workspace 切换为 `Preschool Demo`，再进入 `preschool-demo` Project 后，Portfolio、Benchmark、Operating、June plan 与 Centre detail 均正常显示。切换 Workspace 后若保留旧 Project URL，应显示上下文不匹配而不是跨 Workspace 读取，这属于正确隔离行为。
