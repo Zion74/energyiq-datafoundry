@@ -77,9 +77,9 @@ Overview AI Slot 与 Full AI Analyst 均遵守以上职责。项目 Analysis Pac
 | 顺序 | 任务 | Owner | 状态 | 完成证据 |
 | ---: | --- | --- | --- | --- |
 | 1 | 将 #36 六个独立提交合入最新 Integration | 主 Agent | pending | cherry-pick 成功；聚焦测试与 build 通过 |
-| 2 | 运行 #36 DeepSeek critical pass@3 + 固定三轮 same-session | 本侧边任务 | blocked by 1 | JSON/Markdown 报告；同 Snapshot；无 hard failure |
+| 2 | 运行 #36 DeepSeek critical pass@3 + 固定三轮 same-session | 本侧边任务 | Ngee Ann pass@3 completed；Preschool real-auth blocked | Ngee Ann 3/3；Preschool CLI 被真实登录 401 阻止 |
 | 3 | 将 #30 质量评分升级为结构化 Rubric，并保留确定性 hard gates | 本侧边任务 | implemented；real Candidate comparison pending | `7fb6977`；报告新增八维质量分解 |
-| 4 | 增加重复调查与回答冗长的诊断遥测，不设效率硬门槛 | 本侧边任务 | implemented；real telemetry pending | `7fb6977`；重复 SQL、总字数、首段字数 |
+| 4 | 增加重复调查与回答冗长的诊断遥测，不设效率硬门槛 | 本侧边任务 | completed | `7fb6977`；真实 pass@3 无重复 SQL，平均 701 词 |
 | 5 | 校准 Ngee Ann/Preschool AI Slot 的固定 SQL/强制 Finding 路线 | 主 Agent或其提交后由侧边分支 | blocked by dirty Integration | 0–3 Findings；Agent 自主调查；Evidence guard 不弱化 |
 | 6 | 补齐 Ngee Ann 的 acted/ignored/verify 决策后果 | 主 Agent | planned | 两项目共享 Finding 语义；项目 Pack 保持独立 |
 | 7 | 完成 #35 Provider 与 Presentation browser acceptance | 主 Agent + 本侧边复核 | pending | 两项目各有 useful visual 和正确 no-visual 案例 |
@@ -157,8 +157,8 @@ Ngee Ann 与 Preschool 各运行至少三次固定 Profile/Snapshot：
 ## 7. 验收与关闭顺序
 
 1. [ ] #36 commits 合入并通过自动回归；
-2. [ ] #36 real pass@3 + same-session 报告；
-3. [ ] #30 结构化质量 Rubric 与报告回归；
+2. [x] #36 Ngee Ann real pass@3；Preschool same-session 保留为真实登录环境验收；
+3. [x] #30 结构化质量 Rubric 与报告回归；
 4. [ ] AI Slot 固定路线校准后跑两项目 Provider；
 5. [ ] #35 真实 visual/no-visual 与浏览器验收；
 6. [ ] #20 History keyboard/1440/1920 验收；
@@ -239,3 +239,65 @@ Ngee Ann 与 Preschool 各运行至少三次固定 Profile/Snapshot：
 - #30 进度证据：<https://github.com/Zion74/energyiq-datafoundry/issues/30#issuecomment-5219684498>
 - #36 最新合入交接：<https://github.com/Zion74/energyiq-datafoundry/issues/36#issuecomment-5219684718>
 - #33 已验证并关闭：<https://github.com/Zion74/energyiq-datafoundry/issues/33#issuecomment-5219684918>
+
+### Ngee Ann 真实 DeepSeek 验收与修复
+
+验收使用隔离 Metadata/File storage、受保护的 Ngee Ann 事实库和固定 Snapshot
+`energy-snapshot-03499dcda183ae28c47f7d66`。没有停止当前 Integration 服务，也没有修改共享事实或登录状态。
+
+第一次有效 pass@3 为 2/3。第三次并非模型结论错误，而是 Context Processor 在 SQL 工具返回
+`undefined` observation 时对非字符串调用 `.slice()`，导致 Harness 自身崩溃。已用可复现红测锁定并修复：
+
+- `9c14107 fix(agent): tolerate missing SQL observations`；
+- 精确回归 3/3、相关 Context 回归 4/4、根 build 均通过；
+- 修复后相同 Ngee Ann case 的真实 DeepSeek pass@3 为 3/3，hard failure 0。
+
+修复后 pass@3 摘要：
+
+| 指标 | 结果 |
+| --- | ---: |
+| Correctness / Insight | 1.00 / 10.00 |
+| p50 / p95 | 139.5s / 206.2s |
+| 平均 SQL / Reasoning rounds | 14.33 / 9.33 |
+| 完全重复 SQL | 0 |
+| Tool failure / recovered | 1 / 1 |
+| Max prompt / budget utilization | 67,630 / 5.09% |
+| Cache hit tokens / ratio | 653,568 / 1.00 |
+| 平均 Decision Quality / Answer words | 0.75 / 701.3 |
+
+结论：1M Context budget 不是当前性能瓶颈；DuckDB 也不是本次 139–206 秒的主要原因。
+耗时主要来自模型自主选择了 9.33 个推理轮次和 14.33 条 SQL。因为没有重复 SQL且失败能恢复，
+不应增加固定 SQL/轮次硬上限。当前应优化工具反馈、停止判断和最终表达，而不是限制调查能力。
+
+### 决策简报最小优化
+
+提交 `e8d5a16 feat(agent): default EnergyIQ answers to decision briefs` 只调整最终表达合同：默认把单一决策问题
+组织为不超过五个短要点的简报，保留一个 takeaway、最多三个决定性 Evidence、一个行动和一个验证；
+这不是分析或工具预算，不阻止 Agent 在需要时继续调查。
+
+三次真实 Provider 单次试验均通过 correctness 1.00 / Insight 10：
+
+- 96.4s、9 SQL、6 rounds、366 words；
+- 119.8s、13 SQL、10 rounds、498 words；
+- 最终文案：86.7s、9 SQL、6 rounds、359 words。
+
+它已把 3-run 平均 701 词显著压短，但 DeepSeek 仍可能超过 300 词目标。今晚不增加第二个总结模型或
+通用 Prompt 平台；AI Slot 的卡片级裁剪继续由 Presentation/renderer 负责。
+
+### Preschool same-session 的诚实边界
+
+对当前 `127.0.0.1:8787` 运行 fixed three-turn continuity 时，CLI 在进入模型前收到 `401 Authentication required`。
+当前 API 使用真实浏览器 Session，并同时持有项目 DuckDB；不应停服务、复制登录凭据或切换 dev-auth 来制造通过。
+因此当前证据边界是：same-session 自动契约测试已通过，但 Preschool 真实 Provider 连续会话仍需在已登录 UI 或
+经正式测试账号/Token 的隔离实例完成。该 401 不是 DeepSeek、SQL 或结果质量失败。
+
+### AI Slot 固定路线复核
+
+最新 Integration 的未提交 AI Slot 仍存在两类限制：
+
+- Ngee Ann：最多两次 SQL、第一次成功立即停止、必须恰好三条 Finding、强制覆盖 1d/7d/28d；
+- Preschool：固定 observation → drill-down → validation，并要求每条 Finding 至少引用两条 SQL。
+
+这些规则超出了安全/Evidence 边界，确实会限制 Agent 自主调查。但相关文件正包含主 Agent 的 Presentation WIP，
+侧边分支不直接改动，避免覆盖或制造难解冲突。安全切片应在该 WIP 提交后单独完成：保留 inspect-first、只读、
+Snapshot pin、数字 Evidence 与 fail-closed；删除固定调查状态机、成功 SQL 数和“恰好三条”要求，允许 0–3 条有价值 Finding。
