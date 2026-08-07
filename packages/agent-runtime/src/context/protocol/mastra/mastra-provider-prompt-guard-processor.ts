@@ -31,9 +31,16 @@ export class MastraProviderPromptGuardProcessor implements Processor<"provider-p
     this.options.eventSink.emitContextEvent("context.prompt-verified", {
       step_number: args.stepNumber,
       model_profile_id: profile.id,
+      capability_source: profile.capabilitySource,
+      context_window: profile.contextWindow,
+      max_output_tokens: profile.maxOutputTokens,
+      output_reserve: profile.outputReserve,
+      safety_margin: profile.safetyMargin,
       prompt_tokens: promptTokens,
       input_budget: inputBudget,
       remaining_tokens: remainingTokens,
+      budget_utilization: inputBudget > 0 ? promptTokens / inputBudget : 1,
+      high_water_mark: highWaterMark(promptTokens, inputBudget),
       // R-017: stable top-level budget fields. `model` is the resolved model name;
       // `budget_tokens` aliases `input_budget`; `total_tokens` mirrors prompt_tokens for
       // the verified-prompt snapshot (no completion tokens yet at this stage).
@@ -60,6 +67,16 @@ export class MastraProviderPromptGuardProcessor implements Processor<"provider-p
     return undefined;
   }
 }
+
+const highWaterMark = (
+  promptTokens: number,
+  inputBudget: number
+): "normal" | "diagnostic" | "review" => {
+  const utilization = inputBudget > 0 ? promptTokens / inputBudget : 1;
+  if (utilization >= 0.75) return "review";
+  if (utilization >= 0.5) return "diagnostic";
+  return "normal";
+};
 
 const UNAVAILABLE_SYSTEM_TOOL_NAMES = ["updateWorkingMemory", "setWorkingMemory", "update-working-memory"] as const;
 
