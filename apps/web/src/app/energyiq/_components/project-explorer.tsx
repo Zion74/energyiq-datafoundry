@@ -1097,7 +1097,7 @@ export function buildExplorerAnalysisRequest(
 
 export function hasExplorerFacts(
   analysis: EnergyScopeAnalysisDto | null,
-): analysis is EnergyScopeAnalysisDto {
+): boolean {
   return Boolean(analysis && analysis.summary.validIntervalCount > 0);
 }
 
@@ -1106,7 +1106,7 @@ export function explorerTrendSeries(analysis: EnergyScopeAnalysisDto | null): Ar
   usageKwh: number | null;
   coveragePct: number;
 }> {
-  if (!hasExplorerFacts(analysis)) return [];
+  if (!analysis || !hasExplorerFacts(analysis)) return [];
   const selectedScope = analysis.dailyTotals?.scopes.find(
     (candidate) => candidate.scopeId === analysis.context.scopeId,
   );

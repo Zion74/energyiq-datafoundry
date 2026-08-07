@@ -403,6 +403,7 @@ export function buildPreschoolOverviewViewModel(
       : {
           status: "unavailable",
           detail: snapshot.preschoolOperational?.status === "available"
+            && snapshot.preschoolOperational.planningOutlook.status === "unavailable"
             ? snapshot.preschoolOperational.planningOutlook.reason.message
             : "June planning baseline is unavailable because the release-pinned May operational projection is unavailable.",
         },
