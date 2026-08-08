@@ -18,24 +18,18 @@ export type PreschoolOverviewCentre = {
 
 export type PreschoolDecisionSummaryItem = {
   id: "after-hours" | "efficiency" | "operating";
+  sectionId: "overall-summary" | "centre-benchmark" | "operating-behaviour" | "appliance-contribution" | "planning-outlook";
   priority: 1 | 2 | 3;
   label: string;
-  finding: string;
-  signal: {
+  primaryMetric: {
     label: string;
     value: number;
-    max: number;
     valueLabel: string;
-    referenceLabel: string;
   };
-  what: string;
-  why: string;
-  action: string;
-  ifActed: string;
-  ifIgnored: string;
-  verification: string;
+  supportingMetrics: Array<{ label: string; valueLabel: string }>;
+  centreCodes: string[];
   limitation: string;
-  evidenceLabel: string;
+  evidenceRefs: string[];
 };
 
 export type PreschoolBenchmarkDistribution = {
@@ -635,104 +629,52 @@ function buildBenchmarkDistributions(
 function buildPreschoolDecisionSummary(
   snapshot: EnergyProjectAnalysisSnapshotDto,
 ): PreschoolOverviewViewModel["decisionSummary"] {
-  if (snapshot.dataQuality.status !== "complete") {
+  const signals = snapshot.preschoolDecisionSignals;
+  if (!signals || signals.status !== "available") {
     return {
       items: [],
-      detail: "Priority findings and actions are withheld because this Snapshot is not complete.",
+      detail: signals?.reason?.message
+        ?? "Verified decision signals are unavailable for this Snapshot.",
     };
   }
-
-  const candidates: Array<Omit<PreschoolDecisionSummaryItem, "priority">> = [];
-  const operational = snapshot.preschoolOperational?.status === "available"
-    ? snapshot.preschoolOperational
-    : null;
-  if (
-    operational
-    && operational.spikes.standby.count > 0
-    && operational.sop.breachingCentreCodes.length > 0
-  ) {
-    const centreNames = formatCentreCodes(operational.sop.breachingCentreCodes);
-    candidates.push({
-      id: "after-hours",
-      label: "Energy after closing",
-      finding: `Centres ${centreNames} should be checked first for energy use after closing.`,
-      signal: {
-        label: "Energy used after closing",
-        value: operational.energy.standbySharePct,
-        max: 100,
-        valueLabel: `${formatNumber(operational.energy.standbySharePct, 1)}%`,
-        referenceLabel: "of total energy",
+  const items = signals.items.flatMap<PreschoolDecisionSummaryItem>((signal) => {
+    const primary = signal.metrics.find((metric) => metric.role === "primary");
+    if (!primary) return [];
+    return [{
+      id: signal.id,
+      sectionId: signal.sectionId,
+      priority: signal.priority,
+      label: signal.label,
+      primaryMetric: {
+        label: primary.label,
+        value: primary.value,
+        valueLabel: formatDecisionSignalMetric(primary.value, primary.precision, primary.unit),
       },
-      what: `${formatNumber(operational.energy.standbyKwh, 2)} kWh was used when centres were scheduled to be closed. ${formatNumber(operational.spikes.standby.count, 0)} unusual peaks were found across ${formatNumber(operational.spikes.standby.centreCount, 0)} centres.`,
-      why: "Electricity used after closing may be avoidable, but staff schedules and centre activities must be checked first.",
-      action: `Start with Centres ${centreNames}. Check which appliances were running after closing and confirm the centre opening hours are correct.`,
-      ifActed: "This will separate normal after-hours activity from equipment that can be switched off or rescheduled.",
-      ifIgnored: "The same after-hours use may continue each month, but the possible saving is not yet confirmed.",
-      verification: "After changes, compare after-hours energy in the next full month with May.",
-      limitation: "Meter data shows when energy was used, but not why the equipment was running.",
-      evidenceLabel: operational.evidence.projectionRecipeIds.join(" · "),
-    });
-  }
-
-  const benchmark = snapshot.preschoolBenchmark;
-  if (benchmark && benchmark.priorityCentreCodes.length > 0 && benchmark.sampleSize > 0) {
-    const centreNames = formatCentreCodes(benchmark.priorityCentreCodes);
-    candidates.push({
-      id: "efficiency",
-      label: "High energy use",
-      finding: `Centres ${centreNames} use more energy than expected for both their floor area and number of people.`,
-      signal: {
-        label: "High for both size and headcount",
-        value: benchmark.priorityCentreCodes.length,
-        max: benchmark.sampleSize,
-        valueLabel: `${benchmark.priorityCentreCodes.length} / ${benchmark.sampleSize}`,
-        referenceLabel: "centres",
-      },
-      what: "All three are among the highest 25% of centres for both energy per square metre and energy per person.",
-      why: "They still rank high after allowing for size and headcount, so they are less likely to look high only because they are larger centres.",
-      action: `Confirm the floor area and headcount for Centres ${centreNames}, then check which appliances use the most energy.`,
-      ifActed: "This will show whether the priority comes from incorrect information, unusually intensive use, or a specific appliance.",
-      ifIgnored: "Incorrect floor area or headcount could keep the wrong centres at the top of the list.",
-      verification: "Next month, compare energy per square metre and per person again with centres of the same type.",
-      limitation: "Floor area and headcount are provisional, so this is a check priority, not proof of poor efficiency.",
-      evidenceLabel: benchmark.evidence.projectionRecipeIds.join(" · "),
-    });
-  }
-
-  if (operational && operational.spikes.operating.count > 0 && snapshot.analysis.childScopes.length > 0) {
-    candidates.push({
-      id: "operating",
-      label: "Unusual peaks",
-      finding: `${formatNumber(operational.spikes.operating.centreCount, 0)} centres had unusual energy peaks during opening hours.`,
-      signal: {
-        label: "Centres with unusual peaks",
-        value: operational.spikes.operating.centreCount,
-        max: snapshot.analysis.childScopes.length,
-        valueLabel: `${operational.spikes.operating.centreCount} / ${snapshot.analysis.childScopes.length}`,
-        referenceLabel: "centres",
-      },
-      what: `${formatNumber(operational.spikes.operating.count, 0)} times, a centre used more energy than its normal level for the same hour while open.`,
-      why: "Some peaks may come from planned activities. Peaks that repeat without an explanation can point to equipment or operating changes.",
-      action: "Review the largest peaks first and ask centre staff what was happening at those times.",
-      ifActed: "Normal activities can be closed out, while repeated unexplained peaks can become targeted actions.",
-      ifIgnored: "The same peaks may happen again without anyone knowing whether they are normal or avoidable.",
-      verification: "Next month, check whether the same unexplained peaks happen again.",
-      limitation: "Meter data cannot tell whether a peak came from an override, equipment fault, or legitimate activity.",
-      evidenceLabel: operational.evidence.projectionRecipeIds[0],
-    });
-  }
-
-  const items = candidates.slice(0, 3).map((item, index) => ({
-    ...item,
-    priority: (index + 1) as 1 | 2 | 3,
-  }));
+      supportingMetrics: signal.metrics
+        .filter((metric) => metric.role === "supporting")
+        .map((metric) => ({
+          label: metric.label,
+          valueLabel: formatDecisionSignalMetric(metric.value, metric.precision, metric.unit),
+        })),
+      centreCodes: signal.entities.map((entity) => entity.code),
+      limitation: signal.limitations.map((limitation) => limitation.label).join(" "),
+      evidenceRefs: signal.evidenceRefs,
+    }];
+  });
 
   return {
     items,
     detail: items.length > 0
-      ? "Only themes supported by this complete Snapshot are shown."
-      : "No Evidence-backed priority is shown because the current Snapshot has no available Benchmark or Operational exception projection.",
+      ? "Verified signals from this Snapshot. AI interpretation is shown beside the relevant analysis section."
+      : "No decision signal met the current deterministic criteria for this Snapshot.",
   };
+}
+
+function formatDecisionSignalMetric(value: number, precision: number, unit: "kWh" | "%" | "count"): string {
+  const formatted = formatNumber(value, precision);
+  if (unit === "%") return `${formatted}%`;
+  if (unit === "kWh") return `${formatted} kWh`;
+  return formatted;
 }
 
 function toOperationalCentre(
@@ -789,13 +731,6 @@ function formatMonthYear(from: string, timeZone: string): string {
     year: "numeric",
     timeZone,
   }).format(new Date(from));
-}
-
-function formatCentreCodes(codes: string[]): string {
-  if (codes.length === 0) return "";
-  if (codes.length === 1) return codes[0]!;
-  if (codes.length === 2) return `${codes[0]} and ${codes[1]}`;
-  return `${codes.slice(0, -1).join(", ")} and ${codes[codes.length - 1]}`;
 }
 
 function formatNumber(value: number, maximumFractionDigits: number): string {

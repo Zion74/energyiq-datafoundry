@@ -85,6 +85,9 @@ export function PreschoolOverviewRenderer({
   }
 
   const view = buildPreschoolOverviewViewModel(state.snapshot);
+  const savedAiResult = savedAiArtifact?.rendererKey === "preschool-overview"
+    ? savedAiArtifact.result as unknown as Extract<import("./preschool-ai-run").PreschoolAiRunResult, { status: "available" }>
+    : undefined;
   const statusClass = view.dataStatus.status === "complete"
     ? "border-step-success/30 bg-step-success-soft text-step-success"
     : view.dataStatus.status === "partial"
@@ -204,7 +207,7 @@ export function PreschoolOverviewRenderer({
 
       <section id="preschool-decision-summary" aria-labelledby="preschool-decision-summary-heading" className="scroll-mt-28 border-b border-border bg-surface-subtle/45 px-5 py-7 lg:px-7 lg:py-8">
         <div>
-          <h3 id="preschool-decision-summary-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Key findings and next steps</h3>
+          <h3 id="preschool-decision-summary-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Signals to investigate</h3>
         </div>
         {view.decisionSummary.items.length > 0 ? (
           <div className="mt-4 space-y-3">
@@ -226,11 +229,9 @@ export function PreschoolOverviewRenderer({
       <div id="preschool-ai-analysis" className="scroll-mt-28">
         <PreschoolAiSlot
           snapshot={state.snapshot}
-          decisionSummary={view.decisionSummary}
+          sectionId="page-synthesis"
           mode={aiSlotMode}
-          {...(savedAiArtifact?.rendererKey === "preschool-overview"
-            ? { savedResult: savedAiArtifact.result as unknown as Extract<import("./preschool-ai-run").PreschoolAiRunResult, { status: "available" }> }
-            : {})}
+          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
           {...(onAiArtifactChange ? {
             onCompletedResult: (result: Extract<import("./preschool-ai-run").PreschoolAiRunResult, { status: "available" }>) => onAiArtifactChange({
               contract: "energyiq-saved-ai-result@1",
@@ -286,6 +287,13 @@ export function PreschoolOverviewRenderer({
             <p className="mt-2 text-[11px] leading-5 text-muted">{view.appliances.detail}</p>
           </div>
         )}
+        <PreschoolAiSlot
+          snapshot={state.snapshot}
+          sectionId="appliance-contribution"
+          mode={aiSlotMode}
+          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
+          {...(aiAnalystHref ? { aiAnalystHref } : {})}
+        />
       </section>
 
       <section id="preschool-efficiency-benchmark" aria-labelledby="preschool-efficiency-benchmark-heading" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
@@ -349,6 +357,13 @@ export function PreschoolOverviewRenderer({
             <p className="mt-3 text-sm leading-6 text-muted">{view.benchmark.detail}</p>
           </div>
         )}
+        <PreschoolAiSlot
+          snapshot={state.snapshot}
+          sectionId="centre-benchmark"
+          mode={aiSlotMode}
+          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
+          {...(aiAnalystHref ? { aiAnalystHref } : {})}
+        />
       </section>
 
       <section id="preschool-operational-behaviour" aria-labelledby="preschool-operational-behaviour-heading" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
@@ -420,6 +435,13 @@ export function PreschoolOverviewRenderer({
             <p className="mt-2 text-[11px] leading-5 text-muted">{view.operational.detail}</p>
           </div>
         )}
+        <PreschoolAiSlot
+          snapshot={state.snapshot}
+          sectionId="operating-behaviour"
+          mode={aiSlotMode}
+          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
+          {...(aiAnalystHref ? { aiAnalystHref } : {})}
+        />
       </section>
 
       <section id="preschool-planning-outlook" aria-labelledby="preschool-planning-outlook-heading" className="scroll-mt-28 border-b border-border bg-surface-subtle/35 px-5 py-7 lg:px-7 lg:py-8">
@@ -472,6 +494,13 @@ export function PreschoolOverviewRenderer({
           </div>
         )}
         <p className="mt-3 text-xs leading-5 text-muted">{view.liveForecast.detail}</p>
+        <PreschoolAiSlot
+          snapshot={state.snapshot}
+          sectionId="planning-outlook"
+          mode={aiSlotMode}
+          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
+          {...(aiAnalystHref ? { aiAnalystHref } : {})}
+        />
       </section>
 
       <div className="grid gap-0 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -552,11 +581,6 @@ function DecisionSummaryCard({ item }: { item: PreschoolDecisionSummaryItem }) {
     : item.id === "efficiency"
       ? "border-step-error/30 bg-step-error-soft/30"
       : "border-border bg-surface-subtle";
-  const signalClass = item.id === "after-hours"
-    ? "fill-step-warning"
-    : item.id === "efficiency"
-      ? "fill-step-error"
-      : "fill-primary";
   return (
     <article
       className={`min-w-0 rounded-xl border p-5 lg:p-6 ${toneClass}`}
@@ -565,68 +589,33 @@ function DecisionSummaryCard({ item }: { item: PreschoolDecisionSummaryItem }) {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-xs font-semibold text-primary">Priority {item.priority}</p>
-          <h4 className="mt-1.5 max-w-4xl text-lg font-semibold leading-7 text-foreground">{item.finding}</h4>
+          <h4 className="mt-1.5 max-w-4xl text-lg font-semibold leading-7 text-foreground">{item.label}</h4>
+          {item.centreCodes.length > 0 ? (
+            <p className="mt-1.5 text-sm text-muted">Centres to review: <strong className="font-semibold text-foreground">{item.centreCodes.join(" · ")}</strong></p>
+          ) : null}
         </div>
-        <span className="shrink-0 rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-muted">
-          {item.label}
-        </span>
+        <span className="shrink-0 rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-muted">Verified signal</span>
       </div>
-      <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(240px,0.72fr)_minmax(0,1.5fr)]">
-        <div
-          data-decision-signal={item.id}
-          role="img"
-          aria-label={`${item.signal.label}: ${item.signal.valueLabel} ${item.signal.referenceLabel}`}
-        >
-          <div className="flex items-baseline justify-between gap-3 text-sm">
-            <span className="font-semibold text-foreground">{item.signal.label}</span>
-            <span className="shrink-0 tabular-nums text-muted"><strong className="font-semibold text-foreground">{item.signal.valueLabel}</strong> {item.signal.referenceLabel}</span>
-          </div>
-          <svg
-            viewBox={`0 0 ${item.signal.max} 6`}
-            preserveAspectRatio="none"
-            aria-hidden="true"
-            className="mt-2 h-1.5 w-full overflow-hidden rounded-full"
-          >
-            <rect width={item.signal.max} height="6" rx="3" className="fill-border" />
-            <rect width={item.signal.value} height="6" rx="3" className={signalClass} />
-          </svg>
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-decision-signal={item.id}>
+        <div className="rounded-lg border border-border bg-surface px-4 py-3 sm:col-span-2 lg:col-span-1">
+          <p className="text-xs font-semibold text-muted">{item.primaryMetric.label}</p>
+          <p className="mt-1.5 text-2xl font-semibold tabular-nums text-foreground">{item.primaryMetric.valueLabel}</p>
         </div>
-        <dl className="grid min-w-0 gap-x-8 gap-y-4 text-sm leading-6 sm:grid-cols-2">
-          <DecisionField label="Why it matters" value={item.why} />
-          <DecisionField label="What to do next" value={item.action} />
-          <DecisionField label="How to check the result" value={item.verification} className="sm:col-span-2" />
-        </dl>
+        {item.supportingMetrics.slice(0, 2).map((metric) => (
+          <div key={metric.label} className="rounded-lg border border-border bg-surface px-4 py-3">
+            <p className="text-xs font-semibold text-muted">{metric.label}</p>
+            <p className="mt-1.5 text-lg font-semibold tabular-nums text-foreground">{metric.valueLabel}</p>
+          </div>
+        ))}
       </div>
       <details className="mt-5 border-t border-border/80 pt-4">
         <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
-          More detail and evidence
+          Limitation and evidence
         </summary>
-        <dl className="mt-4 grid gap-x-8 gap-y-4 text-sm leading-6 sm:grid-cols-2">
-          <DecisionField label="What the data shows" value={item.what} />
-          <DecisionField label="Expected result" value={item.ifActed} />
-          <DecisionField label="If no action is taken" value={item.ifIgnored} />
-          <DecisionField label="What we cannot confirm" value={item.limitation} />
-        </dl>
+        <p className="mt-3 text-sm leading-6 text-muted">{item.limitation}</p>
       </details>
       <PreschoolEvidenceLink label="View supporting evidence" />
     </article>
-  );
-}
-
-function DecisionField({
-  label,
-  value,
-  className = "",
-}: {
-  label: string;
-  value: string;
-  className?: string;
-}) {
-  return (
-    <div className={className}>
-      <dt className="font-semibold text-foreground">{label}</dt>
-      <dd className="mt-1 text-muted">{value}</dd>
-    </div>
   );
 }
 

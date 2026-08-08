@@ -9,10 +9,14 @@ import {
   resetPreschoolAiRunsForTests,
   resolvePreschoolAiEventStream,
   validatePreschoolAiEventStream,
+  type PreschoolAiProgress,
+  type PreschoolAiRelationship,
   type PreschoolAiRunInput,
+  type PreschoolAiSectionId,
+  type PreschoolAiWhyKind,
 } from "./preschool-ai-run";
+import type { AiFindingPresentation } from "./ai-finding-presentation";
 import { preschoolGoldenSnapshot } from "./preschool-overview.test-fixture";
-import { buildPreschoolOverviewViewModel } from "./preschool-overview-view-model";
 
 describe("Preschool AI Run", () => {
   afterEach(() => {
@@ -43,7 +47,7 @@ describe("Preschool AI Run", () => {
       "metric-revisions:energy.total_usage_kwh@1,energy.usage_per_person,energy.usage_per_sqm",
       "sg-preschool-calendar-v1",
     ]) expect(input.identityKey).toContain(pin);
-    expect(input.identityKey).toContain("preschool-ai-output-contract@v10");
+    expect(input.identityKey).toContain("preschool-ai-output-contract@v11");
     expect(body).toMatchObject({
       method: "agent/run",
       params: { agentId: "dataFoundry" },
@@ -72,7 +76,9 @@ describe("Preschool AI Run", () => {
         },
       },
     });
-    expect(serialized).toContain("Return zero to three distinct Findings");
+    expect(serialized).toContain("Return zero to three distinct section Findings plus at most one page synthesis");
+    expect(serialized).toContain("Valid sectionId values");
+    expect(serialized).toContain("Structured decision signals");
     expect(serialized).not.toMatch(/\b(?:chart|graph|plot|visuali[sz](?:e|ation))\b/iu);
     expect(serialized).toContain(
       "Your first action must be an immediate inspect_schema Tool call",
@@ -140,12 +146,9 @@ describe("Preschool AI Run", () => {
 
   it("keeps autonomous discovery available when no deterministic theme is publishable", () => {
     const snapshot = preschoolGoldenSnapshot();
-    const emptyThemes = {
-      ...buildPreschoolOverviewViewModel(snapshot).decisionSummary,
-      items: [],
-    };
+    snapshot.preschoolDecisionSignals!.items = [];
 
-    expect(buildPreschoolAiRunInput(snapshot, emptyThemes)).not.toBeNull();
+    expect(buildPreschoolAiRunInput(snapshot)).not.toBeNull();
   });
 
   it.each([
@@ -196,6 +199,8 @@ describe("Preschool AI Run", () => {
     if (result.status !== "available") return;
     expect(result.findings).toHaveLength(2);
     expect(result.findings[0]).toMatchObject({
+      sectionId: "centre-benchmark",
+      signalRefs: ["efficiency"],
       relationship: "supports",
       why: { kind: "Evidence" },
       evidence: {
@@ -208,6 +213,23 @@ describe("Preschool AI Run", () => {
       },
     });
     expect(result.findings[1]!.evidence.tools).toHaveLength(2);
+  });
+
+  it("drops only a Finding whose section points to a missing Structured Signal", () => {
+    const findings = generatedFindings();
+    findings[0]!.signalRefs = ["missing-signal"];
+
+    const result = resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      findings: [{ sectionId: "operating-behaviour", signalRefs: ["after-hours"] }],
+    });
   });
 
   it("accepts an Agent-selected visual backed by the same Finding SQL Evidence", () => {
@@ -1355,7 +1377,7 @@ describe("Preschool AI Run", () => {
 
 function requiredInput(): PreschoolAiRunInput {
   const snapshot = preschoolGoldenSnapshot();
-  const input = buildPreschoolAiRunInput(snapshot, buildPreschoolOverviewViewModel(snapshot).decisionSummary);
+  const input = buildPreschoolAiRunInput(snapshot);
   if (!input) throw new Error("Expected the Preschool Golden Snapshot to support an AI Run");
   return input;
 }
@@ -1454,9 +1476,29 @@ function traceToolNode(
   };
 }
 
-function generatedFindings() {
+type GeneratedFindingFixture = {
+  sectionId: PreschoolAiSectionId;
+  signalRefs: string[];
+  relationship: PreschoolAiRelationship;
+  title: string;
+  what: string;
+  whyKind: PreschoolAiWhyKind;
+  why: string;
+  how: string;
+  howToVerify: string;
+  evidenceNote: string;
+  expectedIfAct: string;
+  ifIgnored: string;
+  evidenceRefs: string[];
+  evidenceSqlIndexes: number[];
+  presentation?: AiFindingPresentation;
+};
+
+function generatedFindings(): GeneratedFindingFixture[] {
   return [
     {
+      sectionId: "centre-benchmark",
+      signalRefs: ["efficiency"],
       relationship: "supports",
       title: "Centre G remains a priority investigation",
       what: "The peer comparison and SQL cross-check point to the same Centre.",
@@ -1471,6 +1513,8 @@ function generatedFindings() {
       evidenceSqlIndexes: [1, 2],
     },
     {
+      sectionId: "operating-behaviour",
+      signalRefs: ["after-hours"],
       relationship: "independent",
       title: "Standby should be separated from operating Spikes",
       what: "The Calendar split exposes a separate after-hours investigation path.",

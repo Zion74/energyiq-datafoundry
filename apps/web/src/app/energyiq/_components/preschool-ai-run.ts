@@ -1,5 +1,6 @@
 import type {
   EnergyProjectAnalysisSnapshotDto,
+  PreschoolDecisionSignalsDto,
   SessionConversationDto,
   TraceDagDto,
 } from "../../../lib/config-api";
@@ -15,7 +16,6 @@ import {
   type PreschoolDiscoveryEvidenceBundleV1,
   type PreschoolDiscoveryEvidenceItem,
 } from "./preschool-ai-discovery-evidence";
-import type { PreschoolOverviewViewModel } from "./preschool-overview-view-model";
 import {
   AI_FINDING_PRESENTATION_PROMPT,
   aiFindingPresentationEvidenceText,
@@ -27,6 +27,7 @@ import {
 export type PreschoolAiProgress = "queued" | "inspecting" | "querying" | "validating" | "drafting";
 export type PreschoolAiRelationship = "supports" | "challenges" | "independent";
 export type PreschoolAiWhyKind = "Evidence" | "Hypothesis" | "Missing Evidence";
+export type PreschoolAiSectionId = PreschoolDecisionSignalsDto["items"][number]["sectionId"] | "page-synthesis";
 
 export type PreschoolAiToolEvidence = {
   evidenceIndex: number;
@@ -40,6 +41,8 @@ export type PreschoolAiToolEvidence = {
 
 export type PreschoolAiFinding = {
   id: string;
+  sectionId: PreschoolAiSectionId;
+  signalRefs: string[];
   relationship: PreschoolAiRelationship;
   title: string;
   what: string;
@@ -76,6 +79,19 @@ export type PreschoolAiValidationIssue = {
   field: "title" | "what" | "why" | "how" | "expectedIfAct" | "ifIgnored" | "howToVerify" | "evidenceNote" | "presentation";
 };
 
+type PreschoolAiDecisionSignals = {
+  contract: PreschoolDecisionSignalsDto["contract"];
+  items: Array<{
+    id: PreschoolDecisionSignalsDto["items"][number]["id"];
+    sectionId: PreschoolDecisionSignalsDto["items"][number]["sectionId"];
+    priority: number;
+    label: string;
+    metrics: Array<Pick<PreschoolDecisionSignalsDto["items"][number]["metrics"][number], "id" | "label" | "metricId" | "value" | "unit" | "role">>;
+    centreCodes: string[];
+    limitations: string[];
+  }>;
+};
+
 export type PreschoolAiRunInput = {
   identityKey: string;
   projectId: "preschool-demo";
@@ -88,7 +104,7 @@ export type PreschoolAiRunInput = {
   projectReleaseId: string;
   analysisFrom: string;
   analysisTo: string;
-  officialThemes: PreschoolOverviewViewModel["decisionSummary"];
+  decisionSignals: PreschoolAiDecisionSignals;
   discoveryEvidence: PreschoolDiscoveryEvidenceBundleV1;
 };
 
@@ -124,7 +140,7 @@ const currentRuns = new Map<string, CurrentRun>();
 const FRIENDLY_UNAVAILABLE = "AI analysis is temporarily unavailable. The verified Overview remains available.";
 const PRESCHOOL_AI_PACK_ID = "preschool-analysis-pack" as const;
 const PRESCHOOL_AI_PACK_REVISION = "v1" as const;
-const PRESCHOOL_AI_OUTPUT_CONTRACT_REVISION = "v10";
+const PRESCHOOL_AI_OUTPUT_CONTRACT_REVISION = "v11";
 const PERSISTED_WORKSPACE_PROFILE_ID = "workspace-default";
 const ACTIVE_RUN_POLL_INTERVAL_MS = 1_500;
 const ACTIVE_RUN_POLL_LIMIT = 200;
@@ -135,10 +151,17 @@ export function resetPreschoolAiRunsForTests(): void {
 
 export function buildPreschoolAiRunInput(
   snapshot: EnergyProjectAnalysisSnapshotDto,
-  officialThemes: PreschoolOverviewViewModel["decisionSummary"],
 ): PreschoolAiRunInput | null {
   const discoveryEvidence = buildPreschoolDiscoveryEvidenceBundle(snapshot);
-  if (!discoveryEvidence || snapshot.context.resource !== "electricity") return null;
+  const decisionSignals = snapshot.preschoolDecisionSignals;
+  if (
+    !discoveryEvidence
+    || snapshot.context.resource !== "electricity"
+    || !decisionSignals
+    || decisionSignals.status !== "available"
+    || decisionSignals.context.dataSnapshotId !== snapshot.dataSnapshot.id
+    || decisionSignals.context.projectReleaseId !== snapshot.projectRelease.id
+  ) return null;
   const analysisFrom = localDate(new Date(discoveryEvidence.identity.period.from), snapshot.context.timezone);
   const analysisTo = localDate(new Date(Date.parse(discoveryEvidence.identity.period.to) - 1), snapshot.context.timezone);
   const identityKey = [
@@ -174,8 +197,23 @@ export function buildPreschoolAiRunInput(
     projectReleaseId: snapshot.projectRelease.id,
     analysisFrom,
     analysisTo,
-    officialThemes,
+    decisionSignals: compactDecisionSignals(decisionSignals),
     discoveryEvidence,
+  };
+}
+
+function compactDecisionSignals(signals: PreschoolDecisionSignalsDto): PreschoolAiDecisionSignals {
+  return {
+    contract: signals.contract,
+    items: signals.items.map((signal) => ({
+      id: signal.id,
+      sectionId: signal.sectionId,
+      priority: signal.priority,
+      label: signal.label,
+      metrics: signal.metrics.map(({ id, label, metricId, value, unit, role }) => ({ id, label, metricId, value, unit, role })),
+      centreCodes: signal.entities.map((entity) => entity.code),
+      limitations: signal.limitations.map((limitation) => limitation.label),
+    })),
   };
 }
 
@@ -451,17 +489,19 @@ function buildPrompt(input: PreschoolAiRunInput): string {
     "When filtering interval_start, use an ISO-8601 string or TIMESTAMPTZ literal for pinned UTC bounds. Never compare interval_start with a TIMESTAMP literal that contains Z; it is timezone-naive. If SQL and bundle differ, narrate a gap only when a bounded reconciliation query returns it as a named column.",
     "For Centre aggregation use parent_node_id, not scope_id. Only include quality_status='ok' and official_aggregation_eligible=TRUE. Do not add Project totals to component rows.",
     "The bounded Preschool bundle is authoritative; SQL cross-checks it.",
-    "Return zero to three distinct Findings. Do not force novelty and do not repeat the official themes as prose. Each displayed Finding must cite only the successful SQL Evidence operations it actually uses; one sufficient query is valid, while a claim that needs validation should cite the additional query that tests it.",
+    "Return zero to three distinct section Findings plus at most one page synthesis. Do not force novelty and do not repeat the structured signals as prose. Each displayed Finding must cite only the successful SQL Evidence operations it actually uses; one sufficient query is valid, while a claim that needs validation should cite the additional query that tests it.",
+    `Valid sectionId values: ${JSON.stringify(["overall-summary", "centre-benchmark", "operating-behaviour", "appliance-contribution", "planning-outlook", "page-synthesis"])}. Put each Finding beside the section where it helps the user most. Use page-synthesis only for the cross-section priority and next decision.`,
+    `Valid signalRefs: ${JSON.stringify(input.decisionSignals.items.map((signal) => signal.id))}. Use only exact ids. An independent discovery may use []; a signal-linked Finding must point to the matching Structured Signal.`,
     "A Finding may support, challenge, or be independent. Answer What, Why, next investigation, acted/ignored consequences, verification, and limitations. whyKind is Evidence, Hypothesis, or Missing Evidence. Never invent savings, certainty, or outcomes; evidenceNote states what Evidence cannot prove.",
     `Valid evidenceRefs: ${JSON.stringify(input.discoveryEvidence.items.map((item) => item.id))}. Use only these exact ids; never cite other Runtime ids or object paths. Use [] for an SQL-only Finding.`,
     "Cite only SQL results actually used. Use numbers only from the same Finding's cited bundle items or SQL. Do not invent causes, equipment state, tariff, cost, savings, ROI, forecast, owner, commitment, target, threshold, duration, or time window.",
     "Before emitting the final JSON, audit every customer-visible field and block. Each number must match a cited typed bundle field or named SQL column; same-valued sources are ambiguous. If a ranking, ratio, difference, or other derived value is useful, query a named column; otherwise omit or state Missing Evidence. Do not mention the audit.",
     AI_FINDING_PRESENTATION_PROMPT,
-    "Return only strict JSON: {\"findings\":[{\"relationship\":\"supports\",\"title\":\"...\",\"what\":\"...\",\"whyKind\":\"Evidence\",\"why\":\"...\",\"how\":\"...\",\"expectedIfAct\":\"...\",\"ifIgnored\":\"...\",\"howToVerify\":\"...\",\"evidenceNote\":\"...\",\"evidenceRefs\":[\"benchmark:priority-centre:G\"],\"evidenceSqlIndexes\":[1,2],\"presentation\":{\"version\":\"1\",\"blocks\":[{\"type\":\"ranking\",\"prominence\":\"primary\",\"unit\":\"kWh\",\"items\":[{\"label\":\"Centre E\",\"value\":0}],\"evidenceRefs\":[\"benchmark:priority-centre:G\"],\"evidenceSqlIndexes\":[1]}]}}]}",
+    "Return only strict JSON: {\"findings\":[{\"sectionId\":\"operating-behaviour\",\"signalRefs\":[\"after-hours\"],\"relationship\":\"supports\",\"title\":\"...\",\"what\":\"...\",\"whyKind\":\"Evidence\",\"why\":\"...\",\"how\":\"...\",\"expectedIfAct\":\"...\",\"ifIgnored\":\"...\",\"howToVerify\":\"...\",\"evidenceNote\":\"...\",\"evidenceRefs\":[\"benchmark:priority-centre:G\"],\"evidenceSqlIndexes\":[1,2],\"presentation\":{\"version\":\"1\",\"blocks\":[{\"type\":\"ranking\",\"prominence\":\"primary\",\"unit\":\"kWh\",\"items\":[{\"label\":\"Centre E\",\"value\":0}],\"evidenceRefs\":[\"benchmark:priority-centre:G\"],\"evidenceSqlIndexes\":[1]}]}}]}",
     "Bounded Preschool Discovery Evidence Bundle:",
     JSON.stringify(input.discoveryEvidence),
-    "Official deterministic themes (context, not a script):",
-    JSON.stringify(input.officialThemes),
+    "Structured decision signals (facts to interpret, prioritize, merge or challenge; not prose to repeat):",
+    JSON.stringify(input.decisionSignals),
   ].join("\n\n");
 }
 
@@ -502,9 +542,16 @@ function resolvePreschoolAiEventStreamInternal(
   const generated = parseFindings(answer);
   if (!generated) return { status: "unavailable", reason: "The AI response could not be verified against this Snapshot." };
   const evidenceById = new Map(args.input.discoveryEvidence.items.map((item) => [item.id, item]));
+  const signalById = new Map<string, PreschoolAiDecisionSignals["items"][number]>(
+    args.input.decisionSignals.items.map((signal) => [signal.id, signal]),
+  );
   let missingSnapshotEvidence = false;
   let missingSqlEvidence = false;
   const referenceValidFindings = generated.flatMap((finding, findingIndex) => {
+    const signals = finding.signalRefs.map((id) => signalById.get(id)).filter(Boolean);
+    if (signals.length !== finding.signalRefs.length) return [];
+    if (finding.sectionId !== "page-synthesis"
+      && signals.some((signal) => signal?.sectionId !== finding.sectionId)) return [];
     const evidence = finding.evidenceRefs
       .map((id) => evidenceById.get(id)).filter((item): item is PreschoolDiscoveryEvidenceItem => Boolean(item));
     if (evidence.length !== finding.evidenceRefs.length) {
@@ -578,6 +625,8 @@ function resolvePreschoolAiEventStreamInternal(
     packRevision: "v1",
     findings: displayable.map(({ finding, evidence, tools }, index) => ({
       id: `preschool-ai-finding-${index + 1}`,
+      sectionId: finding.sectionId,
+      signalRefs: finding.signalRefs,
       relationship: finding.relationship,
       title: finding.title,
       what: finding.what,
@@ -676,6 +725,8 @@ function repairFindingEvidenceBindings(
 }
 
 type GeneratedFinding = {
+  sectionId: PreschoolAiSectionId;
+  signalRefs: string[];
   relationship: PreschoolAiRelationship;
   title: string;
   what: string;
@@ -693,9 +744,11 @@ type GeneratedFinding = {
 
 function parseFindings(answer: string): GeneratedFinding[] | null {
   const envelope = findLastFindingsEnvelope(answer);
-  if (!envelope || !Array.isArray(envelope.findings) || envelope.findings.length > 3) return null;
+  if (!envelope || !Array.isArray(envelope.findings) || envelope.findings.length > 4) return null;
   const findings = envelope.findings.flatMap<GeneratedFinding>((candidate) => {
     if (!isRecord(candidate)) return [];
+    const sectionId = stringValue(candidate.sectionId) ?? "page-synthesis";
+    const signalRefs = stringArray(candidate.signalRefs);
     const evidenceRefs = stringArray(candidate.evidenceRefs);
     const evidenceSqlIndexes = positiveIntegerArray(candidate.evidenceSqlIndexes);
     const relationship = stringValue(candidate.relationship) ?? "independent";
@@ -710,15 +763,25 @@ function parseFindings(answer: string): GeneratedFinding[] | null {
     const evidenceNote = cleanText(candidate.evidenceNote);
     const presentation = parseAiFindingPresentation(candidate.presentation
       ?? (Array.isArray(candidate.blocks) ? { version: "1", blocks: candidate.blocks } : null));
-    if ((relationship !== "supports" && relationship !== "challenges" && relationship !== "independent")
+    if (!isPreschoolAiSectionId(sectionId)
+      || (relationship !== "supports" && relationship !== "challenges" && relationship !== "independent")
       || (whyKind !== "Evidence" && whyKind !== "Hypothesis" && whyKind !== "Missing Evidence")
       || !title || !what || !why || !how || !expectedIfAct || !ifIgnored || !howToVerify || !evidenceNote
       || evidenceSqlIndexes === null) return [];
-    return [{ relationship, title, what, whyKind, why, how, expectedIfAct, ifIgnored, howToVerify, evidenceNote, evidenceRefs, evidenceSqlIndexes, ...(presentation ? { presentation } : {}) }];
+    return [{ sectionId, signalRefs, relationship, title, what, whyKind, why, how, expectedIfAct, ifIgnored, howToVerify, evidenceNote, evidenceRefs, evidenceSqlIndexes, ...(presentation ? { presentation } : {}) }];
   });
   if (findings.length !== envelope.findings.length) return null;
   const semantic = findings.map((finding) => `${finding.title} ${finding.what}`.toLowerCase().replace(/[^a-z0-9]+/gu, " ").trim());
   return new Set(semantic).size === semantic.length ? findings : null;
+}
+
+function isPreschoolAiSectionId(value: string): value is PreschoolAiSectionId {
+  return value === "overall-summary"
+    || value === "centre-benchmark"
+    || value === "operating-behaviour"
+    || value === "appliance-contribution"
+    || value === "planning-outlook"
+    || value === "page-synthesis";
 }
 
 function collectTools(events: AgUiEvent[]): { schemaValid: boolean; sql: CollectedSqlEvidence[] } {

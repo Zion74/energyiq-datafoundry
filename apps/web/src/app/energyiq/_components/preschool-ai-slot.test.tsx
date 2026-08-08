@@ -8,7 +8,6 @@ import { buildEnergyAiHandoffInitialDraftPrompt } from "./energy-analysis-workbe
 import { PreschoolAiSlot } from "./preschool-ai-slot";
 import type { PreschoolAiProgress, PreschoolAiRunResult } from "./preschool-ai-run";
 import { preschoolGoldenSnapshot } from "./preschool-overview.test-fixture";
-import { buildPreschoolOverviewViewModel } from "./preschool-overview-view-model";
 
 describe("PreschoolAiSlot", () => {
   let container: HTMLDivElement;
@@ -34,7 +33,6 @@ describe("PreschoolAiSlot", () => {
     await act(async () => root.render(
       <PreschoolAiSlot
         snapshot={snapshot}
-        decisionSummary={buildPreschoolOverviewViewModel(snapshot).decisionSummary}
         mode="saved"
         startRun={startRun}
       />,
@@ -51,7 +49,6 @@ describe("PreschoolAiSlot", () => {
     await act(async () => root.render(
       <PreschoolAiSlot
         snapshot={snapshot}
-        decisionSummary={buildPreschoolOverviewViewModel(snapshot).decisionSummary}
         mode="saved"
         savedResult={availableResult()}
         startRun={startRun}
@@ -164,12 +161,27 @@ describe("PreschoolAiSlot", () => {
     expect(container.querySelectorAll("[data-ai-primary-takeaway='true']")).toHaveLength(3);
   });
 
-  async function renderSlot(startRun: Parameters<typeof PreschoolAiSlot>[0]["startRun"]) {
+  it("renders only the accepted Finding assigned to the current Overview section", async () => {
+    const result = availableResult();
+    result.findings[1] = finding("preschool-ai-finding-2", "independent", false, "centre-benchmark", ["efficiency"]);
+    await renderSlot(vi.fn().mockResolvedValue(result), "centre-benchmark");
+    await act(async () => undefined);
+
+    expect(container.textContent).toContain("AI interpretation");
+    expect(container.textContent).toContain("Standby is a separate angle");
+    expect(container.textContent).not.toContain("Centre G deserves investigation");
+    expect(container.querySelectorAll("article")).toHaveLength(1);
+  });
+
+  async function renderSlot(
+    startRun: Parameters<typeof PreschoolAiSlot>[0]["startRun"],
+    sectionId: Parameters<typeof PreschoolAiSlot>[0]["sectionId"] = "page-synthesis",
+  ) {
     const snapshot = preschoolGoldenSnapshot();
     await act(async () => root.render(
       <PreschoolAiSlot
         snapshot={snapshot}
-        decisionSummary={buildPreschoolOverviewViewModel(snapshot).decisionSummary}
+        sectionId={sectionId}
         aiAnalystHref="/energyiq/ai?projectId=preschool-demo&scopeId=project&resource=electricity&period=Custom&from=2026-05-01&to=2026-05-31&dataCutoff=2026-05-31&dataSnapshotId=preschool-26b85b9c0b95e090"
         startRun={startRun}
       />,
@@ -206,9 +218,13 @@ function finding(
   id: string,
   relationship: "supports" | "independent",
   withSql: boolean,
+  sectionId: Extract<PreschoolAiRunResult, { status: "available" }>["findings"][number]["sectionId"] = "page-synthesis",
+  signalRefs: string[] = [],
 ): Extract<PreschoolAiRunResult, { status: "available" }>["findings"][number] {
   return {
     id,
+    sectionId,
+    signalRefs,
     relationship,
     title: id === "preschool-ai-finding-1" ? "Centre G deserves investigation" : "Standby is a separate angle",
     what: "A scoped pattern is visible.",
@@ -241,6 +257,7 @@ function finding(
         limitation: "Not a confirmed cause.",
       }],
       tools: withSql ? [{
+        evidenceIndex: 1,
         toolCallId: "sql-1",
         sql: "SELECT parent_node_id, SUM(usage_kwh) FROM energy_intervals GROUP BY parent_node_id",
         rowCount: 1,

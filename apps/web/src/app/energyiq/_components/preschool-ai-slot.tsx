@@ -12,8 +12,8 @@ import {
   type PreschoolAiProgress,
   type PreschoolAiRunInput,
   type PreschoolAiRunResult,
+  type PreschoolAiSectionId,
 } from "./preschool-ai-run";
-import type { PreschoolOverviewViewModel } from "./preschool-overview-view-model";
 import { AiFindingPresentationView } from "./ai-finding-presentation-view";
 
 type ProgressCallback = (progress: PreschoolAiProgress) => void;
@@ -21,7 +21,7 @@ type Settled = { identityKey: string; result: PreschoolAiRunResult };
 
 export function PreschoolAiSlot({
   snapshot,
-  decisionSummary,
+  sectionId = "page-synthesis",
   aiAnalystHref,
   mode = "live",
   savedResult,
@@ -29,14 +29,14 @@ export function PreschoolAiSlot({
   startRun = getOrStartPreschoolAiRun,
 }: {
   snapshot: EnergyProjectAnalysisSnapshotDto;
-  decisionSummary: PreschoolOverviewViewModel["decisionSummary"];
+  sectionId?: PreschoolAiSectionId;
   aiAnalystHref?: string;
   mode?: "live" | "saved";
   savedResult?: Extract<PreschoolAiRunResult, { status: "available" }>;
   onCompletedResult?: (result: Extract<PreschoolAiRunResult, { status: "available" }>) => void;
   startRun?: (input: PreschoolAiRunInput, onProgress?: ProgressCallback) => Promise<PreschoolAiRunResult>;
 }) {
-  const input = useMemo(() => buildPreschoolAiRunInput(snapshot, decisionSummary), [decisionSummary, snapshot]);
+  const input = useMemo(() => buildPreschoolAiRunInput(snapshot), [snapshot]);
   const inputRef = useRef(input);
   const startRunRef = useRef(startRun);
   const onCompletedResultRef = useRef(onCompletedResult);
@@ -70,23 +70,27 @@ export function PreschoolAiSlot({
   }, [input?.identityKey, mode]);
 
   if (mode === "saved" && !savedResult) {
+    if (sectionId !== "page-synthesis") return null;
     return (
-      <AiFrame>
+      <AiFrame sectionId={sectionId}>
         <Unavailable detail="No completed AI result was attached when this analysis was saved. Opening a saved result never starts a new AI run." />
       </AiFrame>
     );
   }
 
-  if (!input) return <AiFrame><Unavailable detail="AI analysis needs one complete, release-pinned Preschool Snapshot." /></AiFrame>;
+  if (!input) return sectionId === "page-synthesis"
+    ? <AiFrame sectionId={sectionId}><Unavailable detail="AI analysis needs one complete, release-pinned Preschool Snapshot." /></AiFrame>
+    : null;
   const displayedResult = mode === "saved"
     ? savedResult
     : settled?.identityKey === input.identityKey
       ? settled.result
       : null;
   if (!displayedResult) {
+    if (sectionId !== "page-synthesis") return null;
     const stage = progress?.identityKey === input.identityKey ? progress.stage : "queued";
     return (
-      <AiFrame>
+      <AiFrame sectionId={sectionId}>
         <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-4" role="status" aria-live="polite">
           <div className="flex items-start gap-3">
             <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 animate-pulse items-center justify-center rounded-full bg-primary/10 text-primary motion-reduce:animate-none">
@@ -103,14 +107,24 @@ export function PreschoolAiSlot({
       </AiFrame>
     );
   }
-  if (displayedResult.status === "unavailable") return <AiFrame><Unavailable detail={displayedResult.reason} /></AiFrame>;
+  if (displayedResult.status === "unavailable") return sectionId === "page-synthesis"
+    ? <AiFrame sectionId={sectionId}><Unavailable detail={displayedResult.reason} /></AiFrame>
+    : null;
   const availableResult = displayedResult;
-  if (availableResult.findings.length === 0) {
+  const sectionFindings = availableResult.findings.filter((finding) => findingSectionId(finding) === sectionId);
+  if (sectionFindings.length === 0) {
+    if (sectionId !== "page-synthesis") return null;
     return (
-      <AiFrame>
+      <AiFrame sectionId={sectionId}>
         <div className="rounded-lg border border-border bg-surface-subtle px-4 py-4" role="status">
-          <p className="text-xs font-semibold text-foreground">No additional Evidence-backed candidates</p>
-          <p className="mt-1 text-[11px] leading-5 text-muted">The AI Analyst did not find a distinct angle worth adding to the deterministic themes for this Snapshot.</p>
+          <p className="text-xs font-semibold text-foreground">
+            {availableResult.findings.length > 0 ? "Section interpretations ready" : "No additional Evidence-backed candidates"}
+          </p>
+          <p className="mt-1 text-[11px] leading-5 text-muted">
+            {availableResult.findings.length > 0
+              ? "The accepted AI findings are shown beside the analysis sections they explain."
+              : "The AI Analyst did not find a distinct angle worth adding to the verified signals for this Snapshot."}
+          </p>
         </div>
         {mode === "saved" ? (
           <p className="mt-3 text-[10px] font-medium text-muted" data-saved-ai-result="true">
@@ -121,12 +135,12 @@ export function PreschoolAiSlot({
     );
   }
   return (
-    <AiFrame>
+    <AiFrame sectionId={sectionId}>
       <div
         className="space-y-4"
         aria-label="Preschool AI energy analyst findings"
       >
-        {availableResult.findings.map((finding) => (
+        {sectionFindings.map((finding) => (
           <FindingCard
             key={finding.id}
             finding={finding}
@@ -148,7 +162,19 @@ export function PreschoolAiSlot({
   );
 }
 
-function AiFrame({ children }: { children: React.ReactNode }) {
+function AiFrame({ children, sectionId }: { children: React.ReactNode; sectionId: PreschoolAiSectionId }) {
+  if (sectionId !== "page-synthesis") {
+    return (
+      <aside className="mt-5 rounded-xl border border-primary/20 bg-primary/5 p-4 lg:p-5" aria-label="AI interpretation for this section">
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <EnergyIcon name="spark" className="h-4 w-4 text-primary" />
+          <p className="text-sm font-semibold text-foreground">AI interpretation</p>
+          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-primary">AI-generated</span>
+        </div>
+        {children}
+      </aside>
+    );
+  }
   return (
     <section aria-labelledby="preschool-ai-slot" className="border-b border-border bg-surface px-5 py-5 lg:px-7 lg:py-6">
       <div className="mb-5">
@@ -163,6 +189,10 @@ function AiFrame({ children }: { children: React.ReactNode }) {
       {children}
     </section>
   );
+}
+
+function findingSectionId(finding: PreschoolAiFinding): PreschoolAiSectionId {
+  return finding.sectionId ?? "page-synthesis";
 }
 
 function Unavailable({ detail }: { detail: string }) {

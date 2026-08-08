@@ -158,50 +158,42 @@ describe("Preschool Overview ViewModel", () => {
     ]);
     expect(view.decisionSummary.items[0]).toMatchObject({
       priority: 1,
-      finding: "Centres L, E and N should be checked first for energy use after closing.",
-      signal: {
-        label: "Energy used after closing",
+      sectionId: "operating-behaviour",
+      label: "Energy used after closing",
+      centreCodes: ["L", "E", "N"],
+      primaryMetric: {
+        label: "Share used after closing",
         value: 12.45,
-        max: 100,
         valueLabel: "12.5%",
       },
-      what: "3,103.78 kWh was used when centres were scheduled to be closed. 7 unusual peaks were found across 3 centres.",
-      action: "Start with Centres L, E and N. Check which appliances were running after closing and confirm the centre opening hours are correct.",
-      verification: "After changes, compare after-hours energy in the next full month with May.",
-      evidenceLabel: "preschool-hour-slot-spike-v1 · preschool-after-hours-sop-signal-v1",
+      supportingMetrics: expect.arrayContaining([
+        { label: "Energy used after closing", valueLabel: "3,103.78 kWh" },
+        { label: "Unusual closed-hour peaks", valueLabel: "7" },
+      ]),
     });
     expect(view.decisionSummary.items[1]).toMatchObject({
       priority: 2,
-      finding: "Centres G, M and J use more energy than expected for both their floor area and number of people.",
-      signal: {
-        label: "High for both size and headcount",
+      sectionId: "centre-benchmark",
+      label: "High for both floor area and headcount",
+      centreCodes: ["G", "M", "J"],
+      primaryMetric: {
         value: 3,
-        max: 30,
-        valueLabel: "3 / 30",
+        valueLabel: "3",
       },
-      why: "They still rank high after allowing for size and headcount, so they are less likely to look high only because they are larger centres.",
     });
     expect(view.decisionSummary.items[2]).toMatchObject({
       priority: 3,
-      finding: "14 centres had unusual energy peaks during opening hours.",
-      signal: {
-        label: "Centres with unusual peaks",
+      sectionId: "operating-behaviour",
+      label: "Unusual peaks during opening hours",
+      primaryMetric: {
         value: 14,
-        max: 30,
-        valueLabel: "14 / 30",
+        valueLabel: "14",
       },
-      action: "Review the largest peaks first and ask centre staff what was happening at those times.",
-      evidenceLabel: "preschool-hour-slot-spike-v1",
     });
     expect(view.decisionSummary.items.every((item) => (
-      item.what.length > 0
-      && item.why.length > 0
-      && item.action.length > 0
-      && item.ifActed.length > 0
-      && item.ifIgnored.length > 0
-      && item.verification.length > 0
+      item.primaryMetric.valueLabel.length > 0
       && item.limitation.length > 0
-      && item.evidenceLabel.length > 0
+      && item.evidenceRefs.length > 0
     ))).toBe(true);
     expect(view.planningOutlook).toMatchObject({
       status: "provisional",
@@ -278,6 +270,9 @@ describe("Preschool Overview ViewModel", () => {
         businessCalendarVersion: snapshot.projectRelease.businessCalendarVersion,
       },
     };
+    snapshot.preschoolDecisionSignals!.items = snapshot.preschoolDecisionSignals!.items
+      .filter((item) => item.id === "efficiency")
+      .map((item) => ({ ...item, priority: 1 }));
 
     const view = buildPreschoolOverviewViewModel(snapshot);
     expect(view.operational).toEqual({
@@ -293,6 +288,9 @@ describe("Preschool Overview ViewModel", () => {
   it("does not calculate percentiles in the browser when the server projection is absent", () => {
     const snapshot = preschoolGoldenSnapshot();
     delete snapshot.preschoolBenchmark;
+    snapshot.preschoolDecisionSignals!.items = snapshot.preschoolDecisionSignals!.items
+      .filter((item) => item.id !== "efficiency")
+      .map((item, index) => ({ ...item, priority: (index + 1) as 1 | 2 | 3 }));
     const view = buildPreschoolOverviewViewModel(snapshot);
 
     expect(view.benchmark).toMatchObject({ status: "unavailable" });
@@ -316,6 +314,12 @@ describe("Preschool Overview ViewModel", () => {
   it("withholds all decision priorities when the Snapshot is partial", () => {
     const snapshot = preschoolGoldenSnapshot();
     snapshot.dataQuality.status = "partial";
+    snapshot.preschoolDecisionSignals = {
+      ...snapshot.preschoolDecisionSignals!,
+      status: "withheld",
+      reason: { code: "SNAPSHOT_INCOMPLETE", message: "Decision signals are withheld because the current Snapshot is not complete." },
+      items: [],
+    };
 
     const view = buildPreschoolOverviewViewModel(snapshot);
 
@@ -329,11 +333,12 @@ describe("Preschool Overview ViewModel", () => {
     const snapshot = preschoolGoldenSnapshot();
     delete snapshot.preschoolBenchmark;
     delete snapshot.preschoolOperational;
+    delete snapshot.preschoolDecisionSignals;
 
     const view = buildPreschoolOverviewViewModel(snapshot);
 
     expect(view.decisionSummary.items).toEqual([]);
-    expect(view.decisionSummary.detail).toContain("no available Benchmark or Operational exception projection");
+    expect(view.decisionSummary.detail).toContain("unavailable");
   });
 
   it("fails closed when the published Renderer key does not match", () => {

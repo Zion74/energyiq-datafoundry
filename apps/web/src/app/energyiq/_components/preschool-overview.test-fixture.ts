@@ -174,6 +174,67 @@ export function preschoolGoldenSnapshot(): EnergyProjectAnalysisSnapshotDto {
       importBatchIds: ["preschool-may-2026"],
       lastSeenAt: "2026-05-31T15:00:00.000Z",
     },
+    preschoolDecisionSignals: {
+      contract: { id: "preschool-decision-signals", version: "1" },
+      context: {
+        projectReleaseId: "legacy-profile:preschool-demo:1",
+        dataSnapshotId: "preschool-26b85b9c0b95e090",
+        period: {
+          start: "2026-04-30T16:00:00.000Z",
+          endExclusive: "2026-05-31T16:00:00.000Z",
+          timezone: "Asia/Singapore",
+        },
+      },
+      status: "available",
+      items: [
+        {
+          id: "after-hours",
+          kind: "after-hours-energy",
+          sectionId: "operating-behaviour",
+          priority: 1,
+          severity: "attention",
+          label: "Energy used after closing",
+          metrics: [
+            { id: "after-hours-share", label: "Share used after closing", metricId: "energy.off_hours_share_pct", value: 12.45, unit: "%", role: "primary", precision: 1, dimensions: { operatingState: "closed" } },
+            { id: "after-hours-energy", label: "Energy used after closing", metricId: "energy.off_hours_usage_kwh", value: 3_103.784, unit: "kWh", role: "supporting", precision: 2, dimensions: { operatingState: "closed" } },
+            { id: "after-hours-spikes", label: "Unusual closed-hour peaks", metricId: "preschool.operating.spike_count", value: 7, unit: "count", role: "supporting", precision: 0, dimensions: { operatingState: "closed" } },
+          ],
+          entities: ["L", "E", "N"].map((code) => ({ kind: "centre" as const, scopeId: centreByCode.get(code)!.scopeId, code, name: centreByCode.get(code)!.name })),
+          evidenceRefs: ["scope_summary_v1", "preschool_centre_hour_cells_v1", "preschool-hour-slot-spike-v1"],
+          limitations: [{ code: "CAUSE_NOT_OBSERVED", label: "Meter data shows when energy was used, not why equipment was running." }],
+        },
+        {
+          id: "efficiency",
+          kind: "normalised-peer-priority",
+          sectionId: "centre-benchmark",
+          priority: 2,
+          severity: "attention",
+          label: "High for both floor area and headcount",
+          metrics: [
+            { id: "priority-centres", label: "Centres above both Portfolio P75 lines", metricId: "preschool.benchmark.priority_count", value: 3, unit: "count", role: "primary", precision: 0, dimensions: { benchmark: "portfolio-p75" } },
+            { id: "benchmark-sample", label: "Centres compared", metricId: "preschool.benchmark.sample_size", value: 30, unit: "count", role: "supporting", precision: 0, dimensions: { benchmark: "portfolio" } },
+          ],
+          entities: ["G", "M", "J"].map((code) => ({ kind: "centre" as const, scopeId: centreByCode.get(code)!.scopeId, code, name: centreByCode.get(code)!.name })),
+          evidenceRefs: ["child_scope_breakdown_v1", "preschool-eui-benchmark-v1", "preschool-per-pax-benchmark-v1"],
+          limitations: [{ code: "PROVISIONAL_METADATA", label: "Floor area and headcount are provisional, so this is an investigation priority rather than proof of poor efficiency." }],
+        },
+        {
+          id: "operating",
+          kind: "operating-hour-spikes",
+          sectionId: "operating-behaviour",
+          priority: 3,
+          severity: "attention",
+          label: "Unusual peaks during opening hours",
+          metrics: [
+            { id: "operating-spike-centres", label: "Centres with unusual opening-hour peaks", metricId: "preschool.operating.centre_count", value: 14, unit: "count", role: "primary", precision: 0, dimensions: { operatingState: "open" } },
+            { id: "operating-spike-count", label: "Unusual opening-hour peaks", metricId: "preschool.operating.spike_count", value: 21, unit: "count", role: "supporting", precision: 0, dimensions: { operatingState: "open" } },
+          ],
+          entities: centreCodes.slice(0, 14).map((code) => ({ kind: "centre" as const, scopeId: centreByCode.get(code)!.scopeId, code, name: centreByCode.get(code)!.name })),
+          evidenceRefs: ["preschool_centre_hour_cells_v1", "preschool-hour-slot-spike-v1"],
+          limitations: [{ code: "ACTIVITY_NOT_OBSERVED", label: "Meter data cannot distinguish planned activity, manual override and equipment faults." }],
+        },
+      ],
+    },
     preschoolBenchmark: {
       status: "provisional",
       contract: {

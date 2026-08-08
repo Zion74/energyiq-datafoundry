@@ -8,7 +8,7 @@ import { PreschoolOverviewRenderer } from "./preschool-overview-renderer";
 import { preschoolGoldenSnapshot } from "./preschool-overview.test-fixture";
 
 describe("PreschoolOverviewRenderer reading flow", () => {
-  it("leads with a three-number overall summary, Centre Type breakdown and plain-language next steps", () => {
+  it("leads with a three-number overall summary, Centre Type breakdown and verified decision signals", () => {
     const markup = renderToStaticMarkup(
       <PreschoolOverviewRenderer state={{ status: "ready", snapshot: preschoolGoldenSnapshot() }} />,
     );
@@ -26,19 +26,19 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup).not.toContain("Average across the selected reporting window.");
     expect(markup).not.toContain("Centre rows returned by the authoritative Project analysis.");
     expect(markup).toContain('id="preschool-decision-summary"');
-    expect(markup).toContain("Key findings and next steps");
-    expect(markup).toContain("Centres L, E and N should be checked first for energy use after closing.");
-    expect(markup).toContain("Centres G, M and J use more energy than expected for both their floor area and number of people.");
-    expect(markup).toContain("14 centres had unusual energy peaks during opening hours.");
-    expect(markup).toContain("Why it matters");
-    expect(markup).toContain("What to do next");
-    expect(markup).toContain("How to check the result");
-    expect(markup).toContain("More detail and evidence");
+    expect(markup).toContain("Signals to investigate");
+    expect(markup).toContain("Energy used after closing");
+    expect(markup).toContain("Centres to review: <strong class=\"font-semibold text-foreground\">L · E · N</strong>");
+    expect(markup).toContain("High for both floor area and headcount");
+    expect(markup).toContain("Unusual peaks during opening hours");
+    expect(markup).toContain("Verified signal");
+    expect(markup).toContain("Limitation and evidence");
+    expect(markup).not.toContain("What to do next");
     expect(markup).toContain("June planning baseline");
     expect(markup).toContain("not an AI forecast or customer bill");
     expect(markup).toContain("View normalisation and evidence");
-    expect(markup.indexOf("Overall consumption summary")).toBeLessThan(markup.indexOf("Key findings and next steps"));
-    expect(markup.indexOf("Key findings and next steps")).toBeLessThan(markup.indexOf("Where energy goes"));
+    expect(markup.indexOf("Overall consumption summary")).toBeLessThan(markup.indexOf("Signals to investigate"));
+    expect(markup.indexOf("Signals to investigate")).toBeLessThan(markup.indexOf("Where energy goes"));
   });
 
   it("shows only the first five Centres by default and retains the remaining rows in disclosure", () => {
