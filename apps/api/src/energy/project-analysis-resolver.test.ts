@@ -674,6 +674,16 @@ describe("ProjectAnalysisResolver", () => {
         .filter((row) => row.dataHealth.status === "complete") ?? [];
       expect(completeProjectDays.length).toBeLessThan(28);
       expect(result.snapshot).not.toHaveProperty("preschoolBenchmark");
+      expect(result.snapshot.preschoolDecisionSignals).toMatchObject({
+        contract: { id: "preschool-decision-signals", version: "1" },
+        context: {
+          projectReleaseId: "legacy-profile:preschool-demo:1",
+          dataSnapshotId: preschoolSnapshot.id,
+        },
+        status: "withheld",
+        reason: { code: "SNAPSHOT_INCOMPLETE" },
+        items: [],
+      });
       expect(result.snapshot.preschoolOperational).toMatchObject({
         status: "unavailable",
         reason: { code: "PRESCHOOL_OPERATING_CALENDAR_UNAVAILABLE" },

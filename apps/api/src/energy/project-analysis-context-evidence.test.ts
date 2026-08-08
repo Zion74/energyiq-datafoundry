@@ -43,6 +43,18 @@ describe("ProjectAnalysisSnapshot Context Evidence catalog", () => {
         value: 120,
         dimensions: { calendarVersion: "calendar-current" },
       }),
+      expect.objectContaining({
+        id: "preschool.decision_signals.after-hours.after-hours-share",
+        metricId: "energy.off_hours_share_pct",
+        value: 12.5,
+        unit: "%",
+        evidenceRefs: ["evidence-current", "operational-query", "preschool-hour-slot-spike-v1"],
+        dimensions: expect.objectContaining({
+          signalId: "after-hours",
+          sectionId: "operating-behaviour",
+          centreCodes: "L,E",
+        }),
+      }),
     ]));
   });
 
@@ -177,5 +189,45 @@ const snapshot = (): ProjectAnalysisSnapshot => ({
     }],
     priorityCentreCodes: [],
     evidence: {} as never,
+  },
+  preschoolDecisionSignals: {
+    contract: { id: "preschool-decision-signals", version: "1" },
+    context: {
+      projectReleaseId: "release-current",
+      dataSnapshotId: "snapshot-current",
+      period: {
+        start: "2026-04-30T16:00:00.000Z",
+        endExclusive: "2026-05-31T16:00:00.000Z",
+        timezone: "Asia/Singapore",
+      },
+    },
+    status: "available",
+    items: [{
+      id: "after-hours",
+      kind: "after-hours-energy",
+      sectionId: "operating-behaviour",
+      priority: 1,
+      severity: "attention",
+      label: "Energy used after closing",
+      metrics: [{
+        id: "after-hours-share",
+        label: "Share used after closing",
+        metricId: "energy.off_hours_share_pct",
+        value: 12.5,
+        unit: "%",
+        role: "primary",
+        precision: 1,
+        dimensions: { operatingState: "closed" },
+      }],
+      entities: [
+        { kind: "centre", scopeId: "centre-l", code: "L", name: "Centre L" },
+        { kind: "centre", scopeId: "centre-e", code: "E", name: "Centre E" },
+      ],
+      evidenceRefs: ["operational-query", "preschool-hour-slot-spike-v1"],
+      limitations: [{
+        code: "CAUSE_NOT_OBSERVED",
+        label: "Meter data shows when energy was used, not why equipment was running.",
+      }],
+    }],
   },
 });

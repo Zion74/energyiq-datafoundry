@@ -22,6 +22,7 @@ export const createProjectAnalysisContextEvidenceCatalog = (
     addTopCircuitFacts(facts, snapshot, evidenceRefs);
     addOffHoursFacts(facts, snapshot, evidenceRefs);
     addPreschoolBenchmarkFacts(facts, snapshot, evidenceRefs);
+    addPreschoolDecisionSignalFacts(facts, snapshot, evidenceRefs);
   }
   return {
     contract: "analysis-context-evidence@1",
@@ -317,6 +318,39 @@ const addPreschoolBenchmarkFacts = (
       evidenceRefs: [...evidenceRefs],
       dimensions,
     });
+  }
+};
+
+const addPreschoolDecisionSignalFacts = (
+  target: AnalysisContextEvidenceFact[],
+  snapshot: ProjectAnalysisSnapshot,
+  evidenceRefs: string[],
+): void => {
+  const projection = snapshot.preschoolDecisionSignals;
+  if (!projection || projection.status !== "available") return;
+  const status = factStatus(snapshot);
+  for (const signal of projection.items) {
+    const centreCodes = signal.entities.map((entity) => entity.code).join(",");
+    const scopeIds = signal.entities.map((entity) => entity.scopeId).join(",");
+    const signalEvidenceRefs = [...new Set([...evidenceRefs, ...signal.evidenceRefs])];
+    for (const metric of signal.metrics) {
+      pushNumber(target, {
+        id: `preschool.decision_signals.${signal.id}.${metric.id}`,
+        label: metric.label,
+        metricId: metric.metricId,
+        value: metric.value,
+        unit: metric.unit,
+        status,
+        evidenceRefs: signalEvidenceRefs,
+        dimensions: {
+          ...metric.dimensions,
+          signalId: signal.id,
+          sectionId: signal.sectionId,
+          ...(centreCodes ? { centreCodes } : {}),
+          ...(scopeIds ? { scopeIds } : {}),
+        },
+      });
+    }
   }
 };
 

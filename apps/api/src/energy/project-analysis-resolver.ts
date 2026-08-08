@@ -47,6 +47,10 @@ import {
   type PreschoolOperationalProjection,
 } from "./preschool-operational-projection.js";
 import {
+  buildPreschoolDecisionSignals,
+  type PreschoolDecisionSignals,
+} from "./preschool-decision-signals.js";
+import {
   resolveEnergyAccessContext,
   resolveEnergyQueryContext,
   type EnergyQueryContext,
@@ -119,6 +123,7 @@ export type ProjectAnalysisSnapshot = {
   preschoolBenchmark?: PreschoolBenchmarkProjection;
   preschoolAppliances?: PreschoolApplianceProjection;
   preschoolOperational?: PreschoolOperationalProjection;
+  preschoolDecisionSignals?: PreschoolDecisionSignals;
   dataSnapshot: {
     id: string;
     importBatchIds: string[];
@@ -373,6 +378,21 @@ export const resolveProjectAnalysis = async (input: {
               databasePath: analysisDatabasePath,
             })
           : undefined;
+      const preschoolDecisionSignals = projectRelease.renderer.key === "preschool-overview"
+        && releasedContext.scopeId === input.metadataStore.energyIq.getProject(releasedContext.projectId).root_scope_id
+          ? buildPreschoolDecisionSignals({
+              projectReleaseId: projectRelease.id,
+              dataSnapshotId: analysis.provenance.dataSnapshotId,
+              period: {
+                ...snapshotContext.primaryPeriod,
+                timezone: releasedContext.timezone,
+              },
+              dataQualityStatus: analysis.dataHealth.status,
+              totalCentreCount: analysis.childScopes.length,
+              ...(preschoolBenchmark ? { benchmark: preschoolBenchmark } : {}),
+              ...(preschoolOperational ? { operational: preschoolOperational } : {}),
+            })
+          : undefined;
       const latestAvailablePeriod = scopeAnalysis.latestAvailablePeriod ?? null;
       return {
         status: "ready",
@@ -399,6 +419,7 @@ export const resolveProjectAnalysis = async (input: {
           ...(preschoolBenchmark ? { preschoolBenchmark } : {}),
           ...(preschoolAppliances ? { preschoolAppliances } : {}),
           ...(preschoolOperational ? { preschoolOperational } : {}),
+          ...(preschoolDecisionSignals ? { preschoolDecisionSignals } : {}),
           dataSnapshot: {
             id: analysis.provenance.dataSnapshotId,
             importBatchIds: analysis.dataHealth.importBatchIds,

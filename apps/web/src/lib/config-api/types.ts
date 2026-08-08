@@ -1513,6 +1513,41 @@ export type PreschoolApplianceProjectionDto = {
   };
 };
 
+export type PreschoolDecisionSignalsDto = {
+  contract: { id: "preschool-decision-signals"; version: "1" };
+  context: {
+    projectReleaseId: string;
+    dataSnapshotId: string;
+    period: { start: string; endExclusive: string; timezone: string };
+  };
+  status: "available" | "withheld";
+  reason?: { code: "SNAPSHOT_INCOMPLETE"; message: string };
+  items: Array<{
+    id: "after-hours" | "efficiency" | "operating";
+    kind: "after-hours-energy" | "normalised-peer-priority" | "operating-hour-spikes";
+    sectionId: "overall-summary" | "centre-benchmark" | "operating-behaviour" | "appliance-contribution" | "planning-outlook";
+    priority: 1 | 2 | 3;
+    severity: "attention";
+    label: string;
+    metrics: Array<{
+      id: string;
+      label: string;
+      metricId: string;
+      value: number;
+      unit: "kWh" | "%" | "count";
+      role: "primary" | "supporting";
+      precision: number;
+      dimensions: Record<string, string>;
+    }>;
+    entities: Array<{ kind: "centre"; scopeId: string; code: string; name: string }>;
+    evidenceRefs: string[];
+    limitations: Array<{
+      code: "CAUSE_NOT_OBSERVED" | "PROVISIONAL_METADATA" | "ACTIVITY_NOT_OBSERVED";
+      label: string;
+    }>;
+  }>;
+};
+
 export type EnergyProjectAnalysisSnapshotDto = {
   context: EnergyQueryContextDto & {
     primaryPeriod: {
@@ -1549,6 +1584,7 @@ export type EnergyProjectAnalysisSnapshotDto = {
   preschoolBenchmark?: PreschoolBenchmarkProjectionDto;
   preschoolAppliances?: PreschoolApplianceProjectionDto;
   preschoolOperational?: PreschoolOperationalProjectionDto;
+  preschoolDecisionSignals?: PreschoolDecisionSignalsDto;
 };
 
 export type EnergyProjectAnalysisResolutionDto =
