@@ -101,14 +101,14 @@ describe("Project Renderer Registry", () => {
     expect(preschoolMarkup).toContain("data-benchmark-p75-axis=\"per-pax\"");
     expect(preschoolMarkup.match(/data-benchmark-priority-label=/g)).toHaveLength(3);
     expect(preschoolMarkup).toContain("Annualised EUI (kWh/m²/yr) →");
-    expect(preschoolMarkup).toContain("↑ May per-pax (kWh/person)");
+    expect(preschoolMarkup).toContain("↑ Energy per person (kWh/person)");
     expect(preschoolMarkup.match(/data-benchmark-distribution=/g)).toHaveLength(2);
     expect(preschoolMarkup.match(/data-benchmark-lane=/g)).toHaveLength(6);
     expect(preschoolMarkup.match(/data-distribution-centre=/g)).toHaveLength(60);
     expect(preschoolMarkup).toContain("data-shared-axis=\"eui\"");
     expect(preschoolMarkup).toContain("data-shared-axis=\"per-pax\"");
-    expect(preschoolMarkup).toContain("Annualised May EUI estimate");
-    expect(preschoolMarkup).toContain("May energy per person");
+    expect(preschoolMarkup).toContain("Annualised EUI estimate");
+    expect(preschoolMarkup).toContain("Energy per person");
     expect(preschoolMarkup).toContain("Each dot is one Centre");
     expect(preschoolMarkup).toContain("Empirical distribution — not a fitted bell curve");
     expect(preschoolMarkup).toContain("Typical (P50)");

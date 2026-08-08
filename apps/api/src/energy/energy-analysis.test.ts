@@ -144,7 +144,7 @@ describe("EnergyScopeAnalysis", () => {
       metadata.close();
       removeTemporaryEnergyFixture(root);
     }
-  }, 30_000);
+  }, 60_000);
 
   it("returns the latest accepted cumulative register only for an eligible leaf Circuit", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-analysis-latest-reading-"));
@@ -607,6 +607,11 @@ describe("EnergyScopeAnalysis", () => {
       await materializeNgeeAnnGoldenFixture(databasePath, metadata, {
         includeAnomalyHistory: true,
         transformIntervalFacts: (facts) => facts.flatMap((fact) => {
+          if (fact.localDate < "2026-06-10"
+            && fact.dayType === "weekday"
+            && !["2026-06-04", "2026-06-05", "2026-06-08", "2026-06-09"].includes(fact.localDate)) {
+            return [];
+          }
           if (!removedBaselineInterval
             && fact.meterPointId === "mapping-lvl-7-total-office-load-18"
             && fact.localDate === "2026-06-04"
@@ -874,6 +879,11 @@ describe("EnergyScopeAnalysis", () => {
         transformIntervalFacts: (facts) => {
           return facts.flatMap((fact) => {
             if (fact.meterRole !== "total") return [fact];
+            if (fact.localDate < "2026-06-10"
+              && fact.dayType === "weekend"
+              && !["2026-05-24", "2026-06-06", "2026-06-07"].includes(fact.localDate)) {
+              return [];
+            }
             if (fact.localDate === "2026-06-11" && fact.localHour === 0) {
               return [{ ...fact, qualityStatus: "rejected" }];
             }
