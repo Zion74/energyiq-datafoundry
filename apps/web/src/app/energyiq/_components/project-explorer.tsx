@@ -1051,7 +1051,7 @@ function ProjectTree({
               onClick={() => onSelect(node.id)}
               style={{ paddingLeft: `${8 + depth * 18}px` }}
               className={[
-                "group flex min-h-9 w-full items-center gap-2 rounded-lg pr-2 text-left text-xs transition-colors",
+                "group flex min-h-9 w-full items-center gap-2 rounded-lg pr-2 text-left text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
                 selected ? "bg-primary text-white" : "text-muted hover:bg-surface-subtle hover:text-foreground",
               ].join(" ")}
             >

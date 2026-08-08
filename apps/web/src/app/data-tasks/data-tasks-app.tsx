@@ -4909,6 +4909,7 @@ function SessionListItem({
       id={`session-item-${session.id}`}
       role="button"
       tabIndex={0}
+      aria-current={active ? "page" : undefined}
       data-testid={`session-item-${session.id}`}
       onClick={onSelect}
       onKeyDown={(event) => {
@@ -4919,7 +4920,7 @@ function SessionListItem({
       }}
       title={session.title}
       className={[
-        "group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 transition-colors duration-150",
+        "group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
         active ? "bg-surface shadow-[var(--shadow-card)]" : "hover:bg-surface",
       ].join(" ")}
     >
@@ -5036,7 +5037,7 @@ function SessionPane({
               onClick={onToggleCollapse}
               title={collapsedRailCopy.expandLabel}
               aria-label={collapsedRailCopy.expandLabel}
-              className="energyiq-collapse-control flex cursor-pointer items-center justify-center rounded-lg border border-border bg-surface text-foreground shadow-[var(--shadow-card)] transition-colors duration-200 hover:bg-surface-subtle"
+              className="energyiq-collapse-control flex cursor-pointer items-center justify-center rounded-lg border border-border bg-surface text-foreground shadow-[var(--shadow-card)] transition-colors duration-200 hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
             >
               <SidebarToggleIcon />
             </button>
@@ -5222,7 +5223,7 @@ function SessionPaneContent({
             onClick={onToggleCollapse}
             title={preview ? t("sidebar.expandToSidebar") : t("sidebar.collapseToRail")}
             aria-label={preview ? t("sidebar.expandToSidebar") : t("sidebar.collapseToRail")}
-            className="energyiq-collapse-control flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-light transition-colors duration-200 hover:bg-surface hover:text-foreground"
+            className="energyiq-collapse-control flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-light transition-colors duration-200 hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
           >
             <SidebarToggleIcon />
           </button>
@@ -5241,7 +5242,7 @@ function SessionPaneContent({
             onClick={onToggleCollapse}
             title={preview ? t("sidebar.expandToSidebar") : t("sidebar.collapseToRail")}
             aria-label={preview ? t("sidebar.expandToSidebar") : t("sidebar.collapseToRail")}
-            className="energyiq-collapse-control flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-light transition-colors duration-200 hover:bg-surface-subtle hover:text-foreground"
+            className="energyiq-collapse-control flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-light transition-colors duration-200 hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
           >
             <SidebarToggleIcon />
           </button>

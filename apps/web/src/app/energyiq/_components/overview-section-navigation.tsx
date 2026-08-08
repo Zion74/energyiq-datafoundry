@@ -32,9 +32,9 @@ export function OverviewSectionNavigation({
               onClick={() => onSelect(section.id)}
               aria-current={active ? "location" : undefined}
               className={[
-                "flex min-h-10 shrink-0 items-center rounded-md px-3 py-2 text-ui-body font-medium transition-colors xl:w-full",
+                "flex min-h-10 shrink-0 items-center rounded-md px-3 py-2 text-ui-body font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 xl:w-full",
                 active
-                  ? "bg-primary text-white"
+                  ? "bg-surface-subtle text-foreground ring-1 ring-inset ring-border"
                   : "text-muted hover:bg-surface-subtle hover:text-foreground",
               ].join(" ")}
             >
