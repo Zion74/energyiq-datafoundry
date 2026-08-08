@@ -8,8 +8,8 @@ export type MessageTree = {
 
 export type TranslateFn = (key: string, params?: MessageParams) => string;
 
-export const LOCALE_STORAGE_KEY = "data-tasks:locale:v1";
+export const LOCALE_STORAGE_KEY = "energyiq:locale:v2";
 
-export const DEFAULT_LOCALE: Locale = "zh-CN";
+export const DEFAULT_LOCALE: Locale = "en";
 
 export const SUPPORTED_LOCALES: Locale[] = ["zh-CN", "en"];

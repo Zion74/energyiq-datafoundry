@@ -9,7 +9,6 @@ import {
 import {
   createModelProviderFromEnv,
   createModelProviderFromProfile,
-  probeModelProvider,
   resolveSkillCacheDir,
   resolveSessionWorkspaceDir,
   resolveWorkspaceDir,
@@ -29,6 +28,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
   artifactRecordToSummary,
+  WORKSPACE_DEFAULT_MODEL_PROFILE_ID,
   type ArtifactRecord,
   type CheckpointRecord,
   type ConfigResourceKind,
@@ -66,6 +66,9 @@ import {
   modelProfileTestFailureMessage,
   modelProfileTestSuccessReason
 } from "./model-profile-test.js";
+import { isEnergyIqOverviewSlotSessionId } from "./energy/energy-session-surface.js";
+import { sessionEnergyContextFromSnapshot } from "./energy/session-energy-context.js";
+import { probeModelProfileCapabilities } from "./model-profile-capability-test.js";
 import { handleCapabilitiesRequest } from "./routes/capabilities.js";
 import type { ConfigApiContext, ConfigApiResponse } from "./routes/types.js";
 import {
@@ -85,6 +88,12 @@ import { buildSessionTraceDag } from "./trace-dag.js";
 import { readMultipartFiles, readMultipartUpload } from "./upload-parser.js";
 import { knowledgeDocumentTextFromFile } from "./knowledge-document-text.js";
 import { resolveLiveSessionActiveRun } from "./stale-active-runs.js";
+import { handleEnergyApiRequest } from "./energy/energy-api.js";
+import {
+  handleWorkspaceDefaultModelProfileRequest,
+  workspaceDefaultModelProfileDto
+} from "./workspace-model-profile-api.js";
+import { workspaceDefaultModelProfileConfigured } from "./workspace-model-profile-resolver.js";
 
 const MAX_JSON_BODY_BYTES = 1024 * 1024;
 const DEFAULT_WORKSPACE_ID = "default";
@@ -174,6 +183,12 @@ const routeConfigRequest = async (
   if (root === "me") {
     return handleMeRequest(request, context);
   }
+  if (root === "energy") {
+    return handleEnergyApiRequest(request, segments.slice(1), context);
+  }
+  if (root === "workspace-default-model-profile") {
+    return handleWorkspaceDefaultModelProfileRequest(request, context);
+  }
   if (root === "dev") {
     return handleDevIdentityRequest(request, segments.slice(1), context);
   }
@@ -238,13 +253,28 @@ const routeConfigRequest = async (
   return fail(404, "RESOURCE_NOT_FOUND", `Unknown API resource: ${root}`);
 };
 
-const handleMeRequest = (
+const MAX_AVATAR_DATA_URL_LENGTH = 350_000;
+const AVATAR_DATA_URL_PATTERN = /^data:image\/(?:jpeg|png|webp);base64,[a-zA-Z0-9+/]+={0,2}$/u;
+
+const handleMeRequest = async (
   request: IncomingMessage,
   context: Required<ConfigApiContext>
-): ConfigApiResponse => {
-  if (request.method !== "GET") {
-    return methodNotAllowed();
+): Promise<ConfigApiResponse> => {
+  if (request.method === "PATCH") {
+    const body = await readJsonBody(request);
+    const displayName = sanitizeDisplayName(stringValue(body.displayName) ?? "");
+    const avatarUrl = sanitizeAvatarUrl(body.avatarUrl);
+    const user = context.metadataStore.users.updateProfile({
+      user_id: context.userId,
+      display_name: displayName,
+      avatar_url: avatarUrl
+    });
+    return ok({
+      user: devIdentityUserDto(user),
+      workspace: defaultWorkspaceDto(context.workspaceId)
+    });
   }
+  if (request.method !== "GET") return methodNotAllowed();
   const user = context.metadataStore.users.getById({ user_id: context.userId });
   return ok({
     user: devIdentityUserDto(user),
@@ -440,11 +470,21 @@ const handleSessionRequest = async (
     const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
     const limit = clampInteger(Number.parseInt(requestUrl.searchParams.get("limit") ?? "", 10), 1, 200, 50);
     const cursor = requestUrl.searchParams.get("cursor");
-    const records = context.metadataStore.sessions.list({
+    const projectId = requestUrl.searchParams.get("projectId")?.trim();
+    const listedRecords = context.metadataStore.sessions.list({
       user_id: context.userId,
       limit,
+      ...(projectId
+        ? {
+            workspace_id: context.workspaceId,
+            project_id: projectId
+          }
+        : {}),
       ...(cursor ? { cursor } : {})
     });
+    const records = projectId
+      ? listedRecords.filter((session) => !isEnergyIqOverviewSlotSessionId(session.id))
+      : listedRecords;
     return ok({
       sessions: records.map((session) =>
         sessionListDto(
@@ -457,7 +497,9 @@ const handleSessionRequest = async (
           })
         )
       ),
-      ...(records.length === limit ? { nextCursor: encodeSessionCursor(records.at(-1) as SessionRecord) } : {})
+      ...(listedRecords.length === limit
+        ? { nextCursor: encodeSessionCursor(listedRecords.at(-1) as SessionRecord) }
+        : {})
     });
   }
   if (!sessionId) {
@@ -625,6 +667,15 @@ const handleSessionRequest = async (
     userId: context.userId,
     sessionId
   });
+  const energyContext = latestVisibleSessionEnergyContext({
+    metadataStore: context.metadataStore,
+    userId: context.userId,
+    runIds: [...new Set([
+      ...[...messages].reverse().map((message) => message.run_id),
+      ...[...pendingInteractions].reverse().map((interaction) => interaction.run_id),
+      ...(latestSummary?.source_run_id ? [latestSummary.source_run_id] : [])
+    ])]
+  });
 
   return ok({
     sessionId,
@@ -642,8 +693,26 @@ const handleSessionRequest = async (
     restorableCustomEvents: runEventGroups.flatMap(({ runId, events }) =>
       restorableCustomEventDtos(runId, events)
     ),
-    ...(activeRun ? { activeRun: sessionActiveRunDto(activeRun) } : {})
+    ...(activeRun ? { activeRun: sessionActiveRunDto(activeRun) } : {}),
+    ...(energyContext ? { energyContext } : {})
   });
+};
+
+const latestVisibleSessionEnergyContext = (input: {
+  metadataStore: MetadataStore;
+  userId: string;
+  runIds: string[];
+}) => {
+  for (const runId of input.runIds) {
+    const snapshot = input.metadataStore.contextPackageSnapshots.latestByRun({
+      user_id: input.userId,
+      run_id: runId
+    });
+    if (!snapshot) continue;
+    const context = sessionEnergyContextFromSnapshot(snapshot);
+    if (context) return context;
+  }
+  return undefined;
 };
 
 const handleCheckpointRequest = async (
@@ -1554,10 +1623,13 @@ const handleGenericResourceRequest = async (
       });
     }
     if (kind === "model-profile") {
-      let probe: { model: string; text: string };
+      let tested: Awaited<ReturnType<typeof probeModelProfileCapabilities>>;
       try {
         const provider = resolveProfileProvider(resource, context);
-        probe = await probeModelProvider(provider, numberValue(resource.payload.timeoutMs) ?? 30000);
+        tested = await probeModelProfileCapabilities({
+          provider,
+          timeoutMs: numberValue(resource.payload.timeoutMs) ?? 30000
+        });
       } catch (error) {
         // Persist failed status best-effort; never let a revision race mask the probe reason.
         try {
@@ -1575,7 +1647,7 @@ const handleGenericResourceRequest = async (
       }
       const payload: Record<string, unknown> = {
         ...resource.payload,
-        capabilities: { reasoning: "unknown", toolCall: "untested" }
+        capabilities: tested.capabilities
       };
       if (resource.id === "server-default") {
         payload.llmEnvFingerprint = llmEnvFingerprint(process.env);
@@ -1587,14 +1659,15 @@ const handleGenericResourceRequest = async (
         payload
       });
       const reason = modelProfileTestSuccessReason({
-        model: probe.model,
-        response: probe.text
+        model: tested.connectivity.model,
+        response: tested.connectivity.text
       });
       return ok({
+        capabilities: tested.capabilities,
         id,
         latencyMs: Date.now() - startedAt,
-        model: probe.model,
-        response: probe.text,
+        model: tested.connectivity.model,
+        response: tested.connectivity.text,
         reason,
         status: "connected",
         revision: updated.revision
@@ -1681,6 +1754,9 @@ const saveConfigResourceInTransaction = (
   kind: ConfigResourceKind,
   context: Required<ConfigApiContext>
 ): Record<string, unknown> => {
+  if (kind === "model-profile" && id === WORKSPACE_DEFAULT_MODEL_PROFILE_ID) {
+    throw new Error("WORKSPACE_DEFAULT_MODEL_PROFILE_ID_RESERVED");
+  }
   const current = context.metadataStore.configResources.find({
     id,
     workspace_id: context.workspaceId,
@@ -2438,6 +2514,8 @@ const sessionListDto = (
 ): Record<string, unknown> => ({
   id: session.id,
   threadId: session.id,
+  ...(session.workspace_id ? { workspaceId: session.workspace_id } : {}),
+  ...(session.project_id ? { projectId: session.project_id } : {}),
   title: session.title ?? "",
   titleSource: session.title_source ?? "fallback",
   createdAt: session.created_at,
@@ -3544,7 +3622,7 @@ const buildWorkspaceConfig = (context: Required<ConfigApiContext>): Record<strin
   datasources: context.metadataStore.dataSources.list({ user_id: context.userId }).map(dataSourceDto),
   knowledgeBases: listConfig(context, "knowledge-base"),
   mcpServers: listConfig(context, "mcp-server"),
-  modelProfiles: listConfig(context, "model-profile"),
+  modelProfiles: workspaceModelProfiles(context),
   skills: listConfig(context, "skill")
 });
 
@@ -3565,7 +3643,9 @@ const buildRunDefaults = (context: Required<ConfigApiContext>): Record<string, u
     enabledMcpServerIds: enabled("mcp-server").map((item) => item.id),
     enabledSkillIds: enabled("skill").map((item) => item.id),
     ...(datasourceIds[0] ? { activeDatasourceId: datasourceIds[0] } : {}),
-    activeLlmProfileId: preferConnectedResourceId(modelProfiles),
+    activeLlmProfileId: workspaceDefaultModelProfileConfigured(context.metadataStore, context.workspaceId)
+      ? WORKSPACE_DEFAULT_MODEL_PROFILE_ID
+      : preferConnectedResourceId(modelProfiles),
     activeSkillId: enabled("skill")[0]?.id
   };
 };
@@ -3577,10 +3657,21 @@ const listConfig = (context: Required<ConfigApiContext>, kind: ConfigResourceKin
     kind
   }).map(configResourceDto);
 
+const workspaceModelProfiles = (context: Required<ConfigApiContext>): Record<string, unknown>[] => {
+  const own = listConfig(context, "model-profile")
+    .filter((item) => item.id !== WORKSPACE_DEFAULT_MODEL_PROFILE_ID);
+  const shared = workspaceDefaultModelProfileDto({
+    context,
+    isAdmin: context.metadataStore.energyIq.findUserRole(context.userId)?.role === "admin"
+  });
+  return shared.configured === true ? [shared, ...own] : own;
+};
+
 const devIdentityUserDto = (user: UserRecord): Record<string, unknown> => ({
   id: user.id,
   ...(user.email ? { email: user.email } : {}),
   ...(user.display_name ? { displayName: user.display_name } : {}),
+  ...(user.avatar_url ? { avatarUrl: user.avatar_url } : {}),
   ...(user.dev_token ? { devToken: user.dev_token } : {})
 });
 
@@ -3603,6 +3694,17 @@ const sanitizeDisplayName = (value: string): string => {
     throw new Error("DEV_USER_DISPLAY_NAME_REQUIRED");
   }
   return normalized.slice(0, 80);
+};
+
+const sanitizeAvatarUrl = (value: unknown): string | null => {
+  if (value === null || value === "" || value === undefined) return null;
+  if (typeof value !== "string" || value.length > MAX_AVATAR_DATA_URL_LENGTH) {
+    throw new Error("INVALID_AVATAR_SIZE");
+  }
+  if (!AVATAR_DATA_URL_PATTERN.test(value)) {
+    throw new Error("INVALID_AVATAR_FORMAT");
+  }
+  return value;
 };
 
 const sanitizeOptionalEmail = (value: string | undefined, id: string): string => {
@@ -3852,6 +3954,9 @@ const errorResponse = (error: unknown): ConfigApiResponse => {
   if (message.startsWith("REVISION_CONFLICT")) {
     return fail(409, "REVISION_CONFLICT", message);
   }
+  if (message.includes("FORBIDDEN") || message.includes("ADMIN_REQUIRED")) {
+    return fail(403, "FORBIDDEN", message);
+  }
   if (message.startsWith("RUN_NOT_BRANCHABLE")) {
     return fail(409, "RUN_NOT_BRANCHABLE", message);
   }
@@ -3899,6 +4004,9 @@ const errorResponse = (error: unknown): ConfigApiResponse => {
   }
   if (message.startsWith("PROVIDER_") || message.startsWith("MODEL_FALLBACK")) {
     return fail(422, "PROVIDER_TEST_FAILED", message);
+  }
+  if (message.startsWith("WORKSPACE_DEFAULT_MODEL_")) {
+    return fail(422, "BAD_REQUEST", message);
   }
   if (message.startsWith("BUILTIN_RESOURCE_READONLY") || message.startsWith("SECRET_OWNER_MISMATCH")) {
     return fail(409, "CONFLICT", message);

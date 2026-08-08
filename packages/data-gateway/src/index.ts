@@ -72,8 +72,41 @@ import type {
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type {
+  EnergySnapshotGuardScope,
+} from "./energy-snapshot-guard.js";
 
 export { createDemoDuckDbConfig, demoDuckDbPath } from "./demo-duckdb.js";
+export {
+  assertEnergyCurrentSnapshotFacts,
+  ensureEnergyScopedDataSource,
+  prepareEnergyScopedDataSource,
+  readEnergyFactCoverage,
+  registerPreparedEnergyScopedDataSource,
+  resolveEnergyFactStorePath,
+  type EnergyFactCoverage,
+  type EnergyPreparedScopedDataSource,
+  type EnergyScopedDataSource,
+  type EnergyScopedDataSourceContext,
+  type EnergyScopedScopeDimension
+} from "./energy-scoped-datasource.js";
+export {
+  ENERGY_FACT_WRITER_CONTRACT_VERSION,
+  probeEnergyFactProjectStateForMaterialization,
+  readEnergyFactProjectAudit,
+  readEnergyFactProjectState,
+  readEnergyFactMaterializationStats,
+  writeEnergyFactProjectMaterialization,
+  type EnergyFactMaterializationBatchWrite,
+  type EnergyFactProjectAudit,
+  type EnergyFactProjectMaterializationResult,
+  type EnergyFactProjectMaterializationWrite,
+  type EnergyFactProjectState,
+  type EnergyIntervalFactWrite,
+  type EnergyNormalizedReadingWrite,
+  type EnergyQualityEventWrite,
+  type EnergyRawReadingWrite,
+} from "./energy-fact-writer.js";
 
 export type {
   AdapterExecutionInput,
@@ -228,15 +261,26 @@ export class LocalDataGateway implements DataGateway {
     try {
       const workspaceId = input.workspace_id ?? this.policy.workspaceId ?? "default";
       const adapter = this.createAdapter(dataSource, workspaceId);
-      const result = await withTimeout(
-        adapter.runSqlReadonly({
+      const executionController = new AbortController();
+      const forwardAbort = (): void => executionController.abort(abortReason(input.signal));
+      input.signal?.addEventListener("abort", forwardAbort, { once: true });
+      let result: TableResult;
+      try {
+        const execution = adapter.runSqlReadonly({
           sql: guard.normalized_sql,
           limit,
-          signal: input.signal
-        }),
-        timeoutMs,
-        input.signal
-      );
+          signal: executionController.signal
+        });
+        result = await withTimeout(
+          execution,
+          timeoutMs,
+          input.signal,
+          (error) => executionController.abort(error),
+          adapter instanceof DuckDbAdapter,
+        );
+      } finally {
+        input.signal?.removeEventListener("abort", forwardAbort);
+      }
       const maskedResult = normalizeTableResult(maskTableResult(result, resourcePolicy.maskFields));
       const elapsedMs = Date.now() - startedAt;
       const audit = this.metadataStore.sqlAuditLogs.create({
@@ -299,6 +343,21 @@ export class LocalDataGateway implements DataGateway {
       }
       throw error;
     }
+  }
+
+  async withEnergySnapshotReadSession<T>(input: {
+    user_id: string;
+    workspace_id: string;
+    datasource_id: string;
+  }, execute: (scope: EnergySnapshotGuardScope) => Promise<T>): Promise<T> {
+    const adapter = this.createAdapter(this.metadataStore.dataSources.get({
+      user_id: input.user_id,
+      datasource_id: input.datasource_id,
+    }), input.workspace_id);
+    if (!(adapter instanceof DuckDbAdapter)) {
+      throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+    }
+    return await adapter.withEnergySnapshotReadSession(execute);
   }
 
   async createArtifact(input: CreateArtifactInput): Promise<ArtifactSummary> {
@@ -557,14 +616,20 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 const withTimeout = async <T>(
   promise: Promise<T>,
   timeoutMs: number,
-  signal?: AbortSignal | undefined
+  signal?: AbortSignal | undefined,
+  onTimeout?: (error: Error) => void,
+  detachSettlementAfterInterruption = false,
 ): Promise<T> => {
   throwIfAborted(signal);
   let timer: ReturnType<typeof setTimeout> | undefined;
   let abortListener: (() => void) | undefined;
   try {
     const timeout = new Promise<T>((_, reject) => {
-      timer = setTimeout(() => reject(new Error("SQL_TIMEOUT")), timeoutMs);
+      timer = setTimeout(() => {
+        const error = new Error("SQL_TIMEOUT");
+        onTimeout?.(error);
+        reject(error);
+      }, timeoutMs);
     });
     const aborted = signal
       ? new Promise<T>((_, reject) => {
@@ -572,7 +637,15 @@ const withTimeout = async <T>(
           signal.addEventListener("abort", abortListener, { once: true });
         })
       : undefined;
-    return await Promise.race(aborted ? [promise, timeout, aborted] : [promise, timeout]);
+    try {
+      return await Promise.race(aborted ? [promise, timeout, aborted] : [promise, timeout]);
+    } catch (error) {
+      if (detachSettlementAfterInterruption
+        && (signal?.aborted || (error instanceof Error && error.message === "SQL_TIMEOUT"))) {
+        void promise.catch(() => undefined);
+      }
+      throw error;
+    }
   } finally {
     if (timer) {
       clearTimeout(timer);
@@ -582,6 +655,9 @@ const withTimeout = async <T>(
     }
   }
 };
+
+const abortReason = (signal?: AbortSignal): Error =>
+  signal?.reason instanceof Error ? signal.reason : new Error("RUN_CANCELLED");
 
 const throwIfAborted = (signal?: AbortSignal | undefined): void => {
   if (signal?.aborted) {

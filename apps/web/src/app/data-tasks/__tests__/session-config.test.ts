@@ -3,10 +3,13 @@ import {
   applyAutoTitle,
   createChatSession,
   dedupeChatSessions,
+  dataTaskRuntimeHeaders,
+  dataTaskSessionScopeKey,
   deleteChatSession,
   deriveSnippetTitle,
   emptyPerRunSelection,
   getSessionDisabled,
+  isEnergyIqOverviewSlotSessionId,
   loadActiveLlmId,
   loadChatSessions,
   mergeServerChatSessions,
@@ -149,6 +152,8 @@ describe("session config disabled map", () => {
     const session = serverSessionDtoToChatSession({
       id: "thread-1",
       threadId: "thread-1",
+      workspaceId: "workspace-1",
+      projectId: "project-1",
       title: "渠道订单分析",
       titleSource: "llm",
       createdAt: "2026-06-27T10:00:00.000Z",
@@ -159,12 +164,48 @@ describe("session config disabled map", () => {
     expect(session).toMatchObject({
       id: "thread-1",
       threadId: "thread-1",
+      workspaceId: "workspace-1",
+      projectId: "project-1",
       title: "渠道订单分析",
       titleSource: "llm",
     });
     expect(session.createdAt).toBe(new Date("2026-06-27T10:00:00.000Z").getTime());
     expect(session.updatedAt).toBe(new Date("2026-06-27T10:05:00.000Z").getTime());
     expect(session.lastMessageAt).toBe(new Date("2026-06-27T10:04:00.000Z").getTime());
+  });
+
+  it("separates EnergyIQ conversations by Workspace and Project", () => {
+    expect(dataTaskSessionScopeKey("user-1", {
+      workspaceId: "workspace-a",
+      projectId: "project-a",
+    })).toBe("user-1:energyiq:workspace-a:project-a");
+    expect(dataTaskSessionScopeKey("user-1", {
+      workspaceId: "workspace-a",
+      projectId: "project-b",
+    })).toBe("user-1:energyiq:workspace-a:project-b");
+    expect(dataTaskSessionScopeKey("user-1")).toBe("user-1");
+  });
+
+  it("runs an EnergyIQ conversation in the selected Workspace", () => {
+    expect(dataTaskRuntimeHeaders(
+      { Authorization: "Bearer dev-token", "X-Workspace-Id": "default" },
+      { workspaceId: "preschool-demo-org" },
+    )).toEqual({
+      Authorization: "Bearer dev-token",
+      "X-Workspace-Id": "preschool-demo-org",
+    });
+    expect(dataTaskRuntimeHeaders({ Authorization: "Bearer dev-token" })).toEqual({
+      Authorization: "Bearer dev-token",
+    });
+  });
+
+  it("recognises internal Overview Slot sessions", () => {
+    expect(isEnergyIqOverviewSlotSessionId(
+      "energyiq-overview-slot-preschool-portfolio-1234",
+    )).toBe(true);
+    expect(isEnergyIqOverviewSlotSessionId("ngee-ann-overview-1234")).toBe(true);
+    expect(isEnergyIqOverviewSlotSessionId("preschool-overview-1234")).toBe(true);
+    expect(isEnergyIqOverviewSlotSessionId("58b8bcf4-analyst-session")).toBe(false);
   });
 
   it("merges server sessions with local pinned metadata", () => {

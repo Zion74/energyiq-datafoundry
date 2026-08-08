@@ -18,7 +18,7 @@ export const createMastraStreamNormalizerHooks = (
     onWorkspaceMetadata?: (metadata: unknown) => Promise<void> | void;
   } = {},
 ): MastraStreamNormalizerHooks => {
-  const emittedStepUsageKeys = new Set<string>();
+  let previousEmittedUsage: { key: string; chunkType: string } | undefined;
   let completedSteps = 0;
 
   return {
@@ -45,10 +45,16 @@ export const createMastraStreamNormalizerHooks = (
         String(usageEvent.output_tokens ?? 0),
         stringValue(usageEvent.model) ?? "",
       ].join("|");
-      if (emittedStepUsageKeys.has(dedupeKey)) {
+      // Mastra versions may emit both aliases for one completed step. Only collapse
+      // the adjacent cross-alias duplicate; a later real step is allowed to have
+      // exactly the same token counts and tool metadata.
+      if (
+        previousEmittedUsage?.key === dedupeKey
+        && previousEmittedUsage.chunkType !== type
+      ) {
         return;
       }
-      emittedStepUsageKeys.add(dedupeKey);
+      previousEmittedUsage = { key: dedupeKey, chunkType: type };
 
       completedSteps += 1;
       usageEvent.step_number = completedSteps;
@@ -109,6 +115,7 @@ export const tokenUsageEventFromChunk = (
     context.stepNumber ??
     numericValue(chunk.stepNumber) ??
     numericValue(payload?.stepNumber);
+  const cacheUsage = cacheUsageFromRecord(usage);
 
   return {
     input_tokens: inputTokens ?? 0,
@@ -118,6 +125,10 @@ export const tokenUsageEventFromChunk = (
     ...(tokenCount(usage.totalTokens) !== undefined
       ? { total_tokens: tokenCount(usage.totalTokens) }
       : {}),
+    cache_telemetry_available: cacheUsage.available,
+    ...(cacheUsage.hitTokens !== undefined ? { cache_hit_tokens: cacheUsage.hitTokens } : {}),
+    ...(cacheUsage.missTokens !== undefined ? { cache_miss_tokens: cacheUsage.missTokens } : {}),
+    ...(cacheUsage.hitRatio !== undefined ? { cache_hit_ratio: cacheUsage.hitRatio } : {}),
     ...(stepNumber !== undefined ? { step_number: stepNumber } : {}),
     ...(toolCallId ? { tool_call_id: toolCallId } : {}),
     ...(toolName ? { tool_name: toolName } : {}),
@@ -125,6 +136,54 @@ export const tokenUsageEventFromChunk = (
     ...(typeof chunk.runId === "string" ? { run_id: chunk.runId } : {}),
     ...(typeof chunk.from === "string" ? { source: chunk.from } : {}),
   };
+};
+
+const cacheUsageFromRecord = (usage: Record<string, unknown>): {
+  available: boolean;
+  hitTokens?: number;
+  missTokens?: number;
+  hitRatio?: number;
+} => {
+  const inputDetails = usageRecord(usage.inputTokenDetails)
+    ?? usageRecord(usage.input_token_details)
+    ?? usageRecord(usage.promptTokensDetails)
+    ?? usageRecord(usage.prompt_tokens_details);
+  const hitTokens = firstTokenCount([
+    usage.promptCacheHitTokens,
+    usage.prompt_cache_hit_tokens,
+    usage.cachedInputTokens,
+    usage.cached_input_tokens,
+    inputDetails?.cacheRead,
+    inputDetails?.cache_read,
+    inputDetails?.cachedTokens,
+    inputDetails?.cached_tokens
+  ]);
+  const missTokens = firstTokenCount([
+    usage.promptCacheMissTokens,
+    usage.prompt_cache_miss_tokens,
+    inputDetails?.cacheWrite,
+    inputDetails?.cache_write,
+    inputDetails?.cacheMiss,
+    inputDetails?.cache_miss
+  ]);
+  const available = hitTokens !== undefined || missTokens !== undefined;
+  const total = (hitTokens ?? 0) + (missTokens ?? 0);
+  return {
+    available,
+    ...(hitTokens !== undefined ? { hitTokens } : {}),
+    ...(missTokens !== undefined ? { missTokens } : {}),
+    ...(hitTokens !== undefined && missTokens !== undefined && total > 0
+      ? { hitRatio: hitTokens / total }
+      : {})
+  };
+};
+
+const firstTokenCount = (values: unknown[]): number | undefined => {
+  for (const value of values) {
+    const count = tokenCount(value);
+    if (count !== undefined) return count;
+  }
+  return undefined;
 };
 
 const usageRecord = (value: unknown): Record<string, unknown> | undefined =>

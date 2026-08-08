@@ -8,6 +8,25 @@ import type {
 } from "../types.js";
 import { DatabaseSync } from "node:sqlite";
 import type * as DuckDbModule from "duckdb";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { resolve } from "node:path";
+import { getDuckDbDatabase, openDuckDbDatabase } from "../duckdb-database-cache.js";
+import {
+  assertEnergySnapshotReceipt,
+  energySnapshotGuardSql,
+  type EnergySnapshotGuardScope,
+  type EnergySnapshotIdentityScope,
+} from "../energy-snapshot-guard.js";
+
+type EnergySnapshotReadSessionState = {
+  connection: DuckDbModule.Connection;
+  databasePath: string;
+  detachCleanup: boolean;
+  scope: EnergySnapshotGuardScope;
+  tail: Promise<void>;
+};
+
+const energySnapshotReadSession = new AsyncLocalStorage<EnergySnapshotReadSessionState>();
 
 export class SQLiteAdapter implements DataSourceAdapter {
   constructor(private readonly config: Record<string, unknown>) {}
@@ -73,6 +92,8 @@ export class SQLiteAdapter implements DataSourceAdapter {
 }
 
 export class DuckDbAdapter implements DataSourceAdapter {
+  private memoryDatabase: Promise<DuckDbModule.Database> | undefined;
+
   constructor(private readonly config: Record<string, unknown>) {}
 
   async inspectSchema(input: AdapterExecutionInput = {}): Promise<Omit<SchemaSummary, "datasource_id">> {
@@ -99,38 +120,257 @@ export class DuckDbAdapter implements DataSourceAdapter {
     return rowsToTableResult(await this.query(applyStandardLimit(input.sql, input.limit), input.signal));
   }
 
+  async withEnergySnapshotReadSession<T>(execute: (scope: EnergySnapshotGuardScope) => Promise<T>): Promise<T> {
+    const databasePath = normalizeDuckDbPath(stringConfig(this.config, "path"));
+    const expectedScope = energySnapshotIdentityScope(this.config.energyQueryScope);
+    if (!expectedScope) throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+    const existing = energySnapshotReadSession.getStore();
+    if (existing) {
+      assertSameEnergySnapshotSession(existing, databasePath, expectedScope);
+      return await execute(existing.scope);
+    }
+    const database = await this.database(databasePath);
+    const connection = database.connect();
+    let session: EnergySnapshotReadSessionState | undefined;
+    try {
+      await duckDbAll(connection, "BEGIN TRANSACTION");
+      const scope = await readEnergySnapshotStateReceipt(connection, expectedScope);
+      session = {
+        connection,
+        databasePath,
+        detachCleanup: false,
+        scope,
+        tail: Promise.resolve(),
+      };
+      return await energySnapshotReadSession.run(session, () => execute(scope));
+    } finally {
+      const cleanup = async (): Promise<void> => {
+        await session?.tail.catch(() => undefined);
+        await duckDbAll(connection, "ROLLBACK").catch(() => undefined);
+        await duckDbClose(connection).catch(ignoreAlreadyClosed);
+      };
+      if (session?.detachCleanup) {
+        void cleanup().catch(() => undefined);
+      } else {
+        await cleanup();
+      }
+    }
+  }
+
   private async query(sql: string, signal?: AbortSignal | undefined): Promise<Record<string, unknown>[]> {
-    const duckdb = await loadDuckDb();
-    const database = new duckdb.Database(stringConfig(this.config, "path"));
+    const databasePath = normalizeDuckDbPath(stringConfig(this.config, "path"));
+    const snapshotScope = energySnapshotScope(this.config.energyQueryScope);
+    const session = energySnapshotReadSession.getStore();
+    if (session) {
+      if (!snapshotScope) throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+      assertSameEnergySnapshotSession(session, databasePath, snapshotScope);
+      const prior = session.tail;
+      let started = false;
+      const markDetachedCleanup = (): void => {
+        if (isSessionInterruption(signal?.reason)) session.detachCleanup = true;
+      };
+      signal?.addEventListener("abort", markDetachedCleanup, { once: true });
+      if (signal?.aborted) markDetachedCleanup();
+      const completion = prior.then(async () => {
+        started = true;
+        throwIfAborted(signal);
+        return await duckDbAll(session.connection, sql, signal);
+      });
+      void completion.then(
+        () => signal?.removeEventListener("abort", markDetachedCleanup),
+        () => signal?.removeEventListener("abort", markDetachedCleanup),
+      );
+      session.tail = completion.then(() => undefined, () => undefined);
+      return (await rejectIfAbortedWhileQueued(completion, signal, () => started)).filter(isRecord);
+    }
+    const database = await this.database(databasePath);
     const connection = database.connect();
     try {
+      if (snapshotScope) {
+        await duckDbAll(connection, "BEGIN TRANSACTION", signal);
+        await assertEnergySnapshotState(connection, snapshotScope, signal);
+      }
       const rows = await duckDbAll(connection, sql, signal);
       return rows.filter(isRecord);
     } finally {
-      await duckDbClose(connection);
-      await duckDbCloseDatabase(database);
+      if (snapshotScope) await duckDbAll(connection, "ROLLBACK").catch(() => undefined);
+      await duckDbClose(connection).catch(ignoreAlreadyClosed);
     }
+  }
+
+  private async database(databasePath: string): Promise<DuckDbModule.Database> {
+    if (databasePath !== ":memory:") return await getDuckDbDatabase(databasePath);
+    this.memoryDatabase ??= openDuckDbDatabase(databasePath);
+    return await this.memoryDatabase;
   }
 }
 
-const loadDuckDb = async (): Promise<typeof DuckDbModule> => {
-  const loaded = await import("duckdb") as unknown as { default?: typeof DuckDbModule } & typeof DuckDbModule;
-  return loaded.default ?? loaded;
+const energySnapshotScope = (value: unknown): EnergySnapshotGuardScope | undefined => {
+  if (!isRecord(value)) return undefined;
+  const sourceSha256 = value.sourceSha256;
+  if (typeof value.workspaceId !== "string"
+    || typeof value.projectId !== "string"
+    || typeof value.dataSnapshotId !== "string"
+    || typeof value.manifestFingerprint !== "string"
+    || typeof value.factWriterContractVersion !== "string"
+    || typeof value.canonicalIntervalCount !== "number"
+    || !Number.isSafeInteger(value.canonicalIntervalCount)
+    || value.canonicalIntervalCount < 0
+    || typeof value.canonicalIntervalDigest !== "string"
+    || !/^[a-f0-9]{64}$/u.test(value.canonicalIntervalDigest)
+    || !Array.isArray(sourceSha256)
+    || !sourceSha256.every((source) => typeof source === "string")) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+  return {
+    workspaceId: value.workspaceId,
+    projectId: value.projectId,
+    dataSnapshotId: value.dataSnapshotId,
+    manifestFingerprint: value.manifestFingerprint,
+    sourceSha256,
+    factWriterContractVersion: value.factWriterContractVersion,
+    canonicalIntervalCount: value.canonicalIntervalCount,
+    canonicalIntervalDigest: value.canonicalIntervalDigest,
+  };
+};
+
+const energySnapshotIdentityScope = (value: unknown): EnergySnapshotIdentityScope | undefined => {
+  if (!isRecord(value)) return undefined;
+  const sourceSha256 = value.sourceSha256;
+  if (typeof value.workspaceId !== "string"
+    || typeof value.projectId !== "string"
+    || typeof value.dataSnapshotId !== "string"
+    || typeof value.manifestFingerprint !== "string"
+    || typeof value.factWriterContractVersion !== "string"
+    || !Array.isArray(sourceSha256)
+    || !sourceSha256.every((source) => typeof source === "string")) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+  return {
+    workspaceId: value.workspaceId,
+    projectId: value.projectId,
+    dataSnapshotId: value.dataSnapshotId,
+    manifestFingerprint: value.manifestFingerprint,
+    sourceSha256,
+    factWriterContractVersion: value.factWriterContractVersion,
+  };
+};
+
+const assertSameEnergySnapshotSession = (
+  session: EnergySnapshotReadSessionState,
+  databasePath: string,
+  scope: EnergySnapshotIdentityScope,
+): void => {
+  if (session.databasePath !== databasePath) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+  assertEnergySnapshotReceipt(scope, session.scope);
+};
+
+const assertEnergySnapshotState = async (
+  connection: DuckDbModule.Connection,
+  scope: EnergySnapshotGuardScope,
+  signal?: AbortSignal,
+): Promise<void> => {
+  await duckDbAll(connection, `SELECT ${energySnapshotGuardSql(scope)} AS snapshot_valid`, signal);
+};
+
+const readEnergySnapshotStateReceipt = async (
+  connection: DuckDbModule.Connection,
+  expected: EnergySnapshotIdentityScope,
+): Promise<EnergySnapshotGuardScope> => {
+  let rows: DuckDbModule.TableData;
+  try {
+    rows = await duckDbAll(connection, `
+      SELECT workspace_id, project_id, data_snapshot_id, manifest_fingerprint,
+        source_sha256_json, fact_writer_contract_version,
+        canonical_interval_count, canonical_interval_digest
+      FROM energy_project_fact_state
+      WHERE project_id = ${sqlLiteral(expected.projectId)}
+    `);
+  } catch {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+  if (rows.length !== 1 || !isRecord(rows[0])) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+  const row = rows[0];
+  let sourceSha256: unknown;
+  try {
+    sourceSha256 = JSON.parse(String(row.source_sha256_json));
+  } catch {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+  const canonicalIntervalCount = Number(row.canonical_interval_count);
+  const canonicalIntervalDigest = String(row.canonical_interval_digest);
+  if (!Array.isArray(sourceSha256)
+    || !sourceSha256.every((value) => typeof value === "string")
+    || !Number.isSafeInteger(canonicalIntervalCount)
+    || canonicalIntervalCount < 0
+    || !/^[a-f0-9]{64}$/u.test(canonicalIntervalDigest)) {
+    throw new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE");
+  }
+  const actual: EnergySnapshotGuardScope = {
+    workspaceId: String(row.workspace_id),
+    projectId: String(row.project_id),
+    dataSnapshotId: String(row.data_snapshot_id),
+    manifestFingerprint: String(row.manifest_fingerprint),
+    sourceSha256,
+    factWriterContractVersion: String(row.fact_writer_contract_version),
+    canonicalIntervalCount,
+    canonicalIntervalDigest,
+  };
+  assertEnergySnapshotReceipt(expected, actual);
+  return actual;
+};
+
+const normalizeDuckDbPath = (databasePath: string): string =>
+  databasePath === ":memory:" ? databasePath : resolve(databasePath);
+
+const rejectIfAbortedWhileQueued = async <T>(
+  completion: Promise<T>,
+  signal: AbortSignal | undefined,
+  hasStarted: () => boolean,
+): Promise<T> => {
+  if (!signal) return await completion;
+  throwIfAborted(signal);
+  let abortListener: (() => void) | undefined;
+  const aborted = new Promise<T>((_, reject) => {
+    abortListener = () => {
+      if (!hasStarted()) reject(abortReason(signal));
+    };
+    signal.addEventListener("abort", abortListener, { once: true });
+    if (signal.aborted) abortListener();
+  });
+  try {
+    return await Promise.race([completion, aborted]);
+  } finally {
+    if (abortListener) signal.removeEventListener("abort", abortListener);
+  }
 };
 
 const duckDbAll = async (
   connection: DuckDbModule.Connection,
   sql: string,
-  signal?: AbortSignal | undefined
+  signal?: AbortSignal | undefined,
 ): Promise<DuckDbModule.TableData> =>
   await new Promise((resolve, reject) => {
+    throwIfAborted(signal);
+    let aborted: Error | undefined;
     const abort = (): void => {
-      reject(signal?.reason instanceof Error ? signal.reason : new Error("RUN_CANCELLED"));
+      aborted = abortReason(signal);
     };
     signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) {
+      signal.removeEventListener("abort", abort);
+      reject(abortReason(signal));
+      return;
+    }
     connection.all(sql, (error, rows) => {
       signal?.removeEventListener("abort", abort);
-      if (error) {
+      if (aborted) {
+        reject(aborted);
+      } else if (error) {
         reject(error);
       } else {
         resolve(rows);
@@ -138,15 +378,26 @@ const duckDbAll = async (
     });
   });
 
+const abortReason = (signal?: AbortSignal): Error =>
+  signal?.reason instanceof Error ? signal.reason : new Error("RUN_CANCELLED");
+
+const isSessionInterruption = (reason: unknown): boolean =>
+  reason instanceof Error
+  && (reason.message === "SQL_TIMEOUT" || reason.message === "RUN_CANCELLED" || reason.name === "AbortError");
+
+const sqlLiteral = (value: string): string => `'${value.replaceAll("'", "''")}'`;
+
 const duckDbClose = async (connection: DuckDbModule.Connection): Promise<void> =>
   await new Promise((resolve, reject) => {
     connection.close((error) => error ? reject(error) : resolve());
   });
 
-const duckDbCloseDatabase = async (database: DuckDbModule.Database): Promise<void> =>
-  await new Promise((resolve, reject) => {
-    database.close((error) => error ? reject(error) : resolve());
-  });
+const ignoreAlreadyClosed = (error: unknown): void => {
+  if (error instanceof Error && error.message.includes("already closed")) {
+    return;
+  }
+  throw error;
+};
 
 const applyStandardLimit = (sql: string, limit: number): string => {
   if (/\bLIMIT\s+\d+\b/iu.test(sql)) {

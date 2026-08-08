@@ -11,13 +11,43 @@ import {
   EncryptedSecretStore,
   initializeConfigSchema
 } from "./config-store.js";
+import {
+  initializeWorkspaceDefaultModelProfileSchema,
+  WorkspaceDefaultModelProfileRepository
+} from "./workspace-model-profile-store.js";
+import { EnergyIqStore, initializeEnergyIqSchema } from "./energyiq-store.js";
+import { initializeEnergyIqMetricSchema } from "./energyiq-metric-store.js";
+import { initializeEnergyIqOverviewAiArtifactSchema } from "./energyiq-overview-ai-artifact-store.js";
+import {
+  ensureEnergyIqOperationalPolicyBindingOwnershipSchema,
+  initializeEnergyIqOperationalPolicySchema
+} from "./energyiq-operational-policy-store.js";
+import { initializeEnergyIqProjectSetupSchema } from "./energyiq-project-setup-store.js";
+import {
+  ensureEnergyIqHistoricalBaselineRuleRequirementSchema,
+  initializeEnergyIqRuleSchema
+} from "./energyiq-rule-store.js";
+import { initializeEnergyIqSavedAnalysisSchema } from "./energyiq-saved-analysis-store.js";
+import { initializeEnergyIqTemplateRevisionSchema, initializeEnergyIqTemplateSchema } from "./energyiq-template-store.js";
 
 export * from "./config-store.js";
+export * from "./energyiq-store.js";
+export * from "./energyiq-import-readiness.js";
+export * from "./energyiq-saved-analysis-store.js";
+export * from "./energyiq-scope-metadata-resolver.js";
+export * from "./energyiq-metric-store.js";
+export * from "./energyiq-operational-policy-store.js";
+export * from "./energyiq-overview-ai-artifact-store.js";
+export * from "./energyiq-project-setup-store.js";
+export * from "./energyiq-rule-store.js";
+export * from "./energyiq-template-store.js";
+export * from "./workspace-model-profile-store.js";
 
 export type UserRecord = {
   id: string;
   email?: string;
   display_name?: string;
+  avatar_url?: string;
   dev_token?: string;
   email_verified_at?: string;
   disabled_at?: string;
@@ -53,7 +83,7 @@ export type AuthSessionRecord = {
   last_seen_at: string;
 };
 
-export type AuthTokenPurpose = "email_verification" | "password_reset";
+export type AuthTokenPurpose = "account_invitation" | "email_verification" | "password_reset";
 
 export type AuthTokenRecord = {
   id: string;
@@ -68,8 +98,9 @@ export type AuthTokenRecord = {
 export type WorkspaceRecord = {
   id: string;
   name: string;
-  kind: "personal";
+  kind: "personal" | "customer";
   owner_user_id: string;
+  disabled_at?: string;
   created_at: string;
   updated_at: string;
 };
@@ -77,7 +108,7 @@ export type WorkspaceRecord = {
 export type WorkspaceMembershipRecord = {
   workspace_id: string;
   user_id: string;
-  role: "owner";
+  role: "owner" | "member";
   created_at: string;
 };
 
@@ -95,6 +126,8 @@ export type AuthAuditEventRecord = {
 export type SessionRecord = {
   id: string;
   user_id: string;
+  workspace_id?: string;
+  project_id?: string;
   title?: string;
   title_source?: "llm" | "fallback" | "user";
   last_message_at?: string;
@@ -403,6 +436,8 @@ export type MetadataStoreOptions = {
 export type CreateSessionInput = {
   user_id: string;
   id: string;
+  workspace_id?: string;
+  project_id?: string;
   title?: string;
   title_source?: "llm" | "fallback" | "user";
   selected_datasource_id?: string;
@@ -630,8 +665,8 @@ export type CreateQueryHistoryInput = {
 
 const DEFAULT_DEV_USER = {
   id: "dev-user",
-  email: "dev@example.com",
-  display_name: "Dev User",
+  email: "admin@energyiq.local",
+  display_name: "EnergyIQ Admin",
   dev_token: "dev-token"
 };
 
@@ -648,6 +683,7 @@ export class MetadataStore {
   readonly conversationSummaries: ConversationSummaryRepository;
   readonly contextPackageSnapshots: ContextPackageSnapshotRepository;
   readonly dataSources: DataSourceRepository;
+  readonly energyIq: EnergyIqStore;
   readonly fileAssetRefs: FileAssetRefRepository;
   readonly fileAssets: FileAssetRepository;
   readonly interactions: InteractionRepository;
@@ -664,6 +700,7 @@ export class MetadataStore {
   readonly userPasswordCredentials: UserPasswordCredentialRepository;
   readonly users: UserRepository;
   readonly workspaceMemberships: WorkspaceMembershipRepository;
+  readonly workspaceDefaultModelProfiles: WorkspaceDefaultModelProfileRepository;
   readonly workspaces: WorkspaceRepository;
 
   constructor(readonly db: DatabaseSync, secretMasterKey?: string) {
@@ -674,6 +711,7 @@ export class MetadataStore {
     this.authAuditEvents = new AuthAuditEventRepository(db);
     this.workspaces = new WorkspaceRepository(db);
     this.workspaceMemberships = new WorkspaceMembershipRepository(db);
+    this.workspaceDefaultModelProfiles = new WorkspaceDefaultModelProfileRepository(db);
     this.sessions = new SessionRepository(db);
     this.runs = new RunRepository(db);
     this.runEvents = new RunEventRepository(db);
@@ -688,6 +726,7 @@ export class MetadataStore {
     this.traceSections = new TraceSectionRepository(db);
     this.contextPackageSnapshots = new ContextPackageSnapshotRepository(db);
     this.dataSources = new DataSourceRepository(db);
+    this.energyIq = new EnergyIqStore(db);
     this.fileAssets = new FileAssetRepository(db);
     this.fileAssetRefs = new FileAssetRefRepository(db);
     this.interactions = new InteractionRepository(db);
@@ -872,6 +911,36 @@ export class UserRepository {
     return this.getById({ user_id: input.id });
   }
 
+  updateProfile(input: {
+    user_id: string;
+    display_name: string;
+    avatar_url?: string | null;
+  }): UserRecord {
+    const updatedAt = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE users
+      SET display_name = ?, avatar_url = ?, updated_at = ?
+      WHERE id = ?
+    `).run(input.display_name, input.avatar_url ?? null, updatedAt, input.user_id);
+    return this.getById({ user_id: input.user_id });
+  }
+
+  updateDisplayName(input: { user_id: string; display_name: string }): UserRecord {
+    const updatedAt = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE users SET display_name = ?, updated_at = ? WHERE id = ?
+    `).run(input.display_name, updatedAt, input.user_id);
+    return this.getById({ user_id: input.user_id });
+  }
+
+  setDisabled(input: { user_id: string; disabled: boolean }): UserRecord {
+    const updatedAt = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE users SET disabled_at = ?, updated_at = ? WHERE id = ?
+    `).run(input.disabled ? updatedAt : null, updatedAt, input.user_id);
+    return this.getById({ user_id: input.user_id });
+  }
+
   getByDevToken(input: { dev_token: string }): Optional<UserRecord> {
     return mapUserRow(this.db.prepare("SELECT * FROM users WHERE dev_token = ?").get(input.dev_token));
   }
@@ -1009,6 +1078,13 @@ export class AuthSessionRepository {
       .filter((record): record is AuthSessionRecord => Boolean(record));
   }
 
+  latestSeenAt(input: { user_id: string }): string | undefined {
+    const row = this.db.prepare(`
+      SELECT MAX(last_seen_at) AS last_seen_at FROM auth_sessions WHERE user_id = ?
+    `).get(input.user_id);
+    return isRecord(row) ? optionalString(row.last_seen_at) : undefined;
+  }
+
   touch(input: { id: string; last_seen_at?: string }): void {
     this.db.prepare("UPDATE auth_sessions SET last_seen_at = ? WHERE id = ?")
       .run(input.last_seen_at ?? new Date().toISOString(), input.id);
@@ -1067,6 +1143,18 @@ export class AuthTokenRepository {
     return this.get(input);
   }
 
+  consumeOpenByUser(input: {
+    user_id: string;
+    purpose: AuthTokenPurpose;
+    consumed_at?: string;
+  }): void {
+    this.db.prepare(`
+      UPDATE auth_tokens
+      SET consumed_at = COALESCE(consumed_at, ?)
+      WHERE user_id = ? AND purpose = ? AND consumed_at IS NULL
+    `).run(input.consumed_at ?? new Date().toISOString(), input.user_id, input.purpose);
+  }
+
   get(input: { id: string }): AuthTokenRecord {
     const token = mapAuthTokenRow(this.db.prepare("SELECT * FROM auth_tokens WHERE id = ?").get(input.id));
     if (!token) {
@@ -1091,6 +1179,25 @@ export class WorkspaceRepository {
     return this.get({ id: input.id });
   }
 
+  upsert(input: {
+    id: string;
+    owner_user_id: string;
+    name: string;
+    kind: WorkspaceRecord["kind"];
+  }): WorkspaceRecord {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      INSERT INTO workspaces (id, name, kind, owner_user_id, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        kind = excluded.kind,
+        owner_user_id = excluded.owner_user_id,
+        updated_at = excluded.updated_at
+    `).run(input.id, input.name, input.kind, input.owner_user_id, now, now);
+    return this.get({ id: input.id });
+  }
+
   get(input: { id: string }): WorkspaceRecord {
     const workspace = mapWorkspaceRow(this.db.prepare("SELECT * FROM workspaces WHERE id = ?").get(input.id));
     if (!workspace) {
@@ -1099,10 +1206,38 @@ export class WorkspaceRepository {
     return workspace;
   }
 
+  setCustomerDetails(input: { id: string; name: string; disabled: boolean }): WorkspaceRecord {
+    const updatedAt = new Date().toISOString();
+    this.db.prepare(`
+      UPDATE workspaces
+      SET name = ?, disabled_at = ?, updated_at = ?
+      WHERE id = ? AND kind = 'customer'
+    `).run(input.name, input.disabled ? updatedAt : null, updatedAt, input.id);
+    return this.get({ id: input.id });
+  }
+
   findPersonalByUser(input: { user_id: string }): Optional<WorkspaceRecord> {
     return mapWorkspaceRow(this.db.prepare(`
       SELECT * FROM workspaces WHERE kind = 'personal' AND owner_user_id = ? ORDER BY created_at ASC LIMIT 1
     `).get(input.user_id));
+  }
+
+  list(): WorkspaceRecord[] {
+    return this.db.prepare("SELECT * FROM workspaces ORDER BY kind, name")
+      .all()
+      .map(mapWorkspaceRow)
+      .filter((workspace): workspace is WorkspaceRecord => workspace !== undefined);
+  }
+
+  listByUser(input: { user_id: string }): WorkspaceRecord[] {
+    return this.db.prepare(`
+      SELECT w.* FROM workspaces w
+      INNER JOIN workspace_memberships m ON m.workspace_id = w.id
+      WHERE m.user_id = ?
+      ORDER BY CASE w.kind WHEN 'customer' THEN 0 ELSE 1 END, w.name
+    `).all(input.user_id)
+      .map(mapWorkspaceRow)
+      .filter((workspace): workspace is WorkspaceRecord => workspace !== undefined);
   }
 }
 
@@ -1119,6 +1254,20 @@ export class WorkspaceMembershipRepository {
     return this.get(input);
   }
 
+  upsert(input: {
+    workspace_id: string;
+    user_id: string;
+    role: WorkspaceMembershipRecord["role"];
+  }): WorkspaceMembershipRecord {
+    const now = new Date().toISOString();
+    this.db.prepare(`
+      INSERT INTO workspace_memberships (workspace_id, user_id, role, created_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(workspace_id, user_id) DO UPDATE SET role = excluded.role
+    `).run(input.workspace_id, input.user_id, input.role, now);
+    return this.get(input);
+  }
+
   get(input: { workspace_id: string; user_id: string }): WorkspaceMembershipRecord {
     const membership = mapWorkspaceMembershipRow(this.db.prepare(`
       SELECT * FROM workspace_memberships WHERE workspace_id = ? AND user_id = ?
@@ -1127,6 +1276,37 @@ export class WorkspaceMembershipRepository {
       throw new Error(`WORKSPACE_MEMBERSHIP_NOT_FOUND:${input.workspace_id}:${input.user_id}`);
     }
     return membership;
+  }
+
+  find(input: {
+    workspace_id: string;
+    user_id: string;
+  }): Optional<WorkspaceMembershipRecord> {
+    return mapWorkspaceMembershipRow(this.db.prepare(`
+      SELECT * FROM workspace_memberships WHERE workspace_id = ? AND user_id = ?
+    `).get(input.workspace_id, input.user_id));
+  }
+
+  listByUser(input: { user_id: string }): WorkspaceMembershipRecord[] {
+    return this.db.prepare(`
+      SELECT * FROM workspace_memberships WHERE user_id = ? ORDER BY created_at
+    `).all(input.user_id)
+      .map(mapWorkspaceMembershipRow)
+      .filter((membership): membership is WorkspaceMembershipRecord => membership !== undefined);
+  }
+
+  listByWorkspace(input: { workspace_id: string }): WorkspaceMembershipRecord[] {
+    return this.db.prepare(`
+      SELECT * FROM workspace_memberships WHERE workspace_id = ? ORDER BY created_at
+    `).all(input.workspace_id)
+      .map(mapWorkspaceMembershipRow)
+      .filter((membership): membership is WorkspaceMembershipRecord => membership !== undefined);
+  }
+
+  remove(input: { workspace_id: string; user_id: string }): void {
+    this.db.prepare(`
+      DELETE FROM workspace_memberships WHERE workspace_id = ? AND user_id = ?
+    `).run(input.workspace_id, input.user_id);
   }
 }
 
@@ -1175,15 +1355,40 @@ export class SessionRepository {
   create(input: CreateSessionInput): SessionRecord {
     const now = new Date().toISOString();
 
+    if ((input.workspace_id && !input.project_id) || (!input.workspace_id && input.project_id)) {
+      throw new Error("ENERGYIQ_SESSION_SCOPE_INCOMPLETE");
+    }
+    const existing = mapSessionRow(
+      this.db.prepare("SELECT * FROM sessions WHERE user_id = ? AND id = ?").get(input.user_id, input.id)
+    );
+    if (existing && input.workspace_id && input.project_id) {
+      if (existing.workspace_id && existing.workspace_id !== input.workspace_id) {
+        throw new Error("ENERGYIQ_SESSION_WORKSPACE_MISMATCH");
+      }
+      if (existing.project_id && existing.project_id !== input.project_id) {
+        throw new Error("ENERGYIQ_SESSION_PROJECT_MISMATCH");
+      }
+      if (!existing.workspace_id && !existing.project_id) {
+        const hasRunHistory = this.db.prepare(`
+          SELECT 1 FROM runs WHERE user_id = ? AND session_id = ? LIMIT 1
+        `).get(input.user_id, input.id);
+        if (hasRunHistory) {
+          throw new Error("ENERGYIQ_SESSION_SCOPE_REQUIRED");
+        }
+      }
+    }
+
     this.db
       .prepare(
         `
         INSERT INTO sessions (
-          id, user_id, title, title_source, selected_datasource_id, selected_collection_id,
-          created_at, updated_at
+          id, user_id, workspace_id, project_id, title, title_source,
+          selected_datasource_id, selected_collection_id, created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id, id) DO UPDATE SET
+          workspace_id = COALESCE(sessions.workspace_id, excluded.workspace_id),
+          project_id = COALESCE(sessions.project_id, excluded.project_id),
           title = COALESCE(excluded.title, sessions.title),
           title_source = COALESCE(excluded.title_source, sessions.title_source),
           selected_datasource_id = COALESCE(excluded.selected_datasource_id, sessions.selected_datasource_id),
@@ -1194,6 +1399,8 @@ export class SessionRepository {
       .run(
         input.id,
         input.user_id,
+        input.workspace_id ?? null,
+        input.project_id ?? null,
         input.title ?? null,
         input.title_source ?? null,
         input.selected_datasource_id ?? null,
@@ -1217,34 +1424,41 @@ export class SessionRepository {
     return session;
   }
 
-  list(input: { cursor?: string; limit?: number; user_id: string }): SessionRecord[] {
+  list(input: {
+    cursor?: string;
+    limit?: number;
+    project_id?: string;
+    user_id: string;
+    workspace_id?: string;
+  }): SessionRecord[] {
     const limit = Math.max(1, Math.min(input.limit ?? 50, 200));
+    if ((input.workspace_id && !input.project_id) || (!input.workspace_id && input.project_id)) {
+      throw new Error("ENERGYIQ_SESSION_SCOPE_INCOMPLETE");
+    }
+    const where = ["user_id = ?"];
+    const params: Array<string | number> = [input.user_id];
+    if (input.workspace_id && input.project_id) {
+      where.push("workspace_id = ?", "project_id = ?");
+      params.push(input.workspace_id, input.project_id);
+    }
     if (input.cursor) {
       const cursor = decodeSessionCursor(input.cursor);
       if (cursor) {
-        return this.db
-          .prepare(`
-            SELECT * FROM sessions
-            WHERE user_id = ?
-              AND (
-                COALESCE(last_message_at, updated_at) < ?
-                OR (COALESCE(last_message_at, updated_at) = ? AND id < ?)
-              )
-            ORDER BY COALESCE(last_message_at, updated_at) DESC, id DESC
-            LIMIT ?
-          `)
-          .all(input.user_id, cursor.sort_at, cursor.sort_at, cursor.id, limit)
-          .map(mapRequiredSessionRow);
+        where.push(`(
+          COALESCE(last_message_at, updated_at) < ?
+          OR (COALESCE(last_message_at, updated_at) = ? AND id < ?)
+        )`);
+        params.push(cursor.sort_at, cursor.sort_at, cursor.id);
       }
     }
     return this.db
       .prepare(`
         SELECT * FROM sessions
-        WHERE user_id = ?
+        WHERE ${where.join(" AND ")}
         ORDER BY COALESCE(last_message_at, updated_at) DESC, id DESC
         LIMIT ?
       `)
-      .all(input.user_id, limit)
+      .all(...params, limit)
       .map(mapRequiredSessionRow);
   }
 
@@ -3374,6 +3588,7 @@ const runMigrations = (db: DatabaseSync): void => {
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE,
       display_name TEXT,
+      avatar_url TEXT,
       dev_token TEXT UNIQUE,
       email_verified_at TEXT,
       disabled_at TEXT,
@@ -3385,6 +3600,8 @@ const runMigrations = (db: DatabaseSync): void => {
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT NOT NULL,
       user_id TEXT NOT NULL,
+      workspace_id TEXT,
+      project_id TEXT,
       title TEXT,
       title_source TEXT,
       last_message_at TEXT,
@@ -3816,6 +4033,45 @@ const runMigrations = (db: DatabaseSync): void => {
   runSchemaMigration(db, "0017_protocol_event_journal", "Ensure protocol event journal schema", () => {
     initializeProtocolEventJournalSchema(db);
   });
+  runSchemaMigration(db, "0018_energyiq_domain_schema", "Ensure EnergyIQ domain schema", () => {
+    initializeEnergyIqSchema(db);
+  });
+  runSchemaMigration(db, "0019_energyiq_project_setup_schema", "Ensure EnergyIQ project setup schema", () => {
+    initializeEnergyIqProjectSetupSchema(db);
+  });
+  runSchemaMigration(db, "0020_energyiq_metric_schema", "Ensure EnergyIQ metric revision schema", () => {
+    initializeEnergyIqMetricSchema(db);
+  });
+  runSchemaMigration(db, "0021_energyiq_rule_schema", "Ensure EnergyIQ rule revision schema", () => {
+    initializeEnergyIqRuleSchema(db);
+  });
+  runSchemaMigration(db, "0022_energyiq_template_schema", "Ensure EnergyIQ component and template draft schema", () => {
+    initializeEnergyIqTemplateSchema(db);
+  });
+  runSchemaMigration(db, "0023_energyiq_template_revision_schema", "Ensure immutable EnergyIQ template revision schema", () => {
+    initializeEnergyIqTemplateRevisionSchema(db);
+  });
+  runSchemaMigration(db, "0024_energyiq_saved_analysis_schema", "Ensure immutable EnergyIQ saved analysis schema", () => {
+    initializeEnergyIqSavedAnalysisSchema(db);
+  });
+  runSchemaMigration(db, "0025_energyiq_operational_policy_schema", "Ensure immutable EnergyIQ operational policy schema", () => {
+    initializeEnergyIqOperationalPolicySchema(db);
+  });
+  runSchemaMigration(db, "0026_energyiq_operational_policy_binding_ownership", "Enforce EnergyIQ operational policy Project ownership", () => {
+    ensureEnergyIqOperationalPolicyBindingOwnershipSchema(db);
+  });
+  runSchemaMigration(db, "0027_workspace_default_model_profile", "Bind a server-side Workspace default model profile", () => {
+    initializeWorkspaceDefaultModelProfileSchema(db);
+  });
+  runSchemaMigration(db, "0028_energyiq_historical_baseline_rule_requirement", "Allow historical baseline EnergyIQ rules", () => {
+    ensureEnergyIqHistoricalBaselineRuleRequirementSchema(db);
+  });
+  runSchemaMigration(db, "0029_energyiq_session_scope", "Bind EnergyIQ Sessions to Workspace and Project", () => {
+    initializeEnergyIqSessionScopeSchema(db);
+  });
+  runSchemaMigration(db, "0030_energyiq_overview_ai_artifact", "Persist shared EnergyIQ Overview AI artifacts", () => {
+    initializeEnergyIqOverviewAiArtifactSchema(db);
+  });
 };
 
 const initializeSchemaMigrationTable = (db: DatabaseSync): void => {
@@ -3989,6 +4245,7 @@ const initializeProtocolEventJournalSchema = (db: DatabaseSync): void => {
 };
 
 const initializeAuthSchema = (db: DatabaseSync): void => {
+  ensureColumn(db, "users", "avatar_url", "TEXT");
   ensureColumn(db, "users", "email_verified_at", "TEXT");
   ensureColumn(db, "users", "disabled_at", "TEXT");
   ensureColumn(db, "users", "password_updated_at", "TEXT");
@@ -4036,6 +4293,7 @@ const initializeAuthSchema = (db: DatabaseSync): void => {
       name TEXT NOT NULL,
       kind TEXT NOT NULL,
       owner_user_id TEXT NOT NULL,
+      disabled_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (owner_user_id) REFERENCES users(id)
@@ -4078,6 +4336,7 @@ const initializeAuthSchema = (db: DatabaseSync): void => {
       updated_at TEXT NOT NULL
     );
   `);
+  ensureColumn(db, "workspaces", "disabled_at", "TEXT");
 };
 
 const initializeSessionBranchSchema = (db: DatabaseSync): void => {
@@ -4101,6 +4360,15 @@ const initializeSessionBranchSchema = (db: DatabaseSync): void => {
     );
     CREATE INDEX IF NOT EXISTS idx_session_branches_parent_fork
       ON session_branches(user_id, parent_session_id, fork_run_id, created_at);
+  `);
+};
+
+const initializeEnergyIqSessionScopeSchema = (db: DatabaseSync): void => {
+  ensureColumn(db, "sessions", "workspace_id", "TEXT");
+  ensureColumn(db, "sessions", "project_id", "TEXT");
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_sessions_energyiq_scope
+      ON sessions(user_id, workspace_id, project_id, last_message_at, updated_at);
   `);
 };
 
@@ -4464,6 +4732,7 @@ const mapUserRow = (row: unknown): Optional<UserRecord> => {
 
   const email = optionalString(row.email);
   const displayName = optionalString(row.display_name);
+  const avatarUrl = optionalString(row.avatar_url);
   const devToken = optionalString(row.dev_token);
   const emailVerifiedAt = optionalString(row.email_verified_at);
   const disabledAt = optionalString(row.disabled_at);
@@ -4473,6 +4742,7 @@ const mapUserRow = (row: unknown): Optional<UserRecord> => {
     id: requiredString(row, "id"),
     ...(email ? { email } : {}),
     ...(displayName ? { display_name: displayName } : {}),
+    ...(avatarUrl ? { avatar_url: avatarUrl } : {}),
     ...(devToken ? { dev_token: devToken } : {}),
     ...(emailVerifiedAt ? { email_verified_at: emailVerifiedAt } : {}),
     ...(disabledAt ? { disabled_at: disabledAt } : {}),
@@ -4536,11 +4806,13 @@ const mapWorkspaceRow = (row: unknown): Optional<WorkspaceRecord> => {
   if (!isRecord(row)) {
     return undefined;
   }
+  const disabledAt = optionalString(row.disabled_at);
   return {
     id: requiredString(row, "id"),
     name: requiredString(row, "name"),
     kind: requiredString(row, "kind") as WorkspaceRecord["kind"],
     owner_user_id: requiredString(row, "owner_user_id"),
+    ...(disabledAt ? { disabled_at: disabledAt } : {}),
     created_at: requiredString(row, "created_at"),
     updated_at: requiredString(row, "updated_at")
   };
@@ -4589,10 +4861,14 @@ const mapSessionRow = (row: unknown): Optional<SessionRecord> => {
   const lastMessageAt = optionalString(row.last_message_at);
   const selectedDatasourceId = optionalString(row.selected_datasource_id);
   const selectedCollectionId = optionalString(row.selected_collection_id);
+  const workspaceId = optionalString(row.workspace_id);
+  const projectId = optionalString(row.project_id);
 
   return {
     id: requiredString(row, "id"),
     user_id: requiredString(row, "user_id"),
+    ...(workspaceId ? { workspace_id: workspaceId } : {}),
+    ...(projectId ? { project_id: projectId } : {}),
     ...(title ? { title } : {}),
     ...(titleSource ? { title_source: titleSource } : {}),
     ...(lastMessageAt ? { last_message_at: lastMessageAt } : {}),

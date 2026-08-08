@@ -90,6 +90,19 @@ describe("buildRunForwardedProps", () => {
     });
   });
 
+  it("pins EnergyIQ Analyst runs to the data-analysis protocol", () => {
+    const runConfig = buildRunConfig(store, {
+      activeLlmId: "llm-1",
+      defaultDatasourceId: "db-default",
+      session,
+      protocol: { protocolId: "data-analysis", protocolVersion: "1" },
+    });
+    expect(runConfig.protocol).toEqual({
+      protocolId: "data-analysis",
+      protocolVersion: "1",
+    });
+  });
+
   it("merges resume command without dropping run_config", () => {
     const base = buildRunForwardedProps("db-default", {
       activeLlmProfileId: "llm-2",

@@ -1,5 +1,9 @@
 import { Agent } from "@mastra/core/agent";
-import type { ModelProvider } from "@datafoundry/providers";
+import {
+  createModelHelperProviderOptions,
+  createModelHelperSettings,
+  type ModelProvider
+} from "@datafoundry/providers";
 import { z } from "zod";
 
 import { AGENT_RUNTIME_LIMITS } from "../config/agent-runtime-limits.js";
@@ -69,6 +73,14 @@ export const createFallbackAnalysisRequirements = (userText: string): AnalysisRe
   acceptanceCriteria: ["回答请求中的全部可量化问题，并为结论绑定审计证据"]
 }]);
 
+/**
+ * EnergyIQ already has a server-pinned Project/Scope/Snapshot contract. Keep
+ * the user's exact question as one auditable requirement instead of spending
+ * another model turn paraphrasing it before the real analysis starts.
+ */
+export const createEnergyAnalysisRequirementExtractor = (): AnalysisRequirementExtractor =>
+  async ({ userText }) => createFallbackAnalysisRequirements(userText);
+
 /** Create a tool-free structured requirement extractor backed by the configured run model. */
 export const createModelAnalysisRequirementExtractor = (
   provider: Exclude<ModelProvider, { kind: "mock" }>
@@ -87,10 +99,14 @@ export const createModelAnalysisRequirementExtractor = (
         : "\n上次输出不是合法 JSON。请缩短描述，确保所有字符串闭合，并严格返回紧凑 JSON。";
       const output = await agent.generate(`${basePrompt}${retryInstruction}`, {
         maxSteps: AGENT_RUNTIME_LIMITS.modelHelperMaxSteps,
-        modelSettings: {
-          maxOutputTokens: AGENT_RUNTIME_LIMITS.requirementExtractorMaxOutputTokens,
-          temperature: 0
-        }
+        modelSettings: createModelHelperSettings({
+          modelName: provider.model_name,
+          maxOutputTokens: AGENT_RUNTIME_LIMITS.requirementExtractorMaxOutputTokens
+        }),
+        providerOptions: createModelHelperProviderOptions({
+          providerId: provider.provider_id,
+          modelName: provider.model_name
+        })
       });
       try {
         return parseAnalysisRequirementExtractionText(output.text);

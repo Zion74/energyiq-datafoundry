@@ -47,6 +47,25 @@
     "WenQuanYi Micro Hei", sans-serif; /* CJK_FALLBACK_STACK_V1 */
   --font-fira-code: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
     "Courier New", monospace;
+
+  /* Product typography roles. These describe information responsibility rather
+     than a one-off pixel value so the four EnergyIQ surfaces can stay distinct
+     while sharing the same reading hierarchy. */
+  --type-ui-body: 0.875rem;
+  --type-ui-body-leading: 1.375rem;
+  --type-ui-support: 0.8125rem;
+  --type-ui-support-leading: 1.25rem;
+  --type-ui-label: 0.75rem;
+  --type-ui-label-leading: 1rem;
+  --type-ui-meta: 0.6875rem;
+  --type-ui-meta-leading: 1rem;
+
+  /* EnergyIQ surface geometry. These variables align the four product shells
+     without forcing their different navigation models into one component. */
+  --energyiq-surface-header-height: 4rem;
+  --energyiq-sidebar-rail-width: 3.5rem;
+  --energyiq-collapse-control-size: 2.25rem;
+  --energyiq-content-gutter: 1rem;
 }
 
 @theme inline {
@@ -72,6 +91,14 @@
   --color-step-error: var(--step-error);
   --font-sans: var(--font-inter);
   --font-mono: var(--font-fira-code);
+  --text-ui-body: var(--type-ui-body);
+  --text-ui-body--line-height: var(--type-ui-body-leading);
+  --text-ui-support: var(--type-ui-support);
+  --text-ui-support--line-height: var(--type-ui-support-leading);
+  --text-ui-label: var(--type-ui-label);
+  --text-ui-label--line-height: var(--type-ui-label-leading);
+  --text-ui-meta: var(--type-ui-meta);
+  --text-ui-meta--line-height: var(--type-ui-meta-leading);
 }
 
 body {
@@ -147,6 +174,78 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *::-webkit-scrollbar-thumb {
     transition: none;
+  }
+}
+
+@media (min-width: 64rem) {
+  :root {
+    --energyiq-content-gutter: 1.5rem;
+  }
+}
+
+.energyiq-surface-header {
+  min-height: var(--energyiq-surface-header-height);
+  padding-inline: var(--energyiq-content-gutter);
+}
+
+.energyiq-sidebar-header {
+  min-height: var(--energyiq-surface-header-height);
+  padding-inline: 1rem;
+}
+
+.energyiq-collapsed-rail {
+  width: var(--energyiq-sidebar-rail-width);
+  min-width: var(--energyiq-sidebar-rail-width);
+  max-width: var(--energyiq-sidebar-rail-width);
+}
+
+.energyiq-collapse-control {
+  flex: 0 0 var(--energyiq-collapse-control-size);
+  width: var(--energyiq-collapse-control-size);
+  height: var(--energyiq-collapse-control-size);
+}
+
+.energyiq-collapsed-rail .energyiq-sidebar-header {
+  padding-inline: 0;
+}
+
+.energyiq-content-gutter {
+  padding-inline: var(--energyiq-content-gutter);
+}
+
+@media print {
+  @page {
+    margin: 10mm;
+  }
+
+  [data-energyiq-shell="true"] {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: white !important;
+  }
+
+  [data-energyiq-shell="true"] > header,
+  [data-print-exclude="true"] {
+    display: none !important;
+  }
+
+  [data-energyiq-shell="true"] > main {
+    overflow: visible !important;
+  }
+
+  [data-energyiq-saved-report="true"] {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  [data-energyiq-saved-report="true"] details {
+    break-inside: avoid;
+  }
+
+  [data-energyiq-saved-report="true"] svg,
+  [data-energyiq-saved-report="true"] canvas {
+    max-width: 100% !important;
   }
 }
 

@@ -13,6 +13,37 @@ import type {
   DatasourceTypeDto,
   DevIdentitiesResponseDto,
   DevIdentityUser,
+  EnergyAccessContextDto,
+  EnergyAdminOrganisationDto,
+  EnergyAdminUserDto,
+  EnergyImportBatchDto,
+  EnergyImportBatchesResponseDto,
+  EnergyImportMaterializationResponseDto,
+  EnergyOperatingCalendarEntryInputDto,
+  EnergyOperatingCalendarRevisionDto,
+  EnergyOperationalPolicyConfigurationDto,
+  EnergyProjectAnalysisResolutionDto,
+  EnergyOverviewAiArtifactDto,
+  EnergyProjectMetricConfigResponseDto,
+  EnergyProjectDataCoverageDto,
+  EnergyProjectRuleConfigResponseDto,
+  EnergyProjectTemplateDraftResponseDto,
+  EnergyPublishedTemplateResponseDto,
+  EnergyTemplateDraftDocumentDto,
+  EnergyProjectHierarchyDto,
+  EnergyProjectRecordDto,
+  EnergyProjectSetupDocumentDto,
+  EnergyProjectSetupDraftDto,
+  EnergyProjectSetupDto,
+  EnergyProjectSetupValidationDto,
+  EnergyQueryContextDto,
+  EnergyQueryContextRequestDto,
+  EnergyScopeAnalysisDto,
+  EnergySavedAnalysisDetailDto,
+  EnergySavedAnalysisAiArtifactInputDto,
+  EnergySavedAnalysisSummaryDto,
+  EnergyTariffScheduleEntryInputDto,
+  EnergyTariffScheduleRevisionDto,
   FileAssetRefDto,
   JobDto,
   KnowledgeBaseDto,
@@ -41,10 +72,12 @@ export type ConfigApiIdentity = {
   userId: string;
   displayName?: string;
   email?: string;
+  avatarUrl?: string;
   devToken: string;
 };
 
 let currentIdentity: ConfigApiIdentity | null = null;
+let currentWorkspaceId: string | null = isPasswordAuthMode() ? null : DEFAULT_WORKSPACE_ID;
 
 export function setConfigApiIdentity(identity: ConfigApiIdentity | null): void {
   currentIdentity = identity;
@@ -54,16 +87,20 @@ export function clearConfigApiIdentity(): void {
   currentIdentity = null;
 }
 
+export function setConfigApiWorkspaceId(workspaceId: string | null): void {
+  currentWorkspaceId = workspaceId;
+}
+
 export function configApiIdentityHeaders(): Record<string, string> {
   if (isPasswordAuthMode()) {
-    return {};
+    return currentWorkspaceId ? { "X-Workspace-Id": currentWorkspaceId } : {};
   }
   if (!currentIdentity?.devToken) {
     return {};
   }
   return {
     Authorization: `Bearer ${currentIdentity.devToken}`,
-    "X-Workspace-Id": DEFAULT_WORKSPACE_ID,
+    "X-Workspace-Id": currentWorkspaceId ?? DEFAULT_WORKSPACE_ID,
   };
 }
 
@@ -96,7 +133,7 @@ export function getAgentRuntimeUrl(): string {
   );
 }
 
-function csrfHeader(method: string | undefined): Record<string, string> {
+export function configApiCsrfHeaders(method: string | undefined): Record<string, string> {
   if (!isPasswordAuthMode() || !isUnsafeMethod(method)) {
     return {};
   }
@@ -149,7 +186,7 @@ async function requestEnvelope<T>(
     headers: {
       Accept: "application/json",
       ...identityHeaders,
-      ...csrfHeader(init?.method),
+      ...configApiCsrfHeaders(init?.method),
       ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
       ...init?.headers,
     },
@@ -173,7 +210,7 @@ async function requestRaw(path: string, init?: RequestInit): Promise<Response> {
     ...(isPasswordAuthMode() ? { credentials: "same-origin" as RequestCredentials } : {}),
     headers: {
       ...configApiIdentityHeaders(),
-      ...csrfHeader(init?.method),
+      ...configApiCsrfHeaders(init?.method),
       ...init?.headers,
     },
   });
@@ -250,6 +287,367 @@ export const configApi = {
 
   getMe(): Promise<MeResponseDto> {
     return requestEnvelope<MeResponseDto>("/api/v1/me");
+  },
+
+  activateAccount(body: { displayName?: string; password: string; token: string }): Promise<MeResponseDto> {
+    return requestEnvelope<MeResponseDto>("/api/v1/auth/activate", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  updateMe(body: { displayName: string; avatarUrl?: string | null }): Promise<MeResponseDto> {
+    return requestEnvelope<MeResponseDto>("/api/v1/me", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  },
+
+  getEnergyAccessContext(): Promise<EnergyAccessContextDto> {
+    return requestEnvelope<EnergyAccessContextDto>("/api/v1/energy/access-context");
+  },
+
+  listEnergyAdminOrganisations(): Promise<{ organisations: EnergyAdminOrganisationDto[] }> {
+    return requestEnvelope("/api/v1/energy/admin/organisations");
+  },
+
+  createEnergyAdminOrganisation(body: { name: string }): Promise<EnergyAdminOrganisationDto> {
+    return requestEnvelope("/api/v1/energy/admin/organisations", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  updateEnergyAdminOrganisation(
+    id: string,
+    body: { disabled: boolean; name: string },
+  ): Promise<EnergyAdminOrganisationDto> {
+    return requestEnvelope(`/api/v1/energy/admin/organisations/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  },
+
+  listEnergyAdminUsers(): Promise<{ users: EnergyAdminUserDto[] }> {
+    return requestEnvelope("/api/v1/energy/admin/users");
+  },
+
+  inviteEnergyAdminUser(body: {
+    displayName?: string;
+    email: string;
+    organisationIds: string[];
+    role: "user" | "admin";
+  }): Promise<{ invitationUrl?: string; user: EnergyAdminUserDto }> {
+    return requestEnvelope("/api/v1/energy/admin/users", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  updateEnergyAdminUser(
+    id: string,
+    body: {
+      disabled: boolean;
+      displayName: string;
+      organisationIds: string[];
+      role: "user" | "admin";
+    },
+  ): Promise<EnergyAdminUserDto> {
+    return requestEnvelope(`/api/v1/energy/admin/users/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  },
+
+  resendEnergyAdminInvitation(id: string): Promise<{ invitationUrl?: string; user: EnergyAdminUserDto }> {
+    return requestEnvelope(`/api/v1/energy/admin/users/${encodeURIComponent(id)}/resend-invitation`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  },
+
+  getEnergyProjectHierarchy(projectId: string): Promise<EnergyProjectHierarchyDto> {
+    return requestEnvelope<EnergyProjectHierarchyDto>(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/hierarchy`,
+    );
+  },
+
+  createEnergyProject(body: {
+    name: string;
+    timezone?: string;
+  }): Promise<{ project: EnergyProjectRecordDto; draft: EnergyProjectSetupDraftDto }> {
+    return requestEnvelope("/api/v1/energy/projects", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  getEnergyProjectSetup(projectId: string): Promise<EnergyProjectSetupDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/setup`,
+    );
+  },
+
+  saveEnergyProjectSetupDraft(
+    projectId: string,
+    body: { expectedRevision: number; document: EnergyProjectSetupDocumentDto },
+  ): Promise<{
+    draft: EnergyProjectSetupDraftDto;
+    validation: EnergyProjectSetupValidationDto;
+  }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/setup/draft`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+  },
+
+  validateEnergyProjectSetup(projectId: string): Promise<EnergyProjectSetupValidationDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/setup/validate`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  },
+
+  publishEnergyProjectSetup(
+    projectId: string,
+    body: {
+      expectedRevision: number;
+      expectedTemplateDraftRevision: number;
+      expectedMetricConfigRevision: number;
+      expectedRuleConfigRevision: number;
+    },
+  ): Promise<{
+    hierarchy_revision_id: string;
+    template_revision_id: string;
+    validation: EnergyProjectSetupValidationDto;
+    project: EnergyProjectRecordDto;
+  }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/setup/publish`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  },
+
+  getEnergyOperationalPolicies(projectId: string): Promise<EnergyOperationalPolicyConfigurationDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/operational-policies`,
+    );
+  },
+
+  publishEnergyTariffSchedule(
+    projectId: string,
+    body: { entries: EnergyTariffScheduleEntryInputDto[] },
+  ): Promise<{
+    revision: EnergyTariffScheduleRevisionDto;
+    configuration: EnergyOperationalPolicyConfigurationDto;
+  }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/operational-policies/tariff`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  },
+
+  publishEnergyOperatingCalendar(
+    projectId: string,
+    body: { entries: EnergyOperatingCalendarEntryInputDto[] },
+  ): Promise<{
+    revision: EnergyOperatingCalendarRevisionDto;
+    configuration: EnergyOperationalPolicyConfigurationDto;
+  }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/operational-policies/calendar`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  },
+
+  getEnergyProjectMetricConfig(projectId: string): Promise<EnergyProjectMetricConfigResponseDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/metric-config`,
+    );
+  },
+
+  saveEnergyProjectMetricConfig(
+    projectId: string,
+    body: { expectedRevision: number; selectedMetricRevisionIds: string[] },
+  ): Promise<EnergyProjectMetricConfigResponseDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/metric-config`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+  },
+
+  getEnergyProjectRuleConfig(projectId: string): Promise<EnergyProjectRuleConfigResponseDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/rule-config`,
+    );
+  },
+
+  saveEnergyProjectRuleConfig(
+    projectId: string,
+    body: { expectedRevision: number; selectedRuleRevisionIds: string[] },
+  ): Promise<EnergyProjectRuleConfigResponseDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/rule-config`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+  },
+
+  getEnergyProjectTemplateDraft(projectId: string): Promise<EnergyProjectTemplateDraftResponseDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/template-draft`,
+    );
+  },
+
+  getEnergyPublishedTemplate(projectId: string): Promise<EnergyPublishedTemplateResponseDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/published-template`,
+    );
+  },
+
+  listEnergySavedAnalyses(projectId: string): Promise<{ items: EnergySavedAnalysisSummaryDto[] }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/saved-analyses`,
+    );
+  },
+
+  saveEnergyAnalysis(
+    projectId: string,
+    body: EnergyQueryContextRequestDto & {
+      title?: string;
+      viewState?: {
+        grain: "day" | "hour";
+        comparison: "overlay" | "selected" | "average";
+        category: "all" | "load" | "light";
+      };
+      aiArtifact?: EnergySavedAnalysisAiArtifactInputDto;
+    },
+  ): Promise<EnergySavedAnalysisDetailDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/saved-analyses`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  },
+
+  getEnergySavedAnalysis(
+    projectId: string,
+    analysisId: string,
+  ): Promise<EnergySavedAnalysisDetailDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/saved-analyses/${encodeURIComponent(analysisId)}`,
+    );
+  },
+
+  rerunEnergySavedAnalysis(
+    projectId: string,
+    analysisId: string,
+  ): Promise<EnergySavedAnalysisDetailDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/saved-analyses/${encodeURIComponent(analysisId)}/rerun`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  },
+
+  getEnergyProjectDataCoverage(projectId: string): Promise<{ coverage: EnergyProjectDataCoverageDto | null }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/data-coverage`,
+    );
+  },
+
+  saveEnergyProjectTemplateDraft(
+    projectId: string,
+    body: { expectedRevision: number; document: EnergyTemplateDraftDocumentDto },
+  ): Promise<EnergyProjectTemplateDraftResponseDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/template-draft`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+  },
+
+  resolveEnergyQueryContext(
+    body: EnergyQueryContextRequestDto,
+  ): Promise<EnergyQueryContextDto> {
+    return requestEnvelope<EnergyQueryContextDto>("/api/v1/energy/query-context/resolve", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  executeEnergyScopeAnalysis(
+    body: EnergyQueryContextRequestDto,
+  ): Promise<EnergyScopeAnalysisDto> {
+    return requestEnvelope<EnergyScopeAnalysisDto>("/api/v1/energy/analysis/execute", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  },
+
+  resolveProjectAnalysis(
+    body: EnergyQueryContextRequestDto,
+    options?: { bypassCache?: boolean },
+  ): Promise<EnergyProjectAnalysisResolutionDto> {
+    return requestEnvelope<EnergyProjectAnalysisResolutionDto>("/api/v1/energy/analysis/resolve", {
+      method: "POST",
+      body: JSON.stringify(options?.bypassCache ? { ...body, bypassCache: true } : body),
+    });
+  },
+
+  getEnergyOverviewAiArtifact(
+    projectId: string,
+    scopeId: string,
+  ): Promise<EnergyOverviewAiArtifactDto> {
+    const params = new URLSearchParams({ scopeId });
+    return requestEnvelope<EnergyOverviewAiArtifactDto>(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-ai-artifact?${params.toString()}`,
+    );
+  },
+
+  completeEnergyOverviewAiArtifact(
+    projectId: string,
+    result: EnergyOverviewAiArtifactDto["result"],
+  ): Promise<EnergyOverviewAiArtifactDto> {
+    return requestEnvelope<EnergyOverviewAiArtifactDto>(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-ai-artifact/complete`,
+      { method: "POST", body: JSON.stringify({ result }) },
+    );
+  },
+
+  attachEnergySavedAnalysisAiArtifact(
+    projectId: string,
+    analysisId: string,
+    aiArtifact: EnergySavedAnalysisAiArtifactInputDto,
+  ): Promise<EnergySavedAnalysisDetailDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/saved-analyses/${encodeURIComponent(analysisId)}/ai-result`,
+      { method: "POST", body: JSON.stringify({ aiArtifact }) },
+    );
+  },
+
+  listEnergyImportBatches(projectId: string): Promise<EnergyImportBatchesResponseDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/imports`,
+    );
+  },
+
+  uploadEnergyExcelImport(
+    projectId: string,
+    file: File,
+  ): Promise<{ batch: EnergyImportBatchDto; duplicate: boolean }> {
+    const form = new FormData();
+    form.append("file", file);
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/imports/excel`,
+      { method: "POST", body: form },
+    );
+  },
+
+  materializeEnergyImportBatch(
+    projectId: string,
+    batchId: string,
+  ): Promise<EnergyImportMaterializationResponseDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/imports/${encodeURIComponent(batchId)}/materialize`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
   },
 
   getDevIdentities(): Promise<DevIdentitiesResponseDto> {
@@ -341,10 +739,11 @@ export const configApi = {
     });
   },
 
-  listSessions(options: { limit?: number; cursor?: string } = {}): Promise<SessionListResponseDto> {
+  listSessions(options: { limit?: number; cursor?: string; projectId?: string } = {}): Promise<SessionListResponseDto> {
     const params = new URLSearchParams();
     if (options.limit !== undefined) params.set("limit", String(options.limit));
     if (options.cursor) params.set("cursor", options.cursor);
+    if (options.projectId) params.set("projectId", options.projectId);
     return requestEnvelope<SessionListResponseDto>(`/api/v1/sessions${queryString(params)}`);
   },
 

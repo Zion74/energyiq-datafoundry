@@ -21,6 +21,7 @@ import { btnSecondaryClass, panelTitleClass, sectionLabelClass } from "../ui-tok
 type DataLinkPanelProps = {
   onBack: () => void;
   onOpenMcpSettings: () => void;
+  readOnly?: boolean;
 };
 
 type GraphNodeType = "table" | "column" | "concept" | "entity";
@@ -97,7 +98,11 @@ type GraphStats = Record<GraphNodeType | "edge", number>;
 const GRAPH_NODE_TYPES: GraphNodeType[] = ["table", "column", "concept", "entity"];
 const DEFAULT_CANVAS_HEIGHT = 620;
 
-export function DataLinkPanel({ onBack, onOpenMcpSettings }: DataLinkPanelProps) {
+export function DataLinkPanel({
+  onBack,
+  onOpenMcpSettings,
+  readOnly = false,
+}: DataLinkPanelProps) {
   const t = useT();
   const [servers, setServers] = useState<DatalinkServerDto[]>([]);
   const [serverId, setServerId] = useState("");
@@ -282,11 +287,13 @@ export function DataLinkPanel({ onBack, onOpenMcpSettings }: DataLinkPanelProps)
   return (
     <div className="flex min-h-0 min-w-0 flex-col overflow-hidden bg-surface">
       <PanelHeader
+        businessView={readOnly}
         graph={graph}
         loadingGraph={loadingGraph}
         onBack={onBack}
         onOpenMcpSettings={onOpenMcpSettings}
         onRefresh={() => void loadGraph(serverId)}
+        showMcpSettings={!readOnly}
       />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
@@ -297,15 +304,21 @@ export function DataLinkPanel({ onBack, onOpenMcpSettings }: DataLinkPanelProps)
             <LoadingServersState />
           ) : (
             <>
-              <ServerToolbar
-                loadingServers={loadingServers}
-                serverId={serverId}
-                servers={servers}
-                onServerChange={setServerId}
-              />
+              {readOnly ? null : (
+                <ServerToolbar
+                  loadingServers={loadingServers}
+                  serverId={serverId}
+                  servers={servers}
+                  onServerChange={setServerId}
+                />
+              )}
 
               {servers.length === 0 ? (
-                <EmptyGraphState onOpenMcpSettings={onOpenMcpSettings} />
+                <EmptyGraphState
+                  businessView={readOnly}
+                  canConfigure={!readOnly}
+                  onOpenMcpSettings={onOpenMcpSettings}
+                />
               ) : (
                 <>
                   <StatsStrip graphStats={graphStats} visibleGraph={visibleGraph.data} />
@@ -353,7 +366,7 @@ export function DataLinkPanel({ onBack, onOpenMcpSettings }: DataLinkPanelProps)
                     />
                   </section>
 
-                  <section className="grid gap-4 xl:grid-cols-3">
+                  <section className={readOnly ? "" : "grid gap-4 xl:grid-cols-3"}>
                     <ExplorePanel
                       busy={busyAction === "explore"}
                       focus={exploreFocus}
@@ -379,49 +392,53 @@ export function DataLinkPanel({ onBack, onOpenMcpSettings }: DataLinkPanelProps)
                         )
                       }
                     />
-                    <AddTablePanel
-                      busy={busyAction === "add_table"}
-                      schemaName={schemaName}
-                      source={source}
-                      sourceType={sourceType}
-                      table={table}
-                      onRun={() =>
-                        runAction("add_table", async () => {
-                          const response = await configApi.addDatalinkTable(serverId, {
-                            source,
-                            sourceType,
-                            ...(schemaName.trim() ? { schemaName } : {}),
-                            ...(table.trim() ? { table } : {}),
-                          });
-                          return response.result;
-                        })
-                      }
-                      onSchemaNameChange={setSchemaName}
-                      onSourceChange={setSource}
-                      onSourceTypeChange={setSourceType}
-                      onTableChange={setTable}
-                    />
-                    <GraphMaintenancePanel
-                      actionResult={actionResult}
-                      busyAction={busyAction}
-                      selectedNode={selectedNode}
-                      tableNodes={tableNodes}
-                      onRebuild={() =>
-                        runAction("rebuild", async () => {
-                          const response = await configApi.rebuildDatalink(serverId);
-                          return response.result;
-                        })
-                      }
-                      onRemoveTable={(tableId) =>
-                        runAction("remove_table", async () => {
-                          const response = await configApi.removeDatalinkTable(serverId, {
-                            cleanupOrphans: true,
-                            tableId,
-                          });
-                          return response.result;
-                        })
-                      }
-                    />
+                    {readOnly ? null : (
+                      <>
+                        <AddTablePanel
+                          busy={busyAction === "add_table"}
+                          schemaName={schemaName}
+                          source={source}
+                          sourceType={sourceType}
+                          table={table}
+                          onRun={() =>
+                            runAction("add_table", async () => {
+                              const response = await configApi.addDatalinkTable(serverId, {
+                                source,
+                                sourceType,
+                                ...(schemaName.trim() ? { schemaName } : {}),
+                                ...(table.trim() ? { table } : {}),
+                              });
+                              return response.result;
+                            })
+                          }
+                          onSchemaNameChange={setSchemaName}
+                          onSourceChange={setSource}
+                          onSourceTypeChange={setSourceType}
+                          onTableChange={setTable}
+                        />
+                        <GraphMaintenancePanel
+                          actionResult={actionResult}
+                          busyAction={busyAction}
+                          selectedNode={selectedNode}
+                          tableNodes={tableNodes}
+                          onRebuild={() =>
+                            runAction("rebuild", async () => {
+                              const response = await configApi.rebuildDatalink(serverId);
+                              return response.result;
+                            })
+                          }
+                          onRemoveTable={(tableId) =>
+                            runAction("remove_table", async () => {
+                              const response = await configApi.removeDatalinkTable(serverId, {
+                                cleanupOrphans: true,
+                                tableId,
+                              });
+                              return response.result;
+                            })
+                          }
+                        />
+                      </>
+                    )}
                   </section>
                 </>
               )}
@@ -434,17 +451,21 @@ export function DataLinkPanel({ onBack, onOpenMcpSettings }: DataLinkPanelProps)
 }
 
 function PanelHeader({
+  businessView,
   graph,
   loadingGraph,
   onBack,
   onOpenMcpSettings,
   onRefresh,
+  showMcpSettings,
 }: {
+  businessView: boolean;
   graph: DatalinkGraphDto | null;
   loadingGraph: boolean;
   onBack: () => void;
   onOpenMcpSettings: () => void;
   onRefresh: () => void;
+  showMcpSettings: boolean;
 }) {
   const t = useT();
   return (
@@ -459,17 +480,27 @@ function PanelHeader({
         <BackIcon />
       </button>
       <div className="min-w-0 flex-1">
-        <h2 className={panelTitleClass}>{t("dataLink.title")}</h2>
+        <h2 className={panelTitleClass}>
+          {businessView ? "Data Map" : t("dataLink.title")}
+        </h2>
         <p className="text-xs text-muted-light">
-          {graph ? t("dataLink.nodesEdges", { nodes: graph.nodes.length, edges: graph.edges.length }) : t("dataLink.subtitle")}
+          {businessView
+            ? graph
+              ? `${graph.nodes.length} entities · ${graph.edges.length} relationships`
+              : "Published project structure and trusted data relationships"
+            : graph
+              ? t("dataLink.nodesEdges", { nodes: graph.nodes.length, edges: graph.edges.length })
+              : t("dataLink.subtitle")}
         </p>
       </div>
       <button type="button" onClick={onRefresh} className={btnSecondaryClass}>
         {loadingGraph ? t("common.refreshing") : t("common.refresh")}
       </button>
-      <button type="button" onClick={onOpenMcpSettings} className={btnSecondaryClass}>
-        {t("dataLink.mcpSettings")}
-      </button>
+      {showMcpSettings ? (
+        <button type="button" onClick={onOpenMcpSettings} className={btnSecondaryClass}>
+          {t("dataLink.mcpSettings")}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -886,14 +917,30 @@ function LoadingServersState() {
   );
 }
 
-function EmptyGraphState({ onOpenMcpSettings }: { onOpenMcpSettings: () => void }) {
+function EmptyGraphState({
+  businessView,
+  canConfigure,
+  onOpenMcpSettings,
+}: {
+  businessView: boolean;
+  canConfigure: boolean;
+  onOpenMcpSettings: () => void;
+}) {
   const t = useT();
   return (
     <section className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-5 py-8 text-center">
-      <p className="text-sm font-semibold text-slate-800">{t("dataLink.emptyTitle")}</p>
-      <button type="button" onClick={onOpenMcpSettings} className={`mt-4 ${btnSecondaryClass}`}>
-        {t("dataLink.openMcpSettings")}
-      </button>
+      <p className="text-sm font-semibold text-slate-800">
+        {businessView ? "No published data map yet" : t("dataLink.emptyTitle")}
+      </p>
+      {canConfigure ? (
+        <button type="button" onClick={onOpenMcpSettings} className={`mt-4 ${btnSecondaryClass}`}>
+          {t("dataLink.openMcpSettings")}
+        </button>
+      ) : (
+        <p className="mt-2 text-xs text-slate-500">
+          No published semantic map is available for this project yet.
+        </p>
+      )}
     </section>
   );
 }

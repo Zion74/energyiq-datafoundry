@@ -51,7 +51,8 @@
     "chineseShort": "中"
   },
   "sidebar": {
-    "brand": "DataFoundry",
+    "brand": "EnergyIQ",
+    "analysisTitle": "AI 分析",
     "sessionCount": "{{count}} 个会话",
     "workspaceResources": "工作区资源",
     "newTask": "新建数据任务",
@@ -219,7 +220,7 @@
     "metricOutputs": "输出",
     "metricItems": "{{count}} 项",
     "currentQuestion": "当前问题",
-    "startPrompt": "发送问题以启动 DataFoundry。",
+    "startPrompt": "发送问题以启动 EnergyIQ。",
     "steps": "步骤",
     "stepsSession": "步骤（会话）",
     "successRate": "成功率",
@@ -335,6 +336,8 @@
     "addDataSource": "添加数据源",
     "startFromGallery": "从适配器图库开始创建。",
     "workspaceDefault": "工作区默认",
+    "systemDefault": "系统默认",
+    "availableProfile": "可用模型",
     "disabledByDefault": "默认禁用",
     "secretSaved": "密钥已保存",
     "testConnection": "测试连接",

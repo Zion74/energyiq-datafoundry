@@ -11,13 +11,14 @@ import { AuthMailer } from "./mailer.js";
 import { createSecretToken, hashPassword, hashToken, verifyPassword } from "./crypto.js";
 
 const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
-const EMAIL_VERIFICATION_TTL_MS = 1000 * 60 * 60 * 24;
+const ACCOUNT_INVITATION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const PASSWORD_RESET_TTL_MS = 1000 * 60 * 30;
 
 export type AuthUserDto = {
   id: string;
   email?: string;
   displayName?: string;
+  avatarUrl?: string;
 };
 
 export type AuthWorkspaceDto = {
@@ -55,17 +56,89 @@ export class AuthService {
     password: string;
     userAgent?: string | undefined;
   }): Promise<{ user: AuthUserDto; workspace: AuthWorkspaceDto; verificationToken?: string }> {
+    void input;
+    throw new AuthError(403, "FORBIDDEN", "Public registration is closed. Ask an administrator for an invitation.");
+  }
+
+  async inviteUser(input: {
+    displayName?: string | undefined;
+    email: string;
+    inviterUserId: string;
+  }): Promise<{
+    active: boolean;
+    invitationUrl?: string;
+    user: AuthUserDto;
+  }> {
     const email = normalizeEmail(input.email);
-    assertPassword(input.password);
-    this.checkRateLimit(`register:ip:${input.ipAddress ?? "unknown"}`, 5, 60 * 60);
-    if (this.metadataStore.users.findByEmail({ email })) {
-      throw new AuthError(409, "CONFLICT", "Email is already registered.");
+    const existing = this.metadataStore.users.findByEmail({ email });
+    if (existing?.disabled_at) {
+      throw new AuthError(409, "CONFLICT", "The account is disabled. Enable it before adding access.");
     }
-    const user = this.metadataStore.users.createPasswordUser({
+    if (existing?.email_verified_at && existing.password_updated_at) {
+      return { active: true, user: userDto(existing) };
+    }
+    this.mailer.assertDeliveryConfigured();
+    const user = existing ?? this.metadataStore.users.createPasswordUser({
       id: randomUUID(),
       email,
       ...(input.displayName ? { display_name: normalizeDisplayName(input.displayName) } : {})
     });
+    if (input.displayName && existing) {
+      this.metadataStore.users.updateDisplayName({
+        user_id: user.id,
+        display_name: normalizeDisplayName(input.displayName)
+      });
+    }
+    this.metadataStore.authTokens.consumeOpenByUser({
+      user_id: user.id,
+      purpose: "account_invitation"
+    });
+    const invitationToken = createSecretToken();
+    this.metadataStore.authTokens.create({
+      id: randomUUID(),
+      user_id: user.id,
+      purpose: "account_invitation",
+      token_hash: hashToken(invitationToken, this.config.sessionSecret),
+      expires_at: new Date(Date.now() + ACCOUNT_INVITATION_TTL_MS).toISOString()
+    });
+    const mail = await this.mailer.sendInvitation({ email, token: invitationToken });
+    this.audit(existing ? "auth.invitation_resent" : "auth.invitation_created", {
+      email,
+      metadata: { invitedUserId: user.id, inviterUserId: input.inviterUserId },
+      userId: input.inviterUserId
+    });
+    return {
+      active: false,
+      user: userDto(this.metadataStore.users.getById({ user_id: user.id })),
+      ...(mail.testUrl ? { invitationUrl: mail.testUrl } : {})
+    };
+  }
+
+  async acceptInvitation(input: {
+    displayName?: string | undefined;
+    ipAddress?: string | undefined;
+    password: string;
+    token: string;
+    userAgent?: string | undefined;
+  }): Promise<{
+    csrfToken: string;
+    maxAgeSeconds: number;
+    sessionToken: string;
+    user: AuthUserDto;
+    workspace: AuthWorkspaceDto;
+  }> {
+    assertPassword(input.password);
+    const token = this.requireToken("account_invitation", input.token);
+    let user = this.metadataStore.users.getById({ user_id: token.user_id });
+    if (user.disabled_at) {
+      throw new AuthError(403, "FORBIDDEN", "This account is disabled.");
+    }
+    if (input.displayName) {
+      user = this.metadataStore.users.updateDisplayName({
+        user_id: user.id,
+        display_name: normalizeDisplayName(input.displayName)
+      });
+    }
     const password = await hashPassword(input.password);
     this.metadataStore.userPasswordCredentials.set({
       user_id: user.id,
@@ -73,22 +146,19 @@ export class AuthService {
       password_hash_params: password.params
     });
     this.metadataStore.users.touchPasswordUpdated({ user_id: user.id });
-    const workspace = this.ensurePersonalWorkspace(user);
-    const verificationToken = createSecretToken();
-    this.metadataStore.authTokens.create({
-      id: randomUUID(),
-      user_id: user.id,
-      purpose: "email_verification",
-      token_hash: hashToken(verificationToken, this.config.sessionSecret),
-      expires_at: new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS).toISOString()
+    user = this.metadataStore.users.markEmailVerified({ user_id: user.id });
+    this.metadataStore.authTokens.consume({ id: token.id });
+    this.audit("auth.invitation_accepted", {
+      email: user.email,
+      ipAddress: input.ipAddress,
+      userAgent: input.userAgent,
+      userId: user.id
     });
-    const mail = await this.mailer.sendVerification({ email, token: verificationToken });
-    this.audit("auth.register", { email, ipAddress: input.ipAddress, userAgent: input.userAgent, userId: user.id });
-    return {
-      user: userDto(user),
-      workspace: workspaceDto(workspace),
-      ...(mail.testToken ? { verificationToken: mail.testToken } : {})
-    };
+    return this.createAuthenticatedSession({
+      user,
+      ...(input.ipAddress ? { ipAddress: input.ipAddress } : {}),
+      ...(input.userAgent ? { userAgent: input.userAgent } : {})
+    });
   }
 
   async verifyEmail(input: {
@@ -147,32 +217,17 @@ export class AuthService {
       });
       throw new AuthError(401, "UNAUTHORIZED", "Invalid email or password.");
     }
-    const sessionToken = createSecretToken();
-    const csrfToken = createSecretToken();
-    const session = this.metadataStore.authSessions.create({
-      id: randomUUID(),
-      user_id: user.id,
-      token_hash: hashToken(sessionToken, this.config.sessionSecret),
-      csrf_token_hash: hashToken(csrfToken, this.config.sessionSecret),
-      expires_at: new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString(),
-      ...(input.ipAddress ? { ip_address: input.ipAddress } : {}),
-      ...(input.userAgent ? { user_agent: input.userAgent } : {})
-    });
-    const workspace = this.ensurePersonalWorkspace(user);
     this.audit("auth.login_succeeded", {
       email,
       ipAddress: input.ipAddress,
-      metadata: { sessionId: session.id },
       userAgent: input.userAgent,
       userId: user.id
     });
-    return {
-      csrfToken,
-      maxAgeSeconds: SESSION_TTL_SECONDS,
-      sessionToken,
-      user: userDto(user),
-      workspace: workspaceDto(workspace)
-    };
+    return this.createAuthenticatedSession({
+      user,
+      ...(input.ipAddress ? { ipAddress: input.ipAddress } : {}),
+      ...(input.userAgent ? { userAgent: input.userAgent } : {})
+    });
   }
 
   async forgotPassword(input: {
@@ -183,7 +238,7 @@ export class AuthService {
     const email = normalizeEmail(input.email);
     this.checkRateLimit(`password-reset:email:${email}`, 3, 60 * 60);
     const user = this.metadataStore.users.findByEmail({ email });
-    if (!user) {
+    if (!user || !user.email_verified_at || user.disabled_at) {
       this.audit("auth.password_reset_requested_unknown", {
         email,
         ipAddress: input.ipAddress,
@@ -334,7 +389,7 @@ export class AuthService {
     return { revoked: true };
   }
 
-  private requireToken(purpose: "email_verification" | "password_reset", token: string) {
+  private requireToken(purpose: "account_invitation" | "email_verification" | "password_reset", token: string) {
     const record = this.metadataStore.authTokens.findValid({
       purpose,
       token_hash: hashToken(token, this.config.sessionSecret)
@@ -343,6 +398,43 @@ export class AuthService {
       throw new AuthError(400, "BAD_REQUEST", "Token is invalid or expired.");
     }
     return record;
+  }
+
+  private createAuthenticatedSession(input: {
+    user: UserRecord;
+    ipAddress?: string;
+    userAgent?: string;
+  }): {
+    csrfToken: string;
+    maxAgeSeconds: number;
+    sessionToken: string;
+    user: AuthUserDto;
+    workspace: AuthWorkspaceDto;
+  } {
+    const sessionToken = createSecretToken();
+    const csrfToken = createSecretToken();
+    const session = this.metadataStore.authSessions.create({
+      id: randomUUID(),
+      user_id: input.user.id,
+      token_hash: hashToken(sessionToken, this.config.sessionSecret),
+      csrf_token_hash: hashToken(csrfToken, this.config.sessionSecret),
+      expires_at: new Date(Date.now() + SESSION_TTL_SECONDS * 1000).toISOString(),
+      ...(input.ipAddress ? { ip_address: input.ipAddress } : {}),
+      ...(input.userAgent ? { user_agent: input.userAgent } : {})
+    });
+    const workspace = this.ensurePersonalWorkspace(input.user);
+    this.audit("auth.session_created", {
+      email: input.user.email,
+      metadata: { sessionId: session.id },
+      userId: input.user.id
+    });
+    return {
+      csrfToken,
+      maxAgeSeconds: SESSION_TTL_SECONDS,
+      sessionToken,
+      user: userDto(input.user),
+      workspace: workspaceDto(workspace)
+    };
   }
 
   private ensurePersonalWorkspace(user: UserRecord): WorkspaceRecord {
@@ -407,7 +499,8 @@ export function userDto(user: UserRecord): AuthUserDto {
   return {
     id: user.id,
     ...(user.email ? { email: user.email } : {}),
-    ...(user.display_name ? { displayName: user.display_name } : {})
+    ...(user.display_name ? { displayName: user.display_name } : {}),
+    ...(user.avatar_url ? { avatarUrl: user.avatar_url } : {})
   };
 }
 
@@ -432,8 +525,8 @@ function normalizeDisplayName(value: string): string {
 }
 
 function assertPassword(password: string): void {
-  if (password.length < 6) {
-    throw new AuthError(400, "BAD_REQUEST", "Password must be at least 6 characters.");
+  if (password.length < 8) {
+    throw new AuthError(400, "BAD_REQUEST", "Password must be at least 8 characters.");
   }
 }
 

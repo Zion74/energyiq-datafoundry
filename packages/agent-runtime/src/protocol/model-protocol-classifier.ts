@@ -1,5 +1,9 @@
 import { Agent } from "@mastra/core/agent";
-import type { ModelProvider } from "@datafoundry/providers";
+import {
+  createModelHelperProviderOptions,
+  createModelHelperSettings,
+  type ModelProvider
+} from "@datafoundry/providers";
 import { z } from "zod";
 
 import { AGENT_RUNTIME_LIMITS } from "../config/agent-runtime-limits.js";
@@ -50,7 +54,14 @@ export const createModelProtocolClassifier = (
   return async (input) => {
     const output = await agent.generate(createProtocolClassificationPrompt(input), {
       maxSteps: AGENT_RUNTIME_LIMITS.modelHelperMaxSteps,
-      modelSettings: { maxOutputTokens: AGENT_RUNTIME_LIMITS.protocolClassifierMaxOutputTokens, temperature: 0 }
+      modelSettings: createModelHelperSettings({
+        modelName: provider.model_name,
+        maxOutputTokens: AGENT_RUNTIME_LIMITS.protocolClassifierMaxOutputTokens
+      }),
+      providerOptions: createModelHelperProviderOptions({
+        providerId: provider.provider_id,
+        modelName: provider.model_name
+      })
     });
     return parseProtocolClassificationText(output.text);
   };

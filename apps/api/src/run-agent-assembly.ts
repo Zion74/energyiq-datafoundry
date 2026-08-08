@@ -7,6 +7,8 @@ import {
   type AgentRunContext,
   type AgentContextItem,
   type AgUiEventEmitter,
+  type AnalysisContractGrounder,
+  type AnalysisContextEvidenceCatalog,
   type ContextPackage,
   type ContextPackageRecorder,
   type GoalRuntimeAdapter,
@@ -14,6 +16,7 @@ import {
   type ContextPackageRef,
   type ProtocolStateStore,
   type TaskStateRuntime,
+  type TrustedEnergyTextQueryContract,
   type WorkspaceAttachment
 } from "@datafoundry/agent-runtime";
 import type { DataGateway } from "@datafoundry/data-gateway";
@@ -26,6 +29,7 @@ import type { InteractionResume } from "./interaction-runtime-adapter.js";
 import { createPolicyMcpTools } from "./policy-mcp-tools.js";
 import type { McpRuntime, ResolvedRunConfig } from "./run-config-resolver.js";
 import type { EffectiveRunConfig } from "./run-input.js";
+import type { EnergyQueryContext } from "./energy/energy-query-context.js";
 
 export type RunAgentAssembly = {
   destroyWorkspace(): Promise<void>;
@@ -47,15 +51,19 @@ export type RunAgentAssembly = {
 type CreateRunAgentContextInput = {
   effectiveRunConfig: EffectiveRunConfig;
   modelProvider: ResolvedRunConfig["modelProvider"];
+  reasoningModel?: boolean;
   runId: string;
   selectedDatasourceId?: string;
   sessionId: string;
   userId: string;
   userInput: string;
   workspaceId: string;
+  energyQueryContext?: EnergyQueryContext | TrustedEnergyTextQueryContract;
 };
 
 type CreateRunAgentAssemblyInput = {
+  analysisContractGrounder?: AnalysisContractGrounder;
+  contextEvidenceCatalog?: AnalysisContextEvidenceCatalog;
   abortSignal?: AbortSignal | undefined;
   artifactService: ArtifactService;
   dataGateway: DataGateway;
@@ -127,7 +135,13 @@ export const createRunAgentContext = (input: CreateRunAgentContextInput): AgentR
     ...(input.effectiveRunConfig.evidenceRefs.length > 0
       ? { evidence_refs: input.effectiveRunConfig.evidenceRefs }
       : {}),
-    model_name: input.modelProvider.model_name
+    model_name: input.modelProvider.model_name,
+    ...(input.reasoningModel !== undefined
+      ? { reasoning_model: input.reasoningModel }
+      : {}),
+    ...(input.energyQueryContext
+      ? { energy_query_context: input.energyQueryContext }
+      : {})
   });
 
 /** Assemble the Mastra-backed AG-UI agent and its run-scoped execution metadata. */
@@ -147,6 +161,12 @@ export const createRunAgentAssembly = async (
     workspaceDir,
     sessionDir
   } = await createDataFoundry({
+    ...(input.analysisContractGrounder
+      ? { analysisContractGrounder: input.analysisContractGrounder }
+      : {}),
+    ...(input.contextEvidenceCatalog
+      ? { contextEvidenceCatalog: input.contextEvidenceCatalog }
+      : {}),
     ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
     artifactService: input.artifactService,
     ...(input.contextPackageRecorder ? { contextPackageRecorder: input.contextPackageRecorder } : {}),

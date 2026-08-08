@@ -9,6 +9,14 @@ site/
 .turbo/
 .next/
 **/.next/
+**/.next-*/
+*.log
+**/__pycache__/
+~$*
+**/.impeccable/
+data/raw_excel/
+docs/Net-Zero Product/
+docs/map.png
 coverage/
 artifacts/
 storage/

@@ -3,6 +3,7 @@ import type { MetadataStore, RunRecord } from "@datafoundry/metadata";
 import type { RunCancelRegistry } from "./run-cancel-registry.js";
 
 const LIVE_CLAIM_STATUSES = new Set(["queued", "running"]);
+const RUN_REGISTRATION_GRACE_MS = 60_000;
 
 /**
  * Active metadata rows can outlive the in-process worker after crashes/restarts.
@@ -34,6 +35,12 @@ export function resolveLiveSessionActiveRun(input: {
     ) {
       return active;
     }
+    if (
+      LIVE_CLAIM_STATUSES.has(active.status)
+      && isWithinRunRegistrationGrace(active.started_at)
+    ) {
+      return active;
+    }
     if (!LIVE_CLAIM_STATUSES.has(active.status)) {
       return active;
     }
@@ -45,6 +52,12 @@ export function resolveLiveSessionActiveRun(input: {
     });
   }
 }
+
+const isWithinRunRegistrationGrace = (startedAt: string): boolean => {
+  const startedAtMs = Date.parse(startedAt);
+  return Number.isFinite(startedAtMs)
+    && Date.now() - startedAtMs < RUN_REGISTRATION_GRACE_MS;
+};
 
 /** Cancel queued/running rows that have no live cancel handle (e.g. after process restart). */
 export function reclaimOrphanedQueuedAndRunningRuns(input: {

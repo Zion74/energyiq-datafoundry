@@ -462,12 +462,12 @@ function addEventNode(
   }
 
   if (type === "REASONING_MESSAGE_CONTENT") {
-    updateActiveContext(builder, input, { type: "context", reasoning: stringValue(event.delta) });
+    updateActiveContext(builder, input, { type: "context", reasoning: streamTextValue(event.delta) });
     return undefined;
   }
 
   if (type === "TEXT_MESSAGE_CHUNK" && stringValue(event.role) === "assistant") {
-    updateActiveContext(builder, input, { type: "context", assistantOutput: stringValue(event.delta) });
+    updateActiveContext(builder, input, { type: "context", assistantOutput: streamTextValue(event.delta) });
     return undefined;
   }
 
@@ -854,6 +854,10 @@ function stringArrayValue(value: unknown): string[] | undefined {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function streamTextValue(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
 }
 
 function numberValue(value: unknown): number | undefined {

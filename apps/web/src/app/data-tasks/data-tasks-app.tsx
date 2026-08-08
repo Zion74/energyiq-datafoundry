@@ -18,7 +18,7 @@ import {
 } from "@copilotkit/react-core/v2";
 import type { EvidenceRef } from "@datafoundry/contracts";
 import nextDynamic from "next/dynamic";
-import { Children, cloneElement, isValidElement, useCallback, createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Children, cloneElement, Fragment, isValidElement, useCallback, createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ComponentProps, ComponentType, MouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { z } from "zod";
 import {
@@ -29,6 +29,8 @@ import {
   createChatSession,
   createClientId,
   createWorkspaceConfigItem,
+  dataTaskRuntimeHeaders,
+  dataTaskSessionScopeKey,
   defaultSettingsForKind,
   applyAutoTitle,
   deleteChatSession,
@@ -51,6 +53,7 @@ import {
   persistActiveLlmId,
   persistChatSessions,
   isWorkspaceConfigItemValid,
+  isEnergyIqOverviewSlotSessionId,
   renameChatSession,
   serverSessionDtoToChatSession,
   normalizeSkillSettings,
@@ -198,7 +201,10 @@ import {
   SessionBusyPrompt,
   SessionRemoteBusyBanner,
 } from "./components/chat/SessionBusyPrompt";
-import type { SessionActiveRunDto } from "../../lib/config-api/types";
+import type {
+  SessionActiveRunDto,
+  SessionEnergyContextDto,
+} from "../../lib/config-api/types";
 import { scheduleChatTextareaResize } from "./components/chat/use-chat-textarea-autoresize";
 import { invokeWithReportedError } from "./invoke-with-reported-error";
 import { formatRunErrorMessage } from "./run-error-message";
@@ -961,32 +967,100 @@ function sanitizeWorkspaceConfig(
   };
 }
 
-export default function DataTasksApp() {
+export type DataTasksExternalContext = {
+  source: "energyiq";
+  workspaceId: string;
+  projectId: string;
+  projectName?: string;
+  scopeId?: string;
+  scopeName?: string;
+  resource?: "electricity" | "water";
+  period?: string;
+  from?: string;
+  to?: string;
+  timezone?: string;
+  dataCutoff?: string;
+  dataSnapshotId?: string;
+  historyStatus?: "outdated";
+  historyStatusReason?: string;
+};
+
+export function createInitialDraftPromptRequest(
+  initialDraftPrompt?: string,
+): { id: number; text: string } | null {
+  const text = initialDraftPrompt?.trim();
+  return text ? { id: 1, text } : null;
+}
+
+export default function DataTasksApp({
+  viewport = "standalone",
+  accessMode = "admin",
+  externalContext,
+  initialDraftPrompt,
+  onSessionEnergyContextRestored,
+  inheritIdentity = false,
+}: {
+  viewport?: "standalone" | "embedded";
+  accessMode?: "admin" | "user";
+  externalContext?: DataTasksExternalContext;
+  initialDraftPrompt?: string;
+  onSessionEnergyContextRestored?: (context: SessionEnergyContextDto | null) => void;
+  inheritIdentity?: boolean;
+}) {
+  const shell = (
+    <DataTasksCopilotShell
+      viewport={viewport}
+      accessMode={accessMode}
+      externalContext={externalContext}
+      initialDraftPrompt={initialDraftPrompt}
+      onSessionEnergyContextRestored={onSessionEnergyContextRestored}
+    />
+  );
+
   return (
     <LocaleProvider>
-      <DataTaskIdentityProvider>
-        <DataTasksCopilotShell />
-      </DataTaskIdentityProvider>
+      {inheritIdentity ? shell : <DataTaskIdentityProvider>{shell}</DataTaskIdentityProvider>}
     </LocaleProvider>
   );
 }
 
-function DataTasksCopilotShell() {
+function DataTasksCopilotShell({
+  viewport,
+  accessMode,
+  externalContext,
+  initialDraftPrompt,
+  onSessionEnergyContextRestored,
+}: {
+  viewport: "standalone" | "embedded";
+  accessMode: "admin" | "user";
+  externalContext?: DataTasksExternalContext;
+  initialDraftPrompt?: string;
+  onSessionEnergyContextRestored?: (context: SessionEnergyContextDto | null) => void;
+}) {
   const [copilotProperties, setCopilotProperties] = useState<Record<string, unknown>>(
     {},
   );
   const { authHeaders, scopeKey } = useDataTaskIdentity();
+  const sessionScopeKey = dataTaskSessionScopeKey(
+    scopeKey,
+    externalContext
+      ? {
+          workspaceId: externalContext.workspaceId,
+          projectId: externalContext.projectId,
+        }
+      : undefined,
+  );
 
   useEffect(() => {
     setCopilotProperties({});
-  }, [scopeKey]);
+  }, [sessionScopeKey]);
 
   return (
     <CopilotKit
-      key={scopeKey}
+      key={sessionScopeKey}
       runtimeUrl={runtimeUrl}
       agent={runtimeAgentId}
-      headers={() => authHeaders}
+      headers={() => dataTaskRuntimeHeaders(authHeaders, externalContext)}
       useSingleEndpoint
       showDevConsole={false}
       enableInspector={false}
@@ -1020,8 +1094,13 @@ function DataTasksCopilotShell() {
       <CollaborationResponsesProvider>
         <LiveRunProvider>
           <DataTaskWorkspace
-            key={scopeKey}
-            identityScopeKey={scopeKey}
+            key={sessionScopeKey}
+            identityScopeKey={sessionScopeKey}
+            viewport={viewport}
+            accessMode={accessMode}
+            externalContext={externalContext}
+            initialDraftPrompt={initialDraftPrompt}
+            onSessionEnergyContextRestored={onSessionEnergyContextRestored}
             onCopilotPropertiesChange={setCopilotProperties}
           />
         </LiveRunProvider>
@@ -1032,9 +1111,19 @@ function DataTasksCopilotShell() {
 
 function DataTaskWorkspace({
   identityScopeKey,
+  viewport,
+  accessMode,
+  externalContext,
+  initialDraftPrompt,
+  onSessionEnergyContextRestored,
   onCopilotPropertiesChange,
 }: {
   identityScopeKey: string;
+  viewport: "standalone" | "embedded";
+  accessMode: "admin" | "user";
+  externalContext?: DataTasksExternalContext;
+  initialDraftPrompt?: string;
+  onSessionEnergyContextRestored?: (context: SessionEnergyContextDto | null) => void;
   onCopilotPropertiesChange: (properties: Record<string, unknown>) => void;
 }) {
   const t = useT();
@@ -1102,7 +1191,7 @@ function DataTaskWorkspace({
   const [draftPromptRequest, setDraftPromptRequest] = useState<{
     id: number;
     text: string;
-  } | null>(null);
+  } | null>(() => createInitialDraftPromptRequest(initialDraftPrompt));
   const consumeDraftPromptRequest = useCallback((id: number) => {
     setDraftPromptRequest((current) => (current?.id === id ? null : current));
   }, []);
@@ -1115,6 +1204,7 @@ function DataTaskWorkspace({
   const stopActiveChatRunRef = useRef<(() => void) | undefined>(undefined);
   const [chatColumnWidth, setChatColumnWidth] = useState(1280);
   const [layoutHydrated, setLayoutHydrated] = useState(false);
+  const energyIqSessionMode = externalContext !== undefined;
 
   useEffect(() => {
     setLayoutHydrated(true);
@@ -1316,7 +1406,9 @@ function DataTaskWorkspace({
   }, [canDockRightPanel, isConsoleDrawerOpen]);
 
   useEffect(() => {
-    const stored = loadChatSessions(identityScopeKey);
+    const stored = loadChatSessions(identityScopeKey).filter(
+      (session) => !energyIqSessionMode || !isEnergyIqOverviewSlotSessionId(session.id),
+    );
     if (stored.length > 0) {
       setSessions(stored);
       setActiveSessionId(stored[0].id);
@@ -1325,11 +1417,14 @@ function DataTaskWorkspace({
     const first = createChatSession(defaultSessionTitle);
     setSessions([first]);
     setActiveSessionId(first.id);
-  }, [defaultSessionTitle, identityScopeKey]);
+  }, [defaultSessionTitle, energyIqSessionMode, identityScopeKey]);
 
   useEffect(() => {
     let cancelled = false;
-    void configApi.listSessions({ limit: 50 })
+    void configApi.listSessions({
+      limit: 50,
+      ...(externalContext ? { projectId: externalContext.projectId } : {}),
+    })
       .then((response) => {
         if (cancelled) return;
         if (response.sessions.length === 0) {
@@ -1360,7 +1455,7 @@ function DataTaskWorkspace({
     return () => {
       cancelled = true;
     };
-  }, [defaultSessionTitle, identityScopeKey]);
+  }, [defaultSessionTitle, externalContext?.projectId, identityScopeKey]);
 
   useEffect(() => {
     if (sessions.length > 0) persistChatSessions(sessions, identityScopeKey);
@@ -1830,14 +1925,29 @@ function DataTaskWorkspace({
             audits: liveRun.audits,
             artifacts: liveRun.artifacts,
           },
+          ...(externalContext ? { externalContext } : {}),
           selection,
         }),
       ) as JsonSerializable,
-    [activeSession, activeDatasourceId, activeLlmId, liveRun, selection, workspaceConfig],
+    [
+      activeSession,
+      activeDatasourceId,
+      activeLlmId,
+      externalContext,
+      liveRun,
+      selection,
+      workspaceConfig,
+    ],
   );
 
   const visibleArtifacts = liveRun.artifacts;
   const visibleTimelineEvents = liveRun.events;
+  const energyAnalystProtocol = useMemo(
+    () => externalContext
+      ? { protocolId: "data-analysis", protocolVersion: "1" }
+      : undefined,
+    [externalContext],
+  );
 
   const runConfigPayload = useMemo(
     () =>
@@ -1848,10 +1958,12 @@ function DataTaskWorkspace({
         perRunSelection,
         perRunFiles,
         evidenceRefs: selectedEvidenceRefs,
+        ...(energyAnalystProtocol ? { protocol: energyAnalystProtocol } : {}),
       }),
     [
       activeLlmId,
       activeSession,
+      energyAnalystProtocol,
       perRunFiles,
       perRunSelection,
       runDefaults?.activeDatasourceId,
@@ -1881,6 +1993,7 @@ function DataTaskWorkspace({
     runDefaultsActiveDatasourceId: runDefaults?.activeDatasourceId,
     activeThreadId,
     pendingCheckpointResume,
+    energyAnalystProtocol,
   });
   runConfigInputsRef.current = {
     workspaceConfig,
@@ -1893,6 +2006,7 @@ function DataTaskWorkspace({
     runDefaultsActiveDatasourceId: runDefaults?.activeDatasourceId,
     activeThreadId,
     pendingCheckpointResume,
+    energyAnalystProtocol,
   };
 
   const getRunForwardedProps = useCallback(() => {
@@ -1904,6 +2018,7 @@ function DataTaskWorkspace({
       perRunSelection: inputs.perRunSelection,
       perRunFiles: inputs.perRunFiles,
       evidenceRefs: inputs.selectedEvidenceRefs,
+      ...(inputs.energyAnalystProtocol ? { protocol: inputs.energyAnalystProtocol } : {}),
     });
     const checkpointId =
       inputs.pendingCheckpointResume?.sessionId === inputs.activeThreadId
@@ -1933,19 +2048,27 @@ function DataTaskWorkspace({
     description: "Current data task workspace state",
     value: agentContext,
   });
+  useAgentContext({
+    description:
+      "Trusted host context for the current EnergyIQ project, selected scope, resource and reporting period",
+    value: externalContext ?? {},
+  });
 
   const chatInputBindings = useMemo(
     () => ({
       activeLlmId,
       llmOptions: enabledLlmOptions,
       onActiveLlmChange: setActiveLlmId,
-      onOpenLlmConfig: () => openConfigPanel("llm"),
-      mentionResources,
+      onOpenLlmConfig:
+        accessMode === "admin" ? () => openConfigPanel("llm") : undefined,
+      showResourceControls: accessMode === "admin",
+      mentionResources: accessMode === "admin" ? mentionResources : [],
       perRunSelection,
       onTogglePerRunMention: togglePerRunMentionItem,
       onRemovePerRunMention: removePerRunMentionItem,
       onClearPerRunMentions: clearPerRunMentions,
-      fileMentionResources,
+      fileMentionResources:
+        accessMode === "admin" ? fileMentionResources : [],
       perRunFiles,
       onTogglePerRunFileMention: togglePerRunFileMentionItem,
       onRemovePerRunFileMention: removePerRunFileMentionItem,
@@ -1974,6 +2097,7 @@ function DataTaskWorkspace({
     }),
     [
       activeLlmId,
+      accessMode,
       activeAgentId,
       activeSession,
       activeThreadId,
@@ -2089,7 +2213,8 @@ function DataTaskWorkspace({
         data-guide-id="workspace-layout"
         ref={gridRef}
         className={[
-          "grid h-screen min-h-[560px] overflow-hidden bg-surface-subtle text-foreground",
+          "grid min-h-[560px] overflow-hidden bg-surface-subtle text-foreground",
+          viewport === "embedded" ? "h-full" : "h-screen",
           isRightPanelResizing ||
           isLeftPanelResizing ||
           isAutoLayout ||
@@ -2104,6 +2229,7 @@ function DataTaskWorkspace({
             sidebarCollapsed,
             rightPanelWidth,
             leftPanelWidth,
+            viewportWidth: workspaceViewportWidth,
           }),
         }}
       >
@@ -2149,24 +2275,28 @@ function DataTaskWorkspace({
         onDeleteSession={deleteSession}
         onTogglePinSession={togglePinSession}
         workspaceConfig={workspaceConfig}
+        showWorkspaceResources={accessMode === "admin"}
+        hideIdentityChrome={viewport === "embedded"}
         quickStartGuide={
-          <QuickStartGuide
-            workspaceConfig={workspaceConfig}
-            liveRun={liveRun}
-            hasSubmittedTask={
-              agentRenderSnapshot.messageCount > 0 ||
-              liveRun.runStatus !== "idle" ||
-              sessionUsage.runCount > 0
-            }
-            onOpenConfigPanel={openConfigPanel}
-            onOpenTaskConsole={openTaskConsole}
-            onUseExampleQuery={(text) =>
-              setDraftPromptRequest((current) => ({
-                id: (current?.id ?? 0) + 1,
-                text,
-              }))
-            }
-          />
+          accessMode === "admin" ? (
+            <QuickStartGuide
+              workspaceConfig={workspaceConfig}
+              liveRun={liveRun}
+              hasSubmittedTask={
+                agentRenderSnapshot.messageCount > 0 ||
+                liveRun.runStatus !== "idle" ||
+                sessionUsage.runCount > 0
+              }
+              onOpenConfigPanel={openConfigPanel}
+              onOpenTaskConsole={openTaskConsole}
+              onUseExampleQuery={(text) =>
+                setDraftPromptRequest((current) => ({
+                  id: (current?.id ?? 0) + 1,
+                  text,
+                }))
+              }
+            />
+          ) : undefined
         }
       />
 
@@ -2277,6 +2407,8 @@ function DataTaskWorkspace({
         title={activeSession?.title ?? "Data Tasks"}
         workspaceConfig={workspaceConfig}
         activeSession={activeSession}
+        externalContext={externalContext}
+        onSessionEnergyContextRestored={onSessionEnergyContextRestored}
         liveRunStatus={liveRun.runStatus}
         liveRun={liveRun}
         runningThreadIds={runningThreadIds}
@@ -4778,6 +4910,7 @@ function SessionListItem({
       id={`session-item-${session.id}`}
       role="button"
       tabIndex={0}
+      aria-current={active ? "page" : undefined}
       data-testid={`session-item-${session.id}`}
       onClick={onSelect}
       onKeyDown={(event) => {
@@ -4788,7 +4921,7 @@ function SessionListItem({
       }}
       title={session.title}
       className={[
-        "group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 transition-colors duration-150",
+        "group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
         active ? "bg-surface shadow-[var(--shadow-card)]" : "hover:bg-surface",
       ].join(" ")}
     >
@@ -4799,7 +4932,7 @@ function SessionListItem({
       ) : null}
       <span
         className={[
-          "min-w-0 flex-1 truncate text-left text-sm transition",
+          "min-w-0 flex-1 truncate text-left text-ui-body transition",
           active ? "font-medium text-foreground" : "text-muted group-hover:text-foreground",
         ].join(" ")}
       >
@@ -4841,6 +4974,8 @@ type SessionPaneProps = {
   runningThreadIds: ReadonlySet<string>;
   workspaceFileCount: number;
   workspaceConfig: WorkspaceConfigStore;
+  showWorkspaceResources: boolean;
+  hideIdentityChrome: boolean;
   quickStartGuide?: ReactNode;
   capabilitiesReady: boolean;
   onCreateSession: () => void;
@@ -4871,6 +5006,8 @@ function SessionPane({
   runningThreadIds,
   workspaceFileCount,
   workspaceConfig,
+  showWorkspaceResources,
+  hideIdentityChrome,
   quickStartGuide,
   capabilitiesReady,
   onCreateSession,
@@ -4892,54 +5029,64 @@ function SessionPane({
     return (
       <aside
         aria-label={collapsedRailCopy.railLabel}
-        className="relative z-30 flex h-full min-h-0 w-14 min-w-14 max-w-14 shrink-0 flex-col items-center border-r border-border bg-surface-subtle py-3"
+        className="energyiq-collapsed-rail relative z-30 flex h-full min-h-0 shrink-0 flex-col items-center border-r border-border bg-surface-subtle"
       >
-        <div className="group relative">
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            title={collapsedRailCopy.expandLabel}
-            aria-label={collapsedRailCopy.expandLabel}
-            className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-border bg-surface text-foreground shadow-[var(--shadow-card)] transition-colors duration-200 hover:bg-surface-subtle"
-          >
-            <SidebarToggleIcon />
-          </button>
-          <div className={previewClassNames.panel} aria-label="Workspace sidebar preview">
-            <SessionPaneContent
-              activeSessionId={activeSessionId}
-              activeConfigPanel={activeConfigPanel}
-              activeDataLinkPanel={activeDataLinkPanel}
-              activeFilesPanel={activeFilesPanel}
-              filteredSessions={filteredSessions}
-              query={query}
-              sessionCount={sessionCount}
-              runningThreadIds={runningThreadIds}
-              workspaceFileCount={workspaceFileCount}
-              workspaceConfig={workspaceConfig}
-              quickStartGuide={quickStartGuide}
-              capabilitiesReady={capabilitiesReady}
-              onCreateSession={onCreateSession}
-              onOpenConfigPanel={onOpenConfigPanel}
-              onOpenDataLinkPanel={onOpenDataLinkPanel}
-              onOpenFilesPanel={onOpenFilesPanel}
-              onQueryChange={onQueryChange}
-              onToggleCollapse={onToggleCollapse}
-              onSelectSession={onSelectSession}
-              onRenameSession={onRenameSession}
-              onDeleteSession={onDeleteSession}
-              onTogglePinSession={onTogglePinSession}
-              preview
-            />
+        <div className="energyiq-sidebar-header flex w-full shrink-0 items-center justify-center">
+          <div className="group relative">
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              title={collapsedRailCopy.expandLabel}
+              aria-label={collapsedRailCopy.expandLabel}
+              className="energyiq-collapse-control flex cursor-pointer items-center justify-center rounded-lg border border-border bg-surface text-foreground shadow-[var(--shadow-card)] transition-colors duration-200 hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+            >
+              <SidebarToggleIcon />
+            </button>
+            <div className={previewClassNames.panel} aria-label="Workspace sidebar preview">
+              <SessionPaneContent
+                activeSessionId={activeSessionId}
+                activeConfigPanel={activeConfigPanel}
+                activeDataLinkPanel={activeDataLinkPanel}
+                activeFilesPanel={activeFilesPanel}
+                filteredSessions={filteredSessions}
+                query={query}
+                sessionCount={sessionCount}
+                runningThreadIds={runningThreadIds}
+                workspaceFileCount={workspaceFileCount}
+                workspaceConfig={workspaceConfig}
+                showWorkspaceResources={showWorkspaceResources}
+                hideIdentityChrome={hideIdentityChrome}
+                quickStartGuide={quickStartGuide}
+                capabilitiesReady={capabilitiesReady}
+                onCreateSession={onCreateSession}
+                onOpenConfigPanel={onOpenConfigPanel}
+                onOpenDataLinkPanel={onOpenDataLinkPanel}
+                onOpenFilesPanel={onOpenFilesPanel}
+                onQueryChange={onQueryChange}
+                onToggleCollapse={onToggleCollapse}
+                onSelectSession={onSelectSession}
+                onRenameSession={onRenameSession}
+                onDeleteSession={onDeleteSession}
+                onTogglePinSession={onTogglePinSession}
+                preview
+              />
+            </div>
           </div>
         </div>
-        <DataTaskUserBar
-          compact
-          quickStartGuide={quickStartGuide}
-          onOpenSettings={() => {
-            onToggleCollapse();
-            onOpenConfigPanel("llm");
-          }}
-        />
+        {hideIdentityChrome ? null : (
+          <DataTaskUserBar
+            compact
+            quickStartGuide={quickStartGuide}
+            onOpenSettings={
+              showWorkspaceResources
+                ? () => {
+                    onToggleCollapse();
+                    onOpenConfigPanel("llm");
+                  }
+                : undefined
+            }
+          />
+        )}
       </aside>
     );
   }
@@ -4974,6 +5121,8 @@ function SessionPane({
         runningThreadIds={runningThreadIds}
         workspaceFileCount={workspaceFileCount}
         workspaceConfig={workspaceConfig}
+        showWorkspaceResources={showWorkspaceResources}
+        hideIdentityChrome={hideIdentityChrome}
         quickStartGuide={quickStartGuide}
         capabilitiesReady={capabilitiesReady}
         onCreateSession={onCreateSession}
@@ -5013,6 +5162,8 @@ function SessionPaneContent({
   runningThreadIds,
   workspaceFileCount,
   workspaceConfig,
+  showWorkspaceResources,
+  hideIdentityChrome,
   quickStartGuide,
   capabilitiesReady,
   onCreateSession,
@@ -5063,42 +5214,61 @@ function SessionPaneContent({
           : "flex h-full min-h-0 w-full flex-col overflow-hidden"
       }
     >
-      <div className="flex h-16 items-center gap-3 border-b border-border px-4">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface text-sm font-semibold text-foreground shadow-[var(--shadow-card)]">
-          D
+      {hideIdentityChrome ? (
+        <div className="energyiq-sidebar-header flex items-center justify-between border-b border-border">
+          <h1 className="truncate text-base font-semibold text-foreground">
+            {t("sidebar.analysisTitle")}
+          </h1>
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            title={preview ? t("sidebar.expandToSidebar") : t("sidebar.collapseToRail")}
+            aria-label={preview ? t("sidebar.expandToSidebar") : t("sidebar.collapseToRail")}
+            className="energyiq-collapse-control flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-light transition-colors duration-200 hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+          >
+            <SidebarToggleIcon />
+          </button>
         </div>
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate text-sm font-semibold text-foreground">{t("sidebar.brand")}</h1>
-          <p className="text-xs text-muted-light">{t("sidebar.sessionCount", { count: sessionCount })}</p>
+      ) : (
+        <div className="energyiq-sidebar-header flex items-center gap-3 border-b border-border">
+          <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface text-sm font-semibold text-foreground shadow-[var(--shadow-card)]">
+            D
+          </div>
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate text-base font-semibold text-foreground">{t("sidebar.brand")}</h1>
+            <p className="text-ui-label text-muted-light">{t("sidebar.sessionCount", { count: sessionCount })}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onToggleCollapse}
+            title={preview ? t("sidebar.expandToSidebar") : t("sidebar.collapseToRail")}
+            aria-label={preview ? t("sidebar.expandToSidebar") : t("sidebar.collapseToRail")}
+            className="energyiq-collapse-control flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-light transition-colors duration-200 hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+          >
+            <SidebarToggleIcon />
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onToggleCollapse}
-          title={preview ? t("sidebar.expandToSidebar") : t("sidebar.collapseToRail")}
-          aria-label={preview ? t("sidebar.expandToSidebar") : t("sidebar.collapseToRail")}
-          className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-light transition-colors duration-200 hover:bg-surface-subtle hover:text-foreground"
-        >
-          <SidebarToggleIcon />
-        </button>
-      </div>
+      )}
 
-      <div
-        data-guide-id="workspace-resources"
-        className="border-b border-border px-2.5 pt-1.5 pb-1"
-      >
-        <div className="mb-0.5 px-0.5">
-          <span className={sectionLabelClass}>{t("sidebar.workspaceResources")}</span>
+      {showWorkspaceResources ? (
+        <div
+          data-guide-id="workspace-resources"
+          className="border-b border-border px-2.5 pt-1.5 pb-1"
+        >
+          <div className="mb-0.5 px-0.5">
+            <span className={sectionLabelClass}>{t("sidebar.workspaceResources")}</span>
+          </div>
+          <div className="flex flex-col gap-px">
+            {resourceNavGroups.map((group) => (
+              <ResourceNavCard
+                key={group.id}
+                group={group}
+                onAction={handleResourceAction}
+              />
+            ))}
+          </div>
         </div>
-        <div className="flex flex-col gap-px">
-          {resourceNavGroups.map((group) => (
-            <ResourceNavCard
-              key={group.id}
-              group={group}
-              onAction={handleResourceAction}
-            />
-          ))}
-        </div>
-      </div>
+      ) : null}
 
       <div className="border-b border-border px-2.5 py-2">
         <button
@@ -5126,12 +5296,12 @@ function SessionPaneContent({
             : "min-h-0 flex-1 overflow-y-auto p-2"
         }
       >
-        <div className="px-2 pb-2 text-xs font-semibold text-muted-light">
+        <div className="px-2 pb-2 text-ui-label font-semibold text-muted-light">
           {preview ? t("sidebar.history") : t("sidebar.sessions")}
         </div>
         <div className="flex flex-col gap-0.5">
           {filteredSessions.length === 0 ? (
-            <p className="px-2 py-3 text-xs text-muted-light">{t("sidebar.noMatchingSessions")}</p>
+            <p className="px-2 py-3 text-ui-support text-muted-light">{t("sidebar.noMatchingSessions")}</p>
           ) : (
             filteredSessions.map((session) => (
               <SessionListItem
@@ -5148,9 +5318,13 @@ function SessionPaneContent({
           )}
         </div>
       </div>
-      {!preview ? (
+      {!preview && !hideIdentityChrome ? (
         <DataTaskUserBar
-          onOpenSettings={() => onOpenConfigPanel("llm")}
+          onOpenSettings={
+            showWorkspaceResources
+              ? () => onOpenConfigPanel("llm")
+              : undefined
+          }
           quickStartGuide={quickStartGuide}
         />
       ) : null}
@@ -6492,7 +6666,11 @@ function ModelConfigList({
                     <p className="mt-2 truncate text-xs text-slate-600">{summary || item.description}</p>
                     <div className="mt-3 flex flex-wrap gap-1.5 text-[10px] text-slate-500">
                       <span className="rounded-full border border-border bg-slate-50 px-2 py-0.5">
-                        {item.enabled ? t("configPanel.workspaceDefault") : t("configPanel.disabledByDefault")}
+                        {item.id === "workspace-default"
+                          ? t("configPanel.systemDefault")
+                          : item.enabled
+                            ? t("configPanel.availableProfile")
+                            : t("configPanel.disabledByDefault")}
                       </span>
                       {item.builtin ? (
                         <span className="rounded-full border border-border bg-slate-50 px-2 py-0.5">
@@ -7523,9 +7701,11 @@ function ProcessToolGroupSync({
 function ChatWelcomeOverlay({
   liveRunStatus,
   onUseExamplePrompt,
+  externalContext,
 }: {
   liveRunStatus: LiveRun["runStatus"];
   onUseExamplePrompt: (prompt: string) => void;
+  externalContext?: DataTasksExternalContext;
 }) {
   const t = useT();
   const chatConfig = useCopilotChatConfiguration();
@@ -7555,7 +7735,15 @@ function ChatWelcomeOverlay({
   return (
     <div className="pointer-events-none absolute inset-x-0 top-0 bottom-32 z-10 overflow-y-auto">
       <div className="pointer-events-auto min-h-full">
-        <DataTaskWelcomeScreen onUsePrompt={onUseExamplePrompt} />
+        <DataTaskWelcomeScreen
+          onUsePrompt={onUseExamplePrompt}
+          variant={externalContext ? "energy" : "default"}
+          contextLabel={
+            externalContext
+              ? energyExternalContextLabels(externalContext).join(" · ")
+              : undefined
+          }
+        />
       </div>
     </div>
   );
@@ -7627,6 +7815,8 @@ function SessionChatRuntime({
   onUserMessageSubmitted,
   onToolGroupsChange,
   onUseExamplePrompt,
+  externalContext,
+  onSessionEnergyContextRestored,
 }: {
   threadId: string;
   isActive: boolean;
@@ -7638,6 +7828,8 @@ function SessionChatRuntime({
   onUserMessageSubmitted: (text: string) => void;
   onToolGroupsChange: (groups: ProcessToolGroup[]) => void;
   onUseExamplePrompt: (prompt: string) => void;
+  externalContext?: DataTasksExternalContext;
+  onSessionEnergyContextRestored?: (context: SessionEnergyContextDto | null) => void;
 }) {
   const agentId = dataTaskSessionAgentId(threadId);
   const { liveRun } = useLiveRun(threadId);
@@ -7656,6 +7848,8 @@ function SessionChatRuntime({
       <SessionConversationRestore
         agentId={agentId}
         capabilitiesReady={capabilitiesReady}
+        isActive={isActive}
+        onEnergyContextRestored={onSessionEnergyContextRestored}
       />
       {isActive ? <SessionConversationScrollRestore agentId={agentId} /> : null}
       {isActive ? (
@@ -7695,6 +7889,7 @@ function SessionChatRuntime({
           <ChatWelcomeOverlay
             liveRunStatus={liveRunStatus}
             onUseExamplePrompt={onUseExamplePrompt}
+            externalContext={externalContext}
           />
         ) : null}
         <CopilotChat
@@ -7729,6 +7924,8 @@ function ChatPane({
   title,
   workspaceConfig,
   activeSession,
+  externalContext,
+  onSessionEnergyContextRestored,
   liveRunStatus,
   liveRun,
   runningThreadIds,
@@ -7750,6 +7947,8 @@ function ChatPane({
   title: string;
   workspaceConfig: WorkspaceConfigStore;
   activeSession: ChatSession | null;
+  externalContext?: DataTasksExternalContext;
+  onSessionEnergyContextRestored?: (context: SessionEnergyContextDto | null) => void;
   liveRunStatus: LiveRun["runStatus"];
   liveRun: LiveRun;
   runningThreadIds: ReadonlySet<string>;
@@ -7840,19 +8039,30 @@ function ChatPane({
       <ChatRunStatusContext.Provider value={liveRunStatus}>
       <ChatLiveRunContext.Provider value={liveRun}>
       <ProcessTimelineCollapseContext.Provider value={processTimelineCollapse}>
-      <header className="flex h-16 items-center justify-between gap-3 border-b border-border bg-surface px-5">
+      <header className="energyiq-surface-header flex items-center justify-between gap-3 border-b border-border bg-surface">
         <div ref={schemaPreviewRootRef} className="relative min-w-0">
           <h2 className="truncate text-base font-semibold text-foreground">
             {title}
           </h2>
           <div className="mt-0.5">
-            <SessionHeaderResourceChips
-              workspaceConfig={workspaceConfig}
-              session={activeSession}
-              onPreviewDatasource={(itemId) =>
-                setSchemaPreviewDatasourceId((current) => (current === itemId ? null : itemId))
-              }
-            />
+            {externalContext ? (
+              <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-light">
+                {energyExternalContextLabels(externalContext).map((label, index) => (
+                  <Fragment key={`${index}:${label}`}>
+                    {index > 0 ? <span aria-hidden>·</span> : null}
+                    <span className={index < 2 ? "truncate" : "shrink-0"}>{label}</span>
+                  </Fragment>
+                ))}
+              </div>
+            ) : (
+              <SessionHeaderResourceChips
+                workspaceConfig={workspaceConfig}
+                session={activeSession}
+                onPreviewDatasource={(itemId) =>
+                  setSchemaPreviewDatasourceId((current) => (current === itemId ? null : itemId))
+                }
+              />
+            )}
           </div>
           {schemaPreviewDatasource ? (
             <DatasourceSchemaPreviewPopover
@@ -7863,6 +8073,14 @@ function ChatPane({
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {externalContext?.historyStatus === "outdated" ? (
+            <span
+              className="rounded-full border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800"
+              title={externalContext.historyStatusReason}
+            >
+              Outdated
+            </span>
+          ) : null}
           <RunStatusPill status={liveRunStatus} />
           {!rightPanelOpen ? (
             <ChatOpenConsoleButton onOpenRightPanel={onOpenRightPanel} />
@@ -7898,6 +8116,8 @@ function ChatPane({
                     onUserMessageSubmitted={onUserMessageSubmitted}
                     onToolGroupsChange={onToolGroupsChange}
                     onUseExamplePrompt={onUseExamplePrompt}
+                    externalContext={externalContext}
+                    onSessionEnergyContextRestored={onSessionEnergyContextRestored}
                   />
                 </div>
               );
@@ -7912,6 +8132,17 @@ function ChatPane({
       </ChatRunStatusContext.Provider>
     </main>
   );
+}
+
+export function energyExternalContextLabels(
+  context: DataTasksExternalContext,
+): string[] {
+  return [
+    context.projectName ?? context.projectId,
+    context.scopeName ?? context.scopeId,
+    context.period,
+    context.dataCutoff ? `Data through ${context.dataCutoff}` : undefined,
+  ].filter((value): value is string => Boolean(value));
 }
 
 function formatPayload(value: unknown): string {

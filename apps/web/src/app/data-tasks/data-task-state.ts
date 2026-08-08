@@ -78,6 +78,7 @@ const toolDisplayTitles: Record<string, string> = {
   inspect_schema: "Inspect data source schema",
   preview_table: "Preview table",
   run_sql_readonly: "Run SQL query",
+  analysis_requirements_commit: "Verify evidence",
   retrieve_knowledge: "Retrieve knowledge",
   read_file: "Read file",
   edit_file: "Edit file",
@@ -267,6 +268,8 @@ export type ChatSessionTitleSource = "default" | "auto-snippet" | "llm" | "user"
 export interface ChatSession {
   id: string;
   threadId: string;
+  workspaceId?: string;
+  projectId?: string;
   title: string;
   titleSource?: ChatSessionTitleSource;
   createdAt: number;
@@ -412,6 +415,8 @@ export type ServerChatSessionDto = {
   id?: string;
   sessionId?: string;
   threadId?: string;
+  workspaceId?: string;
+  projectId?: string;
   title?: string;
   titleSource?: ChatSessionTitleSource | string;
   createdAt?: string;
@@ -439,12 +444,38 @@ export function serverSessionDtoToChatSession(dto: ServerChatSessionDto): ChatSe
   return {
     id: dto.id ?? dto.sessionId ?? threadId,
     threadId,
+    ...(dto.workspaceId ? { workspaceId: dto.workspaceId } : {}),
+    ...(dto.projectId ? { projectId: dto.projectId } : {}),
     title: normalizeSessionTitle(dto.title ?? "") || "New data task",
     titleSource: normalizeTitleSource(dto.titleSource),
     createdAt,
     updatedAt,
     lastMessageAt: timestampFromIso(dto.lastMessageAt, updatedAt),
   };
+}
+
+export function dataTaskSessionScopeKey(
+  identityScopeKey: string,
+  energyScope?: { projectId: string; workspaceId: string },
+): string {
+  return energyScope
+    ? `${identityScopeKey}:energyiq:${energyScope.workspaceId}:${energyScope.projectId}`
+    : identityScopeKey;
+}
+
+export function dataTaskRuntimeHeaders(
+  authHeaders: Record<string, string>,
+  energyScope?: { workspaceId: string },
+): Record<string, string> {
+  return energyScope
+    ? { ...authHeaders, "X-Workspace-Id": energyScope.workspaceId }
+    : authHeaders;
+}
+
+export function isEnergyIqOverviewSlotSessionId(sessionId: string): boolean {
+  return sessionId.startsWith("energyiq-overview-slot-")
+    || sessionId.startsWith("ngee-ann-overview-")
+    || sessionId.startsWith("preschool-overview-");
 }
 
 export function mergeServerChatSessions(
@@ -2622,6 +2653,10 @@ export type RunConfigPayload = {
   fileIds: string[];
   pinnedPaths: string[];
   evidenceRefs: EvidenceRef[];
+  protocol?: {
+    protocolId: string;
+    protocolVersion: string;
+  };
 };
 
 export interface BuildRunConfigOptions {
@@ -2632,6 +2667,7 @@ export interface BuildRunConfigOptions {
   perRunFiles?: PerRunFileSelection;
   evidenceRefs?: EvidenceRef[];
   defaultSkillId?: string;
+  protocol?: RunConfigPayload["protocol"];
 }
 
 function filterMentionedIds(
@@ -2698,6 +2734,7 @@ export function buildRunConfig(
     fileIds: uniqueStrings(fileSelection.fileIds),
     pinnedPaths: uniqueStrings(fileSelection.pinnedPaths),
     evidenceRefs: uniqueEvidenceRefs(options.evidenceRefs ?? []),
+    ...(options.protocol ? { protocol: options.protocol } : {}),
   };
 }
 

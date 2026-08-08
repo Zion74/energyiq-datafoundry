@@ -4,6 +4,10 @@ import type { NextConfig } from "next";
 const workspaceRoot = path.join(__dirname, "../..");
 
 const nextConfig: NextConfig = {
+  // Allow parallel local servers and production builds to use separate output
+  // directories. Sharing `.next` makes one process delete another process's
+  // development manifests.
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   outputFileTracingRoot: workspaceRoot,
   // Next's default `compress: true` applies gzip to `text/*`, including
   // `text/event-stream`. Even with flush hooks, compression is the wrong layer

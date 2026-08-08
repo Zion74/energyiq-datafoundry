@@ -42,6 +42,7 @@ type DataTaskChatInputProps = CopilotChatInputProps & {
   activeLlmId: string | null;
   onActiveLlmChange: (llmId: string) => void;
   onOpenLlmConfig?: () => void;
+  showResourceControls?: boolean;
   mentionResources: MentionResource[];
   perRunSelection: PerRunSelection;
   onTogglePerRunMention: (kind: PerRunMentionKind, id: string) => void;
@@ -75,6 +76,7 @@ export function DataTaskChatInput({
   activeLlmId,
   onActiveLlmChange,
   onOpenLlmConfig,
+  showResourceControls = true,
   mentionResources,
   perRunSelection,
   onTogglePerRunMention,
@@ -141,6 +143,7 @@ export function DataTaskChatInput({
           llmOptions={llmOptions}
           onActiveLlmChange={onActiveLlmChange}
           onOpenLlmConfig={onOpenLlmConfig}
+          showResourceControls={showResourceControls}
           mentionResources={mentionResources}
           perRunSelection={perRunSelection}
           onTogglePerRunMention={onTogglePerRunMention}
@@ -189,6 +192,7 @@ function DataTaskChatInputLayout({
   activeLlmId,
   onActiveLlmChange,
   onOpenLlmConfig,
+  showResourceControls,
   mentionResources,
   perRunSelection,
   onTogglePerRunMention,
@@ -232,6 +236,7 @@ function DataTaskChatInputLayout({
   activeLlmId: string | null;
   onActiveLlmChange: (llmId: string) => void;
   onOpenLlmConfig?: () => void;
+  showResourceControls: boolean;
   mentionResources: MentionResource[];
   perRunSelection: PerRunSelection;
   onTogglePerRunMention: (kind: PerRunMentionKind, id: string) => void;
@@ -283,30 +288,45 @@ function DataTaskChatInputLayout({
   useEffect(() => {
     if (!draftPromptRequest || mode !== "input") return;
 
-    const container = attachmentsApi.containerRef.current;
-    const textarea =
-      container?.querySelector<HTMLTextAreaElement>(
-        "[data-testid=copilot-chat-textarea]",
-      ) ?? container?.querySelector<HTMLTextAreaElement>("textarea");
-    if (!textarea) return;
+    let cancelled = false;
+    let frameId = 0;
+    let remainingAttempts = 20;
+    const applyDraft = () => {
+      if (cancelled) return;
+      const container = attachmentsApi.containerRef.current;
+      const textarea =
+        container?.querySelector<HTMLTextAreaElement>(
+          "[data-testid=copilot-chat-textarea]",
+        ) ?? container?.querySelector<HTMLTextAreaElement>("textarea");
+      if (!textarea) {
+        remainingAttempts -= 1;
+        if (remainingAttempts > 0) frameId = requestAnimationFrame(applyDraft);
+        return;
+      }
 
-    const valueSetter = Object.getOwnPropertyDescriptor(
-      window.HTMLTextAreaElement.prototype,
-      "value",
-    )?.set;
-    if (valueSetter) {
-      valueSetter.call(textarea, draftPromptRequest.text);
-    } else {
-      textarea.value = draftPromptRequest.text;
-    }
-    textarea.dispatchEvent(new Event("input", { bubbles: true }));
-    textarea.focus({ preventScroll: true });
-    textarea.setSelectionRange(
-      draftPromptRequest.text.length,
-      draftPromptRequest.text.length,
-    );
-    requestAnimationFrame(scheduleChatTextareaResize);
-    onDraftPromptConsumed(draftPromptRequest.id);
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        "value",
+      )?.set;
+      if (valueSetter) {
+        valueSetter.call(textarea, draftPromptRequest.text);
+      } else {
+        textarea.value = draftPromptRequest.text;
+      }
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      textarea.focus({ preventScroll: true });
+      textarea.setSelectionRange(
+        draftPromptRequest.text.length,
+        draftPromptRequest.text.length,
+      );
+      requestAnimationFrame(scheduleChatTextareaResize);
+      onDraftPromptConsumed(draftPromptRequest.id);
+    };
+    frameId = requestAnimationFrame(applyDraft);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frameId);
+    };
   }, [
     attachmentsApi.containerRef,
     draftPromptRequest,
@@ -462,36 +482,45 @@ function DataTaskChatInputLayout({
             )}
           </div>
           {mode !== "transcribe" && (
-            <SessionConfigBar
-              workspaceConfig={workspaceConfig}
-              session={activeSession}
-              sessionStartedHints={sessionStartedHints}
-              onToggleSessionResource={onToggleSessionResource}
-              leading={
-                <div className="flex items-center gap-1">
-                  <input
-                    ref={attachmentsApi.fileInputRef}
-                    type="file"
-                    multiple
-                    accept={CHAT_ATTACHMENT_ACCEPT}
-                    className="hidden"
-                    onChange={attachmentsApi.handleFileUpload}
-                  />
-                  <ChatAddMenu actions={addActions} />
-                </div>
-              }
-              trailing={
-                <>
-                  <ChatModelPicker
-                    activeLlmId={activeLlmId}
-                    llmOptions={llmOptions}
-                    onActiveLlmChange={onActiveLlmChange}
-                    onOpenLlmConfig={onOpenLlmConfig}
-                  />
-                  <div className="shrink-0">{sendButton}</div>
-                </>
-              }
-            />
+            showResourceControls ? (
+              <SessionConfigBar
+                workspaceConfig={workspaceConfig}
+                session={activeSession}
+                sessionStartedHints={sessionStartedHints}
+                onToggleSessionResource={onToggleSessionResource}
+                leading={
+                  <div className="flex items-center gap-1">
+                    <input
+                      ref={attachmentsApi.fileInputRef}
+                      type="file"
+                      multiple
+                      accept={CHAT_ATTACHMENT_ACCEPT}
+                      className="hidden"
+                      onChange={attachmentsApi.handleFileUpload}
+                    />
+                    <ChatAddMenu actions={addActions} />
+                  </div>
+                }
+                trailing={
+                  <>
+                    <ChatModelPicker
+                      activeLlmId={activeLlmId}
+                      llmOptions={llmOptions}
+                      onActiveLlmChange={onActiveLlmChange}
+                      onOpenLlmConfig={onOpenLlmConfig}
+                    />
+                    <div className="shrink-0">{sendButton}</div>
+                  </>
+                }
+              />
+            ) : (
+              <div
+                data-testid="copilot-user-submit-bar"
+                className="flex items-center justify-end border-t border-border px-3 py-2"
+              >
+                <div className="shrink-0">{sendButton}</div>
+              </div>
+            )
           )}
         </div>
       </div>

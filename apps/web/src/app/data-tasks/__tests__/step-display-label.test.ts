@@ -6,8 +6,15 @@ import {
   resolveStepSummaryText,
   resolveToolStepActionLabel,
 } from "../step-display-label";
+import { toolDisplayTitle } from "../data-task-state";
 
 describe("resolveToolStepActionLabel", () => {
+  it("uses a customer-facing label for the internal analysis commit tool", () => {
+    expect(resolveToolStepActionLabel(["analysis_requirements_commit"]))
+      .toBe("Verify evidence");
+    expect(toolDisplayTitle("analysis_requirements_commit"))
+      .toBe("Verify evidence");
+  });
   it("uses specific action labels for common data tools", () => {
     expect(resolveToolStepActionLabel(["list_data_sources"])).toBe("List data sources");
     expect(resolveToolStepActionLabel(["inspect_schema"])).toBe("Inspect schema");

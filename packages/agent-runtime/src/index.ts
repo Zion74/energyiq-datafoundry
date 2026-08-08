@@ -25,11 +25,12 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import {
   createModelProvider,
   createModelProviderFromConfig,
+  createModelRuntimeProviderOptions,
   type ChatProviderConfig,
   type ModelProvider
 } from "@datafoundry/providers";
 
-import { AGENT_MAX_STEPS, SQL_MAX_EXECUTION_COUNT } from "./runtime-limits.js";
+import { AGENT_MAX_STEPS } from "./runtime-limits.js";
 import { AGENT_RUNTIME_LIMITS } from "./config/agent-runtime-limits.js";
 import { SQL_MAX_SQL_CHARS } from "./context/inventory/context-limits.js";
 import { createToolObservationBoundary } from "./context/tool-observation/tool-observation-boundary.js";
@@ -49,7 +50,7 @@ import {
   type TaskStateRuntime
 } from "./memory/task-state-runtime.js";
 import { CONVERSATION_WORKING_MEMORY_CONFIG } from "./memory/conversation-memory-bridge.js";
-import type { RuntimeContextSource } from "./context/source/runtime-context-source.js";
+import { createEvidenceFocusRuntimeSource } from "./context/source/evidence-focus-context-source.js";
 import {
   createContextItem,
   type ContextItem,
@@ -60,7 +61,7 @@ import {
   type ContextSourceMetadata
 } from "./context/inventory/context-source-metadata.js";
 import { GoalRuntimeAdapter, type GoalRequest } from "./memory/goal-runtime-adapter.js";
-import { createDataFoundryToolRegistry } from "./tools/data-tools.js";
+import { createDataFoundryToolRegistry, isChartRequested } from "./tools/data-tools.js";
 import { GovernedToolFactory } from "./tools/governed-tool-factory.js";
 import {
   maybeIngestSessionFileOutput,
@@ -77,6 +78,13 @@ import { wrapAgentForAgUi } from "./stream/mastra-stream-normalizer.js";
 import type { AgentRunContext, AgentRunContextInput, AgUiEventEmitter } from "./types.js";
 import { createCustomEvent } from "./events.js";
 import { createTool, type ToolAction } from "@mastra/core/tools";
+
+export {
+  MODEL_PROVIDER_TOOL_CONTRACT_BUNDLE_REVISION,
+  probeModelProviderToolContract,
+  type ModelProviderToolContractProbeDiagnostic,
+  type ModelProviderToolContractProbeResult
+} from "./model-provider-tool-contract-probe.js";
 import { z } from "zod";
 import {
   createRunProtocolBoundary,
@@ -85,6 +93,7 @@ import {
 import type { ProtocolClassifier, ProtocolIdentity } from "./protocol/protocol-router.js";
 import { createModelProtocolClassifier } from "./protocol/model-protocol-classifier.js";
 import {
+  createEnergyAnalysisRequirementExtractor,
   createModelAnalysisRequirementExtractor,
   type AnalysisRequirementExtractor
 } from "./protocol/model-analysis-requirement-extractor.js";
@@ -92,23 +101,41 @@ import {
   createModelAnalysisContractGrounder,
   type AnalysisContractGrounder
 } from "./protocol/model-analysis-contract-grounder.js";
-import type { AnalysisRequirement } from "./protocol/analysis-requirements.js";
+import type {
+  AnalysisQueryEvidenceBinding,
+  AnalysisRequirement,
+} from "./protocol/analysis-requirements.js";
+import { createAnalysisRequirementsCommitTool } from "./protocol/analysis-requirements-commit-tool.js";
 import type { DataAnalysisState } from "./protocol/protocols/data-analysis.js";
+import type { AnalysisContextEvidenceCatalog } from "./protocol/analysis-context-evidence.js";
 import { createDefaultSemanticProvider } from "./semantic/default-semantic-provider.js";
+import { EnergyQuerySemanticProvider } from "./semantic/energy-query-semantic-provider.js";
+import type { TrustedEnergyTextQueryContract } from "./semantic/trusted-energy-text.js";
 import type { ProtocolEvent } from "./protocol/types.js";
 import type { ContextPackageRef, ProtocolStateStore } from "./protocol/types.js";
 import { toolErrorObservation as createToolErrorObservation } from "./errors/tool-execution-error.js";
 
 export type { AgentRunContext, AgentRunContextInput, AgUiEventEmitter } from "./types.js";
+export {
+  contextEvidenceVerifiedValues,
+  evidencePinsEqual,
+  resolveContextEvidenceFacts,
+  type AnalysisContextEvidenceCatalog,
+  type AnalysisContextEvidenceFact,
+  type AnalysisEvidencePins,
+} from "./protocol/analysis-context-evidence.js";
 export type { ContextPackage } from "./context/inventory/context-package.js";
 export type { ContextPlan } from "./context/inventory/context-plan.js";
+export { ModelContextProfileRegistry } from "./context/policy/model-context-profile.js";
 export type { ContextPackageRecorder } from "./context/protocol/mastra/mastra-context-budget-processor.js";
 export type AgentContextItem = ContextItem;
 export type AgentContextSourceMetadata = ContextSourceMetadata;
 export type CreateAgentContextItemInput = CreateContextItemInput;
 export type AgentModelContextProfile = {
   id: string;
+  capabilitySource: "conservative-fallback" | "explicit-profile" | "verified-model-default";
   contextWindow: number;
+  maxOutputTokens: number;
   outputReserve: number;
   safetyMargin: number;
   messageOverhead: number;
@@ -253,6 +280,7 @@ export type CreateDataFoundryInput = {
   protocolClassifier?: ProtocolClassifier;
   analysisRequirementExtractor?: AnalysisRequirementExtractor;
   analysisContractGrounder?: AnalysisContractGrounder;
+  contextEvidenceCatalog?: AnalysisContextEvidenceCatalog;
   onProtocolEvent?(event: ProtocolEvent): void;
   protocolStateStore?: ProtocolStateStore;
   resourceRevisions?: Record<string, number>;
@@ -288,6 +316,8 @@ export const createDataFoundry = async (
   flushProtocolEvents(): void;
   destroyWorkspace(): Promise<void>;
 }> => {
+  const energyIqRun = Boolean(input.runContext.energy_query_context);
+  const maxSteps = AGENT_MAX_STEPS;
   const toolObservationBoundary = createToolObservationBoundary({
     identity: {
       resourceId: input.runContext.user_id,
@@ -336,6 +366,7 @@ export const createDataFoundry = async (
   const tokenUsageCorrelation = createTokenUsageCorrelationStore();
   const registry = createDataFoundryToolRegistry({
     ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+    ...(input.artifactService ? { artifactService: input.artifactService } : {}),
     dataGateway: input.dataGateway,
     emitter: input.emitter,
     runContext: input.runContext,
@@ -474,9 +505,14 @@ export const createDataFoundry = async (
     input.skillSelection,
     alwaysAllowTools
   );
+  const harnessSelectedTools = energyIqRun
+    ? Object.fromEntries(Object.entries(selectedPolicyTools).filter(([name]) =>
+        name === "inspect_schema" || name === "run_sql_readonly"))
+    : selectedPolicyTools;
+  const selectedMcpTools = energyIqRun ? {} : (input.mcpTools ?? {});
   const selectedTools = {
-    ...selectedPolicyTools,
-    ...(input.mcpTools ?? {})
+    ...harnessSelectedTools,
+    ...selectedMcpTools
   };
   const selectedDatasourceId = input.runContext.selected_datasource_id;
   const deferredProtocolEvents: ProtocolEvent[] = [];
@@ -492,23 +528,33 @@ export const createDataFoundry = async (
     tools: selectedTools,
     ...(selectedDatasourceId
       ? {
-          semanticProvider: createDefaultSemanticProvider({ tools: selectedTools }),
+          semanticProvider: input.runContext.energy_query_context
+            ? new EnergyQuerySemanticProvider(input.runContext.energy_query_context)
+            : createDefaultSemanticProvider({ tools: selectedTools }),
           semanticRequest: {
             userId: input.runContext.user_id,
             workspaceId: input.runContext.workspace_id ?? "default",
             datasourceId: selectedDatasourceId,
             datasourceRevision: String(
               input.resourceRevisions?.[`datasource:${selectedDatasourceId}`] ?? "unknown"
-            )
+            ),
+            ...(input.runContext.energy_query_context
+              && "kind" in input.runContext.energy_query_context
+              && input.runContext.energy_query_context.kind === "trusted-energy-text-query"
+              ? { physicalSchema: input.runContext.energy_query_context.pins.sourcePin.physicalSchema }
+              : {})
           }
         }
       : {}),
     ...(input.explicitProtocol ? { explicitProtocol: input.explicitProtocol } : {}),
     classifier: input.protocolClassifier ?? createModelProtocolClassifier(input.modelProvider),
     requirementExtractor: input.analysisRequirementExtractor
-      ?? createModelAnalysisRequirementExtractor(input.modelProvider),
+      ?? (energyIqRun
+        ? createEnergyAnalysisRequirementExtractor()
+        : createModelAnalysisRequirementExtractor(input.modelProvider)),
     analysisContractGrounder: input.analysisContractGrounder
       ?? createModelAnalysisContractGrounder(input.modelProvider),
+    ...(input.contextEvidenceCatalog ? { contextEvidenceCatalog: input.contextEvidenceCatalog } : {}),
     ...(input.protocolStateStore ? { stateStore: input.protocolStateStore } : {}),
     projectContext: ({ actionName, rawResult }) => {
       if (isProtocolRuntimeAction(actionName)) {
@@ -566,38 +612,33 @@ export const createDataFoundry = async (
     : [];
   const requirementsCommitTools = analysisRequirements.length > 0
     ? {
-        analysis_requirements_commit: createTool({
-          id: "analysis_requirements_commit",
-          description: "Commit final claims for analysis requirements using artifact evidence from successful SQL results.",
-          inputSchema: z.object({
-            claims: z.array(z.object({
-              requirement_id: z.string().min(1),
-              claim: z.string().min(1),
-              values: z.array(z.object({
-                name: z.string().min(1),
-                value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
-                unit: z.string().optional()
-              })).max(AGENT_RUNTIME_LIMITS.requirementCommitMaxOutputFields).optional(),
-              evidence_refs: z.array(z.string().min(1)).optional(),
-              evidence_requirement_ids: z.array(z.string().min(1)).optional()
-            })).min(1).max(AGENT_RUNTIME_LIMITS.requirementCommitMaxClaims)
-          }),
-          execute: async (toolInput, options) => {
-            const toolCallId = protocolToolCallId(options);
-            try {
-              const result = await protocol.actionRouter.execute({
-                runId: input.runContext.run_id,
-                segmentId: protocol.segmentId,
-                actionId: toolCallId ?? `analysis-requirements-commit:${Date.now()}`,
-                actionName: "analysis.requirements.commit",
-                input: toolInput,
-                idempotencyKey: toolCallId ?? JSON.stringify(toolInput)
-              });
-              return result.observation;
-            } catch (error) {
-              return createToolErrorObservation(error, { toolName: "analysis_requirements_commit" });
-            }
-          }
+        analysis_requirements_commit: createAnalysisRequirementsCommitTool({
+          analysisRequirements,
+          ...(input.contextEvidenceCatalog ? { contextEvidenceCatalog: input.contextEvidenceCatalog } : {}),
+          executeAction: (action) => protocol.actionRouter.execute(action),
+          getAnalysisRequirements: () => {
+            const current = protocol.protocolRuntime.getState(input.runContext.run_id, protocol.segmentId);
+            return current.protocolId === "data-analysis"
+              ? ((current.domain as DataAnalysisState).requirements ?? []).filter((requirement) =>
+                  requirement.source === "user")
+              : [];
+          },
+          getVerifiedRequirementValues: (requirementId) => {
+            const current = protocol.protocolRuntime.getState(input.runContext.run_id, protocol.segmentId);
+            if (current.protocolId !== "data-analysis") return [];
+            const state = current.domain as DataAnalysisState;
+            const evidencedAttemptIds = new Set((state.evidenceBindings ?? []).flatMap((binding) => {
+              if (binding.requirementId !== requirementId || binding.source === "context") return [];
+              return [(binding as AnalysisQueryEvidenceBinding).queryAttemptId];
+            }));
+            return [...new Map((state.queryAttempts ?? [])
+              .filter((attempt) => evidencedAttemptIds.has(attempt.id))
+              .flatMap((attempt) => attempt.verifiedValues)
+              .map((value) => [value.name, value])).values()];
+          },
+          runId: input.runContext.run_id,
+          segmentId: protocol.segmentId,
+          trustedEnergy: Boolean(input.runContext.energy_query_context)
         })
       }
     : {};
@@ -631,6 +672,13 @@ export const createDataFoundry = async (
       }
     })
   };
+  const runtimeProviderOptions = createModelRuntimeProviderOptions({
+    providerId: input.modelProvider.provider_id,
+    ...(input.modelProvider.provider_ids ? { providerIds: input.modelProvider.provider_ids } : {}),
+    ...(input.runContext.reasoning_model !== undefined
+      ? { reasoningEnabled: input.runContext.reasoning_model }
+      : {})
+  });
   const agent = new Agent({
     id: "data-foundry",
     name: "DataFoundry",
@@ -661,13 +709,9 @@ export const createDataFoundry = async (
     ],
     outputProcessors: mastraContextProcessors.outputProcessors,
     defaultOptions: {
-      maxSteps: AGENT_MAX_STEPS,
+      maxSteps,
       ...(input.modelSettings ? { modelSettings: input.modelSettings } : {}),
-      providerOptions: {
-        openai: {
-          systemMessageMode: "system"
-        }
-      }
+      ...(runtimeProviderOptions ? { providerOptions: runtimeProviderOptions } : {})
     }
   });
   const agentForAgUi = wrapAgentForAgUi(
@@ -739,16 +783,6 @@ export const createDataFoundry = async (
   };
 };
 
-const createEvidenceFocusRuntimeSource = (items: AgentContextItem[]): RuntimeContextSource | undefined => {
-  if (items.length === 0) {
-    return undefined;
-  }
-  return {
-    sourceType: "evidence-focus",
-    collect: () => items
-  };
-};
-
 export const createDataFoundryRunContext = (input: AgentRunContextInput): AgentRunContext => {
   if ((input.enabled_datasource_ids?.length ?? 0) === 0) {
     return input;
@@ -784,7 +818,7 @@ export const probeModelProvider = async (
   const output = await agent.generate("Reply with OK only.", {
     abortSignal: AbortSignal.timeout(timeoutMs),
     maxSteps: 1,
-    modelSettings: { maxOutputTokens: 16, temperature: 0 }
+    modelSettings: { maxOutputTokens: 16 }
   });
   return { model: provider.model_name, text: output.text.trim() };
 };
@@ -943,6 +977,103 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
   }
 
   const policies: string[] = [];
+  if (context.energy_query_context) {
+    const energyContext = context.energy_query_context;
+    if (isTrustedEnergyTextQueryContract(energyContext)) {
+      policies.push(
+        "EnergyIQ trusted Snapshot path: the server has already compiled immutable Project, Scope, half-open Period, "
+          + "timezone, released Metric, Data Snapshot, Data as of, expected facts, and Evidence pins. Use only the "
+          + "structured expected facts in the authoritative ProjectAnalysisSnapshot context. Do not rediscover or "
+          + "replace them with SQL, files, memory, another datasource, or model inference. Never reveal the internal "
+          + "datasource, schema, model profile, provider configuration, or credentials. The answer must state Scope, "
+          + "Period with exclusive end and timezone, Metric, Data as of, and Evidence. If a required expected fact is "
+          + "absent, report it as unavailable; never invent, extrapolate, or substitute a nearby Metric."
+      );
+    } else {
+    const localRangeStart = formatEnergyTimestamp(energyContext.from, energyContext.timezone);
+    const localRangeEnd = formatEnergyTimestamp(
+      new Date(Date.parse(energyContext.to) - 1).toISOString(),
+      energyContext.timezone
+    );
+    const noDeclaredClaimValues = input.analysisRequirements.every((requirement) =>
+      requirement.assertions.every((assertion) => assertion.claimValues.length === 0)
+    );
+    const chartRequested = isChartRequested(context.user_input);
+    policies.push(
+      "EnergyIQ trusted-query fast path: the server has already selected and allowlisted exactly one datasource for "
+        + `Project "${energyContext.projectName}", scope "${energyContext.scopeName}" (${energyContext.scopeType}), `
+        + `resource "${energyContext.resource}", and the half-open time range [${energyContext.from}, `
+        + `${energyContext.to}) in timezone ${energyContext.timezone}. The user selected period is `
+        + `"${energyContext.period}"; its local calendar display range is ${localRangeStart} through `
+        + `${localRangeEnd}. Treat that scope and period as authoritative and show the local calendar range, not raw UTC. `
+        + "Do not call list_data_sources, list_files, preview_table, workspace file tools, or direct database clients "
+        + "to rediscover data. Call inspect_schema alone as the initial governed-contract setup action and wait for its "
+        + "result. This one setup action does not require a SQL investigation. If scoped SQL can add explanation, reduce "
+        + "uncertainty, verify a new angle, or change the action, reuse that inspection's schema_id in run_sql_readonly. "
+        + "A requirement whose analysis_contract declares sufficient context_evidence may be committed directly; the server "
+        + "binds its authorized current-Snapshot Context Evidence. Scoped SQL may investigate relevant context but must not "
+        + "silently replace released values. Requirements without sufficient context evidence need at least one successful "
+        + "run_sql_readonly result in the current run. Schema IDs and table "
+        + "names found in prior messages, deterministic Evidence, examples, or earlier runs are reference-only and "
+        + "must never be executed in the current run. The run-scoped relation is already restricted to the authoritative "
+        + "period, so do not add a redundant time filter. If a boundary audit truly requires one, compare a TIMESTAMPTZ "
+        + "column only with explicit TIMESTAMPTZ UTC literals; never compare it with an unzoned TIMESTAMP literal. Prefer one "
+        + "focused aggregate SQL query that supplies all requested figures; for simple aggregates, query the inspected "
+        + "physical table directly and avoid CTEs or derived table aliases when that is the clearest correct query. "
+        + "Use as many focused SQL queries as the question and Evidence require. Avoid redundant repeats, but never "
+        + "stop investigating merely to meet a query, step, latency, or token target. If a validation error occurs, "
+        + "use its feedback to repair the query or choose a better supported path. Commit evidenced analysis requirements "
+        + "when they are sufficiently verified. For one count, total, lookup, or direct comparison, start with the "
+        + "smallest sufficient query. If it does not fully answer and verify the request, continue investigating. "
+        + "When reporting a share or percentage, make the full requested denominator explicit in the SQL result, for "
+        + "example with a conditional total or a window total. Preserve NULL or Unknown dimension values as an explicit "
+        + "bucket or disclose the unreconciled amount; never use only the displayed non-null groups as the parent total. "
+        + "Prefer an authoritative deterministic Evidence item when it already answers the question. Business "
+        + "classifications such as facility type must come from an explicit Metadata field or authoritative Evidence. "
+        + "Never infer a classification or a zero count from project titles, ID prefixes, Scope names, device labels, "
+        + "or the absence of matching words in energy facts. If the required dimension is not exposed, return Missing "
+        + "Evidence or Unavailable instead of searching similar labels or guessing. Do not enumerate a large Evidence "
+        + "bundle in reasoning when one Evidence item or query can verify the answer. For an explanatory or discovery "
+        + "question, begin with the strongest available observation and use targeted follow-ups to test candidate "
+        + "explanations, comparisons, and decisions. Continue while another check can materially improve correctness, "
+        + "reduce uncertainty, or change the recommended action. Finish only when the requirements are supported by "
+        + "sufficient Evidence, or when the remaining Evidence gap is stated honestly with a useful verification path. "
+        + "Keep visible reasoning useful: name the question, the Evidence gap, the next check, and what the result changed. Do not "
+        + "repeat the Prompt, policy, schema, protocol contract, or the same finding in multiple reasoning rounds. "
+        + (noDeclaredClaimValues
+          ? "This run declares no claim value names, so every analysis_requirements_commit claim must omit its values field entirely. "
+          : "Include only claim value names explicitly declared in the requirement assertions. ")
+        + "Call tools without narrating internal plans or validation "
+        + "mechanics. After the tools finish, start the final answer with the user-facing result itself, then give the "
+        + "scope, period, unit, and concise caveats. Never preface the answer with a workflow status such as requirements "
+        + "committed, validation completed, analysis completed, or protocol completed. Do not mention requirement IDs, "
+        + "tool names, schema IDs, artifact IDs, commits, or internal protocol state unless "
+        + "the user explicitly asks for audit details. Never show the internal datasource ID; use the Project and scope "
+        + "names above. Do not create a report, export, chart file, "
+        + "or other workspace artifact unless the user explicitly requests one; a normal conversational answer is not "
+        + "an artifact. "
+        + (chartRequested
+          ? "The user explicitly requested a chart. Make the first chartable analytical SQL result exactly two columns: "
+            + "one label/time column and one numeric metric column, with 2 to 500 exact rows, and set the "
+            + "run_sql_readonly limit argument to 500 so the result is not truncated. The backend automatically "
+            + "creates the validated chart preview from those SQL rows. Never use write_file or execute_command to build "
+            + "HTML, CSV, JavaScript, SVG, or simulated chart values; never interpolate, repeat, or invent points. For an "
+            + "hourly trend across a multi-day period, the first chart query must group by the full local hourly timestamp "
+            + "(for example date_trunc('hour', local_interval_start) AS local_hour_start), not return raw interval rows and "
+            + "not group by hour-of-day or EXTRACT(hour); a complete seven-day hourly timeline has 168 ordered points, "
+            + "not 24 aggregated clock-hour buckets. Reuse that chart result to identify the peak. If the chart result "
+            + "preview is truncated and the exact peak is not visible, run a focused follow-up using the same "
+            + "hourly aggregation ordered by the hourly metric descending with LIMIT 1; never use MAX on a raw interval "
+            + "row as the hourly peak. Do not add a total query unless the user asked for a total. Mention a generated "
+            + "chart preview only when the successful SQL tool "
+            + "result explicitly reports that the backend created a chart artifact. When it exists, tell the user that "
+            + "the chart is available in Task Console > Outputs > Preview; do not say chart below because charts are not "
+            + "currently embedded inline in the answer. If no chart artifact exists, use the validation feedback to "
+            + "correct the SQL and retry; otherwise state plainly that no chart was generated."
+          : "")
+    );
+    }
+  }
   if (taskToolsEnabled && taskTools.length === 4) {
     policies.push(
       "Plan with tasks. For work with three or more distinct actions, call task_write first and keep exactly one "
@@ -968,8 +1099,10 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
     }).join("\n");
     toolGroups.push("Analysis requirement tool: analysis_requirements_commit.");
     policies.push(
-      "Analysis requirements are mandatory completion conditions:\n"
+      "Analysis requirements are mandatory minimum completion conditions, not an exhaustive boundary on investigation:\n"
         + requirementList
+        + "\nThe Analyst may pursue additional Evidence-backed angles when they can improve correctness, reduce uncertainty, "
+        + "or create decision value. Additional investigation must not replace or weaken the user's required claims. "
         + "\nWhen using task_write, include the relevant requirement IDs in each task content. Every run_sql_readonly call "
         + "must include requirement_ids for the claims it supports and expected_columns for its result contract. "
         + "For every non-manual structured requirement, also include its exact assertion_ids; the runtime rejects SQL "
@@ -983,8 +1116,8 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
         + "include the full requested end date. Compute threshold crossings from row-level SQL, never estimates. "
         + "Do not defer every claim until the final step. As soon as a requirement has sufficient validated evidence, "
         + "call analysis_requirements_commit for that requirement before starting more optional drill-downs. Commit any "
-        + "remaining evidenced requirements before writing final report files, and reserve the last two steps for task_check "
-        + "and the closing answer. Runtime resolves validated evidence already bound to that requirement, so do not guess "
+        + "remaining evidenced requirements before writing final report files or the closing answer. Runtime resolves "
+        + "validated evidence already bound to that requirement, so do not guess "
         + "artifact IDs. Every required claimValues entry must be copied into the claim values array with the exact "
         + "verified name, numeric value, and unit; the runtime rejects unverified or mismatched values. "
         + "For a derived claim, use evidence_requirement_ids to name the upstream requirement IDs that "
@@ -1044,10 +1177,21 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
       + "requires the other registered protocol (general-task@1 or data-analysis@1). Provide stable reasonCodes and "
       + "all unresolvedGoals. Never hand off to bypass schema, SQL validation, evidence, policy, or completion gates."
   );
-  policies.push(
-    "Reply in the same natural language as the user's latest request. If the user mixes languages, use the dominant "
-      + "language from the request. Keep SQL, code, table names, column names, and other technical identifiers "
-      + "unchanged."
+  policies.push(context.energy_query_context
+    ? "For EnergyIQ, write the final customer answer in plain English even when the question is in Chinese. Lead with "
+      + "the answer or finding, then explain What happened, Why it matters or may have happened, What to do next, and "
+      + "How to verify when those sections are useful. Unless the user explicitly requests detail, multiple deliverables, "
+      + "or a report, the final answer to one decision question must be a compact executive brief under 300 words and "
+      + "use no more than five short bullets: one-sentence takeaway, up to three decisive Evidence points, one next "
+      + "action, and one verification measure. Keep only facts "
+      + "that change prioritization, impact, action, or uncertainty; omit secondary metrics and technical method details. "
+      + "This is a presentation target, not an analysis or tool budget; investigate as much as needed before answering. "
+      + "Do not list every query or checked metric. Avoid protocol jargon and unexplained technical terms. Visible "
+      + "reasoning may use the model's natural working language. Do not invent external definitions, classifications, "
+      + "causes, or operational facts that are absent from authoritative Context or successful Tool Evidence. Keep SQL, "
+      + "table names, and column names unchanged."
+    : "Reply in the same natural language as the user's latest request. If the user mixes languages, use the dominant "
+      + "language from the request. Keep SQL, code, table names, column names, and other technical identifiers unchanged."
   );
   policies.push(
     "Always finish a run with a brief natural-language message to the user that summarizes what you did and the "
@@ -1057,10 +1201,12 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
       + "restating raw tool output."
   );
   policies.push(
-    `Respect limits. This run allows at most ${AGENT_MAX_STEPS} steps and `
-      + `${SQL_MAX_EXECUTION_COUNT} SQL executions total `
-      + `(SQL longer than ${SQL_MAX_SQL_CHARS} chars is truncated from view). `
-      + "Prefer one focused query per datasource before refining."
+    "Runtime circuit breakers exist only to stop runaway execution; they are not an analysis budget or a reason to "
+      + "answer early. Continue until the requirement is supported by sufficient Evidence or the unresolved gap is "
+      + "explicit. When another query would not change the conclusion, next action, or material uncertainty, finish "
+      + "the investigation and answer; this is a judgment principle, not a fixed query or step limit. Prefer focused, "
+      + "non-duplicative queries and use validation feedback to refine the investigation. "
+      + `(SQL longer than ${SQL_MAX_SQL_CHARS} chars is truncated from view.)`
   );
   if (commandExecutionEnabled) {
     const workspacePromotionPolicy = promoteWorkspaceFileEnabled
@@ -1129,6 +1275,22 @@ Operating policy:
 ${policies.map((policy, index) => `${index + 1}. ${policy}`).join("\n")}
 `;
 };
+
+const isTrustedEnergyTextQueryContract = (
+  value: NonNullable<AgentRunContext["energy_query_context"]>
+): value is TrustedEnergyTextQueryContract =>
+  "kind" in value && value.kind === "trusted-energy-text-query";
+
+const formatEnergyTimestamp = (value: string, timeZone: string): string =>
+  new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  }).format(new Date(value));
 
 const selectToolsByPolicy = <TTool>(
   availableTools: Record<string, TTool>,
@@ -1495,6 +1657,34 @@ export type * from "./protocol/protocol-router.js";
 export type * from "./protocol/protocol-runtime.js";
 export type * from "./protocol/types.js";
 export { DataLinkSemanticProvider } from "./semantic/datalink-semantic-provider.js";
+export { EnergyQuerySemanticProvider } from "./semantic/energy-query-semantic-provider.js";
+export { createEnergyAnalysisContractGrounder } from "./semantic/energy-analysis-contract-grounder.js";
+export type { EnergyAnalysisSemantics } from "./semantic/energy-analysis-contract-grounder.js";
+export {
+  executeTrustedEnergyText,
+  projectAnalysisSnapshotToTrustedText
+} from "./semantic/project-analysis-snapshot-trusted-text.js";
+export type {
+  ProjectAnalysisSnapshotTrustedTextInput,
+  TrustedEnergySnapshotMetric,
+  TrustedEnergySnapshotProjection,
+  TrustedEnergyStructuredClaimProvider
+} from "./semantic/project-analysis-snapshot-trusted-text.js";
+export {
+  compileTrustedEnergyTextQuery,
+  createTrustedEnergyAnswerEnvelope,
+  TRUSTED_ENERGY_TEXT_INTENT_METRICS,
+  TRUSTED_ENERGY_TEXT_INTENTS,
+  validateTrustedEnergyTextResult
+} from "./semantic/trusted-energy-text.js";
+export type {
+  TrustedEnergyPhysicalSchemaIdentity,
+  TrustedEnergyTextIntent,
+  TrustedEnergyTextQueryContract,
+  TrustedEnergyTextRequest,
+  TrustedEnergyTextResult,
+  TrustedEnergyTextResultInput
+} from "./semantic/trusted-energy-text.js";
 export { LocalSemanticProvider } from "./semantic/local-semantic-provider.js";
 export { SemanticProviderChain } from "./semantic/semantic-provider-chain.js";
 export { createDefaultSemanticProvider } from "./semantic/default-semantic-provider.js";

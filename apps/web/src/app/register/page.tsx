@@ -1,10 +1,5 @@
-import type { Metadata } from "next";
-import { RegisterClient } from "./register-client";
-
-export const metadata: Metadata = {
-  title: "Sign up",
-};
+import { redirect } from "next/navigation";
 
 export default function RegisterPage() {
-  return <RegisterClient />;
+  redirect("/login");
 }

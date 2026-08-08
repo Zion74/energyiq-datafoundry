@@ -1,7 +1,9 @@
 export type ModelContextProfile = {
   id: string;
   modelPattern: string;
+  capabilitySource: "conservative-fallback" | "explicit-profile" | "verified-model-default";
   contextWindow: number;
+  maxOutputTokens: number;
   outputReserve: number;
   safetyMargin: number;
   messageOverhead: number;
@@ -27,7 +29,9 @@ const resolveDefaultContextWindow = (): number => {
 const DEFAULT_PROFILE: ModelContextProfile = {
   id: "conservative-default",
   modelPattern: "*",
+  capabilitySource: "conservative-fallback",
   contextWindow: resolveDefaultContextWindow(),
+  maxOutputTokens: 4096,
   outputReserve: 4096,
   safetyMargin: 2048,
   messageOverhead: 4,

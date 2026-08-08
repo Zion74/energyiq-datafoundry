@@ -72,6 +72,19 @@ describe("workspace layout", () => {
     );
   });
 
+  it("lets the chat track shrink below its desktop minimum on a phone viewport", () => {
+    expect(
+      getWorkspaceGridTemplateColumns({
+        isConfigPanelOpen: false,
+        isRightPanelOpen: false,
+        sidebarCollapsed: true,
+        viewportWidth: 390,
+      }),
+    ).toBe(
+      `${fixedGridColumn(LEFT_PANEL_WIDTH_COLLAPSED)} minmax(0px, 1fr) ${fixedGridColumn(0)}`,
+    );
+  });
+
   it("centers message rows within the content column max-width", () => {
     expect(chatPaneClassName).toContain("w-full");
     expect(chatPaneClassName).toContain("[&_.copilotKitMessage]:mx-auto");

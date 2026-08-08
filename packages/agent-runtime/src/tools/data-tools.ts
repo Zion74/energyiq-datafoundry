@@ -1,4 +1,5 @@
 import { createTool } from "@mastra/core/tools";
+import type { ArtifactService } from "@datafoundry/artifacts";
 import type { DataGateway, SchemaSummary, SqlExecutionResult } from "@datafoundry/data-gateway";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -47,6 +48,7 @@ type InspectSchemaResult = SchemaSummary & {
 
 type RawSqlToolResult = {
   cache_hit?: boolean;
+  chart_artifact?: Awaited<ReturnType<ArtifactService["createChartArtifact"]>>;
   result: SqlExecutionResult;
   sql: string;
 };
@@ -88,6 +90,7 @@ export type ToolRegistry = {
   ): Promise<RawSqlToolResult>;
   state: {
     artifact_ids: string[];
+    chart_artifact_ids: string[];
     schema_capabilities: Map<string, SchemaCapability>;
     sql_execution_count: number;
     sql_execution_count_by_datasource: Map<string, number>;
@@ -96,6 +99,7 @@ export type ToolRegistry = {
 
 type CreateDataFoundryToolRegistryInput = {
   abortSignal?: AbortSignal | undefined;
+  artifactService?: ArtifactService;
   dataGateway: DataGateway;
   emitter: AgUiEventEmitter;
   runContext: AgentRunContext;
@@ -106,6 +110,7 @@ type CreateDataFoundryToolRegistryInput = {
 export const createDataFoundryToolRegistry = (input: CreateDataFoundryToolRegistryInput): ToolRegistry => {
   const state = {
     artifact_ids: [] as string[],
+    chart_artifact_ids: [] as string[],
     schema_capabilities: new Map<string, SchemaCapability>(),
     sql_execution_count: 0,
     sql_execution_count_by_datasource: new Map<string, number>()
@@ -252,7 +257,21 @@ export const createDataFoundryToolRegistry = (input: CreateDataFoundryToolRegist
         state.artifact_ids.push(result.artifact_id);
       }
       emitSqlReferences(input, datasourceId, result);
-      const rawResult = { result, sql: toolInput.sql };
+      const chartArtifact = await maybeCreateEnergyChartArtifact({
+        ...(input.artifactService ? { artifactService: input.artifactService } : {}),
+        emitter: input.emitter,
+        result,
+        runContext: input.runContext,
+        ...(toolInput.limit !== undefined ? { requestedLimit: toolInput.limit } : {}),
+        state,
+        stepId,
+        ...(options?.toolCallId ? { toolCallId: options.toolCallId } : {})
+      });
+      const rawResult = {
+        result,
+        sql: toolInput.sql,
+        ...(chartArtifact ? { chart_artifact: chartArtifact } : {})
+      };
       sqlResultCache.set(cacheKey, rawResult);
       resultMetadata.set(rawResult, { datasourceId, stepId });
       return rawResult;
@@ -335,6 +354,180 @@ export const createDataFoundryToolRegistry = (input: CreateDataFoundryToolRegist
     state
   };
 };
+
+export const isChartRequested = (userInput: string): boolean =>
+  /\b(?:chart|graph|plot|visuali[sz](?:e|ation)|line[- ]?chart|bar[- ]?chart|pie[- ]?chart)\b|\u56fe\u8868|\u8d8b\u52bf\u56fe|\u6298\u7ebf\u56fe|\u67f1\u72b6\u56fe|\u997c\u56fe|\u53ef\u89c6\u5316/iu
+    .test(userInput);
+
+const maybeCreateEnergyChartArtifact = async (input: {
+  artifactService?: ArtifactService;
+  emitter: AgUiEventEmitter;
+  result: SqlExecutionResult;
+  runContext: AgentRunContext;
+  requestedLimit?: number;
+  state: ToolRegistry["state"];
+  stepId: string;
+  toolCallId?: string;
+}): Promise<Awaited<ReturnType<ArtifactService["createChartArtifact"]>> | undefined> => {
+  if (
+    !input.artifactService
+    || !input.runContext.energy_query_context
+    || !isChartRequested(input.runContext.user_input)
+    || input.state.chart_artifact_ids.length > 0
+  ) {
+    return undefined;
+  }
+  const preview = chartPreviewFromSqlResult(input.result, input.runContext.user_input);
+  if (input.requestedLimit === undefined || input.requestedLimit < input.result.row_count) {
+    return undefined;
+  }
+  if (!preview) {
+    return undefined;
+  }
+  try {
+    const artifact = await input.artifactService.createChartArtifact({
+      user_id: input.runContext.user_id,
+      session_id: input.runContext.session_id,
+      run_id: input.runContext.run_id,
+      name: preview.name,
+      chartType: preview.chartType,
+      points: preview.points,
+      ...(preview.unit ? { unit: preview.unit } : {}),
+      metadata_json: {
+        source_artifact_id: input.result.artifact_id,
+        audit_log_id: input.result.audit_log_id,
+        step_id: input.stepId,
+        ...(input.toolCallId ? { tool_call_id: input.toolCallId } : {}),
+        generated_by: "energyiq-rule-based-chart"
+      }
+    });
+    input.state.chart_artifact_ids.push(artifact.id);
+    input.emitter.emit(createArtifactEvent(artifact));
+    return artifact;
+  } catch (error) {
+    input.emitter.emit(createCustomEvent("chart.preview.skipped", {
+      reason: error instanceof Error ? error.message : "CHART_PREVIEW_FAILED",
+      run_id: input.runContext.run_id,
+      step_id: input.stepId
+    }));
+    return undefined;
+  }
+};
+
+const chartPreviewFromSqlResult = (
+  result: SqlExecutionResult,
+  userInput: string
+): {
+  chartType: "bar" | "line" | "pie";
+  name: string;
+  points: Array<{ label: string; value: number }>;
+  unit?: string;
+} | undefined => {
+  if (result.columns.length !== 2 || result.rows.length < 2 || result.rows.length > 500) {
+    return undefined;
+  }
+  const [labelColumn, valueColumn] = result.columns;
+  if (!labelColumn || !valueColumn) {
+    return undefined;
+  }
+  if (!requestedTimeGrainMatches(userInput, labelColumn)) {
+    return undefined;
+  }
+  const points = result.rows.map((row) => ({
+    label: chartLabel(row[0]),
+    value: typeof row[1] === "number" ? row[1] : Number(row[1])
+  }));
+  if (points.some((point) => point.label.length === 0 || !Number.isFinite(point.value))) {
+    return undefined;
+  }
+  if (!requestedTimeSpacingMatches(userInput, points)) {
+    return undefined;
+  }
+  const chartType = /\bpie[- ]?chart\b|\u997c\u56fe/iu.test(userInput)
+    ? "pie"
+    : /\bbar[- ]?chart\b|\u67f1\u72b6\u56fe/iu.test(userInput)
+      ? "bar"
+      : /(?:time|date|hour|day|week|month|interval|timestamp)/iu.test(labelColumn)
+        ? "line"
+        : "bar";
+  const unit = chartUnit(valueColumn);
+  return {
+    chartType,
+    name: `${humanizeColumn(valueColumn)} by ${humanizeColumn(labelColumn)}`,
+    points,
+    ...(unit ? { unit } : {})
+  };
+};
+
+const chartLabel = (value: unknown): string => {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  return typeof value === "string" || typeof value === "number" ? String(value) : "";
+};
+
+const requestedTimeGrainMatches = (userInput: string, labelColumn: string): boolean => {
+  const requestedGrain = /\b(?:hour|hourly)\b|\u5c0f\u65f6/iu.test(userInput)
+    ? "hour"
+    : /\b(?:day|daily)\b|\u6bcf\u65e5|\u6309\u65e5|\u5929/iu.test(userInput)
+      ? "day"
+      : /\b(?:week|weekly)\b|\u6bcf\u5468|\u6309\u5468/iu.test(userInput)
+        ? "week"
+        : /\b(?:month|monthly)\b|\u6bcf\u6708|\u6309\u6708/iu.test(userInput)
+          ? "month"
+          : undefined;
+  const normalizedLabel = labelColumn.toLowerCase();
+  if (requestedGrain === undefined || !normalizedLabel.includes(requestedGrain)) {
+    return requestedGrain === undefined;
+  }
+  const requestsTimeline = /\b(?:trend|timeline|over\s+the\s+period|across\s+the\s+period)\b|\u8d8b\u52bf|\u65f6\u95f4\u7ebf/iu
+    .test(userInput);
+  if (requestedGrain === "hour" && requestsTimeline) {
+    return /(?:timestamp|start|date|datetime|time|(?:^|_)ts(?:$|_))/iu.test(normalizedLabel)
+      && !/(?:^|_)(?:local_)?hour(?:_of_day)?$/iu.test(normalizedLabel);
+  }
+  return true;
+};
+
+const requestedTimeSpacingMatches = (
+  userInput: string,
+  points: Array<{ label: string; value: number }>
+): boolean => {
+  const requestsTimeline = /\b(?:trend|timeline|over\s+the\s+period|across\s+the\s+period)\b|\u8d8b\u52bf|\u65f6\u95f4\u7ebf/iu
+    .test(userInput);
+  if (!requestsTimeline) {
+    return true;
+  }
+  const minimumSpacingMs = /\b(?:hour|hourly)\b|\u5c0f\u65f6/iu.test(userInput)
+    ? 60 * 60 * 1000
+    : /\b(?:day|daily)\b|\u6bcf\u65e5|\u6309\u65e5|\u5929/iu.test(userInput)
+      ? 20 * 60 * 60 * 1000
+      : /\b(?:week|weekly)\b|\u6bcf\u5468|\u6309\u5468/iu.test(userInput)
+        ? 6 * 24 * 60 * 60 * 1000
+        : /\b(?:month|monthly)\b|\u6bcf\u6708|\u6309\u6708/iu.test(userInput)
+          ? 27 * 24 * 60 * 60 * 1000
+          : undefined;
+  if (minimumSpacingMs === undefined) {
+    return true;
+  }
+  const timestamps = points.map((point) => Date.parse(point.label));
+  if (timestamps.some((timestamp) => !Number.isFinite(timestamp))) {
+    return false;
+  }
+  return timestamps.slice(1).every((timestamp, index) =>
+    timestamp - (timestamps[index] as number) >= minimumSpacingMs
+  );
+};
+
+const chartUnit = (column: string): string | undefined => {
+  if (/(?:^|_)kwh(?:$|_)/iu.test(column)) return "kWh";
+  if (/(?:^|_)kw(?:$|_)/iu.test(column)) return "kW";
+  if (/(?:percent|percentage|pct|rate)/iu.test(column)) return "%";
+  return undefined;
+};
+
+const humanizeColumn = (column: string): string =>
+  column.replaceAll("_", " ").replace(/\b\w/gu, (letter) => letter.toUpperCase());
 
 const sqlCacheKey = (input: {
   schema_id: string;

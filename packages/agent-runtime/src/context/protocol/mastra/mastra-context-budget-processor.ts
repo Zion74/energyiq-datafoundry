@@ -59,8 +59,16 @@ export class MastraContextBudgetProcessor implements Processor<"context-budget">
 
   processInputStep(args: ProcessInputStepArgs): ProcessInputStepResult {
     const governedMessages = this.options.toolObservationRouter?.governMessages(args.messages) ?? args.messages;
+    const activeSourceMessageIds = new Set(
+      this.options.runState.package.groups
+        .filter((group) => group.kind === "source")
+        .map((group) => `context:${group.id}`)
+    );
+    const conversationMessages = governedMessages.filter((message) =>
+      typeof message.id !== "string" || !activeSourceMessageIds.has(message.id)
+    );
     const livePackage = this.builder.build(
-      createMastraConversationContextItems(governedMessages, args.systemMessages),
+      createMastraConversationContextItems(conversationMessages, args.systemMessages),
       {
         resourceId: this.options.runState.identity.resourceId,
         sessionId: this.options.runState.identity.sessionId,

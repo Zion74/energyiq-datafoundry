@@ -4,11 +4,11 @@ import { useCallback, useState, type FormEvent, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { configApi } from "../../lib/config-api/client";
 
-export type AuthMode = "login" | "register" | "forgot" | "verify" | "reset";
+export type AuthMode = "login" | "invite" | "forgot" | "verify" | "reset";
 
 const AUTH_MODE_META: Record<AuthMode, { title: string; subtitle: string; submit: string }> = {
-  login: { title: "Sign in", subtitle: "Welcome back to DataFoundry", submit: "Sign in" },
-  register: { title: "Create account", subtitle: "Get started with DataFoundry", submit: "Create account" },
+  login: { title: "Sign in", subtitle: "Welcome back to EnergyIQ", submit: "Sign in" },
+  invite: { title: "Activate account", subtitle: "Complete your EnergyIQ invitation", submit: "Activate account" },
   forgot: { title: "Forgot password", subtitle: "We'll send you a reset link", submit: "Send reset link" },
   verify: { title: "Verify email", subtitle: "Enter the code we sent you", submit: "Verify email" },
   reset: { title: "Reset password", subtitle: "Choose a new password", submit: "Reset password" },
@@ -18,17 +18,17 @@ export const AUTH_BUTTON_CLASS =
   "flex h-10 w-full items-center justify-center gap-2 rounded-md bg-primary px-3 text-sm font-semibold text-white transition-colors hover:bg-primary-light focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-2 focus-visible:ring-offset-surface disabled:cursor-not-allowed disabled:opacity-50";
 
 /**
- * Self-contained password auth journey. `login` and `register` are distinct
- * routes (`/login`, `/register`) so each has its own URL + tab title; the
- * transient steps (`forgot`/`reset`/`verify`) are sub-states of the route they
- * flow from and navigate back to the canonical routes when finished.
+ * Self-contained invitation-only password auth journey. Account creation is
+ * owned by Admin; users can sign in, activate an invitation or recover access.
  */
 export function AuthFlow({
   initialMode,
+  initialToken = "",
   onAuthenticated,
   error = null,
 }: {
   initialMode: AuthMode;
+  initialToken?: string;
   onAuthenticated: () => void | Promise<void>;
   error?: string | null;
 }) {
@@ -37,7 +37,7 @@ export function AuthFlow({
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [token, setToken] = useState("");
+  const [token, setToken] = useState(initialToken);
   const [message, setMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -48,13 +48,12 @@ export function AuthFlow({
     setMessage(null);
   }, []);
 
-  // Forgot/reset/verify are in-page sub-modes of /login or /register. Pushing
-  // `/login` alone is a no-op when already on that route, so also reset mode.
+  // Recovery and invitation states live on /login. Reset the local mode as
+  // well because pushing the same URL does not remount this component.
   const goToLogin = useCallback(() => {
     goToSubMode("login");
     router.push("/login");
   }, [goToSubMode, router]);
-  const goToRegister = useCallback(() => router.push("/register"), [router]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -62,8 +61,8 @@ export function AuthFlow({
     setLocalError(null);
     setMessage(null);
     try {
-      if ((mode === "register" || mode === "reset") && password.length < 6) {
-        setLocalError("Password must be at least 6 characters.");
+      if ((mode === "invite" || mode === "reset") && password.length < 8) {
+        setLocalError("Password must be at least 8 characters.");
         return;
       }
       if (mode === "login") {
@@ -71,20 +70,19 @@ export function AuthFlow({
         await onAuthenticated();
         return;
       }
-      if (mode === "register") {
-        const result = await configApi.register({ email, password, displayName });
-        setMessage(
-          result.verificationToken ? `Verify email token: ${result.verificationToken}` : "Verify email",
-        );
-        setMode("verify");
+      if (mode === "invite") {
+        await configApi.activateAccount({ token, password, displayName });
+        await onAuthenticated();
         return;
       }
       if (mode === "forgot") {
         const result = await configApi.forgotPassword({ email });
-        setMessage(
-          result.resetToken ? `Reset token: ${result.resetToken}` : "Check your email for a reset link.",
-        );
-        setMode("reset");
+        if (result.resetToken) {
+          setToken(result.resetToken);
+          setMode("reset");
+        } else {
+          setMessage("If the account exists, a reset link has been sent.");
+        }
         return;
       }
       if (mode === "verify") {
@@ -110,7 +108,7 @@ export function AuthFlow({
   return (
     <PasswordAuthShell title={meta.title} subtitle={meta.subtitle}>
       <form className="flex flex-col gap-4" onSubmit={submit} noValidate>
-        {mode === "register" ? (
+        {mode === "invite" ? (
           <AuthField
             id="auth-display-name"
             label="Display name"
@@ -120,7 +118,7 @@ export function AuthFlow({
             autoComplete="name"
           />
         ) : null}
-        {mode === "verify" || mode === "reset" ? (
+        {(mode === "verify" || mode === "reset") && !initialToken ? (
           <AuthField
             id="auth-token"
             label={mode === "verify" ? "Verification code" : "Reset code"}
@@ -130,7 +128,7 @@ export function AuthFlow({
             autoComplete="one-time-code"
           />
         ) : null}
-        {mode !== "verify" && mode !== "reset" ? (
+        {mode === "login" || mode === "forgot" ? (
           <AuthField
             id="auth-email"
             label="Email"
@@ -148,8 +146,8 @@ export function AuthFlow({
             type="password"
             value={password}
             onChange={setPassword}
-            placeholder={mode === "login" ? "••••••••" : "At least 6 characters"}
-            hint={mode === "register" || mode === "reset" ? "At least 6 characters" : undefined}
+            placeholder={mode === "login" ? "Enter your password" : "At least 8 characters"}
+            hint={mode === "invite" || mode === "reset" ? "At least 8 characters" : undefined}
             autoComplete={mode === "login" ? "current-password" : "new-password"}
             {...(mode === "login"
               ? {
@@ -194,7 +192,7 @@ export function AuthFlow({
         </button>
       </form>
 
-      <AuthModeSwitch mode={mode} onGoLogin={goToLogin} onGoRegister={goToRegister} />
+      <AuthModeSwitch mode={mode} onGoLogin={goToLogin} />
     </PasswordAuthShell>
   );
 }
@@ -202,11 +200,9 @@ export function AuthFlow({
 function AuthModeSwitch({
   mode,
   onGoLogin,
-  onGoRegister,
 }: {
   mode: AuthMode;
   onGoLogin: () => void;
-  onGoRegister: () => void;
 }) {
   const link = (label: string, onClick: () => void) => (
     <button
@@ -221,9 +217,7 @@ function AuthModeSwitch({
   return (
     <div className="mt-5 border-t border-border pt-4 text-center text-xs text-muted">
       {mode === "login" ? (
-        <p>New to DataFoundry? {link("Create an account", onGoRegister)}</p>
-      ) : mode === "register" ? (
-        <p>Already have an account? {link("Sign in", onGoLogin)}</p>
+        <p>Accounts are created by an EnergyIQ administrator.</p>
       ) : (
         <p>{link("Back to sign in", onGoLogin)}</p>
       )}
@@ -288,9 +282,9 @@ export function PasswordAuthShell({
       <section className="auth-card-in w-full max-w-sm">
         <div className="mb-6 flex items-center gap-2.5">
           <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-xs font-bold tracking-tight text-white">
-            DF
+            EI
           </span>
-          <span className="text-sm font-semibold text-foreground">DataFoundry</span>
+          <span className="text-sm font-semibold text-foreground">EnergyIQ</span>
         </div>
         <div className="rounded-xl border border-border bg-surface p-6 shadow-[var(--shadow-card)]">
           <div className="mb-5">

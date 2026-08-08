@@ -1,9 +1,23 @@
 import type { RunAgentInput } from "@ag-ui/client";
 import type { EvidenceKind, EvidenceRef, EvidenceSelection } from "@datafoundry/contracts";
-import type { ConfigResourceKind, MetadataStore } from "@datafoundry/metadata";
+import {
+  WORKSPACE_DEFAULT_MODEL_PROFILE_ID,
+  type ConfigResourceKind,
+  type MetadataStore
+} from "@datafoundry/metadata";
 import type { SkillMode, SkillPolicyConfig } from "@datafoundry/skills";
 
 import { preferConnectedResourceId } from "./model-profile-connection-status.js";
+import type { EnergyQueryContextRequest } from "./energy/energy-query-context.js";
+import {
+  TRUSTED_ENERGY_TEXT_INTENTS,
+  type TrustedEnergyTextIntent
+} from "@datafoundry/agent-runtime";
+import {
+  resolveModelProfileChain,
+  systemDefaultModelProfileRevision,
+  workspaceDefaultModelProfileConfigured
+} from "./workspace-model-profile-resolver.js";
 
 export type RunConfigDefaults = {
   activeDatasourceId?: string;
@@ -14,6 +28,8 @@ export type RunConfigDefaults = {
   enabledMcpServerIds: string[];
   enabledSkillIds: string[];
 };
+
+export type ModelSelectionPolicy = "request-or-workspace" | "system-default";
 
 export type EffectiveRunConfig = {
   activeDatasourceId?: string;
@@ -167,10 +183,14 @@ export const resolveEffectiveRunConfig = (
   metadataStore: MetadataStore,
   userId: string,
   defaultDatasourceId?: string,
-  workspaceId = "default"
+  workspaceId = "default",
+  modelSelection: ModelSelectionPolicy = "request-or-workspace"
 ): EffectiveRunConfig => {
   const defaults = loadWorkspaceRunDefaults(metadataStore, userId, workspaceId);
   const config = extractEffectiveRunConfig(input, defaultDatasourceId, defaults);
+  if (modelSelection === "system-default") {
+    config.activeLlmProfileId = WORKSPACE_DEFAULT_MODEL_PROFILE_ID;
+  }
   return {
     ...config,
     resourceRevisions: resolveResourceRevisions(config, metadataStore, userId, workspaceId)
@@ -195,7 +215,9 @@ const loadWorkspaceRunDefaults = (
   }).filter((item) => item.default_enabled && item.status !== "disabled");
   const modelProfiles = enabled("model-profile");
   const skillIds = enabled("skill").map((item) => item.id);
-  const activeLlmProfileId = preferConnectedResourceId(modelProfiles);
+  const activeLlmProfileId = workspaceDefaultModelProfileConfigured(metadataStore, workspaceId)
+    ? WORKSPACE_DEFAULT_MODEL_PROFILE_ID
+    : preferConnectedResourceId(modelProfiles);
   return {
     ...(datasourceIds[0] ? { activeDatasourceId: datasourceIds[0] } : {}),
     ...(activeLlmProfileId ? { activeLlmProfileId } : {}),
@@ -235,20 +257,18 @@ const resolveResourceRevisions = (
     ...(config.activeSkillId ? [config.activeSkillId] : [])
   ]);
   if (config.activeLlmProfileId) {
-    const visited = new Set<string>();
-    let profileId: string | undefined = config.activeLlmProfileId;
-    while (profileId && !visited.has(profileId)) {
-      visited.add(profileId);
-      const profile = metadataStore.configResources.get({
-        id: profileId,
-        workspace_id: workspaceId,
-        user_id: userId,
-        kind: "model-profile"
-      });
-      revisions[`model-profile:${profileId}`] = profile.revision;
-      profileId = typeof profile.payload.fallbackProfileId === "string"
-        ? profile.payload.fallbackProfileId
-        : undefined;
+    const chain = resolveModelProfileChain({
+      metadataStore,
+      profileId: config.activeLlmProfileId,
+      userId,
+      workspaceId
+    });
+    for (const profile of chain) {
+      revisions[`model-profile:${profile.exposedId}`] = profile.resource.revision;
+    }
+    if (config.activeLlmProfileId === WORKSPACE_DEFAULT_MODEL_PROFILE_ID) {
+      revisions[`model-profile-binding:${WORKSPACE_DEFAULT_MODEL_PROFILE_ID}`] =
+        systemDefaultModelProfileRevision(metadataStore);
     }
   }
   return revisions;
@@ -344,6 +364,84 @@ export const extractLastUserText = (input: RunAgentInput): string | undefined =>
     .map((part) => part.text)
     .join("\n")
     .trim();
+};
+
+/** Extract an untrusted EnergyIQ context request. It must be resolved again server-side. */
+export const extractEnergyQueryContextRequest = (
+  input: RunAgentInput
+): EnergyQueryContextRequest | undefined => {
+  const forwardedProps = isRecord(input.forwardedProps) ? input.forwardedProps : {};
+  const forwarded = recordFromUnknown(
+    forwardedProps.externalContext ?? forwardedProps.energyQueryContext
+  );
+  const contextValue = input.context.find((item) =>
+    item.description ===
+      "Trusted host context for the current EnergyIQ project, selected scope, resource and reporting period"
+  )?.value;
+  const candidate = forwarded ?? recordFromUnknown(contextValue);
+  if (!candidate || candidate.source !== "energyiq") {
+    return undefined;
+  }
+  const projectId = stringFromRecord(candidate, "projectId");
+  if (!projectId) {
+    throw new Error("ENERGYIQ_PROJECT_REQUIRED");
+  }
+  const resource = candidate.resource === "water" ? "water" : "electricity";
+  const periodValue = stringFromRecord(candidate, "period");
+  if (candidate.period !== undefined && !(
+    periodValue === "Yesterday"
+    || periodValue === "Last 7 days"
+    || periodValue === "Last 30 days"
+    || periodValue === "Previous week"
+    || periodValue === "Previous month"
+    || periodValue === "Custom"
+  )) {
+    throw new Error("ENERGYIQ_PERIOD_INVALID");
+  }
+  const period = periodValue === "Yesterday"
+    || periodValue === "Last 7 days"
+    || periodValue === "Last 30 days"
+    || periodValue === "Previous week"
+    || periodValue === "Previous month"
+    || periodValue === "Custom"
+    ? periodValue
+    : "Last 30 days";
+  const scopeId = stringFromRecord(candidate, "scopeId");
+  const from = stringFromRecord(candidate, "from");
+  const to = stringFromRecord(candidate, "to");
+  const expectedDataSnapshotId = stringFromRecord(candidate, "expectedDataSnapshotId");
+  const expectedProjectReleaseId = stringFromRecord(candidate, "expectedProjectReleaseId");
+  return {
+    projectId,
+    ...(scopeId ? { scopeId } : {}),
+    resource,
+    period,
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
+    ...(expectedDataSnapshotId ? { expectedDataSnapshotId } : {}),
+    ...(expectedProjectReleaseId ? { expectedProjectReleaseId } : {})
+  };
+};
+
+/** Extract only the allowlisted trusted-text intent; all facts are resolved server-side. */
+export const extractTrustedEnergyTextIntent = (
+  input: RunAgentInput
+): TrustedEnergyTextIntent | undefined => {
+  const forwardedProps = isRecord(input.forwardedProps) ? input.forwardedProps : {};
+  const forwarded = recordFromUnknown(
+    forwardedProps.externalContext ?? forwardedProps.energyQueryContext
+  );
+  const contextValue = input.context.find((item) =>
+    item.description ===
+      "Trusted host context for the current EnergyIQ project, selected scope, resource and reporting period"
+  )?.value;
+  const candidate = forwarded ?? recordFromUnknown(contextValue);
+  const value = candidate ? stringFromRecord(candidate, "trustedTextIntent") : undefined;
+  if (!value) return undefined;
+  if (!TRUSTED_ENERGY_TEXT_INTENTS.some((intent) => intent === value)) {
+    throw new Error(`TRUSTED_ENERGY_TEXT_INTENT_INVALID:${value}`);
+  }
+  return value as TrustedEnergyTextIntent;
 };
 
 const stringFromRecord = (record: Record<string, unknown>, key: string): string | undefined => {

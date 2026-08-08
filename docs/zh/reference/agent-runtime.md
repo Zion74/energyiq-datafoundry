@@ -89,6 +89,19 @@ workspace defaults
 
 客户端应保存 `runId`、`threadId`、tool call id 和 artifact id，用于详情展示、取消和恢复。
 
+### Context 与 Token 诊断事件
+
+Runtime 会发送向后兼容的 Custom Event，用于观察 Context 预算和实际用量：
+
+| 事件 | 重要字段 | 含义 |
+| --- | --- | --- |
+| `run.config.resolved` | `context_window`、`max_output_tokens`、`input_budget`、`capability_source` | 本次 Run 采用的模型预算。来源为 `explicit-profile`、`verified-model-default` 或 `conservative-fallback`。 |
+| `context.compiled` | `checkpoint_schema_version`、`package_revision`、`plan_id`、`token_report`、`group_token_costs`、`source_snapshot_hashes`、`high_water_mark` | 每个模型步骤已有 Context Package/Plan 的确定性 Checkpoint。 |
+| `context.prompt-verified` | `prompt_tokens`、`input_budget`、`remaining_tokens`、`high_water_mark` | 向 Provider 发起请求前，最终 Prompt 的校验计数。 |
+| `token_usage` | `step_number`、`input_tokens`、`output_tokens`、`cache_telemetry_available`，以及可选的 Cache hit/miss Token | Provider 返回的单步骤用量。Provider 没有返回 Cache 数据时表示 unavailable，不等于 0。 |
+
+`normal`、`diagnostic` 和 `review` 软水位只用于诊断，不会限制 SQL、思考轮数、运行时间或答案长度。只有最终 Prompt 超过有效 Input Budget 时，已有 Guard 才会 fail closed。
+
 ## 取消、错误和恢复
 
 | 场景 | 客户端动作 |

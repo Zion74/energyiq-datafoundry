@@ -44,6 +44,7 @@ import type {
   ProtocolStateStore
 } from "./types.js";
 import type { SemanticRequest, SemanticResolution } from "../semantic/types.js";
+import type { AnalysisContextEvidenceCatalog } from "./analysis-context-evidence.js";
 
 type ExistingTool = { execute?: (...args: unknown[]) => unknown | Promise<unknown> };
 type RunProtocolDomainState = GeneralTaskState | DataAnalysisState;
@@ -65,6 +66,7 @@ export type CreateRunProtocolBoundaryInput = {
   semanticRequest?: Omit<SemanticRequest, "query">;
   requirementExtractor?: AnalysisRequirementExtractor;
   analysisContractGrounder?: AnalysisContractGrounder;
+  contextEvidenceCatalog?: AnalysisContextEvidenceCatalog;
 };
 
 export type RunProtocolBoundary = {
@@ -104,7 +106,7 @@ export const createRunProtocolBoundary = async (
     : [];
   const protocolRegistry = new ProtocolRegistry();
   protocolRegistry.register(createGeneralTaskProtocol(actionNames));
-  protocolRegistry.register(createDataAnalysisProtocol(actionNames, userRequirements));
+  protocolRegistry.register(createDataAnalysisProtocol(actionNames, userRequirements, input.contextEvidenceCatalog));
   const router = new ProtocolRouter(protocolRegistry, {
     ...(input.classifier ? { classifier: input.classifier } : {})
   });
@@ -371,8 +373,9 @@ const projectGroundedSchemaObservation = (
     ...schemaObservation,
     analysis_contract: {
       instruction: [
-        "Use the exact requirement_id, assertion_id, aggregate aliases, and expected columns below in",
-        "run_sql_readonly. Do not invent or rename contract fields."
+        "Use the exact requirement_id, assertion_id, aggregate aliases, and expected columns below when producing Evidence.",
+        "Requirements with sufficient context_evidence may be committed directly. Use run_sql_readonly when scoped",
+        "investigation adds Evidence, and do not invent or rename contract fields."
       ].join(" "),
       requirements: state.requirements
         .filter((requirement) => requirement.source === "user")
@@ -389,7 +392,14 @@ const projectGroundedSchemaObservation = (
             sql_constraints: structuredClone(assertion.sqlConstraints),
             result_checks: structuredClone(assertion.resultChecks),
             claim_values: structuredClone(assertion.claimValues)
-          }))
+          })),
+          ...(requirement.contextEvidence
+            ? {
+                context_evidence: {
+                  mode: requirement.contextEvidence.mode,
+                }
+              }
+            : {})
         }))
     }
   };
@@ -408,6 +418,7 @@ const createRuntimeActionPlugin = (
     "data.query.plan",
     "data.query.validate",
     "analysis.result.validate",
+    "analysis.context.evidence.bind",
     "analysis.evidence.bind",
     "analysis.requirements.commit"
   ];

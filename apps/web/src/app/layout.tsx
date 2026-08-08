@@ -4,10 +4,10 @@ import "@copilotkit/react-core/v2/styles.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "DataFoundry",
-    template: "%s · DataFoundry",
+    default: "EnergyIQ",
+    template: "%s · EnergyIQ",
   },
-  description: "Agent-driven data task workspace",
+  description: "Decision-first energy analysis and AI data workspace",
 };
 
 export default function RootLayout({
@@ -16,7 +16,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <body className="font-sans antialiased">{children}</body>
     </html>
   );
