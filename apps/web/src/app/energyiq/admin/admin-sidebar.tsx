@@ -64,7 +64,7 @@ const projectItems: NavigationItem[] = [
   { id: "meter-mapping", label: "Meter Mapping", icon: "meter", available: true },
   { id: "operational-policies", label: "Tariff & Hours", icon: "settings", available: true },
   { id: "data-map", label: "Data Map", icon: "map", available: true },
-  { id: "templates", label: "Templates", icon: "explorer", available: true },
+  { id: "templates", label: "Overview Setup", icon: "explorer", available: true },
   { id: "knowledge", label: "Knowledge", icon: "spark", available: true },
   { id: "assets", label: "Assets", icon: "explorer", available: true },
 ];

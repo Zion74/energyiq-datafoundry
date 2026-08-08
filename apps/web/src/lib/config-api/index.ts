@@ -116,6 +116,7 @@ export type {
   EnergyProjectRecordDto,
   EnergyProjectSetupDocumentDto,
   EnergyProjectSetupDraftDto,
+  EnergyProjectOverviewProfileDto,
   EnergyProjectSetupDto,
   EnergyProjectSetupIssueDto,
   EnergyProjectSetupNodeDto,

@@ -16,6 +16,7 @@ import {
   type EnergyComponentRevisionDto,
   type EnergyImportBatchDto,
   type EnergyProjectDataReadinessDto,
+  type EnergyProjectOverviewProfileDto,
   type EnergyMeterMappingDraftDto,
   type EnergyMeterMappingRowDto,
   type EnergyMetricFamilyDto,
@@ -42,6 +43,10 @@ import { EnergyIqAdminSidebar, type AdminSection } from "./admin-sidebar";
 import { AdminAccessPages } from "./admin-access-pages";
 import { resolveComponentReadiness, resolveMetricReadiness, resolveRuleReadiness } from "./analysis-configuration-model";
 import { OperationalPolicySettings } from "./operational-policy-settings";
+import {
+  presentAdminOverviewProfile,
+  resolveAdminOverviewPreviewMode,
+} from "./overview-profile-model";
 import { deriveProjectDeliveryProgress } from "./project-delivery-progress";
 import { TemplateDraftPreview } from "./template-draft-preview";
 import {
@@ -291,6 +296,7 @@ export function EnergyIqAdminWorkbench({
     || section === "data-sources"
     || section === "meter-mapping";
   const showProjectLink = Boolean(selectedProject?.status === "published" && isProjectContext(section));
+  const projectLinkTargetsOverview = section === "project-overview" || section === "templates";
   const chooseAdminProject = (projectId: string) => {
     const nextProject = projects.find((project) => project.id === projectId);
     if (!nextProject) return;
@@ -353,11 +359,13 @@ export function EnergyIqAdminWorkbench({
               ) : null}
               {showProjectLink && selectedProject ? (
                 <Link
-                  href="/energyiq/explorer"
+                  href={projectLinkTargetsOverview
+                    ? `/energyiq/overview?projectId=${encodeURIComponent(selectedProject.id)}`
+                    : "/energyiq/explorer"}
                   onClick={() => selectProject(selectedProject.id)}
                   className={secondaryButton}
                 >
-                  View as user
+                  {projectLinkTargetsOverview ? "Open customer Overview" : "Open Project Explorer"}
                 </Link>
               ) : null}
             </div>
@@ -533,6 +541,8 @@ function renderAdminSection({
         projectId={selectedProjectId}
         document={document}
         businessCalendarVersion={setup.project.business_calendar_version}
+        overviewProfile={setup.overviewProfile}
+        published={setup.project.delivery_stage === "published"}
       />
     );
   }
@@ -575,16 +585,94 @@ const ruleFamilyCopy: Record<EnergyRuleFamilyDto, { label: string; description: 
   },
 };
 
+function OverviewDeliverySummary({
+  projectId,
+  profile,
+  presentation,
+  published,
+}: {
+  projectId: string;
+  profile: EnergyProjectOverviewProfileDto | null;
+  presentation: ReturnType<typeof presentAdminOverviewProfile> | null;
+  published: boolean;
+}) {
+  if (!profile || !presentation) {
+    return (
+      <section className="rounded-xl border border-step-warning/30 bg-surface p-5">
+        <h3 className="text-base font-semibold">Customer Overview profile is not assigned</h3>
+        <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">
+          Project configuration can remain in Draft, but the customer Overview is unavailable until a registered project Renderer is assigned.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="overflow-hidden rounded-xl border border-border bg-surface">
+      <div className="flex flex-wrap items-start justify-between gap-5 p-5">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-lg font-semibold">{presentation.name}</h3>
+            <span className="rounded-full bg-step-success/10 px-2.5 py-1 text-xs font-semibold text-step-success">
+              Registered
+            </span>
+          </div>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">
+            One Project cutoff and Data Snapshot support the page. The customer Renderer combines current status, short-term change and the main decision range without a global Period selector.
+          </p>
+          <p className="mt-2 text-xs font-medium text-muted-light">{presentation.revisionLabel} · {profile.contractVersion}</p>
+        </div>
+        {published ? (
+          <Link
+            href={`/energyiq/overview?projectId=${encodeURIComponent(projectId)}`}
+            className={primaryButton}
+          >
+            Open customer Overview
+          </Link>
+        ) : (
+          <span className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted" aria-disabled="true">
+            Publish to open customer Overview
+          </span>
+        )}
+      </div>
+
+      <dl className="grid border-t border-border bg-surface-subtle sm:grid-cols-3 sm:divide-x sm:divide-border">
+        <OverviewHorizon label="Latest status" value={presentation.latestStatusLabel} detail="The latest complete local day." />
+        <OverviewHorizon label="Short-term change" value={presentation.shortTermLabel} detail="Recent movement and recurring signals." />
+        <OverviewHorizon label="Main decision range" value={presentation.mainRangeLabel} detail="Trend, contribution and structural comparison." />
+      </dl>
+
+      <div className="border-t border-border px-5 py-3 text-sm leading-6 text-muted">
+        AI analysis runs separately after deterministic data is ready. Provider availability does not block this Overview or Project Publish.
+      </div>
+    </section>
+  );
+}
+
+function OverviewHorizon({ label, value, detail }: { label: string; value: string; detail: string }) {
+  return (
+    <div className="px-5 py-4">
+      <dt className="text-xs font-semibold text-muted">{label}</dt>
+      <dd className="mt-1 text-base font-semibold">{value}</dd>
+      <p className="mt-1 text-sm leading-5 text-muted">{detail}</p>
+    </div>
+  );
+}
+
 function AnalysisConfigurationPage({
   projectId,
   document,
   businessCalendarVersion,
+  overviewProfile,
+  published,
 }: {
   projectId: string;
   document: EnergyProjectSetupDocumentDto;
   businessCalendarVersion: string;
+  overviewProfile: EnergyProjectOverviewProfileDto | null;
+  published: boolean;
 }) {
-  const [activeStep, setActiveStep] = useState<"metrics" | "rules" | "layout">("layout");
+  const [activeStep, setActiveStep] = useState<"metrics" | "rules" | "layout">("metrics");
   const [catalog, setCatalog] = useState<EnergyMetricRevisionDto[]>([]);
   const [revision, setRevision] = useState(0);
   const [selected, setSelected] = useState<string[]>([]);
@@ -733,28 +821,37 @@ function AnalysisConfigurationPage({
     : activeStep === "rules"
       ? ruleRevision
       : templateDraft?.revision ?? 0;
+  const profilePresentation = overviewProfile
+    ? presentAdminOverviewProfile(overviewProfile)
+    : null;
 
   return (
     <div className={["mx-auto space-y-5", activeStep === "layout" ? "max-w-[1800px]" : "max-w-6xl"].join(" ")}>
+      <OverviewDeliverySummary
+        projectId={projectId}
+        profile={overviewProfile}
+        presentation={profilePresentation}
+        published={published}
+      />
+
       <section className="rounded-xl border border-border bg-surface p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted">Analysis configuration</span>
-            <h3 className="mt-2 text-base font-semibold">Configure trusted calculations, findings and layouts</h3>
-            <p className="mt-1 max-w-3xl text-xs leading-5 text-muted">
-              Formulas are controlled, versioned definitions. Here the administrator only selects which metrics may appear in rules and templates; free-form SQL is intentionally out of scope.
+            <h3 className="text-base font-semibold">Advanced release configuration</h3>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-muted">
+              These versioned definitions are pinned when the Project is published. The customer Renderer owns the Overview page structure; these controls do not replace it.
             </p>
           </div>
-          <span className="rounded-full bg-surface-subtle px-3 py-1 text-[10px] font-semibold text-muted">
+          <span className="rounded-full bg-surface-subtle px-3 py-1 text-xs font-semibold text-muted">
             Draft config revision {activeRevision}
           </span>
         </div>
 
-        <ol className="mt-5 grid gap-3 md:grid-cols-3">
-          <AnalysisStep number="1" title="Metrics" body="Select approved calculations." active={activeStep === "metrics"} onClick={() => setActiveStep("metrics")} />
-          <AnalysisStep number="2" title="Rules" body="Select deterministic findings." active={activeStep === "rules"} onClick={() => setActiveStep("rules")} />
-          <AnalysisStep number="3" title="Template layout" body="Choose and order evidence-backed modules." active={activeStep === "layout"} onClick={() => setActiveStep("layout")} />
-        </ol>
+        <div className="mt-5 grid gap-3 md:grid-cols-3" role="tablist" aria-label="Advanced release configuration">
+          <AnalysisConfigTab title="Metrics" body="Approved deterministic calculations." active={activeStep === "metrics"} onClick={() => setActiveStep("metrics")} />
+          <AnalysisConfigTab title="Rules" body="Versioned deterministic findings." active={activeStep === "rules"} onClick={() => setActiveStep("rules")} />
+          <AnalysisConfigTab title="Release layout metadata" body="Advanced Component Catalog placements." active={activeStep === "layout"} onClick={() => setActiveStep("layout")} />
+        </div>
       </section>
 
       {error ? <div className="rounded-lg border border-step-error/25 bg-step-error/5 px-4 py-3 text-xs text-step-error">{error}</div> : null}
@@ -949,6 +1046,8 @@ function AnalysisConfigurationPage({
           businessCalendarVersion={businessCalendarVersion}
           projectId={projectId}
           previewRange={previewRange}
+          overviewProfile={overviewProfile}
+          published={published}
           activeTemplateId={activeTemplateId}
           setActiveTemplateId={setActiveTemplateId}
           dirty={templateDirty}
@@ -977,6 +1076,8 @@ function TemplateLayoutPanel({
   businessCalendarVersion,
   projectId,
   previewRange,
+  overviewProfile,
+  published,
   activeTemplateId,
   setActiveTemplateId,
   dirty,
@@ -995,6 +1096,8 @@ function TemplateLayoutPanel({
   businessCalendarVersion: string;
   projectId: string;
   previewRange: EnergyPreviewRange | null;
+  overviewProfile: EnergyProjectOverviewProfileDto | null;
+  published: boolean;
   activeTemplateId: string;
   setActiveTemplateId: Dispatch<SetStateAction<string>>;
   dirty: boolean;
@@ -1062,16 +1165,22 @@ function TemplateLayoutPanel({
         businessCalendarVersion,
       )
     : undefined;
+  const customerProfile = overviewProfile
+    ? presentAdminOverviewProfile(overviewProfile)
+    : null;
+  const previewMode = resolveAdminOverviewPreviewMode(overviewProfile);
 
   return (
     <section className="rounded-xl border border-border bg-surface">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
         <div>
-          <h4 className="text-sm font-semibold">Template layout</h4>
-          <p className="mt-1 max-w-2xl text-[11px] leading-4 text-muted">
-            Choose modules on the left, adjust the selected module, and compare the result in Draft Preview. Templates may only use the controlled Component Catalog.
+          <h4 className="text-sm font-semibold">Release layout metadata</h4>
+          <p className="mt-1 max-w-2xl text-sm leading-5 text-muted">
+            {customerProfile
+              ? `The ${customerProfile.name} Renderer owns the customer page structure. These Component Catalog placements remain versioned release metadata and do not reorder that page.`
+              : "Choose controlled Component Catalog placements for the generic template preview."}
           </p>
-          <p className="mt-1 text-[10px] text-muted-light">
+          <p className="mt-1 text-xs text-muted-light">
             Draft revision {templateDraft.revision} · changes remain invisible to customers until Review &amp; Publish.
           </p>
         </div>
@@ -1117,7 +1226,9 @@ function TemplateLayoutPanel({
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h5 className="text-sm font-semibold">{templateLabel}</h5>
-                <p className="mt-1 text-[11px] text-muted">{enabledCount} enabled modules · preview renders from top to bottom</p>
+                <p className="mt-1 text-xs text-muted">
+                  {enabledCount} enabled modules{customerProfile ? " · pinned as advanced release metadata" : " · generic preview renders from top to bottom"}
+                </p>
               </div>
               <span className="rounded-full bg-surface-subtle px-2.5 py-1 text-[9px] font-semibold text-muted">
                 {selectedTemplate.target_kind === "project" ? "PROJECT" : "TIER"}
@@ -1205,7 +1316,11 @@ function TemplateLayoutPanel({
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h6 className="text-xs font-semibold">Selected module settings</h6>
-                  <p className="mt-1 text-[10px] leading-4 text-muted">Layout &amp; appearance stay visible while you compare Draft Preview.</p>
+                  <p className="mt-1 text-xs leading-5 text-muted">
+                    {customerProfile
+                      ? "These settings do not replace the registered customer Renderer."
+                      : "Layout and appearance stay visible while you compare the generic Draft Preview."}
+                  </p>
                 </div>
                 {selectedComponent && selectedReadiness ? (
                   <span className={[
@@ -1310,15 +1425,82 @@ function TemplateLayoutPanel({
           </div>
         </div>
 
-        <TemplateDraftPreview
-          key={`${projectId}:${selectedTemplate.template_id}`}
-          projectId={projectId}
-          plan={previewPlan}
-          previewRange={previewRange}
-          dirty={dirty}
-        />
+        {previewMode === "customer-renderer-handoff" && customerProfile && overviewProfile ? (
+          <CustomerOverviewPreviewHandoff
+            projectId={projectId}
+            profile={overviewProfile}
+            presentation={customerProfile}
+            published={published}
+            dirty={dirty}
+          />
+        ) : (
+          <TemplateDraftPreview
+            key={`${projectId}:${selectedTemplate.template_id}`}
+            projectId={projectId}
+            plan={previewPlan}
+            previewRange={previewRange}
+            dirty={dirty}
+          />
+        )}
       </div>
     </section>
+  );
+}
+
+function CustomerOverviewPreviewHandoff({
+  projectId,
+  profile,
+  presentation,
+  published,
+  dirty,
+}: {
+  projectId: string;
+  profile: EnergyProjectOverviewProfileDto;
+  presentation: ReturnType<typeof presentAdminOverviewProfile>;
+  published: boolean;
+  dirty: boolean;
+}) {
+  return (
+    <div className="min-w-0 border-t border-border bg-background/40 p-4 sm:p-5 xl:border-t-0">
+      <div className="rounded-xl border border-border bg-background p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h5 className="text-base font-semibold">Customer Overview preview</h5>
+              {dirty ? <span className="rounded-full bg-step-warning/10 px-2.5 py-1 text-xs font-semibold text-step-warning">Unsaved release metadata</span> : null}
+            </div>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
+              The generic module preview is hidden because it does not represent the registered {presentation.name}. Open the published customer page to review the real Renderer and its fixed multi-horizon structure.
+            </p>
+          </div>
+          <span className="rounded-full bg-surface-subtle px-2.5 py-1 text-xs font-semibold text-muted">
+            {presentation.revisionLabel}
+          </span>
+        </div>
+
+        <dl className="mt-5 divide-y divide-border rounded-xl bg-surface-subtle px-4">
+          <SummaryRow label="Latest status" value={presentation.latestStatusLabel} />
+          <SummaryRow label="Short-term change" value={presentation.shortTermLabel} />
+          <SummaryRow label="Main decision range" value={presentation.mainRangeLabel} />
+          <SummaryRow label="Snapshot contract" value={profile.contractVersion} />
+        </dl>
+
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-5">
+          <p className="max-w-xl text-sm leading-6 text-muted">
+            Draft Metric, Rule and layout revisions take effect only after Review &amp; Publish. AI results remain asynchronous and non-blocking.
+          </p>
+          {published ? (
+            <Link href={`/energyiq/overview?projectId=${encodeURIComponent(projectId)}`} className={primaryButton}>
+              Open customer Overview
+            </Link>
+          ) : (
+            <span className="rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted" aria-disabled="true">
+              Publish to open customer Overview
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1401,31 +1583,31 @@ function movePlacement(
   return next;
 }
 
-function AnalysisStep({
-  number,
+function AnalysisConfigTab({
   title,
   body,
   active = false,
-  disabled = false,
   onClick,
 }: {
-  number: string;
   title: string;
   body: string;
   active?: boolean;
-  disabled?: boolean;
-  onClick?: () => void;
+  onClick: () => void;
 }) {
   return (
-    <li className={["rounded-xl border", active ? "border-foreground/25 bg-surface-subtle" : "border-border", disabled ? "opacity-60" : ""].join(" ")}>
-      <button type="button" disabled={disabled} onClick={onClick} className="w-full p-3 text-left disabled:cursor-not-allowed">
-        <span className="flex items-center gap-2">
-          <span className={["flex h-5 w-5 items-center justify-center rounded text-[9px] font-bold", active ? "bg-foreground text-background" : "bg-surface-subtle text-muted"].join(" ")}>{number}</span>
-          <strong className="text-xs">{title}</strong>
-        </span>
-        <span className="mt-2 block text-[10px] leading-4 text-muted">{body}</span>
-      </button>
-    </li>
+    <button
+      type="button"
+      role="tab"
+      aria-selected={active}
+      onClick={onClick}
+      className={[
+        "rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
+        active ? "border-foreground/25 bg-surface-subtle" : "border-border hover:bg-surface-subtle",
+      ].join(" ")}
+    >
+      <strong className="text-sm">{title}</strong>
+      <span className="mt-1 block text-xs leading-5 text-muted">{body}</span>
+    </button>
   );
 }
 
@@ -1591,6 +1773,9 @@ function ProjectDeliveryOverview({
   });
   const { nextSection, nextLabel, stages } = progress;
   const latestTemplateRevision = setup.published.templateRevisions[0];
+  const overviewProfilePresentation = setup.overviewProfile
+    ? presentAdminOverviewProfile(setup.overviewProfile)
+    : null;
   const readyToPublish = Boolean(
     publicationReview
     && hasConfirmedMapping
@@ -1664,6 +1849,7 @@ function ProjectDeliveryOverview({
           <dl className="mt-4 divide-y divide-border">
             <SummaryRow label="Hierarchy" value={setup.project.hierarchy_revision_id || "Not published"} />
             <SummaryRow label="Template" value={latestTemplateRevision?.revision_id ?? "Not published"} />
+            <SummaryRow label="Overview" value={overviewProfilePresentation?.revisionLabel ?? "Not assigned"} />
             <SummaryRow label="Tiers" value={String(setup.published.tiers.length)} />
             <SummaryRow label="Nodes" value={String(Math.max(0, setup.published.nodes.length - 1))} />
           </dl>
@@ -1681,7 +1867,7 @@ function ProjectDeliveryOverview({
               ].join(" ")}>{readyToPublish ? "READY" : "BLOCKED"}</span>
             </div>
             <p className="mt-1 max-w-2xl text-xs leading-5 text-muted">
-              Publish one immutable revision that pins the hierarchy, template layout, metrics, rules, calendar, tariff and meter formula. Customer pages never read the editable Draft directly.
+              Publish one immutable revision that pins hierarchy, release layout metadata, metrics, rules, calendar, tariff and meter formula. The registered customer Renderer reads only the Published release.
             </p>
           </div>
           <button
@@ -1706,7 +1892,7 @@ function ProjectDeliveryOverview({
           <PublicationPin label="Rule Config" value={publicationReview ? `r${publicationReview.ruleConfig.revision}` : "Loading"} detail={publicationReview ? `${publicationReview.ruleConfig.selected_rule_revision_ids.length} rules` : "Waiting for configuration"} />
         </dl>
 
-        <div className="mt-4 grid gap-3 text-xs md:grid-cols-3">
+        <div className="mt-4 grid gap-3 text-xs md:grid-cols-2 xl:grid-cols-4">
           <ReviewGate
             label="Interval facts"
             ready={dataReadiness?.ready === true}
@@ -1716,6 +1902,13 @@ function ProjectDeliveryOverview({
           />
           <ReviewGate label="Meter mapping" ready={hasConfirmedMapping} detail={hasConfirmedMapping ? `${document.meter_mapping?.rows.length ?? 0} confirmed rows` : "Confirm Mapping first"} />
           <ReviewGate label="Setup validation" ready={!setup.validation.blocking} detail={setup.validation.blocking ? "Resolve blocking issues" : "No blocking issue"} />
+          <ReviewGate
+            label="Customer Overview"
+            ready={overviewProfilePresentation !== null}
+            detail={overviewProfilePresentation
+              ? `${overviewProfilePresentation.revisionLabel} · AI remains non-blocking`
+              : "No registered customer Renderer; configuration may publish but Overview remains unavailable"}
+          />
         </div>
       </section>
     </div>
@@ -2493,7 +2686,7 @@ function WorkflowStep({ number, title, body }: { number: string; title: string; 
 function plannedSectionCopy(section: AdminSection): { title: string; description: string; dependency: string } {
   const copy: Partial<Record<AdminSection, { title: string; description: string; dependency: string }>> = {
     "data-map": { title: "Data Map", description: "Review configured scopes, meters, sources and trusted relationships without replacing authoritative project configuration.", dependency: "Published Structure and Meter Mapping" },
-    templates: { title: "Templates", description: "Configure the Project Overview template and one shared analysis template for each Tier Definition.", dependency: "Metrics, rules and mapped facts" },
+    templates: { title: "Overview Setup", description: "Review the customer Overview profile and its pinned release configuration.", dependency: "Registered Overview profile, metrics, rules and mapped facts" },
     knowledge: { title: "Project Knowledge", description: "Add operational documents that AI may cite. Structured meter facts and mappings do not belong in the knowledge base.", dependency: "Project scope and access policy" },
     assets: { title: "Project Assets", description: "Store project files that belong to this Project rather than a user's personal temporary assets.", dependency: "Project scope and storage policy" },
   };
@@ -2517,7 +2710,7 @@ function adminSectionMeta(section: AdminSection, projectName?: string): { title:
     "meter-mapping": { title: "Meter Mapping", description: `${project} · source labels to physical meters, scopes and optional derived meters.` },
     "operational-policies": { title: "Tariff & Operating Hours", description: `${project} · immutable effective policy revisions prepared for the next Project publication.` },
     "data-map": { title: "Data Map", description: `${project} · trusted configured relationships and traceable lineage.` },
-    templates: { title: "Templates", description: `${project} · controlled Project and Tier analysis templates.` },
+    templates: { title: "Overview Setup", description: `${project} · customer Overview profile, decision horizons and pinned release configuration.` },
     knowledge: { title: "Knowledge", description: `${project} · documents and citations available to AI.` },
     assets: { title: "Assets", description: `${project} · Project-owned files and source material.` },
     runs: { title: "Runs & Replays", description: "Analysis runs, deterministic replays and failures." },

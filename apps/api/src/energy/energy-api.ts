@@ -50,6 +50,7 @@ import { materializeEnergyProjectManifest } from "./energy-project-materializati
 import { EnergyAdminAccessService } from "./energy-admin-access.js";
 import {
   resolveProjectAnalysis,
+  resolveProjectOverviewProfile,
   resolvePublishedEnergyQueryContext,
   type ProjectAnalysisSnapshot,
 } from "./project-analysis-resolver.js";
@@ -379,6 +380,7 @@ export const handleEnergyApiRequest = async (
           status: 200,
           body: createSuccessResult({
             project: context.metadataStore.energyIq.getProject(projectId),
+            overviewProfile: resolveProjectOverviewProfile(projectId),
             draft,
             validation: context.metadataStore.energyIq.projectSetup.validateDraft(projectId),
             published: {

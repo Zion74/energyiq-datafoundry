@@ -309,8 +309,20 @@ export type EnergyHierarchyRevisionDto = {
   published_at: string;
 };
 
+export type EnergyProjectOverviewProfileDto = {
+  rendererKey: EnergyProjectRendererKeyDto;
+  rendererVersion: "1";
+  contractVersion: "project-analysis-snapshot@1";
+  horizons: {
+    latestStatus: "latest-complete-day";
+    shortTermDays: 7;
+    mainDays: 28;
+  };
+};
+
 export type EnergyProjectSetupDto = {
   project: EnergyProjectRecordDto;
+  overviewProfile: EnergyProjectOverviewProfileDto | null;
   draft: EnergyProjectSetupDraftDto;
   validation: EnergyProjectSetupValidationDto;
   published: {

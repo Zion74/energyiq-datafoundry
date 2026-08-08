@@ -185,14 +185,34 @@ const projectAnalysisCacheFor = (
   return cache;
 };
 
-type LegacyProjectProfile = {
+export type ProjectOverviewProfile = {
   rendererKey: ProjectRendererKey;
+  rendererVersion: "1";
+  contractVersion: "project-analysis-snapshot@1";
+  horizons: {
+    latestStatus: "latest-complete-day";
+    shortTermDays: 7;
+    mainDays: 28;
+  };
 };
 
-const LEGACY_PROJECT_PROFILES: Readonly<Record<string, LegacyProjectProfile>> = {
-  "ngee-ann-polytechnic": { rendererKey: "ngee-ann-overview" },
-  "preschool-demo": { rendererKey: "preschool-overview" },
+const PROJECT_OVERVIEW_PROFILES: Readonly<Record<string, ProjectOverviewProfile>> = {
+  "ngee-ann-polytechnic": {
+    rendererKey: "ngee-ann-overview",
+    rendererVersion: "1",
+    contractVersion: "project-analysis-snapshot@1",
+    horizons: { latestStatus: "latest-complete-day", shortTermDays: 7, mainDays: 28 },
+  },
+  "preschool-demo": {
+    rendererKey: "preschool-overview",
+    rendererVersion: "1",
+    contractVersion: "project-analysis-snapshot@1",
+    horizons: { latestStatus: "latest-complete-day", shortTermDays: 7, mainDays: 28 },
+  },
 };
+
+export const resolveProjectOverviewProfile = (projectId: string): ProjectOverviewProfile | null =>
+  PROJECT_OVERVIEW_PROFILES[projectId] ?? null;
 
 export const resolveProjectAnalysis = async (input: {
   metadataStore: MetadataStore;
@@ -215,7 +235,7 @@ export const resolveProjectAnalysis = async (input: {
   if (!accessibleProject || accessibleProject.workspaceId !== access.activeWorkspaceId) {
     throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
   }
-  const legacyProfile = LEGACY_PROJECT_PROFILES[input.request.projectId];
+  const legacyProfile = resolveProjectOverviewProfile(input.request.projectId);
   if (!legacyProfile) {
     const context = resolveEnergyQueryContext({
       metadataStore: input.metadataStore,
@@ -610,7 +630,7 @@ export const resolvePublishedProjectRelease = (
 ): PublishedProjectRelease | null => {
   const catalog = metadataStore.energyIq.templates.listComponentRevisions();
   const revision = metadataStore.energyIq.templates.getLatestProjectRevision(context.projectId);
-  const legacyProfile = LEGACY_PROJECT_PROFILES[context.projectId];
+  const legacyProfile = resolveProjectOverviewProfile(context.projectId);
   if (!legacyProfile) return null;
   return revision
     ? releaseFromTemplateRevision(revision, legacyProfile.rendererKey, catalog)
@@ -702,7 +722,7 @@ const releaseFromTemplateRevision = (
 const releaseFromLegacyProfile = (
   metadataStore: MetadataStore,
   context: EnergyQueryContext,
-  profile: LegacyProjectProfile,
+  profile: ProjectOverviewProfile,
   catalog: EnergyIqComponentRevisionRecord[],
 ): PublishedProjectRelease => buildPublishedProjectRelease({
   rendererKey: profile.rendererKey,
