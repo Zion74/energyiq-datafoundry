@@ -236,8 +236,10 @@ describe("published Overview URL reload", () => {
 
     expect(container.textContent).toContain("Decision themes unavailable");
     expect(container.textContent).toContain("Verified figures");
-    expect(container.textContent).toContain("Rolling 28-day decision window");
+    expect(container.textContent).toContain("Energy decision overview");
+    expect(container.textContent).toContain("Rolling 28-day view");
     expect(container.textContent).toContain("20 May 2026–16 Jun 2026");
+    expect(container.textContent).not.toContain("Published overview");
     expect(container.querySelector("[role='combobox'][aria-label='Analysis Scope']")).toBeNull();
     expect(Array.from(container.querySelectorAll("button"), (button) => button.textContent)).not.toEqual(
       expect.arrayContaining(["Yesterday", "Last 7 days", "Previous week", "Previous month", "Custom"]),
@@ -348,6 +350,9 @@ describe("published Overview URL reload", () => {
       to: "2026-05-31",
     });
     expect(container.querySelector("[data-preschool-overview='true']")).not.toBeNull();
+    expect(container.textContent?.match(/Portfolio energy overview/g)).toHaveLength(1);
+    expect(container.textContent).not.toContain("Published overview");
+    expect(container.textContent).not.toContain("A Project-wide portfolio view built from");
     expect(container.querySelector("[role='combobox'][aria-label='Analysis Scope']")).toBeNull();
     expect(container.querySelector("[aria-label='Area and headcount metadata']")).toBeNull();
     expect(container.querySelectorAll("input[type='date']")).toHaveLength(0);

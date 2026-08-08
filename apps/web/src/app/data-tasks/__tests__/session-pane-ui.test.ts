@@ -213,6 +213,10 @@ describe("session pane ui conventions", () => {
     );
   });
 
+  it("labels the embedded EnergyIQ analysis sidebar", () => {
+    expect(dataTasksPageSource()).toContain('t("sidebar.analysisTitle")');
+  });
+
   it("moves schema preview from db settings into the chat header", () => {
     const source = dataTasksPageSource();
 

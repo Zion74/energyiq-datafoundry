@@ -229,7 +229,6 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
   const selected = projectNodes.find((node) => node.id === selectedId)
     ?? projectNodes[0]
     ?? { id: "", parentId: null, type: "project", name: selectedProject?.name ?? "Loading project" };
-  const children = projectNodes.filter((node) => node.parentId === selected.id);
   const directMeters = projectNodes.filter(
     (node) => node.parentId === selected.id && isMeterNode(node),
   );
@@ -361,10 +360,9 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
   return (
     <div className="mx-auto grid min-h-[calc(100vh-56px)] w-full max-w-[1680px] lg:grid-cols-[300px_minmax(0,1fr)]">
       <aside className="max-h-[420px] overflow-y-auto border-b border-border bg-surface lg:max-h-none lg:overflow-visible lg:border-b-0 lg:border-r">
-        <div className="sticky top-[56px] max-h-[calc(100vh-56px)] overflow-y-auto p-4">
+        <div className="sticky top-0 max-h-[calc(100vh-56px)] overflow-y-auto p-4">
           <div>
             <h1 className="text-sm font-semibold text-foreground">Project Explorer</h1>
-            <p className="mt-1 text-xs leading-5 text-muted-light">Browse configured project structure and meter evidence.</p>
           </div>
 
           {projectSelectionError ? (
@@ -489,20 +487,22 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
           <>
             <div className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <div className="flex flex-wrap items-center gap-1 text-[11px] text-muted-light">
-                  {breadcrumbs.map((node, index) => (
-                    <span key={node.id} className="flex items-center gap-1">
-                      {index > 0 ? <EnergyIcon name="chevron" className="h-3 w-3" /> : null}
-                      <button
-                        type="button"
-                        onClick={() => revealNodeSelection(node.id)}
-                        className="hover:text-foreground hover:underline"
-                      >
-                        {node.name}
-                      </button>
-                    </span>
-                  ))}
-                </div>
+                {breadcrumbs.length > 1 ? (
+                  <div className="flex flex-wrap items-center gap-1 text-[11px] text-muted-light">
+                    {breadcrumbs.map((node, index) => (
+                      <span key={node.id} className="flex items-center gap-1">
+                        {index > 0 ? <EnergyIcon name="chevron" className="h-3 w-3" /> : null}
+                        <button
+                          type="button"
+                          onClick={() => revealNodeSelection(node.id)}
+                          className="hover:text-foreground hover:underline"
+                        >
+                          {node.name}
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
                 <div className="mt-2 flex items-center gap-2">
                   <h1 className="text-2xl font-semibold tracking-tight text-foreground">{selected.name}</h1>
                   <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted">
@@ -514,11 +514,11 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                     </span>
                   ) : null}
                 </div>
-                <p className="mt-1.5 text-sm text-muted">
-                  {isMeterNode(selected)
-                    ? `${selected.category ?? "Electricity"} ${selected.type} · source interval readings`
-                    : `${children.length} direct children · ${directMeters.length} metered circuits attached directly to this node`}
-                </p>
+                {isMeterNode(selected) ? (
+                  <p className="mt-1.5 text-sm text-muted">
+                    {selected.category ?? "Electricity"} {selected.type} · source interval readings
+                  </p>
+                ) : null}
               </div>
 
               <div className="flex max-w-full overflow-x-auto rounded-lg border border-border bg-surface p-1" aria-label="Explorer period">
@@ -661,9 +661,11 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                     <h2 className="text-sm font-semibold text-foreground">
                       {explorerChartTitle(selectedChartView)}
                     </h2>
-                    <p className="mt-1 text-xs text-muted-light">
-                      {explorerChartDescription(selectedChartView)}
-                    </p>
+                    {explorerChartDescription(selectedChartView) ? (
+                      <p className="mt-1 text-xs text-muted-light">
+                        {explorerChartDescription(selectedChartView)}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="flex flex-wrap items-center justify-end gap-3">
                     {dailyTrend.length > 1 || weeklyTrend.length > 0 || monthlyTrend.length > 0 ? (
@@ -818,7 +820,6 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
               <div>
                 <div className="mb-3">
                   <h2 className="text-sm font-semibold text-foreground">Source & Data Health</h2>
-                  <p className="mt-1 text-xs text-muted-light">A plain-language status first; technical trace remains available below</p>
                 </div>
                 <div className="rounded-xl border border-border bg-surface p-5 shadow-[var(--shadow-card)]">
                   {explorerMetricsPending ? (
@@ -935,14 +936,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
 
             <section className="mt-8">
               <div className="mb-3 flex items-end justify-between">
-                <div>
-                  <h2 className="text-sm font-semibold text-foreground">Meter points attached to {selected.name}</h2>
-                  <p className="mt-1 text-xs text-muted-light">
-                    {explorerMetricsPending
-                      ? "Each Meter Point is queried within the selected Scope and period."
-                      : "Period energy and health come from the same trusted analysis result shown above."}
-                  </p>
-                </div>
+                <h2 className="text-sm font-semibold text-foreground">Meter points attached to {selected.name}</h2>
                 <span className="text-[11px] text-muted-light">{directMeters.length} direct meters</span>
               </div>
 
@@ -1469,11 +1463,10 @@ function explorerChartTitle(view: ExplorerChartView): string {
   return "Daily energy trend";
 }
 
-function explorerChartDescription(view: ExplorerChartView): string {
+function explorerChartDescription(view: ExplorerChartView): string | null {
   if (view === "weekly") return "Server-aggregated Monday–Sunday totals; boundary weeks may be partial";
   if (view === "monthly") return "Server-aggregated calendar-month totals; boundary months may be partial";
-  if (view === "hourly") return "Server-provided interval-average power grouped by local hour";
-  return "Server-provided daily energy for this Scope and selected period";
+  return null;
 }
 
 function explorerChartSeriesLabel(view: ExplorerChartView): string {

@@ -43,9 +43,6 @@ export function OverviewSectionNavigation({
           );
         })}
       </nav>
-      <p className="mt-3 hidden px-3 text-xs leading-5 text-muted xl:block">
-        Start with the takeaways, then open the supporting detail you need.
-      </p>
     </aside>
   );
 }

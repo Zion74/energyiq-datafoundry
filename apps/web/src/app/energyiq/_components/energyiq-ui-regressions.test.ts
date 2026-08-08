@@ -43,7 +43,10 @@ describe("EnergyIQ UI regressions", () => {
 
   it("lets administrators collapse and restore the desktop navigation", () => {
     expect(adminSidebarSource).toContain('aria-label="Collapse admin navigation"');
-    expect(adminSource).toContain('aria-label="Show admin navigation"');
+    expect(adminSidebarSource).toContain('aria-label="Show admin navigation"');
+    expect(adminSidebarSource).toContain('aria-label={props.desktopCollapsed ? "Admin navigation rail"');
+    expect(adminSource).not.toContain('aria-label="Show admin navigation"');
+    expect(adminSidebarSource).not.toContain("Delivery, access and AI operations");
   });
 
   it("keeps module selection and layout controls beside Draft Preview", () => {
@@ -94,6 +97,10 @@ describe("EnergyIQ UI regressions", () => {
     expect(explorerSource).toContain("Average power");
     expect(explorerSource).toContain("Source & Data Health");
     expect(explorerSource).toContain("Latest cumulative reading");
+    expect(explorerSource).not.toContain("Browse configured project structure and meter evidence.");
+    expect(explorerSource).not.toContain("A plain-language status first; technical trace remains available below");
+    expect(explorerSource).not.toContain("Each Meter Point is queried within the selected Scope and period.");
+    expect(explorerSource).not.toContain("Server-provided interval-average power grouped by local hour");
   });
 
   it("keeps saved analyses immutable and reruns them through the trusted API", () => {

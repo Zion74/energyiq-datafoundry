@@ -40,6 +40,7 @@ export function NgeeAnnOverviewRenderer({
   latestAvailableRange,
   projectExplorerHref,
   aiAnalystHref,
+  showContextHeader = true,
   aiSlotMode = "live",
   savedAiArtifact,
   onAiArtifactChange,
@@ -55,6 +56,7 @@ export function NgeeAnnOverviewRenderer({
   latestAvailableRange?: NgeeAnnLatestAvailableRange | null;
   projectExplorerHref?: string;
   aiAnalystHref?: string;
+  showContextHeader?: boolean;
   aiSlotMode?: "live" | "saved";
   savedAiArtifact?: EnergySavedAnalysisAiArtifactDto;
   onAiArtifactChange?: (artifact: EnergySavedAnalysisAiArtifactInputDto | null) => void;
@@ -73,6 +75,28 @@ export function NgeeAnnOverviewRenderer({
     ...(grain ? { trendGrain: grain } : {}),
   });
   const statusTone = dataStatusTone(view.dataStatus.status);
+  const dataStatus = (
+    <div className={`max-w-lg rounded-lg px-4 py-3 ${statusTone.surface}`} role="status">
+      <div className="flex items-start gap-3">
+        <EnergyIcon name={statusTone.icon} className={`mt-0.5 h-4 w-4 shrink-0 ${statusTone.text}`} />
+        <div>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <p className={`text-sm font-semibold ${statusTone.text}`}>{view.dataStatus.label}</p>
+            <span className="text-xs text-muted">{view.dataStatus.coverage}</span>
+          </div>
+          <p className="mt-1 text-xs leading-5 text-muted">{view.dataStatus.summary}</p>
+          <details className="mt-1">
+            <summary className="cursor-pointer text-xs font-medium text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+              Data details
+            </summary>
+            <p className="mt-1 text-xs leading-5 text-muted">
+              {view.dataStatus.intervals} / {view.dataStatus.qualityEvents} / {view.dataStatus.lastSeen}
+            </p>
+          </details>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <section
@@ -81,46 +105,40 @@ export function NgeeAnnOverviewRenderer({
       data-data-status={view.dataStatus.status}
       className="overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-card)]"
     >
-      <header className="grid gap-5 border-b border-border px-5 py-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:px-7">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
-            <span className="font-semibold text-foreground">{view.context.projectName}</span>
-            <EnergyIcon name="chevron" className="h-3 w-3 text-muted-light" />
-            <span>Scope · {view.context.scopeType === "project" ? "Whole project" : view.context.scopeName}</span>
-          </div>
-          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.025em] text-foreground">
-            Energy decision overview
-          </h2>
-          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted">
-            <span className="inline-flex items-center gap-1.5">
-              <EnergyIcon name="calendar" className="h-3.5 w-3.5 text-muted-light" />
-              {view.context.periodRange}
-            </span>
-            <span>{view.context.timezone}</span>
-          </div>
-        </div>
-
-        <div className={`max-w-lg rounded-lg px-4 py-3 ${statusTone.surface}`} role="status">
-          <div className="flex items-start gap-3">
-            <EnergyIcon name={statusTone.icon} className={`mt-0.5 h-4 w-4 shrink-0 ${statusTone.text}`} />
-            <div>
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <p className={`text-sm font-semibold ${statusTone.text}`}>{view.dataStatus.label}</p>
-                <span className="text-xs text-muted">{view.dataStatus.coverage}</span>
-              </div>
-              <p className="mt-1 text-xs leading-5 text-muted">{view.dataStatus.summary}</p>
-              <details className="mt-1">
-                <summary className="cursor-pointer text-xs font-medium text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
-                  Data details
-                </summary>
-                <p className="mt-1 text-xs leading-5 text-muted">
-                  {view.dataStatus.intervals} / {view.dataStatus.qualityEvents} / {view.dataStatus.lastSeen}
-                </p>
-              </details>
+      {showContextHeader ? (
+        <header className="grid gap-5 border-b border-border px-5 py-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:px-7">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
+              <span className="font-semibold text-foreground">{view.context.projectName}</span>
+              <EnergyIcon name="chevron" className="h-3 w-3 text-muted-light" />
+              <span>Scope · {view.context.scopeType === "project" ? "Whole project" : view.context.scopeName}</span>
+            </div>
+            <h2 className="mt-2 text-2xl font-semibold tracking-[-0.025em] text-foreground">
+              Energy decision overview
+            </h2>
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted">
+              <span className="inline-flex items-center gap-1.5">
+                <EnergyIcon name="calendar" className="h-3.5 w-3.5 text-muted-light" />
+                {view.context.periodRange}
+              </span>
+              <span>{view.context.timezone}</span>
             </div>
           </div>
+          {dataStatus}
+        </header>
+      ) : (
+        <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-5 py-3 text-sm ${statusTone.surface}`} role="status">
+          <EnergyIcon name={statusTone.icon} className={`h-4 w-4 shrink-0 ${statusTone.text}`} />
+          <span className={`font-semibold ${statusTone.text}`}>{view.dataStatus.label}</span>
+          <span className="text-xs text-muted">{view.dataStatus.coverage}</span>
+          <details className="text-xs text-muted">
+            <summary className="cursor-pointer font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Data details</summary>
+            <p className="mt-1 leading-5">
+              {view.dataStatus.intervals} / {view.dataStatus.qualityEvents} / {view.dataStatus.lastSeen}
+            </p>
+          </details>
         </div>
-      </header>
+      )}
 
       {view.dataStatus.recovery ? (
         <div className="flex flex-col gap-3 border-b border-border bg-surface-subtle px-5 py-3 sm:flex-row sm:items-center sm:justify-between lg:px-7">

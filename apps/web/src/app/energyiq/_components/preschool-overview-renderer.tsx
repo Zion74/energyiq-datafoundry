@@ -33,6 +33,7 @@ export function PreschoolOverviewRenderer({
   onRetry,
   projectExplorerHref,
   aiAnalystHref,
+  showContextHeader = true,
   aiSlotMode = "live",
   savedAiArtifact,
   onAiArtifactChange,
@@ -41,6 +42,7 @@ export function PreschoolOverviewRenderer({
   onRetry?: () => void;
   projectExplorerHref?: string;
   aiAnalystHref?: string;
+  showContextHeader?: boolean;
   aiSlotMode?: "live" | "saved";
   savedAiArtifact?: EnergySavedAnalysisAiArtifactDto;
   onAiArtifactChange?: (artifact: EnergySavedAnalysisAiArtifactInputDto | null) => void;
@@ -65,6 +67,16 @@ export function PreschoolOverviewRenderer({
     : view.dataStatus.status === "partial"
       ? "border-step-warning/30 bg-step-warning-soft text-step-warning"
       : "border-step-error/30 bg-step-error-soft text-step-error";
+  const dataStatus = (
+    <div className={`rounded-lg border px-4 py-3 ${statusClass}`} role="status">
+      <p className="text-sm font-semibold">{view.dataStatus.label}</p>
+      <p className="mt-1 text-xs text-muted">{view.dataStatus.coverage}</p>
+      <details className="mt-1">
+        <summary className="cursor-pointer text-xs font-medium text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Data details</summary>
+        <p className="mt-1 text-xs leading-5 text-muted">{view.dataStatus.intervals} · {view.dataStatus.qualityEvents}</p>
+      </details>
+    </div>
+  );
 
   return (
     <section
@@ -73,24 +85,28 @@ export function PreschoolOverviewRenderer({
       data-data-status={view.dataStatus.status}
       className="overflow-hidden rounded-xl border border-border bg-surface shadow-[var(--shadow-card)]"
     >
-      <header className="grid gap-5 border-b border-border px-5 py-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:px-7">
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-foreground">{view.context.projectName}</p>
-          <h2 className="mt-2 text-2xl font-semibold tracking-[-0.025em] text-foreground">Portfolio energy overview</h2>
-          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted">
-            <span className="inline-flex items-center gap-1.5"><EnergyIcon name="calendar" className="h-3.5 w-3.5 text-muted-light" />{view.context.period}</span>
-            <span>{view.context.timezone}</span>
+      {showContextHeader ? (
+        <header className="grid gap-5 border-b border-border px-5 py-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:px-7">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-foreground">{view.context.projectName}</p>
+            <h2 className="mt-2 text-2xl font-semibold tracking-[-0.025em] text-foreground">Portfolio energy overview</h2>
+            <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted">
+              <span className="inline-flex items-center gap-1.5"><EnergyIcon name="calendar" className="h-3.5 w-3.5 text-muted-light" />{view.context.period}</span>
+              <span>{view.context.timezone}</span>
+            </div>
           </div>
-        </div>
-        <div className={`rounded-lg border px-4 py-3 ${statusClass}`} role="status">
-          <p className="text-sm font-semibold">{view.dataStatus.label}</p>
-          <p className="mt-1 text-xs text-muted">{view.dataStatus.coverage}</p>
-          <details className="mt-1">
-            <summary className="cursor-pointer text-xs font-medium text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Data details</summary>
-            <p className="mt-1 text-xs leading-5 text-muted">{view.dataStatus.intervals} · {view.dataStatus.qualityEvents}</p>
+          {dataStatus}
+        </header>
+      ) : (
+        <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-5 py-3 text-sm ${statusClass}`} role="status">
+          <span className="font-semibold">{view.dataStatus.label}</span>
+          <span className="text-xs text-muted">{view.dataStatus.coverage}</span>
+          <details className="text-xs text-muted">
+            <summary className="cursor-pointer font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Data details</summary>
+            <p className="mt-1 leading-5">{view.dataStatus.intervals} · {view.dataStatus.qualityEvents}</p>
           </details>
         </div>
-      </header>
+      )}
 
       <div className="grid divide-y divide-border border-b border-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-5">
         {view.highlights.map((highlight) => (
@@ -105,7 +121,6 @@ export function PreschoolOverviewRenderer({
       <section id="preschool-decision-summary" aria-labelledby="preschool-decision-summary-heading" className="scroll-mt-28 border-b border-border bg-surface-subtle/45 px-5 py-7 lg:px-7 lg:py-8">
         <div>
           <h3 id="preschool-decision-summary-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Takeaways and next decisions</h3>
-          <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Start here: the Portfolio issues worth attention and the next check for each one.</p>
         </div>
         {view.decisionSummary.items.length > 0 ? (
           <div className="mt-4 space-y-3">
@@ -149,7 +164,6 @@ export function PreschoolOverviewRenderer({
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h3 id="preschool-appliance-ranking-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Where energy goes</h3>
-            <p className="mt-1.5 text-sm leading-6 text-muted">See which Appliances contribute most before choosing where to investigate.</p>
           </div>
           {view.appliances.status === "available" ? (
             <p className="text-xs font-semibold tabular-nums text-foreground">{view.appliances.totalEnergy} · 9 Appliances</p>

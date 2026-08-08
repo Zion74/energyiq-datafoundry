@@ -89,11 +89,25 @@ export function EnergyIqAdminSidebar(props: AdminSidebarProps) {
 
   return (
     <>
-      <aside className={props.desktopCollapsed
-        ? "hidden"
-        : "hidden w-[276px] shrink-0 border-r border-border bg-surface lg:flex lg:flex-col"}
+      <aside
+        aria-label={props.desktopCollapsed ? "Admin navigation rail" : "Admin navigation sidebar"}
+        className={props.desktopCollapsed
+          ? "hidden w-14 min-w-14 max-w-14 shrink-0 flex-col items-center border-r border-border bg-surface-subtle py-3 lg:flex"
+          : "hidden w-[276px] shrink-0 border-r border-border bg-surface lg:flex lg:flex-col"}
       >
-        <SidebarContent {...props} selectedProject={selectedProject} />
+        {props.desktopCollapsed ? (
+          <button
+            type="button"
+            aria-label="Show admin navigation"
+            title="Show admin navigation"
+            onClick={() => props.onDesktopCollapsedChange(false)}
+            className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface text-foreground shadow-[var(--shadow-card)] transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+          >
+            <EnergyIcon name="sidebar" className="h-[18px] w-[18px]" />
+          </button>
+        ) : (
+          <SidebarContent {...props} selectedProject={selectedProject} />
+        )}
       </aside>
 
       <details className="group border-b border-border bg-surface lg:hidden">
@@ -130,20 +144,16 @@ function SidebarContent({
     <div className={compact ? "p-3" : "flex min-h-0 flex-1 flex-col"}>
       {!compact ? (
         <div className="border-b border-border px-4 py-4">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h1 className="text-sm font-semibold">Admin console</h1>
-              <p className="mt-0.5 text-[11px] text-muted">Delivery, access and AI operations</p>
-            </div>
+          <div className="flex h-9 items-center justify-between gap-3">
+            <h1 className="min-w-0 truncate text-sm font-semibold">Admin console</h1>
             <button
               type="button"
               aria-label="Collapse admin navigation"
               title="Collapse admin navigation"
               onClick={() => onDesktopCollapsedChange(true)}
-              className="flex h-8 shrink-0 items-center gap-1.5 rounded-lg border border-border px-2 text-[11px] font-semibold text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
             >
-              <EnergyIcon name="chevron" className="h-3.5 w-3.5 rotate-180" />
-              Collapse
+              <EnergyIcon name="sidebar" className="h-[18px] w-[18px]" />
             </button>
           </div>
           <button

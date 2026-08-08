@@ -32,9 +32,12 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
   );
   const publishedProjects = access?.projects.filter((project) => project.status === "published") ?? [];
   const isAdminPage = pathname.startsWith("/energyiq/admin");
-  const showWorkspaceSelector = !isAdminPage && (access?.workspaces.length ?? 0) > 1;
-  const showProjectSelector = !isAdminPage && publishedProjects.length > 1;
-  const showStaticProjectContext = !isAdminPage && publishedProjects.length === 1 && activeProject;
+  const contextProjects = isAdminPage && access?.role === "admin"
+    ? access.projects
+    : publishedProjects;
+  const showWorkspaceSelector = (access?.workspaces.length ?? 0) > 1;
+  const showProjectSelector = contextProjects.length > 1;
+  const showStaticProjectContext = contextProjects.length === 1 && activeProject;
   const selectWorkspaceFromShell = async (workspaceId: string) => {
     await selectOrganisation(workspaceId);
     if (pathname !== "/energyiq/overview" && pathname !== "/energyiq/ai") return;
@@ -120,10 +123,10 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
             <EnergySelect
               ariaLabel="Energy project"
               value={activeProject?.id ?? ""}
-              options={publishedProjects.map((project) => ({ value: project.id, label: `Project · ${project.name}` }))}
+              options={contextProjects.map((project) => ({ value: project.id, label: `Project · ${project.name}` }))}
               onValueChange={selectProjectFromShell}
               leadingIcon={<EnergyIcon name="explorer" className="h-3.5 w-3.5" />}
-              placeholder="No published projects"
+              placeholder={isAdminPage ? "No projects" : "No published projects"}
               className="max-w-44 sm:max-w-60"
               triggerClassName="w-auto max-w-44 sm:max-w-60"
               size="small"
