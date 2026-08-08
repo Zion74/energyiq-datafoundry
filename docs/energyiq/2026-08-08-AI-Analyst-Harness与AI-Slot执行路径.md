@@ -487,12 +487,15 @@ Preschool 的 1440/1920/tablet useful visual 验收等待至少一条可信 Arti
 18 tests passed；根 typecheck、build 与 `git diff --check` passed。四次真实失败 Run 只用于确认失败形态；回归采用匿名 synthetic events，
 不把原始推理、SQL、客户上下文或真实 Artifact 复制进 Git。
 
-尚未宣称完成“一次定向修正”。当前 `validatePreschoolAiEventStream` 已能输出字段级问题，但安全修正仍需同一 Run 内的
-governed submit seam，复用冻结的 Snapshot、SQL 与 Bundle，修正阶段禁用 inspect/query，最多提交两次。不能把修正实现
-为第二个独立 AG-UI Run，否则会产生新 Run 身份、恢复关联和 TOCTOU 问题。该 seam 未完成前，系统继续局部丢弃无效
-Finding 或 honest unavailable；不以 Prompt 自检冒充提交后修正。
+尚未宣称完成“一次定向修正”。当前 `validatePreschoolAiEventStream` 已能输出字段级问题，系统继续局部丢弃无效 Finding
+或 honest unavailable；不以 Prompt 自检冒充提交后修正。安全修正需要的 governed submit seam 保留为架构候选，
+**不是当前 MVP 的下一实现切片或客户验收前置**。只有 14.7 所列真实失败证据出现时，才重新开启这一方案评审。
 
 ## 13. #30 Output Submit 架构独立复核
+
+> **当前状态（2026-08-08）**：本节保留为已完成的架构评审和未来触发式备选方案，不代表已批准实施。
+> 当前执行以第 14 节为准：v10 是 MVP 安全底线；完整 canonical submit、同 Run repair 和 Pack Typed Evidence
+> 扩展均 `DEFERRED BY EVIDENCE`。
 
 ### 13.1 结论：部分同意
 
@@ -581,5 +584,125 @@ materialize。自由文案中的额外数字继续由 parser 作为防御检查�
 | 进程重启重置修正预算 | attempts、issues、catalog digest、accepted payload/digest 持久化到现有 Metadata Protocol State |
 | 旧 Artifact 恢复 | identity 同时包含 Pack、output contract 与 validator revision；Saved historical Artifact 不改写 |
 
-第一切片只为 Preschool 接入以上闭环并跑匿名 transcript/tamper 回归；稳定后再用相同 lifecycle 接 Ngee Ann Adapter。
-若实现要求新增第二套 Session、Artifact、Query Receipt 或历史版本平台，立即停止并缩小方案。
+若 14.7 的证据以后触发实现，届时第一切片也只能为 Preschool 接入以上闭环并跑匿名 transcript/tamper 回归；
+稳定后才评估是否需要 Ngee Ann Adapter。若实现要求新增第二套 Session、Artifact、Query Receipt 或历史版本平台，
+立即停止并缩小方案。
+
+## 14. 2026-08-08 客户价值主线与轻量通用化路线
+
+### 14.1 当前总目标
+
+从本节开始，停止把 #30 Output Submit、一次定向修正或通用 Typed Evidence Adapter 作为当前主线。Preschool v10
+继续承担安全底线；新的工程投入按以下顺序服务同一个结果：
+
+> 用户在 60 秒内先看到 Takeaway，理解问题与影响，再看到合适的图和下一步；AI Slot 只补充真正有价值的调查角度。
+
+本路线适用于 Ngee Ann 与 Preschool 当前 MVP 收口。不适用于 Runtime 平台扩建、第三方 Provider 路由、通用 BI
+模板、Scheduler 或自动生成任意页面。
+
+### 14.2 可跟踪执行顺序
+
+| 顺序 | 任务 | Ticket | 完成判据 | 当前决定 |
+| --- | --- | --- | --- | --- |
+| 0 | 冻结可信基线 | #30 | v10 tamper 回归、两项目相关测试、typecheck/build 通过 | 已完成；除真实验收反证外不继续扩建 |
+| 1 | 两项目当前效果基线验收 | #9、#13、#18、#35 | 分开记录自动测试、真实 Provider、1440/1920/tablet Chrome 和 Charles/用户判断；不混写为“全部通过” | 当前第一任务 |
+| 2 | Overview 60 秒信息表达 | #9、#13 | 首屏先给 0–3 个 Takeaway；每个主题形成“结论 → 关键数字/小图 → 影响 → 下一步”；技术信息默认折叠 | 基线验收后立即执行 |
+| 3 | AI Slot 展示优化 | #18、#35 | AI 自主选择文字或受控 Presentation Block；重点一眼可见，正文可略读，Evidence 不占主阅读路径 | 与第 2 项按模块垂直交付 |
+| 4 | 受控 AI 图表只补真实需要 | #15、#35 | 只有 Finding 用图比文字更清楚时才生成；图表值与同 Finding Evidence 一致 | 不设图表配额，不为关闭 Ticket 强行画图 |
+| 5 | 两项目产品验收与试点收口 | #21 | Ngee Ann 与 Preschool 均完成 A→B 连续数据、Overview、Explorer 下钻、AI 降级和人工价值验收 | 最终试点门禁 |
+| 6 | Harness/性能后续 | #30、#36 | 仅处理真实验收暴露且阻塞客户结果的问题 | 不与视觉主线竞争优先级 |
+
+每个客户可见模块按同一垂直链交付：
+
+`用户问题 → Takeaway → 权威数字/比较 → 最合适的图 → 影响 → 行动/调查 → 验证 → 可展开 Evidence`
+
+不再先做一批后端能力，再等最后一个 Ticket 才首次看到页面效果。
+
+### 14.3 验收分层
+
+1. **自动证据**：focused tests、Harness Eval、typecheck、build；
+2. **真实 Runtime 证据**：固定 Profile/Snapshot 的 Provider Run、工具序列、结果分类；
+3. **Chrome 证据**：1440、1920、tablet，检查首屏、字号、裁切、交互、History/Evidence；
+4. **人工产品验收**：用户是否能在 60 秒说出“发生什么、为什么重要、下一步做什么”。
+
+前一层通过不能代替后一层。Provider connected 不等于 AI 有价值，Chrome 没报错也不等于 Charles 接受。
+
+### 14.4 第一项客户可见交付物
+
+先产出两项目“当前页面 60 秒阅读基线”，只回答：
+
+1. 首屏最先看到的 Takeaway 是什么；
+2. 哪些信息用户必须寻找或阅读长段文字才能得到；
+3. 哪些图没有帮助解释结论，哪些结论缺少图；
+4. AI Slot 的三秒重点、展开信息和 Evidence 是否分层；
+5. 第一项最小改动能否在一张 1440/1920 对照图中证明价值提高。
+
+基线形成后，第一项代码切片固定为 **AI Finding 首屏决策密度收口**：
+
+- 首屏依次能看到一句 Takeaway、Why 和推荐下一步；
+- 最多一张主要图直接展示，其余图表折叠为 `Supporting visuals (N)`；
+- 没有图表时不渲染空容器；
+- Preschool 的“做了 / 不做的后果”保持紧凑，Evidence、验证方式和限制继续折叠；
+- 不改变 Agent、Prompt、Finding、Evidence 或 Provider 合同。
+
+自动化覆盖 0/1/3/8 个 Presentation Blocks、默认折叠和键盘可访问性；真实 Chrome 再分别检查 Ngee Ann 与
+Preschool 的 1440/1920/tablet。Preschool 若仍没有真实 accepted Artifact，应诚实记录为 Provider 验收未完成，
+不能用 fixture 冒充人工视觉证据。
+
+### 14.5 轻量“Analysis Pattern Card”沉淀
+
+通用化先沉淀已经证明有价值的**分析角度**，不是复制整页，也不是建设新的分析引擎。每张 Card 只记录：
+
+| 字段 | 说明 |
+| --- | --- |
+| `patternId` | 稳定名称，例如 `off_hours_opportunity` |
+| `decisionQuestion` | 用户需要回答的业务问题 |
+| `applicability` | 所需 Metric、Dimension、历史长度、Calendar/Metadata |
+| `trustedInputs` | 已有 Kernel/SQL/Evidence 来源；不保存当前项目数字 |
+| `analysisRole` | 确定性计算负责什么，AI 可以探索或解释什么 |
+| `presentationOptions` | 适合 KPI、对比条、趋势、热力图、分布或纯文字的条件 |
+| `decisionOutput` | What、Importance、Action、Verify 的最低要求 |
+| `provenBy` | 已在哪个 Project、Snapshot 和人工验收中证明有价值 |
+| `status` | `candidate`、`proven-in-project`、`reusable` 或 `retired` |
+
+首批只建立候选清单，不把“代码里已有”误写成“用户价值已证明”：
+
+| Candidate | 回答的用户问题 | 当前来源 |
+| --- | --- | --- |
+| `change-across-horizons` | 最新状态、短期变化和结构性变化是否一致 | 两项目 1d/7d/28d Horizon |
+| `where-energy-concentrates` | 能源主要集中在哪个 Level、Centre、Category 或 Circuit | Ngee Ann Composition；Preschool Centre/Appliance |
+| `when-energy-occurs` | 用能主要发生在什么时候，是否偏离运营时段 | Day Profile、Heatmap、Operating/Standby |
+| `exception-and-recurrence` | 哪些异常是一次性的，哪些正在重复 | Ngee Ann anomaly/recurrence |
+| `peak-contributors` | 峰值由谁、在什么时候贡献 | Ngee Ann Peak/Circuit/Level |
+| `normalised-peer-priority` | 在规模差异下，哪个同级对象应优先调查 | Preschool EUI/per-pax Benchmark |
+
+这些 Card 复用现有 `AnalysisContextEvidenceCatalog`、Project Analysis Pack、Recipe/ViewModel 和 Presentation Blocks，
+不再创建第二套 Typed Evidence Catalog 或通用 DSL。What → Why → How → Verify 是共同输出包装，不是新的分析角度。
+Bell curve、Forecast、Cost 等尚未具备可靠输入或人工价值证据的角度不提升为 reusable；原始 anomaly grid、Accounting
+Trace、临时阈值和 Preschool appliance alias 也不作为通用 Pattern。
+
+### 14.6 新 Project 的复用方式
+
+1. 先确定性检查新 Project 具备哪些 Scope、Metric、Dimension、Calendar、Tariff 和历史覆盖；
+2. 只匹配 `applicability` 已满足的 Pattern Card；不让模型猜 Meter Mapping 或业务层级；
+3. 用现有 Metric/Rule/Component Catalog、Project Recipe/ViewModel 和 Analysis Pack 组合项目专属 Overview；
+4. 缺少输入的角度显示 unavailable 或不启用，不用 Mock 数据冒充；
+5. 经过真实数据与人工价值验收后，把 Card 从 `candidate` 提升；
+6. 只有同一角度在至少两个项目都证明有价值且实现重复时，才考虑抽取代码 Module/Interface。
+
+因此通用化的顺序是：
+
+`先证明用户价值 → 记录适用条件 → 新项目复用验证 → 再抽取共同实现`
+
+不是：
+
+`先设计通用平台 → 再寻找使用场景`。
+
+### 14.7 停止项与升级触发
+
+- 不继续实现同 Run repair，除非重复真实 Run 证明有价值结果只因可机械修复引用而被丢弃；
+- 不新建 Analysis DSL、通用 Pack Runtime、Insight 仓库、Scheduler 或任意页面生成器；
+- 不为通用化统一 Ngee Ann 与 Preschool 的业务叙事或 Renderer；
+- 不把尚未人工证明价值的图表登记为 reusable；
+- 不因视觉优先而移除 Snapshot、授权、只读 SQL 和错实体/错单位安全底线；
+- 发现超出当前客户可见切片的新问题时，先记录到对应 Issue，再决定是否进入主线。

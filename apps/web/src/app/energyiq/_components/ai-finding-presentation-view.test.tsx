@@ -23,7 +23,7 @@ describe("AiFindingPresentationView", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders the visual forms chosen by the analyst", async () => {
+  it("renders one primary visual and folds the remaining visual forms", async () => {
     await act(async () => root.render(<AiFindingPresentationView presentation={{
       version: "1",
       blocks: [
@@ -61,6 +61,9 @@ describe("AiFindingPresentationView", () => {
     }} />));
 
     expect(container.querySelector("[data-ai-presentation='true']")).not.toBeNull();
+    expect(container.querySelectorAll("[data-ai-presentation-primary='true'] [data-presentation-type]")).toHaveLength(1);
+    expect(container.querySelector("[data-ai-supporting-visuals='true']")?.hasAttribute("open")).toBe(false);
+    expect(container.querySelector("[data-ai-supporting-visuals='true'] summary")?.textContent).toContain("Supporting visuals (4)");
     expect(container.querySelector("[data-presentation-type='metric']")?.textContent).toContain("418.2 kWh");
     expect(container.querySelector("[data-presentation-type='comparison']")?.textContent).toContain("Previous");
     expect(container.querySelector("[data-presentation-type='trend'] svg")).not.toBeNull();
@@ -69,5 +72,32 @@ describe("AiFindingPresentationView", () => {
       .toBe("Centre A, 09:00: 8 kWh");
     expect(container.querySelector("[data-presentation-type='table'] caption")?.textContent).toBe("Priority centres");
     expect(container.querySelector("[data-presentation-type='table'] th")?.getAttribute("scope")).toBe("col");
+  });
+
+  it.each([1, 3, 8])("keeps exactly one of %i blocks primary", async (blockCount) => {
+    await act(async () => root.render(<AiFindingPresentationView presentation={{
+      version: "1",
+      blocks: Array.from({ length: blockCount }, (_, index) => ({
+        type: "metric" as const,
+        label: `Metric ${index + 1}`,
+        value: index + 1,
+        evidenceRefs: [`metric:${index + 1}`],
+      })),
+    }} />));
+
+    expect(container.querySelectorAll("[data-ai-presentation-primary='true'] [data-presentation-type]")).toHaveLength(1);
+    const supporting = container.querySelector("[data-ai-supporting-visuals='true']");
+    if (blockCount === 1) {
+      expect(supporting).toBeNull();
+    } else {
+      expect(supporting?.hasAttribute("open")).toBe(false);
+      expect(supporting?.querySelector("summary")?.textContent).toContain(`Supporting visuals (${blockCount - 1})`);
+      expect(supporting?.querySelectorAll("[data-presentation-type]")).toHaveLength(blockCount - 1);
+    }
+  });
+
+  it("renders no visual shell when the analyst chose no blocks", async () => {
+    await act(async () => root.render(<AiFindingPresentationView presentation={{ version: "1", blocks: [] }} />));
+    expect(container.querySelector("[data-ai-presentation='true']")).toBeNull();
   });
 });

@@ -304,8 +304,6 @@ function AiFindingCard({
         <p className="mt-1.5 max-w-[75ch] text-base font-semibold leading-7 text-foreground">{finding.what}</p>
       </div>
 
-      <AiFindingPresentationView presentation={finding.presentation} />
-
       <div className="mt-5 grid gap-5 border-t border-border pt-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -321,6 +319,8 @@ function AiFindingCard({
           <p className="mt-1.5 text-base font-semibold leading-6">{finding.how}</p>
         </div>
       </div>
+
+      <AiFindingPresentationView presentation={finding.presentation} />
 
       <details className="mt-5 border-t border-border pt-4" data-ai-secondary-details="true">
         <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">

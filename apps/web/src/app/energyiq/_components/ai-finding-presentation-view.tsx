@@ -8,15 +8,28 @@ import type {
 
 export function AiFindingPresentationView({ presentation }: { presentation?: AiFindingPresentation | null }) {
   if (!presentation || presentation.blocks.length === 0) return null;
+  const [primaryBlock, ...supportingBlocks] = presentation.blocks;
   return (
     <div
-      className="mt-5 grid gap-3 sm:grid-cols-2"
+      className="mt-5"
       data-ai-presentation="true"
       aria-label="AI-selected visual explanation"
     >
-      {presentation.blocks.map((block, index) => (
-        <PresentationBlock key={`${block.type}-${index}`} block={block} />
-      ))}
+      <div className="grid gap-3 sm:grid-cols-2" data-ai-presentation-primary="true">
+        <PresentationBlock block={primaryBlock!} />
+      </div>
+      {supportingBlocks.length > 0 ? (
+        <details className="mt-3 rounded-xl border border-border bg-surface" data-ai-supporting-visuals="true">
+          <summary className="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25 focus-visible:ring-inset">
+            Supporting visuals ({supportingBlocks.length})
+          </summary>
+          <div className="grid gap-3 border-t border-border px-4 py-4 sm:grid-cols-2">
+            {supportingBlocks.map((block, index) => (
+              <PresentationBlock key={`${block.type}-${index + 1}`} block={block} />
+            ))}
+          </div>
+        </details>
+      ) : null}
     </div>
   );
 }

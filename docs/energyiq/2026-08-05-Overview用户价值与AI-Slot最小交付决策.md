@@ -209,6 +209,24 @@ Agent 的调查能力与客户可见输出采用不同边界：**调查阶段不
 Insight 的 What/Evidence/Why/Action/Verify 与人工决策价值，不能用“通过守卫”代替客户验收，也不能通过让模型少写数字
 来提高通过率。
 
+### 6.4 2026-08-08 MVP 执行校准：停止扩大输出治理
+
+Preschool 输出合同 v10 已经覆盖当前已复现的同值错实体、错单位、错误 Centre、EUI/per-pax/currency 混淆和唯一
+Evidence 补绑定。它作为 Charles MVP 的安全底线继续保留，但本轮**不再把同 Run 的 Output Submit、一次定向修正或
+通用 Typed Evidence Adapter 作为客户可见交付的前置条件**。
+
+当前处理规则足够简单：唯一且语义一致时允许补绑定；无法证明的 Presentation Block 或 Finding 局部移除；全部无效时
+honest unavailable；确定性 Overview 始终不受影响。接下来工程优先级回到真实验收、信息价值、阅读路径、图文协同和
+AI Slot 展示，而不是继续增加 Runtime 协议。
+
+只有同时满足以下条件，才重新启动一次定向修正切片：
+
+1. 固定 Snapshot/Profile 的重复真实 Run 中，至少两次产生了人工判断有价值、数字本身正确，但只因可机械修复的引用错误而被丢弃；
+2. 该问题已经阻塞 Charles/用户看到有价值结果，不能靠当前唯一匹配或局部降级解决；
+3. 修复可以复用现有 Runtime/Session/Artifact，在一个窄切片内完成，不新增第二套平台。
+
+即使触发，也只做最小修正；不建设通用 Claim Graph、公式 DSL、Scheduler、跨项目缓存或新的 Artifact 仓库。
+
 ## 7. 页面生命周期
 
 1. Ngee Ann Renderer 和确定性首屏立即出现；

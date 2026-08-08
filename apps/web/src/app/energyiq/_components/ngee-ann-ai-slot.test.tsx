@@ -72,6 +72,7 @@ describe("NgeeAnnAiSlot", () => {
     expect(container.querySelector("[data-saved-ai-result='true']")?.textContent).toContain("run-1");
     expect(container.querySelectorAll("article")).toHaveLength(3);
     expect(container.querySelector("[data-ai-presentation='true']")?.textContent).toContain("Current period");
+    expectDecisionSummaryBeforeVisual(container);
   });
 
   it("shows an honest accepted-empty state instead of a blank AI section", async () => {
@@ -376,6 +377,17 @@ describe("NgeeAnnAiSlot", () => {
     expect(url.searchParams.get("evidence")).toContain("category:load");
   });
 });
+
+function expectDecisionSummaryBeforeVisual(container: HTMLElement): void {
+  const takeaway = container.querySelector("[data-ai-primary-takeaway='true']");
+  const action = container.querySelector("[data-ai-primary-action='true']");
+  const presentation = container.querySelector("[data-ai-presentation='true']");
+  expect(takeaway).not.toBeNull();
+  expect(action).not.toBeNull();
+  expect(presentation).not.toBeNull();
+  expect(takeaway!.compareDocumentPosition(action!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(action!.compareDocumentPosition(presentation!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+}
 
 function availableResult(): NgeeAnnAiRunResult {
   return {

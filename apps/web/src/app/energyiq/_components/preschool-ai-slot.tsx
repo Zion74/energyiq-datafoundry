@@ -207,8 +207,6 @@ function FindingCard({
         <p className="mt-1.5 max-w-[75ch] text-base font-semibold leading-7 text-foreground">{finding.what}</p>
       </div>
 
-      <AiFindingPresentationView presentation={finding.presentation} />
-
       <div className="mt-5 grid gap-5 border-t border-border pt-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -224,6 +222,8 @@ function FindingCard({
           <p className="mt-1.5 text-base font-semibold leading-6">{finding.how}</p>
         </div>
       </div>
+
+      <AiFindingPresentationView presentation={finding.presentation} />
 
       <dl className="mt-5 grid gap-5 border-t border-border pt-5 sm:grid-cols-2">
         <DecisionOutcome label="Expected if acted on" value={finding.expectedIfAct} tone="positive" />
