@@ -48,15 +48,38 @@ export function PreschoolOverviewRenderer({
   onAiArtifactChange?: (artifact: EnergySavedAnalysisAiArtifactInputDto | null) => void;
 }) {
   if (state.status !== "ready") {
+    const meta = {
+      loading: { label: "Loading", icon: "analysis" as const, tone: "text-muted", surface: "border-border bg-surface" },
+      empty: { label: "No data", icon: "info" as const, tone: "text-muted", surface: "border-border bg-surface" },
+      unsupported: { label: "Unsupported", icon: "info" as const, tone: "text-step-warning", surface: "border-step-warning/25 bg-step-warning/5" },
+      error: { label: "Unavailable", icon: "alert" as const, tone: "text-step-error", surface: "border-step-error/25 bg-step-error/5" },
+    }[state.status];
     return (
-      <section className="rounded-xl border border-border bg-surface p-6" role="status">
-        <h2 className="text-base font-semibold text-foreground">{state.title}</h2>
-        <p className="mt-2 text-sm leading-6 text-muted">{state.detail}</p>
-        {state.status === "error" && onRetry ? (
-          <button type="button" onClick={onRetry} className="mt-4 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-white">
-            Try again
-          </button>
-        ) : null}
+      <section
+        className={`rounded-xl border px-5 py-8 ${meta.surface}`}
+        role={state.status === "error" ? "alert" : "status"}
+        aria-live={state.status === "loading" ? "polite" : undefined}
+        data-renderer-state={state.status}
+      >
+        <div className="mx-auto flex max-w-xl items-start gap-3">
+          <span className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-background ${meta.tone}`}>
+            <EnergyIcon name={meta.icon} className="h-4 w-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className={`text-ui-label font-semibold uppercase tracking-[0.08em] ${meta.tone}`}>{meta.label}</p>
+            <h2 className="mt-1 text-ui-body font-semibold text-foreground">{state.title}</h2>
+            <p className="mt-1 text-ui-support leading-5 text-muted">{state.detail}</p>
+            {state.status === "error" && onRetry ? (
+              <button
+                type="button"
+                onClick={onRetry}
+                className="mt-4 rounded-lg border border-border bg-surface px-3 py-2 text-ui-support font-semibold text-foreground transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+              >
+                Try again
+              </button>
+            ) : null}
+          </div>
+        </div>
       </section>
     );
   }
