@@ -468,3 +468,118 @@ Preschool 的 1440/1920/tablet useful visual 验收等待至少一条可信 Arti
 - 不因 0/3 而放松数值、Snapshot、授权或只读 SQL 守卫；
 - 若一次定向修正仍频繁触发、明显增加时延但 useful 率没有改善，停止叠加 Prompt/重试，重新检查 Evidence 提交接口；
 - 若通过率提高但人工判断仍是复读图表、空泛建议或不说人话，不关闭 #18/#35，转为表达与分析价值问题处理。
+
+### 12.5 2026-08-08 首个实现切片
+
+已完成 Preschool 本地输出合同 v10 的第一层可信闭环：
+
+- 最终 JSON 前增加逐字段自检提示，同时保留既有的 cause、tariff、cost、savings、ROI、forecast 等禁止臆造约束；
+- SQL Evidence 从“某个查询里出现过相同数字”收紧为 typed cell，保留 column、row 和同行字符串维度；
+- Bundle Evidence 同样按字段类型和 Centre 维度匹配，`30 centres` 不再能授权 `30 kWh`；
+- 实体既支持数字前也支持数字后、多字符 Centre 和跨字段代词；同一数值语句出现多个 Centre 时 fail closed；
+- EUI、per-pax、currency 与能量单位分型校验，远距离 `cost` 和 `MWh` 不能由同值 `kWh` 字段授权；
+- 自动补 Evidence 只接受全局唯一的 typed cell；同一 SQL 多行同值、SQL 与 Bundle 同值、错误 Centre 同值均拒绝静默绑定；
+- 已有引用指向错误 Centre 时不自动追加另一个引用掩盖错误；
+- 字段级校验结果保留原始 Provider candidate index，前序 sibling 被淘汰后不会错报 Finding；
+- output contract 从 v9 升至 v10，避免同一 Snapshot 恢复旧合同 Artifact；Saved Analysis 中已冻结的历史结果不改写。
+
+自动证据：Preschool Run 65 tests passed；Presentation、两项目 Run/Slot 共 6 files / 139 tests passed；Harness Eval
+18 tests passed；根 typecheck、build 与 `git diff --check` passed。四次真实失败 Run 只用于确认失败形态；回归采用匿名 synthetic events，
+不把原始推理、SQL、客户上下文或真实 Artifact 复制进 Git。
+
+尚未宣称完成“一次定向修正”。当前 `validatePreschoolAiEventStream` 已能输出字段级问题，但安全修正仍需同一 Run 内的
+governed submit seam，复用冻结的 Snapshot、SQL 与 Bundle，修正阶段禁用 inspect/query，最多提交两次。不能把修正实现
+为第二个独立 AG-UI Run，否则会产生新 Run 身份、恢复关联和 TOCTOU 问题。该 seam 未完成前，系统继续局部丢弃无效
+Finding 或 honest unavailable；不以 Prompt 自检冒充提交后修正。
+
+## 13. #30 Output Submit 架构独立复核
+
+### 13.1 结论：部分同意
+
+采用以下产品原则：
+
+> Agent 决定调查什么、解释什么；Runtime 决定哪些结构化事实、数字和图表数据有资格作为可信结果展示。
+
+但 Runtime 不能声称“证明整个 Finding”。它可以确定性验证实体、指标、值、单位、维度、授权窗口和来源是否一致；
+不能仅靠规则证明自然语言因果、行动价值或未来结果。后者仍必须显式标为 Evidence、Hypothesis 或 Missing Evidence，
+并由 Harness rubric 与人工验收判断价值。
+
+### 13.2 可复用与不可硬套的现有机制
+
+| 现有能力 | 决定 | 原因 |
+| --- | --- | --- |
+| `ActionRouter` / `ProtocolRuntime` | 复用机制 | 已有 server policy、授权、requested/succeeded/failed journal、Context revision CAS、持久化 Protocol State 和同 Run 工具反馈 |
+| `GovernedToolFactory` / Tool error observation | 复用机制 | 能在现有模型工具循环内返回结构化 rejection 与 recovery，不需要第二个 Agent Runtime |
+| `analysis-requirements-commit` 生命周期 | 参考 | 已证明 Proposal → server validate → feedback → retry 能在同一 Run 工作 |
+| `analysis-requirements-commit` 具体 Tool/Reducer | 不直接复用 | 面向预定义 Requirement；manual claim prose 与 Presentation 不验真；显式 Evidence 不匹配时存在回退到 candidate bindings 的兼容逻辑，不符合唯一 typed binding |
+| `proposeCompletion` | 不作为修正入口 | 它负责整个 Run 终态；当前 API 在模型自由文本完成后 force terminal，无法把 post-hoc Web rejection 送回已经结束的 Agent loop |
+| 当前 Web `validatePreschoolAiEventStream` | 仅保留为防御与回归 | 能 fail closed，但发生在 `RUN_FINISHED` 后，不是 Runtime referee，也不能安全触发 same-Run repair |
+
+另一个必须修复的 TOCTOU 风险是：即使 `analysis_requirements_commit` 已接受 Claim，模型后续自由文本仍可能写出不同数字。
+可信页面必须渲染 Runtime 接受并持久化的 canonical payload；不能继续把最后一段自由文本当权威结果。
+
+### 13.3 推荐的最小深 Module
+
+只新增一个窄 Interface，不建设 Claim Graph、公式 DSL 或通用治理平台：
+
+```ts
+submitAnalysisOutput({
+  contractId,
+  contractRevision,
+  baseRevision,
+  findings,
+}): AcceptedOutput | RejectedOutput
+```
+
+Agent-facing Tool 可命名为 `analysis_output_submit`，内部 Action 为 `analysis.output.submit`。生命周期复用现有
+Action Router 与 Protocol State；Ngee Ann、Preschool 各自提供小型 Evidence Adapter，不共享项目分析路线。
+
+```mermaid
+flowchart LR
+  A["Agent 自由 inspect / SQL / 推理"] --> B["提交 Candidate Findings"]
+  B --> C["Runtime 冻结 Pins 与 Typed Evidence Catalog"]
+  C --> D{"确定性验证"}
+  D -->|"接受"| E["持久化 Canonical Payload + Digest"]
+  D -->|"首次拒绝"| F["结构化字段 / Block 问题"]
+  F --> G["同 Run 一次修正提交"]
+  G --> D
+  D -->|"第二次拒绝"| H["局部丢弃或 Honest Unavailable"]
+  E --> I["页面只渲染已接受 Payload"]
+```
+
+第一次 rejection 后进入 output-repair phase：锁定同一 `runId/segmentId`、Project、Scope、Snapshot、Period 和
+Evidence catalog，只允许一次 `analysis_output_submit` 修正，不再 inspect 或查询。缺少派生事实时应删除数字或降级为
+Hypothesis/Missing Evidence；若 Agent 希望保留排名、比例或差值，必须在第一次提交前让 SQL 返回最终命名字段。
+
+第二次提交携带 `baseRevision`。Runtime 必须验证已通过 sibling 未被改写，仅允许修改 rejection 指向的 Finding/字段/Block。
+接受后把 canonical payload、digest、attempt count、contract revision 和 catalog digest 写入持久化 Protocol State/Session
+journal。只依赖进程内 idempotency Map 不足以支持重启恢复。
+
+### 13.4 Typed Evidence MVP
+
+不要在每个 cell 重复 Project/Snapshot 等信息。最小结构分两层：
+
+1. Catalog envelope：Workspace、Project、Scope、Resource、Snapshot、Release、Period、timezone、contract revision；
+2. Evidence cell：`sourceRef + metricId + value + unit + row/dimensions`。
+
+其中实体、日期、Horizon、Category、Circuit 等属于 `dimensions`；SQL Artifact/Audit/Tool call 或 Bundle item 属于
+`sourceRef`。排名、比例、差值不建立通用 derivation graph：MVP 只接受 SQL/受控工具返回的最终命名字段。
+
+自然语言不是主要数据接口。Candidate 应把客户文案与结构化 facts/Presentation 分开；数字和图表从已验证 fact/cell
+materialize。自由文案中的额外数字继续由 parser 作为防御检查，但不能以列名关键词和数字相等作为主要证明方式。
+
+### 13.5 反证、风险与验收
+
+| 风险 | 最小处理 |
+| --- | --- |
+| Validator false positive | 使用证据坐标和 Pack metric registry；EUI、kWh/pax、currency、count、ratio 分类型回归，不靠通用字符串猜测 |
+| Validator false negative | 同值不同实体、同行维度互换、远距离实体、多字符 Centre、未知单位全部 tamper 测试；未知类型 fail closed |
+| Agent 为过门而输出空话 | correctness gate 与 decision-value rubric 分开；无数字不等于 useful |
+| 修正增加时延和成本 | 无第二模型/第二 Run；只有首次 rejection 多一个模型回合；第二次失败停止 |
+| 修正时偷偷重查或改变 sibling | repair phase 禁用数据工具；base digest + sibling digest 校验 |
+| 接受后自由文本漂移 | 页面与 Saved Analysis 只使用 canonical accepted payload，不读取后续自由文本作为权威 |
+| 进程重启重置修正预算 | attempts、issues、catalog digest、accepted payload/digest 持久化到现有 Metadata Protocol State |
+| 旧 Artifact 恢复 | identity 同时包含 Pack、output contract 与 validator revision；Saved historical Artifact 不改写 |
+
+第一切片只为 Preschool 接入以上闭环并跑匿名 transcript/tamper 回归；稳定后再用相同 lifecycle 接 Ngee Ann Adapter。
+若实现要求新增第二套 Session、Artifact、Query Receipt 或历史版本平台，立即停止并缩小方案。

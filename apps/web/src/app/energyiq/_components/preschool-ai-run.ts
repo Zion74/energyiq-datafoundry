@@ -70,6 +70,12 @@ export type PreschoolAiRunResult = {
   reason: string;
 };
 
+export type PreschoolAiValidationIssue = {
+  code: "unsupported_claim";
+  findingIndex: number;
+  field: "title" | "what" | "why" | "how" | "expectedIfAct" | "ifIgnored" | "howToVerify" | "evidenceNote" | "presentation";
+};
+
 export type PreschoolAiRunInput = {
   identityKey: string;
   projectId: "preschool-demo";
@@ -95,9 +101,16 @@ type ToolAccumulator = {
   result: unknown;
 };
 type CollectedSqlEvidence = PreschoolAiToolEvidence & {
-  numericEvidence: Array<{ column: string | null; row: number; value: number }>;
+  numericEvidence: SqlNumericEvidenceCell[];
   normalizedSql: string | null;
   returnedRowCount: number;
+};
+type SqlDimensionEvidence = { column: string | null; value: string };
+type SqlNumericEvidenceCell = {
+  column: string | null;
+  row: number;
+  value: number;
+  dimensions: SqlDimensionEvidence[];
 };
 type ProgressCallback = (progress: PreschoolAiProgress) => void;
 type CurrentRun = {
@@ -111,7 +124,7 @@ const currentRuns = new Map<string, CurrentRun>();
 const FRIENDLY_UNAVAILABLE = "AI analysis is temporarily unavailable. The verified Overview remains available.";
 const PRESCHOOL_AI_PACK_ID = "preschool-analysis-pack" as const;
 const PRESCHOOL_AI_PACK_REVISION = "v1" as const;
-const PRESCHOOL_AI_OUTPUT_CONTRACT_REVISION = "v9";
+const PRESCHOOL_AI_OUTPUT_CONTRACT_REVISION = "v10";
 const PERSISTED_WORKSPACE_PROFILE_ID = "workspace-default";
 const ACTIVE_RUN_POLL_INTERVAL_MS = 1_500;
 const ACTIVE_RUN_POLL_LIMIT = 200;
@@ -428,20 +441,21 @@ function buildPrompt(input: PreschoolAiRunInput): string {
   return [
     `Act as an autonomous energy analyst for ${input.projectName}, Scope ${input.scopeName}.`,
     `Analyse only ${input.analysisFrom} through ${input.analysisTo} in ${input.timezone}, pinned to Snapshot ${input.snapshotId} and Release ${input.projectReleaseId}.`,
-    "Your first action must be an immediate inspect_schema Tool call. Before that call, do not restate, explain, plan, summarize, or precompute the task or contract, and do not output prose. After inspect_schema returns, choose the investigation order and depth from the Evidence you observe. A simple question may need one successful SQL query; a complex question may need multiple distinct queries. Stop when another query would not change the conclusion, next action, or material uncertainty. Number successful SQL results consecutively from 1.",
-    "The grounded Preschool requirements in this Run are manual assertions. Include only the requirement_ids that each SQL query materially supports and omit assertion_ids from every run_sql_readonly call; the Runtime binds the matching manual assertions. Do not call analysis_requirements_commit. Use each next SQL to follow Evidence from the prior result, test a material uncertainty, or investigate a different valuable angle; do not repeat the same aggregate with different wording. Return zero Findings when no decision-useful candidate survives. Do not add an explanation or task plan around the final JSON.",
+    "Your first action must be an immediate inspect_schema Tool call. Before it, do not restate, explain, plan, summarize, or precompute the task or contract; output no prose. Then choose depth from observed Evidence. A simple question may need one successful SQL query; a complex question may need multiple distinct queries. Stop when another query would not change the conclusion, next action, or material uncertainty. Number successful SQL results from 1.",
+    "The grounded Preschool requirements in this Run are manual assertions. Include only requirement_ids each SQL materially supports; omit assertion_ids from every run_sql_readonly call because Runtime binds them. Do not call analysis_requirements_commit. Each next SQL must follow prior Evidence, test material uncertainty, or investigate another valuable angle; never repeat an aggregate with different wording. Return zero Findings when no decision-useful candidate survives. Output only final JSON.",
     "A successful SQL may return one aggregate row or a bounded grouped, ranked, or Top-N result. Do not request more than 10 rows from one SQL Evidence operation. Multi-row output is Evidence only for the rows actually returned; omitted or truncated rows remain unavailable.",
     "Never use row position, rank, Top N size, LIMIT value, or row count in a Finding as Evidence or a numeric claim unless that quantity is returned as a real named SQL column value in the cited SQL result.",
     "Never estimate, sum, extrapolate, approximate, or infer values from truncated, previewed, omitted, or remaining rows. Every number in a Finding must appear directly in that Finding's cited bundle item values or cited SQL row; derived numbers and near matches are forbidden even when the arithmetic seems obvious.",
     "Except for the exact authorized structural references below, every non-SQL number must appear in the actual values of a bundle item cited by that same Finding. For example, stating 100% coverage requires citing quality:may in that same Finding. This is an Evidence-binding example, not a required Finding or theme.",
     "Do not use digits copied from artifact ids, audit ids, query ids, version strings, Snapshot ids, or dates as Finding numbers. Exact pinned Period, Snapshot, Release, and derived full-period presentation may appear only as structural context. Return zero Findings when no directly cited Evidence supports a useful candidate.",
-    "When filtering interval_start, which is TIMESTAMPTZ, use an ISO-8601 string or TIMESTAMPTZ literal for the pinned UTC bounds. Never compare interval_start with a TIMESTAMP literal that contains Z because that literal is timezone-naive and can shift the authorized window. If SQL and the published bundle differ, do not calculate or narrate a gap unless the gap itself is returned as a named column by a bounded reconciliation query.",
+    "When filtering interval_start, use an ISO-8601 string or TIMESTAMPTZ literal for pinned UTC bounds. Never compare interval_start with a TIMESTAMP literal that contains Z; it is timezone-naive. If SQL and bundle differ, narrate a gap only when a bounded reconciliation query returns it as a named column.",
     "For Centre aggregation use parent_node_id, not scope_id. Only include quality_status='ok' and official_aggregation_eligible=TRUE. Do not add Project totals to component rows.",
     "The bounded Preschool bundle is authoritative; SQL cross-checks it.",
     "Return zero to three distinct Findings. Do not force novelty and do not repeat the official themes as prose. Each displayed Finding must cite only the successful SQL Evidence operations it actually uses; one sufficient query is valid, while a claim that needs validation should cite the additional query that tests it.",
     "A Finding may support, challenge, or be independent. Answer What, Why, next investigation, acted/ignored consequences, verification, and limitations. whyKind is Evidence, Hypothesis, or Missing Evidence. Never invent savings, certainty, or outcomes; evidenceNote states what Evidence cannot prove.",
     `Valid evidenceRefs: ${JSON.stringify(input.discoveryEvidence.items.map((item) => item.id))}. Use only these exact ids; never cite other Runtime ids or object paths. Use [] for an SQL-only Finding.`,
     "Cite only SQL results actually used. Use numbers only from the same Finding's cited bundle items or SQL. Do not invent causes, equipment state, tariff, cost, savings, ROI, forecast, owner, commitment, target, threshold, duration, or time window.",
+    "Before emitting the final JSON, audit every customer-visible field and block. Each number must match a cited typed bundle field or named SQL column; same-valued sources are ambiguous. If a ranking, ratio, difference, or other derived value is useful, query a named column; otherwise omit or state Missing Evidence. Do not mention the audit.",
     AI_FINDING_PRESENTATION_PROMPT,
     "Return only strict JSON: {\"findings\":[{\"relationship\":\"supports\",\"title\":\"...\",\"what\":\"...\",\"whyKind\":\"Evidence\",\"why\":\"...\",\"how\":\"...\",\"expectedIfAct\":\"...\",\"ifIgnored\":\"...\",\"howToVerify\":\"...\",\"evidenceNote\":\"...\",\"evidenceRefs\":[\"benchmark:priority-centre:G\"],\"evidenceSqlIndexes\":[1,2],\"presentation\":{\"version\":\"1\",\"blocks\":[{\"type\":\"ranking\",\"unit\":\"kWh\",\"items\":[{\"label\":\"Centre E\",\"value\":0}],\"evidenceRefs\":[\"benchmark:priority-centre:G\"],\"evidenceSqlIndexes\":[1]}]}}]}",
     "Bounded Preschool Discovery Evidence Bundle:",
@@ -451,12 +465,29 @@ function buildPrompt(input: PreschoolAiRunInput): string {
   ].join("\n\n");
 }
 
-export function resolvePreschoolAiEventStream(args: {
+type PreschoolAiEventStreamInput = {
   eventStream: string;
   input: PreschoolAiRunInput;
   providerProfileId: string;
   runId: string;
-}): PreschoolAiRunResult {
+};
+
+export function resolvePreschoolAiEventStream(args: PreschoolAiEventStreamInput): PreschoolAiRunResult {
+  return validatePreschoolAiEventStream(args).result;
+}
+
+export function validatePreschoolAiEventStream(args: PreschoolAiEventStreamInput): {
+  result: PreschoolAiRunResult;
+  issues: PreschoolAiValidationIssue[];
+} {
+  const issues: PreschoolAiValidationIssue[] = [];
+  return { result: resolvePreschoolAiEventStreamInternal(args, issues), issues };
+}
+
+function resolvePreschoolAiEventStreamInternal(
+  args: PreschoolAiEventStreamInput,
+  validationIssues: PreschoolAiValidationIssue[],
+): PreschoolAiRunResult {
   const events = parseEventStream(args.eventStream);
   const runError = events.findLast((event) => event.type === "RUN_ERROR");
   if (runError) return { status: "unavailable", reason: friendlyReason(stringValue(runError.message) ?? "AI Analyst Run failed.") };
@@ -473,7 +504,7 @@ export function resolvePreschoolAiEventStream(args: {
   const evidenceById = new Map(args.input.discoveryEvidence.items.map((item) => [item.id, item]));
   let missingSnapshotEvidence = false;
   let missingSqlEvidence = false;
-  const referenceValidFindings = generated.flatMap((finding) => {
+  const referenceValidFindings = generated.flatMap((finding, findingIndex) => {
     const evidence = finding.evidenceRefs
       .map((id) => evidenceById.get(id)).filter((item): item is PreschoolDiscoveryEvidenceItem => Boolean(item));
     if (evidence.length !== finding.evidenceRefs.length) {
@@ -486,7 +517,7 @@ export function resolvePreschoolAiEventStream(args: {
       missingSqlEvidence = true;
       return [];
     }
-    return [{ finding, evidence, tools }];
+    return [{ finding, evidence, tools, findingIndex }];
   });
   if (generated.length > 0 && referenceValidFindings.length === 0) {
     return missingSnapshotEvidence
@@ -496,7 +527,7 @@ export function resolvePreschoolAiEventStream(args: {
         : "The AI Analyst returned no Finding with current Snapshot Evidence." };
   }
   let oversizedSqlEvidence = false;
-  const verifiedFindings = referenceValidFindings.flatMap(({ finding, evidence, tools }) => {
+  const verifiedFindings = referenceValidFindings.flatMap(({ finding, evidence, tools, findingIndex }) => {
     const repaired = repairFindingEvidenceBindings(finding, evidence, tools, collected.sql, args.input);
     const repairedTools = repaired.evidenceSqlIndexes
       .map((index) => collected.sql[index - 1]).filter((tool): tool is CollectedSqlEvidence => Boolean(tool));
@@ -504,30 +535,38 @@ export function resolvePreschoolAiEventStream(args: {
       oversizedSqlEvidence = true;
       return [];
     }
-    return [repaired];
+    return [{ finding: repaired, findingIndex }];
   });
   if (generated.length > 0 && verifiedFindings.length === 0 && oversizedSqlEvidence) {
     return { status: "unavailable", reason: "The AI Analyst exceeded the ten-row SQL Evidence limit." };
   }
-  const selectedEvidence = verifiedFindings.map((finding) => finding.evidenceRefs
+  const selectedEvidence = verifiedFindings.map(({ finding }) => finding.evidenceRefs
     .map((id) => evidenceById.get(id)).filter((item): item is PreschoolDiscoveryEvidenceItem => Boolean(item)));
-  const selectedTools = verifiedFindings.map((finding) => finding.evidenceSqlIndexes
+  const selectedTools = verifiedFindings.map(({ finding }) => finding.evidenceSqlIndexes
     .map((index) => collected.sql[index - 1]).filter((tool): tool is CollectedSqlEvidence => Boolean(tool)));
-  for (const finding of verifiedFindings) {
+  for (const { finding } of verifiedFindings) {
     const presentation = materializePreschoolPresentation(finding, evidenceById, collected.sql, args.input);
     if (presentation) finding.presentation = presentation;
     else delete finding.presentation;
   }
-  const displayable = verifiedFindings.flatMap((finding, index) => unsupportedNumber(
-    finding,
-    selectedEvidence[index]!,
-    selectedTools[index]!,
-    args.input,
-  ) ? [] : [{
-    finding,
-    evidence: selectedEvidence[index]!,
-    tools: selectedTools[index]!,
-  }]);
+  const displayable = verifiedFindings.flatMap(({ finding, findingIndex }, index) => {
+    const unsupportedFields = unsupportedFindingFields(
+      finding,
+      selectedEvidence[index]!,
+      selectedTools[index]!,
+      args.input,
+    );
+    validationIssues.push(...unsupportedFields.map((field) => ({
+      code: "unsupported_claim" as const,
+      findingIndex,
+      field,
+    })));
+    return unsupportedFields.length > 0 ? [] : [{
+      finding,
+      evidence: selectedEvidence[index]!,
+      tools: selectedTools[index]!,
+    }];
+  });
   if (verifiedFindings.length > 0 && displayable.length === 0) {
     return { status: "unavailable", reason: "The AI Analyst returned a numeric claim without Finding-specific Evidence." };
   }
@@ -574,20 +613,23 @@ function repairFindingEvidenceBindings(
   input: PreschoolAiRunInput,
 ): GeneratedFinding {
   if (!unsupportedNumber(finding, evidence, selectedTools, input)) return finding;
+  const fallbackCentreReference = findingCentreReference(finding);
   const narrative = removeAllowedStructuralReferences(
     [finding.title, finding.what, finding.why, finding.how, finding.expectedIfAct,
-      finding.ifIgnored, finding.howToVerify, finding.evidenceNote,
-      aiFindingPresentationEvidenceText(finding.presentation)].join(" "),
+      finding.ifIgnored, finding.howToVerify, removeCitedSqlReturnedRowReferences(finding.evidenceNote, selectedTools),
+      aiFindingPresentationEvidenceText(finding.presentation)].join("\n"),
     input,
     finding.evidenceSqlIndexes,
   );
   const evidenceNarrative = removeCitedSqlPredicateReferences(narrative, selectedTools);
-  const deterministicValues = evidence.flatMap((item) => collectNumericValues(item.values));
+  const deterministicValues = evidence.flatMap((item) => collectTypedNumericEvidence(item.values)
+    .map((cell) => ({ item, cell })));
   const selectedValues = selectedTools.flatMap((tool) => tool.numericEvidence);
   const unsupportedClaims = numericTokens(evidenceNarrative).filter((claim) => {
-    if (deterministicValues.some((value) => numericMatches(claim, value))) return false;
+    if (deterministicValues.some(({ item, cell }) => numericMatches(claim, cell.value)
+      && deterministicCellSupportsClaim(item, cell, claim.context, claim.entityContext, fallbackCentreReference))) return false;
     return !selectedValues.some((cell) => numericMatches(claim, cell.value)
-      && sqlColumnSupportsClaim(cell.column, claim.context));
+      && sqlCellSupportsClaim(cell, claim.context, claim.entityContext, fallbackCentreReference));
   });
   if (unsupportedClaims.length === 0) return finding;
   const indexes = new Set(finding.evidenceSqlIndexes);
@@ -598,16 +640,28 @@ function repairFindingEvidenceBindings(
     if (!hasExplicitUnit(claim.context) || /(?:sql\s+)?evidence\s+index\s*$/u.test(claim.context)) {
       return finding;
     }
-    const sqlMatches = allTools.flatMap((tool, index) => tool.numericEvidence.some((cell) =>
-      numericMatches(claim, cell.value) && sqlColumnSupportsClaim(cell.column, claim.context))
-      ? [index + 1]
-      : []);
-    const deterministicMatches = input.discoveryEvidence.items.filter((item) =>
-      collectTypedNumericEvidence(item.values).some((cell) => numericMatches(claim, cell.value)
-        && sqlColumnSupportsClaim(cell.field, claim.context)));
-    if (sqlMatches.length === 0 && deterministicMatches.length === 0) return finding;
-    for (const index of sqlMatches) indexes.add(index);
-    for (const item of deterministicMatches) evidenceRefs.add(item.id);
+    const hasWrongSelectedDimension = evidence.some((item) => collectTypedNumericEvidence(item.values)
+      .some((cell) => numericMatches(claim, cell.value)
+        && sqlColumnSupportsClaim(cell.field, claim.context)
+        && !deterministicCellSupportsClaim(item, cell, claim.context, claim.entityContext, fallbackCentreReference)))
+      || selectedTools.some((tool) => tool.numericEvidence.some((cell) => numericMatches(claim, cell.value)
+        && sqlColumnSupportsClaim(cell.column, claim.context)
+        && !sqlCellSupportsClaim(cell, claim.context, claim.entityContext, fallbackCentreReference)));
+    if (hasWrongSelectedDimension) return finding;
+    const sqlMatches = allTools.flatMap((tool, index) => tool.numericEvidence.flatMap((cell) =>
+      numericMatches(claim, cell.value)
+        && sqlCellSupportsClaim(cell, claim.context, claim.entityContext, fallbackCentreReference)
+        ? [{ evidenceIndex: index + 1, cell }]
+        : []));
+    const deterministicMatches = input.discoveryEvidence.items.flatMap((item) =>
+      collectTypedNumericEvidence(item.values).flatMap((cell) => numericMatches(claim, cell.value)
+        && deterministicCellSupportsClaim(item, cell, claim.context, claim.entityContext, fallbackCentreReference)
+        ? [{ item, cell }]
+        : []));
+    const matchCount = sqlMatches.length + deterministicMatches.length;
+    if (matchCount !== 1) return finding;
+    if (sqlMatches[0]) indexes.add(sqlMatches[0].evidenceIndex);
+    if (deterministicMatches[0]) evidenceRefs.add(deterministicMatches[0].item.id);
   }
   const repaired = {
     ...finding,
@@ -727,11 +781,35 @@ function unsupportedNumber(
   tools: CollectedSqlEvidence[],
   input: PreschoolAiRunInput,
 ): boolean {
-  const evidenceNote = removeCitedSqlReturnedRowReferences(finding.evidenceNote, tools);
-  const rawNarrative = [finding.title, finding.what, finding.why, finding.how, finding.expectedIfAct,
-    finding.ifIgnored, finding.howToVerify, evidenceNote,
-    aiFindingPresentationEvidenceText(finding.presentation)].join(" ");
-  return unsupportedNarrative(rawNarrative, evidence, tools, input, finding.evidenceSqlIndexes);
+  return unsupportedFindingFields(finding, evidence, tools, input).length > 0;
+}
+
+function unsupportedFindingFields(
+  finding: GeneratedFinding,
+  evidence: PreschoolDiscoveryEvidenceItem[],
+  tools: CollectedSqlEvidence[],
+  input: PreschoolAiRunInput,
+): PreschoolAiValidationIssue["field"][] {
+  const fallbackCentreReference = findingCentreReference(finding);
+  const fields: Array<{ field: PreschoolAiValidationIssue["field"]; value: string }> = [
+    { field: "title", value: finding.title },
+    { field: "what", value: finding.what },
+    { field: "why", value: finding.why },
+    { field: "how", value: finding.how },
+    { field: "expectedIfAct", value: finding.expectedIfAct },
+    { field: "ifIgnored", value: finding.ifIgnored },
+    { field: "howToVerify", value: finding.howToVerify },
+    { field: "evidenceNote", value: removeCitedSqlReturnedRowReferences(finding.evidenceNote, tools) },
+    { field: "presentation", value: aiFindingPresentationEvidenceText(finding.presentation) },
+  ];
+  return fields.flatMap(({ field, value }) => value && unsupportedNarrative(
+    value,
+    evidence,
+    tools,
+    input,
+    finding.evidenceSqlIndexes,
+    fallbackCentreReference,
+  ) ? [field] : []);
 }
 
 function materializePreschoolPresentation(
@@ -745,6 +823,7 @@ function materializePreschoolPresentation(
     evidenceSqlIndexes: finding.evidenceSqlIndexes,
   });
   if (!scoped) return null;
+  const fallbackCentreReference = findingCentreReference(finding);
   const blocks = scoped.blocks.filter((block) => {
     const evidence = (block.evidenceRefs ?? []).flatMap((reference) => {
       const item = evidenceById.get(reference);
@@ -760,6 +839,7 @@ function materializePreschoolPresentation(
       tools,
       input,
       block.evidenceSqlIndexes ?? [],
+      fallbackCentreReference,
     );
   });
   return blocks.length > 0 ? { version: "1", blocks } : null;
@@ -771,6 +851,7 @@ function unsupportedNarrative(
   tools: CollectedSqlEvidence[],
   input: PreschoolAiRunInput,
   evidenceSqlIndexes: number[],
+  fallbackCentreReference: string | null = null,
 ): boolean {
   if (hasMismatchedPinnedReference(rawNarrative, "Snapshot", input.snapshotId)
     || hasMismatchedPinnedReference(rawNarrative, "Release", input.projectReleaseId)) {
@@ -782,12 +863,20 @@ function unsupportedNarrative(
     evidenceSqlIndexes,
   );
   const evidenceNarrative = removeCitedSqlPredicateReferences(narrative, tools);
-  const deterministicValues = evidence.flatMap((item) => collectNumericValues(item.values));
+  const deterministicValues = evidence.flatMap((item) => collectTypedNumericEvidence(item.values)
+    .map((cell) => ({ item, cell })));
   const sqlValues = tools.flatMap((tool) => tool.numericEvidence);
   return numericTokens(evidenceNarrative).some((claim) => {
-    if (deterministicValues.some((value) => numericMatches(claim, value))) return false;
+    if (deterministicValues.some(({ item, cell }) => numericMatches(claim, cell.value)
+      && deterministicCellSupportsClaim(
+        item,
+        cell,
+        claim.context,
+        claim.entityContext,
+        fallbackCentreReference,
+      ))) return false;
     return !sqlValues.some((cell) => numericMatches(claim, cell.value)
-      && sqlColumnSupportsClaim(cell.column, claim.context));
+      && sqlCellSupportsClaim(cell, claim.context, claim.entityContext, fallbackCentreReference));
   });
 }
 
@@ -932,13 +1021,6 @@ function isStructuralIdentifierCharacter(value: string | undefined): boolean {
   return Boolean(value && /[A-Za-z0-9_-]/u.test(value));
 }
 
-function collectNumericValues(value: unknown): number[] {
-  if (typeof value === "number") return Number.isFinite(value) ? [value] : [];
-  if (Array.isArray(value)) return value.flatMap(collectNumericValues);
-  if (isRecord(value)) return Object.values(value).flatMap(collectNumericValues);
-  return [];
-}
-
 function collectTypedNumericEvidence(
   value: unknown,
   field = "",
@@ -952,23 +1034,34 @@ function collectTypedNumericEvidence(
 function collectSqlNumericEvidence(
   columns: string[],
   rows: unknown[],
-): Array<{ column: string | null; row: number; value: number }> {
+): SqlNumericEvidenceCell[] {
   return rows.flatMap((row, rowIndex) => {
     if (Array.isArray(row)) {
+      const dimensions = row.flatMap<SqlDimensionEvidence>((value, columnIndex) => typeof value === "string"
+        ? [{ column: columns[columnIndex] ?? null, value }]
+        : []);
       return row.flatMap((value, columnIndex) => typeof value === "number" && Number.isFinite(value)
-        ? [{ column: columns[columnIndex] ?? null, row: rowIndex, value }]
+        ? [{ column: columns[columnIndex] ?? null, row: rowIndex, value, dimensions }]
         : []);
     }
     if (isRecord(row)) {
+      const dimensions = Object.entries(row).flatMap<SqlDimensionEvidence>(([column, value]) => typeof value === "string"
+        ? [{ column, value }]
+        : []);
       return Object.entries(row).flatMap(([column, value]) => typeof value === "number" && Number.isFinite(value)
-        ? [{ column, row: rowIndex, value }]
+        ? [{ column, row: rowIndex, value, dimensions }]
         : []);
     }
     return [];
   });
 }
 
-function numericTokens(value: string): Array<{ context: string; precision: number; value: number }> {
+function numericTokens(value: string): Array<{
+  context: string;
+  entityContext: string;
+  precision: number;
+  value: number;
+}> {
   return [...value.matchAll(/(?<![A-Za-z0-9])[-+]?\d[\d,]*(?:\.\d+)?(?![A-Za-z0-9])/gu)].flatMap((match) => {
     const token = match[0];
     const normalized = token.replaceAll(",", "");
@@ -977,10 +1070,20 @@ function numericTokens(value: string): Array<{ context: string; precision: numbe
     const end = Math.min(value.length, (match.index ?? 0) + token.length + 20);
     return Number.isFinite(parsed) ? [{
       context: value.slice(start, end).toLowerCase(),
+      entityContext: entityClauseAround(value, match.index ?? 0, (match.index ?? 0) + token.length).toLowerCase(),
       precision: normalized.includes(".") ? normalized.split(".")[1]!.length : 0,
       value: parsed,
     }] : [];
   });
+}
+
+function entityClauseAround(value: string, numberStart: number, numberEnd: number): string {
+  const boundaries = [...value.matchAll(/[.;\n]|\b(?:while|whereas|however|but)\b/giu)];
+  const previous = boundaries.filter((boundary) => (boundary.index ?? 0) < numberStart).at(-1);
+  const next = boundaries.find((boundary) => (boundary.index ?? value.length) >= numberEnd);
+  const start = previous?.index === undefined ? 0 : previous.index + previous[0].length;
+  const end = next?.index ?? value.length;
+  return value.slice(start, end);
 }
 
 function numericMatches(claim: { precision: number; value: number }, evidence: number): boolean {
@@ -988,14 +1091,98 @@ function numericMatches(claim: { precision: number; value: number }, evidence: n
 }
 
 function sqlColumnSupportsClaim(column: string | null, context: string): boolean {
-  if (!column) return !hasExplicitUnit(context);
+  if (!column) return !hasExplicitUnit(context) && !hasCurrencyUnit(context);
   const normalizedColumn = column.toLowerCase();
-  if (/\b(?:kwh|kilowatt[- ]?hours?)\b/u.test(context)) return /(?:^|_)kwh(?:_|$)|usage|energy/u.test(normalizedColumn);
+  if (hasCurrencyUnit(context)) return /cost|amount|price|tariff|sgd|usd|currency/u.test(normalizedColumn);
+  if (/\b(?:eui|kwh\s*(?:\/|per)\s*(?:m(?:²|2)|sqm|square metres?))\b/u.test(context)) {
+    return /eui|kwh.*(?:m2|sqm)|(?:m2|sqm).*kwh/u.test(normalizedColumn);
+  }
+  if (/\bkwh\s*(?:\/|per)\s*(?:pax|people|persons?)\b|\bper[-_ ]?pax\b/u.test(context)) {
+    return /per_?pax|pax|kwh.*person|person.*kwh/u.test(normalizedColumn);
+  }
+  const energyUnit = context.match(/\b(kwh|mwh|gwh|wh|kw|mw|gw|kilowatt[- ]?hours?)\b/u)?.[1];
+  if (energyUnit) {
+    if (energyUnit === "kwh" || energyUnit.startsWith("kilowatt")) {
+      return normalizedColumn.includes("kwh");
+    }
+    return normalizedColumn.includes(energyUnit);
+  }
   if (/%|\bpercent(?:age)?\b/u.test(context)) return /pct|percent|share|rate|ratio/u.test(normalizedColumn);
   if (/\bcentres?\b/u.test(context)) return /centre.*count|count.*centre/u.test(normalizedColumn);
   if (/\b(?:spikes?|events?)\b/u.test(context)) return /spike.*count|event.*count|count.*spike|count.*event/u.test(normalizedColumn);
   if (/\b(?:people|persons?|pax)\b/u.test(context)) return /pax|people|person|headcount/u.test(normalizedColumn);
   return true;
+}
+
+function sqlCellSupportsClaim(
+  cell: SqlNumericEvidenceCell,
+  context: string,
+  entityContext: string,
+  fallbackCentreReference: string | null = null,
+): boolean {
+  if (!sqlColumnSupportsClaim(cell.column, `${context} ${entityContext}`)) return false;
+  const centreReference = explicitCentreReference(entityContext) ?? fallbackCentreReference;
+  if (!centreReference) return true;
+  return cell.dimensions.some((dimension) => {
+    if (!dimension.column || !/(?:centre|center|parent_node|scope)/u.test(dimension.column.toLowerCase())) {
+      return false;
+    }
+    const tokens = dimension.value.toLowerCase().match(/[a-z0-9]+/gu) ?? [];
+    return tokens.includes(centreReference);
+  });
+}
+
+function deterministicCellSupportsClaim(
+  item: PreschoolDiscoveryEvidenceItem,
+  cell: { field: string | null; value: number },
+  context: string,
+  entityContext: string,
+  fallbackCentreReference: string | null = null,
+): boolean {
+  if (!sqlColumnSupportsClaim(cell.field, `${context} ${entityContext}`)) return false;
+  const centreReference = explicitCentreReference(entityContext) ?? fallbackCentreReference;
+  if (!centreReference) return true;
+  const dimensionTokens = `${item.id} ${item.label} ${collectNamedCentreDimensions(item.values).join(" ")}`
+    .toLowerCase().match(/[a-z0-9]+/gu) ?? [];
+  return dimensionTokens.includes(centreReference);
+}
+
+function collectNamedCentreDimensions(value: unknown, field = ""): string[] {
+  if (typeof value === "string") {
+    return /(?:centre|center|parent_node|scope)(?:_?code|_?id|_?name)?$/u.test(field.toLowerCase())
+      ? [value]
+      : [];
+  }
+  if (Array.isArray(value)) return value.flatMap((item) => collectNamedCentreDimensions(item, field));
+  if (isRecord(value)) {
+    return Object.entries(value).flatMap(([key, item]) => collectNamedCentreDimensions(item, key));
+  }
+  return [];
+}
+
+function explicitCentreReference(context: string): string | null {
+  const references = new Set([...context.matchAll(/\bcent(?:re|er)\s+([a-z]{1,2}|\d+)\b/giu)]
+    .map((match) => match[1]!.toLowerCase()));
+  if (references.size === 0) return null;
+  if (references.size > 1) return "__ambiguous_centre__";
+  return [...references][0]!;
+}
+
+function findingCentreReference(finding: GeneratedFinding): string | null {
+  return explicitCentreReference([
+    finding.title,
+    finding.what,
+    finding.why,
+    finding.how,
+    finding.expectedIfAct,
+    finding.ifIgnored,
+    finding.howToVerify,
+    finding.evidenceNote,
+  ].join("\n"));
+}
+
+function hasCurrencyUnit(context: string): boolean {
+  return /[$€£]|\b(?:sgd|usd|cost|price|tariff|dollars?)\b/u.test(context);
 }
 
 function hasExplicitUnit(context: string): boolean {
