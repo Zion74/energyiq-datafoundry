@@ -1331,6 +1331,8 @@ export const executeEnergyScopeAnalysis = async (input: {
   });
   const circuitOperatingByMeterId = new Map<string, EnergyIqOperatingEvaluation>();
   if (
+    !explorerProfile
+    &&
     input.includeMeterOperationalBreakdown !== false
     && operationalPolicy.operating.status === "available"
   ) {

@@ -7,6 +7,7 @@ import {
   explorerCurrentFactsUrl,
   explorerChildScopeHealth,
   explorerLatestReadingPresentation,
+  explorerAnalysisErrorPresentation,
   explorerSelectedPeriodAverage,
   explorerSnapshotHealthMap,
   explorerTrendSeries,
@@ -27,6 +28,14 @@ describe("Project Explorer trusted view state", () => {
       period: "Custom",
       analysisWindow: "latest-complete-day",
       surface: "project-explorer",
+    });
+  });
+
+  it("keeps long internal meter lists out of the primary error message", () => {
+    const raw = "ENERGYIQ_OPERATIONAL_POLICY_METER_INTERVALS_INCOMPLETE:meter-a,meter-b,meter-c";
+    expect(explorerAnalysisErrorPresentation(raw)).toEqual({
+      summary: "Operating-hours details are incomplete for this Scope. No partial meter-policy result was shown.",
+      technicalDetails: raw,
     });
   });
 

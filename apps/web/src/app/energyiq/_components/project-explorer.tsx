@@ -240,6 +240,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
   const explorerMetricsPending = analysisLoading || !analysis;
   const selectedPeriodHasFacts = hasExplorerFacts(analysis);
   const pinnedContextMismatch = isExplorerPinnedContextMismatch(analysisError);
+  const analysisErrorPresentation = explorerAnalysisErrorPresentation(analysisError);
   const currentFactsHref = explorerCurrentFactsUrl({
     projectId: activeProjectId ?? initialViewState.projectId,
     scopeId: selectedId || initialViewState.scopeId,
@@ -599,9 +600,15 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                 </Link>
               </div>
             ) : analysisError ? (
-              <p className="mt-4 rounded-lg border border-step-warning/25 bg-step-warning/5 p-3 text-xs leading-5 text-step-warning">
-                Scope analysis unavailable: {analysisError}
-              </p>
+              <div className="mt-4 rounded-lg border border-step-warning/25 bg-step-warning/5 p-3 text-sm leading-5 text-step-warning">
+                <p>Scope analysis unavailable: {analysisErrorPresentation?.summary}</p>
+                {analysisErrorPresentation?.technicalDetails ? (
+                  <details className="mt-2 text-xs text-muted">
+                    <summary className="cursor-pointer font-medium">Technical details</summary>
+                    <p className="mt-1 break-all font-mono">{analysisErrorPresentation.technicalDetails}</p>
+                  </details>
+                ) : null}
+              </div>
             ) : null}
 
             {analysis && !selectedPeriodHasFacts ? (
@@ -1348,6 +1355,25 @@ export function isExplorerPinnedContextMismatch(message: string | null): boolean
   if (!message) return false;
   return message.includes("ENERGYIQ_DATA_SNAPSHOT_MISMATCH")
     || message.includes("ENERGYIQ_PROJECT_RELEASE_MISMATCH");
+}
+
+export function explorerAnalysisErrorPresentation(
+  message: string | null,
+): { summary: string; technicalDetails?: string } | null {
+  if (!message) return null;
+  if (message.startsWith("ENERGYIQ_OPERATIONAL_POLICY_METER_INTERVALS_INCOMPLETE:")) {
+    return {
+      summary: "Operating-hours details are incomplete for this Scope. No partial meter-policy result was shown.",
+      technicalDetails: message,
+    };
+  }
+  if (message.length > 180) {
+    return {
+      summary: "Trusted scope analysis could not be completed. Review the technical details or retry after checking the data configuration.",
+      technicalDetails: message,
+    };
+  }
+  return { summary: message };
 }
 
 export function buildExplorerAnalysisRequest(

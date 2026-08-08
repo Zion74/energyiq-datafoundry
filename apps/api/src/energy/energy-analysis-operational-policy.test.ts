@@ -187,6 +187,32 @@ describe("EnergyScopeAnalysis operational policy", () => {
     }
   });
 
+  it("keeps Explorer scope policy facts without requiring the skipped meter breakdown", async () => {
+    const fixture = await createOperationalFixture();
+    try {
+      publishPolicyV1(fixture.metadata);
+      const analysis = await executeEnergyScopeAnalysis({
+        metadataStore: fixture.metadata,
+        dataGateway: fixture.gateway,
+        userId: "dev-user",
+        context: policyContext("tariff-v1", "calendar-v1", fixture.dataSnapshotId),
+        databasePath: fixture.databasePath,
+        ruleRevisions: [offHoursRule],
+        profile: "explorer",
+      });
+
+      expect(analysis.offHours).toMatchObject({
+        status: "available",
+        operatingKwh: 3,
+        standbyKwh: 7,
+      });
+      expect(analysis.circuits[0]).not.toHaveProperty("nonOperatingKwh");
+      expect(analysis.provenance.queryIds).not.toContain("operational_policy_meter_intervals_v1");
+    } finally {
+      fixture.close();
+    }
+  });
+
   it("returns explicit unavailable policy results and suppresses legacy off-hours findings", async () => {
     const fixture = await createOperationalFixture();
     try {
