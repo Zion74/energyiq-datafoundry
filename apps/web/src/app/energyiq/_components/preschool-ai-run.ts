@@ -140,7 +140,7 @@ const currentRuns = new Map<string, CurrentRun>();
 const FRIENDLY_UNAVAILABLE = "AI analysis is temporarily unavailable. The verified Overview remains available.";
 const PRESCHOOL_AI_PACK_ID = "preschool-analysis-pack" as const;
 const PRESCHOOL_AI_PACK_REVISION = "v1" as const;
-const PRESCHOOL_AI_OUTPUT_CONTRACT_REVISION = "v11";
+const PRESCHOOL_AI_OUTPUT_CONTRACT_REVISION = "v12";
 const PERSISTED_WORKSPACE_PROFILE_ID = "workspace-default";
 const ACTIVE_RUN_POLL_INTERVAL_MS = 1_500;
 const ACTIVE_RUN_POLL_LIMIT = 200;
@@ -492,12 +492,13 @@ function buildPrompt(input: PreschoolAiRunInput): string {
     "Return zero to three distinct section Findings plus at most one page synthesis. Do not force novelty and do not repeat the structured signals as prose. Each displayed Finding must cite only the successful SQL Evidence operations it actually uses; one sufficient query is valid, while a claim that needs validation should cite the additional query that tests it.",
     `Valid sectionId values: ${JSON.stringify(["overall-summary", "centre-benchmark", "operating-behaviour", "appliance-contribution", "planning-outlook", "page-synthesis"])}. Put each Finding beside the section where it helps the user most. Use page-synthesis only for the cross-section priority and next decision.`,
     `Valid signalRefs: ${JSON.stringify(input.decisionSignals.items.map((signal) => signal.id))}. Use only exact ids. An independent discovery may use []; a signal-linked Finding must point to the matching Structured Signal.`,
-    "A Finding may support, challenge, or be independent. Answer What, Why, next investigation, acted/ignored consequences, verification, and limitations. whyKind is Evidence, Hypothesis, or Missing Evidence. Never invent savings, certainty, or outcomes; evidenceNote states what Evidence cannot prove.",
+    "A Finding may support, challenge, or be independent. Use short customer language: title at most 10 words; what, why and how at most two short sentences each; expectedIfAct, ifIgnored, howToVerify and evidenceNote exactly one short sentence each. Never write report-style paragraphs. whyKind is Evidence, Hypothesis, or Missing Evidence. Never invent savings, certainty, or outcomes; evidenceNote states what Evidence cannot prove.",
     `Valid evidenceRefs: ${JSON.stringify(input.discoveryEvidence.items.map((item) => item.id))}. Use only these exact ids; never cite other Runtime ids or object paths. Use [] for an SQL-only Finding.`,
-    "Cite only SQL results actually used. Use numbers only from the same Finding's cited bundle items or SQL. Do not invent causes, equipment state, tariff, cost, savings, ROI, forecast, owner, commitment, target, threshold, duration, or time window.",
+    "Cite only SQL results actually used. Use numbers only from the same Finding's cited bundle items or SQL. Do not mention SQL index numbers in customer-visible text; put them only in evidenceSqlIndexes. Prefer omitting a number over citing the wrong source. Do not invent causes, equipment state, tariff, cost, savings, ROI, forecast, owner, commitment, target, threshold, duration, or time window.",
     "Before emitting the final JSON, audit every customer-visible field and block. Each number must match a cited typed bundle field or named SQL column; same-valued sources are ambiguous. If a ranking, ratio, difference, or other derived value is useful, query a named column; otherwise omit or state Missing Evidence. Do not mention the audit.",
     AI_FINDING_PRESENTATION_PROMPT,
-    "Return only strict JSON: {\"findings\":[{\"sectionId\":\"operating-behaviour\",\"signalRefs\":[\"after-hours\"],\"relationship\":\"supports\",\"title\":\"...\",\"what\":\"...\",\"whyKind\":\"Evidence\",\"why\":\"...\",\"how\":\"...\",\"expectedIfAct\":\"...\",\"ifIgnored\":\"...\",\"howToVerify\":\"...\",\"evidenceNote\":\"...\",\"evidenceRefs\":[\"benchmark:priority-centre:G\"],\"evidenceSqlIndexes\":[1,2],\"presentation\":{\"version\":\"1\",\"blocks\":[{\"type\":\"ranking\",\"prominence\":\"primary\",\"unit\":\"kWh\",\"items\":[{\"label\":\"Centre E\",\"value\":0}],\"evidenceRefs\":[\"benchmark:priority-centre:G\"],\"evidenceSqlIndexes\":[1]}]}}]}",
+    "Use only the canonical Finding keys shown below; never aliases next, acted, ignored, verification, blocks or shape.",
+    "Return only strict JSON: {\"findings\":[{\"sectionId\":\"operating-behaviour\",\"signalRefs\":[\"after-hours\"],\"relationship\":\"supports\",\"title\":\"...\",\"what\":\"...\",\"whyKind\":\"Evidence\",\"why\":\"...\",\"how\":\"...\",\"expectedIfAct\":\"...\",\"ifIgnored\":\"...\",\"howToVerify\":\"...\",\"evidenceNote\":\"...\",\"evidenceRefs\":[\"circuit:standby:L\"],\"evidenceSqlIndexes\":[1],\"presentation\":{\"version\":\"1\",\"blocks\":[{\"type\":\"metric\",\"prominence\":\"primary\",\"label\":\"Observed load\",\"value\":0,\"unit\":\"kWh\",\"evidenceRefs\":[\"circuit:standby:L\"],\"evidenceSqlIndexes\":[1]}]}}]}",
     "Bounded Preschool Discovery Evidence Bundle:",
     JSON.stringify(input.discoveryEvidence),
     "Structured decision signals (facts to interpret, prioritize, merge or challenge; not prose to repeat):",
@@ -550,8 +551,6 @@ function resolvePreschoolAiEventStreamInternal(
   const referenceValidFindings = generated.flatMap((finding, findingIndex) => {
     const signals = finding.signalRefs.map((id) => signalById.get(id)).filter(Boolean);
     if (signals.length !== finding.signalRefs.length) return [];
-    if (finding.sectionId !== "page-synthesis"
-      && signals.some((signal) => signal?.sectionId !== finding.sectionId)) return [];
     const evidence = finding.evidenceRefs
       .map((id) => evidenceById.get(id)).filter((item): item is PreschoolDiscoveryEvidenceItem => Boolean(item));
     if (evidence.length !== finding.evidenceRefs.length) {
@@ -608,11 +607,18 @@ function resolvePreschoolAiEventStreamInternal(
       findingIndex,
       field,
     })));
-    return unsupportedFields.length > 0 ? [] : [{
+    const canonical = canonicalizeFindingNarrative(
       finding,
+      unsupportedFields,
+      selectedEvidence[index]!,
+      selectedTools[index]!,
+      args.input,
+    );
+    return canonical ? [{
+      finding: canonical,
       evidence: selectedEvidence[index]!,
       tools: selectedTools[index]!,
-    }];
+    }] : [];
   });
   if (verifiedFindings.length > 0 && displayable.length === 0) {
     return { status: "unavailable", reason: "The AI Analyst returned a numeric claim without Finding-specific Evidence." };
@@ -753,16 +759,19 @@ function parseFindings(answer: string): GeneratedFinding[] | null {
     const evidenceSqlIndexes = positiveIntegerArray(candidate.evidenceSqlIndexes);
     const relationship = stringValue(candidate.relationship) ?? "independent";
     const whyKind = stringValue(candidate.whyKind);
-    const title = cleanText(candidate.title);
+    const title = cleanText(candidate.title) ?? providerFindingTitle(sectionId, signalRefs);
     const what = cleanText(candidate.what);
     const why = cleanText(candidate.why);
     const how = cleanText(candidate.how) ?? cleanText(candidate.next);
-    const expectedIfAct = cleanText(candidate.expectedIfAct);
-    const ifIgnored = cleanText(candidate.ifIgnored);
-    const howToVerify = cleanText(candidate.howToVerify);
+    const expectedIfAct = cleanText(candidate.expectedIfAct) ?? cleanText(candidate.acted);
+    const ifIgnored = cleanText(candidate.ifIgnored) ?? cleanText(candidate.ignored);
+    const howToVerify = cleanText(candidate.howToVerify) ?? cleanText(candidate.verification);
     const evidenceNote = cleanText(candidate.evidenceNote);
-    const presentation = parseAiFindingPresentation(candidate.presentation
-      ?? (Array.isArray(candidate.blocks) ? { version: "1", blocks: candidate.blocks } : null));
+    const presentation = parseAiFindingPresentation(normalizeProviderPresentation(
+      candidate.presentation ?? (Array.isArray(candidate.blocks) ? { version: "1", blocks: candidate.blocks } : null),
+      evidenceRefs,
+      evidenceSqlIndexes ?? [],
+    ));
     if (!isPreschoolAiSectionId(sectionId)
       || (relationship !== "supports" && relationship !== "challenges" && relationship !== "independent")
       || (whyKind !== "Evidence" && whyKind !== "Hypothesis" && whyKind !== "Missing Evidence")
@@ -773,6 +782,97 @@ function parseFindings(answer: string): GeneratedFinding[] | null {
   if (findings.length !== envelope.findings.length) return null;
   const semantic = findings.map((finding) => `${finding.title} ${finding.what}`.toLowerCase().replace(/[^a-z0-9]+/gu, " ").trim());
   return new Set(semantic).size === semantic.length ? findings : null;
+}
+
+function providerFindingTitle(sectionId: string, signalRefs: string[]): string | null {
+  const signalTitles: Record<string, string> = {
+    "after-hours": "Energy used after closing",
+    efficiency: "High for both floor area and headcount",
+    operating: "Unusual peaks during opening hours",
+  };
+  if (signalRefs.length === 1 && signalTitles[signalRefs[0]!]) return signalTitles[signalRefs[0]!]!;
+  const sectionTitles: Record<string, string> = {
+    "overall-summary": "Portfolio pattern",
+    "centre-benchmark": "Centre benchmark",
+    "operating-behaviour": "Operating pattern",
+    "appliance-contribution": "Energy drivers",
+    "planning-outlook": "Planning outlook",
+    "page-synthesis": "Portfolio priorities",
+  };
+  return sectionTitles[sectionId] ?? null;
+}
+
+function normalizeProviderPresentation(
+  value: unknown,
+  evidenceRefs: string[],
+  evidenceSqlIndexes: number[],
+): unknown {
+  if (!isRecord(value) || !Array.isArray(value.blocks)) return value;
+  return {
+    version: "1",
+    blocks: value.blocks.map((block) => normalizeProviderPresentationBlock(
+      block,
+      evidenceRefs,
+      evidenceSqlIndexes,
+    )),
+  };
+}
+
+function normalizeProviderPresentationBlock(
+  value: unknown,
+  findingEvidenceRefs: string[],
+  findingEvidenceSqlIndexes: number[],
+): unknown {
+  if (!isRecord(value)) return value;
+  const type = stringValue(value.type) ?? stringValue(value.shape);
+  const tone = value.tone === "warning" ? "caution" : value.tone === "info" ? "insight" : value.tone;
+  const evidenceRefs = Array.isArray(value.evidenceRefs) ? value.evidenceRefs : findingEvidenceRefs;
+  const evidenceSqlIndexes = Array.isArray(value.evidenceSqlIndexes)
+    ? value.evidenceSqlIndexes
+    : findingEvidenceSqlIndexes;
+  const normalized: Record<string, unknown> = {
+    ...value,
+    ...(type ? { type } : {}),
+    evidenceRefs,
+    evidenceSqlIndexes,
+    ...(tone ? { tone } : {}),
+  };
+  delete normalized.shape;
+  if (type === "metric") normalized.value = providerNumericValue(value.value);
+  if (type === "comparison" || type === "ranking" || type === "share" || type === "distribution") {
+    normalized.items = normalizeProviderValueItems(value.items);
+  }
+  if (type === "trend") normalized.points = normalizeProviderValueItems(value.points);
+  if (type === "heatmap" && Array.isArray(value.values)) {
+    normalized.values = value.values.map((row) => Array.isArray(row)
+      ? row.map(providerNumericValue)
+      : row);
+  }
+  if (type === "table" && Array.isArray(value.rows)) {
+    normalized.rows = value.rows.map((row) => Array.isArray(row)
+      ? row.map(providerTableCell)
+      : row);
+  }
+  return normalized;
+}
+
+function normalizeProviderValueItems(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((item) => isRecord(item)
+    ? { ...item, value: providerNumericValue(item.value) }
+    : item);
+}
+
+function providerTableCell(value: unknown): unknown {
+  return typeof value === "string" && /^-?\d+(?:\.\d+)?$/u.test(value.trim())
+    ? providerNumericValue(value)
+    : value;
+}
+
+function providerNumericValue(value: unknown): unknown {
+  if (typeof value !== "string" || !/^-?\d+(?:\.\d+)?$/u.test(value.trim())) return value;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : value;
 }
 
 function isPreschoolAiSectionId(value: string): value is PreschoolAiSectionId {
@@ -871,8 +971,113 @@ function unsupportedFindingFields(
     tools,
     input,
     finding.evidenceSqlIndexes,
-    fallbackCentreReference,
+    narrativeFragmentCentreFallback(value, fallbackCentreReference),
   ) ? [field] : []);
+}
+
+function canonicalizeFindingNarrative(
+  finding: GeneratedFinding,
+  unsupportedFields: PreschoolAiValidationIssue["field"][],
+  evidence: PreschoolDiscoveryEvidenceItem[],
+  tools: CollectedSqlEvidence[],
+  input: PreschoolAiRunInput,
+): GeneratedFinding | null {
+  if (unsupportedFields.length === 0) return finding;
+  const unsupported = new Set(unsupportedFields);
+  const canonical = { ...finding };
+  const fallbackCentreReference = findingCentreReference(finding);
+  const keepSupported = (value: string): string | null => supportedNarrativeFragments(
+    value,
+    evidence,
+    tools,
+    input,
+    finding.evidenceSqlIndexes,
+    fallbackCentreReference,
+  );
+  if (unsupported.has("title")) {
+    canonical.title = providerFindingTitle(finding.sectionId, finding.signalRefs) ?? "AI interpretation";
+  }
+  if (unsupported.has("what")) {
+    const supported = keepSupported(finding.what);
+    if (!supported) return null;
+    canonical.what = supported;
+  }
+  if (unsupported.has("why")) {
+    canonical.why = keepSupported(finding.why)
+      ?? "The cited Snapshot and scoped SQL Evidence support this investigation priority.";
+  }
+  if (unsupported.has("how")) {
+    canonical.how = keepSupported(finding.how)
+      ?? "Review the cited Evidence before changing operations.";
+  }
+  if (unsupported.has("expectedIfAct")) {
+    canonical.expectedIfAct = keepSupported(finding.expectedIfAct)
+      ?? "A follow-up check should show whether the verified pattern changes.";
+  }
+  if (unsupported.has("ifIgnored")) {
+    canonical.ifIgnored = keepSupported(finding.ifIgnored)
+      ?? "The reason for this pattern will remain unresolved.";
+  }
+  if (unsupported.has("howToVerify")) {
+    canonical.howToVerify = keepSupported(finding.howToVerify)
+      ?? "Repeat the same scoped check on the next published Snapshot.";
+  }
+  if (unsupported.has("evidenceNote")) {
+    canonical.evidenceNote = keepSupported(finding.evidenceNote)
+      ?? "The Evidence supports prioritisation, not a confirmed cause.";
+  }
+  if (unsupported.has("presentation")) delete canonical.presentation;
+  return unsupportedFindingFields(canonical, evidence, tools, input).length === 0 ? canonical : null;
+}
+
+function supportedNarrativeFragments(
+  raw: string,
+  evidence: PreschoolDiscoveryEvidenceItem[],
+  tools: CollectedSqlEvidence[],
+  input: PreschoolAiRunInput,
+  evidenceSqlIndexes: number[],
+  fallbackCentreReference: string | null,
+): string | null {
+  const fragments = raw.split(/(?<=[.!?])\s+|;\s+|\s+[—–]\s+|\s+while\s+/iu)
+    .map((fragment) => cleanText(fragment))
+    .filter((fragment): fragment is string => Boolean(fragment))
+    .map((fragment) => labelBareCentreFragment(fragment, evidence));
+  let accepted = "";
+  for (const fragment of fragments) {
+    const fragmentFallback = narrativeFragmentCentreFallback(fragment, fallbackCentreReference);
+    if (unsupportedNarrative(
+      fragment,
+      evidence,
+      tools,
+      input,
+      evidenceSqlIndexes,
+      fragmentFallback,
+    )) continue;
+    const candidate = accepted ? `${accepted}; ${fragment}` : fragment;
+    if (!unsupportedNarrative(
+      candidate,
+      evidence,
+      tools,
+      input,
+      evidenceSqlIndexes,
+      narrativeFragmentCentreFallback(candidate, fallbackCentreReference),
+    )) accepted = candidate;
+  }
+  return accepted || null;
+}
+
+function labelBareCentreFragment(fragment: string, evidence: PreschoolDiscoveryEvidenceItem[]): string {
+  const match = /^([A-Z]{1,2})\s*(?=\()/u.exec(fragment);
+  if (!match) return fragment;
+  const centreCode = match[1]!;
+  const citedCentreCodes = new Set(evidence.flatMap((item) => collectNamedCentreDimensions(item.values)));
+  return citedCentreCodes.has(centreCode) ? `Centre ${fragment}` : fragment;
+}
+
+function narrativeFragmentCentreFallback(fragment: string, original: string | null): string | null {
+  const explicit = explicitCentreReference(fragment);
+  if (explicit) return explicit;
+  return /\b(?:it|its|this centre|the centre|selected centre)\b/iu.test(fragment) ? original : null;
 }
 
 function materializePreschoolPresentation(
@@ -1129,15 +1334,24 @@ function numericTokens(value: string): Array<{
     const token = match[0];
     const normalized = token.replaceAll(",", "");
     const parsed = Number(normalized);
-    const start = Math.max(0, (match.index ?? 0) - 20);
-    const end = Math.min(value.length, (match.index ?? 0) + token.length + 20);
+    const tokenStart = match.index ?? 0;
+    const tokenEnd = tokenStart + token.length;
     return Number.isFinite(parsed) ? [{
-      context: value.slice(start, end).toLowerCase(),
-      entityContext: entityClauseAround(value, match.index ?? 0, (match.index ?? 0) + token.length).toLowerCase(),
+      context: numericUnitContext(value, tokenStart, tokenEnd),
+      entityContext: entityClauseAround(value, tokenStart, tokenEnd).toLowerCase(),
       precision: normalized.includes(".") ? normalized.split(".")[1]!.length : 0,
       value: parsed,
     }] : [];
   });
+}
+
+function numericUnitContext(value: string, numberStart: number, numberEnd: number): string {
+  const before = value.slice(Math.max(0, numberStart - 20), numberStart).toLowerCase();
+  const after = value.slice(numberEnd, Math.min(value.length, numberEnd + 24)).toLowerCase();
+  const explicitAfter = /^\s*(?:%|percent(?:age)?|kwh|mwh|gwh|wh|kw|mw|gw|kilowatt[- ]?hours?|centres?|spikes?|events?|people|persons?|pax)/u.exec(after);
+  const explicitBefore = /(?:[$€£]|\b(?:sgd|usd))\s*$/u.exec(before);
+  if (explicitAfter || explicitBefore) return `${explicitBefore?.[0] ?? ""} ${explicitAfter?.[0] ?? ""}`;
+  return `${before} ${after}`;
 }
 
 function entityClauseAround(value: string, numberStart: number, numberEnd: number): string {
@@ -1183,7 +1397,7 @@ function sqlCellSupportsClaim(
   entityContext: string,
   fallbackCentreReference: string | null = null,
 ): boolean {
-  if (!sqlColumnSupportsClaim(cell.column, `${context} ${entityContext}`)) return false;
+  if (!sqlColumnSupportsClaim(cell.column, `${context} ${semanticMetricContext(entityContext)}`)) return false;
   const centreReference = explicitCentreReference(entityContext) ?? fallbackCentreReference;
   if (!centreReference) return true;
   return cell.dimensions.some((dimension) => {
@@ -1202,12 +1416,20 @@ function deterministicCellSupportsClaim(
   entityContext: string,
   fallbackCentreReference: string | null = null,
 ): boolean {
-  if (!sqlColumnSupportsClaim(cell.field, `${context} ${entityContext}`)) return false;
+  if (!sqlColumnSupportsClaim(cell.field, `${context} ${semanticMetricContext(entityContext)}`)) return false;
   const centreReference = explicitCentreReference(entityContext) ?? fallbackCentreReference;
   if (!centreReference) return true;
   const dimensionTokens: string[] = `${item.id} ${item.label} ${collectNamedCentreDimensions(item.values).join(" ")}`
     .toLowerCase().match(/[a-z0-9]+/gu) ?? [];
   return dimensionTokens.includes(centreReference);
+}
+
+function semanticMetricContext(entityContext: string): string {
+  return [
+    /[$€£]|\b(?:sgd|usd|cost|price|tariff|dollars?)\b/u.test(entityContext) ? "cost" : "",
+    /\b(?:eui|kwh\s*(?:\/|per)\s*(?:m(?:²|2)|sqm|square metres?))\b/u.test(entityContext) ? "eui" : "",
+    /\bkwh\s*(?:\/|per)\s*(?:pax|people|persons?)\b|\bper[-_ ]?pax\b/u.test(entityContext) ? "per-pax" : "",
+  ].filter(Boolean).join(" ");
 }
 
 function collectNamedCentreDimensions(value: unknown, field = ""): string[] {

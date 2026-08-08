@@ -591,7 +591,7 @@ function DecisionSummaryCard({ item }: { item: PreschoolDecisionSummaryItem }) {
           <p className="text-xs font-semibold text-primary">Priority {item.priority}</p>
           <h4 className="mt-1.5 max-w-4xl text-lg font-semibold leading-7 text-foreground">{item.label}</h4>
           {item.centreCodes.length > 0 ? (
-            <p className="mt-1.5 text-sm text-muted">Centres to review: <strong className="font-semibold text-foreground">{item.centreCodes.join(" · ")}</strong></p>
+            <p className="mt-1.5 text-sm text-muted">Centres to review: <strong className="font-semibold text-foreground">{compactCentreCodes(item.centreCodes)}</strong></p>
           ) : null}
         </div>
         <span className="shrink-0 rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-muted">Verified signal</span>
@@ -1074,4 +1074,9 @@ function applianceBarClass(applianceGroup: string): string {
 
 function titleCase(value: string): string {
   return value.slice(0, 1).toUpperCase() + value.slice(1);
+}
+
+function compactCentreCodes(codes: string[]): string {
+  const visible = codes.slice(0, 5).join(" · ");
+  return codes.length > 5 ? `${visible} · +${codes.length - 5} more` : visible;
 }

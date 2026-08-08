@@ -47,7 +47,7 @@ describe("Preschool AI Run", () => {
       "metric-revisions:energy.total_usage_kwh@1,energy.usage_per_person,energy.usage_per_sqm",
       "sg-preschool-calendar-v1",
     ]) expect(input.identityKey).toContain(pin);
-    expect(input.identityKey).toContain("preschool-ai-output-contract@v11");
+    expect(input.identityKey).toContain("preschool-ai-output-contract@v12");
     expect(body).toMatchObject({
       method: "agent/run",
       params: { agentId: "dataFoundry" },
@@ -232,6 +232,23 @@ describe("Preschool AI Run", () => {
     });
   });
 
+  it("lets the Agent place a signal-backed Finding in the most useful Overview section", () => {
+    const findings = generatedFindings().slice(0, 1);
+    findings[0]!.sectionId = "appliance-contribution";
+
+    const result = resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(findings),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      findings: [{ sectionId: "appliance-contribution", signalRefs: ["efficiency"] }],
+    });
+  });
+
   it("accepts an Agent-selected visual backed by the same Finding SQL Evidence", () => {
     const findings = generatedFindings().slice(0, 1);
     findings[0]!.presentation = {
@@ -292,6 +309,77 @@ describe("Preschool AI Run", () => {
         how: generatedFindings()[0]!.how,
         presentation: { version: "1", blocks: [expect.objectContaining({ type: "comparison" })] },
       });
+    }
+  });
+
+  it("normalizes the live Provider aliases without bypassing Finding Evidence", () => {
+    const finding = {
+      sectionId: "centre-benchmark",
+      signalRefs: ["efficiency"],
+      evidenceRefs: ["benchmark:priority-centre:G"],
+      evidenceSqlIndexes: [1],
+      whyKind: "Evidence",
+      what: "The scoped query confirms the efficiency signal for Centre G.",
+      why: "The published benchmark and the scoped query point to the same investigation priority.",
+      next: "Confirm the floor area and headcount before assigning a cause.",
+      acted: "The next review can separate a denominator issue from an operating issue.",
+      ignored: "The reason for the intensity signal remains unresolved.",
+      verification: "Repeat the scoped comparison after the metadata review.",
+      evidenceNote: "The signal supports prioritisation, not a confirmed root cause.",
+      blocks: [{
+        shape: "metric",
+        label: "Centre G usage",
+        value: "843.0985",
+        unit: "kWh",
+        prominence: "primary",
+      }],
+    };
+    const sqlEvidence = namedSqlEvents(
+      "sql-1",
+      "SELECT centre_code, usage_kwh FROM energy_intervals WHERE centre_code = 'G'",
+      ["centre_code", "usage_kwh"],
+      [["G", 843.0985]],
+    );
+
+    const result = resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream([finding] as never, sqlEvidence),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status === "available") {
+      expect(result.findings[0]).toMatchObject({
+        title: "High for both floor area and headcount",
+        relationship: "independent",
+        how: finding.next,
+        expectedIfAct: finding.acted,
+        ifIgnored: finding.ignored,
+        howToVerify: finding.verification,
+        presentation: {
+          version: "1",
+          blocks: [expect.objectContaining({ type: "metric", value: 843.0985 })],
+        },
+      });
+    }
+  });
+
+  it("keeps a supported sentence while removing an unsupported numeric sentence", () => {
+    const finding = generatedFindings()[0]!;
+    finding.what = "The scoped comparison points to the same Centre. Centre G used 999 kWh.";
+
+    const result = resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream([finding]),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status === "available") {
+      expect(result.findings[0]!.what).toBe("The scoped comparison points to the same Centre.");
+      expect(result.findings[0]!.what).not.toContain("999");
     }
   });
 
@@ -896,6 +984,47 @@ describe("Preschool AI Run", () => {
     }).status).toBe("unavailable");
   });
 
+  it("does not bind a portfolio SQL claim to a Centre cited elsewhere in the Finding", () => {
+    const findings = generatedFindings().slice(0, 1);
+    findings[0]!.title = "Centre G remains a priority investigation";
+    findings[0]!.what = "Weekend usage was 1435.03 kWh.";
+    findings[0]!.evidenceRefs = ["benchmark:priority-centre:G"];
+    findings[0]!.evidenceSqlIndexes = [1];
+    const sqlEvidence = namedSqlEvents(
+      "sql-1",
+      "SELECT day_type, SUM(usage_kwh) AS usage_kwh FROM energy_intervals GROUP BY day_type",
+      ["day_type", "usage_kwh"],
+      [["weekend", 1435.03]],
+    );
+
+    expect(resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(findings, sqlEvidence),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    }).status).toBe("available");
+  });
+
+  it("validates adjacent energy and percentage claims against their own SQL columns", () => {
+    const findings = generatedFindings().slice(0, 1);
+    findings[0]!.what = "Load consumed 1406.34 kWh (98% of weekend usage).";
+    findings[0]!.evidenceRefs = [];
+    findings[0]!.evidenceSqlIndexes = [1];
+    const sqlEvidence = namedSqlEvents(
+      "sql-1",
+      "SELECT category, usage_kwh, share_pct FROM energy_intervals",
+      ["category", "usage_kwh", "share_pct"],
+      [["load", 1406.34, 98]],
+    );
+
+    expect(resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(findings, sqlEvidence),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    }).status).toBe("available");
+  });
+
   it("does not auto-bind when SQL and Bundle both contain the same typed value", () => {
     const findings = generatedFindings().slice(0, 1);
     findings[0]!.what = "Centre G used 830.3005 kWh.";
@@ -1032,15 +1161,17 @@ describe("Preschool AI Run", () => {
 
     finding[0]!.what = generatedFindings()[0]!.what;
     finding[0]!.evidenceNote = "The ranking reflects only the 4 rows returned.";
-    expect(resolvePreschoolAiEventStream({
+    const sanitized = resolvePreschoolAiEventStream({
       eventStream: successfulEventStream(finding),
       input: requiredInput(),
       providerProfileId: "profile-1",
       runId: "run-1",
-    })).toEqual({
-      status: "unavailable",
-      reason: "The AI Analyst returned a numeric claim without Finding-specific Evidence.",
     });
+    expect(sanitized.status).toBe("available");
+    if (sanitized.status === "available") {
+      expect(sanitized.findings[0]!.evidenceNote).toBe("The Evidence supports prioritisation, not a confirmed cause.");
+      expect(sanitized.findings[0]!.evidenceNote).not.toContain("4 rows");
+    }
   });
 
   it("binds an exact Bundle field and treats an actually cited SQL predicate as method context", () => {

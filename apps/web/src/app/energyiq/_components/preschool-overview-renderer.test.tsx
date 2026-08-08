@@ -31,6 +31,8 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup).toContain("Centres to review: <strong class=\"font-semibold text-foreground\">L · E · N</strong>");
     expect(markup).toContain("High for both floor area and headcount");
     expect(markup).toContain("Unusual peaks during opening hours");
+    expect(markup).toContain("A · B · C · D · E · +9 more");
+    expect(markup).not.toContain("A · B · C · D · E · F · G · H · I · J · K · L · M · N");
     expect(markup).toContain("Verified signal");
     expect(markup).toContain("Limitation and evidence");
     expect(markup).not.toContain("What to do next");
