@@ -361,8 +361,6 @@ export const resolveProjectAnalysis = async (input: {
         : undefined;
       const preschoolBenchmark = projectRelease.renderer.key === "preschool-overview"
         && releasedContext.scopeId === input.metadataStore.energyIq.getProject(releasedContext.projectId).root_scope_id
-        && snapshotContext.primaryPeriod.start === "2026-04-30T16:00:00.000Z"
-        && snapshotContext.primaryPeriod.endExclusive === "2026-05-31T16:00:00.000Z"
         && hasCompletePreschoolBenchmarkWindow(analysis, releasedContext.scopeId)
           ? resolvePreschoolBenchmarkProjection({
               metadataStore: input.metadataStore,
@@ -375,8 +373,6 @@ export const resolveProjectAnalysis = async (input: {
           : undefined;
       const preschoolAppliances = projectRelease.renderer.key === "preschool-overview"
         && releasedContext.scopeId === input.metadataStore.energyIq.getProject(releasedContext.projectId).root_scope_id
-        && snapshotContext.primaryPeriod.start === "2026-04-30T16:00:00.000Z"
-        && snapshotContext.primaryPeriod.endExclusive === "2026-05-31T16:00:00.000Z"
           ? buildPreschoolApplianceProjection({
               projectRelease,
               period: snapshotContext.primaryPeriod,
@@ -386,8 +382,6 @@ export const resolveProjectAnalysis = async (input: {
           : undefined;
       const preschoolOperational = projectRelease.renderer.key === "preschool-overview"
         && releasedContext.scopeId === input.metadataStore.energyIq.getProject(releasedContext.projectId).root_scope_id
-        && snapshotContext.primaryPeriod.start === "2026-04-30T16:00:00.000Z"
-        && snapshotContext.primaryPeriod.endExclusive === "2026-05-31T16:00:00.000Z"
           ? await loadPreschoolOperationalProjection({
               metadataStore: input.metadataStore,
               dataGateway: input.dataGateway,
@@ -521,7 +515,7 @@ const resolveCurrentOverviewContext = async (input: {
       ...(input.now ? { now: input.now } : {}),
       ...(input.env ? { env: input.env } : {}),
     });
-    if (pinnedProjectContext.projectRelease?.renderer.key !== "ngee-ann-overview") {
+    if (!supportsCurrentOverviewWindow(pinnedProjectContext.projectRelease?.renderer.key)) {
       throw new Error("ENERGYIQ_ANALYSIS_WINDOW_UNSUPPORTED");
     }
     const releasedPinnedContext = resolvePublishedEnergyQueryContext({
@@ -568,7 +562,8 @@ const resolveCurrentOverviewContext = async (input: {
     ...(input.now ? { now: input.now } : {}),
     ...(input.env ? { env: input.env } : {}),
   });
-  if (projectContext.projectRelease?.renderer.key !== "ngee-ann-overview") {
+  const projectRelease = projectContext.projectRelease;
+  if (!projectRelease || !supportsCurrentOverviewWindow(projectRelease.renderer.key)) {
     throw new Error("ENERGYIQ_ANALYSIS_WINDOW_UNSUPPORTED");
   }
   const selected = await selectOverviewPeriod({
@@ -588,12 +583,15 @@ const resolveCurrentOverviewContext = async (input: {
       from: selected.period.localFrom,
       to: inclusiveLocalDate(selected.period.localToExclusive),
       expectedDataSnapshotId: projectContext.context.dataSnapshotId,
-      expectedProjectReleaseId: projectContext.projectRelease.id,
+      expectedProjectReleaseId: projectRelease.id,
     },
     ...(input.now ? { now: input.now } : {}),
     ...(input.env ? { env: input.env } : {}),
   });
 };
+
+const supportsCurrentOverviewWindow = (rendererKey: string | undefined): boolean =>
+  rendererKey === "ngee-ann-overview" || rendererKey === "preschool-overview";
 
 const inclusiveLocalDate = (localToExclusive: string): string => {
   const exclusive = new Date(`${localToExclusive}T00:00:00.000Z`);

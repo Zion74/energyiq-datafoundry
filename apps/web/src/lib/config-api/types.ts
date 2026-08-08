@@ -1269,7 +1269,7 @@ export type PreschoolBenchmarkProjectionDto = {
   contract: {
     id: "preschool-may-2026-benchmark";
     version: "1";
-    annualisationFactor: 12;
+    annualisationFactor: number;
   };
   period: {
     start: string;
@@ -1315,8 +1315,8 @@ export type PreschoolBenchmarkProjectionDto = {
     cohortSource: "published-hierarchy-node-metadata";
     metadataStatus: "provisional";
     normalisation: {
-      eui: "May usage kWh * 12 / published comparison area m2";
-      perPax: "May usage kWh / published representative headcount";
+      eui: string;
+      perPax: string;
     };
   };
 };

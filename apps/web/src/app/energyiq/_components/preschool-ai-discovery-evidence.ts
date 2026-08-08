@@ -49,17 +49,20 @@ export function buildPreschoolDiscoveryEvidenceBundle(
 ): PreschoolDiscoveryEvidenceBundleV1 | null {
   if (!validPreschoolSnapshotPins(snapshot)) return null;
   const benchmark = snapshot.preschoolBenchmark!;
-  const operational = snapshot.preschoolOperational!;
-  if (operational.status !== "available") return null;
+  const appliances = snapshot.preschoolAppliances!;
+  if (appliances.status !== "available") return null;
+  const operational = snapshot.preschoolOperational?.status === "available"
+    ? snapshot.preschoolOperational
+    : null;
   const period = {
     from: snapshot.context.primaryPeriod.start,
     to: snapshot.context.primaryPeriod.endExclusive,
   };
   const items: PreschoolDiscoveryEvidenceItem[] = [
     {
-      id: "portfolio:may",
+      id: "portfolio:window",
       kind: "portfolio",
-      label: "Published May Portfolio energy",
+      label: "Published current-window Portfolio energy",
       unit: "kWh",
       values: {
         usageKwh: snapshot.analysis.summary.usageKwh,
@@ -109,7 +112,27 @@ export function buildPreschoolDiscoveryEvidenceBundle(
     });
   }
 
-  items.push(
+  if (!operational) {
+    for (const appliance of appliances.appliances.slice(0, 1)) {
+      items.push({
+        id: `circuit:appliance:${appliance.name}`,
+        kind: "circuit",
+        label: `${appliance.name} Portfolio contribution`,
+        unit: "kWh",
+        values: {
+          appliance: appliance.name,
+          applianceGroup: appliance.applianceGroup,
+          usageKwh: appliance.usageKwh,
+          sharePct: appliance.sharePct,
+          centreCount: appliance.centreCount,
+        },
+        queryIds: [appliances.evidence.projectionRecipeId],
+        limitation: "Project-specific Appliance alias backed by published Circuit rows.",
+      });
+    }
+  }
+
+  if (operational) items.push(
     {
       id: "operating:portfolio",
       kind: "operating",
@@ -147,13 +170,13 @@ export function buildPreschoolDiscoveryEvidenceBundle(
     },
   );
 
-  const strongestStandby = strongestSpike(operational.spikes.standby.centres);
-  if (strongestStandby) items.push(circuitEvidence("standby", strongestStandby, operational));
+  const strongestStandby = operational ? strongestSpike(operational.spikes.standby.centres) : null;
+  if (strongestStandby && operational) items.push(circuitEvidence("standby", strongestStandby, operational));
 
   items.push({
-    id: "quality:may",
+    id: "quality:window",
     kind: "quality",
-    label: "Published May data quality",
+    label: "Published current-window data quality",
     unit: null,
     values: {
       status: snapshot.dataQuality.status,
@@ -206,7 +229,10 @@ type OperationalCentre = AvailableOperational["spikes"]["standby"]["centres"][nu
 
 function validPreschoolSnapshotPins(snapshot: EnergyProjectAnalysisSnapshotDto): boolean {
   const benchmark = snapshot.preschoolBenchmark;
-  const operational = snapshot.preschoolOperational;
+  const appliances = snapshot.preschoolAppliances;
+  const operational = snapshot.preschoolOperational?.status === "available"
+    ? snapshot.preschoolOperational
+    : null;
   const context = snapshot.context;
   const release = snapshot.projectRelease;
   const primaryPeriod = context.primaryPeriod;
@@ -261,17 +287,26 @@ function validPreschoolSnapshotPins(snapshot: EnergyProjectAnalysisSnapshotDto):
     || benchmark.evidence.dataSnapshotId !== snapshot.dataSnapshot.id
     || benchmark.evidence.hierarchyRevisionId !== context.hierarchyRevisionId
     || benchmark.evidence.meterMappingRevisionId !== context.meterMappingRevisionId
-    || !operational
-    || operational.status !== "available"
-    || operational.contract.id !== "preschool-may-2026-operational-behaviour"
-    || operational.period.start !== primaryPeriod.start
-    || operational.period.endExclusive !== primaryPeriod.endExclusive
-    || operational.period.timezone !== context.timezone
-    || operational.evidence.projectReleaseId !== release.id
-    || operational.evidence.dataSnapshotId !== snapshot.dataSnapshot.id
-    || operational.evidence.hierarchyRevisionId !== context.hierarchyRevisionId
-    || operational.evidence.meterMappingRevisionId !== context.meterMappingRevisionId
-    || operational.evidence.businessCalendarVersion !== context.businessCalendarVersion
+    || !appliances
+    || appliances.status !== "available"
+    || appliances.period.start !== primaryPeriod.start
+    || appliances.period.endExclusive !== primaryPeriod.endExclusive
+    || appliances.period.timezone !== context.timezone
+    || appliances.evidence.projectReleaseId !== release.id
+    || appliances.evidence.dataSnapshotId !== snapshot.dataSnapshot.id
+    || appliances.evidence.hierarchyRevisionId !== context.hierarchyRevisionId
+    || appliances.evidence.meterMappingRevisionId !== context.meterMappingRevisionId
+    || (operational !== null && (
+      operational.contract.id !== "preschool-may-2026-operational-behaviour"
+      || operational.period.start !== primaryPeriod.start
+      || operational.period.endExclusive !== primaryPeriod.endExclusive
+      || operational.period.timezone !== context.timezone
+      || operational.evidence.projectReleaseId !== release.id
+      || operational.evidence.dataSnapshotId !== snapshot.dataSnapshot.id
+      || operational.evidence.hierarchyRevisionId !== context.hierarchyRevisionId
+      || operational.evidence.meterMappingRevisionId !== context.meterMappingRevisionId
+      || operational.evidence.businessCalendarVersion !== context.businessCalendarVersion
+    ))
   ) return false;
   return true;
 }

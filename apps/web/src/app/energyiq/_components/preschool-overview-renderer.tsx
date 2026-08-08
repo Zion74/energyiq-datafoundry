@@ -312,7 +312,7 @@ export function PreschoolOverviewRenderer({
                 <h3 id="preschool-efficiency-benchmark-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Efficiency benchmark</h3>
                 <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2.5 py-1 text-xs font-semibold text-step-warning">Provisional</span>
               </div>
-              <p className="mt-1.5 text-sm leading-6 text-muted">Find Centres that are high on both annualised EUI and May per-pax usage.</p>
+              <p className="mt-1.5 text-sm leading-6 text-muted">Find Centres that use more energy than peers after accounting for floor area and people served.</p>
             </div>
             <p className="text-sm font-semibold text-step-error">Review first: {view.benchmark.priorityCentreCodes.join(" · ")}</p>
           </div>
@@ -541,7 +541,7 @@ export function PreschoolOverviewRenderer({
                   <th className="px-3 py-2.5 text-right font-semibold">Energy</th>
                   <th className="px-3 py-2.5 text-right font-semibold">Share</th>
                   <th className="px-3 py-2.5 text-right font-semibold">Annualised EUI</th>
-                  <th className="px-3 py-2.5 text-right font-semibold">May per pax</th>
+                  <th className="px-3 py-2.5 text-right font-semibold">Energy per person</th>
                   <th className="px-3 py-2.5 font-semibold">Quadrant</th>
                   <th className="px-3 py-2.5 font-semibold">Leading appliance</th>
                 </tr>
@@ -656,8 +656,8 @@ function BenchmarkScatterPlot({ benchmark }: { benchmark: BenchmarkView }) {
         data-benchmark-plot="eui-x-per-pax-y"
         className="h-auto w-full"
       >
-        <title id="preschool-benchmark-scatter-title">Centre EUI and May per-pax efficiency quadrant</title>
-        <desc id="preschool-benchmark-scatter-description">Thirty Centres plotted with annualised EUI increasing to the right and May per-pax energy increasing upward. Dashed Portfolio P75 lines identify Priority Centres G, M and J.</desc>
+        <title id="preschool-benchmark-scatter-title">Centre energy intensity and energy-per-person comparison</title>
+        <desc id="preschool-benchmark-scatter-description">Thirty Centres plotted with annualised energy intensity increasing to the right and energy per person increasing upward. Dashed Portfolio P75 lines identify the Centres to review first.</desc>
         <rect x={margin.left} y={margin.top} width={plotWidth} height={plotHeight} rx="8" className="fill-surface" />
         <line x1={margin.left} y1={margin.top + plotHeight} x2={margin.left + plotWidth} y2={margin.top + plotHeight} stroke="currentColor" className="text-border" />
         <line x1={margin.left} y1={margin.top} x2={margin.left} y2={margin.top + plotHeight} stroke="currentColor" className="text-border" />
@@ -717,7 +717,7 @@ function BenchmarkScatterPlot({ benchmark }: { benchmark: BenchmarkView }) {
         <text x={margin.left - 8} y={margin.top + plotHeight} textAnchor="end" className="fill-muted-light text-[9px]">{perPaxMin.toFixed(1)}</text>
         <text x={margin.left - 8} y={margin.top + 4} textAnchor="end" className="fill-muted-light text-[9px]">{perPaxMax.toFixed(1)}</text>
         <text x={margin.left + plotWidth / 2} y={height - 10} textAnchor="middle" className="fill-muted text-[11px] font-semibold">Annualised EUI (kWh/m²/yr) →</text>
-        <text x={16} y={margin.top + plotHeight / 2} textAnchor="middle" transform={`rotate(-90 16 ${margin.top + plotHeight / 2})`} className="fill-muted text-[11px] font-semibold">↑ May per-pax (kWh/person)</text>
+        <text x={16} y={margin.top + plotHeight / 2} textAnchor="middle" transform={`rotate(-90 16 ${margin.top + plotHeight / 2})`} className="fill-muted text-[11px] font-semibold">↑ Energy per person (kWh/person)</text>
       </svg>
       <BenchmarkCohortLegend />
     </div>

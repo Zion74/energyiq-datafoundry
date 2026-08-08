@@ -4,6 +4,26 @@ import { preschoolGoldenSnapshot } from "./preschool-overview.test-fixture";
 import { buildPreschoolOverviewViewModel } from "./preschool-overview-view-model";
 
 describe("Preschool Overview ViewModel", () => {
+  it("labels a rolling current window with its actual date range", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    snapshot.context.from = "2026-05-10T16:00:00.000Z";
+    snapshot.context.to = "2026-06-07T16:00:00.000Z";
+    snapshot.context.primaryPeriod = {
+      start: snapshot.context.from,
+      endExclusive: snapshot.context.to,
+    };
+
+    const view = buildPreschoolOverviewViewModel(snapshot);
+
+    expect(view.context.period).toBe("11 May 2026–7 Jun 2026");
+    expect(view.overallSummary.periodLabel).toBe("11 May 2026–7 Jun 2026");
+    expect(view.overallSummary.metrics[1]?.label).toBe("Total energy · 11 May 2026–7 Jun 2026");
+    expect(view.benchmark).toMatchObject({
+      status: "provisional",
+      detail: "Provisional comparison across the published 30-Centre cohort. EUI is annualised from the current window; energy per person is normalised to an average month.",
+    });
+  });
+
   it("projects the server-authoritative May Portfolio benchmark and Evidence", () => {
     const snapshot = preschoolGoldenSnapshot();
     snapshot.analysis.childScopes[0]!.topCircuitName = "preschool-centre-a:Aircon 1";
@@ -75,7 +95,7 @@ describe("Preschool Overview ViewModel", () => {
     }))).toEqual([
       {
         id: "eui",
-        label: "Annualised May EUI estimate",
+        label: "Annualised EUI estimate",
         unit: "kWh/m²/year",
         axis: { min: 0, max: 16 },
         cohorts: [
@@ -86,7 +106,7 @@ describe("Preschool Overview ViewModel", () => {
       },
       {
         id: "per-pax",
-        label: "May energy per person",
+        label: "Energy per person",
         unit: "kWh/person",
         axis: { min: 0, max: 24 },
         cohorts: [

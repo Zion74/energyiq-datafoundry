@@ -61,6 +61,19 @@ describe("buildPreschoolApplianceProjection", () => {
       reason: { code: "PRESCHOOL_APPLIANCE_SNAPSHOT_INCOMPLETE" },
     });
   });
+
+  it("reuses the published Circuit-as-Appliance contract for a current rolling 28-day window", () => {
+    const input = fixture();
+    input.period = {
+      start: "2026-05-10T16:00:00.000Z",
+      endExclusive: "2026-06-07T16:00:00.000Z",
+    };
+
+    expect(buildPreschoolApplianceProjection(input)).toMatchObject({
+      status: "available",
+      period: input.period,
+    });
+  });
 });
 
 const fixture = (): Parameters<typeof buildPreschoolApplianceProjection>[0] => {

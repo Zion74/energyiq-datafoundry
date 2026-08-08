@@ -2,11 +2,7 @@ import type { ProjectAnalysisPayload } from "./project-analysis-metadata.js";
 import type { PublishedProjectRelease } from "./project-analysis-resolver.js";
 
 const PRESCHOOL_PROJECT_ID = "preschool-demo";
-const PRESCHOOL_MAY_PERIOD = {
-  start: "2026-04-30T16:00:00.000Z",
-  endExclusive: "2026-05-31T16:00:00.000Z",
-  timezone: "Asia/Singapore",
-} as const;
+const PRESCHOOL_TIMEZONE = "Asia/Singapore";
 const EXPECTED_CENTRE_COUNT = 30;
 const RECONCILIATION_TOLERANCE_KWH = 0.01;
 const EXPECTED_APPLIANCE_BY_ALIAS = new Map<string, { applianceGroup: string; category: string }>([
@@ -84,7 +80,7 @@ export const buildPreschoolApplianceProjection = (input: {
   if (input.analysis.dataHealth.status !== "complete") {
     return unavailable(
       "PRESCHOOL_APPLIANCE_SNAPSHOT_INCOMPLETE",
-      "Appliance ranking is unavailable because the fixed May Portfolio Snapshot is not complete.",
+      "Appliance ranking is unavailable because the current Portfolio window is not complete.",
       evidence,
     );
   }
@@ -183,9 +179,8 @@ export const buildPreschoolApplianceProjection = (input: {
 const hasExpectedEvidencePins = (input: Parameters<typeof buildPreschoolApplianceProjection>[0]): boolean => (
   input.projectRelease.projectId === PRESCHOOL_PROJECT_ID
   && input.projectRelease.renderer.key === "preschool-overview"
-  && input.period.start === PRESCHOOL_MAY_PERIOD.start
-  && input.period.endExclusive === PRESCHOOL_MAY_PERIOD.endExclusive
-  && input.timezone === PRESCHOOL_MAY_PERIOD.timezone
+  && supportedOverviewPeriod(input.period)
+  && input.timezone === PRESCHOOL_TIMEZONE
   && input.analysis.context.projectId === PRESCHOOL_PROJECT_ID
   && input.analysis.context.dataSnapshotId === input.analysis.provenance.dataSnapshotId
   && input.analysis.context.hierarchyRevisionId === input.projectRelease.hierarchyRevisionId
@@ -193,6 +188,11 @@ const hasExpectedEvidencePins = (input: Parameters<typeof buildPreschoolApplianc
   && input.analysis.provenance.hierarchyRevisionId === input.projectRelease.hierarchyRevisionId
   && input.analysis.provenance.meterMappingRevisionId === input.projectRelease.meterMappingRevisionId
 );
+
+const supportedOverviewPeriod = (period: { start: string; endExclusive: string }): boolean => {
+  const durationDays = (Date.parse(period.endExclusive) - Date.parse(period.start)) / 86_400_000;
+  return Number.isInteger(durationDays) && durationDays >= 28 && durationDays <= 31;
+};
 
 const unavailableEvidence = (input: Parameters<typeof buildPreschoolApplianceProjection>[0]) => ({
   projectReleaseId: input.projectRelease.id,

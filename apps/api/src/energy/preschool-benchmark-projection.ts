@@ -12,10 +12,6 @@ const PRESCHOOL_MAY_PERIOD = {
   endExclusive: "2026-05-31T16:00:00.000Z",
   timezone: "Asia/Singapore",
 } as const;
-const PRESCHOOL_MAY_LOCAL_DATE = {
-  start: "2026-05-01",
-  endInclusive: "2026-05-31",
-} as const;
 const PRESCHOOL_MINIMUM_COMPLETE_DAYS = 28;
 
 export type PreschoolBenchmarkQuadrant =
@@ -29,7 +25,7 @@ export type PreschoolBenchmarkProjection = {
   contract: {
     id: "preschool-may-2026-benchmark";
     version: "1";
-    annualisationFactor: 12;
+    annualisationFactor: number;
   };
   period: {
     start: string;
@@ -75,8 +71,8 @@ export type PreschoolBenchmarkProjection = {
     cohortSource: "published-hierarchy-node-metadata";
     metadataStatus: "provisional";
     normalisation: {
-      eui: "May usage kWh * 12 / published comparison area m2";
-      perPax: "May usage kWh / published representative headcount";
+      eui: string;
+      perPax: string;
     };
   };
 };
@@ -112,6 +108,11 @@ export const buildPreschoolBenchmarkProjection = (
   input: PreschoolBenchmarkProjectionInput,
 ): PreschoolBenchmarkProjection => {
   assertPublishedMayContract(input);
+  const periodDays = periodDayCount(input.period);
+  const isPublishedMay = input.period.start === PRESCHOOL_MAY_PERIOD.start
+    && input.period.endExclusive === PRESCHOOL_MAY_PERIOD.endExclusive;
+  const annualisationFactor = isPublishedMay ? 12 : 365 / periodDays;
+  const monthlyNormalisationFactor = isPublishedMay ? 1 : (365 / 12) / periodDays;
   const hierarchy = input.metadataStore.energyIq.projectSetup
     .listHierarchyRevisions(PRESCHOOL_PROJECT_ID)
     .find((revision) => revision.id === input.projectRelease.hierarchyRevisionId);
@@ -134,8 +135,8 @@ export const buildPreschoolBenchmarkProjection = (
       name: scope.name,
       cohort,
       usageKwh: scope.usageKwh,
-      annualisedEuiKwhPerSqmYear: (scope.usageKwh * 12) / area,
-      mayKwhPerPerson: scope.usageKwh / headcount,
+      annualisedEuiKwhPerSqmYear: (scope.usageKwh * annualisationFactor) / area,
+      mayKwhPerPerson: (scope.usageKwh * monthlyNormalisationFactor) / headcount,
       quadrant: "lower-intensity" as PreschoolBenchmarkQuadrant,
       priority: false,
     };
@@ -178,7 +179,7 @@ export const buildPreschoolBenchmarkProjection = (
     contract: {
       id: "preschool-may-2026-benchmark",
       version: "1",
-      annualisationFactor: 12,
+      annualisationFactor,
     },
     period: {
       start: input.period.start,
@@ -224,8 +225,12 @@ export const buildPreschoolBenchmarkProjection = (
       cohortSource: "published-hierarchy-node-metadata",
       metadataStatus: "provisional",
       normalisation: {
-        eui: "May usage kWh * 12 / published comparison area m2",
-        perPax: "May usage kWh / published representative headcount",
+        eui: isPublishedMay
+          ? "May usage kWh * 12 / published comparison area m2"
+          : `Current ${periodDays}-day usage normalised to 365 days / published comparison area m2`,
+        perPax: isPublishedMay
+          ? "May usage kWh / published representative headcount"
+          : `Current ${periodDays}-day usage normalised to an average month / published representative headcount`,
       },
     },
   };
@@ -250,12 +255,10 @@ export const hasCompletePreschoolBenchmarkWindow = (
   if (!dailyTotals || dailyTotals.timezone !== PRESCHOOL_MAY_PERIOD.timezone) return false;
   const projectScope = dailyTotals.scopes.find((scope) => scope.scopeId === projectScopeId);
   if (!projectScope) return false;
-  const completeMayDates = new Set(projectScope.rows
-    .filter((row) => row.localDate >= PRESCHOOL_MAY_LOCAL_DATE.start
-      && row.localDate <= PRESCHOOL_MAY_LOCAL_DATE.endInclusive
-      && row.dataHealth.status === "complete")
+  const completeDates = new Set(projectScope.rows
+    .filter((row) => row.dataHealth.status === "complete")
     .map((row) => row.localDate));
-  return completeMayDates.size >= PRESCHOOL_MINIMUM_COMPLETE_DAYS;
+  return completeDates.size >= PRESCHOOL_MINIMUM_COMPLETE_DAYS;
 };
 
 const priorityScore = (
@@ -284,10 +287,16 @@ const assertPublishedMayContract = (input: {
     throw new Error("PRESCHOOL_BENCHMARK_MAPPING_MISMATCH");
   }
   if (input.timezone !== PRESCHOOL_MAY_PERIOD.timezone
-    || input.period.start !== PRESCHOOL_MAY_PERIOD.start
-    || input.period.endExclusive !== PRESCHOOL_MAY_PERIOD.endExclusive) {
+    || periodDayCount(input.period) < PRESCHOOL_MINIMUM_COMPLETE_DAYS
+    || periodDayCount(input.period) > 31) {
     throw new Error("PRESCHOOL_BENCHMARK_PERIOD_UNSUPPORTED");
   }
+};
+
+const periodDayCount = (period: { start: string; endExclusive: string }): number => {
+  const days = (Date.parse(period.endExclusive) - Date.parse(period.start)) / 86_400_000;
+  if (!Number.isInteger(days) || days <= 0) throw new Error("PRESCHOOL_BENCHMARK_PERIOD_UNSUPPORTED");
+  return days;
 };
 
 const percentilePair = (values: number[]): PreschoolPercentilePair => ({

@@ -301,7 +301,11 @@ export function buildPreschoolOverviewViewModel(
       : "confirmed";
   const queryIds = [...new Set(snapshot.evidence.flatMap((item) => item.queryIds))];
   const decisionSummary = buildPreschoolDecisionSummary(snapshot);
-  const periodLabel = formatMonthYear(snapshot.context.from, snapshot.context.timezone);
+  const periodLabel = formatAnalysisWindowLabel(
+    snapshot.context.from,
+    snapshot.context.to,
+    snapshot.context.timezone,
+  );
   const planningReference = snapshot.preschoolOperational?.status === "available"
     && snapshot.preschoolOperational.planningOutlook.status === "provisional"
     ? snapshot.preschoolOperational.planningOutlook
@@ -469,11 +473,17 @@ export function buildPreschoolOverviewViewModel(
               priority: centre.priority,
             })),
           },
-          detail: "Provisional May benchmark from the published 30-Centre cohort. EUI is annualised ×12; per-pax is May usage.",
+          detail: isCompleteCalendarMonth(
+            snapshot.context.from,
+            snapshot.context.to,
+            snapshot.context.timezone,
+          )
+            ? "Provisional comparison across the published 30-Centre cohort. EUI is annualised from this complete month; energy per person uses the same month."
+            : "Provisional comparison across the published 30-Centre cohort. EUI is annualised from the current window; energy per person is normalised to an average month.",
         }
       : {
           status: "unavailable",
-          detail: "The current Snapshot does not contain the published May benchmark projection. No client-side percentile is inferred.",
+          detail: "The current Snapshot does not contain a server-authoritative benchmark projection. No client-side percentile is inferred.",
         },
     appliances: snapshot.preschoolAppliances?.status === "available"
       ? {
@@ -576,7 +586,7 @@ function buildBenchmarkDistributions(
   const definitions = [
     {
       id: "eui",
-      label: "Annualised May EUI estimate",
+      label: "Annualised EUI estimate",
       unit: "kWh/m²/year",
       digits: 2,
       value: (centre: typeof benchmark.centres[number]) => centre.annualisedEuiKwhPerSqmYear,
@@ -584,7 +594,7 @@ function buildBenchmarkDistributions(
     },
     {
       id: "per-pax",
-      label: "May energy per person",
+      label: "Energy per person",
       unit: "kWh/person",
       digits: 1,
       value: (centre: typeof benchmark.centres[number]) => centre.mayKwhPerPerson,
@@ -731,6 +741,36 @@ function formatMonthYear(from: string, timeZone: string): string {
     year: "numeric",
     timeZone,
   }).format(new Date(from));
+}
+
+function formatAnalysisWindowLabel(from: string, toExclusive: string, timeZone: string): string {
+  return isCompleteCalendarMonth(from, toExclusive, timeZone)
+    ? formatMonthYear(from, timeZone)
+    : formatPeriod(from, toExclusive, timeZone);
+}
+
+function isCompleteCalendarMonth(from: string, toExclusive: string, timeZone: string): boolean {
+  const start = localDateParts(new Date(from), timeZone);
+  const end = localDateParts(new Date(toExclusive), timeZone);
+  if (start.day !== 1 || end.day !== 1) return false;
+  return end.year === start.year
+    ? end.month === start.month + 1
+    : start.month === 12 && end.year === start.year + 1 && end.month === 1;
+}
+
+function localDateParts(value: Date, timeZone: string): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat("en-SG", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    timeZone,
+  }).formatToParts(value);
+  const numberPart = (type: "year" | "month" | "day") => Number(parts.find((part) => part.type === type)?.value);
+  return {
+    year: numberPart("year"),
+    month: numberPart("month"),
+    day: numberPart("day"),
+  };
 }
 
 function formatNumber(value: number, maximumFractionDigits: number): string {

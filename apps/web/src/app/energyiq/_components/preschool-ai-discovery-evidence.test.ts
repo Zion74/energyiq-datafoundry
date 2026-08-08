@@ -37,7 +37,6 @@ describe("Preschool AI Discovery Evidence", () => {
       .toMatchObject({ spikeCount: 21, centreCount: 14 });
     expect(bundle?.items.some((item) => item.kind === "circuit" && item.values.leadingCircuit === "Other Lighting3"))
       .toBe(true);
-
     const serialized = JSON.stringify(bundle);
     expect(serialized.length).toBeLessThanOrEqual(6_000);
     expect(serialized).not.toMatch(/forecast|tariff|cost|28,011|7,639|raw reading|energy_interval_facts/i);
@@ -109,13 +108,22 @@ describe("Preschool AI Discovery Evidence", () => {
     expect(buildPreschoolDiscoveryEvidenceBundle(snapshot)).toBeNull();
   });
 
-  it("does not manufacture AI Evidence when either required published projection is unavailable", () => {
+  it("requires trusted Benchmark and Appliance projections but can omit unavailable Operating evidence", () => {
     const withoutBenchmark = preschoolGoldenSnapshot();
     delete withoutBenchmark.preschoolBenchmark;
     expect(buildPreschoolDiscoveryEvidenceBundle(withoutBenchmark)).toBeNull();
 
+    const withoutAppliances = preschoolGoldenSnapshot();
+    delete withoutAppliances.preschoolAppliances;
+    expect(buildPreschoolDiscoveryEvidenceBundle(withoutAppliances)).toBeNull();
+
     const withoutOperational = preschoolGoldenSnapshot();
     delete withoutOperational.preschoolOperational;
-    expect(buildPreschoolDiscoveryEvidenceBundle(withoutOperational)).toBeNull();
+    const bundle = buildPreschoolDiscoveryEvidenceBundle(withoutOperational);
+    expect(bundle).not.toBeNull();
+    expect(bundle?.items.some((item) => item.kind === "operating" || item.kind === "spike")).toBe(false);
+    expect(bundle?.items.filter((item) => item.id.startsWith("circuit:appliance:"))).toHaveLength(1);
+    expect(bundle?.items.find((item) => item.id === "circuit:appliance:Aircon 1")?.values)
+      .toMatchObject({ usageKwh: 5_200, sharePct: 20.865256255862256 });
   });
 });

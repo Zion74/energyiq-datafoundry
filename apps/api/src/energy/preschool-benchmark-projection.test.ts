@@ -228,7 +228,7 @@ describe("Preschool benchmark projection", () => {
     })).toThrow("PRESCHOOL_BENCHMARK_SNAPSHOT_MISMATCH");
   });
 
-  it("requires at least 28 complete Project local days inside May", () => {
+  it("requires at least 28 complete Project local days in the resolved rolling window", () => {
     const rows = Array.from({ length: 31 }, (_, index) => ({
       localDate: `2026-05-${String(index + 1).padStart(2, "0")}`,
       from: "",
@@ -271,6 +271,6 @@ describe("Preschool benchmark projection", () => {
           rows: [...rows.slice(0, 27), { ...rows[27]!, localDate: "2026-06-01" }],
         }],
       },
-    }, "preschool-project")).toBe(false);
+    }, "preschool-project")).toBe(true);
   });
 });

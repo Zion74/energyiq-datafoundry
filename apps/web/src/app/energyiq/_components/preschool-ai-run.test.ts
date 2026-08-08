@@ -99,7 +99,7 @@ describe("Preschool AI Run", () => {
     expect(serialized).not.toContain("Make at most four total run_sql_readonly attempts");
     expect(serialized).not.toContain("observation scan, a targeted drill-down, and a validation or contradiction check");
     expect(serialized).toContain(
-      "stating 100% coverage requires citing quality:may in that same Finding",
+      "stating 100% coverage requires citing quality:window in that same Finding",
     );
     expect(serialized).toContain(
       "This is an Evidence-binding example, not a required Finding or theme",
@@ -899,7 +899,7 @@ describe("Preschool AI Run", () => {
   it("does not let a typed Centre count authorize the same number as kWh", () => {
     const findings = generatedFindings().slice(0, 1);
     findings[0]!.what = "The Portfolio used 30 kWh.";
-    findings[0]!.evidenceRefs = ["portfolio:may"];
+    findings[0]!.evidenceRefs = ["portfolio:window"];
 
     expect(resolvePreschoolAiEventStream({
       eventStream: successfulEventStream(findings),
@@ -1282,7 +1282,7 @@ describe("Preschool AI Run", () => {
     findings[0]!.title = "Portfolio validation coverage remains explicit";
     findings[0]!.what = "The validation should cover all 30 Centres.";
     findings[0]!.how = "Compare local_hour<7 or >=19 in the cited query.";
-    findings[0]!.evidenceRefs = ["benchmark:priority-centre:G", "portfolio:may"];
+    findings[0]!.evidenceRefs = ["benchmark:priority-centre:G", "portfolio:window"];
     const sqlEvidence = [
       ...namedSqlEvents("sql-1", "SELECT 843.0985 AS usage_kwh WHERE local_hour<7 OR local_hour>=19", ["usage_kwh"], [[843.0985]]),
       ...namedSqlEvents("sql-2", "SELECT 62.4 AS usage_kwh", ["usage_kwh"], [[62.4]]),
@@ -1297,7 +1297,7 @@ describe("Preschool AI Run", () => {
 
     expect(result.status).toBe("available");
     if (result.status === "available") {
-      expect(result.findings[0]!.evidence.deterministic.map((item) => item.id)).toContain("portfolio:may");
+      expect(result.findings[0]!.evidence.deterministic.map((item) => item.id)).toContain("portfolio:window");
     }
   });
 
