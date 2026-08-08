@@ -100,7 +100,7 @@ type ToolAccumulator = {
   argsText: string;
   result: unknown;
 };
-type CollectedSqlEvidence = PreschoolAiToolEvidence & {
+type CollectedSqlEvidence = Omit<PreschoolAiToolEvidence, "evidenceIndex"> & {
   numericEvidence: SqlNumericEvidenceCell[];
   normalizedSql: string | null;
   returnedRowCount: number;
@@ -1127,7 +1127,7 @@ function sqlCellSupportsClaim(
     if (!dimension.column || !/(?:centre|center|parent_node|scope)/u.test(dimension.column.toLowerCase())) {
       return false;
     }
-    const tokens = dimension.value.toLowerCase().match(/[a-z0-9]+/gu) ?? [];
+    const tokens: string[] = dimension.value.toLowerCase().match(/[a-z0-9]+/gu) ?? [];
     return tokens.includes(centreReference);
   });
 }
@@ -1142,7 +1142,7 @@ function deterministicCellSupportsClaim(
   if (!sqlColumnSupportsClaim(cell.field, `${context} ${entityContext}`)) return false;
   const centreReference = explicitCentreReference(entityContext) ?? fallbackCentreReference;
   if (!centreReference) return true;
-  const dimensionTokens = `${item.id} ${item.label} ${collectNamedCentreDimensions(item.values).join(" ")}`
+  const dimensionTokens: string[] = `${item.id} ${item.label} ${collectNamedCentreDimensions(item.values).join(" ")}`
     .toLowerCase().match(/[a-z0-9]+/gu) ?? [];
   return dimensionTokens.includes(centreReference);
 }

@@ -114,7 +114,7 @@ type ToolAccumulator = {
   args: Record<string, unknown> | null;
   result: unknown;
 };
-type CollectedToolEvidence = NgeeAnnAiToolEvidence & {
+type CollectedToolEvidence = Omit<NgeeAnnAiToolEvidence, "evidenceIndex"> & {
   numericEvidence: string;
 };
 
