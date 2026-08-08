@@ -127,7 +127,7 @@ type CurrentRun = {
 
 const currentRuns = new Map<string, CurrentRun>();
 const FRIENDLY_AI_UNAVAILABLE_REASON = "AI analysis is temporarily unavailable. The verified Overview remains available.";
-const NGEE_ANN_AI_OUTPUT_CONTRACT_REVISION = "v5";
+const NGEE_ANN_AI_OUTPUT_CONTRACT_REVISION = "v6";
 const PERSISTED_WORKSPACE_PROFILE_ID = "workspace-default";
 const ACTIVE_RUN_POLL_INTERVAL_MS = 1_500;
 const ACTIVE_RUN_POLL_LIMIT = 200;
@@ -341,10 +341,33 @@ async function restoreOrExecuteNgeeAnnAiRun(
   if (!defaults.activeLlmProfileId) {
     return { status: "unavailable", reason: "No current Workspace model profile is configured." };
   }
-  return executeNgeeAnnAiRun(input, onProgress, {
+  const executed = await executeNgeeAnnAiRun(input, onProgress, {
     profileId: defaults.activeLlmProfileId,
     threadId,
   });
+  if (executed.status === "available" || executed.reason !== "The AI Analyst Run did not finish.") {
+    return executed;
+  }
+
+  // Another browser tab can pass the initial persisted-session probe before the
+  // winning Run is visible. The runtime rejects the duplicate thread start, so
+  // the losing tab follows the winner's persisted result instead of surfacing a
+  // false unavailable state.
+  persisted = await probePersistedNgeeAnnAiRun(input, threadId);
+  for (let attempt = 0; attempt < ACTIVE_RUN_POLL_LIMIT; attempt += 1) {
+    if (persisted.result) {
+      onProgress?.("drafting");
+      return persisted.result;
+    }
+    if (!persisted.active && attempt >= 1) break;
+    await delay(ACTIVE_RUN_POLL_INTERVAL_MS);
+    persisted = await probePersistedNgeeAnnAiRun(input, threadId);
+  }
+  if (persisted.result) {
+    onProgress?.("drafting");
+    return persisted.result;
+  }
+  return executed;
 }
 
 async function buildNgeeAnnAiSessionId(input: NgeeAnnAiRunInput): Promise<string> {
@@ -532,6 +555,7 @@ export function buildAgentRunBody(
 }
 
 function buildAgentPrompt(input: NgeeAnnAiRunInput): string {
+  const acceptedEvidenceRefs = input.discoveryEvidence.items.map((item) => item.id);
   return [
     `Act as an autonomous energy analyst for ${input.projectName}, Scope ${input.scopeName}.`,
     `The governed analysis window is ${input.analysisFrom} through ${input.analysisTo} in ${input.timezone}; data cutoff is ${input.dataCutoff}.`,
@@ -545,6 +569,8 @@ function buildAgentPrompt(input: NgeeAnnAiRunInput): string {
     "How must state the next investigation or operational action. It must not restate What, Why, or the numeric Evidence in different words. How to verify must name the observed outcome, metric, or dimension that would confirm or challenge the Finding.",
     "whyKind must be Evidence, Hypothesis, or Missing Evidence. Do not invent a cause, owner, saving, ROI, device state, or commitment.",
     "Every Finding must cite the exact Evidence it actually uses. Cite Discovery item ids in evidenceRefs and successful SQL result numbers in evidenceSqlIndexes. An independent SQL-only Finding may leave evidenceRefs empty. Every declared Horizon must cite its matching horizon Evidence id. Do not attribute SQL to an unrelated Finding.",
+    `Accepted evidenceRefs IDs are exactly: ${JSON.stringify(acceptedEvidenceRefs)}. Use only these exact strings in evidenceRefs and presentation block evidenceRefs. Do not cite runtime context catalog IDs such as analysis.*; if a fact is available only there, reproduce it with scoped SQL and cite its successful evidenceSqlIndexes, or omit it.`,
+    "Every Finding must include a horizons array. Use horizons:[] when no 1d, 7d or 28d Horizon materially supports that Finding; never omit the field.",
     "Finding text may use only numeric values directly present in that Finding's cited Discovery Evidence items or cited SQL result, or a single-step sum, difference, ratio, or percentage computed from those values. Never report a multi-step derived number such as normalizing values and then comparing the normalized results.",
     "In how and howToVerify, never invent a numeric threshold, target, tolerance, percentage, duration, or time window that is absent from that Finding's cited Evidence. Verification may name the metric or dimension to monitor, but it must not introduce a new number.",
     "Include the relevant quality status or coverage fields in the SQL result used as Evidence. The supplied deterministic Overview quality summary covers only its primary period and must not be claimed as the quality of the full AI lookback.",

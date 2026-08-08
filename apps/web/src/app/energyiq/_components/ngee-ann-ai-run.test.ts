@@ -105,7 +105,7 @@ describe("Ngee Ann AI Run", () => {
 
     expect(input.identityKey).toContain(input.snapshotId);
     expect(input.identityKey).toContain(input.dataCutoff);
-    expect(input.identityKey).toContain("ngee-ann-ai-output-contract@v5");
+    expect(input.identityKey).toContain("ngee-ann-ai-output-contract@v6");
     for (const identityPart of [
       input.projectReleaseId,
       "ngee-ann-overview",
@@ -157,6 +157,8 @@ describe("Ngee Ann AI Run", () => {
     expect(JSON.stringify(body)).not.toContain("Stop after the first successful SQL call");
     expect(JSON.stringify(body)).toContain("Bounded Ngee Ann Discovery Evidence Bundle");
     expect(JSON.stringify(body)).toContain("category:load");
+    expect(JSON.stringify(body)).toContain("Accepted evidenceRefs IDs are exactly");
+    expect(JSON.stringify(body)).toContain("Do not cite runtime context catalog IDs such as analysis.*");
     expect(JSON.stringify(body)).toContain("evidenceRefs");
     expect(JSON.stringify(body)).toContain("Every declared Horizon must cite its matching horizon Evidence id");
     expect(JSON.stringify(body)).not.toContain("execute exactly the following concise cross-horizon Level query");
@@ -1018,6 +1020,87 @@ describe("Ngee Ann AI Run", () => {
       reason: "AI Analyst request failed (503).",
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers a concurrent cross-tab loser from the winner's persisted result", async () => {
+    const input = requiredInput();
+    const persistedRunId = "ngee-ann-overview-cross-tab-winner";
+    const findings = generatedFindings();
+    const notFound = new ConfigApiError("RESOURCE_NOT_FOUND", "Session not found", 404);
+    vi.mocked(configApi.getSessionConversation).mockReset()
+      .mockRejectedValueOnce(notFound)
+      .mockRejectedValueOnce(notFound)
+      .mockResolvedValue({
+        sessionId: "persisted-session",
+        messages: [{
+          id: "assistant-final",
+          runId: persistedRunId,
+          role: "assistant",
+          source: "agent",
+          contentText: JSON.stringify({ findings }),
+          position: 1,
+          createdAt: "2026-08-08T00:00:02.000Z",
+        }],
+        runEventRefs: [{ runId: persistedRunId, eventCount: 6, firstSeq: 1, lastSeq: 6 }],
+        checkpoints: [{
+          runId: persistedRunId,
+          status: "completed",
+          terminalEvent: "RUN_FINISHED",
+          firstEventSeq: 1,
+          lastEventSeq: 6,
+          startedAt: "2026-08-08T00:00:00.000Z",
+          finishedAt: "2026-08-08T00:00:02.000Z",
+        }],
+        toolCalls: [],
+      });
+    vi.spyOn(configApi, "getSessionTraceDag").mockResolvedValue({
+      sessionId: "persisted-session",
+      edges: [],
+      sections: [],
+      nodes: [
+        traceToolNode(persistedRunId, "schema-1", "inspect_schema", 1, {}, {
+          tables: [{ name: "energy_intervals", columns: [{ name: "usage_kwh", type: "DOUBLE" }] }],
+        }),
+        traceToolNode(persistedRunId, "sql-1", "run_sql_readonly", 2, {
+          sql: "SELECT SUM(usage_kwh) AS usage_kwh FROM energy_intervals",
+        }, {
+          sql: "SELECT SUM(usage_kwh) AS usage_kwh FROM energy_intervals",
+          columns: ["value"],
+          rows: [[150]],
+          row_count: 1,
+          audit_log_id: "audit-sql-1",
+          elapsed_ms: 12,
+        }),
+      ],
+    });
+    vi.spyOn(configApi, "getRunDefaults").mockResolvedValue({ activeLlmProfileId: "profile-1" } as never);
+    let releaseWinner!: () => void;
+    const winnerResponse = new Promise<Response>((resolve) => {
+      releaseWinner = () => resolve(new Response(successfulEventStream(), {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }));
+    });
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => winnerResponse)
+      .mockResolvedValueOnce(new Response("", {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const winner = getOrStartNgeeAnnAiRun(input);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    resetNgeeAnnAiRunsForTests(); // Simulate the same Snapshot opening in another browser tab.
+    const loser = getOrStartNgeeAnnAiRun(input);
+
+    await expect(loser).resolves.toMatchObject({
+      status: "available",
+      runId: persistedRunId,
+    });
+    releaseWinner();
+    await expect(winner).resolves.toMatchObject({ status: "available" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("prefers an untruncated Conversation result when Trace assistant output has damaged numeric token boundaries", async () => {
