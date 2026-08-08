@@ -9,7 +9,7 @@
 1. [当前共识与新会话入口](当前共识与新会话入口.md)：截至 2026-08-03 的全部最终共识、现状、差距、开放输入和延期项；
 2. [MVP 底座 + 双功能 + 协同架构](决策-MVP底座双功能协同架构.md)：当前最高优先级与复杂度边界；
 3. [Overview 改造与 AI Analysis 打通最终方案](决策-Overview改造与AI-Analysis打通最终方案.md)：项目专属 Recipe/Renderer、DataFoundry AI 边界和最终实施顺序；
-4. [Overview 用户价值与 AI Slot 最小交付决策](2026-08-05-Overview用户价值与AI-Slot最小交付决策.md)：Ngee Ann 首版北极星、真实自主只读 SQL Run、最小 Project Analysis Prior 和最新 Ticket 顺序；
+4. [Overview 用户价值与 AI Slot 最小交付决策](2026-08-05-Overview用户价值与AI-Slot最小交付决策.md)：统一 Snapshot/Facts、项目专属 Structured Signals、单次多 Section AI Interpretation，以及新 Snapshot 后预生成共享 Overview AI Artifact；
 5. [Charles 系统价值复核与两批数据连续演示决策](2026-08-06-Charles系统价值复核与连续数据演示决策.md)：用连续 Snapshot、简洁洞察、图文协同和行动后果证明系统相对一次性 Claude HTML 的价值；
 6. [项目 Renderer、Recipe 与时间上下文](决策-项目Renderer-Recipe与时间上下文.md)：全局主时间、Benchmark、四象限和 AI 上下文契约；
 7. [Ngee Ann 首个试点路线与页面边界](决策-NgeeAnn首个试点路线与页面边界.md)：Ngee Ann 模块、交互/保存语义，以及 Overview/Explorer/AI 的最新边界；
@@ -37,7 +37,7 @@
 | [项目专属模板与决策型分析](决策-项目专属模板与决策型分析.md) | EnergyIQ Template Schema、Component Catalog/Analysis Spec、开源复用边界、Agent 受控生成、证据与复跑 |
 | [项目 Renderer、Recipe 与时间上下文](决策-项目Renderer-Recipe与时间上下文.md) | 已确认的统一主时间、受控局部时间、Benchmark 周期、正确四象限和 AI 上下文契约 |
 | [Overview 改造与 AI Analysis 打通最终方案](决策-Overview改造与AI-Analysis打通最终方案.md) | 项目专属 Recipe + React Renderer、DataFoundry AI Runtime 边界、上下文跳转、AI Slot 与实施顺序 |
-| [Overview 用户价值与 AI Slot 最小交付决策](2026-08-05-Overview用户价值与AI-Slot最小交付决策.md) | Ngee Ann 首版把快速确定性 Overview 与一次真实自主 DataFoundry Run 合并验收，并固定服务端 Analysis Pack、Snapshot、只读 SQL 与 Evidence 边界 |
+| [Overview 用户价值与 AI Slot 最小交付决策](2026-08-05-Overview用户价值与AI-Slot最小交付决策.md) | 以同一 Published Snapshot 和 Evidence Catalog 连接 Facts、Structured Signals、一次多 Section AI Run、嵌入式 Interpretation 与共享预生成 Artifact；不建设第二套 Runtime 或通用 Scheduler |
 | [Charles 系统价值复核与两批数据连续演示决策](2026-08-06-Charles系统价值复核与连续数据演示决策.md) | 承认一次性 Claude HTML 的适用场景，并以两批数据连续更新、0–3 条精炼洞察、图文协同和行动后果定义下一项客户价值验收 |
 | [四界面 UI/UX 一致性与功能保护决策](2026-08-08-四界面UI-UX一致性与功能保护决策.md) | 统一 Overview、AI Analyst、Project Explorer 与 Admin 的视觉语法、可读性和操作习惯，同时保留不同侧栏职责并保护现有功能 |
 | [Project Explorer 性能、时间、指标与 Snapshot Health 决策](2026-08-08-Project-Explorer性能时间指标与Snapshot-Health决策.md) | 将 Explorer 收窄为快速的设备与数据核查界面，默认 Project 统一最新完整日，并按节点类型展示指标、自身平均线与诚实的 Snapshot Health |

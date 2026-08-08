@@ -1,6 +1,6 @@
 ---
 title: "2026-08-05 决策：Overview 用户价值与 AI Slot 最小交付"
-summary: "把快速、可信的确定性 Ngee Ann Overview 与一次真实、异步、可降级的 DataFoundry 自主分析 Run 共同纳入 Charles 首版验收，并以最小 Project Analysis Prior 提升分析价值。"
+summary: "以同一 Published Snapshot 和 Evidence Catalog 连接确定性 Facts、项目专属 Structured Signals、一次自主 AI Run、Section Interpretation 与预生成共享 Overview AI Artifact。"
 doc_type: decision
 tags: [Overview, Ngee Ann, AI Slot, DataFoundry, Evidence]
 updated_at: "2026-08-08"
@@ -339,3 +339,117 @@ Run 只向模型提供 Context、Pack 和模型完成调查所需的工具结果
 ## 13. 当前未决输入
 
 当前本地开发继续使用已配置 Workspace/用户模型完成真实 Provider 验证。客户正式环境发布前仍需确认发送字段范围及对应 Provider 的留存和处理地域；这项确认不触发通用治理平台建设，也不阻塞 Ngee Ann 本地 Charles 验收。
+
+## 14. 2026-08-08 AI-native 决策界面校准
+
+### 14.1 独立结论与替代范围
+
+本次独立复核后，接受以下产品目标：EnergyIQ 不是“Dashboard + 页面底部 AI Chat”，而是一个由同一可信上下文驱动的
+AI-native 决策界面。确定性计算、Structured Signals、AI Interpretation 和 UI Composition 分工如下：
+
+| 层 | 权威职责 | 不负责 |
+| --- | --- | --- |
+| Facts / Evidence | Metric、Comparison、Ranking、Threshold、Snapshot、Scope、Period、单位和 Evidence | 客户长文与开放式原因判断 |
+| Structured Signals | 项目专属、可测试的值得关注信号，包含事实引用、严重程度、Section 和限制 | 拼接完整 What/Why/Action 文章 |
+| AI Interpretation | 自主选择调查角度，解释重要性、提出假设、下一步和验证方式，并选择 0～N 个 Presentation Blocks | 改写官方 KPI、Snapshot、Signal 强度或 Evidence |
+| UI Composition | 把已接受的 Interpretation 放入对应 Section，并提供确定性 fallback、加载和局部失败状态 | 执行模型生成的 HTML、JavaScript 或 React |
+
+这一决定不新建第二套 Unified Model。现有 Published Snapshot 与 `AnalysisContextEvidenceCatalog` 是唯一可信上下文；
+Preschool 与 Ngee Ann 只新增项目专属 Structured Signal Adapter。原 5.2、7、9.1、11、12 中“AI 只作为独立页面级
+Slot”“不做持久/跨用户结果”的表述，被本节的窄范围共享 Artifact 决定替代；禁止通用 Scheduler、跨项目缓存和任意
+页面代码的停止项继续有效。
+
+### 14.2 单次 Run，多 Section 输出
+
+同一 `Project + Scope + Resource + Published Snapshot + Project Release + model Profile revision + output contract`
+只运行一次 AI。模型可以为不同模块返回不同表达，但不为每个模块重复调用：
+
+```ts
+type OverviewAiArtifact = {
+  sectionInterpretations: Array<{
+    sectionId: string;
+    signalRefs: string[];
+    takeaway: string;
+    importance: string;
+    action: string;
+    verify: string;
+    presentation: PresentationBlock[];
+  }>;
+  pageSynthesis: {
+    priorities: Array<{ sectionId?: string; signalRefs: string[]; takeaway: string }>;
+  };
+};
+```
+
+Agent 可以支持、挑战、合并或省略现有 Signal，也可以提出新的 Evidence-backed 发现。新发现属于已知模块时绑定稳定
+`sectionId`；跨模块发现进入 `page-synthesis`。Runtime 逐 Finding、逐 Section、逐 Presentation Block 验收；一个模块
+失败时只回退该模块的确定性 Signal，不连坐已经接受的 sibling。Page Synthesis 只能引用已接受的事实、Signal 或
+Interpretation。
+
+Preschool 首版稳定锚点为：
+
+- `overall-summary`；
+- `centre-benchmark`；
+- `operating-behaviour`；
+- `appliance-contribution`；
+- `planning-outlook`；
+- `page-synthesis`。
+
+锚点只规定内容可以放在哪里，不规定 Agent 必须调查哪些主题或必须输出多少内容。AI 可以组合任意数量的安全声明式
+Presentation Blocks，并标记 `primary` / `supporting`；系统不执行模型生成的 HTML、JavaScript、React、SQL 或任意
+前端代码。将来若复杂可视化确有价值，只在完整 AI Analyst 中另行评审隔离 iframe 实验区，不进入当前 MVP。
+
+### 14.3 页面生命周期与 fallback
+
+1. 确定性 Overview、Facts、图表和精简 Structured Signals 立即显示；
+2. Artifact 尚未完成时，顶部或对应模块显示轻量 `AI analysis is being prepared`，不阻塞整页；
+3. Artifact Available 后，Section Interpretation 原地进入对应模块，页面顶部只保留 0～3 条简洁全页 Synthesis；
+4. 不再同时展示一套长篇 deterministic DecisionSummary 和一套重复 AI Brief；
+5. 单个 Section 无效时局部回退，全部无效或 Provider 不可用时确定性页面保持完整；
+6. Saved Analysis 冻结并恢复当时已接受的 Interpretation、Presentation 和 Synthesis，不启动新 Run；旧版历史 Artifact
+   按原合同和布局读取，不追写、不迁移、不重新生成。
+
+### 14.4 新 Snapshot 后预生成共享 Artifact
+
+Overview AI 不再以“用户打开页面”作为主要启动条件。新 Data Snapshot 成为 Project 当前 Published Snapshot 后，系统为
+Project-level Current Overview 触发一次 AI materialization：
+
+```mermaid
+flowchart LR
+  A["New data accepted"] --> B["Publish current Snapshot"]
+  B --> C["Resolve deterministic Overview + Signals"]
+  C --> D["One AI Run"]
+  D --> E["Validate by Section / Finding / Block"]
+  E --> F["Persist shared Overview AI Artifact"]
+  F --> G["Authorized users read without a new model call"]
+```
+
+这不是固定夜间 Cron：虽然当前数据通常夜间更新，但触发条件是新 Published Snapshot，保证未来 API 在任意时间到数时仍
+正确。MVP 只预生成 Project-level Current Overview，不提前遍历 Centre、Level、Circuit、自定义 Period 或完整 AI Analyst
+问题。
+
+Artifact 在同一 Workspace/Project/Scope/Snapshot/Release/Profile/contract 下共享，但读取时仍重新检查 Membership 与
+Project 授权；不跨 Workspace、Project 或 Snapshot 复用。相同身份的普通页面 Refresh 直接恢复 Artifact；新 Snapshot
+创建新身份。旧 Snapshot Artifact 只在 History 中读取，不得和当前数字混用。
+
+后台对同一 Snapshot 只允许一个共享任务和有限重试。预生成仍失败时，用户打开页面不为每个用户创建新 Run；页面显示
+确定性 Overview 与明确状态，并提供受控 Retry。实现复用现有 Run、Session、validator 和 Metadata 持久化，不建设通用
+Scheduler、Cadence DSL、跨项目 Insight 平台或第二套 Agent Runtime。
+
+### 14.5 配置 fail-fast
+
+`SECRET_MASTER_KEY` 缺失或无法解密当前模型 Profile 属于启动配置错误，不应等到客户发起 AI Run 才暴露。受支持的启动
+入口必须在停旧进程前检查授权 Env；API readiness 在存在加密默认 Profile 时执行不泄露明文的 decryptability probe。
+配置错误使 AI capability not-ready，并向 UI 返回客户安全的配置状态；readiness 不调用外部 Provider，避免把网络波动变成
+整个 API 的健康失败。Provider 超时、网络失败和 Evidence rejection 仍是正常可降级的 AI unavailable，不承诺彻底消失。
+
+### 14.6 最小迁移顺序与停止项
+
+1. Preschool 服务端 Snapshot 产出项目专属 Structured Signals，删除浏览器 ViewModel 中的长篇决策模板 owner；
+2. Preschool 一次 Run 返回 Section Interpretations + Page Synthesis，并逐 Section 验收；
+3. Renderer 将 Interpretation 嵌入稳定 Section，保留 deterministic fallback、Saved/Resume 和旧 Artifact 兼容；
+4. 完成真实 Provider、1440/1920/tablet 和人工信息价值验收后，再把同一输出 Interface 适配 Ngee Ann；
+5. 新 Snapshot 预生成共享 Artifact 作为独立窄切片接入，不阻塞前三步首次客户可见结果。
+
+明确停止：不建立通用 Signal DSL、通用 Scheduler、所有 Scope 预跑、按用户重复分析、跨项目缓存、第二套 Evidence Catalog、
+第二套 Runtime、模型生成可执行页面代码，或为了预生成而放松 Snapshot/授权/Evidence 校验。
