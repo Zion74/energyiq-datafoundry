@@ -13,12 +13,22 @@ describe("Preschool Overview ViewModel", () => {
       projectName: "Preschool Portfolio",
       period: "1 May 2026–31 May 2026",
     });
-    expect(view.highlights.find((item) => item.id === "energy")?.value).toBe("24,921.81 kWh");
-    expect(view.highlights.find((item) => item.id === "off-hours")?.value).toBe("12.5%");
-    expect(view.highlights.find((item) => item.id === "cost")).toMatchObject({
-      label: "Estimated May cost",
-      value: "S$6,796.18",
-      available: true,
+    expect(view.overallSummary).toMatchObject({
+      periodLabel: "May 2026",
+      metrics: [
+        { id: "centres", label: "Total centres", value: "30", available: true },
+        { id: "energy", label: "Total energy · May 2026", value: "24,921.81 kWh", available: true },
+        { id: "cost", label: "Estimated total cost · May 2026", value: "S$6,796.18", available: true },
+      ],
+      centreTypes: [
+        { centreType: "Senior Care Center", centreCount: 14, energy: "11,637.00 kWh", estimatedCost: "S$3,173.41", share: "46.7%" },
+        { centreType: "Active Aging Center", centreCount: 8, energy: "6,642.40 kWh", estimatedCost: "S$1,811.38", share: "26.7%" },
+        { centreType: "Preschool", centreCount: 8, energy: "6,642.40 kWh", estimatedCost: "S$1,811.38", share: "26.7%" },
+      ],
+      costAssumption: {
+        rate: "S$0.2727/kWh before GST",
+        label: "SP Group Q2 2026 low-tension non-domestic reference",
+      },
     });
     expect(view.centres).toHaveLength(30);
     expect(view.centres[0]).toMatchObject({
@@ -148,35 +158,39 @@ describe("Preschool Overview ViewModel", () => {
     ]);
     expect(view.decisionSummary.items[0]).toMatchObject({
       priority: 1,
-      finding: "L · E · N need after-hours checks first.",
+      finding: "Centres L, E and N should be checked first for energy use after closing.",
       signal: {
-        label: "Outside published hours",
+        label: "Energy used after closing",
         value: 12.45,
         max: 100,
         valueLabel: "12.5%",
       },
-      what: "3,103.78 kWh fell outside published hours, with 7 Spikes across 3 Centres.",
+      what: "3,103.78 kWh was used when centres were scheduled to be closed. 7 unusual peaks were found across 3 centres.",
+      action: "Start with Centres L, E and N. Check which appliances were running after closing and confirm the centre opening hours are correct.",
+      verification: "After changes, compare after-hours energy in the next full month with May.",
       evidenceLabel: "preschool-hour-slot-spike-v1 · preschool-after-hours-sop-signal-v1",
     });
     expect(view.decisionSummary.items[1]).toMatchObject({
       priority: 2,
-      finding: "G · M · J need metadata and Appliance review first.",
+      finding: "Centres G, M and J use more energy than expected for both their floor area and number of people.",
       signal: {
-        label: "Above both Portfolio P75 lines",
+        label: "High for both size and headcount",
         value: 3,
         max: 30,
         valueLabel: "3 / 30",
       },
+      why: "They still rank high after allowing for size and headcount, so they are less likely to look high only because they are larger centres.",
     });
     expect(view.decisionSummary.items[2]).toMatchObject({
       priority: 3,
-      finding: "14 Centres need operating-hour event review.",
+      finding: "14 centres had unusual energy peaks during opening hours.",
       signal: {
-        label: "Centres with operating Spikes",
+        label: "Centres with unusual peaks",
         value: 14,
         max: 30,
         valueLabel: "14 / 30",
       },
+      action: "Review the largest peaks first and ask centre staff what was happening at those times.",
       evidenceLabel: "preschool-hour-slot-spike-v1",
     });
     expect(view.decisionSummary.items.every((item) => (

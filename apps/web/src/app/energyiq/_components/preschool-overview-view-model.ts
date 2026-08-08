@@ -73,13 +73,27 @@ export type PreschoolOverviewViewModel = {
     intervals: string;
     qualityEvents: string;
   };
-  highlights: Array<{
-    id: "energy" | "daily" | "centres" | "off-hours" | "cost";
-    label: string;
-    value: string;
-    detail: string;
-    available: boolean;
-  }>;
+  overallSummary: {
+    periodLabel: string;
+    metrics: Array<{
+      id: "centres" | "energy" | "cost";
+      label: string;
+      value: string;
+      available: boolean;
+    }>;
+    centreTypes: Array<{
+      centreType: string;
+      centreCount: number;
+      energy: string;
+      estimatedCost: string;
+      share: string;
+    }>;
+    costAssumption: {
+      rate: string;
+      label: string;
+      sourceUrl: string;
+    } | null;
+  };
   decisionSummary: {
     items: PreschoolDecisionSummaryItem[];
     detail: string;
@@ -293,6 +307,32 @@ export function buildPreschoolOverviewViewModel(
       : "confirmed";
   const queryIds = [...new Set(snapshot.evidence.flatMap((item) => item.queryIds))];
   const decisionSummary = buildPreschoolDecisionSummary(snapshot);
+  const periodLabel = formatMonthYear(snapshot.context.from, snapshot.context.timezone);
+  const planningReference = snapshot.preschoolOperational?.status === "available"
+    && snapshot.preschoolOperational.planningOutlook.status === "provisional"
+    ? snapshot.preschoolOperational.planningOutlook
+    : null;
+  const provisionalRate = planningReference?.tariffReference.beforeGstSgdPerKwh ?? null;
+  const estimatedCost = analysis.cost.status === "available"
+    ? `${currencySymbol(analysis.cost.currency)}${formatNumber(analysis.cost.amount, 2)}`
+    : planningReference
+      ? `S$${formatNumber(planningReference.costEstimate.currentPeriodBeforeGstSgd, 2)}`
+      : "Unavailable";
+  const centreTypeOrder = ["Senior Care Center", "Active Aging Center", "Preschool"];
+  const centreTypes = centreTypeOrder.flatMap((centreType) => {
+    const rows = centres.filter((centre) => centre.cohort === centreType);
+    if (rows.length === 0) return [];
+    const usageKwh = rows.reduce((sum, centre) => sum + centre.usageKwhValue, 0);
+    return [{
+      centreType,
+      centreCount: rows.length,
+      energy: `${formatNumber(usageKwh, 2)} kWh`,
+      estimatedCost: provisionalRate === null
+        ? "Unavailable"
+        : `S$${formatNumber(usageKwh * provisionalRate, 2)}`,
+      share: `${formatNumber((usageKwh / analysis.summary.usageKwh) * 100, 1)}%`,
+    }];
+  });
 
   return {
     context: {
@@ -312,68 +352,37 @@ export function buildPreschoolOverviewViewModel(
       intervals: `${formatNumber(snapshot.dataQuality.validIntervalCount, 0)} / ${formatNumber(snapshot.dataQuality.expectedMeterIntervalCount, 0)} intervals`,
       qualityEvents: `${formatNumber(snapshot.dataQuality.qualityEventCount, 0)} quality events`,
     },
-    highlights: [
-      {
-        id: "energy",
-        label: "Portfolio energy",
-        value: `${formatNumber(analysis.summary.usageKwh, 2)} kWh`,
-        detail: "Published Portfolio total for this Snapshot.",
-        available: true,
-      },
-      {
-        id: "daily",
-        label: "Daily average",
-        value: `${formatNumber(analysis.summary.averageDailyUsageKwh, 2)} kWh/day`,
-        detail: "Average across the selected reporting window.",
-        available: true,
-      },
-      {
-        id: "centres",
-        label: "Centres compared",
-        value: formatNumber(centres.length, 0),
-        detail: "Centre rows returned by the authoritative Project analysis.",
-        available: centres.length > 0,
-      },
-      analysis.offHours.status === "available"
+    overallSummary: {
+      periodLabel,
+      metrics: [
+        {
+          id: "centres",
+          label: "Total centres",
+          value: formatNumber(centres.length, 0),
+          available: centres.length > 0,
+        },
+        {
+          id: "energy",
+          label: `Total energy · ${periodLabel}`,
+          value: `${formatNumber(analysis.summary.usageKwh, 2)} kWh`,
+          available: true,
+        },
+        {
+          id: "cost",
+          label: `Estimated total cost · ${periodLabel}`,
+          value: estimatedCost,
+          available: estimatedCost !== "Unavailable",
+        },
+      ],
+      centreTypes,
+      costAssumption: planningReference
         ? {
-            id: "off-hours",
-            label: "Standby / off-hours",
-            value: `${formatNumber(analysis.offHours.sharePct, 1)}%`,
-            detail: `${formatNumber(analysis.offHours.standbyKwh, 2)} kWh outside published operating hours.`,
-            available: true,
+            rate: `S$${formatNumber(planningReference.tariffReference.beforeGstSgdPerKwh, 4)}/kWh before GST`,
+            label: "SP Group Q2 2026 low-tension non-domestic reference",
+            sourceUrl: planningReference.tariffReference.sourceUrl,
           }
-        : {
-            id: "off-hours",
-            label: "Standby / off-hours",
-            value: "Unavailable",
-            detail: analysis.offHours.reason.message,
-            available: false,
-          },
-      analysis.cost.status === "available"
-        ? {
-            id: "cost",
-            label: "Estimated cost",
-            value: `${currencySymbol(analysis.cost.currency)}${formatNumber(analysis.cost.amount, 2)}`,
-            detail: `Tariff ${analysis.cost.tariffScheduleVersion}.`,
-            available: true,
-          }
-        : snapshot.preschoolOperational?.status === "available"
-          && snapshot.preschoolOperational.planningOutlook.status === "provisional"
-          ? {
-              id: "cost",
-              label: "Estimated May cost",
-              value: `S$${formatNumber(snapshot.preschoolOperational.planningOutlook.costEstimate.currentPeriodBeforeGstSgd, 2)}`,
-              detail: "Provisional SP low-tension non-domestic reference before GST; not the customer bill.",
-              available: true,
-            }
-          : {
-              id: "cost",
-              label: "Estimated cost",
-              value: "Unavailable",
-              detail: analysis.cost.reason.message,
-              available: false,
-            },
-    ],
+        : null,
+    },
     decisionSummary,
     planningOutlook: snapshot.preschoolOperational?.status === "available"
       && snapshot.preschoolOperational.planningOutlook.status === "provisional"
@@ -642,48 +651,50 @@ function buildPreschoolDecisionSummary(
     && operational.spikes.standby.count > 0
     && operational.sop.breachingCentreCodes.length > 0
   ) {
+    const centreNames = formatCentreCodes(operational.sop.breachingCentreCodes);
     candidates.push({
       id: "after-hours",
-      label: "After-hours energy",
-      finding: `${operational.sop.breachingCentreCodes.join(" · ")} need after-hours checks first.`,
+      label: "Energy after closing",
+      finding: `Centres ${centreNames} should be checked first for energy use after closing.`,
       signal: {
-        label: "Outside published hours",
+        label: "Energy used after closing",
         value: operational.energy.standbySharePct,
         max: 100,
         valueLabel: `${formatNumber(operational.energy.standbySharePct, 1)}%`,
-        referenceLabel: "of Portfolio energy",
+        referenceLabel: "of total energy",
       },
-      what: `${formatNumber(operational.energy.standbyKwh, 2)} kWh fell outside published hours, with ${formatNumber(operational.spikes.standby.count, 0)} Spikes across ${formatNumber(operational.spikes.standby.centreCount, 0)} Centres.`,
-      why: "Closed-hour load can persist without appearing in operating-hour checks.",
-      action: `Check the worst time and leading Appliance at ${operational.sop.breachingCentreCodes.join(" · ")}; confirm the Calendar and local SOP.`,
-      ifActed: "The review can separate Calendar errors, legitimate activity and controllable load.",
-      ifIgnored: "The same closed-hour load may recur; avoidable savings are not yet proven.",
-      verification: "Next complete period: compare standby kWh and same-hour Spike count.",
-      limitation: "Meter data cannot confirm why equipment was on; Calendar and site checks are required.",
+      what: `${formatNumber(operational.energy.standbyKwh, 2)} kWh was used when centres were scheduled to be closed. ${formatNumber(operational.spikes.standby.count, 0)} unusual peaks were found across ${formatNumber(operational.spikes.standby.centreCount, 0)} centres.`,
+      why: "Electricity used after closing may be avoidable, but staff schedules and centre activities must be checked first.",
+      action: `Start with Centres ${centreNames}. Check which appliances were running after closing and confirm the centre opening hours are correct.`,
+      ifActed: "This will separate normal after-hours activity from equipment that can be switched off or rescheduled.",
+      ifIgnored: "The same after-hours use may continue each month, but the possible saving is not yet confirmed.",
+      verification: "After changes, compare after-hours energy in the next full month with May.",
+      limitation: "Meter data shows when energy was used, but not why the equipment was running.",
       evidenceLabel: operational.evidence.projectionRecipeIds.join(" · "),
     });
   }
 
   const benchmark = snapshot.preschoolBenchmark;
   if (benchmark && benchmark.priorityCentreCodes.length > 0 && benchmark.sampleSize > 0) {
+    const centreNames = formatCentreCodes(benchmark.priorityCentreCodes);
     candidates.push({
       id: "efficiency",
-      label: "Efficiency review",
-      finding: `${benchmark.priorityCentreCodes.join(" · ")} need metadata and Appliance review first.`,
+      label: "High energy use",
+      finding: `Centres ${centreNames} use more energy than expected for both their floor area and number of people.`,
       signal: {
-        label: "Above both Portfolio P75 lines",
+        label: "High for both size and headcount",
         value: benchmark.priorityCentreCodes.length,
         max: benchmark.sampleSize,
         valueLabel: `${benchmark.priorityCentreCodes.length} / ${benchmark.sampleSize}`,
-        referenceLabel: "Centres",
+        referenceLabel: "centres",
       },
-      what: "Each sits above Portfolio P75 for both annualised EUI and May energy per person.",
-      why: "Two normalisations point to the same Centres, reducing size-only bias.",
-      action: "Confirm area and headcount, then compare cohort position and leading Appliances.",
-      ifActed: "The review can separate building intensity, occupancy and Appliance priorities.",
-      ifIgnored: "Priorities remain based on provisional metadata and may misclassify efficiency.",
-      verification: "Next complete period: compare the same metrics against the same cohort after metadata confirmation and action.",
-      limitation: "Area and headcount are provisional; this is a review priority, not confirmed inefficiency.",
+      what: "All three are among the highest 25% of centres for both energy per square metre and energy per person.",
+      why: "They still rank high after allowing for size and headcount, so they are less likely to look high only because they are larger centres.",
+      action: `Confirm the floor area and headcount for Centres ${centreNames}, then check which appliances use the most energy.`,
+      ifActed: "This will show whether the priority comes from incorrect information, unusually intensive use, or a specific appliance.",
+      ifIgnored: "Incorrect floor area or headcount could keep the wrong centres at the top of the list.",
+      verification: "Next month, compare energy per square metre and per person again with centres of the same type.",
+      limitation: "Floor area and headcount are provisional, so this is a check priority, not proof of poor efficiency.",
       evidenceLabel: benchmark.evidence.projectionRecipeIds.join(" · "),
     });
   }
@@ -691,22 +702,22 @@ function buildPreschoolDecisionSummary(
   if (operational && operational.spikes.operating.count > 0 && snapshot.analysis.childScopes.length > 0) {
     candidates.push({
       id: "operating",
-      label: "Operating exceptions",
-      finding: `${formatNumber(operational.spikes.operating.centreCount, 0)} Centres need operating-hour event review.`,
+      label: "Unusual peaks",
+      finding: `${formatNumber(operational.spikes.operating.centreCount, 0)} centres had unusual energy peaks during opening hours.`,
       signal: {
-        label: "Centres with operating Spikes",
+        label: "Centres with unusual peaks",
         value: operational.spikes.operating.centreCount,
         max: snapshot.analysis.childScopes.length,
         valueLabel: `${operational.spikes.operating.centreCount} / ${snapshot.analysis.childScopes.length}`,
-        referenceLabel: "Portfolio Centres",
+        referenceLabel: "centres",
       },
-      what: `${formatNumber(operational.spikes.operating.count, 0)} events exceeded each Centre's same-hour baseline during operating hours.`,
-      why: "Repeated unexplained events justify checking for overrides or process drift; scheduled activity may also explain them.",
-      action: "Start with the highest-variance events; record the operator explanation, time, baseline and leading Appliance.",
-      ifActed: "Explained events can be closed; repeated unexplained events become targeted action candidates.",
-      ifIgnored: "Recurring exceptions remain mixed with legitimate activity, weakening future priorities.",
-      verification: "Next complete period: retain only repeated events without an operational explanation.",
-      limitation: "Meter data alone cannot distinguish an override from legitimate activity.",
+      what: `${formatNumber(operational.spikes.operating.count, 0)} times, a centre used more energy than its normal level for the same hour while open.`,
+      why: "Some peaks may come from planned activities. Peaks that repeat without an explanation can point to equipment or operating changes.",
+      action: "Review the largest peaks first and ask centre staff what was happening at those times.",
+      ifActed: "Normal activities can be closed out, while repeated unexplained peaks can become targeted actions.",
+      ifIgnored: "The same peaks may happen again without anyone knowing whether they are normal or avoidable.",
+      verification: "Next month, check whether the same unexplained peaks happen again.",
+      limitation: "Meter data cannot tell whether a peak came from an override, equipment fault, or legitimate activity.",
       evidenceLabel: operational.evidence.projectionRecipeIds[0],
     });
   }
@@ -770,6 +781,21 @@ function formatPeriod(from: string, toExclusive: string, timeZone: string): stri
     timeZone,
   });
   return `${formatter.format(new Date(from))}–${formatter.format(new Date(Date.parse(toExclusive) - 1))}`;
+}
+
+function formatMonthYear(from: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-SG", {
+    month: "long",
+    year: "numeric",
+    timeZone,
+  }).format(new Date(from));
+}
+
+function formatCentreCodes(codes: string[]): string {
+  if (codes.length === 0) return "";
+  if (codes.length === 1) return codes[0]!;
+  if (codes.length === 2) return `${codes[0]} and ${codes[1]}`;
+  return `${codes.slice(0, -1).join(", ")} and ${codes[codes.length - 1]}`;
 }
 
 function formatNumber(value: number, maximumFractionDigits: number): string {

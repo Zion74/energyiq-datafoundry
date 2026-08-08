@@ -131,19 +131,80 @@ export function PreschoolOverviewRenderer({
         </div>
       )}
 
-      <div className="grid divide-y divide-border border-b border-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-5">
-        {view.highlights.map((highlight) => (
-          <div key={highlight.id} className="min-w-0 px-5 py-4">
-            <p className="text-xs font-semibold text-muted">{highlight.label}</p>
-            <p className={`mt-2 text-2xl font-semibold tabular-nums ${highlight.available ? "text-foreground" : "text-muted"}`}>{highlight.value}</p>
-            <p className="mt-2 text-xs leading-5 text-muted">{highlight.detail}</p>
+      <section
+        id="preschool-overall-summary"
+        aria-labelledby="preschool-overall-summary-heading"
+        className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8"
+      >
+        <h3 id="preschool-overall-summary-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">
+          Overall consumption summary
+        </h3>
+
+        <div className="mt-4 grid overflow-hidden rounded-xl bg-[linear-gradient(125deg,var(--color-foreground),color-mix(in_srgb,var(--color-primary)_58%,var(--color-foreground)))] text-background sm:grid-cols-3">
+          {view.overallSummary.metrics.map((metric) => (
+            <div
+              key={metric.id}
+              data-overall-summary-metric={metric.id}
+              className="min-w-0 border-white/15 px-5 py-5 first:border-0 sm:border-l lg:px-6"
+            >
+              <p className="text-sm font-semibold text-white/75">{metric.label}</p>
+              <p className={`mt-2 text-2xl font-semibold tabular-nums tracking-[-0.02em] lg:text-3xl ${metric.available ? "text-white" : "text-white/60"}`}>
+                {metric.value}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-6">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h4 className="text-base font-semibold text-foreground">Energy &amp; cost by centre type</h4>
+            <span className="text-sm text-muted">{view.overallSummary.periodLabel}</span>
           </div>
-        ))}
-      </div>
+          <div className="mt-3 overflow-x-auto rounded-lg border border-border">
+            <table className="w-full min-w-[680px] border-collapse text-left text-sm">
+              <thead className="bg-surface-subtle text-xs font-semibold text-muted">
+                <tr>
+                  <th scope="col" className="px-4 py-3">Centre type</th>
+                  <th scope="col" className="px-4 py-3 text-right">Centres</th>
+                  <th scope="col" className="px-4 py-3 text-right">Energy</th>
+                  <th scope="col" className="px-4 py-3 text-right">Estimated cost</th>
+                  <th scope="col" className="px-4 py-3 text-right">Share</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {view.overallSummary.centreTypes.map((row) => (
+                  <tr key={row.centreType}>
+                    <th scope="row" className="px-4 py-3 font-semibold text-foreground">{row.centreType}</th>
+                    <td className="px-4 py-3 text-right tabular-nums text-foreground">{row.centreCount}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-foreground">{row.energy}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-foreground">{row.estimatedCost}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-foreground">{row.share}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {view.overallSummary.costAssumption ? (
+            <p className="mt-3 rounded-lg border border-step-warning/30 bg-step-warning-soft px-4 py-3 text-sm leading-6 text-foreground">
+              <strong className="font-semibold">Cost estimate:</strong>{" "}
+              {view.overallSummary.costAssumption.rate} using the{" "}
+              <a
+                href={view.overallSummary.costAssumption.sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="font-semibold underline decoration-border underline-offset-2 hover:decoration-foreground"
+              >
+                {view.overallSummary.costAssumption.label}
+              </a>
+              . This is a planning estimate, not the customer bill.
+            </p>
+          ) : null}
+        </div>
+      </section>
 
       <section id="preschool-decision-summary" aria-labelledby="preschool-decision-summary-heading" className="scroll-mt-28 border-b border-border bg-surface-subtle/45 px-5 py-7 lg:px-7 lg:py-8">
         <div>
-          <h3 id="preschool-decision-summary-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Takeaways and next decisions</h3>
+          <h3 id="preschool-decision-summary-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Key findings and next steps</h3>
         </div>
         {view.decisionSummary.items.length > 0 ? (
           <div className="mt-4 space-y-3">
@@ -532,19 +593,19 @@ function DecisionSummaryCard({ item }: { item: PreschoolDecisionSummaryItem }) {
         </div>
         <dl className="grid min-w-0 gap-x-8 gap-y-4 text-sm leading-6 sm:grid-cols-2">
           <DecisionField label="Why it matters" value={item.why} />
-          <DecisionField label="Do next" value={item.action} />
-          <DecisionField label="Verify with" value={item.verification} className="sm:col-span-2" />
+          <DecisionField label="What to do next" value={item.action} />
+          <DecisionField label="How to check the result" value={item.verification} className="sm:col-span-2" />
         </dl>
       </div>
       <details className="mt-5 border-t border-border/80 pt-4">
         <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
-          Expected outcome, evidence and limits
+          More detail and evidence
         </summary>
         <dl className="mt-4 grid gap-x-8 gap-y-4 text-sm leading-6 sm:grid-cols-2">
           <DecisionField label="What the data shows" value={item.what} />
-          <DecisionField label="If acted on" value={item.ifActed} />
-          <DecisionField label="If ignored" value={item.ifIgnored} />
-          <DecisionField label="Limitation" value={item.limitation} />
+          <DecisionField label="Expected result" value={item.ifActed} />
+          <DecisionField label="If no action is taken" value={item.ifIgnored} />
+          <DecisionField label="What we cannot confirm" value={item.limitation} />
         </dl>
       </details>
       <PreschoolEvidenceLink label="View supporting evidence" />
