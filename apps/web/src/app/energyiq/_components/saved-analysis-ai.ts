@@ -28,14 +28,8 @@ export async function runSavedAnalysisAiForSnapshot(
   }
 
   if (snapshot.renderer.key === "preschool-overview") {
-    const [{ buildPreschoolOverviewViewModel }, { buildPreschoolAiRunInput, getOrStartPreschoolAiRun }] = await Promise.all([
-      import("./preschool-overview-view-model"),
-      import("./preschool-ai-run"),
-    ]);
-    const input = buildPreschoolAiRunInput(
-      snapshot,
-      buildPreschoolOverviewViewModel(snapshot).decisionSummary,
-    );
+    const { buildPreschoolAiRunInput, getOrStartPreschoolAiRun } = await import("./preschool-ai-run");
+    const input = buildPreschoolAiRunInput(snapshot);
     if (!input) return null;
     const result = await getOrStartPreschoolAiRun(input);
     if (result.status !== "available") return null;
