@@ -687,8 +687,8 @@ Trace、临时阈值和 Preschool appliance alias 也不作为通用 Pattern。
 2. 只匹配 `applicability` 已满足的 Pattern Card；不让模型猜 Meter Mapping 或业务层级；
 3. 用现有 Metric/Rule/Component Catalog、Project Recipe/ViewModel 和 Analysis Pack 组合项目专属 Overview；
 4. 缺少输入的角度显示 unavailable 或不启用，不用 Mock 数据冒充；
-5. 经过真实数据与人工价值验收后，把 Card 从 `candidate` 提升；
-6. 只有同一角度在至少两个项目都证明有价值且实现重复时，才考虑抽取代码 Module/Interface。
+5. 经过真实数据与人工价值验收后，把 Card 从 `candidate` 提升；同一角度在至少两个项目证明有价值后，可以先提升为知识层面的 `reusable`；
+6. 代码 Module/Interface 的抽取仍遵守 Parent Spec：至少等第三个真实 Renderer 再确认实现是否稳定重复，不能因两个 Demo 相似就提前平台化。
 
 因此通用化的顺序是：
 
