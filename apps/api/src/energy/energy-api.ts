@@ -35,7 +35,12 @@ import type { IncomingMessage } from "node:http";
 import type { ConfigApiContext, ConfigApiResponse } from "../routes/types.js";
 import { AuthError } from "../auth/service.js";
 import { readMultipartUpload } from "../upload-parser.js";
-import { executeEnergyScopeAnalysisWithLatestAvailable, type EnergyScopeAnalysis } from "./energy-analysis.js";
+import {
+  executeEnergyScopeAnalysisWithLatestAvailable,
+  selectEnergyLatestAvailableDay,
+  selectEnergyLatestCompleteDay,
+  type EnergyScopeAnalysis,
+} from "./energy-analysis.js";
 import { inspectEnergyExcelWorkbook } from "./energy-excel-import.js";
 import {
   ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION,
@@ -54,6 +59,10 @@ import {
   type EnergyPeriod,
   type EnergyQueryContextRequest
 } from "./energy-query-context.js";
+
+const EXPLORER_ANALYSIS_CACHE_LIMIT = 100;
+const explorerAnalysisCache = new Map<string, EnergyScopeAnalysis>();
+const explorerLatestDayCache = new Map<string, string>();
 
 export const handleEnergyApiRequest = async (
   request: IncomingMessage,
@@ -695,20 +704,121 @@ export const handleEnergyApiRequest = async (
     }
     if (segments[0] === "analysis" && segments[1] === "execute" && request.method === "POST") {
       const body = await readJsonBody(request);
-      const energyContext = resolvePublishedEnergyQueryContext({
+      const query = parseQueryContextRequest(body);
+      const explorerLatestDay = isRecord(body)
+        && body.surface === "project-explorer"
+        && query.analysisWindow === "latest-complete-day";
+      const preliminaryRun = resolvePublishedEnergyQueryContext({
         metadataStore: context.metadataStore,
         user,
         workspaceId: context.workspaceId,
-        request: parseQueryContextRequest(body)
-      }).context;
-      return {
-        status: 200,
-        body: createSuccessResult(await executeEnergyScopeAnalysisWithLatestAvailable({
+        request: explorerLatestDay
+          ? { ...query, scopeId: "project", period: "Last 30 days" }
+          : query,
+      });
+      const explorerLatestDayCacheKey = explorerLatestDay
+        ? JSON.stringify({
+            userId: context.userId,
+            workspaceId: preliminaryRun.context.workspaceId,
+            projectId: preliminaryRun.context.projectId,
+            resource: preliminaryRun.context.resource,
+            dataSnapshotId: preliminaryRun.context.dataSnapshotId,
+            hierarchyRevisionId: preliminaryRun.context.hierarchyRevisionId,
+            meterMappingRevisionId: preliminaryRun.context.meterMappingRevisionId,
+            meterFormulaRevisionId: preliminaryRun.context.meterFormulaRevisionId,
+            metricVersion: preliminaryRun.context.metricVersion,
+            businessCalendarVersion: preliminaryRun.context.businessCalendarVersion,
+            tariffScheduleVersion: preliminaryRun.context.tariffScheduleVersion,
+            projectReleaseId: preliminaryRun.projectRelease?.id ?? null,
+          })
+        : null;
+      const cachedLatestDay = explorerLatestDayCacheKey
+        ? explorerLatestDayCache.get(explorerLatestDayCacheKey)
+        : undefined;
+      const latestDayLocalFrom = cachedLatestDay ?? (explorerLatestDay
+        ? (await selectEnergyLatestCompleteDay({
+            metadataStore: context.metadataStore,
+            dataGateway: context.dataGateway,
+            userId: context.userId,
+            context: preliminaryRun.context,
+          }).catch(async (error: unknown) => {
+            if (!(error instanceof Error) || error.message !== "ENERGYIQ_LATEST_COMPLETE_DAY_NOT_FOUND") {
+              throw error;
+            }
+            return await selectEnergyLatestAvailableDay({
+              metadataStore: context.metadataStore,
+              dataGateway: context.dataGateway,
+              userId: context.userId,
+              context: preliminaryRun.context,
+            });
+          })).period.localFrom
+        : null);
+      if (explorerLatestDayCacheKey && latestDayLocalFrom && !cachedLatestDay) {
+        explorerLatestDayCache.set(explorerLatestDayCacheKey, latestDayLocalFrom);
+        while (explorerLatestDayCache.size > EXPLORER_ANALYSIS_CACHE_LIMIT) {
+          const oldestKey = explorerLatestDayCache.keys().next().value as string | undefined;
+          if (!oldestKey) break;
+          explorerLatestDayCache.delete(oldestKey);
+        }
+      }
+      const energyContext = explorerLatestDay
+        ? resolvePublishedEnergyQueryContext({
+            metadataStore: context.metadataStore,
+            user,
+            workspaceId: context.workspaceId,
+            request: {
+              ...query,
+              period: "Custom",
+              from: latestDayLocalFrom!,
+              to: latestDayLocalFrom!,
+            },
+          }).context
+        : preliminaryRun.context;
+      const useExplorerCache = isRecord(body)
+        && body.surface === "project-explorer"
+        && body.bypassCache !== true;
+      const explorerCacheKey = useExplorerCache
+        ? JSON.stringify({
+            userId: context.userId,
+            workspaceId: energyContext.workspaceId,
+            projectId: energyContext.projectId,
+            scopeId: energyContext.scopeId,
+            resource: energyContext.resource,
+            from: energyContext.from,
+            to: energyContext.to,
+            dataSnapshotId: energyContext.dataSnapshotId,
+            hierarchyRevisionId: energyContext.hierarchyRevisionId,
+            meterMappingRevisionId: energyContext.meterMappingRevisionId,
+            meterFormulaRevisionId: energyContext.meterFormulaRevisionId,
+            metricVersion: energyContext.metricVersion,
+            businessCalendarVersion: energyContext.businessCalendarVersion,
+            tariffScheduleVersion: energyContext.tariffScheduleVersion,
+            projectReleaseId: preliminaryRun.projectRelease?.id ?? null,
+          })
+        : null;
+      const cachedExplorerAnalysis = explorerCacheKey
+        ? explorerAnalysisCache.get(explorerCacheKey)
+        : undefined;
+      const analysis = cachedExplorerAnalysis ?? await executeEnergyScopeAnalysisWithLatestAvailable({
           metadataStore: context.metadataStore,
           dataGateway: context.dataGateway,
           userId: context.userId,
-          context: energyContext
-        }))
+          context: energyContext,
+          ...(isRecord(body) && body.surface === "project-explorer"
+            ? { profile: "explorer" as const }
+            : {}),
+        });
+      if (explorerCacheKey && !cachedExplorerAnalysis) {
+        explorerAnalysisCache.set(explorerCacheKey, analysis);
+        while (explorerAnalysisCache.size > EXPLORER_ANALYSIS_CACHE_LIMIT) {
+          const oldestKey = explorerAnalysisCache.keys().next().value as string | undefined;
+          if (!oldestKey) break;
+          explorerAnalysisCache.delete(oldestKey);
+        }
+      }
+      return {
+        status: 200,
+        body: createSuccessResult(analysis)
       };
     }
     if (segments[0] === "analysis" && segments[1] === "resolve" && request.method === "POST") {
@@ -1317,6 +1427,7 @@ const parseQueryContextRequest = (value: unknown): EnergyQueryContextRequest => 
     throw new Error("ENERGYIQ_PERIOD_INVALID");
   }
   if (value.analysisWindow !== undefined
+    && value.analysisWindow !== "latest-complete-day"
     && value.analysisWindow !== "latest-complete-7d"
     && value.analysisWindow !== "current-overview-28d") {
     throw new Error("ENERGYIQ_ANALYSIS_WINDOW_INVALID");
@@ -1331,7 +1442,9 @@ const parseQueryContextRequest = (value: unknown): EnergyQueryContextRequest => 
     period,
     ...(typeof value.from === "string" ? { from: value.from } : {}),
     ...(typeof value.to === "string" ? { to: value.to } : {}),
-    ...(value.analysisWindow === "latest-complete-7d" || value.analysisWindow === "current-overview-28d"
+    ...(value.analysisWindow === "latest-complete-day"
+      || value.analysisWindow === "latest-complete-7d"
+      || value.analysisWindow === "current-overview-28d"
       ? { analysisWindow: value.analysisWindow }
       : {}),
     ...(typeof value.expectedDataSnapshotId === "string"

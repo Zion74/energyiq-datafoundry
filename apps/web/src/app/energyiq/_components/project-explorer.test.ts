@@ -7,6 +7,8 @@ import {
   explorerCurrentFactsUrl,
   explorerChildScopeHealth,
   explorerLatestReadingPresentation,
+  explorerSelectedPeriodAverage,
+  explorerSnapshotHealthMap,
   explorerTrendSeries,
   explorerUrlWithView,
   explorerViewStateFromSearchParams,
@@ -16,6 +18,18 @@ import {
 } from "./project-explorer";
 
 describe("Project Explorer trusted view state", () => {
+  it("defaults an unpinned Explorer visit to the Project latest complete day", () => {
+    const view = explorerViewStateFromSearchParams(new URLSearchParams("projectId=preschool-demo"));
+
+    expect(view.period).toBe("Latest complete day");
+    expect(buildExplorerAnalysisRequest(view)).toMatchObject({
+      projectId: "preschool-demo",
+      period: "Custom",
+      analysisWindow: "latest-complete-day",
+      surface: "project-explorer",
+    });
+  });
+
   it("uses the Project timezone for inclusive Custom dates", () => {
     expect(formatDateInput("2026-06-09T16:00:00.000Z", "Asia/Singapore")).toBe("2026-06-10");
     expect(formatDateInput("2026-06-16T15:59:59.999Z", "Asia/Singapore")).toBe("2026-06-16");
@@ -47,6 +61,7 @@ describe("Project Explorer trusted view state", () => {
       to: "2026-06-16",
       expectedDataSnapshotId: "snapshot-a",
       expectedProjectReleaseId: "release-a",
+      surface: "project-explorer",
     });
   });
 
@@ -221,6 +236,17 @@ describe("Project Explorer trusted view state", () => {
     }]);
   });
 
+  it("uses only complete selected-Scope buckets for its own average line", () => {
+    expect(explorerSelectedPeriodAverage([
+      { date: "2026-06-14", usageKwh: 12, coveragePct: 100 },
+      { date: "2026-06-15", usageKwh: 999, coveragePct: 80 },
+      { date: "2026-06-16", usageKwh: 18, coveragePct: 100 },
+    ], "daily")).toBe(15);
+    expect(explorerSelectedPeriodAverage([
+      { date: "2026-06-01", usageKwh: 30, coveragePct: 100 },
+    ], "weekly")).toBeNull();
+  });
+
   it("summarises child Scope health without treating valid zero usage as missing", () => {
     const analysis = analysisFixture({
       usageKwh: 30,
@@ -247,6 +273,28 @@ describe("Project Explorer trusted view state", () => {
         { nodeId: "partial", status: "review" },
         { nodeId: "flagged", status: "review" },
       ],
+    });
+  });
+
+  it("derives tree indicators from the published Snapshot result, not live connectivity", () => {
+    const analysis = analysisFixture({
+      usageKwh: 30,
+      validIntervalCount: 288,
+      expectedMeterIntervalCount: 288,
+      coveragePct: 100,
+      dailyRows: [],
+    });
+    analysis.childScopes = [
+      childScope("healthy", "Healthy", 12, 96, 100, 0),
+      childScope("partial", "Partial", 9, 80, 83.33, 0),
+      childScope("missing", "Missing", 0, 0, 0, 0),
+    ];
+
+    expect(explorerSnapshotHealthMap(analysis)).toMatchObject({
+      project: { status: "complete", label: "Complete Snapshot data" },
+      healthy: { status: "complete" },
+      partial: { status: "review" },
+      missing: { status: "unavailable" },
     });
   });
 });

@@ -23,6 +23,7 @@ import {
   evaluateEnergyAttention,
   executeEnergyScopeAnalysis,
   executeEnergyScopeAnalysisWithLatestAvailable,
+  selectEnergyLatestCompleteDay,
   selectEnergyCurrentOverviewPeriod,
   selectEnergyGoldenPeriod,
   selectEnergyLatestCompletePeriod,
@@ -1046,6 +1047,21 @@ describe("EnergyScopeAnalysis", () => {
         intervalMinutes: NGEE_ANN_GOLDEN.selection.intervalMinutes,
         period: NGEE_ANN_GOLDEN.selection.period,
       });
+      const latestCompleteDay = await selectEnergyLatestCompleteDay({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        context,
+        databasePath,
+      });
+      expect(latestCompleteDay).toMatchObject({
+        periodDays: 1,
+        intervalMinutes: NGEE_ANN_GOLDEN.selection.intervalMinutes,
+        period: {
+          localFrom: "2026-06-16",
+          localToExclusive: "2026-06-17",
+        },
+      });
       const currentOverview = await selectEnergyCurrentOverviewPeriod({
         metadataStore: metadata,
         dataGateway: gateway,
@@ -1080,6 +1096,27 @@ describe("EnergyScopeAnalysis", () => {
       const measuredRunQueryCount = readonlyQueryCount - queryCountBeforeMeasuredRun;
       const measuredRunSessionCount = snapshotReadSessionCount - sessionCountBeforeMeasuredRun;
       const measuredPayloadBytes = Buffer.byteLength(JSON.stringify(analysis));
+      const explorerQueryCountBefore = readonlyQueryCount;
+      const explorerAnalysis = await executeEnergyScopeAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        context,
+        databasePath,
+        profile: "explorer",
+      });
+      const explorerQueryCount = readonlyQueryCount - explorerQueryCountBefore;
+      expect(explorerQueryCount).toBeLessThan(measuredRunQueryCount);
+      expect(explorerAnalysis.dailyTotals?.scopes).toHaveLength(1);
+      expect(explorerAnalysis.timeBehaviour).toBeUndefined();
+      expect(explorerAnalysis.dailyUsageAnomalies).toBeUndefined();
+      expect(explorerAnalysis.peakBreakdown).toBeUndefined();
+      if (process.env.ENERGYIQ_OVERVIEW_PERFORMANCE === "1") {
+        console.info("ENERGYIQ_EXPLORER_PERFORMANCE", JSON.stringify({
+          readonlyQueryCount: explorerQueryCount,
+          payloadBytes: Buffer.byteLength(JSON.stringify(explorerAnalysis)),
+        }));
+      }
       const repeatedRunStartedAt = performance.now();
       const repeated = await run();
       const repeatedRunElapsedMs = performance.now() - repeatedRunStartedAt;

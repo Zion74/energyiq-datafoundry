@@ -972,7 +972,9 @@ export const executeEnergyScopeAnalysis = async (input: {
   ruleRevisions?: readonly EnergyIqRuleRevisionRecord[];
   includeTimeBehaviour?: boolean;
   includeMeterOperationalBreakdown?: boolean;
+  profile?: "full" | "explorer";
 }): Promise<EnergyScopeAnalysis> => {
+  const explorerProfile = input.profile === "explorer";
   const ruleRevisions = input.ruleRevisions
     ?? input.metadataStore.energyIq.rules.listRevisions()
       .filter((rule) => rule.requirement !== "historical_baseline");
@@ -1040,12 +1042,14 @@ export const executeEnergyScopeAnalysis = async (input: {
     },
     databasePath: scopedPrepared.databasePath
   });
-  const dailyUsageAnomalyPreparation = prepareDailyUsageAnomaly({
-    metadataStore: input.metadataStore,
-    context: input.context,
-    ...(input.projectReleaseId ? { projectReleaseId: input.projectReleaseId } : {}),
-    ruleRevisions,
-  });
+  const dailyUsageAnomalyPreparation: DailyUsageAnomalyPreparation = explorerProfile
+    ? { status: "absent" }
+    : prepareDailyUsageAnomaly({
+        metadataStore: input.metadataStore,
+        context: input.context,
+        ...(input.projectReleaseId ? { projectReleaseId: input.projectReleaseId } : {}),
+        ruleRevisions,
+      });
   const historicalScopedPrepared = dailyUsageAnomalyPreparation.status === "ready"
     ? await prepareEnergyScopedDataSource({
         metadataStore: input.metadataStore,
@@ -1106,7 +1110,7 @@ export const executeEnergyScopeAnalysis = async (input: {
   const aggregateMeterNodeIds = publishedMeterRoute.officialMeterPointIds ?? [];
   const aggregateMeterIds = new Set(aggregateMeterNodeIds);
   const aggregateMeters = meterAggregates.filter((meter) => aggregateMeterIds.has(meter.meterNodeId));
-  const dailyTotalScopes = resolveDailyTotalScopes({
+  const resolvedDailyTotalScopes = resolveDailyTotalScopes({
     metadataStore: input.metadataStore,
     projectId: input.context.projectId,
     hierarchyRevisionId: input.context.hierarchyRevisionId,
@@ -1117,6 +1121,9 @@ export const executeEnergyScopeAnalysis = async (input: {
     meterAggregates,
     aggregateMeterNodeIds,
   });
+  const dailyTotalScopes = explorerProfile
+    ? resolvedDailyTotalScopes.filter((scope) => scope.scopeId === selectedNode.id).slice(0, 1)
+    : resolvedDailyTotalScopes;
   const dailyDateBuckets = buildDailyDateBuckets(input.context);
   const dailyUsageAnomalyLoadInput = {
     metadataStore: input.metadataStore,
@@ -1162,7 +1169,7 @@ export const executeEnergyScopeAnalysis = async (input: {
       sql: dailyTotalsSql(scoped.viewName, dailyTotalScopes),
       limit: Math.max(1, dailyTotalScopes.length * dailyDateBuckets.length),
     }),
-    input.includeTimeBehaviour === false
+    explorerProfile || input.includeTimeBehaviour === false
       ? Promise.resolve(undefined)
       : input.dataGateway.runSqlReadonly({
           user_id: input.userId,
@@ -1188,13 +1195,15 @@ export const executeEnergyScopeAnalysis = async (input: {
     operationalScopeIntervalResult,
     operationalMeterIntervalResult,
   ] = await Promise.all([
-    input.dataGateway.runSqlReadonly({
-      user_id: input.userId,
-      workspace_id: input.context.workspaceId,
-      datasource_id: scoped.datasourceId,
-      sql: peakBreakdownSql(scoped.viewName, peakAtForBreakdown),
-      limit: 1000,
-    }),
+    explorerProfile
+      ? Promise.resolve(undefined)
+      : input.dataGateway.runSqlReadonly({
+          user_id: input.userId,
+          workspace_id: input.context.workspaceId,
+          datasource_id: scoped.datasourceId,
+          sql: peakBreakdownSql(scoped.viewName, peakAtForBreakdown),
+          limit: 1000,
+        }),
     input.dataGateway.runSqlReadonly({
       user_id: input.userId,
       workspace_id: input.context.workspaceId,
@@ -1202,7 +1211,7 @@ export const executeEnergyScopeAnalysis = async (input: {
       sql: operationalPolicyScopeIntervalsSql(scoped.viewName, aggregateMeterNodeIds),
       limit: 1,
     }),
-    input.includeMeterOperationalBreakdown === false
+    explorerProfile || input.includeMeterOperationalBreakdown === false
       ? Promise.resolve(undefined)
       : input.dataGateway.runSqlReadonly({
           user_id: input.userId,
@@ -1546,7 +1555,7 @@ export const executeEnergyScopeAnalysis = async (input: {
     ...(lastSeenAt ? { lastSeenAt } : {}),
     importBatchIds
   };
-  const peakBreakdown = selectedNode.node_type === "project"
+  const peakBreakdown = selectedNode.node_type === "project" && peakBreakdownResult
     ? buildPeakBreakdown({
         ...(peakAt ? { peakAt } : {}),
         peakKw,
@@ -1612,7 +1621,7 @@ export const executeEnergyScopeAnalysis = async (input: {
         "hourly_profile_v1",
         "daily_totals_v1",
         ...(timeBucketGridResult ? ["time_bucket_grid_v1" as const] : []),
-        "peak_breakdown_v1",
+        ...(peakBreakdownResult ? ["peak_breakdown_v1" as const] : []),
         "meter_breakdown_v1",
         "previous_meter_usage_v1",
         "operational_policy_scope_intervals_v1",
@@ -2757,6 +2766,83 @@ const buildCalendarTotals = (input: {
       weeks: aggregateDailyRowsByCalendarPeriod(selectedScope.rows, "week"),
       months: aggregateDailyRowsByCalendarPeriod(selectedScope.rows, "month"),
     }] : [],
+  };
+};
+
+export const selectEnergyLatestCompleteDay = async (
+  input: EnergyPeriodSelectionInput,
+): Promise<EnergyLatestCompleteDaySelection> => {
+  const { scoped, aggregateMeterNodeIds } = await prepareEnergyPeriodSelection(
+    input,
+    "ENERGYIQ_LATEST_COMPLETE_PERIOD_COVERAGE_NOT_FOUND",
+  );
+  const selected = await input.dataGateway.runSqlReadonly({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: scoped.datasourceId,
+    sql: latestCompletePeriodSelectionSql(
+      scoped.viewName,
+      aggregateMeterNodeIds,
+      1,
+      input.context.timezone,
+    ),
+    limit: 1,
+  });
+  const row = selected.rows[0];
+  if (!row) throw new Error("ENERGYIQ_LATEST_COMPLETE_DAY_NOT_FOUND");
+  return {
+    periodDays: 1,
+    status: "complete",
+    intervalMinutes: numberAt(row, 4),
+    period: {
+      localFrom: stringAt(row, 0),
+      localToExclusive: stringAt(row, 1),
+      from: isoAt(row, 2),
+      to: isoAt(row, 3),
+    },
+  };
+};
+
+export type EnergyLatestCompleteDaySelection = Omit<EnergyLatestCompletePeriodSelection, "periodDays"> & {
+  periodDays: 1;
+  status: "complete";
+};
+
+export type EnergyLatestAvailableDaySelection = Omit<EnergyLatestCompletePeriodSelection, "periodDays"> & {
+  periodDays: 1;
+  status: "partial";
+};
+
+export const selectEnergyLatestAvailableDay = async (
+  input: EnergyPeriodSelectionInput,
+): Promise<EnergyLatestAvailableDaySelection> => {
+  const { scoped, aggregateMeterNodeIds } = await prepareEnergyPeriodSelection(
+    input,
+    "ENERGYIQ_LATEST_COMPLETE_PERIOD_COVERAGE_NOT_FOUND",
+  );
+  const selected = await input.dataGateway.runSqlReadonly({
+    user_id: input.userId,
+    workspace_id: input.context.workspaceId,
+    datasource_id: scoped.datasourceId,
+    sql: latestAvailableDaySelectionSql(
+      scoped.viewName,
+      aggregateMeterNodeIds,
+      input.context.timezone,
+    ),
+    limit: 1,
+  });
+  const row = selected.rows[0];
+  if (!row) throw new Error("ENERGYIQ_LATEST_AVAILABLE_DAY_NOT_FOUND");
+  return {
+    periodDays: 1,
+    status: "partial",
+    intervalMinutes: numberAt(row, 4),
+    period: {
+      localFrom: stringAt(row, 0),
+      localToExclusive: stringAt(row, 1),
+      from: isoAt(row, 2),
+      to: isoAt(row, 3),
+    },
   };
 };
 
@@ -4121,6 +4207,27 @@ const latestCompletePeriodSelectionSql = (
   WHERE current_day_count = ${periodDays}
     AND DATE_DIFF('day', local_date, current_end_date) = ${periodDays - 1}
     AND complete_day_count = ${periodDays}
+  ORDER BY local_date DESC
+  LIMIT 1
+`;
+
+const latestAvailableDaySelectionSql = (
+  viewName: string,
+  meterNodeIds: string[],
+  timezone: string,
+): string => `
+  SELECT
+    STRFTIME(local_date, '%Y-%m-%d') AS local_from,
+    STRFTIME(local_date + INTERVAL 1 DAY, '%Y-%m-%d') AS local_to_exclusive,
+    EPOCH_MS(TIMEZONE(${sqlLiteral(timezone)}, CAST(local_date AS TIMESTAMP))) AS from_ms,
+    EPOCH_MS(TIMEZONE(${sqlLiteral(timezone)}, CAST(local_date + INTERVAL 1 DAY AS TIMESTAMP))) AS to_ms,
+    COALESCE(MEDIAN(elapsed_minutes) FILTER (
+      WHERE quality_status = 'ok' AND elapsed_minutes > 0
+    ), 15) AS interval_minutes
+  FROM ${quoteIdentifier(viewName)} source
+  WHERE ${meterNodeFilter(meterNodeIds)}
+  GROUP BY local_date
+  HAVING COUNT(*) FILTER (WHERE quality_status = 'ok') > 0
   ORDER BY local_date DESC
   LIMIT 1
 `;

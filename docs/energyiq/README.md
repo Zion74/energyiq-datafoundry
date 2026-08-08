@@ -40,6 +40,7 @@
 | [Overview 用户价值与 AI Slot 最小交付决策](2026-08-05-Overview用户价值与AI-Slot最小交付决策.md) | Ngee Ann 首版把快速确定性 Overview 与一次真实自主 DataFoundry Run 合并验收，并固定服务端 Analysis Pack、Snapshot、只读 SQL 与 Evidence 边界 |
 | [Charles 系统价值复核与两批数据连续演示决策](2026-08-06-Charles系统价值复核与连续数据演示决策.md) | 承认一次性 Claude HTML 的适用场景，并以两批数据连续更新、0–3 条精炼洞察、图文协同和行动后果定义下一项客户价值验收 |
 | [四界面 UI/UX 一致性与功能保护决策](2026-08-08-四界面UI-UX一致性与功能保护决策.md) | 统一 Overview、AI Analyst、Project Explorer 与 Admin 的视觉语法、可读性和操作习惯，同时保留不同侧栏职责并保护现有功能 |
+| [Project Explorer 性能、时间、指标与 Snapshot Health 决策](2026-08-08-Project-Explorer性能时间指标与Snapshot-Health决策.md) | 将 Explorer 收窄为快速的设备与数据核查界面，默认 Project 统一最新完整日，并按节点类型展示指标、自身平均线与诚实的 Snapshot Health |
 | [项目配置、数据接入与模板发布流程](流程-项目配置与模板发布.md) | Admin 从 Project Draft 到 Published 的操作与发布门槛 |
 | [Preschool 数据与三层目标结构](决策-Preschool-Portfolio数据集接入.md) | 区分 Centre×Circuit 现有事实与 Block→Room→Circuit 目标映射 |
 | [Ngee Ann 模板吸收方案](评估-Ngee-Ann模板吸收方案.md) | 原型可直接吸收、需参数化、延期模块与 golden baseline |

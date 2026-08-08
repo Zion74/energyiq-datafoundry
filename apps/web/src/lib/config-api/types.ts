@@ -340,7 +340,8 @@ export type EnergyQueryContextRequestDto = {
   period?: "Yesterday" | "Last 7 days" | "Last 30 days" | "Previous week" | "Previous month" | "Custom";
   from?: string;
   to?: string;
-  analysisWindow?: "latest-complete-7d" | "current-overview-28d";
+  analysisWindow?: "latest-complete-day" | "latest-complete-7d" | "current-overview-28d";
+  surface?: "project-explorer";
   expectedDataSnapshotId?: string;
   expectedProjectReleaseId?: string;
 };

@@ -7,6 +7,7 @@ import {
   Area,
   AreaChart,
   CartesianGrid,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -31,7 +32,7 @@ type ProjectNode = {
   category?: "Light" | "Load" | "Aircon";
 };
 
-type ExplorerPeriod = "Yesterday" | "Last 7 days" | "Previous week" | "Previous month" | "Custom";
+type ExplorerPeriod = "Latest complete day" | "Yesterday" | "Last 7 days" | "Previous week" | "Previous month" | "Custom";
 type ExplorerChartView = "daily" | "weekly" | "monthly" | "hourly";
 
 export type ExplorerUrlViewState = {
@@ -52,6 +53,7 @@ const explorerPeriodOptions: ReadonlyArray<{
   disabled?: boolean;
   title?: string;
 }> = [
+  { label: "Latest complete day", value: "Latest complete day" },
   { label: "Yesterday", value: "Yesterday" },
   { label: "Last 7 days", value: "Last 7 days" },
   { label: "Previous week", value: "Previous week" },
@@ -71,16 +73,12 @@ const typeIcon: Record<ProjectNode["type"], EnergyIconName> = {
 export function ProjectExplorer() {
   const searchParams = useSearchParams();
   const initialViewState = explorerViewStateFromSearchParams(searchParams);
+  // Internal Scope/Period changes are mirrored into the URL. Keying the whole view by those
+  // values remounts the component and repeats the same hierarchy + analysis requests.
   const viewStateKey = [
     initialViewState.projectId,
-    initialViewState.scopeId,
-    initialViewState.resource,
-    initialViewState.period,
-    initialViewState.from,
-    initialViewState.to,
     initialViewState.dataSnapshotId,
     initialViewState.projectReleaseId,
-    initialViewState.chartView,
   ].join(":");
   return <ProjectExplorerView key={viewStateKey} initialViewState={initialViewState} />;
 }
@@ -104,6 +102,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
   const [analysis, setAnalysis] = useState<EnergyScopeAnalysisDto | null>(null);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [snapshotHealthByNode, setSnapshotHealthByNode] = useState<ExplorerSnapshotHealthMap>({});
   const [periodSelection, setPeriodSelection] = useState<ExplorerPeriod>(initialViewState.period);
   const [chartView, setChartView] = useState<ExplorerChartView>(initialViewState.chartView);
   const [customRange, setCustomRange] = useState({
@@ -139,6 +138,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
     if (!activeProjectId) return;
     let cancelled = false;
     setHierarchyError(null);
+    setSnapshotHealthByNode({});
     void configApi.getEnergyProjectHierarchy(activeProjectId)
       .then((hierarchy) => {
         if (cancelled) return;
@@ -196,6 +196,10 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
     })).then((result) => {
       if (cancelled) return;
       setAnalysis(result);
+      if (selectedId === defaultScopeId(hierarchyNodes ?? [])
+        && periodSelection === "Latest complete day") {
+        setSnapshotHealthByNode(explorerSnapshotHealthMap(result));
+      }
       setCustomRange((current) => current.projectId === activeProjectId && current.from && current.to
         ? current
         : {
@@ -220,6 +224,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
     customRange.to,
     initialViewState.dataSnapshotId,
     initialViewState.projectReleaseId,
+    hierarchyNodes,
     periodSelection,
     resource,
     selectedId,
@@ -317,6 +322,21 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
     : selectedChartView === "monthly"
       ? monthlyTrend
       : dailyTrend;
+  const selectedPeriodAverage = selectedChartView === "hourly"
+    ? null
+    : explorerSelectedPeriodAverage(
+        selectedEnergyTrend,
+        selectedChartView === "weekly" ? "weekly" : selectedChartView === "monthly" ? "monthly" : "daily",
+      );
+  const hourlyAveragePower = hourlyTrend.length > 0
+    ? hourlyTrend.reduce((sum, point) => sum + point.averagePowerKw, 0) / hourlyTrend.length
+    : null;
+  const coveredHours = analysis
+    ? analysis.dataHealth.validIntervalCount * analysis.units.intervalMinutes / 60
+    : 0;
+  const selectedAveragePower = selectedPeriodHasFacts && selectedValue !== null && coveredHours > 0
+    ? selectedValue / coveredHours
+    : null;
   const showLatestAvailable = () => {
     const latest = analysis?.latestAvailablePeriod;
     if (!activeProjectId || !latest) return;
@@ -464,6 +484,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                   selectedId={selectedId}
                   expandedIds={expandedIds}
                   searchActive={search.trim().length > 0}
+                  snapshotHealthByNode={snapshotHealthByNode}
                   onSelect={handleTreeNodeSelect}
                 />
               </div>
@@ -514,6 +535,16 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                   {selected.role ? (
                     <span className="rounded-full border border-step-inspect/25 bg-step-inspect/10 px-2 py-0.5 text-ui-meta font-semibold text-step-inspect">
                       {selected.role}
+                    </span>
+                  ) : null}
+                  {analysis ? (
+                    <span className={[
+                      "rounded-full border px-2 py-0.5 text-ui-meta font-semibold",
+                      analysis.dataHealth.status === "complete"
+                        ? "border-step-success/25 bg-step-success/10 text-step-success"
+                        : "border-step-warning/25 bg-step-warning/10 text-step-warning",
+                    ].join(" ")}>
+                      {analysis.dataHealth.coveragePct.toFixed(1)}% coverage
                     </span>
                   ) : null}
                 </div>
@@ -593,66 +624,77 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
               </div>
             ) : null}
 
-            <div className="mt-6 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 xl:grid-cols-5">
+            <div className={[
+              "mt-6 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2",
+              isMeterNode(selected) ? "xl:grid-cols-5" : "xl:grid-cols-3",
+            ].join(" ")}>
               {explorerMetricsPending ? (
                 <>
                   <MetricCell
-                    label="Period consumption"
+                    label={isMeterNode(selected) ? "Period energy" : "Total energy"}
                     value={analysisLoading ? "Loading facts…" : "No validated data"}
                     note="Resolved from the trusted project, scope and period"
                   />
-                  <MetricCell
-                    label="Latest cumulative reading"
-                    value="—"
-                    note="Waiting for the Meter Data Health contract"
-                  />
-                  <MetricCell
-                    label="Average power"
-                    value="—"
-                    note="Hourly interval-average power loads below"
-                  />
-                  <MetricCell
-                    label="Source"
-                    value="—"
-                    note="Waiting for trusted analysis provenance"
-                  />
-                  <MetricCell
-                    label="Data health"
-                    value="—"
-                    note="Waiting for deterministic analysis"
-                  />
+                  {isMeterNode(selected) ? (
+                    <>
+                      <MetricCell label="Latest cumulative reading" value="—" note="Loading accepted meter reading" />
+                      <MetricCell label="Last data received" value="—" note="Loading Snapshot timestamp" />
+                      <MetricCell label="Average power" value="—" note="Loading interval-average power" />
+                      <MetricCell label="Peak power" value="—" note="Loading interval peak" />
+                    </>
+                  ) : (
+                    <>
+                      <MetricCell label="Daily average" value="—" note="Loading complete-day average" />
+                      <MetricCell label="Peak power" value="—" note="Loading interval peak" />
+                    </>
+                  )}
                 </>
               ) : (
                 <>
                   <MetricCell
-                    label="Period consumption"
+                    label={isMeterNode(selected) ? "Period energy" : "Total energy"}
                     value={selectedValue === null ? "No data" : `${selectedValue.toLocaleString(undefined, { maximumFractionDigits: 2 })} kWh`}
                     note={selectedValue === null ? "No accepted interval facts in this period" : `${analysis!.context.scopeName} · selected period`}
                     tone={selectedValue === null ? "warning" : "muted"}
                   />
-                  <MetricCell
-                    label="Latest cumulative reading"
-                    value={latestReadingPresentation!.value}
-                    note={latestReadingPresentation!.note}
-                    tone={latestReadingPresentation!.tone}
-                  />
-                  <MetricCell
-                    label="Average power"
-                    value={selectedPeriodHasFacts ? "24h profile" : "No data"}
-                    note={selectedPeriodHasFacts ? `${analysis!.hourlyProfile.length} server-provided hourly averages` : "No accepted intervals to profile"}
-                    tone={selectedPeriodHasFacts ? "muted" : "warning"}
-                  />
-                  <MetricCell
-                    label="Source"
-                    value="Canonical facts"
-                    note={`Snapshot ${compactEvidenceId(analysis!.provenance.dataSnapshotId)}`}
-                  />
-                  <MetricCell
-                    label="Data health"
-                    value={analysis!.dataHealth.status === "complete" ? "Complete" : analysis!.dataHealth.status === "partial" ? "Review" : "Unavailable"}
-                    note={`${analysis!.dataHealth.coveragePct.toFixed(1)}% coverage · ${analysis!.dataHealth.qualityEventCount} flagged`}
-                    tone={analysis!.dataHealth.status === "complete" ? "success" : "warning"}
-                  />
+                  {isMeterNode(selected) ? (
+                    <>
+                      <MetricCell label="Latest cumulative reading" value={latestReadingPresentation!.value} note={latestReadingPresentation!.note} tone={latestReadingPresentation!.tone} />
+                      <MetricCell
+                        label="Last data received"
+                        value={analysis!.dataHealth.lastSeenAt ? formatExplorerDateTime(analysis!.dataHealth.lastSeenAt, analysis!.context.timezone) : "Unavailable"}
+                        note="Latest accepted interval in this Snapshot"
+                        tone={analysis!.dataHealth.lastSeenAt ? "muted" : "warning"}
+                      />
+                      <MetricCell
+                        label="Average power"
+                        value={selectedAveragePower === null ? "No data" : `${selectedAveragePower.toFixed(2)} kW`}
+                        note="Energy divided by covered interval hours"
+                        tone={selectedAveragePower === null ? "warning" : "muted"}
+                      />
+                      <MetricCell
+                        label="Peak power"
+                        value={selectedPeriodHasFacts ? `${analysis!.summary.peakKw.toFixed(2)} kW` : "No data"}
+                        note={analysis!.summary.peakAt ? formatExplorerDateTime(analysis!.summary.peakAt, analysis!.context.timezone) : "Peak timestamp unavailable"}
+                        tone={selectedPeriodHasFacts ? "muted" : "warning"}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <MetricCell
+                        label="Daily average"
+                        value={selectedPeriodHasFacts ? `${analysis!.summary.averageDailyUsageKwh.toLocaleString(undefined, { maximumFractionDigits: 2 })} kWh/day` : "No data"}
+                        note="Across the selected reporting window"
+                        tone={selectedPeriodHasFacts ? "muted" : "warning"}
+                      />
+                      <MetricCell
+                        label="Peak power"
+                        value={selectedPeriodHasFacts ? `${analysis!.summary.peakKw.toFixed(2)} kW` : "No data"}
+                        note={analysis!.summary.peakAt ? formatExplorerDateTime(analysis!.summary.peakAt, analysis!.context.timezone) : "Peak timestamp unavailable"}
+                        tone={selectedPeriodHasFacts ? "muted" : "warning"}
+                      />
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -771,7 +813,19 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                             fontSize: 12,
                           }}
                           labelFormatter={(label) => formatExplorerTrendTooltipLabel(String(label), selectedChartView)}
-                          formatter={(value) => [value === null ? "No accepted facts" : `${Number(value).toFixed(2)} kWh`, explorerChartSeriesLabel(selectedChartView)]}
+                          formatter={(value) => {
+                            if (value === null) return ["No accepted facts", explorerChartSeriesLabel(selectedChartView)];
+                            const numeric = Number(value);
+                            if (selectedPeriodAverage === null || selectedPeriodAverage === 0) {
+                              return [`${numeric.toFixed(2)} kWh`, explorerChartSeriesLabel(selectedChartView)];
+                            }
+                            const delta = numeric - selectedPeriodAverage;
+                            const relative = delta / selectedPeriodAverage * 100;
+                            return [
+                              `${numeric.toFixed(2)} kWh · ${delta >= 0 ? "+" : ""}${delta.toFixed(2)} kWh (${relative >= 0 ? "+" : ""}${relative.toFixed(1)}%) vs avg`,
+                              explorerChartSeriesLabel(selectedChartView),
+                            ];
+                          }}
                         />
                         <Area
                           type="monotone"
@@ -783,6 +837,14 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                           activeDot={{ r: 4 }}
                           connectNulls={false}
                         />
+                        {selectedPeriodAverage !== null ? (
+                          <ReferenceLine
+                            y={selectedPeriodAverage}
+                            stroke="#c07a28"
+                            strokeDasharray="5 4"
+                            label={{ value: `Avg ${selectedPeriodAverage.toFixed(1)}`, position: "insideTopRight", fill: "#8a5a20", fontSize: 11 }}
+                          />
+                        ) : null}
                       </AreaChart>
                     </ResponsiveContainer>
                   ) : (
@@ -804,7 +866,18 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                             boxShadow: "0 8px 24px rgba(13,13,13,.08)",
                             fontSize: 12,
                           }}
-                          formatter={(value) => [`${Number(value).toFixed(1)} kW`, "Hourly average"]}
+                          formatter={(value) => {
+                            const numeric = Number(value);
+                            if (hourlyAveragePower === null || hourlyAveragePower === 0) {
+                              return [`${numeric.toFixed(1)} kW`, "Hourly average"];
+                            }
+                            const delta = numeric - hourlyAveragePower;
+                            const relative = delta / hourlyAveragePower * 100;
+                            return [
+                              `${numeric.toFixed(1)} kW · ${delta >= 0 ? "+" : ""}${delta.toFixed(1)} kW (${relative >= 0 ? "+" : ""}${relative.toFixed(1)}%) vs avg`,
+                              "Hourly average",
+                            ];
+                          }}
                         />
                         <Area
                           type="monotone"
@@ -814,6 +887,14 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                           fill="url(#explorer-fill)"
                           dot={false}
                         />
+                        {hourlyAveragePower !== null ? (
+                          <ReferenceLine
+                            y={hourlyAveragePower}
+                            stroke="#c07a28"
+                            strokeDasharray="5 4"
+                            label={{ value: `Avg ${hourlyAveragePower.toFixed(1)}`, position: "insideTopRight", fill: "#8a5a20", fontSize: 11 }}
+                          />
+                        ) : null}
                       </AreaChart>
                     </ResponsiveContainer>
                   )}
@@ -1017,6 +1098,7 @@ function ProjectTree({
   selectedId,
   expandedIds,
   searchActive,
+  snapshotHealthByNode,
   onSelect,
 }: {
   allNodes: ProjectNode[];
@@ -1024,6 +1106,7 @@ function ProjectTree({
   selectedId: string;
   expandedIds: Set<string>;
   searchActive: boolean;
+  snapshotHealthByNode: ExplorerSnapshotHealthMap;
   onSelect: (id: string) => void;
 }) {
   const orderedNodes = useMemo(
@@ -1042,6 +1125,7 @@ function ProjectTree({
           const selected = selectedId === node.id;
           const hasChildren = allNodes.some((candidate) => candidate.parentId === node.id);
           const expanded = expandedIds.has(node.id);
+          const snapshotHealth = snapshotHealthByNode[node.id];
           return (
             <button
               key={node.id}
@@ -1069,6 +1153,21 @@ function ProjectTree({
                 className={["h-3.5 w-3.5 shrink-0", selected ? "text-white" : "text-muted-light"].join(" ")}
               />
               <span className="min-w-0 flex-1 truncate font-medium">{node.name}</span>
+              <span
+                aria-label={snapshotHealth?.label ?? "Snapshot health unknown"}
+                title={`${snapshotHealth?.label ?? "Snapshot health unknown"}. Connectivity unknown.`}
+                className={[
+                  "h-2 w-2 shrink-0 rounded-full ring-2 ring-current/10",
+                  snapshotHealth?.status === "complete"
+                    ? "bg-step-success text-step-success"
+                    : snapshotHealth?.status === "review"
+                      ? "bg-step-warning text-step-warning"
+                      : snapshotHealth?.status === "unavailable"
+                        ? "bg-red-600 text-red-600"
+                        : selected ? "bg-white/70 text-white" : "bg-muted-light text-muted-light",
+                  selected ? "ring-white/50" : "",
+                ].join(" ")}
+              />
             </button>
           );
         })}
@@ -1179,12 +1278,13 @@ export function explorerViewStateFromSearchParams(
   searchParams: Pick<URLSearchParams, "get">,
 ): ExplorerUrlViewState {
   const requestedPeriod = searchParams.get("period");
-  const period: ExplorerPeriod = requestedPeriod === "Yesterday"
+  const period: ExplorerPeriod = requestedPeriod === "Latest complete day"
+    || requestedPeriod === "Yesterday"
     || requestedPeriod === "Previous week"
     || requestedPeriod === "Previous month"
     || requestedPeriod === "Custom"
     ? requestedPeriod
-    : "Last 7 days";
+    : "Latest complete day";
   const requestedFrom = period === "Custom" ? searchParams.get("from") ?? "" : "";
   const requestedTo = period === "Custom" ? searchParams.get("to") ?? "" : "";
   const hasValidCustomRange = period !== "Custom"
@@ -1224,6 +1324,18 @@ export function explorerUrlWithView(view: ExplorerUrlViewState): string {
   return `/energyiq/explorer?${next.toString()}`;
 }
 
+function formatExplorerDateTime(value: string, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-SG", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone,
+  }).format(new Date(value));
+}
+
 export function explorerCurrentFactsUrl(view: ExplorerUrlViewState): string {
   return explorerUrlWithView({
     ...view,
@@ -1245,7 +1357,9 @@ export function buildExplorerAnalysisRequest(
     projectId: view.projectId,
     scopeId: view.scopeId || "project",
     resource: view.resource,
-    period: view.period,
+    period: view.period === "Latest complete day" ? "Custom" : view.period,
+    surface: "project-explorer",
+    ...(view.period === "Latest complete day" ? { analysisWindow: "latest-complete-day" as const } : {}),
     ...(view.period === "Custom" && view.from && view.to
       ? { from: view.from, to: view.to }
       : {}),
@@ -1258,6 +1372,59 @@ export function hasExplorerFacts(
   analysis: EnergyScopeAnalysisDto | null,
 ): boolean {
   return Boolean(analysis && analysis.summary.validIntervalCount > 0);
+}
+
+export type ExplorerSnapshotHealth = {
+  status: "complete" | "review" | "unavailable" | "unknown";
+  label: string;
+};
+
+export type ExplorerSnapshotHealthMap = Record<string, ExplorerSnapshotHealth>;
+
+export function explorerSnapshotHealthMap(
+  analysis: EnergyScopeAnalysisDto | null,
+): ExplorerSnapshotHealthMap {
+  if (!analysis) return {};
+  const result: ExplorerSnapshotHealthMap = {
+    [analysis.context.scopeId]: snapshotHealthPresentation(analysis.dataHealth),
+  };
+  for (const scope of analysis.childScopes) {
+    result[scope.nodeId] = scope.dataHealth
+      ? snapshotHealthPresentation(scope.dataHealth)
+      : { status: "unknown", label: "Snapshot health unknown" };
+  }
+  for (const circuit of analysis.circuits) {
+    result[circuit.meterNodeId] = circuit.dataHealth
+      ? snapshotHealthPresentation(circuit.dataHealth)
+      : { status: "unknown", label: "Snapshot health unknown" };
+  }
+  return result;
+}
+
+function snapshotHealthPresentation(health: {
+  coveragePct: number;
+  validIntervalCount: number;
+  qualityEventCount: number;
+}): ExplorerSnapshotHealth {
+  if (health.validIntervalCount === 0) {
+    return { status: "unavailable", label: "No accepted Snapshot data" };
+  }
+  if (health.coveragePct >= 100 && health.qualityEventCount === 0) {
+    return { status: "complete", label: "Complete Snapshot data" };
+  }
+  return { status: "review", label: "Partial Snapshot data; review" };
+}
+
+export function explorerSelectedPeriodAverage(
+  rows: Array<{ usageKwh: number | null; coveragePct: number; isPartialCalendarPeriod?: boolean }>,
+  grain: "daily" | "weekly" | "monthly",
+): number | null {
+  const complete = rows.filter((row) => row.usageKwh !== null
+    && row.coveragePct >= 100
+    && !row.isPartialCalendarPeriod);
+  if (grain !== "daily" && complete.length < 2) return null;
+  if (complete.length === 0) return null;
+  return complete.reduce((sum, row) => sum + (row.usageKwh ?? 0), 0) / complete.length;
 }
 
 export function explorerTrendSeries(
