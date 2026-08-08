@@ -1648,6 +1648,26 @@ export type EnergySavedAnalysisAiArtifactInputDto = {
   };
 };
 
+export type EnergyOverviewAiArtifactDto = {
+  id?: string;
+  status: "missing" | "queued" | "running" | "available" | "failed";
+  dataSnapshotId: string;
+  projectReleaseId: string;
+  modelProfileId?: string;
+  modelProfileRevision?: number;
+  attemptCount?: number;
+  runId?: string;
+  completedAt?: string;
+  errorCode?: string;
+  result?: {
+    status: "available";
+    providerProfileId: string;
+    runId: string;
+    findings: Array<Record<string, unknown>>;
+    [key: string]: unknown;
+  };
+};
+
 export type EnergySavedAnalysisAiArtifactDto = EnergySavedAnalysisAiArtifactInputDto & {
   completedAt: string;
   runProvenance?: {

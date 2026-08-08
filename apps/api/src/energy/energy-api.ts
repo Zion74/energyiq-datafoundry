@@ -16,6 +16,7 @@ import type {
   EnergyIqOperatingCalendarEntry,
   EnergyIqOperatingDay,
   EnergyIqOperatingTimeRange,
+  EnergyIqOverviewAiArtifactRecord,
   EnergyIqPolicyOwner,
   EnergyIqProjectSetupDocument,
   EnergyIqSavedAnalysisRecord,
@@ -47,6 +48,10 @@ import {
   ENERGY_EXCEL_MATERIALIZER_CONTRACT_VERSION,
 } from "./energy-import-materializer.js";
 import { materializeEnergyProjectManifest } from "./energy-project-materialization.js";
+import {
+  queueCurrentProjectOverviewAiArtifact,
+  resolveCurrentOverviewAiArtifactIdentity,
+} from "./overview-ai-artifact.js";
 import { EnergyAdminAccessService } from "./energy-admin-access.js";
 import {
   resolveProjectAnalysis,
@@ -194,6 +199,75 @@ export const handleEnergyApiRequest = async (
         }))
       };
     }
+    if (segments[0] === "projects" && segments[2] === "overview-ai-artifact") {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      const project = context.metadataStore.energyIq.getProject(projectId);
+      const scopeId = request.method === "GET"
+        ? new URL(request.url ?? "/", "http://127.0.0.1").searchParams.get("scopeId") ?? project.root_scope_id
+        : project.root_scope_id;
+      const identity = resolveCurrentOverviewAiArtifactIdentity({
+        metadataStore: context.metadataStore,
+        projectId,
+        scopeId,
+        user,
+      });
+      if (segments.length === 3 && request.method === "GET") {
+        const artifact = context.metadataStore.energyIq.overviewAiArtifacts.find(identity);
+        return {
+          status: 200,
+          body: createSuccessResult(artifact
+            ? toOverviewAiArtifactDto(artifact)
+            : {
+                status: "missing",
+                dataSnapshotId: identity.dataSnapshotId,
+                projectReleaseId: identity.projectReleaseId,
+              }),
+        };
+      }
+      if (segments.length === 4 && segments[3] === "complete" && request.method === "POST") {
+        const body = requireRecord(await readJsonBody(request));
+        const result = requireRecord(body.result);
+        if (result.status !== "available"
+          || typeof result.runId !== "string"
+          || !result.runId.trim()
+          || !Array.isArray(result.findings)) {
+          throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+        }
+        const run = context.metadataStore.runs.find({ user_id: user.id, run_id: result.runId });
+        if (!run
+          || run.status !== "completed"
+          || !run.finished_at
+          || !run.user_input.includes(identity.dataSnapshotId)
+          || !run.user_input.includes(identity.projectReleaseId)) {
+          throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RUN_INVALID");
+        }
+        let artifact = context.metadataStore.energyIq.overviewAiArtifacts.find(identity)
+          ?? context.metadataStore.energyIq.overviewAiArtifacts.queue({
+            identity,
+            triggeredBy: user.id,
+          });
+        if (artifact.status !== "available") {
+          const workerId = `completed-run:${result.runId}`;
+          const claim = context.metadataStore.energyIq.overviewAiArtifacts.claim({
+            identity,
+            workerId,
+            leaseMs: 60_000,
+          });
+          if (claim.claimed) {
+            artifact = context.metadataStore.energyIq.overviewAiArtifacts.complete({
+              identity,
+              workerId,
+              sessionId: run.session_id,
+              runId: result.runId,
+              resultJson: JSON.stringify(result),
+            });
+          } else {
+            artifact = claim.artifact;
+          }
+        }
+        return { status: 200, body: createSuccessResult(toOverviewAiArtifactDto(artifact)) };
+      }
+    }
     if (segments[0] === "projects" && segments.length === 1 && request.method === "POST") {
       const access = requireEnergyAdmin(context, user);
       const body = requireRecord(await readJsonBody(request));
@@ -234,6 +308,16 @@ export const handleEnergyApiRequest = async (
           projectId,
           requestedBatchId: batchId,
         });
+        let overviewAiArtifact: Awaited<ReturnType<typeof queueCurrentProjectOverviewAiArtifact>> = null;
+        try {
+          overviewAiArtifact = await queueCurrentProjectOverviewAiArtifact({
+            metadataStore: context.metadataStore,
+            projectId,
+            user,
+          });
+        } catch (error) {
+          console.warn("[energyiq] failed to queue Overview AI Artifact after materialization", error);
+        }
         return {
           status: 200,
           body: createSuccessResult({
@@ -241,6 +325,15 @@ export const handleEnergyApiRequest = async (
             dataSnapshot: toEnergyDataSnapshotDto(materialized.snapshot),
             readiness: await createProjectDataReadiness(context, projectId, materialized.document),
             duplicate: materialized.duplicate,
+            ...(overviewAiArtifact
+              ? {
+                  overviewAiArtifact: {
+                    id: overviewAiArtifact.id,
+                    status: overviewAiArtifact.status,
+                    dataSnapshotId: overviewAiArtifact.data_snapshot_id,
+                  },
+                }
+              : {}),
           }),
         };
       }
@@ -443,11 +536,30 @@ export const handleEnergyApiRequest = async (
             "ENERGYIQ_RULE_CONFIG_REVISION_REQUIRED",
           ),
         });
+        let overviewAiArtifact: Awaited<ReturnType<typeof queueCurrentProjectOverviewAiArtifact>> = null;
+        try {
+          overviewAiArtifact = await queueCurrentProjectOverviewAiArtifact({
+            metadataStore: context.metadataStore,
+            projectId,
+            user,
+          });
+        } catch (error) {
+          console.warn("[energyiq] failed to queue Overview AI Artifact after Project publish", error);
+        }
         return {
           status: 200,
           body: createSuccessResult({
             ...published,
-            project: context.metadataStore.energyIq.getProject(projectId)
+            project: context.metadataStore.energyIq.getProject(projectId),
+            ...(overviewAiArtifact
+              ? {
+                  overviewAiArtifact: {
+                    id: overviewAiArtifact.id,
+                    status: overviewAiArtifact.status,
+                    dataSnapshotId: overviewAiArtifact.data_snapshot_id,
+                  },
+                }
+              : {}),
           })
         };
       }
@@ -1167,6 +1279,20 @@ const parseSavedAnalysisQuery = (record: EnergyIqSavedAnalysisRecord): EnergyQue
     throw new Error("ENERGYIQ_SAVED_ANALYSIS_QUERY_INVALID");
   }
 };
+
+const toOverviewAiArtifactDto = (artifact: EnergyIqOverviewAiArtifactRecord): Record<string, unknown> => ({
+  id: artifact.id,
+  status: artifact.status,
+  dataSnapshotId: artifact.data_snapshot_id,
+  projectReleaseId: artifact.project_release_id,
+  modelProfileId: artifact.model_profile_id,
+  modelProfileRevision: artifact.model_profile_revision,
+  attemptCount: artifact.attempt_count,
+  ...(artifact.run_id ? { runId: artifact.run_id } : {}),
+  ...(artifact.completed_at ? { completedAt: artifact.completed_at } : {}),
+  ...(artifact.error_code ? { errorCode: artifact.error_code } : {}),
+  ...(artifact.result_json ? { result: JSON.parse(artifact.result_json) as unknown } : {}),
+});
 
 const savedAnalysisRerunQuery = (
   query: EnergyQueryContextRequest,

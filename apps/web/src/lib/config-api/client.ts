@@ -23,6 +23,7 @@ import type {
   EnergyOperatingCalendarRevisionDto,
   EnergyOperationalPolicyConfigurationDto,
   EnergyProjectAnalysisResolutionDto,
+  EnergyOverviewAiArtifactDto,
   EnergyProjectMetricConfigResponseDto,
   EnergyProjectDataCoverageDto,
   EnergyProjectRuleConfigResponseDto,
@@ -588,6 +589,26 @@ export const configApi = {
       method: "POST",
       body: JSON.stringify(options?.bypassCache ? { ...body, bypassCache: true } : body),
     });
+  },
+
+  getEnergyOverviewAiArtifact(
+    projectId: string,
+    scopeId: string,
+  ): Promise<EnergyOverviewAiArtifactDto> {
+    const params = new URLSearchParams({ scopeId });
+    return requestEnvelope<EnergyOverviewAiArtifactDto>(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-ai-artifact?${params.toString()}`,
+    );
+  },
+
+  completeEnergyOverviewAiArtifact(
+    projectId: string,
+    result: EnergyOverviewAiArtifactDto["result"],
+  ): Promise<EnergyOverviewAiArtifactDto> {
+    return requestEnvelope<EnergyOverviewAiArtifactDto>(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-ai-artifact/complete`,
+      { method: "POST", body: JSON.stringify({ result }) },
+    );
   },
 
   attachEnergySavedAnalysisAiArtifact(

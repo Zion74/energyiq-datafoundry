@@ -1419,6 +1419,18 @@ describe("Preschool AI Run", () => {
 
   it("single-flights identical page identities and fails soft", async () => {
     const input = requiredInput();
+    vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockResolvedValue({
+      status: "missing",
+      dataSnapshotId: input.snapshotId,
+      projectReleaseId: input.projectReleaseId,
+    });
+    vi.spyOn(configApi, "completeEnergyOverviewAiArtifact").mockImplementation(async (_projectId, result) => ({
+      id: "artifact-test",
+      status: "available",
+      dataSnapshotId: input.snapshotId,
+      projectReleaseId: input.projectReleaseId,
+      result,
+    }));
     vi.spyOn(configApi, "getSessionConversation").mockRejectedValue(
       new ConfigApiError("RESOURCE_NOT_FOUND", "Session not found", 404),
     );
@@ -1447,6 +1459,18 @@ describe("Preschool AI Run", () => {
 
   it("restores a completed same-identity Run after memory reset without another Agent POST", async () => {
     const input = requiredInput();
+    vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockResolvedValue({
+      status: "missing",
+      dataSnapshotId: input.snapshotId,
+      projectReleaseId: input.projectReleaseId,
+    });
+    vi.spyOn(configApi, "completeEnergyOverviewAiArtifact").mockImplementation(async (_projectId, result) => ({
+      id: "artifact-restored",
+      status: "available",
+      dataSnapshotId: input.snapshotId,
+      projectReleaseId: input.projectReleaseId,
+      result,
+    }));
     const persistedRunId = "preschool-overview-persisted";
     const findings = generatedFindings();
     vi.spyOn(configApi, "getSessionConversation").mockResolvedValue({
@@ -1528,6 +1552,18 @@ describe("Preschool AI Run", () => {
 
   it("prefers complete Conversation text when Trace chunk joins would corrupt numeric Evidence", async () => {
     const input = requiredInput();
+    vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockResolvedValue({
+      status: "missing",
+      dataSnapshotId: input.snapshotId,
+      projectReleaseId: input.projectReleaseId,
+    });
+    vi.spyOn(configApi, "completeEnergyOverviewAiArtifact").mockImplementation(async (_projectId, result) => ({
+      id: "artifact-conversation",
+      status: "available",
+      dataSnapshotId: input.snapshotId,
+      projectReleaseId: input.projectReleaseId,
+      result,
+    }));
     const persistedRunId = "preschool-overview-conversation-source";
     const findings = generatedFindings();
     findings[0]!.what = "Centre G used 843.0985 kWh in the scoped comparison.";
@@ -1605,6 +1641,34 @@ describe("Preschool AI Run", () => {
       status: "available",
       runId: persistedRunId,
     });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("restores the shared current Artifact without reading a user-owned Session or starting Provider", async () => {
+    const input = requiredInput();
+    const available = resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(),
+      input,
+      providerProfileId: "profile-shared",
+      runId: "run-shared",
+    });
+    if (available.status !== "available") throw new Error("Expected a valid shared fixture");
+    vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockResolvedValue({
+      id: "artifact-shared",
+      status: "available",
+      dataSnapshotId: input.snapshotId,
+      projectReleaseId: input.projectReleaseId,
+      result: available,
+    });
+    const sessionSpy = vi.spyOn(configApi, "getSessionConversation");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getOrStartPreschoolAiRun(input)).resolves.toMatchObject({
+      status: "available",
+      runId: "run-shared",
+    });
+    expect(sessionSpy).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

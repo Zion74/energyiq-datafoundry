@@ -302,11 +302,18 @@ async function restoreOrExecutePreschoolAiRun(
   onProgress?: ProgressCallback,
 ): Promise<PreschoolAiRunResult> {
   onProgress?.("inspecting");
+  const shared = await probeSharedPreschoolAiArtifact(input);
+  if (shared) {
+    onProgress?.("validating");
+    onProgress?.("drafting");
+    return shared;
+  }
   const threadId = await buildPreschoolAiSessionId(input);
   let persisted = await probePersistedPreschoolAiRun(input, threadId);
   if (persisted.result) {
     onProgress?.("validating");
     onProgress?.("drafting");
+    await persistSharedPreschoolAiArtifact(input, persisted.result);
     return persisted.result;
   }
   for (let attempt = 0; persisted.active && attempt < ACTIVE_RUN_POLL_LIMIT; attempt += 1) {
@@ -315,6 +322,7 @@ async function restoreOrExecutePreschoolAiRun(
     if (persisted.result) {
       onProgress?.("validating");
       onProgress?.("drafting");
+      await persistSharedPreschoolAiArtifact(input, persisted.result);
       return persisted.result;
     }
   }
@@ -325,10 +333,45 @@ async function restoreOrExecutePreschoolAiRun(
   if (!defaults.activeLlmProfileId) {
     return { status: "unavailable", reason: "No current Workspace model profile is configured." };
   }
-  return executePreschoolAiRun(input, onProgress, {
+  const result = await executePreschoolAiRun(input, onProgress, {
     profileId: defaults.activeLlmProfileId,
     threadId,
   });
+  if (result.status === "available") await persistSharedPreschoolAiArtifact(input, result);
+  return result;
+}
+
+async function probeSharedPreschoolAiArtifact(
+  input: PreschoolAiRunInput,
+): Promise<Extract<PreschoolAiRunResult, { status: "available" }> | null> {
+  try {
+    const artifact = await configApi.getEnergyOverviewAiArtifact(input.projectId, input.scopeId);
+    if (artifact.status !== "available"
+      || artifact.dataSnapshotId !== input.snapshotId
+      || artifact.projectReleaseId !== input.projectReleaseId
+      || !artifact.result
+      || artifact.result.status !== "available"
+      || artifact.result.packId !== PRESCHOOL_AI_PACK_ID
+      || artifact.result.packRevision !== PRESCHOOL_AI_PACK_REVISION
+      || !Array.isArray(artifact.result.findings)
+      || !artifact.result.findings.every((finding) => isRecord(finding)
+        && isRecord(finding.evidence)
+        && finding.evidence.snapshotId === input.snapshotId)) return null;
+    return artifact.result as unknown as Extract<PreschoolAiRunResult, { status: "available" }>;
+  } catch {
+    return null;
+  }
+}
+
+async function persistSharedPreschoolAiArtifact(
+  input: PreschoolAiRunInput,
+  result: Extract<PreschoolAiRunResult, { status: "available" }>,
+): Promise<void> {
+  try {
+    await configApi.completeEnergyOverviewAiArtifact(input.projectId, result);
+  } catch (error) {
+    console.warn("[energyiq] failed to persist shared Preschool Overview AI Artifact", error);
+  }
 }
 
 async function buildPreschoolAiSessionId(input: PreschoolAiRunInput): Promise<string> {

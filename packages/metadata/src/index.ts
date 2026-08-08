@@ -17,6 +17,7 @@ import {
 } from "./workspace-model-profile-store.js";
 import { EnergyIqStore, initializeEnergyIqSchema } from "./energyiq-store.js";
 import { initializeEnergyIqMetricSchema } from "./energyiq-metric-store.js";
+import { initializeEnergyIqOverviewAiArtifactSchema } from "./energyiq-overview-ai-artifact-store.js";
 import {
   ensureEnergyIqOperationalPolicyBindingOwnershipSchema,
   initializeEnergyIqOperationalPolicySchema
@@ -36,6 +37,7 @@ export * from "./energyiq-saved-analysis-store.js";
 export * from "./energyiq-scope-metadata-resolver.js";
 export * from "./energyiq-metric-store.js";
 export * from "./energyiq-operational-policy-store.js";
+export * from "./energyiq-overview-ai-artifact-store.js";
 export * from "./energyiq-project-setup-store.js";
 export * from "./energyiq-rule-store.js";
 export * from "./energyiq-template-store.js";
@@ -4066,6 +4068,9 @@ const runMigrations = (db: DatabaseSync): void => {
   });
   runSchemaMigration(db, "0029_energyiq_session_scope", "Bind EnergyIQ Sessions to Workspace and Project", () => {
     initializeEnergyIqSessionScopeSchema(db);
+  });
+  runSchemaMigration(db, "0030_energyiq_overview_ai_artifact", "Persist shared EnergyIQ Overview AI artifacts", () => {
+    initializeEnergyIqOverviewAiArtifactSchema(db);
   });
 };
 
