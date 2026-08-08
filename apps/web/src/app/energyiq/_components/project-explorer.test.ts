@@ -19,14 +19,14 @@ import {
 } from "./project-explorer";
 
 describe("Project Explorer trusted view state", () => {
-  it("defaults an unpinned Explorer visit to the Project latest complete day", () => {
+  it("defaults an unpinned Explorer visit to the Project current 28-day window", () => {
     const view = explorerViewStateFromSearchParams(new URLSearchParams("projectId=preschool-demo"));
 
-    expect(view.period).toBe("Latest complete day");
+    expect(view.period).toBe("Current 28 days");
     expect(buildExplorerAnalysisRequest(view)).toMatchObject({
       projectId: "preschool-demo",
       period: "Custom",
-      analysisWindow: "latest-complete-day",
+      analysisWindow: "current-overview-28d",
       surface: "project-explorer",
     });
   });
@@ -74,7 +74,17 @@ describe("Project Explorer trusted view state", () => {
     });
   });
 
-  it("preserves supported previous Periods and rejects an invalid Custom range", () => {
+  it("preserves supported Periods and rejects an invalid Custom range", () => {
+    expect(explorerViewStateFromSearchParams(new URLSearchParams("period=Last+7+days"))).toMatchObject({
+      period: "Last 7 days",
+      from: "",
+      to: "",
+    });
+    expect(explorerViewStateFromSearchParams(new URLSearchParams("period=Last+30+days"))).toMatchObject({
+      period: "Last 30 days",
+      from: "",
+      to: "",
+    });
     expect(explorerViewStateFromSearchParams(new URLSearchParams("period=Previous+month"))).toMatchObject({
       period: "Previous month",
       from: "",

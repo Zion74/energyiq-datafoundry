@@ -32,7 +32,7 @@ type ProjectNode = {
   category?: "Light" | "Load" | "Aircon";
 };
 
-type ExplorerPeriod = "Latest complete day" | "Yesterday" | "Last 7 days" | "Previous week" | "Previous month" | "Custom";
+type ExplorerPeriod = "Current 28 days" | "Latest complete day" | "Yesterday" | "Last 7 days" | "Last 30 days" | "Previous week" | "Previous month" | "Custom";
 type ExplorerChartView = "daily" | "weekly" | "monthly" | "hourly";
 
 export type ExplorerUrlViewState = {
@@ -46,20 +46,6 @@ export type ExplorerUrlViewState = {
   projectReleaseId: string;
   chartView: ExplorerChartView;
 };
-
-const explorerPeriodOptions: ReadonlyArray<{
-  label: string;
-  value?: ExplorerPeriod;
-  disabled?: boolean;
-  title?: string;
-}> = [
-  { label: "Latest complete day", value: "Latest complete day" },
-  { label: "Yesterday", value: "Yesterday" },
-  { label: "Last 7 days", value: "Last 7 days" },
-  { label: "Previous week", value: "Previous week" },
-  { label: "Previous month", value: "Previous month" },
-  { label: "Custom", value: "Custom" },
-];
 
 const typeIcon: Record<ProjectNode["type"], EnergyIconName> = {
   project: "building",
@@ -196,8 +182,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
     })).then((result) => {
       if (cancelled) return;
       setAnalysis(result);
-      if (selectedId === defaultScopeId(hierarchyNodes ?? [])
-        && periodSelection === "Latest complete day") {
+      if (selectedId === defaultScopeId(hierarchyNodes ?? [])) {
         setSnapshotHealthByNode(explorerSnapshotHealthMap(result));
       }
       setCustomRange((current) => current.projectId === activeProjectId && current.from && current.to
@@ -313,7 +298,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
       : dailyTrend;
   const selectedChartView = chartView === "hourly"
     ? "hourly"
-    : requestedEnergyTrend.length > 0
+    : requestedEnergyTrend.length > 1
       ? chartView
       : dailyTrend.length > 1
         ? "daily"
@@ -556,33 +541,12 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                 ) : null}
               </div>
 
-              <div className="flex max-w-full overflow-x-auto rounded-lg border border-border bg-surface p-1" aria-label="Explorer period">
-                {explorerPeriodOptions.map((option) => (
-                  <button
-                    key={option.label}
-                    type="button"
-                    onClick={() => option.value ? setPeriodSelection(option.value) : undefined}
-                    disabled={option.disabled}
-                    title={option.title}
-                    className={[
-                      "h-8 whitespace-nowrap rounded-md px-2.5 text-xs font-medium transition-colors",
-                      option.value && periodSelection === option.value ? "bg-surface-subtle text-foreground shadow-sm" : "text-muted hover:text-foreground",
-                      option.disabled ? "cursor-not-allowed opacity-45 hover:text-muted" : "",
-                    ].join(" ")}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
+              {analysis ? (
+                <p className="text-sm font-medium text-muted">
+                  {formatExplorerDate(analysis.context.from, analysis.context.timezone)}–{formatExplorerDate(new Date(Date.parse(analysis.context.to) - 1).toISOString(), analysis.context.timezone)}
+                </p>
+              ) : null}
             </div>
-
-            {periodSelection === "Custom" ? (
-              <div className="mt-4 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface px-4 py-3">
-                <ExplorerDateField label="From" value={customRange.projectId === activeProjectId ? customRange.from : ""} onChange={(from) => setCustomRange((current) => ({ ...current, projectId: activeProjectId ?? "", from }))} />
-                <ExplorerDateField label="To, inclusive" value={customRange.projectId === activeProjectId ? customRange.to : ""} onChange={(to) => setCustomRange((current) => ({ ...current, projectId: activeProjectId ?? "", to }))} />
-                <p className="pb-2 text-ui-meta text-muted-light">The hierarchy stays fixed while the selected-period facts are re-queried.</p>
-              </div>
-            ) : null}
 
             {pinnedContextMismatch ? (
               <div role="alert" className="mt-4 flex flex-col gap-3 rounded-xl border border-step-warning/25 bg-step-warning/5 p-4 sm:flex-row sm:items-center sm:justify-between">
@@ -706,7 +670,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
               )}
             </div>
 
-            <div className="mt-7 grid gap-6 xl:grid-cols-[1.4fr_0.8fr]">
+            <div className="mt-7">
               <div>
                 <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                   <div>
@@ -733,7 +697,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                         >
                           Daily trend
                         </button>
-                        {weeklyTrend.length > 0 ? (
+                        {weeklyTrend.length > 1 ? (
                           <button
                             type="button"
                             aria-pressed={selectedChartView === "weekly"}
@@ -743,10 +707,10 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                               selectedChartView === "weekly" ? "bg-surface-subtle text-foreground" : "text-muted hover:text-foreground",
                             ].join(" ")}
                           >
-                            Week
+                            Weekly
                           </button>
                         ) : null}
-                        {monthlyTrend.length > 0 ? (
+                        {monthlyTrend.length > 1 ? (
                           <button
                             type="button"
                             aria-pressed={selectedChartView === "monthly"}
@@ -756,7 +720,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                               selectedChartView === "monthly" ? "bg-surface-subtle text-foreground" : "text-muted hover:text-foreground",
                             ].join(" ")}
                           >
-                            Month
+                            Monthly
                           </button>
                         ) : null}
                         <button
@@ -768,7 +732,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                             selectedChartView === "hourly" ? "bg-surface-subtle text-foreground" : "text-muted hover:text-foreground",
                           ].join(" ")}
                         >
-                          24h profile
+                          Typical 24h
                         </button>
                       </div>
                     ) : null}
@@ -908,7 +872,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                 </div>
               </div>
 
-              <div>
+              <div className="mt-6">
                 <div className="mb-3">
                   <h2 className="text-sm font-semibold text-foreground">Source & Data Health</h2>
                 </div>
@@ -1250,28 +1214,6 @@ function mapHierarchyNode(
   };
 }
 
-function ExplorerDateField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="text-[9px] font-semibold uppercase tracking-wide text-muted-light">
-      {label}
-      <input
-        type="date"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="mt-1 block h-9 rounded-md border border-border bg-surface px-3 text-xs font-medium normal-case text-foreground"
-      />
-    </label>
-  );
-}
-
 export function formatDateInput(value: string, timeZone: string): string {
   return new Intl.DateTimeFormat("en-CA", {
     year: "numeric",
@@ -1285,13 +1227,16 @@ export function explorerViewStateFromSearchParams(
   searchParams: Pick<URLSearchParams, "get">,
 ): ExplorerUrlViewState {
   const requestedPeriod = searchParams.get("period");
-  const period: ExplorerPeriod = requestedPeriod === "Latest complete day"
+  const period: ExplorerPeriod = requestedPeriod === "Current 28 days"
+    || requestedPeriod === "Latest complete day"
     || requestedPeriod === "Yesterday"
+    || requestedPeriod === "Last 7 days"
+    || requestedPeriod === "Last 30 days"
     || requestedPeriod === "Previous week"
     || requestedPeriod === "Previous month"
     || requestedPeriod === "Custom"
     ? requestedPeriod
-    : "Latest complete day";
+    : "Current 28 days";
   const requestedFrom = period === "Custom" ? searchParams.get("from") ?? "" : "";
   const requestedTo = period === "Custom" ? searchParams.get("to") ?? "" : "";
   const hasValidCustomRange = period !== "Custom"
@@ -1320,7 +1265,7 @@ export function explorerUrlWithView(view: ExplorerUrlViewState): string {
   if (view.projectId) next.set("projectId", view.projectId);
   next.set("scopeId", view.scopeId || "project");
   next.set("resource", view.resource);
-  next.set("period", view.period);
+  if (view.period !== "Current 28 days") next.set("period", view.period);
   if (view.period === "Custom" && view.from && view.to) {
     next.set("from", view.from);
     next.set("to", view.to);
@@ -1383,9 +1328,10 @@ export function buildExplorerAnalysisRequest(
     projectId: view.projectId,
     scopeId: view.scopeId || "project",
     resource: view.resource,
-    period: view.period === "Latest complete day" ? "Custom" : view.period,
+    period: view.period === "Latest complete day" || view.period === "Current 28 days" ? "Custom" : view.period,
     surface: "project-explorer",
     ...(view.period === "Latest complete day" ? { analysisWindow: "latest-complete-day" as const } : {}),
+    ...(view.period === "Current 28 days" ? { analysisWindow: "current-overview-28d" as const } : {}),
     ...(view.period === "Custom" && view.from && view.to
       ? { from: view.from, to: view.to }
       : {}),

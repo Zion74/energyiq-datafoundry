@@ -1,6 +1,6 @@
 ---
 title: "Project Explorer 性能、时间、指标与 Snapshot Health 决策"
-summary: "将 Explorer 收窄为快速的设备与数据核查界面，默认使用 Project 统一的最新完整日，并按节点类型展示指标、自身平均线和诚实的 Snapshot Health。"
+summary: "将 Explorer 收窄为快速的设备与数据核查界面，默认使用 Project 统一 cutoff 前的滚动 28 天，并按节点类型展示指标、自身平均线和诚实的 Snapshot Health。"
 doc_type: decision
 tags: [energyiq, project-explorer, performance, data-health, ux]
 updated_at: "2026-08-08"
@@ -51,12 +51,13 @@ Project Explorer 的任务是帮助用户找到 Project、Scope、Circuit 和 Me
 
 ### 3.2 默认时间
 
-- 未指定 Period 时，默认使用 Project Official Aggregation Route 的 `Latest complete day`；
-- 完整日必须是 Project timezone 下的完整自然日，100% Coverage 且无阻断性 Invalid 事件；
+- 未指定 Period 时，默认使用 Project Official Aggregation Route 统一 cutoff 前的滚动 28 天，避免 Daily/Weekly 图只拿到一个点；
+- cutoff 仍由 Project timezone 下的最新完整自然日确定；完整日需要 100% Coverage 且无阻断性 Invalid 事件；
 - 所有 Scope 使用同一个 Project 日期和 Snapshot；切换节点不得各自寻找日期；
-- 子 Scope 当日不完整时诚实显示 Partial/No data，不静默跳到更早日期；
-- 如果 Snapshot 没有完整日，显示最近有数据的 `Latest available day`，并标记 `Partial · xx% coverage`；
-- 明确 URL、Overview handoff 或用户主动选择的 Period 优先于默认值，并可刷新、分享和恢复。
+- Explorer 不提供控制整页的全局时间选择器；Daily、Weekly、Monthly 与 Typical 24h 只作为趋势模块内部视图；
+- 子 Scope 在统一窗口内不完整时诚实显示 Partial/No data，不静默跳到更早窗口；
+- 如果 Snapshot 无法形成 28 天窗口，则显示最近有数据的 `Latest available day`，并标记 `Partial · xx% coverage`；
+- 明确 URL 或 Overview handoff 的 Period 优先于默认值，并可刷新、分享和恢复。
 
 ### 3.3 顶部指标
 
@@ -161,17 +162,19 @@ Physical Meter/Circuit 显示：
 
 已完成：
 
-- 默认窗口改为 Project 统一的 Latest complete day；无完整日时选择最新有有效事实的日期并诚实保留 Partial；
+- 默认窗口最终校准为 Project 统一 cutoff 前的滚动 28 天；无可用 28 天窗口时选择最新有有效事实的日期并诚实保留 Partial；
+- 移除页头全局时间选择器；Overview handoff 的显式 Period、Snapshot 与 Release pin 仍原样保留；
 - 移除内部 URL `replaceState` 引起的 Scope/Period 自重挂载条件；
 - 增加 Explorer 专用分析 Profile，保留 Summary、Hourly、Daily、Comparison、Operational scope 与 Evidence，跳过未使用的 Time bucket、Anomaly、Peak breakdown 和 Meter operational 展开；
 - Project/Scope 与 Meter/Circuit 使用不同顶部指标；Coverage 改为紧凑 Badge，Source 与详细 Data Health 保持在下方；
 - Daily/Weekly/Monthly/24h 图增加选中节点自身平均线与相对差值 Tooltip；
+- Source & Data Health 移到趋势图下方独占一行；不足两个 Bucket 的 Weekly/Monthly 不再展示为误导性的单点趋势；
 - 树状态显示 Published Snapshot Health，并明确 `Connectivity unknown`；每日同步的 Delayed/Stale 只记录规则，当前历史 Demo 不启用；
 - 增加仅进程内、按用户/Workspace/Project/Scope/Snapshot/Release/Revision 隔离的窄缓存；不引入持久化 Cache 平台。
 
 自动证据：
 
-- Project Explorer 纯函数回归：14/14；
+- Project Explorer 纯函数回归：15/15；
 - Ngee Ann DuckDB Golden：通过，完整分析保持 10 条查询；Explorer Profile 为 7 条查询；
 - 同一 Golden Payload：约 174,083 bytes 降至 29,590 bytes，减少约 83%；
 - API TypeScript Build 与 Next.js Production Build：通过。

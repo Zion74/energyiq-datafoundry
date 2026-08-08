@@ -37,6 +37,7 @@ import { AuthError } from "../auth/service.js";
 import { readMultipartUpload } from "../upload-parser.js";
 import {
   executeEnergyScopeAnalysisWithLatestAvailable,
+  selectEnergyCurrentOverviewPeriod,
   selectEnergyLatestAvailableDay,
   selectEnergyLatestCompleteDay,
   type EnergyScopeAnalysis,
@@ -62,7 +63,49 @@ import {
 
 const EXPLORER_ANALYSIS_CACHE_LIMIT = 100;
 const explorerAnalysisCache = new Map<string, EnergyScopeAnalysis>();
-const explorerLatestDayCache = new Map<string, string>();
+const explorerAnchoredWindowCache = new Map<string, { localFrom: string; localTo: string }>();
+
+type ExplorerPeriodSelectionInput = Parameters<typeof selectEnergyLatestCompleteDay>[0];
+
+const resolveExplorerAnchoredWindow = async (
+  input: ExplorerPeriodSelectionInput & {
+    analysisWindow: "latest-complete-day" | "current-overview-28d";
+  },
+): Promise<{ localFrom: string; localTo: string }> => {
+  if (input.analysisWindow === "current-overview-28d") {
+    try {
+      const selected = await selectEnergyCurrentOverviewPeriod(input);
+      return {
+        localFrom: selected.period.localFrom,
+        localTo: selected.cutoffLocalDate,
+      };
+    } catch (error) {
+      if (!(error instanceof Error) || (
+        error.message !== "ENERGYIQ_CURRENT_OVERVIEW_COVERAGE_NOT_FOUND"
+        && error.message !== "ENERGYIQ_CURRENT_OVERVIEW_PERIOD_NOT_FOUND"
+      )) {
+        throw error;
+      }
+    }
+  } else {
+    try {
+      const selected = await selectEnergyLatestCompleteDay(input);
+      return {
+        localFrom: selected.period.localFrom,
+        localTo: selected.period.localFrom,
+      };
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== "ENERGYIQ_LATEST_COMPLETE_DAY_NOT_FOUND") {
+        throw error;
+      }
+    }
+  }
+  const fallback = await selectEnergyLatestAvailableDay(input);
+  return {
+    localFrom: fallback.period.localFrom,
+    localTo: fallback.period.localFrom,
+  };
+};
 
 export const handleEnergyApiRequest = async (
   request: IncomingMessage,
@@ -705,23 +748,25 @@ export const handleEnergyApiRequest = async (
     if (segments[0] === "analysis" && segments[1] === "execute" && request.method === "POST") {
       const body = await readJsonBody(request);
       const query = parseQueryContextRequest(body);
-      const explorerLatestDay = isRecord(body)
+      const explorerAnchoredWindow = isRecord(body)
         && body.surface === "project-explorer"
-        && query.analysisWindow === "latest-complete-day";
+        && (query.analysisWindow === "latest-complete-day"
+          || query.analysisWindow === "current-overview-28d");
       const preliminaryRun = resolvePublishedEnergyQueryContext({
         metadataStore: context.metadataStore,
         user,
         workspaceId: context.workspaceId,
-        request: explorerLatestDay
+        request: explorerAnchoredWindow
           ? { ...query, scopeId: "project", period: "Last 30 days" }
           : query,
       });
-      const explorerLatestDayCacheKey = explorerLatestDay
+      const explorerAnchoredWindowCacheKey = explorerAnchoredWindow
         ? JSON.stringify({
             userId: context.userId,
             workspaceId: preliminaryRun.context.workspaceId,
             projectId: preliminaryRun.context.projectId,
             resource: preliminaryRun.context.resource,
+            analysisWindow: query.analysisWindow,
             dataSnapshotId: preliminaryRun.context.dataSnapshotId,
             hierarchyRevisionId: preliminaryRun.context.hierarchyRevisionId,
             meterMappingRevisionId: preliminaryRun.context.meterMappingRevisionId,
@@ -732,36 +777,29 @@ export const handleEnergyApiRequest = async (
             projectReleaseId: preliminaryRun.projectRelease?.id ?? null,
           })
         : null;
-      const cachedLatestDay = explorerLatestDayCacheKey
-        ? explorerLatestDayCache.get(explorerLatestDayCacheKey)
+      const cachedAnchoredWindow = explorerAnchoredWindowCacheKey
+        ? explorerAnchoredWindowCache.get(explorerAnchoredWindowCacheKey)
         : undefined;
-      const latestDayLocalFrom = cachedLatestDay ?? (explorerLatestDay
-        ? (await selectEnergyLatestCompleteDay({
+      const resolvedAnchoredWindow = cachedAnchoredWindow ?? (explorerAnchoredWindow
+        ? await resolveExplorerAnchoredWindow({
             metadataStore: context.metadataStore,
             dataGateway: context.dataGateway,
             userId: context.userId,
             context: preliminaryRun.context,
-          }).catch(async (error: unknown) => {
-            if (!(error instanceof Error) || error.message !== "ENERGYIQ_LATEST_COMPLETE_DAY_NOT_FOUND") {
-              throw error;
-            }
-            return await selectEnergyLatestAvailableDay({
-              metadataStore: context.metadataStore,
-              dataGateway: context.dataGateway,
-              userId: context.userId,
-              context: preliminaryRun.context,
-            });
-          })).period.localFrom
+            analysisWindow: query.analysisWindow === "current-overview-28d"
+              ? "current-overview-28d"
+              : "latest-complete-day",
+          })
         : null);
-      if (explorerLatestDayCacheKey && latestDayLocalFrom && !cachedLatestDay) {
-        explorerLatestDayCache.set(explorerLatestDayCacheKey, latestDayLocalFrom);
-        while (explorerLatestDayCache.size > EXPLORER_ANALYSIS_CACHE_LIMIT) {
-          const oldestKey = explorerLatestDayCache.keys().next().value as string | undefined;
+      if (explorerAnchoredWindowCacheKey && resolvedAnchoredWindow && !cachedAnchoredWindow) {
+        explorerAnchoredWindowCache.set(explorerAnchoredWindowCacheKey, resolvedAnchoredWindow);
+        while (explorerAnchoredWindowCache.size > EXPLORER_ANALYSIS_CACHE_LIMIT) {
+          const oldestKey = explorerAnchoredWindowCache.keys().next().value as string | undefined;
           if (!oldestKey) break;
-          explorerLatestDayCache.delete(oldestKey);
+          explorerAnchoredWindowCache.delete(oldestKey);
         }
       }
-      const energyContext = explorerLatestDay
+      const energyContext = resolvedAnchoredWindow
         ? resolvePublishedEnergyQueryContext({
             metadataStore: context.metadataStore,
             user,
@@ -769,8 +807,8 @@ export const handleEnergyApiRequest = async (
             request: {
               ...query,
               period: "Custom",
-              from: latestDayLocalFrom!,
-              to: latestDayLocalFrom!,
+              from: resolvedAnchoredWindow.localFrom,
+              to: resolvedAnchoredWindow.localTo,
             },
           }).context
         : preliminaryRun.context;
