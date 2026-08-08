@@ -165,7 +165,7 @@ export function PreschoolAiSlot({
 function AiFrame({ children, sectionId }: { children: React.ReactNode; sectionId: PreschoolAiSectionId }) {
   if (sectionId !== "page-synthesis") {
     return (
-      <aside className="mt-5 rounded-xl border border-primary/20 bg-primary/5 p-4 lg:p-5" aria-label="AI interpretation for this section">
+      <aside className="mt-5 rounded-xl border border-primary/20 bg-primary/5 p-4 lg:p-5" aria-label="AI interpretation for this section" data-ai-section={sectionId}>
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <EnergyIcon name="spark" className="h-4 w-4 text-primary" />
           <p className="text-sm font-semibold text-foreground">AI interpretation</p>
@@ -176,7 +176,7 @@ function AiFrame({ children, sectionId }: { children: React.ReactNode; sectionId
     );
   }
   return (
-    <section aria-labelledby="preschool-ai-slot" className="border-b border-border bg-surface px-5 py-5 lg:px-7 lg:py-6">
+    <section aria-labelledby="preschool-ai-slot" className="border-b border-border bg-surface px-5 py-5 lg:px-7 lg:py-6" data-ai-section={sectionId}>
       <div className="mb-5">
         <div>
           <div className="flex flex-wrap items-center gap-2">

@@ -168,6 +168,7 @@ describe("PreschoolAiSlot", () => {
     await act(async () => undefined);
 
     expect(container.textContent).toContain("AI interpretation");
+    expect(container.querySelector("[data-ai-section='centre-benchmark']")).not.toBeNull();
     expect(container.textContent).toContain("Standby is a separate angle");
     expect(container.textContent).not.toContain("Centre G deserves investigation");
     expect(container.querySelectorAll("article")).toHaveLength(1);

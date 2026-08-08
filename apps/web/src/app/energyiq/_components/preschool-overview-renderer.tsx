@@ -202,6 +202,13 @@ export function PreschoolOverviewRenderer({
               . This is a planning estimate, not the customer bill.
             </p>
           ) : null}
+          <PreschoolAiSlot
+            snapshot={state.snapshot}
+            sectionId="overall-summary"
+            mode={aiSlotMode}
+            {...(savedAiResult ? { savedResult: savedAiResult } : {})}
+            {...(aiAnalystHref ? { aiAnalystHref } : {})}
+          />
         </div>
       </section>
 
