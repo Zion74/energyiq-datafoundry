@@ -552,7 +552,7 @@ function buildAgentPrompt(input: NgeeAnnAiRunInput): string {
     "After the useful investigation is complete, return the required strict JSON without commentary.",
     AI_FINDING_PRESENTATION_PROMPT,
     "Return only strict JSON with no markdown or commentary using this shape:",
-    '{"findings":[{"relationship":"supports","horizons":["1d","7d"],"title":"...","what":"...","whyKind":"Evidence","why":"...","how":"...","howToVerify":"...","evidenceNote":"what the cited Evidence supports or cannot prove","evidenceRefs":["horizon:1d","category:load"],"evidenceSqlIndexes":[1],"presentation":{"version":"1","blocks":[{"type":"comparison","title":"Current versus previous","unit":"kWh","items":[{"label":"Current","value":0},{"label":"Previous","value":0}],"evidenceRefs":["horizon:1d"],"evidenceSqlIndexes":[1]}]}}]}',
+    '{"findings":[{"relationship":"supports","horizons":["1d","7d"],"title":"...","what":"...","whyKind":"Evidence","why":"...","how":"...","howToVerify":"...","evidenceNote":"what the cited Evidence supports or cannot prove","evidenceRefs":["horizon:1d","category:load"],"evidenceSqlIndexes":[1],"presentation":{"version":"1","blocks":[{"type":"comparison","prominence":"primary","title":"Current versus previous","unit":"kWh","items":[{"label":"Current","value":0},{"label":"Previous","value":0}],"evidenceRefs":["horizon:1d"],"evidenceSqlIndexes":[1]}]}}]}',
     "Bounded Ngee Ann Discovery Evidence Bundle:",
     JSON.stringify(input.discoveryEvidence),
     "Official deterministic projection:",

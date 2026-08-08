@@ -640,12 +640,13 @@ materialize。自由文案中的额外数字继续由 parser 作为防御检查�
 基线形成后，第一项代码切片固定为 **AI Finding 首屏决策密度收口**：
 
 - 首屏依次能看到一句 Takeaway、Why 和推荐下一步；
-- 最多一张主要图直接展示，其余图表折叠为 `Supporting visuals (N)`；
+- Agent 按当前 Finding 自主选择 0～N 个 Presentation Blocks，并声明哪些是初始阅读必需的 `primary`、哪些是可折叠的 `supporting`；
+- 页面直接展示全部 `primary`，只折叠 Agent 明确标为 `supporting` 的次级表达，不再强制“只能一张主图”；
 - 没有图表时不渲染空容器；
 - Preschool 的“做了 / 不做的后果”保持紧凑，Evidence、验证方式和限制继续折叠；
-- 不改变 Agent、Prompt、Finding、Evidence 或 Provider 合同。
+- Runtime 继续校验每个定量 Block 的 Evidence 资格，但不决定分析角度、图表类型或主图数量。
 
-自动化覆盖 0/1/3/8 个 Presentation Blocks、默认折叠和键盘可访问性；真实 Chrome 再分别检查 Ngee Ann 与
+自动化覆盖 0/1/3/8 个旧 Presentation Blocks 的兼容展示、多个 primary、全 supporting、默认折叠和键盘可访问性；真实 Chrome 再分别检查 Ngee Ann 与
 Preschool 的 1440/1920/tablet。Preschool 若仍没有真实 accepted Artifact，应诚实记录为 Provider 验收未完成，
 不能用 fixture 冒充人工视觉证据。
 
@@ -706,3 +707,15 @@ Trace、临时阈值和 Preschool appliance alias 也不作为通用 Pattern。
 - 不把尚未人工证明价值的图表登记为 reusable；
 - 不因视觉优先而移除 Snapshot、授权、只读 SQL 和错实体/错单位安全底线；
 - 发现超出当前客户可见切片的新问题时，先记录到对应 Issue，再决定是否进入主线。
+
+### 14.8 分工与当前实现校准（2026-08-08）
+
+UI/UX 侧边 Agent 的 19 个展示层文件已从原混合提交中拆为独立 commit，范围只包含 Shell、侧栏、字号/说明降噪、
+响应式展示和相应测试；AI Slot 的信息合同、Prompt、Evidence 和业务表达继续由主 Agent维护。
+
+AI Finding 展示采用兼容扩展：每个 Block 可选 `prominence: primary | supporting`。省略该字段的历史 Artifact 全部按
+`primary` 展示，避免版本升级后把既有重要内容静默隐藏；Agent 可让多个 Block 同时成为 primary，也可完全不生成图表。
+现有总 Block 数量和单个序列长度上限仅作为 payload/render 安全边界保留，不作为分析主题或视觉配额。
+
+验收仍分四层：focused tests/typecheck、真实 Provider accepted Artifact、1440/1920/tablet Chrome、Charles/用户 60 秒
+信息价值判断。前一层不能代替后一层；没有 accepted Artifact 时只证明 fail-closed，不冒充 AI Slot 视觉验收完成。

@@ -7,9 +7,10 @@ describe("parseAiFindingPresentation", () => {
     expect(parseAiFindingPresentation({
       version: "1",
       blocks: [
-        { type: "metric", label: "Latest day", value: 418.2, unit: "kWh", evidenceRefs: ["horizon:1d"] },
+        { type: "metric", prominence: "primary", label: "Latest day", value: 418.2, unit: "kWh", evidenceRefs: ["horizon:1d"] },
         {
           type: "comparison",
+          prominence: "supporting",
           title: "Current versus previous period",
           unit: "kWh",
           items: [
@@ -27,9 +28,10 @@ describe("parseAiFindingPresentation", () => {
     })).toEqual({
       version: "1",
       blocks: [
-        { type: "metric", label: "Latest day", value: 418.2, unit: "kWh", evidenceRefs: ["horizon:1d"] },
+        { type: "metric", prominence: "primary", label: "Latest day", value: 418.2, unit: "kWh", evidenceRefs: ["horizon:1d"] },
         {
           type: "comparison",
+          prominence: "supporting",
           title: "Current versus previous period",
           unit: "kWh",
           items: [
@@ -90,5 +92,18 @@ describe("parseAiFindingPresentation", () => {
   it("allows the analyst to omit presentation when prose is clearer", () => {
     expect(parseAiFindingPresentation(undefined)).toBeNull();
     expect(parseAiFindingPresentation({ version: "1", blocks: [] })).toBeNull();
+  });
+
+  it("drops a block with an invalid presentation prominence", () => {
+    expect(parseAiFindingPresentation({
+      version: "1",
+      blocks: [
+        { type: "metric", prominence: "hero", label: "Invalid", value: 42, evidenceRefs: ["metric:invalid"] },
+        { type: "callout", prominence: "primary", tone: "insight", text: "Keep this verified explanation." },
+      ],
+    })).toEqual({
+      version: "1",
+      blocks: [{ type: "callout", prominence: "primary", tone: "insight", text: "Keep this verified explanation." }],
+    });
   });
 });

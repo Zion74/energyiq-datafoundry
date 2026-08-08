@@ -8,7 +8,11 @@ export type AiPresentationEvidenceBinding = {
   evidenceSqlIndexes?: number[];
 };
 
-export type AiPresentationBlock = AiPresentationEvidenceBinding & (
+export type AiPresentationDisplayIntent = {
+  prominence?: "primary" | "supporting";
+};
+
+export type AiPresentationBlock = AiPresentationEvidenceBinding & AiPresentationDisplayIntent & (
   | { type: "metric"; label: string; value: number; unit?: string; context?: string }
   | { type: "comparison" | "ranking" | "share" | "distribution"; title?: string; unit?: string; items: AiPresentationValueItem[] }
   | { type: "trend"; title?: string; unit?: string; points: AiPresentationValueItem[] }
@@ -57,6 +61,8 @@ export function filterAiFindingPresentationEvidence(
 
 function parseBlock(value: unknown): AiPresentationBlock[] {
   if (!isRecord(value)) return [];
+  const displayIntent = parseDisplayIntent(value);
+  if (!displayIntent) return [];
   const type = text(value.type, 40);
   if (type === "metric") {
     const binding = parseEvidenceBinding(value, true);
@@ -65,7 +71,7 @@ function parseBlock(value: unknown): AiPresentationBlock[] {
     if (!binding || !label || metricValue === null) return [];
     const unit = optionalText(value.unit, 32);
     const context = optionalText(value.context, 180);
-    return [{ type, label, value: metricValue, ...binding, ...(unit ? { unit } : {}), ...(context ? { context } : {}) }];
+    return [{ type, label, value: metricValue, ...binding, ...displayIntent, ...(unit ? { unit } : {}), ...(context ? { context } : {}) }];
   }
   if (type === "comparison" || type === "ranking" || type === "share" || type === "distribution") {
     const binding = parseEvidenceBinding(value, true);
@@ -73,7 +79,7 @@ function parseBlock(value: unknown): AiPresentationBlock[] {
     if (!binding || !items) return [];
     const title = optionalText(value.title, 160);
     const unit = optionalText(value.unit, 32);
-    return [{ type, items, ...binding, ...(title ? { title } : {}), ...(unit ? { unit } : {}) }];
+    return [{ type, items, ...binding, ...displayIntent, ...(title ? { title } : {}), ...(unit ? { unit } : {}) }];
   }
   if (type === "trend") {
     const binding = parseEvidenceBinding(value, true);
@@ -81,7 +87,7 @@ function parseBlock(value: unknown): AiPresentationBlock[] {
     if (!binding || !points) return [];
     const title = optionalText(value.title, 160);
     const unit = optionalText(value.unit, 32);
-    return [{ type, points, ...binding, ...(title ? { title } : {}), ...(unit ? { unit } : {}) }];
+    return [{ type, points, ...binding, ...displayIntent, ...(title ? { title } : {}), ...(unit ? { unit } : {}) }];
   }
   if (type === "heatmap") {
     const binding = parseEvidenceBinding(value, true);
@@ -96,7 +102,7 @@ function parseBlock(value: unknown): AiPresentationBlock[] {
       return parsed.some((candidate) => candidate === null) ? [] : [parsed as number[]];
     });
     if (values.length !== yLabels.length) return [];
-    return [{ type, xLabels, yLabels, values, ...binding, ...(title ? { title } : {}), ...(unit ? { unit } : {}) }];
+    return [{ type, xLabels, yLabels, values, ...binding, ...displayIntent, ...(title ? { title } : {}), ...(unit ? { unit } : {}) }];
   }
   if (type === "table") {
     const title = optionalText(value.title, 160);
@@ -115,16 +121,23 @@ function parseBlock(value: unknown): AiPresentationBlock[] {
     if (rows.length !== value.rows.length) return [];
     const binding = parseEvidenceBinding(value, rows.some((row) => row.some((cell) => typeof cell === "number")));
     if (!binding) return [];
-    return [{ type, columns, rows, ...binding, ...(title ? { title } : {}) }];
+    return [{ type, columns, rows, ...binding, ...displayIntent, ...(title ? { title } : {}) }];
   }
   if (type === "callout") {
     const tone = text(value.tone, 20);
     const calloutText = text(value.text, 320);
     const binding = parseEvidenceBinding(value, Boolean(calloutText && /\d/u.test(calloutText)));
     if (!binding || !calloutText || (tone !== "insight" && tone !== "caution" && tone !== "positive" && tone !== "neutral")) return [];
-    return [{ type, tone, text: calloutText, ...binding }];
+    return [{ type, tone, text: calloutText, ...binding, ...displayIntent }];
   }
   return [];
+}
+
+function parseDisplayIntent(value: Record<string, unknown>): AiPresentationDisplayIntent | null {
+  if (value.prominence === undefined || value.prominence === null) return {};
+  return value.prominence === "primary" || value.prominence === "supporting"
+    ? { prominence: value.prominence }
+    : null;
 }
 
 function parseEvidenceBinding(

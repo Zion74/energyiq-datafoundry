@@ -3,6 +3,7 @@ import {
   parseAiFindingPresentation,
   type AiFindingPresentation,
   type AiPresentationBlock,
+  type AiPresentationDisplayIntent,
   type AiPresentationValueItem,
 } from "@datafoundry/contracts";
 
@@ -11,13 +12,14 @@ export {
   parseAiFindingPresentation,
   type AiFindingPresentation,
   type AiPresentationBlock,
+  type AiPresentationDisplayIntent,
   type AiPresentationValueItem,
 };
 
 export const AI_FINDING_PRESENTATION_PROMPT = [
-  "For each Finding, use presentation v1 blocks only when clearer; there is no presentation-block quota or executable HTML/JS/CSS/React.",
-  "Each quantitative block must cite a subset of that Finding's sources in evidenceRefs and/or evidenceSqlIndexes. Preserve the cited metric, label, unit and business meaning.",
-  "Blocks: metric {type,label,value,unit?,context?}; comparison/ranking/share/distribution {type,title?,unit?,items:[{label,value}]}; trend {type,title?,unit?,points:[{label,value}]}; heatmap {type,title?,unit?,xLabels,yLabels,values}; table {type,title?,columns,rows}; callout {type,tone,text}. Add evidenceRefs/evidenceSqlIndexes to every quantitative block.",
+  "For each Finding, use zero or more presentation v1 blocks only when clearer; no theme or primary-block quota; never emit executable HTML/JS/CSS/React.",
+  "Set optional prominence:'primary' on every block essential to initial reading and 'supporting' only on secondary detail. Any number may be primary; omission means primary.",
+  "Shapes: metric(label,value); comparison/ranking/share/distribution(items); trend(points); heatmap(xLabels,yLabels,values); table(columns,rows); callout(tone,text). Optional fields: title,unit,context,prominence. Every quantitative block must cite that Finding's evidenceRefs/evidenceSqlIndexes and preserve metric, label, unit and meaning.",
 ].join("\n");
 
 export function aiFindingPresentationEvidenceText(presentation: AiFindingPresentation | null | undefined): string {
