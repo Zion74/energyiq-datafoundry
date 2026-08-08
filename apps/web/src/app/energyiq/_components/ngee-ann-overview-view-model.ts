@@ -687,7 +687,7 @@ export function buildNgeeAnnOverviewViewModel(
           ? `${analysis.cost.currency === "SGD" ? "S$" : `${analysis.cost.currency} `}${formatDecimal(analysis.cost.amount, 2)}`
           : "Unavailable",
         detail: analysis.cost.status === "available" && !unavailable
-          ? `Tariff ${analysis.cost.tariffScheduleVersion} / ${analysis.cost.allocations.length} allocation${analysis.cost.allocations.length === 1 ? "" : "s"}`
+          ? `Based on ${analysis.cost.allocations.length === 1 ? "the active tariff" : `${analysis.cost.allocations.length} active tariff allocations`} for this period`
           : analysis.cost.status === "unavailable"
             ? analysis.cost.reason.message
             : "No effective Tariff",
@@ -1403,7 +1403,7 @@ function buildDecisionPriorities(
         formatLocalDate(item.evidence.occurrence.localDate),
         `${formatDecimal(item.finding.actualKwh, 2)} kWh vs ${formatDecimal(item.finding.baselineKwh, 2)} kWh baseline (${signedDecimal(item.finding.relativePct, 1)}%)`,
       ].join(" / "),
-      impact: `${signedDecimal(item.impact.energy.deltaKwh, 2)} kWh above baseline; incident cost unavailable`,
+      impact: `${formatDecimal(Math.abs(item.impact.energy.deltaKwh), 1)} kWh above comparable days. Cost impact is not available yet.`,
       action: item.action.label,
       confidence: item.confidence.status === "complete" ? "Complete Evidence" : "Partial Evidence",
       confidenceLimitation: item.confidence.limitation?.message ?? null,
@@ -1432,7 +1432,7 @@ function buildDecisionPriorities(
         limitation: horizon.limitation,
       })),
       driver: item.driver.status === "available"
-        ? `${item.driver.label}: ${signedDecimal(item.driver.impactKwh, 2)} kWh; ${item.driver.limitation}`
+        ? `${item.driver.label} contributed ${signedDecimal(item.driver.impactKwh, 1)} kWh to the selected exception. Meter data locates the issue; it does not confirm the operational cause.`
         : item.driver.limitation,
       nextCheck: item.action.nextCheck,
       verificationMetric: item.action.verificationMetricRef.label,

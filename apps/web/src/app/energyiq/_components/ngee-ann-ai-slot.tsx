@@ -180,9 +180,14 @@ export function NgeeAnnAiSlot({
           Saved AI result · Run {displayedResult.runId}
         </p>
       ) : null}
-      <p className="mt-4 text-xs leading-5 text-muted-light">
-        AI suggestions are based on Snapshot {input.snapshotId} through {input.dataCutoff}. Verified KPIs and Evidence remain authoritative.
-      </p>
+      <details className="mt-4 text-xs leading-5 text-muted-light">
+        <summary className="cursor-pointer font-medium text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+          AI analysis data details
+        </summary>
+        <p className="mt-1">
+          AI suggestions use Snapshot {input.snapshotId} through {input.dataCutoff}. Verified KPIs and Evidence remain authoritative.
+        </p>
+      </details>
     </AiSlotFrame>
   );
 }

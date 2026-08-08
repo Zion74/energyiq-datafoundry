@@ -147,6 +147,9 @@ describe("NgeeAnnAiSlot", () => {
     expect(container.querySelectorAll("[data-ai-primary-takeaway='true']")).toHaveLength(3);
     expect(container.querySelectorAll("[data-ai-primary-action='true']")).toHaveLength(3);
     expect(container.querySelector("[data-ai-secondary-details='true']")?.hasAttribute("open")).toBe(false);
+    const analysisDataDetails = Array.from(container.querySelectorAll("details"))
+      .find((details) => details.querySelector("summary")?.textContent?.includes("AI analysis data details"));
+    expect(analysisDataDetails?.hasAttribute("open")).toBe(false);
     expect(startRun).toHaveBeenCalledTimes(1);
 
     const whatLabel = [...container.querySelectorAll("article p")]

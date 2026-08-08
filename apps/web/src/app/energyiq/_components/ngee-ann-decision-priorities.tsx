@@ -19,7 +19,9 @@ export function NgeeAnnDecisionPriorities({
   projectExplorerHref?: string;
   aiAnalystHref?: string;
 }) {
-  const stateMessage = priorityStateMessage(view);
+  const stateMessage = view.status === "partial" && view.items.length > 0
+    ? null
+    : priorityStateMessage(view);
   return (
     <section
       id="ngee-ann-takeaways"
@@ -36,7 +38,7 @@ export function NgeeAnnDecisionPriorities({
           </p>
         </div>
         <span className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-muted">
-          {view.items.length} verified {view.items.length === 1 ? "priority" : "priorities"}
+          {view.items.length} decision {view.items.length === 1 ? "priority" : "priorities"}
         </span>
       </div>
 
@@ -95,7 +97,7 @@ export function NgeeAnnDecisionPriorities({
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-xs font-semibold text-primary">Priority {item.rank}</p>
-                  <h4 className="mt-1.5 max-w-4xl text-lg font-semibold leading-7 text-foreground">{item.finding}</h4>
+                  <h4 className="mt-1.5 max-w-4xl text-lg font-semibold leading-7 text-foreground">{decisionHeadline(item)}</h4>
                 </div>
                 <div className="flex flex-wrap justify-end gap-2">
                   {item.lifecycle ? (
@@ -117,7 +119,7 @@ export function NgeeAnnDecisionPriorities({
                       ? "bg-step-success-light text-step-success"
                       : "bg-step-warning/10 text-step-warning",
                   ].join(" ")}>
-                    {item.confidence}
+                    {item.confidence === "Complete Evidence" ? "Verified" : "Supporting data partial"}
                   </span>
                 </div>
               </div>
@@ -127,15 +129,16 @@ export function NgeeAnnDecisionPriorities({
               <HorizonComparison horizons={item.horizons} />
               <dl className="mt-5 grid gap-x-8 gap-y-4 text-sm leading-6 md:grid-cols-2">
                 <PriorityField label="Why it matters" value={item.impact} />
-                <PriorityField label="Main supported driver" value={item.driver} />
-                <PriorityField label="Do next" value={item.nextCheck} />
-                <PriorityField label="Verify with" value={item.verificationMetric} />
+                <PriorityField label="Where to investigate first" value={item.driver} />
+                <PriorityField label="Recommended next check" value={item.nextCheck} />
+                <PriorityField label="How to confirm progress" value={item.verificationMetric} />
               </dl>
               <details className="mt-5 border-t border-border pt-4">
                 <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
                   Details, evidence and limitations
                 </summary>
                 <div className="mt-4 text-sm leading-6 text-muted">
+                  <p><span className="font-semibold text-foreground">Rule finding.</span> {item.finding}</p>
                   <p><span className="font-semibold text-foreground">Supporting evidence.</span> {item.evidence}</p>
                   <p className="mt-2">Seen on {item.recurrenceDayCount} distinct exception days. Linked Level and Circuit evidence is preserved.</p>
                   {item.confidenceLimitation ? (
@@ -219,14 +222,14 @@ function HorizonComparison({
     <div className="mt-5 border-y border-border py-4">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <p className="text-sm font-semibold text-foreground">
-          How each horizon compares with its governed baseline
+          How usage changed across 1 day, 7 days and 28 days
         </p>
         <div className="text-right text-xs leading-5 text-muted">
           <div className="flex justify-end gap-5 font-medium" aria-hidden="true">
-            <span>Below baseline</span>
-            <span>Above baseline</span>
+            <span>Lower use</span>
+            <span>Higher use</span>
           </div>
-          <p>Bar length is relative to the largest visible change.</p>
+          <p>Each period is compared with the same type of previous period.</p>
         </div>
       </div>
       <div className="mt-4 space-y-4">
@@ -236,6 +239,26 @@ function HorizonComparison({
       </div>
     </div>
   );
+}
+
+function decisionHeadline(item: NgeeAnnDecisionPrioritiesViewModel["items"][number]): string {
+  const preferred = item.horizons.find((horizon) => horizon.label === "Rolling 7 days" && horizon.status === "available")
+    ?? item.horizons.find((horizon) => horizon.label === "Rolling 28 days" && horizon.status === "available")
+    ?? item.horizons.find((horizon) => horizon.status === "available");
+  if (!preferred || preferred.relativePct === null) return item.finding;
+
+  const periodLabel = preferred.label === "Rolling 7 days"
+    ? "Recent 7-day"
+    : preferred.label === "Rolling 28 days"
+      ? "28-day"
+      : "Latest complete-day";
+  const magnitude = formatNumber(Math.abs(preferred.relativePct), 1);
+  const comparison = preferred.relativePct > 0
+    ? `${magnitude}% above`
+    : preferred.relativePct < 0
+      ? `${magnitude}% below`
+      : "in line with";
+  return `${periodLabel} usage is ${comparison} its comparable baseline; ${item.recurrenceDayCount} daily exception${item.recurrenceDayCount === 1 ? "" : "s"} need review.`;
 }
 
 function HorizonComparisonRow({

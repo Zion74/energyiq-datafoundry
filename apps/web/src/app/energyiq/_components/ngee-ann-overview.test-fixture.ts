@@ -763,10 +763,10 @@ function goldenDecisionPriorities(): NonNullable<EnergyProjectAnalysisSnapshotDt
         label: "Review the strongest supported Level, Circuit and hourly Evidence before changing schedules or equipment.",
         targetIncidentId: primaryIncidentId,
         targetRef: { kind: "daily_usage_incident", id: primaryIncidentId },
-        nextCheck: "Open the primary incident and compare its hourly and Circuit Evidence with the pinned baseline.",
+        nextCheck: "Open the highest-impact day, then compare its hourly pattern and largest contributing Circuits with a comparable day.",
         verificationMetricRef: {
           metricId: "energy.total_usage_kwh@1",
-          label: "Daily and rolling total usage versus the pinned baseline",
+          label: "After the check, compare daily and 7-day usage with the same baseline",
         },
       },
       confidence: { status: "complete", limitation: null },

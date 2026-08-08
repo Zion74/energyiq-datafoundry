@@ -356,10 +356,10 @@ export const buildNgeeAnnDecisionPriorities = (input: {
         label: "Review the strongest supported Level, Circuit and hourly Evidence before changing schedules or equipment.",
         targetIncidentId: themePrimary.row.incidentId,
         targetRef: { kind: "daily_usage_incident", id: themePrimary.row.incidentId },
-        nextCheck: "Open the primary incident and compare its hourly and Circuit Evidence with the pinned baseline.",
+        nextCheck: "Open the highest-impact day, then compare its hourly pattern and largest contributing Circuits with a comparable day.",
         verificationMetricRef: {
           metricId: DAILY_USAGE_METRIC_ID,
-          label: "Daily and rolling total usage versus the pinned baseline",
+          label: "After the check, compare daily and 7-day usage with the same baseline",
         },
       },
       confidence: confidencePartial

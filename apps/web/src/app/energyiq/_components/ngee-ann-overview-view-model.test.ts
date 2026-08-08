@@ -370,7 +370,7 @@ describe("Ngee Ann Overview ViewModel", () => {
     expect(view.highlights.find((item) => item.id === "comparison")?.detail)
       .toBe("Current 1531.17 kWh vs previous 1211.68 kWh");
     expect(view.highlights.find((item) => item.id === "cost")?.detail)
-      .toBe("Tariff tariff-v1 / 1 allocation");
+      .toBe("Based on the active tariff for this period");
     expect(view.metadataLimitation).toContain("Area and headcount metadata are missing");
     expect(view.metadataLimitation).toContain("does not affect Total energy, Daily average, Peak interval-average power, Comparison or Cost");
     expect(view.levelComparison).toMatchObject({
@@ -1824,7 +1824,7 @@ describe("Ngee Ann Overview ViewModel", () => {
           rank: 1,
           finding: "Ngee Ann Polytechnic recorded 3 distinct daily usage exceptions in this Snapshot.",
           evidence: "Project / 13 Jun / 168.96 kWh vs 63.34 kWh baseline (+166.8%)",
-          impact: "+105.63 kWh above baseline; incident cost unavailable",
+          impact: "105.6 kWh above comparable days. Cost impact is not available yet.",
           targetIncidentId: "incident:project:2026-06-13",
           explorerScopeId: "level-7",
           explorerScopeName: "Level 7",
@@ -1858,7 +1858,7 @@ describe("Ngee Ann Overview ViewModel", () => {
               comparison: "4904.87 kWh vs 4831.56 kWh (+1.5%)",
             },
           ],
-          driver: "Level 7: +88.1 kWh; Evidence only; not a confirmed root cause.",
+          driver: "Level 7 contributed +88.1 kWh to the selected exception. Meter data locates the issue; it does not confirm the operational cause.",
         },
       ],
     });

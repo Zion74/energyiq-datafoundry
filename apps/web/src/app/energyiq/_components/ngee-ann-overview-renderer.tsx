@@ -92,6 +92,12 @@ export function NgeeAnnOverviewRenderer({
             <p className="mt-1 text-xs leading-5 text-muted">
               {view.dataStatus.intervals} / {view.dataStatus.qualityEvents} / {view.dataStatus.lastSeen}
             </p>
+            {view.metadataLimitation ? (
+              <p className="mt-2 max-w-xl text-xs leading-5 text-muted">
+                <span className="font-semibold text-foreground">Normalised benchmarks are not shown.</span>{" "}
+                {view.metadataLimitation}
+              </p>
+            ) : null}
           </details>
         </div>
       </div>
@@ -136,6 +142,12 @@ export function NgeeAnnOverviewRenderer({
             <p className="mt-1 leading-5">
               {view.dataStatus.intervals} / {view.dataStatus.qualityEvents} / {view.dataStatus.lastSeen}
             </p>
+            {view.metadataLimitation ? (
+              <p className="mt-2 max-w-xl leading-5">
+                <span className="font-semibold text-foreground">Normalised benchmarks are not shown.</span>{" "}
+                {view.metadataLimitation}
+              </p>
+            ) : null}
           </details>
         </div>
       )}
@@ -153,21 +165,6 @@ export function NgeeAnnOverviewRenderer({
               <EnergyIcon name="arrow" className="h-3.5 w-3.5" />
             </button>
           ) : null}
-        </div>
-      ) : null}
-
-      {view.metadataLimitation ? (
-        <div className="border-b border-border bg-surface px-5 py-3 lg:px-7" role="note">
-          <p className="text-xs leading-5 text-muted">
-            <span className="font-semibold text-foreground">Normalised benchmarks unavailable.</span>{" "}
-            Area and headcount are not configured. Core energy, comparison and cost figures remain valid.
-          </p>
-          <details className="mt-1.5 text-xs leading-5 text-muted">
-            <summary className="cursor-pointer font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
-              Why, and how to enable them
-            </summary>
-            <p className="mt-1 max-w-4xl">{view.metadataLimitation}</p>
-          </details>
         </div>
       ) : null}
 

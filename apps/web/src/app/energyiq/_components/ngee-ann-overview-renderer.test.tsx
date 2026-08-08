@@ -43,17 +43,18 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Latest complete day");
     expect(markup).toContain("Rolling 7 days");
     expect(markup).toContain("Rolling 28 days");
-    expect(markup).toContain("How each horizon compares with its governed baseline");
+    expect(markup).toContain("How usage changed across 1 day, 7 days and 28 days");
     expect(markup).toContain('data-horizon-label="Rolling 7 days"');
     expect(markup).toContain('data-direction="increase"');
     expect(markup).toContain('aria-label="Rolling 7 days, 10 Jun – 16 Jun: 1,531.17 kWh versus 1,211.68 kWh governed baseline; +319.49 kWh, +26.4%"');
-    expect(markup).toContain("Bar length is relative to the largest visible change.");
+    expect(markup).toContain("Recent 7-day usage is 26.4% above its comparable baseline; 3 daily exceptions need review.");
+    expect(markup).toContain("Each period is compared with the same type of previous period.");
     expect(markup).toContain("1,531.17 vs 1,211.68 kWh");
     expect(markup).toContain("+319.49 kWh vs baseline");
     expect(markup).toContain("Seen on 3 distinct exception days. Linked Level and Circuit evidence is preserved.");
     expect(markup).toContain("Why it matters");
-    expect(markup).toContain("Do next");
-    expect(markup).toContain("Verify with");
+    expect(markup).toContain("Recommended next check");
+    expect(markup).toContain("How to confirm progress");
     expect(markup).toContain("Details, evidence and limitations");
     expect(markup.match(/View supporting evidence/g)).toHaveLength(1);
     expect(markup).toContain("Compared with saved result from");
@@ -168,9 +169,9 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Takeaways and next decisions");
     expect(markup).toContain("Supporting evidence");
     expect(markup).toContain("Why it matters");
-    expect(markup).toContain("Do next");
-    expect(markup).toContain("Verify with");
-    expect(markup).toContain("Complete Evidence");
+    expect(markup).toContain("Recommended next check");
+    expect(markup).toContain("How to confirm progress");
+    expect(markup).toContain("Verified");
     expect(markup).toContain("href=\"#incident-project-2026-06-13\"");
     expect(markup).toContain("Inspect Level 7 in Project Explorer");
     expect(markup).toContain("Open Project Explorer");
@@ -238,7 +239,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     );
 
     expect(markup).toContain(expected);
-    expect(markup).toContain("0 verified priorities");
+    expect(markup).toContain("0 decision priorities");
     expect(markup).not.toContain("View supporting evidence");
     expect(markup).toContain("Verified figures");
   });
@@ -269,8 +270,9 @@ describe("NgeeAnnOverviewRenderer", () => {
       <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
     );
 
-    expect(markup).toContain("bg-step-warning/10 text-step-warning\">Partial Evidence");
+    expect(markup).toContain("bg-step-warning/10 text-step-warning\">Supporting data partial");
     expect(markup).toContain("Limitation.</span> Supporting Circuit Evidence is partial.");
+    expect(markup).not.toContain("Themes use partial supporting Evidence");
   });
 
   it("keeps the Golden context, status, highlights and evidence in one compact dedicated surface", () => {
@@ -293,10 +295,10 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Current 1531.17 kWh vs previous 1211.68 kWh");
     expect(markup).toContain("S$489.97");
     expect(markup).toContain("Area and headcount metadata are missing");
-    expect(markup).toContain("Normalised benchmarks unavailable.");
-    expect(markup).toContain("Core energy, comparison and cost figures remain valid.");
-    expect(markup).toContain("Why, and how to enable them");
+    expect(markup).toContain("Normalised benchmarks are not shown.");
+    expect(markup).not.toContain("Normalised benchmarks unavailable.");
     expect(markup).toContain("Configure area metadata. Configure headcount metadata.");
+    expect(markup).toContain("Based on the active tariff for this period");
     expect(markup).toContain("Energy trend");
     expect(markup).toContain("When did accepted energy use change inside the selected Period?");
     expect(markup).toContain("Energy trend Scope");
