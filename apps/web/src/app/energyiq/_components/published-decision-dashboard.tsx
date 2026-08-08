@@ -630,16 +630,6 @@ function PublishedDecisionDashboardView({
             </div>
           ) : null}
           <button
-            ref={historyButtonRef}
-            type="button"
-            onClick={() => navigateHistory({ open: true, selectedAnalysisId: null })}
-            disabled={!projectId}
-            className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-surface px-4 text-xs font-semibold text-foreground transition-colors hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <EnergyIcon name="calendar" className="h-3.5 w-3.5" />
-            History
-          </button>
-          <button
             type="button"
             onClick={refreshOverview}
             disabled={running || resource === "water"}
@@ -657,6 +647,16 @@ function PublishedDecisionDashboardView({
             className="h-10 rounded-lg border border-border bg-surface px-4 text-xs font-semibold text-foreground transition-colors hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving ? "Saving…" : "Save analysis"}
+          </button>
+          <button
+            ref={historyButtonRef}
+            type="button"
+            onClick={() => navigateHistory({ open: true, selectedAnalysisId: null })}
+            disabled={!projectId}
+            className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-surface px-4 text-xs font-semibold text-foreground transition-colors hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <EnergyIcon name="calendar" className="h-3.5 w-3.5" />
+            History
           </button>
         </div>
       </section>
