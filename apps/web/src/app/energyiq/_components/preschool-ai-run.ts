@@ -644,8 +644,7 @@ function parseFindings(answer: string): GeneratedFinding[] | null {
     if (!isRecord(candidate)) return [];
     const evidenceRefs = stringArray(candidate.evidenceRefs);
     const evidenceSqlIndexes = positiveIntegerArray(candidate.evidenceSqlIndexes);
-    const relationship = stringValue(candidate.relationship)
-      ?? (evidenceRefs.length > 0 ? "supports" : "independent");
+    const relationship = stringValue(candidate.relationship) ?? "independent";
     const whyKind = stringValue(candidate.whyKind);
     const title = cleanText(candidate.title);
     const what = cleanText(candidate.what);
@@ -728,8 +727,9 @@ function unsupportedNumber(
   tools: CollectedSqlEvidence[],
   input: PreschoolAiRunInput,
 ): boolean {
+  const evidenceNote = removeCitedSqlReturnedRowReferences(finding.evidenceNote, tools);
   const rawNarrative = [finding.title, finding.what, finding.why, finding.how, finding.expectedIfAct,
-    finding.ifIgnored, finding.howToVerify, finding.evidenceNote,
+    finding.ifIgnored, finding.howToVerify, evidenceNote,
     aiFindingPresentationEvidenceText(finding.presentation)].join(" ");
   return unsupportedNarrative(rawNarrative, evidence, tools, input, finding.evidenceSqlIndexes);
 }
@@ -813,6 +813,11 @@ function removeCitedSqlPredicateReferences(narrative: string, tools: CollectedSq
       ? `${column}${operator}`
       : full,
   );
+  return remaining;
+}
+
+function removeCitedSqlReturnedRowReferences(evidenceNote: string, tools: CollectedSqlEvidence[]): string {
+  let remaining = evidenceNote;
   for (const tool of tools) {
     if (tool.returnedRowCount < 1) continue;
     remaining = remaining.replace(

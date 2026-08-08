@@ -411,9 +411,10 @@ v9 三次真实 Run 证据：
 | `preschool-overview-e21b30cc-1262-41b2-b214-50813e6f8427` | 251s | 11 | 一条被 Finding 实际需要的查询返回 24 行，且叙述未绑定对应 SQL，数字守卫正确拒绝 |
 | `preschool-overview-7ca9322f-8bdd-4693-80fb-936f88384876` | 164s | 6 | 生成 3 条候选；至少一条把实际返回行数写在 limitation，旧守卫将审计行数误当业务数字 |
 
-解析器现兼容 `next → how`、顶层 `blocks → presentation.blocks`，缺少纯展示关系时按是否引用 deterministic Evidence
-归为 supports/independent；数值、Snapshot、SQL 行数与 Evidence 守卫不变。审计限制中出现的“实际返回 N 行”只在
-N 精确等于该 Finding 所引用工具的 `returnedRowCount` 时作为结构上下文移除；不匹配行数、Top-N 业务结论、能耗、
+解析器现兼容 `next → how`、顶层 `blocks → presentation.blocks`；缺少纯展示关系时使用中性的 `independent`，避免
+根据 Evidence 引用臆断 supports/challenges。数值、Snapshot、SQL 行数与 Evidence 守卫不变。只有 `evidenceNote`
+限制说明中的“实际返回 N 行”，且 N 精确等于该 Finding 所引用工具的 `returnedRowCount` 时，才作为结构上下文移除；
+What/Why/Action/Presentation 中的相同数字仍须正常取证。不匹配行数、Top-N 业务结论、能耗、
 比例、成本和派生数字仍拒绝。自动证据为 Presentation/两项目 Run 4 files / 98 tests、根 typecheck/build 通过；最新窄测
 继续覆盖等价字段、未引用超行隔离、引用超行拒绝与真实返回行数/错误行数分支。
 

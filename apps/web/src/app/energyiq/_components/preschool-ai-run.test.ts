@@ -255,7 +255,7 @@ describe("Preschool AI Run", () => {
     expect(result.status).toBe("available");
     if (result.status === "available") {
       expect(result.findings[0]).toMatchObject({
-        relationship: "supports",
+        relationship: "independent",
         how: generatedFindings()[0]!.how,
         presentation: { version: "1", blocks: [expect.objectContaining({ type: "comparison" })] },
       });
@@ -671,6 +671,19 @@ describe("Preschool AI Run", () => {
       runId: "run-1",
     }).status).toBe("available");
 
+    finding[0]!.evidenceNote = "The Evidence supports prioritisation, not a confirmed root cause.";
+    finding[0]!.what = "The ranking reflects only the 3 rows returned.";
+    expect(resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(finding),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    })).toEqual({
+      status: "unavailable",
+      reason: "The AI Analyst returned a numeric claim without Finding-specific Evidence.",
+    });
+
+    finding[0]!.what = generatedFindings()[0]!.what;
     finding[0]!.evidenceNote = "The ranking reflects only the 4 rows returned.";
     expect(resolvePreschoolAiEventStream({
       eventStream: successfulEventStream(finding),
