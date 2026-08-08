@@ -3,7 +3,7 @@ title: "2026-08-05 决策：Overview 用户价值与 AI Slot 最小交付"
 summary: "把快速、可信的确定性 Ngee Ann Overview 与一次真实、异步、可降级的 DataFoundry 自主分析 Run 共同纳入 Charles 首版验收，并以最小 Project Analysis Prior 提升分析价值。"
 doc_type: decision
 tags: [Overview, Ngee Ann, AI Slot, DataFoundry, Evidence]
-updated_at: "2026-08-06"
+updated_at: "2026-08-08"
 related:
   - "决策-Overview改造与AI-Analysis打通最终方案.md"
   - "决策-项目Renderer-Recipe与时间上下文.md"
@@ -175,6 +175,39 @@ Hover、弹窗、选中 heatmap cell、滚动位置和局部图表切换不触�
 - `relationship`：`supports`、`challenges` 或 `independent`。
 
 `relationship` 用于解释 AI 与确定性主题的关系，不是创新配额。若数据不足以支持额外角度，模型不得为了填满 `independent` 而编造结论。无 Evidence 的数字、已确认根因、节省金额、ROI、负责人或承诺不展示。
+
+### 6.3 自主探索与最终输出验真边界
+
+Agent 的调查能力与客户可见输出采用不同边界：**调查阶段不规定固定主题、维度、SQL 数量或“创新”配额；发布阶段
+逐条验证事实、数字、图表与 Evidence 身份。** 输出校验限制的是未经证明的断言，不限制 Agent 可以观察和调查什么。
+
+评估过的选择：
+
+| 方案 | 优点 | 风险 | 决定 |
+| --- | --- | --- | --- |
+| 直接相信模型最终文本 | 最快、最自由 | 无法区分可靠计算、心算、错引和编造 | 不采用 |
+| 用固定主题、固定 SQL 或固定路线避免错误 | 容易得到稳定格式 | 压制自主发现，退化成摘要生成器 | 不采用 |
+| 自主调查，完成后只做拒绝 | 安全 | 当前 Preschool 已出现工具成功但 0/3 Finding 可展示 | 仅作为最终兜底 |
+| 自主调查 + 提交前自检 + 确定性发布校验 | 保留分析能力，同时提高可交付率 | 增加一次校验和可能的定向修正成本 | **采用** |
+
+采用方案的最小合同：
+
+1. `Fact`、数字和图表值必须来自同一 Project/Scope/Resource/Snapshot/window 的 typed Evidence；只出现相同数值不等于
+   语义一致，还必须匹配指标、单位和维度；
+2. 排名、比例、差值等派生事实应由 SQL/受控计算工具输出为明确命名字段，不允许模型在最终文案中自行心算；
+3. 原因尚未被数据证明时可以提出 `Hypothesis`，但必须说明支持迹象、缺失 Evidence 和验证方式，不能写成已确认因果；
+4. 行动建议可以自主提出；“做了会节省多少”等量化结果只有在存在对应模型/Evidence 时才能发布，否则使用可验证的
+   定性预期；
+5. 每条 Finding 和每个 Presentation Block 独立校验：无效 Block 局部移除，无效 Finding 不连坐已验证 sibling；全部
+   无效时 AI Slot honest unavailable，确定性 Overview 保持可用；
+6. Agent 提交前先使用本 Run 已有工具结果自检；服务端校验失败时最多进行一次定向修正，只允许补正确引用、删除/降级
+   未证明断言或改为 Missing Evidence，不重新启动整页分析，也不形成无限自动重试；
+7. 自动补绑定只在 typed Evidence 唯一匹配时执行；同值、多来源或语义不明确时不得静默选择某条 Evidence；
+8. 校验合同 revision 进入 Artifact/恢复指纹；旧结果不因新校验器而被改写，新 Snapshot 也不得恢复旧合同结果。
+
+这套校验是必要但不充分的：数字可追溯不代表洞察有价值，也不能完全自动证明因果语义。因此 #30 继续同时检查
+Insight 的 What/Evidence/Why/Action/Verify 与人工决策价值，不能用“通过守卫”代替客户验收，也不能通过让模型少写数字
+来提高通过率。
 
 ## 7. 页面生命周期
 

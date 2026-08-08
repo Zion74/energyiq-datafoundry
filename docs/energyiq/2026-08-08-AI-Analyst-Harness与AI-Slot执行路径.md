@@ -426,3 +426,45 @@ Finding-specific 数字守卫拒绝；它进一步证明剩余问题不是 10 �
 因此不能关闭 #18/#35，也不继续自动重跑。以上真实失败样本进入 #30 Harness/Prompt 质量任务；下一步应让 Agent 在
 最终提交前使用现有工具结果自检引用，或减少没有必要的派生数字，而不是放宽能耗、比例、成本守卫或建设通用调度平台。
 Preschool 的 1440/1920/tablet useful visual 验收等待至少一条可信 Artifact 后再执行。
+
+## 12. 自主探索与输出验真校准
+
+### 12.1 独立结论
+
+采用“开放调查、严格发布”的双阶段边界，但不能把它简化成数字白名单。当前 0/3 的真实证据证明 post-hoc 拒绝能守住
+正确性，却不能稳定交付价值；下一切片要把校验反馈前移到提交阶段，同时保留最终 fail closed。
+
+### 12.2 已识别的潜在问题
+
+| 风险 | 可能后果 | 最小控制 |
+| --- | --- | --- |
+| 相同数字出现在不同查询或维度 | 错误 Evidence 也可能“数值匹配” | 同时校验 metric、unit、Scope、window、dimension；自动补绑定只接受唯一 typed match |
+| 合法派生值不直接存在于行中 | 误杀正确排名、比例或差值 | 要求 SQL/受控工具输出最终命名字段；不在浏览器或模型文本中补算 |
+| 模型为通过校验而回避数字 | 文案安全但空泛，没有决策价值 | #30 的 Insight rubric 与人工价值验收独立于 correctness gate |
+| 修正循环重新查询或不断重跑 | 延迟、费用和结果漂移扩大 | post-validation 最多一次定向修正，复用同一 Run/Snapshot；失败后局部丢弃或 honest unavailable |
+| 校验器自身误判 | 有效 Finding 被拒，或无效 Finding 放行 | 固定四次真实失败 transcript、篡改变体和 Golden 回归；记录字段级 reason code |
+| 数字正确但因果/行动过度 | 形成错误决策建议 | 原因分 Fact/Hypothesis/Missing Evidence；量化后果必须另有 Evidence，无法自动证明的价值留给人工 rubric |
+| 新合同恢复旧 Artifact | 修复后页面仍显示旧错误 | bump output contract revision，并把 revision 纳入恢复 fingerprint |
+| 无效图表拖垮整条洞察 | 有价值文字也被隐藏 | Presentation Block 与 Finding 分层校验，Block 可局部降级 |
+
+### 12.3 #30 下一实施切片
+
+1. 把四次 Preschool 真实失败输出加入固定回归样本，保留原工具结果和失败字段；
+2. 生成最终 JSON 前，让 Agent 检查每个客户可见数字是否具备当前 Finding 的 typed Evidence；派生事实没有最终 SQL 字段时，
+   删除数字、降级为 Hypothesis/Missing Evidence，或在结束调查前自行补一次定向 SQL；
+3. 服务端继续执行确定性校验；返回字段级失败原因，并只允许一次复用同一 Context 的定向文案修正，不重新跑 Overview、
+   不静默换模型、不放宽 Snapshot/授权/只读/Evidence 守卫；
+4. 自动 Evidence 补绑定改为仅唯一 typed match；多条候选时拒绝静默绑定；
+5. 单个 Presentation Block、单个 Finding、同批 sibling 分别验证和局部降级；
+6. 校验合同升版，补 Cache/Resume 回归，确保旧 Artifact 不被当成新合同结果；
+7. 自动回归通过后，对相同 Preschool Profile/Snapshot 固定运行 3 次：目标至少 2/3 产生非空、可理解、
+   Finding-specific Evidence 的 useful 结果，hard safety failure 必须为 0；再进行 1440/1920/tablet 与 Evidence 弹窗验收。
+
+### 12.4 停止项与复审条件
+
+- 不增加固定分析主题、SQL 次数、工具顺序或新颖性配额；
+- 不用第二个 LLM Judge 决定事实正确性；
+- 不构建通用 Claim Graph、公式 DSL、Provider Router 或自动 Prompt Optimizer；
+- 不因 0/3 而放松数值、Snapshot、授权或只读 SQL 守卫；
+- 若一次定向修正仍频繁触发、明显增加时延但 useful 率没有改善，停止叠加 Prompt/重试，重新检查 Evidence 提交接口；
+- 若通过率提高但人工判断仍是复读图表、空泛建议或不说人话，不关闭 #18/#35，转为表达与分析价值问题处理。
