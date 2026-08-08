@@ -85,6 +85,7 @@ export type ProjectRendererState =
 type ProjectRendererCommonProps = {
   sectionIdPrefix?: string;
   onRetry?: () => void;
+  showContextHeader?: boolean;
   aiSlotMode?: "live" | "saved";
   savedAiArtifact?: EnergySavedAnalysisAiArtifactDto;
   onAiArtifactChange?: (artifact: EnergySavedAnalysisAiArtifactInputDto | null) => void;
@@ -183,6 +184,7 @@ export function ProjectRenderer(props: ProjectRendererProps): ReactNode {
       <div data-project-renderer={selection.key} data-renderer-version={selection.version}>
         <NgeeAnnOverviewRenderer
           state={ngeeAnnState}
+          {...(props.showContextHeader !== undefined ? { showContextHeader: props.showContextHeader } : {})}
           {...(props.onRetry ? { onRetry: props.onRetry } : {})}
           {...(props.onViewLatestAvailableData ? { onViewLatestAvailableData: props.onViewLatestAvailableData } : {})}
           {...(props.latestAvailableRange ? { latestAvailableRange: props.latestAvailableRange } : {})}
@@ -208,6 +210,7 @@ export function ProjectRenderer(props: ProjectRendererProps): ReactNode {
       <div data-project-renderer={selection.key} data-renderer-version={selection.version}>
         <PreschoolOverviewRenderer
           state={preschoolState}
+          {...(props.showContextHeader !== undefined ? { showContextHeader: props.showContextHeader } : {})}
           {...(props.onRetry ? { onRetry: props.onRetry } : {})}
           {...(props.projectExplorerHref ? { projectExplorerHref: props.projectExplorerHref } : {})}
           {...(props.aiAnalystHref ? { aiAnalystHref: props.aiAnalystHref } : {})}

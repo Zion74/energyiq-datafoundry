@@ -52,6 +52,7 @@
   },
   "sidebar": {
     "brand": "EnergyIQ",
+    "analysisTitle": "AI Analyst",
     "sessionCount": "{{count}} sessions",
     "workspaceResources": "Workspace Resources",
     "newTask": "New data task",

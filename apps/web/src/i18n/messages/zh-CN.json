@@ -52,6 +52,7 @@
   },
   "sidebar": {
     "brand": "EnergyIQ",
+    "analysisTitle": "AI 分析",
     "sessionCount": "{{count}} 个会话",
     "workspaceResources": "工作区资源",
     "newTask": "新建数据任务",

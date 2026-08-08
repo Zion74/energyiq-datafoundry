@@ -111,6 +111,25 @@ describe("EnergyIQ Shell Project navigation", () => {
     expect(mainNavigation?.textContent).not.toContain("Saved analyses");
   });
 
+  it("keeps Workspace and Project context visible in Admin", async () => {
+    navigation.pathname = "/energyiq/admin";
+    mockedAccess.access = {
+      ...accessContext([project("project-a", "Project A"), project("project-b", "Project B")]),
+      role: "admin",
+      workspaces: [
+        { id: "workspace-1", name: "Workspace 1", kind: "customer", disabled: false },
+        { id: "workspace-2", name: "Workspace 2", kind: "customer", disabled: false },
+      ],
+    };
+
+    await act(async () => {
+      root.render(<EnergyIqShell><div>Admin</div></EnergyIqShell>);
+    });
+
+    expect(container.querySelector("[role='combobox'][aria-label='Customer workspace']")).not.toBeNull();
+    expect(container.querySelector("[role='combobox'][aria-label='Energy project']")).not.toBeNull();
+  });
+
   it("switches the AI Analyst Project and removes the previous handoff context", async () => {
     navigation.pathname = "/energyiq/ai";
     navigation.search = "projectId=project-a&scopeId=level-6&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16&finding=old-finding&evidence=old-evidence";

@@ -5211,7 +5211,10 @@ function SessionPaneContent({
       }
     >
       {hideIdentityChrome ? (
-        <div className="flex justify-end px-2 pt-2">
+        <div className="flex h-16 items-center justify-between border-b border-border px-4">
+          <h1 className="truncate text-sm font-semibold text-foreground">
+            {t("sidebar.analysisTitle")}
+          </h1>
           <button
             type="button"
             onClick={onToggleCollapse}

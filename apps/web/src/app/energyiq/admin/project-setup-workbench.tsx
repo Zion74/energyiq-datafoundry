@@ -153,12 +153,10 @@ export function EnergyIqAdminWorkbench({
 
   useEffect(() => {
     if (!access?.activeWorkspaceId || adminProjects.length === 0) return;
-    const selected = adminProjects.find((project) => project.id === selectedProjectId);
-    if (selected?.workspaceId === access.activeWorkspaceId) return;
     const next = adminProjects.find((project) =>
       project.workspaceId === access.activeWorkspaceId && project.id === activeProject?.id,
     ) ?? adminProjects.find((project) => project.workspaceId === access.activeWorkspaceId);
-    if (next) setSelectedProjectId(next.id);
+    if (next && next.id !== selectedProjectId) setSelectedProjectId(next.id);
   }, [access?.activeWorkspaceId, activeProject?.id, adminProjects, selectedProjectId]);
 
   const loadSetup = useCallback(async (projectId: string) => {
@@ -330,18 +328,6 @@ export function EnergyIqAdminWorkbench({
       <div className="min-w-0 flex-1">
         <header className="sticky top-0 z-20 border-b border-border bg-surface px-4 py-3 lg:px-6">
           <div className="flex flex-wrap items-center gap-3">
-            {adminNavigationCollapsed ? (
-              <button
-                type="button"
-                aria-label="Show admin navigation"
-                title="Show admin navigation"
-                onClick={() => setAdminNavigationCollapsed(false)}
-                className="hidden h-9 shrink-0 items-center gap-2 rounded-lg border border-border px-3 text-xs font-semibold text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20 lg:flex"
-              >
-                <EnergyIcon name="chevron" className="h-3.5 w-3.5" />
-                Show navigation
-              </button>
-            ) : null}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <h2 className="truncate text-base font-semibold">{sectionMeta.title}</h2>

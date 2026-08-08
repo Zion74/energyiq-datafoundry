@@ -531,22 +531,35 @@ function PublishedDecisionDashboardView({
       className="mx-auto w-full max-w-[1480px] px-4 py-6 lg:px-8 lg:py-8"
     >
       <section className="flex flex-col gap-5 border-b border-border pb-6 xl:flex-row xl:items-end xl:justify-between">
-        <div>
-          <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted">
-            <span>{selectedProject?.name ?? "Select a Project"}</span>
-            <EnergyIcon name="chevron" className="h-3 w-3" />
-            <span>{isDedicatedOverviewRenderer ? "Published overview" : "Published analysis"}</span>
-          </div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            {isDedicatedOverviewRenderer ? "Energy overview" : "Energy analysis"}
-          </h1>
-          <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted">
-            {isNgeeAnnRenderer
-              ? "A rolling 28-day Project view with 1-day and 7-day decision signals."
-              : isPreschoolRenderer
-                ? "A Project-wide portfolio view built from the published Preschool Snapshot and governed projections."
-                : "A Project-specific decision view rendered from the published EnergyIQ Template Schema."}
-          </p>
+        <div className="min-w-0">
+          {isDedicatedOverviewRenderer ? (
+            <>
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                {isPreschoolRenderer ? "Portfolio energy overview" : "Energy decision overview"}
+              </h1>
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
+                <span className="font-semibold text-foreground">{selectedProject?.name}</span>
+                {isNgeeAnnRenderer ? <span>Rolling 28-day view</span> : null}
+                {currentSnapshot ? <span>{formatAnalysisWindow(currentSnapshot)}</span> : null}
+                {currentAnalysis ? <span>{currentAnalysis.context.timezone}</span> : null}
+                {isNgeeAnnRenderer && currentSnapshot ? (
+                  <span>Data through {formatDataThrough(currentSnapshot)}</span>
+                ) : null}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted">
+                <span>{selectedProject?.name ?? "Select a Project"}</span>
+                <EnergyIcon name="chevron" className="h-3 w-3" />
+                <span>Published analysis</span>
+              </div>
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">Energy analysis</h1>
+              <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted">
+                A Project-specific decision view rendered from the published EnergyIQ Template Schema.
+              </p>
+            </>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -660,16 +673,6 @@ function PublishedDecisionDashboardView({
         </div>
       ) : null}
 
-      {isNgeeAnnProject && currentSnapshot ? (
-        <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 border-y border-border py-3 text-xs" aria-label="Read-only analysis window">
-          <span className="font-semibold text-foreground">
-            Rolling 28-day decision window
-          </span>
-          <span className="text-muted">{formatAnalysisWindow(currentSnapshot)}</span>
-          <span className="text-muted">Data through {formatDataThrough(currentSnapshot)}</span>
-        </div>
-      ) : null}
-
       {!isDedicatedOverviewRenderer || saveError || savedAnalysis ? (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-light">
           {!isDedicatedOverviewRenderer ? <span>{runMessage}</span> : <span />}
@@ -711,6 +714,7 @@ function PublishedDecisionDashboardView({
               <ProjectRenderer
                 request={rendererRequest}
                 state={projectRendererState}
+                showContextHeader={false}
                 onRetry={refreshOverview}
                 latestAvailableRange={usesCurrentOverviewWindow ? null : latestAvailableRange}
                 onViewLatestAvailableData={(range) => navigateOverview({

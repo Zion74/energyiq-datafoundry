@@ -706,3 +706,27 @@ Trace、临时阈值和 Preschool appliance alias 也不作为通用 Pattern。
 - 不把尚未人工证明价值的图表登记为 reusable；
 - 不因视觉优先而移除 Snapshot、授权、只读 SQL 和错实体/错单位安全底线；
 - 发现超出当前客户可见切片的新问题时，先记录到对应 Issue，再决定是否进入主线。
+
+### 14.8 本轮执行状态（2026-08-08）
+
+已交付并推送 `9ca6694`：
+
+- 两项目共享 Finding 调整为 Takeaway → Why → Action → 主要图；
+- 只直接展示第一张 Presentation Block，其余折叠为 `Supporting visuals (N)`；
+- 0/1/3/8 Block、默认折叠、两项目 DOM 顺序和 Saved Result 不重跑路径有定向回归；
+- 3 files / 26 tests passed，根 TypeScript build graph passed。
+
+当前 Chrome/Runtime 证据必须分层记录：
+
+- 3001 首次回读暴露本地 `@datafoundry/contracts/dist` 过期，缺少 Presentation parser/filter 导出；重建 contracts 后，
+  新错误为 0。这是验收环境构建产物问题，不是 Provider 质量结论；
+- Ngee Ann 当前 1600px 页面无横向溢出，确定性 Overview、History 与 AI non-blocking 占位正常；
+- 真实 Ngee Ann Run `ngee-ann-overview-6d04cbcf-bc74-47fc-9305-a7dc77ec1bbf` 从
+  `2026-08-08T03:39:10.849Z` 到 `03:41:54.591Z` 完成，约 164 秒；
+- 该 Run 的 Finding 因引用了当前 Snapshot 不存在的确定性 Evidence 被 Runtime 拒绝，页面诚实显示 AI unavailable；
+- 因此本轮只证明了 fail-closed 与非阻塞行为，**没有**形成 accepted Artifact，也没有完成 #35 的 1440/1920/tablet
+  或 Charles 60 秒人工视觉验收。
+
+下一项仍是 #18：固定 Preschool Profile/Snapshot 取得首个真实 accepted Artifact，并完成 3-run 分类；首个 accepted
+Artifact 出现后立即进入 #35 的真实 1440/1920/tablet 展示验收。若持续 unavailable，记录失败分类并回到内容/Pack
+输入检查，不自动重启完整 Output Submit 平台建设。
