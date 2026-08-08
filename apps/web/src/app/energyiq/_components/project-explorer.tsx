@@ -277,9 +277,6 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
   };
 
   const selectedValue = selectedPeriodHasFacts ? analysis?.summary.usageKwh ?? null : null;
-  const latestReadingPresentation = analysis
-    ? explorerLatestReadingPresentation(analysis.latestAcceptedReading, analysis.context.timezone)
-    : null;
   const hourlyTrend = useMemo(
     () => (analysis?.hourlyProfile ?? []).map((point) => ({
       time: `${String(point.hour).padStart(2, "0")}:00`,
@@ -518,11 +515,6 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                   <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-ui-meta font-semibold uppercase tracking-[0.06em] text-muted">
                     {selected.type}
                   </span>
-                  {selected.role ? (
-                    <span className="rounded-full border border-step-inspect/25 bg-step-inspect/10 px-2 py-0.5 text-ui-meta font-semibold text-step-inspect">
-                      {selected.role}
-                    </span>
-                  ) : null}
                   {analysis ? (
                     <span className={[
                       "rounded-full border px-2 py-0.5 text-ui-meta font-semibold",
@@ -534,11 +526,6 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                     </span>
                   ) : null}
                 </div>
-                {isMeterNode(selected) ? (
-                  <p className="mt-1.5 text-sm text-muted">
-                    {selected.category ?? "Electricity"} {selected.type} · source interval readings
-                  </p>
-                ) : null}
               </div>
 
               {analysis ? (
@@ -596,27 +583,23 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
             ) : null}
 
             <div className={[
-              "mt-6 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2",
-              isMeterNode(selected) ? "xl:grid-cols-5" : "xl:grid-cols-3",
+              "mt-6 grid gap-px overflow-hidden rounded-xl border border-border bg-border sm:grid-cols-2 xl:grid-cols-3",
             ].join(" ")}>
               {explorerMetricsPending ? (
                 <>
                   <MetricCell
                     label={isMeterNode(selected) ? "Period energy" : "Total energy"}
                     value={analysisLoading ? "Loading facts…" : "No validated data"}
-                    note="Resolved from the trusted project, scope and period"
                   />
                   {isMeterNode(selected) ? (
                     <>
-                      <MetricCell label="Latest cumulative reading" value="—" note="Loading accepted meter reading" />
-                      <MetricCell label="Last data received" value="—" note="Loading Snapshot timestamp" />
-                      <MetricCell label="Average power" value="—" note="Loading interval-average power" />
-                      <MetricCell label="Peak power" value="—" note="Loading interval peak" />
+                      <MetricCell label="Average power" value="—" />
+                      <MetricCell label="Peak power" value="—" />
                     </>
                   ) : (
                     <>
-                      <MetricCell label="Daily average" value="—" note="Loading complete-day average" />
-                      <MetricCell label="Peak power" value="—" note="Loading interval peak" />
+                      <MetricCell label="Daily average" value="—" />
+                      <MetricCell label="Peak power" value="—" />
                     </>
                   )}
                 </>
@@ -625,22 +608,15 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                   <MetricCell
                     label={isMeterNode(selected) ? "Period energy" : "Total energy"}
                     value={selectedValue === null ? "No data" : `${selectedValue.toLocaleString(undefined, { maximumFractionDigits: 2 })} kWh`}
-                    note={selectedValue === null ? "No accepted interval facts in this period" : `${analysis!.context.scopeName} · selected period`}
+                    note={selectedValue === null ? "No accepted interval facts in this period" : undefined}
                     tone={selectedValue === null ? "warning" : "muted"}
                   />
                   {isMeterNode(selected) ? (
                     <>
-                      <MetricCell label="Latest cumulative reading" value={latestReadingPresentation!.value} note={latestReadingPresentation!.note} tone={latestReadingPresentation!.tone} />
-                      <MetricCell
-                        label="Last data received"
-                        value={analysis!.dataHealth.lastSeenAt ? formatExplorerDateTime(analysis!.dataHealth.lastSeenAt, analysis!.context.timezone) : "Unavailable"}
-                        note="Latest accepted interval in this Snapshot"
-                        tone={analysis!.dataHealth.lastSeenAt ? "muted" : "warning"}
-                      />
                       <MetricCell
                         label="Average power"
                         value={selectedAveragePower === null ? "No data" : `${selectedAveragePower.toFixed(2)} kW`}
-                        note="Energy divided by covered interval hours"
+                        note={selectedAveragePower === null ? "Average unavailable for this period" : undefined}
                         tone={selectedAveragePower === null ? "warning" : "muted"}
                       />
                       <MetricCell
@@ -655,7 +631,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                       <MetricCell
                         label="Daily average"
                         value={selectedPeriodHasFacts ? `${analysis!.summary.averageDailyUsageKwh.toLocaleString(undefined, { maximumFractionDigits: 2 })} kWh/day` : "No data"}
-                        note="Across the selected reporting window"
+                        note={selectedPeriodHasFacts ? undefined : "Average unavailable for this period"}
                         tone={selectedPeriodHasFacts ? "muted" : "warning"}
                       />
                       <MetricCell
@@ -1481,24 +1457,6 @@ export function explorerChildScopeHealth(
   };
 }
 
-export function explorerLatestReadingPresentation(
-  reading: EnergyScopeAnalysisDto["latestAcceptedReading"],
-  timeZone: string,
-): { value: string; note: string; tone: "muted" | "warning" | "success" } {
-  if (reading.status === "available") {
-    return {
-      value: `${reading.valueKwh.toLocaleString("en-SG", { maximumFractionDigits: 2 })} kWh`,
-      note: `${formatExplorerTimestamp(reading.recordedAt, timeZone)} · ${reading.sourceFile}`,
-      tone: "success",
-    };
-  }
-  return {
-    value: reading.status === "not_applicable" ? "Not applicable" : "Unavailable",
-    note: reading.reason.message,
-    tone: reading.status === "not_applicable" ? "muted" : "warning",
-  };
-}
-
 function validDateInput(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00.000Z`);
@@ -1638,21 +1596,23 @@ function MetricCell({
 }: {
   label: string;
   value: string;
-  note: string;
-  tone?: "muted" | "warning" | "success";
+  note?: string;
+  tone?: "muted" | "warning";
 }) {
   return (
     <div className="min-w-0 bg-surface px-5 py-4">
       <p className="text-xs font-medium text-muted-light">{label}</p>
       <p className="mt-2 break-words tabular text-lg font-semibold leading-tight tracking-tight text-foreground">{value}</p>
-      <p
-        className={[
-          "mt-1 break-words text-xs leading-4",
-          tone === "warning" ? "text-step-warning" : tone === "success" ? "text-step-success" : "text-muted-light",
-        ].join(" ")}
-      >
-        {note}
-      </p>
+      {note ? (
+        <p
+          className={[
+            "mt-1 break-words text-xs leading-4",
+            tone === "warning" ? "text-step-warning" : "text-muted-light",
+          ].join(" ")}
+        >
+          {note}
+        </p>
+      ) : null}
     </div>
   );
 }

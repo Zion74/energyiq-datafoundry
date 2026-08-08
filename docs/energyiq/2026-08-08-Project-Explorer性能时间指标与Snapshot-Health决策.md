@@ -71,13 +71,11 @@ Project、Level、Centre 等聚合 Scope 显示：
 Physical Meter/Circuit 显示：
 
 1. Period energy；
-2. Latest cumulative reading（仅累计读数来源）；
-3. Last data received；
-4. Average power；
-5. Peak interval-average power；
-6. Coverage 作为紧凑 Badge。
+2. Average power；
+3. Peak interval-average power；
+4. Coverage 作为紧凑 Badge。
 
-`Source` 与详细 `Data health` 移到下方 Evidence/Data Health 区域。Average power 必须是能耗除以实际覆盖小时数，不得用 `24h profile` 文字冒充数值。
+`Latest cumulative reading`、`Last data received`、`Source` 与详细 `Data health` 移到下方 Evidence/Data Health 区域，不占据用户首要阅读路径。Average power 必须是能耗除以实际覆盖小时数，不得用 `24h profile` 文字冒充数值。
 
 ### 3.4 趋势平均线
 
@@ -174,7 +172,7 @@ Physical Meter/Circuit 显示：
 
 自动证据：
 
-- Project Explorer 纯函数回归：15/15；
+- Project Explorer 纯函数回归：14/14；
 - Ngee Ann DuckDB Golden：通过，完整分析保持 10 条查询；Explorer Profile 为 7 条查询；
 - 同一 Golden Payload：约 174,083 bytes 降至 29,590 bytes，减少约 83%；
 - API TypeScript Build 与 Next.js Production Build：通过。
