@@ -719,3 +719,9 @@ AI Finding 展示采用兼容扩展：每个 Block 可选 `prominence: primary |
 
 验收仍分四层：focused tests/typecheck、真实 Provider accepted Artifact、1440/1920/tablet Chrome、Charles/用户 60 秒
 信息价值判断。前一层不能代替后一层；没有 accepted Artifact 时只证明 fail-closed，不冒充 AI Slot 视觉验收完成。
+
+保留此前真实 Runtime 证据：3001 首次回读发现本地 `@datafoundry/contracts/dist` 过期，重建 contracts 后该加载错误归零；
+Ngee Ann Run `ngee-ann-overview-6d04cbcf-bc74-47fc-9305-a7dc77ec1bbf` 于 `2026-08-08T03:39:10.849Z`
+至 `03:41:54.591Z` 完成，但 Finding 引用了当前 Snapshot 不存在的确定性 Evidence，因而被 Runtime 拒绝。该次只证明
+非阻塞与 fail-closed，未形成 accepted Artifact，也未完成 #35 的真实多尺寸视觉验收。下一项仍是取得固定 Profile/Snapshot
+的 accepted Artifact 后，再验证多个 primary 与 supporting 的真实页面效果。
