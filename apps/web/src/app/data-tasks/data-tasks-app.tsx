@@ -4930,7 +4930,7 @@ function SessionListItem({
       ) : null}
       <span
         className={[
-          "min-w-0 flex-1 truncate text-left text-sm transition",
+          "min-w-0 flex-1 truncate text-left text-ui-body transition",
           active ? "font-medium text-foreground" : "text-muted group-hover:text-foreground",
         ].join(" ")}
       >
@@ -5212,7 +5212,7 @@ function SessionPaneContent({
     >
       {hideIdentityChrome ? (
         <div className="flex h-16 items-center justify-between border-b border-border px-4">
-          <h1 className="truncate text-sm font-semibold text-foreground">
+          <h1 className="truncate text-base font-semibold text-foreground">
             {t("sidebar.analysisTitle")}
           </h1>
           <button
@@ -5231,8 +5231,8 @@ function SessionPaneContent({
             D
           </div>
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-sm font-semibold text-foreground">{t("sidebar.brand")}</h1>
-            <p className="text-xs text-muted-light">{t("sidebar.sessionCount", { count: sessionCount })}</p>
+            <h1 className="truncate text-base font-semibold text-foreground">{t("sidebar.brand")}</h1>
+            <p className="text-ui-label text-muted-light">{t("sidebar.sessionCount", { count: sessionCount })}</p>
           </div>
           <button
             type="button"
@@ -5292,12 +5292,12 @@ function SessionPaneContent({
             : "min-h-0 flex-1 overflow-y-auto p-2"
         }
       >
-        <div className="px-2 pb-2 text-xs font-semibold text-muted-light">
+        <div className="px-2 pb-2 text-ui-label font-semibold text-muted-light">
           {preview ? t("sidebar.history") : t("sidebar.sessions")}
         </div>
         <div className="flex flex-col gap-0.5">
           {filteredSessions.length === 0 ? (
-            <p className="px-2 py-3 text-xs text-muted-light">{t("sidebar.noMatchingSessions")}</p>
+            <p className="px-2 py-3 text-ui-support text-muted-light">{t("sidebar.noMatchingSessions")}</p>
           ) : (
             filteredSessions.map((session) => (
               <SessionListItem

@@ -362,7 +362,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
       <aside className="max-h-[420px] overflow-y-auto border-b border-border bg-surface lg:max-h-none lg:overflow-visible lg:border-b-0 lg:border-r">
         <div className="sticky top-0 max-h-[calc(100vh-56px)] overflow-y-auto p-4">
           <div>
-            <h1 className="text-sm font-semibold text-foreground">Project Explorer</h1>
+            <h1 className="text-base font-semibold text-foreground">Project Explorer</h1>
           </div>
 
           {projectSelectionError ? (
@@ -406,7 +406,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search structure or meter"
-              className="h-9 w-full rounded-lg border border-border bg-surface pl-9 pr-3 text-xs text-foreground outline-none transition-colors placeholder:text-muted-light focus:border-muted-light focus:ring-2 focus:ring-primary/10"
+              className="h-9 w-full rounded-lg border border-border bg-surface pl-9 pr-3 text-ui-support text-foreground outline-none transition-colors placeholder:text-muted-light focus:border-muted-light focus:ring-2 focus:ring-primary/10"
             />
           </label>
 
@@ -428,7 +428,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                 </p>
               ) : null}
               <div className="mt-4 flex items-center justify-between gap-3">
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-light">
+                <span className="text-ui-label font-semibold uppercase tracking-wide text-muted-light">
                   Hierarchy
                 </span>
                 <div className="flex items-center gap-1">
@@ -440,7 +440,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                         .filter((node) => projectNodes.some((candidate) => candidate.parentId === node.id))
                         .map((node) => node.id),
                     ))}
-                    className="rounded-md px-2 py-1 text-[10px] font-semibold text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+                    className="rounded-md px-2 py-1 text-ui-label font-semibold text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
                   >
                     Expand all
                   </button>
@@ -449,7 +449,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                     type="button"
                     aria-label="Collapse all hierarchy nodes"
                     onClick={() => setExpandedIds(new Set())}
-                    className="rounded-md px-2 py-1 text-[10px] font-semibold text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+                    className="rounded-md px-2 py-1 text-ui-label font-semibold text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
                   >
                     Collapse all
                   </button>
@@ -488,7 +488,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
             <div className="flex flex-col gap-4 border-b border-border pb-5 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 {breadcrumbs.length > 1 ? (
-                  <div className="flex flex-wrap items-center gap-1 text-[11px] text-muted-light">
+                  <div className="flex flex-wrap items-center gap-1 text-ui-support text-muted-light">
                     {breadcrumbs.map((node, index) => (
                       <span key={node.id} className="flex items-center gap-1">
                         {index > 0 ? <EnergyIcon name="chevron" className="h-3 w-3" /> : null}
@@ -505,11 +505,11 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
                 ) : null}
                 <div className="mt-2 flex items-center gap-2">
                   <h1 className="text-2xl font-semibold tracking-tight text-foreground">{selected.name}</h1>
-                  <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted">
+                  <span className="rounded-full border border-border bg-surface px-2 py-0.5 text-ui-meta font-semibold uppercase tracking-[0.06em] text-muted">
                     {selected.type}
                   </span>
                   {selected.role ? (
-                    <span className="rounded-full border border-step-inspect/25 bg-step-inspect/10 px-2 py-0.5 text-[10px] font-semibold text-step-inspect">
+                    <span className="rounded-full border border-step-inspect/25 bg-step-inspect/10 px-2 py-0.5 text-ui-meta font-semibold text-step-inspect">
                       {selected.role}
                     </span>
                   ) : null}
@@ -545,7 +545,7 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
               <div className="mt-4 flex flex-wrap items-end gap-3 rounded-lg border border-border bg-surface px-4 py-3">
                 <ExplorerDateField label="From" value={customRange.projectId === activeProjectId ? customRange.from : ""} onChange={(from) => setCustomRange((current) => ({ ...current, projectId: activeProjectId ?? "", from }))} />
                 <ExplorerDateField label="To, inclusive" value={customRange.projectId === activeProjectId ? customRange.to : ""} onChange={(to) => setCustomRange((current) => ({ ...current, projectId: activeProjectId ?? "", to }))} />
-                <p className="pb-2 text-[10px] text-muted-light">The hierarchy stays fixed while the selected-period facts are re-queried.</p>
+                <p className="pb-2 text-ui-meta text-muted-light">The hierarchy stays fixed while the selected-period facts are re-queried.</p>
               </div>
             ) : null}
 

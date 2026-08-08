@@ -116,8 +116,8 @@ export function EnergyIqAdminSidebar(props: AdminSidebarProps) {
             <EnergyIcon name="settings" className="h-4 w-4" />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-xs font-semibold">Admin</span>
-            <span className="block truncate text-[11px] text-muted">{activeLabel}</span>
+            <span className="block truncate text-ui-support font-semibold">Admin</span>
+            <span className="block truncate text-ui-label text-muted">{activeLabel}</span>
           </span>
           <EnergyIcon name="chevron" className="h-4 w-4 rotate-90 text-muted transition-transform group-open:-rotate-90" />
         </summary>
@@ -145,7 +145,7 @@ function SidebarContent({
       {!compact ? (
         <div className="border-b border-border px-4 py-4">
           <div className="flex h-9 items-center justify-between gap-3">
-            <h1 className="min-w-0 truncate text-sm font-semibold">Admin console</h1>
+            <h1 className="min-w-0 truncate text-base font-semibold">Admin console</h1>
             <button
               type="button"
               aria-label="Collapse admin navigation"
@@ -159,7 +159,7 @@ function SidebarContent({
           <button
             type="button"
             onClick={onCreateProject}
-            className="mt-3 w-full rounded-lg border border-border px-2.5 py-1.5 text-[11px] font-semibold transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+            className="mt-3 w-full rounded-lg border border-border px-2.5 py-1.5 text-ui-label font-semibold transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
           >
             New project
           </button>
@@ -191,9 +191,9 @@ function SidebarContent({
                 leadingIcon={<EnergyIcon name="building" className="h-3.5 w-3.5" />}
                 placeholder="Select project"
                 className="w-full"
-                triggerClassName="bg-surface-subtle text-xs font-semibold hover:border-muted-light"
+                triggerClassName="bg-surface-subtle text-ui-label font-semibold hover:border-muted-light"
               />
-              <span className="mt-1.5 flex items-center justify-between px-1 text-[10px] text-muted-light">
+              <span className="mt-1.5 flex items-center justify-between px-1 text-ui-meta text-muted-light">
                 <span>Selected project</span>
                 <span className="capitalize">{selectedProject?.status ?? "Draft"}</span>
               </span>
@@ -244,7 +244,7 @@ function NavigationGroup({
 function NavigationGroupSummary({ label, active }: { label: string; active: boolean }) {
   return (
     <summary className={[
-      "flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-lg px-2.5 text-xs font-semibold transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
+      "flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-lg px-2.5 text-ui-support font-semibold transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
       active ? "text-foreground" : "text-muted",
     ].join(" ")}>
       <EnergyIcon name="chevron" className="h-3 w-3 rotate-90 transition-transform group-open/nav:-rotate-90 group-open/projects:-rotate-90" />
@@ -273,8 +273,8 @@ function NavigationButton({
         nested ? "ml-2" : "",
       ].join(" ")} aria-disabled="true">
         <EnergyIcon name={item.icon} className="h-3.5 w-3.5 shrink-0" />
-        <span className="min-w-0 flex-1 truncate text-xs">{item.label}</span>
-        <span className="text-[9px] font-medium uppercase tracking-wide text-muted-light">Later</span>
+        <span className="min-w-0 flex-1 truncate text-ui-support">{item.label}</span>
+        <span className="text-ui-meta font-medium uppercase tracking-wide text-muted-light">Later</span>
       </div>
     );
   }
@@ -285,7 +285,7 @@ function NavigationButton({
       onClick={() => onSelect(item.id)}
       aria-current={active ? "page" : undefined}
       className={[
-        "flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
+        "flex min-h-10 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-ui-support font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20",
         nested ? "ml-2 w-[calc(100%-0.5rem)]" : "",
         active
           ? "bg-primary text-white"

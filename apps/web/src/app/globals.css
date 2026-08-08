@@ -47,6 +47,18 @@
     "WenQuanYi Micro Hei", sans-serif; /* CJK_FALLBACK_STACK_V1 */
   --font-fira-code: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
     "Courier New", monospace;
+
+  /* Product typography roles. These describe information responsibility rather
+     than a one-off pixel value so the four EnergyIQ surfaces can stay distinct
+     while sharing the same reading hierarchy. */
+  --type-ui-body: 0.875rem;
+  --type-ui-body-leading: 1.375rem;
+  --type-ui-support: 0.8125rem;
+  --type-ui-support-leading: 1.25rem;
+  --type-ui-label: 0.75rem;
+  --type-ui-label-leading: 1rem;
+  --type-ui-meta: 0.6875rem;
+  --type-ui-meta-leading: 1rem;
 }
 
 @theme inline {
@@ -72,6 +84,14 @@
   --color-step-error: var(--step-error);
   --font-sans: var(--font-inter);
   --font-mono: var(--font-fira-code);
+  --text-ui-body: var(--type-ui-body);
+  --text-ui-body--line-height: var(--type-ui-body-leading);
+  --text-ui-support: var(--type-ui-support);
+  --text-ui-support--line-height: var(--type-ui-support-leading);
+  --text-ui-label: var(--type-ui-label);
+  --text-ui-label--line-height: var(--type-ui-label-leading);
+  --text-ui-meta: var(--type-ui-meta);
+  --text-ui-meta--line-height: var(--type-ui-meta-leading);
 }
 
 body {
