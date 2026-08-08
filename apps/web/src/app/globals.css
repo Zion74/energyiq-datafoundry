@@ -59,6 +59,13 @@
   --type-ui-label-leading: 1rem;
   --type-ui-meta: 0.6875rem;
   --type-ui-meta-leading: 1rem;
+
+  /* EnergyIQ surface geometry. These variables align the four product shells
+     without forcing their different navigation models into one component. */
+  --energyiq-surface-header-height: 4rem;
+  --energyiq-sidebar-rail-width: 3.5rem;
+  --energyiq-collapse-control-size: 2.25rem;
+  --energyiq-content-gutter: 1rem;
 }
 
 @theme inline {
@@ -168,6 +175,42 @@ body {
   *::-webkit-scrollbar-thumb {
     transition: none;
   }
+}
+
+@media (min-width: 64rem) {
+  :root {
+    --energyiq-content-gutter: 1.5rem;
+  }
+}
+
+.energyiq-surface-header {
+  min-height: var(--energyiq-surface-header-height);
+  padding-inline: var(--energyiq-content-gutter);
+}
+
+.energyiq-sidebar-header {
+  min-height: var(--energyiq-surface-header-height);
+  padding-inline: 1rem;
+}
+
+.energyiq-collapsed-rail {
+  width: var(--energyiq-sidebar-rail-width);
+  min-width: var(--energyiq-sidebar-rail-width);
+  max-width: var(--energyiq-sidebar-rail-width);
+}
+
+.energyiq-collapse-control {
+  flex: 0 0 var(--energyiq-collapse-control-size);
+  width: var(--energyiq-collapse-control-size);
+  height: var(--energyiq-collapse-control-size);
+}
+
+.energyiq-collapsed-rail .energyiq-sidebar-header {
+  padding-inline: 0;
+}
+
+.energyiq-content-gutter {
+  padding-inline: var(--energyiq-content-gutter);
 }
 
 @media print {

@@ -326,7 +326,7 @@ export function EnergyIqAdminWorkbench({
       />
 
       <div className="min-w-0 flex-1">
-        <header className="sticky top-0 z-20 border-b border-border bg-surface px-4 py-3 lg:px-6">
+        <header className="energyiq-surface-header sticky top-0 z-20 border-b border-border bg-surface py-3">
           <div className="flex flex-wrap items-center gap-3">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
@@ -364,7 +364,7 @@ export function EnergyIqAdminWorkbench({
           </div>
         </header>
 
-        <div className="p-4 lg:p-6">
+        <div className="energyiq-content-gutter py-4 lg:py-6">
           {error ? <StatusMessage tone="error">{error}</StatusMessage> : null}
           {notice ? <StatusMessage tone={validation?.blocking ? "warning" : "success"}>{notice}</StatusMessage> : null}
           {section === "organisations" || section === "users" ? (

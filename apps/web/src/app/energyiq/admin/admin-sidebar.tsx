@@ -92,19 +92,21 @@ export function EnergyIqAdminSidebar(props: AdminSidebarProps) {
       <aside
         aria-label={props.desktopCollapsed ? "Admin navigation rail" : "Admin navigation sidebar"}
         className={props.desktopCollapsed
-          ? "hidden w-14 min-w-14 max-w-14 shrink-0 flex-col items-center border-r border-border bg-surface-subtle py-3 lg:flex"
+          ? "energyiq-collapsed-rail hidden shrink-0 flex-col items-center border-r border-border bg-surface-subtle lg:flex"
           : "hidden w-[276px] shrink-0 border-r border-border bg-surface lg:flex lg:flex-col"}
       >
         {props.desktopCollapsed ? (
-          <button
-            type="button"
-            aria-label="Show admin navigation"
-            title="Show admin navigation"
-            onClick={() => props.onDesktopCollapsedChange(false)}
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface text-foreground shadow-[var(--shadow-card)] transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
-          >
-            <EnergyIcon name="sidebar" className="h-[18px] w-[18px]" />
-          </button>
+          <div className="energyiq-sidebar-header flex w-full items-center justify-center">
+            <button
+              type="button"
+              aria-label="Show admin navigation"
+              title="Show admin navigation"
+              onClick={() => props.onDesktopCollapsedChange(false)}
+              className="energyiq-collapse-control flex items-center justify-center rounded-lg border border-border bg-surface text-foreground shadow-[var(--shadow-card)] transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+            >
+              <EnergyIcon name="sidebar" className="h-[18px] w-[18px]" />
+            </button>
+          </div>
         ) : (
           <SidebarContent {...props} selectedProject={selectedProject} />
         )}
@@ -143,26 +145,28 @@ function SidebarContent({
   return (
     <div className={compact ? "p-3" : "flex min-h-0 flex-1 flex-col"}>
       {!compact ? (
-        <div className="border-b border-border px-4 py-4">
-          <div className="flex h-9 items-center justify-between gap-3">
+        <div className="border-b border-border">
+          <div className="energyiq-sidebar-header flex items-center justify-between gap-3">
             <h1 className="min-w-0 truncate text-base font-semibold">Admin console</h1>
             <button
               type="button"
               aria-label="Collapse admin navigation"
               title="Collapse admin navigation"
               onClick={() => onDesktopCollapsedChange(true)}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+              className="energyiq-collapse-control flex shrink-0 items-center justify-center rounded-lg border border-border bg-surface text-muted transition-colors hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
             >
               <EnergyIcon name="sidebar" className="h-[18px] w-[18px]" />
             </button>
           </div>
-          <button
-            type="button"
-            onClick={onCreateProject}
-            className="mt-3 w-full rounded-lg border border-border px-2.5 py-1.5 text-ui-label font-semibold transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
-          >
-            New project
-          </button>
+          <div className="px-3 py-2">
+            <button
+              type="button"
+              onClick={onCreateProject}
+              className="w-full rounded-lg border border-border px-2.5 py-1.5 text-ui-label font-semibold transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+            >
+              New project
+            </button>
+          </div>
         </div>
       ) : null}
 

@@ -528,7 +528,7 @@ function PublishedDecisionDashboardView({
     <div
       data-energyiq-current-overview="true"
       data-print-exclude={historyState.open ? "true" : undefined}
-      className="mx-auto w-full max-w-[1480px] px-4 py-6 lg:px-8 lg:py-8"
+      className="energyiq-content-gutter mx-auto w-full max-w-[1480px] py-6 lg:py-8"
     >
       <section className="flex flex-col gap-5 border-b border-border pb-6 xl:flex-row xl:items-end xl:justify-between">
         <div className="min-w-0">

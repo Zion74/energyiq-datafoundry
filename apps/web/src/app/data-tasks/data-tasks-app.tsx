@@ -5027,46 +5027,48 @@ function SessionPane({
     return (
       <aside
         aria-label={collapsedRailCopy.railLabel}
-        className="relative z-30 flex h-full min-h-0 w-14 min-w-14 max-w-14 shrink-0 flex-col items-center border-r border-border bg-surface-subtle py-3"
+        className="energyiq-collapsed-rail relative z-30 flex h-full min-h-0 shrink-0 flex-col items-center border-r border-border bg-surface-subtle"
       >
-        <div className="group relative">
-          <button
-            type="button"
-            onClick={onToggleCollapse}
-            title={collapsedRailCopy.expandLabel}
-            aria-label={collapsedRailCopy.expandLabel}
-            className="flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-border bg-surface text-foreground shadow-[var(--shadow-card)] transition-colors duration-200 hover:bg-surface-subtle"
-          >
-            <SidebarToggleIcon />
-          </button>
-          <div className={previewClassNames.panel} aria-label="Workspace sidebar preview">
-            <SessionPaneContent
-              activeSessionId={activeSessionId}
-              activeConfigPanel={activeConfigPanel}
-              activeDataLinkPanel={activeDataLinkPanel}
-              activeFilesPanel={activeFilesPanel}
-              filteredSessions={filteredSessions}
-              query={query}
-              sessionCount={sessionCount}
-              runningThreadIds={runningThreadIds}
-              workspaceFileCount={workspaceFileCount}
-              workspaceConfig={workspaceConfig}
-              showWorkspaceResources={showWorkspaceResources}
-              hideIdentityChrome={hideIdentityChrome}
-              quickStartGuide={quickStartGuide}
-              capabilitiesReady={capabilitiesReady}
-              onCreateSession={onCreateSession}
-              onOpenConfigPanel={onOpenConfigPanel}
-              onOpenDataLinkPanel={onOpenDataLinkPanel}
-              onOpenFilesPanel={onOpenFilesPanel}
-              onQueryChange={onQueryChange}
-              onToggleCollapse={onToggleCollapse}
-              onSelectSession={onSelectSession}
-              onRenameSession={onRenameSession}
-              onDeleteSession={onDeleteSession}
-              onTogglePinSession={onTogglePinSession}
-              preview
-            />
+        <div className="energyiq-sidebar-header flex w-full shrink-0 items-center justify-center">
+          <div className="group relative">
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              title={collapsedRailCopy.expandLabel}
+              aria-label={collapsedRailCopy.expandLabel}
+              className="energyiq-collapse-control flex cursor-pointer items-center justify-center rounded-lg border border-border bg-surface text-foreground shadow-[var(--shadow-card)] transition-colors duration-200 hover:bg-surface-subtle"
+            >
+              <SidebarToggleIcon />
+            </button>
+            <div className={previewClassNames.panel} aria-label="Workspace sidebar preview">
+              <SessionPaneContent
+                activeSessionId={activeSessionId}
+                activeConfigPanel={activeConfigPanel}
+                activeDataLinkPanel={activeDataLinkPanel}
+                activeFilesPanel={activeFilesPanel}
+                filteredSessions={filteredSessions}
+                query={query}
+                sessionCount={sessionCount}
+                runningThreadIds={runningThreadIds}
+                workspaceFileCount={workspaceFileCount}
+                workspaceConfig={workspaceConfig}
+                showWorkspaceResources={showWorkspaceResources}
+                hideIdentityChrome={hideIdentityChrome}
+                quickStartGuide={quickStartGuide}
+                capabilitiesReady={capabilitiesReady}
+                onCreateSession={onCreateSession}
+                onOpenConfigPanel={onOpenConfigPanel}
+                onOpenDataLinkPanel={onOpenDataLinkPanel}
+                onOpenFilesPanel={onOpenFilesPanel}
+                onQueryChange={onQueryChange}
+                onToggleCollapse={onToggleCollapse}
+                onSelectSession={onSelectSession}
+                onRenameSession={onRenameSession}
+                onDeleteSession={onDeleteSession}
+                onTogglePinSession={onTogglePinSession}
+                preview
+              />
+            </div>
           </div>
         </div>
         {hideIdentityChrome ? null : (
@@ -5211,7 +5213,7 @@ function SessionPaneContent({
       }
     >
       {hideIdentityChrome ? (
-        <div className="flex h-16 items-center justify-between border-b border-border px-4">
+        <div className="energyiq-sidebar-header flex items-center justify-between border-b border-border">
           <h1 className="truncate text-base font-semibold text-foreground">
             {t("sidebar.analysisTitle")}
           </h1>
@@ -5220,13 +5222,13 @@ function SessionPaneContent({
             onClick={onToggleCollapse}
             title={preview ? t("sidebar.expandToSidebar") : t("sidebar.collapseToRail")}
             aria-label={preview ? t("sidebar.expandToSidebar") : t("sidebar.collapseToRail")}
-            className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-light transition-colors duration-200 hover:bg-surface hover:text-foreground"
+            className="energyiq-collapse-control flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-light transition-colors duration-200 hover:bg-surface hover:text-foreground"
           >
             <SidebarToggleIcon />
           </button>
         </div>
       ) : (
-        <div className="flex h-16 items-center gap-3 border-b border-border px-4">
+        <div className="energyiq-sidebar-header flex items-center gap-3 border-b border-border">
           <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-surface text-sm font-semibold text-foreground shadow-[var(--shadow-card)]">
             D
           </div>
@@ -5239,7 +5241,7 @@ function SessionPaneContent({
             onClick={onToggleCollapse}
             title={preview ? t("sidebar.expandToSidebar") : t("sidebar.collapseToRail")}
             aria-label={preview ? t("sidebar.expandToSidebar") : t("sidebar.collapseToRail")}
-            className="flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-light transition-colors duration-200 hover:bg-surface-subtle hover:text-foreground"
+            className="energyiq-collapse-control flex shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted-light transition-colors duration-200 hover:bg-surface-subtle hover:text-foreground"
           >
             <SidebarToggleIcon />
           </button>
@@ -8035,7 +8037,7 @@ function ChatPane({
       <ChatRunStatusContext.Provider value={liveRunStatus}>
       <ChatLiveRunContext.Provider value={liveRun}>
       <ProcessTimelineCollapseContext.Provider value={processTimelineCollapse}>
-      <header className="flex h-16 items-center justify-between gap-3 border-b border-border bg-surface px-5">
+      <header className="energyiq-surface-header flex items-center justify-between gap-3 border-b border-border bg-surface">
         <div ref={schemaPreviewRootRef} className="relative min-w-0">
           <h2 className="truncate text-base font-semibold text-foreground">
             {title}

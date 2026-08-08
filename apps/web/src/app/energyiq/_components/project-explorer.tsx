@@ -360,10 +360,12 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
   return (
     <div className="mx-auto grid min-h-[calc(100vh-56px)] w-full max-w-[1680px] lg:grid-cols-[300px_minmax(0,1fr)]">
       <aside className="max-h-[420px] overflow-y-auto border-b border-border bg-surface lg:max-h-none lg:overflow-visible lg:border-b-0 lg:border-r">
-        <div className="sticky top-0 max-h-[calc(100vh-56px)] overflow-y-auto p-4">
-          <div>
+        <div className="sticky top-0 max-h-[calc(100vh-56px)] overflow-y-auto">
+          <div className="energyiq-sidebar-header flex items-center border-b border-border">
             <h1 className="text-base font-semibold text-foreground">Project Explorer</h1>
           </div>
+
+          <div className="p-4">
 
           {projectSelectionError ? (
             <p role="alert" className="mt-4 rounded-lg border border-step-warning/25 bg-step-warning/5 p-3 text-xs leading-5 text-step-warning">
@@ -467,10 +469,11 @@ function ProjectExplorerView({ initialViewState }: { initialViewState: ExplorerU
               </div>
             </>
           )}
+          </div>
         </div>
       </aside>
 
-      <section className="min-w-0 px-4 py-6 lg:px-8 lg:py-8">
+      <section className="energyiq-content-gutter min-w-0 py-6">
         {resource === "water" ? (
           <div className="grid min-h-[520px] place-items-center rounded-xl border border-dashed border-border bg-surface">
             <div className="max-w-md px-6 text-center">
