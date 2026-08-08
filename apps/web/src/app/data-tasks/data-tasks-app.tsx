@@ -2229,6 +2229,7 @@ function DataTaskWorkspace({
             sidebarCollapsed,
             rightPanelWidth,
             leftPanelWidth,
+            viewportWidth: workspaceViewportWidth,
           }),
         }}
       >

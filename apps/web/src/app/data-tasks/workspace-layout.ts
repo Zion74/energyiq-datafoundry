@@ -8,6 +8,7 @@ export const RIGHT_PANEL_MIN_WIDTH = 320;
  */
 export const RIGHT_PANEL_MAX_WIDTH = 640;
 export const RIGHT_PANEL_DEFAULT_WIDTH = 400;
+/** Desktop docking minimum; phone layouts may shrink below it after both side panels fold. */
 export const CHAT_MIN_WIDTH = 420;
 /**
  * Centered chat content column bounds. Messages and the input flow between the
@@ -94,17 +95,24 @@ export function getWorkspaceGridTemplateColumns({
   sidebarCollapsed,
   rightPanelWidth = RIGHT_PANEL_DEFAULT_WIDTH,
   leftPanelWidth = LEFT_PANEL_DEFAULT_WIDTH,
+  viewportWidth = 0,
 }: {
   isConfigPanelOpen: boolean;
   isRightPanelOpen: boolean;
   sidebarCollapsed: boolean;
   rightPanelWidth?: number;
   leftPanelWidth?: number;
+  viewportWidth?: number;
 }): string {
-  const leftColumn = fixedGridColumn(
-    getLeftPanelWidth(sidebarCollapsed, leftPanelWidth),
-  );
-  const chatColumn = `minmax(${CHAT_MIN_WIDTH}px, 1fr)`;
+  const resolvedLeftPanelWidth = getLeftPanelWidth(sidebarCollapsed, leftPanelWidth);
+  const leftColumn = fixedGridColumn(resolvedLeftPanelWidth);
+  // Once the collapsed rail plus the desktop chat minimum no longer fits, the
+  // chat becomes the fluid track. Inner content already uses max-width: 100%,
+  // so this removes clipping without changing desktop docking thresholds.
+  const chatMinimum = viewportWidth > 0 && viewportWidth < resolvedLeftPanelWidth + CHAT_MIN_WIDTH
+    ? 0
+    : CHAT_MIN_WIDTH;
+  const chatColumn = `minmax(${chatMinimum}px, 1fr)`;
 
   // Keep the track *count* constant (always three columns) so a CSS transition
   // on `grid-template-columns` can interpolate width smoothly. Removing/adding

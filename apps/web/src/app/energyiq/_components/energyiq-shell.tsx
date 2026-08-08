@@ -92,61 +92,67 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
   return (
     <div data-energyiq-shell="true" className="flex h-dvh flex-col overflow-hidden bg-surface-subtle text-foreground">
       <header className="sticky top-0 z-40 shrink-0 border-b border-border bg-surface/95 backdrop-blur">
-        <div className="flex h-14 items-center gap-4 px-4 lg:px-6">
-          <Link href="/energyiq/overview" className="flex shrink-0 items-center gap-2.5">
+        <div className="flex h-14 items-center gap-3 px-4 sm:gap-4 lg:px-6">
+          <Link
+            href="/energyiq/overview"
+            className="flex shrink-0 items-center gap-2.5 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20"
+          >
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-white">
               <EnergyIcon name="bolt" className="h-4 w-4" />
             </span>
             <span className="hidden text-sm font-semibold tracking-tight sm:block">EnergyIQ</span>
           </Link>
 
-          <div className="hidden h-5 w-px bg-border sm:block" />
+          <div className="hidden h-5 w-px bg-border xl:block" />
 
-          {showWorkspaceSelector ? (
-            <EnergySelect
-              ariaLabel="Customer workspace"
-              value={access?.activeWorkspaceId ?? ""}
-              options={(access?.workspaces ?? []).map((workspace) => ({
-                value: workspace.id,
-                label: `Workspace · ${workspace.name}${workspace.disabled ? " (disabled)" : ""}`,
-              }))}
-              onValueChange={selectWorkspaceFromShell}
-              leadingIcon={<EnergyIcon name="building" className="h-3.5 w-3.5" />}
-              placeholder="No organisations"
-              className="max-w-40 sm:max-w-52"
-              triggerClassName="w-auto max-w-40 sm:max-w-52"
-              size="small"
-            />
-          ) : null}
+          <div className="flex min-w-0 items-center gap-3 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {showWorkspaceSelector ? (
+              <EnergySelect
+                ariaLabel="Customer workspace"
+                value={access?.activeWorkspaceId ?? ""}
+                options={(access?.workspaces ?? []).map((workspace) => ({
+                  value: workspace.id,
+                  label: `Workspace · ${workspace.name}${workspace.disabled ? " (disabled)" : ""}`,
+                }))}
+                onValueChange={selectWorkspaceFromShell}
+                leadingIcon={<EnergyIcon name="building" className="h-3.5 w-3.5" />}
+                placeholder="No organisations"
+                className="max-w-40 shrink-0 sm:max-w-52"
+                triggerClassName="w-auto max-w-40 sm:max-w-52"
+                size="small"
+              />
+            ) : null}
 
-          {showProjectSelector ? (
-            <EnergySelect
-              ariaLabel="Energy project"
-              value={activeProject?.id ?? ""}
-              options={contextProjects.map((project) => ({ value: project.id, label: `Project · ${project.name}` }))}
-              onValueChange={selectProjectFromShell}
-              leadingIcon={<EnergyIcon name="explorer" className="h-3.5 w-3.5" />}
-              placeholder={isAdminPage ? "No projects" : "No published projects"}
-              className="max-w-44 sm:max-w-60"
-              triggerClassName="w-auto max-w-44 sm:max-w-60"
-              size="small"
-            />
-          ) : showStaticProjectContext ? (
-            <div className="hidden min-w-0 items-center gap-2 text-xs sm:flex" aria-label="Energy project">
-              <EnergyIcon name="explorer" className="h-3.5 w-3.5 shrink-0 text-muted-light" />
-              <span className="max-w-56 truncate font-medium">{activeProject.name}</span>
-            </div>
-          ) : null}
+            {showProjectSelector ? (
+              <EnergySelect
+                ariaLabel="Energy project"
+                value={activeProject?.id ?? ""}
+                options={contextProjects.map((project) => ({ value: project.id, label: `Project · ${project.name}` }))}
+                onValueChange={selectProjectFromShell}
+                leadingIcon={<EnergyIcon name="explorer" className="h-3.5 w-3.5" />}
+                placeholder={isAdminPage ? "No projects" : "No published projects"}
+                className="max-w-44 shrink-0 sm:max-w-60"
+                triggerClassName="w-auto max-w-44 sm:max-w-60"
+                size="small"
+              />
+            ) : showStaticProjectContext ? (
+              <div className="hidden min-w-0 shrink-0 items-center gap-2 text-xs sm:flex" aria-label="Energy project">
+                <EnergyIcon name="explorer" className="h-3.5 w-3.5 shrink-0 text-muted-light" />
+                <span className="max-w-56 truncate font-medium">{activeProject.name}</span>
+              </div>
+            ) : null}
+          </div>
 
-          <nav className="hidden h-full items-center gap-1 md:flex" aria-label="Main navigation">
+          <nav className="hidden h-full shrink-0 items-center gap-1 xl:flex" aria-label="Main navigation">
             {visibleNavigation.map((item) => {
               const active = pathname.startsWith(item.href);
               return (
                 <Link
                   key={item.href}
                   href={item.href}
+                  aria-current={active ? "page" : undefined}
                   className={[
-                    "relative flex h-full items-center gap-2 px-3 text-xs font-medium transition-colors",
+                    "relative flex h-full items-center gap-2 px-3 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/20",
                     active ? "text-foreground" : "text-muted hover:text-foreground",
                   ].join(" ")}
                 >
@@ -158,8 +164,8 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
             })}
           </nav>
 
-          <div className="ml-auto flex items-center gap-2">
-            <span className="hidden items-center gap-1.5 rounded-full border border-step-success/25 bg-step-success/10 px-2.5 py-1 text-[11px] font-medium text-step-success sm:inline-flex">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <span className="hidden items-center gap-1.5 rounded-full border border-step-success/25 bg-step-success/10 px-2.5 py-1 text-ui-label font-medium text-step-success xl:inline-flex">
               <span className="h-1.5 w-1.5 rounded-full bg-step-success" />
               Published Project
             </span>
@@ -176,7 +182,7 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
         </div>
 
         <nav
-          className="grid border-t border-border md:hidden"
+          className="grid border-t border-border xl:hidden"
           style={{ gridTemplateColumns: `repeat(${visibleNavigation.length}, minmax(0, 1fr))` }}
           aria-label="Mobile navigation"
         >
@@ -186,8 +192,9 @@ export function EnergyIqShell({ children }: { children: ReactNode }) {
               <Link
                 key={item.href}
                 href={item.href}
+                aria-current={active ? "page" : undefined}
                 className={[
-                  "flex min-h-11 items-center justify-center gap-1.5 border-r border-border px-2 text-[11px] font-medium last:border-r-0",
+                  "flex min-h-11 items-center justify-center gap-1.5 border-r border-border px-2 text-ui-label font-medium last:border-r-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/20",
                   active ? "bg-surface-subtle text-foreground" : "bg-surface text-muted",
                 ].join(" ")}
               >
