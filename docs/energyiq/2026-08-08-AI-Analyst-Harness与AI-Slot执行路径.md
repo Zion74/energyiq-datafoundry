@@ -386,6 +386,42 @@ Audit ids 与 Finding-specific Evidence 对话框一致。当前旧 API 实例�
    映射为客户安全的暂时不可用提示，并增加 `RUN_TIMEOUT:300000` 与 stream abort 回归。业务校验失败原因仍保留，
    便于区分“模型结果不可验证”和“运行时暂时失败”。
 
-本轮不会再触发第三次 Provider Run。当前结论是：Ngee Ann 已有一条真实 visual Finding 的 Chrome 证据；Preschool
+当时未继续触发第三次 Provider Run。该轮结论是：Ngee Ann 已有一条真实 visual Finding 的 Chrome 证据；Preschool
 仍缺少一次同时通过可信合同与客户表达的真实 Run，因此 #35 不能关闭。完成但全部候选被拒的 Run 在重新加载时会
 再次尝试，是后续 Resume/Retry policy 的独立窄问题，不在本切片扩成调度或通用缓存平台。
+
+### #18/#35 Preschool 后续真实验收与最小修复
+
+登录态 Chrome 在同一 Published Snapshot 上继续运行，确定性 Overview 始终先显示且未被 AI 失败修改。本轮确认的
+首要根因不是 DuckDB：Run `preschool-overview-ecb5f783-27d6-40aa-9628-5bdee83fa277` 约 233 秒内完成 7 条 SQL，
+但页面提示词中的 `no chart quota` 被 Harness 关键词识别为“用户明确要求图表”，强制首个查询返回 2–500 行；这与
+Preschool 单条页面 Evidence 最多 10 行的合同冲突。现将提示改为 `presentation-block quota`，保留 Agent 自主选择
+Presentation 的能力，不再误触发 Artifact chart fast path。
+
+结果校验从“任意探索 SQL 超行则整批失败”收窄为 Finding-specific：超 10 行的查询只淘汰实际引用它的 Finding；
+未引用的探索查询不再连坐有效 sibling。显式引用或自动修复后新增引用的超行查询仍 fail closed。Ngee Ann 与
+Preschool 输出合同分别提升至 v5/v9，避免同 Snapshot 恢复旧提示生成的结果；Saved Analysis 中已冻结的历史结果
+不被改写。
+
+v9 三次真实 Run 证据：
+
+| Run | 耗时 | SQL | 结果 |
+| --- | ---: | ---: | --- |
+| `preschool-overview-f158f061-2f2f-45e7-a7dc-8a5696165cbf` | 184s | 5 | Evidence id 已限制为合法集合；Provider 使用 `next` 与顶层 `blocks` 等价字段，旧解析器拒绝 |
+| `preschool-overview-e21b30cc-1262-41b2-b214-50813e6f8427` | 251s | 11 | 一条被 Finding 实际需要的查询返回 24 行，且叙述未绑定对应 SQL，数字守卫正确拒绝 |
+| `preschool-overview-7ca9322f-8bdd-4693-80fb-936f88384876` | 164s | 6 | 生成 3 条候选；至少一条把实际返回行数写在 limitation，旧守卫将审计行数误当业务数字 |
+
+解析器现兼容 `next → how`、顶层 `blocks → presentation.blocks`，缺少纯展示关系时按是否引用 deterministic Evidence
+归为 supports/independent；数值、Snapshot、SQL 行数与 Evidence 守卫不变。审计限制中出现的“实际返回 N 行”只在
+N 精确等于该 Finding 所引用工具的 `returnedRowCount` 时作为结构上下文移除；不匹配行数、Top-N 业务结论、能耗、
+比例、成本和派生数字仍拒绝。自动证据为 Presentation/两项目 Run 4 files / 98 tests、根 typecheck/build 通过；最新窄测
+继续覆盖等价字段、未引用超行隔离、引用超行拒绝与真实返回行数/错误行数分支。
+
+完整重载恢复后，三份 v9 Artifact 仍均无可显示 Finding，真实结果为 0/3 useful。恢复动作意外触发的第 4 次 Run
+`preschool-overview-28c1ede5-2852-4827-92b3-3688cd913d4b` 也在约 266 秒、7 条成功 SQL（单条最多 9 行）后被
+Finding-specific 数字守卫拒绝；它进一步证明剩余问题不是 10 行限制本身，而是模型继续输出未被同 Finding 精确引用的
+派生/排名/上下文数字。确定性 Overview 仍完整可用。
+
+因此不能关闭 #18/#35，也不继续自动重跑。以上真实失败样本进入 #30 Harness/Prompt 质量任务；下一步应让 Agent 在
+最终提交前使用现有工具结果自检引用，或减少没有必要的派生数字，而不是放宽能耗、比例、成本守卫或建设通用调度平台。
+Preschool 的 1440/1920/tablet useful visual 验收等待至少一条可信 Artifact 后再执行。

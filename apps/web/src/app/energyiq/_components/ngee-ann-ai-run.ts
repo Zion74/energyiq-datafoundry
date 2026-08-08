@@ -127,7 +127,7 @@ type CurrentRun = {
 
 const currentRuns = new Map<string, CurrentRun>();
 const FRIENDLY_AI_UNAVAILABLE_REASON = "AI analysis is temporarily unavailable. The verified Overview remains available.";
-const NGEE_ANN_AI_OUTPUT_CONTRACT_REVISION = "v4";
+const NGEE_ANN_AI_OUTPUT_CONTRACT_REVISION = "v5";
 const PERSISTED_WORKSPACE_PROFILE_ID = "workspace-default";
 const ACTIVE_RUN_POLL_INTERVAL_MS = 1_500;
 const ACTIVE_RUN_POLL_LIMIT = 200;

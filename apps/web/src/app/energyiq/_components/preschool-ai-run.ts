@@ -111,7 +111,7 @@ const currentRuns = new Map<string, CurrentRun>();
 const FRIENDLY_UNAVAILABLE = "AI analysis is temporarily unavailable. The verified Overview remains available.";
 const PRESCHOOL_AI_PACK_ID = "preschool-analysis-pack" as const;
 const PRESCHOOL_AI_PACK_REVISION = "v1" as const;
-const PRESCHOOL_AI_OUTPUT_CONTRACT_REVISION = "v8";
+const PRESCHOOL_AI_OUTPUT_CONTRACT_REVISION = "v9";
 const PERSISTED_WORKSPACE_PROFILE_ID = "workspace-default";
 const ACTIVE_RUN_POLL_INTERVAL_MS = 1_500;
 const ACTIVE_RUN_POLL_LIMIT = 200;
@@ -437,10 +437,11 @@ function buildPrompt(input: PreschoolAiRunInput): string {
     "Do not use digits copied from artifact ids, audit ids, query ids, version strings, Snapshot ids, or dates as Finding numbers. Exact pinned Period, Snapshot, Release, and derived full-period presentation may appear only as structural context. Return zero Findings when no directly cited Evidence supports a useful candidate.",
     "When filtering interval_start, which is TIMESTAMPTZ, use an ISO-8601 string or TIMESTAMPTZ literal for the pinned UTC bounds. Never compare interval_start with a TIMESTAMP literal that contains Z because that literal is timezone-naive and can shift the authorized window. If SQL and the published bundle differ, do not calculate or narrate a gap unless the gap itself is returned as a named column by a bounded reconciliation query.",
     "For Centre aggregation use parent_node_id, not scope_id. Only include quality_status='ok' and official_aggregation_eligible=TRUE. Do not add Project totals to component rows.",
-    "The Bounded Preschool Discovery Evidence Bundle is authoritative for published Portfolio, Centre, Benchmark, Calendar, Spike and Circuit values. SQL is one independent cross-check, not a replacement truth source.",
+    "The bounded Preschool bundle is authoritative; SQL cross-checks it.",
     "Return zero to three distinct Findings. Do not force novelty and do not repeat the official themes as prose. Each displayed Finding must cite only the successful SQL Evidence operations it actually uses; one sufficient query is valid, while a claim that needs validation should cite the additional query that tests it.",
-    "A Finding may support, challenge, or be independent of the official themes. Each must answer What, Why, the next investigation, expected result if acted on, consequence if ignored, how to verify, and limitations. whyKind must be Evidence, Hypothesis, or Missing Evidence. expectedIfAct and ifIgnored describe decision consequences supported by the investigation; they must not invent savings, certainty, or operational outcomes. Use evidenceNote to state what the cited Evidence cannot prove.",
-    "Cite every SQL result a Finding uses in evidenceSqlIndexes. Cite exact bundle item ids in evidenceRefs whenever the Finding uses published bundle values; evidenceRefs may be empty for an independent SQL-only angle backed by sufficient cited SQL Evidence. Use numbers only from that Finding's cited bundle items or cited SQL. Do not invent causes, equipment state, tariff, cost, savings, ROI, forecast, owner, commitment, target, threshold, duration, or time window.",
+    "A Finding may support, challenge, or be independent. Answer What, Why, next investigation, acted/ignored consequences, verification, and limitations. whyKind is Evidence, Hypothesis, or Missing Evidence. Never invent savings, certainty, or outcomes; evidenceNote states what Evidence cannot prove.",
+    `Valid evidenceRefs: ${JSON.stringify(input.discoveryEvidence.items.map((item) => item.id))}. Use only these exact ids; never cite other Runtime ids or object paths. Use [] for an SQL-only Finding.`,
+    "Cite only SQL results actually used. Use numbers only from the same Finding's cited bundle items or SQL. Do not invent causes, equipment state, tariff, cost, savings, ROI, forecast, owner, commitment, target, threshold, duration, or time window.",
     AI_FINDING_PRESENTATION_PROMPT,
     "Return only strict JSON: {\"findings\":[{\"relationship\":\"supports\",\"title\":\"...\",\"what\":\"...\",\"whyKind\":\"Evidence\",\"why\":\"...\",\"how\":\"...\",\"expectedIfAct\":\"...\",\"ifIgnored\":\"...\",\"howToVerify\":\"...\",\"evidenceNote\":\"...\",\"evidenceRefs\":[\"benchmark:priority-centre:G\"],\"evidenceSqlIndexes\":[1,2],\"presentation\":{\"version\":\"1\",\"blocks\":[{\"type\":\"ranking\",\"unit\":\"kWh\",\"items\":[{\"label\":\"Centre E\",\"value\":0}],\"evidenceRefs\":[\"benchmark:priority-centre:G\"],\"evidenceSqlIndexes\":[1]}]}}]}",
     "Bounded Preschool Discovery Evidence Bundle:",
@@ -463,9 +464,6 @@ export function resolvePreschoolAiEventStream(args: {
   const collected = collectTools(events);
   if (!collected.schemaValid || collected.sql.length < 1) {
     return { status: "unavailable", reason: "The AI Analyst did not complete a grounded read-only SQL investigation." };
-  }
-  if (collected.sql.some((tool) => Math.max(tool.rowCount ?? 0, tool.returnedRowCount) > 10)) {
-    return { status: "unavailable", reason: "The AI Analyst exceeded the ten-row SQL Evidence limit." };
   }
   if (!discoveryMatchesInput(args.input)) return { status: "unavailable", reason: "The Preschool Discovery Evidence does not match this Run identity." };
   const answer = events.filter((event) => event.type === "TEXT_MESSAGE_CONTENT")
@@ -497,13 +495,20 @@ export function resolvePreschoolAiEventStream(args: {
         ? "A Preschool Finding cited SQL Evidence that is not present in this Run."
         : "The AI Analyst returned no Finding with current Snapshot Evidence." };
   }
-  const verifiedFindings = referenceValidFindings.map(({ finding, evidence, tools }) => repairFindingEvidenceBindings(
-    finding,
-    evidence,
-    tools,
-    collected.sql,
-    args.input,
-  ));
+  let oversizedSqlEvidence = false;
+  const verifiedFindings = referenceValidFindings.flatMap(({ finding, evidence, tools }) => {
+    const repaired = repairFindingEvidenceBindings(finding, evidence, tools, collected.sql, args.input);
+    const repairedTools = repaired.evidenceSqlIndexes
+      .map((index) => collected.sql[index - 1]).filter((tool): tool is CollectedSqlEvidence => Boolean(tool));
+    if (repairedTools.some(isOversizedSqlEvidence)) {
+      oversizedSqlEvidence = true;
+      return [];
+    }
+    return [repaired];
+  });
+  if (generated.length > 0 && verifiedFindings.length === 0 && oversizedSqlEvidence) {
+    return { status: "unavailable", reason: "The AI Analyst exceeded the ten-row SQL Evidence limit." };
+  }
   const selectedEvidence = verifiedFindings.map((finding) => finding.evidenceRefs
     .map((id) => evidenceById.get(id)).filter((item): item is PreschoolDiscoveryEvidenceItem => Boolean(item)));
   const selectedTools = verifiedFindings.map((finding) => finding.evidenceSqlIndexes
@@ -555,6 +560,10 @@ export function resolvePreschoolAiEventStream(args: {
       },
     })),
   };
+}
+
+function isOversizedSqlEvidence(tool: CollectedSqlEvidence): boolean {
+  return Math.max(tool.rowCount ?? 0, tool.returnedRowCount) > 10;
 }
 
 function repairFindingEvidenceBindings(
@@ -633,19 +642,21 @@ function parseFindings(answer: string): GeneratedFinding[] | null {
   if (!envelope || !Array.isArray(envelope.findings) || envelope.findings.length > 3) return null;
   const findings = envelope.findings.flatMap<GeneratedFinding>((candidate) => {
     if (!isRecord(candidate)) return [];
-    const relationship = stringValue(candidate.relationship);
-    const whyKind = stringValue(candidate.whyKind);
     const evidenceRefs = stringArray(candidate.evidenceRefs);
     const evidenceSqlIndexes = positiveIntegerArray(candidate.evidenceSqlIndexes);
+    const relationship = stringValue(candidate.relationship)
+      ?? (evidenceRefs.length > 0 ? "supports" : "independent");
+    const whyKind = stringValue(candidate.whyKind);
     const title = cleanText(candidate.title);
     const what = cleanText(candidate.what);
     const why = cleanText(candidate.why);
-    const how = cleanText(candidate.how);
+    const how = cleanText(candidate.how) ?? cleanText(candidate.next);
     const expectedIfAct = cleanText(candidate.expectedIfAct);
     const ifIgnored = cleanText(candidate.ifIgnored);
     const howToVerify = cleanText(candidate.howToVerify);
     const evidenceNote = cleanText(candidate.evidenceNote);
-    const presentation = parseAiFindingPresentation(candidate.presentation);
+    const presentation = parseAiFindingPresentation(candidate.presentation
+      ?? (Array.isArray(candidate.blocks) ? { version: "1", blocks: candidate.blocks } : null));
     if ((relationship !== "supports" && relationship !== "challenges" && relationship !== "independent")
       || (whyKind !== "Evidence" && whyKind !== "Hypothesis" && whyKind !== "Missing Evidence")
       || !title || !what || !why || !how || !expectedIfAct || !ifIgnored || !howToVerify || !evidenceNote
@@ -802,6 +813,13 @@ function removeCitedSqlPredicateReferences(narrative: string, tools: CollectedSq
       ? `${column}${operator}`
       : full,
   );
+  for (const tool of tools) {
+    if (tool.returnedRowCount < 1) continue;
+    remaining = remaining.replace(
+      new RegExp(`\\b${tool.returnedRowCount}\\s+rows?\\s+(?:returned|shown)\\b`, "giu"),
+      "returned rows",
+    );
+  }
   return remaining;
 }
 

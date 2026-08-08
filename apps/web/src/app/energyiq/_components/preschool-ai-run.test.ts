@@ -42,7 +42,7 @@ describe("Preschool AI Run", () => {
       "metric-revisions:energy.total_usage_kwh@1,energy.usage_per_person,energy.usage_per_sqm",
       "sg-preschool-calendar-v1",
     ]) expect(input.identityKey).toContain(pin);
-    expect(input.identityKey).toContain("preschool-ai-output-contract@v8");
+    expect(input.identityKey).toContain("preschool-ai-output-contract@v9");
     expect(body).toMatchObject({
       method: "agent/run",
       params: { agentId: "dataFoundry" },
@@ -72,6 +72,7 @@ describe("Preschool AI Run", () => {
       },
     });
     expect(serialized).toContain("Return zero to three distinct Findings");
+    expect(serialized).not.toMatch(/\b(?:chart|graph|plot|visuali[sz](?:e|ation))\b/iu);
     expect(serialized).toContain(
       "Your first action must be an immediate inspect_schema Tool call",
     );
@@ -124,7 +125,9 @@ describe("Preschool AI Run", () => {
     expect(serialized).toContain("official_aggregation_eligible=TRUE");
     expect(serialized).toContain("quality_status='ok'");
     expect(serialized).toContain("Bounded Preschool Discovery Evidence Bundle");
-    expect(serialized).toContain("evidenceRefs may be empty for an independent SQL-only angle");
+    expect(serialized).toContain("Use [] for an SQL-only Finding");
+    expect(serialized).toContain("Valid evidenceRefs:");
+    expect(serialized).toContain("never cite other Runtime ids or object paths");
     expect(serialized).not.toContain("exactly three Findings");
     expect(serialized).not.toContain("horizons");
     expect(serialized).not.toContain("forecastKwh");
@@ -228,6 +231,37 @@ describe("Preschool AI Run", () => {
     if (result.status === "available") expect(result.findings[0]!.presentation?.blocks).toHaveLength(1);
   });
 
+  it("normalizes the Provider's equivalent next and top-level blocks fields", () => {
+    const finding = generatedFindings()[0]! as unknown as Record<string, unknown>;
+    finding.next = finding.how;
+    delete finding.how;
+    delete finding.relationship;
+    finding.blocks = [{
+      type: "comparison",
+      title: "Two observed energy values",
+      unit: "kWh",
+      items: [{ label: "Centre usage", value: 843.0985 }, { label: "Hour 9 usage", value: 62.4 }],
+      evidenceRefs: ["benchmark:priority-centre:G"],
+      evidenceSqlIndexes: [1, 2],
+    }];
+
+    const result = resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream([finding] as never),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status === "available") {
+      expect(result.findings[0]).toMatchObject({
+        relationship: "supports",
+        how: generatedFindings()[0]!.how,
+        presentation: { version: "1", blocks: [expect.objectContaining({ type: "comparison" })] },
+      });
+    }
+  });
+
   it("drops an Agent-selected visual value without hiding the verified Finding", () => {
     const findings = generatedFindings().slice(0, 1);
     findings[0]!.presentation = {
@@ -329,6 +363,49 @@ describe("Preschool AI Run", () => {
       status: "unavailable",
       reason: "The AI Analyst exceeded the ten-row SQL Evidence limit.",
     });
+  });
+
+  it("keeps a verified Finding when an uncited exploratory SQL result exceeds ten rows", () => {
+    const findings = generatedFindings().slice(1);
+    findings[0]!.evidenceSqlIndexes = [2];
+
+    const result = resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(findings, [
+        ...oversizedSqlEvents("sql-1", 31, 20),
+        ...multiRowSqlEvents("sql-2"),
+      ]),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status === "available") {
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings[0]!.evidence.tools.map((tool) => tool.toolCallId)).toEqual(["sql-2"]);
+    }
+  });
+
+  it("drops only the Finding that cites oversized SQL Evidence", () => {
+    const findings = generatedFindings();
+    findings[0]!.evidenceSqlIndexes = [1];
+    findings[1]!.evidenceSqlIndexes = [2];
+
+    const result = resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(findings, [
+        ...oversizedSqlEvents("sql-1", 31, 20),
+        ...multiRowSqlEvents("sql-2"),
+      ]),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status === "available") {
+      expect(result.findings).toHaveLength(1);
+      expect(result.findings[0]!.title).toBe(findings[1]!.title);
+    }
   });
 
   it("rejects unsupported numeric claims and Snapshot pin drift", () => {
@@ -580,6 +657,30 @@ describe("Preschool AI Run", () => {
       providerProfileId: "profile-1",
       runId: "run-1",
     }).status).toBe("available");
+  });
+
+  it("accepts the exact cited SQL returned-row count only as limitation context", () => {
+    const finding = generatedFindings().slice(0, 1);
+    finding[0]!.evidenceSqlIndexes = [2];
+    finding[0]!.evidenceNote = "The ranking reflects only the 3 rows returned.";
+
+    expect(resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(finding),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    }).status).toBe("available");
+
+    finding[0]!.evidenceNote = "The ranking reflects only the 4 rows returned.";
+    expect(resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream(finding),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    })).toEqual({
+      status: "unavailable",
+      reason: "The AI Analyst returned a numeric claim without Finding-specific Evidence.",
+    });
   });
 
   it("binds an exact Bundle field and treats an actually cited SQL predicate as method context", () => {

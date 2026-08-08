@@ -105,7 +105,7 @@ describe("Ngee Ann AI Run", () => {
 
     expect(input.identityKey).toContain(input.snapshotId);
     expect(input.identityKey).toContain(input.dataCutoff);
-    expect(input.identityKey).toContain("ngee-ann-ai-output-contract@v4");
+    expect(input.identityKey).toContain("ngee-ann-ai-output-contract@v5");
     for (const identityPart of [
       input.projectReleaseId,
       "ngee-ann-overview",
@@ -149,6 +149,7 @@ describe("Ngee Ann AI Run", () => {
       },
     });
     expect(JSON.stringify(body)).toContain("first action must be inspect_schema");
+    expect(JSON.stringify(body)).not.toMatch(/\b(?:chart|graph|plot|visuali[sz](?:e|ation))\b/iu);
     expect(JSON.stringify(body)).toContain("A simple question may need one successful SQL query");
     expect(JSON.stringify(body)).toContain("a complex question may need multiple distinct queries");
     expect(JSON.stringify(body)).toContain("would not change the conclusion, next action, or material uncertainty");
