@@ -277,6 +277,109 @@ describe("Preschool AI Run", () => {
     if (result.status === "available") expect(result.findings[0]!.presentation?.blocks).toHaveLength(1);
   });
 
+  it("projects a cited day-type comparison when the Provider omits presentation", () => {
+    const finding = generatedFindings()[1]!;
+    finding.evidenceRefs = [];
+    finding.evidenceSqlIndexes = [1];
+    const sqlEvidence = namedSqlEvents(
+      "sql-1",
+      "SELECT day_type, mean_kwh_per_day FROM energy_intervals GROUP BY day_type",
+      ["day_type", "mean_kwh_per_day"],
+      [["weekday", 1118.42], ["weekend", 143.5]],
+    );
+
+    const result = resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream([finding], sqlEvidence),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status === "available") {
+      expect(result.findings[0]!.presentation).toEqual({
+        version: "1",
+        blocks: [{
+          type: "comparison",
+          title: "Average energy by day type",
+          unit: "kWh/day",
+          items: [{ label: "Weekday", value: 1118.42 }, { label: "Weekend", value: 143.5 }],
+          evidenceSqlIndexes: [1],
+        }],
+      });
+    }
+  });
+
+  it("projects a cited appliance share when the Provider omits presentation", () => {
+    const finding = generatedFindings()[1]!;
+    finding.sectionId = "appliance-contribution";
+    finding.evidenceRefs = [];
+    finding.evidenceSqlIndexes = [1];
+    const sqlEvidence = namedSqlEvents(
+      "sql-1",
+      "SELECT category, usage_kwh, share_pct FROM energy_intervals GROUP BY category",
+      ["category", "usage_kwh", "share_pct"],
+      [["load", 1406.343, 98], ["aircon", 28.684, 2], ["light", 0, 0]],
+    );
+
+    const result = resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream([finding], sqlEvidence),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status === "available") {
+      expect(result.findings[0]!.presentation).toMatchObject({
+        blocks: [{
+          type: "share",
+          unit: "%",
+          title: "Energy share by appliance category",
+          items: [{ label: "Plugload", value: 98 }, { label: "Air conditioning", value: 2 }, { label: "Lighting", value: 0 }],
+        }],
+      });
+    }
+  });
+
+  it("projects a cited peak Circuit ranking when the Provider omits presentation", () => {
+    const finding = generatedFindings()[0]!;
+    finding.sectionId = "overall-summary";
+    finding.evidenceRefs = [];
+    finding.evidenceSqlIndexes = [1];
+    const sqlEvidence = namedSqlEvents(
+      "sql-1",
+      "SELECT parent_node_id, circuit_name, interval_kw FROM energy_intervals ORDER BY interval_kw DESC LIMIT 5",
+      ["parent_node_id", "circuit_name", "interval_kw"],
+      [
+        ["preschool-centre-n", "preschool-centre-n:Kitchen Plug Load", 43.711],
+        ["preschool-centre-ad", "preschool-centre-ad:Plug Load3", 0.992],
+      ],
+    );
+
+    const result = resolvePreschoolAiEventStream({
+      eventStream: successfulEventStream([finding], sqlEvidence),
+      input: requiredInput(),
+      providerProfileId: "profile-1",
+      runId: "run-1",
+    });
+
+    expect(result.status).toBe("available");
+    if (result.status === "available") {
+      expect(result.findings[0]!.presentation).toMatchObject({
+        blocks: [{
+          type: "ranking",
+          title: "Power at the peak interval",
+          unit: "kW",
+          items: [
+            { label: "Centre N · Kitchen Plug Load", value: 43.711 },
+            { label: "Centre AD · Plug Load 3", value: 0.992 },
+          ],
+        }],
+      });
+    }
+  });
+
   it("normalizes the Provider's equivalent next and top-level blocks fields", () => {
     const finding = generatedFindings()[0]! as unknown as Record<string, unknown>;
     finding.next = finding.how;

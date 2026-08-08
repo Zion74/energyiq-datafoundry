@@ -117,6 +117,8 @@ type ToolAccumulator = {
   result: unknown;
 };
 type CollectedSqlEvidence = Omit<PreschoolAiToolEvidence, "evidenceIndex"> & {
+  columns: string[];
+  rows: unknown[];
   numericEvidence: SqlNumericEvidenceCell[];
   normalizedSql: string | null;
   returnedRowCount: number;
@@ -614,6 +616,10 @@ function resolvePreschoolAiEventStreamInternal(
       selectedTools[index]!,
       args.input,
     );
+    if (canonical && !canonical.presentation) {
+      const projected = derivePreschoolEvidencePresentation(canonical, collected.sql);
+      if (projected) canonical.presentation = projected;
+    }
     return canonical ? [{
       finding: canonical,
       evidence: selectedEvidence[index]!,
@@ -647,7 +653,14 @@ function resolvePreschoolAiEventStreamInternal(
         snapshotId: args.input.snapshotId,
         period: { from: args.input.analysisFrom, to: args.input.analysisTo },
         deterministic: evidence,
-        tools: tools.map(({ numericEvidence: _, normalizedSql: __, returnedRowCount: ___, ...tool }, toolIndex) => ({
+        tools: tools.map(({
+          columns: _,
+          rows: __,
+          numericEvidence: ___,
+          normalizedSql: ____,
+          returnedRowCount: _____,
+          ...tool
+        }, toolIndex) => ({
           evidenceIndex: finding.evidenceSqlIndexes[toolIndex]!,
           ...tool,
         })),
@@ -917,6 +930,8 @@ function collectTools(events: AgUiEvent[]): { schemaValid: boolean; sql: Collect
       auditLogId: parsed.audit_log_id ?? null,
       elapsedMs: parsed.elapsed_ms ?? null,
       resultPreview: preview.slice(0, 2_000),
+      columns: parsed.columns,
+      rows: parsed.rows,
       numericEvidence: collectSqlNumericEvidence(parsed.columns, parsed.rows),
       normalizedSql: normalizeSql(sql),
       returnedRowCount: parsed.rows.length,
@@ -1111,6 +1126,108 @@ function materializePreschoolPresentation(
     );
   });
   return blocks.length > 0 ? { version: "1", blocks } : null;
+}
+
+/**
+ * Keeps model-selected presentation authoritative. When the Provider omits it,
+ * project only a small set of customer-useful relationships already selected
+ * by the Finding and returned by its cited SQL. This never runs a new query or
+ * derives a new business claim.
+ */
+function derivePreschoolEvidencePresentation(
+  finding: GeneratedFinding,
+  allTools: CollectedSqlEvidence[],
+): AiFindingPresentation | null {
+  for (const evidenceSqlIndex of finding.evidenceSqlIndexes) {
+    const tool = allTools[evidenceSqlIndex - 1];
+    if (!tool) continue;
+    const rows = tool.rows.filter((row): row is unknown[] => Array.isArray(row));
+
+    if (finding.sectionId === "operating-behaviour") {
+      const items = sqlValueItems(tool.columns, rows, "day_type", "mean_kwh_per_day", dayTypeLabel);
+      const presentation = items.length >= 2 ? parseAiFindingPresentation({
+        version: "1",
+        blocks: [{
+          type: "comparison",
+          title: "Average energy by day type",
+          unit: "kWh/day",
+          items,
+          evidenceSqlIndexes: [evidenceSqlIndex],
+        }],
+      }) : null;
+      if (presentation) return presentation;
+    }
+
+    if (finding.sectionId === "appliance-contribution") {
+      const items = sqlValueItems(tool.columns, rows, "category", "share_pct", applianceCategoryLabel);
+      const presentation = items.length >= 2 ? parseAiFindingPresentation({
+        version: "1",
+        blocks: [{
+          type: "share",
+          title: "Energy share by appliance category",
+          unit: "%",
+          items,
+          evidenceSqlIndexes: [evidenceSqlIndex],
+        }],
+      }) : null;
+      if (presentation) return presentation;
+    }
+
+    if (finding.sectionId === "overall-summary") {
+      const items = sqlValueItems(tool.columns, rows, "circuit_name", "interval_kw", circuitLabel);
+      const presentation = items.length >= 2 ? parseAiFindingPresentation({
+        version: "1",
+        blocks: [{
+          type: "ranking",
+          title: "Power at the peak interval",
+          unit: "kW",
+          items,
+          evidenceSqlIndexes: [evidenceSqlIndex],
+        }],
+      }) : null;
+      if (presentation) return presentation;
+    }
+  }
+  return null;
+}
+
+function sqlValueItems(
+  columns: string[],
+  rows: unknown[][],
+  labelColumn: string,
+  valueColumn: string,
+  label: (value: string) => string,
+): Array<{ label: string; value: number }> {
+  const labelIndex = columns.indexOf(labelColumn);
+  const valueIndex = columns.indexOf(valueColumn);
+  if (labelIndex < 0 || valueIndex < 0) return [];
+  return rows.slice(0, 10).flatMap((row) => {
+    const rawLabel = row[labelIndex];
+    const rawValue = row[valueIndex];
+    if (typeof rawLabel !== "string" || typeof rawValue !== "number" || !Number.isFinite(rawValue)) return [];
+    return [{ label: label(rawLabel), value: rawValue }];
+  });
+}
+
+function dayTypeLabel(value: string): string {
+  return value.toLowerCase() === "weekday" ? "Weekday"
+    : value.toLowerCase() === "weekend" ? "Weekend"
+      : value.replace(/(^|[-_\s]+)(\p{L})/gu, (_match, _separator, letter: string) => ` ${letter.toUpperCase()}`).trim();
+}
+
+function applianceCategoryLabel(value: string): string {
+  const category = value.toLowerCase();
+  if (category === "load") return "Plugload";
+  if (category === "aircon") return "Air conditioning";
+  if (category === "light") return "Lighting";
+  return dayTypeLabel(value);
+}
+
+function circuitLabel(value: string): string {
+  const [scope, circuit = value] = value.split(":", 2);
+  const centre = /^preschool-centre-(.+)$/u.exec(scope)?.[1]?.toUpperCase();
+  const readableCircuit = circuit.replace(/([\p{L}])(\d+)/gu, "$1 $2");
+  return centre ? `Centre ${centre} · ${readableCircuit}` : readableCircuit;
 }
 
 function unsupportedNarrative(
