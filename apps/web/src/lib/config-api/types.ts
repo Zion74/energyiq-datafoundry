@@ -1321,6 +1321,28 @@ export type PreschoolBenchmarkProjectionDto = {
   };
 };
 
+export type PreschoolOperationalApplianceCompositionDto = {
+  totalKwh: number;
+  provisionalCostBeforeGstSgd: number;
+  reconciliationGapKwh: number;
+  applianceGroups: Array<{
+    name: string;
+    usageKwh: number;
+    sharePct: number;
+    provisionalCostBeforeGstSgd: number;
+    sourceAliases: string[];
+  }>;
+  appliances: Array<{
+    name: string;
+    applianceGroup: string;
+    usageKwh: number;
+    sharePct: number;
+    provisionalCostBeforeGstSgd: number;
+    centreCount: number;
+    sourceCircuitIds: string[];
+  }>;
+};
+
 export type PreschoolOperationalProjectionDto = {
   status: "available";
   contract: {
@@ -1338,7 +1360,9 @@ export type PreschoolOperationalProjectionDto = {
     standbyKwh: number;
     standbySharePct: number;
     operatingKwh: number;
+    operatingSharePct: number;
     provisionalStandbyCostBeforeGstSgd: number;
+    provisionalOperatingCostBeforeGstSgd: number;
   };
   tariffReference: {
     sourceName: "SP Group";
@@ -1350,27 +1374,8 @@ export type PreschoolOperationalProjectionDto = {
     beforeGstSgdPerKwh: 0.2727;
     withGstSgdPerKwh: 0.2972;
   };
-  standbyAppliances: {
-    totalKwh: number;
-    provisionalCostBeforeGstSgd: number;
-    reconciliationGapKwh: number;
-    applianceGroups: Array<{
-      name: string;
-      usageKwh: number;
-      sharePct: number;
-      provisionalCostBeforeGstSgd: number;
-      sourceAliases: string[];
-    }>;
-    appliances: Array<{
-      name: string;
-      applianceGroup: string;
-      usageKwh: number;
-      sharePct: number;
-      provisionalCostBeforeGstSgd: number;
-      centreCount: number;
-      sourceCircuitIds: string[];
-    }>;
-  };
+  standbyAppliances: PreschoolOperationalApplianceCompositionDto;
+  operatingAppliances: PreschoolOperationalApplianceCompositionDto;
   hourlyProfile: {
     completeDayCount: 31;
     unit: "mean kWh per complete day";

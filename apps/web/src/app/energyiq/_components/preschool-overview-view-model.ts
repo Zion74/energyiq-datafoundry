@@ -261,9 +261,30 @@ export type PreschoolOverviewViewModel = {
     };
     operating: {
       energy: string;
+      provisionalCost: string;
+      provisionalCostNote: string;
+      share: string;
       spikeCount: number;
       centreCount: number;
       centres: PreschoolOperationalCentre[];
+      applianceGroups: Array<{
+        name: string;
+        energy: string;
+        share: string;
+        sharePct: number;
+        provisionalCost: string;
+        sourceAliases: string[];
+      }>;
+      appliances: Array<{
+        name: string;
+        applianceGroup: string;
+        energy: string;
+        share: string;
+        sharePct: number;
+        provisionalCost: string;
+        centreCount: number;
+      }>;
+      reconciliation: string;
     };
     sop: {
       label: "After-hours Review Priority";
@@ -369,7 +390,8 @@ export function buildPreschoolOverviewViewModel(
   const decisionSummary = buildPreschoolDecisionSummary(snapshot);
   const benchmark = buildPreschoolBenchmarkView(snapshot);
   const hasCurrentOperationalContract = snapshot.preschoolOperational?.status === "available"
-    && Reflect.get(snapshot.preschoolOperational.contract, "version") === "2";
+    && Reflect.get(snapshot.preschoolOperational.contract, "version") === "2"
+    && Reflect.get(snapshot.preschoolOperational, "operatingAppliances") !== undefined;
   const periodLabel = formatAnalysisWindowLabel(
     snapshot.context.from,
     snapshot.context.to,
@@ -570,9 +592,30 @@ export function buildPreschoolOverviewViewModel(
           },
           operating: {
             energy: `${formatNumber(snapshot.preschoolOperational.energy.operatingKwh, 2)} kWh`,
+            provisionalCost: `S$${formatNumber(snapshot.preschoolOperational.energy.provisionalOperatingCostBeforeGstSgd, 2)}`,
+            provisionalCostNote: `${snapshot.preschoolOperational.tariffReference.sourceName} ${formatNumber(snapshot.preschoolOperational.tariffReference.beforeGstSgdPerKwh, 4)} SGD/kWh before GST reference · planning estimate only, not a bill`,
+            share: `${formatNumber(snapshot.preschoolOperational.energy.operatingSharePct, 1)}%`,
             spikeCount: snapshot.preschoolOperational.spikes.operating.count,
             centreCount: snapshot.preschoolOperational.spikes.operating.centreCount,
             centres: snapshot.preschoolOperational.spikes.operating.centres.map(toOperationalCentre),
+            applianceGroups: snapshot.preschoolOperational.operatingAppliances.applianceGroups.map((group) => ({
+              name: group.name,
+              energy: `${formatNumber(group.usageKwh, 2)} kWh`,
+              share: `${formatNumber(group.sharePct, 1)}%`,
+              sharePct: group.sharePct,
+              provisionalCost: `S$${formatNumber(group.provisionalCostBeforeGstSgd, 2)}`,
+              sourceAliases: group.sourceAliases,
+            })),
+            appliances: snapshot.preschoolOperational.operatingAppliances.appliances.map((appliance) => ({
+              name: appliance.name,
+              applianceGroup: appliance.applianceGroup,
+              energy: `${formatNumber(appliance.usageKwh, 2)} kWh`,
+              share: `${formatNumber(appliance.sharePct, 1)}%`,
+              sharePct: appliance.sharePct,
+              provisionalCost: `S$${formatNumber(appliance.provisionalCostBeforeGstSgd, 2)}`,
+              centreCount: appliance.centreCount,
+            })),
+            reconciliation: `${formatNumber(Math.abs(snapshot.preschoolOperational.operatingAppliances.reconciliationGapKwh), 4)} kWh reconciliation gap`,
           },
           sop: {
             label: "After-hours Review Priority",
@@ -603,7 +646,7 @@ export function buildPreschoolOverviewViewModel(
       : {
           status: "unavailable",
           detail: snapshot.preschoolOperational?.status === "available"
-            ? "The current API runtime returned a superseded operational Evidence contract. Refresh the runtime before using Standby or Spike findings."
+            ? "The current API runtime returned a superseded operational Evidence contract. Refresh the runtime before using Standby, Operating-hours or Spike findings."
             : snapshot.preschoolOperational?.reason.message
               ?? "The current Snapshot does not contain release-pinned Calendar and Centre-hour Evidence for operational behaviour.",
         },

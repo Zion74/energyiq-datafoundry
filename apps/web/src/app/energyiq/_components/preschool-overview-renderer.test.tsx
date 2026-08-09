@@ -64,8 +64,8 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup.indexOf("Key findings · Sections 2–5")).toBeLessThan(markup.indexOf('id="preschool-ai-analysis"'));
     expect(markup.indexOf("Key findings · Sections 2–5")).toBeLessThan(markup.indexOf("Benchmark Analysis"));
     expect(markup.indexOf("Benchmark Analysis")).toBeLessThan(markup.indexOf("Standby Energy Wastage — Post Operating Hours"));
-    expect(markup.indexOf("Standby Energy Wastage — Post Operating Hours")).toBeLessThan(markup.indexOf("Operating hours analysis"));
-    expect(markup.indexOf("Operating hours analysis")).toBeLessThan(markup.indexOf("June planning / Forecast"));
+    expect(markup.indexOf("Standby Energy Wastage — Post Operating Hours")).toBeLessThan(markup.indexOf("Operating Hours Analysis"));
+    expect(markup.indexOf("Operating Hours Analysis")).toBeLessThan(markup.indexOf("June planning / Forecast"));
   });
 
   it("shows only the first five Centres by default and retains the remaining rows in disclosure", () => {
@@ -293,6 +293,114 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(matchingMarkup).toContain("MATCHING_STANDBY_HEADLINE");
     expect(matchingMarkup).toContain("MATCHING_STANDBY_SUMMARY");
     expect(matchingMarkup).toContain("MATCHING_STANDBY_ACTION");
+  });
+
+  it("renders the Operating-hours decision path from five KPIs to state-specific Appliance and complete Centre evidence", () => {
+    const markup = renderToStaticMarkup(
+      <PreschoolOverviewRenderer state={{ status: "ready", snapshot: preschoolGoldenSnapshot() }} />,
+    );
+    const container = document.createElement("div");
+    container.innerHTML = markup;
+    const operatingSection = container.querySelector<HTMLElement>("#preschool-operating-hours")!;
+
+    expect(operatingSection.querySelector("[data-operating-interpretation-status]")?.getAttribute("data-operating-interpretation-status")).toBe("unavailable");
+    expect(operatingSection.textContent).toContain("No matching AI interpretation is available for this Snapshot.");
+    expect(operatingSection.querySelectorAll("[data-operating-kpis] > div")).toHaveLength(5);
+    expect(operatingSection.textContent).toContain("21,818.03 kWh");
+    expect(operatingSection.textContent).toContain("S$5,949.78");
+    expect(operatingSection.textContent).toContain("Before GST reference · not a bill");
+    expect(operatingSection.textContent).toContain("87.5%");
+    expect(operatingSection.textContent).toContain("Unusual operating-hour Spikes21");
+    expect(operatingSection.textContent).toContain("Centres to review14");
+
+    expect(operatingSection.textContent).toContain("4.1 Operating Energy by Appliance Type");
+    expect([...operatingSection.querySelectorAll("[data-operating-appliance-group]")].map((node) => node.getAttribute("data-operating-appliance-group")))
+      .toEqual(["Plugload", "Aircon", "Lighting", "Heater"]);
+    expect(operatingSection.querySelectorAll("[data-operating-appliance]")).toHaveLength(9);
+    expect(operatingSection.querySelector("[data-operating-appliance]")?.getAttribute("data-operating-appliance")).toBe("Plug Load3");
+
+    expect(operatingSection.textContent).toContain("4.2 Operating Hours Spike Analysis");
+    const centreDetails = operatingSection.querySelectorAll<HTMLDetailsElement>("details[data-operating-spike-centre]");
+    expect([...centreDetails].map((detail) => detail.dataset.operatingSpikeCentre)).toEqual([
+      "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N",
+    ]);
+    expect([...centreDetails].map((detail) => detail.querySelectorAll("[data-operating-spike-event]").length))
+      .toEqual([8, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
+    expect([...centreDetails].every((detail) => detail.querySelector(":scope > summary")?.tabIndex === 0)).toBe(true);
+    expect(centreDetails[0]?.querySelectorAll('[data-operating-spike-event^="B:"]')).toHaveLength(0);
+    centreDetails[0]!.open = true;
+    expect(centreDetails[0]!.open).toBe(true);
+    centreDetails[0]!.open = false;
+
+    expect(operatingSection.textContent).toMatch(/observed leading contributor/i);
+    expect(operatingSection.textContent).not.toMatch(/root cause\s*:/i);
+    expect(operatingSection.textContent).not.toContain("Potential Saving");
+    const supportingContext = operatingSection.querySelector<HTMLDetailsElement>("[data-all-hours-appliance-context]");
+    expect(supportingContext).not.toBeNull();
+    expect(supportingContext!.open).toBe(false);
+
+    const readingOrder = [
+      "Key focus / AI interpretation",
+      "Total operating energy",
+      "4.1 Operating Energy by Appliance Type",
+      "4.2 Operating Hours Spike Analysis",
+      "Method, tariff and evidence",
+      "Supporting Evidence · all-hours Portfolio Appliance context",
+    ].map((label) => operatingSection.textContent!.indexOf(label));
+    expect(readingOrder.every((position) => position >= 0)).toBe(true);
+    expect(readingOrder).toEqual([...readingOrder].sort((left, right) => left - right));
+  });
+
+  it("only renders Operating-hours interpretation when Snapshot, Release and period identities all match", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    const staleMarkup = renderToStaticMarkup(
+      <PreschoolOverviewRenderer
+        state={{ status: "ready", snapshot }}
+        operatingInterpretation={{
+          status: "available",
+          dataSnapshotId: snapshot.dataSnapshot.id,
+          projectReleaseId: snapshot.projectRelease.id,
+          period: { start: "2026-05-10T16:00:00.000Z", endExclusive: "2026-06-07T16:00:00.000Z" },
+          headline: "STALE_OPERATING_HEADLINE",
+          summary: "STALE_OPERATING_SUMMARY",
+        }}
+      />,
+    );
+    expect(staleMarkup).not.toContain("STALE_OPERATING_HEADLINE");
+    expect(staleMarkup).not.toContain("STALE_OPERATING_SUMMARY");
+    expect(staleMarkup).toContain('data-operating-interpretation-status="unavailable"');
+
+    const pendingMarkup = renderToStaticMarkup(
+      <PreschoolOverviewRenderer
+        state={{ status: "ready", snapshot }}
+        operatingInterpretation={{
+          status: "pending",
+          dataSnapshotId: snapshot.dataSnapshot.id,
+          projectReleaseId: snapshot.projectRelease.id,
+          period: snapshot.context.primaryPeriod,
+        }}
+      />,
+    );
+    expect(pendingMarkup).toContain('data-operating-interpretation-status="pending"');
+
+    const matchingMarkup = renderToStaticMarkup(
+      <PreschoolOverviewRenderer
+        state={{ status: "ready", snapshot }}
+        operatingInterpretation={{
+          status: "available",
+          dataSnapshotId: snapshot.dataSnapshot.id,
+          projectReleaseId: snapshot.projectRelease.id,
+          period: snapshot.context.primaryPeriod,
+          headline: "MATCHING_OPERATING_HEADLINE",
+          summary: "MATCHING_OPERATING_SUMMARY",
+          actions: ["MATCHING_OPERATING_ACTION"],
+        }}
+      />,
+    );
+    expect(matchingMarkup).toContain('data-operating-interpretation-status="available"');
+    expect(matchingMarkup).toContain("MATCHING_OPERATING_HEADLINE");
+    expect(matchingMarkup).toContain("MATCHING_OPERATING_SUMMARY");
+    expect(matchingMarkup).toContain("MATCHING_OPERATING_ACTION");
   });
 
   it("links a visible Centre to its exact Explorer Scope without dropping Snapshot pins", () => {

@@ -165,7 +165,9 @@ function operationalProjection(): PreschoolOperationalProjection {
       standbyKwh: 3103.78,
       standbySharePct: 12.5,
       operatingKwh: 21818.03,
+      operatingSharePct: 87.5,
       provisionalStandbyCostBeforeGstSgd: 846.4,
+      provisionalOperatingCostBeforeGstSgd: 5949.78,
     },
     tariffReference: {
       sourceName: "SP Group",
@@ -180,6 +182,13 @@ function operationalProjection(): PreschoolOperationalProjection {
     standbyAppliances: {
       totalKwh: 3103.78,
       provisionalCostBeforeGstSgd: 846.4,
+      reconciliationGapKwh: 0,
+      applianceGroups: [],
+      appliances: [],
+    },
+    operatingAppliances: {
+      totalKwh: 21818.03,
+      provisionalCostBeforeGstSgd: 5949.78,
       reconciliationGapKwh: 0,
       applianceGroups: [],
       appliances: [],

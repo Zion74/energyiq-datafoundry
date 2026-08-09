@@ -84,7 +84,9 @@ describe("Preschool operational projection", () => {
       standbyKwh: 3_103.784,
       standbySharePct: 12.45,
       operatingKwh: 21_818.0283,
+      operatingSharePct: 87.5459,
       provisionalStandbyCostBeforeGstSgd: 846.4019,
+      provisionalOperatingCostBeforeGstSgd: 5_949.7763,
     });
     expect(projection.tariffReference).toMatchObject({
       sourceName: "SP Group",
@@ -105,6 +107,22 @@ describe("Preschool operational projection", () => {
       ]);
     expect(projection.standbyAppliances.appliances).toHaveLength(9);
     expect(projection.standbyAppliances.appliances.every((appliance) => (
+      appliance.centreCount === 30 && appliance.sourceCircuitIds.length === 30
+    ))).toBe(true);
+    expect(projection.operatingAppliances).toMatchObject({
+      totalKwh: 21_818.0283,
+      provisionalCostBeforeGstSgd: 5_949.7763,
+      reconciliationGapKwh: 0,
+    });
+    expect(projection.operatingAppliances.applianceGroups.map((group) => [group.name, group.sharePct]))
+      .toEqual([
+        ["Plugload", 97.4],
+        ["Aircon", 2],
+        ["Lighting", 0.5],
+        ["Heater", 0.1],
+      ]);
+    expect(projection.operatingAppliances.appliances).toHaveLength(9);
+    expect(projection.operatingAppliances.appliances.every((appliance) => (
       appliance.centreCount === 30 && appliance.sourceCircuitIds.length === 30
     ))).toBe(true);
     expect(projection.hourlyProfile).toMatchObject({
@@ -466,6 +484,19 @@ describe("Preschool operational projection", () => {
       });
       expect(new Set(projection.standbyAppliances.applianceGroups.map((group) => group.name)))
         .toEqual(new Set(["Plugload", "Aircon", "Lighting", "Heater"]));
+      expect(projection.operatingAppliances).toMatchObject({
+        totalKwh: 21_818.0283,
+        reconciliationGapKwh: 0,
+      });
+      expect(projection.operatingAppliances.applianceGroups.map((group) => [group.name, group.sharePct]))
+        .toEqual([["Plugload", 100]]);
+      expect(projection.operatingAppliances.appliances).toHaveLength(1);
+      expect(projection.operatingAppliances.appliances[0]).toMatchObject({
+        name: "Plug Load3",
+        applianceGroup: "Plugload",
+        sharePct: 100,
+        centreCount: 30,
+      });
       expect(projection.spikes.operating.centres.find((centre) => centre.centreCode === "A"))
         .toMatchObject({ centreType: "Senior Care Center" });
       expect(projection.sop.centres.find((centre) => centre.centreCode === "L"))

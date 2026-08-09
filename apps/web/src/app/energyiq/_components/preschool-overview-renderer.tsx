@@ -45,6 +45,7 @@ export type PreschoolOverviewRendererState =
 export type PreschoolBenchmarkInterpretation = PreschoolSectionInterpretationView;
 
 export type PreschoolStandbyInterpretation = PreschoolBenchmarkInterpretation;
+export type PreschoolOperatingInterpretation = PreschoolBenchmarkInterpretation;
 
 export function PreschoolOverviewRenderer({
   state,
@@ -57,6 +58,7 @@ export function PreschoolOverviewRenderer({
   onAiArtifactChange,
   benchmarkInterpretation,
   standbyInterpretation,
+  operatingInterpretation,
 }: {
   state: PreschoolOverviewRendererState;
   onRetry?: () => void;
@@ -68,6 +70,7 @@ export function PreschoolOverviewRenderer({
   onAiArtifactChange?: (artifact: EnergySavedAnalysisAiArtifactInputDto | null) => void;
   benchmarkInterpretation?: PreschoolBenchmarkInterpretation;
   standbyInterpretation?: PreschoolStandbyInterpretation;
+  operatingInterpretation?: PreschoolOperatingInterpretation;
 }) {
   const [liveAiResult, setLiveAiResult] = React.useState<PreschoolAiRunResult | undefined>();
   const readySnapshotIdentity = state.status === "ready"
@@ -459,85 +462,49 @@ export function PreschoolOverviewRenderer({
         <SectionHeader
           id="preschool-operating-hours-heading"
           sectionNumber={4}
-          title="Operating hours analysis"
-          description="Review unusual peaks during opening hours and retain the current all-hours Appliance ranking as supporting context until the state-specific projection is delivered."
+          title="Operating Hours Analysis"
+          description="How much energy is used while Centres are open, which Appliances account for it, and which Centres and hours need an operating review?"
+        />
+        <OperatingInterpretationSlot
+          snapshot={state.snapshot}
+          interpretation={operatingInterpretation}
         />
         {view.operational.status === "available" ? (
-          <div className="mt-5">
-            <OperationalSpikePanel
-              title="Operating hours"
-              energy={view.operational.operating.energy}
-              spikeCount={view.operational.operating.spikeCount}
-              centreCount={view.operational.operating.centreCount}
-              centres={view.operational.operating.centres}
-              tone="default"
-            />
-          </div>
+          <>
+            <OperatingKpiStrip operating={view.operational.operating} />
+
+            <section className="mt-8 border-t border-border pt-7" aria-labelledby="preschool-operating-appliances-heading">
+              <h4 id="preschool-operating-appliances-heading" className="text-base font-semibold text-foreground">4.1 Operating Energy by Appliance Type</h4>
+              <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Which observed published Appliance aliases account for energy while the Calendar marks Centres as open?</p>
+              <OperatingApplianceComposition operating={view.operational.operating} />
+            </section>
+
+            <section className="mt-8 border-t border-border pt-7" aria-labelledby="preschool-operating-spikes-heading">
+              <h4 id="preschool-operating-spikes-heading" className="text-base font-semibold text-foreground">4.2 Operating Hours Spike Analysis</h4>
+              <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Contact Centres with repeated opening-hour exceptions first. Expand a row to inspect every event recorded for that Centre.</p>
+              <OperatingSpikeTable centres={view.operational.operating.centres} />
+            </section>
+
+            <details className="mt-7 rounded-lg border border-border bg-surface-subtle/40 px-4 py-3">
+              <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Method, tariff and evidence</summary>
+              <dl className="mt-3 grid gap-2 text-xs leading-5 sm:grid-cols-2">
+                <ReadinessRow label="Calendar" value={view.operational.calendarVersion} />
+                <ReadinessRow label="Spike rule" value={view.operational.threshold} />
+                <ReadinessRow label="Tariff" value={view.operational.operating.provisionalCostNote} />
+                <ReadinessRow label="Reconciliation" value={view.operational.operating.reconciliation} />
+              </dl>
+              <p className="mt-3 text-xs leading-5 text-muted">The composition and Spike events come from the same Snapshot-scoped Centre-hour × Circuit query. Observed leading contributors are not confirmed root causes, and no saving estimate is presented.</p>
+              <div className="mt-3"><PreschoolEvidenceLink label="View supporting evidence" /></div>
+            </details>
+
+            <AllHoursApplianceContext appliances={view.appliances} />
+          </>
         ) : (
           <div className="mt-5 rounded-lg border border-border bg-surface-subtle p-4" role="status">
             <p className="text-xs font-semibold text-muted">Operating-hours analysis unavailable</p>
             <p className="mt-2 text-[11px] leading-5 text-muted">{view.operational.detail}</p>
           </div>
         )}
-        <PreschoolAiSlot
-          snapshot={state.snapshot}
-          sectionId="operating-behaviour"
-          mode={aiSlotMode}
-          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
-          {...(aiAnalystHref ? { aiAnalystHref } : {})}
-        />
-
-        <div id="preschool-appliance-ranking" className="mt-8 scroll-mt-28 border-t border-border pt-7">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <h4 id="preschool-appliance-ranking-heading" className="text-base font-semibold text-foreground">Portfolio Appliance context</h4>
-              <p className="mt-1.5 text-sm leading-6 text-muted">All-hours totals only. This ranking is not presented as the open-hour Appliance breakdown.</p>
-            </div>
-            {view.appliances.status === "available" ? (
-              <p className="text-xs font-semibold tabular-nums text-foreground">{view.appliances.totalEnergy} · 9 Appliances</p>
-            ) : null}
-          </div>
-          {view.appliances.status === "available" ? (
-            <div className="mt-4">
-              <div className="divide-y divide-border border-y border-border" role="list" aria-label="Portfolio Appliance energy ranking">
-                {view.appliances.rows.map((appliance, index) => (
-                  <div key={appliance.name} className="grid gap-2 py-3 sm:grid-cols-[minmax(150px,0.8fr)_minmax(220px,1.5fr)_170px] sm:items-center sm:gap-4" role="listitem">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-foreground">{index + 1}. {appliance.name}</p>
-                      <p className="mt-0.5 text-xs text-muted">{appliance.applianceGroup} · {appliance.centreCount} Centres</p>
-                    </div>
-                    <div className="h-2.5 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true">
-                      <div
-                        className={`h-full rounded-full ${applianceBarClass(appliance.applianceGroup)}`}
-                        style={{ width: `${Math.max(2, appliance.relativeToTopPct)}%` }}
-                      />
-                    </div>
-                    <div className="flex items-baseline justify-between gap-3 tabular-nums sm:justify-end">
-                      <span className="text-sm font-semibold text-foreground">{appliance.energy}</span>
-                      <span className="w-14 text-right text-xs text-muted">{appliance.share}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <details className="mt-4 border-t border-border pt-3">
-                <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Appliance calculation note</summary>
-                <p className="mt-2 text-xs leading-5 text-muted">{view.appliances.detail}</p>
-              </details>
-            </div>
-          ) : (
-            <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
-              <p className="text-xs font-semibold text-muted">Appliance ranking unavailable</p>
-              <p className="mt-2 text-[11px] leading-5 text-muted">{view.appliances.detail}</p>
-            </div>
-          )}
-          <PreschoolAiSlot
-            snapshot={state.snapshot}
-            sectionId="appliance-contribution"
-            mode={aiSlotMode}
-            {...(savedAiResult ? { savedResult: savedAiResult } : {})}
-            {...(aiAnalystHref ? { aiAnalystHref } : {})}
-          />
-        </div>
       </section>
 
       <section id="preschool-june-planning" aria-labelledby="preschool-june-planning-heading" data-overview-section="5" className="scroll-mt-28 border-b border-border bg-surface-subtle/35 px-5 py-7 lg:px-7 lg:py-8">
@@ -793,6 +760,23 @@ function StandbyInterpretationSlot({
   );
 }
 
+function OperatingInterpretationSlot({
+  snapshot,
+  interpretation,
+}: {
+  snapshot: EnergyProjectAnalysisSnapshotDto;
+  interpretation: PreschoolOperatingInterpretation | undefined;
+}) {
+  return (
+    <SnapshotInterpretationSlot
+      snapshot={snapshot}
+      interpretation={interpretation}
+      slot="operating"
+      title="Key focus / AI interpretation"
+    />
+  );
+}
+
 function SnapshotInterpretationSlot({
   snapshot,
   interpretation,
@@ -800,8 +784,8 @@ function SnapshotInterpretationSlot({
   title,
 }: {
   snapshot: EnergyProjectAnalysisSnapshotDto;
-  interpretation: PreschoolBenchmarkInterpretation | PreschoolStandbyInterpretation | undefined;
-  slot: "benchmark" | "standby";
+  interpretation: PreschoolBenchmarkInterpretation | PreschoolStandbyInterpretation | PreschoolOperatingInterpretation | undefined;
+  slot: "benchmark" | "standby" | "operating";
   title: string;
 }) {
   const matchesSnapshot = interpretation?.status === "available" || interpretation?.status === "pending"
@@ -1289,6 +1273,7 @@ function roundSvg(value: number): number {
 
 type OperationalView = Extract<PreschoolOverviewViewModel["operational"], { status: "available" }>;
 type StandbyView = OperationalView["standby"];
+type OperatingView = OperationalView["operating"];
 
 function StandbyKpiStrip({ standby }: { standby: StandbyView }) {
   const metrics = [
@@ -1314,20 +1299,63 @@ function StandbyKpiStrip({ standby }: { standby: StandbyView }) {
   );
 }
 
+function OperatingKpiStrip({ operating }: { operating: OperatingView }) {
+  const metrics = [
+    { label: "Total operating energy", value: operating.energy, detail: "Calendar-classified opening hours" },
+    { label: "Provisional operating cost", value: operating.provisionalCost, detail: "Before GST reference · not a bill" },
+    { label: "Share of total", value: operating.share, detail: "Of accepted May Portfolio energy" },
+    { label: "Unusual operating-hour Spikes", value: String(operating.spikeCount), detail: "Above the same-hour baseline" },
+    { label: "Centres to review", value: String(operating.centreCount), detail: "Named below in action order" },
+  ];
+  return (
+    <dl
+      data-operating-kpis="five-decision-metrics"
+      className="mt-6 grid overflow-hidden rounded-lg border border-border bg-surface sm:grid-cols-2 xl:grid-cols-5"
+    >
+      {metrics.map((metric) => (
+        <div key={metric.label} className="border-b border-border px-4 py-4 last:border-b-0 sm:border-r xl:border-b-0 xl:last:border-r-0">
+          <dt className="text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-light">{metric.label}</dt>
+          <dd className="mt-2 text-xl font-semibold tabular-nums text-foreground">{metric.value}</dd>
+          <p className="mt-1.5 text-[10px] leading-4 text-muted">{metric.detail}</p>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
 function StandbyApplianceComposition({ standby }: { standby: StandbyView }) {
+  return <OperatingStateApplianceComposition state="standby" stateView={standby} />;
+}
+
+function OperatingApplianceComposition({ operating }: { operating: OperatingView }) {
+  return <OperatingStateApplianceComposition state="operating" stateView={operating} />;
+}
+
+function OperatingStateApplianceComposition({
+  state,
+  stateView,
+}: {
+  state: "standby" | "operating";
+  stateView: StandbyView | OperatingView;
+}) {
+  const isStandby = state === "standby";
+  const stateLabel = isStandby ? "Closed-hour" : "Operating-hour";
+  const compositionData = isStandby
+    ? { "data-standby-appliance-composition": "closed-state" }
+    : { "data-operating-appliance-composition": "operating-state" };
   let cumulativeOffset = 0;
-  const arcs = standby.applianceGroups.map((group) => {
+  const arcs = stateView.applianceGroups.map((group) => {
     const arc = { ...group, offset: cumulativeOffset };
     cumulativeOffset += group.sharePct;
     return arc;
   });
   return (
-    <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(300px,0.78fr)_minmax(520px,1.22fr)]" data-standby-appliance-composition="closed-state">
+    <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(300px,0.78fr)_minmax(520px,1.22fr)]" {...compositionData}>
       <article className="border-y border-border py-5">
         <div className="grid gap-5 sm:grid-cols-[220px_minmax(0,1fr)] sm:items-center">
-          <svg viewBox="0 0 220 220" role="img" aria-labelledby="standby-composition-title standby-composition-description" className="mx-auto h-auto w-full max-w-[220px]">
-            <title id="standby-composition-title">Closed-hour energy share by Appliance group</title>
-            <desc id="standby-composition-description">A four-segment donut shows the share of closed-hour energy from Plugload, Aircon, Lighting and Heater Circuit aliases.</desc>
+          <svg viewBox="0 0 220 220" role="img" aria-labelledby={`${state}-composition-title ${state}-composition-description`} className="mx-auto h-auto w-full max-w-[220px]">
+            <title id={`${state}-composition-title`}>{`${stateLabel} energy share by Appliance group`}</title>
+            <desc id={`${state}-composition-description`}>{`The composition shows each observed published Appliance group and its share of ${stateLabel.toLowerCase()} energy.`}</desc>
             <circle cx="110" cy="110" r="75" pathLength="100" fill="none" stroke="currentColor" strokeWidth="28" className="text-surface-subtle" />
             {arcs.map((group) => (
               <circle
@@ -1344,16 +1372,19 @@ function StandbyApplianceComposition({ standby }: { standby: StandbyView }) {
                 strokeLinecap="butt"
                 transform="rotate(-90 110 110)"
                 className={applianceStrokeClass(group.name)}
-                data-standby-appliance-group={group.name}
+                data-operating-state-appliance-group={`${state}:${group.name}`}
+                {...(isStandby
+                  ? { "data-standby-appliance-group": group.name }
+                  : { "data-operating-appliance-group": group.name })}
               >
                 <title>{`${group.name}: ${group.energy}, ${group.share}`}</title>
               </circle>
             ))}
-            <text x="110" y="104" textAnchor="middle" className="fill-muted text-[11px] font-semibold">Closed-hour</text>
-            <text x="110" y="126" textAnchor="middle" className="fill-foreground text-[15px] font-semibold">{standby.energy}</text>
+            <text x="110" y="104" textAnchor="middle" className="fill-muted text-[11px] font-semibold">{stateLabel}</text>
+            <text x="110" y="126" textAnchor="middle" className="fill-foreground text-[15px] font-semibold">{stateView.energy}</text>
           </svg>
-          <div className="space-y-3" aria-label="Closed-hour Appliance group legend">
-            {standby.applianceGroups.map((group) => (
+          <div className="space-y-3" aria-label={`${stateLabel} Appliance group legend`}>
+            {stateView.applianceGroups.map((group) => (
               <div key={group.name} className="grid grid-cols-[10px_minmax(0,1fr)_auto] items-start gap-2 text-xs">
                 <span className={`mt-1 h-2.5 w-2.5 rounded-sm ${applianceBarClass(group.name)}`} aria-hidden="true" />
                 <span>
@@ -1367,17 +1398,30 @@ function StandbyApplianceComposition({ standby }: { standby: StandbyView }) {
         </div>
       </article>
 
-      <article className="border-y border-border py-5" aria-labelledby="standby-appliance-ranking-heading">
+      <article className="border-y border-border py-5" aria-labelledby={`${state}-appliance-ranking-heading`}>
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
-            <h5 id="standby-appliance-ranking-heading" className="text-sm font-semibold text-foreground">Appliance ranking</h5>
-            <p className="mt-1 text-xs leading-5 text-muted">Published Circuit aliases, highest closed-hour consumer first.</p>
+            <h5 id={`${state}-appliance-ranking-heading`} className="text-sm font-semibold text-foreground">Appliance ranking</h5>
+            <p className="mt-1 text-xs leading-5 text-muted">Observed published Circuit aliases, highest {stateLabel.toLowerCase()} consumer first.</p>
           </div>
           <span className="text-[10px] text-muted">Energy · provisional cost · share</span>
         </div>
-        <ol className="mt-4 divide-y divide-border" data-standby-appliance-ranking="true">
-          {standby.appliances.map((appliance, index) => (
-            <li key={appliance.name} className="grid gap-2 py-2.5 text-xs sm:grid-cols-[24px_minmax(150px,0.8fr)_minmax(120px,1fr)_92px_72px] sm:items-center" data-standby-appliance={appliance.name}>
+        <ol
+          className="mt-4 divide-y divide-border"
+          data-operating-state-appliance-ranking={state}
+          {...(isStandby
+            ? { "data-standby-appliance-ranking": "true" }
+            : { "data-operating-appliance-ranking": "true" })}
+        >
+          {stateView.appliances.map((appliance, index) => (
+            <li
+              key={appliance.name}
+              className="grid gap-2 py-2.5 text-xs sm:grid-cols-[24px_minmax(150px,0.8fr)_minmax(120px,1fr)_92px_72px] sm:items-center"
+              data-operating-state-appliance={`${state}:${appliance.name}`}
+              {...(isStandby
+                ? { "data-standby-appliance": appliance.name }
+                : { "data-operating-appliance": appliance.name })}
+            >
               <span className="text-right tabular-nums text-muted">{index + 1}</span>
               <span><strong className="block font-semibold text-foreground">{appliance.name}</strong><span className="mt-0.5 block text-[10px] text-muted">{appliance.applianceGroup} · {appliance.centreCount} Centres</span></span>
               <span className="h-2 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true"><span className={`block h-full min-w-[2px] rounded-full ${applianceBarClass(appliance.applianceGroup)}`} style={{ width: `${appliance.sharePct}%` }} /></span>
@@ -1392,18 +1436,47 @@ function StandbyApplianceComposition({ standby }: { standby: StandbyView }) {
 }
 
 function StandbySpikeTable({ centres }: { centres: PreschoolOperationalCentre[] }) {
+  return <OperatingStateSpikeTable state="standby" centres={centres} />;
+}
+
+function OperatingSpikeTable({ centres }: { centres: PreschoolOperationalCentre[] }) {
+  return <OperatingStateSpikeTable state="operating" centres={centres} />;
+}
+
+function OperatingStateSpikeTable({
+  state,
+  centres,
+}: {
+  state: "standby" | "operating";
+  centres: PreschoolOperationalCentre[];
+}) {
+  const isStandby = state === "standby";
+  const stateLabel = isStandby ? "closed-hour" : "operating-hour";
   const summaryGrid = "grid min-w-[1060px] grid-cols-[minmax(150px,1fr)_130px_64px_132px_88px_96px_82px_minmax(150px,1fr)_58px] items-center gap-3";
   return (
-    <div className="mt-5 overflow-x-auto rounded-lg border border-border bg-surface" data-standby-spike-table="action-sorted">
+    <div
+      className="mt-5 overflow-x-auto rounded-lg border border-border bg-surface"
+      data-operating-state-spike-table={`${state}:action-sorted`}
+      {...(isStandby
+        ? { "data-standby-spike-table": "action-sorted" }
+        : { "data-operating-spike-table": "action-sorted" })}
+    >
       <div className={`${summaryGrid} bg-surface-subtle px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-light`} aria-hidden="true">
-        <span>Centre</span><span>Centre type</span><span>Spikes</span><span>Worst date / hour</span><span className="text-right">Actual</span><span className="text-right">Baseline</span><span className="text-right">Variance</span><span>Leading contributor</span><span className="text-right">Detail</span>
+        <span>Centre</span><span>Centre type</span><span>Spikes</span><span>Worst date / hour</span><span className="text-right">Actual</span><span className="text-right">Baseline</span><span className="text-right">Variance</span><span>Observed leading contributor</span><span className="text-right">Detail</span>
       </div>
       <div className="divide-y divide-border">
         {centres.map((centre) => (
-          <details key={centre.centreCode} data-standby-spike-centre={centre.centreCode} className="group">
+          <details
+            key={centre.centreCode}
+            data-operating-state-spike-centre={`${state}:${centre.centreCode}`}
+            {...(isStandby
+              ? { "data-standby-spike-centre": centre.centreCode }
+              : { "data-operating-spike-centre": centre.centreCode })}
+            className="group"
+          >
             <summary
               tabIndex={0}
-              aria-label={`View all ${centre.spikeCount} closed-hour Spike events for ${centre.name}.`}
+              aria-label={`View all ${centre.spikeCount} ${stateLabel} Spike events for ${centre.name}.`}
               className={`${summaryGrid} cursor-pointer list-none px-4 py-3 text-xs text-foreground hover:bg-surface-subtle/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/25 [&::-webkit-details-marker]:hidden`}
             >
               <span><strong className="block font-semibold">{centre.name}</strong><span className="mt-0.5 block text-[10px] text-muted">Centre {centre.centreCode}</span></span>
@@ -1417,13 +1490,20 @@ function StandbySpikeTable({ centres }: { centres: PreschoolOperationalCentre[] 
               <span className="text-right font-semibold text-primary"><span className="group-open:hidden">Open</span><span className="hidden group-open:inline">Close</span></span>
             </summary>
             <div className="min-w-[1060px] border-t border-border bg-surface-subtle/35 px-4 py-4">
-              <p className="text-xs font-semibold text-foreground">All {centre.events.length} closed-hour event{centre.events.length === 1 ? "" : "s"} for {centre.name}</p>
+              <p className="text-xs font-semibold text-foreground">All {centre.events.length} {stateLabel} event{centre.events.length === 1 ? "" : "s"} for {centre.name}</p>
               <div className="mt-3 grid grid-cols-[42px_150px_100px_100px_100px_92px_minmax(180px,1fr)] gap-3 border-b border-border pb-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-light" aria-hidden="true">
-                <span>#</span><span>When</span><span className="text-right">Actual</span><span className="text-right">Baseline</span><span className="text-right">Excess</span><span className="text-right">Variance</span><span>Leading contributor</span>
+                <span>#</span><span>When</span><span className="text-right">Actual</span><span className="text-right">Baseline</span><span className="text-right">Excess</span><span className="text-right">Variance</span><span>Observed leading contributor</span>
               </div>
-              <ol className="divide-y divide-border" aria-label={`${centre.name} closed-hour Spike events`}>
+              <ol className="divide-y divide-border" aria-label={`${centre.name} ${stateLabel} Spike events`}>
                 {centre.events.map((event, index) => (
-                  <li key={`${event.when}:${index}`} className="grid grid-cols-[42px_150px_100px_100px_100px_92px_minmax(180px,1fr)] gap-3 py-2.5 text-xs" data-standby-spike-event={`${centre.centreCode}:${index + 1}`}>
+                  <li
+                    key={`${event.when}:${index}`}
+                    className="grid grid-cols-[42px_150px_100px_100px_100px_92px_minmax(180px,1fr)] gap-3 py-2.5 text-xs"
+                    data-operating-state-spike-event={`${state}:${centre.centreCode}:${index + 1}`}
+                    {...(isStandby
+                      ? { "data-standby-spike-event": `${centre.centreCode}:${index + 1}` }
+                      : { "data-operating-spike-event": `${centre.centreCode}:${index + 1}` })}
+                  >
                     <span className="tabular-nums text-muted">{index + 1}</span><span>{event.when}<span className="mt-0.5 block text-[10px] text-muted">{event.dayType}</span></span><span className="text-right font-semibold tabular-nums">{event.usage}</span><span className="text-right tabular-nums text-muted">{event.baseline}</span><span className="text-right tabular-nums text-muted">{event.impact}</span><span className="text-right font-semibold tabular-nums text-step-error">{event.variance}</span><span className="text-muted">{event.leadingCircuit}</span>
                   </li>
                 ))}
@@ -1490,46 +1570,55 @@ function PlanningBaselineChart({ outlook }: { outlook: PlanningOutlookView }) {
   );
 }
 
-function OperationalSpikePanel({
-  title,
-  energy,
-  spikeCount,
-  centreCount,
-  centres,
-  tone,
+function AllHoursApplianceContext({
+  appliances,
 }: {
-  title: string;
-  energy: string;
-  spikeCount: number;
-  centreCount: number;
-  centres: PreschoolOperationalCentre[];
-  tone: "warning" | "default";
+  appliances: PreschoolOverviewViewModel["appliances"];
 }) {
   return (
-    <div className={`rounded-lg border p-4 ${tone === "warning" ? "border-step-warning/30 bg-step-warning-soft/30" : "border-border bg-surface-subtle"}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold text-foreground">{title}</p>
-          <p className="mt-1 text-[11px] tabular-nums text-muted">{energy}</p>
-        </div>
-        <div className="text-right">
-          <p className="text-xl font-semibold tabular-nums text-foreground">{spikeCount}</p>
-          <p className="text-[10px] text-muted-light">Spikes · {centreCount} Centres</p>
-        </div>
-      </div>
-      <div className="mt-4 space-y-2">
-        {centres.slice(0, 4).map((centre) => (
-          <div key={centre.centreCode} className="rounded-md border border-border bg-surface px-3 py-2.5">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-[11px] font-semibold text-foreground">{centre.centreCode} · {centre.centreType ?? "Type unavailable"} · {centre.spikeCount} Spike{centre.spikeCount === 1 ? "" : "s"}</p>
-              <span className="text-[11px] font-semibold tabular-nums text-step-error">{centre.worst.variance}</span>
-            </div>
-            <p className="mt-1 text-[10px] text-muted">{centre.worst.when} · {centre.worst.dayType} · {centre.worst.usage} · {centre.worst.baseline}</p>
-            <p className="mt-1 text-[10px] text-muted-light">Leading appliance: {centre.worst.leadingCircuit}</p>
+    <details id="preschool-appliance-ranking" className="mt-5 scroll-mt-28 border-t border-border pt-4" data-all-hours-appliance-context="supporting-only">
+      <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+        Supporting Evidence · all-hours Portfolio Appliance context
+      </summary>
+      <p className="mt-2 max-w-3xl text-xs leading-5 text-muted">All-hours totals only. This evidence is kept separate from the operating-state composition above.</p>
+      {appliances.status === "available" ? (
+        <div className="mt-4">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <h4 id="preschool-appliance-ranking-heading" className="text-sm font-semibold text-foreground">Portfolio Appliance ranking</h4>
+            <p className="text-xs font-semibold tabular-nums text-foreground">{appliances.totalEnergy} · {appliances.rows.length} Appliances</p>
           </div>
-        ))}
-      </div>
-    </div>
+          <div className="mt-3 divide-y divide-border border-y border-border" role="list" aria-label="All-hours Portfolio Appliance energy ranking">
+            {appliances.rows.map((appliance, index) => (
+              <div key={appliance.name} className="grid gap-2 py-3 sm:grid-cols-[minmax(150px,0.8fr)_minmax(220px,1.5fr)_170px] sm:items-center sm:gap-4" role="listitem">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-foreground">{index + 1}. {appliance.name}</p>
+                  <p className="mt-0.5 text-xs text-muted">{appliance.applianceGroup} · {appliance.centreCount} Centres</p>
+                </div>
+                <div className="h-2.5 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true">
+                  <div
+                    className={`h-full rounded-full ${applianceBarClass(appliance.applianceGroup)}`}
+                    style={{ width: `${Math.max(2, appliance.relativeToTopPct)}%` }}
+                  />
+                </div>
+                <div className="flex items-baseline justify-between gap-3 tabular-nums sm:justify-end">
+                  <span className="text-sm font-semibold text-foreground">{appliance.energy}</span>
+                  <span className="w-14 text-right text-xs text-muted">{appliance.share}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <details className="mt-4 border-t border-border pt-3">
+            <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">All-hours calculation note</summary>
+            <p className="mt-2 text-xs leading-5 text-muted">{appliances.detail}</p>
+          </details>
+        </div>
+      ) : (
+        <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
+          <p className="text-xs font-semibold text-muted">All-hours Appliance ranking unavailable</p>
+          <p className="mt-2 text-[11px] leading-5 text-muted">{appliances.detail}</p>
+        </div>
+      )}
+    </details>
   );
 }
 

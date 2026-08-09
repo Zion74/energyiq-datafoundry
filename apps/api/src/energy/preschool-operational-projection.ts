@@ -77,6 +77,28 @@ export type PreschoolOperationalCircuitCell = {
   usageKwh: number;
 };
 
+export type PreschoolOperationalApplianceComposition = {
+  totalKwh: number;
+  provisionalCostBeforeGstSgd: number;
+  reconciliationGapKwh: number;
+  applianceGroups: Array<{
+    name: string;
+    usageKwh: number;
+    sharePct: number;
+    provisionalCostBeforeGstSgd: number;
+    sourceAliases: string[];
+  }>;
+  appliances: Array<{
+    name: string;
+    applianceGroup: string;
+    usageKwh: number;
+    sharePct: number;
+    provisionalCostBeforeGstSgd: number;
+    centreCount: number;
+    sourceCircuitIds: string[];
+  }>;
+};
+
 export type PreschoolOperationalProjection = {
   status: "available";
   contract: {
@@ -94,30 +116,13 @@ export type PreschoolOperationalProjection = {
     standbyKwh: number;
     standbySharePct: number;
     operatingKwh: number;
+    operatingSharePct: number;
     provisionalStandbyCostBeforeGstSgd: number;
+    provisionalOperatingCostBeforeGstSgd: number;
   };
   tariffReference: typeof PRESCHOOL_DEMO_TARIFF_REFERENCE;
-  standbyAppliances: {
-    totalKwh: number;
-    provisionalCostBeforeGstSgd: number;
-    reconciliationGapKwh: number;
-    applianceGroups: Array<{
-      name: string;
-      usageKwh: number;
-      sharePct: number;
-      provisionalCostBeforeGstSgd: number;
-      sourceAliases: string[];
-    }>;
-    appliances: Array<{
-      name: string;
-      applianceGroup: string;
-      usageKwh: number;
-      sharePct: number;
-      provisionalCostBeforeGstSgd: number;
-      centreCount: number;
-      sourceCircuitIds: string[];
-    }>;
-  };
+  standbyAppliances: PreschoolOperationalApplianceComposition;
+  operatingAppliances: PreschoolOperationalApplianceComposition;
   hourlyProfile: {
     completeDayCount: 31;
     unit: "mean kWh per complete day";
@@ -434,15 +439,22 @@ export const buildPreschoolOperationalProjection = (input: {
       evidence,
     );
   }
-  const standbyAppliances = buildStandbyApplianceComposition({
+  const standbyAppliances = buildOperatingStateApplianceComposition({
     cells: classified as Array<PreschoolOperationalCell & { operatingState: PreschoolOperatingState }>,
     centres: input.centres,
-    expectedStandbyKwh: input.analysis.offHours.standbyKwh,
+    operatingState: "standby",
+    expectedKwh: input.analysis.offHours.standbyKwh,
   });
-  if (!standbyAppliances) {
+  const operatingAppliances = buildOperatingStateApplianceComposition({
+    cells: classified as Array<PreschoolOperationalCell & { operatingState: PreschoolOperatingState }>,
+    centres: input.centres,
+    operatingState: "operating",
+    expectedKwh: input.analysis.offHours.operatingKwh,
+  });
+  if (!standbyAppliances || !operatingAppliances) {
     return unavailable(
       "PRESCHOOL_OPERATIONAL_FACTS_UNAVAILABLE",
-      "Closed-state Appliance evidence was withheld because published Circuit aliases were incomplete or did not reconcile to the accepted standby total.",
+      "Operating-state Appliance evidence was withheld because published Circuit aliases were incomplete or did not reconcile to the accepted standby and operating totals.",
       evidence,
     );
   }
@@ -550,12 +562,20 @@ export const buildPreschoolOperationalProjection = (input: {
       standbyKwh: input.analysis.offHours.standbyKwh,
       standbySharePct: input.analysis.offHours.sharePct,
       operatingKwh: input.analysis.offHours.operatingKwh,
+      operatingSharePct: percent(
+        input.analysis.offHours.operatingKwh,
+        input.analysis.offHours.operatingKwh + input.analysis.offHours.standbyKwh,
+      ),
       provisionalStandbyCostBeforeGstSgd: round(
         input.analysis.offHours.standbyKwh * PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh,
+      ),
+      provisionalOperatingCostBeforeGstSgd: round(
+        input.analysis.offHours.operatingKwh * PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh,
       ),
     },
     tariffReference: PRESCHOOL_DEMO_TARIFF_REFERENCE,
     standbyAppliances,
+    operatingAppliances,
     hourlyProfile: {
       completeDayCount: 31,
       unit: "mean kWh per complete day",
@@ -592,18 +612,19 @@ export const buildPreschoolOperationalProjection = (input: {
   };
 };
 
-const buildStandbyApplianceComposition = (input: {
+const buildOperatingStateApplianceComposition = (input: {
   cells: Array<PreschoolOperationalCell & { operatingState: PreschoolOperatingState }>;
   centres: PreschoolCentre[];
-  expectedStandbyKwh: number;
-}): Extract<PreschoolOperationalProjection, { status: "available" }>["standbyAppliances"] | null => {
+  operatingState: PreschoolOperatingState;
+  expectedKwh: number;
+}): PreschoolOperationalApplianceComposition | null => {
   const applianceRows = new Map<string, {
     applianceGroup: string;
     usageKwh: number;
     centreIds: Set<string>;
     sourceCircuitIds: Set<string>;
   }>();
-  let closedCircuitTotalKwh = 0;
+  let stateCircuitTotalKwh = 0;
   for (const cell of input.cells) {
     if (cell.circuits.length === 0) return null;
     const cellCircuitTotalKwh = cell.circuits.reduce((sum, circuit) => sum + circuit.usageKwh, 0);
@@ -619,7 +640,7 @@ const buildStandbyApplianceComposition = (input: {
         || !Number.isFinite(circuit.usageKwh)
         || circuit.usageKwh < 0
       ) return null;
-      if (cell.operatingState !== "standby") continue;
+      if (cell.operatingState !== input.operatingState) continue;
       const row = applianceRows.get(alias) ?? {
         applianceGroup: aliasContract.applianceGroup,
         usageKwh: 0,
@@ -630,17 +651,20 @@ const buildStandbyApplianceComposition = (input: {
       row.centreIds.add(cell.scopeId);
       row.sourceCircuitIds.add(circuit.circuitId);
       applianceRows.set(alias, row);
-      closedCircuitTotalKwh += circuit.usageKwh;
+      stateCircuitTotalKwh += circuit.usageKwh;
     }
   }
   if (
-    applianceRows.size !== PRESCHOOL_EXPECTED_APPLIANCE_ALIAS_COUNT
+    applianceRows.size === 0
+    || (input.operatingState === "standby"
+      && applianceRows.size !== PRESCHOOL_EXPECTED_APPLIANCE_ALIAS_COUNT)
     || [...applianceRows.values()].some((row) => (
       row.centreIds.size !== input.centres.length
       || row.sourceCircuitIds.size !== input.centres.length
     ))
   ) return null;
-  const reconciliationGapKwh = round(closedCircuitTotalKwh - input.expectedStandbyKwh);
+  const roundedGapKwh = round(stateCircuitTotalKwh - input.expectedKwh);
+  const reconciliationGapKwh = Object.is(roundedGapKwh, -0) ? 0 : roundedGapKwh;
   if (Math.abs(reconciliationGapKwh) > RECONCILIATION_TOLERANCE_KWH) return null;
 
   const appliances = [...applianceRows.entries()]
@@ -648,7 +672,7 @@ const buildStandbyApplianceComposition = (input: {
       name,
       applianceGroup: row.applianceGroup,
       usageKwh: round(row.usageKwh),
-      sharePct: percent(row.usageKwh, input.expectedStandbyKwh),
+      sharePct: percent(row.usageKwh, input.expectedKwh),
       provisionalCostBeforeGstSgd: round(row.usageKwh * PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh),
       centreCount: row.centreIds.size,
       sourceCircuitIds: [...row.sourceCircuitIds].sort((left, right) => left.localeCompare(right)),
@@ -663,16 +687,16 @@ const buildStandbyApplianceComposition = (input: {
   }
 
   return {
-    totalKwh: round(input.expectedStandbyKwh),
+    totalKwh: round(input.expectedKwh),
     provisionalCostBeforeGstSgd: round(
-      input.expectedStandbyKwh * PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh,
+      input.expectedKwh * PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh,
     ),
     reconciliationGapKwh,
     applianceGroups: [...groupRows.entries()]
       .map(([name, row]) => ({
         name,
         usageKwh: round(row.usageKwh),
-        sharePct: percent(row.usageKwh, input.expectedStandbyKwh),
+        sharePct: percent(row.usageKwh, input.expectedKwh),
         provisionalCostBeforeGstSgd: round(
           row.usageKwh * PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh,
         ),

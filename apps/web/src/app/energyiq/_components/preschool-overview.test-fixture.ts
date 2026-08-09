@@ -94,11 +94,11 @@ export function preschoolGoldenSnapshot(): EnergyProjectAnalysisSnapshotDto {
       ? worstSpike
       : {
           ...worstSpike,
-          localDate: `2026-05-${String(25 - index).padStart(2, "0")}`,
-          localHour: (worstSpike.localHour + index * 3) % 24,
+          localDate: `2026-05-${String((operating ? 18 : 25) - index).padStart(2, "0")}`,
+          localHour: operating ? 9 + (index % 9) : (worstSpike.localHour + index * 3) % 24,
           usageKwh: worstSpike.usageKwh - index * 0.2,
           impactKwh: worstSpike.impactKwh - index * 0.2,
-          variancePct: worstSpike.variancePct - index * 75,
+          variancePct: worstSpike.variancePct - index * (operating ? 25 : 75),
         });
     return {
       scopeId: centre.scopeId,
@@ -124,6 +124,7 @@ export function preschoolGoldenSnapshot(): EnergyProjectAnalysisSnapshotDto {
     ["Plug Load3", "Plugload", 1_421.8123],
   ] as const;
   const standbyEnergyKwh = 3_103.784;
+  const operatingEnergyKwh = 21_818.0283;
   const standbyApplianceShares = [
     ["Plug Load3", "Plugload", 40],
     ["Kitchen Plug Load", "Plugload", 30],
@@ -143,6 +144,26 @@ export function preschoolGoldenSnapshot(): EnergyProjectAnalysisSnapshotDto {
     provisionalCostBeforeGstSgd: standbyEnergyKwh * sharePct / 100 * 0.2727,
     centreCount: 30,
     sourceCircuitIds: centreCodes.map((code) => `preschool-centre-${code.toLowerCase()}-standby-${applianceIndex + 1}`),
+  }));
+  const operatingApplianceShares = [
+    ["Plug Load3", "Plugload", 24],
+    ["Kitchen Plug Load", "Plugload", 16],
+    ["Living Area Plug Load", "Plugload", 12],
+    ["Aircon 1", "Aircon", 15],
+    ["Aircon 2", "Aircon", 10.1],
+    ["Kitchen Lighting", "Lighting", 7],
+    ["Living Room Lighting", "Lighting", 6.5],
+    ["Other Lighting3", "Lighting", 5.4],
+    ["Heater", "Heater", 4],
+  ] as const;
+  const operatingAppliances = operatingApplianceShares.map(([name, applianceGroup, sharePct], applianceIndex) => ({
+    name,
+    applianceGroup,
+    usageKwh: operatingEnergyKwh * sharePct / 100,
+    sharePct,
+    provisionalCostBeforeGstSgd: operatingEnergyKwh * sharePct / 100 * 0.2727,
+    centreCount: 30,
+    sourceCircuitIds: centreCodes.map((code) => `preschool-centre-${code.toLowerCase()}-operating-${applianceIndex + 1}`),
   }));
 
   return {
@@ -358,8 +379,10 @@ export function preschoolGoldenSnapshot(): EnergyProjectAnalysisSnapshotDto {
         totalKwh: 24_921.8123,
         standbyKwh: 3_103.784,
         standbySharePct: 12.45,
-        operatingKwh: 21_818.0283,
+        operatingKwh: operatingEnergyKwh,
+        operatingSharePct: 87.5459,
         provisionalStandbyCostBeforeGstSgd: 846.4019,
+        provisionalOperatingCostBeforeGstSgd: 5_949.7763,
       },
       tariffReference: {
         sourceName: "SP Group",
@@ -388,6 +411,24 @@ export function preschoolGoldenSnapshot(): EnergyProjectAnalysisSnapshotDto {
           sourceAliases: sourceAliases as string[],
         })),
         appliances: standbyAppliances,
+      },
+      operatingAppliances: {
+        totalKwh: operatingEnergyKwh,
+        provisionalCostBeforeGstSgd: 5_949.7763,
+        reconciliationGapKwh: 0,
+        applianceGroups: [
+          ["Plugload", 52, ["Kitchen Plug Load", "Living Area Plug Load", "Plug Load3"]],
+          ["Aircon", 25.1, ["Aircon 1", "Aircon 2"]],
+          ["Lighting", 18.9, ["Kitchen Lighting", "Living Room Lighting", "Other Lighting3"]],
+          ["Heater", 4, ["Heater"]],
+        ].map(([name, sharePct, sourceAliases]) => ({
+          name: String(name),
+          usageKwh: operatingEnergyKwh * Number(sharePct) / 100,
+          sharePct: Number(sharePct),
+          provisionalCostBeforeGstSgd: operatingEnergyKwh * Number(sharePct) / 100 * 0.2727,
+          sourceAliases: sourceAliases as string[],
+        })),
+        appliances: operatingAppliances,
       },
       hourlyProfile: {
         completeDayCount: 31,

@@ -185,7 +185,14 @@ describe("Preschool Overview ViewModel", () => {
         centreCount: 3,
         reconciliation: "0.0000 kWh reconciliation gap",
       },
-      operating: { energy: "21,818.03 kWh", spikeCount: 21, centreCount: 14 },
+      operating: {
+        energy: "21,818.03 kWh",
+        provisionalCost: "S$5,949.78",
+        share: "87.5%",
+        spikeCount: 21,
+        centreCount: 14,
+        reconciliation: "0.0000 kWh reconciliation gap",
+      },
       sop: {
         label: "After-hours Review Priority",
         sourceLabel: "Provisional after-hours SOP signal",
@@ -232,6 +239,31 @@ describe("Preschool Overview ViewModel", () => {
     });
     expect(view.operational.operating.centres.find((centre) => centre.centreCode === "A"))
       .toMatchObject({ centreType: "Senior Care Center" });
+    expect(view.operational.operating.applianceGroups.map((group) => [group.name, group.share]))
+      .toEqual([
+        ["Plugload", "52.0%"],
+        ["Aircon", "25.1%"],
+        ["Lighting", "18.9%"],
+        ["Heater", "4.0%"],
+      ]);
+    expect(view.operational.operating.appliances).toHaveLength(9);
+    expect(view.operational.operating.appliances.reduce((sum, appliance) => sum + appliance.sharePct, 0)).toBe(100);
+    expect(view.operational.operating.appliances[0]).toMatchObject({
+      name: "Plug Load3",
+      applianceGroup: "Plugload",
+      share: "24.0%",
+      centreCount: 30,
+    });
+    expect(view.operational.operating.centres.map((centre) => [centre.centreCode, centre.events.length]))
+      .toEqual([
+        ["A", 8], ["B", 1], ["C", 1], ["D", 1], ["E", 1], ["F", 1], ["G", 1],
+        ["H", 1], ["I", 1], ["J", 1], ["K", 1], ["L", 1], ["M", 1], ["N", 1],
+      ]);
+    expect(view.operational.operating.centres[0]?.events).toHaveLength(8);
+    expect(view.operational.operating.centres[1]?.events[0]).toMatchObject({
+      when: "18 May · 14:00–15:00",
+      leadingCircuit: "Aircon 1 · 93%",
+    });
     expect(view.decisionSummary.items).toHaveLength(4);
     expect(view.decisionSummary.items.map((item) => item.id)).toEqual([
       "efficiency",
@@ -400,7 +432,20 @@ describe("Preschool Overview ViewModel", () => {
 
     expect(view.operational).toEqual({
       status: "unavailable",
-      detail: "The current API runtime returned a superseded operational Evidence contract. Refresh the runtime before using Standby or Spike findings.",
+      detail: "The current API runtime returned a superseded operational Evidence contract. Refresh the runtime before using Standby, Operating-hours or Spike findings.",
+    });
+  });
+
+  it("fails closed when an older v2 runtime omits operating-state Appliance evidence", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    if (snapshot.preschoolOperational?.status !== "available") throw new Error("Expected operational fixture");
+    Reflect.deleteProperty(snapshot.preschoolOperational, "operatingAppliances");
+
+    const view = buildPreschoolOverviewViewModel(snapshot);
+
+    expect(view.operational).toEqual({
+      status: "unavailable",
+      detail: "The current API runtime returned a superseded operational Evidence contract. Refresh the runtime before using Standby, Operating-hours or Spike findings.",
     });
   });
 
