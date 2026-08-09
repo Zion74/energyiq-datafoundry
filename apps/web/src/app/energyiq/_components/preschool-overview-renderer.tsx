@@ -563,6 +563,38 @@ export function PreschoolOverviewRenderer({
             <p className="mt-2 text-sm leading-6 text-muted">{view.planningOutlook.detail}</p>
           </div>
         )}
+        {view.planningOutlook.status === "provisional" && view.planningOutlook.actual ? (
+          <article className="mt-4 rounded-lg border border-border bg-surface p-4" data-planning-actual={view.planningOutlook.actual.status}>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <h4 className="text-base font-semibold text-foreground">Current June actual</h4>
+              <span className={view.planningOutlook.actual.status === "complete"
+                ? "rounded-full border border-step-success/30 bg-step-success-soft px-2.5 py-1 text-xs font-semibold text-step-success"
+                : "rounded-full border border-step-warning/30 bg-step-warning-soft px-2.5 py-1 text-xs font-semibold text-step-warning"}
+              >
+                {view.planningOutlook.actual.statusLabel}
+              </span>
+            </div>
+            <dl className="mt-4 grid gap-4 sm:grid-cols-3">
+              <div>
+                <dt className="text-xs text-muted">Actual energy</dt>
+                <dd className="mt-1 text-xl font-semibold tabular-nums text-foreground">{view.planningOutlook.actual.usage}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted">Coverage</dt>
+                <dd className="mt-1 text-sm font-semibold tabular-nums text-foreground">{view.planningOutlook.actual.coverage}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted">Plan variance</dt>
+                <dd className="mt-1 text-sm font-semibold tabular-nums text-foreground">Variance {view.planningOutlook.actual.variance}</dd>
+              </div>
+            </dl>
+            <details className="mt-4 border-t border-border pt-3">
+              <summary className="cursor-pointer text-xs font-semibold text-foreground">Plan and actual provenance</summary>
+              <p className="mt-2 break-all font-mono text-xs leading-5 text-muted">{view.planningOutlook.actual.planEvidence}</p>
+              <p className="mt-1 break-all font-mono text-xs leading-5 text-muted">{view.planningOutlook.actual.actualEvidence}</p>
+            </details>
+          </article>
+        ) : null}
         <p className="mt-3 text-xs leading-5 text-muted">{view.liveForecast.detail}</p>
         <PreschoolAiSlot
           snapshot={state.snapshot}
@@ -1288,7 +1320,7 @@ function StandbyKpiStrip({ standby }: { standby: StandbyView }) {
   const metrics = [
     { label: "Energy used after closing", value: standby.energy, detail: "Calendar-classified closed hours" },
     { label: "Provisional standby cost", value: standby.provisionalCost, detail: "Before GST reference · not a bill" },
-    { label: "Share of total", value: standby.share, detail: "Of accepted May Portfolio energy" },
+    { label: "Share of total", value: standby.share, detail: "Of energy in the current accepted window" },
     { label: "Unusual closed-hour Spikes", value: String(standby.spikeCount), detail: "Above the same-hour baseline" },
     { label: "Centres to review", value: String(standby.centreCount), detail: "Named below in action order" },
   ];
@@ -1312,7 +1344,7 @@ function OperatingKpiStrip({ operating }: { operating: OperatingView }) {
   const metrics = [
     { label: "Total operating energy", value: operating.energy, detail: "Calendar-classified opening hours" },
     { label: "Provisional operating cost", value: operating.provisionalCost, detail: "Before GST reference · not a bill" },
-    { label: "Share of total", value: operating.share, detail: "Of accepted May Portfolio energy" },
+    { label: "Share of total", value: operating.share, detail: "Of energy in the current accepted window" },
     { label: "Unusual operating-hour Spikes", value: String(operating.spikeCount), detail: "Above the same-hour baseline" },
     { label: "Centres to review", value: String(operating.centreCount), detail: "Named below in action order" },
   ];

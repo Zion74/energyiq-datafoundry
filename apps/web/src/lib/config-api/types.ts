@@ -1347,7 +1347,7 @@ export type PreschoolOperationalProjectionDto = {
   status: "available";
   contract: {
     id: "preschool-may-2026-operational-behaviour";
-    version: "2";
+    version: "2" | "3";
     spikeThresholdPct: 50;
   };
   period: {
@@ -1377,7 +1377,7 @@ export type PreschoolOperationalProjectionDto = {
   standbyAppliances: PreschoolOperationalApplianceCompositionDto;
   operatingAppliances: PreschoolOperationalApplianceCompositionDto;
   hourlyProfile: {
-    completeDayCount: 31;
+    completeDayCount: number;
     unit: "mean kWh per complete day";
     rows: Array<{
       localHour: number;
@@ -1525,6 +1525,58 @@ export type PreschoolOperationalProjectionDto = {
   };
 };
 
+type PreschoolProvisionalPlanningOutlookDto = Extract<
+  Extract<PreschoolOperationalProjectionDto, { status: "available" }>["planningOutlook"],
+  { status: "provisional" }
+>;
+
+export type PreschoolPlanningLifecycleDto = {
+  status: "available";
+  contract: {
+    id: "preschool-saved-plan-current-actual";
+    version: "1";
+  };
+  targetPeriod: {
+    start: "2026-06-01";
+    endExclusive: "2026-07-01";
+    timezone: "Asia/Singapore";
+    targetDayCount: 30;
+  };
+  plan: PreschoolProvisionalPlanningOutlookDto;
+  actual: {
+    status: "partial" | "complete";
+    usageKwh: number | null;
+    completeDayCount: number;
+    targetDayCount: 30;
+    varianceKwh: number | null;
+    variancePct: number | null;
+  };
+  planProvenance: {
+    savedAnalysisId: string;
+    dataSnapshotId: string;
+    projectReleaseId: string;
+    templateRevisionId: string;
+    queryId: "daily_totals_v1";
+    recipeId: "preschool-naive-weekly-planning-baseline-v1";
+  };
+  actualProvenance: {
+    dataSnapshotId: string;
+    projectReleaseId: string;
+    queryId: "daily_totals_v1";
+    period: {
+      start: string;
+      endExclusive: string;
+      timezone: string;
+    };
+  };
+} | {
+  status: "unavailable";
+  reason: {
+    code: "NO_COMPATIBLE_SAVED_ANALYSIS" | "CURRENT_ACTUAL_UNAVAILABLE";
+    message: string;
+  };
+};
+
 export type PreschoolApplianceProjectionDto = {
   status: "available";
   contract: {
@@ -1646,6 +1698,7 @@ export type EnergyProjectAnalysisSnapshotDto = {
   preschoolBenchmark?: PreschoolBenchmarkProjectionDto;
   preschoolAppliances?: PreschoolApplianceProjectionDto;
   preschoolOperational?: PreschoolOperationalProjectionDto;
+  preschoolPlanningLifecycle?: PreschoolPlanningLifecycleDto;
   preschoolDecisionSignals?: PreschoolDecisionSignalsDto;
 };
 

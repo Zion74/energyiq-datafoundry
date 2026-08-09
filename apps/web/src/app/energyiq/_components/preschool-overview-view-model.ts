@@ -137,6 +137,16 @@ export type PreschoolOverviewViewModel = {
     tariffAppendixUrl: string;
     evidenceLabel: string;
     limitations: string[];
+    actual: {
+      status: "partial" | "complete";
+      statusLabel: "Partial actual" | "Complete actual";
+      usage: string;
+      coverage: string;
+      variance: string;
+      varianceStatus: "withheld" | "available";
+      planEvidence: string;
+      actualEvidence: string;
+    } | null;
   } | {
     status: "unavailable";
     detail: string;
@@ -389,19 +399,22 @@ export function buildPreschoolOverviewViewModel(
   const queryIds = [...new Set(snapshot.evidence.flatMap((item) => item.queryIds))];
   const decisionSummary = buildPreschoolDecisionSummary(snapshot);
   const benchmark = buildPreschoolBenchmarkView(snapshot);
-  // v2 is additive for rolling deployments: old Web ignores A4 fields, while new Web
-  // feature-detects operatingAppliances and fails closed against a pre-A4 v2 API.
+  // Historical v2 Saved Analysis remains readable while current rolling windows use v3.
+  // Both still require the additive operating-state Appliance evidence introduced by A4.
+  const operationalContractVersion = snapshot.preschoolOperational?.status === "available"
+    ? Reflect.get(snapshot.preschoolOperational.contract, "version")
+    : null;
   const hasCurrentOperationalContract = snapshot.preschoolOperational?.status === "available"
-    && Reflect.get(snapshot.preschoolOperational.contract, "version") === "2"
+    && (operationalContractVersion === "2" || operationalContractVersion === "3")
     && Reflect.get(snapshot.preschoolOperational, "operatingAppliances") !== undefined;
   const periodLabel = formatAnalysisWindowLabel(
     snapshot.context.from,
     snapshot.context.to,
     snapshot.context.timezone,
   );
-  const planningReference = snapshot.preschoolOperational?.status === "available"
-    && snapshot.preschoolOperational.planningOutlook.status === "provisional"
-    ? snapshot.preschoolOperational.planningOutlook
+  const planningReference = resolvePlanningReference(snapshot);
+  const planningLifecycle = snapshot.preschoolPlanningLifecycle?.status === "available"
+    ? snapshot.preschoolPlanningLifecycle
     : null;
   const provisionalRate = planningReference?.tariffReference.beforeGstSgdPerKwh ?? null;
   const estimatedCost = analysis.cost.status === "available"
@@ -481,30 +494,32 @@ export function buildPreschoolOverviewViewModel(
         : null,
     },
     decisionSummary,
-    planningOutlook: snapshot.preschoolOperational?.status === "available"
-      && snapshot.preschoolOperational.planningOutlook.status === "provisional"
+    planningOutlook: planningReference
       ? {
           status: "provisional",
           targetPeriod: "1–30 Jun 2026",
           method: "Average of four complete Monday–Sunday weeks from the accepted May Snapshot.",
-          sourceWeeks: snapshot.preschoolOperational.planningOutlook.sourceWeeks.map((week) => ({
+          sourceWeeks: planningReference.sourceWeeks.map((week) => ({
             label: `${formatShortDate(week.start)}–${formatShortDate(week.endInclusive)}`,
             usageKwh: week.usageKwh,
             usage: `${formatNumber(week.usageKwh, 0)} kWh`,
           })),
-          weeklyAverageKwh: snapshot.preschoolOperational.planningOutlook.weeklyBaseline.averageKwh,
-          weeklyAverage: `${formatNumber(snapshot.preschoolOperational.planningOutlook.weeklyBaseline.averageKwh, 0)} kWh/week`,
-          projectedUsage: `${formatNumber(snapshot.preschoolOperational.planningOutlook.usageEstimate.projectedKwh, 0)} kWh`,
-          projectedRange: `${formatNumber(snapshot.preschoolOperational.planningOutlook.usageEstimate.lowerKwh, 0)}–${formatNumber(snapshot.preschoolOperational.planningOutlook.usageEstimate.upperKwh, 0)} kWh`,
-          currentPeriodCost: `S$${formatNumber(snapshot.preschoolOperational.planningOutlook.costEstimate.currentPeriodBeforeGstSgd, 0)}`,
-          projectedCost: `S$${formatNumber(snapshot.preschoolOperational.planningOutlook.costEstimate.projectedBeforeGstSgd, 0)}`,
-          projectedCostRange: `S$${formatNumber(snapshot.preschoolOperational.planningOutlook.costEstimate.lowerBeforeGstSgd, 0)}–S$${formatNumber(snapshot.preschoolOperational.planningOutlook.costEstimate.upperBeforeGstSgd, 0)}`,
-          tariffRate: `${formatNumber(snapshot.preschoolOperational.planningOutlook.tariffReference.beforeGstSgdPerKwh * 100, 2)}¢/kWh before GST`,
-          tariffLabel: `${snapshot.preschoolOperational.planningOutlook.tariffReference.sourceName} regulated ${snapshot.preschoolOperational.planningOutlook.tariffReference.supplyClass.toLowerCase()} reference · 1 Apr–30 Jun 2026`,
-          tariffSourceUrl: snapshot.preschoolOperational.planningOutlook.tariffReference.sourceUrl,
-          tariffAppendixUrl: snapshot.preschoolOperational.planningOutlook.tariffReference.appendixUrl,
-          evidenceLabel: `${snapshot.preschoolOperational.planningOutlook.evidence.queryId} · ${snapshot.preschoolOperational.planningOutlook.evidence.recipeId}`,
-          limitations: snapshot.preschoolOperational.planningOutlook.limitations,
+          weeklyAverageKwh: planningReference.weeklyBaseline.averageKwh,
+          weeklyAverage: `${formatNumber(planningReference.weeklyBaseline.averageKwh, 0)} kWh/week`,
+          projectedUsage: `${formatNumber(planningReference.usageEstimate.projectedKwh, 0)} kWh`,
+          projectedRange: `${formatNumber(planningReference.usageEstimate.lowerKwh, 0)}–${formatNumber(planningReference.usageEstimate.upperKwh, 0)} kWh`,
+          currentPeriodCost: `S$${formatNumber(planningReference.costEstimate.currentPeriodBeforeGstSgd, 0)}`,
+          projectedCost: `S$${formatNumber(planningReference.costEstimate.projectedBeforeGstSgd, 0)}`,
+          projectedCostRange: `S$${formatNumber(planningReference.costEstimate.lowerBeforeGstSgd, 0)}–S$${formatNumber(planningReference.costEstimate.upperBeforeGstSgd, 0)}`,
+          tariffRate: `${formatNumber(planningReference.tariffReference.beforeGstSgdPerKwh * 100, 2)}¢/kWh before GST`,
+          tariffLabel: `${planningReference.tariffReference.sourceName} regulated ${planningReference.tariffReference.supplyClass.toLowerCase()} reference · 1 Apr–30 Jun 2026`,
+          tariffSourceUrl: planningReference.tariffReference.sourceUrl,
+          tariffAppendixUrl: planningReference.tariffReference.appendixUrl,
+          evidenceLabel: `${planningReference.evidence.queryId} · ${planningReference.evidence.recipeId}`,
+          limitations: planningReference.limitations,
+          actual: planningLifecycle
+            ? planningActualView(planningLifecycle)
+            : null,
         }
       : {
           status: "unavailable",
@@ -665,12 +680,54 @@ export function buildPreschoolOverviewViewModel(
       operationalRecipeIds: snapshot.preschoolOperational?.status === "available"
         ? snapshot.preschoolOperational.evidence.projectionRecipeIds
         : [],
-      planningRecipeIds: snapshot.preschoolOperational?.status === "available"
-        && snapshot.preschoolOperational.planningOutlook.status === "provisional"
-        ? [snapshot.preschoolOperational.planningOutlook.evidence.recipeId]
+      planningRecipeIds: planningReference
+        ? [planningReference.evidence.recipeId]
         : [],
     },
   };
+}
+
+function resolvePlanningReference(snapshot: EnergyProjectAnalysisSnapshotDto) {
+  if (snapshot.preschoolPlanningLifecycle?.status === "available") {
+    return snapshot.preschoolPlanningLifecycle.plan;
+  }
+  return snapshot.preschoolOperational?.status === "available"
+    && snapshot.preschoolOperational.planningOutlook.status === "provisional"
+    ? snapshot.preschoolOperational.planningOutlook
+    : null;
+}
+
+function planningActualView(
+  lifecycle: Extract<
+    NonNullable<EnergyProjectAnalysisSnapshotDto["preschoolPlanningLifecycle"]>,
+    { status: "available" }
+  >,
+): Extract<
+  PreschoolOverviewViewModel["planningOutlook"],
+  { status: "provisional" }
+>["actual"] {
+  const varianceAvailable = lifecycle.actual.status === "complete"
+    && lifecycle.actual.varianceKwh !== null
+    && lifecycle.actual.variancePct !== null;
+  return {
+    status: lifecycle.actual.status,
+    statusLabel: lifecycle.actual.status === "complete" ? "Complete actual" : "Partial actual",
+    usage: lifecycle.actual.usageKwh === null
+      ? "Unavailable"
+      : `${formatNumber(lifecycle.actual.usageKwh, 0)} kWh`,
+    coverage: `${lifecycle.actual.completeDayCount} / ${lifecycle.actual.targetDayCount} complete days`,
+    variance: varianceAvailable
+      ? `${formatSigned(lifecycle.actual.varianceKwh!, 2)} kWh · ${formatSigned(lifecycle.actual.variancePct!, 2)}% versus plan`
+      : `withheld until ${lifecycle.actual.targetDayCount} / ${lifecycle.actual.targetDayCount} complete days`,
+    varianceStatus: varianceAvailable ? "available" : "withheld",
+    planEvidence: `Saved ${lifecycle.planProvenance.savedAnalysisId} · Snapshot ${lifecycle.planProvenance.dataSnapshotId}`,
+    actualEvidence: `Current Snapshot ${lifecycle.actualProvenance.dataSnapshotId} · ${lifecycle.actualProvenance.queryId}`,
+  };
+}
+
+function formatSigned(value: number, digits: number): string {
+  const formatted = formatNumber(value, digits);
+  return value > 0 ? `+${formatted}` : formatted;
 }
 
 function buildPreschoolBenchmarkView(
@@ -913,10 +970,7 @@ function buildPreschoolDecisionSummary(
         }];
       })
     : [];
-  const planning = snapshot.preschoolOperational?.status === "available"
-    && snapshot.preschoolOperational.planningOutlook.status === "provisional"
-    ? snapshot.preschoolOperational.planningOutlook
-    : null;
+  const planning = resolvePlanningReference(snapshot);
   const planningItem: PreschoolDecisionSummaryItem[] = planning
     ? [{
         id: "planning",

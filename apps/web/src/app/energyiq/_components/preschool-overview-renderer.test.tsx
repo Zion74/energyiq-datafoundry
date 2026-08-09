@@ -34,6 +34,8 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup).toContain("24,921.81 kWh");
     expect(markup).toContain("100.0%");
     expect(markup).toContain("S$0.2727/kWh before GST");
+    expect(markup.match(/Of energy in the current accepted window/g)).toHaveLength(2);
+    expect(markup).not.toContain("Of accepted May Portfolio energy");
     expect(markup).not.toContain("Published Portfolio total for this Snapshot.");
     expect(markup).not.toContain("Average across the selected reporting window.");
     expect(markup).not.toContain("Centre rows returned by the authoritative Project analysis.");
@@ -66,6 +68,64 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup.indexOf("Benchmark Analysis")).toBeLessThan(markup.indexOf("Standby Energy Wastage — Post Operating Hours"));
     expect(markup.indexOf("Standby Energy Wastage — Post Operating Hours")).toBeLessThan(markup.indexOf("Operating Hours Analysis"));
     expect(markup.indexOf("Operating Hours Analysis")).toBeLessThan(markup.indexOf("June planning / Forecast"));
+  });
+
+  it("renders Saved A plan and partial current B actual as separately provenanced Evidence", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    if (
+      snapshot.preschoolOperational?.status !== "available"
+      || snapshot.preschoolOperational.planningOutlook.status !== "provisional"
+    ) throw new Error("Expected planning fixture");
+    const plan = structuredClone(snapshot.preschoolOperational.planningOutlook);
+    plan.evidence.dataSnapshotId = "snapshot-a";
+    Reflect.set(snapshot, "preschoolPlanningLifecycle", {
+      status: "available",
+      contract: { id: "preschool-saved-plan-current-actual", version: "1" },
+      targetPeriod: {
+        start: "2026-06-01",
+        endExclusive: "2026-07-01",
+        timezone: "Asia/Singapore",
+        targetDayCount: 30,
+      },
+      plan,
+      actual: {
+        status: "partial",
+        usageKwh: 1_400,
+        completeDayCount: 7,
+        targetDayCount: 30,
+        varianceKwh: null,
+        variancePct: null,
+      },
+      planProvenance: {
+        savedAnalysisId: "saved-a",
+        dataSnapshotId: "snapshot-a",
+        projectReleaseId: snapshot.projectRelease.id,
+        templateRevisionId: snapshot.projectRelease.templateRevisionId,
+        queryId: "daily_totals_v1",
+        recipeId: "preschool-naive-weekly-planning-baseline-v1",
+      },
+      actualProvenance: {
+        dataSnapshotId: "snapshot-b",
+        projectReleaseId: snapshot.projectRelease.id,
+        queryId: "daily_totals_v1",
+        period: {
+          start: "2026-06-01",
+          endExclusive: "2026-07-01",
+          timezone: "Asia/Singapore",
+        },
+      },
+    });
+
+    const markup = renderToStaticMarkup(
+      <PreschoolOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+
+    expect(markup).toContain("Current June actual");
+    expect(markup).toContain("1,400 kWh");
+    expect(markup).toContain("7 / 30 complete days");
+    expect(markup).toContain("Variance withheld until 30 / 30 complete days");
+    expect(markup).toContain("Saved saved-a · Snapshot snapshot-a");
+    expect(markup).toContain("Current Snapshot snapshot-b · daily_totals_v1");
   });
 
   it("shows only the first five Centres by default and retains the remaining rows in disclosure", () => {

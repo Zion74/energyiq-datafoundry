@@ -148,6 +148,50 @@ describe("ProjectAnalysisResolver", () => {
     }
   });
 
+  it("anchors the latest complete day to historical Snapshot facts instead of wall-clock time", async () => {
+    const root = mkdtempSync(join(tmpdir(), "project-analysis-latest-day-"));
+    const databasePath = join(root, "energy.duckdb");
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    const gateway = new LocalDataGateway(metadata);
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      await materializeNgeeAnnLatestPeriodFixture(databasePath, metadata);
+      const result = await resolveProjectAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        user: metadata.users.getById({ user_id: "dev-user" }),
+        workspaceId: NGEE_ANN_WORKSPACE_ID,
+        request: {
+          projectId: NGEE_ANN_GOLDEN.projectId,
+          scopeId: "project",
+          resource: "electricity",
+          analysisWindow: "latest-complete-day",
+        },
+        databasePath,
+        now: new Date("2026-08-05T00:00:00.000Z"),
+      });
+
+      expect(result.status).toBe("ready");
+      if (result.status !== "ready") throw new Error("Expected latest complete Project day");
+      expect(result.snapshot.context).toMatchObject({
+        period: "Custom",
+        from: "2026-06-15T16:00:00.000Z",
+        to: "2026-06-16T16:00:00.000Z",
+        primaryPeriod: {
+          start: "2026-06-15T16:00:00.000Z",
+          endExclusive: "2026-06-16T16:00:00.000Z",
+        },
+      });
+      expect(result.snapshot.analysis.summary.validIntervalCount).toBeGreaterThan(0);
+      expect(result.snapshot.analysis.dailyTotals?.scopes[0]?.rows).toMatchObject([
+        { localDate: "2026-06-16", dataHealth: { status: "complete" } },
+      ]);
+    } finally {
+      metadata.close();
+      removeTemporaryFixture(root);
+    }
+  }, 30_000);
+
   it("pins the latest complete Project day to one rolling 28-day Ngee Ann range across Scopes", async () => {
     const root = mkdtempSync(join(tmpdir(), "project-analysis-latest-period-"));
     const databasePath = join(root, "energy.duckdb");

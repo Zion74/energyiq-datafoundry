@@ -373,6 +373,77 @@ describe("Preschool Overview ViewModel", () => {
     expect(view.evidence.applianceRecipeIds).toEqual(["preschool-appliance-ranking-v1"]);
   });
 
+  it("uses Saved A planning with Day 7 current B actual and renders server-withheld variance", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    attachPlanningLifecycle(snapshot, {
+      status: "partial",
+      usageKwh: 1_400,
+      completeDayCount: 7,
+      varianceKwh: null,
+      variancePct: null,
+    });
+
+    const view = buildPreschoolOverviewViewModel(snapshot);
+
+    expect(view.planningOutlook).toMatchObject({
+      status: "provisional",
+      actual: {
+        status: "partial",
+        statusLabel: "Partial actual",
+        usage: "1,400 kWh",
+        coverage: "7 / 30 complete days",
+        variance: "withheld until 30 / 30 complete days",
+        varianceStatus: "withheld",
+        planEvidence: "Saved saved-a · Snapshot snapshot-a",
+        actualEvidence: "Current Snapshot snapshot-b · daily_totals_v1",
+      },
+    });
+  });
+
+  it("formats the server-authoritative Day 30 delta without deriving it in the browser", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    attachPlanningLifecycle(snapshot, {
+      status: "complete",
+      usageKwh: 25_000,
+      completeDayCount: 30,
+      varianceKwh: 651.79,
+      variancePct: 2.68,
+    });
+
+    const view = buildPreschoolOverviewViewModel(snapshot);
+
+    expect(view.planningOutlook).toMatchObject({
+      status: "provisional",
+      actual: {
+        status: "complete",
+        statusLabel: "Complete actual",
+        usage: "25,000 kWh",
+        coverage: "30 / 30 complete days",
+        variance: "+651.79 kWh · +2.68% versus plan",
+        varianceStatus: "available",
+      },
+    });
+  });
+
+  it("retains the current planning baseline when the Saved A lifecycle is unavailable", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    Reflect.set(snapshot, "preschoolPlanningLifecycle", {
+      status: "unavailable",
+      reason: {
+        code: "NO_COMPATIBLE_SAVED_ANALYSIS",
+        message: "No older Saved A.",
+      },
+    });
+
+    const view = buildPreschoolOverviewViewModel(snapshot);
+
+    expect(view.planningOutlook).toMatchObject({
+      status: "provisional",
+      projectedUsage: "24,348 kWh",
+      actual: null,
+    });
+  });
+
   it("presents a Calendar exception honestly without labelling it a public holiday", () => {
     const snapshot = preschoolGoldenSnapshot();
     if (snapshot.preschoolOperational?.status !== "available") throw new Error("Expected operational fixture");
@@ -434,6 +505,20 @@ describe("Preschool Overview ViewModel", () => {
       status: "unavailable",
       detail: "The current API runtime returned a superseded operational Evidence contract. Refresh the runtime before using Standby, Operating-hours or Spike findings.",
     });
+  });
+
+  it("accepts the current-window Operational v3 contract while retaining v2 Saved Analysis compatibility", () => {
+    const currentSnapshot = preschoolGoldenSnapshot();
+    if (currentSnapshot.preschoolOperational?.status !== "available") {
+      throw new Error("Expected operational fixture");
+    }
+    Reflect.set(currentSnapshot.preschoolOperational.contract, "version", "3");
+
+    const currentView = buildPreschoolOverviewViewModel(currentSnapshot);
+    const savedView = buildPreschoolOverviewViewModel(preschoolGoldenSnapshot());
+
+    expect(currentView.operational.status).toBe("available");
+    expect(savedView.operational.status).toBe("available");
   });
 
   it("fails closed when a pre-A4 v2 runtime omits operating-state Appliance evidence", () => {
@@ -512,3 +597,51 @@ describe("Preschool Overview ViewModel", () => {
       .toThrow("PRESCHOOL_OVERVIEW_RENDERER_MISMATCH");
   });
 });
+
+const attachPlanningLifecycle = (
+  snapshot: ReturnType<typeof preschoolGoldenSnapshot>,
+  actual: {
+    status: "partial" | "complete";
+    usageKwh: number;
+    completeDayCount: number;
+    varianceKwh: number | null;
+    variancePct: number | null;
+  },
+): void => {
+  if (
+    snapshot.preschoolOperational?.status !== "available"
+    || snapshot.preschoolOperational.planningOutlook.status !== "provisional"
+  ) throw new Error("Expected planning fixture");
+  const plan = structuredClone(snapshot.preschoolOperational.planningOutlook);
+  plan.evidence.dataSnapshotId = "snapshot-a";
+  Reflect.set(snapshot, "preschoolPlanningLifecycle", {
+    status: "available",
+    contract: { id: "preschool-saved-plan-current-actual", version: "1" },
+    targetPeriod: {
+      start: "2026-06-01",
+      endExclusive: "2026-07-01",
+      timezone: "Asia/Singapore",
+      targetDayCount: 30,
+    },
+    plan,
+    actual: { ...actual, targetDayCount: 30 },
+    planProvenance: {
+      savedAnalysisId: "saved-a",
+      dataSnapshotId: "snapshot-a",
+      projectReleaseId: snapshot.projectRelease.id,
+      templateRevisionId: snapshot.projectRelease.templateRevisionId,
+      queryId: "daily_totals_v1",
+      recipeId: "preschool-naive-weekly-planning-baseline-v1",
+    },
+    actualProvenance: {
+      dataSnapshotId: "snapshot-b",
+      projectReleaseId: snapshot.projectRelease.id,
+      queryId: "daily_totals_v1",
+      period: {
+        start: "2026-06-01",
+        endExclusive: "2026-07-01",
+        timezone: "Asia/Singapore",
+      },
+    },
+  });
+};
