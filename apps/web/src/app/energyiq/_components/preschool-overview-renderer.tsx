@@ -421,7 +421,7 @@ export function PreschoolOverviewRenderer({
             <StandbyKpiStrip standby={view.operational.standby} />
 
             <section className="mt-8 border-t border-border pt-7" aria-labelledby="preschool-standby-appliances-heading">
-              <h4 id="preschool-standby-appliances-heading" className="text-base font-semibold text-foreground">3.1 Standby Energy by Appliance Type</h4>
+              <h4 id="preschool-standby-appliances-heading" className="text-base font-semibold text-foreground">3.1 Standby Energy by Appliance</h4>
               <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Which published Appliance aliases continue to consume energy while the Calendar marks Centres as closed?</p>
               <StandbyApplianceComposition standby={view.operational.standby} />
             </section>
@@ -474,7 +474,7 @@ export function PreschoolOverviewRenderer({
             <OperatingKpiStrip operating={view.operational.operating} />
 
             <section className="mt-8 border-t border-border pt-7" aria-labelledby="preschool-operating-appliances-heading">
-              <h4 id="preschool-operating-appliances-heading" className="text-base font-semibold text-foreground">4.1 Operating Energy by Appliance Type</h4>
+              <h4 id="preschool-operating-appliances-heading" className="text-base font-semibold text-foreground">4.1 Operating Energy by Appliance</h4>
               <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Which observed published Appliance aliases account for energy while the Calendar marks Centres as open?</p>
               <OperatingApplianceComposition operating={view.operational.operating} />
             </section>
@@ -1353,57 +1353,61 @@ function OperatingStateApplianceComposition({
     ? { "data-standby-appliance-composition": "closed-state" }
     : { "data-operating-appliance-composition": "operating-state" };
   let cumulativeOffset = 0;
-  const arcs = stateView.applianceGroups.map((group) => {
-    const arc = { ...group, offset: cumulativeOffset };
-    cumulativeOffset += group.sharePct;
+  const arcs = stateView.appliances.map((appliance, index) => {
+    const arc = { ...appliance, index, offset: cumulativeOffset };
+    cumulativeOffset += appliance.sharePct;
     return arc;
   });
   return (
-    <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(300px,0.78fr)_minmax(520px,1.22fr)]" {...compositionData}>
+    <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(360px,0.82fr)_minmax(0,1.18fr)]" {...compositionData}>
       <article className="border-y border-border py-5">
-        <div className="grid gap-5 sm:grid-cols-[220px_minmax(0,1fr)] sm:items-center">
-          <svg viewBox="0 0 220 220" role="img" aria-labelledby={`${state}-composition-title ${state}-composition-description`} className="mx-auto h-auto w-full max-w-[220px]">
-            <title id={`${state}-composition-title`}>{`${stateLabel} energy share by Appliance group`}</title>
-            <desc id={`${state}-composition-description`}>{`The composition shows each observed published Appliance group and its share of ${stateLabel.toLowerCase()} energy.`}</desc>
-            <circle cx="110" cy="110" r="75" pathLength="100" fill="none" stroke="currentColor" strokeWidth="28" className="text-surface-subtle" />
-            {arcs.map((group) => (
-              <circle
-                key={group.name}
-                cx="110"
-                cy="110"
-                r="75"
-                pathLength="100"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="28"
-                strokeDasharray={`${group.sharePct} ${100 - group.sharePct}`}
-                strokeDashoffset={-group.offset}
-                strokeLinecap="butt"
-                transform="rotate(-90 110 110)"
-                className={applianceStrokeClass(group.name)}
-                data-operating-state-appliance-group={`${state}:${group.name}`}
-                {...(isStandby
-                  ? { "data-standby-appliance-group": group.name }
-                  : { "data-operating-appliance-group": group.name })}
-              >
-                <title>{`${group.name}: ${group.energy}, ${group.share}`}</title>
-              </circle>
+        <div className="mx-auto max-w-xl">
+          <svg viewBox="0 0 300 300" role="img" aria-labelledby={`${state}-composition-title ${state}-composition-description`} className="mx-auto h-auto w-full max-w-[340px] overflow-visible">
+            <title id={`${state}-composition-title`}>{`${stateLabel} energy share by published Appliance alias`}</title>
+            <desc id={`${state}-composition-description`}>{`${stateView.appliances.length} published Circuit aliases shown as individual sectors. Focus a sector for its alias, energy and share; the full values remain available in the ranking.`}</desc>
+            <circle cx="150" cy="150" r="100" pathLength="100" fill="none" stroke="currentColor" strokeWidth="46" className="text-surface-subtle" />
+            <text x="150" y="145" textAnchor="middle" className="fill-muted text-[12px] font-semibold" data-operating-state-appliance-total-label={state}>{stateLabel}</text>
+            <text x="150" y="169" textAnchor="middle" className="fill-foreground text-[17px] font-semibold" data-operating-state-appliance-total={state}>{stateView.energy}</text>
+            {arcs.map((appliance) => (
+              <g key={appliance.name} className="group/segment">
+                <circle
+                  cx="150"
+                  cy="150"
+                  r="100"
+                  pathLength="100"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="46"
+                  strokeDasharray={`${appliance.sharePct} ${100 - appliance.sharePct}`}
+                  strokeDashoffset={-appliance.offset}
+                  strokeLinecap="butt"
+                  transform="rotate(-90 150 150)"
+                  tabIndex={0}
+                  role="img"
+                  aria-label={`${appliance.name}: ${appliance.energy}, ${appliance.share}`}
+                  className={`${applianceSeriesStrokeClass(appliance.index)} cursor-pointer focus-visible:outline-none focus-visible:opacity-80`}
+                  data-operating-state-appliance-segment={`${state}:${appliance.name}`}
+                  {...(isStandby
+                    ? { "data-standby-appliance-segment": appliance.name }
+                    : { "data-operating-appliance-segment": appliance.name })}
+                >
+                  <title>{`${appliance.name}: ${appliance.energy}, ${appliance.share}`}</title>
+                </circle>
+                <g
+                  aria-hidden="true"
+                  className="pointer-events-none opacity-0 transition-opacity group-hover/segment:opacity-100 group-focus-within/segment:opacity-100"
+                  data-operating-state-appliance-tooltip={`${state}:${appliance.name}`}
+                >
+                  <rect x="80" y="120" width="140" height="60" rx="8" className="fill-foreground" />
+                  <text x="150" y="141" textAnchor="middle" className="fill-white text-[10px] font-semibold">
+                    <tspan x="150">{appliance.name}</tspan>
+                    <tspan x="150" dy="19" className="font-normal">{appliance.energy} · {appliance.share}</tspan>
+                  </text>
+                </g>
+              </g>
             ))}
-            <text x="110" y="104" textAnchor="middle" className="fill-muted text-[11px] font-semibold">{stateLabel}</text>
-            <text x="110" y="126" textAnchor="middle" className="fill-foreground text-[15px] font-semibold">{stateView.energy}</text>
           </svg>
-          <div className="space-y-3" aria-label={`${stateLabel} Appliance group legend`}>
-            {stateView.applianceGroups.map((group) => (
-              <div key={group.name} className="grid grid-cols-[10px_minmax(0,1fr)_auto] items-start gap-2 text-xs">
-                <span className={`mt-1 h-2.5 w-2.5 rounded-sm ${applianceBarClass(group.name)}`} aria-hidden="true" />
-                <span>
-                  <strong className="block font-semibold text-foreground">{group.name}</strong>
-                  <span className="mt-0.5 block text-[10px] leading-4 text-muted">{group.sourceAliases.join(" · ")}</span>
-                </span>
-                <span className="text-right tabular-nums"><strong className="block font-semibold text-foreground">{group.share}</strong><span className="text-[10px] text-muted">{group.energy}</span></span>
-              </div>
-            ))}
-          </div>
+          <p className="mt-3 text-center text-[10px] leading-4 text-muted">Hover or focus a sector for its alias and value. Full details are listed in the ranking.</p>
         </div>
       </article>
 
@@ -1426,14 +1430,15 @@ function OperatingStateApplianceComposition({
             <li
               key={appliance.name}
               className="grid gap-2 py-2.5 text-xs sm:grid-cols-[24px_minmax(150px,0.8fr)_minmax(120px,1fr)_92px_72px] sm:items-center"
+              data-appliance-series-index={index + 1}
               data-operating-state-appliance={`${state}:${appliance.name}`}
               {...(isStandby
                 ? { "data-standby-appliance": appliance.name }
                 : { "data-operating-appliance": appliance.name })}
             >
               <span className="text-right tabular-nums text-muted">{index + 1}</span>
-              <span><strong className="block font-semibold text-foreground">{appliance.name}</strong><span className="mt-0.5 block text-[10px] text-muted">{appliance.applianceGroup} · {appliance.centreCount} Centres</span></span>
-              <span className="h-2 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true"><span className={`block h-full min-w-[2px] rounded-full ${applianceBarClass(appliance.applianceGroup)}`} style={{ width: `${appliance.sharePct}%` }} /></span>
+              <span className="min-w-0"><strong className="flex items-center gap-2 break-words font-semibold text-foreground"><span className={`h-2.5 w-2.5 shrink-0 rounded-sm ${applianceSeriesBarClass(index)}`} aria-hidden="true" />{appliance.name}</strong><span className="mt-0.5 block text-[10px] text-muted">Published alias · {appliance.centreCount} Centres</span></span>
+              <span className="h-2 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true"><span className={`block h-full min-w-[2px] rounded-full ${applianceSeriesBarClass(index)}`} style={{ width: `${appliance.sharePct}%` }} /></span>
               <span className="text-right font-semibold tabular-nums text-foreground">{appliance.energy}</span>
               <span className="text-right tabular-nums text-muted"><strong className="block font-semibold text-foreground">{appliance.share}</strong>{appliance.provisionalCost}</span>
             </li>
@@ -1461,16 +1466,17 @@ function OperatingStateSpikeTable({
 }) {
   const isStandby = state === "standby";
   const stateLabel = isStandby ? "closed-hour" : "operating-hour";
-  const summaryGrid = "grid min-w-[1060px] grid-cols-[minmax(150px,1fr)_130px_64px_132px_88px_96px_82px_minmax(150px,1fr)_58px] items-center gap-3";
+  const summaryGrid = "grid grid-cols-2 gap-x-4 gap-y-3 xl:grid-cols-[minmax(110px,1fr)_minmax(105px,0.9fr)_42px_minmax(110px,0.95fr)_minmax(70px,0.7fr)_minmax(80px,0.75fr)_minmax(70px,0.65fr)_minmax(120px,1fr)_44px] xl:items-center xl:gap-3";
+  const eventGrid = "grid grid-cols-2 gap-x-4 gap-y-3 xl:grid-cols-[36px_minmax(112px,1fr)_minmax(72px,0.7fr)_minmax(80px,0.75fr)_minmax(78px,0.7fr)_minmax(70px,0.65fr)_minmax(130px,1fr)] xl:items-center xl:gap-3";
   return (
     <div
-      className="mt-5 overflow-x-auto rounded-lg border border-border bg-surface"
+      className="mt-5 overflow-hidden rounded-lg border border-border bg-surface"
       data-operating-state-spike-table={`${state}:action-sorted`}
       {...(isStandby
         ? { "data-standby-spike-table": "action-sorted" }
         : { "data-operating-spike-table": "action-sorted" })}
     >
-      <div className={`${summaryGrid} bg-surface-subtle px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-light`} aria-hidden="true">
+      <div className="hidden bg-surface-subtle px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-light xl:grid xl:grid-cols-[minmax(110px,1fr)_minmax(105px,0.9fr)_42px_minmax(110px,0.95fr)_minmax(70px,0.7fr)_minmax(80px,0.75fr)_minmax(70px,0.65fr)_minmax(120px,1fr)_44px] xl:items-center xl:gap-3" aria-hidden="true">
         <span>Centre</span><span>Centre type</span><span>Spikes</span><span>Worst date / hour</span><span className="text-right">Actual</span><span className="text-right">Baseline</span><span className="text-right">Variance</span><span>Observed leading contributor</span><span className="text-right">Detail</span>
       </div>
       <div className="divide-y divide-border">
@@ -1488,32 +1494,38 @@ function OperatingStateSpikeTable({
               aria-label={`View all ${centre.spikeCount} ${stateLabel} Spike events for ${centre.name}.`}
               className={`${summaryGrid} cursor-pointer list-none px-4 py-3 text-xs text-foreground hover:bg-surface-subtle/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/25 [&::-webkit-details-marker]:hidden`}
             >
-              <span><strong className="block font-semibold">{centre.name}</strong><span className="mt-0.5 block text-[10px] text-muted">Centre {centre.centreCode}</span></span>
-              <span className="text-muted">{centre.centreType ?? "Unavailable"}</span>
-              <span className="font-semibold tabular-nums text-step-error">{centre.spikeCount}</span>
-              <span className="tabular-nums text-muted">{centre.worst.when}</span>
-              <span className="text-right font-semibold tabular-nums">{centre.worst.usage}</span>
-              <span className="text-right tabular-nums text-muted">{centre.worst.baseline}</span>
-              <span className="text-right font-semibold tabular-nums text-step-error">{centre.worst.variance}</span>
-              <span className="text-muted">{centre.worst.leadingCircuit}</span>
-              <span className="text-right font-semibold text-primary"><span className="group-open:hidden">Open</span><span className="hidden group-open:inline">Close</span></span>
+              <span className="col-span-2 min-w-0 xl:col-span-1"><ResponsiveCellLabel>Centre</ResponsiveCellLabel><strong className="block break-words font-semibold">{centre.name}</strong><span className="mt-0.5 block text-[10px] text-muted">Centre {centre.centreCode}</span></span>
+              <span className="min-w-0 break-words text-muted"><ResponsiveCellLabel>Centre type</ResponsiveCellLabel>{centre.centreType ?? "Unavailable"}</span>
+              <span className="font-semibold tabular-nums text-step-error"><ResponsiveCellLabel>Spikes</ResponsiveCellLabel>{centre.spikeCount}</span>
+              <span className="min-w-0 break-words tabular-nums text-muted"><ResponsiveCellLabel>Worst date / hour</ResponsiveCellLabel>{centre.worst.when}</span>
+              <span className="font-semibold tabular-nums xl:text-right"><ResponsiveCellLabel>Actual</ResponsiveCellLabel>{centre.worst.usage}</span>
+              <span className="min-w-0 break-words tabular-nums text-muted xl:text-right"><ResponsiveCellLabel>Baseline</ResponsiveCellLabel>{centre.worst.baseline}</span>
+              <span className="font-semibold tabular-nums text-step-error xl:text-right"><ResponsiveCellLabel>Variance</ResponsiveCellLabel>{centre.worst.variance}</span>
+              <span className="col-span-2 min-w-0 break-words text-muted xl:col-span-1"><ResponsiveCellLabel>Observed leading contributor</ResponsiveCellLabel>{centre.worst.leadingCircuit}</span>
+              <span className="col-span-2 font-semibold text-primary xl:col-span-1 xl:text-right"><ResponsiveCellLabel>Detail</ResponsiveCellLabel><span className="group-open:hidden">Open</span><span className="hidden group-open:inline">Close</span></span>
             </summary>
-            <div className="min-w-[1060px] border-t border-border bg-surface-subtle/35 px-4 py-4">
+            <div className="border-t border-border bg-surface-subtle/35 px-4 py-4">
               <p className="text-xs font-semibold text-foreground">All {centre.events.length} {stateLabel} event{centre.events.length === 1 ? "" : "s"} for {centre.name}</p>
-              <div className="mt-3 grid grid-cols-[42px_150px_100px_100px_100px_92px_minmax(180px,1fr)] gap-3 border-b border-border pb-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-light" aria-hidden="true">
+              <div className="mt-3 hidden border-b border-border pb-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-light xl:grid xl:grid-cols-[36px_minmax(112px,1fr)_minmax(72px,0.7fr)_minmax(80px,0.75fr)_minmax(78px,0.7fr)_minmax(70px,0.65fr)_minmax(130px,1fr)] xl:items-center xl:gap-3" aria-hidden="true">
                 <span>#</span><span>When</span><span className="text-right">Actual</span><span className="text-right">Baseline</span><span className="text-right">Excess</span><span className="text-right">Variance</span><span>Observed leading contributor</span>
               </div>
               <ol className="divide-y divide-border" aria-label={`${centre.name} ${stateLabel} Spike events`}>
                 {centre.events.map((event, index) => (
                   <li
                     key={`${event.when}:${index}`}
-                    className="grid grid-cols-[42px_150px_100px_100px_100px_92px_minmax(180px,1fr)] gap-3 py-2.5 text-xs"
+                    className={`${eventGrid} py-3 text-xs`}
                     data-operating-state-spike-event={`${state}:${centre.centreCode}:${index + 1}`}
                     {...(isStandby
                       ? { "data-standby-spike-event": `${centre.centreCode}:${index + 1}` }
                       : { "data-operating-spike-event": `${centre.centreCode}:${index + 1}` })}
                   >
-                    <span className="tabular-nums text-muted">{index + 1}</span><span>{event.when}<span className="mt-0.5 block text-[10px] text-muted">{event.dayType}</span></span><span className="text-right font-semibold tabular-nums">{event.usage}</span><span className="text-right tabular-nums text-muted">{event.baseline}</span><span className="text-right tabular-nums text-muted">{event.impact}</span><span className="text-right font-semibold tabular-nums text-step-error">{event.variance}</span><span className="text-muted">{event.leadingCircuit}</span>
+                    <span className="tabular-nums text-muted"><ResponsiveCellLabel>Event</ResponsiveCellLabel>{index + 1}</span>
+                    <span className="min-w-0 break-words"><ResponsiveCellLabel>When</ResponsiveCellLabel>{event.when}<span className="mt-0.5 block text-[10px] text-muted">{event.dayType}</span></span>
+                    <span className="font-semibold tabular-nums xl:text-right"><ResponsiveCellLabel>Actual</ResponsiveCellLabel>{event.usage}</span>
+                    <span className="tabular-nums text-muted xl:text-right"><ResponsiveCellLabel>Baseline</ResponsiveCellLabel>{event.baseline}</span>
+                    <span className="tabular-nums text-muted xl:text-right"><ResponsiveCellLabel>Excess</ResponsiveCellLabel>{event.impact}</span>
+                    <span className="font-semibold tabular-nums text-step-error xl:text-right"><ResponsiveCellLabel>Variance</ResponsiveCellLabel>{event.variance}</span>
+                    <span className="col-span-2 min-w-0 break-words text-muted xl:col-span-1"><ResponsiveCellLabel>Observed leading contributor</ResponsiveCellLabel>{event.leadingCircuit}</span>
                   </li>
                 ))}
               </ol>
@@ -1525,6 +1537,10 @@ function OperatingStateSpikeTable({
   );
 }
 
+function ResponsiveCellLabel({ children }: { children: React.ReactNode }) {
+  return <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-light xl:hidden">{children}</span>;
+}
+
 function AfterHoursReviewPriority({ sop }: { sop: OperationalView["sop"] }) {
   return (
     <div className="mt-5 border-y border-border" data-after-hours-review-priority="provisional">
@@ -1534,14 +1550,14 @@ function AfterHoursReviewPriority({ sop }: { sop: OperationalView["sop"] }) {
       </div>
       <ol className="divide-y divide-border">
         {sop.centres.map((centre, index) => (
-          <li key={centre.centreCode} className="grid gap-3 px-4 py-4 text-xs lg:grid-cols-[42px_minmax(180px,0.8fr)_110px_150px_minmax(150px,0.8fr)_96px_minmax(210px,1fr)] lg:items-center" data-review-priority-centre={centre.centreCode}>
+          <li key={centre.centreCode} className="grid gap-4 px-4 py-4 text-xs sm:grid-cols-2 xl:grid-cols-[36px_minmax(140px,0.9fr)_minmax(78px,0.55fr)_minmax(110px,0.8fr)_minmax(120px,0.8fr)_minmax(78px,0.55fr)_minmax(170px,1fr)] xl:items-center xl:gap-3" data-review-priority-centre={centre.centreCode}>
             <span className="text-lg font-semibold tabular-nums text-step-warning">{index + 1}</span>
-            <span><strong className="block text-sm font-semibold text-foreground">{centre.name}</strong><span className="mt-0.5 block text-muted">Centre {centre.centreCode} · {centre.centreType ?? "Type unavailable"}</span></span>
-            <span><strong className="block font-semibold tabular-nums text-step-error">{centre.standbySpikeCount}</strong><span className="text-[10px] text-muted">closed-hour Spikes</span></span>
-            <span><strong className="block font-semibold tabular-nums text-foreground">{centre.worstWhen}</strong><span className="text-[10px] text-muted">worst event · {centre.worstVariance}</span></span>
-            <span><strong className="block font-semibold text-foreground">{centre.leadingContributor}</strong><span className="text-[10px] text-muted">observed leading contributor</span></span>
-            <span><strong className="block text-lg font-semibold tabular-nums text-step-warning">{centre.score}</strong><span className="text-[10px] text-muted">provisional score</span></span>
-            <span className="leading-5 text-muted"><strong className="font-semibold text-foreground">Next check:</strong> confirm the Calendar, operating SOP and equipment state with the Centre.</span>
+            <span className="min-w-0"><strong className="block break-words text-sm font-semibold text-foreground">{centre.name}</strong><span className="mt-0.5 block break-words text-muted">Centre {centre.centreCode} · {centre.centreType ?? "Type unavailable"}</span></span>
+            <span className="min-w-0"><strong className="block font-semibold tabular-nums text-step-error">{centre.standbySpikeCount}</strong><span className="text-[10px] text-muted">closed-hour Spikes</span></span>
+            <span className="min-w-0"><strong className="block break-words font-semibold tabular-nums text-foreground">{centre.worstWhen}</strong><span className="text-[10px] text-muted">worst event · {centre.worstVariance}</span></span>
+            <span className="min-w-0"><strong className="block break-words font-semibold text-foreground">{centre.leadingContributor}</strong><span className="text-[10px] text-muted">observed leading contributor</span></span>
+            <span className="min-w-0"><strong className="block text-lg font-semibold tabular-nums text-step-warning">{centre.score}</strong><span className="text-[10px] text-muted">provisional score</span></span>
+            <span className="min-w-0 break-words leading-5 text-muted sm:col-span-2 xl:col-span-1"><strong className="font-semibold text-foreground">Next check:</strong> confirm the Calendar, operating SOP and equipment state with the Centre.</span>
           </li>
         ))}
       </ol>
@@ -1718,6 +1734,34 @@ function applianceStrokeClass(applianceGroup: string): string {
   if (applianceGroup === "Lighting") return "text-step-inspect";
   if (applianceGroup === "Plugload") return "text-step-warning";
   return "text-step-success";
+}
+
+function applianceSeriesBarClass(index: number): string {
+  return [
+    "bg-step-warning",
+    "bg-primary",
+    "bg-step-inspect",
+    "bg-step-success",
+    "bg-step-query",
+    "bg-step-fetch",
+    "bg-step-visualize",
+    "bg-step-transform",
+    "bg-step-knowledge",
+  ][index % 9]!;
+}
+
+function applianceSeriesStrokeClass(index: number): string {
+  return [
+    "text-step-warning",
+    "text-primary",
+    "text-step-inspect",
+    "text-step-success",
+    "text-step-query",
+    "text-step-fetch",
+    "text-step-visualize",
+    "text-step-transform",
+    "text-step-knowledge",
+  ][index % 9]!;
 }
 
 function titleCase(value: string): string {

@@ -236,19 +236,42 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(standbySection.textContent).toContain("Unusual closed-hour Spikes7");
     expect(standbySection.textContent).toContain("Centres to review3");
 
-    expect(standbySection.textContent).toContain("3.1 Standby Energy by Appliance Type");
-    expect(standbySection.querySelectorAll("[data-standby-appliance-group]")).toHaveLength(4);
-    expect([...standbySection.querySelectorAll("[data-standby-appliance-group]")].map((node) => node.getAttribute("data-standby-appliance-group")))
-      .toEqual(["Plugload", "Aircon", "Lighting", "Heater"]);
+    expect(standbySection.textContent).toContain("3.1 Standby Energy by Appliance");
+    const standbySegments = standbySection.querySelectorAll<SVGElement>("[data-standby-appliance-segment]");
+    const standbyApplianceRows = standbySection.querySelectorAll<HTMLElement>("[data-standby-appliance]");
+    expect(standbySegments).toHaveLength(9);
+    expect([...standbySegments].map((node) => node.getAttribute("data-standby-appliance-segment")))
+      .toEqual([...standbyApplianceRows].map((node) => node.getAttribute("data-standby-appliance")));
+    expect([...standbySegments].every((node) => (
+      node.tabIndex === 0
+      && node.getAttribute("aria-label")?.includes("kWh")
+      && node.getAttribute("aria-label")?.includes("%")
+    ))).toBe(true);
+    expect(standbySection.querySelectorAll('[data-operating-state-appliance-tooltip^="standby:"]')).toHaveLength(9);
+    expect(standbySection.querySelectorAll('[data-operating-state-appliance-legend^="standby:"]')).toHaveLength(0);
+    const standbyComposition = standbySection.querySelector<HTMLElement>("[data-standby-appliance-composition]")!;
+    expect(standbyComposition.innerHTML.indexOf('data-operating-state-appliance-total="standby"'))
+      .toBeLessThan(standbyComposition.innerHTML.indexOf('data-operating-state-appliance-tooltip="standby:Plug Load3"'));
+    expect(standbyComposition.querySelector('[data-operating-state-appliance-tooltip="standby:Plug Load3"] rect')?.getAttribute("x")).toBe("80");
+    expect(standbyComposition.querySelector('[data-operating-state-appliance-tooltip="standby:Plug Load3"] rect')?.getAttribute("width")).toBe("140");
+    expect(standbySection.querySelectorAll("[data-standby-appliance-group]")).toHaveLength(0);
     expect(standbySection.querySelectorAll("[data-standby-appliance]")).toHaveLength(9);
     expect(standbySection.querySelector("[data-standby-appliance]")?.getAttribute("data-standby-appliance")).toBe("Plug Load3");
-    expect(standbySection.textContent).toContain("97.4%");
+    expect([...standbyApplianceRows].map((node) => node.getAttribute("data-appliance-series-index"))).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
+    expect(standbySection.textContent).toContain("40.0%");
+    expect(standbySection.textContent).not.toContain("Plug Load3 · Living Area Plug Load · Kitchen Plug Load");
 
     expect(standbySection.textContent).toContain("3.2 Non-operating Hours Spike Analysis");
+    const standbySpikeTable = standbySection.querySelector<HTMLElement>("[data-standby-spike-table]")!;
+    expect(standbySpikeTable.classList.contains("overflow-x-auto")).toBe(false);
+    expect(standbySpikeTable.classList.contains("overflow-hidden")).toBe(true);
+    expect(standbySpikeTable.outerHTML).not.toContain("min-w-[1060px]");
     const centreDetails = standbySection.querySelectorAll<HTMLDetailsElement>("details[data-standby-spike-centre]");
     expect([...centreDetails].map((detail) => detail.dataset.standbySpikeCentre)).toEqual(["L", "E", "N"]);
     expect([...centreDetails].map((detail) => detail.querySelectorAll("[data-standby-spike-event]").length)).toEqual([4, 2, 1]);
     expect([...centreDetails].every((detail) => detail.querySelector(":scope > summary")?.tabIndex === 0)).toBe(true);
+    expect([...centreDetails].every((detail) => detail.querySelector(":scope > summary")?.classList.contains("grid-cols-2"))).toBe(true);
+    expect([...standbySection.querySelectorAll<HTMLElement>("[data-standby-spike-event]")].every((event) => event.classList.contains("grid-cols-2"))).toBe(true);
     expect(centreDetails[0]?.querySelectorAll('[data-standby-spike-event^="E:"]')).toHaveLength(0);
     centreDetails[0]!.open = true;
     expect(centreDetails[0]!.open).toBe(true);
@@ -257,6 +280,9 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(standbySection.textContent).toContain("3.3 After-hours Review Priority");
     expect([...standbySection.querySelectorAll("[data-review-priority-centre]")].map((node) => node.getAttribute("data-review-priority-centre")))
       .toEqual(["L", "E", "N"]);
+    expect([...standbySection.querySelectorAll<HTMLElement>("[data-review-priority-centre]")].every((row) => (
+      row.classList.contains("sm:grid-cols-2") && [...row.classList].some((className) => className.startsWith("xl:grid-cols-["))
+    ))).toBe(true);
     expect(standbySection.textContent).toContain("confirm the Calendar, operating SOP and equipment state with the Centre");
     expect(standbySection.textContent).toContain("does not measure SOP compliance");
     expect(standbySection.textContent).not.toContain("SOP Compliance Score");
@@ -334,13 +360,28 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(operatingSection.textContent).toContain("Unusual operating-hour Spikes21");
     expect(operatingSection.textContent).toContain("Centres to review14");
 
-    expect(operatingSection.textContent).toContain("4.1 Operating Energy by Appliance Type");
-    expect([...operatingSection.querySelectorAll("[data-operating-appliance-group]")].map((node) => node.getAttribute("data-operating-appliance-group")))
-      .toEqual(["Plugload", "Aircon", "Lighting", "Heater"]);
+    expect(operatingSection.textContent).toContain("4.1 Operating Energy by Appliance");
+    const operatingSegments = operatingSection.querySelectorAll<SVGElement>("[data-operating-appliance-segment]");
+    const operatingApplianceRows = operatingSection.querySelectorAll<HTMLElement>("[data-operating-appliance]");
+    expect(operatingSegments).toHaveLength(9);
+    expect([...operatingSegments].map((node) => node.getAttribute("data-operating-appliance-segment")))
+      .toEqual([...operatingApplianceRows].map((node) => node.getAttribute("data-operating-appliance")));
+    expect([...operatingSegments].every((node) => node.tabIndex === 0 && node.getAttribute("aria-label")?.includes("kWh"))).toBe(true);
+    expect(operatingSection.querySelectorAll('[data-operating-state-appliance-tooltip^="operating:"]')).toHaveLength(9);
+    expect(operatingSection.querySelectorAll('[data-operating-state-appliance-legend^="operating:"]')).toHaveLength(0);
+    const operatingComposition = operatingSection.querySelector<HTMLElement>("[data-operating-appliance-composition]")!;
+    expect(operatingComposition.innerHTML.indexOf('data-operating-state-appliance-total="operating"'))
+      .toBeLessThan(operatingComposition.innerHTML.indexOf('data-operating-state-appliance-tooltip="operating:Plug Load3"'));
+    expect(operatingSection.querySelectorAll("[data-operating-appliance-group]")).toHaveLength(0);
     expect(operatingSection.querySelectorAll("[data-operating-appliance]")).toHaveLength(9);
     expect(operatingSection.querySelector("[data-operating-appliance]")?.getAttribute("data-operating-appliance")).toBe("Plug Load3");
+    expect([...operatingApplianceRows].map((node) => node.getAttribute("data-appliance-series-index"))).toEqual(["1", "2", "3", "4", "5", "6", "7", "8", "9"]);
 
     expect(operatingSection.textContent).toContain("4.2 Operating Hours Spike Analysis");
+    const operatingSpikeTable = operatingSection.querySelector<HTMLElement>("[data-operating-spike-table]")!;
+    expect(operatingSpikeTable.classList.contains("overflow-x-auto")).toBe(false);
+    expect(operatingSpikeTable.classList.contains("overflow-hidden")).toBe(true);
+    expect(operatingSpikeTable.outerHTML).not.toContain("min-w-[1060px]");
     const centreDetails = operatingSection.querySelectorAll<HTMLDetailsElement>("details[data-operating-spike-centre]");
     expect([...centreDetails].map((detail) => detail.dataset.operatingSpikeCentre)).toEqual([
       "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N",
@@ -348,6 +389,8 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect([...centreDetails].map((detail) => detail.querySelectorAll("[data-operating-spike-event]").length))
       .toEqual([8, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
     expect([...centreDetails].every((detail) => detail.querySelector(":scope > summary")?.tabIndex === 0)).toBe(true);
+    expect([...centreDetails].every((detail) => detail.querySelector(":scope > summary")?.classList.contains("grid-cols-2"))).toBe(true);
+    expect([...operatingSection.querySelectorAll<HTMLElement>("[data-operating-spike-event]")].every((event) => event.classList.contains("grid-cols-2"))).toBe(true);
     expect(centreDetails[0]?.querySelectorAll('[data-operating-spike-event^="B:"]')).toHaveLength(0);
     centreDetails[0]!.open = true;
     expect(centreDetails[0]!.open).toBe(true);
@@ -363,7 +406,7 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     const readingOrder = [
       "Key focus / AI interpretation",
       "Total operating energy",
-      "4.1 Operating Energy by Appliance Type",
+      "4.1 Operating Energy by Appliance",
       "4.2 Operating Hours Spike Analysis",
       "Supporting Evidence · all-hours Portfolio Appliance context",
       "Method, tariff and evidence",
