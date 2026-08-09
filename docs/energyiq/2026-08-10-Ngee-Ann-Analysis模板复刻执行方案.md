@@ -312,3 +312,38 @@ http://127.0.0.1:4178/analysis?utility=electricity&project=proj-nap-energy-analy
 - Heatmap 已明确标注颜色只代表当前视图内 accepted usage 的相对高低，不能单独证明异常、浪费或原因；
 - 峰值小时是 Renderer ViewModel 对同一 profile 的 24 个服务端值所做的展示级排序，只用于当前图前摘要，不注册为服务端 Structured Signal，不进入 AI Artifact、Decision Priority 或跨模块计算；若未来需要用于决策排序或 AI Evidence，必须上移服务端合同；
 - 聚焦 Renderer 测试 `56/56` 与根 TypeScript typecheck 通过；真实 Chrome 1440/1920 和 Charles 人工验收仍待主 Agent 完成。
+
+## 16. NAP-A3 执行切片：Where measured energy changed（2026-08-10）
+
+### 16.1 客户问题与页面结果
+
+本切片只回答两个容易混淆的问题：**当前用量集中在哪里？相对上一个可比窗口，哪些 Level、Category 和 Circuit 的测得变化最大？**
+
+1. 复用现有 Level、Category、Circuit current/previous/change/share、quality 和 Evidence；不新增 SQL、Projection 或前端业务公式；
+2. `Main contributors` 先明确分成 `Current concentration` 与 `Measured change`，不再让当前占比排名看起来像异常或变化原因；
+3. Level 与 Category 分别陈述，不能拼成 `Level × Category` 交集，也不能写成 proven cause；
+4. Circuit 列表继续默认 Top 5，但明确它按 current usage 排序，只是调查入口；不能称为 anomaly、priority 或 saving；
+5. comparison 不可用时仍可显示当前 share/usage，但所有变化结论局部 Unavailable；技术明细继续折叠。
+
+### 16.2 开发前自我 Grilling
+
+- **最大 current usage 是否等于最大增量？** 否。页面必须同时展示排序口径；不能用 share 回答 change。
+- **Level 7 增加且 Load 增加，能否说 Level 7 Load 是 driver？** 不能。两个独立维度可能不相交；只可并列陈述各自变化。
+- **最大的 Circuit 是否应先调查？** 只能说它是 current usage 的最大 component Circuit。若没有异常、变化或规则证据，不能把“大”升级为“有问题”。
+- **是否要增加新的 Sankey、donut 或 stacked chart？** 当前不需要。现有 bars/list 已能表达 share 与 delta；先修语义和结论，人工验收后再判断图形是否不足。
+- **客户端是否产生新的官方 Signal？** 否。任何新增摘要都只能是当前图内对 server rows 的展示级排序，不进入 AI Artifact、Decision Priority 或跨模块复用；若未来需要这些用途，上移服务端 Structured Signal Adapter。
+
+### 16.3 自动化验收
+
+1. Golden 分别显示 largest current Level/Category 与 largest same-direction Level/Category movement，名称、share、change 和单位来自同一行；
+2. Level 与 Category 文案保持独立，不出现未经证明的交集或 cause；
+3. Circuit 明确标注 `ranked by current usage` 和 `not an anomaly ranking`；局部 Level/Category filter 与 Top 5/All 行为不变；
+4. missing comparison 只关闭 movement，不隐藏有效 current facts；missing Circuit/Accounting 保持现有局部 fail-closed；
+5. 聚焦 Renderer tests、root typecheck/build、`git diff --check` 通过。
+
+### 16.4 停止条件
+
+- 需要在 React 重新计算服务端 comparison、anomaly 或 accounting；
+- 需要把独立 Level/Category 行拼成未经证明的交集；
+- 需要用 absolute usage 冒充异常、变化原因或节能潜力；
+- 需要新增共享 Analytics/Signal/Chart 平台才能完成。
