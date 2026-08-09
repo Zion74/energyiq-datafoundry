@@ -31,6 +31,7 @@ import {
   OverviewSectionNavigation,
   type OverviewNavigationSection,
 } from "./overview-section-navigation";
+import { PRESCHOOL_OVERVIEW_SECTIONS } from "./preschool-overview-renderer";
 import { orderProjectNodesDepthFirst } from "./project-tree-model";
 import {
   applyProjectAnalysisQualityPolicy,
@@ -68,16 +69,6 @@ const NGEE_ANN_OVERVIEW_SECTIONS: ReadonlyArray<OverviewNavigationSection> = [
   { id: "ngee-ann-location", label: "Main contributors" },
   { id: "ngee-ann-timing", label: "Time patterns" },
   { id: "ngee-ann-evidence", label: "Evidence" },
-] as const;
-const PRESCHOOL_OVERVIEW_SECTIONS: ReadonlyArray<OverviewNavigationSection> = [
-  { id: "preschool-decision-summary", label: "Takeaways" },
-  { id: "preschool-ai-analysis", label: "AI analysis" },
-  { id: "preschool-appliance-ranking", label: "Energy drivers" },
-  { id: "preschool-efficiency-benchmark", label: "Efficiency" },
-  { id: "preschool-operational-behaviour", label: "Operating patterns" },
-  { id: "preschool-planning-outlook", label: "June plan" },
-  { id: "preschool-centre-ranking", label: "Centre detail" },
-  { id: "preschool-evidence", label: "Evidence" },
 ] as const;
 export type OverviewComparison = "overlay" | "selected" | "average";
 export type OverviewCategory = "all" | "load" | "light";
@@ -527,7 +518,7 @@ function PublishedDecisionDashboardView({
     const scrollContainer = elements[0]?.closest("main");
     if (!scrollContainer) return;
     const updateActiveSection = () => {
-      const passed = elements.filter((element) => element.getBoundingClientRect().top <= 168);
+      const passed = elements.filter((element) => element.getBoundingClientRect().top <= 176);
       setActiveSection((passed.at(-1) ?? elements[0]).id);
     };
     updateActiveSection();

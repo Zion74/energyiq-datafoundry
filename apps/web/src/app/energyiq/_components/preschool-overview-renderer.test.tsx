@@ -27,6 +27,7 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup).toContain("Total energy · May 2026");
     expect(markup).toContain("Estimated total cost · May 2026");
     expect(markup).toContain("Energy &amp; cost by centre type");
+    expect(markup).toContain(">Outlets</th>");
     expect(markup).toContain("Senior Care Center");
     expect(markup).toContain("11,637.00 kWh");
     expect(markup).toContain("Portfolio total");

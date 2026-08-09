@@ -373,16 +373,19 @@ describe("published Overview URL reload", () => {
     });
     expect(container.textContent).toContain("Overview contents");
     const contents = container.querySelector("[aria-label='Overview contents']");
-    expect(Array.from(contents?.querySelectorAll<HTMLAnchorElement>("a") ?? [], (anchor) => anchor.textContent)).toEqual([
-      "Takeaways",
-      "AI analysis",
-      "Energy drivers",
-      "Efficiency",
-      "Operating patterns",
-      "June plan",
-      "Centre detail",
-      "Evidence",
+    const contentLinks = Array.from(contents?.querySelectorAll<HTMLAnchorElement>("a") ?? []);
+    expect(contentLinks.map((anchor) => [anchor.textContent, anchor.getAttribute("href")])).toEqual([
+      ["1 · Overview", "#preschool-overall-summary"],
+      ["2 · Benchmarks", "#preschool-benchmark-analysis"],
+      ["3 · Standby wastage", "#preschool-standby-wastage"],
+      ["4 · Operating hours", "#preschool-operating-hours"],
+      ["5 · June planning", "#preschool-june-planning"],
     ]);
+    for (const anchor of contentLinks) {
+      const href = anchor.getAttribute("href");
+      expect(href).toMatch(/^#preschool-/);
+      expect(container.querySelector(href!)).not.toBeNull();
+    }
     expect(Array.from(container.querySelectorAll("button"), (button) => button.textContent)).not.toEqual(
       expect.arrayContaining(["Yesterday", "Last 7 days", "Previous week", "Previous month", "Custom"]),
     );

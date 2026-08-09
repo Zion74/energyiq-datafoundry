@@ -181,7 +181,7 @@ export function PreschoolOverviewRenderer({
               <thead className="bg-surface-subtle text-xs font-semibold text-muted">
                 <tr>
                   <th scope="col" className="px-4 py-3">Centre type</th>
-                  <th scope="col" className="px-4 py-3 text-right">Centres</th>
+                  <th scope="col" className="px-4 py-3 text-right">Outlets</th>
                   <th scope="col" className="px-4 py-3 text-right">Energy</th>
                   <th scope="col" className="px-4 py-3 text-right">Estimated cost</th>
                   <th scope="col" className="px-4 py-3 text-right">Share</th>
