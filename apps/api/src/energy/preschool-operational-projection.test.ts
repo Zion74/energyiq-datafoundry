@@ -27,6 +27,17 @@ const centreCodes = [
   "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T",
   "U", "V", "W", "X", "Y", "Z", "AA", "AB", "AC", "AD",
 ];
+const applianceCircuits = [
+  ["plug-load3", "Plug Load3", "load", 0.4],
+  ["kitchen-plug-load", "Kitchen Plug Load", "load", 0.3],
+  ["living-area-plug-load", "Living Area Plug Load", "load", 0.274],
+  ["aircon-1", "Aircon 1", "aircon", 0.012],
+  ["aircon-2", "Aircon 2", "aircon", 0.008],
+  ["kitchen-lighting", "Kitchen Lighting", "light", 0.002],
+  ["living-room-lighting", "Living Room Lighting", "light", 0.002],
+  ["other-lighting3", "Other Lighting3", "light", 0.001],
+  ["heater", "Heater", "load", 0.001],
+] as const;
 
 describe("Preschool operational projection", () => {
   it("reproduces the May Spike and provisional after-hours SOP Golden", () => {
@@ -73,7 +84,29 @@ describe("Preschool operational projection", () => {
       standbyKwh: 3_103.784,
       standbySharePct: 12.45,
       operatingKwh: 21_818.0283,
+      provisionalStandbyCostBeforeGstSgd: 846.4019,
     });
+    expect(projection.tariffReference).toMatchObject({
+      sourceName: "SP Group",
+      beforeGstSgdPerKwh: 0.2727,
+      supplyClass: "Low tension, non-domestic",
+    });
+    expect(projection.standbyAppliances).toMatchObject({
+      totalKwh: 3_103.784,
+      provisionalCostBeforeGstSgd: 846.4019,
+      reconciliationGapKwh: 0,
+    });
+    expect(projection.standbyAppliances.applianceGroups.map((group) => [group.name, group.sharePct]))
+      .toEqual([
+        ["Plugload", 97.4],
+        ["Aircon", 2],
+        ["Lighting", 0.5],
+        ["Heater", 0.1],
+      ]);
+    expect(projection.standbyAppliances.appliances).toHaveLength(9);
+    expect(projection.standbyAppliances.appliances.every((appliance) => (
+      appliance.centreCount === 30 && appliance.sourceCircuitIds.length === 30
+    ))).toBe(true);
     expect(projection.hourlyProfile).toMatchObject({
       completeDayCount: 31,
       unit: "mean kWh per complete day",
@@ -88,6 +121,14 @@ describe("Preschool operational projection", () => {
     expect(projection.spikes.operating).toMatchObject({ count: 21, centreCount: 14 });
     expect(projection.spikes.standby.centres.map((centre) => [centre.centreCode, centre.spikeCount]))
       .toEqual([["L", 4], ["E", 2], ["N", 1]]);
+    expect(projection.spikes.standby.centres.map((centre) => centre.events.length)).toEqual([4, 2, 1]);
+    expect(projection.spikes.standby.centres[0]?.events).toEqual(
+      [...projection.spikes.standby.centres[0]!.events].sort((left, right) => (
+        right.variancePct - left.variancePct
+        || left.localDate.localeCompare(right.localDate)
+        || left.localHour - right.localHour
+      )),
+    );
     expect(projection.sop.breachingCentreCodes).toEqual(["L", "E", "N"]);
     expect(projection.sop.centres.slice(0, 3).map((centre) => [centre.centreCode, centre.score]))
       .toEqual([["L", 96], ["E", 98], ["N", 99]]);
@@ -103,10 +144,11 @@ describe("Preschool operational projection", () => {
       hierarchyRevisionId: "preschool-hierarchy-v5",
       meterMappingRevisionId: "preschool-mapping-v5",
       businessCalendarVersion: "preschool-calendar-v1",
-      projectionQueryId: "preschool_centre_hour_cells_v1",
+      projectionQueryId: "preschool_centre_hour_appliance_cells_v2",
       projectionRecipeIds: [
         "preschool-hour-slot-spike-v1",
         "preschool-after-hours-sop-signal-v1",
+        "preschool-operating-state-appliance-v1",
       ],
     });
   });
@@ -387,7 +429,13 @@ describe("Preschool operational projection", () => {
       expect(projection.spikes.operating).toMatchObject({ count: 21, centreCount: 14 });
       expect(projection.sop.breachingCentreCodes).toEqual(["L", "E", "N"]);
       expect(projection.spikes.operating.centres.find((centre) => centre.centreCode === "A")?.worstSpike)
-        .toMatchObject({ leadingCircuitName: "Aircon 1", leadingCircuitSharePct: 60 });
+        .toMatchObject({ leadingCircuitName: "Plug Load3", leadingCircuitSharePct: 100 });
+      expect(projection.standbyAppliances).toMatchObject({
+        totalKwh: 3_103.784,
+        reconciliationGapKwh: 0,
+      });
+      expect(new Set(projection.standbyAppliances.applianceGroups.map((group) => group.name)))
+        .toEqual(new Set(["Plugload", "Aircon", "Lighting", "Heater"]));
       expect(projection.spikes.operating.centres.find((centre) => centre.centreCode === "A"))
         .toMatchObject({ centreType: "Senior Care Center" });
       expect(projection.sop.centres.find((centre) => centre.centreCode === "L"))
@@ -528,12 +576,19 @@ const mayCells = (): PreschoolOperationalCell[] => {
           localDate,
           localHour,
           usageKwh: operating ? 10 : 1,
-          leadingCircuitName: `${scopeId(centreCode)}:Plug Load3`,
-          leadingCircuitKwh: operating ? 4 : 0.6,
+          leadingCircuitName: "Plug Load3",
+          leadingCircuitKwh: (operating ? 10 : 1) * applianceCircuits[0][3],
+          circuits: applianceCircuits.map(([slug, name, category, share]) => ({
+            circuitId: `${scopeId(centreCode)}-${slug}`,
+            name,
+            category,
+            usageKwh: (operating ? 10 : 1) * share,
+          })),
         });
       }
     }
   }
+  reconcileMayCellTotals(cells);
   return cells;
 };
 
@@ -549,7 +604,36 @@ const setUsage = (
     && candidate.localHour === localHour);
   if (!cell) throw new Error(`Missing test cell ${centreCode}:${localDate}:${localHour}`);
   cell.usageKwh = usageKwh;
-  cell.leadingCircuitKwh = usageKwh * 0.9;
+  cell.circuits.forEach((circuit, index) => {
+    circuit.usageKwh = usageKwh * applianceCircuits[index]![3];
+  });
+  cell.leadingCircuitName = cell.circuits[0]!.name;
+  cell.leadingCircuitKwh = cell.circuits[0]!.usageKwh;
+  reconcileMayCellTotals(cells);
+};
+
+const reconcileMayCellTotals = (cells: PreschoolOperationalCell[]): void => {
+  const targets = { standby: 3_103.784, operating: 21_818.0283 } as const;
+  const stateFor = (cell: PreschoolOperationalCell): keyof typeof targets => {
+    const weekday = new Date(`${cell.localDate}T00:00:00.000Z`).getUTCDay();
+    const calendarException = cell.localDate === "2026-05-01" || cell.localDate === "2026-05-27";
+    return !calendarException && weekday !== 0 && weekday !== 6 && cell.localHour >= 7 && cell.localHour < 19
+      ? "operating"
+      : "standby";
+  };
+  for (const state of ["standby", "operating"] as const) {
+    const stateCells = cells.filter((cell) => stateFor(cell) === state);
+    const currentTotal = stateCells.reduce((sum, cell) => sum + cell.usageKwh, 0);
+    const factor = targets[state] / currentTotal;
+    stateCells.forEach((cell) => {
+      cell.usageKwh *= factor;
+      cell.circuits.forEach((circuit) => { circuit.usageKwh *= factor; });
+      const leading = [...cell.circuits]
+        .sort((left, right) => right.usageKwh - left.usageKwh || left.name.localeCompare(right.name))[0]!;
+      cell.leadingCircuitName = leading.name;
+      cell.leadingCircuitKwh = leading.usageKwh;
+    });
+  }
 };
 
 const scopeId = (centreCode: string): string => `preschool-centre-${centreCode.toLowerCase()}`;
@@ -573,12 +657,12 @@ const cellsToFacts = (cells: PreschoolOperationalCell[]): EnergyIntervalFactWrit
   return cells.flatMap((cell) => {
     const intervalStartMs = Date.parse(`${cell.localDate}T${String(cell.localHour).padStart(2, "0")}:00:00.000Z`)
       - 8 * 60 * 60_000;
-    const circuits = cell.scopeId === scopeId("A")
-      ? [["aircon-1", "Aircon 1", 0.6], ["aircon-2", "Aircon 2", 0.4]] as const
-      : [["aircon-1", "Aircon 1", 1]] as const;
-    return circuits.map(([circuitSlug, circuitName, share]) => {
-      const meterPointId = `${cell.scopeId}-${circuitSlug}`;
-      const usageKwh = cell.usageKwh * share;
+    const sourceCircuits = cell.localDate === "2026-05-01" && cell.localHour === 0
+      ? cell.circuits
+      : [{ ...cell.circuits[0]!, usageKwh: cell.usageKwh }];
+    return sourceCircuits.map((circuit) => {
+      const meterPointId = circuit.circuitId;
+      const usageKwh = circuit.usageKwh;
       const previousActiveEnergyKwh = activeEnergyByMeter.get(meterPointId) ?? 1_000;
       const activeEnergyKwh = previousActiveEnergyKwh + usageKwh;
       activeEnergyByMeter.set(meterPointId, activeEnergyKwh);
@@ -590,8 +674,8 @@ const cellsToFacts = (cells: PreschoolOperationalCell[]): EnergyIntervalFactWrit
       meterPointId,
       scopeId: meterPointId,
       parentNodeId: cell.scopeId,
-      sourceLabel: circuitName,
-      category: "aircon",
+      sourceLabel: circuit.name,
+      category: circuit.category,
       meterRole: "component",
       intervalStart: new Date(intervalStartMs).toISOString(),
       intervalEnd: new Date(intervalStartMs + 60 * 60_000).toISOString(),

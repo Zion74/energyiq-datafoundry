@@ -17,6 +17,15 @@ const EXPECTED_APPLIANCE_BY_ALIAS = new Map<string, { applianceGroup: string; ca
   ["Plug Load3", { applianceGroup: "Plugload", category: "load" }],
 ]);
 
+export const PRESCHOOL_EXPECTED_APPLIANCE_ALIAS_COUNT = EXPECTED_APPLIANCE_BY_ALIAS.size;
+
+export const preschoolApplianceContractForAlias = (
+  alias: string,
+): { applianceGroup: string; category: string } | null => {
+  const contract = EXPECTED_APPLIANCE_BY_ALIAS.get(alias);
+  return contract ? { ...contract } : null;
+};
+
 export type PreschoolApplianceProjection = {
   status: "available";
   contract: {

@@ -14,6 +14,10 @@ import {
   resolveEnergyPublishedMeterRoute,
   type EnergyQueryContext,
 } from "./energy-query-context.js";
+import {
+  PRESCHOOL_EXPECTED_APPLIANCE_ALIAS_COUNT,
+  preschoolApplianceContractForAlias,
+} from "./preschool-appliance-projection.js";
 
 const PRESCHOOL_PROJECT_ID = "preschool-demo";
 const PRESCHOOL_MAY_PERIOD = {
@@ -24,8 +28,9 @@ const PRESCHOOL_MAY_PERIOD = {
 const SPIKE_THRESHOLD_PCT = 50;
 const EXPECTED_CENTRE_COUNT = 30;
 const EXPECTED_CELL_COUNT = EXPECTED_CENTRE_COUNT * 31 * 24;
-const CELL_QUERY_ID = "preschool_centre_hour_cells_v1" as const;
+const CELL_QUERY_ID = "preschool_centre_hour_appliance_cells_v2" as const;
 const DAILY_TOTALS_QUERY_ID = "daily_totals_v1" as const;
+const RECONCILIATION_TOLERANCE_KWH = 0.01;
 const PRESCHOOL_MAY_COMPLETE_WEEK_STARTS = [
   "2026-05-04",
   "2026-05-11",
@@ -64,11 +69,18 @@ export type PreschoolOperationalSpike = {
   leadingCircuitSharePct: number;
 };
 
+export type PreschoolOperationalCircuitCell = {
+  circuitId: string;
+  name: string;
+  category: string;
+  usageKwh: number;
+};
+
 export type PreschoolOperationalProjection = {
   status: "available";
   contract: {
     id: "preschool-may-2026-operational-behaviour";
-    version: "1";
+    version: "2";
     spikeThresholdPct: 50;
   };
   period: {
@@ -81,6 +93,29 @@ export type PreschoolOperationalProjection = {
     standbyKwh: number;
     standbySharePct: number;
     operatingKwh: number;
+    provisionalStandbyCostBeforeGstSgd: number;
+  };
+  tariffReference: typeof PRESCHOOL_DEMO_TARIFF_REFERENCE;
+  standbyAppliances: {
+    totalKwh: number;
+    provisionalCostBeforeGstSgd: number;
+    reconciliationGapKwh: number;
+    applianceGroups: Array<{
+      name: string;
+      usageKwh: number;
+      sharePct: number;
+      provisionalCostBeforeGstSgd: number;
+      sourceAliases: string[];
+    }>;
+    appliances: Array<{
+      name: string;
+      applianceGroup: string;
+      usageKwh: number;
+      sharePct: number;
+      provisionalCostBeforeGstSgd: number;
+      centreCount: number;
+      sourceCircuitIds: string[];
+    }>;
   };
   hourlyProfile: {
     completeDayCount: 31;
@@ -146,6 +181,7 @@ export type PreschoolOperationalProjection = {
       centreType: string | null;
       spikeCount: number;
       worstSpike: PreschoolOperationalSpike;
+      events: PreschoolOperationalSpike[];
     }>;
   }>;
   sop: {
@@ -171,10 +207,11 @@ export type PreschoolOperationalProjection = {
     metricRevisionIds: string[];
     businessCalendarVersion: string;
     sourceQueryIds: string[];
-    projectionQueryId: "preschool_centre_hour_cells_v1";
+    projectionQueryId: "preschool_centre_hour_appliance_cells_v2";
     projectionRecipeIds: [
       "preschool-hour-slot-spike-v1",
       "preschool-after-hours-sop-signal-v1",
+      "preschool-operating-state-appliance-v1",
     ];
     baseline: "same-centre same-hour-slot mean within operating state";
   };
@@ -201,6 +238,7 @@ export type PreschoolOperationalCell = {
   usageKwh: number;
   leadingCircuitName: string;
   leadingCircuitKwh: number;
+  circuits: PreschoolOperationalCircuitCell[];
 };
 
 type PreschoolCentre = {
@@ -395,6 +433,18 @@ export const buildPreschoolOperationalProjection = (input: {
       evidence,
     );
   }
+  const standbyAppliances = buildStandbyApplianceComposition({
+    cells: classified as Array<PreschoolOperationalCell & { operatingState: PreschoolOperatingState }>,
+    centres: input.centres,
+    expectedStandbyKwh: input.analysis.offHours.standbyKwh,
+  });
+  if (!standbyAppliances) {
+    return unavailable(
+      "PRESCHOOL_OPERATIONAL_FACTS_UNAVAILABLE",
+      "Closed-state Appliance evidence was withheld because published Circuit aliases were incomplete or did not reconcile to the accepted standby total.",
+      evidence,
+    );
+  }
 
   const baselines = new Map<string, { total: number; count: number }>();
   for (const cell of classified) {
@@ -445,6 +495,7 @@ export const buildPreschoolOperationalProjection = (input: {
         ...centre,
         spikeCount: ordered.length,
         worstSpike: withoutInternalSpikeFields(worst),
+        events: ordered.map(withoutInternalSpikeFields),
       };
     }).sort((left, right) => right.spikeCount - left.spikeCount
       || right.worstSpike.variancePct - left.worstSpike.variancePct
@@ -486,7 +537,7 @@ export const buildPreschoolOperationalProjection = (input: {
     status: "available",
     contract: {
       id: "preschool-may-2026-operational-behaviour",
-      version: "1",
+      version: "2",
       spikeThresholdPct: SPIKE_THRESHOLD_PCT,
     },
     period: { ...input.period, timezone: input.timezone },
@@ -495,7 +546,12 @@ export const buildPreschoolOperationalProjection = (input: {
       standbyKwh: input.analysis.offHours.standbyKwh,
       standbySharePct: input.analysis.offHours.sharePct,
       operatingKwh: input.analysis.offHours.operatingKwh,
+      provisionalStandbyCostBeforeGstSgd: round(
+        input.analysis.offHours.standbyKwh * PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh,
+      ),
     },
+    tariffReference: PRESCHOOL_DEMO_TARIFF_REFERENCE,
+    standbyAppliances,
     hourlyProfile: {
       completeDayCount: 31,
       unit: "mean kWh per complete day",
@@ -525,9 +581,99 @@ export const buildPreschoolOperationalProjection = (input: {
       projectionRecipeIds: [
         "preschool-hour-slot-spike-v1",
         "preschool-after-hours-sop-signal-v1",
+        "preschool-operating-state-appliance-v1",
       ],
       baseline: "same-centre same-hour-slot mean within operating state",
     },
+  };
+};
+
+const buildStandbyApplianceComposition = (input: {
+  cells: Array<PreschoolOperationalCell & { operatingState: PreschoolOperatingState }>;
+  centres: PreschoolCentre[];
+  expectedStandbyKwh: number;
+}): Extract<PreschoolOperationalProjection, { status: "available" }>["standbyAppliances"] | null => {
+  const applianceRows = new Map<string, {
+    applianceGroup: string;
+    usageKwh: number;
+    centreIds: Set<string>;
+    sourceCircuitIds: Set<string>;
+  }>();
+  let closedCircuitTotalKwh = 0;
+  for (const cell of input.cells) {
+    if (cell.circuits.length === 0) return null;
+    const cellCircuitTotalKwh = cell.circuits.reduce((sum, circuit) => sum + circuit.usageKwh, 0);
+    if (Math.abs(cellCircuitTotalKwh - cell.usageKwh) > RECONCILIATION_TOLERANCE_KWH) return null;
+    for (const circuit of cell.circuits) {
+      const aliasContract = preschoolApplianceContractForAlias(circuit.name);
+      if (
+        !aliasContract
+        || aliasContract.category !== circuit.category
+        || !circuit.circuitId
+        || !Number.isFinite(circuit.usageKwh)
+        || circuit.usageKwh < 0
+      ) return null;
+      if (cell.operatingState !== "standby") continue;
+      const row = applianceRows.get(circuit.name) ?? {
+        applianceGroup: aliasContract.applianceGroup,
+        usageKwh: 0,
+        centreIds: new Set<string>(),
+        sourceCircuitIds: new Set<string>(),
+      };
+      row.usageKwh += circuit.usageKwh;
+      row.centreIds.add(cell.scopeId);
+      row.sourceCircuitIds.add(circuit.circuitId);
+      applianceRows.set(circuit.name, row);
+      closedCircuitTotalKwh += circuit.usageKwh;
+    }
+  }
+  if (
+    applianceRows.size !== PRESCHOOL_EXPECTED_APPLIANCE_ALIAS_COUNT
+    || [...applianceRows.values()].some((row) => (
+      row.centreIds.size !== input.centres.length
+      || row.sourceCircuitIds.size !== input.centres.length
+    ))
+  ) return null;
+  const reconciliationGapKwh = round(closedCircuitTotalKwh - input.expectedStandbyKwh);
+  if (Math.abs(reconciliationGapKwh) > RECONCILIATION_TOLERANCE_KWH) return null;
+
+  const appliances = [...applianceRows.entries()]
+    .map(([name, row]) => ({
+      name,
+      applianceGroup: row.applianceGroup,
+      usageKwh: round(row.usageKwh),
+      sharePct: percent(row.usageKwh, input.expectedStandbyKwh),
+      provisionalCostBeforeGstSgd: round(row.usageKwh * PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh),
+      centreCount: row.centreIds.size,
+      sourceCircuitIds: [...row.sourceCircuitIds].sort((left, right) => left.localeCompare(right)),
+    }))
+    .sort((left, right) => right.usageKwh - left.usageKwh || left.name.localeCompare(right.name));
+  const groupRows = new Map<string, { usageKwh: number; sourceAliases: string[] }>();
+  for (const appliance of appliances) {
+    const row = groupRows.get(appliance.applianceGroup) ?? { usageKwh: 0, sourceAliases: [] };
+    row.usageKwh += appliance.usageKwh;
+    row.sourceAliases.push(appliance.name);
+    groupRows.set(appliance.applianceGroup, row);
+  }
+
+  return {
+    totalKwh: round(input.expectedStandbyKwh),
+    provisionalCostBeforeGstSgd: round(
+      input.expectedStandbyKwh * PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh,
+    ),
+    reconciliationGapKwh,
+    applianceGroups: [...groupRows.entries()]
+      .map(([name, row]) => ({
+        name,
+        usageKwh: round(row.usageKwh),
+        sharePct: percent(row.usageKwh, input.expectedStandbyKwh),
+        provisionalCostBeforeGstSgd: round(
+          row.usageKwh * PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh,
+        ),
+        sourceAliases: row.sourceAliases.sort((left, right) => left.localeCompare(right)),
+      }))
+      .sort((left, right) => right.usageKwh - left.usageKwh || left.name.localeCompare(right.name)),
+    appliances,
   };
 };
 
@@ -781,25 +927,52 @@ const withoutInternalSpikeFields = (spike: {
 };
 
 const round = (value: number): number => Math.round((value + Number.EPSILON) * 10_000) / 10_000;
+const percent = (part: number, total: number): number => total > 0 ? round((part / total) * 100) : 0;
 
 const rowToCells = (row: unknown[]): PreschoolOperationalCell[] => {
   const scopeId = typeof row[0] === "string" ? row[0] : "";
   const json = typeof row[1] === "string" ? row[1] : "[]";
   const parsed = JSON.parse(json) as unknown;
   if (!scopeId || !Array.isArray(parsed)) throw new Error("PRESCHOOL_OPERATIONAL_CELL_ROW_INVALID");
-  return parsed.map((item) => {
+  const grouped = new Map<string, {
+    localDate: string;
+    localHour: number;
+    circuits: PreschoolOperationalCircuitCell[];
+  }>();
+  for (const item of parsed) {
     if (!isRecord(item)) throw new Error("PRESCHOOL_OPERATIONAL_CELL_INVALID");
     const localDate = String(item.local_date ?? "");
     const localHour = Number(item.local_hour);
-    const usageKwh = Number(item.usage_kwh);
-    const leadingCircuitName = String(item.leading_circuit_name ?? "");
-    const leadingCircuitKwh = Number(item.leading_circuit_kwh);
-    if (!localDate || !Number.isInteger(localHour) || !Number.isFinite(usageKwh)
-      || !leadingCircuitName || !Number.isFinite(leadingCircuitKwh)) {
+    const circuitId = String(item.circuit_id ?? "");
+    const name = String(item.circuit_name ?? "");
+    const category = String(item.circuit_category ?? "");
+    const usageKwh = Number(item.circuit_kwh);
+    if (!localDate || !Number.isInteger(localHour) || !circuitId || !name || !category
+      || !Number.isFinite(usageKwh)) {
       throw new Error("PRESCHOOL_OPERATIONAL_CELL_INVALID");
     }
-    return { scopeId, localDate, localHour, usageKwh, leadingCircuitName, leadingCircuitKwh };
-  });
+    const key = `${localDate}:${localHour}`;
+    const group = grouped.get(key) ?? { localDate, localHour, circuits: [] };
+    group.circuits.push({ circuitId, name, category, usageKwh });
+    grouped.set(key, group);
+  }
+  return [...grouped.values()]
+    .map((group) => {
+      const circuits = [...group.circuits]
+        .sort((left, right) => right.usageKwh - left.usageKwh || left.name.localeCompare(right.name));
+      const leading = circuits[0];
+      if (!leading) throw new Error("PRESCHOOL_OPERATIONAL_CELL_INVALID");
+      return {
+        scopeId,
+        localDate: group.localDate,
+        localHour: group.localHour,
+        usageKwh: circuits.reduce((sum, circuit) => sum + circuit.usageKwh, 0),
+        leadingCircuitName: leading.name,
+        leadingCircuitKwh: leading.usageKwh,
+        circuits,
+      };
+    })
+    .sort((left, right) => left.localDate.localeCompare(right.localDate) || left.localHour - right.localHour);
 };
 
 const preschoolCentreHourCellsSql = (viewName: string): string => `
@@ -808,32 +981,26 @@ const preschoolCentreHourCellsSql = (viewName: string): string => `
     TO_JSON(LIST(STRUCT_PACK(
       local_date := local_date,
       local_hour := local_hour,
-      usage_kwh := usage_kwh,
-      leading_circuit_name := circuit_name,
-      leading_circuit_kwh := circuit_kwh
-    ) ORDER BY local_date, local_hour)) AS cells_json
+      circuit_id := circuit_id,
+      circuit_name := circuit_name,
+      circuit_category := circuit_category,
+      circuit_kwh := circuit_kwh
+    ) ORDER BY local_date, local_hour, circuit_kwh DESC, circuit_name)) AS circuit_cells_json
   FROM (
     SELECT
-      circuit_cells.*,
-      SUM(circuit_kwh) OVER (PARTITION BY scope_id, local_date, local_hour) AS usage_kwh,
-      ROW_NUMBER() OVER (
-        PARTITION BY scope_id, local_date, local_hour
-        ORDER BY circuit_kwh DESC, circuit_name ASC
-      ) AS driver_rank
-    FROM (
-      SELECT
-        source.parent_node_id AS scope_id,
-        STRFTIME(CAST(source.local_interval_start AS DATE), '%Y-%m-%d') AS local_date,
-        source.local_hour,
-        source.circuit_name,
-        SUM(source.usage_kwh) AS circuit_kwh
-      FROM ${quoteIdentifier(viewName)} source
-      WHERE source.quality_status = 'ok'
-        AND source.official_aggregation_eligible = TRUE
-      GROUP BY source.parent_node_id, CAST(source.local_interval_start AS DATE), source.local_hour, source.circuit_name
-    ) circuit_cells
-  ) ranked
-  WHERE driver_rank = 1
+      source.parent_node_id AS scope_id,
+      STRFTIME(CAST(source.local_interval_start AS DATE), '%Y-%m-%d') AS local_date,
+      source.local_hour,
+      source.meter_node_id AS circuit_id,
+      source.circuit_name,
+      source.category AS circuit_category,
+      SUM(source.usage_kwh) AS circuit_kwh
+    FROM ${quoteIdentifier(viewName)} source
+    WHERE source.quality_status = 'ok'
+      AND source.official_aggregation_eligible = TRUE
+    GROUP BY source.parent_node_id, CAST(source.local_interval_start AS DATE), source.local_hour,
+      source.meter_node_id, source.circuit_name, source.category
+  ) circuit_cells
   GROUP BY scope_id
   ORDER BY scope_id
 `;
