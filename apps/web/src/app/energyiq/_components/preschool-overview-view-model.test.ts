@@ -85,10 +85,20 @@ describe("Preschool Overview ViewModel", () => {
     if (view.benchmark.status !== "provisional") throw new Error("Expected benchmark view");
     expect(view.benchmark.scatter.points).toHaveLength(30);
     expect(view.benchmark.scatter.points.find((point) => point.centreCode === "G"))
-      .toMatchObject({ priority: true, quadrant: "priority" });
+      .toMatchObject({ priority: true, quadrant: "priority", actionRank: 1 });
+    expect(view.benchmark.priorityCentres.map((centre) => ({
+      rank: centre.rank,
+      centreCode: centre.centreCode,
+      name: centre.name,
+    }))).toEqual([
+      { rank: 1, centreCode: "G", name: "Centre G" },
+      { rank: 2, centreCode: "M", name: "Centre M" },
+      { rank: 3, centreCode: "J", name: "Centre J" },
+    ]);
     expect(view.benchmark.distributions.map((distribution) => ({
       id: distribution.id,
       label: distribution.label,
+      question: distribution.question,
       unit: distribution.unit,
       axis: distribution.axis,
       cohorts: distribution.cohorts.map((cohort) => ({
@@ -102,6 +112,7 @@ describe("Preschool Overview ViewModel", () => {
       {
         id: "eui",
         label: "Annualised EUI estimate",
+        question: "Which Outlets use more energy than peers after adjusting for floor area?",
         unit: "kWh/m²/year",
         axis: { min: 0, max: 16 },
         cohorts: [
@@ -113,7 +124,8 @@ describe("Preschool Overview ViewModel", () => {
       {
         id: "per-pax",
         label: "Energy per person",
-        unit: "kWh/person",
+        question: "Which Outlets use more energy per person than peers of the same Centre type?",
+        unit: "kWh/person/month",
         axis: { min: 0, max: 24 },
         cohorts: [
           { name: "Active Aging Center", sampleSize: 8, p50: "17.2", p75: "22.5", pointCount: 8 },
@@ -125,10 +137,25 @@ describe("Preschool Overview ViewModel", () => {
     expect(view.benchmark.distributions.flatMap((distribution) => (
       distribution.cohorts.flatMap((cohort) => cohort.points)
     ))).toHaveLength(60);
-    expect(view.benchmark.distributions[0]?.cohorts
+    const euiDistribution = view.benchmark.distributions[0]!;
+    const perPaxDistribution = view.benchmark.distributions[1]!;
+    expect(euiDistribution.cohorts
       .find((cohort) => cohort.name === "Senior Care Center")?.points
       .find((point) => point.centreCode === "J"))
-      .toMatchObject({ centreCode: "J", name: "Centre J", aboveP75: true });
+      .toMatchObject({ centreCode: "J", name: "Centre J", valueLabel: "12.90", aboveP75: true, priority: true });
+    expect(perPaxDistribution.cohorts
+      .find((cohort) => cohort.name === "Active Aging Center")?.points
+      .filter((point) => point.aboveP75)
+      .map((point) => point.centreCode)).toEqual(["M", "G"]);
+    expect(perPaxDistribution.ranking.slice(0, 3).map((row) => ({
+      rank: row.rank,
+      centreCode: row.centreCode,
+      aboveP75: row.aboveP75,
+    }))).toEqual([
+      { rank: 1, centreCode: "J", aboveP75: true },
+      { rank: 2, centreCode: "M", aboveP75: true },
+      { rank: 3, centreCode: "G", aboveP75: true },
+    ]);
     expect(view.appliances).toMatchObject({
       status: "available",
       totalEnergy: "24,921.81 kWh",

@@ -37,6 +37,7 @@ export type PreschoolDecisionSummaryItem = {
 export type PreschoolBenchmarkDistribution = {
   id: "eui" | "per-pax";
   label: string;
+  question: string;
   unit: string;
   axis: { min: 0; max: number };
   cohorts: Array<{
@@ -50,8 +51,22 @@ export type PreschoolBenchmarkDistribution = {
       centreCode: string;
       name: string;
       value: number;
+      valueLabel: string;
       aboveP75: boolean;
+      priority: boolean;
     }>;
+  }>;
+  ranking: Array<{
+    rank: number;
+    centreCode: string;
+    name: string;
+    cohort: string;
+    value: number;
+    valueLabel: string;
+    p75: string;
+    p75Value: number;
+    aboveP75: boolean;
+    priority: boolean;
   }>;
 };
 
@@ -157,6 +172,14 @@ export type PreschoolOverviewViewModel = {
       centreCodes: string[];
     }>;
     priorityCentreCodes: string[];
+    priorityCentres: Array<{
+      rank: number;
+      centreCode: string;
+      name: string;
+      cohort: string;
+      eui: string;
+      perPax: string;
+    }>;
     distributions: PreschoolBenchmarkDistribution[];
     scatter: {
       euiP75: number;
@@ -169,6 +192,7 @@ export type PreschoolOverviewViewModel = {
         perPax: number;
         quadrant: "priority" | "eui-intensive" | "people-intensive" | "lower-intensity";
         priority: boolean;
+        actionRank: number | null;
       }>;
     };
     detail: string;
@@ -309,6 +333,7 @@ export function buildPreschoolOverviewViewModel(
       : "confirmed";
   const queryIds = [...new Set(snapshot.evidence.flatMap((item) => item.queryIds))];
   const decisionSummary = buildPreschoolDecisionSummary(snapshot);
+  const benchmark = buildPreschoolBenchmarkView(snapshot);
   const periodLabel = formatAnalysisWindowLabel(
     snapshot.context.from,
     snapshot.context.to,
@@ -440,65 +465,7 @@ export function buildPreschoolOverviewViewModel(
       totalCentreCount: centres.length,
       status: metadataStatus,
     },
-    benchmark: snapshot.preschoolBenchmark
-      ? {
-          status: "provisional",
-          sampleSize: snapshot.preschoolBenchmark.sampleSize,
-          eui: {
-            p50: formatNumber(snapshot.preschoolBenchmark.portfolio.eui.p50, 2),
-            p75: formatNumber(snapshot.preschoolBenchmark.portfolio.eui.p75, 2),
-          },
-          perPax: {
-            p50: formatNumber(snapshot.preschoolBenchmark.portfolio.perPax.p50, 1),
-            p75: formatNumber(snapshot.preschoolBenchmark.portfolio.perPax.p75, 1),
-          },
-          cohorts: snapshot.preschoolBenchmark.cohorts.map((cohort) => ({
-            name: cohort.name,
-            sampleSize: cohort.sampleSize,
-            euiP50: formatNumber(cohort.eui.p50, 2),
-            euiP75: formatNumber(cohort.eui.p75, 2),
-            perPaxP50: formatNumber(cohort.perPax.p50, 1),
-            perPaxP75: formatNumber(cohort.perPax.p75, 1),
-          })),
-          quadrants: ([
-            ["priority", "Priority"],
-            ["eui-intensive", "High EUI"],
-            ["people-intensive", "High per-pax"],
-            ["lower-intensity", "Lower intensity"],
-          ] as const).map(([id, label]) => ({
-            id,
-            label,
-            centreCodes: snapshot.preschoolBenchmark!.centres
-              .filter((centre) => centre.quadrant === id)
-              .map((centre) => centre.centreCode),
-          })),
-          priorityCentreCodes: snapshot.preschoolBenchmark.priorityCentreCodes,
-          distributions: buildBenchmarkDistributions(snapshot.preschoolBenchmark),
-          scatter: {
-            euiP75: snapshot.preschoolBenchmark.portfolio.eui.p75,
-            perPaxP75: snapshot.preschoolBenchmark.portfolio.perPax.p75,
-            points: snapshot.preschoolBenchmark.centres.map((centre) => ({
-              centreCode: centre.centreCode,
-              name: centre.name,
-              cohort: centre.cohort,
-              eui: centre.annualisedEuiKwhPerSqmYear,
-              perPax: centre.mayKwhPerPerson,
-              quadrant: centre.quadrant,
-              priority: centre.priority,
-            })),
-          },
-          detail: isCompleteCalendarMonth(
-            snapshot.context.from,
-            snapshot.context.to,
-            snapshot.context.timezone,
-          )
-            ? "Provisional comparison across the published 30-Centre cohort. EUI is annualised from this complete month; energy per person uses the same month."
-            : "Provisional comparison across the published 30-Centre cohort. EUI is annualised from the current window; energy per person is normalised to an average month.",
-        }
-      : {
-          status: "unavailable",
-          detail: "The current Snapshot does not contain a server-authoritative benchmark projection. No client-side percentile is inferred.",
-        },
+    benchmark,
     appliances: snapshot.preschoolAppliances?.status === "available"
       ? {
           status: "available",
@@ -594,6 +561,110 @@ export function buildPreschoolOverviewViewModel(
   };
 }
 
+function buildPreschoolBenchmarkView(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+): PreschoolOverviewViewModel["benchmark"] {
+  const projection = snapshot.preschoolBenchmark;
+  if (!projection) {
+    return {
+      status: "unavailable",
+      detail: "The current Snapshot does not contain a server-authoritative benchmark projection. No client-side percentile is inferred.",
+    };
+  }
+
+  const priorityIndex = new Map(
+    projection.priorityCentreCodes.map((centreCode, index) => [centreCode, index]),
+  );
+  type BenchmarkQuadrant = typeof projection.centres[number]["quadrant"];
+  const actionScore = (centre: typeof projection.centres[number], quadrant: BenchmarkQuadrant) => {
+    if (quadrant === "priority") return -(priorityIndex.get(centre.centreCode) ?? Number.MAX_SAFE_INTEGER);
+    if (quadrant === "eui-intensive") return centre.annualisedEuiKwhPerSqmYear / projection.portfolio.eui.p75;
+    if (quadrant === "people-intensive") return centre.mayKwhPerPerson / projection.portfolio.perPax.p75;
+    return Math.max(
+      centre.annualisedEuiKwhPerSqmYear / projection.portfolio.eui.p75,
+      centre.mayKwhPerPerson / projection.portfolio.perPax.p75,
+    );
+  };
+  const sortedQuadrantCodes = (quadrant: BenchmarkQuadrant) => projection.centres
+    .filter((centre) => centre.quadrant === quadrant)
+    .sort((left, right) => actionScore(right, quadrant) - actionScore(left, quadrant)
+      || left.centreCode.localeCompare(right.centreCode))
+    .map((centre) => centre.centreCode);
+  const priorityCentres = projection.priorityCentreCodes.flatMap((centreCode, index) => {
+    const centre = projection.centres.find((candidate) => candidate.centreCode === centreCode);
+    if (!centre) return [];
+    return [{
+      rank: index + 1,
+      centreCode,
+      name: centre.name,
+      cohort: centre.cohort,
+      eui: `${formatNumber(centre.annualisedEuiKwhPerSqmYear, 2)} kWh/m²/yr`,
+      perPax: `${formatNumber(centre.mayKwhPerPerson, 1)} kWh/person/month`,
+    }];
+  });
+  const scatterPoints = projection.centres
+    .map((centre) => ({
+      centreCode: centre.centreCode,
+      name: centre.name,
+      cohort: centre.cohort,
+      eui: centre.annualisedEuiKwhPerSqmYear,
+      perPax: centre.mayKwhPerPerson,
+      quadrant: centre.quadrant,
+      priority: centre.priority,
+      actionRank: priorityIndex.has(centre.centreCode)
+        ? priorityIndex.get(centre.centreCode)! + 1
+        : null,
+    }))
+    .sort((left, right) => Number(left.priority) - Number(right.priority)
+      || (right.actionRank ?? 0) - (left.actionRank ?? 0));
+
+  return {
+    status: "provisional",
+    sampleSize: projection.sampleSize,
+    eui: {
+      p50: formatNumber(projection.portfolio.eui.p50, 2),
+      p75: formatNumber(projection.portfolio.eui.p75, 2),
+    },
+    perPax: {
+      p50: formatNumber(projection.portfolio.perPax.p50, 1),
+      p75: formatNumber(projection.portfolio.perPax.p75, 1),
+    },
+    cohorts: projection.cohorts.map((cohort) => ({
+      name: cohort.name,
+      sampleSize: cohort.sampleSize,
+      euiP50: formatNumber(cohort.eui.p50, 2),
+      euiP75: formatNumber(cohort.eui.p75, 2),
+      perPaxP50: formatNumber(cohort.perPax.p50, 1),
+      perPaxP75: formatNumber(cohort.perPax.p75, 1),
+    })),
+    quadrants: ([
+      ["priority", "Priority"],
+      ["eui-intensive", "High EUI"],
+      ["people-intensive", "High per-pax"],
+      ["lower-intensity", "Lower intensity"],
+    ] as const).map(([id, label]) => ({
+      id,
+      label,
+      centreCodes: sortedQuadrantCodes(id),
+    })),
+    priorityCentreCodes: projection.priorityCentreCodes,
+    priorityCentres,
+    distributions: buildBenchmarkDistributions(projection),
+    scatter: {
+      euiP75: projection.portfolio.eui.p75,
+      perPaxP75: projection.portfolio.perPax.p75,
+      points: scatterPoints,
+    },
+    detail: isCompleteCalendarMonth(
+      snapshot.context.from,
+      snapshot.context.to,
+      snapshot.context.timezone,
+    )
+      ? "Provisional comparison across the published 30-Centre cohort. EUI is annualised from this complete month; energy per person uses the same month."
+      : "Provisional comparison across the published 30-Centre cohort. EUI is annualised from the current window; energy per person is normalised to an average month.",
+  };
+}
+
 function buildBenchmarkDistributions(
   benchmark: NonNullable<EnergyProjectAnalysisSnapshotDto["preschoolBenchmark"]>,
 ): PreschoolBenchmarkDistribution[] {
@@ -601,6 +672,7 @@ function buildBenchmarkDistributions(
     {
       id: "eui",
       label: "Annualised EUI estimate",
+      question: "Which Outlets use more energy than peers after adjusting for floor area?",
       unit: "kWh/m²/year",
       digits: 2,
       value: (centre: typeof benchmark.centres[number]) => centre.annualisedEuiKwhPerSqmYear,
@@ -609,7 +681,8 @@ function buildBenchmarkDistributions(
     {
       id: "per-pax",
       label: "Energy per person",
-      unit: "kWh/person",
+      question: "Which Outlets use more energy per person than peers of the same Centre type?",
+      unit: "kWh/person/month",
       digits: 1,
       value: (centre: typeof benchmark.centres[number]) => centre.mayKwhPerPerson,
       threshold: (cohort: typeof benchmark.cohorts[number]) => cohort.perPax,
@@ -619,9 +692,32 @@ function buildBenchmarkDistributions(
   return definitions.map((definition) => {
     const values = benchmark.centres.map(definition.value);
     const p75Values = benchmark.cohorts.map((cohort) => definition.threshold(cohort).p75);
+    const cohortByName = new Map(benchmark.cohorts.map((cohort) => [cohort.name, cohort]));
+    const ranking = benchmark.centres.map((centre) => {
+      const cohort = cohortByName.get(centre.cohort);
+      if (!cohort) throw new Error(`PRESCHOOL_BENCHMARK_COHORT_MISMATCH:${centre.cohort}`);
+      const threshold = definition.threshold(cohort);
+      const value = definition.value(centre);
+      return {
+        centreCode: centre.centreCode,
+        name: centre.name,
+        cohort: centre.cohort,
+        value,
+        valueLabel: formatNumber(value, definition.digits),
+        p75: formatNumber(threshold.p75, definition.digits),
+        p75Value: threshold.p75,
+        aboveP75: value > threshold.p75,
+        priority: centre.priority,
+        relativeToP75: threshold.p75 > 0 ? value / threshold.p75 : 0,
+      };
+    }).sort((left, right) => Number(right.aboveP75) - Number(left.aboveP75)
+      || right.relativeToP75 - left.relativeToP75
+      || right.value - left.value
+      || left.centreCode.localeCompare(right.centreCode));
     return {
       id: definition.id,
       label: definition.label,
+      question: definition.question,
       unit: definition.unit,
       axis: {
         min: 0,
@@ -642,10 +738,19 @@ function buildBenchmarkDistributions(
               centreCode: centre.centreCode,
               name: centre.name,
               value: definition.value(centre),
+              valueLabel: formatNumber(definition.value(centre), definition.digits),
               aboveP75: definition.value(centre) > threshold.p75,
-            })),
+              priority: centre.priority,
+            }))
+            .sort((left, right) => Number(right.aboveP75) - Number(left.aboveP75)
+              || right.value - left.value
+              || left.centreCode.localeCompare(right.centreCode)),
         };
       }),
+      ranking: ranking.map(({ relativeToP75: _relativeToP75, ...row }, index) => ({
+        ...row,
+        rank: index + 1,
+      })),
     };
   });
 }

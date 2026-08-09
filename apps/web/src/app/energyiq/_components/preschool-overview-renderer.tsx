@@ -36,6 +36,28 @@ export type PreschoolOverviewRendererState =
     snapshot: EnergyProjectAnalysisSnapshotDto;
   };
 
+type PreschoolBenchmarkInterpretationIdentity = {
+  dataSnapshotId: string;
+  projectReleaseId: string;
+  period: {
+    start: string;
+    endExclusive: string;
+  };
+};
+
+export type PreschoolBenchmarkInterpretation =
+  | ({
+    status: "available";
+    headline: string;
+    summary: string;
+    actions?: string[];
+  } & PreschoolBenchmarkInterpretationIdentity)
+  | ({ status: "pending" } & PreschoolBenchmarkInterpretationIdentity)
+  | {
+    status: "unavailable";
+    detail?: string;
+  };
+
 export function PreschoolOverviewRenderer({
   state,
   onRetry,
@@ -45,6 +67,7 @@ export function PreschoolOverviewRenderer({
   aiSlotMode = "live",
   savedAiArtifact,
   onAiArtifactChange,
+  benchmarkInterpretation,
 }: {
   state: PreschoolOverviewRendererState;
   onRetry?: () => void;
@@ -54,6 +77,7 @@ export function PreschoolOverviewRenderer({
   aiSlotMode?: "live" | "saved";
   savedAiArtifact?: EnergySavedAnalysisAiArtifactDto;
   onAiArtifactChange?: (artifact: EnergySavedAnalysisAiArtifactInputDto | null) => void;
+  benchmarkInterpretation?: PreschoolBenchmarkInterpretation;
 }) {
   if (state.status !== "ready") {
     const meta = {
@@ -282,61 +306,76 @@ export function PreschoolOverviewRenderer({
         <SectionHeader
           id="preschool-benchmark-analysis-heading"
           sectionNumber={2}
-          title="Benchmark analysis"
+          title="Benchmark Analysis"
           description="Compare Centres after normalising for floor area and people served, then identify who should be reviewed first."
+        />
+        <BenchmarkInterpretationSlot
+          snapshot={state.snapshot}
+          interpretation={benchmarkInterpretation}
         />
         {view.benchmark.status === "provisional" ? (
           <>
-          <div className="mt-5 flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <h4 className="text-base font-semibold text-foreground">Current benchmark evidence</h4>
-                <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2.5 py-1 text-xs font-semibold text-step-warning">Provisional</span>
-              </div>
-              <p className="mt-1.5 text-sm leading-6 text-muted">Find Centres that use more energy than peers after accounting for floor area and people served.</p>
-            </div>
-            <p className="text-sm font-semibold text-step-error">Review first: {view.benchmark.priorityCentreCodes.join(" · ")}</p>
-          </div>
-          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-            <div className="min-w-0">
-              <BenchmarkScatterPlot benchmark={view.benchmark} />
-              <div className="mt-3 grid overflow-hidden rounded-lg border border-border sm:grid-cols-2 xl:grid-cols-4">
-                {view.benchmark.quadrants.map((quadrant) => (
-                  <div key={quadrant.id} className={`min-h-24 border-border p-3 sm:[&:nth-child(odd)]:border-r sm:[&:nth-child(-n+2)]:border-b xl:border-b-0 xl:[&:not(:last-child)]:border-r ${quadrant.id === "priority" ? "bg-step-error-soft" : "bg-surface-subtle"}`}>
-                    <div className="flex items-center justify-between gap-3">
-                      <p className={`text-[11px] font-semibold ${quadrant.id === "priority" ? "text-step-error" : "text-foreground"}`}>{quadrant.label}</p>
-                      <span className="text-[10px] tabular-nums text-muted">{quadrant.centreCodes.length}</span>
-                    </div>
-                    <p className="mt-2 text-xs font-semibold tracking-wide text-foreground">{quadrant.centreCodes.join(" · ") || "None"}</p>
+            <div className="mt-7 border-t border-border pt-6">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="text-base font-semibold text-foreground">2.1 — Centre Efficiency Metrics</h4>
+                    <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2.5 py-1 text-xs font-semibold text-step-warning">Provisional</span>
                   </div>
-                ))}
+                  <p className="mt-1.5 text-sm leading-6 text-muted">Which Centres are high for both floor-area intensity and energy used per person?</p>
+                </div>
+                <p className="text-xs font-semibold text-muted">Portfolio cohort · n={view.benchmark.sampleSize}</p>
+              </div>
+              <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+                <div className="min-w-0">
+                  <BenchmarkScatterPlot benchmark={view.benchmark} />
+                  <div className="mt-3 grid overflow-hidden rounded-lg border border-border sm:grid-cols-2 xl:grid-cols-4">
+                    {view.benchmark.quadrants.map((quadrant) => (
+                      <div key={quadrant.id} className={`min-h-24 border-border p-3 sm:[&:nth-child(odd)]:border-r sm:[&:nth-child(-n+2)]:border-b xl:border-b-0 xl:[&:not(:last-child)]:border-r ${quadrant.id === "priority" ? "bg-step-error-soft" : "bg-surface-subtle"}`}>
+                        <div className="flex items-center justify-between gap-3">
+                          <p className={`text-[11px] font-semibold ${quadrant.id === "priority" ? "text-step-error" : "text-foreground"}`}>{quadrant.label}</p>
+                          <span className="text-[10px] tabular-nums text-muted">{quadrant.centreCodes.length}</span>
+                        </div>
+                        <p className="mt-2 text-xs font-semibold tracking-wide text-foreground">{quadrant.centreCodes.join(" · ") || "None"}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <aside className="rounded-lg border border-border bg-surface-subtle p-4" aria-label="Benchmark action priority">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-step-error">Review first · action priority</p>
+                  <ol className="mt-3 divide-y divide-border">
+                    {view.benchmark.priorityCentres.map((centre) => (
+                      <li key={centre.centreCode} data-benchmark-priority-centre={centre.centreCode} className="py-3 first:pt-0 last:pb-0">
+                        <div className="flex items-start gap-3">
+                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-step-error text-xs font-semibold text-white">{centre.rank}</span>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-foreground">{centre.name}</p>
+                            <p className="mt-0.5 text-xs text-muted">{centre.cohort}</p>
+                            <p className="mt-1 text-xs tabular-nums text-step-error">{centre.eui} · {centre.perPax}</p>
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                  <dl className="mt-4 space-y-2 border-t border-border pt-4 text-xs">
+                    <ReadinessRow label="Portfolio EUI P50 / P75" value={`${view.benchmark.eui.p50} / ${view.benchmark.eui.p75}`} />
+                    <ReadinessRow label="Portfolio per-pax P50 / P75" value={`${view.benchmark.perPax.p50} / ${view.benchmark.perPax.p75}`} />
+                  </dl>
+                  <details className="mt-4 border-t border-border pt-3">
+                    <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Benchmark method</summary>
+                    <p className="mt-2 text-xs leading-5 text-muted">{view.benchmark.detail}</p>
+                  </details>
+                </aside>
               </div>
             </div>
-            <div className="rounded-lg border border-border bg-surface-subtle p-4">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-light">Portfolio cross-hairs · n={view.benchmark.sampleSize}</p>
-              <dl className="mt-3 space-y-3 text-xs">
-                <ReadinessRow label="EUI P50" value={`${view.benchmark.eui.p50} kWh/m²/yr`} />
-                <ReadinessRow label="EUI P75" value={`${view.benchmark.eui.p75} kWh/m²/yr`} />
-                <ReadinessRow label="Per-pax P50" value={`${view.benchmark.perPax.p50} kWh/person`} />
-                <ReadinessRow label="Per-pax P75" value={`${view.benchmark.perPax.p75} kWh/person`} />
-              </dl>
-              <p className="mt-4 border-t border-border pt-3 text-[11px] leading-5 text-muted">{view.benchmark.detail}</p>
-            </div>
-          </div>
-          <div className="mt-5 border-t border-border pt-5">
-            <div className="flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <h4 className="text-base font-semibold text-foreground">Peer benchmark distributions</h4>
-                <p className="mt-1 text-sm leading-6 text-muted">Empirical distribution — not a fitted bell curve. Each dot is one Centre; P50 shows the typical range and P75 marks where review should begin.</p>
-              </div>
-              <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-step-warning">Provisional</span>
-            </div>
-            <div className="mt-4 grid gap-4 2xl:grid-cols-2">
-              {view.benchmark.distributions.map((distribution) => (
-                <BenchmarkDistributionPlot key={distribution.id} distribution={distribution} />
-              ))}
-            </div>
-          </div>
+
+            {view.benchmark.distributions.map((distribution, index) => (
+              <BenchmarkMetricSection
+                key={distribution.id}
+                distribution={distribution}
+                sectionNumber={`2.${index + 2}`}
+              />
+            ))}
           </>
         ) : (
           <div role="status">
@@ -345,13 +384,6 @@ export function PreschoolOverviewRenderer({
             <p className="mt-3 text-sm leading-6 text-muted">{view.benchmark.detail}</p>
           </div>
         )}
-        <PreschoolAiSlot
-          snapshot={state.snapshot}
-          sectionId="centre-benchmark"
-          mode={aiSlotMode}
-          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
-          {...(aiAnalystHref ? { aiAnalystHref } : {})}
-        />
       </section>
 
       <section id="preschool-standby-wastage" aria-labelledby="preschool-standby-wastage-heading" data-overview-section="3" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
@@ -713,6 +745,174 @@ function DecisionSummaryCard({ item }: { item: PreschoolDecisionSummaryItem }) {
 
 type BenchmarkView = Extract<PreschoolOverviewViewModel["benchmark"], { status: "provisional" }>;
 
+function BenchmarkInterpretationSlot({
+  snapshot,
+  interpretation,
+}: {
+  snapshot: EnergyProjectAnalysisSnapshotDto;
+  interpretation: PreschoolBenchmarkInterpretation | undefined;
+}) {
+  const matchesSnapshot = interpretation?.status === "available" || interpretation?.status === "pending"
+    ? interpretation.dataSnapshotId === snapshot.dataSnapshot.id
+      && interpretation.projectReleaseId === snapshot.projectRelease.id
+      && interpretation.period.start === snapshot.context.primaryPeriod.start
+      && interpretation.period.endExclusive === snapshot.context.primaryPeriod.endExclusive
+    : false;
+  const status = interpretation?.status === "available" && matchesSnapshot
+    ? "available"
+    : interpretation?.status === "pending" && matchesSnapshot
+      ? "pending"
+      : "unavailable";
+
+  return (
+    <aside
+      data-benchmark-interpretation-status={status}
+      className="mt-5 rounded-lg border border-primary/20 bg-primary-soft/35 p-4"
+      aria-live={status === "pending" ? "polite" : undefined}
+    >
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface text-primary">
+          <EnergyIcon name="spark" className="h-4 w-4" aria-hidden="true" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 className="text-sm font-semibold text-foreground">Key recommendation / AI interpretation</h4>
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-light">Snapshot-bound</span>
+          </div>
+          {status === "available" && interpretation?.status === "available" ? (
+            <div className="mt-2" data-benchmark-interpretation-content="true">
+              <p className="text-sm font-semibold text-foreground">{interpretation.headline}</p>
+              <p className="mt-1.5 text-sm leading-6 text-muted">{interpretation.summary}</p>
+              {interpretation.actions && interpretation.actions.length > 0 ? (
+                <ul className="mt-3 list-disc space-y-1 pl-5 text-sm leading-6 text-muted">
+                  {interpretation.actions.map((action) => <li key={action}>{action}</li>)}
+                </ul>
+              ) : null}
+            </div>
+          ) : status === "pending" ? (
+            <p className="mt-2 text-sm leading-6 text-muted">AI interpretation pending for this Snapshot.</p>
+          ) : (
+            <p className="mt-2 text-sm leading-6 text-muted">
+              {interpretation?.status === "unavailable" && interpretation.detail
+                ? interpretation.detail
+                : "No matching AI interpretation is available for this Snapshot."}
+            </p>
+          )}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+type BenchmarkDistributionView = BenchmarkView["distributions"][number];
+
+function BenchmarkMetricSection({
+  distribution,
+  sectionNumber,
+}: {
+  distribution: BenchmarkDistributionView;
+  sectionNumber: string;
+}) {
+  const metricTitle = distribution.id === "eui" ? "EUI Benchmark" : "Per-pax Energy Benchmark";
+  return (
+    <section className="mt-7 border-t border-border pt-6" aria-labelledby={`preschool-${distribution.id}-benchmark-heading`}>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h4 id={`preschool-${distribution.id}-benchmark-heading`} className="text-base font-semibold text-foreground">{sectionNumber} — {metricTitle}</h4>
+          <p className="mt-1.5 text-sm leading-6 text-muted">{distribution.question}</p>
+        </div>
+        <span className="text-xs text-muted">P50 = midpoint · P75 = review threshold</span>
+      </div>
+
+      <div className="mt-4 overflow-x-auto rounded-lg border border-border" data-benchmark-summary={distribution.id}>
+        <table className="w-full min-w-[760px] border-collapse text-left text-xs">
+          <thead className="bg-surface-subtle text-[10px] uppercase tracking-[0.07em] text-muted-light">
+            <tr>
+              <th className="px-4 py-3 font-semibold">Centre type</th>
+              <th className="px-4 py-3 text-right font-semibold">Outlets</th>
+              <th className="px-4 py-3 text-right font-semibold">P50</th>
+              <th className="px-4 py-3 text-right font-semibold">P75</th>
+              <th className="px-4 py-3 font-semibold">Outlets above P75</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border bg-surface">
+            {distribution.cohorts.map((cohort) => {
+              const aboveP75 = cohort.points.filter((point) => point.aboveP75);
+              return (
+                <tr key={cohort.name} data-benchmark-summary-cohort={`${distribution.id}:${cohort.name}`}>
+                  <th scope="row" className="px-4 py-3 font-semibold text-foreground">{cohort.name}</th>
+                  <td className="px-4 py-3 text-right tabular-nums text-muted">{cohort.sampleSize}</td>
+                  <td className="px-4 py-3 text-right tabular-nums font-semibold text-primary">{cohort.p50}</td>
+                  <td className="px-4 py-3 text-right tabular-nums font-semibold text-step-warning">{cohort.p75}</td>
+                  <td className="px-4 py-3">
+                    {aboveP75.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {aboveP75.map((point) => (
+                          <span key={point.centreCode} data-benchmark-above-p75={`${distribution.id}:${point.centreCode}`} className="inline-flex items-center gap-1 rounded-full border border-step-error/25 bg-step-error-soft px-2 py-1 text-[11px] text-step-error">
+                            <strong className="font-semibold">{point.name}</strong>
+                            <span className="tabular-nums">{point.valueLabel}</span>
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-muted">None</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-xs text-muted">Values shown in {distribution.unit}. The summary is visible before opening Detail.</p>
+
+      <details data-benchmark-detail={distribution.id} className="mt-4 rounded-lg border border-border bg-surface-subtle/40">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+          View {metricTitle} detail
+        </summary>
+        <div className="border-t border-border p-4">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h5 className="text-sm font-semibold text-foreground">Observed Centre distribution</h5>
+              <p className="mt-1 text-xs leading-5 text-muted">Each marker is one Centre. The view uses observed values and cohort thresholds; no fitted curve is used.</p>
+            </div>
+            <span className="text-xs text-muted">Shared axis · {distribution.unit}</span>
+          </div>
+          <div className="mt-4">
+            <BenchmarkDistributionPlot distribution={distribution} />
+          </div>
+          <div className="mt-5 overflow-x-auto rounded-lg border border-border" data-benchmark-ranking={distribution.id}>
+            <table className="w-full min-w-[780px] border-collapse text-left text-xs">
+              <thead className="bg-surface-subtle text-[10px] uppercase tracking-[0.07em] text-muted-light">
+                <tr>
+                  <th className="px-3 py-2.5 text-right font-semibold">Priority</th>
+                  <th className="px-3 py-2.5 font-semibold">Outlet</th>
+                  <th className="px-3 py-2.5 font-semibold">Centre type</th>
+                  <th className="px-3 py-2.5 text-right font-semibold">Value</th>
+                  <th className="px-3 py-2.5 text-right font-semibold">Cohort P75</th>
+                  <th className="px-3 py-2.5 font-semibold">Review state</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border bg-surface">
+                {distribution.ranking.map((row) => (
+                  <tr key={row.centreCode} data-benchmark-ranking-row={`${distribution.id}:${row.centreCode}`}>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-muted">{row.rank}</td>
+                    <th scope="row" className="px-3 py-2.5 font-semibold text-foreground">{row.name}</th>
+                    <td className="px-3 py-2.5 text-muted">{row.cohort}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-foreground">{row.valueLabel}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-muted">{row.p75}</td>
+                    <td className={`px-3 py-2.5 font-semibold ${row.aboveP75 ? "text-step-error" : "text-muted"}`}>{row.aboveP75 ? "Above P75" : "Within threshold"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </details>
+    </section>
+  );
+}
+
 function BenchmarkScatterPlot({ benchmark }: { benchmark: BenchmarkView }) {
   const width = 760;
   const height = 360;
@@ -744,6 +944,10 @@ function BenchmarkScatterPlot({ benchmark }: { benchmark: BenchmarkView }) {
         <title id="preschool-benchmark-scatter-title">Centre energy intensity and energy-per-person comparison</title>
         <desc id="preschool-benchmark-scatter-description">Thirty Centres plotted with annualised energy intensity increasing to the right and energy per person increasing upward. Dashed Portfolio P75 lines identify the Centres to review first.</desc>
         <rect x={margin.left} y={margin.top} width={plotWidth} height={plotHeight} rx="8" className="fill-surface" />
+        <rect x={margin.left} y={margin.top} width={euiP75X - margin.left} height={perPaxP75Y - margin.top} className="fill-step-warning" opacity="0.04" />
+        <rect x={euiP75X} y={margin.top} width={margin.left + plotWidth - euiP75X} height={perPaxP75Y - margin.top} className="fill-step-error" opacity="0.08" />
+        <rect x={margin.left} y={perPaxP75Y} width={euiP75X - margin.left} height={margin.top + plotHeight - perPaxP75Y} className="fill-muted" opacity="0.025" />
+        <rect x={euiP75X} y={perPaxP75Y} width={margin.left + plotWidth - euiP75X} height={margin.top + plotHeight - perPaxP75Y} className="fill-primary" opacity="0.04" />
         <line x1={margin.left} y1={margin.top + plotHeight} x2={margin.left + plotWidth} y2={margin.top + plotHeight} stroke="currentColor" className="text-border" />
         <line x1={margin.left} y1={margin.top} x2={margin.left} y2={margin.top + plotHeight} stroke="currentColor" className="text-border" />
         <line
@@ -768,10 +972,16 @@ function BenchmarkScatterPlot({ benchmark }: { benchmark: BenchmarkView }) {
         />
         <text x={euiP75X + 5} y={margin.top + 13} className="fill-step-warning text-[10px] font-semibold">EUI P75 {benchmark.eui.p75}</text>
         <text x={margin.left + plotWidth - 6} y={perPaxP75Y - 6} textAnchor="end" className="fill-step-warning text-[10px] font-semibold">Per-pax P75 {benchmark.perPax.p75}</text>
+        <text x={margin.left + 8} y={margin.top + 14} className="fill-step-warning text-[9px] font-semibold">HIGH PER-PAX</text>
+        <text x={margin.left + plotWidth - 8} y={margin.top + 14} textAnchor="end" className="fill-step-error text-[9px] font-semibold">PRIORITY</text>
+        <text x={margin.left + 8} y={margin.top + plotHeight - 10} className="fill-muted text-[9px] font-semibold">LOWER INTENSITY</text>
+        <text x={margin.left + plotWidth - 8} y={margin.top + plotHeight - 10} textAnchor="end" className="fill-primary text-[9px] font-semibold">HIGH EUI</text>
         {benchmark.scatter.points.map((point) => {
           const cx = x(point.eui);
           const cy = y(point.perPax);
           const visual = benchmarkCohortVisual(point.cohort);
+          const alignRight = cx > margin.left + plotWidth - 120;
+          const labelY = cy < margin.top + 28 || point.actionRank === 2 ? cy + 17 : cy - 9;
           return (
             <g
               key={point.centreCode}
@@ -779,7 +989,7 @@ function BenchmarkScatterPlot({ benchmark }: { benchmark: BenchmarkView }) {
               data-marker-shape={visual.shape}
               className={visual.className}
             >
-              <title>{`${point.name} (${point.cohort}): ${point.eui.toFixed(2)} kWh/m²/yr, ${point.perPax.toFixed(1)} kWh/person, ${benchmarkQuadrantLabel(point.quadrant)}`}</title>
+              <title>{`${point.name} (${point.cohort}): ${point.eui.toFixed(2)} kWh/m²/yr, ${point.perPax.toFixed(1)} kWh/person/month, ${benchmarkQuadrantLabel(point.quadrant)}`}</title>
               <BenchmarkMarker shape={visual.shape} cx={cx} cy={cy} radius={4.5} />
               {point.priority ? (
                 <circle cx={cx} cy={cy} r={7.5} fill="none" stroke="currentColor" strokeWidth={1.8} className="text-step-error" />
@@ -787,11 +997,12 @@ function BenchmarkScatterPlot({ benchmark }: { benchmark: BenchmarkView }) {
               {point.priority ? (
                 <text
                   data-benchmark-priority-label={point.centreCode}
-                  x={cx + 7}
-                  y={cy - 7}
+                  x={alignRight ? cx - 9 : cx + 9}
+                  y={labelY}
+                  textAnchor={alignRight ? "end" : "start"}
                   className="fill-step-error text-[11px] font-bold"
                 >
-                  {point.centreCode}
+                  {point.actionRank}. {point.name}
                 </text>
               ) : null}
             </g>
@@ -802,7 +1013,7 @@ function BenchmarkScatterPlot({ benchmark }: { benchmark: BenchmarkView }) {
         <text x={margin.left - 8} y={margin.top + plotHeight} textAnchor="end" className="fill-muted-light text-[9px]">{perPaxMin.toFixed(1)}</text>
         <text x={margin.left - 8} y={margin.top + 4} textAnchor="end" className="fill-muted-light text-[9px]">{perPaxMax.toFixed(1)}</text>
         <text x={margin.left + plotWidth / 2} y={height - 10} textAnchor="middle" className="fill-muted text-[11px] font-semibold">Annualised EUI (kWh/m²/yr) →</text>
-        <text x={16} y={margin.top + plotHeight / 2} textAnchor="middle" transform={`rotate(-90 16 ${margin.top + plotHeight / 2})`} className="fill-muted text-[11px] font-semibold">↑ Energy per person (kWh/person)</text>
+        <text x={16} y={margin.top + plotHeight / 2} textAnchor="middle" transform={`rotate(-90 16 ${margin.top + plotHeight / 2})`} className="fill-muted text-[11px] font-semibold">↑ Energy per person (kWh/person/month)</text>
       </svg>
       <BenchmarkCohortLegend />
     </div>
@@ -859,13 +1070,15 @@ function BenchmarkCohortLegend() {
       ))}
       <span className="inline-flex items-center gap-1.5 text-step-error">
         <span aria-hidden="true" className="h-3 w-3 rounded-full border-2 border-current" />
-        <span className="text-muted">Priority · red ring</span>
+        <span className="text-muted">Action priority · ring + Centre name</span>
+      </span>
+      <span className="inline-flex items-center gap-1.5 text-step-warning">
+        <span aria-hidden="true" className="w-4 border-t border-dashed border-current" />
+        <span className="text-muted">Portfolio P75 review threshold</span>
       </span>
     </div>
   );
 }
-
-type BenchmarkDistributionView = BenchmarkView["distributions"][number];
 
 function BenchmarkDistributionPlot({ distribution }: { distribution: BenchmarkDistributionView }) {
   const width = 720;
