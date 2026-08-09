@@ -16,14 +16,26 @@ type OverviewAiContract = {
   analysisPackRevision: string;
   outputContractRevision: string;
   validatorRevision: string;
+  workflowRevision: string;
+  investigatorPromptRevision: string;
+  editorPromptRevision: string;
+  methodSkillId: string;
+  methodSkillRevision: string;
 };
+
+export type OverviewAiArtifactIdentityV13 = EnergyIqOverviewAiArtifactIdentity & OverviewAiContract;
 
 const OVERVIEW_AI_CONTRACTS: Readonly<Record<string, OverviewAiContract>> = {
   "preschool-overview": {
     analysisPackId: "preschool-analysis-pack",
     analysisPackRevision: "v1",
-    outputContractRevision: "v12",
-    validatorRevision: "preschool-ai-event-stream-v1",
+    outputContractRevision: "v13",
+    validatorRevision: "preschool-ai-two-stage-fact-boundary-v1",
+    workflowRevision: "preschool-two-stage-v1",
+    investigatorPromptRevision: "preschool-investigator-v1",
+    editorPromptRevision: "preschool-insight-editor-v1",
+    methodSkillId: "energy-insight-investigation",
+    methodSkillRevision: "1.0.0",
   },
 };
 
@@ -37,7 +49,7 @@ export const createOverviewAiArtifactIdentity = (input: {
   rendererVersion: string;
   modelProfileId: string;
   modelProfileRevision: number;
-}): EnergyIqOverviewAiArtifactIdentity => {
+}): OverviewAiArtifactIdentityV13 => {
   const contract = OVERVIEW_AI_CONTRACTS[input.rendererKey];
   if (!contract) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_CONTRACT_NOT_FOUND");
   return {
@@ -58,7 +70,7 @@ export const createOverviewAiArtifactIdentity = (input: {
 export const overviewAiArtifactIdentityFromSnapshot = (input: {
   snapshot: ProjectAnalysisSnapshot;
   modelBinding: WorkspaceDefaultModelProfileRecord;
-}): EnergyIqOverviewAiArtifactIdentity => createOverviewAiArtifactIdentity({
+}): OverviewAiArtifactIdentityV13 => createOverviewAiArtifactIdentity({
   workspaceId: input.snapshot.context.workspaceId,
   projectId: input.snapshot.context.projectId,
   scopeId: input.snapshot.context.scopeId,
@@ -115,7 +127,7 @@ export const resolveCurrentOverviewAiArtifactIdentity = (input: {
   projectId: string;
   scopeId: string;
   user: UserRecord;
-}): EnergyIqOverviewAiArtifactIdentity => {
+}): OverviewAiArtifactIdentityV13 => {
   const project = input.metadataStore.energyIq.getProject(input.projectId);
   if (input.scopeId !== project.root_scope_id) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PROJECT_SCOPE_REQUIRED");

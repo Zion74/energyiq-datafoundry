@@ -144,14 +144,57 @@ describe("saved analysis decision-quality boundary", () => {
           result: {
             status: "available",
             providerProfileId: "profile-test",
-            runId: "saved-analysis-ai-run-v1",
+            runId: "saved-analysis-ai-editor-run-v1",
             packId: "preschool-analysis-pack",
             packRevision: "v1",
+            contract: { id: "preschool-ai-accepted-artifact", revision: "v13" },
+            binding: {
+              projectId: project.id,
+              scopeId: project.root_scope_id,
+              dataSnapshotId: project.data_snapshot_id,
+              projectReleaseId: templateRevision.revision_id,
+              dataCutoff: "2026-05-01T16:00:00.000Z",
+              analysisPeriod: { from: "2026-04-30T16:00:00.000Z", to: "2026-05-01T16:00:00.000Z" },
+              outputContractRevision: "v13",
+            },
+            workflow: {
+              id: "preschool-two-stage",
+              revision: "preschool-two-stage-v1",
+              methodSkill: { id: "energy-insight-investigation", revision: "1.0.0" },
+              stages: {
+                investigator: { runId: "saved-analysis-ai-investigator-run-v1", promptRevision: "preschool-investigator-v1" },
+                editor: { runId: "saved-analysis-ai-editor-run-v1", promptRevision: "preschool-insight-editor-v1" },
+              },
+            },
             findings: [{
               id: "finding-v1",
+              binding: {
+                projectId: project.id,
+                scopeId: project.root_scope_id,
+                dataSnapshotId: project.data_snapshot_id,
+                projectReleaseId: templateRevision.revision_id,
+                dataCutoff: "2026-05-01T16:00:00.000Z",
+                analysisPeriod: { from: "2026-04-30T16:00:00.000Z", to: "2026-05-01T16:00:00.000Z" },
+                outputContractRevision: "v13",
+              },
+              placementTargets: ["preschool.benchmark"],
+              epistemicLevel: "verified",
+              relationship: "supports",
+              signalRefs: ["efficiency"],
+              title: "Benchmark priority needs investigation",
+              takeaway: "The current Snapshot supports a focused operating review.",
               evidence: {
                 snapshotId: project.data_snapshot_id,
-                deterministic: [{ id: "benchmark:priority-centre:G", values: { usageKwh: 843.0985 } }],
+                period: { from: "2026-04-30T16:00:00.000Z", to: "2026-05-01T16:00:00.000Z" },
+                deterministic: [{
+                  id: "benchmark:priority-centre:G",
+                  kind: "benchmark",
+                  label: "Priority Centre benchmark",
+                  unit: "kWh",
+                  values: { usageKwh: 843.0985 },
+                  queryIds: ["benchmark-query"],
+                  limitation: null,
+                }],
                 tools: [],
               },
               presentation: {
@@ -179,21 +222,26 @@ describe("saved analysis decision-quality boundary", () => {
         },
       } as const;
       metadata.sessions.create({ user_id: "dev-user", id: "saved-analysis-ai-session-v1", title: "Saved AI v1" });
-      metadata.runs.create({
-        id: query.aiArtifact.result.runId,
-        user_id: "dev-user",
-        session_id: "saved-analysis-ai-session-v1",
-        status: "running",
-        user_input: `Snapshot ${project.data_snapshot_id}; Release ${templateRevision.revision_id}`,
-        model_provider: "openai-compatible",
-        model_name: "test-model-v1",
-        request_fingerprint: "request-fingerprint-v1",
-      });
-      metadata.runs.updateStatus({
-        user_id: "dev-user",
-        run_id: query.aiArtifact.result.runId,
-        status: "completed",
-      });
+      for (const runId of [
+        query.aiArtifact.result.workflow.stages.investigator.runId,
+        query.aiArtifact.result.workflow.stages.editor.runId,
+      ]) {
+        metadata.runs.create({
+          id: runId,
+          user_id: "dev-user",
+          session_id: "saved-analysis-ai-session-v1",
+          status: "running",
+          user_input: `Snapshot ${project.data_snapshot_id}; Release ${templateRevision.revision_id}`,
+          model_provider: "openai-compatible",
+          model_name: "test-model-v1",
+          request_fingerprint: "request-fingerprint-v1",
+        });
+        metadata.runs.updateStatus({
+          user_id: "dev-user",
+          run_id: runId,
+          status: "completed",
+        });
+      }
       const context = {
         metadataStore: metadata,
         dataGateway: gateway,
@@ -347,21 +395,32 @@ describe("saved analysis decision-quality boundary", () => {
       expect(records[0]?.ai_result_json).toBeUndefined();
 
       metadata.sessions.create({ user_id: "dev-user", id: "saved-analysis-ai-session-v2", title: "Saved AI v2" });
-      metadata.runs.create({
-        id: "saved-analysis-ai-run-v2",
-        user_id: "dev-user",
-        session_id: "saved-analysis-ai-session-v2",
-        status: "running",
-        user_input: `Snapshot ${project.data_snapshot_id}; Release ${publishedV2.template_revision_id}`,
-        model_provider: "openai-compatible",
-        model_name: "test-model-v2",
-        request_fingerprint: "request-fingerprint-v2",
-      });
-      metadata.runs.updateStatus({
-        user_id: "dev-user",
-        run_id: "saved-analysis-ai-run-v2",
-        status: "completed",
-      });
+      for (const runId of ["saved-analysis-ai-investigator-run-v2", "saved-analysis-ai-editor-run-v2"]) {
+        metadata.runs.create({
+          id: runId,
+          user_id: "dev-user",
+          session_id: "saved-analysis-ai-session-v2",
+          status: "running",
+          user_input: `Snapshot ${project.data_snapshot_id}; Release ${publishedV2.template_revision_id}`,
+          model_provider: "openai-compatible",
+          model_name: "test-model-v2",
+          request_fingerprint: "request-fingerprint-v2",
+        });
+        metadata.runs.updateStatus({
+          user_id: "dev-user",
+          run_id: runId,
+          status: "completed",
+        });
+      }
+      const bindingV2 = {
+        projectId: project.id,
+        scopeId: project.root_scope_id,
+        dataSnapshotId: project.data_snapshot_id,
+        projectReleaseId: publishedV2.template_revision_id,
+        dataCutoff: "2026-05-01T16:00:00.000Z",
+        analysisPeriod: { from: "2026-04-30T16:00:00.000Z", to: "2026-05-01T16:00:00.000Z" },
+        outputContractRevision: "v13",
+      } as const;
       const aiArtifactV2 = {
         contract: "energyiq-saved-ai-result@1",
         rendererKey: "preschool-overview",
@@ -370,10 +429,37 @@ describe("saved analysis decision-quality boundary", () => {
         result: {
           status: "available",
           providerProfileId: "profile-test",
-          runId: "saved-analysis-ai-run-v2",
+          runId: "saved-analysis-ai-editor-run-v2",
           packId: "preschool-analysis-pack",
           packRevision: "v1",
-          findings: [{ id: "finding-v2", evidence: { snapshotId: project.data_snapshot_id } }],
+          contract: { id: "preschool-ai-accepted-artifact", revision: "v13" },
+          binding: bindingV2,
+          workflow: {
+            id: "preschool-two-stage",
+            revision: "preschool-two-stage-v1",
+            methodSkill: { id: "energy-insight-investigation", revision: "1.0.0" },
+            stages: {
+              investigator: { runId: "saved-analysis-ai-investigator-run-v2", promptRevision: "preschool-investigator-v1" },
+              editor: { runId: "saved-analysis-ai-editor-run-v2", promptRevision: "preschool-insight-editor-v1" },
+            },
+          },
+          findings: [{
+            id: "finding-v2",
+            binding: bindingV2,
+            placementTargets: ["preschool.benchmark"],
+            epistemicLevel: "hypothesis",
+            relationship: "independent",
+            signalRefs: [],
+            title: "Benchmark gap needs an operating explanation",
+            takeaway: "The current facts do not establish the driver.",
+            verification: "Compare schedules and major circuit loads.",
+            evidence: {
+              snapshotId: project.data_snapshot_id,
+              period: bindingV2.analysisPeriod,
+              deterministic: [],
+              tools: [],
+            },
+          }],
         },
       } as const;
       const mismatchedAttachment = await handleEnergyApiRequest(
@@ -399,7 +485,7 @@ describe("saved analysis decision-quality boundary", () => {
             id: records[0]?.id,
             aiArtifact: {
               projectReleaseId: publishedV2.template_revision_id,
-              result: { runId: "saved-analysis-ai-run-v2" },
+              result: { runId: "saved-analysis-ai-editor-run-v2" },
               runProvenance: {
                 modelProvider: "openai-compatible",
                 modelName: "test-model-v2",

@@ -1713,6 +1713,12 @@ export type EnergyOverviewAiArtifactDto = {
   };
 };
 
+export type EnergyOverviewAiArtifactClaimDto =
+  | { status: "owner"; leaseToken: string; artifact: EnergyOverviewAiArtifactDto }
+  | { status: "waiting"; artifact: EnergyOverviewAiArtifactDto }
+  | { status: "available"; artifact: EnergyOverviewAiArtifactDto }
+  | { status: "failed"; artifact: EnergyOverviewAiArtifactDto };
+
 export type EnergySavedAnalysisAiArtifactDto = EnergySavedAnalysisAiArtifactInputDto & {
   completedAt: string;
   runProvenance?: {

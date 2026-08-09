@@ -16,6 +16,11 @@ export type EnergyIqOverviewAiArtifactIdentity = {
   modelProfileRevision: number;
   outputContractRevision: string;
   validatorRevision: string;
+  workflowRevision: string;
+  investigatorPromptRevision: string;
+  editorPromptRevision: string;
+  methodSkillId: string;
+  methodSkillRevision: string;
 };
 
 export type EnergyIqOverviewAiArtifactStatus = "queued" | "running" | "available" | "failed";
@@ -181,7 +186,8 @@ export class EnergyIqOverviewAiArtifactStore {
       const reclaimable = current.status === "running"
         && Boolean(current.lease_expires_at)
         && Date.parse(current.lease_expires_at!) <= Date.parse(now);
-      if (current.status !== "queued" && !reclaimable) {
+      const retryable = current.status === "failed";
+      if (current.status !== "queued" && !reclaimable && !retryable) {
         this.db.exec("COMMIT");
         return { claimed: false, artifact: current };
       }
@@ -208,7 +214,7 @@ export class EnergyIqOverviewAiArtifactStore {
     resultJson: string;
     now?: string;
   }): EnergyIqOverviewAiArtifactRecord {
-    requireArtifactResult(input.resultJson, input.identity.dataSnapshotId);
+    requireArtifactResult(input.resultJson, input.identity);
     const now = input.now ?? new Date().toISOString();
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -300,13 +306,21 @@ const canonicalIdentity = (
     modelProfileRevision: identity.modelProfileRevision,
     outputContractRevision: identity.outputContractRevision,
     validatorRevision: identity.validatorRevision,
+    workflowRevision: identity.workflowRevision,
+    investigatorPromptRevision: identity.investigatorPromptRevision,
+    editorPromptRevision: identity.editorPromptRevision,
+    methodSkillId: identity.methodSkillId,
+    methodSkillRevision: identity.methodSkillRevision,
   };
 };
 
 const hashIdentity = (identityJson: string): string =>
   createHash("sha256").update(identityJson).digest("hex");
 
-const requireArtifactResult = (resultJson: string, snapshotId: string): void => {
+const requireArtifactResult = (
+  resultJson: string,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): void => {
   if (Buffer.byteLength(resultJson, "utf8") > 262_144) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_TOO_LARGE");
   }
@@ -316,13 +330,148 @@ const requireArtifactResult = (resultJson: string, snapshotId: string): void => 
   } catch {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
   }
-  if (!isRecord(parsed) || parsed.status !== "available" || !Array.isArray(parsed.findings)
-    || !parsed.findings.every((finding) => isRecord(finding)
-      && isRecord(finding.evidence)
-      && finding.evidence.snapshotId === snapshotId)) {
+  if (!isRecord(parsed)) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  const artifactBinding = parsed.binding;
+  if (parsed.status !== "available"
+    || !nonEmptyString(parsed.providerProfileId)
+    || parsed.providerProfileId !== identity.modelProfileId
+    || !nonEmptyString(parsed.runId)
+    || parsed.packId !== identity.analysisPackId
+    || parsed.packRevision !== identity.analysisPackRevision
+    || !isRecord(parsed.contract)
+    || parsed.contract.id !== "preschool-ai-accepted-artifact"
+    || parsed.contract.revision !== identity.outputContractRevision
+    || !isRecord(artifactBinding)
+    || artifactBinding.projectId !== identity.projectId
+    || artifactBinding.scopeId !== identity.scopeId
+    || artifactBinding.dataSnapshotId !== identity.dataSnapshotId
+    || artifactBinding.projectReleaseId !== identity.projectReleaseId
+    || !nonEmptyString(artifactBinding.dataCutoff)
+    || !isRecord(artifactBinding.analysisPeriod)
+    || !nonEmptyString(artifactBinding.analysisPeriod.from)
+    || !nonEmptyString(artifactBinding.analysisPeriod.to)
+    || artifactBinding.dataCutoff !== artifactBinding.analysisPeriod.to
+    || artifactBinding.outputContractRevision !== identity.outputContractRevision
+    || !isRecord(parsed.workflow)
+    || parsed.workflow.id !== "preschool-two-stage"
+    || parsed.workflow.revision !== identity.workflowRevision
+    || !isRecord(parsed.workflow.methodSkill)
+    || parsed.workflow.methodSkill.id !== identity.methodSkillId
+    || parsed.workflow.methodSkill.revision !== identity.methodSkillRevision
+    || !isRecord(parsed.workflow.stages)
+    || !isRecord(parsed.workflow.stages.investigator)
+    || !isRecord(parsed.workflow.stages.editor)
+    || !nonEmptyString(parsed.workflow.stages.investigator.runId)
+    || !nonEmptyString(parsed.workflow.stages.editor.runId)
+    || parsed.workflow.stages.investigator.runId === parsed.workflow.stages.editor.runId
+    || parsed.workflow.stages.editor.runId !== parsed.runId
+    || parsed.workflow.stages.investigator.promptRevision !== identity.investigatorPromptRevision
+    || parsed.workflow.stages.editor.promptRevision !== identity.editorPromptRevision
+    || !validEditorTrace(parsed.workflow.editorTrace)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+  if (!Array.isArray(parsed.findings)
+    || !parsed.findings.every((finding) => validAcceptedFinding(finding, artifactBinding))) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
   }
 };
+
+const validAcceptedFinding = (value: unknown, binding: Record<string, unknown>): boolean => {
+  if (!isRecord(value)
+    || !nonEmptyString(value.id)
+    || !isRecord(value.binding)
+    || !sameArtifactBinding(value.binding, binding)
+    || !Array.isArray(value.placementTargets)
+    || value.placementTargets.length === 0
+    || !value.placementTargets.every(isPreschoolPlacementTarget)
+    || (value.epistemicLevel !== "verified"
+      && value.epistemicLevel !== "hypothesis"
+      && value.epistemicLevel !== "exploration-idea")
+    || (value.relationship !== "supports"
+      && value.relationship !== "challenges"
+      && value.relationship !== "independent")
+    || !stringArray(value.signalRefs)
+    || !nonEmptyString(value.title)
+    || !nonEmptyString(value.takeaway)
+    || !optionalString(value.interpretation)
+    || !optionalString(value.action)
+    || !optionalString(value.verification)
+    || !optionalString(value.uncertainty)
+    || (value.epistemicLevel !== "verified"
+      && !nonEmptyString(value.verification)
+      && !nonEmptyString(value.uncertainty))
+    || (value.presentation !== undefined
+      && (!isRecord(value.presentation)
+        || value.presentation.version !== "1"
+        || !Array.isArray(value.presentation.blocks)))
+    || !isRecord(value.evidence)
+    || value.evidence.snapshotId !== binding.dataSnapshotId
+    || !isRecord(value.evidence.period)
+    || !isRecord(binding.analysisPeriod)
+    || value.evidence.period.from !== binding.analysisPeriod.from
+    || value.evidence.period.to !== binding.analysisPeriod.to
+    || !Array.isArray(value.evidence.deterministic)
+    || !value.evidence.deterministic.every(validDeterministicEvidence)
+    || !Array.isArray(value.evidence.tools)
+    || !value.evidence.tools.every(validToolEvidence)) return false;
+  return value.epistemicLevel !== "verified"
+    || value.evidence.deterministic.length > 0
+    || value.evidence.tools.length > 0;
+};
+
+const sameArtifactBinding = (left: Record<string, unknown>, right: Record<string, unknown>): boolean =>
+  left.projectId === right.projectId
+  && left.scopeId === right.scopeId
+  && left.dataSnapshotId === right.dataSnapshotId
+  && left.projectReleaseId === right.projectReleaseId
+  && left.dataCutoff === right.dataCutoff
+  && left.outputContractRevision === right.outputContractRevision
+  && isRecord(left.analysisPeriod)
+  && isRecord(right.analysisPeriod)
+  && left.analysisPeriod.from === right.analysisPeriod.from
+  && left.analysisPeriod.to === right.analysisPeriod.to;
+
+const validDeterministicEvidence = (value: unknown): boolean => isRecord(value)
+  && nonEmptyString(value.id)
+  && nonEmptyString(value.label)
+  && isRecord(value.values)
+  && Array.isArray(value.queryIds)
+  && value.queryIds.every(nonEmptyString);
+
+const validToolEvidence = (value: unknown): boolean => isRecord(value)
+  && Number.isSafeInteger(value.evidenceIndex)
+  && (value.evidenceIndex as number) > 0
+  && nonEmptyString(value.toolCallId)
+  && (value.sql === null || nonEmptyString(value.sql))
+  && (value.rowCount === null || (Number.isSafeInteger(value.rowCount) && (value.rowCount as number) >= 0))
+  && (value.auditLogId === null || nonEmptyString(value.auditLogId))
+  && (value.elapsedMs === null
+    || (typeof value.elapsedMs === "number" && Number.isFinite(value.elapsedMs) && value.elapsedMs >= 0))
+  && typeof value.resultPreview === "string";
+
+const validEditorTrace = (value: unknown): boolean => value === undefined
+  || (Array.isArray(value) && value.every((decision) => isRecord(decision)
+    && (decision.decision === "accepted" || decision.decision === "rejected" || decision.decision === "merged")
+    && Array.isArray(decision.sourceCandidateIds)
+    && decision.sourceCandidateIds.length > 0
+    && decision.sourceCandidateIds.every(nonEmptyString)
+    && optionalString(decision.findingId)
+    && optionalString(decision.reason)));
+
+const isPreschoolPlacementTarget = (value: unknown): boolean =>
+  value === "preschool.overall-key-findings"
+  || value === "preschool.benchmark"
+  || value === "preschool.standby"
+  || value === "preschool.operating-hours"
+  || value === "preschool.forecast"
+  || value === "cross-section";
+
+const nonEmptyString = (value: unknown): value is string =>
+  typeof value === "string" && Boolean(value.trim());
+
+const optionalString = (value: unknown): boolean => value === undefined || nonEmptyString(value);
+
+const stringArray = (value: unknown): boolean => Array.isArray(value) && value.every(nonEmptyString);
 
 const mapArtifact = (row: Record<string, unknown>): EnergyIqOverviewAiArtifactRecord => ({
   id: stringField(row, "id"),

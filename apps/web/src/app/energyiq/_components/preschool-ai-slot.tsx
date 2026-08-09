@@ -14,6 +14,7 @@ import {
   type PreschoolAiRunResult,
   type PreschoolAiSectionId,
 } from "./preschool-ai-run";
+import type { PreschoolAiAcceptedFinding, PreschoolAiEpistemicLevel } from "./preschool-ai-artifact";
 import { AiFindingPresentationView } from "./ai-finding-presentation-view";
 
 type ProgressCallback = (progress: PreschoolAiProgress) => void;
@@ -111,7 +112,7 @@ export function PreschoolAiSlot({
     ? <AiFrame sectionId={sectionId}><Unavailable detail={displayedResult.reason} /></AiFrame>
     : null;
   const availableResult = displayedResult;
-  const sectionFindings = availableResult.findings.filter((finding) => findingSectionId(finding) === sectionId);
+  const sectionFindings = availableResult.findings.filter((finding) => findingMatchesSection(finding, sectionId));
   if (sectionFindings.length === 0) {
     if (sectionId !== "page-synthesis") return null;
     return (
@@ -191,8 +192,18 @@ function AiFrame({ children, sectionId }: { children: React.ReactNode; sectionId
   );
 }
 
-function findingSectionId(finding: PreschoolAiFinding): PreschoolAiSectionId {
-  return finding.sectionId ?? "page-synthesis";
+type DisplayFinding = PreschoolAiFinding | PreschoolAiAcceptedFinding;
+
+function findingMatchesSection(finding: DisplayFinding, sectionId: PreschoolAiSectionId): boolean {
+  if (!isAcceptedFinding(finding)) return (finding.sectionId ?? "page-synthesis") === sectionId;
+  return finding.placementTargets.some((target) => {
+    if (target === "preschool.benchmark") return sectionId === "centre-benchmark";
+    if (target === "preschool.standby" || target === "preschool.operating-hours") {
+      return sectionId === "operating-behaviour";
+    }
+    if (target === "preschool.forecast") return sectionId === "planning-outlook";
+    return sectionId === "page-synthesis";
+  });
 }
 
 function Unavailable({ detail }: { detail: string }) {
@@ -211,7 +222,7 @@ function FindingCard({
   projectId,
   aiAnalystHref,
 }: {
-  finding: PreschoolAiFinding;
+  finding: DisplayFinding;
   pack: string;
   projectId: string;
   aiAnalystHref?: string;
@@ -223,6 +234,13 @@ function FindingCard({
     triggerRef.current?.focus();
   }, []);
   const askHref = aiAnalystHref ? buildAskHref(aiAnalystHref, projectId, finding) : null;
+  const accepted = isAcceptedFinding(finding);
+  const takeaway = accepted ? finding.takeaway : finding.what;
+  const interpretation = accepted ? finding.interpretation : finding.why.text;
+  const action = accepted ? finding.action : finding.how;
+  const verification = accepted ? finding.verification : finding.howToVerify;
+  const limitation = accepted ? finding.uncertainty : finding.evidenceNote;
+  const epistemicLevel = accepted ? finding.epistemicLevel : whyKindToEpistemicLevel(finding.why.kind);
   return (
     <article className="min-w-0 rounded-xl border border-border bg-surface px-5 py-5 lg:px-6 lg:py-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -234,41 +252,41 @@ function FindingCard({
 
       <div className="mt-5" data-ai-primary-takeaway="true">
         <p className="text-xs font-semibold text-muted">What the data shows</p>
-        <p className="mt-1.5 max-w-[75ch] text-base font-semibold leading-7 text-foreground">{finding.what}</p>
+        <p className="mt-1.5 max-w-[75ch] text-base font-semibold leading-7 text-foreground">{takeaway}</p>
       </div>
 
-      <div className="mt-5 grid gap-5 border-t border-border pt-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
-        <div>
+      {interpretation || action ? <div className="mt-5 grid gap-5 border-t border-border pt-5 lg:grid-cols-[minmax(0,1fr)_minmax(320px,0.9fr)]">
+        {interpretation ? <div>
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-xs font-semibold text-muted">Why this matters</p>
-            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${whyKindClass(finding.why.kind)}`}>
-              {whyKindLabel(finding.why.kind)}
+            <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${epistemicLevelClass(epistemicLevel)}`}>
+              {epistemicLevelLabel(epistemicLevel)}
             </span>
           </div>
-          <p className="mt-1.5 max-w-[70ch] text-sm leading-6 text-foreground/80">{finding.why.text}</p>
-        </div>
-        <div className="rounded-xl bg-primary px-5 py-4 text-white" data-ai-primary-action="true">
+          <p className="mt-1.5 max-w-[70ch] text-sm leading-6 text-foreground/80">{interpretation}</p>
+        </div> : <div />}
+        {action ? <div className="rounded-xl bg-primary px-5 py-4 text-white" data-ai-primary-action="true">
           <p className="text-xs font-semibold text-white/70">Recommended next check</p>
-          <p className="mt-1.5 text-base font-semibold leading-6">{finding.how}</p>
-        </div>
-      </div>
+          <p className="mt-1.5 text-base font-semibold leading-6">{action}</p>
+        </div> : null}
+      </div> : null}
 
       <AiFindingPresentationView presentation={finding.presentation} />
 
-      <dl className="mt-5 grid gap-5 border-t border-border pt-5 sm:grid-cols-2">
+      {!accepted ? <dl className="mt-5 grid gap-5 border-t border-border pt-5 sm:grid-cols-2">
         <DecisionOutcome label="Expected if acted on" value={finding.expectedIfAct} tone="positive" />
         <DecisionOutcome label="If ignored" value={finding.ifIgnored} tone="warning" />
-      </dl>
+      </dl> : null}
 
-      <details className="mt-5 border-t border-border pt-4" data-ai-secondary-details="true">
+      {verification || limitation ? <details className="mt-5 border-t border-border pt-4" data-ai-secondary-details="true">
         <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
           Verification and limitations
         </summary>
         <dl className="mt-4 grid gap-5 text-sm leading-6 sm:grid-cols-2">
-          <DecisionDetail label="How to verify" value={finding.howToVerify} />
-          <DecisionDetail label="Limitations" value={finding.evidenceNote} />
+          {verification ? <DecisionDetail label="How to verify" value={verification} /> : null}
+          {limitation ? <DecisionDetail label="Limitations" value={limitation} /> : null}
         </dl>
-      </details>
+      </details> : null}
 
       <div className="mt-5 flex flex-wrap gap-2 border-t border-border pt-4">
         <button ref={triggerRef} type="button" onClick={() => setEvidenceOpen(true)} className="h-8 rounded-md border border-border bg-surface px-3 text-[11px] font-semibold text-foreground">
@@ -289,7 +307,7 @@ function FindingCard({
               <Pin label="Period" value={`${finding.evidence.period.from} / ${finding.evidence.period.to}`} />
               <Pin label="Relationship" value={titleCase(finding.relationship)} />
             </dl>
-            <p className="mt-4 rounded-lg border border-border bg-surface-subtle px-4 py-3 text-xs leading-5 text-muted">{finding.evidenceNote}</p>
+            {limitation ? <p className="mt-4 rounded-lg border border-border bg-surface-subtle px-4 py-3 text-xs leading-5 text-muted">{limitation}</p> : null}
             {finding.evidence.deterministic.map((item) => (
               <section key={item.id} className="mt-4 rounded-lg border border-border p-4">
                 <p className="text-xs font-semibold text-foreground">{item.label}</p>
@@ -363,27 +381,41 @@ function relationshipLabel(relationship: PreschoolAiFinding["relationship"]): st
   return "Reinforces a known issue";
 }
 
-function whyKindLabel(kind: PreschoolAiFinding["why"]["kind"]): string {
-  if (kind === "Evidence") return "Evidence-backed";
-  if (kind === "Hypothesis") return "Hypothesis";
-  return "Needs more evidence";
+function epistemicLevelLabel(level: PreschoolAiEpistemicLevel): string {
+  if (level === "verified") return "Evidence-backed";
+  if (level === "hypothesis") return "Hypothesis";
+  return "Exploration idea";
 }
 
-function whyKindClass(kind: PreschoolAiFinding["why"]["kind"]): string {
-  if (kind === "Evidence") return "bg-step-success-soft text-step-success";
-  if (kind === "Hypothesis") return "bg-step-warning-soft text-step-warning";
+function epistemicLevelClass(level: PreschoolAiEpistemicLevel): string {
+  if (level === "verified") return "bg-step-success-soft text-step-success";
+  if (level === "hypothesis") return "bg-step-warning-soft text-step-warning";
   return "bg-surface-subtle text-muted";
+}
+
+function whyKindToEpistemicLevel(kind: PreschoolAiFinding["why"]["kind"]): PreschoolAiEpistemicLevel {
+  if (kind === "Evidence") return "verified";
+  if (kind === "Hypothesis") return "hypothesis";
+  return "exploration-idea";
 }
 
 function titleCase(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
-function buildAskHref(base: string, projectId: string, finding: PreschoolAiFinding): string {
+function buildAskHref(base: string, projectId: string, finding: DisplayFinding): string {
   const [path, query = ""] = base.split("?", 2);
   const params = new URLSearchParams(query);
   params.set("projectId", projectId);
-  params.set("finding", JSON.stringify({
+  params.set("finding", JSON.stringify(isAcceptedFinding(finding) ? {
+    title: finding.title,
+    takeaway: finding.takeaway,
+    epistemicLevel: finding.epistemicLevel,
+    interpretation: finding.interpretation,
+    action: finding.action,
+    verification: finding.verification,
+    uncertainty: finding.uncertainty,
+  } : {
     title: finding.title,
     what: finding.what,
     why: finding.why,
@@ -396,10 +428,14 @@ function buildAskHref(base: string, projectId: string, finding: PreschoolAiFindi
     snapshotId: finding.evidence.snapshotId,
     dataCutoff: finding.evidence.period.to,
     period: finding.evidence.period,
-    note: finding.evidenceNote,
+    note: isAcceptedFinding(finding) ? finding.uncertainty : finding.evidenceNote,
     deterministicEvidenceIds: finding.evidence.deterministic.map((item) => item.id),
     toolCallIds: finding.evidence.tools.map((tool) => tool.toolCallId),
     auditLogIds: finding.evidence.tools.flatMap((tool) => tool.auditLogId ? [tool.auditLogId] : []),
   }));
   return `${path}?${params.toString()}`;
+}
+
+function isAcceptedFinding(finding: DisplayFinding): finding is PreschoolAiAcceptedFinding {
+  return "placementTargets" in finding && "epistemicLevel" in finding && "takeaway" in finding;
 }

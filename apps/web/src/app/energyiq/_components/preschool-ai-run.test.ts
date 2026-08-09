@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ConfigApiError, configApi } from "../../../lib/config-api";
+import { configApi } from "../../../lib/config-api";
 import {
   buildPreschoolAgentRunBody,
   buildPreschoolAiRunInput,
@@ -8,6 +8,7 @@ import {
   getOrStartPreschoolAiRun,
   resetPreschoolAiRunsForTests,
   resolvePreschoolAiEventStream,
+  resolvePreschoolAiWorkflowEventStreams,
   validatePreschoolAiEventStream,
   type PreschoolAiProgress,
   type PreschoolAiRelationship,
@@ -21,6 +22,7 @@ import { preschoolGoldenSnapshot } from "./preschool-overview.test-fixture";
 describe("Preschool AI Run", () => {
   afterEach(() => {
     resetPreschoolAiRunsForTests();
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -47,7 +49,11 @@ describe("Preschool AI Run", () => {
       "metric-revisions:energy.total_usage_kwh@1,energy.usage_per_person,energy.usage_per_sqm",
       "sg-preschool-calendar-v1",
     ]) expect(input.identityKey).toContain(pin);
-    expect(input.identityKey).toContain("preschool-ai-output-contract@v12");
+    expect(input.identityKey).toContain("preschool-ai-output-contract@v13");
+    expect(input.identityKey).toContain("preschool-ai-workflow@preschool-two-stage-v1");
+    expect(input.identityKey).toContain("investigator-prompt@preschool-investigator-v1");
+    expect(input.identityKey).toContain("editor-prompt@preschool-insight-editor-v1");
+    expect(input.identityKey).toContain("method-skill@energy-insight-investigation@1.0.0");
     expect(body).toMatchObject({
       method: "agent/run",
       params: { agentId: "dataFoundry" },
@@ -1419,26 +1425,34 @@ describe("Preschool AI Run", () => {
 
   it("single-flights identical page identities and fails soft", async () => {
     const input = requiredInput();
-    vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockResolvedValue({
-      status: "missing",
-      dataSnapshotId: input.snapshotId,
-      projectReleaseId: input.projectReleaseId,
+    vi.spyOn(configApi, "getRunDefaults").mockResolvedValue({ activeLlmProfileId: "profile-1" } as never);
+    vi.spyOn(configApi, "claimEnergyOverviewAiArtifact").mockResolvedValue({
+      status: "owner",
+      leaseToken: "lease-owner",
+      artifact: {
+        id: "artifact-test",
+        status: "running",
+        dataSnapshotId: input.snapshotId,
+        projectReleaseId: input.projectReleaseId,
+        modelProfileId: "profile-1",
+      },
     });
-    vi.spyOn(configApi, "completeEnergyOverviewAiArtifact").mockImplementation(async (_projectId, result) => ({
+    vi.spyOn(configApi, "completeEnergyOverviewAiArtifact").mockImplementation(async (_projectId, _scopeId, _leaseToken, result) => ({
       id: "artifact-test",
       status: "available",
       dataSnapshotId: input.snapshotId,
       projectReleaseId: input.projectReleaseId,
       result,
     }));
-    vi.spyOn(configApi, "getSessionConversation").mockRejectedValue(
-      new ConfigApiError("RESOURCE_NOT_FOUND", "Session not found", 404),
-    );
-    vi.spyOn(configApi, "getRunDefaults").mockResolvedValue({ activeLlmProfileId: "profile-1" } as never);
-    const fetchMock = vi.fn().mockResolvedValue(new Response(successfulEventStream(), {
-      status: 200,
-      headers: { "Content-Type": "text/event-stream" },
-    }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(workflowEnvelopeEventStream("candidates", []), {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }))
+      .mockResolvedValueOnce(new Response(workflowEnvelopeEventStream("findings", [], { trace: [] }), {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }));
     vi.stubGlobal("fetch", fetchMock);
 
     const progress: PreschoolAiProgress[] = [];
@@ -1446,8 +1460,8 @@ describe("Preschool AI Run", () => {
     const second = getOrStartPreschoolAiRun(input);
     expect(first).toBe(second);
     await expect(first).resolves.toMatchObject({ status: "available" });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(progress).toEqual(["inspecting", "querying", "validating", "drafting"]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(progress).toEqual(["inspecting", "validating", "drafting"]);
 
     resetPreschoolAiRunsForTests();
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 503 })));
@@ -1457,208 +1471,128 @@ describe("Preschool AI Run", () => {
     });
   });
 
-  it("restores a completed same-identity Run after memory reset without another Agent POST", async () => {
-    const input = requiredInput();
-    vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockResolvedValue({
-      status: "missing",
-      dataSnapshotId: input.snapshotId,
-      projectReleaseId: input.projectReleaseId,
-    });
-    vi.spyOn(configApi, "completeEnergyOverviewAiArtifact").mockImplementation(async (_projectId, result) => ({
-      id: "artifact-restored",
-      status: "available",
-      dataSnapshotId: input.snapshotId,
-      projectReleaseId: input.projectReleaseId,
-      result,
-    }));
-    const persistedRunId = "preschool-overview-persisted";
-    const findings = generatedFindings();
-    vi.spyOn(configApi, "getSessionConversation").mockResolvedValue({
-      sessionId: "persisted-session",
-      messages: [{
-        id: "assistant-final",
-        runId: persistedRunId,
-        role: "assistant",
-        source: "agent",
-        contentText: "[conversation message truncated: original_chars=12755]",
-        position: 1,
-        createdAt: "2026-08-06T00:00:02.000Z",
-      }],
-      runEventRefs: [{ runId: persistedRunId, eventCount: 8, firstSeq: 1, lastSeq: 8 }],
-      checkpoints: [{
-        runId: persistedRunId,
-        status: "completed",
-        terminalEvent: "RUN_FINISHED",
-        firstEventSeq: 1,
-        lastEventSeq: 8,
-        startedAt: "2026-08-06T00:00:00.000Z",
-        finishedAt: "2026-08-06T00:00:02.000Z",
-      }],
-      toolCalls: [],
-    });
-    vi.spyOn(configApi, "getSessionTraceDag").mockResolvedValue({
-      sessionId: "persisted-session",
-      edges: [],
-      sections: [],
-      nodes: [
-        {
-          id: `${persistedRunId}:context`,
-          kind: "context",
-          label: "Compiled context",
-          runId: persistedRunId,
-          eventSeq: 0,
-          detail: {
-            type: "context",
-            assistantOutput: JSON.stringify({ findings }),
-          },
+  it("lets two client identities share one server-owned two-stage Provider execution", async () => {
+    const firstInput = requiredInput();
+    const secondInput = { ...firstInput, identityKey: `second-authorized-user:${firstInput.identityKey}` };
+    const claimSpy = vi.spyOn(configApi, "claimEnergyOverviewAiArtifact")
+      .mockResolvedValueOnce({
+        status: "owner",
+        leaseToken: "lease-owner",
+        artifact: {
+          id: "artifact-shared",
+          status: "running",
+          dataSnapshotId: firstInput.snapshotId,
+          projectReleaseId: firstInput.projectReleaseId,
+          modelProfileId: "profile-1",
         },
-        traceToolNode(persistedRunId, "schema-1", "inspect_schema", 1, { datasource_id: "energy-scope" }, {
-          tables: [{ name: "energy_intervals", columns: [{ name: "usage_kwh", type: "DOUBLE" }] }],
-        }),
-        traceToolNode(persistedRunId, "sql-1", "run_sql_readonly", 2, {
-          sql: "SELECT parent_node_id, SUM(usage_kwh) AS usage_kwh FROM energy_intervals GROUP BY parent_node_id",
-        }, {
-          columns: ["parent_node_id", "usage_kwh"],
-          rows: [["preschool-centre-7", 843.0985]],
-          row_count: 1,
-          audit_log_id: "audit-sql-1",
-          elapsed_ms: 12,
-        }),
-        traceToolNode(persistedRunId, "sql-2", "run_sql_readonly", 3, {
-          sql: "SELECT hour_of_day, SUM(usage_kwh) AS usage_kwh FROM energy_intervals GROUP BY hour_of_day LIMIT 3",
-        }, {
-          columns: ["hour_of_day", "usage_kwh"],
-          rows: [[9, 62.4], [10, 59.1], [8, 57.8]],
-          row_count: 3,
-          audit_log_id: "audit-sql-2",
-          elapsed_ms: 14,
-        }),
-      ],
+      })
+      .mockResolvedValueOnce({
+        status: "waiting",
+        artifact: {
+          id: "artifact-shared",
+          status: "running",
+          dataSnapshotId: firstInput.snapshotId,
+          projectReleaseId: firstInput.projectReleaseId,
+          modelProfileId: "profile-1",
+        },
+      });
+    let releaseWaitingClient!: () => void;
+    const ownerCompleted = new Promise<void>((resolve) => { releaseWaitingClient = resolve; });
+    let stored: Awaited<ReturnType<typeof configApi.getEnergyOverviewAiArtifact>> | null = null;
+    vi.spyOn(configApi, "completeEnergyOverviewAiArtifact")
+      .mockImplementation(async (_projectId, _scopeId, _leaseToken, result) => {
+        stored = {
+          id: "artifact-shared",
+          status: "available",
+          dataSnapshotId: firstInput.snapshotId,
+          projectReleaseId: firstInput.projectReleaseId,
+          result,
+        };
+        releaseWaitingClient();
+        return stored;
+      });
+    vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockImplementation(async () => {
+      await ownerCompleted;
+      if (!stored) throw new Error("Expected owner completion");
+      return stored;
     });
-    const fetchMock = vi.fn(() => {
-      throw new Error("A restored result must not start another Agent Run");
-    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(workflowEnvelopeEventStream("candidates", []), {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }))
+      .mockResolvedValueOnce(new Response(workflowEnvelopeEventStream("findings", [], { trace: [] }), {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }));
     vi.stubGlobal("fetch", fetchMock);
 
-    resetPreschoolAiRunsForTests();
-    await expect(getOrStartPreschoolAiRun(input)).resolves.toMatchObject({
-      status: "available",
-      runId: persistedRunId,
-    });
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(configApi.getSessionConversation).toHaveBeenCalledTimes(1);
-    expect(configApi.getSessionTraceDag).toHaveBeenCalledTimes(1);
+    const [first, second] = await Promise.all([
+      getOrStartPreschoolAiRun(firstInput),
+      getOrStartPreschoolAiRun(secondInput),
+    ]);
+
+    expect(first).toMatchObject({ status: "available" });
+    expect(second).toEqual(first);
+    expect(claimSpy).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(claimSpy.mock.invocationCallOrder[0]).toBeLessThan(fetchMock.mock.invocationCallOrder[0]!);
+    expect(configApi.completeEnergyOverviewAiArtifact).toHaveBeenCalledTimes(1);
   });
 
-  it("prefers complete Conversation text when Trace chunk joins would corrupt numeric Evidence", async () => {
+  it("fails soft when a non-owner waits past the shared Artifact deadline", async () => {
+    vi.useFakeTimers();
     const input = requiredInput();
+    vi.spyOn(configApi, "claimEnergyOverviewAiArtifact").mockResolvedValue({
+      status: "waiting",
+      artifact: {
+        id: "artifact-running",
+        status: "running",
+        dataSnapshotId: input.snapshotId,
+        projectReleaseId: input.projectReleaseId,
+        modelProfileId: "profile-1",
+      },
+    });
     vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockResolvedValue({
-      status: "missing",
+      id: "artifact-running",
+      status: "running",
       dataSnapshotId: input.snapshotId,
       projectReleaseId: input.projectReleaseId,
+      modelProfileId: "profile-1",
     });
-    vi.spyOn(configApi, "completeEnergyOverviewAiArtifact").mockImplementation(async (_projectId, result) => ({
-      id: "artifact-conversation",
-      status: "available",
-      dataSnapshotId: input.snapshotId,
-      projectReleaseId: input.projectReleaseId,
-      result,
-    }));
-    const persistedRunId = "preschool-overview-conversation-source";
-    const findings = generatedFindings();
-    findings[0]!.what = "Centre G used 843.0985 kWh in the scoped comparison.";
-    const corruptedTraceFindings = structuredClone(findings);
-    corruptedTraceFindings[0]!.what = "Centre G used at843.0985 kWh in the scoped comparison.";
-    vi.spyOn(configApi, "getSessionConversation").mockResolvedValue({
-      sessionId: "persisted-session",
-      messages: [{
-        id: "assistant-final",
-        runId: persistedRunId,
-        role: "assistant",
-        source: "agent",
-        contentText: JSON.stringify({ findings }),
-        position: 1,
-        createdAt: "2026-08-06T00:00:02.000Z",
-      }],
-      runEventRefs: [{ runId: persistedRunId, eventCount: 8, firstSeq: 1, lastSeq: 8 }],
-      checkpoints: [{
-        runId: persistedRunId,
-        status: "completed",
-        terminalEvent: "RUN_FINISHED",
-        firstEventSeq: 1,
-        lastEventSeq: 8,
-        startedAt: "2026-08-06T00:00:00.000Z",
-        finishedAt: "2026-08-06T00:00:02.000Z",
-      }],
-      toolCalls: [],
-    });
-    vi.spyOn(configApi, "getSessionTraceDag").mockResolvedValue({
-      sessionId: "persisted-session",
-      edges: [],
-      sections: [],
-      nodes: [
-        {
-          id: `${persistedRunId}:context`,
-          kind: "context",
-          label: "Compiled context",
-          runId: persistedRunId,
-          eventSeq: 0,
-          detail: {
-            type: "context",
-            assistantOutput: JSON.stringify({ findings: corruptedTraceFindings }),
-          },
-        },
-        traceToolNode(persistedRunId, "schema-1", "inspect_schema", 1, { datasource_id: "energy-scope" }, {
-          tables: [{ name: "energy_intervals", columns: [{ name: "usage_kwh", type: "DOUBLE" }] }],
-        }),
-        traceToolNode(persistedRunId, "sql-1", "run_sql_readonly", 2, {
-          sql: "SELECT parent_node_id, SUM(usage_kwh) AS usage_kwh FROM energy_intervals GROUP BY parent_node_id",
-        }, {
-          columns: ["parent_node_id", "usage_kwh"],
-          rows: [["preschool-centre-7", 843.0985]],
-          row_count: 1,
-          audit_log_id: "audit-sql-1",
-          elapsed_ms: 12,
-        }),
-        traceToolNode(persistedRunId, "sql-2", "run_sql_readonly", 3, {
-          sql: "SELECT hour_of_day, SUM(usage_kwh) AS usage_kwh FROM energy_intervals GROUP BY hour_of_day LIMIT 3",
-        }, {
-          columns: ["hour_of_day", "usage_kwh"],
-          rows: [[9, 62.4], [10, 59.1], [8, 57.8]],
-          row_count: 3,
-          audit_log_id: "audit-sql-2",
-          elapsed_ms: 14,
-        }),
-      ],
-    });
-    const fetchMock = vi.fn(() => {
-      throw new Error("A restored result must not start another Agent Run");
-    });
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
-    resetPreschoolAiRunsForTests();
-    await expect(getOrStartPreschoolAiRun(input)).resolves.toMatchObject({
-      status: "available",
-      runId: persistedRunId,
+    const result = getOrStartPreschoolAiRun(input);
+    await vi.advanceTimersByTimeAsync(13 * 60 * 1_000);
+
+    await expect(result).resolves.toEqual({
+      status: "unavailable",
+      reason: "AI analysis is temporarily unavailable. The verified Overview remains available.",
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("restores the shared current Artifact without reading a user-owned Session or starting Provider", async () => {
     const input = requiredInput();
-    const available = resolvePreschoolAiEventStream({
-      eventStream: successfulEventStream(),
+    const available = resolvePreschoolAiWorkflowEventStreams({
       input,
       providerProfileId: "profile-shared",
-      runId: "run-shared",
+      investigatorRunId: "run-investigator-shared",
+      investigatorEventStream: workflowEnvelopeEventStream("candidates", []),
+      editorRunId: "run-editor-shared",
+      editorEventStream: workflowEnvelopeEventStream("findings", [], { trace: [] }),
     });
     if (available.status !== "available") throw new Error("Expected a valid shared fixture");
-    vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockResolvedValue({
-      id: "artifact-shared",
+    vi.spyOn(configApi, "claimEnergyOverviewAiArtifact").mockResolvedValue({
       status: "available",
-      dataSnapshotId: input.snapshotId,
-      projectReleaseId: input.projectReleaseId,
-      result: available,
+      artifact: {
+        id: "artifact-shared",
+        status: "available",
+        dataSnapshotId: input.snapshotId,
+        projectReleaseId: input.projectReleaseId,
+        result: available,
+      },
     });
     const sessionSpy = vi.spyOn(configApi, "getSessionConversation");
     const fetchMock = vi.fn();
@@ -1666,7 +1600,7 @@ describe("Preschool AI Run", () => {
 
     await expect(getOrStartPreschoolAiRun(input)).resolves.toMatchObject({
       status: "available",
-      runId: "run-shared",
+      runId: "run-editor-shared",
     });
     expect(sessionSpy).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
@@ -1678,6 +1612,17 @@ function requiredInput(): PreschoolAiRunInput {
   const input = buildPreschoolAiRunInput(snapshot);
   if (!input) throw new Error("Expected the Preschool Golden Snapshot to support an AI Run");
   return input;
+}
+
+function workflowEnvelopeEventStream(
+  key: "candidates" | "findings",
+  value: unknown[],
+  rest: Record<string, unknown> = {},
+): string {
+  return [
+    { type: "TEXT_MESSAGE_CONTENT", delta: JSON.stringify({ [key]: value, ...rest }) },
+    { type: "RUN_FINISHED" },
+  ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
 }
 
 function successfulEventStream(
@@ -1746,32 +1691,6 @@ function namedSqlEvents(
       },
     },
   ];
-}
-
-function traceToolNode(
-  runId: string,
-  toolCallId: string,
-  toolName: string,
-  eventSeq: number,
-  args: Record<string, unknown>,
-  result: Record<string, unknown>,
-) {
-  return {
-    id: `${runId}:${toolCallId}`,
-    kind: "tool" as const,
-    label: `Tool: ${toolName}`,
-    runId,
-    toolCallId,
-    eventSeq,
-    detail: {
-      type: "tool" as const,
-      toolName,
-      arguments: args,
-      argumentsText: JSON.stringify(args),
-      result,
-      resultText: JSON.stringify(result),
-    },
-  };
 }
 
 type GeneratedFindingFixture = {

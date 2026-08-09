@@ -29,8 +29,13 @@ describe("createOverviewAiArtifactIdentity", () => {
       analysisPackRevision: "v1",
       modelProfileId: "deepseek-v4-flash",
       modelProfileRevision: 8,
-      outputContractRevision: "v12",
-      validatorRevision: "preschool-ai-event-stream-v1",
+      outputContractRevision: "v13",
+      validatorRevision: "preschool-ai-two-stage-fact-boundary-v1",
+      workflowRevision: "preschool-two-stage-v1",
+      investigatorPromptRevision: "preschool-investigator-v1",
+      editorPromptRevision: "preschool-insight-editor-v1",
+      methodSkillId: "energy-insight-investigation",
+      methodSkillRevision: "1.0.0",
     });
     expect(createOverviewAiArtifactIdentity({ ...base, dataSnapshotId: "snapshot-b" }))
       .not.toEqual(createOverviewAiArtifactIdentity(base));

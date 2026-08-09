@@ -167,6 +167,123 @@ export type RunEnergyIqHarnessEvalInput = {
   ) => Promise<EnergyIqHarnessObservation>;
 };
 
+export type PreschoolOverviewAiValueReview = {
+  nonRepetition: 0 | 1 | 2;
+  depth: 0 | 1 | 2;
+  managerValue: 0 | 1 | 2;
+  epistemicDiscipline: 0 | 1 | 2;
+  placementQuality: 0 | 1 | 2;
+  expressionFit: 0 | 1 | 2;
+};
+
+export type PreschoolOverviewAiPassAt3Input = {
+  expected: {
+    projectId: "preschool-demo";
+    scopeId: string;
+    dataSnapshotId: string;
+    projectReleaseId: string;
+    dataCutoff: string;
+  };
+  baseline: Array<{ result: unknown; review: PreschoolOverviewAiValueReview }>;
+  twoStage: Array<{ result: unknown; review: PreschoolOverviewAiValueReview }>;
+};
+
+export type PreschoolOverviewAiPassAt3Report = {
+  status: "passed" | "failed";
+  methodSkillValueProved: boolean;
+  baseline: PreschoolOverviewAiVariantReport;
+  twoStage: PreschoolOverviewAiVariantReport;
+};
+
+type PreschoolOverviewAiVariantReport = {
+  passAt3: boolean;
+  passedCount: number;
+  averageValueScore: number;
+  attempts: Array<{
+    attempt: number;
+    passed: boolean;
+    exactIdentity: boolean;
+    contractValid: boolean;
+    valueScore: number;
+    findingCount: number;
+  }>;
+};
+
+export const evaluatePreschoolOverviewAiPassAt3 = (
+  input: PreschoolOverviewAiPassAt3Input,
+): PreschoolOverviewAiPassAt3Report => {
+  if (input.baseline.length !== 3 || input.twoStage.length !== 3) {
+    throw new Error("PRESCHOOL_OVERVIEW_AI_PASS_AT_3_REQUIRES_THREE_ATTEMPTS");
+  }
+  const baseline = evaluatePreschoolVariant(input.baseline, input.expected, false);
+  const twoStage = evaluatePreschoolVariant(input.twoStage, input.expected, true);
+  const methodSkillValueProved = twoStage.passAt3
+    && twoStage.averageValueScore > baseline.averageValueScore;
+  return {
+    status: methodSkillValueProved ? "passed" : "failed",
+    methodSkillValueProved,
+    baseline,
+    twoStage,
+  };
+};
+
+const evaluatePreschoolVariant = (
+  observations: PreschoolOverviewAiPassAt3Input["baseline"],
+  expected: PreschoolOverviewAiPassAt3Input["expected"],
+  requireTwoStage: boolean,
+): PreschoolOverviewAiVariantReport => {
+  const attempts = observations.map((observation, index) => {
+    const result = isRecord(observation.result) ? observation.result : {};
+    const findings = Array.isArray(result.findings) ? result.findings.filter(isRecord) : [];
+    const exactIdentity = requireTwoStage
+      ? isRecord(result.binding)
+        && result.binding.projectId === expected.projectId
+        && result.binding.scopeId === expected.scopeId
+        && result.binding.dataSnapshotId === expected.dataSnapshotId
+        && result.binding.projectReleaseId === expected.projectReleaseId
+        && result.binding.dataCutoff === expected.dataCutoff
+        && findings.every((finding) => isRecord(finding.binding)
+          && finding.binding.dataSnapshotId === expected.dataSnapshotId
+          && isRecord(finding.evidence)
+          && finding.evidence.snapshotId === expected.dataSnapshotId)
+      : findings.every((finding) => isRecord(finding.evidence)
+        && finding.evidence.snapshotId === expected.dataSnapshotId);
+    const contractValid = result.status === "available" && (!requireTwoStage || (
+      isRecord(result.contract)
+      && result.contract.id === "preschool-ai-accepted-artifact"
+      && result.contract.revision === "v13"
+      && isRecord(result.workflow)
+      && result.workflow.id === "preschool-two-stage"
+      && result.workflow.revision === "preschool-two-stage-v1"
+      && isRecord(result.workflow.methodSkill)
+      && result.workflow.methodSkill.id === "energy-insight-investigation"
+      && result.workflow.methodSkill.revision === "1.0.0"
+    ));
+    const valueScore = Object.values(observation.review).reduce<number>((total, score) => total + score, 0);
+    const passed = exactIdentity
+      && contractValid
+      && valueScore >= 9
+      && observation.review.nonRepetition >= 1
+      && observation.review.managerValue === 2
+      && observation.review.epistemicDiscipline >= 1;
+    return {
+      attempt: index + 1,
+      passed,
+      exactIdentity,
+      contractValid,
+      valueScore,
+      findingCount: findings.length,
+    };
+  });
+  const passedCount = attempts.filter((attempt) => attempt.passed).length;
+  return {
+    passAt3: passedCount >= 2,
+    passedCount,
+    averageValueScore: average(attempts.map((attempt) => attempt.valueScore)),
+    attempts,
+  };
+};
+
 export const runEnergyIqHarnessEval = async (
   input: RunEnergyIqHarnessEvalInput,
 ): Promise<EnergyIqHarnessSuiteReport> => {

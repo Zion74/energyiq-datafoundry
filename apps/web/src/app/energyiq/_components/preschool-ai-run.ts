@@ -1,10 +1,9 @@
 import type {
+  EnergyOverviewAiArtifactDto,
   EnergyProjectAnalysisSnapshotDto,
   PreschoolDecisionSignalsDto,
-  SessionConversationDto,
-  TraceDagDto,
 } from "../../../lib/config-api";
-import { ConfigApiError, configApi, getAgentRuntimeUrl } from "../../../lib/config-api";
+import { configApi, getAgentRuntimeUrl } from "../../../lib/config-api";
 import {
   configApiCsrfHeaders,
   configApiIdentityHeaders,
@@ -17,12 +16,37 @@ import {
   type PreschoolDiscoveryEvidenceItem,
 } from "./preschool-ai-discovery-evidence";
 import {
+  buildPreschoolOverviewCoverage,
+  type PreschoolOverviewCoverageV1,
+} from "./preschool-ai-coverage";
+import {
   AI_FINDING_PRESENTATION_PROMPT,
   aiFindingPresentationEvidenceText,
   filterAiFindingPresentationEvidence,
   parseAiFindingPresentation,
   type AiFindingPresentation,
 } from "./ai-finding-presentation";
+import {
+  PRESCHOOL_AI_ACCEPTED_CONTRACT_REVISION,
+  PRESCHOOL_AI_EDITOR_PROMPT_REVISION,
+  PRESCHOOL_AI_INVESTIGATOR_PROMPT_REVISION,
+  PRESCHOOL_AI_METHOD_SKILL_ID,
+  PRESCHOOL_AI_METHOD_SKILL_REVISION,
+  PRESCHOOL_AI_WORKFLOW_REVISION,
+  selectPreschoolAiSectionInterpretation,
+  type PreschoolAiAcceptedArtifact,
+  type PreschoolAiAcceptedArtifactInternal,
+  type PreschoolAiAcceptedFinding,
+  type PreschoolAiEpistemicLevel,
+} from "./preschool-ai-artifact";
+import {
+  buildPreschoolInsightEditorPrompt,
+  buildPreschoolInvestigatorPrompt,
+  parsePreschoolEditorEnvelope,
+  parsePreschoolInvestigatorCandidates,
+  type PreschoolAiEditorFindingDraft,
+  type PreschoolAiInvestigatorCandidate,
+} from "./preschool-ai-workflow";
 
 export type PreschoolAiProgress = "queued" | "inspecting" | "querying" | "validating" | "drafting";
 export type PreschoolAiRelationship = "supports" | "challenges" | "independent";
@@ -61,7 +85,7 @@ export type PreschoolAiFinding = {
   };
 };
 
-export type PreschoolAiRunResult = {
+export type PreschoolAiLegacyRunResult = {
   status: "available";
   providerProfileId: string;
   runId: string;
@@ -69,6 +93,11 @@ export type PreschoolAiRunResult = {
   packRevision: "v1";
   findings: PreschoolAiFinding[];
 } | {
+  status: "unavailable";
+  reason: string;
+};
+
+export type PreschoolAiRunResult = PreschoolAiAcceptedArtifact | Extract<PreschoolAiLegacyRunResult, { status: "available" }> | {
   status: "unavailable";
   reason: string;
 };
@@ -106,6 +135,7 @@ export type PreschoolAiRunInput = {
   analysisTo: string;
   decisionSignals: PreschoolAiDecisionSignals;
   discoveryEvidence: PreschoolDiscoveryEvidenceBundleV1;
+  coverage: PreschoolOverviewCoverageV1;
 };
 
 type AgUiEvent = Record<string, unknown> & { type?: string };
@@ -142,10 +172,9 @@ const currentRuns = new Map<string, CurrentRun>();
 const FRIENDLY_UNAVAILABLE = "AI analysis is temporarily unavailable. The verified Overview remains available.";
 const PRESCHOOL_AI_PACK_ID = "preschool-analysis-pack" as const;
 const PRESCHOOL_AI_PACK_REVISION = "v1" as const;
-const PRESCHOOL_AI_OUTPUT_CONTRACT_REVISION = "v12";
-const PERSISTED_WORKSPACE_PROFILE_ID = "workspace-default";
-const ACTIVE_RUN_POLL_INTERVAL_MS = 1_500;
-const ACTIVE_RUN_POLL_LIMIT = 200;
+const PRESCHOOL_AI_OUTPUT_CONTRACT_REVISION = "v13";
+const SHARED_ARTIFACT_POLL_MS = 1_000;
+const SHARED_ARTIFACT_WAIT_TIMEOUT_MS = 13 * 60 * 1_000;
 
 export function resetPreschoolAiRunsForTests(): void {
   currentRuns.clear();
@@ -155,9 +184,11 @@ export function buildPreschoolAiRunInput(
   snapshot: EnergyProjectAnalysisSnapshotDto,
 ): PreschoolAiRunInput | null {
   const discoveryEvidence = buildPreschoolDiscoveryEvidenceBundle(snapshot);
+  const coverage = buildPreschoolOverviewCoverage(snapshot);
   const decisionSignals = snapshot.preschoolDecisionSignals;
   if (
     !discoveryEvidence
+    || !coverage
     || snapshot.context.resource !== "electricity"
     || !decisionSignals
     || decisionSignals.status !== "available"
@@ -184,6 +215,10 @@ export function buildPreschoolAiRunInput(
     snapshot.context.tariffScheduleVersion,
     `${PRESCHOOL_AI_PACK_ID}@${PRESCHOOL_AI_PACK_REVISION}`,
     `preschool-ai-output-contract@${PRESCHOOL_AI_OUTPUT_CONTRACT_REVISION}`,
+    `preschool-ai-workflow@${PRESCHOOL_AI_WORKFLOW_REVISION}`,
+    `investigator-prompt@${PRESCHOOL_AI_INVESTIGATOR_PROMPT_REVISION}`,
+    `editor-prompt@${PRESCHOOL_AI_EDITOR_PROMPT_REVISION}`,
+    `method-skill@${PRESCHOOL_AI_METHOD_SKILL_ID}@${PRESCHOOL_AI_METHOD_SKILL_REVISION}`,
     analysisFrom,
     analysisTo,
   ].join(":");
@@ -201,6 +236,7 @@ export function buildPreschoolAiRunInput(
     analysisTo,
     decisionSignals: compactDecisionSignals(decisionSignals),
     discoveryEvidence,
+    coverage,
   };
 }
 
@@ -257,7 +293,7 @@ export async function executePreschoolAiRun(
   input: PreschoolAiRunInput,
   onProgress?: ProgressCallback,
   prepared: { profileId?: string; threadId?: string } = {},
-): Promise<PreschoolAiRunResult> {
+): Promise<PreschoolAiLegacyRunResult> {
   let last: PreschoolAiProgress | null = null;
   const report = (progress: PreschoolAiProgress) => {
     const rank = { queued: 0, inspecting: 1, querying: 2, validating: 3, drafting: 4 } satisfies Record<PreschoolAiProgress, number>;
@@ -297,80 +333,184 @@ export async function executePreschoolAiRun(
   return resolvePreschoolAiEventStream({ eventStream, input, providerProfileId: profileId, runId });
 }
 
+export async function executePreschoolAiWorkflow(
+  input: PreschoolAiRunInput,
+  onProgress?: ProgressCallback,
+  prepared: { profileId?: string; threadId?: string } = {},
+): Promise<PreschoolAiAcceptedArtifactInternal | { status: "unavailable"; reason: string }> {
+  let last: PreschoolAiProgress | null = null;
+  const report = (progress: PreschoolAiProgress) => {
+    const rank = { queued: 0, inspecting: 1, querying: 2, validating: 3, drafting: 4 } satisfies Record<PreschoolAiProgress, number>;
+    if (last && rank[progress] <= rank[last]) return;
+    last = progress;
+    onProgress?.(progress);
+  };
+  report("inspecting");
+  const profileId = prepared.profileId ?? (await configApi.getRunDefaults()).activeLlmProfileId;
+  if (!profileId) return { status: "unavailable", reason: "No current Workspace model profile is configured." };
+  const baseThreadId = prepared.threadId ?? await buildPreschoolAiSessionId(input);
+  const investigatorRunId = `preschool-overview-investigator-${crypto.randomUUID()}`;
+  const investigatorResponse = await executePreschoolAiStage({
+    body: buildPreschoolAiStageRunBody(
+      input,
+      profileId,
+      investigatorRunId,
+      `${baseThreadId}:investigator`,
+      "investigator",
+      buildPreschoolInvestigatorPrompt(input),
+    ),
+    onSqlStart: () => report("querying"),
+  });
+  if (investigatorResponse.status === "unavailable") return investigatorResponse;
+  const investigatorEvents = parseEventStream(investigatorResponse.eventStream);
+  const investigatorFailure = stageFailure(investigatorEvents, "Investigator");
+  if (investigatorFailure) return investigatorFailure;
+  const candidates = parsePreschoolInvestigatorCandidates(answerFromEvents(investigatorEvents));
+  if (!candidates) {
+    return { status: "unavailable", reason: "The Investigator response could not be verified against this Snapshot." };
+  }
+  const investigatorTools = collectTools(investigatorEvents);
+  report("validating");
+  const editorRunId = `preschool-overview-editor-${crypto.randomUUID()}`;
+  const editorResponse = await executePreschoolAiStage({
+    body: buildPreschoolAiStageRunBody(
+      input,
+      profileId,
+      editorRunId,
+      `${baseThreadId}:editor`,
+      "editor",
+      buildPreschoolInsightEditorPrompt(
+        input,
+        candidates,
+        investigatorTools.sql.map((tool, index) => ({
+          evidenceIndex: index + 1,
+          resultPreview: tool.resultPreview,
+        })),
+      ),
+    ),
+    onSqlStart: () => report("querying"),
+  });
+  if (editorResponse.status === "unavailable") return editorResponse;
+  report("drafting");
+  return resolvePreschoolAiWorkflowEventStreams({
+    input,
+    providerProfileId: profileId,
+    investigatorRunId,
+    investigatorEventStream: investigatorResponse.eventStream,
+    editorRunId,
+    editorEventStream: editorResponse.eventStream,
+  });
+}
+
 async function restoreOrExecutePreschoolAiRun(
   input: PreschoolAiRunInput,
   onProgress?: ProgressCallback,
 ): Promise<PreschoolAiRunResult> {
   onProgress?.("inspecting");
-  const shared = await probeSharedPreschoolAiArtifact(input);
-  if (shared) {
+  const claim = await configApi.claimEnergyOverviewAiArtifact(input.projectId, input.scopeId);
+  if (claim.status === "available") {
+    const shared = acceptedSharedPreschoolAiArtifact(input, claim.artifact);
+    if (!shared) return { status: "unavailable", reason: FRIENDLY_UNAVAILABLE };
     onProgress?.("validating");
     onProgress?.("drafting");
     return shared;
   }
-  const threadId = await buildPreschoolAiSessionId(input);
-  let persisted = await probePersistedPreschoolAiRun(input, threadId);
-  if (persisted.result) {
-    onProgress?.("validating");
-    onProgress?.("drafting");
-    await persistSharedPreschoolAiArtifact(input, persisted.result);
-    return persisted.result;
+  if (claim.status === "failed") return { status: "unavailable", reason: FRIENDLY_UNAVAILABLE };
+  if (claim.status === "waiting") {
+    return waitForSharedPreschoolAiArtifact(input, onProgress);
   }
-  for (let attempt = 0; persisted.active && attempt < ACTIVE_RUN_POLL_LIMIT; attempt += 1) {
-    await delay(ACTIVE_RUN_POLL_INTERVAL_MS);
-    persisted = await probePersistedPreschoolAiRun(input, threadId);
-    if (persisted.result) {
-      onProgress?.("validating");
-      onProgress?.("drafting");
-      await persistSharedPreschoolAiArtifact(input, persisted.result);
-      return persisted.result;
-    }
-  }
-  if (persisted.active) {
-    return { status: "unavailable", reason: "The existing AI analysis did not finish within the bounded wait." };
-  }
-  const defaults = await configApi.getRunDefaults();
-  if (!defaults.activeLlmProfileId) {
+  const profileId = claim.artifact.modelProfileId;
+  if (!profileId) {
+    await failSharedPreschoolAiArtifact(input, claim.leaseToken, "MODEL_PROFILE_UNAVAILABLE");
     return { status: "unavailable", reason: "No current Workspace model profile is configured." };
   }
-  const result = await executePreschoolAiRun(input, onProgress, {
-    profileId: defaults.activeLlmProfileId,
-    threadId,
-  });
-  if (result.status === "available") await persistSharedPreschoolAiArtifact(input, result);
+  let result: Awaited<ReturnType<typeof executePreschoolAiWorkflow>>;
+  try {
+    result = await executePreschoolAiWorkflow(input, onProgress, {
+      profileId,
+      threadId: await buildPreschoolAiSessionId(input),
+    });
+  } catch (error) {
+    await failSharedPreschoolAiArtifact(input, claim.leaseToken, "WORKFLOW_EXECUTION_FAILED");
+    throw error;
+  }
+  if (result.status === "available") {
+    try {
+      const persisted = await persistSharedPreschoolAiArtifact(input, claim.leaseToken, result);
+      return persisted ?? { status: "unavailable", reason: FRIENDLY_UNAVAILABLE };
+    } catch (error) {
+      await failSharedPreschoolAiArtifact(input, claim.leaseToken, "ARTIFACT_COMPLETION_FAILED");
+      throw error;
+    }
+  }
+  await failSharedPreschoolAiArtifact(input, claim.leaseToken, "WORKFLOW_RESULT_UNAVAILABLE");
   return result;
 }
 
-async function probeSharedPreschoolAiArtifact(
+function acceptedSharedPreschoolAiArtifact(
   input: PreschoolAiRunInput,
-): Promise<Extract<PreschoolAiRunResult, { status: "available" }> | null> {
-  try {
+  artifact: EnergyOverviewAiArtifactDto,
+): PreschoolAiAcceptedArtifact | null {
+  if (artifact.status !== "available"
+    || artifact.dataSnapshotId !== input.snapshotId
+    || artifact.projectReleaseId !== input.projectReleaseId
+    || !artifact.result) return null;
+  const exact = selectPreschoolAiSectionInterpretation(
+    artifact.result,
+    input.coverage.binding,
+    "preschool.overall-key-findings",
+  );
+  return exact.status === "available"
+    ? artifact.result as unknown as PreschoolAiAcceptedArtifact
+    : null;
+}
+
+async function waitForSharedPreschoolAiArtifact(
+  input: PreschoolAiRunInput,
+  onProgress?: ProgressCallback,
+): Promise<PreschoolAiRunResult> {
+  const deadline = Date.now() + SHARED_ARTIFACT_WAIT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
     const artifact = await configApi.getEnergyOverviewAiArtifact(input.projectId, input.scopeId);
-    if (artifact.status !== "available"
-      || artifact.dataSnapshotId !== input.snapshotId
-      || artifact.projectReleaseId !== input.projectReleaseId
-      || !artifact.result
-      || artifact.result.status !== "available"
-      || artifact.result.packId !== PRESCHOOL_AI_PACK_ID
-      || artifact.result.packRevision !== PRESCHOOL_AI_PACK_REVISION
-      || !Array.isArray(artifact.result.findings)
-      || !artifact.result.findings.every((finding) => isRecord(finding)
-        && isRecord(finding.evidence)
-        && finding.evidence.snapshotId === input.snapshotId)) return null;
-    return artifact.result as unknown as Extract<PreschoolAiRunResult, { status: "available" }>;
-  } catch {
-    return null;
+    const accepted = acceptedSharedPreschoolAiArtifact(input, artifact);
+    if (accepted) {
+      onProgress?.("validating");
+      onProgress?.("drafting");
+      return accepted;
+    }
+    if (artifact.status === "available" || artifact.status === "failed") {
+      return { status: "unavailable", reason: FRIENDLY_UNAVAILABLE };
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await new Promise<void>((resolve) => setTimeout(resolve, Math.min(SHARED_ARTIFACT_POLL_MS, remaining)));
   }
+  return { status: "unavailable", reason: FRIENDLY_UNAVAILABLE };
 }
 
 async function persistSharedPreschoolAiArtifact(
   input: PreschoolAiRunInput,
-  result: Extract<PreschoolAiRunResult, { status: "available" }>,
+  leaseToken: string,
+  result: Extract<PreschoolAiRunResult, { status: "available" }> | PreschoolAiAcceptedArtifactInternal,
+): Promise<PreschoolAiAcceptedArtifact | null> {
+  const artifact = await configApi.completeEnergyOverviewAiArtifact(
+    input.projectId,
+    input.scopeId,
+    leaseToken,
+    result,
+  );
+  return acceptedSharedPreschoolAiArtifact(input, artifact);
+}
+
+async function failSharedPreschoolAiArtifact(
+  input: PreschoolAiRunInput,
+  leaseToken: string,
+  errorCode: string,
 ): Promise<void> {
   try {
-    await configApi.completeEnergyOverviewAiArtifact(input.projectId, result);
+    await configApi.failEnergyOverviewAiArtifact(input.projectId, input.scopeId, leaseToken, errorCode);
   } catch (error) {
-    console.warn("[energyiq] failed to persist shared Preschool Overview AI Artifact", error);
+    console.warn("[energyiq] failed to release shared Preschool Overview AI Artifact lease", error);
   }
 }
 
@@ -380,95 +520,6 @@ async function buildPreschoolAiSessionId(input: PreschoolAiRunInput): Promise<st
   const suffix = [...new Uint8Array(digest)].slice(0, 16)
     .map((value) => value.toString(16).padStart(2, "0")).join("");
   return `energyiq-overview-slot-${input.projectId}-${suffix}`;
-}
-
-async function probePersistedPreschoolAiRun(
-  input: PreschoolAiRunInput,
-  threadId: string,
-): Promise<{ active: boolean; result: Extract<PreschoolAiRunResult, { status: "available" }> | null }> {
-  let conversation: SessionConversationDto;
-  try {
-    conversation = await configApi.getSessionConversation(threadId, 200);
-  } catch (error) {
-    if (error instanceof ConfigApiError && error.status === 404) {
-      return { active: false, result: null };
-    }
-    throw error;
-  }
-  const completed = [...(conversation.checkpoints ?? [])]
-    .filter((checkpoint) => checkpoint.status === "completed" && checkpoint.terminalEvent === "RUN_FINISHED")
-    .sort((left, right) => (right.finishedAt ?? "").localeCompare(left.finishedAt ?? ""));
-  if (completed.length === 0) {
-    return { active: Boolean(conversation.activeRun), result: null };
-  }
-  const trace = await configApi.getSessionTraceDag(threadId, 200);
-  for (const checkpoint of completed) {
-    const eventStream = persistedEventStream(conversation, trace, checkpoint.runId);
-    const result = resolvePreschoolAiEventStream({
-      eventStream,
-      input,
-      providerProfileId: PERSISTED_WORKSPACE_PROFILE_ID,
-      runId: checkpoint.runId,
-    });
-    if (result.status === "available") {
-      return { active: Boolean(conversation.activeRun), result };
-    }
-  }
-  return { active: Boolean(conversation.activeRun), result: null };
-}
-
-function persistedEventStream(
-  conversation: SessionConversationDto,
-  trace: TraceDagDto,
-  runId: string,
-): string {
-  const toolEvents = trace.nodes
-    .filter((node) => node.runId === runId && node.kind === "tool" && node.detail?.type === "tool")
-    .sort((left, right) => (left.eventSeq ?? 0) - (right.eventSeq ?? 0))
-    .flatMap<AgUiEvent>((node) => {
-      if (node.detail?.type !== "tool") return [];
-      const toolCallId = node.toolCallId ?? node.id;
-      const toolCallName = node.detail.toolName ?? node.label.replace(/^Tool:\s*/u, "");
-      const result = node.detail.result ?? node.detail.resultText;
-      return [
-        {
-          type: "TOOL_CALL_START",
-          toolCallId,
-          toolCallName,
-          ...(node.detail.arguments !== undefined ? { args: node.detail.arguments } : {}),
-          ...(node.detail.argumentsText ? { argsText: node.detail.argumentsText } : {}),
-        },
-        {
-          type: "TOOL_CALL_RESULT",
-          toolCallId,
-          toolCallName,
-          result,
-        },
-      ];
-    });
-  const traceMessageEvents = trace.nodes
-    .filter((node) => node.runId === runId
-      && node.kind === "context"
-      && node.detail?.type === "context"
-      && Boolean(node.detail.assistantOutput))
-    .sort((left, right) => (left.eventSeq ?? 0) - (right.eventSeq ?? 0))
-    .flatMap<AgUiEvent>((node) => node.detail?.type === "context" && node.detail.assistantOutput
-      ? [{ type: "TEXT_MESSAGE_CONTENT", delta: node.detail.assistantOutput }]
-      : []);
-  const conversationMessages = conversation.messages
-    .filter((message) => message.runId === runId && message.role === "assistant" && message.contentText)
-    .sort((left, right) => left.position - right.position);
-  const conversationIsComplete = conversationMessages.length > 0
-    && conversationMessages.every((message) => !message.contentText.includes("[conversation message truncated:"));
-  const messageEvents = conversationIsComplete
-    ? conversationMessages.map<AgUiEvent>((message) => ({ type: "TEXT_MESSAGE_CONTENT", delta: message.contentText }))
-    : traceMessageEvents;
-  return [...toolEvents, ...messageEvents, { type: "RUN_FINISHED" }]
-    .map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
-}
-
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 export function buildPreschoolAgentRunBody(
@@ -520,6 +571,327 @@ export function buildPreschoolAgentRunBody(
   };
 }
 
+export function buildPreschoolAiStageRunBody(
+  input: PreschoolAiRunInput,
+  profileId: string,
+  runId: string,
+  threadId: string,
+  stage: "investigator" | "editor",
+  prompt: string,
+): Record<string, unknown> {
+  return {
+    method: "agent/run",
+    params: { agentId: "dataFoundry" },
+    body: {
+      threadId,
+      runId,
+      state: {},
+      messages: [{ id: `${runId}:user`, role: "user", content: prompt }],
+      tools: [],
+      context: [],
+      forwardedProps: {
+        externalContext: {
+          source: "energyiq",
+          projectId: input.projectId,
+          scopeId: input.scopeId,
+          resource: input.resource,
+          period: "Custom",
+          from: input.analysisFrom,
+          to: input.analysisTo,
+          expectedDataSnapshotId: input.snapshotId,
+          expectedProjectReleaseId: input.projectReleaseId,
+          overviewAiStage: stage,
+        },
+        run_config: {
+          protocol: { id: "data-analysis", version: "1" },
+          activeLlmProfileId: profileId,
+          activeSkillId: PRESCHOOL_AI_METHOD_SKILL_ID,
+          enabledDatasourceIds: [],
+          enabledKnowledgeIds: [],
+          enabledMcpServerIds: [],
+          enabledSkillIds: [PRESCHOOL_AI_METHOD_SKILL_ID],
+          skillPolicy: {
+            allowedToolNames: ["skill", "skill_search", "skill_read", "inspect_schema", "run_sql_readonly"],
+            deniedToolNames: ["list_data_sources", "preview_table"],
+            maxSkills: 1,
+            requireUserInvocable: true,
+            strictSkillTools: true,
+          },
+        },
+      },
+    },
+  };
+}
+
+async function executePreschoolAiStage(input: {
+  body: Record<string, unknown>;
+  onSqlStart: () => void;
+}): Promise<{ status: "available"; eventStream: string } | { status: "unavailable"; reason: string }> {
+  const response = await fetch(getAgentRuntimeUrl(), {
+    method: "POST",
+    ...(isPasswordAuthMode() ? { credentials: "same-origin" as RequestCredentials } : {}),
+    headers: {
+      Accept: "text/event-stream",
+      "Content-Type": "application/json",
+      ...configApiIdentityHeaders(),
+      ...configApiCsrfHeaders("POST"),
+    },
+    body: JSON.stringify(input.body),
+    signal: AbortSignal.timeout(300_000),
+  });
+  if (!response.ok) return { status: "unavailable", reason: `AI Analyst request failed (${response.status}).` };
+  const eventStream = await readEventStream(response, (event) => {
+    const toolName = stringValue(event.toolCallName) ?? stringValue(event.tool_call_name);
+    if (event.type === "TOOL_CALL_START" && toolName === "run_sql_readonly") input.onSqlStart();
+  });
+  return { status: "available", eventStream };
+}
+
+type PreschoolAiWorkflowEventStreamsInput = {
+  input: PreschoolAiRunInput;
+  providerProfileId: string;
+  investigatorRunId: string;
+  investigatorEventStream: string;
+  editorRunId: string;
+  editorEventStream: string;
+};
+
+export function resolvePreschoolAiWorkflowEventStreams(
+  args: PreschoolAiWorkflowEventStreamsInput,
+): PreschoolAiAcceptedArtifactInternal | { status: "unavailable"; reason: string } {
+  const investigatorEvents = parseEventStream(args.investigatorEventStream);
+  const investigatorFailure = stageFailure(investigatorEvents, "Investigator");
+  if (investigatorFailure) return investigatorFailure;
+  const candidates = parsePreschoolInvestigatorCandidates(answerFromEvents(investigatorEvents));
+  if (!candidates) {
+    return { status: "unavailable", reason: "The Investigator response could not be verified against this Snapshot." };
+  }
+  const editorEvents = parseEventStream(args.editorEventStream);
+  const editorFailure = stageFailure(editorEvents, "Insight Editor");
+  if (editorFailure) return editorFailure;
+  if (!discoveryMatchesInput(args.input) || !coverageMatchesInput(args.input)) {
+    return { status: "unavailable", reason: "The Preschool Evidence or page coverage does not match this Run identity." };
+  }
+  const envelope = parsePreschoolEditorEnvelope(
+    answerFromEvents(editorEvents),
+    new Set(candidates.map((candidate) => candidate.id)),
+  );
+  if (!envelope) {
+    return { status: "unavailable", reason: "The Insight Editor response could not be verified against this Snapshot." };
+  }
+  const collected = collectTools([...investigatorEvents, ...editorEvents]);
+  if (collected.sql.length > 0 && !collected.schemaValid) {
+    return { status: "unavailable", reason: "The AI Analyst used SQL without a verified scoped schema inspection." };
+  }
+  const evidenceById = new Map(args.input.discoveryEvidence.items.map((item) => [item.id, item]));
+  const signalIds = new Set(args.input.decisionSignals.items.map((signal) => signal.id));
+  const accepted = envelope.findings.flatMap((finding) => materializeAcceptedFinding({
+    finding,
+    input: args.input,
+    evidenceById,
+    signalIds,
+    allTools: collected.sql,
+  }));
+  const binding = args.input.coverage.binding;
+  const findings: PreschoolAiAcceptedFinding[] = accepted.map(({ finding, evidence, tools }, index) => ({
+    id: `preschool-ai-finding-${index + 1}`,
+    binding,
+    placementTargets: finding.placementTargets,
+    epistemicLevel: finding.epistemicLevel,
+    relationship: finding.relationship,
+    signalRefs: finding.signalRefs,
+    title: finding.title,
+    takeaway: finding.takeaway,
+    ...(finding.interpretation ? { interpretation: finding.interpretation } : {}),
+    ...(finding.action ? { action: finding.action } : {}),
+    ...(finding.verification ? { verification: finding.verification } : {}),
+    ...(finding.uncertainty ? { uncertainty: finding.uncertainty } : {}),
+    ...(finding.presentation ? { presentation: finding.presentation } : {}),
+    evidence: {
+      snapshotId: binding.dataSnapshotId,
+      period: binding.analysisPeriod,
+      deterministic: evidence,
+      tools: tools.map(({ columns: _, rows: __, numericEvidence: ___, normalizedSql: ____, returnedRowCount: _____, ...tool }) => tool),
+    },
+  }));
+  const findingIdBySources = new Map(accepted.map(({ finding }, index) => [
+    finding.sourceCandidateIds.slice().sort().join("\u0000"),
+    findings[index]!.id,
+  ]));
+  const normalizedTrace = envelope.trace.map((decision) => {
+    const findingId = findingIdBySources.get(decision.sourceCandidateIds.slice().sort().join("\u0000"));
+    return findingId && (decision.decision === "accepted" || decision.decision === "merged")
+      ? { ...decision, findingId }
+      : decision;
+  });
+  const tracedAcceptedSources = new Set(normalizedTrace
+    .filter((decision) => decision.decision === "accepted" || decision.decision === "merged")
+    .map((decision) => decision.sourceCandidateIds.slice().sort().join("\u0000")));
+  const editorTrace = [
+    ...normalizedTrace,
+    ...accepted.flatMap(({ finding }, index) => {
+      const sourceKey = finding.sourceCandidateIds.slice().sort().join("\u0000");
+      return tracedAcceptedSources.has(sourceKey) ? [] : [{
+        decision: "accepted" as const,
+        sourceCandidateIds: finding.sourceCandidateIds,
+        findingId: findings[index]!.id,
+      }];
+    }),
+  ];
+  return {
+    status: "available",
+    providerProfileId: args.providerProfileId,
+    runId: args.editorRunId,
+    packId: PRESCHOOL_AI_PACK_ID,
+    packRevision: PRESCHOOL_AI_PACK_REVISION,
+    contract: { id: "preschool-ai-accepted-artifact", revision: PRESCHOOL_AI_ACCEPTED_CONTRACT_REVISION },
+    binding,
+    workflow: {
+      id: "preschool-two-stage",
+      revision: PRESCHOOL_AI_WORKFLOW_REVISION,
+      methodSkill: { id: PRESCHOOL_AI_METHOD_SKILL_ID, revision: PRESCHOOL_AI_METHOD_SKILL_REVISION },
+      stages: {
+        investigator: { runId: args.investigatorRunId, promptRevision: PRESCHOOL_AI_INVESTIGATOR_PROMPT_REVISION },
+        editor: { runId: args.editorRunId, promptRevision: PRESCHOOL_AI_EDITOR_PROMPT_REVISION },
+      },
+      ...(editorTrace.length > 0 ? { editorTrace } : {}),
+    },
+    findings,
+  };
+}
+
+function materializeAcceptedFinding(input: {
+  finding: PreschoolAiEditorFindingDraft;
+  input: PreschoolAiRunInput;
+  evidenceById: ReadonlyMap<string, PreschoolDiscoveryEvidenceItem>;
+  signalIds: ReadonlySet<string>;
+  allTools: CollectedSqlEvidence[];
+}): Array<{
+  finding: PreschoolAiEditorFindingDraft;
+  evidence: PreschoolDiscoveryEvidenceItem[];
+  tools: CollectedSqlEvidence[];
+}> {
+  if (input.finding.signalRefs.some((reference) => !input.signalIds.has(reference))) return [];
+  const evidence = input.finding.evidenceRefs.flatMap((reference) => {
+    const item = input.evidenceById.get(reference);
+    return item ? [item] : [];
+  });
+  if (evidence.length !== input.finding.evidenceRefs.length) return [];
+  const tools = input.finding.evidenceSqlIndexes.flatMap((index) => {
+    const tool = input.allTools[index - 1];
+    return tool ? [tool] : [];
+  });
+  if (tools.length !== input.finding.evidenceSqlIndexes.length || tools.some(isOversizedSqlEvidence)) return [];
+  if (input.finding.epistemicLevel === "verified" && evidence.length === 0 && tools.length === 0) return [];
+  const narrative = [
+    input.finding.title,
+    input.finding.takeaway,
+    input.finding.interpretation,
+    input.finding.action,
+    input.finding.verification,
+    input.finding.uncertainty,
+  ].filter((value): value is string => Boolean(value));
+  if (narrative.some((value) => unsupportedNarrative(
+    value,
+    evidence,
+    tools,
+    input.input,
+    input.finding.evidenceSqlIndexes,
+  ) || unsupportedCentreEntity(value, evidence, tools))) return [];
+  const presentation = materializeAcceptedPresentation(
+    input.finding,
+    input.evidenceById,
+    input.allTools,
+    input.input,
+  );
+  return [{
+    finding: {
+      ...input.finding,
+      ...(presentation ? { presentation } : { presentation: undefined }),
+    },
+    evidence,
+    tools,
+  }];
+}
+
+function materializeAcceptedPresentation(
+  finding: PreschoolAiEditorFindingDraft,
+  evidenceById: ReadonlyMap<string, PreschoolDiscoveryEvidenceItem>,
+  allTools: CollectedSqlEvidence[],
+  input: PreschoolAiRunInput,
+): AiFindingPresentation | null {
+  const scoped = filterAiFindingPresentationEvidence(finding.presentation, {
+    evidenceRefs: finding.evidenceRefs,
+    evidenceSqlIndexes: finding.evidenceSqlIndexes,
+  });
+  if (!scoped) return null;
+  const blocks = scoped.blocks.filter((block) => {
+    const evidence = (block.evidenceRefs ?? []).flatMap((reference) => {
+      const item = evidenceById.get(reference);
+      return item ? [item] : [];
+    });
+    const tools = (block.evidenceSqlIndexes ?? []).flatMap((index) => {
+      const tool = allTools[index - 1];
+      return tool ? [tool] : [];
+    });
+    const text = aiFindingPresentationEvidenceText({ version: "1", blocks: [block] });
+    return !unsupportedNarrative(text, evidence, tools, input, block.evidenceSqlIndexes ?? [])
+      && !unsupportedCentreEntity(text, evidence, tools);
+  });
+  return blocks.length > 0 ? { version: "1", blocks } : null;
+}
+
+function unsupportedCentreEntity(
+  text: string,
+  evidence: PreschoolDiscoveryEvidenceItem[],
+  tools: CollectedSqlEvidence[],
+): boolean {
+  const references = [...text.matchAll(/\bcent(?:re|er)\s+([A-Za-z0-9_-]+)\b/giu)]
+    .map((match) => match[1]!.toLowerCase());
+  if (references.length === 0) return false;
+  const allowed = new Set<string>();
+  for (const item of evidence) {
+    for (const value of collectNamedCentreDimensions(item.values)) allowed.add(value.toLowerCase());
+  }
+  for (const tool of tools) {
+    for (const cell of tool.numericEvidence) {
+      for (const dimension of cell.dimensions) {
+        if (dimension.column && /(?:centre|center|parent_node|scope)/u.test(dimension.column.toLowerCase())) {
+          allowed.add(dimension.value.toLowerCase());
+        }
+      }
+    }
+  }
+  return references.some((reference) => !allowed.has(reference));
+}
+
+function stageFailure(events: AgUiEvent[], label: string): { status: "unavailable"; reason: string } | null {
+  const runError = events.findLast((event) => event.type === "RUN_ERROR");
+  if (runError) return { status: "unavailable", reason: friendlyReason(stringValue(runError.message) ?? `${label} Run failed.`) };
+  return events.some((event) => event.type === "RUN_FINISHED")
+    ? null
+    : { status: "unavailable", reason: `The ${label} Run did not finish.` };
+}
+
+function answerFromEvents(events: AgUiEvent[]): string {
+  return events.filter((event) => event.type === "TEXT_MESSAGE_CONTENT")
+    .map((event) => stringValue(event.delta) ?? "").join("").trim();
+}
+
+function coverageMatchesInput(input: PreschoolAiRunInput): boolean {
+  const binding = input.coverage.binding;
+  return input.coverage.contract.id === "preschool-overview-coverage"
+    && input.coverage.contract.revision === "v1"
+    && binding.projectId === input.projectId
+    && binding.scopeId === input.scopeId
+    && binding.dataSnapshotId === input.snapshotId
+    && binding.projectReleaseId === input.projectReleaseId
+    && binding.outputContractRevision === PRESCHOOL_AI_ACCEPTED_CONTRACT_REVISION
+    && binding.analysisPeriod.from === input.discoveryEvidence.identity.period.from
+    && binding.analysisPeriod.to === input.discoveryEvidence.identity.period.to
+    && binding.dataCutoff === input.discoveryEvidence.identity.period.to;
+}
+
 function buildPrompt(input: PreschoolAiRunInput): string {
   return [
     `Act as an autonomous energy analyst for ${input.projectName}, Scope ${input.scopeName}.`,
@@ -558,12 +930,12 @@ type PreschoolAiEventStreamInput = {
   runId: string;
 };
 
-export function resolvePreschoolAiEventStream(args: PreschoolAiEventStreamInput): PreschoolAiRunResult {
+export function resolvePreschoolAiEventStream(args: PreschoolAiEventStreamInput): PreschoolAiLegacyRunResult {
   return validatePreschoolAiEventStream(args).result;
 }
 
 export function validatePreschoolAiEventStream(args: PreschoolAiEventStreamInput): {
-  result: PreschoolAiRunResult;
+  result: PreschoolAiLegacyRunResult;
   issues: PreschoolAiValidationIssue[];
 } {
   const issues: PreschoolAiValidationIssue[] = [];
@@ -573,7 +945,7 @@ export function validatePreschoolAiEventStream(args: PreschoolAiEventStreamInput
 function resolvePreschoolAiEventStreamInternal(
   args: PreschoolAiEventStreamInput,
   validationIssues: PreschoolAiValidationIssue[],
-): PreschoolAiRunResult {
+): PreschoolAiLegacyRunResult {
   const events = parseEventStream(args.eventStream);
   const runError = events.findLast((event) => event.type === "RUN_ERROR");
   if (runError) return { status: "unavailable", reason: friendlyReason(stringValue(runError.message) ?? "AI Analyst Run failed.") };
