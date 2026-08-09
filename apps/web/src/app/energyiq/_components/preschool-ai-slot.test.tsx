@@ -100,9 +100,17 @@ describe("PreschoolAiSlot", () => {
   });
 
   it("keeps provider failure optional and the verified Overview unchanged", async () => {
-    await renderSlot(vi.fn().mockResolvedValue({ status: "unavailable", reason: "provider unavailable" }));
+    const onResult = vi.fn();
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        startRun={vi.fn().mockResolvedValue({ status: "unavailable", reason: "provider unavailable" })}
+        onResult={onResult}
+      />,
+    ));
     await act(async () => undefined);
 
+    expect(onResult).toHaveBeenCalledWith({ status: "unavailable", reason: "provider unavailable" });
     expect(container.textContent).toContain("AI analysis unavailable");
     expect(container.textContent).toContain("verified Overview remains available and unchanged");
   });

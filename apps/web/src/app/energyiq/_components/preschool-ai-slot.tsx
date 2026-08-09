@@ -26,6 +26,7 @@ export function PreschoolAiSlot({
   aiAnalystHref,
   mode = "live",
   savedResult,
+  onResult,
   onCompletedResult,
   startRun = getOrStartPreschoolAiRun,
 }: {
@@ -34,17 +35,20 @@ export function PreschoolAiSlot({
   aiAnalystHref?: string;
   mode?: "live" | "saved";
   savedResult?: Extract<PreschoolAiRunResult, { status: "available" }>;
+  onResult?: (result: PreschoolAiRunResult) => void;
   onCompletedResult?: (result: Extract<PreschoolAiRunResult, { status: "available" }>) => void;
   startRun?: (input: PreschoolAiRunInput, onProgress?: ProgressCallback) => Promise<PreschoolAiRunResult>;
 }) {
   const input = useMemo(() => buildPreschoolAiRunInput(snapshot), [snapshot]);
   const inputRef = useRef(input);
   const startRunRef = useRef(startRun);
+  const onResultRef = useRef(onResult);
   const onCompletedResultRef = useRef(onCompletedResult);
   const [settled, setSettled] = useState<Settled | null>(null);
   const [progress, setProgress] = useState<{ identityKey: string; stage: PreschoolAiProgress } | null>(null);
   inputRef.current = input;
   startRunRef.current = startRun;
+  onResultRef.current = onResult;
   onCompletedResultRef.current = onCompletedResult;
 
   useEffect(() => {
@@ -59,13 +63,15 @@ export function PreschoolAiSlot({
     }).then((result) => {
       if (active) {
         setSettled({ identityKey, result });
+        onResultRef.current?.(result);
         if (result.status === "available") onCompletedResultRef.current?.(result);
       }
     }).catch(() => {
-      if (active) setSettled({
-        identityKey,
-        result: { status: "unavailable", reason: "AI analysis is temporarily unavailable." },
-      });
+      if (active) {
+        const result = { status: "unavailable", reason: "AI analysis is temporarily unavailable." } as const;
+        setSettled({ identityKey, result });
+        onResultRef.current?.(result);
+      }
     });
     return () => { active = false; };
   }, [input?.identityKey, mode]);
@@ -198,9 +204,8 @@ function findingMatchesSection(finding: DisplayFinding, sectionId: PreschoolAiSe
   if (!isAcceptedFinding(finding)) return (finding.sectionId ?? "page-synthesis") === sectionId;
   return finding.placementTargets.some((target) => {
     if (target === "preschool.benchmark") return sectionId === "centre-benchmark";
-    if (target === "preschool.standby" || target === "preschool.operating-hours") {
-      return sectionId === "operating-behaviour";
-    }
+    if (target === "preschool.standby") return false;
+    if (target === "preschool.operating-hours") return sectionId === "operating-behaviour";
     if (target === "preschool.forecast") return sectionId === "planning-outlook";
     return sectionId === "page-synthesis";
   });

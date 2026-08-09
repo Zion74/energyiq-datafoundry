@@ -62,6 +62,7 @@
 
 | 文档 | 作用 |
 | --- | --- |
+| [2026-08-09 Preschool Overview AI 路线 B 集成记录](2026-08-09-Preschool-Overview-AI-路线B集成记录.md) | 两阶段 AI Artifact、bounded failed retry、Benchmark/Standby 薄适配、本地自动化证据，以及仍待完成的服务端执行、Provider 与 Chrome 边界 |
 | [2026-08-04 Ngee Ann 权威 Excel、Mapping 与 Facts Materialization 实施记录](2026-08-04-Ngee-Ann权威Excel-Mapping与Facts-Materialization实施记录.md) | 四份权威 workbook、18/18 Mapping、项目级 canonical interval rebuild、100,205 facts、固定 Golden、Admin readiness 与 #4/#24/#19 边界 |
 | [可信查询范围与 Energy Fact 接入记录](2026-07-31-可信查询范围与Energy-Fact接入记录.md) | Ngee Ann/Preschool 事实接入、DuckDB Scope 约束、SQL allowlist 和验证证据 |
 | [2026-08-01 Admin 与 Tier 批次 0–1 实施记录](2026-08-01-Admin-Tier-批次0-1实施记录.md) | Project/Tier/Node Draft、Validate、Publish、样板迁移、测试和本地复现证据 |

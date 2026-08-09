@@ -9,6 +9,12 @@ import { EnergyIcon } from "./icons";
 import { projectExplorerHrefForScope } from "./overview-explorer-handoff";
 import { PreschoolEvidenceLink } from "./preschool-evidence-link";
 import { PreschoolAiSlot } from "./preschool-ai-slot";
+import type { PreschoolAiRunResult } from "./preschool-ai-run";
+import { buildPreschoolOverviewCoverage } from "./preschool-ai-coverage";
+import {
+  adaptPreschoolAiArtifactToSectionInterpretation,
+  type PreschoolSectionInterpretationView,
+} from "./preschool-section-interpretation-adapter";
 import {
   buildPreschoolOverviewViewModel,
   type PreschoolDecisionSummaryItem,
@@ -36,27 +42,7 @@ export type PreschoolOverviewRendererState =
     snapshot: EnergyProjectAnalysisSnapshotDto;
   };
 
-type PreschoolSectionInterpretationIdentity = {
-  dataSnapshotId: string;
-  projectReleaseId: string;
-  period: {
-    start: string;
-    endExclusive: string;
-  };
-};
-
-export type PreschoolBenchmarkInterpretation =
-  | ({
-    status: "available";
-    headline: string;
-    summary: string;
-    actions?: string[];
-  } & PreschoolSectionInterpretationIdentity)
-  | ({ status: "pending" } & PreschoolSectionInterpretationIdentity)
-  | {
-    status: "unavailable";
-    detail?: string;
-  };
+export type PreschoolBenchmarkInterpretation = PreschoolSectionInterpretationView;
 
 export type PreschoolStandbyInterpretation = PreschoolBenchmarkInterpretation;
 
@@ -83,6 +69,17 @@ export function PreschoolOverviewRenderer({
   benchmarkInterpretation?: PreschoolBenchmarkInterpretation;
   standbyInterpretation?: PreschoolStandbyInterpretation;
 }) {
+  const [liveAiResult, setLiveAiResult] = React.useState<PreschoolAiRunResult | undefined>();
+  const readySnapshotIdentity = state.status === "ready"
+    ? [
+        state.snapshot.dataSnapshot.id,
+        state.snapshot.projectRelease.id,
+        state.snapshot.context.primaryPeriod.start,
+        state.snapshot.context.primaryPeriod.endExclusive,
+      ].join("|")
+    : state.status;
+  React.useEffect(() => setLiveAiResult(undefined), [readySnapshotIdentity]);
+
   if (state.status !== "ready") {
     const meta = {
       loading: { label: "Loading", icon: "analysis" as const, tone: "text-muted", surface: "border-border bg-surface" },
@@ -124,6 +121,20 @@ export function PreschoolOverviewRenderer({
   const savedAiResult = savedAiArtifact?.rendererKey === "preschool-overview"
     ? savedAiArtifact.result as unknown as Extract<import("./preschool-ai-run").PreschoolAiRunResult, { status: "available" }>
     : undefined;
+  const coverage = buildPreschoolOverviewCoverage(state.snapshot);
+  const sectionAiResult = aiSlotMode === "saved" ? savedAiResult : liveAiResult;
+  const adaptedBenchmarkInterpretation = adaptPreschoolAiArtifactToSectionInterpretation({
+    candidate: sectionAiResult,
+    expected: coverage?.binding ?? null,
+    target: "preschool.benchmark",
+    mode: aiSlotMode,
+  });
+  const adaptedStandbyInterpretation = adaptPreschoolAiArtifactToSectionInterpretation({
+    candidate: sectionAiResult,
+    expected: coverage?.binding ?? null,
+    target: "preschool.standby",
+    mode: aiSlotMode,
+  });
   const statusClass = view.dataStatus.status === "complete"
     ? "border-step-success/30 bg-step-success-soft text-step-success"
     : view.dataStatus.status === "partial"
@@ -285,6 +296,7 @@ export function PreschoolOverviewRenderer({
             sectionId="page-synthesis"
             mode={aiSlotMode}
             {...(savedAiResult ? { savedResult: savedAiResult } : {})}
+            onResult={setLiveAiResult}
             {...(onAiArtifactChange ? {
               onCompletedResult: (result: Extract<import("./preschool-ai-run").PreschoolAiRunResult, { status: "available" }>) => onAiArtifactChange({
                 contract: "energyiq-saved-ai-result@1",
@@ -315,7 +327,7 @@ export function PreschoolOverviewRenderer({
         />
         <BenchmarkInterpretationSlot
           snapshot={state.snapshot}
-          interpretation={benchmarkInterpretation}
+          interpretation={benchmarkInterpretation ?? adaptedBenchmarkInterpretation}
         />
         {view.benchmark.status === "provisional" ? (
           <>
@@ -399,7 +411,7 @@ export function PreschoolOverviewRenderer({
         />
         <StandbyInterpretationSlot
           snapshot={state.snapshot}
-          interpretation={standbyInterpretation}
+          interpretation={standbyInterpretation ?? adaptedStandbyInterpretation}
         />
         {view.operational.status === "available" ? (
           <>
@@ -819,7 +831,14 @@ function SnapshotInterpretationSlot({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h4 className="text-sm font-semibold text-foreground">{title}</h4>
-            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-light">Snapshot-bound</span>
+            <span className="flex flex-wrap items-center justify-end gap-2">
+              {status === "available" && interpretation?.status === "available" && interpretation.epistemicLevel ? (
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${sectionInterpretationLevelClass(interpretation.epistemicLevel)}`}>
+                  {sectionInterpretationLevelLabel(interpretation.epistemicLevel)}
+                </span>
+              ) : null}
+              <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-light">Snapshot-bound</span>
+            </span>
           </div>
           {status === "available" && interpretation?.status === "available" ? (
             <div className="mt-2" {...contentData}>
@@ -844,6 +863,18 @@ function SnapshotInterpretationSlot({
       </div>
     </aside>
   );
+}
+
+function sectionInterpretationLevelLabel(level: NonNullable<Extract<PreschoolBenchmarkInterpretation, { status: "available" }>["epistemicLevel"]>): string {
+  if (level === "verified") return "Verified";
+  if (level === "hypothesis") return "Hypothesis";
+  return "Explore";
+}
+
+function sectionInterpretationLevelClass(level: NonNullable<Extract<PreschoolBenchmarkInterpretation, { status: "available" }>["epistemicLevel"]>): string {
+  if (level === "verified") return "bg-step-success-soft text-step-success";
+  if (level === "hypothesis") return "bg-step-warning-soft text-step-warning";
+  return "bg-primary/10 text-primary";
 }
 
 type BenchmarkDistributionView = BenchmarkView["distributions"][number];

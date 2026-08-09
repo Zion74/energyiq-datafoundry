@@ -195,6 +195,15 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
         claimed: true,
         artifact: { status: "running", attempt_count: 2, lease_owner: "api-2" },
       });
+      expect(store.energyIq.overviewAiArtifacts.claim({
+        identity: identity("snapshot-a"),
+        workerId: "api-3",
+        leaseMs: 60_000,
+        now: "2026-08-08T12:02:00.000Z",
+      })).toMatchObject({
+        claimed: false,
+        artifact: { status: "failed", attempt_count: 2, error_code: "ATTEMPT_LIMIT_EXCEEDED" },
+      });
     } finally {
       metadata?.close();
       rmSync(root, { recursive: true, force: true });
@@ -298,6 +307,45 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
       })).toMatchObject({
         claimed: false,
         artifact: { status: "available", attempt_count: 2 },
+      });
+
+      store.energyIq.overviewAiArtifacts.queue({
+        identity: identity("snapshot-exhausted"),
+        triggeredBy: "dev-user",
+        now: "2026-08-08T12:01:00.000Z",
+      });
+      store.energyIq.overviewAiArtifacts.claim({
+        identity: identity("snapshot-exhausted"),
+        workerId: "api-1",
+        leaseMs: 60_000,
+        now: "2026-08-08T12:01:01.000Z",
+      });
+      store.energyIq.overviewAiArtifacts.fail({
+        identity: identity("snapshot-exhausted"),
+        workerId: "api-1",
+        errorCode: "PROVIDER_TEMPORARY",
+        now: "2026-08-08T12:01:02.000Z",
+      });
+      store.energyIq.overviewAiArtifacts.claim({
+        identity: identity("snapshot-exhausted"),
+        workerId: "api-2",
+        leaseMs: 60_000,
+        now: "2026-08-08T12:01:03.000Z",
+      });
+      store.energyIq.overviewAiArtifacts.fail({
+        identity: identity("snapshot-exhausted"),
+        workerId: "api-2",
+        errorCode: "PROVIDER_TEMPORARY",
+        now: "2026-08-08T12:01:04.000Z",
+      });
+      expect(store.energyIq.overviewAiArtifacts.claim({
+        identity: identity("snapshot-exhausted"),
+        workerId: "api-3",
+        leaseMs: 60_000,
+        now: "2026-08-08T12:01:05.000Z",
+      })).toMatchObject({
+        claimed: false,
+        artifact: { status: "failed", attempt_count: 2, error_code: "PROVIDER_TEMPORARY" },
       });
     } finally {
       metadata?.close();

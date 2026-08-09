@@ -25,6 +25,8 @@ export type EnergyIqOverviewAiArtifactIdentity = {
 
 export type EnergyIqOverviewAiArtifactStatus = "queued" | "running" | "available" | "failed";
 
+const MAX_OVERVIEW_AI_ARTIFACT_ATTEMPTS = 2;
+
 export type EnergyIqOverviewAiArtifactRecord = {
   id: string;
   identity_hash: string;
@@ -183,10 +185,24 @@ export class EnergyIqOverviewAiArtifactStore {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const current = this.get(input.identity);
-      const reclaimable = current.status === "running"
+      const leaseExpired = current.status === "running"
         && Boolean(current.lease_expires_at)
         && Date.parse(current.lease_expires_at!) <= Date.parse(now);
-      const retryable = current.status === "failed";
+      const hasAttemptsRemaining = current.attempt_count < MAX_OVERVIEW_AI_ARTIFACT_ATTEMPTS;
+      if (leaseExpired && !hasAttemptsRemaining) {
+        this.db.prepare(`
+          UPDATE energyiq_overview_ai_artifacts
+          SET status = 'failed', lease_owner = NULL, lease_expires_at = NULL,
+              error_code = 'ATTEMPT_LIMIT_EXCEEDED', updated_at = ?
+          WHERE id = ?
+        `).run(now, current.id);
+        const artifact = this.get(input.identity);
+        this.db.exec("COMMIT");
+        return { claimed: false, artifact };
+      }
+      const reclaimable = hasAttemptsRemaining
+        && leaseExpired;
+      const retryable = hasAttemptsRemaining && current.status === "failed";
       if (current.status !== "queued" && !reclaimable && !retryable) {
         this.db.exec("COMMIT");
         return { claimed: false, artifact: current };

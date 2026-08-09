@@ -86,8 +86,8 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     container.innerHTML = markup;
 
     const benchmarkSection = container.querySelector<HTMLElement>("#preschool-benchmark-analysis")!;
-    expect(benchmarkSection.querySelector("[data-benchmark-interpretation-status]")?.getAttribute("data-benchmark-interpretation-status")).toBe("unavailable");
-    expect(benchmarkSection.textContent).toContain("No matching AI interpretation is available for this Snapshot.");
+    expect(benchmarkSection.querySelector("[data-benchmark-interpretation-status]")?.getAttribute("data-benchmark-interpretation-status")).toBe("pending");
+    expect(benchmarkSection.textContent).toContain("AI interpretation pending for this Snapshot.");
     expect(benchmarkSection.textContent).toContain("2.1 — Centre Efficiency Metrics");
     expect(benchmarkSection.querySelectorAll("[data-benchmark-priority-label]")).toHaveLength(3);
     expect([...benchmarkSection.querySelectorAll("[data-benchmark-priority-label]")].map((node) => node.textContent?.trim())).toEqual([
@@ -205,8 +205,8 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     container.innerHTML = markup;
     const standbySection = container.querySelector<HTMLElement>("#preschool-standby-wastage")!;
 
-    expect(standbySection.querySelector("[data-standby-interpretation-status]")?.getAttribute("data-standby-interpretation-status")).toBe("unavailable");
-    expect(standbySection.textContent).toContain("No matching AI interpretation is available for this Snapshot.");
+    expect(standbySection.querySelector("[data-standby-interpretation-status]")?.getAttribute("data-standby-interpretation-status")).toBe("pending");
+    expect(standbySection.textContent).toContain("AI interpretation pending for this Snapshot.");
     expect(standbySection.querySelectorAll("[data-standby-kpis] > div")).toHaveLength(5);
     expect(standbySection.textContent).toContain("3,103.78 kWh");
     expect(standbySection.textContent).toContain("S$846.40");
