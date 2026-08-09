@@ -100,6 +100,7 @@ export {
   type EnergyFactMaterializationBatchWrite,
   type EnergyFactProjectAudit,
   type EnergyFactProjectMaterializationResult,
+  type EnergyFactProjectMaterializationTimings,
   type EnergyFactProjectMaterializationWrite,
   type EnergyFactProjectState,
   type EnergyIntervalFactWrite,

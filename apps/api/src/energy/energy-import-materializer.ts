@@ -14,6 +14,9 @@ import { fingerprintEnergyIqMeterMapping } from "@datafoundry/metadata";
 
 import { readEnergyExcelWorkbook } from "./energy-excel-import.js";
 
+const zonedPartsFormatters = new Map<string, Intl.DateTimeFormat>();
+const weekdayFormatters = new Map<string, Intl.DateTimeFormat>();
+
 export type EnergyImportMaterializationSummary = {
   rawRowCount: number;
   normalizedReadingCount: number;
@@ -151,7 +154,12 @@ export const buildEnergyExcelMaterialization = async (input: {
   const intervalToleranceMinutes = Math.max(0.1, typicalIntervalMinutes * 0.01);
   const readingsByMeter = new Map<string, EnergyNormalizedReadingWrite[]>();
   for (const reading of normalizedReadings) {
-    readingsByMeter.set(reading.meterPointId, [...(readingsByMeter.get(reading.meterPointId) ?? []), reading]);
+    const meterReadings = readingsByMeter.get(reading.meterPointId);
+    if (meterReadings) {
+      meterReadings.push(reading);
+    } else {
+      readingsByMeter.set(reading.meterPointId, [reading]);
+    }
   }
   for (const readings of readingsByMeter.values()) {
     readings.sort((left, right) => left.eventTime.localeCompare(right.eventTime));
@@ -314,7 +322,10 @@ const localTimestampToUtc = (value: string, timezone: string): string => {
 const localParts = (timestamp: string, timezone: string): { date: string; hour: number; dayType: string } => {
   const date = new Date(timestamp);
   const parts = zonedParts(date, timezone);
-  const weekday = new Intl.DateTimeFormat("en-US", { timeZone: timezone, weekday: "short" }).format(date);
+  const weekday = formatterFor(weekdayFormatters, timezone, {
+    timeZone: timezone,
+    weekday: "short",
+  }).format(date);
   return {
     date: `${parts.year.toString().padStart(4, "0")}-${parts.month.toString().padStart(2, "0")}-${parts.day.toString().padStart(2, "0")}`,
     hour: parts.hour,
@@ -323,7 +334,7 @@ const localParts = (timestamp: string, timezone: string): { date: string; hour: 
 };
 
 const zonedParts = (date: Date, timezone: string) => {
-  const values = new Map(new Intl.DateTimeFormat("en-CA", {
+  const formatter = formatterFor(zonedPartsFormatters, timezone, {
     timeZone: timezone,
     year: "numeric",
     month: "2-digit",
@@ -332,7 +343,8 @@ const zonedParts = (date: Date, timezone: string) => {
     minute: "2-digit",
     second: "2-digit",
     hourCycle: "h23",
-  }).formatToParts(date).map((part) => [part.type, part.value]));
+  });
+  const values = new Map(formatter.formatToParts(date).map((part) => [part.type, part.value]));
   return {
     year: Number(values.get("year")),
     month: Number(values.get("month")),
@@ -341,6 +353,18 @@ const zonedParts = (date: Date, timezone: string) => {
     minute: Number(values.get("minute")),
     second: Number(values.get("second")),
   };
+};
+
+const formatterFor = (
+  cache: Map<string, Intl.DateTimeFormat>,
+  timezone: string,
+  options: Intl.DateTimeFormatOptions,
+): Intl.DateTimeFormat => {
+  const cached = cache.get(timezone);
+  if (cached) return cached;
+  const formatter = new Intl.DateTimeFormat("en-CA", options);
+  cache.set(timezone, formatter);
+  return formatter;
 };
 
 const countQuality = (codes: string[]): Record<string, number> => {

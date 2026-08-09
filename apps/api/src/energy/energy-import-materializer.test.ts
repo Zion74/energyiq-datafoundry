@@ -202,6 +202,69 @@ describe("buildEnergyExcelMaterialization", () => {
     expect(result.summary.qualityCounts).not.toHaveProperty("gap");
   });
 
+  it("keeps interval semantics stable when source readings arrive out of order", async () => {
+    const workbook = await writeXlsxFile([
+      [text("Device Name"), text("Time"), text("Active Energy")],
+      [text("Meter A"), date("2026-05-01T00:30:00Z"), number(101)],
+      [text("Meter A"), date("2026-05-01T00:00:00Z"), number(100)],
+      [text("Meter A"), date("2026-05-01T00:15:00Z"), number(100.5)],
+    ]).toBuffer();
+
+    const result = await buildEnergyExcelMaterialization({
+      content: workbook,
+      batch: batch("batch-out-of-order", "project-out-of-order", "o".repeat(64)),
+      document: document(),
+      mappingRevision: 4,
+      timezone: "Asia/Singapore",
+    });
+
+    expect(result.write.intervalFacts.map((fact) => ({
+      from: fact.intervalStart,
+      to: fact.intervalEnd,
+      usageKwh: fact.usageKwh,
+      localDate: fact.localDate,
+      localHour: fact.localHour,
+    }))).toEqual([
+      {
+        from: "2026-04-30T16:00:00.000Z",
+        to: "2026-04-30T16:15:00.000Z",
+        usageKwh: 0.5,
+        localDate: "2026-05-01",
+        localHour: 0,
+      },
+      {
+        from: "2026-04-30T16:15:00.000Z",
+        to: "2026-04-30T16:30:00.000Z",
+        usageKwh: 0.5,
+        localDate: "2026-05-01",
+        localHour: 0,
+      },
+    ]);
+  });
+
+  it("keeps cached date formatters isolated by Project timezone", async () => {
+    const workbook = await writeXlsxFile([
+      [text("Device Name"), text("Time"), text("Active Energy")],
+      [text("Meter A"), date("2026-05-01T00:00:00Z"), number(100)],
+      [text("Meter A"), date("2026-05-01T00:15:00Z"), number(100.5)],
+    ]).toBuffer();
+    const buildForTimezone = (timezone: string, suffix: string) => buildEnergyExcelMaterialization({
+      content: workbook,
+      batch: batch(`batch-${suffix}`, `project-${suffix}`, suffix.repeat(64)),
+      document: document(),
+      mappingRevision: 4,
+      timezone,
+    });
+
+    const singapore = await buildForTimezone("Asia/Singapore", "s");
+    const utc = await buildForTimezone("UTC", "u");
+
+    expect(singapore.write.normalizedReadings[0]?.eventTime).toBe("2026-04-30T16:00:00.000Z");
+    expect(utc.write.normalizedReadings[0]?.eventTime).toBe("2026-05-01T00:00:00.000Z");
+    expect(singapore.write.intervalFacts[0]).toMatchObject({ localDate: "2026-05-01", localHour: 0 });
+    expect(utc.write.intervalFacts[0]).toMatchObject({ localDate: "2026-05-01", localHour: 0 });
+  });
+
   it("requires a confirmed Mapping", async () => {
     const workbook = await writeXlsxFile([
       [text("Device Name"), text("Time"), text("Active Energy")],

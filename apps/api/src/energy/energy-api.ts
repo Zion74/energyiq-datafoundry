@@ -295,6 +295,7 @@ export const handleEnergyApiRequest = async (
             dataSnapshot: toEnergyDataSnapshotDto(materialized.snapshot),
             readiness: await createProjectDataReadiness(context, projectId, materialized.document),
             duplicate: materialized.duplicate,
+            ...(materialized.timings ? { materializationTimings: materialized.timings } : {}),
             ...(overviewAiArtifact
               ? {
                   overviewAiArtifact: {

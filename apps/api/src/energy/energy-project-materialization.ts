@@ -51,6 +51,15 @@ export type EnergyProjectManifestMaterialization = {
   snapshot: EnergyIqDataSnapshotRecord;
   document: EnergyIqProjectSetupDocument;
   duplicate: boolean;
+  timings?: EnergyProjectManifestMaterializationTimings;
+};
+
+export type EnergyProjectManifestMaterializationTimings = {
+  parseNormalizeByBatch: Array<{ batchId: string; durationMs: number }>;
+  sourceWriteMs: number;
+  canonicalRebuildMs: number;
+  integrityAndCheckpointMs: number;
+  totalMs: number;
 };
 
 export const materializeEnergyProjectManifest = async (input: {
@@ -65,6 +74,7 @@ export const materializeEnergyProjectManifest = async (input: {
     initialProject.workspace_id,
     input.projectId,
     async () => {
+      const totalStartedAt = performance.now();
       const project = input.context.metadataStore.energyIq.getProject(input.projectId);
       const draft = input.context.metadataStore.energyIq.projectSetup.getDraft({
         project_id: input.projectId,
@@ -131,6 +141,7 @@ export const materializeEnergyProjectManifest = async (input: {
       }
 
       const materializations = await Promise.all(batches.map(async (batch) => {
+        const parseNormalizeStartedAt = performance.now();
         if (batch.source_kind !== "excel" || !batch.file_asset_ref_id) {
           throw new Error(`ENERGYIQ_IMPORT_BATCH_INVALID:${batch.id}`);
         }
@@ -148,6 +159,7 @@ export const materializeEnergyProjectManifest = async (input: {
             mappingRevision: draft.revision,
             timezone: draft.document.project.timezone,
           }),
+          parseNormalizeMs: elapsedMs(parseNormalizeStartedAt),
         };
       }));
       const metadataMaterializations = materializations.map(({ batch, result }) => ({
@@ -196,6 +208,14 @@ export const materializeEnergyProjectManifest = async (input: {
         snapshot: completed.snapshot,
         document: draft.document,
         duplicate: false,
+        timings: {
+          parseNormalizeByBatch: materializations.map(({ batch, parseNormalizeMs }) => ({
+            batchId: batch.id,
+            durationMs: parseNormalizeMs,
+          })),
+          ...persisted.timings,
+          totalMs: elapsedMs(totalStartedAt),
+        },
       };
     },
   );
@@ -256,3 +276,5 @@ const sameSourceSet = (left: readonly string[], right: readonly string[]): boole
 };
 
 const normalizeSha = (value: string): string => value.trim().toLocaleLowerCase();
+
+const elapsedMs = (startedAt: number): number => Math.round((performance.now() - startedAt) * 1_000) / 1_000;
