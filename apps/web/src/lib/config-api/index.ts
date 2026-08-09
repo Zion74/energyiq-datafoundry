@@ -79,7 +79,6 @@ export type {
   EnergyProjectAnalysisScopeMetadataDto,
   EnergyProjectAnalysisSnapshotDto,
   EnergyOverviewAiArtifactDto,
-  EnergyOverviewAiArtifactClaimDto,
   PreschoolDecisionSignalsDto,
   NgeeAnnDecisionPrioritiesDto,
   NgeeAnnDecisionPriorityDto,

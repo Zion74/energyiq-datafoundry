@@ -6,6 +6,7 @@ import {
   buildPreschoolAiRunInput,
   executePreschoolAiRun,
   getOrStartPreschoolAiRun,
+  retryPreschoolAiRun,
   resetPreschoolAiRunsForTests,
   resolvePreschoolAiEventStream,
   resolvePreschoolAiWorkflowEventStreams,
@@ -1425,34 +1426,23 @@ describe("Preschool AI Run", () => {
 
   it("single-flights identical page identities and fails soft", async () => {
     const input = requiredInput();
-    vi.spyOn(configApi, "getRunDefaults").mockResolvedValue({ activeLlmProfileId: "profile-1" } as never);
-    vi.spyOn(configApi, "claimEnergyOverviewAiArtifact").mockResolvedValue({
-      status: "owner",
-      leaseToken: "lease-owner",
-      artifact: {
-        id: "artifact-test",
-        status: "running",
-        dataSnapshotId: input.snapshotId,
-        projectReleaseId: input.projectReleaseId,
-        modelProfileId: "profile-1",
-      },
+    const available = resolvePreschoolAiWorkflowEventStreams({
+      input,
+      providerProfileId: "profile-shared",
+      investigatorRunId: "run-investigator-shared",
+      investigatorEventStream: workflowEnvelopeEventStream("candidates", []),
+      editorRunId: "run-editor-shared",
+      editorEventStream: workflowEnvelopeEventStream("findings", [], { trace: [] }),
     });
-    vi.spyOn(configApi, "completeEnergyOverviewAiArtifact").mockImplementation(async (_projectId, _scopeId, _leaseToken, result) => ({
+    if (available.status !== "available") throw new Error("Expected a valid shared fixture");
+    const readSpy = vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockResolvedValue({
       id: "artifact-test",
       status: "available",
       dataSnapshotId: input.snapshotId,
       projectReleaseId: input.projectReleaseId,
-      result,
-    }));
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(workflowEnvelopeEventStream("candidates", []), {
-        status: 200,
-        headers: { "Content-Type": "text/event-stream" },
-      }))
-      .mockResolvedValueOnce(new Response(workflowEnvelopeEventStream("findings", [], { trace: [] }), {
-        status: 200,
-        headers: { "Content-Type": "text/event-stream" },
-      }));
+      result: available,
+    });
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     const progress: PreschoolAiProgress[] = [];
@@ -1460,10 +1450,12 @@ describe("Preschool AI Run", () => {
     const second = getOrStartPreschoolAiRun(input);
     expect(first).toBe(second);
     await expect(first).resolves.toMatchObject({ status: "available" });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(readSpy).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(progress).toEqual(["inspecting", "validating", "drafting"]);
 
     resetPreschoolAiRunsForTests();
+    vi.spyOn(configApi, "getRunDefaults").mockResolvedValue({ activeLlmProfileId: "profile-1" } as never);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 503 })));
     await expect(executePreschoolAiRun(input)).resolves.toEqual({
       status: "unavailable",
@@ -1474,57 +1466,38 @@ describe("Preschool AI Run", () => {
   it("lets two client identities share one server-owned two-stage Provider execution", async () => {
     const firstInput = requiredInput();
     const secondInput = { ...firstInput, identityKey: `second-authorized-user:${firstInput.identityKey}` };
-    const claimSpy = vi.spyOn(configApi, "claimEnergyOverviewAiArtifact")
+    const available = resolvePreschoolAiWorkflowEventStreams({
+      input: firstInput,
+      providerProfileId: "profile-shared",
+      investigatorRunId: "run-investigator-shared",
+      investigatorEventStream: workflowEnvelopeEventStream("candidates", []),
+      editorRunId: "run-editor-shared",
+      editorEventStream: workflowEnvelopeEventStream("findings", [], { trace: [] }),
+    });
+    if (available.status !== "available") throw new Error("Expected a valid shared fixture");
+    const readSpy = vi.spyOn(configApi, "getEnergyOverviewAiArtifact")
       .mockResolvedValueOnce({
-        status: "owner",
-        leaseToken: "lease-owner",
-        artifact: {
-          id: "artifact-shared",
-          status: "running",
-          dataSnapshotId: firstInput.snapshotId,
-          projectReleaseId: firstInput.projectReleaseId,
-          modelProfileId: "profile-1",
-        },
+        id: "artifact-shared",
+        status: "running",
+        dataSnapshotId: firstInput.snapshotId,
+        projectReleaseId: firstInput.projectReleaseId,
+        modelProfileId: "profile-1",
       })
       .mockResolvedValueOnce({
-        status: "waiting",
-        artifact: {
-          id: "artifact-shared",
-          status: "running",
-          dataSnapshotId: firstInput.snapshotId,
-          projectReleaseId: firstInput.projectReleaseId,
-          modelProfileId: "profile-1",
-        },
+        id: "artifact-shared",
+        status: "running",
+        dataSnapshotId: firstInput.snapshotId,
+        projectReleaseId: firstInput.projectReleaseId,
+        modelProfileId: "profile-1",
+      })
+      .mockResolvedValue({
+        id: "artifact-shared",
+        status: "available",
+        dataSnapshotId: firstInput.snapshotId,
+        projectReleaseId: firstInput.projectReleaseId,
+        result: available,
       });
-    let releaseWaitingClient!: () => void;
-    const ownerCompleted = new Promise<void>((resolve) => { releaseWaitingClient = resolve; });
-    let stored: Awaited<ReturnType<typeof configApi.getEnergyOverviewAiArtifact>> | null = null;
-    vi.spyOn(configApi, "completeEnergyOverviewAiArtifact")
-      .mockImplementation(async (_projectId, _scopeId, _leaseToken, result) => {
-        stored = {
-          id: "artifact-shared",
-          status: "available",
-          dataSnapshotId: firstInput.snapshotId,
-          projectReleaseId: firstInput.projectReleaseId,
-          result,
-        };
-        releaseWaitingClient();
-        return stored;
-      });
-    vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockImplementation(async () => {
-      await ownerCompleted;
-      if (!stored) throw new Error("Expected owner completion");
-      return stored;
-    });
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(workflowEnvelopeEventStream("candidates", []), {
-        status: 200,
-        headers: { "Content-Type": "text/event-stream" },
-      }))
-      .mockResolvedValueOnce(new Response(workflowEnvelopeEventStream("findings", [], { trace: [] }), {
-        status: 200,
-        headers: { "Content-Type": "text/event-stream" },
-      }));
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     const [first, second] = await Promise.all([
@@ -1534,25 +1507,13 @@ describe("Preschool AI Run", () => {
 
     expect(first).toMatchObject({ status: "available" });
     expect(second).toEqual(first);
-    expect(claimSpy).toHaveBeenCalledTimes(2);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(claimSpy.mock.invocationCallOrder[0]).toBeLessThan(fetchMock.mock.invocationCallOrder[0]!);
-    expect(configApi.completeEnergyOverviewAiArtifact).toHaveBeenCalledTimes(1);
+    expect(readSpy).toHaveBeenCalledTimes(4);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("fails soft when a non-owner waits past the shared Artifact deadline", async () => {
     vi.useFakeTimers();
     const input = requiredInput();
-    vi.spyOn(configApi, "claimEnergyOverviewAiArtifact").mockResolvedValue({
-      status: "waiting",
-      artifact: {
-        id: "artifact-running",
-        status: "running",
-        dataSnapshotId: input.snapshotId,
-        projectReleaseId: input.projectReleaseId,
-        modelProfileId: "profile-1",
-      },
-    });
     vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockResolvedValue({
       id: "artifact-running",
       status: "running",
@@ -1569,6 +1530,7 @@ describe("Preschool AI Run", () => {
     await expect(result).resolves.toEqual({
       status: "unavailable",
       reason: "AI analysis is temporarily unavailable. The verified Overview remains available.",
+      retryable: true,
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -1584,15 +1546,12 @@ describe("Preschool AI Run", () => {
       editorEventStream: workflowEnvelopeEventStream("findings", [], { trace: [] }),
     });
     if (available.status !== "available") throw new Error("Expected a valid shared fixture");
-    vi.spyOn(configApi, "claimEnergyOverviewAiArtifact").mockResolvedValue({
+    vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockResolvedValue({
+      id: "artifact-shared",
       status: "available",
-      artifact: {
-        id: "artifact-shared",
-        status: "available",
-        dataSnapshotId: input.snapshotId,
-        projectReleaseId: input.projectReleaseId,
-        result: available,
-      },
+      dataSnapshotId: input.snapshotId,
+      projectReleaseId: input.projectReleaseId,
+      result: available,
     });
     const sessionSpy = vi.spyOn(configApi, "getSessionConversation");
     const fetchMock = vi.fn();
@@ -1603,6 +1562,27 @@ describe("Preschool AI Run", () => {
       runId: "run-editor-shared",
     });
     expect(sessionSpy).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("uses the explicit server retry endpoint without submitting canonical content", async () => {
+    const input = requiredInput();
+    vi.spyOn(configApi, "retryEnergyOverviewAiArtifact").mockResolvedValue({
+      id: "artifact-failed",
+      status: "failed",
+      dataSnapshotId: input.snapshotId,
+      projectReleaseId: input.projectReleaseId,
+      attemptCount: 2,
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(retryPreschoolAiRun(input)).resolves.toEqual({
+      status: "unavailable",
+      reason: "AI analysis is temporarily unavailable. The verified Overview remains available.",
+      retryable: false,
+    });
+    expect(configApi.retryEnergyOverviewAiArtifact).toHaveBeenCalledWith(input.projectId, input.scopeId);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

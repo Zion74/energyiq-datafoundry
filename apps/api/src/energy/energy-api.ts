@@ -50,7 +50,6 @@ import {
 import { materializeEnergyProjectManifest } from "./energy-project-materialization.js";
 import {
   queueCurrentProjectOverviewAiArtifact,
-  resolveCurrentOverviewAiArtifactIdentity,
 } from "./overview-ai-artifact.js";
 import { EnergyAdminAccessService } from "./energy-admin-access.js";
 import {
@@ -68,7 +67,6 @@ import {
 } from "./energy-query-context.js";
 
 const EXPLORER_ANALYSIS_CACHE_LIMIT = 100;
-const OVERVIEW_AI_CLIENT_LEASE_MS = 12 * 60 * 1_000;
 const explorerAnalysisCache = new Map<string, EnergyScopeAnalysis>();
 const explorerAnchoredWindowCache = new Map<string, { localFrom: string; localTo: string }>();
 
@@ -205,102 +203,27 @@ export const handleEnergyApiRequest = async (
       const project = context.metadataStore.energyIq.getProject(projectId);
       const scopeId = new URL(request.url ?? "/", "http://127.0.0.1")
         .searchParams.get("scopeId") ?? project.root_scope_id;
-      const identity = resolveCurrentOverviewAiArtifactIdentity({
-        metadataStore: context.metadataStore,
+      if (!context.overviewAiWorkflow) throw new Error("ENERGYIQ_OVERVIEW_AI_SERVER_WORKFLOW_REQUIRED");
+      const identity = await context.overviewAiWorkflow.resolveCurrentIdentity({
         projectId,
         scopeId,
         user,
       });
       if (segments.length === 3 && request.method === "GET") {
-        const artifact = context.metadataStore.energyIq.overviewAiArtifacts.find(identity);
+        const artifact = await context.overviewAiWorkflow.execute({ identity, user, retry: false });
         return {
           status: 200,
-          body: createSuccessResult(artifact
-            ? toOverviewAiArtifactDto(artifact)
-            : {
-                status: "missing",
-                dataSnapshotId: identity.dataSnapshotId,
-                projectReleaseId: identity.projectReleaseId,
-              }),
+          body: createSuccessResult(toOverviewAiArtifactDto(artifact)),
         };
       }
-      if (segments.length === 4 && segments[3] === "claim" && request.method === "POST") {
-        const current = context.metadataStore.energyIq.overviewAiArtifacts.find(identity)
-          ?? context.metadataStore.energyIq.overviewAiArtifacts.queue({
-            identity,
-            triggeredBy: user.id,
-          });
-        if (current.status === "available") {
-          return {
-            status: 200,
-            body: createSuccessResult({
-              status: current.status,
-              artifact: toOverviewAiArtifactDto(current),
-            }),
-          };
-        }
-        const leaseToken = `overview-ai-client:${randomUUID()}`;
-        const claim = context.metadataStore.energyIq.overviewAiArtifacts.claim({
-          identity,
-          workerId: leaseToken,
-          leaseMs: OVERVIEW_AI_CLIENT_LEASE_MS,
-        });
-        if (claim.claimed) {
-          return {
-            status: 200,
-            body: createSuccessResult({
-              status: "owner",
-              leaseToken,
-              artifact: toOverviewAiArtifactDto(claim.artifact),
-            }),
-          };
-        }
-        const status = claim.artifact.status === "available" || claim.artifact.status === "failed"
-          ? claim.artifact.status
-          : "waiting";
-        return {
-          status: 200,
-          body: createSuccessResult({ status, artifact: toOverviewAiArtifactDto(claim.artifact) }),
-        };
-      }
-      if (segments.length === 4 && segments[3] === "complete" && request.method === "POST") {
-        const body = requireRecord(await readJsonBody(request));
-        const leaseToken = requireNonEmptyString(body.leaseToken, "ENERGYIQ_OVERVIEW_AI_ARTIFACT_LEASE_REQUIRED");
-        const result = requireRecord(body.result);
-        if (result.status !== "available"
-          || typeof result.runId !== "string"
-          || !result.runId.trim()
-          || !Array.isArray(result.findings)) {
-          throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
-        }
-        const run = requireCompletedOverviewAiWorkflowRuns({
-          context,
-          identity,
-          result,
-          userId: user.id,
-        });
-        const artifact = context.metadataStore.energyIq.overviewAiArtifacts.complete({
-          identity,
-          workerId: leaseToken,
-          sessionId: run.session_id,
-          runId: result.runId,
-          resultJson: JSON.stringify(result),
-        });
+      if (segments.length === 4 && segments[3] === "retry" && request.method === "POST") {
+        const artifact = await context.overviewAiWorkflow.execute({ identity, user, retry: true });
         return { status: 200, body: createSuccessResult(toOverviewAiArtifactDto(artifact)) };
       }
-      if (segments.length === 4 && segments[3] === "fail" && request.method === "POST") {
-        const body = requireRecord(await readJsonBody(request));
-        const leaseToken = requireNonEmptyString(body.leaseToken, "ENERGYIQ_OVERVIEW_AI_ARTIFACT_LEASE_REQUIRED");
-        const errorCode = requireNonEmptyString(body.errorCode, "ENERGYIQ_OVERVIEW_AI_ARTIFACT_ERROR_REQUIRED");
-        if (errorCode.length > 120 || !/^[A-Z0-9_:-]+$/u.test(errorCode)) {
-          throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_ERROR_INVALID");
-        }
-        const artifact = context.metadataStore.energyIq.overviewAiArtifacts.fail({
-          identity,
-          workerId: leaseToken,
-          errorCode,
-        });
-        return { status: 200, body: createSuccessResult(toOverviewAiArtifactDto(artifact)) };
+      if (segments.length === 4
+        && (segments[3] === "claim" || segments[3] === "complete" || segments[3] === "fail")
+        && request.method === "POST") {
+        throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_CLIENT_ORCHESTRATION_FORBIDDEN");
       }
     }
     if (segments[0] === "projects" && segments.length === 1 && request.method === "POST") {
@@ -347,6 +270,7 @@ export const handleEnergyApiRequest = async (
         try {
           overviewAiArtifact = await queueCurrentProjectOverviewAiArtifact({
             metadataStore: context.metadataStore,
+            dataGateway: context.dataGateway,
             projectId,
             user,
           });
@@ -575,6 +499,7 @@ export const handleEnergyApiRequest = async (
         try {
           overviewAiArtifact = await queueCurrentProjectOverviewAiArtifact({
             metadataStore: context.metadataStore,
+            dataGateway: context.dataGateway,
             projectId,
             user,
           });
@@ -1333,52 +1258,6 @@ const customerVisibleOverviewAiResult = (value: unknown): unknown => {
   if (!isRecord(value) || !isRecord(value.workflow) || !Array.isArray(value.workflow.editorTrace)) return value;
   const { editorTrace: _, ...workflow } = value.workflow;
   return { ...value, workflow };
-};
-
-const requireCompletedOverviewAiWorkflowRuns = (input: {
-  context: Required<ConfigApiContext>;
-  identity: ReturnType<typeof resolveCurrentOverviewAiArtifactIdentity>;
-  result: Record<string, unknown>;
-  userId: string;
-}) => {
-  const { binding, contract, workflow } = input.result;
-  if (!isRecord(contract)
-    || contract.id !== "preschool-ai-accepted-artifact"
-    || contract.revision !== input.identity.outputContractRevision
-    || !isRecord(binding)
-    || binding.projectId !== input.identity.projectId
-    || binding.scopeId !== input.identity.scopeId
-    || binding.dataSnapshotId !== input.identity.dataSnapshotId
-    || binding.projectReleaseId !== input.identity.projectReleaseId
-    || binding.outputContractRevision !== input.identity.outputContractRevision
-    || !isRecord(workflow)
-    || workflow.revision !== input.identity.workflowRevision
-    || !isRecord(workflow.methodSkill)
-    || workflow.methodSkill.id !== input.identity.methodSkillId
-    || workflow.methodSkill.revision !== input.identity.methodSkillRevision
-    || !isRecord(workflow.stages)
-    || !isRecord(workflow.stages.investigator)
-    || !isRecord(workflow.stages.editor)
-    || workflow.stages.investigator.promptRevision !== input.identity.investigatorPromptRevision
-    || workflow.stages.editor.promptRevision !== input.identity.editorPromptRevision
-    || typeof workflow.stages.investigator.runId !== "string"
-    || typeof workflow.stages.editor.runId !== "string"
-    || workflow.stages.investigator.runId === workflow.stages.editor.runId
-    || workflow.stages.editor.runId !== input.result.runId) {
-    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
-  }
-  const runs = [workflow.stages.investigator.runId, workflow.stages.editor.runId].map((runId) => {
-    const run = input.context.metadataStore.runs.find({ user_id: input.userId, run_id: runId });
-    if (!run
-      || run.status !== "completed"
-      || !run.finished_at
-      || !run.user_input.includes(input.identity.dataSnapshotId)
-      || !run.user_input.includes(input.identity.projectReleaseId)) {
-      throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RUN_INVALID");
-    }
-    return run;
-  });
-  return runs[1]!;
 };
 
 const savedAnalysisRerunQuery = (

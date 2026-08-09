@@ -15,6 +15,8 @@ const identity = (
   resource: "electricity",
   dataSnapshotId,
   projectReleaseId: "release-v1",
+  analysisPeriodFrom: "2026-05-01T00:00:00.000Z",
+  analysisPeriodTo: "2026-06-01T00:00:00.000Z",
   rendererKey: "preschool-overview",
   rendererVersion: "v1",
   analysisPackId: "preschool-analysis-pack",

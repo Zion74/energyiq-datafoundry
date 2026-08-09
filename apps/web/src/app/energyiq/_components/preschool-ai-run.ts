@@ -100,6 +100,7 @@ export type PreschoolAiLegacyRunResult = {
 export type PreschoolAiRunResult = PreschoolAiAcceptedArtifact | Extract<PreschoolAiLegacyRunResult, { status: "available" }> | {
   status: "unavailable";
   reason: string;
+  retryable?: boolean;
 };
 
 export type PreschoolAiValidationIssue = {
@@ -407,44 +408,40 @@ async function restoreOrExecutePreschoolAiRun(
   onProgress?: ProgressCallback,
 ): Promise<PreschoolAiRunResult> {
   onProgress?.("inspecting");
-  const claim = await configApi.claimEnergyOverviewAiArtifact(input.projectId, input.scopeId);
-  if (claim.status === "available") {
-    const shared = acceptedSharedPreschoolAiArtifact(input, claim.artifact);
+  const artifact = await configApi.getEnergyOverviewAiArtifact(input.projectId, input.scopeId);
+  if (artifact.status === "available") {
+    const shared = acceptedSharedPreschoolAiArtifact(input, artifact);
     if (!shared) return { status: "unavailable", reason: FRIENDLY_UNAVAILABLE };
     onProgress?.("validating");
     onProgress?.("drafting");
     return shared;
   }
-  if (claim.status === "failed") return { status: "unavailable", reason: FRIENDLY_UNAVAILABLE };
-  if (claim.status === "waiting") {
-    return waitForSharedPreschoolAiArtifact(input, onProgress);
+  if (artifact.status === "failed") return {
+    status: "unavailable",
+    reason: FRIENDLY_UNAVAILABLE,
+    retryable: (artifact.attemptCount ?? 0) < 2,
+  };
+  return waitForSharedPreschoolAiArtifact(input, onProgress);
+}
+
+export async function retryPreschoolAiRun(
+  input: PreschoolAiRunInput,
+  onProgress?: ProgressCallback,
+): Promise<PreschoolAiRunResult> {
+  onProgress?.("inspecting");
+  const artifact = await configApi.retryEnergyOverviewAiArtifact(input.projectId, input.scopeId);
+  const accepted = acceptedSharedPreschoolAiArtifact(input, artifact);
+  if (accepted) {
+    onProgress?.("validating");
+    onProgress?.("drafting");
+    return accepted;
   }
-  const profileId = claim.artifact.modelProfileId;
-  if (!profileId) {
-    await failSharedPreschoolAiArtifact(input, claim.leaseToken, "MODEL_PROFILE_UNAVAILABLE");
-    return { status: "unavailable", reason: "No current Workspace model profile is configured." };
-  }
-  let result: Awaited<ReturnType<typeof executePreschoolAiWorkflow>>;
-  try {
-    result = await executePreschoolAiWorkflow(input, onProgress, {
-      profileId,
-      threadId: await buildPreschoolAiSessionId(input),
-    });
-  } catch (error) {
-    await failSharedPreschoolAiArtifact(input, claim.leaseToken, "WORKFLOW_EXECUTION_FAILED");
-    throw error;
-  }
-  if (result.status === "available") {
-    try {
-      const persisted = await persistSharedPreschoolAiArtifact(input, claim.leaseToken, result);
-      return persisted ?? { status: "unavailable", reason: FRIENDLY_UNAVAILABLE };
-    } catch (error) {
-      await failSharedPreschoolAiArtifact(input, claim.leaseToken, "ARTIFACT_COMPLETION_FAILED");
-      throw error;
-    }
-  }
-  await failSharedPreschoolAiArtifact(input, claim.leaseToken, "WORKFLOW_RESULT_UNAVAILABLE");
-  return result;
+  if (artifact.status === "failed") return {
+    status: "unavailable",
+    reason: FRIENDLY_UNAVAILABLE,
+    retryable: (artifact.attemptCount ?? 0) < 2,
+  };
+  return waitForSharedPreschoolAiArtifact(input, onProgress);
 }
 
 function acceptedSharedPreschoolAiArtifact(
@@ -479,39 +476,17 @@ async function waitForSharedPreschoolAiArtifact(
       return accepted;
     }
     if (artifact.status === "available" || artifact.status === "failed") {
-      return { status: "unavailable", reason: FRIENDLY_UNAVAILABLE };
+      return {
+        status: "unavailable",
+        reason: FRIENDLY_UNAVAILABLE,
+        ...(artifact.status === "failed" ? { retryable: (artifact.attemptCount ?? 0) < 2 } : {}),
+      };
     }
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
     await new Promise<void>((resolve) => setTimeout(resolve, Math.min(SHARED_ARTIFACT_POLL_MS, remaining)));
   }
-  return { status: "unavailable", reason: FRIENDLY_UNAVAILABLE };
-}
-
-async function persistSharedPreschoolAiArtifact(
-  input: PreschoolAiRunInput,
-  leaseToken: string,
-  result: Extract<PreschoolAiRunResult, { status: "available" }> | PreschoolAiAcceptedArtifactInternal,
-): Promise<PreschoolAiAcceptedArtifact | null> {
-  const artifact = await configApi.completeEnergyOverviewAiArtifact(
-    input.projectId,
-    input.scopeId,
-    leaseToken,
-    result,
-  );
-  return acceptedSharedPreschoolAiArtifact(input, artifact);
-}
-
-async function failSharedPreschoolAiArtifact(
-  input: PreschoolAiRunInput,
-  leaseToken: string,
-  errorCode: string,
-): Promise<void> {
-  try {
-    await configApi.failEnergyOverviewAiArtifact(input.projectId, input.scopeId, leaseToken, errorCode);
-  } catch (error) {
-    console.warn("[energyiq] failed to release shared Preschool Overview AI Artifact lease", error);
-  }
+  return { status: "unavailable", reason: FRIENDLY_UNAVAILABLE, retryable: true };
 }
 
 async function buildPreschoolAiSessionId(input: PreschoolAiRunInput): Promise<string> {

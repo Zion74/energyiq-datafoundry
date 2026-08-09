@@ -8,6 +8,8 @@ export type EnergyIqOverviewAiArtifactIdentity = {
   resource: "electricity";
   dataSnapshotId: string;
   projectReleaseId: string;
+  analysisPeriodFrom: string;
+  analysisPeriodTo: string;
   rendererKey: string;
   rendererVersion: string;
   analysisPackId: string;
@@ -314,6 +316,8 @@ const canonicalIdentity = (
     resource: identity.resource,
     dataSnapshotId: identity.dataSnapshotId,
     projectReleaseId: identity.projectReleaseId,
+    analysisPeriodFrom: identity.analysisPeriodFrom,
+    analysisPeriodTo: identity.analysisPeriodTo,
     rendererKey: identity.rendererKey,
     rendererVersion: identity.rendererVersion,
     analysisPackId: identity.analysisPackId,
@@ -364,8 +368,8 @@ const requireArtifactResult = (
     || artifactBinding.projectReleaseId !== identity.projectReleaseId
     || !nonEmptyString(artifactBinding.dataCutoff)
     || !isRecord(artifactBinding.analysisPeriod)
-    || !nonEmptyString(artifactBinding.analysisPeriod.from)
-    || !nonEmptyString(artifactBinding.analysisPeriod.to)
+    || artifactBinding.analysisPeriod.from !== identity.analysisPeriodFrom
+    || artifactBinding.analysisPeriod.to !== identity.analysisPeriodTo
     || artifactBinding.dataCutoff !== artifactBinding.analysisPeriod.to
     || artifactBinding.outputContractRevision !== identity.outputContractRevision
     || !isRecord(parsed.workflow)

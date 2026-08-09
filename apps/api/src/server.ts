@@ -100,6 +100,10 @@ import {
   type ProjectAnalysisSnapshot,
   type PublishedProjectRelease
 } from "./energy/project-analysis-resolver.js";
+import {
+  createPreschoolOverviewAiWorkflow,
+  type PreschoolOverviewAiStageInput,
+} from "./energy/preschool-overview-ai-workflow.js";
 
 const DEV_USER: MeResponse = {
   id: "dev-user",
@@ -261,6 +265,36 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
     ),
   ]);
 
+  const overviewAiWorkflow = createPreschoolOverviewAiWorkflow({
+    metadataStore,
+    dataGateway,
+    runStage: async (stageInput) => collectOverviewAiStageEvents(
+      new DataFoundryAgUiAgent({
+        dataGateway,
+        artifactService,
+        sessionOutputService,
+        fileAssetService,
+        conversationMemoryMode,
+        knowledgeService,
+        memoryExtractionTimeoutMs: options.memoryExtractionTimeoutMs
+          ?? envConfig.memory.completed_extraction_timeout_ms,
+        metadataStore,
+        runCancelRegistry,
+        taskStateRuntime,
+        traceSectionSummaries: options.traceSectionSummaries !== false,
+        user: {
+          id: stageInput.user.id,
+          ...(stageInput.user.email ? { email: stageInput.user.email } : {}),
+          ...(stageInput.user.display_name ? { display_name: stageInput.user.display_name } : {}),
+        },
+        workspaceId: stageInput.workspaceId,
+        workspaceRoot: process.env.WORKSPACE_ROOT ?? join(process.env.STORAGE_ROOT_DIR ?? "storage", "workspaces"),
+      }),
+      stageInput,
+      metadataStore,
+    ),
+  });
+
   // After restart, cancel-registry is empty — reclaim queued/running rows left by dead workers.
   const reclaimedActiveRuns = await timer.measure("stale_active_run_reclaim", () =>
     reclaimOrphanedQueuedAndRunningRuns({
@@ -337,6 +371,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
         fileAssetService,
         knowledgeService,
         metadataStore,
+        overviewAiWorkflow,
         runCancelRegistry,
         userId: authContext.user.id,
         workspaceId: authContext.workspaceId
@@ -415,6 +450,78 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
 
   return server;
 };
+
+const collectOverviewAiStageEvents = (
+  agent: DataFoundryAgUiAgent,
+  input: PreschoolOverviewAiStageInput,
+  metadataStore: MetadataStore,
+): Promise<{
+  events: ReadonlyArray<Record<string, unknown>>;
+  completedRun: { runId: string; sessionId: string };
+}> => new Promise((resolve, reject) => {
+  const events: BaseEvent[] = [];
+  agent.run(buildOverviewAiStageRunInput(input)).subscribe({
+    next: (event) => events.push(event),
+    error: reject,
+    complete: () => {
+      const run = metadataStore.runs.find({ user_id: input.user.id, run_id: input.runId });
+      if (!run
+        || run.status !== "completed"
+        || !run.finished_at
+        || run.session_id !== input.sessionId
+        || !run.user_input.includes(input.identity.dataSnapshotId)
+        || !run.user_input.includes(input.identity.projectReleaseId)
+        || !run.user_input.includes(input.identity.analysisPeriodFrom)
+        || !run.user_input.includes(input.identity.analysisPeriodTo)) {
+        reject(new Error("OVERVIEW_AI_RUNTIME_RUN_INVALID"));
+        return;
+      }
+      resolve({
+        events: events as unknown as ReadonlyArray<Record<string, unknown>>,
+        completedRun: { runId: run.id, sessionId: run.session_id },
+      });
+    },
+  });
+});
+
+const buildOverviewAiStageRunInput = (input: PreschoolOverviewAiStageInput): RunAgentInput => ({
+  threadId: input.sessionId,
+  runId: input.runId,
+  state: {},
+  messages: [{ id: `${input.runId}:user`, role: "user", content: input.prompt }],
+  tools: [],
+  context: [],
+  forwardedProps: {
+    externalContext: {
+      source: "energyiq",
+      projectId: input.identity.projectId,
+      scopeId: input.identity.scopeId,
+      resource: input.identity.resource,
+      period: "Custom",
+      from: input.identity.analysisPeriodFrom,
+      to: input.identity.analysisPeriodTo,
+      expectedDataSnapshotId: input.identity.dataSnapshotId,
+      expectedProjectReleaseId: input.identity.projectReleaseId,
+      overviewAiStage: input.stage,
+    },
+    run_config: {
+      protocol: { id: "data-analysis", version: "1" },
+      activeLlmProfileId: input.identity.modelProfileId,
+      activeSkillId: input.identity.methodSkillId,
+      enabledDatasourceIds: [],
+      enabledKnowledgeIds: [],
+      enabledMcpServerIds: [],
+      enabledSkillIds: [input.identity.methodSkillId],
+      skillPolicy: {
+        allowedToolNames: ["skill", "skill_search", "skill_read", "inspect_schema", "run_sql_readonly"],
+        deniedToolNames: ["list_data_sources", "preview_table"],
+        maxSkills: 1,
+        requireUserInvocable: true,
+        strictSkillTools: true,
+      },
+    },
+  },
+});
 
 type HandleCopilotKitRequestInput = {
   artifactService: LocalArtifactService;

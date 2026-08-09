@@ -5,11 +5,12 @@ import type {
   UserRecord,
   WorkspaceDefaultModelProfileRecord,
 } from "@datafoundry/metadata";
+import type { LocalDataGateway } from "@datafoundry/data-gateway";
 
 import {
+  resolveProjectAnalysis,
   type ProjectAnalysisSnapshot,
 } from "./project-analysis-resolver.js";
-import { resolvePublishedEnergyQueryContext } from "./project-analysis-resolver.js";
 
 type OverviewAiContract = {
   analysisPackId: string;
@@ -45,6 +46,8 @@ export const createOverviewAiArtifactIdentity = (input: {
   scopeId: string;
   dataSnapshotId: string;
   projectReleaseId: string;
+  analysisPeriodFrom: string;
+  analysisPeriodTo: string;
   rendererKey: string;
   rendererVersion: string;
   modelProfileId: string;
@@ -59,6 +62,8 @@ export const createOverviewAiArtifactIdentity = (input: {
     resource: "electricity",
     dataSnapshotId: input.dataSnapshotId,
     projectReleaseId: input.projectReleaseId,
+    analysisPeriodFrom: input.analysisPeriodFrom,
+    analysisPeriodTo: input.analysisPeriodTo,
     rendererKey: input.rendererKey,
     rendererVersion: input.rendererVersion,
     ...contract,
@@ -76,6 +81,8 @@ export const overviewAiArtifactIdentityFromSnapshot = (input: {
   scopeId: input.snapshot.context.scopeId,
   dataSnapshotId: input.snapshot.dataSnapshot.id,
   projectReleaseId: input.snapshot.projectRelease.id,
+  analysisPeriodFrom: input.snapshot.context.primaryPeriod.start,
+  analysisPeriodTo: input.snapshot.context.primaryPeriod.endExclusive,
   rendererKey: input.snapshot.renderer.key,
   rendererVersion: input.snapshot.renderer.version,
   modelProfileId: input.modelBinding.profile_id,
@@ -84,6 +91,7 @@ export const overviewAiArtifactIdentityFromSnapshot = (input: {
 
 export const queueCurrentProjectOverviewAiArtifact = async (input: {
   metadataStore: MetadataStore;
+  dataGateway: LocalDataGateway;
   projectId: string;
   user: UserRecord;
 }): Promise<EnergyIqOverviewAiArtifactRecord | null> => {
@@ -92,8 +100,9 @@ export const queueCurrentProjectOverviewAiArtifact = async (input: {
   const modelBinding = input.metadataStore.workspaceDefaultModelProfiles.find(project.workspace_id);
   if (!modelBinding) return null;
   if (project.id !== "preschool-demo") return null;
-  const published = resolvePublishedEnergyQueryContext({
+  const resolution = await resolveProjectAnalysis({
     metadataStore: input.metadataStore,
+    dataGateway: input.dataGateway,
     user: input.user,
     workspaceId: project.workspace_id,
     request: {
@@ -101,61 +110,42 @@ export const queueCurrentProjectOverviewAiArtifact = async (input: {
       scopeId: project.root_scope_id,
       resource: "electricity",
       analysisWindow: "current-overview-28d",
-      expectedDataSnapshotId: project.data_snapshot_id,
     },
   });
-  if (!published.projectRelease) return null;
-  const identity = createOverviewAiArtifactIdentity({
-    workspaceId: project.workspace_id,
-    projectId: project.id,
-    scopeId: project.root_scope_id,
-    dataSnapshotId: project.data_snapshot_id,
-    projectReleaseId: published.projectRelease.id,
-    rendererKey: published.projectRelease.renderer.key,
-    rendererVersion: published.projectRelease.renderer.version,
-    modelProfileId: modelBinding.profile_id,
-    modelProfileRevision: modelBinding.revision,
-  });
+  if (resolution.status !== "ready" || resolution.snapshot.dataSnapshot.id !== project.data_snapshot_id) return null;
+  const identity = overviewAiArtifactIdentityFromSnapshot({ snapshot: resolution.snapshot, modelBinding });
   return input.metadataStore.energyIq.overviewAiArtifacts.queue({
     identity,
     triggeredBy: input.user.id,
   });
 };
 
-export const resolveCurrentOverviewAiArtifactIdentity = (input: {
+export const resolveCurrentOverviewAiArtifactIdentity = async (input: {
   metadataStore: MetadataStore;
+  dataGateway: LocalDataGateway;
   projectId: string;
   scopeId: string;
   user: UserRecord;
-}): OverviewAiArtifactIdentityV13 => {
+}): Promise<OverviewAiArtifactIdentityV13> => {
   const project = input.metadataStore.energyIq.getProject(input.projectId);
   if (input.scopeId !== project.root_scope_id) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PROJECT_SCOPE_REQUIRED");
   }
   const modelBinding = input.metadataStore.workspaceDefaultModelProfiles.get(project.workspace_id);
-  const published = resolvePublishedEnergyQueryContext({
+  const resolution = await resolveProjectAnalysis({
     metadataStore: input.metadataStore,
+    dataGateway: input.dataGateway,
     user: input.user,
     workspaceId: project.workspace_id,
     request: {
       projectId: project.id,
       scopeId: input.scopeId,
       resource: "electricity",
-      expectedDataSnapshotId: project.data_snapshot_id,
+      analysisWindow: "current-overview-28d",
     },
   });
-  if (!published.projectRelease) {
+  if (resolution.status !== "ready" || resolution.snapshot.dataSnapshot.id !== project.data_snapshot_id) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RELEASE_REQUIRED");
   }
-  return createOverviewAiArtifactIdentity({
-    workspaceId: project.workspace_id,
-    projectId: project.id,
-    scopeId: input.scopeId,
-    dataSnapshotId: project.data_snapshot_id,
-    projectReleaseId: published.projectRelease.id,
-    rendererKey: published.projectRelease.renderer.key,
-    rendererVersion: published.projectRelease.renderer.version,
-    modelProfileId: modelBinding.profile_id,
-    modelProfileRevision: modelBinding.revision,
-  });
+  return overviewAiArtifactIdentityFromSnapshot({ snapshot: resolution.snapshot, modelBinding });
 };

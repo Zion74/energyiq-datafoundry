@@ -8,6 +8,7 @@ import { EnergyIcon } from "./icons";
 import {
   buildPreschoolAiRunInput,
   getOrStartPreschoolAiRun,
+  retryPreschoolAiRun,
   type PreschoolAiFinding,
   type PreschoolAiProgress,
   type PreschoolAiRunInput,
@@ -29,6 +30,7 @@ export function PreschoolAiSlot({
   onResult,
   onCompletedResult,
   startRun = getOrStartPreschoolAiRun,
+  retryRun = retryPreschoolAiRun,
 }: {
   snapshot: EnergyProjectAnalysisSnapshotDto;
   sectionId?: PreschoolAiSectionId;
@@ -38,18 +40,40 @@ export function PreschoolAiSlot({
   onResult?: (result: PreschoolAiRunResult) => void;
   onCompletedResult?: (result: Extract<PreschoolAiRunResult, { status: "available" }>) => void;
   startRun?: (input: PreschoolAiRunInput, onProgress?: ProgressCallback) => Promise<PreschoolAiRunResult>;
+  retryRun?: (input: PreschoolAiRunInput, onProgress?: ProgressCallback) => Promise<PreschoolAiRunResult>;
 }) {
   const input = useMemo(() => buildPreschoolAiRunInput(snapshot), [snapshot]);
   const inputRef = useRef(input);
   const startRunRef = useRef(startRun);
+  const retryRunRef = useRef(retryRun);
   const onResultRef = useRef(onResult);
   const onCompletedResultRef = useRef(onCompletedResult);
   const [settled, setSettled] = useState<Settled | null>(null);
   const [progress, setProgress] = useState<{ identityKey: string; stage: PreschoolAiProgress } | null>(null);
   inputRef.current = input;
   startRunRef.current = startRun;
+  retryRunRef.current = retryRun;
   onResultRef.current = onResult;
   onCompletedResultRef.current = onCompletedResult;
+
+  const retry = useCallback(() => {
+    const currentInput = inputRef.current;
+    if (!currentInput) return;
+    const identityKey = currentInput.identityKey;
+    setSettled(null);
+    setProgress({ identityKey, stage: "queued" });
+    void retryRunRef.current(currentInput, (stage) => setProgress({ identityKey, stage }))
+      .then((result) => {
+        setSettled({ identityKey, result });
+        onResultRef.current?.(result);
+        if (result.status === "available") onCompletedResultRef.current?.(result);
+      })
+      .catch(() => {
+        const result = { status: "unavailable", reason: "AI analysis is temporarily unavailable." } as const;
+        setSettled({ identityKey, result });
+        onResultRef.current?.(result);
+      });
+  }, []);
 
   useEffect(() => {
     if (mode === "saved") return;
@@ -115,7 +139,7 @@ export function PreschoolAiSlot({
     );
   }
   if (displayedResult.status === "unavailable") return sectionId === "page-synthesis"
-    ? <AiFrame sectionId={sectionId}><Unavailable detail={displayedResult.reason} /></AiFrame>
+    ? <AiFrame sectionId={sectionId}><Unavailable detail={displayedResult.reason} onRetry={mode === "live" && displayedResult.retryable === true ? retry : undefined} /></AiFrame>
     : null;
   const availableResult = displayedResult;
   const sectionFindings = availableResult.findings.filter((finding) => findingMatchesSection(finding, sectionId));
@@ -211,12 +235,21 @@ function findingMatchesSection(finding: DisplayFinding, sectionId: PreschoolAiSe
   });
 }
 
-function Unavailable({ detail }: { detail: string }) {
+function Unavailable({ detail, onRetry }: { detail: string; onRetry?: () => void }) {
   return (
     <div className="rounded-lg border border-border bg-surface-subtle px-4 py-4" role="status">
       <p className="text-xs font-semibold text-foreground">AI analysis unavailable</p>
       <p className="mt-1 text-[11px] leading-5 text-muted">{detail}</p>
       <p className="mt-1 text-[10px] leading-4 text-muted-light">The verified Overview remains available and unchanged.</p>
+      {onRetry ? (
+        <button
+          type="button"
+          className="mt-3 rounded-md border border-border bg-surface px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-surface-subtle"
+          onClick={onRetry}
+        >
+          Retry AI analysis
+        </button>
+      ) : null}
     </div>
   );
 }

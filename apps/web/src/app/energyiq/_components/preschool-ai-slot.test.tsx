@@ -115,6 +115,25 @@ describe("PreschoolAiSlot", () => {
     expect(container.textContent).toContain("verified Overview remains available and unchanged");
   });
 
+  it("offers one explicit server retry without resubmitting browser content", async () => {
+    const retryRun = vi.fn().mockResolvedValue(availableResult());
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        startRun={vi.fn().mockResolvedValue({ status: "unavailable", reason: "provider unavailable", retryable: true })}
+        retryRun={retryRun}
+      />,
+    ));
+    await act(async () => undefined);
+    const retryButton = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("Retry AI analysis"));
+    expect(retryButton).toBeDefined();
+
+    await act(async () => retryButton!.click());
+    expect(retryRun).toHaveBeenCalledTimes(1);
+    expect(container.querySelectorAll("article")).toHaveLength(2);
+  });
+
   it("opens compact Evidence and carries one Finding into Ask AI deeper", async () => {
     await renderSlot(vi.fn().mockResolvedValue(availableResult()));
     await act(async () => undefined);

@@ -10,6 +10,8 @@ describe("createOverviewAiArtifactIdentity", () => {
       scopeId: "preschool-project",
       dataSnapshotId: "snapshot-a",
       projectReleaseId: "release-v1",
+      analysisPeriodFrom: "2026-05-01T00:00:00.000Z",
+      analysisPeriodTo: "2026-06-01T00:00:00.000Z",
       rendererKey: "preschool-overview" as const,
       rendererVersion: "1",
       modelProfileId: "deepseek-v4-flash",
@@ -23,6 +25,8 @@ describe("createOverviewAiArtifactIdentity", () => {
       resource: "electricity",
       dataSnapshotId: "snapshot-a",
       projectReleaseId: "release-v1",
+      analysisPeriodFrom: "2026-05-01T00:00:00.000Z",
+      analysisPeriodTo: "2026-06-01T00:00:00.000Z",
       rendererKey: "preschool-overview",
       rendererVersion: "1",
       analysisPackId: "preschool-analysis-pack",
@@ -41,6 +45,8 @@ describe("createOverviewAiArtifactIdentity", () => {
       .not.toEqual(createOverviewAiArtifactIdentity(base));
     expect(createOverviewAiArtifactIdentity({ ...base, modelProfileRevision: 9 }))
       .not.toEqual(createOverviewAiArtifactIdentity(base));
+    expect(createOverviewAiArtifactIdentity({ ...base, analysisPeriodTo: "2026-06-02T00:00:00.000Z" }))
+      .not.toEqual(createOverviewAiArtifactIdentity(base));
   });
 
   it("fails closed for a Renderer without a released Overview AI contract", () => {
@@ -50,6 +56,8 @@ describe("createOverviewAiArtifactIdentity", () => {
       scopeId: "project",
       dataSnapshotId: "snapshot",
       projectReleaseId: "release",
+      analysisPeriodFrom: "2026-05-01T00:00:00.000Z",
+      analysisPeriodTo: "2026-06-01T00:00:00.000Z",
       rendererKey: "unknown-overview",
       rendererVersion: "1",
       modelProfileId: "profile",

@@ -24,7 +24,6 @@ import type {
   EnergyOperationalPolicyConfigurationDto,
   EnergyProjectAnalysisResolutionDto,
   EnergyOverviewAiArtifactDto,
-  EnergyOverviewAiArtifactClaimDto,
   EnergyProjectMetricConfigResponseDto,
   EnergyProjectDataCoverageDto,
   EnergyProjectRuleConfigResponseDto,
@@ -602,40 +601,14 @@ export const configApi = {
     );
   },
 
-  claimEnergyOverviewAiArtifact(
+  retryEnergyOverviewAiArtifact(
     projectId: string,
     scopeId: string,
-  ): Promise<EnergyOverviewAiArtifactClaimDto> {
+  ): Promise<EnergyOverviewAiArtifactDto> {
     const params = new URLSearchParams({ scopeId });
-    return requestEnvelope<EnergyOverviewAiArtifactClaimDto>(
-      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-ai-artifact/claim?${params.toString()}`,
+    return requestEnvelope<EnergyOverviewAiArtifactDto>(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-ai-artifact/retry?${params.toString()}`,
       { method: "POST", body: "{}" },
-    );
-  },
-
-  completeEnergyOverviewAiArtifact(
-    projectId: string,
-    scopeId: string,
-    leaseToken: string,
-    result: EnergyOverviewAiArtifactDto["result"],
-  ): Promise<EnergyOverviewAiArtifactDto> {
-    const params = new URLSearchParams({ scopeId });
-    return requestEnvelope<EnergyOverviewAiArtifactDto>(
-      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-ai-artifact/complete?${params.toString()}`,
-      { method: "POST", body: JSON.stringify({ leaseToken, result }) },
-    );
-  },
-
-  failEnergyOverviewAiArtifact(
-    projectId: string,
-    scopeId: string,
-    leaseToken: string,
-    errorCode: string,
-  ): Promise<EnergyOverviewAiArtifactDto> {
-    const params = new URLSearchParams({ scopeId });
-    return requestEnvelope<EnergyOverviewAiArtifactDto>(
-      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-ai-artifact/fail?${params.toString()}`,
-      { method: "POST", body: JSON.stringify({ leaseToken, errorCode }) },
     );
   },
 
