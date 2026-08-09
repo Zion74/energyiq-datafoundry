@@ -56,6 +56,10 @@ type OverviewPeriod = "Yesterday" | "Last 7 days" | "Previous week" | "Previous 
 type ResourceType = "electricity" | "water";
 const ALL_OVERVIEW_RESOURCES = ["electricity", "water"] as const;
 const ELECTRICITY_ONLY_RESOURCES = ["electricity"] as const;
+export const PRESCHOOL_OVERVIEW_BASELINE_RANGE = {
+  from: "2026-05-01",
+  to: "2026-05-31",
+} as const;
 const NGEE_ANN_OVERVIEW_SECTIONS: ReadonlyArray<OverviewNavigationSection> = [
   { id: "ngee-ann-takeaways", label: "Takeaways" },
   { id: "ngee-ann-key-highlights", label: "Verified figures" },
@@ -173,9 +177,11 @@ function PublishedDecisionDashboardView({
   const isDedicatedOverviewProject = isNgeeAnnProject || isPreschoolProject;
   const resource = isDedicatedOverviewProject ? "electricity" : initialViewState.resource;
   const scopeId = isDedicatedOverviewProject ? "project" : initialViewState.scopeId;
-  const period = initialViewState.period;
-  const usesCurrentOverviewWindow = isNgeeAnnProject || isPreschoolProject;
-  const effectiveCustomRange = period === "Custom"
+  const period = isPreschoolProject ? "Custom" : initialViewState.period;
+  const usesCurrentOverviewWindow = isNgeeAnnProject;
+  const effectiveCustomRange = isPreschoolProject
+    ? { projectId, ...PRESCHOOL_OVERVIEW_BASELINE_RANGE }
+    : period === "Custom"
       ? { projectId, from: initialViewState.from, to: initialViewState.to }
       : resolvedRange.projectId === projectId
         ? resolvedRange
@@ -218,14 +224,47 @@ function PublishedDecisionDashboardView({
     router.replace(href);
   }, [initialViewState, isNgeeAnnProject, projectId, router]);
 
+  useEffect(() => {
+    if (!isPreschoolProject) return;
+    const alreadyCanonical = initialViewState.scopeId === "project"
+      && initialViewState.resource === "electricity"
+      && initialViewState.period === "Custom"
+      && initialViewState.from === PRESCHOOL_OVERVIEW_BASELINE_RANGE.from
+      && initialViewState.to === PRESCHOOL_OVERVIEW_BASELINE_RANGE.to
+      && !initialViewState.currentOverviewPin;
+    if (alreadyCanonical) return;
+    const href = overviewUrlWithView({
+      ...initialViewState,
+      projectId,
+      scopeId: "project",
+      resource: "electricity",
+      period: "Custom",
+      ...PRESCHOOL_OVERVIEW_BASELINE_RANGE,
+      grain: "day",
+    });
+    pendingUrlSearchRef.current = href.slice(href.indexOf("?") + 1);
+    router.replace(href);
+  }, [initialViewState, isPreschoolProject, projectId, router]);
+
   const navigateOverview = (update: Partial<OverviewUrlViewState>) => {
     const base = overviewViewStateFromSearchParams(new URLSearchParams(pendingUrlSearchRef.current));
-    const nextView = {
+    const requestedNextView = {
       ...base,
       ...update,
       projectId: update.projectId ?? (base.projectId || projectId),
       scopeId: isDedicatedOverviewProject ? "project" : update.scopeId ?? base.scopeId,
     };
+    const nextView = isPreschoolProject
+      ? {
+          ...requestedNextView,
+          scopeId: "project",
+          resource: "electricity" as const,
+          period: "Custom" as const,
+          ...PRESCHOOL_OVERVIEW_BASELINE_RANGE,
+          grain: "day" as const,
+          currentOverviewPin: undefined,
+        }
+      : requestedNextView;
     const href = usesCurrentOverviewWindow
       ? currentOverviewUrlWithView(nextView)
       : overviewUrlWithView(nextView);

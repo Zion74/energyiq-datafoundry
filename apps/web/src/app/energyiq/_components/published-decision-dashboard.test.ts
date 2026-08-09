@@ -120,7 +120,7 @@ describe("published Overview URL reload", () => {
     await act(async () => history?.click());
 
     expect(mockedRouter.push).toHaveBeenCalledWith(
-      "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&grain=day&comparison=overlay&category=all&history=1",
+      "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Custom&from=2026-05-01&to=2026-05-31&grain=day&comparison=overlay&category=all&history=1",
     );
   });
 
@@ -323,7 +323,7 @@ describe("published Overview URL reload", () => {
     expect(container.querySelectorAll("input[type='date']")).toHaveLength(0);
   });
 
-  it("uses the dedicated Preschool shell on the current rolling 28-day Snapshot and bypasses only Refresh", async () => {
+  it("uses the dedicated Preschool shell on the fixed May Charles baseline and bypasses only Refresh", async () => {
     const preschool = project("preschool-demo", "Preschool Portfolio");
     mockedAccess.activeProject = preschool;
     mockedAccess.access = accessContext([preschool]);
@@ -345,7 +345,9 @@ describe("published Overview URL reload", () => {
       projectId: "preschool-demo",
       scopeId: "project",
       resource: "electricity",
-      analysisWindow: "current-overview-28d",
+      period: "Custom",
+      from: "2026-05-01",
+      to: "2026-05-31",
     });
     expect(container.querySelector("[data-preschool-overview='true']")).not.toBeNull();
     expect(container.textContent?.match(/Portfolio energy overview/g)).toHaveLength(1);
@@ -388,14 +390,12 @@ describe("published Overview URL reload", () => {
       container.querySelector("[aria-label='Resource type']")?.querySelectorAll("button") ?? [],
       (button) => button.textContent,
     )).toEqual(["Electricity"]);
-    expect(container.textContent).toContain("Refresh current overview");
+    expect(container.textContent).toContain("Refresh view");
     expect(container.textContent).toContain("Save analysis");
-    expect(mockedRouter.replace).toHaveBeenCalledWith(expect.stringContaining(
-      `currentDataSnapshotId=${snapshot.context.dataSnapshotId}`,
-    ));
+    expect(mockedRouter.replace).not.toHaveBeenCalled();
 
     const refresh = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
-      .find((button) => button.textContent === "Refresh current overview");
+      .find((button) => button.textContent === "Refresh view");
     await act(async () => refresh?.click());
 
     expect(resolveProjectAnalysis).toHaveBeenCalledTimes(2);
@@ -403,7 +403,9 @@ describe("published Overview URL reload", () => {
       projectId: "preschool-demo",
       scopeId: "project",
       resource: "electricity",
-      analysisWindow: "current-overview-28d",
+      period: "Custom",
+      from: "2026-05-01",
+      to: "2026-05-31",
     }, { bypassCache: true });
   });
 
@@ -411,7 +413,7 @@ describe("published Overview URL reload", () => {
     ["a URL without Period", "/energyiq/overview?projectId=preschool-demo&scopeId=level-7&resource=electricity"],
     ["an old arbitrary Custom range", "/energyiq/overview?projectId=preschool-demo&scopeId=level-7&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16"],
     ["an old Water resource", "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=water&period=Custom&from=2026-05-01&to=2026-05-31"],
-  ] as const)("ignores legacy Preschool %s and resolves the current rolling Overview", async (_label, href) => {
+  ] as const)("canonicalizes legacy Preschool %s to the fixed May Charles baseline", async (_label, href) => {
     const preschool = project("preschool-demo", "Preschool Portfolio");
     mockedAccess.activeProject = preschool;
     mockedAccess.access = accessContext([preschool]);
@@ -428,9 +430,13 @@ describe("published Overview URL reload", () => {
       projectId: "preschool-demo",
       scopeId: "project",
       resource: "electricity",
-      analysisWindow: "current-overview-28d",
+      period: "Custom",
+      from: "2026-05-01",
+      to: "2026-05-31",
     });
-    expect(mockedRouter.replace).not.toHaveBeenCalled();
+    expect(mockedRouter.replace).toHaveBeenCalledWith(
+      "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Custom&from=2026-05-01&to=2026-05-31&grain=day&comparison=overlay&category=all",
+    );
     expect(container.querySelector("[role='combobox'][aria-label='Analysis Scope']")).toBeNull();
     expect(container.querySelectorAll("input[type='date']")).toHaveLength(0);
     expect(configApi.getEnergyProjectHierarchy).not.toHaveBeenCalled();
