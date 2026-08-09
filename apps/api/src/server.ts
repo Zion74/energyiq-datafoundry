@@ -384,7 +384,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
           });
           response.end(configResponse.body);
         } else {
-          sendJson(response, configResponse.status, configResponse.body);
+          sendJson(response, configResponse.status, configResponse.body, configResponse.headers);
         }
         return;
       }
@@ -1481,10 +1481,16 @@ const ensureDevUser = (metadataStore: MetadataStore): void => {
   });
 };
 
-const sendJson = (response: ServerResponse, statusCode: number, body: unknown): void => {
+const sendJson = (
+  response: ServerResponse,
+  statusCode: number,
+  body: unknown,
+  headers: Record<string, string> = {},
+): void => {
   response.writeHead(statusCode, {
     "Access-Control-Allow-Origin": "*",
-    "Content-Type": "application/json; charset=utf-8"
+    "Content-Type": "application/json; charset=utf-8",
+    ...headers,
   });
   response.end(JSON.stringify(body));
 };

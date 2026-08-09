@@ -2,9 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { configApi } from "../../../lib/config-api";
 import {
-  buildPreschoolAgentRunBody,
   buildPreschoolAiRunInput,
-  executePreschoolAiRun,
   getOrStartPreschoolAiRun,
   retryPreschoolAiRun,
   resetPreschoolAiRunsForTests,
@@ -19,6 +17,7 @@ import {
 } from "./preschool-ai-run";
 import type { AiFindingPresentation } from "./ai-finding-presentation";
 import { preschoolGoldenSnapshot } from "./preschool-overview.test-fixture";
+import { runSavedAnalysisAiForSnapshot } from "./saved-analysis-ai";
 
 describe("Preschool AI Run", () => {
   afterEach(() => {
@@ -28,10 +27,8 @@ describe("Preschool AI Run", () => {
     vi.unstubAllGlobals();
   });
 
-  it("builds one bounded Run pinned to the published Preschool Snapshot", () => {
+  it("builds the exact server workflow identity pinned to the published Preschool Snapshot", () => {
     const input = requiredInput();
-    const body = buildPreschoolAgentRunBody(input, "profile-1", "run-1", "thread-1");
-    const serialized = JSON.stringify(body);
 
     expect(input).toMatchObject({
       projectId: "preschool-demo",
@@ -55,100 +52,6 @@ describe("Preschool AI Run", () => {
     expect(input.identityKey).toContain("investigator-prompt@preschool-investigator-v1");
     expect(input.identityKey).toContain("editor-prompt@preschool-insight-editor-v1");
     expect(input.identityKey).toContain("method-skill@energy-insight-investigation@1.0.0");
-    expect(body).toMatchObject({
-      method: "agent/run",
-      params: { agentId: "dataFoundry" },
-      body: {
-        forwardedProps: {
-          externalContext: {
-            source: "energyiq",
-            projectId: "preschool-demo",
-            scopeId: "preschool-project",
-            resource: "electricity",
-            period: "Custom",
-            from: "2026-05-01",
-            to: "2026-05-31",
-            expectedDataSnapshotId: input.snapshotId,
-            expectedProjectReleaseId: input.projectReleaseId,
-          },
-          run_config: {
-            skillPolicy: {
-              allowedToolNames: ["inspect_schema", "run_sql_readonly"],
-              deniedToolNames: ["list_data_sources", "preview_table", "skill", "skill_search", "skill_read"],
-              maxSkills: 1,
-              requireUserInvocable: true,
-              strictSkillTools: true,
-            },
-          },
-        },
-      },
-    });
-    expect(serialized).toContain("Return zero to three distinct section Findings plus at most one page synthesis");
-    expect(serialized).toContain("Valid sectionId values");
-    expect(serialized).toContain("Structured decision signals");
-    expect(serialized).not.toMatch(/\b(?:chart|graph|plot|visuali[sz](?:e|ation))\b/iu);
-    expect(serialized).toContain(
-      "Your first action must be an immediate inspect_schema Tool call",
-    );
-    expect(serialized).toContain(
-      "do not restate, explain, plan, summarize, or precompute the task or contract",
-    );
-    expect(serialized).toContain("Each displayed Finding must cite only the successful SQL Evidence operations it actually uses");
-    expect(serialized).toContain(
-      "omit assertion_ids from every run_sql_readonly call",
-    );
-    expect(serialized).toContain("The grounded Preschool requirements in this Run are manual assertions");
-    expect(serialized).toContain("use an ISO-8601 string or TIMESTAMPTZ literal");
-    expect(serialized).toContain("Never compare interval_start with a TIMESTAMP literal that contains Z");
-    expect(serialized).toContain("A simple question may need one successful SQL query");
-    expect(serialized).toContain("a complex question may need multiple distinct queries");
-    expect(serialized).toContain("would not change the conclusion, next action, or material uncertainty");
-    expect(serialized).not.toContain("Make at most four total run_sql_readonly attempts");
-    expect(serialized).not.toContain("observation scan, a targeted drill-down, and a validation or contradiction check");
-    expect(serialized).toContain(
-      "stating 100% coverage requires citing quality:window in that same Finding",
-    );
-    expect(serialized).toContain(
-      "This is an Evidence-binding example, not a required Finding or theme",
-    );
-    expect(serialized).toContain("Do not call analysis_requirements_commit");
-    expect(serialized).toContain(
-      "A successful SQL may return one aggregate row or a bounded grouped, ranked, or Top-N result",
-    );
-    expect(serialized).toContain(
-      "Do not request more than 10 rows from one SQL Evidence operation",
-    );
-    expect(serialized).toContain(
-      "Never use row position, rank, Top N size, LIMIT value, or row count in a Finding as Evidence or a numeric claim unless that quantity is returned as a real named SQL column value",
-    );
-    expect(serialized).not.toContain("must return exactly one row");
-    expect(serialized).toContain(
-      "Never estimate, sum, extrapolate, approximate, or infer values from truncated, previewed, omitted, or remaining rows",
-    );
-    expect(serialized).toContain(
-      "Every number in a Finding must appear directly in that Finding's cited bundle item values or cited SQL row",
-    );
-    expect(serialized).toContain(
-      "Do not use digits copied from artifact ids, audit ids, query ids, version strings, Snapshot ids, or dates as Finding numbers",
-    );
-    expect(serialized).toContain(
-      "Exact pinned Period, Snapshot, Release, and derived full-period presentation may appear only as structural context",
-    );
-    expect(serialized).toContain("Return zero Findings when no directly cited Evidence supports a useful candidate");
-    expect(serialized).toContain("Before emitting the final JSON, audit every customer-visible field");
-    expect(serialized).toContain("If a ranking, ratio, difference, or other derived value is useful");
-    expect(serialized).toContain("parent_node_id");
-    expect(serialized).toContain("official_aggregation_eligible=TRUE");
-    expect(serialized).toContain("quality_status='ok'");
-    expect(serialized).toContain("Bounded Preschool Discovery Evidence Bundle");
-    expect(serialized).toContain("Use [] for an SQL-only Finding");
-    expect(serialized).toContain("Valid evidenceRefs:");
-    expect(serialized).toContain("never cite other Runtime ids or object paths");
-    expect(serialized).not.toContain("exactly three Findings");
-    expect(serialized).not.toContain("horizons");
-    expect(serialized).not.toContain("forecastKwh");
-    expect(serialized).not.toContain("costAmount");
-    expect(serialized.length).toBeLessThan(16_000);
   });
 
   it("keeps autonomous discovery available when no deterministic theme is publishable", () => {
@@ -1424,7 +1327,7 @@ describe("Preschool AI Run", () => {
     expect(result.status).toBe("available");
   });
 
-  it("single-flights identical page identities and fails soft", async () => {
+  it("single-flights identical page identities through the server ensure endpoint", async () => {
     const input = requiredInput();
     const available = resolvePreschoolAiWorkflowEventStreams({
       input,
@@ -1436,31 +1339,26 @@ describe("Preschool AI Run", () => {
     });
     if (available.status !== "available") throw new Error("Expected a valid shared fixture");
     const readSpy = vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockResolvedValue({
+      status: "missing",
+      dataSnapshotId: input.snapshotId,
+      projectReleaseId: input.projectReleaseId,
+    });
+    const ensureSpy = vi.spyOn(configApi, "ensureEnergyOverviewAiArtifact").mockResolvedValue({
       id: "artifact-test",
       status: "available",
       dataSnapshotId: input.snapshotId,
       projectReleaseId: input.projectReleaseId,
       result: available,
     });
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-
     const progress: PreschoolAiProgress[] = [];
     const first = getOrStartPreschoolAiRun(input, (stage) => progress.push(stage));
     const second = getOrStartPreschoolAiRun(input);
     expect(first).toBe(second);
     await expect(first).resolves.toMatchObject({ status: "available" });
     expect(readSpy).toHaveBeenCalledTimes(1);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(ensureSpy).toHaveBeenCalledTimes(1);
+    expect(ensureSpy).toHaveBeenCalledWith(input.projectId, input.scopeId);
     expect(progress).toEqual(["inspecting", "validating", "drafting"]);
-
-    resetPreschoolAiRunsForTests();
-    vi.spyOn(configApi, "getRunDefaults").mockResolvedValue({ activeLlmProfileId: "profile-1" } as never);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("", { status: 503 })));
-    await expect(executePreschoolAiRun(input)).resolves.toEqual({
-      status: "unavailable",
-      reason: "AI Analyst request failed (503).",
-    });
   });
 
   it("lets two client identities share one server-owned two-stage Provider execution", async () => {
@@ -1584,6 +1482,43 @@ describe("Preschool AI Run", () => {
     });
     expect(configApi.retryEnergyOverviewAiArtifact).toHaveBeenCalledWith(input.projectId, input.scopeId);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("replaces a failed cached run after retry so remount and Saved Analysis see available", async () => {
+    const input = requiredInput();
+    const available = resolvePreschoolAiWorkflowEventStreams({
+      input,
+      providerProfileId: "profile-shared",
+      investigatorRunId: "run-investigator-retry",
+      investigatorEventStream: workflowEnvelopeEventStream("candidates", []),
+      editorRunId: "run-editor-retry",
+      editorEventStream: workflowEnvelopeEventStream("findings", [], { trace: [] }),
+    });
+    if (available.status !== "available") throw new Error("Expected a valid shared fixture");
+    const readSpy = vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockResolvedValue({
+      id: "artifact-failed",
+      status: "failed",
+      dataSnapshotId: input.snapshotId,
+      projectReleaseId: input.projectReleaseId,
+      attemptCount: 1,
+    });
+    vi.spyOn(configApi, "retryEnergyOverviewAiArtifact").mockResolvedValue({
+      id: "artifact-retried",
+      status: "available",
+      dataSnapshotId: input.snapshotId,
+      projectReleaseId: input.projectReleaseId,
+      attemptCount: 2,
+      result: available,
+    });
+
+    await expect(getOrStartPreschoolAiRun(input)).resolves.toMatchObject({ status: "unavailable", retryable: true });
+    await expect(retryPreschoolAiRun(input)).resolves.toMatchObject({ status: "available", runId: "run-editor-retry" });
+    await expect(getOrStartPreschoolAiRun(input)).resolves.toMatchObject({ status: "available", runId: "run-editor-retry" });
+    await expect(runSavedAnalysisAiForSnapshot(preschoolGoldenSnapshot())).resolves.toMatchObject({
+      contract: "energyiq-saved-ai-result@1",
+      result: { status: "available", runId: "run-editor-retry" },
+    });
+    expect(readSpy).toHaveBeenCalledTimes(1);
   });
 });
 

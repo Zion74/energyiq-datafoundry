@@ -13,7 +13,7 @@ import { handleEnergyApiRequest } from "./energy-api.js";
 import { createOverviewAiArtifactIdentity } from "./overview-ai-artifact.js";
 
 describe("Overview AI Artifact API", () => {
-  it("materializes on read and delegates explicit retry without exposing a lease", async () => {
+  it("keeps GET read-only and no-store while POST ensure and retry execute server-owned work", async () => {
     const harness = await createHarness();
     try {
       const execute = vi.fn(async ({ identity, user, retry }) => {
@@ -36,11 +36,19 @@ describe("Overview AI Artifact API", () => {
       const secondContext = { ...context, userId: "second-user" };
       const path = ["projects", harness.project.id, "overview-ai-artifact"];
 
-      const started = await handleEnergyApiRequest(
+      const before = await handleEnergyApiRequest(
         getRequest(`/api/v1/energy/projects/${harness.project.id}/overview-ai-artifact?scopeId=${harness.project.root_scope_id}`),
         path,
         context,
       );
+      expect(before).toMatchObject({
+        status: 200,
+        headers: { "Cache-Control": "private, no-store" },
+        body: { success: true, data: { status: "missing" } },
+      });
+      expect(execute).not.toHaveBeenCalled();
+
+      const started = await handleEnergyApiRequest(jsonPost({}), [...path, "ensure"], context);
       expect(started).toMatchObject({
         status: 200,
         body: {
@@ -66,22 +74,23 @@ describe("Overview AI Artifact API", () => {
         path,
         secondContext,
       );
-      expect(restored).toEqual(started);
-      expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({
-        user: expect.objectContaining({ id: "second-user" }),
-        retry: false,
-      }));
+      expect(restored).toMatchObject({
+        status: 200,
+        headers: { "Cache-Control": "private, no-store" },
+        body: started.body,
+      });
+      expect(execute).toHaveBeenCalledTimes(1);
 
       const retry = await handleEnergyApiRequest(jsonPost({}), [...path, "retry"], secondContext);
       expect(retry).toEqual(started);
       expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ retry: true }));
-      expect(resolveCurrentIdentity).toHaveBeenCalledTimes(3);
+      expect(resolveCurrentIdentity).toHaveBeenCalledTimes(4);
     } finally {
       harness.close();
     }
   });
 
-  it("rejects browser claim/complete/fail payloads and revalidates the current exact identity", async () => {
+  it("returns 403 for deprecated claim/complete/fail payloads and revalidates exact identity", async () => {
     const harness = await createHarness();
     try {
       const execute = vi.fn(async () => { throw new Error("not expected"); });
@@ -96,7 +105,7 @@ describe("Overview AI Artifact API", () => {
         );
         expect(response).toMatchObject({
           status: 403,
-          body: { success: false, error: { code: "FORBIDDEN", message: "ENERGYIQ_OVERVIEW_AI_ARTIFACT_CLIENT_ORCHESTRATION_FORBIDDEN" } },
+          body: { success: false, error: { code: "FORBIDDEN", message: "Overview AI Artifact browser orchestration is forbidden." } },
         });
       }
       expect(execute).not.toHaveBeenCalled();

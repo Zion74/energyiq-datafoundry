@@ -8,7 +8,6 @@ import {
 } from "./preschool-ai-workflow";
 import {
   buildPreschoolAiRunInput,
-  buildPreschoolAiStageRunBody,
   resolvePreschoolAiWorkflowEventStreams,
 } from "./preschool-ai-run";
 import { preschoolGoldenSnapshot } from "./preschool-overview.test-fixture";
@@ -124,34 +123,6 @@ describe("fixed Preschool Investigator to Insight Editor workflow contract", () 
       JSON.stringify({ findings: [{ ...base, uncertainty: "Occupancy schedules are not present." }] }),
       new Set(["candidate-1"]),
     )).toMatchObject({ findings: [{ uncertainty: "Occupancy schedules are not present." }] });
-  });
-
-  it("enables the Method Skill and skill discovery tools for both fixed stages", () => {
-    const input = requiredInput();
-    const body = buildPreschoolAiStageRunBody(
-      input,
-      "profile-1",
-      "run-1",
-      "thread-1",
-      "investigator",
-      buildPreschoolInvestigatorPrompt(input),
-    );
-
-    expect(body).toMatchObject({
-      body: {
-        forwardedProps: {
-          externalContext: { overviewAiStage: "investigator" },
-          run_config: {
-            activeSkillId: "energy-insight-investigation",
-            enabledSkillIds: ["energy-insight-investigation"],
-            skillPolicy: {
-              allowedToolNames: ["skill", "skill_search", "skill_read", "inspect_schema", "run_sql_readonly"],
-              deniedToolNames: ["list_data_sources", "preview_table"],
-            },
-          },
-        },
-      },
-    });
   });
 
   it("materializes an accepted Benchmark interpretation with two-stage trace and no forced visual", () => {

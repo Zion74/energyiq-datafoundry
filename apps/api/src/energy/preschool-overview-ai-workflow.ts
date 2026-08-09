@@ -1,4 +1,5 @@
 import {
+  energyAiNarrativeClaimsSupported,
   filterAiFindingPresentationEvidence,
   parseAiFindingPresentation,
   type AiFindingPresentation,
@@ -198,6 +199,7 @@ export function createPreschoolOverviewAiWorkflow(input: {
       if (!claim.claimed) return claim.artifact;
 
       try {
+        requireRuntimeRevisionIdentity(input.metadataStore, identity, user);
         const snapshot = await resolveSnapshot({ identity, user });
         const context = buildWorkflowContext(snapshot, identity);
         const sessionId = workflowSessionId(identity, user.id, claim.artifact.attempt_count);
@@ -238,6 +240,7 @@ export function createPreschoolOverviewAiWorkflow(input: {
         if (tools.length > 0 && !investigator.schemaValid && !editor.schemaValid) {
           throw new Error("OVERVIEW_AI_SQL_SCHEMA_NOT_INSPECTED");
         }
+        requireRuntimeRevisionIdentity(input.metadataStore, identity, user);
         const result = materializeCanonicalArtifact({
           context,
           identity,
@@ -263,6 +266,39 @@ export function createPreschoolOverviewAiWorkflow(input: {
       }
     },
   };
+}
+
+function requireRuntimeRevisionIdentity(
+  metadataStore: MetadataStore,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+  user: UserRecord,
+): void {
+  const modelBinding = metadataStore.workspaceDefaultModelProfiles.find(identity.workspaceId);
+  if (!modelBinding
+    || modelBinding.profile_id !== identity.modelProfileId
+    || modelBinding.revision !== identity.modelProfileRevision) {
+    throw new Error("OVERVIEW_AI_MODEL_PROFILE_REVISION_MISMATCH");
+  }
+  const modelResource = metadataStore.configResources.find({
+    workspace_id: identity.workspaceId,
+    user_id: modelBinding.profile_owner_user_id,
+    kind: "model-profile",
+    id: identity.modelProfileId,
+  });
+  if (!modelResource || modelResource.status !== "connected" || !modelResource.default_enabled) {
+    throw new Error("OVERVIEW_AI_MODEL_PROFILE_REVISION_MISMATCH");
+  }
+  const skill = metadataStore.configResources.find({
+    workspace_id: identity.workspaceId,
+    user_id: user.id,
+    kind: "skill",
+    id: identity.methodSkillId,
+  });
+  if (!skill
+    || skill.status !== "valid"
+    || skill.payload.version !== identity.methodSkillRevision) {
+    throw new Error("OVERVIEW_AI_METHOD_SKILL_REVISION_MISMATCH");
+  }
 }
 
 function requirePreschoolIdentity(identity: EnergyIqOverviewAiArtifactIdentity): void {
@@ -763,10 +799,11 @@ function parseEditorEnvelope(answer: string, candidateIds: ReadonlySet<string>):
 
 function unsupportedNarrative(text: string, evidence: EvidenceItem[], tools: ToolEvidence[]): boolean {
   const withoutDates = text.replace(/\b\d{4}-\d{2}-\d{2}(?:T[^\s,;)]*)?/gu, " ");
-  const allowedNumbers = [...evidence.flatMap(({ values }) => collectNumbers(values)), ...tools.flatMap(({ rows }) => collectNumbers(rows))];
-  const claims = [...withoutDates.matchAll(/(?<![A-Za-z0-9_-])-?\d+(?:,\d{3})*(?:\.\d+)?/gu)]
-    .map(([raw]) => Number(raw.replace(/,/gu, ""))).filter(Number.isFinite);
-  if (claims.some((claim) => !allowedNumbers.some((value) => numericMatches(claim, value)))) return true;
+  if (!energyAiNarrativeClaimsSupported({
+    narrative: withoutDates,
+    evidence,
+    sqlEvidence: tools,
+  })) return true;
   const allowedEntities = new Set([
     ...evidence.flatMap(({ values }) => collectStrings(values)),
     ...tools.flatMap(({ rows }) => collectStrings(rows)),
@@ -826,22 +863,11 @@ function findEnvelope(answer: string, key: "candidates" | "findings"): Record<st
   return null;
 }
 
-function collectNumbers(value: unknown): number[] {
-  if (typeof value === "number" && Number.isFinite(value)) return [value];
-  if (Array.isArray(value)) return value.flatMap(collectNumbers);
-  if (isRecord(value)) return Object.values(value).flatMap(collectNumbers);
-  return [];
-}
-
 function collectStrings(value: unknown): string[] {
   if (typeof value === "string" && value.trim()) return [value.trim(), ...value.split(/[,;]\s*/u).filter(Boolean)];
   if (Array.isArray(value)) return value.flatMap(collectStrings);
   if (isRecord(value)) return Object.values(value).flatMap(collectStrings);
   return [];
-}
-
-function numericMatches(left: number, right: number): boolean {
-  return Math.abs(left - right) <= Math.max(1e-6, Math.abs(right) * 1e-9);
 }
 
 function placements(value: unknown): PlacementTarget[] | null {

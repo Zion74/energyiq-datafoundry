@@ -210,11 +210,22 @@ export const handleEnergyApiRequest = async (
         user,
       });
       if (segments.length === 3 && request.method === "GET") {
-        const artifact = await context.overviewAiWorkflow.execute({ identity, user, retry: false });
+        const artifact = context.metadataStore.energyIq.overviewAiArtifacts.find(identity);
         return {
           status: 200,
-          body: createSuccessResult(toOverviewAiArtifactDto(artifact)),
+          headers: { "Cache-Control": "private, no-store" },
+          body: createSuccessResult(artifact
+            ? toOverviewAiArtifactDto(artifact)
+            : {
+                status: "missing",
+                dataSnapshotId: identity.dataSnapshotId,
+                projectReleaseId: identity.projectReleaseId,
+              }),
         };
+      }
+      if (segments.length === 4 && segments[3] === "ensure" && request.method === "POST") {
+        const artifact = await context.overviewAiWorkflow.execute({ identity, user, retry: false });
+        return { status: 200, body: createSuccessResult(toOverviewAiArtifactDto(artifact)) };
       }
       if (segments.length === 4 && segments[3] === "retry" && request.method === "POST") {
         const artifact = await context.overviewAiWorkflow.execute({ identity, user, retry: true });
@@ -223,7 +234,7 @@ export const handleEnergyApiRequest = async (
       if (segments.length === 4
         && (segments[3] === "claim" || segments[3] === "complete" || segments[3] === "fail")
         && request.method === "POST") {
-        throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_CLIENT_ORCHESTRATION_FORBIDDEN");
+        throw new AuthError(403, "FORBIDDEN", "Overview AI Artifact browser orchestration is forbidden.");
       }
     }
     if (segments[0] === "projects" && segments.length === 1 && request.method === "POST") {

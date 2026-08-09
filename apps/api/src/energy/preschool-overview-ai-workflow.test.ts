@@ -181,6 +181,229 @@ describe("Preschool Overview AI server workflow", () => {
     expect(rejected).toMatchObject({ status: "failed", error_code: "OVERVIEW_AI_RUNTIME_RUN_IDENTITY_MISMATCH" });
     provenanceHarness.close();
   });
+
+  it("does not let a Centre count authorize an energy claim with the same number", async () => {
+    const harness = createHarness();
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? stageEvents(stage, runId, sessionId)
+        : envelopeEvents({
+            findings: [{
+              sourceCandidateIds: ["candidate-1"],
+              placementTargets: ["preschool.forecast"],
+              epistemicLevel: "verified",
+              relationship: "independent",
+              signalRefs: [],
+              title: "Aircon uses 30 kWh",
+              takeaway: "The current Snapshot shows 30 kWh for the Aircon contribution.",
+              evidenceRefs: ["circuit:appliance:Aircon 1"],
+              evidenceSqlIndexes: [],
+            }],
+            trace: [{ decision: "accepted", sourceCandidateIds: ["candidate-1"] }],
+          }, runId, sessionId),
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact.status).toBe("available");
+    expect(JSON.parse(artifact.result_json!) as Record<string, unknown>).toMatchObject({ findings: [] });
+  });
+
+  it("binds a deterministic metric value to the same cited Centre", async () => {
+    const harness = createHarness();
+    const currentSnapshot = snapshot();
+    const benchmark = currentSnapshot.preschoolBenchmark;
+    if (!benchmark || benchmark.status !== "provisional") throw new Error("Expected benchmark fixture");
+    benchmark.priorityCentreCodes = ["A1", "E"];
+    benchmark.centres = [
+      {
+        scopeId: "centre-a1",
+        centreCode: "A1",
+        name: "Centre A1",
+        cohort: "Childcare",
+        usageKwh: 100,
+        annualisedEuiKwhPerSqmYear: 120,
+        mayKwhPerPerson: 30,
+        quadrant: "priority",
+        priority: true,
+      },
+      {
+        scopeId: "centre-e",
+        centreCode: "E",
+        name: "Centre E",
+        cohort: "Childcare",
+        usageKwh: 300,
+        annualisedEuiKwhPerSqmYear: 140,
+        mayKwhPerPerson: 35,
+        quadrant: "priority",
+        priority: true,
+      },
+    ];
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => currentSnapshot,
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? stageEvents(stage, runId, sessionId)
+        : envelopeEvents({
+            findings: [{
+              sourceCandidateIds: ["candidate-1"],
+              placementTargets: ["preschool.benchmark"],
+              epistemicLevel: "verified",
+              relationship: "independent",
+              signalRefs: [],
+              title: "Centre A1 used 300 kWh",
+              takeaway: "Centre A1 recorded 300 kWh in the current period.",
+              evidenceRefs: ["benchmark:priority-centre:A1", "benchmark:priority-centre:E"],
+              evidenceSqlIndexes: [],
+            }],
+            trace: [{ decision: "accepted", sourceCandidateIds: ["candidate-1"] }],
+          }, runId, sessionId),
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(JSON.parse(artifact.result_json!) as Record<string, unknown>).toMatchObject({ findings: [] });
+  });
+
+  it("accepts manager-facing percentage rounding from the same typed metric", async () => {
+    const harness = createHarness();
+    const currentSnapshot = snapshot();
+    const operational = currentSnapshot.preschoolOperational;
+    if (!operational || operational.status !== "available") throw new Error("Expected operational fixture");
+    operational.energy.standbySharePct = 51.96;
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => currentSnapshot,
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? stageEvents(stage, runId, sessionId)
+        : envelopeEvents({
+            findings: [{
+              sourceCandidateIds: ["candidate-1"],
+              placementTargets: ["preschool.standby"],
+              epistemicLevel: "verified",
+              relationship: "independent",
+              signalRefs: [],
+              title: "Standby accounts for 52% of energy",
+              takeaway: "The current standby share rounds to 52%.",
+              evidenceRefs: ["operating:portfolio"],
+              evidenceSqlIndexes: [],
+            }],
+            trace: [{ decision: "accepted", sourceCandidateIds: ["candidate-1"] }],
+          }, runId, sessionId),
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(JSON.parse(artifact.result_json!) as Record<string, unknown>).toMatchObject({
+      findings: [{ title: "Standby accounts for 52% of energy" }],
+    });
+  });
+
+  it("binds SQL metric values and Centre identity to the same returned row", async () => {
+    const harness = createHarness();
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? stageEvents(stage, runId, sessionId)
+        : sqlEnvelopeEvents({
+            findings: [
+              {
+                sourceCandidateIds: ["candidate-1"],
+                placementTargets: ["preschool.benchmark"],
+                epistemicLevel: "verified",
+                relationship: "independent",
+                signalRefs: [],
+                title: "Centre A1 used 300 kWh",
+                takeaway: "Centre A1 recorded 300 kWh in the scoped query.",
+                evidenceRefs: [],
+                evidenceSqlIndexes: [1],
+              },
+              {
+                sourceCandidateIds: ["candidate-1"],
+                placementTargets: ["preschool.benchmark"],
+                epistemicLevel: "verified",
+                relationship: "independent",
+                signalRefs: [],
+                title: "Centre E used 300 kWh",
+                takeaway: "Centre E recorded 300 kWh in the scoped query.",
+                evidenceRefs: [],
+                evidenceSqlIndexes: [1],
+              },
+            ],
+            trace: [{ decision: "accepted", sourceCandidateIds: ["candidate-1"] }],
+          }, runId, sessionId),
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(JSON.parse(artifact.result_json!) as Record<string, unknown>).toMatchObject({
+      findings: [{ title: "Centre E used 300 kWh" }],
+    });
+  });
+
+  it("fails before Provider when model binding or Method Skill revision drifts", async () => {
+    const modelHarness = createHarness();
+    modelHarness.metadata.workspaceDefaultModelProfiles.set({
+      workspace_id: modelHarness.identity.workspaceId,
+      profile_id: modelHarness.identity.modelProfileId,
+      profile_owner_user_id: modelHarness.user.id,
+      configured_by_user_id: modelHarness.user.id,
+      expected_revision: modelHarness.identity.modelProfileRevision,
+    });
+    let modelCalls = 0;
+    const modelWorkflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: modelHarness.metadata,
+      dataGateway: modelHarness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => { modelCalls += 1; return stageEvents(stage, runId, sessionId); },
+    });
+    const modelResult = await modelWorkflow.execute({ identity: modelHarness.identity, user: modelHarness.user, retry: false });
+    modelHarness.close();
+    expect(modelResult).toMatchObject({ status: "failed", error_code: "OVERVIEW_AI_MODEL_PROFILE_REVISION_MISMATCH" });
+    expect(modelCalls).toBe(0);
+
+    const skillHarness = createHarness();
+    const skill = skillHarness.metadata.configResources.get({
+      workspace_id: skillHarness.identity.workspaceId,
+      user_id: skillHarness.user.id,
+      kind: "skill",
+      id: skillHarness.identity.methodSkillId,
+    });
+    skillHarness.metadata.configResources.upsert({
+      workspace_id: skill.workspace_id,
+      user_id: skill.user_id,
+      kind: "skill",
+      id: skill.id,
+      name: skill.name,
+      payload: { ...skill.payload, version: "2.0.0" },
+      builtin: skill.builtin,
+      default_enabled: skill.default_enabled,
+      status: skill.status,
+      expected_revision: skill.revision,
+    });
+    let skillCalls = 0;
+    const skillWorkflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: skillHarness.metadata,
+      dataGateway: skillHarness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => { skillCalls += 1; return stageEvents(stage, runId, sessionId); },
+    });
+    const skillResult = await skillWorkflow.execute({ identity: skillHarness.identity, user: skillHarness.user, retry: false });
+    skillHarness.close();
+    expect(skillResult).toMatchObject({ status: "failed", error_code: "OVERVIEW_AI_METHOD_SKILL_REVISION_MISMATCH" });
+    expect(skillCalls).toBe(0);
+  });
 });
 
 function createHarness() {
@@ -198,6 +421,35 @@ function createHarness() {
     status: "published",
     root_scope_id: "preschool-project",
   });
+  metadata.configResources.upsert({
+    id: "profile-current",
+    workspace_id: "preschool-workspace",
+    user_id: "dev-user",
+    kind: "model-profile",
+    name: "Current model",
+    payload: { provider: "openai-compatible", modelName: "test-model" },
+    default_enabled: true,
+    status: "connected",
+  });
+  metadata.workspaceDefaultModelProfiles.set({
+    workspace_id: "preschool-workspace",
+    profile_id: "profile-current",
+    profile_owner_user_id: "dev-user",
+    configured_by_user_id: "dev-user",
+  });
+  for (const userId of ["dev-user", "second-user"]) {
+    metadata.configResources.upsert({
+      id: "energy-insight-investigation",
+      workspace_id: "preschool-workspace",
+      user_id: userId,
+      kind: "skill",
+      name: "energy-insight-investigation",
+      payload: { version: "1.0.0", userInvocable: true },
+      builtin: true,
+      default_enabled: false,
+      status: "valid",
+    });
+  }
   const identity: EnergyIqOverviewAiArtifactIdentity = {
     workspaceId: "preschool-workspace",
     projectId: "preschool-demo",
@@ -212,7 +464,7 @@ function createHarness() {
     analysisPackId: "preschool-analysis-pack",
     analysisPackRevision: "v1",
     modelProfileId: "profile-current",
-    modelProfileRevision: 4,
+    modelProfileRevision: 1,
     outputContractRevision: "v13",
     validatorRevision: "preschool-ai-two-stage-fact-boundary-v1",
     workflowRevision: "preschool-two-stage-v1",
@@ -337,6 +589,30 @@ function stageEvents(stage: "investigator" | "editor", runId: string, sessionId:
 function envelopeEvents(value: Record<string, unknown>, runId: string, sessionId: string) {
   return {
     events: [
+      { type: "TEXT_MESSAGE_CONTENT", delta: JSON.stringify(value) },
+      { type: "RUN_FINISHED" },
+    ],
+    completedRun: { runId, sessionId },
+  };
+}
+
+function sqlEnvelopeEvents(value: Record<string, unknown>, runId: string, sessionId: string) {
+  return {
+    events: [
+      { type: "TOOL_CALL_START", toolCallId: "schema-1", toolCallName: "inspect_schema", args: {} },
+      { type: "TOOL_CALL_RESULT", toolCallId: "schema-1", toolCallName: "inspect_schema", result: { tables: [{ name: "energy_facts" }] } },
+      { type: "TOOL_CALL_START", toolCallId: "sql-1", toolCallName: "run_sql_readonly", args: { sql: "SELECT centre_code, usage_kwh FROM energy_facts" } },
+      {
+        type: "TOOL_CALL_RESULT",
+        toolCallId: "sql-1",
+        toolCallName: "run_sql_readonly",
+        result: {
+          columns: ["centre_code", "usage_kwh"],
+          rows: [["A1", 100], ["E", 300]],
+          row_count: 2,
+          audit_log_id: "audit-1",
+        },
+      },
       { type: "TEXT_MESSAGE_CONTENT", delta: JSON.stringify(value) },
       { type: "RUN_FINISHED" },
     ],

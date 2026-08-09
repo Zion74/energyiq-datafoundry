@@ -601,6 +601,17 @@ export const configApi = {
     );
   },
 
+  ensureEnergyOverviewAiArtifact(
+    projectId: string,
+    scopeId: string,
+  ): Promise<EnergyOverviewAiArtifactDto> {
+    const params = new URLSearchParams({ scopeId });
+    return requestEnvelope<EnergyOverviewAiArtifactDto>(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-ai-artifact/ensure?${params.toString()}`,
+      { method: "POST", body: "{}" },
+    );
+  },
+
   retryEnergyOverviewAiArtifact(
     projectId: string,
     scopeId: string,
