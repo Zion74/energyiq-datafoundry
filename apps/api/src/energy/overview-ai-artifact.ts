@@ -89,6 +89,17 @@ export const overviewAiArtifactIdentityFromSnapshot = (input: {
   modelProfileRevision: input.modelBinding.revision,
 });
 
+export const overviewAiArtifactPinnedLocalPeriod = (input: {
+  identity: Pick<EnergyIqOverviewAiArtifactIdentity, "analysisPeriodFrom" | "analysisPeriodTo">;
+  timezone: string;
+}): { from: string; to: string } => {
+  const from = localDateAtTimezone(input.identity.analysisPeriodFrom, input.timezone);
+  const endExclusive = localDateAtTimezone(input.identity.analysisPeriodTo, input.timezone);
+  const to = shiftLocalDate(endExclusive, -1);
+  if (from > to) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PERIOD_INVALID");
+  return { from, to };
+};
+
 export const queueCurrentProjectOverviewAiArtifact = async (input: {
   metadataStore: MetadataStore;
   dataGateway: LocalDataGateway;
@@ -148,4 +159,25 @@ export const resolveCurrentOverviewAiArtifactIdentity = async (input: {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RELEASE_REQUIRED");
   }
   return overviewAiArtifactIdentityFromSnapshot({ snapshot: resolution.snapshot, modelBinding });
+};
+
+const localDateAtTimezone = (value: string, timezone: string): string => {
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PERIOD_INVALID");
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(timestamp));
+  const part = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((candidate) => candidate.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+};
+
+const shiftLocalDate = (value: string, days: number): string => {
+  const [year, month, day] = value.split("-").map(Number);
+  const shifted = new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1));
+  shifted.setUTCDate(shifted.getUTCDate() + days);
+  return shifted.toISOString().slice(0, 10);
 };

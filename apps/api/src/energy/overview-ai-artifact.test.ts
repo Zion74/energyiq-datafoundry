@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { createOverviewAiArtifactIdentity } from "./overview-ai-artifact.js";
+import {
+  createOverviewAiArtifactIdentity,
+  overviewAiArtifactPinnedLocalPeriod,
+} from "./overview-ai-artifact.js";
 
 describe("createOverviewAiArtifactIdentity", () => {
   it("is shared across users but changes with Snapshot or model binding revision", () => {
@@ -63,5 +66,27 @@ describe("createOverviewAiArtifactIdentity", () => {
       modelProfileId: "profile",
       modelProfileRevision: 1,
     })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_CONTRACT_NOT_FOUND");
+  });
+});
+
+describe("overviewAiArtifactPinnedLocalPeriod", () => {
+  it("converts Snapshot ISO boundaries to the Project-local inclusive date range", () => {
+    expect(overviewAiArtifactPinnedLocalPeriod({
+      identity: {
+        analysisPeriodFrom: "2026-05-10T16:00:00.000Z",
+        analysisPeriodTo: "2026-06-07T16:00:00.000Z",
+      },
+      timezone: "Asia/Singapore",
+    })).toEqual({ from: "2026-05-11", to: "2026-06-07" });
+  });
+
+  it("fails closed when the exclusive boundary does not follow the start date", () => {
+    expect(() => overviewAiArtifactPinnedLocalPeriod({
+      identity: {
+        analysisPeriodFrom: "2026-05-01T00:00:00.000Z",
+        analysisPeriodTo: "2026-05-01T00:00:00.000Z",
+      },
+      timezone: "UTC",
+    })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PERIOD_INVALID");
   });
 });

@@ -17,7 +17,10 @@ import {
   resolveProjectAnalysis,
   type ProjectAnalysisSnapshot,
 } from "./project-analysis-resolver.js";
-import { resolveCurrentOverviewAiArtifactIdentity } from "./overview-ai-artifact.js";
+import {
+  overviewAiArtifactPinnedLocalPeriod,
+  resolveCurrentOverviewAiArtifactIdentity,
+} from "./overview-ai-artifact.js";
 
 type PlacementTarget =
   | "preschool.overall-key-findings"
@@ -151,6 +154,11 @@ export function createPreschoolOverviewAiWorkflow(input: {
   }) => Promise<ProjectAnalysisSnapshot>;
 }): PreschoolOverviewAiWorkflow {
   const resolveSnapshot = input.resolveSnapshot ?? (async ({ identity, user }) => {
+    const project = input.metadataStore.energyIq.getProject(identity.projectId);
+    const period = overviewAiArtifactPinnedLocalPeriod({
+      identity,
+      timezone: project.timezone,
+    });
     const resolution = await resolveProjectAnalysis({
       metadataStore: input.metadataStore,
       dataGateway: input.dataGateway,
@@ -163,8 +171,8 @@ export function createPreschoolOverviewAiWorkflow(input: {
         resource: "electricity",
         analysisWindow: "current-overview-28d",
         period: "Custom",
-        from: identity.analysisPeriodFrom,
-        to: identity.analysisPeriodTo,
+        from: period.from,
+        to: period.to,
         expectedDataSnapshotId: identity.dataSnapshotId,
         expectedProjectReleaseId: identity.projectReleaseId,
       },
