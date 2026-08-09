@@ -33,6 +33,64 @@ function makeWithinThreshold(row: DailyAnomalyRow): void {
 }
 
 describe("NgeeAnnOverviewRenderer", () => {
+  it("builds the default when-energy summary from the selected complete profile cells", () => {
+    const view = buildNgeeAnnOverviewViewModel(ngeeAnnGoldenSnapshot()).dayProfile;
+    expect(view.status).toBe("available");
+    if (view.status !== "available") return;
+
+    expect(view.profiles.find((profile) => profile.id === "project:weekday")?.summary).toEqual({
+      status: "available",
+      peakHour: 14,
+      peakHourLabel: "14:00",
+      peakUsageKwh: 16.0703,
+      peakUsage: "16.0703",
+      sampleDayCount: 5,
+    });
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot: ngeeAnnGoldenSnapshot() }} />,
+    );
+    expect(markup).toContain("When energy occurs");
+    expect(markup).toContain("Weekday / Project peaked at 14:00");
+    expect(markup).toContain("16.0703 kWh mean");
+    expect(markup).toContain("5 complete-day samples");
+    expect(markup).toContain("Weekend / Project peaked at 14:00 with a 9.7148 kWh mean across 2 complete-day samples.");
+    expect(markup).toContain("This observed profile does not by itself prove an anomaly, waste or cause.");
+    expect(markup).toContain("Darker Heatmap cells show higher accepted usage within the selected view; they do not by themselves prove an anomaly, waste or cause.");
+  });
+
+  it("keeps the complete-day profile summary independent from excluded partial grid cells", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    snapshot.analysis.timeBehaviour!.scopes[0]!.cells[0]!.dataHealth = {
+      status: "partial",
+      coveragePct: 75,
+      expectedMeterIntervalCount: 16,
+      validIntervalCount: 12,
+      qualityEventCount: 1,
+    };
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+    expect(markup).toContain("Weekday / Project peaked at 14:00");
+    expect(markup).toContain("5 complete days / 24 server values");
+  });
+
+  it("fails the full Day Profile contract closed when an available profile has no valid samples", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const profile = snapshot.analysis.timeBehaviour!.dayProfiles.find((candidate) => (
+      candidate.scopeId === "project" && candidate.dayType === "weekday"
+    ));
+    if (!profile || profile.status !== "available") throw new Error("Expected available Project weekday profile.");
+    profile.sampleDayCount = 0;
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+    expect(markup).toContain("The server Day Profile contract is incomplete or invalid.");
+    expect(markup).not.toContain("Weekday / Project peaked at 14:00");
+  });
+
   it("opens with an answer-first Executive Summary built only from verified Snapshot facts", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     const view = buildNgeeAnnOverviewViewModel(snapshot);
@@ -405,7 +463,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("How these exceptions were selected");
     expect(markup).not.toContain("Triggered only / pinned Rule");
     expect(markup).toContain("Day profile");
-    expect(markup).toContain("How does the typical 24-hour energy shape change by Day Type and Scope?");
+    expect(markup).toContain("How does the observed 24-hour energy shape change by Day Type and Scope?");
     expect(markup).toContain("5 complete days / 24 server values");
     expect(markup).toContain("Day Profile evidence / time_bucket_grid_v1");
     expect(markup).toContain("Usage heatmap");
@@ -1381,6 +1439,10 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(weekend.getAttribute("aria-pressed")).toBe("true");
     expect(level7.getAttribute("aria-pressed")).toBe("true");
     expect(container.textContent).toContain("2 complete days / 24 server values");
+    expect(container.textContent).toContain("Weekend / Level 7 peaked at 14:00");
+    expect(container.textContent).toContain("7.5239 kWh mean");
+    expect(container.textContent).toContain("2 complete-day samples");
+    expect(container.textContent).toContain("Weekday / Level 7 peaked at 14:00 with a 10.7286 kWh mean across 5 complete-day samples.");
 
     const profileHour = container.querySelector<HTMLButtonElement>(
       'button[aria-label^="Weekend Level 7 00:00:"]',
@@ -1402,11 +1464,14 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
 
     await act(async () => publicHoliday.click());
     expect(container.textContent).toContain("Public Holiday / Level 7 unavailable");
+    expect(container.textContent).toContain("When-energy summary unavailable");
     expect(container.textContent).toContain("requires an authoritative release-pinned Calendar classification");
     expect(container.textContent).toContain("No value is inferred or zero-filled");
 
     await act(async () => weekday.click());
     expect(container.textContent).toContain("5 complete days / 24 server values");
+    expect(container.textContent).toContain("Weekday / Level 7 peaked at 14:00");
+    expect(container.textContent).toContain("10.7286 kWh mean");
     expect(container.textContent).toContain("Hover or focus an hour");
   });
 

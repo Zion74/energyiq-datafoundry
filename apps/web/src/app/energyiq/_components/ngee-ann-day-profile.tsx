@@ -28,6 +28,19 @@ export function NgeeAnnDayProfile({ view }: { view: NgeeAnnDayProfileViewModel }
   const activePoint = profile.values.find((point) => point.id === activePointId)
     ?? profile.values.find((point) => point.id === selectedPointId)
     ?? null;
+  const comparisonDayType = profile.dayType === "weekday"
+    ? "weekend"
+    : profile.dayType === "weekend"
+      ? "weekday"
+      : null;
+  const comparisonProfile = comparisonDayType
+    ? view.profiles.find((candidate) => (
+      candidate.scopeId === profile.scopeId
+      && candidate.dayType === comparisonDayType
+      && candidate.status === "available"
+      && candidate.summary.status === "available"
+    )) ?? null
+    : null;
   let maximumUsageKwh = 0;
   for (const point of profile.values) {
     if (point.acceptedUsageKwh > maximumUsageKwh) maximumUsageKwh = point.acceptedUsageKwh;
@@ -107,6 +120,42 @@ export function NgeeAnnDayProfile({ view }: { view: NgeeAnnDayProfileViewModel }
             })}
           </div>
         </fieldset>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-border bg-surface-subtle/60 px-4 py-4" data-when-energy-summary="true">
+        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">When energy occurs</p>
+        {profile.status === "available" && profile.summary.status === "available" ? (
+          <div className="mt-2 grid gap-3 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)] lg:items-start">
+            <div>
+              <p className="text-lg font-semibold tracking-[-0.015em] text-foreground">
+                {profile.dayTypeLabel} / {profile.scopeName} peaked at {profile.summary.peakHourLabel}
+              </p>
+              <p className="mt-1 text-base font-semibold tabular-nums text-step-inspect">
+                {profile.summary.peakUsage} kWh mean
+              </p>
+              <p className="mt-1 text-xs text-muted">
+                {profile.summary.sampleDayCount} complete-day {profile.summary.sampleDayCount === 1 ? "sample" : "samples"}
+              </p>
+            </div>
+            <div className="text-sm leading-6 text-muted">
+              {comparisonProfile && comparisonProfile.summary.status === "available" ? (
+                <p>
+                  {comparisonProfile.dayTypeLabel} / {comparisonProfile.scopeName} peaked at {comparisonProfile.summary.peakHourLabel} with a {comparisonProfile.summary.peakUsage} kWh mean across {comparisonProfile.summary.sampleDayCount} complete-day {comparisonProfile.summary.sampleDayCount === 1 ? "sample" : "samples"}.
+                </p>
+              ) : (
+                <p>No second complete Day Type profile is available for a trustworthy comparison.</p>
+              )}
+              <p className="mt-1">This observed profile does not by itself prove an anomaly, waste or cause.</p>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-2" role="status">
+            <p className="text-sm font-semibold text-foreground">When-energy summary unavailable</p>
+            <p className="mt-1 text-sm leading-6 text-muted">
+              {profile.summary.reason}
+            </p>
+          </div>
+        )}
       </div>
 
       {profile.status === "unavailable" ? (

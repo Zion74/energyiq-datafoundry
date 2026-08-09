@@ -138,6 +138,19 @@ export type NgeeAnnDayProfileViewModel = {
     status: "available" | "unavailable";
     sampleDayCount: number | null;
     reason: string | null;
+    summary:
+      | {
+        status: "available";
+        peakHour: number;
+        peakHourLabel: string;
+        peakUsageKwh: number;
+        peakUsage: string;
+        sampleDayCount: number;
+      }
+      | {
+        status: "unavailable";
+        reason: string;
+      };
     values: Array<{
       id: string;
       localHour: number;
@@ -2537,7 +2550,7 @@ function buildDayProfile(
   const evidence = timeBehaviourEvidence(snapshot);
   const unavailable = (reason: string): NgeeAnnDayProfileViewModel => ({
     status: "unavailable",
-    decisionQuestion: "How does the typical 24-hour energy shape change by Day Type and Scope?",
+    decisionQuestion: "How does the observed 24-hour energy shape change by Day Type and Scope?",
     reason,
     scopes: [],
     profiles: [],
@@ -2585,31 +2598,48 @@ function buildDayProfile(
 
   return {
     status: "available",
-    decisionQuestion: "How does the typical 24-hour energy shape change by Day Type and Scope?",
+    decisionQuestion: "How does the observed 24-hour energy shape change by Day Type and Scope?",
     reason: null,
     scopes: grid.scopes.map((scope) => ({
       id: scope.scopeId,
       name: scope.scopeType === "project" ? "Project" : scope.scopeName,
     })),
-    profiles: profiles.map((profile) => ({
-      id: `${profile.scopeId}:${profile.dayType}`,
-      dayType: profile.dayType,
-      dayTypeLabel: dayTypeLabel(profile.dayType),
-      scopeId: profile.scopeId,
-      scopeName: profile.scopeId === snapshot.context.scopeId ? "Project" : profile.scopeName,
-      status: profile.status,
-      sampleDayCount: profile.status === "available" ? profile.sampleDayCount : null,
-      reason: profile.status === "unavailable" ? profile.reason.message : null,
-      values: profile.status === "available"
-        ? profile.values.map((value) => ({
-          id: `${profile.scopeId}:${profile.dayType}:${value.localHour}`,
-          localHour: value.localHour,
-          hourLabel: formatLocalHour(value.localHour),
-          acceptedUsageKwh: value.usageKwh,
-          usageKwh: formatDecimal(value.usageKwh, 4),
-        }))
-        : [],
-    })),
+    profiles: profiles.map((profile) => {
+      const peak = profile.status === "available"
+        ? profile.values.reduce((current, candidate) => (
+          candidate.usageKwh > current.usageKwh ? candidate : current
+        ))
+        : null;
+      return {
+        id: `${profile.scopeId}:${profile.dayType}`,
+        dayType: profile.dayType,
+        dayTypeLabel: dayTypeLabel(profile.dayType),
+        scopeId: profile.scopeId,
+        scopeName: profile.scopeId === snapshot.context.scopeId ? "Project" : profile.scopeName,
+        status: profile.status,
+        sampleDayCount: profile.status === "available" ? profile.sampleDayCount : null,
+        reason: profile.status === "unavailable" ? profile.reason.message : null,
+        summary: profile.status === "unavailable"
+          ? { status: "unavailable" as const, reason: profile.reason.message }
+          : {
+            status: "available" as const,
+            peakHour: peak!.localHour,
+            peakHourLabel: formatLocalHour(peak!.localHour),
+            peakUsageKwh: peak!.usageKwh,
+            peakUsage: formatDecimal(peak!.usageKwh, 4),
+            sampleDayCount: profile.sampleDayCount,
+          },
+        values: profile.status === "available"
+          ? profile.values.map((value) => ({
+            id: `${profile.scopeId}:${profile.dayType}:${value.localHour}`,
+            localHour: value.localHour,
+            hourLabel: formatLocalHour(value.localHour),
+            acceptedUsageKwh: value.usageKwh,
+            usageKwh: formatDecimal(value.usageKwh, 4),
+          }))
+          : [],
+      };
+    }),
     evidence,
   };
 }

@@ -212,6 +212,10 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
         </div>
       </div>
 
+      <p className="mt-3 text-xs leading-5 text-muted">
+        Darker Heatmap cells show higher accepted usage within the selected view; they do not by themselves prove an anomaly, waste or cause.
+      </p>
+
       <div className="mt-4 min-h-[96px] rounded-lg bg-surface-subtle px-4 py-3" aria-live="polite" aria-atomic="true">
         {activeAverageCell ? (
           <div className="flex flex-wrap items-start justify-between gap-3">
