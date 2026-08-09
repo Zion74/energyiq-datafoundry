@@ -36,7 +36,7 @@ export type PreschoolOverviewRendererState =
     snapshot: EnergyProjectAnalysisSnapshotDto;
   };
 
-type PreschoolBenchmarkInterpretationIdentity = {
+type PreschoolSectionInterpretationIdentity = {
   dataSnapshotId: string;
   projectReleaseId: string;
   period: {
@@ -51,12 +51,14 @@ export type PreschoolBenchmarkInterpretation =
     headline: string;
     summary: string;
     actions?: string[];
-  } & PreschoolBenchmarkInterpretationIdentity)
-  | ({ status: "pending" } & PreschoolBenchmarkInterpretationIdentity)
+  } & PreschoolSectionInterpretationIdentity)
+  | ({ status: "pending" } & PreschoolSectionInterpretationIdentity)
   | {
     status: "unavailable";
     detail?: string;
   };
+
+export type PreschoolStandbyInterpretation = PreschoolBenchmarkInterpretation;
 
 export function PreschoolOverviewRenderer({
   state,
@@ -68,6 +70,7 @@ export function PreschoolOverviewRenderer({
   savedAiArtifact,
   onAiArtifactChange,
   benchmarkInterpretation,
+  standbyInterpretation,
 }: {
   state: PreschoolOverviewRendererState;
   onRetry?: () => void;
@@ -78,6 +81,7 @@ export function PreschoolOverviewRenderer({
   savedAiArtifact?: EnergySavedAnalysisAiArtifactDto;
   onAiArtifactChange?: (artifact: EnergySavedAnalysisAiArtifactInputDto | null) => void;
   benchmarkInterpretation?: PreschoolBenchmarkInterpretation;
+  standbyInterpretation?: PreschoolStandbyInterpretation;
 }) {
   if (state.status !== "ready") {
     const meta = {
@@ -390,48 +394,46 @@ export function PreschoolOverviewRenderer({
         <SectionHeader
           id="preschool-standby-wastage-heading"
           sectionNumber={3}
-          title="Standby energy waste"
-          description="Review energy that remains while Centres are closed, the repeated Spikes behind it, and the Centres that need an after-hours check."
-          meta={view.operational.status === "available" ? `Calendar ${view.operational.calendarVersion} · ${view.operational.threshold}` : undefined}
+          title="Standby Energy Wastage — Post Operating Hours"
+          description="How much energy remains after closing, what stays powered, and which Centres and hours need an after-hours review?"
+        />
+        <StandbyInterpretationSlot
+          snapshot={state.snapshot}
+          interpretation={standbyInterpretation}
         />
         {view.operational.status === "available" ? (
           <>
-            <div className="mt-5">
-              <OperatingProfileChart profile={view.operational.hourlyProfile} />
-            </div>
-            <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-              <OperationalSpikePanel
-                title="Standby / closed hours"
-                energy={`${view.operational.standby.energy} · ${view.operational.standby.share}`}
-                spikeCount={view.operational.standby.spikeCount}
-                centreCount={view.operational.standby.centreCount}
-                centres={view.operational.standby.centres}
-                tone="warning"
-              />
-              <div className="rounded-lg border border-step-warning/30 bg-step-warning-soft p-4">
-                <p className="text-xs font-semibold text-step-warning">{view.operational.sop.label}</p>
-                <p className="mt-2 text-xl font-semibold tabular-nums text-foreground">
-                  {view.operational.sop.breachingCentreCodes.join(" · ") || "No signal"}
-                </p>
-                <div className="mt-3 space-y-2">
-                  {view.operational.sop.centres.map((centre) => (
-                    <div
-                      key={centre.centreCode}
-                      data-sop-centre-type={centre.centreType ?? "Unavailable"}
-                      className="flex items-center justify-between gap-3 rounded-md border border-step-warning/20 bg-surface/70 px-3 py-2 text-xs"
-                    >
-                      <span className="min-w-0">
-                        <span className="block font-semibold text-foreground">{centre.centreCode}</span>
-                        <span className="mt-0.5 block truncate text-[10px] text-muted-light">{centre.centreType ?? "Type unavailable"}</span>
-                      </span>
-                      <span className="text-muted">{centre.standbySpikeCount} Spike{centre.standbySpikeCount === 1 ? "" : "s"}</span>
-                      <span className="font-semibold tabular-nums text-step-warning">{centre.score}</span>
-                    </div>
-                  ))}
-                </div>
-                <p className="mt-3 text-[11px] leading-5 text-muted">{view.operational.sop.detail}</p>
-              </div>
-            </div>
+            <StandbyKpiStrip standby={view.operational.standby} />
+
+            <section className="mt-8 border-t border-border pt-7" aria-labelledby="preschool-standby-appliances-heading">
+              <h4 id="preschool-standby-appliances-heading" className="text-base font-semibold text-foreground">3.1 Standby Energy by Appliance Type</h4>
+              <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Which published Appliance aliases continue to consume energy while the Calendar marks Centres as closed?</p>
+              <StandbyApplianceComposition standby={view.operational.standby} />
+            </section>
+
+            <section className="mt-8 border-t border-border pt-7" aria-labelledby="preschool-standby-spikes-heading">
+              <h4 id="preschool-standby-spikes-heading" className="text-base font-semibold text-foreground">3.2 Non-operating Hours Spike Analysis</h4>
+              <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Start with the Centres that have repeated closed-hour exceptions. Expand a row to inspect every event for that Centre.</p>
+              <StandbySpikeTable centres={view.operational.standby.centres} />
+            </section>
+
+            <section className="mt-8 border-t border-border pt-7" aria-labelledby="preschool-after-hours-review-heading">
+              <h4 id="preschool-after-hours-review-heading" className="text-base font-semibold text-foreground">3.3 {view.operational.sop.label}</h4>
+              <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Use this provisional score to order an investigation, not to certify SOP compliance.</p>
+              <AfterHoursReviewPriority sop={view.operational.sop} />
+            </section>
+
+            <details className="mt-7 rounded-lg border border-border bg-surface-subtle/40 px-4 py-3">
+              <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Method, tariff and evidence</summary>
+              <dl className="mt-3 grid gap-2 text-xs leading-5 sm:grid-cols-2">
+                <ReadinessRow label="Calendar" value={view.operational.calendarVersion} />
+                <ReadinessRow label="Spike rule" value={view.operational.threshold} />
+                <ReadinessRow label="Tariff" value={view.operational.standby.provisionalCostNote} />
+                <ReadinessRow label="Reconciliation" value={view.operational.standby.reconciliation} />
+              </dl>
+              <p className="mt-3 text-xs leading-5 text-muted">Leading contributors identify the largest observed Circuit within an event; they are not confirmed root causes. Spike excess is investigation evidence, not guaranteed savings.</p>
+              <div className="mt-3"><PreschoolEvidenceLink label="View supporting evidence" /></div>
+            </details>
           </>
         ) : (
           <div className="mt-5 rounded-lg border border-border bg-surface-subtle p-4" role="status">
@@ -752,6 +754,44 @@ function BenchmarkInterpretationSlot({
   snapshot: EnergyProjectAnalysisSnapshotDto;
   interpretation: PreschoolBenchmarkInterpretation | undefined;
 }) {
+  return (
+    <SnapshotInterpretationSlot
+      snapshot={snapshot}
+      interpretation={interpretation}
+      slot="benchmark"
+      title="Key recommendation / AI interpretation"
+    />
+  );
+}
+
+function StandbyInterpretationSlot({
+  snapshot,
+  interpretation,
+}: {
+  snapshot: EnergyProjectAnalysisSnapshotDto;
+  interpretation: PreschoolStandbyInterpretation | undefined;
+}) {
+  return (
+    <SnapshotInterpretationSlot
+      snapshot={snapshot}
+      interpretation={interpretation}
+      slot="standby"
+      title="Next step / AI interpretation"
+    />
+  );
+}
+
+function SnapshotInterpretationSlot({
+  snapshot,
+  interpretation,
+  slot,
+  title,
+}: {
+  snapshot: EnergyProjectAnalysisSnapshotDto;
+  interpretation: PreschoolBenchmarkInterpretation | PreschoolStandbyInterpretation | undefined;
+  slot: "benchmark" | "standby";
+  title: string;
+}) {
   const matchesSnapshot = interpretation?.status === "available" || interpretation?.status === "pending"
     ? interpretation.dataSnapshotId === snapshot.dataSnapshot.id
       && interpretation.projectReleaseId === snapshot.projectRelease.id
@@ -763,10 +803,12 @@ function BenchmarkInterpretationSlot({
     : interpretation?.status === "pending" && matchesSnapshot
       ? "pending"
       : "unavailable";
+  const statusData = { [`data-${slot}-interpretation-status`]: status };
+  const contentData = { [`data-${slot}-interpretation-content`]: "true" };
 
   return (
     <aside
-      data-benchmark-interpretation-status={status}
+      {...statusData}
       className="mt-5 rounded-lg border border-primary/20 bg-primary-soft/35 p-4"
       aria-live={status === "pending" ? "polite" : undefined}
     >
@@ -776,11 +818,11 @@ function BenchmarkInterpretationSlot({
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <h4 className="text-sm font-semibold text-foreground">Key recommendation / AI interpretation</h4>
+            <h4 className="text-sm font-semibold text-foreground">{title}</h4>
             <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-light">Snapshot-bound</span>
           </div>
           {status === "available" && interpretation?.status === "available" ? (
-            <div className="mt-2" data-benchmark-interpretation-content="true">
+            <div className="mt-2" {...contentData}>
               <p className="text-sm font-semibold text-foreground">{interpretation.headline}</p>
               <p className="mt-1.5 text-sm leading-6 text-muted">{interpretation.summary}</p>
               {interpretation.actions && interpretation.actions.length > 0 ? (
@@ -1215,63 +1257,176 @@ function roundSvg(value: number): number {
 }
 
 type OperationalView = Extract<PreschoolOverviewViewModel["operational"], { status: "available" }>;
+type StandbyView = OperationalView["standby"];
 
-function OperatingProfileChart({ profile }: { profile: OperationalView["hourlyProfile"] }) {
-  const width = 960;
-  const height = 270;
-  const margin = { top: 28, right: 24, bottom: 48, left: 54 };
-  const plotWidth = width - margin.left - margin.right;
-  const plotHeight = height - margin.top - margin.bottom;
-  const columnWidth = plotWidth / profile.rows.length;
-  const barWidth = Math.max(8, columnWidth - 8);
-  const maxValue = Math.max(1, ...profile.rows.map((row) => row.totalKwh));
-
+function StandbyKpiStrip({ standby }: { standby: StandbyView }) {
+  const metrics = [
+    { label: "Energy used after closing", value: standby.energy, detail: "Calendar-classified closed hours" },
+    { label: "Provisional standby cost", value: standby.provisionalCost, detail: "Before GST reference · not a bill" },
+    { label: "Share of total", value: standby.share, detail: "Of accepted May Portfolio energy" },
+    { label: "Unusual closed-hour Spikes", value: String(standby.spikeCount), detail: "Above the same-hour baseline" },
+    { label: "Centres to review", value: String(standby.centreCount), detail: "Named below in action order" },
+  ];
   return (
-    <article className="overflow-hidden rounded-lg border border-border bg-surface-subtle p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h4 className="text-sm font-semibold text-foreground">When energy is used</h4>
-          <p className="mt-1 text-[11px] leading-5 text-muted">Average complete day across the Portfolio; Calendar-classified closed-hour energy is highlighted.</p>
+    <dl
+      data-standby-kpis="five-decision-metrics"
+      className="mt-6 grid overflow-hidden rounded-lg border border-border bg-surface sm:grid-cols-2 xl:grid-cols-5"
+    >
+      {metrics.map((metric) => (
+        <div key={metric.label} className="border-b border-border px-4 py-4 last:border-b-0 sm:border-r xl:border-b-0 xl:last:border-r-0">
+          <dt className="text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-light">{metric.label}</dt>
+          <dd className="mt-2 text-xl font-semibold tabular-nums text-foreground">{metric.value}</dd>
+          <p className="mt-1.5 text-[10px] leading-4 text-muted">{metric.detail}</p>
         </div>
-        <p className="text-[11px] text-muted"><strong className="font-semibold text-foreground">Peak average hour:</strong> {profile.peakHourLabel}</p>
+      ))}
+    </dl>
+  );
+}
+
+function StandbyApplianceComposition({ standby }: { standby: StandbyView }) {
+  let cumulativeOffset = 0;
+  const arcs = standby.applianceGroups.map((group) => {
+    const arc = { ...group, offset: cumulativeOffset };
+    cumulativeOffset += group.sharePct;
+    return arc;
+  });
+  return (
+    <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(300px,0.78fr)_minmax(520px,1.22fr)]" data-standby-appliance-composition="closed-state">
+      <article className="border-y border-border py-5">
+        <div className="grid gap-5 sm:grid-cols-[220px_minmax(0,1fr)] sm:items-center">
+          <svg viewBox="0 0 220 220" role="img" aria-labelledby="standby-composition-title standby-composition-description" className="mx-auto h-auto w-full max-w-[220px]">
+            <title id="standby-composition-title">Closed-hour energy share by Appliance group</title>
+            <desc id="standby-composition-description">A four-segment donut shows the share of closed-hour energy from Plugload, Aircon, Lighting and Heater Circuit aliases.</desc>
+            <circle cx="110" cy="110" r="75" pathLength="100" fill="none" stroke="currentColor" strokeWidth="28" className="text-surface-subtle" />
+            {arcs.map((group) => (
+              <circle
+                key={group.name}
+                cx="110"
+                cy="110"
+                r="75"
+                pathLength="100"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="28"
+                strokeDasharray={`${group.sharePct} ${100 - group.sharePct}`}
+                strokeDashoffset={-group.offset}
+                strokeLinecap="butt"
+                transform="rotate(-90 110 110)"
+                className={applianceStrokeClass(group.name)}
+                data-standby-appliance-group={group.name}
+              >
+                <title>{`${group.name}: ${group.energy}, ${group.share}`}</title>
+              </circle>
+            ))}
+            <text x="110" y="104" textAnchor="middle" className="fill-muted text-[11px] font-semibold">Closed-hour</text>
+            <text x="110" y="126" textAnchor="middle" className="fill-foreground text-[15px] font-semibold">{standby.energy}</text>
+          </svg>
+          <div className="space-y-3" aria-label="Closed-hour Appliance group legend">
+            {standby.applianceGroups.map((group) => (
+              <div key={group.name} className="grid grid-cols-[10px_minmax(0,1fr)_auto] items-start gap-2 text-xs">
+                <span className={`mt-1 h-2.5 w-2.5 rounded-sm ${applianceBarClass(group.name)}`} aria-hidden="true" />
+                <span>
+                  <strong className="block font-semibold text-foreground">{group.name}</strong>
+                  <span className="mt-0.5 block text-[10px] leading-4 text-muted">{group.sourceAliases.join(" · ")}</span>
+                </span>
+                <span className="text-right tabular-nums"><strong className="block font-semibold text-foreground">{group.share}</strong><span className="text-[10px] text-muted">{group.energy}</span></span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </article>
+
+      <article className="border-y border-border py-5" aria-labelledby="standby-appliance-ranking-heading">
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h5 id="standby-appliance-ranking-heading" className="text-sm font-semibold text-foreground">Appliance ranking</h5>
+            <p className="mt-1 text-xs leading-5 text-muted">Published Circuit aliases, highest closed-hour consumer first.</p>
+          </div>
+          <span className="text-[10px] text-muted">Energy · provisional cost · share</span>
+        </div>
+        <ol className="mt-4 divide-y divide-border" data-standby-appliance-ranking="true">
+          {standby.appliances.map((appliance, index) => (
+            <li key={appliance.name} className="grid gap-2 py-2.5 text-xs sm:grid-cols-[24px_minmax(150px,0.8fr)_minmax(120px,1fr)_92px_72px] sm:items-center" data-standby-appliance={appliance.name}>
+              <span className="text-right tabular-nums text-muted">{index + 1}</span>
+              <span><strong className="block font-semibold text-foreground">{appliance.name}</strong><span className="mt-0.5 block text-[10px] text-muted">{appliance.applianceGroup} · {appliance.centreCount} Centres</span></span>
+              <span className="h-2 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true"><span className={`block h-full min-w-[2px] rounded-full ${applianceBarClass(appliance.applianceGroup)}`} style={{ width: `${appliance.sharePct}%` }} /></span>
+              <span className="text-right font-semibold tabular-nums text-foreground">{appliance.energy}</span>
+              <span className="text-right tabular-nums text-muted"><strong className="block font-semibold text-foreground">{appliance.share}</strong>{appliance.provisionalCost}</span>
+            </li>
+          ))}
+        </ol>
+      </article>
+    </div>
+  );
+}
+
+function StandbySpikeTable({ centres }: { centres: PreschoolOperationalCentre[] }) {
+  const summaryGrid = "grid min-w-[1060px] grid-cols-[minmax(150px,1fr)_130px_64px_132px_88px_96px_82px_minmax(150px,1fr)_58px] items-center gap-3";
+  return (
+    <div className="mt-5 overflow-x-auto rounded-lg border border-border bg-surface" data-standby-spike-table="action-sorted">
+      <div className={`${summaryGrid} bg-surface-subtle px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-light`} aria-hidden="true">
+        <span>Centre</span><span>Centre type</span><span>Spikes</span><span>Worst date / hour</span><span className="text-right">Actual</span><span className="text-right">Baseline</span><span className="text-right">Variance</span><span>Leading contributor</span><span className="text-right">Detail</span>
       </div>
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        role="img"
-        aria-labelledby="preschool-operating-profile-title preschool-operating-profile-description"
-        data-operating-profile="hourly-calendar-split"
-        className="mt-3 h-auto w-full"
-      >
-        <title id="preschool-operating-profile-title">Average hourly energy split by operating and closed hours</title>
-        <desc id="preschool-operating-profile-description">Twenty-four stacked bars show average operating energy in blue and closed-hour energy in amber across thirty-one complete May days.</desc>
-        <line x1={margin.left} y1={margin.top + plotHeight} x2={width - margin.right} y2={margin.top + plotHeight} stroke="currentColor" className="text-border" />
-        <text x={margin.left - 8} y={margin.top + 4} textAnchor="end" className="fill-muted-light text-[9px]">{Math.ceil(maxValue)}</text>
-        <text x={margin.left - 8} y={margin.top + plotHeight} textAnchor="end" className="fill-muted-light text-[9px]">0</text>
-        {profile.rows.map((row) => {
-          const x = margin.left + row.hour * columnWidth + (columnWidth - barWidth) / 2;
-          const operatingHeight = (row.operatingKwh / maxValue) * plotHeight;
-          const closedHeight = (row.closedHourKwh / maxValue) * plotHeight;
-          const operatingY = margin.top + plotHeight - operatingHeight;
-          const closedY = operatingY - closedHeight;
-          return (
-            <g key={row.hour} data-profile-hour={row.hour}>
-              <title>{`${row.label}: ${row.totalKwh.toFixed(1)} kWh mean; ${row.operatingKwh.toFixed(1)} operating and ${row.closedHourKwh.toFixed(1)} closed-hour`}</title>
-              <rect x={x} y={operatingY} width={barWidth} height={operatingHeight} rx="2" className="fill-primary" />
-              <rect x={x} y={closedY} width={barWidth} height={closedHeight} rx="2" className="fill-step-warning" />
-              {row.hour % 3 === 0 ? (
-                <text x={x + barWidth / 2} y={margin.top + plotHeight + 22} textAnchor="middle" className="fill-muted text-[10px]">{String(row.hour).padStart(2, "0")}:00</text>
-              ) : null}
-            </g>
-          );
-        })}
-        <text x={16} y={margin.top + plotHeight / 2} textAnchor="middle" transform={`rotate(-90 16 ${margin.top + plotHeight / 2})`} className="fill-muted text-[10px] font-semibold">Mean kWh / complete day</text>
-      </svg>
-      <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2 text-[11px] text-muted">
-        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm bg-primary" aria-hidden="true" />Operating energy</span>
-        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm bg-step-warning" aria-hidden="true" />Closed-hour energy</span>
-        <span>{profile.completeDayCount} complete days</span>
+      <div className="divide-y divide-border">
+        {centres.map((centre) => (
+          <details key={centre.centreCode} data-standby-spike-centre={centre.centreCode} className="group">
+            <summary
+              tabIndex={0}
+              aria-label={`View all ${centre.spikeCount} closed-hour Spike events for ${centre.name}.`}
+              className={`${summaryGrid} cursor-pointer list-none px-4 py-3 text-xs text-foreground hover:bg-surface-subtle/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/25 [&::-webkit-details-marker]:hidden`}
+            >
+              <span><strong className="block font-semibold">{centre.name}</strong><span className="mt-0.5 block text-[10px] text-muted">Centre {centre.centreCode}</span></span>
+              <span className="text-muted">{centre.centreType ?? "Unavailable"}</span>
+              <span className="font-semibold tabular-nums text-step-error">{centre.spikeCount}</span>
+              <span className="tabular-nums text-muted">{centre.worst.when}</span>
+              <span className="text-right font-semibold tabular-nums">{centre.worst.usage}</span>
+              <span className="text-right tabular-nums text-muted">{centre.worst.baseline}</span>
+              <span className="text-right font-semibold tabular-nums text-step-error">{centre.worst.variance}</span>
+              <span className="text-muted">{centre.worst.leadingCircuit}</span>
+              <span className="text-right font-semibold text-primary"><span className="group-open:hidden">Open</span><span className="hidden group-open:inline">Close</span></span>
+            </summary>
+            <div className="min-w-[1060px] border-t border-border bg-surface-subtle/35 px-4 py-4">
+              <p className="text-xs font-semibold text-foreground">All {centre.events.length} closed-hour event{centre.events.length === 1 ? "" : "s"} for {centre.name}</p>
+              <div className="mt-3 grid grid-cols-[42px_150px_100px_100px_100px_92px_minmax(180px,1fr)] gap-3 border-b border-border pb-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-light" aria-hidden="true">
+                <span>#</span><span>When</span><span className="text-right">Actual</span><span className="text-right">Baseline</span><span className="text-right">Excess</span><span className="text-right">Variance</span><span>Leading contributor</span>
+              </div>
+              <ol className="divide-y divide-border" aria-label={`${centre.name} closed-hour Spike events`}>
+                {centre.events.map((event, index) => (
+                  <li key={`${event.when}:${index}`} className="grid grid-cols-[42px_150px_100px_100px_100px_92px_minmax(180px,1fr)] gap-3 py-2.5 text-xs" data-standby-spike-event={`${centre.centreCode}:${index + 1}`}>
+                    <span className="tabular-nums text-muted">{index + 1}</span><span>{event.when}<span className="mt-0.5 block text-[10px] text-muted">{event.dayType}</span></span><span className="text-right font-semibold tabular-nums">{event.usage}</span><span className="text-right tabular-nums text-muted">{event.baseline}</span><span className="text-right tabular-nums text-muted">{event.impact}</span><span className="text-right font-semibold tabular-nums text-step-error">{event.variance}</span><span className="text-muted">{event.leadingCircuit}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </details>
+        ))}
       </div>
-    </article>
+    </div>
+  );
+}
+
+function AfterHoursReviewPriority({ sop }: { sop: OperationalView["sop"] }) {
+  return (
+    <div className="mt-5 border-y border-border" data-after-hours-review-priority="provisional">
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-step-warning-soft/35 px-4 py-3 text-xs">
+        <p className="font-semibold text-foreground">Centres with recorded Spikes appear first: {sop.breachingCentreCodes.join(" · ") || "none"}</p>
+        <p className="text-muted">Lower provisional score = more closed-hour Spikes</p>
+      </div>
+      <ol className="divide-y divide-border">
+        {sop.centres.map((centre, index) => (
+          <li key={centre.centreCode} className="grid gap-3 px-4 py-4 text-xs lg:grid-cols-[42px_minmax(180px,0.8fr)_110px_150px_minmax(150px,0.8fr)_96px_minmax(210px,1fr)] lg:items-center" data-review-priority-centre={centre.centreCode}>
+            <span className="text-lg font-semibold tabular-nums text-step-warning">{index + 1}</span>
+            <span><strong className="block text-sm font-semibold text-foreground">{centre.name}</strong><span className="mt-0.5 block text-muted">Centre {centre.centreCode} · {centre.centreType ?? "Type unavailable"}</span></span>
+            <span><strong className="block font-semibold tabular-nums text-step-error">{centre.standbySpikeCount}</strong><span className="text-[10px] text-muted">closed-hour Spikes</span></span>
+            <span><strong className="block font-semibold tabular-nums text-foreground">{centre.worstWhen}</strong><span className="text-[10px] text-muted">worst event · {centre.worstVariance}</span></span>
+            <span><strong className="block font-semibold text-foreground">{centre.leadingContributor}</strong><span className="text-[10px] text-muted">observed leading contributor</span></span>
+            <span><strong className="block text-lg font-semibold tabular-nums text-step-warning">{centre.score}</strong><span className="text-[10px] text-muted">provisional score</span></span>
+            <span className="leading-5 text-muted"><strong className="font-semibold text-foreground">Next check:</strong> confirm the Calendar, operating SOP and equipment state with the Centre.</span>
+          </li>
+        ))}
+      </ol>
+      <p className="px-4 py-3 text-[11px] leading-5 text-muted">{sop.detail}</p>
+    </div>
   );
 }
 
@@ -1427,6 +1582,13 @@ function applianceBarClass(applianceGroup: string): string {
   if (applianceGroup === "Lighting") return "bg-step-inspect";
   if (applianceGroup === "Plugload") return "bg-step-warning";
   return "bg-step-success";
+}
+
+function applianceStrokeClass(applianceGroup: string): string {
+  if (applianceGroup === "Aircon") return "text-primary";
+  if (applianceGroup === "Lighting") return "text-step-inspect";
+  if (applianceGroup === "Plugload") return "text-step-warning";
+  return "text-step-success";
 }
 
 function titleCase(value: string): string {

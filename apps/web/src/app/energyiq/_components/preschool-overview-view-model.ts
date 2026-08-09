@@ -234,10 +234,30 @@ export type PreschoolOverviewViewModel = {
     };
     standby: {
       energy: string;
+      provisionalCost: string;
+      provisionalCostNote: string;
       share: string;
       spikeCount: number;
       centreCount: number;
       centres: PreschoolOperationalCentre[];
+      applianceGroups: Array<{
+        name: string;
+        energy: string;
+        share: string;
+        sharePct: number;
+        provisionalCost: string;
+        sourceAliases: string[];
+      }>;
+      appliances: Array<{
+        name: string;
+        applianceGroup: string;
+        energy: string;
+        share: string;
+        sharePct: number;
+        provisionalCost: string;
+        centreCount: number;
+      }>;
+      reconciliation: string;
     };
     operating: {
       energy: string;
@@ -246,7 +266,8 @@ export type PreschoolOverviewViewModel = {
       centres: PreschoolOperationalCentre[];
     };
     sop: {
-      label: "Provisional after-hours SOP signal";
+      label: "After-hours Review Priority";
+      sourceLabel: "Provisional after-hours SOP signal";
       detail: string;
       breachingCentreCodes: string[];
       centres: Array<{
@@ -255,6 +276,9 @@ export type PreschoolOverviewViewModel = {
         centreType: string | null;
         standbySpikeCount: number;
         score: string;
+        worstWhen: string;
+        worstVariance: string;
+        leadingContributor: string;
       }>;
     };
     calendarVersion: string;
@@ -277,6 +301,7 @@ export type PreschoolOverviewViewModel = {
 };
 
 export type PreschoolOperationalCentre = {
+  scopeId: string;
   centreCode: string;
   name: string;
   centreType: string | null;
@@ -289,6 +314,15 @@ export type PreschoolOperationalCentre = {
     variance: string;
     leadingCircuit: string;
   };
+  events: Array<{
+    when: string;
+    dayType: "Weekday" | "Weekend" | "Calendar exception" | "Unavailable";
+    usage: string;
+    baseline: string;
+    impact: string;
+    variance: string;
+    leadingCircuit: string;
+  }>;
 };
 
 export function buildPreschoolOverviewViewModel(
@@ -334,6 +368,8 @@ export function buildPreschoolOverviewViewModel(
   const queryIds = [...new Set(snapshot.evidence.flatMap((item) => item.queryIds))];
   const decisionSummary = buildPreschoolDecisionSummary(snapshot);
   const benchmark = buildPreschoolBenchmarkView(snapshot);
+  const hasCurrentOperationalContract = snapshot.preschoolOperational?.status === "available"
+    && Reflect.get(snapshot.preschoolOperational.contract, "version") === "2";
   const periodLabel = formatAnalysisWindowLabel(
     snapshot.context.from,
     snapshot.context.to,
@@ -489,7 +525,7 @@ export function buildPreschoolOverviewViewModel(
           detail: snapshot.preschoolAppliances?.reason.message
             ?? "The current Snapshot does not contain a server-authoritative Appliance ranking.",
         },
-    operational: snapshot.preschoolOperational?.status === "available"
+    operational: snapshot.preschoolOperational?.status === "available" && hasCurrentOperationalContract
       ? {
           status: "available",
           hourlyProfile: {
@@ -507,10 +543,30 @@ export function buildPreschoolOverviewViewModel(
           },
           standby: {
             energy: `${formatNumber(snapshot.preschoolOperational.energy.standbyKwh, 2)} kWh`,
+            provisionalCost: `S$${formatNumber(snapshot.preschoolOperational.energy.provisionalStandbyCostBeforeGstSgd, 2)}`,
+            provisionalCostNote: `${snapshot.preschoolOperational.tariffReference.sourceName} ${formatNumber(snapshot.preschoolOperational.tariffReference.beforeGstSgdPerKwh, 4)} SGD/kWh before GST reference · estimate only, not a bill`,
             share: `${formatNumber(snapshot.preschoolOperational.energy.standbySharePct, 1)}%`,
             spikeCount: snapshot.preschoolOperational.spikes.standby.count,
             centreCount: snapshot.preschoolOperational.spikes.standby.centreCount,
             centres: snapshot.preschoolOperational.spikes.standby.centres.map(toOperationalCentre),
+            applianceGroups: snapshot.preschoolOperational.standbyAppliances.applianceGroups.map((group) => ({
+              name: group.name,
+              energy: `${formatNumber(group.usageKwh, 2)} kWh`,
+              share: `${formatNumber(group.sharePct, 1)}%`,
+              sharePct: group.sharePct,
+              provisionalCost: `S$${formatNumber(group.provisionalCostBeforeGstSgd, 2)}`,
+              sourceAliases: group.sourceAliases,
+            })),
+            appliances: snapshot.preschoolOperational.standbyAppliances.appliances.map((appliance) => ({
+              name: appliance.name,
+              applianceGroup: appliance.applianceGroup,
+              energy: `${formatNumber(appliance.usageKwh, 2)} kWh`,
+              share: `${formatNumber(appliance.sharePct, 1)}%`,
+              sharePct: appliance.sharePct,
+              provisionalCost: `S$${formatNumber(appliance.provisionalCostBeforeGstSgd, 2)}`,
+              centreCount: appliance.centreCount,
+            })),
+            reconciliation: `${formatNumber(Math.abs(snapshot.preschoolOperational.standbyAppliances.reconciliationGapKwh), 4)} kWh reconciliation gap`,
           },
           operating: {
             energy: `${formatNumber(snapshot.preschoolOperational.energy.operatingKwh, 2)} kWh`,
@@ -519,26 +575,37 @@ export function buildPreschoolOverviewViewModel(
             centres: snapshot.preschoolOperational.spikes.operating.centres.map(toOperationalCentre),
           },
           sop: {
-            label: snapshot.preschoolOperational.sop.label,
-            detail: "Exploratory signal only: each +50% standby hour-slot Spike deducts one point from 100. Confirm the operating SOP before using this as compliance evidence.",
+            label: "After-hours Review Priority",
+            sourceLabel: snapshot.preschoolOperational.sop.label,
+            detail: "Provisional review signal only: the score starts at 100 and deducts one point per closed-hour Spike. It does not measure SOP compliance; confirm the Calendar, operating SOP and equipment state on site.",
             breachingCentreCodes: snapshot.preschoolOperational.sop.breachingCentreCodes,
             centres: snapshot.preschoolOperational.sop.centres
               .filter((centre) => centre.standbySpikeCount > 0)
-              .map((centre) => ({
-                centreCode: centre.centreCode,
-                name: centre.name,
-                centreType: centre.centreType,
-                standbySpikeCount: centre.standbySpikeCount,
-                score: formatNumber(centre.score, 0),
-              })),
+              .flatMap((centre) => {
+                const spikeCentre = snapshot.preschoolOperational?.status === "available"
+                  ? snapshot.preschoolOperational.spikes.standby.centres.find((candidate) => candidate.scopeId === centre.scopeId)
+                  : undefined;
+                return spikeCentre ? [{
+                  centreCode: centre.centreCode,
+                  name: centre.name,
+                  centreType: centre.centreType,
+                  standbySpikeCount: centre.standbySpikeCount,
+                  score: formatNumber(centre.score, 0),
+                  worstWhen: `${formatShortDate(spikeCentre.worstSpike.localDate)} · ${formatHourRange(spikeCentre.worstSpike.localHour)}`,
+                  worstVariance: `+${formatNumber(spikeCentre.worstSpike.variancePct, 1)}%`,
+                  leadingContributor: toCustomerCircuitName(centre.scopeId, spikeCentre.worstSpike.leadingCircuitName) ?? "Unavailable",
+                }] : [];
+              }),
           },
           calendarVersion: snapshot.preschoolOperational.evidence.businessCalendarVersion,
           threshold: `>${snapshot.preschoolOperational.contract.spikeThresholdPct}% above same Centre and hour-slot mean`,
         }
       : {
           status: "unavailable",
-          detail: snapshot.preschoolOperational?.reason.message
-            ?? "The current Snapshot does not contain release-pinned Calendar and Centre-hour Evidence for operational behaviour.",
+          detail: snapshot.preschoolOperational?.status === "available"
+            ? "The current API runtime returned a superseded operational Evidence contract. Refresh the runtime before using Standby or Spike findings."
+            : snapshot.preschoolOperational?.reason.message
+              ?? "The current Snapshot does not contain release-pinned Calendar and Centre-hour Evidence for operational behaviour.",
         },
     evidence: {
       snapshotId: snapshot.dataSnapshot.id,
@@ -856,6 +923,7 @@ function toOperationalCentre(
   centre: Extract<NonNullable<EnergyProjectAnalysisSnapshotDto["preschoolOperational"]>, { status: "available" }>["spikes"]["standby"]["centres"][number],
 ): PreschoolOperationalCentre {
   return {
+    scopeId: centre.scopeId,
     centreCode: centre.centreCode,
     name: centre.name,
     centreType: centre.centreType,
@@ -868,6 +936,15 @@ function toOperationalCentre(
       variance: `+${formatNumber(centre.worstSpike.variancePct, 1)}%`,
       leadingCircuit: `${toCustomerCircuitName(centre.scopeId, centre.worstSpike.leadingCircuitName) ?? "Unavailable"} · ${formatNumber(centre.worstSpike.leadingCircuitSharePct, 0)}%`,
     },
+    events: centre.events.map((event) => ({
+      when: `${formatShortDate(event.localDate)} · ${formatHourRange(event.localHour)}`,
+      dayType: operationalDayTypeLabel(event.dayType),
+      usage: `${formatNumber(event.usageKwh, 3)} kWh`,
+      baseline: `${formatNumber(event.baselineKwh, 3)} kWh`,
+      impact: `+${formatNumber(event.impactKwh, 3)} kWh`,
+      variance: `+${formatNumber(event.variancePct, 1)}%`,
+      leadingCircuit: `${toCustomerCircuitName(centre.scopeId, event.leadingCircuitName) ?? "Unavailable"} · ${formatNumber(event.leadingCircuitSharePct, 0)}%`,
+    })),
   };
 }
 

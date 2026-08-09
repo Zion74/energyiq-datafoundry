@@ -1325,7 +1325,7 @@ export type PreschoolOperationalProjectionDto = {
   status: "available";
   contract: {
     id: "preschool-may-2026-operational-behaviour";
-    version: "1";
+    version: "2";
     spikeThresholdPct: 50;
   };
   period: {
@@ -1338,6 +1338,38 @@ export type PreschoolOperationalProjectionDto = {
     standbyKwh: number;
     standbySharePct: number;
     operatingKwh: number;
+    provisionalStandbyCostBeforeGstSgd: number;
+  };
+  tariffReference: {
+    sourceName: "SP Group";
+    sourceUrl: string;
+    appendixUrl: string;
+    supplyClass: "Low tension, non-domestic";
+    appliesFrom: "2026-04-01";
+    appliesTo: "2026-06-30";
+    beforeGstSgdPerKwh: 0.2727;
+    withGstSgdPerKwh: 0.2972;
+  };
+  standbyAppliances: {
+    totalKwh: number;
+    provisionalCostBeforeGstSgd: number;
+    reconciliationGapKwh: number;
+    applianceGroups: Array<{
+      name: string;
+      usageKwh: number;
+      sharePct: number;
+      provisionalCostBeforeGstSgd: number;
+      sourceAliases: string[];
+    }>;
+    appliances: Array<{
+      name: string;
+      applianceGroup: string;
+      usageKwh: number;
+      sharePct: number;
+      provisionalCostBeforeGstSgd: number;
+      centreCount: number;
+      sourceCircuitIds: string[];
+    }>;
   };
   hourlyProfile: {
     completeDayCount: 31;
@@ -1427,6 +1459,18 @@ export type PreschoolOperationalProjectionDto = {
         leadingCircuitKwh: number;
         leadingCircuitSharePct: number;
       };
+      events: Array<{
+        localDate: string;
+        localHour: number;
+        dayType: "weekday" | "weekend" | "calendar_exception";
+        usageKwh: number;
+        baselineKwh: number;
+        impactKwh: number;
+        variancePct: number;
+        leadingCircuitName: string;
+        leadingCircuitKwh: number;
+        leadingCircuitSharePct: number;
+      }>;
     }>;
   }>;
   sop: {
@@ -1452,10 +1496,11 @@ export type PreschoolOperationalProjectionDto = {
     metricRevisionIds: string[];
     businessCalendarVersion: string;
     sourceQueryIds: string[];
-    projectionQueryId: "preschool_centre_hour_cells_v1";
+    projectionQueryId: "preschool_centre_hour_appliance_cells_v2";
     projectionRecipeIds: [
       "preschool-hour-slot-spike-v1",
       "preschool-after-hours-sop-signal-v1",
+      "preschool-operating-state-appliance-v1",
     ];
     baseline: "same-centre same-hour-slot mean within operating state";
   };

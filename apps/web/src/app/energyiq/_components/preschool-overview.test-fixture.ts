@@ -78,24 +78,36 @@ export function preschoolGoldenSnapshot(): EnergyProjectAnalysisSnapshotDto {
   const centreByCode = new Map(benchmarkCentres.map((centre) => [centre.centreCode, centre]));
   const spikeCentre = (code: string, spikeCount: number, operating: boolean) => {
     const centre = centreByCode.get(code)!;
+    const worstSpike = {
+      localDate: operating ? "2026-05-18" : code === "L" ? "2026-05-25" : code === "E" ? "2026-05-04" : "2026-05-08",
+      localHour: operating ? 14 : code === "L" ? 1 : code === "E" ? 23 : 22,
+      dayType: operating ? "weekday" as const : code === "L" ? "weekend" as const : "weekday" as const,
+      usageKwh: operating ? 19.503 : code === "L" ? 5.038 : code === "E" ? 4.052 : 4.171,
+      baselineKwh: operating ? 3.7 : code === "L" ? 0.403 : code === "E" ? 0.326 : 0.328,
+      impactKwh: operating ? 15.803 : code === "L" ? 4.635 : code === "E" ? 3.726 : 3.843,
+      variancePct: operating ? 427.1 : code === "L" ? 1_149.4 : code === "E" ? 1_144.9 : 1_173,
+      leadingCircuitName: `${centre.scopeId}:${operating ? "Aircon 1" : code === "L" ? "Living Room Lighting" : code === "E" ? "Heater" : "Other Lighting3"}`,
+      leadingCircuitKwh: operating ? 18.2 : code === "L" ? 4.851 : code === "E" ? 3.849 : 3.958,
+      leadingCircuitSharePct: operating ? 93 : code === "L" ? 96 : code === "E" ? 95 : 95,
+    };
+    const events = Array.from({ length: spikeCount }, (_, index) => index === 0
+      ? worstSpike
+      : {
+          ...worstSpike,
+          localDate: `2026-05-${String(25 - index).padStart(2, "0")}`,
+          localHour: (worstSpike.localHour + index * 3) % 24,
+          usageKwh: worstSpike.usageKwh - index * 0.2,
+          impactKwh: worstSpike.impactKwh - index * 0.2,
+          variancePct: worstSpike.variancePct - index * 75,
+        });
     return {
       scopeId: centre.scopeId,
       centreCode: code,
       name: centre.name,
       centreType: centre.cohort,
       spikeCount,
-      worstSpike: {
-        localDate: operating ? "2026-05-18" : code === "L" ? "2026-05-25" : "2026-05-08",
-        localHour: operating ? 14 : code === "L" ? 1 : 22,
-        dayType: operating ? "weekday" as const : code === "L" ? "weekend" as const : "weekday" as const,
-        usageKwh: operating ? 19.503 : code === "L" ? 5.038 : 4.171,
-        baselineKwh: operating ? 3.7 : code === "L" ? 0.403 : 0.328,
-        impactKwh: operating ? 15.803 : code === "L" ? 4.635 : 3.843,
-        variancePct: operating ? 427.1 : code === "L" ? 1_149.4 : 1_173,
-        leadingCircuitName: `${centre.scopeId}:${operating ? "Aircon 1" : "Other Lighting3"}`,
-        leadingCircuitKwh: operating ? 18.2 : code === "L" ? 4.851 : 3.958,
-        leadingCircuitSharePct: operating ? 93 : code === "L" ? 96 : 95,
-      },
+      worstSpike,
+      events,
     };
   };
   const standbySpikeCounts = new Map([["L", 4], ["E", 2], ["N", 1]]);
@@ -111,6 +123,27 @@ export function preschoolGoldenSnapshot(): EnergyProjectAnalysisSnapshotDto {
     ["Living Area Plug Load", "Plugload", 1_700],
     ["Plug Load3", "Plugload", 1_421.8123],
   ] as const;
+  const standbyEnergyKwh = 3_103.784;
+  const standbyApplianceShares = [
+    ["Plug Load3", "Plugload", 40],
+    ["Kitchen Plug Load", "Plugload", 30],
+    ["Living Area Plug Load", "Plugload", 27.4],
+    ["Aircon 1", "Aircon", 1.2],
+    ["Aircon 2", "Aircon", 0.8],
+    ["Kitchen Lighting", "Lighting", 0.2],
+    ["Living Room Lighting", "Lighting", 0.2],
+    ["Other Lighting3", "Lighting", 0.1],
+    ["Heater", "Heater", 0.1],
+  ] as const;
+  const standbyAppliances = standbyApplianceShares.map(([name, applianceGroup, sharePct], applianceIndex) => ({
+    name,
+    applianceGroup,
+    usageKwh: standbyEnergyKwh * sharePct / 100,
+    sharePct,
+    provisionalCostBeforeGstSgd: standbyEnergyKwh * sharePct / 100 * 0.2727,
+    centreCount: 30,
+    sourceCircuitIds: centreCodes.map((code) => `preschool-centre-${code.toLowerCase()}-standby-${applianceIndex + 1}`),
+  }));
 
   return {
     ...base,
@@ -313,7 +346,7 @@ export function preschoolGoldenSnapshot(): EnergyProjectAnalysisSnapshotDto {
       status: "available",
       contract: {
         id: "preschool-may-2026-operational-behaviour",
-        version: "1",
+        version: "2",
         spikeThresholdPct: 50,
       },
       period: {
@@ -326,6 +359,35 @@ export function preschoolGoldenSnapshot(): EnergyProjectAnalysisSnapshotDto {
         standbyKwh: 3_103.784,
         standbySharePct: 12.45,
         operatingKwh: 21_818.0283,
+        provisionalStandbyCostBeforeGstSgd: 846.4019,
+      },
+      tariffReference: {
+        sourceName: "SP Group",
+        sourceUrl: "https://www.spgroup.com.sg/about-us/media-resources/news-and-media-releases/Electricity-Tariff-Revision-for-the-Period-1-April-to-30-June-2026",
+        appendixUrl: "https://www.spgroup.com.sg/dam/spgroup/images/news-media-releases/2026/Appendix-2---Q2-2026.png0",
+        supplyClass: "Low tension, non-domestic",
+        appliesFrom: "2026-04-01",
+        appliesTo: "2026-06-30",
+        beforeGstSgdPerKwh: 0.2727,
+        withGstSgdPerKwh: 0.2972,
+      },
+      standbyAppliances: {
+        totalKwh: standbyEnergyKwh,
+        provisionalCostBeforeGstSgd: 846.4019,
+        reconciliationGapKwh: 0,
+        applianceGroups: [
+          ["Plugload", 97.4, ["Kitchen Plug Load", "Living Area Plug Load", "Plug Load3"]],
+          ["Aircon", 2, ["Aircon 1", "Aircon 2"]],
+          ["Lighting", 0.5, ["Kitchen Lighting", "Living Room Lighting", "Other Lighting3"]],
+          ["Heater", 0.1, ["Heater"]],
+        ].map(([name, sharePct, sourceAliases]) => ({
+          name: String(name),
+          usageKwh: standbyEnergyKwh * Number(sharePct) / 100,
+          sharePct: Number(sharePct),
+          provisionalCostBeforeGstSgd: standbyEnergyKwh * Number(sharePct) / 100 * 0.2727,
+          sourceAliases: sourceAliases as string[],
+        })),
+        appliances: standbyAppliances,
       },
       hourlyProfile: {
         completeDayCount: 31,
@@ -423,8 +485,8 @@ export function preschoolGoldenSnapshot(): EnergyProjectAnalysisSnapshotDto {
         metricRevisionIds: ["energy.total_usage_kwh@1"],
         businessCalendarVersion: "sg-preschool-calendar-v1",
         sourceQueryIds: ["scope_summary_v1"],
-        projectionQueryId: "preschool_centre_hour_cells_v1",
-        projectionRecipeIds: ["preschool-hour-slot-spike-v1", "preschool-after-hours-sop-signal-v1"],
+        projectionQueryId: "preschool_centre_hour_appliance_cells_v2",
+        projectionRecipeIds: ["preschool-hour-slot-spike-v1", "preschool-after-hours-sop-signal-v1", "preschool-operating-state-appliance-v1"],
         baseline: "same-centre same-hour-slot mean within operating state",
       },
     },

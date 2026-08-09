@@ -177,10 +177,18 @@ describe("Preschool Overview ViewModel", () => {
         unit: "mean kWh per complete day",
         peakHourLabel: "11:00–12:00",
       },
-      standby: { energy: "3,103.78 kWh", share: "12.5%", spikeCount: 7, centreCount: 3 },
+      standby: {
+        energy: "3,103.78 kWh",
+        provisionalCost: "S$846.40",
+        share: "12.5%",
+        spikeCount: 7,
+        centreCount: 3,
+        reconciliation: "0.0000 kWh reconciliation gap",
+      },
       operating: { energy: "21,818.03 kWh", spikeCount: 21, centreCount: 14 },
       sop: {
-        label: "Provisional after-hours SOP signal",
+        label: "After-hours Review Priority",
+        sourceLabel: "Provisional after-hours SOP signal",
         breachingCentreCodes: ["L", "E", "N"],
         centres: [
           { centreCode: "L", standbySpikeCount: 4, score: "96" },
@@ -200,6 +208,27 @@ describe("Preschool Overview ViewModel", () => {
     expect(view.operational.standby.centres[0]).toMatchObject({
       centreCode: "L",
       centreType: "Preschool",
+    });
+    expect(view.operational.standby.applianceGroups.map((group) => [group.name, group.share]))
+      .toEqual([
+        ["Plugload", "97.4%"],
+        ["Aircon", "2.0%"],
+        ["Lighting", "0.5%"],
+        ["Heater", "0.1%"],
+      ]);
+    expect(view.operational.standby.appliances).toHaveLength(9);
+    expect(view.operational.standby.appliances.reduce((sum, appliance) => sum + appliance.sharePct, 0)).toBe(100);
+    expect(view.operational.standby.centres.map((centre) => [centre.centreCode, centre.events.length]))
+      .toEqual([["L", 4], ["E", 2], ["N", 1]]);
+    expect(view.operational.standby.centres[0]?.events.map((event) => event.when)).toEqual([
+      "25 May · 01:00–02:00",
+      "24 May · 04:00–05:00",
+      "23 May · 07:00–08:00",
+      "22 May · 10:00–11:00",
+    ]);
+    expect(view.operational.standby.centres[1]?.events[0]).toMatchObject({
+      when: "4 May · 23:00–00:00",
+      leadingCircuit: "Heater · 95%",
     });
     expect(view.operational.operating.centres.find((centre) => centre.centreCode === "A"))
       .toMatchObject({ centreType: "Senior Care Center" });
@@ -296,7 +325,7 @@ describe("Preschool Overview ViewModel", () => {
     expect(view.operational.standby.centres[0]?.worst).toMatchObject({
       when: "25 May · 01:00–02:00",
       dayType: "Weekend",
-      leadingCircuit: "Other Lighting3 · 96%",
+      leadingCircuit: "Living Room Lighting · 96%",
     });
     expect(view.evidence.benchmarkRecipeIds).toEqual([
       "preschool-eui-benchmark-v1",
@@ -306,6 +335,7 @@ describe("Preschool Overview ViewModel", () => {
     expect(view.evidence.operationalRecipeIds).toEqual([
       "preschool-hour-slot-spike-v1",
       "preschool-after-hours-sop-signal-v1",
+      "preschool-operating-state-appliance-v1",
     ]);
     expect(view.evidence.planningRecipeIds).toEqual(["preschool-naive-weekly-planning-baseline-v1"]);
     expect(view.evidence.applianceRecipeIds).toEqual(["preschool-appliance-ranking-v1"]);
@@ -359,6 +389,19 @@ describe("Preschool Overview ViewModel", () => {
     expect(view.evidence.operationalRecipeIds).toEqual([]);
     expect(view.decisionSummary.items.map((item) => item.id)).toEqual(["efficiency"]);
     expect(view.decisionSummary.items.map((item) => item.priority)).toEqual([1]);
+  });
+
+  it("fails closed when the API runtime returns the superseded operational contract", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    if (snapshot.preschoolOperational?.status !== "available") throw new Error("Expected operational fixture");
+    Reflect.set(snapshot.preschoolOperational.contract, "version", "1");
+
+    const view = buildPreschoolOverviewViewModel(snapshot);
+
+    expect(view.operational).toEqual({
+      status: "unavailable",
+      detail: "The current API runtime returned a superseded operational Evidence contract. Refresh the runtime before using Standby or Spike findings.",
+    });
   });
 
   it("does not calculate percentiles in the browser when the server projection is absent", () => {
