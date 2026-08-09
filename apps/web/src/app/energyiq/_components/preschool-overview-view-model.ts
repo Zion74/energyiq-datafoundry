@@ -17,9 +17,11 @@ export type PreschoolOverviewCentre = {
 };
 
 export type PreschoolDecisionSummaryItem = {
-  id: "after-hours" | "efficiency" | "operating";
+  id: "after-hours" | "efficiency" | "operating" | "planning";
   sectionId: "overall-summary" | "centre-benchmark" | "operating-behaviour" | "appliance-contribution" | "planning-outlook";
-  priority: 1 | 2 | 3;
+  priority: 1 | 2 | 3 | null;
+  sectionNumber: 2 | 3 | 4 | 5;
+  targetId: "preschool-benchmark-analysis" | "preschool-standby-wastage" | "preschool-operating-hours" | "preschool-june-planning";
   label: string;
   primaryMetric: {
     label: string;
@@ -82,6 +84,12 @@ export type PreschoolOverviewViewModel = {
       estimatedCost: string;
       share: string;
     }>;
+    total: {
+      centreCount: number;
+      energy: string;
+      estimatedCost: string;
+      share: string;
+    };
     costAssumption: {
       rate: string;
       label: string;
@@ -373,6 +381,12 @@ export function buildPreschoolOverviewViewModel(
         },
       ],
       centreTypes,
+      total: {
+        centreCount: centres.length,
+        energy: `${formatNumber(analysis.summary.usageKwh, 2)} kWh`,
+        estimatedCost,
+        share: analysis.summary.usageKwh > 0 ? "100.0%" : "Unavailable",
+      },
       costAssumption: planningReference
         ? {
             rate: `S$${formatNumber(planningReference.tariffReference.beforeGstSgdPerKwh, 4)}/kWh before GST`,
@@ -640,43 +654,79 @@ function buildPreschoolDecisionSummary(
   snapshot: EnergyProjectAnalysisSnapshotDto,
 ): PreschoolOverviewViewModel["decisionSummary"] {
   const signals = snapshot.preschoolDecisionSignals;
-  if (!signals || signals.status !== "available") {
-    return {
-      items: [],
-      detail: signals?.reason?.message
-        ?? "Verified decision signals are unavailable for this Snapshot.",
-    };
-  }
-  const items = signals.items.flatMap<PreschoolDecisionSummaryItem>((signal) => {
-    const primary = signal.metrics.find((metric) => metric.role === "primary");
-    if (!primary) return [];
-    return [{
-      id: signal.id,
-      sectionId: signal.sectionId,
-      priority: signal.priority,
-      label: signal.label,
-      primaryMetric: {
-        label: primary.label,
-        value: primary.value,
-        valueLabel: formatDecisionSignalMetric(primary.value, primary.precision, primary.unit),
-      },
-      supportingMetrics: signal.metrics
-        .filter((metric) => metric.role === "supporting")
-        .map((metric) => ({
-          label: metric.label,
-          valueLabel: formatDecisionSignalMetric(metric.value, metric.precision, metric.unit),
-        })),
-      centreCodes: signal.entities.map((entity) => entity.code),
-      limitation: signal.limitations.map((limitation) => limitation.label).join(" "),
-      evidenceRefs: signal.evidenceRefs,
-    }];
-  });
+  const signalItems = signals?.status === "available"
+    ? signals.items.flatMap<PreschoolDecisionSummaryItem>((signal) => {
+        const primary = signal.metrics.find((metric) => metric.role === "primary");
+        if (!primary) return [];
+        const destination = signal.id === "efficiency"
+          ? { sectionNumber: 2 as const, targetId: "preschool-benchmark-analysis" as const }
+          : signal.id === "after-hours"
+            ? { sectionNumber: 3 as const, targetId: "preschool-standby-wastage" as const }
+            : { sectionNumber: 4 as const, targetId: "preschool-operating-hours" as const };
+        return [{
+          id: signal.id,
+          sectionId: signal.sectionId,
+          priority: signal.priority,
+          ...destination,
+          label: signal.label,
+          primaryMetric: {
+            label: primary.label,
+            value: primary.value,
+            valueLabel: formatDecisionSignalMetric(primary.value, primary.precision, primary.unit),
+          },
+          supportingMetrics: signal.metrics
+            .filter((metric) => metric.role === "supporting")
+            .map((metric) => ({
+              label: metric.label,
+              valueLabel: formatDecisionSignalMetric(metric.value, metric.precision, metric.unit),
+            })),
+          centreCodes: signal.entities.map((entity) => entity.code),
+          limitation: signal.limitations.map((limitation) => limitation.label).join(" "),
+          evidenceRefs: signal.evidenceRefs,
+        }];
+      })
+    : [];
+  const planning = snapshot.preschoolOperational?.status === "available"
+    && snapshot.preschoolOperational.planningOutlook.status === "provisional"
+    ? snapshot.preschoolOperational.planningOutlook
+    : null;
+  const planningItem: PreschoolDecisionSummaryItem[] = planning
+    ? [{
+        id: "planning",
+        sectionId: "planning-outlook",
+        priority: null,
+        sectionNumber: 5,
+        targetId: "preschool-june-planning",
+        label: "June planning baseline",
+        primaryMetric: {
+          label: "Estimated June energy",
+          value: planning.usageEstimate.projectedKwh,
+          valueLabel: `${formatNumber(planning.usageEstimate.projectedKwh, 0)} kWh`,
+        },
+        supportingMetrics: [
+          {
+            label: "Estimated June cost",
+            valueLabel: `S$${formatNumber(planning.costEstimate.projectedBeforeGstSgd, 0)}`,
+          },
+          {
+            label: "Source window",
+            valueLabel: `${planning.sourceWeeks.length} complete weeks`,
+          },
+        ],
+        centreCodes: [],
+        limitation: planning.limitations.join(" "),
+        evidenceRefs: [planning.evidence.queryId, planning.evidence.recipeId],
+      }]
+    : [];
+  const items = [...signalItems, ...planningItem]
+    .sort((left, right) => left.sectionNumber - right.sectionNumber);
 
   return {
     items,
     detail: items.length > 0
-      ? "Verified signals from this Snapshot. AI interpretation is shown beside the relevant analysis section."
-      : "No decision signal met the current deterministic criteria for this Snapshot.",
+      ? "Snapshot-bound findings for Sections 2–5. AI interpretation is shown after this structured summary and beside the relevant analysis section."
+      : signals?.reason?.message
+        ?? "Verified decision signals and the June planning baseline are unavailable for this Snapshot.",
   };
 }
 

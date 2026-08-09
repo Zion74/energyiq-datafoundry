@@ -45,6 +45,12 @@ describe("Preschool Overview ViewModel", () => {
         { centreType: "Active Aging Center", centreCount: 8, energy: "6,642.40 kWh", estimatedCost: "S$1,811.38", share: "26.7%" },
         { centreType: "Preschool", centreCount: 8, energy: "6,642.40 kWh", estimatedCost: "S$1,811.38", share: "26.7%" },
       ],
+      total: {
+        centreCount: 30,
+        energy: "24,921.81 kWh",
+        estimatedCost: "S$6,796.18",
+        share: "100.0%",
+      },
       costAssumption: {
         rate: "S$0.2727/kWh before GST",
         label: "SP Group Q2 2026 low-tension non-domestic reference",
@@ -170,14 +176,29 @@ describe("Preschool Overview ViewModel", () => {
     });
     expect(view.operational.operating.centres.find((centre) => centre.centreCode === "A"))
       .toMatchObject({ centreType: "Senior Care Center" });
-    expect(view.decisionSummary.items).toHaveLength(3);
+    expect(view.decisionSummary.items).toHaveLength(4);
     expect(view.decisionSummary.items.map((item) => item.id)).toEqual([
-      "after-hours",
       "efficiency",
+      "after-hours",
       "operating",
+      "planning",
     ]);
     expect(view.decisionSummary.items[0]).toMatchObject({
+      priority: 2,
+      sectionNumber: 2,
+      targetId: "preschool-benchmark-analysis",
+      sectionId: "centre-benchmark",
+      label: "High for both floor area and headcount",
+      centreCodes: ["G", "M", "J"],
+      primaryMetric: {
+        value: 3,
+        valueLabel: "3",
+      },
+    });
+    expect(view.decisionSummary.items[1]).toMatchObject({
       priority: 1,
+      sectionNumber: 3,
+      targetId: "preschool-standby-wastage",
       sectionId: "operating-behaviour",
       label: "Energy used after closing",
       centreCodes: ["L", "E", "N"],
@@ -191,24 +212,32 @@ describe("Preschool Overview ViewModel", () => {
         { label: "Unusual closed-hour peaks", valueLabel: "7" },
       ]),
     });
-    expect(view.decisionSummary.items[1]).toMatchObject({
-      priority: 2,
-      sectionId: "centre-benchmark",
-      label: "High for both floor area and headcount",
-      centreCodes: ["G", "M", "J"],
-      primaryMetric: {
-        value: 3,
-        valueLabel: "3",
-      },
-    });
     expect(view.decisionSummary.items[2]).toMatchObject({
       priority: 3,
+      sectionNumber: 4,
+      targetId: "preschool-operating-hours",
       sectionId: "operating-behaviour",
       label: "Unusual peaks during opening hours",
       primaryMetric: {
         value: 14,
         valueLabel: "14",
       },
+    });
+    expect(view.decisionSummary.items[3]).toMatchObject({
+      priority: null,
+      sectionNumber: 5,
+      targetId: "preschool-june-planning",
+      sectionId: "planning-outlook",
+      label: "June planning baseline",
+      primaryMetric: {
+        label: "Estimated June energy",
+        value: 24_348.2143,
+        valueLabel: "24,348 kWh",
+      },
+      supportingMetrics: expect.arrayContaining([
+        { label: "Estimated June cost", valueLabel: "S$6,640" },
+        { label: "Source window", valueLabel: "4 complete weeks" },
+      ]),
     });
     expect(view.decisionSummary.items.every((item) => (
       item.primaryMetric.valueLabel.length > 0
@@ -316,8 +345,8 @@ describe("Preschool Overview ViewModel", () => {
     expect(view.benchmark).toMatchObject({ status: "unavailable" });
     expect(view.benchmark.detail).toContain("No client-side percentile");
     expect(view.centres.every((centre) => centre.eui === null && centre.perPax === null)).toBe(true);
-    expect(view.decisionSummary.items.map((item) => item.id)).toEqual(["after-hours", "operating"]);
-    expect(view.decisionSummary.items.map((item) => item.priority)).toEqual([1, 2]);
+    expect(view.decisionSummary.items.map((item) => item.id)).toEqual(["after-hours", "operating", "planning"]);
+    expect(view.decisionSummary.items.map((item) => item.priority)).toEqual([1, 2, null]);
   });
 
   it("does not calculate an Appliance ranking in the browser when the server projection is absent", () => {
@@ -331,7 +360,7 @@ describe("Preschool Overview ViewModel", () => {
     expect(view.evidence.applianceRecipeIds).toEqual([]);
   });
 
-  it("withholds all decision priorities when the Snapshot is partial", () => {
+  it("withholds decision priorities but retains the deterministic planning directory item when the Snapshot is partial", () => {
     const snapshot = preschoolGoldenSnapshot();
     snapshot.dataQuality.status = "partial";
     snapshot.preschoolDecisionSignals = {
@@ -343,8 +372,8 @@ describe("Preschool Overview ViewModel", () => {
 
     const view = buildPreschoolOverviewViewModel(snapshot);
 
-    expect(view.decisionSummary.items).toEqual([]);
-    expect(view.decisionSummary.detail).toContain("withheld");
+    expect(view.decisionSummary.items.map((item) => item.id)).toEqual(["planning"]);
+    expect(view.decisionSummary.items.map((item) => item.priority)).toEqual([null]);
     expect(view.benchmark).toMatchObject({ status: "provisional" });
     expect(view.operational).toMatchObject({ status: "available" });
   });

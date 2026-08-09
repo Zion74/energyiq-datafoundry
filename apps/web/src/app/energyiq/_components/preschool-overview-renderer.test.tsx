@@ -4,15 +4,23 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { PreschoolOverviewRenderer } from "./preschool-overview-renderer";
+import { PRESCHOOL_OVERVIEW_SECTIONS, PreschoolOverviewRenderer } from "./preschool-overview-renderer";
 import { preschoolGoldenSnapshot } from "./preschool-overview.test-fixture";
 
 describe("PreschoolOverviewRenderer reading flow", () => {
-  it("leads with a three-number overall summary, Centre Type breakdown and verified decision signals", () => {
+  it("renders the Charles-aligned five-section spine and keeps Key findings before AI", () => {
     const markup = renderToStaticMarkup(
       <PreschoolOverviewRenderer state={{ status: "ready", snapshot: preschoolGoldenSnapshot() }} />,
     );
 
+    expect(PRESCHOOL_OVERVIEW_SECTIONS).toEqual([
+      { id: "preschool-overall-summary", label: "1 · Overview" },
+      { id: "preschool-benchmark-analysis", label: "2 · Benchmarks" },
+      { id: "preschool-standby-wastage", label: "3 · Standby wastage" },
+      { id: "preschool-operating-hours", label: "4 · Operating hours" },
+      { id: "preschool-june-planning", label: "5 · June planning" },
+    ]);
+    expect(markup.match(/data-overview-section=/g)).toHaveLength(5);
     expect(markup).toContain("Overall consumption summary");
     expect(markup.match(/data-overall-summary-metric=/g)).toHaveLength(3);
     expect(markup).toContain("Total centres");
@@ -21,26 +29,42 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup).toContain("Energy &amp; cost by centre type");
     expect(markup).toContain("Senior Care Center");
     expect(markup).toContain("11,637.00 kWh");
+    expect(markup).toContain("Portfolio total");
+    expect(markup).toContain("24,921.81 kWh");
+    expect(markup).toContain("100.0%");
     expect(markup).toContain("S$0.2727/kWh before GST");
     expect(markup).not.toContain("Published Portfolio total for this Snapshot.");
     expect(markup).not.toContain("Average across the selected reporting window.");
     expect(markup).not.toContain("Centre rows returned by the authoritative Project analysis.");
     expect(markup).toContain('id="preschool-decision-summary"');
-    expect(markup).toContain("Signals to investigate");
+    expect(markup).toContain("Key findings · Sections 2–5");
+    expect(markup.match(/data-key-finding-target=/g)).toHaveLength(4);
+    expect(markup).toContain('href="#preschool-benchmark-analysis"');
+    expect(markup).toContain('href="#preschool-standby-wastage"');
+    expect(markup).toContain('href="#preschool-operating-hours"');
+    expect(markup).toContain('href="#preschool-june-planning"');
     expect(markup).toContain("Energy used after closing");
-    expect(markup).toContain("Centres to review: <strong class=\"font-semibold text-foreground\">L · E · N</strong>");
+    expect(markup).toContain("Centres <strong class=\"font-semibold text-foreground\">L · E · N</strong>");
     expect(markup).toContain("High for both floor area and headcount");
     expect(markup).toContain("Unusual peaks during opening hours");
     expect(markup).toContain("A · B · C · D · E · +9 more");
     expect(markup).not.toContain("A · B · C · D · E · F · G · H · I · J · K · L · M · N");
-    expect(markup).toContain("Verified signal");
+    expect(markup).toContain("Estimated June energy");
+    expect(markup).toContain("24,348 kWh");
     expect(markup).toContain("Limitation and evidence");
     expect(markup).not.toContain("What to do next");
-    expect(markup).toContain("June planning baseline");
+    expect(markup).toContain("June planning / Forecast");
     expect(markup).toContain("not an AI forecast or customer bill");
     expect(markup).toContain("View normalisation and evidence");
-    expect(markup.indexOf("Overall consumption summary")).toBeLessThan(markup.indexOf("Signals to investigate"));
-    expect(markup.indexOf("Signals to investigate")).toBeLessThan(markup.indexOf("Where energy goes"));
+    const sectionPositions = PRESCHOOL_OVERVIEW_SECTIONS.map((section) => markup.indexOf(`id="${section.id}"`));
+    expect(sectionPositions.every((position) => position >= 0)).toBe(true);
+    expect(sectionPositions).toEqual([...sectionPositions].sort((left, right) => left - right));
+    expect(markup.indexOf("Overall consumption summary")).toBeLessThan(markup.indexOf("Key findings · Sections 2–5"));
+    expect(markup.indexOf("Key findings · Sections 2–5")).toBeLessThan(markup.indexOf('id="preschool-ai-analysis"'));
+    expect(markup.indexOf("Key findings · Sections 2–5")).toBeLessThan(markup.indexOf("Benchmark analysis"));
+    expect(markup.indexOf("Benchmark analysis")).toBeLessThan(markup.indexOf("Standby energy waste"));
+    expect(markup.indexOf("Standby energy waste")).toBeLessThan(markup.indexOf("Operating hours analysis"));
+    expect(markup.indexOf("Operating hours analysis")).toBeLessThan(markup.indexOf("June planning / Forecast"));
   });
 
   it("shows only the first five Centres by default and retains the remaining rows in disclosure", () => {

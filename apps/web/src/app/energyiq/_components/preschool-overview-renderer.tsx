@@ -17,6 +17,14 @@ import {
   type PreschoolOperationalCentre,
 } from "./preschool-overview-view-model";
 
+export const PRESCHOOL_OVERVIEW_SECTIONS = [
+  { id: "preschool-overall-summary", label: "1 · Overview" },
+  { id: "preschool-benchmark-analysis", label: "2 · Benchmarks" },
+  { id: "preschool-standby-wastage", label: "3 · Standby wastage" },
+  { id: "preschool-operating-hours", label: "4 · Operating hours" },
+  { id: "preschool-june-planning", label: "5 · June planning" },
+] as const;
+
 export type PreschoolOverviewRendererState =
   | {
     status: "loading" | "empty" | "unsupported" | "error";
@@ -137,11 +145,16 @@ export function PreschoolOverviewRenderer({
       <section
         id="preschool-overall-summary"
         aria-labelledby="preschool-overall-summary-heading"
+        data-overview-section="1"
         className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8"
       >
-        <h3 id="preschool-overall-summary-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">
-          Overall consumption summary
-        </h3>
+        <SectionHeader
+          id="preschool-overall-summary-heading"
+          sectionNumber={1}
+          title="Overall consumption summary"
+          description={`Total portfolio energy and estimated cost across all ${view.overallSummary.total.centreCount} Centres, followed by the key findings that organise the rest of this report.`}
+          meta={view.context.period}
+        />
 
         <div className="mt-4 grid overflow-hidden rounded-xl bg-[linear-gradient(125deg,var(--color-foreground),color-mix(in_srgb,var(--color-primary)_58%,var(--color-foreground)))] text-background sm:grid-cols-3">
           {view.overallSummary.metrics.map((metric) => (
@@ -185,6 +198,15 @@ export function PreschoolOverviewRenderer({
                   </tr>
                 ))}
               </tbody>
+              <tfoot className="border-t-2 border-border bg-surface-subtle font-semibold text-foreground">
+                <tr>
+                  <th scope="row" className="px-4 py-3">Portfolio total</th>
+                  <td className="px-4 py-3 text-right tabular-nums">{view.overallSummary.total.centreCount}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">{view.overallSummary.total.energy}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">{view.overallSummary.total.estimatedCost}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">{view.overallSummary.total.share}</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
           {view.overallSummary.costAssumption ? (
@@ -202,6 +224,50 @@ export function PreschoolOverviewRenderer({
               . This is a planning estimate, not the customer bill.
             </p>
           ) : null}
+        </div>
+
+        <div id="preschool-decision-summary" className="mt-8 scroll-mt-28 border-t border-border pt-7">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h4 id="preschool-decision-summary-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Key findings · Sections 2–5</h4>
+              <p className="mt-1.5 text-sm leading-6 text-muted">A compact, Snapshot-bound directory to the detailed analysis below.</p>
+            </div>
+            <span className="text-xs font-semibold text-muted">Select a finding to open its section</span>
+          </div>
+          {view.decisionSummary.items.length > 0 ? (
+            <div className="mt-4 divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface">
+              {view.decisionSummary.items.map((item) => (
+                <DecisionSummaryCard key={item.id} item={item} />
+              ))}
+            </div>
+          ) : (
+            <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
+              <p className="text-sm font-semibold text-muted">Key findings unavailable</p>
+              <p className="mt-2 text-sm leading-6 text-muted">{view.decisionSummary.detail}</p>
+            </div>
+          )}
+          {view.decisionSummary.items.length > 0 ? (
+            <p className="mt-3 text-xs leading-5 text-muted">{view.decisionSummary.detail}</p>
+          ) : null}
+        </div>
+
+        <div id="preschool-ai-analysis" className="mt-8 scroll-mt-28 border-t border-border pt-7">
+          <PreschoolAiSlot
+            snapshot={state.snapshot}
+            sectionId="page-synthesis"
+            mode={aiSlotMode}
+            {...(savedAiResult ? { savedResult: savedAiResult } : {})}
+            {...(onAiArtifactChange ? {
+              onCompletedResult: (result: Extract<import("./preschool-ai-run").PreschoolAiRunResult, { status: "available" }>) => onAiArtifactChange({
+                contract: "energyiq-saved-ai-result@1",
+                rendererKey: "preschool-overview",
+                snapshotId: state.snapshot.dataSnapshot.id,
+                projectReleaseId: state.snapshot.projectRelease.id,
+                result,
+              }),
+            } : {})}
+            {...(aiAnalystHref ? { aiAnalystHref } : {})}
+          />
           <PreschoolAiSlot
             snapshot={state.snapshot}
             sectionId="overall-summary"
@@ -212,104 +278,19 @@ export function PreschoolOverviewRenderer({
         </div>
       </section>
 
-      <section id="preschool-decision-summary" aria-labelledby="preschool-decision-summary-heading" className="scroll-mt-28 border-b border-border bg-surface-subtle/45 px-5 py-7 lg:px-7 lg:py-8">
-        <div>
-          <h3 id="preschool-decision-summary-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Signals to investigate</h3>
-        </div>
-        {view.decisionSummary.items.length > 0 ? (
-          <div className="mt-4 space-y-3">
-            {view.decisionSummary.items.map((item) => (
-              <DecisionSummaryCard key={item.id} item={item} />
-            ))}
-          </div>
-        ) : (
-          <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
-            <p className="text-sm font-semibold text-muted">Decision summary unavailable</p>
-            <p className="mt-2 text-sm leading-6 text-muted">{view.decisionSummary.detail}</p>
-          </div>
-        )}
-        {view.decisionSummary.items.length > 0 ? (
-          <p className="mt-4 text-xs leading-5 text-muted">{view.decisionSummary.detail}</p>
-        ) : null}
-      </section>
-
-      <div id="preschool-ai-analysis" className="scroll-mt-28">
-        <PreschoolAiSlot
-          snapshot={state.snapshot}
-          sectionId="page-synthesis"
-          mode={aiSlotMode}
-          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
-          {...(onAiArtifactChange ? {
-            onCompletedResult: (result: Extract<import("./preschool-ai-run").PreschoolAiRunResult, { status: "available" }>) => onAiArtifactChange({
-              contract: "energyiq-saved-ai-result@1",
-              rendererKey: "preschool-overview",
-              snapshotId: state.snapshot.dataSnapshot.id,
-              projectReleaseId: state.snapshot.projectRelease.id,
-              result,
-            }),
-          } : {})}
-          {...(aiAnalystHref ? { aiAnalystHref } : {})}
+      <section id="preschool-benchmark-analysis" aria-labelledby="preschool-benchmark-analysis-heading" data-overview-section="2" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
+        <SectionHeader
+          id="preschool-benchmark-analysis-heading"
+          sectionNumber={2}
+          title="Benchmark analysis"
+          description="Compare Centres after normalising for floor area and people served, then identify who should be reviewed first."
         />
-      </div>
-
-      <section id="preschool-appliance-ranking" aria-labelledby="preschool-appliance-ranking-heading" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h3 id="preschool-appliance-ranking-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Where energy goes</h3>
-          </div>
-          {view.appliances.status === "available" ? (
-            <p className="text-xs font-semibold tabular-nums text-foreground">{view.appliances.totalEnergy} · 9 Appliances</p>
-          ) : null}
-        </div>
-        {view.appliances.status === "available" ? (
-          <div className="mt-4">
-            <div className="divide-y divide-border border-y border-border" role="list" aria-label="Portfolio Appliance energy ranking">
-              {view.appliances.rows.map((appliance, index) => (
-                <div key={appliance.name} className="grid gap-2 py-3 sm:grid-cols-[minmax(150px,0.8fr)_minmax(220px,1.5fr)_170px] sm:items-center sm:gap-4" role="listitem">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-foreground">{index + 1}. {appliance.name}</p>
-                    <p className="mt-0.5 text-xs text-muted">{appliance.applianceGroup} · {appliance.centreCount} Centres</p>
-                  </div>
-                  <div className="h-2.5 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true">
-                    <div
-                      className={`h-full rounded-full ${applianceBarClass(appliance.applianceGroup)}`}
-                      style={{ width: `${Math.max(2, appliance.relativeToTopPct)}%` }}
-                    />
-                  </div>
-                  <div className="flex items-baseline justify-between gap-3 tabular-nums sm:justify-end">
-                    <span className="text-sm font-semibold text-foreground">{appliance.energy}</span>
-                    <span className="w-14 text-right text-xs text-muted">{appliance.share}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <details className="mt-4 border-t border-border pt-3">
-              <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Appliance calculation note</summary>
-              <p className="mt-2 text-xs leading-5 text-muted">{view.appliances.detail}</p>
-            </details>
-          </div>
-        ) : (
-          <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
-            <p className="text-xs font-semibold text-muted">Appliance ranking unavailable</p>
-            <p className="mt-2 text-[11px] leading-5 text-muted">{view.appliances.detail}</p>
-          </div>
-        )}
-        <PreschoolAiSlot
-          snapshot={state.snapshot}
-          sectionId="appliance-contribution"
-          mode={aiSlotMode}
-          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
-          {...(aiAnalystHref ? { aiAnalystHref } : {})}
-        />
-      </section>
-
-      <section id="preschool-efficiency-benchmark" aria-labelledby="preschool-efficiency-benchmark-heading" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
         {view.benchmark.status === "provisional" ? (
           <>
-          <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="mt-5 flex flex-wrap items-end justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
-                <h3 id="preschool-efficiency-benchmark-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Efficiency benchmark</h3>
+                <h4 className="text-base font-semibold text-foreground">Current benchmark evidence</h4>
                 <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2.5 py-1 text-xs font-semibold text-step-warning">Provisional</span>
               </div>
               <p className="mt-1.5 text-sm leading-6 text-muted">Find Centres that use more energy than peers after accounting for floor area and people served.</p>
@@ -359,7 +340,7 @@ export function PreschoolOverviewRenderer({
           </>
         ) : (
           <div role="status">
-            <h3 id="preschool-efficiency-benchmark-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Efficiency benchmark</h3>
+            <h4 className="mt-5 text-base font-semibold text-foreground">Benchmark unavailable</h4>
             <p className="mt-1.5 text-sm leading-6 text-muted">This Snapshot does not yet support a reliable peer comparison.</p>
             <p className="mt-3 text-sm leading-6 text-muted">{view.benchmark.detail}</p>
           </div>
@@ -373,28 +354,20 @@ export function PreschoolOverviewRenderer({
         />
       </section>
 
-      <section id="preschool-operational-behaviour" aria-labelledby="preschool-operational-behaviour-heading" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 id="preschool-operational-behaviour-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Operating patterns</h3>
-              {view.operational.status === "available" ? (
-                <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2 py-0.5 text-[10px] font-semibold text-step-warning">Provisional SOP signal</span>
-              ) : null}
-            </div>
-            <p className="mt-1.5 text-sm leading-6 text-muted">See where energy use continues outside operating hours and which Centres repeat the same hourly Spike.</p>
-          </div>
-          {view.operational.status === "available" ? (
-            <p className="text-[11px] text-muted-light">Calendar {view.operational.calendarVersion} · {view.operational.threshold}</p>
-          ) : null}
-        </div>
-
+      <section id="preschool-standby-wastage" aria-labelledby="preschool-standby-wastage-heading" data-overview-section="3" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
+        <SectionHeader
+          id="preschool-standby-wastage-heading"
+          sectionNumber={3}
+          title="Standby energy waste"
+          description="Review energy that remains while Centres are closed, the repeated Spikes behind it, and the Centres that need an after-hours check."
+          meta={view.operational.status === "available" ? `Calendar ${view.operational.calendarVersion} · ${view.operational.threshold}` : undefined}
+        />
         {view.operational.status === "available" ? (
           <>
-            <div className="mt-4">
+            <div className="mt-5">
               <OperatingProfileChart profile={view.operational.hourlyProfile} />
             </div>
-            <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_320px]">
+            <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
               <OperationalSpikePanel
                 title="Standby / closed hours"
                 energy={`${view.operational.standby.energy} · ${view.operational.standby.share}`}
@@ -402,14 +375,6 @@ export function PreschoolOverviewRenderer({
                 centreCount={view.operational.standby.centreCount}
                 centres={view.operational.standby.centres}
                 tone="warning"
-              />
-              <OperationalSpikePanel
-                title="Operating hours"
-                energy={view.operational.operating.energy}
-                spikeCount={view.operational.operating.spikeCount}
-                centreCount={view.operational.operating.centreCount}
-                centres={view.operational.operating.centres}
-                tone="default"
               />
               <div className="rounded-lg border border-step-warning/30 bg-step-warning-soft p-4">
                 <p className="text-xs font-semibold text-step-warning">{view.operational.sop.label}</p>
@@ -437,8 +402,34 @@ export function PreschoolOverviewRenderer({
             </div>
           </>
         ) : (
-          <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
-            <p className="text-xs font-semibold text-muted">Unavailable</p>
+          <div className="mt-5 rounded-lg border border-border bg-surface-subtle p-4" role="status">
+            <p className="text-xs font-semibold text-muted">Standby analysis unavailable</p>
+            <p className="mt-2 text-[11px] leading-5 text-muted">{view.operational.detail}</p>
+          </div>
+        )}
+      </section>
+
+      <section id="preschool-operating-hours" aria-labelledby="preschool-operating-hours-heading" data-overview-section="4" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
+        <SectionHeader
+          id="preschool-operating-hours-heading"
+          sectionNumber={4}
+          title="Operating hours analysis"
+          description="Review unusual peaks during opening hours and retain the current all-hours Appliance ranking as supporting context until the state-specific projection is delivered."
+        />
+        {view.operational.status === "available" ? (
+          <div className="mt-5">
+            <OperationalSpikePanel
+              title="Operating hours"
+              energy={view.operational.operating.energy}
+              spikeCount={view.operational.operating.spikeCount}
+              centreCount={view.operational.operating.centreCount}
+              centres={view.operational.operating.centres}
+              tone="default"
+            />
+          </div>
+        ) : (
+          <div className="mt-5 rounded-lg border border-border bg-surface-subtle p-4" role="status">
+            <p className="text-xs font-semibold text-muted">Operating-hours analysis unavailable</p>
             <p className="mt-2 text-[11px] leading-5 text-muted">{view.operational.detail}</p>
           </div>
         )}
@@ -449,13 +440,71 @@ export function PreschoolOverviewRenderer({
           {...(savedAiResult ? { savedResult: savedAiResult } : {})}
           {...(aiAnalystHref ? { aiAnalystHref } : {})}
         />
+
+        <div id="preschool-appliance-ranking" className="mt-8 scroll-mt-28 border-t border-border pt-7">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h4 id="preschool-appliance-ranking-heading" className="text-base font-semibold text-foreground">Portfolio Appliance context</h4>
+              <p className="mt-1.5 text-sm leading-6 text-muted">All-hours totals only. This ranking is not presented as the open-hour Appliance breakdown.</p>
+            </div>
+            {view.appliances.status === "available" ? (
+              <p className="text-xs font-semibold tabular-nums text-foreground">{view.appliances.totalEnergy} · 9 Appliances</p>
+            ) : null}
+          </div>
+          {view.appliances.status === "available" ? (
+            <div className="mt-4">
+              <div className="divide-y divide-border border-y border-border" role="list" aria-label="Portfolio Appliance energy ranking">
+                {view.appliances.rows.map((appliance, index) => (
+                  <div key={appliance.name} className="grid gap-2 py-3 sm:grid-cols-[minmax(150px,0.8fr)_minmax(220px,1.5fr)_170px] sm:items-center sm:gap-4" role="listitem">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-foreground">{index + 1}. {appliance.name}</p>
+                      <p className="mt-0.5 text-xs text-muted">{appliance.applianceGroup} · {appliance.centreCount} Centres</p>
+                    </div>
+                    <div className="h-2.5 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true">
+                      <div
+                        className={`h-full rounded-full ${applianceBarClass(appliance.applianceGroup)}`}
+                        style={{ width: `${Math.max(2, appliance.relativeToTopPct)}%` }}
+                      />
+                    </div>
+                    <div className="flex items-baseline justify-between gap-3 tabular-nums sm:justify-end">
+                      <span className="text-sm font-semibold text-foreground">{appliance.energy}</span>
+                      <span className="w-14 text-right text-xs text-muted">{appliance.share}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <details className="mt-4 border-t border-border pt-3">
+                <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Appliance calculation note</summary>
+                <p className="mt-2 text-xs leading-5 text-muted">{view.appliances.detail}</p>
+              </details>
+            </div>
+          ) : (
+            <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
+              <p className="text-xs font-semibold text-muted">Appliance ranking unavailable</p>
+              <p className="mt-2 text-[11px] leading-5 text-muted">{view.appliances.detail}</p>
+            </div>
+          )}
+          <PreschoolAiSlot
+            snapshot={state.snapshot}
+            sectionId="appliance-contribution"
+            mode={aiSlotMode}
+            {...(savedAiResult ? { savedResult: savedAiResult } : {})}
+            {...(aiAnalystHref ? { aiAnalystHref } : {})}
+          />
+        </div>
       </section>
 
-      <section id="preschool-planning-outlook" aria-labelledby="preschool-planning-outlook-heading" className="scroll-mt-28 border-b border-border bg-surface-subtle/35 px-5 py-7 lg:px-7 lg:py-8">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+      <section id="preschool-june-planning" aria-labelledby="preschool-june-planning-heading" data-overview-section="5" className="scroll-mt-28 border-b border-border bg-surface-subtle/35 px-5 py-7 lg:px-7 lg:py-8">
+        <SectionHeader
+          id="preschool-june-planning-heading"
+          sectionNumber={5}
+          title="June planning / Forecast"
+          description="Estimate June from the accepted May pattern, while keeping planning baseline, Forecast and Actual as separate concepts."
+        />
+        <div className="mt-5 flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h3 id="preschool-planning-outlook-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">June planning baseline</h3>
+              <h4 className="text-base font-semibold text-foreground">Planning baseline</h4>
               {view.planningOutlook.status === "provisional" ? (
                 <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2.5 py-1 text-xs font-semibold text-step-warning">Estimated · Provisional</span>
               ) : null}
@@ -511,7 +560,7 @@ export function PreschoolOverviewRenderer({
       </section>
 
       <div className="grid gap-0 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <section id="preschool-centre-ranking" aria-labelledby="preschool-centre-ranking-heading" className="min-w-0 scroll-mt-28 px-5 py-7 lg:px-7 lg:py-8">
+        <aside id="preschool-centre-ranking" aria-labelledby="preschool-centre-ranking-heading" className="min-w-0 scroll-mt-28 px-5 py-7 lg:px-7 lg:py-8">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h3 id="preschool-centre-ranking-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Centre detail</h3>
@@ -552,7 +601,7 @@ export function PreschoolOverviewRenderer({
               </table>
             </div>
           </details>
-        </section>
+        </aside>
 
         <aside className="border-t border-border bg-surface-subtle px-5 py-5 xl:border-l xl:border-t-0 lg:px-7 lg:py-6">
           <h3 className="text-base font-semibold text-foreground">Data confidence</h3>
@@ -582,46 +631,82 @@ export function PreschoolOverviewRenderer({
   );
 }
 
-function DecisionSummaryCard({ item }: { item: PreschoolDecisionSummaryItem }) {
-  const toneClass = item.id === "after-hours"
-    ? "border-step-warning/30 bg-step-warning-soft/30"
-    : item.id === "efficiency"
-      ? "border-step-error/30 bg-step-error-soft/30"
-      : "border-border bg-surface-subtle";
+function SectionHeader({
+  id,
+  sectionNumber,
+  title,
+  description,
+  meta,
+}: {
+  id: string;
+  sectionNumber: 1 | 2 | 3 | 4 | 5;
+  title: string;
+  description: string;
+  meta?: string;
+}) {
   return (
-    <article
-      className={`min-w-0 rounded-xl border p-5 lg:p-6 ${toneClass}`}
-      data-decision-priority={item.id}
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-xs font-semibold text-primary">Priority {item.priority}</p>
-          <h4 className="mt-1.5 max-w-4xl text-lg font-semibold leading-7 text-foreground">{item.label}</h4>
-          {item.centreCodes.length > 0 ? (
-            <p className="mt-1.5 text-sm text-muted">Centres to review: <strong className="font-semibold text-foreground">{compactCentreCodes(item.centreCodes)}</strong></p>
+    <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+      <div className="min-w-0 max-w-4xl">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="inline-flex min-h-7 items-center rounded-md bg-foreground px-2.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-background">
+            Section {sectionNumber}
+          </span>
+          <h3 id={id} className="text-xl font-semibold tracking-[-0.02em] text-foreground">{title}</h3>
+        </div>
+        <p className="mt-2 max-w-[72ch] text-sm leading-6 text-muted">{description}</p>
+      </div>
+      {meta ? <span className="shrink-0 text-xs font-semibold tabular-nums text-muted">{meta}</span> : null}
+    </div>
+  );
+}
+
+function DecisionSummaryCard({ item }: { item: PreschoolDecisionSummaryItem }) {
+  const badgeClass = item.sectionNumber === 2
+    ? "bg-foreground text-background"
+    : item.sectionNumber === 3
+      ? "bg-step-warning text-white"
+      : item.sectionNumber === 4
+        ? "bg-step-inspect text-white"
+        : "bg-step-success text-white";
+  return (
+    <article className="min-w-0 bg-surface transition-colors hover:bg-surface-subtle/60" data-decision-priority={item.id}>
+      <a
+        href={`#${item.targetId}`}
+        className="grid min-h-20 gap-3 px-4 py-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 sm:grid-cols-[44px_minmax(0,1fr)_auto] sm:items-center lg:px-5"
+        data-key-finding-target={item.targetId}
+      >
+        <span className={`inline-flex h-8 w-10 items-center justify-center rounded-md text-xs font-semibold ${badgeClass}`}>
+          §{item.sectionNumber}
+        </span>
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold text-foreground">{item.label}</span>
+          <span className="mt-1 block text-sm leading-6 text-muted">
+            <strong className="font-semibold tabular-nums text-foreground">{item.primaryMetric.valueLabel}</strong>
+            {` · ${item.primaryMetric.label}`}
+            {item.centreCodes.length > 0 ? (
+              <> · Centres <strong className="font-semibold text-foreground">{compactCentreCodes(item.centreCodes)}</strong></>
+            ) : null}
+          </span>
+          {item.supportingMetrics.length > 0 ? (
+            <span className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+              {item.supportingMetrics.slice(0, 2).map((metric) => (
+                <span key={metric.label}>{metric.label}: <strong className="font-semibold tabular-nums text-foreground">{metric.valueLabel}</strong></span>
+              ))}
+            </span>
           ) : null}
-        </div>
-        <span className="shrink-0 rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-muted">Verified signal</span>
-      </div>
-      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-decision-signal={item.id}>
-        <div className="rounded-lg border border-border bg-surface px-4 py-3 sm:col-span-2 lg:col-span-1">
-          <p className="text-xs font-semibold text-muted">{item.primaryMetric.label}</p>
-          <p className="mt-1.5 text-2xl font-semibold tabular-nums text-foreground">{item.primaryMetric.valueLabel}</p>
-        </div>
-        {item.supportingMetrics.slice(0, 2).map((metric) => (
-          <div key={metric.label} className="rounded-lg border border-border bg-surface px-4 py-3">
-            <p className="text-xs font-semibold text-muted">{metric.label}</p>
-            <p className="mt-1.5 text-lg font-semibold tabular-nums text-foreground">{metric.valueLabel}</p>
-          </div>
-        ))}
-      </div>
-      <details className="mt-5 border-t border-border/80 pt-4">
-        <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+        </span>
+        <span className="inline-flex min-h-10 items-center gap-2 justify-self-start rounded-md px-2 text-xs font-semibold text-primary sm:justify-self-end">
+          View section
+          <EnergyIcon name="arrow" className="h-3.5 w-3.5" aria-hidden="true" />
+        </span>
+      </a>
+      <details className="mx-4 border-t border-border/70 pb-3 pt-2 sm:ml-[71px] lg:mx-5 lg:ml-[79px]">
+        <summary className="cursor-pointer text-xs font-semibold text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
           Limitation and evidence
         </summary>
-        <p className="mt-3 text-sm leading-6 text-muted">{item.limitation}</p>
+        <p className="mt-2 text-xs leading-5 text-muted">{item.limitation}</p>
+        <PreschoolEvidenceLink label="View supporting evidence" />
       </details>
-      <PreschoolEvidenceLink label="View supporting evidence" />
     </article>
   );
 }
