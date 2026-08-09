@@ -11,6 +11,7 @@ import type {
   MetadataStore,
   UserRecord,
 } from "@datafoundry/metadata";
+import { WORKSPACE_DEFAULT_MODEL_PROFILE_ID } from "@datafoundry/metadata";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -21,6 +22,7 @@ import {
   overviewAiArtifactPinnedLocalPeriod,
   resolveCurrentOverviewAiArtifactIdentity,
 } from "./overview-ai-artifact.js";
+import { ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID } from "../workspace-model-profile-resolver.js";
 
 type PlacementTarget =
   | "preschool.overall-key-findings"
@@ -32,6 +34,8 @@ type PlacementTarget =
 type EpistemicLevel = "verified" | "hypothesis" | "exploration-idea";
 type Relationship = "supports" | "challenges" | "independent";
 type Stage = "investigator" | "editor";
+
+const OVERVIEW_AI_CANDIDATE_SUBMISSION_TOOL_NAME = "overview_ai_candidates_submit" as const;
 
 export type PreschoolOverviewAiStageInput = {
   stage: Stage;
@@ -108,6 +112,10 @@ type InvestigatorCandidate = {
   epistemicLevel: EpistemicLevel;
   title: string;
   takeaway: string;
+  action: string;
+  expectedIfAct: string;
+  ifIgnored: string;
+  limitation: string;
   significance?: string;
   possibleExplanation?: string;
   nextCheck?: string;
@@ -116,25 +124,15 @@ type InvestigatorCandidate = {
   presentation?: AiFindingPresentation;
 };
 
-type EditorFinding = {
+type EditorSelection = {
   sourceCandidateIds: string[];
   placementTargets: PlacementTarget[];
-  epistemicLevel: EpistemicLevel;
   relationship: Relationship;
   signalRefs: string[];
-  title: string;
-  takeaway: string;
-  interpretation?: string;
-  action?: string;
-  verification?: string;
-  uncertainty?: string;
-  evidenceRefs: string[];
-  evidenceSqlIndexes: number[];
-  presentation?: AiFindingPresentation;
 };
 
 type TraceDecision = {
-  decision: "accepted" | "rejected" | "merged";
+  decision: "accepted" | "rejected";
   sourceCandidateIds: string[];
   findingId?: string;
   reason?: string;
@@ -143,6 +141,16 @@ type TraceDecision = {
 const LEASE_MS = 13 * 60 * 1_000;
 const MAX_ANSWER_CHARS = 160_000;
 const MAX_EVIDENCE_PREVIEW_CHARS = 2_000;
+const MAX_EDITOR_PROMPT_CHARS = 6_000;
+const MAX_INVESTIGATOR_CANDIDATES = 3;
+const MAX_CANDIDATE_TITLE_CHARS = 160;
+const MAX_CANDIDATE_TAKEAWAY_CHARS = 220;
+const MAX_CANDIDATE_SUPPORTING_TEXT_CHARS = 120;
+const MAX_EDITOR_EVIDENCE_REF_CHARS = 80;
+const MAX_EDITOR_EVIDENCE_REFS = 4;
+const MAX_EDITOR_SQL_INDEXES = 8;
+const MAX_EDITOR_PRESENTATION_BLOCKS = 2;
+const MAX_EDITOR_PRESENTATION_TEXT_CHARS = 60;
 
 export function createPreschoolOverviewAiWorkflow(input: {
   metadataStore: MetadataStore;
@@ -222,7 +230,11 @@ export function createPreschoolOverviewAiWorkflow(input: {
           identity,
         });
         requireCompletedStage(investigatorStage.completedRun, investigatorRunId, sessionId);
-        const investigator = normalizeStageEvents(investigatorStage);
+        const investigator = normalizeStageEvents(
+          investigatorStage,
+          "candidates",
+          OVERVIEW_AI_CANDIDATE_SUBMISSION_TOOL_NAME,
+        );
         const candidates = parseInvestigatorCandidates(investigator.answer);
         if (!candidates) throw new Error("OVERVIEW_AI_INVESTIGATOR_RESULT_INVALID");
 
@@ -237,15 +249,12 @@ export function createPreschoolOverviewAiWorkflow(input: {
           identity,
         });
         requireCompletedStage(editorStage.completedRun, editorRunId, sessionId);
-        const editor = normalizeStageEvents(editorStage);
+        const editor = normalizeStageEvents(editorStage, "findings");
         const envelope = parseEditorEnvelope(editor.answer, new Set(candidates.map(({ id }) => id)));
         if (!envelope) throw new Error("OVERVIEW_AI_EDITOR_RESULT_INVALID");
 
-        const tools = [...investigator.tools, ...editor.tools].map((tool, index) => ({
-          ...tool,
-          evidenceIndex: index + 1,
-        }));
-        if (tools.length > 0 && !investigator.schemaValid && !editor.schemaValid) {
+        const tools = investigator.tools;
+        if (tools.length > 0 && !investigator.schemaValid) {
           throw new Error("OVERVIEW_AI_SQL_SCHEMA_NOT_INSPECTED");
         }
         requireRuntimeRevisionIdentity(input.metadataStore, identity, user);
@@ -254,6 +263,7 @@ export function createPreschoolOverviewAiWorkflow(input: {
           identity,
           investigatorRunId,
           editorRunId,
+          candidates,
           envelope,
           tools,
         });
@@ -281,17 +291,17 @@ function requireRuntimeRevisionIdentity(
   identity: EnergyIqOverviewAiArtifactIdentity,
   user: UserRecord,
 ): void {
-  const modelBinding = metadataStore.workspaceDefaultModelProfiles.find(identity.workspaceId);
+  const modelBinding = metadataStore.workspaceDefaultModelProfiles.find(ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID);
   if (!modelBinding
-    || modelBinding.profile_id !== identity.modelProfileId
+    || identity.modelProfileId !== WORKSPACE_DEFAULT_MODEL_PROFILE_ID
     || modelBinding.revision !== identity.modelProfileRevision) {
     throw new Error("OVERVIEW_AI_MODEL_PROFILE_REVISION_MISMATCH");
   }
   const modelResource = metadataStore.configResources.find({
-    workspace_id: identity.workspaceId,
+    workspace_id: ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID,
     user_id: modelBinding.profile_owner_user_id,
     kind: "model-profile",
-    id: identity.modelProfileId,
+    id: modelBinding.profile_id,
   });
   if (!modelResource || modelResource.status !== "connected" || !modelResource.default_enabled) {
     throw new Error("OVERVIEW_AI_MODEL_PROFILE_REVISION_MISMATCH");
@@ -557,12 +567,19 @@ function buildInvestigatorPrompt(context: WorkflowContext, identity: EnergyIqOve
     `Work only inside Snapshot ${identity.dataSnapshotId}, Release ${identity.projectReleaseId}, and ${identity.analysisPeriodFrom} through ${identity.analysisPeriodTo} in ${context.timezone}.`,
     `Use ${identity.methodSkillId}@${identity.methodSkillRevision} as a discovery method, not a question checklist.`,
     "The Coverage is what the manager already sees. Investigate relationships, drivers, concentration, timing, contradictions, likely explanations, consequences, or useful next checks that add material value beyond visible claims and visuals.",
-    "Use read-only SQL only when it can materially change a conclusion, action, or uncertainty. Zero candidates is valid; there is no finding quota.",
+    "Before using SQL, choose one decision-changing question. Combine related dimensions when one query can answer them. Stop when another query would not change the conclusion, action, or uncertainty. Zero candidates is valid; there is no finding quota.",
+    "Before every new SQL call, check whether Bounded Snapshot Evidence or an earlier successful SQL result already answers the decision-changing question. Do not rerun or reformulate an equivalent SQL query unless the prior call failed or omitted a field the final claim requires. Submit as soon as further SQL would not change the conclusion, action, or uncertainty.",
     "Use verified only for supported observations. Preserve useful hypotheses and exploration ideas, but do not invent causes, equipment state, occupancy, savings, ROI, ownership, commitment, thresholds, or forecasts.",
-    "Every displayed number or named entity must occur in that candidate's cited bounded Evidence or successful SQL result. Omit presentation for no-visual. Output only strict JSON.",
-    "SQL Evidence indexes are 1-based in execution order: the first successful SQL result is 1. Never output index 0.",
+    "action is the concrete next step; expectedIfAct is the observable benefit if it is taken; ifIgnored is the bounded consequence of inaction. Do not turn either outcome into a forecast.",
+    "possibleExplanation is optional and unconfirmed; when present it requires nextCheck. limitation is always required and must state what the pinned Evidence cannot establish.",
+    "Every displayed number or named entity must occur in that candidate's cited bounded Evidence or successful SQL result. Omit presentation for no-visual.",
+    "evidenceRefs may contain only exact item.id strings copied verbatim from Bounded Snapshot Evidence. Never use claimRefs, Coverage claim paths, JSON property paths, labels, or queryIds as evidenceRefs. When SQL alone supports a candidate, evidenceRefs may be empty.",
+    "Any ranking, percentage, ratio, share, difference, or delta stated by a candidate must be explicitly returned by SQL; never calculate or estimate it yourself.",
+    "Call overview_ai_candidates_submit with the final Candidate envelope. Do not emit Candidate JSON as Assistant text. If the tool reports a schema error, correct it once only; there may be at most two submission starts. After a successful submission, stop immediately and do not call SQL or the submission tool again.",
+    "For evidenceSqlIndexes, copy verbatim the evidence_index returned by each successful run_sql_readonly result. Never infer, count, renumber, or guess an index; if a successful result lacks evidence_index, do not cite it. A zero-row successful result may have an index; an isError result never does.",
     `Prompt revision: ${identity.investigatorPromptRevision}.`,
-    "Return: {\"candidates\":[{\"id\":\"candidate-1\",\"epistemicLevel\":\"verified|hypothesis|exploration-idea\",\"title\":\"...\",\"takeaway\":\"...\",\"significance\":\"optional\",\"possibleExplanation\":\"optional\",\"nextCheck\":\"optional\",\"evidenceRefs\":[],\"evidenceSqlIndexes\":[],\"presentation\":{\"version\":\"1\",\"blocks\":[]}}]}",
+    "Submit 0-3 candidates. Required text limits: title<=160, takeaway<=220, action/expectedIfAct/ifIgnored/limitation<=120. Optional significance/possibleExplanation/nextCheck<=120.",
+    "Submission tool arguments: {\"candidates\":[{\"id\":\"candidate-1\",\"epistemicLevel\":\"verified|hypothesis|exploration-idea\",\"title\":\"...\",\"takeaway\":\"...\",\"action\":\"...\",\"expectedIfAct\":\"...\",\"ifIgnored\":\"...\",\"limitation\":\"...\",\"significance\":\"optional\",\"possibleExplanation\":\"optional\",\"nextCheck\":\"optional\",\"evidenceRefs\":[],\"evidenceSqlIndexes\":[],\"presentation\":{\"version\":\"1\",\"blocks\":[]}}]}",
     "Overview Coverage:", JSON.stringify(context.coverage),
     "Bounded Snapshot Evidence:", JSON.stringify({ identity: context.binding, items: context.evidence }),
     "Project decision signals:", JSON.stringify({ items: context.decisionSignals }),
@@ -573,59 +590,201 @@ function buildEditorPrompt(
   context: WorkflowContext,
   identity: EnergyIqOverviewAiArtifactIdentity,
   candidates: InvestigatorCandidate[],
-  tools: Array<Omit<ToolEvidence, "evidenceIndex">>,
+  _tools: Array<Omit<ToolEvidence, "evidenceIndex">>,
 ): string {
-  return [
-    `You are the Insight Editor in the final stage for ${context.projectName}. Accept content only for Snapshot ${identity.dataSnapshotId}, Release ${identity.projectReleaseId}, and ${identity.analysisPeriodFrom} through ${identity.analysisPeriodTo}.`,
-    "Judge incremental manager value, non-repetition against visible claims and visuals, depth, epistemic honesty, page placement, and clarity. Reject, merge, or accept. Zero accepted findings is valid; never generate filler.",
-    "The Benchmark target needs an interpretation, likely explanation, action, or verification beyond benchmark repetition. Leave it empty when no candidate clears that bar.",
-    `Valid placementTargets: ${JSON.stringify(["preschool.overall-key-findings", "preschool.benchmark", "preschool.standby", "preschool.operating-hours", "preschool.forecast", "cross-section"])}.`,
-    "Preserve no-visual. Hypothesis or exploration-idea must include at least one of uncertainty or verification. Every number and named entity must be supported by that finding's cited Evidence.",
-    "Investigator SQL indexes retain their numbers. If you run more SQL, continue numbering after the last Investigator index. Trace accepted, rejected, or merged decisions separately from customer content.",
-    `Output contract ${identity.outputContractRevision}; prompt revision ${identity.editorPromptRevision}. Output only strict JSON.`,
-    "Return: {\"findings\":[{\"sourceCandidateIds\":[\"candidate-1\"],\"placementTargets\":[\"preschool.benchmark\"],\"epistemicLevel\":\"hypothesis\",\"relationship\":\"independent\",\"signalRefs\":[],\"title\":\"...\",\"takeaway\":\"...\",\"interpretation\":\"optional\",\"action\":\"optional\",\"verification\":\"optional\",\"uncertainty\":\"optional\",\"evidenceRefs\":[],\"evidenceSqlIndexes\":[],\"presentation\":{\"version\":\"1\",\"blocks\":[]}}],\"trace\":[{\"decision\":\"accepted|rejected|merged\",\"sourceCandidateIds\":[\"candidate-1\"],\"reason\":\"optional\"}]}",
-    "Overview Coverage:", JSON.stringify(context.coverage),
-    "Investigator candidates:", JSON.stringify(candidates),
-    "Investigator SQL Evidence summaries:", JSON.stringify(tools.map((tool, index) => ({ evidenceIndex: index + 1, resultPreview: tool.resultPreview }))),
-    "Bounded Snapshot Evidence:", JSON.stringify({ identity: context.binding, items: context.evidence }),
-  ].join("\n\n");
+  const candidateViews = candidates.map((candidate) => ({
+    id: candidate.id,
+    epistemicLevel: candidate.epistemicLevel,
+    title: editorPreview(candidate.title, MAX_CANDIDATE_TITLE_CHARS),
+    takeaway: editorPreview(candidate.takeaway, MAX_CANDIDATE_TAKEAWAY_CHARS),
+    action: editorPreview(candidate.action, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS),
+    expectedIfAct: editorPreview(candidate.expectedIfAct, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS),
+    ifIgnored: editorPreview(candidate.ifIgnored, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS),
+    limitation: editorPreview(candidate.limitation, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS),
+    ...(candidate.significance
+      ? { significance: editorPreview(candidate.significance, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS) }
+      : {}),
+    ...(candidate.possibleExplanation
+      ? { possibleExplanation: editorPreview(candidate.possibleExplanation, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS) }
+      : {}),
+    ...(candidate.nextCheck
+      ? { nextCheck: editorPreview(candidate.nextCheck, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS) }
+      : {}),
+    evidenceRefs: candidate.evidenceRefs.slice(0, MAX_EDITOR_EVIDENCE_REFS)
+      .map((reference) => editorPreview(reference, MAX_EDITOR_EVIDENCE_REF_CHARS)),
+    evidenceSqlIndexes: candidate.evidenceSqlIndexes.slice(0, MAX_EDITOR_SQL_INDEXES),
+    ...(candidate.presentation
+      ? {
+          presentation: candidate.presentation.blocks.slice(0, MAX_EDITOR_PRESENTATION_BLOCKS)
+            .map(editorPresentationPreview),
+        }
+      : {}),
+  }));
+  const prompt = [
+    `Pin ${identity.dataSnapshotId}|${identity.projectReleaseId}|${identity.analysisPeriodFrom}–${identity.analysisPeriodTo}.`,
+    "Select useful non-repetition (zero valid; each once). Exact previews; never rewrite Candidate fields or presentation.",
+    "Judge value/depth/honesty/placement/clarity. You cannot query Schema or SQL.",
+    "Similar absolute kWh does not invalidate EUI/per-pax. With provisional area/headcount: verify metadata first; if correct, investigate fixed/base load, schedule, or another supported driver. This is conditional, not mandatory.",
+    "placementTargets: preschool.{overall-key-findings|benchmark|standby|operating-hours|forecast} or cross-section.",
+    `${identity.outputContractRevision}; ${identity.editorPromptRevision}; JSON.`,
+    "JSON only: findings[{sourceCandidateIds:[id],placementTargets:[target],relationship:\"supports|challenges|independent\",signalRefs:[]}], trace[{decision:\"accepted|rejected\",sourceCandidateIds:[id]}].",
+    "Investigator candidates", JSON.stringify(candidateViews),
+    "Overview Coverage (compact):", JSON.stringify(compactEditorCoverage(context.coverage)),
+  ].join("\n");
+  if (prompt.length > MAX_EDITOR_PROMPT_CHARS) {
+    throw new Error(`OVERVIEW_AI_EDITOR_PROMPT_TOO_LARGE:${prompt.length}`);
+  }
+  return prompt;
 }
 
-function normalizeStageEvents(input: { events: ReadonlyArray<Record<string, unknown>> }): {
+function compactEditorCoverage(value: unknown): unknown {
+  if (!isRecord(value) || !Array.isArray(value.sections)) return value;
+  return Object.fromEntries(value.sections.flatMap((section) => {
+    if (!isRecord(section) || typeof section.target !== "string") return [];
+    return [[section.target, {
+      s: section.visibleSignalRefs,
+      v: Array.isArray(section.visibleVisuals)
+        ? section.visibleVisuals.flatMap((visual) => isRecord(visual) ? [visual.type] : [])
+        : [],
+    }]];
+  }));
+}
+
+function editorPreview(value: string, maxChars: number): string {
+  return value.length <= maxChars ? value : `${value.slice(0, maxChars - 1)}…`;
+}
+
+function editorPresentationPreview(block: AiFindingPresentation["blocks"][number]): Record<string, unknown> {
+  const source = block.type === "metric"
+    ? block.label
+    : block.type === "callout"
+      ? block.text
+      : block.title;
+  return {
+    type: block.type,
+    ...(source ? { text: editorPreview(source, MAX_EDITOR_PRESENTATION_TEXT_CHARS) } : {}),
+  };
+}
+
+function normalizeStageEvents(
+  input: { events: ReadonlyArray<Record<string, unknown>> },
+  envelopeKey: "candidates" | "findings",
+  submissionToolName?: string,
+): {
   answer: string;
   schemaValid: boolean;
-  tools: Array<Omit<ToolEvidence, "evidenceIndex">>;
+  tools: ToolEvidence[];
 } {
   const runError = [...input.events].reverse().find(({ type }) => type === "RUN_ERROR");
   if (runError) throw new Error(typeof runError.message === "string" ? runError.message : "OVERVIEW_AI_STAGE_FAILED");
   if (!input.events.some(({ type }) => type === "RUN_FINISHED")) throw new Error("OVERVIEW_AI_STAGE_INCOMPLETE");
-  const answer = input.events.filter(({ type }) => type === "TEXT_MESSAGE_CONTENT")
-    .map(({ delta }) => typeof delta === "string" ? delta : "").join("").trim();
-  const tools = collectTools(input.events);
-  return { answer, ...tools };
+  if (submissionToolName) {
+    const submission = collectStructuredSubmission(input.events, submissionToolName);
+    return {
+      answer: submission ? JSON.stringify(submission.payload) : "",
+      ...collectTools(input.events, submission?.successfulStartIndex ?? 0, true),
+    };
+  }
+  const messageOrder: string[] = [];
+  const messages = new Map<string, string>();
+  for (const event of input.events) {
+    if (event.type !== "TEXT_MESSAGE_CONTENT" && event.type !== "TEXT_MESSAGE_CHUNK") continue;
+    const messageId = stringValue(event.messageId) ?? stringValue(event.message_id) ?? "legacy-assistant-message";
+    if (!messages.has(messageId)) messageOrder.push(messageId);
+    messages.set(messageId, `${messages.get(messageId) ?? ""}${stringValue(event.delta) ?? ""}`);
+  }
+  const orderedAnswers = [...messageOrder].reverse()
+    .map((messageId) => messages.get(messageId)?.trim() ?? "")
+    .filter(Boolean);
+  const answer = orderedAnswers.find((candidate) => findEnvelope(candidate, envelopeKey))
+    ?? orderedAnswers[0]
+    ?? "";
+  return { answer, ...collectTools(input.events) };
 }
 
-function collectTools(events: ReadonlyArray<Record<string, unknown>>): {
-  schemaValid: boolean;
-  tools: Array<Omit<ToolEvidence, "evidenceIndex">>;
-} {
-  const attempts = new Map<string, { name: string; argsText: string; args: Record<string, unknown> | null; result: unknown }>();
-  for (const event of events) {
+function collectStructuredSubmission(
+  events: ReadonlyArray<Record<string, unknown>>,
+  submissionToolName: string,
+): { payload: Record<string, unknown>; successfulStartIndex: number } | null {
+  const attempts = new Map<string, { name?: string; result?: unknown; resultIndex?: number }>();
+  const starts: Array<{ id: string; startIndex: number }> = [];
+  for (const [eventIndex, event] of events.entries()) {
     const id = stringValue(event.toolCallId) ?? stringValue(event.tool_call_id);
     if (!id) continue;
-    const current = attempts.get(id) ?? { name: "unknown", argsText: "", args: null, result: undefined };
+    const current = attempts.get(id) ?? {};
+    const name = stringValue(event.toolCallName) ?? stringValue(event.tool_call_name);
+    if (name) current.name = name;
+    if (event.type === "TOOL_CALL_START" && name === submissionToolName) {
+      starts.push({ id, startIndex: eventIndex });
+    }
+    if (event.type === "TOOL_CALL_RESULT") {
+      current.result = event.result ?? event.content;
+      current.resultIndex = eventIndex;
+    }
+    attempts.set(id, current);
+  }
+  if (starts.length === 0 || starts.length > 2
+    || new Set(starts.map(({ id }) => id)).size !== starts.length) return null;
+  const results = starts.flatMap(({ id, startIndex }) => {
+    const attempt = attempts.get(id);
+    if (!attempt || attempt.name !== submissionToolName || attempt.result === undefined
+      || attempt.resultIndex === undefined || attempt.resultIndex <= startIndex) return [];
+    const { result } = attempt;
+    const parsed = typeof result === "string" ? parseUnknown(result) : result;
+    return isRecord(parsed) ? [{ parsed, startIndex }] : [];
+  });
+  if (results.length !== starts.length) return null;
+  const successful = results.flatMap(({ parsed, startIndex }, attemptIndex) => (
+    parsed.ok === true
+      && parsed.resultType === "overview-ai-candidate-submission"
+      && isRecord(parsed.payload)
+      ? [{ payload: parsed.payload, startIndex, attemptIndex }]
+      : []
+  ));
+  if (successful.length !== 1 || successful[0]!.attemptIndex !== starts.length - 1) return null;
+  if (results.slice(0, -1).some(({ parsed }) => parsed.ok === true)) return null;
+  return {
+    payload: successful[0]!.payload,
+    successfulStartIndex: successful[0]!.startIndex,
+  };
+}
+
+function collectTools(
+  events: ReadonlyArray<Record<string, unknown>>,
+  beforeIndex = events.length,
+  requireRuntimeEvidenceIndex = false,
+): {
+  schemaValid: boolean;
+  tools: ToolEvidence[];
+} {
+  const attempts = new Map<string, {
+    name: string;
+    argsText: string;
+    args: Record<string, unknown> | null;
+    result: unknown;
+    resultIndex: number | null;
+  }>();
+  for (const [eventIndex, event] of events.slice(0, beforeIndex).entries()) {
+    const id = stringValue(event.toolCallId) ?? stringValue(event.tool_call_id);
+    if (!id) continue;
+    const current = attempts.get(id) ?? { name: "unknown", argsText: "", args: null, result: undefined, resultIndex: null };
     current.name = stringValue(event.toolCallName) ?? stringValue(event.tool_call_name) ?? current.name;
     if (event.type === "TOOL_CALL_ARGS") current.argsText += stringValue(event.delta) ?? "";
     if (isRecord(event.args)) current.args = event.args;
     if (isRecord(event.parameters)) current.args = event.parameters;
-    if (event.type === "TOOL_CALL_RESULT") current.result = event.result ?? event.content;
+    if (event.type === "TOOL_CALL_RESULT") {
+      current.result = event.result ?? event.content;
+      current.resultIndex = eventIndex;
+    }
     attempts.set(id, current);
   }
   for (const attempt of attempts.values()) {
     if (attempt.argsText && !attempt.args) attempt.args = parseRecord(attempt.argsText);
   }
   const schemaValid = [...attempts.values()].some(({ name, result }) => name === "inspect_schema" && validSchemaResult(result));
-  const tools = [...attempts.entries()].flatMap<Omit<ToolEvidence, "evidenceIndex">>(([toolCallId, attempt]) => {
+  const collected = [...attempts.entries()]
+    .sort(([, left], [, right]) => (left.resultIndex ?? Number.MAX_SAFE_INTEGER) - (right.resultIndex ?? Number.MAX_SAFE_INTEGER))
+    .flatMap<Array<Omit<ToolEvidence, "evidenceIndex"> & { reportedEvidenceIndex: number | null }>[number]>(([toolCallId, attempt]) => {
     if (attempt.name !== "run_sql_readonly") return [];
     const result = parseSqlResult(attempt.result);
     if (!result) return [];
@@ -639,7 +798,15 @@ function collectTools(events: ReadonlyArray<Record<string, unknown>>): {
       resultPreview: preview.slice(0, MAX_EVIDENCE_PREVIEW_CHARS),
       columns: result.columns,
       rows: result.rows,
+      reportedEvidenceIndex: result.evidenceIndex,
     }];
+  });
+  const tools = collected.map(({ reportedEvidenceIndex, ...tool }, index) => {
+    const expectedEvidenceIndex = index + 1;
+    if (requireRuntimeEvidenceIndex && reportedEvidenceIndex !== expectedEvidenceIndex) {
+      throw new Error(`OVERVIEW_AI_SQL_EVIDENCE_INDEX_MISMATCH:${reportedEvidenceIndex ?? "missing"}:${expectedEvidenceIndex}`);
+    }
+    return { ...tool, evidenceIndex: reportedEvidenceIndex ?? expectedEvidenceIndex };
   });
   return { schemaValid, tools };
 }
@@ -649,69 +816,122 @@ function materializeCanonicalArtifact(input: {
   identity: EnergyIqOverviewAiArtifactIdentity;
   investigatorRunId: string;
   editorRunId: string;
-  envelope: { findings: EditorFinding[]; trace: TraceDecision[] };
+  candidates: InvestigatorCandidate[];
+  envelope: { findings: EditorSelection[]; trace: TraceDecision[] };
   tools: ToolEvidence[];
 }): Record<string, unknown> {
   const evidenceById = new Map(input.context.evidence.map((item) => [item.id, item]));
+  const candidateById = new Map(input.candidates.map((candidate) => [candidate.id, candidate]));
   const signalIds = new Set(input.context.decisionSignals.map(({ id }) => id));
-  const accepted = input.envelope.findings.flatMap((draft) => {
-    if (draft.signalRefs.some((id) => !signalIds.has(id))) return [];
-    const evidence = draft.evidenceRefs.flatMap((id) => {
+  const validation = input.envelope.findings.map((selection) => {
+    const candidate = candidateById.get(selection.sourceCandidateIds[0]!);
+    if (!candidate) return { status: "rejected" as const, selection, reason: "candidate is unavailable" };
+    if (selection.signalRefs.some((id) => !signalIds.has(id))) {
+      return { status: "rejected" as const, selection, reason: "signalRefs are outside the bounded decision signals" };
+    }
+    const evidence = candidate.evidenceRefs.flatMap((id) => {
       const item = evidenceById.get(id);
       return item ? [item] : [];
     });
-    const tools = draft.evidenceSqlIndexes.flatMap((index) => {
+    const tools = candidate.evidenceSqlIndexes.flatMap((index) => {
       const tool = input.tools[index - 1];
       return tool ? [tool] : [];
     });
-    if (evidence.length !== draft.evidenceRefs.length
-      || tools.length !== draft.evidenceSqlIndexes.length
-      || draft.epistemicLevel === "verified" && evidence.length === 0 && tools.length === 0) return [];
-    const narrative = [draft.title, draft.takeaway, draft.interpretation, draft.action, draft.verification, draft.uncertainty]
+    if (evidence.length !== candidate.evidenceRefs.length) {
+      return { status: "rejected" as const, selection, reason: "evidenceRefs are outside the bounded Snapshot" };
+    }
+    if (tools.length !== candidate.evidenceSqlIndexes.length) {
+      return { status: "rejected" as const, selection, reason: "SQL indexes are outside pre-submission successful results" };
+    }
+    if (candidate.epistemicLevel === "verified" && evidence.length === 0 && tools.length === 0) {
+      return { status: "rejected" as const, selection, reason: "verified content has no accepted Evidence" };
+    }
+    const narrative = [
+      candidate.title,
+      candidate.takeaway,
+      candidate.action,
+      candidate.expectedIfAct,
+      candidate.ifIgnored,
+      candidate.limitation,
+      candidate.significance,
+      candidate.possibleExplanation,
+      candidate.nextCheck,
+    ]
       .filter((value): value is string => Boolean(value));
-    if (narrative.some((text) => unsupportedNarrative(text, evidence, tools))) return [];
-    const presentation = filterAiFindingPresentationEvidence(draft.presentation, {
-      evidenceRefs: draft.evidenceRefs,
-      evidenceSqlIndexes: draft.evidenceSqlIndexes,
+    if (narrative.some((text) => unsupportedNarrative(text, evidence, tools))) {
+      return { status: "rejected" as const, selection, reason: "narrative is unsupported by cited Evidence" };
+    }
+    const presentation = filterAiFindingPresentationEvidence(candidate.presentation, {
+      evidenceRefs: candidate.evidenceRefs,
+      evidenceSqlIndexes: candidate.evidenceSqlIndexes,
     });
-    const safePresentation = presentation && !unsupportedNarrative(JSON.stringify(presentation), evidence, tools)
+    const safePresentation = presentation && !unsupportedNarrative(presentationNarrative(presentation), evidence, tools)
       ? presentation
       : null;
-    return [{ draft, evidence, tools, presentation: safePresentation }];
+    return { status: "accepted" as const, selection, candidate, evidence, tools, presentation: safePresentation };
   });
-  const findings = accepted.map(({ draft, evidence, tools, presentation }, index) => ({
-    id: `preschool-ai-finding-${index + 1}`,
-    binding: input.context.binding,
-    placementTargets: draft.placementTargets,
-    epistemicLevel: draft.epistemicLevel,
-    relationship: draft.relationship,
-    signalRefs: draft.signalRefs,
-    title: draft.title,
-    takeaway: draft.takeaway,
-    ...(draft.interpretation ? { interpretation: draft.interpretation } : {}),
-    ...(draft.action ? { action: draft.action } : {}),
-    ...(draft.verification ? { verification: draft.verification } : {}),
-    ...(draft.uncertainty ? { uncertainty: draft.uncertainty } : {}),
-    ...(presentation ? { presentation } : {}),
-    evidence: {
-      snapshotId: input.identity.dataSnapshotId,
-      period: input.context.binding.analysisPeriod,
-      deterministic: evidence,
-      tools: tools.map(({ columns: _, rows: __, ...tool }) => tool),
-    },
-  }));
-  const findingIdBySources = new Map(accepted.map(({ draft }, index) => [
-    sourceKey(draft.sourceCandidateIds),
+  const accepted = validation.flatMap((result) => result.status === "accepted" ? [result] : []);
+  const runtimeRejected = validation.flatMap((result) => result.status === "rejected" ? [result] : []);
+  if (input.envelope.findings.length > 0 && accepted.length === 0) {
+    throw new Error("OVERVIEW_AI_RUNTIME_VALIDATION_REJECTED_ALL");
+  }
+  const findings = accepted.map(({ selection, candidate, evidence, tools, presentation }, index) => {
+    const interpretation = candidate.significance;
+    return {
+      id: `preschool-ai-finding-${index + 1}`,
+      binding: input.context.binding,
+      placementTargets: selection.placementTargets,
+      epistemicLevel: candidate.epistemicLevel,
+      relationship: selection.relationship,
+      signalRefs: selection.signalRefs,
+      title: candidate.title,
+      takeaway: candidate.takeaway,
+      ...(interpretation ? { interpretation } : {}),
+      action: candidate.action,
+      expectedIfAct: candidate.expectedIfAct,
+      ifIgnored: candidate.ifIgnored,
+      ...(candidate.nextCheck ? { verification: candidate.nextCheck } : {}),
+      uncertainty: candidate.limitation,
+      ...(candidate.possibleExplanation ? { possibleExplanation: candidate.possibleExplanation } : {}),
+      ...(presentation ? { presentation } : {}),
+      evidence: {
+        snapshotId: input.identity.dataSnapshotId,
+        period: input.context.binding.analysisPeriod,
+        deterministic: evidence,
+        tools: tools.map(({ columns: _, rows: __, ...tool }) => tool),
+      },
+    };
+  });
+  const findingIdBySources = new Map(accepted.map(({ selection }, index) => [
+    sourceKey(selection.sourceCandidateIds),
     findings[index]!.id,
   ]));
+  const runtimeRejectionBySources = new Map(runtimeRejected.map(({ selection, reason }) => [
+    sourceKey(selection.sourceCandidateIds),
+    `Runtime validation rejected: ${reason}.`,
+  ]));
   const trace = input.envelope.trace.map((decision) => {
-    const findingId = findingIdBySources.get(sourceKey(decision.sourceCandidateIds));
+    const key = sourceKey(decision.sourceCandidateIds);
+    const runtimeReason = runtimeRejectionBySources.get(key);
+    if (runtimeReason) {
+      return { decision: "rejected" as const, sourceCandidateIds: decision.sourceCandidateIds, reason: runtimeReason };
+    }
+    const findingId = findingIdBySources.get(key);
     return findingId && decision.decision !== "rejected" ? { ...decision, findingId } : decision;
   });
-  const traced = new Set(trace.filter(({ decision }) => decision !== "rejected").map(({ sourceCandidateIds }) => sourceKey(sourceCandidateIds)));
-  for (const [index, { draft }] of accepted.entries()) {
-    if (!traced.has(sourceKey(draft.sourceCandidateIds))) {
-      trace.push({ decision: "accepted", sourceCandidateIds: draft.sourceCandidateIds, findingId: findings[index]!.id });
+  const traced = new Set(trace.map(({ sourceCandidateIds }) => sourceKey(sourceCandidateIds)));
+  for (const [index, { selection }] of accepted.entries()) {
+    if (!traced.has(sourceKey(selection.sourceCandidateIds))) {
+      trace.push({ decision: "accepted", sourceCandidateIds: selection.sourceCandidateIds, findingId: findings[index]!.id });
+    }
+  }
+  for (const { selection, reason } of runtimeRejected) {
+    if (!traced.has(sourceKey(selection.sourceCandidateIds))) {
+      trace.push({
+        decision: "rejected",
+        sourceCandidateIds: selection.sourceCandidateIds,
+        reason: `Runtime validation rejected: ${reason}.`,
+      });
     }
   }
   return {
@@ -738,21 +958,31 @@ function materializeCanonicalArtifact(input: {
 
 function parseInvestigatorCandidates(answer: string): InvestigatorCandidate[] | null {
   const envelope = findEnvelope(answer, "candidates");
-  if (!envelope || !Array.isArray(envelope.candidates)) return null;
+  if (!envelope || !Array.isArray(envelope.candidates)
+    || envelope.candidates.length > MAX_INVESTIGATOR_CANDIDATES) return null;
   const candidates = envelope.candidates.flatMap<InvestigatorCandidate>((value) => {
     if (!isRecord(value)) return [];
     const id = cleanId(value.id);
     const epistemicLevel = epistemic(value.epistemicLevel);
-    const title = cleanText(value.title);
-    const takeaway = cleanText(value.takeaway);
+    const title = cleanText(value.title, MAX_CANDIDATE_TITLE_CHARS);
+    const takeaway = cleanText(value.takeaway, MAX_CANDIDATE_TAKEAWAY_CHARS);
+    const action = cleanText(value.action, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS);
+    const expectedIfAct = cleanText(value.expectedIfAct, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS);
+    const ifIgnored = cleanText(value.ifIgnored, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS);
+    const limitation = cleanText(value.limitation, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS);
+    const significance = optionalBoundedText(value.significance, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS);
+    const possibleExplanation = optionalBoundedText(value.possibleExplanation, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS);
+    const nextCheck = optionalBoundedText(value.nextCheck, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS);
     const evidenceSqlIndexes = positiveIntegers(value.evidenceSqlIndexes);
-    if (!id || !epistemicLevel || !title || !takeaway || evidenceSqlIndexes === null) return [];
+    if (!id || !epistemicLevel || !title || !takeaway || !action || !expectedIfAct || !ifIgnored || !limitation
+      || significance === null || possibleExplanation === null || nextCheck === null
+      || possibleExplanation && !nextCheck || evidenceSqlIndexes === null) return [];
     const presentation = parseAiFindingPresentation(value.presentation);
     return [{
-      id, epistemicLevel, title, takeaway,
-      ...optionalText("significance", value.significance),
-      ...optionalText("possibleExplanation", value.possibleExplanation),
-      ...optionalText("nextCheck", value.nextCheck),
+      id, epistemicLevel, title, takeaway, action, expectedIfAct, ifIgnored, limitation,
+      ...(significance ? { significance } : {}),
+      ...(possibleExplanation ? { possibleExplanation } : {}),
+      ...(nextCheck ? { nextCheck } : {}),
       evidenceRefs: strings(value.evidenceRefs),
       evidenceSqlIndexes,
       ...(presentation ? { presentation } : {}),
@@ -762,54 +992,49 @@ function parseInvestigatorCandidates(answer: string): InvestigatorCandidate[] | 
     && new Set(candidates.map(({ id }) => id)).size === candidates.length ? candidates : null;
 }
 
-function parseEditorEnvelope(answer: string, candidateIds: ReadonlySet<string>): { findings: EditorFinding[]; trace: TraceDecision[] } | null {
+function parseEditorEnvelope(answer: string, candidateIds: ReadonlySet<string>): { findings: EditorSelection[]; trace: TraceDecision[] } | null {
   const envelope = findEnvelope(answer, "findings");
   if (!envelope || !Array.isArray(envelope.findings)) return null;
-  const findings = envelope.findings.flatMap<EditorFinding>((value) => {
+  const findings = envelope.findings.flatMap<EditorSelection>((value) => {
     if (!isRecord(value)) return [];
     const sourceCandidateIds = strings(value.sourceCandidateIds);
     const placementTargets = placements(value.placementTargets);
-    const epistemicLevel = epistemic(value.epistemicLevel);
-    const relationship = relation(value.relationship);
-    const title = cleanText(value.title);
-    const takeaway = cleanText(value.takeaway);
-    const verification = cleanText(value.verification);
-    const uncertainty = cleanText(value.uncertainty);
-    const evidenceSqlIndexes = positiveIntegers(value.evidenceSqlIndexes);
-    if (sourceCandidateIds.length === 0 || sourceCandidateIds.some((id) => !candidateIds.has(id))
-      || !placementTargets?.length || !epistemicLevel || !relationship || !title || !takeaway
-      || epistemicLevel !== "verified" && !verification && !uncertainty || evidenceSqlIndexes === null) return [];
-    const presentation = parseAiFindingPresentation(value.presentation);
+    // Relationship is presentation metadata, not a factual claim. A blank model value is
+    // safely equivalent to independent; unknown non-blank values remain invalid.
+    const relationship = value.relationship === "" ? "independent" : relation(value.relationship);
+    if (sourceCandidateIds.length !== 1 || !candidateIds.has(sourceCandidateIds[0]!)
+      || !placementTargets?.length || !relationship) return [];
     return [{
-      sourceCandidateIds, placementTargets, epistemicLevel, relationship,
-      signalRefs: strings(value.signalRefs), title, takeaway,
-      ...optionalText("interpretation", value.interpretation),
-      ...optionalText("action", value.action),
-      ...(verification ? { verification } : {}),
-      ...(uncertainty ? { uncertainty } : {}),
-      evidenceRefs: strings(value.evidenceRefs), evidenceSqlIndexes,
-      ...(presentation ? { presentation } : {}),
+      sourceCandidateIds, placementTargets, relationship,
+      signalRefs: strings(value.signalRefs),
     }];
   });
-  if (findings.length !== envelope.findings.length) return null;
+  if (findings.length !== envelope.findings.length
+    || new Set(findings.map(({ sourceCandidateIds }) => sourceCandidateIds[0])).size !== findings.length) return null;
   const trace = Array.isArray(envelope.trace) ? envelope.trace.flatMap<TraceDecision>((value) => {
-    if (!isRecord(value) || value.decision !== "accepted" && value.decision !== "rejected" && value.decision !== "merged") return [];
+    if (!isRecord(value) || value.decision !== "accepted" && value.decision !== "rejected") return [];
     const sourceCandidateIds = strings(value.sourceCandidateIds);
-    if (!sourceCandidateIds.length || sourceCandidateIds.some((id) => !candidateIds.has(id))) return [];
+    if (sourceCandidateIds.length !== 1 || !candidateIds.has(sourceCandidateIds[0]!)) return [];
     return [{
       decision: value.decision,
       sourceCandidateIds,
-      ...optionalText("findingId", value.findingId),
       ...optionalText("reason", value.reason),
     }];
   }) : [];
-  return Array.isArray(envelope.trace) && trace.length !== envelope.trace.length ? null : { findings, trace };
+  // Trace is non-authoritative audit prose. Ignore malformed trace entries and derive the
+  // canonical accepted/rejected trace from validated selections below.
+  const selectedIds = new Set(findings.map(({ sourceCandidateIds }) => sourceCandidateIds[0]!));
+  if (trace.some(({ decision, sourceCandidateIds }) => (
+    decision === "accepted" && !selectedIds.has(sourceCandidateIds[0]!)
+    || decision === "rejected" && selectedIds.has(sourceCandidateIds[0]!)
+  ))) return null;
+  return { findings, trace };
 }
 
 function unsupportedNarrative(text: string, evidence: EvidenceItem[], tools: ToolEvidence[]): boolean {
-  const withoutDates = text.replace(/\b\d{4}-\d{2}-\d{2}(?:T[^\s,;)]*)?/gu, " ");
+  if (!narrativeDateTimesSupported(text, evidence, tools)) return true;
   if (!energyAiNarrativeClaimsSupported({
-    narrative: withoutDates,
+    narrative: text,
     evidence,
     sqlEvidence: tools,
   })) return true;
@@ -822,7 +1047,24 @@ function unsupportedNarrative(text: string, evidence: EvidenceItem[], tools: Too
   return centreCodes.some((code) => !allowedEntities.has(code.toLowerCase()));
 }
 
-function parseSqlResult(value: unknown): { columns: string[]; rows: unknown[]; rowCount: number | null; auditLogId: string | null; elapsedMs: number | null; sql: string | null } | null {
+function narrativeDateTimesSupported(text: string, evidence: EvidenceItem[], tools: ToolEvidence[]): boolean {
+  const claims = [
+    ...text.matchAll(/\b\d{4}-\d{2}-\d{2}\b/gu),
+    ...text.matchAll(/\b\d{1,2}:\d{2}(?::\d{2})?\b/gu),
+  ].map((match) => match[0]);
+  if (claims.length === 0) return true;
+  const citedSource = JSON.stringify({
+    evidence: evidence.map(({ values }) => values),
+    tools: tools.map(({ columns, rows }) => ({ columns, rows })),
+  });
+  return claims.every((claim) => citedSource.includes(claim));
+}
+
+function presentationNarrative(presentation: AiFindingPresentation): string {
+  return JSON.stringify(presentation.blocks.map(({ evidenceRefs: _, evidenceSqlIndexes: __, ...block }) => block));
+}
+
+function parseSqlResult(value: unknown): { columns: string[]; rows: unknown[]; rowCount: number | null; auditLogId: string | null; elapsedMs: number | null; sql: string | null; evidenceIndex: number | null } | null {
   const record = unwrapRecord(value);
   if (!record || !Array.isArray(record.columns) || !Array.isArray(record.rows)) return null;
   return {
@@ -832,6 +1074,11 @@ function parseSqlResult(value: unknown): { columns: string[]; rows: unknown[]; r
     auditLogId: stringValue(record.audit_log_id) ?? null,
     elapsedMs: typeof record.elapsed_ms === "number" && Number.isFinite(record.elapsed_ms) ? record.elapsed_ms : null,
     sql: stringValue(record.sql) ?? null,
+    evidenceIndex: typeof record.evidence_index === "number"
+      && Number.isSafeInteger(record.evidence_index)
+      && record.evidence_index > 0
+        ? record.evidence_index
+        : null,
   };
 }
 
@@ -850,7 +1097,7 @@ function unwrapRecord(value: unknown): Record<string, unknown> | null {
 
 function findEnvelope(answer: string, key: "candidates" | "findings"): Record<string, unknown> | null {
   if (answer.length > MAX_ANSWER_CHARS) return null;
-  for (let start = answer.lastIndexOf("{"); start >= 0; start = answer.lastIndexOf("{", start - 1)) {
+  for (let start = answer.lastIndexOf("{"); start >= 0;) {
     let depth = 0;
     let inString = false;
     let escaped = false;
@@ -863,11 +1110,61 @@ function findEnvelope(answer: string, key: "candidates" | "findings"): Record<st
       } else if (character === "\"") inString = true;
       else if (character === "{") depth += 1;
       else if (character === "}" && --depth === 0) {
-        const parsed = parseUnknown(answer.slice(start, index + 1));
+        const source = answer.slice(start, index + 1);
+        const parsed = parseUnknown(source)
+          ?? (key === "candidates" ? parseCandidateEnvelopeWithoutMalformedPresentation(source) : undefined);
         if (isRecord(parsed) && Object.hasOwn(parsed, key)) return parsed;
         break;
       }
     }
+    if (start === 0) break;
+    start = answer.lastIndexOf("{", start - 1);
+  }
+  return null;
+}
+
+/**
+ * Presentation is optional. If a model emits valid candidate fields but makes a
+ * syntax error inside a final `presentation` object, preserve the candidate and
+ * drop only that optional object. This deliberately does not repair arbitrary
+ * JSON or any required customer-facing field.
+ */
+function parseCandidateEnvelopeWithoutMalformedPresentation(source: string): unknown {
+  let repaired = source;
+  let removed = false;
+  while (true) {
+    const matches = [...repaired.matchAll(/,\s*"presentation"\s*:\s*/gu)];
+    const match = matches.at(-1);
+    if (!match || match.index === undefined) break;
+    const valueStart = match.index + match[0].length;
+    if (repaired[valueStart] !== "{") return undefined;
+    const presentationEnd = balancedObjectEnd(repaired, valueStart);
+    if (presentationEnd === null) return undefined;
+    let candidateEnd = presentationEnd;
+    while (/\s/u.test(repaired[candidateEnd] ?? "")) candidateEnd += 1;
+    if (repaired[candidateEnd] !== "}") return undefined;
+    let afterCandidate = candidateEnd + 1;
+    while (/\s/u.test(repaired[afterCandidate] ?? "")) afterCandidate += 1;
+    if (repaired[afterCandidate] !== "," && repaired[afterCandidate] !== "]") return undefined;
+    repaired = `${repaired.slice(0, match.index)}${repaired.slice(candidateEnd)}`;
+    removed = true;
+  }
+  return removed ? parseUnknown(repaired) : undefined;
+}
+
+function balancedObjectEnd(source: string, start: number): number | null {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index]!;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === "\"") inString = false;
+    } else if (character === "\"") inString = true;
+    else if (character === "{") depth += 1;
+    else if (character === "}" && --depth === 0) return index + 1;
   }
   return null;
 }
@@ -904,7 +1201,7 @@ function positiveIntegers(value: unknown): number[] | null {
 function strings(value: unknown): string[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) return [];
-  const result = value.map(cleanText);
+  const result = value.map((item) => cleanText(item));
   return result.every(Boolean) ? [...new Set(result as string[])] : [];
 }
 
@@ -913,9 +1210,14 @@ function cleanId(value: unknown): string | null {
   return id && id.length <= 120 && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(id) ? id : null;
 }
 
-function cleanText(value: unknown): string | null {
+function cleanText(value: unknown, maxChars = 1_200): string | null {
   const text = typeof value === "string" ? value.replace(/\s+/gu, " ").trim() : "";
-  return text && text.length <= 1_200 ? text : null;
+  return text && text.length <= maxChars ? text : null;
+}
+
+function optionalBoundedText(value: unknown, maxChars: number): string | undefined | null {
+  if (value === undefined) return undefined;
+  return cleanText(value, maxChars);
 }
 
 function optionalText<Key extends string>(key: Key, value: unknown): Partial<Record<Key, string>> {

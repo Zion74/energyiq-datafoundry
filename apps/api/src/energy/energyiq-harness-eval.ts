@@ -254,7 +254,7 @@ const evaluatePreschoolVariant = (
       && result.contract.revision === "v13"
       && isRecord(result.workflow)
       && result.workflow.id === "preschool-two-stage"
-      && result.workflow.revision === "preschool-two-stage-v1"
+      && result.workflow.revision === "preschool-two-stage-v2"
       && isRecord(result.workflow.methodSkill)
       && result.workflow.methodSkill.id === "energy-insight-investigation"
       && result.workflow.methodSkill.revision === "1.0.0"

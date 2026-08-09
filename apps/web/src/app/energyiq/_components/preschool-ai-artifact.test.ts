@@ -26,7 +26,14 @@ describe("Preschool accepted AI Artifact Section interface", () => {
       status: "available",
       target: "preschool.benchmark",
       binding: artifact.binding,
-      findings: [{ id: "benchmark-insight", epistemicLevel: "hypothesis" }],
+      findings: [{
+        id: "benchmark-insight",
+        epistemicLevel: "hypothesis",
+        action: "Review the priority centres after verifying their metadata.",
+        expectedIfAct: "The next review should isolate the operating driver.",
+        ifIgnored: "The unresolved priority may persist into the next review.",
+        possibleExplanation: "Operating schedules or equipment mix may differ.",
+      }],
     });
   });
 
@@ -93,6 +100,18 @@ describe("Preschool accepted AI Artifact Section interface", () => {
     )).toMatchObject({ status: "unavailable" });
   });
 
+  it("rejects a separate possibleExplanation when the accepted Finding has no next-check verification", () => {
+    const artifact = acceptedArtifact();
+    artifact.findings[0]!.epistemicLevel = "verified";
+    delete artifact.findings[0]!.verification;
+
+    expect(selectPreschoolAiSectionInterpretation(
+      artifact,
+      artifact.binding,
+      "preschool.benchmark",
+    )).toMatchObject({ status: "unavailable" });
+  });
+
   it("allows an exact Benchmark placement to be empty without template filler", () => {
     const artifact = acceptedArtifact();
     artifact.findings = [];
@@ -141,6 +160,10 @@ function acceptedArtifact(): PreschoolAiAcceptedArtifact {
       signalRefs: ["efficiency"],
       title: "Benchmark gap needs an operating explanation",
       takeaway: "The same centres remain high after both floor-area and headcount normalisation.",
+      action: "Review the priority centres after verifying their metadata.",
+      expectedIfAct: "The next review should isolate the operating driver.",
+      ifIgnored: "The unresolved priority may persist into the next review.",
+      possibleExplanation: "Operating schedules or equipment mix may differ.",
       verification: "Compare schedules and major circuit loads for the priority centres.",
       uncertainty: "The Snapshot does not include occupancy schedules or equipment state.",
       evidence: {

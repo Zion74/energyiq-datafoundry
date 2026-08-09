@@ -159,11 +159,11 @@ describe("saved analysis decision-quality boundary", () => {
             },
             workflow: {
               id: "preschool-two-stage",
-              revision: "preschool-two-stage-v1",
+              revision: "preschool-two-stage-v2",
               methodSkill: { id: "energy-insight-investigation", revision: "1.0.0" },
               stages: {
-                investigator: { runId: "saved-analysis-ai-investigator-run-v1", promptRevision: "preschool-investigator-v1" },
-                editor: { runId: "saved-analysis-ai-editor-run-v1", promptRevision: "preschool-insight-editor-v1" },
+                investigator: { runId: "saved-analysis-ai-investigator-run-v1", promptRevision: "preschool-investigator-v8" },
+                editor: { runId: "saved-analysis-ai-editor-run-v1", promptRevision: "preschool-insight-editor-v3" },
               },
             },
             findings: [{
@@ -183,6 +183,10 @@ describe("saved analysis decision-quality boundary", () => {
               signalRefs: ["efficiency"],
               title: "Benchmark priority needs investigation",
               takeaway: "The current Snapshot supports a focused operating review.",
+              action: "Review the priority Centre with its local operator.",
+              expectedIfAct: "The next review will isolate the operating driver.",
+              ifIgnored: "The priority condition may continue without an owner.",
+              uncertainty: "The pinned evidence does not establish a cause.",
               evidence: {
                 snapshotId: project.data_snapshot_id,
                 period: { from: "2026-04-30T16:00:00.000Z", to: "2026-05-01T16:00:00.000Z" },
@@ -436,11 +440,11 @@ describe("saved analysis decision-quality boundary", () => {
           binding: bindingV2,
           workflow: {
             id: "preschool-two-stage",
-            revision: "preschool-two-stage-v1",
+            revision: "preschool-two-stage-v2",
             methodSkill: { id: "energy-insight-investigation", revision: "1.0.0" },
             stages: {
-              investigator: { runId: "saved-analysis-ai-investigator-run-v2", promptRevision: "preschool-investigator-v1" },
-              editor: { runId: "saved-analysis-ai-editor-run-v2", promptRevision: "preschool-insight-editor-v1" },
+              investigator: { runId: "saved-analysis-ai-investigator-run-v2", promptRevision: "preschool-investigator-v8" },
+              editor: { runId: "saved-analysis-ai-editor-run-v2", promptRevision: "preschool-insight-editor-v3" },
             },
           },
           findings: [{
@@ -452,7 +456,11 @@ describe("saved analysis decision-quality boundary", () => {
             signalRefs: [],
             title: "Benchmark gap needs an operating explanation",
             takeaway: "The current facts do not establish the driver.",
+            action: "Review schedules and major circuit loads.",
+            expectedIfAct: "The review should isolate the operating condition.",
+            ifIgnored: "The unexplained benchmark gap may persist.",
             verification: "Compare schedules and major circuit loads.",
+            uncertainty: "The pinned evidence does not establish a cause.",
             evidence: {
               snapshotId: project.data_snapshot_id,
               period: bindingV2.analysisPeriod,

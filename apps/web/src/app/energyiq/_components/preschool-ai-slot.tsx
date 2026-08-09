@@ -276,6 +276,9 @@ function FindingCard({
   const takeaway = accepted ? finding.takeaway : finding.what;
   const interpretation = accepted ? finding.interpretation : finding.why.text;
   const action = accepted ? finding.action : finding.how;
+  const expectedIfAct = finding.expectedIfAct;
+  const ifIgnored = finding.ifIgnored;
+  const possibleExplanation = accepted ? finding.possibleExplanation : undefined;
   const verification = accepted ? finding.verification : finding.howToVerify;
   const limitation = accepted ? finding.uncertainty : finding.evidenceNote;
   const epistemicLevel = accepted ? finding.epistemicLevel : whyKindToEpistemicLevel(finding.why.kind);
@@ -309,12 +312,17 @@ function FindingCard({
         </div> : null}
       </div> : null}
 
+      {possibleExplanation ? <div className="mt-5 rounded-xl border border-step-warning/30 bg-step-warning-soft px-5 py-4">
+        <p className="text-xs font-semibold text-step-warning">Possible explanation · needs verification</p>
+        <p className="mt-1.5 max-w-[75ch] text-sm leading-6 text-foreground/80">{possibleExplanation}</p>
+      </div> : null}
+
       <AiFindingPresentationView presentation={finding.presentation} />
 
-      {!accepted ? <dl className="mt-5 grid gap-5 border-t border-border pt-5 sm:grid-cols-2">
-        <DecisionOutcome label="Expected if acted on" value={finding.expectedIfAct} tone="positive" />
-        <DecisionOutcome label="If ignored" value={finding.ifIgnored} tone="warning" />
-      </dl> : null}
+      <dl className="mt-5 grid gap-5 border-t border-border pt-5 sm:grid-cols-2">
+        <DecisionOutcome label="Expected if acted on" value={expectedIfAct} tone="positive" />
+        <DecisionOutcome label="If ignored" value={ifIgnored} tone="warning" />
+      </dl>
 
       {verification || limitation ? <details className="mt-5 border-t border-border pt-4" data-ai-secondary-details="true">
         <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
@@ -450,7 +458,10 @@ function buildAskHref(base: string, projectId: string, finding: DisplayFinding):
     takeaway: finding.takeaway,
     epistemicLevel: finding.epistemicLevel,
     interpretation: finding.interpretation,
+    possibleExplanation: finding.possibleExplanation,
     action: finding.action,
+    expectedIfAct: finding.expectedIfAct,
+    ifIgnored: finding.ifIgnored,
     verification: finding.verification,
     uncertainty: finding.uncertainty,
   } : {

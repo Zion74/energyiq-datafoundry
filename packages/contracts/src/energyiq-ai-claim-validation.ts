@@ -77,25 +77,38 @@ function collectSqlNumericEvidence(columns: readonly string[], rows: readonly un
 }
 
 function numericClaims(value: string): NumericClaim[] {
-  return [...value.matchAll(/(?<![A-Za-z0-9])[-+]?\d[\d,]*(?:\.\d+)?(?![A-Za-z0-9])/gu)].flatMap((match) => {
+  const nonBusinessRanges = dateTimeRanges(value);
+  return [...value.matchAll(/(?<![A-Za-z0-9])[-+]?\d[\d,]*(?:\.\d+)?(?:(?=[xX]\b)|(?=×)|(?![A-Za-z0-9]))/gu)].flatMap((match) => {
     const token = match[0];
     const normalized = token.replaceAll(",", "");
     const parsed = Number(normalized);
     const start = match.index ?? 0;
     const end = start + token.length;
+    if (nonBusinessRanges.some((range) => start >= range.start && end <= range.end)) return [];
     return Number.isFinite(parsed) ? [{
       context: numericUnitContext(value, start, end),
-      entityContext: entityClauseAround(value, start, end).toLowerCase(),
+      entityContext: entityClauseAround(value, start, end),
       precision: normalized.includes(".") ? normalized.split(".")[1]!.length : 0,
       value: parsed,
     }] : [];
   });
 }
 
+function dateTimeRanges(value: string): Array<{ start: number; end: number }> {
+  return [
+    ...value.matchAll(/\b\d{4}-\d{2}-\d{2}\b/gu),
+    ...value.matchAll(/\b\d{1,2}:\d{2}(?::\d{2})?\s*[-–—]\s*\d{1,2}:\d{2}(?::\d{2})?\b/gu),
+    ...value.matchAll(/\b\d{1,2}:\d{2}(?::\d{2})?\b/gu),
+  ].map((match) => ({
+    start: match.index ?? 0,
+    end: (match.index ?? 0) + match[0].length,
+  }));
+}
+
 function numericUnitContext(value: string, numberStart: number, numberEnd: number): string {
   const before = value.slice(Math.max(0, numberStart - 20), numberStart).toLowerCase();
   const after = value.slice(numberEnd, Math.min(value.length, numberEnd + 28)).toLowerCase();
-  const explicitAfter = /^\s*(?:%|percent(?:age)?|kwh|mwh|gwh|wh|kw|mw|gw|kilowatt[- ]?hours?|centres?|spikes?|events?|people|persons?|pax)/u.exec(after);
+  const explicitAfter = /^\s*(?:[xX]\b|×|%|percent(?:age)?|kwh|mwh|gwh|wh|kw|mw|gw|kilowatt[- ]?hours?|centres?|spikes?|events?|people|persons?|pax)/u.exec(after);
   const explicitBefore = /(?:[$€£]|\b(?:sgd|usd))\s*$/u.exec(before);
   return explicitAfter || explicitBefore
     ? `${explicitBefore?.[0] ?? ""} ${explicitAfter?.[0] ?? ""}`
@@ -121,7 +134,7 @@ function deterministicCellSupportsClaim(
   claim: NumericClaim,
   fallbackCentreReference: string | null,
 ): boolean {
-  const metricContext = `${claim.context} ${semanticMetricContext(claim.entityContext)}`;
+  const metricContext = `${claim.context} ${semanticMetricContext(claim.entityContext.toLowerCase())}`;
   if (!fieldSupportsClaim(cell.field, metricContext, item.unit)) return false;
   const centreReference = explicitCentreReference(claim.entityContext) ?? fallbackCentreReference;
   if (!centreReference) return true;
@@ -135,7 +148,7 @@ function sqlCellSupportsClaim(
   claim: NumericClaim,
   fallbackCentreReference: string | null,
 ): boolean {
-  if (!fieldSupportsClaim(cell.column, `${claim.context} ${semanticMetricContext(claim.entityContext)}`, null)) return false;
+  if (!fieldSupportsClaim(cell.column, `${claim.context} ${semanticMetricContext(claim.entityContext.toLowerCase())}`, null)) return false;
   const centreReference = explicitCentreReference(claim.entityContext) ?? fallbackCentreReference;
   if (!centreReference) return true;
   return cell.dimensions.some((dimension) => {
@@ -147,6 +160,9 @@ function sqlCellSupportsClaim(
 
 function fieldSupportsClaim(field: string | null, context: string, itemUnit: string | null): boolean {
   const normalizedField = field?.toLowerCase() ?? "";
+  if (/\b(?:x|times?|multiple|multiplier|factor)\b|×/u.test(context)) {
+    return /ratio|multiple|multiplier|factor|fold|times?/u.test(normalizedField);
+  }
   if (hasCurrencyUnit(context)) return /cost|amount|price|tariff|sgd|usd|currency/u.test(normalizedField);
   if (/\b(?:eui|kwh\s*(?:\/|per)\s*(?:m(?:²|2)|sqm|square metres?))\b/u.test(context)) {
     return /eui|kwh.*(?:m2|sqm)|(?:m2|sqm).*kwh/u.test(normalizedField);
@@ -186,10 +202,16 @@ function collectNamedCentreDimensions(value: unknown, field = ""): string[] {
 
 function explicitCentreReference(context: string): string | null {
   const references = new Set([...context.matchAll(/\bcent(?:re|er)\s+([a-z0-9][a-z0-9_-]{0,15})\b/giu)]
-    .map((match) => match[1]!.toLowerCase()));
+    .map((match) => match[1]!)
+    .filter(isProjectCentreCode)
+    .map((reference) => reference.toLowerCase()));
   if (references.size === 0) return null;
   if (references.size > 1) return "__ambiguous_centre__";
   return [...references][0]!;
+}
+
+function isProjectCentreCode(value: string): boolean {
+  return /^[A-Z]{1,8}$/u.test(value) || /[0-9_-]/u.test(value);
 }
 
 function hasCurrencyUnit(context: string): boolean {

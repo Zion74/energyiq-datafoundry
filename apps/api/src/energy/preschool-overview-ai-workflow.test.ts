@@ -1,4 +1,5 @@
 import { LocalDataGateway } from "@datafoundry/data-gateway";
+import { WORKSPACE_DEFAULT_MODEL_PROFILE_ID } from "@datafoundry/metadata";
 import { createMetadataStore, type EnergyIqOverviewAiArtifactIdentity } from "@datafoundry/metadata";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,9 +25,11 @@ describe("Preschool Overview AI server workflow", () => {
     const investigatorGate = new Promise<void>((resolve) => { releaseInvestigator = resolve; });
     const stages: string[] = [];
     const investigatorPrompts: string[] = [];
+    const editorPrompts: string[] = [];
     const runStage: PreschoolOverviewAiStageRunner = async ({ stage, prompt, runId, sessionId }) => {
       stages.push(stage);
       if (stage === "investigator") investigatorPrompts.push(prompt);
+      if (stage === "editor") editorPrompts.push(prompt);
       if (stage === "investigator") await investigatorGate;
       return stageEvents(stage, runId, sessionId);
     };
@@ -47,7 +50,30 @@ describe("Preschool Overview AI server workflow", () => {
     const available = await owner;
     expect(available).toMatchObject({ status: "available", attempt_count: 1 });
     expect(stages).toEqual(["investigator", "editor"]);
-    expect(investigatorPrompts[0]).toContain("the first successful SQL result is 1. Never output index 0");
+    expect(investigatorPrompts[0]).toContain("copy verbatim the evidence_index returned by each successful run_sql_readonly result");
+    expect(investigatorPrompts[0]).toContain("Never infer, count, renumber, or guess an index");
+    expect(investigatorPrompts[0]).toContain("if a successful result lacks evidence_index, do not cite it");
+    expect(investigatorPrompts[0]).toContain("Before using SQL, choose one decision-changing question");
+    expect(investigatorPrompts[0]).toContain("there may be at most two submission starts");
+    expect(investigatorPrompts[0]).toContain("Do not emit Candidate JSON as Assistant text");
+    expect(investigatorPrompts[0]).toContain("Do not rerun or reformulate an equivalent SQL query");
+    expect(investigatorPrompts[0]).toContain("evidenceRefs may contain only exact item.id strings copied verbatim from Bounded Snapshot Evidence");
+    expect(investigatorPrompts[0]).toContain("Never use claimRefs, Coverage claim paths, JSON property paths, labels, or queryIds as evidenceRefs");
+    expect(investigatorPrompts[0]).toContain("When SQL alone supports a candidate, evidenceRefs may be empty");
+    expect(investigatorPrompts[0]).toContain("A zero-row successful result may have an index; an isError result never does");
+    expect(investigatorPrompts[0]).toContain("ranking, percentage, ratio, share, difference, or delta");
+    expect(investigatorPrompts[0]).toContain("must be explicitly returned by SQL; never calculate or estimate it yourself");
+    expect(investigatorPrompts[0]).toContain("Prompt revision: preschool-investigator-v8");
+    expect(editorPrompts[0]).toContain("You cannot query Schema or SQL");
+    expect(editorPrompts[0]).toContain("Similar absolute kWh does not invalidate EUI/per-pax");
+    expect(editorPrompts[0]).toContain("verify metadata first");
+    expect(editorPrompts[0]).toContain("if correct, investigate fixed/base load, schedule, or another supported driver");
+    expect(editorPrompts[0]).toContain("This is conditional, not mandatory");
+    expect(editorPrompts[0]!.length).toBeLessThanOrEqual(6_000);
+    expect(editorPrompts[0]!.indexOf("Investigator candidates")).toBeLessThan(
+      editorPrompts[0]!.indexOf("Overview Coverage (compact):"),
+    );
+    expect(editorPrompts[0]).not.toContain("visibleClaims");
     const result = JSON.parse(available.result_json!) as Record<string, unknown>;
     expect(result).toMatchObject({
       status: "available",
@@ -75,6 +101,838 @@ describe("Preschool Overview AI server workflow", () => {
     expect(restored).toEqual(available);
     expect(stages).toHaveLength(2);
     harness.close();
+  }, 15_000);
+
+  it("keeps three maximum legal Candidates exact and visible inside the 6000-character Editor budget", async () => {
+    const harness = createHarness();
+    let editorPrompt = "";
+    const candidates = [1, 2, 3].map((index) => ({
+      id: `candidate-${index}`,
+      epistemicLevel: "verified",
+      title: String.fromCharCode(64 + index).repeat(160),
+      takeaway: String.fromCharCode(67 + index).repeat(220),
+      action: String.fromCharCode(70 + index).repeat(120),
+      expectedIfAct: String.fromCharCode(73 + index).repeat(120),
+      ifIgnored: String.fromCharCode(76 + index).repeat(120),
+      limitation: String.fromCharCode(79 + index).repeat(120),
+      significance: String.fromCharCode(82 + index).repeat(120),
+      possibleExplanation: String.fromCharCode(85 + index).repeat(120),
+      nextCheck: String.fromCharCode(88 + index).repeat(120),
+      evidenceRefs: ["quality:window"],
+      evidenceSqlIndexes: [],
+      presentation: {
+        version: "1",
+        blocks: [{
+          type: "callout",
+          tone: "insight",
+          text: `Candidate ${index} presentation summary`,
+          evidenceRefs: ["quality:window"],
+        }],
+      },
+    }));
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, prompt, runId, sessionId }) => {
+        if (stage === "editor") editorPrompt = prompt;
+        return stage === "investigator"
+          ? envelopeEvents({ candidates }, runId, sessionId)
+          : stageEvents(stage, runId, sessionId);
+      },
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+    expect(editorPrompt.length).toBeLessThanOrEqual(6_000);
+    expect(editorPrompt).toContain('"id":"candidate-1"');
+    expect(editorPrompt).toContain('"id":"candidate-2"');
+    expect(editorPrompt).toContain('"id":"candidate-3"');
+    for (const candidate of candidates) {
+      expect(editorPrompt).toContain(`"title":"${candidate.title}"`);
+      expect(editorPrompt).toContain(`"takeaway":"${candidate.takeaway}"`);
+      expect(editorPrompt).toContain(`"action":"${candidate.action}"`);
+      expect(editorPrompt).toContain(`"expectedIfAct":"${candidate.expectedIfAct}"`);
+      expect(editorPrompt).toContain(`"ifIgnored":"${candidate.ifIgnored}"`);
+      expect(editorPrompt).toContain(`"limitation":"${candidate.limitation}"`);
+      expect(editorPrompt).toContain(`"significance":"${candidate.significance}"`);
+      expect(editorPrompt).toContain(`"possibleExplanation":"${candidate.possibleExplanation}"`);
+      expect(editorPrompt).toContain(`"nextCheck":"${candidate.nextCheck}"`);
+      expect(editorPrompt).toContain(`"text":"Candidate ${candidate.id.at(-1)} presentation summary"`);
+    }
+    expect(JSON.parse(artifact.result_json!) as Record<string, unknown>).toMatchObject({
+      findings: [{
+        action: candidates[0]!.action,
+        expectedIfAct: candidates[0]!.expectedIfAct,
+        ifIgnored: candidates[0]!.ifIgnored,
+        uncertainty: candidates[0]!.limitation,
+        interpretation: candidates[0]!.significance,
+        possibleExplanation: candidates[0]!.possibleExplanation,
+        verification: candidates[0]!.nextCheck,
+      }],
+    });
+  });
+
+  it("fails closed beyond three Candidates, text bounds, or possibleExplanation without nextCheck", async () => {
+    const baseCandidate = {
+      epistemicLevel: "verified",
+      title: "A bounded Candidate",
+      takeaway: "The Candidate remains inside the pinned Snapshot.",
+      evidenceRefs: ["quality:window"],
+      evidenceSqlIndexes: [],
+    };
+    const attempts = [
+      {
+        candidates: [1, 2, 3, 4].map((index) => ({ ...baseCandidate, id: `candidate-${index}` })),
+      },
+      {
+        candidates: [{ ...baseCandidate, id: "candidate-1", title: "T".repeat(161) }],
+      },
+      {
+        candidates: [{
+          ...baseCandidate,
+          id: "candidate-1",
+          possibleExplanation: "An operating difference may explain the observed pattern.",
+        }],
+      },
+    ];
+
+    for (const submission of attempts) {
+      const harness = createHarness();
+      const workflow = createPreschoolOverviewAiWorkflow({
+        metadataStore: harness.metadata,
+        dataGateway: harness.gateway,
+        resolveSnapshot: async () => snapshot(),
+        runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+          ? envelopeEvents(submission, runId, sessionId)
+          : stageEvents(stage, runId, sessionId),
+      });
+
+      const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+      harness.close();
+      expect(artifact).toMatchObject({ status: "failed", error_code: "OVERVIEW_AI_INVESTIGATOR_RESULT_INVALID" });
+    }
+  });
+
+  it("parses only the final Editor Assistant message as the Stage submission", async () => {
+    const harness = createHarness();
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? stageEvents(stage, runId, sessionId)
+        : {
+            events: [
+              { type: "TEXT_MESSAGE_CONTENT", messageId: "editor-note", delta: "I checked the candidates before submitting." },
+              {
+                type: "TEXT_MESSAGE_CONTENT",
+                messageId: "final-submission",
+                delta: JSON.stringify({
+                  findings: [{
+                    sourceCandidateIds: ["candidate-1"],
+                    placementTargets: ["preschool.benchmark"],
+                    relationship: "independent",
+                    signalRefs: ["efficiency"],
+                  }],
+                  trace: [{ decision: "accepted", sourceCandidateIds: ["candidate-1"] }],
+                }),
+              },
+              { type: "RUN_FINISHED" },
+            ],
+            completedRun: { runId, sessionId },
+          },
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+  });
+
+  it("uses exactly one successful structured Investigator submission and ignores malformed Assistant JSON", async () => {
+    const harness = createHarness();
+    const structured = {
+      candidates: [{
+        id: "candidate-1",
+        epistemicLevel: "hypothesis",
+        title: "A quoted \"lower-intensity\" label remains valid text",
+        takeaway: "The candidate arrived through the strict submission tool.",
+        nextCheck: "Verify the source row before acting.",
+        evidenceRefs: ["benchmark:portfolio-p75"],
+        evidenceSqlIndexes: [],
+      }],
+    };
+    let editorPrompt = "";
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, prompt, runId, sessionId }) => {
+        if (stage === "editor") editorPrompt = prompt;
+        return stage === "investigator"
+          ? {
+              events: [
+                {
+                  type: "TOOL_CALL_START",
+                  toolCallId: "submit-1",
+                  toolCallName: "overview_ai_candidates_submit",
+                },
+                {
+                  type: "TOOL_CALL_RESULT",
+                  toolCallId: "submit-1",
+                  content: JSON.stringify({
+                    ok: true,
+                    resultType: "overview-ai-candidate-submission",
+                    payload: canonicalCandidateSubmission(structured),
+                  }),
+                },
+                {
+                  type: "TEXT_MESSAGE_CHUNK",
+                  messageId: "malformed-free-text",
+                  delta: '{"candidates":[{"title":"unescaped "lower-intensity" text"}]}',
+                },
+                { type: "RUN_FINISHED" },
+              ],
+              completedRun: { runId, sessionId },
+            }
+          : stageEvents(stage, runId, sessionId);
+      },
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+    expect(editorPrompt).toContain("A quoted \\\"lower-intensity\\\" label remains valid text");
+    expect(editorPrompt).not.toContain("unescaped");
+  });
+
+  it("fails closed when one Run reports a duplicate structured submission conflict", async () => {
+    const harness = createHarness();
+    const first = {
+      candidates: [{
+        id: "candidate-1",
+        epistemicLevel: "hypothesis",
+        title: "First submission",
+        takeaway: "First payload.",
+        nextCheck: "Verify first.",
+        evidenceRefs: ["benchmark:portfolio-p75"],
+        evidenceSqlIndexes: [],
+      }],
+    };
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? {
+            events: [
+              ...successfulSubmissionEvents(first, "submit-1"),
+              {
+                type: "TOOL_CALL_START",
+                toolCallId: "submit-2",
+                toolCallName: "overview_ai_candidates_submit",
+              },
+              {
+                type: "TOOL_CALL_RESULT",
+                toolCallId: "submit-2",
+                content: JSON.stringify({
+                  ok: false,
+                  isError: true,
+                  error: { code: "OVERVIEW_AI_CANDIDATE_SUBMISSION_CONFLICT" },
+                }),
+              },
+              { type: "RUN_FINISHED" },
+            ],
+            completedRun: { runId, sessionId },
+          }
+        : stageEvents(stage, runId, sessionId),
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact).toMatchObject({
+      status: "failed",
+      error_code: "OVERVIEW_AI_INVESTIGATOR_RESULT_INVALID",
+    });
+  });
+
+  it("allows one failed submission correction and aligns Candidate indexes to successful SQL order", async () => {
+    const harness = createHarness();
+    const submission = {
+      candidates: [{
+        id: "candidate-1",
+        epistemicLevel: "verified",
+        title: "Centre A1 and Centre E remain visible in the scoped query",
+        takeaway: "The two pre-submission SQL results support the selected review.",
+        evidenceRefs: [],
+        evidenceSqlIndexes: [1, 2],
+      }],
+    };
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? {
+            events: [
+              ...schemaEvents(),
+              ...sqlEvents("sql-1", 1, "A1", 100),
+              ...failedSubmissionEvents("submit-1"),
+              ...sqlEvents("sql-2", 2, "E", 300),
+              ...successfulSubmissionEvents(submission, "submit-2"),
+              ...sqlEvents("sql-after-submit", 3, "H", 900),
+              { type: "RUN_FINISHED" },
+            ],
+            completedRun: { runId, sessionId },
+          }
+        : stageEvents(stage, runId, sessionId),
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    const result = JSON.parse(artifact.result_json!) as { findings: Array<{ evidence: { tools: Array<Record<string, unknown>> } }> };
+    harness.close();
+
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+    expect(result.findings[0]!.evidence.tools).toMatchObject([
+      { evidenceIndex: 1, toolCallId: "sql-1" },
+      { evidenceIndex: 2, toolCallId: "sql-2" },
+    ]);
+    expect(result.findings[0]!.evidence.tools).not.toContainEqual(expect.objectContaining({ toolCallId: "sql-after-submit" }));
+  });
+
+  it("fails closed when persisted SQL evidence indexes differ from the Runtime indexes shown to the model", async () => {
+    const harness = createHarness();
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? {
+            events: [
+              ...schemaEvents(),
+              ...sqlEvents("sql-1", 2, "A1", 100),
+              ...successfulSubmissionEvents({ candidates: [] }, "submit-1"),
+              { type: "RUN_FINISHED" },
+            ],
+            completedRun: { runId, sessionId },
+          }
+        : envelopeEvents({ findings: [], trace: [] }, runId, sessionId),
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact).toMatchObject({
+      status: "failed",
+      error_code: "OVERVIEW_AI_SQL_EVIDENCE_INDEX_MISMATCH:2:1",
+    });
+  });
+
+  it("rejects a specific date or time that does not occur in the cited Evidence", async () => {
+    const harness = createHarness();
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? sqlEnvelopeEvents({
+            candidates: [{
+              id: "candidate-1",
+              epistemicLevel: "verified",
+              title: "Centre A1 peaked on 2026-05-29 at 03:00",
+              takeaway: "Centre A1 recorded 100 kWh in the cited result.",
+              evidenceRefs: [],
+              evidenceSqlIndexes: [1],
+            }],
+          }, runId, sessionId)
+        : stageEvents(stage, runId, sessionId),
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact).toMatchObject({
+      status: "failed",
+      error_code: "OVERVIEW_AI_RUNTIME_VALIDATION_REJECTED_ALL",
+    });
+  });
+
+  it("rejects an Editor-selected Candidate when its only SQL index started after successful submission", async () => {
+    const harness = createHarness();
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? {
+            events: [
+              ...schemaEvents(),
+              ...successfulSubmissionEvents({
+                candidates: [{
+                  id: "candidate-1",
+                  epistemicLevel: "verified",
+                  title: "Centre H recorded 900 kWh",
+                  takeaway: "The Candidate cites only a post-submission SQL result.",
+                  evidenceRefs: [],
+                  evidenceSqlIndexes: [1],
+                }],
+              }, "submit-1"),
+              ...sqlEvents("sql-after-submit", 1, "H", 900),
+              { type: "RUN_FINISHED" },
+            ],
+            completedRun: { runId, sessionId },
+          }
+        : stageEvents(stage, runId, sessionId),
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact).toMatchObject({
+      status: "failed",
+      error_code: "OVERVIEW_AI_RUNTIME_VALIDATION_REJECTED_ALL",
+    });
+  });
+
+  it("fails closed when the Investigator starts a third structured submission", async () => {
+    const harness = createHarness();
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? {
+            events: [
+              ...failedSubmissionEvents("submit-1"),
+              ...failedSubmissionEvents("submit-2"),
+              ...successfulSubmissionEvents({ candidates: [] }, "submit-3"),
+              { type: "RUN_FINISHED" },
+            ],
+            completedRun: { runId, sessionId },
+          }
+        : envelopeEvents({ findings: [], trace: [] }, runId, sessionId),
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact).toMatchObject({ status: "failed", error_code: "OVERVIEW_AI_INVESTIGATOR_RESULT_INVALID" });
+  });
+
+  it("drops an invalid optional Presentation from a structured Candidate submission", async () => {
+    const harness = createHarness();
+    let editorPrompt = "";
+    const submission = {
+      candidates: [{
+        id: "candidate-1",
+        epistemicLevel: "hypothesis",
+        title: "The dual-normalisation outlier deserves an operating review",
+        takeaway: "The same Centre remains a priority after both normalisations, so size alone is not a sufficient explanation.",
+        evidenceRefs: ["benchmark:portfolio-p75", "benchmark:priority-centre:A1"],
+        evidenceSqlIndexes: [],
+        presentation: {
+          version: "1",
+          blocks: [{ type: "unsupported-block", text: "Optional visual explanation" }],
+        },
+      }],
+    };
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, prompt, runId, sessionId }) => {
+        if (stage === "editor") editorPrompt = prompt;
+        return stage === "investigator"
+          ? envelopeEvents(submission, runId, sessionId)
+          : stageEvents(stage, runId, sessionId);
+      },
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    const result = JSON.parse(artifact.result_json!) as { findings: Array<{ presentation?: unknown }> };
+    harness.close();
+
+    expect(artifact.status).toBe("available");
+    expect(editorPrompt).toContain("The dual-normalisation outlier deserves an operating review");
+    expect(result.findings.every((finding) => !Object.hasOwn(finding, "presentation"))).toBe(true);
+  });
+
+  it("keeps the latest valid Editor envelope when a later Runtime message has no submission", async () => {
+    const harness = createHarness();
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? stageEvents(stage, runId, sessionId)
+        : {
+            events: [
+              {
+                type: "TEXT_MESSAGE_CHUNK",
+                messageId: "model-submission",
+                delta: JSON.stringify({
+                  findings: [{
+                    sourceCandidateIds: ["candidate-1"],
+                    placementTargets: ["preschool.benchmark"],
+                    relationship: "independent",
+                    signalRefs: ["efficiency"],
+                  }],
+                  trace: [{ decision: "accepted", sourceCandidateIds: ["candidate-1"] }],
+                }),
+              },
+              {
+                type: "TEXT_MESSAGE_CONTENT",
+                messageId: "runtime-finalizer",
+                delta: "The run completed and its trace was saved.",
+              },
+              { type: "RUN_FINISHED" },
+            ],
+            completedRun: { runId, sessionId },
+          },
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact.status).toBe("available");
+  });
+
+  it("inherits canonical customer content from the selected Investigator candidate instead of Editor text", async () => {
+    const harness = createHarness();
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? envelopeEvents({
+            candidates: [{
+              id: "candidate-1",
+              epistemicLevel: "hypothesis",
+              title: "Centre A1 remains a priority after both normalisations",
+              takeaway: "Centre A1 stays above the peer threshold after adjusting for floor area and headcount.",
+              action: "Verify metadata, then review Centre A1 operating conditions.",
+              expectedIfAct: "The review will isolate the decision-relevant operating condition.",
+              ifIgnored: "The priority may persist without an accountable investigation.",
+              limitation: "The Snapshot does not observe occupancy schedules or equipment state.",
+              significance: "The result is unlikely to be explained by Centre size alone.",
+              possibleExplanation: "Its operating pattern or equipment mix may differ from lower-intensity peers.",
+              nextCheck: "Compare Centre A1 operating hours and equipment state with lower-intensity peers.",
+              evidenceRefs: ["benchmark:portfolio-p75", "benchmark:priority-centre:A1"],
+              evidenceSqlIndexes: [],
+            }],
+          }, runId, sessionId)
+        : envelopeEvents({
+            findings: [{
+              sourceCandidateIds: ["candidate-1"],
+              placementTargets: ["preschool.benchmark"],
+              relationship: "independent",
+              signalRefs: ["efficiency"],
+              title: "Centre H is the hidden priority",
+              takeaway: "Centre H should be investigated first.",
+              epistemicLevel: "hypothesis",
+              uncertainty: "The current Snapshot does not confirm the cause.",
+              evidenceRefs: ["benchmark:portfolio-p75", "benchmark:priority-centre:A1"],
+              evidenceSqlIndexes: [],
+            }],
+            trace: [{ decision: "accepted", sourceCandidateIds: ["candidate-1"] }],
+          }, runId, sessionId),
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact.status).toBe("available");
+    expect(JSON.parse(artifact.result_json!) as Record<string, unknown>).toMatchObject({
+      findings: [{
+        title: "Centre A1 remains a priority after both normalisations",
+        takeaway: "Centre A1 stays above the peer threshold after adjusting for floor area and headcount.",
+        interpretation: "The result is unlikely to be explained by Centre size alone.",
+        action: "Verify metadata, then review Centre A1 operating conditions.",
+        expectedIfAct: "The review will isolate the decision-relevant operating condition.",
+        ifIgnored: "The priority may persist without an accountable investigation.",
+        uncertainty: "The Snapshot does not observe occupancy schedules or equipment state.",
+        possibleExplanation: "Its operating pattern or equipment mix may differ from lower-intensity peers.",
+        verification: "Compare Centre A1 operating hours and equipment state with lower-intensity peers.",
+      }],
+    });
+    const firstFinding = (JSON.parse(artifact.result_json!) as { findings: Array<Record<string, unknown>> }).findings[0]!;
+    expect(firstFinding.interpretation).not.toContain("operating pattern or equipment mix");
+    expect(artifact.result_json).not.toContain("Centre H");
+  });
+
+  it("inherits deterministic Evidence and SQL indexes from the selected Investigator candidate", async () => {
+    const harness = createHarness();
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? sqlEnvelopeEvents({
+            candidates: [{
+              id: "candidate-1",
+              epistemicLevel: "verified",
+              title: "Centre E recorded 300 kWh",
+              takeaway: "The scoped query places Centre E at 300 kWh.",
+              evidenceRefs: ["benchmark:portfolio-p75"],
+              evidenceSqlIndexes: [1],
+              presentation: {
+                version: "1",
+                blocks: [{
+                  type: "metric",
+                  label: "Centre E energy",
+                  value: 300,
+                  unit: "kWh",
+                  evidenceSqlIndexes: [1],
+                }],
+              },
+            }],
+          }, runId, sessionId)
+        : envelopeEvents({
+            findings: [{
+              sourceCandidateIds: ["candidate-1"],
+              placementTargets: ["preschool.benchmark"],
+              relationship: "independent",
+              signalRefs: ["efficiency"],
+              evidenceRefs: ["quality:window"],
+              evidenceSqlIndexes: [],
+              presentation: {
+                version: "1",
+                blocks: [{ type: "metric", label: "Wrong Editor value", value: 999, unit: "kWh", evidenceRefs: ["quality:window"] }],
+              },
+            }],
+            trace: [{ decision: "accepted", sourceCandidateIds: ["candidate-1"] }],
+          }, runId, sessionId),
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact.status).toBe("available");
+    expect(JSON.parse(artifact.result_json!) as Record<string, unknown>).toMatchObject({
+      findings: [{
+        title: "Centre E recorded 300 kWh",
+        evidence: {
+          deterministic: [{ id: "benchmark:portfolio-p75" }],
+          tools: [{ evidenceIndex: 1, auditLogId: "audit-1", rowCount: 2 }],
+        },
+        presentation: {
+          version: "1",
+          blocks: [{ label: "Centre E energy", value: 300, evidenceSqlIndexes: [1] }],
+        },
+      }],
+    });
+  });
+
+  it("keeps an all-rejected Editor result available and empty", async () => {
+    const harness = createHarness();
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? stageEvents(stage, runId, sessionId)
+        : envelopeEvents({
+            findings: [],
+            trace: [{ decision: "rejected", sourceCandidateIds: ["candidate-1"], reason: "No incremental manager value." }],
+          }, runId, sessionId),
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact.status).toBe("available");
+    expect(JSON.parse(artifact.result_json!) as Record<string, unknown>).toMatchObject({
+      findings: [],
+      workflow: { editorTrace: [{ decision: "rejected", sourceCandidateIds: ["candidate-1"] }] },
+    });
+  });
+
+  it("calibrates a partially rejected Editor selection to Runtime validation instead of accepted-without-findingId", async () => {
+    const harness = createHarness();
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? envelopeEvents({
+            candidates: [
+              {
+                id: "candidate-valid",
+                epistemicLevel: "verified",
+                title: "The current Snapshot exposes a bounded quality window",
+                takeaway: "This Candidate cites a real deterministic Evidence item.",
+                evidenceRefs: ["quality:window"],
+                evidenceSqlIndexes: [],
+              },
+              {
+                id: "candidate-invalid",
+                epistemicLevel: "verified",
+                title: "A missing Evidence item should not survive Runtime validation",
+                takeaway: "This Candidate cites an identifier outside the bounded Snapshot.",
+                evidenceRefs: ["missing:evidence"],
+                evidenceSqlIndexes: [],
+              },
+            ],
+          }, runId, sessionId)
+        : envelopeEvents({
+            findings: ["candidate-valid", "candidate-invalid"].map((id) => ({
+              sourceCandidateIds: [id],
+              placementTargets: ["preschool.benchmark"],
+              relationship: "independent",
+              signalRefs: [],
+            })),
+            trace: ["candidate-valid", "candidate-invalid"].map((id) => ({
+              decision: "accepted",
+              sourceCandidateIds: [id],
+            })),
+          }, runId, sessionId),
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    const result = JSON.parse(artifact.result_json!) as {
+      findings: Array<{ id: string }>;
+      workflow: { editorTrace: Array<Record<string, unknown>> };
+    };
+    harness.close();
+
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+    expect(result.findings).toHaveLength(1);
+    expect(result.workflow.editorTrace).toContainEqual(expect.objectContaining({
+      decision: "rejected",
+      sourceCandidateIds: ["candidate-invalid"],
+      reason: expect.stringContaining("Runtime validation"),
+    }));
+    expect(result.workflow.editorTrace).not.toContainEqual({
+      decision: "accepted",
+      sourceCandidateIds: ["candidate-invalid"],
+    });
+  });
+
+  it("fails closed when Editor selects an unknown candidate, attempts a merge, or contradicts its selection", async () => {
+    for (const attempt of [
+      {
+        candidates: null,
+        editorEnvelope: {
+          findings: [{
+            sourceCandidateIds: ["candidate-404"],
+            placementTargets: ["preschool.benchmark"],
+            relationship: "independent",
+            signalRefs: [],
+          }],
+          trace: [],
+        },
+      },
+      {
+        candidates: [{
+          id: "candidate-2",
+          epistemicLevel: "verified",
+          title: "A second supported candidate",
+          takeaway: "The current Snapshot contains a second distinct candidate.",
+          evidenceRefs: ["quality:window"],
+          evidenceSqlIndexes: [],
+        }],
+        editorEnvelope: {
+          findings: [{
+            sourceCandidateIds: ["candidate-1", "candidate-2"],
+            placementTargets: ["cross-section"],
+            relationship: "supports",
+            signalRefs: [],
+          }],
+          trace: [{ decision: "merged", sourceCandidateIds: ["candidate-1", "candidate-2"] }],
+        },
+      },
+      {
+        candidates: null,
+        editorEnvelope: {
+          findings: [{
+            sourceCandidateIds: ["candidate-1"],
+            placementTargets: ["preschool.benchmark"],
+            relationship: "independent",
+            signalRefs: [],
+          }],
+          trace: [{ decision: "rejected", sourceCandidateIds: ["candidate-1"] }],
+        },
+      },
+    ]) {
+      const harness = createHarness();
+      const workflow = createPreschoolOverviewAiWorkflow({
+        metadataStore: harness.metadata,
+        dataGateway: harness.gateway,
+        resolveSnapshot: async () => snapshot(),
+        runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+          ? attempt.candidates
+            ? envelopeEvents({
+                candidates: [
+                  {
+                    id: "candidate-1",
+                    epistemicLevel: "verified",
+                    title: "A supported candidate",
+                    takeaway: "The current Snapshot contains a distinct candidate.",
+                    evidenceRefs: ["quality:window"],
+                    evidenceSqlIndexes: [],
+                  },
+                  ...attempt.candidates,
+                ],
+              }, runId, sessionId)
+            : stageEvents(stage, runId, sessionId)
+          : envelopeEvents(attempt.editorEnvelope, runId, sessionId),
+      });
+
+      const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+      harness.close();
+      expect(artifact).toMatchObject({ status: "failed", error_code: "OVERVIEW_AI_EDITOR_RESULT_INVALID" });
+    }
+  });
+
+  it("normalizes blank Editor relationship metadata and derives canonical trace from validated selections", async () => {
+    const harness = createHarness();
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? envelopeEvents({
+            candidates: [{
+              id: "candidate-1",
+              epistemicLevel: "verified",
+              title: "A bounded operational exception",
+              takeaway: "The accepted Snapshot contains a decision-relevant exception.",
+              evidenceRefs: ["quality:window"],
+              evidenceSqlIndexes: [],
+            }],
+          }, runId, sessionId)
+        : envelopeEvents({
+            findings: [{
+              sourceCandidateIds: ["candidate-1"],
+              placementTargets: ["preschool.standby"],
+              relationship: "",
+              signalRefs: [],
+            }],
+            trace: [{
+              decision: "Select this useful non-repeating finding.",
+              sourceCandidateIds: ["candidate-1"],
+            }],
+          }, runId, sessionId),
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    const result = JSON.parse(artifact.result_json!) as {
+      findings: Array<{ relationship: string }>;
+      workflow: { editorTrace: Array<Record<string, unknown>> };
+    };
+    harness.close();
+
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+    expect(result.findings).toEqual([expect.objectContaining({ relationship: "independent" })]);
+    expect(result.workflow.editorTrace).toContainEqual(expect.objectContaining({
+      decision: "accepted",
+      sourceCandidateIds: ["candidate-1"],
+    }));
   });
 
   it("requires an explicit retry, caps the identity at two attempts, and never reruns available", async () => {
@@ -141,34 +999,40 @@ describe("Preschool Overview AI server workflow", () => {
     emptyHarness.close();
   });
 
-  it("drops an unsupported finding instead of rewriting it and rejects unverified Runtime provenance", async () => {
+  it("fails when Runtime rejects every selected finding and rejects unverified Runtime provenance", async () => {
     const validatorHarness = createHarness();
     const validatorWorkflow = createPreschoolOverviewAiWorkflow({
       metadataStore: validatorHarness.metadata,
       dataGateway: validatorHarness.gateway,
       resolveSnapshot: async () => snapshot(),
       runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
-        ? stageEvents(stage, runId, sessionId)
+        ? envelopeEvents({
+            candidates: [{
+              id: "candidate-1",
+              epistemicLevel: "hypothesis",
+              title: "Unsupported savings claim",
+              takeaway: "The intervention will save 37%.",
+              nextCheck: "Measure the result on a later Snapshot.",
+              evidenceRefs: ["benchmark:portfolio-p75"],
+              evidenceSqlIndexes: [],
+            }],
+          }, runId, sessionId)
         : envelopeEvents({
             findings: [{
               sourceCandidateIds: ["candidate-1"],
               placementTargets: ["preschool.benchmark"],
-              epistemicLevel: "hypothesis",
               relationship: "independent",
               signalRefs: ["efficiency"],
-              title: "Unsupported savings claim",
-              takeaway: "The intervention will save 37%.",
-              verification: "Measure the result on a later Snapshot.",
-              evidenceRefs: ["benchmark:portfolio-p75"],
-              evidenceSqlIndexes: [],
             }],
             trace: [{ decision: "accepted", sourceCandidateIds: ["candidate-1"] }],
           }, runId, sessionId),
     });
     const validated = await validatorWorkflow.execute({ identity: validatorHarness.identity, user: validatorHarness.user, retry: false });
-    expect(validated.status).toBe("available");
-    expect(JSON.parse(validated.result_json!) as Record<string, unknown>).toMatchObject({ findings: [] });
     validatorHarness.close();
+    expect(validated).toMatchObject({
+      status: "failed",
+      error_code: "OVERVIEW_AI_RUNTIME_VALIDATION_REJECTED_ALL",
+    });
 
     const provenanceHarness = createHarness();
     const provenanceWorkflow = createPreschoolOverviewAiWorkflow({
@@ -192,18 +1056,22 @@ describe("Preschool Overview AI server workflow", () => {
       dataGateway: harness.gateway,
       resolveSnapshot: async () => snapshot(),
       runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
-        ? stageEvents(stage, runId, sessionId)
-        : envelopeEvents({
-            findings: [{
-              sourceCandidateIds: ["candidate-1"],
-              placementTargets: ["preschool.forecast"],
+        ? envelopeEvents({
+            candidates: [{
+              id: "candidate-1",
               epistemicLevel: "verified",
-              relationship: "independent",
-              signalRefs: [],
               title: "Aircon uses 30 kWh",
               takeaway: "The current Snapshot shows 30 kWh for the Aircon contribution.",
               evidenceRefs: ["circuit:appliance:Aircon 1"],
               evidenceSqlIndexes: [],
+            }],
+          }, runId, sessionId)
+        : envelopeEvents({
+            findings: [{
+              sourceCandidateIds: ["candidate-1"],
+              placementTargets: ["preschool.forecast"],
+              relationship: "independent",
+              signalRefs: [],
             }],
             trace: [{ decision: "accepted", sourceCandidateIds: ["candidate-1"] }],
           }, runId, sessionId),
@@ -212,8 +1080,10 @@ describe("Preschool Overview AI server workflow", () => {
     const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
     harness.close();
 
-    expect(artifact.status).toBe("available");
-    expect(JSON.parse(artifact.result_json!) as Record<string, unknown>).toMatchObject({ findings: [] });
+    expect(artifact).toMatchObject({
+      status: "failed",
+      error_code: "OVERVIEW_AI_RUNTIME_VALIDATION_REJECTED_ALL",
+    });
   });
 
   it("binds a deterministic metric value to the same cited Centre", async () => {
@@ -251,18 +1121,22 @@ describe("Preschool Overview AI server workflow", () => {
       dataGateway: harness.gateway,
       resolveSnapshot: async () => currentSnapshot,
       runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
-        ? stageEvents(stage, runId, sessionId)
-        : envelopeEvents({
-            findings: [{
-              sourceCandidateIds: ["candidate-1"],
-              placementTargets: ["preschool.benchmark"],
+        ? envelopeEvents({
+            candidates: [{
+              id: "candidate-1",
               epistemicLevel: "verified",
-              relationship: "independent",
-              signalRefs: [],
               title: "Centre A1 used 300 kWh",
               takeaway: "Centre A1 recorded 300 kWh in the current period.",
               evidenceRefs: ["benchmark:priority-centre:A1", "benchmark:priority-centre:E"],
               evidenceSqlIndexes: [],
+            }],
+          }, runId, sessionId)
+        : envelopeEvents({
+            findings: [{
+              sourceCandidateIds: ["candidate-1"],
+              placementTargets: ["preschool.benchmark"],
+              relationship: "independent",
+              signalRefs: [],
             }],
             trace: [{ decision: "accepted", sourceCandidateIds: ["candidate-1"] }],
           }, runId, sessionId),
@@ -271,7 +1145,10 @@ describe("Preschool Overview AI server workflow", () => {
     const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
     harness.close();
 
-    expect(JSON.parse(artifact.result_json!) as Record<string, unknown>).toMatchObject({ findings: [] });
+    expect(artifact).toMatchObject({
+      status: "failed",
+      error_code: "OVERVIEW_AI_RUNTIME_VALIDATION_REJECTED_ALL",
+    });
   });
 
   it("accepts manager-facing percentage rounding from the same typed metric", async () => {
@@ -285,18 +1162,22 @@ describe("Preschool Overview AI server workflow", () => {
       dataGateway: harness.gateway,
       resolveSnapshot: async () => currentSnapshot,
       runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
-        ? stageEvents(stage, runId, sessionId)
-        : envelopeEvents({
-            findings: [{
-              sourceCandidateIds: ["candidate-1"],
-              placementTargets: ["preschool.standby"],
+        ? envelopeEvents({
+            candidates: [{
+              id: "candidate-1",
               epistemicLevel: "verified",
-              relationship: "independent",
-              signalRefs: [],
               title: "Standby accounts for 52% of energy",
               takeaway: "The current standby share rounds to 52%.",
               evidenceRefs: ["operating:portfolio"],
               evidenceSqlIndexes: [],
+            }],
+          }, runId, sessionId)
+        : envelopeEvents({
+            findings: [{
+              sourceCandidateIds: ["candidate-1"],
+              placementTargets: ["preschool.standby"],
+              relationship: "independent",
+              signalRefs: [],
             }],
             trace: [{ decision: "accepted", sourceCandidateIds: ["candidate-1"] }],
           }, runId, sessionId),
@@ -317,33 +1198,45 @@ describe("Preschool Overview AI server workflow", () => {
       dataGateway: harness.gateway,
       resolveSnapshot: async () => snapshot(),
       runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
-        ? stageEvents(stage, runId, sessionId)
-        : sqlEnvelopeEvents({
-            findings: [
+        ? sqlEnvelopeEvents({
+            candidates: [
               {
-                sourceCandidateIds: ["candidate-1"],
-                placementTargets: ["preschool.benchmark"],
+                id: "candidate-1",
                 epistemicLevel: "verified",
-                relationship: "independent",
-                signalRefs: [],
                 title: "Centre A1 used 300 kWh",
                 takeaway: "Centre A1 recorded 300 kWh in the scoped query.",
                 evidenceRefs: [],
                 evidenceSqlIndexes: [1],
               },
               {
-                sourceCandidateIds: ["candidate-1"],
-                placementTargets: ["preschool.benchmark"],
+                id: "candidate-2",
                 epistemicLevel: "verified",
-                relationship: "independent",
-                signalRefs: [],
                 title: "Centre E used 300 kWh",
                 takeaway: "Centre E recorded 300 kWh in the scoped query.",
                 evidenceRefs: [],
                 evidenceSqlIndexes: [1],
               },
             ],
-            trace: [{ decision: "accepted", sourceCandidateIds: ["candidate-1"] }],
+          }, runId, sessionId)
+        : envelopeEvents({
+            findings: [
+              {
+                sourceCandidateIds: ["candidate-1"],
+                placementTargets: ["preschool.benchmark"],
+                relationship: "independent",
+                signalRefs: [],
+              },
+              {
+                sourceCandidateIds: ["candidate-2"],
+                placementTargets: ["preschool.benchmark"],
+                relationship: "independent",
+                signalRefs: [],
+              },
+            ],
+            trace: [
+              { decision: "accepted", sourceCandidateIds: ["candidate-1"] },
+              { decision: "accepted", sourceCandidateIds: ["candidate-2"] },
+            ],
           }, runId, sessionId),
     });
 
@@ -358,8 +1251,8 @@ describe("Preschool Overview AI server workflow", () => {
   it("fails before Provider when model binding or Method Skill revision drifts", async () => {
     const modelHarness = createHarness();
     modelHarness.metadata.workspaceDefaultModelProfiles.set({
-      workspace_id: modelHarness.identity.workspaceId,
-      profile_id: modelHarness.identity.modelProfileId,
+      workspace_id: "default",
+      profile_id: "profile-current",
       profile_owner_user_id: modelHarness.user.id,
       configured_by_user_id: modelHarness.user.id,
       expected_revision: modelHarness.identity.modelProfileRevision,
@@ -415,6 +1308,7 @@ function createHarness() {
   const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
   metadata.users.upsertDevUser({ id: "dev-user", email: "dev@example.test", display_name: "Dev", dev_token: "dev" });
   metadata.users.upsertDevUser({ id: "second-user", email: "second@example.test", display_name: "Second", dev_token: "second" });
+  metadata.workspaces.upsert({ id: "default", owner_user_id: "dev-user", name: "System", kind: "personal" });
   metadata.workspaces.upsert({ id: "preschool-workspace", owner_user_id: "dev-user", name: "Preschool", kind: "customer" });
   metadata.workspaceMemberships.upsert({ workspace_id: "preschool-workspace", user_id: "second-user", role: "member" });
   metadata.energyIq.upsertProject({
@@ -426,7 +1320,7 @@ function createHarness() {
   });
   metadata.configResources.upsert({
     id: "profile-current",
-    workspace_id: "preschool-workspace",
+    workspace_id: "default",
     user_id: "dev-user",
     kind: "model-profile",
     name: "Current model",
@@ -435,7 +1329,7 @@ function createHarness() {
     status: "connected",
   });
   metadata.workspaceDefaultModelProfiles.set({
-    workspace_id: "preschool-workspace",
+    workspace_id: "default",
     profile_id: "profile-current",
     profile_owner_user_id: "dev-user",
     configured_by_user_id: "dev-user",
@@ -466,13 +1360,13 @@ function createHarness() {
     rendererVersion: "1",
     analysisPackId: "preschool-analysis-pack",
     analysisPackRevision: "v1",
-    modelProfileId: "profile-current",
+    modelProfileId: WORKSPACE_DEFAULT_MODEL_PROFILE_ID,
     modelProfileRevision: 1,
     outputContractRevision: "v13",
-    validatorRevision: "preschool-ai-two-stage-fact-boundary-v1",
-    workflowRevision: "preschool-two-stage-v1",
-    investigatorPromptRevision: "preschool-investigator-v2",
-    editorPromptRevision: "preschool-insight-editor-v1",
+    validatorRevision: "preschool-ai-two-stage-fact-boundary-v4",
+    workflowRevision: "preschool-two-stage-v2",
+    investigatorPromptRevision: "preschool-investigator-v8",
+    editorPromptRevision: "preschool-insight-editor-v3",
     methodSkillId: "energy-insight-investigation",
     methodSkillRevision: "1.0.0",
   };
@@ -567,6 +1461,8 @@ function stageEvents(stage: "investigator" | "editor", runId: string, sessionId:
           epistemicLevel: "hypothesis",
           title: "The dual-normalisation outlier deserves an operating review",
           takeaway: "The same Centre remains a priority after both normalisations, so size alone is not a sufficient explanation.",
+          possibleExplanation: "The current Snapshot does not observe occupancy or equipment state.",
+          nextCheck: "Compare its operating schedule and equipment state with lower-intensity peers before assigning a cause.",
           evidenceRefs: ["benchmark:portfolio-p75", "benchmark:priority-centre:A1"],
           evidenceSqlIndexes: [],
         }],
@@ -575,15 +1471,8 @@ function stageEvents(stage: "investigator" | "editor", runId: string, sessionId:
         findings: [{
           sourceCandidateIds: ["candidate-1"],
           placementTargets: ["preschool.benchmark"],
-          epistemicLevel: "hypothesis",
           relationship: "independent",
           signalRefs: ["efficiency"],
-          title: "Normalisation does not remove the priority signal",
-          takeaway: "The same Centre remains a priority under both floor-area and headcount normalisation.",
-          verification: "Compare its operating schedule and equipment state with lower-intensity peers before assigning a cause.",
-          uncertainty: "The current Snapshot does not observe occupancy or equipment state.",
-          evidenceRefs: ["benchmark:portfolio-p75", "benchmark:priority-centre:A1"],
-          evidenceSqlIndexes: [],
         }],
         trace: [{ decision: "accepted", sourceCandidateIds: ["candidate-1"], reason: "Adds a decision-relevant interpretation." }],
       }, runId, sessionId);
@@ -592,7 +1481,9 @@ function stageEvents(stage: "investigator" | "editor", runId: string, sessionId:
 function envelopeEvents(value: Record<string, unknown>, runId: string, sessionId: string) {
   return {
     events: [
-      { type: "TEXT_MESSAGE_CONTENT", delta: JSON.stringify(value) },
+      ...(Object.hasOwn(value, "candidates")
+        ? successfulSubmissionEvents(value, "submit-1")
+        : [{ type: "TEXT_MESSAGE_CONTENT", delta: JSON.stringify(value) }]),
       { type: "RUN_FINISHED" },
     ],
     completedRun: { runId, sessionId },
@@ -610,16 +1501,101 @@ function sqlEnvelopeEvents(value: Record<string, unknown>, runId: string, sessio
         toolCallId: "sql-1",
         toolCallName: "run_sql_readonly",
         result: {
+          evidence_index: 1,
           columns: ["centre_code", "usage_kwh"],
           rows: [["A1", 100], ["E", 300]],
           row_count: 2,
           audit_log_id: "audit-1",
         },
       },
-      { type: "TEXT_MESSAGE_CONTENT", delta: JSON.stringify(value) },
+      ...successfulSubmissionEvents(value, "submit-1"),
       { type: "RUN_FINISHED" },
     ],
     completedRun: { runId, sessionId },
+  };
+}
+
+function successfulSubmissionEvents(value: Record<string, unknown>, toolCallId: string) {
+  return [
+    {
+      type: "TOOL_CALL_START",
+      toolCallId,
+      toolCallName: "overview_ai_candidates_submit",
+    },
+    {
+      type: "TOOL_CALL_RESULT",
+      toolCallId,
+      content: JSON.stringify({
+        ok: true,
+        resultType: "overview-ai-candidate-submission",
+        payload: canonicalCandidateSubmission(value),
+      }),
+    },
+  ];
+}
+
+function failedSubmissionEvents(toolCallId: string) {
+  return [
+    {
+      type: "TOOL_CALL_START",
+      toolCallId,
+      toolCallName: "overview_ai_candidates_submit",
+    },
+    {
+      type: "TOOL_CALL_RESULT",
+      toolCallId,
+      content: JSON.stringify({
+        ok: false,
+        isError: true,
+        error: { code: "OVERVIEW_AI_CANDIDATE_SUBMISSION_INVALID" },
+      }),
+    },
+  ];
+}
+
+function schemaEvents() {
+  return [
+    { type: "TOOL_CALL_START", toolCallId: "schema-1", toolCallName: "inspect_schema", args: {} },
+    { type: "TOOL_CALL_RESULT", toolCallId: "schema-1", toolCallName: "inspect_schema", result: { tables: [{ name: "energy_facts" }] } },
+  ];
+}
+
+function sqlEvents(toolCallId: string, evidenceIndex: number, centreCode: string, usageKwh: number) {
+  return [
+    {
+      type: "TOOL_CALL_START",
+      toolCallId,
+      toolCallName: "run_sql_readonly",
+      args: { sql: `SELECT '${centreCode}' AS centre_code, ${usageKwh} AS usage_kwh` },
+    },
+    {
+      type: "TOOL_CALL_RESULT",
+      toolCallId,
+      toolCallName: "run_sql_readonly",
+      result: {
+        evidence_index: evidenceIndex,
+        columns: ["centre_code", "usage_kwh"],
+        rows: [[centreCode, usageKwh]],
+        row_count: 1,
+        audit_log_id: `audit-${toolCallId}`,
+      },
+    },
+  ];
+}
+
+function canonicalCandidateSubmission(value: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(value.candidates)) return value;
+  return {
+    ...value,
+    candidates: value.candidates.map((candidate) => typeof candidate === "object" && candidate !== null && !Array.isArray(candidate)
+      ? {
+          action: "Review the pinned Evidence before choosing an operational response.",
+          expectedIfAct: "The next review will resolve the decision-relevant question.",
+          ifIgnored: "The unresolved pattern may continue without an accountable review.",
+          limitation: "The pinned Snapshot does not prove a cause or future outcome.",
+          ...candidate,
+        }
+      : candidate),
   };
 }
 

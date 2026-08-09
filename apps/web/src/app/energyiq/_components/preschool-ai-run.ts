@@ -448,7 +448,17 @@ export function resolvePreschoolAiWorkflowEventStreams(
       snapshotId: binding.dataSnapshotId,
       period: binding.analysisPeriod,
       deterministic: evidence,
-      tools: tools.map(({ columns: _, rows: __, numericEvidence: ___, normalizedSql: ____, returnedRowCount: _____, ...tool }) => tool),
+      tools: tools.map(({
+        columns: _,
+        rows: __,
+        numericEvidence: ___,
+        normalizedSql: ____,
+        returnedRowCount: _____,
+        ...tool
+      }, toolIndex) => ({
+        evidenceIndex: finding.evidenceSqlIndexes[toolIndex]!,
+        ...tool,
+      })),
     },
   }));
   const findingIdBySources = new Map(accepted.map(({ finding }, index) => [

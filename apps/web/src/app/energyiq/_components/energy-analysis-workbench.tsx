@@ -214,12 +214,22 @@ export function buildEnergyAiHandoffInitialDraftPrompt(
   if (!finding || !evidence) return null;
 
   const title = boundedText(finding.title, MAX_HANDOFF_TEXT_LENGTH);
-  const what = boundedText(finding.what, MAX_HANDOFF_TEXT_LENGTH);
+  const takeaway = boundedText(finding.takeaway, MAX_HANDOFF_TEXT_LENGTH);
+  const what = boundedText(finding.what, MAX_HANDOFF_TEXT_LENGTH) ?? takeaway;
   const why = isRecord(finding.why) ? finding.why : null;
-  const whyKind = why ? boundedWhyKind(why.kind) : null;
-  const whyText = why ? boundedText(why.text, MAX_HANDOFF_TEXT_LENGTH) : null;
-  const how = boundedText(finding.how, MAX_HANDOFF_TEXT_LENGTH);
-  const howToVerify = boundedText(finding.howToVerify, MAX_HANDOFF_TEXT_LENGTH);
+  const epistemicLevel = boundedEpistemicLevel(finding.epistemicLevel);
+  const whyKind = why ? boundedWhyKind(why.kind) : epistemicLevelToWhyKind(epistemicLevel);
+  const possibleExplanation = boundedText(finding.possibleExplanation, MAX_HANDOFF_TEXT_LENGTH);
+  const whyText = (why ? boundedText(why.text, MAX_HANDOFF_TEXT_LENGTH) : null)
+    ?? boundedText(finding.interpretation, MAX_HANDOFF_TEXT_LENGTH)
+    ?? possibleExplanation
+    ?? takeaway;
+  const how = boundedText(finding.how, MAX_HANDOFF_TEXT_LENGTH)
+    ?? boundedText(finding.action, MAX_HANDOFF_TEXT_LENGTH);
+  const expectedIfAct = boundedText(finding.expectedIfAct, MAX_HANDOFF_TEXT_LENGTH);
+  const ifIgnored = boundedText(finding.ifIgnored, MAX_HANDOFF_TEXT_LENGTH);
+  const howToVerify = boundedText(finding.howToVerify, MAX_HANDOFF_TEXT_LENGTH)
+    ?? boundedText(finding.verification, MAX_HANDOFF_TEXT_LENGTH);
   const snapshotId = boundedText(evidence.snapshotId, MAX_HANDOFF_ID_LENGTH);
   const dataCutoff = boundedText(evidence.dataCutoff, MAX_HANDOFF_ID_LENGTH);
   const evidenceNote = boundedText(evidence.note, MAX_HANDOFF_TEXT_LENGTH);
@@ -240,6 +250,9 @@ export function buildEnergyAiHandoffInitialDraftPrompt(
     `- What: ${what}`,
     `- Why (${whyKind}): ${whyText}`,
     `- Suggested next investigation: ${how}`,
+    ...(possibleExplanation ? [`- Unverified possible explanation: ${possibleExplanation}`] : []),
+    ...(expectedIfAct ? [`- Expected if acted on: ${expectedIfAct}`] : []),
+    ...(ifIgnored ? [`- If ignored: ${ifIgnored}`] : []),
     `- Suggested verification: ${howToVerify}`,
     "",
     "Untrusted Evidence references:",
@@ -274,6 +287,19 @@ function boundedWhyKind(value: unknown): "Evidence" | "Hypothesis" | "Missing Ev
   return value === "Evidence" || value === "Hypothesis" || value === "Missing Evidence"
     ? value
     : null;
+}
+
+function boundedEpistemicLevel(value: unknown): "verified" | "hypothesis" | "exploration-idea" | null {
+  return value === "verified" || value === "hypothesis" || value === "exploration-idea" ? value : null;
+}
+
+function epistemicLevelToWhyKind(
+  value: "verified" | "hypothesis" | "exploration-idea" | null,
+): "Evidence" | "Hypothesis" | "Missing Evidence" | null {
+  if (value === "verified") return "Evidence";
+  if (value === "hypothesis") return "Hypothesis";
+  if (value === "exploration-idea") return "Missing Evidence";
+  return null;
 }
 
 function boundedStringList(value: unknown, allowEmpty = false): string[] | null {

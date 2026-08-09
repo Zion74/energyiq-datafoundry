@@ -1490,7 +1490,7 @@ const isPreschoolAcceptedSavedResult = (
     || result.binding.outputContractRevision !== "v13"
     || !isRecord(result.workflow)
     || result.workflow.id !== "preschool-two-stage"
-    || result.workflow.revision !== "preschool-two-stage-v1"
+    || result.workflow.revision !== "preschool-two-stage-v2"
     || !isRecord(result.workflow.methodSkill)
     || result.workflow.methodSkill.id !== "energy-insight-investigation"
     || result.workflow.methodSkill.revision !== "1.0.0"
@@ -1499,8 +1499,8 @@ const isPreschoolAcceptedSavedResult = (
     || !isRecord(result.workflow.stages.editor)
     || !isPresentString(result.workflow.stages.investigator.runId)
     || !isPresentString(result.workflow.stages.editor.runId)
-    || result.workflow.stages.investigator.promptRevision !== "preschool-investigator-v1"
-    || result.workflow.stages.editor.promptRevision !== "preschool-insight-editor-v1"
+    || result.workflow.stages.investigator.promptRevision !== "preschool-investigator-v8"
+    || result.workflow.stages.editor.promptRevision !== "preschool-insight-editor-v3"
     || result.workflow.stages.editor.runId !== result.runId
     || result.workflow.stages.investigator.runId === result.workflow.stages.editor.runId
     || !Array.isArray(result.findings)) return false;
@@ -1529,9 +1529,13 @@ const isPreschoolAcceptedSavedResult = (
     && isPresentString(finding.title)
     && isPresentString(finding.takeaway)
     && isOptionalPresentString(finding.interpretation)
-    && isOptionalPresentString(finding.action)
+    && isPresentString(finding.action)
+    && isPresentString(finding.expectedIfAct)
+    && isPresentString(finding.ifIgnored)
+    && isOptionalPresentString(finding.possibleExplanation)
     && isOptionalPresentString(finding.verification)
-    && isOptionalPresentString(finding.uncertainty)
+    && isPresentString(finding.uncertainty)
+    && (!isPresentString(finding.possibleExplanation) || isPresentString(finding.verification))
     && (finding.epistemicLevel === "verified"
       || isPresentString(finding.verification)
       || isPresentString(finding.uncertainty))

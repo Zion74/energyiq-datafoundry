@@ -47,7 +47,7 @@ describe("EnergyIQ Harness Eval", () => {
       binding,
       workflow: {
         id: "preschool-two-stage",
-        revision: "preschool-two-stage-v1",
+        revision: "preschool-two-stage-v2",
         methodSkill: { id: "energy-insight-investigation", revision: "1.0.0" },
       },
       findings: Array.from({ length: 6 }, (_, index) => ({

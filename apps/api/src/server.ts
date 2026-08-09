@@ -122,6 +122,19 @@ let serverReady = false;
 let startupTimings: Record<string, number> = {};
 let startupTotalMs = 0;
 
+export const resolveOverviewAiStageRuntimeOptions = (stage: "investigator" | "editor") => ({
+  analysisRequirementsMode: "omit" as const,
+  excludedToolNames: stage === "editor"
+    ? ["inspect_schema", "run_sql_readonly", "protocol_handoff"] as const
+    : ["protocol_handoff"] as const,
+  overviewAiCandidateSubmission: stage === "investigator",
+  reasoningModel: false as const,
+});
+
+export const shouldIncludeProjectAnalysisEvidenceContext = (
+  stage?: "investigator" | "editor",
+): boolean => stage === undefined;
+
 const emitEarlyRunFailure = (
   subscriber: { complete(): void; next(event: BaseEvent): void },
   runId: string,
@@ -287,6 +300,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
           ...(stageInput.user.email ? { email: stageInput.user.email } : {}),
           ...(stageInput.user.display_name ? { display_name: stageInput.user.display_name } : {}),
         },
+        overviewAiStage: stageInput.stage,
         workspaceId: stageInput.workspaceId,
         workspaceRoot: process.env.WORKSPACE_ROOT ?? join(process.env.STORAGE_ROOT_DIR ?? "storage", "workspaces"),
       }),
@@ -513,7 +527,9 @@ const buildOverviewAiStageRunInput = (input: PreschoolOverviewAiStageInput): Run
       enabledMcpServerIds: [],
       enabledSkillIds: [input.identity.methodSkillId],
       skillPolicy: {
-        allowedToolNames: ["skill", "skill_search", "skill_read", "inspect_schema", "run_sql_readonly"],
+        allowedToolNames: input.stage === "editor"
+          ? ["skill", "skill_search", "skill_read"]
+          : ["skill", "skill_search", "skill_read", "inspect_schema", "run_sql_readonly"],
         deniedToolNames: ["list_data_sources", "preview_table"],
         maxSkills: 1,
         requireUserInvocable: true,
@@ -605,6 +621,8 @@ type DataFoundryAgUiAgentInput = {
   metadataStore: MetadataStore;
   knowledgeService: LocalKnowledgeService;
   memoryExtractionTimeoutMs: number;
+  /** Server-created Overview Artifact stage; never accepted from browser props. */
+  overviewAiStage?: "investigator" | "editor";
   runCancelRegistry: RunCancelRegistry;
   taskStateRuntime: TaskStateRuntime;
   traceSectionSummaries: boolean;
@@ -641,6 +659,9 @@ class DataFoundryAgUiAgent extends AbstractAgent {
         const normalizedRunInput =
           runId === runInput.runId ? runInput : { ...runInput, runId };
         const userInput = extractLastUserText(normalizedRunInput) ?? "CopilotKit AG-UI run";
+        const overviewAiStageOptions = this.input.overviewAiStage
+          ? resolveOverviewAiStageRuntimeOptions(this.input.overviewAiStage)
+          : undefined;
         let effectiveRunConfig;
         let mcpRuntime;
         let modelContextProfile;
@@ -736,12 +757,15 @@ class DataFoundryAgUiAgent extends AbstractAgent {
               ? { defaultDatasourceId: energyScopedDataSource?.datasourceId ?? this.input.defaultDatasourceId }
               : {}),
             metadataStore: this.input.metadataStore,
-            modelSelection: energyRequest ? "system-default" : "request-or-workspace",
+            modelSelection: overviewAiStageOptions
+              ? "request-or-workspace"
+              : energyRequest ? "system-default" : "request-or-workspace",
             runInput: normalizedRunInput,
             userId: this.input.user.id,
             userInput,
             workspaceId: this.input.workspaceId
           }));
+          if (overviewAiStageOptions) reasoningModel = overviewAiStageOptions.reasoningModel;
           if (energyScopedDataSource) {
             effectiveRunConfig = {
               ...effectiveRunConfig,
@@ -883,8 +907,10 @@ class DataFoundryAgUiAgent extends AbstractAgent {
               ? { analysisWorkspace: energyAnalysisWorkspace.semantics }
               : {}),
             ...(energyQueryContext ? { context: energyQueryContext } : {}),
-            ...(projectAnalysisSnapshot ? { projectAnalysisSnapshot } : {}),
-            ...(contextEvidenceCatalog ? { contextEvidenceCatalog } : {}),
+            ...(shouldIncludeProjectAnalysisEvidenceContext(this.input.overviewAiStage)
+              && projectAnalysisSnapshot ? { projectAnalysisSnapshot } : {}),
+            ...(shouldIncludeProjectAnalysisEvidenceContext(this.input.overviewAiStage)
+              && contextEvidenceCatalog ? { contextEvidenceCatalog } : {}),
             ...(publishedProjectRelease ? { projectRelease: publishedProjectRelease } : {}),
             sessionId,
             ...(trustedEnergyTextContract ? { trustedTextContract: trustedEnergyTextContract } : {}),
@@ -955,6 +981,17 @@ class DataFoundryAgUiAgent extends AbstractAgent {
             : {}),
           abortSignal: runAbortController.signal,
           ...(contextEvidenceCatalog ? { contextEvidenceCatalog } : {}),
+          ...(overviewAiStageOptions
+            ? {
+                analysisRequirementsMode: overviewAiStageOptions.analysisRequirementsMode,
+                ...(overviewAiStageOptions.overviewAiCandidateSubmission
+                  ? { overviewAiCandidateSubmission: true }
+                  : {}),
+                ...(overviewAiStageOptions.excludedToolNames.length > 0
+                  ? { excludedToolNames: overviewAiStageOptions.excludedToolNames }
+                  : {}),
+              }
+            : {}),
           contextPackageRecorder,
           contextPackageExists: (reference) => Boolean(
             this.input.metadataStore.contextPackageSnapshots.findByPackageRevision({
@@ -1218,6 +1255,7 @@ class DataFoundryAgUiAgent extends AbstractAgent {
                     }
                   : {}),
                 ...(reasoningModel !== undefined ? { reasoning_model: reasoningModel } : {}),
+                ...(this.input.overviewAiStage ? { overview_ai_stage: this.input.overviewAiStage } : {}),
                 ...(runTimeoutMs !== undefined ? { run_timeout_ms: runTimeoutMs } : {}),
                 ...(effectiveRunConfig.mentioned
                   ? {

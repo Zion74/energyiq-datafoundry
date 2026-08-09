@@ -725,3 +725,98 @@ Ngee Ann Run `ngee-ann-overview-6d04cbcf-bc74-47fc-9305-a7dc77ec1bbf` 于 `2026-
 至 `03:41:54.591Z` 完成，但 Finding 引用了当前 Snapshot 不存在的确定性 Evidence，因而被 Runtime 拒绝。该次只证明
 非阻塞与 fail-closed，未形成 accepted Artifact，也未完成 #35 的真实多尺寸视觉验收。下一项仍是取得固定 Profile/Snapshot
 的 accepted Artifact 后，再验证多个 primary 与 supporting 的真实页面效果。
+
+## 15. 2026-08-10 Overview AI Stage 最小运行收口（#18 / #30 / #39）
+
+### 15.1 触发证据与目标
+
+Preschool `overview-ai-investigator-d177e0f5-fafc-4e88-8ccf-2b49fa13462` 在 300 秒内进行了多轮 Schema/SQL 调用，
+但最终没有完成输出；存储的 Profile 已声明 `reasoningModel: false`，运行 Trace 却没有该字段，不能证明 DeepSeek
+的 `thinking.disabled` 真正下发。另一个冲突是：Overview Investigator 明明是受限的只读调查，却因通用
+`data-analysis` 的 user requirement 自动注入了 `analysis_requirements_commit`，把一个页面 Artifact Stage 拉回完整
+分析流程。
+
+本切片只让现有 Overview 两阶段流程在同一 Snapshot、授权和只读 SQL 边界内更快收口；它不增加 Timeout，不改变
+Renderer/UI，不建立新的 Agent 协议或调度平台。
+
+### 15.2 实现方案
+
+1. 给现有 Run Assembly 增加窄范围的 `analysisRequirementsMode: "default" | "omit"`。默认行为完全不变；
+   Overview Investigator/Editor 选 `omit`，因此不会注册或提示 `analysis_requirements_commit`。这不是删除
+   `data-analysis` Protocol，Schema/只读 SQL、Snapshot 和 Evidence 仍走原有受控路径。
+2. Overview Stage 在服务器端显式覆盖 `reasoningModel: false`，使 `run.config.resolved` 记录
+   `reasoning_model: false`，并让现有 Provider Adapter 对 DeepSeek 生成
+   `deepseek.thinking.type = "disabled"`。普通 AI Analyst 和普通 data-analysis Run 仍使用其原有 Profile 设置。
+3. Editor Stage 使用同一 Run Assembly，但排除 `inspect_schema` 与 `run_sql_readonly`；它只接收 Investigator
+   candidates、已收集的 SQL Evidence 和固定 Snapshot Evidence，负责筛选、合并和写成用户可读的结果。
+4. 将 `preschool-investigator-v2` 同步到 API 的 Saved Analysis 验收及 Web identity，避免新 Artifact 被旧
+   revision 误判为不可恢复。Prompt 仅增加“先选一个会改变决策的问题、合并同一问题可回答的维度、下一次查询不再
+   改变结论/行动/不确定性时停止”的软引导；不规定主题、SQL 数量或推理轮数。
+
+### 15.3 预检风险与守护
+
+| 风险 | 本切片处理 | 不做什么 |
+| --- | --- | --- |
+| 关闭 generic commit 意外影响完整 Analyst | 选项默认 `default`，仅服务器创建的 Overview 两个 Stage 传 `omit` | 不改全局 Protocol 默认值 |
+| Editor 偷跑查询、改变 Evidence 顺序 | 仅 Editor 移除 Schema/SQL 工具；其 SQL index 只引用 Investigator 的 1-based 顺序 | 不创建第二个 Evidence Store |
+| 关闭 thinking 后仍超时 | 以 Trace 和 Provider option contract 先确认真实下发；再跑一次固定 Profile 真实验收 | 不把 300 秒加长来掩盖问题 |
+| Prompt 收紧成固定 Pipeline | 只提供 value/stop rubric，允许零 Finding 和自主调查角度 | 不设 SQL 配额、主题白名单或强制图表 |
+| v1/v2 identity 混用 | API/Web/Saved 同步为 v2，历史 Artifact 仍按原 identity 只读恢复 | 不改写历史 Artifact |
+
+### 15.4 验收与停止条件
+
+自动验收必须证明：Overview Stage omit 模式不注册 `analysis_requirements_commit`；Editor 没有 Schema/SQL；
+DeepSeek `reasoningModel: false` 映射为 `thinking.disabled`；Web/API/Saved identity 都要求 v2。再运行聚焦测试和
+typecheck。
+
+真实 Provider 验收另记，不能由测试代替：固定 Preschool Snapshot/Profile 跑一次，Trace 必须含
+`reasoning_model: false`，工具序列不含 generic commit，Editor 不调用 SQL，且在原 300 秒内形成 available Artifact
+或给出可归因的新失败码。随后才检查 Chrome 中恢复后的 AI Slot。
+
+若仍须新增 Timeout、第二套 Session/Artifact/Evidence 平台，或为了完成此切片改变普通 data-analysis 行为，立即
+停止并回到真实 Trace 复核；不要继续扩张。
+
+## 16. 2026-08-10 v7 结构化提交与用户价值合同收口
+
+### 16.1 真实失败已经改变实施判断
+
+DeepSeek V4 Flash 已证明能在原 300 秒边界内完成 Investigator 与 Editor：最近两次两阶段运行分别约
+107 秒与 135 秒，`reasoning_model=false`，且 Editor 不再查 SQL。因此当前问题不是继续增加 Timeout，而是最终
+Candidate 提交与 Evidence 绑定不稳定：模型自行计数 SQL 序号时出现 off-by-one，且旧 Candidate 合同丢失了用户真正
+需要的行动、行动后预期、不行动后果和限制。
+
+### 16.2 最小实现边界
+
+1. Investigator 仍可自主选择调查问题、SQL 和 0–3 条 Finding，不设主题白名单或 SQL 数量配额。
+2. 最终 Candidate 只通过 `overview_ai_candidates_submit` 结构化提交；首次 schema 失败后最多修正一次，成功提交后
+   不得继续调查。
+3. 每次成功的 Overview `run_sql_readonly` 由 Runtime 直接返回 run-local `evidence_index`；模型只能原样复制，
+   失败 SQL 不获得也不占用编号。普通 AI Analyst 工具结果不变。
+4. Candidate 必须提交 `title / takeaway / action / expectedIfAct / ifIgnored / limitation`；
+   `possibleExplanation` 保持为未证实假设，且必须同时提交 `nextCheck`。
+5. Editor 只选择 Candidate、安排 Section、标记 relationship 与 signal refs；不重写 canonical 文字、Evidence
+   或 Presentation。Editor 没有 Schema/SQL/protocol-handoff 工具，系统 Prompt 也不再强制它调用不存在的工具。
+6. Workflow 只收集成功提交 start 之前的 SQL Evidence；Editor 选中但 Runtime 全部拒绝时，返回
+   `OVERVIEW_AI_RUNTIME_VALIDATION_REJECTED_ALL`，不会伪装成合法的空分析。
+
+### 16.3 仍然保留的边界
+
+- 本切片不建第二套 Typed Evidence 平台，不扩建历史 Run 修复系统。
+- `evidence_index` 和 submission attempt 是同一次 factory/Run 内的状态；未实现跨进程恢复后继续提交，也不应
+  把一次 Overview Stage 拆成跨进程长任务。
+- 日期/时刻目前只是避免被当成 kWh 数字误判，还不是完整的 typed time Evidence 校验；这是后续治理风险，
+  不影响本次客户可见 MVP 收口，但不能把任意时间 Claim 称为已验证。
+- 自动测试只证明合同和 fail-closed；仍须使用新 revision 运行一次固定 Preschool Snapshot/Profile 的真实
+  Provider，然后才能进行 Chrome 和用户价值验收。
+
+### 16.4 v8 真实验收结论与 v3 Editor 封顶修复
+
+真实 v8 Run 已证明关闭长思考和上下文减负有效：Investigator 约 100 秒、Editor 约 7 秒，总流程约 121 秒，
+没有再命中 300 秒。模型还找到 Centre L 在两天 01:00 的异常，而不是复读 Overview，说明调查方向本身已有用户
+价值。失败发生在提交边界：`evidence_index` 位于长工具 JSON 的尾部而未进入模型可见片段；Editor 对非事实元数据
+输出空 relationship 和自然语言 trace decision。
+
+封顶修复不改变事实治理：SQL `evidence_index` 移到结果首字段；Editor 明确枚举；空 relationship 安全归一为
+`independent`；格式损坏的非权威 Trace 被忽略，并由 Runtime 根据最终验证结果重建 canonical trace。未知 Candidate、
+合并 Candidate、矛盾的合法 Trace、无 Evidence 的 verified Candidate 仍然 fail closed。Prompt identity 升为
+`preschool-insight-editor-v3`；本轮只做自动回归，不再次调用 Provider。

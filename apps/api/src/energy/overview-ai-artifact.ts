@@ -5,7 +5,10 @@ import type {
   UserRecord,
   WorkspaceDefaultModelProfileRecord,
 } from "@datafoundry/metadata";
+import { WORKSPACE_DEFAULT_MODEL_PROFILE_ID } from "@datafoundry/metadata";
 import type { LocalDataGateway } from "@datafoundry/data-gateway";
+
+import { ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID } from "../workspace-model-profile-resolver.js";
 
 import {
   resolveProjectAnalysis,
@@ -31,10 +34,10 @@ const OVERVIEW_AI_CONTRACTS: Readonly<Record<string, OverviewAiContract>> = {
     analysisPackId: "preschool-analysis-pack",
     analysisPackRevision: "v1",
     outputContractRevision: "v13",
-    validatorRevision: "preschool-ai-two-stage-fact-boundary-v1",
-    workflowRevision: "preschool-two-stage-v1",
-    investigatorPromptRevision: "preschool-investigator-v2",
-    editorPromptRevision: "preschool-insight-editor-v1",
+    validatorRevision: "preschool-ai-two-stage-fact-boundary-v4",
+    workflowRevision: "preschool-two-stage-v2",
+    investigatorPromptRevision: "preschool-investigator-v8",
+    editorPromptRevision: "preschool-insight-editor-v3",
     methodSkillId: "energy-insight-investigation",
     methodSkillRevision: "1.0.0",
   },
@@ -85,7 +88,7 @@ export const overviewAiArtifactIdentityFromSnapshot = (input: {
   analysisPeriodTo: input.snapshot.context.primaryPeriod.endExclusive,
   rendererKey: input.snapshot.renderer.key,
   rendererVersion: input.snapshot.renderer.version,
-  modelProfileId: input.modelBinding.profile_id,
+  modelProfileId: WORKSPACE_DEFAULT_MODEL_PROFILE_ID,
   modelProfileRevision: input.modelBinding.revision,
 });
 
@@ -108,7 +111,7 @@ export const queueCurrentProjectOverviewAiArtifact = async (input: {
 }): Promise<EnergyIqOverviewAiArtifactRecord | null> => {
   const project = input.metadataStore.energyIq.getProject(input.projectId);
   if (project.status !== "published" || project.delivery_stage !== "published") return null;
-  const modelBinding = input.metadataStore.workspaceDefaultModelProfiles.find(project.workspace_id);
+  const modelBinding = input.metadataStore.workspaceDefaultModelProfiles.find(ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID);
   if (!modelBinding) return null;
   if (project.id !== "preschool-demo") return null;
   const resolution = await resolveProjectAnalysis({
@@ -142,7 +145,7 @@ export const resolveCurrentOverviewAiArtifactIdentity = async (input: {
   if (input.scopeId !== project.root_scope_id) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PROJECT_SCOPE_REQUIRED");
   }
-  const modelBinding = input.metadataStore.workspaceDefaultModelProfiles.get(project.workspace_id);
+  const modelBinding = input.metadataStore.workspaceDefaultModelProfiles.get(ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID);
   const resolution = await resolveProjectAnalysis({
     metadataStore: input.metadataStore,
     dataGateway: input.dataGateway,

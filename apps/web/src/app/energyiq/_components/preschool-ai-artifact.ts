@@ -2,9 +2,9 @@ import { parseAiFindingPresentation, type AiFindingPresentation } from "./ai-fin
 import type { PreschoolDiscoveryEvidenceItem } from "./preschool-ai-discovery-evidence";
 
 export const PRESCHOOL_AI_ACCEPTED_CONTRACT_REVISION = "v13" as const;
-export const PRESCHOOL_AI_WORKFLOW_REVISION = "preschool-two-stage-v1" as const;
-export const PRESCHOOL_AI_INVESTIGATOR_PROMPT_REVISION = "preschool-investigator-v1" as const;
-export const PRESCHOOL_AI_EDITOR_PROMPT_REVISION = "preschool-insight-editor-v1" as const;
+export const PRESCHOOL_AI_WORKFLOW_REVISION = "preschool-two-stage-v2" as const;
+export const PRESCHOOL_AI_INVESTIGATOR_PROMPT_REVISION = "preschool-investigator-v8" as const;
+export const PRESCHOOL_AI_EDITOR_PROMPT_REVISION = "preschool-insight-editor-v3" as const;
 export const PRESCHOOL_AI_METHOD_SKILL_ID = "energy-insight-investigation" as const;
 export const PRESCHOOL_AI_METHOD_SKILL_REVISION = "1.0.0" as const;
 
@@ -49,9 +49,12 @@ export type PreschoolAiAcceptedFinding = {
   title: string;
   takeaway: string;
   interpretation?: string;
-  action?: string;
+  action: string;
+  expectedIfAct: string;
+  ifIgnored: string;
+  possibleExplanation?: string;
   verification?: string;
-  uncertainty?: string;
+  uncertainty: string;
   presentation?: AiFindingPresentation;
   evidence: {
     snapshotId: string;
@@ -169,7 +172,8 @@ function isAcceptedArtifact(value: unknown): value is PreschoolAiAcceptedArtifac
     || value.workflow.stages.editor.promptRevision !== PRESCHOOL_AI_EDITOR_PROMPT_REVISION
     || value.workflow.stages.editor.runId !== value.runId
     || !Array.isArray(value.findings)) return false;
-  return value.findings.every((finding) => isAcceptedFinding(finding, value.binding));
+  const artifactBinding = value.binding;
+  return value.findings.every((finding) => isAcceptedFinding(finding, artifactBinding));
 }
 
 function isAcceptedFinding(value: unknown, artifactBinding: PreschoolAiArtifactBinding): boolean {
@@ -190,9 +194,13 @@ function isAcceptedFinding(value: unknown, artifactBinding: PreschoolAiArtifactB
     || !nonEmptyString(value.title)
     || !nonEmptyString(value.takeaway)
     || !optionalString(value.interpretation)
-    || !optionalString(value.action)
+    || !nonEmptyString(value.action)
+    || !nonEmptyString(value.expectedIfAct)
+    || !nonEmptyString(value.ifIgnored)
+    || !optionalString(value.possibleExplanation)
     || !optionalString(value.verification)
-    || !optionalString(value.uncertainty)
+    || !nonEmptyString(value.uncertainty)
+    || (nonEmptyString(value.possibleExplanation) && !nonEmptyString(value.verification))
     || (value.epistemicLevel !== "verified"
       && !nonEmptyString(value.verification)
       && !nonEmptyString(value.uncertainty))

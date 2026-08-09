@@ -48,9 +48,9 @@ describe("Preschool AI Run", () => {
       "sg-preschool-calendar-v1",
     ]) expect(input.identityKey).toContain(pin);
     expect(input.identityKey).toContain("preschool-ai-output-contract@v13");
-    expect(input.identityKey).toContain("preschool-ai-workflow@preschool-two-stage-v1");
-    expect(input.identityKey).toContain("investigator-prompt@preschool-investigator-v1");
-    expect(input.identityKey).toContain("editor-prompt@preschool-insight-editor-v1");
+    expect(input.identityKey).toContain("preschool-ai-workflow@preschool-two-stage-v2");
+    expect(input.identityKey).toContain("investigator-prompt@preschool-investigator-v8");
+    expect(input.identityKey).toContain("editor-prompt@preschool-insight-editor-v3");
     expect(input.identityKey).toContain("method-skill@energy-insight-investigation@1.0.0");
   });
 

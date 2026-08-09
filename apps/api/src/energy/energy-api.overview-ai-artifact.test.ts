@@ -1,4 +1,5 @@
 import { LocalDataGateway } from "@datafoundry/data-gateway";
+import { WORKSPACE_DEFAULT_MODEL_PROFILE_ID } from "@datafoundry/metadata";
 import { createMetadataStore } from "@datafoundry/metadata";
 import { mkdtempSync, rmSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
@@ -123,7 +124,7 @@ async function createHarness() {
   ensureEnergyIqBootstrap(metadata);
   metadata.configResources.upsert({
     id: "profile-test",
-    workspace_id: PRESCHOOL_WORKSPACE_ID,
+    workspace_id: "default",
     user_id: "dev-user",
     kind: "model-profile",
     name: "Test profile",
@@ -132,7 +133,7 @@ async function createHarness() {
     status: "connected",
   });
   metadata.workspaceDefaultModelProfiles.set({
-    workspace_id: PRESCHOOL_WORKSPACE_ID,
+    workspace_id: "default",
     profile_id: "profile-test",
     profile_owner_user_id: "dev-user",
     configured_by_user_id: "dev-user",
@@ -150,7 +151,7 @@ async function createHarness() {
     analysisPeriodTo: "2026-05-31T16:00:00.000Z",
     rendererKey: "preschool-overview",
     rendererVersion: "1",
-    modelProfileId: "profile-test",
+    modelProfileId: WORKSPACE_DEFAULT_MODEL_PROFILE_ID,
     modelProfileRevision: 1,
   });
   return {
