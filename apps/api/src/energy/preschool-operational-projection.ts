@@ -16,6 +16,7 @@ import {
 } from "./energy-query-context.js";
 import {
   PRESCHOOL_EXPECTED_APPLIANCE_ALIAS_COUNT,
+  preschoolApplianceAliasForPublishedCircuit,
   preschoolApplianceContractForAlias,
 } from "./preschool-appliance-projection.js";
 
@@ -470,7 +471,10 @@ export const buildPreschoolOperationalProjection = (input: {
       baselineKwh: round(baselineKwh),
       impactKwh: round(cell.usageKwh - baselineKwh),
       variancePct: round(((cell.usageKwh - baselineKwh) / baselineKwh) * 100),
-      leadingCircuitName: cell.leadingCircuitName,
+      leadingCircuitName: preschoolApplianceAliasForPublishedCircuit(
+        cell.leadingCircuitName,
+        cell.scopeId,
+      ) ?? cell.leadingCircuitName,
       leadingCircuitKwh: round(cell.leadingCircuitKwh),
       leadingCircuitSharePct: cell.usageKwh > 0
         ? round((cell.leadingCircuitKwh / cell.usageKwh) * 100)
@@ -605,16 +609,18 @@ const buildStandbyApplianceComposition = (input: {
     const cellCircuitTotalKwh = cell.circuits.reduce((sum, circuit) => sum + circuit.usageKwh, 0);
     if (Math.abs(cellCircuitTotalKwh - cell.usageKwh) > RECONCILIATION_TOLERANCE_KWH) return null;
     for (const circuit of cell.circuits) {
-      const aliasContract = preschoolApplianceContractForAlias(circuit.name);
+      const alias = preschoolApplianceAliasForPublishedCircuit(circuit.name, cell.scopeId);
+      const aliasContract = alias ? preschoolApplianceContractForAlias(alias) : null;
       if (
-        !aliasContract
+        !alias
+        || !aliasContract
         || aliasContract.category !== circuit.category
         || !circuit.circuitId
         || !Number.isFinite(circuit.usageKwh)
         || circuit.usageKwh < 0
       ) return null;
       if (cell.operatingState !== "standby") continue;
-      const row = applianceRows.get(circuit.name) ?? {
+      const row = applianceRows.get(alias) ?? {
         applianceGroup: aliasContract.applianceGroup,
         usageKwh: 0,
         centreIds: new Set<string>(),
@@ -623,7 +629,7 @@ const buildStandbyApplianceComposition = (input: {
       row.usageKwh += circuit.usageKwh;
       row.centreIds.add(cell.scopeId);
       row.sourceCircuitIds.add(circuit.circuitId);
-      applianceRows.set(circuit.name, row);
+      applianceRows.set(alias, row);
       closedCircuitTotalKwh += circuit.usageKwh;
     }
   }

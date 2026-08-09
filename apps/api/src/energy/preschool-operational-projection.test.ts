@@ -153,6 +153,36 @@ describe("Preschool operational projection", () => {
     });
   });
 
+  it("accepts release-scoped Circuit identities and exposes user-facing Appliance aliases", () => {
+    const cells = mayCells();
+
+    const projection = buildPreschoolOperationalProjection({
+      projectRelease: release(),
+      dataSnapshotId: "preschool-snapshot-may-2026",
+      period: {
+        start: "2026-04-30T16:00:00.000Z",
+        endExclusive: "2026-05-31T16:00:00.000Z",
+      },
+      timezone: "Asia/Singapore",
+      analysis: analysis(),
+      calendar: calendar(),
+      centres: centreCodes.map((code) => ({
+        scopeId: scopeId(code),
+        centreCode: code,
+        name: `Centre ${code}`,
+        centreType: null,
+      })),
+      cells,
+    });
+
+    expect(projection.status).toBe("available");
+    if (projection.status !== "available") throw new Error(projection.reason.message);
+    expect(projection.standbyAppliances.appliances.map((appliance) => appliance.name))
+      .toContain("Living Area Plug Load");
+    expect(projection.standbyAppliances.appliances.some((appliance) => appliance.name.includes(":")))
+      .toBe(false);
+  });
+
   it("builds a transparent June planning baseline from four complete May weeks and the official demo tariff reference", () => {
     const projection = buildPreschoolOperationalProjection({
       projectRelease: release(),
@@ -576,11 +606,11 @@ const mayCells = (): PreschoolOperationalCell[] => {
           localDate,
           localHour,
           usageKwh: operating ? 10 : 1,
-          leadingCircuitName: "Plug Load3",
+          leadingCircuitName: `${scopeId(centreCode)}:Plug Load3`,
           leadingCircuitKwh: (operating ? 10 : 1) * applianceCircuits[0][3],
           circuits: applianceCircuits.map(([slug, name, category, share]) => ({
             circuitId: `${scopeId(centreCode)}-${slug}`,
-            name,
+            name: `${scopeId(centreCode)}:${name}`,
             category,
             usageKwh: (operating ? 10 : 1) * share,
           })),
