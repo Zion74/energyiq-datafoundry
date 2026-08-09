@@ -67,7 +67,7 @@ related:
 1. **首屏与数据上下文**：Project、统一 cutoff/Snapshot、Data Status、1d/7d/28d takeaway 和关键 KPI；
 2. **时间变化**：趋势、baseline、异常点与关键日期，回答变化发生在哪里；
 3. **空间/层级贡献**：Level、Category、Circuit 的当前期/上期贡献，回答谁在驱动；
-4. **日内模式**：工作日/周末、典型曲线与 Heatmap，回答什么时候发生；
+4. **日内模式**：工作日/周末的 observed profile 与 Heatmap，回答什么时候发生；
 5. **决策组装**：Finding → Evidence → Impact → Action → Verification，以及对应的 AI interpretation；
 6. **A→B 更新证明**：Saved A 不变、Current B 更新、Snapshot/Evidence/AI Artifact 不混。
 
@@ -158,7 +158,7 @@ http://127.0.0.1:4178/analysis?utility=electricity&project=proj-nap-energy-analy
 | Consumption Breakdown | “变化发生在哪些日期、由什么 Category/Level 驱动？” | 按日堆叠 Category 柱、Cost 折线、空间/Tag/日期筛选 | 已有 Energy Trend、Level comparison、Category/Circuit composition，但不是一张 Category×Day 堆叠图 | 若要 Category×Day，需要服务端时间×Category Projection；Cost overlay 还依赖 Tariff | **adapt / M–L**：第一切片用现有 Trend + Level/Category contributor；不要为了复刻先建新 Projection | AI 解释转折点和 driver；确定性层提供日期、Category、Level 和差值 |
 | Energy Distribution | “总能耗主要流向哪里，点某类后谁贡献最多？” | Category donut、占比、点击 Category 后看 Level 排名 | 已有 Energy Composition、Category/Circuit 排名和 accounting trace | 无关键缺口；当前正式 UI 形态未必是 donut | **retain capability, adapt visual / S–M**：只有当占比是核心论点时用 donut；否则 Top contributors 条形图更清楚 | AI 说明集中度为何重要；不要复读最大值 |
 | Summary of Findings | “整份报告最值得先关注哪 2–4 件事？” | 六组固定主题和长 bullet，Generate Full Report | 已有 Decision Priorities、1d/7d/28d horizons、AI Slot、Evidence | 原型 Findings 是 `napEnergyAnalysisData.ts` 中固定字符串；新数据不会产生新角度 | **replace / M**：使用结构化 Signals + 一次 AI Artifact 生成优先级、意义和下一步，并按 Snapshot 持久化 | AI 负责选择、合并、排序和讲人话；Runtime 只验证引用事实 |
-| Day Profile | “典型工作日、周末和假日的 24 小时形状如何不同？哪个 Level/Circuit 造成差异？” | 3 个 Day Type KPI、24h stacked profile、Level 表、选择 Level 后热力图 | 已有 Day Profile（Project/Level）、weekday/weekend/holiday、hour axis 和 Usage Heatmap | 正式数据已有核心能力；是否有 Calendar/holiday 覆盖必须按 Snapshot 状态显示 | **retain + reorganise / M**：标题直接给结论，图作证据；热力图作为下钻 | AI 解释峰谷、开关机行为和建议核查时段；不推断未提供的 occupancy |
+| Day Profile | “已观察到的工作日、周末和假日 24 小时形状如何不同？哪个 Level/Circuit 值得继续查看？” | 3 个 Day Type KPI、24h stacked profile、Level 表、选择 Level 后热力图 | 已有 Day Profile（Project/Level）、weekday/weekend/holiday、hour axis 和 Usage Heatmap | 正式数据已有核心能力；是否有 Calendar/holiday 覆盖必须按 Snapshot 状态显示 | **retain + reorganise / M**：标题直接给结论，图作证据；热力图作为下钻 | AI 解释峰谷、开关机行为和建议核查时段；不推断未提供的 occupancy |
 | Daily Trend + Anomaly | “哪些日期偏离正常，是否重复，先查哪一天？” | 30-day bars、day-type baseline、115% threshold、anomaly dots/list、Scope/Day Type filter | 已有正式 daily totals、governed baseline overlay、Daily Anomalies、Incident/Evidence | 原型固定 15% 阈值并写死 21 Apr–17 Jun calibration；正式规则必须来自 Rule revision，不能从 JSX 复制 | **retain formal / S–M**：用正式 Rule，减少长列表，Top exceptions + 展开全部 | AI 解释异常的组合、复发和可能调查方向；不能把阈值变成因果结论 |
 | Energy Health Summary | “工作日/周末/假日和 office/after-hours 的结构性差异是什么？” | 7 个 KPI：3 类日均、office/after-hours、Level 6/7 total | 已有 Day Profile、rolling horizons、Level comparison；Calendar 能力决定 office/after-hours 是否成立 | Ngee Ann 当前正式 Calendar/Operating-hours 覆盖需重新确认；缺失则不能复制 08–18、22–06 | **adapt / M**：将有效的 1d/7d/28d 或 Day Type 差异做成 2–3 个 takeaway，不堆 7 张孤立 KPI | AI 把指标组织成“即时/短期/结构性”解释；营业时段事实保持确定性 |
 | Circuit Category Analysis | “最值得排查的 Circuit 是哪些，它们属于哪个 Level/Category？” | Top 10 表、kWh、相对 Top10 平均值 | 已有 Circuit/Category composition、Peak breakdown、derived meter trace 和 Evidence | “vs Avg of Top 10”基线容易误导，不等于正常或节能潜力；应同时显示 share、change 或 anomaly link | **adapt / M**：首屏 Top 3–5，其余展开；按决策优先级而不只是绝对量排序 | AI 可解释为什么某 Circuit 值得查；排名、share、delta 必须来自 Projection |
@@ -292,7 +292,7 @@ http://127.0.0.1:4178/analysis?utility=electricity&project=proj-nap-energy-analy
 
 1. Golden Snapshot 的默认 Day Type/Scope 摘要来自同一组 profile cells，并能定位峰值小时和值；
 2. 切换 Day Type 或 Scope 时，摘要与图同步变化，不保留旧选择；
-3. `sampleDayCount=0/null`、缺 Day Type、缺 Level 或 partial cells 时明确 Unavailable/observed limitation，不补零；
+3. `sampleDayCount=0/null`、缺 Day Type 或缺 Level 表示服务端 Day Profile 合同无效，整段 fail closed；Date × Hour grid 的 partial cell 不得反向压掉由完整日生成的独立 Day Profile；
 4. 现有键盘、hover/focus、Snapshot refresh 和 Heatmap 测试保持通过；
 5. 聚焦 Renderer tests、root typecheck/build、`git diff --check` 通过后才能提交。
 
@@ -302,3 +302,13 @@ http://127.0.0.1:4178/analysis?utility=electricity&project=proj-nap-energy-analy
 - 只能通过硬编码原型日期、营业时间或峰值结论实现；
 - 为一个模块建设通用图表 DSL、全局筛选器或新的 AI Run；
 - 样本不足却仍必须写成“典型行为”才能获得视觉效果。
+
+### 15.5 执行结果
+
+- 状态：`DONE-ENGINEERING / PENDING-CHROME-AND-HUMAN-ACCEPTANCE`；
+- 每个可用 Day Profile 都从同一组 24 个 server-provided profile values 生成峰值小时、峰值均值和完整样本天数；相同 Scope 的 Weekday/Weekend profile 均完整时才显示局部对照；
+- Day Type 或 Scope 切换时，摘要跟随模块局部状态同步更新，不改变整页 Snapshot/Period，也不触发 AI；
+- Public Holiday 缺 Calendar 时该 profile 摘要局部 unavailable；任一 available profile 样本数无效或缺少必要 Day Type/Scope 时，完整 Day Profile 合同 fail closed。Date × Hour grid 的 partial cell 不反向否定服务端由完整日生成的 profile；
+- Heatmap 已明确标注颜色只代表当前视图内 accepted usage 的相对高低，不能单独证明异常、浪费或原因；
+- 峰值小时是 Renderer ViewModel 对同一 profile 的 24 个服务端值所做的展示级排序，只用于当前图前摘要，不注册为服务端 Structured Signal，不进入 AI Artifact、Decision Priority 或跨模块计算；若未来需要用于决策排序或 AI Evidence，必须上移服务端合同；
+- 聚焦 Renderer 测试 `56/56` 与根 TypeScript typecheck 通过；真实 Chrome 1440/1920 和 Charles 人工验收仍待主 Agent 完成。
