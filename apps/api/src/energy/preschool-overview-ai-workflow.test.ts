@@ -23,8 +23,10 @@ describe("Preschool Overview AI server workflow", () => {
     let releaseInvestigator!: () => void;
     const investigatorGate = new Promise<void>((resolve) => { releaseInvestigator = resolve; });
     const stages: string[] = [];
-    const runStage: PreschoolOverviewAiStageRunner = async ({ stage, runId, sessionId }) => {
+    const investigatorPrompts: string[] = [];
+    const runStage: PreschoolOverviewAiStageRunner = async ({ stage, prompt, runId, sessionId }) => {
       stages.push(stage);
+      if (stage === "investigator") investigatorPrompts.push(prompt);
       if (stage === "investigator") await investigatorGate;
       return stageEvents(stage, runId, sessionId);
     };
@@ -45,6 +47,7 @@ describe("Preschool Overview AI server workflow", () => {
     const available = await owner;
     expect(available).toMatchObject({ status: "available", attempt_count: 1 });
     expect(stages).toEqual(["investigator", "editor"]);
+    expect(investigatorPrompts[0]).toContain("the first successful SQL result is 1. Never output index 0");
     const result = JSON.parse(available.result_json!) as Record<string, unknown>;
     expect(result).toMatchObject({
       status: "available",
@@ -468,7 +471,7 @@ function createHarness() {
     outputContractRevision: "v13",
     validatorRevision: "preschool-ai-two-stage-fact-boundary-v1",
     workflowRevision: "preschool-two-stage-v1",
-    investigatorPromptRevision: "preschool-investigator-v1",
+    investigatorPromptRevision: "preschool-investigator-v2",
     editorPromptRevision: "preschool-insight-editor-v1",
     methodSkillId: "energy-insight-investigation",
     methodSkillRevision: "1.0.0",

@@ -39,7 +39,7 @@ describe("createOverviewAiArtifactIdentity", () => {
       outputContractRevision: "v13",
       validatorRevision: "preschool-ai-two-stage-fact-boundary-v1",
       workflowRevision: "preschool-two-stage-v1",
-      investigatorPromptRevision: "preschool-investigator-v1",
+      investigatorPromptRevision: "preschool-investigator-v2",
       editorPromptRevision: "preschool-insight-editor-v1",
       methodSkillId: "energy-insight-investigation",
       methodSkillRevision: "1.0.0",

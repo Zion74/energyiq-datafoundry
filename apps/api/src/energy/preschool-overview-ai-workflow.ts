@@ -560,6 +560,7 @@ function buildInvestigatorPrompt(context: WorkflowContext, identity: EnergyIqOve
     "Use read-only SQL only when it can materially change a conclusion, action, or uncertainty. Zero candidates is valid; there is no finding quota.",
     "Use verified only for supported observations. Preserve useful hypotheses and exploration ideas, but do not invent causes, equipment state, occupancy, savings, ROI, ownership, commitment, thresholds, or forecasts.",
     "Every displayed number or named entity must occur in that candidate's cited bounded Evidence or successful SQL result. Omit presentation for no-visual. Output only strict JSON.",
+    "SQL Evidence indexes are 1-based in execution order: the first successful SQL result is 1. Never output index 0.",
     `Prompt revision: ${identity.investigatorPromptRevision}.`,
     "Return: {\"candidates\":[{\"id\":\"candidate-1\",\"epistemicLevel\":\"verified|hypothesis|exploration-idea\",\"title\":\"...\",\"takeaway\":\"...\",\"significance\":\"optional\",\"possibleExplanation\":\"optional\",\"nextCheck\":\"optional\",\"evidenceRefs\":[],\"evidenceSqlIndexes\":[],\"presentation\":{\"version\":\"1\",\"blocks\":[]}}]}",
     "Overview Coverage:", JSON.stringify(context.coverage),
