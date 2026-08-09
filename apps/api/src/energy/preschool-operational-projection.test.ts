@@ -79,6 +79,7 @@ describe("Preschool operational projection", () => {
 
     expect(projection.status).toBe("available");
     if (projection.status !== "available") throw new Error("Expected available projection");
+    expect(projection.contract.version).toBe("2");
     expect(projection.energy).toEqual({
       totalKwh: 24_921.8123,
       standbyKwh: 3_103.784,
@@ -473,6 +474,7 @@ describe("Preschool operational projection", () => {
 
       if (projection.status !== "available") throw new Error(projection.reason.message);
       expect(projection.status).toBe("available");
+      expect(projection.contract.version).toBe("2");
       expect(projection.spikes.standby).toMatchObject({ count: 7, centreCount: 3 });
       expect(projection.spikes.operating).toMatchObject({ count: 21, centreCount: 14 });
       expect(projection.sop.breachingCentreCodes).toEqual(["L", "E", "N"]);

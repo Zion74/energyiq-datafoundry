@@ -423,7 +423,7 @@ describe("Preschool Overview ViewModel", () => {
     expect(view.decisionSummary.items.map((item) => item.priority)).toEqual([1]);
   });
 
-  it("fails closed when the API runtime returns the superseded operational contract", () => {
+  it("fails closed when the API runtime returns an unsupported operational contract version", () => {
     const snapshot = preschoolGoldenSnapshot();
     if (snapshot.preschoolOperational?.status !== "available") throw new Error("Expected operational fixture");
     Reflect.set(snapshot.preschoolOperational.contract, "version", "1");
@@ -436,7 +436,7 @@ describe("Preschool Overview ViewModel", () => {
     });
   });
 
-  it("fails closed when an older v2 runtime omits operating-state Appliance evidence", () => {
+  it("fails closed when a pre-A4 v2 runtime omits operating-state Appliance evidence", () => {
     const snapshot = preschoolGoldenSnapshot();
     if (snapshot.preschoolOperational?.status !== "available") throw new Error("Expected operational fixture");
     Reflect.deleteProperty(snapshot.preschoolOperational, "operatingAppliances");

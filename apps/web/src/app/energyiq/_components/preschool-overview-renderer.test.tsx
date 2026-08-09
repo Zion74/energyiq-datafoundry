@@ -344,8 +344,8 @@ describe("PreschoolOverviewRenderer reading flow", () => {
       "Total operating energy",
       "4.1 Operating Energy by Appliance Type",
       "4.2 Operating Hours Spike Analysis",
-      "Method, tariff and evidence",
       "Supporting Evidence · all-hours Portfolio Appliance context",
+      "Method, tariff and evidence",
     ].map((label) => operatingSection.textContent!.indexOf(label));
     expect(readingOrder.every((position) => position >= 0)).toBe(true);
     expect(readingOrder).toEqual([...readingOrder].sort((left, right) => left - right));

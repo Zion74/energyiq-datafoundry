@@ -485,6 +485,8 @@ export function PreschoolOverviewRenderer({
               <OperatingSpikeTable centres={view.operational.operating.centres} />
             </section>
 
+            <AllHoursApplianceContext appliances={view.appliances} />
+
             <details className="mt-7 rounded-lg border border-border bg-surface-subtle/40 px-4 py-3">
               <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Method, tariff and evidence</summary>
               <dl className="mt-3 grid gap-2 text-xs leading-5 sm:grid-cols-2">
@@ -497,7 +499,6 @@ export function PreschoolOverviewRenderer({
               <div className="mt-3"><PreschoolEvidenceLink label="View supporting evidence" /></div>
             </details>
 
-            <AllHoursApplianceContext appliances={view.appliances} />
           </>
         ) : (
           <div className="mt-5 rounded-lg border border-border bg-surface-subtle p-4" role="status">

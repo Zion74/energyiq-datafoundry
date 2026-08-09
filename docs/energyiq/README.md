@@ -75,7 +75,7 @@
 | [2026-08-04 Tariff 与营业日历持久化实施记录](2026-08-04-Tariff与营业日历持久化实施记录.md) | 不可变 Tariff/Calendar、Published Release Resolver、API/Web/Saved serialized 集成、显式 Unavailable，以及待完成的 Ngee Ann #24-first Golden |
 | [2026-08-04 Published Meter Routing 实施记录](2026-08-04-Published-Meter-Routing实施记录.md) | Mapping schema v2、Meter attachment、按 Scope/Resource/Category 的官方 routes、Release pin 与四层 Golden |
 | [2026-08-04 T03/T04/T13 集成实施记录](2026-08-04-T03-T04-T13集成实施记录.md) | Runtime policy、Period-effective metadata、Workspace 默认模型、公开 API/持久化契约，以及 T13 尚未通过的 live 产品门禁 |
-| [Preschool Overview Interaction Matrix](2026-08-06-Preschool-Overview-Interaction-Matrix.md) | Preschool 对 Charles 模块的保留、适配、主动删除，以及 Evidence、降级、1440/1920 和人工验收边界 |
+| [Preschool Overview Interaction Matrix](2026-08-06-Preschool-Overview-Interaction-Matrix.md) | Preschool 对 Charles 模块的保留、适配与主动删除；包含 A4 Operating Hours 的 v2 additive/feature-detect 合同、Evidence 收尾顺序，以及新 API 构建后的 3102 正向验收边界 |
 | [2026-08-03 DeepSeek V4 Flash 与 DataFoundry 实测记录](2026-08-03-DeepSeek-V4-Flash与DataFoundry实测记录.md) | Flash 连接和工具链可运行，但同一问数产生过两种结果；记录时区 SQL、图表触发、60 秒超时和用户级模型配置等真实缺口 |
 | [2026-08-01 Ngee Ann 源到事实契约原型](2026-08-01-Ngee-Ann-源到事实契约原型记录.md) | 统一 Adapter、SHA 幂等、实际时长 Fact、Virtual Load 12、冲突与官方汇总排重的可运行证据 |
 | [2026-08-01 Admin 首次数据源配置交互原型](2026-08-01-Admin-首次数据源配置交互原型记录.md) | 已废弃的 A/B/C 历史实验记录；正式路径已回归 Project Overview、Structure、Data Sources 与 Meter Mapping |

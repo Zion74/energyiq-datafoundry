@@ -389,6 +389,8 @@ export function buildPreschoolOverviewViewModel(
   const queryIds = [...new Set(snapshot.evidence.flatMap((item) => item.queryIds))];
   const decisionSummary = buildPreschoolDecisionSummary(snapshot);
   const benchmark = buildPreschoolBenchmarkView(snapshot);
+  // v2 is additive for rolling deployments: old Web ignores A4 fields, while new Web
+  // feature-detects operatingAppliances and fails closed against a pre-A4 v2 API.
   const hasCurrentOperationalContract = snapshot.preschoolOperational?.status === "available"
     && Reflect.get(snapshot.preschoolOperational.contract, "version") === "2"
     && Reflect.get(snapshot.preschoolOperational, "operatingAppliances") !== undefined;
