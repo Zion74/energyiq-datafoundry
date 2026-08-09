@@ -35,8 +35,24 @@ describe("Preschool AI Discovery Evidence", () => {
       .toMatchObject({ spikeCount: 7, centreCount: 3 });
     expect(bundle?.items.find((item) => item.id === "spike:operating-summary")?.values)
       .toMatchObject({ spikeCount: 21, centreCount: 14 });
-    expect(bundle?.items.some((item) => item.kind === "circuit" && item.values.leadingCircuit === "Other Lighting3"))
-      .toBe(true);
+    if (snapshot.preschoolOperational?.status !== "available") throw new Error("Expected operational fixture");
+    const strongestStandby = snapshot.preschoolOperational.spikes.standby.centres
+      .toSorted((left, right) => right.worstSpike.impactKwh - left.worstSpike.impactKwh
+        || left.centreCode.localeCompare(right.centreCode))[0]!;
+    const expectedCircuitName = strongestStandby.worstSpike.leadingCircuitName
+      .slice(strongestStandby.worstSpike.leadingCircuitName.indexOf(":") + 1);
+    const circuitItems = bundle?.items.filter((item) => item.kind === "circuit") ?? [];
+    expect(circuitItems).toHaveLength(1);
+    expect(circuitItems[0]).toMatchObject({
+      id: `circuit:standby:${strongestStandby.centreCode}`,
+      values: {
+        operatingState: "standby",
+        centreCode: strongestStandby.centreCode,
+        leadingCircuit: expectedCircuitName,
+        leadingCircuitKwh: strongestStandby.worstSpike.leadingCircuitKwh,
+        leadingCircuitSharePct: strongestStandby.worstSpike.leadingCircuitSharePct,
+      },
+    });
     const serialized = JSON.stringify(bundle);
     expect(serialized.length).toBeLessThanOrEqual(6_000);
     expect(serialized).not.toMatch(/forecast|tariff|cost|28,011|7,639|raw reading|energy_interval_facts/i);
