@@ -267,3 +267,38 @@ http://127.0.0.1:4178/analysis?utility=electricity&project=proj-nap-energy-analy
 - Comparison 或 anomaly 缺失时对应信号局部 `Unavailable`，不补零；
 - 聚焦 Renderer 测试 `53/53` 通过，根 TypeScript build typecheck 通过，`git diff --check` 无错误；
 - 尚未完成真实 Chrome 1440/1920 与 Charles 人工验收，不能据此宣称 NAP-A1 产品验收完成。
+
+## 15. NAP-A2 执行切片：When energy occurs（2026-08-10）
+
+### 15.1 客户问题与页面结果
+
+本切片只回答：**用电高点通常出现在什么时候，工作日、周末、Level 6 与 Level 7 的形状是否不同，FM 应先检查哪个时段？**
+
+1. 复用现有 `Day Profile`、Day Type、Project/Level Scope 与 `Date × Hour / Level × Hour Heatmap`，不增加新的 Kernel 或浏览器计算口径；
+2. 在图表前给一个由已验证 profile cells 计算的简短事实摘要：所选 Day Type/Scope 的峰值小时、峰值均值、完整样本天数；
+3. 只有同一 Snapshot 内存在两个可比且完整的 profile 时，才给工作日/周末或 Level 间的差异摘要；否则局部写明样本不足；
+4. Heatmap 继续作为探索证据，不把颜色较深直接写成异常、浪费或原因；
+5. 逐 Section AI interpretation 暂不在本切片硬接，等待正式 Ngee Ann Structured Signal Adapter/Artifact；确定性摘要不能冒充 AI。
+
+### 15.2 开发前自我 Grilling
+
+- **峰值小时是否等于应关设备的时段？** 否。它只说明平均 profile 的最高点；没有 Calendar、occupancy 或设备状态就不能推断浪费。
+- **两天样本能否叫“典型周末”？** 不能。界面必须同时显示 `n complete-day samples`，样本少时使用 `observed` 而非 `typical`。
+- **不同 Scope 的峰值能否相加或声称因果？** 不能。Project、Level 6、Level 7 只能分别陈述；若需要 contributor，使用现有 Evidence 下钻，不在前端用峰值时刻拼装因果。
+- **是否为了对齐原型新增全局 Day Type/Scope 控制？** 否。它们保持模块局部状态，不改变整页统一 Snapshot/Period，也不触发整页 AI。
+- **是否需要新图？** 第一切片不需要。现有 Day Profile 与 Heatmap 已覆盖表达；先改善论点和阅读路径，只有人工验收证明信息不足再增加视觉。
+
+### 15.3 自动化验收
+
+1. Golden Snapshot 的默认 Day Type/Scope 摘要来自同一组 profile cells，并能定位峰值小时和值；
+2. 切换 Day Type 或 Scope 时，摘要与图同步变化，不保留旧选择；
+3. `sampleDayCount=0/null`、缺 Day Type、缺 Level 或 partial cells 时明确 Unavailable/observed limitation，不补零；
+4. 现有键盘、hover/focus、Snapshot refresh 和 Heatmap 测试保持通过；
+5. 聚焦 Renderer tests、root typecheck/build、`git diff --check` 通过后才能提交。
+
+### 15.4 停止条件
+
+- 需要前端重算正式 anomaly、Calendar 或 occupancy；
+- 只能通过硬编码原型日期、营业时间或峰值结论实现；
+- 为一个模块建设通用图表 DSL、全局筛选器或新的 AI Run；
+- 样本不足却仍必须写成“典型行为”才能获得视觉效果。
