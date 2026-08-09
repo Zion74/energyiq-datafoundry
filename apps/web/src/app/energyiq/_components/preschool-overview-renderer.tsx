@@ -814,6 +814,7 @@ function BenchmarkMetricSection({
   sectionNumber: string;
 }) {
   const metricTitle = distribution.id === "eui" ? "EUI Benchmark" : "Per-pax Energy Benchmark";
+  const rowGridClass = "grid min-w-[900px] grid-cols-[minmax(240px,1.2fr)_88px_116px_116px_minmax(280px,1.4fr)_72px] items-center gap-3";
   return (
     <section className="mt-7 border-t border-border pt-6" aria-labelledby={`preschool-${distribution.id}-benchmark-heading`}>
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -825,90 +826,76 @@ function BenchmarkMetricSection({
       </div>
 
       <div className="mt-4 overflow-x-auto rounded-lg border border-border" data-benchmark-summary={distribution.id}>
-        <table className="w-full min-w-[760px] border-collapse text-left text-xs">
-          <thead className="bg-surface-subtle text-[10px] uppercase tracking-[0.07em] text-muted-light">
-            <tr>
-              <th className="px-4 py-3 font-semibold">Centre type</th>
-              <th className="px-4 py-3 text-right font-semibold">Outlets</th>
-              <th className="px-4 py-3 text-right font-semibold">P50</th>
-              <th className="px-4 py-3 text-right font-semibold">P75</th>
-              <th className="px-4 py-3 font-semibold">Outlets above P75</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border bg-surface">
-            {distribution.cohorts.map((cohort) => {
-              const aboveP75 = cohort.points.filter((point) => point.aboveP75);
-              return (
-                <tr key={cohort.name} data-benchmark-summary-cohort={`${distribution.id}:${cohort.name}`}>
-                  <th scope="row" className="px-4 py-3 font-semibold text-foreground">{cohort.name}</th>
-                  <td className="px-4 py-3 text-right tabular-nums text-muted">{cohort.sampleSize}</td>
-                  <td className="px-4 py-3 text-right tabular-nums font-semibold text-primary">{cohort.p50}</td>
-                  <td className="px-4 py-3 text-right tabular-nums font-semibold text-step-warning">{cohort.p75}</td>
-                  <td className="px-4 py-3">
+        <div className={`${rowGridClass} bg-surface-subtle px-4 py-3 text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-light`} aria-hidden="true">
+          <span>Centre type</span>
+          <span className="text-right">Outlets</span>
+          <span className="text-right">P50</span>
+          <span className="text-right">P75</span>
+          <span>Outlets above P75</span>
+          <span className="text-right">Detail</span>
+        </div>
+        <div className="min-w-[900px] divide-y divide-border bg-surface">
+          {distribution.cohorts.map((cohort, cohortIndex) => {
+            const aboveP75 = cohort.points.filter((point) => point.aboveP75);
+            const visual = benchmarkCohortVisual(cohort.name);
+            return (
+              <details
+                key={cohort.name}
+                data-benchmark-detail={`${distribution.id}:${cohort.name}`}
+                className="group"
+              >
+                <summary
+                  data-benchmark-summary-cohort={`${distribution.id}:${cohort.name}`}
+                  tabIndex={0}
+                  aria-label={`${cohort.name}: ${cohort.sampleSize} Outlets, P50 ${cohort.p50}, P75 ${cohort.p75}, ${aboveP75.length} above P75. View detail.`}
+                  className={`${rowGridClass} cursor-pointer list-none px-4 py-3 text-xs transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 [&::-webkit-details-marker]:hidden`}
+                >
+                  <span className="flex min-w-0 items-center gap-2.5 font-semibold text-foreground">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] text-white">{cohortIndex + 1}</span>
+                    <svg viewBox="0 0 16 16" aria-hidden="true" className={`h-3.5 w-3.5 shrink-0 ${visual.className}`}>
+                      <BenchmarkMarker shape={visual.shape} cx={8} cy={8} radius={4} />
+                    </svg>
+                    <span className="truncate">{cohort.name}</span>
+                  </span>
+                  <span className="text-right tabular-nums text-muted">{cohort.sampleSize}</span>
+                  <span className="text-right tabular-nums font-semibold text-primary">{cohort.p50}</span>
+                  <span className="text-right tabular-nums font-semibold text-step-warning">{cohort.p75}</span>
+                  <span>
                     {aboveP75.length > 0 ? (
-                      <div className="flex flex-wrap gap-1.5">
+                      <span className="flex flex-wrap gap-1.5">
                         {aboveP75.map((point) => (
                           <span key={point.centreCode} data-benchmark-above-p75={`${distribution.id}:${point.centreCode}`} className="inline-flex items-center gap-1 rounded-full border border-step-error/25 bg-step-error-soft px-2 py-1 text-[11px] text-step-error">
                             <strong className="font-semibold">{point.name}</strong>
                             <span className="tabular-nums">{point.valueLabel}</span>
                           </span>
                         ))}
-                      </div>
+                      </span>
                     ) : (
                       <span className="text-muted">None</span>
                     )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <p className="mt-2 text-xs text-muted">Values shown in {distribution.unit}. The summary is visible before opening Detail.</p>
-
-      <details data-benchmark-detail={distribution.id} className="mt-4 rounded-lg border border-border bg-surface-subtle/40">
-        <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
-          View {metricTitle} detail
-        </summary>
-        <div className="border-t border-border p-4">
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <h5 className="text-sm font-semibold text-foreground">Observed Centre distribution</h5>
-              <p className="mt-1 text-xs leading-5 text-muted">Each marker is one Centre. The view uses observed values and cohort thresholds; no fitted curve is used.</p>
-            </div>
-            <span className="text-xs text-muted">Shared axis · {distribution.unit}</span>
-          </div>
-          <div className="mt-4">
-            <BenchmarkDistributionPlot distribution={distribution} />
-          </div>
-          <div className="mt-5 overflow-x-auto rounded-lg border border-border" data-benchmark-ranking={distribution.id}>
-            <table className="w-full min-w-[780px] border-collapse text-left text-xs">
-              <thead className="bg-surface-subtle text-[10px] uppercase tracking-[0.07em] text-muted-light">
-                <tr>
-                  <th className="px-3 py-2.5 text-right font-semibold">Priority</th>
-                  <th className="px-3 py-2.5 font-semibold">Outlet</th>
-                  <th className="px-3 py-2.5 font-semibold">Centre type</th>
-                  <th className="px-3 py-2.5 text-right font-semibold">Value</th>
-                  <th className="px-3 py-2.5 text-right font-semibold">Cohort P75</th>
-                  <th className="px-3 py-2.5 font-semibold">Review state</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border bg-surface">
-                {distribution.ranking.map((row) => (
-                  <tr key={row.centreCode} data-benchmark-ranking-row={`${distribution.id}:${row.centreCode}`}>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-muted">{row.rank}</td>
-                    <th scope="row" className="px-3 py-2.5 font-semibold text-foreground">{row.name}</th>
-                    <td className="px-3 py-2.5 text-muted">{row.cohort}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-foreground">{row.valueLabel}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-muted">{row.p75}</td>
-                    <td className={`px-3 py-2.5 font-semibold ${row.aboveP75 ? "text-step-error" : "text-muted"}`}>{row.aboveP75 ? "Above P75" : "Within threshold"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                  </span>
+                  <span className="flex justify-end text-primary">
+                    <EnergyIcon name="arrow" className="h-4 w-4 transition-transform group-open:rotate-90" aria-hidden="true" />
+                  </span>
+                </summary>
+                <div className="min-w-[900px] border-t border-border bg-surface-subtle/35 p-4">
+                  <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+                    <div className="min-w-0">
+                      <h5 className="text-sm font-semibold text-foreground">Observed distribution — {cohort.name}</h5>
+                      <p className="mt-1 text-xs leading-5 text-muted">Observed Centres only. Bars show sample frequency; markers show each Centre. No fitted curve is used.</p>
+                      <div className="mt-3">
+                        <BenchmarkCohortDistributionPlot distribution={distribution} cohort={cohort} />
+                      </div>
+                    </div>
+                    <BenchmarkCohortRanking distribution={distribution} cohort={cohort} />
+                  </div>
+                </div>
+              </details>
+            );
+          })}
         </div>
-      </details>
+      </div>
+      <p className="mt-2 text-xs text-muted">Values shown in {distribution.unit}. Open Detail on a Centre Type to see only its distribution and Centre ranking.</p>
     </section>
   );
 }
@@ -1080,74 +1067,139 @@ function BenchmarkCohortLegend() {
   );
 }
 
-function BenchmarkDistributionPlot({ distribution }: { distribution: BenchmarkDistributionView }) {
-  const width = 720;
-  const height = 250;
-  const margin = { top: 42, right: 24, bottom: 34, left: 172 };
+type BenchmarkCohortView = BenchmarkDistributionView["cohorts"][number];
+
+function BenchmarkCohortDistributionPlot({
+  distribution,
+  cohort,
+}: {
+  distribution: BenchmarkDistributionView;
+  cohort: BenchmarkCohortView;
+}) {
+  const width = 700;
+  const height = 270;
+  const margin = { top: 42, right: 24, bottom: 44, left: 42 };
   const plotWidth = width - margin.left - margin.right;
-  const laneGap = 54;
+  const baselineY = height - margin.bottom - 24;
+  const histogramHeight = baselineY - margin.top;
+  const binCount = 8;
+  const axisSpan = distribution.axis.max - distribution.axis.min;
+  const binSpan = axisSpan / binCount;
+  const bins = Array.from({ length: binCount }, (_, index) => ({
+    start: distribution.axis.min + index * binSpan,
+    count: 0,
+  }));
+  cohort.points.forEach((point) => {
+    const binIndex = Math.min(binCount - 1, Math.max(0, Math.floor((point.value - distribution.axis.min) / binSpan)));
+    bins[binIndex]!.count += 1;
+  });
+  const maximumBinCount = Math.max(1, ...bins.map((bin) => bin.count));
   const x = (value: number) => roundSvg(
-    margin.left + ((value - distribution.axis.min) / (distribution.axis.max - distribution.axis.min)) * plotWidth,
+    margin.left + ((value - distribution.axis.min) / axisSpan) * plotWidth,
   );
-  const offsets = [-7, 0, 7];
+  const barSlotWidth = plotWidth / binCount;
+  const visual = benchmarkCohortVisual(cohort.name);
+  const rugOffsets = [0, -7, 7];
 
   return (
-    <article
-      data-benchmark-distribution={distribution.id}
-      className="overflow-hidden rounded-lg border border-border bg-surface-subtle p-4"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h5 className="text-xs font-semibold text-foreground">{distribution.label}</h5>
-          <p className="mt-1 text-xs text-muted">Shared cohort axis · {distribution.unit}</p>
-        </div>
-        <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2 py-0.5 text-xs font-semibold text-step-warning">Provisional</span>
-      </div>
+    <div className="overflow-hidden border-y border-border bg-surface py-3" data-benchmark-distribution={`${distribution.id}:${cohort.name}`}>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         role="img"
-        aria-label={`${distribution.label} distribution by cohort`}
+        aria-label={`${cohort.name} observed ${distribution.label} distribution`}
         data-shared-axis={distribution.id}
-        className="mt-3 h-auto w-full"
+        className="h-auto w-full"
       >
-        <line x1={margin.left} y1={height - margin.bottom} x2={width - margin.right} y2={height - margin.bottom} stroke="currentColor" className="text-border" />
-        {distribution.cohorts.map((cohort, cohortIndex) => {
-          const laneY = margin.top + cohortIndex * laneGap;
-          const visual = benchmarkCohortVisual(cohort.name);
+        <line x1={margin.left} y1={baselineY} x2={width - margin.right} y2={baselineY} stroke="currentColor" className="text-border" />
+        <text x={margin.left} y={margin.top - 12} className="fill-muted text-[10px]">Observed Centre count · max {maximumBinCount}</text>
+        {bins.map((bin, index) => {
+          const barHeight = roundSvg((bin.count / maximumBinCount) * histogramHeight);
+          const barX = roundSvg(margin.left + index * barSlotWidth + 3);
           return (
-            <g key={cohort.name} data-benchmark-lane={`${distribution.id}:${cohort.name}`}>
-              <text x={margin.left - 12} y={laneY - 4} textAnchor="end" className="fill-foreground text-xs font-semibold">{cohort.name}</text>
-              <text x={margin.left - 12} y={laneY + 11} textAnchor="end" className="fill-muted text-[10px]">n={cohort.sampleSize}</text>
-              <line x1={margin.left} y1={laneY} x2={width - margin.right} y2={laneY} stroke="currentColor" className="text-border" />
-              <line x1={x(cohort.p50Value)} y1={laneY - 14} x2={x(cohort.p50Value)} y2={laneY + 14} stroke="currentColor" strokeWidth={1.5} className="text-primary" />
-              <line x1={x(cohort.p75Value)} y1={laneY - 14} x2={x(cohort.p75Value)} y2={laneY + 14} stroke="currentColor" strokeWidth={1.5} strokeDasharray="3 3" className="text-step-warning" />
-              <text x={x(cohort.p50Value)} y={laneY - 18} textAnchor="middle" className="fill-primary text-[10px] font-semibold">P50 {cohort.p50}</text>
-              <text x={x(cohort.p75Value)} y={laneY + 25} textAnchor="middle" className="fill-step-warning text-[10px] font-semibold">P75 {cohort.p75}</text>
-              {cohort.points.map((point, pointIndex) => {
-                const cx = x(point.value);
-                const cy = laneY + offsets[pointIndex % offsets.length]!;
-                return (
-                  <g
-                    key={point.centreCode}
-                    data-distribution-centre={`${distribution.id}:${point.centreCode}`}
-                    className={visual.className}
-                  >
-                    <title>{`${point.name}: ${point.value.toFixed(distribution.id === "eui" ? 2 : 1)} ${distribution.unit}${point.aboveP75 ? ", above cohort P75" : ""}`}</title>
-                    <BenchmarkMarker shape={visual.shape} cx={cx} cy={cy} radius={3.6} />
-                  </g>
-                );
-              })}
+            <rect
+              key={bin.start}
+              x={barX}
+              y={baselineY - barHeight}
+              width={Math.max(2, barSlotWidth - 6)}
+              height={barHeight}
+              rx="2"
+              className="fill-primary"
+              opacity={bin.count > 0 ? 0.16 : 0.035}
+            >
+              <title>{`${bin.count} Centre${bin.count === 1 ? "" : "s"} in this observed range`}</title>
+            </rect>
+          );
+        })}
+        <line x1={x(cohort.p50Value)} y1={margin.top} x2={x(cohort.p50Value)} y2={baselineY + 24} stroke="currentColor" strokeWidth={1.8} className="text-primary" />
+        <line x1={x(cohort.p75Value)} y1={margin.top} x2={x(cohort.p75Value)} y2={baselineY + 24} stroke="currentColor" strokeWidth={1.8} strokeDasharray="5 4" className="text-step-warning" />
+        <text x={x(cohort.p50Value)} y={margin.top - 8} textAnchor="middle" className="fill-primary text-[11px] font-semibold">P50 {cohort.p50}</text>
+        <text x={x(cohort.p75Value)} y={margin.top + 10} textAnchor="middle" className="fill-step-warning text-[11px] font-semibold">P75 {cohort.p75}</text>
+        {cohort.points.map((point, pointIndex) => {
+          const cx = x(point.value);
+          const cy = baselineY + 16 + rugOffsets[pointIndex % rugOffsets.length]!;
+          return (
+            <g
+              key={point.centreCode}
+              data-distribution-centre={`${distribution.id}:${cohort.name}:${point.centreCode}`}
+              className={point.aboveP75 ? "text-step-error" : visual.className}
+            >
+              <title>{`${point.name}: ${point.valueLabel} ${distribution.unit}${point.aboveP75 ? ", above cohort P75" : ""}`}</title>
+              <BenchmarkMarker shape={visual.shape} cx={cx} cy={cy} radius={4} />
             </g>
           );
         })}
-        <text x={margin.left} y={height - 12} className="fill-muted text-[10px]">{distribution.axis.min}</text>
-        <text x={width - margin.right} y={height - 12} textAnchor="end" className="fill-muted text-[10px]">{distribution.axis.max} {distribution.unit}</text>
+        <text x={margin.left} y={height - 10} className="fill-muted text-[10px]">{distribution.axis.min}</text>
+        <text x={width - margin.right} y={height - 10} textAnchor="end" className="fill-muted text-[10px]">{distribution.axis.max} {distribution.unit}</text>
       </svg>
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-muted">
-        <span><strong className="font-semibold text-primary">Typical (P50)</strong> · solid marker</span>
-        <span><strong className="font-semibold text-step-warning">Review above (P75)</strong> · dashed marker</span>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 px-2 text-[10px] text-muted">
+        <span><strong className="font-semibold text-primary">P50</strong> · solid line</span>
+        <span><strong className="font-semibold text-step-warning">P75</strong> · dashed line</span>
+        <span><strong className="font-semibold text-step-error">Above P75</strong> · red marker</span>
       </div>
-    </article>
+    </div>
+  );
+}
+
+function BenchmarkCohortRanking({
+  distribution,
+  cohort,
+}: {
+  distribution: BenchmarkDistributionView;
+  cohort: BenchmarkCohortView;
+}) {
+  const maximumValue = Math.max(1, ...cohort.points.map((point) => point.value));
+  return (
+    <aside className="min-w-0 xl:border-l xl:border-border xl:pl-5" data-benchmark-ranking={`${distribution.id}:${cohort.name}`}>
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h5 className="text-sm font-semibold text-foreground">Centre ranking</h5>
+          <p className="mt-1 text-xs text-muted">Above-P75 Centres first, then highest observed value.</p>
+        </div>
+        <span className="text-xs tabular-nums text-muted">n={cohort.sampleSize}</span>
+      </div>
+      <dl className="mt-3 grid grid-cols-3 gap-3 border-y border-border py-3 text-xs">
+        <div><dt className="text-muted">P50</dt><dd className="mt-1 font-semibold tabular-nums text-primary">{cohort.p50}</dd></div>
+        <div><dt className="text-muted">P75</dt><dd className="mt-1 font-semibold tabular-nums text-step-warning">{cohort.p75}</dd></div>
+        <div><dt className="text-muted">Above</dt><dd className="mt-1 font-semibold tabular-nums text-step-error">{cohort.points.filter((point) => point.aboveP75).length}</dd></div>
+      </dl>
+      <ol className="mt-3 divide-y divide-border">
+        {cohort.points.map((point, index) => (
+          <li
+            key={point.centreCode}
+            data-benchmark-ranking-row={`${distribution.id}:${cohort.name}:${point.centreCode}`}
+            className="grid grid-cols-[24px_minmax(96px,auto)_minmax(80px,1fr)_64px] items-center gap-2 py-2 text-xs"
+          >
+            <span className="text-right tabular-nums text-muted">{index + 1}</span>
+            <span className={`truncate font-semibold ${point.aboveP75 ? "text-step-error" : "text-foreground"}`}>{point.name}</span>
+            <span className="h-1.5 overflow-hidden rounded-full bg-border" aria-hidden="true">
+              <span className={`block h-full rounded-full ${point.aboveP75 ? "bg-step-error" : "bg-primary"}`} style={{ width: `${Math.max(3, (point.value / maximumValue) * 100)}%` }} />
+            </span>
+            <span className={`text-right tabular-nums font-semibold ${point.aboveP75 ? "text-step-error" : "text-foreground"}`}>{point.valueLabel}</span>
+          </li>
+        ))}
+      </ol>
+      <p className="mt-3 text-[10px] leading-4 text-muted">Values in {distribution.unit}. Ranking is scoped to {cohort.name} only.</p>
+    </aside>
   );
 }
 

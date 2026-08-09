@@ -110,12 +110,37 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(activePerPaxAbove).toEqual(["per-pax:M", "per-pax:G"]);
 
     const details = benchmarkSection.querySelectorAll<HTMLDetailsElement>("details[data-benchmark-detail]");
-    expect(details).toHaveLength(2);
+    expect(details).toHaveLength(6);
+    expect([...details].map((detail) => detail.dataset.benchmarkDetail)).toEqual([
+      "eui:Senior Care Center",
+      "eui:Active Aging Center",
+      "eui:Preschool",
+      "per-pax:Senior Care Center",
+      "per-pax:Active Aging Center",
+      "per-pax:Preschool",
+    ]);
     expect([...details].every((detail) => !detail.open)).toBe(true);
-    expect(benchmarkSection.querySelectorAll('[data-benchmark-ranking="eui"] [data-benchmark-ranking-row]')).toHaveLength(30);
-    expect(benchmarkSection.querySelectorAll('[data-benchmark-ranking="per-pax"] [data-benchmark-ranking-row]')).toHaveLength(30);
-    expect([...benchmarkSection.querySelectorAll('[data-benchmark-ranking="per-pax"] [data-benchmark-ranking-row]')].slice(0, 3)
-      .map((node) => node.getAttribute("data-benchmark-ranking-row"))).toEqual(["per-pax:J", "per-pax:M", "per-pax:G"]);
+    expect([...details].every((detail) => detail.querySelector<HTMLElement>(":scope > summary")?.tabIndex === 0)).toBe(true);
+    expect([...details].every((detail) => detail.querySelector(":scope > summary")?.getAttribute("aria-label")?.includes("View detail."))).toBe(true);
+    [...details].forEach((detail, index) => {
+      detail.open = true;
+      expect(detail.open).toBe(true);
+      expect([...details].filter((candidate) => candidate.open).map((candidate) => candidate.dataset.benchmarkDetail)).toEqual([
+        details[index]!.dataset.benchmarkDetail,
+      ]);
+      detail.open = false;
+    });
+    expect(benchmarkSection.querySelectorAll('[data-benchmark-ranking^="eui:"] [data-benchmark-ranking-row]')).toHaveLength(30);
+    expect(benchmarkSection.querySelectorAll('[data-benchmark-ranking^="per-pax:"] [data-benchmark-ranking-row]')).toHaveLength(30);
+    expect(benchmarkSection.querySelectorAll('[data-benchmark-ranking="eui:Senior Care Center"] [data-benchmark-ranking-row]')).toHaveLength(14);
+    expect(benchmarkSection.querySelectorAll('[data-benchmark-ranking="eui:Active Aging Center"] [data-benchmark-ranking-row]')).toHaveLength(8);
+    expect(benchmarkSection.querySelectorAll('[data-benchmark-ranking="per-pax:Preschool"] [data-benchmark-ranking-row]')).toHaveLength(8);
+    expect([...benchmarkSection.querySelectorAll('[data-benchmark-ranking="per-pax:Active Aging Center"] [data-benchmark-ranking-row]')].slice(0, 2)
+      .map((node) => node.getAttribute("data-benchmark-ranking-row"))).toEqual([
+      "per-pax:Active Aging Center:M",
+      "per-pax:Active Aging Center:G",
+    ]);
+    expect(benchmarkSection.querySelector('[data-benchmark-detail="eui:Senior Care Center"]')?.textContent).not.toContain("Active Aging Center · n=");
     expect(benchmarkSection.textContent).not.toMatch(/bell curve/i);
   });
 

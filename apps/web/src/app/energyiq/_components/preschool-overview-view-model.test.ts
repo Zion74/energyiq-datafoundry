@@ -116,9 +116,9 @@ describe("Preschool Overview ViewModel", () => {
         unit: "kWh/m²/year",
         axis: { min: 0, max: 16 },
         cohorts: [
+          { name: "Senior Care Center", sampleSize: 14, p50: "6.76", p75: "9.20", pointCount: 14 },
           { name: "Active Aging Center", sampleSize: 8, p50: "6.72", p75: "15.13", pointCount: 8 },
           { name: "Preschool", sampleSize: 8, p50: "9.00", p75: "10.95", pointCount: 8 },
-          { name: "Senior Care Center", sampleSize: 14, p50: "6.76", p75: "9.20", pointCount: 14 },
         ],
       },
       {
@@ -128,9 +128,9 @@ describe("Preschool Overview ViewModel", () => {
         unit: "kWh/person/month",
         axis: { min: 0, max: 24 },
         cohorts: [
+          { name: "Senior Care Center", sampleSize: 14, p50: "18.5", p75: "20.7", pointCount: 14 },
           { name: "Active Aging Center", sampleSize: 8, p50: "17.2", p75: "22.5", pointCount: 8 },
           { name: "Preschool", sampleSize: 8, p50: "18.1", p75: "20.1", pointCount: 8 },
-          { name: "Senior Care Center", sampleSize: 14, p50: "18.5", p75: "20.7", pointCount: 14 },
         ],
       },
     ]);

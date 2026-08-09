@@ -668,6 +668,16 @@ function buildPreschoolBenchmarkView(
 function buildBenchmarkDistributions(
   benchmark: NonNullable<EnergyProjectAnalysisSnapshotDto["preschoolBenchmark"]>,
 ): PreschoolBenchmarkDistribution[] {
+  const cohortDisplayOrder = new Map([
+    ["Senior Care Center", 0],
+    ["Active Aging Center", 1],
+    ["Preschool", 2],
+  ]);
+  const orderedCohorts = [...benchmark.cohorts].sort((left, right) => (
+    (cohortDisplayOrder.get(left.name) ?? Number.MAX_SAFE_INTEGER)
+      - (cohortDisplayOrder.get(right.name) ?? Number.MAX_SAFE_INTEGER)
+      || left.name.localeCompare(right.name)
+  ));
   const definitions = [
     {
       id: "eui",
@@ -723,7 +733,7 @@ function buildBenchmarkDistributions(
         min: 0,
         max: Math.max(1, Math.ceil(Math.max(...values, ...p75Values))),
       },
-      cohorts: benchmark.cohorts.map((cohort) => {
+      cohorts: orderedCohorts.map((cohort) => {
         const threshold = definition.threshold(cohort);
         return {
           name: cohort.name,
