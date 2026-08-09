@@ -872,7 +872,7 @@ function BenchmarkMetricSection({
   sectionNumber: string;
 }) {
   const metricTitle = distribution.id === "eui" ? "EUI Benchmark" : "Per-pax Energy Benchmark";
-  const rowGridClass = "grid min-w-[900px] grid-cols-[minmax(240px,1.2fr)_88px_116px_116px_minmax(280px,1.4fr)_72px] items-center gap-3";
+  const rowGridClass = "grid min-w-[760px] grid-cols-[minmax(180px,1.15fr)_56px_78px_78px_minmax(240px,1.8fr)_40px] items-center gap-3";
   return (
     <section className="mt-7 border-t border-border pt-6" aria-labelledby={`preschool-${distribution.id}-benchmark-heading`}>
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -886,13 +886,13 @@ function BenchmarkMetricSection({
       <div className="mt-4 overflow-x-auto rounded-lg border border-border" data-benchmark-summary={distribution.id}>
         <div className={`${rowGridClass} bg-surface-subtle px-4 py-3 text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-light`} aria-hidden="true">
           <span>Centre type</span>
-          <span className="text-right">Outlets</span>
-          <span className="text-right">P50</span>
-          <span className="text-right">P75</span>
+          <span data-benchmark-summary-header="outlets">Outlets</span>
+          <span data-benchmark-summary-header="p50">P50</span>
+          <span data-benchmark-summary-header="p75">P75</span>
           <span>Outlets above P75</span>
           <span className="text-right">Detail</span>
         </div>
-        <div className="min-w-[900px] divide-y divide-border bg-surface">
+        <div className="min-w-[760px] divide-y divide-border bg-surface">
           {distribution.cohorts.map((cohort, cohortIndex) => {
             const aboveP75 = cohort.points.filter((point) => point.aboveP75);
             const visual = benchmarkCohortVisual(cohort.name);
@@ -915,9 +915,9 @@ function BenchmarkMetricSection({
                     </svg>
                     <span className="truncate">{cohort.name}</span>
                   </span>
-                  <span className="text-right tabular-nums text-muted">{cohort.sampleSize}</span>
-                  <span className="text-right tabular-nums font-semibold text-primary">{cohort.p50}</span>
-                  <span className="text-right tabular-nums font-semibold text-step-warning">{cohort.p75}</span>
+                  <span data-benchmark-summary-value="outlets" className="tabular-nums text-muted">{cohort.sampleSize}</span>
+                  <span data-benchmark-summary-value="p50" className="tabular-nums font-semibold text-primary">{cohort.p50}</span>
+                  <span data-benchmark-summary-value="p75" className="tabular-nums font-semibold text-step-warning">{cohort.p75}</span>
                   <span>
                     {aboveP75.length > 0 ? (
                       <span className="flex flex-wrap gap-1.5">
@@ -936,7 +936,7 @@ function BenchmarkMetricSection({
                     <EnergyIcon name="arrow" className="h-4 w-4 transition-transform group-open:rotate-90" aria-hidden="true" />
                   </span>
                 </summary>
-                <div className="min-w-[900px] border-t border-border bg-surface-subtle/35 p-4">
+                <div className="border-t border-border bg-surface-subtle/35 p-4">
                   <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
                     <div className="min-w-0">
                       <h5 className="text-sm font-semibold text-foreground">Observed distribution — {cohort.name}</h5>
@@ -1240,22 +1240,30 @@ function BenchmarkCohortRanking({
         <div><dt className="text-muted">P75</dt><dd className="mt-1 font-semibold tabular-nums text-step-warning">{cohort.p75}</dd></div>
         <div><dt className="text-muted">Above</dt><dd className="mt-1 font-semibold tabular-nums text-step-error">{cohort.points.filter((point) => point.aboveP75).length}</dd></div>
       </dl>
-      <ol className="mt-3 divide-y divide-border">
-        {cohort.points.map((point, index) => (
-          <li
-            key={point.centreCode}
-            data-benchmark-ranking-row={`${distribution.id}:${cohort.name}:${point.centreCode}`}
-            className="grid grid-cols-[24px_minmax(96px,auto)_minmax(80px,1fr)_64px] items-center gap-2 py-2 text-xs"
-          >
-            <span className="text-right tabular-nums text-muted">{index + 1}</span>
-            <span className={`truncate font-semibold ${point.aboveP75 ? "text-step-error" : "text-foreground"}`}>{point.name}</span>
-            <span className="h-1.5 overflow-hidden rounded-full bg-border" aria-hidden="true">
-              <span className={`block h-full rounded-full ${point.aboveP75 ? "bg-step-error" : "bg-primary"}`} style={{ width: `${Math.max(3, (point.value / maximumValue) * 100)}%` }} />
-            </span>
-            <span className={`text-right tabular-nums font-semibold ${point.aboveP75 ? "text-step-error" : "text-foreground"}`}>{point.valueLabel}</span>
-          </li>
-        ))}
-      </ol>
+      <div
+        data-benchmark-ranking-scroll={`${distribution.id}:${cohort.name}`}
+        role="region"
+        tabIndex={0}
+        aria-label={`${cohort.name} ${distribution.label} Centre ranking, all ${cohort.sampleSize} Centres`}
+        className="mt-3 max-h-64 touch-pan-y overflow-y-auto overscroll-contain rounded-sm pr-2 scroll-py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
+      >
+        <ol className="divide-y divide-border">
+          {cohort.points.map((point, index) => (
+            <li
+              key={point.centreCode}
+              data-benchmark-ranking-row={`${distribution.id}:${cohort.name}:${point.centreCode}`}
+              className="grid grid-cols-[24px_minmax(96px,auto)_minmax(80px,1fr)_64px] items-center gap-2 py-2 text-xs"
+            >
+              <span className="text-right tabular-nums text-muted">{index + 1}</span>
+              <span className={`truncate font-semibold ${point.aboveP75 ? "text-step-error" : "text-foreground"}`}>{point.name}</span>
+              <span className="h-1.5 overflow-hidden rounded-full bg-border" aria-hidden="true">
+                <span className={`block h-full rounded-full ${point.aboveP75 ? "bg-step-error" : "bg-primary"}`} style={{ width: `${Math.max(3, (point.value / maximumValue) * 100)}%` }} />
+              </span>
+              <span className={`text-right tabular-nums font-semibold ${point.aboveP75 ? "text-step-error" : "text-foreground"}`}>{point.valueLabel}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
       <p className="mt-3 text-[10px] leading-4 text-muted">Values in {distribution.unit}. Ranking is scoped to {cohort.name} only.</p>
     </aside>
   );

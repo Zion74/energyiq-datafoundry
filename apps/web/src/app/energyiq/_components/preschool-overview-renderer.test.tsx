@@ -101,6 +101,17 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(benchmarkSection.textContent).toContain("2.2 — EUI Benchmark");
     expect(benchmarkSection.textContent).toContain("2.3 — Per-pax Energy Benchmark");
 
+    for (const summary of benchmarkSection.querySelectorAll<HTMLElement>("[data-benchmark-summary]")) {
+      const header = summary.firstElementChild as HTMLElement;
+      expect(header.classList.contains("min-w-[760px]")).toBe(true);
+      expect(header.classList.contains("min-w-[900px]")).toBe(false);
+      for (const column of ["outlets", "p50", "p75"]) {
+        expect(summary.querySelector(`[data-benchmark-summary-header="${column}"]`)?.classList.contains("text-right")).toBe(false);
+        expect([...summary.querySelectorAll(`[data-benchmark-summary-value="${column}"]`)]
+          .every((value) => !value.classList.contains("text-right"))).toBe(true);
+      }
+    }
+
     const euiSenior = benchmarkSection.querySelector<HTMLElement>('[data-benchmark-summary-cohort="eui:Senior Care Center"]')!;
     expect(euiSenior.textContent).toContain("6.76");
     expect(euiSenior.textContent).toContain("9.20");
@@ -132,6 +143,16 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     });
     expect(benchmarkSection.querySelectorAll('[data-benchmark-ranking^="eui:"] [data-benchmark-ranking-row]')).toHaveLength(30);
     expect(benchmarkSection.querySelectorAll('[data-benchmark-ranking^="per-pax:"] [data-benchmark-ranking-row]')).toHaveLength(30);
+    const rankingScrollRegions = benchmarkSection.querySelectorAll<HTMLElement>("[data-benchmark-ranking-scroll]");
+    expect(rankingScrollRegions).toHaveLength(6);
+    expect([...rankingScrollRegions].every((region) => (
+      region.getAttribute("role") === "region"
+      && region.tabIndex === 0
+      && region.getAttribute("aria-label")?.includes("Centre ranking, all")
+      && region.classList.contains("max-h-64")
+      && region.classList.contains("overflow-y-auto")
+      && region.classList.contains("touch-pan-y")
+    ))).toBe(true);
     expect(benchmarkSection.querySelectorAll('[data-benchmark-ranking="eui:Senior Care Center"] [data-benchmark-ranking-row]')).toHaveLength(14);
     expect(benchmarkSection.querySelectorAll('[data-benchmark-ranking="eui:Active Aging Center"] [data-benchmark-ranking-row]')).toHaveLength(8);
     expect(benchmarkSection.querySelectorAll('[data-benchmark-ranking="per-pax:Preschool"] [data-benchmark-ranking-row]')).toHaveLength(8);
