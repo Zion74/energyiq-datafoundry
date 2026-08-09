@@ -1,4 +1,5 @@
 import type { EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
+import { anomalyIncidentDomId } from "./ngee-ann-overview-links";
 
 const COMPARISON_EVIDENCE_METRIC_IDS = new Set([
   "energy.total_usage_kwh",
@@ -15,6 +16,27 @@ export type NgeeAnnOverviewHighlight = {
   unit?: string;
   detail: string;
   available: boolean;
+};
+
+export type NgeeAnnExecutiveSummarySignal = {
+  id: "period-change" | "main-driver" | "first-review";
+  label: string;
+  value: string;
+  detail: string;
+  href: string | null;
+  status: "available" | "unavailable";
+  tone: "neutral" | "warning";
+};
+
+export type NgeeAnnExecutiveSummaryViewModel = {
+  headline: string;
+  detail: string;
+  signals: NgeeAnnExecutiveSummarySignal[];
+};
+
+export type NgeeAnnChangeOverTimeSummaryViewModel = {
+  headline: string;
+  detail: string;
 };
 
 export type NgeeAnnLatestAvailableRange = {
@@ -541,6 +563,8 @@ export type NgeeAnnOverviewViewModel = {
   };
   metadataLimitation: string | null;
   highlights: NgeeAnnOverviewHighlight[];
+  executiveSummary: NgeeAnnExecutiveSummaryViewModel;
+  changeOverTime: NgeeAnnChangeOverTimeSummaryViewModel;
   decisionPriorities: NgeeAnnDecisionPrioritiesViewModel;
   peakBreakdown: NgeeAnnPeakBreakdownViewModel;
   energyTrend: NgeeAnnEnergyTrendViewModel;
@@ -624,6 +648,15 @@ export function buildNgeeAnnOverviewViewModel(
   const evidenceQueryIds = [...analysis.provenance.queryIds];
   const comparisonReferenceIds = comparisonEvidenceReferences(snapshot);
   const dailyAnomalies = buildDailyAnomalies(snapshot, unavailable);
+  const levelComparison = buildLevelComparison(snapshot, unavailable);
+  const energyComposition = buildEnergyComposition(snapshot, unavailable);
+  const executiveSummary = buildExecutiveSummary(
+    snapshot,
+    comparisonAvailable,
+    levelComparison,
+    energyComposition,
+    dailyAnomalies,
+  );
 
   return {
     context: {
@@ -640,6 +673,8 @@ export function buildNgeeAnnOverviewViewModel(
     },
     dataStatus: buildDataStatus(snapshot, status, latestSeenAt, Boolean(latestAvailableRange)),
     metadataLimitation: buildMetadataLimitation(snapshot),
+    executiveSummary,
+    changeOverTime: buildChangeOverTimeSummary(executiveSummary, dailyAnomalies),
     highlights: [
       {
         id: "total",
@@ -700,8 +735,8 @@ export function buildNgeeAnnOverviewViewModel(
     dailyAnomalies,
     dayProfile: buildDayProfile(snapshot, unavailable),
     usageHeatmap: buildUsageHeatmap(snapshot, unavailable),
-    levelComparison: buildLevelComparison(snapshot, unavailable),
-    energyComposition: buildEnergyComposition(snapshot, unavailable),
+    levelComparison,
+    energyComposition,
     evidence: {
       snapshotId: snapshot.dataSnapshot.id,
       projectReleaseId: snapshot.projectRelease.id,
@@ -1439,6 +1474,151 @@ function buildDecisionPriorities(
       lifecycle: lifecycleForPriority(snapshot, lifecycle, item.priorityId),
     })),
   };
+}
+
+function buildExecutiveSummary(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  comparisonAvailable: boolean,
+  levelComparison: NgeeAnnLevelComparisonViewModel,
+  energyComposition: NgeeAnnEnergyCompositionViewModel,
+  dailyAnomalies: NgeeAnnDailyAnomalyViewModel,
+): NgeeAnnExecutiveSummaryViewModel {
+  const { analysis } = snapshot;
+  const comparison = analysis.comparison;
+  const headline = comparisonAvailable
+    ? comparison.changePct === 0
+      ? "Energy use was unchanged versus the previous period"
+      : `Energy use ${comparison.changePct! > 0 ? "increased" : "decreased"} ${formatDecimal(Math.abs(comparison.changePct!), 1)}% versus the previous period`
+    : "Comparable-period change unavailable";
+  const detail = comparisonAvailable
+    ? `The Project used ${formatDecimal(analysis.summary.usageKwh, 2)} kWh, ${comparison.changeKwh >= 0 ? "up" : "down"} ${formatDecimal(Math.abs(comparison.changeKwh), 2)} kWh from the validated previous period.`
+    : "No validated comparable-period usage is available. Current accepted energy remains visible below.";
+
+  const levelDriver = levelComparison.status === "available"
+    ? selectDirectionalDriver(
+      analysis.childScopes
+        .filter((scope) => scope.nodeType === "level" && scope.comparison)
+        .map((scope) => ({
+          id: scope.nodeId,
+          name: scope.name,
+          changeKwh: scope.comparison!.changeKwh,
+        })),
+      comparison.changeKwh,
+    )
+    : null;
+  const categoryDriver = energyComposition.categories.status === "available"
+    ? selectDirectionalDriver(
+      analysis.categories
+        .filter((category) => category.comparison)
+        .map((category) => ({
+          id: category.category,
+          name: compositionCategoryName(category.category),
+          changeKwh: category.comparison!.changeKwh,
+        })),
+      comparison.changeKwh,
+    )
+    : null;
+  const driverAvailable = Boolean(levelDriver && categoryDriver);
+  const driverValue = driverAvailable
+    ? `${levelDriver!.name}: ${signedDecimal(levelDriver!.changeKwh, 2)} kWh`
+    : "Unavailable";
+  const driverDetail = driverAvailable
+    ? `Category ${categoryDriver!.name}: ${signedDecimal(categoryDriver!.changeKwh, 2)} kWh. These are separate same-direction movements; their overlap and cause are not established.`
+    : "No Level and Category movements align with the Project direction in the validated comparison.";
+
+  const largestIncident = largestDailyAnomalyIncident(dailyAnomalies);
+  const firstReviewValue = largestIncident
+    ? `${largestIncident.scopeName} · ${largestIncident.dateLabel}`
+    : dailyAnomalies.status === "available"
+      ? "No daily exception triggered"
+      : "Usage exception analysis unavailable";
+  const firstReviewDetail = largestIncident
+    ? `${signedDecimal(largestIncident.impactKwhValue, 2)} kWh (${signedPercent(largestIncident.relativePctValue, 1)}) versus its governed comparable-day baseline.`
+    : dailyAnomalies.status === "available"
+      ? "No eligible Project or Level day crossed the published rule in this Period."
+      : dailyAnomalies.reason ?? "No validated daily exception result is available.";
+
+  return {
+    headline,
+    detail,
+    signals: [
+      {
+        id: "period-change",
+        label: "What changed",
+        value: comparisonAvailable ? `${signedDecimal(comparison.changeKwh, 2)} kWh` : "Unavailable",
+        detail: comparisonAvailable
+          ? `Current ${formatDecimal(analysis.summary.usageKwh, 2)} kWh versus previous ${formatDecimal(comparison.usageKwh, 2)} kWh.`
+          : "No validated comparable-period usage is available.",
+        href: comparisonAvailable ? "#ngee-ann-comparison-evidence" : null,
+        status: comparisonAvailable ? "available" : "unavailable",
+        tone: "neutral",
+      },
+      {
+        id: "main-driver",
+        label: comparisonAvailable ? "Largest aligned movements" : "Largest verified movement",
+        value: driverValue,
+        detail: driverDetail,
+        href: driverAvailable ? "#ngee-ann-location" : null,
+        status: driverAvailable ? "available" : "unavailable",
+        tone: "neutral",
+      },
+      {
+        id: "first-review",
+        label: "First date to review",
+        value: firstReviewValue,
+        detail: firstReviewDetail,
+        href: largestIncident ? `#${anomalyIncidentDomId(largestIncident.incidentId)}` : null,
+        status: dailyAnomalies.status === "available" ? "available" : "unavailable",
+        tone: largestIncident ? "warning" : "neutral",
+      },
+    ],
+  };
+}
+
+function buildChangeOverTimeSummary(
+  executiveSummary: NgeeAnnExecutiveSummaryViewModel,
+  dailyAnomalies: NgeeAnnDailyAnomalyViewModel,
+): NgeeAnnChangeOverTimeSummaryViewModel {
+  const firstReview = executiveSummary.signals.find((signal) => signal.id === "first-review")!;
+  const largestIncident = largestDailyAnomalyIncident(dailyAnomalies);
+  if (largestIncident) {
+    return {
+      headline: `Start with ${largestIncident.scopeName} on ${largestIncident.dateLabel}: ${signedDecimal(largestIncident.impactKwhValue, 2)} kWh above its comparable-day baseline`,
+      detail: "The trend uses accepted daily energy. Exception markers use the separately governed comparable-day Rule; open the date to verify its Evidence before deciding why it happened.",
+    };
+  }
+  return {
+    headline: firstReview.value,
+    detail: firstReview.detail,
+  };
+}
+
+function selectDirectionalDriver<T extends { changeKwh: number }>(
+  candidates: T[],
+  projectChangeKwh: number,
+): T | null {
+  if (candidates.length === 0) return null;
+  const aligned = candidates.filter((candidate) => (
+    projectChangeKwh > 0 ? candidate.changeKwh > 0 : projectChangeKwh < 0 ? candidate.changeKwh < 0 : false
+  ));
+  return [...aligned].sort((left, right) => (
+    Math.abs(right.changeKwh) - Math.abs(left.changeKwh)
+  ))[0] ?? null;
+}
+
+function largestDailyAnomalyIncident(
+  dailyAnomalies: NgeeAnnDailyAnomalyViewModel,
+): NgeeAnnDailyAnomalyViewModel["incidents"][number] | null {
+  if (dailyAnomalies.status !== "available") return null;
+  return [...dailyAnomalies.incidents].sort((left, right) => (
+    Math.abs(right.impactKwhValue) - Math.abs(left.impactKwhValue)
+    || right.localDate.localeCompare(left.localDate)
+    || left.incidentId.localeCompare(right.incidentId)
+  ))[0] ?? null;
+}
+
+function signedPercent(value: number, digits: number): string {
+  return `${value >= 0 ? "+" : ""}${formatDecimal(value, digits)}%`;
 }
 
 function buildDecisionLifecycleView(

@@ -168,18 +168,19 @@ export function NgeeAnnOverviewRenderer({
         </div>
       ) : null}
 
-      <NgeeAnnDecisionPriorities
-        view={view.decisionPriorities}
-        projectExplorerHref={projectExplorerHref}
-        aiAnalystHref={aiAnalystHref}
-      />
-
       <OverviewSectionHeading
         id="ngee-ann-key-highlights"
-        title="Verified figures"
-        description="The small set of numbers that anchors the decisions above."
+        title="Executive summary"
+        description={view.executiveSummary.headline}
       />
 
+      <div className="border-b border-border px-5 py-5 lg:px-7">
+        <p className="max-w-4xl text-sm leading-6 text-muted">{view.executiveSummary.detail}</p>
+      </div>
+
+      <div className="border-b border-border px-5 pt-5 lg:px-7">
+        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">Verified figures</p>
+      </div>
       <div className="grid border-b border-border sm:grid-cols-2 xl:grid-cols-5 xl:divide-x xl:divide-border">
         {view.highlights.map((highlight) => (
           <article
@@ -199,6 +200,35 @@ export function NgeeAnnOverviewRenderer({
           </article>
         ))}
       </div>
+
+      <div className="grid border-b border-border lg:grid-cols-3 lg:divide-x lg:divide-border">
+        {view.executiveSummary.signals.map((signal) => (
+          <article key={signal.id} data-executive-signal={signal.id} className="min-w-0 border-b border-border px-5 py-5 last:border-b-0 lg:border-b-0 lg:px-7">
+            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">{signal.label}</p>
+            <p className={[
+              "mt-2 text-xl font-semibold tracking-[-0.02em] text-foreground",
+              signal.tone === "warning" ? "text-step-warning" : "",
+              signal.status === "unavailable" ? "text-muted-light" : "",
+            ].join(" ")}>{signal.value}</p>
+            <p className="mt-2 text-sm leading-6 text-muted">{signal.detail}</p>
+            {signal.href ? (
+              <a href={signal.href} className="mt-3 inline-flex text-sm font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+                {signal.id === "period-change"
+                  ? "Open comparison evidence"
+                  : signal.id === "main-driver"
+                    ? "Open contributor evidence"
+                    : "Open exception evidence"}
+              </a>
+            ) : null}
+          </article>
+        ))}
+      </div>
+
+      <NgeeAnnDecisionPriorities
+        view={view.decisionPriorities}
+        projectExplorerHref={projectExplorerHref}
+        aiAnalystHref={aiAnalystHref}
+      />
 
       <div id="ngee-ann-ai-analysis" className="scroll-mt-28">
         <NgeeAnnAiSlot
@@ -224,8 +254,12 @@ export function NgeeAnnOverviewRenderer({
       <OverviewSectionHeading
         id="ngee-ann-change"
         title="Change over time"
-        description="See when usage moved away from its comparison and which days need investigation."
+        description={view.changeOverTime.headline}
       />
+
+      <div className="border-b border-border bg-surface-subtle/50 px-5 py-4 lg:px-7">
+        <p className="max-w-4xl text-sm leading-6 text-muted">{view.changeOverTime.detail}</p>
+      </div>
 
       <NgeeAnnEnergyTrend key={`trend:${view.energyTrend.evidence.period}`} view={view.energyTrend} />
 

@@ -33,6 +33,97 @@ function makeWithinThreshold(row: DailyAnomalyRow): void {
 }
 
 describe("NgeeAnnOverviewRenderer", () => {
+  it("opens with an answer-first Executive Summary built only from verified Snapshot facts", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.executiveSummary.headline).toBe("Energy use increased 26.4% versus the previous period");
+    expect(view.executiveSummary.signals).toEqual([
+      expect.objectContaining({
+        id: "period-change",
+        label: "What changed",
+        value: "+319.49 kWh",
+        href: "#ngee-ann-comparison-evidence",
+      }),
+      expect.objectContaining({
+        id: "main-driver",
+        label: "Largest aligned movements",
+        value: "Level 7: +319.56 kWh",
+        detail: "Category Load: +352.21 kWh. These are separate same-direction movements; their overlap and cause are not established.",
+        href: "#ngee-ann-location",
+      }),
+      expect.objectContaining({
+        id: "first-review",
+        label: "First date to review",
+        value: "Project · 13 Jun",
+        href: "#incident-project-2026-06-13",
+      }),
+    ]);
+    expect(view.changeOverTime.headline).toBe("Start with Project on 13 Jun: +105.63 kWh above its comparable-day baseline");
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+
+    expect(markup).toContain("Executive summary");
+    expect(markup).toContain("Energy use increased 26.4% versus the previous period");
+    expect(markup).toContain("Largest aligned movements");
+    expect(markup).toContain("Level 7: +319.56 kWh");
+    expect(markup).toContain("Category Load: +352.21 kWh");
+    expect(markup).toContain("Start with Project on 13 Jun: +105.63 kWh above its comparable-day baseline");
+    expect(markup).toContain('href="#ngee-ann-comparison-evidence"');
+    expect(markup).toContain('href="#ngee-ann-location"');
+    expect(markup).toContain('href="#incident-project-2026-06-13"');
+    expect(markup.indexOf("Executive summary")).toBeLessThan(markup.indexOf("Takeaways and next decisions"));
+    expect(markup.indexOf("Takeaways and next decisions")).toBeLessThan(markup.indexOf("Change over time"));
+    expect(markup.indexOf("Change over time")).toBeLessThan(markup.indexOf("Energy trend"));
+  });
+
+  it("withholds aligned movements instead of relabelling opposite-direction facts", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    for (const scope of snapshot.analysis.childScopes) {
+      if (scope.comparison) scope.comparison.changeKwh = -Math.abs(scope.comparison.changeKwh || 1);
+    }
+    for (const category of snapshot.analysis.categories) {
+      if (category.comparison) category.comparison.changeKwh = -Math.abs(category.comparison.changeKwh || 1);
+    }
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+    const movements = view.executiveSummary.signals.find((signal) => signal.id === "main-driver");
+
+    expect(movements).toEqual(expect.objectContaining({
+      label: "Largest aligned movements",
+      value: "Unavailable",
+      status: "unavailable",
+      href: null,
+    }));
+    expect(movements?.detail).toContain("No Level and Category movements align");
+  });
+
+  it("keeps missing comparison and anomaly facts explicit without inventing an Executive Summary", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    snapshot.analysis.comparison.changePct = null;
+    snapshot.analysis.dailyUsageAnomalies = {
+      status: "unavailable",
+      ruleRevisionId: "comparison.daily_usage_above_baseline@1",
+      reason: {
+        code: "BUSINESS_CALENDAR_VERSION_MISSING",
+        message: "No Published Calendar is pinned.",
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+
+    expect(markup).toContain("Comparable-period change unavailable");
+    expect(markup).toContain("No validated comparable-period usage is available.");
+    expect(markup).toContain("First date to review");
+    expect(markup).toContain("Usage exception analysis unavailable");
+    expect(markup).not.toContain("0% versus the previous period");
+    expect(markup).not.toContain("0 kWh above its comparable-day baseline");
+  });
+
   it("shows one deterministic theme across latest day, rolling 7 days and rolling 28 days", () => {
     const markup = renderToStaticMarkup(
       <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot: ngeeAnnGoldenSnapshot() }} />,
@@ -146,7 +237,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).not.toContain("Rolling 28 days, 20 May – 16 Jun: 0 kWh");
   });
 
-  it("places the server-owned decision priorities after Data Status and before Key highlights", () => {
+  it("places verified figures before server-owned decisions in the answer-first Executive Summary", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     const projectExplorerHref = [
       "/energyiq/explorer?projectId=ngee-ann-polytechnic",
@@ -178,8 +269,9 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Ask AI Analyst");
     expect(markup).toContain("AI energy analyst");
     expect(markup).toContain("Inspecting scoped data");
-    expect(markup.indexOf("Takeaways and next decisions")).toBeLessThan(markup.indexOf("Verified figures"));
-    expect(markup.indexOf("Verified figures")).toBeLessThan(markup.indexOf("AI energy analyst"));
+    expect(markup.indexOf("Executive summary")).toBeLessThan(markup.indexOf("Verified figures"));
+    expect(markup.indexOf("Verified figures")).toBeLessThan(markup.indexOf("Takeaways and next decisions"));
+    expect(markup.indexOf("Takeaways and next decisions")).toBeLessThan(markup.indexOf("AI energy analyst"));
     expect(markup.indexOf("AI energy analyst")).toBeLessThan(markup.indexOf("Change over time"));
 
     const container = document.createElement("div");
