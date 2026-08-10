@@ -64,7 +64,8 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup).toContain("Pace vs Original Estimate");
     expect(markup).toContain("Method, tariff and evidence");
     expect(markup).toContain('data-forecast-status="waiting"');
-    expect(markup).toContain("Planning baseline ready · Frozen comparison pending");
+    expect(markup).toContain("Awaiting first complete day");
+    expect(markup).toContain("Actual not started");
     expect(markup).toContain("24,348 kWh");
     expect(markup).toContain("S$6,640");
     expect(markup).toContain("The Planning Baseline remains visible; no Actual is invented.");
@@ -617,6 +618,9 @@ const attachForecastLifecycle = (
     currentOutlookKwh: index < input.completeDays && input.actualKwh !== null
       ? input.actualKwh / input.completeDays
       : plan.usageEstimate.projectedKwh / 30,
+    futureOutlookKwh: index < input.completeDays
+      ? null
+      : plan.usageEstimate.projectedKwh / 30,
     actualCompleteDayCount: index < input.completeDays ? 1 : 0,
     actualTargetDayCount: 1,
     actualStatus: index < input.completeDays ? "complete" as const : "waiting" as const,
@@ -624,6 +628,7 @@ const attachForecastLifecycle = (
   const aggregate = (size: number) => Array.from({ length: Math.ceil(30 / size) }, (_, bucketIndex) => {
     const rows = daily.slice(bucketIndex * size, (bucketIndex + 1) * size);
     const actualRows = rows.filter((row) => row.actualKwh !== null);
+    const futureRows = rows.filter((row) => row.futureOutlookKwh !== null);
     return {
       start: rows[0]!.start,
       endExclusive: rows.at(-1)!.endExclusive,
@@ -631,6 +636,9 @@ const attachForecastLifecycle = (
       originalEstimateKwh: rows.reduce((sum, row) => sum + row.originalEstimateKwh, 0),
       actualKwh: actualRows.length === 0 ? null : actualRows.reduce((sum, row) => sum + row.actualKwh!, 0),
       currentOutlookKwh: rows.reduce((sum, row) => sum + row.currentOutlookKwh, 0),
+      futureOutlookKwh: futureRows.length === 0
+        ? null
+        : futureRows.reduce((sum, row) => sum + row.futureOutlookKwh!, 0),
       actualCompleteDayCount: actualRows.length,
       actualTargetDayCount: rows.length,
       actualStatus: actualRows.length === 0 ? "waiting" as const : actualRows.length === rows.length ? "complete" as const : "partial" as const,
@@ -649,6 +657,9 @@ const attachForecastLifecycle = (
     actualCostBeforeGstSgd: input.actualKwh === null ? null : input.actualKwh * 0.2727,
     actualCompleteDayCount: input.completeDays,
     actualTargetDayCount: 30 as const,
+    actualThroughLocalDate: input.completeDays === 0
+      ? null
+      : `2026-06-${String(input.completeDays).padStart(2, "0")}`,
     pacePct: input.pacePct,
     outcome: input.status === "complete" ? "above_plan" as const : null,
     originalEstimateIdentity: "saved-a:2026-06-01:snapshot-a:preschool-weekday-mean-series-v1",
