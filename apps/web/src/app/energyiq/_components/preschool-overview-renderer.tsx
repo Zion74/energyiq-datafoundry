@@ -30,7 +30,7 @@ export const PRESCHOOL_OVERVIEW_SECTIONS = [
   { id: "preschool-benchmark-analysis", label: "2 · Benchmarks" },
   { id: "preschool-standby-wastage", label: "3 · Standby wastage" },
   { id: "preschool-operating-hours", label: "4 · Operating hours" },
-  { id: "preschool-june-planning", label: "5 · June planning" },
+  { id: "preschool-monthly-outlook", label: "5 · Monthly outlook" },
 ] as const;
 
 export type PreschoolOverviewRendererState =
@@ -510,12 +510,14 @@ export function PreschoolOverviewRenderer({
         )}
       </section>
 
-      <section id="preschool-june-planning" aria-labelledby="preschool-june-planning-heading" data-overview-section="5" className="scroll-mt-28 border-b border-border bg-surface-subtle/35 px-5 py-7 lg:px-7 lg:py-8">
+      <section id="preschool-monthly-outlook" aria-labelledby="preschool-monthly-outlook-heading" data-overview-section="5" className="scroll-mt-28 border-b border-border bg-surface-subtle/35 px-5 py-7 lg:px-7 lg:py-8">
         <SectionHeader
-          id="preschool-june-planning-heading"
+          id="preschool-monthly-outlook-heading"
           sectionNumber={5}
-          title="June 2026 Forecast"
-          description="A transparent estimate from the accepted May Plan, compared with current June Actual only when matching Snapshot Evidence is available."
+          title="Monthly Energy Outlook"
+          description={view.forecast.status === "unavailable"
+            ? "A transparent next-month energy view with Plan and Actual kept as separate, Snapshot-bound facts."
+            : `${view.forecast.targetMonth} · ${view.forecast.targetPeriod} · Plan and Actual remain separately pinned.`}
         />
         <PreschoolForecastPanel forecast={view.forecast} />
         <PlanningForecastEvidence planning={view.planningOutlook} forecast={view.forecast} />
@@ -1576,7 +1578,9 @@ function PlanningForecastEvidence({
             <p className="mt-2">{planning.method}</p>
             <p className="mt-3"><strong className="font-semibold text-foreground">Rate:</strong> {planning.tariffRate}</p>
             <p className="mt-1">{planning.tariffLabel}</p>
-            <a className="mt-2 inline-flex font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30" href={planning.tariffSourceUrl} target="_blank" rel="noreferrer">View official SP tariff source</a>
+            {planning.tariffSourceUrl ? (
+              <a className="mt-2 inline-flex font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30" href={planning.tariffSourceUrl} target="_blank" rel="noreferrer">View official SP tariff source</a>
+            ) : null}
             {forecast.status === "unavailable" ? (
               <p className="mt-3 rounded-md border border-step-warning/25 bg-step-warning-soft/40 px-3 py-2">{forecast.detail}</p>
             ) : (
@@ -1604,7 +1608,7 @@ function PlanningBaselineChart({ outlook }: { outlook: PlanningOutlookView }) {
     <article className="rounded-lg border border-border bg-surface-subtle p-4" data-planning-baseline="naive-weekly-average">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h4 className="text-sm font-semibold text-foreground">Four complete May weeks</h4>
+          <h4 className="text-sm font-semibold text-foreground">Four complete source weeks</h4>
           <p className="mt-1 text-[11px] leading-5 text-muted">{outlook.method}</p>
         </div>
         <p className="text-xs tabular-nums text-foreground"><strong className="font-semibold">{outlook.weeklyAverage}</strong> average</p>
@@ -1620,7 +1624,7 @@ function PlanningBaselineChart({ outlook }: { outlook: PlanningOutlookView }) {
           </div>
         ))}
       </div>
-      <p className="mt-5 border-t border-border pt-3 text-[11px] leading-5 text-muted">Supporting method evidence only. These four May bars are not June Actual. No trend, weather or occupancy adjustment is applied.</p>
+      <p className="mt-5 border-t border-border pt-3 text-[11px] leading-5 text-muted">Supporting method evidence only. These source-week bars are not target-month Actual. No trend, weather or occupancy adjustment is applied.</p>
     </article>
   );
 }

@@ -1531,6 +1531,10 @@ type PreschoolProvisionalPlanningOutlookDto = Extract<
   { status: "provisional" }
 >;
 
+type PreschoolSavedPlanningOutlookDto = Omit<PreschoolProvisionalPlanningOutlookDto, "tariffReference"> & {
+  tariffReference?: PreschoolProvisionalPlanningOutlookDto["tariffReference"];
+};
+
 export type PreschoolPlanningEstimateSeriesDto = {
   contract: {
     id: "preschool-june-2026-estimate-series";
@@ -1555,9 +1559,29 @@ export type PreschoolPlanningEstimateSeriesDto = {
 export type PreschoolPlanningForecastDto = {
   status: "waiting" | "partial" | "complete";
   contract: {
-    id: "preschool-june-2026-forecast-series";
-    version: "1";
+    id: "preschool-june-2026-forecast-series" | "preschool-monthly-energy-outlook";
+    version: "1" | "2";
     method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total";
+  };
+  targetPeriod?: {
+    start: string;
+    endExclusive: string;
+    timezone: string;
+    targetDayCount: number;
+  };
+  tariffAssumption?: {
+    status: "effective" | "provisional";
+    beforeGstSgdPerKwh: number;
+    sourceName: string;
+    sourceUrl: string;
+    supplyClass: string;
+    appliesFrom: string;
+    appliesTo: string;
+    beforeGst: true;
+    notBill: true;
+  } | {
+    status: "unavailable";
+    reason: string;
   };
   scopes: Array<{
     scopeId: string;
@@ -1565,17 +1589,25 @@ export type PreschoolPlanningForecastDto = {
     scopeType: string;
     scopeRole: "portfolio" | "centre";
     estimatedKwh: number;
-    estimatedCostBeforeGstSgd: number;
+    estimatedCostBeforeGstSgd: number | null;
+    expectedFullMonthKwh?: number | null;
+    expectedFullMonthCostBeforeGstSgd?: number | null;
     actualKwh: number | null;
+    actualCostBeforeGstSgd?: number | null;
     actualCompleteDayCount: number;
-    actualTargetDayCount: 30;
+    actualTargetDayCount: number;
     pacePct: number | null;
     outcome: "on_plan" | "above_plan" | "below_plan" | null;
+    originalEstimateIdentity?: string;
+    actualIdentity?: string;
+    currentOutlookIdentity?: string;
     buckets: Record<"daily" | "weekly" | "monthly", Array<{
       start: string;
       endExclusive: string;
       estimatedKwh: number;
+      originalEstimateKwh?: number;
       actualKwh: number | null;
+      currentOutlookKwh?: number | null;
       actualCompleteDayCount: number;
       actualTargetDayCount: number;
       actualStatus: "waiting" | "partial" | "complete";
@@ -1594,20 +1626,20 @@ export type PreschoolPlanningLifecycleDto = {
   status: "available";
   contract: {
     id: "preschool-saved-plan-current-actual";
-    version: "1";
+    version: "1" | "2";
   };
   targetPeriod: {
-    start: "2026-06-01";
-    endExclusive: "2026-07-01";
-    timezone: "Asia/Singapore";
-    targetDayCount: 30;
+    start: string;
+    endExclusive: string;
+    timezone: string;
+    targetDayCount: number;
   };
-  plan: PreschoolProvisionalPlanningOutlookDto;
+  plan: PreschoolSavedPlanningOutlookDto;
   actual: {
     status: "partial" | "complete";
     usageKwh: number | null;
     completeDayCount: number;
-    targetDayCount: 30;
+    targetDayCount: number;
     varianceKwh: number | null;
     variancePct: number | null;
   };

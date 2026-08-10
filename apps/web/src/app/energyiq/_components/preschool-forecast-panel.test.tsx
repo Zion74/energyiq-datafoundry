@@ -33,8 +33,10 @@ describe("PreschoolForecastPanel", () => {
     expect(container.querySelector('[data-forecast-scope="portfolio"]')?.textContent).toContain("24,348 kWh");
     expect(container.textContent).toContain("1,400 kWh");
     expect(container.querySelectorAll("[data-forecast-kpi]")).toHaveLength(4);
-    expect(container.querySelector('path[data-series="estimate"]')?.getAttribute("stroke-dasharray")).not.toBeNull();
+    expect(container.querySelector('path[data-series="original-estimate"]')?.getAttribute("stroke-dasharray")).not.toBeNull();
     expect(container.querySelector('path[data-series="actual"]')?.getAttribute("stroke-dasharray")).toBeNull();
+    expect(container.querySelector('path[data-series="current-outlook"]')).not.toBeNull();
+    expect(container.textContent).toContain("Original Estimate, Actual and Current Outlook");
 
     const weekly = Array.from(container.querySelectorAll("button")).find((button) => button.textContent === "Weekly")!;
     weekly.focus();
@@ -43,7 +45,7 @@ describe("PreschoolForecastPanel", () => {
     expect(container.querySelector('[data-forecast-grain="weekly"]')).not.toBeNull();
     expect(container.textContent).toContain("1 Jun–7 Jun");
 
-    const scope = container.querySelector<HTMLSelectElement>('select[aria-label="Forecast scope"]')!;
+    const scope = container.querySelector<HTMLSelectElement>('select[aria-label="Monthly outlook scope"]')!;
     await act(async () => {
       scope.value = "centre-a";
       scope.dispatchEvent(new Event("change", { bubbles: true }));
@@ -56,18 +58,76 @@ describe("PreschoolForecastPanel", () => {
     expect(container.querySelector('[data-forecast-grain="monthly"]')).not.toBeNull();
     expect(container.textContent).toContain("1 Jun–30 Jun");
   });
+
+  it.each([
+    ["waiting", "Awaiting first complete day"],
+    ["partial", "Actual to date + remaining estimate"],
+    ["complete", "Complete month · Above original estimate"],
+  ] as const)("renders the honest %s lifecycle status", async (status, statusLabel) => {
+    const forecast = forecastView(status);
+    await act(async () => root.render(<PreschoolForecastPanel forecast={forecast} />));
+
+    expect(container.querySelector(`[data-forecast-status="${status}"]`)).not.toBeNull();
+    expect(container.textContent).toContain(statusLabel);
+    expect(container.querySelectorAll("[data-forecast-kpi]")).toHaveLength(4);
+    expect(container.textContent).toContain("Expected June 2026 Energy");
+    expect(container.textContent).toContain("Pace vs Original Estimate");
+  });
+
+  it("keeps the Planning Baseline visible while localising the missing frozen comparison", async () => {
+    const forecast = forecastView("waiting", "planning-baseline");
+    await act(async () => root.render(<PreschoolForecastPanel forecast={forecast} />));
+
+    expect(container.textContent).toContain("Planning Baseline and Actual availability");
+    expect(container.textContent).toContain("24,348 kWh");
+    expect(container.textContent).toContain("S$6,640");
+    expect(container.textContent).toContain("Frozen Original Estimate pending");
+    expect(container.querySelector('path[data-series="planning-baseline"]')).not.toBeNull();
+    expect(container.querySelector('path[data-series="original-estimate"]')).toBeNull();
+  });
+
+  it("labels an out-of-period tariff as provisional without withholding energy", async () => {
+    const forecast = forecastView();
+    forecast.tariff.status = "provisional";
+    forecast.tariff.label = "Provisional · using latest available tariff";
+    await act(async () => root.render(<PreschoolForecastPanel forecast={forecast} />));
+
+    expect(container.querySelector('[data-forecast-tariff="provisional"]')).not.toBeNull();
+    expect(container.textContent).toContain("Provisional · using latest available tariff");
+    expect(container.textContent).toContain("not a customer bill");
+    expect(container.textContent).toContain("24,348 kWh");
+  });
 });
 
-const forecastView = (): ForecastView => ({
-  status: "partial",
-  statusLabel: "Partial June actual",
-  statusDetail: "June Actual is shown only for complete days.",
+const forecastView = (
+  status: "waiting" | "partial" | "complete" = "partial",
+  comparisonStatus: ForecastView["comparisonStatus"] = "frozen-original",
+): ForecastView => ({
+  status,
+  comparisonStatus,
+  statusLabel: status === "waiting"
+    ? comparisonStatus === "planning-baseline"
+      ? "Planning baseline ready · Frozen comparison pending"
+      : "Awaiting first complete day"
+    : status === "partial"
+      ? "Actual to date + remaining estimate"
+      : "Complete month · Above original estimate",
+  statusDetail: "Actual contains complete local days only.",
+  targetMonth: "June 2026",
   targetPeriod: "1–30 Jun 2026",
   defaultScopeId: "portfolio",
   centreSelectionAvailable: true,
+  tariff: {
+    status: "effective",
+    rate: "S$0.2727/kWh before GST",
+    label: "Effective for June 2026",
+    effectiveRange: "1 Apr–30 Jun 2026",
+    sourceUrl: "https://example.com/tariff",
+    note: "SP Group · Low tension, non-domestic · planning reference only · not a customer bill.",
+  },
   scopes: [
-    scopeView("portfolio", "Preschool Portfolio", "portfolio", "24,348 kWh", "S$6,640", "1,400 kWh"),
-    scopeView("centre-a", "Centre A", "centre", "6,000 kWh", "S$1,636", "420 kWh"),
+    scopeView("portfolio", "Preschool Portfolio", "portfolio", "24,348 kWh", "S$6,640", "1,400 kWh", status, comparisonStatus),
+    scopeView("centre-a", "Centre A", "centre", "6,000 kWh", "S$1,636", "420 kWh", status, comparisonStatus),
   ],
   method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total",
   planEvidence: "Saved saved-a · Snapshot snapshot-a · daily_totals_v1",
@@ -81,24 +141,33 @@ const scopeView = (
   estimatedEnergy: string,
   estimatedCost: string,
   consumedSoFar: string,
+  status: "waiting" | "partial" | "complete",
+  comparisonStatus: ForecastView["comparisonStatus"],
 ): ForecastView["scopes"][number] => ({
   scopeId,
   label,
   scopeType: role === "portfolio" ? "project" : "centre",
   role,
-  status: "partial",
-  statusLabel: "Partial June actual",
-  estimatedEnergy,
-  estimatedCost,
-  consumedSoFar,
-  paceVsEstimate: "24.64%",
-  paceDetail: "Actual to date ÷ estimate for the same complete days",
-  coverage: "7 / 30 complete days",
-  outcome: null,
+  status,
+  statusLabel: status === "waiting" ? "Awaiting first complete day" : status === "partial" ? "Actual to date + remaining estimate" : "Complete month · Above original estimate",
+  expectedFullMonthEnergy: estimatedEnergy,
+  expectedFullMonthCost: estimatedCost,
+  consumedSoFar: status === "waiting" ? "Awaiting first complete day" : consumedSoFar,
+  consumedCostSoFar: status === "waiting" ? "Awaiting first complete day" : "S$382 before GST",
+  paceVsOriginalEstimate: comparisonStatus === "planning-baseline"
+    ? "Frozen Original Estimate pending"
+    : status === "waiting"
+      ? "Starts after first complete day"
+      : "24.64%",
+  paceDetail: comparisonStatus === "planning-baseline"
+    ? "The Planning Baseline remains visible; historical comparison needs a compatible Saved Plan."
+    : "Actual to date ÷ frozen estimate for the same complete days",
+  coverage: status === "waiting" ? "0 / 30 complete days" : status === "complete" ? "30 / 30 complete days" : "7 / 30 complete days",
+  outcome: status === "complete" ? "above_plan" : null,
   buckets: {
-    daily: [bucket("1 Jun", "2026-06-01", "2026-06-02", 800, 200, "complete", "1 / 1 complete days")],
-    weekly: [bucket("1 Jun–7 Jun", "2026-06-01", "2026-06-08", 5_600, 1_400, "complete", "7 / 7 complete days")],
-    monthly: [bucket("1 Jun–30 Jun", "2026-06-01", "2026-07-01", 24_348, 1_400, "partial", "7 / 30 complete days")],
+    daily: [bucket("1 Jun", "2026-06-01", "2026-06-02", 800, status === "waiting" ? null : 200, status === "waiting" ? "waiting" : "complete", status === "waiting" ? "0 / 1 complete days" : "1 / 1 complete days", comparisonStatus)],
+    weekly: [bucket("1 Jun–7 Jun", "2026-06-01", "2026-06-08", 5_600, status === "waiting" ? null : 1_400, status === "waiting" ? "waiting" : "complete", status === "waiting" ? "0 / 7 complete days" : "7 / 7 complete days", comparisonStatus)],
+    monthly: [bucket("1 Jun–30 Jun", "2026-06-01", "2026-07-01", 24_348, status === "waiting" ? null : status === "complete" ? 25_000 : 1_400, status, status === "waiting" ? "0 / 30 complete days" : status === "complete" ? "30 / 30 complete days" : "7 / 30 complete days", comparisonStatus)],
   },
 });
 
@@ -107,17 +176,22 @@ const bucket = (
   start: string,
   endExclusive: string,
   estimateKwh: number,
-  actualKwh: number,
-  actualStatus: "partial" | "complete",
+  actualKwh: number | null,
+  actualStatus: "waiting" | "partial" | "complete",
   coverage: string,
+  comparisonStatus: ForecastView["comparisonStatus"],
 ) => ({
   label,
   start,
   endExclusive,
-  estimateKwh,
-  estimate: `${estimateKwh.toLocaleString("en-SG")} kWh`,
+  originalEstimateKwh: comparisonStatus === "frozen-original" ? estimateKwh : null,
+  originalEstimate: comparisonStatus === "frozen-original" ? `${estimateKwh.toLocaleString("en-SG")} kWh` : "Frozen estimate pending",
+  planningBaselineKwh: comparisonStatus === "planning-baseline" ? estimateKwh : null,
+  planningBaseline: comparisonStatus === "planning-baseline" ? `${estimateKwh.toLocaleString("en-SG")} kWh` : "Not used",
   actualKwh,
-  actual: `${actualKwh.toLocaleString("en-SG")} kWh`,
+  actual: actualKwh === null ? "Waiting" : `${actualKwh.toLocaleString("en-SG")} kWh`,
+  currentOutlookKwh: estimateKwh,
+  currentOutlook: `${estimateKwh.toLocaleString("en-SG")} kWh`,
   actualStatus,
   coverage,
 });

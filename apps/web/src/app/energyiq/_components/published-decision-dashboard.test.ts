@@ -379,7 +379,7 @@ describe("published Overview URL reload", () => {
       ["2 · Benchmarks", "#preschool-benchmark-analysis"],
       ["3 · Standby wastage", "#preschool-standby-wastage"],
       ["4 · Operating hours", "#preschool-operating-hours"],
-      ["5 · June planning", "#preschool-june-planning"],
+      ["5 · Monthly outlook", "#preschool-monthly-outlook"],
     ]);
     for (const anchor of contentLinks) {
       const href = anchor.getAttribute("href");

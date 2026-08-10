@@ -1,11 +1,37 @@
 import type { EnergyIqSavedAnalysisRecord } from "@datafoundry/metadata";
 import { describe, expect, it } from "vitest";
 
+import { recoverPreschoolPlanningOutlookFromCompleteWeeks } from "./preschool-operational-projection.js";
+
 import {
-  buildPreschoolJuneActualContext,
+  buildPreschoolMonthlyActualContext,
   buildPreschoolPlanningLifecycle,
   loadPreschoolPlanningLifecycleFromSavedAnalyses,
+  resolvePreschoolMonthlyTargetPeriod,
 } from "./preschool-planning-lifecycle.js";
+
+describe("resolvePreschoolMonthlyTargetPeriod", () => {
+  it.each([
+    ["2026-01-31", "2026-02-01", "2026-03-01", 28],
+    ["2028-01-31", "2028-02-01", "2028-03-01", 29],
+    ["2026-03-31", "2026-04-01", "2026-05-01", 30],
+    ["2026-06-30", "2026-07-01", "2026-08-01", 31],
+    ["2026-12-31", "2027-01-01", "2027-02-01", 31],
+  ])(
+    "derives the natural target month after latest complete local day %s",
+    (latestCompleteLocalDay, start, endExclusive, targetDayCount) => {
+      expect(resolvePreschoolMonthlyTargetPeriod(
+        latestCompleteLocalDay,
+        "Asia/Singapore",
+      )).toEqual({
+        start,
+        endExclusive,
+        timezone: "Asia/Singapore",
+        targetDayCount,
+      });
+    },
+  );
+});
 
 describe("buildPreschoolPlanningLifecycle", () => {
   it.each(["2", "3"] as const)(
@@ -31,6 +57,8 @@ describe("buildPreschoolPlanningLifecycle", () => {
         templateRevisionId: "template-v1",
         projectReleaseId: "release-v1",
         currentDataSnapshotId: "snapshot-b",
+        latestCompleteLocalDay: "2026-06-07",
+        targetPeriod: juneTargetPeriod(),
         savedAnalyses: [incompatible, compatible],
         actualAnalysis: juneActualAnalysis(7),
       });
@@ -39,7 +67,7 @@ describe("buildPreschoolPlanningLifecycle", () => {
         status: "available",
         contract: {
           id: "preschool-saved-plan-current-actual",
-          version: "1",
+          version: "2",
         },
         targetPeriod: {
           start: "2026-06-01",
@@ -95,6 +123,8 @@ describe("buildPreschoolPlanningLifecycle", () => {
       templateRevisionId: "template-v1",
       projectReleaseId: "release-v1",
       currentDataSnapshotId: "snapshot-b",
+      latestCompleteLocalDay: "2026-06-07",
+      targetPeriod: juneTargetPeriod(),
       savedAnalyses: [compatible],
       actualAnalysis: juneActualAnalysis(7),
     });
@@ -240,6 +270,173 @@ describe("buildPreschoolPlanningLifecycle", () => {
     expect(forecast.scopes[0]?.buckets.weekly[1]).toMatchObject({ actualKwh: null, actualStatus: "waiting" });
   });
 
+  it("builds a July natural-month outlook with frozen Original, Actual and Current Outlook series", () => {
+    const result = buildJulyLifecycle(monthlyActualAnalysis({
+      start: "2026-07-01",
+      targetDayCount: 31,
+      completeDayCount: 14,
+    }));
+
+    expect(result).toMatchObject({
+      status: "available",
+      targetPeriod: {
+        start: "2026-07-01",
+        endExclusive: "2026-08-01",
+        timezone: "Asia/Singapore",
+        targetDayCount: 31,
+      },
+      forecast: {
+        status: "partial",
+        tariffAssumption: {
+          status: "provisional",
+          beforeGstSgdPerKwh: 0.2727,
+          appliesFrom: "2026-04-01",
+          appliesTo: "2026-06-30",
+        },
+      },
+    });
+    if (result.status !== "available" || !result.forecast) throw new Error("Expected July outlook");
+    const portfolio = result.forecast.scopes[0]!;
+    expect(portfolio).toMatchObject({
+      scopeId: "project",
+      actualKwh: 2800,
+      actualCompleteDayCount: 14,
+      actualTargetDayCount: 31,
+      expectedFullMonthKwh: expect.any(Number),
+      expectedFullMonthCostBeforeGstSgd: expect.any(Number),
+      actualCostBeforeGstSgd: 763.56,
+      originalEstimateIdentity: expect.stringContaining("saved-a:2026-07-01"),
+    });
+    expect(portfolio.buckets.daily).toHaveLength(31);
+    expect(portfolio.buckets.daily.slice(0, 14).every((bucket) => (
+      bucket.actualKwh !== null && bucket.currentOutlookKwh === bucket.actualKwh
+    ))).toBe(true);
+    expect(portfolio.buckets.daily.slice(14).every((bucket) => (
+      bucket.actualKwh === null && bucket.currentOutlookKwh === bucket.originalEstimateKwh
+    ))).toBe(true);
+    expect(portfolio.expectedFullMonthKwh).toBeCloseTo(
+      portfolio.buckets.daily.reduce((total, bucket) => total + (bucket.currentOutlookKwh ?? 0), 0),
+      2,
+    );
+  });
+
+  it("shows a complete July Original Estimate while waiting for the first July complete day", () => {
+    const result = buildJulyLifecycle(monthlyActualAnalysis({
+      start: "2026-07-01",
+      targetDayCount: 31,
+      completeDayCount: 0,
+    }), savedAnalysisForJuly(), { latestCompleteLocalDay: "2026-06-30" });
+
+    if (result.status !== "available" || !result.forecast) throw new Error("Expected waiting July outlook");
+    expect(result.forecast.status).toBe("waiting");
+    expect(result.forecast.scopes[0]).toMatchObject({
+      actualKwh: null,
+      actualCompleteDayCount: 0,
+      expectedFullMonthKwh: expect.any(Number),
+    });
+    expect(result.forecast.scopes[0]!.buckets.daily).toHaveLength(31);
+    expect(result.forecast.scopes[0]!.buckets.daily.every((bucket) => (
+      bucket.actualStatus === "waiting"
+      && bucket.actualKwh === null
+      && bucket.currentOutlookKwh === bucket.originalEstimateKwh
+    ))).toBe(true);
+  });
+
+  it("renders a frozen complete-July lifecycle with Current Outlook equal to final Actual across all 31 days", () => {
+    const result = buildJulyLifecycle(monthlyActualAnalysis({
+      start: "2026-07-01",
+      targetDayCount: 31,
+      completeDayCount: 31,
+    }), savedAnalysisForJuly(), { latestCompleteLocalDay: "2026-07-31" });
+
+    if (result.status !== "available" || !result.forecast) throw new Error("Expected complete July outlook");
+    expect(result.forecast.status).toBe("complete");
+    expect(result.forecast.scopes[0]).toMatchObject({
+      actualKwh: 6_200,
+      actualCompleteDayCount: 31,
+      expectedFullMonthKwh: 6_200,
+      outcome: "above_plan",
+    });
+    expect(result.forecast.scopes[0]!.buckets.daily.every((bucket) => (
+      bucket.actualStatus === "complete"
+      && bucket.currentOutlookKwh === bucket.actualKwh
+    ))).toBe(true);
+  });
+
+  it("keeps a Centre with missing past Actual visible while withholding only its Current Outlook KPI", () => {
+    const actual = monthlyActualAnalysis({
+      start: "2026-07-01",
+      targetDayCount: 31,
+      completeDayCount: 14,
+    });
+    actual.dailyTotals.scopes = actual.dailyTotals.scopes.filter((scope) => scope.scopeId !== "centre-b");
+
+    const result = buildJulyLifecycle(actual);
+
+    if (result.status !== "available" || !result.forecast) throw new Error("Expected July outlook");
+    expect(result.forecast.scopes.find((scope) => scope.scopeId === "centre-b")).toMatchObject({
+      actualKwh: null,
+      actualCompleteDayCount: 0,
+      expectedFullMonthKwh: null,
+      expectedFullMonthCostBeforeGstSgd: null,
+    });
+  });
+
+  it("keeps Energy available but withholds only Cost when no tariff reference exists", () => {
+    const result = buildJulyLifecycle(monthlyActualAnalysis({
+      start: "2026-07-01",
+      targetDayCount: 31,
+      completeDayCount: 14,
+    }), savedAnalysisForJuly({ omitTariff: true }));
+
+    if (result.status !== "available" || !result.forecast) throw new Error("Expected July outlook");
+    expect(result.forecast.tariffAssumption).toEqual({
+      status: "unavailable",
+      reason: "No accepted tariff reference is available for this target month.",
+    });
+    expect(result.forecast.scopes[0]).toMatchObject({
+      expectedFullMonthKwh: expect.any(Number),
+      expectedFullMonthCostBeforeGstSgd: null,
+      actualCostBeforeGstSgd: null,
+    });
+  });
+
+  it("keeps Saved A and Original Estimate immutable when Current B is replaced by a newer current Snapshot", () => {
+    const saved = savedAnalysisForJuly();
+    const savedBytes = saved.snapshot_json;
+    const actualB = monthlyActualAnalysis({
+      start: "2026-07-01",
+      targetDayCount: 31,
+      completeDayCount: 14,
+      dataSnapshotId: "snapshot-b",
+      portfolioDailyKwh: 200,
+    });
+    const actualC = monthlyActualAnalysis({
+      start: "2026-07-01",
+      targetDayCount: 31,
+      completeDayCount: 14,
+      dataSnapshotId: "snapshot-c",
+      portfolioDailyKwh: 240,
+    });
+
+    const resultB = buildJulyLifecycle(actualB, saved);
+    const resultC = buildJulyLifecycle(actualC, saved);
+    if (
+      resultB.status !== "available" || !resultB.forecast
+      || resultC.status !== "available" || !resultC.forecast
+    ) throw new Error("Expected both current outlooks");
+    const scopeB = resultB.forecast.scopes.find((scope) => scope.scopeRole === "portfolio")!;
+    const scopeC = resultC.forecast.scopes.find((scope) => scope.scopeRole === "portfolio")!;
+
+    expect(saved.snapshot_json).toBe(savedBytes);
+    expect(resultB.planProvenance).toEqual(resultC.planProvenance);
+    expect(scopeB.originalEstimateIdentity).toBe(scopeC.originalEstimateIdentity);
+    expect(scopeB.estimatedKwh).toBe(scopeC.estimatedKwh);
+    expect(scopeB.actualIdentity).not.toBe(scopeC.actualIdentity);
+    expect(scopeB.actualKwh).not.toBe(scopeC.actualKwh);
+    expect(scopeB.expectedFullMonthKwh).not.toBe(scopeC.expectedFullMonthKwh);
+  });
+
   it("shows plan-versus-actual delta only after all 30 June days are complete", () => {
     const result = buildLifecycle(juneActualAnalysis(30));
 
@@ -299,9 +496,9 @@ describe("buildPreschoolPlanningLifecycle", () => {
   });
 });
 
-describe("buildPreschoolJuneActualContext", () => {
-  it("pins the existing current B Snapshot and release inputs to June 1-July 1", () => {
-    const context = buildPreschoolJuneActualContext({
+describe("buildPreschoolMonthlyActualContext", () => {
+  it("pins the existing current B Snapshot and release inputs to the natural target month", () => {
+    const context = buildPreschoolMonthlyActualContext({
       userId: "user-admin",
       workspaceId: "workspace-preschool",
       projectId: "preschool-demo",
@@ -323,11 +520,11 @@ describe("buildPreschoolJuneActualContext", () => {
       businessCalendarVersion: "calendar-v1",
       tariffScheduleVersion: "tariff-v1",
       resolvedAt: "2026-08-10T00:00:00.000Z",
-    });
+    }, resolvePreschoolMonthlyTargetPeriod("2026-06-30", "Asia/Singapore"));
 
     expect(context).toMatchObject({
-      from: "2026-05-31T16:00:00.000Z",
-      to: "2026-06-30T16:00:00.000Z",
+      from: "2026-06-30T16:00:00.000Z",
+      to: "2026-07-31T16:00:00.000Z",
       period: "Custom",
       timezone: "Asia/Singapore",
       dataSnapshotId: "snapshot-b",
@@ -350,6 +547,7 @@ describe("loadPreschoolPlanningLifecycleFromSavedAnalyses", () => {
       templateRevisionId: "template-v1",
       projectReleaseId: "release-v1",
       currentDataSnapshotId: "snapshot-b",
+      latestCompleteLocalDay: "2026-05-31",
       savedAnalyses: [],
       loadActualAnalysis: async () => {
         actualLoadCount += 1;
@@ -374,6 +572,10 @@ const buildLifecycle = (actualAnalysis: ReturnType<typeof juneActualAnalysis>) =
     templateRevisionId: "template-v1",
     projectReleaseId: "release-v1",
     currentDataSnapshotId: "snapshot-b",
+    latestCompleteLocalDay: actualAnalysis.dailyTotals.scopes[0]!.rows
+      .filter((row) => row.dataHealth.status === "complete")
+      .at(-1)?.localDate ?? "2026-05-31",
+    targetPeriod: juneTargetPeriod(),
     savedAnalyses: [savedAnalysis({ operationalVersion: "3" })],
     actualAnalysis,
   })
@@ -509,6 +711,115 @@ const actualScopes = (completeDayCount: number) => ([
     status: offset < completeDayCount ? "complete" : "unavailable",
   })),
 })));
+
+const juneTargetPeriod = () => ({
+  start: "2026-06-01",
+  endExclusive: "2026-07-01",
+  timezone: "Asia/Singapore",
+  targetDayCount: 30,
+});
+
+const savedAnalysisForJuly = (input: { omitTariff?: boolean } = {}): EnergyIqSavedAnalysisRecord => {
+  const record = savedAnalysis({ operationalVersion: "3" });
+  const snapshot = JSON.parse(record.snapshot_json!) as Record<string, unknown>;
+  const analysis = mayAnalysis(1);
+  const planningOutlook = recoverPreschoolPlanningOutlookFromCompleteWeeks(analysis);
+  if (planningOutlook.status !== "provisional") throw new Error("Expected recoverable May plan");
+  const projectedKwh = planningOutlook.weeklyBaseline.averageKwh * (31 / 7);
+  const rate = planningOutlook.tariffReference.beforeGstSgdPerKwh;
+  Reflect.set(planningOutlook, "targetPeriod", {
+    start: "2026-07-01",
+    endInclusive: "2026-07-31",
+    endExclusive: "2026-08-01",
+    timezone: "Asia/Singapore",
+    days: 31,
+  });
+  Reflect.set(planningOutlook.usageEstimate, "projectedKwh", projectedKwh);
+  Reflect.set(planningOutlook.costEstimate, "projectedBeforeGstSgd", projectedKwh * rate);
+  Reflect.deleteProperty(planningOutlook, "estimateSeries");
+  if (input.omitTariff) Reflect.deleteProperty(planningOutlook, "tariffReference");
+  Reflect.set(snapshot, "preschoolOperational", {
+    status: "available",
+    contract: {
+      id: "preschool-may-2026-operational-behaviour",
+      version: "3",
+    },
+    planningOutlook,
+  });
+  return {
+    ...record,
+    snapshot_json: JSON.stringify(snapshot),
+  };
+};
+
+const buildJulyLifecycle = (
+  actualAnalysis: ReturnType<typeof monthlyActualAnalysis>,
+  saved = savedAnalysisForJuly(),
+  options: { latestCompleteLocalDay?: string } = {},
+) => buildPreschoolPlanningLifecycle({
+  projectId: "preschool-demo",
+  workspaceId: "workspace-preschool",
+  scopeId: "project",
+  resource: "electricity",
+  templateRevisionId: "template-v1",
+  projectReleaseId: "release-v1",
+  currentDataSnapshotId: actualAnalysis.provenance.dataSnapshotId,
+  latestCompleteLocalDay: options.latestCompleteLocalDay ?? "2026-07-14",
+  targetPeriod: {
+    start: actualAnalysis.targetPeriod.start,
+    endExclusive: actualAnalysis.targetPeriod.endExclusive,
+    timezone: "Asia/Singapore",
+    targetDayCount: actualAnalysis.dailyTotals.scopes[0]?.rows.length ?? 0,
+  },
+  savedAnalyses: [saved],
+  actualAnalysis,
+});
+
+const monthlyActualAnalysis = (input: {
+  start: string;
+  targetDayCount: number;
+  completeDayCount: number;
+  dataSnapshotId?: string;
+  portfolioDailyKwh?: number;
+}) => {
+  const endExclusive = shiftFixtureDate(input.start, input.targetDayCount);
+  return {
+    context: {
+      scopeId: "project",
+      from: "2026-06-30T16:00:00.000Z",
+      to: "2026-07-31T16:00:00.000Z",
+      timezone: "Asia/Singapore",
+    },
+    provenance: {
+      dataSnapshotId: input.dataSnapshotId ?? "snapshot-b",
+      queryIds: ["daily_totals_v1"],
+    },
+    dailyTotals: {
+      timezone: "Asia/Singapore",
+      scopes: [
+        { scopeId: "project", scopeName: "Preschool Portfolio", scopeType: "project", usageKwh: input.portfolioDailyKwh ?? 200 },
+        { scopeId: "centre-a", scopeName: "Centre A", scopeType: "centre", usageKwh: (input.portfolioDailyKwh ?? 200) * 0.6 },
+        { scopeId: "centre-b", scopeName: "Centre B", scopeType: "centre", usageKwh: (input.portfolioDailyKwh ?? 200) * 0.4 },
+      ].map((scope) => ({
+        scopeId: scope.scopeId,
+        scopeName: scope.scopeName,
+        scopeType: scope.scopeType,
+        rows: Array.from({ length: input.targetDayCount }, (_, offset) => dailyRow({
+          localDate: shiftFixtureDate(input.start, offset),
+          usageKwh: offset < input.completeDayCount ? scope.usageKwh : null,
+          status: offset < input.completeDayCount ? "complete" : "unavailable",
+        })),
+      })),
+    },
+    targetPeriod: { start: input.start, endExclusive },
+  };
+};
+
+const shiftFixtureDate = (localDate: string, days: number): string => {
+  const date = new Date(`${localDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+};
 
 const dailyRow = (input: {
   localDate: string;

@@ -11,7 +11,7 @@ import {
 } from "./preschool-operational-projection.js";
 import type { PublishedProjectRelease } from "./project-analysis-resolver.js";
 
-const TARGET_PERIOD = {
+const DEFAULT_JUNE_TARGET_PERIOD = {
   start: "2026-06-01",
   endExclusive: "2026-07-01",
   timezone: "Asia/Singapore",
@@ -20,10 +20,28 @@ const TARGET_PERIOD = {
 const DAILY_TOTALS_QUERY_ID = "daily_totals_v1" as const;
 const FORECAST_SERIES_RECIPE_ID = "preschool-weekday-mean-series-v1" as const;
 
-type PlanningOutlook = Extract<
+export type PreschoolMonthlyTargetPeriod = {
+  start: string;
+  endExclusive: string;
+  timezone: string;
+  targetDayCount: number;
+};
+
+type OperationalPlanningOutlook = Extract<
   Extract<PreschoolOperationalProjection, { status: "available" }>["planningOutlook"],
   { status: "provisional" }
 >;
+
+type PlanningOutlook = Omit<OperationalPlanningOutlook, "targetPeriod" | "tariffReference"> & {
+  targetPeriod: {
+    start: string;
+    endInclusive: string;
+    endExclusive?: string;
+    timezone?: string;
+    days: number;
+  };
+  tariffReference?: OperationalPlanningOutlook["tariffReference"];
+};
 
 export type PreschoolPlanningActualAnalysis = {
   context: {
@@ -55,7 +73,9 @@ type PreschoolPlanningForecastBucket = {
   start: string;
   endExclusive: string;
   estimatedKwh: number;
+  originalEstimateKwh: number;
   actualKwh: number | null;
+  currentOutlookKwh: number | null;
   actualCompleteDayCount: number;
   actualTargetDayCount: number;
   actualStatus: "waiting" | "partial" | "complete";
@@ -64,9 +84,24 @@ type PreschoolPlanningForecastBucket = {
 export type PreschoolPlanningForecast = {
   status: "waiting" | "partial" | "complete";
   contract: {
-    id: "preschool-june-2026-forecast-series";
-    version: "1";
+    id: "preschool-monthly-energy-outlook";
+    version: "2";
     method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total";
+  };
+  targetPeriod: PreschoolMonthlyTargetPeriod;
+  tariffAssumption: {
+    status: "effective" | "provisional";
+    beforeGstSgdPerKwh: number;
+    sourceName: string;
+    sourceUrl: string;
+    supplyClass: string;
+    appliesFrom: string;
+    appliesTo: string;
+    beforeGst: true;
+    notBill: true;
+  } | {
+    status: "unavailable";
+    reason: string;
   };
   scopes: Array<{
     scopeId: string;
@@ -74,12 +109,18 @@ export type PreschoolPlanningForecast = {
     scopeType: string;
     scopeRole: "portfolio" | "centre";
     estimatedKwh: number;
-    estimatedCostBeforeGstSgd: number;
+    estimatedCostBeforeGstSgd: number | null;
+    expectedFullMonthKwh: number | null;
+    expectedFullMonthCostBeforeGstSgd: number | null;
     actualKwh: number | null;
+    actualCostBeforeGstSgd: number | null;
     actualCompleteDayCount: number;
-    actualTargetDayCount: 30;
+    actualTargetDayCount: number;
     pacePct: number | null;
     outcome: "on_plan" | "above_plan" | "below_plan" | null;
+    originalEstimateIdentity: string;
+    actualIdentity: string;
+    currentOutlookIdentity: string;
     buckets: Record<"daily" | "weekly" | "monthly", PreschoolPlanningForecastBucket[]>;
   }>;
   evidence: {
@@ -95,15 +136,15 @@ export type PreschoolPlanningLifecycle = {
   status: "available";
   contract: {
     id: "preschool-saved-plan-current-actual";
-    version: "1";
+    version: "2";
   };
-  targetPeriod: typeof TARGET_PERIOD;
+  targetPeriod: PreschoolMonthlyTargetPeriod;
   plan: PlanningOutlook;
   actual: {
     status: "partial" | "complete";
     usageKwh: number | null;
     completeDayCount: number;
-    targetDayCount: 30;
+    targetDayCount: number;
     varianceKwh: number | null;
     variancePct: number | null;
   };
@@ -142,17 +183,40 @@ type PreschoolPlanningIdentityInput = {
   templateRevisionId: string;
   projectReleaseId: string;
   currentDataSnapshotId: string;
+  latestCompleteLocalDay?: string;
+  targetPeriod?: PreschoolMonthlyTargetPeriod;
   savedAnalyses: readonly EnergyIqSavedAnalysisRecord[];
 };
 
-export const buildPreschoolJuneActualContext = (
+export const resolvePreschoolMonthlyTargetPeriod = (
+  latestCompleteLocalDay: string,
+  timezone: string,
+): PreschoolMonthlyTargetPeriod => {
+  const nextLocalDay = shiftLocalDate(latestCompleteLocalDay, 1);
+  const [year, month] = nextLocalDay.split("-").map(Number);
+  if (!year || !month) throw new Error("PRESCHOOL_MONTHLY_TARGET_DATE_INVALID");
+  const start = `${year}-${String(month).padStart(2, "0")}-01`;
+  const nextMonth = new Date(Date.UTC(year, month, 1));
+  const endExclusive = nextMonth.toISOString().slice(0, 10);
+  return {
+    start,
+    endExclusive,
+    timezone,
+    targetDayCount: localDateDistance(start, endExclusive),
+  };
+};
+
+export const buildPreschoolMonthlyActualContext = (
   context: EnergyQueryContext,
+  targetPeriod: PreschoolMonthlyTargetPeriod = DEFAULT_JUNE_TARGET_PERIOD,
 ): EnergyQueryContext => ({
   ...context,
-  from: "2026-05-31T16:00:00.000Z",
-  to: "2026-06-30T16:00:00.000Z",
+  from: zonedStartOfLocalDate(targetPeriod.start, targetPeriod.timezone),
+  to: zonedStartOfLocalDate(targetPeriod.endExclusive, targetPeriod.timezone),
   period: "Custom",
 });
+
+export const buildPreschoolJuneActualContext = buildPreschoolMonthlyActualContext;
 
 export const loadPreschoolPlanningLifecycle = async (input: {
   metadataStore: MetadataStore;
@@ -170,10 +234,15 @@ export const loadPreschoolPlanningLifecycle = async (input: {
       status: "unavailable",
       reason: {
         code: "NO_COMPATIBLE_SAVED_ANALYSIS",
-        message: "A compatible older Saved Analysis with a recoverable June plan is unavailable.",
+        message: "A compatible older Saved Analysis with a recoverable target-month plan is unavailable. The current deterministic Planning Baseline may still be shown separately.",
       },
     };
   }
+  const latestCompleteLocalDay = latestCompleteLocalDayFromContext(input.context);
+  const targetPeriod = resolvePreschoolMonthlyTargetPeriod(
+    latestCompleteLocalDay,
+    input.context.timezone,
+  );
   return loadPreschoolPlanningLifecycleFromSavedAnalyses({
     projectId: input.context.projectId,
     workspaceId: input.context.workspaceId,
@@ -182,12 +251,14 @@ export const loadPreschoolPlanningLifecycle = async (input: {
     templateRevisionId: input.projectRelease.templateRevisionId,
     projectReleaseId: input.projectRelease.id,
     currentDataSnapshotId: input.context.dataSnapshotId,
+    latestCompleteLocalDay,
+    targetPeriod,
     savedAnalyses: input.metadataStore.energyIq.savedAnalyses.listProject(input.context.projectId),
     loadActualAnalysis: () => executeEnergyScopeAnalysis({
       metadataStore: input.metadataStore,
       dataGateway: input.dataGateway,
       userId: input.userId,
-      context: buildPreschoolJuneActualContext(input.context),
+      context: buildPreschoolMonthlyActualContext(input.context, targetPeriod),
       projectReleaseId: input.projectRelease.id,
       ruleRevisions: [],
       includeTimeBehaviour: false,
@@ -217,6 +288,7 @@ export const loadPreschoolPlanningLifecycleFromSavedAnalyses = async (
 export const buildPreschoolPlanningLifecycle = (input: PreschoolPlanningIdentityInput & {
   actualAnalysis: PreschoolPlanningActualAnalysis;
 }): PreschoolPlanningLifecycle => {
+  const targetPeriod = lifecycleTargetPeriod(input);
   const reference = findSavedPlanReference(input);
   if (!reference) return noCompatibleSavedAnalysis();
 
@@ -224,13 +296,14 @@ export const buildPreschoolPlanningLifecycle = (input: PreschoolPlanningIdentity
     analysis: input.actualAnalysis,
     plan: reference.planningOutlook,
     currentDataSnapshotId: input.currentDataSnapshotId,
+    targetPeriod,
   });
   if (!actual) {
     return {
       status: "unavailable",
       reason: {
         code: "CURRENT_ACTUAL_UNAVAILABLE",
-        message: "Current June daily-total Evidence does not match the active Snapshot.",
+        message: "Current target-month daily-total Evidence does not match the active Snapshot.",
       },
     };
   }
@@ -240,6 +313,9 @@ export const buildPreschoolPlanningLifecycle = (input: PreschoolPlanningIdentity
         actualAnalysis: input.actualAnalysis,
         plan: reference.planningOutlook,
         currentDataSnapshotId: input.currentDataSnapshotId,
+        latestCompleteLocalDay: input.latestCompleteLocalDay ?? shiftLocalDate(targetPeriod.start, -1),
+        targetPeriod,
+        savedAnalysisId: reference.savedAnalysis.id,
       })
     : null;
 
@@ -247,9 +323,9 @@ export const buildPreschoolPlanningLifecycle = (input: PreschoolPlanningIdentity
     status: "available",
     contract: {
       id: "preschool-saved-plan-current-actual",
-      version: "1",
+      version: "2",
     },
-    targetPeriod: TARGET_PERIOD,
+    targetPeriod,
     plan: reference.planningOutlook,
     actual,
     ...(forecast ? { forecast } : {}),
@@ -266,16 +342,17 @@ export const buildPreschoolPlanningLifecycle = (input: PreschoolPlanningIdentity
       projectReleaseId: input.projectReleaseId,
       queryId: DAILY_TOTALS_QUERY_ID,
       period: {
-        start: TARGET_PERIOD.start,
-        endExclusive: TARGET_PERIOD.endExclusive,
-        timezone: TARGET_PERIOD.timezone,
+        start: targetPeriod.start,
+        endExclusive: targetPeriod.endExclusive,
+        timezone: targetPeriod.timezone,
       },
     },
   };
 };
 
-const findSavedPlanReference = (input: PreschoolPlanningIdentityInput) => (
-  [...input.savedAnalyses]
+const findSavedPlanReference = (input: PreschoolPlanningIdentityInput) => {
+  const targetPeriod = lifecycleTargetPeriod(input);
+  return [...input.savedAnalyses]
     .sort((left, right) => (
       right.created_at.localeCompare(left.created_at)
       || right.sequence - left.sequence
@@ -283,18 +360,22 @@ const findSavedPlanReference = (input: PreschoolPlanningIdentityInput) => (
     .flatMap((savedAnalysis) => {
       const snapshot = compatibleSavedSnapshot(input, savedAnalysis);
       if (!snapshot) return [];
-      const planningOutlook = savedPlanningOutlook(snapshot, savedAnalysis.data_snapshot_id);
+      const planningOutlook = savedPlanningOutlook(
+        snapshot,
+        savedAnalysis.data_snapshot_id,
+        targetPeriod,
+      );
       const planAnalysis = planningAnalysisInput(recordField(snapshot, "analysis"));
       return planningOutlook ? [{ savedAnalysis, planningOutlook, planAnalysis }] : [];
     })[0]
-  ?? null
-);
+  ?? null;
+};
 
 const noCompatibleSavedAnalysis = (): PreschoolPlanningLifecycle => ({
   status: "unavailable",
   reason: {
     code: "NO_COMPATIBLE_SAVED_ANALYSIS",
-    message: "A compatible older Saved Analysis with a recoverable June plan is unavailable.",
+    message: "A compatible frozen Saved Plan for this target month is unavailable. The deterministic Planning Baseline remains available when the current Snapshot can support it.",
   },
 });
 
@@ -344,17 +425,20 @@ const compatibleSavedSnapshot = (
 const savedPlanningOutlook = (
   snapshot: Record<string, unknown>,
   dataSnapshotId: string,
+  targetPeriod: PreschoolMonthlyTargetPeriod,
 ): PlanningOutlook | null => {
   const operational = recordField(snapshot, "preschoolOperational");
   const candidate = operational?.planningOutlook;
   if (candidate !== undefined) {
-    return isPlanningOutlook(candidate, dataSnapshotId) ? candidate : null;
+    return isPlanningOutlook(candidate, dataSnapshotId, targetPeriod) ? candidate : null;
   }
   const analysis = planningAnalysisInput(recordField(snapshot, "analysis"));
   if (!analysis) return null;
   const derived = recoverPreschoolPlanningOutlookFromCompleteWeeks(analysis);
-  return derived.status === "provisional" && derived.evidence.dataSnapshotId === dataSnapshotId
-    ? derived
+  return derived.status === "provisional"
+    && derived.evidence.dataSnapshotId === dataSnapshotId
+    && planningTargetMatches(derived.targetPeriod, targetPeriod)
+    ? derived as PlanningOutlook
     : null;
 };
 
@@ -423,44 +507,75 @@ const buildForecast = (input: {
   actualAnalysis: PreschoolPlanningActualAnalysis;
   plan: PlanningOutlook;
   currentDataSnapshotId: string;
+  latestCompleteLocalDay: string;
+  targetPeriod: PreschoolMonthlyTargetPeriod;
+  savedAnalysisId: string;
 }): PreschoolPlanningForecast | null => {
   if (
     input.planAnalysis.provenance.dataSnapshotId !== input.plan.evidence.dataSnapshotId
     || input.actualAnalysis.provenance.dataSnapshotId !== input.currentDataSnapshotId
-    || input.planAnalysis.dailyTotals?.timezone !== TARGET_PERIOD.timezone
-    || input.actualAnalysis.dailyTotals?.timezone !== TARGET_PERIOD.timezone
+    || input.planAnalysis.dailyTotals?.timezone !== input.targetPeriod.timezone
+    || input.actualAnalysis.dailyTotals?.timezone !== input.targetPeriod.timezone
+    || input.actualAnalysis.context.from !== zonedStartOfLocalDate(input.targetPeriod.start, input.targetPeriod.timezone)
+    || input.actualAnalysis.context.to !== zonedStartOfLocalDate(input.targetPeriod.endExclusive, input.targetPeriod.timezone)
+    || !planningTargetMatches(input.plan.targetPeriod, input.targetPeriod)
   ) return null;
   const estimateSeries = buildPreschoolPlanningEstimateSeries(
     input.planAnalysis,
     input.plan.usageEstimate.projectedKwh,
+    input.targetPeriod,
   );
   if (!estimateSeries) return null;
   const actualScopesById = new Map(input.actualAnalysis.dailyTotals.scopes.map((scope) => [scope.scopeId, scope]));
   const portfolioScopeId = input.planAnalysis.context?.scopeId;
   if (!portfolioScopeId) return null;
   if (!actualScopesById.has(portfolioScopeId)) return null;
-  const scopes = estimateSeries.scopes.flatMap((estimateScope) => {
+  const tariffAssumption = buildTariffAssumption(input.plan, input.targetPeriod);
+  const tariffRate = tariffAssumption.status === "unavailable"
+    ? null
+    : tariffAssumption.beforeGstSgdPerKwh;
+  const originalEstimateIdentity = [
+    input.savedAnalysisId,
+    input.targetPeriod.start,
+    input.plan.evidence.dataSnapshotId,
+    FORECAST_SERIES_RECIPE_ID,
+  ].join(":");
+  const scopes = estimateSeries.scopes.map((estimateScope) => {
     const actualScope = actualScopesById.get(estimateScope.scopeId);
-    if (!actualScope) return [];
-    const actualRowsByDate = new Map(actualScope.rows.map((row) => [row.localDate, row]));
+    const actualRowsByDate = new Map((actualScope?.rows ?? []).map((row) => [row.localDate, row]));
     const daily = estimateScope.buckets.daily.map((estimate) => {
       const actual = actualRowsByDate.get(estimate.start);
-      const complete = actual?.dataHealth.status === "complete" && typeof actual.usageKwh === "number";
+      const withinCutoff = estimate.start <= input.latestCompleteLocalDay;
+      const complete = withinCutoff
+        && actual?.dataHealth.status === "complete"
+        && typeof actual.usageKwh === "number";
+      const actualKwh = complete ? round(actual.usageKwh!) : null;
+      const currentOutlookKwh = complete
+        ? actualKwh
+        : withinCutoff
+          ? null
+          : round(estimate.estimatedKwh);
       return {
         start: estimate.start,
         endExclusive: estimate.endExclusive,
         estimatedKwh: round(estimate.estimatedKwh),
-        actualKwh: complete ? round(actual.usageKwh!) : null,
+        originalEstimateKwh: round(estimate.estimatedKwh),
+        actualKwh,
+        currentOutlookKwh,
         actualCompleteDayCount: complete ? 1 : 0,
         actualTargetDayCount: 1,
-        actualStatus: complete ? "complete" as const : "waiting" as const,
+        actualStatus: complete
+          ? "complete" as const
+          : withinCutoff
+            ? "partial" as const
+            : "waiting" as const,
       };
     });
     const actualCompleteDayCount = daily.reduce((total, bucket) => total + bucket.actualCompleteDayCount, 0);
     const actualKwh = actualCompleteDayCount === 0
       ? null
       : round(sum(daily.flatMap((bucket) => bucket.actualKwh === null ? [] : [bucket.actualKwh])));
-    const estimatedToDateKwh = actualCompleteDayCount === TARGET_PERIOD.targetDayCount
+    const estimatedToDateKwh = actualCompleteDayCount === input.targetPeriod.targetDayCount
       ? estimateScope.estimatedKwh
       : sum(daily
         .filter((bucket) => bucket.actualCompleteDayCount === 1)
@@ -468,7 +583,7 @@ const buildForecast = (input: {
     const pacePct = actualKwh === null || estimatedToDateKwh <= 0
       ? null
       : round((actualKwh / estimatedToDateKwh) * 100);
-    const complete = actualCompleteDayCount === TARGET_PERIOD.targetDayCount;
+    const complete = actualCompleteDayCount === input.targetPeriod.targetDayCount;
     const outcome = complete && actualKwh !== null
       ? actualKwh > estimateScope.estimatedKwh
         ? "above_plan" as const
@@ -476,38 +591,56 @@ const buildForecast = (input: {
           ? "below_plan" as const
           : "on_plan" as const
       : null;
-    return [{
+    const expectedFullMonthKwh = daily.every((bucket) => bucket.currentOutlookKwh !== null)
+      ? round(sum(daily.map((bucket) => bucket.currentOutlookKwh!)))
+      : null;
+    const actualIdentity = `${input.currentDataSnapshotId}:${input.targetPeriod.start}:${input.latestCompleteLocalDay}`;
+    return {
       scopeId: estimateScope.scopeId,
-      scopeName: estimateScope.scopeName ?? actualScope.scopeName ?? estimateScope.scopeId,
-      scopeType: estimateScope.scopeType ?? actualScope.scopeType ?? (estimateScope.scopeId === portfolioScopeId ? "project" : "centre"),
+      scopeName: estimateScope.scopeName ?? actualScope?.scopeName ?? estimateScope.scopeId,
+      scopeType: estimateScope.scopeType ?? actualScope?.scopeType ?? (estimateScope.scopeId === portfolioScopeId ? "project" : "centre"),
       scopeRole: estimateScope.scopeRole,
       estimatedKwh: round(estimateScope.estimatedKwh),
-      estimatedCostBeforeGstSgd: estimateScope.estimatedCostBeforeGstSgd,
+      estimatedCostBeforeGstSgd: tariffRate === null
+        ? null
+        : round(estimateScope.estimatedKwh * tariffRate),
+      expectedFullMonthKwh,
+      expectedFullMonthCostBeforeGstSgd: expectedFullMonthKwh === null || tariffRate === null
+        ? null
+        : round(expectedFullMonthKwh * tariffRate),
       actualKwh,
+      actualCostBeforeGstSgd: actualKwh === null || tariffRate === null
+        ? null
+        : round(actualKwh * tariffRate),
       actualCompleteDayCount,
-      actualTargetDayCount: TARGET_PERIOD.targetDayCount,
+      actualTargetDayCount: input.targetPeriod.targetDayCount,
       pacePct,
       outcome,
+      originalEstimateIdentity,
+      actualIdentity,
+      currentOutlookIdentity: `${originalEstimateIdentity}:${actualIdentity}`,
       buckets: {
         daily,
         weekly: aggregateForecastBuckets(daily, 7),
-        monthly: aggregateForecastBuckets(daily, TARGET_PERIOD.targetDayCount),
+        monthly: aggregateForecastBuckets(daily, input.targetPeriod.targetDayCount),
       },
-    }];
+    };
   });
   const portfolio = scopes.find((scope) => scope.scopeRole === "portfolio");
   if (!portfolio) return null;
   return {
     status: portfolio.actualCompleteDayCount === 0
       ? "waiting"
-      : portfolio.actualCompleteDayCount === TARGET_PERIOD.targetDayCount
+      : portfolio.actualCompleteDayCount === input.targetPeriod.targetDayCount
         ? "complete"
         : "partial",
     contract: {
-      id: "preschool-june-2026-forecast-series",
-      version: "1",
+      id: "preschool-monthly-energy-outlook",
+      version: "2",
       method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total",
     },
+    targetPeriod: input.targetPeriod,
+    tariffAssumption,
     scopes,
     evidence: {
       planDataSnapshotId: input.plan.evidence.dataSnapshotId,
@@ -527,16 +660,21 @@ const aggregateForecastBuckets = (
   for (let offset = 0; offset < daily.length; offset += size) {
     const rows = daily.slice(offset, offset + size);
     const actualRows = rows.filter((row) => row.actualKwh !== null);
+    const currentOutlookRows = rows.filter((row) => row.currentOutlookKwh !== null);
     const actualCompleteDayCount = sum(rows.map((row) => row.actualCompleteDayCount));
     const actualTargetDayCount = sum(rows.map((row) => row.actualTargetDayCount));
     buckets.push({
       start: rows[0]!.start,
       endExclusive: rows.at(-1)!.endExclusive,
       estimatedKwh: round(sum(rows.map((row) => row.estimatedKwh))),
+      originalEstimateKwh: round(sum(rows.map((row) => row.originalEstimateKwh))),
       actualKwh: actualRows.length === 0 ? null : round(sum(actualRows.map((row) => row.actualKwh!))),
+      currentOutlookKwh: currentOutlookRows.length === rows.length
+        ? round(sum(currentOutlookRows.map((row) => row.currentOutlookKwh!)))
+        : null,
       actualCompleteDayCount,
       actualTargetDayCount,
-      actualStatus: actualCompleteDayCount === 0
+      actualStatus: rows.every((row) => row.actualStatus === "waiting")
         ? "waiting"
         : actualCompleteDayCount === actualTargetDayCount
           ? "complete"
@@ -553,15 +691,16 @@ const buildActual = (
     analysis: PreschoolPlanningActualAnalysis;
     plan: PlanningOutlook;
     currentDataSnapshotId: string;
+    targetPeriod: PreschoolMonthlyTargetPeriod;
   },
 ): Extract<PreschoolPlanningLifecycle, { status: "available" }>["actual"] | null => {
   const { analysis, plan } = input;
   if (
-    analysis.context.from !== "2026-05-31T16:00:00.000Z"
-    || analysis.context.to !== "2026-06-30T16:00:00.000Z"
-    || analysis.context.timezone !== TARGET_PERIOD.timezone
+    analysis.context.from !== zonedStartOfLocalDate(input.targetPeriod.start, input.targetPeriod.timezone)
+    || analysis.context.to !== zonedStartOfLocalDate(input.targetPeriod.endExclusive, input.targetPeriod.timezone)
+    || analysis.context.timezone !== input.targetPeriod.timezone
     || analysis.provenance.dataSnapshotId !== input.currentDataSnapshotId
-    || analysis.dailyTotals?.timezone !== TARGET_PERIOD.timezone
+    || analysis.dailyTotals?.timezone !== input.targetPeriod.timezone
     || !analysis.provenance.queryIds.includes(DAILY_TOTALS_QUERY_ID)
   ) return null;
   const scope = analysis.dailyTotals.scopes.find((candidate) => (
@@ -569,8 +708,8 @@ const buildActual = (
   ));
   if (!scope) return null;
   const rowsByDate = new Map(scope.rows.map((row) => [row.localDate, row]));
-  const targetRows = Array.from({ length: TARGET_PERIOD.targetDayCount }, (_, offset) => (
-    rowsByDate.get(`2026-06-${String(offset + 1).padStart(2, "0")}`)
+  const targetRows = Array.from({ length: input.targetPeriod.targetDayCount }, (_, offset) => (
+    rowsByDate.get(shiftLocalDate(input.targetPeriod.start, offset))
   ));
   const completeRows = targetRows.flatMap((row) => (
     row?.dataHealth.status === "complete" && typeof row.usageKwh === "number"
@@ -580,7 +719,7 @@ const buildActual = (
   const usageKwh = completeRows.length === 0
     ? null
     : round(completeRows.reduce((total, row) => total + (row.usageKwh ?? 0), 0));
-  const complete = completeRows.length === TARGET_PERIOD.targetDayCount;
+  const complete = completeRows.length === input.targetPeriod.targetDayCount;
   const varianceKwh = complete && usageKwh !== null
     ? round(usageKwh - plan.usageEstimate.projectedKwh)
     : null;
@@ -588,7 +727,7 @@ const buildActual = (
     status: complete ? "complete" : "partial",
     usageKwh,
     completeDayCount: completeRows.length,
-    targetDayCount: TARGET_PERIOD.targetDayCount,
+    targetDayCount: input.targetPeriod.targetDayCount,
     varianceKwh,
     variancePct: varianceKwh !== null && plan.usageEstimate.projectedKwh > 0
       ? round((varianceKwh / plan.usageEstimate.projectedKwh) * 100)
@@ -596,7 +735,64 @@ const buildActual = (
   };
 };
 
-const isPlanningOutlook = (value: unknown, dataSnapshotId: string): value is PlanningOutlook => {
+const lifecycleTargetPeriod = (
+  input: Pick<PreschoolPlanningIdentityInput, "latestCompleteLocalDay" | "targetPeriod">,
+): PreschoolMonthlyTargetPeriod => input.targetPeriod ?? resolvePreschoolMonthlyTargetPeriod(
+  input.latestCompleteLocalDay ?? "2026-05-31",
+  DEFAULT_JUNE_TARGET_PERIOD.timezone,
+);
+
+const latestCompleteLocalDayFromContext = (context: EnergyQueryContext): string => {
+  const nextLocalDay = new Intl.DateTimeFormat("en-CA", {
+    timeZone: context.timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(context.to));
+  return shiftLocalDate(nextLocalDay, -1);
+};
+
+const planningTargetMatches = (
+  value: PlanningOutlook["targetPeriod"],
+  targetPeriod: PreschoolMonthlyTargetPeriod,
+): boolean => value.start === targetPeriod.start
+  && value.endInclusive === shiftLocalDate(targetPeriod.endExclusive, -1)
+  && value.days === targetPeriod.targetDayCount
+  && (value.endExclusive === undefined || value.endExclusive === targetPeriod.endExclusive)
+  && (value.timezone === undefined || value.timezone === targetPeriod.timezone);
+
+const buildTariffAssumption = (
+  plan: PlanningOutlook,
+  targetPeriod: PreschoolMonthlyTargetPeriod,
+): PreschoolPlanningForecast["tariffAssumption"] => {
+  const tariff = plan.tariffReference;
+  if (!tariff) {
+    return {
+      status: "unavailable",
+      reason: "No accepted tariff reference is available for this target month.",
+    };
+  }
+  const targetEndInclusive = shiftLocalDate(targetPeriod.endExclusive, -1);
+  return {
+    status: tariff.appliesFrom <= targetPeriod.start && tariff.appliesTo >= targetEndInclusive
+      ? "effective"
+      : "provisional",
+    beforeGstSgdPerKwh: tariff.beforeGstSgdPerKwh,
+    sourceName: tariff.sourceName,
+    sourceUrl: tariff.sourceUrl,
+    supplyClass: tariff.supplyClass,
+    appliesFrom: tariff.appliesFrom,
+    appliesTo: tariff.appliesTo,
+    beforeGst: true,
+    notBill: true,
+  };
+};
+
+const isPlanningOutlook = (
+  value: unknown,
+  dataSnapshotId: string,
+  expectedTargetPeriod: PreschoolMonthlyTargetPeriod,
+): value is PlanningOutlook => {
   if (!isRecord(value)) return false;
   const contract = recordField(value, "contract");
   const targetPeriod = recordField(value, "targetPeriod");
@@ -605,9 +801,10 @@ const isPlanningOutlook = (value: unknown, dataSnapshotId: string): value is Pla
   return value.status === "provisional"
     && contract?.id === "preschool-june-2026-naive-weekly-baseline"
     && contract.version === "1"
-    && targetPeriod?.start === "2026-06-01"
-    && targetPeriod.endInclusive === "2026-06-30"
-    && targetPeriod.days === 30
+    && typeof targetPeriod?.start === "string"
+    && typeof targetPeriod.endInclusive === "string"
+    && typeof targetPeriod.days === "number"
+    && planningTargetMatches(targetPeriod as PlanningOutlook["targetPeriod"], expectedTargetPeriod)
     && typeof usageEstimate?.projectedKwh === "number"
     && typeof usageEstimate.lowerKwh === "number"
     && typeof usageEstimate.upperKwh === "number"
@@ -617,7 +814,6 @@ const isPlanningOutlook = (value: unknown, dataSnapshotId: string): value is Pla
     && Array.isArray(value.sourceWeeks)
     && isRecord(value.weeklyBaseline)
     && isRecord(value.costEstimate)
-    && isRecord(value.tariffReference)
     && Array.isArray(value.limitations);
 };
 
@@ -646,5 +842,53 @@ const isStringArray = (value: unknown): value is string[] => (
 const isDailyStatus = (value: unknown): value is "complete" | "partial" | "unavailable" => (
   value === "complete" || value === "partial" || value === "unavailable"
 );
+
+const shiftLocalDate = (localDate: string, days: number): string => {
+  const value = new Date(`${localDate}T00:00:00.000Z`);
+  if (Number.isNaN(value.valueOf())) throw new Error("PRESCHOOL_MONTHLY_TARGET_DATE_INVALID");
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+};
+
+const localDateDistance = (start: string, endExclusive: string): number => {
+  const startMs = Date.parse(`${start}T00:00:00.000Z`);
+  const endMs = Date.parse(`${endExclusive}T00:00:00.000Z`);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+    throw new Error("PRESCHOOL_MONTHLY_TARGET_DATE_INVALID");
+  }
+  return Math.round((endMs - startMs) / 86_400_000);
+};
+
+const zonedStartOfLocalDate = (localDate: string, timezone: string): string => {
+  const [year, month, day] = localDate.split("-").map(Number);
+  if (!year || !month || !day) throw new Error("PRESCHOOL_MONTHLY_TARGET_DATE_INVALID");
+  const localAsUtc = Date.UTC(year, month - 1, day);
+  let guess = localAsUtc;
+  for (let iteration = 0; iteration < 3; iteration += 1) {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date(guess));
+    const valueOf = (type: Intl.DateTimeFormatPartTypes): number => Number(
+      parts.find((part) => part.type === type)?.value ?? Number.NaN,
+    );
+    const zonedAsUtc = Date.UTC(
+      valueOf("year"),
+      valueOf("month") - 1,
+      valueOf("day"),
+      valueOf("hour"),
+      valueOf("minute"),
+      valueOf("second"),
+    );
+    guess = localAsUtc - (zonedAsUtc - guess);
+  }
+  return new Date(guess).toISOString();
+};
 
 const round = (value: number): number => Math.round(value * 100) / 100;

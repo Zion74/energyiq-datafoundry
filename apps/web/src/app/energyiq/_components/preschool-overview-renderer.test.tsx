@@ -18,7 +18,7 @@ describe("PreschoolOverviewRenderer reading flow", () => {
       { id: "preschool-benchmark-analysis", label: "2 · Benchmarks" },
       { id: "preschool-standby-wastage", label: "3 · Standby wastage" },
       { id: "preschool-operating-hours", label: "4 · Operating hours" },
-      { id: "preschool-june-planning", label: "5 · June planning" },
+      { id: "preschool-monthly-outlook", label: "5 · Monthly outlook" },
     ]);
     expect(markup.match(/data-overview-section=/g)).toHaveLength(5);
     expect(markup).toContain("Overall consumption summary");
@@ -45,30 +45,31 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup).toContain('href="#preschool-benchmark-analysis"');
     expect(markup).toContain('href="#preschool-standby-wastage"');
     expect(markup).toContain('href="#preschool-operating-hours"');
-    expect(markup).toContain('href="#preschool-june-planning"');
+    expect(markup).toContain('href="#preschool-monthly-outlook"');
     expect(markup).toContain("Energy used after closing");
     expect(markup).toContain("Centres <strong class=\"font-semibold text-foreground\">L · E · N</strong>");
     expect(markup).toContain("High for both floor area and headcount");
     expect(markup).toContain("Unusual peaks during opening hours");
     expect(markup).toContain("A · B · C · D · E · +9 more");
     expect(markup).not.toContain("A · B · C · D · E · F · G · H · I · J · K · L · M · N");
-    expect(markup).toContain("Estimated June energy");
+    expect(markup).toContain("Estimated June 2026 energy");
     expect(markup).toContain("24,348 kWh");
     expect(markup).toContain("Limitation and evidence");
     expect(markup).not.toContain("What to do next");
-    expect(markup).toContain("June 2026 Forecast");
-    expect(markup).toContain("Estimated Energy");
-    expect(markup).toContain("Estimated Cost");
+    expect(markup).toContain("Monthly Energy Outlook");
+    expect(markup).toContain("June 2026 · 1–30 Jun 2026");
+    expect(markup).toContain("Expected June 2026 Energy");
+    expect(markup).toContain("Expected June 2026 Cost");
     expect(markup).toContain("Consumed So Far");
-    expect(markup).toContain("Pace vs Estimate");
+    expect(markup).toContain("Pace vs Original Estimate");
     expect(markup).toContain("Method, tariff and evidence");
     expect(markup).toContain('data-forecast-status="waiting"');
-    expect(markup).toContain("Awaiting June actual");
+    expect(markup).toContain("Planning baseline ready · Frozen comparison pending");
     expect(markup).toContain("24,348 kWh");
     expect(markup).toContain("S$6,640");
-    expect(markup).toContain("Actual not available yet. The Estimate remains visible; no June Actual line is invented.");
+    expect(markup).toContain("The Planning Baseline remains visible; no Actual is invented.");
     expect(markup).toContain("Centre A");
-    expect(markup).toContain('data-series="estimate"');
+    expect(markup).toContain('data-series="planning-baseline"');
     expect(markup).toContain('d="" fill="none" stroke="currentColor" class="text-foreground"');
     expect(markup).toContain("View normalisation and evidence");
     const sectionPositions = PRESCHOOL_OVERVIEW_SECTIONS.map((section) => markup.indexOf(`id="${section.id}"`));
@@ -79,13 +80,13 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup.indexOf("Key findings · Sections 2–5")).toBeLessThan(markup.indexOf("Benchmark Analysis"));
     expect(markup.indexOf("Benchmark Analysis")).toBeLessThan(markup.indexOf("Standby Energy Wastage — Post Operating Hours"));
     expect(markup.indexOf("Standby Energy Wastage — Post Operating Hours")).toBeLessThan(markup.indexOf("Operating Hours Analysis"));
-    expect(markup.indexOf("Operating Hours Analysis")).toBeLessThan(markup.indexOf("June 2026 Forecast"));
+    expect(markup.indexOf("Operating Hours Analysis")).toBeLessThan(markup.indexOf("Monthly Energy Outlook"));
   });
 
   it.each([
-    { status: "waiting" as const, completeDays: 0, actualKwh: null, pacePct: null, label: "Awaiting June actual" },
-    { status: "partial" as const, completeDays: 7, actualKwh: 1_400, pacePct: 24.64, label: "Partial June actual" },
-    { status: "complete" as const, completeDays: 30, actualKwh: 25_000, pacePct: 102.68, label: "Above plan" },
+    { status: "waiting" as const, completeDays: 0, actualKwh: null, pacePct: null, label: "Awaiting first complete day" },
+    { status: "partial" as const, completeDays: 7, actualKwh: 1_400, pacePct: 24.64, label: "Actual to date + remaining estimate" },
+    { status: "complete" as const, completeDays: 30, actualKwh: 25_000, pacePct: 102.68, label: "Complete month · Above original estimate" },
   ])("renders the $status Forecast path with separately pinned Plan and Actual Evidence", ({ status, completeDays, actualKwh, pacePct, label }) => {
     const snapshot = preschoolGoldenSnapshot();
     attachForecastLifecycle(snapshot, { status, completeDays, actualKwh, pacePct });
@@ -95,25 +96,26 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     );
     const container = document.createElement("div");
     container.innerHTML = markup;
-    const forecastSection = container.querySelector<HTMLElement>("#preschool-june-planning")!;
+    const forecastSection = container.querySelector<HTMLElement>("#preschool-monthly-outlook")!;
     const forecastMarkup = forecastSection.innerHTML;
 
     expect(forecastMarkup).toContain(label);
     expect(forecastMarkup.match(/data-forecast-kpi=/g)).toHaveLength(4);
-    expect(forecastMarkup).toContain("Estimate vs Actual");
+    expect(forecastMarkup).toContain("Original Estimate, Actual and Current Outlook");
     expect(forecastMarkup).toContain("Daily");
     expect(forecastMarkup).toContain("Weekly");
     expect(forecastMarkup).toContain("Monthly");
     expect(forecastMarkup).toContain("Portfolio");
     expect(forecastMarkup).toContain("Centre A");
-    expect(forecastMarkup).toContain('data-series="estimate"');
+    expect(forecastMarkup).toContain('data-series="original-estimate"');
+    expect(forecastMarkup).toContain('data-series="current-outlook"');
     expect(forecastMarkup).toContain('stroke-dasharray="8 7"');
     expect(forecastMarkup).toContain('data-series="actual"');
     expect(forecastMarkup).toContain("Saved saved-a · Snapshot snapshot-a · daily_totals_v1");
     expect(forecastMarkup).toContain("Current Snapshot snapshot-b · daily_totals_v1");
-    expect(forecastMarkup.indexOf("Estimated Energy")).toBeLessThan(forecastMarkup.indexOf("Estimate vs Actual"));
-    expect(forecastMarkup.indexOf("Estimate vs Actual")).toBeLessThan(forecastMarkup.indexOf("Method, tariff and evidence"));
-    expect(forecastMarkup.indexOf("Method, tariff and evidence")).toBeLessThan(forecastMarkup.indexOf("Four complete May weeks"));
+    expect(forecastMarkup.indexOf("Expected June 2026 Energy")).toBeLessThan(forecastMarkup.indexOf("Original Estimate, Actual and Current Outlook"));
+    expect(forecastMarkup.indexOf("Original Estimate, Actual and Current Outlook")).toBeLessThan(forecastMarkup.indexOf("Method, tariff and evidence"));
+    expect(forecastMarkup.indexOf("Method, tariff and evidence")).toBeLessThan(forecastMarkup.indexOf("Four complete source weeks"));
   });
 
   it("shows only the first five Centres by default and retains the remaining rows in disclosure", () => {
@@ -610,7 +612,11 @@ const attachForecastLifecycle = (
     start: `2026-06-${String(index + 1).padStart(2, "0")}`,
     endExclusive: index === 29 ? "2026-07-01" : `2026-06-${String(index + 2).padStart(2, "0")}`,
     estimatedKwh: plan.usageEstimate.projectedKwh / 30,
+    originalEstimateKwh: plan.usageEstimate.projectedKwh / 30,
     actualKwh: index < input.completeDays && input.actualKwh !== null ? input.actualKwh / input.completeDays : null,
+    currentOutlookKwh: index < input.completeDays && input.actualKwh !== null
+      ? input.actualKwh / input.completeDays
+      : plan.usageEstimate.projectedKwh / 30,
     actualCompleteDayCount: index < input.completeDays ? 1 : 0,
     actualTargetDayCount: 1,
     actualStatus: index < input.completeDays ? "complete" as const : "waiting" as const,
@@ -622,7 +628,9 @@ const attachForecastLifecycle = (
       start: rows[0]!.start,
       endExclusive: rows.at(-1)!.endExclusive,
       estimatedKwh: rows.reduce((sum, row) => sum + row.estimatedKwh, 0),
+      originalEstimateKwh: rows.reduce((sum, row) => sum + row.originalEstimateKwh, 0),
       actualKwh: actualRows.length === 0 ? null : actualRows.reduce((sum, row) => sum + row.actualKwh!, 0),
+      currentOutlookKwh: rows.reduce((sum, row) => sum + row.currentOutlookKwh, 0),
       actualCompleteDayCount: actualRows.length,
       actualTargetDayCount: rows.length,
       actualStatus: actualRows.length === 0 ? "waiting" as const : actualRows.length === rows.length ? "complete" as const : "partial" as const,
@@ -635,16 +643,22 @@ const attachForecastLifecycle = (
     scopeRole: "portfolio" as const,
     estimatedKwh: plan.usageEstimate.projectedKwh,
     estimatedCostBeforeGstSgd: plan.costEstimate.projectedBeforeGstSgd,
+    expectedFullMonthKwh: daily.reduce((sum, row) => sum + row.currentOutlookKwh, 0),
+    expectedFullMonthCostBeforeGstSgd: daily.reduce((sum, row) => sum + row.currentOutlookKwh, 0) * 0.2727,
     actualKwh: input.actualKwh,
+    actualCostBeforeGstSgd: input.actualKwh === null ? null : input.actualKwh * 0.2727,
     actualCompleteDayCount: input.completeDays,
     actualTargetDayCount: 30 as const,
     pacePct: input.pacePct,
     outcome: input.status === "complete" ? "above_plan" as const : null,
+    originalEstimateIdentity: "saved-a:2026-06-01:snapshot-a:preschool-weekday-mean-series-v1",
+    actualIdentity: `snapshot-b:2026-06-01:${input.completeDays}`,
+    currentOutlookIdentity: `saved-a:snapshot-b:${input.completeDays}`,
     buckets: { daily, weekly: aggregate(7), monthly: aggregate(30) },
   };
   Reflect.set(snapshot, "preschoolPlanningLifecycle", {
     status: "available",
-    contract: { id: "preschool-saved-plan-current-actual", version: "1" },
+    contract: { id: "preschool-saved-plan-current-actual", version: "2" },
     targetPeriod: {
       start: "2026-06-01",
       endExclusive: "2026-07-01",
@@ -663,9 +677,26 @@ const attachForecastLifecycle = (
     forecast: {
       status: input.status,
       contract: {
-        id: "preschool-june-2026-forecast-series",
-        version: "1",
+        id: "preschool-monthly-energy-outlook",
+        version: "2",
         method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total",
+      },
+      targetPeriod: {
+        start: "2026-06-01",
+        endExclusive: "2026-07-01",
+        timezone: "Asia/Singapore",
+        targetDayCount: 30,
+      },
+      tariffAssumption: {
+        status: "effective",
+        beforeGstSgdPerKwh: 0.2727,
+        sourceName: "SP Group",
+        sourceUrl: "https://example.com/tariff",
+        supplyClass: "Low tension, non-domestic",
+        appliesFrom: "2026-04-01",
+        appliesTo: "2026-06-30",
+        beforeGst: true,
+        notBill: true,
       },
       scopes: [
         portfolioScope,

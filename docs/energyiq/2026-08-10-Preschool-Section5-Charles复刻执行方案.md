@@ -173,3 +173,11 @@ Preschool 当前使用 27.27¢/kWh before GST。费率覆盖目标月时标为�
 - [ ] Saved A fixed、Current B updated，A/B Plan/Actual/Evidence 不混；
 - [ ] 1440/1920/tablet Chrome 无横向溢出，等待、月中和完成态分别留证；
 - [ ] 主 Agent完成代码、数据语义和浏览器复核后，才交用户/Charles 人工验收。
+
+### 11.6 T12A 工程交付边界
+
+- 服务端、ViewModel 与 Renderer 的确定性测试覆盖 waiting / partial / complete、自然月天数、跨年、Asia/Singapore 月界、Scope 隔离，以及 Saved A 不随 Current B 更新而改写；
+- 未找到兼容 Frozen Saved Plan 时，Section 5 保留 Planning Baseline、目标月 Energy 和可用的 provisional Cost，仅将 Original Estimate 对比局部标为 pending；不为此新增持久化写路径；
+- Tariff 优先使用目标月有效配置；超出有效期时显示 latest available provisional reference，完全缺失时只隐藏 Cost；
+- 真实 Chrome 只按当前运行时实际可达状态留证。waiting 状态可用于布局与交互验收，partial / complete 仍需主 Agent在相应 Snapshot 运行时补充正向证据；
+- 本切片不建设 ML Forecast、通用 Scheduler/Forecast repository 或第二套版本系统，不修改 Task B AI Runtime；Charles 人工验收仍是独立终点。

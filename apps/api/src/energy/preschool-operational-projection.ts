@@ -881,18 +881,29 @@ const buildPreschoolPlanningOutlookFromCompleteMayRows = (input: {
 export const buildPreschoolPlanningEstimateSeries = (
   analysis: PreschoolPlanningAnalysisInput,
   projectedKwh: number,
+  targetPeriod: {
+    start: string;
+    endExclusive: string;
+    timezone: string;
+    targetDayCount: number;
+  } = {
+    start: PRESCHOOL_JUNE_PERIOD.start,
+    endExclusive: "2026-07-01",
+    timezone: PRESCHOOL_MAY_PERIOD.timezone,
+    targetDayCount: PRESCHOOL_JUNE_PERIOD.days,
+  },
 ): PreschoolPlanningEstimateSeries | null => {
   const portfolioScopeId = analysis.context?.scopeId;
   const scopes = analysis.dailyTotals?.scopes;
-  if (!portfolioScopeId || !scopes || analysis.dailyTotals?.timezone !== PRESCHOOL_MAY_PERIOD.timezone) return null;
+  if (!portfolioScopeId || !scopes || analysis.dailyTotals?.timezone !== targetPeriod.timezone) return null;
   const portfolio = scopes.find((scope) => scope.scopeId === portfolioScopeId);
-  const portfolioRaw = portfolio ? rawJunePlanningEstimate(portfolio.rows) : null;
+  const portfolioRaw = portfolio ? rawPlanningEstimate(portfolio.rows, targetPeriod) : null;
   if (!portfolioRaw) return null;
   const portfolioRawTotal = sumPlanning(portfolioRaw.map((row) => row.estimatedKwh));
   if (portfolioRawTotal <= 0) return null;
   const scale = projectedKwh / portfolioRawTotal;
   const estimatedScopes = scopes.flatMap((scope) => {
-    const raw = rawJunePlanningEstimate(scope.rows);
+    const raw = rawPlanningEstimate(scope.rows, targetPeriod);
     if (!raw) return [];
     const estimatedTarget = scope.scopeId === portfolioScopeId
       ? projectedKwh
@@ -910,7 +921,7 @@ export const buildPreschoolPlanningEstimateSeries = (
       buckets: {
         daily,
         weekly: aggregatePlanningEstimate(daily, 7),
-        monthly: aggregatePlanningEstimate(daily, PRESCHOOL_JUNE_PERIOD.days),
+        monthly: aggregatePlanningEstimate(daily, targetPeriod.targetDayCount),
       },
     }];
   });
@@ -926,8 +937,12 @@ export const buildPreschoolPlanningEstimateSeries = (
     : null;
 };
 
-const rawJunePlanningEstimate = (
+const rawPlanningEstimate = (
   rows: NonNullable<PreschoolPlanningAnalysisInput["dailyTotals"]>["scopes"][number]["rows"],
+  targetPeriod: {
+    start: string;
+    targetDayCount: number;
+  },
 ): PreschoolPlanningEstimateBucket[] | null => {
   const rowsByDate = new Map(rows.map((row) => [row.localDate, row]));
   const sourceDates = Array.from({ length: 28 }, (_, offset) => shiftPlanningDate("2026-05-04", offset));
@@ -944,8 +959,8 @@ const rawJunePlanningEstimate = (
     if (values.length !== 4) return null;
     meansByWeekday.set(weekday, sumPlanning(values) / values.length);
   }
-  return Array.from({ length: PRESCHOOL_JUNE_PERIOD.days }, (_, offset) => {
-    const start = shiftPlanningDate(PRESCHOOL_JUNE_PERIOD.start, offset);
+  return Array.from({ length: targetPeriod.targetDayCount }, (_, offset) => {
+    const start = shiftPlanningDate(targetPeriod.start, offset);
     return {
       start,
       endExclusive: shiftPlanningDate(start, 1),

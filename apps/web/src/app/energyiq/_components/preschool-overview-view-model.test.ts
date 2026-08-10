@@ -314,16 +314,16 @@ describe("Preschool Overview ViewModel", () => {
     expect(view.decisionSummary.items[3]).toMatchObject({
       priority: null,
       sectionNumber: 5,
-      targetId: "preschool-june-planning",
+      targetId: "preschool-monthly-outlook",
       sectionId: "planning-outlook",
-      label: "June planning baseline",
+      label: "June 2026 planning baseline",
       primaryMetric: {
-        label: "Estimated June energy",
+        label: "Estimated June 2026 energy",
         value: 24_348.2143,
         valueLabel: "24,348 kWh",
       },
       supportingMetrics: expect.arrayContaining([
-        { label: "Estimated June cost", valueLabel: "S$6,640" },
+        { label: "Estimated June 2026 cost", valueLabel: "S$6,640" },
         { label: "Source window", valueLabel: "4 complete weeks" },
       ]),
     });
@@ -352,19 +352,21 @@ describe("Preschool Overview ViewModel", () => {
     expect(view.liveForecast).toMatchObject({ status: "unavailable", label: "Unavailable" });
     expect(view.forecast).toMatchObject({
       status: "waiting",
-      statusLabel: "Awaiting June actual",
+      statusLabel: "Planning baseline ready · Frozen comparison pending",
+      comparisonStatus: "planning-baseline",
+      targetMonth: "June 2026",
       targetPeriod: "1–30 Jun 2026",
       defaultScopeId: "preschool-project",
       centreSelectionAvailable: true,
       planEvidence: "Current Snapshot preschool-26b85b9c0b95e090 · daily_totals_v1",
-      actualEvidence: "June Actual not available yet",
+      actualEvidence: "June 2026 Actual not available yet",
       scopes: expect.arrayContaining([
         expect.objectContaining({
           scopeId: "preschool-project",
-          estimatedEnergy: "24,348 kWh",
-          estimatedCost: "S$6,640",
-          consumedSoFar: "Not available yet",
-          paceVsEstimate: "Not available yet",
+          expectedFullMonthEnergy: "24,348 kWh",
+          expectedFullMonthCost: "S$6,640",
+          consumedSoFar: "Awaiting first complete day",
+          paceVsOriginalEstimate: "Frozen Original Estimate pending",
           coverage: "0 / 30 complete days",
         }),
         expect.objectContaining({ scopeId: "preschool-centre-1", role: "centre" }),
@@ -463,9 +465,9 @@ describe("Preschool Overview ViewModel", () => {
       pacePct: null,
       expected: {
         status: "waiting",
-        statusLabel: "Awaiting June actual",
-        consumedSoFar: "Not available yet",
-        paceVsEstimate: "Not available yet",
+        statusLabel: "Awaiting first complete day",
+        consumedSoFar: "Awaiting first complete day",
+        paceVsOriginalEstimate: "Starts after first complete day",
         coverage: "0 / 30 complete days",
       },
     },
@@ -476,9 +478,9 @@ describe("Preschool Overview ViewModel", () => {
       pacePct: 24.64,
       expected: {
         status: "partial",
-        statusLabel: "Partial June actual",
+        statusLabel: "Actual to date + remaining estimate",
         consumedSoFar: "1,400 kWh",
-        paceVsEstimate: "24.64%",
+        paceVsOriginalEstimate: "24.64%",
         coverage: "7 / 30 complete days",
       },
     },
@@ -489,9 +491,9 @@ describe("Preschool Overview ViewModel", () => {
       pacePct: 102.68,
       expected: {
         status: "complete",
-        statusLabel: "Above plan",
+        statusLabel: "Complete month · Above original estimate",
         consumedSoFar: "25,000 kWh",
-        paceVsEstimate: "102.68%",
+        paceVsOriginalEstimate: "102.68%",
         coverage: "30 / 30 complete days",
       },
     },
@@ -516,7 +518,9 @@ describe("Preschool Overview ViewModel", () => {
     expect(view.forecast).toMatchObject({
       status: expected.status,
       statusLabel: expected.statusLabel,
+      targetMonth: "June 2026",
       targetPeriod: "1–30 Jun 2026",
+      comparisonStatus: "frozen-original",
       defaultScopeId: snapshot.context.scopeId,
       centreSelectionAvailable: true,
       scopes: [
@@ -524,12 +528,16 @@ describe("Preschool Overview ViewModel", () => {
           scopeId: snapshot.context.scopeId,
           label: snapshot.context.scopeName,
           role: "portfolio",
-          estimatedEnergy: "24,348 kWh",
-          estimatedCost: "S$6,640",
+          expectedFullMonthEnergy: expect.stringMatching(/kWh$/),
+          expectedFullMonthCost: expect.stringMatching(/^S\$/),
+          consumedCostSoFar: expect.any(String),
           ...expected,
           buckets: {
             daily: expect.arrayContaining([
-              expect.objectContaining({ estimateKwh: expect.any(Number), actualStatus: expect.any(String) }),
+              expect.objectContaining({
+                originalEstimateKwh: expect.any(Number),
+                actualStatus: expect.any(String),
+              }),
             ]),
             weekly: expect.any(Array),
             monthly: expect.any(Array),
@@ -539,11 +547,51 @@ describe("Preschool Overview ViewModel", () => {
       ],
       planEvidence: "Saved saved-a · Snapshot snapshot-a · daily_totals_v1",
       actualEvidence: "Current Snapshot snapshot-b · daily_totals_v1",
+      tariff: {
+        status: "effective",
+        rate: "S$0.2727/kWh before GST",
+        effectiveRange: "1 Apr–30 Jun 2026",
+      },
     });
     if (view.forecast.status === "unavailable") throw new Error(view.forecast.detail);
     expect(view.forecast.scopes[0]?.buckets.daily).toHaveLength(30);
     expect(view.forecast.scopes[0]?.buckets.weekly).toHaveLength(5);
     expect(view.forecast.scopes[0]?.buckets.monthly).toHaveLength(1);
+  });
+
+  it("maps a 31-day July lifecycle without retaining June labels or a 30-day assumption", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    attachPlanningLifecycle(snapshot, {
+      status: "partial",
+      usageKwh: 2_800,
+      completeDayCount: 14,
+      varianceKwh: null,
+      variancePct: null,
+    }, { status: "partial", pacePct: 95.2 }, {
+      targetStart: "2026-07-01",
+      targetDayCount: 31,
+    });
+
+    const view = buildPreschoolOverviewViewModel(snapshot);
+
+    expect(view.forecast).toMatchObject({
+      status: "partial",
+      targetMonth: "July 2026",
+      targetPeriod: "1–31 Jul 2026",
+      tariff: {
+        status: "provisional",
+        label: "Provisional · using latest available tariff",
+      },
+      scopes: expect.arrayContaining([expect.objectContaining({
+        coverage: "14 / 31 complete days",
+      })]),
+    });
+    if (view.forecast.status === "unavailable") throw new Error(view.forecast.detail);
+    expect(view.forecast.scopes[0]?.buckets.daily).toHaveLength(31);
+    expect(view.forecast.scopes[0]?.buckets.monthly[0]).toMatchObject({
+      start: "2026-07-01",
+      endExclusive: "2026-08-01",
+    });
   });
 
   it("fails the Forecast closed when its Plan and Actual Evidence identities do not match the lifecycle pins", () => {
@@ -567,6 +615,45 @@ describe("Preschool Overview ViewModel", () => {
     });
   });
 
+  it("keeps target-month Energy visible while withholding only Cost when the server has no tariff reference", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    attachPlanningLifecycle(snapshot, {
+      status: "partial",
+      usageKwh: 1_400,
+      completeDayCount: 7,
+      varianceKwh: null,
+      variancePct: null,
+    }, { status: "partial", pacePct: 24.64 });
+    const lifecycle = snapshot.preschoolPlanningLifecycle;
+    if (!lifecycle || lifecycle.status !== "available" || !lifecycle.forecast) throw new Error("Expected forecast fixture");
+    Reflect.deleteProperty(lifecycle.plan, "tariffReference");
+    lifecycle.forecast.tariffAssumption = {
+      status: "unavailable",
+      reason: "No accepted tariff reference is available for this target month.",
+    };
+    for (const scope of lifecycle.forecast.scopes) {
+      scope.estimatedCostBeforeGstSgd = null;
+      scope.expectedFullMonthCostBeforeGstSgd = null;
+      scope.actualCostBeforeGstSgd = null;
+    }
+
+    const view = buildPreschoolOverviewViewModel(snapshot);
+
+    expect(view.overallSummary.costAssumption).toBeNull();
+    expect(view.forecast).toMatchObject({
+      status: "partial",
+      tariff: {
+        status: "unavailable",
+        rate: "Unavailable",
+      },
+      scopes: expect.arrayContaining([expect.objectContaining({
+        expectedFullMonthEnergy: expect.stringMatching(/kWh$/),
+        expectedFullMonthCost: "Unavailable",
+        consumedCostSoFar: "Unavailable",
+      })]),
+    });
+  });
+
   it("retains the current planning baseline when the Saved A lifecycle is unavailable", () => {
     const snapshot = preschoolGoldenSnapshot();
     Reflect.set(snapshot, "preschoolPlanningLifecycle", {
@@ -583,6 +670,18 @@ describe("Preschool Overview ViewModel", () => {
       status: "provisional",
       projectedUsage: "24,348 kWh",
       actual: null,
+    });
+    expect(view.forecast).toMatchObject({
+      status: "waiting",
+      comparisonStatus: "planning-baseline",
+      targetMonth: "June 2026",
+      targetPeriod: "1–30 Jun 2026",
+      scopes: expect.arrayContaining([expect.objectContaining({
+        expectedFullMonthEnergy: "24,348 kWh",
+        expectedFullMonthCost: "S$6,640",
+        consumedSoFar: "Awaiting first complete day",
+        paceVsOriginalEstimate: "Frozen Original Estimate pending",
+      })]),
     });
   });
 
@@ -753,6 +852,10 @@ const attachPlanningLifecycle = (
     status: "waiting" | "partial" | "complete";
     pacePct: number | null;
   },
+  options: {
+    targetStart?: string;
+    targetDayCount?: number;
+  } = {},
 ): void => {
   if (
     snapshot.preschoolOperational?.status !== "available"
@@ -760,6 +863,16 @@ const attachPlanningLifecycle = (
   ) throw new Error("Expected planning fixture");
   const plan = structuredClone(snapshot.preschoolOperational.planningOutlook);
   plan.evidence.dataSnapshotId = "snapshot-a";
+  const targetStart = options.targetStart ?? "2026-06-01";
+  const targetDayCount = options.targetDayCount ?? 30;
+  const targetEndExclusive = shiftFixtureDate(targetStart, targetDayCount);
+  Reflect.set(plan, "targetPeriod", {
+    start: targetStart,
+    endInclusive: shiftFixtureDate(targetEndExclusive, -1),
+    endExclusive: targetEndExclusive,
+    timezone: "Asia/Singapore",
+    days: targetDayCount,
+  });
   const forecastScopes = forecast
     ? [
         forecastScope({
@@ -771,6 +884,8 @@ const attachPlanningLifecycle = (
           actualKwh: actual.usageKwh,
           completeDayCount: actual.completeDayCount,
           pacePct: forecast.pacePct,
+          targetStart,
+          targetDayCount,
         }),
         forecastScope({
           scopeId: "centre-a",
@@ -781,27 +896,46 @@ const attachPlanningLifecycle = (
           actualKwh: forecast.status === "waiting" ? null : forecast.status === "complete" ? 6_300 : 420,
           completeDayCount: actual.completeDayCount,
           pacePct: forecast.status === "waiting" ? null : forecast.status === "complete" ? 105 : 30,
+          targetStart,
+          targetDayCount,
         }),
       ]
     : null;
   Reflect.set(snapshot, "preschoolPlanningLifecycle", {
     status: "available",
-    contract: { id: "preschool-saved-plan-current-actual", version: "1" },
+    contract: { id: "preschool-saved-plan-current-actual", version: "2" },
     targetPeriod: {
-      start: "2026-06-01",
-      endExclusive: "2026-07-01",
+      start: targetStart,
+      endExclusive: targetEndExclusive,
       timezone: "Asia/Singapore",
-      targetDayCount: 30,
+      targetDayCount,
     },
     plan,
-    actual: { ...actual, targetDayCount: 30 },
+    actual: { ...actual, targetDayCount },
     ...(forecast && forecastScopes ? {
       forecast: {
         status: forecast.status,
         contract: {
-          id: "preschool-june-2026-forecast-series",
-          version: "1",
+          id: "preschool-monthly-energy-outlook",
+          version: "2",
           method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total",
+        },
+        targetPeriod: {
+          start: targetStart,
+          endExclusive: targetEndExclusive,
+          timezone: "Asia/Singapore",
+          targetDayCount,
+        },
+        tariffAssumption: {
+          status: targetStart <= "2026-06-30" ? "effective" : "provisional",
+          beforeGstSgdPerKwh: 0.2727,
+          sourceName: "SP Group",
+          sourceUrl: "https://example.com/tariff",
+          supplyClass: "Low tension, non-domestic",
+          appliesFrom: "2026-04-01",
+          appliesTo: "2026-06-30",
+          beforeGst: true,
+          notBill: true,
         },
         scopes: forecastScopes,
         evidence: {
@@ -826,8 +960,8 @@ const attachPlanningLifecycle = (
       projectReleaseId: snapshot.projectRelease.id,
       queryId: "daily_totals_v1",
       period: {
-        start: "2026-06-01",
-        endExclusive: "2026-07-01",
+        start: targetStart,
+        endExclusive: targetEndExclusive,
         timezone: "Asia/Singapore",
       },
     },
@@ -843,26 +977,34 @@ const forecastScope = (input: {
   actualKwh: number | null;
   completeDayCount: number;
   pacePct: number | null;
+  targetStart: string;
+  targetDayCount: number;
 }) => {
-  const daily = Array.from({ length: 30 }, (_, index) => ({
-    start: `2026-06-${String(index + 1).padStart(2, "0")}`,
-    endExclusive: index === 29 ? "2026-07-01" : `2026-06-${String(index + 2).padStart(2, "0")}`,
-    estimatedKwh: input.estimatedKwh / 30,
+  const daily = Array.from({ length: input.targetDayCount }, (_, index) => ({
+    start: shiftFixtureDate(input.targetStart, index),
+    endExclusive: shiftFixtureDate(input.targetStart, index + 1),
+    estimatedKwh: input.estimatedKwh / input.targetDayCount,
+    originalEstimateKwh: input.estimatedKwh / input.targetDayCount,
     actualKwh: index < input.completeDayCount && input.actualKwh !== null
       ? input.actualKwh / input.completeDayCount
       : null,
+    currentOutlookKwh: index < input.completeDayCount && input.actualKwh !== null
+      ? input.actualKwh / input.completeDayCount
+      : input.estimatedKwh / input.targetDayCount,
     actualCompleteDayCount: index < input.completeDayCount ? 1 : 0,
     actualTargetDayCount: 1,
     actualStatus: index < input.completeDayCount ? "complete" as const : "waiting" as const,
   }));
-  const aggregate = (size: number) => Array.from({ length: Math.ceil(30 / size) }, (_, bucketIndex) => {
+  const aggregate = (size: number) => Array.from({ length: Math.ceil(input.targetDayCount / size) }, (_, bucketIndex) => {
     const rows = daily.slice(bucketIndex * size, (bucketIndex + 1) * size);
     const actualRows = rows.filter((row) => row.actualKwh !== null);
     return {
       start: rows[0]!.start,
       endExclusive: rows.at(-1)!.endExclusive,
       estimatedKwh: rows.reduce((sum, row) => sum + row.estimatedKwh, 0),
+      originalEstimateKwh: rows.reduce((sum, row) => sum + row.originalEstimateKwh, 0),
       actualKwh: actualRows.length === 0 ? null : actualRows.reduce((sum, row) => sum + row.actualKwh!, 0),
+      currentOutlookKwh: rows.reduce((sum, row) => sum + row.currentOutlookKwh, 0),
       actualCompleteDayCount: actualRows.length,
       actualTargetDayCount: rows.length,
       actualStatus: actualRows.length === 0
@@ -879,15 +1021,27 @@ const forecastScope = (input: {
     scopeRole: input.role,
     estimatedKwh: input.estimatedKwh,
     estimatedCostBeforeGstSgd: input.estimatedCost,
+    expectedFullMonthKwh: daily.reduce((sum, row) => sum + row.currentOutlookKwh, 0),
+    expectedFullMonthCostBeforeGstSgd: daily.reduce((sum, row) => sum + row.currentOutlookKwh, 0) * 0.2727,
     actualKwh: input.actualKwh,
+    actualCostBeforeGstSgd: input.actualKwh === null ? null : input.actualKwh * 0.2727,
     actualCompleteDayCount: input.completeDayCount,
-    actualTargetDayCount: 30 as const,
+    actualTargetDayCount: input.targetDayCount,
     pacePct: input.pacePct,
     outcome: input.completeDayCount === 30 ? "above_plan" as const : null,
+    originalEstimateIdentity: `saved-a:${input.targetStart}:snapshot-a:preschool-weekday-mean-series-v1`,
+    actualIdentity: `snapshot-b:${input.targetStart}:${input.completeDayCount}`,
+    currentOutlookIdentity: `saved-a:snapshot-b:${input.completeDayCount}`,
     buckets: {
       daily,
       weekly: aggregate(7),
-      monthly: aggregate(30),
+      monthly: aggregate(input.targetDayCount),
     },
   };
+};
+
+const shiftFixtureDate = (localDate: string, days: number): string => {
+  const date = new Date(`${localDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 };

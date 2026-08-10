@@ -21,7 +21,7 @@ export type PreschoolDecisionSummaryItem = {
   sectionId: "overall-summary" | "centre-benchmark" | "operating-behaviour" | "appliance-contribution" | "planning-outlook";
   priority: 1 | 2 | 3 | null;
   sectionNumber: 2 | 3 | 4 | 5;
-  targetId: "preschool-benchmark-analysis" | "preschool-standby-wastage" | "preschool-operating-hours" | "preschool-june-planning";
+  targetId: "preschool-benchmark-analysis" | "preschool-standby-wastage" | "preschool-operating-hours" | "preschool-monthly-outlook";
   label: string;
   primaryMetric: {
     label: string;
@@ -133,8 +133,8 @@ export type PreschoolOverviewViewModel = {
     projectedCostRange: string;
     tariffRate: string;
     tariffLabel: string;
-    tariffSourceUrl: string;
-    tariffAppendixUrl: string;
+    tariffSourceUrl: string | null;
+    tariffAppendixUrl: string | null;
     evidenceLabel: string;
     limitations: string[];
     actual: {
@@ -158,22 +158,33 @@ export type PreschoolOverviewViewModel = {
   };
   forecast: {
     status: "waiting" | "partial" | "complete";
-    statusLabel: "Awaiting June actual" | "Partial June actual" | "On plan" | "Above plan" | "Below plan";
+    comparisonStatus: "frozen-original" | "planning-baseline";
+    statusLabel: string;
     statusDetail: string;
-    targetPeriod: "1–30 Jun 2026";
+    targetMonth: string;
+    targetPeriod: string;
     defaultScopeId: string;
     centreSelectionAvailable: boolean;
+    tariff: {
+      status: "effective" | "provisional" | "unavailable";
+      rate: string;
+      label: string;
+      effectiveRange: string;
+      sourceUrl: string | null;
+      note: string;
+    };
     scopes: Array<{
       scopeId: string;
       label: string;
       scopeType: string;
       role: "portfolio" | "centre";
       status: "waiting" | "partial" | "complete";
-      statusLabel: "Awaiting June actual" | "Partial June actual" | "On plan" | "Above plan" | "Below plan";
-      estimatedEnergy: string;
-      estimatedCost: string;
+      statusLabel: string;
+      expectedFullMonthEnergy: string;
+      expectedFullMonthCost: string;
       consumedSoFar: string;
-      paceVsEstimate: string;
+      consumedCostSoFar: string;
+      paceVsOriginalEstimate: string;
       paceDetail: string;
       coverage: string;
       outcome: "on_plan" | "above_plan" | "below_plan" | null;
@@ -181,10 +192,14 @@ export type PreschoolOverviewViewModel = {
         label: string;
         start: string;
         endExclusive: string;
-        estimateKwh: number;
-        estimate: string;
+        originalEstimateKwh: number | null;
+        originalEstimate: string;
+        planningBaselineKwh: number | null;
+        planningBaseline: string;
         actualKwh: number | null;
         actual: string;
+        currentOutlookKwh: number | null;
+        currentOutlook: string;
         actualStatus: "waiting" | "partial" | "complete";
         coverage: string;
       }>>;
@@ -456,7 +471,7 @@ export function buildPreschoolOverviewViewModel(
   const planningLifecycle = snapshot.preschoolPlanningLifecycle?.status === "available"
     ? snapshot.preschoolPlanningLifecycle
     : null;
-  const provisionalRate = planningReference?.tariffReference.beforeGstSgdPerKwh ?? null;
+  const provisionalRate = planningReference?.tariffReference?.beforeGstSgdPerKwh ?? null;
   const estimatedCost = analysis.cost.status === "available"
     ? `${currencySymbol(analysis.cost.currency)}${formatNumber(analysis.cost.amount, 2)}`
     : planningReference
@@ -525,7 +540,7 @@ export function buildPreschoolOverviewViewModel(
         estimatedCost,
         share: analysis.summary.usageKwh > 0 ? "100.0%" : "Unavailable",
       },
-      costAssumption: planningReference
+      costAssumption: planningReference?.tariffReference
         ? {
             rate: `S$${formatNumber(planningReference.tariffReference.beforeGstSgdPerKwh, 4)}/kWh before GST`,
             label: "SP Group Q2 2026 low-tension non-domestic reference",
@@ -537,7 +552,10 @@ export function buildPreschoolOverviewViewModel(
     planningOutlook: planningReference
       ? {
           status: "provisional",
-          targetPeriod: "1–30 Jun 2026",
+          targetPeriod: formatForecastTargetPeriod(
+            planningReference.targetPeriod.start,
+            shiftLocalDate(planningReference.targetPeriod.endInclusive, 1),
+          ),
           method: "Average of four complete Monday–Sunday weeks from the accepted May Snapshot.",
           sourceWeeks: planningReference.sourceWeeks.map((week) => ({
             label: `${formatShortDate(week.start)}–${formatShortDate(week.endInclusive)}`,
@@ -548,13 +566,23 @@ export function buildPreschoolOverviewViewModel(
           weeklyAverage: `${formatNumber(planningReference.weeklyBaseline.averageKwh, 0)} kWh/week`,
           projectedUsage: `${formatNumber(planningReference.usageEstimate.projectedKwh, 0)} kWh`,
           projectedRange: `${formatNumber(planningReference.usageEstimate.lowerKwh, 0)}–${formatNumber(planningReference.usageEstimate.upperKwh, 0)} kWh`,
-          currentPeriodCost: `S$${formatNumber(planningReference.costEstimate.currentPeriodBeforeGstSgd, 0)}`,
-          projectedCost: `S$${formatNumber(planningReference.costEstimate.projectedBeforeGstSgd, 0)}`,
-          projectedCostRange: `S$${formatNumber(planningReference.costEstimate.lowerBeforeGstSgd, 0)}–S$${formatNumber(planningReference.costEstimate.upperBeforeGstSgd, 0)}`,
-          tariffRate: `${formatNumber(planningReference.tariffReference.beforeGstSgdPerKwh * 100, 2)}¢/kWh before GST`,
-          tariffLabel: `${planningReference.tariffReference.sourceName} regulated ${planningReference.tariffReference.supplyClass.toLowerCase()} reference · 1 Apr–30 Jun 2026`,
-          tariffSourceUrl: planningReference.tariffReference.sourceUrl,
-          tariffAppendixUrl: planningReference.tariffReference.appendixUrl,
+          currentPeriodCost: planningReference.tariffReference
+            ? `S$${formatNumber(planningReference.costEstimate.currentPeriodBeforeGstSgd, 0)}`
+            : "Unavailable",
+          projectedCost: planningReference.tariffReference
+            ? `S$${formatNumber(planningReference.costEstimate.projectedBeforeGstSgd, 0)}`
+            : "Unavailable",
+          projectedCostRange: planningReference.tariffReference
+            ? `S$${formatNumber(planningReference.costEstimate.lowerBeforeGstSgd, 0)}–S$${formatNumber(planningReference.costEstimate.upperBeforeGstSgd, 0)}`
+            : "Unavailable",
+          tariffRate: planningReference.tariffReference
+            ? `${formatNumber(planningReference.tariffReference.beforeGstSgdPerKwh * 100, 2)}¢/kWh before GST`
+            : "Unavailable",
+          tariffLabel: planningReference.tariffReference
+            ? `${planningReference.tariffReference.sourceName} regulated ${planningReference.tariffReference.supplyClass.toLowerCase()} reference · ${formatTariffEffectiveRange(planningReference.tariffReference.appliesFrom, planningReference.tariffReference.appliesTo)}`
+            : "No accepted tariff reference is available; energy remains available and cost is withheld.",
+          tariffSourceUrl: planningReference.tariffReference?.sourceUrl ?? null,
+          tariffAppendixUrl: planningReference.tariffReference?.appendixUrl ?? null,
           evidenceLabel: `${planningReference.evidence.queryId} · ${planningReference.evidence.recipeId}`,
           limitations: planningReference.limitations,
           actual: planningLifecycle
@@ -566,7 +594,7 @@ export function buildPreschoolOverviewViewModel(
           detail: snapshot.preschoolOperational?.status === "available"
             && snapshot.preschoolOperational.planningOutlook.status === "unavailable"
             ? snapshot.preschoolOperational.planningOutlook.reason.message
-            : "June planning baseline is unavailable because the release-pinned May operational projection is unavailable.",
+            : "The next-month Planning Baseline is unavailable because the release-pinned operational projection is unavailable.",
         },
     liveForecast: {
       status: "unavailable",
@@ -735,19 +763,46 @@ function buildForecastView(
   if (!lifecycle || lifecycle.status !== "available" || !lifecycle.forecast) {
     return buildEstimateOnlyForecastView(snapshot);
   }
+  if (lifecycle.contract.version !== "2") {
+    return buildEstimateOnlyForecastView(snapshot);
+  }
   const forecast = lifecycle.forecast;
-  const identityMatches = lifecycle.targetPeriod.start === "2026-06-01"
-    && lifecycle.targetPeriod.endExclusive === "2026-07-01"
-    && lifecycle.targetPeriod.timezone === "Asia/Singapore"
+  const targetPeriod = forecast.targetPeriod;
+  const tariffAssumption = forecast.tariffAssumption;
+  const identityMatches = forecast.contract.id === "preschool-monthly-energy-outlook"
+    && forecast.contract.version === "2"
+    && targetPeriod !== undefined
+    && tariffAssumption !== undefined
+    && targetPeriod.start === lifecycle.targetPeriod.start
+    && targetPeriod.endExclusive === lifecycle.targetPeriod.endExclusive
+    && targetPeriod.timezone === lifecycle.targetPeriod.timezone
+    && targetPeriod.targetDayCount === lifecycle.targetPeriod.targetDayCount
+    && planningTargetMatches(lifecycle.plan.targetPeriod, lifecycle.targetPeriod)
     && lifecycle.planProvenance.projectReleaseId === snapshot.projectRelease.id
     && lifecycle.actualProvenance.projectReleaseId === snapshot.projectRelease.id
     && lifecycle.planProvenance.dataSnapshotId === forecast.evidence.planDataSnapshotId
     && lifecycle.actualProvenance.dataSnapshotId === forecast.evidence.actualDataSnapshotId
     && lifecycle.plan.evidence.dataSnapshotId === forecast.evidence.planDataSnapshotId
+    && lifecycle.actualProvenance.period.start === lifecycle.targetPeriod.start
+    && lifecycle.actualProvenance.period.endExclusive === lifecycle.targetPeriod.endExclusive
+    && lifecycle.actualProvenance.period.timezone === lifecycle.targetPeriod.timezone
     && forecast.evidence.planQueryId === "daily_totals_v1"
     && forecast.evidence.actualQueryId === "daily_totals_v1";
   const portfolio = forecast.scopes.find((scope) => scope.scopeRole === "portfolio");
-  if (!identityMatches || !portfolio) {
+  const hasMonthlyFields = forecast.scopes.every((scope) => (
+    typeof scope.originalEstimateIdentity === "string"
+    && typeof scope.actualIdentity === "string"
+    && typeof scope.currentOutlookIdentity === "string"
+    && scope.expectedFullMonthKwh !== undefined
+    && scope.expectedFullMonthCostBeforeGstSgd !== undefined
+    && scope.actualCostBeforeGstSgd !== undefined
+    && forecastScopeCoversTarget(scope, lifecycle.targetPeriod)
+    && Object.values(scope.buckets).every((buckets) => buckets.every((bucket) => (
+      typeof bucket.originalEstimateKwh === "number"
+      && bucket.currentOutlookKwh !== undefined
+    )))
+  ));
+  if (!identityMatches || !portfolio || !targetPeriod || !tariffAssumption || !hasMonthlyFields) {
     return {
       status: "unavailable",
       detail: "The Snapshot-bound Forecast series does not match its Saved Plan and current Actual Evidence pins.",
@@ -766,13 +821,22 @@ function buildForecastView(
       role: scope.scopeRole,
       status: scopeStatus,
       statusLabel: forecastStatusLabel(scopeStatus, scope.outcome),
-      estimatedEnergy: `${formatNumber(scope.estimatedKwh, 0)} kWh`,
-      estimatedCost: `S$${formatNumber(scope.estimatedCostBeforeGstSgd, 0)}`,
+      expectedFullMonthEnergy: scope.expectedFullMonthKwh == null
+        ? "Unavailable"
+        : `${formatNumber(scope.expectedFullMonthKwh, 0)} kWh`,
+      expectedFullMonthCost: scope.expectedFullMonthCostBeforeGstSgd == null
+        ? "Unavailable"
+        : `S$${formatNumber(scope.expectedFullMonthCostBeforeGstSgd, 0)}`,
       consumedSoFar: scope.actualKwh === null
-        ? "Not available yet"
+        ? "Awaiting first complete day"
         : `${formatNumber(scope.actualKwh, 0)} kWh`,
-      paceVsEstimate: scope.pacePct === null
-        ? "Not available yet"
+      consumedCostSoFar: scope.actualKwh === null
+        ? "Awaiting first complete day"
+        : scope.actualCostBeforeGstSgd == null
+          ? "Unavailable"
+          : `S$${formatNumber(scope.actualCostBeforeGstSgd, 0)} before GST`,
+      paceVsOriginalEstimate: scope.pacePct === null
+        ? "Starts after first complete day"
         : `${formatNumber(scope.pacePct, 2)}%`,
       paceDetail: forecastPaceDetail(scope.pacePct, scope.outcome, scopeStatus),
       coverage: `${scope.actualCompleteDayCount} / ${scope.actualTargetDayCount} complete days`,
@@ -786,15 +850,18 @@ function buildForecastView(
   });
   return {
     status: forecast.status,
+    comparisonStatus: "frozen-original",
     statusLabel: forecastStatusLabel(forecast.status, portfolio.outcome),
     statusDetail: forecast.status === "waiting"
-      ? "Estimate is ready from Saved May Plan Evidence; current June Actual has no complete days yet."
+      ? `The frozen estimate is ready for ${formatForecastTargetMonth(targetPeriod.start)}; Actual starts after the first complete local day.`
       : forecast.status === "partial"
-        ? "June Actual is shown only for complete days. Pace compares those days with the matching estimate dates."
-        : "All 30 June days are complete, so final Plan-versus-Actual status is available.",
-    targetPeriod: "1–30 Jun 2026",
+        ? "Actual includes complete local days only. Current Outlook combines those facts with the remaining frozen estimate."
+        : `All ${targetPeriod.targetDayCount} local days are complete, so Current Outlook equals final Actual.`,
+    targetMonth: formatForecastTargetMonth(targetPeriod.start),
+    targetPeriod: formatForecastTargetPeriod(targetPeriod.start, targetPeriod.endExclusive),
     defaultScopeId: portfolio.scopeId,
     centreSelectionAvailable: scopes.some((scope) => scope.role === "centre"),
+    tariff: forecastTariffView(tariffAssumption, targetPeriod.start),
     scopes,
     method: forecast.contract.method,
     planEvidence: `Saved ${lifecycle.planProvenance.savedAnalysisId} · Snapshot ${lifecycle.planProvenance.dataSnapshotId} · ${lifecycle.planProvenance.queryId}`,
@@ -807,9 +874,12 @@ function buildEstimateOnlyForecastView(
 ): PreschoolOverviewViewModel["forecast"] {
   const plan = resolvePlanningReference(snapshot);
   const estimateSeries = plan?.estimateSeries;
-  const identityMatches = plan?.targetPeriod.start === "2026-06-01"
-    && plan.targetPeriod.endInclusive === "2026-06-30"
-    && plan.targetPeriod.days === 30
+  const targetEndExclusive = plan
+    ? shiftLocalDate(plan.targetPeriod.endInclusive, 1)
+    : null;
+  const identityMatches = plan !== null
+    && targetEndExclusive !== null
+    && plan.targetPeriod.days === forecastBucketDayCount(plan.targetPeriod.start, targetEndExclusive)
     && plan.evidence.dataSnapshotId === snapshot.dataSnapshot.id
     && plan.evidence.queryId === "daily_totals_v1"
     && estimateSeries?.contract.id === "preschool-june-2026-estimate-series"
@@ -818,7 +888,7 @@ function buildEstimateOnlyForecastView(
   if (!identityMatches || !estimateSeries || !portfolio) {
     return {
       status: "unavailable",
-      detail: "A Snapshot-bound Forecast series is unavailable. June Actual is never simulated or borrowed from another Snapshot.",
+      detail: "A Snapshot-bound monthly Planning Baseline is unavailable. Actual is never simulated or borrowed from another Snapshot.",
     };
   }
   const scopes = estimateSeries.scopes.map((scope) => ({
@@ -827,13 +897,16 @@ function buildEstimateOnlyForecastView(
     scopeType: scope.scopeType,
     role: scope.scopeRole,
     status: "waiting" as const,
-    statusLabel: "Awaiting June actual" as const,
-    estimatedEnergy: `${formatNumber(scope.estimatedKwh, 0)} kWh`,
-    estimatedCost: `S$${formatNumber(scope.estimatedCostBeforeGstSgd, 0)}`,
-    consumedSoFar: "Not available yet",
-    paceVsEstimate: "Not available yet",
-    paceDetail: "Available after the first complete June day",
-    coverage: "0 / 30 complete days",
+    statusLabel: "Awaiting first complete day",
+    expectedFullMonthEnergy: `${formatNumber(scope.estimatedKwh, 0)} kWh`,
+    expectedFullMonthCost: plan.tariffReference
+      ? `S$${formatNumber(scope.estimatedCostBeforeGstSgd, 0)}`
+      : "Unavailable",
+    consumedSoFar: "Awaiting first complete day",
+    consumedCostSoFar: "Awaiting first complete day",
+    paceVsOriginalEstimate: "Frozen Original Estimate pending",
+    paceDetail: "The Planning Baseline remains visible; historical Original-versus-Current comparison needs a compatible Saved Plan.",
+    coverage: `0 / ${plan.targetPeriod.days} complete days`,
     outcome: null,
     buckets: {
       daily: scope.buckets.daily.map(estimateOnlyForecastBucketView),
@@ -843,15 +916,18 @@ function buildEstimateOnlyForecastView(
   }));
   return {
     status: "waiting",
-    statusLabel: "Awaiting June actual",
-    statusDetail: "Estimate is ready from the current May Snapshot; June Actual has no complete days yet.",
-    targetPeriod: "1–30 Jun 2026",
+    comparisonStatus: "planning-baseline",
+    statusLabel: "Planning baseline ready · Frozen comparison pending",
+    statusDetail: `A deterministic baseline is ready for ${formatForecastTargetMonth(plan.targetPeriod.start)}. A compatible frozen Saved Plan is not available for Original-versus-Current comparison.`,
+    targetMonth: formatForecastTargetMonth(plan.targetPeriod.start),
+    targetPeriod: formatForecastTargetPeriod(plan.targetPeriod.start, targetEndExclusive),
     defaultScopeId: portfolio.scopeId,
     centreSelectionAvailable: scopes.some((scope) => scope.role === "centre"),
+    tariff: planningTariffView(plan),
     scopes,
     method: estimateSeries.contract.method,
     planEvidence: `Current Snapshot ${plan.evidence.dataSnapshotId} · ${plan.evidence.queryId}`,
-    actualEvidence: "June Actual not available yet",
+    actualEvidence: `${formatForecastTargetMonth(plan.targetPeriod.start)} Actual not available yet`,
   };
 }
 
@@ -865,10 +941,14 @@ function estimateOnlyForecastBucketView(bucket: PlanningEstimateBucket) {
     label: formatForecastBucketLabel(bucket.start, bucket.endExclusive),
     start: bucket.start,
     endExclusive: bucket.endExclusive,
-    estimateKwh: bucket.estimatedKwh,
-    estimate: `${formatNumber(bucket.estimatedKwh, 0)} kWh`,
+    originalEstimateKwh: null,
+    originalEstimate: "Frozen estimate pending",
+    planningBaselineKwh: bucket.estimatedKwh,
+    planningBaseline: `${formatNumber(bucket.estimatedKwh, 0)} kWh`,
     actualKwh: null,
     actual: "Waiting",
+    currentOutlookKwh: bucket.estimatedKwh,
+    currentOutlook: `${formatNumber(bucket.estimatedKwh, 0)} kWh`,
     actualStatus: "waiting" as const,
     coverage: `0 / ${targetDayCount} complete days`,
   };
@@ -883,12 +963,12 @@ function forecastBucketDayCount(start: string, endExclusive: string): number {
 function forecastStatusLabel(
   status: "waiting" | "partial" | "complete",
   outcome: "on_plan" | "above_plan" | "below_plan" | null,
-): "Awaiting June actual" | "Partial June actual" | "On plan" | "Above plan" | "Below plan" {
-  if (status === "waiting") return "Awaiting June actual";
-  if (status === "partial") return "Partial June actual";
-  if (outcome === "above_plan") return "Above plan";
-  if (outcome === "below_plan") return "Below plan";
-  return "On plan";
+): string {
+  if (status === "waiting") return "Awaiting first complete day";
+  if (status === "partial") return "Actual to date + remaining estimate";
+  if (outcome === "above_plan") return "Complete month · Above original estimate";
+  if (outcome === "below_plan") return "Complete month · Below original estimate";
+  return "Complete month · On original estimate";
 }
 
 function forecastPaceDetail(
@@ -896,11 +976,11 @@ function forecastPaceDetail(
   outcome: "on_plan" | "above_plan" | "below_plan" | null,
   status: "waiting" | "partial" | "complete",
 ): string {
-  if (pacePct === null) return "Available after the first complete June day";
-  if (status !== "complete") return "Actual to date ÷ estimate for the same complete days";
-  if (outcome === "above_plan") return "Final actual finished above estimate";
-  if (outcome === "below_plan") return "Final actual finished below estimate";
-  return "Final actual finished on estimate";
+  if (pacePct === null) return "Starts after the first complete local day";
+  if (status !== "complete") return "Actual to date ÷ frozen estimate for the same complete days";
+  if (outcome === "above_plan") return "Final Actual finished above Original Estimate";
+  if (outcome === "below_plan") return "Final Actual finished below Original Estimate";
+  return "Final Actual finished on Original Estimate";
 }
 
 function forecastBucketView(
@@ -913,13 +993,163 @@ function forecastBucketView(
     label: formatForecastBucketLabel(bucket.start, bucket.endExclusive),
     start: bucket.start,
     endExclusive: bucket.endExclusive,
-    estimateKwh: bucket.estimatedKwh,
-    estimate: `${formatNumber(bucket.estimatedKwh, 0)} kWh`,
+    originalEstimateKwh: bucket.originalEstimateKwh ?? null,
+    originalEstimate: bucket.originalEstimateKwh === undefined
+      ? "Unavailable"
+      : `${formatNumber(bucket.originalEstimateKwh, 0)} kWh`,
+    planningBaselineKwh: null,
+    planningBaseline: "Not used",
     actualKwh: bucket.actualKwh,
     actual: bucket.actualKwh === null ? "Waiting" : `${formatNumber(bucket.actualKwh, 0)} kWh`,
+    currentOutlookKwh: bucket.currentOutlookKwh ?? null,
+    currentOutlook: bucket.currentOutlookKwh == null
+      ? "Unavailable"
+      : `${formatNumber(bucket.currentOutlookKwh, 0)} kWh`,
     actualStatus: bucket.actualStatus,
     coverage: `${bucket.actualCompleteDayCount} / ${bucket.actualTargetDayCount} complete days`,
   };
+}
+
+function planningTargetMatches(
+  plan: { start: string; endInclusive: string; days: number },
+  target: { start: string; endExclusive: string; targetDayCount: number },
+): boolean {
+  return plan.start === target.start
+    && plan.endInclusive === shiftLocalDate(target.endExclusive, -1)
+    && plan.days === target.targetDayCount;
+}
+
+function forecastScopeCoversTarget(
+  scope: NonNullable<Extract<
+    NonNullable<Extract<NonNullable<EnergyProjectAnalysisSnapshotDto["preschoolPlanningLifecycle"]>, { status: "available" }>["forecast"]>,
+    { status: "waiting" | "partial" | "complete" }
+  >>["scopes"][number],
+  target: { start: string; endExclusive: string; targetDayCount: number },
+): boolean {
+  const daily = scope.buckets.daily;
+  const weekly = scope.buckets.weekly;
+  const monthly = scope.buckets.monthly;
+  return scope.actualTargetDayCount === target.targetDayCount
+    && daily.length === target.targetDayCount
+    && daily[0]?.start === target.start
+    && daily.at(-1)?.endExclusive === target.endExclusive
+    && daily.every((bucket, index) => (
+      bucket.start === shiftLocalDate(target.start, index)
+      && bucket.endExclusive === shiftLocalDate(target.start, index + 1)
+    ))
+    && weekly[0]?.start === target.start
+    && weekly.at(-1)?.endExclusive === target.endExclusive
+    && monthly.length === 1
+    && monthly[0]?.start === target.start
+    && monthly[0]?.endExclusive === target.endExclusive;
+}
+
+function formatForecastTargetMonth(start: string): string {
+  return new Intl.DateTimeFormat("en-SG", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${start}T00:00:00.000Z`));
+}
+
+function formatForecastTargetPeriod(start: string, endExclusive: string): string {
+  const endInclusive = shiftLocalDate(endExclusive, -1);
+  const startDate = new Date(`${start}T00:00:00.000Z`);
+  const endDate = new Date(`${endInclusive}T00:00:00.000Z`);
+  const sameMonth = start.slice(0, 7) === endInclusive.slice(0, 7);
+  const startLabel = new Intl.DateTimeFormat("en-SG", {
+    day: "numeric",
+    ...(sameMonth ? {} : { month: "short" as const }),
+    timeZone: "UTC",
+  }).format(startDate);
+  const endLabel = new Intl.DateTimeFormat("en-SG", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(endDate);
+  return `${startLabel}–${endLabel}`;
+}
+
+function formatTariffEffectiveRange(from: string, toInclusive: string): string {
+  const fromLabel = new Intl.DateTimeFormat("en-SG", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  }).format(new Date(`${from}T00:00:00.000Z`));
+  const toLabel = new Intl.DateTimeFormat("en-SG", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${toInclusive}T00:00:00.000Z`));
+  return `${fromLabel}–${toLabel}`;
+}
+
+function forecastTariffView(
+  tariff: NonNullable<EnergyProjectAnalysisSnapshotDto["preschoolPlanningLifecycle"]> extends infer Lifecycle
+    ? Lifecycle extends { status: "available"; forecast?: infer Forecast }
+      ? Forecast extends { tariffAssumption?: infer Tariff }
+        ? NonNullable<Tariff>
+        : never
+      : never
+    : never,
+  targetStart: string,
+): Extract<PreschoolOverviewViewModel["forecast"], { status: "waiting" | "partial" | "complete" }>["tariff"] {
+  if (tariff.status === "unavailable") {
+    return {
+      status: "unavailable",
+      rate: "Unavailable",
+      label: "Tariff reference unavailable",
+      effectiveRange: "No accepted reference period",
+      sourceUrl: null,
+      note: `${tariff.reason} Energy remains available; only provisional cost is withheld.`,
+    };
+  }
+  return {
+    status: tariff.status,
+    rate: `S$${formatNumber(tariff.beforeGstSgdPerKwh, 4)}/kWh before GST`,
+    label: tariff.status === "effective"
+      ? `Effective for ${formatForecastTargetMonth(targetStart)}`
+      : "Provisional · using latest available tariff",
+    effectiveRange: formatTariffEffectiveRange(tariff.appliesFrom, tariff.appliesTo),
+    sourceUrl: tariff.sourceUrl,
+    note: `${tariff.sourceName} · ${tariff.supplyClass} · planning reference only · not a customer bill.`,
+  };
+}
+
+function planningTariffView(
+  plan: NonNullable<ReturnType<typeof resolvePlanningReference>>,
+): Extract<PreschoolOverviewViewModel["forecast"], { status: "waiting" | "partial" | "complete" }>["tariff"] {
+  const tariff = plan.tariffReference;
+  if (!tariff) {
+    return {
+      status: "unavailable",
+      rate: "Unavailable",
+      label: "Tariff reference unavailable",
+      effectiveRange: "No accepted reference period",
+      sourceUrl: null,
+      note: "Energy remains available; only provisional cost is withheld.",
+    };
+  }
+  const effective = tariff.appliesFrom <= plan.targetPeriod.start
+    && tariff.appliesTo >= plan.targetPeriod.endInclusive;
+  return {
+    status: effective ? "effective" : "provisional",
+    rate: `S$${formatNumber(tariff.beforeGstSgdPerKwh, 4)}/kWh before GST`,
+    label: effective
+      ? `Effective for ${formatForecastTargetMonth(plan.targetPeriod.start)}`
+      : "Provisional · using latest available tariff",
+    effectiveRange: formatTariffEffectiveRange(tariff.appliesFrom, tariff.appliesTo),
+    sourceUrl: tariff.sourceUrl,
+    note: `${tariff.sourceName} · ${tariff.supplyClass} · planning reference only · not a customer bill.`,
+  };
+}
+
+function shiftLocalDate(localDate: string, days: number): string {
+  const date = new Date(`${localDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
 function formatForecastBucketLabel(start: string, endExclusive: string): string {
@@ -1215,23 +1445,26 @@ function buildPreschoolDecisionSummary(
       })
     : [];
   const planning = resolvePlanningReference(snapshot);
+  const planningMonth = planning ? formatForecastTargetMonth(planning.targetPeriod.start) : null;
   const planningItem: PreschoolDecisionSummaryItem[] = planning
     ? [{
         id: "planning",
         sectionId: "planning-outlook",
         priority: null,
         sectionNumber: 5,
-        targetId: "preschool-june-planning",
-        label: "June planning baseline",
+        targetId: "preschool-monthly-outlook",
+        label: `${planningMonth} planning baseline`,
         primaryMetric: {
-          label: "Estimated June energy",
+          label: `Estimated ${planningMonth} energy`,
           value: planning.usageEstimate.projectedKwh,
           valueLabel: `${formatNumber(planning.usageEstimate.projectedKwh, 0)} kWh`,
         },
         supportingMetrics: [
           {
-            label: "Estimated June cost",
-            valueLabel: `S$${formatNumber(planning.costEstimate.projectedBeforeGstSgd, 0)}`,
+            label: `Estimated ${planningMonth} cost`,
+            valueLabel: planning.tariffReference
+              ? `S$${formatNumber(planning.costEstimate.projectedBeforeGstSgd, 0)}`
+              : "Unavailable",
           },
           {
             label: "Source window",
@@ -1251,7 +1484,7 @@ function buildPreschoolDecisionSummary(
     detail: items.length > 0
       ? "Snapshot-bound findings for Sections 2–5. AI interpretation is shown after this structured summary and beside the relevant analysis section."
       : signals?.reason?.message
-        ?? "Verified decision signals and the June planning baseline are unavailable for this Snapshot.",
+        ?? "Verified decision signals and the next-month Planning Baseline are unavailable for this Snapshot.",
   };
 }
 
