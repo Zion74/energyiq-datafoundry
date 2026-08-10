@@ -7,7 +7,6 @@ import {
   retryPreschoolAiRun,
   resetPreschoolAiRunsForTests,
   resolvePreschoolAiEventStream,
-  resolvePreschoolAiWorkflowEventStreams,
   validatePreschoolAiEventStream,
   type PreschoolAiProgress,
   type PreschoolAiRelationship,
@@ -16,6 +15,15 @@ import {
   type PreschoolAiWhyKind,
 } from "./preschool-ai-run";
 import type { AiFindingPresentation } from "./ai-finding-presentation";
+import {
+  PRESCHOOL_AI_ACCEPTED_CONTRACT_REVISION,
+  PRESCHOOL_AI_EDITOR_PROMPT_REVISION,
+  PRESCHOOL_AI_INVESTIGATOR_PROMPT_REVISION,
+  PRESCHOOL_AI_METHOD_SKILL_ID,
+  PRESCHOOL_AI_METHOD_SKILL_REVISION,
+  PRESCHOOL_AI_WORKFLOW_REVISION,
+  type PreschoolAiAcceptedArtifact,
+} from "./preschool-ai-artifact";
 import { preschoolGoldenSnapshot } from "./preschool-overview.test-fixture";
 import { runSavedAnalysisAiForSnapshot } from "./saved-analysis-ai";
 
@@ -1329,15 +1337,7 @@ describe("Preschool AI Run", () => {
 
   it("single-flights identical page identities through the server ensure endpoint", async () => {
     const input = requiredInput();
-    const available = resolvePreschoolAiWorkflowEventStreams({
-      input,
-      providerProfileId: "profile-shared",
-      investigatorRunId: "run-investigator-shared",
-      investigatorEventStream: workflowEnvelopeEventStream("candidates", []),
-      editorRunId: "run-editor-shared",
-      editorEventStream: workflowEnvelopeEventStream("findings", [], { trace: [] }),
-    });
-    if (available.status !== "available") throw new Error("Expected a valid shared fixture");
+    const available = sharedArtifactFixture(input, "run-editor-shared");
     const readSpy = vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockResolvedValue({
       status: "missing",
       dataSnapshotId: input.snapshotId,
@@ -1364,15 +1364,7 @@ describe("Preschool AI Run", () => {
   it("lets two client identities share one server-owned two-stage Provider execution", async () => {
     const firstInput = requiredInput();
     const secondInput = { ...firstInput, identityKey: `second-authorized-user:${firstInput.identityKey}` };
-    const available = resolvePreschoolAiWorkflowEventStreams({
-      input: firstInput,
-      providerProfileId: "profile-shared",
-      investigatorRunId: "run-investigator-shared",
-      investigatorEventStream: workflowEnvelopeEventStream("candidates", []),
-      editorRunId: "run-editor-shared",
-      editorEventStream: workflowEnvelopeEventStream("findings", [], { trace: [] }),
-    });
-    if (available.status !== "available") throw new Error("Expected a valid shared fixture");
+    const available = sharedArtifactFixture(firstInput, "run-editor-shared");
     const readSpy = vi.spyOn(configApi, "getEnergyOverviewAiArtifact")
       .mockResolvedValueOnce({
         id: "artifact-shared",
@@ -1435,15 +1427,7 @@ describe("Preschool AI Run", () => {
 
   it("restores the shared current Artifact without reading a user-owned Session or starting Provider", async () => {
     const input = requiredInput();
-    const available = resolvePreschoolAiWorkflowEventStreams({
-      input,
-      providerProfileId: "profile-shared",
-      investigatorRunId: "run-investigator-shared",
-      investigatorEventStream: workflowEnvelopeEventStream("candidates", []),
-      editorRunId: "run-editor-shared",
-      editorEventStream: workflowEnvelopeEventStream("findings", [], { trace: [] }),
-    });
-    if (available.status !== "available") throw new Error("Expected a valid shared fixture");
+    const available = sharedArtifactFixture(input, "run-editor-shared");
     vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockResolvedValue({
       id: "artifact-shared",
       status: "available",
@@ -1486,15 +1470,7 @@ describe("Preschool AI Run", () => {
 
   it("replaces a failed cached run after retry so remount and Saved Analysis see available", async () => {
     const input = requiredInput();
-    const available = resolvePreschoolAiWorkflowEventStreams({
-      input,
-      providerProfileId: "profile-shared",
-      investigatorRunId: "run-investigator-retry",
-      investigatorEventStream: workflowEnvelopeEventStream("candidates", []),
-      editorRunId: "run-editor-retry",
-      editorEventStream: workflowEnvelopeEventStream("findings", [], { trace: [] }),
-    });
-    if (available.status !== "available") throw new Error("Expected a valid shared fixture");
+    const available = sharedArtifactFixture(input, "run-editor-retry");
     const readSpy = vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockResolvedValue({
       id: "artifact-failed",
       status: "failed",
@@ -1529,15 +1505,29 @@ function requiredInput(): PreschoolAiRunInput {
   return input;
 }
 
-function workflowEnvelopeEventStream(
-  key: "candidates" | "findings",
-  value: unknown[],
-  rest: Record<string, unknown> = {},
-): string {
-  return [
-    { type: "TEXT_MESSAGE_CONTENT", delta: JSON.stringify({ [key]: value, ...rest }) },
-    { type: "RUN_FINISHED" },
-  ].map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
+function sharedArtifactFixture(input: PreschoolAiRunInput, editorRunId: string): PreschoolAiAcceptedArtifact {
+  return {
+    status: "available",
+    providerProfileId: "profile-shared",
+    runId: editorRunId,
+    packId: "preschool-analysis-pack",
+    packRevision: "v1",
+    contract: { id: "preschool-ai-accepted-artifact", revision: PRESCHOOL_AI_ACCEPTED_CONTRACT_REVISION },
+    binding: input.coverage.binding,
+    workflow: {
+      id: "preschool-two-stage",
+      revision: PRESCHOOL_AI_WORKFLOW_REVISION,
+      methodSkill: { id: PRESCHOOL_AI_METHOD_SKILL_ID, revision: PRESCHOOL_AI_METHOD_SKILL_REVISION },
+      stages: {
+        investigator: {
+          runId: `${editorRunId}:investigator`,
+          promptRevision: PRESCHOOL_AI_INVESTIGATOR_PROMPT_REVISION,
+        },
+        editor: { runId: editorRunId, promptRevision: PRESCHOOL_AI_EDITOR_PROMPT_REVISION },
+      },
+    },
+    findings: [],
+  };
 }
 
 function successfulEventStream(

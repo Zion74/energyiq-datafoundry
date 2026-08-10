@@ -52,6 +52,9 @@ export function NgeeAnnDayProfile({ view }: { view: NgeeAnnDayProfileViewModel }
   const activeDifferencePct = activePoint && averageUsageKwh > 0
     ? (activePoint.acceptedUsageKwh - averageUsageKwh) / averageUsageKwh * 100
     : null;
+  const summaryUnavailableReason = profile.summary.status === "unavailable"
+    ? profile.summary.reason
+    : profile.reason ?? "No complete Day Type profile is available for this selection.";
 
   const resetPoint = () => {
     setActivePointId(null);
@@ -152,7 +155,7 @@ export function NgeeAnnDayProfile({ view }: { view: NgeeAnnDayProfileViewModel }
           <div className="mt-2" role="status">
             <p className="text-sm font-semibold text-foreground">When-energy summary unavailable</p>
             <p className="mt-1 text-sm leading-6 text-muted">
-              {profile.summary.reason}
+              {summaryUnavailableReason}
             </p>
           </div>
         )}

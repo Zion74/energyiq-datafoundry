@@ -447,3 +447,22 @@ http://127.0.0.1:4178/analysis?utility=electricity&project=proj-nap-energy-analy
 - 两条技术化小字已改为 `Total electricity used in the selected scope` 与 `Average electricity used per day in this Overview window`；
 - 没有修改 SQL、Tariff、Snapshot、共享 Renderer、样式系统或 UI/UX Agent 的色彩/字号职责；
 - ViewModel + Renderer 共 `210/210`，root typecheck/build 与 `git diff --check` 通过。
+
+### 18.5 Web 生产构建预检修复
+
+`next build` 在 Day Profile unavailable 分支发现 TypeScript 收窄缺口：复合条件的 else 同时包含 `profile.status === unavailable` 与 `summary.status === unavailable`，因此不能无条件读取 `summary.reason`。运行时已有 Public Holiday unavailable 回归，但生产构建会被阻断。
+
+最小修复只把说明选择显式化：优先使用 `summary.reason`，否则使用 profile 已有的 `reason`，再以通用 unavailable 文字兜底。不得改变 Day Profile 状态、值、Calendar 判断、图表或 ViewModel 合同；现有 Public Holiday 测试必须保持通过。
+
+第二次构建暴露的是一个既有架构漂移，而不是两个文本字段的简单漏传：真实 Provider 已由 API 端 `preschool-overview-ai-workflow` 单独负责，Web 端仍残留一套只被测试使用的旧 `resolvePreschoolAiWorkflowEventStreams`。旧流程允许 Editor 重写完整 Finding，当前权威 v13 则由 Investigator 提交完整候选、Editor 只做选择、Runtime 生成 canonical Artifact。继续给旧流程补字段会形成第二套不一致的 AI 合同。
+
+最小、安全处理：
+
+- 删除 Web 端已无生产调用者的旧两阶段 EventStream materializer 及其专属 parser；
+- Web 单航班、恢复、重试测试改用明确的 v13 Artifact fixture，不再通过旧 Provider parser 伪造服务端结果；
+- 保留服务端权威 workflow、Runtime validation、Artifact selector 和页面 UI 不变；
+- 构建、Web AI focused tests、API workflow tests必须继续通过。
+
+停止项：不把服务端 workflow 复制回浏览器；不为旧 helper 伪造 `action / expectedIfAct / ifIgnored / uncertainty`；不改变真实 Provider Prompt 或用户页面行为。
+
+结果：旧 Web materializer/parser 及其专属测试已移除；Web 单航班、共享恢复与重试测试改为显式 v13 Artifact fixture。Web focused tests `137/137`、API 权威 workflow `28/28`、root typecheck 与 `next build` 均通过。
