@@ -405,10 +405,33 @@ export type NgeeAnnPeakBreakdownViewModel = {
   };
 };
 
+type ContributorMovement = {
+  status: "available" | "unavailable";
+  reason: string | null;
+};
+
+type ContributorSummary = {
+  currentConcentration: {
+    status: "available" | "unavailable";
+    reason: string | null;
+    name: string | null;
+    currentUsageKwh: string | null;
+    projectShare: string | null;
+  };
+  measuredChange: {
+    status: "available" | "unavailable";
+    reason: string | null;
+    name: string | null;
+    changeKwh: string | null;
+    changePct: string | null;
+  };
+};
+
 export type NgeeAnnLevelComparisonViewModel = {
   status: "available" | "unavailable";
   decisionQuestion: string;
   reason: string | null;
+  summary: ContributorSummary;
   rows: Array<{
     id: string;
     name: string;
@@ -421,6 +444,7 @@ export type NgeeAnnLevelComparisonViewModel = {
     coverage: string;
     intervals: string;
     qualityEvents: string;
+    movement: ContributorMovement;
     exact: {
       currentUsageKwh: string;
       projectShare: string;
@@ -465,6 +489,7 @@ type DerivedMeterTraceInput = {
 export type NgeeAnnEnergyCompositionViewModel = {
   decisionQuestion: string;
   categories: CompositionStatus & {
+    summary: ContributorSummary;
     rows: Array<{
       id: string;
       name: string;
@@ -473,6 +498,7 @@ export type NgeeAnnEnergyCompositionViewModel = {
       previousUsageKwh: string;
       changeKwh: string;
       changePct: string;
+      movement: ContributorMovement;
       quality: CompositionQuality;
       exact: {
         currentUsageKwh: string;
@@ -499,6 +525,7 @@ export type NgeeAnnEnergyCompositionViewModel = {
       previousUsageKwh: string;
       changeKwh: string;
       changePct: string;
+      movement: ContributorMovement;
       includedInOfficialTotal: false;
       quality: CompositionQuality;
       exact: {
@@ -847,36 +874,52 @@ function buildEnergyComposition(
     && analysis.categories.length === expectedCategories.size
     && analysis.categories.every((category) =>
       expectedCategories.has(category.category)
-      && hasComparisonAndHealth(category),
+      && hasDataHealth(category),
     );
   const categories: NgeeAnnEnergyCompositionViewModel["categories"] = categoryContractAvailable
     ? {
       status: "available",
       reason: null,
+      summary: buildContributorSummary(
+        analysis.categories.map((category) => ({
+          name: compositionCategoryName(category.category),
+          usageKwh: category.usageKwh,
+          sharePct: category.sharePct,
+          comparison: category.comparison,
+        })),
+        analysis.comparison.changeKwh,
+        "Category",
+      ),
       rows: analysis.categories.map((category) => ({
         id: category.category,
         name: compositionCategoryName(category.category),
         currentUsageKwh: formatDecimal(category.usageKwh, 2),
         projectShare: `${formatDecimal(category.sharePct, 1)}%`,
-        previousUsageKwh: formatDecimal(category.comparison!.usageKwh, 2),
-        changeKwh: `${signedDecimal(category.comparison!.changeKwh, 2)} kWh`,
-        changePct: signedDisplayPercent(category.comparison!.changePct, "Rate unavailable"),
+        previousUsageKwh: category.comparison ? formatDecimal(category.comparison.usageKwh, 2) : "Unavailable",
+        changeKwh: category.comparison ? `${signedDecimal(category.comparison.changeKwh, 2)} kWh` : "Unavailable",
+        changePct: category.comparison ? signedDisplayPercent(category.comparison.changePct, "Rate unavailable") : "Unavailable",
+        movement: movementAvailability(category.comparison, "Category comparison is unavailable for this published Snapshot."),
         quality: compositionQuality(category.dataHealth!),
         exact: {
           currentUsageKwh: formatDecimal(category.usageKwh, 4),
           projectShare: `${formatDecimal(category.sharePct, 4)}%`,
-          previousUsageKwh: formatDecimal(category.comparison!.usageKwh, 4),
-          changeKwh: `${signedDecimal(category.comparison!.changeKwh, 4)} kWh`,
-          changePct: category.comparison!.changePct === null
+          previousUsageKwh: category.comparison ? formatDecimal(category.comparison.usageKwh, 4) : "Unavailable",
+          changeKwh: category.comparison ? `${signedDecimal(category.comparison.changeKwh, 4)} kWh` : "Unavailable",
+          changePct: !category.comparison
+            ? "Unavailable"
+            : category.comparison.changePct === null
             ? "Rate unavailable"
-            : `${category.comparison!.changePct! >= 0 ? "+" : ""}${formatDecimal(category.comparison!.changePct!, 4)}%`,
+            : `${category.comparison.changePct >= 0 ? "+" : ""}${formatDecimal(category.comparison.changePct, 4)}%`,
         },
       })),
     }
     : {
       status: "unavailable",
       reason: unavailableReason
-        ?? "This published Snapshot does not include complete official Load and Light comparison facts.",
+        ?? "This published Snapshot does not include complete official Load and Light current facts and quality.",
+      summary: unavailableContributorSummary(
+        unavailableReason ?? "Current Category concentration is unavailable for this published Snapshot.",
+      ),
       rows: [],
     };
 
@@ -902,7 +945,7 @@ function buildEnergyComposition(
       && Boolean(circuit.parentScopeId)
       && levelNames.has(circuit.parentScopeId!)
       && expectedCategories.has(circuit.category)
-      && hasComparisonAndHealth(circuit),
+      && hasDataHealth(circuit),
     );
   const circuits: NgeeAnnEnergyCompositionViewModel["circuits"] = circuitContractAvailable
     ? {
@@ -920,26 +963,29 @@ function buildEnergyComposition(
         category: compositionCategoryName(circuit.category),
         currentUsageKwh: formatDecimal(circuit.usageKwh, 2),
         projectShare: `${formatDecimal(circuit.sharePct, 1)}%`,
-        previousUsageKwh: formatDecimal(circuit.comparison!.usageKwh, 2),
-        changeKwh: `${signedDecimal(circuit.comparison!.changeKwh, 2)} kWh`,
-        changePct: signedDisplayPercent(circuit.comparison!.changePct, "Rate unavailable"),
+        previousUsageKwh: circuit.comparison ? formatDecimal(circuit.comparison.usageKwh, 2) : "Unavailable",
+        changeKwh: circuit.comparison ? `${signedDecimal(circuit.comparison.changeKwh, 2)} kWh` : "Unavailable",
+        changePct: circuit.comparison ? signedDisplayPercent(circuit.comparison.changePct, "Rate unavailable") : "Unavailable",
+        movement: movementAvailability(circuit.comparison, "Circuit comparison is unavailable for this published Snapshot."),
         includedInOfficialTotal: false,
         quality: compositionQuality(circuit.dataHealth!),
         exact: {
           currentUsageKwh: formatDecimal(circuit.usageKwh, 4),
           projectShare: `${formatDecimal(circuit.sharePct, 4)}%`,
-          previousUsageKwh: formatDecimal(circuit.comparison!.usageKwh, 4),
-          changeKwh: `${signedDecimal(circuit.comparison!.changeKwh, 4)} kWh`,
-          changePct: circuit.comparison!.changePct === null
+          previousUsageKwh: circuit.comparison ? formatDecimal(circuit.comparison.usageKwh, 4) : "Unavailable",
+          changeKwh: circuit.comparison ? `${signedDecimal(circuit.comparison.changeKwh, 4)} kWh` : "Unavailable",
+          changePct: !circuit.comparison
+            ? "Unavailable"
+            : circuit.comparison.changePct === null
             ? "Rate unavailable"
-            : `${circuit.comparison!.changePct! >= 0 ? "+" : ""}${formatDecimal(circuit.comparison!.changePct!, 4)}%`,
+            : `${circuit.comparison.changePct >= 0 ? "+" : ""}${formatDecimal(circuit.comparison.changePct, 4)}%`,
         },
       })),
     }
     : {
       status: "unavailable",
       reason: unavailableReason
-        ?? "This published Snapshot does not explicitly identify the complete component Circuit set, Scopes, parents, categories, official-total markers, comparisons and quality.",
+        ?? "This published Snapshot does not explicitly identify the complete component Circuit set, Scopes, parents, categories, official-total markers and quality.",
       rows: [],
     };
 
@@ -1132,11 +1178,106 @@ function buildDerivedMeterTrace(
   };
 }
 
-function hasComparisonAndHealth(value: {
-  comparison?: unknown;
+function hasDataHealth(value: {
   dataHealth?: unknown;
 }): boolean {
-  return Boolean(value.comparison) && Boolean(value.dataHealth);
+  return Boolean(value.dataHealth);
+}
+
+function movementAvailability(
+  comparison: { changePct: number | null } | undefined,
+  unavailableReason: string,
+): ContributorMovement {
+  return comparison && comparison.changePct !== null
+    ? { status: "available", reason: null }
+    : { status: "unavailable", reason: unavailableReason };
+}
+
+function unavailableContributorSummary(reason: string): ContributorSummary {
+  return {
+    currentConcentration: {
+      status: "unavailable",
+      reason,
+      name: null,
+      currentUsageKwh: null,
+      projectShare: null,
+    },
+    measuredChange: {
+      status: "unavailable",
+      reason,
+      name: null,
+      changeKwh: null,
+      changePct: null,
+    },
+  };
+}
+
+function buildContributorSummary(
+  rows: Array<{
+    name: string;
+    usageKwh: number;
+    sharePct: number;
+    comparison?: { changeKwh: number; changePct: number | null };
+  }>,
+  projectChangeKwh: number,
+  dimension: "Level" | "Category",
+): ContributorSummary {
+  const current = [...rows].sort((left, right) => right.usageKwh - left.usageKwh)[0];
+  const currentConcentration: ContributorSummary["currentConcentration"] = current
+    ? {
+      status: "available",
+      reason: null,
+      name: current.name,
+      currentUsageKwh: formatDecimal(current.usageKwh, 2),
+      projectShare: `${formatDecimal(current.sharePct, 1)}%`,
+    }
+    : {
+      status: "unavailable",
+      reason: `No current ${dimension} facts are available.`,
+      name: null,
+      currentUsageKwh: null,
+      projectShare: null,
+    };
+
+  if (rows.length === 0 || rows.some((row) => !row.comparison || row.comparison.changePct === null)) {
+    return {
+      currentConcentration,
+      measuredChange: {
+        status: "unavailable",
+        reason: `A complete ${dimension} comparison is unavailable for this published Snapshot.`,
+        name: null,
+        changeKwh: null,
+        changePct: null,
+      },
+    };
+  }
+
+  const movement = selectDirectionalDriver(
+    rows.map((row) => ({
+      ...row,
+      changeKwh: row.comparison!.changeKwh,
+      changePct: row.comparison!.changePct,
+    })),
+    projectChangeKwh,
+  );
+  return {
+    currentConcentration,
+    measuredChange: movement
+      ? {
+        status: "available",
+        reason: null,
+        name: movement.name,
+        changeKwh: `${signedDecimal(movement.changeKwh, 2)} kWh`,
+        changePct: signedDisplayPercent(movement.changePct, "Rate unavailable"),
+      }
+      : {
+        status: "unavailable",
+        reason: `No ${dimension} movement aligns with the Project direction in the validated comparison.`,
+        name: null,
+        changeKwh: null,
+        changePct: null,
+      },
+  };
 }
 
 function compositionCategoryName(category: string): string {
@@ -3244,46 +3385,64 @@ function buildLevelComparison(
   };
   const levelRows = snapshot.analysis.childScopes.filter((scope) => scope.nodeType === "level");
   const hasCompleteContract = levelRows.length > 0
-    && levelRows.every((scope) => scope.comparison && scope.dataHealth);
+    && levelRows.every((scope) => scope.dataHealth);
 
   if (overviewUnavailable || snapshot.context.scopeType !== "project" || !hasCompleteContract) {
     return {
       status: "unavailable",
-      decisionQuestion: "Which Level needs attention first?",
+      decisionQuestion: "Where is current energy concentrated by Level, and which Level changed most?",
       reason: overviewUnavailable
         ? "No trusted intervals support a Level comparison for this Period."
         : snapshot.context.scopeType !== "project"
           ? "Select the Project Scope to compare Level 6 and Level 7."
           : "This published Snapshot does not include the Level comparison and quality contract.",
       rows: [],
+      summary: unavailableContributorSummary(
+        overviewUnavailable
+          ? "No trusted intervals support current Level concentration for this Period."
+          : "This published Snapshot does not include the Level current facts and quality contract.",
+      ),
       evidence,
     };
   }
 
   return {
     status: "available",
-    decisionQuestion: "Which Level needs attention first?",
+    decisionQuestion: "Where is current energy concentrated by Level, and which Level changed most?",
     reason: null,
+    summary: buildContributorSummary(
+      levelRows.map((scope) => ({
+        name: scope.name,
+        usageKwh: scope.usageKwh,
+        sharePct: scope.sharePct,
+        comparison: scope.comparison,
+      })),
+      snapshot.analysis.comparison.changeKwh,
+      "Level",
+    ),
     rows: levelRows.map((scope) => ({
       id: scope.nodeId,
       name: scope.name,
       currentUsageKwh: formatDecimal(scope.usageKwh, 2),
       projectShare: `${formatDecimal(scope.sharePct, 1)}%`,
       projectShareBar: `${Math.min(Math.max(scope.sharePct, 0), 100)}%`,
-      previousUsageKwh: formatDecimal(scope.comparison!.usageKwh, 2),
-      changeKwh: `${signedDecimal(scope.comparison!.changeKwh, 2)} kWh`,
-      changePct: signedDisplayPercent(scope.comparison!.changePct, "Unavailable"),
+      previousUsageKwh: scope.comparison ? formatDecimal(scope.comparison.usageKwh, 2) : "Unavailable",
+      changeKwh: scope.comparison ? `${signedDecimal(scope.comparison.changeKwh, 2)} kWh` : "Unavailable",
+      changePct: scope.comparison ? signedDisplayPercent(scope.comparison.changePct, "Unavailable") : "Unavailable",
       coverage: `${formatDecimal(scope.dataHealth!.coveragePct, 1)}% coverage`,
       intervals: `${scope.dataHealth!.validIntervalCount.toLocaleString("en-SG")} / ${scope.dataHealth!.expectedMeterIntervalCount.toLocaleString("en-SG")}`,
       qualityEvents: `${scope.dataHealth!.qualityEventCount.toLocaleString("en-SG")} quality events`,
+      movement: movementAvailability(scope.comparison, "Level comparison is unavailable for this published Snapshot."),
       exact: {
         currentUsageKwh: formatDecimal(scope.usageKwh, 4),
         projectShare: `${formatDecimal(scope.sharePct, 4)}%`,
-        previousUsageKwh: formatDecimal(scope.comparison!.usageKwh, 4),
-        changeKwh: `${signedDecimal(scope.comparison!.changeKwh, 4)} kWh`,
-        changePct: scope.comparison!.changePct === null
+        previousUsageKwh: scope.comparison ? formatDecimal(scope.comparison.usageKwh, 4) : "Unavailable",
+        changeKwh: scope.comparison ? `${signedDecimal(scope.comparison.changeKwh, 4)} kWh` : "Unavailable",
+        changePct: !scope.comparison
           ? "Unavailable"
-          : `${scope.comparison!.changePct! >= 0 ? "+" : ""}${formatDecimal(scope.comparison!.changePct!, 4)}%`,
+          : scope.comparison.changePct === null
+          ? "Unavailable"
+          : `${scope.comparison.changePct >= 0 ? "+" : ""}${formatDecimal(scope.comparison.changePct, 4)}%`,
       },
     })),
     evidence,

@@ -27,6 +27,27 @@ export function NgeeAnnLevelComparison({
           <p className="mt-1 text-sm leading-6 text-muted">{view.reason}</p>
         </div>
       ) : (
+        <>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <div className="rounded-lg border border-border bg-surface-subtle px-4 py-3">
+            <p className="text-xs font-semibold text-foreground">Current concentration by Level</p>
+            {view.summary.currentConcentration.status === "available" ? (
+              <p className="mt-1 text-sm leading-6 text-muted">
+                <span className="font-semibold text-foreground">{view.summary.currentConcentration.name}</span> uses {view.summary.currentConcentration.currentUsageKwh} kWh ({view.summary.currentConcentration.projectShare} of Project energy).
+              </p>
+            ) : <p className="mt-1 text-sm text-muted">{view.summary.currentConcentration.reason}</p>}
+          </div>
+          <div className="rounded-lg border border-border bg-surface-subtle px-4 py-3">
+            <p className="text-xs font-semibold text-foreground">Largest measured Level movement</p>
+            {view.summary.measuredChange.status === "available" ? (
+              <p className="mt-1 text-sm leading-6 text-muted">
+                <span className="font-semibold text-foreground">{view.summary.measuredChange.name}</span> changed {view.summary.measuredChange.changeKwh} ({view.summary.measuredChange.changePct}) versus the previous window.
+              </p>
+            ) : (
+              <p className="mt-1 text-sm leading-6 text-muted"><span className="font-semibold text-foreground">Measured Level movement unavailable.</span> {view.summary.measuredChange.reason}</p>
+            )}
+          </div>
+        </div>
         <div className="mt-4 divide-y divide-border border-y border-border">
           {view.rows.map((row) => (
             <article key={row.id} className="grid gap-4 py-4 lg:grid-cols-[minmax(220px,1fr)_180px_200px] lg:items-center lg:gap-7">
@@ -50,24 +71,29 @@ export function NgeeAnnLevelComparison({
               </div>
               <div>
                 <p className="text-xs text-muted">Versus previous window</p>
-                <p className={`mt-1 text-base font-semibold tabular-nums ${changeTone(row.changePct)}`}>{row.changePct}</p>
-                <p className="mt-0.5 text-xs tabular-nums text-muted">{row.changeKwh}</p>
+                {row.movement.status === "available" ? (
+                  <>
+                    <p className={`mt-1 text-base font-semibold tabular-nums ${changeTone(row.changePct)}`}>{row.changePct}</p>
+                    <p className="mt-0.5 text-xs tabular-nums text-muted">{row.changeKwh}</p>
+                  </>
+                ) : <p className="mt-1 text-xs font-semibold text-muted">Movement unavailable</p>}
                 <details className="mt-2 text-xs text-muted">
                   <summary className="cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
                     Comparison details
                   </summary>
                   <dl className="mt-2 grid grid-cols-[92px_minmax(0,1fr)] gap-x-3 gap-y-1.5">
-                    <dt>Previous</dt><dd className="tabular-nums text-foreground">{row.previousUsageKwh} kWh</dd>
+                    <dt>Previous</dt><dd className="tabular-nums text-foreground">{row.movement.status === "available" ? `${row.previousUsageKwh} kWh` : row.movement.reason}</dd>
                     <dt>Coverage</dt><dd className="text-foreground">{row.coverage}</dd>
                     <dt>Intervals</dt><dd className="text-foreground">{row.intervals} valid</dd>
                     <dt>Quality</dt><dd className="text-foreground">{row.qualityEvents}</dd>
-                    <dt>Exact values</dt><dd className="tabular-nums text-foreground">Current {row.exact.currentUsageKwh} kWh · share {row.exact.projectShare} · previous {row.exact.previousUsageKwh} kWh · change {row.exact.changeKwh} ({row.exact.changePct})</dd>
+                    <dt>Exact values</dt><dd className="tabular-nums text-foreground">Current {row.exact.currentUsageKwh} kWh · share {row.exact.projectShare}{row.movement.status === "available" ? ` · previous ${row.exact.previousUsageKwh} kWh · change ${row.exact.changeKwh} (${row.exact.changePct})` : " · movement unavailable"}</dd>
                   </dl>
                 </details>
               </div>
             </article>
           ))}
         </div>
+        </>
       )}
 
       <details className="mt-4 border-t border-border pt-3 text-[10px] leading-4 text-muted">

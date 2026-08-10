@@ -476,7 +476,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Energy distribution");
     expect(markup).toContain("bg-blue-600");
     expect(markup).toContain("bg-teal-700");
-    expect(markup).toContain("Which Level needs attention first?");
+    expect(markup).toContain("Where is current energy concentrated by Level, and which Level changed most?");
     expect(markup).toContain("1054.1845");
     expect(markup).toContain("68.8484%");
     expect(markup).toContain("734.6257");
@@ -500,7 +500,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("-32.7158 kWh");
     expect(markup).toContain("-10.0832%");
     expect(markup).toContain("Largest component Circuits");
-    expect(markup).toContain("Ranked by current usage. Use these Circuits to decide where to investigate first.");
+    expect(markup).toContain("Ranked by current usage only. This is not an anomaly, priority or savings ranking.");
     expect(markup).toContain("439.0972 kWh");
     expect(markup).toContain("28.6773%");
     expect(markup).toContain("70.6873 kWh");
@@ -590,6 +590,66 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Level comparison unavailable");
     expect(markup).toContain("does not include the Level comparison and quality contract");
     expect(markup).not.toContain("1054.1845");
+  });
+
+  it("separates current concentration from measured change without joining Level and Category", () => {
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot: ngeeAnnGoldenSnapshot() }} />,
+    );
+
+    expect(markup).toContain("Current concentration by Level");
+    expect(markup).toContain("Largest measured Level movement");
+    expect(markup).toContain("Current concentration by Category");
+    expect(markup).toContain("Largest measured Category movement");
+    const levelCurrent = markup.slice(
+      markup.indexOf("Current concentration by Level"),
+      markup.indexOf("Largest measured Level movement"),
+    );
+    const levelMovement = markup.slice(
+      markup.indexOf("Largest measured Level movement"),
+      markup.indexOf("Current concentration by Category"),
+    );
+    const categoryCurrent = markup.slice(
+      markup.indexOf("Current concentration by Category"),
+      markup.indexOf("Largest measured Category movement"),
+    );
+    const categoryMovement = markup.slice(
+      markup.indexOf("Largest measured Category movement"),
+      markup.indexOf("Level and Category are separate views"),
+    );
+    for (const value of ["Level 7", "1054.18", "68.8%", "Project energy"]) expect(levelCurrent).toContain(value);
+    for (const value of ["Level 7", "+319.56 kWh", "+43.5%", "previous window"]) expect(levelMovement).toContain(value);
+    for (const value of ["Load", "1239.42", "80.9%", "Project energy"]) expect(categoryCurrent).toContain(value);
+    for (const value of ["Load", "+352.21 kWh", "+39.7%", "previous window"]) expect(categoryMovement).toContain(value);
+    expect(markup).toContain("Level and Category are separate views; their overlap and cause are not established here.");
+    expect(markup).not.toContain("Level 7 Load");
+  });
+
+  it("keeps current contributor views open when comparison facts are absent", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    for (const level of snapshot.analysis.childScopes.filter((scope) => scope.nodeType === "level")) {
+      delete level.comparison;
+    }
+    for (const category of snapshot.analysis.categories) delete category.comparison;
+    for (const circuit of snapshot.analysis.circuits) delete circuit.comparison;
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+
+    expect(markup).toContain("Current concentration by Level");
+    expect(markup).toContain("Current concentration by Category");
+    expect(markup).toContain("1054.18");
+    expect(markup).toContain("68.8%");
+    expect(markup).toContain("1239.42");
+    expect(markup).toContain("80.9%");
+    expect(markup).toContain("439.1");
+    expect(markup).toContain("Measured Level movement unavailable");
+    expect(markup).toContain("Measured Category movement unavailable");
+    expect(markup).toContain("Circuit movement unavailable");
+    expect(markup).not.toContain("Level comparison unavailable");
+    expect(markup).not.toContain("Category comparison unavailable");
+    expect(markup).not.toContain("Component Circuit ranking unavailable");
   });
 
   it("fails only Energy trend closed for a legacy Snapshot without daily totals", () => {

@@ -375,7 +375,7 @@ describe("Ngee Ann Overview ViewModel", () => {
     expect(view.metadataLimitation).toContain("does not affect Total energy, Daily average, Peak interval-average power, Comparison or Cost");
     expect(view.levelComparison).toMatchObject({
       status: "available",
-      decisionQuestion: "Which Level needs attention first?",
+      decisionQuestion: "Where is current energy concentrated by Level, and which Level changed most?",
       rows: [
         {
           id: "level-7",
@@ -1862,6 +1862,95 @@ describe("Ngee Ann Overview ViewModel", () => {
         },
       ],
     });
+  });
+
+  it("keeps current Level, Category and Circuit concentration visible when comparisons are absent", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    for (const level of snapshot.analysis.childScopes.filter((scope) => scope.nodeType === "level")) {
+      delete level.comparison;
+    }
+    for (const category of snapshot.analysis.categories) delete category.comparison;
+    for (const circuit of snapshot.analysis.circuits) delete circuit.comparison;
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.levelComparison).toMatchObject({
+      status: "available",
+      summary: {
+        currentConcentration: {
+          status: "available",
+          name: "Level 7",
+          currentUsageKwh: "1054.18",
+          projectShare: "68.8%",
+        },
+        measuredChange: {
+          status: "unavailable",
+          reason: expect.stringContaining("comparison"),
+        },
+      },
+      rows: expect.arrayContaining([
+        expect.objectContaining({
+          name: "Level 7",
+          currentUsageKwh: "1054.18",
+          projectShare: "68.8%",
+          movement: { status: "unavailable", reason: expect.stringContaining("comparison") },
+        }),
+      ]),
+    });
+    expect(view.energyComposition.categories).toMatchObject({
+      status: "available",
+      summary: {
+        currentConcentration: {
+          status: "available",
+          name: "Load",
+          currentUsageKwh: "1239.42",
+          projectShare: "80.9%",
+        },
+        measuredChange: { status: "unavailable", reason: expect.stringContaining("comparison") },
+      },
+      rows: expect.arrayContaining([
+        expect.objectContaining({
+          name: "Load",
+          currentUsageKwh: "1239.42",
+          projectShare: "80.9%",
+          movement: { status: "unavailable", reason: expect.stringContaining("comparison") },
+        }),
+      ]),
+    });
+    expect(view.energyComposition.circuits).toMatchObject({
+      status: "available",
+      rows: expect.arrayContaining([
+        expect.objectContaining({
+          rank: 1,
+          currentUsageKwh: "439.1",
+          movement: { status: "unavailable", reason: expect.stringContaining("comparison") },
+        }),
+      ]),
+    });
+  });
+
+  it("withholds movement when the previous baseline is zero but keeps current contributor facts", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const level = snapshot.analysis.childScopes.find((scope) => scope.nodeType === "level");
+    const category = snapshot.analysis.categories[0];
+    const circuit = snapshot.analysis.circuits.find((row) => row.includedInOfficialTotal === false);
+    if (!level?.comparison || !category?.comparison || !circuit?.comparison) {
+      throw new Error("Expected contributor comparison fixtures.");
+    }
+    level.comparison.usageKwh = 0;
+    level.comparison.changePct = null;
+    category.comparison.usageKwh = 0;
+    category.comparison.changePct = null;
+    circuit.comparison.usageKwh = 0;
+    circuit.comparison.changePct = null;
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.levelComparison.rows.find((row) => row.id === level.nodeId)?.movement.status).toBe("unavailable");
+    expect(view.energyComposition.categories.rows.find((row) => row.id === category.category)?.movement.status).toBe("unavailable");
+    expect(view.energyComposition.circuits.rows.find((row) => row.meterNodeId === circuit.meterNodeId)?.movement.status).toBe("unavailable");
+    expect(view.levelComparison.summary.currentConcentration.status).toBe("available");
+    expect(view.levelComparison.summary.measuredChange.status).toBe("unavailable");
   });
 
   it.each(rollingBoundaryTamperCases)(

@@ -72,6 +72,28 @@ export function NgeeAnnEnergyComposition({
         {view.categories.status === "unavailable" ? (
           <Unavailable title="Category comparison unavailable" reason={view.categories.reason} />
         ) : (
+          <>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <div className="rounded-lg border border-border bg-surface-subtle px-4 py-3">
+              <p className="text-xs font-semibold text-foreground">Current concentration by Category</p>
+              {view.categories.summary.currentConcentration.status === "available" ? (
+                <p className="mt-1 text-sm leading-6 text-muted">
+                  <span className="font-semibold text-foreground">{view.categories.summary.currentConcentration.name}</span> uses {view.categories.summary.currentConcentration.currentUsageKwh} kWh ({view.categories.summary.currentConcentration.projectShare} of Project energy).
+                </p>
+              ) : <p className="mt-1 text-sm text-muted">{view.categories.summary.currentConcentration.reason}</p>}
+            </div>
+            <div className="rounded-lg border border-border bg-surface-subtle px-4 py-3">
+              <p className="text-xs font-semibold text-foreground">Largest measured Category movement</p>
+              {view.categories.summary.measuredChange.status === "available" ? (
+                <p className="mt-1 text-sm leading-6 text-muted">
+                  <span className="font-semibold text-foreground">{view.categories.summary.measuredChange.name}</span> changed {view.categories.summary.measuredChange.changeKwh} ({view.categories.summary.measuredChange.changePct}) versus the previous window.
+                </p>
+              ) : (
+                <p className="mt-1 text-sm leading-6 text-muted"><span className="font-semibold text-foreground">Measured Category movement unavailable.</span> {view.categories.summary.measuredChange.reason}</p>
+              )}
+            </div>
+          </div>
+          <p className="mt-3 text-xs leading-5 text-muted">Level and Category are separate views; their overlap and cause are not established here.</p>
           <div className="mt-3 divide-y divide-border border-y border-border">
             {view.categories.rows.map((row) => (
               <article key={row.id} className="grid gap-4 py-4 lg:grid-cols-[minmax(220px,1fr)_180px_200px] lg:items-center lg:gap-7">
@@ -95,22 +117,27 @@ export function NgeeAnnEnergyComposition({
                 </div>
                 <div>
                   <p className="text-xs text-muted">Versus previous window</p>
-                  <p className={`mt-1 text-base font-semibold tabular-nums ${changeTone(row.changePct)}`}>{row.changePct}</p>
-                  <p className="mt-0.5 text-xs tabular-nums text-muted">{row.changeKwh}</p>
+                  {row.movement.status === "available" ? (
+                    <>
+                      <p className={`mt-1 text-base font-semibold tabular-nums ${changeTone(row.changePct)}`}>{row.changePct}</p>
+                      <p className="mt-0.5 text-xs tabular-nums text-muted">{row.changeKwh}</p>
+                    </>
+                  ) : <p className="mt-1 text-xs font-semibold text-muted">Movement unavailable</p>}
                   <details className="mt-2 text-xs text-muted">
                     <summary className="cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Comparison details</summary>
                     <dl className="mt-2 grid grid-cols-[92px_minmax(0,1fr)] gap-x-3 gap-y-1.5">
-                      <dt>Previous</dt><dd className="tabular-nums text-foreground">{row.previousUsageKwh} kWh</dd>
+                      <dt>Previous</dt><dd className="tabular-nums text-foreground">{row.movement.status === "available" ? `${row.previousUsageKwh} kWh` : row.movement.reason}</dd>
                       <dt>Coverage</dt><dd className="text-foreground">{row.quality.coverage}</dd>
                       <dt>Intervals</dt><dd className="text-foreground">{row.quality.intervals} valid</dd>
                       <dt>Quality</dt><dd className="text-foreground">{row.quality.qualityEvents}</dd>
-                      <dt>Exact values</dt><dd className="tabular-nums text-foreground">Current {row.exact.currentUsageKwh} kWh · share {row.exact.projectShare} · previous {row.exact.previousUsageKwh} kWh · change {row.exact.changeKwh} ({row.exact.changePct})</dd>
+                      <dt>Exact values</dt><dd className="tabular-nums text-foreground">Current {row.exact.currentUsageKwh} kWh · share {row.exact.projectShare}{row.movement.status === "available" ? ` · previous ${row.exact.previousUsageKwh} kWh · change ${row.exact.changeKwh} (${row.exact.changePct})` : " · movement unavailable"}</dd>
                     </dl>
                   </details>
                 </div>
               </article>
             ))}
           </div>
+          </>
         )}
       </div>
 
@@ -121,7 +148,7 @@ export function NgeeAnnEnergyComposition({
               {showAllCircuits ? "All available component Circuits" : "Largest component Circuits"}
             </h4>
             <p className="mt-1 text-xs leading-5 text-muted">
-              Ranked by current usage. Use these Circuits to decide where to investigate first.
+              Ranked by current usage only. This is not an anomaly, priority or savings ranking.
             </p>
           </div>
           <span className="text-xs font-medium text-muted">Share of official Project total</span>
@@ -200,8 +227,12 @@ export function NgeeAnnEnergyComposition({
                       </div>
                       <div>
                         <p className="text-xs text-muted">Versus previous window</p>
-                        <p className={`mt-1 text-sm font-semibold tabular-nums ${changeTone(row.changePct)}`}>{row.changePct}</p>
-                        <p className="mt-0.5 text-xs tabular-nums text-muted">{row.changeKwh}</p>
+                        {row.movement.status === "available" ? (
+                          <>
+                            <p className={`mt-1 text-sm font-semibold tabular-nums ${changeTone(row.changePct)}`}>{row.changePct}</p>
+                            <p className="mt-0.5 text-xs tabular-nums text-muted">{row.changeKwh}</p>
+                          </>
+                        ) : <p className="mt-1 text-xs font-semibold text-muted">Circuit movement unavailable</p>}
                       </div>
                     </div>
                     <details className="mt-3 text-xs text-muted">
@@ -210,12 +241,12 @@ export function NgeeAnnEnergyComposition({
                       </summary>
                       <div className="mt-2 grid gap-4 lg:grid-cols-2">
                         <dl className="grid grid-cols-[92px_minmax(0,1fr)] gap-x-3 gap-y-1.5">
-                          <dt>Previous</dt><dd className="tabular-nums text-foreground">{row.previousUsageKwh} kWh</dd>
+                          <dt>Previous</dt><dd className="tabular-nums text-foreground">{row.movement.status === "available" ? `${row.previousUsageKwh} kWh` : row.movement.reason}</dd>
                           <dt>Coverage</dt><dd className="text-foreground">{row.quality.coverage}</dd>
                           <dt>Intervals</dt><dd className="text-foreground">{row.quality.intervals} valid</dd>
                           <dt>Quality</dt><dd className="text-foreground">{row.quality.qualityEvents}</dd>
                           <dt>Accounting</dt><dd className="text-foreground">Explanatory only</dd>
-                          <dt>Exact values</dt><dd className="tabular-nums text-foreground">Current {row.exact.currentUsageKwh} kWh · share {row.exact.projectShare} · previous {row.exact.previousUsageKwh} kWh · change {row.exact.changeKwh} ({row.exact.changePct})</dd>
+                          <dt>Exact values</dt><dd className="tabular-nums text-foreground">Current {row.exact.currentUsageKwh} kWh · share {row.exact.projectShare}{row.movement.status === "available" ? ` · previous ${row.exact.previousUsageKwh} kWh · change ${row.exact.changeKwh} (${row.exact.changePct})` : " · movement unavailable"}</dd>
                         </dl>
                         <CircuitEvidenceDetails row={row} evidence={view.evidence} />
                       </div>
