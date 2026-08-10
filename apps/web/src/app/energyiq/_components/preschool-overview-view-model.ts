@@ -156,6 +156,46 @@ export type PreschoolOverviewViewModel = {
     label: "Unavailable";
     detail: string;
   };
+  forecast: {
+    status: "waiting" | "partial" | "complete";
+    statusLabel: "Awaiting June actual" | "Partial June actual" | "On plan" | "Above plan" | "Below plan";
+    statusDetail: string;
+    targetPeriod: "1–30 Jun 2026";
+    defaultScopeId: string;
+    centreSelectionAvailable: boolean;
+    scopes: Array<{
+      scopeId: string;
+      label: string;
+      scopeType: string;
+      role: "portfolio" | "centre";
+      status: "waiting" | "partial" | "complete";
+      statusLabel: "Awaiting June actual" | "Partial June actual" | "On plan" | "Above plan" | "Below plan";
+      estimatedEnergy: string;
+      estimatedCost: string;
+      consumedSoFar: string;
+      paceVsEstimate: string;
+      paceDetail: string;
+      coverage: string;
+      outcome: "on_plan" | "above_plan" | "below_plan" | null;
+      buckets: Record<"daily" | "weekly" | "monthly", Array<{
+        label: string;
+        start: string;
+        endExclusive: string;
+        estimateKwh: number;
+        estimate: string;
+        actualKwh: number | null;
+        actual: string;
+        actualStatus: "waiting" | "partial" | "complete";
+        coverage: string;
+      }>>;
+    }>;
+    method: string;
+    planEvidence: string;
+    actualEvidence: string;
+  } | {
+    status: "unavailable";
+    detail: string;
+  };
   centres: PreschoolOverviewCentre[];
   normalisation: {
     euiAvailableCount: number;
@@ -533,6 +573,7 @@ export function buildPreschoolOverviewViewModel(
       label: "Unavailable",
       detail: "A validated live Forecast still requires more history, a published Forecast Recipe and backtesting. The planning baseline above is not an AI forecast.",
     },
+    forecast: buildForecastView(snapshot),
     centres,
     normalisation: {
       euiAvailableCount,
@@ -685,6 +726,134 @@ export function buildPreschoolOverviewViewModel(
         : [],
     },
   };
+}
+
+function buildForecastView(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+): PreschoolOverviewViewModel["forecast"] {
+  const lifecycle = snapshot.preschoolPlanningLifecycle;
+  if (!lifecycle || lifecycle.status !== "available" || !lifecycle.forecast) {
+    return {
+      status: "unavailable",
+      detail: "A Snapshot-bound Forecast series is unavailable. June Actual is never simulated or borrowed from another Snapshot.",
+    };
+  }
+  const forecast = lifecycle.forecast;
+  const identityMatches = lifecycle.targetPeriod.start === "2026-06-01"
+    && lifecycle.targetPeriod.endExclusive === "2026-07-01"
+    && lifecycle.targetPeriod.timezone === "Asia/Singapore"
+    && lifecycle.planProvenance.projectReleaseId === snapshot.projectRelease.id
+    && lifecycle.actualProvenance.projectReleaseId === snapshot.projectRelease.id
+    && lifecycle.planProvenance.dataSnapshotId === forecast.evidence.planDataSnapshotId
+    && lifecycle.actualProvenance.dataSnapshotId === forecast.evidence.actualDataSnapshotId
+    && lifecycle.plan.evidence.dataSnapshotId === forecast.evidence.planDataSnapshotId
+    && forecast.evidence.planQueryId === "daily_totals_v1"
+    && forecast.evidence.actualQueryId === "daily_totals_v1";
+  const portfolio = forecast.scopes.find((scope) => scope.scopeRole === "portfolio");
+  if (!identityMatches || !portfolio) {
+    return {
+      status: "unavailable",
+      detail: "The Snapshot-bound Forecast series does not match its Saved Plan and current Actual Evidence pins.",
+    };
+  }
+  const scopes = forecast.scopes.map((scope) => {
+    const scopeStatus = scope.actualCompleteDayCount === 0
+      ? "waiting" as const
+      : scope.actualCompleteDayCount === scope.actualTargetDayCount
+        ? "complete" as const
+        : "partial" as const;
+    return {
+      scopeId: scope.scopeId,
+      label: scope.scopeName,
+      scopeType: scope.scopeType,
+      role: scope.scopeRole,
+      status: scopeStatus,
+      statusLabel: forecastStatusLabel(scopeStatus, scope.outcome),
+      estimatedEnergy: `${formatNumber(scope.estimatedKwh, 0)} kWh`,
+      estimatedCost: `S$${formatNumber(scope.estimatedCostBeforeGstSgd, 0)}`,
+      consumedSoFar: scope.actualKwh === null
+        ? "Not available yet"
+        : `${formatNumber(scope.actualKwh, 0)} kWh`,
+      paceVsEstimate: scope.pacePct === null
+        ? "Not available yet"
+        : `${formatNumber(scope.pacePct, 2)}%`,
+      paceDetail: forecastPaceDetail(scope.pacePct, scope.outcome, scopeStatus),
+      coverage: `${scope.actualCompleteDayCount} / ${scope.actualTargetDayCount} complete days`,
+      outcome: scope.outcome,
+      buckets: {
+        daily: scope.buckets.daily.map(forecastBucketView),
+        weekly: scope.buckets.weekly.map(forecastBucketView),
+        monthly: scope.buckets.monthly.map(forecastBucketView),
+      },
+    };
+  });
+  return {
+    status: forecast.status,
+    statusLabel: forecastStatusLabel(forecast.status, portfolio.outcome),
+    statusDetail: forecast.status === "waiting"
+      ? "Estimate is ready from Saved May Plan Evidence; current June Actual has no complete days yet."
+      : forecast.status === "partial"
+        ? "June Actual is shown only for complete days. Pace compares those days with the matching estimate dates."
+        : "All 30 June days are complete, so final Plan-versus-Actual status is available.",
+    targetPeriod: "1–30 Jun 2026",
+    defaultScopeId: portfolio.scopeId,
+    centreSelectionAvailable: scopes.some((scope) => scope.role === "centre"),
+    scopes,
+    method: forecast.contract.method,
+    planEvidence: `Saved ${lifecycle.planProvenance.savedAnalysisId} · Snapshot ${lifecycle.planProvenance.dataSnapshotId} · ${lifecycle.planProvenance.queryId}`,
+    actualEvidence: `Current Snapshot ${lifecycle.actualProvenance.dataSnapshotId} · ${lifecycle.actualProvenance.queryId}`,
+  };
+}
+
+function forecastStatusLabel(
+  status: "waiting" | "partial" | "complete",
+  outcome: "on_plan" | "above_plan" | "below_plan" | null,
+): "Awaiting June actual" | "Partial June actual" | "On plan" | "Above plan" | "Below plan" {
+  if (status === "waiting") return "Awaiting June actual";
+  if (status === "partial") return "Partial June actual";
+  if (outcome === "above_plan") return "Above plan";
+  if (outcome === "below_plan") return "Below plan";
+  return "On plan";
+}
+
+function forecastPaceDetail(
+  pacePct: number | null,
+  outcome: "on_plan" | "above_plan" | "below_plan" | null,
+  status: "waiting" | "partial" | "complete",
+): string {
+  if (pacePct === null) return "Available after the first complete June day";
+  if (status !== "complete") return "Actual to date ÷ estimate for the same complete days";
+  if (outcome === "above_plan") return "Final actual finished above estimate";
+  if (outcome === "below_plan") return "Final actual finished below estimate";
+  return "Final actual finished on estimate";
+}
+
+function forecastBucketView(
+  bucket: Extract<
+    NonNullable<Extract<NonNullable<EnergyProjectAnalysisSnapshotDto["preschoolPlanningLifecycle"]>, { status: "available" }>["forecast"]>,
+    { status: "waiting" | "partial" | "complete" }
+  >["scopes"][number]["buckets"]["daily"][number],
+) {
+  return {
+    label: formatForecastBucketLabel(bucket.start, bucket.endExclusive),
+    start: bucket.start,
+    endExclusive: bucket.endExclusive,
+    estimateKwh: bucket.estimatedKwh,
+    estimate: `${formatNumber(bucket.estimatedKwh, 0)} kWh`,
+    actualKwh: bucket.actualKwh,
+    actual: bucket.actualKwh === null ? "Waiting" : `${formatNumber(bucket.actualKwh, 0)} kWh`,
+    actualStatus: bucket.actualStatus,
+    coverage: `${bucket.actualCompleteDayCount} / ${bucket.actualTargetDayCount} complete days`,
+  };
+}
+
+function formatForecastBucketLabel(start: string, endExclusive: string): string {
+  const endDate = new Date(`${endExclusive}T00:00:00.000Z`);
+  endDate.setUTCDate(endDate.getUTCDate() - 1);
+  const endInclusive = endDate.toISOString().slice(0, 10);
+  return start === endInclusive
+    ? formatShortDate(start)
+    : `${formatShortDate(start)}–${formatShortDate(endInclusive)}`;
 }
 
 function resolvePlanningReference(snapshot: EnergyProjectAnalysisSnapshotDto) {

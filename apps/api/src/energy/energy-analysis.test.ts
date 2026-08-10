@@ -1121,6 +1121,20 @@ describe("EnergyScopeAnalysis", () => {
       expect(explorerAnalysis.timeBehaviour).toBeUndefined();
       expect(explorerAnalysis.dailyUsageAnomalies).toBeUndefined();
       expect(explorerAnalysis.peakBreakdown).toBeUndefined();
+      const childDailyExplorerQueryCountBefore = readonlyQueryCount;
+      const childDailyExplorer = await executeEnergyScopeAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        context,
+        databasePath,
+        profile: "explorer",
+        includeImmediateChildDailyTotals: true,
+      });
+      const childDailyExplorerQueryCount = readonlyQueryCount - childDailyExplorerQueryCountBefore;
+      expect(childDailyExplorer.dailyTotals?.scopes).toHaveLength(3);
+      expect(childDailyExplorerQueryCount).toBe(explorerQueryCount);
+      expect(childDailyExplorer.timeBehaviour).toBeUndefined();
       if (process.env.ENERGYIQ_OVERVIEW_PERFORMANCE === "1") {
         console.info("ENERGYIQ_EXPLORER_PERFORMANCE", JSON.stringify({
           readonlyQueryCount: explorerQueryCount,

@@ -171,6 +171,7 @@ export type PreschoolOperationalProjection = {
       queryId: "daily_totals_v1";
       recipeId: "preschool-naive-weekly-planning-baseline-v1";
     };
+    estimateSeries?: PreschoolPlanningEstimateSeries;
     limitations: string[];
   } | {
     status: "unavailable";
@@ -723,6 +724,8 @@ export type PreschoolPlanningAnalysisInput = {
     timezone: string;
     scopes: Array<{
       scopeId: string;
+      scopeName?: string;
+      scopeType?: string;
       rows: Array<{
         localDate: string;
         usageKwh: number | null;
@@ -730,6 +733,28 @@ export type PreschoolPlanningAnalysisInput = {
       }>;
     }>;
   } | undefined;
+};
+
+export type PreschoolPlanningEstimateBucket = {
+  start: string;
+  endExclusive: string;
+  estimatedKwh: number;
+};
+
+export type PreschoolPlanningEstimateSeries = {
+  contract: {
+    id: "preschool-june-2026-estimate-series";
+    version: "1";
+    method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total";
+  };
+  scopes: Array<{
+    scopeId: string;
+    scopeName: string;
+    scopeType: string;
+    scopeRole: "portfolio" | "centre";
+    estimatedKwh: number;
+    buckets: Record<"daily" | "weekly" | "monthly", PreschoolPlanningEstimateBucket[]>;
+  }>;
 };
 
 export const buildPreschoolPlanningOutlook = (
@@ -809,6 +834,7 @@ const buildPreschoolPlanningOutlookFromCompleteMayRows = (input: {
   const lowerKwh = Math.min(...weeklyValues) * targetScale;
   const upperKwh = Math.max(...weeklyValues) * targetScale;
   const rate = PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh;
+  const estimateSeries = buildPreschoolPlanningEstimateSeries(analysis, round(projectedKwh));
   return {
     status: "provisional",
     contract: {
@@ -841,6 +867,7 @@ const buildPreschoolPlanningOutlookFromCompleteMayRows = (input: {
       queryId: DAILY_TOTALS_QUERY_ID,
       recipeId: "preschool-naive-weekly-planning-baseline-v1",
     },
+    ...(estimateSeries ? { estimateSeries } : {}),
     limitations: [
       "Planning baseline only; it is not an AI or validated statistical forecast.",
       "Weather, occupancy, holidays, operational changes and tariff-plan differences are not modelled.",
@@ -849,6 +876,114 @@ const buildPreschoolPlanningOutlookFromCompleteMayRows = (input: {
     ],
   };
 };
+
+export const buildPreschoolPlanningEstimateSeries = (
+  analysis: PreschoolPlanningAnalysisInput,
+  projectedKwh: number,
+): PreschoolPlanningEstimateSeries | null => {
+  const portfolioScopeId = analysis.context?.scopeId;
+  const scopes = analysis.dailyTotals?.scopes;
+  if (!portfolioScopeId || !scopes || analysis.dailyTotals?.timezone !== PRESCHOOL_MAY_PERIOD.timezone) return null;
+  const portfolio = scopes.find((scope) => scope.scopeId === portfolioScopeId);
+  const portfolioRaw = portfolio ? rawJunePlanningEstimate(portfolio.rows) : null;
+  if (!portfolioRaw) return null;
+  const portfolioRawTotal = sumPlanning(portfolioRaw.map((row) => row.estimatedKwh));
+  if (portfolioRawTotal <= 0) return null;
+  const scale = projectedKwh / portfolioRawTotal;
+  const estimatedScopes = scopes.flatMap((scope) => {
+    const raw = rawJunePlanningEstimate(scope.rows);
+    if (!raw) return [];
+    const estimatedTarget = scope.scopeId === portfolioScopeId
+      ? projectedKwh
+      : round(sumPlanning(raw.map((row) => row.estimatedKwh)) * scale);
+    const daily = scalePlanningEstimate(raw, scale, estimatedTarget);
+    return [{
+      scopeId: scope.scopeId,
+      scopeName: scope.scopeName ?? scope.scopeId,
+      scopeType: scope.scopeType ?? (scope.scopeId === portfolioScopeId ? "project" : "centre"),
+      scopeRole: scope.scopeId === portfolioScopeId ? "portfolio" as const : "centre" as const,
+      estimatedKwh: estimatedTarget,
+      buckets: {
+        daily,
+        weekly: aggregatePlanningEstimate(daily, 7),
+        monthly: aggregatePlanningEstimate(daily, PRESCHOOL_JUNE_PERIOD.days),
+      },
+    }];
+  });
+  return estimatedScopes.some((scope) => scope.scopeRole === "portfolio")
+    ? {
+        contract: {
+          id: "preschool-june-2026-estimate-series",
+          version: "1",
+          method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total",
+        },
+        scopes: estimatedScopes,
+      }
+    : null;
+};
+
+const rawJunePlanningEstimate = (
+  rows: NonNullable<PreschoolPlanningAnalysisInput["dailyTotals"]>["scopes"][number]["rows"],
+): PreschoolPlanningEstimateBucket[] | null => {
+  const rowsByDate = new Map(rows.map((row) => [row.localDate, row]));
+  const sourceDates = Array.from({ length: 28 }, (_, offset) => shiftPlanningDate("2026-05-04", offset));
+  const sourceRows = sourceDates.flatMap((date) => {
+    const row = rowsByDate.get(date);
+    return row?.dataHealth.status === "complete" && typeof row.usageKwh === "number" ? [row] : [];
+  });
+  if (sourceRows.length !== sourceDates.length) return null;
+  const meansByWeekday = new Map<number, number>();
+  for (let weekday = 0; weekday < 7; weekday += 1) {
+    const values = sourceRows
+      .filter((row) => new Date(`${row.localDate}T00:00:00.000Z`).getUTCDay() === weekday)
+      .map((row) => row.usageKwh!);
+    if (values.length !== 4) return null;
+    meansByWeekday.set(weekday, sumPlanning(values) / values.length);
+  }
+  return Array.from({ length: PRESCHOOL_JUNE_PERIOD.days }, (_, offset) => {
+    const start = shiftPlanningDate(PRESCHOOL_JUNE_PERIOD.start, offset);
+    return {
+      start,
+      endExclusive: shiftPlanningDate(start, 1),
+      estimatedKwh: meansByWeekday.get(new Date(`${start}T00:00:00.000Z`).getUTCDay())!,
+    };
+  });
+};
+
+const scalePlanningEstimate = (
+  rows: PreschoolPlanningEstimateBucket[],
+  scale: number,
+  target: number,
+): PreschoolPlanningEstimateBucket[] => {
+  const scaled = rows.map((row) => ({ ...row, estimatedKwh: round(row.estimatedKwh * scale) }));
+  const last = scaled.at(-1);
+  if (last) last.estimatedKwh = round(last.estimatedKwh + (target - sumPlanning(scaled.map((row) => row.estimatedKwh))));
+  return scaled;
+};
+
+const aggregatePlanningEstimate = (
+  daily: PreschoolPlanningEstimateBucket[],
+  size: number,
+): PreschoolPlanningEstimateBucket[] => {
+  const buckets: PreschoolPlanningEstimateBucket[] = [];
+  for (let offset = 0; offset < daily.length; offset += size) {
+    const rows = daily.slice(offset, offset + size);
+    buckets.push({
+      start: rows[0]!.start,
+      endExclusive: rows.at(-1)!.endExclusive,
+      estimatedKwh: round(sumPlanning(rows.map((row) => row.estimatedKwh))),
+    });
+  }
+  return buckets;
+};
+
+const shiftPlanningDate = (localDate: string, days: number): string => {
+  const date = new Date(`${localDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+};
+
+const sumPlanning = (values: number[]): number => values.reduce((total, value) => total + value, 0);
 
 const completePlanningRows = (
   rowByDate: Map<string, NonNullable<PreschoolPlanningAnalysisInput["dailyTotals"]>["scopes"][number]["rows"][number]>,

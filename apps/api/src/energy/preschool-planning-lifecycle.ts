@@ -4,6 +4,7 @@ import type { EnergyIqSavedAnalysisRecord, MetadataStore } from "@datafoundry/me
 import { executeEnergyScopeAnalysis } from "./energy-analysis.js";
 import type { EnergyQueryContext } from "./energy-query-context.js";
 import {
+  buildPreschoolPlanningEstimateSeries,
   recoverPreschoolPlanningOutlookFromCompleteWeeks,
   type PreschoolOperationalProjection,
   type PreschoolPlanningAnalysisInput,
@@ -17,6 +18,7 @@ const TARGET_PERIOD = {
   targetDayCount: 30,
 } as const;
 const DAILY_TOTALS_QUERY_ID = "daily_totals_v1" as const;
+const FORECAST_SERIES_RECIPE_ID = "preschool-weekday-mean-series-v1" as const;
 
 type PlanningOutlook = Extract<
   Extract<PreschoolOperationalProjection, { status: "available" }>["planningOutlook"],
@@ -38,12 +40,54 @@ export type PreschoolPlanningActualAnalysis = {
     timezone: string;
     scopes: Array<{
       scopeId: string;
+      scopeName?: string;
+      scopeType?: string;
       rows: Array<{
         localDate: string;
         usageKwh: number | null;
         dataHealth: { status: "complete" | "partial" | "unavailable" };
       }>;
     }>;
+  };
+};
+
+type PreschoolPlanningForecastBucket = {
+  start: string;
+  endExclusive: string;
+  estimatedKwh: number;
+  actualKwh: number | null;
+  actualCompleteDayCount: number;
+  actualTargetDayCount: number;
+  actualStatus: "waiting" | "partial" | "complete";
+};
+
+export type PreschoolPlanningForecast = {
+  status: "waiting" | "partial" | "complete";
+  contract: {
+    id: "preschool-june-2026-forecast-series";
+    version: "1";
+    method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total";
+  };
+  scopes: Array<{
+    scopeId: string;
+    scopeName: string;
+    scopeType: string;
+    scopeRole: "portfolio" | "centre";
+    estimatedKwh: number;
+    estimatedCostBeforeGstSgd: number;
+    actualKwh: number | null;
+    actualCompleteDayCount: number;
+    actualTargetDayCount: 30;
+    pacePct: number | null;
+    outcome: "on_plan" | "above_plan" | "below_plan" | null;
+    buckets: Record<"daily" | "weekly" | "monthly", PreschoolPlanningForecastBucket[]>;
+  }>;
+  evidence: {
+    planDataSnapshotId: string;
+    actualDataSnapshotId: string;
+    planQueryId: "daily_totals_v1";
+    actualQueryId: "daily_totals_v1";
+    recipeId: typeof FORECAST_SERIES_RECIPE_ID;
   };
 };
 
@@ -63,6 +107,7 @@ export type PreschoolPlanningLifecycle = {
     varianceKwh: number | null;
     variancePct: number | null;
   };
+  forecast?: PreschoolPlanningForecast;
   planProvenance: {
     savedAnalysisId: string;
     dataSnapshotId: string;
@@ -147,6 +192,7 @@ export const loadPreschoolPlanningLifecycle = async (input: {
       ruleRevisions: [],
       includeTimeBehaviour: false,
       includeMeterOperationalBreakdown: false,
+      includeImmediateChildDailyTotals: true,
       profile: "explorer",
       ...(input.databasePath ? { databasePath: input.databasePath } : {}),
     }),
@@ -188,6 +234,14 @@ export const buildPreschoolPlanningLifecycle = (input: PreschoolPlanningIdentity
       },
     };
   }
+  const forecast = reference.planAnalysis
+    ? buildForecast({
+        planAnalysis: reference.planAnalysis,
+        actualAnalysis: input.actualAnalysis,
+        plan: reference.planningOutlook,
+        currentDataSnapshotId: input.currentDataSnapshotId,
+      })
+    : null;
 
   return {
     status: "available",
@@ -198,6 +252,7 @@ export const buildPreschoolPlanningLifecycle = (input: PreschoolPlanningIdentity
     targetPeriod: TARGET_PERIOD,
     plan: reference.planningOutlook,
     actual,
+    ...(forecast ? { forecast } : {}),
     planProvenance: {
       savedAnalysisId: reference.savedAnalysis.id,
       dataSnapshotId: reference.savedAnalysis.data_snapshot_id,
@@ -229,7 +284,8 @@ const findSavedPlanReference = (input: PreschoolPlanningIdentityInput) => (
       const snapshot = compatibleSavedSnapshot(input, savedAnalysis);
       if (!snapshot) return [];
       const planningOutlook = savedPlanningOutlook(snapshot, savedAnalysis.data_snapshot_id);
-      return planningOutlook ? [{ savedAnalysis, planningOutlook }] : [];
+      const planAnalysis = planningAnalysisInput(recordField(snapshot, "analysis"));
+      return planningOutlook ? [{ savedAnalysis, planningOutlook, planAnalysis }] : [];
     })[0]
   ?? null
 );
@@ -322,7 +378,7 @@ const planningAnalysisInput = (
     || typeof dailyTotals.timezone !== "string"
     || !Array.isArray(scopes)
   ) return null;
-  const parsedScopes = scopes.flatMap((scope) => {
+    const parsedScopes = scopes.flatMap((scope) => {
     if (!isRecord(scope) || typeof scope.scopeId !== "string" || !Array.isArray(scope.rows)) return [];
     const rows = scope.rows.flatMap((row) => {
       const dataHealth = isRecord(row) ? recordField(row, "dataHealth") : null;
@@ -340,7 +396,12 @@ const planningAnalysisInput = (
       }];
     });
     if (rows.length !== scope.rows.length) return [];
-    return [{ scopeId: scope.scopeId, rows }];
+    return [{
+      scopeId: scope.scopeId,
+      ...(typeof scope.scopeName === "string" ? { scopeName: scope.scopeName } : {}),
+      ...(typeof scope.scopeType === "string" ? { scopeType: scope.scopeType } : {}),
+      rows,
+    }];
   });
   if (parsedScopes.length !== scopes.length) return null;
   return {
@@ -356,6 +417,137 @@ const planningAnalysisInput = (
     },
   };
 };
+
+const buildForecast = (input: {
+  planAnalysis: PreschoolPlanningAnalysisInput;
+  actualAnalysis: PreschoolPlanningActualAnalysis;
+  plan: PlanningOutlook;
+  currentDataSnapshotId: string;
+}): PreschoolPlanningForecast | null => {
+  if (
+    input.planAnalysis.provenance.dataSnapshotId !== input.plan.evidence.dataSnapshotId
+    || input.actualAnalysis.provenance.dataSnapshotId !== input.currentDataSnapshotId
+    || input.planAnalysis.dailyTotals?.timezone !== TARGET_PERIOD.timezone
+    || input.actualAnalysis.dailyTotals?.timezone !== TARGET_PERIOD.timezone
+  ) return null;
+  const estimateSeries = buildPreschoolPlanningEstimateSeries(
+    input.planAnalysis,
+    input.plan.usageEstimate.projectedKwh,
+  );
+  if (!estimateSeries) return null;
+  const actualScopesById = new Map(input.actualAnalysis.dailyTotals.scopes.map((scope) => [scope.scopeId, scope]));
+  const portfolioScopeId = input.planAnalysis.context?.scopeId;
+  if (!portfolioScopeId) return null;
+  if (!actualScopesById.has(portfolioScopeId)) return null;
+  const rate = input.plan.tariffReference.beforeGstSgdPerKwh;
+  const scopes = estimateSeries.scopes.flatMap((estimateScope) => {
+    const actualScope = actualScopesById.get(estimateScope.scopeId);
+    if (!actualScope) return [];
+    const actualRowsByDate = new Map(actualScope.rows.map((row) => [row.localDate, row]));
+    const daily = estimateScope.buckets.daily.map((estimate) => {
+      const actual = actualRowsByDate.get(estimate.start);
+      const complete = actual?.dataHealth.status === "complete" && typeof actual.usageKwh === "number";
+      return {
+        start: estimate.start,
+        endExclusive: estimate.endExclusive,
+        estimatedKwh: round(estimate.estimatedKwh),
+        actualKwh: complete ? round(actual.usageKwh!) : null,
+        actualCompleteDayCount: complete ? 1 : 0,
+        actualTargetDayCount: 1,
+        actualStatus: complete ? "complete" as const : "waiting" as const,
+      };
+    });
+    const actualCompleteDayCount = daily.reduce((total, bucket) => total + bucket.actualCompleteDayCount, 0);
+    const actualKwh = actualCompleteDayCount === 0
+      ? null
+      : round(sum(daily.flatMap((bucket) => bucket.actualKwh === null ? [] : [bucket.actualKwh])));
+    const estimatedToDateKwh = actualCompleteDayCount === TARGET_PERIOD.targetDayCount
+      ? estimateScope.estimatedKwh
+      : sum(daily
+        .filter((bucket) => bucket.actualCompleteDayCount === 1)
+        .map((bucket) => bucket.estimatedKwh));
+    const pacePct = actualKwh === null || estimatedToDateKwh <= 0
+      ? null
+      : round((actualKwh / estimatedToDateKwh) * 100);
+    const complete = actualCompleteDayCount === TARGET_PERIOD.targetDayCount;
+    const outcome = complete && actualKwh !== null
+      ? actualKwh > estimateScope.estimatedKwh
+        ? "above_plan" as const
+        : actualKwh < estimateScope.estimatedKwh
+          ? "below_plan" as const
+          : "on_plan" as const
+      : null;
+    return [{
+      scopeId: estimateScope.scopeId,
+      scopeName: estimateScope.scopeName ?? actualScope.scopeName ?? estimateScope.scopeId,
+      scopeType: estimateScope.scopeType ?? actualScope.scopeType ?? (estimateScope.scopeId === portfolioScopeId ? "project" : "centre"),
+      scopeRole: estimateScope.scopeRole,
+      estimatedKwh: round(estimateScope.estimatedKwh),
+      estimatedCostBeforeGstSgd: round(estimateScope.estimatedKwh * rate),
+      actualKwh,
+      actualCompleteDayCount,
+      actualTargetDayCount: TARGET_PERIOD.targetDayCount,
+      pacePct,
+      outcome,
+      buckets: {
+        daily,
+        weekly: aggregateForecastBuckets(daily, 7),
+        monthly: aggregateForecastBuckets(daily, TARGET_PERIOD.targetDayCount),
+      },
+    }];
+  });
+  const portfolio = scopes.find((scope) => scope.scopeRole === "portfolio");
+  if (!portfolio) return null;
+  return {
+    status: portfolio.actualCompleteDayCount === 0
+      ? "waiting"
+      : portfolio.actualCompleteDayCount === TARGET_PERIOD.targetDayCount
+        ? "complete"
+        : "partial",
+    contract: {
+      id: "preschool-june-2026-forecast-series",
+      version: "1",
+      method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total",
+    },
+    scopes,
+    evidence: {
+      planDataSnapshotId: input.plan.evidence.dataSnapshotId,
+      actualDataSnapshotId: input.currentDataSnapshotId,
+      planQueryId: DAILY_TOTALS_QUERY_ID,
+      actualQueryId: DAILY_TOTALS_QUERY_ID,
+      recipeId: FORECAST_SERIES_RECIPE_ID,
+    },
+  };
+};
+
+const aggregateForecastBuckets = (
+  daily: PreschoolPlanningForecastBucket[],
+  size: number,
+): PreschoolPlanningForecastBucket[] => {
+  const buckets: PreschoolPlanningForecastBucket[] = [];
+  for (let offset = 0; offset < daily.length; offset += size) {
+    const rows = daily.slice(offset, offset + size);
+    const actualRows = rows.filter((row) => row.actualKwh !== null);
+    const actualCompleteDayCount = sum(rows.map((row) => row.actualCompleteDayCount));
+    const actualTargetDayCount = sum(rows.map((row) => row.actualTargetDayCount));
+    buckets.push({
+      start: rows[0]!.start,
+      endExclusive: rows.at(-1)!.endExclusive,
+      estimatedKwh: round(sum(rows.map((row) => row.estimatedKwh))),
+      actualKwh: actualRows.length === 0 ? null : round(sum(actualRows.map((row) => row.actualKwh!))),
+      actualCompleteDayCount,
+      actualTargetDayCount,
+      actualStatus: actualCompleteDayCount === 0
+        ? "waiting"
+        : actualCompleteDayCount === actualTargetDayCount
+          ? "complete"
+          : "partial",
+    });
+  }
+  return buckets;
+};
+
+const sum = (values: number[]): number => values.reduce((total, value) => total + value, 0);
 
 const buildActual = (
   input: {

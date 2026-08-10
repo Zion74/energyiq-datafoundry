@@ -140,6 +140,106 @@ describe("buildPreschoolPlanningLifecycle", () => {
     });
   });
 
+  it("publishes waiting Portfolio and Centre forecast series without inventing June actual", () => {
+    const result = buildLifecycle(juneActualAnalysis(0));
+
+    expect(result).toMatchObject({
+      status: "available",
+      forecast: {
+        status: "waiting",
+        scopes: [
+          {
+            scopeId: "project",
+            scopeName: "Preschool Portfolio",
+            scopeRole: "portfolio",
+            estimatedKwh: 3525,
+            actualKwh: null,
+            pacePct: null,
+          },
+          {
+            scopeId: "centre-a",
+            scopeName: "Centre A",
+            scopeRole: "centre",
+            estimatedKwh: 2115,
+            actualKwh: null,
+            pacePct: null,
+          },
+          {
+            scopeId: "centre-b",
+            scopeName: "Centre B",
+            scopeRole: "centre",
+            estimatedKwh: 1410,
+            actualKwh: null,
+            pacePct: null,
+          },
+        ],
+      },
+    });
+    if (result.status !== "available") throw new Error(result.reason.message);
+    const forecast = Reflect.get(result, "forecast") as {
+      scopes: Array<{
+        scopeId: string;
+        buckets: Record<"daily" | "weekly" | "monthly", Array<{
+          estimatedKwh: number;
+          actualKwh: number | null;
+          actualStatus: "waiting" | "partial" | "complete";
+        }>>;
+      }>;
+    };
+    expect(forecast.scopes[0]?.buckets.daily).toHaveLength(30);
+    expect(forecast.scopes[0]?.buckets.weekly).toHaveLength(5);
+    expect(forecast.scopes[0]?.buckets.monthly).toHaveLength(1);
+    expect(forecast.scopes[0]?.buckets.daily.reduce((total, bucket) => total + bucket.estimatedKwh, 0)).toBeCloseTo(3525, 2);
+    expect(forecast.scopes[0]?.buckets.daily.every((bucket) => (
+      bucket.actualKwh === null && bucket.actualStatus === "waiting"
+    ))).toBe(true);
+  });
+
+  it("keeps partial actual series isolated by scope and calculates pace against like-for-like dates", () => {
+    const result = buildLifecycle(juneActualAnalysis(7));
+
+    expect(result).toMatchObject({
+      status: "available",
+      forecast: {
+        status: "partial",
+        scopes: [
+          {
+            scopeId: "project",
+            actualKwh: 1400,
+            actualCompleteDayCount: 7,
+            pacePct: expect.any(Number),
+          },
+          {
+            scopeId: "centre-a",
+            actualKwh: 840,
+            actualCompleteDayCount: 7,
+            pacePct: expect.any(Number),
+          },
+          {
+            scopeId: "centre-b",
+            actualKwh: 560,
+            actualCompleteDayCount: 7,
+            pacePct: expect.any(Number),
+          },
+        ],
+      },
+    });
+    if (result.status !== "available") throw new Error(result.reason.message);
+    const forecast = Reflect.get(result, "forecast") as {
+      scopes: Array<{
+        scopeId: string;
+        buckets: Record<"daily" | "weekly" | "monthly", Array<{
+          actualKwh: number | null;
+          actualStatus: "waiting" | "partial" | "complete";
+        }>>;
+      }>;
+    };
+    expect(forecast.scopes[0]?.buckets.daily.slice(0, 7).every((bucket) => bucket.actualStatus === "complete")).toBe(true);
+    expect(forecast.scopes[0]?.buckets.daily.slice(7).every((bucket) => bucket.actualKwh === null)).toBe(true);
+    expect(forecast.scopes[0]?.buckets.weekly[0]).toMatchObject({ actualKwh: 1400, actualStatus: "complete" });
+    expect(forecast.scopes[0]?.buckets.weekly[1]).toMatchObject({ actualKwh: null, actualStatus: "waiting" });
+  });
+
   it("shows plan-versus-actual delta only after all 30 June days are complete", () => {
     const result = buildLifecycle(juneActualAnalysis(30));
 
@@ -152,6 +252,32 @@ describe("buildPreschoolPlanningLifecycle", () => {
         targetDayCount: 30,
         varianceKwh: 2475,
         variancePct: 70.21,
+      },
+      forecast: {
+        status: "complete",
+        scopes: [
+          {
+            scopeId: "project",
+            actualKwh: 6000,
+            actualCompleteDayCount: 30,
+            pacePct: 170.21,
+            outcome: "above_plan",
+          },
+          {
+            scopeId: "centre-a",
+            actualKwh: 3600,
+            actualCompleteDayCount: 30,
+            pacePct: 170.21,
+            outcome: "above_plan",
+          },
+          {
+            scopeId: "centre-b",
+            actualKwh: 2400,
+            actualCompleteDayCount: 30,
+            pacePct: 170.21,
+            outcome: "above_plan",
+          },
+        ],
       },
     });
   });
@@ -333,16 +459,7 @@ const mayAnalysis = (firstMayDay: number) => ({
     metricId: "energy.total_usage_kwh@1",
     grain: "day",
     timezone: "Asia/Singapore",
-    scopes: [{
-      scopeId: "project",
-      scopeName: "Preschool Portfolio",
-      scopeType: "project",
-      rows: Array.from({ length: 32 - firstMayDay }, (_, offset) => dailyRow({
-        localDate: `2026-05-${String(offset + firstMayDay).padStart(2, "0")}`,
-        usageKwh: 100 + firstMayDay + offset,
-        status: "complete",
-      })),
-    }],
+    scopes: planningScopes(firstMayDay),
   },
 });
 
@@ -359,16 +476,39 @@ const juneActualAnalysis = (completeDayCount: number) => ({
   },
   dailyTotals: {
     timezone: "Asia/Singapore",
-    scopes: [{
-      scopeId: "project",
-      rows: Array.from({ length: 30 }, (_, offset) => dailyRow({
-        localDate: `2026-06-${String(offset + 1).padStart(2, "0")}`,
-        usageKwh: offset < completeDayCount ? 200 : null,
-        status: offset < completeDayCount ? "complete" : "unavailable",
-      })),
-    }],
+    scopes: actualScopes(completeDayCount),
   },
 });
+
+const planningScopes = (firstMayDay: number) => ([
+  { scopeId: "project", scopeName: "Preschool Portfolio", scopeType: "project", share: 1 },
+  { scopeId: "centre-a", scopeName: "Centre A", scopeType: "centre", share: 0.6 },
+  { scopeId: "centre-b", scopeName: "Centre B", scopeType: "centre", share: 0.4 },
+].map((scope) => ({
+  scopeId: scope.scopeId,
+  scopeName: scope.scopeName,
+  scopeType: scope.scopeType,
+  rows: Array.from({ length: 32 - firstMayDay }, (_, offset) => dailyRow({
+    localDate: `2026-05-${String(offset + firstMayDay).padStart(2, "0")}`,
+    usageKwh: (100 + firstMayDay + offset) * scope.share,
+    status: "complete",
+  })),
+})));
+
+const actualScopes = (completeDayCount: number) => ([
+  { scopeId: "project", scopeName: "Preschool Portfolio", scopeType: "project", usageKwh: 200 },
+  { scopeId: "centre-a", scopeName: "Centre A", scopeType: "centre", usageKwh: 120 },
+  { scopeId: "centre-b", scopeName: "Centre B", scopeType: "centre", usageKwh: 80 },
+].map((scope) => ({
+  scopeId: scope.scopeId,
+  scopeName: scope.scopeName,
+  scopeType: scope.scopeType,
+  rows: Array.from({ length: 30 }, (_, offset) => dailyRow({
+    localDate: `2026-06-${String(offset + 1).padStart(2, "0")}`,
+    usageKwh: offset < completeDayCount ? scope.usageKwh : null,
+    status: offset < completeDayCount ? "complete" : "unavailable",
+  })),
+})));
 
 const dailyRow = (input: {
   localDate: string;

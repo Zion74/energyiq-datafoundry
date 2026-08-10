@@ -379,7 +379,29 @@ describe("Preschool operational projection", () => {
         queryId: "daily_totals_v1",
         recipeId: "preschool-naive-weekly-planning-baseline-v1",
       },
+      estimateSeries: {
+        contract: {
+          id: "preschool-june-2026-estimate-series",
+          version: "1",
+        },
+        scopes: [
+          { scopeId: "preschool-project", scopeName: "Preschool Portfolio", scopeRole: "portfolio", estimatedKwh: 3525 },
+          { scopeId: "centre-a", scopeName: "Centre A", scopeRole: "centre", estimatedKwh: 2115 },
+          { scopeId: "centre-b", scopeName: "Centre B", scopeRole: "centre", estimatedKwh: 1410 },
+        ],
+      },
     });
+    if (projection.planningOutlook.status !== "provisional") throw new Error(projection.planningOutlook.reason.message);
+    const estimateSeries = Reflect.get(projection.planningOutlook, "estimateSeries") as {
+      scopes: Array<{
+        estimatedKwh: number;
+        buckets: Record<"daily" | "weekly" | "monthly", Array<{ estimatedKwh: number }>>;
+      }>;
+    };
+    expect(estimateSeries.scopes[0]?.buckets.daily).toHaveLength(30);
+    expect(estimateSeries.scopes[0]?.buckets.weekly).toHaveLength(5);
+    expect(estimateSeries.scopes[0]?.buckets.monthly).toHaveLength(1);
+    expect(estimateSeries.scopes[0]?.buckets.daily.reduce((total, bucket) => total + bucket.estimatedKwh, 0)).toBeCloseTo(3525, 2);
   });
 
   it("classifies each worst Spike from the published Calendar without assuming every exception is a public holiday", () => {
@@ -808,10 +830,14 @@ const planningAnalysis = (): Pick<ProjectAnalysisPayload, "offHours" | "provenan
     metricId: "energy.total_usage_kwh@1",
     grain: "day",
     timezone: "Asia/Singapore",
-    scopes: [{
-      scopeId: "preschool-project",
-      scopeName: "Preschool Portfolio",
-      scopeType: "project",
+    scopes: [
+      { scopeId: "preschool-project", scopeName: "Preschool Portfolio", scopeType: "project", share: 1 },
+      { scopeId: "centre-a", scopeName: "Centre A", scopeType: "centre", share: 0.6 },
+      { scopeId: "centre-b", scopeName: "Centre B", scopeType: "centre", share: 0.4 },
+    ].map((scope) => ({
+      scopeId: scope.scopeId,
+      scopeName: scope.scopeName,
+      scopeType: scope.scopeType,
       rows: Array.from({ length: 31 }, (_, index) => {
         const day = index + 1;
         const localDate = `2026-05-${String(day).padStart(2, "0")}`;
@@ -819,7 +845,7 @@ const planningAnalysis = (): Pick<ProjectAnalysisPayload, "offHours" | "provenan
           localDate,
           from: `${localDate}T00:00:00.000+08:00`,
           to: `${localDate}T23:59:59.999+08:00`,
-          usageKwh: 100 + day,
+          usageKwh: (100 + day) * scope.share,
           dataHealth: {
             status: "complete" as const,
             coveragePct: 100,
@@ -829,7 +855,7 @@ const planningAnalysis = (): Pick<ProjectAnalysisPayload, "offHours" | "provenan
           },
         };
       }),
-    }],
+    })),
   },
 });
 

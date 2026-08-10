@@ -425,6 +425,118 @@ describe("Preschool Overview ViewModel", () => {
     });
   });
 
+  it.each([
+    {
+      status: "waiting" as const,
+      completeDayCount: 0,
+      usageKwh: null,
+      pacePct: null,
+      expected: {
+        status: "waiting",
+        statusLabel: "Awaiting June actual",
+        consumedSoFar: "Not available yet",
+        paceVsEstimate: "Not available yet",
+        coverage: "0 / 30 complete days",
+      },
+    },
+    {
+      status: "partial" as const,
+      completeDayCount: 7,
+      usageKwh: 1_400,
+      pacePct: 24.64,
+      expected: {
+        status: "partial",
+        statusLabel: "Partial June actual",
+        consumedSoFar: "1,400 kWh",
+        paceVsEstimate: "24.64%",
+        coverage: "7 / 30 complete days",
+      },
+    },
+    {
+      status: "complete" as const,
+      completeDayCount: 30,
+      usageKwh: 25_000,
+      pacePct: 102.68,
+      expected: {
+        status: "complete",
+        statusLabel: "Above plan",
+        consumedSoFar: "25,000 kWh",
+        paceVsEstimate: "102.68%",
+        coverage: "30 / 30 complete days",
+      },
+    },
+  ])("maps the server-authoritative $status forecast without recalculating its KPIs", ({
+    status,
+    completeDayCount,
+    usageKwh,
+    pacePct,
+    expected,
+  }) => {
+    const snapshot = preschoolGoldenSnapshot();
+    attachPlanningLifecycle(snapshot, {
+      status: status === "complete" ? "complete" : "partial",
+      usageKwh,
+      completeDayCount,
+      varianceKwh: status === "complete" ? 651.79 : null,
+      variancePct: status === "complete" ? 2.68 : null,
+    }, { status, pacePct });
+
+    const view = buildPreschoolOverviewViewModel(snapshot);
+
+    expect(view.forecast).toMatchObject({
+      status: expected.status,
+      statusLabel: expected.statusLabel,
+      targetPeriod: "1–30 Jun 2026",
+      defaultScopeId: snapshot.context.scopeId,
+      centreSelectionAvailable: true,
+      scopes: [
+        {
+          scopeId: snapshot.context.scopeId,
+          label: snapshot.context.scopeName,
+          role: "portfolio",
+          estimatedEnergy: "24,348 kWh",
+          estimatedCost: "S$6,640",
+          ...expected,
+          buckets: {
+            daily: expect.arrayContaining([
+              expect.objectContaining({ estimateKwh: expect.any(Number), actualStatus: expect.any(String) }),
+            ]),
+            weekly: expect.any(Array),
+            monthly: expect.any(Array),
+          },
+        },
+        expect.objectContaining({ scopeId: "centre-a", label: "Centre A", role: "centre" }),
+      ],
+      planEvidence: "Saved saved-a · Snapshot snapshot-a · daily_totals_v1",
+      actualEvidence: "Current Snapshot snapshot-b · daily_totals_v1",
+    });
+    if (view.forecast.status === "unavailable") throw new Error(view.forecast.detail);
+    expect(view.forecast.scopes[0]?.buckets.daily).toHaveLength(30);
+    expect(view.forecast.scopes[0]?.buckets.weekly).toHaveLength(5);
+    expect(view.forecast.scopes[0]?.buckets.monthly).toHaveLength(1);
+  });
+
+  it("fails the Forecast closed when its Plan and Actual Evidence identities do not match the lifecycle pins", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    attachPlanningLifecycle(snapshot, {
+      status: "partial",
+      usageKwh: 1_400,
+      completeDayCount: 7,
+      varianceKwh: null,
+      variancePct: null,
+    }, { status: "partial", pacePct: 24.64 });
+    const lifecycle = snapshot.preschoolPlanningLifecycle;
+    if (!lifecycle || lifecycle.status !== "available" || !lifecycle.forecast) throw new Error("Expected forecast fixture");
+    lifecycle.forecast.evidence.actualDataSnapshotId = "stale-snapshot";
+
+    const view = buildPreschoolOverviewViewModel(snapshot);
+
+    expect(view.forecast).toMatchObject({
+      status: "unavailable",
+      detail: expect.stringContaining("Snapshot-bound Forecast series"),
+    });
+  });
+
   it("retains the current planning baseline when the Saved A lifecycle is unavailable", () => {
     const snapshot = preschoolGoldenSnapshot();
     Reflect.set(snapshot, "preschoolPlanningLifecycle", {
@@ -602,10 +714,14 @@ const attachPlanningLifecycle = (
   snapshot: ReturnType<typeof preschoolGoldenSnapshot>,
   actual: {
     status: "partial" | "complete";
-    usageKwh: number;
+    usageKwh: number | null;
     completeDayCount: number;
     varianceKwh: number | null;
     variancePct: number | null;
+  },
+  forecast?: {
+    status: "waiting" | "partial" | "complete";
+    pacePct: number | null;
   },
 ): void => {
   if (
@@ -614,6 +730,30 @@ const attachPlanningLifecycle = (
   ) throw new Error("Expected planning fixture");
   const plan = structuredClone(snapshot.preschoolOperational.planningOutlook);
   plan.evidence.dataSnapshotId = "snapshot-a";
+  const forecastScopes = forecast
+    ? [
+        forecastScope({
+          scopeId: snapshot.context.scopeId,
+          scopeName: snapshot.context.scopeName,
+          role: "portfolio",
+          estimatedKwh: plan.usageEstimate.projectedKwh,
+          estimatedCost: plan.costEstimate.projectedBeforeGstSgd,
+          actualKwh: actual.usageKwh,
+          completeDayCount: actual.completeDayCount,
+          pacePct: forecast.pacePct,
+        }),
+        forecastScope({
+          scopeId: "centre-a",
+          scopeName: "Centre A",
+          role: "centre",
+          estimatedKwh: 6_000,
+          estimatedCost: 1_636.2,
+          actualKwh: forecast.status === "waiting" ? null : forecast.status === "complete" ? 6_300 : 420,
+          completeDayCount: actual.completeDayCount,
+          pacePct: forecast.status === "waiting" ? null : forecast.status === "complete" ? 105 : 30,
+        }),
+      ]
+    : null;
   Reflect.set(snapshot, "preschoolPlanningLifecycle", {
     status: "available",
     contract: { id: "preschool-saved-plan-current-actual", version: "1" },
@@ -625,6 +765,24 @@ const attachPlanningLifecycle = (
     },
     plan,
     actual: { ...actual, targetDayCount: 30 },
+    ...(forecast && forecastScopes ? {
+      forecast: {
+        status: forecast.status,
+        contract: {
+          id: "preschool-june-2026-forecast-series",
+          version: "1",
+          method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total",
+        },
+        scopes: forecastScopes,
+        evidence: {
+          planDataSnapshotId: "snapshot-a",
+          actualDataSnapshotId: "snapshot-b",
+          planQueryId: "daily_totals_v1",
+          actualQueryId: "daily_totals_v1",
+          recipeId: "preschool-weekday-mean-series-v1",
+        },
+      },
+    } : {}),
     planProvenance: {
       savedAnalysisId: "saved-a",
       dataSnapshotId: "snapshot-a",
@@ -644,4 +802,62 @@ const attachPlanningLifecycle = (
       },
     },
   });
+};
+
+const forecastScope = (input: {
+  scopeId: string;
+  scopeName: string;
+  role: "portfolio" | "centre";
+  estimatedKwh: number;
+  estimatedCost: number;
+  actualKwh: number | null;
+  completeDayCount: number;
+  pacePct: number | null;
+}) => {
+  const daily = Array.from({ length: 30 }, (_, index) => ({
+    start: `2026-06-${String(index + 1).padStart(2, "0")}`,
+    endExclusive: index === 29 ? "2026-07-01" : `2026-06-${String(index + 2).padStart(2, "0")}`,
+    estimatedKwh: input.estimatedKwh / 30,
+    actualKwh: index < input.completeDayCount && input.actualKwh !== null
+      ? input.actualKwh / input.completeDayCount
+      : null,
+    actualCompleteDayCount: index < input.completeDayCount ? 1 : 0,
+    actualTargetDayCount: 1,
+    actualStatus: index < input.completeDayCount ? "complete" as const : "waiting" as const,
+  }));
+  const aggregate = (size: number) => Array.from({ length: Math.ceil(30 / size) }, (_, bucketIndex) => {
+    const rows = daily.slice(bucketIndex * size, (bucketIndex + 1) * size);
+    const actualRows = rows.filter((row) => row.actualKwh !== null);
+    return {
+      start: rows[0]!.start,
+      endExclusive: rows.at(-1)!.endExclusive,
+      estimatedKwh: rows.reduce((sum, row) => sum + row.estimatedKwh, 0),
+      actualKwh: actualRows.length === 0 ? null : actualRows.reduce((sum, row) => sum + row.actualKwh!, 0),
+      actualCompleteDayCount: actualRows.length,
+      actualTargetDayCount: rows.length,
+      actualStatus: actualRows.length === 0
+        ? "waiting" as const
+        : actualRows.length === rows.length
+          ? "complete" as const
+          : "partial" as const,
+    };
+  });
+  return {
+    scopeId: input.scopeId,
+    scopeName: input.scopeName,
+    scopeType: input.role === "portfolio" ? "project" : "centre",
+    scopeRole: input.role,
+    estimatedKwh: input.estimatedKwh,
+    estimatedCostBeforeGstSgd: input.estimatedCost,
+    actualKwh: input.actualKwh,
+    actualCompleteDayCount: input.completeDayCount,
+    actualTargetDayCount: 30 as const,
+    pacePct: input.pacePct,
+    outcome: input.completeDayCount === 30 ? "above_plan" as const : null,
+    buckets: {
+      daily,
+      weekly: aggregate(7),
+      monthly: aggregate(30),
+    },
+  };
 };

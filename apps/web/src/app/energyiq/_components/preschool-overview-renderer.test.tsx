@@ -56,8 +56,13 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup).toContain("24,348 kWh");
     expect(markup).toContain("Limitation and evidence");
     expect(markup).not.toContain("What to do next");
-    expect(markup).toContain("June planning / Forecast");
-    expect(markup).toContain("not an AI forecast or customer bill");
+    expect(markup).toContain("June 2026 Forecast");
+    expect(markup).toContain("Estimated Energy");
+    expect(markup).toContain("Estimated Cost");
+    expect(markup).toContain("Consumed So Far");
+    expect(markup).toContain("Pace vs Estimate");
+    expect(markup).toContain("Method, tariff and evidence");
+    expect(markup).toContain('data-forecast-status="unavailable"');
     expect(markup).toContain("View normalisation and evidence");
     const sectionPositions = PRESCHOOL_OVERVIEW_SECTIONS.map((section) => markup.indexOf(`id="${section.id}"`));
     expect(sectionPositions.every((position) => position >= 0)).toBe(true);
@@ -67,65 +72,41 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup.indexOf("Key findings · Sections 2–5")).toBeLessThan(markup.indexOf("Benchmark Analysis"));
     expect(markup.indexOf("Benchmark Analysis")).toBeLessThan(markup.indexOf("Standby Energy Wastage — Post Operating Hours"));
     expect(markup.indexOf("Standby Energy Wastage — Post Operating Hours")).toBeLessThan(markup.indexOf("Operating Hours Analysis"));
-    expect(markup.indexOf("Operating Hours Analysis")).toBeLessThan(markup.indexOf("June planning / Forecast"));
+    expect(markup.indexOf("Operating Hours Analysis")).toBeLessThan(markup.indexOf("June 2026 Forecast"));
   });
 
-  it("renders Saved A plan and partial current B actual as separately provenanced Evidence", () => {
+  it.each([
+    { status: "waiting" as const, completeDays: 0, actualKwh: null, pacePct: null, label: "Awaiting June actual" },
+    { status: "partial" as const, completeDays: 7, actualKwh: 1_400, pacePct: 24.64, label: "Partial June actual" },
+    { status: "complete" as const, completeDays: 30, actualKwh: 25_000, pacePct: 102.68, label: "Above plan" },
+  ])("renders the $status Forecast path with separately pinned Plan and Actual Evidence", ({ status, completeDays, actualKwh, pacePct, label }) => {
     const snapshot = preschoolGoldenSnapshot();
-    if (
-      snapshot.preschoolOperational?.status !== "available"
-      || snapshot.preschoolOperational.planningOutlook.status !== "provisional"
-    ) throw new Error("Expected planning fixture");
-    const plan = structuredClone(snapshot.preschoolOperational.planningOutlook);
-    plan.evidence.dataSnapshotId = "snapshot-a";
-    Reflect.set(snapshot, "preschoolPlanningLifecycle", {
-      status: "available",
-      contract: { id: "preschool-saved-plan-current-actual", version: "1" },
-      targetPeriod: {
-        start: "2026-06-01",
-        endExclusive: "2026-07-01",
-        timezone: "Asia/Singapore",
-        targetDayCount: 30,
-      },
-      plan,
-      actual: {
-        status: "partial",
-        usageKwh: 1_400,
-        completeDayCount: 7,
-        targetDayCount: 30,
-        varianceKwh: null,
-        variancePct: null,
-      },
-      planProvenance: {
-        savedAnalysisId: "saved-a",
-        dataSnapshotId: "snapshot-a",
-        projectReleaseId: snapshot.projectRelease.id,
-        templateRevisionId: snapshot.projectRelease.templateRevisionId,
-        queryId: "daily_totals_v1",
-        recipeId: "preschool-naive-weekly-planning-baseline-v1",
-      },
-      actualProvenance: {
-        dataSnapshotId: "snapshot-b",
-        projectReleaseId: snapshot.projectRelease.id,
-        queryId: "daily_totals_v1",
-        period: {
-          start: "2026-06-01",
-          endExclusive: "2026-07-01",
-          timezone: "Asia/Singapore",
-        },
-      },
-    });
+    attachForecastLifecycle(snapshot, { status, completeDays, actualKwh, pacePct });
 
     const markup = renderToStaticMarkup(
       <PreschoolOverviewRenderer state={{ status: "ready", snapshot }} />,
     );
+    const container = document.createElement("div");
+    container.innerHTML = markup;
+    const forecastSection = container.querySelector<HTMLElement>("#preschool-june-planning")!;
+    const forecastMarkup = forecastSection.innerHTML;
 
-    expect(markup).toContain("Current June actual");
-    expect(markup).toContain("1,400 kWh");
-    expect(markup).toContain("7 / 30 complete days");
-    expect(markup).toContain("Variance withheld until 30 / 30 complete days");
-    expect(markup).toContain("Saved saved-a · Snapshot snapshot-a");
-    expect(markup).toContain("Current Snapshot snapshot-b · daily_totals_v1");
+    expect(forecastMarkup).toContain(label);
+    expect(forecastMarkup.match(/data-forecast-kpi=/g)).toHaveLength(4);
+    expect(forecastMarkup).toContain("Estimate vs Actual");
+    expect(forecastMarkup).toContain("Daily");
+    expect(forecastMarkup).toContain("Weekly");
+    expect(forecastMarkup).toContain("Monthly");
+    expect(forecastMarkup).toContain("Portfolio");
+    expect(forecastMarkup).toContain("Centre A");
+    expect(forecastMarkup).toContain('data-series="estimate"');
+    expect(forecastMarkup).toContain('stroke-dasharray="8 7"');
+    expect(forecastMarkup).toContain('data-series="actual"');
+    expect(forecastMarkup).toContain("Saved saved-a · Snapshot snapshot-a · daily_totals_v1");
+    expect(forecastMarkup).toContain("Current Snapshot snapshot-b · daily_totals_v1");
+    expect(forecastMarkup.indexOf("Estimated Energy")).toBeLessThan(forecastMarkup.indexOf("Estimate vs Actual"));
+    expect(forecastMarkup.indexOf("Estimate vs Actual")).toBeLessThan(forecastMarkup.indexOf("Method, tariff and evidence"));
+    expect(forecastMarkup.indexOf("Method, tariff and evidence")).toBeLessThan(forecastMarkup.indexOf("Four complete May weeks"));
   });
 
   it("shows only the first five Centres by default and retains the remaining rows in disclosure", () => {
@@ -565,3 +546,116 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     });
   });
 });
+
+const attachForecastLifecycle = (
+  snapshot: ReturnType<typeof preschoolGoldenSnapshot>,
+  input: {
+    status: "waiting" | "partial" | "complete";
+    completeDays: number;
+    actualKwh: number | null;
+    pacePct: number | null;
+  },
+) => {
+  if (
+    snapshot.preschoolOperational?.status !== "available"
+    || snapshot.preschoolOperational.planningOutlook.status !== "provisional"
+  ) throw new Error("Expected planning fixture");
+  const plan = structuredClone(snapshot.preschoolOperational.planningOutlook);
+  plan.evidence.dataSnapshotId = "snapshot-a";
+  const daily = Array.from({ length: 30 }, (_, index) => ({
+    start: `2026-06-${String(index + 1).padStart(2, "0")}`,
+    endExclusive: index === 29 ? "2026-07-01" : `2026-06-${String(index + 2).padStart(2, "0")}`,
+    estimatedKwh: plan.usageEstimate.projectedKwh / 30,
+    actualKwh: index < input.completeDays && input.actualKwh !== null ? input.actualKwh / input.completeDays : null,
+    actualCompleteDayCount: index < input.completeDays ? 1 : 0,
+    actualTargetDayCount: 1,
+    actualStatus: index < input.completeDays ? "complete" as const : "waiting" as const,
+  }));
+  const aggregate = (size: number) => Array.from({ length: Math.ceil(30 / size) }, (_, bucketIndex) => {
+    const rows = daily.slice(bucketIndex * size, (bucketIndex + 1) * size);
+    const actualRows = rows.filter((row) => row.actualKwh !== null);
+    return {
+      start: rows[0]!.start,
+      endExclusive: rows.at(-1)!.endExclusive,
+      estimatedKwh: rows.reduce((sum, row) => sum + row.estimatedKwh, 0),
+      actualKwh: actualRows.length === 0 ? null : actualRows.reduce((sum, row) => sum + row.actualKwh!, 0),
+      actualCompleteDayCount: actualRows.length,
+      actualTargetDayCount: rows.length,
+      actualStatus: actualRows.length === 0 ? "waiting" as const : actualRows.length === rows.length ? "complete" as const : "partial" as const,
+    };
+  });
+  const portfolioScope = {
+    scopeId: snapshot.context.scopeId,
+    scopeName: snapshot.context.scopeName,
+    scopeType: "project",
+    scopeRole: "portfolio" as const,
+    estimatedKwh: plan.usageEstimate.projectedKwh,
+    estimatedCostBeforeGstSgd: plan.costEstimate.projectedBeforeGstSgd,
+    actualKwh: input.actualKwh,
+    actualCompleteDayCount: input.completeDays,
+    actualTargetDayCount: 30 as const,
+    pacePct: input.pacePct,
+    outcome: input.status === "complete" ? "above_plan" as const : null,
+    buckets: { daily, weekly: aggregate(7), monthly: aggregate(30) },
+  };
+  Reflect.set(snapshot, "preschoolPlanningLifecycle", {
+    status: "available",
+    contract: { id: "preschool-saved-plan-current-actual", version: "1" },
+    targetPeriod: {
+      start: "2026-06-01",
+      endExclusive: "2026-07-01",
+      timezone: "Asia/Singapore",
+      targetDayCount: 30,
+    },
+    plan,
+    actual: {
+      status: input.status === "complete" ? "complete" : "partial",
+      usageKwh: input.actualKwh,
+      completeDayCount: input.completeDays,
+      targetDayCount: 30,
+      varianceKwh: input.status === "complete" ? 651.79 : null,
+      variancePct: input.status === "complete" ? 2.68 : null,
+    },
+    forecast: {
+      status: input.status,
+      contract: {
+        id: "preschool-june-2026-forecast-series",
+        version: "1",
+        method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total",
+      },
+      scopes: [
+        portfolioScope,
+        {
+          ...portfolioScope,
+          scopeId: "centre-a",
+          scopeName: "Centre A",
+          scopeType: "centre",
+          scopeRole: "centre",
+          estimatedKwh: 6_000,
+          estimatedCostBeforeGstSgd: 1_636.2,
+        },
+      ],
+      evidence: {
+        planDataSnapshotId: "snapshot-a",
+        actualDataSnapshotId: "snapshot-b",
+        planQueryId: "daily_totals_v1",
+        actualQueryId: "daily_totals_v1",
+        recipeId: "preschool-weekday-mean-series-v1",
+      },
+    },
+    planProvenance: {
+      savedAnalysisId: "saved-a",
+      dataSnapshotId: "snapshot-a",
+      projectReleaseId: snapshot.projectRelease.id,
+      templateRevisionId: snapshot.projectRelease.templateRevisionId,
+      queryId: "daily_totals_v1",
+      recipeId: "preschool-naive-weekly-planning-baseline-v1",
+    },
+    actualProvenance: {
+      dataSnapshotId: "snapshot-b",
+      projectReleaseId: snapshot.projectRelease.id,
+      queryId: "daily_totals_v1",
+      period: { start: "2026-06-01", endExclusive: "2026-07-01", timezone: "Asia/Singapore" },
+    },
+  });
+};

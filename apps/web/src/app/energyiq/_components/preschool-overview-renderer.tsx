@@ -10,6 +10,7 @@ import { projectExplorerHrefForScope } from "./overview-explorer-handoff";
 import { PreschoolEvidenceLink } from "./preschool-evidence-link";
 import { PreschoolAiSlot } from "./preschool-ai-slot";
 import type { PreschoolAiRunResult } from "./preschool-ai-run";
+import { PreschoolForecastPanel } from "./preschool-forecast-panel";
 import { buildPreschoolOverviewCoverage } from "./preschool-ai-coverage";
 import {
   adaptPreschoolAiArtifactToSectionInterpretation,
@@ -512,90 +513,11 @@ export function PreschoolOverviewRenderer({
         <SectionHeader
           id="preschool-june-planning-heading"
           sectionNumber={5}
-          title="June planning / Forecast"
-          description="Estimate June from the accepted May pattern, while keeping planning baseline, Forecast and Actual as separate concepts."
+          title="June 2026 Forecast"
+          description="A transparent estimate from the accepted May Plan, compared with current June Actual only when matching Snapshot Evidence is available."
         />
-        <div className="mt-5 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h4 className="text-base font-semibold text-foreground">Planning baseline</h4>
-              {view.planningOutlook.status === "provisional" ? (
-                <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2.5 py-1 text-xs font-semibold text-step-warning">Estimated · Provisional</span>
-              ) : null}
-            </div>
-            <p className="mt-1.5 text-sm leading-6 text-muted">A transparent planning reference from accepted May facts — not an AI forecast or customer bill.</p>
-          </div>
-          <span className="text-xs text-muted">Live Forecast: {view.liveForecast.label}</span>
-        </div>
-        {view.planningOutlook.status === "provisional" ? (
-          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
-            <PlanningBaselineChart outlook={view.planningOutlook} />
-            <div className="rounded-lg border border-step-warning/30 bg-step-warning-soft/30 p-4">
-              <p className="text-sm font-semibold text-foreground">If May's complete-week pattern repeats</p>
-              <dl className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-                <div>
-                  <dt className="text-xs text-muted">June energy</dt>
-                  <dd className="mt-1 text-xl font-semibold tabular-nums text-foreground">{view.planningOutlook.projectedUsage}</dd>
-                  <dd className="mt-1 text-xs text-muted">Observed-week range {view.planningOutlook.projectedRange}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-muted">June cost before GST</dt>
-                  <dd className="mt-1 text-xl font-semibold tabular-nums text-foreground">{view.planningOutlook.projectedCost}</dd>
-                  <dd className="mt-1 text-xs text-muted">Reference range {view.planningOutlook.projectedCostRange}</dd>
-                </div>
-              </dl>
-              <div className="mt-4 border-t border-step-warning/20 pt-4 text-xs leading-5 text-muted">
-                <p><strong className="font-semibold text-foreground">Rate:</strong> {view.planningOutlook.tariffRate}</p>
-                <p className="mt-1">{view.planningOutlook.tariffLabel}</p>
-                <a className="mt-2 inline-flex font-semibold text-primary hover:underline" href={view.planningOutlook.tariffSourceUrl} target="_blank" rel="noreferrer">View official SP tariff source</a>
-              </div>
-              <details className="mt-4 border-t border-step-warning/20 pt-3">
-                <summary className="cursor-pointer text-xs font-semibold text-foreground">Assumptions and limitations</summary>
-                <ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-5 text-muted">
-                  {view.planningOutlook.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}
-                </ul>
-              </details>
-            </div>
-          </div>
-        ) : (
-          <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
-            <p className="text-sm font-semibold text-muted">Planning baseline unavailable</p>
-            <p className="mt-2 text-sm leading-6 text-muted">{view.planningOutlook.detail}</p>
-          </div>
-        )}
-        {view.planningOutlook.status === "provisional" && view.planningOutlook.actual ? (
-          <article className="mt-4 rounded-lg border border-border bg-surface p-4" data-planning-actual={view.planningOutlook.actual.status}>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h4 className="text-base font-semibold text-foreground">Current June actual</h4>
-              <span className={view.planningOutlook.actual.status === "complete"
-                ? "rounded-full border border-step-success/30 bg-step-success-soft px-2.5 py-1 text-xs font-semibold text-step-success"
-                : "rounded-full border border-step-warning/30 bg-step-warning-soft px-2.5 py-1 text-xs font-semibold text-step-warning"}
-              >
-                {view.planningOutlook.actual.statusLabel}
-              </span>
-            </div>
-            <dl className="mt-4 grid gap-4 sm:grid-cols-3">
-              <div>
-                <dt className="text-xs text-muted">Actual energy</dt>
-                <dd className="mt-1 text-xl font-semibold tabular-nums text-foreground">{view.planningOutlook.actual.usage}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-muted">Coverage</dt>
-                <dd className="mt-1 text-sm font-semibold tabular-nums text-foreground">{view.planningOutlook.actual.coverage}</dd>
-              </div>
-              <div>
-                <dt className="text-xs text-muted">Plan variance</dt>
-                <dd className="mt-1 text-sm font-semibold tabular-nums text-foreground">Variance {view.planningOutlook.actual.variance}</dd>
-              </div>
-            </dl>
-            <details className="mt-4 border-t border-border pt-3">
-              <summary className="cursor-pointer text-xs font-semibold text-foreground">Plan and actual provenance</summary>
-              <p className="mt-2 break-all font-mono text-xs leading-5 text-muted">{view.planningOutlook.actual.planEvidence}</p>
-              <p className="mt-1 break-all font-mono text-xs leading-5 text-muted">{view.planningOutlook.actual.actualEvidence}</p>
-            </details>
-          </article>
-        ) : null}
-        <p className="mt-3 text-xs leading-5 text-muted">{view.liveForecast.detail}</p>
+        <PreschoolForecastPanel forecast={view.forecast} />
+        <PlanningForecastEvidence planning={view.planningOutlook} forecast={view.forecast} />
         <PreschoolAiSlot
           snapshot={state.snapshot}
           sectionId="planning-outlook"
@@ -1600,6 +1522,48 @@ function AfterHoursReviewPriority({ sop }: { sop: OperationalView["sop"] }) {
 
 type PlanningOutlookView = Extract<PreschoolOverviewViewModel["planningOutlook"], { status: "provisional" }>;
 
+function PlanningForecastEvidence({
+  planning,
+  forecast,
+}: {
+  planning: PreschoolOverviewViewModel["planningOutlook"];
+  forecast: PreschoolOverviewViewModel["forecast"];
+}) {
+  return (
+    <details className="mt-4 rounded-lg border border-border bg-surface px-4 py-3" data-forecast-method-evidence>
+      <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30">
+        Method, tariff and evidence
+      </summary>
+      {planning.status === "provisional" ? (
+        <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
+          <PlanningBaselineChart outlook={planning} />
+          <div className="rounded-lg border border-border bg-surface-subtle p-4 text-xs leading-5 text-muted">
+            <p className="font-semibold text-foreground">Transparent planning method</p>
+            <p className="mt-2">{planning.method}</p>
+            <p className="mt-3"><strong className="font-semibold text-foreground">Rate:</strong> {planning.tariffRate}</p>
+            <p className="mt-1">{planning.tariffLabel}</p>
+            <a className="mt-2 inline-flex font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30" href={planning.tariffSourceUrl} target="_blank" rel="noreferrer">View official SP tariff source</a>
+            {forecast.status === "unavailable" ? (
+              <p className="mt-3 rounded-md border border-step-warning/25 bg-step-warning-soft/40 px-3 py-2">{forecast.detail}</p>
+            ) : (
+              <div className="mt-3 border-t border-border pt-3">
+                <p className="break-all font-mono">{forecast.planEvidence}</p>
+                <p className="mt-1 break-all font-mono">{forecast.actualEvidence}</p>
+              </div>
+            )}
+            <ul className="mt-3 list-disc space-y-1 pl-4">
+              {planning.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}
+            </ul>
+            <div className="mt-3"><PreschoolEvidenceLink label="View supporting evidence" /></div>
+          </div>
+        </div>
+      ) : (
+        <p className="mt-3 text-xs leading-5 text-muted">{planning.detail}</p>
+      )}
+    </details>
+  );
+}
+
 function PlanningBaselineChart({ outlook }: { outlook: PlanningOutlookView }) {
   const maximum = Math.max(1, ...outlook.sourceWeeks.map((week) => week.usageKwh));
   return (
@@ -1622,7 +1586,7 @@ function PlanningBaselineChart({ outlook }: { outlook: PlanningOutlookView }) {
           </div>
         ))}
       </div>
-      <p className="mt-5 border-t border-border pt-3 text-[11px] leading-5 text-muted">The observed weekly spread becomes the displayed June reference range. No trend, weather or occupancy adjustment is applied.</p>
+      <p className="mt-5 border-t border-border pt-3 text-[11px] leading-5 text-muted">Supporting method evidence only. These four May bars are not June Actual. No trend, weather or occupancy adjustment is applied.</p>
     </article>
   );
 }

@@ -972,6 +972,7 @@ export const executeEnergyScopeAnalysis = async (input: {
   ruleRevisions?: readonly EnergyIqRuleRevisionRecord[];
   includeTimeBehaviour?: boolean;
   includeMeterOperationalBreakdown?: boolean;
+  includeImmediateChildDailyTotals?: boolean;
   profile?: "full" | "explorer";
 }): Promise<EnergyScopeAnalysis> => {
   const explorerProfile = input.profile === "explorer";
@@ -1121,7 +1122,7 @@ export const executeEnergyScopeAnalysis = async (input: {
     meterAggregates,
     aggregateMeterNodeIds,
   });
-  const dailyTotalScopes = explorerProfile
+  const dailyTotalScopes = explorerProfile && input.includeImmediateChildDailyTotals !== true
     ? resolvedDailyTotalScopes.filter((scope) => scope.scopeId === selectedNode.id).slice(0, 1)
     : resolvedDailyTotalScopes;
   const dailyDateBuckets = buildDailyDateBuckets(input.context);

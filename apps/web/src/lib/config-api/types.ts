@@ -1435,6 +1435,7 @@ export type PreschoolOperationalProjectionDto = {
       queryId: "daily_totals_v1";
       recipeId: "preschool-naive-weekly-planning-baseline-v1";
     };
+    estimateSeries?: PreschoolPlanningEstimateSeriesDto;
     limitations: string[];
   } | {
     status: "unavailable";
@@ -1530,6 +1531,64 @@ type PreschoolProvisionalPlanningOutlookDto = Extract<
   { status: "provisional" }
 >;
 
+export type PreschoolPlanningEstimateSeriesDto = {
+  contract: {
+    id: "preschool-june-2026-estimate-series";
+    version: "1";
+    method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total";
+  };
+  scopes: Array<{
+    scopeId: string;
+    scopeName: string;
+    scopeType: string;
+    scopeRole: "portfolio" | "centre";
+    estimatedKwh: number;
+    buckets: Record<"daily" | "weekly" | "monthly", Array<{
+      start: string;
+      endExclusive: string;
+      estimatedKwh: number;
+    }>>;
+  }>;
+};
+
+export type PreschoolPlanningForecastDto = {
+  status: "waiting" | "partial" | "complete";
+  contract: {
+    id: "preschool-june-2026-forecast-series";
+    version: "1";
+    method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total";
+  };
+  scopes: Array<{
+    scopeId: string;
+    scopeName: string;
+    scopeType: string;
+    scopeRole: "portfolio" | "centre";
+    estimatedKwh: number;
+    estimatedCostBeforeGstSgd: number;
+    actualKwh: number | null;
+    actualCompleteDayCount: number;
+    actualTargetDayCount: 30;
+    pacePct: number | null;
+    outcome: "on_plan" | "above_plan" | "below_plan" | null;
+    buckets: Record<"daily" | "weekly" | "monthly", Array<{
+      start: string;
+      endExclusive: string;
+      estimatedKwh: number;
+      actualKwh: number | null;
+      actualCompleteDayCount: number;
+      actualTargetDayCount: number;
+      actualStatus: "waiting" | "partial" | "complete";
+    }>>;
+  }>;
+  evidence: {
+    planDataSnapshotId: string;
+    actualDataSnapshotId: string;
+    planQueryId: "daily_totals_v1";
+    actualQueryId: "daily_totals_v1";
+    recipeId: "preschool-weekday-mean-series-v1";
+  };
+};
+
 export type PreschoolPlanningLifecycleDto = {
   status: "available";
   contract: {
@@ -1551,6 +1610,7 @@ export type PreschoolPlanningLifecycleDto = {
     varianceKwh: number | null;
     variancePct: number | null;
   };
+  forecast?: PreschoolPlanningForecastDto;
   planProvenance: {
     savedAnalysisId: string;
     dataSnapshotId: string;
