@@ -121,3 +121,55 @@ related:
 - 当前 1422px Chrome 无 document-level 横向溢出；精确 1920 与 tablet 仍保留为人工/设备验收项。
 - 自动证据：56/56 聚焦测试、root typecheck、API build、Web production build、Impeccable detector 均通过。
 - 与模板无关但会影响整页观感的独立 Task B 问题：当前 AI Artifact 文案存在英文单词粘连，且部分 Section 无匹配 interpretation。不得把它误报成模板完成度问题，也不得在本切片跨改 AI Runtime。
+
+## 11. 下一切片：自然月 Monthly Energy Outlook
+
+执行 Ticket：[GitHub #42](https://github.com/Zion74/energyiq-datafoundry/issues/42)。
+
+### 11.1 产品决定
+
+客户可见标题使用 `Monthly Energy Outlook`，动态显示目标自然月；不固定写 `June Forecast` 或 `Next month forecast`。
+
+目标月由 Project timezone 下的 latest complete local day 决定：取其下一自然日所在月份。由此形成统一行为：
+
+- 月初、尚无本月完整日：显示整月 Original Estimate，Actual/Pace 显示 `Awaiting first complete day`；
+- 月中：显示本月 Actual to date、剩余日期 Estimate、Expected full-month outcome，以及同日期 Actual-vs-original-estimate pace；
+- 月末完成后：最终 Actual-vs-original-estimate 进入冻结 History，Current Overview 进入下一个自然月 Outlook；
+- Saved Analysis/History 保留保存时的 target month、Plan、Actual cutoff 和 Artifact，不随 Current Snapshot 改写。
+
+### 11.2 三条数据语义
+
+1. **Original Estimate**：目标月开始时冻结的原始日序列；同一 target month 内不被后续 Actual 覆盖。
+2. **Actual**：只包含同一 Project cutoff 前的完整本地日；缺失或未完成日期不能当作 0。
+3. **Current Outlook**：Actual to date + Original Estimate 中尚未发生日期的剩余值。首版不因短期 pace 自动放大未来，不建设预测模型。
+
+图表用三种可区分语义表达：Original Estimate 虚线、Actual 实线、Current Outlook 的未来段使用第二种虚线或浅色区域。Daily / Weekly / Monthly 和 Portfolio / Centre 继续保持 Section-local。
+
+### 11.3 四 KPI 与 Cost
+
+- `Expected Full-month Energy`：Actual to date + remaining Estimate；
+- `Expected Full-month Cost`：Expected Energy × 当前适用或 latest configured Tariff；
+- `Consumed So Far`：Actual energy，并显示 Actual cost to date；
+- `Pace vs Original Estimate`：相同完整日期范围的 Actual ÷ Original Estimate，不拿 MTD Actual 与整月 Estimate 比。
+
+Preschool 当前使用 27.27¢/kWh before GST。费率覆盖目标月时标为有效 reference；超出有效期但仍沿用最新配置时必须标 `Provisional · using latest available tariff`，不能冒充目标月正式费率，也不应仅因此把 Cost 整块隐藏。
+
+### 11.4 必须先验证的风险
+
+- 28/29/30/31 天、闰年二月、跨年和 Asia/Singapore 月界；
+- cutoff 当天是否已完整，不能把正在发生的日期算入 Actual；
+- 同月迟到数据或修订可以更新 Current Actual，但不能改写 Original Estimate 或 Saved History；
+- Project/Portfolio/Centre 必须共用同一 cutoff、target month、Plan identity 和 Tariff assumption；
+- 月中缺日、partial day、scope 缺失时局部显示 Partial，不将缺口当零；
+- 当前实现若无法复用现有 Planning Lifecycle/Saved Plan 冻结 Original Estimate，应停止并提出最小复用方案，不建设第二套 Forecast/Version repository。
+
+### 11.5 完成判据
+
+- [ ] July 1 / July 15 / month complete 三种状态有服务端、ViewModel 和 Renderer 测试；
+- [ ] 28/29/30/31 天、跨年和 timezone 边界有确定性测试；
+- [ ] Original Estimate、Actual、Current Outlook 分别携带可追溯 identity；
+- [ ] 四 KPI 与图表使用同一数据合同，Cost 使用明确 Tariff assumption；
+- [ ] 局部 grain/scope 切换不改变整页 URL、不重跑 AI；
+- [ ] Saved A fixed、Current B updated，A/B Plan/Actual/Evidence 不混；
+- [ ] 1440/1920/tablet Chrome 无横向溢出，等待、月中和完成态分别留证；
+- [ ] 主 Agent完成代码、数据语义和浏览器复核后，才交用户/Charles 人工验收。
