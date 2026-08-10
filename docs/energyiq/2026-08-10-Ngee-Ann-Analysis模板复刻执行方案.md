@@ -347,3 +347,12 @@ http://127.0.0.1:4178/analysis?utility=electricity&project=proj-nap-energy-analy
 - 需要把独立 Level/Category 行拼成未经证明的交集；
 - 需要用 absolute usage 冒充异常、变化原因或节能潜力；
 - 需要新增共享 Analytics/Signal/Chart 平台才能完成。
+
+### 16.5 执行结果（2026-08-10）
+
+- Level 与 Category 各自增加 `Current concentration` 和 `Largest measured movement` 摘要；摘要只对同一组服务端 rows 做展示级选择，名称、用量、占比和变化保持同一行来源，不生成 Level × Category 交集；
+- comparison 缺失时，当前用量、占比、Circuit Top 5 与既有 filter 继续展示；Level、Category 和 Circuit 的 movement 分别局部标记 Unavailable，不再关闭整个 contributor 模块；
+- comparison 对象存在但前期基线为零、`changePct=null` 时，也不把 current usage 写成有效 movement；current concentration 保留，movement 局部 Unavailable；
+- Circuit 文案已明确为 `Ranked by current usage only. This is not an anomaly, priority or savings ranking.`，不再把 absolute usage 写成调查优先级；
+- 未新增 SQL、Projection、服务端公式、Structured Signal、AI Artifact 或共享平台；展示级摘要没有进入 Decision Priority；
+- ViewModel 测试 `150/150`、Renderer/interaction 测试 `59/59` 通过；零基线回归明确保留当前 contributor、只隐藏无法定义的百分比 movement。根 TypeScript typecheck、根 build 与 `git diff --check` 通过；真实 Chrome 1440/1920、视觉密度和 Charles 人工验收仍待完成。
