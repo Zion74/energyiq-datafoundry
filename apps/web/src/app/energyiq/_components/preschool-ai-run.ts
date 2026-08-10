@@ -279,9 +279,10 @@ async function restoreOrExecutePreschoolAiRun(
   onProgress?: ProgressCallback,
 ): Promise<PreschoolAiRunResult> {
   onProgress?.("inspecting");
-  let artifact = await configApi.getEnergyOverviewAiArtifact(input.projectId, input.scopeId);
+  const pin = overviewAiArtifactPin(input);
+  let artifact = await configApi.getEnergyOverviewAiArtifact(input.projectId, input.scopeId, pin);
   if (artifact.status === "missing" || artifact.status === "queued") {
-    artifact = await configApi.ensureEnergyOverviewAiArtifact(input.projectId, input.scopeId);
+    artifact = await configApi.ensureEnergyOverviewAiArtifact(input.projectId, input.scopeId, pin);
   }
   if (artifact.status === "available") {
     const shared = acceptedSharedPreschoolAiArtifact(input, artifact);
@@ -303,7 +304,11 @@ export async function retryPreschoolAiRun(
   onProgress?: ProgressCallback,
 ): Promise<PreschoolAiRunResult> {
   onProgress?.("inspecting");
-  const artifact = await configApi.retryEnergyOverviewAiArtifact(input.projectId, input.scopeId);
+  const artifact = await configApi.retryEnergyOverviewAiArtifact(
+    input.projectId,
+    input.scopeId,
+    overviewAiArtifactPin(input),
+  );
   const accepted = acceptedSharedPreschoolAiArtifact(input, artifact);
   if (accepted) {
     onProgress?.("validating");
@@ -355,7 +360,11 @@ async function waitForSharedPreschoolAiArtifact(
 ): Promise<PreschoolAiRunResult> {
   const deadline = Date.now() + SHARED_ARTIFACT_WAIT_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const artifact = await configApi.getEnergyOverviewAiArtifact(input.projectId, input.scopeId);
+    const artifact = await configApi.getEnergyOverviewAiArtifact(
+      input.projectId,
+      input.scopeId,
+      overviewAiArtifactPin(input),
+    );
     const accepted = acceptedSharedPreschoolAiArtifact(input, artifact);
     if (accepted) {
       onProgress?.("validating");
@@ -374,6 +383,20 @@ async function waitForSharedPreschoolAiArtifact(
     await new Promise<void>((resolve) => setTimeout(resolve, Math.min(SHARED_ARTIFACT_POLL_MS, remaining)));
   }
   return { status: "unavailable", reason: FRIENDLY_UNAVAILABLE, retryable: true };
+}
+
+function overviewAiArtifactPin(input: PreschoolAiRunInput): {
+  from: string;
+  to: string;
+  dataSnapshotId: string;
+  projectReleaseId: string;
+} {
+  return {
+    from: input.analysisFrom,
+    to: input.analysisTo,
+    dataSnapshotId: input.snapshotId,
+    projectReleaseId: input.projectReleaseId,
+  };
 }
 
 type PreschoolAiEventStreamInput = {

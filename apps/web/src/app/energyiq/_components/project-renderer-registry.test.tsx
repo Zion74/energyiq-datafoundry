@@ -116,7 +116,7 @@ describe("Project Renderer Registry", () => {
     expect(preschoolMarkup).toContain('data-standby-kpis="five-decision-metrics"');
     expect(preschoolMarkup).toContain("3,103.78 kWh");
     expect(preschoolMarkup).toContain("S$846.40");
-    expect(preschoolMarkup.match(/data-standby-appliance-group=/g)).toHaveLength(4);
+    expect(preschoolMarkup.match(/data-standby-appliance-segment=/g)).toHaveLength(9);
     expect(preschoolMarkup.match(/data-standby-appliance=/g)).toHaveLength(9);
     expect(preschoolMarkup.match(/data-standby-spike-event=/g)).toHaveLength(7);
     expect(preschoolMarkup.match(/data-review-priority-centre=/g)).toHaveLength(3);
@@ -126,7 +126,7 @@ describe("Project Renderer Registry", () => {
     expect(preschoolMarkup).toContain("21,818.03 kWh");
     expect(preschoolMarkup).toContain("S$5,949.78");
     expect(preschoolMarkup).toContain('data-operating-kpis="five-decision-metrics"');
-    expect(preschoolMarkup.match(/data-operating-appliance-group=/g)).toHaveLength(4);
+    expect(preschoolMarkup.match(/data-operating-appliance-segment=/g)).toHaveLength(9);
     expect(preschoolMarkup.match(/data-operating-appliance=/g)).toHaveLength(9);
     expect(preschoolMarkup.match(/data-operating-spike-centre=/g)).toHaveLength(14);
     expect(preschoolMarkup.match(/data-operating-spike-event=/g)).toHaveLength(21);

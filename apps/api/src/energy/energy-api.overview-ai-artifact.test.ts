@@ -91,6 +91,36 @@ describe("Overview AI Artifact API", () => {
     }
   });
 
+  it("resolves the Artifact against the exact Overview period, Snapshot, and Release pin", async () => {
+    const harness = await createHarness();
+    try {
+      const execute = vi.fn(async () => { throw new Error("not expected"); });
+      const resolveCurrentIdentity = vi.fn().mockResolvedValue(harness.identity);
+      const context = { ...harness.context, overviewAiWorkflow: { execute, resolveCurrentIdentity } } as unknown as Required<ConfigApiContext>;
+      const path = ["projects", harness.project.id, "overview-ai-artifact"];
+
+      await handleEnergyApiRequest(
+        getRequest(`/api/v1/energy/projects/${harness.project.id}/overview-ai-artifact?scopeId=${harness.project.root_scope_id}&from=2026-05-01&to=2026-05-31&dataSnapshotId=snapshot-may&projectReleaseId=release-may`),
+        path,
+        context,
+      );
+
+      expect(resolveCurrentIdentity).toHaveBeenCalledWith(expect.objectContaining({
+        projectId: harness.project.id,
+        scopeId: harness.project.root_scope_id,
+        pin: {
+          from: "2026-05-01",
+          to: "2026-05-31",
+          dataSnapshotId: "snapshot-may",
+          projectReleaseId: "release-may",
+        },
+      }));
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      harness.close();
+    }
+  });
+
   it("returns 403 for deprecated claim/complete/fail payloads and revalidates exact identity", async () => {
     const harness = await createHarness();
     try {

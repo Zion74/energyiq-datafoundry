@@ -230,6 +230,21 @@ function queryString(params: URLSearchParams): string {
   return query ? `?${query}` : "";
 }
 
+function overviewAiArtifactParams(
+  scopeId: string,
+  pin?: { from: string; to: string; dataSnapshotId: string; projectReleaseId: string },
+): URLSearchParams {
+  return new URLSearchParams({
+    scopeId,
+    ...(pin ? {
+      from: pin.from,
+      to: pin.to,
+      dataSnapshotId: pin.dataSnapshotId,
+      projectReleaseId: pin.projectReleaseId,
+    } : {}),
+  });
+}
+
 export const configApi = {
   register(body: { displayName?: string; email: string; password: string }): Promise<{
     user: { id: string; email?: string; displayName?: string };
@@ -594,8 +609,9 @@ export const configApi = {
   getEnergyOverviewAiArtifact(
     projectId: string,
     scopeId: string,
+    pin?: { from: string; to: string; dataSnapshotId: string; projectReleaseId: string },
   ): Promise<EnergyOverviewAiArtifactDto> {
-    const params = new URLSearchParams({ scopeId });
+    const params = overviewAiArtifactParams(scopeId, pin);
     return requestEnvelope<EnergyOverviewAiArtifactDto>(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-ai-artifact?${params.toString()}`,
     );
@@ -604,8 +620,9 @@ export const configApi = {
   ensureEnergyOverviewAiArtifact(
     projectId: string,
     scopeId: string,
+    pin?: { from: string; to: string; dataSnapshotId: string; projectReleaseId: string },
   ): Promise<EnergyOverviewAiArtifactDto> {
-    const params = new URLSearchParams({ scopeId });
+    const params = overviewAiArtifactParams(scopeId, pin);
     return requestEnvelope<EnergyOverviewAiArtifactDto>(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-ai-artifact/ensure?${params.toString()}`,
       { method: "POST", body: "{}" },
@@ -615,8 +632,9 @@ export const configApi = {
   retryEnergyOverviewAiArtifact(
     projectId: string,
     scopeId: string,
+    pin?: { from: string; to: string; dataSnapshotId: string; projectReleaseId: string },
   ): Promise<EnergyOverviewAiArtifactDto> {
-    const params = new URLSearchParams({ scopeId });
+    const params = overviewAiArtifactParams(scopeId, pin);
     return requestEnvelope<EnergyOverviewAiArtifactDto>(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-ai-artifact/retry?${params.toString()}`,
       { method: "POST", body: "{}" },

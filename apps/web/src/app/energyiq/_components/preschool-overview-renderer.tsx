@@ -6,6 +6,7 @@ import type {
   EnergySavedAnalysisAiArtifactInputDto,
 } from "../../../lib/config-api";
 import { EnergyIcon } from "./icons";
+import { AiFindingPresentationView } from "./ai-finding-presentation-view";
 import { projectExplorerHrefForScope } from "./overview-explorer-handoff";
 import { PreschoolEvidenceLink } from "./preschool-evidence-link";
 import { PreschoolAiSlot } from "./preschool-ai-slot";
@@ -780,14 +781,47 @@ function SnapshotInterpretationSlot({
             </span>
           </div>
           {status === "available" && interpretation?.status === "available" ? (
-            <div className="mt-2" {...contentData}>
-              <p className="text-sm font-semibold text-foreground">{interpretation.headline}</p>
-              <p className="mt-1.5 text-sm leading-6 text-muted">{interpretation.summary}</p>
-              {interpretation.actions && interpretation.actions.length > 0 ? (
-                <ul className="mt-3 list-disc space-y-1 pl-5 text-sm leading-6 text-muted">
-                  {interpretation.actions.map((action) => <li key={action}>{action}</li>)}
-                </ul>
+            <div className="mt-3 space-y-4" {...contentData}>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-primary">Key takeaway</p>
+                <p className="mt-1 text-base font-semibold leading-6 text-foreground">{interpretation.headline}</p>
+                <p className="mt-1.5 text-sm leading-6 text-muted">{interpretation.takeaway}</p>
+                {interpretation.whyItMatters ? (
+                  <p className="mt-2 text-sm leading-6 text-muted"><strong className="font-semibold text-foreground">Why it matters:</strong> {interpretation.whyItMatters}</p>
+                ) : null}
+              </div>
+
+              <AiFindingPresentationView presentation={interpretation.presentation} />
+
+              {interpretation.possibleExplanation ? (
+                <div className="rounded-lg border border-step-warning/20 bg-step-warning-soft/45 px-3 py-2.5 text-sm leading-6 text-muted">
+                  <strong className="font-semibold text-foreground">What may explain it:</strong> {interpretation.possibleExplanation}
+                </div>
               ) : null}
+
+              <div className="rounded-lg bg-foreground px-4 py-3 text-background">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-background/65">Recommended next step</p>
+                <p className="mt-1 text-sm font-semibold leading-6">{interpretation.action}</p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-lg border border-step-success/20 bg-step-success-soft/45 px-3 py-2.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-step-success">If acted on</p>
+                  <p className="mt-1 text-sm leading-6 text-muted">{interpretation.expectedIfAct}</p>
+                </div>
+                <div className="rounded-lg border border-step-warning/20 bg-step-warning-soft/45 px-3 py-2.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-step-warning">If ignored</p>
+                  <p className="mt-1 text-sm leading-6 text-muted">{interpretation.ifIgnored}</p>
+                </div>
+              </div>
+
+              <details className="rounded-lg border border-border bg-surface px-3 py-2.5">
+                <summary className="cursor-pointer text-sm font-semibold text-foreground">Verification and limitations</summary>
+                <div className="mt-2 space-y-2 text-sm leading-6 text-muted">
+                  {interpretation.verification ? <p><strong className="font-semibold text-foreground">How to verify:</strong> {interpretation.verification}</p> : null}
+                  <p><strong className="font-semibold text-foreground">What this cannot prove:</strong> {interpretation.limitation}</p>
+                </div>
+              </details>
             </div>
           ) : status === "pending" ? (
             <p className="mt-2 text-sm leading-6 text-muted">AI interpretation pending for this Snapshot.</p>

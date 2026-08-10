@@ -3,7 +3,7 @@ title: "AI Analyst Harness 与 AI Slot 执行路径"
 summary: "跟踪 #30/#36 Harness、两项目 AI Slot 和相关 Open Ticket 的最小实施顺序、Owner、证据与停止项。"
 doc_type: playbook
 tags: [AI Analyst, Harness Eval, AI Slot, Overview, execution]
-updated_at: "2026-08-08"
+updated_at: "2026-08-10"
 related:
   - "2026-08-05-Overview用户价值与AI-Slot最小交付决策.md"
   - "2026-08-06-Charles系统价值复核与连续数据演示决策.md"
@@ -820,3 +820,152 @@ Candidate 提交与 Evidence 绑定不稳定：模型自行计数 SQL 序号时�
 `independent`；格式损坏的非权威 Trace 被忽略，并由 Runtime 根据最终验证结果重建 canonical trace。未知 Candidate、
 合并 Candidate、矛盾的合法 Trace、无 Evidence 的 verified Candidate 仍然 fail closed。Prompt identity 升为
 `preschool-insight-editor-v3`；本轮只做自动回归，不再次调用 Provider。
+
+## 17. 2026-08-10 Investigator / Editor 职责校准与 AI Slot 可见性修复
+
+### 17.1 用户校准
+
+`Investigator + Editor` 两阶段本身不是需要删除的复杂度。一次页面级 AI Workflow 可以包含两个模型阶段：
+
+- Investigator 负责自主提出多个问题、运行只读 SQL、发现关系和候选洞察；
+- Editor 负责去重、排序、选择 Section Placement，并将技术性候选结果整理为普通管理者能直接理解的英文；
+- Runtime 继续锁定 Snapshot/Scope/Period，并校验最终数字、实体、单位和 Evidence；
+- React Renderer 只展示 Runtime 接受的 canonical Artifact。
+
+因此不应把前端卡片的 120/140/220 字符排版限制当作 Investigator 的调查门禁，也不应把一次页面 Workflow 误解为只能使用一个模型阶段。
+
+### 17.2 当前真实故障
+
+真实 DeepSeek Run 已完成调查并三次启动 `overview_ai_candidates_submit`：前两次只因短字段超限失败，第三次已通过 Schema。但收集器对“总提交次数大于 2”直接返回无效，导致：
+
+`Investigator 已分析 → 最终合法提交被丢弃 → Editor 未启动 → Artifact failed → 前端 AI analysis unavailable`
+
+这是 AI Slot 不可见的 P0 直接原因，不是 DuckDB 性能、Provider 连接或前端渲染问题。失败 Artifact 又会按同一身份持久化，所以普通刷新会稳定恢复旧失败结果，而不会自动得到新分析。
+
+### 17.3 分两个可验证切片修复
+
+**P0：恢复可见性**
+
+1. 一次已被 300 秒和 Agent 最大轮次限制的 Run 内，只要最终有且只有一个成功 Candidate 提交，并且成功后没有继续 SQL/提交，Workflow 就接受该最终提交；早先的纯 Schema 错误不再连坐否决它。
+2. 不放宽 Evidence、Snapshot、实体/数字/单位和 Runtime 最终校验。
+3. 升级 Prompt identity，使旧失败 Artifact 不会遮蔽新工作流。
+4. 先用已捕获的三次提交序列做秒级回放红测，然后只跑一次真实 DeepSeek。
+
+**P1：Editor Humanizer 与多 Section 编排**
+
+1. Investigator 交付可验证的分析内核和 Evidence，不承担前端卡片字数压缩。
+2. Editor 可重写展示文案，但 `sourceCandidateId` 不可变，Evidence 与 SQL index 由服务端从源 Candidate 继承，Editor 不能重新编造引用。
+3. Editor 输出必须用普通英文回答 `What / Why it matters / What to do / How to verify`；例如不向用户显示 `common baseload`，而是说 `Even when the centres are closed, electricity use does not fall to zero.`
+4. 页面级运行可为 Key Findings 和 Section 2–5 生成多个有价值的结果；“3 条”只能是某个区域的首屏排序，不是分析数量配额。
+5. Runtime 对 Editor 最终展示文案再做 Evidence 校验；无法证明的单条不展示，不连坐杀掉其他已验证 Finding。
+
+### 17.4 暂停项与验收
+
+- 暂停 Ngee Ann 新切片，直到 Preschool AI Slot 可见且文案通过人工价值检查。
+- 不扩建第二套 Artifact/Evidence/Session 平台；继续使用现有两阶段 Workflow。
+- P0 自动验收：三次提交中最后一次合法时 Editor 必须启动，Artifact 不得以 `INVESTIGATOR_RESULT_INVALID` 失败。
+- 真实验收：一次 DeepSeek 形成至少一条 Runtime 接受的 Finding；Overview 可见；刷新后恢复同一 Artifact，不启动第二次 Provider Run。
+
+### 17.5 v9 真实验收：可见性第二层故障与最小修复
+
+v9 已证明 17.3 的 P0 修复有效：Investigator 在约 178 秒内完成三次结构化提交，前两次是字段长度/缺字段错误，第三次成功；Workflow 接受最终成功提交，并启动 Editor。Editor 约 21 秒完成，选择了两条有增量价值的候选。因此“两次格式失败导致 Editor 永远不启动”的第一层故障已经消除。
+
+Artifact 最终仍以 `OVERVIEW_AI_RUNTIME_VALIDATION_REJECTED_ALL` 失败。根因不是 Provider、Editor JSON 或前端，而是 Investigator 将三个候选的 `evidenceSqlIndexes` 写成 `[1] / [2] / [3]`；同一 Run 中真正支持 Category split、Centre comparison 与 peak-hour composition 的成功 SQL Evidence 位于后续编号。Editor 当前无权改 Evidence，Runtime 按错误引用校验时自然全部拒绝。
+
+本轮增加一个窄范围的 Runtime Evidence 装订修复：
+
+1. 先使用 Agent 显式提交的 Evidence 校验；若已经完整支持，保持原引用不变。
+2. 仅当显式 SQL 引用无法支持叙述时，Runtime 才可在**同一 Investigator Run、成功提交之前、同一 Snapshot**的成功只读 SQL Evidence 中寻找支持集合。
+3. Runtime 只保留能够共同证明整条叙述的最小 SQL Evidence 集，并以真实 `evidenceIndex` 写入 canonical Artifact；Editor 仍不能编造或改写 Evidence。
+4. 若全部同 Run SQL 仍无法证明某个数字、实体、单位或日期，候选继续拒绝。例如模型自行计算但 SQL 未明确返回的比例不能因为“看起来合理”而放行。
+5. 不使用其他 Run、其他 Snapshot、失败 SQL、提交后的 SQL 或全局跨项目 Evidence；不放宽实体/指标/单位校验。
+
+该修复把“模型记住正确数组下标”从可信结果的必要条件移除，但没有降低事实门槛：Agent 决定分析什么，Runtime 负责把它与本 Run 已取得的证据正确装订。完成后升级 Prompt identity，并只再运行一次真实 Provider 验收。
+
+### 17.6 v10 真实验收：提交工具与 Workflow Schema 漂移
+
+v10 Investigator 约 104 秒完成，并在第二次提交中得到工具返回的 `ok:true`。但该成功 Payload 有一条 `possibleExplanation` 没有 `nextCheck`；提交工具的 Zod Schema 未声明这条跨字段规则，而 Workflow 解析器声明了。因此模型被告知“提交成功”后，后置解析器又将整份 Payload 判为 `OVERVIEW_AI_INVESTIGATOR_RESULT_INVALID`，Editor 未启动。
+
+最小修复是在唯一正式提交工具上补齐同一跨字段规则：有 `possibleExplanation` 就必须有 `nextCheck`。这让字段级错误在 Run 内立即返回给 Investigator 修正，避免工具成功与 Workflow 拒绝相互矛盾。仍不放宽原因推断或 Evidence 边界；Prompt identity 升级后再做一次真实验收。
+
+### 17.7 v11 真实验收：Editor 恢复为用户文案整理者
+
+v11 已完整进入 Editor，但唯一入选候选包含 SQL 未直接返回的派生表达：SQL 返回 0–1 share，候选展示为百分比；行动中又写了 SQL 未返回的约 11 倍。Runtime 自动 Evidence 装订不能把未明确返回的派生数字变成已验证事实，因此该候选仍被拒绝。这说明仅修 Evidence 下标不足，也说明让 Investigator 同时承担探索、证据编译和最终 UI 文案是不合理的。
+
+Editor v4 恢复为两阶段设计中的真正整理层：
+
+1. Investigator 继续自主调查和提出源 Candidate；不让 Editor改变其身份或引用其他 Candidate。
+2. Workflow 在进入 Editor 前，用同一 Snapshot/Run Evidence 标出各 Candidate 中无法被 Runtime证明的字段。
+3. Editor 对入选 Candidate 输出独立 `copy`：用普通英文组织标题、结论、行动、行动后结果、不行动后果、限制及验证步骤；可删除无法证明的数字或技术术语，但不得增加源 Candidate 没有的数字、日期、Centre、原因或事实。
+4. Runtime 从源 Candidate 继承 Evidence，重新校验 Editor 的最终 `copy`；最终页面只显示校验通过的文案。
+5. Editor Prompt 预算从 6,500 调整为 12,000 字符，只为保留三条合法 Candidate 和字段级证明反馈，不增加 SQL、第二套上下文或通用平台。
+
+该调整对应用户确认的职责：Investigator 尽情探索；Editor 筛选、整理并 Humanize；Runtime 决定最终内容是否有资格作为可信结果展示。
+
+### 17.8 v12/v13 客户可见闭环（2026-08-10）
+
+最终确认 AI Slot 不可见不是单一 Provider 故障，而是三层独立问题叠加：
+
+1. Investigator 的工作笔记被错误套用前端短文案的 `220/140` 字符限制，导致有价值分析在进入 Editor 前反复修格式。Candidate 提交现改为有界但较宽的传输限制（title 240、takeaway 800、supporting fields 600）；Editor 继续负责把内容压缩成人话，Evidence 与 Runtime 事实校验不放宽。
+2. API 已生成 `available` 的 v12 Artifact，但 Web 仍硬编码接受 v11/v5，因 revision 漂移把成功结果误判成 unavailable。Web 的 Investigator/Editor revision 已与服务端同步。
+3. v13 首次 Editor 输出使用 `standby / operating-hours / overall-key-findings` 等已知短 Section 名，而 Runtime 只接受完整 `preschool.*` 名称。Runtime 现在只归一化这五个已知短名；未知位置仍 fail closed。
+
+真实 DeepSeek v13 重试结果：Investigator 约 120 秒、Editor 约 26 秒，Artifact
+`overview-ai-artifact-dee5268b29913abbcedd26c5` 在第二次允许的尝试中变为 `available`，并产生两条 Runtime 接受的 Finding：
+
+- Benchmark：高 energy-per-square-metre 排名可能主要由 Centre 面积较小造成，需要在派维修人员前与同规模 Centre 再比较；
+- Standby / Operating Hours：被标记的 plug-load circuits 更像全 Portfolio 共同模式，而非少数 Priority Centre 的独有故障。
+
+Chrome `3102` 已确认：页面不再显示 `AI analysis unavailable`，页首提示 `Section interpretations ready`，两条分析分别插入 Benchmark 与 Standby/Operating Hours。该证据只通过“真实 Artifact 可见”门槛；文案长度、信息层级、是否需要声明式图表和 `View evidence / Ask AI deeper` 的最终产品体验仍需用户人工验收，不能据此关闭 Charles 价值验收。
+
+自动证据：Candidate tool + Workflow + Artifact 44 项通过；Web Artifact/Run/Slot 95 项通过；Section alias 回归后的 Workflow 30 项通过；Agent Runtime、API、Web build 与根 typecheck 通过。
+
+### 17.9 Section Interpretation 结构化表达与按需图表（2026-08-10）
+
+用户人工复核指出：当前 Benchmark、Standby、Operating Hours 虽然已经恢复真实 AI Finding，但页面把结构化字段重新拼成一段长文，用户仍要阅读完整段落才能找到结论和行动；同时 Section 适配器没有把已经验收过的 `presentation` 合同传到 Renderer，所以 Agent 即使提交了有价值图表也无法在对应 Section 显示。
+
+本切片的目标不是缩短 Investigator 的探索空间，也不是要求每条 Finding 必须画图，而是修复“结构化 Artifact → 人类可扫描 Section”的最后一段数据链：
+
+1. Investigator 继续自由探索；Editor 继续输出 `title / takeaway / significance / action / expectedIfAct / ifIgnored / possibleExplanation / nextCheck / limitation` 等结构化字段。
+2. Section Adapter 不再把 `takeaway + interpretation` 拼成长段，也不再把 `action + verification` 压成普通列表；它逐字段保留 accepted Artifact，并透传可选 `presentation`。
+3. Section Renderer 按阅读优先级展示：一句话 Takeaway → 可选图表 → Recommended action → 做了/不做的结果；可能原因、验证方式和限制默认放在次级区域或折叠区域。
+4. Editor 使用软文案目标而非 Runtime 硬门禁：标题约 8–14 个词；Takeaway、Why、Action 各一条短句；Outcome、Verification、Limitation 各一条短句。超出软目标不使整个 Artifact 失败。
+5. Agent 可为一个 Finding 选择 `0–N` 个声明式 Presentation Block。只有图表能比文字更清楚地证明比较、排名、占比、趋势、分布或时段模式时才画；没有信息增益时不画，禁止装饰性图表和重复已有 Section 图表。
+6. 图表仍使用现有非可执行合同：`metric / comparison / ranking / share / distribution / trend / heatmap / table / callout`，每个定量 Block 必须绑定该 Finding 自己的 Evidence。Agent 决定画什么，Runtime 决定是否可信，React 决定如何安全渲染。
+7. 不开放任意 HTML、JS 或 React；不增加图表数量配额；不建设第二套 Unified Model、通用画布平台或新的模型调用。
+
+实施顺序：
+
+1. 先写 Adapter/Renderer 红测，证明字段和 `presentation` 不再丢失；
+2. 改 Adapter 与 Section Renderer；
+3. 给 Investigator 补充最小 Presentation 选择说明和完整 JSON 示例，给 Editor 补充人话软目标；
+4. bump Prompt/Artifact revision，避免恢复旧版长文 Artifact；
+5. 跑聚焦测试、API/Web build 与 typecheck；
+6. 最后才跑一次真实 DeepSeek，并分别验收“有价值图表”和“无需图表”两种合法结果。
+
+停止项：不因某次 Agent 没画图而由前端臆造图表；不把长文问题变成会导致 unavailable 的硬字数门禁；不让图表引用未被该 Finding 接受的数字；不借此扩建 Harness 或 Ngee Ann 新切片。
+
+### 17.10 v14 真实运行：Agent 已画图，但 Runtime 在交接处静默丢弃
+
+v14 真实 DeepSeek Investigator 找到一条有增量价值的异常：5 月 27 日整个 Portfolio 的用电从相邻工作日约
+1,200 kWh 降到 144.1 kWh，次日恢复；它同时提交了两张声明式图表：相邻三日直接对比、异常日的 Category
+构成。Editor 成功将长工作笔记整理为普通英文，Artifact 也变为 `available`。因此“模型不会选择图表”不是事实。
+
+前端最终没有显示图表的根因有两层：
+
+1. Investigator 在 Candidate 顶层提交了正确 `evidenceSqlIndexes`，但图表 Block 没有重复这些索引；旧 Parser
+   要求每个定量 Block 自己再写一份引用，因此静默删除了 Block。
+2. 旧 Presentation 校验把整张图序列化为一段 JSON 再做自然语言 Claim 校验；多个 label/value 对放进同一
+   JSON 后会产生误拒绝，不能正确表达“每个图表数据点分别受哪条 Evidence 支持”。
+
+最小修复保持原治理边界：
+
+- Agent 仍决定 `0–N` 张图，不增加图表配额；
+- Block 有自己的 Evidence binding 时继续使用；若遗漏，则只继承同一 Candidate 已被接受的 Evidence 集合，
+  不允许跨 Candidate、跨 Run 或跨 Snapshot 取数；
+- Runtime 按每个 metric、label/value、trend point、heatmap cell 或 table cell 分别验证，不再把整张图当作一段
+  JSON 文案；任何不在 accepted Evidence 中的数字、Centre 或日期仍会让该图表失效；
+- 前端只渲染通过验证的声明式 Block，不自动补画装饰图，也不执行 HTML/JS/React。
+
+该修复解决的是 Investigator → Runtime → Editor/Renderer 的字段运输和校验问题，不改变发现角度，也不压缩
+Investigator 的分析空间。

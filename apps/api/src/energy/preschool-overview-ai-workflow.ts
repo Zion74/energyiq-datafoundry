@@ -59,6 +59,12 @@ export type PreschoolOverviewAiWorkflow = {
     projectId: string;
     scopeId: string;
     user: UserRecord;
+    pin?: {
+      from: string;
+      to: string;
+      dataSnapshotId: string;
+      projectReleaseId: string;
+    };
   }): Promise<EnergyIqOverviewAiArtifactIdentity>;
   execute(input: {
     identity: EnergyIqOverviewAiArtifactIdentity;
@@ -129,6 +135,19 @@ type EditorSelection = {
   placementTargets: PlacementTarget[];
   relationship: Relationship;
   signalRefs: string[];
+  copy?: EditorCopy;
+};
+
+type EditorCopy = {
+  title: string;
+  takeaway: string;
+  action: string;
+  expectedIfAct: string;
+  ifIgnored: string;
+  limitation: string;
+  significance?: string;
+  possibleExplanation?: string;
+  nextCheck?: string;
 };
 
 type TraceDecision = {
@@ -141,16 +160,20 @@ type TraceDecision = {
 const LEASE_MS = 13 * 60 * 1_000;
 const MAX_ANSWER_CHARS = 160_000;
 const MAX_EVIDENCE_PREVIEW_CHARS = 2_000;
-const MAX_EDITOR_PROMPT_CHARS = 6_500;
+const MAX_EDITOR_PROMPT_CHARS = 12_000;
 const MAX_INVESTIGATOR_CANDIDATES = 3;
-const MAX_CANDIDATE_TITLE_CHARS = 160;
-const MAX_CANDIDATE_TAKEAWAY_CHARS = 220;
-const MAX_CANDIDATE_SUPPORTING_TEXT_CHARS = 140;
+const MAX_CANDIDATE_TITLE_CHARS = 240;
+const MAX_CANDIDATE_TAKEAWAY_CHARS = 800;
+const MAX_CANDIDATE_SUPPORTING_TEXT_CHARS = 600;
+const MAX_EDITOR_TITLE_CHARS = 240;
+const MAX_EDITOR_TAKEAWAY_CHARS = 800;
+const MAX_EDITOR_SUPPORTING_TEXT_CHARS = 600;
 const MAX_EDITOR_EVIDENCE_REF_CHARS = 80;
 const MAX_EDITOR_EVIDENCE_REFS = 4;
 const MAX_EDITOR_SQL_INDEXES = 8;
 const MAX_EDITOR_PRESENTATION_BLOCKS = 2;
 const MAX_EDITOR_PRESENTATION_TEXT_CHARS = 60;
+const MAX_EDITOR_CANDIDATE_SUPPORTING_PREVIEW_CHARS = 220;
 
 export function createPreschoolOverviewAiWorkflow(input: {
   metadataStore: MetadataStore;
@@ -177,7 +200,6 @@ export function createPreschoolOverviewAiWorkflow(input: {
         projectId: identity.projectId,
         scopeId: identity.scopeId,
         resource: "electricity",
-        analysisWindow: "current-overview-28d",
         period: "Custom",
         from: period.from,
         to: period.to,
@@ -192,12 +214,13 @@ export function createPreschoolOverviewAiWorkflow(input: {
   });
 
   return {
-    resolveCurrentIdentity: ({ projectId, scopeId, user }) => resolveCurrentOverviewAiArtifactIdentity({
+    resolveCurrentIdentity: ({ projectId, scopeId, user, pin }) => resolveCurrentOverviewAiArtifactIdentity({
       metadataStore: input.metadataStore,
       dataGateway: input.dataGateway,
       projectId,
       scopeId,
       user,
+      ...(pin ? { pin } : {}),
     }),
     async execute({ identity, user, retry }) {
       requirePreschoolIdentity(identity);
@@ -572,15 +595,20 @@ function buildInvestigatorPrompt(context: WorkflowContext, identity: EnergyIqOve
     "Use verified only for supported observations. Preserve useful hypotheses and exploration ideas, but do not invent causes, equipment state, occupancy, savings, ROI, ownership, commitment, thresholds, or forecasts.",
     "action is the concrete next step; expectedIfAct is the observable benefit if it is taken; ifIgnored is the bounded consequence of inaction. Do not turn either outcome into a forecast.",
     "possibleExplanation is optional and unconfirmed; when present it requires nextCheck. limitation is always required and must state what the pinned Evidence cannot establish.",
-    "Every displayed number or named entity must occur in that candidate's cited bounded Evidence or successful SQL result. Omit presentation for no-visual.",
+    "Every displayed number or named entity must occur in that candidate's cited bounded Evidence or successful SQL result.",
+    "presentation is an optional Evidence-backed visual explanation, never a quota. Use zero blocks when prose is clearer or the visible Section already shows the same relationship. Add one or more blocks only when they materially clarify a comparison, ranking, share, time trend, distribution, heatmap pattern, exact lookup table, or decision callout. Never add a decorative chart.",
+    "Choose the visual form from the relationship in the Evidence: comparison for a small direct contrast; ranking for an ordered shortlist; share for a few parts of a whole; trend for ordered time points; distribution for enough peer observations; heatmap only for a real two-dimensional matrix; table only when exact values matter more than shape. prominence may be primary or supporting; several important blocks are allowed, but omit redundant blocks.",
+    "Presentation shape: {version:\"1\",blocks:[...]}. Quantitative blocks should copy their own exact evidenceRefs and/or evidenceSqlIndexes from this Candidate. Example: {type:\"comparison\",title:\"Daily energy around the change\",unit:\"kWh\",items:[{label:\"Before\",value:1200},{label:\"Changed day\",value:150}],prominence:\"primary\",evidenceSqlIndexes:[7]}. trend uses points; ranking/share/distribution use items; heatmap uses xLabels/yLabels/values; table uses columns/rows. If an otherwise valid block omits its binding, Runtime may inherit the Candidate's accepted Evidence set and still validates every label and value. Do not put HTML, JS, React, markdown charts, or invented values in presentation.",
     "evidenceRefs may contain only exact item.id strings copied verbatim from Bounded Snapshot Evidence. Never use claimRefs, Coverage claim paths, JSON property paths, labels, or queryIds as evidenceRefs. When SQL alone supports a candidate, evidenceRefs may be empty.",
     "A verified Candidate must cite at least one Catalog Evidence item or successful SQL evidence_index. Hypotheses and exploration ideas may remain unbound only when they make no unsupported factual claim and retain their limitation plus a concrete verification step in nextCheck or action.",
     "Any ranking, percentage, ratio, share, difference, or delta stated by a candidate must be explicitly returned by SQL; never calculate or estimate it yourself.",
-    "Call overview_ai_candidates_submit with the final Candidate envelope. Do not emit Candidate JSON as Assistant text. If the tool reports a schema error, correct it once only; there may be at most two submission starts. After a successful submission, stop immediately and do not call SQL or the submission tool again.",
+    "Call overview_ai_candidates_submit with the final Candidate envelope. Do not emit Candidate JSON as Assistant text. If the tool reports field-level schema errors, resubmit the complete candidates[] envelope with every required field preserved; do not send only the corrected fields and do not repeat an unchanged invalid payload. After a successful submission, stop immediately and do not call SQL or the submission tool again.",
     "For evidenceSqlIndexes, copy verbatim the evidence_index returned by each successful run_sql_readonly result. Never infer, count, renumber, or guess an index; if a successful result lacks evidence_index, do not cite it. A zero-row successful result may have an index; an isError result never does.",
+    "If any Candidate fact came from SQL, evidenceSqlIndexes must include every successful query that proves that fact. Example: if Centre H and its per-person value came from a result labelled evidence_index 7, submit evidenceSqlIndexes:[7]. A verified Candidate that uses SQL facts but submits evidenceSqlIndexes:[] is invalid.",
     `Prompt revision: ${identity.investigatorPromptRevision}.`,
-    "Submit 0-3 candidates. Required text limits: title<=160, takeaway<=220, action/expectedIfAct/ifIgnored/limitation<=140. Optional significance/possibleExplanation/nextCheck<=140.",
+    "Submit 0-3 candidates. These are transport limits for evidence-backed working notes, not display-copy targets: title<=240, takeaway<=800, action/expectedIfAct/ifIgnored/limitation<=600. Optional significance/possibleExplanation/nextCheck<=600. The Editor will make accepted content concise and customer-facing.",
     "Submission object shape: candidates[] with id, epistemicLevel, title, takeaway, action, expectedIfAct, ifIgnored, limitation, optional significance/possibleExplanation/nextCheck/presentation, evidenceRefs:string[], and evidenceSqlIndexes:number[]. For Catalog-backed verified findings copy exact item IDs into evidenceRefs; for SQL-backed verified findings copy returned evidence_index values into evidenceSqlIndexes.",
+    "Complete shape example (replace every value with this Run's result): {\"candidates\":[{\"id\":\"investigation-angle\",\"epistemicLevel\":\"verified\",\"title\":\"Plain working title\",\"takeaway\":\"Evidence-backed explanation\",\"action\":\"Concrete next step\",\"expectedIfAct\":\"What the check will clarify\",\"ifIgnored\":\"Bounded consequence\",\"limitation\":\"What this Snapshot cannot establish\",\"evidenceRefs\":[],\"evidenceSqlIndexes\":[1]}]}.",
     "Overview Coverage:", JSON.stringify(context.coverage),
     "Bounded Snapshot Evidence:", JSON.stringify({ identity: context.binding, items: context.evidence }),
     "Project decision signals:", JSON.stringify({ items: context.decisionSignals }),
@@ -591,29 +619,37 @@ function buildEditorPrompt(
   context: WorkflowContext,
   identity: EnergyIqOverviewAiArtifactIdentity,
   candidates: InvestigatorCandidate[],
-  _tools: Array<Omit<ToolEvidence, "evidenceIndex">>,
+  tools: ToolEvidence[],
 ): string {
+  const evidenceById = new Map(context.evidence.map((item) => [item.id, item]));
   const candidateViews = candidates.map((candidate) => ({
     id: candidate.id,
     epistemicLevel: candidate.epistemicLevel,
     title: editorPreview(candidate.title, MAX_CANDIDATE_TITLE_CHARS),
     takeaway: editorPreview(candidate.takeaway, MAX_CANDIDATE_TAKEAWAY_CHARS),
-    action: editorPreview(candidate.action, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS),
-    expectedIfAct: editorPreview(candidate.expectedIfAct, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS),
-    ifIgnored: editorPreview(candidate.ifIgnored, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS),
-    limitation: editorPreview(candidate.limitation, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS),
+    action: editorPreview(candidate.action, MAX_EDITOR_CANDIDATE_SUPPORTING_PREVIEW_CHARS),
+    expectedIfAct: editorPreview(candidate.expectedIfAct, MAX_EDITOR_CANDIDATE_SUPPORTING_PREVIEW_CHARS),
+    ifIgnored: editorPreview(candidate.ifIgnored, MAX_EDITOR_CANDIDATE_SUPPORTING_PREVIEW_CHARS),
+    limitation: editorPreview(candidate.limitation, MAX_EDITOR_CANDIDATE_SUPPORTING_PREVIEW_CHARS),
     ...(candidate.significance
-      ? { significance: editorPreview(candidate.significance, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS) }
+      ? { significance: editorPreview(candidate.significance, MAX_EDITOR_CANDIDATE_SUPPORTING_PREVIEW_CHARS) }
       : {}),
     ...(candidate.possibleExplanation
-      ? { possibleExplanation: editorPreview(candidate.possibleExplanation, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS) }
+      ? { possibleExplanation: editorPreview(candidate.possibleExplanation, MAX_EDITOR_CANDIDATE_SUPPORTING_PREVIEW_CHARS) }
       : {}),
     ...(candidate.nextCheck
-      ? { nextCheck: editorPreview(candidate.nextCheck, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS) }
+      ? { nextCheck: editorPreview(candidate.nextCheck, MAX_EDITOR_CANDIDATE_SUPPORTING_PREVIEW_CHARS) }
       : {}),
     evidenceRefs: candidate.evidenceRefs.slice(0, MAX_EDITOR_EVIDENCE_REFS)
       .map((reference) => editorPreview(reference, MAX_EDITOR_EVIDENCE_REF_CHARS)),
     evidenceSqlIndexes: candidate.evidenceSqlIndexes.slice(0, MAX_EDITOR_SQL_INDEXES),
+    unsupportedFields: candidateNarrativeEntries(candidate).flatMap(([field, text]) => (
+      unsupportedNarrative(
+        text,
+        candidate.evidenceRefs.flatMap((id) => evidenceById.get(id) ? [evidenceById.get(id)!] : []),
+        tools,
+      ) ? [field] : []
+    )),
     ...(candidate.presentation
       ? {
           presentation: candidate.presentation.blocks.slice(0, MAX_EDITOR_PRESENTATION_BLOCKS)
@@ -623,12 +659,17 @@ function buildEditorPrompt(
   }));
   const prompt = [
     `Pin ${identity.dataSnapshotId}|${identity.projectReleaseId}|${identity.analysisPeriodFrom}–${identity.analysisPeriodTo}.`,
-    "Select useful non-repetition (zero valid; each once). Exact previews; never rewrite Candidate fields or presentation.",
-    "Judge value/depth/honesty/placement/clarity. You cannot query Schema or SQL.",
-    "Similar absolute kWh does not invalidate EUI/per-pax. With provisional area/headcount: verify metadata first; if correct, investigate fixed/base load, schedule, or another supported driver. This is conditional, not mandatory.",
+    "You are the final customer-facing Editor. Select useful non-repetition (zero valid; each once), then rewrite each accepted Candidate into plain English that a non-technical manager can understand.",
+    "Keep exactly one source Candidate identity per Finding. You may shorten, reorganise, or remove unsupported detail, but never add a number, date, Centre, cause, or fact that is absent from the source Candidate.",
+    "unsupportedFields names Candidate fields that the Runtime cannot prove from this Run's Evidence. Rewrite those fields without the unsupported factual detail. Optional fields may be omitted. Required copy fields must remain useful, specific, and concise.",
+    "For every field named in unsupportedFields, remove every numeral, explicit count, quantity, ratio, date, and unsupported comparison from that field. Do not preserve an unsupported value by paraphrasing it. Example: rewrite 'highest of all 30 Centres' as 'stands out across the portfolio'. Keep the insight and action, not the unproved detail.",
+    "Organise each Finding for scanning, not as an essay. Soft targets: title 8-14 words; takeaway one sentence of about 35 words or fewer; significance one short 'why this matters' sentence; action one direct sentence; expectedIfAct, ifIgnored, nextCheck, and limitation one short sentence each. These are writing goals, not Runtime rejection thresholds.",
+    "Use ordinary human language. Say 'smaller Centres use about the same electricity' instead of 'denominator effect', explain EUI as 'energy per square metre', and keep technical method details out of the main copy.",
+    "Judge value/depth/honesty/placement/clarity. Do not repeat the visible dashboard. You cannot query Schema or SQL.",
+    "Similar absolute kWh does not invalidate EUI/per-pax. With provisional area/headcount: verify metadata first; if correct, investigate equipment that keeps drawing similar electricity regardless of site size, operating schedules, or another supported driver. This is conditional, not mandatory.",
     "placementTargets: preschool.{overall-key-findings|benchmark|standby|operating-hours|forecast} or cross-section.",
     `${identity.outputContractRevision}; ${identity.editorPromptRevision}; JSON.`,
-    "JSON only: findings[{sourceCandidateIds:[id],placementTargets:[target],relationship:\"supports|challenges|independent\",signalRefs:[]}], trace[{decision:\"accepted|rejected\",sourceCandidateIds:[id]}].",
+    "JSON only: findings[{sourceCandidateIds:[id],placementTargets:[target],relationship:\"supports|challenges|independent\",signalRefs:[],copy:{title,takeaway,action,expectedIfAct,ifIgnored,limitation,significance?,possibleExplanation?,nextCheck?}}], trace[{decision:\"accepted|rejected\",sourceCandidateIds:[id]}].",
     "Investigator candidates", JSON.stringify(candidateViews),
     "Overview Coverage (compact):", JSON.stringify(compactEditorCoverage(context.coverage)),
   ].join("\n");
@@ -692,7 +733,7 @@ function normalizeStageEvents(
     if (event.type !== "TEXT_MESSAGE_CONTENT" && event.type !== "TEXT_MESSAGE_CHUNK") continue;
     const messageId = stringValue(event.messageId) ?? stringValue(event.message_id) ?? "legacy-assistant-message";
     if (!messages.has(messageId)) messageOrder.push(messageId);
-    messages.set(messageId, `${messages.get(messageId) ?? ""}${stringValue(event.delta) ?? ""}`);
+    messages.set(messageId, `${messages.get(messageId) ?? ""}${textChunkValue(event.delta)}`);
   }
   const orderedAnswers = [...messageOrder].reverse()
     .map((messageId) => messages.get(messageId)?.trim() ?? "")
@@ -724,7 +765,7 @@ function collectStructuredSubmission(
     }
     attempts.set(id, current);
   }
-  if (starts.length === 0 || starts.length > 2
+  if (starts.length === 0
     || new Set(starts.map(({ id }) => id)).size !== starts.length) return null;
   const results = starts.flatMap(({ id, startIndex }) => {
     const attempt = attempts.get(id);
@@ -847,37 +888,32 @@ function materializeCanonicalArtifact(input: {
     if (candidate.epistemicLevel === "verified" && evidence.length === 0 && tools.length === 0) {
       return { status: "rejected" as const, selection, reason: "verified content has no accepted Evidence" };
     }
-    const narrative = [
-      candidate.title,
-      candidate.takeaway,
-      candidate.action,
-      candidate.expectedIfAct,
-      candidate.ifIgnored,
-      candidate.limitation,
-      candidate.significance,
-      candidate.possibleExplanation,
-      candidate.nextCheck,
-    ]
-      .filter((value): value is string => Boolean(value));
-    if (narrative.some((text) => unsupportedNarrative(text, evidence, tools))) {
+    const display = selection.copy ?? candidate;
+    const narrative = candidateNarrativeEntries(display).map(([, text]) => text);
+    const reboundTools = narrative.some((text) => unsupportedNarrative(text, evidence, tools))
+      ? minimalRunSqlEvidence(narrative, evidence, input.tools)
+      : tools;
+    if (!reboundTools) {
       return { status: "rejected" as const, selection, reason: "narrative is unsupported by cited Evidence" };
     }
     const presentation = filterAiFindingPresentationEvidence(candidate.presentation, {
-      evidenceRefs: candidate.evidenceRefs,
-      evidenceSqlIndexes: candidate.evidenceSqlIndexes,
+      evidenceRefs: evidence.map(({ id }) => id),
+      evidenceSqlIndexes: reboundTools.map(({ evidenceIndex }) => evidenceIndex),
     });
-    const safePresentation = presentation && !unsupportedNarrative(presentationNarrative(presentation), evidence, tools)
+    const safePresentation = presentation && presentationNarratives(presentation).every((text) => (
+      !unsupportedNarrative(text, evidence, reboundTools)
+    ))
       ? presentation
       : null;
-    return { status: "accepted" as const, selection, candidate, evidence, tools, presentation: safePresentation };
+    return { status: "accepted" as const, selection, candidate, display, evidence, tools: reboundTools, presentation: safePresentation };
   });
   const accepted = validation.flatMap((result) => result.status === "accepted" ? [result] : []);
   const runtimeRejected = validation.flatMap((result) => result.status === "rejected" ? [result] : []);
   if (input.envelope.findings.length > 0 && accepted.length === 0) {
     throw new Error("OVERVIEW_AI_RUNTIME_VALIDATION_REJECTED_ALL");
   }
-  const findings = accepted.map(({ selection, candidate, evidence, tools, presentation }, index) => {
-    const interpretation = candidate.significance;
+  const findings = accepted.map(({ selection, candidate, display, evidence, tools, presentation }, index) => {
+    const interpretation = display.significance;
     return {
       id: `preschool-ai-finding-${index + 1}`,
       binding: input.context.binding,
@@ -885,15 +921,15 @@ function materializeCanonicalArtifact(input: {
       epistemicLevel: candidate.epistemicLevel,
       relationship: selection.relationship,
       signalRefs: selection.signalRefs,
-      title: candidate.title,
-      takeaway: candidate.takeaway,
+      title: display.title,
+      takeaway: display.takeaway,
       ...(interpretation ? { interpretation } : {}),
-      action: candidate.action,
-      expectedIfAct: candidate.expectedIfAct,
-      ifIgnored: candidate.ifIgnored,
-      ...(candidate.nextCheck ? { verification: candidate.nextCheck } : {}),
-      uncertainty: candidate.limitation,
-      ...(candidate.possibleExplanation ? { possibleExplanation: candidate.possibleExplanation } : {}),
+      action: display.action,
+      expectedIfAct: display.expectedIfAct,
+      ifIgnored: display.ifIgnored,
+      ...(display.nextCheck ? { verification: display.nextCheck } : {}),
+      uncertainty: display.limitation,
+      ...(display.possibleExplanation ? { possibleExplanation: display.possibleExplanation } : {}),
       ...(presentation ? { presentation } : {}),
       evidence: {
         snapshotId: input.identity.dataSnapshotId,
@@ -980,7 +1016,7 @@ function parseInvestigatorCandidates(answer: string): InvestigatorCandidate[] | 
       || significance === null || possibleExplanation === null || nextCheck === null
       || possibleExplanation && !nextCheck || evidenceSqlIndexes === null
       || epistemicLevel === "verified" && evidenceRefs.length === 0 && evidenceSqlIndexes.length === 0) return [];
-    const presentation = parseAiFindingPresentation(value.presentation);
+    const presentation = parseCandidatePresentation(value.presentation, evidenceRefs, evidenceSqlIndexes);
     return [{
       id, epistemicLevel, title, takeaway, action, expectedIfAct, ifIgnored, limitation,
       ...(significance ? { significance } : {}),
@@ -995,6 +1031,26 @@ function parseInvestigatorCandidates(answer: string): InvestigatorCandidate[] | 
     && new Set(candidates.map(({ id }) => id)).size === candidates.length ? candidates : null;
 }
 
+function parseCandidatePresentation(
+  value: unknown,
+  evidenceRefs: string[],
+  evidenceSqlIndexes: number[],
+): AiFindingPresentation | null {
+  if (!isRecord(value) || !Array.isArray(value.blocks)) return parseAiFindingPresentation(value);
+  const blocks = value.blocks.map((block) => {
+    if (!isRecord(block)) return block;
+    const hasOwnBinding = Array.isArray(block.evidenceRefs) && block.evidenceRefs.length > 0
+      || Array.isArray(block.evidenceSqlIndexes) && block.evidenceSqlIndexes.length > 0;
+    if (hasOwnBinding) return block;
+    return {
+      ...block,
+      ...(evidenceRefs.length > 0 ? { evidenceRefs } : {}),
+      ...(evidenceSqlIndexes.length > 0 ? { evidenceSqlIndexes } : {}),
+    };
+  });
+  return parseAiFindingPresentation({ ...value, blocks });
+}
+
 function parseEditorEnvelope(answer: string, candidateIds: ReadonlySet<string>): { findings: EditorSelection[]; trace: TraceDecision[] } | null {
   const envelope = findEnvelope(answer, "findings");
   if (!envelope || !Array.isArray(envelope.findings)) return null;
@@ -1005,11 +1061,13 @@ function parseEditorEnvelope(answer: string, candidateIds: ReadonlySet<string>):
     // Relationship is presentation metadata, not a factual claim. A blank model value is
     // safely equivalent to independent; unknown non-blank values remain invalid.
     const relationship = value.relationship === "" ? "independent" : relation(value.relationship);
+    const copy = value.copy === undefined ? undefined : parseEditorCopy(value.copy);
     if (sourceCandidateIds.length !== 1 || !candidateIds.has(sourceCandidateIds[0]!)
-      || !placementTargets?.length || !relationship) return [];
+      || !placementTargets?.length || !relationship || value.copy !== undefined && !copy) return [];
     return [{
       sourceCandidateIds, placementTargets, relationship,
       signalRefs: strings(value.signalRefs),
+      ...(copy ? { copy } : {}),
     }];
   });
   if (findings.length !== envelope.findings.length
@@ -1032,6 +1090,61 @@ function parseEditorEnvelope(answer: string, candidateIds: ReadonlySet<string>):
     || decision === "rejected" && selectedIds.has(sourceCandidateIds[0]!)
   ))) return null;
   return { findings, trace };
+}
+
+function parseEditorCopy(value: unknown): EditorCopy | null {
+  if (!isRecord(value)) return null;
+  const title = cleanText(value.title, MAX_EDITOR_TITLE_CHARS);
+  const takeaway = cleanText(value.takeaway, MAX_EDITOR_TAKEAWAY_CHARS);
+  const action = cleanText(value.action, MAX_EDITOR_SUPPORTING_TEXT_CHARS);
+  const expectedIfAct = cleanText(value.expectedIfAct, MAX_EDITOR_SUPPORTING_TEXT_CHARS);
+  const ifIgnored = cleanText(value.ifIgnored, MAX_EDITOR_SUPPORTING_TEXT_CHARS);
+  const limitation = cleanText(value.limitation, MAX_EDITOR_SUPPORTING_TEXT_CHARS);
+  const significance = optionalBoundedText(value.significance, MAX_EDITOR_SUPPORTING_TEXT_CHARS);
+  const possibleExplanation = optionalBoundedText(value.possibleExplanation, MAX_EDITOR_SUPPORTING_TEXT_CHARS);
+  const nextCheck = optionalBoundedText(value.nextCheck, MAX_EDITOR_SUPPORTING_TEXT_CHARS);
+  if (!title || !takeaway || !action || !expectedIfAct || !ifIgnored || !limitation
+    || significance === null || possibleExplanation === null || nextCheck === null
+    || possibleExplanation && !nextCheck) return null;
+  return {
+    title, takeaway, action, expectedIfAct, ifIgnored, limitation,
+    ...(significance ? { significance } : {}),
+    ...(possibleExplanation ? { possibleExplanation } : {}),
+    ...(nextCheck ? { nextCheck } : {}),
+  };
+}
+
+function candidateNarrativeEntries(candidate: EditorCopy | InvestigatorCandidate): Array<[keyof EditorCopy, string]> {
+  const entries: Array<[keyof EditorCopy, string | undefined]> = [
+    ["title", candidate.title],
+    ["takeaway", candidate.takeaway],
+    ["action", candidate.action],
+    ["expectedIfAct", candidate.expectedIfAct],
+    ["ifIgnored", candidate.ifIgnored],
+    ["limitation", candidate.limitation],
+    ["significance", candidate.significance],
+    ["possibleExplanation", candidate.possibleExplanation],
+    ["nextCheck", candidate.nextCheck],
+  ];
+  return entries.filter((entry): entry is [keyof EditorCopy, string] => Boolean(entry[1]));
+}
+
+function minimalRunSqlEvidence(
+  narrative: string[],
+  evidence: EvidenceItem[],
+  runTools: ToolEvidence[],
+): ToolEvidence[] | null {
+  const supportsAll = (tools: ToolEvidence[]) => narrative.every((text) => (
+    !unsupportedNarrative(text, evidence, tools)
+  ));
+  if (!supportsAll(runTools)) return null;
+  const selected = [...runTools];
+  for (let index = 0; index < selected.length;) {
+    const trial = selected.filter((_, candidateIndex) => candidateIndex !== index);
+    if (supportsAll(trial)) selected.splice(index, 1);
+    else index += 1;
+  }
+  return selected;
 }
 
 function unsupportedNarrative(text: string, evidence: EvidenceItem[], tools: ToolEvidence[]): boolean {
@@ -1063,8 +1176,41 @@ function narrativeDateTimesSupported(text: string, evidence: EvidenceItem[], too
   return claims.every((claim) => citedSource.includes(claim));
 }
 
-function presentationNarrative(presentation: AiFindingPresentation): string {
-  return JSON.stringify(presentation.blocks.map(({ evidenceRefs: _, evidenceSqlIndexes: __, ...block }) => block));
+function presentationNarratives(presentation: AiFindingPresentation): string[] {
+  return presentation.blocks.flatMap((block) => {
+    const title = "title" in block && block.title ? [block.title] : [];
+    if (block.type === "metric") {
+      return [...title, `${block.label} ${block.value}${block.unit ? ` ${block.unit}` : ""}`, ...(block.context ? [block.context] : [])];
+    }
+    if (block.type === "comparison" || block.type === "ranking" || block.type === "share" || block.type === "distribution") {
+      return [
+        ...title,
+        ...block.items.map(({ label, value }) => `${label} ${value}${block.unit ? ` ${block.unit}` : ""}`),
+      ];
+    }
+    if (block.type === "trend") {
+      return [
+        ...title,
+        ...block.points.map(({ label, value }) => `${label} ${value}${block.unit ? ` ${block.unit}` : ""}`),
+      ];
+    }
+    if (block.type === "heatmap") {
+      return [
+        ...title,
+        ...block.values.flatMap((row, rowIndex) => row.map((value, columnIndex) => (
+          `${block.yLabels[rowIndex]} ${block.xLabels[columnIndex]} ${value}${block.unit ? ` ${block.unit}` : ""}`
+        ))),
+      ];
+    }
+    if (block.type === "table") {
+      return [
+        ...title,
+        ...block.rows.flatMap((row) => row.map((value, columnIndex) => `${block.columns[columnIndex]} ${value}`)),
+      ];
+    }
+    if (block.type === "callout") return [block.text];
+    return [];
+  });
 }
 
 function parseSqlResult(value: unknown): { columns: string[]; rows: unknown[]; rowCount: number | null; auditLogId: string | null; elapsedMs: number | null; sql: string | null; evidenceIndex: number | null } | null {
@@ -1181,7 +1327,14 @@ function collectStrings(value: unknown): string[] {
 
 function placements(value: unknown): PlacementTarget[] | null {
   if (!Array.isArray(value)) return null;
-  const unique = [...new Set(value)];
+  const aliases: Readonly<Record<string, PlacementTarget>> = {
+    "overall-key-findings": "preschool.overall-key-findings",
+    benchmark: "preschool.benchmark",
+    standby: "preschool.standby",
+    "operating-hours": "preschool.operating-hours",
+    forecast: "preschool.forecast",
+  };
+  const unique = [...new Set(value.map((item) => typeof item === "string" && aliases[item] ? aliases[item] : item))];
   return unique.every((item) => item === "preschool.overall-key-findings" || item === "preschool.benchmark"
     || item === "preschool.standby" || item === "preschool.operating-hours"
     || item === "preschool.forecast" || item === "cross-section") ? unique as PlacementTarget[] : null;
@@ -1254,6 +1407,10 @@ function parseRecord(value: string): Record<string, unknown> | null {
 
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function textChunkValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

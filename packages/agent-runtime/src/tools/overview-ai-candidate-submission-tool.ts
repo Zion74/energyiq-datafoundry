@@ -6,15 +6,17 @@ export const OVERVIEW_AI_CANDIDATE_SUBMISSION_TOOL_NAME = "overview_ai_candidate
 const candidateSchema = z.object({
   id: z.string().trim().min(1).max(120).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u),
   epistemicLevel: z.enum(["verified", "hypothesis", "exploration-idea"]),
-  title: z.string().trim().min(1).max(160),
-  takeaway: z.string().trim().min(1).max(220),
-  action: z.string().trim().min(1).max(140),
-  expectedIfAct: z.string().trim().min(1).max(140),
-  ifIgnored: z.string().trim().min(1).max(140),
-  limitation: z.string().trim().min(1).max(140),
-  significance: z.string().trim().min(1).max(140).optional(),
-  possibleExplanation: z.string().trim().min(1).max(140).optional(),
-  nextCheck: z.string().trim().min(1).max(140).optional(),
+  // These are transport-safety bounds for the Investigator's evidence-backed
+  // working notes. Customer-facing brevity belongs to the downstream Editor.
+  title: z.string().trim().min(1).max(240),
+  takeaway: z.string().trim().min(1).max(800),
+  action: z.string().trim().min(1).max(600),
+  expectedIfAct: z.string().trim().min(1).max(600),
+  ifIgnored: z.string().trim().min(1).max(600),
+  limitation: z.string().trim().min(1).max(600),
+  significance: z.string().trim().min(1).max(600).optional(),
+  possibleExplanation: z.string().trim().min(1).max(600).optional(),
+  nextCheck: z.string().trim().min(1).max(600).optional(),
   evidenceRefs: z.array(z.string().trim().min(1).max(240)).max(24),
   evidenceSqlIndexes: z.array(z.number().int().positive()).max(24),
   // Presentation stays optional and is parsed by the existing versioned
@@ -28,6 +30,13 @@ const candidateSchema = z.object({
       code: "custom",
       path: ["evidenceRefs"],
       message: "A verified Candidate must cite Catalog or SQL Evidence.",
+    });
+  }
+  if (candidate.possibleExplanation && !candidate.nextCheck) {
+    context.addIssue({
+      code: "custom",
+      path: ["nextCheck"],
+      message: "A possibleExplanation requires a concrete nextCheck.",
     });
   }
 });
@@ -44,11 +53,12 @@ export const createOverviewAiCandidateSubmissionTool = () => {
   let accepted = false;
   return createTool({
     id: OVERVIEW_AI_CANDIDATE_SUBMISSION_TOOL_NAME,
-    description: "Submit zero to three concise Findings in the final Overview Investigator Candidate envelope. Each "
+    description: "Submit zero to three evidence-backed Candidate analyses in the final Overview Investigator envelope. Each "
       + "Candidate requires action, expectedIfAct, ifIgnored, and limitation in addition to its title, takeaway, "
       + "epistemic level, and bounded Evidence references. A verified Candidate must cite Catalog or SQL Evidence. "
-      + "Call once after investigation; do not emit Candidate JSON "
-      + "as Assistant text.",
+      + "Call after investigation; when the tool returns field-level schema errors, resubmit the complete envelope with "
+      + "all required fields preserved. The downstream Editor, not this tool, owns customer-facing brevity. After a "
+      + "successful submission, stop and do not emit Candidate JSON as Assistant text.",
     inputSchema: overviewAiCandidateSubmissionSchema,
     execute: async (input) => {
       const parsed = overviewAiCandidateSubmissionSchema.safeParse(input);

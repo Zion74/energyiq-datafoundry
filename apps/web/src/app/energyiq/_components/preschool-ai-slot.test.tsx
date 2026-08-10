@@ -294,8 +294,8 @@ function acceptedResult(): PreschoolAiAcceptedArtifact {
       revision: "preschool-two-stage-v2",
       methodSkill: { id: "energy-insight-investigation", revision: "1.0.0" },
       stages: {
-        investigator: { runId: "accepted-investigator-run", promptRevision: "preschool-investigator-v8" },
-        editor: { runId: "accepted-editor-run", promptRevision: "preschool-insight-editor-v3" },
+        investigator: { runId: "accepted-investigator-run", promptRevision: "preschool-investigator-v15" },
+        editor: { runId: "accepted-editor-run", promptRevision: "preschool-insight-editor-v7" },
       },
     },
     findings: [{

@@ -57,8 +57,8 @@ describe("Preschool AI Run", () => {
     ]) expect(input.identityKey).toContain(pin);
     expect(input.identityKey).toContain("preschool-ai-output-contract@v13");
     expect(input.identityKey).toContain("preschool-ai-workflow@preschool-two-stage-v2");
-    expect(input.identityKey).toContain("investigator-prompt@preschool-investigator-v8");
-    expect(input.identityKey).toContain("editor-prompt@preschool-insight-editor-v3");
+    expect(input.identityKey).toContain("investigator-prompt@preschool-investigator-v15");
+    expect(input.identityKey).toContain("editor-prompt@preschool-insight-editor-v7");
     expect(input.identityKey).toContain("method-skill@energy-insight-investigation@1.0.0");
   });
 
@@ -1357,7 +1357,12 @@ describe("Preschool AI Run", () => {
     await expect(first).resolves.toMatchObject({ status: "available" });
     expect(readSpy).toHaveBeenCalledTimes(1);
     expect(ensureSpy).toHaveBeenCalledTimes(1);
-    expect(ensureSpy).toHaveBeenCalledWith(input.projectId, input.scopeId);
+    expect(ensureSpy).toHaveBeenCalledWith(input.projectId, input.scopeId, {
+      from: input.analysisFrom,
+      to: input.analysisTo,
+      dataSnapshotId: input.snapshotId,
+      projectReleaseId: input.projectReleaseId,
+    });
     expect(progress).toEqual(["inspecting", "validating", "drafting"]);
   });
 
@@ -1464,7 +1469,12 @@ describe("Preschool AI Run", () => {
       reason: "AI analysis is temporarily unavailable. The verified Overview remains available.",
       retryable: false,
     });
-    expect(configApi.retryEnergyOverviewAiArtifact).toHaveBeenCalledWith(input.projectId, input.scopeId);
+    expect(configApi.retryEnergyOverviewAiArtifact).toHaveBeenCalledWith(input.projectId, input.scopeId, {
+      from: input.analysisFrom,
+      to: input.analysisTo,
+      dataSnapshotId: input.snapshotId,
+      projectReleaseId: input.projectReleaseId,
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

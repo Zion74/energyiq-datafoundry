@@ -3,13 +3,21 @@ import {
   type PreschoolAiArtifactBinding,
   type PreschoolAiEpistemicLevel,
 } from "./preschool-ai-artifact";
+import type { AiFindingPresentation } from "./ai-finding-presentation";
 
 export type PreschoolSectionInterpretationView =
   | ({
       status: "available";
       headline: string;
-      summary: string;
-      actions?: string[];
+      takeaway: string;
+      whyItMatters?: string;
+      action: string;
+      expectedIfAct: string;
+      ifIgnored: string;
+      possibleExplanation?: string;
+      verification?: string;
+      limitation: string;
+      presentation?: AiFindingPresentation;
       epistemicLevel?: PreschoolAiEpistemicLevel;
     } & PreschoolSectionInterpretationIdentity)
   | ({ status: "pending" } & PreschoolSectionInterpretationIdentity)
@@ -53,17 +61,19 @@ export function adaptPreschoolAiArtifactToSectionInterpretation(input: {
       detail: "The AI run did not identify a distinct insight for this section in the current Snapshot.",
     };
   }
-  const summary = [finding.takeaway, finding.interpretation]
-    .filter((value): value is string => Boolean(value?.trim()))
-    .join(" ");
-  const actions = [finding.action, finding.verification]
-    .filter((value): value is string => Boolean(value?.trim()));
   return {
     status: "available",
     ...identity,
     headline: finding.title,
-    summary,
-    ...(actions.length > 0 ? { actions } : {}),
+    takeaway: finding.takeaway,
+    ...(finding.interpretation ? { whyItMatters: finding.interpretation } : {}),
+    action: finding.action,
+    expectedIfAct: finding.expectedIfAct,
+    ifIgnored: finding.ifIgnored,
+    ...(finding.possibleExplanation ? { possibleExplanation: finding.possibleExplanation } : {}),
+    ...(finding.verification ? { verification: finding.verification } : {}),
+    limitation: finding.uncertainty,
+    ...(finding.presentation ? { presentation: finding.presentation } : {}),
     epistemicLevel: finding.epistemicLevel,
   };
 }

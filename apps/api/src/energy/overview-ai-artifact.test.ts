@@ -37,10 +37,10 @@ describe("createOverviewAiArtifactIdentity", () => {
       modelProfileId: "deepseek-v4-flash",
       modelProfileRevision: 8,
       outputContractRevision: "v13",
-      validatorRevision: "preschool-ai-two-stage-fact-boundary-v4",
+      validatorRevision: "preschool-ai-two-stage-fact-boundary-v7",
       workflowRevision: "preschool-two-stage-v2",
-      investigatorPromptRevision: "preschool-investigator-v8",
-      editorPromptRevision: "preschool-insight-editor-v3",
+      investigatorPromptRevision: "preschool-investigator-v15",
+      editorPromptRevision: "preschool-insight-editor-v7",
       methodSkillId: "energy-insight-investigation",
       methodSkillRevision: "1.0.0",
     });

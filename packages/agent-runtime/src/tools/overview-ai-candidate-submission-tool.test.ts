@@ -30,8 +30,9 @@ describe("Overview AI Candidate submission tool", () => {
     const result = await tool.execute?.(submission, {} as never);
 
     expect(OVERVIEW_AI_CANDIDATE_SUBMISSION_TOOL_NAME).toBe("overview_ai_candidates_submit");
-    expect(tool.description).toContain("zero to three concise Findings");
+    expect(tool.description).toContain("zero to three evidence-backed Candidate analyses");
     expect(tool.description).toContain("action, expectedIfAct, ifIgnored, and limitation");
+    expect(tool.description).toContain("downstream Editor");
     expect(result).toEqual({
       ok: true,
       resultType: "overview-ai-candidate-submission",
@@ -77,17 +78,26 @@ describe("Overview AI Candidate submission tool", () => {
     }
   });
 
-  it("enforces the concise Finding text limits", () => {
+  it("requires a verification step when a Candidate proposes a possible explanation", () => {
+    expect(overviewAiCandidateSubmissionSchema.safeParse({
+      candidates: [{ ...submission.candidates[0]!, nextCheck: undefined }],
+    }).success).toBe(false);
+    expect(overviewAiCandidateSubmissionSchema.safeParse({
+      candidates: [{ ...submission.candidates[0]!, possibleExplanation: undefined, nextCheck: undefined }],
+    }).success).toBe(true);
+  });
+
+  it("keeps the Investigator transport bounded without imposing display-copy limits", () => {
     const textLimits = {
-      title: 160,
-      takeaway: 220,
-      action: 140,
-      expectedIfAct: 140,
-      ifIgnored: 140,
-      limitation: 140,
-      significance: 140,
-      possibleExplanation: 140,
-      nextCheck: 140,
+      title: 240,
+      takeaway: 800,
+      action: 600,
+      expectedIfAct: 600,
+      ifIgnored: 600,
+      limitation: 600,
+      significance: 600,
+      possibleExplanation: 600,
+      nextCheck: 600,
     } as const;
 
     for (const [field, max] of Object.entries(textLimits)) {
@@ -176,7 +186,7 @@ describe("Overview AI Candidate submission tool", () => {
     }, {} as never);
     const oversizedTextTool = createOverviewAiCandidateSubmissionTool();
     const oversizedText = await oversizedTextTool.execute?.({
-      candidates: [{ ...submission.candidates[0]!, takeaway: "x".repeat(221) }],
+      candidates: [{ ...submission.candidates[0]!, takeaway: "x".repeat(801) }],
     }, {} as never);
 
     expect(invalidIdentity).toMatchObject({ error: true });

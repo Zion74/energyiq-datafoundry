@@ -35,8 +35,23 @@ describe("Preschool section interpretation adapter", () => {
       projectReleaseId: "release-may",
       period: { start: "2026-05-01T00:00:00.000Z", endExclusive: "2026-06-01T00:00:00.000Z" },
       headline: "Three Centres remain inefficient after normalisation",
-      summary: "G, M and J need review first. The same Centres stay high under both normalisations.",
-      actions: ["Ask the three Centre managers to check operating schedules.", "Compare their next complete month."],
+      takeaway: "G, M and J need review first.",
+      whyItMatters: "The same Centres stay high under both normalisations.",
+      action: "Ask the three Centre managers to check operating schedules.",
+      expectedIfAct: "The review will show whether schedules explain the excess use.",
+      ifIgnored: "The same avoidable use may continue next month.",
+      possibleExplanation: "Equipment may be running longer than the published schedule.",
+      verification: "Compare their next complete month.",
+      limitation: "The Snapshot does not show equipment state.",
+      presentation: {
+        version: "1",
+        blocks: [{
+          type: "ranking",
+          title: "Centres to review first",
+          items: [{ label: "Centre G", value: 19.39 }],
+          evidenceRefs: ["benchmark:priority"],
+        }],
+      },
       epistemicLevel: "verified",
     });
   });
@@ -95,7 +110,20 @@ function artifact(): PreschoolAiAcceptedArtifact {
       takeaway: "G, M and J need review first.",
       interpretation: "The same Centres stay high under both normalisations.",
       action: "Ask the three Centre managers to check operating schedules.",
+      expectedIfAct: "The review will show whether schedules explain the excess use.",
+      ifIgnored: "The same avoidable use may continue next month.",
+      possibleExplanation: "Equipment may be running longer than the published schedule.",
       verification: "Compare their next complete month.",
+      uncertainty: "The Snapshot does not show equipment state.",
+      presentation: {
+        version: "1",
+        blocks: [{
+          type: "ranking",
+          title: "Centres to review first",
+          items: [{ label: "Centre G", value: 19.39 }],
+          evidenceRefs: ["benchmark:priority"],
+        }],
+      },
       evidence: {
         snapshotId: binding.dataSnapshotId,
         period: binding.analysisPeriod,

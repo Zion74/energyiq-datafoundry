@@ -224,7 +224,11 @@ describe("PreschoolOverviewRenderer reading flow", () => {
           projectReleaseId: snapshot.projectRelease.id,
           period: { start: "2026-05-10T16:00:00.000Z", endExclusive: "2026-06-07T16:00:00.000Z" },
           headline: "STALE_BENCHMARK_HEADLINE",
-          summary: "STALE_BENCHMARK_SUMMARY",
+          takeaway: "STALE_BENCHMARK_SUMMARY",
+          action: "STALE_BENCHMARK_ACTION",
+          expectedIfAct: "STALE_BENCHMARK_EXPECTED",
+          ifIgnored: "STALE_BENCHMARK_IGNORED",
+          limitation: "STALE_BENCHMARK_LIMITATION",
         }}
       />,
     );
@@ -255,8 +259,22 @@ describe("PreschoolOverviewRenderer reading flow", () => {
           projectReleaseId: snapshot.projectRelease.id,
           period: snapshot.context.primaryPeriod,
           headline: "MATCHING_BENCHMARK_HEADLINE",
-          summary: "MATCHING_BENCHMARK_SUMMARY",
-          actions: ["MATCHING_BENCHMARK_ACTION"],
+          takeaway: "MATCHING_BENCHMARK_SUMMARY",
+          whyItMatters: "MATCHING_BENCHMARK_WHY",
+          action: "MATCHING_BENCHMARK_ACTION",
+          expectedIfAct: "MATCHING_BENCHMARK_EXPECTED",
+          ifIgnored: "MATCHING_BENCHMARK_IGNORED",
+          verification: "MATCHING_BENCHMARK_VERIFY",
+          limitation: "MATCHING_BENCHMARK_LIMITATION",
+          presentation: {
+            version: "1",
+            blocks: [{
+              type: "comparison",
+              title: "MATCHING_BENCHMARK_CHART",
+              items: [{ label: "Centre G", value: 19.39 }, { label: "Peer P75", value: 15.13 }],
+              evidenceRefs: ["benchmark:priority"],
+            }],
+          },
         }}
       />,
     );
@@ -264,6 +282,11 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(matchingMarkup).toContain("MATCHING_BENCHMARK_HEADLINE");
     expect(matchingMarkup).toContain("MATCHING_BENCHMARK_SUMMARY");
     expect(matchingMarkup).toContain("MATCHING_BENCHMARK_ACTION");
+    expect(matchingMarkup).toContain("MATCHING_BENCHMARK_WHY");
+    expect(matchingMarkup).toContain("MATCHING_BENCHMARK_EXPECTED");
+    expect(matchingMarkup).toContain("MATCHING_BENCHMARK_IGNORED");
+    expect(matchingMarkup).toContain("MATCHING_BENCHMARK_CHART");
+    expect(matchingMarkup).toContain('data-presentation-type="comparison"');
   });
 
   it("renders the Standby decision path from five KPIs to closed-state Appliance evidence, Centre events and review priority", () => {
@@ -349,7 +372,11 @@ describe("PreschoolOverviewRenderer reading flow", () => {
           projectReleaseId: snapshot.projectRelease.id,
           period: { start: "2026-05-10T16:00:00.000Z", endExclusive: "2026-06-07T16:00:00.000Z" },
           headline: "STALE_STANDBY_HEADLINE",
-          summary: "STALE_STANDBY_SUMMARY",
+          takeaway: "STALE_STANDBY_SUMMARY",
+          action: "STALE_STANDBY_ACTION",
+          expectedIfAct: "STALE_STANDBY_EXPECTED",
+          ifIgnored: "STALE_STANDBY_IGNORED",
+          limitation: "STALE_STANDBY_LIMITATION",
         }}
       />,
     );
@@ -379,8 +406,11 @@ describe("PreschoolOverviewRenderer reading flow", () => {
           projectReleaseId: snapshot.projectRelease.id,
           period: snapshot.context.primaryPeriod,
           headline: "MATCHING_STANDBY_HEADLINE",
-          summary: "MATCHING_STANDBY_SUMMARY",
-          actions: ["MATCHING_STANDBY_ACTION"],
+          takeaway: "MATCHING_STANDBY_SUMMARY",
+          action: "MATCHING_STANDBY_ACTION",
+          expectedIfAct: "MATCHING_STANDBY_EXPECTED",
+          ifIgnored: "MATCHING_STANDBY_IGNORED",
+          limitation: "MATCHING_STANDBY_LIMITATION",
         }}
       />,
     );
@@ -474,7 +504,11 @@ describe("PreschoolOverviewRenderer reading flow", () => {
           projectReleaseId: snapshot.projectRelease.id,
           period: { start: "2026-05-10T16:00:00.000Z", endExclusive: "2026-06-07T16:00:00.000Z" },
           headline: "STALE_OPERATING_HEADLINE",
-          summary: "STALE_OPERATING_SUMMARY",
+          takeaway: "STALE_OPERATING_SUMMARY",
+          action: "STALE_OPERATING_ACTION",
+          expectedIfAct: "STALE_OPERATING_EXPECTED",
+          ifIgnored: "STALE_OPERATING_IGNORED",
+          limitation: "STALE_OPERATING_LIMITATION",
         }}
       />,
     );
@@ -504,8 +538,11 @@ describe("PreschoolOverviewRenderer reading flow", () => {
           projectReleaseId: snapshot.projectRelease.id,
           period: snapshot.context.primaryPeriod,
           headline: "MATCHING_OPERATING_HEADLINE",
-          summary: "MATCHING_OPERATING_SUMMARY",
-          actions: ["MATCHING_OPERATING_ACTION"],
+          takeaway: "MATCHING_OPERATING_SUMMARY",
+          action: "MATCHING_OPERATING_ACTION",
+          expectedIfAct: "MATCHING_OPERATING_EXPECTED",
+          ifIgnored: "MATCHING_OPERATING_IGNORED",
+          limitation: "MATCHING_OPERATING_LIMITATION",
         }}
       />,
     );

@@ -162,8 +162,8 @@ describe("saved analysis decision-quality boundary", () => {
               revision: "preschool-two-stage-v2",
               methodSkill: { id: "energy-insight-investigation", revision: "1.0.0" },
               stages: {
-                investigator: { runId: "saved-analysis-ai-investigator-run-v1", promptRevision: "preschool-investigator-v8" },
-                editor: { runId: "saved-analysis-ai-editor-run-v1", promptRevision: "preschool-insight-editor-v3" },
+                investigator: { runId: "saved-analysis-ai-investigator-run-v1", promptRevision: "preschool-investigator-v11" },
+                editor: { runId: "saved-analysis-ai-editor-run-v1", promptRevision: "preschool-insight-editor-v5" },
               },
             },
             findings: [{
@@ -443,8 +443,8 @@ describe("saved analysis decision-quality boundary", () => {
             revision: "preschool-two-stage-v2",
             methodSkill: { id: "energy-insight-investigation", revision: "1.0.0" },
             stages: {
-              investigator: { runId: "saved-analysis-ai-investigator-run-v2", promptRevision: "preschool-investigator-v8" },
-              editor: { runId: "saved-analysis-ai-editor-run-v2", promptRevision: "preschool-insight-editor-v3" },
+              investigator: { runId: "saved-analysis-ai-investigator-run-v2", promptRevision: "preschool-investigator-v11" },
+              editor: { runId: "saved-analysis-ai-editor-run-v2", promptRevision: "preschool-insight-editor-v5" },
             },
           },
           findings: [{

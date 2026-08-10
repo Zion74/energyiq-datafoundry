@@ -3,8 +3,8 @@ import type { PreschoolDiscoveryEvidenceItem } from "./preschool-ai-discovery-ev
 
 export const PRESCHOOL_AI_ACCEPTED_CONTRACT_REVISION = "v13" as const;
 export const PRESCHOOL_AI_WORKFLOW_REVISION = "preschool-two-stage-v2" as const;
-export const PRESCHOOL_AI_INVESTIGATOR_PROMPT_REVISION = "preschool-investigator-v8" as const;
-export const PRESCHOOL_AI_EDITOR_PROMPT_REVISION = "preschool-insight-editor-v3" as const;
+export const PRESCHOOL_AI_INVESTIGATOR_PROMPT_REVISION = "preschool-investigator-v15" as const;
+export const PRESCHOOL_AI_EDITOR_PROMPT_REVISION = "preschool-insight-editor-v7" as const;
 export const PRESCHOOL_AI_METHOD_SKILL_ID = "energy-insight-investigation" as const;
 export const PRESCHOOL_AI_METHOD_SKILL_REVISION = "1.0.0" as const;
 

@@ -54,24 +54,38 @@ describe("Preschool Overview AI server workflow", () => {
     expect(investigatorPrompts[0]).toContain("Never infer, count, renumber, or guess an index");
     expect(investigatorPrompts[0]).toContain("if a successful result lacks evidence_index, do not cite it");
     expect(investigatorPrompts[0]).toContain("Before using SQL, choose one decision-changing question");
-    expect(investigatorPrompts[0]).toContain("there may be at most two submission starts");
+    expect(investigatorPrompts[0]).toContain("resubmit the complete candidates[] envelope");
+    expect(investigatorPrompts[0]).not.toContain("at most two submission starts");
     expect(investigatorPrompts[0]).toContain("Do not emit Candidate JSON as Assistant text");
     expect(investigatorPrompts[0]).toContain("Do not rerun or reformulate an equivalent SQL query");
     expect(investigatorPrompts[0]).toContain("evidenceRefs may contain only exact item.id strings copied verbatim from Bounded Snapshot Evidence");
     expect(investigatorPrompts[0]).toContain("Never use claimRefs, Coverage claim paths, JSON property paths, labels, or queryIds as evidenceRefs");
     expect(investigatorPrompts[0]).toContain("When SQL alone supports a candidate, evidenceRefs may be empty");
     expect(investigatorPrompts[0]).toContain("A verified Candidate must cite at least one Catalog Evidence item or successful SQL evidence_index");
-    expect(investigatorPrompts[0]).toContain("action/expectedIfAct/ifIgnored/limitation<=140");
+    expect(investigatorPrompts[0]).toContain("action/expectedIfAct/ifIgnored/limitation<=600");
+    expect(investigatorPrompts[0]).toContain("The Editor will make accepted content concise and customer-facing");
+    expect(investigatorPrompts[0]).toContain("Complete shape example");
     expect(investigatorPrompts[0]).toContain("A zero-row successful result may have an index; an isError result never does");
+    expect(investigatorPrompts[0]).toContain("A verified Candidate that uses SQL facts but submits evidenceSqlIndexes:[] is invalid");
+    expect(investigatorPrompts[0]).toContain("if Centre H and its per-person value came from a result labelled evidence_index 7");
     expect(investigatorPrompts[0]).toContain("ranking, percentage, ratio, share, difference, or delta");
     expect(investigatorPrompts[0]).toContain("must be explicitly returned by SQL; never calculate or estimate it yourself");
-    expect(investigatorPrompts[0]).toContain("Prompt revision: preschool-investigator-v8");
+    expect(investigatorPrompts[0]).toContain("Prompt revision: preschool-investigator-v15");
+    expect(investigatorPrompts[0]).toContain("never a quota");
+    expect(investigatorPrompts[0]).toContain("Never add a decorative chart");
+    expect(investigatorPrompts[0]).toContain("Do not put HTML, JS, React");
     expect(editorPrompts[0]).toContain("You cannot query Schema or SQL");
     expect(editorPrompts[0]).toContain("Similar absolute kWh does not invalidate EUI/per-pax");
     expect(editorPrompts[0]).toContain("verify metadata first");
-    expect(editorPrompts[0]).toContain("if correct, investigate fixed/base load, schedule, or another supported driver");
+    expect(editorPrompts[0]).toContain("if correct, investigate equipment that keeps drawing similar electricity regardless of site size");
+    expect(editorPrompts[0]).toContain("instead of 'denominator effect'");
     expect(editorPrompts[0]).toContain("This is conditional, not mandatory");
-    expect(editorPrompts[0]!.length).toBeLessThanOrEqual(6_500);
+    expect(editorPrompts[0]).toContain("final customer-facing Editor");
+    expect(editorPrompts[0]).toContain("unsupportedFields");
+    expect(editorPrompts[0]).toContain("remove every numeral, explicit count, quantity, ratio, date, and unsupported comparison");
+    expect(editorPrompts[0]).toContain("rewrite 'highest of all 30 Centres' as 'stands out across the portfolio'");
+    expect(editorPrompts[0]).toContain("rewrite each accepted Candidate into plain English");
+    expect(editorPrompts[0]!.length).toBeLessThanOrEqual(12_000);
     expect(editorPrompts[0]!.indexOf("Investigator candidates")).toBeLessThan(
       editorPrompts[0]!.indexOf("Overview Coverage (compact):"),
     );
@@ -105,21 +119,21 @@ describe("Preschool Overview AI server workflow", () => {
     harness.close();
   }, 15_000);
 
-  it("keeps three maximum legal Candidates exact and visible inside the 6500-character Editor budget", async () => {
+  it("keeps three maximum legal Candidates visible inside the bounded Editor context", async () => {
     const harness = createHarness();
     let editorPrompt = "";
     const candidates = [1, 2, 3].map((index) => ({
       id: `candidate-${index}`,
       epistemicLevel: "verified",
-      title: String.fromCharCode(64 + index).repeat(160),
-      takeaway: String.fromCharCode(67 + index).repeat(220),
-      action: String.fromCharCode(70 + index).repeat(140),
-      expectedIfAct: String.fromCharCode(73 + index).repeat(140),
-      ifIgnored: String.fromCharCode(76 + index).repeat(140),
-      limitation: String.fromCharCode(79 + index).repeat(140),
-      significance: String.fromCharCode(82 + index).repeat(140),
-      possibleExplanation: String.fromCharCode(85 + index).repeat(140),
-      nextCheck: String.fromCharCode(88 + index).repeat(140),
+      title: String.fromCharCode(64 + index).repeat(240),
+      takeaway: String.fromCharCode(67 + index).repeat(800),
+      action: String.fromCharCode(70 + index).repeat(600),
+      expectedIfAct: String.fromCharCode(73 + index).repeat(600),
+      ifIgnored: String.fromCharCode(76 + index).repeat(600),
+      limitation: String.fromCharCode(79 + index).repeat(600),
+      significance: String.fromCharCode(82 + index).repeat(600),
+      possibleExplanation: String.fromCharCode(85 + index).repeat(600),
+      nextCheck: String.fromCharCode(88 + index).repeat(600),
       evidenceRefs: ["quality:window"],
       evidenceSqlIndexes: [],
       presentation: {
@@ -148,20 +162,20 @@ describe("Preschool Overview AI server workflow", () => {
     harness.close();
 
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
-    expect(editorPrompt.length).toBeLessThanOrEqual(6_500);
+    expect(editorPrompt.length).toBeLessThanOrEqual(12_000);
     expect(editorPrompt).toContain('"id":"candidate-1"');
     expect(editorPrompt).toContain('"id":"candidate-2"');
     expect(editorPrompt).toContain('"id":"candidate-3"');
     for (const candidate of candidates) {
       expect(editorPrompt).toContain(`"title":"${candidate.title}"`);
       expect(editorPrompt).toContain(`"takeaway":"${candidate.takeaway}"`);
-      expect(editorPrompt).toContain(`"action":"${candidate.action}"`);
-      expect(editorPrompt).toContain(`"expectedIfAct":"${candidate.expectedIfAct}"`);
-      expect(editorPrompt).toContain(`"ifIgnored":"${candidate.ifIgnored}"`);
-      expect(editorPrompt).toContain(`"limitation":"${candidate.limitation}"`);
-      expect(editorPrompt).toContain(`"significance":"${candidate.significance}"`);
-      expect(editorPrompt).toContain(`"possibleExplanation":"${candidate.possibleExplanation}"`);
-      expect(editorPrompt).toContain(`"nextCheck":"${candidate.nextCheck}"`);
+      expect(editorPrompt).toContain(`"action":"${candidate.action.slice(0, 219)}…"`);
+      expect(editorPrompt).toContain(`"expectedIfAct":"${candidate.expectedIfAct.slice(0, 219)}…"`);
+      expect(editorPrompt).toContain(`"ifIgnored":"${candidate.ifIgnored.slice(0, 219)}…"`);
+      expect(editorPrompt).toContain(`"limitation":"${candidate.limitation.slice(0, 219)}…"`);
+      expect(editorPrompt).toContain(`"significance":"${candidate.significance.slice(0, 219)}…"`);
+      expect(editorPrompt).toContain(`"possibleExplanation":"${candidate.possibleExplanation.slice(0, 219)}…"`);
+      expect(editorPrompt).toContain(`"nextCheck":"${candidate.nextCheck.slice(0, 219)}…"`);
       expect(editorPrompt).toContain(`"text":"Candidate ${candidate.id.at(-1)} presentation summary"`);
     }
     expect(JSON.parse(artifact.result_json!) as Record<string, unknown>).toMatchObject({
@@ -190,10 +204,10 @@ describe("Preschool Overview AI server workflow", () => {
         candidates: [1, 2, 3, 4].map((index) => ({ ...baseCandidate, id: `candidate-${index}` })),
       },
       {
-        candidates: [{ ...baseCandidate, id: "candidate-1", title: "T".repeat(161) }],
+        candidates: [{ ...baseCandidate, id: "candidate-1", title: "T".repeat(241) }],
       },
       {
-        candidates: [{ ...baseCandidate, id: "candidate-1", action: "A".repeat(141) }],
+        candidates: [{ ...baseCandidate, id: "candidate-1", action: "A".repeat(601) }],
       },
       {
         candidates: [{
@@ -286,6 +300,50 @@ describe("Preschool Overview AI server workflow", () => {
     harness.close();
 
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+  });
+
+  it("preserves whitespace when the Editor JSON arrives in streamed text chunks", async () => {
+    const harness = createHarness();
+    const editorEnvelope = JSON.stringify({
+      findings: [{
+        sourceCandidateIds: ["candidate-1"],
+        placementTargets: ["preschool.benchmark"],
+        relationship: "independent",
+        signalRefs: ["efficiency"],
+        copy: {
+          title: "The dual-normalisation outlier deserves an operating review",
+          takeaway: "The same Centre remains a priority after both normalisations, so size alone is not a sufficient explanation.",
+          action: "Review the pinned Evidence before choosing an operational response.",
+          expectedIfAct: "The next review will resolve the decision-relevant question.",
+          ifIgnored: "The unresolved pattern may continue without an accountable review.",
+          limitation: "The pinned Snapshot does not prove a cause or future outcome.",
+        },
+      }],
+      trace: [{ decision: "accepted", sourceCandidateIds: ["candidate-1"] }],
+    });
+    const chunks = editorEnvelope.split(/(?= )/u);
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? stageEvents(stage, runId, sessionId)
+        : {
+            events: [
+              ...chunks.map((delta) => ({ type: "TEXT_MESSAGE_CHUNK", messageId: "editor-stream", delta })),
+              { type: "RUN_FINISHED" },
+            ],
+            completedRun: { runId, sessionId },
+          },
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    const result = JSON.parse(artifact.result_json!) as { findings: Array<{ title: string; takeaway: string }> };
+    harness.close();
+
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+    expect(result.findings[0]?.title).toBe("The dual-normalisation outlier deserves an operating review");
+    expect(result.findings[0]?.takeaway).toContain("same Centre remains a priority");
   });
 
   it("uses exactly one successful structured Investigator submission and ignores malformed Assistant JSON", async () => {
@@ -441,6 +499,49 @@ describe("Preschool Overview AI server workflow", () => {
     expect(result.findings[0]!.evidence.tools).not.toContainEqual(expect.objectContaining({ toolCallId: "sql-after-submit" }));
   });
 
+  it("rebinds a Candidate to the supporting SQL from the same pre-submission Run", async () => {
+    const harness = createHarness();
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? {
+            events: [
+              ...schemaEvents(),
+              ...sqlEvents("sql-1", 1, "A1", 100),
+              ...sqlEvents("sql-2", 2, "E", 300),
+              ...successfulSubmissionEvents({
+                candidates: [{
+                  id: "candidate-1",
+                  epistemicLevel: "verified",
+                  title: "Centre E recorded 300 kWh",
+                  takeaway: "The scoped query places Centre E at 300 kWh.",
+                  evidenceRefs: [],
+                  // The model remembered the wrong Run-local index. Runtime must
+                  // attach the source that actually proves the displayed claim.
+                  evidenceSqlIndexes: [1],
+                }],
+              }, "submit-1"),
+              { type: "RUN_FINISHED" },
+            ],
+            completedRun: { runId, sessionId },
+          }
+        : stageEvents(stage, runId, sessionId),
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    const result = artifact.result_json
+      ? JSON.parse(artifact.result_json) as { findings: Array<{ evidence: { tools: Array<Record<string, unknown>> } }> }
+      : null;
+    harness.close();
+
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+    expect(result?.findings[0]!.evidence.tools).toMatchObject([
+      { evidenceIndex: 2, toolCallId: "sql-2" },
+    ]);
+  });
+
   it("fails closed when persisted SQL evidence indexes differ from the Runtime indexes shown to the model", async () => {
     const harness = createHarness();
     const workflow = createPreschoolOverviewAiWorkflow({
@@ -535,29 +636,47 @@ describe("Preschool Overview AI server workflow", () => {
     });
   });
 
-  it("fails closed when the Investigator starts a third structured submission", async () => {
+  it("accepts the final valid Investigator submission after earlier schema-only corrections", async () => {
     const harness = createHarness();
+    const stages: string[] = [];
     const workflow = createPreschoolOverviewAiWorkflow({
       metadataStore: harness.metadata,
       dataGateway: harness.gateway,
       resolveSnapshot: async () => snapshot(),
-      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
-        ? {
+      runStage: async ({ stage, runId, sessionId }) => {
+        stages.push(stage);
+        return stage === "investigator" ? {
             events: [
               ...failedSubmissionEvents("submit-1"),
               ...failedSubmissionEvents("submit-2"),
-              ...successfulSubmissionEvents({ candidates: [] }, "submit-3"),
+              ...successfulSubmissionEvents({
+                candidates: [{
+                  id: "candidate-1",
+                  epistemicLevel: "hypothesis",
+                  title: "The dual-normalisation outlier deserves an operating review",
+                  takeaway: "The same Centre remains a priority after both normalisations, so size alone is not a sufficient explanation.",
+                  possibleExplanation: "The current Snapshot does not observe occupancy or equipment state.",
+                  nextCheck: "Compare its operating schedule and equipment state with lower-intensity peers before assigning a cause.",
+                  evidenceRefs: ["benchmark:portfolio-p75", "benchmark:priority-centre:A1"],
+                  evidenceSqlIndexes: [],
+                }],
+              }, "submit-3"),
               { type: "RUN_FINISHED" },
             ],
             completedRun: { runId, sessionId },
           }
-        : envelopeEvents({ findings: [], trace: [] }, runId, sessionId),
+          : stageEvents(stage, runId, sessionId);
+      },
     });
 
     const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
     harness.close();
 
-    expect(artifact).toMatchObject({ status: "failed", error_code: "OVERVIEW_AI_INVESTIGATOR_RESULT_INVALID" });
+    expect(artifact).toMatchObject({ status: "available" });
+    expect(stages).toEqual(["investigator", "editor"]);
+    expect(JSON.parse(artifact.result_json!)).toMatchObject({
+      findings: [{ title: "The dual-normalisation outlier deserves an operating review" }],
+    });
   });
 
   it("drops an invalid optional Presentation from a structured Candidate submission", async () => {
@@ -638,8 +757,9 @@ describe("Preschool Overview AI server workflow", () => {
     expect(artifact.status).toBe("available");
   });
 
-  it("inherits canonical customer content from the selected Investigator candidate instead of Editor text", async () => {
+  it("lets the Editor humanize display copy while inheriting the Investigator identity and Evidence", async () => {
     const harness = createHarness();
+    const longHumanTakeaway = "Centre A1 stays high after both fair comparisons, so the result deserves a closer operational review before any conclusion is made. ".repeat(3).trim();
     const workflow = createPreschoolOverviewAiWorkflow({
       metadataStore: harness.metadata,
       dataGateway: harness.gateway,
@@ -668,6 +788,17 @@ describe("Preschool Overview AI server workflow", () => {
               placementTargets: ["preschool.benchmark"],
               relationship: "independent",
               signalRefs: ["efficiency"],
+              copy: {
+                title: "Centre A1 needs a closer look",
+                takeaway: longHumanTakeaway,
+                action: "Check its source data, then review how the Centre is being operated.",
+                expectedIfAct: "The review should reveal which operating condition needs attention.",
+                ifIgnored: "The same issue may continue without a clear owner or follow-up.",
+                limitation: "The current data cannot show what equipment was running or why.",
+                significance: "Centre size alone does not explain the result.",
+                possibleExplanation: "Its schedule or equipment mix may differ from similar Centres.",
+                nextCheck: "Compare its opening hours and equipment state with lower-use peers.",
+              },
               title: "Centre H is the hidden priority",
               takeaway: "Centre H should be investigated first.",
               epistemicLevel: "hypothesis",
@@ -685,19 +816,19 @@ describe("Preschool Overview AI server workflow", () => {
     expect(artifact.status).toBe("available");
     expect(JSON.parse(artifact.result_json!) as Record<string, unknown>).toMatchObject({
       findings: [{
-        title: "Centre A1 remains a priority after both normalisations",
-        takeaway: "Centre A1 stays above the peer threshold after adjusting for floor area and headcount.",
-        interpretation: "The result is unlikely to be explained by Centre size alone.",
-        action: "Verify metadata, then review Centre A1 operating conditions.",
-        expectedIfAct: "The review will isolate the decision-relevant operating condition.",
-        ifIgnored: "The priority may persist without an accountable investigation.",
-        uncertainty: "The Snapshot does not observe occupancy schedules or equipment state.",
-        possibleExplanation: "Its operating pattern or equipment mix may differ from lower-intensity peers.",
-        verification: "Compare Centre A1 operating hours and equipment state with lower-intensity peers.",
+        title: "Centre A1 needs a closer look",
+        takeaway: longHumanTakeaway,
+        interpretation: "Centre size alone does not explain the result.",
+        action: "Check its source data, then review how the Centre is being operated.",
+        expectedIfAct: "The review should reveal which operating condition needs attention.",
+        ifIgnored: "The same issue may continue without a clear owner or follow-up.",
+        uncertainty: "The current data cannot show what equipment was running or why.",
+        possibleExplanation: "Its schedule or equipment mix may differ from similar Centres.",
+        verification: "Compare its opening hours and equipment state with lower-use peers.",
       }],
     });
     const firstFinding = (JSON.parse(artifact.result_json!) as { findings: Array<Record<string, unknown>> }).findings[0]!;
-    expect(firstFinding.interpretation).not.toContain("operating pattern or equipment mix");
+    expect(firstFinding.interpretation).not.toContain("normalisations");
     expect(artifact.result_json).not.toContain("Centre H");
   });
 
@@ -759,6 +890,64 @@ describe("Preschool Overview AI server workflow", () => {
         presentation: {
           version: "1",
           blocks: [{ label: "Centre E energy", value: 300, evidenceSqlIndexes: [1] }],
+        },
+      }],
+    });
+  });
+
+  it("inherits Candidate Evidence binding for an otherwise valid optional Presentation", async () => {
+    const harness = createHarness();
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? sqlEnvelopeEvents({
+            candidates: [{
+              id: "candidate-1",
+              epistemicLevel: "verified",
+              title: "Centre E recorded 300 kWh",
+              takeaway: "The scoped query places Centre E at 300 kWh.",
+              evidenceRefs: ["benchmark:portfolio-p75"],
+              evidenceSqlIndexes: [1],
+              presentation: {
+                version: "1",
+                blocks: [{
+                  type: "comparison",
+                  title: "Centre energy comparison",
+                  unit: "kWh",
+                  items: [
+                    { label: "Centre E", value: 300 },
+                    { label: "Centre A1", value: 100 },
+                  ],
+                }],
+              },
+            }],
+          }, runId, sessionId)
+        : envelopeEvents({
+            findings: [{
+              sourceCandidateIds: ["candidate-1"],
+              placementTargets: ["preschool.benchmark"],
+              relationship: "independent",
+              signalRefs: ["efficiency"],
+            }],
+            trace: [{ decision: "accepted", sourceCandidateIds: ["candidate-1"] }],
+          }, runId, sessionId),
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact.status).toBe("available");
+    expect(JSON.parse(artifact.result_json!) as Record<string, unknown>).toMatchObject({
+      findings: [{
+        presentation: {
+          version: "1",
+          blocks: [{
+            type: "comparison",
+            title: "Centre energy comparison",
+            evidenceSqlIndexes: [1],
+          }],
         },
       }],
     });
@@ -925,7 +1114,7 @@ describe("Preschool Overview AI server workflow", () => {
     }
   });
 
-  it("normalizes blank Editor relationship metadata and derives canonical trace from validated selections", async () => {
+  it("normalizes known short Section targets and blank relationship metadata", async () => {
     const harness = createHarness();
     const workflow = createPreschoolOverviewAiWorkflow({
       metadataStore: harness.metadata,
@@ -945,7 +1134,7 @@ describe("Preschool Overview AI server workflow", () => {
         : envelopeEvents({
             findings: [{
               sourceCandidateIds: ["candidate-1"],
-              placementTargets: ["preschool.standby"],
+              placementTargets: ["standby"],
               relationship: "",
               signalRefs: [],
             }],
@@ -958,13 +1147,16 @@ describe("Preschool Overview AI server workflow", () => {
 
     const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
     const result = JSON.parse(artifact.result_json!) as {
-      findings: Array<{ relationship: string }>;
+      findings: Array<{ relationship: string; placementTargets: string[] }>;
       workflow: { editorTrace: Array<Record<string, unknown>> };
     };
     harness.close();
 
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
-    expect(result.findings).toEqual([expect.objectContaining({ relationship: "independent" })]);
+    expect(result.findings).toEqual([expect.objectContaining({
+      relationship: "independent",
+      placementTargets: ["preschool.standby"],
+    })]);
     expect(result.workflow.editorTrace).toContainEqual(expect.objectContaining({
       decision: "accepted",
       sourceCandidateIds: ["candidate-1"],
@@ -1399,10 +1591,10 @@ function createHarness() {
     modelProfileId: WORKSPACE_DEFAULT_MODEL_PROFILE_ID,
     modelProfileRevision: 1,
     outputContractRevision: "v13",
-    validatorRevision: "preschool-ai-two-stage-fact-boundary-v4",
+    validatorRevision: "preschool-ai-two-stage-fact-boundary-v5",
     workflowRevision: "preschool-two-stage-v2",
-    investigatorPromptRevision: "preschool-investigator-v8",
-    editorPromptRevision: "preschool-insight-editor-v3",
+    investigatorPromptRevision: "preschool-investigator-v15",
+    editorPromptRevision: "preschool-insight-editor-v7",
     methodSkillId: "energy-insight-investigation",
     methodSkillRevision: "1.0.0",
   };

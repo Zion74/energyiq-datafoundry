@@ -32,4 +32,28 @@ describe("Overview AI Artifact client controls", () => {
       }),
     );
   });
+
+  it("pins the Artifact request to the Snapshot and period visible on the Overview", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      success: true,
+      data: {
+        status: "missing",
+        dataSnapshotId: "snapshot-may",
+        projectReleaseId: "release-may",
+      },
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await configApi.getEnergyOverviewAiArtifact("preschool-demo", "preschool-project", {
+      from: "2026-05-01",
+      to: "2026-05-31",
+      dataSnapshotId: "snapshot-may",
+      projectReleaseId: "release-may",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("scopeId=preschool-project&from=2026-05-01&to=2026-05-31&dataSnapshotId=snapshot-may&projectReleaseId=release-may"),
+      expect.any(Object),
+    );
+  });
 });

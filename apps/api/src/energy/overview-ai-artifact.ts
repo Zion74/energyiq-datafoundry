@@ -34,10 +34,10 @@ const OVERVIEW_AI_CONTRACTS: Readonly<Record<string, OverviewAiContract>> = {
     analysisPackId: "preschool-analysis-pack",
     analysisPackRevision: "v1",
     outputContractRevision: "v13",
-    validatorRevision: "preschool-ai-two-stage-fact-boundary-v4",
+    validatorRevision: "preschool-ai-two-stage-fact-boundary-v7",
     workflowRevision: "preschool-two-stage-v2",
-    investigatorPromptRevision: "preschool-investigator-v8",
-    editorPromptRevision: "preschool-insight-editor-v3",
+    investigatorPromptRevision: "preschool-investigator-v15",
+    editorPromptRevision: "preschool-insight-editor-v7",
     methodSkillId: "energy-insight-investigation",
     methodSkillRevision: "1.0.0",
   },
@@ -140,6 +140,12 @@ export const resolveCurrentOverviewAiArtifactIdentity = async (input: {
   projectId: string;
   scopeId: string;
   user: UserRecord;
+  pin?: {
+    from: string;
+    to: string;
+    dataSnapshotId: string;
+    projectReleaseId: string;
+  };
 }): Promise<OverviewAiArtifactIdentityV13> => {
   const project = input.metadataStore.energyIq.getProject(input.projectId);
   if (input.scopeId !== project.root_scope_id) {
@@ -155,7 +161,15 @@ export const resolveCurrentOverviewAiArtifactIdentity = async (input: {
       projectId: project.id,
       scopeId: input.scopeId,
       resource: "electricity",
-      analysisWindow: "current-overview-28d",
+      ...(input.pin ? {
+        period: "Custom" as const,
+        from: input.pin.from,
+        to: input.pin.to,
+        expectedDataSnapshotId: input.pin.dataSnapshotId,
+        expectedProjectReleaseId: input.pin.projectReleaseId,
+      } : {
+        analysisWindow: "current-overview-28d" as const,
+      }),
     },
   });
   if (resolution.status !== "ready" || resolution.snapshot.dataSnapshot.id !== project.data_snapshot_id) {

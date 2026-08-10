@@ -201,13 +201,32 @@ export const handleEnergyApiRequest = async (
     if (segments[0] === "projects" && segments[2] === "overview-ai-artifact") {
       const projectId = decodeURIComponent(segments[1] ?? "");
       const project = context.metadataStore.energyIq.getProject(projectId);
-      const scopeId = new URL(request.url ?? "/", "http://127.0.0.1")
-        .searchParams.get("scopeId") ?? project.root_scope_id;
+      const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+      const scopeId = requestUrl.searchParams.get("scopeId") ?? project.root_scope_id;
+      const pinParts = {
+        from: requestUrl.searchParams.get("from"),
+        to: requestUrl.searchParams.get("to"),
+        dataSnapshotId: requestUrl.searchParams.get("dataSnapshotId"),
+        projectReleaseId: requestUrl.searchParams.get("projectReleaseId"),
+      };
+      const suppliedPinParts = Object.values(pinParts).filter((value) => value?.trim()).length;
+      if (suppliedPinParts > 0 && suppliedPinParts < 4) {
+        throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PIN_INCOMPLETE");
+      }
+      const pin = suppliedPinParts === 4
+        ? {
+            from: pinParts.from!,
+            to: pinParts.to!,
+            dataSnapshotId: pinParts.dataSnapshotId!,
+            projectReleaseId: pinParts.projectReleaseId!,
+          }
+        : undefined;
       if (!context.overviewAiWorkflow) throw new Error("ENERGYIQ_OVERVIEW_AI_SERVER_WORKFLOW_REQUIRED");
       const identity = await context.overviewAiWorkflow.resolveCurrentIdentity({
         projectId,
         scopeId,
         user,
+        ...(pin ? { pin } : {}),
       });
       if (segments.length === 3 && request.method === "GET") {
         const artifact = context.metadataStore.energyIq.overviewAiArtifacts.find(identity);
@@ -1499,8 +1518,8 @@ const isPreschoolAcceptedSavedResult = (
     || !isRecord(result.workflow.stages.editor)
     || !isPresentString(result.workflow.stages.investigator.runId)
     || !isPresentString(result.workflow.stages.editor.runId)
-    || result.workflow.stages.investigator.promptRevision !== "preschool-investigator-v8"
-    || result.workflow.stages.editor.promptRevision !== "preschool-insight-editor-v3"
+    || result.workflow.stages.investigator.promptRevision !== "preschool-investigator-v11"
+    || result.workflow.stages.editor.promptRevision !== "preschool-insight-editor-v5"
     || result.workflow.stages.editor.runId !== result.runId
     || result.workflow.stages.investigator.runId === result.workflow.stages.editor.runId
     || !Array.isArray(result.findings)) return false;
