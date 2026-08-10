@@ -29,8 +29,8 @@ import {
 } from "./overview-history-state";
 import {
   OverviewSectionNavigation,
-  type OverviewNavigationSection,
 } from "./overview-section-navigation";
+import { NGEE_ANN_OVERVIEW_SECTIONS } from "./ngee-ann-overview-sections";
 import { PRESCHOOL_OVERVIEW_SECTIONS } from "./preschool-overview-renderer";
 import { orderProjectNodesDepthFirst } from "./project-tree-model";
 import {
@@ -61,15 +61,6 @@ export const PRESCHOOL_OVERVIEW_BASELINE_RANGE = {
   from: "2026-05-01",
   to: "2026-05-31",
 } as const;
-const NGEE_ANN_OVERVIEW_SECTIONS: ReadonlyArray<OverviewNavigationSection> = [
-  { id: "ngee-ann-takeaways", label: "Takeaways" },
-  { id: "ngee-ann-key-highlights", label: "Verified figures" },
-  { id: "ngee-ann-ai-analysis", label: "AI analysis" },
-  { id: "ngee-ann-change", label: "Change over time" },
-  { id: "ngee-ann-location", label: "Main contributors" },
-  { id: "ngee-ann-timing", label: "Time patterns" },
-  { id: "ngee-ann-evidence", label: "Evidence" },
-] as const;
 export type OverviewComparison = "overlay" | "selected" | "average";
 export type OverviewCategory = "all" | "load" | "light";
 export type CurrentOverviewPin = {

@@ -640,16 +640,17 @@ describe("Ngee Ann Overview ViewModel", () => {
     expect(view.energyTrend.scopes[0]!.points).toHaveLength(7);
     expect(view.energyTrend.scopes[0]!.points.map((point) => ({
       localDate: point.localDate,
+      dayType: point.dayType,
       usageKwh: point.usageKwh,
       status: point.status,
     }))).toEqual([
-      { localDate: "2026-06-10", usageKwh: "253.7018", status: "complete" },
-      { localDate: "2026-06-11", usageKwh: "268.399", status: "complete" },
-      { localDate: "2026-06-12", usageKwh: "260.0659", status: "complete" },
-      { localDate: "2026-06-13", usageKwh: "168.9645", status: "complete" },
-      { localDate: "2026-06-14", usageKwh: "127.9387", status: "complete" },
-      { localDate: "2026-06-15", usageKwh: "230.1002", status: "complete" },
-      { localDate: "2026-06-16", usageKwh: "221.9982", status: "complete" },
+      { localDate: "2026-06-10", dayType: "weekday", usageKwh: "253.7018", status: "complete" },
+      { localDate: "2026-06-11", dayType: "weekday", usageKwh: "268.399", status: "complete" },
+      { localDate: "2026-06-12", dayType: "weekday", usageKwh: "260.0659", status: "complete" },
+      { localDate: "2026-06-13", dayType: "weekend", usageKwh: "168.9645", status: "complete" },
+      { localDate: "2026-06-14", dayType: "weekend", usageKwh: "127.9387", status: "complete" },
+      { localDate: "2026-06-15", dayType: "weekday", usageKwh: "230.1002", status: "complete" },
+      { localDate: "2026-06-16", dayType: "weekday", usageKwh: "221.9982", status: "complete" },
     ]);
   });
 
@@ -851,8 +852,13 @@ describe("Ngee Ann Overview ViewModel", () => {
       scopeName: "Project",
       actualKwh: "268.399",
       baselineKwh: "218.885",
+      thresholdKwh: "262.662",
       impactKwh: "+49.514",
       baselineDates: ["2026-06-04", "2026-06-05", "2026-06-08", "2026-06-09"],
+      relatedLevelTotals: [
+        expect.objectContaining({ scopeName: "Level 7" }),
+        expect.objectContaining({ scopeName: "Level 6" }),
+      ],
     });
     expect(dailyAnomalies.incidents[0]!.hourlyComparison).toHaveLength(24);
     expect(dailyAnomalies.incidents[0]!.series.map((series) => series.scopeId)).toEqual([

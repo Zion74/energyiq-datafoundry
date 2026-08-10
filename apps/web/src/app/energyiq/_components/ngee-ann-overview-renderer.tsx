@@ -7,11 +7,10 @@ import type {
 } from "../../../lib/config-api";
 import { EnergyIcon } from "./icons";
 import { NgeeAnnAiSlot } from "./ngee-ann-ai-slot";
+import { NgeeAnnDailyTrendSection } from "./ngee-ann-daily-trend-section";
 import { NgeeAnnDayProfile } from "./ngee-ann-day-profile";
-import { NgeeAnnDailyAnomalies } from "./ngee-ann-daily-anomalies";
 import { NgeeAnnDecisionPriorities } from "./ngee-ann-decision-priorities";
 import { NgeeAnnEnergyComposition } from "./ngee-ann-energy-composition";
-import { NgeeAnnEnergyTrend } from "./ngee-ann-energy-trend";
 import { NgeeAnnLevelComparison } from "./ngee-ann-level-comparison";
 import { NgeeAnnPeakBreakdown } from "./ngee-ann-peak-breakdown";
 import { NgeeAnnUsageHeatmap } from "./ngee-ann-usage-heatmap";
@@ -47,7 +46,6 @@ export function NgeeAnnOverviewRenderer({
   grain,
   comparison = "overlay",
   category = "all",
-  onComparisonChange,
   onCategoryChange,
 }: {
   state: NgeeAnnOverviewRendererState;
@@ -168,9 +166,29 @@ export function NgeeAnnOverviewRenderer({
         </div>
       ) : null}
 
+      <div id="ngee-ann-daily-trend" data-overview-section="true" className="scroll-mt-28">
+        <div className="border-b border-border bg-surface-subtle/50 px-5 py-4 lg:px-7">
+          <p className="max-w-4xl text-sm font-semibold leading-6 text-foreground">{view.changeOverTime.headline}</p>
+          <p className="mt-1 max-w-4xl text-sm leading-6 text-muted">{view.changeOverTime.detail}</p>
+        </div>
+        <NgeeAnnDailyTrendSection
+          key={[
+            "daily-trend",
+            view.energyTrend.evidence.period,
+            view.dailyAnomalies.evidence.snapshotId,
+            view.dailyAnomalies.evidence.projectReleaseId,
+            view.dailyAnomalies.evidence.bundleId ?? "unavailable",
+          ].join(":")}
+          trend={view.energyTrend}
+          anomalies={view.dailyAnomalies}
+          comparison={comparison}
+          category={category}
+        />
+      </div>
+
       <OverviewSectionHeading
-        id="ngee-ann-key-highlights"
-        title="Executive summary"
+        id="ngee-ann-executive-summary"
+        title="Executive Summary"
         description={view.executiveSummary.headline}
       />
 
@@ -179,7 +197,7 @@ export function NgeeAnnOverviewRenderer({
       </div>
 
       <div className="border-b border-border px-5 pt-5 lg:px-7">
-        <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">Verified figures</p>
+        <p className="text-sm font-semibold text-foreground">Key Highlights</p>
       </div>
       <div className="grid border-b border-border sm:grid-cols-2 xl:grid-cols-5 xl:divide-x xl:divide-border">
         {view.highlights.map((highlight) => (
@@ -200,6 +218,12 @@ export function NgeeAnnOverviewRenderer({
           </article>
         ))}
       </div>
+
+      <OverviewSectionHeading
+        id="ngee-ann-summary-findings"
+        title="Summary of Findings"
+        description="Verified findings from the selected Snapshot, kept separate from AI interpretation."
+      />
 
       <div className="grid border-b border-border lg:grid-cols-3 lg:divide-x lg:divide-border">
         {view.executiveSummary.signals.map((signal) => (
@@ -224,13 +248,49 @@ export function NgeeAnnOverviewRenderer({
         ))}
       </div>
 
+      <OverviewSectionHeading
+        id="ngee-ann-day-profile-analysis"
+        title="Day Profile Analysis"
+        description="Compare the accepted 24-hour shape by Day Type and Scope."
+      />
+
+      <NgeeAnnDayProfile key={`profile:${view.dayProfile.evidence.period}`} view={view.dayProfile} />
+
+      <NgeeAnnUsageHeatmap key={`heatmap:${view.usageHeatmap.evidence.period}`} view={view.usageHeatmap} />
+
+      <OverviewSectionHeading
+        id="ngee-ann-energy-health"
+        title="Energy Health Summary"
+        description="Compare the accepted Level position before moving into Circuit-level evidence."
+      />
+
+      <NgeeAnnLevelComparison view={view.levelComparison} />
+
+      <OverviewSectionHeading
+        id="ngee-ann-circuit-analysis"
+        title="Circuit Category Analysis"
+        description="Rank the published Circuit evidence that explains the Project result."
+      />
+
+      <NgeeAnnEnergyComposition
+        view={view.energyComposition}
+        category={category}
+        onCategoryChange={onCategoryChange}
+      />
+
+      <OverviewSectionHeading
+        id="ngee-ann-recommendations"
+        title="Personalized Recommendations"
+        description="Prioritised operational checks supported by this Snapshot; no saving is assumed."
+      />
+
       <NgeeAnnDecisionPriorities
         view={view.decisionPriorities}
         projectExplorerHref={projectExplorerHref}
         aiAnalystHref={aiAnalystHref}
       />
 
-      <div id="ngee-ann-ai-analysis" className="scroll-mt-28">
+      <div id="ngee-ann-ai-analysis" className="scroll-mt-28 border-b border-border">
         <NgeeAnnAiSlot
           snapshot={state.snapshot}
           decisionPriorities={view.decisionPriorities}
@@ -251,59 +311,7 @@ export function NgeeAnnOverviewRenderer({
         />
       </div>
 
-      <OverviewSectionHeading
-        id="ngee-ann-change"
-        title="Change over time"
-        description={view.changeOverTime.headline}
-      />
-
-      <div className="border-b border-border bg-surface-subtle/50 px-5 py-4 lg:px-7">
-        <p className="max-w-4xl text-sm leading-6 text-muted">{view.changeOverTime.detail}</p>
-      </div>
-
-      <NgeeAnnEnergyTrend key={`trend:${view.energyTrend.evidence.period}`} view={view.energyTrend} />
-
-      <NgeeAnnDailyAnomalies
-        key={[
-          "anomalies",
-          view.dailyAnomalies.evidence.period,
-          view.dailyAnomalies.evidence.snapshotId,
-          view.dailyAnomalies.evidence.projectReleaseId,
-          view.dailyAnomalies.evidence.bundleId ?? "unavailable",
-        ].join(":")}
-        view={view.dailyAnomalies}
-        comparison={comparison}
-        category={category}
-        onComparisonChange={onComparisonChange}
-        onCategoryChange={onCategoryChange}
-      />
-
-
-      <OverviewSectionHeading
-        id="ngee-ann-location"
-        title="Main contributors"
-        description="Locate the Levels, categories and Circuits that explain the Project result."
-      />
-
-      <NgeeAnnLevelComparison view={view.levelComparison} />
-
-      <NgeeAnnEnergyComposition
-        view={view.energyComposition}
-        category={category}
-        onCategoryChange={onCategoryChange}
-      />
-
-      <OverviewSectionHeading
-        id="ngee-ann-timing"
-        title="Time patterns"
-        description="Use the daily shape and recurring hour patterns to plan the next operational check."
-      />
-
-      <NgeeAnnDayProfile key={`profile:${view.dayProfile.evidence.period}`} view={view.dayProfile} />
-
-      <NgeeAnnUsageHeatmap key={`heatmap:${view.usageHeatmap.evidence.period}`} view={view.usageHeatmap} />
-
-      <div id="ngee-ann-evidence" className="scroll-mt-28 px-5 py-5 lg:px-7 lg:py-6">
+      <div id="ngee-ann-evidence" data-overview-section="true" className="scroll-mt-28 px-5 py-5 lg:px-7 lg:py-6">
         <div>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -378,7 +386,7 @@ function OverviewSectionHeading({
   description: string;
 }) {
   return (
-    <div id={id} className="scroll-mt-28 border-b border-border bg-surface px-5 pb-4 pt-7 lg:px-7 lg:pt-8">
+    <div id={id} data-overview-section="true" className="scroll-mt-28 border-b border-border bg-surface px-5 pb-4 pt-7 lg:px-7 lg:pt-8">
       <h3 className="text-lg font-semibold tracking-[-0.015em] text-foreground">{title}</h3>
       <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">{description}</p>
     </div>

@@ -62,6 +62,7 @@ export type NgeeAnnEnergyTrendViewModel = {
       id: string;
       localDate: string;
       localHour: number | null;
+      dayType: "weekday" | "weekend" | null;
       dateLabel: string;
       weekday: string;
       range: string;
@@ -227,13 +228,20 @@ export type NgeeAnnDailyAnomalyViewModel = {
     baselineKwhValue: number;
     impactKwhValue: number;
     relativePctValue: number;
+    thresholdKwhValue: number;
     actualKwh: string;
     baselineKwh: string;
+    thresholdKwh: string;
     impactKwh: string;
     relativePct: string;
     coverage: string;
     intervals: string;
     qualityEvents: string;
+    relatedLevelTotals: Array<{
+      scopeId: string;
+      scopeName: string;
+      selectedKwh: string | null;
+    }>;
     baselineDates: string[];
     baselineSamples: Array<{
       localDate: string;
@@ -1712,7 +1720,7 @@ function buildExecutiveSummary(
         label: comparisonAvailable ? "Largest aligned movements" : "Largest verified movement",
         value: driverValue,
         detail: driverDetail,
-        href: driverAvailable ? "#ngee-ann-location" : null,
+        href: driverAvailable ? "#ngee-ann-circuit-analysis" : null,
         status: driverAvailable ? "available" : "unavailable",
         tone: "neutral",
       },
@@ -2236,73 +2244,88 @@ function buildDailyAnomalies(
   }
   const incidents = bundle.scopes.flatMap((scope) => scope.rows
     .filter((row) => row.outcome === "triggered")
-    .map((row) => ({
-      anomalyId: row.anomalyId,
-      incidentId: row.incidentId,
-      scopeId: scope.scopeId,
-      scopeName: scope.scopeType === "project" ? "Project" : scope.scopeName,
-      localDate: row.localDate,
-      dateLabel: formatLocalDate(row.localDate),
-      weekday: formatLocalWeekday(row.localDate),
-      dayType: row.dayType === "weekday" ? "Weekday" as const : "Weekend" as const,
-      range: formatEvidenceRange(row.from, row.to, bundle.timezone),
-      actualKwhValue: row.actualKwh!,
-      baselineKwhValue: row.baselineKwh!,
-      impactKwhValue: row.impactKwh!,
-      relativePctValue: row.relativePct!,
-      actualKwh: formatDecimal(row.actualKwh!, 4),
-      baselineKwh: formatDecimal(row.baselineKwh!, 4),
-      impactKwh: signedDecimal(row.impactKwh!, 4),
-      relativePct: `${signedDecimal(row.relativePct!, 4)}%`,
-      coverage: `${formatDecimal(row.coveragePct, 1)}% coverage`,
-      intervals: `${row.validIntervalCount.toLocaleString("en-SG")} / ${row.expectedMeterIntervalCount.toLocaleString("en-SG")} valid intervals`,
-      qualityEvents: `${row.qualityEventCount.toLocaleString("en-SG")} quality events`,
-      baselineDates: [...row.baselineDates],
-      baselineSamples: row.baselineSamples.map((sample) => ({
-        localDate: sample.localDate,
-        coverage: `${formatDecimal(sample.coveragePct, 1)}% coverage`,
-        intervals: `${sample.validIntervalCount.toLocaleString("en-SG")} / ${sample.expectedMeterIntervalCount.toLocaleString("en-SG")} valid intervals`,
-        qualityEvents: `${sample.qualityEventCount.toLocaleString("en-SG")} quality events`,
-      })),
-      hourlyComparison: row.hourlyComparison.map((point) => ({
-        localHour: point.localHour,
-        actualKwh: point.actualKwh!,
-        baselineKwh: point.baselineKwh!,
-        impactKwh: point.impactKwh!,
-        relativePct: point.relativePct!,
-      })),
-      series: row.detailSeries.map((series) => ({
-        seriesId: series.seriesId,
-        relationship: series.relationship,
-        kind: series.kind,
-        scopeId: series.scopeId,
-        scopeName: series.scopeName,
-        meterNodeId: series.meterNodeId ?? null,
-        category: series.category ?? null,
-        categoryLabel: series.category ? formatCategoryLabel(series.category) : null,
-        includedInOfficialTotal: series.includedInOfficialTotal,
-        status: series.status,
-        statusLabel: series.status === "available"
-          ? "Available" as const
-          : series.status === "partial"
-            ? "Partial" as const
-            : "Unavailable" as const,
-        selectedTotalKwh: series.selectedTotalKwh === null ? null : formatDecimal(series.selectedTotalKwh, 4),
-        baselineTotalKwh: series.baselineTotalKwh === null ? null : formatDecimal(series.baselineTotalKwh, 4),
-        impactKwh: series.impactKwh === null ? null : signedDecimal(series.impactKwh, 4),
-        relativePct: series.relativePct === null ? null : `${signedDecimal(series.relativePct, 4)}%`,
-        coverage: `${formatDecimal(series.coveragePct, 1)}% coverage`,
-        intervals: `${series.validIntervalCount.toLocaleString("en-SG")} / ${series.expectedMeterIntervalCount.toLocaleString("en-SG")} valid intervals`,
-        qualityEvents: `${series.qualityEventCount.toLocaleString("en-SG")} quality events`,
-        points: series.points.map((point) => ({
-          localHour: point.localHour,
-          hourLabel: formatLocalHour(point.localHour),
-          selectedKwh: point.selectedKwh,
-          baselineKwh: point.baselineKwh,
-          impactKwh: point.impactKwh,
+    .map((row) => {
+      const thresholdKwhValue = Math.max(
+        row.baselineKwh! * (1 + bundle.rule.relativeThresholdPct / 100),
+        row.baselineKwh! + bundle.rule.absoluteImpactKwh,
+      );
+      return {
+        anomalyId: row.anomalyId,
+        incidentId: row.incidentId,
+        scopeId: scope.scopeId,
+        scopeName: scope.scopeType === "project" ? "Project" : scope.scopeName,
+        localDate: row.localDate,
+        dateLabel: formatLocalDate(row.localDate),
+        weekday: formatLocalWeekday(row.localDate),
+        dayType: row.dayType === "weekday" ? "Weekday" as const : "Weekend" as const,
+        range: formatEvidenceRange(row.from, row.to, bundle.timezone),
+        actualKwhValue: row.actualKwh!,
+        baselineKwhValue: row.baselineKwh!,
+        impactKwhValue: row.impactKwh!,
+        relativePctValue: row.relativePct!,
+        thresholdKwhValue,
+        actualKwh: formatDecimal(row.actualKwh!, 4),
+        baselineKwh: formatDecimal(row.baselineKwh!, 4),
+        thresholdKwh: formatDecimal(thresholdKwhValue, 4),
+        impactKwh: signedDecimal(row.impactKwh!, 4),
+        relativePct: `${signedDecimal(row.relativePct!, 4)}%`,
+        coverage: `${formatDecimal(row.coveragePct, 1)}% coverage`,
+        intervals: `${row.validIntervalCount.toLocaleString("en-SG")} / ${row.expectedMeterIntervalCount.toLocaleString("en-SG")} valid intervals`,
+        qualityEvents: `${row.qualityEventCount.toLocaleString("en-SG")} quality events`,
+        relatedLevelTotals: row.detailSeries
+          .filter((series) => series.relationship === "immediate_level" && series.kind === "official_scope")
+          .map((series) => ({
+            scopeId: series.scopeId,
+            scopeName: series.scopeName,
+            selectedKwh: series.selectedTotalKwh === null ? null : formatDecimal(series.selectedTotalKwh, 4),
+          })),
+        baselineDates: [...row.baselineDates],
+        baselineSamples: row.baselineSamples.map((sample) => ({
+          localDate: sample.localDate,
+          coverage: `${formatDecimal(sample.coveragePct, 1)}% coverage`,
+          intervals: `${sample.validIntervalCount.toLocaleString("en-SG")} / ${sample.expectedMeterIntervalCount.toLocaleString("en-SG")} valid intervals`,
+          qualityEvents: `${sample.qualityEventCount.toLocaleString("en-SG")} quality events`,
         })),
-      })),
-    })));
+        hourlyComparison: row.hourlyComparison.map((point) => ({
+          localHour: point.localHour,
+          actualKwh: point.actualKwh!,
+          baselineKwh: point.baselineKwh!,
+          impactKwh: point.impactKwh!,
+          relativePct: point.relativePct!,
+        })),
+        series: row.detailSeries.map((series) => ({
+          seriesId: series.seriesId,
+          relationship: series.relationship,
+          kind: series.kind,
+          scopeId: series.scopeId,
+          scopeName: series.scopeName,
+          meterNodeId: series.meterNodeId ?? null,
+          category: series.category ?? null,
+          categoryLabel: series.category ? formatCategoryLabel(series.category) : null,
+          includedInOfficialTotal: series.includedInOfficialTotal,
+          status: series.status,
+          statusLabel: series.status === "available"
+            ? "Available" as const
+            : series.status === "partial"
+              ? "Partial" as const
+              : "Unavailable" as const,
+          selectedTotalKwh: series.selectedTotalKwh === null ? null : formatDecimal(series.selectedTotalKwh, 4),
+          baselineTotalKwh: series.baselineTotalKwh === null ? null : formatDecimal(series.baselineTotalKwh, 4),
+          impactKwh: series.impactKwh === null ? null : signedDecimal(series.impactKwh, 4),
+          relativePct: series.relativePct === null ? null : `${signedDecimal(series.relativePct, 4)}%`,
+          coverage: `${formatDecimal(series.coveragePct, 1)}% coverage`,
+          intervals: `${series.validIntervalCount.toLocaleString("en-SG")} / ${series.expectedMeterIntervalCount.toLocaleString("en-SG")} valid intervals`,
+          qualityEvents: `${series.qualityEventCount.toLocaleString("en-SG")} quality events`,
+          points: series.points.map((point) => ({
+            localHour: point.localHour,
+            hourLabel: formatLocalHour(point.localHour),
+            selectedKwh: point.selectedKwh,
+            baselineKwh: point.baselineKwh,
+            impactKwh: point.impactKwh,
+          })),
+        })),
+      };
+    }));
 
   return {
     status: "available",
@@ -3091,6 +3114,7 @@ function buildEnergyTrend(
           id: `${scope.scopeId}:${cell.localDate}:${cell.localHour}`,
           localDate: cell.localDate,
           localHour: cell.localHour,
+          dayType: null,
           dateLabel: formatLocalHour(cell.localHour),
           weekday: formatLocalDate(cell.localDate),
           range: formatEvidenceRange(cell.from, cell.to, timeBehaviour!.timezone),
@@ -3171,6 +3195,7 @@ function buildEnergyTrend(
           id: `${scope.scopeId}:${row.localDate}`,
           localDate: row.localDate,
           localHour: null,
+          dayType: dailyBaseline.dayTypes.get(scope.scopeId)?.get(row.localDate) ?? null,
           dateLabel: formatLocalDate(row.localDate),
           weekday: formatLocalWeekday(row.localDate),
           range: formatEvidenceRange(row.from, row.to, dailyTotals.timezone),
@@ -3205,6 +3230,7 @@ function buildDailyTrendBaseline(
   overlay: NgeeAnnEnergyTrendViewModel["baselineOverlay"];
   evidence: NonNullable<NgeeAnnEnergyTrendViewModel["evidence"]["baseline"]> | null;
   points: Map<string, Map<string, DailyTrendBaseline>>;
+  dayTypes: Map<string, Map<string, "weekday" | "weekend" | null>>;
 } {
   const unavailable = (reason: string) => ({
     overlay: {
@@ -3214,6 +3240,7 @@ function buildDailyTrendBaseline(
     },
     evidence: null,
     points: new Map<string, Map<string, DailyTrendBaseline>>(),
+    dayTypes: new Map<string, Map<string, "weekday" | "weekend" | null>>(),
   });
   const bundle = snapshot.analysis.dailyUsageAnomalies;
   if (!bundle) {
@@ -3225,6 +3252,7 @@ function buildDailyTrendBaseline(
 
   const anomalyScopes = new Map(bundle.scopes.map((scope) => [scope.scopeId, scope]));
   const points = new Map<string, Map<string, DailyTrendBaseline>>();
+  const dayTypes = new Map<string, Map<string, "weekday" | "weekend" | null>>();
   for (const scope of dailyTotals.scopes) {
     const anomalyScope = anomalyScopes.get(scope.scopeId);
     if (
@@ -3237,6 +3265,7 @@ function buildDailyTrendBaseline(
     }
     const anomalyRows = new Map(anomalyScope.rows.map((row) => [row.localDate, row]));
     const scopePoints = new Map<string, DailyTrendBaseline>();
+    const scopeDayTypes = new Map<string, "weekday" | "weekend" | null>();
     for (const row of scope.rows) {
       const anomalyRow = anomalyRows.get(row.localDate);
       if (
@@ -3266,8 +3295,10 @@ function buildDailyTrendBaseline(
         incidentId: anomalyRow.outcome === "triggered" ? anomalyRow.incidentId : null,
         limitation: anomalyRow.suppressionReason?.message ?? null,
       });
+      scopeDayTypes.set(row.localDate, anomalyRow.dayType);
     }
     points.set(scope.scopeId, scopePoints);
+    dayTypes.set(scope.scopeId, scopeDayTypes);
   }
   if (anomalyScopes.size !== dailyTotals.scopes.length) {
     return unavailable("the anomaly Scope set does not align with the daily totals Scope set.");
@@ -3282,6 +3313,7 @@ function buildDailyTrendBaseline(
       baselineMethod: bundle.rule.baselineMethod,
     },
     points,
+    dayTypes,
   };
 }
 

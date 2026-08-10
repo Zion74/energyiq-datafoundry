@@ -6,8 +6,22 @@ import { NgeeAnnHourAxis } from "./ngee-ann-hour-axis";
 import { anomalyIncidentDomId } from "./ngee-ann-overview-links";
 import type { NgeeAnnEnergyTrendViewModel } from "./ngee-ann-overview-view-model";
 
-export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel }) {
-  const [selectedScopeId, setSelectedScopeId] = useState(view.scopes[0]?.id ?? "");
+export type NgeeAnnTrendDayType = "weekday" | "weekend" | "public_holiday";
+
+export function NgeeAnnEnergyTrend({
+  view,
+  selectedScopeId: controlledScopeId,
+  selectedDayType,
+  onScopeChange,
+  onDayTypeChange,
+}: {
+  view: NgeeAnnEnergyTrendViewModel;
+  selectedScopeId?: string;
+  selectedDayType?: NgeeAnnTrendDayType;
+  onScopeChange?: (scopeId: string) => void;
+  onDayTypeChange?: (dayType: NgeeAnnTrendDayType) => void;
+}) {
+  const [internalScopeId, setInternalScopeId] = useState(view.scopes[0]?.id ?? "");
   const [activePointId, setActivePointId] = useState<string | null>(null);
   const [selectedPointId, setSelectedPointId] = useState<string | null>(null);
 
@@ -15,7 +29,7 @@ export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel
     return (
       <section aria-labelledby="ngee-ann-energy-trend" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
         <h3 id="ngee-ann-energy-trend" className="text-lg font-semibold tracking-[-0.015em] text-foreground">
-          Energy trend
+          Daily Total Trend
         </h3>
         <p className="mt-1.5 text-sm leading-6 text-muted">{view.decisionQuestion}</p>
         <div className="mt-4 rounded-lg border border-border bg-surface-subtle px-4 py-4" role="status">
@@ -26,11 +40,15 @@ export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel
     );
   }
 
+  const selectedScopeId = controlledScopeId ?? internalScopeId;
   const selectedScope = view.scopes.find((scope) => scope.id === selectedScopeId) ?? view.scopes[0]!;
+  const visiblePoints = selectedDayType && view.grain === "day"
+    ? selectedScope.points.filter((point) => point.dayType === selectedDayType)
+    : selectedScope.points;
   const selectedPoint = selectedScope.points.find((point) => point.id === selectedPointId) ?? null;
   const activePoint = selectedScope.points.find((point) => point.id === activePointId) ?? selectedPoint;
   let maximumUsageKwh = 0;
-  for (const point of selectedScope.points) {
+  for (const point of visiblePoints) {
     if (point.acceptedUsageKwh !== null && point.acceptedUsageKwh > maximumUsageKwh) {
       maximumUsageKwh = point.acceptedUsageKwh;
     }
@@ -44,7 +62,7 @@ export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <h3 id="ngee-ann-energy-trend" className="text-lg font-semibold tracking-[-0.015em] text-foreground">
-            Energy trend
+            Daily Total Trend
           </h3>
           <p className="mt-1.5 text-sm leading-6 text-muted">{view.decisionQuestion}</p>
         </div>
@@ -53,9 +71,45 @@ export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel
         </p>
       </div>
 
-      <fieldset className="mt-4">
-        <legend className="mb-2 text-xs font-semibold text-muted">Energy trend Scope</legend>
-        <div className="flex flex-wrap gap-1.5">
+      <div className="mt-4 grid gap-3 lg:grid-cols-2">
+        {view.grain === "day" && selectedDayType && onDayTypeChange ? (
+          <fieldset className="min-w-0 rounded-lg border border-border px-3 py-3">
+            <legend className="px-1 text-xs font-semibold text-muted">Day Type</legend>
+            <div className="flex flex-wrap gap-1.5">
+              {([
+                ["weekday", "Weekday"],
+                ["weekend", "Weekend"],
+                ["public_holiday", "Holiday"],
+              ] as const).map(([dayType, label]) => {
+                const available = view.scopes.some((scope) => scope.points.some((point) => point.dayType === dayType));
+                const selected = dayType === selectedDayType;
+                return (
+                  <button
+                    key={dayType}
+                    type="button"
+                    disabled={!available}
+                    title={available ? undefined : "No release-pinned classification is available for this Day Type."}
+                    className={selected
+                      ? "min-h-11 rounded-lg border border-primary bg-primary px-3 py-2 text-xs font-semibold text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                      : "min-h-11 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted hover:bg-surface-subtle hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:cursor-not-allowed disabled:opacity-45"}
+                    aria-pressed={selected}
+                    aria-controls="ngee-ann-energy-trend-chart ngee-ann-detected-anomaly-list"
+                    onClick={() => {
+                      setActivePointId(null);
+                      setSelectedPointId(null);
+                      onDayTypeChange(dayType);
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </fieldset>
+        ) : null}
+        <fieldset className="min-w-0 rounded-lg border border-border px-3 py-3">
+          <legend className="px-1 text-xs font-semibold text-muted">Energy trend Scope</legend>
+          <div className="flex flex-wrap gap-1.5">
           {view.scopes.map((scope) => {
             const selected = scope.id === selectedScope.id;
             return (
@@ -68,7 +122,8 @@ export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel
                 aria-pressed={selected}
                 aria-controls="ngee-ann-energy-trend-chart"
                 onClick={() => {
-                  setSelectedScopeId(scope.id);
+                  setInternalScopeId(scope.id);
+                  onScopeChange?.(scope.id);
                   setActivePointId(null);
                   setSelectedPointId(null);
                 }}
@@ -77,8 +132,9 @@ export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel
               </button>
             );
           })}
-        </div>
-      </fieldset>
+          </div>
+        </fieldset>
+      </div>
 
       {selectedScope.limitation ? (
         <p className="mt-3 rounded-lg border border-step-warning/25 bg-step-warning/5 px-3 py-2 text-xs leading-5 text-step-warning" role="status">
@@ -96,7 +152,7 @@ export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel
         <div className={view.grain === "hour" ? "min-w-[1100px]" : "min-w-[720px]"}>
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-[10px] text-muted">
             <span>Accepted energy / kWh</span>
-            <span>{selectedScope.points.length} {view.grain === "hour" ? "hourly" : "daily"} buckets</span>
+            <span>{visiblePoints.length} {view.grain === "hour" ? "hourly" : "daily"} buckets</span>
           </div>
           {view.grain === "day" && view.baselineOverlay.status === "available" ? (
             <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[10px] text-muted" aria-label="Energy trend legend">
@@ -108,9 +164,9 @@ export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel
           <div
             data-hour-plot={view.grain === "hour" ? "energy-trend" : undefined}
             className="grid h-56 items-end gap-2 border-b border-border px-2"
-            style={{ gridTemplateColumns: `repeat(${selectedScope.points.length}, minmax(32px, 1fr))` }}
+            style={{ gridTemplateColumns: `repeat(${Math.max(visiblePoints.length, 1)}, minmax(32px, 1fr))` }}
           >
-            {selectedScope.points.map((point) => {
+            {visiblePoints.map((point) => {
               const selected = selectedPoint?.id === point.id;
               const height = point.acceptedUsageKwh === null || maximumUsageKwh <= 0
                 ? 0
@@ -126,6 +182,7 @@ export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel
                   className="group flex h-full min-w-0 flex-col justify-end rounded-t px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
                   aria-label={trendPointAriaLabel(point)}
                   aria-pressed={selected}
+                  data-trend-point="true"
                   data-trend-outcome={point.baseline?.outcome}
                   onMouseEnter={() => setActivePointId(point.id)}
                   onMouseLeave={() => setActivePointId(null)}
@@ -167,6 +224,11 @@ export function NgeeAnnEnergyTrend({ view }: { view: NgeeAnnEnergyTrendViewModel
                 </button>
               );
             })}
+            {visiblePoints.length === 0 ? (
+              <p className="col-span-full self-center text-center text-sm text-muted" role="status">
+                No accepted daily points match this Day Type and Scope.
+              </p>
+            ) : null}
           </div>
           {view.grain === "hour" ? (
             <NgeeAnnHourAxis

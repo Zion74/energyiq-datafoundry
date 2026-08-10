@@ -136,7 +136,7 @@ describe("published Overview URL reload", () => {
     expect(singleDay).toMatchObject({ grain: "hour", comparison: "average", category: "load" });
   });
 
-  it("restores anomaly controls and handoffs from URL, writes changes back, and keeps dialog state transient", async () => {
+  it("restores anomaly handoffs from URL and keeps detail comparison controls section-local", async () => {
     const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
     mockedAccess.activeProject = ngeeAnn;
     mockedAccess.access = accessContext([ngeeAnn]);
@@ -167,9 +167,9 @@ describe("published Overview URL reload", () => {
     await act(async () => openIncident?.click());
     const dialog = document.querySelector<HTMLElement>("[role='dialog']");
     const average = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])
-      .find((button) => button.textContent === "Average");
+      .find((button) => button.textContent === "Comparable-day average");
     const selected = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])
-      .find((button) => button.textContent === "Selected");
+      .find((button) => button.textContent === "Selected day");
     const load = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])
       .find((button) => button.textContent === "Load");
     const light = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])
@@ -177,20 +177,20 @@ describe("published Overview URL reload", () => {
     expect(average?.getAttribute("aria-pressed")).toBe("true");
     expect(load?.getAttribute("aria-pressed")).toBe("true");
 
+    const navigationCountBeforeDetail = mockedRouter.replace.mock.calls.length;
     await act(async () => selected?.click());
     await act(async () => light?.click());
+    expect(selected?.getAttribute("aria-pressed")).toBe("true");
+    expect(light?.getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelector("[data-anomaly-inline-detail='true']")).toBe(dialog);
+    expect(mockedRouter.replace).toHaveBeenCalledTimes(navigationCountBeforeDetail);
+
     const close = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])
       .find((button) => button.textContent === "Close");
     await act(async () => close?.click());
 
-    const navigations = mockedRouter.replace.mock.calls.map(([href]) => href);
-    expect(navigations).toHaveLength(3);
-    expect(navigations[1]).toContain("scopeId=project&resource=electricity&grain=day&comparison=selected&category=load");
-    expect(navigations[1]).toContain("currentDataSnapshotId=");
-    expect(navigations[1]).not.toContain("period=");
-    expect(navigations[2]).toContain("scopeId=project&resource=electricity&grain=day&comparison=selected&category=light");
-    expect(navigations[2]).toContain("currentDataSnapshotId=");
-    expect(navigations[2]).not.toContain("period=");
+    expect(document.querySelector("[data-anomaly-inline-detail='true']")).toBeNull();
+    expect(mockedRouter.replace).toHaveBeenCalledTimes(navigationCountBeforeDetail);
     expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
   });
 
@@ -235,7 +235,7 @@ describe("published Overview URL reload", () => {
     });
 
     expect(container.textContent).toContain("Decision themes unavailable");
-    expect(container.textContent).toContain("Verified figures");
+    expect(container.textContent).toContain("Key Highlights");
     expect(container.textContent).toContain("Energy decision overview");
     expect(container.textContent).toContain("Rolling 28-day view");
     expect(container.textContent).toContain("20 May 2026–16 Jun 2026");
@@ -251,14 +251,18 @@ describe("published Overview URL reload", () => {
       anchor.textContent,
       anchor.getAttribute("href"),
     ])).toEqual([
-      ["Takeaways", "#ngee-ann-takeaways"],
-      ["Verified figures", "#ngee-ann-key-highlights"],
-      ["AI analysis", "#ngee-ann-ai-analysis"],
-      ["Change over time", "#ngee-ann-change"],
-      ["Main contributors", "#ngee-ann-location"],
-      ["Time patterns", "#ngee-ann-timing"],
+      ["Daily trend", "#ngee-ann-daily-trend"],
+      ["Executive summary", "#ngee-ann-executive-summary"],
+      ["Summary of findings", "#ngee-ann-summary-findings"],
+      ["Day profile", "#ngee-ann-day-profile-analysis"],
+      ["Energy health", "#ngee-ann-energy-health"],
+      ["Circuit analysis", "#ngee-ann-circuit-analysis"],
+      ["Recommendations", "#ngee-ann-recommendations"],
       ["Evidence", "#ngee-ann-evidence"],
     ]);
+    for (const anchor of Array.from(contents?.querySelectorAll<HTMLAnchorElement>("a") ?? [])) {
+      expect(container.querySelector(anchor.getAttribute("href")!)).not.toBeNull();
+    }
     expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
     expect(resolveProjectAnalysis).toHaveBeenCalledWith({
       projectId: "ngee-ann-polytechnic",

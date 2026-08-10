@@ -108,7 +108,7 @@ describe("NgeeAnnOverviewRenderer", () => {
         label: "Largest aligned movements",
         value: "Level 7: +319.56 kWh",
         detail: "Category Load: +352.21 kWh. These are separate same-direction movements; their overlap and cause are not established.",
-        href: "#ngee-ann-location",
+        href: "#ngee-ann-circuit-analysis",
       }),
       expect.objectContaining({
         id: "first-review",
@@ -123,18 +123,34 @@ describe("NgeeAnnOverviewRenderer", () => {
       <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
     );
 
-    expect(markup).toContain("Executive summary");
+    expect(markup).toContain("Executive Summary");
     expect(markup).toContain("Energy use increased 26.4% versus the previous period");
     expect(markup).toContain("Largest aligned movements");
     expect(markup).toContain("Level 7: +319.56 kWh");
     expect(markup).toContain("Category Load: +352.21 kWh");
     expect(markup).toContain("Start with Project on 13 Jun: +105.63 kWh above its comparable-day baseline");
     expect(markup).toContain('href="#ngee-ann-comparison-evidence"');
-    expect(markup).toContain('href="#ngee-ann-location"');
+    expect(markup).toContain('href="#ngee-ann-circuit-analysis"');
     expect(markup).toContain('href="#incident-project-2026-06-13"');
-    expect(markup.indexOf("Executive summary")).toBeLessThan(markup.indexOf("Takeaways and next decisions"));
-    expect(markup.indexOf("Takeaways and next decisions")).toBeLessThan(markup.indexOf("Change over time"));
-    expect(markup.indexOf("Change over time")).toBeLessThan(markup.indexOf("Energy trend"));
+    const expectedSections = [
+      ["ngee-ann-daily-trend", "Daily Total Trend"],
+      ["ngee-ann-executive-summary", "Executive Summary"],
+      ["ngee-ann-summary-findings", "Summary of Findings"],
+      ["ngee-ann-day-profile-analysis", "Day Profile Analysis"],
+      ["ngee-ann-energy-health", "Energy Health Summary"],
+      ["ngee-ann-circuit-analysis", "Circuit Category Analysis"],
+      ["ngee-ann-recommendations", "Personalized Recommendations"],
+      ["ngee-ann-evidence", "Evidence and calculation details"],
+    ] as const;
+    const container = document.createElement("div");
+    container.innerHTML = markup;
+    expect(Array.from(container.querySelectorAll<HTMLElement>("[data-overview-section]"), (section) => section.id))
+      .toEqual(expectedSections.map(([id]) => id));
+    for (let index = 1; index < expectedSections.length; index += 1) {
+      expect(markup.indexOf(expectedSections[index - 1]![1])).toBeLessThan(markup.indexOf(expectedSections[index]![1]));
+    }
+    expect(markup).toContain("Detected Anomaly List");
+    expect(container.querySelectorAll("[data-template-anomaly-trigger]")).toHaveLength(1);
   });
 
   it("withholds aligned movements instead of relabelling opposite-direction facts", () => {
@@ -357,10 +373,11 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Ask AI Analyst");
     expect(markup).toContain("AI energy analyst");
     expect(markup).toContain("Inspecting scoped data");
-    expect(markup.indexOf("Executive summary")).toBeLessThan(markup.indexOf("Verified figures"));
-    expect(markup.indexOf("Verified figures")).toBeLessThan(markup.indexOf("Takeaways and next decisions"));
-    expect(markup.indexOf("Takeaways and next decisions")).toBeLessThan(markup.indexOf("AI energy analyst"));
-    expect(markup.indexOf("AI energy analyst")).toBeLessThan(markup.indexOf("Change over time"));
+    expect(markup.indexOf("Daily Total Trend")).toBeLessThan(markup.indexOf("Executive Summary"));
+    expect(markup.indexOf("Executive Summary")).toBeLessThan(markup.indexOf("Key Highlights"));
+    expect(markup.indexOf("Circuit Category Analysis")).toBeLessThan(markup.indexOf("Personalized Recommendations"));
+    expect(markup.indexOf("Personalized Recommendations")).toBeLessThan(markup.indexOf("AI energy analyst"));
+    expect(markup.indexOf("AI energy analyst")).toBeLessThan(markup.indexOf("Evidence and calculation details"));
 
     const container = document.createElement("div");
     container.innerHTML = markup;
@@ -423,7 +440,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).not.toContain("View supporting evidence");
     expect(markup).not.toContain("Recommended action");
     expect(markup).not.toContain("Review the strongest supported Level, Circuit and hourly Evidence before changing schedules or equipment.");
-    expect(markup).toContain("Verified figures");
+    expect(markup).toContain("Key Highlights");
   });
 
   it("fails invalid priorities closed while leaving the rest of the Golden Overview visible", () => {
@@ -436,7 +453,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Decision themes unavailable");
     expect(markup).toContain("order or Evidence contract is invalid");
     expect(markup).toContain("1,531.17");
-    expect(markup).toContain("Energy trend");
+    expect(markup).toContain("Daily Total Trend");
   });
 
   it("uses a warning badge for a server-owned partial priority", () => {
@@ -486,12 +503,12 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Energy trend");
     expect(markup).toContain("When did accepted energy use change inside the selected Period?");
     expect(markup).toContain("Energy trend Scope");
-    expect(markup).toContain("7 daily buckets");
+    expect(markup).toContain("5 daily buckets");
     expect(markup).toContain("Trend evidence / daily_totals_v1");
-    expect(markup).toContain("Priority usage exceptions");
-    expect(markup).toContain("Focus on the largest gaps from comparable days");
-    expect(markup).toContain("Largest gap to review first");
-    expect(markup.match(/data-priority-anomaly-trigger="true"/g)).toHaveLength(3);
+    expect(markup).toContain("Detected Anomaly List");
+    expect(markup).toContain("Open a flagged day to compare its accepted 24-hour Circuit evidence");
+    expect(markup).toContain("Threshold");
+    expect(markup.match(/data-template-anomaly-trigger="true"/g)).toHaveLength(1);
     expect(markup.match(/data-anomaly-trigger="true"/g)).toHaveLength(7);
     expect(markup).toContain("View all 7 flagged checks");
     expect(markup).toContain("How these exceptions were selected");
@@ -572,11 +589,10 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("level-7");
     expect(markup).toContain("No · explanatory component");
     expect(markup).toContain("[2026-06-09T16:00:00.000Z, 2026-06-16T16:00:00.000Z)");
-    expect(markup.indexOf("Energy trend")).toBeLessThan(markup.indexOf("Energy distribution"));
-    expect(markup.indexOf("Energy trend")).toBeLessThan(markup.indexOf("Priority usage exceptions"));
-    expect(markup.indexOf("Priority usage exceptions")).toBeLessThan(markup.indexOf("Energy distribution"));
+    expect(markup.indexOf("Daily Total Trend")).toBeLessThan(markup.indexOf("Executive Summary"));
+    expect(markup.indexOf("Detected Anomaly List")).toBeLessThan(markup.indexOf("Executive Summary"));
+    expect(markup.indexOf("Day Profile Analysis")).toBeLessThan(markup.indexOf("Energy distribution"));
     expect(markup.indexOf("Energy distribution")).toBeLessThan(markup.indexOf("Energy composition"));
-    expect(markup.indexOf("Energy composition")).toBeLessThan(markup.indexOf("Day profile"));
     expect(markup.indexOf("Day profile")).toBeLessThan(markup.indexOf("Usage heatmap"));
     expect(markup.indexOf("Usage heatmap")).toBeLessThan(markup.indexOf("Evidence and calculation details"));
     expect(markup.indexOf("Accounting trace")).toBeLessThan(markup.indexOf("Derived meter trace"));
@@ -741,7 +757,7 @@ describe("NgeeAnnOverviewRenderer", () => {
       <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
     );
 
-    expect(markup).toContain("7 daily buckets");
+    expect(markup).toContain("5 daily buckets");
     expect(markup).toContain("Day profile unavailable");
     expect(markup).toContain("Usage heatmap unavailable");
     expect(markup).toContain("does not include the authoritative hourly time grid");
@@ -799,7 +815,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(suppressedMarkup).toContain("prevented a trustworthy conclusion for every check");
     expect(suppressedMarkup).not.toContain("data-anomaly-trigger=\"true\"");
     for (const markup of [absentMarkup, unavailableMarkup, invalidMarkup, suppressedMarkup]) {
-      expect(markup).toContain("Energy trend");
+      expect(markup).toContain("Daily Total Trend");
       expect(markup).toContain("Day profile");
       expect(markup).toContain("Energy distribution");
     }
@@ -822,7 +838,7 @@ describe("NgeeAnnOverviewRenderer", () => {
 
     expect(markup).toContain("7 checks crossed both published thresholds; 13 stayed within threshold; 1 could not be classified.");
     expect(markup).toContain("Suppressed checks are not counted as normal.");
-    expect(markup.match(/data-priority-anomaly-trigger="true"/g)).toHaveLength(3);
+    expect(markup.match(/data-template-anomaly-trigger="true"/g)).toHaveLength(1);
     expect(markup.match(/data-anomaly-trigger="true"/g)).toHaveLength(7);
   });
 
@@ -1243,7 +1259,32 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(container.textContent).toContain("Governed baseline 138.88 kWh");
   });
 
-  it("opens a frozen daily incident, switches exact server modes, closes and restores trigger focus", async () => {
+  it("keeps the template Day Type, Scope, anomaly list and detail heatmap on one interaction path", async () => {
+    await renderGolden();
+
+    const trend = container.querySelector("#ngee-ann-daily-trend")!;
+    expect(trend.querySelectorAll("[data-trend-point]")).toHaveLength(5);
+    expect(trend.querySelectorAll("[data-template-anomaly-trigger]")).toHaveLength(1);
+    expect(filterButton("Day Type", "Weekday")?.getAttribute("aria-pressed")).toBe("true");
+    expect(filterButton("Day Type", "Holiday")?.hasAttribute("disabled")).toBe(true);
+
+    await act(async () => filterButton("Day Type", "Weekend")?.click());
+    expect(trend.querySelectorAll("[data-trend-point]")).toHaveLength(2);
+    expect(trend.querySelectorAll("[data-template-anomaly-trigger]")).toHaveLength(2);
+    expect(trend.textContent).toContain("13 Jun Sat");
+    expect(trend.textContent).toContain("14 Jun Sun");
+
+    const row = trend.querySelector<HTMLElement>("[data-template-anomaly-trigger]")!;
+    await act(async () => row.focus());
+    await act(async () => row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    const dialog = anomalyDialog()!;
+    expect(dialog.textContent).toContain("24-hour deviation heatmap");
+    expect(dialog.querySelector("[data-anomaly-detail-heatmap]")).not.toBeNull();
+    expect(dialog.querySelectorAll("[data-anomaly-detail-heatmap] button")).toHaveLength(72);
+    expect((document.activeElement as HTMLElement)?.textContent).toBe("Close");
+  });
+
+  it("opens an inline frozen daily incident, switches exact server modes, closes and restores trigger focus", async () => {
     await renderGolden();
     expect(anomalyTriggers()).toHaveLength(7);
     const trigger = anomalyTriggers()[0]!;
@@ -1251,9 +1292,12 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     await activateNativeButton(trigger, "Enter");
     let dialog = anomalyDialog()!;
     expect(dialog).toBeTruthy();
-    expect(dialog.textContent).toContain("Project / Thu 11 Jun");
+    expect(dialog.textContent).toContain("Anomaly Detail — 11 Jun Thu");
+    expect(dialog.textContent).toContain("weekday baseline · Project");
+    expect(dialog.getAttribute("aria-modal")).toBeNull();
+    expect(dialog.getAttribute("data-anomaly-inline-detail")).toBe("true");
     expect((document.activeElement as HTMLElement)?.textContent).toBe("Close");
-    expect(anomalyFilterButton("Comparison view", "Overlay")?.getAttribute("aria-pressed")).toBe("true");
+    expect(anomalyFilterButton("Comparison view", "Overlay comparison")?.getAttribute("aria-pressed")).toBe("true");
     expect(dialog.querySelectorAll("[data-anomaly-series]")).toHaveLength(3);
     expect(dialog.textContent).toContain("Official Scope series · included in the official total");
     expect(dialog.textContent).not.toContain("路");
@@ -1271,7 +1315,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     await act(async () => point.focus());
     expect(dialog.textContent).toContain("Impact");
 
-    await act(async () => anomalyFilterButton("Comparison view", "Selected")?.click());
+    await act(async () => anomalyFilterButton("Comparison view", "Selected day")?.click());
     point = dialog.querySelector<HTMLButtonElement>('[data-anomaly-series="scope:project"] button')!;
     expect(point.getAttribute("aria-label")).toContain("selected");
     expect(point.getAttribute("aria-label")).not.toContain("average");
@@ -1281,7 +1325,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(selectedDetail).not.toContain("Average");
     expect(selectedDetail).not.toContain("Impact");
 
-    await act(async () => anomalyFilterButton("Comparison view", "Average")?.click());
+    await act(async () => anomalyFilterButton("Comparison view", "Comparable-day average")?.click());
     point = dialog.querySelector<HTMLButtonElement>('[data-anomaly-series="scope:project"] button')!;
     expect(point.getAttribute("aria-label")).not.toContain("selected");
     expect(point.getAttribute("aria-label")).toContain("average");
@@ -1299,16 +1343,8 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
 
     await activateNativeButton(trigger, " ");
     dialog = anomalyDialog()!;
-    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
-      "button:not([disabled]), summary, a[href], input, select, textarea, [tabindex]:not([tabindex='-1'])",
-    ));
-    const first = focusable[0]!;
-    const last = focusable.at(-1)!;
-    await act(async () => last.focus());
-    await act(async () => {
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
-    });
-    expect(document.activeElement).toBe(first);
+    expect(dialog.getAttribute("aria-modal")).toBeNull();
+    expect(dialog.parentElement).toBe(container.querySelector("#ngee-ann-detected-anomaly-list"));
     await act(async () => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     });
@@ -1324,7 +1360,8 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     await act(async () => trigger.click());
     const dialog = anomalyDialog()!;
     expect(dialog).toBeTruthy();
-    expect(dialog.textContent).toContain("Project / Sat 13 Jun");
+    expect(dialog.textContent).toContain("Anomaly Detail — 13 Jun Sat");
+    expect(dialog.textContent).toContain("weekend baseline · Project");
     expect((document.activeElement as HTMLElement)?.textContent).toBe("Close");
 
     await act(async () => {
@@ -1339,7 +1376,8 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     await act(async () => anomalyTriggers()[3]!.click());
     const dialog = anomalyDialog()!;
 
-    expect(dialog.textContent).toContain("Level 7 / Thu 11 Jun");
+    expect(dialog.textContent).toContain("Anomaly Detail — 11 Jun Thu");
+    expect(dialog.textContent).toContain("weekday baseline · Level 7");
     expect(dialog.querySelectorAll("[data-anomaly-series]")).toHaveLength(3);
     await act(async () => anomalyFilterButton("Category", "Load")?.click());
     expect(dialog.querySelectorAll("[data-anomaly-series]")).toHaveLength(1);
@@ -1383,7 +1421,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     async ({ mutate }) => {
       await renderGolden();
       await act(async () => anomalyTriggers()[3]!.click());
-      await act(async () => anomalyFilterButton("Comparison view", "Average")?.click());
+      await act(async () => anomalyFilterButton("Comparison view", "Comparable-day average")?.click());
       await act(async () => anomalyFilterButton("Category", "Load")?.click());
       await act(async () => anomalyFilterButton("Scope", "Level 7 component Load")?.click());
       const oldDialog = anomalyDialog()!;
@@ -1404,7 +1442,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
       expect(document.activeElement).not.toBe(oldFocusedPoint);
       await act(async () => anomalyTriggers()[3]!.click());
       expect((document.activeElement as HTMLElement)?.textContent).toBe("Close");
-      expect(anomalyFilterButton("Comparison view", "Overlay")?.getAttribute("aria-pressed")).toBe("true");
+      expect(anomalyFilterButton("Comparison view", "Overlay comparison")?.getAttribute("aria-pressed")).toBe("true");
       expect(anomalyFilterButton("Scope", "All")?.getAttribute("aria-pressed")).toBe("true");
       expect(anomalyFilterButton("Category", "All")?.getAttribute("aria-pressed")).toBe("true");
     },
@@ -1455,12 +1493,12 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     )!;
     await act(async () => heatmapCell.click());
     await act(async () => anomalyTriggers()[0]!.click());
-    await act(async () => anomalyFilterButton("Comparison view", "Average")?.click());
+    await act(async () => anomalyFilterButton("Comparison view", "Comparable-day average")?.click());
     expect(trendPoint.getAttribute("aria-pressed")).toBe("true");
     expect(profilePoint.getAttribute("aria-pressed")).toBe("true");
     expect(heatmapCell.getAttribute("aria-pressed")).toBe("true");
     expect(anomalyDialog()).toBeTruthy();
-    expect(anomalyFilterButton("Comparison view", "Average")?.getAttribute("aria-pressed")).toBe("true");
+    expect(anomalyFilterButton("Comparison view", "Comparable-day average")?.getAttribute("aria-pressed")).toBe("true");
 
     const next = ngeeAnnSingleDaySnapshot({ includeDailyTotals: false });
     await act(async () => {
