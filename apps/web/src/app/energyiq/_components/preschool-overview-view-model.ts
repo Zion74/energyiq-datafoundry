@@ -733,10 +733,7 @@ function buildForecastView(
 ): PreschoolOverviewViewModel["forecast"] {
   const lifecycle = snapshot.preschoolPlanningLifecycle;
   if (!lifecycle || lifecycle.status !== "available" || !lifecycle.forecast) {
-    return {
-      status: "unavailable",
-      detail: "A Snapshot-bound Forecast series is unavailable. June Actual is never simulated or borrowed from another Snapshot.",
-    };
+    return buildEstimateOnlyForecastView(snapshot);
   }
   const forecast = lifecycle.forecast;
   const identityMatches = lifecycle.targetPeriod.start === "2026-06-01"
@@ -803,6 +800,84 @@ function buildForecastView(
     planEvidence: `Saved ${lifecycle.planProvenance.savedAnalysisId} · Snapshot ${lifecycle.planProvenance.dataSnapshotId} · ${lifecycle.planProvenance.queryId}`,
     actualEvidence: `Current Snapshot ${lifecycle.actualProvenance.dataSnapshotId} · ${lifecycle.actualProvenance.queryId}`,
   };
+}
+
+function buildEstimateOnlyForecastView(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+): PreschoolOverviewViewModel["forecast"] {
+  const plan = resolvePlanningReference(snapshot);
+  const estimateSeries = plan?.estimateSeries;
+  const identityMatches = plan?.targetPeriod.start === "2026-06-01"
+    && plan.targetPeriod.endInclusive === "2026-06-30"
+    && plan.targetPeriod.days === 30
+    && plan.evidence.dataSnapshotId === snapshot.dataSnapshot.id
+    && plan.evidence.queryId === "daily_totals_v1"
+    && estimateSeries?.contract.id === "preschool-june-2026-estimate-series"
+    && estimateSeries.contract.version === "1";
+  const portfolio = estimateSeries?.scopes.find((scope) => scope.scopeRole === "portfolio");
+  if (!identityMatches || !estimateSeries || !portfolio) {
+    return {
+      status: "unavailable",
+      detail: "A Snapshot-bound Forecast series is unavailable. June Actual is never simulated or borrowed from another Snapshot.",
+    };
+  }
+  const scopes = estimateSeries.scopes.map((scope) => ({
+    scopeId: scope.scopeId,
+    label: scope.scopeName,
+    scopeType: scope.scopeType,
+    role: scope.scopeRole,
+    status: "waiting" as const,
+    statusLabel: "Awaiting June actual" as const,
+    estimatedEnergy: `${formatNumber(scope.estimatedKwh, 0)} kWh`,
+    estimatedCost: `S$${formatNumber(scope.estimatedCostBeforeGstSgd, 0)}`,
+    consumedSoFar: "Not available yet",
+    paceVsEstimate: "Not available yet",
+    paceDetail: "Available after the first complete June day",
+    coverage: "0 / 30 complete days",
+    outcome: null,
+    buckets: {
+      daily: scope.buckets.daily.map(estimateOnlyForecastBucketView),
+      weekly: scope.buckets.weekly.map(estimateOnlyForecastBucketView),
+      monthly: scope.buckets.monthly.map(estimateOnlyForecastBucketView),
+    },
+  }));
+  return {
+    status: "waiting",
+    statusLabel: "Awaiting June actual",
+    statusDetail: "Estimate is ready from the current May Snapshot; June Actual has no complete days yet.",
+    targetPeriod: "1–30 Jun 2026",
+    defaultScopeId: portfolio.scopeId,
+    centreSelectionAvailable: scopes.some((scope) => scope.role === "centre"),
+    scopes,
+    method: estimateSeries.contract.method,
+    planEvidence: `Current Snapshot ${plan.evidence.dataSnapshotId} · ${plan.evidence.queryId}`,
+    actualEvidence: "June Actual not available yet",
+  };
+}
+
+type PlanningEstimateBucket = NonNullable<
+  NonNullable<ReturnType<typeof resolvePlanningReference>>["estimateSeries"]
+>["scopes"][number]["buckets"]["daily"][number];
+
+function estimateOnlyForecastBucketView(bucket: PlanningEstimateBucket) {
+  const targetDayCount = forecastBucketDayCount(bucket.start, bucket.endExclusive);
+  return {
+    label: formatForecastBucketLabel(bucket.start, bucket.endExclusive),
+    start: bucket.start,
+    endExclusive: bucket.endExclusive,
+    estimateKwh: bucket.estimatedKwh,
+    estimate: `${formatNumber(bucket.estimatedKwh, 0)} kWh`,
+    actualKwh: null,
+    actual: "Waiting",
+    actualStatus: "waiting" as const,
+    coverage: `0 / ${targetDayCount} complete days`,
+  };
+}
+
+function forecastBucketDayCount(start: string, endExclusive: string): number {
+  const startMs = Date.parse(`${start}T00:00:00.000Z`);
+  const endMs = Date.parse(`${endExclusive}T00:00:00.000Z`);
+  return Math.max(1, Math.round((endMs - startMs) / 86_400_000));
 }
 
 function forecastStatusLabel(

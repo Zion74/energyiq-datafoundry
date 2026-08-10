@@ -62,7 +62,14 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup).toContain("Consumed So Far");
     expect(markup).toContain("Pace vs Estimate");
     expect(markup).toContain("Method, tariff and evidence");
-    expect(markup).toContain('data-forecast-status="unavailable"');
+    expect(markup).toContain('data-forecast-status="waiting"');
+    expect(markup).toContain("Awaiting June actual");
+    expect(markup).toContain("24,348 kWh");
+    expect(markup).toContain("S$6,640");
+    expect(markup).toContain("Actual not available yet. The Estimate remains visible; no June Actual line is invented.");
+    expect(markup).toContain("Centre A");
+    expect(markup).toContain('data-series="estimate"');
+    expect(markup).toContain('d="" fill="none" stroke="currentColor" class="text-foreground"');
     expect(markup).toContain("View normalisation and evidence");
     const sectionPositions = PRESCHOOL_OVERVIEW_SECTIONS.map((section) => markup.indexOf(`id="${section.id}"`));
     expect(sectionPositions.every((position) => position >= 0)).toBe(true);

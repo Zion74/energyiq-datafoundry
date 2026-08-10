@@ -439,7 +439,6 @@ const buildForecast = (input: {
   const portfolioScopeId = input.planAnalysis.context?.scopeId;
   if (!portfolioScopeId) return null;
   if (!actualScopesById.has(portfolioScopeId)) return null;
-  const rate = input.plan.tariffReference.beforeGstSgdPerKwh;
   const scopes = estimateSeries.scopes.flatMap((estimateScope) => {
     const actualScope = actualScopesById.get(estimateScope.scopeId);
     if (!actualScope) return [];
@@ -483,7 +482,7 @@ const buildForecast = (input: {
       scopeType: estimateScope.scopeType ?? actualScope.scopeType ?? (estimateScope.scopeId === portfolioScopeId ? "project" : "centre"),
       scopeRole: estimateScope.scopeRole,
       estimatedKwh: round(estimateScope.estimatedKwh),
-      estimatedCostBeforeGstSgd: round(estimateScope.estimatedKwh * rate),
+      estimatedCostBeforeGstSgd: estimateScope.estimatedCostBeforeGstSgd,
       actualKwh,
       actualCompleteDayCount,
       actualTargetDayCount: TARGET_PERIOD.targetDayCount,

@@ -72,15 +72,15 @@ related:
 
 ## 6. 执行步骤
 
-- [ ] 产出 Charles/Current 差异矩阵，并把每项标成 `retain / adapt / unavailable / drop`。
-- [ ] 为 waiting、partial、complete 三种状态先补 ViewModel/Renderer 红测。
-- [ ] 若 DTO 缺趋势/范围数据，补最小服务端 Projection 测试和字段；不得在前端复制公式。
-- [ ] 实现状态条、四 KPI、Estimate-vs-Actual 和局部切换。
-- [ ] 把旧 May 四周横条降级到 Method/Evidence 折叠区。
-- [ ] 验证切换不会修改整页 URL 主 Period、不会触发 AI、不会混用 Snapshot。
-- [ ] 完成聚焦测试、typecheck、production build 和 `git diff --check`。
+- [x] 产出 Charles/Current 差异矩阵，并把每项标成 `retain / adapt / unavailable / drop`。
+- [x] 为 waiting、partial、complete 三种状态先补 ViewModel/Renderer 红测。
+- [x] 若 DTO 缺趋势/范围数据，补最小服务端 Projection 测试和字段；不得在前端复制公式。
+- [x] 实现状态条、四 KPI、Estimate-vs-Actual 和局部切换。
+- [x] 把旧 May 四周横条降级到 Method/Evidence 折叠区。
+- [x] 验证切换不会修改整页 URL 主 Period、不会触发 AI、不会混用 Snapshot。
+- [x] 完成聚焦测试、typecheck、production build 和 `git diff --check`。
 - [ ] 使用 Chrome 验收 1440×900、1920×1080、tablet；至少覆盖 waiting 与 available/partial 状态。
-- [ ] 独立提交并回报 SHA、变更文件、测试、浏览器证据和未完成边界。
+- [x] 独立提交并回报 SHA、变更文件、测试、浏览器证据和未完成边界。
 
 ## 7. 验收标准
 
@@ -110,3 +110,14 @@ related:
 - 为了有图而伪造 June actual；
 - 与 Section 5 无关的全页 redesign；
 - Task B 的 Prompt、Harness、Provider 和 Evidence Validator。
+
+## 10. 2026-08-10 集成验收状态
+
+状态：`READY-FOR-HUMAN`，不是 Charles 已验收。
+
+- Task A A5 已集成到权威开发线；固定 May 1–31 页面不再错误显示整个 Forecast unavailable。
+- 当前 Snapshot 已有的 June Estimate 直接显示为 waiting：26,240 kWh、S$7,156、0/30 complete days；Actual 与 Pace 明确等待，不制造 Actual。
+- Daily / Weekly / Monthly 与 Portfolio / 30 Centres 均为 Section-local；真实 Chrome 操作后整页 URL 保持不变。
+- 当前 1422px Chrome 无 document-level 横向溢出；精确 1920 与 tablet 仍保留为人工/设备验收项。
+- 自动证据：56/56 聚焦测试、root typecheck、API build、Web production build、Impeccable detector 均通过。
+- 与模板无关但会影响整页观感的独立 Task B 问题：当前 AI Artifact 文案存在英文单词粘连，且部分 Section 无匹配 interpretation。不得把它误报成模板完成度问题，也不得在本切片跨改 AI Runtime。

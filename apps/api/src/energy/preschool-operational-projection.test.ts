@@ -395,6 +395,7 @@ describe("Preschool operational projection", () => {
     const estimateSeries = Reflect.get(projection.planningOutlook, "estimateSeries") as {
       scopes: Array<{
         estimatedKwh: number;
+        estimatedCostBeforeGstSgd: number;
         buckets: Record<"daily" | "weekly" | "monthly", Array<{ estimatedKwh: number }>>;
       }>;
     };
@@ -402,6 +403,7 @@ describe("Preschool operational projection", () => {
     expect(estimateSeries.scopes[0]?.buckets.weekly).toHaveLength(5);
     expect(estimateSeries.scopes[0]?.buckets.monthly).toHaveLength(1);
     expect(estimateSeries.scopes[0]?.buckets.daily.reduce((total, bucket) => total + bucket.estimatedKwh, 0)).toBeCloseTo(3525, 2);
+    expect(estimateSeries.scopes[0]?.estimatedCostBeforeGstSgd).toBe(961.2675);
   });
 
   it("classifies each worst Spike from the published Calendar without assuming every exception is a public holiday", () => {

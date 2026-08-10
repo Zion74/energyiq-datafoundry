@@ -753,6 +753,7 @@ export type PreschoolPlanningEstimateSeries = {
     scopeType: string;
     scopeRole: "portfolio" | "centre";
     estimatedKwh: number;
+    estimatedCostBeforeGstSgd: number;
     buckets: Record<"daily" | "weekly" | "monthly", PreschoolPlanningEstimateBucket[]>;
   }>;
 };
@@ -903,6 +904,9 @@ export const buildPreschoolPlanningEstimateSeries = (
       scopeType: scope.scopeType ?? (scope.scopeId === portfolioScopeId ? "project" : "centre"),
       scopeRole: scope.scopeId === portfolioScopeId ? "portfolio" as const : "centre" as const,
       estimatedKwh: estimatedTarget,
+      estimatedCostBeforeGstSgd: round(
+        estimatedTarget * PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh,
+      ),
       buckets: {
         daily,
         weekly: aggregatePlanningEstimate(daily, 7),

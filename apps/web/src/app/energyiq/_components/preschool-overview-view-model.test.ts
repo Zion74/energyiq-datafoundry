@@ -350,6 +350,36 @@ describe("Preschool Overview ViewModel", () => {
       ],
     });
     expect(view.liveForecast).toMatchObject({ status: "unavailable", label: "Unavailable" });
+    expect(view.forecast).toMatchObject({
+      status: "waiting",
+      statusLabel: "Awaiting June actual",
+      targetPeriod: "1–30 Jun 2026",
+      defaultScopeId: "preschool-project",
+      centreSelectionAvailable: true,
+      planEvidence: "Current Snapshot preschool-26b85b9c0b95e090 · daily_totals_v1",
+      actualEvidence: "June Actual not available yet",
+      scopes: expect.arrayContaining([
+        expect.objectContaining({
+          scopeId: "preschool-project",
+          estimatedEnergy: "24,348 kWh",
+          estimatedCost: "S$6,640",
+          consumedSoFar: "Not available yet",
+          paceVsEstimate: "Not available yet",
+          coverage: "0 / 30 complete days",
+        }),
+        expect.objectContaining({ scopeId: "preschool-centre-1", role: "centre" }),
+      ]),
+    });
+    if (view.forecast.status === "unavailable") throw new Error(view.forecast.detail);
+    expect(view.forecast.scopes[0]?.buckets.daily).toHaveLength(30);
+    expect(view.forecast.scopes[0]?.buckets.weekly).toHaveLength(5);
+    expect(view.forecast.scopes[0]?.buckets.monthly).toHaveLength(1);
+    expect(view.forecast.scopes[0]?.buckets.daily[0]).toMatchObject({
+      actualKwh: null,
+      actual: "Waiting",
+      actualStatus: "waiting",
+      coverage: "0 / 1 complete days",
+    });
     if (view.planningOutlook.status !== "provisional") throw new Error(view.planningOutlook.detail);
     expect(view.planningOutlook.limitations.join(" ")).toContain("not the customer's contract or bill");
     expect(JSON.stringify(view.planningOutlook)).not.toMatch(/28,011|7,639|simulated actual/i);

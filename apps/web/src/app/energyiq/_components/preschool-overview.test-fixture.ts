@@ -1,6 +1,42 @@
 import type { EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
 import { ngeeAnnGoldenSnapshot } from "./ngee-ann-overview.test-fixture";
 
+function fixturePlanningEstimateScope(input: {
+  scopeId: string;
+  scopeName: string;
+  scopeType: string;
+  scopeRole: "portfolio" | "centre";
+  estimatedKwh: number;
+}) {
+  const daily = Array.from({ length: 30 }, (_, index) => ({
+    start: `2026-06-${String(index + 1).padStart(2, "0")}`,
+    endExclusive: index === 29
+      ? "2026-07-01"
+      : `2026-06-${String(index + 2).padStart(2, "0")}`,
+    estimatedKwh: input.estimatedKwh / 30,
+  }));
+  const aggregate = (size: number) => Array.from(
+    { length: Math.ceil(daily.length / size) },
+    (_, index) => {
+      const rows = daily.slice(index * size, (index + 1) * size);
+      return {
+        start: rows[0]!.start,
+        endExclusive: rows.at(-1)!.endExclusive,
+        estimatedKwh: rows.reduce((total, row) => total + row.estimatedKwh, 0),
+      };
+    },
+  );
+  return {
+    ...input,
+    estimatedCostBeforeGstSgd: input.estimatedKwh * 0.2727,
+    buckets: {
+      daily,
+      weekly: aggregate(7),
+      monthly: aggregate(30),
+    },
+  };
+}
+
 export function preschoolGoldenSnapshot(): EnergyProjectAnalysisSnapshotDto {
   const base = structuredClone(ngeeAnnGoldenSnapshot());
   const centreCodes = [
@@ -482,6 +518,29 @@ export function preschoolGoldenSnapshot(): EnergyProjectAnalysisSnapshotDto {
           dataSnapshotId: "preschool-26b85b9c0b95e090",
           queryId: "daily_totals_v1",
           recipeId: "preschool-naive-weekly-planning-baseline-v1",
+        },
+        estimateSeries: {
+          contract: {
+            id: "preschool-june-2026-estimate-series",
+            version: "1",
+            method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total",
+          },
+          scopes: [
+            fixturePlanningEstimateScope({
+              scopeId: "preschool-project",
+              scopeName: "Preschool Portfolio",
+              scopeType: "project",
+              scopeRole: "portfolio",
+              estimatedKwh: 24_348.2143,
+            }),
+            fixturePlanningEstimateScope({
+              scopeId: "preschool-centre-1",
+              scopeName: "Centre A",
+              scopeType: "centre",
+              scopeRole: "centre",
+              estimatedKwh: 843.0985,
+            }),
+          ],
         },
         limitations: [
           "Planning baseline only; it is not an AI or validated statistical forecast.",

@@ -1543,6 +1543,7 @@ export type PreschoolPlanningEstimateSeriesDto = {
     scopeType: string;
     scopeRole: "portfolio" | "centre";
     estimatedKwh: number;
+    estimatedCostBeforeGstSgd: number;
     buckets: Record<"daily" | "weekly" | "monthly", Array<{
       start: string;
       endExclusive: string;
