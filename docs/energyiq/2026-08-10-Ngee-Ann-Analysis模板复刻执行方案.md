@@ -356,3 +356,94 @@ http://127.0.0.1:4178/analysis?utility=electricity&project=proj-nap-energy-analy
 - Circuit 文案已明确为 `Ranked by current usage only. This is not an anomaly, priority or savings ranking.`，不再把 absolute usage 写成调查优先级；
 - 未新增 SQL、Projection、服务端公式、Structured Signal、AI Artifact 或共享平台；展示级摘要没有进入 Decision Priority；
 - ViewModel 测试 `150/150`、Renderer/interaction 测试 `59/59` 通过；零基线回归明确保留当前 contributor、只隐藏无法定义的百分比 movement。根 TypeScript typecheck、根 build 与 `git diff --check` 通过；真实 Chrome 1440/1920、视觉密度和 Charles 人工验收仍待完成。
+
+## 17. NAP-A4 执行切片：Action → Why → Verify 决策闭环（2026-08-10）
+
+### 17.1 开发前现状检查
+
+当前正式链路已经具备这一切片的大部分事实能力，不应重复建设：
+
+- 服务端 `decisionPriorities` 已把同一 Snapshot 的 daily exception、1d/7d/28d Horizon、最大支持 Scope、影响量、下一步检查和验证 Metric 组织为一个权威主题；
+- ViewModel 会校验 Snapshot、Release、Rule、rank、Evidence、Action target 和 Verification metric，合同失配时 fail closed；
+- Renderer 已有一句话结论、Why、Where、Next check、Verify 与折叠 Evidence，但漏显 ViewModel 已接收的正式 Action，且三时间尺度详情占据主卡较多空间；
+- 当前 Golden 只有一条可证明的主题，因此显示 1 张卡是正确结果。`2–4` 是上限，不是必须填满的配额。
+
+### 17.2 自我 Grilling 与决定
+
+**Q1：为了对齐原型，是否应固定生成 2–4 张行动卡？**
+
+不应。当前权威事实只支持一条合并后的 recurring daily-exception 主题。拆成多张卡会把同一问题重复三遍，或要求浏览器创造新的优先级。
+
+**Q2：是否应复制原型里的 saving、owner 和 Add to Action Log？**
+
+不应。当前 Evidence 没有节省量、责任人或已接入的 Action workflow。MVP 只显示可执行的 `next check` 和 `verification metric`；这些字段有正式事实或工作流之前继续隐藏。
+
+**Q3：是否应由确定性代码解释根因和“不做的后果”？**
+
+不应。确定性层只说明观测事实、影响量、可定位的 Scope/Circuit 和验证方法；根因、管理意义与后果属于 AI interpretation，但必须标为假设或建议并引用同一 Snapshot Evidence。
+
+**Q4：现有 A4 是否需要立即改代码？**
+
+先不假定需要。先做浏览器阅读路径、降级态和重复信息复核；若当前卡已能让用户在 30 秒内回答“发生了什么、先查哪里、怎么验证”，则把 A4 记录为复用既有能力的工程验收，不为制造提交而重写组件。
+
+### 17.3 验收
+
+- 只显示 Runtime/服务端接受的优先主题，不由前端补卡或重排事实；
+- 每张卡必须同时回答 What、Why it matters、Where/Next check 和 Verify；
+- 1d/7d/28d 使用同 Snapshot、统一 cutoff，缺失 Horizon 单独显示 Unavailable；
+- 技术 Evidence、Rule、Snapshot id 和限制默认折叠，不占主要阅读路径；
+- Explorer 跳转保留 Project、Scope、Period、Snapshot 和 Release；
+- 不显示无 Evidence 的 saving、ROI、owner、承诺或已完成动作；
+- `empty / partial / suppressed / unavailable` 不生成假行动卡。
+
+### 17.4 停止条件
+
+- 需要新增 Kernel、Action Log、节省计算或第二套 AI Run 才能完成；
+- 为了卡片数量拆分同一主题或重复日、周、28 日结论；
+- 需要让前端重新计算影响、排序或验证阈值；
+- 把调查建议写成已证实根因、节省承诺或合规结论。
+
+### 17.5 执行结果
+
+- 未新建 A4 Renderer；直接在现有 Decision Priority 卡补显服务端已有的 `item.action`；
+- 主路径固定为 `Takeaway → Evidence → Why → Recommended action → Where → Next check → Verify`；
+- 1d/7d/28d 完整比较移入原生 `details`，保留全部数据、aria label 和 Unavailable 状态；
+- 当前 Golden 仍只渲染一张真实卡；empty、suppressed、unavailable 和非法合同均不生成 Action；
+- 未增加 saving、ROI、owner、Action Log、expected/if-ignored、根因或第二套计算；
+- ViewModel + Renderer 共 `210/210`，root typecheck/build 与 `git diff --check` 通过；精确 1440/1920 和 Charles 人工验收仍单独待验收。
+
+## 18. NAP-A4.1 首屏数字与普通语言小修复（2026-08-10）
+
+### 18.1 触发证据
+
+真实 1280px Saved 页面显示 `4904.87 kWh`、`S$1569.56` 和 `Primary Period daily average`。数值正确，但缺少千位分隔，说明文字偏内部实现语言，降低老板或 FM 的扫读速度。
+
+### 18.2 自我 Grilling 与边界
+
+**Q1：格式化会不会改变权威数字或 Evidence？**
+
+不会。本切片只改变首屏字符串格式；原始数值、精确 Evidence、比较公式、Snapshot 与 Release 均保持不变。客户显示使用 `en-SG` 千位分隔和最多两位小数。
+
+**Q2：是否趁机统一重写全页所有数值和字号？**
+
+不做。全页机械替换会扩大回归面，也会碰到图表 axis、aria label、Evidence precision 和 UI/UX Agent 的职责。本切片只处理 Executive Summary 的总量、日均、峰值、比较详情和 Cost，以及两条明显技术化的小字。
+
+**Q3：是否应隐藏单位或 active tariff 说明？**
+
+不应。单位和 Tariff 是理解结果所必需；只把 `Official usage for this Project and Scope` 改为 `Total electricity used in the selected scope`，把 `Primary Period daily average` 改为 `Average electricity used per day in this Overview window`。
+
+### 18.3 验收与停止条件
+
+- Golden 首屏显示 `4,904.87 kWh`、`175.17 kWh/day`、`22.5 kW`、`S$1,569.56`；
+- comparison detail 同样使用千位分隔；
+- 精确 Evidence 仍保留原精度，不因首屏格式化改变；
+- 不修改 UI 色系、字号系统、共享 Renderer、SQL、Tariff 或 Snapshot；
+- 若改动要求全局格式化迁移或破坏既有 Evidence 文本，立即停止并改为独立后续 Ticket。
+
+### 18.4 执行结果
+
+- 首屏 customer-facing 总量、日均、峰值、比较详情和 Cost 使用独立的 `en-SG` 展示 formatter；Evidence exact fields 和其他模块继续使用原合同精度；
+- Golden 显示由 `1531.17` 改为 `1,531.17`，真实 Saved Snapshot 对应为 `4,904.87 kWh` 和 `S$1,569.56`；
+- 两条技术化小字已改为 `Total electricity used in the selected scope` 与 `Average electricity used per day in this Overview window`；
+- 没有修改 SQL、Tariff、Snapshot、共享 Renderer、样式系统或 UI/UX Agent 的色彩/字号职责；
+- ViewModel + Renderer 共 `210/210`，root typecheck/build 与 `git diff --check` 通过。

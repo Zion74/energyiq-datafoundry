@@ -719,23 +719,23 @@ export function buildNgeeAnnOverviewViewModel(
       {
         id: "total",
         label: "Total energy",
-        value: unavailable ? "Unavailable" : formatDecimal(analysis.summary.usageKwh, 2),
+        value: unavailable ? "Unavailable" : formatCustomerDecimal(analysis.summary.usageKwh, 2),
         unit: unavailable ? undefined : "kWh",
-        detail: "Official usage for this Project and Scope",
+        detail: "Total electricity used in the selected scope",
         available: !unavailable,
       },
       {
         id: "daily",
         label: "Daily average",
-        value: unavailable ? "Unavailable" : formatDecimal(analysis.summary.averageDailyUsageKwh, 2),
+        value: unavailable ? "Unavailable" : formatCustomerDecimal(analysis.summary.averageDailyUsageKwh, 2),
         unit: unavailable ? undefined : "kWh/day",
-        detail: "Primary Period daily average",
+        detail: "Average electricity used per day in this Overview window",
         available: !unavailable,
       },
       {
         id: "peak",
         label: "Peak interval-average power",
-        value: unavailable ? "Unavailable" : formatDecimal(analysis.summary.peakKw, 2),
+        value: unavailable ? "Unavailable" : formatCustomerDecimal(analysis.summary.peakKw, 2),
         unit: unavailable ? undefined : "kW",
         detail: unavailable
           ? "No accepted interval supports a peak"
@@ -748,10 +748,10 @@ export function buildNgeeAnnOverviewViewModel(
         id: "comparison",
         label: "Comparison",
         value: comparisonAvailable
-          ? `${formatDecimal(Math.abs(analysis.comparison.changePct!), 1)}% ${analysis.comparison.changePct! >= 0 ? "higher" : "lower"}`
+          ? `${formatCustomerDecimal(Math.abs(analysis.comparison.changePct!), 1)}% ${analysis.comparison.changePct! >= 0 ? "higher" : "lower"}`
           : "Unavailable",
         detail: comparisonAvailable
-          ? `Current ${formatDecimal(analysis.summary.usageKwh, 2)} kWh vs previous ${formatDecimal(analysis.comparison.usageKwh, 2)} kWh`
+          ? `Current ${formatCustomerDecimal(analysis.summary.usageKwh, 2)} kWh vs previous ${formatCustomerDecimal(analysis.comparison.usageKwh, 2)} kWh`
           : "No validated comparable-period usage",
         available: comparisonAvailable,
       },
@@ -759,7 +759,7 @@ export function buildNgeeAnnOverviewViewModel(
         id: "cost",
         label: "Cost",
         value: analysis.cost.status === "available" && !unavailable
-          ? `${analysis.cost.currency === "SGD" ? "S$" : `${analysis.cost.currency} `}${formatDecimal(analysis.cost.amount, 2)}`
+          ? `${analysis.cost.currency === "SGD" ? "S$" : `${analysis.cost.currency} `}${formatCustomerDecimal(analysis.cost.amount, 2)}`
           : "Unavailable",
         detail: analysis.cost.status === "available" && !unavailable
           ? `Based on ${analysis.cost.allocations.length === 1 ? "the active tariff" : `${analysis.cost.allocations.length} active tariff allocations`} for this period`
@@ -1645,7 +1645,7 @@ function buildExecutiveSummary(
       : `Energy use ${comparison.changePct! > 0 ? "increased" : "decreased"} ${formatDecimal(Math.abs(comparison.changePct!), 1)}% versus the previous period`
     : "Comparable-period change unavailable";
   const detail = comparisonAvailable
-    ? `The Project used ${formatDecimal(analysis.summary.usageKwh, 2)} kWh, ${comparison.changeKwh >= 0 ? "up" : "down"} ${formatDecimal(Math.abs(comparison.changeKwh), 2)} kWh from the validated previous period.`
+    ? `The Project used ${formatCustomerDecimal(analysis.summary.usageKwh, 2)} kWh, ${comparison.changeKwh >= 0 ? "up" : "down"} ${formatCustomerDecimal(Math.abs(comparison.changeKwh), 2)} kWh from the validated previous period.`
     : "No validated comparable-period usage is available. Current accepted energy remains visible below.";
 
   const levelDriver = levelComparison.status === "available"
@@ -3514,6 +3514,15 @@ function buildMetadataLimitation(snapshot: EnergyProjectAnalysisSnapshotDto): st
 function formatDecimal(value: number, maximumFractionDigits: number): string {
   if (!Number.isFinite(value)) return "Unavailable";
   return value.toFixed(maximumFractionDigits).replace(/\.?0+$/u, "");
+}
+
+function formatCustomerDecimal(value: number, maximumFractionDigits: number): string {
+  if (!Number.isFinite(value)) return "Unavailable";
+  return new Intl.NumberFormat("en-SG", {
+    maximumFractionDigits,
+    minimumFractionDigits: 0,
+    useGrouping: true,
+  }).format(value);
 }
 
 function signedDecimal(value: number, maximumFractionDigits: number): string {

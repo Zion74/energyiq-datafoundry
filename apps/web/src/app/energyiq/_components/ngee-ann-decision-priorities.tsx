@@ -126,9 +126,10 @@ export function NgeeAnnDecisionPriorities({
               {item.lifecycle ? (
                 <p className="mt-3 max-w-3xl text-sm leading-6 text-muted">{item.lifecycle.detail}</p>
               ) : null}
-              <HorizonComparison horizons={item.horizons} />
               <dl className="mt-5 grid gap-x-8 gap-y-4 text-sm leading-6 md:grid-cols-2">
+                <PriorityField label="Evidence" value={item.evidence} />
                 <PriorityField label="Why it matters" value={item.impact} />
+                <PriorityField label="Recommended action" value={item.action} />
                 <PriorityField label="Where to investigate first" value={item.driver} />
                 <PriorityField label="Recommended next check" value={item.nextCheck} />
                 <PriorityField label="How to confirm progress" value={item.verificationMetric} />
@@ -137,9 +138,9 @@ export function NgeeAnnDecisionPriorities({
                 <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
                   Details, evidence and limitations
                 </summary>
+                <HorizonComparison horizons={item.horizons} />
                 <div className="mt-4 text-sm leading-6 text-muted">
                   <p><span className="font-semibold text-foreground">Rule finding.</span> {item.finding}</p>
-                  <p><span className="font-semibold text-foreground">Supporting evidence.</span> {item.evidence}</p>
                   <p className="mt-2">Seen on {item.recurrenceDayCount} distinct exception days. Linked Level and Circuit evidence is preserved.</p>
                   {item.confidenceLimitation ? (
                     <p className="mt-2 text-step-warning"><span className="font-semibold">Limitation.</span> {item.confidenceLimitation}</p>

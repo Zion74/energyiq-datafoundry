@@ -361,14 +361,18 @@ describe("Ngee Ann Overview ViewModel", () => {
       qualityEvents: "0 quality events",
     });
     expect(Object.fromEntries(view.highlights.map((item) => [item.id, item.value]))).toEqual({
-      total: "1531.17",
+      total: "1,531.17",
       daily: "218.74",
       peak: "20.67",
       comparison: "26.4% higher",
       cost: "S$489.97",
     });
     expect(view.highlights.find((item) => item.id === "comparison")?.detail)
-      .toBe("Current 1531.17 kWh vs previous 1211.68 kWh");
+      .toBe("Current 1,531.17 kWh vs previous 1,211.68 kWh");
+    expect(view.highlights.find((item) => item.id === "total")?.detail)
+      .toBe("Total electricity used in the selected scope");
+    expect(view.highlights.find((item) => item.id === "daily")?.detail)
+      .toBe("Average electricity used per day in this Overview window");
     expect(view.highlights.find((item) => item.id === "cost")?.detail)
       .toBe("Based on the active tariff for this period");
     expect(view.metadataLimitation).toContain("Area and headcount metadata are missing");
@@ -1733,7 +1737,7 @@ describe("Ngee Ann Overview ViewModel", () => {
     });
     expect(view.dataStatus.recovery).toContain("Restore the missing source intervals");
     expect(view.highlights.find((item) => item.id === "total")).toMatchObject({
-      value: "1531.17",
+      value: "1,531.17",
       available: true,
     });
   });
