@@ -76,6 +76,7 @@ type PreschoolPlanningForecastBucket = {
   originalEstimateKwh: number;
   actualKwh: number | null;
   currentOutlookKwh: number | null;
+  futureOutlookKwh: number | null;
   actualCompleteDayCount: number;
   actualTargetDayCount: number;
   actualStatus: "waiting" | "partial" | "complete";
@@ -116,6 +117,7 @@ export type PreschoolPlanningForecast = {
     actualCostBeforeGstSgd: number | null;
     actualCompleteDayCount: number;
     actualTargetDayCount: number;
+    actualThroughLocalDate: string | null;
     pacePct: number | null;
     outcome: "on_plan" | "above_plan" | "below_plan" | null;
     originalEstimateIdentity: string;
@@ -224,6 +226,7 @@ export const loadPreschoolPlanningLifecycle = async (input: {
   userId: string;
   context: EnergyQueryContext;
   projectRelease: PublishedProjectRelease;
+  latestCompleteLocalDay: string;
   databasePath?: string;
 }): Promise<PreschoolPlanningLifecycle> => {
   if (
@@ -238,9 +241,8 @@ export const loadPreschoolPlanningLifecycle = async (input: {
       },
     };
   }
-  const latestCompleteLocalDay = latestCompleteLocalDayFromContext(input.context);
   const targetPeriod = resolvePreschoolMonthlyTargetPeriod(
-    latestCompleteLocalDay,
+    input.latestCompleteLocalDay,
     input.context.timezone,
   );
   return loadPreschoolPlanningLifecycleFromSavedAnalyses({
@@ -251,7 +253,7 @@ export const loadPreschoolPlanningLifecycle = async (input: {
     templateRevisionId: input.projectRelease.templateRevisionId,
     projectReleaseId: input.projectRelease.id,
     currentDataSnapshotId: input.context.dataSnapshotId,
-    latestCompleteLocalDay,
+    latestCompleteLocalDay: input.latestCompleteLocalDay,
     targetPeriod,
     savedAnalyses: input.metadataStore.energyIq.savedAnalyses.listProject(input.context.projectId),
     loadActualAnalysis: () => executeEnergyScopeAnalysis({
@@ -555,6 +557,7 @@ const buildForecast = (input: {
         : withinCutoff
           ? null
           : round(estimate.estimatedKwh);
+      const futureOutlookKwh = withinCutoff ? null : round(estimate.estimatedKwh);
       return {
         start: estimate.start,
         endExclusive: estimate.endExclusive,
@@ -562,6 +565,7 @@ const buildForecast = (input: {
         originalEstimateKwh: round(estimate.estimatedKwh),
         actualKwh,
         currentOutlookKwh,
+        futureOutlookKwh,
         actualCompleteDayCount: complete ? 1 : 0,
         actualTargetDayCount: 1,
         actualStatus: complete
@@ -572,6 +576,7 @@ const buildForecast = (input: {
       };
     });
     const actualCompleteDayCount = daily.reduce((total, bucket) => total + bucket.actualCompleteDayCount, 0);
+    const actualThroughLocalDate = consecutiveActualThroughLocalDate(daily);
     const actualKwh = actualCompleteDayCount === 0
       ? null
       : round(sum(daily.flatMap((bucket) => bucket.actualKwh === null ? [] : [bucket.actualKwh])));
@@ -614,6 +619,7 @@ const buildForecast = (input: {
         : round(actualKwh * tariffRate),
       actualCompleteDayCount,
       actualTargetDayCount: input.targetPeriod.targetDayCount,
+      actualThroughLocalDate,
       pacePct,
       outcome,
       originalEstimateIdentity,
@@ -661,6 +667,7 @@ const aggregateForecastBuckets = (
     const rows = daily.slice(offset, offset + size);
     const actualRows = rows.filter((row) => row.actualKwh !== null);
     const currentOutlookRows = rows.filter((row) => row.currentOutlookKwh !== null);
+    const futureOutlookRows = rows.filter((row) => row.futureOutlookKwh !== null);
     const actualCompleteDayCount = sum(rows.map((row) => row.actualCompleteDayCount));
     const actualTargetDayCount = sum(rows.map((row) => row.actualTargetDayCount));
     buckets.push({
@@ -672,6 +679,9 @@ const aggregateForecastBuckets = (
       currentOutlookKwh: currentOutlookRows.length === rows.length
         ? round(sum(currentOutlookRows.map((row) => row.currentOutlookKwh!)))
         : null,
+      futureOutlookKwh: futureOutlookRows.length === 0
+        ? null
+        : round(sum(futureOutlookRows.map((row) => row.futureOutlookKwh!))),
       actualCompleteDayCount,
       actualTargetDayCount,
       actualStatus: rows.every((row) => row.actualStatus === "waiting")
@@ -682,6 +692,17 @@ const aggregateForecastBuckets = (
     });
   }
   return buckets;
+};
+
+const consecutiveActualThroughLocalDate = (
+  daily: PreschoolPlanningForecastBucket[],
+): string | null => {
+  let through: string | null = null;
+  for (const bucket of daily) {
+    if (bucket.actualCompleteDayCount !== 1 || bucket.actualKwh === null) break;
+    through = bucket.start;
+  }
+  return through;
 };
 
 const sum = (values: number[]): number => values.reduce((total, value) => total + value, 0);
@@ -742,16 +763,6 @@ const lifecycleTargetPeriod = (
   DEFAULT_JUNE_TARGET_PERIOD.timezone,
 );
 
-const latestCompleteLocalDayFromContext = (context: EnergyQueryContext): string => {
-  const nextLocalDay = new Intl.DateTimeFormat("en-CA", {
-    timeZone: context.timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date(context.to));
-  return shiftLocalDate(nextLocalDay, -1);
-};
-
 const planningTargetMatches = (
   value: PlanningOutlook["targetPeriod"],
   targetPeriod: PreschoolMonthlyTargetPeriod,
@@ -798,9 +809,15 @@ const isPlanningOutlook = (
   const targetPeriod = recordField(value, "targetPeriod");
   const usageEstimate = recordField(value, "usageEstimate");
   const evidence = recordField(value, "evidence");
-  return value.status === "provisional"
-    && contract?.id === "preschool-june-2026-naive-weekly-baseline"
+  const supportedContract = (
+    contract?.id === "preschool-june-2026-naive-weekly-baseline"
     && contract.version === "1"
+  ) || (
+    contract?.id === "preschool-monthly-naive-weekly-baseline"
+    && contract.version === "2"
+  );
+  return value.status === "provisional"
+    && supportedContract
     && typeof targetPeriod?.start === "string"
     && typeof targetPeriod.endInclusive === "string"
     && typeof targetPeriod.days === "number"

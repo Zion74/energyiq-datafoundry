@@ -1389,14 +1389,16 @@ export type PreschoolOperationalProjectionDto = {
   planningOutlook: {
     status: "provisional";
     contract: {
-      id: "preschool-june-2026-naive-weekly-baseline";
-      version: "1";
+      id: "preschool-june-2026-naive-weekly-baseline" | "preschool-monthly-naive-weekly-baseline";
+      version: "1" | "2";
       method: "mean of four complete Monday-Sunday weeks";
     };
     targetPeriod: {
-      start: "2026-06-01";
-      endInclusive: "2026-06-30";
-      days: 30;
+      start: string;
+      endInclusive: string;
+      endExclusive?: string;
+      timezone?: string;
+      days: number;
     };
     sourceWeeks: Array<{
       start: string;
@@ -1537,8 +1539,8 @@ type PreschoolSavedPlanningOutlookDto = Omit<PreschoolProvisionalPlanningOutlook
 
 export type PreschoolPlanningEstimateSeriesDto = {
   contract: {
-    id: "preschool-june-2026-estimate-series";
-    version: "1";
+    id: "preschool-june-2026-estimate-series" | "preschool-monthly-estimate-series";
+    version: "1" | "2";
     method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total";
   };
   scopes: Array<{
@@ -1596,6 +1598,7 @@ export type PreschoolPlanningForecastDto = {
     actualCostBeforeGstSgd?: number | null;
     actualCompleteDayCount: number;
     actualTargetDayCount: number;
+    actualThroughLocalDate?: string | null;
     pacePct: number | null;
     outcome: "on_plan" | "above_plan" | "below_plan" | null;
     originalEstimateIdentity?: string;
@@ -1608,6 +1611,7 @@ export type PreschoolPlanningForecastDto = {
       originalEstimateKwh?: number;
       actualKwh: number | null;
       currentOutlookKwh?: number | null;
+      futureOutlookKwh?: number | null;
       actualCompleteDayCount: number;
       actualTargetDayCount: number;
       actualStatus: "waiting" | "partial" | "complete";
@@ -1762,6 +1766,13 @@ export type EnergyProjectAnalysisSnapshotDto = {
       endExclusive: string;
     };
     projectReleaseId: string;
+    latestCompleteLocalDay?: string | null;
+    monthlyOutlookTargetPeriod?: {
+      start: string;
+      endExclusive: string;
+      timezone: string;
+      targetDayCount: number;
+    } | null;
   };
   projectRelease: EnergyPublishedProjectReleaseDto;
   recipe: EnergyPublishedProjectReleaseDto["recipe"];

@@ -138,11 +138,17 @@ export type PreschoolOperationalProjection = {
   planningOutlook: {
     status: "provisional";
     contract: {
-      id: "preschool-june-2026-naive-weekly-baseline";
-      version: "1";
+      id: "preschool-monthly-naive-weekly-baseline";
+      version: "2";
       method: "mean of four complete Monday-Sunday weeks";
     };
-    targetPeriod: typeof PRESCHOOL_JUNE_PERIOD;
+    targetPeriod: {
+      start: string;
+      endInclusive: string;
+      endExclusive: string;
+      timezone: string;
+      days: number;
+    };
     sourceWeeks: Array<{
       start: string;
       endInclusive: string;
@@ -264,6 +270,12 @@ export const loadPreschoolOperationalProjection = async (input: {
   projectRelease: PublishedProjectRelease;
   context: EnergyQueryContext;
   analysis: ProjectAnalysisPayload;
+  planningTargetPeriod?: {
+    start: string;
+    endExclusive: string;
+    timezone: string;
+    targetDayCount: number;
+  };
   databasePath?: string;
 }): Promise<PreschoolOperationalProjection> => {
   const unavailableEvidence = unavailableEvidenceFor(input);
@@ -350,6 +362,7 @@ export const loadPreschoolOperationalProjection = async (input: {
       period: { start: input.context.from, endExclusive: input.context.to },
       timezone: input.context.timezone,
       analysis: input.analysis,
+      ...(input.planningTargetPeriod ? { planningTargetPeriod: input.planningTargetPeriod } : {}),
       calendar,
       centres,
       cells,
@@ -371,6 +384,12 @@ export const buildPreschoolOperationalProjection = (input: {
   analysis: Pick<ProjectAnalysisPayload, "offHours" | "provenance"> & {
     context?: Pick<ProjectAnalysisPayload["context"], "scopeId">;
     dailyTotals?: ProjectAnalysisPayload["dailyTotals"];
+  };
+  planningTargetPeriod?: {
+    start: string;
+    endExclusive: string;
+    timezone: string;
+    targetDayCount: number;
   };
   calendar: EnergyIqOperatingCalendarRevision;
   centres: PreschoolCentre[];
@@ -553,7 +572,10 @@ export const buildPreschoolOperationalProjection = (input: {
       totalKwh: round(operatingKwh + closedHourKwh),
     };
   });
-  const planningOutlook = buildPreschoolPlanningOutlook(input.analysis);
+  const planningOutlook = buildPreschoolPlanningOutlook(
+    input.analysis,
+    input.planningTargetPeriod,
+  );
 
   return {
     status: "available",
@@ -743,8 +765,8 @@ export type PreschoolPlanningEstimateBucket = {
 
 export type PreschoolPlanningEstimateSeries = {
   contract: {
-    id: "preschool-june-2026-estimate-series";
-    version: "1";
+    id: "preschool-monthly-estimate-series";
+    version: "2";
     method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total";
   };
   scopes: Array<{
@@ -760,9 +782,21 @@ export type PreschoolPlanningEstimateSeries = {
 
 export const buildPreschoolPlanningOutlook = (
   analysis: PreschoolPlanningAnalysisInput,
+  targetPeriod: {
+    start: string;
+    endExclusive: string;
+    timezone: string;
+    targetDayCount: number;
+  } = {
+    start: PRESCHOOL_JUNE_PERIOD.start,
+    endExclusive: "2026-07-01",
+    timezone: PRESCHOOL_MAY_PERIOD.timezone,
+    targetDayCount: PRESCHOOL_JUNE_PERIOD.days,
+  },
 ): Extract<PreschoolOperationalProjection, { status: "available" }>["planningOutlook"] => (
   buildPreschoolPlanningOutlookFromCompleteMayRows({
     analysis,
+    targetPeriod,
     currentPeriodDates: Array.from({ length: 31 }, (_, offset) => (
       `2026-05-${String(offset + 1).padStart(2, "0")}`
     )),
@@ -775,6 +809,12 @@ export const recoverPreschoolPlanningOutlookFromCompleteWeeks = (
 ): Extract<PreschoolOperationalProjection, { status: "available" }>["planningOutlook"] => (
   buildPreschoolPlanningOutlookFromCompleteMayRows({
     analysis,
+    targetPeriod: {
+      start: PRESCHOOL_JUNE_PERIOD.start,
+      endExclusive: "2026-07-01",
+      timezone: PRESCHOOL_MAY_PERIOD.timezone,
+      targetDayCount: PRESCHOOL_JUNE_PERIOD.days,
+    },
     currentPeriodDates: Array.from({ length: 28 }, (_, offset) => (
       `2026-05-${String(offset + 4).padStart(2, "0")}`
     )),
@@ -786,6 +826,12 @@ export const recoverPreschoolPlanningOutlookFromCompleteWeeks = (
 
 const buildPreschoolPlanningOutlookFromCompleteMayRows = (input: {
   analysis: PreschoolPlanningAnalysisInput;
+  targetPeriod: {
+    start: string;
+    endExclusive: string;
+    timezone: string;
+    targetDayCount: number;
+  };
   currentPeriodDates: string[];
   additionalLimitations: string[];
 }): Extract<PreschoolOperationalProjection, { status: "available" }>["planningOutlook"] => {
@@ -830,20 +876,30 @@ const buildPreschoolPlanningOutlookFromCompleteMayRows = (input: {
   if (sourceWeeks.length !== PRESCHOOL_MAY_COMPLETE_WEEK_STARTS.length) return unavailable();
   const weeklyValues = sourceWeeks.map((week) => week.usageKwh);
   const weeklyAverageKwh = weeklyValues.reduce((total, value) => total + value, 0) / weeklyValues.length;
-  const targetScale = PRESCHOOL_JUNE_PERIOD.days / 7;
+  const targetScale = input.targetPeriod.targetDayCount / 7;
   const projectedKwh = weeklyAverageKwh * targetScale;
   const lowerKwh = Math.min(...weeklyValues) * targetScale;
   const upperKwh = Math.max(...weeklyValues) * targetScale;
   const rate = PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh;
-  const estimateSeries = buildPreschoolPlanningEstimateSeries(analysis, round(projectedKwh));
+  const estimateSeries = buildPreschoolPlanningEstimateSeries(
+    analysis,
+    round(projectedKwh),
+    input.targetPeriod,
+  );
   return {
     status: "provisional",
     contract: {
-      id: "preschool-june-2026-naive-weekly-baseline",
-      version: "1",
+      id: "preschool-monthly-naive-weekly-baseline",
+      version: "2",
       method: "mean of four complete Monday-Sunday weeks",
     },
-    targetPeriod: PRESCHOOL_JUNE_PERIOD,
+    targetPeriod: {
+      start: input.targetPeriod.start,
+      endInclusive: shiftPlanningDate(input.targetPeriod.endExclusive, -1),
+      endExclusive: input.targetPeriod.endExclusive,
+      timezone: input.targetPeriod.timezone,
+      days: input.targetPeriod.targetDayCount,
+    },
     sourceWeeks,
     weeklyBaseline: {
       averageKwh: round(weeklyAverageKwh),
@@ -928,8 +984,8 @@ export const buildPreschoolPlanningEstimateSeries = (
   return estimatedScopes.some((scope) => scope.scopeRole === "portfolio")
     ? {
         contract: {
-          id: "preschool-june-2026-estimate-series",
-          version: "1",
+          id: "preschool-monthly-estimate-series",
+          version: "2",
           method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total",
         },
         scopes: estimatedScopes,

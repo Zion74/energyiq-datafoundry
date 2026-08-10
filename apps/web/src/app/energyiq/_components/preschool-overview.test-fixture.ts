@@ -221,6 +221,13 @@ export function preschoolGoldenSnapshot(): EnergyProjectAnalysisSnapshotDto {
       businessCalendarVersion: "sg-preschool-calendar-v1",
       tariffScheduleVersion: "missing",
       projectReleaseId: "legacy-profile:preschool-demo:1",
+      latestCompleteLocalDay: "2026-05-31",
+      monthlyOutlookTargetPeriod: {
+        start: "2026-06-01",
+        endExclusive: "2026-07-01",
+        timezone: "Asia/Singapore",
+        targetDayCount: 30,
+      },
       primaryPeriod: {
         start: "2026-04-30T16:00:00.000Z",
         endExclusive: "2026-05-31T16:00:00.000Z",

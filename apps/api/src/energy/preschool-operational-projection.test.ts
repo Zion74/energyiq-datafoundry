@@ -349,7 +349,8 @@ describe("Preschool operational projection", () => {
     expect(projection.planningOutlook).toMatchObject({
       status: "provisional",
       contract: {
-        id: "preschool-june-2026-naive-weekly-baseline",
+        id: "preschool-monthly-naive-weekly-baseline",
+        version: "2",
         method: "mean of four complete Monday-Sunday weeks",
       },
       sourceWeeks: [
@@ -381,8 +382,8 @@ describe("Preschool operational projection", () => {
       },
       estimateSeries: {
         contract: {
-          id: "preschool-june-2026-estimate-series",
-          version: "1",
+          id: "preschool-monthly-estimate-series",
+          version: "2",
         },
         scopes: [
           { scopeId: "preschool-project", scopeName: "Preschool Portfolio", scopeRole: "portfolio", estimatedKwh: 3525 },

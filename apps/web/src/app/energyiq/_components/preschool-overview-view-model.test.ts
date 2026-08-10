@@ -561,6 +561,13 @@ describe("Preschool Overview ViewModel", () => {
 
   it("maps a 31-day July lifecycle without retaining June labels or a 30-day assumption", () => {
     const snapshot = preschoolGoldenSnapshot();
+    snapshot.context.latestCompleteLocalDay = "2026-06-30";
+    snapshot.context.monthlyOutlookTargetPeriod = {
+      start: "2026-07-01",
+      endExclusive: "2026-08-01",
+      timezone: "Asia/Singapore",
+      targetDayCount: 31,
+    };
     attachPlanningLifecycle(snapshot, {
       status: "partial",
       usageKwh: 2_800,
@@ -584,6 +591,7 @@ describe("Preschool Overview ViewModel", () => {
       },
       scopes: expect.arrayContaining([expect.objectContaining({
         coverage: "14 / 31 complete days",
+        actualThrough: "Actual through 14 Jul 2026",
       })]),
     });
     if (view.forecast.status === "unavailable") throw new Error(view.forecast.detail);
@@ -591,6 +599,33 @@ describe("Preschool Overview ViewModel", () => {
     expect(view.forecast.scopes[0]?.buckets.monthly[0]).toMatchObject({
       start: "2026-07-01",
       endExclusive: "2026-08-01",
+    });
+    expect(view.forecast.scopes[0]?.buckets.daily[0]).toMatchObject({
+      actualKwh: expect.any(Number),
+      currentOutlookKwh: null,
+    });
+    expect(view.forecast.scopes[0]?.buckets.daily[14]).toMatchObject({
+      actualKwh: null,
+      currentOutlookKwh: expect.any(Number),
+    });
+  });
+
+  it("rejects a lifecycle target that does not match the Snapshot-derived monthly target", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    attachPlanningLifecycle(snapshot, {
+      status: "partial",
+      usageKwh: 2_800,
+      completeDayCount: 14,
+      varianceKwh: null,
+      variancePct: null,
+    }, { status: "partial", pacePct: 95.2 }, {
+      targetStart: "2026-07-01",
+      targetDayCount: 31,
+    });
+
+    expect(buildPreschoolOverviewViewModel(snapshot).forecast).toMatchObject({
+      status: "unavailable",
+      detail: expect.stringContaining("does not match"),
     });
   });
 
@@ -991,6 +1026,9 @@ const forecastScope = (input: {
     currentOutlookKwh: index < input.completeDayCount && input.actualKwh !== null
       ? input.actualKwh / input.completeDayCount
       : input.estimatedKwh / input.targetDayCount,
+    futureOutlookKwh: index < input.completeDayCount
+      ? null
+      : input.estimatedKwh / input.targetDayCount,
     actualCompleteDayCount: index < input.completeDayCount ? 1 : 0,
     actualTargetDayCount: 1,
     actualStatus: index < input.completeDayCount ? "complete" as const : "waiting" as const,
@@ -1005,6 +1043,9 @@ const forecastScope = (input: {
       originalEstimateKwh: rows.reduce((sum, row) => sum + row.originalEstimateKwh, 0),
       actualKwh: actualRows.length === 0 ? null : actualRows.reduce((sum, row) => sum + row.actualKwh!, 0),
       currentOutlookKwh: rows.reduce((sum, row) => sum + row.currentOutlookKwh, 0),
+      futureOutlookKwh: rows.some((row) => row.futureOutlookKwh !== null)
+        ? rows.reduce((sum, row) => sum + (row.futureOutlookKwh ?? 0), 0)
+        : null,
       actualCompleteDayCount: actualRows.length,
       actualTargetDayCount: rows.length,
       actualStatus: actualRows.length === 0
@@ -1027,6 +1068,9 @@ const forecastScope = (input: {
     actualCostBeforeGstSgd: input.actualKwh === null ? null : input.actualKwh * 0.2727,
     actualCompleteDayCount: input.completeDayCount,
     actualTargetDayCount: input.targetDayCount,
+    actualThroughLocalDate: input.completeDayCount === 0
+      ? null
+      : shiftFixtureDate(input.targetStart, input.completeDayCount - 1),
     pacePct: input.pacePct,
     outcome: input.completeDayCount === 30 ? "above_plan" as const : null,
     originalEstimateIdentity: `saved-a:${input.targetStart}:snapshot-a:preschool-weekday-mean-series-v1`,

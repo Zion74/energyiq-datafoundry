@@ -32,7 +32,7 @@ function AvailableForecastPanel({ forecast }: { forecast: ForecastView }) {
     ?? forecast.scopes[0]!;
 
   return (
-    <div className="mt-5" data-forecast-status={forecast.status} data-forecast-scope={scope.role}>
+    <div className="mt-5" data-forecast-status={scope.status} data-forecast-scope={scope.role}>
       <ForecastStatusStrip forecast={forecast} scope={scope} />
 
       <dl className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -117,14 +117,14 @@ function AvailableForecastPanel({ forecast }: { forecast: ForecastView }) {
 }
 
 function ForecastStatusStrip({ forecast, scope }: { forecast: ForecastView; scope: ForecastScope }) {
-  const tone = forecast.status === "complete"
+  const tone = scope.status === "complete"
     ? "border-step-success/30 bg-step-success-soft/45"
-    : forecast.status === "partial"
+    : scope.status === "partial"
       ? "border-primary/25 bg-primary/5"
       : "border-step-warning/30 bg-step-warning-soft/45";
-  const dot = forecast.status === "complete"
+  const dot = scope.status === "complete"
     ? "bg-step-success"
-    : forecast.status === "partial"
+    : scope.status === "partial"
       ? "bg-primary"
       : "bg-step-warning";
   return (
@@ -132,13 +132,14 @@ function ForecastStatusStrip({ forecast, scope }: { forecast: ForecastView; scop
       <div className="flex min-w-0 items-start gap-2.5">
         <span className={`mt-1.5 size-2 shrink-0 rounded-full ${dot}`} aria-hidden="true" />
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-foreground">{forecast.statusLabel}</p>
-          <p className="mt-0.5 max-w-3xl text-xs leading-5 text-muted">{forecast.statusDetail}</p>
+          <p className="text-sm font-semibold text-foreground">{scope.statusLabel}</p>
+          <p className="mt-0.5 max-w-3xl text-xs leading-5 text-muted">{scope.statusDetail}</p>
         </div>
       </div>
-      <p className="shrink-0 text-xs font-semibold text-foreground">
-        {scope.role === "portfolio" ? "Portfolio" : scope.label} · {forecast.targetPeriod}
-      </p>
+      <div className="shrink-0 text-xs font-semibold text-foreground sm:text-right">
+        <p>{scope.role === "portfolio" ? "Portfolio" : scope.label} · {forecast.targetPeriod}</p>
+        <p className="mt-0.5 font-medium text-muted">{scope.actualThrough}</p>
+      </div>
     </div>
   );
 }
@@ -218,7 +219,7 @@ function ForecastTrendChart({
         {frozen ? (
           <>
             <span className="inline-flex items-center gap-2"><span className="w-8 border-t-2 border-dashed border-muted" />Original Estimate</span>
-            <span className="inline-flex items-center gap-2"><span className="w-8 border-t-2 border-primary" />Current Outlook</span>
+            <span className="inline-flex items-center gap-2"><span className="w-8 border-t-2 border-dashed border-primary/60" />Current Outlook</span>
           </>
         ) : (
           <span className="inline-flex items-center gap-2"><span className="w-8 border-t-2 border-dashed border-primary" />Planning Baseline</span>
@@ -230,7 +231,7 @@ function ForecastTrendChart({
         <svg className="block h-auto w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-labelledby={`${titleId} ${descId}`}>
           <title id={titleId}>{`${scope.label} ${forecast.targetMonth} ${grain} Monthly Energy Outlook`}</title>
           <desc id={descId}>{frozen
-            ? "Original Estimate is dashed, Actual is solid and stops at the latest complete local day, and Current Outlook combines Actual with the remaining estimate."
+            ? "Original Estimate is dashed for the full month. Actual is solid through the latest complete local day. Current Outlook is a lighter dashed line for future days only."
             : "The Planning Baseline is dashed. Actual is absent until matching complete-day Evidence is available."}</desc>
           {ticks.map((tick) => {
             const tickY = y(tick);
@@ -246,7 +247,7 @@ function ForecastTrendChart({
           {frozen ? (
             <>
               <path d={originalPath} fill="none" stroke="currentColor" className="text-muted" strokeWidth="3" strokeDasharray="8 7" strokeLinejoin="round" data-series="original-estimate" />
-              <path d={currentOutlookPath} fill="none" stroke="currentColor" className="text-primary" strokeWidth="3" strokeLinejoin="round" data-series="current-outlook" />
+              <path d={currentOutlookPath} fill="none" stroke="currentColor" className="text-primary/60" strokeWidth="3" strokeDasharray="4 6" strokeLinejoin="round" data-series="current-outlook" />
             </>
           ) : (
             <path d={baselinePath} fill="none" stroke="currentColor" className="text-primary" strokeWidth="3" strokeDasharray="8 7" strokeLinejoin="round" data-series="planning-baseline" />

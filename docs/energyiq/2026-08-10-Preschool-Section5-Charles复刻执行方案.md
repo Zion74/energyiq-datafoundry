@@ -165,12 +165,12 @@ Preschool 当前使用 27.27¢/kWh before GST。费率覆盖目标月时标为�
 
 ### 11.5 完成判据
 
-- [ ] July 1 / July 15 / month complete 三种状态有服务端、ViewModel 和 Renderer 测试；
-- [ ] 28/29/30/31 天、跨年和 timezone 边界有确定性测试；
-- [ ] Original Estimate、Actual、Current Outlook 分别携带可追溯 identity；
-- [ ] 四 KPI 与图表使用同一数据合同，Cost 使用明确 Tariff assumption；
-- [ ] 局部 grain/scope 切换不改变整页 URL、不重跑 AI；
-- [ ] Saved A fixed、Current B updated，A/B Plan/Actual/Evidence 不混；
+- [x] July 1 / July 15 / month complete 三种状态有服务端、ViewModel 和 Renderer 测试；
+- [x] 28/29/30/31 天、跨年和 timezone 边界有确定性测试；
+- [x] Original Estimate、Actual、Current Outlook 分别携带可追溯 identity；
+- [x] 四 KPI 与图表使用同一数据合同，Cost 使用明确 Tariff assumption；
+- [x] 局部 grain/scope 切换不改变整页 URL、不重跑 AI；
+- [x] Saved A fixed、Current B updated，A/B Plan/Actual/Evidence 不混；
 - [ ] 1440/1920/tablet Chrome 无横向溢出，等待、月中和完成态分别留证；
 - [ ] 主 Agent完成代码、数据语义和浏览器复核后，才交用户/Charles 人工验收。
 
@@ -181,3 +181,11 @@ Preschool 当前使用 27.27¢/kWh before GST。费率覆盖目标月时标为�
 - Tariff 优先使用目标月有效配置；超出有效期时显示 latest available provisional reference，完全缺失时只隐藏 Cost；
 - 真实 Chrome 只按当前运行时实际可达状态留证。waiting 状态可用于布局与交互验收，partial / complete 仍需主 Agent在相应 Snapshot 运行时补充正向证据；
 - 本切片不建设 ML Forecast、通用 Scheduler/Forecast repository 或第二套版本系统，不修改 Task B AI Runtime；Charles 人工验收仍是独立终点。
+
+### 11.7 P1/P2 收口合同
+
+- Preschool 根 Scope 的 Resolver 在同一发布路线与 `dataSnapshotId` 上读取 latest complete local day，不再从固定 Overview `context.to` 推断数据截止日；`context.latestCompleteLocalDay` 与 `context.monthlyOutlookTargetPeriod` 将该服务端结论显式交给 Web。若当前 Snapshot 没有任何完整本地日，只让 Section 5 fail closed，不中断 Section 1–4。
+- 固定 May 1–31 Overview 可以随 Snapshot 推进：例如 cutoff 为 2026-06-30 时，服务端目标月为 2026-07-01…2026-08-01，timezone 为 Asia/Singapore，目标天数为 31；ViewModel 会拒绝与该目标身份不一致的旧 Forecast。
+- 图表三条线互斥：Original Estimate 覆盖整月并使用虚线；Actual 只覆盖 cutoff 及之前的完整本地日并使用实线；Current Outlook 图线只包含 cutoff 之后的未来 Estimate，使用第二种浅色虚线。完整月 KPI 仍使用服务端权威的 Actual + remaining Estimate，不在 React 重算。
+- 状态条和 cutoff 标签属于当前选中 Scope。Portfolio Complete 切到 Centre Partial/Waiting 时，状态、说明与 `Actual through …` / `Actual not started` 同步切换，不沿用 Portfolio 状态。
+- 工程自动证据已覆盖 waiting / partial / complete；真实运行时 partial / complete 的 1440、1920 与 tablet Chrome 仍需相应 Snapshot 环境，不得用 waiting 页面冒充最终 Charles 验收。

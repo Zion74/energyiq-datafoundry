@@ -180,6 +180,8 @@ export type PreschoolOverviewViewModel = {
       role: "portfolio" | "centre";
       status: "waiting" | "partial" | "complete";
       statusLabel: string;
+      statusDetail: string;
+      actualThrough: string;
       expectedFullMonthEnergy: string;
       expectedFullMonthCost: string;
       consumedSoFar: string;
@@ -777,6 +779,7 @@ function buildForecastView(
     && targetPeriod.endExclusive === lifecycle.targetPeriod.endExclusive
     && targetPeriod.timezone === lifecycle.targetPeriod.timezone
     && targetPeriod.targetDayCount === lifecycle.targetPeriod.targetDayCount
+    && monthlyOutlookTargetMatches(snapshot, lifecycle.targetPeriod)
     && planningTargetMatches(lifecycle.plan.targetPeriod, lifecycle.targetPeriod)
     && lifecycle.planProvenance.projectReleaseId === snapshot.projectRelease.id
     && lifecycle.actualProvenance.projectReleaseId === snapshot.projectRelease.id
@@ -796,10 +799,12 @@ function buildForecastView(
     && scope.expectedFullMonthKwh !== undefined
     && scope.expectedFullMonthCostBeforeGstSgd !== undefined
     && scope.actualCostBeforeGstSgd !== undefined
+    && Object.hasOwn(scope, "actualThroughLocalDate")
     && forecastScopeCoversTarget(scope, lifecycle.targetPeriod)
     && Object.values(scope.buckets).every((buckets) => buckets.every((bucket) => (
       typeof bucket.originalEstimateKwh === "number"
       && bucket.currentOutlookKwh !== undefined
+      && bucket.futureOutlookKwh !== undefined
     )))
   ));
   if (!identityMatches || !portfolio || !targetPeriod || !tariffAssumption || !hasMonthlyFields) {
@@ -814,6 +819,9 @@ function buildForecastView(
       : scope.actualCompleteDayCount === scope.actualTargetDayCount
         ? "complete" as const
         : "partial" as const;
+    const actualThrough = scope.actualThroughLocalDate
+      ? `Actual through ${formatForecastLocalDate(scope.actualThroughLocalDate)}`
+      : "Actual not started";
     return {
       scopeId: scope.scopeId,
       label: scope.scopeName,
@@ -821,6 +829,8 @@ function buildForecastView(
       role: scope.scopeRole,
       status: scopeStatus,
       statusLabel: forecastStatusLabel(scopeStatus, scope.outcome),
+      statusDetail: forecastScopeStatusDetail(scopeStatus, scope.actualThroughLocalDate),
+      actualThrough,
       expectedFullMonthEnergy: scope.expectedFullMonthKwh == null
         ? "Unavailable"
         : `${formatNumber(scope.expectedFullMonthKwh, 0)} kWh`,
@@ -879,11 +889,21 @@ function buildEstimateOnlyForecastView(
     : null;
   const identityMatches = plan !== null
     && targetEndExclusive !== null
+    && monthlyOutlookTargetMatches(snapshot, {
+      start: plan.targetPeriod.start,
+      endExclusive: targetEndExclusive,
+      timezone: plan.targetPeriod.timezone ?? snapshot.context.timezone,
+      targetDayCount: plan.targetPeriod.days,
+    })
     && plan.targetPeriod.days === forecastBucketDayCount(plan.targetPeriod.start, targetEndExclusive)
     && plan.evidence.dataSnapshotId === snapshot.dataSnapshot.id
     && plan.evidence.queryId === "daily_totals_v1"
-    && estimateSeries?.contract.id === "preschool-june-2026-estimate-series"
-    && estimateSeries.contract.version === "1";
+    && (
+      (estimateSeries?.contract.id === "preschool-june-2026-estimate-series"
+        && estimateSeries.contract.version === "1")
+      || (estimateSeries?.contract.id === "preschool-monthly-estimate-series"
+        && estimateSeries.contract.version === "2")
+    );
   const portfolio = estimateSeries?.scopes.find((scope) => scope.scopeRole === "portfolio");
   if (!identityMatches || !estimateSeries || !portfolio) {
     return {
@@ -898,6 +918,8 @@ function buildEstimateOnlyForecastView(
     role: scope.scopeRole,
     status: "waiting" as const,
     statusLabel: "Awaiting first complete day",
+    statusDetail: "No complete local-day Actual is available for this scope yet.",
+    actualThrough: "Actual not started",
     expectedFullMonthEnergy: `${formatNumber(scope.estimatedKwh, 0)} kWh`,
     expectedFullMonthCost: plan.tariffReference
       ? `S$${formatNumber(scope.estimatedCostBeforeGstSgd, 0)}`
@@ -971,6 +993,27 @@ function forecastStatusLabel(
   return "Complete month · On original estimate";
 }
 
+function forecastScopeStatusDetail(
+  status: "waiting" | "partial" | "complete",
+  actualThroughLocalDate: string | null | undefined,
+): string {
+  if (status === "waiting" || !actualThroughLocalDate) {
+    return "No complete local-day Actual is available for this scope yet.";
+  }
+  const cutoff = formatForecastLocalDate(actualThroughLocalDate);
+  if (status === "complete") return `Actual is complete through ${cutoff}.`;
+  return `Actual includes complete local days through ${cutoff}; Current Outlook begins after that cutoff.`;
+}
+
+function formatForecastLocalDate(localDate: string): string {
+  return new Intl.DateTimeFormat("en-SG", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${localDate}T00:00:00.000Z`));
+}
+
 function forecastPaceDetail(
   pacePct: number | null,
   outcome: "on_plan" | "above_plan" | "below_plan" | null,
@@ -1001,10 +1044,10 @@ function forecastBucketView(
     planningBaseline: "Not used",
     actualKwh: bucket.actualKwh,
     actual: bucket.actualKwh === null ? "Waiting" : `${formatNumber(bucket.actualKwh, 0)} kWh`,
-    currentOutlookKwh: bucket.currentOutlookKwh ?? null,
-    currentOutlook: bucket.currentOutlookKwh == null
-      ? "Unavailable"
-      : `${formatNumber(bucket.currentOutlookKwh, 0)} kWh`,
+    currentOutlookKwh: bucket.futureOutlookKwh ?? null,
+    currentOutlook: bucket.futureOutlookKwh == null
+      ? "—"
+      : `${formatNumber(bucket.futureOutlookKwh, 0)} kWh`,
     actualStatus: bucket.actualStatus,
     coverage: `${bucket.actualCompleteDayCount} / ${bucket.actualTargetDayCount} complete days`,
   };
@@ -1017,6 +1060,18 @@ function planningTargetMatches(
   return plan.start === target.start
     && plan.endInclusive === shiftLocalDate(target.endExclusive, -1)
     && plan.days === target.targetDayCount;
+}
+
+function monthlyOutlookTargetMatches(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  target: { start: string; endExclusive: string; timezone: string; targetDayCount: number },
+): boolean {
+  const expected = snapshot.context.monthlyOutlookTargetPeriod;
+  if (!expected) return snapshot.context.latestCompleteLocalDay === undefined;
+  return expected.start === target.start
+    && expected.endExclusive === target.endExclusive
+    && expected.timezone === target.timezone
+    && expected.targetDayCount === target.targetDayCount;
 }
 
 function forecastScopeCoversTarget(

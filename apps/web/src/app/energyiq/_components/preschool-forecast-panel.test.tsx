@@ -59,6 +59,66 @@ describe("PreschoolForecastPanel", () => {
     expect(container.textContent).toContain("1 Jun–30 Jun");
   });
 
+  it("draws Actual only through cutoff and the dashed Current Outlook only after cutoff", async () => {
+    const forecast = forecastView("partial");
+    forecast.scopes[0]!.buckets.daily = [
+      bucket("1 Jun", "2026-06-01", "2026-06-02", 800, 210, "complete", "1 / 1 complete days", "frozen-original", null),
+      bucket("2 Jun", "2026-06-02", "2026-06-03", 820, 220, "complete", "1 / 1 complete days", "frozen-original", null),
+      bucket("3 Jun", "2026-06-03", "2026-06-04", 830, null, "waiting", "0 / 1 complete days", "frozen-original", 830),
+      bucket("4 Jun", "2026-06-04", "2026-06-05", 840, null, "waiting", "0 / 1 complete days", "frozen-original", 840),
+    ];
+    await act(async () => root.render(<PreschoolForecastPanel forecast={forecast} />));
+
+    const original = container.querySelector('path[data-series="original-estimate"]')!;
+    const actual = container.querySelector('path[data-series="actual"]')!;
+    const current = container.querySelector('path[data-series="current-outlook"]')!;
+    expect(original.getAttribute("d")?.match(/[ML]/g)).toHaveLength(4);
+    expect(actual.getAttribute("d")?.match(/[ML]/g)).toHaveLength(2);
+    expect(current.getAttribute("d")?.match(/[ML]/g)).toHaveLength(2);
+    expect(actual.getAttribute("stroke-dasharray")).toBeNull();
+    expect(current.getAttribute("stroke-dasharray")).not.toBeNull();
+  });
+
+  it("switches the status strip from Portfolio Complete to Centre Partial and Waiting", async () => {
+    const forecast = forecastView("complete");
+    const portfolio = forecast.scopes[0]!;
+    const partialCentre = forecast.scopes[1]!;
+    partialCentre.status = "partial";
+    partialCentre.statusLabel = "Actual to date + remaining estimate";
+    Reflect.set(partialCentre, "statusDetail", "Actual includes complete local days through 14 Jul 2026.");
+    Reflect.set(partialCentre, "actualThrough", "Actual through 14 Jul 2026");
+    const waitingCentre = structuredClone(partialCentre);
+    waitingCentre.scopeId = "centre-b";
+    waitingCentre.label = "Centre B";
+    waitingCentre.status = "waiting";
+    waitingCentre.statusLabel = "Awaiting first complete day";
+    Reflect.set(waitingCentre, "statusDetail", "No complete local-day Actual is available for this scope yet.");
+    Reflect.set(waitingCentre, "actualThrough", "Actual not started");
+    forecast.scopes.push(waitingCentre);
+
+    await act(async () => root.render(<PreschoolForecastPanel forecast={forecast} />));
+    const status = () => container.querySelector('[role="status"]')!;
+    expect(container.querySelector('[data-forecast-status="complete"]')).not.toBeNull();
+    expect(status().textContent).toContain(portfolio.statusLabel);
+
+    const scope = container.querySelector<HTMLSelectElement>('select[aria-label="Monthly outlook scope"]')!;
+    await act(async () => {
+      scope.value = partialCentre.scopeId;
+      scope.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(container.querySelector('[data-forecast-status="partial"]')).not.toBeNull();
+    expect(status().textContent).toContain(partialCentre.statusLabel);
+    expect(status().textContent).toContain("Actual through 14 Jul 2026");
+
+    await act(async () => {
+      scope.value = waitingCentre.scopeId;
+      scope.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(container.querySelector('[data-forecast-status="waiting"]')).not.toBeNull();
+    expect(status().textContent).toContain(waitingCentre.statusLabel);
+    expect(status().textContent).toContain("Actual not started");
+  });
+
   it.each([
     ["waiting", "Awaiting first complete day"],
     ["partial", "Actual to date + remaining estimate"],
@@ -180,6 +240,7 @@ const bucket = (
   actualStatus: "waiting" | "partial" | "complete",
   coverage: string,
   comparisonStatus: ForecastView["comparisonStatus"],
+  futureOutlookKwh: number | null = estimateKwh,
 ) => ({
   label,
   start,
@@ -190,8 +251,8 @@ const bucket = (
   planningBaseline: comparisonStatus === "planning-baseline" ? `${estimateKwh.toLocaleString("en-SG")} kWh` : "Not used",
   actualKwh,
   actual: actualKwh === null ? "Waiting" : `${actualKwh.toLocaleString("en-SG")} kWh`,
-  currentOutlookKwh: estimateKwh,
-  currentOutlook: `${estimateKwh.toLocaleString("en-SG")} kWh`,
+  currentOutlookKwh: futureOutlookKwh,
+  currentOutlook: futureOutlookKwh === null ? "—" : `${futureOutlookKwh.toLocaleString("en-SG")} kWh`,
   actualStatus,
   coverage,
 });

@@ -305,14 +305,19 @@ describe("buildPreschoolPlanningLifecycle", () => {
       expectedFullMonthKwh: expect.any(Number),
       expectedFullMonthCostBeforeGstSgd: expect.any(Number),
       actualCostBeforeGstSgd: 763.56,
+      actualThroughLocalDate: "2026-07-14",
       originalEstimateIdentity: expect.stringContaining("saved-a:2026-07-01"),
     });
     expect(portfolio.buckets.daily).toHaveLength(31);
     expect(portfolio.buckets.daily.slice(0, 14).every((bucket) => (
-      bucket.actualKwh !== null && bucket.currentOutlookKwh === bucket.actualKwh
+      bucket.actualKwh !== null
+      && bucket.currentOutlookKwh === bucket.actualKwh
+      && bucket.futureOutlookKwh === null
     ))).toBe(true);
     expect(portfolio.buckets.daily.slice(14).every((bucket) => (
-      bucket.actualKwh === null && bucket.currentOutlookKwh === bucket.originalEstimateKwh
+      bucket.actualKwh === null
+      && bucket.currentOutlookKwh === bucket.originalEstimateKwh
+      && bucket.futureOutlookKwh === bucket.originalEstimateKwh
     ))).toBe(true);
     expect(portfolio.expectedFullMonthKwh).toBeCloseTo(
       portfolio.buckets.daily.reduce((total, bucket) => total + (bucket.currentOutlookKwh ?? 0), 0),
@@ -332,6 +337,7 @@ describe("buildPreschoolPlanningLifecycle", () => {
     expect(result.forecast.scopes[0]).toMatchObject({
       actualKwh: null,
       actualCompleteDayCount: 0,
+      actualThroughLocalDate: null,
       expectedFullMonthKwh: expect.any(Number),
     });
     expect(result.forecast.scopes[0]!.buckets.daily).toHaveLength(31);
@@ -339,6 +345,7 @@ describe("buildPreschoolPlanningLifecycle", () => {
       bucket.actualStatus === "waiting"
       && bucket.actualKwh === null
       && bucket.currentOutlookKwh === bucket.originalEstimateKwh
+      && bucket.futureOutlookKwh === bucket.originalEstimateKwh
     ))).toBe(true);
   });
 
@@ -354,12 +361,14 @@ describe("buildPreschoolPlanningLifecycle", () => {
     expect(result.forecast.scopes[0]).toMatchObject({
       actualKwh: 6_200,
       actualCompleteDayCount: 31,
+      actualThroughLocalDate: "2026-07-31",
       expectedFullMonthKwh: 6_200,
       outcome: "above_plan",
     });
     expect(result.forecast.scopes[0]!.buckets.daily.every((bucket) => (
       bucket.actualStatus === "complete"
       && bucket.currentOutlookKwh === bucket.actualKwh
+      && bucket.futureOutlookKwh === null
     ))).toBe(true);
   });
 
@@ -377,6 +386,7 @@ describe("buildPreschoolPlanningLifecycle", () => {
     expect(result.forecast.scopes.find((scope) => scope.scopeId === "centre-b")).toMatchObject({
       actualKwh: null,
       actualCompleteDayCount: 0,
+      actualThroughLocalDate: null,
       expectedFullMonthKwh: null,
       expectedFullMonthCostBeforeGstSgd: null,
     });
