@@ -199,7 +199,7 @@ status: active
 | 时间 | 切片 | 状态 | 证据 / 决定 / 下一步 |
 | --- | --- | --- | --- |
 | 2026-08-10 01:20 SGT | 总路线 | READY | 已完成自我 Grilling、依赖排序、验收与停止条件；等待三个只读预检回报后校准各切片并开始 1A/1B。 |
-| 2026-08-10 01:24 SGT | 1A Section 5 | DONE-ENGINEERING | 真实 3102 页面与 Projection 复核确认：May 1–31、30 Centres、4 个完整周、June planning baseline 26,240 kWh / S$7,156 均来自同一 Snapshot。当前缺口不是漏画控件，而是尚无 June Actual；因此保留诚实 planning baseline，不复刻 Charles 的 simulated actual。真实 Actual/Pace/日周月/Centre 切换移入 A→B 后半段。 |
+| 2026-08-10 01:24 SGT | 1A Section 5 | DOING | 真实 3102 页面与 Projection 复核确认：May 1–31、30 Centres、4 个完整周、June planning baseline 26,240 kWh / S$7,156 均来自同一 Snapshot。旧实现只完成诚实 Planning Baseline，不是 Charles Forecast 复刻；A/B 已补出真实 Plan/Actual 后，Task A 必须继续完成状态条、四 KPI、Estimate-vs-Actual、日/周/月和 Portfolio/Centre 局部切换。详见 `2026-08-10-Preschool-Section5-Charles复刻执行方案.md`。 |
 | 2026-08-10 01:25 SGT | 1A 全页复核 | DOING | Sections 1–5 基础模块均已存在；剩余检查集中在 60 秒阅读路径、英文价值表达、responsive/browser evidence，以及 A/B 后的 Section 5 Actual-vs-plan。 |
 | 2026-08-10 01:27 SGT | 1B DeepSeek 预检 | READY | 已独立复核代码：Overview Stage 仍使用通用 `data-analysis` protocol；Runtime 会额外注册 `analysis_requirements_commit`，而 `reasoning_model=false` 未在 Stage input 明确下发；Web revision 仍为 v1，服务端已为 v2。执行边界确定为：复用现有 assembly 增加窄范围 Stage 选项，移除无关 Requirements commit、显式关闭 Provider thinking、同步 v2；不加超时、不设固定 SQL/思考轮次、不弱化 Evidence。 |
 | 2026-08-10 01:30 SGT | 2 A/B 预检 | READY | 现有旧 B 仅 7 天、只改 14 个 interval，可作为格式探针但不足以验收。新 B 采用 30 天 source coverage + 1d/7d/28d 产品窗口，固定 weekday 基线和三个可解释场景；纯数据 B 不重复 Publish 配置。Saved A、Current B、Evidence、AI Artifact 必须逐字段证明不混。 |

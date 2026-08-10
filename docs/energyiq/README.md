@@ -50,6 +50,7 @@
 
 | 文档 | 状态 |
 | --- | --- |
+| [Preschool Section 5 Charles 复刻执行方案](2026-08-10-Preschool-Section5-Charles复刻执行方案.md) | in progress；Task A 按状态条、四 KPI、Estimate-vs-Actual、Daily/Weekly/Monthly 与 Portfolio/Centre 局部切换补齐 A5；不复制 simulated actual，不在 React 重算权威数据 |
 | [AI Analyst Harness 与 AI Slot 执行路径](2026-08-08-AI-Analyst-Harness与AI-Slot执行路径.md) | in progress；当前以两项目 60 秒客户价值、AI Finding 首屏表达和分层验收为主线；v10 后的完整 submit/repair 延期，通用化只沉淀轻量 Analysis Pattern Cards |
 | [2026-08-06 Overview 夜间执行清单与 Runlog](2026-08-06-Overview夜间执行清单与Runlog.md) | in progress；第 11 节为 2026-08-07 当前行动方案：Overview takeaway-first 阅读体验 → #31 Explorer 精准下钻与设备趋势 → Preschool 演示型图表 → #5/#19/#20/#21 收口；AI 侧线保持隔离 |
 | [三 Agent MVP 最终执行与重置包](2026-08-03-三Agent-MVP最终执行与重置包.md) | accepted；唯一派工入口，含共同基线和三个最终 Prompt |
