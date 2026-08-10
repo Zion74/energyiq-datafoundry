@@ -141,11 +141,11 @@ type TraceDecision = {
 const LEASE_MS = 13 * 60 * 1_000;
 const MAX_ANSWER_CHARS = 160_000;
 const MAX_EVIDENCE_PREVIEW_CHARS = 2_000;
-const MAX_EDITOR_PROMPT_CHARS = 6_000;
+const MAX_EDITOR_PROMPT_CHARS = 6_500;
 const MAX_INVESTIGATOR_CANDIDATES = 3;
 const MAX_CANDIDATE_TITLE_CHARS = 160;
 const MAX_CANDIDATE_TAKEAWAY_CHARS = 220;
-const MAX_CANDIDATE_SUPPORTING_TEXT_CHARS = 120;
+const MAX_CANDIDATE_SUPPORTING_TEXT_CHARS = 140;
 const MAX_EDITOR_EVIDENCE_REF_CHARS = 80;
 const MAX_EDITOR_EVIDENCE_REFS = 4;
 const MAX_EDITOR_SQL_INDEXES = 8;
@@ -574,12 +574,13 @@ function buildInvestigatorPrompt(context: WorkflowContext, identity: EnergyIqOve
     "possibleExplanation is optional and unconfirmed; when present it requires nextCheck. limitation is always required and must state what the pinned Evidence cannot establish.",
     "Every displayed number or named entity must occur in that candidate's cited bounded Evidence or successful SQL result. Omit presentation for no-visual.",
     "evidenceRefs may contain only exact item.id strings copied verbatim from Bounded Snapshot Evidence. Never use claimRefs, Coverage claim paths, JSON property paths, labels, or queryIds as evidenceRefs. When SQL alone supports a candidate, evidenceRefs may be empty.",
+    "A verified Candidate must cite at least one Catalog Evidence item or successful SQL evidence_index. Hypotheses and exploration ideas may remain unbound only when they make no unsupported factual claim and retain their limitation plus a concrete verification step in nextCheck or action.",
     "Any ranking, percentage, ratio, share, difference, or delta stated by a candidate must be explicitly returned by SQL; never calculate or estimate it yourself.",
     "Call overview_ai_candidates_submit with the final Candidate envelope. Do not emit Candidate JSON as Assistant text. If the tool reports a schema error, correct it once only; there may be at most two submission starts. After a successful submission, stop immediately and do not call SQL or the submission tool again.",
     "For evidenceSqlIndexes, copy verbatim the evidence_index returned by each successful run_sql_readonly result. Never infer, count, renumber, or guess an index; if a successful result lacks evidence_index, do not cite it. A zero-row successful result may have an index; an isError result never does.",
     `Prompt revision: ${identity.investigatorPromptRevision}.`,
-    "Submit 0-3 candidates. Required text limits: title<=160, takeaway<=220, action/expectedIfAct/ifIgnored/limitation<=120. Optional significance/possibleExplanation/nextCheck<=120.",
-    "Submission tool arguments: {\"candidates\":[{\"id\":\"candidate-1\",\"epistemicLevel\":\"verified|hypothesis|exploration-idea\",\"title\":\"...\",\"takeaway\":\"...\",\"action\":\"...\",\"expectedIfAct\":\"...\",\"ifIgnored\":\"...\",\"limitation\":\"...\",\"significance\":\"optional\",\"possibleExplanation\":\"optional\",\"nextCheck\":\"optional\",\"evidenceRefs\":[],\"evidenceSqlIndexes\":[],\"presentation\":{\"version\":\"1\",\"blocks\":[]}}]}",
+    "Submit 0-3 candidates. Required text limits: title<=160, takeaway<=220, action/expectedIfAct/ifIgnored/limitation<=140. Optional significance/possibleExplanation/nextCheck<=140.",
+    "Submission object shape: candidates[] with id, epistemicLevel, title, takeaway, action, expectedIfAct, ifIgnored, limitation, optional significance/possibleExplanation/nextCheck/presentation, evidenceRefs:string[], and evidenceSqlIndexes:number[]. For Catalog-backed verified findings copy exact item IDs into evidenceRefs; for SQL-backed verified findings copy returned evidence_index values into evidenceSqlIndexes.",
     "Overview Coverage:", JSON.stringify(context.coverage),
     "Bounded Snapshot Evidence:", JSON.stringify({ identity: context.binding, items: context.evidence }),
     "Project decision signals:", JSON.stringify({ items: context.decisionSignals }),
@@ -973,17 +974,19 @@ function parseInvestigatorCandidates(answer: string): InvestigatorCandidate[] | 
     const significance = optionalBoundedText(value.significance, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS);
     const possibleExplanation = optionalBoundedText(value.possibleExplanation, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS);
     const nextCheck = optionalBoundedText(value.nextCheck, MAX_CANDIDATE_SUPPORTING_TEXT_CHARS);
+    const evidenceRefs = strings(value.evidenceRefs);
     const evidenceSqlIndexes = positiveIntegers(value.evidenceSqlIndexes);
     if (!id || !epistemicLevel || !title || !takeaway || !action || !expectedIfAct || !ifIgnored || !limitation
       || significance === null || possibleExplanation === null || nextCheck === null
-      || possibleExplanation && !nextCheck || evidenceSqlIndexes === null) return [];
+      || possibleExplanation && !nextCheck || evidenceSqlIndexes === null
+      || epistemicLevel === "verified" && evidenceRefs.length === 0 && evidenceSqlIndexes.length === 0) return [];
     const presentation = parseAiFindingPresentation(value.presentation);
     return [{
       id, epistemicLevel, title, takeaway, action, expectedIfAct, ifIgnored, limitation,
       ...(significance ? { significance } : {}),
       ...(possibleExplanation ? { possibleExplanation } : {}),
       ...(nextCheck ? { nextCheck } : {}),
-      evidenceRefs: strings(value.evidenceRefs),
+      evidenceRefs,
       evidenceSqlIndexes,
       ...(presentation ? { presentation } : {}),
     }];

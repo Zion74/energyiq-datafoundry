@@ -81,13 +81,13 @@ describe("Overview AI Candidate submission tool", () => {
     const textLimits = {
       title: 160,
       takeaway: 220,
-      action: 120,
-      expectedIfAct: 120,
-      ifIgnored: 120,
-      limitation: 120,
-      significance: 120,
-      possibleExplanation: 120,
-      nextCheck: 120,
+      action: 140,
+      expectedIfAct: 140,
+      ifIgnored: 140,
+      limitation: 140,
+      significance: 140,
+      possibleExplanation: 140,
+      nextCheck: 140,
     } as const;
 
     for (const [field, max] of Object.entries(textLimits)) {
@@ -119,6 +119,54 @@ describe("Overview AI Candidate submission tool", () => {
     expect(overviewAiCandidateSubmissionSchema.safeParse({
       candidates: [{ ...exactLimit, evidenceSqlIndexes: [0] }],
     }).success).toBe(false);
+  });
+
+  it("requires verified Findings to bind Catalog or SQL Evidence without blocking exploration", () => {
+    const unbound = {
+      ...submission.candidates[0]!,
+      evidenceRefs: [],
+      evidenceSqlIndexes: [],
+    };
+
+    expect(overviewAiCandidateSubmissionSchema.safeParse({
+      candidates: [{ ...unbound, epistemicLevel: "verified" }],
+    }).success).toBe(false);
+    expect(overviewAiCandidateSubmissionSchema.safeParse({
+      candidates: [{ ...unbound, epistemicLevel: "verified", evidenceRefs: ["quality:window"] }],
+    }).success).toBe(true);
+    expect(overviewAiCandidateSubmissionSchema.safeParse({
+      candidates: [{ ...unbound, epistemicLevel: "verified", evidenceSqlIndexes: [1] }],
+    }).success).toBe(true);
+    expect(overviewAiCandidateSubmissionSchema.safeParse({
+      candidates: [{ ...unbound, epistemicLevel: "hypothesis" }],
+    }).success).toBe(true);
+    expect(overviewAiCandidateSubmissionSchema.safeParse({
+      candidates: [{ ...unbound, epistemicLevel: "exploration-idea" }],
+    }).success).toBe(true);
+    expect(overviewAiCandidateSubmissionSchema.safeParse({ candidates: [] }).success).toBe(true);
+  });
+
+  it("allows one corrected submission after a schema rejection", async () => {
+    const tool = createOverviewAiCandidateSubmissionTool();
+    const invalid = await tool.execute?.({
+      candidates: [{
+        ...submission.candidates[0]!,
+        epistemicLevel: "verified",
+        evidenceRefs: [],
+        evidenceSqlIndexes: [],
+      }],
+    }, {} as never);
+    const corrected = await tool.execute?.({
+      candidates: [{
+        ...submission.candidates[0]!,
+        epistemicLevel: "verified",
+        evidenceRefs: [],
+        evidenceSqlIndexes: [1],
+      }],
+    }, {} as never);
+
+    expect(invalid).toMatchObject({ error: true });
+    expect(corrected).toMatchObject({ ok: true, resultType: "overview-ai-candidate-submission" });
   });
 
   it("rejects Candidate identities and text that downstream parsing cannot accept", async () => {

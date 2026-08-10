@@ -60,6 +60,8 @@ describe("Preschool Overview AI server workflow", () => {
     expect(investigatorPrompts[0]).toContain("evidenceRefs may contain only exact item.id strings copied verbatim from Bounded Snapshot Evidence");
     expect(investigatorPrompts[0]).toContain("Never use claimRefs, Coverage claim paths, JSON property paths, labels, or queryIds as evidenceRefs");
     expect(investigatorPrompts[0]).toContain("When SQL alone supports a candidate, evidenceRefs may be empty");
+    expect(investigatorPrompts[0]).toContain("A verified Candidate must cite at least one Catalog Evidence item or successful SQL evidence_index");
+    expect(investigatorPrompts[0]).toContain("action/expectedIfAct/ifIgnored/limitation<=140");
     expect(investigatorPrompts[0]).toContain("A zero-row successful result may have an index; an isError result never does");
     expect(investigatorPrompts[0]).toContain("ranking, percentage, ratio, share, difference, or delta");
     expect(investigatorPrompts[0]).toContain("must be explicitly returned by SQL; never calculate or estimate it yourself");
@@ -69,7 +71,7 @@ describe("Preschool Overview AI server workflow", () => {
     expect(editorPrompts[0]).toContain("verify metadata first");
     expect(editorPrompts[0]).toContain("if correct, investigate fixed/base load, schedule, or another supported driver");
     expect(editorPrompts[0]).toContain("This is conditional, not mandatory");
-    expect(editorPrompts[0]!.length).toBeLessThanOrEqual(6_000);
+    expect(editorPrompts[0]!.length).toBeLessThanOrEqual(6_500);
     expect(editorPrompts[0]!.indexOf("Investigator candidates")).toBeLessThan(
       editorPrompts[0]!.indexOf("Overview Coverage (compact):"),
     );
@@ -103,7 +105,7 @@ describe("Preschool Overview AI server workflow", () => {
     harness.close();
   }, 15_000);
 
-  it("keeps three maximum legal Candidates exact and visible inside the 6000-character Editor budget", async () => {
+  it("keeps three maximum legal Candidates exact and visible inside the 6500-character Editor budget", async () => {
     const harness = createHarness();
     let editorPrompt = "";
     const candidates = [1, 2, 3].map((index) => ({
@@ -111,13 +113,13 @@ describe("Preschool Overview AI server workflow", () => {
       epistemicLevel: "verified",
       title: String.fromCharCode(64 + index).repeat(160),
       takeaway: String.fromCharCode(67 + index).repeat(220),
-      action: String.fromCharCode(70 + index).repeat(120),
-      expectedIfAct: String.fromCharCode(73 + index).repeat(120),
-      ifIgnored: String.fromCharCode(76 + index).repeat(120),
-      limitation: String.fromCharCode(79 + index).repeat(120),
-      significance: String.fromCharCode(82 + index).repeat(120),
-      possibleExplanation: String.fromCharCode(85 + index).repeat(120),
-      nextCheck: String.fromCharCode(88 + index).repeat(120),
+      action: String.fromCharCode(70 + index).repeat(140),
+      expectedIfAct: String.fromCharCode(73 + index).repeat(140),
+      ifIgnored: String.fromCharCode(76 + index).repeat(140),
+      limitation: String.fromCharCode(79 + index).repeat(140),
+      significance: String.fromCharCode(82 + index).repeat(140),
+      possibleExplanation: String.fromCharCode(85 + index).repeat(140),
+      nextCheck: String.fromCharCode(88 + index).repeat(140),
       evidenceRefs: ["quality:window"],
       evidenceSqlIndexes: [],
       presentation: {
@@ -146,7 +148,7 @@ describe("Preschool Overview AI server workflow", () => {
     harness.close();
 
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
-    expect(editorPrompt.length).toBeLessThanOrEqual(6_000);
+    expect(editorPrompt.length).toBeLessThanOrEqual(6_500);
     expect(editorPrompt).toContain('"id":"candidate-1"');
     expect(editorPrompt).toContain('"id":"candidate-2"');
     expect(editorPrompt).toContain('"id":"candidate-3"');
@@ -191,6 +193,9 @@ describe("Preschool Overview AI server workflow", () => {
         candidates: [{ ...baseCandidate, id: "candidate-1", title: "T".repeat(161) }],
       },
       {
+        candidates: [{ ...baseCandidate, id: "candidate-1", action: "A".repeat(141) }],
+      },
+      {
         candidates: [{
           ...baseCandidate,
           id: "candidate-1",
@@ -214,6 +219,37 @@ describe("Preschool Overview AI server workflow", () => {
       harness.close();
       expect(artifact).toMatchObject({ status: "failed", error_code: "OVERVIEW_AI_INVESTIGATOR_RESULT_INVALID" });
     }
+  });
+
+  it("fails before Editor when a verified Candidate has no Catalog or SQL Evidence binding", async () => {
+    const harness = createHarness();
+    const stages: string[] = [];
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => snapshot(),
+      runStage: async ({ stage, runId, sessionId }) => {
+        stages.push(stage);
+        return stage === "investigator"
+          ? envelopeEvents({
+              candidates: [{
+                id: "candidate-1",
+                epistemicLevel: "verified",
+                title: "An unbound verified claim",
+                takeaway: "This claim has no cited Catalog or SQL Evidence.",
+                evidenceRefs: [],
+                evidenceSqlIndexes: [],
+              }],
+            }, runId, sessionId)
+          : stageEvents(stage, runId, sessionId);
+      },
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact).toMatchObject({ status: "failed", error_code: "OVERVIEW_AI_INVESTIGATOR_RESULT_INVALID" });
+    expect(stages).toEqual(["investigator"]);
   });
 
   it("parses only the final Editor Assistant message as the Stage submission", async () => {
