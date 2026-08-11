@@ -157,6 +157,75 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
     }
   });
 
+  it("hashes new value units independently while keeping a legacy identity canonical", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-overview-artifact-kind-"));
+    let metadata: ReturnType<typeof createMetadataStore> | undefined;
+    try {
+      const store = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+      metadata = store;
+      store.workspaces.upsert({
+        id: "artifact-workspace",
+        owner_user_id: "dev-user",
+        name: "Artifact",
+        kind: "customer",
+      });
+      store.energyIq.upsertProject({
+        id: "artifact-project",
+        workspace_id: "artifact-workspace",
+        name: "Artifact",
+        status: "published",
+      });
+
+      const legacy = store.energyIq.overviewAiArtifacts.queue({
+        identity: identity("snapshot-kind"),
+        triggeredBy: "dev-user",
+      });
+      const benchmarkIdentity: EnergyIqOverviewAiArtifactIdentity = {
+        ...identity("snapshot-kind"),
+        artifactKind: "section-interpretation",
+        targetId: "centre-benchmark",
+      };
+      const standbyIdentity: EnergyIqOverviewAiArtifactIdentity = {
+        ...benchmarkIdentity,
+        targetId: "standby-wastage",
+      };
+      const executiveIdentity: EnergyIqOverviewAiArtifactIdentity = {
+        ...identity("snapshot-kind"),
+        artifactKind: "executive-synthesis",
+      };
+      const benchmark = store.energyIq.overviewAiArtifacts.queue({
+        identity: benchmarkIdentity,
+        triggeredBy: "dev-user",
+      });
+      const standby = store.energyIq.overviewAiArtifacts.queue({
+        identity: standbyIdentity,
+        triggeredBy: "dev-user",
+      });
+      const executive = store.energyIq.overviewAiArtifacts.queue({
+        identity: executiveIdentity,
+        triggeredBy: "dev-user",
+      });
+
+      expect(new Set([legacy.id, benchmark.id, standby.id, executive.id]).size).toBe(4);
+      expect(JSON.parse(legacy.identity_json)).not.toHaveProperty("artifactKind");
+      expect(JSON.parse(benchmark.identity_json)).toMatchObject({
+        artifactKind: "section-interpretation",
+        targetId: "centre-benchmark",
+      });
+      expect(store.energyIq.overviewAiArtifacts.find({
+        ...benchmarkIdentity,
+        dataSnapshotId: "snapshot-other",
+      })).toBeUndefined();
+      expect(() => store.energyIq.overviewAiArtifacts.queue({
+        identity: { ...identity("snapshot-kind"), artifactKind: "section-interpretation" },
+        triggeredBy: "dev-user",
+      })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
+    } finally {
+      metadata?.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("allows an expired running lease to be reclaimed without creating another artifact", () => {
     const root = mkdtempSync(join(tmpdir(), "energyiq-overview-artifact-reclaim-"));
     let metadata: ReturnType<typeof createMetadataStore> | undefined;

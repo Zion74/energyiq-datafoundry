@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
+export type EnergyIqOverviewAiArtifactKind =
+  | "section-interpretation"
+  | "executive-synthesis"
+  | "autonomous-insights";
+
 export type EnergyIqOverviewAiArtifactIdentity = {
   workspaceId: string;
   projectId: string;
@@ -23,6 +28,13 @@ export type EnergyIqOverviewAiArtifactIdentity = {
   editorPromptRevision: string;
   methodSkillId: string;
   methodSkillRevision: string;
+  /**
+   * Absent only for legacy autonomous artifacts whose canonical identity and
+   * hash must remain readable. New artifacts always set an explicit kind.
+   */
+  artifactKind?: EnergyIqOverviewAiArtifactKind;
+  /** Required only when artifactKind is section-interpretation. */
+  targetId?: string;
 };
 
 export type EnergyIqOverviewAiArtifactStatus = "queued" | "running" | "available" | "failed";
@@ -309,6 +321,18 @@ const canonicalIdentity = (
     || identity.modelProfileRevision < 1) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_IDENTITY_INVALID");
   }
+  if (identity.artifactKind !== undefined
+    && identity.artifactKind !== "section-interpretation"
+    && identity.artifactKind !== "executive-synthesis"
+    && identity.artifactKind !== "autonomous-insights") {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_KIND_INVALID");
+  }
+  if (identity.artifactKind === "section-interpretation" && !identity.targetId?.trim()) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
+  }
+  if (identity.artifactKind !== "section-interpretation" && identity.targetId !== undefined) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_FORBIDDEN");
+  }
   return {
     workspaceId: identity.workspaceId,
     projectId: identity.projectId,
@@ -331,6 +355,8 @@ const canonicalIdentity = (
     editorPromptRevision: identity.editorPromptRevision,
     methodSkillId: identity.methodSkillId,
     methodSkillRevision: identity.methodSkillRevision,
+    ...(identity.artifactKind ? { artifactKind: identity.artifactKind } : {}),
+    ...(identity.targetId ? { targetId: identity.targetId } : {}),
   };
 };
 

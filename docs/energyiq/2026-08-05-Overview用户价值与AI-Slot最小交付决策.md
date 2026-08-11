@@ -453,3 +453,22 @@ Scheduler、Cadence DSL、跨项目 Insight 平台或第二套 Agent Runtime。
 
 明确停止：不建立通用 Signal DSL、通用 Scheduler、所有 Scope 预跑、按用户重复分析、跨项目缓存、第二套 Evidence Catalog、
 第二套 Runtime、模型生成可执行页面代码，或为了预生成而放松 Snapshot/授权/Evidence 校验。
+
+## 15. 2026-08-11 Preschool Section Interpreter 窄范围校准
+
+GitHub `#43` 对第 14 节作以下 Preschool 专属收窄；本节不改变 Autonomous Investigator、Interactive AI Analyst 或未来
+Overview Studio 的方向：
+
+1. **Section Interpreter** 只读取当前 Published Snapshot 已验证的 Section Pack，为 Preschool Sections 2–5 输出一句普通
+   英文结论和 2～4 个 Key Points。它不加载完整 Schema、SQL 工具、Knowledge/Skill，也不启动自主调查循环或独立 Editor。
+2. **Executive Synthesis** 只综合同一 Workspace、Project、Scope、Snapshot、Release、Period 和 Model identity 下已经通过的
+   Section Interpretation，输出 0～4 条顶部 Key Findings；不得重读原始 Facts、引入新数字或新事实。
+3. **Autonomous Investigator** 保留现有 Investigator → Editor、typed Evidence Validator 和声明式 Presentation Blocks，后续只
+   服务 `Additional EnergyIQ Insights`；其失败不得影响 Section Interpreter 或确定性 Overview。
+4. 三类结果复用同一 Overview AI Artifact Store，并以 `artifactKind` 和可选 `targetId` 区分价值单元。旧 Autonomous identity
+   保持可读，不追写、不迁移；`empty` 是成功 payload，不扩张数据库状态机。
+5. Provider 可用一次短批调用生成多个 Section，但 Parser、Evidence Validator、持久化、失败状态和重试必须逐 Section；一个
+   malformed 或 unsupported Section 不得抹掉合格 sibling。Provider 整体传输失败可以诚实地共同失败。
+6. 客户/Web 继续使用 read / ensure / retry 小接口。Refresh 和 Saved Analysis 只恢复精确 identity 的 Artifact，不启动新模型。
+
+本校准不授权通用 Artifact 平台、通用多 Agent 编排、Scheduler/DSL、Ngee Ann AI 或 Overview Studio。

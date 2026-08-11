@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createOverviewAiArtifactIdentity,
+  createPreschoolOverviewAiValueArtifactIdentity,
   overviewAiArtifactPinnedLocalPeriod,
 } from "./overview-ai-artifact.js";
 
@@ -66,6 +67,52 @@ describe("createOverviewAiArtifactIdentity", () => {
       modelProfileId: "profile",
       modelProfileRevision: 1,
     })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_CONTRACT_NOT_FOUND");
+  });
+
+  it("isolates Section and Executive value identities without changing the legacy identity", () => {
+    const legacy = createOverviewAiArtifactIdentity({
+      workspaceId: "preschool-demo-org",
+      projectId: "preschool-demo",
+      scopeId: "preschool-project",
+      dataSnapshotId: "snapshot-a",
+      projectReleaseId: "release-v1",
+      analysisPeriodFrom: "2026-05-01T00:00:00.000Z",
+      analysisPeriodTo: "2026-06-01T00:00:00.000Z",
+      rendererKey: "preschool-overview",
+      rendererVersion: "1",
+      modelProfileId: "deepseek-v4-flash",
+      modelProfileRevision: 8,
+    });
+    const benchmark = createPreschoolOverviewAiValueArtifactIdentity({
+      baseIdentity: legacy,
+      artifactKind: "section-interpretation",
+      targetId: "centre-benchmark",
+    });
+    const standby = createPreschoolOverviewAiValueArtifactIdentity({
+      baseIdentity: legacy,
+      artifactKind: "section-interpretation",
+      targetId: "standby-wastage",
+    });
+    const executive = createPreschoolOverviewAiValueArtifactIdentity({
+      baseIdentity: legacy,
+      artifactKind: "executive-synthesis",
+    });
+
+    expect(legacy).not.toHaveProperty("artifactKind");
+    expect(benchmark).toMatchObject({
+      artifactKind: "section-interpretation",
+      targetId: "centre-benchmark",
+      outputContractRevision: "preschool-section-interpretation-v1",
+    });
+    expect(standby).not.toEqual(benchmark);
+    expect(executive).toMatchObject({
+      artifactKind: "executive-synthesis",
+      outputContractRevision: "preschool-executive-synthesis-v1",
+    });
+    expect(() => createPreschoolOverviewAiValueArtifactIdentity({
+      baseIdentity: legacy,
+      artifactKind: "section-interpretation",
+    })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
   });
 });
 

@@ -14,6 +14,7 @@ import {
   resolveProjectAnalysis,
   type ProjectAnalysisSnapshot,
 } from "./project-analysis-resolver.js";
+import type { PreschoolSectionId } from "./preschool-overview-ai-contracts.js";
 
 type OverviewAiContract = {
   analysisPackId: string;
@@ -28,6 +29,11 @@ type OverviewAiContract = {
 };
 
 export type OverviewAiArtifactIdentityV13 = EnergyIqOverviewAiArtifactIdentity & OverviewAiContract;
+
+export type PreschoolOverviewAiValueArtifactIdentity = EnergyIqOverviewAiArtifactIdentity & {
+  artifactKind: "section-interpretation" | "executive-synthesis";
+  targetId?: PreschoolSectionId;
+};
 
 const OVERVIEW_AI_CONTRACTS: Readonly<Record<string, OverviewAiContract>> = {
   "preschool-overview": {
@@ -72,6 +78,45 @@ export const createOverviewAiArtifactIdentity = (input: {
     ...contract,
     modelProfileId: input.modelProfileId,
     modelProfileRevision: input.modelProfileRevision,
+  };
+};
+
+export const createPreschoolOverviewAiValueArtifactIdentity = (input: {
+  baseIdentity: OverviewAiArtifactIdentityV13;
+  artifactKind: "section-interpretation" | "executive-synthesis";
+  targetId?: PreschoolSectionId;
+}): PreschoolOverviewAiValueArtifactIdentity => {
+  if (input.artifactKind === "section-interpretation" && !input.targetId) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
+  }
+  if (input.artifactKind === "executive-synthesis" && input.targetId) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_FORBIDDEN");
+  }
+  const section = input.artifactKind === "section-interpretation";
+  const {
+    artifactKind: _legacyArtifactKind,
+    targetId: _legacyTargetId,
+    ...baseIdentity
+  } = input.baseIdentity;
+  return {
+    ...baseIdentity,
+    artifactKind: input.artifactKind,
+    ...(input.targetId ? { targetId: input.targetId } : {}),
+    outputContractRevision: section
+      ? "preschool-section-interpretation-v1"
+      : "preschool-executive-synthesis-v1",
+    validatorRevision: section
+      ? "preschool-section-interpreter-validator-v1"
+      : "preschool-executive-synthesis-validator-v1",
+    workflowRevision: section
+      ? "preschool-section-interpreter-v1"
+      : "preschool-executive-synthesis-v1",
+    investigatorPromptRevision: section
+      ? "preschool-section-interpreter-prompt-v1"
+      : "preschool-executive-synthesis-prompt-v1",
+    editorPromptRevision: "not-applicable-v1",
+    methodSkillId: "none",
+    methodSkillRevision: "not-applicable-v1",
   };
 };
 
