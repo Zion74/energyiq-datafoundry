@@ -65,6 +65,12 @@ import {
   type EnergyPeriod,
   type EnergyQueryContextRequest
 } from "./energy-query-context.js";
+import {
+  PRESCHOOL_SECTION_IDS,
+  isPreschoolSectionId,
+  type PreschoolOverviewAiReadModel,
+} from "./preschool-overview-ai-contracts.js";
+import type { PreschoolOverviewAiRetryTarget } from "./preschool-overview-ai-page-workflow.js";
 
 const EXPLORER_ANALYSIS_CACHE_LIMIT = 100;
 const explorerAnalysisCache = new Map<string, EnergyScopeAnalysis>();
@@ -229,12 +235,19 @@ export const handleEnergyApiRequest = async (
         ...(pin ? { pin } : {}),
       });
       if (segments.length === 3 && request.method === "GET") {
-        const artifact = context.metadataStore.energyIq.overviewAiArtifacts.find(identity);
+        const readModel = typeof context.overviewAiWorkflow.read === "function"
+          ? await context.overviewAiWorkflow.read({ identity, user })
+          : null;
+        const autonomousArtifact = readModel
+          ? null
+          : context.metadataStore.energyIq.overviewAiArtifacts.find(identity);
         return {
           status: 200,
           headers: { "Cache-Control": "private, no-store" },
-          body: createSuccessResult(artifact
-            ? toOverviewAiArtifactDto(artifact)
+          body: createSuccessResult(readModel
+            ? toPreschoolOverviewAiReadModelDto(readModel)
+            : autonomousArtifact
+              ? toOverviewAiArtifactDto(autonomousArtifact)
             : {
                 status: "missing",
                 dataSnapshotId: identity.dataSnapshotId,
@@ -243,12 +256,33 @@ export const handleEnergyApiRequest = async (
         };
       }
       if (segments.length === 4 && segments[3] === "ensure" && request.method === "POST") {
-        const artifact = await context.overviewAiWorkflow.execute({ identity, user, retry: false });
-        return { status: 200, body: createSuccessResult(toOverviewAiArtifactDto(artifact)) };
+        const readModel = await context.overviewAiWorkflow.execute({ identity, user, retry: false });
+        return {
+          status: 200,
+          headers: { "Cache-Control": "private, no-store" },
+          body: createSuccessResult(toOverviewAiWorkflowDto(readModel)),
+        };
       }
       if (segments.length === 4 && segments[3] === "retry" && request.method === "POST") {
-        const artifact = await context.overviewAiWorkflow.execute({ identity, user, retry: true });
-        return { status: 200, body: createSuccessResult(toOverviewAiArtifactDto(artifact)) };
+        const body = requireRecord(await readJsonBody(request));
+        const requestedRetryTarget = optionalString(body.targetId);
+        if (requestedRetryTarget
+          && requestedRetryTarget !== "executive-synthesis"
+          && !isPreschoolSectionId(requestedRetryTarget)) {
+          throw new Error("PRESCHOOL_OVERVIEW_AI_RETRY_TARGET_INVALID");
+        }
+        const retryTarget = requestedRetryTarget as PreschoolOverviewAiRetryTarget | undefined;
+        const readModel = await context.overviewAiWorkflow.execute({
+          identity,
+          user,
+          retry: true,
+          ...(retryTarget ? { retryTarget } : {}),
+        });
+        return {
+          status: 200,
+          headers: { "Cache-Control": "private, no-store" },
+          body: createSuccessResult(toOverviewAiWorkflowDto(readModel)),
+        };
       }
       if (segments.length === 4
         && (segments[3] === "claim" || segments[3] === "complete" || segments[3] === "fail")
@@ -1285,6 +1319,25 @@ const toOverviewAiArtifactDto = (artifact: EnergyIqOverviewAiArtifactRecord): Re
   ...(artifact.result_json ? { result: customerVisibleOverviewAiResult(JSON.parse(artifact.result_json) as unknown) } : {}),
 });
 
+const toPreschoolOverviewAiReadModelDto = (
+  readModel: PreschoolOverviewAiReadModel,
+): Record<string, unknown> => ({
+  status: "available",
+  dataSnapshotId: readModel.binding.dataSnapshotId,
+  projectReleaseId: readModel.binding.projectReleaseId,
+  modelProfileId: readModel.binding.modelProfileId,
+  modelProfileRevision: readModel.binding.modelProfileRevision,
+  result: readModel.autonomous === undefined
+    ? readModel
+    : { ...readModel, autonomous: customerVisibleOverviewAiResult(readModel.autonomous) },
+});
+
+const toOverviewAiWorkflowDto = (
+  value: PreschoolOverviewAiReadModel | EnergyIqOverviewAiArtifactRecord,
+): Record<string, unknown> => "binding" in value
+  ? toPreschoolOverviewAiReadModelDto(value)
+  : toOverviewAiArtifactDto(value);
+
 const customerVisibleOverviewAiResult = (value: unknown): unknown => {
   if (!isRecord(value) || !isRecord(value.workflow) || !Array.isArray(value.workflow.editorTrace)) return value;
   const { editorTrace: _, ...workflow } = value.workflow;
@@ -1338,7 +1391,7 @@ const parseSavedAnalysisViewState = (value: unknown): SavedAnalysisViewState => 
   return { grain, comparison, category };
 };
 
-type SavedAnalysisAiArtifactInput = {
+type SavedAnalysisAiLegacyArtifactInput = {
   contract: "energyiq-saved-ai-result@1";
   rendererKey: "ngee-ann-overview" | "preschool-overview";
   snapshotId: string;
@@ -1350,6 +1403,16 @@ type SavedAnalysisAiArtifactInput = {
     findings: Record<string, unknown>[];
   };
 };
+
+type SavedAnalysisAiSectionedArtifactInput = {
+  contract: "energyiq-saved-ai-result@2";
+  rendererKey: "preschool-overview";
+  snapshotId: string;
+  projectReleaseId: string;
+  result: PreschoolOverviewAiReadModel;
+};
+
+type SavedAnalysisAiArtifactInput = SavedAnalysisAiLegacyArtifactInput | SavedAnalysisAiSectionedArtifactInput;
 
 type SavedAnalysisAiArtifact = SavedAnalysisAiArtifactInput & {
   completedAt: string;
@@ -1369,7 +1432,9 @@ const parseRequestedSavedAnalysisAiArtifact = (
 ): SavedAnalysisAiArtifact | undefined => {
   if (value === undefined) return undefined;
   const artifact = parseSavedAnalysisAiArtifactInput(value, snapshot);
-  if (snapshot.renderer.key === "preschool-overview" && !isPreschoolAcceptedSavedResult(artifact.result, snapshot)) {
+  if (artifact.contract === "energyiq-saved-ai-result@1"
+    && snapshot.renderer.key === "preschool-overview"
+    && !isPreschoolAcceptedSavedResult(artifact.result, snapshot)) {
     throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
   }
   const runIds = savedAnalysisAiRunIds(artifact.result);
@@ -1384,7 +1449,8 @@ const parseRequestedSavedAnalysisAiArtifact = (
     }
     return run;
   });
-  const run = runs.find((candidate) => candidate.id === artifact.result.runId);
+  const primaryRunId = primarySavedAnalysisAiRunId(artifact.result);
+  const run = runs.find((candidate) => candidate.id === primaryRunId);
   if (!run?.finished_at) throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_RUN_INVALID");
   return {
     ...artifact,
@@ -1438,6 +1504,21 @@ const parseSavedAnalysisAiArtifactInput = (
   value: unknown,
   snapshot: ProjectAnalysisSnapshot,
 ): SavedAnalysisAiArtifactInput => {
+  if (isRecord(value) && value.contract === "energyiq-saved-ai-result@2") {
+    if (value.rendererKey !== "preschool-overview"
+      || snapshot.renderer.key !== "preschool-overview"
+      || value.snapshotId !== snapshot.dataSnapshot.id
+      || value.projectReleaseId !== snapshot.projectRelease.id
+      || !isPreschoolSectionedSavedResult(value.result, snapshot)) {
+      throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+    }
+    const artifact = value as unknown as SavedAnalysisAiSectionedArtifactInput;
+    if (savedAnalysisAiRunIds(artifact.result).length === 0
+      || JSON.stringify(artifact).length > 262_144) {
+      throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+    }
+    return artifact;
+  }
   if (!isRecord(value)
     || value.contract !== "energyiq-saved-ai-result@1"
     || value.rendererKey !== snapshot.renderer.key
@@ -1464,8 +1545,8 @@ const parseSavedAnalysisAiArtifactInput = (
       || (!isPreschoolAcceptedSavedResult(value.result, snapshot) && value.result.findings.length > 3))) {
     throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
   }
-  const input = value as SavedAnalysisAiArtifactInput;
-  const artifact: SavedAnalysisAiArtifactInput = {
+  const input = value as SavedAnalysisAiLegacyArtifactInput;
+  const artifact: SavedAnalysisAiLegacyArtifactInput = {
     ...input,
     result: {
       ...input.result,
@@ -1478,6 +1559,17 @@ const parseSavedAnalysisAiArtifactInput = (
 };
 
 const savedAnalysisAiRunIds = (result: SavedAnalysisAiArtifactInput["result"]): string[] => {
+  if (isPreschoolOverviewAiReadModel(result)) {
+    return [...new Set([
+      ...PRESCHOOL_SECTION_IDS.flatMap((sectionId) => {
+        const unit = result.sections[sectionId];
+        return unit.status === "available" || unit.status === "empty" ? [unit.result.runId] : [];
+      }),
+      ...(result.executive.status === "available" || result.executive.status === "empty"
+        ? [result.executive.result.runId]
+        : []),
+    ])];
+  }
   if (!isRecord(result.workflow)
     || !isRecord(result.workflow.stages)
     || !isRecord(result.workflow.stages.investigator)
@@ -1488,6 +1580,67 @@ const savedAnalysisAiRunIds = (result: SavedAnalysisAiArtifactInput["result"]): 
     result.workflow.stages.investigator.runId,
     result.workflow.stages.editor.runId,
   ])];
+};
+
+const primarySavedAnalysisAiRunId = (result: SavedAnalysisAiArtifactInput["result"]): string => {
+  if (!isPreschoolOverviewAiReadModel(result)) return result.runId;
+  if (result.executive.status === "available" || result.executive.status === "empty") {
+    return result.executive.result.runId;
+  }
+  const runIds = savedAnalysisAiRunIds(result);
+  if (runIds.length === 0) throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_RUN_INVALID");
+  return runIds[runIds.length - 1]!;
+};
+
+const isPreschoolSectionedSavedResult = (
+  value: unknown,
+  snapshot: ProjectAnalysisSnapshot,
+): value is PreschoolOverviewAiReadModel => {
+  if (!isPreschoolOverviewAiReadModel(value)
+    || value.binding.dataSnapshotId !== snapshot.dataSnapshot.id
+    || value.binding.projectReleaseId !== snapshot.projectRelease.id
+    || value.binding.projectId !== "preschool-demo"
+    || value.binding.scopeId !== snapshot.context.scopeId
+    || value.binding.analysisPeriod.from !== snapshot.context.primaryPeriod.start
+    || value.binding.analysisPeriod.to !== snapshot.context.primaryPeriod.endExclusive) return false;
+  return PRESCHOOL_SECTION_IDS.every((sectionId) =>
+    validPreschoolSavedUnit(value.sections[sectionId], value.binding, "section-interpretation", sectionId))
+    && validPreschoolSavedUnit(value.executive, value.binding, "executive-synthesis");
+};
+
+const isPreschoolOverviewAiReadModel = (value: unknown): value is PreschoolOverviewAiReadModel =>
+  isRecord(value)
+  && value.artifactKind === "preschool-overview-ai-read-model"
+  && value.status === "available"
+  && isRecord(value.binding)
+  && isRecord(value.binding.analysisPeriod)
+  && isRecord(value.sections)
+  && isRecord(value.executive);
+
+const validPreschoolSavedUnit = (
+  value: unknown,
+  binding: PreschoolOverviewAiReadModel["binding"],
+  artifactKind: "section-interpretation" | "executive-synthesis",
+  sectionId?: string,
+): boolean => {
+  if (!isRecord(value) || value.status === "queued" || value.status === "running") return false;
+  if (value.status === "unavailable") return typeof value.reason === "string" && Boolean(value.reason.trim());
+  if ((value.status !== "available" && value.status !== "empty")
+    || typeof value.artifactId !== "string"
+    || !isRecord(value.result)
+    || value.result.artifactKind !== artifactKind
+    || value.result.status !== value.status
+    || typeof value.result.providerProfileId !== "string"
+    || typeof value.result.runId !== "string"
+    || !isRecord(value.result.binding)
+    || value.result.binding.dataSnapshotId !== binding.dataSnapshotId
+    || value.result.binding.projectReleaseId !== binding.projectReleaseId
+    || value.result.binding.modelProfileId !== binding.modelProfileId
+    || value.result.binding.modelProfileRevision !== binding.modelProfileRevision) return false;
+  if (artifactKind === "section-interpretation") {
+    return value.result.sectionId === sectionId && Array.isArray(value.result.keyPoints);
+  }
+  return Array.isArray(value.result.sourceSectionArtifactIds) && Array.isArray(value.result.keyFindings);
 };
 
 const isPreschoolAcceptedSavedResult = (

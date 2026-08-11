@@ -1841,6 +1841,71 @@ export type EnergySavedAnalysisViewStateDto = {
   category: "all" | "load" | "light";
 };
 
+export type PreschoolOverviewAiSectionIdDto =
+  | "centre-benchmark"
+  | "standby-wastage"
+  | "operating-behaviour"
+  | "planning-outlook";
+
+export type PreschoolOverviewAiBindingDto = {
+  workspaceId: string;
+  projectId: "preschool-demo";
+  scopeId: string;
+  dataSnapshotId: string;
+  projectReleaseId: string;
+  analysisPeriod: { from: string; to: string };
+  modelProfileId: string;
+  modelProfileRevision: number;
+};
+
+export type PreschoolSectionInterpretationResultDto = {
+  artifactKind: "section-interpretation";
+  status: "available" | "empty";
+  providerProfileId: string;
+  runId: string;
+  binding: PreschoolOverviewAiBindingDto;
+  sectionId: PreschoolOverviewAiSectionIdDto;
+  summary?: string;
+  keyPoints: Array<{
+    kind: "finding" | "meaning" | "next-check";
+    label?: string;
+    text: string;
+    evidenceRefs: string[];
+  }>;
+  limitation?: string;
+};
+
+export type PreschoolExecutiveSynthesisResultDto = {
+  artifactKind: "executive-synthesis";
+  status: "available" | "empty";
+  providerProfileId: string;
+  runId: string;
+  binding: PreschoolOverviewAiBindingDto;
+  sourceSectionArtifactIds: string[];
+  keyFindings: Array<{
+    id: string;
+    takeaway: string;
+    sectionIds: PreschoolOverviewAiSectionIdDto[];
+    evidenceRefs: string[];
+  }>;
+};
+
+export type PreschoolOverviewAiUnitStatusDto<T> =
+  | { status: "queued" }
+  | { status: "running" }
+  | { status: "available"; artifactId: string; result: T }
+  | { status: "empty"; artifactId: string; result: T }
+  | { status: "unavailable"; artifactId?: string; reason: string };
+
+export type PreschoolOverviewAiReadModelDto = {
+  artifactKind: "preschool-overview-ai-read-model";
+  status: "available";
+  binding: PreschoolOverviewAiBindingDto;
+  sections: Record<PreschoolOverviewAiSectionIdDto, PreschoolOverviewAiUnitStatusDto<PreschoolSectionInterpretationResultDto>>;
+  executive: PreschoolOverviewAiUnitStatusDto<PreschoolExecutiveSynthesisResultDto>;
+  autonomous?: unknown;
+};
+
 export type EnergySavedAnalysisAiArtifactInputDto = {
   contract: "energyiq-saved-ai-result@1";
   rendererKey: EnergyProjectRendererKeyDto;
@@ -1853,6 +1918,12 @@ export type EnergySavedAnalysisAiArtifactInputDto = {
     findings: Array<Record<string, unknown>>;
     [key: string]: unknown;
   };
+} | {
+  contract: "energyiq-saved-ai-result@2";
+  rendererKey: "preschool-overview";
+  snapshotId: string;
+  projectReleaseId: string;
+  result: PreschoolOverviewAiReadModelDto;
 };
 
 export type EnergyOverviewAiArtifactDto = {
@@ -1866,7 +1937,7 @@ export type EnergyOverviewAiArtifactDto = {
   runId?: string;
   completedAt?: string;
   errorCode?: string;
-  result?: {
+  result?: PreschoolOverviewAiReadModelDto | {
     status: "available";
     providerProfileId: string;
     runId: string;

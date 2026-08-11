@@ -14,6 +14,54 @@ import { handleEnergyApiRequest } from "./energy-api.js";
 import { createOverviewAiArtifactIdentity } from "./overview-ai-artifact.js";
 
 describe("Overview AI Artifact API", () => {
+  it("returns the aggregate read model read-only and forwards only a validated Section retry target", async () => {
+    const harness = await createHarness();
+    try {
+      const aggregate = aggregateResultFor(harness.identity);
+      const read = vi.fn().mockResolvedValue(aggregate);
+      const execute = vi.fn().mockResolvedValue(aggregate);
+      const resolveCurrentIdentity = vi.fn().mockResolvedValue(harness.identity);
+      const context = {
+        ...harness.context,
+        overviewAiWorkflow: { execute, read, resolveCurrentIdentity },
+      } as unknown as Required<ConfigApiContext>;
+      const path = ["projects", harness.project.id, "overview-ai-artifact"];
+
+      const restored = await handleEnergyApiRequest(
+        getRequest(`/api/v1/energy/projects/${harness.project.id}/overview-ai-artifact?scopeId=${harness.project.root_scope_id}`),
+        path,
+        context,
+      );
+      expect(restored).toMatchObject({
+        status: 200,
+        headers: { "Cache-Control": "private, no-store" },
+        body: {
+          success: true,
+          data: {
+            status: "available",
+            result: {
+              artifactKind: "preschool-overview-ai-read-model",
+              sections: {
+                "centre-benchmark": { status: "available" },
+                "standby-wastage": { status: "unavailable" },
+              },
+              executive: { status: "unavailable" },
+            },
+          },
+        },
+      });
+      expect(execute).not.toHaveBeenCalled();
+
+      await handleEnergyApiRequest(jsonPost({ targetId: "standby-wastage" }), [...path, "retry"], context);
+      expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+        retry: true,
+        retryTarget: "standby-wastage",
+      }));
+    } finally {
+      harness.close();
+    }
+  });
+
   it("keeps GET read-only and no-store while POST ensure and retry execute server-owned work", async () => {
     const harness = await createHarness();
     try {
@@ -199,6 +247,44 @@ async function createHarness() {
       metadata.close();
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     },
+  };
+}
+
+function aggregateResultFor(identity: ReturnType<typeof createOverviewAiArtifactIdentity>) {
+  const binding = {
+    workspaceId: identity.workspaceId,
+    projectId: "preschool-demo" as const,
+    scopeId: identity.scopeId,
+    dataSnapshotId: identity.dataSnapshotId,
+    projectReleaseId: identity.projectReleaseId,
+    analysisPeriod: { from: identity.analysisPeriodFrom, to: identity.analysisPeriodTo },
+    modelProfileId: identity.modelProfileId,
+    modelProfileRevision: identity.modelProfileRevision,
+  };
+  return {
+    artifactKind: "preschool-overview-ai-read-model" as const,
+    status: "available" as const,
+    binding,
+    sections: {
+      "centre-benchmark": {
+        status: "available" as const,
+        artifactId: "section-benchmark",
+        result: {
+          artifactKind: "section-interpretation" as const,
+          status: "available" as const,
+          providerProfileId: identity.modelProfileId,
+          runId: "run-benchmark",
+          binding,
+          sectionId: "centre-benchmark" as const,
+          summary: "Benchmark evidence supports a focused review.",
+          keyPoints: [],
+        },
+      },
+      "standby-wastage": { status: "unavailable" as const, artifactId: "section-standby", reason: "SECTION_FAILED" },
+      "operating-behaviour": { status: "unavailable" as const, reason: "Not generated." },
+      "planning-outlook": { status: "unavailable" as const, reason: "Not generated." },
+    },
+    executive: { status: "unavailable" as const, artifactId: "executive", reason: "SYNTHESIS_FAILED" },
   };
 }
 

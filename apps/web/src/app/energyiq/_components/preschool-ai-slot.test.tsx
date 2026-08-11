@@ -4,10 +4,11 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { PreschoolOverviewAiReadModelDto } from "../../../lib/config-api";
 import { buildEnergyAiHandoffInitialDraftPrompt } from "./energy-analysis-workbench";
 import { PreschoolAiSlot } from "./preschool-ai-slot";
 import type { PreschoolAiAcceptedArtifact } from "./preschool-ai-artifact";
-import type { PreschoolAiProgress, PreschoolAiRunResult } from "./preschool-ai-run";
+import type { PreschoolAiLegacyRunResult, PreschoolAiProgress, PreschoolAiRunResult } from "./preschool-ai-run";
 import { preschoolGoldenSnapshot } from "./preschool-overview.test-fixture";
 
 describe("PreschoolAiSlot", () => {
@@ -163,6 +164,26 @@ describe("PreschoolAiSlot", () => {
     expect(container.querySelectorAll("article")).toHaveLength(2);
   });
 
+  it("targets retry to only the failed Section", async () => {
+    const result = sectionedResult();
+    const retryRun = vi.fn().mockResolvedValue(result);
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        sectionId="standby-wastage"
+        startRun={vi.fn().mockResolvedValue(result)}
+        retryRun={retryRun}
+      />,
+    ));
+    await act(async () => undefined);
+    const retryButton = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("Retry AI analysis"));
+    expect(retryButton).toBeDefined();
+
+    await act(async () => retryButton!.click());
+    expect(retryRun).toHaveBeenCalledWith(expect.any(Object), expect.any(Function), "standby-wastage");
+  });
+
   it("opens compact Evidence and carries one Finding into Ask AI deeper", async () => {
     await renderSlot(vi.fn().mockResolvedValue(availableResult()));
     await act(async () => undefined);
@@ -230,6 +251,43 @@ describe("PreschoolAiSlot", () => {
     expect(container.querySelectorAll("article")).toHaveLength(1);
   });
 
+  it("restores independent Section statuses without starting Provider or hiding successful siblings", async () => {
+    const startRun = vi.fn();
+    const result = sectionedResult();
+    await act(async () => {
+      root.render(<>
+        <PreschoolAiSlot
+          snapshot={preschoolGoldenSnapshot()}
+          sectionId="page-synthesis"
+          mode="saved"
+          savedResult={result}
+          startRun={startRun}
+        />
+        <PreschoolAiSlot
+          snapshot={preschoolGoldenSnapshot()}
+          sectionId="centre-benchmark"
+          mode="saved"
+          savedResult={result}
+          startRun={startRun}
+        />
+        <PreschoolAiSlot
+          snapshot={preschoolGoldenSnapshot()}
+          sectionId="standby-wastage"
+          mode="saved"
+          savedResult={result}
+          startRun={startRun}
+        />
+      </>);
+    });
+
+    expect(startRun).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Benchmark evidence supports a focused review.");
+    expect(container.textContent).toContain("Executive Key Findings are unavailable");
+    expect(container.textContent).toContain("This Section interpretation is unavailable");
+    expect(container.querySelector("[data-ai-section='centre-benchmark']")).not.toBeNull();
+    expect(container.querySelector("[data-ai-section='standby-wastage']")).not.toBeNull();
+  });
+
   async function renderSlot(
     startRun: Parameters<typeof PreschoolAiSlot>[0]["startRun"],
     sectionId: Parameters<typeof PreschoolAiSlot>[0]["sectionId"] = "page-synthesis",
@@ -257,7 +315,9 @@ function expectDecisionSummaryBeforeVisual(container: HTMLElement): void {
   expect(action!.compareDocumentPosition(presentation!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 }
 
-function availableResult(): Extract<PreschoolAiRunResult, { status: "available" }> {
+type LegacyAvailableResult = Extract<PreschoolAiLegacyRunResult, { status: "available" }>;
+
+function availableResult(): LegacyAvailableResult {
   return {
     status: "available",
     providerProfileId: "profile-1",
@@ -332,13 +392,67 @@ function acceptedResult(): PreschoolAiAcceptedArtifact {
   };
 }
 
+function sectionedResult(): PreschoolOverviewAiReadModelDto {
+  const snapshot = preschoolGoldenSnapshot();
+  const binding = {
+    workspaceId: snapshot.context.workspaceId,
+    projectId: "preschool-demo" as const,
+    scopeId: snapshot.context.scopeId,
+    dataSnapshotId: snapshot.dataSnapshot.id,
+    projectReleaseId: snapshot.projectRelease.id,
+    analysisPeriod: {
+      from: snapshot.context.primaryPeriod.start,
+      to: snapshot.context.primaryPeriod.endExclusive,
+    },
+    modelProfileId: "workspace-default-model-profile",
+    modelProfileRevision: 1,
+  };
+  const available = {
+    status: "available" as const,
+    artifactId: "section-benchmark",
+    result: {
+      artifactKind: "section-interpretation" as const,
+      status: "available" as const,
+      providerProfileId: binding.modelProfileId,
+      runId: "run-benchmark",
+      binding,
+      sectionId: "centre-benchmark" as const,
+      summary: "Benchmark evidence supports a focused review.",
+      keyPoints: [
+        { kind: "finding" as const, text: "One pattern deserves attention.", evidenceRefs: ["evidence:benchmark"] },
+        { kind: "next-check" as const, text: "Confirm context first.", evidenceRefs: ["evidence:benchmark"] },
+      ],
+    },
+  };
+  return {
+    artifactKind: "preschool-overview-ai-read-model",
+    status: "available",
+    binding,
+    sections: {
+      "centre-benchmark": available,
+      "standby-wastage": { status: "unavailable", artifactId: "section-standby", reason: "SECTION_FAILED" },
+      "operating-behaviour": { status: "empty", artifactId: "section-operating", result: {
+        artifactKind: "section-interpretation",
+        status: "empty",
+        providerProfileId: binding.modelProfileId,
+        binding,
+        sectionId: "operating-behaviour",
+        runId: "run-operating",
+        keyPoints: [],
+      } },
+      "planning-outlook": { status: "unavailable", reason: "Section interpretation has not been generated." },
+    },
+    executive: { status: "unavailable", artifactId: "executive", reason: "SYNTHESIS_FAILED" },
+  };
+}
+
 function finding(
   id: string,
   relationship: "supports" | "independent",
   withSql: boolean,
-  sectionId: Extract<PreschoolAiRunResult, { status: "available" }>["findings"][number]["sectionId"] = "page-synthesis",
+  sectionId: LegacyAvailableResult["findings"][number]["sectionId"] = "page-synthesis",
   signalRefs: string[] = [],
-): Extract<PreschoolAiRunResult, { status: "available" }>["findings"][number] {
+): LegacyAvailableResult["findings"][number] {
   return {
     id,
     sectionId,

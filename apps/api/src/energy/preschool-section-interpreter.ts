@@ -99,7 +99,7 @@ export const createPreschoolSectionInterpreter = (input: {
       const prompt = buildSectionInterpreterPrompt(claimed.map(({ sectionId }) => packBySection.get(sectionId)!));
       const response = await input.runBatch({
         prompt,
-        identity: baseIdentity,
+        identity: claimed[0]!.identity,
         user,
         workspaceId: baseIdentity.workspaceId,
         runId,

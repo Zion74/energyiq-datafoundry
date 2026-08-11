@@ -1,6 +1,7 @@
 import type {
   EnergyOverviewAiArtifactDto,
   EnergyProjectAnalysisSnapshotDto,
+  PreschoolOverviewAiReadModelDto,
   PreschoolDecisionSignalsDto,
 } from "../../../lib/config-api";
 import { configApi } from "../../../lib/config-api";
@@ -35,7 +36,10 @@ import {
 export type PreschoolAiProgress = "queued" | "inspecting" | "querying" | "validating" | "drafting";
 export type PreschoolAiRelationship = "supports" | "challenges" | "independent";
 export type PreschoolAiWhyKind = "Evidence" | "Hypothesis" | "Missing Evidence";
-export type PreschoolAiSectionId = PreschoolDecisionSignalsDto["items"][number]["sectionId"] | "page-synthesis";
+export type PreschoolAiSectionId =
+  | PreschoolDecisionSignalsDto["items"][number]["sectionId"]
+  | "standby-wastage"
+  | "page-synthesis";
 
 export type PreschoolAiToolEvidence = {
   evidenceIndex: number;
@@ -81,7 +85,9 @@ export type PreschoolAiLegacyRunResult = {
   reason: string;
 };
 
-export type PreschoolAiRunResult = PreschoolAiAcceptedArtifact | Extract<PreschoolAiLegacyRunResult, { status: "available" }> | {
+export type PreschoolAiSectionedRunResult = PreschoolOverviewAiReadModelDto;
+
+export type PreschoolAiRunResult = PreschoolAiAcceptedArtifact | PreschoolAiSectionedRunResult | Extract<PreschoolAiLegacyRunResult, { status: "available" }> | {
   status: "unavailable";
   reason: string;
   retryable?: boolean;
@@ -287,6 +293,9 @@ async function restoreOrExecutePreschoolAiRun(
   if (artifact.status === "available") {
     const shared = acceptedSharedPreschoolAiArtifact(input, artifact);
     if (!shared) return { status: "unavailable", reason: FRIENDLY_UNAVAILABLE };
+    if (isPendingPreschoolSectionedReadModel(shared)) {
+      return waitForSharedPreschoolAiArtifact(input, onProgress);
+    }
     onProgress?.("validating");
     onProgress?.("drafting");
     return shared;
@@ -302,15 +311,29 @@ async function restoreOrExecutePreschoolAiRun(
 export async function retryPreschoolAiRun(
   input: PreschoolAiRunInput,
   onProgress?: ProgressCallback,
+  targetId?: "centre-benchmark" | "standby-wastage" | "operating-behaviour" | "planning-outlook" | "executive-synthesis",
 ): Promise<PreschoolAiRunResult> {
   onProgress?.("inspecting");
-  const artifact = await configApi.retryEnergyOverviewAiArtifact(
-    input.projectId,
-    input.scopeId,
-    overviewAiArtifactPin(input),
-  );
+  const artifact = targetId
+    ? await configApi.retryEnergyOverviewAiArtifact(
+        input.projectId,
+        input.scopeId,
+        overviewAiArtifactPin(input),
+        targetId,
+      )
+    : await configApi.retryEnergyOverviewAiArtifact(
+        input.projectId,
+        input.scopeId,
+        overviewAiArtifactPin(input),
+      );
   const accepted = acceptedSharedPreschoolAiArtifact(input, artifact);
   if (accepted) {
+    if (isPendingPreschoolSectionedReadModel(accepted)) {
+      return cacheSettledPreschoolAiRun(
+        input.identityKey,
+        await waitForSharedPreschoolAiArtifact(input, onProgress),
+      );
+    }
     onProgress?.("validating");
     onProgress?.("drafting");
     return cacheSettledPreschoolAiRun(input.identityKey, accepted);
@@ -339,11 +362,12 @@ function cacheSettledPreschoolAiRun(identityKey: string, result: PreschoolAiRunR
 function acceptedSharedPreschoolAiArtifact(
   input: PreschoolAiRunInput,
   artifact: EnergyOverviewAiArtifactDto,
-): PreschoolAiAcceptedArtifact | null {
+): Extract<PreschoolAiRunResult, { status: "available" }> | null {
   if (artifact.status !== "available"
     || artifact.dataSnapshotId !== input.snapshotId
     || artifact.projectReleaseId !== input.projectReleaseId
     || !artifact.result) return null;
+  if (isExactPreschoolSectionedReadModel(artifact.result, input)) return artifact.result;
   const exact = selectPreschoolAiSectionInterpretation(
     artifact.result,
     input.coverage.binding,
@@ -359,6 +383,7 @@ async function waitForSharedPreschoolAiArtifact(
   onProgress?: ProgressCallback,
 ): Promise<PreschoolAiRunResult> {
   const deadline = Date.now() + SHARED_ARTIFACT_WAIT_TIMEOUT_MS;
+  let lastPending: PreschoolAiSectionedRunResult | null = null;
   while (Date.now() < deadline) {
     const artifact = await configApi.getEnergyOverviewAiArtifact(
       input.projectId,
@@ -367,11 +392,15 @@ async function waitForSharedPreschoolAiArtifact(
     );
     const accepted = acceptedSharedPreschoolAiArtifact(input, artifact);
     if (accepted) {
-      onProgress?.("validating");
-      onProgress?.("drafting");
-      return accepted;
+      if (isPendingPreschoolSectionedReadModel(accepted)) {
+        lastPending = accepted;
+      } else {
+        onProgress?.("validating");
+        onProgress?.("drafting");
+        return accepted;
+      }
     }
-    if (artifact.status === "available" || artifact.status === "failed") {
+    if (!accepted && (artifact.status === "available" || artifact.status === "failed")) {
       return {
         status: "unavailable",
         reason: FRIENDLY_UNAVAILABLE,
@@ -382,7 +411,7 @@ async function waitForSharedPreschoolAiArtifact(
     if (remaining <= 0) break;
     await new Promise<void>((resolve) => setTimeout(resolve, Math.min(SHARED_ARTIFACT_POLL_MS, remaining)));
   }
-  return { status: "unavailable", reason: FRIENDLY_UNAVAILABLE, retryable: true };
+  return lastPending ?? { status: "unavailable", reason: FRIENDLY_UNAVAILABLE, retryable: true };
 }
 
 function overviewAiArtifactPin(input: PreschoolAiRunInput): {
@@ -405,6 +434,34 @@ type PreschoolAiEventStreamInput = {
   providerProfileId: string;
   runId: string;
 };
+
+const isExactPreschoolSectionedReadModel = (
+  value: EnergyOverviewAiArtifactDto["result"],
+  input: PreschoolAiRunInput,
+): value is PreschoolOverviewAiReadModelDto => {
+  if (!value || value.artifactKind !== "preschool-overview-ai-read-model") return false;
+  const candidate = value as PreschoolOverviewAiReadModelDto;
+  return candidate.status === "available"
+    && candidate.binding.projectId === input.projectId
+    && candidate.binding.scopeId === input.scopeId
+    && candidate.binding.dataSnapshotId === input.snapshotId
+    && candidate.binding.projectReleaseId === input.projectReleaseId
+    && candidate.binding.analysisPeriod.from === input.analysisFrom
+    && candidate.binding.analysisPeriod.to === input.analysisTo;
+};
+
+export const isPendingPreschoolSectionedReadModel = (
+  value: Extract<PreschoolAiRunResult, { status: "available" }>,
+): value is PreschoolAiSectionedRunResult => isExactSectionedResultShape(value)
+  && [
+    ...Object.values(value.sections),
+    value.executive,
+  ].some((unit) => unit.status === "queued" || unit.status === "running");
+
+const isExactSectionedResultShape = (
+  value: Extract<PreschoolAiRunResult, { status: "available" }>,
+): value is PreschoolAiSectionedRunResult => "artifactKind" in value
+  && value.artifactKind === "preschool-overview-ai-read-model";
 
 export function resolvePreschoolAiEventStream(args: PreschoolAiEventStreamInput): PreschoolAiLegacyRunResult {
   return validatePreschoolAiEventStream(args).result;

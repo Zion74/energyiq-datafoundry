@@ -633,11 +633,12 @@ export const configApi = {
     projectId: string,
     scopeId: string,
     pin?: { from: string; to: string; dataSnapshotId: string; projectReleaseId: string },
+    targetId?: "centre-benchmark" | "standby-wastage" | "operating-behaviour" | "planning-outlook" | "executive-synthesis",
   ): Promise<EnergyOverviewAiArtifactDto> {
     const params = overviewAiArtifactParams(scopeId, pin);
     return requestEnvelope<EnergyOverviewAiArtifactDto>(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-ai-artifact/retry?${params.toString()}`,
-      { method: "POST", body: "{}" },
+      { method: "POST", body: JSON.stringify(targetId ? { targetId } : {}) },
     );
   },
 

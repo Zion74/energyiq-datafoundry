@@ -399,7 +399,7 @@ describe("saved analysis decision-quality boundary", () => {
       expect(records[0]?.ai_result_json).toBeUndefined();
 
       metadata.sessions.create({ user_id: "dev-user", id: "saved-analysis-ai-session-v2", title: "Saved AI v2" });
-      for (const runId of ["saved-analysis-ai-investigator-run-v2", "saved-analysis-ai-editor-run-v2"]) {
+      for (const runId of ["saved-analysis-ai-section-run-v2", "saved-analysis-ai-executive-run-v2"]) {
         metadata.runs.create({
           id: runId,
           user_id: "dev-user",
@@ -417,57 +417,65 @@ describe("saved analysis decision-quality boundary", () => {
         });
       }
       const bindingV2 = {
+        workspaceId: PRESCHOOL_WORKSPACE_ID,
         projectId: project.id,
         scopeId: project.root_scope_id,
         dataSnapshotId: project.data_snapshot_id,
         projectReleaseId: publishedV2.template_revision_id,
-        dataCutoff: "2026-05-01T16:00:00.000Z",
         analysisPeriod: { from: "2026-04-30T16:00:00.000Z", to: "2026-05-01T16:00:00.000Z" },
-        outputContractRevision: "v13",
+        modelProfileId: "workspace-default-model-profile",
+        modelProfileRevision: 1,
       } as const;
       const aiArtifactV2 = {
-        contract: "energyiq-saved-ai-result@1",
+        contract: "energyiq-saved-ai-result@2",
         rendererKey: "preschool-overview",
         snapshotId: project.data_snapshot_id,
         projectReleaseId: publishedV2.template_revision_id,
         result: {
+          artifactKind: "preschool-overview-ai-read-model",
           status: "available",
-          providerProfileId: "profile-test",
-          runId: "saved-analysis-ai-editor-run-v2",
-          packId: "preschool-analysis-pack",
-          packRevision: "v1",
-          contract: { id: "preschool-ai-accepted-artifact", revision: "v13" },
           binding: bindingV2,
-          workflow: {
-            id: "preschool-two-stage",
-            revision: "preschool-two-stage-v2",
-            methodSkill: { id: "energy-insight-investigation", revision: "1.0.0" },
-            stages: {
-              investigator: { runId: "saved-analysis-ai-investigator-run-v2", promptRevision: "preschool-investigator-v11" },
-              editor: { runId: "saved-analysis-ai-editor-run-v2", promptRevision: "preschool-insight-editor-v5" },
+          sections: {
+            "centre-benchmark": {
+              status: "available",
+              artifactId: "section-benchmark-v2",
+              result: {
+                artifactKind: "section-interpretation",
+                status: "available",
+                providerProfileId: bindingV2.modelProfileId,
+                runId: "saved-analysis-ai-section-run-v2",
+                binding: bindingV2,
+                sectionId: "centre-benchmark",
+                summary: "Benchmark evidence supports a focused operating review.",
+                keyPoints: [{
+                  kind: "next-check",
+                  text: "Review schedules before assigning a cause.",
+                  evidenceRefs: ["evidence:benchmark"],
+                }],
+              },
+            },
+            "standby-wastage": { status: "unavailable", reason: "Section interpretation failed." },
+            "operating-behaviour": { status: "unavailable", reason: "Section interpretation was not generated." },
+            "planning-outlook": { status: "unavailable", reason: "Section interpretation was not generated." },
+          },
+          executive: {
+            status: "available",
+            artifactId: "executive-v2",
+            result: {
+              artifactKind: "executive-synthesis",
+              status: "available",
+              providerProfileId: bindingV2.modelProfileId,
+              runId: "saved-analysis-ai-executive-run-v2",
+              binding: bindingV2,
+              sourceSectionArtifactIds: ["section-benchmark-v2"],
+              keyFindings: [{
+                id: "executive-finding-v2",
+                takeaway: "Benchmark evidence supports a focused operating review.",
+                sectionIds: ["centre-benchmark"],
+                evidenceRefs: ["evidence:benchmark"],
+              }],
             },
           },
-          findings: [{
-            id: "finding-v2",
-            binding: bindingV2,
-            placementTargets: ["preschool.benchmark"],
-            epistemicLevel: "hypothesis",
-            relationship: "independent",
-            signalRefs: [],
-            title: "Benchmark gap needs an operating explanation",
-            takeaway: "The current facts do not establish the driver.",
-            action: "Review schedules and major circuit loads.",
-            expectedIfAct: "The review should isolate the operating condition.",
-            ifIgnored: "The unexplained benchmark gap may persist.",
-            verification: "Compare schedules and major circuit loads.",
-            uncertainty: "The pinned evidence does not establish a cause.",
-            evidence: {
-              snapshotId: project.data_snapshot_id,
-              period: bindingV2.analysisPeriod,
-              deterministic: [],
-              tools: [],
-            },
-          }],
         },
       } as const;
       const mismatchedAttachment = await handleEnergyApiRequest(
@@ -493,7 +501,11 @@ describe("saved analysis decision-quality boundary", () => {
             id: records[0]?.id,
             aiArtifact: {
               projectReleaseId: publishedV2.template_revision_id,
-              result: { runId: "saved-analysis-ai-editor-run-v2" },
+              contract: "energyiq-saved-ai-result@2",
+              result: {
+                artifactKind: "preschool-overview-ai-read-model",
+                executive: { result: { runId: "saved-analysis-ai-executive-run-v2" } },
+              },
               runProvenance: {
                 modelProvider: "openai-compatible",
                 modelName: "test-model-v2",

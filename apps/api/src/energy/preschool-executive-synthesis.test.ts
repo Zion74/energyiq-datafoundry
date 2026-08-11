@@ -107,6 +107,48 @@ describe("Preschool Executive Synthesis", () => {
     harness.close();
   });
 
+  it("uses a new immutable Executive identity when a retried Section becomes accepted", async () => {
+    const harness = createHarness();
+    completeSection(harness, "centre-benchmark");
+    let calls = 0;
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      runSynthesis: async (input) => {
+        calls += 1;
+        return {
+          answer: JSON.stringify({
+            status: "available",
+            keyFindings: [{
+              takeaway: "Accepted Section evidence supports a focused review.",
+              sectionIds: calls === 1
+                ? ["centre-benchmark"]
+                : ["centre-benchmark", "operating-behaviour"],
+              evidenceRefs: calls === 1
+                ? ["evidence:centre-benchmark"]
+                : ["evidence:centre-benchmark", "evidence:operating-behaviour"],
+            }],
+          }),
+          runId: input.runId,
+          sessionId: input.sessionId,
+        };
+      },
+    });
+
+    const first = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    completeSection(harness, "operating-behaviour");
+    const second = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+
+    expect(first.id).not.toBe(second.id);
+    expect(first.status).toBe("available");
+    expect(second.status).toBe("available");
+    expect(calls).toBe(2);
+    expect(JSON.parse(second.identity_json)).toMatchObject({
+      artifactKind: "executive-synthesis",
+      targetId: expect.stringMatching(/^sections:[a-f0-9]{64}$/u),
+    });
+    harness.close();
+  });
+
   it("persists an empty success without calling the Provider when no Section has content", async () => {
     const harness = createHarness();
     completeSection(harness, "planning-outlook", undefined, "empty");

@@ -24,6 +24,19 @@ describe("Overview AI server stage options", () => {
     });
   });
 
+  it.each(["section-interpreter", "executive-synthesis"] as const)(
+    "keeps %s lightweight with no Skill, Schema, SQL, handoff, or candidate submission",
+    (stage) => {
+      expect(resolveOverviewAiStageRuntimeOptions(stage)).toEqual({
+        analysisRequirementsMode: "omit",
+        excludedToolNames: ["inspect_schema", "run_sql_readonly", "protocol_handoff"],
+        overviewAiCandidateSubmission: false,
+        reasoningModel: false,
+      });
+      expect(shouldIncludeProjectAnalysisEvidenceContext(stage)).toBe(false);
+    },
+  );
+
   it("suppresses only duplicate full Snapshot and Catalog context for Overview stages", () => {
     expect(shouldIncludeProjectAnalysisEvidenceContext("investigator")).toBe(false);
     expect(shouldIncludeProjectAnalysisEvidenceContext("editor")).toBe(false);

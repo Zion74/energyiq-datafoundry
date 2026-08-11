@@ -83,10 +83,11 @@ export type PreschoolExecutiveSynthesisResult = {
 export type PreschoolOverviewAiUnitStatus<T> =
   | { status: "queued" | "running" }
   | { status: "available"; artifactId: string; result: T }
-  | { status: "empty"; artifactId: string }
+  | { status: "empty"; artifactId: string; result: T }
   | { status: "unavailable"; artifactId?: string; reason: string };
 
 export type PreschoolOverviewAiReadModel = {
+  artifactKind: "preschool-overview-ai-read-model";
   status: "available";
   binding: PreschoolOverviewAiBinding;
   sections: Record<PreschoolSectionId, PreschoolOverviewAiUnitStatus<PreschoolSectionInterpretationResult>>;

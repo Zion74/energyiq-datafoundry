@@ -192,6 +192,7 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
       const executiveIdentity: EnergyIqOverviewAiArtifactIdentity = {
         ...identity("snapshot-kind"),
         artifactKind: "executive-synthesis",
+        targetId: "sections:none",
       };
       const benchmark = store.energyIq.overviewAiArtifacts.queue({
         identity: benchmarkIdentity,

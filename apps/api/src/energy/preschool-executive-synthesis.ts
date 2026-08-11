@@ -4,7 +4,7 @@ import type {
   MetadataStore,
   UserRecord,
 } from "@datafoundry/metadata";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import {
   createPreschoolOverviewAiValueArtifactIdentity,
@@ -52,9 +52,11 @@ export const createPreschoolExecutiveSynthesizer = (input: {
 }): PreschoolExecutiveSynthesizer => ({
   async execute({ baseIdentity, user, retry }) {
     const store = input.metadataStore.energyIq.overviewAiArtifacts;
+    const accepted = acceptedSections(store, baseIdentity);
     const identity = createPreschoolOverviewAiValueArtifactIdentity({
       baseIdentity,
       artifactKind: "executive-synthesis",
+      targetId: preschoolExecutiveSynthesisTargetId(accepted.map(({ artifactId }) => artifactId)),
     });
     const current = store.find(identity) ?? store.queue({ identity, triggeredBy: user.id });
     if (current.status === "available") return current;
@@ -64,7 +66,6 @@ export const createPreschoolExecutiveSynthesizer = (input: {
     const workerId = `executive-synthesis:${randomUUID()}`;
     const claim = store.claim({ identity, workerId, leaseMs: LEASE_MS });
     if (!claim.claimed) return claim.artifact;
-    const accepted = acceptedSections(store, baseIdentity);
     const sessionId = `preschool-executive-synthesis-${randomUUID()}`;
     const runId = `preschool-executive-synthesis-${randomUUID()}`;
 
@@ -117,6 +118,14 @@ export const createPreschoolExecutiveSynthesizer = (input: {
   },
 });
 
+export const preschoolExecutiveSynthesisTargetId = (sourceSectionArtifactIds: string[]): string => {
+  if (sourceSectionArtifactIds.length === 0) return "sections:none";
+  const digest = createHash("sha256")
+    .update([...sourceSectionArtifactIds].sort().join("\n"))
+    .digest("hex");
+  return `sections:${digest}`;
+};
+
 const acceptedSections = (
   store: MetadataStore["energyIq"]["overviewAiArtifacts"],
   baseIdentity: OverviewAiArtifactIdentityV13,
@@ -163,6 +172,7 @@ const buildExecutivePrompt = (accepted: AcceptedSection[]): string => {
     "Return 0-4 concise plain-English findings for a non-technical manager.",
     "Each finding must cite one or more source sectionIds and exact evidenceRefs already present in those Sections.",
     "Return JSON only: {\"status\":\"available\"|\"empty\",\"keyFindings\":[{\"takeaway\":string,\"sectionIds\":string[],\"evidenceRefs\":string[]}]}",
+    `Binding: ${JSON.stringify(accepted[0]!.result.binding)}`,
     `Accepted Sections: ${JSON.stringify(accepted.map(({ result }) => ({
       sectionId: result.sectionId,
       summary: result.summary,

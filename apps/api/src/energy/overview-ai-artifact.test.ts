@@ -96,6 +96,7 @@ describe("createOverviewAiArtifactIdentity", () => {
     const executive = createPreschoolOverviewAiValueArtifactIdentity({
       baseIdentity: legacy,
       artifactKind: "executive-synthesis",
+      targetId: "sections:none",
     });
 
     expect(legacy).not.toHaveProperty("artifactKind");
@@ -107,11 +108,16 @@ describe("createOverviewAiArtifactIdentity", () => {
     expect(standby).not.toEqual(benchmark);
     expect(executive).toMatchObject({
       artifactKind: "executive-synthesis",
+      targetId: "sections:none",
       outputContractRevision: "preschool-executive-synthesis-v1",
     });
     expect(() => createPreschoolOverviewAiValueArtifactIdentity({
       baseIdentity: legacy,
       artifactKind: "section-interpretation",
+    })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
+    expect(() => createPreschoolOverviewAiValueArtifactIdentity({
+      baseIdentity: legacy,
+      artifactKind: "executive-synthesis",
     })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
   });
 });

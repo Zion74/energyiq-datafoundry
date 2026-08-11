@@ -101,9 +101,14 @@ import {
   type PublishedProjectRelease
 } from "./energy/project-analysis-resolver.js";
 import {
-  createPreschoolOverviewAiWorkflow,
+  type PreschoolOverviewAiStage,
   type PreschoolOverviewAiStageInput,
 } from "./energy/preschool-overview-ai-workflow.js";
+import { createPreschoolOverviewAiPageWorkflow } from "./energy/preschool-overview-ai-page-workflow.js";
+
+type OverviewAiRuntimeStageInput = Omit<PreschoolOverviewAiStageInput, "stage"> & {
+  stage: PreschoolOverviewAiStage;
+};
 
 const DEV_USER: MeResponse = {
   id: "dev-user",
@@ -122,9 +127,9 @@ let serverReady = false;
 let startupTimings: Record<string, number> = {};
 let startupTotalMs = 0;
 
-export const resolveOverviewAiStageRuntimeOptions = (stage: "investigator" | "editor") => ({
+export const resolveOverviewAiStageRuntimeOptions = (stage: PreschoolOverviewAiStage) => ({
   analysisRequirementsMode: "omit" as const,
-  excludedToolNames: stage === "editor"
+  excludedToolNames: stage === "editor" || stage === "section-interpreter" || stage === "executive-synthesis"
     ? ["inspect_schema", "run_sql_readonly", "protocol_handoff"] as const
     : ["protocol_handoff"] as const,
   overviewAiCandidateSubmission: stage === "investigator",
@@ -132,7 +137,7 @@ export const resolveOverviewAiStageRuntimeOptions = (stage: "investigator" | "ed
 });
 
 export const shouldIncludeProjectAnalysisEvidenceContext = (
-  stage?: "investigator" | "editor",
+  stage?: PreschoolOverviewAiStage,
 ): boolean => stage === undefined;
 
 const emitEarlyRunFailure = (
@@ -278,10 +283,8 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
     ),
   ]);
 
-  const overviewAiWorkflow = createPreschoolOverviewAiWorkflow({
-    metadataStore,
-    dataGateway,
-    runStage: async (stageInput) => collectOverviewAiStageEvents(
+  const runOverviewAiValueStage = async (stageInput: OverviewAiRuntimeStageInput) => {
+    const completed = await collectOverviewAiStageEvents(
       new DataFoundryAgUiAgent({
         dataGateway,
         artifactService,
@@ -306,7 +309,18 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       }),
       stageInput,
       metadataStore,
-    ),
+    );
+    return {
+      answer: collectOverviewAiText(completed.events),
+      runId: completed.completedRun.runId,
+      sessionId: completed.completedRun.sessionId,
+    };
+  };
+  const overviewAiWorkflow = createPreschoolOverviewAiPageWorkflow({
+    metadataStore,
+    dataGateway,
+    runSectionBatch: (stageInput) => runOverviewAiValueStage({ ...stageInput, stage: "section-interpreter" }),
+    runExecutiveSynthesis: (stageInput) => runOverviewAiValueStage({ ...stageInput, stage: "executive-synthesis" }),
   });
 
   // After restart, cancel-registry is empty — reclaim queued/running rows left by dead workers.
@@ -467,7 +481,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
 
 const collectOverviewAiStageEvents = (
   agent: DataFoundryAgUiAgent,
-  input: PreschoolOverviewAiStageInput,
+  input: OverviewAiRuntimeStageInput,
   metadataStore: MetadataStore,
 ): Promise<{
   events: ReadonlyArray<Record<string, unknown>>;
@@ -498,7 +512,14 @@ const collectOverviewAiStageEvents = (
   });
 });
 
-const buildOverviewAiStageRunInput = (input: PreschoolOverviewAiStageInput): RunAgentInput => ({
+const collectOverviewAiText = (events: ReadonlyArray<Record<string, unknown>>): string =>
+  events
+    .filter((event) => event.type === "TEXT_MESSAGE_CONTENT")
+    .map((event) => typeof event.delta === "string" ? event.delta : "")
+    .join("")
+    .trim();
+
+const buildOverviewAiStageRunInput = (input: OverviewAiRuntimeStageInput): RunAgentInput => ({
   threadId: input.sessionId,
   runId: input.runId,
   state: {},
@@ -521,15 +542,21 @@ const buildOverviewAiStageRunInput = (input: PreschoolOverviewAiStageInput): Run
     run_config: {
       protocol: { id: "data-analysis", version: "1" },
       activeLlmProfileId: input.identity.modelProfileId,
-      activeSkillId: input.identity.methodSkillId,
+      ...((input.stage === "section-interpreter" || input.stage === "executive-synthesis")
+        ? {}
+        : { activeSkillId: input.identity.methodSkillId }),
       enabledDatasourceIds: [],
       enabledKnowledgeIds: [],
       enabledMcpServerIds: [],
-      enabledSkillIds: [input.identity.methodSkillId],
+      enabledSkillIds: input.stage === "section-interpreter" || input.stage === "executive-synthesis"
+        ? []
+        : [input.identity.methodSkillId],
       skillPolicy: {
-        allowedToolNames: input.stage === "editor"
-          ? ["skill", "skill_search", "skill_read"]
-          : ["skill", "skill_search", "skill_read", "inspect_schema", "run_sql_readonly"],
+        allowedToolNames: input.stage === "section-interpreter" || input.stage === "executive-synthesis"
+          ? []
+          : input.stage === "editor"
+            ? ["skill", "skill_search", "skill_read"]
+            : ["skill", "skill_search", "skill_read", "inspect_schema", "run_sql_readonly"],
         deniedToolNames: ["list_data_sources", "preview_table"],
         maxSkills: 1,
         requireUserInvocable: true,
@@ -622,7 +649,7 @@ type DataFoundryAgUiAgentInput = {
   knowledgeService: LocalKnowledgeService;
   memoryExtractionTimeoutMs: number;
   /** Server-created Overview Artifact stage; never accepted from browser props. */
-  overviewAiStage?: "investigator" | "editor";
+  overviewAiStage?: PreschoolOverviewAiStage;
   runCancelRegistry: RunCancelRegistry;
   taskStateRuntime: TaskStateRuntime;
   traceSectionSummaries: boolean;

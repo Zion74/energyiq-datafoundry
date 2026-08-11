@@ -33,7 +33,7 @@ export type EnergyIqOverviewAiArtifactIdentity = {
    * hash must remain readable. New artifacts always set an explicit kind.
    */
   artifactKind?: EnergyIqOverviewAiArtifactKind;
-  /** Required only when artifactKind is section-interpretation. */
+  /** Section target, or deterministic Executive source-set target. */
   targetId?: string;
 };
 
@@ -327,10 +327,13 @@ const canonicalIdentity = (
     && identity.artifactKind !== "autonomous-insights") {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_KIND_INVALID");
   }
-  if (identity.artifactKind === "section-interpretation" && !identity.targetId?.trim()) {
+  if ((identity.artifactKind === "section-interpretation" || identity.artifactKind === "executive-synthesis")
+    && !identity.targetId?.trim()) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
   }
-  if (identity.artifactKind !== "section-interpretation" && identity.targetId !== undefined) {
+  if (identity.artifactKind !== "section-interpretation"
+    && identity.artifactKind !== "executive-synthesis"
+    && identity.targetId !== undefined) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_FORBIDDEN");
   }
   return {

@@ -4,6 +4,7 @@ import type {
   EnergyProjectAnalysisSnapshotDto,
   EnergySavedAnalysisAiArtifactDto,
   EnergySavedAnalysisAiArtifactInputDto,
+  PreschoolOverviewAiReadModelDto,
 } from "../../../lib/config-api";
 import { EnergyIcon } from "./icons";
 import { AiFindingPresentationView } from "./ai-finding-presentation-view";
@@ -128,13 +129,14 @@ export function PreschoolOverviewRenderer({
     : undefined;
   const coverage = buildPreschoolOverviewCoverage(state.snapshot);
   const sectionAiResult = aiSlotMode === "saved" ? savedAiResult : liveAiResult;
-  const adaptedBenchmarkInterpretation = adaptPreschoolAiArtifactToSectionInterpretation({
+  const sectionedAiResult = isSectionedPreschoolAiResult(sectionAiResult);
+  const adaptedBenchmarkInterpretation = sectionedAiResult ? undefined : adaptPreschoolAiArtifactToSectionInterpretation({
     candidate: sectionAiResult,
     expected: coverage?.binding ?? null,
     target: "preschool.benchmark",
     mode: aiSlotMode,
   });
-  const adaptedStandbyInterpretation = adaptPreschoolAiArtifactToSectionInterpretation({
+  const adaptedStandbyInterpretation = sectionedAiResult ? undefined : adaptPreschoolAiArtifactToSectionInterpretation({
     candidate: sectionAiResult,
     expected: coverage?.binding ?? null,
     target: "preschool.standby",
@@ -303,13 +305,8 @@ export function PreschoolOverviewRenderer({
             {...(savedAiResult ? { savedResult: savedAiResult } : {})}
             onResult={setLiveAiResult}
             {...(onAiArtifactChange ? {
-              onCompletedResult: (result: Extract<import("./preschool-ai-run").PreschoolAiRunResult, { status: "available" }>) => onAiArtifactChange({
-                contract: "energyiq-saved-ai-result@1",
-                rendererKey: "preschool-overview",
-                snapshotId: state.snapshot.dataSnapshot.id,
-                projectReleaseId: state.snapshot.projectRelease.id,
-                result,
-              }),
+              onCompletedResult: (result: Extract<import("./preschool-ai-run").PreschoolAiRunResult, { status: "available" }>) =>
+                onAiArtifactChange(toSavedPreschoolAiArtifact(state.snapshot, result)),
             } : {})}
             {...(aiAnalystHref ? { aiAnalystHref } : {})}
           />
@@ -330,9 +327,18 @@ export function PreschoolOverviewRenderer({
           title="Benchmark Analysis"
           description="Compare Centres after normalising for floor area and people served, then identify who should be reviewed first."
         />
-        <BenchmarkInterpretationSlot
+        {!sectionedAiResult || benchmarkInterpretation ? (
+          <BenchmarkInterpretationSlot
+            snapshot={state.snapshot}
+            interpretation={benchmarkInterpretation ?? adaptedBenchmarkInterpretation}
+          />
+        ) : null}
+        <PreschoolAiSlot
           snapshot={state.snapshot}
-          interpretation={benchmarkInterpretation ?? adaptedBenchmarkInterpretation}
+          sectionId="centre-benchmark"
+          mode={aiSlotMode}
+          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
+          {...(aiAnalystHref ? { aiAnalystHref } : {})}
         />
         {view.benchmark.status === "provisional" ? (
           <>
@@ -414,9 +420,18 @@ export function PreschoolOverviewRenderer({
           title="Standby Energy Wastage — Post Operating Hours"
           description="How much energy remains after closing, what stays powered, and which Centres and hours need an after-hours review?"
         />
-        <StandbyInterpretationSlot
+        {!sectionedAiResult || standbyInterpretation ? (
+          <StandbyInterpretationSlot
+            snapshot={state.snapshot}
+            interpretation={standbyInterpretation ?? adaptedStandbyInterpretation}
+          />
+        ) : null}
+        <PreschoolAiSlot
           snapshot={state.snapshot}
-          interpretation={standbyInterpretation ?? adaptedStandbyInterpretation}
+          sectionId="standby-wastage"
+          mode={aiSlotMode}
+          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
+          {...(aiAnalystHref ? { aiAnalystHref } : {})}
         />
         {view.operational.status === "available" ? (
           <>
@@ -467,9 +482,18 @@ export function PreschoolOverviewRenderer({
           title="Operating Hours Analysis"
           description="How much energy is used while Centres are open, which Appliances account for it, and which Centres and hours need an operating review?"
         />
-        <OperatingInterpretationSlot
+        {!sectionedAiResult || operatingInterpretation ? (
+          <OperatingInterpretationSlot
+            snapshot={state.snapshot}
+            interpretation={operatingInterpretation}
+          />
+        ) : null}
+        <PreschoolAiSlot
           snapshot={state.snapshot}
-          interpretation={operatingInterpretation}
+          sectionId="operating-behaviour"
+          mode={aiSlotMode}
+          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
+          {...(aiAnalystHref ? { aiAnalystHref } : {})}
         />
         {view.operational.status === "available" ? (
           <>
@@ -601,6 +625,35 @@ export function PreschoolOverviewRenderer({
     </section>
   );
 }
+
+const isSectionedPreschoolAiResult = (
+  result: PreschoolAiRunResult | undefined,
+): result is PreschoolOverviewAiReadModelDto => Boolean(result
+  && result.status === "available"
+  && "artifactKind" in result
+  && result.artifactKind === "preschool-overview-ai-read-model");
+
+const toSavedPreschoolAiArtifact = (
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  result: Extract<PreschoolAiRunResult, { status: "available" }>,
+): EnergySavedAnalysisAiArtifactInputDto => {
+  if (isSectionedPreschoolAiResult(result)) {
+    return {
+      contract: "energyiq-saved-ai-result@2",
+      rendererKey: "preschool-overview",
+      snapshotId: snapshot.dataSnapshot.id,
+      projectReleaseId: snapshot.projectRelease.id,
+      result,
+    };
+  }
+  return {
+    contract: "energyiq-saved-ai-result@1",
+    rendererKey: "preschool-overview",
+    snapshotId: snapshot.dataSnapshot.id,
+    projectReleaseId: snapshot.projectRelease.id,
+    result,
+  };
+};
 
 function SectionHeader({
   id,

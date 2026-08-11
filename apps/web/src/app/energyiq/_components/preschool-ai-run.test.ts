@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { configApi } from "../../../lib/config-api";
+import type { PreschoolOverviewAiReadModelDto } from "../../../lib/config-api";
 import {
   buildPreschoolAiRunInput,
   getOrStartPreschoolAiRun,
@@ -1452,6 +1453,34 @@ describe("Preschool AI Run", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("restores the aggregate Section read model on refresh without calling ensure or Provider", async () => {
+    const input = requiredInput();
+    const aggregate = sectionedArtifactFixture(input);
+    vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockResolvedValue({
+      status: "available",
+      dataSnapshotId: input.snapshotId,
+      projectReleaseId: input.projectReleaseId,
+      result: aggregate,
+    });
+    const ensureSpy = vi.spyOn(configApi, "ensureEnergyOverviewAiArtifact");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getOrStartPreschoolAiRun(input)).resolves.toMatchObject({
+      artifactKind: "preschool-overview-ai-read-model",
+      sections: {
+        "centre-benchmark": { status: "available" },
+        "standby-wastage": { status: "unavailable" },
+      },
+    });
+    await expect(runSavedAnalysisAiForSnapshot(preschoolGoldenSnapshot())).resolves.toMatchObject({
+      contract: "energyiq-saved-ai-result@2",
+      result: { artifactKind: "preschool-overview-ai-read-model" },
+    });
+    expect(ensureSpy).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("uses the explicit server retry endpoint without submitting canonical content", async () => {
     const input = requiredInput();
     vi.spyOn(configApi, "retryEnergyOverviewAiArtifact").mockResolvedValue({
@@ -1537,6 +1566,47 @@ function sharedArtifactFixture(input: PreschoolAiRunInput, editorRunId: string):
       },
     },
     findings: [],
+  };
+}
+
+function sectionedArtifactFixture(input: PreschoolAiRunInput): PreschoolOverviewAiReadModelDto {
+  const binding = {
+    workspaceId: "preschool-workspace",
+    projectId: input.projectId,
+    scopeId: input.scopeId,
+    dataSnapshotId: input.snapshotId,
+    projectReleaseId: input.projectReleaseId,
+    analysisPeriod: { from: input.analysisFrom, to: input.analysisTo },
+    modelProfileId: "workspace-default-model-profile",
+    modelProfileRevision: 1,
+  };
+  return {
+    artifactKind: "preschool-overview-ai-read-model",
+    status: "available",
+    binding,
+    sections: {
+      "centre-benchmark": {
+        status: "available",
+        artifactId: "section-benchmark",
+        result: {
+          artifactKind: "section-interpretation",
+          status: "available",
+          providerProfileId: binding.modelProfileId,
+          runId: "run-section-benchmark",
+          binding,
+          sectionId: "centre-benchmark",
+          summary: "Benchmark evidence supports a focused review.",
+          keyPoints: [
+            { kind: "finding", text: "One verified pattern deserves attention.", evidenceRefs: ["evidence:benchmark"] },
+            { kind: "next-check", text: "Confirm context before assigning a cause.", evidenceRefs: ["evidence:benchmark"] },
+          ],
+        },
+      },
+      "standby-wastage": { status: "unavailable", artifactId: "section-standby", reason: "SECTION_FAILED" },
+      "operating-behaviour": { status: "unavailable", reason: "Not generated." },
+      "planning-outlook": { status: "unavailable", reason: "Not generated." },
+    },
+    executive: { status: "unavailable", artifactId: "executive", reason: "SYNTHESIS_FAILED" },
   };
 }
 

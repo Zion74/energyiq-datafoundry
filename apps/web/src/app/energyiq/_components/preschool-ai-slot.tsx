@@ -3,11 +3,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import type { EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
+import type {
+  EnergyProjectAnalysisSnapshotDto,
+  PreschoolExecutiveSynthesisResultDto,
+  PreschoolOverviewAiReadModelDto,
+  PreschoolOverviewAiSectionIdDto,
+  PreschoolOverviewAiUnitStatusDto,
+  PreschoolSectionInterpretationResultDto,
+} from "../../../lib/config-api";
 import { EnergyIcon } from "./icons";
 import {
   buildPreschoolAiRunInput,
   getOrStartPreschoolAiRun,
+  isPendingPreschoolSectionedReadModel,
   retryPreschoolAiRun,
   type PreschoolAiFinding,
   type PreschoolAiProgress,
@@ -40,7 +48,11 @@ export function PreschoolAiSlot({
   onResult?: (result: PreschoolAiRunResult) => void;
   onCompletedResult?: (result: Extract<PreschoolAiRunResult, { status: "available" }>) => void;
   startRun?: (input: PreschoolAiRunInput, onProgress?: ProgressCallback) => Promise<PreschoolAiRunResult>;
-  retryRun?: (input: PreschoolAiRunInput, onProgress?: ProgressCallback) => Promise<PreschoolAiRunResult>;
+  retryRun?: (
+    input: PreschoolAiRunInput,
+    onProgress?: ProgressCallback,
+    targetId?: PreschoolOverviewAiSectionIdDto | "executive-synthesis",
+  ) => Promise<PreschoolAiRunResult>;
 }) {
   const input = useMemo(() => buildPreschoolAiRunInput(snapshot), [snapshot]);
   const inputRef = useRef(input);
@@ -62,11 +74,17 @@ export function PreschoolAiSlot({
     const identityKey = currentInput.identityKey;
     setSettled(null);
     setProgress({ identityKey, stage: "queued" });
-    void retryRunRef.current(currentInput, (stage) => setProgress({ identityKey, stage }))
+    void retryRunRef.current(
+      currentInput,
+      (stage) => setProgress({ identityKey, stage }),
+      retryTargetForSection(sectionId),
+    )
       .then((result) => {
         setSettled({ identityKey, result });
         onResultRef.current?.(result);
-        if (result.status === "available") onCompletedResultRef.current?.(result);
+        if (result.status === "available" && !isPendingPreschoolSectionedReadModel(result)) {
+          onCompletedResultRef.current?.(result);
+        }
       })
       .catch(() => {
         const result = { status: "unavailable", reason: "AI analysis is temporarily unavailable." } as const;
@@ -88,7 +106,9 @@ export function PreschoolAiSlot({
       if (active) {
         setSettled({ identityKey, result });
         onResultRef.current?.(result);
-        if (result.status === "available") onCompletedResultRef.current?.(result);
+        if (result.status === "available" && !isPendingPreschoolSectionedReadModel(result)) {
+          onCompletedResultRef.current?.(result);
+        }
       }
     }).catch(() => {
       if (active) {
@@ -142,6 +162,16 @@ export function PreschoolAiSlot({
     ? <AiFrame sectionId={sectionId}><Unavailable detail={displayedResult.reason} onRetry={mode === "live" && displayedResult.retryable === true ? retry : undefined} /></AiFrame>
     : null;
   const availableResult = displayedResult;
+  if (isSectionedReadModel(availableResult)) {
+    return (
+      <SectionedAiResult
+        result={availableResult}
+        sectionId={sectionId}
+        mode={mode}
+        onRetry={mode === "live" ? retry : undefined}
+      />
+    );
+  }
   const sectionFindings = availableResult.findings.filter((finding) => findingMatchesSection(finding, sectionId));
   if (sectionFindings.length === 0) {
     if (sectionId !== "page-synthesis") return null;
@@ -192,6 +222,169 @@ export function PreschoolAiSlot({
     </AiFrame>
   );
 }
+
+function SectionedAiResult({
+  result,
+  sectionId,
+  mode,
+  onRetry,
+}: {
+  result: PreschoolOverviewAiReadModelDto;
+  sectionId: PreschoolAiSectionId;
+  mode: "live" | "saved";
+  onRetry?: () => void;
+}) {
+  if (sectionId === "page-synthesis") {
+    return (
+      <AiFrame sectionId={sectionId}>
+        <ExecutiveUnit unit={result.executive} onRetry={onRetry} />
+        <SavedRunMarker mode={mode} unit={result.executive} />
+        <p className="mt-4 text-xs leading-5 text-muted-light">
+          These Key Findings only combine accepted Section interpretations from this pinned Snapshot.
+        </p>
+      </AiFrame>
+    );
+  }
+  const target = sectionIdToValueTarget(sectionId);
+  if (!target) return null;
+  const unit = result.sections[target];
+  return (
+    <AiFrame sectionId={sectionId}>
+      <SectionUnit unit={unit} onRetry={onRetry} />
+      <SavedRunMarker mode={mode} unit={unit} />
+    </AiFrame>
+  );
+}
+
+function ExecutiveUnit({
+  unit,
+  onRetry,
+}: {
+  unit: PreschoolOverviewAiUnitStatusDto<PreschoolExecutiveSynthesisResultDto>;
+  onRetry?: () => void;
+}) {
+  if (unit.status === "queued" || unit.status === "running") {
+    return <PendingValue detail="Executive Key Findings are being composed from completed Section interpretations." />;
+  }
+  if (unit.status === "unavailable") {
+    return <Unavailable detail="Executive Key Findings are unavailable. Completed Section interpretations remain visible below." onRetry={onRetry} />;
+  }
+  if (unit.status === "empty") {
+    return <EmptyValue title="No additional Executive Key Findings" detail="The accepted Sections did not support a distinct cross-section message for this Snapshot." />;
+  }
+  return (
+    <ol className="space-y-3" aria-label="Executive Key Findings">
+      {unit.result.keyFindings.map((finding) => (
+        <li key={finding.id} className="rounded-lg border border-border bg-surface-subtle px-4 py-3">
+          <p className="text-sm font-semibold leading-6 text-foreground">{finding.takeaway}</p>
+          <details className="mt-2">
+            <summary className="cursor-pointer text-[10px] font-semibold text-muted">Source Sections and Evidence</summary>
+            <p className="mt-1 break-words font-mono text-[10px] leading-4 text-muted-light">
+              {finding.sectionIds.join(" / ")} 路 {finding.evidenceRefs.join(" / ")}
+            </p>
+          </details>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function SectionUnit({
+  unit,
+  onRetry,
+}: {
+  unit: PreschoolOverviewAiUnitStatusDto<PreschoolSectionInterpretationResultDto>;
+  onRetry?: () => void;
+}) {
+  if (unit.status === "queued" || unit.status === "running") {
+    return <PendingValue detail="This Section interpretation is being prepared from its verified Section Pack." />;
+  }
+  if (unit.status === "unavailable") {
+    return <Unavailable detail="This Section interpretation is unavailable. Other Sections and the verified Overview are unchanged." onRetry={onRetry} />;
+  }
+  if (unit.status === "empty") {
+    return <EmptyValue title="No additional AI interpretation" detail="This Section Pack did not support a useful additional conclusion." />;
+  }
+  return (
+    <div>
+      <p className="text-sm font-semibold leading-6 text-foreground">{unit.result.summary}</p>
+      <ul className="mt-3 space-y-2">
+        {unit.result.keyPoints.map((point, index) => (
+          <li key={`${point.kind}-${index}`} className="rounded-lg border border-border bg-surface px-3 py-2.5">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-primary">
+              {point.label ?? point.kind.replace("-", " ")}
+            </p>
+            <p className="mt-1 text-xs leading-5 text-foreground/80">{point.text}</p>
+            <details className="mt-1.5">
+              <summary className="cursor-pointer text-[10px] font-medium text-muted">Evidence references</summary>
+              <p className="mt-1 break-words font-mono text-[10px] leading-4 text-muted-light">{point.evidenceRefs.join(" / ")}</p>
+            </details>
+          </li>
+        ))}
+      </ul>
+      {unit.result.limitation ? (
+        <details className="mt-3 border-t border-border pt-3">
+          <summary className="cursor-pointer text-xs font-semibold text-muted">Limitation</summary>
+          <p className="mt-1 text-xs leading-5 text-muted">{unit.result.limitation}</p>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function PendingValue({ detail }: { detail: string }) {
+  return (
+    <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3" role="status">
+      <p className="text-xs font-semibold text-foreground">AI interpretation in progress</p>
+      <p className="mt-1 text-[11px] leading-5 text-muted">{detail}</p>
+    </div>
+  );
+}
+
+function EmptyValue({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-surface-subtle px-4 py-3" role="status">
+      <p className="text-xs font-semibold text-foreground">{title}</p>
+      <p className="mt-1 text-[11px] leading-5 text-muted">{detail}</p>
+    </div>
+  );
+}
+
+function SavedRunMarker<T>({
+  mode,
+  unit,
+}: {
+  mode: "live" | "saved";
+  unit: PreschoolOverviewAiUnitStatusDto<T>;
+}) {
+  if (mode !== "saved" || (unit.status !== "available" && unit.status !== "empty")) return null;
+  const result = unit.result as { runId?: string };
+  return (
+    <p className="mt-3 text-[10px] font-medium text-muted" data-saved-ai-result="true">
+      Saved AI result{result.runId ? ` 路 Run ${result.runId}` : ""}
+    </p>
+  );
+}
+
+const isSectionedReadModel = (
+  result: Extract<PreschoolAiRunResult, { status: "available" }>,
+): result is PreschoolOverviewAiReadModelDto =>
+  "artifactKind" in result && result.artifactKind === "preschool-overview-ai-read-model";
+
+const sectionIdToValueTarget = (sectionId: PreschoolAiSectionId): PreschoolOverviewAiSectionIdDto | null => {
+  if (sectionId === "centre-benchmark"
+    || sectionId === "standby-wastage"
+    || sectionId === "operating-behaviour"
+    || sectionId === "planning-outlook") return sectionId;
+  return null;
+};
+
+const retryTargetForSection = (
+  sectionId: PreschoolAiSectionId,
+): PreschoolOverviewAiSectionIdDto | "executive-synthesis" | undefined => {
+  if (sectionId === "page-synthesis") return "executive-synthesis";
+  return sectionIdToValueTarget(sectionId) ?? undefined;
+};
 
 function AiFrame({ children, sectionId }: { children: React.ReactNode; sectionId: PreschoolAiSectionId }) {
   if (sectionId !== "page-synthesis") {

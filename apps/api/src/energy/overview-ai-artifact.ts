@@ -32,7 +32,7 @@ export type OverviewAiArtifactIdentityV13 = EnergyIqOverviewAiArtifactIdentity &
 
 export type PreschoolOverviewAiValueArtifactIdentity = EnergyIqOverviewAiArtifactIdentity & {
   artifactKind: "section-interpretation" | "executive-synthesis";
-  targetId?: PreschoolSectionId;
+  targetId: string;
 };
 
 const OVERVIEW_AI_CONTRACTS: Readonly<Record<string, OverviewAiContract>> = {
@@ -84,13 +84,10 @@ export const createOverviewAiArtifactIdentity = (input: {
 export const createPreschoolOverviewAiValueArtifactIdentity = (input: {
   baseIdentity: OverviewAiArtifactIdentityV13;
   artifactKind: "section-interpretation" | "executive-synthesis";
-  targetId?: PreschoolSectionId;
+  targetId?: PreschoolSectionId | string;
 }): PreschoolOverviewAiValueArtifactIdentity => {
-  if (input.artifactKind === "section-interpretation" && !input.targetId) {
+  if (!input.targetId?.trim()) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
-  }
-  if (input.artifactKind === "executive-synthesis" && input.targetId) {
-    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_FORBIDDEN");
   }
   const section = input.artifactKind === "section-interpretation";
   const {
@@ -101,7 +98,7 @@ export const createPreschoolOverviewAiValueArtifactIdentity = (input: {
   return {
     ...baseIdentity,
     artifactKind: input.artifactKind,
-    ...(input.targetId ? { targetId: input.targetId } : {}),
+    targetId: input.targetId,
     outputContractRevision: section
       ? "preschool-section-interpretation-v1"
       : "preschool-executive-synthesis-v1",
