@@ -54,7 +54,7 @@ export type PreschoolSectionInterpretationResult = {
   status: "available" | "empty";
   providerProfileId: string;
   runId: string;
-  contract: { id: "preschool-section-interpretation"; revision: "v1" };
+  contract: { id: "preschool-section-interpretation"; revision: "preschool-section-interpretation-v1" };
   binding: PreschoolOverviewAiBinding;
   sectionId: PreschoolSectionId;
   summary?: string;
@@ -74,7 +74,7 @@ export type PreschoolExecutiveSynthesisResult = {
   status: "available" | "empty";
   providerProfileId: string;
   runId: string;
-  contract: { id: "preschool-executive-synthesis"; revision: "v1" };
+  contract: { id: "preschool-executive-synthesis"; revision: "preschool-executive-synthesis-v1" };
   binding: PreschoolOverviewAiBinding;
   sourceSectionArtifactIds: string[];
   keyFindings: PreschoolExecutiveKeyFinding[];

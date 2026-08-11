@@ -377,6 +377,10 @@ const requireArtifactResult = (
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
   }
   if (!isRecord(parsed)) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  if (identity.artifactKind === "section-interpretation") {
+    requireSectionInterpretationResult(parsed, identity);
+    return;
+  }
   const artifactBinding = parsed.binding;
   if (parsed.status !== "available"
     || !nonEmptyString(parsed.providerProfileId)
@@ -421,6 +425,58 @@ const requireArtifactResult = (
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
   }
 };
+
+const requireSectionInterpretationResult = (
+  parsed: Record<string, unknown>,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): void => {
+  const binding = parsed.binding;
+  const keyPoints = parsed.keyPoints;
+  if (parsed.artifactKind !== "section-interpretation"
+    || (parsed.status !== "available" && parsed.status !== "empty")
+    || !nonEmptyString(parsed.providerProfileId)
+    || parsed.providerProfileId !== identity.modelProfileId
+    || !nonEmptyString(parsed.runId)
+    || !isRecord(parsed.contract)
+    || parsed.contract.id !== "preschool-section-interpretation"
+    || parsed.contract.revision !== identity.outputContractRevision
+    || !isRecord(binding)
+    || binding.workspaceId !== identity.workspaceId
+    || binding.projectId !== identity.projectId
+    || binding.scopeId !== identity.scopeId
+    || binding.dataSnapshotId !== identity.dataSnapshotId
+    || binding.projectReleaseId !== identity.projectReleaseId
+    || binding.modelProfileId !== identity.modelProfileId
+    || binding.modelProfileRevision !== identity.modelProfileRevision
+    || !isRecord(binding.analysisPeriod)
+    || binding.analysisPeriod.from !== identity.analysisPeriodFrom
+    || binding.analysisPeriod.to !== identity.analysisPeriodTo
+    || parsed.sectionId !== identity.targetId
+    || !Array.isArray(keyPoints)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+  if (parsed.status === "empty") {
+    if (keyPoints.length !== 0 || parsed.summary !== undefined || parsed.limitation !== undefined) {
+      throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+    }
+    return;
+  }
+  if (!nonEmptyString(parsed.summary)
+    || keyPoints.length < 2
+    || keyPoints.length > 4
+    || !keyPoints.every(validSectionKeyPoint)
+    || !optionalString(parsed.limitation)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+};
+
+const validSectionKeyPoint = (value: unknown): boolean => isRecord(value)
+  && (value.kind === "finding" || value.kind === "meaning" || value.kind === "next-check")
+  && optionalString(value.label)
+  && nonEmptyString(value.text)
+  && Array.isArray(value.evidenceRefs)
+  && value.evidenceRefs.length > 0
+  && value.evidenceRefs.every(nonEmptyString);
 
 const validAcceptedFinding = (value: unknown, binding: Record<string, unknown>): boolean => {
   if (!isRecord(value)
