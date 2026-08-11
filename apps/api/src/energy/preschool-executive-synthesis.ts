@@ -24,6 +24,7 @@ const LEASE_MS = 3 * 60 * 1_000;
 const MAX_PROMPT_CHARS = 24_000;
 const BANNED_INTERNAL_TEXT = /\b(?:parent_node_id|dataSnapshotId|projectReleaseId|SQL)\b/i;
 const SQL_STATEMENT = /\bSELECT\b[\s\S]{0,500}\b(?:FROM|JOIN)\b/i;
+const NUMBER_TOKEN = /(?<![A-Za-z0-9_-])-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/g;
 
 export type PreschoolExecutiveSynthesisRunner = (input: {
   prompt: string;
@@ -274,11 +275,12 @@ const emptyResult = (
 
 const collectNumbers = (values: unknown[]): number[] => values.flatMap((value) => {
   if (typeof value !== "string") return [];
-  return [...value.matchAll(/(?<![A-Za-z0-9_-])-?\d+(?:\.\d+)?/g)].map(([raw]) => Number(raw));
+  return [...value.matchAll(NUMBER_TOKEN)].map(([raw]) => Number(raw.replaceAll(",", "")));
 });
 
 const hasUnsupportedNumber = (text: string, supported: number[]): boolean =>
-  [...text.matchAll(/(?<![A-Za-z0-9_-])-?\d+(?:\.\d+)?/g)].some(([raw]) => {
+  [...text.matchAll(NUMBER_TOKEN)].some(([token]) => {
+    const raw = token.replaceAll(",", "");
     const value = Number(raw);
     const precision = raw.includes(".") ? raw.length - raw.indexOf(".") - 1 : 0;
     const tolerance = 0.5 * (10 ** -precision);

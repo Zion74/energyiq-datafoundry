@@ -4,6 +4,7 @@ import {
   buildOverviewAiStageRunInput,
   collectOverviewAiText,
   resolveOverviewAiStageRuntimeOptions,
+  shouldUseEnergyContextForOverviewAiStage,
   shouldIncludeProjectAnalysisEvidenceContext,
 } from "./server.js";
 
@@ -43,6 +44,7 @@ describe("Overview AI server stage options", () => {
         reasoningModel: false,
       });
       expect(shouldIncludeProjectAnalysisEvidenceContext(stage)).toBe(false);
+      expect(shouldUseEnergyContextForOverviewAiStage(stage)).toBe(false);
     },
   );
 
@@ -99,6 +101,7 @@ describe("Overview AI server stage options", () => {
           enabledSkillIds: [],
         },
       });
+      expect(input.forwardedProps).not.toHaveProperty("externalContext");
     },
   );
 

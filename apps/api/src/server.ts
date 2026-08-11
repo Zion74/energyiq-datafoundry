@@ -142,6 +142,10 @@ export const shouldIncludeProjectAnalysisEvidenceContext = (
   stage?: PreschoolOverviewAiStage,
 ): boolean => stage === undefined;
 
+export const shouldUseEnergyContextForOverviewAiStage = (
+  stage?: PreschoolOverviewAiStage,
+): boolean => stage !== "section-interpreter" && stage !== "executive-synthesis";
+
 const emitEarlyRunFailure = (
   subscriber: { complete(): void; next(event: BaseEvent): void },
   runId: string,
@@ -529,18 +533,22 @@ export const buildOverviewAiStageRunInput = (input: OverviewAiRuntimeStageInput)
   tools: [],
   context: [],
   forwardedProps: {
-    externalContext: {
-      source: "energyiq",
-      projectId: input.identity.projectId,
-      scopeId: input.identity.scopeId,
-      resource: input.identity.resource,
-      period: "Custom",
-      from: input.identity.analysisPeriodFrom,
-      to: input.identity.analysisPeriodTo,
-      expectedDataSnapshotId: input.identity.dataSnapshotId,
-      expectedProjectReleaseId: input.identity.projectReleaseId,
-      overviewAiStage: input.stage,
-    },
+    ...(shouldUseEnergyContextForOverviewAiStage(input.stage)
+      ? {
+          externalContext: {
+            source: "energyiq",
+            projectId: input.identity.projectId,
+            scopeId: input.identity.scopeId,
+            resource: input.identity.resource,
+            period: "Custom",
+            from: input.identity.analysisPeriodFrom,
+            to: input.identity.analysisPeriodTo,
+            expectedDataSnapshotId: input.identity.dataSnapshotId,
+            expectedProjectReleaseId: input.identity.projectReleaseId,
+            overviewAiStage: input.stage,
+          },
+        }
+      : {}),
     run_config: {
       protocol: { id: "data-analysis", version: "1" },
       activeLlmProfileId: input.identity.modelProfileId,
@@ -694,6 +702,7 @@ class DataFoundryAgUiAgent extends AbstractAgent {
         const overviewAiStageOptions = this.input.overviewAiStage
           ? resolveOverviewAiStageRuntimeOptions(this.input.overviewAiStage)
           : undefined;
+        const useEnergyContext = shouldUseEnergyContextForOverviewAiStage(this.input.overviewAiStage);
         let effectiveRunConfig;
         let mcpRuntime;
         let modelContextProfile;
@@ -710,7 +719,9 @@ class DataFoundryAgUiAgent extends AbstractAgent {
         let publishedProjectRelease: PublishedProjectRelease | null = null;
         let trustedEnergyTextContract: TrustedEnergyTextQueryContract | undefined;
         try {
-          const energyRequest = extractEnergyQueryContextRequest(normalizedRunInput);
+          const energyRequest = useEnergyContext
+            ? extractEnergyQueryContextRequest(normalizedRunInput)
+            : undefined;
           const trustedTextIntent = extractTrustedEnergyTextIntent(normalizedRunInput);
           if (trustedTextIntent && !energyRequest) {
             throw new Error("TRUSTED_ENERGY_TEXT_CONTEXT_REQUIRED");
@@ -785,7 +796,7 @@ class DataFoundryAgUiAgent extends AbstractAgent {
             selectedSkills,
             skillSelection
           } = resolveRunConfig({
-            ...(energyScopedDataSource?.datasourceId || this.input.defaultDatasourceId
+            ...(useEnergyContext && (energyScopedDataSource?.datasourceId || this.input.defaultDatasourceId)
               ? { defaultDatasourceId: energyScopedDataSource?.datasourceId ?? this.input.defaultDatasourceId }
               : {}),
             metadataStore: this.input.metadataStore,
@@ -798,7 +809,7 @@ class DataFoundryAgUiAgent extends AbstractAgent {
             workspaceId: this.input.workspaceId
           }));
           if (overviewAiStageOptions) reasoningModel = overviewAiStageOptions.reasoningModel;
-          if (energyScopedDataSource) {
+          if (useEnergyContext && energyScopedDataSource) {
             effectiveRunConfig = {
               ...effectiveRunConfig,
               activeDatasourceId: energyScopedDataSource.datasourceId,

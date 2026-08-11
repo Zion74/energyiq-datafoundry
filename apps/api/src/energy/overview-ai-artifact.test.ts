@@ -104,16 +104,16 @@ describe("createOverviewAiArtifactIdentity", () => {
       artifactKind: "section-interpretation",
       targetId: "centre-benchmark",
       outputContractRevision: "preschool-section-interpretation-v1",
-      validatorRevision: "preschool-section-interpreter-validator-v4",
+      validatorRevision: "preschool-section-interpreter-validator-v5",
       workflowRevision: "preschool-section-interpreter-v5",
-      investigatorPromptRevision: "preschool-section-interpreter-prompt-v2",
+      investigatorPromptRevision: "preschool-section-interpreter-prompt-v3",
     });
     expect(standby).not.toEqual(benchmark);
     expect(executive).toMatchObject({
       artifactKind: "executive-synthesis",
       targetId: "sections:none",
       outputContractRevision: "preschool-executive-synthesis-v1",
-      validatorRevision: "preschool-executive-synthesis-validator-v2",
+      validatorRevision: "preschool-executive-synthesis-validator-v3",
       workflowRevision: "preschool-executive-synthesis-v5",
     });
     expect(() => createPreschoolOverviewAiValueArtifactIdentity({

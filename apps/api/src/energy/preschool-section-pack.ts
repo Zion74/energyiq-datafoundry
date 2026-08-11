@@ -58,30 +58,49 @@ const benchmarkEvidence = (snapshot: ProjectAnalysisSnapshot): PreschoolSectionP
     || benchmark.status !== "provisional"
     || benchmark.evidence.dataSnapshotId !== snapshot.dataSnapshot.id
     || benchmark.evidence.projectReleaseId !== snapshot.projectRelease.id) return [];
-  const id = `preschool:${snapshot.dataSnapshot.id}:section-2-benchmark`;
+  const baseId = `preschool:${snapshot.dataSnapshot.id}:section-2-benchmark`;
+  const sourceRefs = benchmark.evidence.sourceQueryIds.map((queryId) => `query:${queryId}`);
+  const portfolioId = `${baseId}:portfolio`;
+  const priorityCentres = benchmark.centres.filter(({ priority }) => priority).slice(0, 8);
   return [{
-    id,
-    label: "Portfolio benchmark and priority Centres",
+    id: portfolioId,
+    label: "Portfolio benchmark",
     value: {
       sampleSize: benchmark.sampleSize,
       portfolio: benchmark.portfolio,
-      priorityCentres: benchmark.centres
-        .filter(({ priority }) => priority)
-        .slice(0, 8)
-        .map(({ centreCode, name, cohort, usageKwh, annualisedEuiKwhPerSqmYear, mayKwhPerPerson, quadrant }) => ({
-          centreCode,
-          name,
-          cohort,
-          usageKwh,
-          annualisedEuiKwhPerSqmYear,
-          mayKwhPerPerson,
-          quadrant,
-        })),
       metadataStatus: benchmark.evidence.metadataStatus,
     },
-    entityRefs: benchmark.centres.filter(({ priority }) => priority).slice(0, 8).map(({ scopeId }) => scopeId),
-    evidenceRefs: [id, ...benchmark.evidence.sourceQueryIds.map((queryId) => `query:${queryId}`)],
-  }];
+    unit: "kWh/m2/year, kWh/person/month",
+    entityRefs: [],
+    evidenceRefs: [portfolioId, ...sourceRefs],
+  }, ...priorityCentres.map(({
+    scopeId,
+    centreCode,
+    name,
+    cohort,
+    usageKwh,
+    annualisedEuiKwhPerSqmYear,
+    mayKwhPerPerson,
+    quadrant,
+  }) => {
+    const id = `${baseId}:centre:${evidenceIdSegment(centreCode)}`;
+    return {
+      id,
+      label: `${name} benchmark`,
+      value: {
+        centreCode,
+        name,
+        cohort,
+        usageKwh,
+        annualisedEuiKwhPerSqmYear,
+        mayKwhPerPerson,
+        quadrant,
+      },
+      unit: "kWh, kWh/m2/year, kWh/person/month",
+      entityRefs: [scopeId],
+      evidenceRefs: [id, ...sourceRefs],
+    };
+  })];
 };
 
 const operationalEvidence = (
@@ -96,10 +115,52 @@ const operationalEvidence = (
   const isStandby = state === "standby";
   const spikes = operational.spikes[state];
   const appliances = isStandby ? operational.standbyAppliances : operational.operatingAppliances;
-  const id = `preschool:${snapshot.dataSnapshot.id}:section-${isStandby ? "3-standby" : "4-operating"}`;
-  return [{
-    id,
-    label: isStandby ? "Closed-hour energy and spike evidence" : "Operating-hour energy and spike evidence",
+  const baseId = `preschool:${snapshot.dataSnapshot.id}:section-${isStandby ? "3-standby" : "4-operating"}`;
+  const sourceRefs = operational.evidence.sourceQueryIds.map((queryId) => `query:${queryId}`);
+  const summaryId = `${baseId}:summary`;
+  const centreLimit = isStandby ? 3 : 5;
+  const centreEvidence: PreschoolSectionPackEvidence[] = spikes.centres.slice(0, centreLimit).map(({
+    scopeId,
+    centreCode,
+    name,
+    spikeCount,
+    worstSpike,
+  }) => {
+    const id = `${baseId}:centre:${evidenceIdSegment(centreCode)}`;
+    return {
+      id,
+      label: `${name} ${isStandby ? "closed-hour" : "operating-hour"} spike`,
+      value: { centreCode, name, spikeCount, worstSpike },
+      unit: "kWh, %",
+      entityRefs: [scopeId],
+      evidenceRefs: [id, ...sourceRefs],
+      claimRelations: [{
+        subject: name,
+        predicate: "leading-circuit",
+        object: worstSpike.leadingCircuitName,
+      }],
+    };
+  });
+  const applianceEvidence: PreschoolSectionPackEvidence[] = appliances.appliances.slice(0, 3).map(({
+    name,
+    applianceGroup,
+    usageKwh,
+    sharePct,
+    centreCount,
+  }, index) => {
+    const id = `${baseId}:appliance:${index + 1}`;
+    return {
+      id,
+      label: `${name} ${isStandby ? "closed-hour" : "operating-hour"} contribution`,
+      value: { name, applianceGroup, usageKwh, sharePct, centreCount },
+      unit: "kWh, %",
+      entityRefs: [],
+      evidenceRefs: [id, ...sourceRefs],
+    };
+  });
+  const summary: PreschoolSectionPackEvidence = {
+    id: summaryId,
+    label: isStandby ? "Closed-hour energy summary" : "Operating-hour energy summary",
     value: {
       totalKwh: operational.energy.totalKwh,
       stateKwh: isStandby ? operational.energy.standbyKwh : operational.energy.operatingKwh,
@@ -109,26 +170,21 @@ const operationalEvidence = (
         : operational.energy.provisionalOperatingCostBeforeGstSgd,
       spikeCount: spikes.count,
       centreCount: spikes.centreCount,
-      centres: spikes.centres.slice(0, 8).map(({ scopeId, centreCode, name, spikeCount, worstSpike }) => ({
-        scopeId,
-        centreCode,
-        name,
-        spikeCount,
-        worstSpike,
-      })),
-      topAppliances: appliances.appliances.slice(0, 8).map(({ name, applianceGroup, usageKwh, sharePct, centreCount }) => ({
-        name,
-        applianceGroup,
-        usageKwh,
-        sharePct,
-        centreCount,
-      })),
-      ...(isStandby ? { sopBreachingCentreCodes: operational.sop.breachingCentreCodes } : {}),
     },
     unit: "kWh, %, SGD before GST",
-    entityRefs: spikes.centres.slice(0, 8).map(({ scopeId }) => scopeId),
-    evidenceRefs: [id, ...operational.evidence.sourceQueryIds.map((queryId) => `query:${queryId}`)],
-  }];
+    entityRefs: [],
+    evidenceRefs: [summaryId, ...sourceRefs],
+  };
+  const sopEvidence: PreschoolSectionPackEvidence[] = isStandby
+    ? [{
+        id: `${baseId}:sop`,
+        label: "Closed-hour SOP review Centres",
+        value: { breachingCentreCodes: operational.sop.breachingCentreCodes },
+        entityRefs: [],
+        evidenceRefs: [`${baseId}:sop`, ...sourceRefs],
+      }]
+    : [];
+  return [summary, ...centreEvidence, ...applianceEvidence, ...sopEvidence];
 };
 
 const planningEvidence = (snapshot: ProjectAnalysisSnapshot): PreschoolSectionPackEvidence[] => {
@@ -204,3 +260,9 @@ const requireSnapshotIdentity = (
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+const evidenceIdSegment = (value: string): string => value
+  .trim()
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/gu, "-")
+  .replace(/^-|-$/gu, "") || "unknown";

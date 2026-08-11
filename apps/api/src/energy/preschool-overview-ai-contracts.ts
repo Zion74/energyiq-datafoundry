@@ -27,6 +27,11 @@ export type PreschoolSectionPackEvidence = {
   unit?: string;
   entityRefs: string[];
   evidenceRefs: string[];
+  claimRelations?: Array<{
+    subject: string;
+    predicate: string;
+    object: string;
+  }>;
 };
 
 export type PreschoolSectionPack = {

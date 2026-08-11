@@ -400,6 +400,111 @@ describe("Preschool Section Interpreter", () => {
     ]);
     harness.close();
   });
+
+  it("accepts comma-grouped numbers that exactly match cited Evidence", async () => {
+    const harness = createHarness();
+    const sectionPacks = packs();
+    const standbyPack = sectionPacks.find(({ sectionId }) => sectionId === "standby-wastage")!;
+    standbyPack.evidence = [{
+      id: "evidence:standby-wastage",
+      label: "Verified standby usage",
+      value: { usageKwh: 3103.78 },
+      unit: "kWh",
+      entityRefs: [],
+      evidenceRefs: ["evidence:standby-wastage"],
+    }];
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: harness.metadata,
+      runBatch: async ({ runId, sessionId }) => ({
+        answer: JSON.stringify({
+          sections: PRESCHOOL_SECTION_IDS.map((sectionId) => sectionId === "standby-wastage"
+            ? {
+                ...available(sectionId),
+                summary: "Closed-hour usage was 3,103.78 kWh.",
+                keyPoints: [
+                  { kind: "finding", text: "The recorded usage was 3,103.78 kWh.", evidenceRefs: ["evidence:standby-wastage"] },
+                  { kind: "next-check", text: "Confirm the operating context.", evidenceRefs: ["evidence:standby-wastage"] },
+                ],
+              }
+            : available(sectionId)),
+        }),
+        runId,
+        sessionId,
+      }),
+    });
+
+    const result = await interpreter.execute({
+      baseIdentity: harness.identity,
+      packs: sectionPacks,
+      user: harness.user,
+    });
+    expect(result["standby-wastage"].status).toBe("available");
+    harness.close();
+  });
+
+  it("rejects a Centre-to-circuit relationship not present in the cited Evidence", async () => {
+    const harness = createHarness();
+    const sectionPacks = packs();
+    const operatingPack = sectionPacks.find(({ sectionId }) => sectionId === "operating-behaviour")!;
+    operatingPack.evidence = [
+      {
+        id: "evidence:operating:n",
+        label: "Centre N operating spike",
+        value: { centre: "Centre N", leadingCircuitName: "Kitchen Plug Load" },
+        unit: "kWh",
+        entityRefs: ["centre-n"],
+        evidenceRefs: ["evidence:operating:n"],
+        claimRelations: [{ subject: "Centre N", predicate: "leading-circuit", object: "Kitchen Plug Load" }],
+      },
+      {
+        id: "evidence:operating:l",
+        label: "Centre L operating spike",
+        value: { centre: "Centre L", leadingCircuitName: "Heater" },
+        unit: "kWh",
+        entityRefs: ["centre-l"],
+        evidenceRefs: ["evidence:operating:l"],
+        claimRelations: [{ subject: "Centre L", predicate: "leading-circuit", object: "Heater" }],
+      },
+    ];
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: harness.metadata,
+      runBatch: async ({ runId, sessionId }) => ({
+        answer: JSON.stringify({
+          sections: PRESCHOOL_SECTION_IDS.map((sectionId) => sectionId === "operating-behaviour"
+            ? {
+                ...available(sectionId),
+                summary: "Operating-hour evidence supports a focused review.",
+                keyPoints: [
+                  {
+                    kind: "finding",
+                    text: "Centre N was led by Heater.",
+                    evidenceRefs: ["evidence:operating:n"],
+                  },
+                  {
+                    kind: "next-check",
+                    text: "Review Centre N before assigning a cause.",
+                    evidenceRefs: ["evidence:operating:n"],
+                  },
+                ],
+              }
+            : available(sectionId)),
+        }),
+        runId,
+        sessionId,
+      }),
+    });
+
+    const result = await interpreter.execute({
+      baseIdentity: harness.identity,
+      packs: sectionPacks,
+      user: harness.user,
+    });
+    expect(result["operating-behaviour"]).toMatchObject({
+      status: "failed",
+      error_code: "PRESCHOOL_SECTION_INTERPRETATION_FACT_UNSUPPORTED",
+    });
+    harness.close();
+  });
 });
 
 const available = (sectionId: PreschoolSectionId, evidenceRef = `evidence:${sectionId}`) => ({

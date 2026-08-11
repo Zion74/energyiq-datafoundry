@@ -23,6 +23,7 @@ const LEASE_MS = 4 * 60 * 1_000;
 const MAX_BATCH_PROMPT_CHARS = 12_000;
 const BANNED_INTERNAL_TEXT = /\b(?:parent_node_id|dataSnapshotId|projectReleaseId|SQL)\b/i;
 const SQL_STATEMENT = /\bSELECT\b[\s\S]{0,500}\b(?:FROM|JOIN)\b/i;
+const NUMBER_TOKEN = /(?<![A-Za-z0-9_-])-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/g;
 
 export type PreschoolSectionInterpreterBatchRunner = (input: {
   prompt: string;
@@ -152,8 +153,10 @@ const buildSectionInterpreterPrompt = (packs: PreschoolSectionPack[]): string =>
     "Write plain English for a non-technical manager. Avoid internal field and revision names.",
     "For each section return status=available with a 1-2 sentence summary and 2-4 keyPoints, or status=empty when no useful interpretation is supported.",
     "Each keyPoint must use kind finding|meaning|next-check and copy one or more exact evidenceRefs from its own pack.",
+    "When naming a Centre and its leading circuit, make only one Centre-to-circuit relationship per keyPoint and cite that Centre's exact Evidence item.",
     "Do not calculate, round, combine, or compare numbers beyond exact values already supplied. Do not hypothesize a cause.",
     `The prompt contains exactly ${promptPacks.length} complete bounded Section Pack projections; none are truncated. Return exactly ${promptPacks.length} sections in the same order.`,
+    `Required sectionId sequence: ${JSON.stringify(promptPacks.map(({ sectionId }) => sectionId))}. Do not substitute any other sectionId.`,
     `Artifact pin for runtime validation only; do not repeat it in customer text: ${JSON.stringify({
       workspaceId: sharedBinding.workspaceId,
       projectId: sharedBinding.projectId,
@@ -191,6 +194,7 @@ const projectPackForPrompt = (pack: PreschoolSectionPack) => ({
     id: evidence.id,
     label: evidence.label,
     value: projectEvidenceValue(pack.sectionId, evidence.value),
+    ...(evidence.unit ? { unit: evidence.unit } : {}),
     evidenceRefs: [evidence.id],
   })),
   limitations: pack.limitations,
@@ -199,33 +203,7 @@ const projectPackForPrompt = (pack: PreschoolSectionPack) => ({
 
 const projectEvidenceValue = (sectionId: PreschoolSectionId, value: unknown): unknown => {
   if (!isRecord(value)) return value;
-  if (sectionId === "centre-benchmark") {
-    return pick(value, ["sampleSize", "portfolio", "priorityCentres", "metadataStatus"]);
-  }
-  if (sectionId === "standby-wastage" || sectionId === "operating-behaviour") {
-    const centreLimit = sectionId === "standby-wastage" ? 3 : 5;
-    return {
-      ...pick(value, [
-        "totalKwh",
-        "stateKwh",
-        "stateSharePct",
-        "provisionalCostBeforeGstSgd",
-        "spikeCount",
-        "centreCount",
-      ]),
-      centres: Array.isArray(value.centres)
-        ? value.centres.slice(0, centreLimit).map(projectCentreEvidence)
-        : [],
-      topAppliances: Array.isArray(value.topAppliances)
-        ? value.topAppliances.slice(0, 3).map((item) => isRecord(item)
-          ? pick(item, ["name", "applianceGroup", "usageKwh", "sharePct", "centreCount"])
-          : item)
-        : [],
-      ...(Array.isArray(value.sopBreachingCentreCodes)
-        ? { sopBreachingCentreCodes: value.sopBreachingCentreCodes }
-        : {}),
-    };
-  }
+  if (sectionId !== "planning-outlook") return value;
   const plan = isRecord(value.plan) ? value.plan : {};
   const actual = isRecord(value.actual) ? value.actual : {};
   const forecast = isRecord(value.forecast) ? value.forecast : {};
@@ -263,26 +241,6 @@ const projectEvidenceValue = (sectionId: PreschoolSectionId, value: unknown): un
         "outcome",
       ]),
     },
-  };
-};
-
-const projectCentreEvidence = (value: unknown): unknown => {
-  if (!isRecord(value)) return value;
-  const worstSpike = isRecord(value.worstSpike) ? value.worstSpike : {};
-  return {
-    ...pick(value, ["centreCode", "name", "spikeCount"]),
-    worstSpike: pick(worstSpike, [
-      "localDate",
-      "localHour",
-      "dayType",
-      "usageKwh",
-      "baselineKwh",
-      "impactKwh",
-      "variancePct",
-      "leadingCircuitName",
-      "leadingCircuitKwh",
-      "leadingCircuitSharePct",
-    ]),
   };
 };
 
@@ -377,7 +335,8 @@ const materializeSectionResult = (input: {
     if (citedEvidence.length === 0
       || pointNarrative.some((value) => hasUnsupportedNumber(value, citedEvidence))
       || pointNarrative.some((value) => hasUnsupportedUnit(value, citedEvidence))
-      || pointNarrative.some((value) => hasUnsupportedCentre(value, citedEvidence))) {
+      || pointNarrative.some((value) => hasUnsupportedCentre(value, citedEvidence))
+      || pointNarrative.some((value) => hasUnsupportedRelation(value, citedEvidence, input.pack.evidence))) {
       throw new Error("PRESCHOOL_SECTION_INTERPRETATION_FACT_UNSUPPORTED");
     }
   }
@@ -387,7 +346,8 @@ const materializeSectionResult = (input: {
     || keyPoints.some(({ label, text }) => [label, text].some((value) => Boolean(value) && hasBannedCustomerText(value!)))
     || narrative.some((value) => hasUnsupportedNumber(value, input.pack.evidence))
     || narrative.some((value) => hasUnsupportedUnit(value, input.pack.evidence))
-    || narrative.some((value) => hasUnsupportedCentre(value, input.pack.evidence))) {
+    || narrative.some((value) => hasUnsupportedCentre(value, input.pack.evidence))
+    || narrative.some((value) => hasUnsupportedRelation(value, input.pack.evidence))) {
     throw new Error("PRESCHOOL_SECTION_INTERPRETATION_FACT_UNSUPPORTED");
   }
   return {
@@ -429,9 +389,9 @@ const parseKeyPoints = (value: unknown): PreschoolSectionKeyPoint[] | null => {
 
 const hasUnsupportedNumber = (text: string, evidence: PreschoolSectionPack["evidence"]): boolean => {
   const supported = collectNumbers(evidence.map(({ value }) => value));
-  const tokens = [...text.matchAll(/(?<![A-Za-z0-9_-])-?\d+(?:\.\d+)?/g)];
+  const tokens = [...text.matchAll(NUMBER_TOKEN)];
   return tokens.some((match) => {
-    const raw = match[0];
+    const raw = match[0].replaceAll(",", "");
     const value = Number(raw);
     const precision = raw.includes(".") ? raw.length - raw.indexOf(".") - 1 : 0;
     const tolerance = 0.5 * (10 ** -precision);
@@ -462,6 +422,27 @@ const hasUnsupportedCentre = (text: string, evidence: PreschoolSectionPack["evid
   const supportedText = JSON.stringify(evidence.map(({ value, entityRefs }) => ({ value, entityRefs }))).toLowerCase();
   const centres = [...text.matchAll(/\bCentre\s+[A-Z0-9][A-Z0-9-]*\b/gi)].map(([value]) => value.toLowerCase());
   return centres.some((centre) => !supportedText.includes(centre));
+};
+
+const hasUnsupportedRelation = (
+  text: string,
+  evidence: PreschoolSectionPack["evidence"],
+  knownEvidence: PreschoolSectionPack["evidence"] = evidence,
+): boolean => {
+  const relations = evidence.flatMap(({ claimRelations }) => claimRelations ?? []);
+  const knownRelations = knownEvidence.flatMap(({ claimRelations }) => claimRelations ?? []);
+  if (knownRelations.length === 0) return false;
+  const normalized = text.toLowerCase();
+  const subjects = [...new Set(knownRelations
+    .map(({ subject }) => subject)
+    .filter((subject) => normalized.includes(subject.toLowerCase())))];
+  const objects = [...new Set(knownRelations
+    .map(({ object }) => object)
+    .filter((object) => normalized.includes(object.toLowerCase())))];
+  if (subjects.length === 0 || objects.length === 0) return false;
+  return subjects.some((subject) => objects.some((object) => !relations.some((relation) =>
+    relation.subject.toLowerCase() === subject.toLowerCase()
+      && relation.object.toLowerCase() === object.toLowerCase())));
 };
 
 const hasBannedCustomerText = (text: string): boolean =>

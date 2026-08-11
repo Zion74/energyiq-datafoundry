@@ -16,13 +16,29 @@ describe("assemblePreschoolSectionPacks", () => {
     ]);
     expect(packs.every(({ binding }) => binding.dataSnapshotId === "snapshot-current")).toBe(true);
     expect(packs.find(({ sectionId }) => sectionId === "centre-benchmark")).toMatchObject({
-      evidence: [{
-        entityRefs: ["centre-a1"],
-        evidenceRefs: [
-          "preschool:snapshot-current:section-2-benchmark",
-          "query:benchmark-query",
-        ],
-      }],
+      evidence: [
+        {
+          id: "preschool:snapshot-current:section-2-benchmark:portfolio",
+          unit: "kWh/m2/year, kWh/person/month",
+        },
+        {
+          id: "preschool:snapshot-current:section-2-benchmark:centre:a1",
+          entityRefs: ["centre-a1"],
+          unit: "kWh, kWh/m2/year, kWh/person/month",
+        },
+      ],
+    });
+    expect(packs.find(({ sectionId }) => sectionId === "operating-behaviour")).toMatchObject({
+      evidence: expect.arrayContaining([
+        expect.objectContaining({
+          id: "preschool:snapshot-current:section-4-operating:centre:n",
+          claimRelations: [{ subject: "Centre N", predicate: "leading-circuit", object: "Kitchen Plug Load" }],
+        }),
+        expect.objectContaining({
+          id: "preschool:snapshot-current:section-4-operating:centre:l",
+          claimRelations: [{ subject: "Centre L", predicate: "leading-circuit", object: "Heater" }],
+        }),
+      ]),
     });
     expect(packs.find(({ sectionId }) => sectionId === "planning-outlook")).toMatchObject({
       evidence: [{
@@ -107,10 +123,29 @@ const snapshot = (dataSnapshotId = "snapshot-current"): ProjectAnalysisSnapshot 
       provisionalOperatingCostBeforeGstSgd: 240,
     },
     standbyAppliances: { appliances: [] },
-    operatingAppliances: { appliances: [] },
+    operatingAppliances: { appliances: [{ name: "Heater", applianceGroup: "Heating", usageKwh: 45, sharePct: 5.625, centreCount: 1 }] },
     spikes: {
       standby: { count: 3, centreCount: 1, centres: [] },
-      operating: { count: 2, centreCount: 1, centres: [] },
+      operating: {
+        count: 2,
+        centreCount: 2,
+        centres: [
+          {
+            scopeId: "centre-n",
+            centreCode: "N",
+            name: "Centre N",
+            spikeCount: 1,
+            worstSpike: { leadingCircuitName: "Kitchen Plug Load", usageKwh: 20 },
+          },
+          {
+            scopeId: "centre-l",
+            centreCode: "L",
+            name: "Centre L",
+            spikeCount: 1,
+            worstSpike: { leadingCircuitName: "Heater", usageKwh: 15 },
+          },
+        ],
+      },
     },
     sop: { breachingCentreCodes: ["A1"] },
     evidence: {
