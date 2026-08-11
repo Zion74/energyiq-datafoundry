@@ -336,6 +336,7 @@ describe("Preschool Section Interpreter", () => {
     expect(capturedPrompt.length).toBeLessThan(12_000);
     expect(capturedPrompt).not.toContain('"binding"');
     expect(capturedPrompt).toContain("exactly 4 complete bounded Section Pack projections");
+    expect(capturedPrompt.match(/evidence:centre-benchmark/gu)).toHaveLength(1);
     harness.close();
   });
 

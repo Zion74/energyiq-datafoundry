@@ -191,8 +191,6 @@ const projectPackForPrompt = (pack: PreschoolSectionPack) => ({
   sectionId: pack.sectionId,
   decisionQuestion: pack.decisionQuestion,
   evidence: pack.evidence.map((evidence) => ({
-    id: evidence.id,
-    label: evidence.label,
     value: projectEvidenceValue(pack.sectionId, evidence.value),
     ...(evidence.unit ? { unit: evidence.unit } : {}),
     evidenceRefs: [evidence.id],
