@@ -364,19 +364,50 @@ describe("Ngee Ann Overview ViewModel", () => {
       total: "1,531.17",
       daily: "218.74",
       peak: "20.67",
-      comparison: "26.4% higher",
       cost: "S$489.97",
     });
-    expect(view.highlights.find((item) => item.id === "comparison")?.detail)
-      .toBe("Current 1,531.17 kWh vs previous 1,211.68 kWh");
     expect(view.highlights.find((item) => item.id === "total")?.detail)
-      .toBe("Total electricity used in the selected scope");
+      .toBe("Previous period: 1,211.68 kWh");
+    expect(view.highlights.find((item) => item.id === "total")?.comparison)
+      .toEqual({ label: "+26.4% vs previous", direction: "increase" });
     expect(view.highlights.find((item) => item.id === "daily")?.detail)
       .toBe("Average electricity used per day in this Overview window");
     expect(view.highlights.find((item) => item.id === "cost")?.detail)
       .toBe("Based on the active tariff for this period");
     expect(view.metadataLimitation).toContain("Area and headcount metadata are missing");
     expect(view.metadataLimitation).toContain("does not affect Total energy, Daily average, Peak interval-average power, Comparison or Cost");
+    expect(view.componentCategoryBreakdown).toMatchObject({
+      status: "available",
+      reason: null,
+      categories: [
+        { id: "load", label: "Load" },
+        { id: "light", label: "Light" },
+      ],
+      evidence: {
+        snapshotId: "snapshot-ngee-ann-golden",
+        projectReleaseId: "release-ngee-ann-golden",
+        queryId: "daily_component_categories_v1",
+        accountingBasis: "published_component_circuits",
+      },
+    });
+    expect(view.componentCategoryBreakdown.scopes).toHaveLength(3);
+    expect(view.componentCategoryBreakdown.scopes[0]).toMatchObject({
+      id: "project",
+      period: {
+        officialUsageKwh: "1,531.2",
+        componentUsageKwh: "1,519",
+        ratioPct: "99.2%",
+      },
+    });
+    expect(view.componentCategoryBreakdown.scopes[0]?.rows).toHaveLength(7);
+    expect(view.componentCategoryBreakdown.rankings.find((ranking) => (
+      ranking.scopeId === "project" && ranking.categoryId === "load"
+    ))?.rows[0]).toMatchObject({
+      rank: 1,
+      name: "Office Load 4 Fan ISOL 1/2",
+      levelName: "Level 7",
+      usageKwh: "439.1",
+    });
     expect(view.levelComparison).toMatchObject({
       status: "available",
       decisionQuestion: "Where is current energy concentrated by Level, and which Level changed most?",
@@ -1773,8 +1804,8 @@ describe("Ngee Ann Overview ViewModel", () => {
       "Unavailable",
       "Unavailable",
       "Unavailable",
-      "Unavailable",
     ]);
+    expect(view.componentCategoryBreakdown.status).toBe("unavailable");
     expect(view.latestAvailableRange).toEqual({ from: "2026-06-10", to: "2026-06-16" });
     expect(view.evidence.comparison.status).toBe("unavailable");
     expect(view.evidence.cost).toMatchObject({
@@ -1783,6 +1814,20 @@ describe("Ngee Ann Overview ViewModel", () => {
       allocations: [],
       referenceIds: [],
     });
+  });
+
+  it("fails the component Category presentation closed when the server projection is absent", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    delete snapshot.analysis.componentCategoryBreakdown;
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.componentCategoryBreakdown).toMatchObject({
+      status: "unavailable",
+      scopes: [],
+      rankings: [],
+    });
+    expect(view.componentCategoryBreakdown.reason).toContain("component Category");
   });
 
   it("shows Cost as Unavailable when the Snapshot has no effective Tariff", () => {

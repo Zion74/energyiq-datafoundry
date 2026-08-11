@@ -1206,7 +1206,7 @@ describe("EnergyScopeAnalysis", () => {
 
       expect(repeated).toEqual(analysis);
       expect(maximumReadonlyQueryConcurrency).toBeLessThanOrEqual(3);
-      expect(measuredRunQueryCount).toBe(10);
+      expect(measuredRunQueryCount).toBe(11);
       expect(measuredRunSessionCount).toBe(1);
       expect(analysis.summary.usageKwh).toBe(NGEE_ANN_GOLDEN.period.usageKwh);
       expect(analysis.summary.peakKw).toBe(NGEE_ANN_GOLDEN.period.peakKw);
@@ -1320,6 +1320,34 @@ describe("EnergyScopeAnalysis", () => {
         expectedHourlyProfile(NGEE_ANN_GOLDEN.period.hourlyProfile, 28)
       );
       expect(analysis.dailyTotals).toEqual(expectedNgeeAnnDailyTotals());
+      expect(analysis.componentCategoryBreakdown).toMatchObject({
+        metricId: "energy.total_usage_kwh@1",
+        queryId: "daily_component_categories_v1",
+        accountingBasis: "published_component_circuits",
+        grain: "day",
+        timezone: NGEE_ANN_GOLDEN.timezone,
+      });
+      expect(analysis.componentCategoryBreakdown?.scopes).toHaveLength(3);
+      const projectComponentBreakdown = analysis.componentCategoryBreakdown?.scopes.find(
+        (scope) => scope.scopeId === "project",
+      );
+      expect(projectComponentBreakdown?.rows).toHaveLength(7);
+      expect(projectComponentBreakdown?.period.componentUsageKwh)
+        .toBeCloseTo(NGEE_ANN_GOLDEN.period.componentReconciliation.componentUsageKwh, 3);
+      expect(projectComponentBreakdown?.period.officialUsageKwh)
+        .toBeCloseTo(NGEE_ANN_GOLDEN.period.usageKwh, 3);
+      expect(projectComponentBreakdown?.period.categories.reduce(
+        (sum, category) => sum + category.usageKwh,
+        0,
+      )).toBeCloseTo(projectComponentBreakdown?.period.componentUsageKwh ?? 0, 3);
+      for (const row of projectComponentBreakdown?.rows ?? []) {
+        expect(row.categories.reduce(
+          (sum, category) => sum + (category.usageKwh ?? 0),
+          0,
+        )).toBeCloseTo(row.componentUsageKwh ?? 0, 3);
+        expect(row.estimatedCost.status).toBe(analysis.cost.status);
+      }
+      expect(analysis.provenance.queryIds).toContain("daily_component_categories_v1");
       expect(analysis.timeBehaviour).toMatchObject({
         metricId: "energy.total_usage_kwh@1",
         grain: "hour",

@@ -256,6 +256,53 @@ export type EnergyScopeAnalysis = {
       }>;
     }>;
   };
+  componentCategoryBreakdown?: {
+    metricId: "energy.total_usage_kwh@1";
+    queryId: "daily_component_categories_v1";
+    accountingBasis: "published_component_circuits";
+    grain: "day";
+    timezone: string;
+    scopes: Array<{
+      scopeId: string;
+      scopeName: string;
+      scopeType: string;
+      period: {
+        officialUsageKwh: number;
+        componentUsageKwh: number;
+        gapKwh: number;
+        ratioPct: number | null;
+        categories: Array<{
+          category: string;
+          usageKwh: number;
+          sharePct: number;
+        }>;
+      };
+      rows: Array<{
+        localDate: string;
+        from: string;
+        to: string;
+        dayType: "weekday" | "weekend" | "public_holiday" | null;
+        officialUsageKwh: number | null;
+        componentUsageKwh: number | null;
+        categories: Array<{
+          category: string;
+          usageKwh: number | null;
+          sharePct: number | null;
+        }>;
+        estimatedCost: {
+          status: "available";
+          amount: number;
+          currency: string;
+          ratePerKwh: number;
+          tariffScheduleVersion: string;
+        } | {
+          status: "unavailable";
+          reason: string;
+        };
+        dataHealth: TimeBucketDataHealth;
+      }>;
+    }>;
+  };
   calendarTotals?: {
     metricId: "energy.total_usage_kwh@1";
     timezone: string;
@@ -546,6 +593,7 @@ export type EnergyScopeAnalysis = {
       | "scope_summary_v1"
       | "hourly_profile_v1"
       | "daily_totals_v1"
+      | "daily_component_categories_v1"
       | "time_bucket_grid_v1"
       | "peak_breakdown_v1"
       | "meter_breakdown_v1"
@@ -631,6 +679,16 @@ type DailyTotalScope = {
   scopeId: string;
   scopeName: string;
   scopeType: string;
+  meterNodeIds: string[];
+};
+
+type DailyComponentCategorySeries = {
+  scopeOrder: number;
+  categoryOrder: number;
+  scopeId: string;
+  scopeName: string;
+  scopeType: string;
+  category: string;
   meterNodeIds: string[];
 };
 
@@ -1126,6 +1184,12 @@ export const executeEnergyScopeAnalysis = async (input: {
     ? resolvedDailyTotalScopes.filter((scope) => scope.scopeId === selectedNode.id).slice(0, 1)
     : resolvedDailyTotalScopes;
   const dailyDateBuckets = buildDailyDateBuckets(input.context);
+  const dailyComponentCategorySeries = buildDailyComponentCategorySeries({
+    dailyTotalScopes,
+    hierarchy,
+    meterAggregates,
+    aggregateMeterNodeIds,
+  });
   const dailyUsageAnomalyLoadInput = {
     metadataStore: input.metadataStore,
     dataGateway: input.dataGateway,
@@ -1190,6 +1254,18 @@ export const executeEnergyScopeAnalysis = async (input: {
       limit: 1000,
     }),
   ]);
+  const dailyComponentCategoryResult = dailyComponentCategorySeries.length > 0
+    ? await input.dataGateway.runSqlReadonly({
+        user_id: input.userId,
+        workspace_id: input.context.workspaceId,
+        datasource_id: scoped.datasourceId,
+        sql: dailyComponentCategoriesSql(scoped.viewName, dailyComponentCategorySeries),
+        limit: Math.max(
+          1,
+          dailyComponentCategorySeries.length * dailyDateBuckets.length,
+        ),
+      })
+    : undefined;
   const peakAtForBreakdown = optionalStringAt(summaryResult.rows[0] ?? [], 2);
   const [
     peakBreakdownResult,
@@ -1539,6 +1615,17 @@ export const executeEnergyScopeAnalysis = async (input: {
   };
   const offHours = mapOperatingEvaluation(operationalPolicy.operating, usageKwh);
   const cost = mapTariffEvaluation(operationalPolicy.tariff);
+  const componentCategoryBreakdown = dailyComponentCategoryResult
+    ? buildComponentCategoryBreakdown({
+        timezone: input.context.timezone,
+        dateBuckets: dailyDateBuckets,
+        dailyTotals,
+        series: dailyComponentCategorySeries,
+        rows: dailyComponentCategoryResult.rows,
+        intervalMinutes,
+        cost,
+      })
+    : undefined;
   const coveragePct = expectedMeterIntervalCount > 0
     ? round(Math.min(validIntervalCount / expectedMeterIntervalCount, 1) * 100, 4)
     : 0;
@@ -1586,6 +1673,7 @@ export const executeEnergyScopeAnalysis = async (input: {
       observationCount: numberAt(row, 4)
     })),
     dailyTotals,
+    ...(componentCategoryBreakdown ? { componentCategoryBreakdown } : {}),
     calendarTotals,
     ...(timeBehaviour ? { timeBehaviour } : {}),
     ...(dailyUsageAnomalies ? { dailyUsageAnomalies } : {}),
@@ -1623,6 +1711,7 @@ export const executeEnergyScopeAnalysis = async (input: {
         "scope_summary_v1",
         "hourly_profile_v1",
         "daily_totals_v1",
+        ...(dailyComponentCategoryResult ? ["daily_component_categories_v1" as const] : []),
         ...(timeBucketGridResult ? ["time_bucket_grid_v1" as const] : []),
         ...(peakBreakdownResult ? ["peak_breakdown_v1" as const] : []),
         "meter_breakdown_v1",
@@ -2734,6 +2823,222 @@ const resolveDailyTotalScopes = (input: {
     scopeType: input.selectedNode.node_type,
     meterNodeIds: input.aggregateMeterNodeIds,
   }, ...children];
+};
+
+const buildDailyComponentCategorySeries = (input: {
+  dailyTotalScopes: DailyTotalScope[];
+  hierarchy: ReturnType<MetadataStore["energyIq"]["listProjectNodes"]>;
+  meterAggregates: MeterAggregate[];
+  aggregateMeterNodeIds: string[];
+}): DailyComponentCategorySeries[] => {
+  const officialMeterNodeIds = new Set(input.aggregateMeterNodeIds);
+  return input.dailyTotalScopes.flatMap((scope, scopeOrder) => {
+    const ownedScopeIds = collectDescendantIds(scope.scopeId, input.hierarchy);
+    ownedScopeIds.add(scope.scopeId);
+    const categories = new Map<string, MeterAggregate[]>();
+    for (const meter of input.meterAggregates) {
+      if (officialMeterNodeIds.has(meter.meterNodeId) || !ownedScopeIds.has(meter.scopeId)) continue;
+      categories.set(meter.category, [...(categories.get(meter.category) ?? []), meter]);
+    }
+    return [...categories.entries()]
+      .sort((left, right) => {
+        const leftUsage = left[1].reduce((sum, meter) => sum + meter.usageKwh, 0);
+        const rightUsage = right[1].reduce((sum, meter) => sum + meter.usageKwh, 0);
+        return rightUsage - leftUsage || left[0].localeCompare(right[0]);
+      })
+      .map(([category, meters], categoryOrder) => ({
+        scopeOrder,
+        categoryOrder,
+        scopeId: scope.scopeId,
+        scopeName: scope.scopeName,
+        scopeType: scope.scopeType,
+        category,
+        meterNodeIds: meters.map((meter) => meter.meterNodeId).sort(),
+      }));
+  });
+};
+
+const buildComponentCategoryBreakdown = (input: {
+  timezone: string;
+  dateBuckets: DailyDateBucket[];
+  dailyTotals: NonNullable<EnergyScopeAnalysis["dailyTotals"]>;
+  series: DailyComponentCategorySeries[];
+  rows: unknown[][];
+  intervalMinutes: number;
+  cost: EnergyScopeAnalysis["cost"];
+}): NonNullable<EnergyScopeAnalysis["componentCategoryBreakdown"]> => {
+  const facts = new Map(
+    input.rows.map((row) => [
+      `${stringAt(row, 0)}:${stringAt(row, 3)}:${stringAt(row, 4)}`,
+      row,
+    ]),
+  );
+  const dailyTotalsByScope = new Map(
+    input.dailyTotals.scopes.map((scope) => [scope.scopeId, scope]),
+  );
+  const seriesByScope = new Map<string, DailyComponentCategorySeries[]>();
+  for (const definition of input.series) {
+    seriesByScope.set(definition.scopeId, [
+      ...(seriesByScope.get(definition.scopeId) ?? []),
+      definition,
+    ]);
+  }
+  return {
+    metricId: "energy.total_usage_kwh@1",
+    queryId: "daily_component_categories_v1",
+    accountingBasis: "published_component_circuits",
+    grain: "day",
+    timezone: input.timezone,
+    scopes: [...seriesByScope.values()].map((scopeSeries) => {
+      const orderedSeries = [...scopeSeries].sort(
+        (left, right) => left.categoryOrder - right.categoryOrder,
+      );
+      const scope = orderedSeries[0]!;
+      const officialDailyRows = new Map(
+        (dailyTotalsByScope.get(scope.scopeId)?.rows ?? []).map((row) => [row.localDate, row]),
+      );
+      const rows = input.dateBuckets.map((bucket) => {
+        const categories = orderedSeries.map((definition) => {
+          const fact = facts.get(`${definition.scopeId}:${definition.category}:${bucket.localDate}`);
+          return {
+            category: definition.category,
+            usageKwh: fact && fact[5] !== null && fact[5] !== undefined
+              ? round(numberAt(fact, 5), 4)
+              : null,
+          };
+        });
+        const expectedMeterIntervalCount = orderedSeries.reduce(
+          (sum, definition) => sum + definition.meterNodeIds.length * Math.round(
+            (Date.parse(bucket.to) - Date.parse(bucket.from)) / (input.intervalMinutes * 60_000),
+          ),
+          0,
+        );
+        const validIntervalCount = orderedSeries.reduce((sum, definition) => {
+          const fact = facts.get(`${definition.scopeId}:${definition.category}:${bucket.localDate}`);
+          return sum + (fact ? numberAt(fact, 6) : 0);
+        }, 0);
+        const qualityEventCount = orderedSeries.reduce((sum, definition) => {
+          const fact = facts.get(`${definition.scopeId}:${definition.category}:${bucket.localDate}`);
+          return sum + (fact ? numberAt(fact, 7) : 0);
+        }, 0);
+        const dayTypes = new Set<"weekday" | "weekend" | "public_holiday">(
+          orderedSeries.flatMap((definition): Array<"weekday" | "weekend" | "public_holiday"> => {
+          const fact = facts.get(`${definition.scopeId}:${definition.category}:${bucket.localDate}`);
+          if (!fact || numberAt(fact, 9) !== 1 || numberAt(fact, 10) !== 0) return [];
+          const value = optionalStringAt(fact, 8);
+          return value === "weekday" || value === "weekend" || value === "public_holiday"
+            ? [value]
+            : [];
+          }),
+        );
+        const availableCategoryValues = categories.flatMap((category) =>
+          category.usageKwh === null ? [] : [category.usageKwh],
+        );
+        const componentUsageKwh = availableCategoryValues.length > 0
+          ? round(availableCategoryValues.reduce((sum, value) => sum + value, 0), 4)
+          : null;
+        const officialDailyRow = officialDailyRows.get(bucket.localDate);
+        const officialUsageKwh = officialDailyRow?.usageKwh ?? null;
+        return {
+          localDate: bucket.localDate,
+          from: bucket.from,
+          to: bucket.to,
+          dayType: dayTypes.size === 1 ? [...dayTypes][0]! : null,
+          officialUsageKwh,
+          componentUsageKwh,
+          categories: categories.map((category) => ({
+            ...category,
+            sharePct: category.usageKwh === null || componentUsageKwh === null
+              ? null
+              : percent(category.usageKwh, componentUsageKwh, 4),
+          })),
+          estimatedCost: dailyEstimatedCost({
+            cost: input.cost,
+            from: bucket.from,
+            to: bucket.to,
+            usageKwh: officialUsageKwh,
+          }),
+          dataHealth: {
+            status: validIntervalCount === 0
+              ? "unavailable" as const
+              : validIntervalCount === expectedMeterIntervalCount && qualityEventCount === 0
+                ? "complete" as const
+                : "partial" as const,
+            coveragePct: expectedMeterIntervalCount > 0
+              ? round(Math.min(validIntervalCount / expectedMeterIntervalCount, 1) * 100, 4)
+              : 0,
+            expectedMeterIntervalCount,
+            validIntervalCount,
+            qualityEventCount,
+          },
+        };
+      });
+      const periodCategories = orderedSeries.map((definition) => ({
+        category: definition.category,
+        usageKwh: round(rows.reduce((sum, row) => sum + (
+          row.categories.find((category) => category.category === definition.category)?.usageKwh ?? 0
+        ), 0), 4),
+      }));
+      const componentUsageKwh = round(
+        periodCategories.reduce((sum, category) => sum + category.usageKwh, 0),
+        4,
+      );
+      const officialUsageKwh = round(
+        rows.reduce((sum, row) => sum + (row.officialUsageKwh ?? 0), 0),
+        4,
+      );
+      return {
+        scopeId: scope.scopeId,
+        scopeName: scope.scopeName,
+        scopeType: scope.scopeType,
+        period: {
+          officialUsageKwh,
+          componentUsageKwh,
+          gapKwh: round(officialUsageKwh - componentUsageKwh, 4),
+          ratioPct: officialUsageKwh > 0
+            ? round(componentUsageKwh / officialUsageKwh * 100, 4)
+            : null,
+          categories: periodCategories.map((category) => ({
+            ...category,
+            sharePct: percent(category.usageKwh, componentUsageKwh, 4),
+          })),
+        },
+        rows,
+      };
+    }),
+  };
+};
+
+const dailyEstimatedCost = (input: {
+  cost: EnergyScopeAnalysis["cost"];
+  from: string;
+  to: string;
+  usageKwh: number | null;
+}): NonNullable<EnergyScopeAnalysis["componentCategoryBreakdown"]>["scopes"][number]["rows"][number]["estimatedCost"] => {
+  if (input.usageKwh === null) {
+    return { status: "unavailable", reason: "Official daily usage is unavailable." };
+  }
+  if (input.cost.status === "unavailable") {
+    return { status: "unavailable", reason: input.cost.reason.message };
+  }
+  const coveringAllocations = input.cost.allocations.filter((allocation) =>
+    Date.parse(allocation.from) <= Date.parse(input.from)
+    && Date.parse(allocation.to) >= Date.parse(input.to),
+  );
+  if (coveringAllocations.length !== 1) {
+    return {
+      status: "unavailable",
+      reason: "No single release-pinned Tariff rate covers this complete local day.",
+    };
+  }
+  const allocation = coveringAllocations[0]!;
+  return {
+    status: "available",
+    amount: round(input.usageKwh * allocation.ratePerKwh, 4),
+    currency: input.cost.currency,
+    ratePerKwh: allocation.ratePerKwh,
+    tariffScheduleVersion: input.cost.tariffScheduleVersion,
+  };
 };
 
 const buildDailyDateBuckets = (context: EnergyQueryContext): DailyDateBucket[] => {
@@ -3878,6 +4183,55 @@ const dailyTotalsSql = (
   WHERE ${meterNodeFilter(scope.meterNodeIds)}
   GROUP BY CAST(source.local_interval_start AS DATE)
 `).join(" UNION ALL ") + " ORDER BY scope_order, local_date";
+
+const dailyComponentCategoriesSql = (
+  viewName: string,
+  series: DailyComponentCategorySeries[],
+): string => `
+  SELECT
+    routes.scope_id,
+    routes.scope_name,
+    routes.scope_type,
+    routes.category,
+    STRFTIME(CAST(source.local_interval_start AS DATE), '%Y-%m-%d') AS local_date,
+    SUM(source.usage_kwh) FILTER (WHERE source.quality_status = 'ok') AS usage_kwh,
+    COUNT(*) FILTER (WHERE source.quality_status = 'ok') AS valid_interval_count,
+    COUNT(*) FILTER (WHERE source.quality_status <> 'ok') AS quality_event_count,
+    MAX(source.day_type) FILTER (WHERE source.quality_status = 'ok') AS day_type,
+    COUNT(DISTINCT source.day_type) FILTER (WHERE source.quality_status = 'ok') AS day_type_count,
+    COUNT(*) FILTER (
+      WHERE source.quality_status = 'ok' AND source.day_type IS NULL
+    ) AS day_type_null_count,
+    routes.scope_order,
+    routes.category_order
+  FROM ${quoteIdentifier(viewName)} source
+  JOIN (VALUES ${series.flatMap((definition) => definition.meterNodeIds.map((meterNodeId) => `(
+    ${definition.scopeOrder},
+    ${definition.categoryOrder},
+    ${sqlLiteral(definition.scopeId)},
+    ${sqlLiteral(definition.scopeName)},
+    ${sqlLiteral(definition.scopeType)},
+    ${sqlLiteral(definition.category)},
+    ${sqlLiteral(meterNodeId)}
+  )`)).join(", ")}) AS routes(
+    scope_order,
+    category_order,
+    scope_id,
+    scope_name,
+    scope_type,
+    category,
+    meter_node_id
+  ) ON routes.meter_node_id = source.meter_node_id
+  GROUP BY
+    routes.scope_order,
+    routes.category_order,
+    routes.scope_id,
+    routes.scope_name,
+    routes.scope_type,
+    routes.category,
+    CAST(source.local_interval_start AS DATE)
+  ORDER BY routes.scope_order, routes.category_order, local_date
+`;
 
 const dailyUsageAnomalySql = (
   viewName: string,

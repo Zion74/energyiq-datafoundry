@@ -22,6 +22,7 @@ export function ngeeAnnGoldenSnapshot(input: {
   const queryIds = [
     "scope_summary_v1",
     "daily_totals_v1",
+    "daily_component_categories_v1",
     "time_bucket_grid_v1",
     "time_slot_anomaly_v1",
     "peak_breakdown_v1",
@@ -571,6 +572,8 @@ export function ngeeAnnGoldenSnapshot(input: {
     metadata,
   };
 
+  analysis.componentCategoryBreakdown = goldenComponentCategoryBreakdown(analysis);
+
   return {
     context: {
       ...analysis.context,
@@ -648,6 +651,91 @@ export function ngeeAnnGoldenSnapshot(input: {
     },
     metadata,
     analysis,
+  };
+}
+
+function goldenComponentCategoryBreakdown(
+  analysis: EnergyProjectAnalysisSnapshotDto["analysis"],
+): NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["componentCategoryBreakdown"]> {
+  const componentCircuits = analysis.circuits.filter((circuit) => circuit.includedInOfficialTotal === false);
+  const scopeRows = analysis.dailyTotals?.scopes ?? [];
+  return {
+    metricId: "energy.total_usage_kwh@1",
+    queryId: "daily_component_categories_v1",
+    accountingBasis: "published_component_circuits",
+    grain: "day",
+    timezone: "Asia/Singapore",
+    scopes: scopeRows.map((scope) => {
+      const circuits = componentCircuits.filter((circuit) =>
+        scope.scopeId === "project" || circuit.parentScopeId === scope.scopeId,
+      );
+      const categoryUsage = new Map<string, number>();
+      for (const circuit of circuits) {
+        categoryUsage.set(circuit.category, (categoryUsage.get(circuit.category) ?? 0) + circuit.usageKwh);
+      }
+      const componentUsageKwh = [...categoryUsage.values()].reduce((sum, value) => sum + value, 0);
+      const officialUsageKwh = scope.rows.reduce((sum, row) => sum + (row.usageKwh ?? 0), 0);
+      const ratio = officialUsageKwh > 0 ? componentUsageKwh / officialUsageKwh : 0;
+      const categories = [...categoryUsage.entries()]
+        .sort((left, right) => right[1] - left[1])
+        .map(([category, usageKwh]) => ({
+          category,
+          usageKwh: roundFixture(usageKwh),
+          sharePct: componentUsageKwh > 0 ? roundFixture(usageKwh / componentUsageKwh * 100) : 0,
+        }));
+      return {
+        scopeId: scope.scopeId,
+        scopeName: scope.scopeName,
+        scopeType: scope.scopeType,
+        period: {
+          officialUsageKwh: roundFixture(officialUsageKwh),
+          componentUsageKwh: roundFixture(componentUsageKwh),
+          gapKwh: roundFixture(officialUsageKwh - componentUsageKwh),
+          ratioPct: officialUsageKwh > 0 ? roundFixture(componentUsageKwh / officialUsageKwh * 100) : null,
+          categories,
+        },
+        rows: scope.rows.map((row) => {
+          const componentDaily = row.usageKwh === null ? null : row.usageKwh * ratio;
+          const localDay = new Date(`${row.localDate}T00:00:00.000Z`).getUTCDay();
+          return {
+            localDate: row.localDate,
+            from: row.from,
+            to: row.to,
+            dayType: localDay === 0 || localDay === 6 ? "weekend" as const : "weekday" as const,
+            officialUsageKwh: row.usageKwh,
+            componentUsageKwh: componentDaily === null ? null : roundFixture(componentDaily),
+            categories: categories.map((category) => ({
+              category: category.category,
+              usageKwh: componentDaily === null || componentUsageKwh === 0
+                ? null
+                : roundFixture(componentDaily * category.usageKwh / componentUsageKwh),
+              sharePct: componentDaily === null ? null : category.sharePct,
+            })),
+            estimatedCost: analysis.cost.status === "available" && row.usageKwh !== null
+              ? {
+                status: "available" as const,
+                amount: roundFixture(row.usageKwh * analysis.cost.allocations[0]!.ratePerKwh),
+                currency: analysis.cost.currency,
+                ratePerKwh: analysis.cost.allocations[0]!.ratePerKwh,
+                tariffScheduleVersion: analysis.cost.tariffScheduleVersion,
+              }
+              : {
+                status: "unavailable" as const,
+                reason: analysis.cost.status === "unavailable"
+                  ? analysis.cost.reason.message
+                  : "Official daily usage is unavailable.",
+              },
+            dataHealth: {
+              status: row.dataHealth.status,
+              coveragePct: row.dataHealth.coveragePct,
+              expectedMeterIntervalCount: circuits.length * 96,
+              validIntervalCount: row.dataHealth.status === "unavailable" ? 0 : circuits.length * 96,
+              qualityEventCount: row.dataHealth.qualityEventCount,
+            },
+          };
+        }),
+      };
+    }),
   };
 }
 

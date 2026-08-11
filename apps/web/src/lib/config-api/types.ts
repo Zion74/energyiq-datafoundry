@@ -435,6 +435,54 @@ export type EnergyDailyTotalsDto = {
   }>;
 };
 
+export type EnergyComponentCategoryBreakdownDto = {
+  metricId: "energy.total_usage_kwh@1";
+  queryId: "daily_component_categories_v1";
+  accountingBasis: "published_component_circuits";
+  grain: "day";
+  timezone: string;
+  scopes: Array<{
+    scopeId: string;
+    scopeName: string;
+    scopeType: string;
+    period: {
+      officialUsageKwh: number;
+      componentUsageKwh: number;
+      gapKwh: number;
+      ratioPct: number | null;
+      categories: Array<{
+        category: string;
+        usageKwh: number;
+        sharePct: number;
+      }>;
+    };
+    rows: Array<{
+      localDate: string;
+      from: string;
+      to: string;
+      dayType: "weekday" | "weekend" | "public_holiday" | null;
+      officialUsageKwh: number | null;
+      componentUsageKwh: number | null;
+      categories: Array<{
+        category: string;
+        usageKwh: number | null;
+        sharePct: number | null;
+      }>;
+      estimatedCost: {
+        status: "available";
+        amount: number;
+        currency: string;
+        ratePerKwh: number;
+        tariffScheduleVersion: string;
+      } | {
+        status: "unavailable";
+        reason: string;
+      };
+      dataHealth: EnergyTimeBucketDataHealthDto;
+    }>;
+  }>;
+};
+
 export type EnergyCalendarTotalsDto = {
   metricId: "energy.total_usage_kwh@1";
   timezone: string;
@@ -967,6 +1015,7 @@ export type EnergyScopeAnalysisDto = {
     includedInOfficialTotal: false;
   }>;
   dailyTotals?: EnergyDailyTotalsDto;
+  componentCategoryBreakdown?: EnergyComponentCategoryBreakdownDto;
   calendarTotals?: EnergyCalendarTotalsDto;
   timeBehaviour?: EnergyTimeBehaviourDto;
   dailyUsageAnomalies?: EnergyDailyUsageAnomaliesDto;
@@ -1039,6 +1088,7 @@ export type EnergyScopeAnalysisDto = {
     queryIds: Array<
       | "scope_summary_v1"
       | "daily_totals_v1"
+      | "daily_component_categories_v1"
       | "time_bucket_grid_v1"
       | "time_slot_anomaly_v1"
       | "peak_breakdown_v1"

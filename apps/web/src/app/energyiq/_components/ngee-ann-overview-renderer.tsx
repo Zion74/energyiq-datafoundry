@@ -10,9 +10,12 @@ import { NgeeAnnAiSlot } from "./ngee-ann-ai-slot";
 import { NgeeAnnDailyTrendSection } from "./ngee-ann-daily-trend-section";
 import { NgeeAnnDayProfile } from "./ngee-ann-day-profile";
 import { NgeeAnnDecisionPriorities } from "./ngee-ann-decision-priorities";
+import { NgeeAnnConsumptionBreakdown } from "./ngee-ann-consumption-breakdown";
 import { NgeeAnnEnergyComposition } from "./ngee-ann-energy-composition";
+import { NgeeAnnEnergyDistribution } from "./ngee-ann-energy-distribution";
+import { NgeeAnnExecutiveSummary } from "./ngee-ann-executive-summary";
 import { NgeeAnnLevelComparison } from "./ngee-ann-level-comparison";
-import { NgeeAnnPeakBreakdown } from "./ngee-ann-peak-breakdown";
+import { NgeeAnnSummaryFindings } from "./ngee-ann-summary-findings";
 import { NgeeAnnUsageHeatmap } from "./ngee-ann-usage-heatmap";
 import {
   buildNgeeAnnOverviewViewModel,
@@ -192,32 +195,11 @@ export function NgeeAnnOverviewRenderer({
         description={view.executiveSummary.headline}
       />
 
-      <div className="border-b border-border px-5 py-5 lg:px-7">
-        <p className="max-w-4xl text-sm leading-6 text-muted">{view.executiveSummary.detail}</p>
-      </div>
+      <NgeeAnnExecutiveSummary view={view} />
 
-      <div className="border-b border-border px-5 pt-5 lg:px-7">
-        <p className="text-sm font-semibold text-foreground">Key Highlights</p>
-      </div>
-      <div className="grid border-b border-border sm:grid-cols-2 xl:grid-cols-5 xl:divide-x xl:divide-border">
-        {view.highlights.map((highlight) => (
-          <article
-            key={highlight.id}
-            className="min-w-0 border-b border-border px-5 py-5 last:border-b-0 sm:[&:nth-last-child(-n+2)]:border-b-0 xl:border-b-0"
-          >
-            <p className="text-xs font-medium text-muted">{highlight.label}</p>
-            <p className={[
-              "mt-2 break-words text-2xl font-semibold tracking-[-0.025em] tabular-nums",
-              highlight.available ? "text-foreground" : "text-muted-light",
-            ].join(" ")}>
-              {highlight.value}
-              {highlight.unit ? <span className="ml-1 text-sm font-medium tracking-normal text-muted">{highlight.unit}</span> : null}
-            </p>
-            <p className="mt-2 text-xs leading-5 text-muted">{highlight.detail}</p>
-            {highlight.id === "peak" ? <NgeeAnnPeakBreakdown view={view.peakBreakdown} /> : null}
-          </article>
-        ))}
-      </div>
+      <NgeeAnnConsumptionBreakdown view={view.componentCategoryBreakdown} />
+
+      <NgeeAnnEnergyDistribution view={view.componentCategoryBreakdown} />
 
       <OverviewSectionHeading
         id="ngee-ann-summary-findings"
@@ -225,28 +207,7 @@ export function NgeeAnnOverviewRenderer({
         description="Verified findings from the selected Snapshot, kept separate from AI interpretation."
       />
 
-      <div className="grid border-b border-border lg:grid-cols-3 lg:divide-x lg:divide-border">
-        {view.executiveSummary.signals.map((signal) => (
-          <article key={signal.id} data-executive-signal={signal.id} className="min-w-0 border-b border-border px-5 py-5 last:border-b-0 lg:border-b-0 lg:px-7">
-            <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">{signal.label}</p>
-            <p className={[
-              "mt-2 text-xl font-semibold tracking-[-0.02em] text-foreground",
-              signal.tone === "warning" ? "text-step-warning" : "",
-              signal.status === "unavailable" ? "text-muted-light" : "",
-            ].join(" ")}>{signal.value}</p>
-            <p className="mt-2 text-sm leading-6 text-muted">{signal.detail}</p>
-            {signal.href ? (
-              <a href={signal.href} className="mt-3 inline-flex text-sm font-semibold text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
-                {signal.id === "period-change"
-                  ? "Open comparison evidence"
-                  : signal.id === "main-driver"
-                    ? "Open contributor evidence"
-                    : "Open exception evidence"}
-              </a>
-            ) : null}
-          </article>
-        ))}
-      </div>
+      <NgeeAnnSummaryFindings view={view} />
 
       <OverviewSectionHeading
         id="ngee-ann-day-profile-analysis"

@@ -29,6 +29,7 @@ import {
 } from "./overview-history-state";
 import {
   OverviewSectionNavigation,
+  type OverviewNavigationSection,
 } from "./overview-section-navigation";
 import { NGEE_ANN_OVERVIEW_SECTIONS } from "./ngee-ann-overview-sections";
 import { PRESCHOOL_OVERVIEW_SECTIONS } from "./preschool-overview-renderer";
