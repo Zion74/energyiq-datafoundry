@@ -129,6 +129,9 @@ let startupTotalMs = 0;
 
 export const resolveOverviewAiStageRuntimeOptions = (stage: PreschoolOverviewAiStage) => ({
   analysisRequirementsMode: "omit" as const,
+  ...(stage === "section-interpreter" || stage === "executive-synthesis"
+    ? { disableTools: true as const }
+    : {}),
   excludedToolNames: stage === "section-interpreter" || stage === "executive-synthesis"
     ? ["skill", "skill_search", "skill_read", "inspect_schema", "run_sql_readonly", "protocol_handoff"] as const
     : stage === "editor"
@@ -1027,6 +1030,7 @@ class DataFoundryAgUiAgent extends AbstractAgent {
           ...(overviewAiStageOptions
             ? {
                 analysisRequirementsMode: overviewAiStageOptions.analysisRequirementsMode,
+                ...(overviewAiStageOptions.disableTools ? { disableTools: true } : {}),
                 ...(overviewAiStageOptions.overviewAiCandidateSubmission
                   ? { overviewAiCandidateSubmission: true }
                   : {}),

@@ -265,6 +265,8 @@ export type CreateDataFoundryInput = {
   overviewAiCandidateSubmission?: boolean;
   /** Server-owned stage guard; removes named tools after normal policy selection. */
   excludedToolNames?: readonly string[];
+  /** Server-owned stage guard for bounded value transforms that must never invoke tools. */
+  disableTools?: boolean;
   abortSignal?: AbortSignal | undefined;
   artifactService?: ArtifactService;
   contextPackageRecorder?: ContextPackageRecorder;
@@ -537,9 +539,11 @@ export const createDataFoundry = async (
     ...selectedMcpTools
   };
   const excludedToolNames = new Set(input.excludedToolNames ?? []);
-  const selectedTools = excludedToolNames.size === 0
-    ? toolsBeforeStageExclusions
-    : Object.fromEntries(Object.entries(toolsBeforeStageExclusions).filter(([name]) => !excludedToolNames.has(name)));
+  const selectedTools = input.disableTools
+    ? {}
+    : excludedToolNames.size === 0
+      ? toolsBeforeStageExclusions
+      : Object.fromEntries(Object.entries(toolsBeforeStageExclusions).filter(([name]) => !excludedToolNames.has(name)));
   const selectedDatasourceId = input.runContext.selected_datasource_id;
   const deferredProtocolEvents: ProtocolEvent[] = [];
   let protocolEventsReady = false;
@@ -681,12 +685,12 @@ export const createDataFoundry = async (
         })
       }
     : {};
-  const overviewAiCandidateSubmissionTools = input.overviewAiCandidateSubmission
+  const overviewAiCandidateSubmissionTools = input.overviewAiCandidateSubmission && !input.disableTools
     ? {
         [OVERVIEW_AI_CANDIDATE_SUBMISSION_TOOL_NAME]: createOverviewAiCandidateSubmissionTool(),
       }
     : {};
-  const protocolHandoffTools = excludedToolNames.has("protocol_handoff")
+  const protocolHandoffTools = input.disableTools || excludedToolNames.has("protocol_handoff")
     ? {}
     : {
         protocol_handoff: createTool({

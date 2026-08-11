@@ -25,6 +25,7 @@ const createEnergyIqAgent = async (
     dataGateway?: unknown;
     emittedEvents?: unknown[];
     overviewAiCandidateSubmission?: boolean;
+    disableTools?: boolean;
   } = {},
 ) => {
   const workspaceRoot = mkdtempSync(join(tmpdir(), "datafoundry-agent-policy-"));
@@ -34,6 +35,7 @@ const createEnergyIqAgent = async (
     dataGateway: (options.dataGateway ?? {}) as never,
     emitter: { emit: (event: unknown) => { options.emittedEvents?.push(event); } },
     excludedToolNames,
+    ...(options.disableTools ? { disableTools: true } : {}),
     explicitProtocol: { protocolId: "data-analysis", protocolVersion: "1" },
     messages: [],
     modelProvider: {
@@ -72,6 +74,16 @@ const createEnergyIqAgent = async (
 };
 
 describe("EnergyIQ agent policy follows the enabled tool set", () => {
+  it("attaches no tools when a bounded value stage disables tools", async () => {
+    const runtime = await createEnergyIqAgent([], { disableTools: true });
+
+    try {
+      expect(await runtime.agent.listTools()).toEqual({});
+    } finally {
+      await runtime.destroyWorkspace();
+    }
+  });
+
   it("gives a no-tool Editor selection-only instructions instead of requiring Schema or SQL", async () => {
     const runtime = await createEnergyIqAgent([
       "inspect_schema",

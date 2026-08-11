@@ -201,18 +201,34 @@ const projectPackForPrompt = (pack: PreschoolSectionPack) => ({
 
 const projectEvidenceValue = (sectionId: PreschoolSectionId, value: unknown): unknown => {
   if (!isRecord(value)) return value;
-  if (sectionId !== "planning-outlook") return value;
+  if (sectionId === "centre-benchmark" || sectionId === "standby-wastage" || sectionId === "operating-behaviour") {
+    if (isRecord(value.worstSpike)) {
+      return roundPromptNumbers({
+        ...pick(value, ["centreCode", "name", "spikeCount"]),
+        worstSpike: pick(value.worstSpike, [
+          "localDate",
+          "localHour",
+          "usageKwh",
+          "impactKwh",
+          "variancePct",
+          "leadingCircuitName",
+          "leadingCircuitKwh",
+          "leadingCircuitSharePct",
+        ]),
+      });
+    }
+    return roundPromptNumbers(value);
+  }
   const plan = isRecord(value.plan) ? value.plan : {};
   const actual = isRecord(value.actual) ? value.actual : {};
   const forecast = isRecord(value.forecast) ? value.forecast : {};
   const tariff = isRecord(forecast.tariffAssumption) ? forecast.tariffAssumption : {};
   const portfolio = isRecord(forecast.portfolio) ? forecast.portfolio : {};
-  return {
+  return roundPromptNumbers({
     targetPeriod: value.targetPeriod,
     plan: {
       usageEstimate: plan.usageEstimate,
       costEstimate: plan.costEstimate,
-      limitations: plan.limitations,
     },
     actual: pick(actual, ["status", "usageKwh", "completeDayCount", "targetDayCount", "varianceKwh", "variancePct"]),
     forecast: {
@@ -220,11 +236,8 @@ const projectEvidenceValue = (sectionId: PreschoolSectionId, value: unknown): un
       tariffAssumption: pick(tariff, [
         "status",
         "beforeGstSgdPerKwh",
-        "sourceName",
-        "supplyClass",
         "appliesFrom",
         "appliesTo",
-        "beforeGst",
         "notBill",
       ]),
       portfolio: pick(portfolio, [
@@ -239,7 +252,14 @@ const projectEvidenceValue = (sectionId: PreschoolSectionId, value: unknown): un
         "outcome",
       ]),
     },
-  };
+  });
+};
+
+const roundPromptNumbers = (value: unknown): unknown => {
+  if (typeof value === "number" && Number.isFinite(value)) return Number(value.toFixed(4));
+  if (Array.isArray(value)) return value.map(roundPromptNumbers);
+  if (isRecord(value)) return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, roundPromptNumbers(item)]));
+  return value;
 };
 
 const pick = (value: Record<string, unknown>, keys: string[]): Record<string, unknown> => Object.fromEntries(

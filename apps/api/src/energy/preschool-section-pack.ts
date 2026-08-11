@@ -203,8 +203,8 @@ const planningEvidence = (snapshot: ProjectAnalysisSnapshot): PreschoolSectionPa
       plan: {
         usageEstimate: planning.plan.usageEstimate,
         costEstimate: planning.plan.costEstimate,
-        limitations: planning.plan.limitations,
       },
+      limitations: planning.plan.limitations,
       actual: planning.actual,
       forecast: planning.forecast ? {
         status: planning.forecast.status,

@@ -72,6 +72,7 @@ type CreateRunAgentAssemblyInput = {
   effectiveRunConfig: EffectiveRunConfig;
   emitter: AgUiEventEmitter;
   excludedToolNames?: readonly string[];
+  disableTools?: boolean;
   contextPackageRecorder?: ContextPackageRecorder;
   contextPackageExists(reference: ContextPackageRef): boolean;
   evidenceContextItems?: AgentContextItem[] | undefined;
@@ -186,6 +187,7 @@ export const createRunAgentAssembly = async (
     ...(Object.keys(mcpTools).length > 0 ? { mcpTools } : {}),
     emitter: input.emitter,
     ...(input.excludedToolNames?.length ? { excludedToolNames: input.excludedToolNames } : {}),
+    ...(input.disableTools ? { disableTools: true } : {}),
     ...(input.effectiveRunConfig.protocol ? { explicitProtocol: input.effectiveRunConfig.protocol } : {}),
     messages: input.messages,
     ...(input.modelContextProfile ? { modelContextProfile: input.modelContextProfile } : {}),

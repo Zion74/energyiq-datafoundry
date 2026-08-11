@@ -41,6 +41,7 @@ describe("assemblePreschoolSectionPacks", () => {
       ]),
     });
     expect(packs.find(({ sectionId }) => sectionId === "planning-outlook")).toMatchObject({
+      limitations: ["The estimate uses a simple weekly baseline."],
       evidence: [{
         value: {
           planDataSnapshotId: "snapshot-plan",

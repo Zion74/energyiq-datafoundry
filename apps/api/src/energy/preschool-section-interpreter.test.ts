@@ -316,6 +316,26 @@ describe("Preschool Section Interpreter", () => {
   it("sends a bounded prompt projection rather than repeated runtime bindings", async () => {
     const harness = createHarness();
     let capturedPrompt = "";
+    const sectionPacks = packs();
+    sectionPacks.find(({ sectionId }) => sectionId === "operating-behaviour")!.evidence[0]!.value = {
+      centreCode: "N",
+      name: "Centre N",
+      spikeCount: 2,
+      worstSpike: {
+        usageKwh: 45.3308123,
+        baselineKwh: 5.3667123,
+        leadingCircuitName: "Kitchen Plug Load",
+        leadingCircuitKwh: 43.711,
+      },
+    };
+    sectionPacks.find(({ sectionId }) => sectionId === "planning-outlook")!.evidence[0]!.value = {
+      plan: { usageEstimate: { projectedKwh: 26240.3992123 } },
+      actual: { usageKwh: 5296.63 },
+      forecast: {
+        tariffAssumption: { beforeGstSgdPerKwh: 0.2727, sourceName: "SP Group" },
+        portfolio: { pacePct: 88.79 },
+      },
+    };
     const interpreter = createPreschoolSectionInterpreter({
       metadataStore: harness.metadata,
       runBatch: async ({ prompt, runId, sessionId }) => {
@@ -330,13 +350,17 @@ describe("Preschool Section Interpreter", () => {
 
     await interpreter.execute({
       baseIdentity: harness.identity,
-      packs: packs(),
+      packs: sectionPacks,
       user: harness.user,
     });
     expect(capturedPrompt.length).toBeLessThan(12_000);
     expect(capturedPrompt).not.toContain('"binding"');
     expect(capturedPrompt).toContain("exactly 4 complete bounded Section Pack projections");
     expect(capturedPrompt.match(/evidence:centre-benchmark/gu)).toHaveLength(1);
+    expect(capturedPrompt).toContain('"usageKwh":45.3308');
+    expect(capturedPrompt).toContain('"leadingCircuitName":"Kitchen Plug Load"');
+    expect(capturedPrompt).not.toContain("baselineKwh");
+    expect(capturedPrompt).not.toContain("sourceName");
     harness.close();
   });
 

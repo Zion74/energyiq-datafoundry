@@ -32,6 +32,7 @@ describe("Overview AI server stage options", () => {
     (stage) => {
       expect(resolveOverviewAiStageRuntimeOptions(stage)).toEqual({
         analysisRequirementsMode: "omit",
+        disableTools: true,
         excludedToolNames: [
           "skill",
           "skill_search",
