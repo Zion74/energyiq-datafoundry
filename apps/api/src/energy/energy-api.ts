@@ -32,6 +32,7 @@ import {
 } from "@datafoundry/metadata";
 import { createHash, randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
+import { isDeepStrictEqual } from "node:util";
 
 import type { ConfigApiContext, ConfigApiResponse } from "../routes/types.js";
 import { AuthError } from "../auth/service.js";
@@ -49,6 +50,7 @@ import {
 } from "./energy-import-materializer.js";
 import { materializeEnergyProjectManifest } from "./energy-project-materialization.js";
 import {
+  createOverviewAiArtifactIdentity,
   queueCurrentProjectOverviewAiArtifact,
 } from "./overview-ai-artifact.js";
 import { EnergyAdminAccessService } from "./energy-admin-access.js";
@@ -70,6 +72,7 @@ import {
   isPreschoolSectionId,
   type PreschoolOverviewAiReadModel,
 } from "./preschool-overview-ai-contracts.js";
+import { composePreschoolOverviewAiReadModel } from "./preschool-overview-ai-read-model.js";
 import type { PreschoolOverviewAiRetryTarget } from "./preschool-overview-ai-page-workflow.js";
 
 const EXPLORER_ANALYSIS_CACHE_LIMIT = 100;
@@ -1431,7 +1434,30 @@ const parseRequestedSavedAnalysisAiArtifact = (
   userId: string,
 ): SavedAnalysisAiArtifact | undefined => {
   if (value === undefined) return undefined;
-  const artifact = parseSavedAnalysisAiArtifactInput(value, snapshot);
+  let artifact = parseSavedAnalysisAiArtifactInput(value, snapshot);
+  if (artifact.contract === "energyiq-saved-ai-result@2") {
+    const baseIdentity = createOverviewAiArtifactIdentity({
+      workspaceId: artifact.result.binding.workspaceId,
+      projectId: artifact.result.binding.projectId,
+      scopeId: artifact.result.binding.scopeId,
+      dataSnapshotId: artifact.result.binding.dataSnapshotId,
+      projectReleaseId: artifact.result.binding.projectReleaseId,
+      analysisPeriodFrom: artifact.result.binding.analysisPeriod.from,
+      analysisPeriodTo: artifact.result.binding.analysisPeriod.to,
+      rendererKey: snapshot.renderer.key,
+      rendererVersion: snapshot.renderer.version,
+      modelProfileId: artifact.result.binding.modelProfileId,
+      modelProfileRevision: artifact.result.binding.modelProfileRevision,
+    });
+    const canonical = composePreschoolOverviewAiReadModel({
+      metadataStore: context.metadataStore,
+      baseIdentity,
+    });
+    if (!canonical || !isDeepStrictEqual(canonical, artifact.result)) {
+      throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+    }
+    artifact = { ...artifact, result: canonical };
+  }
   if (artifact.contract === "energyiq-saved-ai-result@1"
     && snapshot.renderer.key === "preschool-overview"
     && !isPreschoolAcceptedSavedResult(artifact.result, snapshot)) {

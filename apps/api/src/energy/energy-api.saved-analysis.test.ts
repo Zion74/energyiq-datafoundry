@@ -14,7 +14,14 @@ import {
 } from "./energy-bootstrap.js";
 import { handleEnergyApiRequest } from "./energy-api.js";
 import { resolveEnergyPublishedMeterRoute } from "./energy-query-context.js";
+import {
+  createOverviewAiArtifactIdentity,
+  createPreschoolOverviewAiValueArtifactIdentity,
+} from "./overview-ai-artifact.js";
 import { materializePreschoolGoldenFixture } from "./preschool-golden.fixture.js";
+import { preschoolExecutiveSynthesisTargetId } from "./preschool-executive-synthesis.js";
+import { composePreschoolOverviewAiReadModel } from "./preschool-overview-ai-read-model.js";
+import { preschoolOverviewAiBindingFromIdentity } from "./preschool-overview-ai-contracts.js";
 
 describe("saved analysis decision-quality boundary", () => {
   afterEach(() => vi.unstubAllEnvs());
@@ -488,34 +495,121 @@ describe("saved analysis decision-quality boundary", () => {
         body: { success: false, error: { message: "ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID" } },
       });
       expect(metadata.energyIq.savedAnalyses.get(records[0]?.id ?? "").ai_result_json).toBeUndefined();
-      const attached = await handleEnergyApiRequest(
+      const forgedAttachment = await handleEnergyApiRequest(
         jsonPost({ aiArtifact: aiArtifactV2 }),
+        ["projects", project.id, "saved-analyses", records[0]?.id ?? "", "ai-result"],
+        context,
+      );
+      expect(forgedAttachment).toMatchObject({
+        status: 400,
+        body: { success: false, error: { message: "ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID" } },
+      });
+      expect(metadata.energyIq.savedAnalyses.get(records[0]?.id ?? "").ai_result_json).toBeUndefined();
+
+      const frozenSnapshotV2 = JSON.parse(records[0]?.snapshot_json ?? "null") as {
+        renderer: { key: string; version: string };
+      };
+      const baseIdentityV2 = createOverviewAiArtifactIdentity({
+        workspaceId: bindingV2.workspaceId,
+        projectId: bindingV2.projectId,
+        scopeId: bindingV2.scopeId,
+        dataSnapshotId: bindingV2.dataSnapshotId,
+        projectReleaseId: bindingV2.projectReleaseId,
+        analysisPeriodFrom: bindingV2.analysisPeriod.from,
+        analysisPeriodTo: bindingV2.analysisPeriod.to,
+        rendererKey: frozenSnapshotV2.renderer.key,
+        rendererVersion: frozenSnapshotV2.renderer.version,
+        modelProfileId: bindingV2.modelProfileId,
+        modelProfileRevision: bindingV2.modelProfileRevision,
+      });
+      const artifactStore = metadata.energyIq.overviewAiArtifacts;
+      const sectionIdentityV2 = createPreschoolOverviewAiValueArtifactIdentity({
+        baseIdentity: baseIdentityV2,
+        artifactKind: "section-interpretation",
+        targetId: "centre-benchmark",
+      });
+      const sectionArtifactV2 = artifactStore.queue({ identity: sectionIdentityV2, triggeredBy: "dev-user" });
+      artifactStore.claim({ identity: sectionIdentityV2, workerId: "saved-analysis-section-worker-v2", leaseMs: 60_000 });
+      artifactStore.complete({
+        identity: sectionIdentityV2,
+        workerId: "saved-analysis-section-worker-v2",
+        sessionId: "saved-analysis-ai-session-v2",
+        runId: "saved-analysis-ai-section-run-v2",
+        resultJson: JSON.stringify({
+          artifactKind: "section-interpretation",
+          status: "available",
+          providerProfileId: sectionIdentityV2.modelProfileId,
+          runId: "saved-analysis-ai-section-run-v2",
+          contract: { id: "preschool-section-interpretation", revision: "preschool-section-interpretation-v1" },
+          binding: preschoolOverviewAiBindingFromIdentity(sectionIdentityV2),
+          sectionId: "centre-benchmark",
+          summary: "Benchmark evidence supports a focused operating review.",
+          keyPoints: [
+            { kind: "finding", text: "Benchmark evidence deserves attention.", evidenceRefs: ["evidence:benchmark"] },
+            { kind: "next-check", text: "Review schedules before assigning a cause.", evidenceRefs: ["evidence:benchmark"] },
+          ],
+        }),
+      });
+      const executiveIdentityV2 = createPreschoolOverviewAiValueArtifactIdentity({
+        baseIdentity: baseIdentityV2,
+        artifactKind: "executive-synthesis",
+        targetId: preschoolExecutiveSynthesisTargetId([sectionArtifactV2.id]),
+      });
+      artifactStore.queue({ identity: executiveIdentityV2, triggeredBy: "dev-user" });
+      artifactStore.claim({ identity: executiveIdentityV2, workerId: "saved-analysis-executive-worker-v2", leaseMs: 60_000 });
+      artifactStore.complete({
+        identity: executiveIdentityV2,
+        workerId: "saved-analysis-executive-worker-v2",
+        sessionId: "saved-analysis-ai-session-v2",
+        runId: "saved-analysis-ai-executive-run-v2",
+        resultJson: JSON.stringify({
+          artifactKind: "executive-synthesis",
+          status: "available",
+          providerProfileId: executiveIdentityV2.modelProfileId,
+          runId: "saved-analysis-ai-executive-run-v2",
+          contract: { id: "preschool-executive-synthesis", revision: "preschool-executive-synthesis-v1" },
+          binding: preschoolOverviewAiBindingFromIdentity(executiveIdentityV2),
+          sourceSectionArtifactIds: [sectionArtifactV2.id],
+          keyFindings: [{
+            id: "executive-finding-v2",
+            takeaway: "Benchmark evidence supports a focused operating review.",
+            sectionIds: ["centre-benchmark"],
+            evidenceRefs: ["evidence:benchmark"],
+          }],
+        }),
+      });
+      const canonicalResultV2 = composePreschoolOverviewAiReadModel({
+        metadataStore: metadata,
+        baseIdentity: baseIdentityV2,
+      });
+      expect(canonicalResultV2).not.toBeNull();
+      const canonicalArtifactV2 = { ...aiArtifactV2, result: canonicalResultV2 };
+      const attached = await handleEnergyApiRequest(
+        jsonPost({ aiArtifact: canonicalArtifactV2 }),
         ["projects", project.id, "saved-analyses", records[0]?.id ?? "", "ai-result"],
         context,
       );
       expect(attached).toMatchObject({
         status: 200,
-        body: {
-          success: true,
-          data: {
-            id: records[0]?.id,
-            aiArtifact: {
-              projectReleaseId: publishedV2.template_revision_id,
-              contract: "energyiq-saved-ai-result@2",
-              result: {
-                artifactKind: "preschool-overview-ai-read-model",
-                executive: { result: { runId: "saved-analysis-ai-executive-run-v2" } },
-              },
-              runProvenance: {
-                modelProvider: "openai-compatible",
-                modelName: "test-model-v2",
-                requestFingerprint: "request-fingerprint-v2",
-                contextSha256: expect.stringMatching(/^[a-f0-9]{64}$/u),
-              },
-            },
-          },
-        },
+        body: { success: true, data: { aiArtifact: { result: canonicalResultV2 } } },
       });
+      const canonicalStoredAiResult = metadata.energyIq.savedAnalyses.get(records[0]?.id ?? "").ai_result_json;
+      expect(canonicalStoredAiResult).toContain(sectionArtifactV2.id);
+
+      const tamperedResultV2 = JSON.parse(JSON.stringify(canonicalResultV2)) as NonNullable<typeof canonicalResultV2>;
+      const tamperedSection = tamperedResultV2.sections["centre-benchmark"];
+      if (tamperedSection.status !== "available") throw new Error("canonical Section fixture missing");
+      tamperedSection.result.summary = "Browser-authored replacement summary.";
+      const tamperedAttachment = await handleEnergyApiRequest(
+        jsonPost({ aiArtifact: { ...canonicalArtifactV2, result: tamperedResultV2 } }),
+        ["projects", project.id, "saved-analyses", records[0]?.id ?? "", "ai-result"],
+        context,
+      );
+      expect(tamperedAttachment).toMatchObject({
+        status: 400,
+        body: { success: false, error: { message: "ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID" } },
+      });
+      expect(metadata.energyIq.savedAnalyses.get(records[0]?.id ?? "").ai_result_json).toBe(canonicalStoredAiResult);
       expect(metadata.energyIq.savedAnalyses.get(first?.id ?? "").ai_result_json).toBe(frozenAiResultJson);
       const latestAnalysis = JSON.parse(records[0]?.analysis_json ?? "null") as {
         context: Record<string, unknown>;

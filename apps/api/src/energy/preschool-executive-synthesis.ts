@@ -49,6 +49,7 @@ type AcceptedSection = {
 export const createPreschoolExecutiveSynthesizer = (input: {
   metadataStore: MetadataStore;
   runSynthesis: PreschoolExecutiveSynthesisRunner;
+  assertRuntimeIdentity?: (identity: EnergyIqOverviewAiArtifactIdentity) => void;
 }): PreschoolExecutiveSynthesizer => ({
   async execute({ baseIdentity, user, retry }) {
     const store = input.metadataStore.energyIq.overviewAiArtifacts;
@@ -71,6 +72,7 @@ export const createPreschoolExecutiveSynthesizer = (input: {
 
     try {
       if (accepted.length === 0) {
+        input.assertRuntimeIdentity?.(identity);
         return store.complete({
           identity,
           workerId,
@@ -97,6 +99,7 @@ export const createPreschoolExecutiveSynthesizer = (input: {
         identity,
         runId,
       });
+      input.assertRuntimeIdentity?.(identity);
       return store.complete({
         identity,
         workerId,

@@ -96,6 +96,38 @@ describe("Preschool Section Interpreter", () => {
     harness.close();
   });
 
+  it("persists empty as a successful result when a bounded Pack has no supported Evidence", async () => {
+    const harness = createHarness();
+    const sectionPacks = packs();
+    const planningPack = sectionPacks.find(({ sectionId }) => sectionId === "planning-outlook")!;
+    planningPack.evidence = [];
+    planningPack.missingEvidence = ["No compatible planning Evidence is available for this Snapshot."];
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: harness.metadata,
+      runBatch: async ({ runId, sessionId }) => ({
+        answer: JSON.stringify({
+          sections: PRESCHOOL_SECTION_IDS.map((sectionId) => sectionId === "planning-outlook"
+            ? { sectionId, status: "empty" }
+            : available(sectionId)),
+        }),
+        runId,
+        sessionId,
+      }),
+    });
+
+    const result = await interpreter.execute({
+      baseIdentity: harness.identity,
+      packs: sectionPacks,
+      user: harness.user,
+    });
+    expect(result["planning-outlook"].status).toBe("available");
+    expect(JSON.parse(result["planning-outlook"].result_json!)).toMatchObject({
+      status: "empty",
+      keyPoints: [],
+    });
+    harness.close();
+  });
+
   it("fails only a malformed item instead of rejecting the whole Provider envelope", async () => {
     const harness = createHarness();
     const interpreter = createPreschoolSectionInterpreter({
@@ -123,6 +155,104 @@ describe("Preschool Section Interpreter", () => {
     expect(result["centre-benchmark"].status).toBe("available");
     expect(result["standby-wastage"].status).toBe("available");
     expect(result["planning-outlook"].status).toBe("available");
+    harness.close();
+  });
+
+  it("rejects a number when the cited Evidence does not support the claimed unit", async () => {
+    const harness = createHarness();
+    const sectionPacks = packs();
+    const standbyPack = sectionPacks.find(({ sectionId }) => sectionId === "standby-wastage")!;
+    standbyPack.evidence = [{
+      id: "evidence:standby-wastage",
+      label: "Verified standby spike count",
+      value: { spikeCount: 2 },
+      unit: "count",
+      entityRefs: [],
+      evidenceRefs: ["evidence:standby-wastage"],
+    }];
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: harness.metadata,
+      runBatch: async ({ runId, sessionId }) => ({
+        answer: JSON.stringify({
+          sections: PRESCHOOL_SECTION_IDS.map((sectionId) => sectionId === "standby-wastage"
+            ? {
+                ...available(sectionId),
+                keyPoints: [
+                  { kind: "finding", text: "SGD 2 should be reviewed.", evidenceRefs: ["evidence:standby-wastage"] },
+                  { kind: "next-check", text: "Confirm the operating context.", evidenceRefs: ["evidence:standby-wastage"] },
+                ],
+              }
+            : available(sectionId)),
+        }),
+        runId,
+        sessionId,
+      }),
+    });
+
+    const result = await interpreter.execute({
+      baseIdentity: harness.identity,
+      packs: sectionPacks,
+      user: harness.user,
+    });
+    expect(result["standby-wastage"]).toMatchObject({
+      status: "failed",
+      error_code: "PRESCHOOL_SECTION_INTERPRETATION_FACT_UNSUPPORTED",
+    });
+    expect(result["centre-benchmark"].status).toBe("available");
+    harness.close();
+  });
+
+  it("does not borrow a number from an uncited Evidence item in the same Section Pack", async () => {
+    const harness = createHarness();
+    const sectionPacks = packs();
+    const standbyPack = sectionPacks.find(({ sectionId }) => sectionId === "standby-wastage")!;
+    standbyPack.evidence = [
+      {
+        id: "evidence:standby-spikes",
+        label: "Verified standby spike count",
+        value: { spikeCount: 2 },
+        unit: "count",
+        entityRefs: [],
+        evidenceRefs: ["evidence:standby-spikes"],
+      },
+      {
+        id: "evidence:standby-duration",
+        label: "Verified standby duration",
+        value: { durationMinutes: 9 },
+        unit: "minutes",
+        entityRefs: [],
+        evidenceRefs: ["evidence:standby-duration"],
+      },
+    ];
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: harness.metadata,
+      runBatch: async ({ runId, sessionId }) => ({
+        answer: JSON.stringify({
+          sections: PRESCHOOL_SECTION_IDS.map((sectionId) => sectionId === "standby-wastage"
+            ? {
+                ...available(sectionId),
+                keyPoints: [
+                  { kind: "finding", text: "The 9 recorded spikes deserve attention.", evidenceRefs: ["evidence:standby-spikes"] },
+                  { kind: "next-check", text: "Confirm the operating context.", evidenceRefs: ["evidence:standby-spikes"] },
+                ],
+              }
+            : available(sectionId)),
+        }),
+        runId,
+        sessionId,
+      }),
+    });
+
+    const result = await interpreter.execute({
+      baseIdentity: harness.identity,
+      packs: sectionPacks,
+      user: harness.user,
+    });
+    expect(result["standby-wastage"]).toMatchObject({
+      status: "failed",
+      error_code: "PRESCHOOL_SECTION_INTERPRETATION_FACT_UNSUPPORTED",
+    });
+    expect(result["centre-benchmark"].status).toBe("available");
     harness.close();
   });
 
@@ -204,6 +334,43 @@ describe("Preschool Section Interpreter", () => {
       user: harness.user,
     })).rejects.toThrow("PRESCHOOL_SECTION_PACK_IDENTITY_MISMATCH");
     expect(providerCalled).toBe(false);
+    harness.close();
+  });
+
+  it("does not complete old-identity Artifacts when the model binding changes during the Provider run", async () => {
+    const harness = createHarness();
+    let runtimeRevision = 1;
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: harness.metadata,
+      assertRuntimeIdentity: (identity) => {
+        if (identity.modelProfileRevision !== runtimeRevision) {
+          throw new Error("OVERVIEW_AI_MODEL_PROFILE_REVISION_MISMATCH");
+        }
+      },
+      runBatch: async ({ runId, sessionId }) => {
+        runtimeRevision = 2;
+        return {
+          answer: JSON.stringify({ sections: PRESCHOOL_SECTION_IDS.map((sectionId) => available(sectionId)) }),
+          runId,
+          sessionId,
+        };
+      },
+    });
+
+    const result = await interpreter.execute({
+      baseIdentity: harness.identity,
+      packs: packs(),
+      user: harness.user,
+    });
+    expect(PRESCHOOL_SECTION_IDS.map((sectionId) => result[sectionId])).toEqual(
+      PRESCHOOL_SECTION_IDS.map(() => expect.objectContaining({
+        status: "failed",
+        error_code: "OVERVIEW_AI_MODEL_PROFILE_REVISION_MISMATCH",
+      })),
+    );
+    expect(PRESCHOOL_SECTION_IDS.map((sectionId) => result[sectionId].result_json)).toEqual([
+      undefined, undefined, undefined, undefined,
+    ]);
     harness.close();
   });
 });

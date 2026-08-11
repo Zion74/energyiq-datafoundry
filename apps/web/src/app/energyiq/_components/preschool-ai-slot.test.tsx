@@ -184,6 +184,83 @@ describe("PreschoolAiSlot", () => {
     expect(retryRun).toHaveBeenCalledWith(expect.any(Object), expect.any(Function), "standby-wastage");
   });
 
+  it("updates Executive and sibling slots immediately from one targeted Section retry", async () => {
+    const initial = sectionedResult();
+    const updated = JSON.parse(JSON.stringify(initial)) as PreschoolOverviewAiReadModelDto;
+    const benchmarkSection = initial.sections["centre-benchmark"];
+    if (benchmarkSection.status !== "available") throw new Error("fixture missing");
+    updated.sections["standby-wastage"] = {
+      status: "available",
+      artifactId: "section-standby-retried",
+      result: {
+        ...benchmarkSection.result,
+        sectionId: "standby-wastage",
+        runId: "run-standby-retried",
+        summary: "Standby evidence is now available.",
+      },
+    };
+    updated.executive = {
+      status: "available",
+      artifactId: "executive-retried",
+      result: {
+        artifactKind: "executive-synthesis",
+        status: "available",
+        providerProfileId: initial.binding.modelProfileId,
+        runId: "run-executive-retried",
+        binding: initial.binding,
+        sourceSectionArtifactIds: ["section-benchmark", "section-standby-retried"],
+        keyFindings: [{
+          id: "executive-retried-finding",
+          takeaway: "The refreshed Executive includes standby evidence.",
+          sectionIds: ["standby-wastage"],
+          evidenceRefs: ["evidence:standby-wastage"],
+        }],
+      },
+    };
+    const retryRun = vi.fn().mockResolvedValue(updated);
+    const onCompletedResult = vi.fn();
+
+    function SharedSlots() {
+      const [liveResult, setLiveResult] = React.useState<PreschoolAiRunResult>();
+      return <>
+        <PreschoolAiSlot
+          snapshot={preschoolGoldenSnapshot()}
+          sectionId="page-synthesis"
+          liveResult={liveResult}
+          onResult={setLiveResult}
+          onCompletedResult={onCompletedResult}
+          startRun={vi.fn().mockResolvedValue(initial)}
+        />
+        <PreschoolAiSlot
+          snapshot={preschoolGoldenSnapshot()}
+          sectionId="standby-wastage"
+          liveResult={liveResult}
+          onResult={setLiveResult}
+          startRun={vi.fn().mockResolvedValue(initial)}
+          retryRun={retryRun}
+        />
+      </>;
+    }
+
+    await act(async () => root.render(<SharedSlots />));
+    await act(async () => undefined);
+    onCompletedResult.mockClear();
+    const retryButtons = [...container.querySelectorAll("button")]
+      .filter((button) => button.textContent?.includes("Retry AI analysis"));
+    expect(retryButtons).toHaveLength(2);
+    await act(async () => {
+      retryButtons[1]!.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("The refreshed Executive includes standby evidence.");
+    expect(container.textContent).toContain("Standby evidence is now available.");
+    expect(retryRun).toHaveBeenCalledTimes(1);
+    expect(onCompletedResult).toHaveBeenCalledOnce();
+    expect(onCompletedResult).toHaveBeenCalledWith(updated);
+  });
+
   it("opens compact Evidence and carries one Finding into Ask AI deeper", async () => {
     await renderSlot(vi.fn().mockResolvedValue(availableResult()));
     await act(async () => undefined);
@@ -286,6 +363,41 @@ describe("PreschoolAiSlot", () => {
     expect(container.textContent).toContain("This Section interpretation is unavailable");
     expect(container.querySelector("[data-ai-section='centre-benchmark']")).not.toBeNull();
     expect(container.querySelector("[data-ai-section='standby-wastage']")).not.toBeNull();
+  });
+
+  it("renders canonical separators in Executive Evidence and Saved Analysis provenance", async () => {
+    const result = sectionedResult();
+    result.executive = {
+      status: "available",
+      artifactId: "executive",
+      result: {
+        artifactKind: "executive-synthesis",
+        status: "available",
+        providerProfileId: result.binding.modelProfileId,
+        runId: "run-executive",
+        binding: result.binding,
+        sourceSectionArtifactIds: ["section-benchmark"],
+        keyFindings: [{
+          id: "executive-finding",
+          takeaway: "Benchmark evidence supports a focused review.",
+          sectionIds: ["centre-benchmark"],
+          evidenceRefs: ["evidence:benchmark"],
+        }],
+      },
+    };
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        sectionId="page-synthesis"
+        mode="saved"
+        savedResult={result}
+        startRun={vi.fn()}
+      />,
+    ));
+
+    expect(container.textContent).toContain("centre-benchmark · evidence:benchmark");
+    expect(container.textContent).toContain("Saved AI result · Run run-executive");
+    expect(container.textContent).not.toContain("路");
   });
 
   async function renderSlot(

@@ -44,6 +44,7 @@ export type PreschoolSectionInterpreter = {
 export const createPreschoolSectionInterpreter = (input: {
   metadataStore: MetadataStore;
   runBatch: PreschoolSectionInterpreterBatchRunner;
+  assertRuntimeIdentity?: (identity: EnergyIqOverviewAiArtifactIdentity) => void;
 }): PreschoolSectionInterpreter => ({
   async execute({ baseIdentity, packs, user, retryTargets = [] }) {
     const packBySection = new Map(packs.map((pack) => [pack.sectionId, pack]));
@@ -81,14 +82,6 @@ export const createPreschoolSectionInterpreter = (input: {
       const claim = store.claim({ identity: identities[sectionId], workerId, leaseMs: LEASE_MS });
       current[sectionId] = claim.artifact;
       if (!claim.claimed) continue;
-      if (packBySection.get(sectionId)!.evidence.length === 0) {
-        current[sectionId] = store.fail({
-          identity: identities[sectionId],
-          workerId,
-          errorCode: "PRESCHOOL_SECTION_PACK_EVIDENCE_UNAVAILABLE",
-        });
-        continue;
-      }
       claimed.push({ sectionId, identity: identities[sectionId], workerId });
     }
     if (claimed.length === 0) return current;
@@ -114,6 +107,7 @@ export const createPreschoolSectionInterpreter = (input: {
         const candidate = parsed.get(unit.sectionId);
         try {
           const result = materializeSectionResult({ candidate, pack, identity: unit.identity, runId });
+          input.assertRuntimeIdentity?.(unit.identity);
           current[unit.sectionId] = store.complete({
             identity: unit.identity,
             workerId: unit.workerId,
@@ -376,12 +370,23 @@ const materializeSectionResult = (input: {
       || point.evidenceRefs.some((reference) => !allowedEvidenceRefs.has(reference))) {
       throw new Error("PRESCHOOL_SECTION_INTERPRETATION_EVIDENCE_UNSUPPORTED");
     }
+    const citedEvidence = input.pack.evidence.filter((evidence) =>
+      point.evidenceRefs.some((reference) => evidence.id === reference || evidence.evidenceRefs.includes(reference)));
+    const pointNarrative = point.label ? [point.label, point.text] : [point.text];
+    if (citedEvidence.length === 0
+      || pointNarrative.some((value) => hasUnsupportedNumber(value, citedEvidence))
+      || pointNarrative.some((value) => hasUnsupportedUnit(value, citedEvidence))
+      || pointNarrative.some((value) => hasUnsupportedCentre(value, citedEvidence))) {
+      throw new Error("PRESCHOOL_SECTION_INTERPRETATION_FACT_UNSUPPORTED");
+    }
   }
-  const narrative = [summary, ...keyPoints.flatMap(({ label, text }) => label ? [label, text] : [text]), limitation]
+  const narrative = [summary, limitation]
     .filter((value): value is string => Boolean(value));
   if (narrative.some((value) => BANNED_CUSTOMER_TEXT.test(value))
-    || narrative.some((value) => hasUnsupportedNumber(value, input.pack))
-    || narrative.some((value) => hasUnsupportedCentre(value, input.pack))) {
+    || keyPoints.some(({ label, text }) => [label, text].some((value) => Boolean(value) && BANNED_CUSTOMER_TEXT.test(value!)))
+    || narrative.some((value) => hasUnsupportedNumber(value, input.pack.evidence))
+    || narrative.some((value) => hasUnsupportedUnit(value, input.pack.evidence))
+    || narrative.some((value) => hasUnsupportedCentre(value, input.pack.evidence))) {
     throw new Error("PRESCHOOL_SECTION_INTERPRETATION_FACT_UNSUPPORTED");
   }
   return {
@@ -421,8 +426,8 @@ const parseKeyPoints = (value: unknown): PreschoolSectionKeyPoint[] | null => {
   return result;
 };
 
-const hasUnsupportedNumber = (text: string, pack: PreschoolSectionPack): boolean => {
-  const supported = collectNumbers(pack.evidence.map(({ value }) => value));
+const hasUnsupportedNumber = (text: string, evidence: PreschoolSectionPack["evidence"]): boolean => {
+  const supported = collectNumbers(evidence.map(({ value }) => value));
   const tokens = [...text.matchAll(/(?<![A-Za-z0-9_-])-?\d+(?:\.\d+)?/g)];
   return tokens.some((match) => {
     const raw = match[0];
@@ -434,6 +439,17 @@ const hasUnsupportedNumber = (text: string, pack: PreschoolSectionPack): boolean
   });
 };
 
+const hasUnsupportedUnit = (text: string, evidence: PreschoolSectionPack["evidence"]): boolean => {
+  const supportedUnits = evidence.flatMap(({ unit }) => unit ? [unit.toLowerCase()] : []);
+  const claimedUnits = [
+    /(?:\bSGD\b|S\$)/iu.test(text) ? "sgd" : null,
+    /\bkWh\b/iu.test(text) ? "kwh" : null,
+    /\bkW\b/iu.test(text) ? "kw" : null,
+    /(?:%|\bpercent(?:age)?\b)/iu.test(text) ? "%" : null,
+  ].filter((unit): unit is string => unit !== null);
+  return claimedUnits.some((claimed) => !supportedUnits.some((unit) => unit.includes(claimed)));
+};
+
 const collectNumbers = (value: unknown): number[] => {
   if (typeof value === "number" && Number.isFinite(value)) return [value];
   if (Array.isArray(value)) return value.flatMap(collectNumbers);
@@ -441,8 +457,8 @@ const collectNumbers = (value: unknown): number[] => {
   return [];
 };
 
-const hasUnsupportedCentre = (text: string, pack: PreschoolSectionPack): boolean => {
-  const supportedText = JSON.stringify(pack.evidence.map(({ value, entityRefs }) => ({ value, entityRefs }))).toLowerCase();
+const hasUnsupportedCentre = (text: string, evidence: PreschoolSectionPack["evidence"]): boolean => {
+  const supportedText = JSON.stringify(evidence.map(({ value, entityRefs }) => ({ value, entityRefs }))).toLowerCase();
   const centres = [...text.matchAll(/\bCentre\s+[A-Z0-9][A-Z0-9-]*\b/gi)].map(([value]) => value.toLowerCase());
   return centres.some((centre) => !supportedText.includes(centre));
 };

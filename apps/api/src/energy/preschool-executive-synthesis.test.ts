@@ -172,6 +172,43 @@ describe("Preschool Executive Synthesis", () => {
     expect(providerCalled).toBe(false);
     harness.close();
   });
+
+  it("does not complete an old-identity Executive when the model binding changes during synthesis", async () => {
+    const harness = createHarness();
+    completeSection(harness, "centre-benchmark");
+    let runtimeRevision = 1;
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      assertRuntimeIdentity: (identity) => {
+        if (identity.modelProfileRevision !== runtimeRevision) {
+          throw new Error("OVERVIEW_AI_MODEL_PROFILE_REVISION_MISMATCH");
+        }
+      },
+      runSynthesis: async (input) => {
+        runtimeRevision = 2;
+        return {
+          answer: JSON.stringify({
+            status: "available",
+            keyFindings: [{
+              takeaway: "Accepted Section evidence supports a focused review.",
+              sectionIds: ["centre-benchmark"],
+              evidenceRefs: ["evidence:centre-benchmark"],
+            }],
+          }),
+          runId: input.runId,
+          sessionId: input.sessionId,
+        };
+      },
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    expect(artifact).toMatchObject({
+      status: "failed",
+      error_code: "OVERVIEW_AI_MODEL_PROFILE_REVISION_MISMATCH",
+    });
+    expect(artifact.result_json).toBeUndefined();
+    harness.close();
+  });
 });
 
 const completeSection = (

@@ -77,10 +77,12 @@ export const createPreschoolOverviewAiPageWorkflow = (input: {
   const interpreter = createPreschoolSectionInterpreter({
     metadataStore: input.metadataStore,
     runBatch: input.runSectionBatch,
+    assertRuntimeIdentity: (identity) => requireModelRuntimeIdentity(input.metadataStore, identity),
   });
   const synthesizer = createPreschoolExecutiveSynthesizer({
     metadataStore: input.metadataStore,
     runSynthesis: input.runExecutiveSynthesis,
+    assertRuntimeIdentity: (identity) => requireModelRuntimeIdentity(input.metadataStore, identity),
   });
 
   return {

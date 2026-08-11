@@ -35,6 +35,7 @@ export function PreschoolAiSlot({
   aiAnalystHref,
   mode = "live",
   savedResult,
+  liveResult,
   onResult,
   onCompletedResult,
   startRun = getOrStartPreschoolAiRun,
@@ -45,6 +46,7 @@ export function PreschoolAiSlot({
   aiAnalystHref?: string;
   mode?: "live" | "saved";
   savedResult?: Extract<PreschoolAiRunResult, { status: "available" }>;
+  liveResult?: PreschoolAiRunResult;
   onResult?: (result: PreschoolAiRunResult) => void;
   onCompletedResult?: (result: Extract<PreschoolAiRunResult, { status: "available" }>) => void;
   startRun?: (input: PreschoolAiRunInput, onProgress?: ProgressCallback) => Promise<PreschoolAiRunResult>;
@@ -82,9 +84,6 @@ export function PreschoolAiSlot({
       .then((result) => {
         setSettled({ identityKey, result });
         onResultRef.current?.(result);
-        if (result.status === "available" && !isPendingPreschoolSectionedReadModel(result)) {
-          onCompletedResultRef.current?.(result);
-        }
       })
       .catch(() => {
         const result = { status: "unavailable", reason: "AI analysis is temporarily unavailable." } as const;
@@ -106,9 +105,6 @@ export function PreschoolAiSlot({
       if (active) {
         setSettled({ identityKey, result });
         onResultRef.current?.(result);
-        if (result.status === "available" && !isPendingPreschoolSectionedReadModel(result)) {
-          onCompletedResultRef.current?.(result);
-        }
       }
     }).catch(() => {
       if (active) {
@@ -119,6 +115,15 @@ export function PreschoolAiSlot({
     });
     return () => { active = false; };
   }, [input?.identityKey, mode]);
+
+  const completedResult = mode === "live"
+    ? liveResult ?? (input && settled?.identityKey === input.identityKey ? settled.result : undefined)
+    : undefined;
+  useEffect(() => {
+    if (completedResult?.status === "available" && !isPendingPreschoolSectionedReadModel(completedResult)) {
+      onCompletedResultRef.current?.(completedResult);
+    }
+  }, [completedResult]);
 
   if (mode === "saved" && !savedResult) {
     if (sectionId !== "page-synthesis") return null;
@@ -134,9 +139,9 @@ export function PreschoolAiSlot({
     : null;
   const displayedResult = mode === "saved"
     ? savedResult
-    : settled?.identityKey === input.identityKey
+    : liveResult ?? (settled?.identityKey === input.identityKey
       ? settled.result
-      : null;
+      : null);
   if (!displayedResult) {
     if (sectionId !== "page-synthesis") return null;
     const stage = progress?.identityKey === input.identityKey ? progress.stage : "queued";
@@ -280,7 +285,7 @@ function ExecutiveUnit({
           <details className="mt-2">
             <summary className="cursor-pointer text-[10px] font-semibold text-muted">Source Sections and Evidence</summary>
             <p className="mt-1 break-words font-mono text-[10px] leading-4 text-muted-light">
-              {finding.sectionIds.join(" / ")} 路 {finding.evidenceRefs.join(" / ")}
+              {finding.sectionIds.join(" / ")} · {finding.evidenceRefs.join(" / ")}
             </p>
           </details>
         </li>
@@ -361,7 +366,7 @@ function SavedRunMarker<T>({
   const result = unit.result as { runId?: string };
   return (
     <p className="mt-3 text-[10px] font-medium text-muted" data-saved-ai-result="true">
-      Saved AI result{result.runId ? ` 路 Run ${result.runId}` : ""}
+      Saved AI result{result.runId ? ` · Run ${result.runId}` : ""}
     </p>
   );
 }

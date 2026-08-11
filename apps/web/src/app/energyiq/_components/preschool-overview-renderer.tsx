@@ -75,7 +75,10 @@ export function PreschoolOverviewRenderer({
   standbyInterpretation?: PreschoolStandbyInterpretation;
   operatingInterpretation?: PreschoolOperatingInterpretation;
 }) {
-  const [liveAiResult, setLiveAiResult] = React.useState<PreschoolAiRunResult | undefined>();
+  const [liveAiState, setLiveAiState] = React.useState<{
+    snapshotIdentity: string;
+    result: PreschoolAiRunResult;
+  }>();
   const readySnapshotIdentity = state.status === "ready"
     ? [
         state.snapshot.dataSnapshot.id,
@@ -84,7 +87,12 @@ export function PreschoolOverviewRenderer({
         state.snapshot.context.primaryPeriod.endExclusive,
       ].join("|")
     : state.status;
-  React.useEffect(() => setLiveAiResult(undefined), [readySnapshotIdentity]);
+  const liveAiResult = liveAiState?.snapshotIdentity === readySnapshotIdentity
+    ? liveAiState.result
+    : undefined;
+  const acceptLiveAiResult = React.useCallback((result: PreschoolAiRunResult) => {
+    setLiveAiState({ snapshotIdentity: readySnapshotIdentity, result });
+  }, [readySnapshotIdentity]);
 
   if (state.status !== "ready") {
     const meta = {
@@ -130,6 +138,9 @@ export function PreschoolOverviewRenderer({
   const coverage = buildPreschoolOverviewCoverage(state.snapshot);
   const sectionAiResult = aiSlotMode === "saved" ? savedAiResult : liveAiResult;
   const sectionedAiResult = isSectionedPreschoolAiResult(sectionAiResult);
+  const aiSlotSharedProps = aiSlotMode === "saved"
+    ? (savedAiResult ? { savedResult: savedAiResult } : {})
+    : { liveResult: liveAiResult, onResult: acceptLiveAiResult };
   const adaptedBenchmarkInterpretation = sectionedAiResult ? undefined : adaptPreschoolAiArtifactToSectionInterpretation({
     candidate: sectionAiResult,
     expected: coverage?.binding ?? null,
@@ -302,8 +313,7 @@ export function PreschoolOverviewRenderer({
             snapshot={state.snapshot}
             sectionId="page-synthesis"
             mode={aiSlotMode}
-            {...(savedAiResult ? { savedResult: savedAiResult } : {})}
-            onResult={setLiveAiResult}
+            {...aiSlotSharedProps}
             {...(onAiArtifactChange ? {
               onCompletedResult: (result: Extract<import("./preschool-ai-run").PreschoolAiRunResult, { status: "available" }>) =>
                 onAiArtifactChange(toSavedPreschoolAiArtifact(state.snapshot, result)),
@@ -314,7 +324,7 @@ export function PreschoolOverviewRenderer({
             snapshot={state.snapshot}
             sectionId="overall-summary"
             mode={aiSlotMode}
-            {...(savedAiResult ? { savedResult: savedAiResult } : {})}
+            {...aiSlotSharedProps}
             {...(aiAnalystHref ? { aiAnalystHref } : {})}
           />
         </div>
@@ -337,7 +347,7 @@ export function PreschoolOverviewRenderer({
           snapshot={state.snapshot}
           sectionId="centre-benchmark"
           mode={aiSlotMode}
-          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
+          {...aiSlotSharedProps}
           {...(aiAnalystHref ? { aiAnalystHref } : {})}
         />
         {view.benchmark.status === "provisional" ? (
@@ -430,7 +440,7 @@ export function PreschoolOverviewRenderer({
           snapshot={state.snapshot}
           sectionId="standby-wastage"
           mode={aiSlotMode}
-          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
+          {...aiSlotSharedProps}
           {...(aiAnalystHref ? { aiAnalystHref } : {})}
         />
         {view.operational.status === "available" ? (
@@ -492,7 +502,7 @@ export function PreschoolOverviewRenderer({
           snapshot={state.snapshot}
           sectionId="operating-behaviour"
           mode={aiSlotMode}
-          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
+          {...aiSlotSharedProps}
           {...(aiAnalystHref ? { aiAnalystHref } : {})}
         />
         {view.operational.status === "available" ? (
@@ -549,7 +559,7 @@ export function PreschoolOverviewRenderer({
           snapshot={state.snapshot}
           sectionId="planning-outlook"
           mode={aiSlotMode}
-          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
+          {...aiSlotSharedProps}
           {...(aiAnalystHref ? { aiAnalystHref } : {})}
         />
       </section>
