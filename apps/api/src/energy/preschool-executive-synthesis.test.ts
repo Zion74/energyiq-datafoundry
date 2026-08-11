@@ -93,6 +93,30 @@ describe("Preschool Executive Synthesis", () => {
     harness.close();
   });
 
+  it("allows ordinary management prose containing the word from", async () => {
+    const harness = createHarness();
+    completeSection(harness, "standby-wastage", "Closed-hour usage stands out against the normal pattern.");
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      runSynthesis: async (input) => ({
+        answer: JSON.stringify({
+          status: "available",
+          keyFindings: [{
+            takeaway: "Closed-hour usage stands out from the normal pattern and deserves review.",
+            sectionIds: ["standby-wastage"],
+            evidenceRefs: ["evidence:standby-wastage"],
+          }],
+        }),
+        runId: input.runId,
+        sessionId: input.sessionId,
+      }),
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    expect(artifact.status).toBe("available");
+    harness.close();
+  });
+
   it("keeps accepted Sections available when the Synthesis Provider fails", async () => {
     const harness = createHarness();
     const section = completeSection(harness, "centre-benchmark", "The benchmark supports a focused review.");

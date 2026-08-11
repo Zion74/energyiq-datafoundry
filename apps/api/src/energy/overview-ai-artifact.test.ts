@@ -104,7 +104,7 @@ describe("createOverviewAiArtifactIdentity", () => {
       artifactKind: "section-interpretation",
       targetId: "centre-benchmark",
       outputContractRevision: "preschool-section-interpretation-v1",
-      validatorRevision: "preschool-section-interpreter-validator-v3",
+      validatorRevision: "preschool-section-interpreter-validator-v4",
       workflowRevision: "preschool-section-interpreter-v5",
       investigatorPromptRevision: "preschool-section-interpreter-prompt-v2",
     });
@@ -113,6 +113,7 @@ describe("createOverviewAiArtifactIdentity", () => {
       artifactKind: "executive-synthesis",
       targetId: "sections:none",
       outputContractRevision: "preschool-executive-synthesis-v1",
+      validatorRevision: "preschool-executive-synthesis-validator-v2",
       workflowRevision: "preschool-executive-synthesis-v5",
     });
     expect(() => createPreschoolOverviewAiValueArtifactIdentity({

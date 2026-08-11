@@ -22,7 +22,8 @@ import {
 
 const LEASE_MS = 3 * 60 * 1_000;
 const MAX_PROMPT_CHARS = 24_000;
-const BANNED_CUSTOMER_TEXT = /\b(?:parent_node_id|dataSnapshotId|projectReleaseId|SELECT|FROM|JOIN|SQL)\b/i;
+const BANNED_INTERNAL_TEXT = /\b(?:parent_node_id|dataSnapshotId|projectReleaseId|SQL)\b/i;
+const SQL_STATEMENT = /\bSELECT\b[\s\S]{0,500}\b(?:FROM|JOIN)\b/i;
 
 export type PreschoolExecutiveSynthesisRunner = (input: {
   prompt: string;
@@ -222,7 +223,7 @@ const materializeExecutiveResult = (input: {
     const evidenceRefs = stringArray(candidate.evidenceRefs);
     if (!takeaway || !sectionIds || sectionIds.length === 0 || !evidenceRefs || evidenceRefs.length === 0
       || sectionIds.length !== (candidate.sectionIds as unknown[]).length
-      || BANNED_CUSTOMER_TEXT.test(takeaway)
+      || hasBannedCustomerText(takeaway)
       || hasUnsupportedNumber(takeaway, sourceNumbers)) {
       throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_FACT_UNSUPPORTED");
     }
@@ -284,6 +285,9 @@ const hasUnsupportedNumber = (text: string, supported: number[]): boolean =>
     return !supported.some((candidate) => Math.abs(candidate - value) < tolerance
       || Math.abs(Number(candidate.toFixed(precision)) - value) < tolerance);
   });
+
+const hasBannedCustomerText = (text: string): boolean =>
+  BANNED_INTERNAL_TEXT.test(text) || SQL_STATEMENT.test(text);
 
 const stripJsonFence = (value: string): string => value.trim()
   .replace(/^```(?:json)?\s*/i, "")

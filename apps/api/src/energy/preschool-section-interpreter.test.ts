@@ -128,6 +128,33 @@ describe("Preschool Section Interpreter", () => {
     harness.close();
   });
 
+  it("allows ordinary Section prose containing the word from", async () => {
+    const harness = createHarness();
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: harness.metadata,
+      runBatch: async ({ runId, sessionId }) => ({
+        answer: JSON.stringify({
+          sections: PRESCHOOL_SECTION_IDS.map((sectionId) => ({
+            ...available(sectionId),
+            summary: "This pattern differs from typical peers and deserves review.",
+          })),
+        }),
+        runId,
+        sessionId,
+      }),
+    });
+
+    const result = await interpreter.execute({
+      baseIdentity: harness.identity,
+      packs: packs(),
+      user: harness.user,
+    });
+    expect(PRESCHOOL_SECTION_IDS.map((sectionId) => result[sectionId].status)).toEqual([
+      "available", "available", "available", "available",
+    ]);
+    harness.close();
+  });
+
   it("fails only a malformed item instead of rejecting the whole Provider envelope", async () => {
     const harness = createHarness();
     const interpreter = createPreschoolSectionInterpreter({

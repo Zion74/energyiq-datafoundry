@@ -21,7 +21,8 @@ import {
 
 const LEASE_MS = 4 * 60 * 1_000;
 const MAX_BATCH_PROMPT_CHARS = 12_000;
-const BANNED_CUSTOMER_TEXT = /\b(?:parent_node_id|dataSnapshotId|projectReleaseId|SELECT|FROM|JOIN|SQL)\b/i;
+const BANNED_INTERNAL_TEXT = /\b(?:parent_node_id|dataSnapshotId|projectReleaseId|SQL)\b/i;
+const SQL_STATEMENT = /\bSELECT\b[\s\S]{0,500}\b(?:FROM|JOIN)\b/i;
 
 export type PreschoolSectionInterpreterBatchRunner = (input: {
   prompt: string;
@@ -382,8 +383,8 @@ const materializeSectionResult = (input: {
   }
   const narrative = [summary, limitation]
     .filter((value): value is string => Boolean(value));
-  if (narrative.some((value) => BANNED_CUSTOMER_TEXT.test(value))
-    || keyPoints.some(({ label, text }) => [label, text].some((value) => Boolean(value) && BANNED_CUSTOMER_TEXT.test(value!)))
+  if (narrative.some(hasBannedCustomerText)
+    || keyPoints.some(({ label, text }) => [label, text].some((value) => Boolean(value) && hasBannedCustomerText(value!)))
     || narrative.some((value) => hasUnsupportedNumber(value, input.pack.evidence))
     || narrative.some((value) => hasUnsupportedUnit(value, input.pack.evidence))
     || narrative.some((value) => hasUnsupportedCentre(value, input.pack.evidence))) {
@@ -462,6 +463,9 @@ const hasUnsupportedCentre = (text: string, evidence: PreschoolSectionPack["evid
   const centres = [...text.matchAll(/\bCentre\s+[A-Z0-9][A-Z0-9-]*\b/gi)].map(([value]) => value.toLowerCase());
   return centres.some((centre) => !supportedText.includes(centre));
 };
+
+const hasBannedCustomerText = (text: string): boolean =>
+  BANNED_INTERNAL_TEXT.test(text) || SQL_STATEMENT.test(text);
 
 const requirePackBinding = (
   pack: PreschoolSectionPack,
