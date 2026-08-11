@@ -31,6 +31,12 @@ describe("assemblePreschoolSectionPacks", () => {
     expect(packs.find(({ sectionId }) => sectionId === "operating-behaviour")).toMatchObject({
       evidence: expect.arrayContaining([
         expect.objectContaining({
+          value: expect.objectContaining({
+            operatingHoursKwh: 800,
+            operatingHoursSharePct: 80,
+          }),
+        }),
+        expect.objectContaining({
           id: "preschool:snapshot-current:section-4-operating:centre:n",
           claimRelations: [{ subject: "Centre N", predicate: "leading-circuit", object: "Kitchen Plug Load" }],
         }),
@@ -39,6 +45,13 @@ describe("assemblePreschoolSectionPacks", () => {
           claimRelations: [{ subject: "Centre L", predicate: "leading-circuit", object: "Heater" }],
         }),
       ]),
+    });
+    expect(packs.find(({ sectionId }) => sectionId === "standby-wastage")!.evidence[0]!.value).toEqual({
+      closedHoursKwh: 200,
+      closedHoursSharePct: 20,
+      provisionalClosedHoursCostBeforeGstSgd: 60,
+      spikeCount: 3,
+      centreCount: 1,
     });
     expect(packs.find(({ sectionId }) => sectionId === "planning-outlook")).toMatchObject({
       limitations: ["The estimate uses a simple weekly baseline."],

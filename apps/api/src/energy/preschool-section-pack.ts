@@ -161,13 +161,16 @@ const operationalEvidence = (
   const summary: PreschoolSectionPackEvidence = {
     id: summaryId,
     label: isStandby ? "Closed-hour energy summary" : "Operating-hour energy summary",
-    value: {
-      totalKwh: operational.energy.totalKwh,
-      stateKwh: isStandby ? operational.energy.standbyKwh : operational.energy.operatingKwh,
-      stateSharePct: isStandby ? operational.energy.standbySharePct : operational.energy.operatingSharePct,
-      provisionalCostBeforeGstSgd: isStandby
-        ? operational.energy.provisionalStandbyCostBeforeGstSgd
-        : operational.energy.provisionalOperatingCostBeforeGstSgd,
+    value: isStandby ? {
+      closedHoursKwh: operational.energy.standbyKwh,
+      closedHoursSharePct: operational.energy.standbySharePct,
+      provisionalClosedHoursCostBeforeGstSgd: operational.energy.provisionalStandbyCostBeforeGstSgd,
+      spikeCount: spikes.count,
+      centreCount: spikes.centreCount,
+    } : {
+      operatingHoursKwh: operational.energy.operatingKwh,
+      operatingHoursSharePct: operational.energy.operatingSharePct,
+      provisionalOperatingHoursCostBeforeGstSgd: operational.energy.provisionalOperatingCostBeforeGstSgd,
       spikeCount: spikes.count,
       centreCount: spikes.centreCount,
     },

@@ -105,8 +105,8 @@ describe("createOverviewAiArtifactIdentity", () => {
       targetId: "centre-benchmark",
       outputContractRevision: "preschool-section-interpretation-v1",
       validatorRevision: "preschool-section-interpreter-validator-v5",
-      workflowRevision: "preschool-section-interpreter-v6",
-      investigatorPromptRevision: "preschool-section-interpreter-prompt-v5",
+      workflowRevision: "preschool-section-interpreter-v7",
+      investigatorPromptRevision: "preschool-section-interpreter-prompt-v6",
     });
     expect(standby).not.toEqual(benchmark);
     expect(executive).toMatchObject({
@@ -114,7 +114,7 @@ describe("createOverviewAiArtifactIdentity", () => {
       targetId: "sections:none",
       outputContractRevision: "preschool-executive-synthesis-v1",
       validatorRevision: "preschool-executive-synthesis-validator-v3",
-      workflowRevision: "preschool-executive-synthesis-v6",
+      workflowRevision: "preschool-executive-synthesis-v7",
     });
     expect(() => createPreschoolOverviewAiValueArtifactIdentity({
       baseIdentity: legacy,

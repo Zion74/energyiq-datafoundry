@@ -32,6 +32,7 @@ describe("Overview AI server stage options", () => {
     (stage) => {
       expect(resolveOverviewAiStageRuntimeOptions(stage)).toEqual({
         analysisRequirementsMode: "omit",
+        conversationMessageMaxChars: stage === "section-interpreter" ? 12_000 : 24_000,
         disableTools: true,
         excludedToolNames: [
           "skill",

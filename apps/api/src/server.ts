@@ -130,7 +130,10 @@ let startupTotalMs = 0;
 export const resolveOverviewAiStageRuntimeOptions = (stage: PreschoolOverviewAiStage) => ({
   analysisRequirementsMode: "omit" as const,
   ...(stage === "section-interpreter" || stage === "executive-synthesis"
-    ? { disableTools: true as const }
+    ? {
+        conversationMessageMaxChars: stage === "section-interpreter" ? 12_000 : 24_000,
+        disableTools: true as const,
+      }
     : {}),
   excludedToolNames: stage === "section-interpreter" || stage === "executive-synthesis"
     ? ["skill", "skill_search", "skill_read", "inspect_schema", "run_sql_readonly", "protocol_handoff"] as const
@@ -906,6 +909,9 @@ class DataFoundryAgUiAgent extends AbstractAgent {
 
         const memoryAssembly = await createRunMemoryAssembly({
           conversationMemoryMode: this.input.conversationMemoryMode,
+          ...(overviewAiStageOptions?.conversationMessageMaxChars
+            ? { conversationMessageMaxChars: overviewAiStageOptions.conversationMessageMaxChars }
+            : {}),
           isResume,
           metadataStore: this.input.metadataStore,
           model: modelProvider.model,

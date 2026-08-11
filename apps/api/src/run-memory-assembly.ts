@@ -35,6 +35,7 @@ export type RunMemoryAssembly = {
 
 type CreateRunMemoryAssemblyInput = {
   conversationMemoryMode: AgentMemoryMode;
+  conversationMessageMaxChars?: number;
   isResume: boolean;
   metadataStore: MetadataStore;
   model: unknown;
@@ -63,6 +64,9 @@ export const createRunMemoryAssembly = async (
       : createMastraConversationMemoryBridge({
         memory: input.taskStateRuntime.memory
       }),
+    ...(input.conversationMessageMaxChars
+      ? { policy: { maxMessageChars: input.conversationMessageMaxChars } }
+      : {}),
     historyProvider: ({ excludeRunId, limit, sessionId, userId }) => {
       const lineage = resolveSessionLineage({
         metadataStore: input.metadataStore,

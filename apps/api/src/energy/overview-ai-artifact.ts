@@ -106,10 +106,10 @@ export const createPreschoolOverviewAiValueArtifactIdentity = (input: {
       ? "preschool-section-interpreter-validator-v5"
       : "preschool-executive-synthesis-validator-v3",
     workflowRevision: section
-      ? "preschool-section-interpreter-v6"
-      : "preschool-executive-synthesis-v6",
+      ? "preschool-section-interpreter-v7"
+      : "preschool-executive-synthesis-v7",
     investigatorPromptRevision: section
-      ? "preschool-section-interpreter-prompt-v5"
+      ? "preschool-section-interpreter-prompt-v6"
       : "preschool-executive-synthesis-prompt-v1",
     editorPromptRevision: "not-applicable-v1",
     methodSkillId: "none",
