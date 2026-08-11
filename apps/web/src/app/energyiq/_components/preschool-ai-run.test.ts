@@ -1576,7 +1576,7 @@ function sectionedArtifactFixture(input: PreschoolAiRunInput): PreschoolOverview
     scopeId: input.scopeId,
     dataSnapshotId: input.snapshotId,
     projectReleaseId: input.projectReleaseId,
-    analysisPeriod: { from: input.analysisFrom, to: input.analysisTo },
+    analysisPeriod: { ...input.coverage.binding.analysisPeriod },
     modelProfileId: "workspace-default-model-profile",
     modelProfileRevision: 1,
   };

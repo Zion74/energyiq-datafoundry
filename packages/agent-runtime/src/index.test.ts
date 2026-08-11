@@ -95,6 +95,26 @@ describe("EnergyIQ agent policy follows the enabled tool set", () => {
     }
   });
 
+  it("does not attach Workspace Skill tools when a lightweight stage excludes all Skill entrypoints", async () => {
+    const runtime = await createEnergyIqAgent([
+      "skill",
+      "skill_search",
+      "skill_read",
+      "inspect_schema",
+      "run_sql_readonly",
+      "protocol_handoff",
+    ]);
+
+    try {
+      const tools = await runtime.agent.listTools();
+      expect(tools).not.toHaveProperty("skill");
+      expect(tools).not.toHaveProperty("skill_search");
+      expect(tools).not.toHaveProperty("skill_read");
+    } finally {
+      await runtime.destroyWorkspace();
+    }
+  });
+
   it("retains the Investigator trusted-query policy when Schema and SQL are enabled", async () => {
     const runtime = await createEnergyIqAgent(["protocol_handoff"], {
       overviewAiCandidateSubmission: true,

@@ -129,8 +129,10 @@ let startupTotalMs = 0;
 
 export const resolveOverviewAiStageRuntimeOptions = (stage: PreschoolOverviewAiStage) => ({
   analysisRequirementsMode: "omit" as const,
-  excludedToolNames: stage === "editor" || stage === "section-interpreter" || stage === "executive-synthesis"
-    ? ["inspect_schema", "run_sql_readonly", "protocol_handoff"] as const
+  excludedToolNames: stage === "section-interpreter" || stage === "executive-synthesis"
+    ? ["skill", "skill_search", "skill_read", "inspect_schema", "run_sql_readonly", "protocol_handoff"] as const
+    : stage === "editor"
+      ? ["inspect_schema", "run_sql_readonly", "protocol_handoff"] as const
     : ["protocol_handoff"] as const,
   overviewAiCandidateSubmission: stage === "investigator",
   reasoningModel: false as const,
@@ -512,14 +514,14 @@ const collectOverviewAiStageEvents = (
   });
 });
 
-const collectOverviewAiText = (events: ReadonlyArray<Record<string, unknown>>): string =>
+export const collectOverviewAiText = (events: ReadonlyArray<Record<string, unknown>>): string =>
   events
-    .filter((event) => event.type === "TEXT_MESSAGE_CONTENT")
+    .filter((event) => event.type === "TEXT_MESSAGE_CONTENT" || event.type === "TEXT_MESSAGE_CHUNK")
     .map((event) => typeof event.delta === "string" ? event.delta : "")
     .join("")
     .trim();
 
-const buildOverviewAiStageRunInput = (input: OverviewAiRuntimeStageInput): RunAgentInput => ({
+export const buildOverviewAiStageRunInput = (input: OverviewAiRuntimeStageInput): RunAgentInput => ({
   threadId: input.sessionId,
   runId: input.runId,
   state: {},
@@ -542,6 +544,9 @@ const buildOverviewAiStageRunInput = (input: OverviewAiRuntimeStageInput): RunAg
     run_config: {
       protocol: { id: "data-analysis", version: "1" },
       activeLlmProfileId: input.identity.modelProfileId,
+      skillMode: input.stage === "section-interpreter" || input.stage === "executive-synthesis"
+        ? "none"
+        : "auto",
       ...((input.stage === "section-interpreter" || input.stage === "executive-synthesis")
         ? {}
         : { activeSkillId: input.identity.methodSkillId }),

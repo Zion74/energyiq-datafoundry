@@ -20,7 +20,7 @@ import {
 } from "./preschool-overview-ai-contracts.js";
 
 const LEASE_MS = 4 * 60 * 1_000;
-const MAX_BATCH_PROMPT_CHARS = 48_000;
+const MAX_BATCH_PROMPT_CHARS = 12_000;
 const BANNED_CUSTOMER_TEXT = /\b(?:parent_node_id|dataSnapshotId|projectReleaseId|SELECT|FROM|JOIN|SQL)\b/i;
 
 export type PreschoolSectionInterpreterBatchRunner = (input: {
@@ -148,27 +148,35 @@ export const createPreschoolSectionInterpreter = (input: {
 });
 
 const buildSectionInterpreterPrompt = (packs: PreschoolSectionPack[]): string => {
+  const promptPacks = packs.map(projectPackForPrompt);
+  const sharedBinding = packs[0]?.binding;
+  if (!sharedBinding) throw new Error("PRESCHOOL_SECTION_PACK_SET_INCOMPLETE");
   const prompt = [
     "You are the Preschool Overview Section Interpreter, not an autonomous investigator.",
     "Use only the supplied Section Packs. Do not query SQL, infer new numbers, or add facts.",
     "Write plain English for a non-technical manager. Avoid internal field and revision names.",
     "For each section return status=available with a 1-2 sentence summary and 2-4 keyPoints, or status=empty when no useful interpretation is supported.",
     "Each keyPoint must use kind finding|meaning|next-check and copy one or more exact evidenceRefs from its own pack.",
-    "Return JSON only: {\"sections\":[{\"sectionId\":string,\"status\":\"available\"|\"empty\",\"summary\"?:string,\"keyPoints\"?:[{\"kind\":string,\"label\"?:string,\"text\":string,\"evidenceRefs\":string[]}],\"limitation\"?:string}]}",
-    `Section Packs: ${JSON.stringify(packs)}`,
+    "Do not calculate, round, combine, or compare numbers beyond exact values already supplied. Do not hypothesize a cause.",
+    `The prompt contains exactly ${promptPacks.length} complete bounded Section Pack projections; none are truncated. Return exactly ${promptPacks.length} sections in the same order.`,
+    `Artifact pin for runtime validation only; do not repeat it in customer text: ${JSON.stringify({
+      workspaceId: sharedBinding.workspaceId,
+      projectId: sharedBinding.projectId,
+      scopeId: sharedBinding.scopeId,
+      dataSnapshotId: sharedBinding.dataSnapshotId,
+      projectReleaseId: sharedBinding.projectReleaseId,
+      analysisPeriod: sharedBinding.analysisPeriod,
+    })}`,
+    "Return only one JSON object with no preface, afterword, or Markdown: {\"sections\":[{\"sectionId\":string,\"status\":\"available\"|\"empty\",\"summary\"?:string,\"keyPoints\"?:[{\"kind\":string,\"label\"?:string,\"text\":string,\"evidenceRefs\":string[]}],\"limitation\"?:string}]}",
+    `Section Packs: ${JSON.stringify(promptPacks)}`,
   ].join("\n\n");
   if (prompt.length > MAX_BATCH_PROMPT_CHARS) throw new Error("PRESCHOOL_SECTION_INTERPRETER_PROMPT_TOO_LARGE");
   return prompt;
 };
 
 const parseBatchResponse = (answer: string): Map<PreschoolSectionId, unknown> => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(stripJsonFence(answer));
-  } catch {
-    throw new Error("PRESCHOOL_SECTION_INTERPRETER_BATCH_MALFORMED");
-  }
-  if (!isRecord(parsed) || !Array.isArray(parsed.sections)) {
+  const parsed = parseSectionsEnvelope(answer);
+  if (!parsed) {
     throw new Error("PRESCHOOL_SECTION_INTERPRETER_BATCH_MALFORMED");
   }
   const bySection = new Map<PreschoolSectionId, unknown>();
@@ -179,6 +187,155 @@ const parseBatchResponse = (answer: string): Map<PreschoolSectionId, unknown> =>
     if (!bySection.has(sectionId)) bySection.set(sectionId, candidate);
   }
   return bySection;
+};
+
+const projectPackForPrompt = (pack: PreschoolSectionPack) => ({
+  sectionId: pack.sectionId,
+  decisionQuestion: pack.decisionQuestion,
+  evidence: pack.evidence.map((evidence) => ({
+    id: evidence.id,
+    label: evidence.label,
+    value: projectEvidenceValue(pack.sectionId, evidence.value),
+    evidenceRefs: [evidence.id],
+  })),
+  limitations: pack.limitations,
+  allowedNextChecks: pack.allowedNextChecks,
+});
+
+const projectEvidenceValue = (sectionId: PreschoolSectionId, value: unknown): unknown => {
+  if (!isRecord(value)) return value;
+  if (sectionId === "centre-benchmark") {
+    return pick(value, ["sampleSize", "portfolio", "priorityCentres", "metadataStatus"]);
+  }
+  if (sectionId === "standby-wastage" || sectionId === "operating-behaviour") {
+    const centreLimit = sectionId === "standby-wastage" ? 3 : 5;
+    return {
+      ...pick(value, [
+        "totalKwh",
+        "stateKwh",
+        "stateSharePct",
+        "provisionalCostBeforeGstSgd",
+        "spikeCount",
+        "centreCount",
+      ]),
+      centres: Array.isArray(value.centres)
+        ? value.centres.slice(0, centreLimit).map(projectCentreEvidence)
+        : [],
+      topAppliances: Array.isArray(value.topAppliances)
+        ? value.topAppliances.slice(0, 3).map((item) => isRecord(item)
+          ? pick(item, ["name", "applianceGroup", "usageKwh", "sharePct", "centreCount"])
+          : item)
+        : [],
+      ...(Array.isArray(value.sopBreachingCentreCodes)
+        ? { sopBreachingCentreCodes: value.sopBreachingCentreCodes }
+        : {}),
+    };
+  }
+  const plan = isRecord(value.plan) ? value.plan : {};
+  const actual = isRecord(value.actual) ? value.actual : {};
+  const forecast = isRecord(value.forecast) ? value.forecast : {};
+  const tariff = isRecord(forecast.tariffAssumption) ? forecast.tariffAssumption : {};
+  const portfolio = isRecord(forecast.portfolio) ? forecast.portfolio : {};
+  return {
+    targetPeriod: value.targetPeriod,
+    plan: {
+      usageEstimate: plan.usageEstimate,
+      costEstimate: plan.costEstimate,
+      limitations: plan.limitations,
+    },
+    actual: pick(actual, ["status", "usageKwh", "completeDayCount", "targetDayCount", "varianceKwh", "variancePct"]),
+    forecast: {
+      status: forecast.status,
+      tariffAssumption: pick(tariff, [
+        "status",
+        "beforeGstSgdPerKwh",
+        "sourceName",
+        "supplyClass",
+        "appliesFrom",
+        "appliesTo",
+        "beforeGst",
+        "notBill",
+      ]),
+      portfolio: pick(portfolio, [
+        "estimatedKwh",
+        "estimatedCostBeforeGstSgd",
+        "expectedFullMonthKwh",
+        "expectedFullMonthCostBeforeGstSgd",
+        "actualKwh",
+        "actualCostBeforeGstSgd",
+        "actualThroughLocalDate",
+        "pacePct",
+        "outcome",
+      ]),
+    },
+  };
+};
+
+const projectCentreEvidence = (value: unknown): unknown => {
+  if (!isRecord(value)) return value;
+  const worstSpike = isRecord(value.worstSpike) ? value.worstSpike : {};
+  return {
+    ...pick(value, ["centreCode", "name", "spikeCount"]),
+    worstSpike: pick(worstSpike, [
+      "localDate",
+      "localHour",
+      "dayType",
+      "usageKwh",
+      "baselineKwh",
+      "impactKwh",
+      "variancePct",
+      "leadingCircuitName",
+      "leadingCircuitKwh",
+      "leadingCircuitSharePct",
+    ]),
+  };
+};
+
+const pick = (value: Record<string, unknown>, keys: string[]): Record<string, unknown> => Object.fromEntries(
+  keys.flatMap((key) => value[key] === undefined ? [] : [[key, value[key]]]),
+);
+
+const parseSectionsEnvelope = (answer: string): (Record<string, unknown> & { sections: unknown[] }) | null => {
+  const candidates = [stripJsonFence(answer), ...jsonObjectCandidates(answer)];
+  for (const candidate of candidates) {
+    try {
+      const parsed: unknown = JSON.parse(candidate);
+      if (isRecord(parsed) && Array.isArray(parsed.sections)) {
+        return parsed as Record<string, unknown> & { sections: unknown[] };
+      }
+    } catch {
+      // A Provider may wrap the JSON object in brief prose; keep searching balanced objects.
+    }
+  }
+  return null;
+};
+
+const jsonObjectCandidates = (value: string): string[] => {
+  const candidates: string[] = [];
+  for (let start = value.indexOf("{"); start >= 0; start = value.indexOf("{", start + 1)) {
+    let depth = 0;
+    let quoted = false;
+    let escaped = false;
+    for (let index = start; index < value.length; index += 1) {
+      const character = value[index]!;
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (character === "\\") escaped = true;
+        else if (character === '"') quoted = false;
+        continue;
+      }
+      if (character === '"') quoted = true;
+      else if (character === "{") depth += 1;
+      else if (character === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          candidates.push(value.slice(start, index + 1));
+          break;
+        }
+      }
+    }
+  }
+  return candidates;
 };
 
 const materializeSectionResult = (input: {

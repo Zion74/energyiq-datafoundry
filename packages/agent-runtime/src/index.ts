@@ -361,6 +361,8 @@ export const createDataFoundry = async (
     runContext: input.runContext,
     workspaceRoot: input.workspaceRoot
   });
+  const skillToolsExcluded = ["skill", "skill_search", "skill_read"]
+    .every((name) => input.excludedToolNames?.includes(name));
   if (input.selectedSkills?.length) {
     await materializeSkillPackages({
       fileAssetService: requireFileAssetService(input.fileAssetService),
@@ -375,7 +377,7 @@ export const createDataFoundry = async (
   // createDataFoundry 每次 run 都调用，直接闭包捕获 runContext，不依赖下游 requestContext 注入。
   const runWorkspace = createRunWorkspace({
     runContext: input.runContext,
-    skillPaths: ["skills"],
+    skillPaths: skillToolsExcluded ? [] : ["skills"],
     workspaceRoot: input.workspaceRoot
   });
   const workspaceAttachments = materializeWorkspaceAttachments(runWorkspace.runDir, input.workspaceAttachments ?? []);

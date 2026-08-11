@@ -446,8 +446,8 @@ const isExactPreschoolSectionedReadModel = (
     && candidate.binding.scopeId === input.scopeId
     && candidate.binding.dataSnapshotId === input.snapshotId
     && candidate.binding.projectReleaseId === input.projectReleaseId
-    && candidate.binding.analysisPeriod.from === input.analysisFrom
-    && candidate.binding.analysisPeriod.to === input.analysisTo;
+    && candidate.binding.analysisPeriod.from === input.coverage.binding.analysisPeriod.from
+    && candidate.binding.analysisPeriod.to === input.coverage.binding.analysisPeriod.to;
 };
 
 export const isPendingPreschoolSectionedReadModel = (

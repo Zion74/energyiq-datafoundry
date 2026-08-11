@@ -126,6 +126,62 @@ describe("Preschool Section Interpreter", () => {
     harness.close();
   });
 
+  it("extracts a Provider-wrapped JSON envelope and keeps missing Sections independent", async () => {
+    const harness = createHarness();
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: harness.metadata,
+      runBatch: async ({ runId, sessionId }) => ({
+        answer: `I will now return the requested object.\n${JSON.stringify({
+          sections: PRESCHOOL_SECTION_IDS
+            .filter((sectionId) => sectionId !== "operating-behaviour")
+            .map((sectionId) => available(sectionId)),
+        })}\nThe interpretation is complete.`,
+        runId,
+        sessionId,
+      }),
+    });
+
+    const result = await interpreter.execute({
+      baseIdentity: harness.identity,
+      packs: packs(),
+      user: harness.user,
+    });
+    expect(result["centre-benchmark"].status).toBe("available");
+    expect(result["standby-wastage"].status).toBe("available");
+    expect(result["planning-outlook"].status).toBe("available");
+    expect(result["operating-behaviour"]).toMatchObject({
+      status: "failed",
+      error_code: "PRESCHOOL_SECTION_INTERPRETATION_MISSING",
+    });
+    harness.close();
+  });
+
+  it("sends a bounded prompt projection rather than repeated runtime bindings", async () => {
+    const harness = createHarness();
+    let capturedPrompt = "";
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: harness.metadata,
+      runBatch: async ({ prompt, runId, sessionId }) => {
+        capturedPrompt = prompt;
+        return {
+          answer: JSON.stringify({ sections: PRESCHOOL_SECTION_IDS.map((sectionId) => available(sectionId)) }),
+          runId,
+          sessionId,
+        };
+      },
+    });
+
+    await interpreter.execute({
+      baseIdentity: harness.identity,
+      packs: packs(),
+      user: harness.user,
+    });
+    expect(capturedPrompt.length).toBeLessThan(12_000);
+    expect(capturedPrompt).not.toContain('"binding"');
+    expect(capturedPrompt).toContain("exactly 4 complete bounded Section Pack projections");
+    harness.close();
+  });
+
   it("rejects stale Pack bindings before queuing or calling the Provider", async () => {
     const harness = createHarness();
     let providerCalled = false;
