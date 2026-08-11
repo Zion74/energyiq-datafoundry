@@ -381,6 +381,10 @@ const requireArtifactResult = (
     requireSectionInterpretationResult(parsed, identity);
     return;
   }
+  if (identity.artifactKind === "executive-synthesis") {
+    requireExecutiveSynthesisResult(parsed, identity);
+    return;
+  }
   const artifactBinding = parsed.binding;
   if (parsed.status !== "available"
     || !nonEmptyString(parsed.providerProfileId)
@@ -477,6 +481,60 @@ const validSectionKeyPoint = (value: unknown): boolean => isRecord(value)
   && Array.isArray(value.evidenceRefs)
   && value.evidenceRefs.length > 0
   && value.evidenceRefs.every(nonEmptyString);
+
+const requireExecutiveSynthesisResult = (
+  parsed: Record<string, unknown>,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): void => {
+  const binding = parsed.binding;
+  const findings = parsed.keyFindings;
+  if (parsed.artifactKind !== "executive-synthesis"
+    || (parsed.status !== "available" && parsed.status !== "empty")
+    || !nonEmptyString(parsed.providerProfileId)
+    || parsed.providerProfileId !== identity.modelProfileId
+    || !nonEmptyString(parsed.runId)
+    || !isRecord(parsed.contract)
+    || parsed.contract.id !== "preschool-executive-synthesis"
+    || parsed.contract.revision !== identity.outputContractRevision
+    || !sameValueArtifactBinding(binding, identity)
+    || !Array.isArray(parsed.sourceSectionArtifactIds)
+    || !parsed.sourceSectionArtifactIds.every(nonEmptyString)
+    || !Array.isArray(findings)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+  if (parsed.status === "empty") {
+    if (findings.length !== 0) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+    return;
+  }
+  if (findings.length < 1 || findings.length > 4 || !findings.every(validExecutiveKeyFinding)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+};
+
+const validExecutiveKeyFinding = (value: unknown): boolean => isRecord(value)
+  && nonEmptyString(value.id)
+  && nonEmptyString(value.takeaway)
+  && Array.isArray(value.sectionIds)
+  && value.sectionIds.length > 0
+  && value.sectionIds.every(nonEmptyString)
+  && Array.isArray(value.evidenceRefs)
+  && value.evidenceRefs.length > 0
+  && value.evidenceRefs.every(nonEmptyString);
+
+const sameValueArtifactBinding = (
+  value: unknown,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): boolean => isRecord(value)
+  && value.workspaceId === identity.workspaceId
+  && value.projectId === identity.projectId
+  && value.scopeId === identity.scopeId
+  && value.dataSnapshotId === identity.dataSnapshotId
+  && value.projectReleaseId === identity.projectReleaseId
+  && value.modelProfileId === identity.modelProfileId
+  && value.modelProfileRevision === identity.modelProfileRevision
+  && isRecord(value.analysisPeriod)
+  && value.analysisPeriod.from === identity.analysisPeriodFrom
+  && value.analysisPeriod.to === identity.analysisPeriodTo;
 
 const validAcceptedFinding = (value: unknown, binding: Record<string, unknown>): boolean => {
   if (!isRecord(value)
