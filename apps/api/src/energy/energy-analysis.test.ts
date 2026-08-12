@@ -1429,7 +1429,10 @@ describe("EnergyScopeAnalysis", () => {
         componentHourlyProfiles?.scopes.find((scope) => scope.scopeId === scopeId)
           ?.profiles.find((profile) => profile.dayType === dayType)
       );
-      expect(componentProfile("project", "weekday")).toMatchObject({
+      const projectWeekdayProfile = componentProfile("project", "weekday");
+      const level7WeekdayProfile = componentProfile("level-7", "weekday");
+      const level6WeekdayProfile = componentProfile("level-6", "weekday");
+      expect(projectWeekdayProfile).toMatchObject({
         status: "available",
         sampleDayCount: 5,
         categories: [
@@ -1437,11 +1440,21 @@ describe("EnergyScopeAnalysis", () => {
           { category: "light", values: expect.any(Array) },
         ],
       });
-      expect(componentProfile("project", "weekday")?.categories?.every(
+      expect(projectWeekdayProfile?.status).toBe("available");
+      expect(level7WeekdayProfile?.status).toBe("available");
+      expect(level6WeekdayProfile?.status).toBe("available");
+      if (
+        projectWeekdayProfile?.status !== "available"
+        || level7WeekdayProfile?.status !== "available"
+        || level6WeekdayProfile?.status !== "available"
+      ) {
+        throw new Error("NGEE_ANN_COMPONENT_HOURLY_GOLDEN_UNAVAILABLE");
+      }
+      expect(projectWeekdayProfile.categories.every(
         (category) => category.values.length === 24,
       )).toBe(true);
-      expect(componentProfile("level-7", "weekday")?.circuits).toHaveLength(7);
-      expect(componentProfile("level-6", "weekday")?.circuits).toHaveLength(7);
+      expect(level7WeekdayProfile.circuits).toHaveLength(7);
+      expect(level6WeekdayProfile.circuits).toHaveLength(7);
       expect(componentProfile("project", "public_holiday")).toMatchObject({
         status: "unavailable",
       });
