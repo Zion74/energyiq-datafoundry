@@ -513,7 +513,21 @@ http://127.0.0.1:4178/analysis?utility=electricity&project=proj-nap-energy-analy
 
 ### 19.5 尚未完成的验收
 
-- 独立 worker worktree 不启动长期服务；必须先安全合并到权威 Integration，再重建 API/Web；
 - 在真实 Ngee Ann Snapshot 上完成 1440、1920、tablet Chrome 截图，检查 stack 可读性、Circuit 行密度、横向滚动与 hover/focus；
 - 人工确认参考图中 Category 颜色、Level 切换和 Circuit 热图的信息层级是否达到 Charles 验收；
 - 若真实数据因 component quality 导致 common complete-day 样本不足，应显示 Unavailable/样本数，不回退到浏览器估算。
+
+### 19.6 权威线集成与实时链路验收（2026-08-13）
+
+实现提交已快进推送到远程权威开发线 `origin/codex/t35-presentation-clean`，当前提交为 `e981f4e`。由于本地 Integration worktree 存在其他 Agent 的大量未提交 WIP，本次没有在该脏工作树内执行 merge、reset、clean 或覆盖文件；远程引用从独立干净 worktree 安全快进。
+
+使用当前提交重建并启动独立 API/Web 后，完成了直接 API 与浏览器同源代理两条真实数据链路验收：
+
+- Web：`127.0.0.1:3000`；API：`127.0.0.1:8788`；Web 通过 `API_PROXY_TARGET` 同源代理到该 API；既有 `8787` 进程未停止、未覆盖；
+- Metadata/Auth 与 fact DuckDB 均显式指向权威 Integration storage；`STORAGE_ROOT_DIR` 只决定 Metadata 根目录，事实库必须另设 `ENERGYIQ_DUCKDB_PATH`，否则会正确返回 `ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE`；
+- 直接 API 与 `3000 → 8788` 同源代理均返回 `ready`，固定 `dataSnapshotId=energy-snapshot-03499dcda183ae28c47f7d66`、`projectReleaseId=ngee-ann-polytechnic-template-v6`；
+- `componentHourlyProfiles` 使用 `queryId=component_hourly_profiles_v1`、`accountingBasis=published_component_circuits`；发布 3 个 Scope、6 个可用 Weekday/Weekend profiles；
+- Project 的 Weekday/Weekend 样本分别为 20/8 个完整日，均包含 2 个 Category、14 个 Circuit；Level 7、Level 6 也分别发布 Weekday/Weekend；所有可用 Category/Circuit series 均为完整 24 小时；
+- 登录、Workspace `default`、Overview 查询和返回合同均通过真实 HTTP；没有使用 mock Artifact 或浏览器端补算。
+
+本次浏览器自动化受到 Codex 内置浏览器对 localhost URL 的安全策略阻止，不能据此生成或声称 Chrome 截图通过，也没有换用其他 CDP/浏览器绕过。服务保留在 `3000`，待人工刷新后完成 1440、1920、tablet 与 Charles 视觉验收；该项仍是产品验收，不是数据/API 阻塞。
