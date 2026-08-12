@@ -250,7 +250,7 @@ export const resolvePinnedOverviewAiArtifactReadIdentity = (input: {
   if (input.scopeId !== project.root_scope_id) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PROJECT_SCOPE_REQUIRED");
   }
-  if (project.status !== "published" || project.delivery_stage !== "published") {
+  if (project.status !== "published") {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RELEASE_REQUIRED");
   }
   if (input.pin.dataSnapshotId !== project.data_snapshot_id) {

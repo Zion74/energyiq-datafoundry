@@ -11,9 +11,56 @@ import { describe, expect, it, vi } from "vitest";
 import type { ConfigApiContext } from "../routes/types.js";
 import { ensureEnergyIqBootstrap, PRESCHOOL_WORKSPACE_ID } from "./energy-bootstrap.js";
 import { handleEnergyApiRequest } from "./energy-api.js";
-import { createOverviewAiArtifactIdentity } from "./overview-ai-artifact.js";
+import {
+  createOverviewAiArtifactIdentity,
+  resolvePinnedOverviewAiArtifactReadIdentity,
+} from "./overview-ai-artifact.js";
 
 describe("Overview AI Artifact API", () => {
+  it("accepts the current published Snapshot and Release while delivery configuration has moved on", async () => {
+    const harness = await createHarness();
+    try {
+      const project = harness.metadata.energyIq.upsertProject({
+        id: harness.project.id,
+        workspace_id: harness.project.workspace_id,
+        name: harness.project.name,
+        status: harness.project.status,
+        timezone: harness.project.timezone,
+        hierarchy_revision_id: harness.project.hierarchy_revision_id,
+        meter_formula_revision_id: harness.project.meter_formula_revision_id,
+        data_snapshot_id: harness.project.data_snapshot_id,
+        metric_version: harness.project.metric_version,
+        business_calendar_version: harness.project.business_calendar_version,
+        tariff_schedule_version: harness.project.tariff_schedule_version,
+        delivery_stage: "configured",
+        root_scope_id: harness.project.root_scope_id,
+        has_unpublished_changes: true,
+      });
+      expect(project.delivery_stage).toBe("configured");
+      const identity = resolvePinnedOverviewAiArtifactReadIdentity({
+        metadataStore: harness.metadata,
+        projectId: project.id,
+        scopeId: project.root_scope_id,
+        user: harness.metadata.users.getById({ user_id: "dev-user" }),
+        pin: {
+          from: "2026-05-01",
+          to: "2026-05-31",
+          dataSnapshotId: project.data_snapshot_id,
+          projectReleaseId: harness.identity.projectReleaseId,
+        },
+      });
+
+      expect(identity).toMatchObject({
+        dataSnapshotId: project.data_snapshot_id,
+        projectReleaseId: harness.identity.projectReleaseId,
+        analysisPeriodFrom: "2026-04-30T16:00:00.000Z",
+        analysisPeriodTo: "2026-05-31T16:00:00.000Z",
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
   it("returns the aggregate read model read-only and forwards only a validated Section retry target", async () => {
     const harness = await createHarness();
     try {
