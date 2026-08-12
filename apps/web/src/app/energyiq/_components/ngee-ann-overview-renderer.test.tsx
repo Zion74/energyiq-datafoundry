@@ -46,12 +46,6 @@ describe("NgeeAnnOverviewRenderer", () => {
       peakUsage: "16.0703",
       dailyUsageKwh: 246.8528,
       dailyUsage: "246.9",
-      officeHoursUsageKwh: 150.9581,
-      officeHoursUsage: "151.0",
-      afterHoursUsageKwh: 45.09,
-      afterHoursUsage: "45.1",
-      afterHoursSharePct: 18.2659,
-      afterHoursShare: "18.3%",
       sampleDayCount: 5,
     });
 
@@ -599,10 +593,12 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("31.1516%");
     expect(markup).toContain("-0.0142%");
     expect(markup).toContain("Time-based Behavioral Analysis");
-    expect(markup).toContain("Weekday office hours (08:00–18:00)");
-    expect(markup).toContain("151.0 kWh/mean day");
-    expect(markup).toContain("Weekday after-hours (22:00–06:00)");
-    expect(markup).toContain("45.1 kWh/mean day");
+    expect(markup).toContain("Published operating-period energy");
+    expect(markup).toContain('aria-label="1,200.0 kWh per period"');
+    expect(markup).toContain("Published non-operating energy");
+    expect(markup).toContain('aria-label="331.2 kWh per period"');
+    expect(markup).not.toContain("08:00–18:00");
+    expect(markup).not.toContain("22:00–06:00");
     expect(markup).toContain("Energy composition");
     expect(markup).toContain("Top Circuit Ranking");
     expect(markup).toContain("Published component Circuits ranked by current Snapshot energy");
@@ -1444,7 +1440,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect((document.activeElement as HTMLElement)?.textContent).toBe("Close");
   });
 
-  it("opens an inline frozen daily incident, switches exact server modes, closes and restores trigger focus", async () => {
+  it("opens an accessible frozen daily incident modal, switches exact server modes, closes and restores trigger focus", async () => {
     await renderGolden();
     expect(anomalyTriggers()).toHaveLength(7);
     const trigger = anomalyTriggers()[0]!;
@@ -1454,8 +1450,9 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(dialog).toBeTruthy();
     expect(dialog.textContent).toContain("Anomaly Detail — 11 Jun Thu");
     expect(dialog.textContent).toContain("weekday baseline · Project");
-    expect(dialog.getAttribute("aria-modal")).toBeNull();
-    expect(dialog.getAttribute("data-anomaly-inline-detail")).toBe("true");
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(container.contains(dialog)).toBe(false);
+    expect(dialog.parentElement?.parentElement).toBe(document.body);
     expect((document.activeElement as HTMLElement)?.textContent).toBe("Close");
     expect(anomalyFilterButton("Comparison view", "Overlay comparison")?.getAttribute("aria-pressed")).toBe("true");
     expect(dialog.querySelectorAll("[data-anomaly-series]")).toHaveLength(3);
@@ -1503,13 +1500,54 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
 
     await activateNativeButton(trigger, " ");
     dialog = anomalyDialog()!;
-    expect(dialog.getAttribute("aria-modal")).toBeNull();
-    expect(dialog.parentElement).toBe(container.querySelector("#ngee-ann-detected-anomaly-list"));
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(container.contains(dialog)).toBe(false);
+    expect(dialog.parentElement?.parentElement).toBe(document.body);
     await act(async () => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     });
     expect(anomalyDialog()).toBeNull();
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it("traps Tab focus inside the Anomaly Detail modal", async () => {
+    await renderGolden();
+    await activateNativeButton(anomalyTriggers()[0]!, "Enter");
+    const dialog = anomalyDialog()!;
+    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
+      "button:not([disabled]), summary, a[href], input, select, textarea, [tabindex]:not([tabindex='-1'])",
+    ));
+    const first = focusable[0]!;
+    const last = focusable.at(-1)!;
+
+    await act(async () => last.focus());
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true })));
+    expect(document.activeElement).toBe(first);
+
+    await act(async () => first.focus());
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true })));
+    expect(document.activeElement).toBe(last);
+  });
+
+  it("writes anomaly comparison and Category changes back through the Overview context callbacks", async () => {
+    const onComparisonChange = vi.fn();
+    const onCategoryChange = vi.fn();
+    await act(async () => {
+      root.render(
+        <NgeeAnnOverviewRenderer
+          state={{ status: "ready", snapshot: ngeeAnnGoldenSnapshot() }}
+          onComparisonChange={onComparisonChange}
+          onCategoryChange={onCategoryChange}
+        />,
+      );
+    });
+    await activateNativeButton(anomalyTriggers()[0]!, "Enter");
+
+    await act(async () => anomalyFilterButton("Comparison view", "Selected day")?.click());
+    await act(async () => anomalyFilterButton("Category", "Load")?.click());
+
+    expect(onComparisonChange).toHaveBeenCalledWith("selected");
+    expect(onCategoryChange).toHaveBeenCalledWith("load");
   });
 
   it("opens the primary incident dialog directly from its Decision theme and restores that link", async () => {

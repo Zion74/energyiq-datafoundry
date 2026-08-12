@@ -1170,6 +1170,8 @@ export const executeEnergyScopeAnalysis = async (input: {
   const meterAggregates = meterResult.rows.map(rowToMeterAggregate);
   const aggregateMeterNodeIds = publishedMeterRoute.officialMeterPointIds ?? [];
   const aggregateMeterIds = new Set(aggregateMeterNodeIds);
+  const componentMeterNodeIds = publishedMeterRoute.componentMeterPointIds;
+  const componentMeterIds = new Set(componentMeterNodeIds);
   const aggregateMeters = meterAggregates.filter((meter) => aggregateMeterIds.has(meter.meterNodeId));
   const resolvedDailyTotalScopes = resolveDailyTotalScopes({
     metadataStore: input.metadataStore,
@@ -1190,7 +1192,7 @@ export const executeEnergyScopeAnalysis = async (input: {
     dailyTotalScopes,
     hierarchy,
     meterAggregates,
-    aggregateMeterNodeIds,
+    componentMeterNodeIds,
   });
   const dailyUsageAnomalyLoadInput = {
     metadataStore: input.metadataStore,
@@ -1503,7 +1505,7 @@ export const executeEnergyScopeAnalysis = async (input: {
     })
     .sort((left, right) => right.usageKwh - left.usageKwh);
   const designatedTotals = circuits.filter((meter) => meter.includedInOfficialTotal);
-  const topCircuits = circuits.filter((meter) => !meter.includedInOfficialTotal);
+  const topCircuits = circuits.filter((meter) => componentMeterIds.has(meter.meterNodeId));
   const categoryMeters = new Map<string, MeterAggregate[]>();
   for (const meter of aggregateMeters) {
     categoryMeters.set(meter.category, [...(categoryMeters.get(meter.category) ?? []), meter]);
@@ -1552,7 +1554,7 @@ export const executeEnergyScopeAnalysis = async (input: {
     .sort((left, right) => right.usageKwh - left.usageKwh);
   const officialUsageKwh = aggregateMeters.reduce((sum, meter) => sum + meter.usageKwh, 0);
   const componentUsageKwh = meterAggregates
-    .filter((meter) => !aggregateMeterIds.has(meter.meterNodeId))
+    .filter((meter) => componentMeterIds.has(meter.meterNodeId))
     .reduce((sum, meter) => sum + meter.usageKwh, 0);
   const componentReconciliation: EnergyScopeAnalysis["componentReconciliation"] = {
     officialUsageKwh: round(officialUsageKwh, 4),
@@ -1563,7 +1565,7 @@ export const executeEnergyScopeAnalysis = async (input: {
       : null,
     officialMeterNodeIds: [...aggregateMeterNodeIds].sort(),
     componentMeterNodeIds: meterAggregates
-      .filter((meter) => !aggregateMeterIds.has(meter.meterNodeId))
+      .filter((meter) => componentMeterIds.has(meter.meterNodeId))
       .map((meter) => meter.meterNodeId)
       .sort(),
   };
@@ -2831,15 +2833,19 @@ const buildDailyComponentCategorySeries = (input: {
   dailyTotalScopes: DailyTotalScope[];
   hierarchy: ReturnType<MetadataStore["energyIq"]["listProjectNodes"]>;
   meterAggregates: MeterAggregate[];
-  aggregateMeterNodeIds: string[];
+  componentMeterNodeIds: string[];
 }): DailyComponentCategorySeries[] => {
-  const officialMeterNodeIds = new Set(input.aggregateMeterNodeIds);
+  const eligibleComponentMeterNodeIds = new Set(input.componentMeterNodeIds);
+  const availableMeterNodeIds = new Set(input.meterAggregates.map((meter) => meter.meterNodeId));
+  if (!input.componentMeterNodeIds.every((meterNodeId) => availableMeterNodeIds.has(meterNodeId))) {
+    return [];
+  }
   return input.dailyTotalScopes.flatMap((scope, scopeOrder) => {
     const ownedScopeIds = collectDescendantIds(scope.scopeId, input.hierarchy);
     ownedScopeIds.add(scope.scopeId);
     const categories = new Map<string, MeterAggregate[]>();
     for (const meter of input.meterAggregates) {
-      if (officialMeterNodeIds.has(meter.meterNodeId) || !ownedScopeIds.has(meter.scopeId)) continue;
+      if (!eligibleComponentMeterNodeIds.has(meter.meterNodeId) || !ownedScopeIds.has(meter.scopeId)) continue;
       categories.set(meter.category, [...(categories.get(meter.category) ?? []), meter]);
     }
     return [...categories.entries()]
@@ -2909,7 +2915,7 @@ const buildComponentCategoryBreakdown = (input: {
               : null,
           };
         });
-        const expectedMeterIntervalCount = orderedSeries.reduce(
+        const componentExpectedMeterIntervalCount = orderedSeries.reduce(
           (sum, definition) => sum + definition.meterNodeIds.length * Math.round(
             (Date.parse(bucket.to) - Date.parse(bucket.from)) / (input.intervalMinutes * 60_000),
           ),
@@ -2933,19 +2939,37 @@ const buildComponentCategoryBreakdown = (input: {
             : [];
           }),
         );
-        const dataStatus = validIntervalCount === 0
+        const componentDataStatus = validIntervalCount === 0
           ? "unavailable" as const
-          : validIntervalCount === expectedMeterIntervalCount && qualityEventCount === 0
+          : validIntervalCount === componentExpectedMeterIntervalCount && qualityEventCount === 0
             ? "complete" as const
             : "partial" as const;
         const completeCategoryValues = categories.every((category) => category.usageKwh !== null)
           ? categories.map((category) => category.usageKwh as number)
           : null;
-        const componentUsageKwh = dataStatus === "complete" && completeCategoryValues
+        const componentUsageKwh = componentDataStatus === "complete" && completeCategoryValues
           ? round(completeCategoryValues.reduce((sum, value) => sum + value, 0), 4)
           : null;
         const officialDailyRow = officialDailyRows.get(bucket.localDate);
-        const officialUsageKwh = officialDailyRow?.usageKwh ?? null;
+        const officialDataStatus = officialDailyRow?.dataHealth.status ?? "unavailable";
+        const officialUsageKwh = officialDataStatus === "complete"
+          ? officialDailyRow?.usageKwh ?? null
+          : null;
+        const officialExpectedMeterIntervalCount = officialDailyRow?.dataHealth.expectedMeterIntervalCount ?? 0;
+        const officialValidIntervalCount = officialDailyRow?.dataHealth.validIntervalCount ?? 0;
+        const officialQualityEventCount = officialDailyRow?.dataHealth.qualityEventCount ?? 0;
+        const expectedMeterIntervalCount = componentExpectedMeterIntervalCount
+          + officialExpectedMeterIntervalCount;
+        const combinedValidIntervalCount = validIntervalCount + officialValidIntervalCount;
+        const combinedQualityEventCount = qualityEventCount + officialQualityEventCount;
+        const dataStatus = componentDataStatus === "complete"
+          && officialDataStatus === "complete"
+          && componentUsageKwh !== null
+          && officialUsageKwh !== null
+          ? "complete" as const
+          : combinedValidIntervalCount === 0
+            ? "unavailable" as const
+            : "partial" as const;
         return {
           localDate: bucket.localDate,
           from: bucket.from,
@@ -2968,11 +2992,11 @@ const buildComponentCategoryBreakdown = (input: {
           dataHealth: {
             status: dataStatus,
             coveragePct: expectedMeterIntervalCount > 0
-              ? round(Math.min(validIntervalCount / expectedMeterIntervalCount, 1) * 100, 4)
+              ? round(Math.min(combinedValidIntervalCount / expectedMeterIntervalCount, 1) * 100, 4)
               : 0,
             expectedMeterIntervalCount,
-            validIntervalCount,
-            qualityEventCount,
+            validIntervalCount: combinedValidIntervalCount,
+            qualityEventCount: combinedQualityEventCount,
           },
         };
       });

@@ -71,6 +71,18 @@ describe("EnergyQueryContext", () => {
         "mapping-lvl-7-total-office-light-17",
         "mapping-lvl-7-total-office-load-18",
       ]);
+      expect(levelRoute.componentMeterPointIds).toEqual([
+        "mapping-lvl-7-back-row-office-light-10",
+        "mapping-lvl-7-front-row-office-light-11",
+        "mapping-lvl-7-middle-row-office-light-12",
+        "mapping-lvl-7-office-load-1-l1p1-l3p6-13",
+        "mapping-lvl-7-office-load-2-l1p7-l3p15-14",
+        "mapping-lvl-7-office-load-3-l1p16-l3p21-15",
+        "mapping-lvl-7-office-load-4-l1p22-l3p25-fan-isol1-2-16",
+      ]);
+      expect(levelRoute.componentMeterPointIds).not.toContain(
+        "mapping-lvl-7-total-office-load-18",
+      );
       expect(levelRoute.attachments.find((attachment) =>
         attachment.meterPointId === "mapping-lvl-7-total-office-load-18"))
         .toEqual({
@@ -482,6 +494,7 @@ describe("EnergyQueryContext", () => {
         resource: "water",
       });
       expect(route.officialMeterPointIds).toEqual([meterPointId]);
+      expect(route.componentMeterPointIds).toEqual([]);
       expect(route.attachments).toEqual([{
         meterPointId,
         scopeId: "l7-load-1",

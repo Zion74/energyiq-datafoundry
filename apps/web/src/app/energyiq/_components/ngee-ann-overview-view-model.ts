@@ -133,6 +133,23 @@ export type NgeeAnnDayProfileViewModel = {
   status: "available" | "unavailable";
   decisionQuestion: string;
   reason: string | null;
+  operatingPolicy:
+    | {
+      status: "available";
+      reason: null;
+      operatingUsageKwh: number;
+      operatingUsage: string;
+      standbyUsageKwh: number;
+      standbyUsage: string;
+      standbySharePct: number;
+      standbyShare: string;
+      timezone: string;
+      businessCalendarVersion: string;
+    }
+    | {
+      status: "unavailable";
+      reason: string;
+    };
   scopes: Array<{ id: string; name: string }>;
   profiles: Array<{
     id: string;
@@ -152,12 +169,6 @@ export type NgeeAnnDayProfileViewModel = {
         peakUsage: string;
         dailyUsageKwh: number;
         dailyUsage: string;
-        officeHoursUsageKwh: number;
-        officeHoursUsage: string;
-        afterHoursUsageKwh: number;
-        afterHoursUsage: string;
-        afterHoursSharePct: number;
-        afterHoursShare: string;
         sampleDayCount: number;
       }
       | {
@@ -1011,13 +1022,23 @@ function buildComponentCategoryBreakdown(
   const projectScope = source.scopes.find((scope) => scope.scopeId === snapshot.context.scopeId);
   const contractValid = Boolean(projectScope)
     && source.scopes.length > 0
+    && source.scopes.length === dailyTotalsByScope.size
     && source.scopes.every((scope) => {
       const dailyScope = dailyTotalsByScope.get(scope.scopeId);
-      if (!dailyScope || scope.rows.length === 0 || scope.period.categories.length === 0) return false;
-      const expectedDates = dailyScope.rows.map((row) => row.localDate);
-      const actualDates = scope.rows.map((row) => row.localDate);
-      const commonShapeValid = expectedDates.length === actualDates.length
-        && expectedDates.every((date, index) => date === actualDates[index])
+      if (
+        !dailyScope
+        || scope.scopeName !== dailyScope.scopeName
+        || scope.scopeType !== dailyScope.scopeType
+        || scope.rows.length === 0
+        || scope.period.categories.length === 0
+      ) return false;
+      const commonShapeValid = dailyScope.rows.length === scope.rows.length
+        && dailyScope.rows.every((dailyRow, index) => {
+          const row = scope.rows[index];
+          return row?.localDate === dailyRow.localDate
+            && row.from === dailyRow.from
+            && row.to === dailyRow.to;
+        })
         && scope.rows.every((row) =>
           row.categories.length === scope.period.categories.length
           && row.categories.every((category) =>
@@ -3038,15 +3059,58 @@ function timeBehaviourEvidence(snapshot: EnergyProjectAnalysisSnapshotDto): Time
   };
 }
 
+function buildOperatingPolicySummary(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+): NgeeAnnDayProfileViewModel["operatingPolicy"] {
+  const source = snapshot.analysis.offHours;
+  const unavailable = (reason: string): NgeeAnnDayProfileViewModel["operatingPolicy"] => ({
+    status: "unavailable",
+    reason,
+  });
+  if (source.status !== "available") {
+    return unavailable(source.reason.message || "The release-pinned operating-policy split is unavailable.");
+  }
+  const valuesValid = [
+    source.operatingKwh,
+    source.standbyKwh,
+    source.usageKwh,
+    source.sharePct,
+  ].every(finiteNonNegative);
+  const expectedShare = source.usageKwh > 0 ? source.standbyKwh / source.usageKwh * 100 : 0;
+  const contractValid = valuesValid
+    && source.timezone === snapshot.context.timezone
+    && source.businessCalendarVersion === snapshot.context.businessCalendarVersion
+    && Math.abs(source.operatingKwh + source.standbyKwh - source.usageKwh) <= 0.1
+    && Math.abs(source.usageKwh - snapshot.analysis.summary.usageKwh) <= 0.1
+    && Math.abs(source.sharePct - expectedShare) <= 0.1;
+  if (!contractValid) {
+    return unavailable("The release-pinned operating-policy split does not match this Snapshot context.");
+  }
+  return {
+    status: "available",
+    reason: null,
+    operatingUsageKwh: source.operatingKwh,
+    operatingUsage: formatFixedCustomerDecimal(source.operatingKwh, 1),
+    standbyUsageKwh: source.standbyKwh,
+    standbyUsage: formatFixedCustomerDecimal(source.standbyKwh, 1),
+    standbySharePct: source.sharePct,
+    standbyShare: `${formatFixedCustomerDecimal(source.sharePct, 1)}%`,
+    timezone: source.timezone,
+    businessCalendarVersion: source.businessCalendarVersion,
+  };
+}
+
 function buildDayProfile(
   snapshot: EnergyProjectAnalysisSnapshotDto,
   overviewUnavailable: boolean,
 ): NgeeAnnDayProfileViewModel {
   const evidence = timeBehaviourEvidence(snapshot);
+  const operatingPolicy = buildOperatingPolicySummary(snapshot);
   const unavailable = (reason: string): NgeeAnnDayProfileViewModel => ({
     status: "unavailable",
     decisionQuestion: "How does the observed 24-hour energy shape change by Day Type and Scope?",
     reason,
+    operatingPolicy,
     scopes: [],
     profiles: [],
     evidence,
@@ -3095,6 +3159,7 @@ function buildDayProfile(
     status: "available",
     decisionQuestion: "How does the observed 24-hour energy shape change by Day Type and Scope?",
     reason: null,
+    operatingPolicy,
     scopes: grid.scopes.map((scope) => ({
       id: scope.scopeId,
       name: scope.scopeType === "project" ? "Project" : scope.scopeName,
@@ -3108,19 +3173,6 @@ function buildDayProfile(
       const dailyUsageKwh = profile.status === "available"
         ? roundDisplayValue(profile.values.reduce((sum, value) => sum + value.usageKwh, 0))
         : null;
-      const officeHoursUsageKwh = profile.status === "available"
-        ? roundDisplayValue(profile.values
-          .filter((value) => value.localHour >= 8 && value.localHour < 18)
-          .reduce((sum, value) => sum + value.usageKwh, 0))
-        : null;
-      const afterHoursUsageKwh = profile.status === "available"
-        ? roundDisplayValue(profile.values
-          .filter((value) => value.localHour >= 22 || value.localHour < 6)
-          .reduce((sum, value) => sum + value.usageKwh, 0))
-        : null;
-      const afterHoursSharePct = dailyUsageKwh !== null && dailyUsageKwh > 0 && afterHoursUsageKwh !== null
-        ? roundDisplayValue(afterHoursUsageKwh / dailyUsageKwh * 100)
-        : 0;
       return {
         id: `${profile.scopeId}:${profile.dayType}`,
         dayType: profile.dayType,
@@ -3140,12 +3192,6 @@ function buildDayProfile(
             peakUsage: formatDecimal(peak!.usageKwh, 4),
             dailyUsageKwh: dailyUsageKwh!,
             dailyUsage: formatFixedCustomerDecimal(dailyUsageKwh!, 1),
-            officeHoursUsageKwh: officeHoursUsageKwh!,
-            officeHoursUsage: formatFixedCustomerDecimal(officeHoursUsageKwh!, 1),
-            afterHoursUsageKwh: afterHoursUsageKwh!,
-            afterHoursUsage: formatFixedCustomerDecimal(afterHoursUsageKwh!, 1),
-            afterHoursSharePct,
-            afterHoursShare: `${formatFixedCustomerDecimal(afterHoursSharePct, 1)}%`,
             sampleDayCount: profile.sampleDayCount,
           },
         values: profile.status === "available"

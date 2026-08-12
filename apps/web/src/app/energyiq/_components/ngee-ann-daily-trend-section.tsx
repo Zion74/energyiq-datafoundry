@@ -16,11 +16,15 @@ export function NgeeAnnDailyTrendSection({
   anomalies,
   comparison = "overlay",
   category = "all",
+  onComparisonChange,
+  onCategoryChange,
 }: {
   trend: NgeeAnnEnergyTrendViewModel;
   anomalies: NgeeAnnDailyAnomalyViewModel;
   comparison?: ViewMode;
   category?: "all" | "load" | "light";
+  onComparisonChange?: (comparison: ViewMode) => void;
+  onCategoryChange?: (category: "all" | "load" | "light") => void;
 }) {
   const [selectedScopeId, setSelectedScopeId] = useState(trend.scopes[0]?.id ?? "");
   const [selectedDayType, setSelectedDayType] = useState<NgeeAnnTrendDayType>(() => (
@@ -35,6 +39,14 @@ export function NgeeAnnDailyTrendSection({
 
   useEffect(() => setDetailComparison(comparison), [comparison]);
   useEffect(() => setDetailCategory(category), [category]);
+  const handleComparisonChange = (nextComparison: ViewMode) => {
+    setDetailComparison(nextComparison);
+    onComparisonChange?.(nextComparison);
+  };
+  const handleCategoryChange = (nextCategory: "all" | "load" | "light") => {
+    setDetailCategory(nextCategory);
+    onCategoryChange?.(nextCategory);
+  };
 
   return (
     <>
@@ -51,8 +63,8 @@ export function NgeeAnnDailyTrendSection({
         selectedDayType={hasClassifiedDays ? selectedDayType : undefined}
         comparison={detailComparison}
         category={detailCategory}
-        onComparisonChange={setDetailComparison}
-        onCategoryChange={setDetailCategory}
+        onComparisonChange={handleComparisonChange}
+        onCategoryChange={handleCategoryChange}
       />
     </>
   );

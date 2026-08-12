@@ -47,7 +47,14 @@ export function NgeeAnnEnergyDistribution({
     ? selectedScope.period.categories.flatMap((category) =>
       category.usageKwhValue === null || category.sharePctValue === null
         ? []
-        : [category])
+        : [{
+          id: category.id,
+          label: category.label,
+          usageKwhValue: category.usageKwhValue,
+          usageKwh: category.usageKwh,
+          sharePctValue: category.sharePctValue,
+          sharePct: category.sharePct,
+        }])
     : selectedDay.categories.flatMap((category) => category.usageKwhValue === null || category.sharePctValue === null
       ? []
       : [{

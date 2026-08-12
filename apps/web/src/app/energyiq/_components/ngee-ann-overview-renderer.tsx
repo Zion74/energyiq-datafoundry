@@ -51,6 +51,7 @@ export function NgeeAnnOverviewRenderer({
   grain,
   comparison = "overlay",
   category = "all",
+  onComparisonChange,
   onCategoryChange,
 }: {
   state: NgeeAnnOverviewRendererState;
@@ -188,6 +189,8 @@ export function NgeeAnnOverviewRenderer({
           anomalies={view.dailyAnomalies}
           comparison={comparison}
           category={category}
+          onComparisonChange={onComparisonChange}
+          onCategoryChange={onCategoryChange}
         />
       </div>
 

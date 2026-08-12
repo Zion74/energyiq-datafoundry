@@ -1158,6 +1158,17 @@ describe("Ngee Ann Overview ViewModel", () => {
         { id: "level-7", name: "Level 7" },
         { id: "level-6", name: "Level 6" },
       ],
+      operatingPolicy: {
+        status: "available",
+        operatingUsageKwh: 1200,
+        operatingUsage: "1,200.0",
+        standbyUsageKwh: 331.168324,
+        standbyUsage: "331.2",
+        standbySharePct: 21.63,
+        standbyShare: "21.6%",
+        timezone: "Asia/Singapore",
+        businessCalendarVersion: "calendar-v1",
+      },
       evidence: { queryIds: ["time_bucket_grid_v1"] },
     });
     expect(view.dayProfile.profiles).toHaveLength(9);
@@ -1168,12 +1179,6 @@ describe("Ngee Ann Overview ViewModel", () => {
         status: "available",
         dailyUsageKwh: 246.8528,
         dailyUsage: "246.9",
-        officeHoursUsageKwh: 150.9581,
-        officeHoursUsage: "151.0",
-        afterHoursUsageKwh: 45.09,
-        afterHoursUsage: "45.1",
-        afterHoursSharePct: 18.2659,
-        afterHoursShare: "18.3%",
       },
       values: expect.any(Array),
     });
@@ -1831,6 +1836,21 @@ describe("Ngee Ann Overview ViewModel", () => {
     });
   });
 
+  it("fails only the operating-policy split closed when its Snapshot pins do not match", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    if (snapshot.analysis.offHours.status !== "available") throw new Error("Expected available off-hours facts.");
+    snapshot.analysis.offHours.businessCalendarVersion = "stale-calendar";
+
+    const dayProfile = buildNgeeAnnOverviewViewModel(snapshot).dayProfile;
+
+    expect(dayProfile.status).toBe("available");
+    expect(dayProfile.profiles).toHaveLength(9);
+    expect(dayProfile.operatingPolicy).toMatchObject({
+      status: "unavailable",
+      reason: expect.stringContaining("operating-policy"),
+    });
+  });
+
   it("fails the component Category presentation closed when the server projection is absent", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     delete snapshot.analysis.componentCategoryBreakdown;
@@ -1889,6 +1909,42 @@ describe("Ngee Ann Overview ViewModel", () => {
     expect(view.componentCategoryBreakdown.scopes[0]?.rows[0]).toMatchObject({
       dataStatus: "partial",
       componentUsageKwh: "Unavailable",
+    });
+  });
+
+  it.each([
+    {
+      name: "Scope name",
+      mutate: (snapshot: GoldenSnapshot) => {
+        snapshot.analysis.componentCategoryBreakdown!.scopes[0]!.scopeName = "Wrong Project";
+      },
+    },
+    {
+      name: "Scope type",
+      mutate: (snapshot: GoldenSnapshot) => {
+        snapshot.analysis.componentCategoryBreakdown!.scopes[0]!.scopeType = "site";
+      },
+    },
+    {
+      name: "row start",
+      mutate: (snapshot: GoldenSnapshot) => {
+        snapshot.analysis.componentCategoryBreakdown!.scopes[0]!.rows[0]!.from = "2026-06-09T16:30:00.000Z";
+      },
+    },
+    {
+      name: "row end",
+      mutate: (snapshot: GoldenSnapshot) => {
+        snapshot.analysis.componentCategoryBreakdown!.scopes[0]!.rows[0]!.to = "2026-06-10T15:30:00.000Z";
+      },
+    },
+  ])("fails the component Category contract closed for a mismatched $name", ({ mutate }) => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    mutate(snapshot);
+
+    expect(buildNgeeAnnOverviewViewModel(snapshot).componentCategoryBreakdown).toMatchObject({
+      status: "unavailable",
+      scopes: [],
+      rankings: [],
     });
   });
 

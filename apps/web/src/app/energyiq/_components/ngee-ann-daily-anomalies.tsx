@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { NgeeAnnHourAxis } from "./ngee-ann-hour-axis";
 import type { NgeeAnnTrendDayType } from "./ngee-ann-energy-trend";
@@ -43,6 +44,7 @@ export function NgeeAnnDailyAnomalies({
   const [selectedCategory, setSelectedCategory] = useState<"all" | "load" | "light">(category);
   const triggerRef = useRef<HTMLElement | null>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   const closeDialog = useCallback(() => {
     setOpenIncidentId(null);
@@ -77,14 +79,34 @@ export function NgeeAnnDailyAnomalies({
   useEffect(() => {
     if (!openIncidentId) return;
     closeRef.current?.focus();
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
         closeDialog();
+        return;
+      }
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+        "button:not([disabled]), summary, a[href], input, select, textarea, [tabindex]:not([tabindex='-1'])",
+      ));
+      if (focusable.length === 0) return;
+      const first = focusable[0]!;
+      const last = focusable.at(-1)!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
       }
     };
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousBodyOverflow;
+    };
   }, [closeDialog, openIncidentId]);
 
   if (view.status === "unavailable") {
@@ -158,7 +180,7 @@ export function NgeeAnnDailyAnomalies({
                     tabIndex={0}
                     role="button"
                     aria-expanded={item.incidentId === openIncidentId}
-                    aria-controls="ngee-ann-anomaly-inline-detail"
+                    aria-controls="ngee-ann-anomaly-dialog"
                     aria-label={`Open anomaly detail for ${item.scopeName}, ${item.weekday} ${item.dateLabel}`}
                     data-template-anomaly-trigger="true"
                     className="cursor-pointer bg-surface hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
@@ -198,7 +220,7 @@ export function NgeeAnnDailyAnomalies({
                   type="button"
                   data-anomaly-trigger="true"
                   aria-expanded={item.incidentId === openIncidentId}
-                  aria-controls="ngee-ann-anomaly-inline-detail"
+                  aria-controls="ngee-ann-anomaly-dialog"
                   onClick={(event) => openIncident(item.incidentId, event.currentTarget)}
                   className="grid min-h-14 w-full scroll-mt-24 gap-1 px-3 py-3 text-left hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 sm:grid-cols-[minmax(10rem,1fr)_minmax(11rem,1fr)_auto] sm:items-center sm:gap-4"
                 >
@@ -236,15 +258,17 @@ export function NgeeAnnDailyAnomalies({
         </div>
       )}
 
-      {incident ? (
-        <div
-          id="ngee-ann-anomaly-inline-detail"
-          data-anomaly-inline-detail="true"
-          role="dialog"
-          aria-labelledby="ngee-ann-anomaly-dialog-title"
-          aria-describedby="ngee-ann-anomaly-dialog-question"
-          className="mt-5 overflow-hidden rounded-xl border border-primary/25 bg-surface shadow-[var(--shadow-card)]"
-        >
+      {incident && typeof document !== "undefined" ? createPortal(
+        <div className="fixed inset-0 z-50 grid items-center overflow-y-auto bg-foreground/40 p-3 backdrop-blur-[1px] sm:p-6">
+          <div
+            ref={dialogRef}
+            id="ngee-ann-anomaly-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ngee-ann-anomaly-dialog-title"
+            aria-describedby="ngee-ann-anomaly-dialog-question"
+            className="mx-auto max-h-[calc(100dvh-1.5rem)] w-full max-w-6xl overflow-y-auto rounded-xl border border-primary/25 bg-surface shadow-[var(--shadow-card)] sm:max-h-[calc(100dvh-3rem)]"
+          >
           <header className="flex items-start justify-between gap-4 border-b border-border bg-surface-subtle px-4 py-4 sm:px-5">
             <div>
               <h2 id="ngee-ann-anomaly-dialog-title" className="text-lg font-semibold tracking-[-0.02em] text-foreground">
@@ -343,7 +367,9 @@ export function NgeeAnnDailyAnomalies({
 
             <IncidentEvidence incident={incident} view={view} />
           </div>
-        </div>
+          </div>
+        </div>,
+        document.body,
       ) : null}
 
       <AnomalyEvidence view={view} />

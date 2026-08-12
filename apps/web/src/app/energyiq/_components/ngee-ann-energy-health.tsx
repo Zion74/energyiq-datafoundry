@@ -25,17 +25,17 @@ export function NgeeAnnEnergyHealth({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h3 id="ngee-ann-energy-health-summary" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Energy Health Summary</h3>
-          <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Day-type averages and observed weekday time bands from the same release-pinned hourly profile.</p>
+          <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Day-type averages plus the server-published operating-policy split from the same Snapshot.</p>
         </div>
-        <p className="text-xs text-muted">Asia/Singapore local hours · mean of complete days</p>
+        <p className="text-xs text-muted">Asia/Singapore · release-pinned Calendar policy</p>
       </div>
 
       <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        <ProfileHealthCard label="Weekday daily average" profile={weekday} value="daily" />
-        <ProfileHealthCard label="Weekend daily average" profile={weekend} value="daily" />
-        <ProfileHealthCard label="Public Holiday daily average" profile={holiday} value="daily" />
-        <ProfileHealthCard label="Weekday office hours (08:00–18:00)" profile={weekday} value="office" />
-        <ProfileHealthCard label="Weekday after-hours (22:00–06:00)" profile={weekday} value="after" />
+        <ProfileHealthCard label="Weekday daily average" profile={weekday} />
+        <ProfileHealthCard label="Weekend daily average" profile={weekend} />
+        <ProfileHealthCard label="Public Holiday daily average" profile={holiday} />
+        <OperatingPolicyHealthCard label="Published operating-period energy" policy={dayProfile.operatingPolicy} kind="operating" />
+        <OperatingPolicyHealthCard label="Published non-operating energy" policy={dayProfile.operatingPolicy} kind="standby" />
         {levelComparison.status === "available" ? levelComparison.rows.map((row) => (
           <article key={row.id} className="rounded-xl border border-border bg-surface px-4 py-4">
             <p className="text-xs font-semibold text-muted">{row.name} total (official aggregate)</p>
@@ -58,11 +58,9 @@ export function NgeeAnnEnergyHealth({
 function ProfileHealthCard({
   label,
   profile,
-  value,
 }: {
   label: string;
   profile: NgeeAnnDayProfileViewModel["profiles"][number] | null;
-  value: "daily" | "office" | "after";
 }) {
   if (!profile || profile.summary.status === "unavailable") {
     return (
@@ -73,18 +71,46 @@ function ProfileHealthCard({
       </article>
     );
   }
-  const displayed = value === "daily"
-    ? profile.summary.dailyUsage
-    : value === "office"
-      ? profile.summary.officeHoursUsage
-      : profile.summary.afterHoursUsage;
-  const suffix = value === "daily" ? "kWh/day" : "kWh/mean day";
+  const displayed = profile.summary.dailyUsage;
+  const suffix = "kWh/day";
   return (
     <article className="rounded-xl border border-border bg-surface px-4 py-4">
       <p className="text-xs font-semibold text-muted">{label}</p>
       <p aria-label={`${displayed} ${suffix}`} className="mt-2 text-xl font-semibold tracking-[-0.02em] tabular-nums text-foreground">{displayed} <span className="text-sm font-medium text-muted">{suffix}</span></p>
       <p className="mt-2 text-xs text-muted">
-        {value === "after" ? `${profile.summary.afterHoursShare} of the observed mean day · ` : ""}{profile.summary.sampleDayCount} complete-day {profile.summary.sampleDayCount === 1 ? "sample" : "samples"}
+        {profile.summary.sampleDayCount} complete-day {profile.summary.sampleDayCount === 1 ? "sample" : "samples"}
+      </p>
+    </article>
+  );
+}
+
+function OperatingPolicyHealthCard({
+  label,
+  policy,
+  kind,
+}: {
+  label: string;
+  policy: NgeeAnnDayProfileViewModel["operatingPolicy"];
+  kind: "operating" | "standby";
+}) {
+  if (policy.status === "unavailable") {
+    return (
+      <article className="rounded-xl border border-border bg-surface-subtle px-4 py-4">
+        <p className="text-xs font-semibold text-muted">{label}</p>
+        <p className="mt-2 text-sm font-semibold text-foreground">Unavailable</p>
+        <p className="mt-1 text-xs leading-5 text-muted">{policy.reason}</p>
+      </article>
+    );
+  }
+  const displayed = kind === "operating" ? policy.operatingUsage : policy.standbyUsage;
+  return (
+    <article className="rounded-xl border border-border bg-surface px-4 py-4">
+      <p className="text-xs font-semibold text-muted">{label}</p>
+      <p aria-label={`${displayed} kWh per period`} className="mt-2 text-xl font-semibold tracking-[-0.02em] tabular-nums text-foreground">
+        {displayed} <span className="text-sm font-medium text-muted">kWh/period</span>
+      </p>
+      <p className="mt-2 text-xs text-muted">
+        {kind === "standby" ? `${policy.standbyShare} of official period energy · ` : ""}{policy.businessCalendarVersion}
       </p>
     </article>
   );
