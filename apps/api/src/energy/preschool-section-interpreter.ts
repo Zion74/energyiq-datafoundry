@@ -20,15 +20,17 @@ import {
 } from "./preschool-overview-ai-contracts.js";
 
 const LEASE_MS = 4 * 60 * 1_000;
-const MAX_BATCH_PROMPT_CHARS = 12_000;
+const MAX_SECTION_PROMPT_CHARS = 12_000;
+const MAX_CONCURRENT_SECTION_RUNS = 2;
 const BANNED_INTERNAL_TEXT = /\b(?:parent_node_id|dataSnapshotId|projectReleaseId|SQL)\b/i;
 const SQL_STATEMENT = /\bSELECT\b[\s\S]{0,500}\b(?:FROM|JOIN)\b/i;
 const NUMBER_TOKEN = /(?<![A-Za-z0-9_-])-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/g;
 const LOCAL_DATE_TOKEN = /\b\d{4}-\d{2}-\d{2}\b/g;
+const NATURAL_DATE_TOKEN = /\b(?:[1-9]|[12]\d|3[01])\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b/giu;
 const LOCAL_TIME_TOKEN = /\b(?:[01]?\d|2[0-3]):[0-5]\d\b/g;
 const LOCAL_DATE_VALUE = /^\d{4}-\d{2}-\d{2}$/;
 
-export type PreschoolSectionInterpreterBatchRunner = (input: {
+export type PreschoolSectionInterpreterRunner = (input: {
   prompt: string;
   identity: EnergyIqOverviewAiArtifactIdentity;
   user: UserRecord;
@@ -36,6 +38,9 @@ export type PreschoolSectionInterpreterBatchRunner = (input: {
   runId: string;
   sessionId: string;
 }) => Promise<{ answer: string; runId: string; sessionId: string }>;
+
+/** @deprecated Test/replay compatibility only; production uses one runner call per Section. */
+export type PreschoolSectionInterpreterBatchRunner = PreschoolSectionInterpreterRunner;
 
 export type PreschoolSectionInterpreter = {
   execute(input: {
@@ -48,9 +53,14 @@ export type PreschoolSectionInterpreter = {
 
 export const createPreschoolSectionInterpreter = (input: {
   metadataStore: MetadataStore;
-  runBatch: PreschoolSectionInterpreterBatchRunner;
   assertRuntimeIdentity?: (identity: EnergyIqOverviewAiArtifactIdentity) => void;
-}): PreschoolSectionInterpreter => ({
+} & (
+  | { runSection: PreschoolSectionInterpreterRunner; runBatch?: never }
+  | { runSection?: never; runBatch: PreschoolSectionInterpreterBatchRunner }
+)): PreschoolSectionInterpreter => {
+  const runSection = input.runSection ?? input.runBatch;
+  const withSectionRunSlot = createConcurrencyGate(MAX_CONCURRENT_SECTION_RUNS);
+  return ({
   async execute({ baseIdentity, packs, user, retryTargets = [] }) {
     const packBySection = new Map(packs.map((pack) => [pack.sectionId, pack]));
     if (packBySection.size !== PRESCHOOL_SECTION_IDS.length
@@ -72,10 +82,10 @@ export const createPreschoolSectionInterpreter = (input: {
       store.find(identities[sectionId]) ?? store.queue({ identity: identities[sectionId], triggeredBy: user.id }),
     ])) as Record<PreschoolSectionId, EnergyIqOverviewAiArtifactRecord>;
     const retrySet = new Set(retryTargets);
-    const claimed: Array<{
+    const candidates: Array<{
       sectionId: PreschoolSectionId;
       identity: EnergyIqOverviewAiArtifactIdentity;
-      workerId: string;
+      previousErrorCode?: string;
     }> = [];
 
     for (const sectionId of PRESCHOOL_SECTION_IDS) {
@@ -83,124 +93,118 @@ export const createPreschoolSectionInterpreter = (input: {
       const shouldTry = artifact.status === "queued"
         || (artifact.status === "failed" && retrySet.has(sectionId));
       if (!shouldTry) continue;
-      const workerId = `section-interpreter:${sectionId}:${randomUUID()}`;
-      const claim = store.claim({ identity: identities[sectionId], workerId, leaseMs: LEASE_MS });
-      current[sectionId] = claim.artifact;
-      if (!claim.claimed) continue;
-      claimed.push({ sectionId, identity: identities[sectionId], workerId });
-    }
-    if (claimed.length === 0) return current;
-
-    const sessionId = `preschool-section-interpreter-${randomUUID()}`;
-    const runId = `preschool-section-interpreter-${randomUUID()}`;
-    try {
-      const prompt = buildSectionInterpreterPrompt(claimed.map(({ sectionId }) => packBySection.get(sectionId)!));
-      const response = await input.runBatch({
-        prompt,
-        identity: claimed[0]!.identity,
-        user,
-        workspaceId: baseIdentity.workspaceId,
-        runId,
-        sessionId,
+      candidates.push({
+        sectionId,
+        identity: identities[sectionId],
+        ...(artifact.status === "failed" && artifact.error_code
+          ? { previousErrorCode: artifact.error_code }
+          : {}),
       });
-      if (response.runId !== runId || response.sessionId !== sessionId) {
-        throw new Error("PRESCHOOL_SECTION_INTERPRETER_RUN_IDENTITY_MISMATCH");
-      }
-      const parsed = parseBatchResponse(response.answer);
-      for (const unit of claimed) {
-        const pack = packBySection.get(unit.sectionId)!;
-        const candidate = parsed.get(unit.sectionId);
-        try {
-          const result = materializeSectionResult({ candidate, pack, identity: unit.identity, runId });
-          input.assertRuntimeIdentity?.(unit.identity);
-          current[unit.sectionId] = store.complete({
-            identity: unit.identity,
-            workerId: unit.workerId,
-            sessionId,
-            runId,
-            resultJson: JSON.stringify(result),
-          });
-        } catch (error) {
-          current[unit.sectionId] = store.fail({
-            identity: unit.identity,
-            workerId: unit.workerId,
-            errorCode: sectionErrorCode(error),
-          });
+    }
+    if (candidates.length === 0) return current;
+
+    const settlements = await Promise.allSettled(candidates.map((unit) => withSectionRunSlot(async () => {
+      const workerId = `section-interpreter:${unit.sectionId}:${randomUUID()}`;
+      const claim = store.claim({ identity: unit.identity, workerId, leaseMs: LEASE_MS });
+      current[unit.sectionId] = claim.artifact;
+      if (!claim.claimed) return;
+      const pack = packBySection.get(unit.sectionId)!;
+      const sessionId = `preschool-section-interpreter-${unit.sectionId}-${randomUUID()}`;
+      const runId = `preschool-section-interpreter-${unit.sectionId}-${randomUUID()}`;
+      try {
+        const response = await runSection({
+          prompt: buildSectionInterpreterPrompt(pack, unit.previousErrorCode),
+          identity: unit.identity,
+          user,
+          workspaceId: baseIdentity.workspaceId,
+          runId,
+          sessionId,
+        });
+        if (response.runId !== runId || response.sessionId !== sessionId) {
+          throw new Error("PRESCHOOL_SECTION_INTERPRETER_RUN_IDENTITY_MISMATCH");
         }
-      }
-      return current;
-    } catch (error) {
-      for (const unit of claimed) {
+        const candidate = parseSectionResponse(response.answer, unit.sectionId);
+        const result = materializeSectionResult({ candidate, pack, identity: unit.identity, runId });
+        input.assertRuntimeIdentity?.(unit.identity);
+        current[unit.sectionId] = store.complete({
+          identity: unit.identity,
+          workerId,
+          sessionId,
+          runId,
+          resultJson: JSON.stringify(result),
+        });
+      } catch (error) {
         try {
           current[unit.sectionId] = store.fail({
             identity: unit.identity,
-            workerId: unit.workerId,
+            workerId,
             errorCode: sectionErrorCode(error),
           });
         } catch {
           current[unit.sectionId] = store.get(unit.identity);
         }
       }
-      return current;
-    }
+    })));
+    const unexpected = settlements.find((settlement): settlement is PromiseRejectedResult =>
+      settlement.status === "rejected");
+    if (unexpected) throw unexpected.reason;
+    return current;
   },
-});
+  });
+};
 
-const buildSectionInterpreterPrompt = (packs: PreschoolSectionPack[]): string => {
-  const promptPacks = packs.map(projectPackForPrompt);
-  const sharedBinding = packs[0]?.binding;
-  if (!sharedBinding) throw new Error("PRESCHOOL_SECTION_PACK_SET_INCOMPLETE");
+const buildSectionInterpreterPrompt = (
+  pack: PreschoolSectionPack,
+  previousErrorCode?: string,
+): string => {
+  const promptPack = projectPackForPrompt(pack);
   const prompt = [
     "You are the Preschool Overview Section Interpreter, not an autonomous investigator.",
     "Use only the supplied Section Packs. Do not query SQL, infer new numbers, or add facts.",
     "Write plain English for a non-technical manager. Avoid internal field and revision names.",
-    "For each available section, return a 1-2 sentence summary and return exactly 3 keyPoints: one finding, one meaning, and one next-check. Never return more or fewer. Return status=empty when no useful interpretation is supported.",
+    "Add management value instead of mechanically restating the pageCoverage labels or every visible KPI.",
+    "Return status=empty with no keyPoints when this Pack supports no useful incremental interpretation.",
+    "When status=available, return a 1-2 sentence summary and 1-4 useful keyPoints. Choose the number, kind, and order based on value; do not force one of each kind.",
+    "A useful keyPoint adds at least one of: priority, business meaning, an Evidence-backed next check, or a material limitation. Do not invent an action to fill a slot.",
     "Each keyPoint must copy one or more exact evidenceRefs from its own pack. If it discusses multiple Evidence items, cite every Evidence item discussed; otherwise discuss only one.",
     "When naming a Centre and its leading circuit, make only one Centre-to-circuit relationship per keyPoint and cite that Centre's exact Evidence item.",
-    "When mentioning a date or hour, copy localDate as YYYY-MM-DD and localHour as HH:00. Do not rewrite them as 25 May, 1am, 11pm, noon, or midday.",
-    "Do not calculate, round, combine, or compare numbers beyond exact values already supplied. Do not hypothesize a cause.",
+    "When mentioning a date, use the exact supplied YYYY-MM-DD or its equivalent D Month YYYY rendering. When mentioning an hour, copy localHour as HH:00; do not rewrite hours as 1am, 11pm, noon, or midday.",
+    "Prefer useful qualitative wording over extra numbers. If a number is necessary, copy one exact supplied value; do not calculate, round, combine, derive a range, or compare values beyond an explicit supplied field.",
     "Do not create combined totals or shares from multiple Evidence items. Describe the items separately or without a synthesized number.",
-    `The prompt contains exactly ${promptPacks.length} complete bounded Section Pack projections; none are truncated. Return exactly ${promptPacks.length} sections in the same order.`,
-    `Required sectionId sequence: ${JSON.stringify(promptPacks.map(({ sectionId }) => sectionId))}. Do not substitute any other sectionId.`,
+    "Do not claim a top, highest, largest, ahead, behind, likely cause, or combined contribution unless those exact meanings are explicit in the cited Evidence. A question about what to verify is allowed when it matches allowedNextChecks.",
+    previousErrorCode
+      ? `Previous attempt rejection: ${previousErrorCode}. Do not repeat that rejected output. Use fewer claims and numbers; keep every Key Point within only its cited Evidence.`
+      : "This is the first attempt for this Artifact; no prior rejection feedback exists.",
+    "The prompt contains exactly one complete bounded Section Pack projection; it is not truncated.",
+    `Required sectionId: ${JSON.stringify(pack.sectionId)}. Do not substitute any other sectionId.`,
     `Artifact pin for runtime validation only; do not repeat it in customer text: ${JSON.stringify({
-      workspaceId: sharedBinding.workspaceId,
-      projectId: sharedBinding.projectId,
-      scopeId: sharedBinding.scopeId,
-      dataSnapshotId: sharedBinding.dataSnapshotId,
-      projectReleaseId: sharedBinding.projectReleaseId,
-      analysisPeriod: sharedBinding.analysisPeriod,
+      workspaceId: pack.binding.workspaceId,
+      projectId: pack.binding.projectId,
+      scopeId: pack.binding.scopeId,
+      dataSnapshotId: pack.binding.dataSnapshotId,
+      projectReleaseId: pack.binding.projectReleaseId,
+      analysisPeriod: pack.binding.analysisPeriod,
     })}`,
-    "Return only one JSON object with no preface, afterword, or Markdown: {\"sections\":[{\"sectionId\":string,\"status\":\"available\"|\"empty\",\"summary\"?:string,\"keyPoints\"?:[{\"kind\":string,\"label\"?:string,\"text\":string,\"evidenceRefs\":string[]}],\"limitation\"?:string}]}",
-    `Section Packs: ${JSON.stringify(promptPacks)}`,
+    "Return only one JSON object with no preface, afterword, or Markdown: {\"sectionId\":string,\"status\":\"available\"|\"empty\",\"summary\"?:string,\"keyPoints\"?:[{\"kind\":\"priority\"|\"finding\"|\"meaning\"|\"next-check\",\"label\"?:string,\"text\":string,\"evidenceRefs\":string[]}],\"limitation\"?:string}",
+    `Section Pack: ${JSON.stringify(promptPack)}`,
   ].join("\n\n");
-  if (prompt.length > MAX_BATCH_PROMPT_CHARS) throw new Error("PRESCHOOL_SECTION_INTERPRETER_PROMPT_TOO_LARGE");
+  if (prompt.length > MAX_SECTION_PROMPT_CHARS) throw new Error("PRESCHOOL_SECTION_INTERPRETER_PROMPT_TOO_LARGE");
   return prompt;
-};
-
-const parseBatchResponse = (answer: string): Map<PreschoolSectionId, unknown> => {
-  const parsed = parseSectionsEnvelope(answer);
-  if (!parsed) {
-    throw new Error("PRESCHOOL_SECTION_INTERPRETER_BATCH_MALFORMED");
-  }
-  const bySection = new Map<PreschoolSectionId, unknown>();
-  for (const candidate of parsed.sections) {
-    if (!isRecord(candidate) || typeof candidate.sectionId !== "string"
-      || !PRESCHOOL_SECTION_IDS.includes(candidate.sectionId as PreschoolSectionId)) continue;
-    const sectionId = candidate.sectionId as PreschoolSectionId;
-    if (!bySection.has(sectionId)) bySection.set(sectionId, candidate);
-  }
-  return bySection;
 };
 
 const projectPackForPrompt = (pack: PreschoolSectionPack) => ({
   sectionId: pack.sectionId,
+  audience: pack.audience,
   decisionQuestion: pack.decisionQuestion,
   evidence: pack.evidence.map((evidence) => ({
     value: projectEvidenceValue(pack.sectionId, evidence.value),
     ...(evidence.unit ? { unit: evidence.unit } : {}),
     evidenceRefs: [evidence.id],
   })),
+  dataQuality: pack.dataQuality,
   limitations: pack.limitations,
+  missingEvidence: pack.missingEvidence,
+  pageCoverage: pack.pageCoverage,
   allowedNextChecks: pack.allowedNextChecks,
 });
 
@@ -271,19 +275,23 @@ const pick = (value: Record<string, unknown>, keys: string[]): Record<string, un
   keys.flatMap((key) => value[key] === undefined ? [] : [[key, value[key]]]),
 );
 
-const parseSectionsEnvelope = (answer: string): (Record<string, unknown> & { sections: unknown[] }) | null => {
+const parseSectionResponse = (answer: string, sectionId: PreschoolSectionId): unknown => {
   const candidates = [stripJsonFence(answer), ...jsonObjectCandidates(answer)];
   for (const candidate of candidates) {
     try {
       const parsed: unknown = JSON.parse(candidate);
+      if (isRecord(parsed) && parsed.sectionId === sectionId) return parsed;
+      // Keep the old batch envelope readable in unit/replay fixtures. New Provider
+      // identities emit one direct Section object per isolated Run.
       if (isRecord(parsed) && Array.isArray(parsed.sections)) {
-        return parsed as Record<string, unknown> & { sections: unknown[] };
+        const matching = parsed.sections.find((item) => isRecord(item) && item.sectionId === sectionId);
+        if (matching) return matching;
       }
     } catch {
       // A Provider may wrap the JSON object in brief prose; keep searching balanced objects.
     }
   }
-  return null;
+  throw new Error("PRESCHOOL_SECTION_INTERPRETER_RESPONSE_MALFORMED");
 };
 
 const jsonObjectCandidates = (value: string): string[] => {
@@ -325,6 +333,12 @@ const materializeSectionResult = (input: {
   }
   const binding = preschoolOverviewAiBindingFromIdentity(input.identity);
   if (input.candidate.status === "empty") {
+    if (input.candidate.summary !== undefined
+      || input.candidate.limitation !== undefined
+      || (input.candidate.keyPoints !== undefined
+        && (!Array.isArray(input.candidate.keyPoints) || input.candidate.keyPoints.length !== 0))) {
+      throw new Error("PRESCHOOL_SECTION_INTERPRETATION_MALFORMED");
+    }
     return {
       artifactKind: "section-interpretation",
       status: "empty",
@@ -332,7 +346,7 @@ const materializeSectionResult = (input: {
       runId: input.runId,
       contract: {
         id: "preschool-section-interpretation",
-        revision: "preschool-section-interpretation-v1",
+        revision: "preschool-section-interpretation-v3",
       },
       binding,
       sectionId: input.pack.sectionId,
@@ -343,7 +357,7 @@ const materializeSectionResult = (input: {
   const keyPoints = parseKeyPoints(input.candidate.keyPoints);
   const limitation = optionalText(input.candidate.limitation);
   if (input.candidate.status !== "available" || !summary || !keyPoints
-    || keyPoints.length < 2 || keyPoints.length > 4) {
+    || keyPoints.length < 1 || keyPoints.length > 4) {
     throw new Error("PRESCHOOL_SECTION_INTERPRETATION_MALFORMED");
   }
   const allowedEvidenceRefs = new Set(input.pack.evidence.flatMap(({ evidenceRefs }) => evidenceRefs));
@@ -382,7 +396,7 @@ const materializeSectionResult = (input: {
     runId: input.runId,
     contract: {
       id: "preschool-section-interpretation",
-      revision: "preschool-section-interpretation-v1",
+      revision: "preschool-section-interpretation-v3",
     },
     binding,
     sectionId: input.pack.sectionId,
@@ -397,7 +411,10 @@ const parseKeyPoints = (value: unknown): PreschoolSectionKeyPoint[] | null => {
   const result: PreschoolSectionKeyPoint[] = [];
   for (const candidate of value) {
     if (!isRecord(candidate)
-      || (candidate.kind !== "finding" && candidate.kind !== "meaning" && candidate.kind !== "next-check")) return null;
+      || (candidate.kind !== "priority"
+        && candidate.kind !== "finding"
+        && candidate.kind !== "meaning"
+        && candidate.kind !== "next-check")) return null;
     const text = cleanText(candidate.text);
     const label = optionalText(candidate.label);
     if (!text || !Array.isArray(candidate.evidenceRefs)
@@ -414,7 +431,10 @@ const parseKeyPoints = (value: unknown): PreschoolSectionKeyPoint[] | null => {
 
 const hasUnsupportedNumber = (text: string, evidence: PreschoolSectionPack["evidence"]): boolean => {
   const supported = collectNumbers(evidence.map(({ value }) => value));
-  const numericText = text.replace(LOCAL_DATE_TOKEN, "").replace(LOCAL_TIME_TOKEN, "");
+  const numericText = text
+    .replace(LOCAL_DATE_TOKEN, "")
+    .replace(NATURAL_DATE_TOKEN, "")
+    .replace(LOCAL_TIME_TOKEN, "");
   const tokens = [...numericText.matchAll(NUMBER_TOKEN)];
   return tokens.some((match) => {
     const raw = match[0].replaceAll(",", "");
@@ -461,6 +481,8 @@ const hasUnsupportedTemporalClaim = (
   const supported = collectTemporalClaims(evidence.map(({ value }) => value));
   const dates = [...text.matchAll(LOCAL_DATE_TOKEN)].map(([value]) => value);
   if (dates.some((date) => !supported.dates.has(date))) return true;
+  const naturalDates = [...text.matchAll(NATURAL_DATE_TOKEN)].map(([value]) => naturalDateToIso(value));
+  if (naturalDates.some((date) => date === null || !supported.dates.has(date))) return true;
   const times = [...text.matchAll(LOCAL_TIME_TOKEN)].map(([value]) => value);
   return times.some((time) => {
     const separator = time.indexOf(":");
@@ -468,6 +490,21 @@ const hasUnsupportedTemporalClaim = (
     const minute = Number(time.slice(separator + 1));
     return minute !== 0 || !supported.hours.has(hour);
   });
+};
+
+const naturalDateToIso = (value: string): string | null => {
+  const match = value.match(/^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})$/u);
+  if (!match) return null;
+  const month = [
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+  ].indexOf(match[2]!.toLowerCase()) + 1;
+  const day = Number(match[1]);
+  const year = Number(match[3]);
+  if (month === 0 || !Number.isInteger(day) || !Number.isInteger(year)) return null;
+  const iso = `${year.toString().padStart(4, "0")}-${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`;
+  const parsed = new Date(`${iso}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().startsWith(iso) ? iso : null;
 };
 
 const hasUnsupportedUnit = (text: string, evidence: PreschoolSectionPack["evidence"]): boolean => {
@@ -579,6 +616,31 @@ const sectionErrorCode = (error: unknown): string => {
   const message = error instanceof Error ? error.message : String(error);
   const normalized = message.trim().toUpperCase().replace(/[^A-Z0-9_]+/g, "_");
   return normalized.slice(0, 160) || "PRESCHOOL_SECTION_INTERPRETER_FAILED";
+};
+
+const createConcurrencyGate = (limit: number) => {
+  let active = 0;
+  const waiters: Array<() => void> = [];
+  const acquire = async (): Promise<void> => {
+    if (active < limit) {
+      active += 1;
+      return;
+    }
+    await new Promise<void>((resolve) => waiters.push(resolve));
+  };
+  const release = (): void => {
+    const next = waiters.shift();
+    if (next) next();
+    else active -= 1;
+  };
+  return async <T>(task: () => Promise<T>): Promise<T> => {
+    await acquire();
+    try {
+      return await task();
+    } finally {
+      release();
+    }
+  };
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

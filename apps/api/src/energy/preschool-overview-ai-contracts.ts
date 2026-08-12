@@ -48,7 +48,7 @@ export type PreschoolSectionPack = {
 };
 
 export type PreschoolSectionKeyPoint = {
-  kind: "finding" | "meaning" | "next-check";
+  kind: "priority" | "finding" | "meaning" | "next-check";
   label?: string;
   text: string;
   evidenceRefs: string[];
@@ -59,7 +59,7 @@ export type PreschoolSectionInterpretationResult = {
   status: "available" | "empty";
   providerProfileId: string;
   runId: string;
-  contract: { id: "preschool-section-interpretation"; revision: "preschool-section-interpretation-v1" };
+  contract: { id: "preschool-section-interpretation"; revision: "preschool-section-interpretation-v3" };
   binding: PreschoolOverviewAiBinding;
   sectionId: PreschoolSectionId;
   summary?: string;

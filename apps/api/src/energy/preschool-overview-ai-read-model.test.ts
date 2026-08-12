@@ -109,7 +109,7 @@ const completeSection = (
       status,
       providerProfileId: unitIdentity.modelProfileId,
       runId,
-      contract: { id: "preschool-section-interpretation", revision: "preschool-section-interpretation-v1" },
+      contract: { id: "preschool-section-interpretation", revision: "preschool-section-interpretation-v3" },
       binding: preschoolOverviewAiBindingFromIdentity(unitIdentity),
       sectionId,
       ...(status === "available" ? {

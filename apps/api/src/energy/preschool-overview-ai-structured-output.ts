@@ -30,43 +30,31 @@ const sectionKeyPoint: JsonSchema = {
   additionalProperties: false,
   required: ["kind", "text", "evidenceRefs"],
   properties: {
-    kind: { type: "string", enum: ["finding", "meaning", "next-check"] },
+    kind: { type: "string", enum: ["priority", "finding", "meaning", "next-check"] },
     label: nonEmptyString,
     text: nonEmptyString,
     evidenceRefs,
   },
 };
 
-/** Native value-output contract for the bounded Section Interpreter stage. */
-export const PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V1 = {
+/** Native value-output contract for one bounded, independently executed Section. */
+export const PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V3 = {
   errorStrategy: "strict",
   schema: {
     type: "object",
     additionalProperties: false,
-    required: ["sections"],
+    required: ["sectionId", "status"],
     properties: {
-      sections: {
+      sectionId: { type: "string", enum: [...PRESCHOOL_SECTION_IDS] },
+      status: { type: "string", enum: ["available", "empty"] },
+      summary: nonEmptyString,
+      keyPoints: {
         type: "array",
-        minItems: 1,
-        maxItems: PRESCHOOL_SECTION_IDS.length,
-        items: {
-          type: "object",
-          additionalProperties: false,
-          required: ["sectionId", "status"],
-          properties: {
-            sectionId: { type: "string", enum: [...PRESCHOOL_SECTION_IDS] },
-            status: { type: "string", enum: ["available", "empty"] },
-            summary: nonEmptyString,
-            keyPoints: {
-              type: "array",
-              minItems: 3,
-              maxItems: 3,
-              items: sectionKeyPoint,
-            },
-            limitation: nonEmptyString,
-          },
-        },
+        minItems: 0,
+        maxItems: 4,
+        items: sectionKeyPoint,
       },
+      limitation: nonEmptyString,
     },
   },
 } satisfies PublicStructuredOutputOptions<StructuredEnvelope>;
@@ -109,7 +97,7 @@ export const PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V1 = {
 export const resolveOverviewAiStageStructuredOutput = (
   stage: PreschoolOverviewAiStage,
 ): PublicStructuredOutputOptions<StructuredEnvelope> | undefined => {
-  if (stage === "section-interpreter") return PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V1;
+  if (stage === "section-interpreter") return PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V3;
   if (stage === "executive-synthesis") return PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V1;
   return undefined;
 };

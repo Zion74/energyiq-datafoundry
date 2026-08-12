@@ -1867,7 +1867,7 @@ export type PreschoolSectionInterpretationResultDto = {
   sectionId: PreschoolOverviewAiSectionIdDto;
   summary?: string;
   keyPoints: Array<{
-    kind: "finding" | "meaning" | "next-check";
+    kind: "priority" | "finding" | "meaning" | "next-check";
     label?: string;
     text: string;
     evidenceRefs: string[];

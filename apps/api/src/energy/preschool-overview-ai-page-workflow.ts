@@ -1,5 +1,10 @@
 import type { LocalDataGateway } from "@datafoundry/data-gateway";
-import type { EnergyIqOverviewAiArtifactIdentity, MetadataStore, UserRecord } from "@datafoundry/metadata";
+import type {
+  EnergyIqOverviewAiArtifactIdentity,
+  EnergyIqOverviewAiArtifactRecord,
+  MetadataStore,
+  UserRecord,
+} from "@datafoundry/metadata";
 import { WORKSPACE_DEFAULT_MODEL_PROFILE_ID } from "@datafoundry/metadata";
 
 import { ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID } from "../workspace-model-profile-resolver.js";
@@ -16,7 +21,7 @@ import {
   type PreschoolOverviewAiReadModel,
   type PreschoolSectionId,
 } from "./preschool-overview-ai-contracts.js";
-import { createPreschoolSectionInterpreter, type PreschoolSectionInterpreterBatchRunner } from "./preschool-section-interpreter.js";
+import { createPreschoolSectionInterpreter, type PreschoolSectionInterpreterRunner } from "./preschool-section-interpreter.js";
 import { assemblePreschoolSectionPacks } from "./preschool-section-pack.js";
 import { resolveProjectAnalysis, type ProjectAnalysisSnapshot } from "./project-analysis-resolver.js";
 
@@ -44,7 +49,7 @@ export type PreschoolOverviewAiPageWorkflow = {
 export const createPreschoolOverviewAiPageWorkflow = (input: {
   metadataStore: MetadataStore;
   dataGateway: LocalDataGateway;
-  runSectionBatch: PreschoolSectionInterpreterBatchRunner;
+  runSection: PreschoolSectionInterpreterRunner;
   runExecutiveSynthesis: PreschoolExecutiveSynthesisRunner;
   resolveSnapshot?: (args: {
     identity: EnergyIqOverviewAiArtifactIdentity;
@@ -76,7 +81,7 @@ export const createPreschoolOverviewAiPageWorkflow = (input: {
   });
   const interpreter = createPreschoolSectionInterpreter({
     metadataStore: input.metadataStore,
-    runBatch: input.runSectionBatch,
+    runSection: input.runSection,
     assertRuntimeIdentity: (identity) => requireModelRuntimeIdentity(input.metadataStore, identity),
   });
   const synthesizer = createPreschoolExecutiveSynthesizer({
@@ -110,13 +115,15 @@ export const createPreschoolOverviewAiPageWorkflow = (input: {
             ? []
             : [...PRESCHOOL_SECTION_IDS]
         : [];
-      await interpreter.execute({ baseIdentity, packs, user, retryTargets });
+      const sectionArtifacts = await interpreter.execute({ baseIdentity, packs, user, retryTargets });
       requireModelRuntimeIdentity(input.metadataStore, baseIdentity);
-      await synthesizer.execute({
-        baseIdentity,
-        user,
-        retry: retry && (retryTarget === undefined || retryTarget === "executive-synthesis"),
-      });
+      if (arePreschoolSectionArtifactsTerminal(sectionArtifacts)) {
+        await synthesizer.execute({
+          baseIdentity,
+          user,
+          retry: retry && (retryTarget === undefined || retryTarget === "executive-synthesis"),
+        });
+      }
       requireModelRuntimeIdentity(input.metadataStore, baseIdentity);
       const readModel = composePreschoolOverviewAiReadModel({ metadataStore: input.metadataStore, baseIdentity });
       if (!readModel) throw new Error("PRESCHOOL_OVERVIEW_AI_READ_MODEL_MISSING");
@@ -124,6 +131,11 @@ export const createPreschoolOverviewAiPageWorkflow = (input: {
     },
   };
 };
+
+export const arePreschoolSectionArtifactsTerminal = (
+  artifacts: Record<PreschoolSectionId, Pick<EnergyIqOverviewAiArtifactRecord, "status">>,
+): boolean => PRESCHOOL_SECTION_IDS.every((sectionId) =>
+  artifacts[sectionId].status === "available" || artifacts[sectionId].status === "failed");
 
 const requireBaseIdentity = (identity: EnergyIqOverviewAiArtifactIdentity): OverviewAiArtifactIdentityV13 => {
   if (identity.projectId !== "preschool-demo"

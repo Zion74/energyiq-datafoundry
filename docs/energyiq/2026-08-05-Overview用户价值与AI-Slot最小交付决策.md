@@ -472,3 +472,34 @@ Overview Studio 的方向：
 6. 客户/Web 继续使用 read / ensure / retry 小接口。Refresh 和 Saved Analysis 只恢复精确 identity 的 Artifact，不启动新模型。
 
 本校准不授权通用 Artifact 平台、通用多 Agent 编排、Scheduler/DSL、Ngee Ann AI 或 Overview Studio。
+
+## 16. 2026-08-12 Preschool Section Run 隔离与价值合同
+
+GitHub `#44` 进一步校准第 15 节的 Provider 批处理边界。四个 Section 已经拥有独立 Artifact，但一次共享 Provider envelope
+仍会让顶层 JSON、传输、上下文和 Run identity 故障连坐全部 claimed Sections。因此 Preschool Sections 2–5 改为四个独立
+Provider Run / Session；它们仍通过同一 Workspace、Project、Scope、Snapshot、Release、Period 和 Model identity 关联，
+不新增父级数据库状态机、第二套 Store 或通用 Orchestrator。
+
+1. 每个 Section Run 获得完整、自包含的单 Section Pack 投影，包括 audience、decision question、page coverage、data quality、
+   limitations、missing evidence、allowed next checks、Evidence 和精确 identity pin；不得依赖其他 Session 的隐式消息或 memory。
+2. 每个 Section 在获得进程内固定并发槽后才 claim Artifact 并启动 Provider，避免等待并发槽时 lease 先过期。并发 ensure 继续
+   依赖精确 Artifact claim 去重；一个 transport、Parser、Schema、Evidence 或 identity drift 失败只影响该 Section。
+3. 第一版并发上限固定为 `2`，用于控制 Provider 限流和突发请求；这会增加 Provider 请求次数和共享指令 Token，必须在真实
+   验收中分别记录每 Section latency / input / output / cache tokens，不把隔离收益描述成免费。
+4. `available` 改为一句结论加 1～4 个真正有用的 Key Points；模型自行选择 `priority`、`finding`、`meaning`、`next-check` 的数量和顺序，
+   不再强迫每类各一条。没有超出页面复述的增量价值时返回 `empty` 和 0 条；不得机械凑数。
+5. Runtime 硬门继续只处理 identity、结构、Evidence、数字、日期、单位、Centre 和关系；“是否有管理价值”由 Prompt 目标、
+   Harness 和人工产品验收判断，自动测试不得冒充该判断。
+6. Executive Synthesis 只在所有 Section 到达 `available/empty/failed` 终态后启动，避免并发 ensure 基于仍在运行的部分来源
+   生成临时 Executive。其 identity 继续绑定 accepted source Artifact IDs；失败 Section 后续成功时形成新的来源集合和 Artifact。
+7. `priority` 是明确的管理价值类型，不是未经验证的严重性标签；它仍必须绑定当前 Section Pack 的 Evidence。真实 Provider
+   验收曾因模型合理返回 `priority`、而旧 Schema 未收录该类型导致单 Section 失败，因此合同、Schema、Parser、Store 与 Web
+   DTO 必须一致接受该类型，并通过新 identity 重新物化，不能用 Prompt 强迫模型把优先事项改写成别的类型。
+8. 同一 Section 的受控 Retry 保持新 Run / Session 和完整 Pack 自包含，但额外携带上一次客户安全的失败类别，帮助模型减少
+   事实范围、数字和关系越界；不得携带隐藏聊天历史、原始错误堆栈或其他 Section 内容。重试上限仍由 Artifact Store 控制，
+   不能无限调用 Provider 直到偶然通过。
+9. 日期事实校验将 Evidence 的 ISO `YYYY-MM-DD` 与等价的客户可读 `D Month YYYY` 规范化到同一天；自然语言日期中的年份
+   不再被数字校验器误判为新数值，但不在 Evidence 中的日期、无效日历日期和非整点时刻仍然拒绝。
+
+本校准不改变 Section Interpreter 无 SQL/工具的 Summary 职责。需要自主发现新事实时，仍由 `Additional EnergyIQ Insights`
+Investigator 使用只读工具；模板编排和 Coding Agent 分别属于后续受控阶段。

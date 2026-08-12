@@ -337,7 +337,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
   const overviewAiWorkflow = createPreschoolOverviewAiPageWorkflow({
     metadataStore,
     dataGateway,
-    runSectionBatch: (stageInput) => runOverviewAiValueStage({ ...stageInput, stage: "section-interpreter" }),
+    runSection: (stageInput) => runOverviewAiValueStage({ ...stageInput, stage: "section-interpreter" }),
     runExecutiveSynthesis: (stageInput) => runOverviewAiValueStage({ ...stageInput, stage: "executive-synthesis" }),
   });
 

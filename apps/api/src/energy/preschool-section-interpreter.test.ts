@@ -22,21 +22,20 @@ describe("Preschool Section Interpreter", () => {
   it("persists valid siblings when one Section cites unsupported Evidence and retries only that Section", async () => {
     const harness = createHarness();
     const prompts: string[] = [];
-    let attempt = 0;
+    const attempts = new Map<PreschoolSectionId, number>();
     const interpreter = createPreschoolSectionInterpreter({
       metadataStore: harness.metadata,
-      runBatch: async ({ prompt, runId, sessionId }) => {
+      runBatch: async ({ identity, prompt, runId, sessionId }) => {
         prompts.push(prompt);
-        attempt += 1;
-        const sections = attempt === 1
-          ? [
-              available("centre-benchmark"),
-              available("standby-wastage", "unsupported:evidence"),
-              available("operating-behaviour"),
-              { sectionId: "planning-outlook", status: "empty" },
-            ]
-          : [available("standby-wastage")];
-        return { answer: JSON.stringify({ sections }), runId, sessionId };
+        const sectionId = identity.targetId as PreschoolSectionId;
+        const attempt = (attempts.get(sectionId) ?? 0) + 1;
+        attempts.set(sectionId, attempt);
+        const section = sectionId === "standby-wastage" && attempt === 1
+          ? available(sectionId, "unsupported:evidence")
+          : sectionId === "planning-outlook"
+            ? { sectionId, status: "empty" }
+            : available(sectionId);
+        return { answer: JSON.stringify(section), runId, sessionId };
       },
     });
 
@@ -55,12 +54,15 @@ describe("Preschool Section Interpreter", () => {
       "planning-outlook": { status: "available" },
     });
     expect(JSON.parse(first["planning-outlook"].result_json!)).toMatchObject({ status: "empty", keyPoints: [] });
-    expect(prompts).toHaveLength(1);
+    expect(prompts).toHaveLength(4);
     expect(prompts[0]).not.toContain("SQL tool");
     expect(prompts[0]).toContain("Do not query SQL");
     expect(prompts[0]).toContain("Do not create combined totals or shares from multiple Evidence items");
-    expect(prompts[0]).toContain("return exactly 3 keyPoints: one finding, one meaning, and one next-check");
-    expect(prompts[0]).toContain("copy localDate as YYYY-MM-DD and localHour as HH:00");
+    expect(prompts[0]).toContain("1-4 useful keyPoints");
+    expect(prompts[0]).toContain("do not force one of each kind");
+    expect(prompts[0]).toContain("no useful incremental interpretation");
+    expect(prompts[0]).toContain("exact supplied YYYY-MM-DD or its equivalent D Month YYYY rendering");
+    expect(prompts[0]).toContain("copy localHour as HH:00");
     expect(prompts[0]).toContain("cite every Evidence item discussed");
 
     const retried = await interpreter.execute({
@@ -73,9 +75,9 @@ describe("Preschool Section Interpreter", () => {
     expect(retried["centre-benchmark"]).toEqual(first["centre-benchmark"]);
     expect(retried["operating-behaviour"]).toEqual(first["operating-behaviour"]);
     expect(retried["planning-outlook"]).toEqual(first["planning-outlook"]);
-    expect(prompts).toHaveLength(2);
-    expect(prompts[1]).toContain('"sectionId":"standby-wastage"');
-    expect(prompts[1]).not.toContain('"sectionId":"centre-benchmark"');
+    expect(prompts).toHaveLength(5);
+    expect(prompts[4]).toContain('"sectionId":"standby-wastage"');
+    expect(prompts[4]).not.toContain('"sectionId":"centre-benchmark"');
     harness.close();
   });
 
@@ -426,14 +428,14 @@ describe("Preschool Section Interpreter", () => {
     expect(result["planning-outlook"].status).toBe("available");
     expect(result["operating-behaviour"]).toMatchObject({
       status: "failed",
-      error_code: "PRESCHOOL_SECTION_INTERPRETATION_MISSING",
+      error_code: "PRESCHOOL_SECTION_INTERPRETER_RESPONSE_MALFORMED",
     });
     harness.close();
   });
 
   it("sends a bounded prompt projection rather than repeated runtime bindings", async () => {
     const harness = createHarness();
-    let capturedPrompt = "";
+    const capturedPrompts = new Map<PreschoolSectionId, string>();
     const sectionPacks = packs();
     sectionPacks.find(({ sectionId }) => sectionId === "operating-behaviour")!.evidence[0]!.value = {
       centreCode: "N",
@@ -456,8 +458,8 @@ describe("Preschool Section Interpreter", () => {
     };
     const interpreter = createPreschoolSectionInterpreter({
       metadataStore: harness.metadata,
-      runBatch: async ({ prompt, runId, sessionId }) => {
-        capturedPrompt = prompt;
+      runBatch: async ({ identity, prompt, runId, sessionId }) => {
+        capturedPrompts.set(identity.targetId as PreschoolSectionId, prompt);
         return {
           answer: JSON.stringify({ sections: PRESCHOOL_SECTION_IDS.map((sectionId) => available(sectionId)) }),
           runId,
@@ -471,14 +473,19 @@ describe("Preschool Section Interpreter", () => {
       packs: sectionPacks,
       user: harness.user,
     });
-    expect(capturedPrompt.length).toBeLessThan(12_000);
-    expect(capturedPrompt).not.toContain('"binding"');
-    expect(capturedPrompt).toContain("exactly 4 complete bounded Section Pack projections");
-    expect(capturedPrompt.match(/evidence:centre-benchmark/gu)).toHaveLength(1);
-    expect(capturedPrompt).toContain('"usageKwh":45.3308');
-    expect(capturedPrompt).toContain('"leadingCircuitName":"Kitchen Plug Load"');
-    expect(capturedPrompt).not.toContain("baselineKwh");
-    expect(capturedPrompt).not.toContain("sourceName");
+    expect(capturedPrompts.size).toBe(4);
+    const operatingPrompt = capturedPrompts.get("operating-behaviour")!;
+    const planningPrompt = capturedPrompts.get("planning-outlook")!;
+    expect([...capturedPrompts.values()].every((prompt) => prompt.length < 12_000)).toBe(true);
+    expect([...capturedPrompts.values()].every((prompt) => !prompt.includes('"binding"'))).toBe(true);
+    expect(operatingPrompt).toContain("exactly one complete bounded Section Pack projection");
+    expect(operatingPrompt.match(/evidence:operating-behaviour/gu)).toHaveLength(1);
+    expect(operatingPrompt).toContain('"usageKwh":45.3308');
+    expect(operatingPrompt).toContain('"leadingCircuitName":"Kitchen Plug Load"');
+    expect(operatingPrompt).not.toContain("baselineKwh");
+    expect(operatingPrompt).not.toContain("evidence:planning-outlook");
+    expect(planningPrompt).not.toContain("sourceName");
+    expect(planningPrompt).toContain('"pageCoverage":["Verified Section evidence"]');
     harness.close();
   });
 

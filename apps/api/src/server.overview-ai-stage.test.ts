@@ -53,7 +53,7 @@ describe("Overview AI server stage options", () => {
   );
 
   it.each([
-    ["section-interpreter", "sections"],
+    ["section-interpreter", "sectionId"],
     ["executive-synthesis", "keyFindings"],
   ] as const)("pins %s to its native structured-output envelope", (stage, requiredProperty) => {
     const structuredOutput = resolveOverviewAiStageStructuredOutput(stage);
@@ -73,6 +73,16 @@ describe("Overview AI server stage options", () => {
       expect(resolveOverviewAiStageRuntimeOptions(stage)).not.toHaveProperty("structuredOutput");
     },
   );
+
+  it("allows the isolated Section value contract to return empty or 1-4 useful points", () => {
+    const structuredOutput = resolveOverviewAiStageStructuredOutput("section-interpreter");
+    expect(structuredOutput?.schema).toMatchObject({
+      required: ["sectionId", "status"],
+      properties: {
+        keyPoints: { minItems: 0, maxItems: 4 },
+      },
+    });
+  });
 
   it("suppresses only duplicate full Snapshot and Catalog context for Overview stages", () => {
     expect(shouldIncludeProjectAnalysisEvidenceContext("investigator")).toBe(false);

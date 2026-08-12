@@ -100,16 +100,16 @@ export const createPreschoolOverviewAiValueArtifactIdentity = (input: {
     artifactKind: input.artifactKind,
     targetId: input.targetId,
     outputContractRevision: section
-      ? "preschool-section-interpretation-v1"
+      ? "preschool-section-interpretation-v3"
       : "preschool-executive-synthesis-v1",
     validatorRevision: section
-      ? "preschool-section-interpreter-validator-v8"
+      ? "preschool-section-interpreter-validator-v11"
       : "preschool-executive-synthesis-validator-v3",
     workflowRevision: section
-      ? "preschool-section-interpreter-v8"
+      ? "preschool-section-interpreter-v12"
       : "preschool-executive-synthesis-v8",
     investigatorPromptRevision: section
-      ? "preschool-section-interpreter-prompt-v8"
+      ? "preschool-section-interpreter-prompt-v12"
       : "preschool-executive-synthesis-prompt-v1",
     editorPromptRevision: "not-applicable-v1",
     methodSkillId: "none",

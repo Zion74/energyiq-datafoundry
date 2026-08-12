@@ -540,7 +540,7 @@ describe("saved analysis decision-quality boundary", () => {
           status: "available",
           providerProfileId: sectionIdentityV2.modelProfileId,
           runId: "saved-analysis-ai-section-run-v2",
-          contract: { id: "preschool-section-interpretation", revision: "preschool-section-interpretation-v1" },
+          contract: { id: "preschool-section-interpretation", revision: "preschool-section-interpretation-v3" },
           binding: preschoolOverviewAiBindingFromIdentity(sectionIdentityV2),
           sectionId: "centre-benchmark",
           summary: "Benchmark evidence supports a focused operating review.",

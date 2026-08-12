@@ -282,7 +282,7 @@ const completeSection = (
       runId,
       contract: {
         id: "preschool-section-interpretation",
-        revision: "preschool-section-interpretation-v1",
+        revision: "preschool-section-interpretation-v3",
       },
       binding: preschoolOverviewAiBindingFromIdentity(identity),
       sectionId,

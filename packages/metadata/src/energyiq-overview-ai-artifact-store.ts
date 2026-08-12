@@ -469,7 +469,7 @@ const requireSectionInterpretationResult = (
     return;
   }
   if (!nonEmptyString(parsed.summary)
-    || keyPoints.length < 2
+    || keyPoints.length < 1
     || keyPoints.length > 4
     || !keyPoints.every(validSectionKeyPoint)
     || !optionalString(parsed.limitation)) {
@@ -478,7 +478,10 @@ const requireSectionInterpretationResult = (
 };
 
 const validSectionKeyPoint = (value: unknown): boolean => isRecord(value)
-  && (value.kind === "finding" || value.kind === "meaning" || value.kind === "next-check")
+  && (value.kind === "priority"
+    || value.kind === "finding"
+    || value.kind === "meaning"
+    || value.kind === "next-check")
   && optionalString(value.label)
   && nonEmptyString(value.text)
   && Array.isArray(value.evidenceRefs)
