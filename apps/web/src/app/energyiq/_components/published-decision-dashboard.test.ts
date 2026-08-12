@@ -18,6 +18,7 @@ import type {
 } from "../../../lib/config-api";
 import { configApi } from "../../../lib/config-api";
 import { buildEnergyTemplateRenderPlan } from "./energy-template-render-plan";
+import * as ngeeAnnAiRun from "./ngee-ann-ai-run";
 import { ngeeAnnGoldenSnapshot } from "./ngee-ann-overview.test-fixture";
 import { preschoolGoldenSnapshot } from "./preschool-overview.test-fixture";
 import {
@@ -67,6 +68,23 @@ describe("published Overview URL reload", () => {
     mockedRouter.push.mockReset();
     mockedRouter.replace.mockReset();
     vi.spyOn(configApi, "getEnergyProjectHierarchy").mockResolvedValue(projectHierarchy());
+    const isolatedAiArtifact = {
+      status: "failed" as const,
+      dataSnapshotId: "test-snapshot",
+      projectReleaseId: "test-release",
+      attemptCount: 2,
+      errorCode: "TEST_ARTIFACT_UNAVAILABLE",
+    };
+    // Keep component tests hermetic: the default client points at the local API
+    // and must never create or retry a real Overview AI run from Happy DOM.
+    vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockResolvedValue(isolatedAiArtifact);
+    vi.spyOn(configApi, "ensureEnergyOverviewAiArtifact").mockResolvedValue(isolatedAiArtifact);
+    vi.spyOn(configApi, "retryEnergyOverviewAiArtifact").mockResolvedValue(isolatedAiArtifact);
+    ngeeAnnAiRun.resetNgeeAnnAiRunsForTests();
+    vi.spyOn(ngeeAnnAiRun, "getOrStartNgeeAnnAiRun").mockResolvedValue({
+      status: "unavailable",
+      reason: "Test AI unavailable.",
+    });
     window.history.replaceState({}, "", "/energyiq/overview");
     container = document.createElement("div");
     document.body.append(container);

@@ -169,10 +169,18 @@ type PublishedRunContext = {
 };
 
 const PROJECT_ANALYSIS_CACHE_CAPACITY = 6;
-const PROJECT_ANALYSIS_CACHE_TTL_MS = 120_000;
+// Snapshot and Release identity are immutable cache-key inputs. Keep the hot
+// result for a working day; a data or release change naturally selects a new key.
+const PROJECT_ANALYSIS_CACHE_TTL_MS = 24 * 60 * 60_000;
+const PROJECT_PLANNING_LIFECYCLE_CACHE_CAPACITY = 12;
+const PROJECT_PLANNING_LIFECYCLE_CACHE_TTL_MS = 24 * 60 * 60_000;
 const PROJECT_ANALYSIS_CACHES = new WeakMap<
   MetadataStore,
   WeakMap<LocalDataGateway, ProjectAnalysisResultCache<ReadyProjectAnalysisResolution>>
+>();
+const PROJECT_PLANNING_LIFECYCLE_CACHES = new WeakMap<
+  MetadataStore,
+  WeakMap<LocalDataGateway, ProjectAnalysisResultCache<PreschoolPlanningLifecycle>>
 >();
 
 const projectAnalysisCacheFor = (
@@ -189,6 +197,26 @@ const projectAnalysisCacheFor = (
     cache = createProjectAnalysisResultCache({
       capacity: PROJECT_ANALYSIS_CACHE_CAPACITY,
       ttlMs: PROJECT_ANALYSIS_CACHE_TTL_MS,
+    });
+    gatewayCaches.set(dataGateway, cache);
+  }
+  return cache;
+};
+
+const projectPlanningLifecycleCacheFor = (
+  metadataStore: MetadataStore,
+  dataGateway: LocalDataGateway,
+): ProjectAnalysisResultCache<PreschoolPlanningLifecycle> => {
+  let gatewayCaches = PROJECT_PLANNING_LIFECYCLE_CACHES.get(metadataStore);
+  if (!gatewayCaches) {
+    gatewayCaches = new WeakMap();
+    PROJECT_PLANNING_LIFECYCLE_CACHES.set(metadataStore, gatewayCaches);
+  }
+  let cache = gatewayCaches.get(dataGateway);
+  if (!cache) {
+    cache = createProjectAnalysisResultCache({
+      capacity: PROJECT_PLANNING_LIFECYCLE_CACHE_CAPACITY,
+      ttlMs: PROJECT_PLANNING_LIFECYCLE_CACHE_TTL_MS,
     });
     gatewayCaches.set(dataGateway, cache);
   }
@@ -486,16 +514,43 @@ export const resolveProjectAnalysis = async (input: {
       .getProject(resolution.snapshot.context.projectId).root_scope_id
   ) {
     const latestCompleteLocalDay = resolution.snapshot.context.latestCompleteLocalDay;
-    const preschoolPlanningLifecycle = latestCompleteLocalDay
-      ? await loadPreschoolPlanningLifecycle({
-      metadataStore: input.metadataStore,
-      dataGateway: input.dataGateway,
+    const savedAnalyses = input.metadataStore.energyIq.savedAnalyses.listProject(
+      releasedContext.projectId,
+    );
+    const lifecycleCacheKey = JSON.stringify({
+      contract: "preschool-planning-lifecycle-cache@1",
       userId: input.user.id,
-      context: releasedContext,
-      projectRelease,
+      workspaceId: releasedContext.workspaceId,
+      projectId: releasedContext.projectId,
+      scopeId: releasedContext.scopeId,
+      dataSnapshotId: releasedContext.dataSnapshotId,
+      projectReleaseId: projectRelease.id,
+      templateRevisionId: projectRelease.templateRevisionId,
       latestCompleteLocalDay,
       databasePath: analysisDatabasePath,
-    })
+      savedAnalyses: savedAnalyses.map((saved) => ({
+        id: saved.id,
+        sequence: saved.sequence,
+        dataSnapshotId: saved.data_snapshot_id,
+        templateRevisionId: saved.template_revision_id,
+        createdAt: saved.created_at,
+      })),
+    });
+    const preschoolPlanningLifecycle = latestCompleteLocalDay
+      ? await projectPlanningLifecycleCacheFor(input.metadataStore, input.dataGateway).resolve(
+        lifecycleCacheKey,
+        () => loadPreschoolPlanningLifecycle({
+          metadataStore: input.metadataStore,
+          dataGateway: input.dataGateway,
+          userId: input.user.id,
+          context: releasedContext,
+          projectRelease,
+          latestCompleteLocalDay,
+          savedAnalyses,
+          databasePath: analysisDatabasePath,
+        }),
+        { bypass: input.bypassCache === true || analysisDatabasePath === ":memory:" },
+      )
       : undefined;
     return {
       ...resolution,
