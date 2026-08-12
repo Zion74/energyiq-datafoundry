@@ -489,6 +489,69 @@ export class EnergyIqTemplateStore {
     return isRecord(row) ? mapTemplateRevision(row) : null;
   }
 
+  getProjectRevision(revisionId: string): EnergyIqTemplateRevisionRecord | null {
+    const row = this.db.prepare(`
+      SELECT * FROM energyiq_template_revisions WHERE revision_id = ?
+    `).get(revisionId);
+    return isRecord(row) ? mapTemplateRevision(row) : null;
+  }
+
+  /**
+   * Publish a server-validated document as a new immutable revision while the
+   * caller owns the approval transaction. All non-template release pins are
+   * copied from the reviewed base revision.
+   */
+  publishDocumentFromRevisionWithinTransaction(input: {
+    project_id: string;
+    expected_base_revision_id: string;
+    document: EnergyIqTemplateDraftDocument;
+    published_by: string;
+    published_at: string;
+  }): EnergyIqTemplateRevisionRecord {
+    const latest = this.getLatestProjectRevision(input.project_id);
+    if (!latest || latest.revision_id !== input.expected_base_revision_id) {
+      throw new Error("ENERGYIQ_TEMPLATE_CHANGE_BASE_REVISION_STALE");
+    }
+    const tierDefinitionIds = latest.document.templates
+      .filter((template) => template.target_kind === "tier")
+      .map((template) => template.tier_definition_id)
+      .filter((value): value is string => Boolean(value));
+    const document = validateAndCanonicalizeTemplateDocument({
+      document: input.document,
+      tier_definition_ids: tierDefinitionIds,
+      catalog: this.listComponentRevisions(),
+    });
+    const sequence = latest.sequence + 1;
+    const revisionId = `${input.project_id}-template-v${sequence}`;
+    this.db.prepare(`
+      INSERT INTO energyiq_template_revisions (
+        revision_id, project_id, sequence, source_template_draft_revision,
+        document_json, hierarchy_revision_id, meter_mapping_revision_id, meter_formula_revision_id,
+        metric_config_revision, selected_metric_revision_ids_json,
+        rule_config_revision, selected_rule_revision_ids_json,
+        business_calendar_version, tariff_schedule_version, published_by, published_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      revisionId,
+      input.project_id,
+      sequence,
+      latest.source_template_draft_revision,
+      JSON.stringify(document),
+      latest.hierarchy_revision_id,
+      latest.meter_mapping_revision_id,
+      latest.meter_formula_revision_id,
+      latest.metric_config_revision,
+      JSON.stringify(latest.selected_metric_revision_ids),
+      latest.rule_config_revision,
+      JSON.stringify(latest.selected_rule_revision_ids),
+      latest.business_calendar_version,
+      latest.tariff_schedule_version,
+      input.published_by,
+      input.published_at,
+    );
+    return this.requireProjectRevision(revisionId);
+  }
+
   /**
    * Freeze the latest reviewed analysis configuration while the caller owns
    * the surrounding SQLite transaction that also publishes the hierarchy.
@@ -791,7 +854,7 @@ const reconcileTemplateDocument = (
   };
 };
 
-const validateAndCanonicalizeTemplateDocument = (input: {
+export const validateAndCanonicalizeTemplateDocument = (input: {
   document: EnergyIqTemplateDraftDocument;
   tier_definition_ids: readonly string[];
   catalog: readonly EnergyIqComponentRevisionRecord[];

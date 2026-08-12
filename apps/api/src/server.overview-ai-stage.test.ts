@@ -52,6 +52,32 @@ describe("Overview AI server stage options", () => {
     },
   );
 
+  it("runs template proposals as a bounded structured-value stage with no tools or Energy context", () => {
+    expect(resolveOverviewAiStageRuntimeOptions("template-proposal")).toEqual({
+      analysisRequirementsMode: "omit",
+      conversationMessageMaxChars: 24_000,
+      disableTools: true,
+      excludedToolNames: [
+        "skill",
+        "skill_search",
+        "skill_read",
+        "inspect_schema",
+        "run_sql_readonly",
+        "protocol_handoff",
+      ],
+      overviewAiCandidateSubmission: false,
+      reasoningModel: false,
+      structuredOutput: resolveOverviewAiStageStructuredOutput("template-proposal"),
+    });
+    expect(resolveOverviewAiStageStructuredOutput("template-proposal")?.schema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: ["title", "rationale", "operations"],
+    });
+    expect(shouldUseEnergyContextForOverviewAiStage("template-proposal")).toBe(false);
+    expect(shouldIncludeProjectAnalysisEvidenceContext("template-proposal")).toBe(false);
+  });
+
   it.each([
     ["section-interpreter", "sectionId"],
     ["executive-synthesis", "keyFindings"],

@@ -29,7 +29,11 @@ import type {
   EnergyProjectRuleConfigResponseDto,
   EnergyProjectTemplateDraftResponseDto,
   EnergyPublishedTemplateResponseDto,
+  EnergyTemplateChangeContextDto,
+  EnergyTemplateChangePreviewDto,
+  EnergyTemplateChangeProposalDto,
   EnergyTemplateDraftDocumentDto,
+  EnergyTemplateRevisionDto,
   EnergyProjectHierarchyDto,
   EnergyProjectRecordDto,
   EnergyProjectSetupDocumentDto,
@@ -527,6 +531,48 @@ export const configApi = {
   getEnergyPublishedTemplate(projectId: string): Promise<EnergyPublishedTemplateResponseDto> {
     return requestEnvelope(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/published-template`,
+    );
+  },
+
+  getEnergyTemplateChangeContext(projectId: string): Promise<EnergyTemplateChangeContextDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/template-change-context`,
+    );
+  },
+
+  proposeEnergyTemplateChange(
+    projectId: string,
+    body: { instruction: string; scopeId?: string },
+  ): Promise<{
+    proposal: EnergyTemplateChangeProposalDto;
+    generation: { runId: string; sessionId: string };
+  }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/template-change-proposals`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  },
+
+  previewEnergyTemplateChange(projectId: string, proposalId: string): Promise<EnergyTemplateChangePreviewDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/template-change-proposals/${encodeURIComponent(proposalId)}/preview`,
+    );
+  },
+
+  rejectEnergyTemplateChange(projectId: string, proposalId: string): Promise<{ proposal: EnergyTemplateChangeProposalDto }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/template-change-proposals/${encodeURIComponent(proposalId)}/reject`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  },
+
+  publishEnergyTemplateChange(projectId: string, proposalId: string): Promise<{
+    proposal: EnergyTemplateChangeProposalDto;
+    revision: EnergyTemplateRevisionDto;
+  }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/template-change-proposals/${encodeURIComponent(proposalId)}/publish`,
+      { method: "POST", body: JSON.stringify({}) },
     );
   },
 

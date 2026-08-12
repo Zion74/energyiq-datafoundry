@@ -21,23 +21,31 @@ export function TemplateDraftPreview({
   plan,
   previewRange,
   dirty,
+  fixedIdentity,
 }: {
   projectId: string;
   plan: TemplatePreviewPlan;
   previewRange: EnergyPreviewRange | null;
   dirty: boolean;
+  fixedIdentity?: {
+    scopeId: string;
+    dataSnapshotId: string;
+    projectReleaseId: string;
+  };
 }) {
   const [scopeId, setScopeId] = useState(plan.recommendedScopeId);
+  const requestScopeId = fixedIdentity?.scopeId ?? scopeId;
   const [period, setPeriod] = useState<PreviewPeriod>(previewRange ? "Available facts" : "Last 30 days");
   const [customFrom, setCustomFrom] = useState(previewRange?.fromDate ?? "");
   const [customTo, setCustomTo] = useState(previewRange?.toDate ?? "");
   const [submittedRequest, setSubmittedRequest] = useState(() => buildTemplatePreviewRequest({
     projectId,
-    scopeId,
+    scopeId: requestScopeId,
     period,
     previewRange,
     customFrom,
     customTo,
+    fixedIdentity,
   }));
   const [analysis, setAnalysis] = useState<EnergyScopeAnalysisDto | null>(null);
   const [loading, setLoading] = useState(Boolean(submittedRequest));
@@ -67,11 +75,12 @@ export function TemplateDraftPreview({
 
   const nextRequest = buildTemplatePreviewRequest({
     projectId,
-    scopeId,
+    scopeId: requestScopeId,
     period,
     previewRange,
     customFrom,
     customTo,
+    fixedIdentity,
   });
   const renderedAnalysis = analysis?.context.projectId === projectId ? analysis : null;
   const rendererState = resolveDraftPreviewRendererState({
@@ -107,6 +116,7 @@ export function TemplateDraftPreview({
               value={scopeId}
               options={plan.scopes.map((scope) => ({ value: scope.id, label: `${scope.name} · ${scope.detail}` }))}
               onValueChange={setScopeId}
+              disabled={Boolean(fixedIdentity)}
               className="mt-1.5 w-full"
               size="small"
             />

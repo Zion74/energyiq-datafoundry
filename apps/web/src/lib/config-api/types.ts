@@ -2193,6 +2193,65 @@ export type EnergyPublishedTemplateResponseDto = {
   catalog: EnergyComponentRevisionDto[];
 };
 
+export type EnergyTemplateChangeDiffItemDto = {
+  kind: "placement_added" | "placement_removed" | "placement_moved" | "section_changed" | "layout_updated" | "presentation_updated";
+  template_id: string;
+  placement_id: string;
+  summary: string;
+};
+
+export type EnergyTemplateChangeProposalDto = {
+  id: string;
+  workspace_id: string;
+  project_id: string;
+  base_revision_id: string;
+  data_snapshot_id: string;
+  scope_id: string;
+  instruction: string;
+  proposal: {
+    title: string;
+    rationale: string;
+    operations: Array<Record<string, unknown>>;
+  };
+  document: EnergyTemplateDraftDocumentDto;
+  diff: EnergyTemplateChangeDiffItemDto[];
+  status: "pending_review" | "rejected" | "published";
+  created_by: string;
+  created_at: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
+  published_revision_id?: string;
+};
+
+export type EnergyTemplateChangeContextDto = {
+  fixedIdentity: {
+    workspaceId: string;
+    projectId: string;
+    scopeId: string;
+    dataSnapshotId: string;
+    projectReleaseId: string;
+  };
+  revision: EnergyTemplateRevisionDto;
+  catalog: EnergyComponentRevisionDto[];
+  proposals: EnergyTemplateChangeProposalDto[];
+  rendererBoundary: {
+    previewRenderer: "structured-template";
+    customerRenderer: string;
+    customerRendererAutomaticallyReordered: false;
+    message: string;
+  };
+};
+
+export type EnergyTemplateChangePreviewDto = {
+  proposal: EnergyTemplateChangeProposalDto;
+  catalog: EnergyComponentRevisionDto[];
+  fixedIdentity: EnergyTemplateChangeContextDto["fixedIdentity"];
+  rendererBoundary: {
+    previewRenderer: "structured-template";
+    customerRendererAutomaticallyReordered: false;
+  };
+};
+
 export type DevIdentitiesResponseDto = {
   users: DevIdentityUser[];
   currentUserId: string;

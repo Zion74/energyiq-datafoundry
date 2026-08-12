@@ -149,8 +149,18 @@ export function buildTemplatePreviewRequest(input: {
   previewRange: EnergyPreviewRange | null;
   customFrom: string;
   customTo: string;
+  fixedIdentity?: {
+    dataSnapshotId: string;
+    projectReleaseId: string;
+  };
 }): EnergyQueryContextRequestDto | null {
   if (!input.projectId || !input.scopeId) return null;
+  const fixedPins = input.fixedIdentity
+    ? {
+        expectedDataSnapshotId: input.fixedIdentity.dataSnapshotId,
+        expectedProjectReleaseId: input.fixedIdentity.projectReleaseId,
+      }
+    : {};
   if (input.period === "Available facts") {
     if (!input.previewRange) return null;
     return {
@@ -160,6 +170,7 @@ export function buildTemplatePreviewRequest(input: {
       period: "Custom",
       from: input.previewRange.from,
       to: input.previewRange.to,
+      ...fixedPins,
     };
   }
   if (input.period === "Custom") {
@@ -171,6 +182,7 @@ export function buildTemplatePreviewRequest(input: {
       period: "Custom",
       from: input.customFrom,
       to: input.customTo,
+      ...fixedPins,
     };
   }
   return {
@@ -178,6 +190,7 @@ export function buildTemplatePreviewRequest(input: {
     scopeId: input.scopeId,
     resource: "electricity",
     period: input.period,
+    ...fixedPins,
   };
 }
 

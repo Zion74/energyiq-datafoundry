@@ -8,6 +8,7 @@ import { EnergyIqRuleStore } from "./energyiq-rule-store.js";
 import { EnergyIqSavedAnalysisStore } from "./energyiq-saved-analysis-store.js";
 import { EnergyIqScopeMetadataResolver } from "./energyiq-scope-metadata-resolver.js";
 import { EnergyIqTemplateStore } from "./energyiq-template-store.js";
+import { EnergyIqTemplateChangeStore } from "./energyiq-template-change.js";
 
 import {
   EnergyIqProjectSetupStore,
@@ -263,6 +264,7 @@ export class EnergyIqStore {
   readonly savedAnalyses: EnergyIqSavedAnalysisStore;
   readonly scopeMetadata: EnergyIqScopeMetadataResolver;
   readonly templates: EnergyIqTemplateStore;
+  readonly templateChanges: EnergyIqTemplateChangeStore;
 
   constructor(private readonly db: DatabaseSync) {
     this.metrics = new EnergyIqMetricStore(db);
@@ -273,6 +275,7 @@ export class EnergyIqStore {
     this.savedAnalyses = new EnergyIqSavedAnalysisStore(db);
     this.scopeMetadata = new EnergyIqScopeMetadataResolver(db);
     this.templates = new EnergyIqTemplateStore(db);
+    this.templateChanges = new EnergyIqTemplateChangeStore(db);
   }
 
   upsertUserRole(input: { user_id: string; role: EnergyIqRole }): EnergyIqUserRoleRecord {

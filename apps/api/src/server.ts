@@ -105,6 +105,7 @@ import {
   type PreschoolOverviewAiStageInput,
 } from "./energy/preschool-overview-ai-workflow.js";
 import { createPreschoolOverviewAiPageWorkflow } from "./energy/preschool-overview-ai-page-workflow.js";
+import { createEnergyIqTemplateChangeWorkflow } from "./energy/energy-template-change-workflow.js";
 import { resolveOverviewAiStageStructuredOutput } from "./energy/preschool-overview-ai-structured-output.js";
 export { resolveOverviewAiStageStructuredOutput } from "./energy/preschool-overview-ai-structured-output.js";
 
@@ -131,15 +132,18 @@ let startupTotalMs = 0;
 
 export const resolveOverviewAiStageRuntimeOptions = (stage: PreschoolOverviewAiStage) => {
   const structuredOutput = resolveOverviewAiStageStructuredOutput(stage);
+  const boundedValueStage = stage === "section-interpreter"
+    || stage === "executive-synthesis"
+    || stage === "template-proposal";
   return {
     analysisRequirementsMode: "omit" as const,
-    ...(stage === "section-interpreter" || stage === "executive-synthesis"
+    ...(boundedValueStage
       ? {
           conversationMessageMaxChars: stage === "section-interpreter" ? 12_000 : 24_000,
           disableTools: true as const,
         }
       : {}),
-    excludedToolNames: stage === "section-interpreter" || stage === "executive-synthesis"
+    excludedToolNames: boundedValueStage
       ? ["skill", "skill_search", "skill_read", "inspect_schema", "run_sql_readonly", "protocol_handoff"] as const
       : stage === "editor"
         ? ["inspect_schema", "run_sql_readonly", "protocol_handoff"] as const
@@ -156,7 +160,7 @@ export const shouldIncludeProjectAnalysisEvidenceContext = (
 
 export const shouldUseEnergyContextForOverviewAiStage = (
   stage?: PreschoolOverviewAiStage,
-): boolean => stage !== "section-interpreter" && stage !== "executive-synthesis";
+): boolean => stage !== "section-interpreter" && stage !== "executive-synthesis" && stage !== "template-proposal";
 
 const emitEarlyRunFailure = (
   subscriber: { complete(): void; next(event: BaseEvent): void },
@@ -340,6 +344,18 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
     runSection: (stageInput) => runOverviewAiValueStage({ ...stageInput, stage: "section-interpreter" }),
     runExecutiveSynthesis: (stageInput) => runOverviewAiValueStage({ ...stageInput, stage: "executive-synthesis" }),
   });
+  const templateChangeWorkflow = createEnergyIqTemplateChangeWorkflow({
+    metadataStore,
+    resolveIdentity: ({ projectId, scopeId, user }) => overviewAiWorkflow.resolveCurrentIdentity({
+      projectId,
+      scopeId,
+      user,
+    }),
+    runProposal: (stageInput) => runOverviewAiValueStage({
+      ...stageInput,
+      stage: "template-proposal",
+    }),
+  });
 
   // After restart, cancel-registry is empty — reclaim queued/running rows left by dead workers.
   const reclaimedActiveRuns = await timer.measure("stale_active_run_reclaim", () =>
@@ -418,6 +434,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
         knowledgeService,
         metadataStore,
         overviewAiWorkflow,
+        templateChangeWorkflow,
         runCancelRegistry,
         userId: authContext.user.id,
         workspaceId: authContext.workspaceId
@@ -564,20 +581,20 @@ export const buildOverviewAiStageRunInput = (input: OverviewAiRuntimeStageInput)
     run_config: {
       protocol: { id: "data-analysis", version: "1" },
       activeLlmProfileId: input.identity.modelProfileId,
-      skillMode: input.stage === "section-interpreter" || input.stage === "executive-synthesis"
+      skillMode: isIsolatedValueStage(input.stage)
         ? "none"
         : "auto",
-      ...((input.stage === "section-interpreter" || input.stage === "executive-synthesis")
+      ...(isIsolatedValueStage(input.stage)
         ? {}
         : { activeSkillId: input.identity.methodSkillId }),
       enabledDatasourceIds: [],
       enabledKnowledgeIds: [],
       enabledMcpServerIds: [],
-      enabledSkillIds: input.stage === "section-interpreter" || input.stage === "executive-synthesis"
+      enabledSkillIds: isIsolatedValueStage(input.stage)
         ? []
         : [input.identity.methodSkillId],
       skillPolicy: {
-        allowedToolNames: input.stage === "section-interpreter" || input.stage === "executive-synthesis"
+        allowedToolNames: isIsolatedValueStage(input.stage)
           ? []
           : input.stage === "editor"
             ? ["skill", "skill_search", "skill_read"]
@@ -590,6 +607,9 @@ export const buildOverviewAiStageRunInput = (input: OverviewAiRuntimeStageInput)
     },
   },
 });
+
+const isIsolatedValueStage = (stage: PreschoolOverviewAiStage): boolean =>
+  stage === "section-interpreter" || stage === "executive-synthesis" || stage === "template-proposal";
 
 type HandleCopilotKitRequestInput = {
   artifactService: LocalArtifactService;

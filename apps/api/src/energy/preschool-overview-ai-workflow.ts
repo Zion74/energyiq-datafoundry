@@ -33,7 +33,7 @@ type PlacementTarget =
   | "cross-section";
 type EpistemicLevel = "verified" | "hypothesis" | "exploration-idea";
 type Relationship = "supports" | "challenges" | "independent";
-export type PreschoolOverviewAiStage = "investigator" | "editor" | "section-interpreter" | "executive-synthesis";
+export type PreschoolOverviewAiStage = "investigator" | "editor" | "section-interpreter" | "executive-synthesis" | "template-proposal";
 
 const OVERVIEW_AI_CANDIDATE_SUBMISSION_TOOL_NAME = "overview_ai_candidates_submit" as const;
 

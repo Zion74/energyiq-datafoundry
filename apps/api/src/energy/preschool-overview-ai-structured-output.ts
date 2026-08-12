@@ -5,16 +5,19 @@ import type { PreschoolOverviewAiStage } from "./preschool-overview-ai-workflow.
 
 type StructuredEnvelope = Record<string, unknown>;
 type JsonSchema = {
-  type: "object" | "array" | "string";
+  type: "object" | "array" | "string" | "integer" | "boolean";
   additionalProperties?: boolean;
   required?: string[];
   properties?: Record<string, JsonSchema>;
   items?: JsonSchema;
-  enum?: string[];
+  enum?: Array<string | number | boolean>;
   minLength?: number;
+  maxLength?: number;
   minItems?: number;
   maxItems?: number;
   uniqueItems?: boolean;
+  minimum?: number;
+  maximum?: number;
 };
 
 const nonEmptyString: JsonSchema = { type: "string", minLength: 1 };
@@ -94,10 +97,77 @@ export const PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V1 = {
   },
 } satisfies PublicStructuredOutputOptions<StructuredEnvelope>;
 
+const templateChangeOperation: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["op", "templateId"],
+  properties: {
+    op: {
+      type: "string",
+      enum: [
+        "add_placement",
+        "remove_placement",
+        "move_placement",
+        "set_section",
+        "update_layout",
+        "update_presentation",
+      ],
+    },
+    templateId: nonEmptyString,
+    componentRevisionId: nonEmptyString,
+    placementId: nonEmptyString,
+    sectionId: nonEmptyString,
+    beforePlacementId: nonEmptyString,
+    layout: {
+      type: "object",
+      additionalProperties: false,
+      required: ["span", "height"],
+      properties: {
+        span: { type: "integer", enum: [4, 6, 8, 12] },
+        height: { type: "string", enum: ["compact", "standard", "tall"] },
+      },
+    },
+    presentation: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        visual_preset: { type: "string", enum: ["auto", "cards", "bar", "area", "table", "list"] },
+        density: { type: "string", enum: ["comfortable", "compact"] },
+        tone: { type: "string", enum: ["default", "highlight", "quiet"] },
+        show_legend: { type: "boolean" },
+        limit: { type: "integer", minimum: 1, maximum: 100 },
+        title: nonEmptyString,
+        description: nonEmptyString,
+      },
+    },
+  },
+};
+
+/** Model output is only a typed proposal. Validation, preview and publishing remain server-owned. */
+export const ENERGYIQ_TEMPLATE_CHANGE_PROPOSAL_STRUCTURED_OUTPUT_V1 = {
+  errorStrategy: "strict",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["title", "rationale", "operations"],
+    properties: {
+      title: { type: "string", minLength: 1, maxLength: 120 },
+      rationale: { type: "string", minLength: 1, maxLength: 800 },
+      operations: {
+        type: "array",
+        minItems: 1,
+        maxItems: 20,
+        items: templateChangeOperation,
+      },
+    },
+  },
+} satisfies PublicStructuredOutputOptions<StructuredEnvelope>;
+
 export const resolveOverviewAiStageStructuredOutput = (
   stage: PreschoolOverviewAiStage,
 ): PublicStructuredOutputOptions<StructuredEnvelope> | undefined => {
   if (stage === "section-interpreter") return PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V3;
   if (stage === "executive-synthesis") return PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V1;
+  if (stage === "template-proposal") return ENERGYIQ_TEMPLATE_CHANGE_PROPOSAL_STRUCTURED_OUTPUT_V1;
   return undefined;
 };

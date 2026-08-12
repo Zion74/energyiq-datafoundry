@@ -29,6 +29,7 @@ import {
 } from "./energyiq-rule-store.js";
 import { initializeEnergyIqSavedAnalysisSchema } from "./energyiq-saved-analysis-store.js";
 import { initializeEnergyIqTemplateRevisionSchema, initializeEnergyIqTemplateSchema } from "./energyiq-template-store.js";
+import { initializeEnergyIqTemplateChangeSchema } from "./energyiq-template-change.js";
 
 export * from "./config-store.js";
 export * from "./energyiq-store.js";
@@ -41,6 +42,7 @@ export * from "./energyiq-overview-ai-artifact-store.js";
 export * from "./energyiq-project-setup-store.js";
 export * from "./energyiq-rule-store.js";
 export * from "./energyiq-template-store.js";
+export * from "./energyiq-template-change.js";
 export * from "./workspace-model-profile-store.js";
 
 export type UserRecord = {
@@ -4071,6 +4073,9 @@ const runMigrations = (db: DatabaseSync): void => {
   });
   runSchemaMigration(db, "0030_energyiq_overview_ai_artifact", "Persist shared EnergyIQ Overview AI artifacts", () => {
     initializeEnergyIqOverviewAiArtifactSchema(db);
+  });
+  runSchemaMigration(db, "0031_energyiq_template_change_proposal", "Persist reviewed EnergyIQ template change proposals", () => {
+    initializeEnergyIqTemplateChangeSchema(db);
   });
 };
 

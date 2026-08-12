@@ -27,6 +27,7 @@ import type {
 import {
   createDefaultTemplateDocument,
   createEnergyIqSourceManifest,
+  parseEnergyIqTemplateChangeProposal,
   resolveEnergyIqMaterializationBlockingReasons,
   resolveEnergyIqProjectDataReadiness,
 } from "@datafoundry/metadata";
@@ -708,6 +709,132 @@ export const handleEnergyApiRequest = async (
         };
       }
     }
+    if (segments[0] === "projects" && segments[2] === "template-change-context" && segments.length === 3) {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      requireEnergyAdminProject(context, user, projectId);
+      if (request.method !== "GET") throw new Error("ENERGYIQ_TEMPLATE_CHANGE_METHOD_INVALID");
+      const project = context.metadataStore.energyIq.getProject(projectId);
+      const revision = context.metadataStore.energyIq.templates.getLatestProjectRevision(projectId);
+      if (!revision) throw new Error("ENERGYIQ_TEMPLATE_CHANGE_BASE_REVISION_REQUIRED");
+      return {
+        status: 200,
+        body: createSuccessResult({
+          fixedIdentity: {
+            workspaceId: project.workspace_id,
+            projectId,
+            scopeId: project.root_scope_id,
+            dataSnapshotId: project.data_snapshot_id,
+            projectReleaseId: revision.revision_id,
+          },
+          revision,
+          catalog: context.metadataStore.energyIq.templates.listComponentRevisions(),
+          proposals: context.metadataStore.energyIq.templateChanges.listProject(projectId),
+          rendererBoundary: {
+            previewRenderer: "structured-template",
+            customerRenderer: resolveProjectOverviewProfile(projectId)?.rendererKey ?? "energy-template",
+            customerRendererAutomaticallyReordered: false,
+            message: "This preview validates the structured Template Revision. A registered customer renderer remains unchanged until its renderer bridge or Coding Agent stage is approved.",
+          },
+        }),
+      };
+    }
+    if (segments[0] === "projects" && segments[2] === "template-change-proposals") {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      requireEnergyAdminProject(context, user, projectId);
+      const proposalId = segments[3] ? decodeURIComponent(segments[3]) : undefined;
+      if (segments.length === 3 && request.method === "GET") {
+        return {
+          status: 200,
+          body: createSuccessResult({
+            proposals: context.metadataStore.energyIq.templateChanges.listProject(projectId),
+          }),
+        };
+      }
+      if (segments.length === 3 && request.method === "POST") {
+        if (!context.templateChangeWorkflow) throw new Error("ENERGYIQ_TEMPLATE_CHANGE_WORKFLOW_REQUIRED");
+        const body = requireRecord(await readJsonBody(request));
+        const instruction = requireNonEmptyString(
+          body.instruction,
+          "ENERGYIQ_TEMPLATE_CHANGE_INSTRUCTION_REQUIRED",
+        );
+        if (instruction.length > 2_000) {
+          throw new Error("ENERGYIQ_TEMPLATE_CHANGE_INSTRUCTION_INVALID");
+        }
+        const project = context.metadataStore.energyIq.getProject(projectId);
+        const scopeId = optionalString(body.scopeId) ?? project.root_scope_id;
+        const generated = await context.templateChangeWorkflow.propose({
+          projectId,
+          scopeId,
+          instruction,
+          user,
+        });
+        const proposal = context.metadataStore.energyIq.templateChanges.create({
+          id: `template-change-${randomUUID()}`,
+          workspace_id: generated.identity.workspaceId,
+          project_id: generated.identity.projectId,
+          base_revision_id: generated.identity.projectReleaseId,
+          data_snapshot_id: generated.identity.dataSnapshotId,
+          scope_id: generated.identity.scopeId,
+          instruction,
+          proposal: parseEnergyIqTemplateChangeProposal(generated.proposal),
+          created_by: user.id,
+          created_at: new Date().toISOString(),
+        });
+        return {
+          status: 201,
+          body: createSuccessResult({
+            proposal,
+            generation: { runId: generated.runId, sessionId: generated.sessionId },
+          }),
+        };
+      }
+      if (proposalId && segments[4] === "preview" && segments.length === 5 && request.method === "GET") {
+        const proposal = context.metadataStore.energyIq.templateChanges.get(proposalId);
+        if (!proposal || proposal.project_id !== projectId) throw new Error("ENERGYIQ_TEMPLATE_CHANGE_NOT_FOUND");
+        return {
+          status: 200,
+          body: createSuccessResult({
+            proposal,
+            catalog: context.metadataStore.energyIq.templates.listComponentRevisions(),
+            fixedIdentity: {
+              workspaceId: proposal.workspace_id,
+              projectId: proposal.project_id,
+              scopeId: proposal.scope_id,
+              dataSnapshotId: proposal.data_snapshot_id,
+              projectReleaseId: proposal.base_revision_id,
+            },
+            rendererBoundary: {
+              previewRenderer: "structured-template",
+              customerRendererAutomaticallyReordered: false,
+            },
+          }),
+        };
+      }
+      if (proposalId && segments[4] === "reject" && segments.length === 5 && request.method === "POST") {
+        return {
+          status: 200,
+          body: createSuccessResult({
+            proposal: context.metadataStore.energyIq.templateChanges.reject({
+              id: proposalId,
+              project_id: projectId,
+              rejected_by: user.id,
+              rejected_at: new Date().toISOString(),
+            }),
+          }),
+        };
+      }
+      if (proposalId && segments[4] === "publish" && segments.length === 5 && request.method === "POST") {
+        return {
+          status: 200,
+          body: createSuccessResult(context.metadataStore.energyIq.templateChanges.publish({
+            id: proposalId,
+            project_id: projectId,
+            published_by: user.id,
+            published_at: new Date().toISOString(),
+          })),
+        };
+      }
+    }
     if (segments[0] === "projects" && segments[2] === "saved-analyses") {
       const projectId = decodeURIComponent(segments[1] ?? "");
       const projectAccessContext = resolveEnergyAccessContext({
@@ -1081,6 +1208,7 @@ export const toEnergyApiErrorResponse = (error: unknown): ConfigApiResponse => {
     || message.startsWith("ENERGYIQ_IMPORT_MATERIALIZATION_NOT_READY:")
     || message.startsWith("ENERGYIQ_SNAPSHOT_STALE")
     || message.startsWith("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE")
+    || message === "ENERGYIQ_TEMPLATE_CHANGE_BASE_REVISION_STALE"
     || message === "ENERGYIQ_DATA_SNAPSHOT_MISMATCH"
     || message === "ENERGYIQ_PROJECT_RELEASE_MISMATCH"
     || message.startsWith("ENERGYIQ_DATA_SNAPSHOT_IMMUTABLE_CONFLICT:")
