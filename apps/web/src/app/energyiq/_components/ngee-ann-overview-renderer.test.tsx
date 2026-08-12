@@ -204,6 +204,46 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).not.toContain("0 kWh above its comparable-day baseline");
   });
 
+  it("labels an incomplete component Category period partial and withholds its totals", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const project = snapshot.analysis.componentCategoryBreakdown!.scopes[0]!;
+    const incompleteDay = project.rows[0]!;
+    incompleteDay.categories[0]!.usageKwh = null;
+    incompleteDay.categories[0]!.sharePct = null;
+    incompleteDay.componentUsageKwh = null;
+    incompleteDay.dataHealth = {
+      ...incompleteDay.dataHealth,
+      status: "partial",
+      coveragePct: 75,
+      validIntervalCount: Math.floor(incompleteDay.dataHealth.expectedMeterIntervalCount * 0.75),
+    };
+    Object.assign(project.period, {
+      status: "partial",
+      reason: "At least one daily component Category is incomplete.",
+      officialUsageKwh: null,
+      componentUsageKwh: null,
+      gapKwh: null,
+      ratioPct: null,
+      categories: project.period.categories.map((category) => ({
+        ...category,
+        usageKwh: null,
+        sharePct: null,
+      })),
+    });
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+    const container = document.createElement("div");
+    container.innerHTML = markup;
+    const section = container.querySelector('section[aria-labelledby="ngee-ann-consumption-breakdown"]');
+
+    expect(section?.textContent).toContain("Partial component data");
+    expect(section?.textContent).toContain("Period totals withheld");
+    expect(section?.textContent).not.toContain("Component subtotal: 1,519 kWh");
+    expect(section?.textContent).not.toContain("Official Scope total: 1,531.2 kWh");
+  });
+
   it("shows one deterministic theme across latest day, rolling 7 days and rolling 28 days", () => {
     const markup = renderToStaticMarkup(
       <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot: ngeeAnnGoldenSnapshot() }} />,

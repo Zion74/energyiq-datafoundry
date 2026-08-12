@@ -446,14 +446,16 @@ export type EnergyComponentCategoryBreakdownDto = {
     scopeName: string;
     scopeType: string;
     period: {
-      officialUsageKwh: number;
-      componentUsageKwh: number;
-      gapKwh: number;
+      status: "complete" | "partial" | "unavailable";
+      reason: string | null;
+      officialUsageKwh: number | null;
+      componentUsageKwh: number | null;
+      gapKwh: number | null;
       ratioPct: number | null;
       categories: Array<{
         category: string;
-        usageKwh: number;
-        sharePct: number;
+        usageKwh: number | null;
+        sharePct: number | null;
       }>;
     };
     rows: Array<{

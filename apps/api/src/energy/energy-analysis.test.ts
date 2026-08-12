@@ -1332,12 +1332,17 @@ describe("EnergyScopeAnalysis", () => {
         (scope) => scope.scopeId === "project",
       );
       expect(projectComponentBreakdown?.rows).toHaveLength(7);
+      expect((projectComponentBreakdown?.period as unknown as { status?: string })?.status)
+        .toBe("complete");
       expect(projectComponentBreakdown?.period.componentUsageKwh)
         .toBeCloseTo(NGEE_ANN_GOLDEN.period.componentReconciliation.componentUsageKwh, 3);
       expect(projectComponentBreakdown?.period.officialUsageKwh)
         .toBeCloseTo(NGEE_ANN_GOLDEN.period.usageKwh, 3);
+      expect(projectComponentBreakdown?.period.categories.every(
+        (category) => category.usageKwh !== null,
+      )).toBe(true);
       expect(projectComponentBreakdown?.period.categories.reduce(
-        (sum, category) => sum + category.usageKwh,
+        (sum, category) => sum + (category.usageKwh as number),
         0,
       )).toBeCloseTo(projectComponentBreakdown?.period.componentUsageKwh ?? 0, 3);
       for (const row of projectComponentBreakdown?.rows ?? []) {
@@ -1878,6 +1883,31 @@ describe("EnergyScopeAnalysis", () => {
     expect(analysis.timeBehaviour?.scopes.find((scope) => scope.scopeId === "project")
       ?.cells.find((cell) => cell.localDate === "2026-06-10" && cell.localHour === 8)
       ?.dataHealth.status).toBe("complete");
+  }, 30_000);
+
+  it("withholds component Category period totals when one daily Category row is partial", async () => {
+    const analysis = await analyzeNgeeAnnFixture((facts) => facts.filter((fact) => !(
+      fact.meterPointId === "mapping-lvl-7-office-load-1-l1p1-l3p6-13"
+      && fact.intervalStart === "2026-06-11T16:00:00.000Z"
+    )));
+    const project = analysis.componentCategoryBreakdown?.scopes.find(
+      (scope) => scope.scopeId === "project",
+    );
+
+    expect(project?.rows.find((row) => row.localDate === "2026-06-12")).toMatchObject({
+      componentUsageKwh: null,
+      dataHealth: { status: "partial" },
+    });
+    expect(project?.period).toMatchObject({
+      status: "partial",
+      officialUsageKwh: null,
+      componentUsageKwh: null,
+      gapKwh: null,
+      ratioPct: null,
+      categories: expect.arrayContaining([
+        expect.objectContaining({ usageKwh: null, sharePct: null }),
+      ]),
+    });
   }, 30_000);
 
   it.each([

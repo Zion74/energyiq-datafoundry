@@ -267,14 +267,16 @@ export type EnergyScopeAnalysis = {
       scopeName: string;
       scopeType: string;
       period: {
-        officialUsageKwh: number;
-        componentUsageKwh: number;
-        gapKwh: number;
+        status: "complete" | "partial" | "unavailable";
+        reason: string | null;
+        officialUsageKwh: number | null;
+        componentUsageKwh: number | null;
+        gapKwh: number | null;
         ratioPct: number | null;
         categories: Array<{
           category: string;
-          usageKwh: number;
-          sharePct: number;
+          usageKwh: number | null;
+          sharePct: number | null;
         }>;
       };
       rows: Array<{
@@ -2931,11 +2933,16 @@ const buildComponentCategoryBreakdown = (input: {
             : [];
           }),
         );
-        const availableCategoryValues = categories.flatMap((category) =>
-          category.usageKwh === null ? [] : [category.usageKwh],
-        );
-        const componentUsageKwh = availableCategoryValues.length > 0
-          ? round(availableCategoryValues.reduce((sum, value) => sum + value, 0), 4)
+        const dataStatus = validIntervalCount === 0
+          ? "unavailable" as const
+          : validIntervalCount === expectedMeterIntervalCount && qualityEventCount === 0
+            ? "complete" as const
+            : "partial" as const;
+        const completeCategoryValues = categories.every((category) => category.usageKwh !== null)
+          ? categories.map((category) => category.usageKwh as number)
+          : null;
+        const componentUsageKwh = dataStatus === "complete" && completeCategoryValues
+          ? round(completeCategoryValues.reduce((sum, value) => sum + value, 0), 4)
           : null;
         const officialDailyRow = officialDailyRows.get(bucket.localDate);
         const officialUsageKwh = officialDailyRow?.usageKwh ?? null;
@@ -2959,11 +2966,7 @@ const buildComponentCategoryBreakdown = (input: {
             usageKwh: officialUsageKwh,
           }),
           dataHealth: {
-            status: validIntervalCount === 0
-              ? "unavailable" as const
-              : validIntervalCount === expectedMeterIntervalCount && qualityEventCount === 0
-                ? "complete" as const
-                : "partial" as const,
+            status: dataStatus,
             coveragePct: expectedMeterIntervalCount > 0
               ? round(Math.min(validIntervalCount / expectedMeterIntervalCount, 1) * 100, 4)
               : 0,
@@ -2973,34 +2976,60 @@ const buildComponentCategoryBreakdown = (input: {
           },
         };
       });
+      const periodComplete = rows.length > 0 && rows.every((row) =>
+        row.dataHealth.status === "complete"
+        && row.officialUsageKwh !== null
+        && row.componentUsageKwh !== null
+        && row.categories.every((category) => category.usageKwh !== null),
+      );
+      const hasUsableFacts = rows.some((row) =>
+        row.officialUsageKwh !== null
+        || row.categories.some((category) => category.usageKwh !== null),
+      );
+      const periodStatus = periodComplete
+        ? "complete" as const
+        : hasUsableFacts
+          ? "partial" as const
+          : "unavailable" as const;
       const periodCategories = orderedSeries.map((definition) => ({
         category: definition.category,
-        usageKwh: round(rows.reduce((sum, row) => sum + (
-          row.categories.find((category) => category.category === definition.category)?.usageKwh ?? 0
-        ), 0), 4),
+        usageKwh: periodComplete
+          ? round(rows.reduce((sum, row) => {
+            const usageKwh = row.categories.find((category) => category.category === definition.category)?.usageKwh;
+            return sum + (usageKwh as number);
+          }, 0), 4)
+          : null,
       }));
-      const componentUsageKwh = round(
-        periodCategories.reduce((sum, category) => sum + category.usageKwh, 0),
-        4,
-      );
-      const officialUsageKwh = round(
-        rows.reduce((sum, row) => sum + (row.officialUsageKwh ?? 0), 0),
-        4,
-      );
+      const componentUsageKwh = periodComplete
+        ? round(periodCategories.reduce((sum, category) => sum + (category.usageKwh as number), 0), 4)
+        : null;
+      const officialUsageKwh = periodComplete
+        ? round(rows.reduce((sum, row) => sum + (row.officialUsageKwh as number), 0), 4)
+        : null;
       return {
         scopeId: scope.scopeId,
         scopeName: scope.scopeName,
         scopeType: scope.scopeType,
         period: {
+          status: periodStatus,
+          reason: periodStatus === "complete"
+            ? null
+            : periodStatus === "partial"
+              ? "One or more daily component Category rows are incomplete; period totals are withheld."
+              : "No usable daily component Category rows are available; period totals are withheld.",
           officialUsageKwh,
           componentUsageKwh,
-          gapKwh: round(officialUsageKwh - componentUsageKwh, 4),
-          ratioPct: officialUsageKwh > 0
+          gapKwh: officialUsageKwh === null || componentUsageKwh === null
+            ? null
+            : round(officialUsageKwh - componentUsageKwh, 4),
+          ratioPct: officialUsageKwh !== null && officialUsageKwh > 0 && componentUsageKwh !== null
             ? round(componentUsageKwh / officialUsageKwh * 100, 4)
             : null,
           categories: periodCategories.map((category) => ({
             ...category,
-            sharePct: percent(category.usageKwh, componentUsageKwh, 4),
+            sharePct: category.usageKwh === null || componentUsageKwh === null
+              ? null
+              : percent(category.usageKwh, componentUsageKwh, 4),
           })),
         },
         rows,

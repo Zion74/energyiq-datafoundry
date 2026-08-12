@@ -88,6 +88,13 @@ export function NgeeAnnConsumptionBreakdown({
         </div>
       </div>
 
+      {view.status === "partial" ? (
+        <div className="mt-5 rounded-lg border border-warning/35 bg-warning/10 px-4 py-3" role="status">
+          <p className="text-sm font-semibold text-foreground">Partial component data</p>
+          <p className="mt-1 text-xs leading-5 text-muted">{view.reason} Daily rows remain visible with their own data-health state.</p>
+        </div>
+      ) : null}
+
       <div className="mt-5 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-muted" aria-label="Consumption Breakdown legend">
         {(selectedCategoryId === "all" || filterMode === "space" ? view.categories : view.categories.filter((category) => category.id === selectedCategoryId)).map((category) => (
           <span key={category.id} className="inline-flex items-center gap-2">
@@ -109,11 +116,17 @@ export function NgeeAnnConsumptionBreakdown({
         onActiveRowChange={setActiveRowId}
       />
 
-      <div className="mt-4 grid gap-3 border-t border-border pt-4 text-xs leading-5 text-muted sm:grid-cols-3">
-        <p><span className="font-semibold text-foreground">Component subtotal:</span> {selectedScope.period.componentUsageKwh} kWh.</p>
-        <p><span className="font-semibold text-foreground">Official Scope total:</span> {selectedScope.period.officialUsageKwh} kWh.</p>
-        <p><span className="font-semibold text-foreground">Coverage ratio:</span> {selectedScope.period.ratioPct}; gap {selectedScope.period.gapKwh} kWh.</p>
-      </div>
+      {selectedScope.period.status === "complete" ? (
+        <div className="mt-4 grid gap-3 border-t border-border pt-4 text-xs leading-5 text-muted sm:grid-cols-3">
+          <p><span className="font-semibold text-foreground">Component subtotal:</span> {selectedScope.period.componentUsageKwh} kWh.</p>
+          <p><span className="font-semibold text-foreground">Official Scope total:</span> {selectedScope.period.officialUsageKwh} kWh.</p>
+          <p><span className="font-semibold text-foreground">Coverage ratio:</span> {selectedScope.period.ratioPct}; gap {selectedScope.period.gapKwh} kWh.</p>
+        </div>
+      ) : (
+        <div className="mt-4 border-t border-border pt-4 text-xs leading-5 text-muted" role="status">
+          <span className="font-semibold text-foreground">Period totals withheld.</span> {selectedScope.period.reason}
+        </div>
+      )}
     </section>
   );
 }
@@ -135,9 +148,13 @@ function DailyComponentChart({
   const plotWidth = width - margin.left - margin.right;
   const plotHeight = height - margin.top - margin.bottom;
   const visibleRows = scope.rows;
-  const maxEnergy = Math.max(1, ...visibleRows.map((row) => selectedCategoryId === "all"
-    ? row.componentUsageKwhValue ?? 0
-    : row.categories.find((category) => category.id === selectedCategoryId)?.usageKwhValue ?? 0));
+  const availableEnergyValues = visibleRows.flatMap((row) => {
+    const value = selectedCategoryId === "all"
+      ? row.componentUsageKwhValue
+      : row.categories.find((category) => category.id === selectedCategoryId)?.usageKwhValue ?? null;
+    return value === null ? [] : [value];
+  });
+  const maxEnergy = Math.max(1, ...availableEnergyValues);
   const availableCosts = visibleRows.flatMap((row) => row.estimatedCost.status === "available"
     ? [row.estimatedCost.amountValue]
     : []);
@@ -189,11 +206,12 @@ function DailyComponentChart({
               {row.dayType === "weekend" || row.dayType === "public_holiday" ? (
                 <rect x={margin.left + slotWidth * index} y={margin.top} width={slotWidth} height={plotHeight} fill="var(--surface-subtle)" />
               ) : null}
-              {categories.map((category) => {
-                const value = category.usageKwhValue ?? 0;
+              {categories.flatMap((category) => {
+                if (category.usageKwhValue === null) return [];
+                const value = category.usageKwhValue;
                 const segmentHeight = value / maxEnergy * plotHeight;
                 stackedHeight += segmentHeight;
-                return (
+                return [(
                   <rect
                     key={category.id}
                     x={x}
@@ -204,7 +222,7 @@ function DailyComponentChart({
                     fill={categoryColour(category.id)}
                     opacity={row.dataStatus === "complete" ? 0.92 : 0.48}
                   />
-                );
+                )];
               })}
               {(index % tickStep === 0 || index === visibleRows.length - 1) ? (
                 <text x={x + barWidth / 2} y={height - 18} textAnchor="middle" fontSize="10" fill="var(--muted)">{row.dateLabel}</text>

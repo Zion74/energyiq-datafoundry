@@ -29,17 +29,25 @@ export function NgeeAnnEnergyDistribution({
     }
   }, [selectedDate, selectedScope]);
 
-  if (view.status === "unavailable" || !selectedScope) {
+  if (view.status !== "available" || !selectedScope) {
     return (
       <div className="border-b border-border px-5 py-6 lg:px-7" role="status">
-        <h3 className="text-lg font-semibold text-foreground">Energy Distribution unavailable</h3>
+        <h3 className="text-lg font-semibold text-foreground">
+          Energy Distribution {view.status === "partial" ? "partial" : "unavailable"}
+        </h3>
         <p className="mt-2 text-sm leading-6 text-muted">{view.reason}</p>
+        {view.status === "partial" ? (
+          <p className="mt-1 text-xs leading-5 text-muted">Period composition is withheld because it would otherwise present an incomplete total as complete.</p>
+        ) : null}
       </div>
     );
   }
   const selectedDay = selectedScope.rows.find((row) => row.localDate === selectedDate) ?? selectedScope.rows.at(-1)!;
   const series: DistributionCategory[] = range === "period"
-    ? selectedScope.period.categories
+    ? selectedScope.period.categories.flatMap((category) =>
+      category.usageKwhValue === null || category.sharePctValue === null
+        ? []
+        : [category])
     : selectedDay.categories.flatMap((category) => category.usageKwhValue === null || category.sharePctValue === null
       ? []
       : [{

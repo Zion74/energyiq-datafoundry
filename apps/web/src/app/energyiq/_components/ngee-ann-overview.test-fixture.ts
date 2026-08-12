@@ -688,6 +688,8 @@ function goldenComponentCategoryBreakdown(
         scopeName: scope.scopeName,
         scopeType: scope.scopeType,
         period: {
+          status: "complete",
+          reason: null,
           officialUsageKwh: roundFixture(officialUsageKwh),
           componentUsageKwh: roundFixture(componentUsageKwh),
           gapKwh: roundFixture(officialUsageKwh - componentUsageKwh),

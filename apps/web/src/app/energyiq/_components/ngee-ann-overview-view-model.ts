@@ -595,7 +595,7 @@ export type NgeeAnnEnergyCompositionViewModel = {
 };
 
 export type NgeeAnnComponentCategoryBreakdownViewModel = {
-  status: "available" | "unavailable";
+  status: "available" | "partial" | "unavailable";
   reason: string | null;
   decisionQuestion: string;
   categories: Array<{
@@ -607,18 +607,20 @@ export type NgeeAnnComponentCategoryBreakdownViewModel = {
     name: string;
     type: string;
     period: {
-      officialUsageKwhValue: number;
+      status: "complete" | "partial" | "unavailable";
+      reason: string | null;
+      officialUsageKwhValue: number | null;
       officialUsageKwh: string;
-      componentUsageKwhValue: number;
+      componentUsageKwhValue: number | null;
       componentUsageKwh: string;
       gapKwh: string;
       ratioPct: string;
       categories: Array<{
         id: string;
         label: string;
-        usageKwhValue: number;
+        usageKwhValue: number | null;
         usageKwh: string;
-        sharePctValue: number;
+        sharePctValue: number | null;
         sharePct: string;
       }>;
     };
@@ -1002,29 +1004,46 @@ function buildComponentCategoryBreakdown(
       if (!dailyScope || scope.rows.length === 0 || scope.period.categories.length === 0) return false;
       const expectedDates = dailyScope.rows.map((row) => row.localDate);
       const actualDates = scope.rows.map((row) => row.localDate);
-      const officialFromRows = scope.rows.reduce(
-        (sum, row) => sum + (row.officialUsageKwh ?? 0),
-        0,
-      );
-      const componentFromRows = scope.rows.reduce(
-        (sum, row) => sum + (row.componentUsageKwh ?? 0),
-        0,
-      );
-      const categoryTotal = scope.period.categories.reduce(
-        (sum, category) => sum + category.usageKwh,
-        0,
-      );
-      return expectedDates.length === actualDates.length
+      const commonShapeValid = expectedDates.length === actualDates.length
         && expectedDates.every((date, index) => date === actualDates[index])
-        && Math.abs(officialFromRows - scope.period.officialUsageKwh) <= 0.1
-        && Math.abs(componentFromRows - scope.period.componentUsageKwh) <= 0.1
-        && Math.abs(categoryTotal - scope.period.componentUsageKwh) <= 0.1
         && scope.rows.every((row) =>
           row.categories.length === scope.period.categories.length
           && row.categories.every((category) =>
             scope.period.categories.some((periodCategory) => periodCategory.category === category.category)
           )
         );
+      if (!commonShapeValid) return false;
+      if (scope.period.status === "complete") {
+        if (
+          scope.period.officialUsageKwh === null
+          || scope.period.componentUsageKwh === null
+          || scope.period.gapKwh === null
+          || scope.period.categories.some((category) => category.usageKwh === null || category.sharePct === null)
+          || scope.rows.some((row) =>
+            row.dataHealth.status !== "complete"
+            || row.officialUsageKwh === null
+            || row.componentUsageKwh === null
+            || row.categories.some((category) => category.usageKwh === null)
+          )
+        ) return false;
+        const officialFromRows = scope.rows.reduce((sum, row) => sum + (row.officialUsageKwh as number), 0);
+        const componentFromRows = scope.rows.reduce((sum, row) => sum + (row.componentUsageKwh as number), 0);
+        const categoryTotal = scope.period.categories.reduce((sum, category) => sum + (category.usageKwh as number), 0);
+        return Math.abs(officialFromRows - scope.period.officialUsageKwh) <= 0.1
+          && Math.abs(componentFromRows - scope.period.componentUsageKwh) <= 0.1
+          && Math.abs(categoryTotal - scope.period.componentUsageKwh) <= 0.1;
+      }
+      const aggregatesWithheld = scope.period.officialUsageKwh === null
+        && scope.period.componentUsageKwh === null
+        && scope.period.gapKwh === null
+        && scope.period.ratioPct === null
+        && scope.period.categories.every((category) => category.usageKwh === null && category.sharePct === null);
+      const hasUsableFacts = scope.rows.some((row) =>
+        row.officialUsageKwh !== null || row.categories.some((category) => category.usageKwh !== null),
+      );
+      return aggregatesWithheld
+        && scope.rows.some((row) => row.dataHealth.status !== "complete")
+        && (scope.period.status === "partial" ? hasUsableFacts : !hasUsableFacts);
     });
   if (!contractValid || !projectScope) {
     return unavailable("The daily component Category rows do not reconcile with their Snapshot totals and date spine.");
@@ -1039,11 +1058,17 @@ function buildComponentCategoryBreakdown(
     name: scope.scopeName,
     type: scope.scopeType,
     period: {
+      status: scope.period.status,
+      reason: scope.period.reason,
       officialUsageKwhValue: scope.period.officialUsageKwh,
-      officialUsageKwh: formatCustomerDecimal(scope.period.officialUsageKwh, 1),
+      officialUsageKwh: scope.period.officialUsageKwh === null
+        ? "Unavailable"
+        : formatCustomerDecimal(scope.period.officialUsageKwh, 1),
       componentUsageKwhValue: scope.period.componentUsageKwh,
-      componentUsageKwh: formatCustomerDecimal(scope.period.componentUsageKwh, 1),
-      gapKwh: signedDecimal(scope.period.gapKwh, 1),
+      componentUsageKwh: scope.period.componentUsageKwh === null
+        ? "Unavailable"
+        : formatCustomerDecimal(scope.period.componentUsageKwh, 1),
+      gapKwh: scope.period.gapKwh === null ? "Unavailable" : signedDecimal(scope.period.gapKwh, 1),
       ratioPct: scope.period.ratioPct === null
         ? "Unavailable"
         : `${formatCustomerDecimal(scope.period.ratioPct, 1)}%`,
@@ -1051,9 +1076,13 @@ function buildComponentCategoryBreakdown(
         id: category.category,
         label: categoryLabel.get(category.category) ?? compositionCategoryName(category.category),
         usageKwhValue: category.usageKwh,
-        usageKwh: formatCustomerDecimal(category.usageKwh, 1),
+        usageKwh: category.usageKwh === null
+          ? "Unavailable"
+          : formatCustomerDecimal(category.usageKwh, 1),
         sharePctValue: category.sharePct,
-        sharePct: `${formatCustomerDecimal(category.sharePct, 1)}%`,
+        sharePct: category.sharePct === null
+          ? "Unavailable"
+          : `${formatCustomerDecimal(category.sharePct, 1)}%`,
       })),
     },
     rows: scope.rows.map((row) => ({
@@ -1132,8 +1161,8 @@ function buildComponentCategoryBreakdown(
       })),
   })));
   return {
-    status: "available",
-    reason: null,
+    status: projectScope.period.status === "complete" ? "available" : projectScope.period.status,
+    reason: projectScope.period.reason,
     decisionQuestion: "How did published component Circuit usage change day by day?",
     categories,
     scopes,

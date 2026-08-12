@@ -1830,6 +1830,53 @@ describe("Ngee Ann Overview ViewModel", () => {
     expect(view.componentCategoryBreakdown.reason).toContain("component Category");
   });
 
+  it("keeps an incomplete component Category period partial without publishing incomplete totals", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const project = snapshot.analysis.componentCategoryBreakdown!.scopes[0]!;
+    const incompleteDay = project.rows[0]!;
+    incompleteDay.categories[0]!.usageKwh = null;
+    incompleteDay.categories[0]!.sharePct = null;
+    incompleteDay.componentUsageKwh = null;
+    incompleteDay.dataHealth = {
+      ...incompleteDay.dataHealth,
+      status: "partial",
+      coveragePct: 75,
+      validIntervalCount: Math.floor(incompleteDay.dataHealth.expectedMeterIntervalCount * 0.75),
+    };
+    Object.assign(project.period, {
+      status: "partial",
+      reason: "At least one daily component Category is incomplete.",
+      officialUsageKwh: null,
+      componentUsageKwh: null,
+      gapKwh: null,
+      ratioPct: null,
+      categories: project.period.categories.map((category) => ({
+        ...category,
+        usageKwh: null,
+        sharePct: null,
+      })),
+    });
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+    const period = view.componentCategoryBreakdown.scopes[0]?.period as unknown as {
+      status?: string;
+      officialUsageKwh?: string;
+      componentUsageKwh?: string;
+    };
+
+    expect(view.componentCategoryBreakdown.status).toBe("partial");
+    expect(view.componentCategoryBreakdown.reason).toContain("incomplete");
+    expect(period).toMatchObject({
+      status: "partial",
+      officialUsageKwh: "Unavailable",
+      componentUsageKwh: "Unavailable",
+    });
+    expect(view.componentCategoryBreakdown.scopes[0]?.rows[0]).toMatchObject({
+      dataStatus: "partial",
+      componentUsageKwh: "Unavailable",
+    });
+  });
+
   it("shows Cost as Unavailable when the Snapshot has no effective Tariff", () => {
     const view = buildNgeeAnnOverviewViewModel(ngeeAnnGoldenSnapshot({ costAvailable: false }));
 
