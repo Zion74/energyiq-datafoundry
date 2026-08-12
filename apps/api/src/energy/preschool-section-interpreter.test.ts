@@ -585,6 +585,118 @@ describe("Preschool Section Interpreter", () => {
     harness.close();
   });
 
+  it("accepts a bounded over-approximation within the cited Evidence hundred", async () => {
+    const harness = createHarness();
+    const sectionPacks = packs();
+    const standbyPack = sectionPacks.find(({ sectionId }) => sectionId === "standby-wastage")!;
+    standbyPack.evidence = [{
+      id: "evidence:standby-wastage",
+      label: "Verified standby usage",
+      value: { usageKwh: 3103.784 },
+      unit: "kWh",
+      entityRefs: [],
+      evidenceRefs: ["evidence:standby-wastage"],
+    }];
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: harness.metadata,
+      runBatch: async ({ runId, sessionId }) => ({
+        answer: JSON.stringify({
+          sections: PRESCHOOL_SECTION_IDS.map((sectionId) => sectionId === "standby-wastage"
+            ? {
+                ...available(sectionId),
+                summary: "Closed-hours usage was over 3,100 kWh.",
+                keyPoints: [
+                  { kind: "finding", text: "Usage was over 3,100 kWh.", evidenceRefs: ["evidence:standby-wastage"] },
+                  { kind: "next-check", text: "Confirm the operating context.", evidenceRefs: ["evidence:standby-wastage"] },
+                ],
+              }
+            : available(sectionId)),
+        }),
+        runId,
+        sessionId,
+      }),
+    });
+
+    const result = await interpreter.execute({
+      baseIdentity: harness.identity,
+      packs: sectionPacks,
+      user: harness.user,
+    });
+    expect(result["standby-wastage"].status).toBe("available");
+    harness.close();
+  });
+
+  it("rejects an over-approximation outside the cited Evidence hundred", async () => {
+    const harness = createHarness();
+    const sectionPacks = packs();
+    const standbyPack = sectionPacks.find(({ sectionId }) => sectionId === "standby-wastage")!;
+    standbyPack.evidence = [{
+      id: "evidence:standby-wastage",
+      label: "Verified standby usage",
+      value: { usageKwh: 3299.784 },
+      unit: "kWh",
+      entityRefs: [],
+      evidenceRefs: ["evidence:standby-wastage"],
+    }];
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: harness.metadata,
+      runBatch: async ({ runId, sessionId }) => ({
+        answer: JSON.stringify({
+          sections: PRESCHOOL_SECTION_IDS.map((sectionId) => sectionId === "standby-wastage"
+            ? {
+                ...available(sectionId),
+                summary: "Closed-hours usage was over 3,100 kWh.",
+                keyPoints: [
+                  { kind: "finding", text: "Usage was over 3,100 kWh.", evidenceRefs: ["evidence:standby-wastage"] },
+                  { kind: "next-check", text: "Confirm the operating context.", evidenceRefs: ["evidence:standby-wastage"] },
+                ],
+              }
+            : available(sectionId)),
+        }),
+        runId,
+        sessionId,
+      }),
+    });
+
+    const result = await interpreter.execute({
+      baseIdentity: harness.identity,
+      packs: sectionPacks,
+      user: harness.user,
+    });
+    expect(result["standby-wastage"]).toMatchObject({
+      status: "failed",
+      error_code: "PRESCHOOL_SECTION_INTERPRETATION_FACT_UNSUPPORTED",
+    });
+    harness.close();
+  });
+
+  it("does not treat a hyphenated portfolio adjective as a Centre code", async () => {
+    const harness = createHarness();
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: harness.metadata,
+      runBatch: async ({ runId, sessionId }) => ({
+        answer: JSON.stringify({
+          sections: PRESCHOOL_SECTION_IDS.map((sectionId) => sectionId === "centre-benchmark"
+            ? {
+                ...available(sectionId),
+                summary: "After normalising across the 30-centre portfolio, the pattern deserves review.",
+              }
+            : available(sectionId)),
+        }),
+        runId,
+        sessionId,
+      }),
+    });
+
+    const result = await interpreter.execute({
+      baseIdentity: harness.identity,
+      packs: packs(),
+      user: harness.user,
+    });
+    expect(result["centre-benchmark"].status).toBe("available");
+    harness.close();
+  });
+
   it("accepts multiple valid Centre-to-circuit relationships in one narrative", async () => {
     const harness = createHarness();
     const sectionPacks = packs();

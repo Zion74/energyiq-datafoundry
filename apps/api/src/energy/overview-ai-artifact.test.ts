@@ -104,7 +104,7 @@ describe("createOverviewAiArtifactIdentity", () => {
       artifactKind: "section-interpretation",
       targetId: "centre-benchmark",
       outputContractRevision: "preschool-section-interpretation-v1",
-      validatorRevision: "preschool-section-interpreter-validator-v7",
+      validatorRevision: "preschool-section-interpreter-validator-v8",
       workflowRevision: "preschool-section-interpreter-v7",
       investigatorPromptRevision: "preschool-section-interpreter-prompt-v8",
     });

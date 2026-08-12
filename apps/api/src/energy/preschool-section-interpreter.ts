@@ -421,9 +421,37 @@ const hasUnsupportedNumber = (text: string, evidence: PreschoolSectionPack["evid
     const value = Number(raw);
     const precision = raw.includes(".") ? raw.length - raw.indexOf(".") - 1 : 0;
     const tolerance = 0.5 * (10 ** -precision);
-    return !supported.some((candidate) => Math.abs(candidate - value) < tolerance
+    const exactlySupported = supported.some((candidate) => Math.abs(candidate - value) < tolerance
       || Math.abs(Number(candidate.toFixed(precision)) - value) < tolerance);
+    return !exactlySupported && !supportsBoundedIntegerApproximation({
+      text: numericText,
+      tokenIndex: match.index ?? 0,
+      raw,
+      value,
+      supported,
+    });
   });
+};
+
+const supportsBoundedIntegerApproximation = (input: {
+  text: string;
+  tokenIndex: number;
+  raw: string;
+  value: number;
+  supported: number[];
+}): boolean => {
+  if (input.raw.includes(".")) return false;
+  const qualifier = input.text
+    .slice(Math.max(0, input.tokenIndex - 16), input.tokenIndex)
+    .match(/\b(over|under)\s*$/iu)?.[1]?.toLowerCase();
+  if (!qualifier) return false;
+  const unsigned = input.raw.replace(/^-/, "");
+  const trailingZeroCount = unsigned.match(/0+$/)?.[0].length ?? 0;
+  if (trailingZeroCount === 0 || trailingZeroCount > 2) return false;
+  const quantum = 10 ** trailingZeroCount;
+  return input.supported.some((candidate) => qualifier === "over"
+    ? candidate > input.value && candidate < input.value + quantum
+    : candidate < input.value && candidate > input.value - quantum);
 };
 
 const hasUnsupportedTemporalClaim = (
@@ -483,7 +511,8 @@ const collectTemporalClaims = (value: unknown): { dates: Set<string>; hours: Set
 
 const hasUnsupportedCentre = (text: string, evidence: PreschoolSectionPack["evidence"]): boolean => {
   const supportedText = JSON.stringify(evidence.map(({ value, entityRefs }) => ({ value, entityRefs }))).toLowerCase();
-  const centres = [...text.matchAll(/\bCentre\s+[A-Z0-9][A-Z0-9-]*\b/gi)].map(([value]) => value.toLowerCase());
+  const centres = [...text.matchAll(/\b[Cc]entre\s+[A-Z0-9][A-Z0-9-]{0,3}\b/g)]
+    .map(([value]) => value.toLowerCase());
   return centres.some((centre) => !supportedText.includes(centre));
 };
 
