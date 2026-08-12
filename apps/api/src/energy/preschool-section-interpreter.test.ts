@@ -283,6 +283,120 @@ describe("Preschool Section Interpreter", () => {
     harness.close();
   });
 
+  it("accepts an exact local spike date and hour from the cited Evidence", async () => {
+    const harness = createHarness();
+    const sectionPacks = packs();
+    const operatingPack = sectionPacks.find(({ sectionId }) => sectionId === "operating-behaviour")!;
+    operatingPack.evidence = [{
+      id: "evidence:operating:n",
+      label: "Centre N operating-hour spike",
+      value: {
+        centre: "Centre N",
+        localDate: "2026-05-22",
+        localHour: 15,
+        leadingCircuitName: "Kitchen Plug Load",
+        leadingCircuitSharePct: 96.4267,
+      },
+      unit: "kWh, %",
+      entityRefs: ["centre-n"],
+      evidenceRefs: ["evidence:operating:n"],
+      claimRelations: [{ subject: "Centre N", predicate: "leading-circuit", object: "Kitchen Plug Load" }],
+    }];
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: harness.metadata,
+      runBatch: async ({ runId, sessionId }) => ({
+        answer: JSON.stringify({
+          sections: PRESCHOOL_SECTION_IDS.map((sectionId) => sectionId === "operating-behaviour"
+            ? {
+                ...available(sectionId),
+                summary: "Operating-hour evidence supports a focused review.",
+                keyPoints: [
+                  {
+                    kind: "finding",
+                    text: "At Centre N's worst operating-hour spike on 2026-05-22 at 15:00, Kitchen Plug Load was the leading contributor at 96.4%.",
+                    evidenceRefs: ["evidence:operating:n"],
+                  },
+                  {
+                    kind: "next-check",
+                    text: "Review Centre N's operating schedule before assigning a cause.",
+                    evidenceRefs: ["evidence:operating:n"],
+                  },
+                ],
+              }
+            : available(sectionId)),
+        }),
+        runId,
+        sessionId,
+      }),
+    });
+
+    const result = await interpreter.execute({
+      baseIdentity: harness.identity,
+      packs: sectionPacks,
+      user: harness.user,
+    });
+    expect(result["operating-behaviour"].status).toBe("available");
+    harness.close();
+  });
+
+  it("rejects a local spike date or time that differs from the cited Evidence", async () => {
+    const harness = createHarness();
+    const sectionPacks = packs();
+    const operatingPack = sectionPacks.find(({ sectionId }) => sectionId === "operating-behaviour")!;
+    operatingPack.evidence = [{
+      id: "evidence:operating:n",
+      label: "Centre N operating-hour spike",
+      value: {
+        centre: "Centre N",
+        localDate: "2026-05-22",
+        localHour: 15,
+        leadingCircuitName: "Kitchen Plug Load",
+      },
+      unit: "kWh",
+      entityRefs: ["centre-n"],
+      evidenceRefs: ["evidence:operating:n"],
+      claimRelations: [{ subject: "Centre N", predicate: "leading-circuit", object: "Kitchen Plug Load" }],
+    }];
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: harness.metadata,
+      runBatch: async ({ runId, sessionId }) => ({
+        answer: JSON.stringify({
+          sections: PRESCHOOL_SECTION_IDS.map((sectionId) => sectionId === "operating-behaviour"
+            ? {
+                ...available(sectionId),
+                summary: "Operating-hour evidence supports a focused review.",
+                keyPoints: [
+                  {
+                    kind: "finding",
+                    text: "Centre N's spike occurred on 2026-05-23 at 15:30 and was led by Kitchen Plug Load.",
+                    evidenceRefs: ["evidence:operating:n"],
+                  },
+                  {
+                    kind: "next-check",
+                    text: "Review Centre N's operating schedule before assigning a cause.",
+                    evidenceRefs: ["evidence:operating:n"],
+                  },
+                ],
+              }
+            : available(sectionId)),
+        }),
+        runId,
+        sessionId,
+      }),
+    });
+
+    const result = await interpreter.execute({
+      baseIdentity: harness.identity,
+      packs: sectionPacks,
+      user: harness.user,
+    });
+    expect(result["operating-behaviour"]).toMatchObject({
+      status: "failed",
+      error_code: "PRESCHOOL_SECTION_INTERPRETATION_FACT_UNSUPPORTED",
+    });
+    harness.close();
+  });
+
   it("extracts a Provider-wrapped JSON envelope and keeps missing Sections independent", async () => {
     const harness = createHarness();
     const interpreter = createPreschoolSectionInterpreter({

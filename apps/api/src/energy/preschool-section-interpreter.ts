@@ -24,6 +24,9 @@ const MAX_BATCH_PROMPT_CHARS = 12_000;
 const BANNED_INTERNAL_TEXT = /\b(?:parent_node_id|dataSnapshotId|projectReleaseId|SQL)\b/i;
 const SQL_STATEMENT = /\bSELECT\b[\s\S]{0,500}\b(?:FROM|JOIN)\b/i;
 const NUMBER_TOKEN = /(?<![A-Za-z0-9_-])-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/g;
+const LOCAL_DATE_TOKEN = /\b\d{4}-\d{2}-\d{2}\b/g;
+const LOCAL_TIME_TOKEN = /\b(?:[01]?\d|2[0-3]):[0-5]\d\b/g;
+const LOCAL_DATE_VALUE = /^\d{4}-\d{2}-\d{2}$/;
 
 export type PreschoolSectionInterpreterBatchRunner = (input: {
   prompt: string;
@@ -351,6 +354,7 @@ const materializeSectionResult = (input: {
       point.evidenceRefs.some((reference) => evidence.id === reference || evidence.evidenceRefs.includes(reference)));
     const pointNarrative = point.label ? [point.label, point.text] : [point.text];
     if (citedEvidence.length === 0
+      || pointNarrative.some((value) => hasUnsupportedTemporalClaim(value, citedEvidence))
       || pointNarrative.some((value) => hasUnsupportedNumber(value, citedEvidence))
       || pointNarrative.some((value) => hasUnsupportedUnit(value, citedEvidence))
       || pointNarrative.some((value) => hasUnsupportedCentre(value, citedEvidence))
@@ -362,6 +366,7 @@ const materializeSectionResult = (input: {
     .filter((value): value is string => Boolean(value));
   if (narrative.some(hasBannedCustomerText)
     || keyPoints.some(({ label, text }) => [label, text].some((value) => Boolean(value) && hasBannedCustomerText(value!)))
+    || narrative.some((value) => hasUnsupportedTemporalClaim(value, input.pack.evidence))
     || narrative.some((value) => hasUnsupportedNumber(value, input.pack.evidence))
     || narrative.some((value) => hasUnsupportedUnit(value, input.pack.evidence))
     || narrative.some((value) => hasUnsupportedCentre(value, input.pack.evidence))
@@ -407,7 +412,8 @@ const parseKeyPoints = (value: unknown): PreschoolSectionKeyPoint[] | null => {
 
 const hasUnsupportedNumber = (text: string, evidence: PreschoolSectionPack["evidence"]): boolean => {
   const supported = collectNumbers(evidence.map(({ value }) => value));
-  const tokens = [...text.matchAll(NUMBER_TOKEN)];
+  const numericText = text.replace(LOCAL_DATE_TOKEN, "").replace(LOCAL_TIME_TOKEN, "");
+  const tokens = [...numericText.matchAll(NUMBER_TOKEN)];
   return tokens.some((match) => {
     const raw = match[0].replaceAll(",", "");
     const value = Number(raw);
@@ -415,6 +421,22 @@ const hasUnsupportedNumber = (text: string, evidence: PreschoolSectionPack["evid
     const tolerance = 0.5 * (10 ** -precision);
     return !supported.some((candidate) => Math.abs(candidate - value) < tolerance
       || Math.abs(Number(candidate.toFixed(precision)) - value) < tolerance);
+  });
+};
+
+const hasUnsupportedTemporalClaim = (
+  text: string,
+  evidence: PreschoolSectionPack["evidence"],
+): boolean => {
+  const supported = collectTemporalClaims(evidence.map(({ value }) => value));
+  const dates = [...text.matchAll(LOCAL_DATE_TOKEN)].map(([value]) => value);
+  if (dates.some((date) => !supported.dates.has(date))) return true;
+  const times = [...text.matchAll(LOCAL_TIME_TOKEN)].map(([value]) => value);
+  return times.some((time) => {
+    const separator = time.indexOf(":");
+    const hour = Number(time.slice(0, separator));
+    const minute = Number(time.slice(separator + 1));
+    return minute !== 0 || !supported.hours.has(hour);
   });
 };
 
@@ -434,6 +456,27 @@ const collectNumbers = (value: unknown): number[] => {
   if (Array.isArray(value)) return value.flatMap(collectNumbers);
   if (isRecord(value)) return Object.values(value).flatMap(collectNumbers);
   return [];
+};
+
+const collectTemporalClaims = (value: unknown): { dates: Set<string>; hours: Set<number> } => {
+  const dates = new Set<string>();
+  const hours = new Set<number>();
+  const visit = (candidate: unknown): void => {
+    if (Array.isArray(candidate)) {
+      candidate.forEach(visit);
+      return;
+    }
+    if (!isRecord(candidate)) return;
+    for (const [key, item] of Object.entries(candidate)) {
+      if ((key === "localDate" || key === "actualThroughLocalDate")
+        && typeof item === "string" && LOCAL_DATE_VALUE.test(item)) dates.add(item);
+      if (key === "localHour" && typeof item === "number"
+        && Number.isInteger(item) && item >= 0 && item <= 23) hours.add(item);
+      visit(item);
+    }
+  };
+  visit(value);
+  return { dates, hours };
 };
 
 const hasUnsupportedCentre = (text: string, evidence: PreschoolSectionPack["evidence"]): boolean => {
