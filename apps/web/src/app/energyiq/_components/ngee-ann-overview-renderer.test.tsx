@@ -44,6 +44,14 @@ describe("NgeeAnnOverviewRenderer", () => {
       peakHourLabel: "14:00",
       peakUsageKwh: 16.0703,
       peakUsage: "16.0703",
+      dailyUsageKwh: 246.8528,
+      dailyUsage: "246.9",
+      officeHoursUsageKwh: 150.9581,
+      officeHoursUsage: "151.0",
+      afterHoursUsageKwh: 45.09,
+      afterHoursUsage: "45.1",
+      afterHoursSharePct: 18.2659,
+      afterHoursShare: "18.3%",
       sampleDayCount: 5,
     });
 
@@ -560,6 +568,13 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("How these exceptions were selected");
     expect(markup).not.toContain("Triggered only / pinned Rule");
     expect(markup).toContain("Day profile");
+    expect(markup).toContain("Weekday daily average");
+    expect(markup).toContain("246.9 kWh/day");
+    expect(markup).toContain("Weekend daily average");
+    expect(markup).toContain("148.5 kWh/day");
+    expect(markup).toContain("Public Holiday baseline unavailable");
+    expect(markup).toContain("24-Hour Profile Comparison");
+    expect(markup).toContain("Official Scope energy");
     expect(markup).toContain("How does the observed 24-hour energy shape change by Day Type and Scope?");
     expect(markup).toContain("5 complete days / 24 server values");
     expect(markup).toContain("Day Profile evidence / time_bucket_grid_v1");
@@ -568,6 +583,8 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Level × hour average");
     expect(markup).toContain("Average day type");
     expect(markup).toContain("Date × hour");
+    expect(markup).toContain("Daily usage pattern by Level");
+    expect(markup).toContain("Level profile summary");
     expect(markup).toContain("Heatmap evidence / time_bucket_grid_v1");
     expect(markup).toContain("energy.total_usage_kwh@1");
     expect(markup).toContain("Energy distribution");
@@ -581,6 +598,11 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("476.9838");
     expect(markup).toContain("31.1516%");
     expect(markup).toContain("-0.0142%");
+    expect(markup).toContain("Time-based Behavioral Analysis");
+    expect(markup).toContain("Weekday office hours (08:00–18:00)");
+    expect(markup).toContain("151.0 kWh/mean day");
+    expect(markup).toContain("Weekday after-hours (22:00–06:00)");
+    expect(markup).toContain("45.1 kWh/mean day");
     expect(markup).toContain("Energy composition");
     expect(markup).toContain("What explains the official Project total?");
     expect(markup).toContain("Where the energy went");

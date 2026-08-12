@@ -13,6 +13,7 @@ import { NgeeAnnDecisionPriorities } from "./ngee-ann-decision-priorities";
 import { NgeeAnnConsumptionBreakdown } from "./ngee-ann-consumption-breakdown";
 import { NgeeAnnEnergyComposition } from "./ngee-ann-energy-composition";
 import { NgeeAnnEnergyDistribution } from "./ngee-ann-energy-distribution";
+import { NgeeAnnEnergyHealth } from "./ngee-ann-energy-health";
 import { NgeeAnnExecutiveSummary } from "./ngee-ann-executive-summary";
 import { NgeeAnnLevelComparison } from "./ngee-ann-level-comparison";
 import { NgeeAnnSummaryFindings } from "./ngee-ann-summary-findings";
@@ -221,9 +222,11 @@ export function NgeeAnnOverviewRenderer({
 
       <OverviewSectionHeading
         id="ngee-ann-energy-health"
-        title="Energy Health Summary"
-        description="Compare the accepted Level position before moving into Circuit-level evidence."
+        title="Time-based Behavioral Analysis"
+        description="Review day-type averages, weekday time bands and accepted Level totals before moving into Circuit evidence."
       />
+
+      <NgeeAnnEnergyHealth dayProfile={view.dayProfile} levelComparison={view.levelComparison} />
 
       <NgeeAnnLevelComparison view={view.levelComparison} />
 

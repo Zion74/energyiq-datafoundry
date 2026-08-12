@@ -1164,6 +1164,17 @@ describe("Ngee Ann Overview ViewModel", () => {
     expect(view.dayProfile.profiles.find((profile) => profile.id === "project:weekday")).toMatchObject({
       status: "available",
       sampleDayCount: 5,
+      summary: {
+        status: "available",
+        dailyUsageKwh: 246.8528,
+        dailyUsage: "246.9",
+        officeHoursUsageKwh: 150.9581,
+        officeHoursUsage: "151.0",
+        afterHoursUsageKwh: 45.09,
+        afterHoursUsage: "45.1",
+        afterHoursSharePct: 18.2659,
+        afterHoursShare: "18.3%",
+      },
       values: expect.any(Array),
     });
     expect(view.dayProfile.profiles.find((profile) => profile.id === "project:weekend")).toMatchObject({
@@ -1187,6 +1198,10 @@ describe("Ngee Ann Overview ViewModel", () => {
       dayTypeLabel: "Weekday",
       scopeName: "Project",
       sampleDayCount: 5,
+      dailyUsageKwh: 246.8528,
+      dailyUsage: "246.9",
+      peakHourLabel: "14:00",
+      peakUsage: "16.0703",
       values: expect.any(Array),
     });
     expect(view.usageHeatmap.averageProfiles.find((profile) => profile.id === "project:weekday")?.values).toHaveLength(24);

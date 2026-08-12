@@ -83,8 +83,9 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
     <section aria-labelledby="ngee-ann-usage-heatmap" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">Usage heatmap</p>
           <h3 id="ngee-ann-usage-heatmap" className="text-lg font-semibold tracking-[-0.015em] text-foreground">
-            Usage heatmap
+            Daily usage pattern by Level
           </h3>
           <p className="mt-1.5 text-sm leading-6 text-muted">{view.decisionQuestion}</p>
         </div>
@@ -169,8 +170,17 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
         )}
       </div>
 
-      <div id="ngee-ann-usage-heatmap-grid" className="mt-4 overflow-x-auto pb-1">
-        <div className="min-w-[1080px]">
+      <div className="mt-4 grid min-w-0 gap-4 xl:grid-cols-[300px_minmax(0,1fr)] xl:items-start">
+        <LevelProfileSummary
+          profiles={view.averageProfiles.filter((candidate) => candidate.dayType === selectedDayType && candidate.scopeId !== view.scopes[0]?.id)}
+          selectedScopeId={selectedScope.id}
+          onSelect={(scopeId) => {
+            setSelectedScopeId(scopeId);
+            resetCell();
+          }}
+        />
+        <div id="ngee-ann-usage-heatmap-grid" className="min-w-0 overflow-x-auto pb-1">
+          <div className="min-w-[820px]">
           <div className="grid grid-cols-[112px_repeat(24,minmax(34px,1fr))] gap-1 text-[9px] text-muted">
             <span aria-hidden="true" />
             {Array.from({ length: 24 }, (_, hour) => (
@@ -195,7 +205,10 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
               ))
               : averageRows.map((row) => (
                 <React.Fragment key={row.id}>
-                  <span className="flex min-h-9 items-center pr-2 text-[10px] font-semibold text-foreground">{row.label}</span>
+                  <span className={[
+                    "flex min-h-9 items-center rounded-l px-2 text-[10px] font-semibold text-foreground",
+                    row.cells[0]?.scopeId === selectedScope.id ? "bg-primary/10" : "",
+                  ].join(" ")}>{row.label}</span>
                   {row.cells.map((cell) => (
                     <AverageHeatmapCellButton
                       key={cell.id}
@@ -208,6 +221,7 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
                   ))}
                 </React.Fragment>
               ))}
+            </div>
           </div>
         </div>
       </div>
@@ -255,6 +269,44 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
 
       <TimeEvidence label="Heatmap evidence" evidence={view.evidence} />
     </section>
+  );
+}
+
+function LevelProfileSummary({
+  profiles,
+  selectedScopeId,
+  onSelect,
+}: {
+  profiles: NgeeAnnUsageHeatmapViewModel["averageProfiles"];
+  selectedScopeId: string;
+  onSelect: (scopeId: string) => void;
+}) {
+  return (
+    <div className="min-w-0 rounded-xl border border-border bg-surface-subtle/55 p-3">
+      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">Level profile summary</p>
+      <p className="mt-1 text-xs leading-5 text-muted">Select a Level to inspect its observed hourly pattern.</p>
+      <div className="mt-3 divide-y divide-border border-y border-border">
+        {profiles.map((profile) => (
+          <button
+            key={profile.id}
+            type="button"
+            aria-pressed={selectedScopeId === profile.scopeId}
+            className="grid min-h-20 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
+            onClick={() => onSelect(profile.scopeId)}
+          >
+            <span className="min-w-0">
+              <strong className="block text-sm text-foreground">{profile.scopeName}</strong>
+              <span className="mt-1 block text-xs text-muted">Peak {profile.peakHourLabel} · {profile.peakUsage} kWh</span>
+            </span>
+            <span className="text-right text-xs tabular-nums text-muted">
+              <strong className="block text-sm text-foreground">{profile.dailyUsage}</strong>
+              kWh/day
+            </span>
+          </button>
+        ))}
+      </div>
+      <p className="mt-3 text-[11px] leading-5 text-muted">These are official Level totals. This Snapshot does not publish a Circuit-by-hour heatmap, so no sub-meter row is inferred.</p>
+    </div>
   );
 }
 

@@ -2,8 +2,9 @@
 
 import React, { useState } from "react";
 
-import { NgeeAnnHourAxis } from "./ngee-ann-hour-axis";
 import type { NgeeAnnDayProfileViewModel } from "./ngee-ann-overview-view-model";
+
+type DayProfile = NgeeAnnDayProfileViewModel["profiles"][number];
 
 export function NgeeAnnDayProfile({ view }: { view: NgeeAnnDayProfileViewModel }) {
   const [selectedScopeId, setSelectedScopeId] = useState(view.scopes[0]?.id ?? "");
@@ -48,7 +49,6 @@ export function NgeeAnnDayProfile({ view }: { view: NgeeAnnDayProfileViewModel }
   const averageUsageKwh = profile.values.length === 0
     ? 0
     : profile.values.reduce((total, point) => total + point.acceptedUsageKwh, 0) / profile.values.length;
-  const averageHeight = maximumUsageKwh <= 0 ? 0 : averageUsageKwh / maximumUsageKwh * 100;
   const activeDifferencePct = activePoint && averageUsageKwh > 0
     ? (activePoint.acceptedUsageKwh - averageUsageKwh) / averageUsageKwh * 100
     : null;
@@ -65,8 +65,9 @@ export function NgeeAnnDayProfile({ view }: { view: NgeeAnnDayProfileViewModel }
     <section aria-labelledby="ngee-ann-day-profile" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">Day profile</p>
           <h3 id="ngee-ann-day-profile" className="text-lg font-semibold tracking-[-0.015em] text-foreground">
-            Day profile
+            24-Hour Profile Comparison
           </h3>
           <p className="mt-1.5 text-sm leading-6 text-muted">{view.decisionQuestion}</p>
         </div>
@@ -75,8 +76,17 @@ export function NgeeAnnDayProfile({ view }: { view: NgeeAnnDayProfileViewModel }
         </p>
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <fieldset>
+      <div className="mt-5 grid gap-3 md:grid-cols-3" aria-label="Project Day Profile averages">
+        {(["weekday", "weekend", "public_holiday"] as const).map((dayType) => {
+          const projectProfile = view.profiles.find((candidate) => (
+            candidate.scopeId === view.scopes[0]?.id && candidate.dayType === dayType
+          ));
+          return <DayProfileKpi key={dayType} profile={projectProfile ?? null} />;
+        })}
+      </div>
+
+      <div className="mt-5 grid gap-3 rounded-xl border border-border bg-surface-subtle/45 p-3 lg:grid-cols-2">
+        <fieldset className="min-w-0 rounded-lg bg-surface px-3 py-3">
           <legend className="mb-2 text-xs font-semibold text-muted">Day Profile type</legend>
           <div className="flex flex-wrap gap-1.5">
             {(["weekday", "weekend", "public_holiday"] as const).map((dayType) => {
@@ -100,7 +110,7 @@ export function NgeeAnnDayProfile({ view }: { view: NgeeAnnDayProfileViewModel }
             })}
           </div>
         </fieldset>
-        <fieldset>
+        <fieldset className="min-w-0 rounded-lg bg-surface px-3 py-3">
           <legend className="mb-2 text-xs font-semibold text-muted">Day Profile Scope</legend>
           <div className="flex flex-wrap gap-1.5">
             {view.scopes.map((scope) => {
@@ -169,60 +179,14 @@ export function NgeeAnnDayProfile({ view }: { view: NgeeAnnDayProfileViewModel }
         </div>
       ) : (
         <>
-          <div id="ngee-ann-day-profile-chart" className="mt-4 overflow-x-auto pb-1">
-            <div className="min-w-[1040px]">
-              <div className="mb-2 flex items-center justify-between text-[10px] text-muted">
-                <span>Mean accepted energy / kWh</span>
-                <span>{profile.sampleDayCount} complete {profile.sampleDayCount === 1 ? "day" : "days"} / 24 server values</span>
-              </div>
-              <div data-hour-plot="day-profile" className="relative h-52 border-b border-border">
-                <div
-                  className="grid h-full items-end gap-1 px-2"
-                  style={{ gridTemplateColumns: "repeat(24, minmax(32px, 1fr))" }}
-                >
-                  {profile.values.map((point) => {
-                    const selected = selectedPointId === point.id;
-                    const aboveAverage = point.acceptedUsageKwh > averageUsageKwh;
-                    const height = maximumUsageKwh <= 0 ? 0 : Math.max(4, (point.acceptedUsageKwh / maximumUsageKwh) * 100);
-                    return (
-                      <button
-                        key={point.id}
-                        type="button"
-                        aria-label={`${profile.dayTypeLabel} ${profile.scopeName} ${point.hourLabel}: ${point.usageKwh} kWh`}
-                        aria-pressed={selected}
-                        className="group relative z-10 flex h-full min-w-0 items-end justify-center rounded-t px-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-                        onMouseEnter={() => setActivePointId(point.id)}
-                        onMouseLeave={() => setActivePointId(null)}
-                        onFocus={() => setActivePointId(point.id)}
-                        onBlur={() => setActivePointId(null)}
-                        onClick={() => setSelectedPointId(point.id)}
-                      >
-                        <span
-                          className={aboveAverage
-                            ? "w-full rounded-t bg-step-inspect/75 group-hover:bg-step-inspect group-focus-visible:bg-step-inspect"
-                            : "w-full rounded-t bg-primary/35 group-hover:bg-primary/70 group-focus-visible:bg-primary/70"}
-                          style={{ height: `${height}%` }}
-                          aria-hidden="true"
-                        />
-                      </button>
-                    );
-                  })}
-                </div>
-                {averageHeight > 0 ? (
-                  <div
-                    className="pointer-events-none absolute inset-x-2 z-20 border-t border-dashed border-step-inspect/70"
-                    style={{ bottom: `${averageHeight}%` }}
-                    aria-hidden="true"
-                  >
-                    <span className="absolute -top-4 right-0 bg-surface px-1 text-[9px] font-semibold text-step-inspect">
-                      Mean {averageUsageKwh.toFixed(2)} kWh
-                    </span>
-                  </div>
-                ) : null}
-              </div>
-              <NgeeAnnHourAxis points={profile.values} axis="day-profile" />
-            </div>
-          </div>
+          <HourlyProfileChart
+            profile={profile}
+            maximumUsageKwh={maximumUsageKwh}
+            averageUsageKwh={averageUsageKwh}
+            selectedPointId={selectedPointId}
+            onActivePointChange={setActivePointId}
+            onSelectedPointChange={setSelectedPointId}
+          />
           <div className="mt-4 min-h-[78px] rounded-lg bg-surface-subtle px-4 py-3" aria-live="polite" aria-atomic="true">
             {activePoint ? (
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -250,6 +214,132 @@ export function NgeeAnnDayProfile({ view }: { view: NgeeAnnDayProfileViewModel }
 
       <TimeEvidence label="Day Profile evidence" evidence={view.evidence} />
     </section>
+  );
+}
+
+function DayProfileKpi({ profile }: { profile: DayProfile | null }) {
+  const title = profile?.dayType === "weekday"
+    ? "Weekday daily average"
+    : profile?.dayType === "weekend"
+      ? "Weekend daily average"
+      : "Public Holiday baseline";
+  const accent = profile?.dayType === "weekday"
+    ? "border-primary/35"
+    : profile?.dayType === "weekend"
+      ? "border-step-inspect/35"
+      : "border-border";
+  return (
+    <article className={`min-w-0 rounded-xl border bg-surface px-4 py-4 ${accent}`}>
+      <p className="text-xs font-semibold text-muted">{title}</p>
+      {profile?.summary.status === "available" ? (
+        <>
+          <p aria-label={`${profile.summary.dailyUsage} kWh/day`} className="mt-2 text-2xl font-semibold tracking-[-0.025em] tabular-nums text-foreground">
+            {profile.summary.dailyUsage} <span className="text-sm font-medium text-muted">kWh/day</span>
+          </p>
+          <p className="mt-2 text-xs leading-5 text-muted">
+            {profile.summary.sampleDayCount} complete-day {profile.summary.sampleDayCount === 1 ? "sample" : "samples"}
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="mt-2 text-sm font-semibold text-foreground">{title} unavailable</p>
+          <p className="mt-1 text-xs leading-5 text-muted">{profile?.reason ?? "No authoritative Day Type sample is available."}</p>
+        </>
+      )}
+    </article>
+  );
+}
+
+function HourlyProfileChart({
+  profile,
+  maximumUsageKwh,
+  averageUsageKwh,
+  selectedPointId,
+  onActivePointChange,
+  onSelectedPointChange,
+}: {
+  profile: DayProfile;
+  maximumUsageKwh: number;
+  averageUsageKwh: number;
+  selectedPointId: string | null;
+  onActivePointChange: (id: string | null) => void;
+  onSelectedPointChange: (id: string | null) => void;
+}) {
+  const width = 960;
+  const height = 300;
+  const margin = { top: 26, right: 24, bottom: 42, left: 52 };
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom;
+  const maximum = Math.max(maximumUsageKwh, 1);
+  const coordinates = profile.values.map((point, index) => ({
+    point,
+    x: margin.left + (profile.values.length <= 1 ? 0 : index / (profile.values.length - 1) * plotWidth),
+    y: margin.top + plotHeight - point.acceptedUsageKwh / maximum * plotHeight,
+  }));
+  const linePath = coordinates.map(({ x, y }, index) => `${index === 0 ? "M" : "L"}${x.toFixed(2)},${y.toFixed(2)}`).join(" ");
+  const areaPath = coordinates.length === 0
+    ? ""
+    : `M${coordinates[0]!.x.toFixed(2)},${(margin.top + plotHeight).toFixed(2)} ${coordinates.map(({ x, y }) => `L${x.toFixed(2)},${y.toFixed(2)}`).join(" ")} L${coordinates.at(-1)!.x.toFixed(2)},${(margin.top + plotHeight).toFixed(2)} Z`;
+  const averageY = margin.top + plotHeight - averageUsageKwh / maximum * plotHeight;
+
+  return (
+    <div id="ngee-ann-day-profile-chart" className="mt-4 rounded-xl border border-border bg-surface px-3 py-4 sm:px-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
+        <span className="inline-flex items-center gap-2"><span aria-hidden="true" className="h-2.5 w-5 rounded-sm bg-primary/45" />Official Scope energy</span>
+        <span>{profile.sampleDayCount} complete {profile.sampleDayCount === 1 ? "day" : "days"} / 24 server values</span>
+      </div>
+      <div data-hour-plot="day-profile" className="relative mt-3">
+        <svg className="block h-auto w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-labelledby={`day-profile-title-${profile.id} day-profile-desc-${profile.id}`}>
+          <title id={`day-profile-title-${profile.id}`}>{`${profile.dayTypeLabel} 24-hour profile for ${profile.scopeName}`}</title>
+          <desc id={`day-profile-desc-${profile.id}`}>A filled line shows the official Scope mean energy for each local hour. Focus a point for its exact value.</desc>
+        {[0, 0.5, 1].map((ratio) => {
+          const y = margin.top + plotHeight * (1 - ratio);
+          return (
+            <g key={ratio}>
+              <line x1={margin.left} x2={width - margin.right} y1={y} y2={y} stroke="var(--border)" strokeWidth="1" />
+              <text x={margin.left - 9} y={y + 4} textAnchor="end" fontSize="11" fill="var(--muted)">{(maximum * ratio).toFixed(1)}</text>
+            </g>
+          );
+        })}
+        {areaPath ? <path d={areaPath} fill="var(--primary)" opacity="0.16" /> : null}
+        {linePath ? <path d={linePath} fill="none" stroke="var(--primary)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" /> : null}
+        <line x1={margin.left} x2={width - margin.right} y1={averageY} y2={averageY} stroke="var(--step-inspect)" strokeWidth="1.5" strokeDasharray="6 5" />
+        <text x={width - margin.right} y={averageY - 7} textAnchor="end" fontSize="10" fontWeight="600" fill="var(--step-inspect)">Hourly mean {averageUsageKwh.toFixed(2)} kWh</text>
+          {coordinates.map(({ point, x, y }, index) => (
+          <g
+            key={point.id}
+            className="cursor-pointer"
+            onMouseEnter={() => onActivePointChange(point.id)}
+            onMouseLeave={() => onActivePointChange(null)}
+            onClick={() => onSelectedPointChange(point.id)}
+          >
+            <circle cx={x} cy={y} r={selectedPointId === point.id ? 6 : 4} fill="var(--surface)" stroke="var(--primary)" strokeWidth="3" />
+            {(index % 3 === 0 || index === coordinates.length - 1) ? (
+              <text x={x} y={height - 16} textAnchor="middle" fontSize="10" fill="var(--muted)">{point.hourLabel}</text>
+            ) : null}
+          </g>
+        ))}
+          <text x="12" y={margin.top + plotHeight / 2} fontSize="10" fill="var(--muted)" transform={`rotate(-90 12 ${margin.top + plotHeight / 2})`}>Mean energy (kWh)</text>
+        </svg>
+        <div className="absolute bottom-[14%] left-[5.4%] right-[2.5%] top-[8.6%] grid" style={{ gridTemplateColumns: "repeat(24, minmax(0, 1fr))" }} aria-label="Day Profile hourly points">
+          {profile.values.map((point) => (
+            <button
+              key={point.id}
+              type="button"
+              aria-label={`${profile.dayTypeLabel} ${profile.scopeName} ${point.hourLabel}: ${point.usageKwh} kWh`}
+              aria-pressed={selectedPointId === point.id}
+              className="min-w-0 rounded-sm bg-transparent text-transparent outline-none focus-visible:bg-primary/10 focus-visible:ring-2 focus-visible:ring-primary/45"
+              onMouseEnter={() => onActivePointChange(point.id)}
+              onMouseLeave={() => onActivePointChange(null)}
+              onFocus={() => onActivePointChange(point.id)}
+              onBlur={() => onActivePointChange(null)}
+              onClick={() => onSelectedPointChange(point.id)}
+            />
+          ))}
+        </div>
+      </div>
+      <div data-hour-axis="day-profile" className="sr-only">Local-hour axis: 00:00, 03:00, 06:00, 09:00, 12:00, 15:00, 18:00, 21:00.</div>
+    </div>
   );
 }
 

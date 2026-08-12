@@ -150,6 +150,14 @@ export type NgeeAnnDayProfileViewModel = {
         peakHourLabel: string;
         peakUsageKwh: number;
         peakUsage: string;
+        dailyUsageKwh: number;
+        dailyUsage: string;
+        officeHoursUsageKwh: number;
+        officeHoursUsage: string;
+        afterHoursUsageKwh: number;
+        afterHoursUsage: string;
+        afterHoursSharePct: number;
+        afterHoursShare: string;
         sampleDayCount: number;
       }
       | {
@@ -180,6 +188,10 @@ export type NgeeAnnUsageHeatmapViewModel = {
     scopeId: string;
     scopeName: string;
     sampleDayCount: number;
+    dailyUsageKwh: number;
+    dailyUsage: string;
+    peakHourLabel: string;
+    peakUsage: string;
     values: Array<{
       id: string;
       localHour: number;
@@ -3093,6 +3105,22 @@ function buildDayProfile(
           candidate.usageKwh > current.usageKwh ? candidate : current
         ))
         : null;
+      const dailyUsageKwh = profile.status === "available"
+        ? roundDisplayValue(profile.values.reduce((sum, value) => sum + value.usageKwh, 0))
+        : null;
+      const officeHoursUsageKwh = profile.status === "available"
+        ? roundDisplayValue(profile.values
+          .filter((value) => value.localHour >= 8 && value.localHour < 18)
+          .reduce((sum, value) => sum + value.usageKwh, 0))
+        : null;
+      const afterHoursUsageKwh = profile.status === "available"
+        ? roundDisplayValue(profile.values
+          .filter((value) => value.localHour >= 22 || value.localHour < 6)
+          .reduce((sum, value) => sum + value.usageKwh, 0))
+        : null;
+      const afterHoursSharePct = dailyUsageKwh !== null && dailyUsageKwh > 0 && afterHoursUsageKwh !== null
+        ? roundDisplayValue(afterHoursUsageKwh / dailyUsageKwh * 100)
+        : 0;
       return {
         id: `${profile.scopeId}:${profile.dayType}`,
         dayType: profile.dayType,
@@ -3110,6 +3138,14 @@ function buildDayProfile(
             peakHourLabel: formatLocalHour(peak!.localHour),
             peakUsageKwh: peak!.usageKwh,
             peakUsage: formatDecimal(peak!.usageKwh, 4),
+            dailyUsageKwh: dailyUsageKwh!,
+            dailyUsage: formatFixedCustomerDecimal(dailyUsageKwh!, 1),
+            officeHoursUsageKwh: officeHoursUsageKwh!,
+            officeHoursUsage: formatFixedCustomerDecimal(officeHoursUsageKwh!, 1),
+            afterHoursUsageKwh: afterHoursUsageKwh!,
+            afterHoursUsage: formatFixedCustomerDecimal(afterHoursUsageKwh!, 1),
+            afterHoursSharePct,
+            afterHoursShare: `${formatFixedCustomerDecimal(afterHoursSharePct, 1)}%`,
             sampleDayCount: profile.sampleDayCount,
           },
         values: profile.status === "available"
@@ -3164,6 +3200,10 @@ function buildUsageHeatmap(
             scopeId: profile.scopeId,
             scopeName: profile.scopeName,
             sampleDayCount: profile.sampleDayCount!,
+            dailyUsageKwh: profile.summary.status === "available" ? profile.summary.dailyUsageKwh : 0,
+            dailyUsage: profile.summary.status === "available" ? profile.summary.dailyUsage : "Unavailable",
+            peakHourLabel: profile.summary.status === "available" ? profile.summary.peakHourLabel : "Unavailable",
+            peakUsage: profile.summary.status === "available" ? profile.summary.peakUsage : "Unavailable",
             values: profile.values,
           }]
         : []
@@ -3874,6 +3914,19 @@ function formatCustomerDecimal(value: number, maximumFractionDigits: number): st
     minimumFractionDigits: 0,
     useGrouping: true,
   }).format(value);
+}
+
+function formatFixedCustomerDecimal(value: number, fractionDigits: number): string {
+  if (!Number.isFinite(value)) return "Unavailable";
+  return new Intl.NumberFormat("en-SG", {
+    maximumFractionDigits: fractionDigits,
+    minimumFractionDigits: fractionDigits,
+    useGrouping: true,
+  }).format(value);
+}
+
+function roundDisplayValue(value: number): number {
+  return Number(value.toFixed(4));
 }
 
 function signedDecimal(value: number, maximumFractionDigits: number): string {
