@@ -3076,12 +3076,14 @@ function buildOperatingPolicySummary(
     source.usageKwh,
     source.sharePct,
   ].every(finiteNonNegative);
-  const expectedShare = source.usageKwh > 0 ? source.standbyKwh / source.usageKwh * 100 : 0;
+  const totalUsageKwh = source.operatingKwh + source.standbyKwh;
+  const expectedShare = totalUsageKwh > 0 ? source.standbyKwh / totalUsageKwh * 100 : 0;
   const contractValid = valuesValid
     && source.timezone === snapshot.context.timezone
     && source.businessCalendarVersion === snapshot.context.businessCalendarVersion
-    && Math.abs(source.operatingKwh + source.standbyKwh - source.usageKwh) <= 0.1
-    && Math.abs(source.usageKwh - snapshot.analysis.summary.usageKwh) <= 0.1
+    // The API offHours contract exposes usageKwh as the non-operating subtotal.
+    && Math.abs(source.usageKwh - source.standbyKwh) <= 0.1
+    && Math.abs(totalUsageKwh - snapshot.analysis.summary.usageKwh) <= 0.1
     && Math.abs(source.sharePct - expectedShare) <= 0.1;
   if (!contractValid) {
     return unavailable("The release-pinned operating-policy split does not match this Snapshot context.");

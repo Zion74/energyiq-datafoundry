@@ -1851,6 +1851,23 @@ describe("Ngee Ann Overview ViewModel", () => {
     });
   });
 
+  it("accepts the API off-hours contract where usageKwh is the non-operating subtotal", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    if (snapshot.analysis.offHours.status !== "available") throw new Error("Expected available off-hours facts.");
+    snapshot.analysis.offHours.operatingKwh = 1_200;
+    snapshot.analysis.offHours.standbyKwh = 331.168324;
+    snapshot.analysis.offHours.usageKwh = 331.168324;
+    snapshot.analysis.offHours.sharePct = 21.63;
+    snapshot.analysis.summary.usageKwh = 1_531.168324;
+
+    expect(buildNgeeAnnOverviewViewModel(snapshot).dayProfile.operatingPolicy).toMatchObject({
+      status: "available",
+      operatingUsageKwh: 1_200,
+      standbyUsageKwh: 331.168324,
+      standbySharePct: 21.63,
+    });
+  });
+
   it("fails the component Category presentation closed when the server projection is absent", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     delete snapshot.analysis.componentCategoryBreakdown;

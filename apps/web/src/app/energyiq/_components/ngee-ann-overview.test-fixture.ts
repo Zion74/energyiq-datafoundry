@@ -509,7 +509,7 @@ export function ngeeAnnGoldenSnapshot(input: {
       status: "available",
       operatingKwh: 1_200,
       standbyKwh: 331.168324,
-      usageKwh: 1531.168324,
+      usageKwh: 331.168324,
       sharePct: 21.63,
       timezone: "Asia/Singapore",
       businessCalendarVersion: "calendar-v1",
