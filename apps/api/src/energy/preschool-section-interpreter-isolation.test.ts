@@ -234,6 +234,204 @@ describe("Preschool Section Interpreter run isolation", () => {
     harness.close();
   });
 
+  it("accepts exact tariff validity dates from a real Planning Outlook Evidence shape", async () => {
+    const harness = createHarness();
+    const datedPacks = packs().map((pack) => pack.sectionId === "planning-outlook"
+      ? {
+          ...pack,
+          evidence: [{
+            ...pack.evidence[0]!,
+            value: {
+              actualThroughLocalDate: "2026-06-07",
+              tariffAssumption: {
+                appliesFrom: "2026-04-01",
+                appliesTo: "2026-06-30",
+                beforeGstSgdPerKwh: 0.2727,
+              },
+            },
+            unit: "SGD/kWh before GST",
+          }],
+        }
+      : pack);
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: harness.metadata,
+      runSection: async ({ identity, runId, sessionId }) => {
+        const sectionId = requireSectionId(identity.targetId);
+        const answer = sectionId === "planning-outlook"
+          ? {
+              sectionId,
+              status: "available",
+              summary: "The current pattern deserves management attention.",
+              keyPoints: [{
+                kind: "finding",
+                text: "The tariff reference is 0.2727 SGD/kWh before GST from 1 April 2026 to 30 June 2026.",
+                evidenceRefs: [`evidence:${sectionId}`],
+              }],
+            }
+          : available(sectionId);
+        return { answer: JSON.stringify(answer), runId, sessionId };
+      },
+    });
+
+    const result = await interpreter.execute({
+      baseIdentity: harness.identity,
+      packs: datedPacks,
+      user: harness.user,
+    });
+
+    expect(result["planning-outlook"]).toMatchObject({ status: "available" });
+    harness.close();
+  });
+
+  it("accepts a month-and-year limitation when the cited Evidence contains a date in that month", async () => {
+    const harness = createHarness();
+    const datedPacks = packs().map((pack) => pack.sectionId === "operating-behaviour"
+      ? {
+          ...pack,
+          evidence: [{
+            ...pack.evidence[0]!,
+            value: { localDate: "2026-05-22" },
+          }],
+        }
+      : pack);
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: harness.metadata,
+      runSection: async ({ identity, runId, sessionId }) => {
+        const sectionId = requireSectionId(identity.targetId);
+        const answer = sectionId === "operating-behaviour"
+          ? {
+              ...available(sectionId),
+              limitation: "The Evidence covers May 2026 and does not establish a seasonal pattern.",
+            }
+          : available(sectionId);
+        return { answer: JSON.stringify(answer), runId, sessionId };
+      },
+    });
+
+    const result = await interpreter.execute({
+      baseIdentity: harness.identity,
+      packs: datedPacks,
+      user: harness.user,
+    });
+
+    expect(result["operating-behaviour"]).toMatchObject({ status: "available" });
+    harness.close();
+  });
+
+  it("replays the first real Provider operating response without treating May 2026 as a new number", async () => {
+    const harness = createHarness();
+    const ref = (suffix: string) => `evidence:operating:${suffix}`;
+    const operatingPacks = packs().map((pack) => pack.sectionId === "operating-behaviour"
+      ? {
+          ...pack,
+          evidence: [
+            {
+              id: ref("n"), label: "Centre N operating spike",
+              value: { centreCode: "N", name: "Centre N", worstSpike: { localDate: "2026-05-22", localHour: 15, usageKwh: 45.3308, impactKwh: 39.9641, leadingCircuitName: "Kitchen Plug Load" } },
+              unit: "kWh", entityRefs: [], evidenceRefs: [ref("n")],
+              claimRelations: [{ subject: "Centre N", predicate: "leading-circuit", object: "Kitchen Plug Load" }],
+            },
+            {
+              id: ref("l"), label: "Centre L operating spike",
+              value: { centreCode: "L", name: "Centre L", worstSpike: { localDate: "2026-05-19", localHour: 8, usageKwh: 30.847, impactKwh: 26.2093, leadingCircuitName: "Heater" } },
+              unit: "kWh", entityRefs: [], evidenceRefs: [ref("l")],
+              claimRelations: [{ subject: "Centre L", predicate: "leading-circuit", object: "Heater" }],
+            },
+            ...[
+              ["Kitchen Plug Load", 3813.275, 17.4776, "appliance-1"],
+              ["Plug Load3", 3770.7815, 17.2829, "appliance-2"],
+              ["Living Area Plug Load", 3762.1959, 17.2435, "appliance-3"],
+            ].map(([name, usageKwh, sharePct, suffix]) => ({
+              id: ref(String(suffix)), label: `${name} contribution`,
+              value: { name, usageKwh, sharePct, centreCount: 30 },
+              unit: "kWh, %", entityRefs: [], evidenceRefs: [ref(String(suffix))],
+            })),
+          ],
+        }
+      : pack);
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: harness.metadata,
+      runSection: async ({ identity, runId, sessionId }) => {
+        const sectionId = requireSectionId(identity.targetId);
+        const answer = sectionId === "operating-behaviour"
+          ? {
+              sectionId,
+              status: "available",
+              summary: "Operating-hour energy shows notable spikes at a few Centres, mostly linked to plug-load circuits, which may warrant attention to scheduling or equipment behaviour.",
+              keyPoints: [
+                { kind: "finding", label: "High-impact spike at Centre N", text: "Centre N had a severe spike on 22 May 2026 at 15:00, with usage of 45.3308 kWh versus an impact of 39.9641 kWh, driven mainly by the Kitchen Plug Load circuit.", evidenceRefs: [ref("n")] },
+                { kind: "finding", label: "Large spike at Centre L", text: "Centre L experienced a spike on 19 May 2026 at 08:00, with usage of 30.847 kWh and an impact of 26.2093 kWh, led by the Heater circuit.", evidenceRefs: [ref("l")] },
+                { kind: "meaning", label: "Plug-load dominance", text: "Three plug-load categories—Kitchen Plug Load, Plug Load3, and Living Area Plug Load—each account for roughly 17% of operating-hour usage, suggesting plug-load equipment is a significant and consistent consumer across Centres.", evidenceRefs: [ref("appliance-1"), ref("appliance-2"), ref("appliance-3")] },
+                { kind: "next-check", label: "Verify schedules", text: "Consider comparing operating schedules and leading appliance groups at the named Centres to determine whether these spikes reflect normal operations or an opportunity for adjustment.", evidenceRefs: [ref("n"), ref("l")] },
+              ],
+              limitation: "The data covers a single month (May 2026) and does not include a full year for seasonal context; spike causes are not confirmed beyond circuit-level attribution.",
+            }
+          : available(sectionId);
+        return { answer: JSON.stringify(answer), runId, sessionId };
+      },
+    });
+
+    const result = await interpreter.execute({
+      baseIdentity: harness.identity,
+      packs: operatingPacks,
+      user: harness.user,
+    });
+
+    expect(result["operating-behaviour"]).toMatchObject({ status: "available" });
+    harness.close();
+  });
+
+  it("rejects the real Planning retry when an energy pace percentage is also claimed for cost", async () => {
+    const harness = createHarness();
+    const planningPacks = packs().map((pack) => pack.sectionId === "planning-outlook"
+      ? {
+          ...pack,
+          evidence: [{
+            ...pack.evidence[0]!,
+            value: {
+              actual: { usageKwh: 5296.63, completeDayCount: 7, targetDayCount: 30 },
+              forecast: {
+                tariffAssumption: { beforeGstSgdPerKwh: 0.2727, appliesFrom: "2026-04-01", appliesTo: "2026-06-30" },
+                portfolio: { actualCostBeforeGstSgd: 1444.39, actualThroughLocalDate: "2026-06-07", pacePct: 88.79 },
+              },
+            },
+            unit: "kWh, %, SGD before GST",
+          }],
+        }
+      : pack);
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: harness.metadata,
+      runSection: async ({ identity, runId, sessionId }) => {
+        const sectionId = requireSectionId(identity.targetId);
+        const answer = sectionId === "planning-outlook"
+          ? {
+              sectionId,
+              status: "available",
+              summary: "Actual usage and cost are tracking at about 88.8% of the saved plan's expected pace through 7 June 2026.",
+              keyPoints: [{
+                kind: "meaning",
+                text: "Through 7 June 2026, actual usage and cost are running at 88.79% of the plan's expected pace.",
+                evidenceRefs: [`evidence:${sectionId}`],
+              }],
+            }
+          : available(sectionId);
+        return { answer: JSON.stringify(answer), runId, sessionId };
+      },
+    });
+
+    const result = await interpreter.execute({
+      baseIdentity: harness.identity,
+      packs: planningPacks,
+      user: harness.user,
+    });
+
+    expect(result["planning-outlook"]).toMatchObject({
+      status: "failed",
+      error_code: "PRESCHOOL_SECTION_INTERPRETATION_FACT_UNSUPPORTED",
+    });
+    harness.close();
+  });
+
   it("rejects a contradictory empty response without affecting sibling Sections", async () => {
     const harness = createHarness();
     const interpreter = createPreschoolSectionInterpreter({

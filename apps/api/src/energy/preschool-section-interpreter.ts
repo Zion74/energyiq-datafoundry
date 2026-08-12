@@ -27,6 +27,7 @@ const SQL_STATEMENT = /\bSELECT\b[\s\S]{0,500}\b(?:FROM|JOIN)\b/i;
 const NUMBER_TOKEN = /(?<![A-Za-z0-9_-])-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/g;
 const LOCAL_DATE_TOKEN = /\b\d{4}-\d{2}-\d{2}\b/g;
 const NATURAL_DATE_TOKEN = /\b(?:[1-9]|[12]\d|3[01])\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b/giu;
+const MONTH_YEAR_TOKEN = /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b/giu;
 const LOCAL_TIME_TOKEN = /\b(?:[01]?\d|2[0-3]):[0-5]\d\b/g;
 const LOCAL_DATE_VALUE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -171,6 +172,7 @@ const buildSectionInterpreterPrompt = (
     "When mentioning a date, use the exact supplied YYYY-MM-DD or its equivalent D Month YYYY rendering. When mentioning an hour, copy localHour as HH:00; do not rewrite hours as 1am, 11pm, noon, or midday.",
     "Prefer useful qualitative wording over extra numbers. If a number is necessary, copy one exact supplied value; do not calculate, round, combine, derive a range, or compare values beyond an explicit supplied field.",
     "Do not create combined totals or shares from multiple Evidence items. Describe the items separately or without a synthesized number.",
+    "A pacePct field describes energy usage pace only. Never apply it to cost, and never calculate its complement as an ahead/behind percentage.",
     "Do not claim a top, highest, largest, ahead, behind, likely cause, or combined contribution unless those exact meanings are explicit in the cited Evidence. A question about what to verify is allowed when it matches allowedNextChecks.",
     previousErrorCode
       ? `Previous attempt rejection: ${previousErrorCode}. Do not repeat that rejected output. Use fewer claims and numbers; keep every Key Point within only its cited Evidence.`
@@ -374,6 +376,7 @@ const materializeSectionResult = (input: {
       || pointNarrative.some((value) => hasUnsupportedNumber(value, citedEvidence))
       || pointNarrative.some((value) => hasUnsupportedUnit(value, citedEvidence))
       || pointNarrative.some((value) => hasUnsupportedCentre(value, citedEvidence))
+      || pointNarrative.some((value) => hasUnsupportedMetricRelation(value, citedEvidence))
       || pointNarrative.some((value) => hasUnsupportedRelation(value, citedEvidence, input.pack.evidence))) {
       throw new Error("PRESCHOOL_SECTION_INTERPRETATION_FACT_UNSUPPORTED");
     }
@@ -386,6 +389,7 @@ const materializeSectionResult = (input: {
     || narrative.some((value) => hasUnsupportedNumber(value, input.pack.evidence))
     || narrative.some((value) => hasUnsupportedUnit(value, input.pack.evidence))
     || narrative.some((value) => hasUnsupportedCentre(value, input.pack.evidence))
+    || narrative.some((value) => hasUnsupportedMetricRelation(value, input.pack.evidence))
     || narrative.some((value) => hasUnsupportedRelation(value, input.pack.evidence))) {
     throw new Error("PRESCHOOL_SECTION_INTERPRETATION_FACT_UNSUPPORTED");
   }
@@ -434,6 +438,7 @@ const hasUnsupportedNumber = (text: string, evidence: PreschoolSectionPack["evid
   const numericText = text
     .replace(LOCAL_DATE_TOKEN, "")
     .replace(NATURAL_DATE_TOKEN, "")
+    .replace(MONTH_YEAR_TOKEN, "")
     .replace(LOCAL_TIME_TOKEN, "");
   const tokens = [...numericText.matchAll(NUMBER_TOKEN)];
   return tokens.some((match) => {
@@ -483,6 +488,9 @@ const hasUnsupportedTemporalClaim = (
   if (dates.some((date) => !supported.dates.has(date))) return true;
   const naturalDates = [...text.matchAll(NATURAL_DATE_TOKEN)].map(([value]) => naturalDateToIso(value));
   if (naturalDates.some((date) => date === null || !supported.dates.has(date))) return true;
+  const monthYears = [...text.matchAll(MONTH_YEAR_TOKEN)].map(([value]) => monthYearToIsoPrefix(value));
+  if (monthYears.some((prefix) => prefix === null
+    || ![...supported.dates].some((date) => date.startsWith(`${prefix}-`)))) return true;
   const times = [...text.matchAll(LOCAL_TIME_TOKEN)].map(([value]) => value);
   return times.some((time) => {
     const separator = time.indexOf(":");
@@ -490,6 +498,16 @@ const hasUnsupportedTemporalClaim = (
     const minute = Number(time.slice(separator + 1));
     return minute !== 0 || !supported.hours.has(hour);
   });
+};
+
+const monthYearToIsoPrefix = (value: string): string | null => {
+  const match = value.match(/^([A-Za-z]+)\s+(\d{4})$/u);
+  if (!match) return null;
+  const month = [
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+  ].indexOf(match[1]!.toLowerCase()) + 1;
+  return month === 0 ? null : `${match[2]}-${month.toString().padStart(2, "0")}`;
 };
 
 const naturalDateToIso = (value: string): string | null => {
@@ -535,8 +553,7 @@ const collectTemporalClaims = (value: unknown): { dates: Set<string>; hours: Set
     }
     if (!isRecord(candidate)) return;
     for (const [key, item] of Object.entries(candidate)) {
-      if ((key === "localDate" || key === "actualThroughLocalDate")
-        && typeof item === "string" && LOCAL_DATE_VALUE.test(item)) dates.add(item);
+      if (typeof item === "string" && LOCAL_DATE_VALUE.test(item)) dates.add(item);
       if (key === "localHour" && typeof item === "number"
         && Number.isInteger(item) && item >= 0 && item <= 23) hours.add(item);
       visit(item);
@@ -551,6 +568,38 @@ const hasUnsupportedCentre = (text: string, evidence: PreschoolSectionPack["evid
   const centres = [...text.matchAll(/\b[Cc]entre\s+[A-Z0-9][A-Z0-9-]{0,3}\b/g)]
     .map(([value]) => value.toLowerCase());
   return centres.some((centre) => !supportedText.includes(centre));
+};
+
+const hasUnsupportedMetricRelation = (
+  text: string,
+  evidence: PreschoolSectionPack["evidence"],
+): boolean => {
+  const paceValues = evidence.flatMap(({ value }) => collectNumbersForKey(value, "pacePct"));
+  if (paceValues.length === 0) return false;
+  return text.split(/[!?;]|(?<!\d)\.(?!\d)|\b(?:but|while|whereas)\b/iu).some((clause) => {
+    if (!/\bcost\b/iu.test(clause)) return false;
+    const numericClause = clause
+      .replace(LOCAL_DATE_TOKEN, "")
+      .replace(NATURAL_DATE_TOKEN, "")
+      .replace(MONTH_YEAR_TOKEN, "")
+      .replace(LOCAL_TIME_TOKEN, "");
+    return [...numericClause.matchAll(NUMBER_TOKEN)].some((match) => {
+      const raw = match[0].replaceAll(",", "");
+      const value = Number(raw);
+      const precision = raw.includes(".") ? raw.length - raw.indexOf(".") - 1 : 0;
+      const tolerance = 0.5 * (10 ** -precision);
+      return paceValues.some((candidate) => Math.abs(candidate - value) < tolerance
+        || Math.abs(Number(candidate.toFixed(precision)) - value) < tolerance);
+    });
+  });
+};
+
+const collectNumbersForKey = (value: unknown, targetKey: string): number[] => {
+  if (Array.isArray(value)) return value.flatMap((item) => collectNumbersForKey(item, targetKey));
+  if (!isRecord(value)) return [];
+  return Object.entries(value).flatMap(([key, item]) => key === targetKey && typeof item === "number" && Number.isFinite(item)
+    ? [item]
+    : collectNumbersForKey(item, targetKey));
 };
 
 const hasUnsupportedRelation = (
