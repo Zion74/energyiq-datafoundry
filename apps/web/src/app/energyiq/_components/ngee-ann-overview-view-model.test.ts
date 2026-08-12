@@ -1181,6 +1181,14 @@ describe("Ngee Ann Overview ViewModel", () => {
         dailyUsage: "246.9",
       },
       values: expect.any(Array),
+      componentStack: {
+        status: "available",
+        sampleDayCount: 5,
+        categories: [
+          expect.objectContaining({ category: "load", categoryLabel: "Load", values: expect.any(Array) }),
+          expect.objectContaining({ category: "light", categoryLabel: "Light", values: expect.any(Array) }),
+        ],
+      },
     });
     expect(view.dayProfile.profiles.find((profile) => profile.id === "project:weekend")).toMatchObject({
       status: "available",
@@ -1192,6 +1200,12 @@ describe("Ngee Ann Overview ViewModel", () => {
       values: [],
     });
     expect(view.dayProfile.profiles.find((profile) => profile.id === "project:weekday")?.values).toHaveLength(24);
+    const weekdayComponentStack = view.dayProfile.profiles
+      .find((profile) => profile.id === "project:weekday")?.componentStack;
+    expect(weekdayComponentStack?.status).toBe("available");
+    if (weekdayComponentStack?.status === "available") {
+      expect(weekdayComponentStack.categories.every((category) => category.values.length === 24)).toBe(true);
+    }
 
     expect(view.usageHeatmap).toMatchObject({
       status: "available",
@@ -1210,6 +1224,21 @@ describe("Ngee Ann Overview ViewModel", () => {
       values: expect.any(Array),
     });
     expect(view.usageHeatmap.averageProfiles.find((profile) => profile.id === "project:weekday")?.values).toHaveLength(24);
+    expect(view.usageHeatmap.circuitProfiles).toEqual([
+      expect.objectContaining({
+        id: "level-7:weekday",
+        levelScopeId: "level-7",
+        levelScopeName: "Level 7",
+        dayType: "weekday",
+        sampleDayCount: 5,
+        circuits: expect.any(Array),
+      }),
+      expect.objectContaining({ id: "level-7:weekend", levelScopeId: "level-7", dayType: "weekend" }),
+      expect.objectContaining({ id: "level-6:weekday", levelScopeId: "level-6", dayType: "weekday" }),
+      expect.objectContaining({ id: "level-6:weekend", levelScopeId: "level-6", dayType: "weekend" }),
+    ]);
+    expect(view.usageHeatmap.circuitProfiles[0]!.circuits.length).toBeGreaterThan(0);
+    expect(view.usageHeatmap.circuitProfiles[0]!.circuits.every((circuit) => circuit.values.length === 24)).toBe(true);
     expect(view.usageHeatmap.dates).toHaveLength(7);
     expect(view.usageHeatmap.scopes).toHaveLength(3);
     expect(view.usageHeatmap.scopes[0]!.cells).toHaveLength(168);
@@ -1240,6 +1269,30 @@ describe("Ngee Ann Overview ViewModel", () => {
     expect(gridView.dayProfile).toMatchObject({ status: "unavailable", profiles: [] });
     expect(gridView.energyTrend).toMatchObject({ status: "available", grain: "day" });
     expect(gridView.levelComparison.status).toBe("available");
+  });
+
+  it("fails only component hourly projections closed when their authoritative rows are invalid", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const projection = snapshot.analysis.componentHourlyProfiles!;
+    const projectWeekday = projection.scopes[0]!.profiles.find((profile) => (
+      profile.dayType === "weekday" && profile.status === "available"
+    ));
+    if (!projectWeekday || projectWeekday.status !== "available") {
+      throw new Error("Expected an available Project weekday component profile.");
+    }
+    projectWeekday.categories[0]!.values.pop();
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+    const projectProfile = view.dayProfile.profiles.find((profile) => profile.id === "project:weekday")!;
+
+    expect(view.dayProfile.status).toBe("available");
+    expect(projectProfile.componentStack).toMatchObject({
+      status: "unavailable",
+      reason: expect.stringMatching(/component hourly/i),
+    });
+    expect(view.usageHeatmap.status).toBe("available");
+    expect(view.usageHeatmap.circuitProfiles).toEqual([]);
+    expect(view.usageHeatmap.scopes).toHaveLength(3);
   });
 
   it.each(timeEvidencePinMismatchCases)(

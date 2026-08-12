@@ -1206,7 +1206,7 @@ describe("EnergyScopeAnalysis", () => {
 
       expect(repeated).toEqual(analysis);
       expect(maximumReadonlyQueryConcurrency).toBeLessThanOrEqual(3);
-      expect(measuredRunQueryCount).toBe(11);
+      expect(measuredRunQueryCount).toBe(12);
       expect(measuredRunSessionCount).toBe(1);
       expect(analysis.summary.usageKwh).toBe(NGEE_ANN_GOLDEN.period.usageKwh);
       expect(analysis.summary.peakKw).toBe(NGEE_ANN_GOLDEN.period.peakKw);
@@ -1415,6 +1415,37 @@ describe("EnergyScopeAnalysis", () => {
       expect(analysis.timeBehaviour?.dayProfiles.filter(
         (candidate) => candidate.status === "available",
       ).every((candidate) => candidate.values.length === 24)).toBe(true);
+      const componentHourlyProfiles = analysis.componentHourlyProfiles;
+      expect(componentHourlyProfiles).toMatchObject({
+        queryId: "component_hourly_profiles_v1",
+        accountingBasis: "published_component_circuits",
+      });
+      expect(componentHourlyProfiles?.scopes.map((scope) => scope.scopeId)).toEqual([
+        "project",
+        "level-7",
+        "level-6",
+      ]);
+      const componentProfile = (scopeId: string, dayType: string) => (
+        componentHourlyProfiles?.scopes.find((scope) => scope.scopeId === scopeId)
+          ?.profiles.find((profile) => profile.dayType === dayType)
+      );
+      expect(componentProfile("project", "weekday")).toMatchObject({
+        status: "available",
+        sampleDayCount: 5,
+        categories: [
+          { category: "load", values: expect.any(Array) },
+          { category: "light", values: expect.any(Array) },
+        ],
+      });
+      expect(componentProfile("project", "weekday")?.categories?.every(
+        (category) => category.values.length === 24,
+      )).toBe(true);
+      expect(componentProfile("level-7", "weekday")?.circuits).toHaveLength(7);
+      expect(componentProfile("level-6", "weekday")?.circuits).toHaveLength(7);
+      expect(componentProfile("project", "public_holiday")).toMatchObject({
+        status: "unavailable",
+      });
+      expect(analysis.provenance.queryIds).toContain("component_hourly_profiles_v1");
       expect(analysis.peakBreakdown).toEqual(expectedNgeeAnnPeakBreakdown());
       for (const scope of analysis.dailyTotals?.scopes ?? []) {
         const expectedUsageKwh = scope.scopeId === "project"
@@ -1880,6 +1911,14 @@ describe("EnergyScopeAnalysis", () => {
       status: "available",
       sampleDayCount: 2,
     });
+    const componentProfile = (dayType: "weekday" | "weekend", scopeId: string) => (
+      analysis.componentHourlyProfiles?.scopes.find((scope) => scope.scopeId === scopeId)
+        ?.profiles.find((candidate) => candidate.dayType === dayType)
+    );
+    expect(componentProfile("weekday", "project")).toMatchObject({
+      status: "available",
+      sampleDayCount: 5,
+    });
     expect(analysis.timeBehaviour?.scopes.find((scope) => scope.scopeId === "project")
       ?.cells.find((cell) => cell.localDate === "2026-06-10" && cell.localHour === 8)
       ?.dataHealth.status).toBe("complete");
@@ -1907,6 +1946,50 @@ describe("EnergyScopeAnalysis", () => {
       categories: expect.arrayContaining([
         expect.objectContaining({ usageKwh: null, sharePct: null }),
       ]),
+    });
+    const componentProfile = (scopeId: string, dayType: string) => (
+      analysis.componentHourlyProfiles?.scopes.find((scope) => scope.scopeId === scopeId)
+        ?.profiles.find((profile) => profile.dayType === dayType)
+    );
+    expect(componentProfile("project", "weekday")).toMatchObject({
+      status: "available",
+      sampleDayCount: 4,
+    });
+    expect(componentProfile("level-7", "weekday")).toMatchObject({
+      status: "available",
+      sampleDayCount: 4,
+    });
+    expect(componentProfile("level-6", "weekday")).toMatchObject({
+      status: "available",
+      sampleDayCount: 5,
+    });
+  }, 30_000);
+
+  it("fails component hourly Profiles closed per Scope when component Day Type conflicts", async () => {
+    const analysis = await analyzeNgeeAnnFixture((facts) => facts.map((fact) => (
+      fact.intervalStart === "2026-06-10T00:00:00.000Z"
+        && fact.meterPointId === "mapping-lvl-7-office-load-1-l1p1-l3p6-13"
+        ? { ...fact, dayType: "weekend" }
+        : fact
+    )));
+    const profile = (dayType: "weekday" | "weekend", scopeId: string) => (
+      analysis.componentHourlyProfiles?.scopes.find((scope) => scope.scopeId === scopeId)
+        ?.profiles.find((candidate) => candidate.dayType === dayType)
+    );
+
+    for (const scopeId of ["project", "level-7"]) {
+      expect(profile("weekday", scopeId)).toMatchObject({
+        status: "unavailable",
+        reason: { code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE" },
+      });
+      expect(profile("weekend", scopeId)).toMatchObject({
+        status: "unavailable",
+        reason: { code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE" },
+      });
+    }
+    expect(profile("weekday", "level-6")).toMatchObject({
+      status: "available",
+      sampleDayCount: 5,
     });
   }, 30_000);
 

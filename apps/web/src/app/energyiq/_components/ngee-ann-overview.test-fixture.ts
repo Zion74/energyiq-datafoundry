@@ -24,6 +24,7 @@ export function ngeeAnnGoldenSnapshot(input: {
     "daily_totals_v1",
     "daily_component_categories_v1",
     "time_bucket_grid_v1",
+    "component_hourly_profiles_v1",
     "time_slot_anomaly_v1",
     "peak_breakdown_v1",
     "hourly_profile_v1",
@@ -573,6 +574,7 @@ export function ngeeAnnGoldenSnapshot(input: {
   };
 
   analysis.componentCategoryBreakdown = goldenComponentCategoryBreakdown(analysis);
+  analysis.componentHourlyProfiles = goldenComponentHourlyProfiles(timeBehaviour, topCircuits);
 
   return {
     context: {
@@ -1172,6 +1174,83 @@ function goldenTimeBehaviour(): NonNullable<EnergyProjectAnalysisSnapshotDto["an
     queryId: "time_bucket_grid_v1",
     scopes,
     dayProfiles,
+  };
+}
+
+function goldenComponentHourlyProfiles(
+  timeBehaviour: NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["timeBehaviour"]>,
+  componentCircuits: EnergyProjectAnalysisSnapshotDto["analysis"]["topCircuits"],
+): NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["componentHourlyProfiles"]> {
+  return {
+    metricId: "energy.total_usage_kwh@1",
+    queryId: "component_hourly_profiles_v1",
+    accountingBasis: "published_component_circuits",
+    grain: "hour",
+    unit: "kWh",
+    timezone: timeBehaviour.timezone,
+    scopes: timeBehaviour.scopes.map((scope) => {
+      const circuits = scope.scopeType === "project"
+        ? componentCircuits
+        : componentCircuits.filter((circuit) => circuit.parentScopeId === scope.scopeId);
+      const circuitTotal = circuits.reduce((sum, circuit) => sum + circuit.usageKwh, 0);
+      const categories = [...new Set(circuits.map((circuit) => circuit.category))]
+        .sort((left, right) => left === "load" ? -1 : right === "load" ? 1 : left.localeCompare(right));
+      const profiles: NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["componentHourlyProfiles"]>["scopes"][number]["profiles"] = [];
+      for (const dayType of ["weekday", "weekend"] as const) {
+        const official = timeBehaviour.dayProfiles.find((profile) => (
+          profile.scopeId === scope.scopeId && profile.dayType === dayType
+        ));
+        if (!official || official.status === "unavailable" || circuitTotal <= 0) {
+          profiles.push({
+            dayType,
+            status: "unavailable",
+            reason: {
+              code: "COMPLETE_DAY_SAMPLE_UNAVAILABLE",
+              message: `No common complete ${dayType} component-Circuit sample is available for ${scope.scopeName}.`,
+            },
+          });
+          continue;
+        }
+        const circuitRows = circuits.map((circuit) => ({
+          meterNodeId: circuit.meterNodeId,
+          name: circuit.name,
+          category: circuit.category,
+          values: official.values.map((value) => ({
+            localHour: value.localHour,
+            usageKwh: roundFixture(value.usageKwh * 0.992 * circuit.usageKwh / circuitTotal),
+          })),
+        }));
+        profiles.push({
+          dayType,
+          status: "available",
+          sampleDayCount: official.sampleDayCount,
+          categories: categories.map((category) => ({
+            category,
+            values: Array.from({ length: 24 }, (_, localHour) => ({
+              localHour,
+              usageKwh: roundFixture(circuitRows
+                .filter((circuit) => circuit.category === category)
+                .reduce((sum, circuit) => sum + circuit.values[localHour]!.usageKwh, 0)),
+            })),
+          })),
+          circuits: circuitRows,
+        });
+      }
+      profiles.push({
+        dayType: "public_holiday",
+        status: "unavailable",
+        reason: {
+          code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE",
+          message: "Public Holiday component profiles require an authoritative release-pinned Calendar classification.",
+        },
+      });
+      return {
+        scopeId: scope.scopeId,
+        scopeName: scope.scopeName,
+        scopeType: scope.scopeType,
+        profiles,
+      };
+    }),
   };
 }
 

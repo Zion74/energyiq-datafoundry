@@ -569,16 +569,21 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Public Holiday baseline unavailable");
     expect(markup).toContain("24-Hour Profile Comparison");
     expect(markup).toContain("Official Scope energy");
+    expect(markup).toContain("Published component Category shape");
+    expect(markup).toContain("Load");
+    expect(markup).toContain("Light");
     expect(markup).toContain("How does the observed 24-hour energy shape change by Day Type and Scope?");
     expect(markup).toContain("5 complete days / 24 server values");
     expect(markup).toContain("Day Profile evidence / time_bucket_grid_v1");
     expect(markup).toContain("Usage heatmap");
     expect(markup).toContain("Which recurring local hour pattern or individual date needs inspection?");
-    expect(markup).toContain("Level × hour average");
+    expect(markup).toContain("Level → Circuit");
     expect(markup).toContain("Average day type");
     expect(markup).toContain("Date × hour");
     expect(markup).toContain("Daily usage pattern by Level");
     expect(markup).toContain("Level profile summary");
+    expect(markup).toContain("Office Load 4 Fan ISOL 1/2");
+    expect(markup).not.toContain("This Snapshot does not publish a Circuit-by-hour heatmap");
     expect(markup).toContain("Heatmap evidence / time_bucket_grid_v1");
     expect(markup).toContain("energy.total_usage_kwh@1");
     expect(markup).toContain("Energy distribution");
@@ -1707,7 +1712,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(filterButton("Energy trend Scope", "Project")?.getAttribute("aria-pressed")).toBe("true");
     expect(filterButton("Day Profile type", "Weekday")?.getAttribute("aria-pressed")).toBe("true");
     expect(filterButton("Day Profile Scope", "Project")?.getAttribute("aria-pressed")).toBe("true");
-    expect(filterButton("Heatmap view", "Level × hour average")?.getAttribute("aria-pressed")).toBe("true");
+    expect(filterButton("Heatmap view", "Level → Circuit")?.getAttribute("aria-pressed")).toBe("true");
     expect(container.querySelector<HTMLButtonElement>(
       'button[aria-label^="16 Jun 00:00: 5.3565 kWh"]',
     )?.getAttribute("aria-pressed")).toBe("false");
@@ -1809,17 +1814,17 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     await renderGolden();
 
     const dateHour = filterButton("Heatmap view", "Date × hour")!;
-    const levelHour = filterButton("Heatmap view", "Level × hour average")!;
+    const levelHour = filterButton("Heatmap view", "Level → Circuit")!;
     const weekday = filterButton("Average day type", "Weekday")!;
     expect(levelHour.getAttribute("aria-pressed")).toBe("true");
     expect(weekday.getAttribute("aria-pressed")).toBe("true");
     expect(filterButton("Heatmap Level", "Project")).toBeUndefined();
     const averageCell = container.querySelector<HTMLButtonElement>(
-      'button[aria-label^="Project / Weekday 00:00: mean"]',
+      'button[aria-label^="Level 7 / Office Load 4 Fan ISOL 1/2 / Weekday 00:00: mean"]',
     )!;
     await act(async () => averageCell.focus());
-    expect(container.textContent).toContain("Project / Weekday / 00:00");
-    expect(container.textContent).toContain("5 complete-day samples / mean_of_complete_local_days");
+    expect(container.textContent).toContain("Level 7 / Office Load 4 Fan ISOL 1/2 / Weekday / 00:00");
+    expect(container.textContent).toContain("5 common complete-day samples / published component Circuit");
     await activateNativeButton(averageCell, "Enter");
     await act(async () => averageCell.blur());
     expect(averageCell.getAttribute("aria-pressed")).toBe("true");

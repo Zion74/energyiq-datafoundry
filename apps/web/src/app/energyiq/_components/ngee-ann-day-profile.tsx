@@ -213,6 +213,7 @@ export function NgeeAnnDayProfile({ view }: { view: NgeeAnnDayProfileViewModel }
       )}
 
       <TimeEvidence label="Day Profile evidence" evidence={view.evidence} />
+      <TimeEvidence label="Component profile evidence" evidence={view.componentEvidence} />
     </section>
   );
 }
@@ -270,7 +271,13 @@ function HourlyProfileChart({
   const margin = { top: 26, right: 24, bottom: 42, left: 52 };
   const plotWidth = width - margin.left - margin.right;
   const plotHeight = height - margin.top - margin.bottom;
-  const maximum = Math.max(maximumUsageKwh, 1);
+  const componentCategories = profile.componentStack.status === "available"
+    ? profile.componentStack.categories
+    : [];
+  const componentTotals = Array.from({ length: 24 }, (_, localHour) => (
+    componentCategories.reduce((sum, category) => sum + category.values[localHour]!.acceptedUsageKwh, 0)
+  ));
+  const maximum = Math.max(maximumUsageKwh, ...componentTotals, 1);
   const coordinates = profile.values.map((point, index) => ({
     point,
     x: margin.left + (profile.values.length <= 1 ? 0 : index / (profile.values.length - 1) * plotWidth),
@@ -281,17 +288,44 @@ function HourlyProfileChart({
     ? ""
     : `M${coordinates[0]!.x.toFixed(2)},${(margin.top + plotHeight).toFixed(2)} ${coordinates.map(({ x, y }) => `L${x.toFixed(2)},${y.toFixed(2)}`).join(" ")} L${coordinates.at(-1)!.x.toFixed(2)},${(margin.top + plotHeight).toFixed(2)} Z`;
   const averageY = margin.top + plotHeight - averageUsageKwh / maximum * plotHeight;
+  const stackPaths = componentCategories.map((category, categoryIndex) => {
+    const lower = category.values.map((_, localHour) => (
+      componentCategories.slice(0, categoryIndex)
+        .reduce((sum, previous) => sum + previous.values[localHour]!.acceptedUsageKwh, 0)
+    ));
+    const upper = category.values.map((value, localHour) => lower[localHour]! + value.acceptedUsageKwh);
+    const xAt = (localHour: number) => margin.left + localHour / 23 * plotWidth;
+    const yAt = (value: number) => margin.top + plotHeight - value / maximum * plotHeight;
+    const upperPath = upper.map((value, localHour) => `${localHour === 0 ? "M" : "L"}${xAt(localHour).toFixed(2)},${yAt(value).toFixed(2)}`).join(" ");
+    const lowerPath = lower.map((value, localHour) => ({ value, localHour })).reverse()
+      .map(({ value, localHour }) => `L${xAt(localHour).toFixed(2)},${yAt(value).toFixed(2)}`).join(" ");
+    return {
+      category,
+      path: `${upperPath} ${lowerPath} Z`,
+    };
+  });
 
   return (
     <div id="ngee-ann-day-profile-chart" className="mt-4 rounded-xl border border-border bg-surface px-3 py-4 sm:px-4">
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
-        <span className="inline-flex items-center gap-2"><span aria-hidden="true" className="h-2.5 w-5 rounded-sm bg-primary/45" />Official Scope energy</span>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <span className="inline-flex items-center gap-2"><span aria-hidden="true" className="w-5 border-t-[3px] border-primary" />Official Scope energy</span>
+          {componentCategories.length > 0 ? (
+            <span className="font-semibold text-foreground">Published component Category shape</span>
+          ) : null}
+          {componentCategories.map((category) => (
+            <span key={category.category} className="inline-flex items-center gap-1.5">
+              <span aria-hidden="true" className="h-2.5 w-3.5 rounded-sm" style={{ backgroundColor: componentCategoryColor(category.category) }} />
+              {category.categoryLabel}
+            </span>
+          ))}
+        </div>
         <span>{profile.sampleDayCount} complete {profile.sampleDayCount === 1 ? "day" : "days"} / 24 server values</span>
       </div>
       <div data-hour-plot="day-profile" className="relative mt-3">
         <svg className="block h-auto w-full" viewBox={`0 0 ${width} ${height}`} role="img" aria-labelledby={`day-profile-title-${profile.id} day-profile-desc-${profile.id}`}>
           <title id={`day-profile-title-${profile.id}`}>{`${profile.dayTypeLabel} 24-hour profile for ${profile.scopeName}`}</title>
-          <desc id={`day-profile-desc-${profile.id}`}>A filled line shows the official Scope mean energy for each local hour. Focus a point for its exact value.</desc>
+          <desc id={`day-profile-desc-${profile.id}`}>The line shows official Scope mean energy. When published, stacked areas show component Circuit Categories for the same complete-day sample.</desc>
         {[0, 0.5, 1].map((ratio) => {
           const y = margin.top + plotHeight * (1 - ratio);
           return (
@@ -301,7 +335,11 @@ function HourlyProfileChart({
             </g>
           );
         })}
-        {areaPath ? <path d={areaPath} fill="var(--primary)" opacity="0.16" /> : null}
+        {stackPaths.length > 0
+          ? stackPaths.map(({ category, path }) => (
+            <path key={category.category} d={path} fill={componentCategoryColor(category.category)} opacity="0.62" />
+          ))
+          : areaPath ? <path d={areaPath} fill="var(--primary)" opacity="0.16" /> : null}
         {linePath ? <path d={linePath} fill="none" stroke="var(--primary)" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" /> : null}
         <line x1={margin.left} x2={width - margin.right} y1={averageY} y2={averageY} stroke="var(--step-inspect)" strokeWidth="1.5" strokeDasharray="6 5" />
         <text x={width - margin.right} y={averageY - 7} textAnchor="end" fontSize="10" fontWeight="600" fill="var(--step-inspect)">Hourly mean {averageUsageKwh.toFixed(2)} kWh</text>
@@ -343,6 +381,13 @@ function HourlyProfileChart({
   );
 }
 
+function componentCategoryColor(category: string): string {
+  if (category === "load") return "var(--step-transform)";
+  if (category === "light") return "var(--step-query)";
+  if (category === "aircon") return "var(--primary)";
+  return "var(--step-inspect)";
+}
+
 function TimeModuleUnavailable({
   heading,
   headingId,
@@ -371,12 +416,12 @@ function TimeEvidence({
   evidence,
 }: {
   label: string;
-  evidence: NgeeAnnDayProfileViewModel["evidence"];
+  evidence: NgeeAnnDayProfileViewModel["evidence"] | NgeeAnnDayProfileViewModel["componentEvidence"];
 }) {
   return (
     <details className="mt-4 border-t border-border pt-3 text-[10px] leading-4 text-muted">
       <summary className="cursor-pointer font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
-        {label} / time_bucket_grid_v1
+        {label} / {evidence.queryIds.join(", ")}
       </summary>
       <dl className="mt-2 grid gap-x-3 gap-y-1 sm:grid-cols-[80px_minmax(0,1fr)]">
         <dt>Snapshot</dt><dd className="break-all font-mono text-foreground">{evidence.snapshotId}</dd>

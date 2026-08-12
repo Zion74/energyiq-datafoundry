@@ -50,6 +50,7 @@
 
 | 文档 | 状态 |
 | --- | --- |
+| [Ngee Ann Analysis 模板复刻执行方案](2026-08-10-Ngee-Ann-Analysis模板复刻执行方案.md) | in progress；N5 已完成 server-published Category×24h 与 Level→Circuit×24h 工程切片，待合并后真实 Chrome 1440/1920/tablet 与 Charles 人工验收 |
 | [Preschool Section 5 Charles 复刻执行方案](2026-08-10-Preschool-Section5-Charles复刻执行方案.md) | in progress；A5 已进入人工验收；[#42](https://github.com/Zion74/energyiq-datafoundry/issues/42) 把固定 June Forecast 校准为自然月 Monthly Energy Outlook，冻结 Original Estimate，并按同日期范围对照 Actual 与 Current Outlook |
 | [AI Analyst Harness 与 AI Slot 执行路径](2026-08-08-AI-Analyst-Harness与AI-Slot执行路径.md) | in progress；当前以两项目 60 秒客户价值、AI Finding 首屏表达和分层验收为主线；v10 后的完整 submit/repair 延期，通用化只沉淀轻量 Analysis Pattern Cards |
 | [2026-08-06 Overview 夜间执行清单与 Runlog](2026-08-06-Overview夜间执行清单与Runlog.md) | in progress；第 11 节为 2026-08-07 当前行动方案：Overview takeaway-first 阅读体验 → #31 Explorer 精准下钻与设备趋势 → Preschool 演示型图表 → #5/#19/#20/#21 收口；AI 侧线保持隔离 |

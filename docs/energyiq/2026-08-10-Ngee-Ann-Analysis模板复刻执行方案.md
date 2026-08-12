@@ -3,7 +3,7 @@ title: "Ngee Ann Analysis 模板复刻执行方案"
 summary: "在 Preschool 确定性模板、AI Artifact 与连续数据经验之后，先审计 4178 Analysis 原型，再按客户问题映射到正式 Snapshot/ViewModel/Renderer。"
 doc_type: implementation
 tags: [EnergyIQ, Overview, Ngee Ann, Charles, Template, AI Slot]
-updated_at: "2026-08-10"
+updated_at: "2026-08-13"
 status: active
 related:
   - "2026-08-10-Overview夜间执行路线与Runlog.md"
@@ -466,3 +466,54 @@ http://127.0.0.1:4178/analysis?utility=electricity&project=proj-nap-energy-analy
 停止项：不把服务端 workflow 复制回浏览器；不为旧 helper 伪造 `action / expectedIfAct / ifIgnored / uncertainty`；不改变真实 Provider Prompt 或用户页面行为。
 
 结果：旧 Web materializer/parser 及其专属测试已移除；Web 单航班、共享恢复与重试测试改为显式 v13 Artifact fixture。Web focused tests `137/137`、API 权威 workflow `28/28`、root typecheck 与 `next build` 均通过。
+
+## 19. NAP-N5 执行切片：Category 24h 与 Level→Circuit 小时热图（2026-08-13）
+
+### 19.1 客户问题与三层边界
+
+参考模板的 Day Profile 不只需要官方 Scope 总量线，还需要回答：**一天内不同 Category 在什么时间发生，以及选中一个 Level 后，哪些 component Circuit 在哪些小时贡献较高？**
+
+这不是第二套数据底座：
+
+- 共享层继续使用 Published Release、Mapping、canonical interval facts、Scoped Data Source、DuckDB 只读查询、Snapshot/Evidence 与 `energy.total_usage_kwh@1`；
+- Ngee Ann 项目分析包新增 `component_hourly_profiles_v1` Projection，定义该案例需要的 common-complete-day、Category 和 Circuit 组织口径；
+- ViewModel/Renderer 只校验、格式化和呈现服务器 Projection，不从 period ranking、official total 或浏览器端公式猜小时值。
+
+### 19.2 开发前反证与停止项
+
+1. **能否把 Period Circuit 占比乘到 24h 总量上？** 不能。Period 占比不证明每小时构成，必须读取同一批 component interval facts。
+2. **缺一个 Circuit/小时能否按零处理？** 不能。某日期只有在该 Scope 的全部 published component Circuits 均有 24 个质量合格小时后，才能进入共同完整日样本；否则该日期不参与平均。
+3. **Category stack 能否冒充 official total？** 不能。它明确标为 `published_component_circuits`；official Scope 总量仍是独立线和独立 Evidence，两者不强行闭合。
+4. **是否需要新建共享图表 DSL 或通用 Metric 平台？** 不需要。本切片只增加一个 Ngee Ann 项目专属 Projection 和两个已有 Renderer 模块的薄适配。
+5. **性能是否线性增加串行等待？** 新查询使确定性查询数由 11 增至 12，但与既有 daily component Category 查询并行，不增加串行批次；不重复执行 Snapshot SHA 完整性计算。
+
+### 19.3 实现结果
+
+- API 新增 `componentHourlyProfiles`：Project、Level 7、Level 6；Weekday、Weekend 和显式 unavailable 的 Public Holiday；每个可用 profile 同时发布 Category×24h 与 Circuit×24h；
+- 只纳入 Published Mapping 中 `componentMeterNodeIds` 对应的 14 条 component Circuits；official totals、standalone rows 和 Derived meter 不混入；
+- Day Profile 在官方 Scope energy line 下叠加同样本的 component Category areas；样本天数不一致时，Category stack 局部 unavailable，官方 profile 仍可显示；
+- Heatmap 的第二视图改为 `Level → Circuit`；Level 与 Date 视图使用独立本地选择状态，来回切换不会互相污染；
+- ViewModel 校验 Snapshot Evidence、query id、accounting basis、Scope spine、Circuit identity、Category/Circuit 24 小时完整性及逐小时 reconciliation；合同不合法时只关闭 component stack/Circuit rows，Date×Hour 和 official Day Profile 保持可用；
+- 新增独立 component Evidence disclosure；Web 不重新计算正式 Metric、Category、Circuit identity 或缺失值。
+
+### 19.4 红测与验证证据
+
+先加入公开 ViewModel 红测：Golden 缺少 `componentStack`/`circuitProfiles`，以及 Category 行少一个小时仍未 fail closed；实现前两项均按预期失败。Renderer 红测要求出现 `Published component Category shape`、`Level → Circuit` 和真实 Circuit 名称，并移除旧的“Snapshot 不发布 Circuit-by-hour”说明。
+
+已通过：
+
+- `npx vitest run apps/api/src/energy/energy-analysis.test.ts -t "repeats the selected Ngee Ann golden period|withholds component Category period totals|fails component hourly Profiles" --maxWorkers=1`：`3/3`；
+- `npx vitest run apps/web/src/app/energyiq/_components/ngee-ann-overview-view-model.test.ts --maxWorkers=1`：`159/159`；
+- `npx vitest run apps/web/src/app/energyiq/_components/ngee-ann-overview-renderer.test.tsx --maxWorkers=1`：`68/68`；
+- `npm run build`：通过；
+- `npm --workspace @datafoundry/web run build`：通过，17 个 Next.js routes；
+- `git diff --check`：通过。
+
+完整 `energy-analysis.test.ts` 单文件在 184 秒本地命令上限内未返回结果，因此不能把它记为完整通过；上述三个本切片 API Golden/fail-closed 用例单独在 49 秒内通过。
+
+### 19.5 尚未完成的验收
+
+- 独立 worker worktree 不启动长期服务；必须先安全合并到权威 Integration，再重建 API/Web；
+- 在真实 Ngee Ann Snapshot 上完成 1440、1920、tablet Chrome 截图，检查 stack 可读性、Circuit 行密度、横向滚动与 hover/focus；
+- 人工确认参考图中 Category 颜色、Level 切换和 Circuit 热图的信息层级是否达到 Charles 验收；
+- 若真实数据因 component quality 导致 common complete-day 样本不足，应显示 Unavailable/样本数，不回退到浏览器估算。

@@ -553,6 +553,42 @@ export type EnergyTimeBehaviourDto = {
   }>;
 };
 
+export type EnergyComponentHourlyProfilesDto = {
+  metricId: "energy.total_usage_kwh@1";
+  queryId: "component_hourly_profiles_v1";
+  accountingBasis: "published_component_circuits";
+  grain: "hour";
+  unit: "kWh";
+  timezone: string;
+  scopes: Array<{
+    scopeId: string;
+    scopeName: string;
+    scopeType: string;
+    profiles: Array<{
+      dayType: "weekday" | "weekend";
+      status: "available";
+      sampleDayCount: number;
+      categories: Array<{
+        category: string;
+        values: Array<{ localHour: number; usageKwh: number }>;
+      }>;
+      circuits: Array<{
+        meterNodeId: string;
+        name: string;
+        category: string;
+        values: Array<{ localHour: number; usageKwh: number }>;
+      }>;
+    } | {
+      dayType: "weekday" | "weekend" | "public_holiday";
+      status: "unavailable";
+      reason: {
+        code: "COMPLETE_DAY_SAMPLE_UNAVAILABLE" | "DAY_TYPE_CLASSIFICATION_UNAVAILABLE";
+        message: string;
+      };
+    }>;
+  }>;
+};
+
 export type EnergyDailyUsageAnomalySuppressionCodeDto =
   | "CALENDAR_EXCEPTION_DATE"
   | "DAILY_FACTS_UNAVAILABLE"
@@ -1020,6 +1056,7 @@ export type EnergyScopeAnalysisDto = {
   componentCategoryBreakdown?: EnergyComponentCategoryBreakdownDto;
   calendarTotals?: EnergyCalendarTotalsDto;
   timeBehaviour?: EnergyTimeBehaviourDto;
+  componentHourlyProfiles?: EnergyComponentHourlyProfilesDto;
   dailyUsageAnomalies?: EnergyDailyUsageAnomaliesDto;
   peakBreakdown?: EnergyPeakBreakdownDto;
   virtualMeterTraces?: EnergyVirtualMeterTraceDto[];
@@ -1092,6 +1129,7 @@ export type EnergyScopeAnalysisDto = {
       | "daily_totals_v1"
       | "daily_component_categories_v1"
       | "time_bucket_grid_v1"
+      | "component_hourly_profiles_v1"
       | "time_slot_anomaly_v1"
       | "peak_breakdown_v1"
       | "hourly_profile_v1"
