@@ -455,6 +455,25 @@ describe("PreschoolAiSlot", () => {
     expect([...container.querySelectorAll("strong")].some((element) => element.textContent === "raw HTML")).toBe(false);
   });
 
+  it("renders the preserved autonomous result as Additional AI Insights after Section 5", async () => {
+    const result = sectionedResult();
+    result.autonomous = availableResult();
+
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        sectionId="overall-summary"
+        mode="saved"
+        savedResult={result}
+        startRun={vi.fn()}
+      />,
+    ));
+
+    expect(container.textContent).toContain("Additional AI Insights");
+    expect(container.textContent).toContain("Centre G deserves investigation");
+    expect(container.querySelectorAll("article")).toHaveLength(2);
+  });
+
   async function renderSlot(
     startRun: Parameters<typeof PreschoolAiSlot>[0]["startRun"],
     sectionId: Parameters<typeof PreschoolAiSlot>[0]["sectionId"] = "page-synthesis",

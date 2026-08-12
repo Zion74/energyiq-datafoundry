@@ -18,12 +18,17 @@ import {
   isPendingPreschoolSectionedReadModel,
   retryPreschoolAiRun,
   type PreschoolAiFinding,
+  type PreschoolAiLegacyRunResult,
   type PreschoolAiProgress,
   type PreschoolAiRunInput,
   type PreschoolAiRunResult,
   type PreschoolAiSectionId,
 } from "./preschool-ai-run";
-import type { PreschoolAiAcceptedFinding, PreschoolAiEpistemicLevel } from "./preschool-ai-artifact";
+import type {
+  PreschoolAiAcceptedArtifact,
+  PreschoolAiAcceptedFinding,
+  PreschoolAiEpistemicLevel,
+} from "./preschool-ai-artifact";
 import { AiFindingPresentationView } from "./ai-finding-presentation-view";
 import { SafeAiMarkdown } from "./safe-ai-markdown";
 
@@ -174,6 +179,7 @@ export function PreschoolAiSlot({
         result={availableResult}
         sectionId={sectionId}
         mode={mode}
+        aiAnalystHref={aiAnalystHref}
         onRetry={mode === "live" ? retry : undefined}
       />
     );
@@ -233,11 +239,13 @@ function SectionedAiResult({
   result,
   sectionId,
   mode,
+  aiAnalystHref,
   onRetry,
 }: {
   result: PreschoolOverviewAiReadModelDto;
   sectionId: PreschoolAiSectionId;
   mode: "live" | "saved";
+  aiAnalystHref?: string;
   onRetry?: () => void;
 }) {
   if (sectionId === "page-synthesis") {
@@ -245,6 +253,33 @@ function SectionedAiResult({
       <AiFrame sectionId={sectionId}>
         <ExecutiveUnit unit={result.executive} completedSectionCount={completedSectionCount(result)} onRetry={onRetry} />
         <SavedRunMarker mode={mode} unit={result.executive} />
+      </AiFrame>
+    );
+  }
+  if (sectionId === "overall-summary") {
+    const autonomous = autonomousAvailableResult(result.autonomous);
+    if (!autonomous || autonomous.findings.length === 0) return null;
+    return (
+      <AiFrame sectionId={sectionId}>
+        <p className="mb-5 max-w-[75ch] text-sm leading-6 text-muted">
+          Distinct Evidence-backed angles that sit outside the structured Section summaries.
+        </p>
+        <div className="space-y-4" aria-label="Additional AI energy insights">
+          {autonomous.findings.map((finding) => (
+            <FindingCard
+              key={finding.id}
+              finding={finding}
+              pack={`${autonomous.packId}@${autonomous.packRevision}`}
+              projectId={result.binding.projectId}
+              aiAnalystHref={aiAnalystHref}
+            />
+          ))}
+        </div>
+        {mode === "saved" ? (
+          <p className="mt-3 text-[10px] font-medium text-muted" data-saved-ai-result="true">
+            Saved AI result · Run {autonomous.runId}
+          </p>
+        ) : null}
       </AiFrame>
     );
   }
@@ -467,6 +502,22 @@ const completedSectionCount = (result: PreschoolOverviewAiReadModelDto): number 
   Object.values(result.sections).filter((unit) => unit.status === "available" || unit.status === "empty").length;
 
 type DisplayFinding = PreschoolAiFinding | PreschoolAiAcceptedFinding;
+type AutonomousAvailableResult =
+  | Extract<PreschoolAiLegacyRunResult, { status: "available" }>
+  | PreschoolAiAcceptedArtifact;
+
+const autonomousAvailableResult = (value: unknown): AutonomousAvailableResult | null => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Partial<AutonomousAvailableResult>;
+  return candidate.status === "available"
+    && typeof candidate.providerProfileId === "string"
+    && typeof candidate.runId === "string"
+    && candidate.packId === "preschool-analysis-pack"
+    && candidate.packRevision === "v1"
+    && Array.isArray(candidate.findings)
+      ? candidate as AutonomousAvailableResult
+      : null;
+};
 
 function findingMatchesSection(finding: DisplayFinding, sectionId: PreschoolAiSectionId): boolean {
   if (!isAcceptedFinding(finding)) return (finding.sectionId ?? "page-synthesis") === sectionId;
