@@ -1,4 +1,5 @@
-import { Agent } from "@mastra/core/agent";
+import { Agent, type PublicStructuredOutputOptions } from "@mastra/core/agent";
+import { toStandardSchema } from "@mastra/core/schema";
 import {
   askUserTool,
   submitPlanTool,
@@ -267,6 +268,8 @@ export type CreateDataFoundryInput = {
   excludedToolNames?: readonly string[];
   /** Server-owned stage guard for bounded value transforms that must never invoke tools. */
   disableTools?: boolean;
+  /** Native schema for bounded value stages; omitted for ordinary agentic runs. */
+  structuredOutput?: PublicStructuredOutputOptions<Record<string, unknown>>;
   abortSignal?: AbortSignal | undefined;
   artifactService?: ArtifactService;
   contextPackageRecorder?: ContextPackageRecorder;
@@ -737,7 +740,7 @@ export const createDataFoundry = async (
       ? { reasoningEnabled: input.runContext.reasoning_model }
       : {})
   });
-  const agent = new Agent({
+  const agentConfig = {
     id: "data-foundry",
     name: "DataFoundry",
     instructions: buildAgentInstructions({
@@ -771,12 +774,33 @@ export const createDataFoundry = async (
       nonEmptyMessageContentCompat
     ],
     outputProcessors: mastraContextProcessors.outputProcessors,
-    defaultOptions: {
-      maxSteps,
-      ...(input.modelSettings ? { modelSettings: input.modelSettings } : {}),
-      ...(runtimeProviderOptions ? { providerOptions: runtimeProviderOptions } : {})
-    }
-  });
+  };
+  const defaultOptions = {
+    maxSteps,
+    ...(input.modelSettings ? { modelSettings: input.modelSettings } : {}),
+    ...(runtimeProviderOptions ? { providerOptions: runtimeProviderOptions } : {})
+  };
+  const structuredOutput = input.structuredOutput
+    ? {
+        ...input.structuredOutput,
+        schema: toStandardSchema(input.structuredOutput.schema)
+      }
+    : undefined;
+  // @ag-ui/mastra currently fixes its local Agent generic to TOutput=undefined.
+  // The runtime object is still the same Agent; erase only that invariant type
+  // parameter after Mastra has normalized the bounded structured-output schema.
+  const agent = (structuredOutput
+    ? new Agent<string, typeof tools, Record<string, unknown>>({
+        ...agentConfig,
+        defaultOptions: {
+          ...defaultOptions,
+          structuredOutput
+        }
+      })
+    : new Agent({
+        ...agentConfig,
+        defaultOptions
+      })) as unknown as Agent;
   const agentForAgUi = wrapAgentForAgUi(
     agent,
     createMastraStreamNormalizerHooks(input.emitter, input.sessionOutputService

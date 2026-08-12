@@ -105,6 +105,8 @@ import {
   type PreschoolOverviewAiStageInput,
 } from "./energy/preschool-overview-ai-workflow.js";
 import { createPreschoolOverviewAiPageWorkflow } from "./energy/preschool-overview-ai-page-workflow.js";
+import { resolveOverviewAiStageStructuredOutput } from "./energy/preschool-overview-ai-structured-output.js";
+export { resolveOverviewAiStageStructuredOutput } from "./energy/preschool-overview-ai-structured-output.js";
 
 type OverviewAiRuntimeStageInput = Omit<PreschoolOverviewAiStageInput, "stage"> & {
   stage: PreschoolOverviewAiStage;
@@ -127,22 +129,26 @@ let serverReady = false;
 let startupTimings: Record<string, number> = {};
 let startupTotalMs = 0;
 
-export const resolveOverviewAiStageRuntimeOptions = (stage: PreschoolOverviewAiStage) => ({
-  analysisRequirementsMode: "omit" as const,
-  ...(stage === "section-interpreter" || stage === "executive-synthesis"
-    ? {
-        conversationMessageMaxChars: stage === "section-interpreter" ? 12_000 : 24_000,
-        disableTools: true as const,
-      }
-    : {}),
-  excludedToolNames: stage === "section-interpreter" || stage === "executive-synthesis"
-    ? ["skill", "skill_search", "skill_read", "inspect_schema", "run_sql_readonly", "protocol_handoff"] as const
-    : stage === "editor"
-      ? ["inspect_schema", "run_sql_readonly", "protocol_handoff"] as const
-    : ["protocol_handoff"] as const,
-  overviewAiCandidateSubmission: stage === "investigator",
-  reasoningModel: false as const,
-});
+export const resolveOverviewAiStageRuntimeOptions = (stage: PreschoolOverviewAiStage) => {
+  const structuredOutput = resolveOverviewAiStageStructuredOutput(stage);
+  return {
+    analysisRequirementsMode: "omit" as const,
+    ...(stage === "section-interpreter" || stage === "executive-synthesis"
+      ? {
+          conversationMessageMaxChars: stage === "section-interpreter" ? 12_000 : 24_000,
+          disableTools: true as const,
+        }
+      : {}),
+    excludedToolNames: stage === "section-interpreter" || stage === "executive-synthesis"
+      ? ["skill", "skill_search", "skill_read", "inspect_schema", "run_sql_readonly", "protocol_handoff"] as const
+      : stage === "editor"
+        ? ["inspect_schema", "run_sql_readonly", "protocol_handoff"] as const
+        : ["protocol_handoff"] as const,
+    overviewAiCandidateSubmission: stage === "investigator",
+    reasoningModel: false as const,
+    ...(structuredOutput ? { structuredOutput } : {}),
+  };
+};
 
 export const shouldIncludeProjectAnalysisEvidenceContext = (
   stage?: PreschoolOverviewAiStage,
@@ -1042,6 +1048,9 @@ class DataFoundryAgUiAgent extends AbstractAgent {
                   : {}),
                 ...(overviewAiStageOptions.excludedToolNames.length > 0
                   ? { excludedToolNames: overviewAiStageOptions.excludedToolNames }
+                  : {}),
+                ...(overviewAiStageOptions.structuredOutput
+                  ? { structuredOutput: overviewAiStageOptions.structuredOutput }
                   : {}),
               }
             : {}),

@@ -4,6 +4,7 @@ import {
   buildOverviewAiStageRunInput,
   collectOverviewAiText,
   resolveOverviewAiStageRuntimeOptions,
+  resolveOverviewAiStageStructuredOutput,
   shouldUseEnergyContextForOverviewAiStage,
   shouldIncludeProjectAnalysisEvidenceContext,
 } from "./server.js";
@@ -44,9 +45,32 @@ describe("Overview AI server stage options", () => {
         ],
         overviewAiCandidateSubmission: false,
         reasoningModel: false,
+        structuredOutput: resolveOverviewAiStageStructuredOutput(stage),
       });
       expect(shouldIncludeProjectAnalysisEvidenceContext(stage)).toBe(false);
       expect(shouldUseEnergyContextForOverviewAiStage(stage)).toBe(false);
+    },
+  );
+
+  it.each([
+    ["section-interpreter", "sections"],
+    ["executive-synthesis", "keyFindings"],
+  ] as const)("pins %s to its native structured-output envelope", (stage, requiredProperty) => {
+    const structuredOutput = resolveOverviewAiStageStructuredOutput(stage);
+    expect(structuredOutput).toBeDefined();
+    expect(structuredOutput?.schema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: expect.arrayContaining([requiredProperty]),
+    });
+    expect(resolveOverviewAiStageRuntimeOptions(stage).structuredOutput).toBe(structuredOutput);
+  });
+
+  it.each(["investigator", "editor"] as const)(
+    "does not force the agentic %s stage into a value-output schema",
+    (stage) => {
+      expect(resolveOverviewAiStageStructuredOutput(stage)).toBeUndefined();
+      expect(resolveOverviewAiStageRuntimeOptions(stage)).not.toHaveProperty("structuredOutput");
     },
   );
 
