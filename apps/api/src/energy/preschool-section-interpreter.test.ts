@@ -59,6 +59,9 @@ describe("Preschool Section Interpreter", () => {
     expect(prompts[0]).not.toContain("SQL tool");
     expect(prompts[0]).toContain("Do not query SQL");
     expect(prompts[0]).toContain("Do not create combined totals or shares from multiple Evidence items");
+    expect(prompts[0]).toContain("return exactly 3 keyPoints: one finding, one meaning, and one next-check");
+    expect(prompts[0]).toContain("copy localDate as YYYY-MM-DD and localHour as HH:00");
+    expect(prompts[0]).toContain("cite every Evidence item discussed");
 
     const retried = await interpreter.execute({
       baseIdentity: harness.identity,

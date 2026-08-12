@@ -106,7 +106,7 @@ describe("createOverviewAiArtifactIdentity", () => {
       outputContractRevision: "preschool-section-interpretation-v1",
       validatorRevision: "preschool-section-interpreter-validator-v7",
       workflowRevision: "preschool-section-interpreter-v7",
-      investigatorPromptRevision: "preschool-section-interpreter-prompt-v7",
+      investigatorPromptRevision: "preschool-section-interpreter-prompt-v8",
     });
     expect(standby).not.toEqual(benchmark);
     expect(executive).toMatchObject({
