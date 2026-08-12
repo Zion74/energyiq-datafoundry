@@ -120,7 +120,18 @@ export function getConfigApiBaseUrl(): string {
 }
 
 export function isPasswordAuthMode(): boolean {
-  return process.env.NEXT_PUBLIC_DATAFOUNDRY_AUTH_MODE === "password";
+  const configured = process.env.NEXT_PUBLIC_DATAFOUNDRY_AUTH_MODE;
+  if (configured === "password") return true;
+  if (configured === "dev") return false;
+  return process.env.NODE_ENV === "production";
+}
+
+export function isLocalDevAdminAvailable(hostname?: string): boolean {
+  if (isPasswordAuthMode()) return false;
+  const resolvedHostname = hostname ?? (typeof window === "undefined" ? "" : window.location.hostname);
+  return resolvedHostname === "localhost"
+    || resolvedHostname === "127.0.0.1"
+    || resolvedHostname === "::1";
 }
 
 export function getAgentRuntimeUrl(): string {

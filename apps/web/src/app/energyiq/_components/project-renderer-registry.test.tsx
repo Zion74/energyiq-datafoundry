@@ -137,7 +137,7 @@ describe("Project Renderer Registry", () => {
     expect(preschoolMarkup.match(/data-overall-summary-metric=/g)).toHaveLength(3);
     expect(preschoolMarkup).toContain("Energy &amp; cost by centre type");
     expect(preschoolMarkup).toContain("S$0.2727/kWh before GST");
-    expect(preschoolMarkup).toContain("Key findings · Sections 2–5");
+    expect(preschoolMarkup).toContain("Verified section highlights");
     expect(preschoolMarkup).toContain("AI energy analyst");
     expect(preschoolMarkup).toContain("AI analysis queued…");
     expect(preschoolMarkup).toContain("deterministic Overview is ready");

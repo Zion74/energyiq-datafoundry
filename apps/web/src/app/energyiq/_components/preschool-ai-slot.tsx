@@ -244,9 +244,6 @@ function SectionedAiResult({
       <AiFrame sectionId={sectionId}>
         <ExecutiveUnit unit={result.executive} onRetry={onRetry} />
         <SavedRunMarker mode={mode} unit={result.executive} />
-        <p className="mt-4 text-xs leading-5 text-muted-light">
-          These Key Findings only combine accepted Section interpretations from this pinned Snapshot.
-        </p>
       </AiFrame>
     );
   }
@@ -278,16 +275,21 @@ function ExecutiveUnit({
     return <EmptyValue title="No additional Executive Key Findings" detail="The accepted Sections did not support a distinct cross-section message for this Snapshot." />;
   }
   return (
-    <ol className="space-y-3" aria-label="Executive Key Findings">
+    <ol className="divide-y divide-border" aria-label="AI management priorities">
       {unit.result.keyFindings.map((finding) => (
-        <li key={finding.id} className="rounded-lg border border-border bg-surface-subtle px-4 py-3">
-          <p className="text-sm font-semibold leading-6 text-foreground">{finding.takeaway}</p>
-          <details className="mt-2">
-            <summary className="cursor-pointer text-[10px] font-semibold text-muted">Source Sections and Evidence</summary>
-            <p className="mt-1 break-words font-mono text-[10px] leading-4 text-muted-light">
-              {finding.sectionIds.join(" / ")} · {finding.evidenceRefs.join(" / ")}
-            </p>
-          </details>
+        <li key={finding.id} className="flex gap-3 py-4 first:pt-0 last:pb-0">
+          <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-white">
+            <EnergyIcon name="arrow" className="h-3.5 w-3.5" />
+          </span>
+          <div className="min-w-0 max-w-[75ch]">
+            <p className="text-sm font-semibold leading-6 text-foreground">{finding.takeaway}</p>
+            <details className="mt-2">
+              <summary className="cursor-pointer text-[10px] font-semibold text-muted">Source Sections and Evidence</summary>
+              <p className="mt-1 break-words font-mono text-[10px] leading-4 text-muted-light">
+                {finding.sectionIds.join(" / ")} · {finding.evidenceRefs.join(" / ")}
+              </p>
+            </details>
+          </div>
         </li>
       ))}
     </ol>
@@ -312,18 +314,32 @@ function SectionUnit({
   }
   return (
     <div>
-      <p className="text-sm font-semibold leading-6 text-foreground">{unit.result.summary}</p>
-      <ul className="mt-3 space-y-2">
+      <div className="border-b border-primary/15 pb-4" data-ai-takeaway="true">
+        <div className="flex items-center gap-2 text-primary">
+          <EnergyIcon name="spark" className="h-3.5 w-3.5" />
+          <p className="text-xs font-semibold">AI takeaway</p>
+        </div>
+        <p className="mt-2 max-w-[75ch] text-base font-semibold leading-7 text-foreground">{unit.result.summary}</p>
+      </div>
+      <ul className="divide-y divide-border">
         {unit.result.keyPoints.map((point, index) => (
-          <li key={`${point.kind}-${index}`} className="rounded-lg border border-border bg-surface px-3 py-2.5">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-primary">
-              {point.label ?? point.kind.replace("-", " ")}
-            </p>
-            <p className="mt-1 text-xs leading-5 text-foreground/80">{point.text}</p>
-            <details className="mt-1.5">
-              <summary className="cursor-pointer text-[10px] font-medium text-muted">Evidence references</summary>
-              <p className="mt-1 break-words font-mono text-[10px] leading-4 text-muted-light">{point.evidenceRefs.join(" / ")}</p>
-            </details>
+          <li key={`${point.kind}-${index}`} className="flex gap-3 py-4" data-ai-point-role={point.kind}>
+            <span className={`mt-0.5 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${sectionPointMeta[point.kind].tone}`}>
+              <EnergyIcon name={sectionPointMeta[point.kind].icon} className="h-4 w-4" />
+            </span>
+            <div className="min-w-0 max-w-[75ch]">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] ${sectionPointMeta[point.kind].tone}`}>
+                  {sectionPointMeta[point.kind].label}
+                </span>
+                {point.label ? <p className="text-sm font-semibold text-foreground">{point.label}</p> : null}
+              </div>
+              <p className={`mt-1 text-sm leading-6 text-foreground ${point.kind === "priority" || point.kind === "next-check" ? "font-medium" : ""}`}>{point.text}</p>
+              <details className="mt-1.5">
+                <summary className="cursor-pointer text-[10px] font-medium text-muted">Evidence references</summary>
+                <p className="mt-1 break-words font-mono text-[10px] leading-4 text-muted-light">{point.evidenceRefs.join(" / ")}</p>
+              </details>
+            </div>
           </li>
         ))}
       </ul>
@@ -391,11 +407,18 @@ const retryTargetForSection = (
   return sectionIdToValueTarget(sectionId) ?? undefined;
 };
 
+const sectionPointMeta = {
+  priority: { icon: "alert", label: "Priority", tone: "bg-step-error-soft text-step-error" },
+  finding: { icon: "analysis", label: "Supporting signal", tone: "bg-step-inspect/10 text-step-inspect" },
+  meaning: { icon: "info", label: "Why it matters", tone: "bg-step-warning-soft text-step-warning" },
+  "next-check": { icon: "arrow", label: "Next action", tone: "bg-step-success-soft text-step-success" },
+} as const;
+
 function AiFrame({ children, sectionId }: { children: React.ReactNode; sectionId: PreschoolAiSectionId }) {
   if (sectionId !== "page-synthesis") {
     return (
       <aside className="mt-5 rounded-xl border border-primary/20 bg-primary/5 p-4 lg:p-5" aria-label="AI interpretation for this section" data-ai-section={sectionId}>
-        <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="mb-4 flex flex-wrap items-center gap-2 border-b border-primary/15 pb-3">
           <EnergyIcon name="spark" className="h-4 w-4 text-primary" />
           <p className="text-sm font-semibold text-foreground">AI interpretation</p>
           <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-primary">AI-generated</span>
@@ -409,10 +432,10 @@ function AiFrame({ children, sectionId }: { children: React.ReactNode; sectionId
       <div className="mb-5">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h3 id="preschool-ai-slot" className="text-xl font-semibold tracking-[-0.02em] text-foreground">AI analyst briefing</h3>
+            <h3 id="preschool-ai-slot" className="text-xl font-semibold tracking-[-0.02em] text-foreground">AI management brief</h3>
             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-primary">AI-generated</span>
           </div>
-          <p className="mt-1.5 text-sm leading-6 text-muted">What stands out, why it matters, and what to check next.</p>
+          <p className="mt-1.5 max-w-[75ch] text-sm leading-6 text-muted">Cross-section priorities composed only from accepted AI interpretations.</p>
         </div>
       </div>
       {children}

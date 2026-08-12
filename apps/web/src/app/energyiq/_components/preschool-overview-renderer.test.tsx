@@ -8,7 +8,7 @@ import { PRESCHOOL_OVERVIEW_SECTIONS, PreschoolOverviewRenderer } from "./presch
 import { preschoolGoldenSnapshot } from "./preschool-overview.test-fixture";
 
 describe("PreschoolOverviewRenderer reading flow", () => {
-  it("renders the Charles-aligned five-section spine and keeps Key findings before AI", () => {
+  it("renders the Charles-aligned five-section spine and keeps verified highlights before AI", () => {
     const markup = renderToStaticMarkup(
       <PreschoolOverviewRenderer state={{ status: "ready", snapshot: preschoolGoldenSnapshot() }} />,
     );
@@ -40,7 +40,7 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup).not.toContain("Average across the selected reporting window.");
     expect(markup).not.toContain("Centre rows returned by the authoritative Project analysis.");
     expect(markup).toContain('id="preschool-decision-summary"');
-    expect(markup).toContain("Key findings · Sections 2–5");
+    expect(markup).toContain("Verified section highlights");
     expect(markup.match(/data-key-finding-target=/g)).toHaveLength(4);
     expect(markup).toContain('href="#preschool-benchmark-analysis"');
     expect(markup).toContain('href="#preschool-standby-wastage"');
@@ -76,9 +76,9 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     const sectionPositions = PRESCHOOL_OVERVIEW_SECTIONS.map((section) => markup.indexOf(`id="${section.id}"`));
     expect(sectionPositions.every((position) => position >= 0)).toBe(true);
     expect(sectionPositions).toEqual([...sectionPositions].sort((left, right) => left - right));
-    expect(markup.indexOf("Overall consumption summary")).toBeLessThan(markup.indexOf("Key findings · Sections 2–5"));
-    expect(markup.indexOf("Key findings · Sections 2–5")).toBeLessThan(markup.indexOf('id="preschool-ai-analysis"'));
-    expect(markup.indexOf("Key findings · Sections 2–5")).toBeLessThan(markup.indexOf("Benchmark Analysis"));
+    expect(markup.indexOf("Overall consumption summary")).toBeLessThan(markup.indexOf("Verified section highlights"));
+    expect(markup.indexOf("Verified section highlights")).toBeLessThan(markup.indexOf('id="preschool-ai-analysis"'));
+    expect(markup.indexOf("Verified section highlights")).toBeLessThan(markup.indexOf("Benchmark Analysis"));
     expect(markup.indexOf("Benchmark Analysis")).toBeLessThan(markup.indexOf("Standby Energy Wastage — Post Operating Hours"));
     expect(markup.indexOf("Standby Energy Wastage — Post Operating Hours")).toBeLessThan(markup.indexOf("Operating Hours Analysis"));
     expect(markup.indexOf("Operating Hours Analysis")).toBeLessThan(markup.indexOf("Monthly Energy Outlook"));

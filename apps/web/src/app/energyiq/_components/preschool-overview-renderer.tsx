@@ -286,8 +286,14 @@ export function PreschoolOverviewRenderer({
         <div id="preschool-decision-summary" className="mt-8 scroll-mt-28 border-t border-border pt-7">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h4 id="preschool-decision-summary-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Key findings · Sections 2–5</h4>
-              <p className="mt-1.5 text-sm leading-6 text-muted">A compact, Snapshot-bound directory to the detailed analysis below.</p>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h4 id="preschool-decision-summary-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Verified section highlights</h4>
+                <span className="inline-flex items-center gap-1 rounded-full bg-step-success-soft px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-step-success">
+                  <EnergyIcon name="check" className="h-3 w-3" />
+                  Snapshot facts
+                </span>
+              </div>
+              <p className="mt-1.5 text-sm leading-6 text-muted">Evidence-backed signals from Sections 2–5. These highlights are not AI-generated.</p>
             </div>
             <span className="text-xs font-semibold text-muted">Select a finding to open its section</span>
           </div>
@@ -299,7 +305,7 @@ export function PreschoolOverviewRenderer({
             </div>
           ) : (
             <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
-              <p className="text-sm font-semibold text-muted">Key findings unavailable</p>
+              <p className="text-sm font-semibold text-muted">Verified highlights unavailable</p>
               <p className="mt-2 text-sm leading-6 text-muted">{view.decisionSummary.detail}</p>
             </div>
           )}

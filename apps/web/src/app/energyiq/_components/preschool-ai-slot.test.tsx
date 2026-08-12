@@ -359,6 +359,9 @@ describe("PreschoolAiSlot", () => {
 
     expect(startRun).not.toHaveBeenCalled();
     expect(container.textContent).toContain("Benchmark evidence supports a focused review.");
+    expect(container.textContent).toContain("AI takeaway");
+    expect(container.querySelector("[data-ai-point-role='finding']")?.textContent).toContain("Supporting signal");
+    expect(container.querySelector("[data-ai-point-role='next-check']")?.textContent).toContain("Next action");
     expect(container.textContent).toContain("Executive Key Findings are unavailable");
     expect(container.textContent).toContain("This Section interpretation is unavailable");
     expect(container.querySelector("[data-ai-section='centre-benchmark']")).not.toBeNull();
@@ -396,6 +399,7 @@ describe("PreschoolAiSlot", () => {
     ));
 
     expect(container.textContent).toContain("centre-benchmark · evidence:benchmark");
+    expect(container.textContent).toContain("AI management brief");
     expect(container.textContent).toContain("Saved AI result · Run run-executive");
     expect(container.textContent).not.toContain("路");
   });
