@@ -158,6 +158,7 @@ const buildSectionInterpreterPrompt = (packs: PreschoolSectionPack[]): string =>
     "Each keyPoint must use kind finding|meaning|next-check and copy one or more exact evidenceRefs from its own pack.",
     "When naming a Centre and its leading circuit, make only one Centre-to-circuit relationship per keyPoint and cite that Centre's exact Evidence item.",
     "Do not calculate, round, combine, or compare numbers beyond exact values already supplied. Do not hypothesize a cause.",
+    "Do not create combined totals or shares from multiple Evidence items. Describe the items separately or without a synthesized number.",
     `The prompt contains exactly ${promptPacks.length} complete bounded Section Pack projections; none are truncated. Return exactly ${promptPacks.length} sections in the same order.`,
     `Required sectionId sequence: ${JSON.stringify(promptPacks.map(({ sectionId }) => sectionId))}. Do not substitute any other sectionId.`,
     `Artifact pin for runtime validation only; do not repeat it in customer text: ${JSON.stringify({
@@ -501,9 +502,17 @@ const hasUnsupportedRelation = (
     .map(({ object }) => object)
     .filter((object) => normalized.includes(object.toLowerCase())))];
   if (subjects.length === 0 || objects.length === 0) return false;
-  return subjects.some((subject) => objects.some((object) => !relations.some((relation) =>
+  const isSupported = (subject: string, object: string): boolean => relations.some((relation) =>
     relation.subject.toLowerCase() === subject.toLowerCase()
-      && relation.object.toLowerCase() === object.toLowerCase())));
+      && relation.object.toLowerCase() === object.toLowerCase());
+  if (subjects.length === 1 && objects.length === 1) return !isSupported(subjects[0]!, objects[0]!);
+
+  return normalized.split(/[.!?;,]|\b(?:while|whereas)\b/iu).some((clause) => {
+    const clauseSubjects = subjects.filter((subject) => clause.includes(subject.toLowerCase()));
+    const clauseObjects = objects.filter((object) => clause.includes(object.toLowerCase()));
+    if (clauseSubjects.length === 0 || clauseObjects.length === 0) return false;
+    return clauseSubjects.some((subject) => clauseObjects.some((object) => !isSupported(subject, object)));
+  });
 };
 
 const hasBannedCustomerText = (text: string): boolean =>

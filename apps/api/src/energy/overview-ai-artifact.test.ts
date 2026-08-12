@@ -104,9 +104,9 @@ describe("createOverviewAiArtifactIdentity", () => {
       artifactKind: "section-interpretation",
       targetId: "centre-benchmark",
       outputContractRevision: "preschool-section-interpretation-v1",
-      validatorRevision: "preschool-section-interpreter-validator-v6",
+      validatorRevision: "preschool-section-interpreter-validator-v7",
       workflowRevision: "preschool-section-interpreter-v7",
-      investigatorPromptRevision: "preschool-section-interpreter-prompt-v6",
+      investigatorPromptRevision: "preschool-section-interpreter-prompt-v7",
     });
     expect(standby).not.toEqual(benchmark);
     expect(executive).toMatchObject({

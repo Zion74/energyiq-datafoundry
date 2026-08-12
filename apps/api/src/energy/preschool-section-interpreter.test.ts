@@ -58,6 +58,7 @@ describe("Preschool Section Interpreter", () => {
     expect(prompts).toHaveLength(1);
     expect(prompts[0]).not.toContain("SQL tool");
     expect(prompts[0]).toContain("Do not query SQL");
+    expect(prompts[0]).toContain("Do not create combined totals or shares from multiple Evidence items");
 
     const retried = await interpreter.execute({
       baseIdentity: harness.identity,
@@ -578,6 +579,67 @@ describe("Preschool Section Interpreter", () => {
       user: harness.user,
     });
     expect(result["standby-wastage"].status).toBe("available");
+    harness.close();
+  });
+
+  it("accepts multiple valid Centre-to-circuit relationships in one narrative", async () => {
+    const harness = createHarness();
+    const sectionPacks = packs();
+    const operatingPack = sectionPacks.find(({ sectionId }) => sectionId === "operating-behaviour")!;
+    operatingPack.evidence = [
+      {
+        id: "evidence:operating:n",
+        label: "Centre N operating spike",
+        value: { centre: "Centre N", leadingCircuitName: "Kitchen Plug Load" },
+        unit: "kWh",
+        entityRefs: ["centre-n"],
+        evidenceRefs: ["evidence:operating:n"],
+        claimRelations: [{ subject: "Centre N", predicate: "leading-circuit", object: "Kitchen Plug Load" }],
+      },
+      {
+        id: "evidence:operating:l",
+        label: "Centre L operating spike",
+        value: { centre: "Centre L", leadingCircuitName: "Heater" },
+        unit: "kWh",
+        entityRefs: ["centre-l"],
+        evidenceRefs: ["evidence:operating:l"],
+        claimRelations: [{ subject: "Centre L", predicate: "leading-circuit", object: "Heater" }],
+      },
+    ];
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: harness.metadata,
+      runBatch: async ({ runId, sessionId }) => ({
+        answer: JSON.stringify({
+          sections: PRESCHOOL_SECTION_IDS.map((sectionId) => sectionId === "operating-behaviour"
+            ? {
+                ...available(sectionId),
+                summary: "Centre N was led by Kitchen Plug Load, while Centre L was led by Heater.",
+                keyPoints: [
+                  {
+                    kind: "finding",
+                    text: "Centre N was led by Kitchen Plug Load.",
+                    evidenceRefs: ["evidence:operating:n"],
+                  },
+                  {
+                    kind: "finding",
+                    text: "Centre L was led by Heater.",
+                    evidenceRefs: ["evidence:operating:l"],
+                  },
+                ],
+              }
+            : available(sectionId)),
+        }),
+        runId,
+        sessionId,
+      }),
+    });
+
+    const result = await interpreter.execute({
+      baseIdentity: harness.identity,
+      packs: sectionPacks,
+      user: harness.user,
+    });
+    expect(result["operating-behaviour"].status).toBe("available");
     harness.close();
   });
 
