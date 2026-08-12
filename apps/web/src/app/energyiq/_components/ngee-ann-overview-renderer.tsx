@@ -7,6 +7,7 @@ import type {
 } from "../../../lib/config-api";
 import { EnergyIcon } from "./icons";
 import { NgeeAnnAiSlot } from "./ngee-ann-ai-slot";
+import { NgeeAnnCircuitRanking } from "./ngee-ann-circuit-ranking";
 import { NgeeAnnDailyTrendSection } from "./ngee-ann-daily-trend-section";
 import { NgeeAnnDayProfile } from "./ngee-ann-day-profile";
 import { NgeeAnnDecisionPriorities } from "./ngee-ann-decision-priorities";
@@ -235,6 +236,8 @@ export function NgeeAnnOverviewRenderer({
         title="Circuit Category Analysis"
         description="Rank the published Circuit evidence that explains the Project result."
       />
+
+      <NgeeAnnCircuitRanking view={view.energyComposition.circuits} />
 
       <NgeeAnnEnergyComposition
         view={view.energyComposition}

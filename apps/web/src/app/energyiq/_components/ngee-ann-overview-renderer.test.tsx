@@ -604,6 +604,12 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Weekday after-hours (22:00–06:00)");
     expect(markup).toContain("45.1 kWh/mean day");
     expect(markup).toContain("Energy composition");
+    expect(markup).toContain("Top Circuit Ranking");
+    expect(markup).toContain("Published component Circuits ranked by current Snapshot energy");
+    expect(markup).toContain("14 published Circuit rows");
+    expect(markup).toContain("Share of Project");
+    expect(markup).toContain("Validated movement");
+    expect(markup).not.toContain("vs Avg of Top 10");
     expect(markup).toContain("What explains the official Project total?");
     expect(markup).toContain("Where the energy went");
     expect(markup).toContain("bg-violet-600");
@@ -1132,6 +1138,22 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(breakdown?.textContent).toContain("1054.18 kWh");
     expect(container.querySelectorAll("#ngee-ann-key-highlights article")).toHaveLength(4);
     expect(peakTrigger()).toBeTruthy();
+  });
+
+  it("ports personalized recommendations without inventing savings or workflow state", () => {
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot: ngeeAnnGoldenSnapshot() }} />,
+    );
+    const container = document.createElement("div");
+    container.innerHTML = markup;
+    const recommendations = container.querySelector("#ngee-ann-takeaways");
+
+    expect(recommendations?.textContent).toContain("Operational review recommendations");
+    expect(recommendations?.textContent).toContain("Affected area");
+    expect(recommendations?.textContent).toContain("No saving is assumed until the recommended check is completed.");
+    expect(recommendations?.querySelectorAll("[data-recommendation-card]")).toHaveLength(1);
+    expect(recommendations?.textContent).not.toContain("Estimated saving");
+    expect(recommendations?.textContent).not.toContain("Add to Action Log");
   });
 
   it("switches Consumption Breakdown by Scope without recomputing the Snapshot in React", async () => {
