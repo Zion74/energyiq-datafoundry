@@ -231,12 +231,15 @@ export const handleEnergyApiRequest = async (
           }
         : undefined;
       if (!context.overviewAiWorkflow) throw new Error("ENERGYIQ_OVERVIEW_AI_SERVER_WORKFLOW_REQUIRED");
-      const identity = await context.overviewAiWorkflow.resolveCurrentIdentity({
-        projectId,
-        scopeId,
-        user,
-        ...(pin ? { pin } : {}),
-      });
+      const exactRead = segments.length === 3 && request.method === "GET" && pin;
+      const identity = exactRead && typeof context.overviewAiWorkflow.resolveReadIdentity === "function"
+        ? await context.overviewAiWorkflow.resolveReadIdentity({ projectId, scopeId, user, pin: exactRead })
+        : await context.overviewAiWorkflow.resolveCurrentIdentity({
+            projectId,
+            scopeId,
+            user,
+            ...(pin ? { pin } : {}),
+          });
       if (segments.length === 3 && request.method === "GET") {
         const readModel = typeof context.overviewAiWorkflow.read === "function"
           ? await context.overviewAiWorkflow.read({ identity, user })

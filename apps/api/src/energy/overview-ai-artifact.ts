@@ -12,8 +12,10 @@ import { ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID } from "../workspace-model-profile-r
 
 import {
   resolveProjectAnalysis,
+  resolveProjectOverviewProfile,
   type ProjectAnalysisSnapshot,
 } from "./project-analysis-resolver.js";
+import { resolveEnergyAccessContext } from "./energy-query-context.js";
 import type { PreschoolSectionId } from "./preschool-overview-ai-contracts.js";
 
 type OverviewAiContract = {
@@ -106,11 +108,11 @@ export const createPreschoolOverviewAiValueArtifactIdentity = (input: {
       ? "preschool-section-interpreter-validator-v12"
       : "preschool-executive-synthesis-validator-v3",
     workflowRevision: section
-      ? "preschool-section-interpreter-v13"
-      : "preschool-executive-synthesis-v8",
+      ? "preschool-section-interpreter-v14"
+      : "preschool-executive-synthesis-v9",
     investigatorPromptRevision: section
-      ? "preschool-section-interpreter-prompt-v13"
-      : "preschool-executive-synthesis-prompt-v1",
+      ? "preschool-section-interpreter-prompt-v14"
+      : "preschool-executive-synthesis-prompt-v2",
     editorPromptRevision: "not-applicable-v1",
     methodSkillId: "none",
     methodSkillRevision: "not-applicable-v1",
@@ -220,6 +222,70 @@ export const resolveCurrentOverviewAiArtifactIdentity = async (input: {
   return overviewAiArtifactIdentityFromSnapshot({ snapshot: resolution.snapshot, modelBinding });
 };
 
+export const resolvePinnedOverviewAiArtifactReadIdentity = (input: {
+  metadataStore: MetadataStore;
+  projectId: string;
+  scopeId: string;
+  user: UserRecord;
+  pin: {
+    from: string;
+    to: string;
+    dataSnapshotId: string;
+    projectReleaseId: string;
+  };
+}): OverviewAiArtifactIdentityV13 => {
+  const project = input.metadataStore.energyIq.getProject(input.projectId);
+  const access = resolveEnergyAccessContext({
+    metadataStore: input.metadataStore,
+    user: input.user,
+    requestedWorkspaceId: project.workspace_id,
+  });
+  const accessibleProject = access.projects.find((candidate) => candidate.id === project.id);
+  if (!accessibleProject || accessibleProject.workspaceId !== access.activeWorkspaceId) {
+    throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
+  }
+  if (accessibleProject.status !== "published" && access.role !== "admin") {
+    throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
+  }
+  if (input.scopeId !== project.root_scope_id) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PROJECT_SCOPE_REQUIRED");
+  }
+  if (project.status !== "published" || project.delivery_stage !== "published") {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RELEASE_REQUIRED");
+  }
+  if (input.pin.dataSnapshotId !== project.data_snapshot_id) {
+    throw new Error("ENERGYIQ_DATA_SNAPSHOT_MISMATCH");
+  }
+
+  const profile = resolveProjectOverviewProfile(project.id);
+  if (!profile || profile.rendererKey !== "preschool-overview") {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_CONTRACT_NOT_FOUND");
+  }
+  const templateRevision = input.metadataStore.energyIq.templates.getLatestProjectRevision(project.id);
+  const currentProjectReleaseId = templateRevision?.revision_id ?? `legacy-profile:${project.id}:1`;
+  if (input.pin.projectReleaseId !== currentProjectReleaseId) {
+    throw new Error("ENERGYIQ_PROJECT_RELEASE_MISMATCH");
+  }
+
+  const from = requireLocalDate(input.pin.from);
+  const to = requireLocalDate(input.pin.to);
+  if (from > to) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PERIOD_INVALID");
+  const modelBinding = input.metadataStore.workspaceDefaultModelProfiles.get(ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID);
+  return createOverviewAiArtifactIdentity({
+    workspaceId: project.workspace_id,
+    projectId: project.id,
+    scopeId: project.root_scope_id,
+    dataSnapshotId: project.data_snapshot_id,
+    projectReleaseId: currentProjectReleaseId,
+    analysisPeriodFrom: zonedStartOfLocalDate(from, project.timezone),
+    analysisPeriodTo: zonedStartOfLocalDate(shiftLocalDate(to, 1), project.timezone),
+    rendererKey: profile.rendererKey,
+    rendererVersion: "1",
+    modelProfileId: WORKSPACE_DEFAULT_MODEL_PROFILE_ID,
+    modelProfileRevision: modelBinding.revision,
+  });
+};
+
 const localDateAtTimezone = (value: string, timezone: string): string => {
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp)) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PERIOD_INVALID");
@@ -239,4 +305,44 @@ const shiftLocalDate = (value: string, days: number): string => {
   const shifted = new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1));
   shifted.setUTCDate(shifted.getUTCDate() + days);
   return shifted.toISOString().slice(0, 10);
+};
+
+const requireLocalDate = (value: string): string => {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PERIOD_INVALID");
+  }
+  const [year, month, day] = value.split("-").map(Number);
+  const normalized = new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1)).toISOString().slice(0, 10);
+  if (normalized !== value) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PERIOD_INVALID");
+  return value;
+};
+
+const zonedStartOfLocalDate = (date: string, timezone: string): string => {
+  const [year, month, day] = date.split("-").map(Number);
+  const targetUtc = Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1);
+  let candidate = targetUtc;
+  for (let index = 0; index < 3; index += 1) {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date(candidate));
+    const get = (type: Intl.DateTimeFormatPartTypes): number =>
+      Number(parts.find((part) => part.type === type)?.value ?? 0);
+    const observedAsUtc = Date.UTC(
+      get("year"),
+      get("month") - 1,
+      get("day"),
+      get("hour"),
+      get("minute"),
+      get("second"),
+    );
+    candidate += targetUtc - observedAsUtc;
+  }
+  return new Date(candidate).toISOString();
 };

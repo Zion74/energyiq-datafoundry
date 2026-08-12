@@ -1364,7 +1364,7 @@ describe("Preschool AI Run", () => {
       dataSnapshotId: input.snapshotId,
       projectReleaseId: input.projectReleaseId,
     });
-    expect(progress).toEqual(["inspecting", "validating", "drafting"]);
+    expect(progress).toEqual(["inspecting", "querying", "validating", "drafting"]);
   });
 
   it("lets two client identities share one server-owned two-stage Provider execution", async () => {

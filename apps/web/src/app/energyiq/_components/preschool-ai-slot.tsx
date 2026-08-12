@@ -25,6 +25,7 @@ import {
 } from "./preschool-ai-run";
 import type { PreschoolAiAcceptedFinding, PreschoolAiEpistemicLevel } from "./preschool-ai-artifact";
 import { AiFindingPresentationView } from "./ai-finding-presentation-view";
+import { SafeAiMarkdown } from "./safe-ai-markdown";
 
 type ProgressCallback = (progress: PreschoolAiProgress) => void;
 type Settled = { identityKey: string; result: PreschoolAiRunResult };
@@ -242,7 +243,7 @@ function SectionedAiResult({
   if (sectionId === "page-synthesis") {
     return (
       <AiFrame sectionId={sectionId}>
-        <ExecutiveUnit unit={result.executive} onRetry={onRetry} />
+        <ExecutiveUnit unit={result.executive} completedSectionCount={completedSectionCount(result)} onRetry={onRetry} />
         <SavedRunMarker mode={mode} unit={result.executive} />
       </AiFrame>
     );
@@ -260,39 +261,45 @@ function SectionedAiResult({
 
 function ExecutiveUnit({
   unit,
+  completedSectionCount,
   onRetry,
 }: {
   unit: PreschoolOverviewAiUnitStatusDto<PreschoolExecutiveSynthesisResultDto>;
+  completedSectionCount: number;
   onRetry?: () => void;
 }) {
+  const coverage = <p className="mb-3 text-xs font-medium text-muted">Based on {completedSectionCount} of 4 sections</p>;
   if (unit.status === "queued" || unit.status === "running") {
-    return <PendingValue detail="Executive Key Findings are being composed from completed Section interpretations." />;
+    return <>{coverage}<PendingValue detail="The Executive Summary is being composed from completed Section interpretations." /></>;
   }
   if (unit.status === "unavailable") {
-    return <Unavailable detail="Executive Key Findings are unavailable. Completed Section interpretations remain visible below." onRetry={onRetry} />;
+    return <>{coverage}<Unavailable detail="The Executive Summary is unavailable. Completed Section interpretations remain visible below." onRetry={onRetry} /></>;
   }
   if (unit.status === "empty") {
-    return <EmptyValue title="No additional Executive Key Findings" detail="The accepted Sections did not support a distinct cross-section message for this Snapshot." />;
+    return <>{coverage}<EmptyValue title="No additional Executive Summary finding" detail="The accepted Sections did not support a distinct cross-section message for this Snapshot." /></>;
   }
   return (
-    <ol className="divide-y divide-border" aria-label="AI management priorities">
-      {unit.result.keyFindings.map((finding) => (
-        <li key={finding.id} className="flex gap-3 py-4 first:pt-0 last:pb-0">
-          <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-white">
-            <EnergyIcon name="arrow" className="h-3.5 w-3.5" />
-          </span>
-          <div className="min-w-0 max-w-[75ch]">
-            <p className="text-sm font-semibold leading-6 text-foreground">{finding.takeaway}</p>
-            <details className="mt-2">
-              <summary className="cursor-pointer text-[10px] font-semibold text-muted">Source Sections and Evidence</summary>
-              <p className="mt-1 break-words font-mono text-[10px] leading-4 text-muted-light">
-                {finding.sectionIds.join(" / ")} · {finding.evidenceRefs.join(" / ")}
-              </p>
-            </details>
-          </div>
-        </li>
-      ))}
-    </ol>
+    <div>
+      <p className="mb-3 text-xs font-medium text-muted">Based on {unit.result.sourceSectionArtifactIds.length || completedSectionCount} of 4 sections</p>
+      <ol className="divide-y divide-border" aria-label="AI management priorities">
+        {unit.result.keyFindings.map((finding) => (
+          <li key={finding.id} className="flex gap-3 py-4 first:pt-0 last:pb-0">
+            <span className="mt-0.5 inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary text-white">
+              <EnergyIcon name="arrow" className="h-3.5 w-3.5" />
+            </span>
+            <div className="min-w-0 max-w-[75ch]">
+              <SafeAiMarkdown className="text-sm leading-6 text-foreground" children={finding.takeaway} />
+              <details className="mt-2">
+                <summary className="cursor-pointer text-[10px] font-semibold text-muted">Source Sections and Evidence</summary>
+                <p className="mt-1 break-words font-mono text-[10px] leading-4 text-muted-light">
+                  {finding.sectionIds.join(" / ")} · {finding.evidenceRefs.join(" / ")}
+                </p>
+              </details>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 
@@ -319,7 +326,9 @@ function SectionUnit({
           <EnergyIcon name="spark" className="h-3.5 w-3.5" />
           <p className="text-xs font-semibold">AI takeaway</p>
         </div>
-        <p className="mt-2 max-w-[75ch] text-base font-semibold leading-7 text-foreground">{unit.result.summary}</p>
+        {unit.result.summary ? (
+          <SafeAiMarkdown className="mt-2 max-w-[75ch] text-base leading-7 text-foreground" children={unit.result.summary} />
+        ) : null}
       </div>
       <ul className="divide-y divide-border">
         {unit.result.keyPoints.map((point, index) => (
@@ -334,7 +343,7 @@ function SectionUnit({
                 </span>
                 {point.label ? <p className="text-sm font-semibold text-foreground">{point.label}</p> : null}
               </div>
-              <p className={`mt-1 text-sm leading-6 text-foreground ${point.kind === "priority" || point.kind === "next-check" ? "font-medium" : ""}`}>{point.text}</p>
+              <SafeAiMarkdown className="mt-1 text-sm leading-6 text-foreground" children={point.text} />
               <details className="mt-1.5">
                 <summary className="cursor-pointer text-[10px] font-medium text-muted">Evidence references</summary>
                 <p className="mt-1 break-words font-mono text-[10px] leading-4 text-muted-light">{point.evidenceRefs.join(" / ")}</p>
@@ -346,7 +355,7 @@ function SectionUnit({
       {unit.result.limitation ? (
         <details className="mt-3 border-t border-border pt-3">
           <summary className="cursor-pointer text-xs font-semibold text-muted">Limitation</summary>
-          <p className="mt-1 text-xs leading-5 text-muted">{unit.result.limitation}</p>
+          <SafeAiMarkdown className="mt-1 text-xs leading-5 text-muted" children={unit.result.limitation} />
         </details>
       ) : null}
     </div>
@@ -415,6 +424,17 @@ const sectionPointMeta = {
 } as const;
 
 function AiFrame({ children, sectionId }: { children: React.ReactNode; sectionId: PreschoolAiSectionId }) {
+  if (sectionId === "overall-summary") {
+    return (
+      <section aria-labelledby="preschool-additional-ai-insights" className="border-b border-border bg-surface px-5 py-6 lg:px-7 lg:py-7" data-ai-section={sectionId}>
+        <div className="mb-5 flex flex-wrap items-center gap-2">
+          <h3 id="preschool-additional-ai-insights" className="text-lg font-semibold tracking-[-0.02em] text-foreground">Additional AI Insights</h3>
+          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-primary">AI-generated</span>
+        </div>
+        {children}
+      </section>
+    );
+  }
   if (sectionId !== "page-synthesis") {
     return (
       <aside className="mt-5 rounded-xl border border-primary/20 bg-primary/5 p-4 lg:p-5" aria-label="AI interpretation for this section" data-ai-section={sectionId}>
@@ -432,16 +452,19 @@ function AiFrame({ children, sectionId }: { children: React.ReactNode; sectionId
       <div className="mb-5">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h3 id="preschool-ai-slot" className="text-xl font-semibold tracking-[-0.02em] text-foreground">AI management brief</h3>
+            <h3 id="preschool-ai-slot" className="text-xl font-semibold tracking-[-0.02em] text-foreground">AI Executive Summary</h3>
             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-primary">AI-generated</span>
           </div>
-          <p className="mt-1.5 max-w-[75ch] text-sm leading-6 text-muted">Cross-section priorities composed only from accepted AI interpretations.</p>
+          <p className="mt-1.5 max-w-[75ch] text-sm leading-6 text-muted">The main cross-section summary, composed only from accepted Section interpretations.</p>
         </div>
       </div>
       {children}
     </section>
   );
 }
+
+const completedSectionCount = (result: PreschoolOverviewAiReadModelDto): number =>
+  Object.values(result.sections).filter((unit) => unit.status === "available" || unit.status === "empty").length;
 
 type DisplayFinding = PreschoolAiFinding | PreschoolAiAcceptedFinding;
 
@@ -629,11 +652,11 @@ function Pin({ label, value }: { label: string; value: string }) {
 }
 
 function progressLabel(progress: PreschoolAiProgress): string {
-  if (progress === "queued") return "AI analysis queued…";
-  if (progress === "querying") return "Querying Snapshot…";
+  if (progress === "queued" || progress === "inspecting") return "Loading saved AI summary…";
+  if (progress === "querying") return "Preparing AI summary…";
   if (progress === "validating") return "Validating the investigation…";
   if (progress === "drafting") return "Drafting findings…";
-  return "Inspecting scoped data…";
+  return "Loading saved AI summary…";
 }
 
 function relationshipClass(relationship: PreschoolAiFinding["relationship"]): string {

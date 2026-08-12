@@ -175,6 +175,7 @@ const buildExecutivePrompt = (accepted: AcceptedSection[]): string => {
     "Use only the accepted Section Interpretations below. Do not read raw Facts, query SQL, add a number, or add a fact.",
     "Combine duplicate management messages instead of copying each Section verbatim.",
     "Return 0-4 concise plain-English findings for a non-technical manager.",
+    "Each takeaway may use limited inline Markdown only: **bold** for the few words carrying the decision, and _italics_ for a caveat. Keep most text unformatted. Do not use headings, lists, links, images, code, HTML, or Markdown tables.",
     "Each finding must cite one or more source sectionIds and exact evidenceRefs already present in those Sections.",
     "Return JSON only: {\"status\":\"available\"|\"empty\",\"keyFindings\":[{\"takeaway\":string,\"sectionIds\":string[],\"evidenceRefs\":string[]}]}",
     `Binding: ${JSON.stringify(accepted[0]!.result.binding)}`,

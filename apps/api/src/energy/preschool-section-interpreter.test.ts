@@ -64,6 +64,7 @@ describe("Preschool Section Interpreter", () => {
     expect(prompts[0]).toContain("exact supplied YYYY-MM-DD or its equivalent D Month YYYY rendering");
     expect(prompts[0]).toContain("copy localHour as HH:00");
     expect(prompts[0]).toContain("cite every Evidence item discussed");
+    expect(prompts[0]).toContain("limited inline Markdown");
 
     const retried = await interpreter.execute({
       baseIdentity: harness.identity,

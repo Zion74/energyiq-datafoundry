@@ -101,10 +101,10 @@ describe("PreschoolAiSlot", () => {
     }));
     await renderSlot(startRun);
 
-    expect(container.textContent).toContain("AI analysis queued…");
+    expect(container.textContent).toContain("Loading saved AI summary…");
     expect(container.textContent).toContain("deterministic Overview is ready");
     await act(async () => report("querying"));
-    expect(container.textContent).toContain("Querying Snapshot…");
+    expect(container.textContent).toContain("Preparing AI summary…");
     await act(async () => report("validating"));
     expect(container.textContent).toContain("Validating the investigation…");
     await act(async () => report("drafting"));
@@ -362,7 +362,7 @@ describe("PreschoolAiSlot", () => {
     expect(container.textContent).toContain("AI takeaway");
     expect(container.querySelector("[data-ai-point-role='finding']")?.textContent).toContain("Supporting signal");
     expect(container.querySelector("[data-ai-point-role='next-check']")?.textContent).toContain("Next action");
-    expect(container.textContent).toContain("Executive Key Findings are unavailable");
+    expect(container.textContent).toContain("Executive Summary is unavailable");
     expect(container.textContent).toContain("This Section interpretation is unavailable");
     expect(container.querySelector("[data-ai-section='centre-benchmark']")).not.toBeNull();
     expect(container.querySelector("[data-ai-section='standby-wastage']")).not.toBeNull();
@@ -399,9 +399,60 @@ describe("PreschoolAiSlot", () => {
     ));
 
     expect(container.textContent).toContain("centre-benchmark · evidence:benchmark");
-    expect(container.textContent).toContain("AI management brief");
+    expect(container.textContent).toContain("AI Executive Summary");
+    expect(container.textContent).toContain("Based on 1 of 4 sections");
     expect(container.textContent).toContain("Saved AI result · Run run-executive");
     expect(container.textContent).not.toContain("路");
+  });
+
+  it("renders only safe inline Markdown emphasis in AI narrative fields", async () => {
+    const result = sectionedResult();
+    const benchmark = result.sections["centre-benchmark"];
+    if (benchmark.status !== "available") throw new Error("fixture missing");
+    benchmark.result.summary = "Review **Centre G** before assigning _a cause_.";
+    benchmark.result.keyPoints[0]!.text = "Open [unsafe link](https://example.test) and ignore <strong>raw HTML</strong>.";
+    result.executive = {
+      status: "available",
+      artifactId: "executive",
+      result: {
+        artifactKind: "executive-synthesis",
+        status: "available",
+        providerProfileId: result.binding.modelProfileId,
+        runId: "run-executive-markdown",
+        binding: result.binding,
+        sourceSectionArtifactIds: ["section-benchmark"],
+        keyFindings: [{
+          id: "executive-finding",
+          takeaway: "Start with **Centre G**, then _verify context_.",
+          sectionIds: ["centre-benchmark"],
+          evidenceRefs: ["evidence:benchmark"],
+        }],
+      },
+    };
+
+    await act(async () => root.render(<>
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        sectionId="page-synthesis"
+        mode="saved"
+        savedResult={result}
+        startRun={vi.fn()}
+      />
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        sectionId="centre-benchmark"
+        mode="saved"
+        savedResult={result}
+        startRun={vi.fn()}
+      />
+    </>));
+
+    expect([...container.querySelectorAll("strong")].some((element) => element.textContent === "Centre G")).toBe(true);
+    expect([...container.querySelectorAll("em")].some((element) => element.textContent === "verify context")).toBe(true);
+    expect(container.querySelector("a")).toBeNull();
+    expect(container.textContent).toContain("unsafe link");
+    expect(container.textContent).toContain("raw HTML");
+    expect([...container.querySelectorAll("strong")].some((element) => element.textContent === "raw HTML")).toBe(false);
   });
 
   async function renderSlot(

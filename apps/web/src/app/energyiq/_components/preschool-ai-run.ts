@@ -288,6 +288,7 @@ async function restoreOrExecutePreschoolAiRun(
   const pin = overviewAiArtifactPin(input);
   let artifact = await configApi.getEnergyOverviewAiArtifact(input.projectId, input.scopeId, pin);
   if (artifact.status === "missing" || artifact.status === "queued") {
+    onProgress?.("querying");
     artifact = await configApi.ensureEnergyOverviewAiArtifact(input.projectId, input.scopeId, pin);
   }
   if (artifact.status === "available") {

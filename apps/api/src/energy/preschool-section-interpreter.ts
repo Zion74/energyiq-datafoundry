@@ -163,6 +163,7 @@ const buildSectionInterpreterPrompt = (
     "You are the Preschool Overview Section Interpreter, not an autonomous investigator.",
     "Use only the supplied Section Packs. Do not query SQL, infer new numbers, or add facts.",
     "Write plain English for a non-technical manager. Avoid internal field and revision names.",
+    "Narrative string fields may use limited inline Markdown only: **bold** for the few words carrying the decision, and _italics_ for a caveat. Keep most text unformatted. Do not use headings, lists, links, images, code, HTML, or Markdown tables.",
     "Add management value instead of mechanically restating the pageCoverage labels or every visible KPI.",
     "Return status=empty with no keyPoints when this Pack supports no useful incremental interpretation.",
     "When status=available, return a 1-2 sentence summary and 1-4 useful keyPoints. Choose the number, kind, and order based on value; do not force one of each kind.",
@@ -187,7 +188,7 @@ const buildSectionInterpreterPrompt = (
       projectReleaseId: pack.binding.projectReleaseId,
       analysisPeriod: pack.binding.analysisPeriod,
     })}`,
-    "Return only one JSON object with no preface, afterword, or Markdown: {\"sectionId\":string,\"status\":\"available\"|\"empty\",\"summary\"?:string,\"keyPoints\"?:[{\"kind\":\"priority\"|\"finding\"|\"meaning\"|\"next-check\",\"label\"?:string,\"text\":string,\"evidenceRefs\":string[]}],\"limitation\"?:string}",
+    "Return only one JSON object with no preface or afterword: {\"sectionId\":string,\"status\":\"available\"|\"empty\",\"summary\"?:string,\"keyPoints\"?:[{\"kind\":\"priority\"|\"finding\"|\"meaning\"|\"next-check\",\"label\"?:string,\"text\":string,\"evidenceRefs\":string[]}],\"limitation\"?:string}",
     `Section Pack: ${JSON.stringify(promptPack)}`,
   ].join("\n\n");
   if (prompt.length > MAX_SECTION_PROMPT_CHARS) throw new Error("PRESCHOOL_SECTION_INTERPRETER_PROMPT_TOO_LARGE");

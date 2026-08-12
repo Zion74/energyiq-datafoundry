@@ -143,8 +143,12 @@ describe("Overview AI Artifact API", () => {
     const harness = await createHarness();
     try {
       const execute = vi.fn(async () => { throw new Error("not expected"); });
-      const resolveCurrentIdentity = vi.fn().mockResolvedValue(harness.identity);
-      const context = { ...harness.context, overviewAiWorkflow: { execute, resolveCurrentIdentity } } as unknown as Required<ConfigApiContext>;
+      const resolveCurrentIdentity = vi.fn(async () => { throw new Error("analysis resolver must not run for an exact read pin"); });
+      const resolveReadIdentity = vi.fn().mockResolvedValue(harness.identity);
+      const context = {
+        ...harness.context,
+        overviewAiWorkflow: { execute, resolveCurrentIdentity, resolveReadIdentity },
+      } as unknown as Required<ConfigApiContext>;
       const path = ["projects", harness.project.id, "overview-ai-artifact"];
 
       await handleEnergyApiRequest(
@@ -153,7 +157,7 @@ describe("Overview AI Artifact API", () => {
         context,
       );
 
-      expect(resolveCurrentIdentity).toHaveBeenCalledWith(expect.objectContaining({
+      expect(resolveReadIdentity).toHaveBeenCalledWith(expect.objectContaining({
         projectId: harness.project.id,
         scopeId: harness.project.root_scope_id,
         pin: {
@@ -163,6 +167,7 @@ describe("Overview AI Artifact API", () => {
           projectReleaseId: "release-may",
         },
       }));
+      expect(resolveCurrentIdentity).not.toHaveBeenCalled();
       expect(execute).not.toHaveBeenCalled();
     } finally {
       harness.close();

@@ -283,17 +283,31 @@ export function PreschoolOverviewRenderer({
           ) : null}
         </div>
 
+        <div id="preschool-ai-analysis" className="mt-8 scroll-mt-28 border-t border-border pt-7">
+          <PreschoolAiSlot
+            snapshot={state.snapshot}
+            sectionId="page-synthesis"
+            mode={aiSlotMode}
+            {...aiSlotSharedProps}
+            {...(onAiArtifactChange ? {
+              onCompletedResult: (result: Extract<import("./preschool-ai-run").PreschoolAiRunResult, { status: "available" }>) =>
+                onAiArtifactChange(toSavedPreschoolAiArtifact(state.snapshot, result)),
+            } : {})}
+            {...(aiAnalystHref ? { aiAnalystHref } : {})}
+          />
+        </div>
+
         <div id="preschool-decision-summary" className="mt-8 scroll-mt-28 border-t border-border pt-7">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <div className="flex flex-wrap items-center gap-2.5">
-                <h4 id="preschool-decision-summary-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Verified section highlights</h4>
+                <h4 id="preschool-decision-summary-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">At a glance</h4>
                 <span className="inline-flex items-center gap-1 rounded-full bg-step-success-soft px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-step-success">
                   <EnergyIcon name="check" className="h-3 w-3" />
                   Snapshot facts
                 </span>
               </div>
-              <p className="mt-1.5 text-sm leading-6 text-muted">Evidence-backed signals from Sections 2–5. These highlights are not AI-generated.</p>
+              <p className="mt-1.5 text-sm leading-6 text-muted">A deterministic fallback and navigation list from Sections 2–5. These points are not AI-generated.</p>
             </div>
             <span className="text-xs font-semibold text-muted">Select a finding to open its section</span>
           </div>
@@ -314,26 +328,6 @@ export function PreschoolOverviewRenderer({
           ) : null}
         </div>
 
-        <div id="preschool-ai-analysis" className="mt-8 scroll-mt-28 border-t border-border pt-7">
-          <PreschoolAiSlot
-            snapshot={state.snapshot}
-            sectionId="page-synthesis"
-            mode={aiSlotMode}
-            {...aiSlotSharedProps}
-            {...(onAiArtifactChange ? {
-              onCompletedResult: (result: Extract<import("./preschool-ai-run").PreschoolAiRunResult, { status: "available" }>) =>
-                onAiArtifactChange(toSavedPreschoolAiArtifact(state.snapshot, result)),
-            } : {})}
-            {...(aiAnalystHref ? { aiAnalystHref } : {})}
-          />
-          <PreschoolAiSlot
-            snapshot={state.snapshot}
-            sectionId="overall-summary"
-            mode={aiSlotMode}
-            {...aiSlotSharedProps}
-            {...(aiAnalystHref ? { aiAnalystHref } : {})}
-          />
-        </div>
       </section>
 
       <section id="preschool-benchmark-analysis" aria-labelledby="preschool-benchmark-analysis-heading" data-overview-section="2" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
@@ -569,6 +563,14 @@ export function PreschoolOverviewRenderer({
           {...(aiAnalystHref ? { aiAnalystHref } : {})}
         />
       </section>
+
+      <PreschoolAiSlot
+        snapshot={state.snapshot}
+        sectionId="overall-summary"
+        mode={aiSlotMode}
+        {...aiSlotSharedProps}
+        {...(aiAnalystHref ? { aiAnalystHref } : {})}
+      />
 
       <div className="grid gap-0 xl:grid-cols-[minmax(0,1fr)_320px]">
         <aside id="preschool-centre-ranking" aria-labelledby="preschool-centre-ranking-heading" className="min-w-0 scroll-mt-28 px-5 py-7 lg:px-7 lg:py-8">

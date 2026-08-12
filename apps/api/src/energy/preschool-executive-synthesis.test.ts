@@ -62,6 +62,7 @@ describe("Preschool Executive Synthesis", () => {
     expect(prompt).toContain('"sectionId":"operating-behaviour"');
     expect(prompt).not.toContain('"sectionId":"standby-wastage"');
     expect(prompt).not.toContain('"sectionId":"planning-outlook"');
+    expect(prompt).toContain("limited inline Markdown");
     harness.close();
   });
 

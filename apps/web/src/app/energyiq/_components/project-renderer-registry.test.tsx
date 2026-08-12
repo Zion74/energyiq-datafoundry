@@ -137,9 +137,10 @@ describe("Project Renderer Registry", () => {
     expect(preschoolMarkup.match(/data-overall-summary-metric=/g)).toHaveLength(3);
     expect(preschoolMarkup).toContain("Energy &amp; cost by centre type");
     expect(preschoolMarkup).toContain("S$0.2727/kWh before GST");
-    expect(preschoolMarkup).toContain("Verified section highlights");
+    expect(preschoolMarkup).toContain("AI Executive Summary");
+    expect(preschoolMarkup).toContain("At a glance");
     expect(preschoolMarkup).toContain("AI energy analyst");
-    expect(preschoolMarkup).toContain("AI analysis queued…");
+    expect(preschoolMarkup).toContain("Loading saved AI summary…");
     expect(preschoolMarkup).toContain("deterministic Overview is ready");
     expect(preschoolMarkup).toContain("Energy used after closing");
     expect(preschoolMarkup).toContain("L · E · N");
@@ -161,10 +162,11 @@ describe("Project Renderer Registry", () => {
     const operatingPriority = preschoolMarkup.indexOf('data-decision-priority="operating"');
     const aiSlot = preschoolMarkup.indexOf("AI energy analyst");
     expect(efficiencyPriority).toBeGreaterThan(-1);
+    expect(aiSlot).toBeGreaterThan(-1);
+    expect(aiSlot).toBeLessThan(efficiencyPriority);
     expect(afterHoursPriority).toBeGreaterThan(efficiencyPriority);
     expect(operatingPriority).toBeGreaterThan(afterHoursPriority);
-    expect(aiSlot).toBeGreaterThan(operatingPriority);
-    const decisionMarkup = preschoolMarkup.slice(efficiencyPriority, aiSlot);
+    const decisionMarkup = preschoolMarkup.slice(efficiencyPriority, preschoolMarkup.indexOf("Monthly Energy Outlook"));
     expect(decisionMarkup).toContain("Evidence · View supporting evidence");
     expect(decisionMarkup).not.toContain("preschool-hour-slot-spike-v1");
     expect(preschoolMarkup).toContain("June 2026 planning baseline");
