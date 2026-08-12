@@ -241,10 +241,11 @@ export const handleEnergyApiRequest = async (
             ...(pin ? { pin } : {}),
           });
       if (segments.length === 3 && request.method === "GET") {
-        const readModel = typeof context.overviewAiWorkflow.read === "function"
+        const supportsAggregateRead = typeof context.overviewAiWorkflow.read === "function";
+        const readModel = supportsAggregateRead
           ? await context.overviewAiWorkflow.read({ identity, user })
           : null;
-        const autonomousArtifact = readModel
+        const autonomousArtifact = supportsAggregateRead
           ? null
           : context.metadataStore.energyIq.overviewAiArtifacts.find(identity);
         return {

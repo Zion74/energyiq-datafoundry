@@ -13,6 +13,20 @@ import {
 import { preschoolOverviewAiBindingFromIdentity, type PreschoolSectionId } from "./preschool-overview-ai-contracts.js";
 
 describe("composePreschoolOverviewAiReadModel", () => {
+  it("returns null when the current identity has no Section or Executive artifacts", () => {
+    const root = mkdtempSync(join(tmpdir(), "preschool-overview-read-model-empty-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      expect(composePreschoolOverviewAiReadModel({
+        metadataStore: metadata,
+        baseIdentity: identity(),
+      })).toBeNull();
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("keeps successful, empty, failed, and running Sections visible when Executive synthesis fails", async () => {
     const root = mkdtempSync(join(tmpdir(), "preschool-overview-read-model-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });

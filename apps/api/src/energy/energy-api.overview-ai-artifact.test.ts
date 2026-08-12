@@ -109,6 +109,44 @@ describe("Overview AI Artifact API", () => {
     }
   });
 
+  it("returns missing instead of falling back to a legacy autonomous artifact when aggregate read is supported", async () => {
+    const harness = await createHarness();
+    try {
+      const store = harness.metadata.energyIq.overviewAiArtifacts;
+      store.queue({ identity: harness.identity, triggeredBy: "dev-user" });
+      store.claim({ identity: harness.identity, workerId: "legacy-worker", leaseMs: 60_000 });
+      store.complete({
+        identity: harness.identity,
+        workerId: "legacy-worker",
+        sessionId: "legacy-session",
+        runId: "legacy-run",
+        resultJson: JSON.stringify(resultFor(harness.identity, "legacy-run")),
+      });
+      const read = vi.fn().mockResolvedValue(null);
+      const execute = vi.fn();
+      const resolveCurrentIdentity = vi.fn().mockResolvedValue(harness.identity);
+      const context = {
+        ...harness.context,
+        overviewAiWorkflow: { execute, read, resolveCurrentIdentity },
+      } as unknown as Required<ConfigApiContext>;
+
+      const response = await handleEnergyApiRequest(
+        getRequest(`/api/v1/energy/projects/${harness.project.id}/overview-ai-artifact?scopeId=${harness.project.root_scope_id}`),
+        ["projects", harness.project.id, "overview-ai-artifact"],
+        context,
+      );
+
+      expect(response).toMatchObject({
+        status: 200,
+        body: { success: true, data: { status: "missing" } },
+      });
+      expect(read).toHaveBeenCalledOnce();
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      harness.close();
+    }
+  });
+
   it("keeps GET read-only and no-store while POST ensure and retry execute server-owned work", async () => {
     const harness = await createHarness();
     try {

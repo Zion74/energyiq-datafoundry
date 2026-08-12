@@ -30,7 +30,7 @@ export const composePreschoolOverviewAiReadModel = (input: {
       artifactKind: "section-interpretation",
       targetId: sectionId,
     });
-    return [sectionId, { identity, artifact: store.find(identity) }];
+    return [sectionId, { identity, artifact: store.find(identity) ?? null }];
   })) as Record<PreschoolSectionId, {
     identity: EnergyIqOverviewAiArtifactIdentity;
     artifact: EnergyIqOverviewAiArtifactRecord | null;
