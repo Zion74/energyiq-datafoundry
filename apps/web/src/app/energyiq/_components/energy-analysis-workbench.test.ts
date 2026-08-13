@@ -101,6 +101,76 @@ describe("EnergyIQ AI Analyst handoff", () => {
     expect(prompt).toContain("scoped read-only SQL Evidence");
   });
 
+  it("turns a typed Section Insight handoff into an executable Evidence re-resolution draft", () => {
+    const params = new URLSearchParams({
+      projectId: "preschool-demo",
+      finding: JSON.stringify({
+        kind: "section-insight",
+        insightId: "standby-schedule-mismatch",
+        sectionId: "standby-wastage",
+        artifactId: "section-standby-v4",
+        runId: "run-standby-v4",
+        title: "Schedule mismatch may contribute",
+        what: "Closed-hour load recurs near the published closing boundary.",
+        deepDiveQuestion: "Which Centres show recurring closed-hour load near the published closing boundary?",
+      }),
+      evidence: JSON.stringify({
+        snapshotId: "preschool-26b85b9c0b95e090",
+        projectReleaseId: "legacy-profile:preschool-demo:1",
+        period: {
+          from: "2026-04-30T16:00:00.000Z",
+          to: "2026-05-31T16:00:00.000Z",
+        },
+        evidenceRefs: ["standby:closing-boundary"],
+      }),
+    });
+
+    const prompt = buildEnergyAiHandoffInitialDraftPrompt(params);
+
+    expect(prompt).toContain("Which Centres show recurring closed-hour load near the published closing boundary?");
+    expect(prompt).toContain("Section: standby-wastage");
+    expect(prompt).toContain("Artifact: section-standby-v4");
+    expect(prompt).toContain("Run: run-standby-v4");
+    expect(prompt).toContain("Snapshot reference: preschool-26b85b9c0b95e090");
+    expect(prompt).toContain("Project Release reference: legacy-profile:preschool-demo:1");
+    expect(prompt).toContain("Cited Evidence refs: standby:closing-boundary");
+    expect(prompt).toContain("re-resolve the cited Evidence refs");
+    expect(prompt).not.toContain("Data cutoff reference");
+    expect(prompt).not.toContain("Deterministic Evidence IDs");
+    expect(prompt).not.toContain("Tool call IDs");
+    expect(prompt).not.toContain("Audit log IDs");
+  });
+
+  it.each([
+    {
+      name: "a missing Artifact identity",
+      finding: { insightId: "insight-1", sectionId: "standby-wastage", runId: "run-1", deepDiveQuestion: "What changed?" },
+      evidence: { snapshotId: "snapshot-1", projectReleaseId: "release-1", period: { from: "2026-05-01T00:00:00.000Z", to: "2026-06-01T00:00:00.000Z" }, evidenceRefs: ["evidence-1"] },
+    },
+    {
+      name: "a missing Project Release identity",
+      finding: { insightId: "insight-1", sectionId: "standby-wastage", artifactId: "artifact-1", runId: "run-1", deepDiveQuestion: "What changed?" },
+      evidence: { snapshotId: "snapshot-1", period: { from: "2026-05-01T00:00:00.000Z", to: "2026-06-01T00:00:00.000Z" }, evidenceRefs: ["evidence-1"] },
+    },
+    {
+      name: "no cited Evidence refs",
+      finding: { insightId: "insight-1", sectionId: "standby-wastage", artifactId: "artifact-1", runId: "run-1", deepDiveQuestion: "What changed?" },
+      evidence: { snapshotId: "snapshot-1", projectReleaseId: "release-1", period: { from: "2026-05-01T00:00:00.000Z", to: "2026-06-01T00:00:00.000Z" }, evidenceRefs: [] },
+    },
+    {
+      name: "a non-increasing Period",
+      finding: { insightId: "insight-1", sectionId: "standby-wastage", artifactId: "artifact-1", runId: "run-1", deepDiveQuestion: "What changed?" },
+      evidence: { snapshotId: "snapshot-1", projectReleaseId: "release-1", period: { from: "2026-06-01T00:00:00.000Z", to: "2026-05-01T00:00:00.000Z" }, evidenceRefs: ["evidence-1"] },
+    },
+  ])("fails soft for a typed Section Insight with $name", ({ finding, evidence }) => {
+    const params = new URLSearchParams({
+      finding: JSON.stringify({ kind: "section-insight", ...finding }),
+      evidence: JSON.stringify(evidence),
+    });
+
+    expect(buildEnergyAiHandoffInitialDraftPrompt(params)).toBeNull();
+  });
+
   it.each([
     { name: "missing Evidence", finding: JSON.stringify({ title: "Finding" }), evidence: null },
     { name: "invalid Finding JSON", finding: "{broken", evidence: JSON.stringify({ snapshotId: "snapshot-1" }) },
