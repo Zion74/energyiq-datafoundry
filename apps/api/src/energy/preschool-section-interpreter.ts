@@ -48,6 +48,7 @@ const SQL_STATEMENT = /\bSELECT\b[\s\S]{0,500}\b(?:FROM|JOIN)\b/i;
 const NUMBER_TOKEN = /(?<![A-Za-z0-9_-])-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/g;
 const LOCAL_DATE_TOKEN = /\b\d{4}-\d{2}-\d{2}\b/g;
 const NATURAL_DATE_TOKEN = /\b(?:[1-9]|[12]\d|3[01])\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b/giu;
+const DAY_MONTH_TOKEN = /\b(?:[1-9]|[12]\d|3[01])\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\b/giu;
 const MONTH_YEAR_TOKEN = /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b/giu;
 const LOCAL_TIME_TOKEN = /\b(?:[01]?\d|2[0-3]):[0-5]\d\b/g;
 const LOCAL_DATE_VALUE = /^\d{4}-\d{2}-\d{2}$/;
@@ -646,8 +647,10 @@ const parseKeyPoints = (value: unknown): PreschoolSectionKeyPoint[] | null => {
 const hasUnsupportedNumber = (text: string, evidence: PreschoolSectionPack["evidence"]): boolean => {
   const supported = collectNumbers(evidence.map(({ value }) => value));
   const numericText = text
+    .replaceAll("−", "-")
     .replace(LOCAL_DATE_TOKEN, "")
     .replace(NATURAL_DATE_TOKEN, "")
+    .replace(DAY_MONTH_TOKEN, "")
     .replace(MONTH_YEAR_TOKEN, "")
     .replace(LOCAL_TIME_TOKEN, "");
   const tokens = [...numericText.matchAll(NUMBER_TOKEN)];
@@ -656,7 +659,11 @@ const hasUnsupportedNumber = (text: string, evidence: PreschoolSectionPack["evid
     const value = Number(raw);
     const precision = raw.includes(".") ? raw.length - raw.indexOf(".") - 1 : 0;
     const exactlySupported = supported.some((candidate) => reportedNumberMatches(candidate, value, precision));
-    return !exactlySupported && !supportsBoundedIntegerApproximation({
+    const downwardMagnitudeSupported = value >= 0
+      && hasDownwardQualifierNear(numericText, match.index ?? 0, raw.length)
+      && supported.some((candidate) => candidate < 0
+        && reportedNumberMatches(Math.abs(candidate), value, precision));
+    return !exactlySupported && !downwardMagnitudeSupported && !supportsBoundedIntegerApproximation({
       text: numericText,
       tokenIndex: match.index ?? 0,
       raw,
@@ -704,6 +711,9 @@ const hasUnsupportedTemporalClaim = (
   if (dates.some((date) => !supported.dates.has(date))) return true;
   const naturalDates = [...text.matchAll(NATURAL_DATE_TOKEN)].map(([value]) => naturalDateToIso(value));
   if (naturalDates.some((date) => date === null || !supported.dates.has(date))) return true;
+  const dayMonths = [...text.matchAll(DAY_MONTH_TOKEN)].map(([value]) => dayMonthToIsoSuffix(value));
+  if (dayMonths.some((suffix) => suffix === null
+    || [...supported.dates].filter((date) => date.endsWith(`-${suffix}`)).length !== 1)) return true;
   const monthYears = [...text.matchAll(MONTH_YEAR_TOKEN)].map(([value]) => monthYearToIsoPrefix(value));
   if (monthYears.some((prefix) => prefix === null
     || ![...supported.dates].some((date) => date.startsWith(`${prefix}-`)))) return true;
@@ -714,6 +724,20 @@ const hasUnsupportedTemporalClaim = (
     const minute = Number(time.slice(separator + 1));
     return minute !== 0 || !supported.hours.has(hour);
   });
+};
+
+const dayMonthToIsoSuffix = (value: string): string | null => {
+  const match = value.match(/^(\d{1,2})\s+([A-Za-z]+)$/u);
+  if (!match) return null;
+  const month = [
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+  ].indexOf(match[2]!.toLowerCase()) + 1;
+  const day = Number(match[1]);
+  if (month === 0 || !Number.isInteger(day)) return null;
+  const parsed = new Date(Date.UTC(2000, month - 1, day));
+  if (parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) return null;
+  return `${month.toString().padStart(2, "0")}-${day.toString().padStart(2, "0")}`;
 };
 
 const monthYearToIsoPrefix = (value: string): string | null => {
@@ -807,6 +831,11 @@ const hasUnsupportedMetricRelation = (
     });
   });
 };
+
+const hasDownwardQualifierNear = (text: string, tokenIndex: number, tokenLength: number): boolean =>
+  /\b(?:below|under|lower|down|decrease|decreased|reduction)\b/iu.test(
+    text.slice(Math.max(0, tokenIndex - 24), tokenIndex + tokenLength + 32),
+  );
 
 const collectNumbersForKey = (value: unknown, targetKey: string): number[] => {
   if (Array.isArray(value)) return value.flatMap((item) => collectNumbersForKey(item, targetKey));

@@ -526,9 +526,9 @@ describe("Preschool Executive Synthesis", () => {
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.identity_json)).toMatchObject({
       validatorRevision: "preschool-executive-synthesis-validator-v5",
-      workflowRevision: "preschool-executive-synthesis-v5",
-      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v5",
-      capabilityRevision: "section-artifacts-and-overview-evidence-v1",
+      workflowRevision: "preschool-executive-synthesis-v6",
+      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v6",
+      capabilityRevision: "section-artifacts-and-overview-evidence-v2",
       publicationRevision: "key-findings-v2",
     });
     expect(JSON.parse(artifact.result_json!)).toMatchObject({
@@ -540,6 +540,75 @@ describe("Preschool Executive Synthesis", () => {
       },
       findings: [{ alert: { severity: "attention", certainty: "confirmed" } }],
     });
+  });
+
+  it("accepts conventional half-unit rounding of authoritative Overview facts", async () => {
+    const harness = createHarness();
+    completeSectionV4(harness, "centre-benchmark");
+    const authoritativeOverviewEvidence = {
+      binding: preschoolOverviewAiBindingFromIdentity(harness.identity),
+      catalog: {
+        contract: "analysis-context-evidence@1" as const,
+        sourceId: "project-analysis-snapshot:preschool-demo:snapshot-current",
+        pins: {
+          workspaceId: harness.identity.workspaceId,
+          projectId: harness.identity.projectId,
+          scopeId: harness.identity.scopeId,
+          dataSnapshotId: harness.identity.dataSnapshotId,
+          dataCutoff: "2026-05-31T23:45:00.000Z",
+          projectReleaseId: harness.identity.projectReleaseId,
+          metricVersion: "energy-v1",
+        },
+        facts: [{
+          id: "analysis.summary.closed_hour_share_pct",
+          label: "Closed-hour energy share",
+          metricId: "energy.off_hours_share_pct",
+          value: 12.45,
+          unit: "%",
+          status: "confirmed" as const,
+          evidenceRefs: ["query:overview-current"],
+          dimensions: { sectionId: "standby-wastage" },
+        }],
+      },
+    };
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      revision: "v4",
+      authoritativeOverviewEvidence,
+      runSynthesis: async (input) => ({
+        answer: JSON.stringify({
+          status: "available",
+          summary: {
+            text: "The closed-hour share is roughly **12.5%**, with benchmark context available.",
+            evidenceRefs: [
+              "analysis.summary.closed_hour_share_pct",
+              "evidence:centre-benchmark:summary",
+            ],
+          },
+          findings: [{
+            title: "Closed-hour share is roughly 12.5%",
+            text: "The benchmark evidence provides context for the confirmed share.",
+            sectionIds: ["centre-benchmark"],
+            evidenceRefs: [
+              "analysis.summary.closed_hour_share_pct",
+              "evidence:centre-benchmark:insight",
+            ],
+          }],
+        }),
+        runId: input.runId,
+        sessionId: input.sessionId,
+      }),
+    });
+
+    const artifact = await synthesizer.execute({
+      baseIdentity: harness.identity,
+      user: harness.user,
+      retry: false,
+      authoritativeOverviewEvidence,
+    });
+    harness.close();
+
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
   });
 
   it("persists an explicit current Key Findings empty result without Provider when no current-v4 Section contributes", async () => {

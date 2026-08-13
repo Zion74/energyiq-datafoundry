@@ -783,10 +783,16 @@ const hasUnsupportedNumber = (text: string, supported: number[]): boolean =>
     const raw = token.replaceAll(",", "");
     const value = Number(raw);
     const precision = raw.includes(".") ? raw.length - raw.indexOf(".") - 1 : 0;
-    const tolerance = 0.5 * (10 ** -precision);
-    return !supported.some((candidate) => Math.abs(candidate - value) < tolerance
-      || Math.abs(Number(candidate.toFixed(precision)) - value) < tolerance);
+    return !supported.some((candidate) => reportedNumberMatches(candidate, value, precision));
   });
+
+const reportedNumberMatches = (sourceValue: number, reportedValue: number, precision: number): boolean => {
+  const tolerance = 0.5 * (10 ** -precision);
+  const floatingPointSlack = Number.EPSILON
+    * Math.max(1, Math.abs(sourceValue), Math.abs(reportedValue))
+    * 8;
+  return Math.abs(sourceValue - reportedValue) <= tolerance + floatingPointSlack;
+};
 
 const hasBannedCustomerText = (text: string): boolean =>
   BANNED_INTERNAL_TEXT.test(text) || SQL_STATEMENT.test(text);

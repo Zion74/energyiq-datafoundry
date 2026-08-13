@@ -179,6 +179,73 @@ describe("Preschool Section Interpreter v4", () => {
     });
   });
 
+  it("accepts an evidence-backed day and month when the year is unambiguous", () => {
+    const pack = packV2("standby-wastage", 1);
+    pack.evidence[0] = {
+      id: "evidence:standby-wastage:1",
+      label: "Worst closed-hour spike",
+      value: { localDate: "2026-05-25", localHour: 1 },
+      entityRefs: ["centre-l"],
+      evidenceRefs: ["evidence:standby-wastage:1"],
+    };
+    const result = materializePreschoolSectionResultV4({
+      answer: JSON.stringify({
+        sectionId: "standby-wastage",
+        status: "available",
+        summary: {
+          text: "The worst spike was on **25 May** at **01:00**.",
+          evidenceRefs: ["evidence:standby-wastage:1"],
+        },
+        candidates: [],
+      }),
+      pack,
+      identity: identity("standby-wastage"),
+      runId: "runtime-run-day-month",
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      summary: { text: "The worst spike was on **25 May** at **01:00**." },
+    });
+  });
+
+  it("accepts negative percentages expressed with a Unicode minus or as a below-plan magnitude", () => {
+    const pack = packV2("planning-outlook", 1);
+    pack.evidence[0] = {
+      id: "evidence:planning-outlook:1",
+      label: "Current outlook versus plan",
+      value: {
+        portfolioVariancePct: -2.55,
+        bestCentreVariancePct: -1.66,
+        worstCentreVariancePct: -3.89,
+      },
+      unit: "%",
+      entityRefs: [],
+      evidenceRefs: ["evidence:planning-outlook:1"],
+    };
+    const result = materializePreschoolSectionResultV4({
+      answer: JSON.stringify({
+        sectionId: "planning-outlook",
+        status: "available",
+        summary: {
+          text: "The outlook is roughly **2.6% below plan**, with centres ranging from about **−1.7% to −3.9%**.",
+          evidenceRefs: ["evidence:planning-outlook:1"],
+        },
+        candidates: [],
+      }),
+      pack,
+      identity: identity("planning-outlook"),
+      runId: "runtime-run-negative-percentages",
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      summary: {
+        text: "The outlook is roughly **2.6% below plan**, with centres ranging from about **−1.7% to −3.9%**.",
+      },
+    });
+  });
+
   it("passes the explicit V4 structured contract only to Pack-v2 runner calls", async () => {
     const root = mkdtempSync(join(tmpdir(), "preschool-section-v4-runner-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
