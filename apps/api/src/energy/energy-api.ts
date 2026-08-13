@@ -23,15 +23,18 @@ import type {
   EnergyIqTariffScheduleEntry,
   EnergyIqTemplateDraftDocument,
   EnergyIqTemplateRevisionRecord,
+  UserRecord,
 } from "@datafoundry/metadata";
 import {
   createDefaultTemplateDocument,
   createEnergyIqSourceManifest,
+  parseEnergyIqTemplateChangeProposal,
   resolveEnergyIqMaterializationBlockingReasons,
   resolveEnergyIqProjectDataReadiness,
 } from "@datafoundry/metadata";
 import { createHash, randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
+import { isDeepStrictEqual } from "node:util";
 
 import type { ConfigApiContext, ConfigApiResponse } from "../routes/types.js";
 import { AuthError } from "../auth/service.js";
@@ -49,6 +52,7 @@ import {
 } from "./energy-import-materializer.js";
 import { materializeEnergyProjectManifest } from "./energy-project-materialization.js";
 import {
+  createOverviewAiArtifactIdentity,
   queueCurrentProjectOverviewAiArtifact,
 } from "./overview-ai-artifact.js";
 import { EnergyAdminAccessService } from "./energy-admin-access.js";
@@ -65,6 +69,16 @@ import {
   type EnergyPeriod,
   type EnergyQueryContextRequest
 } from "./energy-query-context.js";
+import {
+  PRESCHOOL_SECTION_IDS,
+  isPreschoolSectionId,
+  type PreschoolOverviewAiReadModel,
+} from "./preschool-overview-ai-contracts.js";
+import {
+  composePreschoolOverviewAiReadModel,
+  composePreschoolOverviewAiReadModelV3,
+} from "./preschool-overview-ai-read-model.js";
+import type { PreschoolOverviewAiRetryTarget } from "./preschool-overview-ai-page-workflow.js";
 
 const EXPLORER_ANALYSIS_CACHE_LIMIT = 100;
 const explorerAnalysisCache = new Map<string, EnergyScopeAnalysis>();
@@ -213,6 +227,10 @@ export const handleEnergyApiRequest = async (
       if (suppliedPinParts > 0 && suppliedPinParts < 4) {
         throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PIN_INCOMPLETE");
       }
+      const generationAction = segments.length === 4
+        && request.method === "POST"
+        && (segments[3] === "ensure" || segments[3] === "retry");
+      if (generationAction) requireEnergyAdminProject(context, user, projectId);
       const pin = suppliedPinParts === 4
         ? {
             from: pinParts.from!,
@@ -222,19 +240,30 @@ export const handleEnergyApiRequest = async (
           }
         : undefined;
       if (!context.overviewAiWorkflow) throw new Error("ENERGYIQ_OVERVIEW_AI_SERVER_WORKFLOW_REQUIRED");
-      const identity = await context.overviewAiWorkflow.resolveCurrentIdentity({
-        projectId,
-        scopeId,
-        user,
-        ...(pin ? { pin } : {}),
-      });
+      const exactRead = segments.length === 3 && request.method === "GET" && pin;
+      const identity = exactRead && typeof context.overviewAiWorkflow.resolveReadIdentity === "function"
+        ? await context.overviewAiWorkflow.resolveReadIdentity({ projectId, scopeId, user, pin: exactRead })
+        : await context.overviewAiWorkflow.resolveCurrentIdentity({
+            projectId,
+            scopeId,
+            user,
+            ...(pin ? { pin } : {}),
+          });
       if (segments.length === 3 && request.method === "GET") {
-        const artifact = context.metadataStore.energyIq.overviewAiArtifacts.find(identity);
+        const supportsAggregateRead = typeof context.overviewAiWorkflow.read === "function";
+        const readModel = supportsAggregateRead
+          ? await context.overviewAiWorkflow.read({ identity, user })
+          : null;
+        const autonomousArtifact = supportsAggregateRead
+          ? null
+          : context.metadataStore.energyIq.overviewAiArtifacts.find(identity);
         return {
           status: 200,
           headers: { "Cache-Control": "private, no-store" },
-          body: createSuccessResult(artifact
-            ? toOverviewAiArtifactDto(artifact)
+          body: createSuccessResult(readModel
+            ? toPreschoolOverviewAiReadModelDto(readModel)
+            : autonomousArtifact
+              ? toOverviewAiArtifactDto(autonomousArtifact)
             : {
                 status: "missing",
                 dataSnapshotId: identity.dataSnapshotId,
@@ -243,12 +272,33 @@ export const handleEnergyApiRequest = async (
         };
       }
       if (segments.length === 4 && segments[3] === "ensure" && request.method === "POST") {
-        const artifact = await context.overviewAiWorkflow.execute({ identity, user, retry: false });
-        return { status: 200, body: createSuccessResult(toOverviewAiArtifactDto(artifact)) };
+        const readModel = await context.overviewAiWorkflow.execute({ identity, user, retry: false });
+        return {
+          status: 200,
+          headers: { "Cache-Control": "private, no-store" },
+          body: createSuccessResult(toOverviewAiWorkflowDto(readModel)),
+        };
       }
       if (segments.length === 4 && segments[3] === "retry" && request.method === "POST") {
-        const artifact = await context.overviewAiWorkflow.execute({ identity, user, retry: true });
-        return { status: 200, body: createSuccessResult(toOverviewAiArtifactDto(artifact)) };
+        const body = requireRecord(await readJsonBody(request));
+        const requestedRetryTarget = optionalString(body.targetId);
+        if (requestedRetryTarget
+          && requestedRetryTarget !== "executive-synthesis"
+          && !isPreschoolSectionId(requestedRetryTarget)) {
+          throw new Error("PRESCHOOL_OVERVIEW_AI_RETRY_TARGET_INVALID");
+        }
+        const retryTarget = requestedRetryTarget as PreschoolOverviewAiRetryTarget | undefined;
+        const readModel = await context.overviewAiWorkflow.execute({
+          identity,
+          user,
+          retry: true,
+          ...(retryTarget ? { retryTarget } : {}),
+        });
+        return {
+          status: 200,
+          headers: { "Cache-Control": "private, no-store" },
+          body: createSuccessResult(toOverviewAiWorkflowDto(readModel)),
+        };
       }
       if (segments.length === 4
         && (segments[3] === "claim" || segments[3] === "complete" || segments[3] === "fail")
@@ -296,17 +346,12 @@ export const handleEnergyApiRequest = async (
           projectId,
           requestedBatchId: batchId,
         });
-        let overviewAiArtifact: Awaited<ReturnType<typeof queueCurrentProjectOverviewAiArtifact>> = null;
-        try {
-          overviewAiArtifact = await queueCurrentProjectOverviewAiArtifact({
-            metadataStore: context.metadataStore,
-            dataGateway: context.dataGateway,
-            projectId,
-            user,
-          });
-        } catch (error) {
-          console.warn("[energyiq] failed to queue Overview AI Artifact after materialization", error);
-        }
+        const overviewAiDelivery = await generateOverviewAiAfterProjectMutation({
+          context,
+          projectId,
+          user,
+          operation: "materialization",
+        });
         return {
           status: 200,
           body: createSuccessResult({
@@ -315,15 +360,7 @@ export const handleEnergyApiRequest = async (
             readiness: await createProjectDataReadiness(context, projectId, materialized.document),
             duplicate: materialized.duplicate,
             ...(materialized.timings ? { materializationTimings: materialized.timings } : {}),
-            ...(overviewAiArtifact
-              ? {
-                  overviewAiArtifact: {
-                    id: overviewAiArtifact.id,
-                    status: overviewAiArtifact.status,
-                    dataSnapshotId: overviewAiArtifact.data_snapshot_id,
-                  },
-                }
-              : {}),
+            ...overviewAiDelivery,
           }),
         };
       }
@@ -526,31 +563,18 @@ export const handleEnergyApiRequest = async (
             "ENERGYIQ_RULE_CONFIG_REVISION_REQUIRED",
           ),
         });
-        let overviewAiArtifact: Awaited<ReturnType<typeof queueCurrentProjectOverviewAiArtifact>> = null;
-        try {
-          overviewAiArtifact = await queueCurrentProjectOverviewAiArtifact({
-            metadataStore: context.metadataStore,
-            dataGateway: context.dataGateway,
-            projectId,
-            user,
-          });
-        } catch (error) {
-          console.warn("[energyiq] failed to queue Overview AI Artifact after Project publish", error);
-        }
+        const overviewAiDelivery = await generateOverviewAiAfterProjectMutation({
+          context,
+          projectId,
+          user,
+          operation: "Project publish",
+        });
         return {
           status: 200,
           body: createSuccessResult({
             ...published,
             project: context.metadataStore.energyIq.getProject(projectId),
-            ...(overviewAiArtifact
-              ? {
-                  overviewAiArtifact: {
-                    id: overviewAiArtifact.id,
-                    status: overviewAiArtifact.status,
-                    dataSnapshotId: overviewAiArtifact.data_snapshot_id,
-                  },
-                }
-              : {}),
+            ...overviewAiDelivery,
           })
         };
       }
@@ -664,6 +688,132 @@ export const handleEnergyApiRequest = async (
               updated_by: user.id,
             }),
           }),
+        };
+      }
+    }
+    if (segments[0] === "projects" && segments[2] === "template-change-context" && segments.length === 3) {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      requireEnergyAdminProject(context, user, projectId);
+      if (request.method !== "GET") throw new Error("ENERGYIQ_TEMPLATE_CHANGE_METHOD_INVALID");
+      const project = context.metadataStore.energyIq.getProject(projectId);
+      const revision = context.metadataStore.energyIq.templates.getLatestProjectRevision(projectId);
+      if (!revision) throw new Error("ENERGYIQ_TEMPLATE_CHANGE_BASE_REVISION_REQUIRED");
+      return {
+        status: 200,
+        body: createSuccessResult({
+          fixedIdentity: {
+            workspaceId: project.workspace_id,
+            projectId,
+            scopeId: project.root_scope_id,
+            dataSnapshotId: project.data_snapshot_id,
+            projectReleaseId: revision.revision_id,
+          },
+          revision,
+          catalog: context.metadataStore.energyIq.templates.listComponentRevisions(),
+          proposals: context.metadataStore.energyIq.templateChanges.listProject(projectId),
+          rendererBoundary: {
+            previewRenderer: "structured-template",
+            customerRenderer: resolveProjectOverviewProfile(projectId)?.rendererKey ?? "energy-template",
+            customerRendererAutomaticallyReordered: false,
+            message: "This preview validates the structured Template Revision. A registered customer renderer remains unchanged until its renderer bridge or Coding Agent stage is approved.",
+          },
+        }),
+      };
+    }
+    if (segments[0] === "projects" && segments[2] === "template-change-proposals") {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      requireEnergyAdminProject(context, user, projectId);
+      const proposalId = segments[3] ? decodeURIComponent(segments[3]) : undefined;
+      if (segments.length === 3 && request.method === "GET") {
+        return {
+          status: 200,
+          body: createSuccessResult({
+            proposals: context.metadataStore.energyIq.templateChanges.listProject(projectId),
+          }),
+        };
+      }
+      if (segments.length === 3 && request.method === "POST") {
+        if (!context.templateChangeWorkflow) throw new Error("ENERGYIQ_TEMPLATE_CHANGE_WORKFLOW_REQUIRED");
+        const body = requireRecord(await readJsonBody(request));
+        const instruction = requireNonEmptyString(
+          body.instruction,
+          "ENERGYIQ_TEMPLATE_CHANGE_INSTRUCTION_REQUIRED",
+        );
+        if (instruction.length > 2_000) {
+          throw new Error("ENERGYIQ_TEMPLATE_CHANGE_INSTRUCTION_INVALID");
+        }
+        const project = context.metadataStore.energyIq.getProject(projectId);
+        const scopeId = optionalString(body.scopeId) ?? project.root_scope_id;
+        const generated = await context.templateChangeWorkflow.propose({
+          projectId,
+          scopeId,
+          instruction,
+          user,
+        });
+        const proposal = context.metadataStore.energyIq.templateChanges.create({
+          id: `template-change-${randomUUID()}`,
+          workspace_id: generated.identity.workspaceId,
+          project_id: generated.identity.projectId,
+          base_revision_id: generated.identity.projectReleaseId,
+          data_snapshot_id: generated.identity.dataSnapshotId,
+          scope_id: generated.identity.scopeId,
+          instruction,
+          proposal: parseEnergyIqTemplateChangeProposal(generated.proposal),
+          created_by: user.id,
+          created_at: new Date().toISOString(),
+        });
+        return {
+          status: 201,
+          body: createSuccessResult({
+            proposal,
+            generation: { runId: generated.runId, sessionId: generated.sessionId },
+          }),
+        };
+      }
+      if (proposalId && segments[4] === "preview" && segments.length === 5 && request.method === "GET") {
+        const proposal = context.metadataStore.energyIq.templateChanges.get(proposalId);
+        if (!proposal || proposal.project_id !== projectId) throw new Error("ENERGYIQ_TEMPLATE_CHANGE_NOT_FOUND");
+        return {
+          status: 200,
+          body: createSuccessResult({
+            proposal,
+            catalog: context.metadataStore.energyIq.templates.listComponentRevisions(),
+            fixedIdentity: {
+              workspaceId: proposal.workspace_id,
+              projectId: proposal.project_id,
+              scopeId: proposal.scope_id,
+              dataSnapshotId: proposal.data_snapshot_id,
+              projectReleaseId: proposal.base_revision_id,
+            },
+            rendererBoundary: {
+              previewRenderer: "structured-template",
+              customerRendererAutomaticallyReordered: false,
+            },
+          }),
+        };
+      }
+      if (proposalId && segments[4] === "reject" && segments.length === 5 && request.method === "POST") {
+        return {
+          status: 200,
+          body: createSuccessResult({
+            proposal: context.metadataStore.energyIq.templateChanges.reject({
+              id: proposalId,
+              project_id: projectId,
+              rejected_by: user.id,
+              rejected_at: new Date().toISOString(),
+            }),
+          }),
+        };
+      }
+      if (proposalId && segments[4] === "publish" && segments.length === 5 && request.method === "POST") {
+        return {
+          status: 200,
+          body: createSuccessResult(context.metadataStore.energyIq.templateChanges.publish({
+            id: proposalId,
+            project_id: projectId,
+            published_by: user.id,
+            published_at: new Date().toISOString(),
+          })),
         };
       }
     }
@@ -1040,6 +1190,7 @@ export const toEnergyApiErrorResponse = (error: unknown): ConfigApiResponse => {
     || message.startsWith("ENERGYIQ_IMPORT_MATERIALIZATION_NOT_READY:")
     || message.startsWith("ENERGYIQ_SNAPSHOT_STALE")
     || message.startsWith("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE")
+    || message === "ENERGYIQ_TEMPLATE_CHANGE_BASE_REVISION_STALE"
     || message === "ENERGYIQ_DATA_SNAPSHOT_MISMATCH"
     || message === "ENERGYIQ_PROJECT_RELEASE_MISMATCH"
     || message.startsWith("ENERGYIQ_DATA_SNAPSHOT_IMMUTABLE_CONFLICT:")
@@ -1285,6 +1436,69 @@ const toOverviewAiArtifactDto = (artifact: EnergyIqOverviewAiArtifactRecord): Re
   ...(artifact.result_json ? { result: customerVisibleOverviewAiResult(JSON.parse(artifact.result_json) as unknown) } : {}),
 });
 
+const toPreschoolOverviewAiReadModelDto = (
+  readModel: PreschoolOverviewAiReadModel,
+): Record<string, unknown> => ({
+  status: "available",
+  dataSnapshotId: readModel.binding.dataSnapshotId,
+  projectReleaseId: readModel.binding.projectReleaseId,
+  modelProfileId: readModel.binding.modelProfileId,
+  modelProfileRevision: readModel.binding.modelProfileRevision,
+  result: readModel.autonomous === undefined
+    ? readModel
+    : { ...readModel, autonomous: customerVisibleOverviewAiResult(readModel.autonomous) },
+});
+
+const toOverviewAiWorkflowDto = (
+  value: PreschoolOverviewAiReadModel | EnergyIqOverviewAiArtifactRecord,
+): Record<string, unknown> => "binding" in value
+  ? toPreschoolOverviewAiReadModelDto(value)
+  : toOverviewAiArtifactDto(value);
+
+const generateOverviewAiAfterProjectMutation = async (input: {
+  context: Required<ConfigApiContext>;
+  projectId: string;
+  user: UserRecord;
+  operation: "materialization" | "Project publish";
+}): Promise<Record<string, unknown>> => {
+  const project = input.context.metadataStore.energyIq.getProject(input.projectId);
+  const profile = resolveProjectOverviewProfile(project.id);
+  if (profile?.rendererKey === "preschool-overview") {
+    const identity = await input.context.overviewAiWorkflow.resolveCurrentIdentity({
+      projectId: project.id,
+      scopeId: project.root_scope_id,
+      user: input.user,
+    });
+    const readModel = await input.context.overviewAiWorkflow.execute({
+      identity,
+      user: input.user,
+      retry: false,
+    });
+    return { overviewAi: toOverviewAiWorkflowDto(readModel) };
+  }
+
+  try {
+    const artifact = await queueCurrentProjectOverviewAiArtifact({
+      metadataStore: input.context.metadataStore,
+      dataGateway: input.context.dataGateway,
+      projectId: project.id,
+      user: input.user,
+    });
+    return artifact
+      ? {
+          overviewAiArtifact: {
+            id: artifact.id,
+            status: artifact.status,
+            dataSnapshotId: artifact.data_snapshot_id,
+          },
+        }
+      : {};
+  } catch (error) {
+    console.warn(`[energyiq] failed to queue Overview AI Artifact after ${input.operation}`, error);
+    return {};
+  }
+};
+
 const customerVisibleOverviewAiResult = (value: unknown): unknown => {
   if (!isRecord(value) || !isRecord(value.workflow) || !Array.isArray(value.workflow.editorTrace)) return value;
   const { editorTrace: _, ...workflow } = value.workflow;
@@ -1338,7 +1552,7 @@ const parseSavedAnalysisViewState = (value: unknown): SavedAnalysisViewState => 
   return { grain, comparison, category };
 };
 
-type SavedAnalysisAiArtifactInput = {
+type SavedAnalysisAiLegacyArtifactInput = {
   contract: "energyiq-saved-ai-result@1";
   rendererKey: "ngee-ann-overview" | "preschool-overview";
   snapshotId: string;
@@ -1350,6 +1564,16 @@ type SavedAnalysisAiArtifactInput = {
     findings: Record<string, unknown>[];
   };
 };
+
+type SavedAnalysisAiSectionedArtifactInput = {
+  contract: "energyiq-saved-ai-result@2";
+  rendererKey: "preschool-overview";
+  snapshotId: string;
+  projectReleaseId: string;
+  result: PreschoolOverviewAiReadModel;
+};
+
+type SavedAnalysisAiArtifactInput = SavedAnalysisAiLegacyArtifactInput | SavedAnalysisAiSectionedArtifactInput;
 
 type SavedAnalysisAiArtifact = SavedAnalysisAiArtifactInput & {
   completedAt: string;
@@ -1368,8 +1592,36 @@ const parseRequestedSavedAnalysisAiArtifact = (
   userId: string,
 ): SavedAnalysisAiArtifact | undefined => {
   if (value === undefined) return undefined;
-  const artifact = parseSavedAnalysisAiArtifactInput(value, snapshot);
-  if (snapshot.renderer.key === "preschool-overview" && !isPreschoolAcceptedSavedResult(artifact.result, snapshot)) {
+  let artifact = parseSavedAnalysisAiArtifactInput(value, snapshot);
+  if (artifact.contract === "energyiq-saved-ai-result@2") {
+    const baseIdentity = createOverviewAiArtifactIdentity({
+      workspaceId: artifact.result.binding.workspaceId,
+      projectId: artifact.result.binding.projectId,
+      scopeId: artifact.result.binding.scopeId,
+      dataSnapshotId: artifact.result.binding.dataSnapshotId,
+      projectReleaseId: artifact.result.binding.projectReleaseId,
+      analysisPeriodFrom: artifact.result.binding.analysisPeriod.from,
+      analysisPeriodTo: artifact.result.binding.analysisPeriod.to,
+      rendererKey: snapshot.renderer.key,
+      rendererVersion: snapshot.renderer.version,
+      modelProfileId: artifact.result.binding.modelProfileId,
+      modelProfileRevision: artifact.result.binding.modelProfileRevision,
+    });
+    const sectionRevision = savedSectionContractRevision(artifact.result);
+    const canonical = sectionRevision === "preschool-section-interpretation-v3"
+      ? composePreschoolOverviewAiReadModelV3({ metadataStore: context.metadataStore, baseIdentity })
+      : composePreschoolOverviewAiReadModel({
+      metadataStore: context.metadataStore,
+      baseIdentity,
+    });
+    if (!canonical || !isDeepStrictEqual(canonical, artifact.result)) {
+      throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+    }
+    artifact = { ...artifact, result: canonical };
+  }
+  if (artifact.contract === "energyiq-saved-ai-result@1"
+    && snapshot.renderer.key === "preschool-overview"
+    && !isPreschoolAcceptedSavedResult(artifact.result, snapshot)) {
     throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
   }
   const runIds = savedAnalysisAiRunIds(artifact.result);
@@ -1384,7 +1636,8 @@ const parseRequestedSavedAnalysisAiArtifact = (
     }
     return run;
   });
-  const run = runs.find((candidate) => candidate.id === artifact.result.runId);
+  const primaryRunId = primarySavedAnalysisAiRunId(artifact.result);
+  const run = runs.find((candidate) => candidate.id === primaryRunId);
   if (!run?.finished_at) throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_RUN_INVALID");
   return {
     ...artifact,
@@ -1438,6 +1691,21 @@ const parseSavedAnalysisAiArtifactInput = (
   value: unknown,
   snapshot: ProjectAnalysisSnapshot,
 ): SavedAnalysisAiArtifactInput => {
+  if (isRecord(value) && value.contract === "energyiq-saved-ai-result@2") {
+    if (value.rendererKey !== "preschool-overview"
+      || snapshot.renderer.key !== "preschool-overview"
+      || value.snapshotId !== snapshot.dataSnapshot.id
+      || value.projectReleaseId !== snapshot.projectRelease.id
+      || !isPreschoolSectionedSavedResult(value.result, snapshot)) {
+      throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+    }
+    const artifact = value as unknown as SavedAnalysisAiSectionedArtifactInput;
+    if (savedAnalysisAiRunIds(artifact.result).length === 0
+      || JSON.stringify(artifact).length > 262_144) {
+      throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+    }
+    return artifact;
+  }
   if (!isRecord(value)
     || value.contract !== "energyiq-saved-ai-result@1"
     || value.rendererKey !== snapshot.renderer.key
@@ -1464,8 +1732,8 @@ const parseSavedAnalysisAiArtifactInput = (
       || (!isPreschoolAcceptedSavedResult(value.result, snapshot) && value.result.findings.length > 3))) {
     throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
   }
-  const input = value as SavedAnalysisAiArtifactInput;
-  const artifact: SavedAnalysisAiArtifactInput = {
+  const input = value as SavedAnalysisAiLegacyArtifactInput;
+  const artifact: SavedAnalysisAiLegacyArtifactInput = {
     ...input,
     result: {
       ...input.result,
@@ -1478,6 +1746,17 @@ const parseSavedAnalysisAiArtifactInput = (
 };
 
 const savedAnalysisAiRunIds = (result: SavedAnalysisAiArtifactInput["result"]): string[] => {
+  if (isPreschoolOverviewAiReadModel(result)) {
+    return [...new Set([
+      ...PRESCHOOL_SECTION_IDS.flatMap((sectionId) => {
+        const unit = result.sections[sectionId];
+        return unit.status === "available" || unit.status === "empty" ? [unit.result.runId] : [];
+      }),
+      ...(result.executive.status === "available" || result.executive.status === "empty"
+        ? [result.executive.result.runId]
+        : []),
+    ])];
+  }
   if (!isRecord(result.workflow)
     || !isRecord(result.workflow.stages)
     || !isRecord(result.workflow.stages.investigator)
@@ -1488,6 +1767,101 @@ const savedAnalysisAiRunIds = (result: SavedAnalysisAiArtifactInput["result"]): 
     result.workflow.stages.investigator.runId,
     result.workflow.stages.editor.runId,
   ])];
+};
+
+const primarySavedAnalysisAiRunId = (result: SavedAnalysisAiArtifactInput["result"]): string => {
+  if (!isPreschoolOverviewAiReadModel(result)) return result.runId;
+  if (result.executive.status === "available" || result.executive.status === "empty") {
+    return result.executive.result.runId;
+  }
+  const runIds = savedAnalysisAiRunIds(result);
+  if (runIds.length === 0) throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_RUN_INVALID");
+  return runIds[runIds.length - 1]!;
+};
+
+const isPreschoolSectionedSavedResult = (
+  value: unknown,
+  snapshot: ProjectAnalysisSnapshot,
+): value is PreschoolOverviewAiReadModel => {
+  if (!isPreschoolOverviewAiReadModel(value)
+    || value.binding.workspaceId !== snapshot.context.workspaceId
+    || value.binding.dataSnapshotId !== snapshot.dataSnapshot.id
+    || value.binding.projectReleaseId !== snapshot.projectRelease.id
+    || value.binding.projectId !== "preschool-demo"
+    || value.binding.scopeId !== snapshot.context.scopeId
+    || value.binding.analysisPeriod.from !== snapshot.context.primaryPeriod.start
+    || value.binding.analysisPeriod.to !== snapshot.context.primaryPeriod.endExclusive) return false;
+  return PRESCHOOL_SECTION_IDS.every((sectionId) =>
+    validPreschoolSavedUnit(value.sections[sectionId], value.binding, "section-interpretation", sectionId))
+    && validPreschoolSavedUnit(value.executive, value.binding, "executive-synthesis");
+};
+
+const isPreschoolOverviewAiReadModel = (value: unknown): value is PreschoolOverviewAiReadModel =>
+  isRecord(value)
+  && value.artifactKind === "preschool-overview-ai-read-model"
+  && value.status === "available"
+  && isRecord(value.binding)
+  && isRecord(value.binding.analysisPeriod)
+  && isRecord(value.sections)
+  && isRecord(value.executive);
+
+const savedSectionContractRevision = (
+  result: PreschoolOverviewAiReadModel,
+): "preschool-section-interpretation-v3" | "preschool-section-interpretation-v4" => {
+  const revisions = new Set(PRESCHOOL_SECTION_IDS.flatMap((sectionId) => {
+    const unit = result.sections[sectionId];
+    if (unit.status !== "available" && unit.status !== "empty") return [];
+    const revision = unit.result.contract?.revision;
+    return revision === "preschool-section-interpretation-v3"
+      || revision === "preschool-section-interpretation-v4"
+      ? [revision]
+      : [];
+  }));
+  if (revisions.size !== 1) throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+  return [...revisions][0]!;
+};
+
+const validPreschoolSavedUnit = (
+  value: unknown,
+  binding: PreschoolOverviewAiReadModel["binding"],
+  artifactKind: "section-interpretation" | "executive-synthesis",
+  sectionId?: string,
+): boolean => {
+  if (!isRecord(value) || value.status === "queued" || value.status === "running") return false;
+  if (value.status === "unavailable") return typeof value.reason === "string" && Boolean(value.reason.trim());
+  if ((value.status !== "available" && value.status !== "empty")
+    || typeof value.artifactId !== "string"
+    || !isRecord(value.result)
+    || value.result.artifactKind !== artifactKind
+    || value.result.status !== value.status
+    || typeof value.result.providerProfileId !== "string"
+    || typeof value.result.runId !== "string"
+    || !isRecord(value.result.binding)
+    || value.result.binding.dataSnapshotId !== binding.dataSnapshotId
+    || value.result.binding.projectReleaseId !== binding.projectReleaseId
+    || value.result.binding.modelProfileId !== binding.modelProfileId
+    || value.result.binding.modelProfileRevision !== binding.modelProfileRevision) return false;
+  if (artifactKind === "section-interpretation") {
+    if (value.result.sectionId !== sectionId || !isRecord(value.result.contract)) return false;
+    if (value.result.contract.revision === "preschool-section-interpretation-v3") {
+      return Array.isArray(value.result.keyPoints);
+    }
+    return value.result.contract.revision === "preschool-section-interpretation-v4"
+      && value.result.packRevision === "v2"
+      && isRecord(value.result.capability)
+      && value.result.capability.revision === "pack-only-v1"
+      && Array.isArray(value.result.insights)
+      && isRecord(value.result.publication)
+      && value.result.publication.policyId === "preschool-section-publication"
+      && value.result.publication.policyRevision === "v1"
+      && (value.result.status === "empty"
+        ? value.result.summary === undefined && value.result.insights.length === 0
+        : isRecord(value.result.summary)
+          && typeof value.result.summary.text === "string"
+          && Boolean(value.result.summary.text.trim())
+          && Array.isArray(value.result.summary.evidenceRefs));
+  }
+  return Array.isArray(value.result.sourceSectionArtifactIds) && Array.isArray(value.result.keyFindings);
 };
 
 const isPreschoolAcceptedSavedResult = (

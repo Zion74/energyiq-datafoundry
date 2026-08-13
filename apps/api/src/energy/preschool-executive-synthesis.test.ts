@@ -1,0 +1,608 @@
+import { createMetadataStore, type EnergyIqOverviewAiArtifactIdentity } from "@datafoundry/metadata";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { createPreschoolExecutiveSynthesizer } from "./preschool-executive-synthesis.js";
+import { PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4 } from "./preschool-overview-ai-structured-output.js";
+import {
+  createOverviewAiArtifactIdentity,
+  createPreschoolOverviewAiSectionArtifactIdentityV4,
+  createPreschoolOverviewAiValueArtifactIdentity,
+} from "./overview-ai-artifact.js";
+import { preschoolOverviewAiBindingFromIdentity, type PreschoolSectionId } from "./preschool-overview-ai-contracts.js";
+
+const roots: string[] = [];
+
+afterEach(() => {
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+describe("Preschool Executive Synthesis", () => {
+  it("reads only accepted same-identity Sections and preserves their source references", async () => {
+    const harness = createHarness();
+    const benchmark = completeSection(harness, "centre-benchmark", "30 Centres are included in the benchmark.");
+    failSection(harness, "standby-wastage");
+    const operating = completeSection(harness, "operating-behaviour", "Operating evidence supports a focused review.");
+    completeSection(harness, "planning-outlook", undefined, "empty");
+    let prompt = "";
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      runSynthesis: async (input) => {
+        prompt = input.prompt;
+        return {
+          answer: JSON.stringify({
+            status: "available",
+            keyFindings: [{
+              takeaway: "Benchmark and operating evidence point to one focused management review.",
+              sectionIds: ["centre-benchmark", "operating-behaviour"],
+              evidenceRefs: ["evidence:centre-benchmark", "evidence:operating-behaviour"],
+            }],
+          }),
+          runId: input.runId,
+          sessionId: input.sessionId,
+        };
+      },
+    });
+
+    const artifact = await synthesizer.execute({
+      baseIdentity: harness.identity,
+      user: harness.user,
+      retry: false,
+    });
+    expect(artifact.status).toBe("available");
+    expect(JSON.parse(artifact.result_json!)).toMatchObject({
+      status: "available",
+      sourceSectionArtifactIds: [benchmark.id, operating.id],
+      keyFindings: [{
+        sectionIds: ["centre-benchmark", "operating-behaviour"],
+        evidenceRefs: ["evidence:centre-benchmark", "evidence:operating-behaviour"],
+      }],
+    });
+    expect(prompt).toContain('"sectionId":"centre-benchmark"');
+    expect(prompt).toContain('"sectionId":"operating-behaviour"');
+    expect(prompt).not.toContain('"sectionId":"standby-wastage"');
+    expect(prompt).not.toContain('"sectionId":"planning-outlook"');
+    expect(prompt).toContain("limited inline Markdown");
+    harness.close();
+  });
+
+  it("fails only Synthesis when it introduces a new number", async () => {
+    const harness = createHarness();
+    const section = completeSection(harness, "centre-benchmark", "30 Centres are included in the benchmark.");
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      runSynthesis: async (input) => ({
+        answer: JSON.stringify({
+          status: "available",
+          keyFindings: [{
+            takeaway: "99 Centres require action.",
+            sectionIds: ["centre-benchmark"],
+            evidenceRefs: ["evidence:centre-benchmark"],
+          }],
+        }),
+        runId: input.runId,
+        sessionId: input.sessionId,
+      }),
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    expect(artifact).toMatchObject({
+      status: "failed",
+      error_code: "PRESCHOOL_EXECUTIVE_SYNTHESIS_FACT_UNSUPPORTED",
+    });
+    expect(harness.metadata.energyIq.overviewAiArtifacts.get(sectionIdentity(harness.identity, "centre-benchmark"))).toEqual(section);
+    harness.close();
+  });
+
+  it("allows ordinary management prose containing the word from", async () => {
+    const harness = createHarness();
+    completeSection(harness, "standby-wastage", "Closed-hour usage stands out against the normal pattern.");
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      runSynthesis: async (input) => ({
+        answer: JSON.stringify({
+          status: "available",
+          keyFindings: [{
+            takeaway: "Closed-hour usage stands out from the normal pattern and deserves review.",
+            sectionIds: ["standby-wastage"],
+            evidenceRefs: ["evidence:standby-wastage"],
+          }],
+        }),
+        runId: input.runId,
+        sessionId: input.sessionId,
+      }),
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    expect(artifact.status).toBe("available");
+    harness.close();
+  });
+
+  it("accepts comma-grouped numbers copied from accepted Sections", async () => {
+    const harness = createHarness();
+    completeSection(harness, "standby-wastage", "Closed-hour usage was 3,103.78 kWh.");
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      runSynthesis: async (input) => ({
+        answer: JSON.stringify({
+          status: "available",
+          keyFindings: [{
+            takeaway: "Closed-hour usage was 3,103.78 kWh and deserves review.",
+            sectionIds: ["standby-wastage"],
+            evidenceRefs: ["evidence:standby-wastage"],
+          }],
+        }),
+        runId: input.runId,
+        sessionId: input.sessionId,
+      }),
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    expect(artifact.status).toBe("available");
+    harness.close();
+  });
+
+  it("keeps accepted Sections available when the Synthesis Provider fails", async () => {
+    const harness = createHarness();
+    const section = completeSection(harness, "centre-benchmark", "The benchmark supports a focused review.");
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      runSynthesis: async () => { throw new Error("SYNTHESIS_PROVIDER_UNAVAILABLE"); },
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    expect(artifact).toMatchObject({ status: "failed", error_code: "SYNTHESIS_PROVIDER_UNAVAILABLE" });
+    expect(harness.metadata.energyIq.overviewAiArtifacts.get(sectionIdentity(harness.identity, "centre-benchmark"))).toEqual(section);
+    harness.close();
+  });
+
+  it("uses a new immutable Executive identity when a retried Section becomes accepted", async () => {
+    const harness = createHarness();
+    completeSection(harness, "centre-benchmark");
+    let calls = 0;
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      runSynthesis: async (input) => {
+        calls += 1;
+        return {
+          answer: JSON.stringify({
+            status: "available",
+            keyFindings: [{
+              takeaway: "Accepted Section evidence supports a focused review.",
+              sectionIds: calls === 1
+                ? ["centre-benchmark"]
+                : ["centre-benchmark", "operating-behaviour"],
+              evidenceRefs: calls === 1
+                ? ["evidence:centre-benchmark"]
+                : ["evidence:centre-benchmark", "evidence:operating-behaviour"],
+            }],
+          }),
+          runId: input.runId,
+          sessionId: input.sessionId,
+        };
+      },
+    });
+
+    const first = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    completeSection(harness, "operating-behaviour");
+    const second = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+
+    expect(first.id).not.toBe(second.id);
+    expect(first.status).toBe("available");
+    expect(second.status).toBe("available");
+    expect(calls).toBe(2);
+    expect(JSON.parse(second.identity_json)).toMatchObject({
+      artifactKind: "executive-synthesis",
+      targetId: expect.stringMatching(/^sections:[a-f0-9]{64}$/u),
+    });
+    harness.close();
+  });
+
+  it("persists an empty success without calling the Provider when no Section has content", async () => {
+    const harness = createHarness();
+    completeSection(harness, "planning-outlook", undefined, "empty");
+    let providerCalled = false;
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      runSynthesis: async () => {
+        providerCalled = true;
+        throw new Error("unexpected");
+      },
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    expect(artifact.status).toBe("available");
+    expect(JSON.parse(artifact.result_json!)).toMatchObject({
+      artifactKind: "executive-synthesis",
+      status: "empty",
+      sourceSectionArtifactIds: [],
+      keyFindings: [],
+    });
+    expect(providerCalled).toBe(false);
+    harness.close();
+  });
+
+  it("does not complete an old-identity Executive when the model binding changes during synthesis", async () => {
+    const harness = createHarness();
+    completeSection(harness, "centre-benchmark");
+    let runtimeRevision = 1;
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      assertRuntimeIdentity: (identity) => {
+        if (identity.modelProfileRevision !== runtimeRevision) {
+          throw new Error("OVERVIEW_AI_MODEL_PROFILE_REVISION_MISMATCH");
+        }
+      },
+      runSynthesis: async (input) => {
+        runtimeRevision = 2;
+        return {
+          answer: JSON.stringify({
+            status: "available",
+            keyFindings: [{
+              takeaway: "Accepted Section evidence supports a focused review.",
+              sectionIds: ["centre-benchmark"],
+              evidenceRefs: ["evidence:centre-benchmark"],
+            }],
+          }),
+          runId: input.runId,
+          sessionId: input.sessionId,
+        };
+      },
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    expect(artifact).toMatchObject({
+      status: "failed",
+      error_code: "OVERVIEW_AI_MODEL_PROFILE_REVISION_MISMATCH",
+    });
+    expect(artifact.result_json).toBeUndefined();
+    harness.close();
+  });
+
+  it("synthesizes a partial 3-of-4 Key Findings Artifact from current-v4 Summary and Insight content only", async () => {
+    const harness = createHarness();
+    const benchmark = completeSectionV4(harness, "centre-benchmark");
+    const standby = completeSectionV4(harness, "standby-wastage");
+    const operating = completeSectionV4(harness, "operating-behaviour");
+    failSectionV4(harness, "planning-outlook");
+    completeSection(harness, "planning-outlook", "Legacy planning content must not enter current Key Findings.");
+    let prompt = "";
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      revision: "v4",
+      runSynthesis: async (input) => {
+        expect(input.structuredOutput).toBe(PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4);
+        prompt = input.prompt;
+        return {
+          answer: JSON.stringify({
+            status: "available",
+            summary: {
+              text: "Three current Sections point to a concentrated management review.",
+              evidenceRefs: [
+                "evidence:centre-benchmark:summary",
+                "evidence:standby-wastage:summary",
+                "evidence:operating-behaviour:summary",
+              ],
+            },
+            findings: [{
+              title: "Priorities recur across three Sections",
+              text: "The current evidence connects peer position with both closed- and operating-hour signals.",
+              sectionIds: ["centre-benchmark", "standby-wastage", "operating-behaviour"],
+              evidenceRefs: [
+                "evidence:centre-benchmark:insight",
+                "evidence:standby-wastage:insight",
+                "evidence:operating-behaviour:insight",
+              ],
+            }],
+          }),
+          runId: input.runId,
+          sessionId: input.sessionId,
+        };
+      },
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+    expect(artifact.result_json).toBeDefined();
+    const result = JSON.parse(artifact.result_json!) as Record<string, unknown>;
+    expect(JSON.parse(artifact.identity_json)).toMatchObject({
+      artifactKind: "executive-synthesis",
+      targetId: expect.stringMatching(/^sections:[a-f0-9]{64}$/u),
+    });
+    expect(result).toMatchObject({
+      artifactKind: "executive-synthesis",
+      status: "available",
+      sourceSectionArtifactIds: [benchmark.id, standby.id, operating.id],
+      summary: { text: "Three current Sections point to a concentrated management review." },
+      findings: [{
+        title: "Priorities recur across three Sections",
+        sectionIds: ["centre-benchmark", "standby-wastage", "operating-behaviour"],
+      }],
+    });
+    expect(result).not.toHaveProperty("keyFindings");
+    expect(prompt).toContain('"summary"');
+    expect(prompt).toContain('"insights"');
+    expect(prompt).not.toContain('"keyPoints"');
+    expect(prompt).not.toContain('"sectionId":"planning-outlook"');
+  });
+
+  it("records only current-v4 Sections that actually contribute to the accepted Key Findings output", async () => {
+    const harness = createHarness();
+    const benchmark = completeSectionV4(harness, "centre-benchmark");
+    completeSectionV4(harness, "standby-wastage");
+    const operating = completeSectionV4(harness, "operating-behaviour");
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      revision: "v4",
+      runSynthesis: async (input) => ({
+        answer: JSON.stringify({
+          status: "available",
+          summary: {
+            text: "Benchmark and operating evidence form the clearest cross-Section theme.",
+            evidenceRefs: ["evidence:centre-benchmark:summary", "evidence:operating-behaviour:summary"],
+          },
+          findings: [{
+            title: "One cross-Section pattern stands out",
+            text: "The accepted benchmark and operating insights point in the same direction.",
+            sectionIds: ["centre-benchmark", "operating-behaviour"],
+            evidenceRefs: ["evidence:centre-benchmark:insight", "evidence:operating-behaviour:insight"],
+          }],
+        }),
+        runId: input.runId,
+        sessionId: input.sessionId,
+      }),
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+    expect(JSON.parse(artifact.result_json!)).toMatchObject({
+      sourceSectionArtifactIds: [benchmark.id, operating.id],
+    });
+  });
+
+  it("rejects a Key Finding whose Evidence belongs to a different current-v4 Section", async () => {
+    const harness = createHarness();
+    const benchmark = completeSectionV4(harness, "centre-benchmark");
+    completeSectionV4(harness, "standby-wastage");
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      revision: "v4",
+      runSynthesis: async (input) => ({
+        answer: JSON.stringify({
+          status: "available",
+          summary: {
+            text: "The benchmark provides the summary context.",
+            evidenceRefs: ["evidence:centre-benchmark:summary"],
+          },
+          findings: [{
+            title: "Mismatched lineage",
+            text: "This finding claims to come from the benchmark Section.",
+            sectionIds: ["centre-benchmark"],
+            evidenceRefs: ["evidence:standby-wastage:insight"],
+          }],
+        }),
+        runId: input.runId,
+        sessionId: input.sessionId,
+      }),
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    const storedBenchmark = harness.metadata.energyIq.overviewAiArtifacts
+      .get(sectionIdentityV4(harness.identity, "centre-benchmark"));
+    harness.close();
+    expect(artifact).toMatchObject({
+      status: "failed",
+      error_code: "PRESCHOOL_EXECUTIVE_SYNTHESIS_EVIDENCE_UNSUPPORTED",
+    });
+    expect(storedBenchmark).toEqual(benchmark);
+  });
+
+  it("persists an explicit current Key Findings empty result without Provider when no current-v4 Section contributes", async () => {
+    const harness = createHarness();
+    completeSectionV4(harness, "centre-benchmark", "empty");
+    failSectionV4(harness, "standby-wastage");
+    let providerCalls = 0;
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      revision: "v4",
+      runSynthesis: async () => {
+        providerCalls += 1;
+        throw new Error("ZERO_CONTRIBUTION_MUST_NOT_CALL_PROVIDER");
+      },
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+    const result = JSON.parse(artifact.result_json!) as Record<string, unknown>;
+    expect(artifact.status).toBe("available");
+    expect(result).toMatchObject({
+      artifactKind: "executive-synthesis",
+      status: "empty",
+      sourceSectionArtifactIds: [],
+      findings: [],
+    });
+    expect(result).not.toHaveProperty("summary");
+    expect(result).not.toHaveProperty("keyFindings");
+    expect(providerCalls).toBe(0);
+  });
+});
+
+const completeSection = (
+  harness: ReturnType<typeof createHarness>,
+  sectionId: PreschoolSectionId,
+  summary = "The verified Section evidence supports a focused review.",
+  status: "available" | "empty" = "available",
+) => {
+  const identity = sectionIdentity(harness.identity, sectionId);
+  harness.metadata.energyIq.overviewAiArtifacts.queue({ identity, triggeredBy: harness.user.id });
+  const workerId = `worker:${sectionId}`;
+  harness.metadata.energyIq.overviewAiArtifacts.claim({ identity, workerId, leaseMs: 60_000 });
+  const runId = `run:${sectionId}`;
+  return harness.metadata.energyIq.overviewAiArtifacts.complete({
+    identity,
+    workerId,
+    sessionId: `session:${sectionId}`,
+    runId,
+    resultJson: JSON.stringify({
+      artifactKind: "section-interpretation",
+      status,
+      providerProfileId: identity.modelProfileId,
+      runId,
+      contract: {
+        id: "preschool-section-interpretation",
+        revision: "preschool-section-interpretation-v3",
+      },
+      binding: preschoolOverviewAiBindingFromIdentity(identity),
+      sectionId,
+      ...(status === "available" ? {
+        summary,
+        keyPoints: [
+          { kind: "finding", text: "The current pattern deserves attention.", evidenceRefs: [`evidence:${sectionId}`] },
+          { kind: "next-check", text: "Confirm the context before assigning a cause.", evidenceRefs: [`evidence:${sectionId}`] },
+        ],
+      } : { keyPoints: [] }),
+    }),
+  });
+};
+
+const completeSectionV4 = (
+  harness: ReturnType<typeof createHarness>,
+  sectionId: PreschoolSectionId,
+  status: "available" | "empty" = "available",
+) => {
+  const identity = sectionIdentityV4(harness.identity, sectionId);
+  harness.metadata.energyIq.overviewAiArtifacts.queue({ identity, triggeredBy: harness.user.id });
+  const workerId = `worker:v4:${sectionId}`;
+  harness.metadata.energyIq.overviewAiArtifacts.claim({ identity, workerId, leaseMs: 60_000 });
+  const runId = `run:v4:${sectionId}`;
+  return harness.metadata.energyIq.overviewAiArtifacts.complete({
+    identity,
+    workerId,
+    sessionId: `session:v4:${sectionId}`,
+    runId,
+    resultJson: JSON.stringify({
+      artifactKind: "section-interpretation",
+      status,
+      providerProfileId: identity.modelProfileId,
+      runId,
+      contract: {
+        id: "preschool-section-interpretation",
+        revision: "preschool-section-interpretation-v4",
+      },
+      binding: preschoolOverviewAiBindingFromIdentity(identity),
+      sectionId,
+      packRevision: "v2",
+      capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
+      ...(status === "available" ? {
+        summary: {
+          text: `Current ${sectionId} summary.`,
+          evidenceRefs: [`evidence:${sectionId}:summary`],
+        },
+        insights: [{
+          id: `insight:${sectionId}:1`,
+          title: `Current ${sectionId} insight`,
+          epistemicStatus: "inferred",
+          text: `Current ${sectionId} evidence supports this relationship.`,
+          evidenceRefs: [`evidence:${sectionId}:insight`],
+        }],
+        publication: {
+          policyId: "preschool-section-publication",
+          policyRevision: "v1",
+          discoveredCount: 1,
+          acceptedCount: 1,
+          rejectedCount: 0,
+          publishedCount: 1,
+          suppressedCandidateIds: [],
+        },
+      } : {
+        insights: [],
+        publication: {
+          policyId: "preschool-section-publication",
+          policyRevision: "v1",
+          discoveredCount: 0,
+          acceptedCount: 0,
+          rejectedCount: 0,
+          publishedCount: 0,
+          suppressedCandidateIds: [],
+        },
+      }),
+    }),
+  });
+};
+
+const failSectionV4 = (harness: ReturnType<typeof createHarness>, sectionId: PreschoolSectionId) => {
+  const identity = sectionIdentityV4(harness.identity, sectionId);
+  harness.metadata.energyIq.overviewAiArtifacts.queue({ identity, triggeredBy: harness.user.id });
+  const workerId = `worker:v4:${sectionId}`;
+  harness.metadata.energyIq.overviewAiArtifacts.claim({ identity, workerId, leaseMs: 60_000 });
+  return harness.metadata.energyIq.overviewAiArtifacts.fail({
+    identity,
+    workerId,
+    errorCode: "SECTION_V4_FAILED",
+  });
+};
+
+const failSection = (harness: ReturnType<typeof createHarness>, sectionId: PreschoolSectionId) => {
+  const identity = sectionIdentity(harness.identity, sectionId);
+  harness.metadata.energyIq.overviewAiArtifacts.queue({ identity, triggeredBy: harness.user.id });
+  const workerId = `worker:${sectionId}`;
+  harness.metadata.energyIq.overviewAiArtifacts.claim({ identity, workerId, leaseMs: 60_000 });
+  return harness.metadata.energyIq.overviewAiArtifacts.fail({
+    identity,
+    workerId,
+    errorCode: "SECTION_FAILED",
+  });
+};
+
+const sectionIdentity = (
+  baseIdentity: ReturnType<typeof createOverviewAiArtifactIdentity>,
+  sectionId: PreschoolSectionId,
+): EnergyIqOverviewAiArtifactIdentity => createPreschoolOverviewAiValueArtifactIdentity({
+  baseIdentity,
+  artifactKind: "section-interpretation",
+  targetId: sectionId,
+});
+
+const sectionIdentityV4 = (
+  baseIdentity: ReturnType<typeof createOverviewAiArtifactIdentity>,
+  sectionId: PreschoolSectionId,
+): EnergyIqOverviewAiArtifactIdentity => createPreschoolOverviewAiSectionArtifactIdentityV4({
+  baseIdentity,
+  targetId: sectionId,
+});
+
+const createHarness = () => {
+  const root = mkdtempSync(join(tmpdir(), "preschool-executive-synthesis-"));
+  roots.push(root);
+  const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+  metadata.users.upsertDevUser({ id: "dev-user", email: "dev@example.test", display_name: "Dev", dev_token: "dev" });
+  metadata.workspaces.upsert({ id: "preschool-workspace", owner_user_id: "dev-user", name: "Preschool", kind: "customer" });
+  metadata.energyIq.upsertProject({
+    id: "preschool-demo",
+    workspace_id: "preschool-workspace",
+    name: "Preschool",
+    status: "published",
+    root_scope_id: "preschool-project",
+  });
+  return {
+    metadata,
+    identity: createOverviewAiArtifactIdentity({
+      workspaceId: "preschool-workspace",
+      projectId: "preschool-demo",
+      scopeId: "preschool-project",
+      dataSnapshotId: "snapshot-current",
+      projectReleaseId: "release-current",
+      analysisPeriodFrom: "2026-05-01T00:00:00.000Z",
+      analysisPeriodTo: "2026-06-01T00:00:00.000Z",
+      rendererKey: "preschool-overview",
+      rendererVersion: "1",
+      modelProfileId: "workspace-default-model-profile",
+      modelProfileRevision: 1,
+    }),
+    user: metadata.users.getById({ user_id: "dev-user" }),
+    close: () => metadata.close(),
+  };
+};

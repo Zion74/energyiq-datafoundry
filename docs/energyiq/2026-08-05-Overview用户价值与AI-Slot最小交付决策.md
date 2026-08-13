@@ -1,9 +1,9 @@
 ---
 title: "2026-08-05 决策：Overview 用户价值与 AI Slot 最小交付"
-summary: "以同一 Published Snapshot 和 Evidence Catalog 连接确定性 Facts、项目专属 Structured Signals、一次自主 AI Run、Section Interpretation 与预生成共享 Overview AI Artifact。"
+summary: "以同一 Published Snapshot 和 Evidence Catalog 连接确定性 Facts、At a glance、Section Interpretation、AI Executive Summary、Additional AI Insights 与预生成共享 Artifact，并让 Overview 首屏和 AI 恢复解耦。"
 doc_type: decision
 tags: [Overview, Ngee Ann, AI Slot, DataFoundry, Evidence]
-updated_at: "2026-08-08"
+updated_at: "2026-08-13"
 related:
   - "决策-Overview改造与AI-Analysis打通最终方案.md"
   - "决策-项目Renderer-Recipe与时间上下文.md"
@@ -453,3 +453,278 @@ Scheduler、Cadence DSL、跨项目 Insight 平台或第二套 Agent Runtime。
 
 明确停止：不建立通用 Signal DSL、通用 Scheduler、所有 Scope 预跑、按用户重复分析、跨项目缓存、第二套 Evidence Catalog、
 第二套 Runtime、模型生成可执行页面代码，或为了预生成而放松 Snapshot/授权/Evidence 校验。
+
+## 15. 2026-08-11 Preschool Section Interpreter 窄范围校准
+
+GitHub `#43` 对第 14 节作以下 Preschool 专属收窄；本节不改变 Autonomous Investigator、Interactive AI Analyst 或未来
+Overview Studio 的方向：
+
+1. **Section Interpreter** 只读取当前 Published Snapshot 已验证的 Section Pack，为 Preschool Sections 2–5 输出一句普通
+   英文结论和 2～4 个 Key Points。它不加载完整 Schema、SQL 工具、Knowledge/Skill，也不启动自主调查循环或独立 Editor。
+2. **Executive Synthesis** 只综合同一 Workspace、Project、Scope、Snapshot、Release、Period 和 Model identity 下已经通过的
+   Section Interpretation，输出 0～4 条顶部 Key Findings；不得重读原始 Facts、引入新数字或新事实。
+3. **Autonomous Investigator** 保留现有 Investigator → Editor、typed Evidence Validator 和声明式 Presentation Blocks，后续只
+   服务 `Additional EnergyIQ Insights`；其失败不得影响 Section Interpreter 或确定性 Overview。
+4. 三类结果复用同一 Overview AI Artifact Store，并以 `artifactKind` 和可选 `targetId` 区分价值单元。旧 Autonomous identity
+   保持可读，不追写、不迁移；`empty` 是成功 payload，不扩张数据库状态机。
+5. Provider 可用一次短批调用生成多个 Section，但 Parser、Evidence Validator、持久化、失败状态和重试必须逐 Section；一个
+   malformed 或 unsupported Section 不得抹掉合格 sibling。Provider 整体传输失败可以诚实地共同失败。
+6. 客户/Web 继续使用 read / ensure / retry 小接口。Refresh 和 Saved Analysis 只恢复精确 identity 的 Artifact，不启动新模型。
+
+本校准不授权通用 Artifact 平台、通用多 Agent 编排、Scheduler/DSL、Ngee Ann AI 或 Overview Studio。
+
+## 16. 2026-08-12 Preschool Section Run 隔离与价值合同
+
+GitHub `#44` 进一步校准第 15 节的 Provider 批处理边界。四个 Section 已经拥有独立 Artifact，但一次共享 Provider envelope
+仍会让顶层 JSON、传输、上下文和 Run identity 故障连坐全部 claimed Sections。因此 Preschool Sections 2–5 改为四个独立
+Provider Run / Session；它们仍通过同一 Workspace、Project、Scope、Snapshot、Release、Period 和 Model identity 关联，
+不新增父级数据库状态机、第二套 Store 或通用 Orchestrator。
+
+1. 每个 Section Run 获得完整、自包含的单 Section Pack 投影，包括 audience、decision question、page coverage、data quality、
+   limitations、missing evidence、allowed next checks、Evidence 和精确 identity pin；不得依赖其他 Session 的隐式消息或 memory。
+2. 每个 Section 在获得进程内固定并发槽后才 claim Artifact 并启动 Provider，避免等待并发槽时 lease 先过期。并发 ensure 继续
+   依赖精确 Artifact claim 去重；一个 transport、Parser、Schema、Evidence 或 identity drift 失败只影响该 Section。
+3. 第一版并发上限固定为 `2`，用于控制 Provider 限流和突发请求；这会增加 Provider 请求次数和共享指令 Token，必须在真实
+   验收中分别记录每 Section latency / input / output / cache tokens，不把隔离收益描述成免费。
+4. `available` 改为一句结论加 1～4 个真正有用的 Key Points；模型自行选择 `priority`、`finding`、`meaning`、`next-check` 的数量和顺序，
+   不再强迫每类各一条。没有超出页面复述的增量价值时返回 `empty` 和 0 条；不得机械凑数。
+5. Runtime 硬门继续只处理 identity、结构、Evidence、数字、日期、单位、Centre 和关系；“是否有管理价值”由 Prompt 目标、
+   Harness 和人工产品验收判断，自动测试不得冒充该判断。
+6. Executive Synthesis 只在所有 Section 到达 `available/empty/failed` 终态后启动，避免并发 ensure 基于仍在运行的部分来源
+   生成临时 Executive。其 identity 继续绑定 accepted source Artifact IDs；失败 Section 后续成功时形成新的来源集合和 Artifact。
+7. `priority` 是明确的管理价值类型，不是未经验证的严重性标签；它仍必须绑定当前 Section Pack 的 Evidence。真实 Provider
+   验收曾因模型合理返回 `priority`、而旧 Schema 未收录该类型导致单 Section 失败，因此合同、Schema、Parser、Store 与 Web
+   DTO 必须一致接受该类型，并通过新 identity 重新物化，不能用 Prompt 强迫模型把优先事项改写成别的类型。
+8. 同一 Section 的受控 Retry 保持新 Run / Session 和完整 Pack 自包含，但额外携带上一次客户安全的失败类别，帮助模型减少
+   事实范围、数字和关系越界；不得携带隐藏聊天历史、原始错误堆栈或其他 Section 内容。重试上限仍由 Artifact Store 控制，
+   不能无限调用 Provider 直到偶然通过。
+9. 日期事实校验将 Evidence 的 ISO `YYYY-MM-DD` 与等价的客户可读 `D Month YYYY` 规范化到同一天；自然语言日期中的年份
+   不再被数字校验器误判为新数值，但不在 Evidence 中的日期、无效日历日期和非整点时刻仍然拒绝。
+
+本校准不改变 Section Interpreter 无 SQL/工具的 Summary 职责。需要自主发现新事实时，仍由 `Additional EnergyIQ Insights`
+Investigator 使用只读工具；模板编排和 Coding Agent 分别属于后续受控阶段。
+
+## 17. 2026-08-13 Overview 渐进加载、AI 信息分层与安全 Markdown
+
+### 17.1 背景与本次决定
+
+当前本地 Preschool Overview 的一次真实加载中，页面外壳约 0.6 秒出现，确定性 Overview 约 11.5 秒出现，AI 状态约
+14.2 秒全部恢复。普通页面打开没有必要重新调用模型；当前额外等待主要来自确定性 Project Analysis 首次解析，以及 AI
+Artifact 读取前为重建 identity 再次解析同一 Snapshot。与此同时，顶部确定性 highlights 与 AI synthesis 都以“总结”形式
+出现，职责重叠；AI 文案又以整段统一字重渲染，无法让管理者快速区分重点、解释、行动和限制。
+
+本次选择以下产品与技术方向：
+
+1. **确定性 Overview 与 AI 恢复必须解耦。** 页面先显示当前 Published Snapshot 的确定性结果；AI 作为异步、局部、可降级的
+   已存 Artifact 恢复，不得阻塞 Overview，也不得把普通页面打开变成模型启动条件。
+2. **AI Executive Summary 是主总结。** 它负责跨 Sections 2–5 去重、排序和表达管理优先级、业务意义与下一步，但不引入新的
+   Facts。只有独立 Investigator 产生的增量发现才属于 `Additional AI Insights`。
+3. **At a glance 是确定性备用和导航索引。** 它不是第二份长篇 Summary；AI 未完成、部分失败或返回 `empty` 时承担可靠 fallback，
+   AI 完整可用时保持紧凑、次级和可点击。
+4. **Additional AI Insights 固定在 Section 5 之后。** 后续可承载 Autonomous Investigator、EnergyIQ 内置 Skill，以及能源专家编写
+   并版本化的行业 SOP；它与 Section Interpreter、Executive Synthesis 保持独立 Artifact 和失败状态。
+5. **AI 客户文案允许安全 Markdown 子集。** 模型返回 Markdown 文本，Runtime 在剥离格式后的纯文本上继续执行事实校验，Web
+   将已接受的 Markdown 解析为 React elements；不接受模型 HTML，也不执行 `dangerouslySetInnerHTML`。
+
+### 17.2 真实选项与取舍
+
+| 选项 | 做法 | 优点 | 否决原因或代价 |
+| --- | --- | --- | --- |
+| A. 只保留确定性 Highlights | 删除顶部 AI Summary | 最稳定、最快 | 失去跨 Section 优先级与管理解释，不能作为主路线 |
+| B. 只保留 AI Summary | 删除确定性 fallback | 页面更简洁 | AI partial/empty/failed 时首屏失去可靠摘要，也削弱导航 |
+| C. AI 主总结 + 紧凑 At a glance | AI 负责综合，确定性层负责 fallback 与定位 | 同时保留价值与韧性，职责可解释 | 必须严格控制重复、覆盖状态和视觉主次 |
+| D. 模型返回任意 HTML | 让模型直接控制正文和布局 | 表达自由 | XSS、样式漂移、无法稳定验收，明确拒绝 |
+| E. 安全 Markdown 子集 | 模型只控制正文内轻量强调 | 表达自然、实现成熟、仍可校验 | 需要 parser/renderer 合同和格式降级策略 |
+
+**决定选择 C + E。** At a glance 不是与 AI Executive Summary 平级竞争的第二套 Key Findings；Markdown 也不拥有页面
+信息架构，只负责已结构化字段内部的有限表达。
+
+### 17.3 页面信息架构与职责
+
+| 区域 | 回答的问题 | Owner | 允许增加什么 | 不允许做什么 |
+| --- | --- | --- | --- | --- |
+| At a glance | 每一节最关键的数据结果是什么？ | Renderer/ViewModel + 当前 Snapshot | 主要值、对象、短补充、Section 跳转 | 推测原因、拼长文、替代 AI 解读 |
+| Section Interpretation | 这一节意味着什么、先看什么？ | 单 Section Interpreter | Evidence-backed priority、meaning、next check、limitation | 查 SQL、跨 Section 综合、新事实 |
+| AI Executive Summary | 跨 Sections 2–5，管理者先处理什么？ | Executive Synthesis | 去重、排序、跨节管理含义和行动 | 重读 Facts、创造数字、冒充完整来源 |
+| Additional AI Insights | 页面原有分析之外还发现了什么？ | Autonomous Investigator / approved Skill / SOP | 新角度、调查结果、声明式 Presentation | 修改官方 KPI、混入 Executive 后不标来源 |
+
+展示顺序采用 AI 主总结、At a glance fallback 的逻辑，而不是让两个 Summary 同时争夺注意力：
+
+退役 `AI Management Brief` 和 `Verified Section Highlights` 两个旧展示名，分别统一为 `AI Executive Summary` 和
+`At a glance`；`Verified` 是内部验收属性，不作为面向客户的标题。
+
+1. Overall metrics 后预留 `AI Executive Summary` 稳定区域；
+2. AI 已保存且完整时，显示 0～4 条跨 Section priorities，At a glance 收为紧凑次级导航；
+3. AI 仍在后台生成、部分失败或 `empty` 时，At a glance 自动承担主要 fallback；
+4. Partial Executive 必须显示 `Based on 2 of 4 sections` 等覆盖信息，不得伪装成完整页面总结；
+5. 若 Executive 没有比 At a glance 增加跨节优先级、意义或行动，应返回 `empty`，不机械复述；
+6. `Additional AI Insights` 位于 Section 5 后，默认只展示少量高价值结果并保留来源、Evidence、Skill/SOP revision。
+
+At a glance 的可读性由受控 Presentation Grammar 保证，而不是由代码拼完整自然语言：每个 Section 只保留一个主要结果、
+一个对象或范围和至多一行补充。所有值必须直接投影自同一 Renderer/ViewModel；不得在前端重新计算。Section 5 必须明确
+区分 `Original plan`、`Actual to date` 和 `Current outlook`，避免 fallback 与本节当前结果使用不同口径。
+
+### 17.4 渐进加载和只读 Artifact 恢复
+
+```mermaid
+flowchart TD
+  A["Authorized user opens Overview"] --> B["Read published deterministic Overview"]
+  B --> C["Render metrics, charts and At a glance"]
+  B --> D["Return exact AI read reference"]
+  D --> E["Read persisted AI Artifacts asynchronously"]
+  E --> F{"Artifact state"}
+  F -->|available| G["Render accepted Section and Executive results"]
+  F -->|queued or running| H["Show Preparing AI summary"]
+  F -->|stored read pending| I["Show Loading saved AI summary"]
+  F -->|partial or failed| J["Keep Overview and At a glance; show local status"]
+```
+
+定义一个深的 `Overview AI Read Module`，让调用方只学习一个读取 Interface；Membership、Project 授权、Snapshot/Release/Period/
+Profile/contract 匹配、Section/Executive/Autonomous 组合和历史兼容都隐藏在其 Implementation 中：
+
+```ts
+type OverviewAiReadRef = {
+  projectId: string;
+  scopeId: string;
+  dataSnapshotId: string;
+  projectReleaseId: string;
+  analysisPeriod: { from: string; to: string };
+};
+
+type OverviewAiReadResult = {
+  state: "loading" | "preparing" | "available" | "partial" | "empty" | "failed";
+  acceptedSectionCount: number;
+  expectedSectionCount: number;
+  sections: Record<string, SectionArtifactState>;
+  executive: ExecutiveArtifactState;
+  additional: AutonomousArtifactState;
+};
+
+readOverviewAi(input: { user: AuthorizedUser; ref: OverviewAiReadRef }): Promise<OverviewAiReadResult>;
+```
+
+`OverviewAiReadRef` 是定位信息，不是授权凭证。服务端仍重新检查 Membership、Project 和 Artifact ownership，但不得为了读取
+已存 Artifact 再运行完整 `resolveProjectAnalysis`。伪造、过期或混合 Snapshot 的 ref 必须 fail closed；普通 read 也不得隐式
+调用 `ensure`。只有新 Published Snapshot 的后台 materialization 或明确的受控 Retry 可以调用 Provider。
+
+仅把 AI 与 Overview 解耦只能消除 AI 侧重复解析，不能把确定性 Overview 的约 11.5 秒自动降到目标范围。因此还需要独立修复
+`Published Overview Read Model`：让 Project Analysis cache 覆盖 Planning Lifecycle，或在 Snapshot 发布时物化可直接读取的
+Overview result。不能把 AI skeleton 当成性能优化完成的证据。
+
+状态文案必须反映真实行为：
+
+- `Loading saved AI summary…`：Artifact 已存在，客户端正在读取；
+- `Preparing AI summary…`：新 Snapshot 的后台 materialization 尚未到终态；
+- `AI summary based on 2 of 4 sections`：部分 Section 已接受；
+- `AI summary unavailable`：终态失败且没有可展示结果。
+
+正常页面打开不得显示 `Thinking`，除非确实有一个 Provider Run 正在进行。
+
+### 17.5 安全 Markdown Renderer
+
+首选将 [`react-markdown`](https://github.com/remarkjs/react-markdown) 作为 Web 的**显式直接依赖**，而不是依赖 CopilotKit 当前偶然带入的传递版本。它输出 React elements，
+最终由 React 生成浏览器 DOM；模型不返回 HTML。第一版不需要 GFM 表格、任务列表或 strikethrough，因此不默认引入
+`remark-gfm`。
+
+Section 与 Executive 的 JSON 结构继续控制 `kind`、`label`、列表顺序和页面标题；Markdown 只进入正文型字段，例如：
+
+```ts
+type AiMarkdownCopy = string;
+
+type SectionKeyPoint = {
+  kind: "priority" | "finding" | "meaning" | "next-check";
+  label?: string;
+  textMarkdown: AiMarkdownCopy;
+  evidenceRefs: string[];
+};
+```
+
+第一版 allowlist 只接受：
+
+- 普通 paragraph 与换行；
+- `**strong**`；
+- `*emphasis*`。
+
+列表和标题继续由结构化合同渲染。链接、图片、原始 HTML、iframe、代码块、表格和任意 CSS 均禁用；不启用 `rehype-raw`，
+不调用 `dangerouslySetInnerHTML`。若未来 Additional AI Insights 确实需要引用或 blockquote，必须新增独立 renderer profile 和
+contract revision，不静默扩大当前 allowlist。
+
+Runtime 流程为：
+
+```text
+Markdown source
+  -> parse and enforce allowlist
+  -> extract normalized plain text
+  -> validate Evidence / number / date / unit / entity / relation
+  -> persist accepted Markdown with parser/contract revision
+  -> render through the matching safe profile
+```
+
+格式不是事实来源。Markdown 语法损坏或使用了不支持节点时，应安全退回纯文本或局部移除格式；不得仅因加粗符号错误让一个
+原本事实正确的 Section unavailable。必须限制每个字段长度和 AST 节点数，避免异常输入造成解析开销；对整段全部加粗、连续
+多级强调等低可读格式做软降级而不是事实拒绝。
+
+### 17.6 Additional AI Insights、Skills 与行业 SOP
+
+`Additional AI Insights` 是未来体现能源专业方法的扩展位置，但不能把所有 Skill 和 SOP 塞回 Section Interpreter。首版 Interface
+只要求每条结果公开以下 provenance：
+
+```ts
+type AdditionalInsightSource = {
+  sourceType: "autonomous" | "energyiq-skill" | "industry-sop";
+  sourceId: string;
+  sourceRevision: string;
+  authorRole?: "energy-expert" | "system";
+  snapshotId: string;
+  evidenceRefs: string[];
+};
+```
+
+专家 SOP 应作为版本化、可审阅、可停用的 Project/Workspace Knowledge 或 Skill 输入；页面明确标识 `SOP-based review`，避免
+用户把专业检查方法误解为传感器已证明的事实。SOP 可以决定“检查哪些问题、何时停止、还缺什么 Evidence”，但不能覆盖
+Snapshot 数字或绕过 Runtime validator。第一版 Executive 不消费 Additional Insights，避免 Autonomous 结果较慢或失败时让顶部
+Summary 反复变化；未来若需要纳入，必须让 Executive identity 显式绑定被选中的 Additional Artifact IDs。
+
+### 17.7 潜在问题与缓解
+
+| 潜在问题 | 影响 | 方案中的缓解 |
+| --- | --- | --- |
+| 只解耦 AI，确定性 Overview 仍慢 | 用户仍等待约 10 秒 | 单独优化/物化 Published Overview Read Model；设置首屏性能门 |
+| read ref 被伪造或跨 Snapshot 复用 | 数据泄露或旧 AI 配新数字 | ref 不承载授权；服务端重验 Membership、Project、Artifact identity |
+| 页面打开仍调用 `ensure` | 每个用户重复调用 Provider | normal read 与 materialize/retry 分离；浏览器网络验收证明零模型调用 |
+| 新 Snapshot 发布与旧请求竞态 | 页面闪回旧 Summary | Overview 和 AI ref 同响应绑定；旧响应不得覆盖新 snapshot state |
+| AI Summary 与 At a glance 重复 | 首屏冗余、用户不知道看什么 | AI 必须增加跨节 priority/meaning/action，否则 `empty`；At a glance 保持紧凑 |
+| Partial Summary 冒充完整 | 管理者遗漏 Section 4/5 | 显式 coverage；Executive identity 绑定 accepted source Artifact IDs |
+| Markdown 引入 XSS/样式失控 | 安全与视觉风险 | `react-markdown`、allowlist、`skipHtml`、无 raw HTML/links/images/unsafe plugins |
+| Runtime 与 Web 解析 Markdown 不一致 | 校验文本和显示文本漂移 | pin parser/renderer contract revision；共享 Golden fixtures；先提取纯文本再做事实校验 |
+| 模型过度加粗 | 仍然没有视觉重点 | 默认正文正常字重；整段 strong 软降级；限制格式密度，不限制内容价值 |
+| Markdown 错误导致 Artifact failed | 可用率倒退 | 格式错误退回纯文本，事实错误才 fail closed |
+| At a glance 与 Section 5 使用不同计划口径 | fallback 提供过期结论 | 只投影同一 ViewModel；显式区分 Original/Actual/Current Outlook |
+| Additional Insights 扩张成第二个平台 | T17A 失焦、治理重复 | 复用现有 Artifact/Runtime/Evidence；独立 artifactKind；本切片只固定 placement 与 source contract |
+| 专家 SOP 被当成已确认结论 | 专业方法与事实混淆 | 显示 SOP revision/source；假设、检查项和事实分层；Runtime 仍验证客户可见 Claim |
+| SOP/知识文本产生提示注入 | 模型把外部文本当成工具或越权指令 | 来源信任分级；SOP 只进入声明式检查合同；不得从 Markdown 执行工具、URL 或代码 |
+| Saved Analysis 被新格式重写 | 历史不可复现 | 旧 Artifact 按原 renderer revision 只读；不追写、不迁移、不自动重跑 |
+
+### 17.8 交付切片和验收
+
+1. **读取解耦红测：** normal Overview open 先返回确定性 Read Model；AI read 不调用 `resolveProjectAnalysis`、`ensure` 或 Provider；
+   stale/forged ref fail closed，Membership 每次重验。
+2. **首屏性能：** 补齐 Planning Lifecycle/cache 或发布时物化，分别记录 cold/warm Overview 与 stored AI restore；不把 AI 延迟混入
+   Overview 指标。
+3. **信息架构：** `At a glance` 作为 compact fallback；`AI Executive Summary` 显示 accepted/expected coverage；Section 4/5
+   failure 不隐藏 Sections 2/3 或确定性页面。
+4. **Markdown 合同：** 先做 XSS、raw HTML、link/image、格式降级、plain-text fact validation 和 Saved restore 红测，再添加显式
+   Markdown 依赖、Renderer 与 contract/identity revision。
+5. **T17A 正确性：** 修复 Section 4/5 的真实事实校验问题，完成真实 Provider 4/4、完整 Executive、Refresh 零新 Run 与人工阅读
+   验收；不能用格式改造掩盖当前 2/4。
+6. **Additional placement：** 只固定 Section 5 后的独立区域、empty/partial/failed 状态和 provenance Interface；新的行业 Skill/SOP
+   另开可独立验收 Ticket。
+7. **最终门：** focused/full tests、API/Web build、1440/1920/tablet、无横向溢出、无 console error；Provider、浏览器、性能和人工
+   产品价值分别报告。
+
+建议性能验收目标为：已发布 Overview 的 warm local first meaningful content 不高于 2 秒；stored AI Artifact 在 Overview 后 1 秒内
+恢复；普通 Refresh 的 Provider Run 数不增加。若实际部署环境不同，使用同一测量方法重新设定 P95，不用本地单次数字冒充服务器
+SLA。
+
+本节不授权 Template Agent、Coding Agent、通用 Scheduler、任意 Markdown/HTML 页面生成或全量 Skill 平台。完成 T17A 4/4 和
+本节渐进读取/表达验收后，才进入后续 Template Change Proposal 阶段。

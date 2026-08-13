@@ -33,12 +33,12 @@ type PlacementTarget =
   | "cross-section";
 type EpistemicLevel = "verified" | "hypothesis" | "exploration-idea";
 type Relationship = "supports" | "challenges" | "independent";
-type Stage = "investigator" | "editor";
+export type PreschoolOverviewAiStage = "investigator" | "editor" | "section-interpreter" | "executive-synthesis" | "template-proposal";
 
 const OVERVIEW_AI_CANDIDATE_SUBMISSION_TOOL_NAME = "overview_ai_candidates_submit" as const;
 
 export type PreschoolOverviewAiStageInput = {
-  stage: Stage;
+  stage: "investigator" | "editor";
   prompt: string;
   runId: string;
   sessionId: string;

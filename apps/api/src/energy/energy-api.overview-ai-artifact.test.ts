@@ -11,10 +11,152 @@ import { describe, expect, it, vi } from "vitest";
 import type { ConfigApiContext } from "../routes/types.js";
 import { ensureEnergyIqBootstrap, PRESCHOOL_WORKSPACE_ID } from "./energy-bootstrap.js";
 import { handleEnergyApiRequest } from "./energy-api.js";
-import { createOverviewAiArtifactIdentity } from "./overview-ai-artifact.js";
+import {
+  createOverviewAiArtifactIdentity,
+  resolvePinnedOverviewAiArtifactReadIdentity,
+} from "./overview-ai-artifact.js";
+
+const { materializeEnergyProjectManifestMock } = vi.hoisted(() => ({
+  materializeEnergyProjectManifestMock: vi.fn(),
+}));
+
+vi.mock("./energy-project-materialization.js", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./energy-project-materialization.js")>(),
+  materializeEnergyProjectManifest: materializeEnergyProjectManifestMock,
+}));
 
 describe("Overview AI Artifact API", () => {
-  it("keeps GET read-only and no-store while POST ensure and retry execute server-owned work", async () => {
+  it("accepts the current published Snapshot and Release while delivery configuration has moved on", async () => {
+    const harness = await createHarness();
+    try {
+      const project = harness.metadata.energyIq.upsertProject({
+        id: harness.project.id,
+        workspace_id: harness.project.workspace_id,
+        name: harness.project.name,
+        status: harness.project.status,
+        timezone: harness.project.timezone,
+        hierarchy_revision_id: harness.project.hierarchy_revision_id,
+        meter_formula_revision_id: harness.project.meter_formula_revision_id,
+        data_snapshot_id: harness.project.data_snapshot_id,
+        metric_version: harness.project.metric_version,
+        business_calendar_version: harness.project.business_calendar_version,
+        tariff_schedule_version: harness.project.tariff_schedule_version,
+        delivery_stage: "configured",
+        root_scope_id: harness.project.root_scope_id,
+        has_unpublished_changes: true,
+      });
+      expect(project.delivery_stage).toBe("configured");
+      const identity = resolvePinnedOverviewAiArtifactReadIdentity({
+        metadataStore: harness.metadata,
+        projectId: project.id,
+        scopeId: project.root_scope_id,
+        user: harness.metadata.users.getById({ user_id: "dev-user" }),
+        pin: {
+          from: "2026-05-01",
+          to: "2026-05-31",
+          dataSnapshotId: project.data_snapshot_id,
+          projectReleaseId: harness.identity.projectReleaseId,
+        },
+      });
+
+      expect(identity).toMatchObject({
+        dataSnapshotId: project.data_snapshot_id,
+        projectReleaseId: harness.identity.projectReleaseId,
+        analysisPeriodFrom: "2026-04-30T16:00:00.000Z",
+        analysisPeriodTo: "2026-05-31T16:00:00.000Z",
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("returns the aggregate read model read-only and forwards only a validated Section retry target", async () => {
+    const harness = await createHarness();
+    try {
+      const aggregate = aggregateResultFor(harness.identity);
+      const read = vi.fn().mockResolvedValue(aggregate);
+      const execute = vi.fn().mockResolvedValue(aggregate);
+      const resolveCurrentIdentity = vi.fn().mockResolvedValue(harness.identity);
+      const context = {
+        ...harness.context,
+        overviewAiWorkflow: { execute, read, resolveCurrentIdentity },
+      } as unknown as Required<ConfigApiContext>;
+      const path = ["projects", harness.project.id, "overview-ai-artifact"];
+
+      const restored = await handleEnergyApiRequest(
+        getRequest(`/api/v1/energy/projects/${harness.project.id}/overview-ai-artifact?scopeId=${harness.project.root_scope_id}`),
+        path,
+        context,
+      );
+      expect(restored).toMatchObject({
+        status: 200,
+        headers: { "Cache-Control": "private, no-store" },
+        body: {
+          success: true,
+          data: {
+            status: "available",
+            result: {
+              artifactKind: "preschool-overview-ai-read-model",
+              sections: {
+                "centre-benchmark": { status: "available" },
+                "standby-wastage": { status: "unavailable" },
+              },
+              executive: { status: "unavailable" },
+            },
+          },
+        },
+      });
+      expect(execute).not.toHaveBeenCalled();
+
+      await handleEnergyApiRequest(jsonPost({ targetId: "standby-wastage" }), [...path, "retry"], context);
+      expect(execute).toHaveBeenCalledWith(expect.objectContaining({
+        retry: true,
+        retryTarget: "standby-wastage",
+      }));
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("returns missing instead of falling back to a legacy autonomous artifact when aggregate read is supported", async () => {
+    const harness = await createHarness();
+    try {
+      const store = harness.metadata.energyIq.overviewAiArtifacts;
+      store.queue({ identity: harness.identity, triggeredBy: "dev-user" });
+      store.claim({ identity: harness.identity, workerId: "legacy-worker", leaseMs: 60_000 });
+      store.complete({
+        identity: harness.identity,
+        workerId: "legacy-worker",
+        sessionId: "legacy-session",
+        runId: "legacy-run",
+        resultJson: JSON.stringify(resultFor(harness.identity, "legacy-run")),
+      });
+      const read = vi.fn().mockResolvedValue(null);
+      const execute = vi.fn();
+      const resolveCurrentIdentity = vi.fn().mockResolvedValue(harness.identity);
+      const context = {
+        ...harness.context,
+        overviewAiWorkflow: { execute, read, resolveCurrentIdentity },
+      } as unknown as Required<ConfigApiContext>;
+
+      const response = await handleEnergyApiRequest(
+        getRequest(`/api/v1/energy/projects/${harness.project.id}/overview-ai-artifact?scopeId=${harness.project.root_scope_id}`),
+        ["projects", harness.project.id, "overview-ai-artifact"],
+        context,
+      );
+
+      expect(response).toMatchObject({
+        status: 200,
+        body: { success: true, data: { status: "missing" } },
+      });
+      expect(read).toHaveBeenCalledOnce();
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("keeps GET read-only for members while admin POST ensure and retry execute server-owned work", async () => {
     const harness = await createHarness();
     try {
       const execute = vi.fn(async ({ identity, user, retry }) => {
@@ -82,10 +224,223 @@ describe("Overview AI Artifact API", () => {
       });
       expect(execute).toHaveBeenCalledTimes(1);
 
-      const retry = await handleEnergyApiRequest(jsonPost({}), [...path, "retry"], secondContext);
+      const retry = await handleEnergyApiRequest(jsonPost({}), [...path, "retry"], context);
       expect(retry).toEqual(started);
       expect(execute).toHaveBeenLastCalledWith(expect.objectContaining({ retry: true }));
       expect(resolveCurrentIdentity).toHaveBeenCalledTimes(4);
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("forbids workspace members from starting or retrying Overview AI generation", async () => {
+    const harness = await createHarness();
+    try {
+      const execute = vi.fn();
+      const resolveCurrentIdentity = vi.fn().mockResolvedValue(harness.identity);
+      const context = {
+        ...harness.context,
+        userId: "second-user",
+        overviewAiWorkflow: { execute, resolveCurrentIdentity },
+      } as unknown as Required<ConfigApiContext>;
+      const path = ["projects", harness.project.id, "overview-ai-artifact"];
+
+      for (const action of ["ensure", "retry"] as const) {
+        const response = await handleEnergyApiRequest(jsonPost({}), [...path, action], context);
+        expect(response).toMatchObject({
+          status: 403,
+          body: {
+            success: false,
+            error: { code: "FORBIDDEN", message: "ENERGYIQ_ADMIN_REQUIRED" },
+          },
+        });
+      }
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("runs the current Preschool v4 closure exactly once after materializing a new Snapshot", async () => {
+    const harness = await createHarness();
+    try {
+      const user = harness.metadata.users.getById({ user_id: "dev-user" });
+      const identity = { ...harness.identity, dataSnapshotId: "snapshot-after-materialize" };
+      const readModel = aggregateResultFor(identity);
+      const resolveCurrentIdentity = vi.fn().mockResolvedValue(identity);
+      const execute = vi.fn().mockResolvedValue(readModel);
+      const batch = harness.metadata.energyIq.createImportBatch({
+        id: "batch-for-v4-closure",
+        workspace_id: harness.project.workspace_id,
+        project_id: harness.project.id,
+        source_kind: "excel",
+        source_sha256: "a".repeat(64),
+        filename: "preschool.xlsx",
+        status: "inspected",
+        inspection: { sourceLabels: [] },
+        created_by: user.id,
+      });
+      const draft = harness.metadata.energyIq.projectSetup.getDraft({
+        project_id: harness.project.id,
+        user_id: user.id,
+      });
+      materializeEnergyProjectManifestMock.mockResolvedValueOnce({
+        batch,
+        snapshot: {
+          id: "snapshot-after-materialize",
+          workspace_id: harness.project.workspace_id,
+          project_id: harness.project.id,
+          manifest_json: "{}",
+          audit_json: "{}",
+          created_at: "2026-08-13T00:00:00.000Z",
+        },
+        document: draft.document,
+        duplicate: false,
+      });
+      const context = {
+        ...harness.context,
+        overviewAiWorkflow: { execute, resolveCurrentIdentity },
+      } as unknown as Required<ConfigApiContext>;
+
+      const response = await handleEnergyApiRequest(
+        jsonPost({}),
+        ["projects", harness.project.id, "imports", batch.id, "materialize"],
+        context,
+      );
+
+      expect(response).toMatchObject({
+        status: 200,
+        body: {
+          success: true,
+          data: {
+            dataSnapshot: { id: "snapshot-after-materialize" },
+            overviewAi: {
+              status: "available",
+              dataSnapshotId: identity.dataSnapshotId,
+              projectReleaseId: identity.projectReleaseId,
+              result: { artifactKind: "preschool-overview-ai-read-model" },
+            },
+          },
+        },
+      });
+      expect(materializeEnergyProjectManifestMock).toHaveBeenCalledTimes(1);
+      expect(resolveCurrentIdentity).toHaveBeenCalledTimes(1);
+      expect(resolveCurrentIdentity).toHaveBeenCalledWith({
+        projectId: harness.project.id,
+        scopeId: harness.project.root_scope_id,
+        user,
+      });
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(execute).toHaveBeenCalledWith({ identity, user, retry: false });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("runs the current Preschool v4 closure exactly once after publishing a new Release", async () => {
+    const harness = await createHarness();
+    try {
+      const user = harness.metadata.users.getById({ user_id: "dev-user" });
+      const identity = { ...harness.identity, projectReleaseId: "release-after-publish" };
+      const readModel = aggregateResultFor(identity);
+      const resolveCurrentIdentity = vi.fn().mockResolvedValue(identity);
+      const execute = vi.fn().mockResolvedValue(readModel);
+      const initialDraft = harness.metadata.energyIq.projectSetup.getDraft({
+        project_id: harness.project.id,
+        user_id: user.id,
+      });
+      const { meter_mapping: _mapping, source_manifest: _manifest, ...document } = initialDraft.document;
+      const draft = harness.metadata.energyIq.projectSetup.saveDraft({
+        project_id: harness.project.id,
+        expected_revision: initialDraft.revision,
+        user_id: user.id,
+        document,
+      });
+      const templateDraft = harness.metadata.energyIq.templates.getProjectDraft({
+        project_id: harness.project.id,
+        tier_definition_ids: draft.document.tiers.map((tier) => tier.id),
+      });
+      const metricConfig = harness.metadata.energyIq.metrics.getProjectConfig(harness.project.id);
+      const ruleConfig = harness.metadata.energyIq.rules.getProjectConfig(harness.project.id);
+      const context = {
+        ...harness.context,
+        overviewAiWorkflow: { execute, resolveCurrentIdentity },
+      } as unknown as Required<ConfigApiContext>;
+
+      const response = await handleEnergyApiRequest(
+        jsonPost({
+          expectedRevision: draft.revision,
+          expectedTemplateDraftRevision: templateDraft.revision,
+          expectedMetricConfigRevision: metricConfig.revision,
+          expectedRuleConfigRevision: ruleConfig.revision,
+        }),
+        ["projects", harness.project.id, "setup", "publish"],
+        context,
+      );
+
+      expect(response).toMatchObject({
+        status: 200,
+        body: {
+          success: true,
+          data: {
+            project: { id: harness.project.id, status: "published" },
+            overviewAi: {
+              status: "available",
+              dataSnapshotId: identity.dataSnapshotId,
+              projectReleaseId: identity.projectReleaseId,
+              result: { artifactKind: "preschool-overview-ai-read-model" },
+            },
+          },
+        },
+      });
+      expect(resolveCurrentIdentity).toHaveBeenCalledTimes(1);
+      expect(resolveCurrentIdentity).toHaveBeenCalledWith({
+        projectId: harness.project.id,
+        scopeId: harness.project.root_scope_id,
+        user,
+      });
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(execute).toHaveBeenCalledWith({ identity, user, retry: false });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("forbids members from using materialize or publish as an implicit generation path", async () => {
+    const harness = await createHarness();
+    try {
+      materializeEnergyProjectManifestMock.mockClear();
+      const execute = vi.fn();
+      const resolveCurrentIdentity = vi.fn();
+      const context = {
+        ...harness.context,
+        userId: "second-user",
+        overviewAiWorkflow: { execute, resolveCurrentIdentity },
+      } as unknown as Required<ConfigApiContext>;
+
+      const materialize = await handleEnergyApiRequest(
+        jsonPost({}),
+        ["projects", harness.project.id, "imports", "batch-member", "materialize"],
+        context,
+      );
+      const publish = await handleEnergyApiRequest(
+        jsonPost({}),
+        ["projects", harness.project.id, "setup", "publish"],
+        context,
+      );
+
+      for (const response of [materialize, publish]) {
+        expect(response).toMatchObject({
+          status: 403,
+          body: {
+            success: false,
+            error: { code: "FORBIDDEN", message: "ENERGYIQ_ADMIN_REQUIRED" },
+          },
+        });
+      }
+      expect(materializeEnergyProjectManifestMock).not.toHaveBeenCalled();
+      expect(resolveCurrentIdentity).not.toHaveBeenCalled();
+      expect(execute).not.toHaveBeenCalled();
     } finally {
       harness.close();
     }
@@ -95,8 +450,12 @@ describe("Overview AI Artifact API", () => {
     const harness = await createHarness();
     try {
       const execute = vi.fn(async () => { throw new Error("not expected"); });
-      const resolveCurrentIdentity = vi.fn().mockResolvedValue(harness.identity);
-      const context = { ...harness.context, overviewAiWorkflow: { execute, resolveCurrentIdentity } } as unknown as Required<ConfigApiContext>;
+      const resolveCurrentIdentity = vi.fn(async () => { throw new Error("analysis resolver must not run for an exact read pin"); });
+      const resolveReadIdentity = vi.fn().mockResolvedValue(harness.identity);
+      const context = {
+        ...harness.context,
+        overviewAiWorkflow: { execute, resolveCurrentIdentity, resolveReadIdentity },
+      } as unknown as Required<ConfigApiContext>;
       const path = ["projects", harness.project.id, "overview-ai-artifact"];
 
       await handleEnergyApiRequest(
@@ -105,7 +464,7 @@ describe("Overview AI Artifact API", () => {
         context,
       );
 
-      expect(resolveCurrentIdentity).toHaveBeenCalledWith(expect.objectContaining({
+      expect(resolveReadIdentity).toHaveBeenCalledWith(expect.objectContaining({
         projectId: harness.project.id,
         scopeId: harness.project.root_scope_id,
         pin: {
@@ -115,6 +474,7 @@ describe("Overview AI Artifact API", () => {
           projectReleaseId: "release-may",
         },
       }));
+      expect(resolveCurrentIdentity).not.toHaveBeenCalled();
       expect(execute).not.toHaveBeenCalled();
     } finally {
       harness.close();
@@ -199,6 +559,44 @@ async function createHarness() {
       metadata.close();
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     },
+  };
+}
+
+function aggregateResultFor(identity: ReturnType<typeof createOverviewAiArtifactIdentity>) {
+  const binding = {
+    workspaceId: identity.workspaceId,
+    projectId: "preschool-demo" as const,
+    scopeId: identity.scopeId,
+    dataSnapshotId: identity.dataSnapshotId,
+    projectReleaseId: identity.projectReleaseId,
+    analysisPeriod: { from: identity.analysisPeriodFrom, to: identity.analysisPeriodTo },
+    modelProfileId: identity.modelProfileId,
+    modelProfileRevision: identity.modelProfileRevision,
+  };
+  return {
+    artifactKind: "preschool-overview-ai-read-model" as const,
+    status: "available" as const,
+    binding,
+    sections: {
+      "centre-benchmark": {
+        status: "available" as const,
+        artifactId: "section-benchmark",
+        result: {
+          artifactKind: "section-interpretation" as const,
+          status: "available" as const,
+          providerProfileId: identity.modelProfileId,
+          runId: "run-benchmark",
+          binding,
+          sectionId: "centre-benchmark" as const,
+          summary: "Benchmark evidence supports a focused review.",
+          keyPoints: [],
+        },
+      },
+      "standby-wastage": { status: "unavailable" as const, artifactId: "section-standby", reason: "SECTION_FAILED" },
+      "operating-behaviour": { status: "unavailable" as const, reason: "Not generated." },
+      "planning-outlook": { status: "unavailable" as const, reason: "Not generated." },
+    },
+    executive: { status: "unavailable" as const, artifactId: "executive", reason: "SYNTHESIS_FAILED" },
   };
 }
 

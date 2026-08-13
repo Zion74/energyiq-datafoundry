@@ -1931,6 +1931,143 @@ export type EnergySavedAnalysisViewStateDto = {
   category: "all" | "load" | "light";
 };
 
+export type PreschoolOverviewAiSectionIdDto =
+  | "centre-benchmark"
+  | "standby-wastage"
+  | "operating-behaviour"
+  | "planning-outlook";
+
+export type PreschoolOverviewAiBindingDto = {
+  workspaceId: string;
+  projectId: "preschool-demo";
+  scopeId: string;
+  dataSnapshotId: string;
+  projectReleaseId: string;
+  analysisPeriod: { from: string; to: string };
+  modelProfileId: string;
+  modelProfileRevision: number;
+};
+
+type PreschoolSectionInterpretationResultBaseDto = {
+  artifactKind: "section-interpretation";
+  providerProfileId: string;
+  runId: string;
+  binding: PreschoolOverviewAiBindingDto;
+  sectionId: PreschoolOverviewAiSectionIdDto;
+};
+
+export type PreschoolSectionInterpretationV3ResultDto = PreschoolSectionInterpretationResultBaseDto & ({
+  status: "available";
+  summary?: string;
+  keyPoints: Array<{
+    kind: "priority" | "finding" | "meaning" | "next-check";
+    label?: string;
+    text: string;
+    evidenceRefs: string[];
+  }>;
+  limitation?: string;
+} | {
+  status: "empty";
+  summary?: never;
+  keyPoints: [];
+  limitation?: string;
+});
+
+export type PreschoolSectionInsightDto = {
+  id: string;
+  title: string;
+  label?: string;
+  epistemicStatus: "observed" | "inferred" | "speculative";
+  text: string;
+  evidenceRefs: string[];
+  deepDiveQuestion?: string;
+};
+
+export type PreschoolSectionInterpretationV4ResultDto = PreschoolSectionInterpretationResultBaseDto & ({
+  status: "available";
+  summary: {
+    text: string;
+    evidenceRefs: string[];
+  };
+  insights: PreschoolSectionInsightDto[];
+  limitation?: string;
+} | {
+  status: "empty";
+  summary?: never;
+  insights: [];
+  limitation?: string;
+});
+
+export type PreschoolSectionInterpretationResultDto =
+  | PreschoolSectionInterpretationV3ResultDto
+  | PreschoolSectionInterpretationV4ResultDto;
+
+type PreschoolExecutiveSynthesisResultBaseDto = {
+  artifactKind: "executive-synthesis";
+  providerProfileId: string;
+  runId: string;
+  binding: PreschoolOverviewAiBindingDto;
+  sourceSectionArtifactIds: string[];
+};
+
+export type PreschoolExecutiveSynthesisV3ResultDto = PreschoolExecutiveSynthesisResultBaseDto & ({
+  status: "available";
+  keyFindings: Array<{
+    id: string;
+    takeaway: string;
+    sectionIds: PreschoolOverviewAiSectionIdDto[];
+    evidenceRefs: string[];
+  }>;
+} | {
+  status: "empty";
+  keyFindings: [];
+});
+
+export type PreschoolOverviewKeyFindingDto = {
+  id: string;
+  title: string;
+  text: string;
+  sectionIds: PreschoolOverviewAiSectionIdDto[];
+  evidenceRefs: string[];
+  alert?: {
+    severity: "attention" | "urgent";
+    certainty: "confirmed" | "anomaly" | "possible";
+  };
+};
+
+export type PreschoolExecutiveSynthesisV4ResultDto = PreschoolExecutiveSynthesisResultBaseDto & ({
+  status: "available";
+  summary: {
+    text: string;
+    evidenceRefs: string[];
+  };
+  findings: PreschoolOverviewKeyFindingDto[];
+} | {
+  status: "empty";
+  summary?: never;
+  findings: [];
+});
+
+export type PreschoolExecutiveSynthesisResultDto =
+  | PreschoolExecutiveSynthesisV3ResultDto
+  | PreschoolExecutiveSynthesisV4ResultDto;
+
+export type PreschoolOverviewAiUnitStatusDto<T extends { status: "available" | "empty" }> =
+  | { status: "queued" }
+  | { status: "running" }
+  | { status: "available"; artifactId: string; result: Extract<T, { status: "available" }> }
+  | { status: "empty"; artifactId: string; result: Extract<T, { status: "empty" }> }
+  | { status: "unavailable"; artifactId?: string; reason: string };
+
+export type PreschoolOverviewAiReadModelDto = {
+  artifactKind: "preschool-overview-ai-read-model";
+  status: "available";
+  binding: PreschoolOverviewAiBindingDto;
+  sections: Record<PreschoolOverviewAiSectionIdDto, PreschoolOverviewAiUnitStatusDto<PreschoolSectionInterpretationResultDto>>;
+  executive: PreschoolOverviewAiUnitStatusDto<PreschoolExecutiveSynthesisResultDto>;
+  autonomous?: unknown;
+};
+
 export type EnergySavedAnalysisAiArtifactInputDto = {
   contract: "energyiq-saved-ai-result@1";
   rendererKey: EnergyProjectRendererKeyDto;
@@ -1943,6 +2080,12 @@ export type EnergySavedAnalysisAiArtifactInputDto = {
     findings: Array<Record<string, unknown>>;
     [key: string]: unknown;
   };
+} | {
+  contract: "energyiq-saved-ai-result@2";
+  rendererKey: "preschool-overview";
+  snapshotId: string;
+  projectReleaseId: string;
+  result: PreschoolOverviewAiReadModelDto;
 };
 
 export type EnergyOverviewAiArtifactDto = {
@@ -1956,7 +2099,7 @@ export type EnergyOverviewAiArtifactDto = {
   runId?: string;
   completedAt?: string;
   errorCode?: string;
-  result?: {
+  result?: PreschoolOverviewAiReadModelDto | {
     status: "available";
     providerProfileId: string;
     runId: string;
@@ -2210,6 +2353,65 @@ export type EnergyPublishedTemplateResponseDto = {
   revision: EnergyTemplateRevisionDto | null;
   document: EnergyTemplateDraftDocumentDto;
   catalog: EnergyComponentRevisionDto[];
+};
+
+export type EnergyTemplateChangeDiffItemDto = {
+  kind: "placement_added" | "placement_removed" | "placement_moved" | "section_changed" | "layout_updated" | "presentation_updated";
+  template_id: string;
+  placement_id: string;
+  summary: string;
+};
+
+export type EnergyTemplateChangeProposalDto = {
+  id: string;
+  workspace_id: string;
+  project_id: string;
+  base_revision_id: string;
+  data_snapshot_id: string;
+  scope_id: string;
+  instruction: string;
+  proposal: {
+    title: string;
+    rationale: string;
+    operations: Array<Record<string, unknown>>;
+  };
+  document: EnergyTemplateDraftDocumentDto;
+  diff: EnergyTemplateChangeDiffItemDto[];
+  status: "pending_review" | "rejected" | "published";
+  created_by: string;
+  created_at: string;
+  reviewed_by?: string;
+  reviewed_at?: string;
+  published_revision_id?: string;
+};
+
+export type EnergyTemplateChangeContextDto = {
+  fixedIdentity: {
+    workspaceId: string;
+    projectId: string;
+    scopeId: string;
+    dataSnapshotId: string;
+    projectReleaseId: string;
+  };
+  revision: EnergyTemplateRevisionDto;
+  catalog: EnergyComponentRevisionDto[];
+  proposals: EnergyTemplateChangeProposalDto[];
+  rendererBoundary: {
+    previewRenderer: "structured-template";
+    customerRenderer: string;
+    customerRendererAutomaticallyReordered: false;
+    message: string;
+  };
+};
+
+export type EnergyTemplateChangePreviewDto = {
+  proposal: EnergyTemplateChangeProposalDto;
+  catalog: EnergyComponentRevisionDto[];
+  fixedIdentity: EnergyTemplateChangeContextDto["fixedIdentity"];
+  rendererBoundary: {
+    previewRenderer: "structured-template";
+    customerRendererAutomaticallyReordered: false;
+  };
 };
 
 export type DevIdentitiesResponseDto = {

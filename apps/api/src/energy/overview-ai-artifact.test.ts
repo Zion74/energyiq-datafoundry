@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   createOverviewAiArtifactIdentity,
+  createPreschoolOverviewAiSectionArtifactIdentityV4,
+  createPreschoolOverviewAiValueArtifactIdentity,
   overviewAiArtifactPinnedLocalPeriod,
 } from "./overview-ai-artifact.js";
 
@@ -66,6 +68,79 @@ describe("createOverviewAiArtifactIdentity", () => {
       modelProfileId: "profile",
       modelProfileRevision: 1,
     })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_CONTRACT_NOT_FOUND");
+  });
+
+  it("uses the released v4 Section identity while leaving Executive and the legacy identity unchanged", () => {
+    const legacy = createOverviewAiArtifactIdentity({
+      workspaceId: "preschool-demo-org",
+      projectId: "preschool-demo",
+      scopeId: "preschool-project",
+      dataSnapshotId: "snapshot-a",
+      projectReleaseId: "release-v1",
+      analysisPeriodFrom: "2026-05-01T00:00:00.000Z",
+      analysisPeriodTo: "2026-06-01T00:00:00.000Z",
+      rendererKey: "preschool-overview",
+      rendererVersion: "1",
+      modelProfileId: "deepseek-v4-flash",
+      modelProfileRevision: 8,
+    });
+    const benchmark = createPreschoolOverviewAiSectionArtifactIdentityV4({
+      baseIdentity: legacy,
+      targetId: "centre-benchmark",
+    });
+    const standby = createPreschoolOverviewAiSectionArtifactIdentityV4({
+      baseIdentity: legacy,
+      targetId: "standby-wastage",
+    });
+    const legacySection = createPreschoolOverviewAiValueArtifactIdentity({
+      baseIdentity: legacy,
+      artifactKind: "section-interpretation",
+      targetId: "centre-benchmark",
+    });
+    const executive = createPreschoolOverviewAiValueArtifactIdentity({
+      baseIdentity: legacy,
+      artifactKind: "executive-synthesis",
+      targetId: "sections:none",
+    });
+
+    expect(legacy).not.toHaveProperty("artifactKind");
+    expect(benchmark).toMatchObject({
+      artifactKind: "section-interpretation",
+      targetId: "centre-benchmark",
+      identityContractRevision: "v4",
+      analysisPackId: "preschool-section-pack",
+      analysisPackRevision: "v2",
+      outputContractRevision: "preschool-section-interpretation-v4",
+      validatorRevision: "acceptance-validator-v1",
+      workflowRevision: "discover-accept-publish-v1",
+      investigatorPromptRevision: "discovery-prompt-v1",
+      capabilityRevision: "pack-only-v1",
+      publicationRevision: "v1",
+    });
+    expect(standby).not.toEqual(benchmark);
+    expect(legacySection).toMatchObject({
+      outputContractRevision: "preschool-section-interpretation-v3",
+      validatorRevision: "preschool-section-interpreter-validator-v12",
+      workflowRevision: "preschool-section-interpreter-v14",
+      investigatorPromptRevision: "preschool-section-interpreter-prompt-v14",
+    });
+    expect(legacySection).not.toHaveProperty("identityContractRevision");
+    expect(executive).toMatchObject({
+      artifactKind: "executive-synthesis",
+      targetId: "sections:none",
+      outputContractRevision: "preschool-executive-synthesis-v1",
+      validatorRevision: "preschool-executive-synthesis-validator-v3",
+      workflowRevision: "preschool-executive-synthesis-v9",
+      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v2",
+    });
+    expect(() => createPreschoolOverviewAiValueArtifactIdentity({
+      baseIdentity: legacy,
+      artifactKind: "section-interpretation",
+    })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
+    expect(() => createPreschoolOverviewAiValueArtifactIdentity({
+      baseIdentity: legacy,
+      artifactKind: "executive-synthesis",
+    })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
   });
 });
 

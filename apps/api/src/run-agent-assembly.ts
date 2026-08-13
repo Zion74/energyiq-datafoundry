@@ -1,5 +1,6 @@
 import { MastraAgent } from "@ag-ui/mastra";
 import type { RunAgentInput } from "@ag-ui/client";
+import type { PublicStructuredOutputOptions } from "@mastra/core/agent";
 import type { ArtifactService, SessionOutputService } from "@datafoundry/artifacts";
 import {
   createDataFoundry,
@@ -72,6 +73,8 @@ type CreateRunAgentAssemblyInput = {
   effectiveRunConfig: EffectiveRunConfig;
   emitter: AgUiEventEmitter;
   excludedToolNames?: readonly string[];
+  disableTools?: boolean;
+  structuredOutput?: PublicStructuredOutputOptions<Record<string, unknown>>;
   contextPackageRecorder?: ContextPackageRecorder;
   contextPackageExists(reference: ContextPackageRef): boolean;
   evidenceContextItems?: AgentContextItem[] | undefined;
@@ -186,6 +189,8 @@ export const createRunAgentAssembly = async (
     ...(Object.keys(mcpTools).length > 0 ? { mcpTools } : {}),
     emitter: input.emitter,
     ...(input.excludedToolNames?.length ? { excludedToolNames: input.excludedToolNames } : {}),
+    ...(input.disableTools ? { disableTools: true } : {}),
+    ...(input.structuredOutput ? { structuredOutput: input.structuredOutput } : {}),
     ...(input.effectiveRunConfig.protocol ? { explicitProtocol: input.effectiveRunConfig.protocol } : {}),
     messages: input.messages,
     ...(input.modelContextProfile ? { modelContextProfile: input.modelContextProfile } : {}),

@@ -1,6 +1,11 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
+export type EnergyIqOverviewAiArtifactKind =
+  | "section-interpretation"
+  | "executive-synthesis"
+  | "autonomous-insights";
+
 export type EnergyIqOverviewAiArtifactIdentity = {
   workspaceId: string;
   projectId: string;
@@ -23,6 +28,19 @@ export type EnergyIqOverviewAiArtifactIdentity = {
   editorPromptRevision: string;
   methodSkillId: string;
   methodSkillRevision: string;
+  /** Explicit discriminator for revised value-artifact identity contracts. */
+  identityContractRevision?: string;
+  /** Exact server-owned capability set used to create the artifact. */
+  capabilityRevision?: string;
+  /** Exact publication policy used to select customer-visible results. */
+  publicationRevision?: string;
+  /**
+   * Absent only for legacy autonomous artifacts whose canonical identity and
+   * hash must remain readable. New artifacts always set an explicit kind.
+   */
+  artifactKind?: EnergyIqOverviewAiArtifactKind;
+  /** Section target, or deterministic Executive source-set target. */
+  targetId?: string;
 };
 
 export type EnergyIqOverviewAiArtifactStatus = "queued" | "running" | "available" | "failed";
@@ -232,7 +250,7 @@ export class EnergyIqOverviewAiArtifactStore {
     resultJson: string;
     now?: string;
   }): EnergyIqOverviewAiArtifactRecord {
-    requireArtifactResult(input.resultJson, input.identity);
+    requireArtifactResult(input.resultJson, input.identity, this.db);
     const now = input.now ?? new Date().toISOString();
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -309,6 +327,21 @@ const canonicalIdentity = (
     || identity.modelProfileRevision < 1) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_IDENTITY_INVALID");
   }
+  if (identity.artifactKind !== undefined
+    && identity.artifactKind !== "section-interpretation"
+    && identity.artifactKind !== "executive-synthesis"
+    && identity.artifactKind !== "autonomous-insights") {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_KIND_INVALID");
+  }
+  if ((identity.artifactKind === "section-interpretation" || identity.artifactKind === "executive-synthesis")
+    && !identity.targetId?.trim()) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
+  }
+  if (identity.artifactKind !== "section-interpretation"
+    && identity.artifactKind !== "executive-synthesis"
+    && identity.targetId !== undefined) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_FORBIDDEN");
+  }
   return {
     workspaceId: identity.workspaceId,
     projectId: identity.projectId,
@@ -331,6 +364,17 @@ const canonicalIdentity = (
     editorPromptRevision: identity.editorPromptRevision,
     methodSkillId: identity.methodSkillId,
     methodSkillRevision: identity.methodSkillRevision,
+    ...(identity.identityContractRevision
+      ? { identityContractRevision: identity.identityContractRevision }
+      : {}),
+    ...(identity.capabilityRevision
+      ? { capabilityRevision: identity.capabilityRevision }
+      : {}),
+    ...(identity.publicationRevision
+      ? { publicationRevision: identity.publicationRevision }
+      : {}),
+    ...(identity.artifactKind ? { artifactKind: identity.artifactKind } : {}),
+    ...(identity.targetId ? { targetId: identity.targetId } : {}),
   };
 };
 
@@ -340,6 +384,7 @@ const hashIdentity = (identityJson: string): string =>
 const requireArtifactResult = (
   resultJson: string,
   identity: EnergyIqOverviewAiArtifactIdentity,
+  db: DatabaseSync,
 ): void => {
   if (Buffer.byteLength(resultJson, "utf8") > 262_144) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_TOO_LARGE");
@@ -351,6 +396,14 @@ const requireArtifactResult = (
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
   }
   if (!isRecord(parsed)) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  if (identity.artifactKind === "section-interpretation") {
+    requireSectionInterpretationResult(parsed, identity);
+    return;
+  }
+  if (identity.artifactKind === "executive-synthesis") {
+    requireExecutiveSynthesisResult(parsed, identity, db);
+    return;
+  }
   const artifactBinding = parsed.binding;
   if (parsed.status !== "available"
     || !nonEmptyString(parsed.providerProfileId)
@@ -395,6 +448,395 @@ const requireArtifactResult = (
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
   }
 };
+
+const requireSectionInterpretationResult = (
+  parsed: Record<string, unknown>,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): void => {
+  if (identity.identityContractRevision !== undefined
+    || identity.outputContractRevision === "preschool-section-interpretation-v4") {
+    requireSectionInterpretationResultV4(parsed, identity);
+    return;
+  }
+  requireSectionInterpretationResultV3(parsed, identity);
+};
+
+const requireSectionInterpretationResultV3 = (
+  parsed: Record<string, unknown>,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): void => {
+  const binding = parsed.binding;
+  const keyPoints = parsed.keyPoints;
+  if (identity.outputContractRevision !== "preschool-section-interpretation-v3"
+    || identity.identityContractRevision !== undefined
+    || identity.capabilityRevision !== undefined
+    || identity.publicationRevision !== undefined
+    || parsed.artifactKind !== "section-interpretation"
+    || (parsed.status !== "available" && parsed.status !== "empty")
+    || !nonEmptyString(parsed.providerProfileId)
+    || parsed.providerProfileId !== identity.modelProfileId
+    || !nonEmptyString(parsed.runId)
+    || !isRecord(parsed.contract)
+    || parsed.contract.id !== "preschool-section-interpretation"
+    || parsed.contract.revision !== identity.outputContractRevision
+    || !isRecord(binding)
+    || binding.workspaceId !== identity.workspaceId
+    || binding.projectId !== identity.projectId
+    || binding.scopeId !== identity.scopeId
+    || binding.dataSnapshotId !== identity.dataSnapshotId
+    || binding.projectReleaseId !== identity.projectReleaseId
+    || binding.modelProfileId !== identity.modelProfileId
+    || binding.modelProfileRevision !== identity.modelProfileRevision
+    || !isRecord(binding.analysisPeriod)
+    || binding.analysisPeriod.from !== identity.analysisPeriodFrom
+    || binding.analysisPeriod.to !== identity.analysisPeriodTo
+    || parsed.sectionId !== identity.targetId
+    || !Array.isArray(keyPoints)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+  if (parsed.status === "empty") {
+    if (keyPoints.length !== 0 || parsed.summary !== undefined || parsed.limitation !== undefined) {
+      throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+    }
+    return;
+  }
+  if (!nonEmptyString(parsed.summary)
+    || keyPoints.length < 1
+    || keyPoints.length > 4
+    || !keyPoints.every(validSectionKeyPoint)
+    || !optionalString(parsed.limitation)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+};
+
+const requireSectionInterpretationResultV4 = (
+  parsed: Record<string, unknown>,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): void => {
+  const summary = parsed.summary;
+  const insights = parsed.insights;
+  const capability = parsed.capability;
+  const publication = parsed.publication;
+  if (identity.identityContractRevision !== "v4"
+    || identity.analysisPackId !== "preschool-section-pack"
+    || identity.analysisPackRevision !== "v2"
+    || identity.outputContractRevision !== "preschool-section-interpretation-v4"
+    || identity.validatorRevision !== "acceptance-validator-v1"
+    || identity.workflowRevision !== "discover-accept-publish-v1"
+    || identity.investigatorPromptRevision !== "discovery-prompt-v1"
+    || identity.capabilityRevision !== "pack-only-v1"
+    || identity.publicationRevision !== "v1"
+    || parsed.artifactKind !== "section-interpretation"
+    || (parsed.status !== "available" && parsed.status !== "empty")
+    || !nonEmptyString(parsed.providerProfileId)
+    || parsed.providerProfileId !== identity.modelProfileId
+    || !nonEmptyString(parsed.runId)
+    || !isRecord(parsed.contract)
+    || parsed.contract.id !== "preschool-section-interpretation"
+    || parsed.contract.revision !== identity.outputContractRevision
+    || !sameValueArtifactBinding(parsed.binding, identity)
+    || parsed.sectionId !== identity.targetId
+    || parsed.packRevision !== identity.analysisPackRevision
+    || !isRecord(capability)
+    || capability.revision !== identity.capabilityRevision
+    || capability.mode !== "pack-only"
+    || !Array.isArray(capability.tools)
+    || capability.tools.length !== 0
+    || !Array.isArray(insights)
+    || insights.length > 3
+    || !insights.every(validSectionInsightV4)
+    || !validSectionPublicationV4(publication, identity, insights.length)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+  if (parsed.status === "empty") {
+    if (summary !== undefined || insights.length !== 0 || parsed.limitation !== undefined) {
+      throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+    }
+    return;
+  }
+  if (!validSectionSummaryV4(summary) || !optionalString(parsed.limitation)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+};
+
+const validSectionSummaryV4 = (value: unknown): boolean => isRecord(value)
+  && nonEmptyString(value.text)
+  && Array.isArray(value.evidenceRefs)
+  && value.evidenceRefs.length > 0
+  && value.evidenceRefs.every(nonEmptyString)
+  && new Set(value.evidenceRefs).size === value.evidenceRefs.length;
+
+const validSectionInsightV4 = (value: unknown): boolean => isRecord(value)
+  && nonEmptyString(value.id)
+  && nonEmptyString(value.title)
+  && optionalString(value.label)
+  && (value.epistemicStatus === "observed"
+    || value.epistemicStatus === "inferred"
+    || value.epistemicStatus === "speculative")
+  && nonEmptyString(value.text)
+  && Array.isArray(value.evidenceRefs)
+  && value.evidenceRefs.length > 0
+  && value.evidenceRefs.every(nonEmptyString)
+  && new Set(value.evidenceRefs).size === value.evidenceRefs.length
+  && optionalString(value.deepDiveQuestion);
+
+const validSectionPublicationV4 = (
+  value: unknown,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+  insightCount: number,
+): boolean => isRecord(value)
+  && value.policyId === "preschool-section-publication"
+  && value.policyRevision === identity.publicationRevision
+  && nonNegativeInteger(value.discoveredCount)
+  && nonNegativeInteger(value.acceptedCount)
+  && nonNegativeInteger(value.rejectedCount)
+  && nonNegativeInteger(value.publishedCount)
+  && value.publishedCount === insightCount
+  && (value.acceptedCount as number) >= insightCount
+  && (value.discoveredCount as number) === (value.acceptedCount as number) + (value.rejectedCount as number)
+  && Array.isArray(value.suppressedCandidateIds)
+  && value.suppressedCandidateIds.every(nonEmptyString)
+  && new Set(value.suppressedCandidateIds).size === value.suppressedCandidateIds.length
+  && value.suppressedCandidateIds.length === (value.acceptedCount as number) - insightCount;
+
+const nonNegativeInteger = (value: unknown): boolean =>
+  Number.isSafeInteger(value) && (value as number) >= 0;
+
+const validSectionKeyPoint = (value: unknown): boolean => isRecord(value)
+  && (value.kind === "priority"
+    || value.kind === "finding"
+    || value.kind === "meaning"
+    || value.kind === "next-check")
+  && optionalString(value.label)
+  && nonEmptyString(value.text)
+  && Array.isArray(value.evidenceRefs)
+  && value.evidenceRefs.length > 0
+  && value.evidenceRefs.every(nonEmptyString);
+
+const requireExecutiveSynthesisResult = (
+  parsed: Record<string, unknown>,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+  db: DatabaseSync,
+): void => {
+  if (identity.identityContractRevision === "v4"
+    || identity.outputContractRevision === "preschool-executive-synthesis-v4") {
+    requireExecutiveSynthesisResultV4(parsed, identity, db);
+    return;
+  }
+  requireExecutiveSynthesisResultV3(parsed, identity);
+};
+
+const requireExecutiveSynthesisResultV3 = (
+  parsed: Record<string, unknown>,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): void => {
+  const binding = parsed.binding;
+  const findings = parsed.keyFindings;
+  if (parsed.artifactKind !== "executive-synthesis"
+    || (parsed.status !== "available" && parsed.status !== "empty")
+    || !nonEmptyString(parsed.providerProfileId)
+    || parsed.providerProfileId !== identity.modelProfileId
+    || !nonEmptyString(parsed.runId)
+    || !isRecord(parsed.contract)
+    || parsed.contract.id !== "preschool-executive-synthesis"
+    || parsed.contract.revision !== identity.outputContractRevision
+    || !sameValueArtifactBinding(binding, identity)
+    || !Array.isArray(parsed.sourceSectionArtifactIds)
+    || !parsed.sourceSectionArtifactIds.every(nonEmptyString)
+    || !Array.isArray(findings)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+  if (parsed.status === "empty") {
+    if (findings.length !== 0) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+    return;
+  }
+  if (findings.length < 1 || findings.length > 4 || !findings.every(validExecutiveKeyFinding)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+};
+
+const requireExecutiveSynthesisResultV4 = (
+  parsed: Record<string, unknown>,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+  db: DatabaseSync,
+): void => {
+  const sourceIds = parsed.sourceSectionArtifactIds;
+  const findings = parsed.findings;
+  if (identity.identityContractRevision !== "v4"
+    || identity.analysisPackId !== "preschool-executive-section-artifacts"
+    || identity.analysisPackRevision !== "section-interpretation-v4"
+    || identity.outputContractRevision !== "preschool-executive-synthesis-v4"
+    || identity.validatorRevision !== "preschool-executive-synthesis-validator-v4"
+    || identity.workflowRevision !== "preschool-executive-synthesis-v4"
+    || identity.investigatorPromptRevision !== "preschool-executive-synthesis-prompt-v4"
+    || identity.capabilityRevision !== "section-artifacts-only-v1"
+    || identity.publicationRevision !== "key-findings-v1"
+    || parsed.artifactKind !== "executive-synthesis"
+    || (parsed.status !== "available" && parsed.status !== "empty")
+    || !nonEmptyString(parsed.providerProfileId)
+    || parsed.providerProfileId !== identity.modelProfileId
+    || !nonEmptyString(parsed.runId)
+    || !isRecord(parsed.contract)
+    || parsed.contract.id !== "preschool-executive-synthesis"
+    || parsed.contract.revision !== identity.outputContractRevision
+    || !sameValueArtifactBinding(parsed.binding, identity)
+    || !Array.isArray(sourceIds)
+    || !sourceIds.every(nonEmptyString)
+    || new Set(sourceIds).size !== sourceIds.length
+    || sourceIds.length > 4
+    || !Array.isArray(findings)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+  if (parsed.status === "empty") {
+    if (sourceIds.length !== 0 || parsed.summary !== undefined || findings.length !== 0) {
+      throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+    }
+    return;
+  }
+  if (sourceIds.length === 0
+    || !validExecutiveSummaryV4(parsed.summary)
+    || findings.length > 3
+    || !findings.every(validExecutiveKeyFindingV4)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+  requireExecutiveSourceLineageV4({ parsed, identity, sourceIds, db });
+};
+
+const requireExecutiveSourceLineageV4 = (input: {
+  parsed: Record<string, unknown>;
+  identity: EnergyIqOverviewAiArtifactIdentity;
+  sourceIds: string[];
+  db: DatabaseSync;
+}): void => {
+  const evidenceOwners = new Map<string, Set<string>>();
+  const artifactIdBySection = new Map<string, string>();
+  for (const sourceId of input.sourceIds) {
+    const row = input.db.prepare(`
+      SELECT id, status, identity_json, result_json
+      FROM energyiq_overview_ai_artifacts
+      WHERE id = ?
+    `).get(sourceId);
+    if (!isRecord(row) || row.status !== "available" || typeof row.identity_json !== "string"
+      || typeof row.result_json !== "string") {
+      throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+    }
+    let sourceIdentity: unknown;
+    let sourceResult: unknown;
+    try {
+      sourceIdentity = JSON.parse(row.identity_json);
+      sourceResult = JSON.parse(row.result_json);
+    } catch {
+      throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+    }
+    if (!isRecord(sourceIdentity)
+      || sourceIdentity.artifactKind !== "section-interpretation"
+      || sourceIdentity.identityContractRevision !== "v4"
+      || sourceIdentity.outputContractRevision !== "preschool-section-interpretation-v4"
+      || sourceIdentity.workspaceId !== input.identity.workspaceId
+      || sourceIdentity.projectId !== input.identity.projectId
+      || sourceIdentity.scopeId !== input.identity.scopeId
+      || sourceIdentity.dataSnapshotId !== input.identity.dataSnapshotId
+      || sourceIdentity.projectReleaseId !== input.identity.projectReleaseId
+      || sourceIdentity.analysisPeriodFrom !== input.identity.analysisPeriodFrom
+      || sourceIdentity.analysisPeriodTo !== input.identity.analysisPeriodTo
+      || sourceIdentity.modelProfileId !== input.identity.modelProfileId
+      || sourceIdentity.modelProfileRevision !== input.identity.modelProfileRevision
+      || !nonEmptyString(sourceIdentity.targetId)
+      || !isRecord(sourceResult)
+      || sourceResult.status !== "available"
+      || sourceResult.sectionId !== sourceIdentity.targetId
+      || !isRecord(sourceResult.summary)
+      || !Array.isArray(sourceResult.summary.evidenceRefs)
+      || !Array.isArray(sourceResult.insights)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+    }
+    artifactIdBySection.set(sourceIdentity.targetId, sourceId);
+    const references = [
+      ...sourceResult.summary.evidenceRefs,
+      ...sourceResult.insights.flatMap((insight) => isRecord(insight) && Array.isArray(insight.evidenceRefs)
+        ? insight.evidenceRefs
+        : []),
+    ];
+    for (const reference of references) {
+      if (!nonEmptyString(reference)) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+      const owners = evidenceOwners.get(reference) ?? new Set<string>();
+      owners.add(sourceIdentity.targetId);
+      evidenceOwners.set(reference, owners);
+    }
+  }
+  const usedSections = new Set<string>();
+  const summary = input.parsed.summary as Record<string, unknown>;
+  for (const reference of summary.evidenceRefs as string[]) {
+    const owners = evidenceOwners.get(reference);
+    if (!owners) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+    for (const owner of owners) usedSections.add(owner);
+  }
+  for (const finding of input.parsed.findings as Record<string, unknown>[]) {
+    const declared = new Set(finding.sectionIds as string[]);
+    for (const sectionId of declared) {
+      if (!artifactIdBySection.has(sectionId)) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+      usedSections.add(sectionId);
+    }
+    for (const reference of finding.evidenceRefs as string[]) {
+      const owners = evidenceOwners.get(reference);
+      if (!owners || ![...owners].some((owner) => declared.has(owner))) {
+        throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+      }
+    }
+  }
+  const expectedSourceIds = [...usedSections].map((sectionId) => artifactIdBySection.get(sectionId)!).sort();
+  if (expectedSourceIds.length !== input.sourceIds.length
+    || expectedSourceIds.some((sourceId, index) => sourceId !== [...input.sourceIds].sort()[index])) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+};
+
+const validExecutiveSummaryV4 = (value: unknown): boolean => isRecord(value)
+  && nonEmptyString(value.text)
+  && Array.isArray(value.evidenceRefs)
+  && value.evidenceRefs.length > 0
+  && value.evidenceRefs.every(nonEmptyString);
+
+const validExecutiveKeyFindingV4 = (value: unknown): boolean => isRecord(value)
+  && nonEmptyString(value.id)
+  && nonEmptyString(value.title)
+  && nonEmptyString(value.text)
+  && Array.isArray(value.sectionIds)
+  && value.sectionIds.length > 0
+  && value.sectionIds.every(nonEmptyString)
+  && Array.isArray(value.evidenceRefs)
+  && value.evidenceRefs.length > 0
+  && value.evidenceRefs.every(nonEmptyString)
+  && (value.alert === undefined || validExecutiveAlertV4(value.alert));
+
+const validExecutiveAlertV4 = (value: unknown): boolean => isRecord(value)
+  && (value.severity === "attention" || value.severity === "urgent")
+  && (value.certainty === "confirmed" || value.certainty === "anomaly" || value.certainty === "possible");
+
+const validExecutiveKeyFinding = (value: unknown): boolean => isRecord(value)
+  && nonEmptyString(value.id)
+  && nonEmptyString(value.takeaway)
+  && Array.isArray(value.sectionIds)
+  && value.sectionIds.length > 0
+  && value.sectionIds.every(nonEmptyString)
+  && Array.isArray(value.evidenceRefs)
+  && value.evidenceRefs.length > 0
+  && value.evidenceRefs.every(nonEmptyString);
+
+const sameValueArtifactBinding = (
+  value: unknown,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): boolean => isRecord(value)
+  && value.workspaceId === identity.workspaceId
+  && value.projectId === identity.projectId
+  && value.scopeId === identity.scopeId
+  && value.dataSnapshotId === identity.dataSnapshotId
+  && value.projectReleaseId === identity.projectReleaseId
+  && value.modelProfileId === identity.modelProfileId
+  && value.modelProfileRevision === identity.modelProfileRevision
+  && isRecord(value.analysisPeriod)
+  && value.analysisPeriod.from === identity.analysisPeriodFrom
+  && value.analysisPeriod.to === identity.analysisPeriodTo;
 
 const validAcceptedFinding = (value: unknown, binding: Record<string, unknown>): boolean => {
   if (!isRecord(value)

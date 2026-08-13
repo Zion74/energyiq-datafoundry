@@ -5,7 +5,8 @@ import type { LocalKnowledgeService } from "@datafoundry/knowledge";
 import type { MetadataStore } from "@datafoundry/metadata";
 import type { RunCancelRegistry } from "../run-cancel-registry.js";
 import type { AuthService } from "../auth/service.js";
-import type { PreschoolOverviewAiWorkflow } from "../energy/preschool-overview-ai-workflow.js";
+import type { PreschoolOverviewAiPageWorkflow } from "../energy/preschool-overview-ai-page-workflow.js";
+import type { EnergyIqTemplateChangeWorkflow } from "../energy/energy-template-change-workflow.js";
 
 export type ConfigApiContext = {
   authService: AuthService;
@@ -13,7 +14,8 @@ export type ConfigApiContext = {
   fileAssetService: FileAssetService;
   knowledgeService: LocalKnowledgeService;
   metadataStore: MetadataStore;
-  overviewAiWorkflow: PreschoolOverviewAiWorkflow;
+  overviewAiWorkflow: PreschoolOverviewAiPageWorkflow;
+  templateChangeWorkflow: EnergyIqTemplateChangeWorkflow | undefined;
   runCancelRegistry: RunCancelRegistry;
   userId: string;
   workspaceId?: string;

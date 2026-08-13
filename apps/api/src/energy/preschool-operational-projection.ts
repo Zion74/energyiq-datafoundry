@@ -72,6 +72,109 @@ export type PreschoolOperationalSpike = {
   leadingCircuitSharePct: number;
 };
 
+export type PreschoolOperationalEvent = PreschoolOperationalSpike & {
+  id: string;
+  operatingState: "closed" | "operating";
+  scopeId: string;
+  centreCode: string;
+  centreName: string;
+  centreType: string | null;
+  boundary: {
+    relation: "opening-hour"
+      | "last-operating-hour"
+      | "inside-operating-window"
+      | "first-closed-hour"
+      | "pre-opening-hour"
+      | "closed-away-from-boundary"
+      | "closed-day";
+    scheduleSource: "weekly" | "calendar_exception";
+    operatingWindow: EnergyIqOperatingTimeRange | null;
+  };
+  circuits: Array<PreschoolOperationalCircuitCell & {
+    sourceName: string;
+    sharePct: number;
+    role: "leading" | "contributor";
+    centreCircuitLinkKey: string;
+  }>;
+};
+
+export type PreschoolOperationalRecurrence = {
+  key: string;
+  centreCircuitLinkKey: string;
+  operatingState: "closed" | "operating";
+  scopeId: string;
+  centreCode: string;
+  centreName: string;
+  centreType: string | null;
+  localHour: number;
+  circuitId: string;
+  circuitName: string;
+  eventCount: number;
+  leadingEventCount: number;
+  comparableObservationCount: number;
+  eventRecurrencePct: number;
+  dayTypeEventCounts: {
+    weekday: number;
+    weekend: number;
+    calendarException: number;
+  };
+  circuitPresence: {
+    status: "available";
+    observedCount: number;
+    comparableObservationCount: number;
+    presencePct: number;
+    minimumKwh: number;
+    meanKwh: number;
+    maximumKwh: number;
+  } | {
+    status: "insufficient";
+    observedCount: number;
+    comparableObservationCount: number;
+    requiredObservationCount: 2;
+    reason: "NOT_ENOUGH_COMPARABLE_OBSERVATIONS";
+  };
+  patternEvidence: {
+    status: "available";
+    comparableObservationCount: number;
+    eventCount: number;
+    nonEventObservationCount: number;
+    positiveCircuitObservationCount: number;
+    eventRecurrencePct: number;
+    circuitPresencePct: number;
+    minimumCircuitKwh: number;
+    meanCircuitKwh: number;
+    maximumCircuitKwh: number;
+    interpretationStatus: "undetermined";
+  } | {
+    status: "insufficient";
+    comparableObservationCount: number;
+    availableCircuitObservationCount: number;
+    eventCount: number;
+    requiredObservationCount: 4;
+    reason: "NOT_ENOUGH_COMPARABLE_OBSERVATIONS";
+    interpretationStatus: "undetermined";
+  };
+  counterexamples: {
+    status: "available";
+    comparisonBasis: "same-centre-type";
+    centreType: string;
+    centres: Array<{
+      scopeId: string;
+      centreCode: string;
+      name: string;
+      matchingEventCount: 0;
+      comparableObservationCount: number;
+      circuitId: string;
+      centreCircuitLinkKey: string;
+    }>;
+  } | {
+    status: "unavailable";
+    comparisonBasis: "same-centre-type";
+    reason: "CENTRE_TYPE_UNAVAILABLE" | "NO_SAME_TYPE_PEERS";
+  };
+  eventIds: string[];
+};
+
 export type PreschoolOperationalCircuitCell = {
   circuitId: string;
   name: string;
@@ -199,6 +302,39 @@ export type PreschoolOperationalProjection = {
       events: PreschoolOperationalSpike[];
     }>;
   }>;
+  analysisReady?: {
+    contract: {
+      id: "preschool-operational-analysis-ready";
+      version: "1";
+      maximumCellCount: 22_320;
+      eventCapturePolicy: "all qualifying events; no ranking or Top-N truncation";
+      recurrenceGrain: "operating-state x Centre x local-hour x Circuit";
+      minimumPatternComparableObservationCount: 4;
+      similarCentreBasis: "same published centreType";
+    };
+    eventCatalog: {
+      status: "complete";
+      boundedCellCount: number;
+      totalEventCount: number;
+      capturedEventCount: number;
+      truncated: false;
+      events: PreschoolOperationalEvent[];
+    };
+    recurrence: {
+      status: "complete";
+      rows: PreschoolOperationalRecurrence[];
+    };
+    contextAvailability: {
+      mustRunSchedule: {
+        status: "unknown";
+        reason: "MUST_RUN_SCHEDULE_NOT_PROVIDED_BY_CANONICAL_INPUTS";
+      };
+      equipmentState: {
+        status: "unknown";
+        reason: "EQUIPMENT_STATE_NOT_PROVIDED_BY_CANONICAL_INPUTS";
+      };
+    };
+  };
   sop: {
     status: "provisional";
     label: "Provisional after-hours SOP signal";
@@ -545,6 +681,51 @@ export const buildPreschoolOperationalProjection = (input: {
   };
   const standby = segment("standby");
   const operating = segment("operating");
+  const cellByEventKey = new Map(classified.map((cell) => [
+    `${cell.scopeId}:${cell.localDate}:${cell.localHour}`,
+    cell,
+  ]));
+  const operationalEvents: PreschoolOperationalEvent[] = [...spikes]
+    .sort((left, right) => left.localDate.localeCompare(right.localDate)
+      || left.localHour - right.localHour
+      || left.scopeId.localeCompare(right.scopeId)
+      || left.operatingState.localeCompare(right.operatingState))
+    .map((spike) => {
+      const centre = centreByScopeId.get(spike.scopeId);
+      const cell = cellByEventKey.get(`${spike.scopeId}:${spike.localDate}:${spike.localHour}`);
+      if (!centre || !cell) throw new Error(`PRESCHOOL_OPERATIONAL_EVENT_SOURCE_MISSING:${spike.scopeId}`);
+      return {
+        id: `preschool-operational-event:${spike.operatingState}:${spike.scopeId}:${spike.localDate}:${spike.localHour}`,
+        operatingState: spike.operatingState === "standby" ? "closed" : "operating",
+        scopeId: spike.scopeId,
+        centreCode: centre.centreCode,
+        centreName: centre.name,
+        centreType: centre.centreType,
+        boundary: operationalBoundaryForCell(
+          calendarEntry.weekly,
+          calendarEntry.exceptions ?? [],
+          cell,
+        ),
+        ...withoutInternalSpikeFields(spike),
+        circuits: cell.circuits.map((circuit) => ({
+          ...circuit,
+          sourceName: circuit.name,
+          name: preschoolApplianceAliasForPublishedCircuit(circuit.name, cell.scopeId) ?? circuit.name,
+          sharePct: percent(circuit.usageKwh, cell.usageKwh),
+          role: circuit.name === cell.leadingCircuitName ? "leading" as const : "contributor" as const,
+          centreCircuitLinkKey: `preschool-centre-circuit:${cell.scopeId}:${circuit.circuitId}`,
+        })),
+      };
+    });
+  const recurrence = buildOperationalRecurrence({
+    spikes,
+    cells: classified as Array<PreschoolOperationalCell & { operatingState: PreschoolOperatingState }>,
+    centreByScopeId,
+    eventIdsBySource: new Map(operationalEvents.map((event) => [
+      `${event.scopeId}:${event.localDate}:${event.localHour}`,
+      event.id,
+    ])),
+  });
   const standbyCountByScopeId = new Map(standby.centres.map((centre) => [centre.scopeId, centre.spikeCount]));
   const sopCentres = input.centres.map((centre) => {
     const standbySpikeCount = standbyCountByScopeId.get(centre.scopeId) ?? 0;
@@ -611,6 +792,39 @@ export const buildPreschoolOperationalProjection = (input: {
     },
     planningOutlook,
     spikes: { standby, operating },
+    analysisReady: {
+      contract: {
+        id: "preschool-operational-analysis-ready",
+        version: "1",
+        maximumCellCount: 22_320,
+        eventCapturePolicy: "all qualifying events; no ranking or Top-N truncation",
+        recurrenceGrain: "operating-state x Centre x local-hour x Circuit",
+        minimumPatternComparableObservationCount: 4,
+        similarCentreBasis: "same published centreType",
+      },
+      eventCatalog: {
+        status: "complete",
+        boundedCellCount: classified.length,
+        totalEventCount: operationalEvents.length,
+        capturedEventCount: operationalEvents.length,
+        truncated: false,
+        events: operationalEvents,
+      },
+      recurrence: {
+        status: "complete",
+        rows: recurrence,
+      },
+      contextAvailability: {
+        mustRunSchedule: {
+          status: "unknown",
+          reason: "MUST_RUN_SCHEDULE_NOT_PROVIDED_BY_CANONICAL_INPUTS",
+        },
+        equipmentState: {
+          status: "unknown",
+          reason: "EQUIPMENT_STATE_NOT_PROVIDED_BY_CANONICAL_INPUTS",
+        },
+      },
+    },
     sop: {
       status: "provisional",
       label: "Provisional after-hours SOP signal",
@@ -638,6 +852,202 @@ export const buildPreschoolOperationalProjection = (input: {
       baseline: "same-centre same-hour-slot mean within operating state",
     },
   };
+};
+
+const buildOperationalRecurrence = (input: {
+  spikes: Array<PreschoolOperationalSpike & {
+    scopeId: string;
+    operatingState: PreschoolOperatingState;
+  }>;
+  cells: Array<PreschoolOperationalCell & { operatingState: PreschoolOperatingState }>;
+  centreByScopeId: Map<string, PreschoolCentre>;
+  eventIdsBySource: Map<string, string>;
+}): PreschoolOperationalRecurrence[] => {
+  const groups = new Map<string, {
+    scopeId: string;
+    operatingState: PreschoolOperatingState;
+    localHour: number;
+    circuitId: string;
+    circuitName: string;
+    spikes: typeof input.spikes;
+    leadingEventCount: number;
+  }>();
+  const cellByEventKey = new Map(input.cells.map((cell) => [
+    `${cell.scopeId}:${cell.localDate}:${cell.localHour}`,
+    cell,
+  ]));
+  const comparableByCentreHourState = new Map<string, typeof input.cells>();
+  for (const cell of input.cells) {
+    const key = `${cell.scopeId}:${cell.localHour}:${cell.operatingState}`;
+    const rows = comparableByCentreHourState.get(key) ?? [];
+    rows.push(cell);
+    comparableByCentreHourState.set(key, rows);
+  }
+  const spikesByCentreHourState = new Map<string, typeof input.spikes>();
+  const circuitAliasesByEventKey = new Map<string, Set<string>>();
+  for (const spike of input.spikes) {
+    const groupKey = `${spike.scopeId}:${spike.localHour}:${spike.operatingState}`;
+    const rows = spikesByCentreHourState.get(groupKey) ?? [];
+    rows.push(spike);
+    spikesByCentreHourState.set(groupKey, rows);
+    const eventKey = `${spike.scopeId}:${spike.localDate}:${spike.localHour}`;
+    const eventCell = cellByEventKey.get(eventKey);
+    if (!eventCell) throw new Error(`PRESCHOOL_OPERATIONAL_EVENT_CIRCUIT_MISSING:${spike.scopeId}`);
+    circuitAliasesByEventKey.set(eventKey, new Set(eventCell.circuits.map((circuit) => (
+      preschoolApplianceAliasForPublishedCircuit(circuit.name, spike.scopeId) ?? circuit.name
+    ))));
+  }
+  for (const spike of input.spikes) {
+    const sourceCell = cellByEventKey.get(`${spike.scopeId}:${spike.localDate}:${spike.localHour}`);
+    if (!sourceCell) throw new Error(`PRESCHOOL_OPERATIONAL_EVENT_CIRCUIT_MISSING:${spike.scopeId}`);
+    for (const sourceCircuit of sourceCell.circuits) {
+      const key = `${spike.operatingState}:${spike.scopeId}:${spike.localHour}:${sourceCircuit.circuitId}`;
+      const group = groups.get(key) ?? {
+        scopeId: spike.scopeId,
+        operatingState: spike.operatingState,
+        localHour: spike.localHour,
+        circuitId: sourceCircuit.circuitId,
+        circuitName: preschoolApplianceAliasForPublishedCircuit(sourceCircuit.name, spike.scopeId)
+          ?? sourceCircuit.name,
+        spikes: [],
+        leadingEventCount: 0,
+      };
+      group.spikes.push(spike);
+      if (sourceCircuit.name === sourceCell.leadingCircuitName) group.leadingEventCount += 1;
+      groups.set(key, group);
+    }
+  }
+
+  return [...groups.values()].map((group) => {
+    const centre = input.centreByScopeId.get(group.scopeId);
+    if (!centre) throw new Error(`PRESCHOOL_OPERATIONAL_CENTRE_MISSING:${group.scopeId}`);
+    const comparable = comparableByCentreHourState.get(
+      `${group.scopeId}:${group.localHour}:${group.operatingState}`,
+    ) ?? [];
+    const circuitValues = comparable.map((cell) => (
+      cell.circuits.find((circuit) => circuit.circuitId === group.circuitId)?.usageKwh
+    )).filter((value): value is number => value !== undefined && Number.isFinite(value));
+    const observedCount = circuitValues.filter((value) => value > 0).length;
+    const publicOperatingState: "closed" | "operating" = group.operatingState === "standby"
+      ? "closed"
+      : "operating";
+    const centreCircuitLinkKey = `preschool-centre-circuit:${group.scopeId}:${group.circuitId}`;
+    const dayTypeEventCounts = {
+      weekday: group.spikes.filter((spike) => spike.dayType === "weekday").length,
+      weekend: group.spikes.filter((spike) => spike.dayType === "weekend").length,
+      calendarException: group.spikes.filter((spike) => spike.dayType === "calendar_exception").length,
+    };
+    const sameTypePeers = centre.centreType === null
+      ? []
+      : [...input.centreByScopeId.values()].filter((candidate) => candidate.scopeId !== centre.scopeId
+        && candidate.centreType === centre.centreType);
+    const counterexampleCentres = sameTypePeers.flatMap((peer) => {
+      const peerComparable = comparableByCentreHourState.get(
+        `${peer.scopeId}:${group.localHour}:${group.operatingState}`,
+      ) ?? [];
+      const peerCircuit = peerComparable.flatMap((cell) => cell.circuits).find((circuit) => (
+        (preschoolApplianceAliasForPublishedCircuit(circuit.name, peer.scopeId) ?? circuit.name)
+          === group.circuitName
+      ));
+      if (!peerCircuit || peerComparable.length === 0) return [];
+      const matchingEventCount = (spikesByCentreHourState.get(
+        `${peer.scopeId}:${group.localHour}:${group.operatingState}`,
+      ) ?? []).filter((spike) => circuitAliasesByEventKey.get(
+        `${spike.scopeId}:${spike.localDate}:${spike.localHour}`,
+      )?.has(group.circuitName)).length;
+      if (matchingEventCount > 0) return [];
+      return [{
+        scopeId: peer.scopeId,
+        centreCode: peer.centreCode,
+        name: peer.name,
+        matchingEventCount: 0 as const,
+        comparableObservationCount: peerComparable.length,
+        circuitId: peerCircuit.circuitId,
+        centreCircuitLinkKey: `preschool-centre-circuit:${peer.scopeId}:${peerCircuit.circuitId}`,
+      }];
+    }).sort((left, right) => left.centreCode.localeCompare(right.centreCode));
+    return {
+      key: `preschool-operational-recurrence:${publicOperatingState}:${group.scopeId}:${group.localHour}:${group.circuitId}`,
+      centreCircuitLinkKey,
+      operatingState: publicOperatingState,
+      scopeId: group.scopeId,
+      centreCode: centre.centreCode,
+      centreName: centre.name,
+      centreType: centre.centreType,
+      localHour: group.localHour,
+      circuitId: group.circuitId,
+      circuitName: group.circuitName,
+      eventCount: group.spikes.length,
+      leadingEventCount: group.leadingEventCount,
+      comparableObservationCount: comparable.length,
+      eventRecurrencePct: percent(group.spikes.length, comparable.length),
+      dayTypeEventCounts,
+      circuitPresence: circuitValues.length >= 2
+        ? {
+            status: "available" as const,
+            observedCount,
+            comparableObservationCount: comparable.length,
+            presencePct: percent(observedCount, comparable.length),
+            minimumKwh: round(Math.min(...circuitValues)),
+            meanKwh: round(circuitValues.reduce((sum, value) => sum + value, 0) / circuitValues.length),
+            maximumKwh: round(Math.max(...circuitValues)),
+          }
+        : {
+            status: "insufficient" as const,
+            observedCount,
+            comparableObservationCount: comparable.length,
+            requiredObservationCount: 2 as const,
+            reason: "NOT_ENOUGH_COMPARABLE_OBSERVATIONS" as const,
+          },
+      patternEvidence: circuitValues.length >= 4
+        ? {
+            status: "available" as const,
+            comparableObservationCount: comparable.length,
+            eventCount: group.spikes.length,
+            nonEventObservationCount: Math.max(0, comparable.length - group.spikes.length),
+            positiveCircuitObservationCount: observedCount,
+            eventRecurrencePct: percent(group.spikes.length, comparable.length),
+            circuitPresencePct: percent(observedCount, comparable.length),
+            minimumCircuitKwh: round(Math.min(...circuitValues)),
+            meanCircuitKwh: round(circuitValues.reduce((sum, value) => sum + value, 0) / circuitValues.length),
+            maximumCircuitKwh: round(Math.max(...circuitValues)),
+            interpretationStatus: "undetermined" as const,
+          }
+        : {
+            status: "insufficient" as const,
+            comparableObservationCount: comparable.length,
+            availableCircuitObservationCount: circuitValues.length,
+            eventCount: group.spikes.length,
+            requiredObservationCount: 4 as const,
+            reason: "NOT_ENOUGH_COMPARABLE_OBSERVATIONS" as const,
+            interpretationStatus: "undetermined" as const,
+          },
+      counterexamples: centre.centreType === null
+        ? {
+            status: "unavailable" as const,
+            comparisonBasis: "same-centre-type" as const,
+            reason: "CENTRE_TYPE_UNAVAILABLE" as const,
+          }
+        : sameTypePeers.length === 0
+          ? {
+              status: "unavailable" as const,
+              comparisonBasis: "same-centre-type" as const,
+              reason: "NO_SAME_TYPE_PEERS" as const,
+            }
+          : {
+              status: "available" as const,
+              comparisonBasis: "same-centre-type" as const,
+              centreType: centre.centreType,
+              centres: counterexampleCentres,
+            },
+      eventIds: group.spikes.map((spike) => input.eventIdsBySource.get(
+        `${spike.scopeId}:${spike.localDate}:${spike.localHour}`,
+      )).filter((eventId): eventId is string => Boolean(eventId)).sort((left, right) => left.localeCompare(right)),
+    };
+  }).sort((left, right) => left.operatingState.localeCompare(right.operatingState)
+    || left.centreCode.localeCompare(right.centreCode)
+    || left.localHour - right.localHour
+    || left.circuitName.localeCompare(right.circuitName));
 };
 
 const buildOperatingStateApplianceComposition = (input: {
@@ -1152,6 +1562,43 @@ const operatingStateForCell = (
     return total + Math.max(0, Math.min(cellTo, to) - Math.max(cellFrom, from));
   }, 0);
   return overlap === 60 ? "operating" : overlap === 0 ? "standby" : null;
+};
+
+const operationalBoundaryForCell = (
+  weekly: EnergyIqOperatingCalendarRevision["entries"][number]["weekly"],
+  exceptions: EnergyIqOperatingCalendarRevision["entries"][number]["exceptions"],
+  cell: Pick<PreschoolOperationalCell, "localDate" | "localHour">,
+): PreschoolOperationalEvent["boundary"] => {
+  const exception = exceptions?.find((candidate) => candidate.date === cell.localDate);
+  const ranges = exception?.operating ?? weekly[dayName(cell.localDate)];
+  const scheduleSource = exception ? "calendar_exception" as const : "weekly" as const;
+  if (ranges.length === 0) {
+    return { relation: "closed-day", scheduleSource, operatingWindow: null };
+  }
+  const cellStart = cell.localHour * 60;
+  const cellEnd = cellStart + 60;
+  const parsedRanges = ranges.map((range) => ({
+    range,
+    start: minutesOfDay(range.from),
+    end: minutesOfDay(range.to),
+  })).filter((row): row is { range: EnergyIqOperatingTimeRange; start: number; end: number } => (
+    row.start !== null && row.end !== null
+  ));
+  const opening = parsedRanges.find((row) => row.start === cellStart);
+  if (opening) return { relation: "opening-hour", scheduleSource, operatingWindow: opening.range };
+  const lastOperating = parsedRanges.find((row) => row.end === cellEnd);
+  if (lastOperating) {
+    return { relation: "last-operating-hour", scheduleSource, operatingWindow: lastOperating.range };
+  }
+  const firstClosed = parsedRanges.find((row) => row.end === cellStart);
+  if (firstClosed) return { relation: "first-closed-hour", scheduleSource, operatingWindow: firstClosed.range };
+  const preOpening = parsedRanges.find((row) => row.start === cellEnd);
+  if (preOpening) return { relation: "pre-opening-hour", scheduleSource, operatingWindow: preOpening.range };
+  const inside = parsedRanges.find((row) => Math.max(cellStart, row.start) < Math.min(cellEnd, row.end));
+  if (inside) {
+    return { relation: "inside-operating-window", scheduleSource, operatingWindow: inside.range };
+  }
+  return { relation: "closed-away-from-boundary", scheduleSource, operatingWindow: null };
 };
 
 const dayName = (localDate: string): keyof EnergyIqOperatingCalendarRevision["entries"][number]["weekly"] => {

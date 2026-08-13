@@ -1,4 +1,5 @@
-import { Agent } from "@mastra/core/agent";
+import { Agent, type PublicStructuredOutputOptions } from "@mastra/core/agent";
+import { toStandardSchema } from "@mastra/core/schema";
 import {
   askUserTool,
   submitPlanTool,
@@ -265,6 +266,10 @@ export type CreateDataFoundryInput = {
   overviewAiCandidateSubmission?: boolean;
   /** Server-owned stage guard; removes named tools after normal policy selection. */
   excludedToolNames?: readonly string[];
+  /** Server-owned stage guard for bounded value transforms that must never invoke tools. */
+  disableTools?: boolean;
+  /** Native schema for bounded value stages; omitted for ordinary agentic runs. */
+  structuredOutput?: PublicStructuredOutputOptions<Record<string, unknown>>;
   abortSignal?: AbortSignal | undefined;
   artifactService?: ArtifactService;
   contextPackageRecorder?: ContextPackageRecorder;
@@ -361,6 +366,8 @@ export const createDataFoundry = async (
     runContext: input.runContext,
     workspaceRoot: input.workspaceRoot
   });
+  const skillToolsExcluded = ["skill", "skill_search", "skill_read"]
+    .every((name) => input.excludedToolNames?.includes(name));
   if (input.selectedSkills?.length) {
     await materializeSkillPackages({
       fileAssetService: requireFileAssetService(input.fileAssetService),
@@ -375,7 +382,7 @@ export const createDataFoundry = async (
   // createDataFoundry 每次 run 都调用，直接闭包捕获 runContext，不依赖下游 requestContext 注入。
   const runWorkspace = createRunWorkspace({
     runContext: input.runContext,
-    skillPaths: ["skills"],
+    skillPaths: skillToolsExcluded ? [] : ["skills"],
     workspaceRoot: input.workspaceRoot
   });
   const workspaceAttachments = materializeWorkspaceAttachments(runWorkspace.runDir, input.workspaceAttachments ?? []);
@@ -535,9 +542,11 @@ export const createDataFoundry = async (
     ...selectedMcpTools
   };
   const excludedToolNames = new Set(input.excludedToolNames ?? []);
-  const selectedTools = excludedToolNames.size === 0
-    ? toolsBeforeStageExclusions
-    : Object.fromEntries(Object.entries(toolsBeforeStageExclusions).filter(([name]) => !excludedToolNames.has(name)));
+  const selectedTools = input.disableTools
+    ? {}
+    : excludedToolNames.size === 0
+      ? toolsBeforeStageExclusions
+      : Object.fromEntries(Object.entries(toolsBeforeStageExclusions).filter(([name]) => !excludedToolNames.has(name)));
   const selectedDatasourceId = input.runContext.selected_datasource_id;
   const deferredProtocolEvents: ProtocolEvent[] = [];
   let protocolEventsReady = false;
@@ -679,12 +688,12 @@ export const createDataFoundry = async (
         })
       }
     : {};
-  const overviewAiCandidateSubmissionTools = input.overviewAiCandidateSubmission
+  const overviewAiCandidateSubmissionTools = input.overviewAiCandidateSubmission && !input.disableTools
     ? {
         [OVERVIEW_AI_CANDIDATE_SUBMISSION_TOOL_NAME]: createOverviewAiCandidateSubmissionTool(),
       }
     : {};
-  const protocolHandoffTools = excludedToolNames.has("protocol_handoff")
+  const protocolHandoffTools = input.disableTools || excludedToolNames.has("protocol_handoff")
     ? {}
     : {
         protocol_handoff: createTool({
@@ -731,7 +740,7 @@ export const createDataFoundry = async (
       ? { reasoningEnabled: input.runContext.reasoning_model }
       : {})
   });
-  const agent = new Agent({
+  const agentConfig = {
     id: "data-foundry",
     name: "DataFoundry",
     instructions: buildAgentInstructions({
@@ -765,12 +774,33 @@ export const createDataFoundry = async (
       nonEmptyMessageContentCompat
     ],
     outputProcessors: mastraContextProcessors.outputProcessors,
-    defaultOptions: {
-      maxSteps,
-      ...(input.modelSettings ? { modelSettings: input.modelSettings } : {}),
-      ...(runtimeProviderOptions ? { providerOptions: runtimeProviderOptions } : {})
-    }
-  });
+  };
+  const defaultOptions = {
+    maxSteps,
+    ...(input.modelSettings ? { modelSettings: input.modelSettings } : {}),
+    ...(runtimeProviderOptions ? { providerOptions: runtimeProviderOptions } : {})
+  };
+  const structuredOutput = input.structuredOutput
+    ? {
+        ...input.structuredOutput,
+        schema: toStandardSchema(input.structuredOutput.schema)
+      }
+    : undefined;
+  // @ag-ui/mastra currently fixes its local Agent generic to TOutput=undefined.
+  // The runtime object is still the same Agent; erase only that invariant type
+  // parameter after Mastra has normalized the bounded structured-output schema.
+  const agent = (structuredOutput
+    ? new Agent<string, typeof tools, Record<string, unknown>>({
+        ...agentConfig,
+        defaultOptions: {
+          ...defaultOptions,
+          structuredOutput
+        }
+      })
+    : new Agent({
+        ...agentConfig,
+        defaultOptions
+      })) as unknown as Agent;
   const agentForAgUi = wrapAgentForAgUi(
     agent,
     createMastraStreamNormalizerHooks(input.emitter, input.sessionOutputService

@@ -227,6 +227,7 @@ export const loadPreschoolPlanningLifecycle = async (input: {
   context: EnergyQueryContext;
   projectRelease: PublishedProjectRelease;
   latestCompleteLocalDay: string;
+  savedAnalyses?: readonly EnergyIqSavedAnalysisRecord[];
   databasePath?: string;
 }): Promise<PreschoolPlanningLifecycle> => {
   if (
@@ -255,7 +256,8 @@ export const loadPreschoolPlanningLifecycle = async (input: {
     currentDataSnapshotId: input.context.dataSnapshotId,
     latestCompleteLocalDay: input.latestCompleteLocalDay,
     targetPeriod,
-    savedAnalyses: input.metadataStore.energyIq.savedAnalyses.listProject(input.context.projectId),
+    savedAnalyses: input.savedAnalyses
+      ?? input.metadataStore.energyIq.savedAnalyses.listProject(input.context.projectId),
     loadActualAnalysis: () => executeEnergyScopeAnalysis({
       metadataStore: input.metadataStore,
       dataGateway: input.dataGateway,

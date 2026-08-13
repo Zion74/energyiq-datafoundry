@@ -101,9 +101,28 @@ import {
   type PublishedProjectRelease
 } from "./energy/project-analysis-resolver.js";
 import {
-  createPreschoolOverviewAiWorkflow,
+  type PreschoolOverviewAiStage,
   type PreschoolOverviewAiStageInput,
 } from "./energy/preschool-overview-ai-workflow.js";
+import { createPreschoolOverviewAiPageWorkflow } from "./energy/preschool-overview-ai-page-workflow.js";
+import { createEnergyIqTemplateChangeWorkflow } from "./energy/energy-template-change-workflow.js";
+import { resolveOverviewAiStageStructuredOutput } from "./energy/preschool-overview-ai-structured-output.js";
+export { resolveOverviewAiStageStructuredOutput } from "./energy/preschool-overview-ai-structured-output.js";
+
+type OverviewAiRuntimeStageInput = Omit<PreschoolOverviewAiStageInput, "stage"> & {
+  stage: PreschoolOverviewAiStage;
+  /** Server-owned only; never read from AG-UI forwarded props. */
+  trustedRuntimeOverride?: OverviewAiTrustedRuntimeOverride;
+};
+
+type OverviewAiStructuredOutput = NonNullable<ReturnType<typeof resolveOverviewAiStageStructuredOutput>>;
+
+type OverviewAiTrustedRuntimeOverride = {
+  structuredOutput: OverviewAiStructuredOutput;
+  conversationMessageMaxChars: number;
+};
+
+const PACK_V2_SECTION_MESSAGE_MAX_CHARS = 110_000;
 
 const DEV_USER: MeResponse = {
   id: "dev-user",
@@ -122,18 +141,59 @@ let serverReady = false;
 let startupTimings: Record<string, number> = {};
 let startupTotalMs = 0;
 
-export const resolveOverviewAiStageRuntimeOptions = (stage: "investigator" | "editor") => ({
-  analysisRequirementsMode: "omit" as const,
-  excludedToolNames: stage === "editor"
-    ? ["inspect_schema", "run_sql_readonly", "protocol_handoff"] as const
-    : ["protocol_handoff"] as const,
-  overviewAiCandidateSubmission: stage === "investigator",
-  reasoningModel: false as const,
+export const resolveOverviewAiStageRuntimeOptions = (stage: PreschoolOverviewAiStage) => {
+  const structuredOutput = resolveOverviewAiStageStructuredOutput(stage);
+  const boundedValueStage = stage === "section-interpreter"
+    || stage === "executive-synthesis"
+    || stage === "template-proposal";
+  return {
+    analysisRequirementsMode: "omit" as const,
+    ...(boundedValueStage
+      ? {
+          conversationMessageMaxChars: stage === "section-interpreter" ? 12_000 : 24_000,
+          disableTools: true as const,
+        }
+      : {}),
+    excludedToolNames: boundedValueStage
+      ? ["skill", "skill_search", "skill_read", "inspect_schema", "run_sql_readonly", "protocol_handoff"] as const
+      : stage === "editor"
+        ? ["inspect_schema", "run_sql_readonly", "protocol_handoff"] as const
+        : ["protocol_handoff"] as const,
+    overviewAiCandidateSubmission: stage === "investigator",
+    reasoningModel: false as const,
+    ...(structuredOutput ? { structuredOutput } : {}),
+  };
+};
+
+export const resolveOverviewAiServerRunnerOptions = (input: {
+  stage: PreschoolOverviewAiStage;
+  structuredOutput?: OverviewAiStructuredOutput;
+}): OverviewAiTrustedRuntimeOverride | undefined => {
+  if ((input.stage !== "section-interpreter" && input.stage !== "executive-synthesis")
+    || !input.structuredOutput) return undefined;
+  return {
+    structuredOutput: input.structuredOutput,
+    conversationMessageMaxChars: input.stage === "section-interpreter"
+      ? PACK_V2_SECTION_MESSAGE_MAX_CHARS
+      : 24_000,
+  };
+};
+
+export const resolveOverviewAiAgentRuntimeOptions = (
+  stage: PreschoolOverviewAiStage,
+  trustedOverride?: OverviewAiTrustedRuntimeOverride,
+): ReturnType<typeof resolveOverviewAiStageRuntimeOptions> => ({
+  ...resolveOverviewAiStageRuntimeOptions(stage),
+  ...(trustedOverride ?? {}),
 });
 
 export const shouldIncludeProjectAnalysisEvidenceContext = (
-  stage?: "investigator" | "editor",
+  stage?: PreschoolOverviewAiStage,
 ): boolean => stage === undefined;
+
+export const shouldUseEnergyContextForOverviewAiStage = (
+  stage?: PreschoolOverviewAiStage,
+): boolean => stage !== "section-interpreter" && stage !== "executive-synthesis" && stage !== "template-proposal";
 
 const emitEarlyRunFailure = (
   subscriber: { complete(): void; next(event: BaseEvent): void },
@@ -278,10 +338,8 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
     ),
   ]);
 
-  const overviewAiWorkflow = createPreschoolOverviewAiWorkflow({
-    metadataStore,
-    dataGateway,
-    runStage: async (stageInput) => collectOverviewAiStageEvents(
+  const runOverviewAiValueStage = async (stageInput: OverviewAiRuntimeStageInput) => {
+    const completed = await collectOverviewAiStageEvents(
       new DataFoundryAgUiAgent({
         dataGateway,
         artifactService,
@@ -301,12 +359,58 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
           ...(stageInput.user.display_name ? { display_name: stageInput.user.display_name } : {}),
         },
         overviewAiStage: stageInput.stage,
+        ...(stageInput.trustedRuntimeOverride
+          ? { overviewAiTrustedRuntimeOverride: stageInput.trustedRuntimeOverride }
+          : {}),
         workspaceId: stageInput.workspaceId,
         workspaceRoot: process.env.WORKSPACE_ROOT ?? join(process.env.STORAGE_ROOT_DIR ?? "storage", "workspaces"),
       }),
       stageInput,
       metadataStore,
-    ),
+    );
+    return {
+      answer: collectOverviewAiText(completed.events),
+      runId: completed.completedRun.runId,
+      sessionId: completed.completedRun.sessionId,
+    };
+  };
+  const overviewAiWorkflow = createPreschoolOverviewAiPageWorkflow({
+    metadataStore,
+    dataGateway,
+    runSection: ({ structuredOutput, ...stageInput }) => {
+      const trustedRuntimeOverride = resolveOverviewAiServerRunnerOptions({
+        stage: "section-interpreter",
+        ...(structuredOutput ? { structuredOutput } : {}),
+      });
+      return runOverviewAiValueStage({
+        ...stageInput,
+        stage: "section-interpreter",
+        ...(trustedRuntimeOverride ? { trustedRuntimeOverride } : {}),
+      });
+    },
+    runExecutiveSynthesis: ({ structuredOutput, ...stageInput }) => {
+      const trustedRuntimeOverride = resolveOverviewAiServerRunnerOptions({
+        stage: "executive-synthesis",
+        ...(structuredOutput ? { structuredOutput } : {}),
+      });
+      return runOverviewAiValueStage({
+        ...stageInput,
+        stage: "executive-synthesis",
+        ...(trustedRuntimeOverride ? { trustedRuntimeOverride } : {}),
+      });
+    },
+  });
+  const templateChangeWorkflow = createEnergyIqTemplateChangeWorkflow({
+    metadataStore,
+    resolveIdentity: ({ projectId, scopeId, user }) => overviewAiWorkflow.resolveCurrentIdentity({
+      projectId,
+      scopeId,
+      user,
+    }),
+    runProposal: (stageInput) => runOverviewAiValueStage({
+      ...stageInput,
+      stage: "template-proposal",
+    }),
   });
 
   // After restart, cancel-registry is empty — reclaim queued/running rows left by dead workers.
@@ -386,6 +490,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
         knowledgeService,
         metadataStore,
         overviewAiWorkflow,
+        templateChangeWorkflow,
         runCancelRegistry,
         userId: authContext.user.id,
         workspaceId: authContext.workspaceId
@@ -467,7 +572,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
 
 const collectOverviewAiStageEvents = (
   agent: DataFoundryAgUiAgent,
-  input: PreschoolOverviewAiStageInput,
+  input: OverviewAiRuntimeStageInput,
   metadataStore: MetadataStore,
 ): Promise<{
   events: ReadonlyArray<Record<string, unknown>>;
@@ -498,7 +603,14 @@ const collectOverviewAiStageEvents = (
   });
 });
 
-const buildOverviewAiStageRunInput = (input: PreschoolOverviewAiStageInput): RunAgentInput => ({
+export const collectOverviewAiText = (events: ReadonlyArray<Record<string, unknown>>): string =>
+  events
+    .filter((event) => event.type === "TEXT_MESSAGE_CONTENT" || event.type === "TEXT_MESSAGE_CHUNK")
+    .map((event) => typeof event.delta === "string" ? event.delta : "")
+    .join("")
+    .trim();
+
+export const buildOverviewAiStageRunInput = (input: OverviewAiRuntimeStageInput): RunAgentInput => ({
   threadId: input.sessionId,
   runId: input.runId,
   state: {},
@@ -506,30 +618,43 @@ const buildOverviewAiStageRunInput = (input: PreschoolOverviewAiStageInput): Run
   tools: [],
   context: [],
   forwardedProps: {
-    externalContext: {
-      source: "energyiq",
-      projectId: input.identity.projectId,
-      scopeId: input.identity.scopeId,
-      resource: input.identity.resource,
-      period: "Custom",
-      from: input.identity.analysisPeriodFrom,
-      to: input.identity.analysisPeriodTo,
-      expectedDataSnapshotId: input.identity.dataSnapshotId,
-      expectedProjectReleaseId: input.identity.projectReleaseId,
-      overviewAiStage: input.stage,
-    },
+    ...(shouldUseEnergyContextForOverviewAiStage(input.stage)
+      ? {
+          externalContext: {
+            source: "energyiq",
+            projectId: input.identity.projectId,
+            scopeId: input.identity.scopeId,
+            resource: input.identity.resource,
+            period: "Custom",
+            from: input.identity.analysisPeriodFrom,
+            to: input.identity.analysisPeriodTo,
+            expectedDataSnapshotId: input.identity.dataSnapshotId,
+            expectedProjectReleaseId: input.identity.projectReleaseId,
+            overviewAiStage: input.stage,
+          },
+        }
+      : {}),
     run_config: {
       protocol: { id: "data-analysis", version: "1" },
       activeLlmProfileId: input.identity.modelProfileId,
-      activeSkillId: input.identity.methodSkillId,
+      skillMode: isIsolatedValueStage(input.stage)
+        ? "none"
+        : "auto",
+      ...(isIsolatedValueStage(input.stage)
+        ? {}
+        : { activeSkillId: input.identity.methodSkillId }),
       enabledDatasourceIds: [],
       enabledKnowledgeIds: [],
       enabledMcpServerIds: [],
-      enabledSkillIds: [input.identity.methodSkillId],
+      enabledSkillIds: isIsolatedValueStage(input.stage)
+        ? []
+        : [input.identity.methodSkillId],
       skillPolicy: {
-        allowedToolNames: input.stage === "editor"
-          ? ["skill", "skill_search", "skill_read"]
-          : ["skill", "skill_search", "skill_read", "inspect_schema", "run_sql_readonly"],
+        allowedToolNames: isIsolatedValueStage(input.stage)
+          ? []
+          : input.stage === "editor"
+            ? ["skill", "skill_search", "skill_read"]
+            : ["skill", "skill_search", "skill_read", "inspect_schema", "run_sql_readonly"],
         deniedToolNames: ["list_data_sources", "preview_table"],
         maxSkills: 1,
         requireUserInvocable: true,
@@ -538,6 +663,9 @@ const buildOverviewAiStageRunInput = (input: PreschoolOverviewAiStageInput): Run
     },
   },
 });
+
+const isIsolatedValueStage = (stage: PreschoolOverviewAiStage): boolean =>
+  stage === "section-interpreter" || stage === "executive-synthesis" || stage === "template-proposal";
 
 type HandleCopilotKitRequestInput = {
   artifactService: LocalArtifactService;
@@ -622,7 +750,9 @@ type DataFoundryAgUiAgentInput = {
   knowledgeService: LocalKnowledgeService;
   memoryExtractionTimeoutMs: number;
   /** Server-created Overview Artifact stage; never accepted from browser props. */
-  overviewAiStage?: "investigator" | "editor";
+  overviewAiStage?: PreschoolOverviewAiStage;
+  /** Server-created Pack-v2 override; never accepted from browser props. */
+  overviewAiTrustedRuntimeOverride?: OverviewAiTrustedRuntimeOverride;
   runCancelRegistry: RunCancelRegistry;
   taskStateRuntime: TaskStateRuntime;
   traceSectionSummaries: boolean;
@@ -660,8 +790,12 @@ class DataFoundryAgUiAgent extends AbstractAgent {
           runId === runInput.runId ? runInput : { ...runInput, runId };
         const userInput = extractLastUserText(normalizedRunInput) ?? "CopilotKit AG-UI run";
         const overviewAiStageOptions = this.input.overviewAiStage
-          ? resolveOverviewAiStageRuntimeOptions(this.input.overviewAiStage)
+          ? resolveOverviewAiAgentRuntimeOptions(
+              this.input.overviewAiStage,
+              this.input.overviewAiTrustedRuntimeOverride,
+            )
           : undefined;
+        const useEnergyContext = shouldUseEnergyContextForOverviewAiStage(this.input.overviewAiStage);
         let effectiveRunConfig;
         let mcpRuntime;
         let modelContextProfile;
@@ -678,7 +812,9 @@ class DataFoundryAgUiAgent extends AbstractAgent {
         let publishedProjectRelease: PublishedProjectRelease | null = null;
         let trustedEnergyTextContract: TrustedEnergyTextQueryContract | undefined;
         try {
-          const energyRequest = extractEnergyQueryContextRequest(normalizedRunInput);
+          const energyRequest = useEnergyContext
+            ? extractEnergyQueryContextRequest(normalizedRunInput)
+            : undefined;
           const trustedTextIntent = extractTrustedEnergyTextIntent(normalizedRunInput);
           if (trustedTextIntent && !energyRequest) {
             throw new Error("TRUSTED_ENERGY_TEXT_CONTEXT_REQUIRED");
@@ -753,7 +889,7 @@ class DataFoundryAgUiAgent extends AbstractAgent {
             selectedSkills,
             skillSelection
           } = resolveRunConfig({
-            ...(energyScopedDataSource?.datasourceId || this.input.defaultDatasourceId
+            ...(useEnergyContext && (energyScopedDataSource?.datasourceId || this.input.defaultDatasourceId)
               ? { defaultDatasourceId: energyScopedDataSource?.datasourceId ?? this.input.defaultDatasourceId }
               : {}),
             metadataStore: this.input.metadataStore,
@@ -766,7 +902,7 @@ class DataFoundryAgUiAgent extends AbstractAgent {
             workspaceId: this.input.workspaceId
           }));
           if (overviewAiStageOptions) reasoningModel = overviewAiStageOptions.reasoningModel;
-          if (energyScopedDataSource) {
+          if (useEnergyContext && energyScopedDataSource) {
             effectiveRunConfig = {
               ...effectiveRunConfig,
               activeDatasourceId: energyScopedDataSource.datasourceId,
@@ -860,6 +996,9 @@ class DataFoundryAgUiAgent extends AbstractAgent {
 
         const memoryAssembly = await createRunMemoryAssembly({
           conversationMemoryMode: this.input.conversationMemoryMode,
+          ...(overviewAiStageOptions?.conversationMessageMaxChars
+            ? { conversationMessageMaxChars: overviewAiStageOptions.conversationMessageMaxChars }
+            : {}),
           isResume,
           metadataStore: this.input.metadataStore,
           model: modelProvider.model,
@@ -984,11 +1123,15 @@ class DataFoundryAgUiAgent extends AbstractAgent {
           ...(overviewAiStageOptions
             ? {
                 analysisRequirementsMode: overviewAiStageOptions.analysisRequirementsMode,
+                ...(overviewAiStageOptions.disableTools ? { disableTools: true } : {}),
                 ...(overviewAiStageOptions.overviewAiCandidateSubmission
                   ? { overviewAiCandidateSubmission: true }
                   : {}),
                 ...(overviewAiStageOptions.excludedToolNames.length > 0
                   ? { excludedToolNames: overviewAiStageOptions.excludedToolNames }
+                  : {}),
+                ...(overviewAiStageOptions.structuredOutput
+                  ? { structuredOutput: overviewAiStageOptions.structuredOutput }
                   : {}),
               }
             : {}),

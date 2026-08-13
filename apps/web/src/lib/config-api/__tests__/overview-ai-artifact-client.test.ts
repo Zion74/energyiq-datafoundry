@@ -56,4 +56,33 @@ describe("Overview AI Artifact client controls", () => {
       expect.any(Object),
     );
   });
+
+  it("sends only the selected failed Section as the retry target", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      success: true,
+      data: {
+        status: "available",
+        dataSnapshotId: "snapshot-may",
+        projectReleaseId: "release-may",
+      },
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await configApi.retryEnergyOverviewAiArtifact(
+      "preschool-demo",
+      "preschool-project",
+      {
+        from: "2026-05-01",
+        to: "2026-05-31",
+        dataSnapshotId: "snapshot-may",
+        projectReleaseId: "release-may",
+      },
+      "standby-wastage",
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/overview-ai-artifact/retry?"),
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ targetId: "standby-wastage" }) }),
+    );
+  });
 });

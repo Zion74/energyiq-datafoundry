@@ -15,6 +15,7 @@ import { useRouter } from "next/navigation";
 import {
   clearConfigApiIdentity,
   configApi,
+  isLocalDevAdminAvailable,
   isPasswordAuthMode,
   setConfigApiIdentity,
   type ConfigApiIdentity,
@@ -295,16 +296,22 @@ function DevIdentityProvider({ children }: { children: ReactNode }) {
 }
 
 function DevSignedOutScreen({ onContinue }: { onContinue: () => void }) {
+  const localAdminAvailable = isLocalDevAdminAvailable();
   return (
-    <PasswordAuthShell title="Signed out" subtitle="Local development mode">
+    <PasswordAuthShell title="Local administrator" subtitle="Local development only">
       <div className="flex flex-col gap-4">
         <p className="text-sm leading-relaxed text-muted">
-          Local dev mode uses a built-in account. Continue when you are ready to return to the
-          workspace.
+          Continue with the built-in EnergyIQ administrator. No password is required on this device.
         </p>
-        <button type="button" onClick={onContinue} className={AUTH_BUTTON_CLASS}>
-          Continue as Dev User
-        </button>
+        {localAdminAvailable ? (
+          <button type="button" onClick={onContinue} className={AUTH_BUTTON_CLASS}>
+            Continue as Local Administrator
+          </button>
+        ) : (
+          <p role="alert" className="rounded-md border border-border bg-surface-subtle px-3 py-2 text-xs leading-5 text-muted">
+            Local administrator access is available only from localhost.
+          </p>
+        )}
       </div>
     </PasswordAuthShell>
   );

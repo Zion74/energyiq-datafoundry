@@ -12,8 +12,11 @@ import { ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID } from "../workspace-model-profile-r
 
 import {
   resolveProjectAnalysis,
+  resolveProjectOverviewProfile,
   type ProjectAnalysisSnapshot,
 } from "./project-analysis-resolver.js";
+import { resolveEnergyAccessContext } from "./energy-query-context.js";
+import type { PreschoolSectionId } from "./preschool-overview-ai-contracts.js";
 
 type OverviewAiContract = {
   analysisPackId: string;
@@ -28,6 +31,11 @@ type OverviewAiContract = {
 };
 
 export type OverviewAiArtifactIdentityV13 = EnergyIqOverviewAiArtifactIdentity & OverviewAiContract;
+
+export type PreschoolOverviewAiValueArtifactIdentity = EnergyIqOverviewAiArtifactIdentity & {
+  artifactKind: "section-interpretation" | "executive-synthesis";
+  targetId: string;
+};
 
 const OVERVIEW_AI_CONTRACTS: Readonly<Record<string, OverviewAiContract>> = {
   "preschool-overview": {
@@ -72,6 +80,139 @@ export const createOverviewAiArtifactIdentity = (input: {
     ...contract,
     modelProfileId: input.modelProfileId,
     modelProfileRevision: input.modelProfileRevision,
+  };
+};
+
+export const createPreschoolOverviewAiValueArtifactIdentity = (input: {
+  baseIdentity: OverviewAiArtifactIdentityV13;
+  artifactKind: "section-interpretation" | "executive-synthesis";
+  targetId?: PreschoolSectionId | string;
+}): PreschoolOverviewAiValueArtifactIdentity => {
+  if (!input.targetId?.trim()) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
+  }
+  if (input.artifactKind === "section-interpretation") {
+    return createPreschoolOverviewAiSectionArtifactIdentityV3({
+      baseIdentity: input.baseIdentity,
+      targetId: input.targetId,
+    });
+  }
+  const {
+    artifactKind: _legacyArtifactKind,
+    targetId: _legacyTargetId,
+    identityContractRevision: _legacyIdentityContractRevision,
+    capabilityRevision: _legacyCapabilityRevision,
+    publicationRevision: _legacyPublicationRevision,
+    ...baseIdentity
+  } = input.baseIdentity;
+  return {
+    ...baseIdentity,
+    artifactKind: input.artifactKind,
+    targetId: input.targetId,
+    outputContractRevision: "preschool-executive-synthesis-v1",
+    validatorRevision: "preschool-executive-synthesis-validator-v3",
+    workflowRevision: "preschool-executive-synthesis-v9",
+    investigatorPromptRevision: "preschool-executive-synthesis-prompt-v2",
+    editorPromptRevision: "not-applicable-v1",
+    methodSkillId: "none",
+    methodSkillRevision: "not-applicable-v1",
+  };
+};
+
+export const createPreschoolOverviewAiExecutiveArtifactIdentityV4 = (input: {
+  baseIdentity: OverviewAiArtifactIdentityV13;
+  targetId: string;
+}): PreschoolOverviewAiValueArtifactIdentity => {
+  if (!input.targetId.trim()) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
+  }
+  const {
+    artifactKind: _legacyArtifactKind,
+    targetId: _legacyTargetId,
+    identityContractRevision: _legacyIdentityContractRevision,
+    capabilityRevision: _legacyCapabilityRevision,
+    publicationRevision: _legacyPublicationRevision,
+    ...baseIdentity
+  } = input.baseIdentity;
+  return {
+    ...baseIdentity,
+    artifactKind: "executive-synthesis",
+    targetId: input.targetId,
+    identityContractRevision: "v4",
+    analysisPackId: "preschool-executive-section-artifacts",
+    analysisPackRevision: "section-interpretation-v4",
+    outputContractRevision: "preschool-executive-synthesis-v4",
+    validatorRevision: "preschool-executive-synthesis-validator-v4",
+    workflowRevision: "preschool-executive-synthesis-v4",
+    investigatorPromptRevision: "preschool-executive-synthesis-prompt-v4",
+    editorPromptRevision: "not-applicable-v1",
+    methodSkillId: "none",
+    methodSkillRevision: "not-applicable-v1",
+    capabilityRevision: "section-artifacts-only-v1",
+    publicationRevision: "key-findings-v1",
+  };
+};
+
+export const createPreschoolOverviewAiSectionArtifactIdentityV3 = (input: {
+  baseIdentity: OverviewAiArtifactIdentityV13;
+  targetId: PreschoolSectionId | string;
+}): PreschoolOverviewAiValueArtifactIdentity => {
+  if (!input.targetId.trim()) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
+  }
+  const {
+    artifactKind: _legacyArtifactKind,
+    targetId: _legacyTargetId,
+    identityContractRevision: _identityContractRevision,
+    capabilityRevision: _capabilityRevision,
+    publicationRevision: _publicationRevision,
+    ...baseIdentity
+  } = input.baseIdentity;
+  return {
+    ...baseIdentity,
+    artifactKind: "section-interpretation",
+    targetId: input.targetId,
+    outputContractRevision: "preschool-section-interpretation-v3",
+    validatorRevision: "preschool-section-interpreter-validator-v12",
+    workflowRevision: "preschool-section-interpreter-v14",
+    investigatorPromptRevision: "preschool-section-interpreter-prompt-v14",
+    editorPromptRevision: "not-applicable-v1",
+    methodSkillId: "none",
+    methodSkillRevision: "not-applicable-v1",
+  };
+};
+
+export const createPreschoolOverviewAiSectionArtifactIdentityV4 = (input: {
+  baseIdentity: OverviewAiArtifactIdentityV13;
+  targetId: PreschoolSectionId | string;
+}): PreschoolOverviewAiValueArtifactIdentity => {
+  if (!input.targetId.trim()) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
+  }
+  const {
+    artifactKind: _legacyArtifactKind,
+    targetId: _legacyTargetId,
+    identityContractRevision: _identityContractRevision,
+    capabilityRevision: _capabilityRevision,
+    publicationRevision: _publicationRevision,
+    ...baseIdentity
+  } = input.baseIdentity;
+  return {
+    ...baseIdentity,
+    artifactKind: "section-interpretation",
+    targetId: input.targetId,
+    identityContractRevision: "v4",
+    analysisPackId: "preschool-section-pack",
+    analysisPackRevision: "v2",
+    outputContractRevision: "preschool-section-interpretation-v4",
+    validatorRevision: "acceptance-validator-v1",
+    workflowRevision: "discover-accept-publish-v1",
+    investigatorPromptRevision: "discovery-prompt-v1",
+    editorPromptRevision: "not-applicable-v1",
+    methodSkillId: "none",
+    methodSkillRevision: "not-applicable-v1",
+    capabilityRevision: "pack-only-v1",
+    publicationRevision: "v1",
   };
 };
 
@@ -178,6 +319,70 @@ export const resolveCurrentOverviewAiArtifactIdentity = async (input: {
   return overviewAiArtifactIdentityFromSnapshot({ snapshot: resolution.snapshot, modelBinding });
 };
 
+export const resolvePinnedOverviewAiArtifactReadIdentity = (input: {
+  metadataStore: MetadataStore;
+  projectId: string;
+  scopeId: string;
+  user: UserRecord;
+  pin: {
+    from: string;
+    to: string;
+    dataSnapshotId: string;
+    projectReleaseId: string;
+  };
+}): OverviewAiArtifactIdentityV13 => {
+  const project = input.metadataStore.energyIq.getProject(input.projectId);
+  const access = resolveEnergyAccessContext({
+    metadataStore: input.metadataStore,
+    user: input.user,
+    requestedWorkspaceId: project.workspace_id,
+  });
+  const accessibleProject = access.projects.find((candidate) => candidate.id === project.id);
+  if (!accessibleProject || accessibleProject.workspaceId !== access.activeWorkspaceId) {
+    throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
+  }
+  if (accessibleProject.status !== "published" && access.role !== "admin") {
+    throw new Error("ENERGYIQ_PROJECT_FORBIDDEN");
+  }
+  if (input.scopeId !== project.root_scope_id) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PROJECT_SCOPE_REQUIRED");
+  }
+  if (project.status !== "published") {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RELEASE_REQUIRED");
+  }
+  if (input.pin.dataSnapshotId !== project.data_snapshot_id) {
+    throw new Error("ENERGYIQ_DATA_SNAPSHOT_MISMATCH");
+  }
+
+  const profile = resolveProjectOverviewProfile(project.id);
+  if (!profile || profile.rendererKey !== "preschool-overview") {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_CONTRACT_NOT_FOUND");
+  }
+  const templateRevision = input.metadataStore.energyIq.templates.getLatestProjectRevision(project.id);
+  const currentProjectReleaseId = templateRevision?.revision_id ?? `legacy-profile:${project.id}:1`;
+  if (input.pin.projectReleaseId !== currentProjectReleaseId) {
+    throw new Error("ENERGYIQ_PROJECT_RELEASE_MISMATCH");
+  }
+
+  const from = requireLocalDate(input.pin.from);
+  const to = requireLocalDate(input.pin.to);
+  if (from > to) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PERIOD_INVALID");
+  const modelBinding = input.metadataStore.workspaceDefaultModelProfiles.get(ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID);
+  return createOverviewAiArtifactIdentity({
+    workspaceId: project.workspace_id,
+    projectId: project.id,
+    scopeId: project.root_scope_id,
+    dataSnapshotId: project.data_snapshot_id,
+    projectReleaseId: currentProjectReleaseId,
+    analysisPeriodFrom: zonedStartOfLocalDate(from, project.timezone),
+    analysisPeriodTo: zonedStartOfLocalDate(shiftLocalDate(to, 1), project.timezone),
+    rendererKey: profile.rendererKey,
+    rendererVersion: "1",
+    modelProfileId: WORKSPACE_DEFAULT_MODEL_PROFILE_ID,
+    modelProfileRevision: modelBinding.revision,
+  });
+};
+
 const localDateAtTimezone = (value: string, timezone: string): string => {
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp)) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PERIOD_INVALID");
@@ -197,4 +402,44 @@ const shiftLocalDate = (value: string, days: number): string => {
   const shifted = new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1));
   shifted.setUTCDate(shifted.getUTCDate() + days);
   return shifted.toISOString().slice(0, 10);
+};
+
+const requireLocalDate = (value: string): string => {
+  if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PERIOD_INVALID");
+  }
+  const [year, month, day] = value.split("-").map(Number);
+  const normalized = new Date(Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1)).toISOString().slice(0, 10);
+  if (normalized !== value) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PERIOD_INVALID");
+  return value;
+};
+
+const zonedStartOfLocalDate = (date: string, timezone: string): string => {
+  const [year, month, day] = date.split("-").map(Number);
+  const targetUtc = Date.UTC(year ?? 0, (month ?? 1) - 1, day ?? 1);
+  let candidate = targetUtc;
+  for (let index = 0; index < 3; index += 1) {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date(candidate));
+    const get = (type: Intl.DateTimeFormatPartTypes): number =>
+      Number(parts.find((part) => part.type === type)?.value ?? 0);
+    const observedAsUtc = Date.UTC(
+      get("year"),
+      get("month") - 1,
+      get("day"),
+      get("hour"),
+      get("minute"),
+      get("second"),
+    );
+    candidate += targetUtc - observedAsUtc;
+  }
+  return new Date(candidate).toISOString();
 };

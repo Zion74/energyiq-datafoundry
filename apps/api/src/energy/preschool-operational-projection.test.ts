@@ -172,6 +172,409 @@ describe("Preschool operational projection", () => {
     });
   });
 
+  it("keeps every closed- and operating-hour event in a bounded analysis-ready catalog", () => {
+    const cells = mayCells();
+    const events = [
+      ["L", "2026-05-25", 1],
+      ["L", "2026-05-15", 20],
+      ["L", "2026-05-15", 19],
+      ["E", "2026-05-04", 23],
+      ["N", "2026-05-08", 22],
+    ] as const;
+    events.forEach(([code, localDate, localHour]) => setUsage(cells, code, localDate, localHour, 20));
+    centreCodes.slice(0, 14).forEach((code) => setUsage(cells, code, "2026-05-18", 15, 40));
+
+    const projection = buildPreschoolOperationalProjection({
+      projectRelease: release(),
+      dataSnapshotId: "preschool-snapshot-may-2026",
+      period: {
+        start: "2026-04-30T16:00:00.000Z",
+        endExclusive: "2026-05-31T16:00:00.000Z",
+      },
+      timezone: "Asia/Singapore",
+      analysis: analysis(),
+      calendar: calendar(),
+      centres: centreCodes.map((code) => ({
+        scopeId: scopeId(code),
+        centreCode: code,
+        name: `Centre ${code}`,
+        centreType: "Preschool",
+      })),
+      cells,
+    });
+
+    if (projection.status !== "available") throw new Error(projection.reason.message);
+    const analysisReady = requireAnalysisReady(projection);
+    expect(analysisReady.contract).toEqual({
+      id: "preschool-operational-analysis-ready",
+      version: "1",
+      maximumCellCount: 22_320,
+      eventCapturePolicy: "all qualifying events; no ranking or Top-N truncation",
+      recurrenceGrain: "operating-state x Centre x local-hour x Circuit",
+      minimumPatternComparableObservationCount: 4,
+      similarCentreBasis: "same published centreType",
+    });
+    expect(analysisReady.eventCatalog).toMatchObject({
+      status: "complete",
+      boundedCellCount: 22_320,
+      totalEventCount: 19,
+      capturedEventCount: 19,
+      truncated: false,
+    });
+    expect(analysisReady.eventCatalog.events).toHaveLength(19);
+    expect(new Set(analysisReady.eventCatalog.events.map((event) => event.id)).size).toBe(19);
+    expect(analysisReady.eventCatalog.events.filter((event) => event.operatingState === "closed"))
+      .toHaveLength(5);
+    expect(analysisReady.eventCatalog.events.filter((event) => event.operatingState === "operating"))
+      .toHaveLength(14);
+    expect(analysisReady.eventCatalog.events.every((event) => event.circuits.length === 9))
+      .toBe(true);
+  });
+
+  it("projects Centre-hour-Circuit recurrence without breaking the cross-state Circuit link", () => {
+    const cells = mayCells();
+    setUsage(cells, "L", "2026-05-15", 20, 20);
+    setUsage(cells, "L", "2026-05-22", 20, 20);
+    setUsage(cells, "L", "2026-05-18", 10, 40);
+    setUsage(cells, "L", "2026-05-19", 10, 40);
+
+    const projection = buildPreschoolOperationalProjection({
+      projectRelease: release(),
+      dataSnapshotId: "preschool-snapshot-may-2026",
+      period: {
+        start: "2026-04-30T16:00:00.000Z",
+        endExclusive: "2026-05-31T16:00:00.000Z",
+      },
+      timezone: "Asia/Singapore",
+      analysis: analysis(),
+      calendar: calendar(),
+      centres: centreCodes.map((code) => ({
+        scopeId: scopeId(code),
+        centreCode: code,
+        name: `Centre ${code}`,
+        centreType: "Preschool",
+      })),
+      cells,
+    });
+
+    if (projection.status !== "available") throw new Error(projection.reason.message);
+    const analysisReady = requireAnalysisReady(projection);
+    expect(analysisReady.recurrence.status).toBe("complete");
+    const closed = analysisReady.recurrence.rows.find((row) => (
+      row.centreCode === "L"
+      && row.localHour === 20
+      && row.operatingState === "closed"
+      && row.circuitName === "Plug Load3"
+    ));
+    const operating = analysisReady.recurrence.rows.find((row) => (
+      row.centreCode === "L"
+      && row.localHour === 10
+      && row.operatingState === "operating"
+      && row.circuitName === "Plug Load3"
+    ));
+    expect(closed).toMatchObject({
+      eventCount: 2,
+      comparableObservationCount: 31,
+      dayTypeEventCounts: { weekday: 2, weekend: 0, calendarException: 0 },
+      circuitPresence: { status: "available", observedCount: 31, comparableObservationCount: 31 },
+    });
+    expect(operating).toMatchObject({
+      eventCount: 2,
+      comparableObservationCount: 19,
+      dayTypeEventCounts: { weekday: 2, weekend: 0, calendarException: 0 },
+      circuitPresence: { status: "available", observedCount: 19, comparableObservationCount: 19 },
+    });
+    expect(closed?.centreCircuitLinkKey).toBe(`preschool-centre-circuit:${scopeId("L")}:${scopeId("L")}-plug-load3`);
+    expect(operating?.centreCircuitLinkKey).toBe(closed?.centreCircuitLinkKey);
+  });
+
+  it("keeps non-leading Circuit contributors addressable instead of reducing recurrence to the Top Circuit", () => {
+    const cells = mayCells();
+    setUsage(cells, "L", "2026-05-15", 20, 20);
+    setUsage(cells, "L", "2026-05-22", 20, 20);
+
+    const projection = buildPreschoolOperationalProjection({
+      projectRelease: release(),
+      dataSnapshotId: "preschool-snapshot-may-2026",
+      period: {
+        start: "2026-04-30T16:00:00.000Z",
+        endExclusive: "2026-05-31T16:00:00.000Z",
+      },
+      timezone: "Asia/Singapore",
+      analysis: analysis(),
+      calendar: calendar(),
+      centres: centreCodes.map((code) => ({
+        scopeId: scopeId(code),
+        centreCode: code,
+        name: `Centre ${code}`,
+        centreType: "Preschool",
+      })),
+      cells,
+    });
+
+    if (projection.status !== "available") throw new Error(projection.reason.message);
+    const analysisReady = requireAnalysisReady(projection);
+    const heaterRecurrence = analysisReady.recurrence.rows.find((row) => (
+      row.centreCode === "L"
+      && row.localHour === 20
+      && row.operatingState === "closed"
+      && row.circuitName === "Heater"
+    ));
+    expect(heaterRecurrence).toMatchObject({
+      eventCount: 2,
+      leadingEventCount: 0,
+      circuitId: `${scopeId("L")}-heater`,
+      centreCircuitLinkKey: `preschool-centre-circuit:${scopeId("L")}:${scopeId("L")}-heater`,
+    });
+    const eventHeater = analysisReady.eventCatalog.events
+      .find((event) => event.centreCode === "L" && event.localDate === "2026-05-15" && event.localHour === 20)
+      ?.circuits.find((circuit) => circuit.name === "Heater");
+    expect(eventHeater).toMatchObject({
+      role: "contributor",
+      sharePct: 0.1,
+      centreCircuitLinkKey: `preschool-centre-circuit:${scopeId("L")}:${scopeId("L")}-heater`,
+    });
+  });
+
+  it("labels opening, closing, weekend and Calendar-exception boundaries from the published Calendar", () => {
+    const cells = mayCells();
+    setUsage(cells, "A", "2026-05-04", 7, 40);
+    setUsage(cells, "A", "2026-05-05", 18, 40);
+    setUsage(cells, "A", "2026-05-06", 19, 20);
+    setUsage(cells, "A", "2026-05-07", 6, 20);
+    setUsage(cells, "A", "2026-05-16", 10, 20);
+    setUsage(cells, "A", "2026-05-27", 10, 20);
+
+    const projection = buildPreschoolOperationalProjection({
+      projectRelease: release(),
+      dataSnapshotId: "preschool-snapshot-may-2026",
+      period: {
+        start: "2026-04-30T16:00:00.000Z",
+        endExclusive: "2026-05-31T16:00:00.000Z",
+      },
+      timezone: "Asia/Singapore",
+      analysis: analysis(),
+      calendar: calendar(),
+      centres: centreCodes.map((code) => ({
+        scopeId: scopeId(code),
+        centreCode: code,
+        name: `Centre ${code}`,
+        centreType: "Preschool",
+      })),
+      cells,
+    });
+
+    if (projection.status !== "available") throw new Error(projection.reason.message);
+    const analysisReady = requireAnalysisReady(projection);
+    const eventFor = (localDate: string, localHour: number) => analysisReady.eventCatalog.events
+      .find((event) => event.centreCode === "A" && event.localDate === localDate && event.localHour === localHour);
+    expect(eventFor("2026-05-04", 7)?.boundary).toMatchObject({
+      relation: "opening-hour",
+      scheduleSource: "weekly",
+      operatingWindow: { from: "07:00", to: "19:00" },
+    });
+    expect(eventFor("2026-05-05", 18)?.boundary.relation).toBe("last-operating-hour");
+    expect(eventFor("2026-05-06", 19)?.boundary.relation).toBe("first-closed-hour");
+    expect(eventFor("2026-05-07", 6)?.boundary.relation).toBe("pre-opening-hour");
+    expect(eventFor("2026-05-16", 10)).toMatchObject({
+      dayType: "weekend",
+      boundary: { relation: "closed-day", scheduleSource: "weekly", operatingWindow: null },
+    });
+    expect(eventFor("2026-05-27", 10)).toMatchObject({
+      dayType: "calendar_exception",
+      boundary: { relation: "closed-day", scheduleSource: "calendar_exception", operatingWindow: null },
+    });
+  });
+
+  it("exposes the facts needed to distinguish persistent baseload from events without inventing operating context", () => {
+    const cells = mayCells();
+    setUsage(cells, "L", "2026-05-15", 20, 20);
+    setUsage(cells, "L", "2026-05-22", 20, 20);
+
+    const projection = buildPreschoolOperationalProjection({
+      projectRelease: release(),
+      dataSnapshotId: "preschool-snapshot-may-2026",
+      period: {
+        start: "2026-04-30T16:00:00.000Z",
+        endExclusive: "2026-05-31T16:00:00.000Z",
+      },
+      timezone: "Asia/Singapore",
+      analysis: analysis(),
+      calendar: calendar(),
+      centres: centreCodes.map((code) => ({
+        scopeId: scopeId(code),
+        centreCode: code,
+        name: `Centre ${code}`,
+        centreType: "Preschool",
+      })),
+      cells,
+    });
+
+    if (projection.status !== "available") throw new Error(projection.reason.message);
+    const analysisReady = requireAnalysisReady(projection);
+    const recurrence = analysisReady.recurrence.rows.find((row) => (
+      row.centreCode === "L" && row.localHour === 20 && row.operatingState === "closed"
+    ));
+    expect(recurrence?.patternEvidence).toMatchObject({
+      status: "available",
+      comparableObservationCount: 31,
+      eventCount: 2,
+      nonEventObservationCount: 29,
+      positiveCircuitObservationCount: 31,
+      eventRecurrencePct: 6.4516,
+      circuitPresencePct: 100,
+      interpretationStatus: "undetermined",
+    });
+    expect(analysisReady.contextAvailability).toEqual({
+      mustRunSchedule: {
+        status: "unknown",
+        reason: "MUST_RUN_SCHEDULE_NOT_PROVIDED_BY_CANONICAL_INPUTS",
+      },
+      equipmentState: {
+        status: "unknown",
+        reason: "EQUIPMENT_STATE_NOT_PROVIDED_BY_CANONICAL_INPUTS",
+      },
+    });
+  });
+
+  it("marks pattern evidence insufficient when the published Calendar provides fewer than four comparables", () => {
+    const cells = mayCells();
+    cells.forEach((cell) => {
+      cell.usageKwh = 1;
+      cell.circuits.forEach((circuit, index) => {
+        circuit.usageKwh = applianceCircuits[index]![3];
+      });
+      cell.leadingCircuitName = cell.circuits[0]!.name;
+      cell.leadingCircuitKwh = cell.circuits[0]!.usageKwh;
+    });
+    const sparseEvent = cells.find((cell) => (
+      cell.scopeId === scopeId("A") && cell.localDate === "2026-05-11" && cell.localHour === 7
+    ));
+    if (!sparseEvent) throw new Error("Missing sparse-calendar event cell");
+    sparseEvent.usageKwh = 20;
+    sparseEvent.circuits.forEach((circuit, index) => {
+      circuit.usageKwh = 20 * applianceCircuits[index]![3];
+    });
+    sparseEvent.leadingCircuitName = sparseEvent.circuits[0]!.name;
+    sparseEvent.leadingCircuitKwh = sparseEvent.circuits[0]!.usageKwh;
+    const sparseCalendar = calendar();
+    const closedWeek = {
+      monday: [] as Array<{ from: string; to: string }>,
+      tuesday: [] as Array<{ from: string; to: string }>,
+      wednesday: [] as Array<{ from: string; to: string }>,
+      thursday: [] as Array<{ from: string; to: string }>,
+      friday: [] as Array<{ from: string; to: string }>,
+      saturday: [] as Array<{ from: string; to: string }>,
+      sunday: [] as Array<{ from: string; to: string }>,
+    };
+    sparseCalendar.entries[0]!.weekly = {
+      ...closedWeek,
+      monday: [{ from: "07:00", to: "08:00" }],
+    };
+    sparseCalendar.entries[0]!.exceptions = [{ date: "2026-05-04", operating: [], label: "Closed" }];
+    const operatingCells = cells.filter((cell) => (
+      new Date(`${cell.localDate}T00:00:00.000Z`).getUTCDay() === 1
+      && cell.localDate !== "2026-05-04"
+      && cell.localHour === 7
+    ));
+    const operatingKwh = operatingCells.reduce((sum, cell) => sum + cell.usageKwh, 0);
+    const totalKwh = cells.reduce((sum, cell) => sum + cell.usageKwh, 0);
+    const sparseAnalysis = {
+      ...analysis(),
+      offHours: {
+        ...analysis().offHours,
+        operatingKwh,
+        standbyKwh: totalKwh - operatingKwh,
+        usageKwh: totalKwh - operatingKwh,
+        sharePct: ((totalKwh - operatingKwh) / totalKwh) * 100,
+      },
+    };
+
+    const projection = buildPreschoolOperationalProjection({
+      projectRelease: release(),
+      dataSnapshotId: "preschool-snapshot-may-2026",
+      period: {
+        start: "2026-04-30T16:00:00.000Z",
+        endExclusive: "2026-05-31T16:00:00.000Z",
+      },
+      timezone: "Asia/Singapore",
+      analysis: sparseAnalysis,
+      calendar: sparseCalendar,
+      centres: centreCodes.map((code) => ({
+        scopeId: scopeId(code),
+        centreCode: code,
+        name: `Centre ${code}`,
+        centreType: "Preschool",
+      })),
+      cells,
+    });
+
+    if (projection.status !== "available") throw new Error(projection.reason.message);
+    const recurrence = requireAnalysisReady(projection).recurrence.rows.find((row) => (
+      row.centreCode === "A"
+      && row.localHour === 7
+      && row.operatingState === "operating"
+      && row.circuitName === "Plug Load3"
+    ));
+    expect(recurrence?.patternEvidence).toMatchObject({
+      status: "insufficient",
+      comparableObservationCount: 3,
+      availableCircuitObservationCount: 3,
+      eventCount: 1,
+      requiredObservationCount: 4,
+      reason: "NOT_ENOUGH_COMPARABLE_OBSERVATIONS",
+      interpretationStatus: "undetermined",
+    });
+  });
+
+  it("provides same-type Centres without matching recurrence as explicit counterexamples", () => {
+    const cells = mayCells();
+    setUsage(cells, "A", "2026-05-15", 20, 20);
+    setUsage(cells, "A", "2026-05-22", 20, 20);
+    setUsage(cells, "C", "2026-05-15", 20, 20);
+
+    const projection = buildPreschoolOperationalProjection({
+      projectRelease: release(),
+      dataSnapshotId: "preschool-snapshot-may-2026",
+      period: {
+        start: "2026-04-30T16:00:00.000Z",
+        endExclusive: "2026-05-31T16:00:00.000Z",
+      },
+      timezone: "Asia/Singapore",
+      analysis: analysis(),
+      calendar: calendar(),
+      centres: centreCodes.map((code) => ({
+        scopeId: scopeId(code),
+        centreCode: code,
+        name: `Centre ${code}`,
+        centreType: ["A", "B", "C"].includes(code) ? "Preschool" : "Senior Care Center",
+      })),
+      cells,
+    });
+
+    if (projection.status !== "available") throw new Error(projection.reason.message);
+    const analysisReady = requireAnalysisReady(projection);
+    const recurrence = analysisReady.recurrence.rows.find((row) => (
+      row.centreCode === "A"
+      && row.localHour === 20
+      && row.operatingState === "closed"
+      && row.circuitName === "Plug Load3"
+    ));
+    expect(recurrence?.counterexamples).toMatchObject({
+      status: "available",
+      comparisonBasis: "same-centre-type",
+      centreType: "Preschool",
+      centres: [{
+        scopeId: scopeId("B"),
+        centreCode: "B",
+        name: "Centre B",
+        matchingEventCount: 0,
+        comparableObservationCount: 31,
+        centreCircuitLinkKey: `preschool-centre-circuit:${scopeId("B")}:${scopeId("B")}-plug-load3`,
+      }],
+    });
+  });
+
   it.each([
     {
       phase: "Day 1",
@@ -1030,6 +1433,13 @@ const reconcileMayCellTotals = (cells: PreschoolOperationalCell[]): void => {
 };
 
 const scopeId = (centreCode: string): string => `preschool-centre-${centreCode.toLowerCase()}`;
+
+const requireAnalysisReady = (
+  projection: Extract<ReturnType<typeof buildPreschoolOperationalProjection>, { status: "available" }>,
+) => {
+  if (!projection.analysisReady) throw new Error("Expected analysis-ready operational evidence");
+  return projection.analysisReady;
+};
 
 const removeTemporaryFixture = (root: string): void => {
   try {

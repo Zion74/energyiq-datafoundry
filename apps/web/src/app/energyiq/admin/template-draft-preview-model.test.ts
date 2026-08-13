@@ -203,4 +203,22 @@ describe("buildTemplatePreviewRequest", () => {
       batchId: "fact-store",
     });
   });
+
+  it("pins an approved proposal preview to its immutable Snapshot and base Release", () => {
+    expect(buildTemplatePreviewRequest({
+      projectId: "project",
+      scopeId: "project-root",
+      period: "Last 30 days",
+      previewRange: null,
+      customFrom: "",
+      customTo: "",
+      fixedIdentity: {
+        dataSnapshotId: "snapshot-7",
+        projectReleaseId: "project-template-v3",
+      },
+    })).toMatchObject({
+      expectedDataSnapshotId: "snapshot-7",
+      expectedProjectReleaseId: "project-template-v3",
+    });
+  });
 });

@@ -32,6 +32,12 @@ const identity = (
   methodSkillRevision: "1.0.0",
 });
 
+type SectionV4Identity = EnergyIqOverviewAiArtifactIdentity & {
+  identityContractRevision: string;
+  capabilityRevision: string;
+  publicationRevision: string;
+};
+
 describe("EnergyIqOverviewAiArtifactStore", () => {
   it("single-flights one exact identity and keeps Snapshot A immutable when B is queued", () => {
     const root = mkdtempSync(join(tmpdir(), "energyiq-overview-artifact-"));
@@ -151,6 +157,253 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
         now: "2026-08-08T12:00:10.000Z",
       });
       expect(revisedEditor.id).not.toBe(completedA.id);
+    } finally {
+      metadata?.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("hashes new value units independently while keeping a legacy identity canonical", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-overview-artifact-kind-"));
+    let metadata: ReturnType<typeof createMetadataStore> | undefined;
+    try {
+      const store = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+      metadata = store;
+      store.workspaces.upsert({
+        id: "artifact-workspace",
+        owner_user_id: "dev-user",
+        name: "Artifact",
+        kind: "customer",
+      });
+      store.energyIq.upsertProject({
+        id: "artifact-project",
+        workspace_id: "artifact-workspace",
+        name: "Artifact",
+        status: "published",
+      });
+
+      const legacy = store.energyIq.overviewAiArtifacts.queue({
+        identity: identity("snapshot-kind"),
+        triggeredBy: "dev-user",
+      });
+      const benchmarkIdentity: EnergyIqOverviewAiArtifactIdentity = {
+        ...identity("snapshot-kind"),
+        artifactKind: "section-interpretation",
+        targetId: "centre-benchmark",
+      };
+      const standbyIdentity: EnergyIqOverviewAiArtifactIdentity = {
+        ...benchmarkIdentity,
+        targetId: "standby-wastage",
+      };
+      const executiveIdentity: EnergyIqOverviewAiArtifactIdentity = {
+        ...identity("snapshot-kind"),
+        artifactKind: "executive-synthesis",
+        targetId: "sections:none",
+      };
+      const benchmark = store.energyIq.overviewAiArtifacts.queue({
+        identity: benchmarkIdentity,
+        triggeredBy: "dev-user",
+      });
+      const standby = store.energyIq.overviewAiArtifacts.queue({
+        identity: standbyIdentity,
+        triggeredBy: "dev-user",
+      });
+      const executive = store.energyIq.overviewAiArtifacts.queue({
+        identity: executiveIdentity,
+        triggeredBy: "dev-user",
+      });
+
+      expect(new Set([legacy.id, benchmark.id, standby.id, executive.id]).size).toBe(4);
+      expect(JSON.parse(legacy.identity_json)).not.toHaveProperty("artifactKind");
+      expect(JSON.parse(benchmark.identity_json)).toMatchObject({
+        artifactKind: "section-interpretation",
+        targetId: "centre-benchmark",
+      });
+      expect(store.energyIq.overviewAiArtifacts.find({
+        ...benchmarkIdentity,
+        dataSnapshotId: "snapshot-other",
+      })).toBeUndefined();
+      expect(() => store.energyIq.overviewAiArtifacts.queue({
+        identity: { ...identity("snapshot-kind"), artifactKind: "section-interpretation" },
+        triggeredBy: "dev-user",
+      })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
+    } finally {
+      metadata?.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves the released v3 Section identity hash exactly", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-overview-artifact-v3-hash-"));
+    let metadata: ReturnType<typeof createMetadataStore> | undefined;
+    try {
+      const store = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+      metadata = store;
+      seedArtifactProject(store);
+
+      const queued = store.energyIq.overviewAiArtifacts.queue({
+        identity: sectionV3Identity("snapshot-v3-stable"),
+        triggeredBy: "dev-user",
+      });
+
+      expect(queued.identity_hash).toBe("3fcf78c2da58d021f29f489ed87c64ddcb0ee531a9cbc1395ca1107d6321fde5");
+      expect(queued.id).toBe("overview-ai-artifact-3fcf78c2da58d021f29f489e");
+    } finally {
+      metadata?.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("canonicalizes every v4 contract revision and rotates on any revision, Snapshot, Release, model, or period change", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-overview-artifact-v4-identity-"));
+    let metadata: ReturnType<typeof createMetadataStore> | undefined;
+    try {
+      const store = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+      metadata = store;
+      seedArtifactProject(store);
+      const current = sectionV4Identity("snapshot-v4-current");
+      const mutations: EnergyIqOverviewAiArtifactIdentity[] = [
+        { ...current, identityContractRevision: "v5" } as SectionV4Identity,
+        { ...current, analysisPackRevision: "v3" },
+        { ...current, outputContractRevision: "preschool-section-interpretation-v5" },
+        { ...current, validatorRevision: "acceptance-validator-v2" },
+        { ...current, workflowRevision: "discover-accept-publish-v2" },
+        { ...current, investigatorPromptRevision: "discovery-prompt-v2" },
+        { ...current, capabilityRevision: "pack-only-v2" } as SectionV4Identity,
+        { ...current, publicationRevision: "v2" } as SectionV4Identity,
+        { ...current, dataSnapshotId: "snapshot-v4-next" },
+        { ...current, projectReleaseId: "release-v2" },
+        { ...current, modelProfileRevision: 4 },
+        { ...current, analysisPeriodTo: "2026-06-02T00:00:00.000Z" },
+      ];
+      const records = [current, ...mutations].map((artifactIdentity) =>
+        store.energyIq.overviewAiArtifacts.queue({ identity: artifactIdentity, triggeredBy: "dev-user" }));
+
+      expect(JSON.parse(records[0]!.identity_json)).toEqual(current);
+      expect(new Set(records.map((record) => record.id)).size).toBe(records.length);
+    } finally {
+      metadata?.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("stores valid v4 available-with-zero-insights and empty results, but rejects missing summary, contract, or capability", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-overview-artifact-v4-result-"));
+    let metadata: ReturnType<typeof createMetadataStore> | undefined;
+    try {
+      const store = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+      metadata = store;
+      seedArtifactProject(store);
+
+      const availableIdentity = sectionV4Identity("snapshot-v4-available", "centre-benchmark");
+      expect(completeSectionV4(store, availableIdentity, sectionV4Result(availableIdentity, "available")))
+        .toMatchObject({ status: "available", result_json: expect.any(String) });
+
+      const emptyIdentity = sectionV4Identity("snapshot-v4-empty", "planning-outlook");
+      expect(completeSectionV4(store, emptyIdentity, sectionV4Result(emptyIdentity, "empty")))
+        .toMatchObject({ status: "available", result_json: expect.any(String) });
+
+      const missingSummaryIdentity = sectionV4Identity("snapshot-v4-missing-summary");
+      const { summary: _summary, ...withoutSummary } = sectionV4Result(missingSummaryIdentity, "available");
+      expect(() => completeSectionV4(store, missingSummaryIdentity, withoutSummary))
+        .toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+
+      const missingContractIdentity = sectionV4Identity("snapshot-v4-missing-contract");
+      const { contract: _contract, ...withoutContract } = sectionV4Result(missingContractIdentity, "available");
+      expect(() => completeSectionV4(store, missingContractIdentity, withoutContract))
+        .toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+
+      const missingCapabilityIdentity = sectionV4Identity("snapshot-v4-missing-capability");
+      const { capability: _capability, ...withoutCapability } = sectionV4Result(missingCapabilityIdentity, "available");
+      expect(() => completeSectionV4(store, missingCapabilityIdentity, withoutCapability))
+        .toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+
+      const missingBindingIdentity = sectionV4Identity("snapshot-v4-missing-binding");
+      const { binding: _binding, ...withoutBinding } = sectionV4Result(missingBindingIdentity, "available");
+      expect(() => completeSectionV4(store, missingBindingIdentity, withoutBinding))
+        .toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+
+      const missingPublicationIdentity = sectionV4Identity("snapshot-v4-missing-publication");
+      const { publication: _publication, ...withoutPublication } = sectionV4Result(missingPublicationIdentity, "available");
+      expect(() => completeSectionV4(store, missingPublicationIdentity, withoutPublication))
+        .toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+
+      const mismatchedIdentity = sectionV4Identity("snapshot-v4-mismatched-identity");
+      const mismatchedResult = sectionV4Result(mismatchedIdentity, "available");
+      expect(() => completeSectionV4(store, mismatchedIdentity, {
+        ...mismatchedResult,
+        capability: { revision: "pack-only-v2" },
+      })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+    } finally {
+      metadata?.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects malformed v4 capability, Evidence, insight budget, and publication accounting", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-overview-artifact-v4-strict-"));
+    let metadata: ReturnType<typeof createMetadataStore> | undefined;
+    try {
+      const store = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+      metadata = store;
+      seedArtifactProject(store);
+      const reject = (suffix: string, mutate: (result: ReturnType<typeof sectionV4Result>) => unknown) => {
+        const artifactIdentity = sectionV4Identity(`snapshot-v4-strict-${suffix}`);
+        expect(() => completeSectionV4(store, artifactIdentity, mutate(sectionV4Result(artifactIdentity, "available"))))
+          .toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+      };
+
+      reject("capability-mode", (result) => ({
+        ...result,
+        capability: { revision: "pack-only-v1", mode: "tool-enabled", tools: [] },
+      }));
+      reject("capability-tools", (result) => ({
+        ...result,
+        capability: { revision: "pack-only-v1", mode: "pack-only", tools: ["compare_centres"] },
+      }));
+      reject("summary-empty-evidence", (result) => ({
+        ...result,
+        summary: { text: "Unsupported summary.", evidenceRefs: [] },
+      }));
+      reject("summary-duplicate-evidence", (result) => ({
+        ...result,
+        summary: { text: "Duplicated Evidence.", evidenceRefs: ["evidence:summary", "evidence:summary"] },
+      }));
+      reject("insight-empty-evidence", (result) => ({
+        ...result,
+        insights: [sectionV4Insight("insight-1", [])],
+        publication: publication({ discovered: 1, accepted: 1, published: 1 }),
+      }));
+      reject("insight-duplicate-evidence", (result) => ({
+        ...result,
+        insights: [sectionV4Insight("insight-1", ["evidence:1", "evidence:1"])],
+        publication: publication({ discovered: 1, accepted: 1, published: 1 }),
+      }));
+      reject("four-insights", (result) => ({
+        ...result,
+        insights: [1, 2, 3, 4].map((index) => sectionV4Insight(`insight-${index}`, [`evidence:${index}`])),
+        publication: publication({ discovered: 4, accepted: 4, published: 4 }),
+      }));
+      reject("publication-count", (result) => ({
+        ...result,
+        insights: [sectionV4Insight("insight-1", ["evidence:1"])],
+        publication: publication({ discovered: 2, accepted: 1, rejected: 0, published: 1 }),
+      }));
+      reject("suppression-count", (result) => ({
+        ...result,
+        insights: [sectionV4Insight("insight-1", ["evidence:1"])],
+        publication: publication({ discovered: 2, accepted: 2, published: 1, suppressed: [] }),
+      }));
+      reject("suppression-duplicate", (result) => ({
+        ...result,
+        insights: [sectionV4Insight("insight-1", ["evidence:1"])],
+        publication: publication({
+          discovered: 3,
+          accepted: 3,
+          published: 1,
+          suppressed: ["candidate-2", "candidate-2"],
+        }),
+      }));
     } finally {
       metadata?.close();
       rmSync(root, { recursive: true, force: true });
@@ -408,4 +661,137 @@ const acceptedResult = (artifactIdentity: EnergyIqOverviewAiArtifactIdentity, ru
       },
     }],
   };
+};
+
+const seedArtifactProject = (store: ReturnType<typeof createMetadataStore>) => {
+  store.workspaces.upsert({
+    id: "artifact-workspace",
+    owner_user_id: "dev-user",
+    name: "Artifact",
+    kind: "customer",
+  });
+  store.energyIq.upsertProject({
+    id: "artifact-project",
+    workspace_id: "artifact-workspace",
+    name: "Artifact",
+    status: "published",
+  });
+};
+
+const sectionV3Identity = (
+  dataSnapshotId: string,
+  targetId = "centre-benchmark",
+): EnergyIqOverviewAiArtifactIdentity => ({
+  ...identity(dataSnapshotId),
+  analysisPackId: "preschool-analysis-pack",
+  analysisPackRevision: "v1",
+  outputContractRevision: "preschool-section-interpretation-v3",
+  validatorRevision: "preschool-section-interpreter-validator-v12",
+  workflowRevision: "preschool-section-interpreter-v14",
+  investigatorPromptRevision: "preschool-section-interpreter-prompt-v14",
+  editorPromptRevision: "not-applicable-v1",
+  methodSkillId: "none",
+  methodSkillRevision: "not-applicable-v1",
+  artifactKind: "section-interpretation",
+  targetId,
+});
+
+const sectionV4Identity = (
+  dataSnapshotId: string,
+  targetId = "centre-benchmark",
+): SectionV4Identity => ({
+  ...sectionV3Identity(dataSnapshotId, targetId),
+  identityContractRevision: "v4",
+  analysisPackId: "preschool-section-pack",
+  analysisPackRevision: "v2",
+  outputContractRevision: "preschool-section-interpretation-v4",
+  validatorRevision: "acceptance-validator-v1",
+  workflowRevision: "discover-accept-publish-v1",
+  investigatorPromptRevision: "discovery-prompt-v1",
+  capabilityRevision: "pack-only-v1",
+  publicationRevision: "v1",
+});
+
+const sectionV4Result = (
+  artifactIdentity: SectionV4Identity,
+  status: "available" | "empty",
+) => ({
+  artifactKind: "section-interpretation" as const,
+  status,
+  providerProfileId: artifactIdentity.modelProfileId,
+  runId: `run:${artifactIdentity.dataSnapshotId}`,
+  contract: {
+    id: "preschool-section-interpretation",
+    revision: "preschool-section-interpretation-v4",
+  },
+  binding: {
+    workspaceId: artifactIdentity.workspaceId,
+    projectId: artifactIdentity.projectId,
+    scopeId: artifactIdentity.scopeId,
+    dataSnapshotId: artifactIdentity.dataSnapshotId,
+    projectReleaseId: artifactIdentity.projectReleaseId,
+    analysisPeriod: {
+      from: artifactIdentity.analysisPeriodFrom,
+      to: artifactIdentity.analysisPeriodTo,
+    },
+    modelProfileId: artifactIdentity.modelProfileId,
+    modelProfileRevision: artifactIdentity.modelProfileRevision,
+  },
+  sectionId: artifactIdentity.targetId,
+  packRevision: "v2",
+  capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
+  ...(status === "available"
+    ? { summary: { text: "The Section has a concise evidence-backed summary.", evidenceRefs: ["evidence:summary"] } }
+    : {}),
+  insights: [],
+  publication: {
+    policyId: "preschool-section-publication",
+    policyRevision: "v1",
+    discoveredCount: 0,
+    acceptedCount: 0,
+    rejectedCount: 0,
+    publishedCount: 0,
+    suppressedCandidateIds: [],
+  },
+});
+
+const sectionV4Insight = (id: string, evidenceRefs: string[]) => ({
+  id,
+  title: "A concise supported angle",
+  epistemicStatus: "inferred",
+  text: "The supplied Evidence supports this relationship.",
+  evidenceRefs,
+});
+
+const publication = (input: {
+  discovered: number;
+  accepted: number;
+  rejected?: number;
+  published: number;
+  suppressed?: string[];
+}) => ({
+  policyId: "preschool-section-publication",
+  policyRevision: "v1",
+  discoveredCount: input.discovered,
+  acceptedCount: input.accepted,
+  rejectedCount: input.rejected ?? input.discovered - input.accepted,
+  publishedCount: input.published,
+  suppressedCandidateIds: input.suppressed ?? [],
+});
+
+const completeSectionV4 = (
+  store: ReturnType<typeof createMetadataStore>,
+  artifactIdentity: SectionV4Identity,
+  result: unknown,
+) => {
+  store.energyIq.overviewAiArtifacts.queue({ identity: artifactIdentity, triggeredBy: "dev-user" });
+  const workerId = `worker:${artifactIdentity.dataSnapshotId}`;
+  store.energyIq.overviewAiArtifacts.claim({ identity: artifactIdentity, workerId, leaseMs: 60_000 });
+  return store.energyIq.overviewAiArtifacts.complete({
+    identity: artifactIdentity,
+    workerId,
+    sessionId: `session:${artifactIdentity.dataSnapshotId}`,
+    runId: `run:${artifactIdentity.dataSnapshotId}`,
+    resultJson: JSON.stringify(result),
+  });
 };

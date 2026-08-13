@@ -9,7 +9,11 @@ import { EnergyIcon } from "./icons";
 import { AiFindingPresentationView } from "./ai-finding-presentation-view";
 import { projectExplorerHrefForScope } from "./overview-explorer-handoff";
 import { PreschoolEvidenceLink } from "./preschool-evidence-link";
-import { PreschoolAiSlot } from "./preschool-ai-slot";
+import {
+  isPreschoolOverviewAiReadModelRenderable,
+  isPreschoolSavedAiArtifactIdentityMatch,
+  PreschoolAiSlot,
+} from "./preschool-ai-slot";
 import type { PreschoolAiRunResult } from "./preschool-ai-run";
 import { PreschoolForecastPanel } from "./preschool-forecast-panel";
 import { buildPreschoolOverviewCoverage } from "./preschool-ai-coverage";
@@ -74,7 +78,10 @@ export function PreschoolOverviewRenderer({
   standbyInterpretation?: PreschoolStandbyInterpretation;
   operatingInterpretation?: PreschoolOperatingInterpretation;
 }) {
-  const [liveAiResult, setLiveAiResult] = React.useState<PreschoolAiRunResult | undefined>();
+  const [liveAiState, setLiveAiState] = React.useState<{
+    snapshotIdentity: string;
+    result: PreschoolAiRunResult;
+  }>();
   const readySnapshotIdentity = state.status === "ready"
     ? [
         state.snapshot.dataSnapshot.id,
@@ -83,7 +90,12 @@ export function PreschoolOverviewRenderer({
         state.snapshot.context.primaryPeriod.endExclusive,
       ].join("|")
     : state.status;
-  React.useEffect(() => setLiveAiResult(undefined), [readySnapshotIdentity]);
+  const liveAiResult = liveAiState?.snapshotIdentity === readySnapshotIdentity
+    ? liveAiState.result
+    : undefined;
+  const acceptLiveAiResult = React.useCallback((result: PreschoolAiRunResult) => {
+    setLiveAiState({ snapshotIdentity: readySnapshotIdentity, result });
+  }, [readySnapshotIdentity]);
 
   if (state.status !== "ready") {
     const meta = {
@@ -124,17 +136,22 @@ export function PreschoolOverviewRenderer({
 
   const view = buildPreschoolOverviewViewModel(state.snapshot);
   const savedAiResult = savedAiArtifact?.rendererKey === "preschool-overview"
+    && isPreschoolSavedAiArtifactIdentityMatch(savedAiArtifact, state.snapshot)
     ? savedAiArtifact.result as unknown as Extract<import("./preschool-ai-run").PreschoolAiRunResult, { status: "available" }>
     : undefined;
   const coverage = buildPreschoolOverviewCoverage(state.snapshot);
   const sectionAiResult = aiSlotMode === "saved" ? savedAiResult : liveAiResult;
-  const adaptedBenchmarkInterpretation = adaptPreschoolAiArtifactToSectionInterpretation({
+  const sectionedAiResult = isPreschoolOverviewAiReadModelRenderable(sectionAiResult, state.snapshot, aiSlotMode);
+  const aiSlotSharedProps = aiSlotMode === "saved"
+    ? (savedAiResult ? { savedResult: savedAiResult } : {})
+    : { liveResult: liveAiResult, onResult: acceptLiveAiResult };
+  const adaptedBenchmarkInterpretation = sectionedAiResult ? undefined : adaptPreschoolAiArtifactToSectionInterpretation({
     candidate: sectionAiResult,
     expected: coverage?.binding ?? null,
     target: "preschool.benchmark",
     mode: aiSlotMode,
   });
-  const adaptedStandbyInterpretation = adaptPreschoolAiArtifactToSectionInterpretation({
+  const adaptedStandbyInterpretation = sectionedAiResult ? undefined : adaptPreschoolAiArtifactToSectionInterpretation({
     candidate: sectionAiResult,
     expected: coverage?.binding ?? null,
     target: "preschool.standby",
@@ -167,7 +184,7 @@ export function PreschoolOverviewRenderer({
         <header className="grid gap-5 border-b border-border px-5 py-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start lg:px-7">
           <div className="min-w-0">
             <p className="text-sm font-semibold text-foreground">{view.context.projectName}</p>
-            <h2 className="mt-2 text-2xl font-semibold tracking-[-0.025em] text-foreground">Portfolio energy overview</h2>
+            <h2 className="mt-2 text-2xl font-semibold tracking-[-0.025em] text-foreground">Energy Review</h2>
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted">
               <span className="inline-flex items-center gap-1.5"><EnergyIcon name="calendar" className="h-3.5 w-3.5 text-muted-light" />{view.context.period}</span>
               <span>{view.context.timezone}</span>
@@ -195,8 +212,8 @@ export function PreschoolOverviewRenderer({
         <SectionHeader
           id="preschool-overall-summary-heading"
           sectionNumber={1}
-          title="Overall consumption summary"
-          description={`Total portfolio energy and estimated cost across all ${view.overallSummary.total.centreCount} Centres, followed by the key findings that organise the rest of this report.`}
+          title="Overall metrics"
+          description={`Energy use and estimated cost across ${view.overallSummary.total.centreCount} Centres.`}
           meta={view.context.period}
         />
 
@@ -244,7 +261,7 @@ export function PreschoolOverviewRenderer({
               </tbody>
               <tfoot className="border-t-2 border-border bg-surface-subtle font-semibold text-foreground">
                 <tr>
-                  <th scope="row" className="px-4 py-3">Portfolio total</th>
+                  <th scope="row" className="px-4 py-3">All centres</th>
                   <td className="px-4 py-3 text-right tabular-nums">{view.overallSummary.total.centreCount}</td>
                   <td className="px-4 py-3 text-right tabular-nums">{view.overallSummary.total.energy}</td>
                   <td className="px-4 py-3 text-right tabular-nums">{view.overallSummary.total.estimatedCost}</td>
@@ -273,8 +290,14 @@ export function PreschoolOverviewRenderer({
         <div id="preschool-decision-summary" className="mt-8 scroll-mt-28 border-t border-border pt-7">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h4 id="preschool-decision-summary-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Key findings · Sections 2–5</h4>
-              <p className="mt-1.5 text-sm leading-6 text-muted">A compact, Snapshot-bound directory to the detailed analysis below.</p>
+              <div className="flex flex-wrap items-center gap-2.5">
+                <h4 id="preschool-decision-summary-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">At a glance</h4>
+                <span className="inline-flex items-center gap-1 rounded-full bg-step-success-soft px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.06em] text-step-success">
+                  <EnergyIcon name="check" className="h-3 w-3" />
+                  Snapshot facts
+                </span>
+              </div>
+              <p className="mt-1.5 text-sm leading-6 text-muted">A deterministic fallback and navigation list from Sections 2–5. These points are not AI-generated.</p>
             </div>
             <span className="text-xs font-semibold text-muted">Select a finding to open its section</span>
           </div>
@@ -286,12 +309,14 @@ export function PreschoolOverviewRenderer({
             </div>
           ) : (
             <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
-              <p className="text-sm font-semibold text-muted">Key findings unavailable</p>
+              <p className="text-sm font-semibold text-muted">Verified highlights unavailable</p>
               <p className="mt-2 text-sm leading-6 text-muted">{view.decisionSummary.detail}</p>
             </div>
           )}
           {view.decisionSummary.items.length > 0 ? (
-            <p className="mt-3 text-xs leading-5 text-muted">{view.decisionSummary.detail}</p>
+            <p className="mt-3 text-xs leading-5 text-muted">
+              Snapshot facts for Sections 2–5. Key Findings appear below, while Section interpretations stay beside their supporting analysis.
+            </p>
           ) : null}
         </div>
 
@@ -300,27 +325,15 @@ export function PreschoolOverviewRenderer({
             snapshot={state.snapshot}
             sectionId="page-synthesis"
             mode={aiSlotMode}
-            {...(savedAiResult ? { savedResult: savedAiResult } : {})}
-            onResult={setLiveAiResult}
+            {...aiSlotSharedProps}
             {...(onAiArtifactChange ? {
-              onCompletedResult: (result: Extract<import("./preschool-ai-run").PreschoolAiRunResult, { status: "available" }>) => onAiArtifactChange({
-                contract: "energyiq-saved-ai-result@1",
-                rendererKey: "preschool-overview",
-                snapshotId: state.snapshot.dataSnapshot.id,
-                projectReleaseId: state.snapshot.projectRelease.id,
-                result,
-              }),
+              onCompletedResult: (result: Extract<import("./preschool-ai-run").PreschoolAiRunResult, { status: "available" }>) =>
+                onAiArtifactChange(toSavedPreschoolAiArtifact(state.snapshot, result)),
             } : {})}
             {...(aiAnalystHref ? { aiAnalystHref } : {})}
           />
-          <PreschoolAiSlot
-            snapshot={state.snapshot}
-            sectionId="overall-summary"
-            mode={aiSlotMode}
-            {...(savedAiResult ? { savedResult: savedAiResult } : {})}
-            {...(aiAnalystHref ? { aiAnalystHref } : {})}
-          />
         </div>
+
       </section>
 
       <section id="preschool-benchmark-analysis" aria-labelledby="preschool-benchmark-analysis-heading" data-overview-section="2" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
@@ -330,9 +343,18 @@ export function PreschoolOverviewRenderer({
           title="Benchmark Analysis"
           description="Compare Centres after normalising for floor area and people served, then identify who should be reviewed first."
         />
-        <BenchmarkInterpretationSlot
+        {!sectionedAiResult || benchmarkInterpretation ? (
+          <BenchmarkInterpretationSlot
+            snapshot={state.snapshot}
+            interpretation={benchmarkInterpretation ?? adaptedBenchmarkInterpretation}
+          />
+        ) : null}
+        <PreschoolAiSlot
           snapshot={state.snapshot}
-          interpretation={benchmarkInterpretation ?? adaptedBenchmarkInterpretation}
+          sectionId="centre-benchmark"
+          mode={aiSlotMode}
+          {...aiSlotSharedProps}
+          {...(aiAnalystHref ? { aiAnalystHref } : {})}
         />
         {view.benchmark.status === "provisional" ? (
           <>
@@ -414,9 +436,18 @@ export function PreschoolOverviewRenderer({
           title="Standby Energy Wastage — Post Operating Hours"
           description="How much energy remains after closing, what stays powered, and which Centres and hours need an after-hours review?"
         />
-        <StandbyInterpretationSlot
+        {!sectionedAiResult || standbyInterpretation ? (
+          <StandbyInterpretationSlot
+            snapshot={state.snapshot}
+            interpretation={standbyInterpretation ?? adaptedStandbyInterpretation}
+          />
+        ) : null}
+        <PreschoolAiSlot
           snapshot={state.snapshot}
-          interpretation={standbyInterpretation ?? adaptedStandbyInterpretation}
+          sectionId="standby-wastage"
+          mode={aiSlotMode}
+          {...aiSlotSharedProps}
+          {...(aiAnalystHref ? { aiAnalystHref } : {})}
         />
         {view.operational.status === "available" ? (
           <>
@@ -467,9 +498,18 @@ export function PreschoolOverviewRenderer({
           title="Operating Hours Analysis"
           description="How much energy is used while Centres are open, which Appliances account for it, and which Centres and hours need an operating review?"
         />
-        <OperatingInterpretationSlot
+        {!sectionedAiResult || operatingInterpretation ? (
+          <OperatingInterpretationSlot
+            snapshot={state.snapshot}
+            interpretation={operatingInterpretation}
+          />
+        ) : null}
+        <PreschoolAiSlot
           snapshot={state.snapshot}
-          interpretation={operatingInterpretation}
+          sectionId="operating-behaviour"
+          mode={aiSlotMode}
+          {...aiSlotSharedProps}
+          {...(aiAnalystHref ? { aiAnalystHref } : {})}
         />
         {view.operational.status === "available" ? (
           <>
@@ -525,10 +565,18 @@ export function PreschoolOverviewRenderer({
           snapshot={state.snapshot}
           sectionId="planning-outlook"
           mode={aiSlotMode}
-          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
+          {...aiSlotSharedProps}
           {...(aiAnalystHref ? { aiAnalystHref } : {})}
         />
       </section>
+
+      <PreschoolAiSlot
+        snapshot={state.snapshot}
+        sectionId="overall-summary"
+        mode={aiSlotMode}
+        {...aiSlotSharedProps}
+        {...(aiAnalystHref ? { aiAnalystHref } : {})}
+      />
 
       <div className="grid gap-0 xl:grid-cols-[minmax(0,1fr)_320px]">
         <aside id="preschool-centre-ranking" aria-labelledby="preschool-centre-ranking-heading" className="min-w-0 scroll-mt-28 px-5 py-7 lg:px-7 lg:py-8">
@@ -601,6 +649,28 @@ export function PreschoolOverviewRenderer({
     </section>
   );
 }
+
+const toSavedPreschoolAiArtifact = (
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  result: Extract<PreschoolAiRunResult, { status: "available" }>,
+): EnergySavedAnalysisAiArtifactInputDto => {
+  if (isPreschoolOverviewAiReadModelRenderable(result, snapshot, "live")) {
+    return {
+      contract: "energyiq-saved-ai-result@2",
+      rendererKey: "preschool-overview",
+      snapshotId: snapshot.dataSnapshot.id,
+      projectReleaseId: snapshot.projectRelease.id,
+      result,
+    };
+  }
+  return {
+    contract: "energyiq-saved-ai-result@1",
+    rendererKey: "preschool-overview",
+    snapshotId: snapshot.dataSnapshot.id,
+    projectReleaseId: snapshot.projectRelease.id,
+    result,
+  };
+};
 
 function SectionHeader({
   id,

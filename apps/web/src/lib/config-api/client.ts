@@ -29,7 +29,11 @@ import type {
   EnergyProjectRuleConfigResponseDto,
   EnergyProjectTemplateDraftResponseDto,
   EnergyPublishedTemplateResponseDto,
+  EnergyTemplateChangeContextDto,
+  EnergyTemplateChangePreviewDto,
+  EnergyTemplateChangeProposalDto,
   EnergyTemplateDraftDocumentDto,
+  EnergyTemplateRevisionDto,
   EnergyProjectHierarchyDto,
   EnergyProjectRecordDto,
   EnergyProjectSetupDocumentDto,
@@ -120,7 +124,18 @@ export function getConfigApiBaseUrl(): string {
 }
 
 export function isPasswordAuthMode(): boolean {
-  return process.env.NEXT_PUBLIC_DATAFOUNDRY_AUTH_MODE === "password";
+  const configured = process.env.NEXT_PUBLIC_DATAFOUNDRY_AUTH_MODE;
+  if (configured === "password") return true;
+  if (configured === "dev") return false;
+  return process.env.NODE_ENV === "production";
+}
+
+export function isLocalDevAdminAvailable(hostname?: string): boolean {
+  if (isPasswordAuthMode()) return false;
+  const resolvedHostname = hostname ?? (typeof window === "undefined" ? "" : window.location.hostname);
+  return resolvedHostname === "localhost"
+    || resolvedHostname === "127.0.0.1"
+    || resolvedHostname === "::1";
 }
 
 export function getAgentRuntimeUrl(): string {
@@ -519,6 +534,48 @@ export const configApi = {
     );
   },
 
+  getEnergyTemplateChangeContext(projectId: string): Promise<EnergyTemplateChangeContextDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/template-change-context`,
+    );
+  },
+
+  proposeEnergyTemplateChange(
+    projectId: string,
+    body: { instruction: string; scopeId?: string },
+  ): Promise<{
+    proposal: EnergyTemplateChangeProposalDto;
+    generation: { runId: string; sessionId: string };
+  }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/template-change-proposals`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  },
+
+  previewEnergyTemplateChange(projectId: string, proposalId: string): Promise<EnergyTemplateChangePreviewDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/template-change-proposals/${encodeURIComponent(proposalId)}/preview`,
+    );
+  },
+
+  rejectEnergyTemplateChange(projectId: string, proposalId: string): Promise<{ proposal: EnergyTemplateChangeProposalDto }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/template-change-proposals/${encodeURIComponent(proposalId)}/reject`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  },
+
+  publishEnergyTemplateChange(projectId: string, proposalId: string): Promise<{
+    proposal: EnergyTemplateChangeProposalDto;
+    revision: EnergyTemplateRevisionDto;
+  }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/template-change-proposals/${encodeURIComponent(proposalId)}/publish`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  },
+
   listEnergySavedAnalyses(projectId: string): Promise<{ items: EnergySavedAnalysisSummaryDto[] }> {
     return requestEnvelope(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/saved-analyses`,
@@ -633,11 +690,12 @@ export const configApi = {
     projectId: string,
     scopeId: string,
     pin?: { from: string; to: string; dataSnapshotId: string; projectReleaseId: string },
+    targetId?: "centre-benchmark" | "standby-wastage" | "operating-behaviour" | "planning-outlook" | "executive-synthesis",
   ): Promise<EnergyOverviewAiArtifactDto> {
     const params = overviewAiArtifactParams(scopeId, pin);
     return requestEnvelope<EnergyOverviewAiArtifactDto>(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-ai-artifact/retry?${params.toString()}`,
-      { method: "POST", body: "{}" },
+      { method: "POST", body: JSON.stringify(targetId ? { targetId } : {}) },
     );
   },
 

@@ -49,6 +49,7 @@ import {
 } from "./overview-profile-model";
 import { deriveProjectDeliveryProgress } from "./project-delivery-progress";
 import { TemplateDraftPreview } from "./template-draft-preview";
+import { TemplateChangeProposalPanel } from "./template-change-proposal-panel";
 import {
   buildTemplatePreviewPlan,
   resolveEnergyPreviewRange,
@@ -1443,6 +1444,15 @@ function TemplateLayoutPanel({
           />
         )}
       </div>
+      <TemplateChangeProposalPanel
+        projectId={projectId}
+        setupDocument={document}
+        componentCatalog={componentCatalog}
+        selectedMetricRevisionIds={selectedMetricRevisionIds}
+        selectedRuleRevisionIds={selectedRuleRevisionIds}
+        businessCalendarVersion={businessCalendarVersion}
+        previewRange={previewRange}
+      />
     </section>
   );
 }

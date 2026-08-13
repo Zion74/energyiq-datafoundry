@@ -1537,7 +1537,7 @@ function buildPreschoolDecisionSummary(
   return {
     items,
     detail: items.length > 0
-      ? "Snapshot-bound findings for Sections 2–5. AI interpretation is shown after this structured summary and beside the relevant analysis section."
+      ? "At-a-glance Snapshot facts for Sections 2–5. The AI Executive Summary appears above, while Section interpretations stay beside their supporting analysis."
       : signals?.reason?.message
         ?? "Verified decision signals and the next-month Planning Baseline are unavailable for this Snapshot.",
   };

@@ -1,10 +1,16 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
+import { standardSchemaToJSONSchema, type StandardSchemaWithJSON } from "@mastra/core/schema";
 
-import { createDataFoundry } from "./index.js";
+import {
+  createDataFoundry,
+  createModelProviderFromProfile,
+  type CreateDataFoundryInput,
+} from "./index.js";
 
 const workspaceRoots: string[] = [];
 
@@ -25,6 +31,9 @@ const createEnergyIqAgent = async (
     dataGateway?: unknown;
     emittedEvents?: unknown[];
     overviewAiCandidateSubmission?: boolean;
+    disableTools?: boolean;
+    structuredOutput?: CreateDataFoundryInput["structuredOutput"];
+    modelProvider?: CreateDataFoundryInput["modelProvider"];
   } = {},
 ) => {
   const workspaceRoot = mkdtempSync(join(tmpdir(), "datafoundry-agent-policy-"));
@@ -34,9 +43,11 @@ const createEnergyIqAgent = async (
     dataGateway: (options.dataGateway ?? {}) as never,
     emitter: { emit: (event: unknown) => { options.emittedEvents?.push(event); } },
     excludedToolNames,
+    ...(options.disableTools ? { disableTools: true } : {}),
+    ...(options.structuredOutput ? { structuredOutput: options.structuredOutput } : {}),
     explicitProtocol: { protocolId: "data-analysis", protocolVersion: "1" },
     messages: [],
-    modelProvider: {
+    modelProvider: options.modelProvider ?? {
       kind: "openai-compatible",
       model: "openai/test-model",
       model_name: "test-model",
@@ -72,6 +83,116 @@ const createEnergyIqAgent = async (
 };
 
 describe("EnergyIQ agent policy follows the enabled tool set", () => {
+  it("attaches no tools when a bounded value stage disables tools", async () => {
+    const runtime = await createEnergyIqAgent([], { disableTools: true });
+
+    try {
+      expect(await runtime.agent.listTools()).toEqual({});
+    } finally {
+      await runtime.destroyWorkspace();
+    }
+  });
+
+  it("passes a bounded value stage schema into Mastra default execution options", async () => {
+    const structuredOutput = {
+      errorStrategy: "strict" as const,
+      schema: {
+        type: "object" as const,
+        additionalProperties: false as const,
+        properties: { sections: { type: "array" as const } },
+        required: ["sections"],
+      },
+    };
+    const runtime = await createEnergyIqAgent([], { disableTools: true, structuredOutput });
+
+    try {
+      const defaults = await runtime.agent.getDefaultOptions() as unknown as {
+        structuredOutput: { schema: StandardSchemaWithJSON };
+      };
+      expect(standardSchemaToJSONSchema(defaults.structuredOutput.schema)).toMatchObject(structuredOutput.schema);
+    } finally {
+      await runtime.destroyWorkspace();
+    }
+  });
+
+  it("sends native JSON mode through the streaming Provider boundary for a bounded value stage", async () => {
+    let requestBody: Record<string, unknown> | undefined;
+    const providerServer = createServer(async (request, response) => {
+      const chunks: Buffer[] = [];
+      for await (const chunk of request) chunks.push(Buffer.from(chunk));
+      requestBody = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>;
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.write(`data: ${JSON.stringify({
+        id: "chatcmpl-structured-output",
+        object: "chat.completion.chunk",
+        created: 0,
+        model: "test-model",
+        choices: [{
+          index: 0,
+          delta: { role: "assistant", content: '{"sections":[{"sectionId":"centre-benchmark","status":"empty"}]}' },
+          finish_reason: null,
+        }],
+      })}\n\n`);
+      response.write(`data: ${JSON.stringify({
+        id: "chatcmpl-structured-output",
+        object: "chat.completion.chunk",
+        created: 0,
+        model: "test-model",
+        choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      })}\n\n`);
+      response.end("data: [DONE]\n\n");
+    });
+    await new Promise<void>((resolve) => providerServer.listen(0, "127.0.0.1", resolve));
+    const address = providerServer.address();
+    if (!address || typeof address === "string") throw new Error("TEST_PROVIDER_ADDRESS_INVALID");
+    const modelProvider = createModelProviderFromProfile({
+      provider: "openai-compatible",
+      model: "test-model",
+      base_url: `http://127.0.0.1:${address.port}/v1`,
+      api_key: "test-key",
+    });
+    if (modelProvider.kind === "mock") throw new Error("TEST_PROVIDER_UNEXPECTED_MOCK");
+    const structuredOutput = {
+      errorStrategy: "strict" as const,
+      schema: {
+        type: "object" as const,
+        additionalProperties: false,
+        properties: {
+          sections: {
+            type: "array" as const,
+            items: {
+              type: "object" as const,
+              additionalProperties: false,
+              properties: {
+                sectionId: { type: "string" as const },
+                status: { type: "string" as const },
+              },
+              required: ["sectionId", "status"],
+            },
+          },
+        },
+        required: ["sections"],
+      },
+    };
+    const runtime = await createEnergyIqAgent([], {
+      disableTools: true,
+      modelProvider,
+      structuredOutput,
+    });
+
+    try {
+      const output = await runtime.agent.stream("Return the requested envelope.");
+      for await (const _chunk of output.fullStream) {
+        // Draining the stream completes validation and the Provider request.
+      }
+      expect(requestBody).toMatchObject({ response_format: { type: "json_object" } });
+    } finally {
+      await runtime.destroyWorkspace();
+      await new Promise<void>((resolve, reject) => providerServer.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
   it("gives a no-tool Editor selection-only instructions instead of requiring Schema or SQL", async () => {
     const runtime = await createEnergyIqAgent([
       "inspect_schema",
@@ -90,6 +211,26 @@ describe("EnergyIQ agent policy follows the enabled tool set", () => {
       expect(text).not.toContain("reuse that inspection's schema_id in run_sql_readonly");
       expect(text).not.toContain("Analyze data by calling tools");
       expect(text).not.toContain("You may query any datasource in the list above");
+    } finally {
+      await runtime.destroyWorkspace();
+    }
+  });
+
+  it("does not attach Workspace Skill tools when a lightweight stage excludes all Skill entrypoints", async () => {
+    const runtime = await createEnergyIqAgent([
+      "skill",
+      "skill_search",
+      "skill_read",
+      "inspect_schema",
+      "run_sql_readonly",
+      "protocol_handoff",
+    ]);
+
+    try {
+      const tools = await runtime.agent.listTools();
+      expect(tools).not.toHaveProperty("skill");
+      expect(tools).not.toHaveProperty("skill_search");
+      expect(tools).not.toHaveProperty("skill_read");
     } finally {
       await runtime.destroyWorkspace();
     }

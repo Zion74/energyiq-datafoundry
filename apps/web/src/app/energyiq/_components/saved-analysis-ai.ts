@@ -1,7 +1,9 @@
 import type {
   EnergyProjectAnalysisSnapshotDto,
   EnergySavedAnalysisAiArtifactInputDto,
+  PreschoolOverviewAiReadModelDto,
 } from "../../../lib/config-api";
+import type { PreschoolAiRunResult } from "./preschool-ai-run";
 
 export async function runSavedAnalysisAiForSnapshot(
   snapshot: EnergyProjectAnalysisSnapshotDto,
@@ -33,6 +35,15 @@ export async function runSavedAnalysisAiForSnapshot(
     if (!input) return null;
     const result = await getOrStartPreschoolAiRun(input);
     if (result.status !== "available") return null;
+    if (isPreschoolSectionedSavedResult(result)) {
+      return {
+        contract: "energyiq-saved-ai-result@2",
+        rendererKey: "preschool-overview",
+        snapshotId: snapshot.dataSnapshot.id,
+        projectReleaseId: snapshot.projectRelease.id,
+        result,
+      };
+    }
     return {
       contract: "energyiq-saved-ai-result@1",
       rendererKey: "preschool-overview",
@@ -44,3 +55,9 @@ export async function runSavedAnalysisAiForSnapshot(
 
   return null;
 }
+
+const isPreschoolSectionedSavedResult = (
+  value: PreschoolAiRunResult,
+): value is PreschoolOverviewAiReadModelDto => value.status === "available"
+  && "artifactKind" in value
+  && value.artifactKind === "preschool-overview-ai-read-model";
