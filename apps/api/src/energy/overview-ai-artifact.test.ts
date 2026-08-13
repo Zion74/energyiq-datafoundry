@@ -72,7 +72,7 @@ describe("createOverviewAiArtifactIdentity", () => {
     })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_CONTRACT_NOT_FOUND");
   });
 
-  it("uses the released v4 Section identity while leaving Executive and the legacy identity unchanged", () => {
+  it("uses the released current Section and Executive identities while leaving legacy history unchanged", () => {
     const legacy = createOverviewAiArtifactIdentity({
       workspaceId: "preschool-demo-org",
       projectId: "preschool-demo",
@@ -124,8 +124,8 @@ describe("createOverviewAiArtifactIdentity", () => {
       baseIdentity: legacy,
       targetId: "sections:current-v4",
     })).toMatchObject({
-      validatorRevision: "preschool-executive-synthesis-validator-v6",
-      workflowRevision: "preschool-executive-synthesis-v6",
+      validatorRevision: "preschool-executive-synthesis-validator-v7",
+      workflowRevision: "preschool-executive-synthesis-v7",
       investigatorPromptRevision: "preschool-executive-synthesis-prompt-v6",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
     });

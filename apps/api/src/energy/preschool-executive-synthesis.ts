@@ -491,20 +491,23 @@ const materializeExecutiveResultV4 = (input: {
     ])),
     ...overviewFacts.flatMap(({ value }) => typeof value === "number" ? [value] : []),
   ];
-  const requireSupportedEvidence = (reference: string): {
+  const requireSupportedEvidence = (
+    reference: string,
+    usedFactIds: Set<string> = usedOverviewFactIds,
+  ): {
     canonicalReference: string;
     owners: Set<PreschoolSectionId>;
   } => {
     const owners = evidenceOwners.get(reference);
     if (owners) return { canonicalReference: reference, owners };
     if (authoritativeEvidence.has(reference)) {
-      usedOverviewFactIds.add(reference);
+      usedFactIds.add(reference);
       return { canonicalReference: reference, owners: new Set() };
     }
     const aliasedFactIds = overviewFactIdsByProvenanceRef.get(reference);
     if (aliasedFactIds?.size === 1) {
       const [factId] = aliasedFactIds;
-      usedOverviewFactIds.add(factId!);
+      usedFactIds.add(factId!);
       return { canonicalReference: factId!, owners: new Set() };
     }
     throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_EVIDENCE_UNSUPPORTED");
@@ -521,8 +524,8 @@ const materializeExecutiveResultV4 = (input: {
   if (hasUnsupportedNumber(summaryText, sourceNumbers)) {
     throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_FACT_UNSUPPORTED");
   }
-  const findings: PreschoolOverviewKeyFinding[] = parsed.findings.map((candidate, index) => {
-    if (!isRecord(candidate)) throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_MALFORMED");
+  const findings: PreschoolOverviewKeyFinding[] = parsed.findings.flatMap((candidate, index) => {
+    if (!isRecord(candidate)) return [];
     const title = cleanText(candidate.title);
     const text = cleanText(candidate.text);
     const sectionIds = stringArray(candidate.sectionIds)?.filter(isPreschoolSectionId);
@@ -534,35 +537,48 @@ const materializeExecutiveResultV4 = (input: {
       || !rawEvidenceRefs || rawEvidenceRefs.length === 0
       || hasBannedCustomerText(title) || hasBannedCustomerText(text)
       || hasUnsupportedNumber(`${title} ${text}`, sourceNumbers)) {
-      throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_FACT_UNSUPPORTED");
+      return [];
     }
     const declaredSections = new Set(sectionIds);
     const evidenceBackedSections = new Set<PreschoolSectionId>();
     const evidenceRefs: string[] = [];
-    for (const reference of rawEvidenceRefs) {
-      const supported = requireSupportedEvidence(reference);
-      const { owners } = supported;
-      if (owners.size > 0 && ![...owners].some((sectionId) => declaredSections.has(sectionId))) {
-        throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_EVIDENCE_UNSUPPORTED");
+    const candidateOverviewFactIds = new Set<string>();
+    try {
+      for (const reference of rawEvidenceRefs) {
+        const supported = requireSupportedEvidence(reference, candidateOverviewFactIds);
+        const { owners } = supported;
+        if (owners.size > 0 && ![...owners].some((sectionId) => declaredSections.has(sectionId))) {
+          return [];
+        }
+        for (const sectionId of owners) {
+          if (declaredSections.has(sectionId)) evidenceBackedSections.add(sectionId);
+        }
+        evidenceRefs.push(supported.canonicalReference);
       }
-      for (const sectionId of owners) {
-        if (declaredSections.has(sectionId)) evidenceBackedSections.add(sectionId);
-      }
-      evidenceRefs.push(supported.canonicalReference);
+    } catch (error) {
+      if (error instanceof Error
+        && error.message === "PRESCHOOL_EXECUTIVE_SYNTHESIS_EVIDENCE_UNSUPPORTED") return [];
+      throw error;
     }
     if ([...declaredSections].some((sectionId) => !evidenceBackedSections.has(sectionId))) {
-      throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_EVIDENCE_UNSUPPORTED");
+      return [];
+    }
+    let alert: PreschoolOverviewKeyFinding["alert"] | undefined;
+    try {
+      alert = parseAlert(candidate.alert);
+    } catch {
+      return [];
     }
     for (const sectionId of declaredSections) contributingSections.add(sectionId);
-    const alert = parseAlert(candidate.alert);
-    return {
+    for (const factId of candidateOverviewFactIds) usedOverviewFactIds.add(factId);
+    return [{
       id: `overview-key-finding-${index + 1}`,
       title,
       text,
       sectionIds: [...declaredSections],
       evidenceRefs: [...new Set(evidenceRefs)],
       ...(alert ? { alert } : {}),
-    };
+    }];
   });
   const sourceSectionArtifactIds = PRESCHOOL_SECTION_IDS.flatMap((sectionId) => {
     const accepted = acceptedBySection.get(sectionId);
@@ -762,12 +778,18 @@ const sectionEvidenceOwners = (
 
 const parseAlert = (value: unknown): PreschoolOverviewKeyFinding["alert"] | undefined => {
   if (value === undefined) return undefined;
-  if (!isRecord(value)
-    || (value.severity !== "attention" && value.severity !== "urgent")
-    || (value.certainty !== "confirmed" && value.certainty !== "anomaly" && value.certainty !== "possible")) {
+  if (!isRecord(value) || (value.severity !== "attention" && value.severity !== "urgent")) {
     throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_FACT_UNSUPPORTED");
   }
-  return { severity: value.severity, certainty: value.certainty };
+  const certainty = value.certainty === "confirmed" || value.certainty === "anomaly" || value.certainty === "possible"
+    ? value.certainty
+    : value.certainty === "observed"
+      ? "anomaly"
+      : value.certainty === "inferred" || value.certainty === "speculative"
+        ? "possible"
+        : null;
+  if (!certainty) throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_FACT_UNSUPPORTED");
+  return { severity: value.severity, certainty };
 };
 
 const validSectionInsightV4 = (value: unknown): boolean => isRecord(value)

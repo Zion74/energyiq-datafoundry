@@ -46,11 +46,16 @@ describe("Preschool Overview AI structured output", () => {
     const executiveProperties = PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4.schema.properties!;
     const executiveSummaryEvidence = executiveProperties.summary!.properties!.evidenceRefs!;
     const executiveFindingEvidence = executiveProperties.findings!.items!.properties!.evidenceRefs!;
+    const executiveAlertCertainty = executiveProperties.findings!.items!.properties!.alert!
+      .properties!.certainty!;
     for (const schema of [
       sectionSummaryEvidence,
       sectionCandidateEvidence,
       executiveSummaryEvidence,
       executiveFindingEvidence,
     ]) expect(schema).not.toHaveProperty("uniqueItems");
+    expect(executiveAlertCertainty.enum).toEqual([
+      "confirmed", "anomaly", "possible", "observed", "inferred", "speculative",
+    ]);
   });
 });

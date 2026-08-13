@@ -432,7 +432,7 @@ describe("Preschool Executive Synthesis", () => {
     });
   });
 
-  it("rejects a Key Finding whose Evidence belongs to a different current-v4 Section", async () => {
+  it("rejects only a Key Finding whose Evidence belongs to a different current-v4 Section", async () => {
     const harness = createHarness();
     const benchmark = completeSectionV4(harness, "centre-benchmark");
     completeSectionV4(harness, "standby-wastage");
@@ -462,9 +462,10 @@ describe("Preschool Executive Synthesis", () => {
     const storedBenchmark = harness.metadata.energyIq.overviewAiArtifacts
       .get(sectionIdentityV4(harness.identity, "centre-benchmark"));
     harness.close();
-    expect(artifact).toMatchObject({
-      status: "failed",
-      error_code: "PRESCHOOL_EXECUTIVE_SYNTHESIS_EVIDENCE_UNSUPPORTED",
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+    expect(JSON.parse(artifact.result_json!)).toMatchObject({
+      sourceSectionArtifactIds: [benchmark.id],
+      findings: [],
     });
     expect(storedBenchmark).toEqual(benchmark);
   });
@@ -525,8 +526,8 @@ describe("Preschool Executive Synthesis", () => {
     harness.close();
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.identity_json)).toMatchObject({
-      validatorRevision: "preschool-executive-synthesis-validator-v6",
-      workflowRevision: "preschool-executive-synthesis-v6",
+      validatorRevision: "preschool-executive-synthesis-validator-v7",
+      workflowRevision: "preschool-executive-synthesis-v7",
       investigatorPromptRevision: "preschool-executive-synthesis-prompt-v6",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
       publicationRevision: "key-findings-v2",
@@ -591,6 +592,7 @@ describe("Preschool Executive Synthesis", () => {
             text: "The benchmark evidence provides the supported Section context.",
             sectionIds: ["centre-benchmark"],
             evidenceRefs: ["evidence:centre-benchmark:insight"],
+            alert: { severity: "attention", certainty: "inferred" },
           }],
         }),
         runId: input.runId,
@@ -618,6 +620,7 @@ describe("Preschool Executive Synthesis", () => {
       overviewEvidence: {
         factIds: ["analysis.summary.closed_hour_share_pct"],
       },
+      findings: [{ alert: { severity: "attention", certainty: "possible" } }],
     });
   });
 

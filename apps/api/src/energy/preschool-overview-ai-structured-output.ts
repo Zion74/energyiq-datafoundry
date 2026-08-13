@@ -160,7 +160,10 @@ const executiveAlertV4: JsonSchema = {
   required: ["severity", "certainty"],
   properties: {
     severity: { type: "string", enum: ["attention", "urgent"] },
-    certainty: { type: "string", enum: ["confirmed", "anomaly", "possible"] },
+    certainty: {
+      type: "string",
+      enum: ["confirmed", "anomaly", "possible", "observed", "inferred", "speculative"],
+    },
   },
 };
 
