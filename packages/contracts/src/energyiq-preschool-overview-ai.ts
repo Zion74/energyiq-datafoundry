@@ -120,10 +120,25 @@ export type PreschoolSectionPublicationAuditV4 = {
   suppressedCandidateIds: string[];
 };
 
+export type PreschoolSectionInsightToolNameV4 =
+  | "compare_centres"
+  | "inspect_time_pattern"
+  | "inspect_load_composition"
+  | "inspect_related_section_signals";
+
 export type PreschoolSectionCapabilityV4 = {
-  revision: "pack-only-v1";
-  mode: "pack-only";
-  tools: [];
+  revision: "scoped-read-only-v1";
+  mode: "scoped-read-only";
+  tools: PreschoolSectionInsightToolNameV4[];
+};
+
+export type PreschoolSectionToolAuditV4 = {
+  auditId: string;
+  runId: string;
+  toolCallId: string;
+  toolName: PreschoolSectionInsightToolNameV4;
+  sourcePackRevision: "preschool-section-pack-v2";
+  evidenceRefs: string[];
 };
 
 type PreschoolSectionInterpretationResultV4Base = {
@@ -138,6 +153,7 @@ type PreschoolSectionInterpretationResultV4Base = {
   sectionId: PreschoolSectionIdV4;
   packRevision: "v2";
   capability: PreschoolSectionCapabilityV4;
+  toolAudits: PreschoolSectionToolAuditV4[];
 };
 
 export type PreschoolSectionInterpretationResultV4 =

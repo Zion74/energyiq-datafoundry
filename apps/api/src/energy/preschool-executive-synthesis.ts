@@ -1,4 +1,8 @@
 import type {
+  AnalysisContextEvidenceCatalog,
+  AnalysisContextEvidenceFact,
+} from "@datafoundry/agent-runtime";
+import type {
   EnergyIqOverviewAiArtifactIdentity,
   EnergyIqOverviewAiArtifactRecord,
   MetadataStore,
@@ -17,8 +21,10 @@ import {
   isPreschoolSectionId,
   preschoolOverviewAiBindingFromIdentity,
   type PreschoolExecutiveKeyFinding,
+  type PreschoolExecutiveOverviewEvidenceLineage,
   type PreschoolExecutiveSynthesisResultV4,
   type PreschoolExecutiveSynthesisResult,
+  type PreschoolOverviewAiBinding,
   type PreschoolOverviewKeyFinding,
   type PreschoolSectionId,
   type PreschoolSectionInterpretationResultV3,
@@ -47,6 +53,7 @@ export type PreschoolExecutiveSynthesizer = {
     baseIdentity: OverviewAiArtifactIdentityV13;
     user: UserRecord;
     retry: boolean;
+    authoritativeOverviewEvidence?: PreschoolAuthoritativeOverviewEvidence;
   }): Promise<EnergyIqOverviewAiArtifactRecord>;
 };
 
@@ -60,9 +67,9 @@ type AcceptedSectionV4 = {
   result: PreschoolSectionInterpretationResultV4 & { status: "available" };
 };
 
-type AuthoritativeOverviewEvidence = {
-  evidenceRefs: string[];
-  promptContext?: unknown;
+export type PreschoolAuthoritativeOverviewEvidence = {
+  binding: PreschoolOverviewAiBinding;
+  catalog: AnalysisContextEvidenceCatalog;
 };
 
 export const createPreschoolExecutiveSynthesizer = (input: {
@@ -70,7 +77,7 @@ export const createPreschoolExecutiveSynthesizer = (input: {
   runSynthesis: PreschoolExecutiveSynthesisRunner;
   assertRuntimeIdentity?: (identity: EnergyIqOverviewAiArtifactIdentity) => void;
   revision?: "v3" | "v4";
-  authoritativeOverviewEvidence?: AuthoritativeOverviewEvidence;
+  authoritativeOverviewEvidence?: PreschoolAuthoritativeOverviewEvidence;
 }): PreschoolExecutiveSynthesizer => {
   if (input.revision === "v4") return createPreschoolExecutiveSynthesizerV4(input);
   return ({
@@ -149,9 +156,9 @@ const createPreschoolExecutiveSynthesizerV4 = (input: {
   metadataStore: MetadataStore;
   runSynthesis: PreschoolExecutiveSynthesisRunner;
   assertRuntimeIdentity?: (identity: EnergyIqOverviewAiArtifactIdentity) => void;
-  authoritativeOverviewEvidence?: AuthoritativeOverviewEvidence;
+  authoritativeOverviewEvidence?: PreschoolAuthoritativeOverviewEvidence;
 }): PreschoolExecutiveSynthesizer => ({
-  async execute({ baseIdentity, user, retry }) {
+  async execute({ baseIdentity, user, retry, authoritativeOverviewEvidence: executionOverviewEvidence }) {
     const store = input.metadataStore.energyIq.overviewAiArtifacts;
     const accepted = acceptedSectionsV4(store, baseIdentity);
     const identity = createPreschoolOverviewAiExecutiveArtifactIdentityV4({
@@ -180,8 +187,12 @@ const createPreschoolExecutiveSynthesizerV4 = (input: {
           resultJson: JSON.stringify(emptyResultV4(identity, runId)),
         });
       }
+      const suppliedOverviewEvidence = executionOverviewEvidence ?? input.authoritativeOverviewEvidence;
+      const authoritativeOverviewEvidence = suppliedOverviewEvidence
+        ? requireAuthoritativeOverviewEvidence(suppliedOverviewEvidence, identity)
+        : undefined;
       const response = await input.runSynthesis({
-        prompt: buildExecutivePromptV4(accepted, input.authoritativeOverviewEvidence),
+        prompt: buildExecutivePromptV4(accepted, authoritativeOverviewEvidence),
         identity,
         user,
         workspaceId: identity.workspaceId,
@@ -197,8 +208,8 @@ const createPreschoolExecutiveSynthesizerV4 = (input: {
         accepted,
         identity,
         runId,
-        ...(input.authoritativeOverviewEvidence
-          ? { authoritativeOverviewEvidence: input.authoritativeOverviewEvidence }
+        ...(authoritativeOverviewEvidence
+          ? { authoritativeOverviewEvidence }
           : {}),
       });
       input.assertRuntimeIdentity?.(identity);
@@ -326,7 +337,7 @@ const buildExecutivePrompt = (accepted: AcceptedSection[]): string => {
 
 const buildExecutivePromptV4 = (
   accepted: AcceptedSectionV4[],
-  authoritativeOverviewEvidence?: AuthoritativeOverviewEvidence,
+  authoritativeOverviewEvidence?: PreschoolAuthoritativeOverviewEvidence,
 ): string => {
   const prompt = [
     "You are the Preschool Overview Key Findings synthesizer, not a new investigator.",
@@ -344,7 +355,7 @@ const buildExecutivePromptV4 = (
       ...(result.limitation ? { limitation: result.limitation } : {}),
     })))}`,
     ...(authoritativeOverviewEvidence ? [
-      `Authoritative Overview Evidence: ${JSON.stringify(authoritativeOverviewEvidence)}`,
+      `Authoritative Overview Evidence: ${JSON.stringify(authoritativeOverviewEvidence.catalog)}`,
     ] : []),
   ].join("\n\n");
   if (prompt.length > MAX_PROMPT_CHARS) throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_PROMPT_TOO_LARGE");
@@ -356,7 +367,7 @@ const materializeExecutiveResultV4 = (input: {
   accepted: AcceptedSectionV4[];
   identity: EnergyIqOverviewAiArtifactIdentity;
   runId: string;
-  authoritativeOverviewEvidence?: AuthoritativeOverviewEvidence;
+  authoritativeOverviewEvidence?: PreschoolAuthoritativeOverviewEvidence;
 }): PreschoolExecutiveSynthesisResultV4 => {
   let parsed: unknown;
   try {
@@ -381,21 +392,30 @@ const materializeExecutiveResultV4 = (input: {
   const summaryText = cleanText(parsed.summary.text);
   const summaryEvidenceRefs = stringArray(parsed.summary.evidenceRefs);
   if (!summaryText || !summaryEvidenceRefs || summaryEvidenceRefs.length === 0
+    || new Set(summaryEvidenceRefs).size !== summaryEvidenceRefs.length
     || hasBannedCustomerText(summaryText)) {
     throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_FACT_UNSUPPORTED");
   }
   const acceptedBySection = new Map(input.accepted.map((accepted) => [accepted.result.sectionId, accepted]));
   const evidenceOwners = sectionEvidenceOwners(input.accepted);
-  const authoritativeEvidence = new Set(input.authoritativeOverviewEvidence?.evidenceRefs ?? []);
-  const sourceNumbers = collectNumbers(input.accepted.flatMap(({ result }) => [
-    result.summary.text,
-    ...result.insights.flatMap(({ title, label, text }) => label ? [title, label, text] : [title, text]),
-    result.limitation,
-  ]));
+  const overviewFacts = input.authoritativeOverviewEvidence?.catalog.facts ?? [];
+  const authoritativeEvidence = new Set(overviewFacts.map(({ id }) => id));
+  const usedOverviewFactIds = new Set<string>();
+  const sourceNumbers = [
+    ...collectNumbers(input.accepted.flatMap(({ result }) => [
+      result.summary.text,
+      ...result.insights.flatMap(({ title, label, text }) => label ? [title, label, text] : [title, text]),
+      result.limitation,
+    ])),
+    ...overviewFacts.flatMap(({ value }) => typeof value === "number" ? [value] : []),
+  ];
   const requireSupportedEvidence = (reference: string): Set<PreschoolSectionId> => {
     const owners = evidenceOwners.get(reference);
     if (owners) return owners;
-    if (authoritativeEvidence.has(reference)) return new Set();
+    if (authoritativeEvidence.has(reference)) {
+      usedOverviewFactIds.add(reference);
+      return new Set();
+    }
     throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_EVIDENCE_UNSUPPORTED");
   };
   const contributingSections = new Set<PreschoolSectionId>();
@@ -413,18 +433,27 @@ const materializeExecutiveResultV4 = (input: {
     const evidenceRefs = stringArray(candidate.evidenceRefs);
     if (!title || !text || !sectionIds || sectionIds.length === 0
       || sectionIds.length !== (candidate.sectionIds as unknown[]).length
+      || new Set(sectionIds).size !== sectionIds.length
       || sectionIds.some((sectionId) => !acceptedBySection.has(sectionId))
       || !evidenceRefs || evidenceRefs.length === 0
+      || new Set(evidenceRefs).size !== evidenceRefs.length
       || hasBannedCustomerText(title) || hasBannedCustomerText(text)
       || hasUnsupportedNumber(`${title} ${text}`, sourceNumbers)) {
       throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_FACT_UNSUPPORTED");
     }
     const declaredSections = new Set(sectionIds);
+    const evidenceBackedSections = new Set<PreschoolSectionId>();
     for (const reference of evidenceRefs) {
       const owners = requireSupportedEvidence(reference);
       if (owners.size > 0 && ![...owners].some((sectionId) => declaredSections.has(sectionId))) {
         throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_EVIDENCE_UNSUPPORTED");
       }
+      for (const sectionId of owners) {
+        if (declaredSections.has(sectionId)) evidenceBackedSections.add(sectionId);
+      }
+    }
+    if ([...declaredSections].some((sectionId) => !evidenceBackedSections.has(sectionId))) {
+      throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_EVIDENCE_UNSUPPORTED");
     }
     for (const sectionId of declaredSections) contributingSections.add(sectionId);
     const alert = parseAlert(candidate.alert);
@@ -452,7 +481,13 @@ const materializeExecutiveResultV4 = (input: {
     contract: { id: "preschool-executive-synthesis", revision: "preschool-executive-synthesis-v4" },
     binding: preschoolOverviewAiBindingFromIdentity(input.identity),
     sourceSectionArtifactIds,
-    summary: { text: summaryText, evidenceRefs: [...new Set(summaryEvidenceRefs)] },
+    summary: { text: summaryText, evidenceRefs: summaryEvidenceRefs },
+    ...(input.authoritativeOverviewEvidence && usedOverviewFactIds.size > 0 ? {
+      overviewEvidence: overviewEvidenceLineage(
+        input.authoritativeOverviewEvidence.catalog,
+        usedOverviewFactIds,
+      ),
+    } : {}),
     findings,
   };
 };
@@ -553,6 +588,61 @@ const emptyResultV4 = (
   binding: preschoolOverviewAiBindingFromIdentity(identity),
   sourceSectionArtifactIds: [],
   findings: [],
+});
+
+const requireAuthoritativeOverviewEvidence = (
+  value: PreschoolAuthoritativeOverviewEvidence,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): PreschoolAuthoritativeOverviewEvidence => {
+  const catalog = value.catalog;
+  if (!sameBinding(value.binding, identity)
+    || catalog.contract !== "analysis-context-evidence@1"
+    || !cleanText(catalog.sourceId)
+    || catalog.pins.workspaceId !== identity.workspaceId
+    || catalog.pins.projectId !== identity.projectId
+    || catalog.pins.scopeId !== identity.scopeId
+    || catalog.pins.dataSnapshotId !== identity.dataSnapshotId
+    || catalog.pins.projectReleaseId !== identity.projectReleaseId
+    || !cleanText(catalog.pins.dataCutoff)
+    || !cleanText(catalog.pins.metricVersion)
+    || !Array.isArray(catalog.facts)
+    || !catalog.facts.every(validAuthoritativeOverviewFact)
+    || new Set(catalog.facts.map(({ id }) => id)).size !== catalog.facts.length) {
+    throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_OVERVIEW_EVIDENCE_IDENTITY_MISMATCH");
+  }
+  return value;
+};
+
+const validAuthoritativeOverviewFact = (value: AnalysisContextEvidenceFact): boolean =>
+  Boolean(cleanText(value.id))
+  && Boolean(cleanText(value.label))
+  && Boolean(cleanText(value.metricId))
+  && (typeof value.value === "string"
+    || typeof value.value === "number"
+    || typeof value.value === "boolean"
+    || value.value === null)
+  && (value.unit === undefined || Boolean(cleanText(value.unit)))
+  && (value.status === "confirmed" || value.status === "provisional" || value.status === "partial")
+  && Array.isArray(value.evidenceRefs)
+  && value.evidenceRefs.length > 0
+  && value.evidenceRefs.every((reference) => Boolean(cleanText(reference)))
+  && new Set(value.evidenceRefs).size === value.evidenceRefs.length
+  && isRecord(value.dimensions)
+  && Object.values(value.dimensions).every((dimension) => typeof dimension === "string");
+
+const overviewEvidenceLineage = (
+  catalog: AnalysisContextEvidenceCatalog,
+  usedFactIds: ReadonlySet<string>,
+): PreschoolExecutiveOverviewEvidenceLineage => ({
+  contract: catalog.contract,
+  sourceId: catalog.sourceId,
+  pins: { ...catalog.pins },
+  factIds: catalog.facts.flatMap(({ id }) => usedFactIds.has(id) ? [id] : []),
+  facts: catalog.facts.filter(({ id }) => usedFactIds.has(id)).map((fact) => ({
+    ...fact,
+    evidenceRefs: [...fact.evidenceRefs],
+    dimensions: { ...fact.dimensions },
+  })),
 });
 
 const sectionEvidenceOwners = (

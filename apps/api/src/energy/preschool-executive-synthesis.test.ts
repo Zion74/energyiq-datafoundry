@@ -400,6 +400,79 @@ describe("Preschool Executive Synthesis", () => {
     expect(storedBenchmark).toEqual(benchmark);
   });
 
+  it("persists a supported deterministic Overview Evidence reference without weakening Section lineage", async () => {
+    const harness = createHarness();
+    const benchmark = completeSectionV4(harness, "centre-benchmark");
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      revision: "v4",
+      authoritativeOverviewEvidence: {
+        binding: preschoolOverviewAiBindingFromIdentity(harness.identity),
+        catalog: {
+          contract: "analysis-context-evidence@1",
+          sourceId: "project-analysis-snapshot:preschool-demo:snapshot-current",
+          pins: {
+            workspaceId: harness.identity.workspaceId,
+            projectId: harness.identity.projectId,
+            scopeId: harness.identity.scopeId,
+            dataSnapshotId: harness.identity.dataSnapshotId,
+            dataCutoff: "2026-05-31T23:45:00.000Z",
+            projectReleaseId: harness.identity.projectReleaseId,
+            metricVersion: "energy-v1",
+          },
+          facts: [{
+            id: "analysis.summary.usage_kwh",
+            label: "Portfolio energy use",
+            metricId: "energy.total_usage_kwh",
+            value: 120,
+            unit: "kWh",
+            status: "confirmed",
+            evidenceRefs: ["query:overview-current"],
+            dimensions: { sectionId: "centre-benchmark" },
+          }],
+        },
+      },
+      runSynthesis: async (input) => ({
+        answer: JSON.stringify({
+          status: "available",
+          summary: {
+            text: "The portfolio used 120 kWh and the benchmark evidence warrants attention.",
+            evidenceRefs: ["analysis.summary.usage_kwh", "evidence:centre-benchmark:summary"],
+          },
+          findings: [{
+            title: "Confirmed portfolio alert",
+            text: "The confirmed 120 kWh total adds context to the current benchmark pattern.",
+            sectionIds: ["centre-benchmark"],
+            evidenceRefs: ["analysis.summary.usage_kwh", "evidence:centre-benchmark:insight"],
+            alert: { severity: "attention", certainty: "confirmed" },
+          }],
+        }),
+        runId: input.runId,
+        sessionId: input.sessionId,
+      }),
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+    expect(JSON.parse(artifact.identity_json)).toMatchObject({
+      validatorRevision: "preschool-executive-synthesis-validator-v5",
+      workflowRevision: "preschool-executive-synthesis-v5",
+      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v5",
+      capabilityRevision: "section-artifacts-and-overview-evidence-v1",
+      publicationRevision: "key-findings-v2",
+    });
+    expect(JSON.parse(artifact.result_json!)).toMatchObject({
+      sourceSectionArtifactIds: [benchmark.id],
+      overviewEvidence: {
+        contract: "analysis-context-evidence@1",
+        sourceId: "project-analysis-snapshot:preschool-demo:snapshot-current",
+        factIds: ["analysis.summary.usage_kwh"],
+      },
+      findings: [{ alert: { severity: "attention", certainty: "confirmed" } }],
+    });
+  });
+
   it("persists an explicit current Key Findings empty result without Provider when no current-v4 Section contributes", async () => {
     const harness = createHarness();
     completeSectionV4(harness, "centre-benchmark", "empty");
@@ -495,7 +568,12 @@ const completeSectionV4 = (
       binding: preschoolOverviewAiBindingFromIdentity(identity),
       sectionId,
       packRevision: "v2",
-      capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
+      capability: {
+        revision: "scoped-read-only-v1",
+        mode: "scoped-read-only",
+        tools: sectionTools(sectionId),
+      },
+      toolAudits: [],
       ...(status === "available" ? {
         summary: {
           text: `Current ${sectionId} summary.`,
@@ -531,6 +609,14 @@ const completeSectionV4 = (
       }),
     }),
   });
+};
+
+const sectionTools = (sectionId: PreschoolSectionId) => {
+  if (sectionId === "centre-benchmark") return ["compare_centres", "inspect_related_section_signals"] as const;
+  if (sectionId === "standby-wastage" || sectionId === "operating-behaviour") {
+    return ["inspect_time_pattern", "inspect_load_composition", "inspect_related_section_signals"] as const;
+  }
+  return ["inspect_related_section_signals"] as const;
 };
 
 const failSectionV4 = (harness: ReturnType<typeof createHarness>, sectionId: PreschoolSectionId) => {

@@ -2035,16 +2035,43 @@ export type PreschoolOverviewKeyFindingDto = {
   };
 };
 
+export type PreschoolExecutiveOverviewEvidenceLineageDto = {
+  contract: "analysis-context-evidence@1";
+  sourceId: string;
+  pins: {
+    workspaceId: string;
+    projectId: string;
+    scopeId: string;
+    dataSnapshotId: string;
+    dataCutoff: string;
+    projectReleaseId: string;
+    metricVersion: string;
+  };
+  factIds: string[];
+  facts: Array<{
+    id: string;
+    label: string;
+    metricId: string;
+    value: string | number | boolean | null;
+    unit?: string;
+    status: "confirmed" | "provisional" | "partial";
+    evidenceRefs: string[];
+    dimensions: Record<string, string>;
+  }>;
+};
+
 export type PreschoolExecutiveSynthesisV4ResultDto = PreschoolExecutiveSynthesisResultBaseDto & ({
   status: "available";
   summary: {
     text: string;
     evidenceRefs: string[];
   };
+  overviewEvidence?: PreschoolExecutiveOverviewEvidenceLineageDto;
   findings: PreschoolOverviewKeyFindingDto[];
 } | {
   status: "empty";
   summary?: never;
+  overviewEvidence?: never;
   findings: [];
 });
 

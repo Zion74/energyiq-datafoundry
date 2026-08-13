@@ -13,9 +13,11 @@ import {
   resolveSkillCacheDir,
   type AgentMemoryMode,
   type AnalysisContextEvidenceCatalog,
+  type CreateDataFoundryInput,
   type TaskStateRuntime,
   type TrustedEnergyTextQueryContract
 } from "@datafoundry/agent-runtime";
+import { createTool } from "@mastra/core/tools";
 import { LocalArtifactService, SessionOutputService } from "@datafoundry/artifacts";
 import { type MeResponse, createEnvConfig, createErrorResult, createSuccessResult } from "@datafoundry/contracts";
 import { LocalDataGateway } from "@datafoundry/data-gateway";
@@ -39,6 +41,7 @@ import { createServer as createHttpServer, type IncomingMessage, type Server, ty
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Observable } from "rxjs";
+import { z } from "zod";
 
 import { handleConfigApiRequest } from "./config-api.js";
 import { createAsyncMemoByKey, createStartupTimer } from "./async-memo.js";
@@ -105,6 +108,11 @@ import {
   type PreschoolOverviewAiStageInput,
 } from "./energy/preschool-overview-ai-workflow.js";
 import { createPreschoolOverviewAiPageWorkflow } from "./energy/preschool-overview-ai-page-workflow.js";
+import type {
+  PreschoolSectionInsightToolInvocation,
+  PreschoolSectionInsightToolName,
+  PreschoolSectionInsightToolResult,
+} from "./energy/preschool-section-insight-runtime.js";
 import { createEnergyIqTemplateChangeWorkflow } from "./energy/energy-template-change-workflow.js";
 import { resolveOverviewAiStageStructuredOutput } from "./energy/preschool-overview-ai-structured-output.js";
 export { resolveOverviewAiStageStructuredOutput } from "./energy/preschool-overview-ai-structured-output.js";
@@ -120,6 +128,8 @@ type OverviewAiStructuredOutput = NonNullable<ReturnType<typeof resolveOverviewA
 type OverviewAiTrustedRuntimeOverride = {
   structuredOutput: OverviewAiStructuredOutput;
   conversationMessageMaxChars: number;
+  disableTools?: false;
+  trustedStageTools?: CreateDataFoundryInput["trustedStageTools"];
 };
 
 const PACK_V2_SECTION_MESSAGE_MAX_CHARS = 110_000;
@@ -168,21 +178,96 @@ export const resolveOverviewAiStageRuntimeOptions = (stage: PreschoolOverviewAiS
 export const resolveOverviewAiServerRunnerOptions = (input: {
   stage: PreschoolOverviewAiStage;
   structuredOutput?: OverviewAiStructuredOutput;
+  sectionInsightTools?: readonly PreschoolSectionInsightToolName[];
+  invokeSectionInsightTool?: (
+    invocation: PreschoolSectionInsightToolInvocation,
+  ) => Promise<PreschoolSectionInsightToolResult>;
 }): OverviewAiTrustedRuntimeOverride | undefined => {
   if ((input.stage !== "section-interpreter" && input.stage !== "executive-synthesis")
     || !input.structuredOutput) return undefined;
+  const trustedStageTools = input.stage === "section-interpreter"
+    && input.sectionInsightTools
+    && input.invokeSectionInsightTool
+    ? createPreschoolSectionTrustedStageTools({
+        toolNames: input.sectionInsightTools,
+        invoke: input.invokeSectionInsightTool,
+      })
+    : undefined;
   return {
     structuredOutput: input.structuredOutput,
     conversationMessageMaxChars: input.stage === "section-interpreter"
       ? PACK_V2_SECTION_MESSAGE_MAX_CHARS
       : 24_000,
+    ...(trustedStageTools ? { disableTools: false as const, trustedStageTools } : {}),
   };
 };
+
+export const createPreschoolSectionTrustedStageTools = (input: {
+  toolNames: readonly PreschoolSectionInsightToolName[];
+  invoke(invocation: PreschoolSectionInsightToolInvocation): Promise<PreschoolSectionInsightToolResult>;
+}): NonNullable<CreateDataFoundryInput["trustedStageTools"]> => Object.fromEntries(
+  input.toolNames.map((toolName) => [toolName, preschoolSectionTrustedStageTool(toolName, input.invoke)]),
+) as unknown as NonNullable<CreateDataFoundryInput["trustedStageTools"]>;
+
+const preschoolSectionTrustedStageTool = (
+  toolName: PreschoolSectionInsightToolName,
+  invoke: (invocation: PreschoolSectionInsightToolInvocation) => Promise<PreschoolSectionInsightToolResult>,
+) => {
+  const execute = (controlledInput: unknown, options: unknown) => {
+    const toolCallId = isServerRecord(options)
+      && isServerRecord(options.agent)
+      && typeof options.agent.toolCallId === "string"
+      && options.agent.toolCallId.trim()
+      ? options.agent.toolCallId
+      : null;
+    if (!toolCallId) throw new Error("PRESCHOOL_SECTION_INSIGHT_TOOL_CALL_ID_REQUIRED");
+    return invoke({ toolName, toolCallId, input: controlledInput } as PreschoolSectionInsightToolInvocation);
+  };
+  if (toolName === "compare_centres") {
+    return createTool({
+      id: toolName,
+      description: "Compare selected Centres using only requested allowlisted benchmark dimensions from the current Section Pack.",
+      inputSchema: z.object({
+        centreScopeIds: z.array(z.string().min(1)).min(1),
+        dimensions: z.array(z.enum(["absoluteUsage", "floorAreaNormalised", "peopleNormalised"])).min(1),
+      }).strict(),
+      execute,
+    });
+  }
+  if (toolName === "inspect_related_section_signals") {
+    return createTool({
+      id: toolName,
+      description: "Inspect selected allowlisted cross-Section signals from the current server-owned Pack.",
+      inputSchema: z.object({ signalIds: z.array(z.string().min(1)).min(1) }).strict(),
+      execute,
+    });
+  }
+  return createTool({
+    id: toolName,
+    description: toolName === "inspect_time_pattern"
+      ? "Inspect selected time-pattern Evidence from the current server-owned Section Pack."
+      : "Inspect selected load-composition Evidence from the current server-owned Section Pack.",
+    inputSchema: z.object({ evidenceIds: z.array(z.string().min(1)).min(1) }).strict(),
+    execute,
+  });
+};
+
+const isServerRecord = (value: unknown): value is Record<string, unknown> =>
+  Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
 export const resolveOverviewAiAgentRuntimeOptions = (
   stage: PreschoolOverviewAiStage,
   trustedOverride?: OverviewAiTrustedRuntimeOverride,
-): ReturnType<typeof resolveOverviewAiStageRuntimeOptions> => ({
+): {
+  analysisRequirementsMode: "omit";
+  conversationMessageMaxChars?: number;
+  disableTools?: boolean;
+  excludedToolNames: readonly string[];
+  overviewAiCandidateSubmission: boolean;
+  reasoningModel: false;
+  structuredOutput?: OverviewAiStructuredOutput;
+  trustedStageTools?: CreateDataFoundryInput["trustedStageTools"];
+} => ({
   ...resolveOverviewAiStageRuntimeOptions(stage),
   ...(trustedOverride ?? {}),
 });
@@ -377,10 +462,17 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
   const overviewAiWorkflow = createPreschoolOverviewAiPageWorkflow({
     metadataStore,
     dataGateway,
-    runSection: ({ structuredOutput, ...stageInput }) => {
+    runSection: ({
+      structuredOutput,
+      sectionInsightTools,
+      invokeSectionInsightTool,
+      ...stageInput
+    }) => {
       const trustedRuntimeOverride = resolveOverviewAiServerRunnerOptions({
         stage: "section-interpreter",
         ...(structuredOutput ? { structuredOutput } : {}),
+        ...(sectionInsightTools ? { sectionInsightTools } : {}),
+        ...(invokeSectionInsightTool ? { invokeSectionInsightTool } : {}),
       });
       return runOverviewAiValueStage({
         ...stageInput,
@@ -1132,6 +1224,9 @@ class DataFoundryAgUiAgent extends AbstractAgent {
                   : {}),
                 ...(overviewAiStageOptions.structuredOutput
                   ? { structuredOutput: overviewAiStageOptions.structuredOutput }
+                  : {}),
+                ...(overviewAiStageOptions.trustedStageTools
+                  ? { trustedStageTools: overviewAiStageOptions.trustedStageTools }
                   : {}),
               }
             : {}),

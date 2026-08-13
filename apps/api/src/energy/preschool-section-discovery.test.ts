@@ -16,7 +16,7 @@ describe("Preschool Section discovery", () => {
       sourcePackRevision: "preschool-section-pack-v2",
       factAccess: "inline-complete",
       omittedEvidenceCount: 0,
-      tools: [],
+      tools: ["compare_centres", "inspect_related_section_signals"],
     });
     expect(projection.evidence).toHaveLength(30);
     for (let index = 1; index <= 30; index += 1) {
@@ -108,7 +108,15 @@ const richPack = (
   dataQuality: completeDataQuality,
   limitations: [],
   missingEvidence: [],
-  capabilities: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
+  capabilities: {
+    revision: "scoped-read-only-v1",
+    mode: "scoped-read-only",
+    tools: sectionId === "centre-benchmark"
+      ? ["compare_centres", "inspect_related_section_signals"]
+      : sectionId === "standby-wastage" || sectionId === "operating-behaviour"
+        ? ["inspect_time_pattern", "inspect_load_composition", "inspect_related_section_signals"]
+        : ["inspect_related_section_signals"],
+  },
 });
 
 const completeDataQuality: PreschoolSectionPackV2["dataQuality"] = {

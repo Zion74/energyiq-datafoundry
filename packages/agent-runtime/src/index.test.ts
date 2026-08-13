@@ -5,6 +5,8 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 import { standardSchemaToJSONSchema, type StandardSchemaWithJSON } from "@mastra/core/schema";
+import { createTool } from "@mastra/core/tools";
+import { z } from "zod";
 
 import {
   createDataFoundry,
@@ -33,6 +35,7 @@ const createEnergyIqAgent = async (
     overviewAiCandidateSubmission?: boolean;
     disableTools?: boolean;
     structuredOutput?: CreateDataFoundryInput["structuredOutput"];
+    trustedStageTools?: CreateDataFoundryInput["trustedStageTools"];
     modelProvider?: CreateDataFoundryInput["modelProvider"];
   } = {},
 ) => {
@@ -45,6 +48,7 @@ const createEnergyIqAgent = async (
     excludedToolNames,
     ...(options.disableTools ? { disableTools: true } : {}),
     ...(options.structuredOutput ? { structuredOutput: options.structuredOutput } : {}),
+    ...(options.trustedStageTools ? { trustedStageTools: options.trustedStageTools } : {}),
     explicitProtocol: { protocolId: "data-analysis", protocolVersion: "1" },
     messages: [],
     modelProvider: options.modelProvider ?? {
@@ -90,6 +94,46 @@ describe("EnergyIQ agent policy follows the enabled tool set", () => {
       expect(await runtime.agent.listTools()).toEqual({});
     } finally {
       await runtime.destroyWorkspace();
+    }
+  });
+
+  it("registers only server-owned scoped Section tools inside the governed EnergyIQ runtime", async () => {
+    const toolNames = [
+      "compare_centres",
+      "inspect_time_pattern",
+      "inspect_load_composition",
+      "inspect_related_section_signals",
+    ] as const;
+    const trustedStageTools = Object.fromEntries(toolNames.map((toolName) => [toolName, createTool({
+      id: toolName,
+      description: `Trusted ${toolName}`,
+      inputSchema: z.object({ requestId: z.string().min(1) }).strict(),
+      execute: async ({ requestId }) => ({ requestId, toolName }),
+    })])) as unknown as NonNullable<CreateDataFoundryInput["trustedStageTools"]>;
+    const runtime = await createEnergyIqAgent(
+      ["inspect_schema", "run_sql_readonly", "protocol_handoff"],
+      { trustedStageTools },
+    );
+
+    try {
+      const tools = await runtime.agent.listTools() as Record<string, ExecutableRuntimeTool>;
+      expect(Object.keys(tools).sort()).toEqual([...toolNames].sort());
+      await expect(tools.compare_centres?.execute?.(
+        { requestId: "server-owned-request" },
+        { agent: { toolCallId: "tool-call-1" } },
+      )).resolves.toMatchObject({ toolName: "compare_centres" });
+    } finally {
+      await runtime.destroyWorkspace();
+    }
+
+    const ordinaryRuntime = await createEnergyIqAgent(
+      ["inspect_schema", "run_sql_readonly", "protocol_handoff"],
+    );
+    try {
+      const tools = await ordinaryRuntime.agent.listTools();
+      expect(toolNames.every((toolName) => !(toolName in tools))).toBe(true);
+    } finally {
+      await ordinaryRuntime.destroyWorkspace();
     }
   });
 

@@ -4,6 +4,7 @@ import type { ProjectAnalysisSnapshot } from "./project-analysis-resolver.js";
 import type {
   PreschoolOverviewAiBinding,
   PreschoolSectionId,
+  PreschoolSectionInsightToolNameV4,
   PreschoolSectionPackEvidence,
 } from "./preschool-overview-ai-contracts.js";
 import { assemblePreschoolSectionPacks } from "./preschool-section-pack.js";
@@ -43,10 +44,17 @@ export type PreschoolSectionPackV2 = {
   limitations: string[];
   missingEvidence: string[];
   capabilities: {
-    revision: "pack-only-v1";
-    mode: "pack-only";
-    tools: [];
+    revision: "scoped-read-only-v1";
+    mode: "scoped-read-only";
+    tools: PreschoolSectionInsightToolNameV4[];
   };
+};
+
+const SECTION_INSIGHT_TOOLS: Record<PreschoolSectionId, PreschoolSectionInsightToolNameV4[]> = {
+  "centre-benchmark": ["compare_centres", "inspect_related_section_signals"],
+  "standby-wastage": ["inspect_time_pattern", "inspect_load_composition", "inspect_related_section_signals"],
+  "operating-behaviour": ["inspect_time_pattern", "inspect_load_composition", "inspect_related_section_signals"],
+  "planning-outlook": ["inspect_related_section_signals"],
 };
 
 const ANALYSIS_GOALS: Record<PreschoolSectionId, string> = {
@@ -85,9 +93,9 @@ export const assemblePreschoolSectionPacksV2 = (input: {
       limitations: sectionLimitations(legacyPack.sectionId, input.snapshot, evidence, crossSectionIndex),
       missingEvidence: sectionMissingEvidence(legacyPack.sectionId, input.snapshot, evidence),
       capabilities: {
-        revision: "pack-only-v1",
-        mode: "pack-only",
-        tools: [],
+        revision: "scoped-read-only-v1",
+        mode: "scoped-read-only",
+        tools: [...SECTION_INSIGHT_TOOLS[legacyPack.sectionId]],
       },
     };
   });

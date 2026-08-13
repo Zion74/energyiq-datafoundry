@@ -120,7 +120,7 @@ describe("Preschool Overview AI page workflow", () => {
         analysisPackId: "preschool-section-pack",
         analysisPackRevision: "v2",
         outputContractRevision: "preschool-section-interpretation-v4",
-        capabilityRevision: "pack-only-v1",
+        capabilityRevision: "scoped-read-only-v1",
         publicationRevision: "v1",
       });
       expect(call.structuredOutput).toBeDefined();
@@ -157,6 +157,69 @@ describe("Preschool Overview AI page workflow", () => {
     ]);
     expect(completed.mock.calls[4]?.[0].identity.artifactKind).toBe("executive-synthesis");
     harness.close();
+  });
+
+  it("passes the server-owned Snapshot Evidence catalog into current Key Findings synthesis", async () => {
+    const harness = createHarness();
+    const benchmark = completeSectionV4(harness, "centre-benchmark", "The benchmark evidence supports review.");
+    const snapshot = emptySnapshot();
+    snapshot.evidence = [{
+      id: "query:overview-current",
+      metricId: "energy.total_usage_kwh",
+      queryIds: ["scope_summary_v1"],
+    }];
+    snapshot.analysis.summary.usageKwh = 120;
+    let executivePrompt = "";
+    const workflow = createPreschoolOverviewAiPageWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: {} as LocalDataGateway,
+      resolveSnapshot: async () => snapshot,
+      runSection: async ({ identity, runId, sessionId }) => ({
+        answer: JSON.stringify({ sectionId: identity.targetId, status: "empty", candidates: [] }),
+        runId,
+        sessionId,
+      }),
+      runExecutiveSynthesis: async ({ prompt, runId, sessionId }) => {
+        executivePrompt = prompt;
+        return {
+          answer: JSON.stringify({
+            status: "available",
+            summary: {
+              text: "The 120 kWh portfolio total adds context to the benchmark evidence.",
+              evidenceRefs: ["analysis.summary.usage_kwh", "evidence:v4:centre-benchmark"],
+            },
+            findings: [{
+              title: "Portfolio context",
+              text: "The 120 kWh total and benchmark evidence support a focused review.",
+              sectionIds: ["centre-benchmark"],
+              evidenceRefs: ["analysis.summary.usage_kwh", "evidence:v4:centre-benchmark"],
+            }],
+          }),
+          runId,
+          sessionId,
+        };
+      },
+    });
+
+    const result = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+    expect(result.executive).toMatchObject({
+      status: "available",
+      result: {
+        sourceSectionArtifactIds: [benchmark.id],
+        overviewEvidence: {
+          contract: "analysis-context-evidence@1",
+          pins: {
+            dataSnapshotId: "snapshot-current",
+            projectReleaseId: "release-current",
+            dataCutoff: "2026-06-01T00:00:00.000Z",
+          },
+          factIds: ["analysis.summary.usage_kwh"],
+        },
+      },
+    });
+    expect(executivePrompt).toContain('"contract":"analysis-context-evidence@1"');
+    expect(executivePrompt).toContain('"dataCutoff":"2026-06-01T00:00:00.000Z"');
   });
 });
 
@@ -251,7 +314,12 @@ const completeSectionV4 = (
     binding: binding(identity),
     sectionId,
     packRevision: "v2",
-    capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
+    capability: {
+      revision: "scoped-read-only-v1",
+      mode: "scoped-read-only",
+      tools: sectionTools(sectionId),
+    },
+    toolAudits: [],
     summary: { text: summary, evidenceRefs: [`evidence:v4:${sectionId}`] },
     insights: [],
     publication: {
@@ -264,6 +332,14 @@ const completeSectionV4 = (
       suppressedCandidateIds: [],
     },
   });
+};
+
+const sectionTools = (sectionId: PreschoolSectionId) => {
+  if (sectionId === "centre-benchmark") return ["compare_centres", "inspect_related_section_signals"] as const;
+  if (sectionId === "standby-wastage" || sectionId === "operating-behaviour") {
+    return ["inspect_time_pattern", "inspect_load_composition", "inspect_related_section_signals"] as const;
+  }
+  return ["inspect_related_section_signals"] as const;
 };
 
 const completeArtifact = (
@@ -325,6 +401,7 @@ const emptySnapshot = (): ProjectAnalysisSnapshot => ({
   },
   renderer: { key: "preschool-overview", version: "1", contractVersion: "project-analysis-snapshot@1" },
   dataSnapshot: { id: "snapshot-current", importBatchIds: [], lastSeenAt: null },
+  evidence: [],
   dataQuality: {
     status: "complete",
     coveragePct: 100,
@@ -332,5 +409,13 @@ const emptySnapshot = (): ProjectAnalysisSnapshot => ({
     expectedMeterIntervalCount: 0,
     qualityEventCount: 0,
   },
-  analysis: { summary: { usageKwh: 0, averageDailyUsageKwh: 0 }, childScopes: [] },
+  metadata: { selectedScope: { status: "available" } },
+  analysis: {
+    summary: { usageKwh: 0, averageDailyUsageKwh: 0, peakKw: 0 },
+    comparison: { usageKwh: 0, changeKwh: 0 },
+    categories: [],
+    childScopes: [],
+    topCircuits: [],
+    offHours: { status: "unavailable" },
+  },
 } as unknown as ProjectAnalysisSnapshot);

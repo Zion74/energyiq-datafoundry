@@ -5,6 +5,7 @@ import type {
   PreschoolSectionInterpretationResultV4,
   PreschoolSectionPublicationAuditV4,
   PreschoolSectionCapabilityV4,
+  PreschoolSectionToolAuditV4,
 } from "@datafoundry/contracts";
 
 const MAX_PUBLISHED_INSIGHTS = 3;
@@ -14,6 +15,7 @@ export const publishPreschoolSectionInterpretation = (input: {
   providerProfileId: string;
   runId: string;
   capability: PreschoolSectionCapabilityV4;
+  toolAudits: PreschoolSectionToolAuditV4[];
 }): PreschoolSectionInterpretationResultV4 => {
   const common = {
     artifactKind: "section-interpretation" as const,
@@ -29,8 +31,9 @@ export const publishPreschoolSectionInterpretation = (input: {
     capability: {
       revision: input.capability.revision,
       mode: input.capability.mode,
-      tools: [] as [],
+      tools: [...input.capability.tools],
     },
+    toolAudits: structuredClone(input.toolAudits),
   };
 
   if (input.accepted.status === "empty") {

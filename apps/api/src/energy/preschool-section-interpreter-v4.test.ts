@@ -49,7 +49,12 @@ describe("Preschool Section Interpreter v4", () => {
       packRevision: "v2",
       status: "available",
       runId: "runtime-run-1",
-      capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
+      capability: {
+        revision: "scoped-read-only-v1",
+        mode: "scoped-read-only",
+        tools: ["compare_centres", "inspect_related_section_signals"],
+      },
+      toolAudits: [],
       insights: [
         { id: "preschool:centre-benchmark:candidate:2" },
         { id: "preschool:centre-benchmark:candidate:3" },
@@ -201,6 +206,104 @@ describe("Preschool Section Interpreter v4", () => {
     metadata.close();
     rmSync(root, { recursive: true, force: true });
   });
+
+  it("constructs scoped tools from the server-owned Section Pack and exposes only a controlled invocation callback", async () => {
+    const root = mkdtempSync(join(tmpdir(), "preschool-section-v4-tools-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    metadata.users.upsertDevUser({ id: "dev-user", email: "dev@example.test", display_name: "Dev", dev_token: "dev" });
+    metadata.workspaces.upsert({ id: "preschool-workspace", owner_user_id: "dev-user", name: "Preschool", kind: "customer" });
+    metadata.energyIq.upsertProject({
+      id: "preschool-demo",
+      workspace_id: "preschool-workspace",
+      name: "Preschool",
+      status: "published",
+      root_scope_id: "preschool-project",
+    });
+    const user = metadata.users.getById({ user_id: "dev-user" });
+    const sectionPacks = PRESCHOOL_SECTION_IDS.map((sectionId) => packV2(sectionId, 1));
+    const benchmarkPack = sectionPacks.find(({ sectionId }) => sectionId === "centre-benchmark")!;
+    benchmarkPack.evidence = [{
+      id: "evidence:centre-benchmark:g",
+      label: "Centre G benchmark",
+      value: {
+        centreCode: "G",
+        metrics: {
+          absoluteUsage: { value: 120, unit: "kWh", rank: { position: 1, outOf: 1 } },
+        },
+      },
+      unit: "kWh",
+      entityRefs: ["centre-g"],
+      evidenceRefs: ["evidence:centre-benchmark:g"],
+    }];
+    let centreToolResult: unknown;
+    const interpreter = createPreschoolSectionInterpreter({
+      metadataStore: metadata,
+      runSection: async (runnerInput) => {
+        expect(runnerInput).not.toHaveProperty("pack");
+        expect(runnerInput).not.toHaveProperty("binding");
+        expect(runnerInput).not.toHaveProperty("sectionId");
+        expect(runnerInput.prompt).toContain("scoped read-only tools");
+        if (runnerInput.identity.targetId === "centre-benchmark") {
+          expect(runnerInput.sectionInsightTools).toEqual([
+            "compare_centres",
+            "inspect_related_section_signals",
+          ]);
+          centreToolResult = await runnerInput.invokeSectionInsightTool!({
+            toolName: "compare_centres",
+            toolCallId: "provider-tool-call-centre-g",
+            input: { centreScopeIds: ["centre-g"], dimensions: ["absoluteUsage"] },
+          });
+          await expect(runnerInput.invokeSectionInsightTool!({
+            toolName: "compare_centres",
+            toolCallId: "provider-tool-call-forged",
+            input: {
+              centreScopeIds: ["centre-g"],
+              dimensions: ["absoluteUsage"],
+              dataSnapshotId: "snapshot-forged",
+            },
+          } as never)).rejects.toThrow("PRESCHOOL_SECTION_INSIGHT_REQUEST_INVALID");
+        }
+        return {
+          answer: JSON.stringify({
+            sectionId: runnerInput.identity.targetId,
+            status: "available",
+            summary: {
+              text: "The verified Section evidence is available.",
+              evidenceRefs: [`evidence:${runnerInput.identity.targetId}:1`],
+            },
+            candidates: [],
+          }),
+          runId: runnerInput.runId,
+          sessionId: runnerInput.sessionId,
+        };
+      },
+    });
+
+    await interpreter.execute({
+      baseIdentity: identity("centre-benchmark"),
+      packs: sectionPacks,
+      user,
+    });
+
+    expect(centreToolResult).toMatchObject({
+      binding: {
+        workspaceId: "preschool-workspace",
+        projectId: "preschool-demo",
+        sectionId: "centre-benchmark",
+        dataSnapshotId: "snapshot-current",
+      },
+      audit: {
+        toolName: "compare_centres",
+        evidenceRefs: ["evidence:centre-benchmark:g"],
+      },
+      evidence: [{
+        id: "evidence:centre-benchmark:g",
+        value: { metrics: { absoluteUsage: { value: 120 } } },
+      }],
+    });
+    metadata.close();
+    rmSync(root, { recursive: true, force: true });
+  });
 });
 
 const packV2 = (
@@ -234,8 +337,20 @@ const packV2 = (
   dataQuality: completeDataQuality,
   limitations: [],
   missingEvidence: [],
-  capabilities: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
+  capabilities: {
+    revision: "scoped-read-only-v1",
+    mode: "scoped-read-only",
+    tools: sectionTools(sectionId),
+  },
 });
+
+const sectionTools = (sectionId: PreschoolSectionPackV2["sectionId"]): PreschoolSectionPackV2["capabilities"]["tools"] => {
+  if (sectionId === "centre-benchmark") return ["compare_centres", "inspect_related_section_signals"];
+  if (sectionId === "standby-wastage" || sectionId === "operating-behaviour") {
+    return ["inspect_time_pattern", "inspect_load_composition", "inspect_related_section_signals"];
+  }
+  return ["inspect_related_section_signals"];
+};
 
 const completeDataQuality: PreschoolSectionPackV2["dataQuality"] = {
   status: "complete",

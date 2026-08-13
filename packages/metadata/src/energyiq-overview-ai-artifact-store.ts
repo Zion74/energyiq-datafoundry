@@ -517,14 +517,16 @@ const requireSectionInterpretationResultV4 = (
   const insights = parsed.insights;
   const capability = parsed.capability;
   const publication = parsed.publication;
+  const toolAudits = parsed.toolAudits;
+  const sectionTools = sectionInsightToolsV4(identity.targetId);
   if (identity.identityContractRevision !== "v4"
     || identity.analysisPackId !== "preschool-section-pack"
     || identity.analysisPackRevision !== "v2"
     || identity.outputContractRevision !== "preschool-section-interpretation-v4"
-    || identity.validatorRevision !== "acceptance-validator-v1"
-    || identity.workflowRevision !== "discover-accept-publish-v1"
-    || identity.investigatorPromptRevision !== "discovery-prompt-v1"
-    || identity.capabilityRevision !== "pack-only-v1"
+    || identity.validatorRevision !== "acceptance-validator-v2"
+    || identity.workflowRevision !== "discover-tools-accept-publish-v1"
+    || identity.investigatorPromptRevision !== "discovery-prompt-v2"
+    || identity.capabilityRevision !== "scoped-read-only-v1"
     || identity.publicationRevision !== "v1"
     || parsed.artifactKind !== "section-interpretation"
     || (parsed.status !== "available" && parsed.status !== "empty")
@@ -539,9 +541,13 @@ const requireSectionInterpretationResultV4 = (
     || parsed.packRevision !== identity.analysisPackRevision
     || !isRecord(capability)
     || capability.revision !== identity.capabilityRevision
-    || capability.mode !== "pack-only"
+    || capability.mode !== "scoped-read-only"
     || !Array.isArray(capability.tools)
-    || capability.tools.length !== 0
+    || !sectionTools
+    || capability.tools.length !== sectionTools.length
+    || !capability.tools.every((tool, index) => tool === sectionTools[index])
+    || !Array.isArray(toolAudits)
+    || !validSectionToolAuditsV4(toolAudits, parsed.runId, capability.tools)
     || !Array.isArray(insights)
     || insights.length > 3
     || !insights.every(validSectionInsightV4)
@@ -557,6 +563,38 @@ const requireSectionInterpretationResultV4 = (
   if (!validSectionSummaryV4(summary) || !optionalString(parsed.limitation)) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
   }
+};
+
+const SECTION_INSIGHT_TOOLS_V4 = {
+  "centre-benchmark": ["compare_centres", "inspect_related_section_signals"],
+  "standby-wastage": ["inspect_time_pattern", "inspect_load_composition", "inspect_related_section_signals"],
+  "operating-behaviour": ["inspect_time_pattern", "inspect_load_composition", "inspect_related_section_signals"],
+  "planning-outlook": ["inspect_related_section_signals"],
+} as const;
+
+const sectionInsightToolsV4 = (sectionId: unknown): readonly string[] | null =>
+  typeof sectionId === "string" && sectionId in SECTION_INSIGHT_TOOLS_V4
+    ? SECTION_INSIGHT_TOOLS_V4[sectionId as keyof typeof SECTION_INSIGHT_TOOLS_V4]
+    : null;
+
+const validSectionToolAuditsV4 = (
+  value: unknown[],
+  runId: unknown,
+  capabilityTools: unknown[],
+): boolean => {
+  const audits = value.filter(isRecord);
+  return audits.length === value.length
+    && audits.every((audit) => nonEmptyString(audit.auditId)
+      && audit.runId === runId
+      && nonEmptyString(audit.toolCallId)
+      && capabilityTools.includes(audit.toolName)
+      && audit.sourcePackRevision === "preschool-section-pack-v2"
+      && Array.isArray(audit.evidenceRefs)
+      && audit.evidenceRefs.length > 0
+      && audit.evidenceRefs.every(nonEmptyString)
+      && new Set(audit.evidenceRefs).size === audit.evidenceRefs.length)
+    && new Set(audits.map(({ auditId }) => auditId)).size === audits.length
+    && new Set(audits.map(({ toolCallId }) => toolCallId)).size === audits.length;
 };
 
 const validSectionSummaryV4 = (value: unknown): boolean => isRecord(value)
@@ -666,11 +704,11 @@ const requireExecutiveSynthesisResultV4 = (
     || identity.analysisPackId !== "preschool-executive-section-artifacts"
     || identity.analysisPackRevision !== "section-interpretation-v4"
     || identity.outputContractRevision !== "preschool-executive-synthesis-v4"
-    || identity.validatorRevision !== "preschool-executive-synthesis-validator-v4"
-    || identity.workflowRevision !== "preschool-executive-synthesis-v4"
-    || identity.investigatorPromptRevision !== "preschool-executive-synthesis-prompt-v4"
-    || identity.capabilityRevision !== "section-artifacts-only-v1"
-    || identity.publicationRevision !== "key-findings-v1"
+    || identity.validatorRevision !== "preschool-executive-synthesis-validator-v5"
+    || identity.workflowRevision !== "preschool-executive-synthesis-v5"
+    || identity.investigatorPromptRevision !== "preschool-executive-synthesis-prompt-v5"
+    || identity.capabilityRevision !== "section-artifacts-and-overview-evidence-v1"
+    || identity.publicationRevision !== "key-findings-v2"
     || parsed.artifactKind !== "executive-synthesis"
     || (parsed.status !== "available" && parsed.status !== "empty")
     || !nonEmptyString(parsed.providerProfileId)
@@ -688,7 +726,8 @@ const requireExecutiveSynthesisResultV4 = (
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
   }
   if (parsed.status === "empty") {
-    if (sourceIds.length !== 0 || parsed.summary !== undefined || findings.length !== 0) {
+    if (sourceIds.length !== 0 || parsed.summary !== undefined
+      || parsed.overviewEvidence !== undefined || findings.length !== 0) {
       throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
     }
     return;
@@ -708,6 +747,11 @@ const requireExecutiveSourceLineageV4 = (input: {
   sourceIds: string[];
   db: DatabaseSync;
 }): void => {
+  const overviewFactIds = requireExecutiveOverviewEvidenceLineageV4(
+    input.parsed.overviewEvidence,
+    input.identity,
+  );
+  const usedOverviewFactIds = new Set<string>();
   const evidenceOwners = new Map<string, Set<string>>();
   const artifactIdBySection = new Map<string, string>();
   for (const sourceId of input.sourceIds) {
@@ -768,21 +812,41 @@ const requireExecutiveSourceLineageV4 = (input: {
   const summary = input.parsed.summary as Record<string, unknown>;
   for (const reference of summary.evidenceRefs as string[]) {
     const owners = evidenceOwners.get(reference);
-    if (!owners) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
-    for (const owner of owners) usedSections.add(owner);
+    if (owners) {
+      for (const owner of owners) usedSections.add(owner);
+    } else if (overviewFactIds.has(reference)) {
+      usedOverviewFactIds.add(reference);
+    } else {
+      throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+    }
   }
   for (const finding of input.parsed.findings as Record<string, unknown>[]) {
     const declared = new Set(finding.sectionIds as string[]);
     for (const sectionId of declared) {
       if (!artifactIdBySection.has(sectionId)) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
-      usedSections.add(sectionId);
     }
+    const evidenceBackedSections = new Set<string>();
     for (const reference of finding.evidenceRefs as string[]) {
       const owners = evidenceOwners.get(reference);
-      if (!owners || ![...owners].some((owner) => declared.has(owner))) {
+      if (owners) {
+        const declaredOwners = [...owners].filter((owner) => declared.has(owner));
+        if (declaredOwners.length === 0) {
+          throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+        }
+        for (const owner of declaredOwners) evidenceBackedSections.add(owner);
+      } else if (overviewFactIds.has(reference)) {
+        usedOverviewFactIds.add(reference);
+      } else {
         throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
       }
     }
+    if ([...declared].some((sectionId) => !evidenceBackedSections.has(sectionId))) {
+      throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+    }
+    for (const sectionId of evidenceBackedSections) usedSections.add(sectionId);
+  }
+  if (usedOverviewFactIds.size !== overviewFactIds.size) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
   }
   const expectedSourceIds = [...usedSections].map((sectionId) => artifactIdBySection.get(sectionId)!).sort();
   if (expectedSourceIds.length !== input.sourceIds.length
@@ -791,11 +855,60 @@ const requireExecutiveSourceLineageV4 = (input: {
   }
 };
 
+const requireExecutiveOverviewEvidenceLineageV4 = (
+  value: unknown,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): Set<string> => {
+  if (value === undefined) return new Set();
+  const factIds = isRecord(value) ? value.factIds : undefined;
+  const facts = isRecord(value) ? value.facts : undefined;
+  if (!isRecord(value)
+    || value.contract !== "analysis-context-evidence@1"
+    || !nonEmptyString(value.sourceId)
+    || !isRecord(value.pins)
+    || value.pins.workspaceId !== identity.workspaceId
+    || value.pins.projectId !== identity.projectId
+    || value.pins.scopeId !== identity.scopeId
+    || value.pins.dataSnapshotId !== identity.dataSnapshotId
+    || value.pins.projectReleaseId !== identity.projectReleaseId
+    || !nonEmptyString(value.pins.dataCutoff)
+    || !nonEmptyString(value.pins.metricVersion)
+    || !Array.isArray(factIds)
+    || factIds.length === 0
+    || !factIds.every(nonEmptyString)
+    || new Set(factIds).size !== factIds.length
+    || !Array.isArray(facts)
+    || facts.length !== factIds.length
+    || !facts.every(validExecutiveOverviewFactV4)
+    || facts.some((fact, index) => (fact as Record<string, unknown>).id !== factIds[index])) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+  return new Set(factIds);
+};
+
+const validExecutiveOverviewFactV4 = (value: unknown): boolean => isRecord(value)
+  && nonEmptyString(value.id)
+  && nonEmptyString(value.label)
+  && nonEmptyString(value.metricId)
+  && (typeof value.value === "string"
+    || typeof value.value === "number"
+    || typeof value.value === "boolean"
+    || value.value === null)
+  && optionalString(value.unit)
+  && (value.status === "confirmed" || value.status === "provisional" || value.status === "partial")
+  && Array.isArray(value.evidenceRefs)
+  && value.evidenceRefs.length > 0
+  && value.evidenceRefs.every(nonEmptyString)
+  && new Set(value.evidenceRefs).size === value.evidenceRefs.length
+  && isRecord(value.dimensions)
+  && Object.values(value.dimensions).every((dimension) => typeof dimension === "string");
+
 const validExecutiveSummaryV4 = (value: unknown): boolean => isRecord(value)
   && nonEmptyString(value.text)
   && Array.isArray(value.evidenceRefs)
   && value.evidenceRefs.length > 0
-  && value.evidenceRefs.every(nonEmptyString);
+  && value.evidenceRefs.every(nonEmptyString)
+  && new Set(value.evidenceRefs).size === value.evidenceRefs.length;
 
 const validExecutiveKeyFindingV4 = (value: unknown): boolean => isRecord(value)
   && nonEmptyString(value.id)
@@ -804,9 +917,11 @@ const validExecutiveKeyFindingV4 = (value: unknown): boolean => isRecord(value)
   && Array.isArray(value.sectionIds)
   && value.sectionIds.length > 0
   && value.sectionIds.every(nonEmptyString)
+  && new Set(value.sectionIds).size === value.sectionIds.length
   && Array.isArray(value.evidenceRefs)
   && value.evidenceRefs.length > 0
   && value.evidenceRefs.every(nonEmptyString)
+  && new Set(value.evidenceRefs).size === value.evidenceRefs.length
   && (value.alert === undefined || validExecutiveAlertV4(value.alert));
 
 const validExecutiveAlertV4 = (value: unknown): boolean => isRecord(value)

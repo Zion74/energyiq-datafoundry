@@ -13,9 +13,11 @@ export type {
   PreschoolSectionEpistemicStatusV4,
   PreschoolSectionIdV4,
   PreschoolSectionInsightCandidateV4,
+  PreschoolSectionInsightToolNameV4,
   PreschoolSectionInterpretationResultV4,
   PreschoolSectionPublicationAuditV4,
   PreschoolSectionSummaryV4,
+  PreschoolSectionToolAuditV4,
 } from "@datafoundry/contracts";
 
 export const PRESCHOOL_SECTION_IDS = [
@@ -119,6 +121,31 @@ export type PreschoolOverviewKeyFinding = {
   };
 };
 
+export type PreschoolExecutiveOverviewEvidenceLineage = {
+  contract: "analysis-context-evidence@1";
+  sourceId: string;
+  pins: {
+    workspaceId: string;
+    projectId: string;
+    scopeId: string;
+    dataSnapshotId: string;
+    dataCutoff: string;
+    projectReleaseId: string;
+    metricVersion: string;
+  };
+  factIds: string[];
+  facts: Array<{
+    id: string;
+    label: string;
+    metricId: string;
+    value: string | number | boolean | null;
+    unit?: string;
+    status: "confirmed" | "provisional" | "partial";
+    evidenceRefs: string[];
+    dimensions: Record<string, string>;
+  }>;
+};
+
 type PreschoolExecutiveSynthesisResultV4Base = {
   artifactKind: "executive-synthesis";
   providerProfileId: string;
@@ -134,10 +161,12 @@ export type PreschoolExecutiveSynthesisResultV4 = PreschoolExecutiveSynthesisRes
     text: string;
     evidenceRefs: string[];
   };
+  overviewEvidence?: PreschoolExecutiveOverviewEvidenceLineage;
   findings: PreschoolOverviewKeyFinding[];
 } | {
   status: "empty";
   summary?: never;
+  overviewEvidence?: never;
   findings: [];
 });
 

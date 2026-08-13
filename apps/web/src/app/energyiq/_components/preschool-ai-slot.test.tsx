@@ -1047,7 +1047,17 @@ describe("PreschoolAiSlot", () => {
     const executive = result.executive;
     if (executive.status !== "available" || !("findings" in executive.result)) throw new Error("v4 fixture missing");
     executive.result.summary.evidenceRefs = ["overview:deterministic-summary"];
-    executive.result.findings[0]!.evidenceRefs = ["overview:deterministic-finding"];
+    executive.result.findings[0]!.evidenceRefs = [
+      "overview:deterministic-finding",
+      "standby:portfolio",
+      "operating:spikes",
+    ];
+    Object.assign(executive.result, {
+      overviewEvidence: overviewEvidenceLineage(result.binding, [
+        "overview:deterministic-summary",
+        "overview:deterministic-finding",
+      ]),
+    });
 
     await act(async () => root.render(
       <PreschoolAiSlot snapshot={preschoolGoldenSnapshot()} sectionId="page-synthesis" mode="saved" savedResult={result} startRun={vi.fn()} />,
@@ -1058,6 +1068,41 @@ describe("PreschoolAiSlot", () => {
     expect(pageSlot?.textContent).toContain("overview:deterministic-summary");
     expect(pageSlot?.textContent).toContain("overview:deterministic-finding");
     expect(pageSlot?.textContent).not.toContain("Invalid saved AI result");
+  });
+
+  it.each([
+    {
+      name: "an Overview ref outside the selected catalog facts",
+      mutate: (result: PreschoolOverviewAiReadModelDto) => {
+        const executive = result.executive;
+        if (executive.status !== "available" || !("findings" in executive.result)) throw new Error("v4 fixture missing");
+        executive.result.summary.evidenceRefs = ["overview:forged"];
+        Object.assign(executive.result, {
+          overviewEvidence: overviewEvidenceLineage(result.binding, ["overview:deterministic-summary"]),
+        });
+      },
+    },
+    {
+      name: "Overview Evidence pinned to a different Snapshot",
+      mutate: (result: PreschoolOverviewAiReadModelDto) => {
+        const executive = result.executive;
+        if (executive.status !== "available") throw new Error("v4 fixture missing");
+        const lineage = overviewEvidenceLineage(result.binding, ["overview:deterministic-summary"]);
+        lineage.pins.dataSnapshotId = "snapshot-other";
+        Object.assign(executive.result, { overviewEvidence: lineage });
+      },
+    },
+  ])("rejects $name only in page synthesis", async ({ mutate }) => {
+    const result = cloneV4ReadModelResult();
+    mutate(result);
+
+    await act(async () => root.render(<>
+      <PreschoolAiSlot snapshot={preschoolGoldenSnapshot()} sectionId="page-synthesis" mode="saved" savedResult={result} startRun={vi.fn()} />
+      <PreschoolAiSlot snapshot={preschoolGoldenSnapshot()} sectionId="standby-wastage" mode="saved" savedResult={result} startRun={vi.fn()} />
+    </>));
+
+    expect(container.querySelector<HTMLElement>('[data-ai-section="page-synthesis"]')?.textContent).toContain("Invalid saved AI result");
+    expect(container.querySelector<HTMLElement>('[data-ai-section="standby-wastage"]')?.textContent).toContain("Persistent closed-hour base load");
   });
 
   it("counts only the four required Section keys for terminal coverage", async () => {
@@ -1617,6 +1662,36 @@ function v4ReadModelResult(): PreschoolOverviewAiReadModelDto {
 
 function cloneV4ReadModelResult(): PreschoolOverviewAiReadModelDto {
   return JSON.parse(JSON.stringify(v4ReadModelResult())) as PreschoolOverviewAiReadModelDto;
+}
+
+function overviewEvidenceLineage(
+  binding: PreschoolOverviewAiReadModelDto["binding"],
+  factIds: string[],
+) {
+  return {
+    contract: "analysis-context-evidence@1" as const,
+    sourceId: `project-analysis-snapshot:${binding.projectId}:${binding.dataSnapshotId}`,
+    pins: {
+      workspaceId: binding.workspaceId,
+      projectId: binding.projectId,
+      scopeId: binding.scopeId,
+      dataSnapshotId: binding.dataSnapshotId,
+      dataCutoff: "2026-05-31T16:00:00.000Z",
+      projectReleaseId: binding.projectReleaseId,
+      metricVersion: "energy-v1",
+    },
+    factIds: [...factIds],
+    facts: factIds.map((id) => ({
+      id,
+      label: id,
+      metricId: "energy.test",
+      value: 1,
+      unit: "kWh",
+      status: "confirmed" as const,
+      evidenceRefs: [`query:${id}`],
+      dimensions: {},
+    })),
+  };
 }
 
 function finding(

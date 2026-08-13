@@ -142,14 +142,14 @@ export const createPreschoolOverviewAiExecutiveArtifactIdentityV4 = (input: {
     analysisPackId: "preschool-executive-section-artifacts",
     analysisPackRevision: "section-interpretation-v4",
     outputContractRevision: "preschool-executive-synthesis-v4",
-    validatorRevision: "preschool-executive-synthesis-validator-v4",
-    workflowRevision: "preschool-executive-synthesis-v4",
-    investigatorPromptRevision: "preschool-executive-synthesis-prompt-v4",
+    validatorRevision: "preschool-executive-synthesis-validator-v5",
+    workflowRevision: "preschool-executive-synthesis-v5",
+    investigatorPromptRevision: "preschool-executive-synthesis-prompt-v5",
     editorPromptRevision: "not-applicable-v1",
     methodSkillId: "none",
     methodSkillRevision: "not-applicable-v1",
-    capabilityRevision: "section-artifacts-only-v1",
-    publicationRevision: "key-findings-v1",
+    capabilityRevision: "section-artifacts-and-overview-evidence-v1",
+    publicationRevision: "key-findings-v2",
   };
 };
 
@@ -205,13 +205,13 @@ export const createPreschoolOverviewAiSectionArtifactIdentityV4 = (input: {
     analysisPackId: "preschool-section-pack",
     analysisPackRevision: "v2",
     outputContractRevision: "preschool-section-interpretation-v4",
-    validatorRevision: "acceptance-validator-v1",
-    workflowRevision: "discover-accept-publish-v1",
-    investigatorPromptRevision: "discovery-prompt-v1",
+    validatorRevision: "acceptance-validator-v2",
+    workflowRevision: "discover-tools-accept-publish-v1",
+    investigatorPromptRevision: "discovery-prompt-v2",
     editorPromptRevision: "not-applicable-v1",
     methodSkillId: "none",
     methodSkillRevision: "not-applicable-v1",
-    capabilityRevision: "pack-only-v1",
+    capabilityRevision: "scoped-read-only-v1",
     publicationRevision: "v1",
   };
 };

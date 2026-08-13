@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildOverviewAiStageRunInput,
   collectOverviewAiText,
+  createPreschoolSectionTrustedStageTools,
   resolveOverviewAiAgentRuntimeOptions,
   resolveOverviewAiServerRunnerOptions,
   resolveOverviewAiStageRuntimeOptions,
@@ -136,6 +137,41 @@ describe("Overview AI server stage options", () => {
     });
   });
 
+  it("exposes server-owned scoped tools only to the trusted Section stage runtime", () => {
+    const toolNames = [
+      "compare_centres",
+      "inspect_time_pattern",
+      "inspect_load_composition",
+      "inspect_related_section_signals",
+    ] as const;
+    const invokeSectionInsightTool = async () => ({}) as never;
+    const trusted = resolveOverviewAiServerRunnerOptions({
+      stage: "section-interpreter",
+      structuredOutput: PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4,
+      sectionInsightTools: toolNames,
+      invokeSectionInsightTool,
+    });
+
+    expect(trusted).toMatchObject({ disableTools: false });
+    expect(Object.keys(trusted?.trustedStageTools ?? {}).sort()).toEqual([...toolNames].sort());
+    expect(Object.keys(createPreschoolSectionTrustedStageTools({
+      toolNames,
+      invoke: invokeSectionInsightTool,
+    })).sort()).toEqual([...toolNames].sort());
+    expect(resolveOverviewAiAgentRuntimeOptions("section-interpreter", trusted).trustedStageTools)
+      .toBe(trusted?.trustedStageTools);
+
+    const executive = resolveOverviewAiServerRunnerOptions({
+      stage: "executive-synthesis",
+      structuredOutput: PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4,
+    });
+    expect(executive).not.toHaveProperty("trustedStageTools");
+    expect(resolveOverviewAiAgentRuntimeOptions("executive-synthesis", executive)).toMatchObject({
+      disableTools: true,
+    });
+    expect(resolveOverviewAiStageRuntimeOptions("investigator")).not.toHaveProperty("trustedStageTools");
+  });
+
   it("threads the trusted V4 Executive override without changing the legacy default", () => {
     const trusted = resolveOverviewAiServerRunnerOptions({
       stage: "executive-synthesis",
@@ -196,6 +232,7 @@ describe("Overview AI server stage options", () => {
     expect(input.forwardedProps).not.toHaveProperty("trustedRuntimeOverride");
     expect(input.forwardedProps).not.toHaveProperty("structuredOutput");
     expect(input.forwardedProps).not.toHaveProperty("conversationMessageMaxChars");
+    expect(input.forwardedProps).not.toHaveProperty("trustedStageTools");
   });
 
   it("suppresses only duplicate full Snapshot and Catalog context for Overview stages", () => {

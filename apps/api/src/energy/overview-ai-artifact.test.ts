@@ -111,10 +111,10 @@ describe("createOverviewAiArtifactIdentity", () => {
       analysisPackId: "preschool-section-pack",
       analysisPackRevision: "v2",
       outputContractRevision: "preschool-section-interpretation-v4",
-      validatorRevision: "acceptance-validator-v1",
-      workflowRevision: "discover-accept-publish-v1",
-      investigatorPromptRevision: "discovery-prompt-v1",
-      capabilityRevision: "pack-only-v1",
+      validatorRevision: "acceptance-validator-v2",
+      workflowRevision: "discover-tools-accept-publish-v1",
+      investigatorPromptRevision: "discovery-prompt-v2",
+      capabilityRevision: "scoped-read-only-v1",
       publicationRevision: "v1",
     });
     expect(standby).not.toEqual(benchmark);

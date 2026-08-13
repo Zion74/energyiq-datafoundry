@@ -18,6 +18,7 @@ import {
   type ProtocolStateStore,
   type TaskStateRuntime,
   type TrustedEnergyTextQueryContract,
+  type CreateDataFoundryInput,
   type WorkspaceAttachment
 } from "@datafoundry/agent-runtime";
 import type { DataGateway } from "@datafoundry/data-gateway";
@@ -75,6 +76,7 @@ type CreateRunAgentAssemblyInput = {
   excludedToolNames?: readonly string[];
   disableTools?: boolean;
   structuredOutput?: PublicStructuredOutputOptions<Record<string, unknown>>;
+  trustedStageTools?: CreateDataFoundryInput["trustedStageTools"];
   contextPackageRecorder?: ContextPackageRecorder;
   contextPackageExists(reference: ContextPackageRef): boolean;
   evidenceContextItems?: AgentContextItem[] | undefined;
@@ -191,6 +193,7 @@ export const createRunAgentAssembly = async (
     ...(input.excludedToolNames?.length ? { excludedToolNames: input.excludedToolNames } : {}),
     ...(input.disableTools ? { disableTools: true } : {}),
     ...(input.structuredOutput ? { structuredOutput: input.structuredOutput } : {}),
+    ...(input.trustedStageTools ? { trustedStageTools: input.trustedStageTools } : {}),
     ...(input.effectiveRunConfig.protocol ? { explicitProtocol: input.effectiveRunConfig.protocol } : {}),
     messages: input.messages,
     ...(input.modelContextProfile ? { modelContextProfile: input.modelContextProfile } : {}),
