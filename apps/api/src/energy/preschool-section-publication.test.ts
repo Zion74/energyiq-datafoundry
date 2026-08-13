@@ -47,11 +47,13 @@ describe("Preschool Section publication", () => {
       },
       providerProfileId: "profile-1",
       runId: "run-1",
+      capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
     });
 
     expect(result).toMatchObject({
       status: "available",
       insights: [],
+      capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
       publication: {
         discoveredCount: 0,
         acceptedCount: 0,
@@ -88,6 +90,7 @@ describe("Preschool Section publication", () => {
       accepted,
       providerProfileId: "profile-1",
       runId: "run-1",
+      capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
     });
 
     const result = publish();
@@ -100,6 +103,7 @@ describe("Preschool Section publication", () => {
         revision: "preschool-section-interpretation-v4",
       },
       packRevision: "v2",
+      capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
       insights: [
         {
           id: "preschool:standby-wastage:candidate:1",

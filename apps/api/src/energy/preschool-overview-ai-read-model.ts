@@ -5,6 +5,8 @@ import type {
 } from "@datafoundry/metadata";
 
 import {
+  createPreschoolOverviewAiSectionArtifactIdentityV3,
+  createPreschoolOverviewAiSectionArtifactIdentityV4,
   createPreschoolOverviewAiValueArtifactIdentity,
   type OverviewAiArtifactIdentityV13,
 } from "./overview-ai-artifact.js";
@@ -22,12 +24,31 @@ import {
 export const composePreschoolOverviewAiReadModel = (input: {
   metadataStore: MetadataStore;
   baseIdentity: OverviewAiArtifactIdentityV13;
+}): PreschoolOverviewAiReadModel | null => composeReadModel({
+  ...input,
+  createSectionIdentity: createPreschoolOverviewAiSectionArtifactIdentityV4,
+  parseSectionResult,
+});
+
+export const composePreschoolOverviewAiReadModelV3 = (input: {
+  metadataStore: MetadataStore;
+  baseIdentity: OverviewAiArtifactIdentityV13;
+}): PreschoolOverviewAiReadModel | null => composeReadModel({
+  ...input,
+  createSectionIdentity: createPreschoolOverviewAiSectionArtifactIdentityV3,
+  parseSectionResult: parseSectionResultV3,
+});
+
+const composeReadModel = (input: {
+  metadataStore: MetadataStore;
+  baseIdentity: OverviewAiArtifactIdentityV13;
+  createSectionIdentity: typeof createPreschoolOverviewAiSectionArtifactIdentityV4;
+  parseSectionResult: typeof parseSectionResult;
 }): PreschoolOverviewAiReadModel | null => {
   const store = input.metadataStore.energyIq.overviewAiArtifacts;
   const sectionArtifacts = Object.fromEntries(PRESCHOOL_SECTION_IDS.map((sectionId) => {
-    const identity = createPreschoolOverviewAiValueArtifactIdentity({
+    const identity = input.createSectionIdentity({
       baseIdentity: input.baseIdentity,
-      artifactKind: "section-interpretation",
       targetId: sectionId,
     });
     return [sectionId, { identity, artifact: store.find(identity) ?? null }];
@@ -38,7 +59,7 @@ export const composePreschoolOverviewAiReadModel = (input: {
   const acceptedSectionArtifactIds = PRESCHOOL_SECTION_IDS.flatMap((sectionId) => {
     const { artifact, identity } = sectionArtifacts[sectionId];
     const result = artifact?.status === "available" && artifact.result_json
-      ? parseSectionResult(artifact.result_json, identity)
+      ? input.parseSectionResult(artifact.result_json, identity)
       : null;
     return result?.status === "available" && artifact ? [artifact.id] : [];
   });
@@ -59,7 +80,7 @@ export const composePreschoolOverviewAiReadModel = (input: {
     binding: preschoolOverviewAiBindingFromIdentity(input.baseIdentity),
     sections: Object.fromEntries(PRESCHOOL_SECTION_IDS.map((sectionId) => {
       const { identity, artifact } = sectionArtifacts[sectionId];
-      return [sectionId, sectionUnit(artifact, identity)];
+      return [sectionId, sectionUnit(artifact, identity, input.parseSectionResult)];
     })) as PreschoolOverviewAiReadModel["sections"],
     executive: executiveUnit(executiveArtifact, executiveIdentity),
     ...(autonomousArtifact?.status === "available" && autonomousArtifact.result_json
@@ -71,13 +92,14 @@ export const composePreschoolOverviewAiReadModel = (input: {
 const sectionUnit = (
   artifact: EnergyIqOverviewAiArtifactRecord | null,
   identity: EnergyIqOverviewAiArtifactIdentity,
+  parseResult: typeof parseSectionResult,
 ): PreschoolOverviewAiUnitStatus<PreschoolSectionInterpretationResult> => {
   if (!artifact) return { status: "unavailable", reason: "Section interpretation has not been generated." };
   if (artifact.status === "queued" || artifact.status === "running") return { status: artifact.status };
   if (artifact.status === "failed") {
     return { status: "unavailable", artifactId: artifact.id, reason: artifact.error_code ?? "Section interpretation failed." };
   }
-  const result = artifact.result_json ? parseSectionResult(artifact.result_json, identity) : null;
+  const result = artifact.result_json ? parseResult(artifact.result_json, identity) : null;
   if (!result) return { status: "unavailable", artifactId: artifact.id, reason: "Section interpretation is invalid." };
   return result.status === "empty"
     ? { status: "empty", artifactId: artifact.id, result }
@@ -109,12 +131,59 @@ const parseSectionResult = (
     || parsed.artifactKind !== "section-interpretation"
     || (parsed.status !== "available" && parsed.status !== "empty")
     || parsed.sectionId !== identity.targetId
-    || !isRecord(parsed.binding)
-    || parsed.binding.dataSnapshotId !== identity.dataSnapshotId
-    || parsed.binding.projectReleaseId !== identity.projectReleaseId
+    || !isRecord(parsed.contract)
+    || parsed.contract.id !== "preschool-section-interpretation"
+    || parsed.contract.revision !== identity.outputContractRevision
+    || parsed.packRevision !== identity.analysisPackRevision
+    || !isRecord(parsed.capability)
+    || parsed.capability.revision !== identity.capabilityRevision
+    || !sameValueArtifactBinding(parsed.binding, identity)
+    || !Array.isArray(parsed.insights)
+    || !isRecord(parsed.publication)
+    || parsed.publication.policyId !== "preschool-section-publication"
+    || parsed.publication.policyRevision !== identity.publicationRevision) return null;
+  if (parsed.status === "empty") {
+    if (parsed.summary !== undefined
+      || parsed.insights.length !== 0
+      || parsed.limitation !== undefined) return null;
+  } else if (!isRecord(parsed.summary)
+    || typeof parsed.summary.text !== "string"
+    || !parsed.summary.text.trim()
+    || !Array.isArray(parsed.summary.evidenceRefs)) return null;
+  return parsed as unknown as PreschoolSectionInterpretationResult;
+};
+
+const parseSectionResultV3 = (
+  value: string,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): PreschoolSectionInterpretationResult | null => {
+  const parsed = parseJson(value);
+  if (!isRecord(parsed)
+    || parsed.artifactKind !== "section-interpretation"
+    || (parsed.status !== "available" && parsed.status !== "empty")
+    || parsed.sectionId !== identity.targetId
+    || !isRecord(parsed.contract)
+    || parsed.contract.id !== "preschool-section-interpretation"
+    || parsed.contract.revision !== identity.outputContractRevision
+    || !sameValueArtifactBinding(parsed.binding, identity)
     || !Array.isArray(parsed.keyPoints)) return null;
   return parsed as unknown as PreschoolSectionInterpretationResult;
 };
+
+const sameValueArtifactBinding = (
+  value: unknown,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): boolean => isRecord(value)
+  && value.workspaceId === identity.workspaceId
+  && value.projectId === identity.projectId
+  && value.scopeId === identity.scopeId
+  && value.dataSnapshotId === identity.dataSnapshotId
+  && value.projectReleaseId === identity.projectReleaseId
+  && value.modelProfileId === identity.modelProfileId
+  && value.modelProfileRevision === identity.modelProfileRevision
+  && isRecord(value.analysisPeriod)
+  && value.analysisPeriod.from === identity.analysisPeriodFrom
+  && value.analysisPeriod.to === identity.analysisPeriodTo;
 
 const parseExecutiveResult = (
   value: string,

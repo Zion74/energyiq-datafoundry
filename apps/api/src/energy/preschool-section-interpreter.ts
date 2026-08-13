@@ -7,20 +7,34 @@ import type {
 import { randomUUID } from "node:crypto";
 
 import {
-  createPreschoolOverviewAiValueArtifactIdentity,
+  createPreschoolOverviewAiSectionArtifactIdentityV3,
+  createPreschoolOverviewAiSectionArtifactIdentityV4,
   type OverviewAiArtifactIdentityV13,
 } from "./overview-ai-artifact.js";
 import {
   PRESCHOOL_SECTION_IDS,
   preschoolOverviewAiBindingFromIdentity,
+  type PreschoolSectionCandidateRejectionCodeV4,
   type PreschoolSectionId,
   type PreschoolSectionInterpretationResult,
+  type PreschoolSectionInterpretationResultV4,
+  type PreschoolSectionInsightCandidateV4,
   type PreschoolSectionKeyPoint,
   type PreschoolSectionPack,
+  type PreschoolSectionSummaryV4,
 } from "./preschool-overview-ai-contracts.js";
+import { acceptPreschoolSectionInterpretation } from "./preschool-section-acceptance.js";
+import {
+  parsePreschoolSectionDiscoveryV4,
+  projectPreschoolSectionPackV2ForModel,
+} from "./preschool-section-discovery.js";
+import type { PreschoolSectionPackV2 } from "./preschool-section-pack-v2.js";
+import { publishPreschoolSectionInterpretation } from "./preschool-section-publication.js";
+import { resolveOverviewAiStageStructuredOutputV4 } from "./preschool-overview-ai-structured-output.js";
 
 const LEASE_MS = 4 * 60 * 1_000;
 const MAX_SECTION_PROMPT_CHARS = 12_000;
+const MAX_SECTION_DISCOVERY_PROMPT_CHARS = 110_000;
 const MAX_CONCURRENT_SECTION_RUNS = 2;
 const BANNED_INTERNAL_TEXT = /\b(?:parent_node_id|dataSnapshotId|projectReleaseId|SQL)\b/i;
 const SQL_STATEMENT = /\bSELECT\b[\s\S]{0,500}\b(?:FROM|JOIN)\b/i;
@@ -38,6 +52,7 @@ export type PreschoolSectionInterpreterRunner = (input: {
   workspaceId: string;
   runId: string;
   sessionId: string;
+  structuredOutput?: NonNullable<ReturnType<typeof resolveOverviewAiStageStructuredOutputV4>>;
 }) => Promise<{ answer: string; runId: string; sessionId: string }>;
 
 /** @deprecated Test/replay compatibility only; production uses one runner call per Section. */
@@ -46,7 +61,7 @@ export type PreschoolSectionInterpreterBatchRunner = PreschoolSectionInterpreter
 export type PreschoolSectionInterpreter = {
   execute(input: {
     baseIdentity: OverviewAiArtifactIdentityV13;
-    packs: PreschoolSectionPack[];
+    packs: PreschoolSectionPack[] | PreschoolSectionPackV2[];
     user: UserRecord;
     retryTargets?: PreschoolSectionId[];
   }): Promise<Record<PreschoolSectionId, EnergyIqOverviewAiArtifactRecord>>;
@@ -63,6 +78,10 @@ export const createPreschoolSectionInterpreter = (input: {
   const withSectionRunSlot = createConcurrencyGate(MAX_CONCURRENT_SECTION_RUNS);
   return ({
   async execute({ baseIdentity, packs, user, retryTargets = [] }) {
+    const usesPackV2 = packs.every(isPackV2);
+    if (!usesPackV2 && packs.some(isPackV2)) {
+      throw new Error("PRESCHOOL_SECTION_PACK_REVISIONS_MIXED");
+    }
     const packBySection = new Map(packs.map((pack) => [pack.sectionId, pack]));
     if (packBySection.size !== PRESCHOOL_SECTION_IDS.length
       || PRESCHOOL_SECTION_IDS.some((sectionId) => !packBySection.has(sectionId))) {
@@ -72,11 +91,9 @@ export const createPreschoolSectionInterpreter = (input: {
     const store = input.metadataStore.energyIq.overviewAiArtifacts;
     const identities = Object.fromEntries(PRESCHOOL_SECTION_IDS.map((sectionId) => [
       sectionId,
-      createPreschoolOverviewAiValueArtifactIdentity({
-        baseIdentity,
-        artifactKind: "section-interpretation",
-        targetId: sectionId,
-      }),
+      usesPackV2
+        ? createPreschoolOverviewAiSectionArtifactIdentityV4({ baseIdentity, targetId: sectionId })
+        : createPreschoolOverviewAiSectionArtifactIdentityV3({ baseIdentity, targetId: sectionId }),
     ])) as Record<PreschoolSectionId, EnergyIqOverviewAiArtifactIdentity>;
     const current = Object.fromEntries(PRESCHOOL_SECTION_IDS.map((sectionId) => [
       sectionId,
@@ -114,18 +131,34 @@ export const createPreschoolSectionInterpreter = (input: {
       const runId = `preschool-section-interpreter-${unit.sectionId}-${randomUUID()}`;
       try {
         const response = await runSection({
-          prompt: buildSectionInterpreterPrompt(pack, unit.previousErrorCode),
+          prompt: isPackV2(pack)
+            ? buildPreschoolSectionDiscoveryPrompt(pack, unit.previousErrorCode)
+            : buildSectionInterpreterPrompt(pack, unit.previousErrorCode),
           identity: unit.identity,
           user,
           workspaceId: baseIdentity.workspaceId,
           runId,
           sessionId,
+          ...(isPackV2(pack)
+            ? { structuredOutput: resolveOverviewAiStageStructuredOutputV4("section-interpreter")! }
+            : {}),
         });
         if (response.runId !== runId || response.sessionId !== sessionId) {
           throw new Error("PRESCHOOL_SECTION_INTERPRETER_RUN_IDENTITY_MISMATCH");
         }
-        const candidate = parseSectionResponse(response.answer, unit.sectionId);
-        const result = materializeSectionResult({ candidate, pack, identity: unit.identity, runId });
+        const result = isPackV2(pack)
+          ? materializePreschoolSectionResultV4({
+              answer: response.answer,
+              pack,
+              identity: unit.identity,
+              runId,
+            })
+          : materializeSectionResult({
+              candidate: parseSectionResponse(response.answer, unit.sectionId),
+              pack,
+              identity: unit.identity,
+              runId,
+            });
         input.assertRuntimeIdentity?.(unit.identity);
         current[unit.sectionId] = store.complete({
           identity: unit.identity,
@@ -192,6 +225,37 @@ const buildSectionInterpreterPrompt = (
     `Section Pack: ${JSON.stringify(promptPack)}`,
   ].join("\n\n");
   if (prompt.length > MAX_SECTION_PROMPT_CHARS) throw new Error("PRESCHOOL_SECTION_INTERPRETER_PROMPT_TOO_LARGE");
+  return prompt;
+};
+
+export const buildPreschoolSectionDiscoveryPrompt = (
+  pack: PreschoolSectionPackV2,
+  previousErrorCode?: string,
+): string => {
+  const projection = projectPreschoolSectionPackV2ForModel(pack);
+  const prompt = [
+    "You are producing a concise Summary plus optional Insight candidates for one Preschool Overview Section.",
+    "Use the complete inline Pack projection. No tool call or tool event is required or available for pack-only-v1.",
+    "The Pack is a factual boundary, not a writing template: identify the most useful angles instead of filling fixed What, Why, or Action slots.",
+    "You may connect supplied facts and propose relevant hypotheses. Mark direct Pack facts as observed, supported relationships as inferred, and plausible but unverified lines of inquiry as speculative.",
+    "Do not invent observed facts, entities, numbers, dates, units, or relationships. A speculative explanation must remain clearly conditional and must not be presented as a confirmed safety alert.",
+    "Keep the Summary short and useful. Candidates are optional; return zero when the Summary is sufficient, or several genuinely distinct candidates when the Pack supports them. The server decides which candidates to publish.",
+    "Do not force a recommendation, next action, cause, or one candidate per category. A useful candidate may instead surface a pattern, contrast, connection, counterexample, hypothesis, experiment, watch signal, or question.",
+    "Avoid repeating alreadyPresentedFacts unless the repetition is necessary to explain a new relationship or priority.",
+    "Every Summary and candidate must copy the exact evidenceRefs supporting its factual basis. Cite every Evidence item discussed.",
+    "Narrative fields may use limited inline Markdown: **bold** for a few decisive words and _italics_ for a caveat. Do not use headings, lists, links, images, code, HTML, or tables.",
+    previousErrorCode
+      ? `Previous attempt rejection: ${previousErrorCode}. Correct only the unsupported or malformed claims; retain any independently useful supported angles.`
+      : "This is the first attempt for this Section Artifact.",
+    "Candidate identity is runtime-owned. Do not return candidateId, sourceIndex, runId, sessionId, or binding.",
+    `Required sectionId: ${JSON.stringify(pack.sectionId)}.`,
+    "Return only one JSON object: {\"sectionId\":string,\"status\":\"available\"|\"empty\",\"summary\"?:{\"text\":string,\"evidenceRefs\":string[]},\"candidates\":[{\"title\":string,\"label\"?:string,\"epistemicStatus\":\"observed\"|\"inferred\"|\"speculative\",\"text\":string,\"evidenceRefs\":string[],\"deepDiveQuestion\"?:string}],\"limitation\"?:string}",
+    "For status=empty, candidates must be [] and summary/limitation must be absent. status=available may contain zero candidates.",
+    `Complete model projection: ${JSON.stringify(projection)}`,
+  ].join("\n\n");
+  if (prompt.length > MAX_SECTION_DISCOVERY_PROMPT_CHARS) {
+    throw new Error("PRESCHOOL_SECTION_DISCOVERY_PROMPT_TOO_LARGE");
+  }
   return prompt;
 };
 
@@ -324,6 +388,116 @@ const jsonObjectCandidates = (value: string): string[] => {
   }
   return candidates;
 };
+
+export const materializePreschoolSectionResultV4 = (input: {
+  answer: string;
+  pack: PreschoolSectionPackV2;
+  identity: EnergyIqOverviewAiArtifactIdentity;
+  runId: string;
+}): PreschoolSectionInterpretationResultV4 => {
+  const binding = preschoolOverviewAiBindingFromIdentity(input.identity);
+  const discovery = parsePreschoolSectionDiscoveryV4({
+    answer: input.answer,
+    expectedSectionId: input.pack.sectionId,
+    binding,
+  });
+  if (discovery.status === "available" && discovery.limitation
+    && !isSupportedNarrative(discovery.limitation, input.pack.evidence, input.pack.evidence)) {
+    throw new Error("PRESCHOOL_SECTION_INTERPRETATION_SUMMARY_UNSUPPORTED");
+  }
+  const acceptance = acceptPreschoolSectionInterpretation({
+    expectedSectionId: input.pack.sectionId,
+    expectedBinding: binding,
+    discovery,
+    authority: createPackV2AcceptanceAuthority(input.pack),
+  });
+  if (acceptance.decision === "failed") throw new Error(acceptance.code);
+  return publishPreschoolSectionInterpretation({
+    accepted: acceptance.value,
+    providerProfileId: input.identity.modelProfileId,
+    runId: input.runId,
+    capability: input.pack.capabilities,
+  });
+};
+
+const createPackV2AcceptanceAuthority = (pack: PreschoolSectionPackV2) => ({
+  validateSummary: (summary: PreschoolSectionSummaryV4) => {
+    const citedEvidence = citedPackEvidence(summary.evidenceRefs, pack);
+    return summary.evidenceRefs.length > 0
+      && evidenceRefsAreSupported(summary.evidenceRefs, pack)
+      && citedEvidence.length > 0
+      && isSupportedNarrative(summary.text, citedEvidence, pack.evidence)
+      ? { accepted: true as const }
+      : { accepted: false as const };
+  },
+  validateCandidate: (candidate: PreschoolSectionInsightCandidateV4) => {
+    const rejection = candidateRejectionCode(candidate, pack);
+    return rejection
+      ? { accepted: false as const, code: rejection }
+      : { accepted: true as const };
+  },
+});
+
+const candidateRejectionCode = (
+  candidate: PreschoolSectionInsightCandidateV4,
+  pack: PreschoolSectionPackV2,
+): PreschoolSectionCandidateRejectionCodeV4 | null => {
+  if (!candidate.title.trim()
+    || !candidate.text.trim()
+    || candidate.evidenceRefs.length === 0) return "CANDIDATE_MALFORMED";
+  if (!evidenceRefsAreSupported(candidate.evidenceRefs, pack)) return "EVIDENCE_REF_UNSUPPORTED";
+  const citedEvidence = citedPackEvidence(candidate.evidenceRefs, pack);
+  if (citedEvidence.length === 0) return "EVIDENCE_REF_UNSUPPORTED";
+  const narrative = [candidate.title, candidate.label, candidate.text, candidate.deepDiveQuestion]
+    .filter((value): value is string => Boolean(value));
+  if (narrative.some((value) => hasBannedCustomerText(value) || hasUnsafeMarkdown(value))) {
+    return "MARKDOWN_UNSAFE";
+  }
+  if (narrative.some((value) => hasUnsupportedTemporalClaim(value, citedEvidence))) {
+    return "DATE_UNSUPPORTED";
+  }
+  if (narrative.some((value) => hasUnsupportedNumber(value, citedEvidence)
+    || hasUnsupportedUnit(value, citedEvidence)
+    || hasUnsupportedMetricRelation(value, citedEvidence))) {
+    return "NUMBER_OR_UNIT_UNSUPPORTED";
+  }
+  if (narrative.some((value) => hasUnsupportedCentre(value, citedEvidence)
+    || hasUnsupportedRelation(value, citedEvidence, pack.evidence))) {
+    return "ENTITY_RELATION_UNSUPPORTED";
+  }
+  if (narrative.some((value) => hasUnsupportedSafetyClaim(value, citedEvidence))) {
+    return "SAFETY_CLAIM_UNSUPPORTED";
+  }
+  return null;
+};
+
+const evidenceRefsAreSupported = (
+  refs: string[],
+  pack: PreschoolSectionPackV2,
+): boolean => {
+  const allowed = new Set(pack.evidence.flatMap((evidence) => [evidence.id, ...evidence.evidenceRefs]));
+  return refs.every((reference) => allowed.has(reference));
+};
+
+const citedPackEvidence = (
+  refs: string[],
+  pack: PreschoolSectionPackV2,
+): PreschoolSectionPack["evidence"] => pack.evidence.filter((evidence) =>
+  refs.some((reference) => evidence.id === reference || evidence.evidenceRefs.includes(reference)));
+
+const isSupportedNarrative = (
+  text: string,
+  citedEvidence: PreschoolSectionPack["evidence"],
+  knownEvidence: PreschoolSectionPack["evidence"],
+): boolean => !hasBannedCustomerText(text)
+  && !hasUnsafeMarkdown(text)
+  && !hasUnsupportedTemporalClaim(text, citedEvidence)
+  && !hasUnsupportedNumber(text, citedEvidence)
+  && !hasUnsupportedUnit(text, citedEvidence)
+  && !hasUnsupportedCentre(text, citedEvidence)
+  && !hasUnsupportedMetricRelation(text, citedEvidence)
+  && !hasUnsupportedRelation(text, citedEvidence, knownEvidence)
+  && !hasUnsupportedSafetyClaim(text, citedEvidence);
 
 const materializeSectionResult = (input: {
   candidate: unknown;
@@ -635,8 +809,22 @@ const hasUnsupportedRelation = (
 const hasBannedCustomerText = (text: string): boolean =>
   BANNED_INTERNAL_TEXT.test(text) || SQL_STATEMENT.test(text);
 
+const hasUnsafeMarkdown = (text: string): boolean =>
+  /(^|\n)\s{0,3}(?:#{1,6}\s|[-+*]\s|\d+[.)]\s|>\s)/u.test(text)
+  || /```|`[^`]+`|!\[[^\]]*\]\([^)]*\)|\[[^\]]+\]\([^)]*\)|<\/?[A-Za-z][^>]*>|\|[^\n]*\|/u.test(text);
+
+const hasUnsupportedSafetyClaim = (
+  text: string,
+  evidence: PreschoolSectionPack["evidence"],
+): boolean => {
+  const safetyTerms = text.match(/\b(?:water leak|leakage|electrical fault|short circuit|fire|overheating)\b/giu) ?? [];
+  if (safetyTerms.length === 0) return false;
+  const supportedText = JSON.stringify(evidence).toLowerCase();
+  return safetyTerms.some((term) => !supportedText.includes(term.toLowerCase()));
+};
+
 const requirePackBinding = (
-  pack: PreschoolSectionPack,
+  pack: PreschoolSectionPack | PreschoolSectionPackV2,
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): void => {
   if (pack.binding.workspaceId !== identity.workspaceId
@@ -651,6 +839,11 @@ const requirePackBinding = (
     throw new Error("PRESCHOOL_SECTION_PACK_IDENTITY_MISMATCH");
   }
 };
+
+const isPackV2 = (
+  pack: PreschoolSectionPack | PreschoolSectionPackV2,
+): pack is PreschoolSectionPackV2 => "contract" in pack
+  && pack.contract.revision === "preschool-section-pack-v2";
 
 const stripJsonFence = (value: string): string => value.trim()
   .replace(/^```(?:json)?\s*/i, "")

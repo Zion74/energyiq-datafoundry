@@ -62,6 +62,54 @@ export const PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V3 = {
   },
 } satisfies PublicStructuredOutputOptions<StructuredEnvelope>;
 
+const sectionSummaryV4: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["text", "evidenceRefs"],
+  properties: {
+    text: nonEmptyString,
+    evidenceRefs,
+  },
+};
+
+const sectionInsightCandidateV4: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["title", "epistemicStatus", "text", "evidenceRefs"],
+  properties: {
+    title: nonEmptyString,
+    label: nonEmptyString,
+    epistemicStatus: { type: "string", enum: ["observed", "inferred", "speculative"] },
+    text: nonEmptyString,
+    evidenceRefs,
+    deepDiveQuestion: nonEmptyString,
+  },
+};
+
+/**
+ * Current model proposal contract for one independently executed Section.
+ * Candidate identity, acceptance and the three-insight publication budget remain server-owned.
+ */
+export const PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4 = {
+  errorStrategy: "strict",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["sectionId", "status", "candidates"],
+    properties: {
+      sectionId: { type: "string", enum: [...PRESCHOOL_SECTION_IDS] },
+      status: { type: "string", enum: ["available", "empty"] },
+      summary: sectionSummaryV4,
+      candidates: {
+        type: "array",
+        minItems: 0,
+        items: sectionInsightCandidateV4,
+      },
+      limitation: nonEmptyString,
+    },
+  },
+} satisfies PublicStructuredOutputOptions<StructuredEnvelope>;
+
 const executiveKeyFinding: JsonSchema = {
   type: "object",
   additionalProperties: false,
@@ -171,3 +219,10 @@ export const resolveOverviewAiStageStructuredOutput = (
   if (stage === "template-proposal") return ENERGYIQ_TEMPLATE_CHANGE_PROPOSAL_STRUCTURED_OUTPUT_V1;
   return undefined;
 };
+
+/** Explicit V4 entrypoint for the Pack-v2 workflow; the existing Page path remains on V3. */
+export const resolveOverviewAiStageStructuredOutputV4 = (
+  stage: PreschoolOverviewAiStage,
+): PublicStructuredOutputOptions<StructuredEnvelope> | undefined => stage === "section-interpreter"
+  ? PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4
+  : resolveOverviewAiStageStructuredOutput(stage);

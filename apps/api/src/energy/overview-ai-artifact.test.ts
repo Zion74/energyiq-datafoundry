@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createOverviewAiArtifactIdentity,
+  createPreschoolOverviewAiSectionArtifactIdentityV4,
   createPreschoolOverviewAiValueArtifactIdentity,
   overviewAiArtifactPinnedLocalPeriod,
 } from "./overview-ai-artifact.js";
@@ -69,7 +70,7 @@ describe("createOverviewAiArtifactIdentity", () => {
     })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_CONTRACT_NOT_FOUND");
   });
 
-  it("isolates Section and Executive value identities without changing the legacy identity", () => {
+  it("uses the released v4 Section identity while leaving Executive and the legacy identity unchanged", () => {
     const legacy = createOverviewAiArtifactIdentity({
       workspaceId: "preschool-demo-org",
       projectId: "preschool-demo",
@@ -83,15 +84,18 @@ describe("createOverviewAiArtifactIdentity", () => {
       modelProfileId: "deepseek-v4-flash",
       modelProfileRevision: 8,
     });
-    const benchmark = createPreschoolOverviewAiValueArtifactIdentity({
+    const benchmark = createPreschoolOverviewAiSectionArtifactIdentityV4({
+      baseIdentity: legacy,
+      targetId: "centre-benchmark",
+    });
+    const standby = createPreschoolOverviewAiSectionArtifactIdentityV4({
+      baseIdentity: legacy,
+      targetId: "standby-wastage",
+    });
+    const legacySection = createPreschoolOverviewAiValueArtifactIdentity({
       baseIdentity: legacy,
       artifactKind: "section-interpretation",
       targetId: "centre-benchmark",
-    });
-    const standby = createPreschoolOverviewAiValueArtifactIdentity({
-      baseIdentity: legacy,
-      artifactKind: "section-interpretation",
-      targetId: "standby-wastage",
     });
     const executive = createPreschoolOverviewAiValueArtifactIdentity({
       baseIdentity: legacy,
@@ -103,12 +107,24 @@ describe("createOverviewAiArtifactIdentity", () => {
     expect(benchmark).toMatchObject({
       artifactKind: "section-interpretation",
       targetId: "centre-benchmark",
+      identityContractRevision: "v4",
+      analysisPackId: "preschool-section-pack",
+      analysisPackRevision: "v2",
+      outputContractRevision: "preschool-section-interpretation-v4",
+      validatorRevision: "acceptance-validator-v1",
+      workflowRevision: "discover-accept-publish-v1",
+      investigatorPromptRevision: "discovery-prompt-v1",
+      capabilityRevision: "pack-only-v1",
+      publicationRevision: "v1",
+    });
+    expect(standby).not.toEqual(benchmark);
+    expect(legacySection).toMatchObject({
       outputContractRevision: "preschool-section-interpretation-v3",
       validatorRevision: "preschool-section-interpreter-validator-v12",
       workflowRevision: "preschool-section-interpreter-v14",
       investigatorPromptRevision: "preschool-section-interpreter-prompt-v14",
     });
-    expect(standby).not.toEqual(benchmark);
+    expect(legacySection).not.toHaveProperty("identityContractRevision");
     expect(executive).toMatchObject({
       artifactKind: "executive-synthesis",
       targetId: "sections:none",

@@ -28,6 +28,12 @@ export type EnergyIqOverviewAiArtifactIdentity = {
   editorPromptRevision: string;
   methodSkillId: string;
   methodSkillRevision: string;
+  /** Explicit discriminator for revised value-artifact identity contracts. */
+  identityContractRevision?: string;
+  /** Exact server-owned capability set used to create the artifact. */
+  capabilityRevision?: string;
+  /** Exact publication policy used to select customer-visible results. */
+  publicationRevision?: string;
   /**
    * Absent only for legacy autonomous artifacts whose canonical identity and
    * hash must remain readable. New artifacts always set an explicit kind.
@@ -358,6 +364,15 @@ const canonicalIdentity = (
     editorPromptRevision: identity.editorPromptRevision,
     methodSkillId: identity.methodSkillId,
     methodSkillRevision: identity.methodSkillRevision,
+    ...(identity.identityContractRevision
+      ? { identityContractRevision: identity.identityContractRevision }
+      : {}),
+    ...(identity.capabilityRevision
+      ? { capabilityRevision: identity.capabilityRevision }
+      : {}),
+    ...(identity.publicationRevision
+      ? { publicationRevision: identity.publicationRevision }
+      : {}),
     ...(identity.artifactKind ? { artifactKind: identity.artifactKind } : {}),
     ...(identity.targetId ? { targetId: identity.targetId } : {}),
   };
@@ -437,9 +452,25 @@ const requireSectionInterpretationResult = (
   parsed: Record<string, unknown>,
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): void => {
+  if (identity.identityContractRevision !== undefined
+    || identity.outputContractRevision === "preschool-section-interpretation-v4") {
+    requireSectionInterpretationResultV4(parsed, identity);
+    return;
+  }
+  requireSectionInterpretationResultV3(parsed, identity);
+};
+
+const requireSectionInterpretationResultV3 = (
+  parsed: Record<string, unknown>,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): void => {
   const binding = parsed.binding;
   const keyPoints = parsed.keyPoints;
-  if (parsed.artifactKind !== "section-interpretation"
+  if (identity.outputContractRevision !== "preschool-section-interpretation-v3"
+    || identity.identityContractRevision !== undefined
+    || identity.capabilityRevision !== undefined
+    || identity.publicationRevision !== undefined
+    || parsed.artifactKind !== "section-interpretation"
     || (parsed.status !== "available" && parsed.status !== "empty")
     || !nonEmptyString(parsed.providerProfileId)
     || parsed.providerProfileId !== identity.modelProfileId
@@ -476,6 +507,90 @@ const requireSectionInterpretationResult = (
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
   }
 };
+
+const requireSectionInterpretationResultV4 = (
+  parsed: Record<string, unknown>,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): void => {
+  const summary = parsed.summary;
+  const insights = parsed.insights;
+  const capability = parsed.capability;
+  const publication = parsed.publication;
+  if (identity.identityContractRevision !== "v4"
+    || identity.analysisPackId !== "preschool-section-pack"
+    || identity.analysisPackRevision !== "v2"
+    || identity.outputContractRevision !== "preschool-section-interpretation-v4"
+    || identity.validatorRevision !== "acceptance-validator-v1"
+    || identity.workflowRevision !== "discover-accept-publish-v1"
+    || identity.investigatorPromptRevision !== "discovery-prompt-v1"
+    || identity.capabilityRevision !== "pack-only-v1"
+    || identity.publicationRevision !== "v1"
+    || parsed.artifactKind !== "section-interpretation"
+    || (parsed.status !== "available" && parsed.status !== "empty")
+    || !nonEmptyString(parsed.providerProfileId)
+    || parsed.providerProfileId !== identity.modelProfileId
+    || !nonEmptyString(parsed.runId)
+    || !isRecord(parsed.contract)
+    || parsed.contract.id !== "preschool-section-interpretation"
+    || parsed.contract.revision !== identity.outputContractRevision
+    || !sameValueArtifactBinding(parsed.binding, identity)
+    || parsed.sectionId !== identity.targetId
+    || parsed.packRevision !== identity.analysisPackRevision
+    || !isRecord(capability)
+    || capability.revision !== identity.capabilityRevision
+    || !Array.isArray(insights)
+    || !insights.every(validSectionInsightV4)
+    || !validSectionPublicationV4(publication, identity, insights.length)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+  if (parsed.status === "empty") {
+    if (summary !== undefined || insights.length !== 0 || parsed.limitation !== undefined) {
+      throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+    }
+    return;
+  }
+  if (!validSectionSummaryV4(summary) || !optionalString(parsed.limitation)) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+};
+
+const validSectionSummaryV4 = (value: unknown): boolean => isRecord(value)
+  && nonEmptyString(value.text)
+  && Array.isArray(value.evidenceRefs)
+  && value.evidenceRefs.length > 0
+  && value.evidenceRefs.every(nonEmptyString);
+
+const validSectionInsightV4 = (value: unknown): boolean => isRecord(value)
+  && nonEmptyString(value.id)
+  && nonEmptyString(value.title)
+  && optionalString(value.label)
+  && (value.epistemicStatus === "observed"
+    || value.epistemicStatus === "inferred"
+    || value.epistemicStatus === "speculative")
+  && nonEmptyString(value.text)
+  && Array.isArray(value.evidenceRefs)
+  && value.evidenceRefs.every(nonEmptyString)
+  && optionalString(value.deepDiveQuestion);
+
+const validSectionPublicationV4 = (
+  value: unknown,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+  insightCount: number,
+): boolean => isRecord(value)
+  && value.policyId === "preschool-section-publication"
+  && value.policyRevision === identity.publicationRevision
+  && nonNegativeInteger(value.discoveredCount)
+  && nonNegativeInteger(value.acceptedCount)
+  && nonNegativeInteger(value.rejectedCount)
+  && nonNegativeInteger(value.publishedCount)
+  && value.publishedCount === insightCount
+  && (value.acceptedCount as number) >= insightCount
+  && (value.discoveredCount as number) === (value.acceptedCount as number) + (value.rejectedCount as number)
+  && Array.isArray(value.suppressedCandidateIds)
+  && value.suppressedCandidateIds.every(nonEmptyString);
+
+const nonNegativeInteger = (value: unknown): boolean =>
+  Number.isSafeInteger(value) && (value as number) >= 0;
 
 const validSectionKeyPoint = (value: unknown): boolean => isRecord(value)
   && (value.kind === "priority"

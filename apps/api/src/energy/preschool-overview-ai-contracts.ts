@@ -1,5 +1,23 @@
 import type { EnergyIqOverviewAiArtifactIdentity } from "@datafoundry/metadata";
 
+export type {
+  PreschoolAcceptedSectionInsightV4,
+  PreschoolAcceptedSectionValueV4,
+  PreschoolOverviewAiBindingV4,
+  PreschoolPublishedSectionInsightV4,
+  PreschoolSectionAcceptanceV4,
+  PreschoolSectionCapabilityV4,
+  PreschoolSectionCandidateRejectionCodeV4,
+  PreschoolSectionCandidateRejectionV4,
+  PreschoolSectionDiscoveryV4,
+  PreschoolSectionEpistemicStatusV4,
+  PreschoolSectionIdV4,
+  PreschoolSectionInsightCandidateV4,
+  PreschoolSectionInterpretationResultV4,
+  PreschoolSectionPublicationAuditV4,
+  PreschoolSectionSummaryV4,
+} from "@datafoundry/contracts";
+
 export const PRESCHOOL_SECTION_IDS = [
   "centre-benchmark",
   "standby-wastage",

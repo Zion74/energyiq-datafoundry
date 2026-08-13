@@ -73,7 +73,10 @@ import {
   isPreschoolSectionId,
   type PreschoolOverviewAiReadModel,
 } from "./preschool-overview-ai-contracts.js";
-import { composePreschoolOverviewAiReadModel } from "./preschool-overview-ai-read-model.js";
+import {
+  composePreschoolOverviewAiReadModel,
+  composePreschoolOverviewAiReadModelV3,
+} from "./preschool-overview-ai-read-model.js";
 import type { PreschoolOverviewAiRetryTarget } from "./preschool-overview-ai-page-workflow.js";
 
 const EXPLORER_ANALYSIS_CACHE_LIMIT = 100;
@@ -1581,7 +1584,10 @@ const parseRequestedSavedAnalysisAiArtifact = (
       modelProfileId: artifact.result.binding.modelProfileId,
       modelProfileRevision: artifact.result.binding.modelProfileRevision,
     });
-    const canonical = composePreschoolOverviewAiReadModel({
+    const sectionRevision = savedSectionContractRevision(artifact.result);
+    const canonical = sectionRevision === "preschool-section-interpretation-v3"
+      ? composePreschoolOverviewAiReadModelV3({ metadataStore: context.metadataStore, baseIdentity })
+      : composePreschoolOverviewAiReadModel({
       metadataStore: context.metadataStore,
       baseIdentity,
     });
@@ -1775,6 +1781,22 @@ const isPreschoolOverviewAiReadModel = (value: unknown): value is PreschoolOverv
   && isRecord(value.sections)
   && isRecord(value.executive);
 
+const savedSectionContractRevision = (
+  result: PreschoolOverviewAiReadModel,
+): "preschool-section-interpretation-v3" | "preschool-section-interpretation-v4" => {
+  const revisions = new Set(PRESCHOOL_SECTION_IDS.flatMap((sectionId) => {
+    const unit = result.sections[sectionId];
+    if (unit.status !== "available" && unit.status !== "empty") return [];
+    const revision = unit.result.contract?.revision;
+    return revision === "preschool-section-interpretation-v3"
+      || revision === "preschool-section-interpretation-v4"
+      ? [revision]
+      : [];
+  }));
+  if (revisions.size !== 1) throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+  return [...revisions][0]!;
+};
+
 const validPreschoolSavedUnit = (
   value: unknown,
   binding: PreschoolOverviewAiReadModel["binding"],
@@ -1796,7 +1818,24 @@ const validPreschoolSavedUnit = (
     || value.result.binding.modelProfileId !== binding.modelProfileId
     || value.result.binding.modelProfileRevision !== binding.modelProfileRevision) return false;
   if (artifactKind === "section-interpretation") {
-    return value.result.sectionId === sectionId && Array.isArray(value.result.keyPoints);
+    if (value.result.sectionId !== sectionId || !isRecord(value.result.contract)) return false;
+    if (value.result.contract.revision === "preschool-section-interpretation-v3") {
+      return Array.isArray(value.result.keyPoints);
+    }
+    return value.result.contract.revision === "preschool-section-interpretation-v4"
+      && value.result.packRevision === "v2"
+      && isRecord(value.result.capability)
+      && value.result.capability.revision === "pack-only-v1"
+      && Array.isArray(value.result.insights)
+      && isRecord(value.result.publication)
+      && value.result.publication.policyId === "preschool-section-publication"
+      && value.result.publication.policyRevision === "v1"
+      && (value.result.status === "empty"
+        ? value.result.summary === undefined && value.result.insights.length === 0
+        : isRecord(value.result.summary)
+          && typeof value.result.summary.text === "string"
+          && Boolean(value.result.summary.text.trim())
+          && Array.isArray(value.result.summary.evidenceRefs));
   }
   return Array.isArray(value.result.sourceSectionArtifactIds) && Array.isArray(value.result.keyFindings);
 };

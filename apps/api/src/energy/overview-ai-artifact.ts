@@ -91,31 +91,94 @@ export const createPreschoolOverviewAiValueArtifactIdentity = (input: {
   if (!input.targetId?.trim()) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
   }
-  const section = input.artifactKind === "section-interpretation";
+  if (input.artifactKind === "section-interpretation") {
+    return createPreschoolOverviewAiSectionArtifactIdentityV3({
+      baseIdentity: input.baseIdentity,
+      targetId: input.targetId,
+    });
+  }
   const {
     artifactKind: _legacyArtifactKind,
     targetId: _legacyTargetId,
+    identityContractRevision: _legacyIdentityContractRevision,
+    capabilityRevision: _legacyCapabilityRevision,
+    publicationRevision: _legacyPublicationRevision,
     ...baseIdentity
   } = input.baseIdentity;
   return {
     ...baseIdentity,
     artifactKind: input.artifactKind,
     targetId: input.targetId,
-    outputContractRevision: section
-      ? "preschool-section-interpretation-v3"
-      : "preschool-executive-synthesis-v1",
-    validatorRevision: section
-      ? "preschool-section-interpreter-validator-v12"
-      : "preschool-executive-synthesis-validator-v3",
-    workflowRevision: section
-      ? "preschool-section-interpreter-v14"
-      : "preschool-executive-synthesis-v9",
-    investigatorPromptRevision: section
-      ? "preschool-section-interpreter-prompt-v14"
-      : "preschool-executive-synthesis-prompt-v2",
+    outputContractRevision: "preschool-executive-synthesis-v1",
+    validatorRevision: "preschool-executive-synthesis-validator-v3",
+    workflowRevision: "preschool-executive-synthesis-v9",
+    investigatorPromptRevision: "preschool-executive-synthesis-prompt-v2",
     editorPromptRevision: "not-applicable-v1",
     methodSkillId: "none",
     methodSkillRevision: "not-applicable-v1",
+  };
+};
+
+export const createPreschoolOverviewAiSectionArtifactIdentityV3 = (input: {
+  baseIdentity: OverviewAiArtifactIdentityV13;
+  targetId: PreschoolSectionId | string;
+}): PreschoolOverviewAiValueArtifactIdentity => {
+  if (!input.targetId.trim()) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
+  }
+  const {
+    artifactKind: _legacyArtifactKind,
+    targetId: _legacyTargetId,
+    identityContractRevision: _identityContractRevision,
+    capabilityRevision: _capabilityRevision,
+    publicationRevision: _publicationRevision,
+    ...baseIdentity
+  } = input.baseIdentity;
+  return {
+    ...baseIdentity,
+    artifactKind: "section-interpretation",
+    targetId: input.targetId,
+    outputContractRevision: "preschool-section-interpretation-v3",
+    validatorRevision: "preschool-section-interpreter-validator-v12",
+    workflowRevision: "preschool-section-interpreter-v14",
+    investigatorPromptRevision: "preschool-section-interpreter-prompt-v14",
+    editorPromptRevision: "not-applicable-v1",
+    methodSkillId: "none",
+    methodSkillRevision: "not-applicable-v1",
+  };
+};
+
+export const createPreschoolOverviewAiSectionArtifactIdentityV4 = (input: {
+  baseIdentity: OverviewAiArtifactIdentityV13;
+  targetId: PreschoolSectionId | string;
+}): PreschoolOverviewAiValueArtifactIdentity => {
+  if (!input.targetId.trim()) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
+  }
+  const {
+    artifactKind: _legacyArtifactKind,
+    targetId: _legacyTargetId,
+    identityContractRevision: _identityContractRevision,
+    capabilityRevision: _capabilityRevision,
+    publicationRevision: _publicationRevision,
+    ...baseIdentity
+  } = input.baseIdentity;
+  return {
+    ...baseIdentity,
+    artifactKind: "section-interpretation",
+    targetId: input.targetId,
+    identityContractRevision: "v4",
+    analysisPackId: "preschool-section-pack",
+    analysisPackRevision: "v2",
+    outputContractRevision: "preschool-section-interpretation-v4",
+    validatorRevision: "acceptance-validator-v1",
+    workflowRevision: "discover-accept-publish-v1",
+    investigatorPromptRevision: "discovery-prompt-v1",
+    editorPromptRevision: "not-applicable-v1",
+    methodSkillId: "none",
+    methodSkillRevision: "not-applicable-v1",
+    capabilityRevision: "pack-only-v1",
+    publicationRevision: "v1",
   };
 };
 

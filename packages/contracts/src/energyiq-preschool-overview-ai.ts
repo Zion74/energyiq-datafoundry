@@ -120,6 +120,12 @@ export type PreschoolSectionPublicationAuditV4 = {
   suppressedCandidateIds: string[];
 };
 
+export type PreschoolSectionCapabilityV4 = {
+  revision: "pack-only-v1";
+  mode: "pack-only";
+  tools: [];
+};
+
 type PreschoolSectionInterpretationResultV4Base = {
   artifactKind: "section-interpretation";
   providerProfileId: string;
@@ -131,6 +137,7 @@ type PreschoolSectionInterpretationResultV4Base = {
   binding: PreschoolOverviewAiBindingV4;
   sectionId: PreschoolSectionIdV4;
   packRevision: "v2";
+  capability: PreschoolSectionCapabilityV4;
 };
 
 export type PreschoolSectionInterpretationResultV4 =

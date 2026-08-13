@@ -4,6 +4,7 @@ import type {
   PreschoolPublishedSectionInsightV4,
   PreschoolSectionInterpretationResultV4,
   PreschoolSectionPublicationAuditV4,
+  PreschoolSectionCapabilityV4,
 } from "../../../../packages/contracts/src/energyiq-preschool-overview-ai.js";
 
 const MAX_PUBLISHED_INSIGHTS = 3;
@@ -12,6 +13,7 @@ export const publishPreschoolSectionInterpretation = (input: {
   accepted: PreschoolAcceptedSectionValueV4;
   providerProfileId: string;
   runId: string;
+  capability: PreschoolSectionCapabilityV4;
 }): PreschoolSectionInterpretationResultV4 => {
   const common = {
     artifactKind: "section-interpretation" as const,
@@ -24,6 +26,11 @@ export const publishPreschoolSectionInterpretation = (input: {
     binding: input.accepted.binding,
     sectionId: input.accepted.sectionId,
     packRevision: "v2" as const,
+    capability: {
+      revision: input.capability.revision,
+      mode: input.capability.mode,
+      tools: [] as [],
+    },
   };
 
   if (input.accepted.status === "empty") {
