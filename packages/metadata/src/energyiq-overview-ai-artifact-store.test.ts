@@ -738,9 +738,9 @@ const sectionV4Identity = (
   analysisPackId: "preschool-section-pack",
   analysisPackRevision: "v2",
   outputContractRevision: "preschool-section-interpretation-v4",
-  validatorRevision: "acceptance-validator-v4",
+  validatorRevision: "acceptance-validator-v5",
   workflowRevision: "discover-tools-accept-publish-v2",
-  investigatorPromptRevision: "discovery-prompt-v3",
+  investigatorPromptRevision: "discovery-prompt-v4",
   capabilityRevision: "scoped-read-only-v1",
   publicationRevision: "v1",
 });
