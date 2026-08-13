@@ -278,7 +278,7 @@ const additionalAlert: JsonSchema = {
   properties: {
     severity: { type: "string", enum: ["attention", "urgent"] },
     certainty: { type: "string", enum: ["confirmed", "anomaly", "possible"] },
-    evidenceRefs,
+    evidenceRefs: uniqueEvidenceRefs,
   },
 };
 
@@ -291,7 +291,7 @@ const additionalCandidate: JsonSchema = {
     title: { type: "string", minLength: 1, maxLength: 240 },
     text: { type: "string", minLength: 1, maxLength: 1_200 },
     epistemicStatus: { type: "string", enum: ["observed", "inferred", "speculative"] },
-    evidenceRefs,
+    evidenceRefs: uniqueEvidenceRefs,
     toolAuditIds: {
       type: "array",
       minItems: 0,
