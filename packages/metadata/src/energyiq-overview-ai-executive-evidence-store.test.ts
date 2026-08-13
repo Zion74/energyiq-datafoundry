@@ -138,10 +138,10 @@ const executiveIdentity = (): EnergyIqOverviewAiArtifactIdentity => ({
   analysisPackId: "preschool-executive-section-artifacts",
   analysisPackRevision: "section-interpretation-v4",
   outputContractRevision: "preschool-executive-synthesis-v4",
-  validatorRevision: "preschool-executive-synthesis-validator-v5",
-  workflowRevision: "preschool-executive-synthesis-v5",
-  investigatorPromptRevision: "preschool-executive-synthesis-prompt-v5",
-  capabilityRevision: "section-artifacts-and-overview-evidence-v1",
+  validatorRevision: "preschool-executive-synthesis-validator-v6",
+  workflowRevision: "preschool-executive-synthesis-v6",
+  investigatorPromptRevision: "preschool-executive-synthesis-prompt-v6",
+  capabilityRevision: "section-artifacts-and-overview-evidence-v2",
   publicationRevision: "key-findings-v2",
 });
 

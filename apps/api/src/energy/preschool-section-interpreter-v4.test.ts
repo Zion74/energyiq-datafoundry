@@ -261,7 +261,7 @@ describe("Preschool Section Interpreter v4", () => {
         sectionId: "standby-wastage",
         status: "available",
         summary: {
-          text: "Closed-hour use was **3,104 kWh**. Appliance use started at **1,007 kWh**.",
+          text: "Closed-hour use was **3,104 kWh**. Review the schedule. Two different things drive this. Appliance use started at **1,007 kWh**.",
           evidenceRefs: ["evidence:standby-wastage:1"],
         },
         candidates: [],
@@ -274,7 +274,7 @@ describe("Preschool Section Interpreter v4", () => {
     expect(result).toMatchObject({
       status: "available",
       summary: {
-        text: "Closed-hour use was **3,104 kWh**.",
+        text: "Closed-hour use was **3,104 kWh**. Review the schedule.",
         evidenceRefs: ["evidence:standby-wastage:1"],
       },
     });

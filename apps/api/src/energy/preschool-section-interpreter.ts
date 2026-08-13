@@ -468,12 +468,17 @@ const keepSupportedSummarySentences = (
     .segment(discovery.summary.text)]
     .map(({ segment }) => segment.trim())
     .filter((sentence) => sentence
+      && summaryFragmentIsSelfContained(sentence)
       && isSupportedNarrative(sentence, citedEvidence, pack.evidence))
     .join(" ");
   return supportedText
     ? { ...discovery, summary: { ...discovery.summary, text: supportedText } }
     : discovery;
 };
+
+const summaryFragmentIsSelfContained = (sentence: string): boolean =>
+  !/^(?:two|three|four|several)\b.*\b(?:things|factors|drivers|patterns)\b.*\b(?:drive|explain|cause|support|affect)s?\s+(?:this|that|it)\.?$/iu
+    .test(sentence.replaceAll("**", "").trim());
 
 const createPackV2AcceptanceAuthority = (pack: PreschoolSectionPackV2) => ({
   validateSummary: (summary: PreschoolSectionSummaryV4) => {

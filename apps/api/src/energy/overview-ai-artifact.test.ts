@@ -112,7 +112,7 @@ describe("createOverviewAiArtifactIdentity", () => {
       analysisPackId: "preschool-section-pack",
       analysisPackRevision: "v2",
       outputContractRevision: "preschool-section-interpretation-v4",
-      validatorRevision: "acceptance-validator-v3",
+      validatorRevision: "acceptance-validator-v4",
       workflowRevision: "discover-tools-accept-publish-v2",
       investigatorPromptRevision: "discovery-prompt-v3",
       capabilityRevision: "scoped-read-only-v1",
@@ -123,7 +123,7 @@ describe("createOverviewAiArtifactIdentity", () => {
       baseIdentity: legacy,
       targetId: "sections:current-v4",
     })).toMatchObject({
-      validatorRevision: "preschool-executive-synthesis-validator-v5",
+      validatorRevision: "preschool-executive-synthesis-validator-v6",
       workflowRevision: "preschool-executive-synthesis-v6",
       investigatorPromptRevision: "preschool-executive-synthesis-prompt-v6",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
