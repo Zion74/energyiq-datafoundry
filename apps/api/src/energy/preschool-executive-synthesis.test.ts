@@ -526,8 +526,8 @@ describe("Preschool Executive Synthesis", () => {
     harness.close();
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.identity_json)).toMatchObject({
-      validatorRevision: "preschool-executive-synthesis-validator-v7",
-      workflowRevision: "preschool-executive-synthesis-v7",
+      validatorRevision: "preschool-executive-synthesis-validator-v8",
+      workflowRevision: "preschool-executive-synthesis-v8",
       investigatorPromptRevision: "preschool-executive-synthesis-prompt-v6",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
       publicationRevision: "key-findings-v2",
@@ -567,8 +567,35 @@ describe("Preschool Executive Synthesis", () => {
           value: 12.45,
           unit: "%",
           status: "confirmed" as const,
-          evidenceRefs: ["evidence:off-hours-share"],
+          evidenceRefs: [
+            "evidence:snapshot:energy.off_hours_share_pct@1",
+            "evidence:snapshot:energy.peak_demand_kw@1",
+          ],
           dimensions: { sectionId: "standby-wastage" },
+        }, {
+          id: "analysis.summary.usage_kwh",
+          label: "Portfolio energy use",
+          metricId: "energy.total_usage_kwh",
+          value: 24_921.8,
+          unit: "kWh",
+          status: "confirmed" as const,
+          evidenceRefs: [
+            "evidence:snapshot:energy.off_hours_share_pct@1",
+            "evidence:snapshot:energy.peak_demand_kw@1",
+          ],
+          dimensions: { sectionId: "overview" },
+        }, {
+          id: "analysis.summary.peak_kw",
+          label: "Portfolio peak interval-average power",
+          metricId: "energy.peak_interval_average_kw",
+          value: 138.8058,
+          unit: "kW",
+          status: "confirmed" as const,
+          evidenceRefs: [
+            "evidence:snapshot:energy.off_hours_share_pct@1",
+            "evidence:snapshot:energy.peak_demand_kw@1",
+          ],
+          dimensions: { sectionId: "overview" },
         }],
       },
     };
@@ -580,11 +607,12 @@ describe("Preschool Executive Synthesis", () => {
         answer: JSON.stringify({
           status: "available",
           summary: {
-            text: "The benchmark context is available alongside the 12.45% closed-hour share.",
+            text: "The benchmark context is available alongside the 12.45% closed-hour share and 138.8 kW peak.",
             evidenceRefs: [
               "evidence:centre-benchmark:summary",
-              "evidence:off-hours-share",
-              "evidence:off-hours-share",
+              "evidence:snapshot:energy.off_hours_share_pct@1",
+              "evidence:snapshot:energy.off_hours_share_pct@1",
+              "evidence:snapshot:energy.peak_demand_kw@1",
             ],
           },
           findings: [{
@@ -615,10 +643,11 @@ describe("Preschool Executive Synthesis", () => {
         evidenceRefs: [
           "evidence:centre-benchmark:summary",
           "analysis.summary.closed_hour_share_pct",
+          "analysis.summary.peak_kw",
         ],
       },
       overviewEvidence: {
-        factIds: ["analysis.summary.closed_hour_share_pct"],
+        factIds: ["analysis.summary.closed_hour_share_pct", "analysis.summary.peak_kw"],
       },
       findings: [{ alert: { severity: "attention", certainty: "possible" } }],
     });

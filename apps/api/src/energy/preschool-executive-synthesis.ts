@@ -474,12 +474,12 @@ const materializeExecutiveResultV4 = (input: {
   const evidenceOwners = sectionEvidenceOwners(input.accepted);
   const overviewFacts = input.authoritativeOverviewEvidence?.catalog.facts ?? [];
   const authoritativeEvidence = new Set(overviewFacts.map(({ id }) => id));
-  const overviewFactIdsByProvenanceRef = new Map<string, Set<string>>();
+  const overviewFactsByProvenanceRef = new Map<string, typeof overviewFacts>();
   for (const fact of overviewFacts) {
     for (const reference of fact.evidenceRefs) {
-      const factIds = overviewFactIdsByProvenanceRef.get(reference) ?? new Set<string>();
-      factIds.add(fact.id);
-      overviewFactIdsByProvenanceRef.set(reference, factIds);
+      const facts = overviewFactsByProvenanceRef.get(reference) ?? [];
+      facts.push(fact);
+      overviewFactsByProvenanceRef.set(reference, facts);
     }
   }
   const usedOverviewFactIds = new Set<string>();
@@ -493,6 +493,7 @@ const materializeExecutiveResultV4 = (input: {
   ];
   const requireSupportedEvidence = (
     reference: string,
+    narrativeText: string,
     usedFactIds: Set<string> = usedOverviewFactIds,
   ): {
     canonicalReference: string;
@@ -504,17 +505,20 @@ const materializeExecutiveResultV4 = (input: {
       usedFactIds.add(reference);
       return { canonicalReference: reference, owners: new Set() };
     }
-    const aliasedFactIds = overviewFactIdsByProvenanceRef.get(reference);
-    if (aliasedFactIds?.size === 1) {
-      const [factId] = aliasedFactIds;
-      usedFactIds.add(factId!);
-      return { canonicalReference: factId!, owners: new Set() };
+    const aliasedFact = resolveOverviewFactAlias(
+      reference,
+      narrativeText,
+      overviewFactsByProvenanceRef.get(reference) ?? [],
+    );
+    if (aliasedFact) {
+      usedFactIds.add(aliasedFact.id);
+      return { canonicalReference: aliasedFact.id, owners: new Set() };
     }
     throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_EVIDENCE_UNSUPPORTED");
   };
   const contributingSections = new Set<PreschoolSectionId>();
   const summaryEvidenceRefs = [...new Set(rawSummaryEvidenceRefs.map((reference) => {
-    const supported = requireSupportedEvidence(reference);
+    const supported = requireSupportedEvidence(reference, summaryText);
     for (const sectionId of supported.owners) contributingSections.add(sectionId);
     return supported.canonicalReference;
   }))];
@@ -545,7 +549,11 @@ const materializeExecutiveResultV4 = (input: {
     const candidateOverviewFactIds = new Set<string>();
     try {
       for (const reference of rawEvidenceRefs) {
-        const supported = requireSupportedEvidence(reference, candidateOverviewFactIds);
+        const supported = requireSupportedEvidence(
+          reference,
+          `${title} ${text}`,
+          candidateOverviewFactIds,
+        );
         const { owners } = supported;
         if (owners.size > 0 && ![...owners].some((sectionId) => declaredSections.has(sectionId))) {
           return [];
@@ -845,6 +853,46 @@ const reportedNumberMatches = (sourceValue: number, reportedValue: number, preci
     * Math.max(1, Math.abs(sourceValue), Math.abs(reportedValue))
     * 8;
   return Math.abs(sourceValue - reportedValue) <= tolerance + floatingPointSlack;
+};
+
+const resolveOverviewFactAlias = <T extends {
+  id: string;
+  metricId: string;
+  value: string | number | boolean | null;
+}>(reference: string, narrativeText: string, referencedFacts: T[]): T | null => {
+  if (referencedFacts.length === 0) return null;
+  const evidenceMetricId = /:([^:]+)@\d+$/u.exec(reference)?.[1];
+  const compatibleMetricIds = evidenceMetricId
+    ? new Set([evidenceMetricId, ...(OVERVIEW_EVIDENCE_METRIC_ALIASES[evidenceMetricId] ?? [])])
+    : null;
+  const metricCandidates = compatibleMetricIds
+    ? referencedFacts.filter(({ metricId }) => compatibleMetricIds.has(metricId))
+    : [];
+  const candidates = metricCandidates.length > 0 ? metricCandidates : referencedFacts;
+  const valueMatches = candidates.filter(({ value }) => overviewFactValueAppearsInNarrative(value, narrativeText));
+  if (valueMatches.length === 1) return valueMatches[0]!;
+  return candidates.length === 1 ? candidates[0]! : null;
+};
+
+const OVERVIEW_EVIDENCE_METRIC_ALIASES: Record<string, string[]> = {
+  "energy.peak_demand_kw": ["energy.peak_interval_average_kw"],
+};
+
+const overviewFactValueAppearsInNarrative = (
+  value: string | number | boolean | null,
+  narrativeText: string,
+): boolean => {
+  if (typeof value === "number") {
+    return [...narrativeText.replaceAll("−", "-").matchAll(NUMBER_TOKEN)].some((match) => {
+      const raw = match[0].replaceAll(",", "");
+      const reportedValue = Number(raw);
+      const precision = raw.includes(".") ? raw.length - raw.indexOf(".") - 1 : 0;
+      return reportedNumberMatches(value, reportedValue, precision);
+    });
+  }
+  if (typeof value === "string") return narrativeText.toLocaleLowerCase().includes(value.toLocaleLowerCase());
+  if (typeof value === "boolean") return new RegExp(`\\b${String(value)}\\b`, "iu").test(narrativeText);
+  return false;
 };
 
 const hasBannedCustomerText = (text: string): boolean =>
