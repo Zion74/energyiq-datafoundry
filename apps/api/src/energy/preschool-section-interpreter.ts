@@ -431,11 +431,12 @@ export const materializePreschoolSectionResultV4 = (input: {
   toolAudits?: PreschoolSectionToolAuditV4[];
 }): PreschoolSectionInterpretationResultV4 => {
   const binding = preschoolOverviewAiBindingFromIdentity(input.identity);
-  const discovery = parsePreschoolSectionDiscoveryV4({
+  const parsedDiscovery = parsePreschoolSectionDiscoveryV4({
     answer: input.answer,
     expectedSectionId: input.pack.sectionId,
     binding,
   });
+  const discovery = keepSupportedSummarySentences(parsedDiscovery, input.pack);
   if (discovery.status === "available" && discovery.limitation
     && !isSupportedNarrative(discovery.limitation, input.pack.evidence, input.pack.evidence)) {
     throw new Error("PRESCHOOL_SECTION_INTERPRETATION_SUMMARY_UNSUPPORTED");
@@ -454,6 +455,24 @@ export const materializePreschoolSectionResultV4 = (input: {
     capability: input.pack.capabilities,
     toolAudits: input.toolAudits ?? [],
   });
+};
+
+const keepSupportedSummarySentences = (
+  discovery: ReturnType<typeof parsePreschoolSectionDiscoveryV4>,
+  pack: PreschoolSectionPackV2,
+): ReturnType<typeof parsePreschoolSectionDiscoveryV4> => {
+  if (discovery.status !== "available") return discovery;
+  const citedEvidence = citedPackEvidence(discovery.summary.evidenceRefs, pack);
+  if (isSupportedNarrative(discovery.summary.text, citedEvidence, pack.evidence)) return discovery;
+  const supportedText = [...new Intl.Segmenter("en", { granularity: "sentence" })
+    .segment(discovery.summary.text)]
+    .map(({ segment }) => segment.trim())
+    .filter((sentence) => sentence
+      && isSupportedNarrative(sentence, citedEvidence, pack.evidence))
+    .join(" ");
+  return supportedText
+    ? { ...discovery, summary: { ...discovery.summary, text: supportedText } }
+    : discovery;
 };
 
 const createPackV2AcceptanceAuthority = (pack: PreschoolSectionPackV2) => ({

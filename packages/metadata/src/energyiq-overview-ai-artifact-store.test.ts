@@ -456,8 +456,17 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
         leaseMs: 60_000,
         now: "2026-08-08T12:02:00.000Z",
       })).toMatchObject({
+        claimed: true,
+        artifact: { status: "running", attempt_count: 3, lease_owner: "api-3" },
+      });
+      expect(store.energyIq.overviewAiArtifacts.claim({
+        identity: identity("snapshot-a"),
+        workerId: "api-4",
+        leaseMs: 60_000,
+        now: "2026-08-08T12:04:00.000Z",
+      })).toMatchObject({
         claimed: false,
-        artifact: { status: "failed", attempt_count: 2, error_code: "ATTEMPT_LIMIT_EXCEEDED" },
+        artifact: { status: "failed", attempt_count: 3, error_code: "ATTEMPT_LIMIT_EXCEEDED" },
       });
     } finally {
       metadata?.close();
@@ -465,7 +474,7 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
     }
   });
 
-  it("retries a failed exact identity once, fences stale leases, and keeps available immutable", () => {
+  it("retries a failed exact identity twice, fences stale leases, and keeps available immutable", () => {
     const root = mkdtempSync(join(tmpdir(), "energyiq-overview-artifact-retry-"));
     let metadata: ReturnType<typeof createMetadataStore> | undefined;
     try {
@@ -599,8 +608,23 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
         leaseMs: 60_000,
         now: "2026-08-08T12:01:05.000Z",
       })).toMatchObject({
+        claimed: true,
+        artifact: { status: "running", attempt_count: 3, lease_owner: "api-3" },
+      });
+      store.energyIq.overviewAiArtifacts.fail({
+        identity: identity("snapshot-exhausted"),
+        workerId: "api-3",
+        errorCode: "PROVIDER_TEMPORARY",
+        now: "2026-08-08T12:01:06.000Z",
+      });
+      expect(store.energyIq.overviewAiArtifacts.claim({
+        identity: identity("snapshot-exhausted"),
+        workerId: "api-4",
+        leaseMs: 60_000,
+        now: "2026-08-08T12:01:07.000Z",
+      })).toMatchObject({
         claimed: false,
-        artifact: { status: "failed", attempt_count: 2, error_code: "PROVIDER_TEMPORARY" },
+        artifact: { status: "failed", attempt_count: 3, error_code: "PROVIDER_TEMPORARY" },
       });
     } finally {
       metadata?.close();

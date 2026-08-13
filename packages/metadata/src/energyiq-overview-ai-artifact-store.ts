@@ -45,7 +45,7 @@ export type EnergyIqOverviewAiArtifactIdentity = {
 
 export type EnergyIqOverviewAiArtifactStatus = "queued" | "running" | "available" | "failed";
 
-const MAX_OVERVIEW_AI_ARTIFACT_ATTEMPTS = 2;
+const MAX_OVERVIEW_AI_ARTIFACT_ATTEMPTS = 3;
 
 export type EnergyIqOverviewAiArtifactRecord = {
   id: string;

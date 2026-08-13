@@ -246,6 +246,40 @@ describe("Preschool Section Interpreter v4", () => {
     });
   });
 
+  it("keeps supported Summary sentences when one sentence contains an unsupported number", () => {
+    const pack = packV2("standby-wastage", 1);
+    pack.evidence[0] = {
+      id: "evidence:standby-wastage:1",
+      label: "Closed-hour summary",
+      value: { closedHoursKwh: 3103.784, applianceMinimumKwh: 1006.017 },
+      unit: "kWh",
+      entityRefs: [],
+      evidenceRefs: ["evidence:standby-wastage:1"],
+    };
+    const result = materializePreschoolSectionResultV4({
+      answer: JSON.stringify({
+        sectionId: "standby-wastage",
+        status: "available",
+        summary: {
+          text: "Closed-hour use was **3,104 kWh**. Appliance use started at **1,007 kWh**.",
+          evidenceRefs: ["evidence:standby-wastage:1"],
+        },
+        candidates: [],
+      }),
+      pack,
+      identity: identity("standby-wastage"),
+      runId: "runtime-run-partial-summary",
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      summary: {
+        text: "Closed-hour use was **3,104 kWh**.",
+        evidenceRefs: ["evidence:standby-wastage:1"],
+      },
+    });
+  });
+
   it("passes the explicit V4 structured contract only to Pack-v2 runner calls", async () => {
     const root = mkdtempSync(join(tmpdir(), "preschool-section-v4-runner-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
