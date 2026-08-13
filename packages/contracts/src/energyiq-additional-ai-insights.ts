@@ -16,10 +16,25 @@ export const ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1 = [
 export const CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_ID = "preschool-additional-insights-current";
 export const CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_REVISION = "v1";
 
+export const ENERGYIQ_OPEN_DISCOVERY_METHOD_CONTENT_V1 = [
+  "Find only incremental decision value beyond the deterministic Overview, Key Findings, and Section interpretations.",
+  "Explore openly: counterexamples, cross-signal relationships, hypotheses, low-risk tests, Alerts, and no-material-change are all valid outcomes.",
+  "Do not force What/Why/How or any fixed lens. Preserve model source order from highest to lowest incremental value.",
+  "Every factual claim must cite exact current server-provided Evidence. Mark observed, inferred, and speculative content honestly.",
+  "Use only the server-scoped read-only tools offered for this run. Never request SQL, HTML, JavaScript, URLs, network access, or writes.",
+  "Zero candidates is valid. Do not repeat Layer 1 or Layer 2 merely to fill space.",
+].join("\n");
+
+export type AdditionalAiInsightMethodResource = {
+  method: InsightMethodRevisionRef;
+  content: string;
+};
+
 export type AdditionalAiInsightMethodSet = {
   id: string;
   revision: string;
   methods: readonly InsightMethodRevisionRef[];
+  resources: readonly AdditionalAiInsightMethodResource[];
 };
 
 export const resolveAdditionalAiInsightMethodSet = (input: {
@@ -30,20 +45,22 @@ export const resolveAdditionalAiInsightMethodSet = (input: {
   if (!nonEmptyString(input.workspaceId)
     || input.methodSetId !== CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_ID
     || input.methodSetRevision !== CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_REVISION) return null;
+  const coreMethod: InsightMethodRevisionRef = {
+    skillId: "energyiq-open-discovery",
+    semanticVersion: "1.0.0",
+    resourceId: "builtin:energyiq-open-discovery",
+    resourceRevision: 1,
+    contentSha256: "5af7fdc13e241bf92a4b14268aa1382996c2af31d920d9dc8644bb2efec87d59",
+    scope: "builtin",
+    workspaceId: input.workspaceId,
+    userId: "energyiq-system",
+    role: "core-method",
+  };
   return {
     id: CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_ID,
     revision: CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_REVISION,
-    methods: [{
-      skillId: "energyiq-open-discovery",
-      semanticVersion: "1.0.0",
-      resourceId: "builtin:energyiq-open-discovery",
-      resourceRevision: 1,
-      contentSha256: "e2492b021782065c04832a0b1c54f1fb00217a58f8c9830c46907d9cc8884465",
-      scope: "builtin",
-      workspaceId: input.workspaceId,
-      userId: "energyiq-system",
-      role: "core-method",
-    }],
+    methods: [coreMethod],
+    resources: [{ method: coreMethod, content: ENERGYIQ_OPEN_DISCOVERY_METHOD_CONTENT_V1 }],
   };
 };
 
@@ -100,7 +117,28 @@ export type AdditionalAiInsightToolAudit = {
   auditId: string;
   toolCallId: string;
   toolName: string;
+  status: "succeeded" | "rejected";
   evidenceRefs: string[];
+  errorCode?: string;
+};
+
+export type AdditionalAiInsightsEvidenceLineage = {
+  catalogContract: "analysis-context-evidence@1";
+  sourceId: string;
+  pins: {
+    workspaceId: string;
+    projectId: string;
+    scopeId: string;
+    dataSnapshotId: string;
+    dataCutoff: string;
+    projectReleaseId: string;
+    metricVersion: string;
+  };
+  facts: Array<{
+    id: string;
+    status: "confirmed" | "provisional" | "partial";
+    evidenceRefs: string[];
+  }>;
 };
 
 export type AdditionalAiInsightsSnapshotComparison = {
@@ -135,6 +173,10 @@ export type AdditionalAiInsightsPublication = {
   acceptedCount: number;
   rejectedCount: number;
   publishedCount: number;
+  sourceOrderCandidateIds: string[];
+  acceptedCandidateIds: string[];
+  rejectedCandidateIds: string[];
+  publishedCandidateIds: string[];
   suppressedCandidateIds: string[];
 };
 
@@ -155,6 +197,7 @@ type AdditionalAiInsightsArtifactBase = {
     usedTools: string[];
   };
   toolAudits: AdditionalAiInsightToolAudit[];
+  evidenceLineage: AdditionalAiInsightsEvidenceLineage;
   publication: AdditionalAiInsightsPublication;
   snapshotComparison?: AdditionalAiInsightsSnapshotComparison;
 };
@@ -231,6 +274,7 @@ export const additionalAiInsightsArtifactIsValid = (
     "methodExecution",
     "capability",
     "toolAudits",
+    "evidenceLineage",
     "findings",
     "publication",
     "snapshotComparison",
@@ -258,6 +302,7 @@ export const additionalAiInsightsArtifactIsValid = (
       toolAudits,
     ))
     || !uniqueStrings(findings.map((finding) => isRecord(finding) ? finding.id : undefined))
+    || !evidenceLineageMatches(value.evidenceLineage, expected, findings, toolAudits)
     || !snapshotComparisonIsValid(value.snapshotComparison, expected, findings)
     || !publicationMatches(value.publication, expected, findings.length)) return false;
 
@@ -407,28 +452,55 @@ const publicationMatches = (
   value: unknown,
   expected: AdditionalAiInsightsArtifactExpectation,
   findingCount: number,
-): boolean => isRecord(value)
-  && hasOnlyKeys(value, [
+): boolean => {
+  if (!isRecord(value)
+    || !hasOnlyKeys(value, [
     "policyId",
     "policyRevision",
     "discoveredCount",
     "acceptedCount",
     "rejectedCount",
     "publishedCount",
+    "sourceOrderCandidateIds",
+    "acceptedCandidateIds",
+    "rejectedCandidateIds",
+    "publishedCandidateIds",
     "suppressedCandidateIds",
-  ])
-  && value.policyId === "energyiq-additional-ai-insights"
-  && value.policyRevision === expected.publicationRevision
-  && nonNegativeInteger(value.discoveredCount)
-  && nonNegativeInteger(value.acceptedCount)
-  && nonNegativeInteger(value.rejectedCount)
-  && nonNegativeInteger(value.publishedCount)
-  && value.publishedCount === findingCount
-  && (value.acceptedCount as number) >= findingCount
-  && (value.discoveredCount as number) === (value.acceptedCount as number) + (value.rejectedCount as number)
-  && Array.isArray(value.suppressedCandidateIds)
-  && uniqueStrings(value.suppressedCandidateIds)
-  && value.suppressedCandidateIds.length === (value.acceptedCount as number) - findingCount;
+    ])
+    || value.policyId !== "energyiq-additional-ai-insights"
+    || value.policyRevision !== expected.publicationRevision
+    || !nonNegativeInteger(value.discoveredCount)
+    || !nonNegativeInteger(value.acceptedCount)
+    || !nonNegativeInteger(value.rejectedCount)
+    || !nonNegativeInteger(value.publishedCount)
+    || value.publishedCount !== findingCount
+    || !Array.isArray(value.sourceOrderCandidateIds)
+    || !Array.isArray(value.acceptedCandidateIds)
+    || !Array.isArray(value.rejectedCandidateIds)
+    || !Array.isArray(value.publishedCandidateIds)
+    || !Array.isArray(value.suppressedCandidateIds)) return false;
+  const sourceOrderCandidateIds = value.sourceOrderCandidateIds;
+  const acceptedCandidateIds = value.acceptedCandidateIds;
+  const rejectedCandidateIds = value.rejectedCandidateIds;
+  const publishedCandidateIds = value.publishedCandidateIds;
+  const suppressedCandidateIds = value.suppressedCandidateIds;
+  return uniqueStrings(sourceOrderCandidateIds)
+    && uniqueStrings(acceptedCandidateIds)
+    && uniqueStrings(rejectedCandidateIds)
+    && uniqueStrings(publishedCandidateIds)
+    && uniqueStrings(suppressedCandidateIds)
+    && sourceOrderCandidateIds.length === value.discoveredCount
+    && acceptedCandidateIds.length === value.acceptedCount
+    && rejectedCandidateIds.length === value.rejectedCount
+    && publishedCandidateIds.length === value.publishedCount
+    && suppressedCandidateIds.length === (value.acceptedCount as number) - findingCount
+    && partitionMatches(sourceOrderCandidateIds, acceptedCandidateIds, rejectedCandidateIds)
+    && orderedSubset(publishedCandidateIds, acceptedCandidateIds)
+    && orderedSubset(suppressedCandidateIds, acceptedCandidateIds)
+    && acceptedCandidateIds.every((id) => (
+      publishedCandidateIds.includes(id) !== suppressedCandidateIds.includes(id)
+    ));
+};
 
 const toolAuditsAreValid = (
   value: readonly unknown[],
@@ -446,15 +518,20 @@ const toolAuditsAreValid = (
       "auditId",
       "toolCallId",
       "toolName",
+      "status",
       "evidenceRefs",
+      "errorCode",
     ])
       && nonEmptyString(audit.auditId)
       && nonEmptyString(audit.toolCallId)
       && nonEmptyString(audit.toolName)
       && allowedTools.includes(audit.toolName)
+      && (audit.status === "succeeded" || audit.status === "rejected")
       && Array.isArray(audit.evidenceRefs)
-      && audit.evidenceRefs.length > 0
-      && uniqueStrings(audit.evidenceRefs))
+      && uniqueStrings(audit.evidenceRefs)
+      && (audit.status === "succeeded"
+        ? audit.evidenceRefs.length > 0 && audit.errorCode === undefined
+        : audit.evidenceRefs.length === 0 && nonEmptyString(audit.errorCode)))
     && uniqueStrings(audits.map(({ auditId }) => auditId))
     && uniqueStrings(audits.map(({ toolCallId }) => toolCallId))
     && sameStrings(
@@ -462,6 +539,63 @@ const toolAuditsAreValid = (
       usedTools,
     );
 };
+
+const evidenceLineageMatches = (
+  value: unknown,
+  expected: AdditionalAiInsightsArtifactExpectation,
+  findings: readonly unknown[],
+  toolAudits: readonly unknown[],
+): boolean => {
+  if (!isRecord(value)
+    || !hasOnlyKeys(value, ["catalogContract", "sourceId", "pins", "facts"])
+    || value.catalogContract !== "analysis-context-evidence@1"
+    || !nonEmptyString(value.sourceId)
+    || !isRecord(value.pins)
+    || !hasOnlyKeys(value.pins, [
+      "workspaceId", "projectId", "scopeId", "dataSnapshotId", "dataCutoff", "projectReleaseId", "metricVersion",
+    ])
+    || value.pins.workspaceId !== expected.workspaceId
+    || value.pins.projectId !== expected.projectId
+    || value.pins.scopeId !== expected.scopeId
+    || value.pins.dataSnapshotId !== expected.dataSnapshotId
+    || value.pins.projectReleaseId !== expected.projectReleaseId
+    || !nonEmptyString(value.pins.dataCutoff)
+    || !nonEmptyString(value.pins.metricVersion)
+    || !Array.isArray(value.facts)) return false;
+  const facts = value.facts.filter(isRecord);
+  if (facts.length !== value.facts.length
+    || !facts.every((fact) => hasOnlyKeys(fact, ["id", "status", "evidenceRefs"])
+      && nonEmptyString(fact.id)
+      && (fact.status === "confirmed" || fact.status === "provisional" || fact.status === "partial")
+      && Array.isArray(fact.evidenceRefs)
+      && fact.evidenceRefs.length > 0
+      && uniqueStrings(fact.evidenceRefs))
+    || !uniqueStrings(facts.map(({ id }) => id))) return false;
+  const factIds = new Set(facts.map(({ id }) => id));
+  const findingRefs = findings.flatMap((finding) => isRecord(finding) && Array.isArray(finding.evidenceRefs)
+    ? finding.evidenceRefs
+    : []);
+  const auditRefs = toolAudits.flatMap((audit) => isRecord(audit) && Array.isArray(audit.evidenceRefs)
+    ? audit.evidenceRefs
+    : []);
+  return [...findingRefs, ...auditRefs].every((reference) => typeof reference === "string" && factIds.has(reference));
+};
+
+const orderedSubset = (subset: readonly unknown[], source: readonly unknown[]): boolean => {
+  let cursor = -1;
+  return subset.every((entry) => {
+    const index = source.indexOf(entry, cursor + 1);
+    if (index < 0) return false;
+    cursor = index;
+    return true;
+  });
+};
+
+const partitionMatches = (
+  source: readonly unknown[],
+  accepted: readonly unknown[],
+  rejected: readonly unknown[],
+): boolean => source.every((id) => accepted.includes(id) !== rejected.includes(id));
 
 const alertIsValid = (value: unknown, findingEvidenceRefs: readonly string[]): boolean => value === undefined
   || (isRecord(value)

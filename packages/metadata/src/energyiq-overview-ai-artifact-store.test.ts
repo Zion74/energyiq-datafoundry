@@ -986,6 +986,24 @@ const additionalResult = (
     usedTools: [],
   },
   toolAudits: [],
+  evidenceLineage: {
+    catalogContract: "analysis-context-evidence@1",
+    sourceId: `project-analysis-snapshot:${artifactIdentity.projectId}:${artifactIdentity.dataSnapshotId}`,
+    pins: {
+      workspaceId: artifactIdentity.workspaceId,
+      projectId: artifactIdentity.projectId,
+      scopeId: artifactIdentity.scopeId,
+      dataSnapshotId: artifactIdentity.dataSnapshotId,
+      dataCutoff: "2026-05-31T16:00:00.000Z",
+      projectReleaseId: artifactIdentity.projectReleaseId,
+      metricVersion: "energy-metrics-v1",
+    },
+    facts: status === "available" ? [{
+      id: "evidence:additional:1",
+      status: "confirmed",
+      evidenceRefs: ["snapshot-evidence:additional:1"],
+    }] : [],
+  },
   publication: {
     policyId: "energyiq-additional-ai-insights",
     policyRevision: artifactIdentity.publicationRevision,
@@ -993,6 +1011,10 @@ const additionalResult = (
     acceptedCount: status === "available" ? 1 : 0,
     rejectedCount: 0,
     publishedCount: status === "available" ? 1 : 0,
+    sourceOrderCandidateIds: status === "available" ? ["candidate-1"] : [],
+    acceptedCandidateIds: status === "available" ? ["candidate-1"] : [],
+    rejectedCandidateIds: [],
+    publishedCandidateIds: status === "available" ? ["candidate-1"] : [],
     suppressedCandidateIds: [],
   },
   };

@@ -629,6 +629,24 @@ const currentAdditionalResult = (
     usedTools: [],
   },
   toolAudits: [],
+  evidenceLineage: {
+    catalogContract: "analysis-context-evidence@1",
+    sourceId: `project-analysis-snapshot:${artifactIdentity.projectId}:${artifactIdentity.dataSnapshotId}`,
+    pins: {
+      workspaceId: artifactIdentity.workspaceId,
+      projectId: artifactIdentity.projectId,
+      scopeId: artifactIdentity.scopeId,
+      dataSnapshotId: artifactIdentity.dataSnapshotId,
+      dataCutoff: "2026-05-31T16:00:00.000Z",
+      projectReleaseId: artifactIdentity.projectReleaseId,
+      metricVersion: "energy-metrics-v1",
+    },
+    facts: [{
+      id: "evidence:additional:1",
+      status: "confirmed",
+      evidenceRefs: ["snapshot-evidence:additional:1"],
+    }],
+  },
   findings: [{
     id: "additional-insight-1",
     title: "An incremental angle",
@@ -649,6 +667,10 @@ const currentAdditionalResult = (
     acceptedCount: 1,
     rejectedCount: 0,
     publishedCount: 1,
+    sourceOrderCandidateIds: ["candidate-1"],
+    acceptedCandidateIds: ["candidate-1"],
+    rejectedCandidateIds: [],
+    publishedCandidateIds: ["candidate-1"],
     suppressedCandidateIds: [],
   },
   });

@@ -230,7 +230,11 @@ export const handleEnergyApiRequest = async (
       const generationAction = segments.length === 4
         && request.method === "POST"
         && (segments[3] === "ensure" || segments[3] === "retry");
-      if (generationAction) requireEnergyAdminProject(context, user, projectId);
+      const additionalRegenerate = segments.length === 5
+        && segments[3] === "additional"
+        && segments[4] === "regenerate"
+        && request.method === "POST";
+      if (generationAction || additionalRegenerate) requireEnergyAdminProject(context, user, projectId);
       const pin = suppliedPinParts === 4
         ? {
             from: pinParts.from!,
@@ -277,6 +281,20 @@ export const handleEnergyApiRequest = async (
           status: 200,
           headers: { "Cache-Control": "private, no-store" },
           body: createSuccessResult(toOverviewAiWorkflowDto(readModel)),
+        };
+      }
+      if (additionalRegenerate) {
+        if (!context.additionalAiInsightsWorkflow) {
+          throw new Error("ENERGYIQ_ADDITIONAL_AI_SERVER_WORKFLOW_REQUIRED");
+        }
+        const artifact = await context.additionalAiInsightsWorkflow.execute({
+          baseIdentity: identity,
+          user,
+        });
+        return {
+          status: 200,
+          headers: { "Cache-Control": "private, no-store" },
+          body: createSuccessResult(toOverviewAiArtifactDto(artifact)),
         };
       }
       if (segments.length === 4 && segments[3] === "retry" && request.method === "POST") {

@@ -1,15 +1,27 @@
 import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
 
 import {
   ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1,
+  ENERGYIQ_OPEN_DISCOVERY_METHOD_CONTENT_V1,
   additionalAiInsightsArtifactIsValid,
   canonicalInsightMethodSetJson,
+  resolveCurrentAdditionalAiInsightMethodSet,
   type AdditionalAiInsightsArtifact,
   type AdditionalAiInsightsArtifactValidationInput,
 } from "./energyiq-additional-ai-insights.js";
 import type { InsightMethodRevisionRef } from "./energyiq-autonomous-insights.js";
 
 describe("EnergyIQ Additional AI Insights artifact contract", () => {
+  it("resolves an actual builtin Method resource whose content matches its immutable SHA", () => {
+    const methodSet = resolveCurrentAdditionalAiInsightMethodSet("preschool-workspace");
+    const core = methodSet.resources[0]!;
+
+    expect(core.content).toBe(ENERGYIQ_OPEN_DISCOVERY_METHOD_CONTENT_V1);
+    expect(createHash("sha256").update(core.content).digest("hex")).toBe(core.method.contentSha256);
+    expect(methodSet.methods).toEqual([core.method]);
+  });
+
   it("accepts a compact shared Artifact with exact Method execution and per-Finding origin", () => {
     const input = validInput();
 
@@ -65,6 +77,10 @@ describe("EnergyIQ Additional AI Insights artifact contract", () => {
       acceptedCount: 0,
       rejectedCount: 0,
       publishedCount: 0,
+      sourceOrderCandidateIds: [],
+      acceptedCandidateIds: [],
+      rejectedCandidateIds: [],
+      publishedCandidateIds: [],
       suppressedCandidateIds: [],
     };
     expect(additionalAiInsightsArtifactIsValid(empty)).toBe(true);
@@ -90,6 +106,7 @@ describe("EnergyIQ Additional AI Insights artifact contract", () => {
         auditId: "audit:timeseries:1",
         toolCallId: "tool-call:timeseries:1",
         toolName: "energy.timeseries.analyze",
+        status: "succeeded",
         evidenceRefs: ["evidence:closed-event-catalog"],
       }],
       snapshotComparison: {
@@ -124,6 +141,23 @@ describe("EnergyIQ Additional AI Insights artifact contract", () => {
     const arbitraryProvenance = validInput();
     Object.assign(arbitraryProvenance.value.findings[0]!, { arbitraryAuditIdentity: "forged" });
     expect(additionalAiInsightsArtifactIsValid(arbitraryProvenance)).toBe(false);
+  });
+
+  it("binds compact Evidence lineage and full publication provenance to the current Artifact", () => {
+    const input = validInput();
+    expect(additionalAiInsightsArtifactIsValid(input)).toBe(true);
+
+    const forgedEvidence = structuredClone(input);
+    forgedEvidence.value.findings[0]!.evidenceRefs = ["evidence:forged"];
+    expect(additionalAiInsightsArtifactIsValid(forgedEvidence)).toBe(false);
+
+    const snapshotDrift = structuredClone(input);
+    snapshotDrift.value.evidenceLineage.pins.dataSnapshotId = "snapshot-other";
+    expect(additionalAiInsightsArtifactIsValid(snapshotDrift)).toBe(false);
+
+    const publicationDrift = structuredClone(input);
+    publicationDrift.value.publication.publishedCandidateIds = ["candidate-other"];
+    expect(additionalAiInsightsArtifactIsValid(publicationDrift)).toBe(false);
   });
 
   it.each([
@@ -219,6 +253,24 @@ const validInput = (): AdditionalAiInsightsArtifactValidationInput & {
         usedTools: [],
       },
       toolAudits: [],
+      evidenceLineage: {
+        catalogContract: "analysis-context-evidence@1",
+        sourceId: "project-analysis-snapshot:preschool-demo:snapshot-a",
+        pins: {
+          workspaceId: "preschool-workspace",
+          projectId: "preschool-demo",
+          scopeId: "preschool-project",
+          dataSnapshotId: "snapshot-a",
+          dataCutoff: "2026-06-01T00:00:00.000Z",
+          projectReleaseId: "release-v1",
+          metricVersion: "energy-metrics-v1",
+        },
+        facts: [{
+          id: "evidence:closed-event-catalog",
+          status: "confirmed",
+          evidenceRefs: ["snapshot-evidence:closed-events"],
+        }],
+      },
       findings: [{
         id: "additional-insight-1",
         title: "The overnight pattern may be event-led rather than a persistent baseline",
@@ -241,6 +293,10 @@ const validInput = (): AdditionalAiInsightsArtifactValidationInput & {
         acceptedCount: 1,
         rejectedCount: 0,
         publishedCount: 1,
+        sourceOrderCandidateIds: ["candidate-1"],
+        acceptedCandidateIds: ["candidate-1"],
+        rejectedCandidateIds: [],
+        publishedCandidateIds: ["candidate-1"],
         suppressedCandidateIds: [],
       },
     },

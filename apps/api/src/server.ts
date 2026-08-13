@@ -108,12 +108,22 @@ import {
   type PreschoolOverviewAiStageInput,
 } from "./energy/preschool-overview-ai-workflow.js";
 import { createPreschoolOverviewAiPageWorkflow } from "./energy/preschool-overview-ai-page-workflow.js";
+import {
+  createPreschoolAdditionalAiInsightsWorkflow,
+  MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS,
+} from "./energy/preschool-additional-ai-insights-workflow.js";
+import { overviewAiArtifactPinnedLocalPeriod } from "./energy/overview-ai-artifact.js";
 import { MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS } from "./energy/preschool-executive-synthesis.js";
 import type {
   PreschoolSectionInsightToolInvocation,
   PreschoolSectionInsightToolName,
   PreschoolSectionInsightToolResult,
 } from "./energy/preschool-section-insight-runtime.js";
+import type {
+  PreschoolAdditionalAiInsightToolInvocation,
+  PreschoolAdditionalAiInsightToolName,
+  PreschoolAdditionalAiInsightToolResult,
+} from "./energy/preschool-additional-ai-insight-runtime.js";
 import { createEnergyIqTemplateChangeWorkflow } from "./energy/energy-template-change-workflow.js";
 import { resolveOverviewAiStageStructuredOutput } from "./energy/preschool-overview-ai-structured-output.js";
 export { resolveOverviewAiStageStructuredOutput } from "./energy/preschool-overview-ai-structured-output.js";
@@ -156,7 +166,8 @@ export const resolveOverviewAiStageRuntimeOptions = (stage: PreschoolOverviewAiS
   const structuredOutput = resolveOverviewAiStageStructuredOutput(stage);
   const boundedValueStage = stage === "section-interpreter"
     || stage === "executive-synthesis"
-    || stage === "template-proposal";
+    || stage === "template-proposal"
+    || stage === "additional-insights-discovery";
   return {
     analysisRequirementsMode: "omit" as const,
     ...(boundedValueStage
@@ -183,22 +194,35 @@ export const resolveOverviewAiServerRunnerOptions = (input: {
   invokeSectionInsightTool?: (
     invocation: PreschoolSectionInsightToolInvocation,
   ) => Promise<PreschoolSectionInsightToolResult>;
+  additionalInsightTools?: readonly PreschoolAdditionalAiInsightToolName[];
+  invokeAdditionalInsightTool?: (
+    invocation: PreschoolAdditionalAiInsightToolInvocation,
+  ) => Promise<PreschoolAdditionalAiInsightToolResult>;
 }): OverviewAiTrustedRuntimeOverride | undefined => {
-  if ((input.stage !== "section-interpreter" && input.stage !== "executive-synthesis")
+  if ((input.stage !== "section-interpreter"
+      && input.stage !== "executive-synthesis"
+      && input.stage !== "additional-insights-discovery")
     || !input.structuredOutput) return undefined;
   const trustedStageTools = input.stage === "section-interpreter"
-    && input.sectionInsightTools
-    && input.invokeSectionInsightTool
+    && input.sectionInsightTools && input.invokeSectionInsightTool
     ? createPreschoolSectionTrustedStageTools({
         toolNames: input.sectionInsightTools,
         invoke: input.invokeSectionInsightTool,
       })
+    : input.stage === "additional-insights-discovery"
+      && input.additionalInsightTools && input.invokeAdditionalInsightTool
+      ? createPreschoolAdditionalAiInsightTrustedStageTools({
+          toolNames: input.additionalInsightTools,
+          invoke: input.invokeAdditionalInsightTool,
+        })
     : undefined;
   return {
     structuredOutput: input.structuredOutput,
     conversationMessageMaxChars: input.stage === "section-interpreter"
       ? PACK_V2_SECTION_MESSAGE_MAX_CHARS
-      : MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS,
+      : input.stage === "additional-insights-discovery"
+        ? MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS
+        : MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS,
     ...(trustedStageTools ? { disableTools: false as const, trustedStageTools } : {}),
   };
 };
@@ -209,6 +233,46 @@ export const createPreschoolSectionTrustedStageTools = (input: {
 }): NonNullable<CreateDataFoundryInput["trustedStageTools"]> => Object.fromEntries(
   input.toolNames.map((toolName) => [toolName, preschoolSectionTrustedStageTool(toolName, input.invoke)]),
 ) as unknown as NonNullable<CreateDataFoundryInput["trustedStageTools"]>;
+
+export const createPreschoolAdditionalAiInsightTrustedStageTools = (input: {
+  toolNames: readonly PreschoolAdditionalAiInsightToolName[];
+  invoke(invocation: PreschoolAdditionalAiInsightToolInvocation): Promise<PreschoolAdditionalAiInsightToolResult>;
+}): NonNullable<CreateDataFoundryInput["trustedStageTools"]> => Object.fromEntries(
+  input.toolNames.map((toolName) => [toolName, preschoolAdditionalAiInsightTrustedStageTool(toolName, input.invoke)]),
+) as unknown as NonNullable<CreateDataFoundryInput["trustedStageTools"]>;
+
+const preschoolAdditionalAiInsightTrustedStageTool = (
+  toolName: PreschoolAdditionalAiInsightToolName,
+  invoke: (invocation: PreschoolAdditionalAiInsightToolInvocation) => Promise<PreschoolAdditionalAiInsightToolResult>,
+) => {
+  const execute = (controlledInput: unknown, options: unknown) => {
+    const toolCallId = isServerRecord(options)
+      && isServerRecord(options.agent)
+      && typeof options.agent.toolCallId === "string"
+      && options.agent.toolCallId.trim()
+      ? options.agent.toolCallId
+      : null;
+    if (!toolCallId) throw new Error("PRESCHOOL_ADDITIONAL_AI_TOOL_CALL_ID_REQUIRED");
+    return invoke({ toolName, toolCallId, input: controlledInput });
+  };
+  const factIds = z.object({ factIds: z.array(z.string().min(1)).min(1) }).strict();
+  return createTool({
+    id: toolName,
+    description: additionalInsightToolDescription(toolName),
+    inputSchema: toolName === "energy.project-knowledge.read"
+      ? z.object({ knowledgeIds: z.array(z.string().min(1)).min(1) }).strict()
+      : factIds,
+    execute,
+  });
+};
+
+const additionalInsightToolDescription = (toolName: PreschoolAdditionalAiInsightToolName): string => ({
+  "energy.evidence.read": "Read selected typed facts from the current server-owned Evidence Catalog.",
+  "energy.metrics.compare": "Compare selected numeric facts from the current server-owned Evidence Catalog.",
+  "energy.timeseries.analyze": "Inspect selected time-pattern facts from the current server-owned Evidence Catalog.",
+  "energy.snapshot-history.read": "Read only server-approved Snapshot history facts when that source is available.",
+  "energy.project-knowledge.read": "Read only server-approved project knowledge entries when that source is available.",
+})[toolName];
 
 const preschoolSectionTrustedStageTool = (
   toolName: PreschoolSectionInsightToolName,
@@ -493,6 +557,47 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       });
     },
   });
+  const additionalAiInsightsWorkflow = createPreschoolAdditionalAiInsightsWorkflow({
+    metadataStore,
+    resolveEvidenceCatalog: async ({ identity, user }) => {
+      const project = metadataStore.energyIq.getProject(identity.projectId);
+      const period = overviewAiArtifactPinnedLocalPeriod({ identity, timezone: project.timezone });
+      const resolution = await resolveProjectAnalysis({
+        metadataStore,
+        dataGateway,
+        user,
+        workspaceId: identity.workspaceId,
+        bypassCache: true,
+        request: {
+          projectId: identity.projectId,
+          scopeId: identity.scopeId,
+          resource: "electricity",
+          period: "Custom",
+          from: period.from,
+          to: period.to,
+          expectedDataSnapshotId: identity.dataSnapshotId,
+          expectedProjectReleaseId: identity.projectReleaseId,
+        },
+      });
+      if (resolution.status !== "ready") throw new Error("OVERVIEW_AI_SNAPSHOT_NOT_READY");
+      return createProjectAnalysisContextEvidenceCatalog(resolution.snapshot);
+    },
+    runDiscovery: ({ toolNames, invokeTool, ...stageInput }) => {
+      const structuredOutput = resolveOverviewAiStageStructuredOutput("additional-insights-discovery");
+      if (!structuredOutput) throw new Error("PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_REQUIRED");
+      const trustedRuntimeOverride = resolveOverviewAiServerRunnerOptions({
+        stage: "additional-insights-discovery",
+        structuredOutput,
+        additionalInsightTools: toolNames,
+        invokeAdditionalInsightTool: invokeTool,
+      });
+      return runOverviewAiValueStage({
+        ...stageInput,
+        stage: "additional-insights-discovery",
+        ...(trustedRuntimeOverride ? { trustedRuntimeOverride } : {}),
+      });
+    },
+  });
   const templateChangeWorkflow = createEnergyIqTemplateChangeWorkflow({
     metadataStore,
     resolveIdentity: ({ projectId, scopeId, user }) => overviewAiWorkflow.resolveCurrentIdentity({
@@ -582,6 +687,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
         fileAssetService,
         knowledgeService,
         metadataStore,
+        additionalAiInsightsWorkflow,
         overviewAiWorkflow,
         templateChangeWorkflow,
         runCancelRegistry,
@@ -776,7 +882,10 @@ const overviewAiStageUserPrompt = (input: OverviewAiRuntimeStageInput): string =
     : input.prompt;
 
 const isIsolatedValueStage = (stage: PreschoolOverviewAiStage): boolean =>
-  stage === "section-interpreter" || stage === "executive-synthesis" || stage === "template-proposal";
+  stage === "section-interpreter"
+  || stage === "executive-synthesis"
+  || stage === "template-proposal"
+  || stage === "additional-insights-discovery";
 
 type HandleCopilotKitRequestInput = {
   artifactService: LocalArtifactService;

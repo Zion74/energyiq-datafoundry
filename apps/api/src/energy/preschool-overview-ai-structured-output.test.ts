@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1,
   PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4,
   PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V3,
   PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4,
@@ -9,6 +10,28 @@ import {
 } from "./preschool-overview-ai-structured-output.js";
 
 describe("Preschool Overview AI structured output", () => {
+  it("keeps Additional discovery open while bounding its candidate transport", () => {
+    expect(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1.schema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: ["candidates"],
+      properties: {
+        candidates: {
+          type: "array",
+          minItems: 0,
+          items: {
+            required: ["id", "title", "text", "epistemicStatus", "evidenceRefs", "toolAuditIds"],
+            properties: {
+              epistemicStatus: { enum: ["observed", "inferred", "speculative"] },
+            },
+          },
+        },
+      },
+    });
+    expect(resolveOverviewAiStageStructuredOutput("additional-insights-discovery"))
+      .toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1);
+  });
+
   it("keeps the v3 schema for history while making v4 the current Section discovery contract", () => {
     const legacyProperties = PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V3.schema.properties!;
     const v4Properties = PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4.schema.properties!;

@@ -13,6 +13,7 @@ import { ensureEnergyIqBootstrap, PRESCHOOL_WORKSPACE_ID } from "./energy-bootst
 import { handleEnergyApiRequest } from "./energy-api.js";
 import {
   createOverviewAiArtifactIdentity,
+  createPreschoolAdditionalAiInsightArtifactIdentity,
   resolvePinnedOverviewAiArtifactReadIdentity,
 } from "./overview-ai-artifact.js";
 
@@ -26,6 +27,66 @@ vi.mock("./energy-project-materialization.js", async (importOriginal) => ({
 }));
 
 describe("Overview AI Artifact API", () => {
+  it("keeps Additional reads side-effect free and allows only admins to regenerate", async () => {
+    const harness = await createHarness();
+    try {
+      const read = vi.fn().mockResolvedValue(aggregateResultFor(harness.identity));
+      const resolveCurrentIdentity = vi.fn().mockResolvedValue(harness.identity);
+      const additionalIdentity = createPreschoolAdditionalAiInsightArtifactIdentity({
+        baseIdentity: harness.identity,
+      });
+      const queued = harness.metadata.energyIq.overviewAiArtifacts.queue({
+        identity: additionalIdentity,
+        triggeredBy: "dev-user",
+      });
+      const executeAdditional = vi.fn().mockResolvedValue(queued);
+      const context = {
+        ...harness.context,
+        overviewAiWorkflow: { read, resolveCurrentIdentity },
+        additionalAiInsightsWorkflow: { execute: executeAdditional },
+      } as unknown as Required<ConfigApiContext>;
+      const memberContext = { ...context, userId: "second-user" };
+      const path = ["projects", harness.project.id, "overview-ai-artifact"];
+
+      const restored = await handleEnergyApiRequest(
+        getRequest(`/api/v1/energy/projects/${harness.project.id}/overview-ai-artifact`),
+        path,
+        memberContext,
+      );
+      expect(restored.status).toBe(200);
+      expect(read).toHaveBeenCalledOnce();
+      expect(executeAdditional).not.toHaveBeenCalled();
+
+      const forbidden = await handleEnergyApiRequest(
+        jsonPost({}),
+        [...path, "additional", "regenerate"],
+        memberContext,
+      );
+      expect(forbidden).toMatchObject({
+        status: 403,
+        body: { success: false, error: { code: "FORBIDDEN", message: "ENERGYIQ_ADMIN_REQUIRED" } },
+      });
+      expect(executeAdditional).not.toHaveBeenCalled();
+
+      const regenerated = await handleEnergyApiRequest(
+        jsonPost({}),
+        [...path, "additional", "regenerate"],
+        context,
+      );
+      expect(regenerated).toMatchObject({
+        status: 200,
+        body: { success: true, data: { status: "queued", dataSnapshotId: additionalIdentity.dataSnapshotId } },
+      });
+      expect(executeAdditional).toHaveBeenCalledOnce();
+      expect(executeAdditional).toHaveBeenCalledWith({
+        baseIdentity: harness.identity,
+        user: expect.objectContaining({ id: "dev-user" }),
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
   it("accepts the current published Snapshot and Release while delivery configuration has moved on", async () => {
     const harness = await createHarness();
     try {

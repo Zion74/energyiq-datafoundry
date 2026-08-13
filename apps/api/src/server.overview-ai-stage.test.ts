@@ -8,6 +8,7 @@ import type { EnergyIqOverviewAiArtifactIdentity } from "@datafoundry/metadata";
 import {
   buildOverviewAiStageRunInput,
   collectOverviewAiText,
+  createPreschoolAdditionalAiInsightTrustedStageTools,
   createPreschoolSectionTrustedStageTools,
   resolveOverviewAiAgentRuntimeOptions,
   resolveOverviewAiServerRunnerOptions,
@@ -17,14 +18,160 @@ import {
   shouldIncludeProjectAnalysisEvidenceContext,
 } from "./server.js";
 import {
+  PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1,
   PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4,
   PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4,
 } from "./energy/preschool-overview-ai-structured-output.js";
 import { buildPreschoolSectionDiscoveryPrompt } from "./energy/preschool-section-interpreter.js";
 import type { PreschoolSectionPackV2 } from "./energy/preschool-section-pack-v2.js";
 import { MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS } from "./energy/preschool-executive-synthesis.js";
+import { MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS } from "./energy/preschool-additional-ai-insights-workflow.js";
 
 describe("Overview AI server stage options", () => {
+  it("isolates Additional discovery to server-owned contract tools and current EnergyIQ pins", () => {
+    const toolNames = [
+      "energy.evidence.read",
+      "energy.metrics.compare",
+      "energy.timeseries.analyze",
+      "energy.snapshot-history.read",
+      "energy.project-knowledge.read",
+    ] as const;
+    const invokeAdditionalInsightTool = async () => ({}) as never;
+    const trusted = resolveOverviewAiServerRunnerOptions({
+      stage: "additional-insights-discovery",
+      structuredOutput: PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1,
+      additionalInsightTools: toolNames,
+      invokeAdditionalInsightTool,
+    });
+
+    expect(resolveOverviewAiStageRuntimeOptions("additional-insights-discovery")).toMatchObject({
+      analysisRequirementsMode: "omit",
+      disableTools: true,
+      excludedToolNames: [
+        "skill", "skill_search", "skill_read", "inspect_schema", "run_sql_readonly", "protocol_handoff",
+      ],
+      overviewAiCandidateSubmission: false,
+      structuredOutput: PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1,
+    });
+    expect(trusted).toMatchObject({
+      disableTools: false,
+      conversationMessageMaxChars: MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS,
+    });
+    expect(Object.keys(trusted?.trustedStageTools ?? {}).sort()).toEqual([...toolNames].sort());
+    expect(Object.keys(createPreschoolAdditionalAiInsightTrustedStageTools({
+      toolNames,
+      invoke: invokeAdditionalInsightTool,
+    })).sort()).toEqual([...toolNames].sort());
+    expect(shouldUseEnergyContextForOverviewAiStage("additional-insights-discovery")).toBe(true);
+    expect(shouldIncludeProjectAnalysisEvidenceContext("additional-insights-discovery")).toBe(false);
+
+    const run = buildOverviewAiStageRunInput({
+      stage: "additional-insights-discovery",
+      prompt: "Open discovery.",
+      identity: additionalIdentity(),
+      workspaceId: "preschool-workspace",
+      user: { id: "dev-user" } as never,
+      runId: "additional-run",
+      sessionId: "additional-session",
+    });
+    expect(run.tools).toEqual([]);
+    expect(run.forwardedProps).toMatchObject({
+      externalContext: {
+        source: "energyiq",
+        projectId: "preschool-demo",
+        scopeId: "preschool-project",
+        expectedDataSnapshotId: "snapshot-current",
+        expectedProjectReleaseId: "release-current",
+        overviewAiStage: "additional-insights-discovery",
+      },
+      run_config: {
+        skillMode: "none",
+        enabledMcpServerIds: [],
+        enabledSkillIds: [],
+        skillPolicy: { allowedToolNames: [] },
+      },
+    });
+  });
+
+  it("registers Additional tools in the real governed runtime and nowhere else", async () => {
+    const toolNames = [
+      "energy.evidence.read",
+      "energy.metrics.compare",
+      "energy.timeseries.analyze",
+      "energy.snapshot-history.read",
+      "energy.project-knowledge.read",
+    ] as const;
+    const identity = additionalIdentity();
+    const input = buildOverviewAiStageRunInput({
+      stage: "additional-insights-discovery",
+      prompt: "Open discovery.",
+      identity,
+      workspaceId: identity.workspaceId,
+      user: { id: "dev-user" } as never,
+      runId: "additional-runtime-run",
+      sessionId: "additional-runtime-session",
+    });
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "preschool-additional-runtime-"));
+    let runtime: Awaited<ReturnType<typeof createDataFoundry>> | undefined;
+    try {
+      runtime = await createDataFoundry({
+        analysisRequirementsMode: "omit",
+        dataGateway: {} as never,
+        emitter: { emit: () => undefined },
+        excludedToolNames: [
+          "skill", "skill_search", "skill_read", "inspect_schema", "run_sql_readonly", "protocol_handoff",
+        ],
+        explicitProtocol: { protocolId: "data-analysis", protocolVersion: "1" },
+        messages: input.messages,
+        modelProvider: {
+          kind: "openai-compatible",
+          model: "openai/test-model",
+          model_name: "test-model",
+          provider_id: "openai-compatible",
+        },
+        runContext: createDataFoundryRunContext({
+          user_id: "dev-user",
+          workspace_id: identity.workspaceId,
+          session_id: "additional-runtime-session",
+          run_id: "additional-runtime-run",
+          user_input: "Open discovery.",
+          chat_mode: "copilotkit",
+          model_name: "test-model",
+          energy_query_context: {
+            projectId: identity.projectId,
+            projectName: "Preschool Portfolio",
+            scopeId: identity.scopeId,
+            scopeName: "Preschool Portfolio",
+            scopeType: "project",
+            resource: "electricity",
+            timezone: "Asia/Singapore",
+            from: identity.analysisPeriodFrom,
+            to: identity.analysisPeriodTo,
+            endExclusive: true,
+            period: "Custom",
+          },
+        }),
+        trustedStageTools: createPreschoolAdditionalAiInsightTrustedStageTools({
+          toolNames,
+          invoke: async () => ({}) as never,
+        }),
+        workspaceRoot,
+      });
+      expect(Object.keys(await runtime.agent.listTools()).sort()).toEqual([...toolNames].sort());
+
+      const ordinary = resolveOverviewAiServerRunnerOptions({
+        stage: "executive-synthesis",
+        structuredOutput: PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4,
+        additionalInsightTools: toolNames,
+        invokeAdditionalInsightTool: async () => ({}) as never,
+      });
+      expect(ordinary).not.toHaveProperty("trustedStageTools");
+    } finally {
+      await runtime?.destroyWorkspace();
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
   it("keeps the investigator on the narrow Artifact path with DeepSeek thinking disabled", () => {
     expect(resolveOverviewAiStageRuntimeOptions("investigator")).toEqual({
       analysisRequirementsMode: "omit",
@@ -609,4 +756,35 @@ describe("Overview AI server stage options", () => {
       { type: "CUSTOM", delta: "ignored" },
     ])).toBe('{"sections":[]}');
   });
+});
+
+const additionalIdentity = (): EnergyIqOverviewAiArtifactIdentity => ({
+  workspaceId: "preschool-workspace",
+  projectId: "preschool-demo",
+  scopeId: "preschool-project",
+  resource: "electricity",
+  dataSnapshotId: "snapshot-current",
+  projectReleaseId: "release-current",
+  analysisPeriodFrom: "2026-05-01T00:00:00.000Z",
+  analysisPeriodTo: "2026-06-01T00:00:00.000Z",
+  rendererKey: "preschool-overview",
+  rendererVersion: "1",
+  analysisPackId: "preschool-additional-insights-pack",
+  analysisPackRevision: "v1",
+  modelProfileId: "workspace-default",
+  modelProfileRevision: 7,
+  outputContractRevision: "energyiq-additional-ai-insights-v1",
+  validatorRevision: "additional-insights-acceptance-v1",
+  workflowRevision: "additional-insights-discover-accept-publish-v1",
+  investigatorPromptRevision: "additional-insights-discovery-v1",
+  editorPromptRevision: "additional-insights-publication-v1",
+  methodSkillId: "energyiq-open-discovery",
+  methodSkillRevision: "1.0.0",
+  artifactKind: "autonomous-insights",
+  identityContractRevision: "additional-insights-v1",
+  methodSetId: "preschool-additional-insights-current",
+  methodSetRevision: "v1",
+  methodSetFingerprint: `sha256:${"a".repeat(64)}`,
+  capabilityRevision: "scoped-read-only-v1",
+  publicationRevision: "additional-insights-v1",
 });

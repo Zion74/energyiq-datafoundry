@@ -543,7 +543,18 @@ const requireAdditionalMethodSetIdentity = (
     ? null
     : `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
   const coreMethod = methodSet?.methods.find(({ role }) => role === "core-method");
+  const resourcesAreExact = Boolean(methodSet)
+    && methodSet!.resources.length === methodSet!.methods.length
+    && methodSet!.resources.every(({ method, content }) => (
+      typeof content === "string"
+      && content.trim().length > 0
+      && createHash("sha256").update(content).digest("hex") === method.contentSha256
+      && methodSet!.methods.some((candidate) => (
+        canonicalInsightMethodSetJson([candidate]) === canonicalInsightMethodSetJson([method])
+      ))
+    ));
   if (!methodSet
+    || !resourcesAreExact
     || fingerprint !== identity.methodSetFingerprint
     || !coreMethod
     || identity.methodSkillId !== coreMethod.skillId

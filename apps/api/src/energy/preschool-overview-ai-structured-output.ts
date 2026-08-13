@@ -271,12 +271,62 @@ export const ENERGYIQ_TEMPLATE_CHANGE_PROPOSAL_STRUCTURED_OUTPUT_V1 = {
   },
 } satisfies PublicStructuredOutputOptions<StructuredEnvelope>;
 
+const additionalAlert: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["severity", "certainty", "evidenceRefs"],
+  properties: {
+    severity: { type: "string", enum: ["attention", "urgent"] },
+    certainty: { type: "string", enum: ["confirmed", "anomaly", "possible"] },
+    evidenceRefs,
+  },
+};
+
+const additionalCandidate: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "title", "text", "epistemicStatus", "evidenceRefs", "toolAuditIds"],
+  properties: {
+    id: nonEmptyString,
+    title: { type: "string", minLength: 1, maxLength: 240 },
+    text: { type: "string", minLength: 1, maxLength: 1_200 },
+    epistemicStatus: { type: "string", enum: ["observed", "inferred", "speculative"] },
+    evidenceRefs,
+    toolAuditIds: {
+      type: "array",
+      minItems: 0,
+      uniqueItems: true,
+      items: nonEmptyString,
+    },
+    deepDiveQuestion: { type: "string", minLength: 1, maxLength: 1_200 },
+    alert: additionalAlert,
+  },
+};
+
+/** Open model proposal; acceptance and the three-card publication budget remain server-owned. */
+export const PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1 = {
+  errorStrategy: "strict",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["candidates"],
+    properties: {
+      candidates: {
+        type: "array",
+        minItems: 0,
+        items: additionalCandidate,
+      },
+    },
+  },
+} satisfies PublicStructuredOutputOptions<StructuredEnvelope>;
+
 export const resolveOverviewAiStageStructuredOutput = (
   stage: PreschoolOverviewAiStage,
 ): PublicStructuredOutputOptions<StructuredEnvelope> | undefined => {
   if (stage === "section-interpreter") return PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V3;
   if (stage === "executive-synthesis") return PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V1;
   if (stage === "template-proposal") return ENERGYIQ_TEMPLATE_CHANGE_PROPOSAL_STRUCTURED_OUTPUT_V1;
+  if (stage === "additional-insights-discovery") return PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1;
   return undefined;
 };
 
