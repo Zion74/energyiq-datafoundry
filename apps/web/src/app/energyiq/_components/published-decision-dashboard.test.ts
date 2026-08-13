@@ -156,7 +156,7 @@ describe("published Overview URL reload", () => {
     expect(singleDay).toMatchObject({ grain: "hour", comparison: "average", category: "load" });
   });
 
-  it("restores anomaly handoffs from URL and keeps detail comparison controls section-local", async () => {
+  it("restores anomaly handoffs from URL and persists detail comparison controls", async () => {
     const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
     mockedAccess.activeProject = ngeeAnn;
     mockedAccess.access = accessContext([ngeeAnn]);
@@ -202,15 +202,16 @@ describe("published Overview URL reload", () => {
     await act(async () => light?.click());
     expect(selected?.getAttribute("aria-pressed")).toBe("true");
     expect(light?.getAttribute("aria-pressed")).toBe("true");
-    expect(document.querySelector("[data-anomaly-inline-detail='true']")).toBe(dialog);
-    expect(mockedRouter.replace).toHaveBeenCalledTimes(navigationCountBeforeDetail);
+    expect(document.querySelector("[role='dialog']")).toBe(dialog);
+    const navigationCountAfterDetail = navigationCountBeforeDetail + 2;
+    expect(mockedRouter.replace).toHaveBeenCalledTimes(navigationCountAfterDetail);
 
     const close = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])
       .find((button) => button.textContent === "Close");
     await act(async () => close?.click());
 
-    expect(document.querySelector("[data-anomaly-inline-detail='true']")).toBeNull();
-    expect(mockedRouter.replace).toHaveBeenCalledTimes(navigationCountBeforeDetail);
+    expect(document.querySelector("[role='dialog']")).toBeNull();
+    expect(mockedRouter.replace).toHaveBeenCalledTimes(navigationCountAfterDetail);
     expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
   });
 
