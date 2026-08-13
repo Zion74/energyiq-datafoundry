@@ -171,6 +171,7 @@ const parseAdditionalResult = (
       outputContractRevision: identity.outputContractRevision,
       capabilityRevision: identity.capabilityRevision,
       publicationRevision: identity.publicationRevision,
+      canvasRevision: identity.canvasRevision,
     },
   };
   return additionalAiInsightsArtifactIsValid(validation) ? validation.value : null;

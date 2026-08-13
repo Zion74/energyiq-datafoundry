@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1,
+  PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2,
   PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4,
   PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V3,
   PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4,
@@ -28,8 +29,28 @@ describe("Preschool Overview AI structured output", () => {
         },
       },
     });
+    expect(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1.schema.properties!.candidates!.items!.properties)
+      .not.toHaveProperty("canvas");
+  });
+
+  it("offers only the approved declarative quantitative Canvas plan to current Additional discovery", () => {
+    const candidates = PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2.schema.properties!.candidates!;
+    const canvas = candidates.items!.properties!.canvas!;
+    const block = canvas.properties!.investigatorBlocks!.items!;
+
+    expect(block).toMatchObject({
+      additionalProperties: false,
+      required: ["id", "kind", "visualization", "title", "bindings"],
+      properties: {
+        kind: { enum: ["quantitative"] },
+        visualization: { enum: ["metric", "comparison", "trend"] },
+      },
+    });
+    expect(canvas.properties).not.toHaveProperty("html");
+    expect(canvas.properties).not.toHaveProperty("url");
+    expect(canvas.properties).not.toHaveProperty("sql");
     expect(resolveOverviewAiStageStructuredOutput("additional-insights-discovery"))
-      .toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1);
+      .toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2);
   });
 
   it("keeps the v3 schema for history while making v4 the current Section discovery contract", () => {

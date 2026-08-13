@@ -143,6 +143,30 @@ describe("EnergyIQ Additional AI Insights artifact contract", () => {
     expect(additionalAiInsightsArtifactIsValid(arbitraryProvenance)).toBe(false);
   });
 
+  it("restores only server-accepted ordered Canvas blocks for the current Artifact", () => {
+    const current = currentCanvasInput();
+
+    expect(additionalAiInsightsArtifactIsValid(current)).toBe(true);
+
+    const pointerOnly = currentCanvasInput();
+    Object.assign(pointerOnly.value.findings[0]!, {
+      canvas: {
+        contractRevision: "energyiq-insight-canvas-v1",
+        planId: "canvas-plan:additional-insight-1",
+        acceptedBlockIds: ["canvas-block:closed-hours-trend"],
+      },
+    });
+    expect(additionalAiInsightsArtifactIsValid(pointerOnly)).toBe(false);
+
+    const idDrift = currentCanvasInput();
+    idDrift.value.findings[0]!.canvas.acceptedBlockIds = ["canvas-block:forged"];
+    expect(additionalAiInsightsArtifactIsValid(idDrift)).toBe(false);
+
+    const bindingDrift = currentCanvasInput();
+    bindingDrift.value.findings[0]!.canvas.acceptedBlocks[0]!.bindings[0]!.value = 999;
+    expect(additionalAiInsightsArtifactIsValid(bindingDrift)).toBe(false);
+  });
+
   it("binds compact Evidence lineage and full publication provenance to the current Artifact", () => {
     const input = validInput();
     expect(additionalAiInsightsArtifactIsValid(input)).toBe(true);
@@ -300,6 +324,59 @@ const validInput = (): AdditionalAiInsightsArtifactValidationInput & {
         suppressedCandidateIds: [],
       },
     },
+  };
+};
+
+const currentCanvasInput = () => {
+  const input = validInput();
+  Object.assign(input.expected, {
+    outputContractRevision: "energyiq-additional-ai-insights-v2",
+    publicationRevision: "additional-insights-v2",
+    canvasRevision: "energyiq-insight-canvas-v2",
+  });
+  input.value.contract.revision = "energyiq-additional-ai-insights-v2";
+  input.value.publication.policyRevision = "additional-insights-v2";
+  Object.assign(input.value.evidenceLineage.facts[0]!, {
+    label: "Closed-hours event count",
+    metricId: "energy.closed_hours.event_count",
+    value: 4,
+    unit: "events",
+    dimensions: { scopeId: "preschool-project" },
+  });
+  Object.assign(input.value.findings[0]!, {
+    canvas: {
+      contractRevision: "energyiq-insight-canvas-v2",
+      planId: "canvas-plan:additional-insight-1",
+      acceptedBlockIds: ["canvas-block:closed-hours-trend"],
+      acceptedBlocks: [{
+        id: "canvas-block:closed-hours-trend",
+        kind: "quantitative",
+        visualization: "trend",
+        title: "Closed-hours events",
+        bindings: [{
+          evidenceRef: "evidence:closed-event-catalog",
+          entityId: "preschool-project",
+          metricId: "energy.closed_hours.event_count",
+          value: 4,
+          unit: "events",
+        }],
+      }],
+      rejections: [{ code: "INVESTIGATOR_BLOCK_INVALID", subjectId: "canvas-block:unsafe" }],
+      gaps: [],
+    },
+  });
+  return input as unknown as AdditionalAiInsightsArtifactValidationInput & {
+    expectedMethods: InsightMethodRevisionRef[];
+    value: AdditionalAiInsightsArtifact & {
+      findings: Array<AdditionalAiInsightsArtifact["findings"][number] & {
+        canvas: {
+          acceptedBlockIds: string[];
+          acceptedBlocks: Array<{
+            bindings: Array<{ value: number }>;
+          }>;
+        };
+      }>;
+    };
   };
 };
 

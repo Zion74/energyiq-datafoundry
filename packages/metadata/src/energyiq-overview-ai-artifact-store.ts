@@ -44,6 +44,8 @@ export type EnergyIqOverviewAiArtifactIdentity = {
   capabilityRevision?: string;
   /** Exact publication policy used to select customer-visible results. */
   publicationRevision?: string;
+  /** Exact accepted declarative Canvas contract used by Additional Insights. */
+  canvasRevision?: string;
   /**
    * Absent only for legacy autonomous artifacts whose canonical identity and
    * hash must remain readable. New artifacts always set an explicit kind.
@@ -356,7 +358,8 @@ const canonicalIdentity = (
     requireAdditionalMethodSetIdentity(identity);
   } else if (identity.methodSetId !== undefined
     || identity.methodSetRevision !== undefined
-    || identity.methodSetFingerprint !== undefined) {
+    || identity.methodSetFingerprint !== undefined
+    || identity.canvasRevision !== undefined) {
     throw new Error("ENERGYIQ_ADDITIONAL_INSIGHT_METHOD_SET_IDENTITY_INVALID");
   }
   return {
@@ -392,6 +395,9 @@ const canonicalIdentity = (
       : {}),
     ...(identity.publicationRevision
       ? { publicationRevision: identity.publicationRevision }
+      : {}),
+    ...(identity.canvasRevision
+      ? { canvasRevision: identity.canvasRevision }
       : {}),
     ...(identity.artifactKind ? { artifactKind: identity.artifactKind } : {}),
     ...(identity.targetId ? { targetId: identity.targetId } : {}),
@@ -490,16 +496,26 @@ const requireAdditionalAiInsightsResult = (
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): void => {
   const expectedMethods = requireAdditionalMethodSetIdentity(identity);
-  if (identity.identityContractRevision !== "additional-insights-v1"
+  const isHistoricalV1 = identity.identityContractRevision === "additional-insights-v1"
+    && identity.outputContractRevision === "energyiq-additional-ai-insights-v1"
+    && identity.validatorRevision === "additional-insights-acceptance-v1"
+    && identity.workflowRevision === "additional-insights-discover-accept-publish-v1"
+    && identity.investigatorPromptRevision === "additional-insights-discovery-v1"
+    && identity.editorPromptRevision === "additional-insights-publication-v1"
+    && identity.publicationRevision === "additional-insights-v1"
+    && identity.canvasRevision === undefined;
+  const isCurrentV2 = identity.identityContractRevision === "additional-insights-v2"
+    && identity.outputContractRevision === "energyiq-additional-ai-insights-v2"
+    && identity.validatorRevision === "additional-insights-acceptance-v2"
+    && identity.workflowRevision === "additional-insights-discover-accept-publish-v2"
+    && identity.investigatorPromptRevision === "additional-insights-discovery-v2"
+    && identity.editorPromptRevision === "additional-insights-publication-v2"
+    && identity.publicationRevision === "additional-insights-v2"
+    && identity.canvasRevision === "energyiq-insight-canvas-v2";
+  if ((!isHistoricalV1 && !isCurrentV2)
     || identity.analysisPackId !== "preschool-additional-insights-pack"
     || identity.analysisPackRevision !== "v1"
-    || identity.outputContractRevision !== "energyiq-additional-ai-insights-v1"
-    || identity.validatorRevision !== "additional-insights-acceptance-v1"
-    || identity.workflowRevision !== "additional-insights-discover-accept-publish-v1"
-    || identity.investigatorPromptRevision !== "additional-insights-discovery-v1"
-    || identity.editorPromptRevision !== "additional-insights-publication-v1"
     || identity.capabilityRevision !== "scoped-read-only-v1"
-    || identity.publicationRevision !== "additional-insights-v1"
     || !additionalAiInsightsArtifactIsValid({
       value: parsed,
       expectedMethods,
@@ -520,7 +536,8 @@ const requireAdditionalAiInsightsResult = (
         methodSetFingerprint: identity.methodSetFingerprint!,
         outputContractRevision: identity.outputContractRevision,
         capabilityRevision: identity.capabilityRevision,
-        publicationRevision: identity.publicationRevision,
+        publicationRevision: identity.publicationRevision!,
+        ...(identity.canvasRevision ? { canvasRevision: identity.canvasRevision } : {}),
       },
     })) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");

@@ -174,21 +174,22 @@ describe("createOverviewAiArtifactIdentity", () => {
 
     expect(identity).toMatchObject({
       artifactKind: "autonomous-insights",
-      identityContractRevision: "additional-insights-v1",
+      identityContractRevision: "additional-insights-v2",
       analysisPackId: "preschool-additional-insights-pack",
       analysisPackRevision: "v1",
-      outputContractRevision: "energyiq-additional-ai-insights-v1",
-      validatorRevision: "additional-insights-acceptance-v1",
-      workflowRevision: "additional-insights-discover-accept-publish-v1",
-      investigatorPromptRevision: "additional-insights-discovery-v1",
-      editorPromptRevision: "additional-insights-publication-v1",
+      outputContractRevision: "energyiq-additional-ai-insights-v2",
+      validatorRevision: "additional-insights-acceptance-v2",
+      workflowRevision: "additional-insights-discover-accept-publish-v2",
+      investigatorPromptRevision: "additional-insights-discovery-v2",
+      editorPromptRevision: "additional-insights-publication-v2",
       methodSkillId: "energyiq-open-discovery",
       methodSkillRevision: "1.0.0",
       methodSetId: "preschool-additional-insights-current",
       methodSetRevision: "v1",
       methodSetFingerprint: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
       capabilityRevision: "scoped-read-only-v1",
-      publicationRevision: "additional-insights-v1",
+      publicationRevision: "additional-insights-v2",
+      canvasRevision: "energyiq-insight-canvas-v2",
     });
     expect(identity).not.toHaveProperty("targetId");
     expect(identity.methodSetFingerprint).not.toBe(identity.methodSkillRevision);

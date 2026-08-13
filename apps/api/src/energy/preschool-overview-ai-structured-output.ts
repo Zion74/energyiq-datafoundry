@@ -5,7 +5,7 @@ import type { PreschoolOverviewAiStage } from "./preschool-overview-ai-workflow.
 
 type StructuredEnvelope = Record<string, unknown>;
 type JsonSchema = {
-  type: "object" | "array" | "string" | "integer" | "boolean";
+  type: "object" | "array" | "string" | "integer" | "number" | "boolean";
   additionalProperties?: boolean;
   required?: string[];
   properties?: Record<string, JsonSchema>;
@@ -303,6 +303,121 @@ const additionalCandidate: JsonSchema = {
   },
 };
 
+const additionalCanvasIdentity: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["workspaceId", "projectId", "scopeId", "dataSnapshotId", "projectReleaseId"],
+  properties: {
+    workspaceId: nonEmptyString,
+    projectId: nonEmptyString,
+    scopeId: nonEmptyString,
+    dataSnapshotId: nonEmptyString,
+    projectReleaseId: nonEmptyString,
+  },
+};
+
+const additionalCanvasFinding: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "title", "text", "evidenceRefs", "visualNeeded"],
+  properties: {
+    id: nonEmptyString,
+    title: { type: "string", minLength: 1, maxLength: 240 },
+    text: { type: "string", minLength: 1, maxLength: 1_600 },
+    evidenceRefs,
+    visualNeeded: { type: "boolean" },
+  },
+};
+
+const additionalCanvasBinding: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["evidenceRef", "entityId", "metricId", "value", "unit"],
+  properties: {
+    evidenceRef: nonEmptyString,
+    entityId: nonEmptyString,
+    metricId: nonEmptyString,
+    value: { type: "number" },
+    unit: nonEmptyString,
+  },
+};
+
+const additionalCanvasBlock: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "kind", "visualization", "title", "bindings"],
+  properties: {
+    id: nonEmptyString,
+    kind: { type: "string", enum: ["quantitative"] },
+    visualization: { type: "string", enum: ["metric", "comparison", "trend"] },
+    title: { type: "string", minLength: 1, maxLength: 240 },
+    bindings: {
+      type: "array",
+      minItems: 1,
+      maxItems: 32,
+      items: additionalCanvasBinding,
+    },
+  },
+};
+
+const additionalCanvasGap: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["thesis", "requestedCapability", "why", "requiredDataShape", "evidenceRefs", "safeFallback"],
+  properties: {
+    thesis: { type: "string", minLength: 1, maxLength: 600 },
+    requestedCapability: { type: "string", minLength: 1, maxLength: 240 },
+    why: { type: "string", minLength: 1, maxLength: 800 },
+    requiredDataShape: { type: "string", minLength: 1, maxLength: 800 },
+    evidenceRefs,
+    safeFallback: { type: "string", enum: ["prose", "table", "omit-visual"] },
+  },
+};
+
+const additionalCanvasPlan: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["identity", "finding", "investigatorBlocks", "presentationGapRequests", "editorPlan"],
+  properties: {
+    identity: additionalCanvasIdentity,
+    finding: additionalCanvasFinding,
+    investigatorBlocks: {
+      type: "array",
+      minItems: 0,
+      maxItems: 16,
+      items: additionalCanvasBlock,
+    },
+    presentationGapRequests: {
+      type: "array",
+      minItems: 0,
+      maxItems: 16,
+      items: additionalCanvasGap,
+    },
+    editorPlan: {
+      type: "object",
+      additionalProperties: false,
+      required: ["orderedBlockIds"],
+      properties: {
+        orderedBlockIds: {
+          type: "array",
+          minItems: 0,
+          maxItems: 16,
+          uniqueItems: true,
+          items: nonEmptyString,
+        },
+      },
+    },
+  },
+};
+
+const additionalCandidateV2: JsonSchema = {
+  ...additionalCandidate,
+  properties: {
+    ...additionalCandidate.properties,
+    canvas: additionalCanvasPlan,
+  },
+};
+
 /** Open model proposal; acceptance and the three-card publication budget remain server-owned. */
 export const PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1 = {
   errorStrategy: "strict",
@@ -320,13 +435,29 @@ export const PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1 = {
   },
 } satisfies PublicStructuredOutputOptions<StructuredEnvelope>;
 
+export const PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2 = {
+  errorStrategy: "strict",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["candidates"],
+    properties: {
+      candidates: {
+        type: "array",
+        minItems: 0,
+        items: additionalCandidateV2,
+      },
+    },
+  },
+} satisfies PublicStructuredOutputOptions<StructuredEnvelope>;
+
 export const resolveOverviewAiStageStructuredOutput = (
   stage: PreschoolOverviewAiStage,
 ): PublicStructuredOutputOptions<StructuredEnvelope> | undefined => {
   if (stage === "section-interpreter") return PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V3;
   if (stage === "executive-synthesis") return PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V1;
   if (stage === "template-proposal") return ENERGYIQ_TEMPLATE_CHANGE_PROPOSAL_STRUCTURED_OUTPUT_V1;
-  if (stage === "additional-insights-discovery") return PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1;
+  if (stage === "additional-insights-discovery") return PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2;
   return undefined;
 };
 

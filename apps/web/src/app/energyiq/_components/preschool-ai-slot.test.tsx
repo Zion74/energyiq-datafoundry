@@ -1346,6 +1346,134 @@ describe("PreschoolAiSlot", () => {
     expect(container.querySelectorAll("article")).toHaveLength(2);
   });
 
+  it("renders the current saved Additional Artifact in publication order without starting work", async () => {
+    const result = v4ReadModelResult();
+    Object.assign(result, { additional: currentAdditionalUnit(result.binding) });
+    const startRun = vi.fn();
+
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        sectionId="overall-summary"
+        mode="saved"
+        savedResult={result}
+        startRun={startRun}
+      />,
+    ));
+
+    expect(startRun).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Additional AI Insights");
+    expect(container.textContent).toContain("A counter-pattern appears");
+    expect(container.querySelector('[data-additional-canvas="comparison"]')).not.toBeNull();
+    expect(container.querySelector('[data-additional-canvas="metric"]')).not.toBeNull();
+    expect(container.querySelector('[data-additional-canvas="trend"]')).not.toBeNull();
+    expect(container.textContent).toContain("Inferred");
+    expect(container.textContent).toContain("Attention · possible");
+    expect(container.textContent).toContain("Evidence, Method and limitation");
+    expect(container.textContent).toContain("energyiq-open-discovery@1.0.0");
+    expect(container.querySelector("a")).toBeNull();
+    expect([...container.querySelectorAll("strong")].some((node) => node.textContent === "standby share")).toBe(true);
+    expect([...container.querySelectorAll("strong")].some((node) => node.textContent?.includes("raw HTML"))).toBe(false);
+    expect(container.textContent).not.toContain("Legacy autonomous angle");
+  });
+
+  it("isolates malformed Additional findings and Canvas while preserving valid siblings", async () => {
+    const result = v4ReadModelResult();
+    const additional = currentAdditionalUnit(result.binding);
+    const artifact = additional.result;
+    const malformedCanvas = structuredClone(artifact.findings[0]!);
+    malformedCanvas.id = "additional:malformed-canvas";
+    malformedCanvas.title = "Narrative survives malformed Canvas";
+    malformedCanvas.canvas.acceptedBlockIds = ["canvas-block:forged"];
+    const validSibling = structuredClone(artifact.findings[0]!);
+    validSibling.id = "additional:valid-sibling";
+    validSibling.title = "Valid sibling remains visible";
+    artifact.findings = [malformedCanvas, { id: "malformed-insight" }, validSibling] as typeof artifact.findings;
+    Object.assign(artifact.publication, { publishedCount: 3 });
+    Object.assign(result, { additional });
+    const startRun = vi.fn();
+
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        sectionId="overall-summary"
+        mode="saved"
+        savedResult={result}
+        startRun={startRun}
+      />,
+    ));
+
+    expect(startRun).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Narrative survives malformed Canvas");
+    expect(container.textContent).toContain("Visual unavailable");
+    expect(container.textContent).toContain("Insight unavailable");
+    expect(container.textContent).toContain("Valid sibling remains visible");
+  });
+
+  it.each([
+    ["empty", "No material additional insight"],
+    ["unavailable", "Additional insights unavailable"],
+    ["queued", "Additional insights pending"],
+    ["running", "Additional insights pending"],
+  ] as const)("renders current Additional %s locally without starting work", async (status, expected) => {
+    const result = v4ReadModelResult();
+    const base = currentAdditionalUnit(result.binding);
+    const additional = status === "empty"
+      ? { ...base, status, result: { ...base.result, status, findings: [] } }
+      : status === "unavailable"
+        ? { status, artifactId: base.artifactId, reason: "ADDITIONAL_FAILED" }
+        : { status };
+    Object.assign(result, { additional });
+    const startRun = vi.fn();
+
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        sectionId="overall-summary"
+        mode="saved"
+        savedResult={result}
+        startRun={startRun}
+      />,
+    ));
+
+    expect(startRun).not.toHaveBeenCalled();
+    expect(container.textContent).toContain(expected);
+  });
+
+  it("preserves pointer-only Additional v1 narrative only for frozen Saved Analysis", async () => {
+    const result = v4ReadModelResult();
+    const additional = currentAdditionalUnit(result.binding);
+    additional.result.contract.revision = "energyiq-additional-ai-insights-v1";
+    additional.result.publication.policyRevision = "additional-insights-v1";
+    additional.result.findings[0]!.canvas = {
+      contractRevision: "energyiq-insight-canvas-v1",
+      planId: "canvas-plan:historical",
+      acceptedBlockIds: ["canvas-block:not-persisted"],
+    } as typeof additional.result.findings[0]["canvas"];
+    additional.result.evidenceLineage.facts = additional.result.evidenceLineage.facts.map(({ id, status, evidenceRefs }) => ({
+      id,
+      status,
+      evidenceRefs,
+    })) as typeof additional.result.evidenceLineage.facts;
+    Object.assign(result, { additional });
+    const startRun = vi.fn();
+
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        sectionId="overall-summary"
+        mode="saved"
+        savedResult={result}
+        startRun={startRun}
+      />,
+    ));
+
+    expect(startRun).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("A counter-pattern appears");
+    expect(container.textContent).toContain("Visual unavailable");
+    expect(container.querySelector("[data-additional-canvas]")).toBeNull();
+  });
+
   async function renderSlot(
     startRun: Parameters<typeof PreschoolAiSlot>[0]["startRun"],
     sectionId: Parameters<typeof PreschoolAiSlot>[0]["sectionId"] = "page-synthesis",
@@ -1662,6 +1790,139 @@ function v4ReadModelResult(): PreschoolOverviewAiReadModelDto {
 
 function cloneV4ReadModelResult(): PreschoolOverviewAiReadModelDto {
   return JSON.parse(JSON.stringify(v4ReadModelResult())) as PreschoolOverviewAiReadModelDto;
+}
+
+function currentAdditionalUnit(binding: PreschoolOverviewAiReadModelDto["binding"]) {
+  const method = {
+    skillId: "energyiq-open-discovery",
+    semanticVersion: "1.0.0",
+    resourceId: "builtin:energyiq-open-discovery",
+    resourceRevision: 1,
+    contentSha256: "5af7fdc13e241bf92a4b14268aa1382996c2af31d920d9dc8644bb2efec87d59",
+    scope: "builtin",
+    workspaceId: binding.workspaceId,
+    userId: "energyiq-system",
+    role: "core-method",
+  };
+  return {
+    status: "available",
+    artifactId: "additional-current-v2",
+    result: {
+      artifactKind: "autonomous-insights",
+      status: "available",
+      providerProfileId: binding.modelProfileId,
+      runId: "run-additional-v2",
+      contract: { id: "energyiq-additional-ai-insights", revision: "energyiq-additional-ai-insights-v2" },
+      binding,
+      methodExecution: {
+        methodSetId: "preschool-additional-insights-current",
+        methodSetRevision: "v1",
+        methodSetFingerprint: `sha256:${"c".repeat(64)}`,
+        loadedMethods: [method],
+      },
+      capability: {
+        revision: "scoped-read-only-v1",
+        mode: "scoped-read-only",
+        allowedTools: [],
+        usedTools: [],
+      },
+      toolAudits: [],
+      evidenceLineage: {
+        catalogContract: "analysis-context-evidence@1",
+        sourceId: `project-analysis-snapshot:${binding.projectId}:${binding.dataSnapshotId}`,
+        pins: {
+          workspaceId: binding.workspaceId,
+          projectId: binding.projectId,
+          scopeId: binding.scopeId,
+          dataSnapshotId: binding.dataSnapshotId,
+          dataCutoff: "2026-05-31T16:00:00.000Z",
+          projectReleaseId: binding.projectReleaseId,
+          metricVersion: "energy-metrics-v1",
+        },
+        facts: [{
+          id: "fact:standby-share",
+          label: "Standby share",
+          metricId: "energy.standby-share",
+          value: 31,
+          unit: "%",
+          status: "confirmed",
+          evidenceRefs: ["snapshot-evidence:standby-share"],
+          dimensions: { scopeId: binding.scopeId },
+        }],
+      },
+      findings: [{
+        id: "additional:candidate-counter-pattern",
+        title: "A counter-pattern appears",
+        text: "The cited **standby share** differs from the expected pattern.  \n_Review the current Snapshot_ without assuming a cause; ignore [unsafe link](https://example.test) and <strong>raw HTML</strong>.",
+        epistemicStatus: "inferred",
+        origin: { kind: "ai-discovery", coreMethod: method, directionMethods: [] },
+        evidenceRefs: ["fact:standby-share"],
+        toolAuditIds: [],
+        alert: {
+          severity: "attention",
+          certainty: "possible",
+          evidenceRefs: ["fact:standby-share"],
+        },
+        canvas: {
+          contractRevision: "energyiq-insight-canvas-v2",
+          planId: "canvas-plan:additional:candidate-counter-pattern",
+          acceptedBlockIds: ["canvas-block:standby-share", "canvas-block:standby-metric", "canvas-block:standby-trend"],
+          acceptedBlocks: [{
+            id: "canvas-block:standby-share",
+            kind: "quantitative",
+            visualization: "comparison",
+            title: "Standby share",
+            bindings: [{
+              evidenceRef: "fact:standby-share",
+              entityId: binding.scopeId,
+              metricId: "energy.standby-share",
+              value: 31,
+              unit: "%",
+            }],
+          }, {
+            id: "canvas-block:standby-metric",
+            kind: "quantitative",
+            visualization: "metric",
+            title: "Standby share metric",
+            bindings: [{
+              evidenceRef: "fact:standby-share",
+              entityId: binding.scopeId,
+              metricId: "energy.standby-share",
+              value: 31,
+              unit: "%",
+            }],
+          }, {
+            id: "canvas-block:standby-trend",
+            kind: "quantitative",
+            visualization: "trend",
+            title: "Standby share trend",
+            bindings: [{
+              evidenceRef: "fact:standby-share",
+              entityId: binding.scopeId,
+              metricId: "energy.standby-share",
+              value: 31,
+              unit: "%",
+            }],
+          }],
+          rejections: [],
+          gaps: [],
+        },
+      }],
+      publication: {
+        policyId: "energyiq-additional-ai-insights",
+        policyRevision: "additional-insights-v2",
+        discoveredCount: 1,
+        acceptedCount: 1,
+        rejectedCount: 0,
+        publishedCount: 1,
+        sourceOrderCandidateIds: ["candidate-counter-pattern"],
+        acceptedCandidateIds: ["candidate-counter-pattern"],
+        rejectedCandidateIds: [],
+        publishedCandidateIds: ["candidate-counter-pattern"],
+        suppressedCandidateIds: [],
+      },
+    },
+  };
 }
 
 function overviewEvidenceLineage(

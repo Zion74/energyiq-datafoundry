@@ -30,6 +30,7 @@ import type {
   PreschoolAiEpistemicLevel,
 } from "./preschool-ai-artifact";
 import { AiFindingPresentationView } from "./ai-finding-presentation-view";
+import { PreschoolAdditionalAiInsights } from "./preschool-additional-ai-insights";
 import { SafeAiMarkdown } from "./safe-ai-markdown";
 
 type ProgressCallback = (progress: PreschoolAiProgress) => void;
@@ -262,6 +263,15 @@ function SectionedAiResult({
     );
   }
   if (sectionId === "overall-summary") {
+    if (Object.prototype.hasOwnProperty.call(result, "additional")) {
+      return (
+        <PreschoolAdditionalAiInsights
+          unit={result.additional}
+          outerBinding={result.binding}
+          mode={mode}
+        />
+      );
+    }
     const autonomous = autonomousAvailableResult(result.autonomous);
     if (!autonomous || autonomous.findings.length === 0) return null;
     return (

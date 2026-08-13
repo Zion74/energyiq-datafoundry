@@ -4,6 +4,11 @@ import {
   type AutonomousInsightOrigin,
   type InsightMethodRevisionRef,
 } from "./energyiq-autonomous-insights.js";
+import type {
+  InsightCanvasPresentationGap,
+  InsightCanvasQuantitativeBlock,
+  InsightCanvasRejection,
+} from "./energyiq-insight-canvas.js";
 
 export const ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1 = [
   "energy.evidence.read",
@@ -110,6 +115,13 @@ export type AdditionalAiInsightFinding = {
     contractRevision: "energyiq-insight-canvas-v1";
     planId: string;
     acceptedBlockIds: string[];
+  } | {
+    contractRevision: "energyiq-insight-canvas-v2";
+    planId: string;
+    acceptedBlockIds: string[];
+    acceptedBlocks: InsightCanvasQuantitativeBlock[];
+    rejections: InsightCanvasRejection[];
+    gaps: InsightCanvasPresentationGap[];
   };
 };
 
@@ -138,6 +150,15 @@ export type AdditionalAiInsightsEvidenceLineage = {
     id: string;
     status: "confirmed" | "provisional" | "partial";
     evidenceRefs: string[];
+  } | {
+    id: string;
+    label: string;
+    metricId: string;
+    value: string | number | boolean | null;
+    unit?: string;
+    status: "confirmed" | "provisional" | "partial";
+    evidenceRefs: string[];
+    dimensions: Record<string, string>;
   }>;
 };
 
@@ -217,6 +238,7 @@ export type AdditionalAiInsightsArtifactExpectation = AdditionalAiInsightsBindin
   outputContractRevision: string;
   capabilityRevision: string;
   publicationRevision: string;
+  canvasRevision?: string;
 };
 
 export type AdditionalAiInsightsArtifactValidationInput = {
@@ -300,6 +322,7 @@ export const additionalAiInsightsArtifactIsValid = (
       expectedMethods,
       methodExecution.loadedMethods,
       toolAudits,
+      expected.canvasRevision,
     ))
     || !uniqueStrings(findings.map((finding) => isRecord(finding) ? finding.id : undefined))
     || !evidenceLineageMatches(value.evidenceLineage, expected, findings, toolAudits)
@@ -413,6 +436,7 @@ const validFinding = (
   approvedMethods: readonly InsightMethodRevisionRef[],
   loadedMethods: readonly InsightMethodRevisionRef[],
   toolAudits: readonly unknown[],
+  canvasRevision: string | undefined,
 ): boolean => isRecord(value)
   && hasOnlyKeys(value, [
     "id",
@@ -440,7 +464,7 @@ const validFinding = (
   && value.toolAuditIds.every((auditId) => toolAudits.some((audit) => isRecord(audit) && audit.auditId === auditId))
   && optionalString(value.deepDiveQuestion)
   && alertIsValid(value.alert, value.evidenceRefs)
-  && canvasIsValid(value.canvas)
+  && canvasIsValid(value.canvas, canvasRevision)
   && originHasKnownShape(value.origin)
   && autonomousInsightOriginIsValid({
     origin: value.origin,
@@ -563,13 +587,9 @@ const evidenceLineageMatches = (
     || !nonEmptyString(value.pins.metricVersion)
     || !Array.isArray(value.facts)) return false;
   const facts = value.facts.filter(isRecord);
+  const currentCanvas = expected.canvasRevision === "energyiq-insight-canvas-v2";
   if (facts.length !== value.facts.length
-    || !facts.every((fact) => hasOnlyKeys(fact, ["id", "status", "evidenceRefs"])
-      && nonEmptyString(fact.id)
-      && (fact.status === "confirmed" || fact.status === "provisional" || fact.status === "partial")
-      && Array.isArray(fact.evidenceRefs)
-      && fact.evidenceRefs.length > 0
-      && uniqueStrings(fact.evidenceRefs))
+    || !facts.every((fact) => evidenceFactIsValid(fact, currentCanvas))
     || !uniqueStrings(facts.map(({ id }) => id))) return false;
   const factIds = new Set(facts.map(({ id }) => id));
   const findingRefs = findings.flatMap((finding) => isRecord(finding) && Array.isArray(finding.evidenceRefs)
@@ -578,7 +598,12 @@ const evidenceLineageMatches = (
   const auditRefs = toolAudits.flatMap((audit) => isRecord(audit) && Array.isArray(audit.evidenceRefs)
     ? audit.evidenceRefs
     : []);
-  return [...findingRefs, ...auditRefs].every((reference) => typeof reference === "string" && factIds.has(reference));
+  if (![...findingRefs, ...auditRefs].every((reference) => typeof reference === "string" && factIds.has(reference))) {
+    return false;
+  }
+  if (!currentCanvas) return true;
+  const factsById = new Map(facts.map((fact) => [fact.id as string, fact]));
+  return findings.every((finding) => canvasBindingsMatchLineage(finding, factsById, expected.scopeId));
 };
 
 const orderedSubset = (subset: readonly unknown[], source: readonly unknown[]): boolean => {
@@ -607,14 +632,152 @@ const alertIsValid = (value: unknown, findingEvidenceRefs: readonly string[]): b
     && uniqueStrings(value.evidenceRefs)
     && value.evidenceRefs.every((evidenceRef) => findingEvidenceRefs.includes(evidenceRef)));
 
-const canvasIsValid = (value: unknown): boolean => value === undefined
-  || (isRecord(value)
-    && hasOnlyKeys(value, ["contractRevision", "planId", "acceptedBlockIds"])
-    && value.contractRevision === "energyiq-insight-canvas-v1"
-    && nonEmptyString(value.planId)
-    && Array.isArray(value.acceptedBlockIds)
-    && value.acceptedBlockIds.length > 0
-    && uniqueStrings(value.acceptedBlockIds));
+const MAX_ACCEPTED_CANVAS_BLOCKS = 3;
+const CANVAS_REJECTION_CODES = new Set([
+  "INPUT_IDENTITY_INVALID",
+  "PLAN_INVALID",
+  "PLAN_IDENTITY_MISMATCH",
+  "FINDING_INVALID",
+  "INVESTIGATOR_BLOCK_INVALID",
+  "EVIDENCE_BINDING_MISMATCH",
+  "EDITOR_PLAN_INVALID",
+  "EDITOR_BLOCK_NOT_INVESTIGATED",
+  "PRESENTATION_GAP_INVALID",
+]);
+const FORBIDDEN_CANVAS_TEXT = /[<>]|https?:\/\/|www\.|javascript\s*:|data\s*:\s*text\/html|url\s*\(|@import\b|=>|\b(?:react|css|script|function)\b|on[a-z]+\s*=/iu;
+
+const canvasIsValid = (value: unknown, expectedRevision: string | undefined): boolean => {
+  if (value === undefined) return true;
+  if (!isRecord(value) || !nonEmptyString(value.planId) || !Array.isArray(value.acceptedBlockIds)) return false;
+  if (expectedRevision === undefined) {
+    return hasOnlyKeys(value, ["contractRevision", "planId", "acceptedBlockIds"])
+      && value.contractRevision === "energyiq-insight-canvas-v1"
+      && value.acceptedBlockIds.length > 0
+      && uniqueStrings(value.acceptedBlockIds);
+  }
+  if (expectedRevision !== "energyiq-insight-canvas-v2"
+    || value.contractRevision !== expectedRevision
+    || !hasOnlyKeys(value, [
+      "contractRevision", "planId", "acceptedBlockIds", "acceptedBlocks", "rejections", "gaps",
+    ])
+    || !uniqueStrings(value.acceptedBlockIds)
+    || value.acceptedBlockIds.length > MAX_ACCEPTED_CANVAS_BLOCKS
+    || !Array.isArray(value.acceptedBlocks)
+    || value.acceptedBlocks.length !== value.acceptedBlockIds.length
+    || !value.acceptedBlocks.every(quantitativeBlockIsValid)
+    || !acceptedCanvasBlockOrderMatches(value.acceptedBlockIds, value.acceptedBlocks)
+    || !Array.isArray(value.rejections)
+    || value.rejections.length > 64
+    || !value.rejections.every(canvasRejectionIsValid)
+    || !Array.isArray(value.gaps)
+    || value.gaps.length > 16
+    || !value.gaps.every(canvasGapIsValid)) return false;
+  return true;
+};
+
+const acceptedCanvasBlockOrderMatches = (ids: unknown, blocks: unknown): boolean => Array.isArray(ids)
+  && Array.isArray(blocks)
+  && ids.length === blocks.length
+  && ids.every((id, index) => isRecord(blocks[index]) && blocks[index]!.id === id);
+
+const quantitativeBlockIsValid = (value: unknown): boolean => isRecord(value)
+  && hasOnlyKeys(value, ["id", "kind", "visualization", "title", "bindings"])
+  && safeCanvasText(value.id, 200)
+  && value.kind === "quantitative"
+  && (value.visualization === "metric" || value.visualization === "comparison" || value.visualization === "trend")
+  && safeCanvasText(value.title, 240)
+  && Array.isArray(value.bindings)
+  && value.bindings.length > 0
+  && value.bindings.length <= 32
+  && value.bindings.every((binding) => isRecord(binding)
+    && hasOnlyKeys(binding, ["evidenceRef", "entityId", "metricId", "value", "unit"])
+    && nonEmptyString(binding.evidenceRef)
+    && nonEmptyString(binding.entityId)
+    && nonEmptyString(binding.metricId)
+    && typeof binding.value === "number"
+    && Number.isFinite(binding.value)
+    && nonEmptyString(binding.unit));
+
+const canvasRejectionIsValid = (value: unknown): boolean => isRecord(value)
+  && hasOnlyKeys(value, ["code", "subjectId"])
+  && typeof value.code === "string"
+  && CANVAS_REJECTION_CODES.has(value.code)
+  && safeCanvasText(value.subjectId, 240);
+
+const canvasGapIsValid = (value: unknown): boolean => isRecord(value)
+  && hasOnlyKeys(value, [
+    "thesis", "requestedCapability", "why", "requiredDataShape", "evidenceRefs", "safeFallback",
+    "roadmapEvidenceKey", "occurrences", "disposition",
+  ])
+  && safeCanvasText(value.thesis, 600)
+  && safeCanvasText(value.requestedCapability, 240)
+  && safeCanvasText(value.why, 800)
+  && safeCanvasText(value.requiredDataShape, 800)
+  && Array.isArray(value.evidenceRefs)
+  && value.evidenceRefs.length > 0
+  && uniqueStrings(value.evidenceRefs)
+  && (value.safeFallback === "prose" || value.safeFallback === "table" || value.safeFallback === "omit-visual")
+  && nonEmptyString(value.roadmapEvidenceKey)
+  && Number.isSafeInteger(value.occurrences)
+  && (value.occurrences as number) > 0
+  && value.disposition === "human-roadmap-evidence-only";
+
+const evidenceFactIsValid = (fact: Record<string, unknown>, currentCanvas: boolean): boolean => {
+  const base = nonEmptyString(fact.id)
+    && (fact.status === "confirmed" || fact.status === "provisional" || fact.status === "partial")
+    && Array.isArray(fact.evidenceRefs)
+    && fact.evidenceRefs.length > 0
+    && uniqueStrings(fact.evidenceRefs);
+  if (!base) return false;
+  if (!currentCanvas) return hasOnlyKeys(fact, ["id", "status", "evidenceRefs"]);
+  return hasOnlyKeys(fact, ["id", "label", "metricId", "value", "unit", "status", "evidenceRefs", "dimensions"])
+    && nonEmptyString(fact.label)
+    && nonEmptyString(fact.metricId)
+    && analysisScalarIsValid(fact.value)
+    && (fact.unit === undefined || nonEmptyString(fact.unit))
+    && isRecord(fact.dimensions)
+    && Object.values(fact.dimensions).every(nonEmptyString);
+};
+
+const canvasBindingsMatchLineage = (
+  finding: unknown,
+  factsById: ReadonlyMap<string, Record<string, unknown>>,
+  defaultEntityId: string,
+): boolean => {
+  if (!isRecord(finding) || !isRecord(finding.canvas)) return true;
+  if (finding.canvas.contractRevision !== "energyiq-insight-canvas-v2"
+    || !Array.isArray(finding.canvas.acceptedBlocks)
+    || !Array.isArray(finding.canvas.gaps)
+    || !Array.isArray(finding.evidenceRefs)) return false;
+  const findingRefs = new Set(finding.evidenceRefs.filter((value): value is string => typeof value === "string"));
+  return finding.canvas.acceptedBlocks.every((block) => isRecord(block)
+    && Array.isArray(block.bindings)
+    && block.bindings.every((binding) => {
+      if (!isRecord(binding) || !findingRefs.has(binding.evidenceRef as string)) return false;
+      const fact = factsById.get(binding.evidenceRef as string);
+      if (!fact || typeof fact.value !== "number" || !Number.isFinite(fact.value) || !nonEmptyString(fact.unit)) return false;
+      const dimensions = isRecord(fact.dimensions) ? fact.dimensions : {};
+      const entityId = nonEmptyString(dimensions.entityId)
+        ? dimensions.entityId
+        : nonEmptyString(dimensions.scopeId) ? dimensions.scopeId : defaultEntityId;
+      return binding.entityId === entityId
+        && binding.metricId === fact.metricId
+        && Object.is(binding.value, fact.value)
+        && binding.unit === fact.unit;
+    }))
+    && finding.canvas.gaps.every((gap: unknown) => isRecord(gap)
+      && Array.isArray(gap.evidenceRefs)
+      && gap.evidenceRefs.every((reference) => typeof reference === "string" && factsById.has(reference)));
+};
+
+const analysisScalarIsValid = (value: unknown): boolean => value === null
+  || typeof value === "string"
+  || typeof value === "boolean"
+  || (typeof value === "number" && Number.isFinite(value));
+
+const safeCanvasText = (value: unknown, maximumLength: number): value is string => nonEmptyString(value)
+  && value.length <= maximumLength
+  && !FORBIDDEN_CANVAS_TEXT.test(value);
 
 const originHasKnownShape = (value: unknown): boolean => {
   if (!isRecord(value)

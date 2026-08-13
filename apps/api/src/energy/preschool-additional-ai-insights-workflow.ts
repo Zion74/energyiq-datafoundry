@@ -1,11 +1,14 @@
 import type { AnalysisContextEvidenceCatalog } from "@datafoundry/agent-runtime";
 import {
   ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1,
+  acceptInsightCanvasPlan,
   additionalAiInsightsArtifactIsValid,
   ENERGYIQ_OPEN_DISCOVERY_METHOD_CONTENT_V1,
   resolveCurrentAdditionalAiInsightMethodSet,
   type AdditionalAiInsightFinding,
   type AdditionalAiInsightsArtifact,
+  type InsightCanvasEvidenceFact,
+  type InsightCanvasRejection,
 } from "@datafoundry/contracts";
 import type {
   EnergyIqOverviewAiArtifactRecord,
@@ -132,6 +135,7 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
           outputContractRevision: identity.outputContractRevision,
           capabilityRevision: identity.capabilityRevision,
           publicationRevision: identity.publicationRevision,
+          canvasRevision: identity.canvasRevision,
         },
       };
       if (!additionalAiInsightsArtifactIsValid(validation)) {
@@ -215,10 +219,18 @@ const publishAdditionalArtifact = (input: {
   const factsById = new Map(input.catalog.facts.map((fact) => [fact.id, fact]));
   const auditsById = new Map(input.toolAudits.map((audit) => [audit.auditId, audit]));
   const coreMethod = input.methodSet.methods.find(({ role }) => role === "core-method")!;
+  const canvasEvidenceFacts = projectCanvasEvidenceFacts(input.identity, input.catalog);
   const accepted: AcceptedCandidate[] = [];
   const rejectedCandidateIds: string[] = [];
   for (const candidate of input.candidates) {
-    const finding = acceptCandidate(candidate, factsById, auditsById, coreMethod);
+    const finding = acceptCandidate(
+      candidate,
+      factsById,
+      auditsById,
+      coreMethod,
+      input.identity,
+      canvasEvidenceFacts,
+    );
     if (finding) accepted.push({ sourceId: candidate.sourceId, finding });
     else rejectedCandidateIds.push(candidate.sourceId);
   }
@@ -227,11 +239,26 @@ const publishAdditionalArtifact = (input: {
   const findings = published.map(({ finding }) => finding);
   const usedFactIds = new Set([
     ...findings.flatMap(({ evidenceRefs }) => evidenceRefs),
+    ...findings.flatMap(({ canvas }) => canvas?.contractRevision === "energyiq-insight-canvas-v2"
+      ? [
+          ...canvas.acceptedBlocks.flatMap(({ bindings }) => bindings.map(({ evidenceRef }) => evidenceRef)),
+          ...canvas.gaps.flatMap(({ evidenceRefs }) => evidenceRefs),
+        ]
+      : []),
     ...input.toolAudits.flatMap(({ evidenceRefs }) => evidenceRefs),
   ]);
   const evidenceFacts = input.catalog.facts
     .filter(({ id }) => usedFactIds.has(id))
-    .map(({ id, status, evidenceRefs }) => ({ id, status, evidenceRefs: [...evidenceRefs] }));
+    .map(({ id, label, metricId, value, unit, status, evidenceRefs, dimensions }) => ({
+      id,
+      label,
+      metricId,
+      value,
+      ...(unit ? { unit } : {}),
+      status,
+      evidenceRefs: [...evidenceRefs],
+      dimensions: { ...dimensions },
+    }));
   const usedTools = [...new Set(input.toolAudits.map(({ toolName }) => toolName) as PreschoolAdditionalAiInsightToolName[])];
   const artifactBase = {
     artifactKind: "autonomous-insights" as const,
@@ -298,11 +325,13 @@ const acceptCandidate = (
   factsById: Map<string, AnalysisContextEvidenceCatalog["facts"][number]>,
   auditsById: Map<string, ReturnType<ReturnType<typeof createPreschoolAdditionalAiInsightRuntime>["audits"]>[number]>,
   coreMethod: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>["methods"][number],
+  identity: PreschoolAdditionalAiInsightArtifactIdentity,
+  canvasEvidenceFacts: readonly InsightCanvasEvidenceFact[],
 ): AdditionalAiInsightFinding | null => {
   const value = candidate.value;
   if (!isRecord(value)
     || !hasOnlyKeys(value, [
-      "id", "title", "text", "epistemicStatus", "evidenceRefs", "toolAuditIds", "deepDiveQuestion", "alert",
+      "id", "title", "text", "epistemicStatus", "evidenceRefs", "toolAuditIds", "deepDiveQuestion", "alert", "canvas",
     ])
     || value.id !== candidate.sourceId
     || !boundedSafeText(value.title, MAX_CANDIDATE_TITLE_CHARS)
@@ -321,7 +350,7 @@ const acceptCandidate = (
   if (audits.some((audit) => !audit || audit.status !== "succeeded")
     || audits.some((audit) => audit!.evidenceRefs.some((ref) => !evidenceRefs.includes(ref)))) return null;
   if (!alertIsAcceptable(value.alert, value.epistemicStatus, evidenceRefs, factsById)) return null;
-  return {
+  const finding: AdditionalAiInsightFinding = {
     id: `additional:${candidate.sourceId}`,
     title: value.title.trim(),
     text: value.text.trim(),
@@ -344,7 +373,77 @@ const acceptCandidate = (
         }
       : {}),
   };
+  const canvas = acceptCandidateCanvas({
+    candidate,
+    candidateValue: value,
+    identity,
+    evidenceFacts: canvasEvidenceFacts,
+  });
+  return canvas ? { ...finding, canvas } : finding;
 };
+
+const acceptCandidateCanvas = (input: {
+  candidate: DiscoveryCandidate;
+  candidateValue: Record<string, unknown>;
+  identity: PreschoolAdditionalAiInsightArtifactIdentity;
+  evidenceFacts: readonly InsightCanvasEvidenceFact[];
+}): Extract<AdditionalAiInsightFinding["canvas"], { contractRevision: "energyiq-insight-canvas-v2" }> | undefined => {
+  if (input.candidateValue.canvas === undefined) return undefined;
+  const accepted = acceptInsightCanvasPlan({
+    expectedIdentity: {
+      workspaceId: input.identity.workspaceId,
+      projectId: input.identity.projectId,
+      scopeId: input.identity.scopeId,
+      dataSnapshotId: input.identity.dataSnapshotId,
+      projectReleaseId: input.identity.projectReleaseId,
+    },
+    evidenceFacts: input.evidenceFacts,
+    plan: input.candidateValue.canvas,
+  });
+  const findingMatches = accepted.acceptedFinding?.id === input.candidate.sourceId
+    && accepted.acceptedFinding.title === input.candidateValue.title
+    && accepted.acceptedFinding.text === input.candidateValue.text
+    && Array.isArray(input.candidateValue.evidenceRefs)
+    && sameStringOrder(accepted.acceptedFinding.evidenceRefs, input.candidateValue.evidenceRefs);
+  const acceptedBlocks = findingMatches ? accepted.acceptedBlocks.slice(0, 3) : [];
+  const rejections: InsightCanvasRejection[] = [...accepted.rejections];
+  if (!findingMatches && !rejections.some(({ code }) => code === "FINDING_INVALID")) {
+    rejections.push({ code: "FINDING_INVALID", subjectId: "finding" });
+  }
+  return {
+    contractRevision: "energyiq-insight-canvas-v2",
+    planId: `canvas-plan:additional:${input.candidate.sourceId}`,
+    acceptedBlockIds: acceptedBlocks.map(({ id }) => id),
+    acceptedBlocks,
+    rejections,
+    gaps: accepted.gaps,
+  };
+};
+
+const projectCanvasEvidenceFacts = (
+  identity: PreschoolAdditionalAiInsightArtifactIdentity,
+  catalog: AnalysisContextEvidenceCatalog,
+): InsightCanvasEvidenceFact[] => catalog.facts.flatMap((fact) => {
+  if (typeof fact.value !== "number" || !Number.isFinite(fact.value) || !nonEmptyString(fact.unit)) return [];
+  const entityId = fact.dimensions.entityId ?? fact.dimensions.scopeId ?? identity.scopeId;
+  return [{
+    identity: {
+      workspaceId: identity.workspaceId,
+      projectId: identity.projectId,
+      scopeId: identity.scopeId,
+      dataSnapshotId: identity.dataSnapshotId,
+      projectReleaseId: identity.projectReleaseId,
+    },
+    evidenceRef: fact.id,
+    entityId,
+    metricId: fact.metricId,
+    value: fact.value,
+    unit: fact.unit,
+  }];
+});
+
+const sameStringOrder = (left: readonly string[], right: readonly unknown[]): boolean => left.length === right.length
+  && left.every((value, index) => value === right[index]);
 
 const alertIsAcceptable = (
   value: unknown,
@@ -378,7 +477,8 @@ const buildDiscoveryPrompt = (input: {
   const prompt = [
     "You are the Additional AI Insights discovery stage for EnergyIQ Preschool.",
     input.methodContent,
-    "Return JSON only: {candidates:[{id,title,text,epistemicStatus:'observed|inferred|speculative',evidenceRefs:[exact fact id],toolAuditIds:[actual returned audit id],deepDiveQuestion?,alert?}]}.",
+    "Return JSON only: {candidates:[{id,title,text,epistemicStatus:'observed|inferred|speculative',evidenceRefs:[exact fact id],toolAuditIds:[actual returned audit id],deepDiveQuestion?,alert?,canvas?}]}.",
+    "Optional canvas must be an energyiq-insight-canvas plan using only quantitative metric, comparison, or trend blocks bound exactly to supplied Evidence facts. The server may reject blocks locally without rejecting the Finding.",
     "Candidates must already be ordered from highest to lowest incremental value. Zero candidates is valid.",
     `Server-owned identity: ${JSON.stringify({
       workspaceId: input.identity.workspaceId,

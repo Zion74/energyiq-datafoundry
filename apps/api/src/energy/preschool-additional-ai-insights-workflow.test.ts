@@ -131,6 +131,57 @@ describe("Preschool Additional AI Insights workflow", () => {
     }
   });
 
+  it("persists server-accepted Canvas blocks while rejecting a bad sibling block locally", async () => {
+    const harness = createHarness();
+    try {
+      const canvasCandidate = candidate("candidate-canvas", "fact:standby-share", {
+        canvas: canvasPlan({
+          candidateId: "candidate-canvas",
+          title: "Title for candidate-canvas",
+          text: "Incremental observation for candidate-canvas.",
+        }),
+      });
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [canvasCandidate] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const artifact = await workflow.execute({ baseIdentity: harness.baseIdentity, user: harness.user });
+      expect(artifact.error_code).toBeUndefined();
+      expect(artifact).toMatchObject({ status: "available" });
+      const result = JSON.parse(artifact.result_json!) as AdditionalAiInsightsArtifact;
+      expect(result.status).toBe("available");
+      if (result.status !== "available") throw new Error("available Additional fixture required");
+      expect(result.findings[0]?.canvas).toMatchObject({
+        contractRevision: "energyiq-insight-canvas-v2",
+        planId: "canvas-plan:additional:candidate-canvas",
+        acceptedBlockIds: ["canvas-block:standby-share"],
+        acceptedBlocks: [{
+          id: "canvas-block:standby-share",
+          visualization: "comparison",
+          bindings: [{ evidenceRef: "fact:standby-share", value: 31, unit: "%" }],
+        }],
+        rejections: [{
+          code: "EVIDENCE_BINDING_MISMATCH",
+          subjectId: "canvas-block:forged",
+        }],
+      });
+      expect(result.evidenceLineage.facts).toContainEqual(expect.objectContaining({
+        id: "fact:standby-share",
+        metricId: "energy.standby-share",
+        value: 31,
+        unit: "%",
+      }));
+    } finally {
+      harness.close();
+    }
+  });
+
   it("rejects a forged tool audit locally without losing its valid sibling", async () => {
     const harness = createHarness();
     try {
@@ -292,6 +343,50 @@ const candidate = (
   evidenceRefs: [evidenceRef],
   toolAuditIds: [],
   ...overrides,
+});
+
+const canvasPlan = (input: { candidateId: string; title: string; text: string }) => ({
+  identity: {
+    workspaceId: PRESCHOOL_WORKSPACE_ID,
+    projectId: "preschool-demo",
+    scopeId: "preschool-project",
+    dataSnapshotId: "snapshot-current",
+    projectReleaseId: "release-current",
+  },
+  finding: {
+    id: input.candidateId,
+    title: input.title,
+    text: input.text,
+    evidenceRefs: ["fact:standby-share"],
+    visualNeeded: true,
+  },
+  investigatorBlocks: [{
+    id: "canvas-block:standby-share",
+    kind: "quantitative",
+    visualization: "comparison",
+    title: "Standby share",
+    bindings: [{
+      evidenceRef: "fact:standby-share",
+      entityId: "preschool-project",
+      metricId: "energy.standby-share",
+      value: 31,
+      unit: "%",
+    }],
+  }, {
+    id: "canvas-block:forged",
+    kind: "quantitative",
+    visualization: "trend",
+    title: "Forged trend",
+    bindings: [{
+      evidenceRef: "fact:standby-share",
+      entityId: "preschool-project",
+      metricId: "energy.standby-share",
+      value: 999,
+      unit: "%",
+    }],
+  }],
+  presentationGapRequests: [],
+  editorPlan: { orderedBlockIds: ["canvas-block:standby-share", "canvas-block:forged"] },
 });
 
 const catalog = (): AnalysisContextEvidenceCatalog => ({

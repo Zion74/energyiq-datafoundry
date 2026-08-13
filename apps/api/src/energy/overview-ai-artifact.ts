@@ -46,12 +46,13 @@ export type PreschoolOverviewAiValueArtifactIdentity = EnergyIqOverviewAiArtifac
 
 export type PreschoolAdditionalAiInsightArtifactIdentity = EnergyIqOverviewAiArtifactIdentity & {
   artifactKind: "autonomous-insights";
-  identityContractRevision: "additional-insights-v1";
+  identityContractRevision: "additional-insights-v2";
   methodSetId: "preschool-additional-insights-current";
   methodSetRevision: "v1";
   methodSetFingerprint: string;
   capabilityRevision: "scoped-read-only-v1";
-  publicationRevision: "additional-insights-v1";
+  publicationRevision: "additional-insights-v2";
+  canvasRevision: "energyiq-insight-canvas-v2";
 };
 
 const OVERVIEW_AI_CONTRACTS: Readonly<Record<string, OverviewAiContract>> = {
@@ -109,21 +110,22 @@ export const createPreschoolAdditionalAiInsightArtifactIdentity = (input: {
   return {
     ...input.baseIdentity,
     artifactKind: "autonomous-insights",
-    identityContractRevision: "additional-insights-v1",
+    identityContractRevision: "additional-insights-v2",
     analysisPackId: "preschool-additional-insights-pack",
     analysisPackRevision: "v1",
-    outputContractRevision: "energyiq-additional-ai-insights-v1",
-    validatorRevision: "additional-insights-acceptance-v1",
-    workflowRevision: "additional-insights-discover-accept-publish-v1",
-    investigatorPromptRevision: "additional-insights-discovery-v1",
-    editorPromptRevision: "additional-insights-publication-v1",
+    outputContractRevision: "energyiq-additional-ai-insights-v2",
+    validatorRevision: "additional-insights-acceptance-v2",
+    workflowRevision: "additional-insights-discover-accept-publish-v2",
+    investigatorPromptRevision: "additional-insights-discovery-v2",
+    editorPromptRevision: "additional-insights-publication-v2",
     methodSkillId: "energyiq-open-discovery",
     methodSkillRevision: "1.0.0",
     methodSetId: CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_ID,
     methodSetRevision: CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_REVISION,
     methodSetFingerprint: `sha256:${createHash("sha256").update(canonicalMethods).digest("hex")}`,
     capabilityRevision: "scoped-read-only-v1",
-    publicationRevision: "additional-insights-v1",
+    publicationRevision: "additional-insights-v2",
+    canvasRevision: "energyiq-insight-canvas-v2",
   };
 };
 

@@ -119,7 +119,7 @@ describe("composePreschoolOverviewAiReadModel", () => {
           artifactId: artifact.id,
           result: {
             artifactKind: "autonomous-insights",
-            contract: { revision: "energyiq-additional-ai-insights-v1" },
+            contract: { revision: "energyiq-additional-ai-insights-v2" },
           },
         },
       });
@@ -643,8 +643,13 @@ const currentAdditionalResult = (
     },
     facts: [{
       id: "evidence:additional:1",
+      label: "Additional Evidence",
+      metricId: "energy.additional",
+      value: 1,
+      unit: "kWh",
       status: "confirmed",
       evidenceRefs: ["snapshot-evidence:additional:1"],
+      dimensions: { scopeId: artifactIdentity.scopeId },
     }],
   },
   findings: [{

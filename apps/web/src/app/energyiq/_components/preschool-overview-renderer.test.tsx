@@ -126,6 +126,32 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup).not.toContain("Restored cross-section timing pattern");
   });
 
+  it("places current Additional AI Insights after Section 5 and keeps the deterministic Overview when it is unavailable", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    const savedAiArtifact = savedV4AiArtifact(snapshot);
+    if (savedAiArtifact.contract !== "energyiq-saved-ai-result@2") throw new Error("v4 saved fixture missing");
+    Object.assign(savedAiArtifact.result, {
+      additional: { status: "unavailable", artifactId: "additional-v2", reason: "ADDITIONAL_FAILED" },
+    });
+
+    const markup = renderToStaticMarkup(
+      <PreschoolOverviewRenderer
+        state={{ status: "ready", snapshot }}
+        aiSlotMode="saved"
+        savedAiArtifact={savedAiArtifact}
+      />,
+    );
+
+    expect(markup).toContain("Energy Review");
+    expect(markup).toContain("Restored cross-section timing pattern");
+    expect(markup).toContain("Monthly Energy Outlook");
+    expect(markup).toContain("Additional AI Insights");
+    expect(markup).toContain("Additional insights unavailable");
+    expect(markup).toContain("Centre detail");
+    expect(markup.indexOf("Monthly Energy Outlook")).toBeLessThan(markup.indexOf("Additional AI Insights"));
+    expect(markup.indexOf("Additional AI Insights")).toBeLessThan(markup.indexOf("Centre detail"));
+  });
+
   it.each([
     {
       name: "Snapshot",

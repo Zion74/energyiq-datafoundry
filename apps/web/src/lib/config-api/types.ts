@@ -1,4 +1,4 @@
-import type { EvidenceRef } from "@datafoundry/contracts";
+import type { AdditionalAiInsightsArtifact, EvidenceRef } from "@datafoundry/contracts";
 
 export type ApiErrorCode =
   | "BAD_REQUEST"
@@ -2092,6 +2092,7 @@ export type PreschoolOverviewAiReadModelDto = {
   binding: PreschoolOverviewAiBindingDto;
   sections: Record<PreschoolOverviewAiSectionIdDto, PreschoolOverviewAiUnitStatusDto<PreschoolSectionInterpretationResultDto>>;
   executive: PreschoolOverviewAiUnitStatusDto<PreschoolExecutiveSynthesisResultDto>;
+  additional?: PreschoolOverviewAiUnitStatusDto<AdditionalAiInsightsArtifact>;
   autonomous?: unknown;
 };
 
