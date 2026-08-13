@@ -1336,35 +1336,68 @@ describe("Preschool AI Run", () => {
     expect(result.status).toBe("available");
   });
 
-  it("single-flights identical page identities through the server ensure endpoint", async () => {
+  it("keeps a missing exact Overview Artifact read-only instead of calling ensure, retry, or Provider", async () => {
     const input = requiredInput();
-    const available = sharedArtifactFixture(input, "run-editor-shared");
     const readSpy = vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockResolvedValue({
       status: "missing",
       dataSnapshotId: input.snapshotId,
       projectReleaseId: input.projectReleaseId,
     });
     const ensureSpy = vi.spyOn(configApi, "ensureEnergyOverviewAiArtifact").mockResolvedValue({
-      id: "artifact-test",
-      status: "available",
+      id: "artifact-must-not-be-created",
+      status: "failed",
       dataSnapshotId: input.snapshotId,
       projectReleaseId: input.projectReleaseId,
-      result: available,
+      attemptCount: 2,
     });
-    const progress: PreschoolAiProgress[] = [];
-    const first = getOrStartPreschoolAiRun(input, (stage) => progress.push(stage));
-    const second = getOrStartPreschoolAiRun(input);
-    expect(first).toBe(second);
-    await expect(first).resolves.toMatchObject({ status: "available" });
+    const retrySpy = vi.spyOn(configApi, "retryEnergyOverviewAiArtifact");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getOrStartPreschoolAiRun(input)).resolves.toMatchObject({ status: "unavailable" });
+
     expect(readSpy).toHaveBeenCalledTimes(1);
-    expect(ensureSpy).toHaveBeenCalledTimes(1);
-    expect(ensureSpy).toHaveBeenCalledWith(input.projectId, input.scopeId, {
-      from: input.analysisFrom,
-      to: input.analysisTo,
+    expect(ensureSpy).not.toHaveBeenCalled();
+    expect(retrySpy).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("polls a queued exact Overview Artifact with GET only until the stored result becomes available", async () => {
+    const input = requiredInput();
+    const available = sharedArtifactFixture(input, "run-editor-queued");
+    const readSpy = vi.spyOn(configApi, "getEnergyOverviewAiArtifact")
+      .mockResolvedValueOnce({
+        id: "artifact-queued",
+        status: "queued",
+        dataSnapshotId: input.snapshotId,
+        projectReleaseId: input.projectReleaseId,
+      })
+      .mockResolvedValue({
+        id: "artifact-queued",
+        status: "available",
+        dataSnapshotId: input.snapshotId,
+        projectReleaseId: input.projectReleaseId,
+        result: available,
+      });
+    const ensureSpy = vi.spyOn(configApi, "ensureEnergyOverviewAiArtifact").mockResolvedValue({
+      id: "artifact-queued",
+      status: "queued",
       dataSnapshotId: input.snapshotId,
       projectReleaseId: input.projectReleaseId,
     });
-    expect(progress).toEqual(["inspecting", "querying", "validating", "drafting"]);
+    const retrySpy = vi.spyOn(configApi, "retryEnergyOverviewAiArtifact");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getOrStartPreschoolAiRun(input)).resolves.toMatchObject({
+      status: "available",
+      runId: "run-editor-queued",
+    });
+
+    expect(readSpy).toHaveBeenCalledTimes(2);
+    expect(ensureSpy).not.toHaveBeenCalled();
+    expect(retrySpy).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("lets two client identities share one server-owned two-stage Provider execution", async () => {
@@ -1431,6 +1464,45 @@ describe("Preschool AI Run", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("expires an aggregate read model that stays internally pending and lets a later mount read again", async () => {
+    vi.useFakeTimers();
+    const input = requiredInput();
+    const pending = sectionedArtifactFixture(input);
+    pending.sections["standby-wastage"] = { status: "running" };
+    let stored = pending;
+    const readSpy = vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockImplementation(async () => ({
+      id: "aggregate-read-model",
+      status: "available",
+      dataSnapshotId: input.snapshotId,
+      projectReleaseId: input.projectReleaseId,
+      result: stored,
+    }));
+    const ensureSpy = vi.spyOn(configApi, "ensureEnergyOverviewAiArtifact");
+    const retrySpy = vi.spyOn(configApi, "retryEnergyOverviewAiArtifact");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const first = getOrStartPreschoolAiRun(input);
+    await vi.advanceTimersByTimeAsync(13 * 60 * 1_000);
+
+    await expect(first).resolves.toEqual({
+      status: "unavailable",
+      reason: "AI analysis is temporarily unavailable. The verified Overview remains available.",
+      retryable: true,
+    });
+    const readsAtDeadline = readSpy.mock.calls.length;
+    stored = sectionedArtifactFixture(input);
+
+    await expect(getOrStartPreschoolAiRun(input)).resolves.toMatchObject({
+      artifactKind: "preschool-overview-ai-read-model",
+      status: "available",
+    });
+    expect(readSpy.mock.calls.length).toBeGreaterThan(readsAtDeadline);
+    expect(ensureSpy).not.toHaveBeenCalled();
+    expect(retrySpy).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("restores the shared current Artifact without reading a user-owned Session or starting Provider", async () => {
     const input = requiredInput();
     const available = sharedArtifactFixture(input, "run-editor-shared");
@@ -1479,6 +1551,29 @@ describe("Preschool AI Run", () => {
     });
     expect(ensureSpy).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("leaves Saved Analysis AI absent when its exact Artifact is missing without calling ensure", async () => {
+    const input = requiredInput();
+    const readSpy = vi.spyOn(configApi, "getEnergyOverviewAiArtifact").mockResolvedValue({
+      status: "missing",
+      dataSnapshotId: input.snapshotId,
+      projectReleaseId: input.projectReleaseId,
+    });
+    const ensureSpy = vi.spyOn(configApi, "ensureEnergyOverviewAiArtifact").mockResolvedValue({
+      id: "saved-artifact-must-not-be-created",
+      status: "failed",
+      dataSnapshotId: input.snapshotId,
+      projectReleaseId: input.projectReleaseId,
+      attemptCount: 2,
+    });
+    const retrySpy = vi.spyOn(configApi, "retryEnergyOverviewAiArtifact");
+
+    await expect(runSavedAnalysisAiForSnapshot(preschoolGoldenSnapshot())).resolves.toBeNull();
+
+    expect(readSpy).toHaveBeenCalledTimes(1);
+    expect(ensureSpy).not.toHaveBeenCalled();
+    expect(retrySpy).not.toHaveBeenCalled();
   });
 
   it("uses the explicit server retry endpoint without submitting canonical content", async () => {

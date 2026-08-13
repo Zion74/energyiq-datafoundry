@@ -20,6 +20,7 @@ import { configApi } from "../../../lib/config-api";
 import { buildEnergyTemplateRenderPlan } from "./energy-template-render-plan";
 import * as ngeeAnnAiRun from "./ngee-ann-ai-run";
 import { ngeeAnnGoldenSnapshot } from "./ngee-ann-overview.test-fixture";
+import { resetPreschoolAiRunsForTests } from "./preschool-ai-run";
 import { preschoolGoldenSnapshot } from "./preschool-overview.test-fixture";
 import {
   currentOverviewUrlWithView,
@@ -81,6 +82,7 @@ describe("published Overview URL reload", () => {
     vi.spyOn(configApi, "ensureEnergyOverviewAiArtifact").mockResolvedValue(isolatedAiArtifact);
     vi.spyOn(configApi, "retryEnergyOverviewAiArtifact").mockResolvedValue(isolatedAiArtifact);
     ngeeAnnAiRun.resetNgeeAnnAiRunsForTests();
+    resetPreschoolAiRunsForTests();
     vi.spyOn(ngeeAnnAiRun, "getOrStartNgeeAnnAiRun").mockResolvedValue({
       status: "unavailable",
       reason: "Test AI unavailable.",
@@ -428,6 +430,69 @@ describe("published Overview URL reload", () => {
       from: "2026-05-01",
       to: "2026-05-31",
     }, { bypassCache: true });
+  });
+
+  it("shows the deterministic Preschool Overview while AI restore is pending and never starts AI on hard remount", async () => {
+    const preschool = project("preschool-demo", "Preschool Portfolio");
+    mockedAccess.activeProject = preschool;
+    mockedAccess.access = accessContext([preschool]);
+    window.history.replaceState(
+      {},
+      "",
+      "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Custom&from=2026-05-01&to=2026-05-31&grain=day&comparison=overlay&category=all",
+    );
+    const snapshot = dashboardNgeeAnnSnapshot(preschoolGoldenSnapshot());
+    vi.spyOn(configApi, "resolveProjectAnalysis").mockResolvedValue({ status: "ready", snapshot });
+    type OverviewAiArtifact = Awaited<ReturnType<typeof configApi.getEnergyOverviewAiArtifact>>;
+    let resolveAiRestore!: (artifact: OverviewAiArtifact) => void;
+    const deferredAiRestore = new Promise<OverviewAiArtifact>((resolve) => {
+      resolveAiRestore = resolve;
+    });
+    const readSpy = vi.mocked(configApi.getEnergyOverviewAiArtifact).mockReturnValue(deferredAiRestore);
+    const ensureSpy = vi.mocked(configApi.ensureEnergyOverviewAiArtifact);
+    const retrySpy = vi.mocked(configApi.retryEnergyOverviewAiArtifact);
+
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+    });
+
+    expect(container.textContent).toContain("Overall metrics");
+    expect(container.textContent).toContain("At a glance");
+    for (const sectionId of [
+      "preschool-benchmark-analysis",
+      "preschool-standby-wastage",
+      "preschool-operating-hours",
+      "preschool-monthly-outlook",
+    ]) expect(container.querySelector(`#${sectionId}`)).not.toBeNull();
+    expect(container.textContent).toContain("Loading saved AI summary…");
+
+    await act(async () => {
+      resolveAiRestore({
+        status: "missing",
+        dataSnapshotId: snapshot.context.dataSnapshotId,
+        projectReleaseId: snapshot.projectRelease.id,
+      });
+      await Promise.resolve();
+    });
+
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    resetPreschoolAiRunsForTests();
+    readSpy.mockResolvedValue({
+      status: "missing",
+      dataSnapshotId: snapshot.context.dataSnapshotId,
+      projectReleaseId: snapshot.projectRelease.id,
+    });
+    await act(async () => {
+      root.render(React.createElement(PublishedDecisionDashboard));
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain("Overall metrics");
+    expect(container.textContent).toContain("At a glance");
+    expect(readSpy).toHaveBeenCalledTimes(2);
+    expect(ensureSpy).not.toHaveBeenCalled();
+    expect(retrySpy).not.toHaveBeenCalled();
   });
 
   it.each([

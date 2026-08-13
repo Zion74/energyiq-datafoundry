@@ -269,13 +269,21 @@ export function getOrStartPreschoolAiRun(
     run.progress = progress;
     for (const listener of run.listeners) listener(progress);
   };
-  run.promise = restoreOrExecutePreschoolAiRun(input, report).catch((error: unknown) => ({
-    status: "unavailable" as const,
-    reason: friendlyReason(error instanceof Error ? error.message : "AI Analyst unavailable."),
-  })).finally(() => {
-    run.settled = true;
-    run.listeners.clear();
-  });
+  run.promise = restoreOrExecutePreschoolAiRun(input, report)
+    .catch((error: unknown) => ({
+      status: "unavailable" as const,
+      reason: friendlyReason(error instanceof Error ? error.message : "AI Analyst unavailable."),
+    }))
+    .then((result) => {
+      if (isRefreshableUnavailable(result) && currentRuns.get(input.identityKey) === run) {
+        currentRuns.delete(input.identityKey);
+      }
+      return result;
+    })
+    .finally(() => {
+      run.settled = true;
+      run.listeners.clear();
+    });
   currentRuns.set(input.identityKey, run);
   return run.promise;
 }
@@ -286,11 +294,8 @@ async function restoreOrExecutePreschoolAiRun(
 ): Promise<PreschoolAiRunResult> {
   onProgress?.("inspecting");
   const pin = overviewAiArtifactPin(input);
-  let artifact = await configApi.getEnergyOverviewAiArtifact(input.projectId, input.scopeId, pin);
-  if (artifact.status === "missing" || artifact.status === "queued") {
-    onProgress?.("querying");
-    artifact = await configApi.ensureEnergyOverviewAiArtifact(input.projectId, input.scopeId, pin);
-  }
+  const artifact = await configApi.getEnergyOverviewAiArtifact(input.projectId, input.scopeId, pin);
+  if (artifact.status === "missing") return { status: "unavailable", reason: FRIENDLY_UNAVAILABLE };
   if (artifact.status === "available") {
     const shared = acceptedSharedPreschoolAiArtifact(input, artifact);
     if (!shared) return { status: "unavailable", reason: FRIENDLY_UNAVAILABLE };
@@ -351,6 +356,10 @@ export async function retryPreschoolAiRun(
 }
 
 function cacheSettledPreschoolAiRun(identityKey: string, result: PreschoolAiRunResult): PreschoolAiRunResult {
+  if (isRefreshableUnavailable(result)) {
+    currentRuns.delete(identityKey);
+    return result;
+  }
   currentRuns.set(identityKey, {
     promise: Promise.resolve(result),
     progress: result.status === "available" ? "drafting" : "inspecting",
@@ -359,6 +368,11 @@ function cacheSettledPreschoolAiRun(identityKey: string, result: PreschoolAiRunR
   });
   return result;
 }
+
+const isRefreshableUnavailable = (
+  result: PreschoolAiRunResult,
+): result is Extract<PreschoolAiRunResult, { status: "unavailable" }> & { retryable: true } =>
+  result.status === "unavailable" && result.retryable === true;
 
 function acceptedSharedPreschoolAiArtifact(
   input: PreschoolAiRunInput,
@@ -384,7 +398,6 @@ async function waitForSharedPreschoolAiArtifact(
   onProgress?: ProgressCallback,
 ): Promise<PreschoolAiRunResult> {
   const deadline = Date.now() + SHARED_ARTIFACT_WAIT_TIMEOUT_MS;
-  let lastPending: PreschoolAiSectionedRunResult | null = null;
   while (Date.now() < deadline) {
     const artifact = await configApi.getEnergyOverviewAiArtifact(
       input.projectId,
@@ -392,14 +405,10 @@ async function waitForSharedPreschoolAiArtifact(
       overviewAiArtifactPin(input),
     );
     const accepted = acceptedSharedPreschoolAiArtifact(input, artifact);
-    if (accepted) {
-      if (isPendingPreschoolSectionedReadModel(accepted)) {
-        lastPending = accepted;
-      } else {
-        onProgress?.("validating");
-        onProgress?.("drafting");
-        return accepted;
-      }
+    if (accepted && !isPendingPreschoolSectionedReadModel(accepted)) {
+      onProgress?.("validating");
+      onProgress?.("drafting");
+      return accepted;
     }
     if (!accepted && (artifact.status === "available" || artifact.status === "failed")) {
       return {
@@ -412,7 +421,7 @@ async function waitForSharedPreschoolAiArtifact(
     if (remaining <= 0) break;
     await new Promise<void>((resolve) => setTimeout(resolve, Math.min(SHARED_ARTIFACT_POLL_MS, remaining)));
   }
-  return lastPending ?? { status: "unavailable", reason: FRIENDLY_UNAVAILABLE, retryable: true };
+  return { status: "unavailable", reason: FRIENDLY_UNAVAILABLE, retryable: true };
 }
 
 function overviewAiArtifactPin(input: PreschoolAiRunInput): {
