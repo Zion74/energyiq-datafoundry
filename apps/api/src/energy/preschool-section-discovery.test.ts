@@ -57,6 +57,8 @@ describe("Preschool Section discovery", () => {
       omittedEvidenceCount: 0,
     });
     expect(projection.evidence[0]?.evidenceRefs).toEqual(["evidence:planning-outlook:portfolio-scale"]);
+    const originalScopes = (pack.evidence[0]?.value as { forecast: { scopes: unknown[] } }).forecast.scopes;
+    expect(decodePlanningScopes(planningValue.forecast.scopes)).toEqual(originalScopes);
     for (const scopeId of [
       "preschool-project",
       ...Array.from({ length: 30 }, (_, index) => `centre-${index + 1}`),
@@ -173,9 +175,9 @@ const portfolioScalePlanningPack = (): PreschoolSectionPackV2 => {
     const portfolio = index === 0;
     const scopeId = portfolio ? "preschool-project" : `centre-${index}`;
     const buckets = {
-      daily: Array.from({ length: 30 }, (_, day) => planningBucket(day + 1, "day")),
-      weekly: Array.from({ length: 5 }, (_, week) => planningBucket(week + 1, "week")),
-      monthly: [planningBucket(1, "month")],
+      daily: Array.from({ length: 30 }, (_, day) => planningBucket(index, day + 1, "day")),
+      weekly: Array.from({ length: 5 }, (_, week) => planningBucket(index, week + 1, "week")),
+      monthly: [planningBucket(index, 1, "month")],
     };
     return {
       scopeId,
@@ -210,12 +212,63 @@ const portfolioScalePlanningPack = (): PreschoolSectionPackV2 => {
         timezone: "Asia/Singapore",
         targetDayCount: 30,
       },
+      planIdentity: {
+        lifecycleContract: { id: "preschool-saved-plan-current-actual", version: "2" },
+        planningContract: {
+          id: "preschool-monthly-naive-weekly-baseline",
+          version: "2",
+          method: "mean of four complete Monday-Sunday weeks",
+        },
+        savedAnalysisId: "saved-plan-may-2026",
+        dataSnapshotId: "snapshot-plan",
+        projectReleaseId: "release-1",
+        templateRevisionId: "template-1",
+        queryId: "daily_totals_v1",
+        recipeId: "preschool-naive-weekly-planning-baseline-v1",
+      },
       plan: {
         usageEstimate: { projectedKwh: 31_000, lowerKwh: 29_000, upperKwh: 33_000 },
         costEstimate: { projectedBeforeGstSgd: 9_300 },
       },
-      actual: { status: "partial", usageKwh: 12_000, completeDayCount: 10, targetDayCount: 30 },
-      forecast: { status: "partial", scopes },
+      planBasis: {
+        targetPeriod: { start: "2026-06-01", endInclusive: "2026-06-30", days: 30 },
+        sourceWeeks: Array.from({ length: 4 }, (_, index) => ({
+          start: `2026-05-${String(4 + index * 7).padStart(2, "0")}`,
+          endInclusive: `2026-05-${String(10 + index * 7).padStart(2, "0")}`,
+          usageKwh: 7_123.456789012345 + index,
+        })),
+        weeklyBaseline: { averageKwh: 7_125.123456789012, minimumKwh: 7_100.123456789012, maximumKwh: 7_150.123456789012 },
+        planningTariffReference: null,
+        evidence: { dataSnapshotId: "snapshot-plan", queryId: "daily_totals_v1", recipeId: "preschool-naive-weekly-planning-baseline-v1" },
+        limitations: ["The estimate uses a simple weekly baseline."],
+      },
+      limitations: ["The estimate uses a simple weekly baseline."],
+      actual: {
+        status: "partial",
+        usageKwh: 12_000.123456789012,
+        completeDayCount: 10,
+        targetDayCount: 30,
+        provenance: {
+          dataSnapshotId: "snapshot-1",
+          projectReleaseId: "release-1",
+          queryId: "daily_totals_v1",
+          period: { start: "2026-06-01", endExclusive: "2026-06-11", timezone: "Asia/Singapore" },
+        },
+      },
+      forecast: {
+        status: "partial",
+        contract: { id: "preschool-monthly-energy-outlook", version: "2", method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total" },
+        targetPeriod: { start: "2026-06-01", endExclusive: "2026-07-01", timezone: "Asia/Singapore", targetDayCount: 30 },
+        tariffBoundary: { status: "unavailable", reason: "No published tariff covers the full target period." },
+        evidence: {
+          planDataSnapshotId: "snapshot-plan",
+          actualDataSnapshotId: "snapshot-1",
+          planQueryId: "daily_totals_v1",
+          actualQueryId: "daily_totals_v1",
+          recipeId: "preschool-weekday-mean-series-v1",
+        },
+        scopes,
+      },
     },
     unit: "kWh, %, SGD before GST",
     entityRefs: scopes.map(({ scopeId }) => scopeId),
@@ -224,16 +277,66 @@ const portfolioScalePlanningPack = (): PreschoolSectionPackV2 => {
   return pack;
 };
 
-const planningBucket = (ordinal: number, grain: "day" | "week" | "month") => ({
-  start: `2026-06-${String(Math.min(ordinal, 30)).padStart(2, "0")}`,
-  endExclusive: `2026-07-${String(Math.min(ordinal, 30)).padStart(2, "0")}`,
-  grain,
-  estimatedKwh: 100 + ordinal,
-  originalEstimateKwh: 100 + ordinal,
-  actualKwh: null,
-  currentOutlookKwh: null,
-  futureOutlookKwh: null,
-  actualCompleteDayCount: 0,
-  actualTargetDayCount: 1,
-  actualStatus: "waiting",
-});
+const planningBucket = (
+  scopeIndex: number,
+  ordinal: number,
+  grain: "day" | "week" | "month",
+) => {
+  const estimatedKwh = 100.1234567890123 + scopeIndex * 3.1234567890123 + ordinal / 7;
+  const actualComplete = grain === "day" && ordinal <= 10;
+  return {
+    start: grain === "month"
+      ? "2026-06-01"
+      : `2026-06-${String(Math.min(ordinal, 30)).padStart(2, "0")}`,
+    endExclusive: grain === "month"
+      ? "2026-07-01"
+      : `2026-06-${String(Math.min(ordinal + 1, 30)).padStart(2, "0")}`,
+    estimatedKwh,
+    originalEstimateKwh: estimatedKwh,
+    actualKwh: actualComplete ? estimatedKwh * 1.123456789 : null,
+    currentOutlookKwh: actualComplete ? estimatedKwh * 1.0617283945 : null,
+    futureOutlookKwh: actualComplete ? 0 : null,
+    actualCompleteDayCount: actualComplete ? 1 : 0,
+    actualTargetDayCount: grain === "day" ? 1 : grain === "week" ? 7 : 30,
+    actualStatus: actualComplete ? "complete" : "waiting",
+  };
+};
+
+const decodePlanningScopes = (projection: {
+  scopeCount: number;
+  scopeTables: unknown[];
+  bucketTables: unknown[];
+}): unknown[] => {
+  const scopes = Array.from({ length: projection.scopeCount }, () => ({ buckets: {} as Record<string, unknown[]> }));
+  for (const value of projection.scopeTables) {
+    const table = value as EncodedTable;
+    for (const row of table.rows) {
+      const [scopeIndex, ...cells] = row;
+      Object.assign(scopes[Number(scopeIndex)]!, decodeTableRow(table, cells));
+    }
+  }
+  for (const value of projection.bucketTables) {
+    const table = value as EncodedTable & { grain: string };
+    for (const row of table.rows) {
+      const [scopeIndex, bucketIndex, ...cells] = row;
+      const buckets = scopes[Number(scopeIndex)]!.buckets;
+      const grainBuckets = buckets[table.grain] ?? [];
+      grainBuckets[Number(bucketIndex)] = decodeTableRow(table, cells);
+      buckets[table.grain] = grainBuckets;
+    }
+  }
+  return scopes;
+};
+
+type EncodedTable = {
+  columns: string[];
+  constants?: Record<string, unknown>;
+  rows: unknown[][];
+};
+
+const decodeTableRow = (table: EncodedTable, cells: unknown[]): Record<string, unknown> => {
+  return {
+    ...(table.constants ?? {}),
+    ...Object.fromEntries(table.columns.map((column, index) => [column, cells[index]])),
+  };
+};

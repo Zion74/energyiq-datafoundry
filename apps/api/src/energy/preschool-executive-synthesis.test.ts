@@ -1,10 +1,14 @@
 import { createMetadataStore, type EnergyIqOverviewAiArtifactIdentity } from "@datafoundry/metadata";
+import type { AnalysisContextEvidenceCatalog } from "@datafoundry/agent-runtime";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createPreschoolExecutiveSynthesizer } from "./preschool-executive-synthesis.js";
+import {
+  createPreschoolExecutiveSynthesizer,
+  MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS,
+} from "./preschool-executive-synthesis.js";
 import { PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4 } from "./preschool-overview-ai-structured-output.js";
 import {
   createOverviewAiArtifactIdentity,
@@ -363,6 +367,71 @@ describe("Preschool Executive Synthesis", () => {
     });
   });
 
+  it("losslessly projects two accepted Sections and the full Overview fact catalog before calling the Provider", async () => {
+    const harness = createHarness();
+    const benchmark = completeSectionV4(harness, "centre-benchmark");
+    const operating = completeSectionV4(harness, "operating-behaviour");
+    const catalog = portfolioScaleOverviewEvidenceCatalog(harness.identity);
+    expect(JSON.stringify(catalog).length).toBeGreaterThan(MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS);
+    let prompt = "";
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      revision: "v4",
+      authoritativeOverviewEvidence: {
+        binding: preschoolOverviewAiBindingFromIdentity(harness.identity),
+        catalog,
+      },
+      runSynthesis: async (input) => {
+        prompt = input.prompt;
+        return {
+          answer: JSON.stringify({
+            status: "available",
+            summary: {
+              text: "Benchmark and operating evidence point to a focused portfolio review.",
+              evidenceRefs: ["evidence:centre-benchmark:summary", "evidence:operating-behaviour:summary"],
+            },
+            findings: [{
+              title: "One cross-Section pattern stands out",
+              text: "The accepted benchmark and operating insights point in the same direction.",
+              sectionIds: ["centre-benchmark", "operating-behaviour"],
+              evidenceRefs: ["evidence:centre-benchmark:insight", "evidence:operating-behaviour:insight"],
+            }],
+          }),
+          runId: input.runId,
+          sessionId: input.sessionId,
+        };
+      },
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+    expect(prompt.length).toBeLessThanOrEqual(MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS);
+    expect(prompt).toContain(benchmark.id);
+    expect(prompt).toContain(operating.id);
+    for (let index = 0; index < catalog.facts.length; index += 1) {
+      expect(prompt).toContain(catalog.facts[index]!.id);
+    }
+    expect(prompt).toContain("evidence:overview:scope-summary");
+    expect(prompt).toContain("cite its fact-row id as the evidenceRef");
+    expect(prompt).toContain("sourceArtifactId and encoding indexes are provenance only; never repeat them in customer text");
+    const acceptedProjection = JSON.parse(prompt.split("Accepted Sections: ")[1]!.split("\n\nAuthoritative Overview Evidence: ")[0]!);
+    expect(decodeAcceptedSectionProjection(acceptedProjection)).toEqual([
+      { sourceArtifactId: benchmark.id, result: JSON.parse(benchmark.result_json!) },
+      { sourceArtifactId: operating.id, result: JSON.parse(operating.result_json!) },
+    ].map(({ sourceArtifactId, result }) => ({
+      sourceArtifactId,
+      sectionId: result.sectionId,
+      summary: result.summary,
+      insights: result.insights,
+    })));
+    const overviewProjection = JSON.parse(prompt.split("Authoritative Overview Evidence: ")[1]!);
+    expect(decodeOverviewEvidenceProjection(overviewProjection)).toEqual(catalog);
+    expect(JSON.parse(artifact.result_json!)).toMatchObject({
+      sourceSectionArtifactIds: [benchmark.id, operating.id],
+    });
+  });
+
   it("rejects a Key Finding whose Evidence belongs to a different current-v4 Section", async () => {
     const harness = createHarness();
     const benchmark = completeSectionV4(harness, "centre-benchmark");
@@ -618,6 +687,131 @@ const sectionTools = (sectionId: PreschoolSectionId) => {
   }
   return ["inspect_related_section_signals"] as const;
 };
+
+const portfolioScaleOverviewEvidenceCatalog = (
+  identity: ReturnType<typeof createOverviewAiArtifactIdentity>,
+): AnalysisContextEvidenceCatalog => ({
+  contract: "analysis-context-evidence@1",
+  sourceId: `project-analysis-snapshot:${identity.projectId}:${identity.dataSnapshotId}`,
+  pins: {
+    workspaceId: identity.workspaceId,
+    projectId: identity.projectId,
+    scopeId: identity.scopeId,
+    dataSnapshotId: identity.dataSnapshotId,
+    dataCutoff: "2026-05-31T23:45:00.000Z",
+    projectReleaseId: identity.projectReleaseId,
+    metricVersion: "energy-v1",
+  },
+  facts: [
+    ...Array.from({ length: 31 }, (_, scopeIndex) => {
+    const scopeId = scopeIndex === 0 ? "preschool-project" : `centre-${scopeIndex}`;
+    const scopeName = scopeIndex === 0 ? "All centres" : `Centre ${scopeIndex}`;
+    return [
+      ["usage_kwh", "energy use", "energy.total_usage_kwh", 1_000.123456789 + scopeIndex, "kWh"],
+      ["share_pct", "share of portfolio energy", "energy.scope_share_pct", 3.123456789 + scopeIndex / 10, "%"],
+      ["eui", "annualised EUI", "preschool.benchmark.eui", 12.123456789 + scopeIndex / 10, "kWh/m2/year"],
+      ["per_pax", "May energy use per person", "preschool.benchmark.per_pax", 18.123456789 + scopeIndex / 10, "kWh/person/month"],
+      ["peak_kw", "peak interval-average power", "energy.peak_interval_average_kw", 7.123456789 + scopeIndex / 10, "kW"],
+      ["off_hours_kwh", "off-hours energy use", "energy.off_hours_usage_kwh", 100.123456789 + scopeIndex, "kWh"],
+      ["off_hours_share", "off-hours share", "energy.off_hours_share_pct", 12.123456789 + scopeIndex / 10, "%"],
+      ["change_pct", "change from previous period", "energy.period_change_pct", -3.123456789 + scopeIndex / 10, "%"],
+    ].map(([suffix, label, metricId, value, unit]) => ({
+      id: `fact:${scopeId}:${suffix}`,
+      label: `${scopeName} ${label}`,
+      metricId: String(metricId),
+      value: Number(value),
+      unit: String(unit),
+      status: scopeIndex === 0 ? "confirmed" as const : "provisional" as const,
+      evidenceRefs: [
+        "evidence:overview:scope-summary",
+        "query:scope_summary_v1",
+        "query:hourly_profile_v1",
+        "query:daily_totals_v1",
+        "query:peak_breakdown_v1",
+        "query:meter_breakdown_v1",
+        "query:previous_meter_usage_v1",
+        "query:operational_policy_scope_intervals_v1",
+      ],
+      dimensions: { scopeId, scopeName, scopeType: scopeIndex === 0 ? "project" : "centre" },
+    }));
+    }).flat(),
+    ...Array.from({ length: 29 }, (_, index) => ({
+      id: `fact:portfolio:category-${index + 1}`,
+      label: `Portfolio category ${index + 1} energy use`,
+      metricId: "energy.category_usage_kwh",
+      value: 200.123456789 + index,
+      unit: "kWh",
+      status: "confirmed" as const,
+      evidenceRefs: [
+        "evidence:overview:scope-summary",
+        "query:scope_summary_v1",
+        "query:hourly_profile_v1",
+        "query:daily_totals_v1",
+        "query:peak_breakdown_v1",
+        "query:meter_breakdown_v1",
+        "query:previous_meter_usage_v1",
+        "query:operational_policy_scope_intervals_v1",
+      ],
+      dimensions: { category: `category-${index + 1}` },
+    })),
+  ],
+});
+
+const decodeAcceptedSectionProjection = (projection: {
+  evidenceRefs: string[];
+  sections: Array<{
+    sourceArtifactId: string;
+    sectionId: string;
+    summary: { text: string; evidenceRefIndexes: number[] };
+    insights: Array<Record<string, unknown> & { evidenceRefIndexes: number[] }>;
+    limitation?: string;
+  }>;
+}) => projection.sections.map((section) => ({
+  sourceArtifactId: section.sourceArtifactId,
+  sectionId: section.sectionId,
+  summary: {
+    text: section.summary.text,
+    evidenceRefs: section.summary.evidenceRefIndexes.map((index) => projection.evidenceRefs[index]),
+  },
+  insights: section.insights.map(({ evidenceRefIndexes, ...insight }) => ({
+    ...insight,
+    evidenceRefs: evidenceRefIndexes.map((index) => projection.evidenceRefs[index]),
+  })),
+  ...(section.limitation ? { limitation: section.limitation } : {}),
+}));
+
+const decodeOverviewEvidenceProjection = (projection: {
+  contract: AnalysisContextEvidenceCatalog["contract"];
+  sourceId: string;
+  pins: AnalysisContextEvidenceCatalog["pins"];
+  dictionaries: {
+    metricIds: string[];
+    units: string[];
+    statuses: AnalysisContextEvidenceCatalog["facts"][number]["status"][];
+    evidenceRefs: string[];
+    evidenceSets: number[][];
+    dimensions: Array<Record<string, string>>;
+  };
+  factTable: { rows: unknown[][] };
+}): AnalysisContextEvidenceCatalog => ({
+  contract: projection.contract,
+  sourceId: projection.sourceId,
+  pins: projection.pins,
+  facts: projection.factTable.rows.map((row) => {
+    const [id, label, metricIdIndex, value, unitIndex, statusIndex, evidenceSetIndex, dimensionsIndex] = row;
+    return {
+      id: String(id),
+      label: String(label),
+      metricId: projection.dictionaries.metricIds[Number(metricIdIndex)]!,
+      value: value as string | number | boolean | null,
+      ...(Number(unitIndex) < 0 ? {} : { unit: projection.dictionaries.units[Number(unitIndex)]! }),
+      status: projection.dictionaries.statuses[Number(statusIndex)]!,
+      evidenceRefs: projection.dictionaries.evidenceSets[Number(evidenceSetIndex)]!
+        .map((index) => projection.dictionaries.evidenceRefs[index]!),
+      dimensions: projection.dictionaries.dimensions[Number(dimensionsIndex)]!,
+    };
+  }),
+});
 
 const failSectionV4 = (harness: ReturnType<typeof createHarness>, sectionId: PreschoolSectionId) => {
   const identity = sectionIdentityV4(harness.identity, sectionId);

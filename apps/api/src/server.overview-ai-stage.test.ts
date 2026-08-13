@@ -22,6 +22,7 @@ import {
 } from "./energy/preschool-overview-ai-structured-output.js";
 import { buildPreschoolSectionDiscoveryPrompt } from "./energy/preschool-section-interpreter.js";
 import type { PreschoolSectionPackV2 } from "./energy/preschool-section-pack-v2.js";
+import { MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS } from "./energy/preschool-executive-synthesis.js";
 
 describe("Overview AI server stage options", () => {
   it("keeps the investigator on the narrow Artifact path with DeepSeek thinking disabled", () => {
@@ -184,9 +185,13 @@ describe("Overview AI server stage options", () => {
       stage: "executive-synthesis",
       structuredOutput: PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4,
     });
+    expect(trusted).toEqual({
+      structuredOutput: PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4,
+      conversationMessageMaxChars: MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS,
+    });
     expect(resolveOverviewAiAgentRuntimeOptions("executive-synthesis", trusted)).toMatchObject({
       structuredOutput: PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4,
-      conversationMessageMaxChars: 24_000,
+      conversationMessageMaxChars: MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS,
     });
     expect(resolveOverviewAiAgentRuntimeOptions("executive-synthesis", undefined)).toMatchObject({
       structuredOutput: resolveOverviewAiStageStructuredOutput("executive-synthesis"),
@@ -432,6 +437,92 @@ describe("Overview AI server stage options", () => {
         workspaceRoot,
       });
       expect(Object.keys(await runtime.agent.listTools()).sort()).toEqual([...pack.capabilities.tools].sort());
+    } finally {
+      await runtime?.destroyWorkspace();
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("carries the bounded current-v4 Executive projection through the real governed runtime without Energy or SQL tools", async () => {
+    const identity = {
+      workspaceId: "preschool-demo-org",
+      projectId: "preschool-demo",
+      scopeId: "preschool-project",
+      resource: "electricity",
+      dataSnapshotId: "energy-snapshot-563f8939fd90dc2fbef0018a",
+      projectReleaseId: "preschool-demo-template-v2",
+      analysisPeriodFrom: "2026-04-30T16:00:00.000Z",
+      analysisPeriodTo: "2026-05-31T16:00:00.000Z",
+      rendererKey: "preschool-overview",
+      rendererVersion: "1",
+      analysisPackId: "preschool-executive-section-artifacts",
+      analysisPackRevision: "section-interpretation-v4",
+      modelProfileId: "workspace-default",
+      modelProfileRevision: 7,
+      outputContractRevision: "preschool-executive-synthesis-v4",
+      validatorRevision: "preschool-executive-synthesis-validator-v5",
+      workflowRevision: "preschool-executive-synthesis-v5",
+      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v5",
+      editorPromptRevision: "not-applicable-v1",
+      methodSkillId: "none",
+      methodSkillRevision: "not-applicable-v1",
+      artifactKind: "executive-synthesis" as const,
+      targetId: "sections:current-v4",
+    } as const satisfies EnergyIqOverviewAiArtifactIdentity;
+    const prompt = "E".repeat(MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS);
+    const input = buildOverviewAiStageRunInput({
+      stage: "executive-synthesis",
+      prompt,
+      identity,
+      workspaceId: identity.workspaceId,
+      user: {
+        id: "dev-user",
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-01T00:00:00.000Z",
+      },
+      runId: "executive-run-budget",
+      sessionId: "executive-session-budget",
+    });
+    expect(input.messages[0]?.content).toBe(prompt);
+    expect(input.forwardedProps).not.toHaveProperty("externalContext");
+
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "preschool-executive-runtime-budget-"));
+    let runtime: Awaited<ReturnType<typeof createDataFoundry>> | undefined;
+    try {
+      runtime = await createDataFoundry({
+        analysisRequirementsMode: "omit",
+        dataGateway: {} as never,
+        emitter: { emit: () => undefined },
+        excludedToolNames: ["inspect_schema", "run_sql_readonly", "protocol_handoff"],
+        explicitProtocol: { protocolId: "data-analysis", protocolVersion: "1" },
+        messages: input.messages,
+        modelProvider: {
+          kind: "openai-compatible",
+          model: "openai/test-model",
+          model_name: "test-model",
+          provider_id: "openai-compatible",
+        },
+        runContext: createDataFoundryRunContext({
+          user_id: "dev-user",
+          workspace_id: identity.workspaceId,
+          session_id: "executive-session-budget",
+          run_id: "executive-run-budget",
+          user_input: prompt,
+          chat_mode: "copilotkit",
+          model_name: "test-model",
+        }),
+        workspaceRoot,
+      });
+      const toolNames = Object.keys(await runtime.agent.listTools());
+      expect(toolNames).not.toEqual(expect.arrayContaining([
+        "inspect_schema",
+        "run_sql_readonly",
+        "protocol_handoff",
+        "compare_centres",
+        "inspect_time_pattern",
+        "inspect_load_composition",
+        "inspect_related_section_signals",
+      ]));
     } finally {
       await runtime?.destroyWorkspace();
       rmSync(workspaceRoot, { recursive: true, force: true });

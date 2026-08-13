@@ -33,7 +33,7 @@ import {
 import { resolveOverviewAiStageStructuredOutputV4 } from "./preschool-overview-ai-structured-output.js";
 
 const LEASE_MS = 3 * 60 * 1_000;
-const MAX_PROMPT_CHARS = 24_000;
+export const MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS = 64_000;
 const BANNED_INTERNAL_TEXT = /\b(?:parent_node_id|dataSnapshotId|projectReleaseId|SQL)\b/i;
 const SQL_STATEMENT = /\bSELECT\b[\s\S]{0,500}\b(?:FROM|JOIN)\b/i;
 const NUMBER_TOKEN = /(?<![A-Za-z0-9_-])-?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/g;
@@ -331,7 +331,7 @@ const buildExecutivePrompt = (accepted: AcceptedSection[]): string => {
       ...(result.limitation ? { limitation: result.limitation } : {}),
     })))}`,
   ].join("\n\n");
-  if (prompt.length > MAX_PROMPT_CHARS) throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_PROMPT_TOO_LARGE");
+  if (prompt.length > MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS) throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_PROMPT_TOO_LARGE");
   return prompt;
 };
 
@@ -346,20 +346,95 @@ const buildExecutivePromptV4 = (
     "Return one concise answer-first summary and 0-3 compact findings. A high-priority alert is optional and must be supported by the supplied Evidence.",
     "Narrative text may use only limited inline **bold** and _italics_; do not return headings, links, images, HTML, code, tables, or custom styling.",
     "Every summary and finding must cite exact evidenceRefs. Every finding must declare the exact contributing sectionIds.",
+    "Compact projections are lossless: resolve evidenceRefIndexes through evidenceRefs, and read Overview fact rows using their declared dictionaries and columns. Every accepted Insight and Overview fact is present. For an Overview fact, cite its fact-row id as the evidenceRef; its evidence set is provenance only.",
+    "sourceArtifactId and encoding indexes are provenance only; never repeat them in customer text.",
     "Return JSON only: {\"status\":\"available\"|\"empty\",\"summary\"?:{\"text\":string,\"evidenceRefs\":string[]},\"findings\":[{\"title\":string,\"text\":string,\"sectionIds\":string[],\"evidenceRefs\":string[],\"alert\"?:{\"severity\":\"attention\"|\"urgent\",\"certainty\":\"confirmed\"|\"anomaly\"|\"possible\"}}]}",
     `Binding: ${JSON.stringify(accepted[0]!.result.binding)}`,
-    `Accepted Sections: ${JSON.stringify(accepted.map(({ result }) => ({
-      sectionId: result.sectionId,
-      summary: result.summary,
-      insights: result.insights,
-      ...(result.limitation ? { limitation: result.limitation } : {}),
-    })))}`,
+    `Accepted Sections: ${JSON.stringify(projectAcceptedSectionsV4ForModel(accepted))}`,
     ...(authoritativeOverviewEvidence ? [
-      `Authoritative Overview Evidence: ${JSON.stringify(authoritativeOverviewEvidence.catalog)}`,
+      `Authoritative Overview Evidence: ${JSON.stringify(projectPreschoolExecutiveOverviewEvidenceForModel(authoritativeOverviewEvidence.catalog))}`,
     ] : []),
   ].join("\n\n");
-  if (prompt.length > MAX_PROMPT_CHARS) throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_PROMPT_TOO_LARGE");
+  if (prompt.length > MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS) throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_PROMPT_TOO_LARGE");
   return prompt;
+};
+
+const projectAcceptedSectionsV4ForModel = (accepted: AcceptedSectionV4[]) => {
+  const evidenceRefs = uniqueProjectionStrings(accepted.flatMap(({ result }) => [
+    ...result.summary.evidenceRefs,
+    ...result.insights.flatMap((insight) => insight.evidenceRefs),
+  ]));
+  const evidenceRefIndex = new Map(evidenceRefs.map((reference, index) => [reference, index]));
+  const indexes = (references: string[]) => references.map((reference) => evidenceRefIndex.get(reference)!);
+  return {
+    encoding: { id: "preschool-executive-section-projection", revision: "v1" },
+    evidenceRefs,
+    sections: accepted.map(({ artifactId, result }) => ({
+      sourceArtifactId: artifactId,
+      sectionId: result.sectionId,
+      summary: {
+        text: result.summary.text,
+        evidenceRefIndexes: indexes(result.summary.evidenceRefs),
+      },
+      insights: result.insights.map((insight) => ({
+        id: insight.id,
+        title: insight.title,
+        epistemicStatus: insight.epistemicStatus,
+        text: insight.text,
+        evidenceRefIndexes: indexes(insight.evidenceRefs),
+        ...(insight.label === undefined ? {} : { label: insight.label }),
+        ...(insight.deepDiveQuestion === undefined ? {} : { deepDiveQuestion: insight.deepDiveQuestion }),
+      })),
+      ...(result.limitation ? { limitation: result.limitation } : {}),
+    })),
+  };
+};
+
+export const projectPreschoolExecutiveOverviewEvidenceForModel = (catalog: AnalysisContextEvidenceCatalog) => {
+  const metricIds = uniqueProjectionStrings(catalog.facts.map((fact) => fact.metricId));
+  const units = uniqueProjectionStrings(catalog.facts.flatMap((fact) => fact.unit === undefined ? [] : [fact.unit]));
+  const statuses = uniqueProjectionStrings(catalog.facts.map((fact) => fact.status));
+  const evidenceRefs = uniqueProjectionStrings(catalog.facts.flatMap((fact) => fact.evidenceRefs));
+  const evidenceSets = uniqueJsonValues(catalog.facts.map((fact) =>
+    fact.evidenceRefs.map((reference) => evidenceRefs.indexOf(reference))));
+  const dimensions = uniqueJsonValues(catalog.facts.map((fact) => fact.dimensions));
+  return {
+    encoding: { id: "analysis-context-evidence-columnar-json", revision: "v1" },
+    contract: catalog.contract,
+    sourceId: catalog.sourceId,
+    pins: catalog.pins,
+    dictionaries: { metricIds, units, statuses, evidenceRefs, evidenceSets, dimensions },
+    factTable: {
+      columns: ["id", "label", "metricIdIndex", "value", "unitIndex", "statusIndex", "evidenceSetIndex", "dimensionsIndex"],
+      rows: catalog.facts.map((fact) => [
+        fact.id,
+        fact.label,
+        metricIds.indexOf(fact.metricId),
+        fact.value,
+        fact.unit === undefined ? -1 : units.indexOf(fact.unit),
+        statuses.indexOf(fact.status),
+        indexOfJsonValue(evidenceSets, fact.evidenceRefs.map((reference) => evidenceRefs.indexOf(reference))),
+        indexOfJsonValue(dimensions, fact.dimensions),
+      ]),
+    },
+  };
+};
+
+const uniqueProjectionStrings = (values: string[]): string[] => [...new Set(values)];
+
+const uniqueJsonValues = <T>(values: T[]): T[] => {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    const key = JSON.stringify(value);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const indexOfJsonValue = <T>(values: T[], value: T): number => {
+  const key = JSON.stringify(value);
+  return values.findIndex((candidate) => JSON.stringify(candidate) === key);
 };
 
 const materializeExecutiveResultV4 = (input: {

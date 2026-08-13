@@ -108,6 +108,7 @@ import {
   type PreschoolOverviewAiStageInput,
 } from "./energy/preschool-overview-ai-workflow.js";
 import { createPreschoolOverviewAiPageWorkflow } from "./energy/preschool-overview-ai-page-workflow.js";
+import { MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS } from "./energy/preschool-executive-synthesis.js";
 import type {
   PreschoolSectionInsightToolInvocation,
   PreschoolSectionInsightToolName,
@@ -197,7 +198,7 @@ export const resolveOverviewAiServerRunnerOptions = (input: {
     structuredOutput: input.structuredOutput,
     conversationMessageMaxChars: input.stage === "section-interpreter"
       ? PACK_V2_SECTION_MESSAGE_MAX_CHARS
-      : 24_000,
+      : MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS,
     ...(trustedStageTools ? { disableTools: false as const, trustedStageTools } : {}),
   };
 };

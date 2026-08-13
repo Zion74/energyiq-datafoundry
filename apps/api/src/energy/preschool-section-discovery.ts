@@ -131,7 +131,7 @@ const encodePlanningScopes = (values: unknown[]): Record<string, unknown> | null
       for (const [bucketIndex, bucket] of buckets.entries()) {
         if (!isRecord(bucket)) return null;
         const bucketValue = definedRecordEntries(bucket);
-        const groupKey = JSON.stringify([grain, sortedKeys(bucketValue)]);
+        const groupKey = JSON.stringify([grain, bucketIndex, sortedKeys(bucketValue)]);
         const group = bucketGroups.get(groupKey) ?? { grain, entries: [] };
         group.entries.push({ index: bucketIndex, parentIndex: scopeIndex, value: bucketValue });
         bucketGroups.set(groupKey, group);
