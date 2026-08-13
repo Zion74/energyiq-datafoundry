@@ -23,6 +23,10 @@ const NEXT_CHECKS: Record<PreschoolSectionId, string[]> = {
   "planning-outlook": ["Monitor the current month against the saved plan as complete days arrive."],
 };
 
+/**
+ * @deprecated Legacy Pack v1 seam for the current Section Interpreter and Page Workflow.
+ * New discovery work must call assemblePreschoolSectionPacksV2 from preschool-section-pack-v2.ts.
+ */
 export const assemblePreschoolSectionPacks = (input: {
   identity: EnergyIqOverviewAiArtifactIdentity;
   snapshot: ProjectAnalysisSnapshot;
