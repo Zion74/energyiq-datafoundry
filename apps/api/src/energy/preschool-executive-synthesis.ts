@@ -465,9 +465,8 @@ const materializeExecutiveResultV4 = (input: {
     throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_MALFORMED");
   }
   const summaryText = cleanText(parsed.summary.text);
-  const summaryEvidenceRefs = stringArray(parsed.summary.evidenceRefs);
-  if (!summaryText || !summaryEvidenceRefs || summaryEvidenceRefs.length === 0
-    || new Set(summaryEvidenceRefs).size !== summaryEvidenceRefs.length
+  const rawSummaryEvidenceRefs = stringArray(parsed.summary.evidenceRefs);
+  if (!summaryText || !rawSummaryEvidenceRefs || rawSummaryEvidenceRefs.length === 0
     || hasBannedCustomerText(summaryText)) {
     throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_FACT_UNSUPPORTED");
   }
@@ -475,6 +474,14 @@ const materializeExecutiveResultV4 = (input: {
   const evidenceOwners = sectionEvidenceOwners(input.accepted);
   const overviewFacts = input.authoritativeOverviewEvidence?.catalog.facts ?? [];
   const authoritativeEvidence = new Set(overviewFacts.map(({ id }) => id));
+  const overviewFactIdsByProvenanceRef = new Map<string, Set<string>>();
+  for (const fact of overviewFacts) {
+    for (const reference of fact.evidenceRefs) {
+      const factIds = overviewFactIdsByProvenanceRef.get(reference) ?? new Set<string>();
+      factIds.add(fact.id);
+      overviewFactIdsByProvenanceRef.set(reference, factIds);
+    }
+  }
   const usedOverviewFactIds = new Set<string>();
   const sourceNumbers = [
     ...collectNumbers(input.accepted.flatMap(({ result }) => [
@@ -484,18 +491,32 @@ const materializeExecutiveResultV4 = (input: {
     ])),
     ...overviewFacts.flatMap(({ value }) => typeof value === "number" ? [value] : []),
   ];
-  const requireSupportedEvidence = (reference: string): Set<PreschoolSectionId> => {
+  const requireSupportedEvidence = (reference: string): {
+    canonicalReference: string;
+    owners: Set<PreschoolSectionId>;
+  } => {
     const owners = evidenceOwners.get(reference);
-    if (owners) return owners;
+    if (owners) return { canonicalReference: reference, owners };
     if (authoritativeEvidence.has(reference)) {
       usedOverviewFactIds.add(reference);
-      return new Set();
+      return { canonicalReference: reference, owners: new Set() };
+    }
+    const aliasedFactIds = overviewFactIdsByProvenanceRef.get(reference);
+    if (aliasedFactIds?.size === 1) {
+      const [factId] = aliasedFactIds;
+      usedOverviewFactIds.add(factId!);
+      return { canonicalReference: factId!, owners: new Set() };
     }
     throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_EVIDENCE_UNSUPPORTED");
   };
   const contributingSections = new Set<PreschoolSectionId>();
-  for (const reference of summaryEvidenceRefs) {
-    for (const sectionId of requireSupportedEvidence(reference)) contributingSections.add(sectionId);
+  const summaryEvidenceRefs = [...new Set(rawSummaryEvidenceRefs.map((reference) => {
+    const supported = requireSupportedEvidence(reference);
+    for (const sectionId of supported.owners) contributingSections.add(sectionId);
+    return supported.canonicalReference;
+  }))];
+  if (summaryEvidenceRefs.length === 0) {
+    throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_EVIDENCE_UNSUPPORTED");
   }
   if (hasUnsupportedNumber(summaryText, sourceNumbers)) {
     throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_FACT_UNSUPPORTED");
@@ -505,27 +526,29 @@ const materializeExecutiveResultV4 = (input: {
     const title = cleanText(candidate.title);
     const text = cleanText(candidate.text);
     const sectionIds = stringArray(candidate.sectionIds)?.filter(isPreschoolSectionId);
-    const evidenceRefs = stringArray(candidate.evidenceRefs);
+    const rawEvidenceRefs = stringArray(candidate.evidenceRefs);
     if (!title || !text || !sectionIds || sectionIds.length === 0
       || sectionIds.length !== (candidate.sectionIds as unknown[]).length
       || new Set(sectionIds).size !== sectionIds.length
       || sectionIds.some((sectionId) => !acceptedBySection.has(sectionId))
-      || !evidenceRefs || evidenceRefs.length === 0
-      || new Set(evidenceRefs).size !== evidenceRefs.length
+      || !rawEvidenceRefs || rawEvidenceRefs.length === 0
       || hasBannedCustomerText(title) || hasBannedCustomerText(text)
       || hasUnsupportedNumber(`${title} ${text}`, sourceNumbers)) {
       throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_FACT_UNSUPPORTED");
     }
     const declaredSections = new Set(sectionIds);
     const evidenceBackedSections = new Set<PreschoolSectionId>();
-    for (const reference of evidenceRefs) {
-      const owners = requireSupportedEvidence(reference);
+    const evidenceRefs: string[] = [];
+    for (const reference of rawEvidenceRefs) {
+      const supported = requireSupportedEvidence(reference);
+      const { owners } = supported;
       if (owners.size > 0 && ![...owners].some((sectionId) => declaredSections.has(sectionId))) {
         throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_EVIDENCE_UNSUPPORTED");
       }
       for (const sectionId of owners) {
         if (declaredSections.has(sectionId)) evidenceBackedSections.add(sectionId);
       }
+      evidenceRefs.push(supported.canonicalReference);
     }
     if ([...declaredSections].some((sectionId) => !evidenceBackedSections.has(sectionId))) {
       throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_EVIDENCE_UNSUPPORTED");

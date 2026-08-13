@@ -102,6 +102,33 @@ describe("Preschool Section discovery", () => {
       epistemicStatus: "speculative",
     });
   });
+
+  it("canonicalizes duplicate model Evidence references before acceptance", () => {
+    const pack = richPack("standby-wastage", 1);
+    const discovery = parsePreschoolSectionDiscoveryV4({
+      answer: JSON.stringify({
+        sectionId: "standby-wastage",
+        status: "available",
+        summary: {
+          text: "One event is supported.",
+          evidenceRefs: ["evidence:1", "evidence:1"],
+        },
+        candidates: [{
+          title: "One supported event",
+          epistemicStatus: "observed",
+          text: "One event is supported.",
+          evidenceRefs: ["evidence:1", "evidence:1"],
+        }],
+      }),
+      expectedSectionId: "standby-wastage",
+      binding: pack.binding,
+    });
+
+    expect(discovery.status).toBe("available");
+    if (discovery.status !== "available") throw new Error("expected available discovery");
+    expect(discovery.summary.evidenceRefs).toEqual(["evidence:1"]);
+    expect(discovery.candidates[0]?.evidenceRefs).toEqual(["evidence:1"]);
+  });
 });
 
 const richPack = (

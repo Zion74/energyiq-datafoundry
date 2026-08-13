@@ -40,5 +40,17 @@ describe("Preschool Overview AI structured output", () => {
         findings: { type: "array", maxItems: 3 },
       },
     });
+
+    const sectionSummaryEvidence = v4Properties.summary!.properties!.evidenceRefs!;
+    const sectionCandidateEvidence = candidateProperties.evidenceRefs!;
+    const executiveProperties = PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4.schema.properties!;
+    const executiveSummaryEvidence = executiveProperties.summary!.properties!.evidenceRefs!;
+    const executiveFindingEvidence = executiveProperties.findings!.items!.properties!.evidenceRefs!;
+    for (const schema of [
+      sectionSummaryEvidence,
+      sectionCandidateEvidence,
+      executiveSummaryEvidence,
+      executiveFindingEvidence,
+    ]) expect(schema).not.toHaveProperty("uniqueItems");
   });
 });

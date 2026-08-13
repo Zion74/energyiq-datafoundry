@@ -542,6 +542,85 @@ describe("Preschool Executive Synthesis", () => {
     });
   });
 
+  it("canonicalizes a uniquely owned Overview provenance reference to its server Fact ID", async () => {
+    const harness = createHarness();
+    const benchmark = completeSectionV4(harness, "centre-benchmark");
+    const authoritativeOverviewEvidence = {
+      binding: preschoolOverviewAiBindingFromIdentity(harness.identity),
+      catalog: {
+        contract: "analysis-context-evidence@1" as const,
+        sourceId: "project-analysis-snapshot:preschool-demo:snapshot-current",
+        pins: {
+          workspaceId: harness.identity.workspaceId,
+          projectId: harness.identity.projectId,
+          scopeId: harness.identity.scopeId,
+          dataSnapshotId: harness.identity.dataSnapshotId,
+          dataCutoff: "2026-05-31T23:45:00.000Z",
+          projectReleaseId: harness.identity.projectReleaseId,
+          metricVersion: "energy-v1",
+        },
+        facts: [{
+          id: "analysis.summary.closed_hour_share_pct",
+          label: "Closed-hour energy share",
+          metricId: "energy.off_hours_share_pct",
+          value: 12.45,
+          unit: "%",
+          status: "confirmed" as const,
+          evidenceRefs: ["evidence:off-hours-share"],
+          dimensions: { sectionId: "standby-wastage" },
+        }],
+      },
+    };
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      revision: "v4",
+      authoritativeOverviewEvidence,
+      runSynthesis: async (input) => ({
+        answer: JSON.stringify({
+          status: "available",
+          summary: {
+            text: "The benchmark context is available alongside the 12.45% closed-hour share.",
+            evidenceRefs: [
+              "evidence:centre-benchmark:summary",
+              "evidence:off-hours-share",
+              "evidence:off-hours-share",
+            ],
+          },
+          findings: [{
+            title: "Benchmark context remains the supported priority",
+            text: "The benchmark evidence provides the supported Section context.",
+            sectionIds: ["centre-benchmark"],
+            evidenceRefs: ["evidence:centre-benchmark:insight"],
+          }],
+        }),
+        runId: input.runId,
+        sessionId: input.sessionId,
+      }),
+    });
+
+    const artifact = await synthesizer.execute({
+      baseIdentity: harness.identity,
+      user: harness.user,
+      retry: false,
+      authoritativeOverviewEvidence,
+    });
+    harness.close();
+
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+    expect(JSON.parse(artifact.result_json!)).toMatchObject({
+      sourceSectionArtifactIds: [benchmark.id],
+      summary: {
+        evidenceRefs: [
+          "evidence:centre-benchmark:summary",
+          "analysis.summary.closed_hour_share_pct",
+        ],
+      },
+      overviewEvidence: {
+        factIds: ["analysis.summary.closed_hour_share_pct"],
+      },
+    });
+  });
+
   it("accepts conventional half-unit rounding of authoritative Overview facts", async () => {
     const harness = createHarness();
     completeSectionV4(harness, "centre-benchmark");

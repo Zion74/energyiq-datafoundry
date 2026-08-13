@@ -21,10 +21,19 @@ type JsonSchema = {
 };
 
 const nonEmptyString: JsonSchema = { type: "string", minLength: 1 };
-const evidenceRefs: JsonSchema = {
+const uniqueEvidenceRefs: JsonSchema = {
   type: "array",
   minItems: 1,
   uniqueItems: true,
+  items: nonEmptyString,
+};
+
+// Compatible Providers occasionally repeat a valid reference. The server parser
+// canonicalizes these arrays before acceptance, so duplicates must not make the
+// native structured-output layer discard an otherwise recoverable result.
+const modelEvidenceRefsV4: JsonSchema = {
+  type: "array",
+  minItems: 1,
   items: nonEmptyString,
 };
 
@@ -36,7 +45,7 @@ const sectionKeyPoint: JsonSchema = {
     kind: { type: "string", enum: ["priority", "finding", "meaning", "next-check"] },
     label: nonEmptyString,
     text: nonEmptyString,
-    evidenceRefs,
+    evidenceRefs: uniqueEvidenceRefs,
   },
 };
 
@@ -68,7 +77,7 @@ const sectionSummaryV4: JsonSchema = {
   required: ["text", "evidenceRefs"],
   properties: {
     text: nonEmptyString,
-    evidenceRefs,
+    evidenceRefs: modelEvidenceRefsV4,
   },
 };
 
@@ -81,7 +90,7 @@ const sectionInsightCandidateV4: JsonSchema = {
     label: nonEmptyString,
     epistemicStatus: { type: "string", enum: ["observed", "inferred", "speculative"] },
     text: nonEmptyString,
-    evidenceRefs,
+    evidenceRefs: modelEvidenceRefsV4,
     deepDiveQuestion: nonEmptyString,
   },
 };
@@ -122,7 +131,7 @@ const executiveKeyFinding: JsonSchema = {
       uniqueItems: true,
       items: { type: "string", enum: [...PRESCHOOL_SECTION_IDS] },
     },
-    evidenceRefs,
+    evidenceRefs: uniqueEvidenceRefs,
   },
 };
 
@@ -168,7 +177,7 @@ const executiveFindingV4: JsonSchema = {
       uniqueItems: true,
       items: { type: "string", enum: [...PRESCHOOL_SECTION_IDS] },
     },
-    evidenceRefs,
+    evidenceRefs: modelEvidenceRefsV4,
     alert: executiveAlertV4,
   },
 };
