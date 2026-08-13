@@ -4,7 +4,7 @@ import type {
   PreschoolOverviewAiBindingV4,
   PreschoolSectionInsightCandidateV4,
   PreschoolSectionSummaryV4,
-} from "../../../../packages/contracts/src/energyiq-preschool-overview-ai.js";
+} from "@datafoundry/contracts";
 import { acceptPreschoolSectionInterpretation } from "./preschool-section-acceptance.js";
 
 const binding: PreschoolOverviewAiBindingV4 = {
@@ -175,7 +175,7 @@ describe("Preschool Section acceptance", () => {
     });
   });
 
-  it("fails the Section instead of converting a non-empty fully rejected discovery to empty", () => {
+  it("preserves a valid summary and the full rejection audit when every candidate is rejected", () => {
     const result = acceptPreschoolSectionInterpretation({
       expectedSectionId: "operating-behaviour",
       expectedBinding: binding,
@@ -204,13 +204,22 @@ describe("Preschool Section acceptance", () => {
     });
 
     expect(result).toEqual({
-      decision: "failed",
-      code: "PRESCHOOL_SECTION_INTERPRETATION_ALL_CANDIDATES_REJECTED",
-      rejectedCandidates: [{
-        candidateId: "preschool:operating-behaviour:candidate:1",
-        sourceIndex: 0,
-        code: "ENTITY_RELATION_UNSUPPORTED",
-      }],
+      decision: "accepted",
+      value: {
+        sectionId: "operating-behaviour",
+        binding,
+        status: "available",
+        summary: {
+          text: "Operating-hour behaviour has one proposed interpretation.",
+          evidenceRefs: ["operating-hours:events"],
+        },
+        acceptedCandidates: [],
+        rejectedCandidates: [{
+          candidateId: "preschool:operating-behaviour:candidate:1",
+          sourceIndex: 0,
+          code: "ENTITY_RELATION_UNSUPPORTED",
+        }],
+      },
     });
   });
 

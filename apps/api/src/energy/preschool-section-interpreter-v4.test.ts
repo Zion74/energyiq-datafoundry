@@ -66,6 +66,10 @@ describe("Preschool Section Interpreter v4", () => {
     expect(prompt).toContain("analysisGoal");
     expect(prompt).toContain("inline-complete");
     expect(prompt).toContain("Centre 30");
+    expect(prompt).toContain("highest to lowest incremental value");
+    expect(prompt).toContain("novel angle, relevance, urgency, contrarian value, and verifiability");
+    expect(prompt).toContain("preserves that source order");
+    expect(prompt).toContain("Do not invent an alert");
     expect(prompt).not.toContain("allowedNextChecks");
     expect(prompt).not.toContain('"kind"');
   });
@@ -94,9 +98,9 @@ describe("Preschool Section Interpreter v4", () => {
     });
   });
 
-  it("fails a non-empty discovery whose candidates are all rejected", () => {
+  it("keeps a valid Summary available when every candidate is rejected", () => {
     const pack = packV2("standby-wastage", 1);
-    expect(() => materializePreschoolSectionResultV4({
+    const result = materializePreschoolSectionResultV4({
       answer: JSON.stringify({
         sectionId: "standby-wastage",
         status: "available",
@@ -114,7 +118,22 @@ describe("Preschool Section Interpreter v4", () => {
       pack,
       identity: identity("standby-wastage"),
       runId: "runtime-run-3",
-    })).toThrow("PRESCHOOL_SECTION_INTERPRETATION_ALL_CANDIDATES_REJECTED");
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      summary: {
+        text: "The verified Section evidence is available.",
+        evidenceRefs: ["evidence:standby-wastage:1"],
+      },
+      insights: [],
+      publication: {
+        discoveredCount: 1,
+        acceptedCount: 0,
+        rejectedCount: 1,
+        publishedCount: 0,
+      },
+    });
   });
 
   it("passes the explicit V4 structured contract only to Pack-v2 runner calls", async () => {

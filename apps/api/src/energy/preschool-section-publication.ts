@@ -5,7 +5,7 @@ import type {
   PreschoolSectionInterpretationResultV4,
   PreschoolSectionPublicationAuditV4,
   PreschoolSectionCapabilityV4,
-} from "../../../../packages/contracts/src/energyiq-preschool-overview-ai.js";
+} from "@datafoundry/contracts";
 
 const MAX_PUBLISHED_INSIGHTS = 3;
 
@@ -52,7 +52,9 @@ export const publishPreschoolSectionInterpretation = (input: {
   const publishable: PreschoolAcceptedSectionInsightV4[] = [];
   const suppressedCandidateIds: string[] = [];
 
-  for (const candidate of input.accepted.acceptedCandidates) {
+  const candidatesInModelOrder = [...input.accepted.acceptedCandidates].sort((left, right) =>
+    left.sourceIndex - right.sourceIndex || left.candidateId.localeCompare(right.candidateId));
+  for (const candidate of candidatesInModelOrder) {
     const fingerprint = exactCandidateFingerprint(candidate);
     if (seen.has(fingerprint)) {
       suppressedCandidateIds.push(candidate.candidateId);

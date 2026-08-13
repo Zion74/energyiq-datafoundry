@@ -7,11 +7,12 @@ import {
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PRESCHOOL_SECTION_IDS, type PreschoolSectionId } from "./preschool-overview-ai-contracts.js";
 import {
   createOverviewAiArtifactIdentity,
+  createPreschoolOverviewAiExecutiveArtifactIdentityV4,
   createPreschoolOverviewAiSectionArtifactIdentityV3,
   createPreschoolOverviewAiSectionArtifactIdentityV4,
 } from "./overview-ai-artifact.js";
@@ -86,6 +87,7 @@ describe("Preschool Overview AI page workflow", () => {
       structuredOutput: unknown;
     }> = [];
     let executiveProviderCalls = 0;
+    const completed = vi.spyOn(harness.metadata.energyIq.overviewAiArtifacts, "complete");
     const workflow = createPreschoolOverviewAiPageWorkflow({
       metadataStore: harness.metadata,
       dataGateway: {} as LocalDataGateway,
@@ -109,8 +111,6 @@ describe("Preschool Overview AI page workflow", () => {
       user: harness.user,
       retry: false,
     });
-    harness.close();
-
     expect(sectionCalls).toHaveLength(4);
     expect(sectionCalls.map(({ identity }) => identity.targetId).sort()).toEqual([...PRESCHOOL_SECTION_IDS].sort());
     for (const call of sectionCalls) {
@@ -134,6 +134,29 @@ describe("Preschool Overview AI page workflow", () => {
       "empty",
     ]);
     expect(executiveProviderCalls).toBe(0);
+    const sectionIdentities = PRESCHOOL_SECTION_IDS.map((sectionId) =>
+      createPreschoolOverviewAiSectionArtifactIdentityV4({ baseIdentity: harness.identity, targetId: sectionId }));
+    const executiveIdentity = createPreschoolOverviewAiExecutiveArtifactIdentityV4({
+      baseIdentity: harness.identity,
+      targetId: "sections:none",
+    });
+    expect(sectionIdentities.map((identity) => harness.metadata.energyIq.overviewAiArtifacts.get(identity))).toEqual(
+      sectionIdentities.map(() => expect.objectContaining({
+        status: "available",
+      })),
+    );
+    expect(harness.metadata.energyIq.overviewAiArtifacts.get(executiveIdentity)).toMatchObject({
+      status: "available",
+    });
+    expect(completed).toHaveBeenCalledTimes(5);
+    expect(completed.mock.calls.slice(0, 4).map(([input]) => input.identity.artifactKind)).toEqual([
+      "section-interpretation",
+      "section-interpretation",
+      "section-interpretation",
+      "section-interpretation",
+    ]);
+    expect(completed.mock.calls[4]?.[0].identity.artifactKind).toBe("executive-synthesis");
+    harness.close();
   });
 });
 

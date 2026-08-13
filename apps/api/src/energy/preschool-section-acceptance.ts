@@ -8,7 +8,7 @@ import type {
   PreschoolSectionIdV4,
   PreschoolSectionInsightCandidateV4,
   PreschoolSectionSummaryV4,
-} from "../../../../packages/contracts/src/energyiq-preschool-overview-ai.js";
+} from "@datafoundry/contracts";
 
 type AcceptedValidation = { accepted: true };
 type RejectedValidation = {
@@ -96,14 +96,6 @@ export const acceptPreschoolSectionInterpretation = (input: {
         : { deepDiveQuestion: candidate.deepDiveQuestion }),
     });
   });
-
-  if (input.discovery.candidates.length > 0 && acceptedCandidates.length === 0) {
-    return {
-      decision: "failed",
-      code: "PRESCHOOL_SECTION_INTERPRETATION_ALL_CANDIDATES_REJECTED",
-      rejectedCandidates,
-    };
-  }
 
   return {
     decision: "accepted",

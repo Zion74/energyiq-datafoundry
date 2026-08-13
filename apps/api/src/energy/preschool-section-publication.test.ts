@@ -4,7 +4,7 @@ import type {
   PreschoolAcceptedSectionInsightV4,
   PreschoolAcceptedSectionValueV4,
   PreschoolOverviewAiBindingV4,
-} from "../../../../packages/contracts/src/energyiq-preschool-overview-ai.js";
+} from "@datafoundry/contracts";
 import { publishPreschoolSectionInterpretation } from "./preschool-section-publication.js";
 
 const binding: PreschoolOverviewAiBindingV4 = {
@@ -64,12 +64,18 @@ describe("Preschool Section publication", () => {
     });
   });
 
-  it("publishes the first three distinct insights in model order with stable IDs and an audit trail", () => {
-    const first = insight(0, "Event pattern", "The spike looks event-like rather than persistent.");
-    const exactDuplicate = insight(1, "Event pattern", "The spike looks event-like rather than persistent.");
-    const second = insight(2, "Closing boundary", "Events cluster near the closing boundary.");
-    const third = insight(3, "Peer contrast", "Comparable centres do not show the same recurrence.");
-    const overBudget = insight(4, "Watch next month", "Watch whether the pattern repeats next month.");
+  it("preserves the model value order instead of promoting a later ordinary deep-dive candidate", () => {
+    const first = insight(0, "Unexpected pattern alert", "A non-actionable event pattern is the most important angle for this manager.");
+    const exactDuplicate = insight(1, "Unexpected pattern alert", "A non-actionable event pattern is the most important angle for this manager.");
+    const repeatedAngle = insight(2, "Closing boundary", "Events cluster near the closing boundary.");
+    const distinctEvidence = {
+      ...insight(3, "Peer contrast", "Comparable centres do not show the same recurrence."),
+      evidenceRefs: ["closed-hours:peer-contrast"],
+    };
+    const investigationReady = {
+      ...insight(4, "Watch next month", "The pattern may recur next month."),
+      deepDiveQuestion: "Does the same event recur after the closing boundary next month?",
+    };
     const accepted: PreschoolAcceptedSectionValueV4 = {
       sectionId: "standby-wastage",
       binding,
@@ -78,7 +84,7 @@ describe("Preschool Section publication", () => {
         text: "Closed-hour use is concentrated in a small set of events.",
         evidenceRefs: ["closed-hours:events"],
       },
-      acceptedCandidates: [first, exactDuplicate, second, third, overBudget],
+      acceptedCandidates: [investigationReady, distinctEvidence, repeatedAngle, exactDuplicate, first],
       rejectedCandidates: [{
         candidateId: "preschool:standby-wastage:candidate:6",
         sourceIndex: 5,
@@ -107,7 +113,7 @@ describe("Preschool Section publication", () => {
       insights: [
         {
           id: "preschool:standby-wastage:candidate:1",
-          title: "Event pattern",
+          title: "Unexpected pattern alert",
         },
         {
           id: "preschool:standby-wastage:candidate:3",

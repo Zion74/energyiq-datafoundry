@@ -23,6 +23,7 @@ import type {
   EnergyIqTariffScheduleEntry,
   EnergyIqTemplateDraftDocument,
   EnergyIqTemplateRevisionRecord,
+  UserRecord,
 } from "@datafoundry/metadata";
 import {
   createDefaultTemplateDocument,
@@ -226,6 +227,10 @@ export const handleEnergyApiRequest = async (
       if (suppliedPinParts > 0 && suppliedPinParts < 4) {
         throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PIN_INCOMPLETE");
       }
+      const generationAction = segments.length === 4
+        && request.method === "POST"
+        && (segments[3] === "ensure" || segments[3] === "retry");
+      if (generationAction) requireEnergyAdminProject(context, user, projectId);
       const pin = suppliedPinParts === 4
         ? {
             from: pinParts.from!,
@@ -341,17 +346,12 @@ export const handleEnergyApiRequest = async (
           projectId,
           requestedBatchId: batchId,
         });
-        let overviewAiArtifact: Awaited<ReturnType<typeof queueCurrentProjectOverviewAiArtifact>> = null;
-        try {
-          overviewAiArtifact = await queueCurrentProjectOverviewAiArtifact({
-            metadataStore: context.metadataStore,
-            dataGateway: context.dataGateway,
-            projectId,
-            user,
-          });
-        } catch (error) {
-          console.warn("[energyiq] failed to queue Overview AI Artifact after materialization", error);
-        }
+        const overviewAiDelivery = await generateOverviewAiAfterProjectMutation({
+          context,
+          projectId,
+          user,
+          operation: "materialization",
+        });
         return {
           status: 200,
           body: createSuccessResult({
@@ -360,15 +360,7 @@ export const handleEnergyApiRequest = async (
             readiness: await createProjectDataReadiness(context, projectId, materialized.document),
             duplicate: materialized.duplicate,
             ...(materialized.timings ? { materializationTimings: materialized.timings } : {}),
-            ...(overviewAiArtifact
-              ? {
-                  overviewAiArtifact: {
-                    id: overviewAiArtifact.id,
-                    status: overviewAiArtifact.status,
-                    dataSnapshotId: overviewAiArtifact.data_snapshot_id,
-                  },
-                }
-              : {}),
+            ...overviewAiDelivery,
           }),
         };
       }
@@ -571,31 +563,18 @@ export const handleEnergyApiRequest = async (
             "ENERGYIQ_RULE_CONFIG_REVISION_REQUIRED",
           ),
         });
-        let overviewAiArtifact: Awaited<ReturnType<typeof queueCurrentProjectOverviewAiArtifact>> = null;
-        try {
-          overviewAiArtifact = await queueCurrentProjectOverviewAiArtifact({
-            metadataStore: context.metadataStore,
-            dataGateway: context.dataGateway,
-            projectId,
-            user,
-          });
-        } catch (error) {
-          console.warn("[energyiq] failed to queue Overview AI Artifact after Project publish", error);
-        }
+        const overviewAiDelivery = await generateOverviewAiAfterProjectMutation({
+          context,
+          projectId,
+          user,
+          operation: "Project publish",
+        });
         return {
           status: 200,
           body: createSuccessResult({
             ...published,
             project: context.metadataStore.energyIq.getProject(projectId),
-            ...(overviewAiArtifact
-              ? {
-                  overviewAiArtifact: {
-                    id: overviewAiArtifact.id,
-                    status: overviewAiArtifact.status,
-                    dataSnapshotId: overviewAiArtifact.data_snapshot_id,
-                  },
-                }
-              : {}),
+            ...overviewAiDelivery,
           })
         };
       }
@@ -1475,6 +1454,50 @@ const toOverviewAiWorkflowDto = (
 ): Record<string, unknown> => "binding" in value
   ? toPreschoolOverviewAiReadModelDto(value)
   : toOverviewAiArtifactDto(value);
+
+const generateOverviewAiAfterProjectMutation = async (input: {
+  context: Required<ConfigApiContext>;
+  projectId: string;
+  user: UserRecord;
+  operation: "materialization" | "Project publish";
+}): Promise<Record<string, unknown>> => {
+  const project = input.context.metadataStore.energyIq.getProject(input.projectId);
+  const profile = resolveProjectOverviewProfile(project.id);
+  if (profile?.rendererKey === "preschool-overview") {
+    const identity = await input.context.overviewAiWorkflow.resolveCurrentIdentity({
+      projectId: project.id,
+      scopeId: project.root_scope_id,
+      user: input.user,
+    });
+    const readModel = await input.context.overviewAiWorkflow.execute({
+      identity,
+      user: input.user,
+      retry: false,
+    });
+    return { overviewAi: toOverviewAiWorkflowDto(readModel) };
+  }
+
+  try {
+    const artifact = await queueCurrentProjectOverviewAiArtifact({
+      metadataStore: input.context.metadataStore,
+      dataGateway: input.context.dataGateway,
+      projectId: project.id,
+      user: input.user,
+    });
+    return artifact
+      ? {
+          overviewAiArtifact: {
+            id: artifact.id,
+            status: artifact.status,
+            dataSnapshotId: artifact.data_snapshot_id,
+          },
+        }
+      : {};
+  } catch (error) {
+    console.warn(`[energyiq] failed to queue Overview AI Artifact after ${input.operation}`, error);
+    return {};
+  }
+};
 
 const customerVisibleOverviewAiResult = (value: unknown): unknown => {
   if (!isRecord(value) || !isRecord(value.workflow) || !Array.isArray(value.workflow.editorTrace)) return value;
