@@ -50,6 +50,9 @@ export const projectPreschoolSectionPackV2ForModel = (
     analysisGoal: pack.analysisGoal,
     evidence: pack.evidence.map((evidence) => ({
       ...evidence,
+      value: pack.sectionId === "planning-outlook"
+        ? compactPlanningEvidenceValue(evidence.value)
+        : evidence.value,
       entityRefs: [...evidence.entityRefs],
       evidenceRefs: [...evidence.evidenceRefs],
       ...(evidence.claimRelations
@@ -86,6 +89,106 @@ export const projectPreschoolSectionPackV2ForModel = (
   }
   return projection;
 };
+
+type ColumnarTable = {
+  columns: string[];
+  constants?: Record<string, unknown>;
+  rows: unknown[][];
+};
+
+type IndexedRecord = {
+  index: number;
+  parentIndex?: number;
+  value: Record<string, unknown>;
+};
+
+const compactPlanningEvidenceValue = (value: unknown): unknown => {
+  if (!isRecord(value) || !isRecord(value.forecast) || !Array.isArray(value.forecast.scopes)) return value;
+  const scopes = encodePlanningScopes(value.forecast.scopes);
+  return scopes
+    ? {
+        ...value,
+        forecast: {
+          ...value.forecast,
+          scopes,
+        },
+      }
+    : value;
+};
+
+const encodePlanningScopes = (values: unknown[]): Record<string, unknown> | null => {
+  const scopeGroups = new Map<string, IndexedRecord[]>();
+  const bucketGroups = new Map<string, { grain: string; entries: IndexedRecord[] }>();
+  const bucketCounts: Record<string, number> = {};
+
+  for (const [scopeIndex, value] of values.entries()) {
+    if (!isRecord(value) || !isRecord(value.buckets)) return null;
+    const scopeValue = definedRecordEntries(value, "buckets");
+    addRecordGroup(scopeGroups, scopeValue, { index: scopeIndex, value: scopeValue });
+    for (const [grain, buckets] of Object.entries(value.buckets)) {
+      if (!Array.isArray(buckets)) return null;
+      bucketCounts[grain] = (bucketCounts[grain] ?? 0) + buckets.length;
+      for (const [bucketIndex, bucket] of buckets.entries()) {
+        if (!isRecord(bucket)) return null;
+        const bucketValue = definedRecordEntries(bucket);
+        const groupKey = JSON.stringify([grain, sortedKeys(bucketValue)]);
+        const group = bucketGroups.get(groupKey) ?? { grain, entries: [] };
+        group.entries.push({ index: bucketIndex, parentIndex: scopeIndex, value: bucketValue });
+        bucketGroups.set(groupKey, group);
+      }
+    }
+  }
+
+  return {
+    encoding: { id: "energyiq-lossless-columnar-json", revision: "v1" },
+    scopeRowPrefix: ["scopeIndex"],
+    bucketRowPrefix: ["scopeIndex", "bucketIndex"],
+    scopeCount: values.length,
+    bucketCounts,
+    scopeTables: [...scopeGroups.values()].map((entries) => columnarTable(entries, false)),
+    bucketTables: [...bucketGroups.values()].map(({ grain, entries }) => ({
+      grain,
+      ...columnarTable(entries, true),
+    })),
+  };
+};
+
+const definedRecordEntries = (
+  value: Record<string, unknown>,
+  excludedKey?: string,
+): Record<string, unknown> => Object.fromEntries(
+  Object.entries(value).filter(([key, entry]) => key !== excludedKey && entry !== undefined),
+);
+
+const addRecordGroup = (
+  groups: Map<string, IndexedRecord[]>,
+  value: Record<string, unknown>,
+  entry: IndexedRecord,
+): void => {
+  const key = JSON.stringify(sortedKeys(value));
+  const group = groups.get(key) ?? [];
+  group.push(entry);
+  groups.set(key, group);
+};
+
+const columnarTable = (entries: IndexedRecord[], includeParentIndex: boolean): ColumnarTable => {
+  const keys = sortedKeys(entries[0]?.value ?? {});
+  const constantKeys = keys.filter((key) => entries.every((entry) =>
+    JSON.stringify(entry.value[key]) === JSON.stringify(entries[0]?.value[key])));
+  const columns = keys.filter((key) => !constantKeys.includes(key));
+  const constants = Object.fromEntries(constantKeys.map((key) => [key, entries[0]?.value[key]]));
+  return {
+    columns,
+    ...(constantKeys.length > 0 ? { constants } : {}),
+    rows: entries.map((entry) => [
+      ...(includeParentIndex ? [entry.parentIndex] : []),
+      entry.index,
+      ...columns.map((key) => entry.value[key]),
+    ]),
+  };
+};
+
+const sortedKeys = (value: Record<string, unknown>): string[] => Object.keys(value).sort();
 
 export const parsePreschoolSectionDiscoveryV4 = (input: {
   answer: string;

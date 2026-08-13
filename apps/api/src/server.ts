@@ -278,7 +278,7 @@ export const shouldIncludeProjectAnalysisEvidenceContext = (
 
 export const shouldUseEnergyContextForOverviewAiStage = (
   stage?: PreschoolOverviewAiStage,
-): boolean => stage !== "section-interpreter" && stage !== "executive-synthesis" && stage !== "template-proposal";
+): boolean => stage !== "executive-synthesis" && stage !== "template-proposal";
 
 const emitEarlyRunFailure = (
   subscriber: { complete(): void; next(event: BaseEvent): void },
@@ -706,7 +706,7 @@ export const buildOverviewAiStageRunInput = (input: OverviewAiRuntimeStageInput)
   threadId: input.sessionId,
   runId: input.runId,
   state: {},
-  messages: [{ id: `${input.runId}:user`, role: "user", content: input.prompt }],
+  messages: [{ id: `${input.runId}:user`, role: "user", content: overviewAiStageUserPrompt(input) }],
   tools: [],
   context: [],
   forwardedProps: {
@@ -755,6 +755,24 @@ export const buildOverviewAiStageRunInput = (input: OverviewAiRuntimeStageInput)
     },
   },
 });
+
+const overviewAiStageUserPrompt = (input: OverviewAiRuntimeStageInput): string =>
+  input.stage === "section-interpreter"
+    ? [
+        input.prompt,
+        `Server-owned Artifact pin for runtime validation only; do not repeat it in customer text: ${JSON.stringify({
+          workspaceId: input.identity.workspaceId,
+          projectId: input.identity.projectId,
+          scopeId: input.identity.scopeId,
+          dataSnapshotId: input.identity.dataSnapshotId,
+          projectReleaseId: input.identity.projectReleaseId,
+          analysisPeriod: {
+            from: input.identity.analysisPeriodFrom,
+            to: input.identity.analysisPeriodTo,
+          },
+        })}`,
+      ].join("\n\n")
+    : input.prompt;
 
 const isIsolatedValueStage = (stage: PreschoolOverviewAiStage): boolean =>
   stage === "section-interpreter" || stage === "executive-synthesis" || stage === "template-proposal";
