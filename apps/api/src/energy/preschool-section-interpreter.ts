@@ -15,6 +15,7 @@ import {
   PRESCHOOL_SECTION_IDS,
   preschoolOverviewAiBindingFromIdentity,
   type PreschoolSectionCandidateRejectionCodeV4,
+  type PreschoolSectionDiscoveryV4,
   type PreschoolSectionId,
   type PreschoolSectionInterpretationResult,
   type PreschoolSectionInterpretationResultV4,
@@ -269,6 +270,9 @@ export const buildPreschoolSectionDiscoveryPrompt = (
     `Available scoped read-only tools: ${JSON.stringify(pack.capabilities.tools)}. Tool arguments must contain only the documented controlled parameters; never submit Pack, binding, Section, Snapshot, Release, period, SQL, URL, network, or write instructions.`,
     "The Pack is a factual boundary, not a writing template: identify the most useful angles instead of filling fixed What, Why, or Action slots.",
     "You may connect supplied facts and propose relevant hypotheses. Mark direct Pack facts as observed, supported relationships as inferred, and plausible but unverified lines of inquiry as speculative.",
+    "An observed candidate must contain only direct Pack facts. If it says could, may, might, appears, or recommends a choice, label the whole candidate inferred or speculative instead.",
+    "For event Evidence, usageKwh is total interval energy; impactKwh is only the excess above its comparison baseline. Never describe impactKwh as the whole spike or interval total.",
+    "For planning Evidence, count only rows whose scopeRole is centre when stating a Centre count; one Portfolio row is not a Centre.",
     "Do not invent observed facts, entities, numbers, dates, units, or relationships. A speculative explanation must remain clearly conditional and must not be presented as a confirmed safety alert.",
     "Keep the Summary short and useful. Candidates are optional; return zero when the Summary is sufficient, or several genuinely distinct candidates when the Pack supports them.",
     "Order candidates from highest to lowest incremental value for a non-technical energy manager. In your internal selection, consider novel angle, relevance, urgency, contrarian value, and verifiability together without returning a fixed lens or score.",
@@ -436,7 +440,10 @@ export const materializePreschoolSectionResultV4 = (input: {
     expectedSectionId: input.pack.sectionId,
     binding,
   });
-  const discovery = keepSupportedSummarySentences(parsedDiscovery, input.pack);
+  const discovery = keepSupportedSummarySentences(
+    calibrateCandidateEpistemicStatus(parsedDiscovery),
+    input.pack,
+  );
   if (discovery.status === "available" && discovery.limitation
     && !isSupportedNarrative(discovery.limitation, input.pack.evidence, input.pack.evidence)) {
     throw new Error("PRESCHOOL_SECTION_INTERPRETATION_SUMMARY_UNSUPPORTED");
@@ -456,6 +463,30 @@ export const materializePreschoolSectionResultV4 = (input: {
     toolAudits: input.toolAudits ?? [],
   });
 };
+
+const calibrateCandidateEpistemicStatus = (
+  discovery: PreschoolSectionDiscoveryV4,
+): PreschoolSectionDiscoveryV4 => {
+  if (discovery.status !== "available") return discovery;
+  return {
+    ...discovery,
+    candidates: discovery.candidates.map((candidate) => candidate.epistemicStatus === "observed"
+      && containsInferenceLanguage([
+        candidate.title,
+        candidate.label,
+        candidate.text,
+        candidate.deepDiveQuestion,
+      ].filter((value): value is string => Boolean(value)).join(" "))
+      ? { ...candidate, epistemicStatus: "inferred" as const }
+      : candidate),
+  };
+};
+
+const containsInferenceLanguage = (text: string): boolean =>
+  /\b(?:could|might|appears?|apparently|likely|possibly|potential(?:ly)?|recommend(?:s|ed|ing)?|should|worth considering)\b/iu
+    .test(text)
+  || /\bmay\s+(?:be|reflect|indicate|suggest|result|offer|mean|signal|help|need|show|point|support|capture)\b/iu
+    .test(text);
 
 const keepSupportedSummarySentences = (
   discovery: ReturnType<typeof parsePreschoolSectionDiscoveryV4>,
@@ -838,6 +869,8 @@ const hasUnsupportedMetricRelation = (
   text: string,
   evidence: PreschoolSectionPack["evidence"],
 ): boolean => {
+  if (hasUnsupportedPlanningCentreCount(text, evidence)
+    || hasMislabeledSpikeImpact(text, evidence)) return true;
   const paceValues = evidence.flatMap(({ value }) => collectNumbersForKey(value, "pacePct"));
   if (paceValues.length === 0) return false;
   return text.split(/[!?;]|(?<!\d)\.(?!\d)|\b(?:but|while|whereas)\b/iu).some((clause) => {
@@ -854,6 +887,58 @@ const hasUnsupportedMetricRelation = (
       return paceValues.some((candidate) => reportedNumberMatches(candidate, value, precision));
     });
   });
+};
+
+const hasUnsupportedPlanningCentreCount = (
+  text: string,
+  evidence: PreschoolSectionPack["evidence"],
+): boolean => {
+  const scopeRows = evidence.flatMap(({ value }) => collectRecordsForKey(value, "scopeRole"));
+  if (!scopeRows.some(({ scopeRole }) => scopeRole === "portfolio")) return false;
+  const centreScopeIds = new Set(scopeRows.flatMap(({ scopeRole, scopeId }) =>
+    scopeRole === "centre" && typeof scopeId === "string" ? [scopeId] : []));
+  if (centreScopeIds.size === 0) return false;
+  return [...text.matchAll(/\b(\d{1,3})\s+[Cc]entres?\b/gu)]
+    .some((match) => Number(match[1]) !== centreScopeIds.size);
+};
+
+const hasMislabeledSpikeImpact = (
+  text: string,
+  evidence: PreschoolSectionPack["evidence"],
+): boolean => {
+  const pairs = evidence.flatMap(({ value }) => collectSpikeMetricPairs(value));
+  if (pairs.length === 0 || !/\b(?:spike|event|usage|used|consumption)\b/iu.test(text)) return false;
+  return [...text.matchAll(NUMBER_TOKEN)].some((match) => {
+    const claimed = Number(match[0].replaceAll(",", ""));
+    const precision = match[0].includes(".") ? match[0].length - match[0].indexOf(".") - 1 : 0;
+    const isImpact = pairs.some(({ impactKwh, usageKwh }) =>
+      reportedNumberMatches(impactKwh, claimed, precision)
+      && !reportedNumberMatches(usageKwh, claimed, precision));
+    if (!isImpact) return false;
+    const start = Math.max(0, match.index! - 36);
+    const end = Math.min(text.length, match.index! + match[0].length + 56);
+    const context = text.slice(start, end);
+    return !/\b(?:impact|excess|increment(?:al)?|avoidable)\b|\b(?:above|over)\s+(?:(?:its|the)\s+)?(?:same-hour\s+)?baseline\b/iu
+      .test(context);
+  });
+};
+
+const collectRecordsForKey = (value: unknown, key: string): Record<string, unknown>[] => {
+  if (Array.isArray(value)) return value.flatMap((entry) => collectRecordsForKey(entry, key));
+  if (!isRecord(value)) return [];
+  return [
+    ...(key in value ? [value] : []),
+    ...Object.values(value).flatMap((entry) => collectRecordsForKey(entry, key)),
+  ];
+};
+
+const collectSpikeMetricPairs = (value: unknown): Array<{ usageKwh: number; impactKwh: number }> => {
+  if (Array.isArray(value)) return value.flatMap(collectSpikeMetricPairs);
+  if (!isRecord(value)) return [];
+  const own = typeof value.usageKwh === "number" && typeof value.impactKwh === "number"
+    ? [{ usageKwh: value.usageKwh, impactKwh: value.impactKwh }]
+    : [];
+  return [...own, ...Object.values(value).flatMap(collectSpikeMetricPairs)];
 };
 
 const hasDownwardQualifierNear = (text: string, tokenIndex: number, tokenLength: number): boolean =>

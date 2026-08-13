@@ -75,6 +75,9 @@ describe("Preschool Section Interpreter v4", () => {
     expect(prompt).toContain("novel angle, relevance, urgency, contrarian value, and verifiability");
     expect(prompt).toContain("preserves that source order");
     expect(prompt).toContain("Do not invent an alert");
+    expect(prompt).toContain("usageKwh is total interval energy");
+    expect(prompt).toContain("one Portfolio row is not a Centre");
+    expect(prompt).toContain("could, may, might, appears, or recommends");
     expect(prompt).not.toContain("allowedNextChecks");
     expect(prompt).not.toContain('"kind"');
   });
@@ -277,6 +280,136 @@ describe("Preschool Section Interpreter v4", () => {
         text: "Closed-hour use was **3,104 kWh**. Review the schedule.",
         evidenceRefs: ["evidence:standby-wastage:1"],
       },
+    });
+  });
+
+  it("downgrades a conditional observed candidate to inferred without discarding the useful angle", () => {
+    const pack = packV2("standby-wastage", 1);
+    const result = materializePreschoolSectionResultV4({
+      answer: JSON.stringify({
+        sectionId: "standby-wastage",
+        status: "available",
+        summary: {
+          text: "The verified Section evidence is available.",
+          evidenceRefs: ["evidence:standby-wastage:1"],
+        },
+        candidates: [{
+          title: "Possible schedule relationship",
+          epistemicStatus: "observed",
+          text: "The verified pattern could indicate a scheduling effect.",
+          evidenceRefs: ["evidence:standby-wastage:1"],
+        }],
+      }),
+      pack,
+      identity: identity("standby-wastage"),
+      runId: "runtime-run-epistemic-calibration",
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      insights: [{
+        title: "Possible schedule relationship",
+        epistemicStatus: "inferred",
+      }],
+    });
+  });
+
+  it("does not turn one Portfolio row plus 30 Centre rows into 31 Centres", () => {
+    const pack = packV2("planning-outlook", 1);
+    pack.evidence[0] = {
+      id: "evidence:planning-outlook:1",
+      label: "Portfolio and Centre outlook scopes",
+      value: {
+        actual: { completeDayCount: 31 },
+        forecast: {
+          scopes: [{ scopeId: "portfolio", scopeRole: "portfolio" }, ...Array.from(
+            { length: 30 },
+            (_, index) => ({ scopeId: `centre-${index + 1}`, scopeRole: "centre" }),
+          )],
+        },
+      },
+      entityRefs: ["portfolio", ...Array.from({ length: 30 }, (_, index) => `centre-${index + 1}`)],
+      evidenceRefs: ["evidence:planning-outlook:1"],
+    };
+    const result = materializePreschoolSectionResultV4({
+      answer: JSON.stringify({
+        sectionId: "planning-outlook",
+        status: "available",
+        summary: {
+          text: "The outlook contains one Portfolio scope and separate Centre scopes.",
+          evidenceRefs: ["evidence:planning-outlook:1"],
+        },
+        candidates: [{
+          title: "Wrong scope count",
+          epistemicStatus: "observed",
+          text: "All 31 Centres are represented in the outlook.",
+          evidenceRefs: ["evidence:planning-outlook:1"],
+        }, {
+          title: "Scope distinction",
+          epistemicStatus: "inferred",
+          text: "The Portfolio is a separate scope from the Centre rows.",
+          evidenceRefs: ["evidence:planning-outlook:1"],
+        }],
+      }),
+      pack,
+      identity: identity("planning-outlook"),
+      runId: "runtime-run-planning-scope-semantics",
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      insights: [{ title: "Scope distinction" }],
+      publication: { discoveredCount: 2, acceptedCount: 1, rejectedCount: 1 },
+    });
+  });
+
+  it("keeps operating-event total energy distinct from excess energy above baseline", () => {
+    const pack = packV2("operating-behaviour", 1);
+    pack.evidence[0] = {
+      id: "evidence:operating-behaviour:1",
+      label: "Centre L operating event",
+      value: {
+        centreCode: "L",
+        name: "Centre L",
+        worstSpike: {
+          usageKwh: 30.847,
+          impactKwh: 26.2093,
+          variancePct: 565.1,
+        },
+      },
+      unit: "kWh, %",
+      entityRefs: ["centre-l"],
+      evidenceRefs: ["evidence:operating-behaviour:1"],
+    };
+    const result = materializePreschoolSectionResultV4({
+      answer: JSON.stringify({
+        sectionId: "operating-behaviour",
+        status: "available",
+        summary: {
+          text: "Centre L recorded the cited operating-hour event.",
+          evidenceRefs: ["evidence:operating-behaviour:1"],
+        },
+        candidates: [{
+          title: "Mislabeled event magnitude",
+          epistemicStatus: "observed",
+          text: "Centre L's largest operating spike was 26.2 kWh.",
+          evidenceRefs: ["evidence:operating-behaviour:1"],
+        }, {
+          title: "Total and excess are distinct",
+          epistemicStatus: "observed",
+          text: "Centre L used 30.8 kWh during the interval; 26.2 kWh was above its same-hour baseline.",
+          evidenceRefs: ["evidence:operating-behaviour:1"],
+        }],
+      }),
+      pack,
+      identity: identity("operating-behaviour"),
+      runId: "runtime-run-operating-metric-semantics",
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      insights: [{ title: "Total and excess are distinct" }],
+      publication: { discoveredCount: 2, acceptedCount: 1, rejectedCount: 1 },
     });
   });
 
