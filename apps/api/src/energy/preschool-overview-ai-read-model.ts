@@ -151,6 +151,11 @@ const parseSectionResult = (
     || parsed.packRevision !== identity.analysisPackRevision
     || !isRecord(parsed.capability)
     || parsed.capability.revision !== identity.capabilityRevision
+    || parsed.capability.mode !== "scoped-read-only"
+    || !Array.isArray(parsed.capability.tools)
+    || !sameSectionTools(parsed.sectionId, parsed.capability.tools)
+    || !Array.isArray(parsed.toolAudits)
+    || !validSectionToolAudits(parsed.toolAudits, parsed.runId, parsed.capability.tools)
     || !sameValueArtifactBinding(parsed.binding, identity)
     || !Array.isArray(parsed.insights)
     || !isRecord(parsed.publication)
@@ -165,6 +170,32 @@ const parseSectionResult = (
     || !parsed.summary.text.trim()
     || !Array.isArray(parsed.summary.evidenceRefs)) return null;
   return parsed as unknown as PreschoolSectionInterpretationResult;
+};
+
+const SECTION_INSIGHT_TOOLS = {
+  "centre-benchmark": ["compare_centres", "inspect_related_section_signals"],
+  "standby-wastage": ["inspect_time_pattern", "inspect_load_composition", "inspect_related_section_signals"],
+  "operating-behaviour": ["inspect_time_pattern", "inspect_load_composition", "inspect_related_section_signals"],
+  "planning-outlook": ["inspect_related_section_signals"],
+} as const;
+
+const sameSectionTools = (sectionId: unknown, tools: unknown[]): boolean => {
+  if (typeof sectionId !== "string" || !(sectionId in SECTION_INSIGHT_TOOLS)) return false;
+  const expected = SECTION_INSIGHT_TOOLS[sectionId as keyof typeof SECTION_INSIGHT_TOOLS];
+  return tools.length === expected.length && tools.every((tool, index) => tool === expected[index]);
+};
+
+const validSectionToolAudits = (audits: unknown[], runId: unknown, tools: unknown[]): boolean => {
+  if (!audits.every((audit) => isRecord(audit)
+    && nonEmptyString(audit.auditId)
+    && audit.runId === runId
+    && nonEmptyString(audit.toolCallId)
+    && tools.includes(audit.toolName)
+    && audit.sourcePackRevision === "preschool-section-pack-v2"
+    && uniqueNonEmptyStrings(audit.evidenceRefs))) return false;
+  const records = audits as Array<Record<string, unknown>>;
+  return new Set(records.map(({ auditId }) => auditId)).size === records.length
+    && new Set(records.map(({ toolCallId }) => toolCallId)).size === records.length;
 };
 
 const parseSectionResultV3 = (
@@ -234,14 +265,59 @@ const parseExecutiveResultV4 = (
   if (parsed.status === "empty") {
     if (parsed.sourceSectionArtifactIds.length !== 0
       || parsed.summary !== undefined
+      || parsed.overviewEvidence !== undefined
       || parsed.findings.length !== 0) return null;
   } else if (parsed.sourceSectionArtifactIds.length === 0
     || !isRecord(parsed.summary)
     || typeof parsed.summary.text !== "string"
     || !parsed.summary.text.trim()
-    || !Array.isArray(parsed.summary.evidenceRefs)) return null;
+    || !Array.isArray(parsed.summary.evidenceRefs)
+    || (parsed.overviewEvidence !== undefined
+      && !validOverviewEvidenceLineageV4(parsed.overviewEvidence, identity))) return null;
   return parsed as unknown as PreschoolExecutiveSynthesisResult;
 };
+
+const validOverviewEvidenceLineageV4 = (
+  value: unknown,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): boolean => {
+  const factIds = isRecord(value) ? value.factIds : undefined;
+  const facts = isRecord(value) ? value.facts : undefined;
+  if (!isRecord(value) || !isRecord(value.pins)
+    || value.contract !== "analysis-context-evidence@1"
+    || typeof value.sourceId !== "string" || !value.sourceId.trim()
+    || value.pins.workspaceId !== identity.workspaceId
+    || value.pins.projectId !== identity.projectId
+    || value.pins.scopeId !== identity.scopeId
+    || value.pins.dataSnapshotId !== identity.dataSnapshotId
+    || value.pins.projectReleaseId !== identity.projectReleaseId
+    || typeof value.pins.dataCutoff !== "string" || !value.pins.dataCutoff.trim()
+    || typeof value.pins.metricVersion !== "string" || !value.pins.metricVersion.trim()
+    || !uniqueNonEmptyStrings(factIds)
+    || !Array.isArray(facts)
+    || facts.length !== factIds.length) return false;
+  return facts.every((fact, index) => isRecord(fact)
+    && fact.id === factIds[index]
+    && typeof fact.label === "string" && Boolean(fact.label.trim())
+    && typeof fact.metricId === "string" && Boolean(fact.metricId.trim())
+    && (typeof fact.value === "string"
+      || typeof fact.value === "number"
+      || typeof fact.value === "boolean"
+      || fact.value === null)
+    && (fact.unit === undefined || (typeof fact.unit === "string" && Boolean(fact.unit.trim())))
+    && (fact.status === "confirmed" || fact.status === "provisional" || fact.status === "partial")
+    && uniqueNonEmptyStrings(fact.evidenceRefs)
+    && isRecord(fact.dimensions)
+    && Object.values(fact.dimensions).every((dimension) => typeof dimension === "string"));
+};
+
+const uniqueNonEmptyStrings = (value: unknown): value is string[] => Array.isArray(value)
+  && value.length > 0
+  && value.every((item) => typeof item === "string" && Boolean(item.trim()))
+  && new Set(value).size === value.length;
+
+const nonEmptyString = (value: unknown): value is string =>
+  typeof value === "string" && value.trim().length > 0;
 
 const parseJson = (value: string): unknown => {
   try {

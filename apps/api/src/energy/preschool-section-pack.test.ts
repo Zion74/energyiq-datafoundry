@@ -33,9 +33,9 @@ describe("assemblePreschoolSectionPacks", () => {
       pack.contract.id === "preschool-section-pack"
       && pack.contract.revision === "preschool-section-pack-v2"
       && pack.analysisGoal.length > 0
-      && pack.capabilities.revision === "pack-only-v1"
-      && pack.capabilities.mode === "pack-only"
-      && pack.capabilities.tools.length === 0
+      && pack.capabilities.revision === "scoped-read-only-v1"
+      && pack.capabilities.mode === "scoped-read-only"
+      && pack.capabilities.tools.includes("inspect_related_section_signals")
     ))).toBe(true);
     expect(packs.every((pack) => pack.alreadyPresentedFacts.every((fact) => (
       fact.id.length > 0

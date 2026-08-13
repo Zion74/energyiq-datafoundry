@@ -19,11 +19,13 @@ import { composePreschoolOverviewAiReadModel } from "./preschool-overview-ai-rea
 import {
   PRESCHOOL_SECTION_IDS,
   isPreschoolSectionId,
+  preschoolOverviewAiBindingFromIdentity,
   type PreschoolOverviewAiReadModel,
   type PreschoolSectionId,
 } from "./preschool-overview-ai-contracts.js";
 import { createPreschoolSectionInterpreter, type PreschoolSectionInterpreterRunner } from "./preschool-section-interpreter.js";
 import { assemblePreschoolSectionPacksV2 } from "./preschool-section-pack-v2.js";
+import { createProjectAnalysisContextEvidenceCatalog } from "./project-analysis-context-evidence.js";
 import { resolveProjectAnalysis, type ProjectAnalysisSnapshot } from "./project-analysis-resolver.js";
 
 export type PreschoolOverviewAiRetryTarget = PreschoolSectionId | "executive-synthesis";
@@ -138,6 +140,10 @@ export const createPreschoolOverviewAiPageWorkflow = (input: {
           baseIdentity,
           user,
           retry: retry && (retryTarget === undefined || retryTarget === "executive-synthesis"),
+          authoritativeOverviewEvidence: {
+            binding: preschoolOverviewAiBindingFromIdentity(baseIdentity),
+            catalog: createProjectAnalysisContextEvidenceCatalog(snapshot),
+          },
         });
       }
       requireModelRuntimeIdentity(input.metadataStore, baseIdentity);

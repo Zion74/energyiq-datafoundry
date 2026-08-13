@@ -47,13 +47,23 @@ describe("Preschool Section publication", () => {
       },
       providerProfileId: "profile-1",
       runId: "run-1",
-      capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
+      capability: {
+        revision: "scoped-read-only-v1",
+        mode: "scoped-read-only",
+        tools: ["compare_centres", "inspect_related_section_signals"],
+      },
+      toolAudits: [],
     });
 
     expect(result).toMatchObject({
       status: "available",
       insights: [],
-      capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
+      capability: {
+        revision: "scoped-read-only-v1",
+        mode: "scoped-read-only",
+        tools: ["compare_centres", "inspect_related_section_signals"],
+      },
+      toolAudits: [],
       publication: {
         discoveredCount: 0,
         acceptedCount: 0,
@@ -96,7 +106,12 @@ describe("Preschool Section publication", () => {
       accepted,
       providerProfileId: "profile-1",
       runId: "run-1",
-      capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
+      capability: {
+        revision: "scoped-read-only-v1",
+        mode: "scoped-read-only",
+        tools: ["inspect_time_pattern", "inspect_load_composition", "inspect_related_section_signals"],
+      },
+      toolAudits: [],
     });
 
     const result = publish();
@@ -109,7 +124,12 @@ describe("Preschool Section publication", () => {
         revision: "preschool-section-interpretation-v4",
       },
       packRevision: "v2",
-      capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
+      capability: {
+        revision: "scoped-read-only-v1",
+        mode: "scoped-read-only",
+        tools: ["inspect_time_pattern", "inspect_load_composition", "inspect_related_section_signals"],
+      },
+      toolAudits: [],
       insights: [
         {
           id: "preschool:standby-wastage:candidate:1",

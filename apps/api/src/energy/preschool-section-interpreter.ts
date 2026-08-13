@@ -19,9 +19,11 @@ import {
   type PreschoolSectionInterpretationResult,
   type PreschoolSectionInterpretationResultV4,
   type PreschoolSectionInsightCandidateV4,
+  type PreschoolSectionInsightToolNameV4,
   type PreschoolSectionKeyPoint,
   type PreschoolSectionPack,
   type PreschoolSectionSummaryV4,
+  type PreschoolSectionToolAuditV4,
 } from "./preschool-overview-ai-contracts.js";
 import { acceptPreschoolSectionInterpretation } from "./preschool-section-acceptance.js";
 import {
@@ -29,6 +31,11 @@ import {
   projectPreschoolSectionPackV2ForModel,
 } from "./preschool-section-discovery.js";
 import type { PreschoolSectionPackV2 } from "./preschool-section-pack-v2.js";
+import {
+  createPreschoolSectionInsightRuntime,
+  type PreschoolSectionInsightToolInvocation,
+  type PreschoolSectionInsightToolResult,
+} from "./preschool-section-insight-runtime.js";
 import { publishPreschoolSectionInterpretation } from "./preschool-section-publication.js";
 import { resolveOverviewAiStageStructuredOutputV4 } from "./preschool-overview-ai-structured-output.js";
 
@@ -53,6 +60,10 @@ export type PreschoolSectionInterpreterRunner = (input: {
   runId: string;
   sessionId: string;
   structuredOutput?: NonNullable<ReturnType<typeof resolveOverviewAiStageStructuredOutputV4>>;
+  sectionInsightTools?: readonly PreschoolSectionInsightToolNameV4[];
+  invokeSectionInsightTool?: (
+    invocation: PreschoolSectionInsightToolInvocation,
+  ) => Promise<PreschoolSectionInsightToolResult>;
 }) => Promise<{ answer: string; runId: string; sessionId: string }>;
 
 /** @deprecated Test/replay compatibility only; production uses one runner call per Section. */
@@ -129,6 +140,14 @@ export const createPreschoolSectionInterpreter = (input: {
       const pack = packBySection.get(unit.sectionId)!;
       const sessionId = `preschool-section-interpreter-${unit.sectionId}-${randomUUID()}`;
       const runId = `preschool-section-interpreter-${unit.sectionId}-${randomUUID()}`;
+      const toolAudits: PreschoolSectionToolAuditV4[] = [];
+      const insightRuntime = isPackV2(pack)
+        ? createPreschoolSectionInsightRuntime({
+            pack,
+            runId,
+            createAuditId: () => `preschool-section-tool-audit-${randomUUID()}`,
+          })
+        : undefined;
       try {
         const response = await runSection({
           prompt: isPackV2(pack)
@@ -140,7 +159,15 @@ export const createPreschoolSectionInterpreter = (input: {
           runId,
           sessionId,
           ...(isPackV2(pack)
-            ? { structuredOutput: resolveOverviewAiStageStructuredOutputV4("section-interpreter")! }
+            ? {
+                structuredOutput: resolveOverviewAiStageStructuredOutputV4("section-interpreter")!,
+                sectionInsightTools: [...pack.capabilities.tools],
+                invokeSectionInsightTool: async (invocation: PreschoolSectionInsightToolInvocation) => {
+                  const result = await insightRuntime!.invoke(invocation);
+                  toolAudits.push(structuredClone(result.audit));
+                  return result;
+                },
+              }
             : {}),
         });
         if (response.runId !== runId || response.sessionId !== sessionId) {
@@ -152,6 +179,7 @@ export const createPreschoolSectionInterpreter = (input: {
               pack,
               identity: unit.identity,
               runId,
+              toolAudits,
             })
           : materializeSectionResult({
               candidate: parseSectionResponse(response.answer, unit.sectionId),
@@ -235,7 +263,8 @@ export const buildPreschoolSectionDiscoveryPrompt = (
   const projection = projectPreschoolSectionPackV2ForModel(pack);
   const prompt = [
     "You are producing a concise Summary plus optional Insight candidates for one Preschool Overview Section.",
-    "Use the complete inline Pack projection. No tool call or tool event is required or available for pack-only-v1.",
+    "Use the complete inline Pack projection. Scoped read-only tools may inspect only server-owned Pack Evidence; use them only when they add value.",
+    `Available scoped read-only tools: ${JSON.stringify(pack.capabilities.tools)}. Tool arguments must contain only the documented controlled parameters; never submit Pack, binding, Section, Snapshot, Release, period, SQL, URL, network, or write instructions.`,
     "The Pack is a factual boundary, not a writing template: identify the most useful angles instead of filling fixed What, Why, or Action slots.",
     "You may connect supplied facts and propose relevant hypotheses. Mark direct Pack facts as observed, supported relationships as inferred, and plausible but unverified lines of inquiry as speculative.",
     "Do not invent observed facts, entities, numbers, dates, units, or relationships. A speculative explanation must remain clearly conditional and must not be presented as a confirmed safety alert.",
@@ -397,6 +426,7 @@ export const materializePreschoolSectionResultV4 = (input: {
   pack: PreschoolSectionPackV2;
   identity: EnergyIqOverviewAiArtifactIdentity;
   runId: string;
+  toolAudits?: PreschoolSectionToolAuditV4[];
 }): PreschoolSectionInterpretationResultV4 => {
   const binding = preschoolOverviewAiBindingFromIdentity(input.identity);
   const discovery = parsePreschoolSectionDiscoveryV4({
@@ -420,6 +450,7 @@ export const materializePreschoolSectionResultV4 = (input: {
     providerProfileId: input.identity.modelProfileId,
     runId: input.runId,
     capability: input.pack.capabilities,
+    toolAudits: input.toolAudits ?? [],
   });
 };
 

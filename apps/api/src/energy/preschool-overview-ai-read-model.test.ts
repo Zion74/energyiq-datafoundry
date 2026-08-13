@@ -98,7 +98,12 @@ describe("composePreschoolOverviewAiReadModel", () => {
           : binding,
         sectionId: "centre-benchmark",
         packRevision: "v2",
-        capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
+        capability: {
+          revision: "scoped-read-only-v1",
+          mode: "scoped-read-only",
+          tools: sectionTools("centre-benchmark"),
+        },
+        toolAudits: [],
         summary: {
           text: "A stored result with a mismatched binding must not be exposed.",
           evidenceRefs: ["evidence:1"],
@@ -269,8 +274,16 @@ const sectionIdentity = (
 
 type SectionV4Identity = EnergyIqOverviewAiArtifactIdentity & {
   identityContractRevision: "v4";
-  capabilityRevision: "pack-only-v1";
+  capabilityRevision: "scoped-read-only-v1";
   publicationRevision: "v1";
+};
+
+const sectionTools = (sectionId: PreschoolSectionId) => {
+  if (sectionId === "centre-benchmark") return ["compare_centres", "inspect_related_section_signals"] as const;
+  if (sectionId === "standby-wastage" || sectionId === "operating-behaviour") {
+    return ["inspect_time_pattern", "inspect_load_composition", "inspect_related_section_signals"] as const;
+  }
+  return ["inspect_related_section_signals"] as const;
 };
 
 const sectionIdentityV4 = (
@@ -306,7 +319,12 @@ const completeSection = (
       binding: preschoolOverviewAiBindingFromIdentity(unitIdentity),
       sectionId,
       packRevision: "v2",
-      capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
+      capability: {
+        revision: "scoped-read-only-v1",
+        mode: "scoped-read-only",
+        tools: sectionTools(sectionId),
+      },
+      toolAudits: [],
       ...(status === "available" ? {
         summary: {
           text: "Verified evidence supports a focused review.",

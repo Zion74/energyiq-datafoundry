@@ -64,6 +64,7 @@ import {
 import { GoalRuntimeAdapter, type GoalRequest } from "./memory/goal-runtime-adapter.js";
 import { createDataFoundryToolRegistry, isChartRequested } from "./tools/data-tools.js";
 import { GovernedToolFactory } from "./tools/governed-tool-factory.js";
+import { TrustedStageToolObservationAdapter } from "./context/tool-observation/adapters/trusted-stage-tool-observation-adapter.js";
 import {
   createOverviewAiCandidateSubmissionTool,
   OVERVIEW_AI_CANDIDATE_SUBMISSION_TOOL_NAME,
@@ -282,6 +283,8 @@ export type CreateDataFoundryInput = {
   modelProvider: Exclude<ModelProvider, { kind: "mock" }>;
   runContext: AgentRunContext;
   mcpTools?: Record<string, ToolAction<any, any, any, any, any>>;
+  /** Server-owned stage tools. Never populate from AG-UI tools, MCP configuration, or forwarded props. */
+  trustedStageTools?: Record<string, ToolAction<any, any, any, any, any>>;
   sessionOutputService?: SessionOutputService;
   mcpToolNames?: string[];
   selectedSkills?: SkillRecord[];
@@ -342,6 +345,9 @@ export const createDataFoundry = async (
   destroyWorkspace(): Promise<void>;
 }> => {
   const energyIqRun = Boolean(input.runContext.energy_query_context);
+  if (input.trustedStageTools && !energyIqRun) {
+    throw new Error("TRUSTED_STAGE_TOOLS_REQUIRE_ENERGYIQ_RUN");
+  }
   const maxSteps = AGENT_MAX_STEPS;
   const toolObservationBoundary = createToolObservationBoundary({
     identity: {
@@ -350,6 +356,12 @@ export const createDataFoundry = async (
       runId: input.runContext.run_id
     },
     includeKnowledge: Boolean(input.knowledgeService),
+    ...(input.trustedStageTools
+      ? {
+          additionalAdapters: Object.keys(input.trustedStageTools)
+            .map((toolName) => new TrustedStageToolObservationAdapter(toolName)),
+        }
+      : {}),
     ...(input.mcpToolNames?.length ? { mcpToolNames: input.mcpToolNames } : {})
   });
   const contextRunState = toolObservationBoundary.contextRunState;
@@ -539,7 +551,8 @@ export const createDataFoundry = async (
   const selectedMcpTools = energyIqRun ? {} : (input.mcpTools ?? {});
   const toolsBeforeStageExclusions = {
     ...harnessSelectedTools,
-    ...selectedMcpTools
+    ...selectedMcpTools,
+    ...(input.trustedStageTools ?? {})
   };
   const excludedToolNames = new Set(input.excludedToolNames ?? []);
   const selectedTools = input.disableTools
@@ -757,6 +770,7 @@ export const createDataFoundry = async (
         ...Object.keys(protocolHandoffTools),
       ],
       mcpToolNames: input.mcpToolNames ?? [],
+      trustedStageToolNames: Object.keys(input.trustedStageTools ?? {}),
       protocolId: protocolState.protocolId,
       analysisRequirements,
       workspaceAttachments
@@ -921,6 +935,7 @@ type AgentInstructionsInput = {
   /** builtin task_* 工具是否启用（取决于是否注入 taskStateRuntime）。 */
   taskToolsEnabled: boolean;
   toolNames: string[];
+  trustedStageToolNames: string[];
   /** MCP tools injected through AG-UI clientTools for this run. */
   mcpToolNames: string[];
   protocolId: string;
@@ -945,6 +960,12 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
   const toolGroups: string[] = dataTools.length > 0 ? [`Data tools: ${dataTools.join(", ")}.`] : [];
   if (input.mcpToolNames.length > 0) {
     toolGroups.push(`MCP tools: ${input.mcpToolNames.join(", ")}.`);
+  }
+  if (input.trustedStageToolNames.length > 0) {
+    toolGroups.push(
+      `Server-scoped read-only tools: ${input.trustedStageToolNames.join(", ")}. `
+      + "Their identity and Evidence boundary are server-owned; pass only each tool's declared controlled arguments.",
+    );
   }
   if ((context.enabled_knowledge_ids?.length ?? 0) > 0 && enabled("retrieve_knowledge")) {
     toolGroups.push("Knowledge tools: retrieve_knowledge.");

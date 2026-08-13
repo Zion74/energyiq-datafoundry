@@ -694,6 +694,7 @@ const isRenderableExecutiveUnit = (
 
 type ExecutiveLineage = {
   sectionByArtifactId: ReadonlyMap<string, PreschoolOverviewAiSectionIdDto>;
+  evidenceRefsBySection: ReadonlyMap<PreschoolOverviewAiSectionIdDto, ReadonlySet<string>>;
   hasDuplicateTerminalArtifactIds: boolean;
 };
 
@@ -713,13 +714,23 @@ const buildExecutiveLineage = (
   }
 
   const sectionByArtifactId = new Map<string, PreschoolOverviewAiSectionIdDto>();
+  const evidenceRefsBySection = new Map<PreschoolOverviewAiSectionIdDto, ReadonlySet<string>>();
   for (const sectionId of requiredSectionIds) {
     const unit = value.sections[sectionId];
-    if (!isRenderableSectionUnit(unit, sectionId, value.binding, mode) || unit.status !== "available") continue;
-    if (terminalOwners.get(unit.artifactId)?.length === 1) sectionByArtifactId.set(unit.artifactId, sectionId);
+    if (!isRenderableSectionUnit(unit, sectionId, value.binding, mode)
+      || unit.status !== "available"
+      || !isV4SectionResult(unit.result, "available")) continue;
+    if (terminalOwners.get(unit.artifactId)?.length === 1) {
+      sectionByArtifactId.set(unit.artifactId, sectionId);
+      evidenceRefsBySection.set(sectionId, new Set([
+        ...unit.result.summary.evidenceRefs,
+        ...unit.result.insights.flatMap(({ evidenceRefs }) => evidenceRefs),
+      ]));
+    }
   }
   return {
     sectionByArtifactId,
+    evidenceRefsBySection,
     hasDuplicateTerminalArtifactIds: [...terminalOwners.values()].some((owners) => owners.length > 1),
   };
 };
@@ -737,9 +748,44 @@ const executiveUnitLineageIsValid = (
     if (!sectionId) return false;
     contributingSectionIds.add(sectionId);
   }
-  return value.status === "empty"
-    || value.result.findings.every((finding) =>
-      finding.sectionIds.every((sectionId) => contributingSectionIds.has(sectionId)));
+  if (value.status === "empty") return true;
+  const overviewFactIds = new Set(value.result.overviewEvidence?.factIds ?? []);
+  const usedOverviewFactIds = new Set<string>();
+  const evidenceOwners = new Map<string, Set<PreschoolOverviewAiSectionIdDto>>();
+  for (const sectionId of contributingSectionIds) {
+    for (const reference of lineage.evidenceRefsBySection.get(sectionId) ?? []) {
+      const owners = evidenceOwners.get(reference) ?? new Set<PreschoolOverviewAiSectionIdDto>();
+      owners.add(sectionId);
+      evidenceOwners.set(reference, owners);
+    }
+  }
+  const consumeOverviewOrSectionReference = (reference: string): ReadonlySet<PreschoolOverviewAiSectionIdDto> | null => {
+    const owners = evidenceOwners.get(reference);
+    if (owners) return owners;
+    if (overviewFactIds.has(reference)) {
+      usedOverviewFactIds.add(reference);
+      return new Set();
+    }
+    return null;
+  };
+  if (value.result.summary.evidenceRefs.some((reference) => !consumeOverviewOrSectionReference(reference))) {
+    return false;
+  }
+  for (const finding of value.result.findings) {
+    const declared = new Set(finding.sectionIds);
+    if ([...declared].some((sectionId) => !contributingSectionIds.has(sectionId))) return false;
+    const evidenceBackedSections = new Set<PreschoolOverviewAiSectionIdDto>();
+    for (const reference of finding.evidenceRefs) {
+      const owners = consumeOverviewOrSectionReference(reference);
+      if (!owners) return false;
+      for (const owner of owners) {
+        if (declared.has(owner)) evidenceBackedSections.add(owner);
+      }
+      if (owners.size > 0 && ![...owners].some((owner) => declared.has(owner))) return false;
+    }
+    if ([...declared].some((sectionId) => !evidenceBackedSections.has(sectionId))) return false;
+  }
+  return usedOverviewFactIds.size === overviewFactIds.size;
 };
 
 const isAvailableResultRenderableForSlot = (
@@ -864,12 +910,15 @@ const isV4ExecutiveResult = (
   if (value.status === "available") {
     return isUniqueStringArray(value.sourceSectionArtifactIds, false, 4)
       && isSummary(value.summary)
+      && (value.overviewEvidence === undefined
+        || isExecutiveOverviewEvidenceLineage(value.overviewEvidence, value.binding))
       && value.findings.every(isKeyFinding);
   }
   return value.status === "empty"
     && isUniqueStringArray(value.sourceSectionArtifactIds, true, 4)
     && value.findings.length === 0
-    && value.summary === undefined;
+    && value.summary === undefined
+    && value.overviewEvidence === undefined;
 };
 
 const isV3ExecutiveResult = (
@@ -957,6 +1006,41 @@ const isValidBinding = (value: unknown): value is PreschoolOverviewAiBindingDto 
 
 const isSummary = (value: unknown): boolean =>
   isRecord(value) && isNonEmptyString(value.text) && isUniqueStringArray(value.evidenceRefs);
+
+const isExecutiveOverviewEvidenceLineage = (
+  value: unknown,
+  binding: unknown,
+): boolean => {
+  const factIds = isRecord(value) ? value.factIds : undefined;
+  const facts = isRecord(value) ? value.facts : undefined;
+  if (!isRecord(value) || !isRecord(value.pins) || !isValidBinding(binding)
+    || value.contract !== "analysis-context-evidence@1"
+    || !isNonEmptyString(value.sourceId)
+    || value.pins.workspaceId !== binding.workspaceId
+    || value.pins.projectId !== binding.projectId
+    || value.pins.scopeId !== binding.scopeId
+    || value.pins.dataSnapshotId !== binding.dataSnapshotId
+    || value.pins.projectReleaseId !== binding.projectReleaseId
+    || !isNonEmptyString(value.pins.dataCutoff)
+    || !isNonEmptyString(value.pins.metricVersion)
+    || !isUniqueStringArray(factIds)
+    || !Array.isArray(facts)
+    || facts.length !== factIds.length) return false;
+  return facts.every((fact, index) => isRecord(fact)
+    && fact.id === factIds[index]
+    && isNonEmptyString(fact.id)
+    && isNonEmptyString(fact.label)
+    && isNonEmptyString(fact.metricId)
+    && (typeof fact.value === "string"
+      || typeof fact.value === "number"
+      || typeof fact.value === "boolean"
+      || fact.value === null)
+    && isOptionalString(fact.unit)
+    && (fact.status === "confirmed" || fact.status === "provisional" || fact.status === "partial")
+    && isUniqueStringArray(fact.evidenceRefs)
+    && isRecord(fact.dimensions)
+    && Object.values(fact.dimensions).every((dimension) => typeof dimension === "string"));
+};
 
 const isSectionInsight = (value: unknown): boolean =>
   isRecord(value)

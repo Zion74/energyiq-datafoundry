@@ -1849,7 +1849,10 @@ const validPreschoolSavedUnit = (
     return value.result.contract.revision === "preschool-section-interpretation-v4"
       && value.result.packRevision === "v2"
       && isRecord(value.result.capability)
-      && value.result.capability.revision === "pack-only-v1"
+      && value.result.capability.revision === "scoped-read-only-v1"
+      && value.result.capability.mode === "scoped-read-only"
+      && Array.isArray(value.result.capability.tools)
+      && Array.isArray(value.result.toolAudits)
       && Array.isArray(value.result.insights)
       && isRecord(value.result.publication)
       && value.result.publication.policyId === "preschool-section-publication"

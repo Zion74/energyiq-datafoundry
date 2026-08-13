@@ -29,7 +29,7 @@ export type PreschoolSectionModelProjectionV1 = {
     sourcePackRevision: "preschool-section-pack-v2";
     factAccess: "inline-complete";
     omittedEvidenceCount: 0;
-    tools: [];
+    tools: PreschoolSectionPackV2["capabilities"]["tools"];
   };
 };
 
@@ -70,15 +70,15 @@ export const projectPreschoolSectionPackV2ForModel = (
     limitations: [...pack.limitations],
     missingEvidence: [...pack.missingEvidence],
     capabilities: {
-      revision: "pack-only-v1",
-      mode: "pack-only",
-      tools: [],
+      revision: pack.capabilities.revision,
+      mode: pack.capabilities.mode,
+      tools: [...pack.capabilities.tools],
     },
     capabilityBoundary: {
       sourcePackRevision: "preschool-section-pack-v2",
       factAccess: "inline-complete",
       omittedEvidenceCount: 0,
-      tools: [],
+      tools: [...pack.capabilities.tools],
     },
   };
   if (JSON.stringify(projection).length > MAX_PRESCHOOL_SECTION_MODEL_PROJECTION_CHARS) {

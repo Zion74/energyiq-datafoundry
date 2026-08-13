@@ -266,10 +266,10 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
         { ...current, identityContractRevision: "v5" } as SectionV4Identity,
         { ...current, analysisPackRevision: "v3" },
         { ...current, outputContractRevision: "preschool-section-interpretation-v5" },
-        { ...current, validatorRevision: "acceptance-validator-v2" },
-        { ...current, workflowRevision: "discover-accept-publish-v2" },
-        { ...current, investigatorPromptRevision: "discovery-prompt-v2" },
-        { ...current, capabilityRevision: "pack-only-v2" } as SectionV4Identity,
+        { ...current, validatorRevision: "acceptance-validator-v3" },
+        { ...current, workflowRevision: "discover-tools-accept-publish-v2" },
+        { ...current, investigatorPromptRevision: "discovery-prompt-v3" },
+        { ...current, capabilityRevision: "scoped-read-only-v2" } as SectionV4Identity,
         { ...current, publicationRevision: "v2" } as SectionV4Identity,
         { ...current, dataSnapshotId: "snapshot-v4-next" },
         { ...current, projectReleaseId: "release-v2" },
@@ -332,7 +332,7 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
       const mismatchedResult = sectionV4Result(mismatchedIdentity, "available");
       expect(() => completeSectionV4(store, mismatchedIdentity, {
         ...mismatchedResult,
-        capability: { revision: "pack-only-v2" },
+        capability: { revision: "scoped-read-only-v2" },
       })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
     } finally {
       metadata?.close();
@@ -355,11 +355,11 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
 
       reject("capability-mode", (result) => ({
         ...result,
-        capability: { revision: "pack-only-v1", mode: "tool-enabled", tools: [] },
+        capability: { revision: "scoped-read-only-v1", mode: "pack-only", tools: [] },
       }));
       reject("capability-tools", (result) => ({
         ...result,
-        capability: { revision: "pack-only-v1", mode: "pack-only", tools: ["compare_centres"] },
+        capability: { revision: "scoped-read-only-v1", mode: "scoped-read-only", tools: ["compare_centres"] },
       }));
       reject("summary-empty-evidence", (result) => ({
         ...result,
@@ -705,10 +705,10 @@ const sectionV4Identity = (
   analysisPackId: "preschool-section-pack",
   analysisPackRevision: "v2",
   outputContractRevision: "preschool-section-interpretation-v4",
-  validatorRevision: "acceptance-validator-v1",
-  workflowRevision: "discover-accept-publish-v1",
-  investigatorPromptRevision: "discovery-prompt-v1",
-  capabilityRevision: "pack-only-v1",
+  validatorRevision: "acceptance-validator-v2",
+  workflowRevision: "discover-tools-accept-publish-v1",
+  investigatorPromptRevision: "discovery-prompt-v2",
+  capabilityRevision: "scoped-read-only-v1",
   publicationRevision: "v1",
 });
 
@@ -739,7 +739,12 @@ const sectionV4Result = (
   },
   sectionId: artifactIdentity.targetId,
   packRevision: "v2",
-  capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
+  capability: {
+    revision: "scoped-read-only-v1",
+    mode: "scoped-read-only",
+    tools: sectionV4Tools(artifactIdentity.targetId ?? ""),
+  },
+  toolAudits: [],
   ...(status === "available"
     ? { summary: { text: "The Section has a concise evidence-backed summary.", evidenceRefs: ["evidence:summary"] } }
     : {}),
@@ -754,6 +759,20 @@ const sectionV4Result = (
     suppressedCandidateIds: [],
   },
 });
+
+const sectionV4Tools = (sectionId: string) => {
+  switch (sectionId) {
+    case "centre-benchmark":
+      return ["compare_centres", "inspect_related_section_signals"];
+    case "standby-wastage":
+    case "operating-behaviour":
+      return ["inspect_time_pattern", "inspect_load_composition", "inspect_related_section_signals"];
+    case "planning-outlook":
+      return ["inspect_related_section_signals"];
+    default:
+      return [];
+  }
+};
 
 const sectionV4Insight = (id: string, evidenceRefs: string[]) => ({
   id,
