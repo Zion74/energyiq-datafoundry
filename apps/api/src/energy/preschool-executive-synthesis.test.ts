@@ -611,6 +611,75 @@ describe("Preschool Executive Synthesis", () => {
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
   });
 
+  it("accepts a rounded negative variance expressed as an under-plan magnitude", async () => {
+    const harness = createHarness();
+    completeSectionV4(harness, "planning-outlook");
+    const authoritativeOverviewEvidence = {
+      binding: preschoolOverviewAiBindingFromIdentity(harness.identity),
+      catalog: {
+        contract: "analysis-context-evidence@1" as const,
+        sourceId: "project-analysis-snapshot:preschool-demo:snapshot-current",
+        pins: {
+          workspaceId: harness.identity.workspaceId,
+          projectId: harness.identity.projectId,
+          scopeId: harness.identity.scopeId,
+          dataSnapshotId: harness.identity.dataSnapshotId,
+          dataCutoff: "2026-05-31T23:45:00.000Z",
+          projectReleaseId: harness.identity.projectReleaseId,
+          metricVersion: "energy-v1",
+        },
+        facts: [{
+          id: "analysis.outlook.first_week_variance_kwh",
+          label: "First-week variance from plan",
+          metricId: "energy.plan_variance_kwh",
+          value: -668.86,
+          unit: "kWh",
+          status: "provisional" as const,
+          evidenceRefs: ["query:daily-totals"],
+          dimensions: { sectionId: "planning-outlook" },
+        }],
+      },
+    };
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      revision: "v4",
+      authoritativeOverviewEvidence,
+      runSynthesis: async (input) => ({
+        answer: JSON.stringify({
+          status: "available",
+          summary: {
+            text: "The first week is about **669 kWh under plan**.",
+            evidenceRefs: [
+              "analysis.outlook.first_week_variance_kwh",
+              "evidence:planning-outlook:summary",
+            ],
+          },
+          findings: [{
+            title: "First week is about 669 kWh under plan",
+            text: "This is a provisional planning signal.",
+            sectionIds: ["planning-outlook"],
+            evidenceRefs: [
+              "analysis.outlook.first_week_variance_kwh",
+              "evidence:planning-outlook:insight",
+            ],
+          }],
+        }),
+        runId: input.runId,
+        sessionId: input.sessionId,
+      }),
+    });
+
+    const artifact = await synthesizer.execute({
+      baseIdentity: harness.identity,
+      user: harness.user,
+      retry: false,
+      authoritativeOverviewEvidence,
+    });
+    harness.close();
+
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+  });
+
   it("persists an explicit current Key Findings empty result without Provider when no current-v4 Section contributes", async () => {
     const harness = createHarness();
     completeSectionV4(harness, "centre-benchmark", "empty");

@@ -779,11 +779,19 @@ const collectNumbers = (values: unknown[]): number[] => values.flatMap((value) =
 });
 
 const hasUnsupportedNumber = (text: string, supported: number[]): boolean =>
-  [...text.matchAll(NUMBER_TOKEN)].some(([token]) => {
+  [...text.replaceAll("−", "-").matchAll(NUMBER_TOKEN)].some((match) => {
+    const token = match[0];
     const raw = token.replaceAll(",", "");
     const value = Number(raw);
     const precision = raw.includes(".") ? raw.length - raw.indexOf(".") - 1 : 0;
-    return !supported.some((candidate) => reportedNumberMatches(candidate, value, precision));
+    const exactlySupported = supported.some((candidate) => reportedNumberMatches(candidate, value, precision));
+    const downwardMagnitudeSupported = value >= 0
+      && /\b(?:below|under|lower|down|decrease|decreased|reduction)\b/iu.test(
+        text.slice(Math.max(0, (match.index ?? 0) - 24), (match.index ?? 0) + token.length + 32),
+      )
+      && supported.some((candidate) => candidate < 0
+        && reportedNumberMatches(Math.abs(candidate), value, precision));
+    return !exactlySupported && !downwardMagnitudeSupported;
   });
 
 const reportedNumberMatches = (sourceValue: number, reportedValue: number, precision: number): boolean => {
