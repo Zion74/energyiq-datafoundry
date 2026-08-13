@@ -1858,13 +1858,16 @@ export type PreschoolOverviewAiBindingDto = {
   modelProfileRevision: number;
 };
 
-export type PreschoolSectionInterpretationResultDto = {
+type PreschoolSectionInterpretationResultBaseDto = {
   artifactKind: "section-interpretation";
-  status: "available" | "empty";
   providerProfileId: string;
   runId: string;
   binding: PreschoolOverviewAiBindingDto;
   sectionId: PreschoolOverviewAiSectionIdDto;
+};
+
+export type PreschoolSectionInterpretationV3ResultDto = PreschoolSectionInterpretationResultBaseDto & ({
+  status: "available";
   summary?: string;
   keyPoints: Array<{
     kind: "priority" | "finding" | "meaning" | "next-check";
@@ -1873,28 +1876,97 @@ export type PreschoolSectionInterpretationResultDto = {
     evidenceRefs: string[];
   }>;
   limitation?: string;
+} | {
+  status: "empty";
+  summary?: never;
+  keyPoints: [];
+  limitation?: string;
+});
+
+export type PreschoolSectionInsightDto = {
+  id: string;
+  title: string;
+  label?: string;
+  epistemicStatus: "observed" | "inferred" | "speculative";
+  text: string;
+  evidenceRefs: string[];
+  deepDiveQuestion?: string;
 };
 
-export type PreschoolExecutiveSynthesisResultDto = {
+export type PreschoolSectionInterpretationV4ResultDto = PreschoolSectionInterpretationResultBaseDto & ({
+  status: "available";
+  summary: {
+    text: string;
+    evidenceRefs: string[];
+  };
+  insights: PreschoolSectionInsightDto[];
+  limitation?: string;
+} | {
+  status: "empty";
+  summary?: never;
+  insights: [];
+  limitation?: string;
+});
+
+export type PreschoolSectionInterpretationResultDto =
+  | PreschoolSectionInterpretationV3ResultDto
+  | PreschoolSectionInterpretationV4ResultDto;
+
+type PreschoolExecutiveSynthesisResultBaseDto = {
   artifactKind: "executive-synthesis";
-  status: "available" | "empty";
   providerProfileId: string;
   runId: string;
   binding: PreschoolOverviewAiBindingDto;
   sourceSectionArtifactIds: string[];
+};
+
+export type PreschoolExecutiveSynthesisV3ResultDto = PreschoolExecutiveSynthesisResultBaseDto & ({
+  status: "available";
   keyFindings: Array<{
     id: string;
     takeaway: string;
     sectionIds: PreschoolOverviewAiSectionIdDto[];
     evidenceRefs: string[];
   }>;
+} | {
+  status: "empty";
+  keyFindings: [];
+});
+
+export type PreschoolOverviewKeyFindingDto = {
+  id: string;
+  title: string;
+  text: string;
+  sectionIds: PreschoolOverviewAiSectionIdDto[];
+  evidenceRefs: string[];
+  alert?: {
+    severity: "attention" | "urgent";
+    certainty: "confirmed" | "anomaly" | "possible";
+  };
 };
 
-export type PreschoolOverviewAiUnitStatusDto<T> =
+export type PreschoolExecutiveSynthesisV4ResultDto = PreschoolExecutiveSynthesisResultBaseDto & ({
+  status: "available";
+  summary: {
+    text: string;
+    evidenceRefs: string[];
+  };
+  findings: PreschoolOverviewKeyFindingDto[];
+} | {
+  status: "empty";
+  summary?: never;
+  findings: [];
+});
+
+export type PreschoolExecutiveSynthesisResultDto =
+  | PreschoolExecutiveSynthesisV3ResultDto
+  | PreschoolExecutiveSynthesisV4ResultDto;
+
+export type PreschoolOverviewAiUnitStatusDto<T extends { status: "available" | "empty" }> =
   | { status: "queued" }
   | { status: "running" }
-  | { status: "available"; artifactId: string; result: T }
-  | { status: "empty"; artifactId: string; result: T }
+  | { status: "available"; artifactId: string; result: Extract<T, { status: "available" }> }
+  | { status: "empty"; artifactId: string; result: Extract<T, { status: "empty" }> }
   | { status: "unavailable"; artifactId?: string; reason: string };
 
 export type PreschoolOverviewAiReadModelDto = {

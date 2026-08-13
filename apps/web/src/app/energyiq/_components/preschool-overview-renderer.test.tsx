@@ -4,13 +4,19 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import type { EnergySavedAnalysisAiArtifactDto, EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
 import { PRESCHOOL_OVERVIEW_SECTIONS, PreschoolOverviewRenderer } from "./preschool-overview-renderer";
 import { preschoolGoldenSnapshot } from "./preschool-overview.test-fixture";
 
 describe("PreschoolOverviewRenderer reading flow", () => {
-  it("renders the five-section spine with the AI Executive Summary before the deterministic fallback", () => {
+  it("renders the customer reading flow from Overall metrics through At a glance and Key Findings", () => {
+    const snapshot = preschoolGoldenSnapshot();
     const markup = renderToStaticMarkup(
-      <PreschoolOverviewRenderer state={{ status: "ready", snapshot: preschoolGoldenSnapshot() }} />,
+      <PreschoolOverviewRenderer
+        state={{ status: "ready", snapshot }}
+        aiSlotMode="saved"
+        savedAiArtifact={savedV4AiArtifact(snapshot)}
+      />,
     );
 
     expect(PRESCHOOL_OVERVIEW_SECTIONS).toEqual([
@@ -21,7 +27,9 @@ describe("PreschoolOverviewRenderer reading flow", () => {
       { id: "preschool-monthly-outlook", label: "5 · Monthly outlook" },
     ]);
     expect(markup.match(/data-overview-section=/g)).toHaveLength(5);
-    expect(markup).toContain("Overall consumption summary");
+    expect(markup).toContain("Energy Review");
+    expect(markup).toContain("Overall metrics");
+    expect(markup).toContain("Energy use and estimated cost across 30 Centres.");
     expect(markup.match(/data-overall-summary-metric=/g)).toHaveLength(3);
     expect(markup).toContain("Total centres");
     expect(markup).toContain("Total energy · May 2026");
@@ -30,7 +38,7 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup).toContain(">Outlets</th>");
     expect(markup).toContain("Senior Care Center");
     expect(markup).toContain("11,637.00 kWh");
-    expect(markup).toContain("Portfolio total");
+    expect(markup).toContain("All centres");
     expect(markup).toContain("24,921.81 kWh");
     expect(markup).toContain("100.0%");
     expect(markup).toContain("S$0.2727/kWh before GST");
@@ -40,8 +48,12 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup).not.toContain("Average across the selected reporting window.");
     expect(markup).not.toContain("Centre rows returned by the authoritative Project analysis.");
     expect(markup).toContain('id="preschool-decision-summary"');
-    expect(markup).toContain("AI Executive Summary");
     expect(markup).toContain("At a glance");
+    expect(markup).toContain("Key Findings");
+    expect(markup).toContain("Restored cross-section timing pattern");
+    expect(markup).not.toContain("Portfolio energy overview");
+    expect(markup).not.toContain("Overall consumption summary");
+    expect(markup).not.toContain("AI Executive Summary");
     expect(markup).not.toContain("Verified section highlights");
     expect(markup).not.toContain("AI management brief");
     expect(markup.match(/data-key-finding-target=/g)).toHaveLength(4);
@@ -76,15 +88,114 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup).toContain('data-series="planning-baseline"');
     expect(markup).toContain('d="" fill="none" stroke="currentColor" class="text-foreground"');
     expect(markup).toContain("View normalisation and evidence");
+    const container = document.createElement("div");
+    container.innerHTML = markup;
+    const overallTotalRow = container.querySelector<HTMLElement>("#preschool-overall-summary tfoot tr");
+    expect(overallTotalRow?.textContent).toContain("All centres");
+    expect(overallTotalRow?.textContent).not.toContain("Portfolio total");
     const sectionPositions = PRESCHOOL_OVERVIEW_SECTIONS.map((section) => markup.indexOf(`id="${section.id}"`));
     expect(sectionPositions.every((position) => position >= 0)).toBe(true);
     expect(sectionPositions).toEqual([...sectionPositions].sort((left, right) => left - right));
-    expect(markup.indexOf("Overall consumption summary")).toBeLessThan(markup.indexOf("AI Executive Summary"));
-    expect(markup.indexOf("AI Executive Summary")).toBeLessThan(markup.indexOf("At a glance"));
-    expect(markup.indexOf("At a glance")).toBeLessThan(markup.indexOf("Benchmark Analysis"));
+    expect(markup.indexOf("Overall metrics")).toBeLessThan(markup.indexOf("At a glance"));
+    expect(markup.indexOf("At a glance")).toBeLessThan(markup.indexOf("Restored cross-section timing pattern"));
+    expect(markup.indexOf("Restored cross-section timing pattern")).toBeLessThan(markup.indexOf("Benchmark Analysis"));
     expect(markup.indexOf("Benchmark Analysis")).toBeLessThan(markup.indexOf("Standby Energy Wastage — Post Operating Hours"));
     expect(markup.indexOf("Standby Energy Wastage — Post Operating Hours")).toBeLessThan(markup.indexOf("Operating Hours Analysis"));
     expect(markup.indexOf("Operating Hours Analysis")).toBeLessThan(markup.indexOf("Monthly Energy Outlook"));
+  });
+
+  it("keeps the deterministic Overview and Section 2 visible when a saved AI read model is missing top-level Sections", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    const savedAiArtifact = savedV4AiArtifact(snapshot);
+    if (savedAiArtifact.contract !== "energyiq-saved-ai-result@2") throw new Error("v4 saved fixture missing");
+    Reflect.deleteProperty(savedAiArtifact.result, "sections");
+
+    const markup = renderToStaticMarkup(
+      <PreschoolOverviewRenderer
+        state={{ status: "ready", snapshot }}
+        aiSlotMode="saved"
+        savedAiArtifact={savedAiArtifact}
+      />,
+    );
+
+    expect(markup).toContain("Energy Review");
+    expect(markup).toContain("Overall metrics");
+    expect(markup).toContain("At a glance");
+    expect(markup).toContain("Benchmark Analysis");
+    expect(markup).toContain("Invalid saved AI read model");
+    expect(markup).not.toContain("Restored cross-section timing pattern");
+  });
+
+  it.each([
+    {
+      name: "Snapshot",
+      mutate: (artifact: EnergySavedAnalysisAiArtifactDto) => Object.assign(artifact, { snapshotId: "other-snapshot" }),
+    },
+    {
+      name: "Project Release",
+      mutate: (artifact: EnergySavedAnalysisAiArtifactDto) => Object.assign(artifact, { projectReleaseId: "other-release" }),
+    },
+  ])("rejects a saved AI Artifact with a mismatched outer $name identity while preserving the Overview", ({ mutate }) => {
+    const snapshot = preschoolGoldenSnapshot();
+    const savedAiArtifact = savedV4AiArtifact(snapshot);
+    mutate(savedAiArtifact);
+
+    const markup = renderToStaticMarkup(
+      <PreschoolOverviewRenderer
+        state={{ status: "ready", snapshot }}
+        aiSlotMode="saved"
+        savedAiArtifact={savedAiArtifact}
+      />,
+    );
+
+    expect(markup).toContain("Energy Review");
+    expect(markup).toContain("Overall metrics");
+    expect(markup).toContain("At a glance");
+    expect(markup).toContain("Benchmark Analysis");
+    expect(markup).toContain("No completed AI result was attached");
+    expect(markup).not.toContain("Restored cross-section timing pattern");
+  });
+
+  it.each([
+    { contract: "energyiq-saved-ai-result@1" as const, shape: "missing findings" as const, findings: undefined },
+    { contract: "energyiq-saved-ai-result@1" as const, shape: "non-array findings" as const, findings: "not-an-array" },
+    { contract: "energyiq-saved-ai-result@1" as const, shape: "a null finding" as const, findings: [null] },
+    { contract: "energyiq-saved-ai-result@1" as const, shape: "an invalid finding object" as const, findings: [{}] },
+    { contract: "energyiq-saved-ai-result@2" as const, shape: "missing findings" as const, findings: undefined },
+    { contract: "energyiq-saved-ai-result@2" as const, shape: "non-array findings" as const, findings: "not-an-array" },
+    { contract: "energyiq-saved-ai-result@2" as const, shape: "a null finding" as const, findings: [null] },
+    { contract: "energyiq-saved-ai-result@2" as const, shape: "an invalid finding object" as const, findings: [{}] },
+  ])("fails closed for an outer-valid $contract non-sectioned payload with $shape", ({ contract, findings }) => {
+    const snapshot = preschoolGoldenSnapshot();
+    const markup = renderToStaticMarkup(
+      <PreschoolOverviewRenderer
+        state={{ status: "ready", snapshot }}
+        aiSlotMode="saved"
+        savedAiArtifact={savedNonSectionedAiArtifact(snapshot, contract, findings)}
+      />,
+    );
+
+    expect(markup).toContain("Energy Review");
+    expect(markup).toContain("Overall metrics");
+    expect(markup).toContain("At a glance");
+    expect(markup).toContain("Benchmark Analysis");
+    expect(markup).toContain("Invalid saved AI result");
+    expect(markup).not.toContain("Malformed legacy finding");
+  });
+
+  it("preserves a valid frozen @1 non-sectioned Saved Analysis result", () => {
+    const snapshot = preschoolGoldenSnapshot();
+    const markup = renderToStaticMarkup(
+      <PreschoolOverviewRenderer
+        state={{ status: "ready", snapshot }}
+        aiSlotMode="saved"
+        savedAiArtifact={savedNonSectionedAiArtifact(snapshot, "energyiq-saved-ai-result@1", [])}
+      />,
+    );
+
+    expect(markup).toContain("No additional Evidence-backed candidates");
+    expect(markup).toContain("Saved AI result · Run legacy-saved-run");
+    expect(markup).not.toContain("Invalid saved AI result");
   });
 
   it.each([
@@ -346,7 +457,7 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     const centreDetails = standbySection.querySelectorAll<HTMLDetailsElement>("details[data-standby-spike-centre]");
     expect([...centreDetails].map((detail) => detail.dataset.standbySpikeCentre)).toEqual(["L", "E", "N"]);
     expect([...centreDetails].map((detail) => detail.querySelectorAll("[data-standby-spike-event]").length)).toEqual([4, 2, 1]);
-    expect([...centreDetails].every((detail) => detail.querySelector(":scope > summary")?.tabIndex === 0)).toBe(true);
+    expect([...centreDetails].every((detail) => detail.querySelector<HTMLElement>(":scope > summary")?.tabIndex === 0)).toBe(true);
     expect([...centreDetails].every((detail) => detail.querySelector(":scope > summary")?.classList.contains("grid-cols-2"))).toBe(true);
     expect([...standbySection.querySelectorAll<HTMLElement>("[data-standby-spike-event]")].every((event) => event.classList.contains("grid-cols-2"))).toBe(true);
     expect(centreDetails[0]?.querySelectorAll('[data-standby-spike-event^="E:"]')).toHaveLength(0);
@@ -472,7 +583,7 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     ]);
     expect([...centreDetails].map((detail) => detail.querySelectorAll("[data-operating-spike-event]").length))
       .toEqual([8, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]);
-    expect([...centreDetails].every((detail) => detail.querySelector(":scope > summary")?.tabIndex === 0)).toBe(true);
+    expect([...centreDetails].every((detail) => detail.querySelector<HTMLElement>(":scope > summary")?.tabIndex === 0)).toBe(true);
     expect([...centreDetails].every((detail) => detail.querySelector(":scope > summary")?.classList.contains("grid-cols-2"))).toBe(true);
     expect([...operatingSection.querySelectorAll<HTMLElement>("[data-operating-spike-event]")].every((event) => event.classList.contains("grid-cols-2"))).toBe(true);
     expect(centreDetails[0]?.querySelectorAll('[data-operating-spike-event^="B:"]')).toHaveLength(0);
@@ -748,3 +859,107 @@ const attachForecastLifecycle = (
     },
   });
 };
+
+function savedV4AiArtifact(snapshot: EnergyProjectAnalysisSnapshotDto): EnergySavedAnalysisAiArtifactDto {
+  const binding = {
+    workspaceId: snapshot.context.workspaceId,
+    projectId: "preschool-demo" as const,
+    scopeId: snapshot.context.scopeId,
+    dataSnapshotId: snapshot.dataSnapshot.id,
+    projectReleaseId: snapshot.projectRelease.id,
+    analysisPeriod: {
+      from: snapshot.context.primaryPeriod.start,
+      to: snapshot.context.primaryPeriod.endExclusive,
+    },
+    modelProfileId: "workspace-default-model-profile",
+    modelProfileRevision: 1,
+  };
+  const emptySection = (sectionId: "standby-wastage" | "operating-behaviour" | "planning-outlook", runId: string) => ({
+    status: "empty" as const,
+    artifactId: `section-${sectionId}-v4`,
+    result: {
+      artifactKind: "section-interpretation" as const,
+      status: "empty" as const,
+      providerProfileId: binding.modelProfileId,
+      runId,
+      binding,
+      sectionId,
+      insights: [] as [],
+    },
+  });
+
+  return {
+    contract: "energyiq-saved-ai-result@2",
+    rendererKey: "preschool-overview",
+    snapshotId: snapshot.dataSnapshot.id,
+    projectReleaseId: snapshot.projectRelease.id,
+    completedAt: "2026-08-13T00:00:00.000Z",
+    result: {
+      artifactKind: "preschool-overview-ai-read-model",
+      status: "available",
+      binding,
+      sections: {
+        "centre-benchmark": {
+          status: "available",
+          artifactId: "section-benchmark-v4",
+          result: {
+            artifactKind: "section-interpretation",
+            status: "available",
+            providerProfileId: binding.modelProfileId,
+            runId: "run-benchmark-v4",
+            binding,
+            sectionId: "centre-benchmark",
+            summary: {
+              text: "The restored benchmark interpretation remains beside Section 2.",
+              evidenceRefs: ["benchmark:portfolio"],
+            },
+            insights: [],
+          },
+        },
+        "standby-wastage": emptySection("standby-wastage", "run-standby-v4"),
+        "operating-behaviour": emptySection("operating-behaviour", "run-operating-v4"),
+        "planning-outlook": emptySection("planning-outlook", "run-planning-v4"),
+      },
+      executive: {
+        status: "available",
+        artifactId: "key-findings-v4",
+        result: {
+          artifactKind: "executive-synthesis",
+          status: "available",
+          providerProfileId: binding.modelProfileId,
+          runId: "run-key-findings-v4",
+          binding,
+          sourceSectionArtifactIds: ["section-benchmark-v4"],
+          summary: {
+            text: "Restored cross-section timing pattern",
+            evidenceRefs: ["benchmark:portfolio"],
+          },
+          findings: [],
+        },
+      },
+    },
+  };
+}
+
+function savedNonSectionedAiArtifact(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  contract: "energyiq-saved-ai-result@1" | "energyiq-saved-ai-result@2",
+  findings: unknown,
+): EnergySavedAnalysisAiArtifactDto {
+  const result: Record<string, unknown> = {
+    status: "available",
+    providerProfileId: "legacy-model-profile",
+    runId: "legacy-saved-run",
+    packId: "preschool-analysis-pack",
+    packRevision: "v1",
+  };
+  if (findings !== undefined) result.findings = findings;
+  return {
+    contract,
+    rendererKey: "preschool-overview",
+    snapshotId: snapshot.dataSnapshot.id,
+    projectReleaseId: snapshot.projectRelease.id,
+    completedAt: "2026-08-13T00:00:00.000Z",
+    result,
+  } as unknown as EnergySavedAnalysisAiArtifactDto;
+}
