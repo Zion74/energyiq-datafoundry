@@ -264,6 +264,7 @@ export const buildPreschoolSectionDiscoveryPrompt = (
   const prompt = [
     "You are producing a concise Summary plus optional Insight candidates for one Preschool Overview Section.",
     "Use the complete inline Pack projection. Scoped read-only tools may inspect only server-owned Pack Evidence; use them only when they add value.",
+    "Planning scope and bucket facts may use the declared lossless columnar JSON encoding. Reconstruct each row from its row prefix, table constants, columns, and row values; every source row remains present.",
     `Available scoped read-only tools: ${JSON.stringify(pack.capabilities.tools)}. Tool arguments must contain only the documented controlled parameters; never submit Pack, binding, Section, Snapshot, Release, period, SQL, URL, network, or write instructions.`,
     "The Pack is a factual boundary, not a writing template: identify the most useful angles instead of filling fixed What, Why, or Action slots.",
     "You may connect supplied facts and propose relevant hypotheses. Mark direct Pack facts as observed, supported relationships as inferred, and plausible but unverified lines of inquiry as speculative.",

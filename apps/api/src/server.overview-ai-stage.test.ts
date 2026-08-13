@@ -1,4 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createDataFoundry, createDataFoundryRunContext } from "@datafoundry/agent-runtime";
+import type { EnergyIqOverviewAiArtifactIdentity } from "@datafoundry/metadata";
 
 import {
   buildOverviewAiStageRunInput,
@@ -15,6 +20,8 @@ import {
   PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4,
   PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4,
 } from "./energy/preschool-overview-ai-structured-output.js";
+import { buildPreschoolSectionDiscoveryPrompt } from "./energy/preschool-section-interpreter.js";
+import type { PreschoolSectionPackV2 } from "./energy/preschool-section-pack-v2.js";
 
 describe("Overview AI server stage options", () => {
   it("keeps the investigator on the narrow Artifact path with DeepSeek thinking disabled", () => {
@@ -55,7 +62,7 @@ describe("Overview AI server stage options", () => {
         structuredOutput: resolveOverviewAiStageStructuredOutput(stage),
       });
       expect(shouldIncludeProjectAnalysisEvidenceContext(stage)).toBe(false);
-      expect(shouldUseEnergyContextForOverviewAiStage(stage)).toBe(false);
+      expect(shouldUseEnergyContextForOverviewAiStage(stage)).toBe(stage === "section-interpreter");
     },
   );
 
@@ -235,6 +242,202 @@ describe("Overview AI server stage options", () => {
     expect(input.forwardedProps).not.toHaveProperty("trustedStageTools");
   });
 
+  it("persists exact server-owned Section Snapshot, Release and period pins in the user message", () => {
+    const identity = {
+      workspaceId: "preschool-demo-org",
+      projectId: "preschool-demo",
+      scopeId: "preschool-project",
+      resource: "electricity",
+      dataSnapshotId: "energy-snapshot-563f8939fd90dc2fbef0018a",
+      projectReleaseId: "preschool-demo-template-v2",
+      analysisPeriodFrom: "2026-05-01T00:00:00.000Z",
+      analysisPeriodTo: "2026-06-01T00:00:00.000Z",
+      rendererKey: "preschool-overview",
+      rendererVersion: "1",
+      analysisPackId: "preschool-section-pack",
+      analysisPackRevision: "v2",
+      modelProfileId: "workspace-default",
+      modelProfileRevision: 7,
+      outputContractRevision: "preschool-section-interpretation-v4",
+      validatorRevision: "acceptance-validator-v1",
+      workflowRevision: "discover-accept-publish-v1",
+      investigatorPromptRevision: "discovery-prompt-v2",
+      editorPromptRevision: "not-applicable-v1",
+      methodSkillId: "none",
+      methodSkillRevision: "not-applicable-v1",
+      artifactKind: "section-interpretation" as const,
+      targetId: "centre-benchmark",
+    } as const satisfies EnergyIqOverviewAiArtifactIdentity;
+    const input = buildOverviewAiStageRunInput({
+      stage: "section-interpreter",
+      prompt: "Bounded Section model projection without caller-authored identity.",
+      identity,
+      workspaceId: identity.workspaceId,
+      user: {
+        id: "dev-user",
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-01T00:00:00.000Z",
+      },
+      runId: "section-run-pins",
+      sessionId: "section-session-pins",
+    });
+    const persistedUserInput = input.messages[0]?.content;
+    if (typeof persistedUserInput !== "string") throw new Error("Expected one text user message");
+
+    expect([
+      identity.dataSnapshotId,
+      identity.projectReleaseId,
+      identity.analysisPeriodFrom,
+      identity.analysisPeriodTo,
+    ].filter((pin) => !persistedUserInput.includes(pin))).toEqual([]);
+  });
+
+  it("constructs the real governed runtime for server-owned Section tools from server-owned Energy context", async () => {
+    const identity = {
+      workspaceId: "preschool-demo-org",
+      projectId: "preschool-demo",
+      scopeId: "preschool-project",
+      resource: "electricity",
+      dataSnapshotId: "energy-snapshot-563f8939fd90dc2fbef0018a",
+      projectReleaseId: "preschool-demo-template-v2",
+      analysisPeriodFrom: "2026-05-01T00:00:00.000Z",
+      analysisPeriodTo: "2026-06-01T00:00:00.000Z",
+      rendererKey: "preschool-overview",
+      rendererVersion: "1",
+      analysisPackId: "preschool-section-pack",
+      analysisPackRevision: "v2",
+      modelProfileId: "workspace-default",
+      modelProfileRevision: 7,
+      outputContractRevision: "preschool-section-interpretation-v4",
+      validatorRevision: "acceptance-validator-v1",
+      workflowRevision: "discover-accept-publish-v1",
+      investigatorPromptRevision: "discovery-prompt-v2",
+      editorPromptRevision: "not-applicable-v1",
+      methodSkillId: "none",
+      methodSkillRevision: "not-applicable-v1",
+      artifactKind: "section-interpretation" as const,
+      targetId: "standby-wastage",
+    } as const satisfies EnergyIqOverviewAiArtifactIdentity;
+    const pack: PreschoolSectionPackV2 = {
+      contract: { id: "preschool-section-pack", revision: "preschool-section-pack-v2" },
+      sectionId: "standby-wastage",
+      audience: "non-technical energy manager",
+      analysisGoal: "Identify supported closed-hour patterns.",
+      binding: {
+        workspaceId: identity.workspaceId,
+        projectId: identity.projectId,
+        scopeId: identity.scopeId,
+        dataSnapshotId: identity.dataSnapshotId,
+        projectReleaseId: identity.projectReleaseId,
+        analysisPeriod: { from: identity.analysisPeriodFrom, to: identity.analysisPeriodTo },
+        modelProfileId: identity.modelProfileId,
+        modelProfileRevision: identity.modelProfileRevision,
+      },
+      evidence: [{
+        id: "evidence:standby:summary",
+        label: "Closed-hours summary",
+        value: { closedHoursSharePct: 12 },
+        unit: "%",
+        entityRefs: [],
+        evidenceRefs: ["evidence:standby:summary"],
+      }],
+      alreadyPresentedFacts: [],
+      crossSectionIndex: [],
+      dataQuality: {
+        status: "complete",
+        coveragePct: 100,
+        expectedMeterIntervalCount: 1,
+        validIntervalCount: 1,
+        qualityEventCount: 0,
+        cumulativeDeltaMismatchCount: 0,
+        averageKwMismatchCount: 0,
+        invalidIntervalDurationCount: 0,
+        importBatchIds: [],
+      },
+      limitations: [],
+      missingEvidence: [],
+      capabilities: {
+        revision: "scoped-read-only-v1",
+        mode: "scoped-read-only",
+        tools: ["inspect_time_pattern", "inspect_load_composition", "inspect_related_section_signals"],
+      },
+    };
+    const input = buildOverviewAiStageRunInput({
+      stage: "section-interpreter",
+      prompt: buildPreschoolSectionDiscoveryPrompt(pack),
+      identity,
+      workspaceId: identity.workspaceId,
+      user: {
+        id: "dev-user",
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-01T00:00:00.000Z",
+      },
+      runId: "section-run",
+      sessionId: "section-session",
+    });
+    const externalContext = Reflect.get(input.forwardedProps, "externalContext") as {
+      projectId: string;
+      scopeId: string;
+      resource: "electricity";
+      from: string;
+      to: string;
+      period: "Custom";
+    } | undefined;
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "preschool-section-runtime-red-"));
+    let runtime: Awaited<ReturnType<typeof createDataFoundry>> | undefined;
+    try {
+      runtime = await createDataFoundry({
+        analysisRequirementsMode: "omit",
+        dataGateway: {} as never,
+        emitter: { emit: () => undefined },
+        excludedToolNames: ["inspect_schema", "run_sql_readonly", "protocol_handoff"],
+        explicitProtocol: { protocolId: "data-analysis", protocolVersion: "1" },
+        messages: input.messages,
+        modelProvider: {
+          kind: "openai-compatible",
+          model: "openai/test-model",
+          model_name: "test-model",
+          provider_id: "openai-compatible",
+        },
+        runContext: createDataFoundryRunContext({
+          user_id: "dev-user",
+          workspace_id: identity.workspaceId,
+          session_id: "section-session",
+          run_id: "section-run",
+          user_input: buildPreschoolSectionDiscoveryPrompt(pack),
+          chat_mode: "copilotkit",
+          model_name: "test-model",
+          ...(externalContext
+            ? {
+                energy_query_context: {
+                  projectId: externalContext.projectId,
+                  projectName: "Preschool Portfolio",
+                  scopeId: externalContext.scopeId,
+                  scopeName: "Preschool Portfolio",
+                  scopeType: "project",
+                  resource: externalContext.resource,
+                  timezone: "Asia/Singapore",
+                  from: externalContext.from,
+                  to: externalContext.to,
+                  endExclusive: true,
+                  period: externalContext.period,
+                },
+              }
+            : {}),
+        }),
+        trustedStageTools: createPreschoolSectionTrustedStageTools({
+          toolNames: pack.capabilities.tools,
+          invoke: async () => ({}) as never,
+        }),
+        workspaceRoot,
+      });
+      expect(Object.keys(await runtime.agent.listTools()).sort()).toEqual([...pack.capabilities.tools].sort());
+    } finally {
+      await runtime?.destroyWorkspace();
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
   it("suppresses only duplicate full Snapshot and Catalog context for Overview stages", () => {
     expect(shouldIncludeProjectAnalysisEvidenceContext("investigator")).toBe(false);
     expect(shouldIncludeProjectAnalysisEvidenceContext("editor")).toBe(false);
@@ -288,7 +491,23 @@ describe("Overview AI server stage options", () => {
           enabledSkillIds: [],
         },
       });
-      expect(input.forwardedProps).not.toHaveProperty("externalContext");
+      if (stage === "section-interpreter") {
+        expect(input.forwardedProps).toMatchObject({
+          externalContext: {
+            source: "energyiq",
+            projectId: "preschool-demo",
+            scopeId: "preschool-project",
+            resource: "electricity",
+            from: "2026-05-01T00:00:00.000Z",
+            to: "2026-06-01T00:00:00.000Z",
+            expectedDataSnapshotId: "snapshot-current",
+            expectedProjectReleaseId: "release-current",
+            overviewAiStage: "section-interpreter",
+          },
+        });
+      } else {
+        expect(input.forwardedProps).not.toHaveProperty("externalContext");
+      }
     },
   );
 

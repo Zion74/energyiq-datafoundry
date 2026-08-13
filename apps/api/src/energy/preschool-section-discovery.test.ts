@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { PreschoolSectionPackV2 } from "./preschool-section-pack-v2.js";
 import {
+  MAX_PRESCHOOL_SECTION_MODEL_PROJECTION_CHARS,
   parsePreschoolSectionDiscoveryV4,
   projectPreschoolSectionPackV2ForModel,
 } from "./preschool-section-discovery.js";
@@ -25,6 +26,41 @@ describe("Preschool Section discovery", () => {
     expect(serialized).not.toContain("decisionQuestion");
     expect(serialized).not.toContain("allowedNextChecks");
     expect(serialized).not.toContain("pageCoverage");
+  });
+
+  it("keeps a Portfolio plus 30-Centre planning outlook model-projectable without dropping management rows", () => {
+    const pack = portfolioScalePlanningPack();
+    const projection = projectPreschoolSectionPackV2ForModel(pack);
+    const serialized = JSON.stringify(projection);
+    const planningValue = projection.evidence[0]?.value as {
+      forecast: {
+        scopes: {
+          encoding: { id: string; revision: string };
+          scopeCount: number;
+          bucketCounts: Record<string, number>;
+          scopeTables: unknown[];
+          bucketTables: unknown[];
+        };
+      };
+    };
+
+    expect(serialized.length).toBeLessThanOrEqual(MAX_PRESCHOOL_SECTION_MODEL_PROJECTION_CHARS);
+    expect(planningValue.forecast.scopes).toMatchObject({
+      encoding: { id: "energyiq-lossless-columnar-json", revision: "v1" },
+      scopeCount: 31,
+      bucketCounts: { daily: 930, weekly: 155, monthly: 31 },
+      scopeTables: expect.any(Array),
+      bucketTables: expect.any(Array),
+    });
+    expect(projection.capabilityBoundary).toMatchObject({
+      factAccess: "inline-complete",
+      omittedEvidenceCount: 0,
+    });
+    expect(projection.evidence[0]?.evidenceRefs).toEqual(["evidence:planning-outlook:portfolio-scale"]);
+    for (const scopeId of [
+      "preschool-project",
+      ...Array.from({ length: 30 }, (_, index) => `centre-${index + 1}`),
+    ]) expect(serialized).toContain(JSON.stringify(scopeId));
   });
 
   it("assigns binding at runtime and preserves malformed candidates for local acceptance rejection", () => {
@@ -130,3 +166,74 @@ const completeDataQuality: PreschoolSectionPackV2["dataQuality"] = {
   invalidIntervalDurationCount: 0,
   importBatchIds: [],
 };
+
+const portfolioScalePlanningPack = (): PreschoolSectionPackV2 => {
+  const pack = richPack("planning-outlook", 1);
+  const scopes = Array.from({ length: 31 }, (_, index) => {
+    const portfolio = index === 0;
+    const scopeId = portfolio ? "preschool-project" : `centre-${index}`;
+    const buckets = {
+      daily: Array.from({ length: 30 }, (_, day) => planningBucket(day + 1, "day")),
+      weekly: Array.from({ length: 5 }, (_, week) => planningBucket(week + 1, "week")),
+      monthly: [planningBucket(1, "month")],
+    };
+    return {
+      scopeId,
+      scopeName: portfolio ? "All centres" : `Centre ${index}`,
+      scopeType: portfolio ? "project" : "centre",
+      scopeRole: portfolio ? "portfolio" : "centre",
+      estimatedKwh: 1_000 + index,
+      estimatedCostBeforeGstSgd: 300 + index,
+      expectedFullMonthKwh: 1_100 + index,
+      expectedFullMonthCostBeforeGstSgd: 330 + index,
+      actualKwh: 400 + index,
+      actualCostBeforeGstSgd: 120 + index,
+      actualCompleteDayCount: 10,
+      actualTargetDayCount: 30,
+      actualThroughLocalDate: "2026-06-10",
+      pacePct: 110,
+      outcome: "above_plan",
+      originalEstimateIdentity: `estimate:${scopeId}`,
+      actualIdentity: `actual:${scopeId}`,
+      currentOutlookIdentity: `outlook:${scopeId}`,
+      buckets,
+      currentOutlookVsPlan: { status: "available", varianceKwh: 100, variancePct: 10 },
+    };
+  });
+  pack.evidence[0] = {
+    id: "evidence:planning-outlook:portfolio-scale",
+    label: "Saved plan, current actual and monthly outlook",
+    value: {
+      targetPeriod: {
+        start: "2026-06-01",
+        endExclusive: "2026-07-01",
+        timezone: "Asia/Singapore",
+        targetDayCount: 30,
+      },
+      plan: {
+        usageEstimate: { projectedKwh: 31_000, lowerKwh: 29_000, upperKwh: 33_000 },
+        costEstimate: { projectedBeforeGstSgd: 9_300 },
+      },
+      actual: { status: "partial", usageKwh: 12_000, completeDayCount: 10, targetDayCount: 30 },
+      forecast: { status: "partial", scopes },
+    },
+    unit: "kWh, %, SGD before GST",
+    entityRefs: scopes.map(({ scopeId }) => scopeId),
+    evidenceRefs: ["evidence:planning-outlook:portfolio-scale"],
+  };
+  return pack;
+};
+
+const planningBucket = (ordinal: number, grain: "day" | "week" | "month") => ({
+  start: `2026-06-${String(Math.min(ordinal, 30)).padStart(2, "0")}`,
+  endExclusive: `2026-07-${String(Math.min(ordinal, 30)).padStart(2, "0")}`,
+  grain,
+  estimatedKwh: 100 + ordinal,
+  originalEstimateKwh: 100 + ordinal,
+  actualKwh: null,
+  currentOutlookKwh: null,
+  futureOutlookKwh: null,
+  actualCompleteDayCount: 0,
+  actualTargetDayCount: 1,
+  actualStatus: "waiting",
+});
