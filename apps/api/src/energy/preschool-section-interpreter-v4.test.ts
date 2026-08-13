@@ -141,6 +141,44 @@ describe("Preschool Section Interpreter v4", () => {
     });
   });
 
+  it("accepts conventional decimal rounding at the exact half-unit boundary", () => {
+    const pack = packV2("standby-wastage", 1);
+    pack.evidence[0] = {
+      id: "evidence:standby-wastage:1",
+      label: "Closed-hour energy summary",
+      value: { closedHoursSharePct: 12.45 },
+      unit: "%",
+      entityRefs: [],
+      evidenceRefs: ["evidence:standby-wastage:1"],
+    };
+    const result = materializePreschoolSectionResultV4({
+      answer: JSON.stringify({
+        sectionId: "standby-wastage",
+        status: "available",
+        summary: {
+          text: "Closed-hour energy was roughly **12.5%** of total usage.",
+          evidenceRefs: ["evidence:standby-wastage:1"],
+        },
+        candidates: [],
+      }),
+      pack,
+      identity: identity("standby-wastage"),
+      runId: "runtime-run-decimal-rounding",
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      summary: { text: "Closed-hour energy was roughly **12.5%** of total usage." },
+      insights: [],
+      publication: {
+        discoveredCount: 0,
+        acceptedCount: 0,
+        rejectedCount: 0,
+        publishedCount: 0,
+      },
+    });
+  });
+
   it("passes the explicit V4 structured contract only to Pack-v2 runner calls", async () => {
     const root = mkdtempSync(join(tmpdir(), "preschool-section-v4-runner-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });

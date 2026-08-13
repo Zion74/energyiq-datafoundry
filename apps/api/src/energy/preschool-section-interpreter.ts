@@ -655,9 +655,7 @@ const hasUnsupportedNumber = (text: string, evidence: PreschoolSectionPack["evid
     const raw = match[0].replaceAll(",", "");
     const value = Number(raw);
     const precision = raw.includes(".") ? raw.length - raw.indexOf(".") - 1 : 0;
-    const tolerance = 0.5 * (10 ** -precision);
-    const exactlySupported = supported.some((candidate) => Math.abs(candidate - value) < tolerance
-      || Math.abs(Number(candidate.toFixed(precision)) - value) < tolerance);
+    const exactlySupported = supported.some((candidate) => reportedNumberMatches(candidate, value, precision));
     return !exactlySupported && !supportsBoundedIntegerApproximation({
       text: numericText,
       tokenIndex: match.index ?? 0,
@@ -666,6 +664,14 @@ const hasUnsupportedNumber = (text: string, evidence: PreschoolSectionPack["evid
       supported,
     });
   });
+};
+
+const reportedNumberMatches = (sourceValue: number, reportedValue: number, precision: number): boolean => {
+  const tolerance = 0.5 * (10 ** -precision);
+  const floatingPointSlack = Number.EPSILON
+    * Math.max(1, Math.abs(sourceValue), Math.abs(reportedValue))
+    * 8;
+  return Math.abs(sourceValue - reportedValue) <= tolerance + floatingPointSlack;
 };
 
 const supportsBoundedIntegerApproximation = (input: {
@@ -797,9 +803,7 @@ const hasUnsupportedMetricRelation = (
       const raw = match[0].replaceAll(",", "");
       const value = Number(raw);
       const precision = raw.includes(".") ? raw.length - raw.indexOf(".") - 1 : 0;
-      const tolerance = 0.5 * (10 ** -precision);
-      return paceValues.some((candidate) => Math.abs(candidate - value) < tolerance
-        || Math.abs(Number(candidate.toFixed(precision)) - value) < tolerance);
+      return paceValues.some((candidate) => reportedNumberMatches(candidate, value, precision));
     });
   });
 };
