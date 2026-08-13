@@ -3,13 +3,20 @@ import type {
   EnergyIqOverviewAiArtifactRecord,
   MetadataStore,
 } from "@datafoundry/metadata";
+import {
+  additionalAiInsightsArtifactIsValid,
+  resolveAdditionalAiInsightMethodSet,
+  type AdditionalAiInsightsArtifact,
+} from "@datafoundry/contracts";
 
 import {
+  createPreschoolAdditionalAiInsightArtifactIdentity,
   createPreschoolOverviewAiExecutiveArtifactIdentityV4,
   createPreschoolOverviewAiSectionArtifactIdentityV3,
   createPreschoolOverviewAiSectionArtifactIdentityV4,
   createPreschoolOverviewAiValueArtifactIdentity,
   type OverviewAiArtifactIdentityV13,
+  type PreschoolAdditionalAiInsightArtifactIdentity,
 } from "./overview-ai-artifact.js";
 import { preschoolExecutiveSynthesisTargetId } from "./preschool-executive-synthesis.js";
 import {
@@ -31,6 +38,8 @@ export const composePreschoolOverviewAiReadModel = (input: {
   parseSectionResult,
   createExecutiveIdentity: createPreschoolOverviewAiExecutiveArtifactIdentityV4,
   parseExecutiveResult: parseExecutiveResultV4,
+  createAdditionalIdentity: createPreschoolAdditionalAiInsightArtifactIdentity,
+  restoreLegacyAutonomous: false,
 });
 
 export const composePreschoolOverviewAiReadModelV3 = (input: {
@@ -46,6 +55,7 @@ export const composePreschoolOverviewAiReadModelV3 = (input: {
     targetId,
   }),
   parseExecutiveResult: parseExecutiveResultV3,
+  restoreLegacyAutonomous: true,
 });
 
 const composeReadModel = (input: {
@@ -58,6 +68,10 @@ const composeReadModel = (input: {
     targetId: string;
   }) => EnergyIqOverviewAiArtifactIdentity;
   parseExecutiveResult: typeof parseExecutiveResultV4;
+  createAdditionalIdentity?: (input: {
+    baseIdentity: OverviewAiArtifactIdentityV13;
+  }) => PreschoolAdditionalAiInsightArtifactIdentity;
+  restoreLegacyAutonomous: boolean;
 }): PreschoolOverviewAiReadModel | null => {
   const store = input.metadataStore.energyIq.overviewAiArtifacts;
   const sectionArtifacts = Object.fromEntries(PRESCHOOL_SECTION_IDS.map((sectionId) => {
@@ -82,9 +96,13 @@ const composeReadModel = (input: {
     targetId: preschoolExecutiveSynthesisTargetId(acceptedSectionArtifactIds),
   });
   const executiveArtifact = store.find(executiveIdentity) ?? null;
-  const autonomousArtifact = store.find(input.baseIdentity);
+  const additionalIdentity = input.createAdditionalIdentity?.({ baseIdentity: input.baseIdentity }) ?? null;
+  const additionalArtifact = additionalIdentity ? store.find(additionalIdentity) ?? null : null;
+  const autonomousArtifact = input.restoreLegacyAutonomous ? store.find(input.baseIdentity) : null;
   const hasValueArtifacts = PRESCHOOL_SECTION_IDS.some((sectionId) => sectionArtifacts[sectionId].artifact !== null)
-    || executiveArtifact !== null;
+    || executiveArtifact !== null
+    || additionalArtifact !== null
+    || autonomousArtifact !== null;
   if (!hasValueArtifacts) return null;
 
   return {
@@ -96,10 +114,66 @@ const composeReadModel = (input: {
       return [sectionId, sectionUnit(artifact, identity, input.parseSectionResult)];
     })) as PreschoolOverviewAiReadModel["sections"],
     executive: executiveUnit(executiveArtifact, executiveIdentity, input.parseExecutiveResult),
+    ...(additionalIdentity
+      ? { additional: additionalUnit(additionalArtifact, additionalIdentity) }
+      : {}),
     ...(autonomousArtifact?.status === "available" && autonomousArtifact.result_json
       ? { autonomous: parseJson(autonomousArtifact.result_json) }
       : {}),
   };
+};
+
+const additionalUnit = (
+  artifact: EnergyIqOverviewAiArtifactRecord | null,
+  identity: PreschoolAdditionalAiInsightArtifactIdentity,
+): PreschoolOverviewAiUnitStatus<AdditionalAiInsightsArtifact> => {
+  if (!artifact) return { status: "unavailable", reason: "Additional AI Insights have not been generated." };
+  if (artifact.status === "queued" || artifact.status === "running") return { status: artifact.status };
+  if (artifact.status === "failed") {
+    return { status: "unavailable", artifactId: artifact.id, reason: artifact.error_code ?? "Additional AI Insights failed." };
+  }
+  const result = artifact.result_json ? parseAdditionalResult(artifact.result_json, identity) : null;
+  if (!result) return { status: "unavailable", artifactId: artifact.id, reason: "Additional AI Insights are invalid." };
+  return result.status === "empty"
+    ? { status: "empty", artifactId: artifact.id, result }
+    : { status: "available", artifactId: artifact.id, result };
+};
+
+const parseAdditionalResult = (
+  value: string,
+  identity: PreschoolAdditionalAiInsightArtifactIdentity,
+): AdditionalAiInsightsArtifact | null => {
+  const parsed = parseJson(value);
+  const methodSet = resolveAdditionalAiInsightMethodSet({
+    workspaceId: identity.workspaceId,
+    methodSetId: identity.methodSetId,
+    methodSetRevision: identity.methodSetRevision,
+  });
+  if (!methodSet) return null;
+  const validation = {
+    value: parsed,
+    expectedMethods: methodSet.methods,
+    expected: {
+      workspaceId: identity.workspaceId,
+      projectId: identity.projectId,
+      scopeId: identity.scopeId,
+      dataSnapshotId: identity.dataSnapshotId,
+      projectReleaseId: identity.projectReleaseId,
+      analysisPeriod: {
+        from: identity.analysisPeriodFrom,
+        to: identity.analysisPeriodTo,
+      },
+      modelProfileId: identity.modelProfileId,
+      modelProfileRevision: identity.modelProfileRevision,
+      methodSetId: identity.methodSetId,
+      methodSetRevision: identity.methodSetRevision,
+      methodSetFingerprint: identity.methodSetFingerprint,
+      outputContractRevision: identity.outputContractRevision,
+      capabilityRevision: identity.capabilityRevision,
+      publicationRevision: identity.publicationRevision,
+    },
+  };
+  return additionalAiInsightsArtifactIsValid(validation) ? validation.value : null;
 };
 
 const sectionUnit = (

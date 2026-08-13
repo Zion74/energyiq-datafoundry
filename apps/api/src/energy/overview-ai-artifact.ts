@@ -7,6 +7,13 @@ import type {
 } from "@datafoundry/metadata";
 import { WORKSPACE_DEFAULT_MODEL_PROFILE_ID } from "@datafoundry/metadata";
 import type { LocalDataGateway } from "@datafoundry/data-gateway";
+import {
+  CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_ID,
+  CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_REVISION,
+  canonicalInsightMethodSetJson,
+  resolveCurrentAdditionalAiInsightMethodSet,
+} from "@datafoundry/contracts";
+import { createHash } from "node:crypto";
 
 import { ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID } from "../workspace-model-profile-resolver.js";
 
@@ -35,6 +42,16 @@ export type OverviewAiArtifactIdentityV13 = EnergyIqOverviewAiArtifactIdentity &
 export type PreschoolOverviewAiValueArtifactIdentity = EnergyIqOverviewAiArtifactIdentity & {
   artifactKind: "section-interpretation" | "executive-synthesis";
   targetId: string;
+};
+
+export type PreschoolAdditionalAiInsightArtifactIdentity = EnergyIqOverviewAiArtifactIdentity & {
+  artifactKind: "autonomous-insights";
+  identityContractRevision: "additional-insights-v1";
+  methodSetId: "preschool-additional-insights-current";
+  methodSetRevision: "v1";
+  methodSetFingerprint: string;
+  capabilityRevision: "scoped-read-only-v1";
+  publicationRevision: "additional-insights-v1";
 };
 
 const OVERVIEW_AI_CONTRACTS: Readonly<Record<string, OverviewAiContract>> = {
@@ -80,6 +97,33 @@ export const createOverviewAiArtifactIdentity = (input: {
     ...contract,
     modelProfileId: input.modelProfileId,
     modelProfileRevision: input.modelProfileRevision,
+  };
+};
+
+export const createPreschoolAdditionalAiInsightArtifactIdentity = (input: {
+  baseIdentity: OverviewAiArtifactIdentityV13;
+}): PreschoolAdditionalAiInsightArtifactIdentity => {
+  const methodSet = resolveCurrentAdditionalAiInsightMethodSet(input.baseIdentity.workspaceId);
+  const canonicalMethods = canonicalInsightMethodSetJson(methodSet.methods);
+  if (canonicalMethods === null) throw new Error("ENERGYIQ_ADDITIONAL_INSIGHT_METHOD_SET_INVALID");
+  return {
+    ...input.baseIdentity,
+    artifactKind: "autonomous-insights",
+    identityContractRevision: "additional-insights-v1",
+    analysisPackId: "preschool-additional-insights-pack",
+    analysisPackRevision: "v1",
+    outputContractRevision: "energyiq-additional-ai-insights-v1",
+    validatorRevision: "additional-insights-acceptance-v1",
+    workflowRevision: "additional-insights-discover-accept-publish-v1",
+    investigatorPromptRevision: "additional-insights-discovery-v1",
+    editorPromptRevision: "additional-insights-publication-v1",
+    methodSkillId: "energyiq-open-discovery",
+    methodSkillRevision: "1.0.0",
+    methodSetId: CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_ID,
+    methodSetRevision: CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_REVISION,
+    methodSetFingerprint: `sha256:${createHash("sha256").update(canonicalMethods).digest("hex")}`,
+    capabilityRevision: "scoped-read-only-v1",
+    publicationRevision: "additional-insights-v1",
   };
 };
 

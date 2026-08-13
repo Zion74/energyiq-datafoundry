@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   createOverviewAiArtifactIdentity,
   createPreschoolOverviewAiExecutiveArtifactIdentityV4,
+  createPreschoolAdditionalAiInsightArtifactIdentity,
   createPreschoolOverviewAiSectionArtifactIdentityV4,
   createPreschoolOverviewAiValueArtifactIdentity,
   overviewAiArtifactPinnedLocalPeriod,
@@ -151,6 +152,62 @@ describe("createOverviewAiArtifactIdentity", () => {
       baseIdentity: legacy,
       artifactKind: "executive-synthesis",
     })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
+  });
+
+  it("derives the current Additional Insight identity from the server-owned Method Set", () => {
+    const legacy = createOverviewAiArtifactIdentity({
+      workspaceId: "preschool-demo-org",
+      projectId: "preschool-demo",
+      scopeId: "preschool-project",
+      dataSnapshotId: "snapshot-a",
+      projectReleaseId: "release-v1",
+      analysisPeriodFrom: "2026-05-01T00:00:00.000Z",
+      analysisPeriodTo: "2026-06-01T00:00:00.000Z",
+      rendererKey: "preschool-overview",
+      rendererVersion: "1",
+      modelProfileId: "deepseek-v4-flash",
+      modelProfileRevision: 8,
+    });
+    const identity = createPreschoolAdditionalAiInsightArtifactIdentity({
+      baseIdentity: legacy,
+    });
+
+    expect(identity).toMatchObject({
+      artifactKind: "autonomous-insights",
+      identityContractRevision: "additional-insights-v1",
+      analysisPackId: "preschool-additional-insights-pack",
+      analysisPackRevision: "v1",
+      outputContractRevision: "energyiq-additional-ai-insights-v1",
+      validatorRevision: "additional-insights-acceptance-v1",
+      workflowRevision: "additional-insights-discover-accept-publish-v1",
+      investigatorPromptRevision: "additional-insights-discovery-v1",
+      editorPromptRevision: "additional-insights-publication-v1",
+      methodSkillId: "energyiq-open-discovery",
+      methodSkillRevision: "1.0.0",
+      methodSetId: "preschool-additional-insights-current",
+      methodSetRevision: "v1",
+      methodSetFingerprint: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+      capabilityRevision: "scoped-read-only-v1",
+      publicationRevision: "additional-insights-v1",
+    });
+    expect(identity).not.toHaveProperty("targetId");
+    expect(identity.methodSetFingerprint).not.toBe(identity.methodSkillRevision);
+
+    const callerAttempt = {
+      baseIdentity: legacy,
+      methods: [{
+        skillId: "caller-forged-method",
+        semanticVersion: "99.0.0",
+        resourceId: "skill:caller-forged-method",
+        resourceRevision: 99,
+        contentSha256: "f".repeat(64),
+        scope: "user",
+        workspaceId: "other-workspace",
+        userId: "attacker",
+        role: "core-method",
+      }],
+    } as unknown as Parameters<typeof createPreschoolAdditionalAiInsightArtifactIdentity>[0];
+    expect(createPreschoolAdditionalAiInsightArtifactIdentity(callerAttempt)).toEqual(identity);
   });
 });
 

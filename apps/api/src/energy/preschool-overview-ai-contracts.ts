@@ -1,4 +1,5 @@
 import type { EnergyIqOverviewAiArtifactIdentity } from "@datafoundry/metadata";
+import type { AdditionalAiInsightsArtifact } from "@datafoundry/contracts";
 
 export type {
   PreschoolAcceptedSectionInsightV4,
@@ -186,6 +187,8 @@ export type PreschoolOverviewAiReadModel = {
   binding: PreschoolOverviewAiBinding;
   sections: Record<PreschoolSectionId, PreschoolOverviewAiUnitStatus<PreschoolSectionInterpretationResult>>;
   executive: PreschoolOverviewAiUnitStatus<PreschoolExecutiveSynthesisResult>;
+  additional?: PreschoolOverviewAiUnitStatus<AdditionalAiInsightsArtifact>;
+  /** Historical v3 Saved Analysis compatibility only; current reads never populate this field. */
   autonomous?: unknown;
 };
 

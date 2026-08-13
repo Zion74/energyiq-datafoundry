@@ -3,6 +3,10 @@ import type { BaseEvent, EventType } from "@ag-ui/core";
 export * from "./energyiq-ai-presentation.js";
 export * from "./energyiq-ai-claim-validation.js";
 export * from "./energyiq-preschool-overview-ai.js";
+export * from "./energyiq-autonomous-insights.js";
+export * from "./energyiq-insight-method-promotion.js";
+export * from "./energyiq-insight-canvas.js";
+export * from "./energyiq-additional-ai-insights.js";
 
 export type ApiResult<T> = {
   success: boolean;

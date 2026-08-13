@@ -1,7 +1,16 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
+import {
+  ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1,
+  CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_ID,
+  CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_REVISION,
+  canonicalInsightMethodSetJson,
+  resolveCurrentAdditionalAiInsightMethodSet,
+  type AdditionalAiInsightsArtifact,
+} from "@datafoundry/contracts";
 
 import { createMetadataStore } from "./index.js";
 import type { EnergyIqOverviewAiArtifactIdentity } from "./energyiq-overview-ai-artifact-store.js";
@@ -831,6 +840,193 @@ const completeSectionV4 = (
   const workerId = `worker:${artifactIdentity.dataSnapshotId}`;
   store.energyIq.overviewAiArtifacts.claim({ identity: artifactIdentity, workerId, leaseMs: 60_000 });
   return store.energyIq.overviewAiArtifacts.complete({
+    identity: artifactIdentity,
+    workerId,
+    sessionId: `session:${artifactIdentity.dataSnapshotId}`,
+    runId: `run:${artifactIdentity.dataSnapshotId}`,
+    resultJson: JSON.stringify(result),
+  });
+};
+
+describe("EnergyIqOverviewAiArtifactStore current Additional AI Insights", () => {
+  it("persists only an exact shared Method-set Artifact and keeps empty as a valid terminal result", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-additional-insights-artifact-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      metadata.workspaces.upsert({
+        id: "artifact-workspace",
+        owner_user_id: "dev-user",
+        name: "Artifact",
+        kind: "customer",
+      });
+      metadata.energyIq.upsertProject({
+        id: "artifact-project",
+        workspace_id: "artifact-workspace",
+        name: "Artifact",
+        status: "published",
+      });
+      const availableIdentity = additionalIdentity("snapshot-additional-available");
+      expect(completeAdditional(metadata, availableIdentity, additionalResult(availableIdentity, "available")))
+        .toMatchObject({ status: "available" });
+
+      const emptyIdentity = additionalIdentity("snapshot-additional-empty");
+      expect(completeAdditional(metadata, emptyIdentity, additionalResult(emptyIdentity, "empty")))
+        .toMatchObject({ status: "available" });
+
+      const driftIdentity = additionalIdentity("snapshot-additional-drift");
+      const drift = additionalResult(driftIdentity, "available");
+      drift.methodExecution.loadedMethods[0] = {
+        ...drift.methodExecution.loadedMethods[0]!,
+        contentSha256: "f".repeat(64),
+      };
+      expect(() => completeAdditional(metadata, driftIdentity, drift))
+        .toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+
+      const selfApprovedIdentity = additionalIdentity("snapshot-additional-self-approved");
+      const selfApproved = additionalResult(selfApprovedIdentity, "available");
+      Object.assign(selfApproved.methodExecution, {
+        approvedMethods: [{
+          ...selfApproved.methodExecution.loadedMethods[0]!,
+          skillId: "artifact-self-approved",
+          resourceId: "skill:artifact-self-approved",
+        }],
+      });
+      expect(() => completeAdditional(metadata, selfApprovedIdentity, selfApproved))
+        .toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+
+      expect(() => metadata.energyIq.overviewAiArtifacts.queue({
+        identity: { ...availableIdentity, methodSetFingerprint: `sha256:${"f".repeat(64)}` },
+        triggeredBy: "dev-user",
+      })).toThrow("ENERGYIQ_ADDITIONAL_INSIGHT_METHOD_SET_IDENTITY_INVALID");
+
+      expect(() => metadata.energyIq.overviewAiArtifacts.queue({
+        identity: { ...availableIdentity, targetId: "method-set:forbidden" },
+        triggeredBy: "dev-user",
+      })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_FORBIDDEN");
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+type AdditionalIdentity = EnergyIqOverviewAiArtifactIdentity & {
+  artifactKind: "autonomous-insights";
+  identityContractRevision: "additional-insights-v1";
+  methodSetId: "preschool-additional-insights-current";
+  methodSetRevision: "v1";
+  methodSetFingerprint: string;
+  capabilityRevision: "scoped-read-only-v1";
+  publicationRevision: "additional-insights-v1";
+};
+
+const additionalIdentity = (
+  dataSnapshotId: string,
+): AdditionalIdentity => {
+  const methodSet = resolveCurrentAdditionalAiInsightMethodSet("artifact-workspace");
+  const canonical = canonicalInsightMethodSetJson(methodSet.methods);
+  if (!canonical) throw new Error("test Method set must be canonical");
+  return {
+    ...identity(dataSnapshotId),
+    artifactKind: "autonomous-insights",
+    identityContractRevision: "additional-insights-v1",
+    analysisPackId: "preschool-additional-insights-pack",
+    analysisPackRevision: "v1",
+    outputContractRevision: "energyiq-additional-ai-insights-v1",
+    validatorRevision: "additional-insights-acceptance-v1",
+    workflowRevision: "additional-insights-discover-accept-publish-v1",
+    investigatorPromptRevision: "additional-insights-discovery-v1",
+    editorPromptRevision: "additional-insights-publication-v1",
+    methodSkillId: "energyiq-open-discovery",
+    methodSkillRevision: "1.0.0",
+    methodSetId: CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_ID,
+    methodSetRevision: CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_REVISION,
+    methodSetFingerprint: `sha256:${createHash("sha256").update(canonical).digest("hex")}`,
+    capabilityRevision: "scoped-read-only-v1",
+    publicationRevision: "additional-insights-v1",
+  };
+};
+
+const additionalResult = (
+  artifactIdentity: AdditionalIdentity,
+  status: "available" | "empty",
+): AdditionalAiInsightsArtifact => {
+  const methodSet = resolveCurrentAdditionalAiInsightMethodSet(artifactIdentity.workspaceId);
+  const base: Omit<AdditionalAiInsightsArtifact, "status" | "findings"> = {
+  artifactKind: "autonomous-insights",
+  providerProfileId: artifactIdentity.modelProfileId,
+  runId: `run:${artifactIdentity.dataSnapshotId}`,
+  contract: {
+    id: "energyiq-additional-ai-insights",
+    revision: artifactIdentity.outputContractRevision,
+  },
+  binding: {
+    workspaceId: artifactIdentity.workspaceId,
+    projectId: artifactIdentity.projectId,
+    scopeId: artifactIdentity.scopeId,
+    dataSnapshotId: artifactIdentity.dataSnapshotId,
+    projectReleaseId: artifactIdentity.projectReleaseId,
+    analysisPeriod: {
+      from: artifactIdentity.analysisPeriodFrom,
+      to: artifactIdentity.analysisPeriodTo,
+    },
+    modelProfileId: artifactIdentity.modelProfileId,
+    modelProfileRevision: artifactIdentity.modelProfileRevision,
+  },
+  methodExecution: {
+    methodSetId: artifactIdentity.methodSetId,
+    methodSetRevision: artifactIdentity.methodSetRevision,
+    methodSetFingerprint: artifactIdentity.methodSetFingerprint,
+    loadedMethods: [...methodSet.methods],
+  },
+  capability: {
+    revision: artifactIdentity.capabilityRevision,
+    mode: "scoped-read-only",
+    allowedTools: [...ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1],
+    usedTools: [],
+  },
+  toolAudits: [],
+  publication: {
+    policyId: "energyiq-additional-ai-insights",
+    policyRevision: artifactIdentity.publicationRevision,
+    discoveredCount: status === "available" ? 1 : 0,
+    acceptedCount: status === "available" ? 1 : 0,
+    rejectedCount: 0,
+    publishedCount: status === "available" ? 1 : 0,
+    suppressedCandidateIds: [],
+  },
+  };
+  if (status === "empty") {
+    return { ...base, status, findings: [] };
+  }
+  return {
+    ...base,
+    status,
+    findings: [{
+      id: "additional-insight-1",
+      title: "An incremental angle",
+      text: "Current Snapshot Evidence supports this additional angle.",
+      epistemicStatus: "inferred",
+      origin: {
+        kind: "ai-discovery",
+        coreMethod: methodSet.methods[0]!,
+        directionMethods: [],
+      },
+      evidenceRefs: ["evidence:additional:1"],
+      toolAuditIds: [],
+    }],
+  };
+};
+
+const completeAdditional = (
+  metadata: ReturnType<typeof createMetadataStore>,
+  artifactIdentity: AdditionalIdentity,
+  result: AdditionalAiInsightsArtifact,
+) => {
+  metadata.energyIq.overviewAiArtifacts.queue({ identity: artifactIdentity, triggeredBy: "dev-user" });
+  const workerId = `worker:${artifactIdentity.dataSnapshotId}`;
+  metadata.energyIq.overviewAiArtifacts.claim({ identity: artifactIdentity, workerId, leaseMs: 60_000 });
+  return metadata.energyIq.overviewAiArtifacts.complete({
     identity: artifactIdentity,
     workerId,
     sessionId: `session:${artifactIdentity.dataSnapshotId}`,

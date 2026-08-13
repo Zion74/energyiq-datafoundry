@@ -1,4 +1,9 @@
 import {
+  ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1,
+  resolveCurrentAdditionalAiInsightMethodSet,
+  type AdditionalAiInsightsArtifact,
+} from "@datafoundry/contracts";
+import {
   createMetadataStore,
   type EnergyIqOverviewAiArtifactIdentity,
   type EnergyIqOverviewAiArtifactRecord,
@@ -16,6 +21,7 @@ import {
 } from "./preschool-overview-ai-read-model.js";
 import {
   createOverviewAiArtifactIdentity,
+  createPreschoolAdditionalAiInsightArtifactIdentity,
   createPreschoolOverviewAiExecutiveArtifactIdentityV4,
   createPreschoolOverviewAiSectionArtifactIdentityV3,
   createPreschoolOverviewAiSectionArtifactIdentityV4,
@@ -74,6 +80,134 @@ describe("composePreschoolOverviewAiReadModel", () => {
       metadata.close();
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it("restores the exact current Additional Insight Artifact independently of Section availability", () => {
+    const root = mkdtempSync(join(tmpdir(), "preschool-overview-read-model-additional-current-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      seedProject(metadata);
+      const baseIdentity = identity();
+      const additionalIdentity = createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity });
+      metadata.energyIq.overviewAiArtifacts.queue({ identity: additionalIdentity, triggeredBy: "dev-user" });
+      metadata.energyIq.overviewAiArtifacts.claim({
+        identity: additionalIdentity,
+        workerId: "additional-worker",
+        leaseMs: 60_000,
+      });
+      const artifact = metadata.energyIq.overviewAiArtifacts.complete({
+        identity: additionalIdentity,
+        workerId: "additional-worker",
+        sessionId: "additional-session",
+        runId: "additional-run",
+        resultJson: JSON.stringify(currentAdditionalResult(additionalIdentity)),
+      });
+
+      expect(composePreschoolOverviewAiReadModel({
+        metadataStore: metadata,
+        baseIdentity,
+      })).toMatchObject({
+        sections: {
+          "centre-benchmark": { status: "unavailable" },
+          "standby-wastage": { status: "unavailable" },
+          "operating-behaviour": { status: "unavailable" },
+          "planning-outlook": { status: "unavailable" },
+        },
+        executive: { status: "unavailable" },
+        additional: {
+          status: "available",
+          artifactId: artifact.id,
+          result: {
+            artifactKind: "autonomous-insights",
+            contract: { revision: "energyiq-additional-ai-insights-v1" },
+          },
+        },
+      });
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ["workspace", (value: AdditionalAiInsightsArtifact) => { value.binding.workspaceId = "other-workspace"; }],
+    ["project", (value: AdditionalAiInsightsArtifact) => { value.binding.projectId = "other-project"; }],
+    ["scope", (value: AdditionalAiInsightsArtifact) => { value.binding.scopeId = "other-scope"; }],
+    ["Snapshot", (value: AdditionalAiInsightsArtifact) => { value.binding.dataSnapshotId = "other-snapshot"; }],
+    ["Release", (value: AdditionalAiInsightsArtifact) => { value.binding.projectReleaseId = "other-release"; }],
+    ["period", (value: AdditionalAiInsightsArtifact) => { value.binding.analysisPeriod.to = "2026-07-01T00:00:00.000Z"; }],
+    ["model", (value: AdditionalAiInsightsArtifact) => { value.binding.modelProfileId = "other-model"; }],
+    ["model revision", (value: AdditionalAiInsightsArtifact) => { value.binding.modelProfileRevision += 1; }],
+    ["contract", (value: AdditionalAiInsightsArtifact) => { value.contract.revision = "other-contract"; }],
+    ["Method Set id", (value: AdditionalAiInsightsArtifact) => { value.methodExecution.methodSetId = "caller-method-set"; }],
+    ["Method Set revision", (value: AdditionalAiInsightsArtifact) => { value.methodExecution.methodSetRevision = "v999"; }],
+    ["Method Set fingerprint", (value: AdditionalAiInsightsArtifact) => { value.methodExecution.methodSetFingerprint = `sha256:${"0".repeat(64)}`; }],
+  ] as const)("fails closed locally when the Additional Artifact %s identity drifts", (_label, mutate) => {
+    const baseIdentity = identity();
+    const additionalIdentity = createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity });
+    const additional = currentAdditionalResult(additionalIdentity);
+    mutate(additional);
+    const badAdditional = artifactRecord(additionalIdentity, additional);
+    const queuedSection = artifactRecord(sectionIdentity(baseIdentity, "centre-benchmark"), {});
+    queuedSection.status = "queued";
+    delete queuedSection.result_json;
+    const metadataStore = {
+      energyIq: {
+        overviewAiArtifacts: {
+          find: (requested: EnergyIqOverviewAiArtifactIdentity) => {
+            if (requested.artifactKind === "autonomous-insights") return badAdditional;
+            if (requested.artifactKind === "section-interpretation"
+              && requested.targetId === "centre-benchmark") return queuedSection;
+            return undefined;
+          },
+        },
+      },
+    } as unknown as MetadataStore;
+
+    expect(composePreschoolOverviewAiReadModel({ metadataStore, baseIdentity })).toMatchObject({
+      sections: { "centre-benchmark": { status: "queued" } },
+      additional: {
+        status: "unavailable",
+        artifactId: badAdditional.id,
+        reason: "Additional AI Insights are invalid.",
+      },
+    });
+  });
+
+  it("restores a legacy-only base Artifact only through the v3 Saved composer", () => {
+    const baseIdentity = identity();
+    const legacyArtifact = artifactRecord(baseIdentity, {
+      status: "available",
+      findings: [{ id: "legacy-finding" }],
+    });
+    const metadataStore = {
+      energyIq: {
+        overviewAiArtifacts: {
+          find: (requested: EnergyIqOverviewAiArtifactIdentity) => {
+            if (requested.artifactKind === undefined) return legacyArtifact;
+            return undefined;
+          },
+        },
+      },
+    } as unknown as MetadataStore;
+
+    const current = composePreschoolOverviewAiReadModel({
+      metadataStore,
+      baseIdentity,
+    });
+    const saved = composePreschoolOverviewAiReadModelV3({
+      metadataStore,
+      baseIdentity,
+    });
+
+    expect(current).toBeNull();
+    expect(saved).toMatchObject({
+      autonomous: {
+        status: "available",
+        findings: [{ id: "legacy-finding" }],
+      },
+    });
+    expect(saved).not.toHaveProperty("additional");
   });
 
   it.each(["contract", "binding"] as const)(
@@ -455,3 +589,67 @@ const artifactRecord = (
   updated_at: "2026-08-13T00:00:00.000Z",
   completed_at: "2026-08-13T00:00:00.000Z",
 });
+
+const currentAdditionalResult = (
+  artifactIdentity: ReturnType<typeof createPreschoolAdditionalAiInsightArtifactIdentity>,
+): AdditionalAiInsightsArtifact => {
+  const methodSet = resolveCurrentAdditionalAiInsightMethodSet(artifactIdentity.workspaceId);
+  return ({
+  artifactKind: "autonomous-insights",
+  status: "available",
+  providerProfileId: artifactIdentity.modelProfileId,
+  runId: "additional-run",
+  contract: {
+    id: "energyiq-additional-ai-insights",
+    revision: artifactIdentity.outputContractRevision,
+  },
+  binding: {
+    workspaceId: artifactIdentity.workspaceId,
+    projectId: artifactIdentity.projectId,
+    scopeId: artifactIdentity.scopeId,
+    dataSnapshotId: artifactIdentity.dataSnapshotId,
+    projectReleaseId: artifactIdentity.projectReleaseId,
+    analysisPeriod: {
+      from: artifactIdentity.analysisPeriodFrom,
+      to: artifactIdentity.analysisPeriodTo,
+    },
+    modelProfileId: artifactIdentity.modelProfileId,
+    modelProfileRevision: artifactIdentity.modelProfileRevision,
+  },
+  methodExecution: {
+    methodSetId: artifactIdentity.methodSetId,
+    methodSetRevision: artifactIdentity.methodSetRevision,
+    methodSetFingerprint: artifactIdentity.methodSetFingerprint,
+    loadedMethods: [...methodSet.methods],
+  },
+  capability: {
+    revision: artifactIdentity.capabilityRevision,
+    mode: "scoped-read-only",
+    allowedTools: [...ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1],
+    usedTools: [],
+  },
+  toolAudits: [],
+  findings: [{
+    id: "additional-insight-1",
+    title: "An incremental angle",
+    text: "The current Snapshot supports this additional angle.",
+    epistemicStatus: "inferred",
+    origin: {
+      kind: "ai-discovery",
+      coreMethod: methodSet.methods[0]!,
+      directionMethods: [],
+    },
+    evidenceRefs: ["evidence:additional:1"],
+    toolAuditIds: [],
+  }],
+  publication: {
+    policyId: "energyiq-additional-ai-insights",
+    policyRevision: artifactIdentity.publicationRevision,
+    discoveredCount: 1,
+    acceptedCount: 1,
+    rejectedCount: 0,
+    publishedCount: 1,
+    suppressedCandidateIds: [],
+  },
+  });
+};

@@ -728,3 +728,107 @@ SLA。
 
 本节不授权 Template Agent、Coding Agent、通用 Scheduler、任意 Markdown/HTML 页面生成或全量 Skill 平台。完成 T17A 4/4 和
 本节渐进读取/表达验收后，才进入后续 Template Change Proposal 阶段。
+
+## 18. 2026-08-13 Stage 3 Additional AI Insights 实施与验收计划
+
+### 18.1 当前事实与不能误报的状态
+
+截至 `9baa4dc`，页面已把 `Additional AI Insights` 放在 Section 5 之后，但当前 Live Read Model 仍从旧
+`preschool-analysis-pack@v1` 基础 identity 读取 `autonomous` JSON。旧 `preschool-overview-ai-workflow` 有两阶段
+Investigator/Editor、Evidence 和 SQL 事实校验测试，但当前 Server 只装配 Layer 1/2 Page Workflow，旧 Workflow 没有生产调用入口。
+
+以下能力已经存在为纯合同或纯评估函数，但尚不等于生产 Stage 3：
+
+- `ai-discovery / expert-sop / hybrid` 来源和精确 Skill revision/SHA 校验；
+- feedback → review → approval → publication 的状态转换；
+- 声明式 Insight Canvas 的 Evidence 绑定和局部 Block 拒绝；
+- 固定 Snapshot/Profile 的 pass@3 与 Snapshot A→B 分类函数。
+
+因此当前状态是：**Stage 3 治理原语已建立，运行、持久化、只读恢复、反馈和产品验收尚未闭环。** 不能用旧 Autonomous
+Artifact 的页面可见性，或上述纯函数的单元测试，声称 Additional AI Insights 已达到本阶段目标。
+
+### 18.2 目标运行链路
+
+```text
+Published Snapshot / Release
+  + approved exact Method set (core discovery + optional expert directions)
+  + scoped read-only capability policy
+  + deterministic Evidence catalog
+    -> open discovery
+    -> Evidence / origin / permission / safety / Canvas acceptance
+    -> compact publication
+    -> immutable Additional Insight Artifact
+    -> Overview read-only restore after Section 5
+    -> useful / not-useful feedback
+    -> explicit human review and versioned Method publication
+    -> same Method set reruns on the next Snapshot
+```
+
+普通 Overview 打开只读取已经持久化的精确 Artifact，不启动 Provider、不加载新 Skill、不调用工具。生成只发生在明确的
+Publisher/Admin materialization 路径；失败、`empty`、`No material change` 和局部 Presentation 拒绝都必须是可恢复的独立状态。
+
+### 18.3 Artifact 与来源合同
+
+当前 Additional Artifact 必须使用独立 `artifactKind=autonomous-insights` 和显式 identity revision，至少固定：
+
+- Workspace、Project、Scope、Resource；
+- Snapshot、Release、Period；
+- Model Profile id/revision；
+- output/validator/workflow/prompt/capability/publication revisions；
+- 被批准且实际加载的完整 Method 集合，包含资源 revision 与 content SHA；
+- 共享 Overview 的 workspace/builtin 可见性边界，不允许 user-private Method 泄露到共享页面。
+
+每条已发布 Insight 至少保存 `origin`、确定性等级、Evidence refs、可选 Alert 语义、deep-dive question 和受控 Canvas
+结果。`sourceType/sourceRevision` 可作为客户层简化表达，但不能替代内部的精确 Method execution trace。Artifact 的 Method
+集合、Finding origin 和 Store identity 必须可互相验证；只改 semantic version、不改 identity 的复用是禁止的。
+
+### 18.4 执行切片
+
+1. **3A — identity / Store / Read Model：** 先写红测，建立当前 Additional Artifact identity、Method-set fingerprint、Store
+   canonical validator 和 Live 只读恢复；旧 v13 只保留 Saved compatibility，不再冒充当前 Stage 3。
+2. **3B — discovery / acceptance / publication：** 将当前未接线的 Investigator 能力拆到显式 Stage 3 Workflow；加载已批准
+   Method，支持受控只读能力，并接入 origin、Evidence、权限、Alert safety 和 compact publication。页面打开不得成为 worker。
+3. **3C — Production Insight Canvas：** Runtime 调用 `acceptInsightCanvasPlan`；Finding 可以无图，坏 Block 局部拒绝；Web 只渲染
+   注册模块和已接受声明，不执行 HTML、CSS、JS、URL 或任意图表配置。
+4. **3D — feedback / promotion persistence：** 持久化 Useful/Not useful、Proposal、Review、Approval、Publication audit；反馈本身
+   永不自动发布。Workspace 与 private Analysis 选择规则分别验证。
+5. **3E — evaluation / A→B：** 在固定 Snapshot/Profile 上执行三次独立 Run，至少两次经盲审达到人工价值门；随后使用新
+   Snapshot 验证 New、Changed、Still supported、Resolved 或 No material change，且 B Artifact 不得引用 A 数字。
+
+每个切片保持 TDD：先取得能够命中真实生产缺口的 RED，再做最小 GREEN；focused tests、build、真实 Provider、浏览器和人工
+价值验收分别报告，互不替代。
+
+### 18.5 Stage 3 产品价值门
+
+一个 Additional Insight 只有在现有 Layer 1/2 没有主动提供该角度，并且满足以下条件时才算增量价值：
+
+- 给出值得继续思考的新现象、联系、反例、假设、低风险试验或专业 SOP 视角；
+- 与当前管理问题相关，文字紧凑，并诚实区分事实、推断和猜想；
+- Evidence 与来源可追溯，Alert 等级不超过 Evidence；
+- 值得进入 AI Analysis 深挖，而不是把“请检查、请比较”原样交还用户；
+- Presentation 帮助理解，不为展示 AI 而增加页面长度；没有新价值时允许 `No material change`。
+
+固定 Snapshot 的三次运行必须由人工在不知道运行序号的情况下独立评分。工程测试只证明合同执行，不能证明内容有价值；真实
+Provider 只证明可运行，不能证明值得发布。
+
+### 18.6 首轮审计已发现的实现缺口
+
+- 当前 Server 未装配旧 Autonomous Workflow，也没有新的 Stage 3 Publisher/Admin 生成入口；
+- 当前 Read Model 原样附带旧基础 Artifact，缺少当前 Method-set exact identity 和本地结果校验；
+- Metadata Store 对 legacy accepted artifact 有校验，但没有 Stage 3 origin、Method trace、Canvas、Alert 和 publication 合同；
+- Web 只识别 `preschool-analysis-pack@v1` Finding，未呈现 SOP/Skill revision、运行来源或 A→B 状态；
+- promotion 与 pass@3/A→B 目前没有持久化记录和生产编排；
+- 当前 `/ensure`/`/retry` 路由仍需在最终安全 Gate 中证明只有授权 Publisher/Admin 可产生 Provider 工作。
+
+这些缺口按 3A→3E 顺序关闭。Layer 4 Coding Agent、模板自动发布和未经管理员审核的生产变更继续排除在本计划之外。
+
+### 18.7 Stage 3A 工程 checkpoint
+
+Stage 3A 只关闭 Additional Artifact 的核心持久化边界：服务端从固定 Registry 解析当前 Method set，Method-set fingerprint 与
+`methodSkillRevision` 独立进入 identity；Metadata Store 重新解析同一 Registry 并校验完整 Artifact、Method execution、
+Evidence refs、tool audit 引用、可选 Alert/Canvas provenance 和 Snapshot A→B 结构。当前 Read Model 只恢复精确 current
+Additional identity；旧 base Artifact 仅由 Saved v3 composer 只读恢复，不能冒充 current。
+
+这一 checkpoint 只证明 Contracts、Identity、Store、Read Model 和 Saved compatibility 的自动化门。`energyiq-autonomous-insights`、
+Method promotion、Insight Canvas 与 A→B evaluation 的导出仍是已有的受控合同/评估原语，不表示生产 Workflow、Canvas UI、反馈
+持久化或 Snapshot transition 已接线。3B 的生成入口、真实 Provider、浏览器恢复和人工增量价值验收仍保持未完成。

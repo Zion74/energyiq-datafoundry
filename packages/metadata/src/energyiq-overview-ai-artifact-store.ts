@@ -1,4 +1,10 @@
 import { createHash } from "node:crypto";
+import {
+  additionalAiInsightsArtifactIsValid,
+  canonicalInsightMethodSetJson,
+  resolveAdditionalAiInsightMethodSet,
+  type InsightMethodRevisionRef,
+} from "@datafoundry/contracts";
 import type { DatabaseSync } from "node:sqlite";
 
 export type EnergyIqOverviewAiArtifactKind =
@@ -28,6 +34,10 @@ export type EnergyIqOverviewAiArtifactIdentity = {
   editorPromptRevision: string;
   methodSkillId: string;
   methodSkillRevision: string;
+  /** Server-owned Additional Insight Method Set registry identity. */
+  methodSetId?: string;
+  methodSetRevision?: string;
+  methodSetFingerprint?: string;
   /** Explicit discriminator for revised value-artifact identity contracts. */
   identityContractRevision?: string;
   /** Exact server-owned capability set used to create the artifact. */
@@ -342,6 +352,13 @@ const canonicalIdentity = (
     && identity.targetId !== undefined) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_FORBIDDEN");
   }
+  if (identity.artifactKind === "autonomous-insights") {
+    requireAdditionalMethodSetIdentity(identity);
+  } else if (identity.methodSetId !== undefined
+    || identity.methodSetRevision !== undefined
+    || identity.methodSetFingerprint !== undefined) {
+    throw new Error("ENERGYIQ_ADDITIONAL_INSIGHT_METHOD_SET_IDENTITY_INVALID");
+  }
   return {
     workspaceId: identity.workspaceId,
     projectId: identity.projectId,
@@ -364,6 +381,9 @@ const canonicalIdentity = (
     editorPromptRevision: identity.editorPromptRevision,
     methodSkillId: identity.methodSkillId,
     methodSkillRevision: identity.methodSkillRevision,
+    ...(identity.methodSetId ? { methodSetId: identity.methodSetId } : {}),
+    ...(identity.methodSetRevision ? { methodSetRevision: identity.methodSetRevision } : {}),
+    ...(identity.methodSetFingerprint ? { methodSetFingerprint: identity.methodSetFingerprint } : {}),
     ...(identity.identityContractRevision
       ? { identityContractRevision: identity.identityContractRevision }
       : {}),
@@ -402,6 +422,10 @@ const requireArtifactResult = (
   }
   if (identity.artifactKind === "executive-synthesis") {
     requireExecutiveSynthesisResult(parsed, identity, db);
+    return;
+  }
+  if (identity.artifactKind === "autonomous-insights") {
+    requireAdditionalAiInsightsResult(parsed, identity);
     return;
   }
   const artifactBinding = parsed.binding;
@@ -459,6 +483,74 @@ const requireSectionInterpretationResult = (
     return;
   }
   requireSectionInterpretationResultV3(parsed, identity);
+};
+
+const requireAdditionalAiInsightsResult = (
+  parsed: Record<string, unknown>,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): void => {
+  const expectedMethods = requireAdditionalMethodSetIdentity(identity);
+  if (identity.identityContractRevision !== "additional-insights-v1"
+    || identity.analysisPackId !== "preschool-additional-insights-pack"
+    || identity.analysisPackRevision !== "v1"
+    || identity.outputContractRevision !== "energyiq-additional-ai-insights-v1"
+    || identity.validatorRevision !== "additional-insights-acceptance-v1"
+    || identity.workflowRevision !== "additional-insights-discover-accept-publish-v1"
+    || identity.investigatorPromptRevision !== "additional-insights-discovery-v1"
+    || identity.editorPromptRevision !== "additional-insights-publication-v1"
+    || identity.capabilityRevision !== "scoped-read-only-v1"
+    || identity.publicationRevision !== "additional-insights-v1"
+    || !additionalAiInsightsArtifactIsValid({
+      value: parsed,
+      expectedMethods,
+      expected: {
+        workspaceId: identity.workspaceId,
+        projectId: identity.projectId,
+        scopeId: identity.scopeId,
+        dataSnapshotId: identity.dataSnapshotId,
+        projectReleaseId: identity.projectReleaseId,
+        analysisPeriod: {
+          from: identity.analysisPeriodFrom,
+          to: identity.analysisPeriodTo,
+        },
+        modelProfileId: identity.modelProfileId,
+        modelProfileRevision: identity.modelProfileRevision,
+        methodSetId: identity.methodSetId!,
+        methodSetRevision: identity.methodSetRevision!,
+        methodSetFingerprint: identity.methodSetFingerprint!,
+        outputContractRevision: identity.outputContractRevision,
+        capabilityRevision: identity.capabilityRevision,
+        publicationRevision: identity.publicationRevision,
+      },
+    })) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+  }
+};
+
+const requireAdditionalMethodSetIdentity = (
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): readonly InsightMethodRevisionRef[] => {
+  if (!identity.methodSetId || !identity.methodSetRevision || !identity.methodSetFingerprint) {
+    throw new Error("ENERGYIQ_ADDITIONAL_INSIGHT_METHOD_SET_IDENTITY_INVALID");
+  }
+  const methodSet = resolveAdditionalAiInsightMethodSet({
+    workspaceId: identity.workspaceId,
+    methodSetId: identity.methodSetId,
+    methodSetRevision: identity.methodSetRevision,
+  });
+  const canonical = methodSet ? canonicalInsightMethodSetJson(methodSet.methods) : null;
+  const fingerprint = canonical === null
+    ? null
+    : `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
+  const coreMethod = methodSet?.methods.find(({ role }) => role === "core-method");
+  if (!methodSet
+    || fingerprint !== identity.methodSetFingerprint
+    || !coreMethod
+    || identity.methodSkillId !== coreMethod.skillId
+    || identity.methodSkillRevision !== coreMethod.semanticVersion) {
+    throw new Error("ENERGYIQ_ADDITIONAL_INSIGHT_METHOD_SET_IDENTITY_INVALID");
+  }
+  return methodSet.methods;
 };
 
 const requireSectionInterpretationResultV3 = (
