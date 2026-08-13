@@ -1346,6 +1346,26 @@ describe("PreschoolAiSlot", () => {
     expect(container.querySelectorAll("article")).toHaveLength(2);
   });
 
+  it("does not expose a legacy autonomous result from a current live read model when Additional is missing", async () => {
+    const result = v4ReadModelResult();
+    result.autonomous = availableResult();
+    const startRun = vi.fn().mockResolvedValue(result);
+
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        sectionId="overall-summary"
+        liveResult={result}
+        startRun={startRun}
+      />,
+    ));
+
+    expect(startRun).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain("Additional AI Insights");
+    expect(container.textContent).toContain("Additional insights unavailable");
+    expect(container.textContent).not.toContain("Centre G deserves investigation");
+  });
+
   it("renders the current saved Additional Artifact in publication order without starting work", async () => {
     const result = v4ReadModelResult();
     Object.assign(result, { additional: currentAdditionalUnit(result.binding) });
@@ -1408,6 +1428,69 @@ describe("PreschoolAiSlot", () => {
     expect(container.textContent).toContain("Visual unavailable");
     expect(container.textContent).toContain("Insight unavailable");
     expect(container.textContent).toContain("Valid sibling remains visible");
+  });
+
+  it("counts a contract-approved Canvas budget rejection and rejects an unknown rejection code locally", async () => {
+    const result = v4ReadModelResult();
+    const additional = currentAdditionalUnit(result.binding);
+    const budgeted = structuredClone(additional.result.findings[0]!);
+    budgeted.id = "additional:budgeted";
+    budgeted.title = "Budgeted Canvas remains visible";
+    budgeted.canvas.rejections = [{
+      code: "PRESENTATION_BUDGET_EXCEEDED",
+      subjectId: "canvas-block:suppressed-4",
+    }];
+    const unknown = structuredClone(additional.result.findings[0]!);
+    unknown.id = "additional:unknown-rejection";
+    unknown.title = "Unknown rejection keeps narrative only";
+    unknown.canvas.rejections = [{
+      code: "UNKNOWN_REJECTION",
+      subjectId: "canvas-block:unknown",
+    }];
+    additional.result.findings = [budgeted, unknown] as typeof additional.result.findings;
+    Object.assign(additional.result.publication, { publishedCount: 2 });
+    Object.assign(result, { additional });
+
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        sectionId="overall-summary"
+        mode="saved"
+        savedResult={result}
+        startRun={vi.fn()}
+      />,
+    ));
+
+    expect(container.textContent).toContain("1 unsafe or unsupported Canvas declaration was omitted.");
+    const unknownCard = container.querySelector('[data-additional-insight="additional:unknown-rejection"]');
+    expect(unknownCard?.textContent).toContain("Unknown rejection keeps narrative only");
+    expect(unknownCard?.textContent).toContain("Visual unavailable");
+    expect(unknownCard?.querySelector("[data-additional-canvas]")).toBeNull();
+  });
+
+  it("keeps an Insight narrative but rejects an unregistered Canvas visualization locally", async () => {
+    const result = v4ReadModelResult();
+    const additional = currentAdditionalUnit(result.binding);
+    const finding = additional.result.findings[0]!;
+    finding.title = "Narrative survives an unregistered renderer";
+    finding.canvas.acceptedBlocks[0]!.visualization = "custom-chart" as "comparison";
+    Object.assign(result, { additional });
+
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        sectionId="overall-summary"
+        mode="saved"
+        savedResult={result}
+        startRun={vi.fn()}
+      />,
+    ));
+
+    expect(container.textContent).toContain("Narrative survives an unregistered renderer");
+    expect(container.textContent).toContain("Visual unavailable");
+    expect(container.querySelector("[data-additional-canvas]")).toBeNull();
+    expect(container.querySelector("script")).toBeNull();
+    expect(container.querySelector("a")).toBeNull();
   });
 
   it.each([

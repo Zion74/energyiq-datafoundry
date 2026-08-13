@@ -642,6 +642,7 @@ const CANVAS_REJECTION_CODES = new Set([
   "EVIDENCE_BINDING_MISMATCH",
   "EDITOR_PLAN_INVALID",
   "EDITOR_BLOCK_NOT_INVESTIGATED",
+  "PRESENTATION_BUDGET_EXCEEDED",
   "PRESENTATION_GAP_INVALID",
 ]);
 const FORBIDDEN_CANVAS_TEXT = /[<>]|https?:\/\/|www\.|javascript\s*:|data\s*:\s*text\/html|url\s*\(|@import\b|=>|\b(?:react|css|script|function)\b|on[a-z]+\s*=/iu;

@@ -3,6 +3,7 @@ import React from "react";
 import type { InsightCanvasQuantitativeBlock } from "@datafoundry/contracts";
 
 import type { PreschoolOverviewAiBindingDto } from "../../../lib/config-api";
+import { resolvePreschoolAdditionalCanvasRenderer } from "./preschool-additional-ai-insight-canvas-registry";
 import { EnergyIcon } from "./icons";
 import { SafeAiMarkdown } from "./safe-ai-markdown";
 
@@ -106,59 +107,8 @@ function AdditionalFindingCard({ finding }: { finding: ParsedAdditionalFinding }
 }
 
 function CanvasBlock({ block }: { block: InsightCanvasQuantitativeBlock }) {
-  if (block.visualization === "metric") {
-    return (
-      <section className="rounded-lg border border-border bg-surface p-3" data-additional-canvas="metric" aria-label={block.title}>
-        <p className="text-xs font-semibold text-muted">{block.title}</p>
-        <div className="mt-2 flex flex-wrap gap-3">
-          {block.bindings.map((binding) => (
-            <div key={`${binding.evidenceRef}:${binding.entityId}`} className="rounded-lg bg-surface-subtle px-3 py-2">
-              <p className="text-lg font-semibold text-foreground">{formatCanvasValue(binding.value)} {binding.unit}</p>
-              <p className="mt-0.5 text-[10px] text-muted">{binding.entityId}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-    );
-  }
-  if (block.visualization === "comparison") {
-    const maximum = Math.max(...block.bindings.map(({ value }) => Math.abs(value)), 1);
-    return (
-      <section className="rounded-lg border border-border bg-surface p-3" data-additional-canvas="comparison" aria-label={block.title}>
-        <p className="text-xs font-semibold text-muted">{block.title}</p>
-        <ul className="mt-3 space-y-2">
-          {block.bindings.map((binding) => (
-            <li key={`${binding.evidenceRef}:${binding.entityId}`} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 text-xs">
-              <div>
-                <div className="flex items-center justify-between gap-2"><span>{binding.entityId}</span></div>
-                <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-surface-subtle">
-                  <div className="h-full rounded-full bg-primary" style={{ width: `${Math.max(2, Math.abs(binding.value) / maximum * 100)}%` }} />
-                </div>
-              </div>
-              <span className="font-semibold text-foreground">{formatCanvasValue(binding.value)} {binding.unit}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
-    );
-  }
-  const values = block.bindings.map(({ value }) => value);
-  const minimum = Math.min(...values);
-  const maximum = Math.max(...values);
-  const span = maximum - minimum || 1;
-  const denominator = Math.max(block.bindings.length - 1, 1);
-  const points = block.bindings.map(({ value }, index) => `${index / denominator * 100},${40 - (value - minimum) / span * 36}`).join(" ");
-  return (
-    <section className="rounded-lg border border-border bg-surface p-3" data-additional-canvas="trend" aria-label={block.title}>
-      <p className="text-xs font-semibold text-muted">{block.title}</p>
-      <svg className="mt-2 h-12 w-full text-primary" viewBox="0 0 100 44" role="img" aria-label={`${block.title} trend`} preserveAspectRatio="none">
-        <polyline points={points} fill="none" stroke="currentColor" strokeWidth="2" vectorEffect="non-scaling-stroke" />
-      </svg>
-      <p className="mt-2 text-[10px] leading-4 text-muted">
-        {block.bindings.map(({ entityId, value, unit }) => `${entityId}: ${formatCanvasValue(value)} ${unit}`).join(" · ")}
-      </p>
-    </section>
-  );
+  const Renderer = resolvePreschoolAdditionalCanvasRenderer(block.visualization);
+  return Renderer ? <Renderer block={block} /> : null;
 }
 
 function AdditionalStatus({ title, detail }: { title: string; detail: string }) {
@@ -200,6 +150,19 @@ type ParsedAdditionalUnit =
   | { status: "unavailable"; detail: string }
   | { status: "empty"; runId: string }
   | { status: "available"; runId: string; findings: Array<ParsedAdditionalFinding | null> };
+
+const CANVAS_REJECTION_CODES = new Set([
+  "INPUT_IDENTITY_INVALID",
+  "PLAN_INVALID",
+  "PLAN_IDENTITY_MISMATCH",
+  "FINDING_INVALID",
+  "INVESTIGATOR_BLOCK_INVALID",
+  "EVIDENCE_BINDING_MISMATCH",
+  "EDITOR_PLAN_INVALID",
+  "EDITOR_BLOCK_NOT_INVESTIGATED",
+  "PRESENTATION_BUDGET_EXCEEDED",
+  "PRESENTATION_GAP_INVALID",
+]);
 
 function parseAdditionalUnit(
   unit: unknown,
@@ -315,7 +278,10 @@ function parseCanvas(value: unknown, findingEvidenceRefs: readonly string[]): Pa
   const blocks = value.acceptedBlocks.flatMap((block) => isQuantitativeBlock(block, findingEvidenceRefs) ? [block] : []);
   if (blocks.length !== value.acceptedBlocks.length
     || !value.acceptedBlockIds.every((id, index) => blocks[index]?.id === id)
-    || !value.rejections.every((rejection) => isRecord(rejection) && isNonEmptyString(rejection.code) && isNonEmptyString(rejection.subjectId))) {
+    || !value.rejections.every((rejection) => isRecord(rejection)
+      && typeof rejection.code === "string"
+      && CANVAS_REJECTION_CODES.has(rejection.code)
+      && isNonEmptyString(rejection.subjectId))) {
     return { status: "invalid" };
   }
   return {
@@ -330,7 +296,7 @@ function isQuantitativeBlock(value: unknown, findingEvidenceRefs: readonly strin
   return isRecord(value)
     && isNonEmptyString(value.id)
     && value.kind === "quantitative"
-    && (value.visualization === "metric" || value.visualization === "comparison" || value.visualization === "trend")
+    && resolvePreschoolAdditionalCanvasRenderer(value.visualization) !== null
     && isSafeNarrative(value.title)
     && Array.isArray(value.bindings)
     && value.bindings.length > 0
@@ -399,10 +365,6 @@ function epistemicLimitation(status: ParsedAdditionalFinding["epistemicStatus"])
   if (status === "observed") return "Observed only within the cited current Snapshot Evidence; it does not establish a cause.";
   if (status === "inferred") return "This interpretation must be rechecked against the cited Evidence before action.";
   return "This is a hypothesis to test; the cited Evidence does not confirm the explanation.";
-}
-
-function formatCanvasValue(value: number): string {
-  return new Intl.NumberFormat("en-SG", { maximumFractionDigits: 2 }).format(value);
 }
 
 function isUniqueNonEmptyStrings(value: unknown, allowEmpty: boolean): value is string[] {

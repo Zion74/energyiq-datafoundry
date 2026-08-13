@@ -942,7 +942,25 @@ describe("EnergyIqOverviewAiArtifactStore current Additional AI Insights", () =>
       const acceptedIdentity = additionalIdentity("snapshot-additional-canvas");
       const accepted = additionalResult(acceptedIdentity, "available");
       attachAcceptedCanvas(accepted);
+      const acceptedCanvas = accepted.findings[0]!.canvas;
+      if (acceptedCanvas?.contractRevision !== "energyiq-insight-canvas-v2") throw new Error("current Canvas fixture missing");
+      acceptedCanvas.rejections = [{
+        code: "PRESENTATION_BUDGET_EXCEEDED",
+        subjectId: "canvas-block:suppressed-4",
+      }];
       expect(completeAdditional(metadata, acceptedIdentity, accepted)).toMatchObject({ status: "available" });
+
+      const unknownRejectionIdentity = additionalIdentity("snapshot-additional-canvas-unknown-rejection");
+      const unknownRejection = additionalResult(unknownRejectionIdentity, "available");
+      attachAcceptedCanvas(unknownRejection);
+      const unknownRejectionCanvas = unknownRejection.findings[0]!.canvas;
+      if (unknownRejectionCanvas?.contractRevision !== "energyiq-insight-canvas-v2") throw new Error("current Canvas fixture missing");
+      unknownRejectionCanvas.rejections = [{
+        code: "UNKNOWN_REJECTION" as "PRESENTATION_BUDGET_EXCEEDED",
+        subjectId: "canvas-block:unknown",
+      }];
+      expect(() => completeAdditional(metadata, unknownRejectionIdentity, unknownRejection))
+        .toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
 
       const idDriftIdentity = additionalIdentity("snapshot-additional-canvas-id-drift");
       const idDrift = additionalResult(idDriftIdentity, "available");

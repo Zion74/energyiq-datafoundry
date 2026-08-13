@@ -182,6 +182,53 @@ describe("Preschool Additional AI Insights workflow", () => {
     }
   });
 
+  it("keeps the first three accepted Canvas blocks and records a local rejection for the presentation budget", async () => {
+    const harness = createHarness();
+    try {
+      const plan = canvasPlan({
+        candidateId: "candidate-budget",
+        title: "Title for candidate-budget",
+        text: "Incremental observation for candidate-budget.",
+      });
+      const acceptedTemplate = plan.investigatorBlocks[0]!;
+      plan.investigatorBlocks = Array.from({ length: 4 }, (_, index) => ({
+        ...structuredClone(acceptedTemplate),
+        id: `canvas-block:accepted-${index + 1}`,
+        title: `Accepted block ${index + 1}`,
+      }));
+      plan.editorPlan.orderedBlockIds = plan.investigatorBlocks.map(({ id }) => id);
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({
+            candidates: [candidate("candidate-budget", "fact:standby-share", { canvas: plan })],
+          }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const artifact = await workflow.execute({ baseIdentity: harness.baseIdentity, user: harness.user });
+      expect(artifact).toMatchObject({ status: "available" });
+      const result = JSON.parse(artifact.result_json!) as AdditionalAiInsightsArtifact;
+      if (result.status !== "available") throw new Error("available Additional fixture required");
+      expect(result.findings[0]?.canvas).toMatchObject({
+        acceptedBlockIds: [
+          "canvas-block:accepted-1",
+          "canvas-block:accepted-2",
+          "canvas-block:accepted-3",
+        ],
+        rejections: [{
+          code: "PRESENTATION_BUDGET_EXCEEDED",
+          subjectId: "canvas-block:accepted-4",
+        }],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
   it("rejects a forged tool audit locally without losing its valid sibling", async () => {
     const harness = createHarness();
     try {

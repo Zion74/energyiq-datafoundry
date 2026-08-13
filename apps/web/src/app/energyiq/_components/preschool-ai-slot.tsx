@@ -272,6 +272,15 @@ function SectionedAiResult({
         />
       );
     }
+    if (mode === "live") {
+      return (
+        <PreschoolAdditionalAiInsights
+          unit={undefined}
+          outerBinding={result.binding}
+          mode={mode}
+        />
+      );
+    }
     const autonomous = autonomousAvailableResult(result.autonomous);
     if (!autonomous || autonomous.findings.length === 0) return null;
     return (

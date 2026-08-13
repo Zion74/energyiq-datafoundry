@@ -165,6 +165,21 @@ describe("EnergyIQ Additional AI Insights artifact contract", () => {
     const bindingDrift = currentCanvasInput();
     bindingDrift.value.findings[0]!.canvas.acceptedBlocks[0]!.bindings[0]!.value = 999;
     expect(additionalAiInsightsArtifactIsValid(bindingDrift)).toBe(false);
+
+    const budgetRejection = currentCanvasInput();
+    const budgetCanvas = budgetRejection.value.findings[0]!.canvas;
+    if (budgetCanvas.contractRevision !== "energyiq-insight-canvas-v2") throw new Error("current Canvas fixture required");
+    budgetCanvas.rejections = [{
+      code: "PRESENTATION_BUDGET_EXCEEDED",
+      subjectId: "canvas-block:suppressed-4",
+    }];
+    expect(additionalAiInsightsArtifactIsValid(budgetRejection)).toBe(true);
+
+    const unknownRejection = structuredClone(budgetRejection);
+    const unknownCanvas = unknownRejection.value.findings[0]!.canvas;
+    if (unknownCanvas.contractRevision !== "energyiq-insight-canvas-v2") throw new Error("current Canvas fixture required");
+    unknownCanvas.rejections[0]!.code = "UNKNOWN_REJECTION" as "PRESENTATION_BUDGET_EXCEEDED";
+    expect(additionalAiInsightsArtifactIsValid(unknownRejection)).toBe(false);
   });
 
   it("binds compact Evidence lineage and full publication provenance to the current Artifact", () => {

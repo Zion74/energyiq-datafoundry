@@ -18,7 +18,7 @@ import {
   shouldIncludeProjectAnalysisEvidenceContext,
 } from "./server.js";
 import {
-  PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1,
+  PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2,
   PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4,
   PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4,
 } from "./energy/preschool-overview-ai-structured-output.js";
@@ -39,24 +39,26 @@ describe("Overview AI server stage options", () => {
     const invokeAdditionalInsightTool = async () => ({}) as never;
     const trusted = resolveOverviewAiServerRunnerOptions({
       stage: "additional-insights-discovery",
-      structuredOutput: PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1,
+      structuredOutput: PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2,
       additionalInsightTools: toolNames,
       invokeAdditionalInsightTool,
     });
 
-    expect(resolveOverviewAiStageRuntimeOptions("additional-insights-discovery")).toMatchObject({
+    const currentRuntime = resolveOverviewAiStageRuntimeOptions("additional-insights-discovery");
+    expect(currentRuntime).toMatchObject({
       analysisRequirementsMode: "omit",
       disableTools: true,
       excludedToolNames: [
         "skill", "skill_search", "skill_read", "inspect_schema", "run_sql_readonly", "protocol_handoff",
       ],
       overviewAiCandidateSubmission: false,
-      structuredOutput: PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1,
     });
+    expect(currentRuntime.structuredOutput).toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2);
     expect(trusted).toMatchObject({
       disableTools: false,
       conversationMessageMaxChars: MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS,
     });
+    expect(trusted?.structuredOutput).toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2);
     expect(Object.keys(trusted?.trustedStageTools ?? {}).sort()).toEqual([...toolNames].sort());
     expect(Object.keys(createPreschoolAdditionalAiInsightTrustedStageTools({
       toolNames,

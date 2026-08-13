@@ -406,7 +406,15 @@ const acceptCandidateCanvas = (input: {
     && Array.isArray(input.candidateValue.evidenceRefs)
     && sameStringOrder(accepted.acceptedFinding.evidenceRefs, input.candidateValue.evidenceRefs);
   const acceptedBlocks = findingMatches ? accepted.acceptedBlocks.slice(0, 3) : [];
-  const rejections: InsightCanvasRejection[] = [...accepted.rejections];
+  const rejections: InsightCanvasRejection[] = [
+    ...accepted.rejections,
+    ...(findingMatches
+      ? accepted.acceptedBlocks.slice(3).map(({ id }) => ({
+          code: "PRESENTATION_BUDGET_EXCEEDED" as const,
+          subjectId: id,
+        }))
+      : []),
+  ];
   if (!findingMatches && !rejections.some(({ code }) => code === "FINDING_INVALID")) {
     rejections.push({ code: "FINDING_INVALID", subjectId: "finding" });
   }

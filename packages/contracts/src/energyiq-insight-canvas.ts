@@ -75,6 +75,7 @@ export type InsightCanvasRejectionCode =
   | "EVIDENCE_BINDING_MISMATCH"
   | "EDITOR_PLAN_INVALID"
   | "EDITOR_BLOCK_NOT_INVESTIGATED"
+  | "PRESENTATION_BUDGET_EXCEEDED"
   | "PRESENTATION_GAP_INVALID";
 
 export type InsightCanvasRejection = {

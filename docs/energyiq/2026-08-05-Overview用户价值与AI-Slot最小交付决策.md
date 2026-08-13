@@ -832,3 +832,20 @@ Additional identity；旧 base Artifact 仅由 Saved v3 composer 只读恢复，
 这一 checkpoint 只证明 Contracts、Identity、Store、Read Model 和 Saved compatibility 的自动化门。`energyiq-autonomous-insights`、
 Method promotion、Insight Canvas 与 A→B evaluation 的导出仍是已有的受控合同/评估原语，不表示生产 Workflow、Canvas UI、反馈
 持久化或 Snapshot transition 已接线。3B 的生成入口、真实 Provider、浏览器恢复和人工增量价值验收仍保持未完成。
+
+### 18.8 Stage 3B / 3C 工程 checkpoint
+
+Stage 3B 已把 Additional discovery 接入显式 Publisher/Admin Workflow：服务端从固定 Registry 加载 current Method set，按精确
+Snapshot、Release、Period 与 Model identity 建立 scoped read-only runtime，逐候选校验 Evidence、origin、tool audit 与 Alert，按模型
+source order 发布最多三条，并把 `available` 或诚实 `empty` 保存为不可变 current Additional Artifact。普通 Overview 只读已保存
+Artifact；legacy v1 只允许 Frozen Saved Analysis 恢复，不能作为 current live 结果。
+
+Stage 3C 已把 `acceptInsightCanvasPlan` 接入同一 Workflow，并旋转 Additional output、validator、workflow、prompt、publication 与 Canvas
+current identity。Artifact 只持久化服务端接受的有序 quantitative `metric`、`comparison`、`trend` blocks，以及受约束的局部拒绝和
+presentation gaps；第四个及之后的有效 Block 以 `PRESENTATION_BUDGET_EXCEEDED` 留下审计后省略。Web 通过封闭 Renderer Registry
+只查找上述三个模块；未知声明或坏 Block 仅使该 Canvas 局部 unavailable，Finding 与兄弟 Insight 保留。HTML、CSS、JS、URL 和任意
+图表配置不进入执行路径。
+
+这一 checkpoint 只证明 Stage 3A–3C 的自动化合同、持久化、只读恢复和安全渲染边界，不证明真实 Provider 输出质量、浏览器视觉恢复
+或人工增量价值。Stage 3D feedback/promotion persistence、Stage 3E pass@3 与 Snapshot A→B evaluation 仍未实现；在这些门完成前
+不得宣称 Stage 3 已完成或 Additional Insight 已通过产品验收。
