@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { createOverviewAiArtifactIdentity } from "./overview-ai-artifact.js";
+import {
+  createOverviewAiArtifactIdentity,
+  overviewAiArtifactPinnedLocalPeriod,
+} from "./overview-ai-artifact.js";
 
 describe("createOverviewAiArtifactIdentity", () => {
   it("is shared across users but changes with Snapshot or model binding revision", () => {
@@ -10,6 +13,8 @@ describe("createOverviewAiArtifactIdentity", () => {
       scopeId: "preschool-project",
       dataSnapshotId: "snapshot-a",
       projectReleaseId: "release-v1",
+      analysisPeriodFrom: "2026-05-01T00:00:00.000Z",
+      analysisPeriodTo: "2026-06-01T00:00:00.000Z",
       rendererKey: "preschool-overview" as const,
       rendererVersion: "1",
       modelProfileId: "deepseek-v4-flash",
@@ -23,18 +28,27 @@ describe("createOverviewAiArtifactIdentity", () => {
       resource: "electricity",
       dataSnapshotId: "snapshot-a",
       projectReleaseId: "release-v1",
+      analysisPeriodFrom: "2026-05-01T00:00:00.000Z",
+      analysisPeriodTo: "2026-06-01T00:00:00.000Z",
       rendererKey: "preschool-overview",
       rendererVersion: "1",
       analysisPackId: "preschool-analysis-pack",
       analysisPackRevision: "v1",
       modelProfileId: "deepseek-v4-flash",
       modelProfileRevision: 8,
-      outputContractRevision: "v12",
-      validatorRevision: "preschool-ai-event-stream-v1",
+      outputContractRevision: "v13",
+      validatorRevision: "preschool-ai-two-stage-fact-boundary-v7",
+      workflowRevision: "preschool-two-stage-v2",
+      investigatorPromptRevision: "preschool-investigator-v15",
+      editorPromptRevision: "preschool-insight-editor-v7",
+      methodSkillId: "energy-insight-investigation",
+      methodSkillRevision: "1.0.0",
     });
     expect(createOverviewAiArtifactIdentity({ ...base, dataSnapshotId: "snapshot-b" }))
       .not.toEqual(createOverviewAiArtifactIdentity(base));
     expect(createOverviewAiArtifactIdentity({ ...base, modelProfileRevision: 9 }))
+      .not.toEqual(createOverviewAiArtifactIdentity(base));
+    expect(createOverviewAiArtifactIdentity({ ...base, analysisPeriodTo: "2026-06-02T00:00:00.000Z" }))
       .not.toEqual(createOverviewAiArtifactIdentity(base));
   });
 
@@ -45,10 +59,34 @@ describe("createOverviewAiArtifactIdentity", () => {
       scopeId: "project",
       dataSnapshotId: "snapshot",
       projectReleaseId: "release",
+      analysisPeriodFrom: "2026-05-01T00:00:00.000Z",
+      analysisPeriodTo: "2026-06-01T00:00:00.000Z",
       rendererKey: "unknown-overview",
       rendererVersion: "1",
       modelProfileId: "profile",
       modelProfileRevision: 1,
     })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_CONTRACT_NOT_FOUND");
+  });
+});
+
+describe("overviewAiArtifactPinnedLocalPeriod", () => {
+  it("converts Snapshot ISO boundaries to the Project-local inclusive date range", () => {
+    expect(overviewAiArtifactPinnedLocalPeriod({
+      identity: {
+        analysisPeriodFrom: "2026-05-10T16:00:00.000Z",
+        analysisPeriodTo: "2026-06-07T16:00:00.000Z",
+      },
+      timezone: "Asia/Singapore",
+    })).toEqual({ from: "2026-05-11", to: "2026-06-07" });
+  });
+
+  it("fails closed when the exclusive boundary does not follow the start date", () => {
+    expect(() => overviewAiArtifactPinnedLocalPeriod({
+      identity: {
+        analysisPeriodFrom: "2026-05-01T00:00:00.000Z",
+        analysisPeriodTo: "2026-05-01T00:00:00.000Z",
+      },
+      timezone: "UTC",
+    })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PERIOD_INVALID");
   });
 });

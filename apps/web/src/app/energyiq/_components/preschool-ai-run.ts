@@ -1,15 +1,9 @@
 import type {
+  EnergyOverviewAiArtifactDto,
   EnergyProjectAnalysisSnapshotDto,
   PreschoolDecisionSignalsDto,
-  SessionConversationDto,
-  TraceDagDto,
 } from "../../../lib/config-api";
-import { ConfigApiError, configApi, getAgentRuntimeUrl } from "../../../lib/config-api";
-import {
-  configApiCsrfHeaders,
-  configApiIdentityHeaders,
-  isPasswordAuthMode,
-} from "../../../lib/config-api/client";
+import { configApi } from "../../../lib/config-api";
 import { parseSchemaToolResult, parseSqlToolResult, sqlFromToolPayload } from "../../data-tasks/tool-result-normalize";
 import {
   buildPreschoolDiscoveryEvidenceBundle,
@@ -17,12 +11,26 @@ import {
   type PreschoolDiscoveryEvidenceItem,
 } from "./preschool-ai-discovery-evidence";
 import {
-  AI_FINDING_PRESENTATION_PROMPT,
+  buildPreschoolOverviewCoverage,
+  type PreschoolOverviewCoverageV1,
+} from "./preschool-ai-coverage";
+import {
   aiFindingPresentationEvidenceText,
   filterAiFindingPresentationEvidence,
   parseAiFindingPresentation,
   type AiFindingPresentation,
 } from "./ai-finding-presentation";
+import {
+  PRESCHOOL_AI_ACCEPTED_CONTRACT_REVISION,
+  PRESCHOOL_AI_EDITOR_PROMPT_REVISION,
+  PRESCHOOL_AI_INVESTIGATOR_PROMPT_REVISION,
+  PRESCHOOL_AI_METHOD_SKILL_ID,
+  PRESCHOOL_AI_METHOD_SKILL_REVISION,
+  PRESCHOOL_AI_WORKFLOW_REVISION,
+  selectPreschoolAiSectionInterpretation,
+  type PreschoolAiAcceptedArtifact,
+  type PreschoolAiEpistemicLevel,
+} from "./preschool-ai-artifact";
 
 export type PreschoolAiProgress = "queued" | "inspecting" | "querying" | "validating" | "drafting";
 export type PreschoolAiRelationship = "supports" | "challenges" | "independent";
@@ -61,7 +69,7 @@ export type PreschoolAiFinding = {
   };
 };
 
-export type PreschoolAiRunResult = {
+export type PreschoolAiLegacyRunResult = {
   status: "available";
   providerProfileId: string;
   runId: string;
@@ -71,6 +79,12 @@ export type PreschoolAiRunResult = {
 } | {
   status: "unavailable";
   reason: string;
+};
+
+export type PreschoolAiRunResult = PreschoolAiAcceptedArtifact | Extract<PreschoolAiLegacyRunResult, { status: "available" }> | {
+  status: "unavailable";
+  reason: string;
+  retryable?: boolean;
 };
 
 export type PreschoolAiValidationIssue = {
@@ -106,6 +120,7 @@ export type PreschoolAiRunInput = {
   analysisTo: string;
   decisionSignals: PreschoolAiDecisionSignals;
   discoveryEvidence: PreschoolDiscoveryEvidenceBundleV1;
+  coverage: PreschoolOverviewCoverageV1;
 };
 
 type AgUiEvent = Record<string, unknown> & { type?: string };
@@ -142,10 +157,9 @@ const currentRuns = new Map<string, CurrentRun>();
 const FRIENDLY_UNAVAILABLE = "AI analysis is temporarily unavailable. The verified Overview remains available.";
 const PRESCHOOL_AI_PACK_ID = "preschool-analysis-pack" as const;
 const PRESCHOOL_AI_PACK_REVISION = "v1" as const;
-const PRESCHOOL_AI_OUTPUT_CONTRACT_REVISION = "v12";
-const PERSISTED_WORKSPACE_PROFILE_ID = "workspace-default";
-const ACTIVE_RUN_POLL_INTERVAL_MS = 1_500;
-const ACTIVE_RUN_POLL_LIMIT = 200;
+const PRESCHOOL_AI_OUTPUT_CONTRACT_REVISION = "v13";
+const SHARED_ARTIFACT_POLL_MS = 1_000;
+const SHARED_ARTIFACT_WAIT_TIMEOUT_MS = 13 * 60 * 1_000;
 
 export function resetPreschoolAiRunsForTests(): void {
   currentRuns.clear();
@@ -155,9 +169,11 @@ export function buildPreschoolAiRunInput(
   snapshot: EnergyProjectAnalysisSnapshotDto,
 ): PreschoolAiRunInput | null {
   const discoveryEvidence = buildPreschoolDiscoveryEvidenceBundle(snapshot);
+  const coverage = buildPreschoolOverviewCoverage(snapshot);
   const decisionSignals = snapshot.preschoolDecisionSignals;
   if (
     !discoveryEvidence
+    || !coverage
     || snapshot.context.resource !== "electricity"
     || !decisionSignals
     || decisionSignals.status !== "available"
@@ -184,6 +200,10 @@ export function buildPreschoolAiRunInput(
     snapshot.context.tariffScheduleVersion,
     `${PRESCHOOL_AI_PACK_ID}@${PRESCHOOL_AI_PACK_REVISION}`,
     `preschool-ai-output-contract@${PRESCHOOL_AI_OUTPUT_CONTRACT_REVISION}`,
+    `preschool-ai-workflow@${PRESCHOOL_AI_WORKFLOW_REVISION}`,
+    `investigator-prompt@${PRESCHOOL_AI_INVESTIGATOR_PROMPT_REVISION}`,
+    `editor-prompt@${PRESCHOOL_AI_EDITOR_PROMPT_REVISION}`,
+    `method-skill@${PRESCHOOL_AI_METHOD_SKILL_ID}@${PRESCHOOL_AI_METHOD_SKILL_REVISION}`,
     analysisFrom,
     analysisTo,
   ].join(":");
@@ -201,6 +221,7 @@ export function buildPreschoolAiRunInput(
     analysisTo,
     decisionSignals: compactDecisionSignals(decisionSignals),
     discoveryEvidence,
+    coverage,
   };
 }
 
@@ -253,302 +274,129 @@ export function getOrStartPreschoolAiRun(
   return run.promise;
 }
 
-export async function executePreschoolAiRun(
-  input: PreschoolAiRunInput,
-  onProgress?: ProgressCallback,
-  prepared: { profileId?: string; threadId?: string } = {},
-): Promise<PreschoolAiRunResult> {
-  let last: PreschoolAiProgress | null = null;
-  const report = (progress: PreschoolAiProgress) => {
-    const rank = { queued: 0, inspecting: 1, querying: 2, validating: 3, drafting: 4 } satisfies Record<PreschoolAiProgress, number>;
-    if (last && rank[progress] <= rank[last]) return;
-    last = progress;
-    onProgress?.(progress);
-  };
-  report("inspecting");
-  const profileId = prepared.profileId ?? (await configApi.getRunDefaults()).activeLlmProfileId;
-  if (!profileId) return { status: "unavailable", reason: "No current Workspace model profile is configured." };
-  const runId = `preschool-overview-${crypto.randomUUID()}`;
-  const threadId = prepared.threadId ?? await buildPreschoolAiSessionId(input);
-  const response = await fetch(getAgentRuntimeUrl(), {
-    method: "POST",
-    ...(isPasswordAuthMode() ? { credentials: "same-origin" as RequestCredentials } : {}),
-    headers: {
-      Accept: "text/event-stream",
-      "Content-Type": "application/json",
-      ...configApiIdentityHeaders(),
-      ...configApiCsrfHeaders("POST"),
-    },
-    body: JSON.stringify(buildPreschoolAgentRunBody(input, profileId, runId, threadId)),
-    signal: AbortSignal.timeout(300_000),
-  });
-  if (!response.ok) return { status: "unavailable", reason: `AI Analyst request failed (${response.status}).` };
-  let successfulSqlCount = 0;
-  const eventStream = await readEventStream(response, (event) => {
-    const toolName = stringValue(event.toolCallName) ?? stringValue(event.tool_call_name);
-    if (event.type === "TOOL_CALL_START" && toolName === "run_sql_readonly") {
-      report(successfulSqlCount === 0 ? "querying" : "validating");
-    }
-    if (event.type === "TOOL_CALL_RESULT" && toolName === "run_sql_readonly" && parseSqlToolResult(event.result ?? event.content)) {
-      successfulSqlCount += 1;
-    }
-  });
-  if (successfulSqlCount > 0) report("drafting");
-  return resolvePreschoolAiEventStream({ eventStream, input, providerProfileId: profileId, runId });
-}
-
 async function restoreOrExecutePreschoolAiRun(
   input: PreschoolAiRunInput,
   onProgress?: ProgressCallback,
 ): Promise<PreschoolAiRunResult> {
   onProgress?.("inspecting");
-  const shared = await probeSharedPreschoolAiArtifact(input);
-  if (shared) {
+  const pin = overviewAiArtifactPin(input);
+  let artifact = await configApi.getEnergyOverviewAiArtifact(input.projectId, input.scopeId, pin);
+  if (artifact.status === "missing" || artifact.status === "queued") {
+    artifact = await configApi.ensureEnergyOverviewAiArtifact(input.projectId, input.scopeId, pin);
+  }
+  if (artifact.status === "available") {
+    const shared = acceptedSharedPreschoolAiArtifact(input, artifact);
+    if (!shared) return { status: "unavailable", reason: FRIENDLY_UNAVAILABLE };
     onProgress?.("validating");
     onProgress?.("drafting");
     return shared;
   }
-  const threadId = await buildPreschoolAiSessionId(input);
-  let persisted = await probePersistedPreschoolAiRun(input, threadId);
-  if (persisted.result) {
+  if (artifact.status === "failed") return {
+    status: "unavailable",
+    reason: FRIENDLY_UNAVAILABLE,
+    retryable: (artifact.attemptCount ?? 0) < 2,
+  };
+  return waitForSharedPreschoolAiArtifact(input, onProgress);
+}
+
+export async function retryPreschoolAiRun(
+  input: PreschoolAiRunInput,
+  onProgress?: ProgressCallback,
+): Promise<PreschoolAiRunResult> {
+  onProgress?.("inspecting");
+  const artifact = await configApi.retryEnergyOverviewAiArtifact(
+    input.projectId,
+    input.scopeId,
+    overviewAiArtifactPin(input),
+  );
+  const accepted = acceptedSharedPreschoolAiArtifact(input, artifact);
+  if (accepted) {
     onProgress?.("validating");
     onProgress?.("drafting");
-    await persistSharedPreschoolAiArtifact(input, persisted.result);
-    return persisted.result;
+    return cacheSettledPreschoolAiRun(input.identityKey, accepted);
   }
-  for (let attempt = 0; persisted.active && attempt < ACTIVE_RUN_POLL_LIMIT; attempt += 1) {
-    await delay(ACTIVE_RUN_POLL_INTERVAL_MS);
-    persisted = await probePersistedPreschoolAiRun(input, threadId);
-    if (persisted.result) {
-      onProgress?.("validating");
-      onProgress?.("drafting");
-      await persistSharedPreschoolAiArtifact(input, persisted.result);
-      return persisted.result;
-    }
-  }
-  if (persisted.active) {
-    return { status: "unavailable", reason: "The existing AI analysis did not finish within the bounded wait." };
-  }
-  const defaults = await configApi.getRunDefaults();
-  if (!defaults.activeLlmProfileId) {
-    return { status: "unavailable", reason: "No current Workspace model profile is configured." };
-  }
-  const result = await executePreschoolAiRun(input, onProgress, {
-    profileId: defaults.activeLlmProfileId,
-    threadId,
+  if (artifact.status === "failed") return cacheSettledPreschoolAiRun(input.identityKey, {
+    status: "unavailable",
+    reason: FRIENDLY_UNAVAILABLE,
+    retryable: (artifact.attemptCount ?? 0) < 2,
   });
-  if (result.status === "available") await persistSharedPreschoolAiArtifact(input, result);
+  return cacheSettledPreschoolAiRun(
+    input.identityKey,
+    await waitForSharedPreschoolAiArtifact(input, onProgress),
+  );
+}
+
+function cacheSettledPreschoolAiRun(identityKey: string, result: PreschoolAiRunResult): PreschoolAiRunResult {
+  currentRuns.set(identityKey, {
+    promise: Promise.resolve(result),
+    progress: result.status === "available" ? "drafting" : "inspecting",
+    listeners: new Set(),
+    settled: true,
+  });
   return result;
 }
 
-async function probeSharedPreschoolAiArtifact(
+function acceptedSharedPreschoolAiArtifact(
   input: PreschoolAiRunInput,
-): Promise<Extract<PreschoolAiRunResult, { status: "available" }> | null> {
-  try {
-    const artifact = await configApi.getEnergyOverviewAiArtifact(input.projectId, input.scopeId);
-    if (artifact.status !== "available"
-      || artifact.dataSnapshotId !== input.snapshotId
-      || artifact.projectReleaseId !== input.projectReleaseId
-      || !artifact.result
-      || artifact.result.status !== "available"
-      || artifact.result.packId !== PRESCHOOL_AI_PACK_ID
-      || artifact.result.packRevision !== PRESCHOOL_AI_PACK_REVISION
-      || !Array.isArray(artifact.result.findings)
-      || !artifact.result.findings.every((finding) => isRecord(finding)
-        && isRecord(finding.evidence)
-        && finding.evidence.snapshotId === input.snapshotId)) return null;
-    return artifact.result as unknown as Extract<PreschoolAiRunResult, { status: "available" }>;
-  } catch {
-    return null;
-  }
+  artifact: EnergyOverviewAiArtifactDto,
+): PreschoolAiAcceptedArtifact | null {
+  if (artifact.status !== "available"
+    || artifact.dataSnapshotId !== input.snapshotId
+    || artifact.projectReleaseId !== input.projectReleaseId
+    || !artifact.result) return null;
+  const exact = selectPreschoolAiSectionInterpretation(
+    artifact.result,
+    input.coverage.binding,
+    "preschool.overall-key-findings",
+  );
+  return exact.status === "available"
+    ? artifact.result as unknown as PreschoolAiAcceptedArtifact
+    : null;
 }
 
-async function persistSharedPreschoolAiArtifact(
+async function waitForSharedPreschoolAiArtifact(
   input: PreschoolAiRunInput,
-  result: Extract<PreschoolAiRunResult, { status: "available" }>,
-): Promise<void> {
-  try {
-    await configApi.completeEnergyOverviewAiArtifact(input.projectId, result);
-  } catch (error) {
-    console.warn("[energyiq] failed to persist shared Preschool Overview AI Artifact", error);
-  }
-}
-
-async function buildPreschoolAiSessionId(input: PreschoolAiRunInput): Promise<string> {
-  const bytes = new TextEncoder().encode(`preschool-overview-ai-slot\u0000${input.identityKey}`);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  const suffix = [...new Uint8Array(digest)].slice(0, 16)
-    .map((value) => value.toString(16).padStart(2, "0")).join("");
-  return `energyiq-overview-slot-${input.projectId}-${suffix}`;
-}
-
-async function probePersistedPreschoolAiRun(
-  input: PreschoolAiRunInput,
-  threadId: string,
-): Promise<{ active: boolean; result: Extract<PreschoolAiRunResult, { status: "available" }> | null }> {
-  let conversation: SessionConversationDto;
-  try {
-    conversation = await configApi.getSessionConversation(threadId, 200);
-  } catch (error) {
-    if (error instanceof ConfigApiError && error.status === 404) {
-      return { active: false, result: null };
+  onProgress?: ProgressCallback,
+): Promise<PreschoolAiRunResult> {
+  const deadline = Date.now() + SHARED_ARTIFACT_WAIT_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const artifact = await configApi.getEnergyOverviewAiArtifact(
+      input.projectId,
+      input.scopeId,
+      overviewAiArtifactPin(input),
+    );
+    const accepted = acceptedSharedPreschoolAiArtifact(input, artifact);
+    if (accepted) {
+      onProgress?.("validating");
+      onProgress?.("drafting");
+      return accepted;
     }
-    throw error;
-  }
-  const completed = [...(conversation.checkpoints ?? [])]
-    .filter((checkpoint) => checkpoint.status === "completed" && checkpoint.terminalEvent === "RUN_FINISHED")
-    .sort((left, right) => (right.finishedAt ?? "").localeCompare(left.finishedAt ?? ""));
-  if (completed.length === 0) {
-    return { active: Boolean(conversation.activeRun), result: null };
-  }
-  const trace = await configApi.getSessionTraceDag(threadId, 200);
-  for (const checkpoint of completed) {
-    const eventStream = persistedEventStream(conversation, trace, checkpoint.runId);
-    const result = resolvePreschoolAiEventStream({
-      eventStream,
-      input,
-      providerProfileId: PERSISTED_WORKSPACE_PROFILE_ID,
-      runId: checkpoint.runId,
-    });
-    if (result.status === "available") {
-      return { active: Boolean(conversation.activeRun), result };
+    if (artifact.status === "available" || artifact.status === "failed") {
+      return {
+        status: "unavailable",
+        reason: FRIENDLY_UNAVAILABLE,
+        ...(artifact.status === "failed" ? { retryable: (artifact.attemptCount ?? 0) < 2 } : {}),
+      };
     }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await new Promise<void>((resolve) => setTimeout(resolve, Math.min(SHARED_ARTIFACT_POLL_MS, remaining)));
   }
-  return { active: Boolean(conversation.activeRun), result: null };
+  return { status: "unavailable", reason: FRIENDLY_UNAVAILABLE, retryable: true };
 }
 
-function persistedEventStream(
-  conversation: SessionConversationDto,
-  trace: TraceDagDto,
-  runId: string,
-): string {
-  const toolEvents = trace.nodes
-    .filter((node) => node.runId === runId && node.kind === "tool" && node.detail?.type === "tool")
-    .sort((left, right) => (left.eventSeq ?? 0) - (right.eventSeq ?? 0))
-    .flatMap<AgUiEvent>((node) => {
-      if (node.detail?.type !== "tool") return [];
-      const toolCallId = node.toolCallId ?? node.id;
-      const toolCallName = node.detail.toolName ?? node.label.replace(/^Tool:\s*/u, "");
-      const result = node.detail.result ?? node.detail.resultText;
-      return [
-        {
-          type: "TOOL_CALL_START",
-          toolCallId,
-          toolCallName,
-          ...(node.detail.arguments !== undefined ? { args: node.detail.arguments } : {}),
-          ...(node.detail.argumentsText ? { argsText: node.detail.argumentsText } : {}),
-        },
-        {
-          type: "TOOL_CALL_RESULT",
-          toolCallId,
-          toolCallName,
-          result,
-        },
-      ];
-    });
-  const traceMessageEvents = trace.nodes
-    .filter((node) => node.runId === runId
-      && node.kind === "context"
-      && node.detail?.type === "context"
-      && Boolean(node.detail.assistantOutput))
-    .sort((left, right) => (left.eventSeq ?? 0) - (right.eventSeq ?? 0))
-    .flatMap<AgUiEvent>((node) => node.detail?.type === "context" && node.detail.assistantOutput
-      ? [{ type: "TEXT_MESSAGE_CONTENT", delta: node.detail.assistantOutput }]
-      : []);
-  const conversationMessages = conversation.messages
-    .filter((message) => message.runId === runId && message.role === "assistant" && message.contentText)
-    .sort((left, right) => left.position - right.position);
-  const conversationIsComplete = conversationMessages.length > 0
-    && conversationMessages.every((message) => !message.contentText.includes("[conversation message truncated:"));
-  const messageEvents = conversationIsComplete
-    ? conversationMessages.map<AgUiEvent>((message) => ({ type: "TEXT_MESSAGE_CONTENT", delta: message.contentText }))
-    : traceMessageEvents;
-  return [...toolEvents, ...messageEvents, { type: "RUN_FINISHED" }]
-    .map((event) => `data: ${JSON.stringify(event)}\n\n`).join("");
-}
-
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-
-export function buildPreschoolAgentRunBody(
-  input: PreschoolAiRunInput,
-  profileId: string,
-  runId: string,
-  threadId: string,
-): Record<string, unknown> {
+function overviewAiArtifactPin(input: PreschoolAiRunInput): {
+  from: string;
+  to: string;
+  dataSnapshotId: string;
+  projectReleaseId: string;
+} {
   return {
-    method: "agent/run",
-    params: { agentId: "dataFoundry" },
-    body: {
-      threadId,
-      runId,
-      state: {},
-      messages: [{ id: `${runId}:user`, role: "user", content: buildPrompt(input) }],
-      tools: [],
-      context: [],
-      forwardedProps: {
-        externalContext: {
-          source: "energyiq",
-          projectId: input.projectId,
-          scopeId: input.scopeId,
-          resource: input.resource,
-          period: "Custom",
-          from: input.analysisFrom,
-          to: input.analysisTo,
-          expectedDataSnapshotId: input.snapshotId,
-          expectedProjectReleaseId: input.projectReleaseId,
-        },
-        run_config: {
-          protocol: { id: "data-analysis", version: "1" },
-          activeLlmProfileId: profileId,
-          activeSkillId: "data-analysis",
-          enabledDatasourceIds: [],
-          enabledKnowledgeIds: [],
-          enabledMcpServerIds: [],
-          enabledSkillIds: ["data-analysis"],
-          skillPolicy: {
-            allowedToolNames: ["inspect_schema", "run_sql_readonly"],
-            deniedToolNames: ["list_data_sources", "preview_table", "skill", "skill_search", "skill_read"],
-            maxSkills: 1,
-            requireUserInvocable: true,
-            strictSkillTools: true,
-          },
-        },
-      },
-    },
+    from: input.analysisFrom,
+    to: input.analysisTo,
+    dataSnapshotId: input.snapshotId,
+    projectReleaseId: input.projectReleaseId,
   };
-}
-
-function buildPrompt(input: PreschoolAiRunInput): string {
-  return [
-    `Act as an autonomous energy analyst for ${input.projectName}, Scope ${input.scopeName}.`,
-    `Analyse only ${input.analysisFrom} through ${input.analysisTo} in ${input.timezone}, pinned to Snapshot ${input.snapshotId} and Release ${input.projectReleaseId}.`,
-    "Your first action must be an immediate inspect_schema Tool call. Before it, do not restate, explain, plan, summarize, or precompute the task or contract; output no prose. Then choose depth from observed Evidence. A simple question may need one successful SQL query; a complex question may need multiple distinct queries. Stop when another query would not change the conclusion, next action, or material uncertainty. Number successful SQL results from 1.",
-    "The grounded Preschool requirements in this Run are manual assertions. Include only requirement_ids each SQL materially supports; omit assertion_ids from every run_sql_readonly call because Runtime binds them. Do not call analysis_requirements_commit. Each next SQL must follow prior Evidence, test material uncertainty, or investigate another valuable angle; never repeat an aggregate with different wording. Return zero Findings when no decision-useful candidate survives. Output only final JSON.",
-    "A successful SQL may return one aggregate row or a bounded grouped, ranked, or Top-N result. Do not request more than 10 rows from one SQL Evidence operation. Multi-row output is Evidence only for the rows actually returned; omitted or truncated rows remain unavailable.",
-    "Never use row position, rank, Top N size, LIMIT value, or row count in a Finding as Evidence or a numeric claim unless that quantity is returned as a real named SQL column value in the cited SQL result.",
-    "Never estimate, sum, extrapolate, approximate, or infer values from truncated, previewed, omitted, or remaining rows. Every number in a Finding must appear directly in that Finding's cited bundle item values or cited SQL row; derived numbers and near matches are forbidden even when the arithmetic seems obvious.",
-    "Except for the exact authorized structural references below, every non-SQL number must appear in the actual values of a bundle item cited by that same Finding. For example, stating 100% coverage requires citing quality:window in that same Finding. This is an Evidence-binding example, not a required Finding or theme.",
-    "Do not use digits copied from artifact ids, audit ids, query ids, version strings, Snapshot ids, or dates as Finding numbers. Exact pinned Period, Snapshot, Release, and derived full-period presentation may appear only as structural context. Return zero Findings when no directly cited Evidence supports a useful candidate.",
-    "When filtering interval_start, use an ISO-8601 string or TIMESTAMPTZ literal for pinned UTC bounds. Never compare interval_start with a TIMESTAMP literal that contains Z; it is timezone-naive. If SQL and bundle differ, narrate a gap only when a bounded reconciliation query returns it as a named column.",
-    "For Centre aggregation use parent_node_id, not scope_id. Only include quality_status='ok' and official_aggregation_eligible=TRUE. Do not add Project totals to component rows.",
-    "The bounded Preschool bundle is authoritative; SQL cross-checks it.",
-    "Return zero to three distinct section Findings plus at most one page synthesis. Do not force novelty and do not repeat the structured signals as prose. Each displayed Finding must cite only the successful SQL Evidence operations it actually uses; one sufficient query is valid, while a claim that needs validation should cite the additional query that tests it.",
-    `Valid sectionId values: ${JSON.stringify(["overall-summary", "centre-benchmark", "operating-behaviour", "appliance-contribution", "planning-outlook", "page-synthesis"])}. Put each Finding beside the section where it helps the user most. Use page-synthesis only for the cross-section priority and next decision.`,
-    `Valid signalRefs: ${JSON.stringify(input.decisionSignals.items.map((signal) => signal.id))}. Use only exact ids. An independent discovery may use []; a signal-linked Finding must point to the matching Structured Signal.`,
-    "A Finding may support, challenge, or be independent. Use short customer language: title at most 10 words; what, why and how at most two short sentences each; expectedIfAct, ifIgnored, howToVerify and evidenceNote exactly one short sentence each. Never write report-style paragraphs. whyKind is Evidence, Hypothesis, or Missing Evidence. Never invent savings, certainty, or outcomes; evidenceNote states what Evidence cannot prove.",
-    `Valid evidenceRefs: ${JSON.stringify(input.discoveryEvidence.items.map((item) => item.id))}. Use only these exact ids; never cite other Runtime ids or object paths. Use [] for an SQL-only Finding.`,
-    "Cite only SQL results actually used. Use numbers only from the same Finding's cited bundle items or SQL. Do not mention SQL index numbers in customer-visible text; put them only in evidenceSqlIndexes. Prefer omitting a number over citing the wrong source. Do not invent causes, equipment state, tariff, cost, savings, ROI, forecast, owner, commitment, target, threshold, duration, or time window.",
-    "Before emitting the final JSON, audit every customer-visible field and block. Each number must match a cited typed bundle field or named SQL column; same-valued sources are ambiguous. If a ranking, ratio, difference, or other derived value is useful, query a named column; otherwise omit or state Missing Evidence. Do not mention the audit.",
-    AI_FINDING_PRESENTATION_PROMPT,
-    "Use only the canonical Finding keys shown below; never aliases next, acted, ignored, verification, blocks or shape.",
-    "Return only strict JSON: {\"findings\":[{\"sectionId\":\"operating-behaviour\",\"signalRefs\":[\"after-hours\"],\"relationship\":\"supports\",\"title\":\"...\",\"what\":\"...\",\"whyKind\":\"Evidence\",\"why\":\"...\",\"how\":\"...\",\"expectedIfAct\":\"...\",\"ifIgnored\":\"...\",\"howToVerify\":\"...\",\"evidenceNote\":\"...\",\"evidenceRefs\":[\"circuit:standby:L\"],\"evidenceSqlIndexes\":[1],\"presentation\":{\"version\":\"1\",\"blocks\":[{\"type\":\"metric\",\"prominence\":\"primary\",\"label\":\"Observed load\",\"value\":0,\"unit\":\"kWh\",\"evidenceRefs\":[\"circuit:standby:L\"],\"evidenceSqlIndexes\":[1]}]}}]}",
-    "Bounded Preschool Discovery Evidence Bundle:",
-    JSON.stringify(input.discoveryEvidence),
-    "Structured decision signals (facts to interpret, prioritize, merge or challenge; not prose to repeat):",
-    JSON.stringify(input.decisionSignals),
-  ].join("\n\n");
 }
 
 type PreschoolAiEventStreamInput = {
@@ -558,12 +406,12 @@ type PreschoolAiEventStreamInput = {
   runId: string;
 };
 
-export function resolvePreschoolAiEventStream(args: PreschoolAiEventStreamInput): PreschoolAiRunResult {
+export function resolvePreschoolAiEventStream(args: PreschoolAiEventStreamInput): PreschoolAiLegacyRunResult {
   return validatePreschoolAiEventStream(args).result;
 }
 
 export function validatePreschoolAiEventStream(args: PreschoolAiEventStreamInput): {
-  result: PreschoolAiRunResult;
+  result: PreschoolAiLegacyRunResult;
   issues: PreschoolAiValidationIssue[];
 } {
   const issues: PreschoolAiValidationIssue[] = [];
@@ -573,7 +421,7 @@ export function validatePreschoolAiEventStream(args: PreschoolAiEventStreamInput
 function resolvePreschoolAiEventStreamInternal(
   args: PreschoolAiEventStreamInput,
   validationIssues: PreschoolAiValidationIssue[],
-): PreschoolAiRunResult {
+): PreschoolAiLegacyRunResult {
   const events = parseEventStream(args.eventStream);
   const runError = events.findLast((event) => event.type === "RUN_ERROR");
   if (runError) return { status: "unavailable", reason: friendlyReason(stringValue(runError.message) ?? "AI Analyst Run failed.") };
@@ -1669,41 +1517,6 @@ function parseEventStream(text: string): AgUiEvent[] {
     if (!data || data === "[DONE]") return [];
     try { const parsed: unknown = JSON.parse(data); return isRecord(parsed) ? [parsed] : []; } catch { return []; }
   });
-}
-
-async function readEventStream(response: Response, onEvent: (event: AgUiEvent) => void): Promise<string> {
-  if (!response.body) {
-    const text = await response.text();
-    for (const event of parseEventStream(text)) onEvent(event);
-    return text;
-  }
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let full = "";
-  let pending = "";
-  const consume = (flush = false) => {
-    while (pending) {
-      const separator = /\r?\n\r?\n/u.exec(pending);
-      if (!separator && !flush) return;
-      const end = separator ? separator.index + separator[0].length : pending.length;
-      const chunk = pending.slice(0, end);
-      pending = pending.slice(end);
-      for (const event of parseEventStream(chunk)) onEvent(event);
-    }
-  };
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    const text = decoder.decode(value, { stream: true });
-    full += text;
-    pending += text;
-    consume();
-  }
-  const tail = decoder.decode();
-  full += tail;
-  pending += tail;
-  consume(true);
-  return full;
 }
 
 function findLastFindingsEnvelope(answer: string): Record<string, unknown> | null {

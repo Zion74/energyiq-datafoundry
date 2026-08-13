@@ -1121,6 +1121,20 @@ describe("EnergyScopeAnalysis", () => {
       expect(explorerAnalysis.timeBehaviour).toBeUndefined();
       expect(explorerAnalysis.dailyUsageAnomalies).toBeUndefined();
       expect(explorerAnalysis.peakBreakdown).toBeUndefined();
+      const childDailyExplorerQueryCountBefore = readonlyQueryCount;
+      const childDailyExplorer = await executeEnergyScopeAnalysis({
+        metadataStore: metadata,
+        dataGateway: gateway,
+        userId: "dev-user",
+        context,
+        databasePath,
+        profile: "explorer",
+        includeImmediateChildDailyTotals: true,
+      });
+      const childDailyExplorerQueryCount = readonlyQueryCount - childDailyExplorerQueryCountBefore;
+      expect(childDailyExplorer.dailyTotals?.scopes).toHaveLength(3);
+      expect(childDailyExplorerQueryCount).toBe(explorerQueryCount);
+      expect(childDailyExplorer.timeBehaviour).toBeUndefined();
       if (process.env.ENERGYIQ_OVERVIEW_PERFORMANCE === "1") {
         console.info("ENERGYIQ_EXPLORER_PERFORMANCE", JSON.stringify({
           readonlyQueryCount: explorerQueryCount,
@@ -1192,7 +1206,7 @@ describe("EnergyScopeAnalysis", () => {
 
       expect(repeated).toEqual(analysis);
       expect(maximumReadonlyQueryConcurrency).toBeLessThanOrEqual(3);
-      expect(measuredRunQueryCount).toBe(10);
+      expect(measuredRunQueryCount).toBe(12);
       expect(measuredRunSessionCount).toBe(1);
       expect(analysis.summary.usageKwh).toBe(NGEE_ANN_GOLDEN.period.usageKwh);
       expect(analysis.summary.peakKw).toBe(NGEE_ANN_GOLDEN.period.peakKw);
@@ -1306,6 +1320,39 @@ describe("EnergyScopeAnalysis", () => {
         expectedHourlyProfile(NGEE_ANN_GOLDEN.period.hourlyProfile, 28)
       );
       expect(analysis.dailyTotals).toEqual(expectedNgeeAnnDailyTotals());
+      expect(analysis.componentCategoryBreakdown).toMatchObject({
+        metricId: "energy.total_usage_kwh@1",
+        queryId: "daily_component_categories_v1",
+        accountingBasis: "published_component_circuits",
+        grain: "day",
+        timezone: NGEE_ANN_GOLDEN.timezone,
+      });
+      expect(analysis.componentCategoryBreakdown?.scopes).toHaveLength(3);
+      const projectComponentBreakdown = analysis.componentCategoryBreakdown?.scopes.find(
+        (scope) => scope.scopeId === "project",
+      );
+      expect(projectComponentBreakdown?.rows).toHaveLength(7);
+      expect((projectComponentBreakdown?.period as unknown as { status?: string })?.status)
+        .toBe("complete");
+      expect(projectComponentBreakdown?.period.componentUsageKwh)
+        .toBeCloseTo(NGEE_ANN_GOLDEN.period.componentReconciliation.componentUsageKwh, 3);
+      expect(projectComponentBreakdown?.period.officialUsageKwh)
+        .toBeCloseTo(NGEE_ANN_GOLDEN.period.usageKwh, 3);
+      expect(projectComponentBreakdown?.period.categories.every(
+        (category) => category.usageKwh !== null,
+      )).toBe(true);
+      expect(projectComponentBreakdown?.period.categories.reduce(
+        (sum, category) => sum + (category.usageKwh as number),
+        0,
+      )).toBeCloseTo(projectComponentBreakdown?.period.componentUsageKwh ?? 0, 3);
+      for (const row of projectComponentBreakdown?.rows ?? []) {
+        expect(row.categories.reduce(
+          (sum, category) => sum + (category.usageKwh ?? 0),
+          0,
+        )).toBeCloseTo(row.componentUsageKwh ?? 0, 3);
+        expect(row.estimatedCost.status).toBe(analysis.cost.status);
+      }
+      expect(analysis.provenance.queryIds).toContain("daily_component_categories_v1");
       expect(analysis.timeBehaviour).toMatchObject({
         metricId: "energy.total_usage_kwh@1",
         grain: "hour",
@@ -1368,6 +1415,50 @@ describe("EnergyScopeAnalysis", () => {
       expect(analysis.timeBehaviour?.dayProfiles.filter(
         (candidate) => candidate.status === "available",
       ).every((candidate) => candidate.values.length === 24)).toBe(true);
+      const componentHourlyProfiles = analysis.componentHourlyProfiles;
+      expect(componentHourlyProfiles).toMatchObject({
+        queryId: "component_hourly_profiles_v1",
+        accountingBasis: "published_component_circuits",
+      });
+      expect(componentHourlyProfiles?.scopes.map((scope) => scope.scopeId)).toEqual([
+        "project",
+        "level-7",
+        "level-6",
+      ]);
+      const componentProfile = (scopeId: string, dayType: string) => (
+        componentHourlyProfiles?.scopes.find((scope) => scope.scopeId === scopeId)
+          ?.profiles.find((profile) => profile.dayType === dayType)
+      );
+      const projectWeekdayProfile = componentProfile("project", "weekday");
+      const level7WeekdayProfile = componentProfile("level-7", "weekday");
+      const level6WeekdayProfile = componentProfile("level-6", "weekday");
+      expect(projectWeekdayProfile).toMatchObject({
+        status: "available",
+        sampleDayCount: 5,
+        categories: [
+          { category: "load", values: expect.any(Array) },
+          { category: "light", values: expect.any(Array) },
+        ],
+      });
+      expect(projectWeekdayProfile?.status).toBe("available");
+      expect(level7WeekdayProfile?.status).toBe("available");
+      expect(level6WeekdayProfile?.status).toBe("available");
+      if (
+        projectWeekdayProfile?.status !== "available"
+        || level7WeekdayProfile?.status !== "available"
+        || level6WeekdayProfile?.status !== "available"
+      ) {
+        throw new Error("NGEE_ANN_COMPONENT_HOURLY_GOLDEN_UNAVAILABLE");
+      }
+      expect(projectWeekdayProfile.categories.every(
+        (category) => category.values.length === 24,
+      )).toBe(true);
+      expect(level7WeekdayProfile.circuits).toHaveLength(7);
+      expect(level6WeekdayProfile.circuits).toHaveLength(7);
+      expect(componentProfile("project", "public_holiday")).toMatchObject({
+        status: "unavailable",
+      });
+      expect(analysis.provenance.queryIds).toContain("component_hourly_profiles_v1");
       expect(analysis.peakBreakdown).toEqual(expectedNgeeAnnPeakBreakdown());
       for (const scope of analysis.dailyTotals?.scopes ?? []) {
         const expectedUsageKwh = scope.scopeId === "project"
@@ -1833,9 +1924,140 @@ describe("EnergyScopeAnalysis", () => {
       status: "available",
       sampleDayCount: 2,
     });
+    const componentProfile = (dayType: "weekday" | "weekend", scopeId: string) => (
+      analysis.componentHourlyProfiles?.scopes.find((scope) => scope.scopeId === scopeId)
+        ?.profiles.find((candidate) => candidate.dayType === dayType)
+    );
+    expect(componentProfile("weekday", "project")).toMatchObject({
+      status: "available",
+      sampleDayCount: 5,
+    });
     expect(analysis.timeBehaviour?.scopes.find((scope) => scope.scopeId === "project")
       ?.cells.find((cell) => cell.localDate === "2026-06-10" && cell.localHour === 8)
       ?.dataHealth.status).toBe("complete");
+  }, 30_000);
+
+  it("withholds component Category period totals when one daily Category row is partial", async () => {
+    const analysis = await analyzeNgeeAnnFixture((facts) => facts.filter((fact) => !(
+      fact.meterPointId === "mapping-lvl-7-office-load-1-l1p1-l3p6-13"
+      && fact.intervalStart === "2026-06-11T16:00:00.000Z"
+    )));
+    const project = analysis.componentCategoryBreakdown?.scopes.find(
+      (scope) => scope.scopeId === "project",
+    );
+
+    expect(project?.rows.find((row) => row.localDate === "2026-06-12")).toMatchObject({
+      componentUsageKwh: null,
+      dataHealth: { status: "partial" },
+    });
+    expect(project?.period).toMatchObject({
+      status: "partial",
+      officialUsageKwh: null,
+      componentUsageKwh: null,
+      gapKwh: null,
+      ratioPct: null,
+      categories: expect.arrayContaining([
+        expect.objectContaining({ usageKwh: null, sharePct: null }),
+      ]),
+    });
+    const componentProfile = (scopeId: string, dayType: string) => (
+      analysis.componentHourlyProfiles?.scopes.find((scope) => scope.scopeId === scopeId)
+        ?.profiles.find((profile) => profile.dayType === dayType)
+    );
+    expect(componentProfile("project", "weekday")).toMatchObject({
+      status: "available",
+      sampleDayCount: 4,
+    });
+    expect(componentProfile("level-7", "weekday")).toMatchObject({
+      status: "available",
+      sampleDayCount: 4,
+    });
+    expect(componentProfile("level-6", "weekday")).toMatchObject({
+      status: "available",
+      sampleDayCount: 5,
+    });
+  }, 30_000);
+
+  it("fails component hourly Profiles closed per Scope when component Day Type conflicts", async () => {
+    const analysis = await analyzeNgeeAnnFixture((facts) => facts.map((fact) => (
+      fact.intervalStart === "2026-06-10T00:00:00.000Z"
+        && fact.meterPointId === "mapping-lvl-7-office-load-1-l1p1-l3p6-13"
+        ? { ...fact, dayType: "weekend" }
+        : fact
+    )));
+    const profile = (dayType: "weekday" | "weekend", scopeId: string) => (
+      analysis.componentHourlyProfiles?.scopes.find((scope) => scope.scopeId === scopeId)
+        ?.profiles.find((candidate) => candidate.dayType === dayType)
+    );
+
+    for (const scopeId of ["project", "level-7"]) {
+      expect(profile("weekday", scopeId)).toMatchObject({
+        status: "unavailable",
+        reason: { code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE" },
+      });
+      expect(profile("weekend", scopeId)).toMatchObject({
+        status: "unavailable",
+        reason: { code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE" },
+      });
+    }
+    expect(profile("weekday", "level-6")).toMatchObject({
+      status: "available",
+      sampleDayCount: 5,
+    });
+  }, 30_000);
+
+  it("excludes non-published standalone and total meter rows from component Category accounting", async () => {
+    const fakeRows: unknown[][] = [
+      ["unpublished-standalone", "level-7", "Standalone", "Standalone", "load", "standalone", 9_999, 100, 672, 0],
+      ["unpublished-parent-total", "level-7", "Parent total", "Parent total", "load", "total", 8_888, 90, 672, 0],
+      ["unpublished-other-meter", "l7-load-1", "Other meter", "Other meter", "light", "component", 7_777, 80, 672, 0],
+    ];
+    const analysis = await analyzeNgeeAnnFixture((facts) => facts, undefined, fakeRows);
+    const project = analysis.componentCategoryBreakdown?.scopes.find(
+      (scope) => scope.scopeId === "project",
+    );
+
+    expect(project?.period.status).toBe("complete");
+    expect(project?.period.componentUsageKwh)
+      .toBeCloseTo(NGEE_ANN_GOLDEN.period.componentReconciliation.componentUsageKwh, 3);
+    expect(analysis.componentReconciliation.componentMeterNodeIds).not.toEqual(
+      expect.arrayContaining(fakeRows.map((row) => row[0])),
+    );
+  }, 30_000);
+
+  it("fails the component Category Projection closed when a published component route has no facts", async () => {
+    const analysis = await analyzeNgeeAnnFixture((facts) => facts.filter((fact) => (
+      fact.meterPointId !== "mapping-lvl-7-office-load-1-l1p1-l3p6-13"
+    )));
+
+    expect(analysis.componentCategoryBreakdown).toBeUndefined();
+    expect(analysis.provenance.queryIds).not.toContain("daily_component_categories_v1");
+  }, 30_000);
+
+  it("withholds official component reconciliation when an official daily row is partial", async () => {
+    const analysis = await analyzeNgeeAnnFixture((facts) => facts.filter((fact) => !(
+      fact.meterPointId === "mapping-lvl-7-total-office-load-18"
+      && fact.intervalStart === "2026-06-11T16:00:00.000Z"
+    )));
+    const project = analysis.componentCategoryBreakdown?.scopes.find(
+      (scope) => scope.scopeId === "project",
+    );
+
+    expect(project?.rows.find((row) => row.localDate === "2026-06-12")).toMatchObject({
+      officialUsageKwh: null,
+      estimatedCost: { status: "unavailable" },
+      dataHealth: { status: "partial" },
+    });
+    expect(project?.period).toMatchObject({
+      status: "partial",
+      officialUsageKwh: null,
+      componentUsageKwh: null,
+      gapKwh: null,
+      ratioPct: null,
+      categories: expect.arrayContaining([
+        expect.objectContaining({ usageKwh: null, sharePct: null }),
+      ]),
+    });
   }, 30_000);
 
   it.each([
@@ -2190,6 +2412,7 @@ type GoldenMeter = {
 const analyzeNgeeAnnFixture = async (
   transformIntervalFacts: (facts: EnergyIntervalFactWrite[]) => EnergyIntervalFactWrite[],
   duplicatePeakQueryMeterNodeId?: string,
+  extraMeterBreakdownRows: unknown[][] = [],
 ): Promise<EnergyScopeAnalysis> => {
   const root = mkdtempSync(join(tmpdir(), "energy-analysis-peak-health-"));
   const databasePath = join(root, "energy.duckdb");
@@ -2198,6 +2421,10 @@ const analyzeNgeeAnnFixture = async (
   const runSqlReadonly = gateway.runSqlReadonly.bind(gateway);
   gateway.runSqlReadonly = async (request) => {
     const result = await runSqlReadonly(request);
+    if (extraMeterBreakdownRows.length > 0
+      && request.sql.includes("MAX(device_name) AS device_name")) {
+      return { ...result, rows: [...result.rows, ...extraMeterBreakdownRows] };
+    }
     if (!duplicatePeakQueryMeterNodeId
       || !request.sql.includes("AS interval_start_ms")) return result;
     const duplicate = result.rows.find((row) => row[0] === duplicatePeakQueryMeterNodeId);

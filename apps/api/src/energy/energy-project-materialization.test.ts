@@ -195,6 +195,17 @@ describe("Energy Project materialization lock", () => {
         databasePath: join(root, "energy.duckdb"),
       });
       expect(first.duplicate).toBe(false);
+      expect(first.timings).toMatchObject({
+        sourceWriteMs: expect.any(Number),
+        canonicalRebuildMs: expect.any(Number),
+        integrityAndCheckpointMs: expect.any(Number),
+        totalMs: expect.any(Number),
+      });
+      expect(first.timings?.parseNormalizeByBatch).toHaveLength(2);
+      expect(first.timings?.parseNormalizeByBatch).toEqual(expect.arrayContaining([
+        { batchId: "batch-a", durationMs: expect.any(Number) },
+        { batchId: "batch-b", durationMs: expect.any(Number) },
+      ]));
       expect(resolveEnergyIqSnapshotFactScope(first.snapshot).sourceSha256).toEqual(sources.map((source) => source.sha).sort());
 
       const currentDraft = metadata.energyIq.projectSetup.getDraft({ project_id: "project-1", user_id: "dev-user" });

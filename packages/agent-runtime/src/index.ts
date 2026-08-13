@@ -64,6 +64,10 @@ import { GoalRuntimeAdapter, type GoalRequest } from "./memory/goal-runtime-adap
 import { createDataFoundryToolRegistry, isChartRequested } from "./tools/data-tools.js";
 import { GovernedToolFactory } from "./tools/governed-tool-factory.js";
 import {
+  createOverviewAiCandidateSubmissionTool,
+  OVERVIEW_AI_CANDIDATE_SUBMISSION_TOOL_NAME,
+} from "./tools/overview-ai-candidate-submission-tool.js";
+import {
   maybeIngestSessionFileOutput,
   maybeIngestSessionFileToolResult
 } from "./tools/session-output-ingest.js";
@@ -218,6 +222,11 @@ export {
 export { resolvePythonRuntime } from "./tools/python-runtime.js";
 export { createDataFoundryToolRegistry, type ToolRegistry } from "./tools/data-tools.js";
 export {
+  createOverviewAiCandidateSubmissionTool,
+  overviewAiCandidateSubmissionSchema,
+  OVERVIEW_AI_CANDIDATE_SUBMISSION_TOOL_NAME,
+} from "./tools/overview-ai-candidate-submission-tool.js";
+export {
   GoalRuntimeAdapter,
   type GoalRequest,
   type GoalSnapshot
@@ -245,6 +254,17 @@ export type AgentLongTermMemoryRecord = {
 };
 
 export type CreateDataFoundryInput = {
+  /**
+   * Overview Artifact stages retain the data-analysis protocol but do not need
+   * the generic user-requirement extraction/proposal/commit loop. Read-only SQL
+   * still passes through the normal scoped datasource and query validator.
+   * Defaults preserve the normal Analyst contract.
+   */
+  analysisRequirementsMode?: "default" | "omit";
+  /** Strict, run-local Candidate submission; enabled only for the Overview Investigator Stage. */
+  overviewAiCandidateSubmission?: boolean;
+  /** Server-owned stage guard; removes named tools after normal policy selection. */
+  excludedToolNames?: readonly string[];
   abortSignal?: AbortSignal | undefined;
   artifactService?: ArtifactService;
   contextPackageRecorder?: ContextPackageRecorder;
@@ -510,10 +530,14 @@ export const createDataFoundry = async (
         name === "inspect_schema" || name === "run_sql_readonly"))
     : selectedPolicyTools;
   const selectedMcpTools = energyIqRun ? {} : (input.mcpTools ?? {});
-  const selectedTools = {
+  const toolsBeforeStageExclusions = {
     ...harnessSelectedTools,
     ...selectedMcpTools
   };
+  const excludedToolNames = new Set(input.excludedToolNames ?? []);
+  const selectedTools = excludedToolNames.size === 0
+    ? toolsBeforeStageExclusions
+    : Object.fromEntries(Object.entries(toolsBeforeStageExclusions).filter(([name]) => !excludedToolNames.has(name)));
   const selectedDatasourceId = input.runContext.selected_datasource_id;
   const deferredProtocolEvents: ProtocolEvent[] = [];
   let protocolEventsReady = false;
@@ -548,10 +572,12 @@ export const createDataFoundry = async (
       : {}),
     ...(input.explicitProtocol ? { explicitProtocol: input.explicitProtocol } : {}),
     classifier: input.protocolClassifier ?? createModelProtocolClassifier(input.modelProvider),
-    requirementExtractor: input.analysisRequirementExtractor
-      ?? (energyIqRun
-        ? createEnergyAnalysisRequirementExtractor()
-        : createModelAnalysisRequirementExtractor(input.modelProvider)),
+    requirementExtractor: input.analysisRequirementsMode === "omit"
+      ? async () => []
+      : input.analysisRequirementExtractor
+        ?? (energyIqRun
+          ? createEnergyAnalysisRequirementExtractor()
+          : createModelAnalysisRequirementExtractor(input.modelProvider)),
     analysisContractGrounder: input.analysisContractGrounder
       ?? createModelAnalysisContractGrounder(input.modelProvider),
     ...(input.contextEvidenceCatalog ? { contextEvidenceCatalog: input.contextEvidenceCatalog } : {}),
@@ -593,6 +619,7 @@ export const createDataFoundry = async (
       }
     }
   });
+  let overviewAiSuccessfulSqlCount = 0;
   const governedToolFactory = new GovernedToolFactory(
     dispatcher,
     onGovernedResultWithSessionOutput,
@@ -602,11 +629,21 @@ export const createDataFoundry = async (
       emitter: input.emitter,
       externallyResolvedToolNames: new Set(HITL_TOOL_NAMES),
       runId: input.runContext.run_id,
-      getSegmentId: () => protocol.segmentId
+      getSegmentId: () => protocol.segmentId,
+      ...(input.overviewAiCandidateSubmission
+        ? {
+            transformObservation: ({ observation, toolName }: { observation: unknown; toolName: string }) => {
+              if (toolName !== "run_sql_readonly" || !isRecord(observation)) return observation;
+              overviewAiSuccessfulSqlCount += 1;
+              // Put the run-local reference first so it survives bounded/truncated tool views.
+              return { evidence_index: overviewAiSuccessfulSqlCount, ...observation };
+            },
+          }
+        : {}),
     }
   );
   const protocolState = protocol.protocolRuntime.getState(input.runContext.run_id, protocol.segmentId);
-  const analysisRequirements = protocolState.protocolId === "data-analysis"
+  const analysisRequirements = input.analysisRequirementsMode !== "omit" && protocolState.protocolId === "data-analysis"
     ? ((protocolState.domain as DataAnalysisState).requirements ?? []).filter((requirement) =>
         requirement.source === "user")
     : [];
@@ -642,35 +679,50 @@ export const createDataFoundry = async (
         })
       }
     : {};
-  const tools = {
-    ...governedToolFactory.governTools(selectedTools),
-    ...requirementsCommitTools,
-    protocol_handoff: createTool({
-      id: "protocol_handoff",
-      description: "Propose switching this run to another authorized protocol when the current protocol is unsuitable.",
-      inputSchema: z.object({
-        targetProtocolId: z.string().min(1),
-        targetProtocolVersion: z.string().min(1),
-        reasonCodes: z.array(z.string().min(1)).min(1),
-        unresolvedGoals: z.array(z.string())
-      }),
-      execute: async (toolInput, options) => {
-        const toolCallId = protocolToolCallId(options);
-        try {
-          const result = await protocol.actionRouter.execute({
-            runId: input.runContext.run_id,
-            segmentId: protocol.segmentId,
-            actionId: toolCallId ?? `protocol-handoff:${Date.now()}`,
-            actionName: "protocol.handoff.propose",
-            input: toolInput,
-            idempotencyKey: toolCallId ?? JSON.stringify(toolInput)
-          });
-          return result.observation;
-        } catch (error) {
-          return createToolErrorObservation(error, { toolName: "protocol_handoff" });
-        }
+  const overviewAiCandidateSubmissionTools = input.overviewAiCandidateSubmission
+    ? {
+        [OVERVIEW_AI_CANDIDATE_SUBMISSION_TOOL_NAME]: createOverviewAiCandidateSubmissionTool(),
       }
-    })
+    : {};
+  const protocolHandoffTools = excludedToolNames.has("protocol_handoff")
+    ? {}
+    : {
+        protocol_handoff: createTool({
+          id: "protocol_handoff",
+          description: "Propose switching this run to another authorized protocol when the current protocol is unsuitable.",
+          inputSchema: z.object({
+            targetProtocolId: z.string().min(1),
+            targetProtocolVersion: z.string().min(1),
+            reasonCodes: z.array(z.string().min(1)).min(1),
+            unresolvedGoals: z.array(z.string())
+          }),
+          execute: async (toolInput, options) => {
+            const toolCallId = protocolToolCallId(options);
+            try {
+              const result = await protocol.actionRouter.execute({
+                runId: input.runContext.run_id,
+                segmentId: protocol.segmentId,
+                actionId: toolCallId ?? `protocol-handoff:${Date.now()}`,
+                actionName: "protocol.handoff.propose",
+                input: toolInput,
+                idempotencyKey: toolCallId ?? JSON.stringify(toolInput)
+              });
+              return result.observation;
+            } catch (error) {
+              return createToolErrorObservation(error, { toolName: "protocol_handoff" });
+            }
+          }
+        })
+      };
+  const stageSelectedTools = input.overviewAiCandidateSubmission
+    ? describeOverviewAiSqlEvidenceIndexes(selectedTools)
+    : selectedTools;
+  const governedSelectedTools = governedToolFactory.governTools(stageSelectedTools);
+  const tools = {
+    ...governedSelectedTools,
+    ...requirementsCommitTools,
+    ...overviewAiCandidateSubmissionTools,
+    ...protocolHandoffTools,
   };
   const runtimeProviderOptions = createModelRuntimeProviderOptions({
     providerId: input.modelProvider.provider_id,
@@ -689,7 +741,12 @@ export const createDataFoundry = async (
       pythonRuntimeAvailable: Boolean(runWorkspace.pythonRuntime),
       selectedSkills: input.selectedSkills ?? [],
       taskToolsEnabled: Boolean(input.taskStateRuntime),
-      toolNames: [...Object.keys(selectedTools), ...Object.keys(requirementsCommitTools), "protocol_handoff"],
+      toolNames: [
+        ...Object.keys(selectedTools),
+        ...Object.keys(requirementsCommitTools),
+        ...Object.keys(overviewAiCandidateSubmissionTools),
+        ...Object.keys(protocolHandoffTools),
+      ],
       mcpToolNames: input.mcpToolNames ?? [],
       protocolId: protocolState.protocolId,
       analysisRequirements,
@@ -852,6 +909,7 @@ type MaterializedWorkspaceAttachment = {
 const buildAgentInstructions = (input: AgentInstructionsInput): string => {
   const { runContext: context, collaborationToolsEnabled, commandExecutionEnabled, taskToolsEnabled } = input;
   const enabled = (name: string): boolean => input.toolNames.includes(name);
+  const hasAnyEnabledTools = input.toolNames.length > 0 || input.mcpToolNames.length > 0;
   const promoteWorkspaceFileEnabled = enabled("promote_workspace_file");
   const dataTools = ["list_data_sources", "inspect_schema", "preview_table", "run_sql_readonly"].filter(enabled);
   const toolGroups: string[] = dataTools.length > 0 ? [`Data tools: ${dataTools.join(", ")}.`] : [];
@@ -989,12 +1047,25 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
           + "Period with exclusive end and timezone, Metric, Data as of, and Evidence. If a required expected fact is "
           + "absent, report it as unavailable; never invent, extrapolate, or substitute a nearby Metric."
       );
+    } else if (!enabled("inspect_schema") || !enabled("run_sql_readonly")) {
+      policies.push(
+        "EnergyIQ selection-only path: "
+          + (input.toolNames.length === 0
+            ? "No tools are enabled for this run. "
+            : "The governed Schema-and-SQL tool pair is not enabled for this run. ")
+          + "Select zero to three concise Findings only from the server-provided Candidate selection views and compact "
+          + "Coverage. Do not call, request, or simulate inspect_schema, run_sql_readonly, protocol_handoff, or any "
+          + "other tool. Do not independently investigate, recalculate, merge, or rewrite canonical Candidate content, "
+          + "Evidence references, SQL Evidence indexes, epistemic levels, or presentation. Follow the requested JSON "
+          + "output contract exactly; zero Findings is valid."
+      );
     } else {
     const localRangeStart = formatEnergyTimestamp(energyContext.from, energyContext.timezone);
     const localRangeEnd = formatEnergyTimestamp(
       new Date(Date.parse(energyContext.to) - 1).toISOString(),
       energyContext.timezone
     );
+    const hasAnalysisRequirements = input.analysisRequirements.length > 0;
     const noDeclaredClaimValues = input.analysisRequirements.every((requirement) =>
       requirement.assertions.every((assertion) => assertion.claimValues.length === 0)
     );
@@ -1010,10 +1081,12 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
         + "to rediscover data. Call inspect_schema alone as the initial governed-contract setup action and wait for its "
         + "result. This one setup action does not require a SQL investigation. If scoped SQL can add explanation, reduce "
         + "uncertainty, verify a new angle, or change the action, reuse that inspection's schema_id in run_sql_readonly. "
-        + "A requirement whose analysis_contract declares sufficient context_evidence may be committed directly; the server "
-        + "binds its authorized current-Snapshot Context Evidence. Scoped SQL may investigate relevant context but must not "
-        + "silently replace released values. Requirements without sufficient context evidence need at least one successful "
-        + "run_sql_readonly result in the current run. Schema IDs and table "
+        + (hasAnalysisRequirements
+          ? "A requirement whose analysis_contract declares sufficient context_evidence may be committed directly; the server "
+            + "binds its authorized current-Snapshot Context Evidence. Requirements without sufficient context evidence need "
+            + "at least one successful run_sql_readonly result in the current run. "
+          : "Released authoritative current-Snapshot Context Evidence may be cited directly when it supports a claim. ")
+        + "Scoped SQL may investigate relevant context but must not silently replace released values. Schema IDs and table "
         + "names found in prior messages, deterministic Evidence, examples, or earlier runs are reference-only and "
         + "must never be executed in the current run. The run-scoped relation is already restricted to the authoritative "
         + "period, so do not add a redundant time filter. If a boundary audit truly requires one, compare a TIMESTAMPTZ "
@@ -1022,8 +1095,11 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
         + "physical table directly and avoid CTEs or derived table aliases when that is the clearest correct query. "
         + "Use as many focused SQL queries as the question and Evidence require. Avoid redundant repeats, but never "
         + "stop investigating merely to meet a query, step, latency, or token target. If a validation error occurs, "
-        + "use its feedback to repair the query or choose a better supported path. Commit evidenced analysis requirements "
-        + "when they are sufficiently verified. For one count, total, lookup, or direct comparison, start with the "
+        + "use its feedback to repair the query or choose a better supported path. "
+        + (hasAnalysisRequirements
+          ? "Commit evidenced analysis requirements when they are sufficiently verified. "
+          : "Keep every reported claim bound to the Evidence that supports it. ")
+        + "For one count, total, lookup, or direct comparison, start with the "
         + "smallest sufficient query. If it does not fully answer and verify the request, continue investigating. "
         + "When reporting a share or percentage, make the full requested denominator explicit in the SQL result, for "
         + "example with a conditional total or a window total. Preserve NULL or Unknown dimension values as an explicit "
@@ -1036,13 +1112,19 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
         + "bundle in reasoning when one Evidence item or query can verify the answer. For an explanatory or discovery "
         + "question, begin with the strongest available observation and use targeted follow-ups to test candidate "
         + "explanations, comparisons, and decisions. Continue while another check can materially improve correctness, "
-        + "reduce uncertainty, or change the recommended action. Finish only when the requirements are supported by "
-        + "sufficient Evidence, or when the remaining Evidence gap is stated honestly with a useful verification path. "
+        + "reduce uncertainty, or change the recommended action. "
+        + (hasAnalysisRequirements
+          ? "Finish only when the requirements are supported by sufficient Evidence, or when the remaining Evidence gap is "
+            + "stated honestly with a useful verification path. "
+          : "Finish when the requested output is supported by sufficient Evidence, or state the remaining Evidence gap "
+            + "honestly with a useful verification path. ")
         + "Keep visible reasoning useful: name the question, the Evidence gap, the next check, and what the result changed. Do not "
         + "repeat the Prompt, policy, schema, protocol contract, or the same finding in multiple reasoning rounds. "
-        + (noDeclaredClaimValues
-          ? "This run declares no claim value names, so every analysis_requirements_commit claim must omit its values field entirely. "
-          : "Include only claim value names explicitly declared in the requirement assertions. ")
+        + (hasAnalysisRequirements
+          ? (noDeclaredClaimValues
+              ? "This run declares no claim value names, so every analysis_requirements_commit claim must omit its values field entirely. "
+              : "Include only claim value names explicitly declared in the requirement assertions. ")
+          : "This run has no generic analysis-requirement commit step. Do not search for, invent, or mention requirement IDs or a commit tool. Follow the requested final output contract exactly. ")
         + "Call tools without narrating internal plans or validation "
         + "mechanics. After the tools finish, start the final answer with the user-facing result itself, then give the "
         + "scope, period, unit, and concise caveats. Never preface the answer with a workflow status such as requirements "
@@ -1073,6 +1155,13 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
           : "")
     );
     }
+  }
+  if (enabled(OVERVIEW_AI_CANDIDATE_SUBMISSION_TOOL_NAME) && enabled("run_sql_readonly")) {
+    policies.push(
+      "For Overview Candidate submission, every successful run_sql_readonly result includes an evidence_index assigned "
+        + "by this Run. Copy the returned evidence_index exactly into evidenceSqlIndexes. Do not count or reconstruct "
+        + "SQL Evidence indexes yourself. Failed SQL calls have no evidence_index and do not consume one."
+    );
   }
   if (taskToolsEnabled && taskTools.length === 4) {
     policies.push(
@@ -1172,11 +1261,13 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
         : ". Never use direct database clients to bypass Data Gateway.")
     );
   }
-  policies.push(
-    `This run is governed by ${input.protocolId}@1. Use protocol_handoff only when the user's remaining goal truly `
-      + "requires the other registered protocol (general-task@1 or data-analysis@1). Provide stable reasonCodes and "
-      + "all unresolvedGoals. Never hand off to bypass schema, SQL validation, evidence, policy, or completion gates."
-  );
+  if (enabled("protocol_handoff")) {
+    policies.push(
+      `This run is governed by ${input.protocolId}@1. Use protocol_handoff only when the user's remaining goal truly `
+        + "requires the other registered protocol (general-task@1 or data-analysis@1). Provide stable reasonCodes and "
+        + "all unresolvedGoals. Never hand off to bypass schema, SQL validation, evidence, policy, or completion gates."
+    );
+  }
   policies.push(context.energy_query_context
     ? "For EnergyIQ, write the final customer answer in plain English even when the question is in Chinese. Lead with "
       + "the answer or finding, then explain What happened, Why it matters or may have happened, What to do next, and "
@@ -1252,16 +1343,22 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
   const selectedSkillSummary = input.selectedSkills.length > 0
     ? input.selectedSkills.map((skill) => `${skill.name} (${skill.id}): ${skill.description}`).join("\n")
     : "None";
-  const datasourcePolicy = (context.enabled_datasource_ids ?? []).length > 0
+  const datasourcePolicy = (context.enabled_datasource_ids ?? []).length > 0 && dataTools.length > 0
     ? `Datasources available this run: [${(context.enabled_datasource_ids ?? []).join(", ")}]
 Default datasource: "${context.selected_datasource_id ?? ""}".
 You may query any datasource in the list above by passing its id to a data tool's datasource_id argument.
 Never reference a datasource id outside this list; the tool rejects it with DATASOURCE_NOT_SELECTED.`
+    : (context.enabled_datasource_ids ?? []).length > 0
+      ? `Datasource scope is server-bound to [${(context.enabled_datasource_ids ?? []).join(", ")}], but no data tools `
+        + "are enabled for this run. Use only the supplied context and do not attempt a datasource query."
     : "No datasources are enabled this run. Answer general questions directly. "
       + "Do not call data tools unless the user enables a datasource.";
+  const agentMission = hasAnyEnabledTools
+    ? "Analyze data by calling tools."
+    : "Follow the supplied context and requested output contract without calling tools.";
 
   return `
-You are a general-purpose data agent. Analyze data by calling tools. Never invent schema, rows, SQL results,
+You are a general-purpose data agent. ${agentMission} Never invent schema, rows, SQL results,
 file contents, or command output.
 
 ${datasourcePolicy}
@@ -1599,6 +1696,29 @@ const isWorkspaceUploadPath = (value: string): boolean =>
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+type RuntimeExecutableTool = {
+  description?: string;
+  execute?: (...args: any[]) => unknown | Promise<unknown>;
+};
+
+const describeOverviewAiSqlEvidenceIndexes = <TTools extends Record<string, RuntimeExecutableTool>>(
+  tools: TTools,
+): TTools => {
+  const runSqlReadonly = tools.run_sql_readonly;
+  if (!runSqlReadonly?.execute) {
+    return tools;
+  }
+  return {
+    ...tools,
+    run_sql_readonly: {
+      ...runSqlReadonly,
+      description: `${runSqlReadonly.description ?? "Execute one governed read-only SQL query."} `
+        + "For Overview Candidate submission, copy the returned evidence_index exactly into evidenceSqlIndexes; "
+        + "failed calls do not receive or consume an index.",
+    },
+  } as TTools;
+};
 
 const isProtocolRuntimeAction = (actionName: string): boolean =>
   actionName === "general.answer.commit"

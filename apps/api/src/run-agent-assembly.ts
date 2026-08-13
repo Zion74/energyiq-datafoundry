@@ -63,12 +63,15 @@ type CreateRunAgentContextInput = {
 
 type CreateRunAgentAssemblyInput = {
   analysisContractGrounder?: AnalysisContractGrounder;
+  analysisRequirementsMode?: "default" | "omit";
+  overviewAiCandidateSubmission?: boolean;
   contextEvidenceCatalog?: AnalysisContextEvidenceCatalog;
   abortSignal?: AbortSignal | undefined;
   artifactService: ArtifactService;
   dataGateway: DataGateway;
   effectiveRunConfig: EffectiveRunConfig;
   emitter: AgUiEventEmitter;
+  excludedToolNames?: readonly string[];
   contextPackageRecorder?: ContextPackageRecorder;
   contextPackageExists(reference: ContextPackageRef): boolean;
   evidenceContextItems?: AgentContextItem[] | undefined;
@@ -164,6 +167,10 @@ export const createRunAgentAssembly = async (
     ...(input.analysisContractGrounder
       ? { analysisContractGrounder: input.analysisContractGrounder }
       : {}),
+    ...(input.analysisRequirementsMode ? { analysisRequirementsMode: input.analysisRequirementsMode } : {}),
+    ...(input.overviewAiCandidateSubmission
+      ? { overviewAiCandidateSubmission: true }
+      : {}),
     ...(input.contextEvidenceCatalog
       ? { contextEvidenceCatalog: input.contextEvidenceCatalog }
       : {}),
@@ -178,6 +185,7 @@ export const createRunAgentAssembly = async (
     ...(input.mcpRuntime.toolNames.length > 0 ? { mcpToolNames: input.mcpRuntime.toolNames } : {}),
     ...(Object.keys(mcpTools).length > 0 ? { mcpTools } : {}),
     emitter: input.emitter,
+    ...(input.excludedToolNames?.length ? { excludedToolNames: input.excludedToolNames } : {}),
     ...(input.effectiveRunConfig.protocol ? { explicitProtocol: input.effectiveRunConfig.protocol } : {}),
     messages: input.messages,
     ...(input.modelContextProfile ? { modelContextProfile: input.modelContextProfile } : {}),

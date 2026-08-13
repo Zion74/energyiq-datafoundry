@@ -3,10 +3,101 @@ import { describe, expect, it } from "vitest";
 import { ENERGYIQ_HARNESS_FAST_CASES } from "./energyiq-harness-eval-cases.js";
 import {
   evaluateEnergyIqHarnessObservation,
+  evaluatePreschoolOverviewAiPassAt3,
   evaluateEnergyIqSameSessionContinuity,
 } from "./energyiq-harness-eval.js";
 
 describe("EnergyIQ Harness Eval", () => {
+  it("compares one fixed-Snapshot single-stage baseline with two-stage pass@3 without a Finding quota", () => {
+    const expected = {
+      projectId: "preschool-demo" as const,
+      scopeId: "preschool-project",
+      dataSnapshotId: "snapshot-fixed",
+      projectReleaseId: "release-fixed",
+      dataCutoff: "2026-06-01T00:00:00.000Z",
+    };
+    const weakReview = {
+      nonRepetition: 0 as const,
+      depth: 0 as const,
+      managerValue: 1 as const,
+      epistemicDiscipline: 1 as const,
+      placementQuality: 0 as const,
+      expressionFit: 1 as const,
+    };
+    const strongReview = {
+      nonRepetition: 2 as const,
+      depth: 2 as const,
+      managerValue: 2 as const,
+      epistemicDiscipline: 2 as const,
+      placementQuality: 2 as const,
+      expressionFit: 2 as const,
+    };
+    const baselineResult = {
+      status: "available",
+      findings: [{ evidence: { snapshotId: expected.dataSnapshotId } }],
+    };
+    const binding = {
+      ...expected,
+      analysisPeriod: { from: "2026-05-01T00:00:00.000Z", to: expected.dataCutoff },
+      outputContractRevision: "v13",
+    };
+    const twoStageResult = {
+      status: "available",
+      contract: { id: "preschool-ai-accepted-artifact", revision: "v13" },
+      binding,
+      workflow: {
+        id: "preschool-two-stage",
+        revision: "preschool-two-stage-v2",
+        methodSkill: { id: "energy-insight-investigation", revision: "1.0.0" },
+      },
+      findings: Array.from({ length: 6 }, (_, index) => ({
+        id: `finding-${index + 1}`,
+        binding,
+        evidence: { snapshotId: expected.dataSnapshotId },
+      })),
+    };
+
+    const report = evaluatePreschoolOverviewAiPassAt3({
+      expected,
+      baseline: Array.from({ length: 3 }, () => ({ result: baselineResult, review: weakReview })),
+      twoStage: [
+        { result: twoStageResult, review: strongReview },
+        { result: twoStageResult, review: strongReview },
+        { result: { ...twoStageResult, binding: { ...binding, dataSnapshotId: "stale" } }, review: strongReview },
+      ],
+    });
+
+    expect(report).toMatchObject({
+      status: "passed",
+      methodSkillValueProved: true,
+      baseline: { passAt3: false },
+      twoStage: {
+        passAt3: true,
+        passedCount: 2,
+        attempts: [
+          { passed: true, findingCount: 6 },
+          { passed: true, findingCount: 6 },
+          { passed: false, exactIdentity: false },
+        ],
+      },
+    });
+
+    const oneOfThree = evaluatePreschoolOverviewAiPassAt3({
+      expected,
+      baseline: Array.from({ length: 3 }, () => ({ result: baselineResult, review: weakReview })),
+      twoStage: [
+        { result: twoStageResult, review: strongReview },
+        { result: { ...twoStageResult, binding: { ...binding, dataSnapshotId: "stale-a" } }, review: strongReview },
+        { result: { ...twoStageResult, binding: { ...binding, dataSnapshotId: "stale-b" } }, review: strongReview },
+      ],
+    });
+    expect(oneOfThree).toMatchObject({
+      status: "failed",
+      methodSkillValueProved: false,
+      twoStage: { passAt3: false, passedCount: 1 },
+    });
+  });
+
   it("keeps the fast suite small, product-specific, and uniquely named", () => {
     expect(ENERGYIQ_HARNESS_FAST_CASES).toHaveLength(10);
     expect(new Set(ENERGYIQ_HARNESS_FAST_CASES.map((evalCase) => evalCase.id)).size).toBe(10);

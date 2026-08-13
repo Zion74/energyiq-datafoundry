@@ -3,7 +3,7 @@ title: "Preschool Overview Interaction Matrix"
 summary: "记录 Preschool Overview 对 Charles 报告模块的保留、适配与主动删除，以及数据所有权、Evidence、降级和浏览器验收边界。"
 doc_type: implementation_record
 tags: [Overview, Preschool, Interaction, Evidence, Chrome]
-updated_at: "2026-08-07"
+updated_at: "2026-08-09"
 related:
   - "2026-08-05-Ngee-Ann-Overview-Interaction-Matrix.md"
   - "2026-08-05-Overview用户价值与AI-Slot最小交付决策.md"
@@ -74,6 +74,13 @@ status: provisional
 - Appendix 2 官方图：[Q2 2026 electricity tariffs](https://www.spgroup.com.sg/dam/spgroup/images/news-media-releases/2026/Appendix-2---Q2-2026.png0)。其中 Low Tension Supplies, Non-Domestic 为 `27.27 cents/kWh before GST`、`29.72 cents/kWh with 9% GST`，适用 `2026-04-01` 至 `2026-06-30`。
 - Preschool 是 Mock Demo。页面只采用 `0.2727 SGD/kWh before GST` 做 Provisional reference；它不是客户合同 Tariff，不进入 Published Tariff Revision，也不覆盖未来正式配置。
 - June usage baseline = May 同一 accepted Snapshot 中 4 个完整 Monday–Sunday 周的平均周能耗 × `30/7`；区间使用 4 周 observed minimum/maximum 同比例换算。该方法不建模天气、occupancy、假期、运营变化或趋势，因此只用于量级准备，不用于承诺或节能验收。
+
+## 4.2 A4 Operating Hours 合同与验收边界
+
+- A4 复用同一 Snapshot-scoped Centre-hour × Circuit 查询，在 `PreschoolOperationalProjection` v2 上追加 `operatingSharePct`、`provisionalOperatingCostBeforeGstSgd` 和 `operatingAppliances`；没有新增第二条 SQL 或第二套分析模型。
+- v2 保持 additive 是滚动部署兼容策略：旧 Web 可忽略新增字段；新 Web 必须 feature-detect `operatingAppliances`，面对 pre-A4 v2 API 时整个 Operational 模块诚实 fail closed，不用 all-hours Appliance 数据冒充 operating-state breakdown。
+- Section 4 阅读顺序固定为 `Key focus → KPI → operating composition → Spike detail → collapsed all-hours supporting context → Method/Evidence`，最终以 Evidence 收尾。Observed leading contributor 不等于 root cause，不展示未经定义的 Potential Saving。
+- A4 的自动化与 typecheck 通过不等于共享 `3102` 正向验收通过。只有新 API 构建加载后，真实 Chrome 显示 5 KPI、operating composition、Centre 全事件展开，并完成 1440/1920、鼠标/键盘和 console 验证，才可记录运行时通过；旧 API fail-closed 截图只能证明降级边界。
 
 最新自动化和真实 Chrome 已确认 Day Type、Centre Type、Evidence 一击展开、1440 单列/1920 双列、无横向溢出及零 Console error。`#12` 的服务端 Appliance Ranking、客户侧别名、数值对账和宽屏验收已完成。Preschool 当前只剩：
 

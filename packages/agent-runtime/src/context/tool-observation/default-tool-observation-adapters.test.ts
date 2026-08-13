@@ -78,6 +78,79 @@ describe("default tool observation adapters", () => {
     expect(JSON.stringify(contextPackage)).not.toContain('"committed":true');
   });
 
+  it("preserves an accepted Overview Candidate envelope and tells the model to stop", () => {
+    const runScope = {
+      modelName: "test-model",
+      resourceId: "user-1",
+      runId: "run-1",
+      sessionId: "session-1",
+    };
+    const boundary = createToolObservationBoundary({ identity: runScope });
+    const payload = {
+      candidates: [{
+        id: "candidate-1",
+        epistemicLevel: "verified",
+        title: "A useful finding",
+        takeaway: "The evidence changes the review order.",
+        action: "Check the leading Centre first.",
+        expectedIfAct: "The driver can be confirmed.",
+        ifIgnored: "The issue may remain unexamined.",
+        limitation: "Equipment state is not available.",
+        evidenceRefs: ["benchmark:priority"],
+        evidenceSqlIndexes: [],
+      }],
+    };
+    const contextPackage = boundary.packager.packageToolObservation({
+      toolName: "overview_ai_candidates_submit",
+      rawResult: { ok: true, resultType: "overview-ai-candidate-submission", payload },
+      runScope,
+    });
+
+    expect(contextPackage.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sourceType: "overview-ai-candidate-submission",
+        visibility: "model",
+        content: expect.objectContaining({
+          submitted: true,
+          ok: true,
+          resultType: "overview-ai-candidate-submission",
+          payload,
+          instruction: expect.stringContaining("Stop now"),
+        }),
+      }),
+    ]));
+    expect(JSON.stringify(contextPackage)).not.toContain("adapter_missing");
+  });
+
+  it("keeps the run-local SQL evidence index visible after projection", () => {
+    const runScope = {
+      modelName: "test-model",
+      resourceId: "user-1",
+      runId: "run-1",
+      sessionId: "session-1",
+    };
+    const boundary = createToolObservationBoundary({ identity: runScope });
+    const contextPackage = boundary.packager.packageToolObservation({
+      toolName: "run_sql_readonly",
+      rawResult: {
+        evidence_index: 7,
+        columns: ["centre", "energy_kwh"],
+        rows: [["Centre G", 815.9]],
+        row_count: 1,
+        audit_log_id: "audit-7",
+      },
+      runScope,
+    });
+
+    expect(contextPackage.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sourceType: "sql",
+        visibility: "model",
+        content: expect.objectContaining({ evidence_index: 7 }),
+      }),
+    ]));
+  });
+
   it("bounds a missing SQL observation instead of crashing the context processor", () => {
     const runScope = {
       modelName: "test-model",

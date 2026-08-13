@@ -435,6 +435,56 @@ export type EnergyDailyTotalsDto = {
   }>;
 };
 
+export type EnergyComponentCategoryBreakdownDto = {
+  metricId: "energy.total_usage_kwh@1";
+  queryId: "daily_component_categories_v1";
+  accountingBasis: "published_component_circuits";
+  grain: "day";
+  timezone: string;
+  scopes: Array<{
+    scopeId: string;
+    scopeName: string;
+    scopeType: string;
+    period: {
+      status: "complete" | "partial" | "unavailable";
+      reason: string | null;
+      officialUsageKwh: number | null;
+      componentUsageKwh: number | null;
+      gapKwh: number | null;
+      ratioPct: number | null;
+      categories: Array<{
+        category: string;
+        usageKwh: number | null;
+        sharePct: number | null;
+      }>;
+    };
+    rows: Array<{
+      localDate: string;
+      from: string;
+      to: string;
+      dayType: "weekday" | "weekend" | "public_holiday" | null;
+      officialUsageKwh: number | null;
+      componentUsageKwh: number | null;
+      categories: Array<{
+        category: string;
+        usageKwh: number | null;
+        sharePct: number | null;
+      }>;
+      estimatedCost: {
+        status: "available";
+        amount: number;
+        currency: string;
+        ratePerKwh: number;
+        tariffScheduleVersion: string;
+      } | {
+        status: "unavailable";
+        reason: string;
+      };
+      dataHealth: EnergyTimeBucketDataHealthDto;
+    }>;
+  }>;
+};
+
 export type EnergyCalendarTotalsDto = {
   metricId: "energy.total_usage_kwh@1";
   timezone: string;
@@ -500,6 +550,42 @@ export type EnergyTimeBehaviourDto = {
       code: "COMPLETE_DAY_SAMPLE_UNAVAILABLE" | "DAY_TYPE_CLASSIFICATION_UNAVAILABLE";
       message: string;
     };
+  }>;
+};
+
+export type EnergyComponentHourlyProfilesDto = {
+  metricId: "energy.total_usage_kwh@1";
+  queryId: "component_hourly_profiles_v1";
+  accountingBasis: "published_component_circuits";
+  grain: "hour";
+  unit: "kWh";
+  timezone: string;
+  scopes: Array<{
+    scopeId: string;
+    scopeName: string;
+    scopeType: string;
+    profiles: Array<{
+      dayType: "weekday" | "weekend";
+      status: "available";
+      sampleDayCount: number;
+      categories: Array<{
+        category: string;
+        values: Array<{ localHour: number; usageKwh: number }>;
+      }>;
+      circuits: Array<{
+        meterNodeId: string;
+        name: string;
+        category: string;
+        values: Array<{ localHour: number; usageKwh: number }>;
+      }>;
+    } | {
+      dayType: "weekday" | "weekend" | "public_holiday";
+      status: "unavailable";
+      reason: {
+        code: "COMPLETE_DAY_SAMPLE_UNAVAILABLE" | "DAY_TYPE_CLASSIFICATION_UNAVAILABLE";
+        message: string;
+      };
+    }>;
   }>;
 };
 
@@ -967,8 +1053,10 @@ export type EnergyScopeAnalysisDto = {
     includedInOfficialTotal: false;
   }>;
   dailyTotals?: EnergyDailyTotalsDto;
+  componentCategoryBreakdown?: EnergyComponentCategoryBreakdownDto;
   calendarTotals?: EnergyCalendarTotalsDto;
   timeBehaviour?: EnergyTimeBehaviourDto;
+  componentHourlyProfiles?: EnergyComponentHourlyProfilesDto;
   dailyUsageAnomalies?: EnergyDailyUsageAnomaliesDto;
   peakBreakdown?: EnergyPeakBreakdownDto;
   virtualMeterTraces?: EnergyVirtualMeterTraceDto[];
@@ -1039,7 +1127,9 @@ export type EnergyScopeAnalysisDto = {
     queryIds: Array<
       | "scope_summary_v1"
       | "daily_totals_v1"
+      | "daily_component_categories_v1"
       | "time_bucket_grid_v1"
+      | "component_hourly_profiles_v1"
       | "time_slot_anomaly_v1"
       | "peak_breakdown_v1"
       | "hourly_profile_v1"
@@ -1321,11 +1411,33 @@ export type PreschoolBenchmarkProjectionDto = {
   };
 };
 
+export type PreschoolOperationalApplianceCompositionDto = {
+  totalKwh: number;
+  provisionalCostBeforeGstSgd: number;
+  reconciliationGapKwh: number;
+  applianceGroups: Array<{
+    name: string;
+    usageKwh: number;
+    sharePct: number;
+    provisionalCostBeforeGstSgd: number;
+    sourceAliases: string[];
+  }>;
+  appliances: Array<{
+    name: string;
+    applianceGroup: string;
+    usageKwh: number;
+    sharePct: number;
+    provisionalCostBeforeGstSgd: number;
+    centreCount: number;
+    sourceCircuitIds: string[];
+  }>;
+};
+
 export type PreschoolOperationalProjectionDto = {
   status: "available";
   contract: {
     id: "preschool-may-2026-operational-behaviour";
-    version: "1";
+    version: "2" | "3";
     spikeThresholdPct: 50;
   };
   period: {
@@ -1338,9 +1450,24 @@ export type PreschoolOperationalProjectionDto = {
     standbyKwh: number;
     standbySharePct: number;
     operatingKwh: number;
+    operatingSharePct: number;
+    provisionalStandbyCostBeforeGstSgd: number;
+    provisionalOperatingCostBeforeGstSgd: number;
   };
+  tariffReference: {
+    sourceName: "SP Group";
+    sourceUrl: string;
+    appendixUrl: string;
+    supplyClass: "Low tension, non-domestic";
+    appliesFrom: "2026-04-01";
+    appliesTo: "2026-06-30";
+    beforeGstSgdPerKwh: 0.2727;
+    withGstSgdPerKwh: 0.2972;
+  };
+  standbyAppliances: PreschoolOperationalApplianceCompositionDto;
+  operatingAppliances: PreschoolOperationalApplianceCompositionDto;
   hourlyProfile: {
-    completeDayCount: 31;
+    completeDayCount: number;
     unit: "mean kWh per complete day";
     rows: Array<{
       localHour: number;
@@ -1352,14 +1479,16 @@ export type PreschoolOperationalProjectionDto = {
   planningOutlook: {
     status: "provisional";
     contract: {
-      id: "preschool-june-2026-naive-weekly-baseline";
-      version: "1";
+      id: "preschool-june-2026-naive-weekly-baseline" | "preschool-monthly-naive-weekly-baseline";
+      version: "1" | "2";
       method: "mean of four complete Monday-Sunday weeks";
     };
     targetPeriod: {
-      start: "2026-06-01";
-      endInclusive: "2026-06-30";
-      days: 30;
+      start: string;
+      endInclusive: string;
+      endExclusive?: string;
+      timezone?: string;
+      days: number;
     };
     sourceWeeks: Array<{
       start: string;
@@ -1398,6 +1527,7 @@ export type PreschoolOperationalProjectionDto = {
       queryId: "daily_totals_v1";
       recipeId: "preschool-naive-weekly-planning-baseline-v1";
     };
+    estimateSeries?: PreschoolPlanningEstimateSeriesDto;
     limitations: string[];
   } | {
     status: "unavailable";
@@ -1427,6 +1557,18 @@ export type PreschoolOperationalProjectionDto = {
         leadingCircuitKwh: number;
         leadingCircuitSharePct: number;
       };
+      events: Array<{
+        localDate: string;
+        localHour: number;
+        dayType: "weekday" | "weekend" | "calendar_exception";
+        usageKwh: number;
+        baselineKwh: number;
+        impactKwh: number;
+        variancePct: number;
+        leadingCircuitName: string;
+        leadingCircuitKwh: number;
+        leadingCircuitSharePct: number;
+      }>;
     }>;
   }>;
   sop: {
@@ -1452,10 +1594,11 @@ export type PreschoolOperationalProjectionDto = {
     metricRevisionIds: string[];
     businessCalendarVersion: string;
     sourceQueryIds: string[];
-    projectionQueryId: "preschool_centre_hour_cells_v1";
+    projectionQueryId: "preschool_centre_hour_appliance_cells_v2";
     projectionRecipeIds: [
       "preschool-hour-slot-spike-v1",
       "preschool-after-hours-sop-signal-v1",
+      "preschool-operating-state-appliance-v1",
     ];
     baseline: "same-centre same-hour-slot mean within operating state";
   };
@@ -1472,6 +1615,152 @@ export type PreschoolOperationalProjectionDto = {
     projectReleaseId: string;
     dataSnapshotId: string;
     businessCalendarVersion: string;
+  };
+};
+
+type PreschoolProvisionalPlanningOutlookDto = Extract<
+  Extract<PreschoolOperationalProjectionDto, { status: "available" }>["planningOutlook"],
+  { status: "provisional" }
+>;
+
+type PreschoolSavedPlanningOutlookDto = Omit<PreschoolProvisionalPlanningOutlookDto, "tariffReference"> & {
+  tariffReference?: PreschoolProvisionalPlanningOutlookDto["tariffReference"];
+};
+
+export type PreschoolPlanningEstimateSeriesDto = {
+  contract: {
+    id: "preschool-june-2026-estimate-series" | "preschool-monthly-estimate-series";
+    version: "1" | "2";
+    method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total";
+  };
+  scopes: Array<{
+    scopeId: string;
+    scopeName: string;
+    scopeType: string;
+    scopeRole: "portfolio" | "centre";
+    estimatedKwh: number;
+    estimatedCostBeforeGstSgd: number;
+    buckets: Record<"daily" | "weekly" | "monthly", Array<{
+      start: string;
+      endExclusive: string;
+      estimatedKwh: number;
+    }>>;
+  }>;
+};
+
+export type PreschoolPlanningForecastDto = {
+  status: "waiting" | "partial" | "complete";
+  contract: {
+    id: "preschool-june-2026-forecast-series" | "preschool-monthly-energy-outlook";
+    version: "1" | "2";
+    method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total";
+  };
+  targetPeriod?: {
+    start: string;
+    endExclusive: string;
+    timezone: string;
+    targetDayCount: number;
+  };
+  tariffAssumption?: {
+    status: "effective" | "provisional";
+    beforeGstSgdPerKwh: number;
+    sourceName: string;
+    sourceUrl: string;
+    supplyClass: string;
+    appliesFrom: string;
+    appliesTo: string;
+    beforeGst: true;
+    notBill: true;
+  } | {
+    status: "unavailable";
+    reason: string;
+  };
+  scopes: Array<{
+    scopeId: string;
+    scopeName: string;
+    scopeType: string;
+    scopeRole: "portfolio" | "centre";
+    estimatedKwh: number;
+    estimatedCostBeforeGstSgd: number | null;
+    expectedFullMonthKwh?: number | null;
+    expectedFullMonthCostBeforeGstSgd?: number | null;
+    actualKwh: number | null;
+    actualCostBeforeGstSgd?: number | null;
+    actualCompleteDayCount: number;
+    actualTargetDayCount: number;
+    actualThroughLocalDate?: string | null;
+    pacePct: number | null;
+    outcome: "on_plan" | "above_plan" | "below_plan" | null;
+    originalEstimateIdentity?: string;
+    actualIdentity?: string;
+    currentOutlookIdentity?: string;
+    buckets: Record<"daily" | "weekly" | "monthly", Array<{
+      start: string;
+      endExclusive: string;
+      estimatedKwh: number;
+      originalEstimateKwh?: number;
+      actualKwh: number | null;
+      currentOutlookKwh?: number | null;
+      futureOutlookKwh?: number | null;
+      actualCompleteDayCount: number;
+      actualTargetDayCount: number;
+      actualStatus: "waiting" | "partial" | "complete";
+    }>>;
+  }>;
+  evidence: {
+    planDataSnapshotId: string;
+    actualDataSnapshotId: string;
+    planQueryId: "daily_totals_v1";
+    actualQueryId: "daily_totals_v1";
+    recipeId: "preschool-weekday-mean-series-v1";
+  };
+};
+
+export type PreschoolPlanningLifecycleDto = {
+  status: "available";
+  contract: {
+    id: "preschool-saved-plan-current-actual";
+    version: "1" | "2";
+  };
+  targetPeriod: {
+    start: string;
+    endExclusive: string;
+    timezone: string;
+    targetDayCount: number;
+  };
+  plan: PreschoolSavedPlanningOutlookDto;
+  actual: {
+    status: "partial" | "complete";
+    usageKwh: number | null;
+    completeDayCount: number;
+    targetDayCount: number;
+    varianceKwh: number | null;
+    variancePct: number | null;
+  };
+  forecast?: PreschoolPlanningForecastDto;
+  planProvenance: {
+    savedAnalysisId: string;
+    dataSnapshotId: string;
+    projectReleaseId: string;
+    templateRevisionId: string;
+    queryId: "daily_totals_v1";
+    recipeId: "preschool-naive-weekly-planning-baseline-v1";
+  };
+  actualProvenance: {
+    dataSnapshotId: string;
+    projectReleaseId: string;
+    queryId: "daily_totals_v1";
+    period: {
+      start: string;
+      endExclusive: string;
+      timezone: string;
+    };
+  };
+} | {
+  status: "unavailable";
+  reason: {
+    code: "NO_COMPATIBLE_SAVED_ANALYSIS" | "CURRENT_ACTUAL_UNAVAILABLE";
+    message: string;
   };
 };
 
@@ -1567,6 +1856,13 @@ export type EnergyProjectAnalysisSnapshotDto = {
       endExclusive: string;
     };
     projectReleaseId: string;
+    latestCompleteLocalDay?: string | null;
+    monthlyOutlookTargetPeriod?: {
+      start: string;
+      endExclusive: string;
+      timezone: string;
+      targetDayCount: number;
+    } | null;
   };
   projectRelease: EnergyPublishedProjectReleaseDto;
   recipe: EnergyPublishedProjectReleaseDto["recipe"];
@@ -1596,6 +1892,7 @@ export type EnergyProjectAnalysisSnapshotDto = {
   preschoolBenchmark?: PreschoolBenchmarkProjectionDto;
   preschoolAppliances?: PreschoolApplianceProjectionDto;
   preschoolOperational?: PreschoolOperationalProjectionDto;
+  preschoolPlanningLifecycle?: PreschoolPlanningLifecycleDto;
   preschoolDecisionSignals?: PreschoolDecisionSignalsDto;
 };
 

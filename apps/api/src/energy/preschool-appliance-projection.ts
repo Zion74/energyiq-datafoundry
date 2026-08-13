@@ -17,6 +17,24 @@ const EXPECTED_APPLIANCE_BY_ALIAS = new Map<string, { applianceGroup: string; ca
   ["Plug Load3", { applianceGroup: "Plugload", category: "load" }],
 ]);
 
+export const PRESCHOOL_EXPECTED_APPLIANCE_ALIAS_COUNT = EXPECTED_APPLIANCE_BY_ALIAS.size;
+
+export const preschoolApplianceContractForAlias = (
+  alias: string,
+): { applianceGroup: string; category: string } | null => {
+  const contract = EXPECTED_APPLIANCE_BY_ALIAS.get(alias);
+  return contract ? { ...contract } : null;
+};
+
+export const preschoolApplianceAliasForPublishedCircuit = (
+  name: string,
+  parentScopeId: string | undefined,
+): string | null => {
+  if (!parentScopeId) return null;
+  const prefix = `${parentScopeId}:`;
+  return name.startsWith(prefix) ? name.slice(prefix.length) : null;
+};
+
 export type PreschoolApplianceProjection = {
   status: "available";
   contract: {
@@ -100,7 +118,7 @@ export const buildPreschoolApplianceProjection = (input: {
     sourceCircuitIds: string[];
   }>();
   for (const circuit of officialCircuits) {
-    const alias = acceptedAlias(circuit.name, circuit.parentScopeId);
+    const alias = preschoolApplianceAliasForPublishedCircuit(circuit.name, circuit.parentScopeId);
     const expected = alias ? EXPECTED_APPLIANCE_BY_ALIAS.get(alias) : undefined;
     if (!alias || !expected || circuit.category !== expected.category || !circuit.parentScopeId) {
       return unavailable(
@@ -201,12 +219,6 @@ const unavailableEvidence = (input: Parameters<typeof buildPreschoolAppliancePro
   meterMappingRevisionId: input.projectRelease.meterMappingRevisionId,
   sourceKind: "circuit" as const,
 });
-
-const acceptedAlias = (name: string, parentScopeId: string | undefined): string | null => {
-  if (!parentScopeId) return null;
-  const prefix = `${parentScopeId}:`;
-  return name.startsWith(prefix) ? name.slice(prefix.length) : null;
-};
 
 const unavailable = (
   code: Extract<PreschoolApplianceProjection, { status: "unavailable" }>["reason"]["code"],

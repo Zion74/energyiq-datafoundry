@@ -361,21 +361,56 @@ describe("Ngee Ann Overview ViewModel", () => {
       qualityEvents: "0 quality events",
     });
     expect(Object.fromEntries(view.highlights.map((item) => [item.id, item.value]))).toEqual({
-      total: "1531.17",
+      total: "1,531.17",
       daily: "218.74",
       peak: "20.67",
-      comparison: "26.4% higher",
       cost: "S$489.97",
     });
-    expect(view.highlights.find((item) => item.id === "comparison")?.detail)
-      .toBe("Current 1531.17 kWh vs previous 1211.68 kWh");
+    expect(view.highlights.find((item) => item.id === "total")?.detail)
+      .toBe("Previous period: 1,211.68 kWh");
+    expect(view.highlights.find((item) => item.id === "total")?.comparison)
+      .toEqual({ label: "+26.4% vs previous", direction: "increase" });
+    expect(view.highlights.find((item) => item.id === "daily")?.detail)
+      .toBe("Average electricity used per day in this Overview window");
     expect(view.highlights.find((item) => item.id === "cost")?.detail)
       .toBe("Based on the active tariff for this period");
     expect(view.metadataLimitation).toContain("Area and headcount metadata are missing");
     expect(view.metadataLimitation).toContain("does not affect Total energy, Daily average, Peak interval-average power, Comparison or Cost");
+    expect(view.componentCategoryBreakdown).toMatchObject({
+      status: "available",
+      reason: null,
+      categories: [
+        { id: "load", label: "Load" },
+        { id: "light", label: "Light" },
+      ],
+      evidence: {
+        snapshotId: "snapshot-ngee-ann-golden",
+        projectReleaseId: "release-ngee-ann-golden",
+        queryId: "daily_component_categories_v1",
+        accountingBasis: "published_component_circuits",
+      },
+    });
+    expect(view.componentCategoryBreakdown.scopes).toHaveLength(3);
+    expect(view.componentCategoryBreakdown.scopes[0]).toMatchObject({
+      id: "project",
+      period: {
+        officialUsageKwh: "1,531.2",
+        componentUsageKwh: "1,519",
+        ratioPct: "99.2%",
+      },
+    });
+    expect(view.componentCategoryBreakdown.scopes[0]?.rows).toHaveLength(7);
+    expect(view.componentCategoryBreakdown.rankings.find((ranking) => (
+      ranking.scopeId === "project" && ranking.categoryId === "load"
+    ))?.rows[0]).toMatchObject({
+      rank: 1,
+      name: "Office Load 4 Fan ISOL 1/2",
+      levelName: "Level 7",
+      usageKwh: "439.1",
+    });
     expect(view.levelComparison).toMatchObject({
       status: "available",
-      decisionQuestion: "Which Level needs attention first?",
+      decisionQuestion: "Where is current energy concentrated by Level, and which Level changed most?",
       rows: [
         {
           id: "level-7",
@@ -636,16 +671,17 @@ describe("Ngee Ann Overview ViewModel", () => {
     expect(view.energyTrend.scopes[0]!.points).toHaveLength(7);
     expect(view.energyTrend.scopes[0]!.points.map((point) => ({
       localDate: point.localDate,
+      dayType: point.dayType,
       usageKwh: point.usageKwh,
       status: point.status,
     }))).toEqual([
-      { localDate: "2026-06-10", usageKwh: "253.7018", status: "complete" },
-      { localDate: "2026-06-11", usageKwh: "268.399", status: "complete" },
-      { localDate: "2026-06-12", usageKwh: "260.0659", status: "complete" },
-      { localDate: "2026-06-13", usageKwh: "168.9645", status: "complete" },
-      { localDate: "2026-06-14", usageKwh: "127.9387", status: "complete" },
-      { localDate: "2026-06-15", usageKwh: "230.1002", status: "complete" },
-      { localDate: "2026-06-16", usageKwh: "221.9982", status: "complete" },
+      { localDate: "2026-06-10", dayType: "weekday", usageKwh: "253.7018", status: "complete" },
+      { localDate: "2026-06-11", dayType: "weekday", usageKwh: "268.399", status: "complete" },
+      { localDate: "2026-06-12", dayType: "weekday", usageKwh: "260.0659", status: "complete" },
+      { localDate: "2026-06-13", dayType: "weekend", usageKwh: "168.9645", status: "complete" },
+      { localDate: "2026-06-14", dayType: "weekend", usageKwh: "127.9387", status: "complete" },
+      { localDate: "2026-06-15", dayType: "weekday", usageKwh: "230.1002", status: "complete" },
+      { localDate: "2026-06-16", dayType: "weekday", usageKwh: "221.9982", status: "complete" },
     ]);
   });
 
@@ -847,8 +883,13 @@ describe("Ngee Ann Overview ViewModel", () => {
       scopeName: "Project",
       actualKwh: "268.399",
       baselineKwh: "218.885",
+      thresholdKwh: "262.662",
       impactKwh: "+49.514",
       baselineDates: ["2026-06-04", "2026-06-05", "2026-06-08", "2026-06-09"],
+      relatedLevelTotals: [
+        expect.objectContaining({ scopeName: "Level 7" }),
+        expect.objectContaining({ scopeName: "Level 6" }),
+      ],
     });
     expect(dailyAnomalies.incidents[0]!.hourlyComparison).toHaveLength(24);
     expect(dailyAnomalies.incidents[0]!.series.map((series) => series.scopeId)).toEqual([
@@ -1117,13 +1158,37 @@ describe("Ngee Ann Overview ViewModel", () => {
         { id: "level-7", name: "Level 7" },
         { id: "level-6", name: "Level 6" },
       ],
+      operatingPolicy: {
+        status: "available",
+        operatingUsageKwh: 1200,
+        operatingUsage: "1,200.0",
+        standbyUsageKwh: 331.168324,
+        standbyUsage: "331.2",
+        standbySharePct: 21.63,
+        standbyShare: "21.6%",
+        timezone: "Asia/Singapore",
+        businessCalendarVersion: "calendar-v1",
+      },
       evidence: { queryIds: ["time_bucket_grid_v1"] },
     });
     expect(view.dayProfile.profiles).toHaveLength(9);
     expect(view.dayProfile.profiles.find((profile) => profile.id === "project:weekday")).toMatchObject({
       status: "available",
       sampleDayCount: 5,
+      summary: {
+        status: "available",
+        dailyUsageKwh: 246.8528,
+        dailyUsage: "246.9",
+      },
       values: expect.any(Array),
+      componentStack: {
+        status: "available",
+        sampleDayCount: 5,
+        categories: [
+          expect.objectContaining({ category: "load", categoryLabel: "Load", values: expect.any(Array) }),
+          expect.objectContaining({ category: "light", categoryLabel: "Light", values: expect.any(Array) }),
+        ],
+      },
     });
     expect(view.dayProfile.profiles.find((profile) => profile.id === "project:weekend")).toMatchObject({
       status: "available",
@@ -1135,6 +1200,12 @@ describe("Ngee Ann Overview ViewModel", () => {
       values: [],
     });
     expect(view.dayProfile.profiles.find((profile) => profile.id === "project:weekday")?.values).toHaveLength(24);
+    const weekdayComponentStack = view.dayProfile.profiles
+      .find((profile) => profile.id === "project:weekday")?.componentStack;
+    expect(weekdayComponentStack?.status).toBe("available");
+    if (weekdayComponentStack?.status === "available") {
+      expect(weekdayComponentStack.categories.every((category) => category.values.length === 24)).toBe(true);
+    }
 
     expect(view.usageHeatmap).toMatchObject({
       status: "available",
@@ -1146,9 +1217,28 @@ describe("Ngee Ann Overview ViewModel", () => {
       dayTypeLabel: "Weekday",
       scopeName: "Project",
       sampleDayCount: 5,
+      dailyUsageKwh: 246.8528,
+      dailyUsage: "246.9",
+      peakHourLabel: "14:00",
+      peakUsage: "16.0703",
       values: expect.any(Array),
     });
     expect(view.usageHeatmap.averageProfiles.find((profile) => profile.id === "project:weekday")?.values).toHaveLength(24);
+    expect(view.usageHeatmap.circuitProfiles).toEqual([
+      expect.objectContaining({
+        id: "level-7:weekday",
+        levelScopeId: "level-7",
+        levelScopeName: "Level 7",
+        dayType: "weekday",
+        sampleDayCount: 5,
+        circuits: expect.any(Array),
+      }),
+      expect.objectContaining({ id: "level-7:weekend", levelScopeId: "level-7", dayType: "weekend" }),
+      expect.objectContaining({ id: "level-6:weekday", levelScopeId: "level-6", dayType: "weekday" }),
+      expect.objectContaining({ id: "level-6:weekend", levelScopeId: "level-6", dayType: "weekend" }),
+    ]);
+    expect(view.usageHeatmap.circuitProfiles[0]!.circuits.length).toBeGreaterThan(0);
+    expect(view.usageHeatmap.circuitProfiles[0]!.circuits.every((circuit) => circuit.values.length === 24)).toBe(true);
     expect(view.usageHeatmap.dates).toHaveLength(7);
     expect(view.usageHeatmap.scopes).toHaveLength(3);
     expect(view.usageHeatmap.scopes[0]!.cells).toHaveLength(168);
@@ -1179,6 +1269,30 @@ describe("Ngee Ann Overview ViewModel", () => {
     expect(gridView.dayProfile).toMatchObject({ status: "unavailable", profiles: [] });
     expect(gridView.energyTrend).toMatchObject({ status: "available", grain: "day" });
     expect(gridView.levelComparison.status).toBe("available");
+  });
+
+  it("fails only component hourly projections closed when their authoritative rows are invalid", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const projection = snapshot.analysis.componentHourlyProfiles!;
+    const projectWeekday = projection.scopes[0]!.profiles.find((profile) => (
+      profile.dayType === "weekday" && profile.status === "available"
+    ));
+    if (!projectWeekday || projectWeekday.status !== "available") {
+      throw new Error("Expected an available Project weekday component profile.");
+    }
+    projectWeekday.categories[0]!.values.pop();
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+    const projectProfile = view.dayProfile.profiles.find((profile) => profile.id === "project:weekday")!;
+
+    expect(view.dayProfile.status).toBe("available");
+    expect(projectProfile.componentStack).toMatchObject({
+      status: "unavailable",
+      reason: expect.stringMatching(/component hourly/i),
+    });
+    expect(view.usageHeatmap.status).toBe("available");
+    expect(view.usageHeatmap.circuitProfiles).toEqual([]);
+    expect(view.usageHeatmap.scopes).toHaveLength(3);
   });
 
   it.each(timeEvidencePinMismatchCases)(
@@ -1733,7 +1847,7 @@ describe("Ngee Ann Overview ViewModel", () => {
     });
     expect(view.dataStatus.recovery).toContain("Restore the missing source intervals");
     expect(view.highlights.find((item) => item.id === "total")).toMatchObject({
-      value: "1531.17",
+      value: "1,531.17",
       available: true,
     });
   });
@@ -1763,8 +1877,8 @@ describe("Ngee Ann Overview ViewModel", () => {
       "Unavailable",
       "Unavailable",
       "Unavailable",
-      "Unavailable",
     ]);
+    expect(view.componentCategoryBreakdown.status).toBe("unavailable");
     expect(view.latestAvailableRange).toEqual({ from: "2026-06-10", to: "2026-06-16" });
     expect(view.evidence.comparison.status).toBe("unavailable");
     expect(view.evidence.cost).toMatchObject({
@@ -1772,6 +1886,135 @@ describe("Ngee Ann Overview ViewModel", () => {
       reason: "No trusted intervals support a Cost for this Period.",
       allocations: [],
       referenceIds: [],
+    });
+  });
+
+  it("fails only the operating-policy split closed when its Snapshot pins do not match", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    if (snapshot.analysis.offHours.status !== "available") throw new Error("Expected available off-hours facts.");
+    snapshot.analysis.offHours.businessCalendarVersion = "stale-calendar";
+
+    const dayProfile = buildNgeeAnnOverviewViewModel(snapshot).dayProfile;
+
+    expect(dayProfile.status).toBe("available");
+    expect(dayProfile.profiles).toHaveLength(9);
+    expect(dayProfile.operatingPolicy).toMatchObject({
+      status: "unavailable",
+      reason: expect.stringContaining("operating-policy"),
+    });
+  });
+
+  it("accepts the API off-hours contract where usageKwh is the non-operating subtotal", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    if (snapshot.analysis.offHours.status !== "available") throw new Error("Expected available off-hours facts.");
+    snapshot.analysis.offHours.operatingKwh = 1_200;
+    snapshot.analysis.offHours.standbyKwh = 331.168324;
+    snapshot.analysis.offHours.usageKwh = 331.168324;
+    snapshot.analysis.offHours.sharePct = 21.63;
+    snapshot.analysis.summary.usageKwh = 1_531.168324;
+
+    expect(buildNgeeAnnOverviewViewModel(snapshot).dayProfile.operatingPolicy).toMatchObject({
+      status: "available",
+      operatingUsageKwh: 1_200,
+      standbyUsageKwh: 331.168324,
+      standbySharePct: 21.63,
+    });
+  });
+
+  it("fails the component Category presentation closed when the server projection is absent", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    delete snapshot.analysis.componentCategoryBreakdown;
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.componentCategoryBreakdown).toMatchObject({
+      status: "unavailable",
+      scopes: [],
+      rankings: [],
+    });
+    expect(view.componentCategoryBreakdown.reason).toContain("component Category");
+  });
+
+  it("keeps an incomplete component Category period partial without publishing incomplete totals", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const project = snapshot.analysis.componentCategoryBreakdown!.scopes[0]!;
+    const incompleteDay = project.rows[0]!;
+    incompleteDay.categories[0]!.usageKwh = null;
+    incompleteDay.categories[0]!.sharePct = null;
+    incompleteDay.componentUsageKwh = null;
+    incompleteDay.dataHealth = {
+      ...incompleteDay.dataHealth,
+      status: "partial",
+      coveragePct: 75,
+      validIntervalCount: Math.floor(incompleteDay.dataHealth.expectedMeterIntervalCount * 0.75),
+    };
+    Object.assign(project.period, {
+      status: "partial",
+      reason: "At least one daily component Category is incomplete.",
+      officialUsageKwh: null,
+      componentUsageKwh: null,
+      gapKwh: null,
+      ratioPct: null,
+      categories: project.period.categories.map((category) => ({
+        ...category,
+        usageKwh: null,
+        sharePct: null,
+      })),
+    });
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+    const period = view.componentCategoryBreakdown.scopes[0]?.period as unknown as {
+      status?: string;
+      officialUsageKwh?: string;
+      componentUsageKwh?: string;
+    };
+
+    expect(view.componentCategoryBreakdown.status).toBe("partial");
+    expect(view.componentCategoryBreakdown.reason).toContain("incomplete");
+    expect(period).toMatchObject({
+      status: "partial",
+      officialUsageKwh: "Unavailable",
+      componentUsageKwh: "Unavailable",
+    });
+    expect(view.componentCategoryBreakdown.scopes[0]?.rows[0]).toMatchObject({
+      dataStatus: "partial",
+      componentUsageKwh: "Unavailable",
+    });
+  });
+
+  it.each([
+    {
+      name: "Scope name",
+      mutate: (snapshot: GoldenSnapshot) => {
+        snapshot.analysis.componentCategoryBreakdown!.scopes[0]!.scopeName = "Wrong Project";
+      },
+    },
+    {
+      name: "Scope type",
+      mutate: (snapshot: GoldenSnapshot) => {
+        snapshot.analysis.componentCategoryBreakdown!.scopes[0]!.scopeType = "site";
+      },
+    },
+    {
+      name: "row start",
+      mutate: (snapshot: GoldenSnapshot) => {
+        snapshot.analysis.componentCategoryBreakdown!.scopes[0]!.rows[0]!.from = "2026-06-09T16:30:00.000Z";
+      },
+    },
+    {
+      name: "row end",
+      mutate: (snapshot: GoldenSnapshot) => {
+        snapshot.analysis.componentCategoryBreakdown!.scopes[0]!.rows[0]!.to = "2026-06-10T15:30:00.000Z";
+      },
+    },
+  ])("fails the component Category contract closed for a mismatched $name", ({ mutate }) => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    mutate(snapshot);
+
+    expect(buildNgeeAnnOverviewViewModel(snapshot).componentCategoryBreakdown).toMatchObject({
+      status: "unavailable",
+      scopes: [],
+      rankings: [],
     });
   });
 
@@ -1862,6 +2105,95 @@ describe("Ngee Ann Overview ViewModel", () => {
         },
       ],
     });
+  });
+
+  it("keeps current Level, Category and Circuit concentration visible when comparisons are absent", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    for (const level of snapshot.analysis.childScopes.filter((scope) => scope.nodeType === "level")) {
+      delete level.comparison;
+    }
+    for (const category of snapshot.analysis.categories) delete category.comparison;
+    for (const circuit of snapshot.analysis.circuits) delete circuit.comparison;
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.levelComparison).toMatchObject({
+      status: "available",
+      summary: {
+        currentConcentration: {
+          status: "available",
+          name: "Level 7",
+          currentUsageKwh: "1054.18",
+          projectShare: "68.8%",
+        },
+        measuredChange: {
+          status: "unavailable",
+          reason: expect.stringContaining("comparison"),
+        },
+      },
+      rows: expect.arrayContaining([
+        expect.objectContaining({
+          name: "Level 7",
+          currentUsageKwh: "1054.18",
+          projectShare: "68.8%",
+          movement: { status: "unavailable", reason: expect.stringContaining("comparison") },
+        }),
+      ]),
+    });
+    expect(view.energyComposition.categories).toMatchObject({
+      status: "available",
+      summary: {
+        currentConcentration: {
+          status: "available",
+          name: "Load",
+          currentUsageKwh: "1239.42",
+          projectShare: "80.9%",
+        },
+        measuredChange: { status: "unavailable", reason: expect.stringContaining("comparison") },
+      },
+      rows: expect.arrayContaining([
+        expect.objectContaining({
+          name: "Load",
+          currentUsageKwh: "1239.42",
+          projectShare: "80.9%",
+          movement: { status: "unavailable", reason: expect.stringContaining("comparison") },
+        }),
+      ]),
+    });
+    expect(view.energyComposition.circuits).toMatchObject({
+      status: "available",
+      rows: expect.arrayContaining([
+        expect.objectContaining({
+          rank: 1,
+          currentUsageKwh: "439.1",
+          movement: { status: "unavailable", reason: expect.stringContaining("comparison") },
+        }),
+      ]),
+    });
+  });
+
+  it("withholds movement when the previous baseline is zero but keeps current contributor facts", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const level = snapshot.analysis.childScopes.find((scope) => scope.nodeType === "level");
+    const category = snapshot.analysis.categories[0];
+    const circuit = snapshot.analysis.circuits.find((row) => row.includedInOfficialTotal === false);
+    if (!level?.comparison || !category?.comparison || !circuit?.comparison) {
+      throw new Error("Expected contributor comparison fixtures.");
+    }
+    level.comparison.usageKwh = 0;
+    level.comparison.changePct = null;
+    category.comparison.usageKwh = 0;
+    category.comparison.changePct = null;
+    circuit.comparison.usageKwh = 0;
+    circuit.comparison.changePct = null;
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.levelComparison.rows.find((row) => row.id === level.nodeId)?.movement.status).toBe("unavailable");
+    expect(view.energyComposition.categories.rows.find((row) => row.id === category.category)?.movement.status).toBe("unavailable");
+    expect(view.energyComposition.circuits.rows.find((row) => row.meterNodeId === circuit.meterNodeId)?.movement.status).toBe("unavailable");
+    expect(view.levelComparison.summary.currentConcentration.status).toBe("available");
+    expect(view.levelComparison.summary.measuredChange.status).toBe("unavailable");
   });
 
   it.each(rollingBoundaryTamperCases)(

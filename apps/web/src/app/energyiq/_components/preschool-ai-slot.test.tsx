@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildEnergyAiHandoffInitialDraftPrompt } from "./energy-analysis-workbench";
 import { PreschoolAiSlot } from "./preschool-ai-slot";
+import type { PreschoolAiAcceptedArtifact } from "./preschool-ai-artifact";
 import type { PreschoolAiProgress, PreschoolAiRunResult } from "./preschool-ai-run";
 import { preschoolGoldenSnapshot } from "./preschool-overview.test-fixture";
 
@@ -62,6 +63,34 @@ describe("PreschoolAiSlot", () => {
     expectDecisionSummaryBeforeVisual(container);
   });
 
+  it("renders accepted outcomes and labels an unverified explanation before passing it to Ask AI deeper", async () => {
+    const startRun = vi.fn();
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        mode="saved"
+        savedResult={acceptedResult()}
+        aiAnalystHref="/energyiq/ai?projectId=preschool-demo"
+        startRun={startRun}
+      />,
+    ));
+
+    expect(startRun).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Expected if acted on");
+    expect(container.textContent).toContain("If ignored");
+    expect(container.textContent).toContain("Possible explanation · needs verification");
+    expect(container.textContent).toContain("Equipment schedules may differ from the published Calendar.");
+    const askUrl = new URL(container.querySelector<HTMLAnchorElement>("article a")!.href);
+    expect(JSON.parse(askUrl.searchParams.get("finding") ?? "null")).toMatchObject({
+      possibleExplanation: "Equipment schedules may differ from the published Calendar.",
+      expectedIfAct: "The review should isolate the avoidable condition.",
+      ifIgnored: "The unexplained closed-hour load may continue.",
+    });
+    const handoff = buildEnergyAiHandoffInitialDraftPrompt(askUrl.searchParams);
+    expect(handoff).toContain("Unverified possible explanation: Equipment schedules may differ from the published Calendar.");
+    expect(handoff).toContain("Expected if acted on: The review should isolate the avoidable condition.");
+  });
+
   it("keeps the deterministic Overview ready while analysis progresses", async () => {
     let finish!: (result: PreschoolAiRunResult) => void;
     let report!: (progress: PreschoolAiProgress) => void;
@@ -100,11 +129,38 @@ describe("PreschoolAiSlot", () => {
   });
 
   it("keeps provider failure optional and the verified Overview unchanged", async () => {
-    await renderSlot(vi.fn().mockResolvedValue({ status: "unavailable", reason: "provider unavailable" }));
+    const onResult = vi.fn();
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        startRun={vi.fn().mockResolvedValue({ status: "unavailable", reason: "provider unavailable" })}
+        onResult={onResult}
+      />,
+    ));
     await act(async () => undefined);
 
+    expect(onResult).toHaveBeenCalledWith({ status: "unavailable", reason: "provider unavailable" });
     expect(container.textContent).toContain("AI analysis unavailable");
     expect(container.textContent).toContain("verified Overview remains available and unchanged");
+  });
+
+  it("offers one explicit server retry without resubmitting browser content", async () => {
+    const retryRun = vi.fn().mockResolvedValue(availableResult());
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        startRun={vi.fn().mockResolvedValue({ status: "unavailable", reason: "provider unavailable", retryable: true })}
+        retryRun={retryRun}
+      />,
+    ));
+    await act(async () => undefined);
+    const retryButton = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.includes("Retry AI analysis"));
+    expect(retryButton).toBeDefined();
+
+    await act(async () => retryButton!.click());
+    expect(retryRun).toHaveBeenCalledTimes(1);
+    expect(container.querySelectorAll("article")).toHaveLength(2);
   });
 
   it("opens compact Evidence and carries one Finding into Ask AI deeper", async () => {
@@ -212,6 +268,67 @@ function availableResult(): Extract<PreschoolAiRunResult, { status: "available" 
       finding("preschool-ai-finding-1", "supports", true),
       finding("preschool-ai-finding-2", "independent", false),
     ],
+  };
+}
+
+function acceptedResult(): PreschoolAiAcceptedArtifact {
+  const binding = {
+    projectId: "preschool-demo" as const,
+    scopeId: "preschool-project",
+    dataSnapshotId: "preschool-26b85b9c0b95e090",
+    projectReleaseId: "legacy-profile:preschool-demo:1",
+    dataCutoff: "2026-05-31T16:00:00.000Z",
+    analysisPeriod: { from: "2026-04-30T16:00:00.000Z", to: "2026-05-31T16:00:00.000Z" },
+    outputContractRevision: "v13" as const,
+  };
+  return {
+    status: "available",
+    providerProfileId: "profile-1",
+    runId: "accepted-editor-run",
+    packId: "preschool-analysis-pack",
+    packRevision: "v1",
+    contract: { id: "preschool-ai-accepted-artifact", revision: "v13" },
+    binding,
+    workflow: {
+      id: "preschool-two-stage",
+      revision: "preschool-two-stage-v2",
+      methodSkill: { id: "energy-insight-investigation", revision: "1.0.0" },
+      stages: {
+        investigator: { runId: "accepted-investigator-run", promptRevision: "preschool-investigator-v15" },
+        editor: { runId: "accepted-editor-run", promptRevision: "preschool-insight-editor-v7" },
+      },
+    },
+    findings: [{
+      id: "accepted-finding-1",
+      binding,
+      placementTargets: ["preschool.overall-key-findings"],
+      epistemicLevel: "hypothesis",
+      relationship: "independent",
+      signalRefs: [],
+      title: "Closed-hour load needs an operating check",
+      takeaway: "The cited Snapshot shows a repeatable closed-hour pattern.",
+      interpretation: "This matters because the load occurs outside the published Calendar.",
+      possibleExplanation: "Equipment schedules may differ from the published Calendar.",
+      action: "Check equipment schedules with the Centre operator.",
+      expectedIfAct: "The review should isolate the avoidable condition.",
+      ifIgnored: "The unexplained closed-hour load may continue.",
+      verification: "Compare the same hours after the schedule check.",
+      uncertainty: "The pinned Evidence does not prove equipment state.",
+      evidence: {
+        snapshotId: binding.dataSnapshotId,
+        period: binding.analysisPeriod,
+        deterministic: [{
+          id: "operating:closed-hour-pattern",
+          kind: "operating",
+          label: "Closed-hour pattern",
+          unit: "kWh",
+          values: { status: "observed" },
+          queryIds: ["operating-query"],
+          limitation: "Does not establish equipment state.",
+        }],
+        tools: [],
+      },
+    }],
   };
 }
 

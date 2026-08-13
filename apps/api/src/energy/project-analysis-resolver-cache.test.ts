@@ -107,6 +107,32 @@ describe("ProjectAnalysisResolver deterministic result reuse", () => {
       });
       expect(runSqlReadonly.mock.calls.length).toBeGreaterThan(firstExecutionSqlCount);
       expect(refreshDurationMs).toBeGreaterThan(repeatedDurationMs * 5);
+
+      const overviewInput = {
+        ...baseInput,
+        request: {
+          projectId: "preschool-demo",
+          scopeId: "project",
+          resource: "electricity" as const,
+          analysisWindow: "current-overview-28d" as const,
+        },
+      };
+      const overview = await resolveProjectAnalysis(overviewInput);
+      expect(overview).toMatchObject({
+        status: "ready",
+        snapshot: {
+          preschoolPlanningLifecycle: {
+            status: "unavailable",
+            reason: { code: "NO_COMPATIBLE_SAVED_ANALYSIS" },
+          },
+        },
+      });
+      const overviewExecutionSqlCount = runSqlReadonly.mock.calls.length;
+      const repeatedOverview = await resolveProjectAnalysis(overviewInput);
+      expect(repeatedOverview).toEqual(overview);
+      // Current-window selection performs one bounded latest-facts query before the result-cache
+      // lookup. The cached analysis and absent-A planning adapter must add no further Kernel work.
+      expect(runSqlReadonly).toHaveBeenCalledTimes(overviewExecutionSqlCount + 1);
     } finally {
       vi.restoreAllMocks();
       metadata.close();

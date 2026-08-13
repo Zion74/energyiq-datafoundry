@@ -1,4 +1,5 @@
 import type { EnergyProjectAnalysisSnapshotDto } from "../../../lib/config-api";
+import { anomalyIncidentDomId } from "./ngee-ann-overview-links";
 
 const COMPARISON_EVIDENCE_METRIC_IDS = new Set([
   "energy.total_usage_kwh",
@@ -9,12 +10,37 @@ const COMPARISON_EVIDENCE_METRIC_IDS = new Set([
 export type NgeeAnnOverviewDataStatus = "ready" | "partial" | "unavailable";
 
 export type NgeeAnnOverviewHighlight = {
-  id: "total" | "daily" | "peak" | "comparison" | "cost";
+  id: "total" | "daily" | "peak" | "cost";
   label: string;
   value: string;
   unit?: string;
   detail: string;
   available: boolean;
+  comparison: {
+    label: string;
+    direction: "increase" | "decrease" | "flat";
+  } | null;
+};
+
+export type NgeeAnnExecutiveSummarySignal = {
+  id: "period-change" | "main-driver" | "first-review";
+  label: string;
+  value: string;
+  detail: string;
+  href: string | null;
+  status: "available" | "unavailable";
+  tone: "neutral" | "warning";
+};
+
+export type NgeeAnnExecutiveSummaryViewModel = {
+  headline: string;
+  detail: string;
+  signals: NgeeAnnExecutiveSummarySignal[];
+};
+
+export type NgeeAnnChangeOverTimeSummaryViewModel = {
+  headline: string;
+  detail: string;
 };
 
 export type NgeeAnnLatestAvailableRange = {
@@ -40,6 +66,7 @@ export type NgeeAnnEnergyTrendViewModel = {
       id: string;
       localDate: string;
       localHour: number | null;
+      dayType: "weekday" | "weekend" | null;
       dateLabel: string;
       weekday: string;
       range: string;
@@ -94,6 +121,11 @@ type TimeBehaviourEvidence = {
   queryIds: ["time_bucket_grid_v1"];
 };
 
+type ComponentHourlyEvidence = Omit<TimeBehaviourEvidence, "queryIds"> & {
+  queryIds: ["component_hourly_profiles_v1"];
+  accountingBasis: "published_component_circuits";
+};
+
 type TimePointQuality = {
   status: "complete" | "partial" | "unavailable";
   statusLabel: "Complete" | "Partial" | "Unavailable";
@@ -106,6 +138,23 @@ export type NgeeAnnDayProfileViewModel = {
   status: "available" | "unavailable";
   decisionQuestion: string;
   reason: string | null;
+  operatingPolicy:
+    | {
+      status: "available";
+      reason: null;
+      operatingUsageKwh: number;
+      operatingUsage: string;
+      standbyUsageKwh: number;
+      standbyUsage: string;
+      standbySharePct: number;
+      standbyShare: string;
+      timezone: string;
+      businessCalendarVersion: string;
+    }
+    | {
+      status: "unavailable";
+      reason: string;
+    };
   scopes: Array<{ id: string; name: string }>;
   profiles: Array<{
     id: string;
@@ -116,6 +165,21 @@ export type NgeeAnnDayProfileViewModel = {
     status: "available" | "unavailable";
     sampleDayCount: number | null;
     reason: string | null;
+    summary:
+      | {
+        status: "available";
+        peakHour: number;
+        peakHourLabel: string;
+        peakUsageKwh: number;
+        peakUsage: string;
+        dailyUsageKwh: number;
+        dailyUsage: string;
+        sampleDayCount: number;
+      }
+      | {
+        status: "unavailable";
+        reason: string;
+      };
     values: Array<{
       id: string;
       localHour: number;
@@ -123,8 +187,29 @@ export type NgeeAnnDayProfileViewModel = {
       acceptedUsageKwh: number;
       usageKwh: string;
     }>;
+    componentStack:
+      | {
+        status: "available";
+        sampleDayCount: number;
+        categories: Array<{
+          category: string;
+          categoryLabel: string;
+          values: Array<{
+            id: string;
+            localHour: number;
+            hourLabel: string;
+            acceptedUsageKwh: number;
+            usageKwh: string;
+          }>;
+        }>;
+      }
+      | {
+        status: "unavailable";
+        reason: string;
+      };
   }>;
   evidence: TimeBehaviourEvidence;
+  componentEvidence: ComponentHourlyEvidence;
 };
 
 export type NgeeAnnUsageHeatmapViewModel = {
@@ -140,12 +225,37 @@ export type NgeeAnnUsageHeatmapViewModel = {
     scopeId: string;
     scopeName: string;
     sampleDayCount: number;
+    dailyUsageKwh: number;
+    dailyUsage: string;
+    peakHourLabel: string;
+    peakUsage: string;
     values: Array<{
       id: string;
       localHour: number;
       hourLabel: string;
       acceptedUsageKwh: number;
       usageKwh: string;
+    }>;
+  }>;
+  circuitProfiles: Array<{
+    id: string;
+    levelScopeId: string;
+    levelScopeName: string;
+    dayType: "weekday" | "weekend";
+    dayTypeLabel: "Weekday" | "Weekend";
+    sampleDayCount: number;
+    circuits: Array<{
+      meterNodeId: string;
+      name: string;
+      category: string;
+      categoryLabel: string;
+      values: Array<{
+        id: string;
+        localHour: number;
+        hourLabel: string;
+        acceptedUsageKwh: number;
+        usageKwh: string;
+      }>;
     }>;
   }>;
   scopes: Array<{
@@ -166,6 +276,7 @@ export type NgeeAnnUsageHeatmapViewModel = {
     }>;
   }>;
   evidence: TimeBehaviourEvidence;
+  componentEvidence: ComponentHourlyEvidence;
 };
 
 export type NgeeAnnDailyAnomalyViewModel = {
@@ -192,13 +303,20 @@ export type NgeeAnnDailyAnomalyViewModel = {
     baselineKwhValue: number;
     impactKwhValue: number;
     relativePctValue: number;
+    thresholdKwhValue: number;
     actualKwh: string;
     baselineKwh: string;
+    thresholdKwh: string;
     impactKwh: string;
     relativePct: string;
     coverage: string;
     intervals: string;
     qualityEvents: string;
+    relatedLevelTotals: Array<{
+      scopeId: string;
+      scopeName: string;
+      selectedKwh: string | null;
+    }>;
     baselineDates: string[];
     baselineSamples: Array<{
       localDate: string;
@@ -370,10 +488,33 @@ export type NgeeAnnPeakBreakdownViewModel = {
   };
 };
 
+type ContributorMovement = {
+  status: "available" | "unavailable";
+  reason: string | null;
+};
+
+type ContributorSummary = {
+  currentConcentration: {
+    status: "available" | "unavailable";
+    reason: string | null;
+    name: string | null;
+    currentUsageKwh: string | null;
+    projectShare: string | null;
+  };
+  measuredChange: {
+    status: "available" | "unavailable";
+    reason: string | null;
+    name: string | null;
+    changeKwh: string | null;
+    changePct: string | null;
+  };
+};
+
 export type NgeeAnnLevelComparisonViewModel = {
   status: "available" | "unavailable";
   decisionQuestion: string;
   reason: string | null;
+  summary: ContributorSummary;
   rows: Array<{
     id: string;
     name: string;
@@ -386,6 +527,7 @@ export type NgeeAnnLevelComparisonViewModel = {
     coverage: string;
     intervals: string;
     qualityEvents: string;
+    movement: ContributorMovement;
     exact: {
       currentUsageKwh: string;
       projectShare: string;
@@ -430,6 +572,7 @@ type DerivedMeterTraceInput = {
 export type NgeeAnnEnergyCompositionViewModel = {
   decisionQuestion: string;
   categories: CompositionStatus & {
+    summary: ContributorSummary;
     rows: Array<{
       id: string;
       name: string;
@@ -438,6 +581,7 @@ export type NgeeAnnEnergyCompositionViewModel = {
       previousUsageKwh: string;
       changeKwh: string;
       changePct: string;
+      movement: ContributorMovement;
       quality: CompositionQuality;
       exact: {
         currentUsageKwh: string;
@@ -464,6 +608,7 @@ export type NgeeAnnEnergyCompositionViewModel = {
       previousUsageKwh: string;
       changeKwh: string;
       changePct: string;
+      movement: ContributorMovement;
       includedInOfficialTotal: false;
       quality: CompositionQuality;
       exact: {
@@ -520,6 +665,95 @@ export type NgeeAnnEnergyCompositionViewModel = {
   };
 };
 
+export type NgeeAnnComponentCategoryBreakdownViewModel = {
+  status: "available" | "partial" | "unavailable";
+  reason: string | null;
+  decisionQuestion: string;
+  categories: Array<{
+    id: string;
+    label: string;
+  }>;
+  scopes: Array<{
+    id: string;
+    name: string;
+    type: string;
+    period: {
+      status: "complete" | "partial" | "unavailable";
+      reason: string | null;
+      officialUsageKwhValue: number | null;
+      officialUsageKwh: string;
+      componentUsageKwhValue: number | null;
+      componentUsageKwh: string;
+      gapKwh: string;
+      ratioPct: string;
+      categories: Array<{
+        id: string;
+        label: string;
+        usageKwhValue: number | null;
+        usageKwh: string;
+        sharePctValue: number | null;
+        sharePct: string;
+      }>;
+    };
+    rows: Array<{
+      id: string;
+      localDate: string;
+      dateLabel: string;
+      dayType: "weekday" | "weekend" | "public_holiday" | null;
+      dayTypeLabel: string;
+      officialUsageKwhValue: number | null;
+      officialUsageKwh: string;
+      componentUsageKwhValue: number | null;
+      componentUsageKwh: string;
+      categories: Array<{
+        id: string;
+        label: string;
+        usageKwhValue: number | null;
+        usageKwh: string;
+        sharePctValue: number | null;
+        sharePct: string;
+      }>;
+      estimatedCost: {
+        status: "available";
+        amountValue: number;
+        amount: string;
+        currency: string;
+        ratePerKwh: string;
+        tariffScheduleVersion: string;
+      } | {
+        status: "unavailable";
+        reason: string;
+      };
+      dataStatus: "complete" | "partial" | "unavailable";
+      coverage: string;
+    }>;
+  }>;
+  rankings: Array<{
+    scopeId: string;
+    categoryId: string;
+    rows: Array<{
+      rank: number;
+      meterNodeId: string;
+      name: string;
+      levelName: string;
+      categoryId: string;
+      category: string;
+      usageKwhValue: number;
+      usageKwh: string;
+      projectShare: string;
+    }>;
+  }>;
+  evidence: {
+    snapshotId: string;
+    projectReleaseId: string;
+    meterMappingRevisionId: string;
+    queryId: "daily_component_categories_v1";
+    accountingBasis: "published_component_circuits";
+    period: string;
+    timezone: string;
+  };
+};
+
 export type NgeeAnnOverviewViewModel = {
   context: {
     projectName: string;
@@ -541,6 +775,8 @@ export type NgeeAnnOverviewViewModel = {
   };
   metadataLimitation: string | null;
   highlights: NgeeAnnOverviewHighlight[];
+  executiveSummary: NgeeAnnExecutiveSummaryViewModel;
+  changeOverTime: NgeeAnnChangeOverTimeSummaryViewModel;
   decisionPriorities: NgeeAnnDecisionPrioritiesViewModel;
   peakBreakdown: NgeeAnnPeakBreakdownViewModel;
   energyTrend: NgeeAnnEnergyTrendViewModel;
@@ -548,6 +784,7 @@ export type NgeeAnnOverviewViewModel = {
   dayProfile: NgeeAnnDayProfileViewModel;
   usageHeatmap: NgeeAnnUsageHeatmapViewModel;
   levelComparison: NgeeAnnLevelComparisonViewModel;
+  componentCategoryBreakdown: NgeeAnnComponentCategoryBreakdownViewModel;
   energyComposition: NgeeAnnEnergyCompositionViewModel;
   evidence: {
     snapshotId: string;
@@ -624,6 +861,16 @@ export function buildNgeeAnnOverviewViewModel(
   const evidenceQueryIds = [...analysis.provenance.queryIds];
   const comparisonReferenceIds = comparisonEvidenceReferences(snapshot);
   const dailyAnomalies = buildDailyAnomalies(snapshot, unavailable);
+  const levelComparison = buildLevelComparison(snapshot, unavailable);
+  const energyComposition = buildEnergyComposition(snapshot, unavailable);
+  const componentCategoryBreakdown = buildComponentCategoryBreakdown(snapshot, unavailable);
+  const executiveSummary = buildExecutiveSummary(
+    snapshot,
+    comparisonAvailable,
+    levelComparison,
+    energyComposition,
+    dailyAnomalies,
+  );
 
   return {
     context: {
@@ -640,27 +887,47 @@ export function buildNgeeAnnOverviewViewModel(
     },
     dataStatus: buildDataStatus(snapshot, status, latestSeenAt, Boolean(latestAvailableRange)),
     metadataLimitation: buildMetadataLimitation(snapshot),
+    executiveSummary,
+    changeOverTime: buildChangeOverTimeSummary(executiveSummary, dailyAnomalies),
     highlights: [
       {
         id: "total",
-        label: "Total energy",
-        value: unavailable ? "Unavailable" : formatDecimal(analysis.summary.usageKwh, 2),
+        label: "Total Consumption",
+        value: unavailable ? "Unavailable" : formatCustomerDecimal(analysis.summary.usageKwh, 2),
         unit: unavailable ? undefined : "kWh",
-        detail: "Official usage for this Project and Scope",
+        detail: comparisonAvailable
+          ? `Previous period: ${formatCustomerDecimal(analysis.comparison.usageKwh, 2)} kWh`
+          : "Total electricity used in the selected Scope",
         available: !unavailable,
+        comparison: comparisonAvailable ? {
+          label: `${analysis.comparison.changePct! >= 0 ? "+" : ""}${formatCustomerDecimal(analysis.comparison.changePct!, 1)}% vs previous`,
+          direction: analysis.comparison.changePct! > 0
+            ? "increase"
+            : analysis.comparison.changePct! < 0
+              ? "decrease"
+              : "flat",
+        } : null,
       },
       {
         id: "daily",
-        label: "Daily average",
-        value: unavailable ? "Unavailable" : formatDecimal(analysis.summary.averageDailyUsageKwh, 2),
+        label: "Daily Average",
+        value: unavailable ? "Unavailable" : formatCustomerDecimal(analysis.summary.averageDailyUsageKwh, 2),
         unit: unavailable ? undefined : "kWh/day",
-        detail: "Primary Period daily average",
+        detail: "Average electricity used per day in this Overview window",
         available: !unavailable,
+        comparison: comparisonAvailable ? {
+          label: `${analysis.comparison.changePct! >= 0 ? "+" : ""}${formatCustomerDecimal(analysis.comparison.changePct!, 1)}% vs previous`,
+          direction: analysis.comparison.changePct! > 0
+            ? "increase"
+            : analysis.comparison.changePct! < 0
+              ? "decrease"
+              : "flat",
+        } : null,
       },
       {
         id: "peak",
-        label: "Peak interval-average power",
-        value: unavailable ? "Unavailable" : formatDecimal(analysis.summary.peakKw, 2),
+        label: `Peak ${analysis.units.intervalMinutes}-min Average Power`,
+        value: unavailable ? "Unavailable" : formatCustomerDecimal(analysis.summary.peakKw, 2),
         unit: unavailable ? undefined : "kW",
         detail: unavailable
           ? "No accepted interval supports a peak"
@@ -668,23 +935,13 @@ export function buildNgeeAnnOverviewViewModel(
             ? `Observed ${formatTimestamp(analysis.summary.peakAt, context.timezone)}`
             : `${analysis.units.intervalMinutes}-minute interval average`,
         available: !unavailable,
-      },
-      {
-        id: "comparison",
-        label: "Comparison",
-        value: comparisonAvailable
-          ? `${formatDecimal(Math.abs(analysis.comparison.changePct!), 1)}% ${analysis.comparison.changePct! >= 0 ? "higher" : "lower"}`
-          : "Unavailable",
-        detail: comparisonAvailable
-          ? `Current ${formatDecimal(analysis.summary.usageKwh, 2)} kWh vs previous ${formatDecimal(analysis.comparison.usageKwh, 2)} kWh`
-          : "No validated comparable-period usage",
-        available: comparisonAvailable,
+        comparison: null,
       },
       {
         id: "cost",
-        label: "Cost",
+        label: "Estimated Cost",
         value: analysis.cost.status === "available" && !unavailable
-          ? `${analysis.cost.currency === "SGD" ? "S$" : `${analysis.cost.currency} `}${formatDecimal(analysis.cost.amount, 2)}`
+          ? `${analysis.cost.currency === "SGD" ? "S$" : `${analysis.cost.currency} `}${formatCustomerDecimal(analysis.cost.amount, 2)}`
           : "Unavailable",
         detail: analysis.cost.status === "available" && !unavailable
           ? `Based on ${analysis.cost.allocations.length === 1 ? "the active tariff" : `${analysis.cost.allocations.length} active tariff allocations`} for this period`
@@ -692,6 +949,7 @@ export function buildNgeeAnnOverviewViewModel(
             ? analysis.cost.reason.message
             : "No effective Tariff",
         available: costAvailable,
+        comparison: null,
       },
     ],
     decisionPriorities: buildDecisionPriorities(snapshot, dailyAnomalies),
@@ -700,8 +958,9 @@ export function buildNgeeAnnOverviewViewModel(
     dailyAnomalies,
     dayProfile: buildDayProfile(snapshot, unavailable),
     usageHeatmap: buildUsageHeatmap(snapshot, unavailable),
-    levelComparison: buildLevelComparison(snapshot, unavailable),
-    energyComposition: buildEnergyComposition(snapshot, unavailable),
+    levelComparison,
+    componentCategoryBreakdown,
+    energyComposition,
     evidence: {
       snapshotId: snapshot.dataSnapshot.id,
       projectReleaseId: snapshot.projectRelease.id,
@@ -769,6 +1028,230 @@ export function buildNgeeAnnOverviewViewModel(
   };
 }
 
+function buildComponentCategoryBreakdown(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  overviewUnavailable: boolean,
+): NgeeAnnComponentCategoryBreakdownViewModel {
+  const source = snapshot.analysis.componentCategoryBreakdown;
+  const evidence: NgeeAnnComponentCategoryBreakdownViewModel["evidence"] = {
+    snapshotId: snapshot.dataSnapshot.id,
+    projectReleaseId: snapshot.projectRelease.id,
+    meterMappingRevisionId: snapshot.analysis.provenance.meterMappingRevisionId,
+    queryId: "daily_component_categories_v1",
+    accountingBasis: "published_component_circuits",
+    period: `[${snapshot.context.primaryPeriod.start}, ${snapshot.context.primaryPeriod.endExclusive})`,
+    timezone: snapshot.context.timezone,
+  };
+  const unavailable = (reason: string): NgeeAnnComponentCategoryBreakdownViewModel => ({
+    status: "unavailable",
+    reason,
+    decisionQuestion: "How did published component Circuit usage change day by day?",
+    categories: [],
+    scopes: [],
+    rankings: [],
+    evidence,
+  });
+  if (overviewUnavailable) {
+    return unavailable("No trusted intervals support the component breakdown for this Period.");
+  }
+  if (
+    !source
+    || source.metricId !== "energy.total_usage_kwh@1"
+    || source.queryId !== "daily_component_categories_v1"
+    || source.accountingBasis !== "published_component_circuits"
+    || source.grain !== "day"
+    || source.timezone !== snapshot.context.timezone
+  ) {
+    return unavailable("This Snapshot does not include the release-pinned daily component Category contract.");
+  }
+  const dailyTotalsByScope = new Map(
+    (snapshot.analysis.dailyTotals?.scopes ?? []).map((scope) => [scope.scopeId, scope]),
+  );
+  const projectScope = source.scopes.find((scope) => scope.scopeId === snapshot.context.scopeId);
+  const contractValid = Boolean(projectScope)
+    && source.scopes.length > 0
+    && source.scopes.length === dailyTotalsByScope.size
+    && source.scopes.every((scope) => {
+      const dailyScope = dailyTotalsByScope.get(scope.scopeId);
+      if (
+        !dailyScope
+        || scope.scopeName !== dailyScope.scopeName
+        || scope.scopeType !== dailyScope.scopeType
+        || scope.rows.length === 0
+        || scope.period.categories.length === 0
+      ) return false;
+      const commonShapeValid = dailyScope.rows.length === scope.rows.length
+        && dailyScope.rows.every((dailyRow, index) => {
+          const row = scope.rows[index];
+          return row?.localDate === dailyRow.localDate
+            && row.from === dailyRow.from
+            && row.to === dailyRow.to;
+        })
+        && scope.rows.every((row) =>
+          row.categories.length === scope.period.categories.length
+          && row.categories.every((category) =>
+            scope.period.categories.some((periodCategory) => periodCategory.category === category.category)
+          )
+        );
+      if (!commonShapeValid) return false;
+      if (scope.period.status === "complete") {
+        if (
+          scope.period.officialUsageKwh === null
+          || scope.period.componentUsageKwh === null
+          || scope.period.gapKwh === null
+          || scope.period.categories.some((category) => category.usageKwh === null || category.sharePct === null)
+          || scope.rows.some((row) =>
+            row.dataHealth.status !== "complete"
+            || row.officialUsageKwh === null
+            || row.componentUsageKwh === null
+            || row.categories.some((category) => category.usageKwh === null)
+          )
+        ) return false;
+        const officialFromRows = scope.rows.reduce((sum, row) => sum + (row.officialUsageKwh as number), 0);
+        const componentFromRows = scope.rows.reduce((sum, row) => sum + (row.componentUsageKwh as number), 0);
+        const categoryTotal = scope.period.categories.reduce((sum, category) => sum + (category.usageKwh as number), 0);
+        return Math.abs(officialFromRows - scope.period.officialUsageKwh) <= 0.1
+          && Math.abs(componentFromRows - scope.period.componentUsageKwh) <= 0.1
+          && Math.abs(categoryTotal - scope.period.componentUsageKwh) <= 0.1;
+      }
+      const aggregatesWithheld = scope.period.officialUsageKwh === null
+        && scope.period.componentUsageKwh === null
+        && scope.period.gapKwh === null
+        && scope.period.ratioPct === null
+        && scope.period.categories.every((category) => category.usageKwh === null && category.sharePct === null);
+      const hasUsableFacts = scope.rows.some((row) =>
+        row.officialUsageKwh !== null || row.categories.some((category) => category.usageKwh !== null),
+      );
+      return aggregatesWithheld
+        && scope.rows.some((row) => row.dataHealth.status !== "complete")
+        && (scope.period.status === "partial" ? hasUsableFacts : !hasUsableFacts);
+    });
+  if (!contractValid || !projectScope) {
+    return unavailable("The daily component Category rows do not reconcile with their Snapshot totals and date spine.");
+  }
+  const categories = projectScope.period.categories.map((category) => ({
+    id: category.category,
+    label: compositionCategoryName(category.category),
+  }));
+  const categoryLabel = new Map(categories.map((category) => [category.id, category.label]));
+  const scopes = source.scopes.map((scope) => ({
+    id: scope.scopeId,
+    name: scope.scopeName,
+    type: scope.scopeType,
+    period: {
+      status: scope.period.status,
+      reason: scope.period.reason,
+      officialUsageKwhValue: scope.period.officialUsageKwh,
+      officialUsageKwh: scope.period.officialUsageKwh === null
+        ? "Unavailable"
+        : formatCustomerDecimal(scope.period.officialUsageKwh, 1),
+      componentUsageKwhValue: scope.period.componentUsageKwh,
+      componentUsageKwh: scope.period.componentUsageKwh === null
+        ? "Unavailable"
+        : formatCustomerDecimal(scope.period.componentUsageKwh, 1),
+      gapKwh: scope.period.gapKwh === null ? "Unavailable" : signedDecimal(scope.period.gapKwh, 1),
+      ratioPct: scope.period.ratioPct === null
+        ? "Unavailable"
+        : `${formatCustomerDecimal(scope.period.ratioPct, 1)}%`,
+      categories: scope.period.categories.map((category) => ({
+        id: category.category,
+        label: categoryLabel.get(category.category) ?? compositionCategoryName(category.category),
+        usageKwhValue: category.usageKwh,
+        usageKwh: category.usageKwh === null
+          ? "Unavailable"
+          : formatCustomerDecimal(category.usageKwh, 1),
+        sharePctValue: category.sharePct,
+        sharePct: category.sharePct === null
+          ? "Unavailable"
+          : `${formatCustomerDecimal(category.sharePct, 1)}%`,
+      })),
+    },
+    rows: scope.rows.map((row) => ({
+      id: `${scope.scopeId}:${row.localDate}`,
+      localDate: row.localDate,
+      dateLabel: formatLocalDate(row.localDate),
+      dayType: row.dayType,
+      dayTypeLabel: row.dayType === "public_holiday"
+        ? "Public holiday"
+        : row.dayType === "weekend"
+          ? "Weekend"
+          : row.dayType === "weekday"
+            ? "Weekday"
+            : "Day type unavailable",
+      officialUsageKwhValue: row.officialUsageKwh,
+      officialUsageKwh: row.officialUsageKwh === null
+        ? "Unavailable"
+        : formatCustomerDecimal(row.officialUsageKwh, 1),
+      componentUsageKwhValue: row.componentUsageKwh,
+      componentUsageKwh: row.componentUsageKwh === null
+        ? "Unavailable"
+        : formatCustomerDecimal(row.componentUsageKwh, 1),
+      categories: row.categories.map((category) => ({
+        id: category.category,
+        label: categoryLabel.get(category.category) ?? compositionCategoryName(category.category),
+        usageKwhValue: category.usageKwh,
+        usageKwh: category.usageKwh === null
+          ? "Unavailable"
+          : formatCustomerDecimal(category.usageKwh, 1),
+        sharePctValue: category.sharePct,
+        sharePct: category.sharePct === null
+          ? "Unavailable"
+          : `${formatCustomerDecimal(category.sharePct, 1)}%`,
+      })),
+      estimatedCost: row.estimatedCost.status === "available"
+        ? {
+          status: "available" as const,
+          amountValue: row.estimatedCost.amount,
+          amount: `${row.estimatedCost.currency === "SGD" ? "S$" : `${row.estimatedCost.currency} `}${formatCustomerDecimal(row.estimatedCost.amount, 2)}`,
+          currency: row.estimatedCost.currency,
+          ratePerKwh: formatDecimal(row.estimatedCost.ratePerKwh, 6),
+          tariffScheduleVersion: row.estimatedCost.tariffScheduleVersion,
+        }
+        : {
+          status: "unavailable" as const,
+          reason: row.estimatedCost.reason,
+        },
+      dataStatus: row.dataHealth.status,
+      coverage: `${formatCustomerDecimal(row.dataHealth.coveragePct, 1)}%`,
+    })),
+  }));
+  const levelNames = new Map(
+    snapshot.analysis.childScopes.map((scope) => [scope.nodeId, scope.name]),
+  );
+  const componentCircuits = snapshot.analysis.circuits
+    .filter((circuit) => circuit.includedInOfficialTotal === false && Boolean(circuit.parentScopeId))
+    .sort((left, right) => right.usageKwh - left.usageKwh);
+  const rankings = scopes.flatMap((scope) => ["all", ...categories.map((category) => category.id)].map((categoryId) => ({
+    scopeId: scope.id,
+    categoryId,
+    rows: componentCircuits
+      .filter((circuit) =>
+        (scope.id === snapshot.context.scopeId || circuit.parentScopeId === scope.id)
+        && (categoryId === "all" || circuit.category === categoryId)
+      )
+      .map((circuit, index) => ({
+        rank: index + 1,
+        meterNodeId: circuit.meterNodeId,
+        name: circuit.name,
+        levelName: levelNames.get(circuit.parentScopeId!) ?? circuit.parentScopeId!,
+        categoryId: circuit.category,
+        category: categoryLabel.get(circuit.category) ?? compositionCategoryName(circuit.category),
+        usageKwhValue: circuit.usageKwh,
+        usageKwh: formatCustomerDecimal(circuit.usageKwh, 1),
+        projectShare: `${formatCustomerDecimal(circuit.sharePct, 1)}%`,
+      })),
+  })));
+  return {
+    status: projectScope.period.status === "complete" ? "available" : projectScope.period.status,
+    reason: projectScope.period.reason,
+    decisionQuestion: "How did published component Circuit usage change day by day?",
+    categories,
+    scopes,
+    rankings,
+    evidence,
+  };
+}
+
 function buildEnergyComposition(
   snapshot: EnergyProjectAnalysisSnapshotDto,
   overviewUnavailable: boolean,
@@ -799,36 +1282,52 @@ function buildEnergyComposition(
     && analysis.categories.length === expectedCategories.size
     && analysis.categories.every((category) =>
       expectedCategories.has(category.category)
-      && hasComparisonAndHealth(category),
+      && hasDataHealth(category),
     );
   const categories: NgeeAnnEnergyCompositionViewModel["categories"] = categoryContractAvailable
     ? {
       status: "available",
       reason: null,
+      summary: buildContributorSummary(
+        analysis.categories.map((category) => ({
+          name: compositionCategoryName(category.category),
+          usageKwh: category.usageKwh,
+          sharePct: category.sharePct,
+          comparison: category.comparison,
+        })),
+        analysis.comparison.changeKwh,
+        "Category",
+      ),
       rows: analysis.categories.map((category) => ({
         id: category.category,
         name: compositionCategoryName(category.category),
         currentUsageKwh: formatDecimal(category.usageKwh, 2),
         projectShare: `${formatDecimal(category.sharePct, 1)}%`,
-        previousUsageKwh: formatDecimal(category.comparison!.usageKwh, 2),
-        changeKwh: `${signedDecimal(category.comparison!.changeKwh, 2)} kWh`,
-        changePct: signedDisplayPercent(category.comparison!.changePct, "Rate unavailable"),
+        previousUsageKwh: category.comparison ? formatDecimal(category.comparison.usageKwh, 2) : "Unavailable",
+        changeKwh: category.comparison ? `${signedDecimal(category.comparison.changeKwh, 2)} kWh` : "Unavailable",
+        changePct: category.comparison ? signedDisplayPercent(category.comparison.changePct, "Rate unavailable") : "Unavailable",
+        movement: movementAvailability(category.comparison, "Category comparison is unavailable for this published Snapshot."),
         quality: compositionQuality(category.dataHealth!),
         exact: {
           currentUsageKwh: formatDecimal(category.usageKwh, 4),
           projectShare: `${formatDecimal(category.sharePct, 4)}%`,
-          previousUsageKwh: formatDecimal(category.comparison!.usageKwh, 4),
-          changeKwh: `${signedDecimal(category.comparison!.changeKwh, 4)} kWh`,
-          changePct: category.comparison!.changePct === null
+          previousUsageKwh: category.comparison ? formatDecimal(category.comparison.usageKwh, 4) : "Unavailable",
+          changeKwh: category.comparison ? `${signedDecimal(category.comparison.changeKwh, 4)} kWh` : "Unavailable",
+          changePct: !category.comparison
+            ? "Unavailable"
+            : category.comparison.changePct === null
             ? "Rate unavailable"
-            : `${category.comparison!.changePct! >= 0 ? "+" : ""}${formatDecimal(category.comparison!.changePct!, 4)}%`,
+            : `${category.comparison.changePct >= 0 ? "+" : ""}${formatDecimal(category.comparison.changePct, 4)}%`,
         },
       })),
     }
     : {
       status: "unavailable",
       reason: unavailableReason
-        ?? "This published Snapshot does not include complete official Load and Light comparison facts.",
+        ?? "This published Snapshot does not include complete official Load and Light current facts and quality.",
+      summary: unavailableContributorSummary(
+        unavailableReason ?? "Current Category concentration is unavailable for this published Snapshot.",
+      ),
       rows: [],
     };
 
@@ -854,7 +1353,7 @@ function buildEnergyComposition(
       && Boolean(circuit.parentScopeId)
       && levelNames.has(circuit.parentScopeId!)
       && expectedCategories.has(circuit.category)
-      && hasComparisonAndHealth(circuit),
+      && hasDataHealth(circuit),
     );
   const circuits: NgeeAnnEnergyCompositionViewModel["circuits"] = circuitContractAvailable
     ? {
@@ -872,26 +1371,29 @@ function buildEnergyComposition(
         category: compositionCategoryName(circuit.category),
         currentUsageKwh: formatDecimal(circuit.usageKwh, 2),
         projectShare: `${formatDecimal(circuit.sharePct, 1)}%`,
-        previousUsageKwh: formatDecimal(circuit.comparison!.usageKwh, 2),
-        changeKwh: `${signedDecimal(circuit.comparison!.changeKwh, 2)} kWh`,
-        changePct: signedDisplayPercent(circuit.comparison!.changePct, "Rate unavailable"),
+        previousUsageKwh: circuit.comparison ? formatDecimal(circuit.comparison.usageKwh, 2) : "Unavailable",
+        changeKwh: circuit.comparison ? `${signedDecimal(circuit.comparison.changeKwh, 2)} kWh` : "Unavailable",
+        changePct: circuit.comparison ? signedDisplayPercent(circuit.comparison.changePct, "Rate unavailable") : "Unavailable",
+        movement: movementAvailability(circuit.comparison, "Circuit comparison is unavailable for this published Snapshot."),
         includedInOfficialTotal: false,
         quality: compositionQuality(circuit.dataHealth!),
         exact: {
           currentUsageKwh: formatDecimal(circuit.usageKwh, 4),
           projectShare: `${formatDecimal(circuit.sharePct, 4)}%`,
-          previousUsageKwh: formatDecimal(circuit.comparison!.usageKwh, 4),
-          changeKwh: `${signedDecimal(circuit.comparison!.changeKwh, 4)} kWh`,
-          changePct: circuit.comparison!.changePct === null
+          previousUsageKwh: circuit.comparison ? formatDecimal(circuit.comparison.usageKwh, 4) : "Unavailable",
+          changeKwh: circuit.comparison ? `${signedDecimal(circuit.comparison.changeKwh, 4)} kWh` : "Unavailable",
+          changePct: !circuit.comparison
+            ? "Unavailable"
+            : circuit.comparison.changePct === null
             ? "Rate unavailable"
-            : `${circuit.comparison!.changePct! >= 0 ? "+" : ""}${formatDecimal(circuit.comparison!.changePct!, 4)}%`,
+            : `${circuit.comparison.changePct >= 0 ? "+" : ""}${formatDecimal(circuit.comparison.changePct, 4)}%`,
         },
       })),
     }
     : {
       status: "unavailable",
       reason: unavailableReason
-        ?? "This published Snapshot does not explicitly identify the complete component Circuit set, Scopes, parents, categories, official-total markers, comparisons and quality.",
+        ?? "This published Snapshot does not explicitly identify the complete component Circuit set, Scopes, parents, categories, official-total markers and quality.",
       rows: [],
     };
 
@@ -1084,11 +1586,106 @@ function buildDerivedMeterTrace(
   };
 }
 
-function hasComparisonAndHealth(value: {
-  comparison?: unknown;
+function hasDataHealth(value: {
   dataHealth?: unknown;
 }): boolean {
-  return Boolean(value.comparison) && Boolean(value.dataHealth);
+  return Boolean(value.dataHealth);
+}
+
+function movementAvailability(
+  comparison: { changePct: number | null } | undefined,
+  unavailableReason: string,
+): ContributorMovement {
+  return comparison && comparison.changePct !== null
+    ? { status: "available", reason: null }
+    : { status: "unavailable", reason: unavailableReason };
+}
+
+function unavailableContributorSummary(reason: string): ContributorSummary {
+  return {
+    currentConcentration: {
+      status: "unavailable",
+      reason,
+      name: null,
+      currentUsageKwh: null,
+      projectShare: null,
+    },
+    measuredChange: {
+      status: "unavailable",
+      reason,
+      name: null,
+      changeKwh: null,
+      changePct: null,
+    },
+  };
+}
+
+function buildContributorSummary(
+  rows: Array<{
+    name: string;
+    usageKwh: number;
+    sharePct: number;
+    comparison?: { changeKwh: number; changePct: number | null };
+  }>,
+  projectChangeKwh: number,
+  dimension: "Level" | "Category",
+): ContributorSummary {
+  const current = [...rows].sort((left, right) => right.usageKwh - left.usageKwh)[0];
+  const currentConcentration: ContributorSummary["currentConcentration"] = current
+    ? {
+      status: "available",
+      reason: null,
+      name: current.name,
+      currentUsageKwh: formatDecimal(current.usageKwh, 2),
+      projectShare: `${formatDecimal(current.sharePct, 1)}%`,
+    }
+    : {
+      status: "unavailable",
+      reason: `No current ${dimension} facts are available.`,
+      name: null,
+      currentUsageKwh: null,
+      projectShare: null,
+    };
+
+  if (rows.length === 0 || rows.some((row) => !row.comparison || row.comparison.changePct === null)) {
+    return {
+      currentConcentration,
+      measuredChange: {
+        status: "unavailable",
+        reason: `A complete ${dimension} comparison is unavailable for this published Snapshot.`,
+        name: null,
+        changeKwh: null,
+        changePct: null,
+      },
+    };
+  }
+
+  const movement = selectDirectionalDriver(
+    rows.map((row) => ({
+      ...row,
+      changeKwh: row.comparison!.changeKwh,
+      changePct: row.comparison!.changePct,
+    })),
+    projectChangeKwh,
+  );
+  return {
+    currentConcentration,
+    measuredChange: movement
+      ? {
+        status: "available",
+        reason: null,
+        name: movement.name,
+        changeKwh: `${signedDecimal(movement.changeKwh, 2)} kWh`,
+        changePct: signedDisplayPercent(movement.changePct, "Rate unavailable"),
+      }
+      : {
+        status: "unavailable",
+        reason: `No ${dimension} movement aligns with the Project direction in the validated comparison.`,
+        name: null,
+        changeKwh: null,
+        changePct: null,
+      },
+  };
 }
 
 function compositionCategoryName(category: string): string {
@@ -1352,6 +1949,9 @@ function peakBreakdownQuality(quality: {
 type TimeBehaviour = NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["timeBehaviour"]>;
 type TimeScope = TimeBehaviour["scopes"][number];
 type TimeCell = TimeScope["cells"][number];
+type ComponentHourlyProjection = NonNullable<
+  EnergyProjectAnalysisSnapshotDto["analysis"]["componentHourlyProfiles"]
+>;
 type DailyAnomalyBundle = Extract<
   NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["dailyUsageAnomalies"]>,
   { status: "available" }
@@ -1439,6 +2039,151 @@ function buildDecisionPriorities(
       lifecycle: lifecycleForPriority(snapshot, lifecycle, item.priorityId),
     })),
   };
+}
+
+function buildExecutiveSummary(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+  comparisonAvailable: boolean,
+  levelComparison: NgeeAnnLevelComparisonViewModel,
+  energyComposition: NgeeAnnEnergyCompositionViewModel,
+  dailyAnomalies: NgeeAnnDailyAnomalyViewModel,
+): NgeeAnnExecutiveSummaryViewModel {
+  const { analysis } = snapshot;
+  const comparison = analysis.comparison;
+  const headline = comparisonAvailable
+    ? comparison.changePct === 0
+      ? "Energy use was unchanged versus the previous period"
+      : `Energy use ${comparison.changePct! > 0 ? "increased" : "decreased"} ${formatDecimal(Math.abs(comparison.changePct!), 1)}% versus the previous period`
+    : "Comparable-period change unavailable";
+  const detail = comparisonAvailable
+    ? `The Project used ${formatCustomerDecimal(analysis.summary.usageKwh, 2)} kWh, ${comparison.changeKwh >= 0 ? "up" : "down"} ${formatCustomerDecimal(Math.abs(comparison.changeKwh), 2)} kWh from the validated previous period.`
+    : "No validated comparable-period usage is available. Current accepted energy remains visible below.";
+
+  const levelDriver = levelComparison.status === "available"
+    ? selectDirectionalDriver(
+      analysis.childScopes
+        .filter((scope) => scope.nodeType === "level" && scope.comparison)
+        .map((scope) => ({
+          id: scope.nodeId,
+          name: scope.name,
+          changeKwh: scope.comparison!.changeKwh,
+        })),
+      comparison.changeKwh,
+    )
+    : null;
+  const categoryDriver = energyComposition.categories.status === "available"
+    ? selectDirectionalDriver(
+      analysis.categories
+        .filter((category) => category.comparison)
+        .map((category) => ({
+          id: category.category,
+          name: compositionCategoryName(category.category),
+          changeKwh: category.comparison!.changeKwh,
+        })),
+      comparison.changeKwh,
+    )
+    : null;
+  const driverAvailable = Boolean(levelDriver && categoryDriver);
+  const driverValue = driverAvailable
+    ? `${levelDriver!.name}: ${signedDecimal(levelDriver!.changeKwh, 2)} kWh`
+    : "Unavailable";
+  const driverDetail = driverAvailable
+    ? `Category ${categoryDriver!.name}: ${signedDecimal(categoryDriver!.changeKwh, 2)} kWh. These are separate same-direction movements; their overlap and cause are not established.`
+    : "No Level and Category movements align with the Project direction in the validated comparison.";
+
+  const largestIncident = largestDailyAnomalyIncident(dailyAnomalies);
+  const firstReviewValue = largestIncident
+    ? `${largestIncident.scopeName} · ${largestIncident.dateLabel}`
+    : dailyAnomalies.status === "available"
+      ? "No daily exception triggered"
+      : "Usage exception analysis unavailable";
+  const firstReviewDetail = largestIncident
+    ? `${signedDecimal(largestIncident.impactKwhValue, 2)} kWh (${signedPercent(largestIncident.relativePctValue, 1)}) versus its governed comparable-day baseline.`
+    : dailyAnomalies.status === "available"
+      ? "No eligible Project or Level day crossed the published rule in this Period."
+      : dailyAnomalies.reason ?? "No validated daily exception result is available.";
+
+  return {
+    headline,
+    detail,
+    signals: [
+      {
+        id: "period-change",
+        label: "What changed",
+        value: comparisonAvailable ? `${signedDecimal(comparison.changeKwh, 2)} kWh` : "Unavailable",
+        detail: comparisonAvailable
+          ? `Current ${formatDecimal(analysis.summary.usageKwh, 2)} kWh versus previous ${formatDecimal(comparison.usageKwh, 2)} kWh.`
+          : "No validated comparable-period usage is available.",
+        href: comparisonAvailable ? "#ngee-ann-comparison-evidence" : null,
+        status: comparisonAvailable ? "available" : "unavailable",
+        tone: "neutral",
+      },
+      {
+        id: "main-driver",
+        label: comparisonAvailable ? "Largest aligned movements" : "Largest verified movement",
+        value: driverValue,
+        detail: driverDetail,
+        href: driverAvailable ? "#ngee-ann-circuit-analysis" : null,
+        status: driverAvailable ? "available" : "unavailable",
+        tone: "neutral",
+      },
+      {
+        id: "first-review",
+        label: "First date to review",
+        value: firstReviewValue,
+        detail: firstReviewDetail,
+        href: largestIncident ? `#${anomalyIncidentDomId(largestIncident.incidentId)}` : null,
+        status: dailyAnomalies.status === "available" ? "available" : "unavailable",
+        tone: largestIncident ? "warning" : "neutral",
+      },
+    ],
+  };
+}
+
+function buildChangeOverTimeSummary(
+  executiveSummary: NgeeAnnExecutiveSummaryViewModel,
+  dailyAnomalies: NgeeAnnDailyAnomalyViewModel,
+): NgeeAnnChangeOverTimeSummaryViewModel {
+  const firstReview = executiveSummary.signals.find((signal) => signal.id === "first-review")!;
+  const largestIncident = largestDailyAnomalyIncident(dailyAnomalies);
+  if (largestIncident) {
+    return {
+      headline: `Start with ${largestIncident.scopeName} on ${largestIncident.dateLabel}: ${signedDecimal(largestIncident.impactKwhValue, 2)} kWh above its comparable-day baseline`,
+      detail: "The trend uses accepted daily energy. Exception markers use the separately governed comparable-day Rule; open the date to verify its Evidence before deciding why it happened.",
+    };
+  }
+  return {
+    headline: firstReview.value,
+    detail: firstReview.detail,
+  };
+}
+
+function selectDirectionalDriver<T extends { changeKwh: number }>(
+  candidates: T[],
+  projectChangeKwh: number,
+): T | null {
+  if (candidates.length === 0) return null;
+  const aligned = candidates.filter((candidate) => (
+    projectChangeKwh > 0 ? candidate.changeKwh > 0 : projectChangeKwh < 0 ? candidate.changeKwh < 0 : false
+  ));
+  return [...aligned].sort((left, right) => (
+    Math.abs(right.changeKwh) - Math.abs(left.changeKwh)
+  ))[0] ?? null;
+}
+
+function largestDailyAnomalyIncident(
+  dailyAnomalies: NgeeAnnDailyAnomalyViewModel,
+): NgeeAnnDailyAnomalyViewModel["incidents"][number] | null {
+  if (dailyAnomalies.status !== "available") return null;
+  return [...dailyAnomalies.incidents].sort((left, right) => (
+    Math.abs(right.impactKwhValue) - Math.abs(left.impactKwhValue)
+    || right.localDate.localeCompare(left.localDate)
+    || left.incidentId.localeCompare(right.incidentId)
+  ))[0] ?? null;
+}
+
+function signedPercent(value: number, digits: number): string {
+  return `${value >= 0 ? "+" : ""}${formatDecimal(value, digits)}%`;
 }
 
 function buildDecisionLifecycleView(
@@ -1902,73 +2647,88 @@ function buildDailyAnomalies(
   }
   const incidents = bundle.scopes.flatMap((scope) => scope.rows
     .filter((row) => row.outcome === "triggered")
-    .map((row) => ({
-      anomalyId: row.anomalyId,
-      incidentId: row.incidentId,
-      scopeId: scope.scopeId,
-      scopeName: scope.scopeType === "project" ? "Project" : scope.scopeName,
-      localDate: row.localDate,
-      dateLabel: formatLocalDate(row.localDate),
-      weekday: formatLocalWeekday(row.localDate),
-      dayType: row.dayType === "weekday" ? "Weekday" as const : "Weekend" as const,
-      range: formatEvidenceRange(row.from, row.to, bundle.timezone),
-      actualKwhValue: row.actualKwh!,
-      baselineKwhValue: row.baselineKwh!,
-      impactKwhValue: row.impactKwh!,
-      relativePctValue: row.relativePct!,
-      actualKwh: formatDecimal(row.actualKwh!, 4),
-      baselineKwh: formatDecimal(row.baselineKwh!, 4),
-      impactKwh: signedDecimal(row.impactKwh!, 4),
-      relativePct: `${signedDecimal(row.relativePct!, 4)}%`,
-      coverage: `${formatDecimal(row.coveragePct, 1)}% coverage`,
-      intervals: `${row.validIntervalCount.toLocaleString("en-SG")} / ${row.expectedMeterIntervalCount.toLocaleString("en-SG")} valid intervals`,
-      qualityEvents: `${row.qualityEventCount.toLocaleString("en-SG")} quality events`,
-      baselineDates: [...row.baselineDates],
-      baselineSamples: row.baselineSamples.map((sample) => ({
-        localDate: sample.localDate,
-        coverage: `${formatDecimal(sample.coveragePct, 1)}% coverage`,
-        intervals: `${sample.validIntervalCount.toLocaleString("en-SG")} / ${sample.expectedMeterIntervalCount.toLocaleString("en-SG")} valid intervals`,
-        qualityEvents: `${sample.qualityEventCount.toLocaleString("en-SG")} quality events`,
-      })),
-      hourlyComparison: row.hourlyComparison.map((point) => ({
-        localHour: point.localHour,
-        actualKwh: point.actualKwh!,
-        baselineKwh: point.baselineKwh!,
-        impactKwh: point.impactKwh!,
-        relativePct: point.relativePct!,
-      })),
-      series: row.detailSeries.map((series) => ({
-        seriesId: series.seriesId,
-        relationship: series.relationship,
-        kind: series.kind,
-        scopeId: series.scopeId,
-        scopeName: series.scopeName,
-        meterNodeId: series.meterNodeId ?? null,
-        category: series.category ?? null,
-        categoryLabel: series.category ? formatCategoryLabel(series.category) : null,
-        includedInOfficialTotal: series.includedInOfficialTotal,
-        status: series.status,
-        statusLabel: series.status === "available"
-          ? "Available" as const
-          : series.status === "partial"
-            ? "Partial" as const
-            : "Unavailable" as const,
-        selectedTotalKwh: series.selectedTotalKwh === null ? null : formatDecimal(series.selectedTotalKwh, 4),
-        baselineTotalKwh: series.baselineTotalKwh === null ? null : formatDecimal(series.baselineTotalKwh, 4),
-        impactKwh: series.impactKwh === null ? null : signedDecimal(series.impactKwh, 4),
-        relativePct: series.relativePct === null ? null : `${signedDecimal(series.relativePct, 4)}%`,
-        coverage: `${formatDecimal(series.coveragePct, 1)}% coverage`,
-        intervals: `${series.validIntervalCount.toLocaleString("en-SG")} / ${series.expectedMeterIntervalCount.toLocaleString("en-SG")} valid intervals`,
-        qualityEvents: `${series.qualityEventCount.toLocaleString("en-SG")} quality events`,
-        points: series.points.map((point) => ({
-          localHour: point.localHour,
-          hourLabel: formatLocalHour(point.localHour),
-          selectedKwh: point.selectedKwh,
-          baselineKwh: point.baselineKwh,
-          impactKwh: point.impactKwh,
+    .map((row) => {
+      const thresholdKwhValue = Math.max(
+        row.baselineKwh! * (1 + bundle.rule.relativeThresholdPct / 100),
+        row.baselineKwh! + bundle.rule.absoluteImpactKwh,
+      );
+      return {
+        anomalyId: row.anomalyId,
+        incidentId: row.incidentId,
+        scopeId: scope.scopeId,
+        scopeName: scope.scopeType === "project" ? "Project" : scope.scopeName,
+        localDate: row.localDate,
+        dateLabel: formatLocalDate(row.localDate),
+        weekday: formatLocalWeekday(row.localDate),
+        dayType: row.dayType === "weekday" ? "Weekday" as const : "Weekend" as const,
+        range: formatEvidenceRange(row.from, row.to, bundle.timezone),
+        actualKwhValue: row.actualKwh!,
+        baselineKwhValue: row.baselineKwh!,
+        impactKwhValue: row.impactKwh!,
+        relativePctValue: row.relativePct!,
+        thresholdKwhValue,
+        actualKwh: formatDecimal(row.actualKwh!, 4),
+        baselineKwh: formatDecimal(row.baselineKwh!, 4),
+        thresholdKwh: formatDecimal(thresholdKwhValue, 4),
+        impactKwh: signedDecimal(row.impactKwh!, 4),
+        relativePct: `${signedDecimal(row.relativePct!, 4)}%`,
+        coverage: `${formatDecimal(row.coveragePct, 1)}% coverage`,
+        intervals: `${row.validIntervalCount.toLocaleString("en-SG")} / ${row.expectedMeterIntervalCount.toLocaleString("en-SG")} valid intervals`,
+        qualityEvents: `${row.qualityEventCount.toLocaleString("en-SG")} quality events`,
+        relatedLevelTotals: row.detailSeries
+          .filter((series) => series.relationship === "immediate_level" && series.kind === "official_scope")
+          .map((series) => ({
+            scopeId: series.scopeId,
+            scopeName: series.scopeName,
+            selectedKwh: series.selectedTotalKwh === null ? null : formatDecimal(series.selectedTotalKwh, 4),
+          })),
+        baselineDates: [...row.baselineDates],
+        baselineSamples: row.baselineSamples.map((sample) => ({
+          localDate: sample.localDate,
+          coverage: `${formatDecimal(sample.coveragePct, 1)}% coverage`,
+          intervals: `${sample.validIntervalCount.toLocaleString("en-SG")} / ${sample.expectedMeterIntervalCount.toLocaleString("en-SG")} valid intervals`,
+          qualityEvents: `${sample.qualityEventCount.toLocaleString("en-SG")} quality events`,
         })),
-      })),
-    })));
+        hourlyComparison: row.hourlyComparison.map((point) => ({
+          localHour: point.localHour,
+          actualKwh: point.actualKwh!,
+          baselineKwh: point.baselineKwh!,
+          impactKwh: point.impactKwh!,
+          relativePct: point.relativePct!,
+        })),
+        series: row.detailSeries.map((series) => ({
+          seriesId: series.seriesId,
+          relationship: series.relationship,
+          kind: series.kind,
+          scopeId: series.scopeId,
+          scopeName: series.scopeName,
+          meterNodeId: series.meterNodeId ?? null,
+          category: series.category ?? null,
+          categoryLabel: series.category ? formatCategoryLabel(series.category) : null,
+          includedInOfficialTotal: series.includedInOfficialTotal,
+          status: series.status,
+          statusLabel: series.status === "available"
+            ? "Available" as const
+            : series.status === "partial"
+              ? "Partial" as const
+              : "Unavailable" as const,
+          selectedTotalKwh: series.selectedTotalKwh === null ? null : formatDecimal(series.selectedTotalKwh, 4),
+          baselineTotalKwh: series.baselineTotalKwh === null ? null : formatDecimal(series.baselineTotalKwh, 4),
+          impactKwh: series.impactKwh === null ? null : signedDecimal(series.impactKwh, 4),
+          relativePct: series.relativePct === null ? null : `${signedDecimal(series.relativePct, 4)}%`,
+          coverage: `${formatDecimal(series.coveragePct, 1)}% coverage`,
+          intervals: `${series.validIntervalCount.toLocaleString("en-SG")} / ${series.expectedMeterIntervalCount.toLocaleString("en-SG")} valid intervals`,
+          qualityEvents: `${series.qualityEventCount.toLocaleString("en-SG")} quality events`,
+          points: series.points.map((point) => ({
+            localHour: point.localHour,
+            hourLabel: formatLocalHour(point.localHour),
+            selectedKwh: point.selectedKwh,
+            baselineKwh: point.baselineKwh,
+            impactKwh: point.impactKwh,
+          })),
+        })),
+      };
+    }));
 
   return {
     status: "available",
@@ -2350,18 +3110,80 @@ function timeBehaviourEvidence(snapshot: EnergyProjectAnalysisSnapshotDto): Time
   };
 }
 
+function componentHourlyEvidence(snapshot: EnergyProjectAnalysisSnapshotDto): ComponentHourlyEvidence {
+  return {
+    snapshotId: snapshot.dataSnapshot.id,
+    projectReleaseId: snapshot.projectRelease.id,
+    meterMappingRevisionId: snapshot.analysis.provenance.meterMappingRevisionId,
+    meterFormulaRevisionId: snapshot.analysis.provenance.meterFormulaRevisionId,
+    metricId: "energy.total_usage_kwh@1",
+    period: `[${snapshot.context.primaryPeriod.start}, ${snapshot.context.primaryPeriod.endExclusive})`,
+    timezone: snapshot.analysis.componentHourlyProfiles?.timezone ?? snapshot.context.timezone,
+    unit: "kWh",
+    queryIds: ["component_hourly_profiles_v1"],
+    accountingBasis: "published_component_circuits",
+  };
+}
+
+function buildOperatingPolicySummary(
+  snapshot: EnergyProjectAnalysisSnapshotDto,
+): NgeeAnnDayProfileViewModel["operatingPolicy"] {
+  const source = snapshot.analysis.offHours;
+  const unavailable = (reason: string): NgeeAnnDayProfileViewModel["operatingPolicy"] => ({
+    status: "unavailable",
+    reason,
+  });
+  if (source.status !== "available") {
+    return unavailable(source.reason.message || "The release-pinned operating-policy split is unavailable.");
+  }
+  const valuesValid = [
+    source.operatingKwh,
+    source.standbyKwh,
+    source.usageKwh,
+    source.sharePct,
+  ].every(finiteNonNegative);
+  const totalUsageKwh = source.operatingKwh + source.standbyKwh;
+  const expectedShare = totalUsageKwh > 0 ? source.standbyKwh / totalUsageKwh * 100 : 0;
+  const contractValid = valuesValid
+    && source.timezone === snapshot.context.timezone
+    && source.businessCalendarVersion === snapshot.context.businessCalendarVersion
+    // The API offHours contract exposes usageKwh as the non-operating subtotal.
+    && Math.abs(source.usageKwh - source.standbyKwh) <= 0.1
+    && Math.abs(totalUsageKwh - snapshot.analysis.summary.usageKwh) <= 0.1
+    && Math.abs(source.sharePct - expectedShare) <= 0.1;
+  if (!contractValid) {
+    return unavailable("The release-pinned operating-policy split does not match this Snapshot context.");
+  }
+  return {
+    status: "available",
+    reason: null,
+    operatingUsageKwh: source.operatingKwh,
+    operatingUsage: formatFixedCustomerDecimal(source.operatingKwh, 1),
+    standbyUsageKwh: source.standbyKwh,
+    standbyUsage: formatFixedCustomerDecimal(source.standbyKwh, 1),
+    standbySharePct: source.sharePct,
+    standbyShare: `${formatFixedCustomerDecimal(source.sharePct, 1)}%`,
+    timezone: source.timezone,
+    businessCalendarVersion: source.businessCalendarVersion,
+  };
+}
+
 function buildDayProfile(
   snapshot: EnergyProjectAnalysisSnapshotDto,
   overviewUnavailable: boolean,
 ): NgeeAnnDayProfileViewModel {
   const evidence = timeBehaviourEvidence(snapshot);
+  const componentEvidence = componentHourlyEvidence(snapshot);
+  const operatingPolicy = buildOperatingPolicySummary(snapshot);
   const unavailable = (reason: string): NgeeAnnDayProfileViewModel => ({
     status: "unavailable",
-    decisionQuestion: "How does the typical 24-hour energy shape change by Day Type and Scope?",
+    decisionQuestion: "How does the observed 24-hour energy shape change by Day Type and Scope?",
     reason,
+    operatingPolicy,
     scopes: [],
     profiles: [],
     evidence,
+    componentEvidence,
   });
   if (overviewUnavailable) {
     return unavailable("No trusted intervals support a Day Profile for this Period.");
@@ -2402,35 +3224,98 @@ function buildDayProfile(
   if (!validProfiles || seenKeys.size !== expectedKeys.size) {
     return unavailable("The server Day Profile contract is incomplete or invalid.");
   }
+  const componentProjection = validComponentHourlyProfiles(snapshot);
 
   return {
     status: "available",
-    decisionQuestion: "How does the typical 24-hour energy shape change by Day Type and Scope?",
+    decisionQuestion: "How does the observed 24-hour energy shape change by Day Type and Scope?",
     reason: null,
+    operatingPolicy,
     scopes: grid.scopes.map((scope) => ({
       id: scope.scopeId,
       name: scope.scopeType === "project" ? "Project" : scope.scopeName,
     })),
-    profiles: profiles.map((profile) => ({
-      id: `${profile.scopeId}:${profile.dayType}`,
-      dayType: profile.dayType,
-      dayTypeLabel: dayTypeLabel(profile.dayType),
-      scopeId: profile.scopeId,
-      scopeName: profile.scopeId === snapshot.context.scopeId ? "Project" : profile.scopeName,
-      status: profile.status,
-      sampleDayCount: profile.status === "available" ? profile.sampleDayCount : null,
-      reason: profile.status === "unavailable" ? profile.reason.message : null,
-      values: profile.status === "available"
-        ? profile.values.map((value) => ({
-          id: `${profile.scopeId}:${profile.dayType}:${value.localHour}`,
-          localHour: value.localHour,
-          hourLabel: formatLocalHour(value.localHour),
-          acceptedUsageKwh: value.usageKwh,
-          usageKwh: formatDecimal(value.usageKwh, 4),
-        }))
-        : [],
-    })),
+    profiles: profiles.map((profile) => {
+      const peak = profile.status === "available"
+        ? profile.values.reduce((current, candidate) => (
+          candidate.usageKwh > current.usageKwh ? candidate : current
+        ))
+        : null;
+      const dailyUsageKwh = profile.status === "available"
+        ? roundDisplayValue(profile.values.reduce((sum, value) => sum + value.usageKwh, 0))
+        : null;
+      const componentProfile = componentProjection.valid
+        ? componentProjection.source.scopes
+          .find((scope) => scope.scopeId === profile.scopeId)?.profiles
+          .find((candidate) => candidate.dayType === profile.dayType)
+        : null;
+      const componentStack = !componentProjection.valid
+        ? {
+          status: "unavailable" as const,
+          reason: componentProjection.reason,
+        }
+        : !componentProfile || componentProfile.status === "unavailable"
+          ? {
+            status: "unavailable" as const,
+            reason: componentProfile?.status === "unavailable"
+              ? componentProfile.reason.message
+              : "No server-published component hourly profile is available for this selection.",
+          }
+          : profile.status !== "available" || componentProfile.sampleDayCount !== profile.sampleDayCount
+            ? {
+              status: "unavailable" as const,
+              reason: "The official Scope and component hourly profiles do not use the same complete-day sample.",
+            }
+            : {
+              status: "available" as const,
+              sampleDayCount: componentProfile.sampleDayCount,
+              categories: componentProfile.categories.map((category) => ({
+                category: category.category,
+                categoryLabel: formatCategoryLabel(category.category),
+                values: category.values.map((value) => ({
+                  id: `${profile.scopeId}:${profile.dayType}:${category.category}:${value.localHour}`,
+                  localHour: value.localHour,
+                  hourLabel: formatLocalHour(value.localHour),
+                  acceptedUsageKwh: value.usageKwh,
+                  usageKwh: formatDecimal(value.usageKwh, 4),
+                })),
+              })),
+            };
+      return {
+        id: `${profile.scopeId}:${profile.dayType}`,
+        dayType: profile.dayType,
+        dayTypeLabel: dayTypeLabel(profile.dayType),
+        scopeId: profile.scopeId,
+        scopeName: profile.scopeId === snapshot.context.scopeId ? "Project" : profile.scopeName,
+        status: profile.status,
+        sampleDayCount: profile.status === "available" ? profile.sampleDayCount : null,
+        reason: profile.status === "unavailable" ? profile.reason.message : null,
+        summary: profile.status === "unavailable"
+          ? { status: "unavailable" as const, reason: profile.reason.message }
+          : {
+            status: "available" as const,
+            peakHour: peak!.localHour,
+            peakHourLabel: formatLocalHour(peak!.localHour),
+            peakUsageKwh: peak!.usageKwh,
+            peakUsage: formatDecimal(peak!.usageKwh, 4),
+            dailyUsageKwh: dailyUsageKwh!,
+            dailyUsage: formatFixedCustomerDecimal(dailyUsageKwh!, 1),
+            sampleDayCount: profile.sampleDayCount,
+          },
+        values: profile.status === "available"
+          ? profile.values.map((value) => ({
+            id: `${profile.scopeId}:${profile.dayType}:${value.localHour}`,
+            localHour: value.localHour,
+            hourLabel: formatLocalHour(value.localHour),
+            acceptedUsageKwh: value.usageKwh,
+            usageKwh: formatDecimal(value.usageKwh, 4),
+          }))
+          : [],
+        componentStack,
+      };
+    }),
     evidence,
+    componentEvidence,
   };
 }
 
@@ -2439,6 +3324,7 @@ function buildUsageHeatmap(
   overviewUnavailable: boolean,
 ): NgeeAnnUsageHeatmapViewModel {
   const evidence = timeBehaviourEvidence(snapshot);
+  const componentEvidence = componentHourlyEvidence(snapshot);
   const unavailable = (reason: string): NgeeAnnUsageHeatmapViewModel => ({
     status: "unavailable",
     decisionQuestion: "Which local date, Level and hour cell needs inspection?",
@@ -2446,8 +3332,10 @@ function buildUsageHeatmap(
     defaultView: "date-hour",
     dates: [],
     averageProfiles: [],
+    circuitProfiles: [],
     scopes: [],
     evidence,
+    componentEvidence,
   });
   if (overviewUnavailable) {
     return unavailable("No trusted intervals support an hourly Usage heatmap for this Period.");
@@ -2471,9 +3359,45 @@ function buildUsageHeatmap(
             scopeId: profile.scopeId,
             scopeName: profile.scopeName,
             sampleDayCount: profile.sampleDayCount!,
+            dailyUsageKwh: profile.summary.status === "available" ? profile.summary.dailyUsageKwh : 0,
+            dailyUsage: profile.summary.status === "available" ? profile.summary.dailyUsage : "Unavailable",
+            peakHourLabel: profile.summary.status === "available" ? profile.summary.peakHourLabel : "Unavailable",
+            peakUsage: profile.summary.status === "available" ? profile.summary.peakUsage : "Unavailable",
             values: profile.values,
           }]
         : []
+    ))
+    : [];
+  const componentProjection = validComponentHourlyProfiles(snapshot);
+  const circuitProfiles = componentProjection.valid
+    ? componentProjection.source.scopes.flatMap((scope) => (
+      scope.scopeType !== "level"
+        ? []
+        : scope.profiles.flatMap((profile) => (
+          profile.status === "available" && (profile.dayType === "weekday" || profile.dayType === "weekend")
+            ? [{
+              id: `${scope.scopeId}:${profile.dayType}`,
+              levelScopeId: scope.scopeId,
+              levelScopeName: scope.scopeName,
+              dayType: profile.dayType,
+              dayTypeLabel: profile.dayType === "weekday" ? "Weekday" as const : "Weekend" as const,
+              sampleDayCount: profile.sampleDayCount,
+              circuits: profile.circuits.map((circuit) => ({
+                meterNodeId: circuit.meterNodeId,
+                name: circuit.name,
+                category: circuit.category,
+                categoryLabel: formatCategoryLabel(circuit.category),
+                values: circuit.values.map((value) => ({
+                  id: `${scope.scopeId}:${profile.dayType}:${circuit.meterNodeId}:${value.localHour}`,
+                  localHour: value.localHour,
+                  hourLabel: formatLocalHour(value.localHour),
+                  acceptedUsageKwh: value.usageKwh,
+                  usageKwh: formatDecimal(value.usageKwh, 4),
+                })),
+              })),
+            }]
+            : []
+        ))
     ))
     : [];
   const dates = firstScope.cells
@@ -2488,9 +3412,10 @@ function buildUsageHeatmap(
     status: "available",
     decisionQuestion: "Which recurring local hour pattern or individual date needs inspection?",
     reason: null,
-    defaultView: averageProfiles.length > 0 ? "level-hour" : "date-hour",
+    defaultView: circuitProfiles.length > 0 ? "level-hour" : "date-hour",
     dates,
     averageProfiles,
+    circuitProfiles,
     scopes: grid.scopes.map((scope) => ({
       id: scope.scopeId,
       name: scope.scopeType === "project" ? "Project" : scope.scopeName,
@@ -2509,7 +3434,129 @@ function buildUsageHeatmap(
       })),
     })),
     evidence,
+    componentEvidence,
   };
+}
+
+function validComponentHourlyProfiles(snapshot: EnergyProjectAnalysisSnapshotDto):
+  | { valid: true; source: ComponentHourlyProjection }
+  | { valid: false; reason: string } {
+  const { analysis, context } = snapshot;
+  const source = analysis.componentHourlyProfiles;
+  const invalid = (detail: string) => ({
+    valid: false as const,
+    reason: `The server component hourly contract is unavailable or invalid: ${detail}`,
+  });
+  if (!source) return invalid("no published projection was supplied.");
+  const hasEvidence = snapshot.evidence.some((reference) => (
+    reference.metricId === "energy.total_usage_kwh@1"
+    && reference.queryIds.includes("component_hourly_profiles_v1")
+  ));
+  if (
+    source.metricId !== "energy.total_usage_kwh@1"
+    || source.queryId !== "component_hourly_profiles_v1"
+    || source.accountingBasis !== "published_component_circuits"
+    || source.grain !== "hour"
+    || source.unit !== "kWh"
+    || source.timezone !== context.timezone
+    || !analysis.provenance.queryIds.includes("component_hourly_profiles_v1")
+    || !hasEvidence
+  ) return invalid("its metric, accounting basis, timezone or query evidence does not match this Snapshot.");
+
+  const reconciliation = analysis.componentReconciliation;
+  if (!reconciliation || reconciliation.componentMeterNodeIds.length === 0) {
+    return invalid("the published component-Circuit identity set is missing.");
+  }
+  const componentIds = new Set(reconciliation.componentMeterNodeIds);
+  const expectedCircuits = analysis.topCircuits.filter((circuit) => componentIds.has(circuit.meterNodeId));
+  if (
+    expectedCircuits.length !== componentIds.size
+    || expectedCircuits.some((circuit) => (
+      circuit.includedInOfficialTotal !== false
+      || !circuit.parentScopeId
+      || !circuit.name
+      || !circuit.category
+    ))
+  ) return invalid("the component-Circuit metadata is incomplete or inconsistent.");
+
+  const expectedScopes = [
+    { scopeId: context.scopeId, scopeName: context.scopeName, scopeType: "project" },
+    ...analysis.childScopes
+      .filter((scope) => scope.nodeType === "level")
+      .map((scope) => ({ scopeId: scope.nodeId, scopeName: scope.name, scopeType: "level" })),
+  ];
+  if (
+    source.scopes.length !== expectedScopes.length
+    || source.scopes.some((scope, index) => {
+      const expected = expectedScopes[index];
+      return !expected
+        || scope.scopeId !== expected.scopeId
+        || scope.scopeName !== expected.scopeName
+        || scope.scopeType !== expected.scopeType;
+    })
+  ) return invalid("its Project and Level Scope spine is incomplete or out of order.");
+
+  for (const scope of source.scopes) {
+    const expectedForScope = scope.scopeType === "project"
+      ? expectedCircuits
+      : expectedCircuits.filter((circuit) => circuit.parentScopeId === scope.scopeId);
+    const expectedIds = new Set(expectedForScope.map((circuit) => circuit.meterNodeId));
+    const expectedCategories = new Set(expectedForScope.map((circuit) => circuit.category));
+    const profileKeys = new Set<string>();
+    if (scope.profiles.length !== 3) return invalid(`${scope.scopeName} does not publish all three Day Type states.`);
+    for (const profile of scope.profiles) {
+      if (profileKeys.has(profile.dayType)) return invalid(`${scope.scopeName} repeats a Day Type profile.`);
+      profileKeys.add(profile.dayType);
+      if (profile.status === "unavailable") {
+        if (
+          !profile.reason.message
+          || (profile.reason.code !== "COMPLETE_DAY_SAMPLE_UNAVAILABLE"
+            && profile.reason.code !== "DAY_TYPE_CLASSIFICATION_UNAVAILABLE")
+          || (profile.dayType === "public_holiday"
+            && profile.reason.code !== "DAY_TYPE_CLASSIFICATION_UNAVAILABLE")
+        ) return invalid(`${scope.scopeName} has an invalid unavailable Day Type state.`);
+        continue;
+      }
+      if (!Number.isInteger(profile.sampleDayCount) || profile.sampleDayCount <= 0) {
+        return invalid(`${scope.scopeName} has an invalid complete-day sample.`);
+      }
+      const circuitRowIds = new Set(profile.circuits.map((circuit) => circuit.meterNodeId));
+      const categoryIds = new Set(profile.categories.map((category) => category.category));
+      if (
+        circuitRowIds.size !== expectedIds.size
+        || [...expectedIds].some((id) => !circuitRowIds.has(id))
+        || categoryIds.size !== expectedCategories.size
+        || [...expectedCategories].some((category) => !categoryIds.has(category))
+      ) return invalid(`${scope.scopeName} has a missing or extra Category/Circuit row.`);
+      if (profile.circuits.some((circuit) => {
+        const expected = expectedForScope.find((candidate) => candidate.meterNodeId === circuit.meterNodeId);
+        return !expected
+          || circuit.name !== expected.name
+          || circuit.category !== expected.category
+          || !validHourlyValues(circuit.values);
+      })) return invalid(`${scope.scopeName} has invalid Circuit identity or hourly values.`);
+      if (profile.categories.some((category) => !validHourlyValues(category.values))) {
+        return invalid(`${scope.scopeName} has invalid Category hourly values.`);
+      }
+      for (let localHour = 0; localHour < 24; localHour += 1) {
+        const categoryTotal = profile.categories.reduce((sum, category) => sum + category.values[localHour]!.usageKwh, 0);
+        const circuitTotal = profile.circuits.reduce((sum, circuit) => sum + circuit.values[localHour]!.usageKwh, 0);
+        if (!approximatelyEqual(categoryTotal, circuitTotal, 0.001)) {
+          return invalid(`${scope.scopeName} Category and Circuit hourly totals do not reconcile.`);
+        }
+      }
+    }
+    if (!["weekday", "weekend", "public_holiday"].every((dayType) => profileKeys.has(dayType))) {
+      return invalid(`${scope.scopeName} does not publish the required Day Type identities.`);
+    }
+  }
+  return { valid: true, source };
+}
+
+function validHourlyValues(values: Array<{ localHour: number; usageKwh: number }>): boolean {
+  return values.length === 24 && values.every((value, index) => (
+    value.localHour === index && finiteNonNegative(value.usageKwh)
+  ));
 }
 
 function validTimeGrid(snapshot: EnergyProjectAnalysisSnapshotDto):
@@ -2740,6 +3787,7 @@ function buildEnergyTrend(
           id: `${scope.scopeId}:${cell.localDate}:${cell.localHour}`,
           localDate: cell.localDate,
           localHour: cell.localHour,
+          dayType: null,
           dateLabel: formatLocalHour(cell.localHour),
           weekday: formatLocalDate(cell.localDate),
           range: formatEvidenceRange(cell.from, cell.to, timeBehaviour!.timezone),
@@ -2820,6 +3868,7 @@ function buildEnergyTrend(
           id: `${scope.scopeId}:${row.localDate}`,
           localDate: row.localDate,
           localHour: null,
+          dayType: dailyBaseline.dayTypes.get(scope.scopeId)?.get(row.localDate) ?? null,
           dateLabel: formatLocalDate(row.localDate),
           weekday: formatLocalWeekday(row.localDate),
           range: formatEvidenceRange(row.from, row.to, dailyTotals.timezone),
@@ -2854,6 +3903,7 @@ function buildDailyTrendBaseline(
   overlay: NgeeAnnEnergyTrendViewModel["baselineOverlay"];
   evidence: NonNullable<NgeeAnnEnergyTrendViewModel["evidence"]["baseline"]> | null;
   points: Map<string, Map<string, DailyTrendBaseline>>;
+  dayTypes: Map<string, Map<string, "weekday" | "weekend" | null>>;
 } {
   const unavailable = (reason: string) => ({
     overlay: {
@@ -2863,6 +3913,7 @@ function buildDailyTrendBaseline(
     },
     evidence: null,
     points: new Map<string, Map<string, DailyTrendBaseline>>(),
+    dayTypes: new Map<string, Map<string, "weekday" | "weekend" | null>>(),
   });
   const bundle = snapshot.analysis.dailyUsageAnomalies;
   if (!bundle) {
@@ -2874,6 +3925,7 @@ function buildDailyTrendBaseline(
 
   const anomalyScopes = new Map(bundle.scopes.map((scope) => [scope.scopeId, scope]));
   const points = new Map<string, Map<string, DailyTrendBaseline>>();
+  const dayTypes = new Map<string, Map<string, "weekday" | "weekend" | null>>();
   for (const scope of dailyTotals.scopes) {
     const anomalyScope = anomalyScopes.get(scope.scopeId);
     if (
@@ -2886,6 +3938,7 @@ function buildDailyTrendBaseline(
     }
     const anomalyRows = new Map(anomalyScope.rows.map((row) => [row.localDate, row]));
     const scopePoints = new Map<string, DailyTrendBaseline>();
+    const scopeDayTypes = new Map<string, "weekday" | "weekend" | null>();
     for (const row of scope.rows) {
       const anomalyRow = anomalyRows.get(row.localDate);
       if (
@@ -2915,8 +3968,10 @@ function buildDailyTrendBaseline(
         incidentId: anomalyRow.outcome === "triggered" ? anomalyRow.incidentId : null,
         limitation: anomalyRow.suppressionReason?.message ?? null,
       });
+      scopeDayTypes.set(row.localDate, anomalyRow.dayType);
     }
     points.set(scope.scopeId, scopePoints);
+    dayTypes.set(scope.scopeId, scopeDayTypes);
   }
   if (anomalyScopes.size !== dailyTotals.scopes.length) {
     return unavailable("the anomaly Scope set does not align with the daily totals Scope set.");
@@ -2931,6 +3986,7 @@ function buildDailyTrendBaseline(
       baselineMethod: bundle.rule.baselineMethod,
     },
     points,
+    dayTypes,
   };
 }
 
@@ -3034,46 +4090,64 @@ function buildLevelComparison(
   };
   const levelRows = snapshot.analysis.childScopes.filter((scope) => scope.nodeType === "level");
   const hasCompleteContract = levelRows.length > 0
-    && levelRows.every((scope) => scope.comparison && scope.dataHealth);
+    && levelRows.every((scope) => scope.dataHealth);
 
   if (overviewUnavailable || snapshot.context.scopeType !== "project" || !hasCompleteContract) {
     return {
       status: "unavailable",
-      decisionQuestion: "Which Level needs attention first?",
+      decisionQuestion: "Where is current energy concentrated by Level, and which Level changed most?",
       reason: overviewUnavailable
         ? "No trusted intervals support a Level comparison for this Period."
         : snapshot.context.scopeType !== "project"
           ? "Select the Project Scope to compare Level 6 and Level 7."
           : "This published Snapshot does not include the Level comparison and quality contract.",
       rows: [],
+      summary: unavailableContributorSummary(
+        overviewUnavailable
+          ? "No trusted intervals support current Level concentration for this Period."
+          : "This published Snapshot does not include the Level current facts and quality contract.",
+      ),
       evidence,
     };
   }
 
   return {
     status: "available",
-    decisionQuestion: "Which Level needs attention first?",
+    decisionQuestion: "Where is current energy concentrated by Level, and which Level changed most?",
     reason: null,
+    summary: buildContributorSummary(
+      levelRows.map((scope) => ({
+        name: scope.name,
+        usageKwh: scope.usageKwh,
+        sharePct: scope.sharePct,
+        comparison: scope.comparison,
+      })),
+      snapshot.analysis.comparison.changeKwh,
+      "Level",
+    ),
     rows: levelRows.map((scope) => ({
       id: scope.nodeId,
       name: scope.name,
       currentUsageKwh: formatDecimal(scope.usageKwh, 2),
       projectShare: `${formatDecimal(scope.sharePct, 1)}%`,
       projectShareBar: `${Math.min(Math.max(scope.sharePct, 0), 100)}%`,
-      previousUsageKwh: formatDecimal(scope.comparison!.usageKwh, 2),
-      changeKwh: `${signedDecimal(scope.comparison!.changeKwh, 2)} kWh`,
-      changePct: signedDisplayPercent(scope.comparison!.changePct, "Unavailable"),
+      previousUsageKwh: scope.comparison ? formatDecimal(scope.comparison.usageKwh, 2) : "Unavailable",
+      changeKwh: scope.comparison ? `${signedDecimal(scope.comparison.changeKwh, 2)} kWh` : "Unavailable",
+      changePct: scope.comparison ? signedDisplayPercent(scope.comparison.changePct, "Unavailable") : "Unavailable",
       coverage: `${formatDecimal(scope.dataHealth!.coveragePct, 1)}% coverage`,
       intervals: `${scope.dataHealth!.validIntervalCount.toLocaleString("en-SG")} / ${scope.dataHealth!.expectedMeterIntervalCount.toLocaleString("en-SG")}`,
       qualityEvents: `${scope.dataHealth!.qualityEventCount.toLocaleString("en-SG")} quality events`,
+      movement: movementAvailability(scope.comparison, "Level comparison is unavailable for this published Snapshot."),
       exact: {
         currentUsageKwh: formatDecimal(scope.usageKwh, 4),
         projectShare: `${formatDecimal(scope.sharePct, 4)}%`,
-        previousUsageKwh: formatDecimal(scope.comparison!.usageKwh, 4),
-        changeKwh: `${signedDecimal(scope.comparison!.changeKwh, 4)} kWh`,
-        changePct: scope.comparison!.changePct === null
+        previousUsageKwh: scope.comparison ? formatDecimal(scope.comparison.usageKwh, 4) : "Unavailable",
+        changeKwh: scope.comparison ? `${signedDecimal(scope.comparison.changeKwh, 4)} kWh` : "Unavailable",
+        changePct: !scope.comparison
           ? "Unavailable"
-          : `${scope.comparison!.changePct! >= 0 ? "+" : ""}${formatDecimal(scope.comparison!.changePct!, 4)}%`,
+          : scope.comparison.changePct === null
+          ? "Unavailable"
+          : `${scope.comparison.changePct >= 0 ? "+" : ""}${formatDecimal(scope.comparison.changePct, 4)}%`,
       },
     })),
     evidence,
@@ -3145,6 +4219,28 @@ function buildMetadataLimitation(snapshot: EnergyProjectAnalysisSnapshotDto): st
 function formatDecimal(value: number, maximumFractionDigits: number): string {
   if (!Number.isFinite(value)) return "Unavailable";
   return value.toFixed(maximumFractionDigits).replace(/\.?0+$/u, "");
+}
+
+function formatCustomerDecimal(value: number, maximumFractionDigits: number): string {
+  if (!Number.isFinite(value)) return "Unavailable";
+  return new Intl.NumberFormat("en-SG", {
+    maximumFractionDigits,
+    minimumFractionDigits: 0,
+    useGrouping: true,
+  }).format(value);
+}
+
+function formatFixedCustomerDecimal(value: number, fractionDigits: number): string {
+  if (!Number.isFinite(value)) return "Unavailable";
+  return new Intl.NumberFormat("en-SG", {
+    maximumFractionDigits: fractionDigits,
+    minimumFractionDigits: fractionDigits,
+    useGrouping: true,
+  }).format(value);
+}
+
+function roundDisplayValue(value: number): number {
+  return Number(value.toFixed(4));
 }
 
 function signedDecimal(value: number, maximumFractionDigits: number): string {

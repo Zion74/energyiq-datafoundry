@@ -48,15 +48,13 @@ const PRESCHOOL_ANALYSIS_PACK: ProjectAnalysisPack = {
   projectId: "preschool-demo",
   rendererKey: "preschool-overview",
   investigationPrior: [
-    "Treat the published Portfolio, Benchmark and Operational themes as investigation starting points, not as an answer template. A candidate Finding may support, challenge or be independent of those themes when its Evidence warrants that relationship.",
-    "Start with the published Portfolio total and data quality, then investigate concentration by Centre, comparable cohort, appliance, Circuit, local time and operating state when those dimensions are available.",
+    "This is the Preschool project overlay, not the investigation method or an answer template. The Method Skill decides how deeply to investigate the current Snapshot.",
+    "The published Portfolio total and quality use official aggregation. Centre, appliance and Circuit rows may explain that total but must not be double-counted with it.",
     "Use the published EUI and per-pax Evidence only for peer comparison. Preserve its provisional metadata status and distinguish a P75 screening signal from a confirmed operational problem.",
     "Use standby and off-hours Evidence only with the published Calendar. A closed-hour observation is an investigation target, not automatically waste, savings or non-compliance.",
-    "Treat operating and standby Spikes as governed comparison signals. Inspect the strongest Centre, hour and leading Circuit Evidence without promoting a signal to a root cause.",
-    "Use Circuit rows to explain a Centre or Portfolio pattern. Do not double-count the same official route, and disclose incomplete reconciliation rather than forcing a contribution story.",
-    "Prefer a small set of semantically different Findings that change a decision: what happened, why it matters or may have happened, what to investigate or do next, and how to verify the outcome.",
-    "Surface Missing Evidence when equipment state, occupancy, maintenance, weather, confirmed schedules or other operational facts are required to support a cause.",
-    "Do not change deterministic KPI values, Benchmark classifications, Spike results, provisional SOP signals or official theme priority. Evidence-backed next investigations and actions must remain visibly AI proposals.",
+    "Treat operating and standby Spikes as governed comparison signals, not root causes or confirmed SOP failures.",
+    "Equipment state, occupancy, maintenance, weather and confirmed schedules are Missing Evidence unless the current authorized Evidence explicitly supplies them.",
+    "Do not change deterministic KPI values, Benchmark classifications, Spike results or provisional SOP signals. Actions remain visibly AI proposals.",
   ],
 };
 

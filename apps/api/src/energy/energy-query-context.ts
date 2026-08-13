@@ -78,6 +78,7 @@ export type EnergyPublishedMeterRoute = {
   attachments: Array<{ meterPointId: string; scopeId: string; officialAggregation: boolean }>;
   officialMeterPointIds?: string[];
   officialMeterRoles?: string[];
+  componentMeterPointIds: string[];
 };
 
 export const ensureEnergyIqUserRole = (
@@ -386,6 +387,16 @@ export const resolveEnergyPublishedMeterRoute = (input: {
       `ENERGYIQ_PUBLISHED_MAPPING_REVISION_MISMATCH:${input.expectedMeterMappingRevisionId}:${meterMappingRevisionId}`
     );
   }
+  const componentMeterPointIds = attachments
+    .map((attachment) => rowsById.get(attachment.meterPointId))
+    .filter((row): row is NonNullable<typeof row> => Boolean(row))
+    .filter((row) => (
+      row.meter_role === "component"
+      && row.aggregation_usage === "excluded"
+      && !officialMeterPointIds.includes(row.id)
+    ))
+    .map((row) => row.id)
+    .sort();
   return {
     source: "published",
     meterMappingRevisionId,
@@ -394,6 +405,7 @@ export const resolveEnergyPublishedMeterRoute = (input: {
       officialAggregation: officialMeterPointIds.includes(attachment.meterPointId)
     })),
     officialMeterPointIds,
+    componentMeterPointIds,
     officialMeterRoles: [...new Set(officialMeterPointIds.map((meterPointId) =>
       rowsById.get(meterPointId)?.meter_role ?? "standalone"))]
   };

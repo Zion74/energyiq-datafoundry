@@ -22,7 +22,9 @@ export function ngeeAnnGoldenSnapshot(input: {
   const queryIds = [
     "scope_summary_v1",
     "daily_totals_v1",
+    "daily_component_categories_v1",
     "time_bucket_grid_v1",
+    "component_hourly_profiles_v1",
     "time_slot_anomaly_v1",
     "peak_breakdown_v1",
     "hourly_profile_v1",
@@ -508,7 +510,7 @@ export function ngeeAnnGoldenSnapshot(input: {
       status: "available",
       operatingKwh: 1_200,
       standbyKwh: 331.168324,
-      usageKwh: 1531.168324,
+      usageKwh: 331.168324,
       sharePct: 21.63,
       timezone: "Asia/Singapore",
       businessCalendarVersion: "calendar-v1",
@@ -570,6 +572,9 @@ export function ngeeAnnGoldenSnapshot(input: {
     },
     metadata,
   };
+
+  analysis.componentCategoryBreakdown = goldenComponentCategoryBreakdown(analysis);
+  analysis.componentHourlyProfiles = goldenComponentHourlyProfiles(timeBehaviour, topCircuits);
 
   return {
     context: {
@@ -648,6 +653,93 @@ export function ngeeAnnGoldenSnapshot(input: {
     },
     metadata,
     analysis,
+  };
+}
+
+function goldenComponentCategoryBreakdown(
+  analysis: EnergyProjectAnalysisSnapshotDto["analysis"],
+): NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["componentCategoryBreakdown"]> {
+  const componentCircuits = analysis.circuits.filter((circuit) => circuit.includedInOfficialTotal === false);
+  const scopeRows = analysis.dailyTotals?.scopes ?? [];
+  return {
+    metricId: "energy.total_usage_kwh@1",
+    queryId: "daily_component_categories_v1",
+    accountingBasis: "published_component_circuits",
+    grain: "day",
+    timezone: "Asia/Singapore",
+    scopes: scopeRows.map((scope) => {
+      const circuits = componentCircuits.filter((circuit) =>
+        scope.scopeId === "project" || circuit.parentScopeId === scope.scopeId,
+      );
+      const categoryUsage = new Map<string, number>();
+      for (const circuit of circuits) {
+        categoryUsage.set(circuit.category, (categoryUsage.get(circuit.category) ?? 0) + circuit.usageKwh);
+      }
+      const componentUsageKwh = [...categoryUsage.values()].reduce((sum, value) => sum + value, 0);
+      const officialUsageKwh = scope.rows.reduce((sum, row) => sum + (row.usageKwh ?? 0), 0);
+      const ratio = officialUsageKwh > 0 ? componentUsageKwh / officialUsageKwh : 0;
+      const categories = [...categoryUsage.entries()]
+        .sort((left, right) => right[1] - left[1])
+        .map(([category, usageKwh]) => ({
+          category,
+          usageKwh: roundFixture(usageKwh),
+          sharePct: componentUsageKwh > 0 ? roundFixture(usageKwh / componentUsageKwh * 100) : 0,
+        }));
+      return {
+        scopeId: scope.scopeId,
+        scopeName: scope.scopeName,
+        scopeType: scope.scopeType,
+        period: {
+          status: "complete",
+          reason: null,
+          officialUsageKwh: roundFixture(officialUsageKwh),
+          componentUsageKwh: roundFixture(componentUsageKwh),
+          gapKwh: roundFixture(officialUsageKwh - componentUsageKwh),
+          ratioPct: officialUsageKwh > 0 ? roundFixture(componentUsageKwh / officialUsageKwh * 100) : null,
+          categories,
+        },
+        rows: scope.rows.map((row) => {
+          const componentDaily = row.usageKwh === null ? null : row.usageKwh * ratio;
+          const localDay = new Date(`${row.localDate}T00:00:00.000Z`).getUTCDay();
+          return {
+            localDate: row.localDate,
+            from: row.from,
+            to: row.to,
+            dayType: localDay === 0 || localDay === 6 ? "weekend" as const : "weekday" as const,
+            officialUsageKwh: row.usageKwh,
+            componentUsageKwh: componentDaily === null ? null : roundFixture(componentDaily),
+            categories: categories.map((category) => ({
+              category: category.category,
+              usageKwh: componentDaily === null || componentUsageKwh === 0
+                ? null
+                : roundFixture(componentDaily * category.usageKwh / componentUsageKwh),
+              sharePct: componentDaily === null ? null : category.sharePct,
+            })),
+            estimatedCost: analysis.cost.status === "available" && row.usageKwh !== null
+              ? {
+                status: "available" as const,
+                amount: roundFixture(row.usageKwh * analysis.cost.allocations[0]!.ratePerKwh),
+                currency: analysis.cost.currency,
+                ratePerKwh: analysis.cost.allocations[0]!.ratePerKwh,
+                tariffScheduleVersion: analysis.cost.tariffScheduleVersion,
+              }
+              : {
+                status: "unavailable" as const,
+                reason: analysis.cost.status === "unavailable"
+                  ? analysis.cost.reason.message
+                  : "Official daily usage is unavailable.",
+              },
+            dataHealth: {
+              status: row.dataHealth.status,
+              coveragePct: row.dataHealth.coveragePct,
+              expectedMeterIntervalCount: circuits.length * 96,
+              validIntervalCount: row.dataHealth.status === "unavailable" ? 0 : circuits.length * 96,
+              qualityEventCount: row.dataHealth.qualityEventCount,
+            },
+          };
+        }),
+      };
+    }),
   };
 }
 
@@ -1082,6 +1174,83 @@ function goldenTimeBehaviour(): NonNullable<EnergyProjectAnalysisSnapshotDto["an
     queryId: "time_bucket_grid_v1",
     scopes,
     dayProfiles,
+  };
+}
+
+function goldenComponentHourlyProfiles(
+  timeBehaviour: NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["timeBehaviour"]>,
+  componentCircuits: EnergyProjectAnalysisSnapshotDto["analysis"]["topCircuits"],
+): NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["componentHourlyProfiles"]> {
+  return {
+    metricId: "energy.total_usage_kwh@1",
+    queryId: "component_hourly_profiles_v1",
+    accountingBasis: "published_component_circuits",
+    grain: "hour",
+    unit: "kWh",
+    timezone: timeBehaviour.timezone,
+    scopes: timeBehaviour.scopes.map((scope) => {
+      const circuits = scope.scopeType === "project"
+        ? componentCircuits
+        : componentCircuits.filter((circuit) => circuit.parentScopeId === scope.scopeId);
+      const circuitTotal = circuits.reduce((sum, circuit) => sum + circuit.usageKwh, 0);
+      const categories = [...new Set(circuits.map((circuit) => circuit.category))]
+        .sort((left, right) => left === "load" ? -1 : right === "load" ? 1 : left.localeCompare(right));
+      const profiles: NonNullable<EnergyProjectAnalysisSnapshotDto["analysis"]["componentHourlyProfiles"]>["scopes"][number]["profiles"] = [];
+      for (const dayType of ["weekday", "weekend"] as const) {
+        const official = timeBehaviour.dayProfiles.find((profile) => (
+          profile.scopeId === scope.scopeId && profile.dayType === dayType
+        ));
+        if (!official || official.status === "unavailable" || circuitTotal <= 0) {
+          profiles.push({
+            dayType,
+            status: "unavailable",
+            reason: {
+              code: "COMPLETE_DAY_SAMPLE_UNAVAILABLE",
+              message: `No common complete ${dayType} component-Circuit sample is available for ${scope.scopeName}.`,
+            },
+          });
+          continue;
+        }
+        const circuitRows = circuits.map((circuit) => ({
+          meterNodeId: circuit.meterNodeId,
+          name: circuit.name,
+          category: circuit.category,
+          values: official.values.map((value) => ({
+            localHour: value.localHour,
+            usageKwh: roundFixture(value.usageKwh * 0.992 * circuit.usageKwh / circuitTotal),
+          })),
+        }));
+        profiles.push({
+          dayType,
+          status: "available",
+          sampleDayCount: official.sampleDayCount,
+          categories: categories.map((category) => ({
+            category,
+            values: Array.from({ length: 24 }, (_, localHour) => ({
+              localHour,
+              usageKwh: roundFixture(circuitRows
+                .filter((circuit) => circuit.category === category)
+                .reduce((sum, circuit) => sum + circuit.values[localHour]!.usageKwh, 0)),
+            })),
+          })),
+          circuits: circuitRows,
+        });
+      }
+      profiles.push({
+        dayType: "public_holiday",
+        status: "unavailable",
+        reason: {
+          code: "DAY_TYPE_CLASSIFICATION_UNAVAILABLE",
+          message: "Public Holiday component profiles require an authoritative release-pinned Calendar classification.",
+        },
+      });
+      return {
+        scopeId: scope.scopeId,
+        scopeName: scope.scopeName,
+        scopeType: scope.scopeType,
+        profiles,
+      };
+    }),
   };
 }
 

@@ -87,6 +87,13 @@ describe("writeEnergyFactProjectMaterialization", () => {
       adjacentReadingPairCount: 2,
       missingAdjacentIntervalCount: 0,
     });
+    expect(written.timings).toEqual({
+      sourceWriteMs: expect.any(Number),
+      canonicalRebuildMs: expect.any(Number),
+      integrityAndCheckpointMs: expect.any(Number),
+      totalMs: expect.any(Number),
+    });
+    expect(Object.values(written.timings).every((durationMs) => Number.isFinite(durationMs) && durationMs >= 0)).toBe(true);
     await expect(readEnergyFactMaterializationStats({ databasePath: ":memory:", importBatchId: "hourly-a" }))
       .resolves.toMatchObject({ normalizedRows: 3, intervalFacts: 2, qualityEvents: 1 });
   });

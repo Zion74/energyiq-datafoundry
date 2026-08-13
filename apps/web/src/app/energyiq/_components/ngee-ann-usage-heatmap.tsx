@@ -7,16 +7,21 @@ import { filterClassName, TimeEvidence, TimeModuleUnavailable } from "./ngee-ann
 
 type HeatmapCell = NgeeAnnUsageHeatmapViewModel["scopes"][number]["cells"][number];
 type AverageProfile = NgeeAnnUsageHeatmapViewModel["averageProfiles"][number];
-type AverageCell = AverageProfile["values"][number] & {
-  scopeId: string;
-  scopeName: string;
+type CircuitProfile = NgeeAnnUsageHeatmapViewModel["circuitProfiles"][number];
+type CircuitCell = CircuitProfile["circuits"][number]["values"][number] & {
+  meterNodeId: string;
+  circuitName: string;
+  categoryLabel: string;
+  levelScopeId: string;
+  levelScopeName: string;
   dayTypeLabel: "Weekday" | "Weekend";
   sampleDayCount: number;
 };
 
 export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewModel }) {
   const [viewMode, setViewMode] = useState<"date-hour" | "level-hour">(view.defaultView);
-  const [selectedScopeId, setSelectedScopeId] = useState(view.scopes[0]?.id ?? "");
+  const [selectedDateScopeId, setSelectedDateScopeId] = useState(view.scopes[0]?.id ?? "");
+  const [selectedLevelScopeId, setSelectedLevelScopeId] = useState(view.circuitProfiles[0]?.levelScopeId ?? "");
   const [selectedDayType, setSelectedDayType] = useState<"weekday" | "weekend">("weekday");
   const [activeCellId, setActiveCellId] = useState<string | null>(null);
   const [selectedCellId, setSelectedCellId] = useState<string | null>(null);
@@ -32,39 +37,41 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
     );
   }
 
-  const selectedScope = view.scopes.find((scope) => scope.id === selectedScopeId) ?? view.scopes[0]!;
+  const selectedScope = view.scopes.find((scope) => scope.id === selectedDateScopeId) ?? view.scopes[0]!;
   const dateRows = view.dates.map((date) => ({
       id: date.id,
       label: `${date.weekday} ${date.label}`,
       cells: selectedScope.cells.filter((cell) => cell.localDate === date.id),
     }));
-  const averageRows = view.scopes.flatMap((scope) => {
-    const profile = view.averageProfiles.find((candidate) => (
-      candidate.scopeId === scope.id && candidate.dayType === selectedDayType
-    ));
-    return profile ? [{
-      id: profile.id,
-      label: scope.name,
-      cells: profile.values.map((value): AverageCell => ({
-        ...value,
-        scopeId: scope.id,
-        scopeName: scope.name,
-        dayTypeLabel: profile.dayTypeLabel,
-        sampleDayCount: profile.sampleDayCount,
-      })),
-    }] : [];
-  });
+  const selectedCircuitProfile = view.circuitProfiles.find((profile) => (
+    profile.levelScopeId === selectedLevelScopeId && profile.dayType === selectedDayType
+  )) ?? view.circuitProfiles.find((profile) => profile.dayType === selectedDayType) ?? null;
+  const circuitRows = selectedCircuitProfile?.circuits.map((circuit) => ({
+    id: circuit.meterNodeId,
+    label: circuit.name,
+    categoryLabel: circuit.categoryLabel,
+    cells: circuit.values.map((value): CircuitCell => ({
+      ...value,
+      meterNodeId: circuit.meterNodeId,
+      circuitName: circuit.name,
+      categoryLabel: circuit.categoryLabel,
+      levelScopeId: selectedCircuitProfile.levelScopeId,
+      levelScopeName: selectedCircuitProfile.levelScopeName,
+      dayTypeLabel: selectedCircuitProfile.dayTypeLabel,
+      sampleDayCount: selectedCircuitProfile.sampleDayCount,
+    })),
+  })) ?? [];
   const dateCells = dateRows.flatMap((row) => row.cells);
-  const averageCells = averageRows.flatMap((row) => row.cells);
-  const visibleCells = viewMode === "date-hour" ? dateCells : averageCells;
+  const circuitCells = circuitRows.flatMap((row) => row.cells);
+  const visibleCells = viewMode === "date-hour" ? dateCells : circuitCells;
   const activeCell = viewMode === "date-hour"
     ? dateCells.find((cell) => cell.id === activeCellId)
       ?? dateCells.find((cell) => cell.id === selectedCellId)
       ?? null
     : null;
-  const activeAverageCell = viewMode === "level-hour"
-    ? averageCells.find((cell) => cell.id === activeCellId)
-      ?? averageCells.find((cell) => cell.id === selectedCellId)
+  const activeCircuitCell = viewMode === "level-hour"
+    ? circuitCells.find((cell) => cell.id === activeCellId)
+      ?? circuitCells.find((cell) => cell.id === selectedCellId)
       ?? null
     : null;
   let maximumUsageKwh = 0;
@@ -83,8 +90,9 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
     <section aria-labelledby="ngee-ann-usage-heatmap" className="border-b border-border px-5 py-5 lg:px-7 lg:py-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">Usage heatmap</p>
           <h3 id="ngee-ann-usage-heatmap" className="text-lg font-semibold tracking-[-0.015em] text-foreground">
-            Usage heatmap
+            Daily usage pattern by Level
           </h3>
           <p className="mt-1.5 text-sm leading-6 text-muted">{view.decisionQuestion}</p>
         </div>
@@ -111,7 +119,7 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
                     resetCell();
                   }}
                 >
-                  {mode === "date-hour" ? "Date × hour" : "Level × hour average"}
+                  {mode === "date-hour" ? "Date × hour" : "Level → Circuit"}
                 </button>
               );
             })}
@@ -132,7 +140,7 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
                     aria-controls="ngee-ann-usage-heatmap-grid"
                     className={filterClassName(selected)}
                     onClick={() => {
-                      setSelectedScopeId(scope.id);
+                      setSelectedDateScopeId(scope.id);
                       resetCell();
                     }}
                   >
@@ -169,8 +177,17 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
         )}
       </div>
 
-      <div id="ngee-ann-usage-heatmap-grid" className="mt-4 overflow-x-auto pb-1">
-        <div className="min-w-[1080px]">
+      <div className="mt-4 grid min-w-0 gap-4 xl:grid-cols-[300px_minmax(0,1fr)] xl:items-start">
+        <LevelProfileSummary
+          profiles={view.averageProfiles.filter((candidate) => candidate.dayType === selectedDayType && candidate.scopeId !== view.scopes[0]?.id)}
+          selectedScopeId={selectedLevelScopeId}
+          onSelect={(scopeId) => {
+            setSelectedLevelScopeId(scopeId);
+            resetCell();
+          }}
+        />
+        <div id="ngee-ann-usage-heatmap-grid" className="min-w-0 overflow-x-auto pb-1">
+          <div className="min-w-[820px]">
           <div className="grid grid-cols-[112px_repeat(24,minmax(34px,1fr))] gap-1 text-[9px] text-muted">
             <span aria-hidden="true" />
             {Array.from({ length: 24 }, (_, hour) => (
@@ -193,11 +210,14 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
                   ))}
                 </React.Fragment>
               ))
-              : averageRows.map((row) => (
+              : circuitRows.map((row) => (
                 <React.Fragment key={row.id}>
-                  <span className="flex min-h-9 items-center pr-2 text-[10px] font-semibold text-foreground">{row.label}</span>
+                  <span className={[
+                    "flex min-h-9 flex-col justify-center rounded-l px-2 text-[10px] font-semibold text-foreground",
+                    row.cells[0]?.levelScopeId === selectedLevelScopeId ? "bg-primary/10" : "",
+                  ].join(" ")}><span>{row.label}</span><span className="font-normal text-muted">{row.categoryLabel}</span></span>
                   {row.cells.map((cell) => (
-                    <AverageHeatmapCellButton
+                    <CircuitHeatmapCellButton
                       key={cell.id}
                       cell={cell}
                       maximumUsageKwh={maximumUsageKwh}
@@ -208,22 +228,27 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
                   ))}
                 </React.Fragment>
               ))}
+            </div>
           </div>
         </div>
       </div>
 
+      <p className="mt-3 text-xs leading-5 text-muted">
+        Darker Heatmap cells show higher accepted usage within the selected view; they do not by themselves prove an anomaly, waste or cause.
+      </p>
+
       <div className="mt-4 min-h-[96px] rounded-lg bg-surface-subtle px-4 py-3" aria-live="polite" aria-atomic="true">
-        {activeAverageCell ? (
+        {activeCircuitCell ? (
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold text-foreground">
-                {activeAverageCell.scopeName} / {activeAverageCell.dayTypeLabel} / {activeAverageCell.hourLabel}
+                {activeCircuitCell.levelScopeName} / {activeCircuitCell.circuitName} / {activeCircuitCell.dayTypeLabel} / {activeCircuitCell.hourLabel}
               </p>
               <p className="mt-1 text-[10px] text-muted">
-                {activeAverageCell.sampleDayCount} complete-day samples / mean_of_complete_local_days
+                {activeCircuitCell.categoryLabel} · {activeCircuitCell.sampleDayCount} common complete-day samples / published component Circuit
               </p>
             </div>
-            <p className="text-sm font-semibold tabular-nums text-foreground">{activeAverageCell.usageKwh} kWh</p>
+            <p className="text-sm font-semibold tabular-nums text-foreground">{activeCircuitCell.usageKwh} kWh</p>
           </div>
         ) : activeCell ? (
           <>
@@ -250,7 +275,46 @@ export function NgeeAnnUsageHeatmap({ view }: { view: NgeeAnnUsageHeatmapViewMod
       </div>
 
       <TimeEvidence label="Heatmap evidence" evidence={view.evidence} />
+      <TimeEvidence label="Circuit heatmap evidence" evidence={view.componentEvidence} />
     </section>
+  );
+}
+
+function LevelProfileSummary({
+  profiles,
+  selectedScopeId,
+  onSelect,
+}: {
+  profiles: NgeeAnnUsageHeatmapViewModel["averageProfiles"];
+  selectedScopeId: string;
+  onSelect: (scopeId: string) => void;
+}) {
+  return (
+    <div className="min-w-0 rounded-xl border border-border bg-surface-subtle/55 p-3">
+      <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">Level profile summary</p>
+      <p className="mt-1 text-xs leading-5 text-muted">Select a Level to inspect its observed hourly pattern.</p>
+      <div className="mt-3 divide-y divide-border border-y border-border">
+        {profiles.map((profile) => (
+          <button
+            key={profile.id}
+            type="button"
+            aria-pressed={selectedScopeId === profile.scopeId}
+            className="grid min-h-20 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 py-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
+            onClick={() => onSelect(profile.scopeId)}
+          >
+            <span className="min-w-0">
+              <strong className="block text-sm text-foreground">{profile.scopeName}</strong>
+              <span className="mt-1 block text-xs text-muted">Peak {profile.peakHourLabel} · {profile.peakUsage} kWh</span>
+            </span>
+            <span className="text-right text-xs tabular-nums text-muted">
+              <strong className="block text-sm text-foreground">{profile.dailyUsage}</strong>
+              kWh/day
+            </span>
+          </button>
+        ))}
+      </div>
+      <p className="mt-3 text-[11px] leading-5 text-muted">Level totals remain official. The selected Level opens only server-published component Circuit rows; no sub-meter value is inferred in Web.</p>
+    </div>
   );
 }
 
@@ -301,14 +365,14 @@ function HeatmapCellButton({
   );
 }
 
-function AverageHeatmapCellButton({
+function CircuitHeatmapCellButton({
   cell,
   maximumUsageKwh,
   selected,
   onActivate,
   onSelect,
 }: {
-  cell: AverageCell;
+  cell: CircuitCell;
   maximumUsageKwh: number;
   selected: boolean;
   onActivate: (id: string | null) => void;
@@ -318,7 +382,7 @@ function AverageHeatmapCellButton({
   return (
     <button
       type="button"
-      aria-label={`${cell.scopeName} / ${cell.dayTypeLabel} ${cell.hourLabel}: mean ${cell.usageKwh} kWh across ${cell.sampleDayCount} complete days`}
+      aria-label={`${cell.levelScopeName} / ${cell.circuitName} / ${cell.dayTypeLabel} ${cell.hourLabel}: mean ${cell.usageKwh} kWh across ${cell.sampleDayCount} common complete days`}
       aria-pressed={selected}
       className={[
         "relative h-9 overflow-hidden rounded border border-step-inspect/15 bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-step-inspect/50",

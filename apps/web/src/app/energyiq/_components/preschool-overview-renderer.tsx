@@ -6,9 +6,17 @@ import type {
   EnergySavedAnalysisAiArtifactInputDto,
 } from "../../../lib/config-api";
 import { EnergyIcon } from "./icons";
+import { AiFindingPresentationView } from "./ai-finding-presentation-view";
 import { projectExplorerHrefForScope } from "./overview-explorer-handoff";
 import { PreschoolEvidenceLink } from "./preschool-evidence-link";
 import { PreschoolAiSlot } from "./preschool-ai-slot";
+import type { PreschoolAiRunResult } from "./preschool-ai-run";
+import { PreschoolForecastPanel } from "./preschool-forecast-panel";
+import { buildPreschoolOverviewCoverage } from "./preschool-ai-coverage";
+import {
+  adaptPreschoolAiArtifactToSectionInterpretation,
+  type PreschoolSectionInterpretationView,
+} from "./preschool-section-interpretation-adapter";
 import {
   buildPreschoolOverviewViewModel,
   type PreschoolDecisionSummaryItem,
@@ -16,6 +24,14 @@ import {
   type PreschoolOverviewViewModel,
   type PreschoolOperationalCentre,
 } from "./preschool-overview-view-model";
+
+export const PRESCHOOL_OVERVIEW_SECTIONS = [
+  { id: "preschool-overall-summary", label: "1 · Overview" },
+  { id: "preschool-benchmark-analysis", label: "2 · Benchmarks" },
+  { id: "preschool-standby-wastage", label: "3 · Standby wastage" },
+  { id: "preschool-operating-hours", label: "4 · Operating hours" },
+  { id: "preschool-monthly-outlook", label: "5 · Monthly outlook" },
+] as const;
 
 export type PreschoolOverviewRendererState =
   | {
@@ -28,6 +44,11 @@ export type PreschoolOverviewRendererState =
     snapshot: EnergyProjectAnalysisSnapshotDto;
   };
 
+export type PreschoolBenchmarkInterpretation = PreschoolSectionInterpretationView;
+
+export type PreschoolStandbyInterpretation = PreschoolBenchmarkInterpretation;
+export type PreschoolOperatingInterpretation = PreschoolBenchmarkInterpretation;
+
 export function PreschoolOverviewRenderer({
   state,
   onRetry,
@@ -37,6 +58,9 @@ export function PreschoolOverviewRenderer({
   aiSlotMode = "live",
   savedAiArtifact,
   onAiArtifactChange,
+  benchmarkInterpretation,
+  standbyInterpretation,
+  operatingInterpretation,
 }: {
   state: PreschoolOverviewRendererState;
   onRetry?: () => void;
@@ -46,7 +70,21 @@ export function PreschoolOverviewRenderer({
   aiSlotMode?: "live" | "saved";
   savedAiArtifact?: EnergySavedAnalysisAiArtifactDto;
   onAiArtifactChange?: (artifact: EnergySavedAnalysisAiArtifactInputDto | null) => void;
+  benchmarkInterpretation?: PreschoolBenchmarkInterpretation;
+  standbyInterpretation?: PreschoolStandbyInterpretation;
+  operatingInterpretation?: PreschoolOperatingInterpretation;
 }) {
+  const [liveAiResult, setLiveAiResult] = React.useState<PreschoolAiRunResult | undefined>();
+  const readySnapshotIdentity = state.status === "ready"
+    ? [
+        state.snapshot.dataSnapshot.id,
+        state.snapshot.projectRelease.id,
+        state.snapshot.context.primaryPeriod.start,
+        state.snapshot.context.primaryPeriod.endExclusive,
+      ].join("|")
+    : state.status;
+  React.useEffect(() => setLiveAiResult(undefined), [readySnapshotIdentity]);
+
   if (state.status !== "ready") {
     const meta = {
       loading: { label: "Loading", icon: "analysis" as const, tone: "text-muted", surface: "border-border bg-surface" },
@@ -88,6 +126,20 @@ export function PreschoolOverviewRenderer({
   const savedAiResult = savedAiArtifact?.rendererKey === "preschool-overview"
     ? savedAiArtifact.result as unknown as Extract<import("./preschool-ai-run").PreschoolAiRunResult, { status: "available" }>
     : undefined;
+  const coverage = buildPreschoolOverviewCoverage(state.snapshot);
+  const sectionAiResult = aiSlotMode === "saved" ? savedAiResult : liveAiResult;
+  const adaptedBenchmarkInterpretation = adaptPreschoolAiArtifactToSectionInterpretation({
+    candidate: sectionAiResult,
+    expected: coverage?.binding ?? null,
+    target: "preschool.benchmark",
+    mode: aiSlotMode,
+  });
+  const adaptedStandbyInterpretation = adaptPreschoolAiArtifactToSectionInterpretation({
+    candidate: sectionAiResult,
+    expected: coverage?.binding ?? null,
+    target: "preschool.standby",
+    mode: aiSlotMode,
+  });
   const statusClass = view.dataStatus.status === "complete"
     ? "border-step-success/30 bg-step-success-soft text-step-success"
     : view.dataStatus.status === "partial"
@@ -137,11 +189,16 @@ export function PreschoolOverviewRenderer({
       <section
         id="preschool-overall-summary"
         aria-labelledby="preschool-overall-summary-heading"
+        data-overview-section="1"
         className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8"
       >
-        <h3 id="preschool-overall-summary-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">
-          Overall consumption summary
-        </h3>
+        <SectionHeader
+          id="preschool-overall-summary-heading"
+          sectionNumber={1}
+          title="Overall consumption summary"
+          description={`Total portfolio energy and estimated cost across all ${view.overallSummary.total.centreCount} Centres, followed by the key findings that organise the rest of this report.`}
+          meta={view.context.period}
+        />
 
         <div className="mt-4 grid overflow-hidden rounded-xl bg-[linear-gradient(125deg,var(--color-foreground),color-mix(in_srgb,var(--color-primary)_58%,var(--color-foreground)))] text-background sm:grid-cols-3">
           {view.overallSummary.metrics.map((metric) => (
@@ -168,7 +225,7 @@ export function PreschoolOverviewRenderer({
               <thead className="bg-surface-subtle text-xs font-semibold text-muted">
                 <tr>
                   <th scope="col" className="px-4 py-3">Centre type</th>
-                  <th scope="col" className="px-4 py-3 text-right">Centres</th>
+                  <th scope="col" className="px-4 py-3 text-right">Outlets</th>
                   <th scope="col" className="px-4 py-3 text-right">Energy</th>
                   <th scope="col" className="px-4 py-3 text-right">Estimated cost</th>
                   <th scope="col" className="px-4 py-3 text-right">Share</th>
@@ -185,6 +242,15 @@ export function PreschoolOverviewRenderer({
                   </tr>
                 ))}
               </tbody>
+              <tfoot className="border-t-2 border-border bg-surface-subtle font-semibold text-foreground">
+                <tr>
+                  <th scope="row" className="px-4 py-3">Portfolio total</th>
+                  <td className="px-4 py-3 text-right tabular-nums">{view.overallSummary.total.centreCount}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">{view.overallSummary.total.energy}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">{view.overallSummary.total.estimatedCost}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">{view.overallSummary.total.share}</td>
+                </tr>
+              </tfoot>
             </table>
           </div>
           {view.overallSummary.costAssumption ? (
@@ -202,6 +268,51 @@ export function PreschoolOverviewRenderer({
               . This is a planning estimate, not the customer bill.
             </p>
           ) : null}
+        </div>
+
+        <div id="preschool-decision-summary" className="mt-8 scroll-mt-28 border-t border-border pt-7">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h4 id="preschool-decision-summary-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Key findings · Sections 2–5</h4>
+              <p className="mt-1.5 text-sm leading-6 text-muted">A compact, Snapshot-bound directory to the detailed analysis below.</p>
+            </div>
+            <span className="text-xs font-semibold text-muted">Select a finding to open its section</span>
+          </div>
+          {view.decisionSummary.items.length > 0 ? (
+            <div className="mt-4 divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface">
+              {view.decisionSummary.items.map((item) => (
+                <DecisionSummaryCard key={item.id} item={item} />
+              ))}
+            </div>
+          ) : (
+            <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
+              <p className="text-sm font-semibold text-muted">Key findings unavailable</p>
+              <p className="mt-2 text-sm leading-6 text-muted">{view.decisionSummary.detail}</p>
+            </div>
+          )}
+          {view.decisionSummary.items.length > 0 ? (
+            <p className="mt-3 text-xs leading-5 text-muted">{view.decisionSummary.detail}</p>
+          ) : null}
+        </div>
+
+        <div id="preschool-ai-analysis" className="mt-8 scroll-mt-28 border-t border-border pt-7">
+          <PreschoolAiSlot
+            snapshot={state.snapshot}
+            sectionId="page-synthesis"
+            mode={aiSlotMode}
+            {...(savedAiResult ? { savedResult: savedAiResult } : {})}
+            onResult={setLiveAiResult}
+            {...(onAiArtifactChange ? {
+              onCompletedResult: (result: Extract<import("./preschool-ai-run").PreschoolAiRunResult, { status: "available" }>) => onAiArtifactChange({
+                contract: "energyiq-saved-ai-result@1",
+                rendererKey: "preschool-overview",
+                snapshotId: state.snapshot.dataSnapshot.id,
+                projectReleaseId: state.snapshot.projectRelease.id,
+                result,
+              }),
+            } : {})}
+            {...(aiAnalystHref ? { aiAnalystHref } : {})}
+          />
           <PreschoolAiSlot
             snapshot={state.snapshot}
             sectionId="overall-summary"
@@ -212,295 +323,204 @@ export function PreschoolOverviewRenderer({
         </div>
       </section>
 
-      <section id="preschool-decision-summary" aria-labelledby="preschool-decision-summary-heading" className="scroll-mt-28 border-b border-border bg-surface-subtle/45 px-5 py-7 lg:px-7 lg:py-8">
-        <div>
-          <h3 id="preschool-decision-summary-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Signals to investigate</h3>
-        </div>
-        {view.decisionSummary.items.length > 0 ? (
-          <div className="mt-4 space-y-3">
-            {view.decisionSummary.items.map((item) => (
-              <DecisionSummaryCard key={item.id} item={item} />
-            ))}
-          </div>
-        ) : (
-          <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
-            <p className="text-sm font-semibold text-muted">Decision summary unavailable</p>
-            <p className="mt-2 text-sm leading-6 text-muted">{view.decisionSummary.detail}</p>
-          </div>
-        )}
-        {view.decisionSummary.items.length > 0 ? (
-          <p className="mt-4 text-xs leading-5 text-muted">{view.decisionSummary.detail}</p>
-        ) : null}
-      </section>
-
-      <div id="preschool-ai-analysis" className="scroll-mt-28">
-        <PreschoolAiSlot
-          snapshot={state.snapshot}
-          sectionId="page-synthesis"
-          mode={aiSlotMode}
-          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
-          {...(onAiArtifactChange ? {
-            onCompletedResult: (result: Extract<import("./preschool-ai-run").PreschoolAiRunResult, { status: "available" }>) => onAiArtifactChange({
-              contract: "energyiq-saved-ai-result@1",
-              rendererKey: "preschool-overview",
-              snapshotId: state.snapshot.dataSnapshot.id,
-              projectReleaseId: state.snapshot.projectRelease.id,
-              result,
-            }),
-          } : {})}
-          {...(aiAnalystHref ? { aiAnalystHref } : {})}
+      <section id="preschool-benchmark-analysis" aria-labelledby="preschool-benchmark-analysis-heading" data-overview-section="2" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
+        <SectionHeader
+          id="preschool-benchmark-analysis-heading"
+          sectionNumber={2}
+          title="Benchmark Analysis"
+          description="Compare Centres after normalising for floor area and people served, then identify who should be reviewed first."
         />
-      </div>
-
-      <section id="preschool-appliance-ranking" aria-labelledby="preschool-appliance-ranking-heading" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h3 id="preschool-appliance-ranking-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Where energy goes</h3>
-          </div>
-          {view.appliances.status === "available" ? (
-            <p className="text-xs font-semibold tabular-nums text-foreground">{view.appliances.totalEnergy} · 9 Appliances</p>
-          ) : null}
-        </div>
-        {view.appliances.status === "available" ? (
-          <div className="mt-4">
-            <div className="divide-y divide-border border-y border-border" role="list" aria-label="Portfolio Appliance energy ranking">
-              {view.appliances.rows.map((appliance, index) => (
-                <div key={appliance.name} className="grid gap-2 py-3 sm:grid-cols-[minmax(150px,0.8fr)_minmax(220px,1.5fr)_170px] sm:items-center sm:gap-4" role="listitem">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-foreground">{index + 1}. {appliance.name}</p>
-                    <p className="mt-0.5 text-xs text-muted">{appliance.applianceGroup} · {appliance.centreCount} Centres</p>
-                  </div>
-                  <div className="h-2.5 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true">
-                    <div
-                      className={`h-full rounded-full ${applianceBarClass(appliance.applianceGroup)}`}
-                      style={{ width: `${Math.max(2, appliance.relativeToTopPct)}%` }}
-                    />
-                  </div>
-                  <div className="flex items-baseline justify-between gap-3 tabular-nums sm:justify-end">
-                    <span className="text-sm font-semibold text-foreground">{appliance.energy}</span>
-                    <span className="w-14 text-right text-xs text-muted">{appliance.share}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <details className="mt-4 border-t border-border pt-3">
-              <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Appliance calculation note</summary>
-              <p className="mt-2 text-xs leading-5 text-muted">{view.appliances.detail}</p>
-            </details>
-          </div>
-        ) : (
-          <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
-            <p className="text-xs font-semibold text-muted">Appliance ranking unavailable</p>
-            <p className="mt-2 text-[11px] leading-5 text-muted">{view.appliances.detail}</p>
-          </div>
-        )}
-        <PreschoolAiSlot
+        <BenchmarkInterpretationSlot
           snapshot={state.snapshot}
-          sectionId="appliance-contribution"
-          mode={aiSlotMode}
-          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
-          {...(aiAnalystHref ? { aiAnalystHref } : {})}
+          interpretation={benchmarkInterpretation ?? adaptedBenchmarkInterpretation}
         />
-      </section>
-
-      <section id="preschool-efficiency-benchmark" aria-labelledby="preschool-efficiency-benchmark-heading" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
         {view.benchmark.status === "provisional" ? (
           <>
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 id="preschool-efficiency-benchmark-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Efficiency benchmark</h3>
-                <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2.5 py-1 text-xs font-semibold text-step-warning">Provisional</span>
-              </div>
-              <p className="mt-1.5 text-sm leading-6 text-muted">Find Centres that use more energy than peers after accounting for floor area and people served.</p>
-            </div>
-            <p className="text-sm font-semibold text-step-error">Review first: {view.benchmark.priorityCentreCodes.join(" · ")}</p>
-          </div>
-          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-            <div className="min-w-0">
-              <BenchmarkScatterPlot benchmark={view.benchmark} />
-              <div className="mt-3 grid overflow-hidden rounded-lg border border-border sm:grid-cols-2 xl:grid-cols-4">
-                {view.benchmark.quadrants.map((quadrant) => (
-                  <div key={quadrant.id} className={`min-h-24 border-border p-3 sm:[&:nth-child(odd)]:border-r sm:[&:nth-child(-n+2)]:border-b xl:border-b-0 xl:[&:not(:last-child)]:border-r ${quadrant.id === "priority" ? "bg-step-error-soft" : "bg-surface-subtle"}`}>
-                    <div className="flex items-center justify-between gap-3">
-                      <p className={`text-[11px] font-semibold ${quadrant.id === "priority" ? "text-step-error" : "text-foreground"}`}>{quadrant.label}</p>
-                      <span className="text-[10px] tabular-nums text-muted">{quadrant.centreCodes.length}</span>
-                    </div>
-                    <p className="mt-2 text-xs font-semibold tracking-wide text-foreground">{quadrant.centreCodes.join(" · ") || "None"}</p>
+            <div className="mt-7 border-t border-border pt-6">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h4 className="text-base font-semibold text-foreground">2.1 — Centre Efficiency Metrics</h4>
+                    <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2.5 py-1 text-xs font-semibold text-step-warning">Provisional</span>
                   </div>
-                ))}
+                  <p className="mt-1.5 text-sm leading-6 text-muted">Which Centres are high for both floor-area intensity and energy used per person?</p>
+                </div>
+                <p className="text-xs font-semibold text-muted">Portfolio cohort · n={view.benchmark.sampleSize}</p>
+              </div>
+              <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+                <div className="min-w-0">
+                  <BenchmarkScatterPlot benchmark={view.benchmark} />
+                  <div className="mt-3 grid overflow-hidden rounded-lg border border-border sm:grid-cols-2 xl:grid-cols-4">
+                    {view.benchmark.quadrants.map((quadrant) => (
+                      <div key={quadrant.id} className={`min-h-24 border-border p-3 sm:[&:nth-child(odd)]:border-r sm:[&:nth-child(-n+2)]:border-b xl:border-b-0 xl:[&:not(:last-child)]:border-r ${quadrant.id === "priority" ? "bg-step-error-soft" : "bg-surface-subtle"}`}>
+                        <div className="flex items-center justify-between gap-3">
+                          <p className={`text-[11px] font-semibold ${quadrant.id === "priority" ? "text-step-error" : "text-foreground"}`}>{quadrant.label}</p>
+                          <span className="text-[10px] tabular-nums text-muted">{quadrant.centreCodes.length}</span>
+                        </div>
+                        <p className="mt-2 text-xs font-semibold tracking-wide text-foreground">{quadrant.centreCodes.join(" · ") || "None"}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <aside className="rounded-lg border border-border bg-surface-subtle p-4" aria-label="Benchmark action priority">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-step-error">Review first · action priority</p>
+                  <ol className="mt-3 divide-y divide-border">
+                    {view.benchmark.priorityCentres.map((centre) => (
+                      <li key={centre.centreCode} data-benchmark-priority-centre={centre.centreCode} className="py-3 first:pt-0 last:pb-0">
+                        <div className="flex items-start gap-3">
+                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-step-error text-xs font-semibold text-white">{centre.rank}</span>
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-foreground">{centre.name}</p>
+                            <p className="mt-0.5 text-xs text-muted">{centre.cohort}</p>
+                            <p className="mt-1 text-xs tabular-nums text-step-error">{centre.eui} · {centre.perPax}</p>
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                  <dl className="mt-4 space-y-2 border-t border-border pt-4 text-xs">
+                    <ReadinessRow label="Portfolio EUI P50 / P75" value={`${view.benchmark.eui.p50} / ${view.benchmark.eui.p75}`} />
+                    <ReadinessRow label="Portfolio per-pax P50 / P75" value={`${view.benchmark.perPax.p50} / ${view.benchmark.perPax.p75}`} />
+                  </dl>
+                  <details className="mt-4 border-t border-border pt-3">
+                    <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Benchmark method</summary>
+                    <p className="mt-2 text-xs leading-5 text-muted">{view.benchmark.detail}</p>
+                  </details>
+                </aside>
               </div>
             </div>
-            <div className="rounded-lg border border-border bg-surface-subtle p-4">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-light">Portfolio cross-hairs · n={view.benchmark.sampleSize}</p>
-              <dl className="mt-3 space-y-3 text-xs">
-                <ReadinessRow label="EUI P50" value={`${view.benchmark.eui.p50} kWh/m²/yr`} />
-                <ReadinessRow label="EUI P75" value={`${view.benchmark.eui.p75} kWh/m²/yr`} />
-                <ReadinessRow label="Per-pax P50" value={`${view.benchmark.perPax.p50} kWh/person`} />
-                <ReadinessRow label="Per-pax P75" value={`${view.benchmark.perPax.p75} kWh/person`} />
-              </dl>
-              <p className="mt-4 border-t border-border pt-3 text-[11px] leading-5 text-muted">{view.benchmark.detail}</p>
-            </div>
-          </div>
-          <div className="mt-5 border-t border-border pt-5">
-            <div className="flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <h4 className="text-base font-semibold text-foreground">Peer benchmark distributions</h4>
-                <p className="mt-1 text-sm leading-6 text-muted">Empirical distribution — not a fitted bell curve. Each dot is one Centre; P50 shows the typical range and P75 marks where review should begin.</p>
-              </div>
-              <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-step-warning">Provisional</span>
-            </div>
-            <div className="mt-4 grid gap-4 2xl:grid-cols-2">
-              {view.benchmark.distributions.map((distribution) => (
-                <BenchmarkDistributionPlot key={distribution.id} distribution={distribution} />
-              ))}
-            </div>
-          </div>
+
+            {view.benchmark.distributions.map((distribution, index) => (
+              <BenchmarkMetricSection
+                key={distribution.id}
+                distribution={distribution}
+                sectionNumber={`2.${index + 2}`}
+              />
+            ))}
           </>
         ) : (
           <div role="status">
-            <h3 id="preschool-efficiency-benchmark-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Efficiency benchmark</h3>
+            <h4 className="mt-5 text-base font-semibold text-foreground">Benchmark unavailable</h4>
             <p className="mt-1.5 text-sm leading-6 text-muted">This Snapshot does not yet support a reliable peer comparison.</p>
             <p className="mt-3 text-sm leading-6 text-muted">{view.benchmark.detail}</p>
           </div>
         )}
-        <PreschoolAiSlot
-          snapshot={state.snapshot}
-          sectionId="centre-benchmark"
-          mode={aiSlotMode}
-          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
-          {...(aiAnalystHref ? { aiAnalystHref } : {})}
-        />
       </section>
 
-      <section id="preschool-operational-behaviour" aria-labelledby="preschool-operational-behaviour-heading" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 id="preschool-operational-behaviour-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Operating patterns</h3>
-              {view.operational.status === "available" ? (
-                <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2 py-0.5 text-[10px] font-semibold text-step-warning">Provisional SOP signal</span>
-              ) : null}
-            </div>
-            <p className="mt-1.5 text-sm leading-6 text-muted">See where energy use continues outside operating hours and which Centres repeat the same hourly Spike.</p>
-          </div>
-          {view.operational.status === "available" ? (
-            <p className="text-[11px] text-muted-light">Calendar {view.operational.calendarVersion} · {view.operational.threshold}</p>
-          ) : null}
-        </div>
-
+      <section id="preschool-standby-wastage" aria-labelledby="preschool-standby-wastage-heading" data-overview-section="3" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
+        <SectionHeader
+          id="preschool-standby-wastage-heading"
+          sectionNumber={3}
+          title="Standby Energy Wastage — Post Operating Hours"
+          description="How much energy remains after closing, what stays powered, and which Centres and hours need an after-hours review?"
+        />
+        <StandbyInterpretationSlot
+          snapshot={state.snapshot}
+          interpretation={standbyInterpretation ?? adaptedStandbyInterpretation}
+        />
         {view.operational.status === "available" ? (
           <>
-            <div className="mt-4">
-              <OperatingProfileChart profile={view.operational.hourlyProfile} />
-            </div>
-            <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_320px]">
-              <OperationalSpikePanel
-                title="Standby / closed hours"
-                energy={`${view.operational.standby.energy} · ${view.operational.standby.share}`}
-                spikeCount={view.operational.standby.spikeCount}
-                centreCount={view.operational.standby.centreCount}
-                centres={view.operational.standby.centres}
-                tone="warning"
-              />
-              <OperationalSpikePanel
-                title="Operating hours"
-                energy={view.operational.operating.energy}
-                spikeCount={view.operational.operating.spikeCount}
-                centreCount={view.operational.operating.centreCount}
-                centres={view.operational.operating.centres}
-                tone="default"
-              />
-              <div className="rounded-lg border border-step-warning/30 bg-step-warning-soft p-4">
-                <p className="text-xs font-semibold text-step-warning">{view.operational.sop.label}</p>
-                <p className="mt-2 text-xl font-semibold tabular-nums text-foreground">
-                  {view.operational.sop.breachingCentreCodes.join(" · ") || "No signal"}
-                </p>
-                <div className="mt-3 space-y-2">
-                  {view.operational.sop.centres.map((centre) => (
-                    <div
-                      key={centre.centreCode}
-                      data-sop-centre-type={centre.centreType ?? "Unavailable"}
-                      className="flex items-center justify-between gap-3 rounded-md border border-step-warning/20 bg-surface/70 px-3 py-2 text-xs"
-                    >
-                      <span className="min-w-0">
-                        <span className="block font-semibold text-foreground">{centre.centreCode}</span>
-                        <span className="mt-0.5 block truncate text-[10px] text-muted-light">{centre.centreType ?? "Type unavailable"}</span>
-                      </span>
-                      <span className="text-muted">{centre.standbySpikeCount} Spike{centre.standbySpikeCount === 1 ? "" : "s"}</span>
-                      <span className="font-semibold tabular-nums text-step-warning">{centre.score}</span>
-                    </div>
-                  ))}
-                </div>
-                <p className="mt-3 text-[11px] leading-5 text-muted">{view.operational.sop.detail}</p>
-              </div>
-            </div>
+            <StandbyKpiStrip standby={view.operational.standby} />
+
+            <section className="mt-8 border-t border-border pt-7" aria-labelledby="preschool-standby-appliances-heading">
+              <h4 id="preschool-standby-appliances-heading" className="text-base font-semibold text-foreground">3.1 Standby Energy by Appliance</h4>
+              <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Which published Appliance aliases continue to consume energy while the Calendar marks Centres as closed?</p>
+              <StandbyApplianceComposition standby={view.operational.standby} />
+            </section>
+
+            <section className="mt-8 border-t border-border pt-7" aria-labelledby="preschool-standby-spikes-heading">
+              <h4 id="preschool-standby-spikes-heading" className="text-base font-semibold text-foreground">3.2 Non-operating Hours Spike Analysis</h4>
+              <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Start with the Centres that have repeated closed-hour exceptions. Expand a row to inspect every event for that Centre.</p>
+              <StandbySpikeTable centres={view.operational.standby.centres} />
+            </section>
+
+            <section className="mt-8 border-t border-border pt-7" aria-labelledby="preschool-after-hours-review-heading">
+              <h4 id="preschool-after-hours-review-heading" className="text-base font-semibold text-foreground">3.3 {view.operational.sop.label}</h4>
+              <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Use this provisional score to order an investigation, not to certify SOP compliance.</p>
+              <AfterHoursReviewPriority sop={view.operational.sop} />
+            </section>
+
+            <details className="mt-7 rounded-lg border border-border bg-surface-subtle/40 px-4 py-3">
+              <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Method, tariff and evidence</summary>
+              <dl className="mt-3 grid gap-2 text-xs leading-5 sm:grid-cols-2">
+                <ReadinessRow label="Calendar" value={view.operational.calendarVersion} />
+                <ReadinessRow label="Spike rule" value={view.operational.threshold} />
+                <ReadinessRow label="Tariff" value={view.operational.standby.provisionalCostNote} />
+                <ReadinessRow label="Reconciliation" value={view.operational.standby.reconciliation} />
+              </dl>
+              <p className="mt-3 text-xs leading-5 text-muted">Leading contributors identify the largest observed Circuit within an event; they are not confirmed root causes. Spike excess is investigation evidence, not guaranteed savings.</p>
+              <div className="mt-3"><PreschoolEvidenceLink label="View supporting evidence" /></div>
+            </details>
           </>
         ) : (
-          <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
-            <p className="text-xs font-semibold text-muted">Unavailable</p>
+          <div className="mt-5 rounded-lg border border-border bg-surface-subtle p-4" role="status">
+            <p className="text-xs font-semibold text-muted">Standby analysis unavailable</p>
             <p className="mt-2 text-[11px] leading-5 text-muted">{view.operational.detail}</p>
           </div>
         )}
-        <PreschoolAiSlot
-          snapshot={state.snapshot}
-          sectionId="operating-behaviour"
-          mode={aiSlotMode}
-          {...(savedAiResult ? { savedResult: savedAiResult } : {})}
-          {...(aiAnalystHref ? { aiAnalystHref } : {})}
-        />
       </section>
 
-      <section id="preschool-planning-outlook" aria-labelledby="preschool-planning-outlook-heading" className="scroll-mt-28 border-b border-border bg-surface-subtle/35 px-5 py-7 lg:px-7 lg:py-8">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h3 id="preschool-planning-outlook-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">June planning baseline</h3>
-              {view.planningOutlook.status === "provisional" ? (
-                <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2.5 py-1 text-xs font-semibold text-step-warning">Estimated · Provisional</span>
-              ) : null}
-            </div>
-            <p className="mt-1.5 text-sm leading-6 text-muted">A transparent planning reference from accepted May facts — not an AI forecast or customer bill.</p>
-          </div>
-          <span className="text-xs text-muted">Live Forecast: {view.liveForecast.label}</span>
-        </div>
-        {view.planningOutlook.status === "provisional" ? (
-          <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
-            <PlanningBaselineChart outlook={view.planningOutlook} />
-            <div className="rounded-lg border border-step-warning/30 bg-step-warning-soft/30 p-4">
-              <p className="text-sm font-semibold text-foreground">If May's complete-week pattern repeats</p>
-              <dl className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-                <div>
-                  <dt className="text-xs text-muted">June energy</dt>
-                  <dd className="mt-1 text-xl font-semibold tabular-nums text-foreground">{view.planningOutlook.projectedUsage}</dd>
-                  <dd className="mt-1 text-xs text-muted">Observed-week range {view.planningOutlook.projectedRange}</dd>
-                </div>
-                <div>
-                  <dt className="text-xs text-muted">June cost before GST</dt>
-                  <dd className="mt-1 text-xl font-semibold tabular-nums text-foreground">{view.planningOutlook.projectedCost}</dd>
-                  <dd className="mt-1 text-xs text-muted">Reference range {view.planningOutlook.projectedCostRange}</dd>
-                </div>
+      <section id="preschool-operating-hours" aria-labelledby="preschool-operating-hours-heading" data-overview-section="4" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
+        <SectionHeader
+          id="preschool-operating-hours-heading"
+          sectionNumber={4}
+          title="Operating Hours Analysis"
+          description="How much energy is used while Centres are open, which Appliances account for it, and which Centres and hours need an operating review?"
+        />
+        <OperatingInterpretationSlot
+          snapshot={state.snapshot}
+          interpretation={operatingInterpretation}
+        />
+        {view.operational.status === "available" ? (
+          <>
+            <OperatingKpiStrip operating={view.operational.operating} />
+
+            <section className="mt-8 border-t border-border pt-7" aria-labelledby="preschool-operating-appliances-heading">
+              <h4 id="preschool-operating-appliances-heading" className="text-base font-semibold text-foreground">4.1 Operating Energy by Appliance</h4>
+              <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Which observed published Appliance aliases account for energy while the Calendar marks Centres as open?</p>
+              <OperatingApplianceComposition operating={view.operational.operating} />
+            </section>
+
+            <section className="mt-8 border-t border-border pt-7" aria-labelledby="preschool-operating-spikes-heading">
+              <h4 id="preschool-operating-spikes-heading" className="text-base font-semibold text-foreground">4.2 Operating Hours Spike Analysis</h4>
+              <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">Contact Centres with repeated opening-hour exceptions first. Expand a row to inspect every event recorded for that Centre.</p>
+              <OperatingSpikeTable centres={view.operational.operating.centres} />
+            </section>
+
+            <AllHoursApplianceContext appliances={view.appliances} />
+
+            <details className="mt-7 rounded-lg border border-border bg-surface-subtle/40 px-4 py-3">
+              <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Method, tariff and evidence</summary>
+              <dl className="mt-3 grid gap-2 text-xs leading-5 sm:grid-cols-2">
+                <ReadinessRow label="Calendar" value={view.operational.calendarVersion} />
+                <ReadinessRow label="Spike rule" value={view.operational.threshold} />
+                <ReadinessRow label="Tariff" value={view.operational.operating.provisionalCostNote} />
+                <ReadinessRow label="Reconciliation" value={view.operational.operating.reconciliation} />
               </dl>
-              <div className="mt-4 border-t border-step-warning/20 pt-4 text-xs leading-5 text-muted">
-                <p><strong className="font-semibold text-foreground">Rate:</strong> {view.planningOutlook.tariffRate}</p>
-                <p className="mt-1">{view.planningOutlook.tariffLabel}</p>
-                <a className="mt-2 inline-flex font-semibold text-primary hover:underline" href={view.planningOutlook.tariffSourceUrl} target="_blank" rel="noreferrer">View official SP tariff source</a>
-              </div>
-              <details className="mt-4 border-t border-step-warning/20 pt-3">
-                <summary className="cursor-pointer text-xs font-semibold text-foreground">Assumptions and limitations</summary>
-                <ul className="mt-2 list-disc space-y-1 pl-4 text-xs leading-5 text-muted">
-                  {view.planningOutlook.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}
-                </ul>
-              </details>
-            </div>
-          </div>
+              <p className="mt-3 text-xs leading-5 text-muted">The composition and Spike events come from the same Snapshot-scoped Centre-hour × Circuit query. Observed leading contributors are not confirmed root causes, and no saving estimate is presented.</p>
+              <div className="mt-3"><PreschoolEvidenceLink label="View supporting evidence" /></div>
+            </details>
+
+          </>
         ) : (
-          <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
-            <p className="text-sm font-semibold text-muted">Planning baseline unavailable</p>
-            <p className="mt-2 text-sm leading-6 text-muted">{view.planningOutlook.detail}</p>
+          <div className="mt-5 rounded-lg border border-border bg-surface-subtle p-4" role="status">
+            <p className="text-xs font-semibold text-muted">Operating-hours analysis unavailable</p>
+            <p className="mt-2 text-[11px] leading-5 text-muted">{view.operational.detail}</p>
           </div>
         )}
-        <p className="mt-3 text-xs leading-5 text-muted">{view.liveForecast.detail}</p>
+      </section>
+
+      <section id="preschool-monthly-outlook" aria-labelledby="preschool-monthly-outlook-heading" data-overview-section="5" className="scroll-mt-28 border-b border-border bg-surface-subtle/35 px-5 py-7 lg:px-7 lg:py-8">
+        <SectionHeader
+          id="preschool-monthly-outlook-heading"
+          sectionNumber={5}
+          title="Monthly Energy Outlook"
+          description={view.forecast.status === "unavailable"
+            ? "A transparent next-month energy view with Plan and Actual kept as separate, Snapshot-bound facts."
+            : `${view.forecast.targetMonth} · ${view.forecast.targetPeriod} · Plan and Actual remain separately pinned.`}
+        />
+        <PreschoolForecastPanel forecast={view.forecast} />
+        <PlanningForecastEvidence planning={view.planningOutlook} forecast={view.forecast} />
         <PreschoolAiSlot
           snapshot={state.snapshot}
           sectionId="planning-outlook"
@@ -511,7 +531,7 @@ export function PreschoolOverviewRenderer({
       </section>
 
       <div className="grid gap-0 xl:grid-cols-[minmax(0,1fr)_320px]">
-        <section id="preschool-centre-ranking" aria-labelledby="preschool-centre-ranking-heading" className="min-w-0 scroll-mt-28 px-5 py-7 lg:px-7 lg:py-8">
+        <aside id="preschool-centre-ranking" aria-labelledby="preschool-centre-ranking-heading" className="min-w-0 scroll-mt-28 px-5 py-7 lg:px-7 lg:py-8">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h3 id="preschool-centre-ranking-heading" className="text-lg font-semibold tracking-[-0.015em] text-foreground">Centre detail</h3>
@@ -552,7 +572,7 @@ export function PreschoolOverviewRenderer({
               </table>
             </div>
           </details>
-        </section>
+        </aside>
 
         <aside className="border-t border-border bg-surface-subtle px-5 py-5 xl:border-l xl:border-t-0 lg:px-7 lg:py-6">
           <h3 className="text-base font-semibold text-foreground">Data confidence</h3>
@@ -582,51 +602,351 @@ export function PreschoolOverviewRenderer({
   );
 }
 
-function DecisionSummaryCard({ item }: { item: PreschoolDecisionSummaryItem }) {
-  const toneClass = item.id === "after-hours"
-    ? "border-step-warning/30 bg-step-warning-soft/30"
-    : item.id === "efficiency"
-      ? "border-step-error/30 bg-step-error-soft/30"
-      : "border-border bg-surface-subtle";
+function SectionHeader({
+  id,
+  sectionNumber,
+  title,
+  description,
+  meta,
+}: {
+  id: string;
+  sectionNumber: 1 | 2 | 3 | 4 | 5;
+  title: string;
+  description: string;
+  meta?: string;
+}) {
   return (
-    <article
-      className={`min-w-0 rounded-xl border p-5 lg:p-6 ${toneClass}`}
-      data-decision-priority={item.id}
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-xs font-semibold text-primary">Priority {item.priority}</p>
-          <h4 className="mt-1.5 max-w-4xl text-lg font-semibold leading-7 text-foreground">{item.label}</h4>
-          {item.centreCodes.length > 0 ? (
-            <p className="mt-1.5 text-sm text-muted">Centres to review: <strong className="font-semibold text-foreground">{compactCentreCodes(item.centreCodes)}</strong></p>
+    <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-3">
+      <div className="min-w-0 max-w-4xl">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="inline-flex min-h-7 items-center rounded-md bg-foreground px-2.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-background">
+            Section {sectionNumber}
+          </span>
+          <h3 id={id} className="text-xl font-semibold tracking-[-0.02em] text-foreground">{title}</h3>
+        </div>
+        <p className="mt-2 max-w-[72ch] text-sm leading-6 text-muted">{description}</p>
+      </div>
+      {meta ? <span className="shrink-0 text-xs font-semibold tabular-nums text-muted">{meta}</span> : null}
+    </div>
+  );
+}
+
+function DecisionSummaryCard({ item }: { item: PreschoolDecisionSummaryItem }) {
+  const badgeClass = item.sectionNumber === 2
+    ? "bg-foreground text-background"
+    : item.sectionNumber === 3
+      ? "bg-step-warning text-white"
+      : item.sectionNumber === 4
+        ? "bg-step-inspect text-white"
+        : "bg-step-success text-white";
+  return (
+    <article className="min-w-0 bg-surface transition-colors hover:bg-surface-subtle/60" data-decision-priority={item.id}>
+      <a
+        href={`#${item.targetId}`}
+        className="grid min-h-20 gap-3 px-4 py-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 sm:grid-cols-[44px_minmax(0,1fr)_auto] sm:items-center lg:px-5"
+        data-key-finding-target={item.targetId}
+      >
+        <span className={`inline-flex h-8 w-10 items-center justify-center rounded-md text-xs font-semibold ${badgeClass}`}>
+          §{item.sectionNumber}
+        </span>
+        <span className="min-w-0">
+          <span className="block text-sm font-semibold text-foreground">{item.label}</span>
+          <span className="mt-1 block text-sm leading-6 text-muted">
+            <strong className="font-semibold tabular-nums text-foreground">{item.primaryMetric.valueLabel}</strong>
+            {` · ${item.primaryMetric.label}`}
+            {item.centreCodes.length > 0 ? (
+              <> · Centres <strong className="font-semibold text-foreground">{compactCentreCodes(item.centreCodes)}</strong></>
+            ) : null}
+          </span>
+          {item.supportingMetrics.length > 0 ? (
+            <span className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+              {item.supportingMetrics.slice(0, 2).map((metric) => (
+                <span key={metric.label}>{metric.label}: <strong className="font-semibold tabular-nums text-foreground">{metric.valueLabel}</strong></span>
+              ))}
+            </span>
           ) : null}
-        </div>
-        <span className="shrink-0 rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-semibold text-muted">Verified signal</span>
-      </div>
-      <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-decision-signal={item.id}>
-        <div className="rounded-lg border border-border bg-surface px-4 py-3 sm:col-span-2 lg:col-span-1">
-          <p className="text-xs font-semibold text-muted">{item.primaryMetric.label}</p>
-          <p className="mt-1.5 text-2xl font-semibold tabular-nums text-foreground">{item.primaryMetric.valueLabel}</p>
-        </div>
-        {item.supportingMetrics.slice(0, 2).map((metric) => (
-          <div key={metric.label} className="rounded-lg border border-border bg-surface px-4 py-3">
-            <p className="text-xs font-semibold text-muted">{metric.label}</p>
-            <p className="mt-1.5 text-lg font-semibold tabular-nums text-foreground">{metric.valueLabel}</p>
-          </div>
-        ))}
-      </div>
-      <details className="mt-5 border-t border-border/80 pt-4">
-        <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+        </span>
+        <span className="inline-flex min-h-10 items-center gap-2 justify-self-start rounded-md px-2 text-xs font-semibold text-primary sm:justify-self-end">
+          View section
+          <EnergyIcon name="arrow" className="h-3.5 w-3.5" aria-hidden="true" />
+        </span>
+      </a>
+      <details className="mx-4 border-t border-border/70 pb-3 pt-2 sm:ml-[71px] lg:mx-5 lg:ml-[79px]">
+        <summary className="cursor-pointer text-xs font-semibold text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
           Limitation and evidence
         </summary>
-        <p className="mt-3 text-sm leading-6 text-muted">{item.limitation}</p>
+        <p className="mt-2 text-xs leading-5 text-muted">{item.limitation}</p>
+        <PreschoolEvidenceLink label="View supporting evidence" />
       </details>
-      <PreschoolEvidenceLink label="View supporting evidence" />
     </article>
   );
 }
 
 type BenchmarkView = Extract<PreschoolOverviewViewModel["benchmark"], { status: "provisional" }>;
+
+function BenchmarkInterpretationSlot({
+  snapshot,
+  interpretation,
+}: {
+  snapshot: EnergyProjectAnalysisSnapshotDto;
+  interpretation: PreschoolBenchmarkInterpretation | undefined;
+}) {
+  return (
+    <SnapshotInterpretationSlot
+      snapshot={snapshot}
+      interpretation={interpretation}
+      slot="benchmark"
+      title="Key recommendation / AI interpretation"
+    />
+  );
+}
+
+function StandbyInterpretationSlot({
+  snapshot,
+  interpretation,
+}: {
+  snapshot: EnergyProjectAnalysisSnapshotDto;
+  interpretation: PreschoolStandbyInterpretation | undefined;
+}) {
+  return (
+    <SnapshotInterpretationSlot
+      snapshot={snapshot}
+      interpretation={interpretation}
+      slot="standby"
+      title="Next step / AI interpretation"
+    />
+  );
+}
+
+function OperatingInterpretationSlot({
+  snapshot,
+  interpretation,
+}: {
+  snapshot: EnergyProjectAnalysisSnapshotDto;
+  interpretation: PreschoolOperatingInterpretation | undefined;
+}) {
+  return (
+    <SnapshotInterpretationSlot
+      snapshot={snapshot}
+      interpretation={interpretation}
+      slot="operating"
+      title="Key focus / AI interpretation"
+    />
+  );
+}
+
+function SnapshotInterpretationSlot({
+  snapshot,
+  interpretation,
+  slot,
+  title,
+}: {
+  snapshot: EnergyProjectAnalysisSnapshotDto;
+  interpretation: PreschoolBenchmarkInterpretation | PreschoolStandbyInterpretation | PreschoolOperatingInterpretation | undefined;
+  slot: "benchmark" | "standby" | "operating";
+  title: string;
+}) {
+  const matchesSnapshot = interpretation?.status === "available" || interpretation?.status === "pending"
+    ? interpretation.dataSnapshotId === snapshot.dataSnapshot.id
+      && interpretation.projectReleaseId === snapshot.projectRelease.id
+      && interpretation.period.start === snapshot.context.primaryPeriod.start
+      && interpretation.period.endExclusive === snapshot.context.primaryPeriod.endExclusive
+    : false;
+  const status = interpretation?.status === "available" && matchesSnapshot
+    ? "available"
+    : interpretation?.status === "pending" && matchesSnapshot
+      ? "pending"
+      : "unavailable";
+  const statusData = { [`data-${slot}-interpretation-status`]: status };
+  const contentData = { [`data-${slot}-interpretation-content`]: "true" };
+
+  return (
+    <aside
+      {...statusData}
+      className="mt-5 rounded-lg border border-primary/20 bg-primary-soft/35 p-4"
+      aria-live={status === "pending" ? "polite" : undefined}
+    >
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-surface text-primary">
+          <EnergyIcon name="spark" className="h-4 w-4" aria-hidden="true" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 className="text-sm font-semibold text-foreground">{title}</h4>
+            <span className="flex flex-wrap items-center justify-end gap-2">
+              {status === "available" && interpretation?.status === "available" && interpretation.epistemicLevel ? (
+                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${sectionInterpretationLevelClass(interpretation.epistemicLevel)}`}>
+                  {sectionInterpretationLevelLabel(interpretation.epistemicLevel)}
+                </span>
+              ) : null}
+              <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-light">Snapshot-bound</span>
+            </span>
+          </div>
+          {status === "available" && interpretation?.status === "available" ? (
+            <div className="mt-3 space-y-4" {...contentData}>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-primary">Key takeaway</p>
+                <p className="mt-1 text-base font-semibold leading-6 text-foreground">{interpretation.headline}</p>
+                <p className="mt-1.5 text-sm leading-6 text-muted">{interpretation.takeaway}</p>
+                {interpretation.whyItMatters ? (
+                  <p className="mt-2 text-sm leading-6 text-muted"><strong className="font-semibold text-foreground">Why it matters:</strong> {interpretation.whyItMatters}</p>
+                ) : null}
+              </div>
+
+              <AiFindingPresentationView presentation={interpretation.presentation} />
+
+              {interpretation.possibleExplanation ? (
+                <div className="rounded-lg border border-step-warning/20 bg-step-warning-soft/45 px-3 py-2.5 text-sm leading-6 text-muted">
+                  <strong className="font-semibold text-foreground">What may explain it:</strong> {interpretation.possibleExplanation}
+                </div>
+              ) : null}
+
+              <div className="rounded-lg bg-foreground px-4 py-3 text-background">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-background/65">Recommended next step</p>
+                <p className="mt-1 text-sm font-semibold leading-6">{interpretation.action}</p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-lg border border-step-success/20 bg-step-success-soft/45 px-3 py-2.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-step-success">If acted on</p>
+                  <p className="mt-1 text-sm leading-6 text-muted">{interpretation.expectedIfAct}</p>
+                </div>
+                <div className="rounded-lg border border-step-warning/20 bg-step-warning-soft/45 px-3 py-2.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-step-warning">If ignored</p>
+                  <p className="mt-1 text-sm leading-6 text-muted">{interpretation.ifIgnored}</p>
+                </div>
+              </div>
+
+              <details className="rounded-lg border border-border bg-surface px-3 py-2.5">
+                <summary className="cursor-pointer text-sm font-semibold text-foreground">Verification and limitations</summary>
+                <div className="mt-2 space-y-2 text-sm leading-6 text-muted">
+                  {interpretation.verification ? <p><strong className="font-semibold text-foreground">How to verify:</strong> {interpretation.verification}</p> : null}
+                  <p><strong className="font-semibold text-foreground">What this cannot prove:</strong> {interpretation.limitation}</p>
+                </div>
+              </details>
+            </div>
+          ) : status === "pending" ? (
+            <p className="mt-2 text-sm leading-6 text-muted">AI interpretation pending for this Snapshot.</p>
+          ) : (
+            <p className="mt-2 text-sm leading-6 text-muted">
+              {interpretation?.status === "unavailable" && interpretation.detail
+                ? interpretation.detail
+                : "No matching AI interpretation is available for this Snapshot."}
+            </p>
+          )}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function sectionInterpretationLevelLabel(level: NonNullable<Extract<PreschoolBenchmarkInterpretation, { status: "available" }>["epistemicLevel"]>): string {
+  if (level === "verified") return "Verified";
+  if (level === "hypothesis") return "Hypothesis";
+  return "Explore";
+}
+
+function sectionInterpretationLevelClass(level: NonNullable<Extract<PreschoolBenchmarkInterpretation, { status: "available" }>["epistemicLevel"]>): string {
+  if (level === "verified") return "bg-step-success-soft text-step-success";
+  if (level === "hypothesis") return "bg-step-warning-soft text-step-warning";
+  return "bg-primary/10 text-primary";
+}
+
+type BenchmarkDistributionView = BenchmarkView["distributions"][number];
+
+function BenchmarkMetricSection({
+  distribution,
+  sectionNumber,
+}: {
+  distribution: BenchmarkDistributionView;
+  sectionNumber: string;
+}) {
+  const metricTitle = distribution.id === "eui" ? "EUI Benchmark" : "Per-pax Energy Benchmark";
+  const rowGridClass = "grid min-w-[760px] grid-cols-[minmax(180px,1.15fr)_56px_78px_78px_minmax(240px,1.8fr)_40px] items-center gap-3";
+  return (
+    <section className="mt-7 border-t border-border pt-6" aria-labelledby={`preschool-${distribution.id}-benchmark-heading`}>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h4 id={`preschool-${distribution.id}-benchmark-heading`} className="text-base font-semibold text-foreground">{sectionNumber} — {metricTitle}</h4>
+          <p className="mt-1.5 text-sm leading-6 text-muted">{distribution.question}</p>
+        </div>
+        <span className="text-xs text-muted">P50 = midpoint · P75 = review threshold</span>
+      </div>
+
+      <div className="mt-4 overflow-x-auto rounded-lg border border-border" data-benchmark-summary={distribution.id}>
+        <div className={`${rowGridClass} bg-surface-subtle px-4 py-3 text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-light`} aria-hidden="true">
+          <span>Centre type</span>
+          <span data-benchmark-summary-header="outlets">Outlets</span>
+          <span data-benchmark-summary-header="p50">P50</span>
+          <span data-benchmark-summary-header="p75">P75</span>
+          <span>Outlets above P75</span>
+          <span className="text-right">Detail</span>
+        </div>
+        <div className="min-w-[760px] divide-y divide-border bg-surface">
+          {distribution.cohorts.map((cohort, cohortIndex) => {
+            const aboveP75 = cohort.points.filter((point) => point.aboveP75);
+            const visual = benchmarkCohortVisual(cohort.name);
+            return (
+              <details
+                key={cohort.name}
+                data-benchmark-detail={`${distribution.id}:${cohort.name}`}
+                className="group"
+              >
+                <summary
+                  data-benchmark-summary-cohort={`${distribution.id}:${cohort.name}`}
+                  tabIndex={0}
+                  aria-label={`${cohort.name}: ${cohort.sampleSize} Outlets, P50 ${cohort.p50}, P75 ${cohort.p75}, ${aboveP75.length} above P75. View detail.`}
+                  className={`${rowGridClass} cursor-pointer list-none px-4 py-3 text-xs transition-colors hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 [&::-webkit-details-marker]:hidden`}
+                >
+                  <span className="flex min-w-0 items-center gap-2.5 font-semibold text-foreground">
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary text-[11px] text-white">{cohortIndex + 1}</span>
+                    <svg viewBox="0 0 16 16" aria-hidden="true" className={`h-3.5 w-3.5 shrink-0 ${visual.className}`}>
+                      <BenchmarkMarker shape={visual.shape} cx={8} cy={8} radius={4} />
+                    </svg>
+                    <span className="truncate">{cohort.name}</span>
+                  </span>
+                  <span data-benchmark-summary-value="outlets" className="tabular-nums text-muted">{cohort.sampleSize}</span>
+                  <span data-benchmark-summary-value="p50" className="tabular-nums font-semibold text-primary">{cohort.p50}</span>
+                  <span data-benchmark-summary-value="p75" className="tabular-nums font-semibold text-step-warning">{cohort.p75}</span>
+                  <span>
+                    {aboveP75.length > 0 ? (
+                      <span className="flex flex-wrap gap-1.5">
+                        {aboveP75.map((point) => (
+                          <span key={point.centreCode} data-benchmark-above-p75={`${distribution.id}:${point.centreCode}`} className="inline-flex items-center gap-1 rounded-full border border-step-error/25 bg-step-error-soft px-2 py-1 text-[11px] text-step-error">
+                            <strong className="font-semibold">{point.name}</strong>
+                            <span className="tabular-nums">{point.valueLabel}</span>
+                          </span>
+                        ))}
+                      </span>
+                    ) : (
+                      <span className="text-muted">None</span>
+                    )}
+                  </span>
+                  <span className="flex justify-end text-primary">
+                    <EnergyIcon name="arrow" className="h-4 w-4 transition-transform group-open:rotate-90" aria-hidden="true" />
+                  </span>
+                </summary>
+                <div className="border-t border-border bg-surface-subtle/35 p-4">
+                  <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
+                    <div className="min-w-0">
+                      <h5 className="text-sm font-semibold text-foreground">Observed distribution — {cohort.name}</h5>
+                      <p className="mt-1 text-xs leading-5 text-muted">Observed Centres only. Bars show sample frequency; markers show each Centre. No fitted curve is used.</p>
+                      <div className="mt-3">
+                        <BenchmarkCohortDistributionPlot distribution={distribution} cohort={cohort} />
+                      </div>
+                    </div>
+                    <BenchmarkCohortRanking distribution={distribution} cohort={cohort} />
+                  </div>
+                </div>
+              </details>
+            );
+          })}
+        </div>
+      </div>
+      <p className="mt-2 text-xs text-muted">Values shown in {distribution.unit}. Open Detail on a Centre Type to see only its distribution and Centre ranking.</p>
+    </section>
+  );
+}
 
 function BenchmarkScatterPlot({ benchmark }: { benchmark: BenchmarkView }) {
   const width = 760;
@@ -659,6 +979,10 @@ function BenchmarkScatterPlot({ benchmark }: { benchmark: BenchmarkView }) {
         <title id="preschool-benchmark-scatter-title">Centre energy intensity and energy-per-person comparison</title>
         <desc id="preschool-benchmark-scatter-description">Thirty Centres plotted with annualised energy intensity increasing to the right and energy per person increasing upward. Dashed Portfolio P75 lines identify the Centres to review first.</desc>
         <rect x={margin.left} y={margin.top} width={plotWidth} height={plotHeight} rx="8" className="fill-surface" />
+        <rect x={margin.left} y={margin.top} width={euiP75X - margin.left} height={perPaxP75Y - margin.top} className="fill-step-warning" opacity="0.04" />
+        <rect x={euiP75X} y={margin.top} width={margin.left + plotWidth - euiP75X} height={perPaxP75Y - margin.top} className="fill-step-error" opacity="0.08" />
+        <rect x={margin.left} y={perPaxP75Y} width={euiP75X - margin.left} height={margin.top + plotHeight - perPaxP75Y} className="fill-muted" opacity="0.025" />
+        <rect x={euiP75X} y={perPaxP75Y} width={margin.left + plotWidth - euiP75X} height={margin.top + plotHeight - perPaxP75Y} className="fill-primary" opacity="0.04" />
         <line x1={margin.left} y1={margin.top + plotHeight} x2={margin.left + plotWidth} y2={margin.top + plotHeight} stroke="currentColor" className="text-border" />
         <line x1={margin.left} y1={margin.top} x2={margin.left} y2={margin.top + plotHeight} stroke="currentColor" className="text-border" />
         <line
@@ -683,10 +1007,16 @@ function BenchmarkScatterPlot({ benchmark }: { benchmark: BenchmarkView }) {
         />
         <text x={euiP75X + 5} y={margin.top + 13} className="fill-step-warning text-[10px] font-semibold">EUI P75 {benchmark.eui.p75}</text>
         <text x={margin.left + plotWidth - 6} y={perPaxP75Y - 6} textAnchor="end" className="fill-step-warning text-[10px] font-semibold">Per-pax P75 {benchmark.perPax.p75}</text>
+        <text x={margin.left + 8} y={margin.top + 14} className="fill-step-warning text-[9px] font-semibold">HIGH PER-PAX</text>
+        <text x={margin.left + plotWidth - 8} y={margin.top + 14} textAnchor="end" className="fill-step-error text-[9px] font-semibold">PRIORITY</text>
+        <text x={margin.left + 8} y={margin.top + plotHeight - 10} className="fill-muted text-[9px] font-semibold">LOWER INTENSITY</text>
+        <text x={margin.left + plotWidth - 8} y={margin.top + plotHeight - 10} textAnchor="end" className="fill-primary text-[9px] font-semibold">HIGH EUI</text>
         {benchmark.scatter.points.map((point) => {
           const cx = x(point.eui);
           const cy = y(point.perPax);
           const visual = benchmarkCohortVisual(point.cohort);
+          const alignRight = cx > margin.left + plotWidth - 120;
+          const labelY = cy < margin.top + 28 || point.actionRank === 2 ? cy + 17 : cy - 9;
           return (
             <g
               key={point.centreCode}
@@ -694,7 +1024,7 @@ function BenchmarkScatterPlot({ benchmark }: { benchmark: BenchmarkView }) {
               data-marker-shape={visual.shape}
               className={visual.className}
             >
-              <title>{`${point.name} (${point.cohort}): ${point.eui.toFixed(2)} kWh/m²/yr, ${point.perPax.toFixed(1)} kWh/person, ${benchmarkQuadrantLabel(point.quadrant)}`}</title>
+              <title>{`${point.name} (${point.cohort}): ${point.eui.toFixed(2)} kWh/m²/yr, ${point.perPax.toFixed(1)} kWh/person/month, ${benchmarkQuadrantLabel(point.quadrant)}`}</title>
               <BenchmarkMarker shape={visual.shape} cx={cx} cy={cy} radius={4.5} />
               {point.priority ? (
                 <circle cx={cx} cy={cy} r={7.5} fill="none" stroke="currentColor" strokeWidth={1.8} className="text-step-error" />
@@ -702,11 +1032,12 @@ function BenchmarkScatterPlot({ benchmark }: { benchmark: BenchmarkView }) {
               {point.priority ? (
                 <text
                   data-benchmark-priority-label={point.centreCode}
-                  x={cx + 7}
-                  y={cy - 7}
+                  x={alignRight ? cx - 9 : cx + 9}
+                  y={labelY}
+                  textAnchor={alignRight ? "end" : "start"}
                   className="fill-step-error text-[11px] font-bold"
                 >
-                  {point.centreCode}
+                  {point.actionRank}. {point.name}
                 </text>
               ) : null}
             </g>
@@ -717,7 +1048,7 @@ function BenchmarkScatterPlot({ benchmark }: { benchmark: BenchmarkView }) {
         <text x={margin.left - 8} y={margin.top + plotHeight} textAnchor="end" className="fill-muted-light text-[9px]">{perPaxMin.toFixed(1)}</text>
         <text x={margin.left - 8} y={margin.top + 4} textAnchor="end" className="fill-muted-light text-[9px]">{perPaxMax.toFixed(1)}</text>
         <text x={margin.left + plotWidth / 2} y={height - 10} textAnchor="middle" className="fill-muted text-[11px] font-semibold">Annualised EUI (kWh/m²/yr) →</text>
-        <text x={16} y={margin.top + plotHeight / 2} textAnchor="middle" transform={`rotate(-90 16 ${margin.top + plotHeight / 2})`} className="fill-muted text-[11px] font-semibold">↑ Energy per person (kWh/person)</text>
+        <text x={16} y={margin.top + plotHeight / 2} textAnchor="middle" transform={`rotate(-90 16 ${margin.top + plotHeight / 2})`} className="fill-muted text-[11px] font-semibold">↑ Energy per person (kWh/person/month)</text>
       </svg>
       <BenchmarkCohortLegend />
     </div>
@@ -774,82 +1105,157 @@ function BenchmarkCohortLegend() {
       ))}
       <span className="inline-flex items-center gap-1.5 text-step-error">
         <span aria-hidden="true" className="h-3 w-3 rounded-full border-2 border-current" />
-        <span className="text-muted">Priority · red ring</span>
+        <span className="text-muted">Action priority · ring + Centre name</span>
+      </span>
+      <span className="inline-flex items-center gap-1.5 text-step-warning">
+        <span aria-hidden="true" className="w-4 border-t border-dashed border-current" />
+        <span className="text-muted">Portfolio P75 review threshold</span>
       </span>
     </div>
   );
 }
 
-type BenchmarkDistributionView = BenchmarkView["distributions"][number];
+type BenchmarkCohortView = BenchmarkDistributionView["cohorts"][number];
 
-function BenchmarkDistributionPlot({ distribution }: { distribution: BenchmarkDistributionView }) {
-  const width = 720;
-  const height = 250;
-  const margin = { top: 42, right: 24, bottom: 34, left: 172 };
+function BenchmarkCohortDistributionPlot({
+  distribution,
+  cohort,
+}: {
+  distribution: BenchmarkDistributionView;
+  cohort: BenchmarkCohortView;
+}) {
+  const width = 700;
+  const height = 270;
+  const margin = { top: 42, right: 24, bottom: 44, left: 42 };
   const plotWidth = width - margin.left - margin.right;
-  const laneGap = 54;
+  const baselineY = height - margin.bottom - 24;
+  const histogramHeight = baselineY - margin.top;
+  const binCount = 8;
+  const axisSpan = distribution.axis.max - distribution.axis.min;
+  const binSpan = axisSpan / binCount;
+  const bins = Array.from({ length: binCount }, (_, index) => ({
+    start: distribution.axis.min + index * binSpan,
+    count: 0,
+  }));
+  cohort.points.forEach((point) => {
+    const binIndex = Math.min(binCount - 1, Math.max(0, Math.floor((point.value - distribution.axis.min) / binSpan)));
+    bins[binIndex]!.count += 1;
+  });
+  const maximumBinCount = Math.max(1, ...bins.map((bin) => bin.count));
   const x = (value: number) => roundSvg(
-    margin.left + ((value - distribution.axis.min) / (distribution.axis.max - distribution.axis.min)) * plotWidth,
+    margin.left + ((value - distribution.axis.min) / axisSpan) * plotWidth,
   );
-  const offsets = [-7, 0, 7];
+  const barSlotWidth = plotWidth / binCount;
+  const visual = benchmarkCohortVisual(cohort.name);
+  const rugOffsets = [0, -7, 7];
 
   return (
-    <article
-      data-benchmark-distribution={distribution.id}
-      className="overflow-hidden rounded-lg border border-border bg-surface-subtle p-4"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h5 className="text-xs font-semibold text-foreground">{distribution.label}</h5>
-          <p className="mt-1 text-xs text-muted">Shared cohort axis · {distribution.unit}</p>
-        </div>
-        <span className="rounded-full border border-step-warning/30 bg-step-warning-soft px-2 py-0.5 text-xs font-semibold text-step-warning">Provisional</span>
-      </div>
+    <div className="overflow-hidden border-y border-border bg-surface py-3" data-benchmark-distribution={`${distribution.id}:${cohort.name}`}>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         role="img"
-        aria-label={`${distribution.label} distribution by cohort`}
+        aria-label={`${cohort.name} observed ${distribution.label} distribution`}
         data-shared-axis={distribution.id}
-        className="mt-3 h-auto w-full"
+        className="h-auto w-full"
       >
-        <line x1={margin.left} y1={height - margin.bottom} x2={width - margin.right} y2={height - margin.bottom} stroke="currentColor" className="text-border" />
-        {distribution.cohorts.map((cohort, cohortIndex) => {
-          const laneY = margin.top + cohortIndex * laneGap;
-          const visual = benchmarkCohortVisual(cohort.name);
+        <line x1={margin.left} y1={baselineY} x2={width - margin.right} y2={baselineY} stroke="currentColor" className="text-border" />
+        <text x={margin.left} y={margin.top - 12} className="fill-muted text-[10px]">Observed Centre count · max {maximumBinCount}</text>
+        {bins.map((bin, index) => {
+          const barHeight = roundSvg((bin.count / maximumBinCount) * histogramHeight);
+          const barX = roundSvg(margin.left + index * barSlotWidth + 3);
           return (
-            <g key={cohort.name} data-benchmark-lane={`${distribution.id}:${cohort.name}`}>
-              <text x={margin.left - 12} y={laneY - 4} textAnchor="end" className="fill-foreground text-xs font-semibold">{cohort.name}</text>
-              <text x={margin.left - 12} y={laneY + 11} textAnchor="end" className="fill-muted text-[10px]">n={cohort.sampleSize}</text>
-              <line x1={margin.left} y1={laneY} x2={width - margin.right} y2={laneY} stroke="currentColor" className="text-border" />
-              <line x1={x(cohort.p50Value)} y1={laneY - 14} x2={x(cohort.p50Value)} y2={laneY + 14} stroke="currentColor" strokeWidth={1.5} className="text-primary" />
-              <line x1={x(cohort.p75Value)} y1={laneY - 14} x2={x(cohort.p75Value)} y2={laneY + 14} stroke="currentColor" strokeWidth={1.5} strokeDasharray="3 3" className="text-step-warning" />
-              <text x={x(cohort.p50Value)} y={laneY - 18} textAnchor="middle" className="fill-primary text-[10px] font-semibold">P50 {cohort.p50}</text>
-              <text x={x(cohort.p75Value)} y={laneY + 25} textAnchor="middle" className="fill-step-warning text-[10px] font-semibold">P75 {cohort.p75}</text>
-              {cohort.points.map((point, pointIndex) => {
-                const cx = x(point.value);
-                const cy = laneY + offsets[pointIndex % offsets.length]!;
-                return (
-                  <g
-                    key={point.centreCode}
-                    data-distribution-centre={`${distribution.id}:${point.centreCode}`}
-                    className={visual.className}
-                  >
-                    <title>{`${point.name}: ${point.value.toFixed(distribution.id === "eui" ? 2 : 1)} ${distribution.unit}${point.aboveP75 ? ", above cohort P75" : ""}`}</title>
-                    <BenchmarkMarker shape={visual.shape} cx={cx} cy={cy} radius={3.6} />
-                  </g>
-                );
-              })}
+            <rect
+              key={bin.start}
+              x={barX}
+              y={baselineY - barHeight}
+              width={Math.max(2, barSlotWidth - 6)}
+              height={barHeight}
+              rx="2"
+              className="fill-primary"
+              opacity={bin.count > 0 ? 0.16 : 0.035}
+            >
+              <title>{`${bin.count} Centre${bin.count === 1 ? "" : "s"} in this observed range`}</title>
+            </rect>
+          );
+        })}
+        <line x1={x(cohort.p50Value)} y1={margin.top} x2={x(cohort.p50Value)} y2={baselineY + 24} stroke="currentColor" strokeWidth={1.8} className="text-primary" />
+        <line x1={x(cohort.p75Value)} y1={margin.top} x2={x(cohort.p75Value)} y2={baselineY + 24} stroke="currentColor" strokeWidth={1.8} strokeDasharray="5 4" className="text-step-warning" />
+        <text x={x(cohort.p50Value)} y={margin.top - 8} textAnchor="middle" className="fill-primary text-[11px] font-semibold">P50 {cohort.p50}</text>
+        <text x={x(cohort.p75Value)} y={margin.top + 10} textAnchor="middle" className="fill-step-warning text-[11px] font-semibold">P75 {cohort.p75}</text>
+        {cohort.points.map((point, pointIndex) => {
+          const cx = x(point.value);
+          const cy = baselineY + 16 + rugOffsets[pointIndex % rugOffsets.length]!;
+          return (
+            <g
+              key={point.centreCode}
+              data-distribution-centre={`${distribution.id}:${cohort.name}:${point.centreCode}`}
+              className={point.aboveP75 ? "text-step-error" : visual.className}
+            >
+              <title>{`${point.name}: ${point.valueLabel} ${distribution.unit}${point.aboveP75 ? ", above cohort P75" : ""}`}</title>
+              <BenchmarkMarker shape={visual.shape} cx={cx} cy={cy} radius={4} />
             </g>
           );
         })}
-        <text x={margin.left} y={height - 12} className="fill-muted text-[10px]">{distribution.axis.min}</text>
-        <text x={width - margin.right} y={height - 12} textAnchor="end" className="fill-muted text-[10px]">{distribution.axis.max} {distribution.unit}</text>
+        <text x={margin.left} y={height - 10} className="fill-muted text-[10px]">{distribution.axis.min}</text>
+        <text x={width - margin.right} y={height - 10} textAnchor="end" className="fill-muted text-[10px]">{distribution.axis.max} {distribution.unit}</text>
       </svg>
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-muted">
-        <span><strong className="font-semibold text-primary">Typical (P50)</strong> · solid marker</span>
-        <span><strong className="font-semibold text-step-warning">Review above (P75)</strong> · dashed marker</span>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 px-2 text-[10px] text-muted">
+        <span><strong className="font-semibold text-primary">P50</strong> · solid line</span>
+        <span><strong className="font-semibold text-step-warning">P75</strong> · dashed line</span>
+        <span><strong className="font-semibold text-step-error">Above P75</strong> · red marker</span>
       </div>
-    </article>
+    </div>
+  );
+}
+
+function BenchmarkCohortRanking({
+  distribution,
+  cohort,
+}: {
+  distribution: BenchmarkDistributionView;
+  cohort: BenchmarkCohortView;
+}) {
+  const maximumValue = Math.max(1, ...cohort.points.map((point) => point.value));
+  return (
+    <aside className="min-w-0 xl:border-l xl:border-border xl:pl-5" data-benchmark-ranking={`${distribution.id}:${cohort.name}`}>
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h5 className="text-sm font-semibold text-foreground">Centre ranking</h5>
+          <p className="mt-1 text-xs text-muted">Above-P75 Centres first, then highest observed value.</p>
+        </div>
+        <span className="text-xs tabular-nums text-muted">n={cohort.sampleSize}</span>
+      </div>
+      <dl className="mt-3 grid grid-cols-3 gap-3 border-y border-border py-3 text-xs">
+        <div><dt className="text-muted">P50</dt><dd className="mt-1 font-semibold tabular-nums text-primary">{cohort.p50}</dd></div>
+        <div><dt className="text-muted">P75</dt><dd className="mt-1 font-semibold tabular-nums text-step-warning">{cohort.p75}</dd></div>
+        <div><dt className="text-muted">Above</dt><dd className="mt-1 font-semibold tabular-nums text-step-error">{cohort.points.filter((point) => point.aboveP75).length}</dd></div>
+      </dl>
+      <div
+        data-benchmark-ranking-scroll={`${distribution.id}:${cohort.name}`}
+        role="region"
+        tabIndex={0}
+        aria-label={`${cohort.name} ${distribution.label} Centre ranking, all ${cohort.sampleSize} Centres`}
+        className="mt-3 max-h-64 touch-pan-y overflow-y-auto overscroll-contain rounded-sm pr-2 scroll-py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
+      >
+        <ol className="divide-y divide-border">
+          {cohort.points.map((point, index) => (
+            <li
+              key={point.centreCode}
+              data-benchmark-ranking-row={`${distribution.id}:${cohort.name}:${point.centreCode}`}
+              className="grid grid-cols-[24px_minmax(96px,auto)_minmax(80px,1fr)_64px] items-center gap-2 py-2 text-xs"
+            >
+              <span className="text-right tabular-nums text-muted">{index + 1}</span>
+              <span className={`truncate font-semibold ${point.aboveP75 ? "text-step-error" : "text-foreground"}`}>{point.name}</span>
+              <span className="h-1.5 overflow-hidden rounded-full bg-border" aria-hidden="true">
+                <span className={`block h-full rounded-full ${point.aboveP75 ? "bg-step-error" : "bg-primary"}`} style={{ width: `${Math.max(3, (point.value / maximumValue) * 100)}%` }} />
+              </span>
+              <span className={`text-right tabular-nums font-semibold ${point.aboveP75 ? "text-step-error" : "text-foreground"}`}>{point.valueLabel}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
+      <p className="mt-3 text-[10px] leading-4 text-muted">Values in {distribution.unit}. Ranking is scoped to {cohort.name} only.</p>
+    </aside>
   );
 }
 
@@ -865,67 +1271,336 @@ function roundSvg(value: number): number {
 }
 
 type OperationalView = Extract<PreschoolOverviewViewModel["operational"], { status: "available" }>;
+type StandbyView = OperationalView["standby"];
+type OperatingView = OperationalView["operating"];
 
-function OperatingProfileChart({ profile }: { profile: OperationalView["hourlyProfile"] }) {
-  const width = 960;
-  const height = 270;
-  const margin = { top: 28, right: 24, bottom: 48, left: 54 };
-  const plotWidth = width - margin.left - margin.right;
-  const plotHeight = height - margin.top - margin.bottom;
-  const columnWidth = plotWidth / profile.rows.length;
-  const barWidth = Math.max(8, columnWidth - 8);
-  const maxValue = Math.max(1, ...profile.rows.map((row) => row.totalKwh));
-
+function StandbyKpiStrip({ standby }: { standby: StandbyView }) {
+  const metrics = [
+    { label: "Energy used after closing", value: standby.energy, detail: "Calendar-classified closed hours" },
+    { label: "Provisional standby cost", value: standby.provisionalCost, detail: "Before GST reference · not a bill" },
+    { label: "Share of total", value: standby.share, detail: "Of energy in the current accepted window" },
+    { label: "Unusual closed-hour Spikes", value: String(standby.spikeCount), detail: "Above the same-hour baseline" },
+    { label: "Centres to review", value: String(standby.centreCount), detail: "Named below in action order" },
+  ];
   return (
-    <article className="overflow-hidden rounded-lg border border-border bg-surface-subtle p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h4 className="text-sm font-semibold text-foreground">When energy is used</h4>
-          <p className="mt-1 text-[11px] leading-5 text-muted">Average complete day across the Portfolio; Calendar-classified closed-hour energy is highlighted.</p>
+    <dl
+      data-standby-kpis="five-decision-metrics"
+      className="mt-6 grid overflow-hidden rounded-lg border border-border bg-surface sm:grid-cols-2 xl:grid-cols-5"
+    >
+      {metrics.map((metric) => (
+        <div key={metric.label} className="border-b border-border px-4 py-4 last:border-b-0 sm:border-r xl:border-b-0 xl:last:border-r-0">
+          <dt className="text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-light">{metric.label}</dt>
+          <dd className="mt-2 text-xl font-semibold tabular-nums text-foreground">{metric.value}</dd>
+          <p className="mt-1.5 text-[10px] leading-4 text-muted">{metric.detail}</p>
         </div>
-        <p className="text-[11px] text-muted"><strong className="font-semibold text-foreground">Peak average hour:</strong> {profile.peakHourLabel}</p>
+      ))}
+    </dl>
+  );
+}
+
+function OperatingKpiStrip({ operating }: { operating: OperatingView }) {
+  const metrics = [
+    { label: "Total operating energy", value: operating.energy, detail: "Calendar-classified opening hours" },
+    { label: "Provisional operating cost", value: operating.provisionalCost, detail: "Before GST reference · not a bill" },
+    { label: "Share of total", value: operating.share, detail: "Of energy in the current accepted window" },
+    { label: "Unusual operating-hour Spikes", value: String(operating.spikeCount), detail: "Above the same-hour baseline" },
+    { label: "Centres to review", value: String(operating.centreCount), detail: "Named below in action order" },
+  ];
+  return (
+    <dl
+      data-operating-kpis="five-decision-metrics"
+      className="mt-6 grid overflow-hidden rounded-lg border border-border bg-surface sm:grid-cols-2 xl:grid-cols-5"
+    >
+      {metrics.map((metric) => (
+        <div key={metric.label} className="border-b border-border px-4 py-4 last:border-b-0 sm:border-r xl:border-b-0 xl:last:border-r-0">
+          <dt className="text-[10px] font-semibold uppercase tracking-[0.07em] text-muted-light">{metric.label}</dt>
+          <dd className="mt-2 text-xl font-semibold tabular-nums text-foreground">{metric.value}</dd>
+          <p className="mt-1.5 text-[10px] leading-4 text-muted">{metric.detail}</p>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+function StandbyApplianceComposition({ standby }: { standby: StandbyView }) {
+  return <OperatingStateApplianceComposition state="standby" stateView={standby} />;
+}
+
+function OperatingApplianceComposition({ operating }: { operating: OperatingView }) {
+  return <OperatingStateApplianceComposition state="operating" stateView={operating} />;
+}
+
+function OperatingStateApplianceComposition({
+  state,
+  stateView,
+}: {
+  state: "standby" | "operating";
+  stateView: StandbyView | OperatingView;
+}) {
+  const isStandby = state === "standby";
+  const stateLabel = isStandby ? "Closed-hour" : "Operating-hour";
+  const compositionData = isStandby
+    ? { "data-standby-appliance-composition": "closed-state" }
+    : { "data-operating-appliance-composition": "operating-state" };
+  let cumulativeOffset = 0;
+  const arcs = stateView.appliances.map((appliance, index) => {
+    const arc = { ...appliance, index, offset: cumulativeOffset };
+    cumulativeOffset += appliance.sharePct;
+    return arc;
+  });
+  return (
+    <div className="mt-5 grid gap-5 xl:grid-cols-[minmax(360px,0.82fr)_minmax(0,1.18fr)]" {...compositionData}>
+      <article className="border-y border-border py-5">
+        <div className="mx-auto max-w-xl">
+          <svg viewBox="0 0 300 300" role="img" aria-labelledby={`${state}-composition-title ${state}-composition-description`} className="mx-auto h-auto w-full max-w-[340px] overflow-visible">
+            <title id={`${state}-composition-title`}>{`${stateLabel} energy share by published Appliance alias`}</title>
+            <desc id={`${state}-composition-description`}>{`${stateView.appliances.length} published Circuit aliases shown as individual sectors. Focus a sector for its alias, energy and share; the full values remain available in the ranking.`}</desc>
+            <circle cx="150" cy="150" r="100" pathLength="100" fill="none" stroke="currentColor" strokeWidth="46" className="text-surface-subtle" />
+            <text x="150" y="145" textAnchor="middle" className="fill-muted text-[12px] font-semibold" data-operating-state-appliance-total-label={state}>{stateLabel}</text>
+            <text x="150" y="169" textAnchor="middle" className="fill-foreground text-[17px] font-semibold" data-operating-state-appliance-total={state}>{stateView.energy}</text>
+            {arcs.map((appliance) => (
+              <g key={appliance.name} className="group/segment">
+                <circle
+                  cx="150"
+                  cy="150"
+                  r="100"
+                  pathLength="100"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="46"
+                  strokeDasharray={`${appliance.sharePct} ${100 - appliance.sharePct}`}
+                  strokeDashoffset={-appliance.offset}
+                  strokeLinecap="butt"
+                  transform="rotate(-90 150 150)"
+                  tabIndex={0}
+                  role="img"
+                  aria-label={`${appliance.name}: ${appliance.energy}, ${appliance.share}`}
+                  className={`${applianceSeriesStrokeClass(appliance.index)} cursor-pointer focus-visible:outline-none focus-visible:opacity-80`}
+                  data-operating-state-appliance-segment={`${state}:${appliance.name}`}
+                  {...(isStandby
+                    ? { "data-standby-appliance-segment": appliance.name }
+                    : { "data-operating-appliance-segment": appliance.name })}
+                >
+                  <title>{`${appliance.name}: ${appliance.energy}, ${appliance.share}`}</title>
+                </circle>
+                <g
+                  aria-hidden="true"
+                  className="pointer-events-none opacity-0 transition-opacity group-hover/segment:opacity-100 group-focus-within/segment:opacity-100"
+                  data-operating-state-appliance-tooltip={`${state}:${appliance.name}`}
+                >
+                  <rect x="80" y="120" width="140" height="60" rx="8" className="fill-foreground" />
+                  <text x="150" y="141" textAnchor="middle" className="fill-white text-[10px] font-semibold">
+                    <tspan x="150">{appliance.name}</tspan>
+                    <tspan x="150" dy="19" className="font-normal">{appliance.energy} · {appliance.share}</tspan>
+                  </text>
+                </g>
+              </g>
+            ))}
+          </svg>
+          <p className="mt-3 text-center text-[10px] leading-4 text-muted">Hover or focus a sector for its alias and value. Full details are listed in the ranking.</p>
+        </div>
+      </article>
+
+      <article className="border-y border-border py-5" aria-labelledby={`${state}-appliance-ranking-heading`}>
+        <div className="flex flex-wrap items-end justify-between gap-2">
+          <div>
+            <h5 id={`${state}-appliance-ranking-heading`} className="text-sm font-semibold text-foreground">Appliance ranking</h5>
+            <p className="mt-1 text-xs leading-5 text-muted">Observed published Circuit aliases, highest {stateLabel.toLowerCase()} consumer first.</p>
+          </div>
+          <span className="text-[10px] text-muted">Energy · provisional cost · share</span>
+        </div>
+        <ol
+          className="mt-4 divide-y divide-border"
+          data-operating-state-appliance-ranking={state}
+          {...(isStandby
+            ? { "data-standby-appliance-ranking": "true" }
+            : { "data-operating-appliance-ranking": "true" })}
+        >
+          {stateView.appliances.map((appliance, index) => (
+            <li
+              key={appliance.name}
+              className="grid gap-2 py-2.5 text-xs sm:grid-cols-[24px_minmax(150px,0.8fr)_minmax(120px,1fr)_92px_72px] sm:items-center"
+              data-appliance-series-index={index + 1}
+              data-operating-state-appliance={`${state}:${appliance.name}`}
+              {...(isStandby
+                ? { "data-standby-appliance": appliance.name }
+                : { "data-operating-appliance": appliance.name })}
+            >
+              <span className="text-right tabular-nums text-muted">{index + 1}</span>
+              <span className="min-w-0"><strong className="flex items-center gap-2 break-words font-semibold text-foreground"><span className={`h-2.5 w-2.5 shrink-0 rounded-sm ${applianceSeriesBarClass(index)}`} aria-hidden="true" />{appliance.name}</strong><span className="mt-0.5 block text-[10px] text-muted">Published alias · {appliance.centreCount} Centres</span></span>
+              <span className="h-2 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true"><span className={`block h-full min-w-[2px] rounded-full ${applianceSeriesBarClass(index)}`} style={{ width: `${appliance.sharePct}%` }} /></span>
+              <span className="text-right font-semibold tabular-nums text-foreground">{appliance.energy}</span>
+              <span className="text-right tabular-nums text-muted"><strong className="block font-semibold text-foreground">{appliance.share}</strong>{appliance.provisionalCost}</span>
+            </li>
+          ))}
+        </ol>
+      </article>
+    </div>
+  );
+}
+
+function StandbySpikeTable({ centres }: { centres: PreschoolOperationalCentre[] }) {
+  return <OperatingStateSpikeTable state="standby" centres={centres} />;
+}
+
+function OperatingSpikeTable({ centres }: { centres: PreschoolOperationalCentre[] }) {
+  return <OperatingStateSpikeTable state="operating" centres={centres} />;
+}
+
+function OperatingStateSpikeTable({
+  state,
+  centres,
+}: {
+  state: "standby" | "operating";
+  centres: PreschoolOperationalCentre[];
+}) {
+  const isStandby = state === "standby";
+  const stateLabel = isStandby ? "closed-hour" : "operating-hour";
+  const summaryGrid = "grid grid-cols-2 gap-x-4 gap-y-3 xl:grid-cols-[minmax(110px,1fr)_minmax(105px,0.9fr)_42px_minmax(110px,0.95fr)_minmax(70px,0.7fr)_minmax(80px,0.75fr)_minmax(70px,0.65fr)_minmax(120px,1fr)_44px] xl:items-center xl:gap-3";
+  const eventGrid = "grid grid-cols-2 gap-x-4 gap-y-3 xl:grid-cols-[36px_minmax(112px,1fr)_minmax(72px,0.7fr)_minmax(80px,0.75fr)_minmax(78px,0.7fr)_minmax(70px,0.65fr)_minmax(130px,1fr)] xl:items-center xl:gap-3";
+  return (
+    <div
+      className="mt-5 overflow-hidden rounded-lg border border-border bg-surface"
+      data-operating-state-spike-table={`${state}:action-sorted`}
+      {...(isStandby
+        ? { "data-standby-spike-table": "action-sorted" }
+        : { "data-operating-spike-table": "action-sorted" })}
+    >
+      <div className="hidden bg-surface-subtle px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-light xl:grid xl:grid-cols-[minmax(110px,1fr)_minmax(105px,0.9fr)_42px_minmax(110px,0.95fr)_minmax(70px,0.7fr)_minmax(80px,0.75fr)_minmax(70px,0.65fr)_minmax(120px,1fr)_44px] xl:items-center xl:gap-3" aria-hidden="true">
+        <span>Centre</span><span>Centre type</span><span>Spikes</span><span>Worst date / hour</span><span className="text-right">Actual</span><span className="text-right">Baseline</span><span className="text-right">Variance</span><span>Observed leading contributor</span><span className="text-right">Detail</span>
       </div>
-      <svg
-        viewBox={`0 0 ${width} ${height}`}
-        role="img"
-        aria-labelledby="preschool-operating-profile-title preschool-operating-profile-description"
-        data-operating-profile="hourly-calendar-split"
-        className="mt-3 h-auto w-full"
-      >
-        <title id="preschool-operating-profile-title">Average hourly energy split by operating and closed hours</title>
-        <desc id="preschool-operating-profile-description">Twenty-four stacked bars show average operating energy in blue and closed-hour energy in amber across thirty-one complete May days.</desc>
-        <line x1={margin.left} y1={margin.top + plotHeight} x2={width - margin.right} y2={margin.top + plotHeight} stroke="currentColor" className="text-border" />
-        <text x={margin.left - 8} y={margin.top + 4} textAnchor="end" className="fill-muted-light text-[9px]">{Math.ceil(maxValue)}</text>
-        <text x={margin.left - 8} y={margin.top + plotHeight} textAnchor="end" className="fill-muted-light text-[9px]">0</text>
-        {profile.rows.map((row) => {
-          const x = margin.left + row.hour * columnWidth + (columnWidth - barWidth) / 2;
-          const operatingHeight = (row.operatingKwh / maxValue) * plotHeight;
-          const closedHeight = (row.closedHourKwh / maxValue) * plotHeight;
-          const operatingY = margin.top + plotHeight - operatingHeight;
-          const closedY = operatingY - closedHeight;
-          return (
-            <g key={row.hour} data-profile-hour={row.hour}>
-              <title>{`${row.label}: ${row.totalKwh.toFixed(1)} kWh mean; ${row.operatingKwh.toFixed(1)} operating and ${row.closedHourKwh.toFixed(1)} closed-hour`}</title>
-              <rect x={x} y={operatingY} width={barWidth} height={operatingHeight} rx="2" className="fill-primary" />
-              <rect x={x} y={closedY} width={barWidth} height={closedHeight} rx="2" className="fill-step-warning" />
-              {row.hour % 3 === 0 ? (
-                <text x={x + barWidth / 2} y={margin.top + plotHeight + 22} textAnchor="middle" className="fill-muted text-[10px]">{String(row.hour).padStart(2, "0")}:00</text>
-              ) : null}
-            </g>
-          );
-        })}
-        <text x={16} y={margin.top + plotHeight / 2} textAnchor="middle" transform={`rotate(-90 16 ${margin.top + plotHeight / 2})`} className="fill-muted text-[10px] font-semibold">Mean kWh / complete day</text>
-      </svg>
-      <div className="mt-2 flex flex-wrap gap-x-5 gap-y-2 text-[11px] text-muted">
-        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm bg-primary" aria-hidden="true" />Operating energy</span>
-        <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-sm bg-step-warning" aria-hidden="true" />Closed-hour energy</span>
-        <span>{profile.completeDayCount} complete days</span>
+      <div className="divide-y divide-border">
+        {centres.map((centre) => (
+          <details
+            key={centre.centreCode}
+            data-operating-state-spike-centre={`${state}:${centre.centreCode}`}
+            {...(isStandby
+              ? { "data-standby-spike-centre": centre.centreCode }
+              : { "data-operating-spike-centre": centre.centreCode })}
+            className="group"
+          >
+            <summary
+              tabIndex={0}
+              aria-label={`View all ${centre.spikeCount} ${stateLabel} Spike events for ${centre.name}.`}
+              className={`${summaryGrid} cursor-pointer list-none px-4 py-3 text-xs text-foreground hover:bg-surface-subtle/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/25 [&::-webkit-details-marker]:hidden`}
+            >
+              <span className="col-span-2 min-w-0 xl:col-span-1"><ResponsiveCellLabel>Centre</ResponsiveCellLabel><strong className="block break-words font-semibold">{centre.name}</strong><span className="mt-0.5 block text-[10px] text-muted">Centre {centre.centreCode}</span></span>
+              <span className="min-w-0 break-words text-muted"><ResponsiveCellLabel>Centre type</ResponsiveCellLabel>{centre.centreType ?? "Unavailable"}</span>
+              <span className="font-semibold tabular-nums text-step-error"><ResponsiveCellLabel>Spikes</ResponsiveCellLabel>{centre.spikeCount}</span>
+              <span className="min-w-0 break-words tabular-nums text-muted"><ResponsiveCellLabel>Worst date / hour</ResponsiveCellLabel>{centre.worst.when}</span>
+              <span className="font-semibold tabular-nums xl:text-right"><ResponsiveCellLabel>Actual</ResponsiveCellLabel>{centre.worst.usage}</span>
+              <span className="min-w-0 break-words tabular-nums text-muted xl:text-right"><ResponsiveCellLabel>Baseline</ResponsiveCellLabel>{centre.worst.baseline}</span>
+              <span className="font-semibold tabular-nums text-step-error xl:text-right"><ResponsiveCellLabel>Variance</ResponsiveCellLabel>{centre.worst.variance}</span>
+              <span className="col-span-2 min-w-0 break-words text-muted xl:col-span-1"><ResponsiveCellLabel>Observed leading contributor</ResponsiveCellLabel>{centre.worst.leadingCircuit}</span>
+              <span className="col-span-2 font-semibold text-primary xl:col-span-1 xl:text-right"><ResponsiveCellLabel>Detail</ResponsiveCellLabel><span className="group-open:hidden">Open</span><span className="hidden group-open:inline">Close</span></span>
+            </summary>
+            <div className="border-t border-border bg-surface-subtle/35 px-4 py-4">
+              <p className="text-xs font-semibold text-foreground">All {centre.events.length} {stateLabel} event{centre.events.length === 1 ? "" : "s"} for {centre.name}</p>
+              <div className="mt-3 hidden border-b border-border pb-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-light xl:grid xl:grid-cols-[36px_minmax(112px,1fr)_minmax(72px,0.7fr)_minmax(80px,0.75fr)_minmax(78px,0.7fr)_minmax(70px,0.65fr)_minmax(130px,1fr)] xl:items-center xl:gap-3" aria-hidden="true">
+                <span>#</span><span>When</span><span className="text-right">Actual</span><span className="text-right">Baseline</span><span className="text-right">Excess</span><span className="text-right">Variance</span><span>Observed leading contributor</span>
+              </div>
+              <ol className="divide-y divide-border" aria-label={`${centre.name} ${stateLabel} Spike events`}>
+                {centre.events.map((event, index) => (
+                  <li
+                    key={`${event.when}:${index}`}
+                    className={`${eventGrid} py-3 text-xs`}
+                    data-operating-state-spike-event={`${state}:${centre.centreCode}:${index + 1}`}
+                    {...(isStandby
+                      ? { "data-standby-spike-event": `${centre.centreCode}:${index + 1}` }
+                      : { "data-operating-spike-event": `${centre.centreCode}:${index + 1}` })}
+                  >
+                    <span className="tabular-nums text-muted"><ResponsiveCellLabel>Event</ResponsiveCellLabel>{index + 1}</span>
+                    <span className="min-w-0 break-words"><ResponsiveCellLabel>When</ResponsiveCellLabel>{event.when}<span className="mt-0.5 block text-[10px] text-muted">{event.dayType}</span></span>
+                    <span className="font-semibold tabular-nums xl:text-right"><ResponsiveCellLabel>Actual</ResponsiveCellLabel>{event.usage}</span>
+                    <span className="tabular-nums text-muted xl:text-right"><ResponsiveCellLabel>Baseline</ResponsiveCellLabel>{event.baseline}</span>
+                    <span className="tabular-nums text-muted xl:text-right"><ResponsiveCellLabel>Excess</ResponsiveCellLabel>{event.impact}</span>
+                    <span className="font-semibold tabular-nums text-step-error xl:text-right"><ResponsiveCellLabel>Variance</ResponsiveCellLabel>{event.variance}</span>
+                    <span className="col-span-2 min-w-0 break-words text-muted xl:col-span-1"><ResponsiveCellLabel>Observed leading contributor</ResponsiveCellLabel>{event.leadingCircuit}</span>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </details>
+        ))}
       </div>
-    </article>
+    </div>
+  );
+}
+
+function ResponsiveCellLabel({ children }: { children: React.ReactNode }) {
+  return <span className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-light xl:hidden">{children}</span>;
+}
+
+function AfterHoursReviewPriority({ sop }: { sop: OperationalView["sop"] }) {
+  return (
+    <div className="mt-5 border-y border-border" data-after-hours-review-priority="provisional">
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-step-warning-soft/35 px-4 py-3 text-xs">
+        <p className="font-semibold text-foreground">Centres with recorded Spikes appear first: {sop.breachingCentreCodes.join(" · ") || "none"}</p>
+        <p className="text-muted">Lower provisional score = more closed-hour Spikes</p>
+      </div>
+      <ol className="divide-y divide-border">
+        {sop.centres.map((centre, index) => (
+          <li key={centre.centreCode} className="grid gap-4 px-4 py-4 text-xs sm:grid-cols-2 xl:grid-cols-[36px_minmax(140px,0.9fr)_minmax(78px,0.55fr)_minmax(110px,0.8fr)_minmax(120px,0.8fr)_minmax(78px,0.55fr)_minmax(170px,1fr)] xl:items-center xl:gap-3" data-review-priority-centre={centre.centreCode}>
+            <span className="text-lg font-semibold tabular-nums text-step-warning">{index + 1}</span>
+            <span className="min-w-0"><strong className="block break-words text-sm font-semibold text-foreground">{centre.name}</strong><span className="mt-0.5 block break-words text-muted">Centre {centre.centreCode} · {centre.centreType ?? "Type unavailable"}</span></span>
+            <span className="min-w-0"><strong className="block font-semibold tabular-nums text-step-error">{centre.standbySpikeCount}</strong><span className="text-[10px] text-muted">closed-hour Spikes</span></span>
+            <span className="min-w-0"><strong className="block break-words font-semibold tabular-nums text-foreground">{centre.worstWhen}</strong><span className="text-[10px] text-muted">worst event · {centre.worstVariance}</span></span>
+            <span className="min-w-0"><strong className="block break-words font-semibold text-foreground">{centre.leadingContributor}</strong><span className="text-[10px] text-muted">observed leading contributor</span></span>
+            <span className="min-w-0"><strong className="block text-lg font-semibold tabular-nums text-step-warning">{centre.score}</strong><span className="text-[10px] text-muted">provisional score</span></span>
+            <span className="min-w-0 break-words leading-5 text-muted sm:col-span-2 xl:col-span-1"><strong className="font-semibold text-foreground">Next check:</strong> confirm the Calendar, operating SOP and equipment state with the Centre.</span>
+          </li>
+        ))}
+      </ol>
+      <p className="px-4 py-3 text-[11px] leading-5 text-muted">{sop.detail}</p>
+    </div>
   );
 }
 
 type PlanningOutlookView = Extract<PreschoolOverviewViewModel["planningOutlook"], { status: "provisional" }>;
+
+function PlanningForecastEvidence({
+  planning,
+  forecast,
+}: {
+  planning: PreschoolOverviewViewModel["planningOutlook"];
+  forecast: PreschoolOverviewViewModel["forecast"];
+}) {
+  return (
+    <details className="mt-4 rounded-lg border border-border bg-surface px-4 py-3" data-forecast-method-evidence>
+      <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30">
+        Method, tariff and evidence
+      </summary>
+      {planning.status === "provisional" ? (
+        <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(280px,0.75fr)]">
+          <PlanningBaselineChart outlook={planning} />
+          <div className="rounded-lg border border-border bg-surface-subtle p-4 text-xs leading-5 text-muted">
+            <p className="font-semibold text-foreground">Transparent planning method</p>
+            <p className="mt-2">{planning.method}</p>
+            <p className="mt-3"><strong className="font-semibold text-foreground">Rate:</strong> {planning.tariffRate}</p>
+            <p className="mt-1">{planning.tariffLabel}</p>
+            {planning.tariffSourceUrl ? (
+              <a className="mt-2 inline-flex font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30" href={planning.tariffSourceUrl} target="_blank" rel="noreferrer">View official SP tariff source</a>
+            ) : null}
+            {forecast.status === "unavailable" ? (
+              <p className="mt-3 rounded-md border border-step-warning/25 bg-step-warning-soft/40 px-3 py-2">{forecast.detail}</p>
+            ) : (
+              <div className="mt-3 border-t border-border pt-3">
+                <p className="break-all font-mono">{forecast.planEvidence}</p>
+                <p className="mt-1 break-all font-mono">{forecast.actualEvidence}</p>
+              </div>
+            )}
+            <ul className="mt-3 list-disc space-y-1 pl-4">
+              {planning.limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}
+            </ul>
+            <div className="mt-3"><PreschoolEvidenceLink label="View supporting evidence" /></div>
+          </div>
+        </div>
+      ) : (
+        <p className="mt-3 text-xs leading-5 text-muted">{planning.detail}</p>
+      )}
+    </details>
+  );
+}
 
 function PlanningBaselineChart({ outlook }: { outlook: PlanningOutlookView }) {
   const maximum = Math.max(1, ...outlook.sourceWeeks.map((week) => week.usageKwh));
@@ -933,7 +1608,7 @@ function PlanningBaselineChart({ outlook }: { outlook: PlanningOutlookView }) {
     <article className="rounded-lg border border-border bg-surface-subtle p-4" data-planning-baseline="naive-weekly-average">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h4 className="text-sm font-semibold text-foreground">Four complete May weeks</h4>
+          <h4 className="text-sm font-semibold text-foreground">Four complete source weeks</h4>
           <p className="mt-1 text-[11px] leading-5 text-muted">{outlook.method}</p>
         </div>
         <p className="text-xs tabular-nums text-foreground"><strong className="font-semibold">{outlook.weeklyAverage}</strong> average</p>
@@ -949,51 +1624,60 @@ function PlanningBaselineChart({ outlook }: { outlook: PlanningOutlookView }) {
           </div>
         ))}
       </div>
-      <p className="mt-5 border-t border-border pt-3 text-[11px] leading-5 text-muted">The observed weekly spread becomes the displayed June reference range. No trend, weather or occupancy adjustment is applied.</p>
+      <p className="mt-5 border-t border-border pt-3 text-[11px] leading-5 text-muted">Supporting method evidence only. These source-week bars are not target-month Actual. No trend, weather or occupancy adjustment is applied.</p>
     </article>
   );
 }
 
-function OperationalSpikePanel({
-  title,
-  energy,
-  spikeCount,
-  centreCount,
-  centres,
-  tone,
+function AllHoursApplianceContext({
+  appliances,
 }: {
-  title: string;
-  energy: string;
-  spikeCount: number;
-  centreCount: number;
-  centres: PreschoolOperationalCentre[];
-  tone: "warning" | "default";
+  appliances: PreschoolOverviewViewModel["appliances"];
 }) {
   return (
-    <div className={`rounded-lg border p-4 ${tone === "warning" ? "border-step-warning/30 bg-step-warning-soft/30" : "border-border bg-surface-subtle"}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold text-foreground">{title}</p>
-          <p className="mt-1 text-[11px] tabular-nums text-muted">{energy}</p>
-        </div>
-        <div className="text-right">
-          <p className="text-xl font-semibold tabular-nums text-foreground">{spikeCount}</p>
-          <p className="text-[10px] text-muted-light">Spikes · {centreCount} Centres</p>
-        </div>
-      </div>
-      <div className="mt-4 space-y-2">
-        {centres.slice(0, 4).map((centre) => (
-          <div key={centre.centreCode} className="rounded-md border border-border bg-surface px-3 py-2.5">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-[11px] font-semibold text-foreground">{centre.centreCode} · {centre.centreType ?? "Type unavailable"} · {centre.spikeCount} Spike{centre.spikeCount === 1 ? "" : "s"}</p>
-              <span className="text-[11px] font-semibold tabular-nums text-step-error">{centre.worst.variance}</span>
-            </div>
-            <p className="mt-1 text-[10px] text-muted">{centre.worst.when} · {centre.worst.dayType} · {centre.worst.usage} · {centre.worst.baseline}</p>
-            <p className="mt-1 text-[10px] text-muted-light">Leading appliance: {centre.worst.leadingCircuit}</p>
+    <details id="preschool-appliance-ranking" className="mt-5 scroll-mt-28 border-t border-border pt-4" data-all-hours-appliance-context="supporting-only">
+      <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+        Supporting Evidence · all-hours Portfolio Appliance context
+      </summary>
+      <p className="mt-2 max-w-3xl text-xs leading-5 text-muted">All-hours totals only. This evidence is kept separate from the operating-state composition above.</p>
+      {appliances.status === "available" ? (
+        <div className="mt-4">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <h4 id="preschool-appliance-ranking-heading" className="text-sm font-semibold text-foreground">Portfolio Appliance ranking</h4>
+            <p className="text-xs font-semibold tabular-nums text-foreground">{appliances.totalEnergy} · {appliances.rows.length} Appliances</p>
           </div>
-        ))}
-      </div>
-    </div>
+          <div className="mt-3 divide-y divide-border border-y border-border" role="list" aria-label="All-hours Portfolio Appliance energy ranking">
+            {appliances.rows.map((appliance, index) => (
+              <div key={appliance.name} className="grid gap-2 py-3 sm:grid-cols-[minmax(150px,0.8fr)_minmax(220px,1.5fr)_170px] sm:items-center sm:gap-4" role="listitem">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-foreground">{index + 1}. {appliance.name}</p>
+                  <p className="mt-0.5 text-xs text-muted">{appliance.applianceGroup} · {appliance.centreCount} Centres</p>
+                </div>
+                <div className="h-2.5 overflow-hidden rounded-full bg-surface-subtle" aria-hidden="true">
+                  <div
+                    className={`h-full rounded-full ${applianceBarClass(appliance.applianceGroup)}`}
+                    style={{ width: `${Math.max(2, appliance.relativeToTopPct)}%` }}
+                  />
+                </div>
+                <div className="flex items-baseline justify-between gap-3 tabular-nums sm:justify-end">
+                  <span className="text-sm font-semibold text-foreground">{appliance.energy}</span>
+                  <span className="w-14 text-right text-xs text-muted">{appliance.share}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <details className="mt-4 border-t border-border pt-3">
+            <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">All-hours calculation note</summary>
+            <p className="mt-2 text-xs leading-5 text-muted">{appliances.detail}</p>
+          </details>
+        </div>
+      ) : (
+        <div className="mt-4 rounded-lg border border-border bg-surface-subtle p-4" role="status">
+          <p className="text-xs font-semibold text-muted">All-hours Appliance ranking unavailable</p>
+          <p className="mt-2 text-[11px] leading-5 text-muted">{appliances.detail}</p>
+        </div>
+      )}
+    </details>
   );
 }
 
@@ -1077,6 +1761,41 @@ function applianceBarClass(applianceGroup: string): string {
   if (applianceGroup === "Lighting") return "bg-step-inspect";
   if (applianceGroup === "Plugload") return "bg-step-warning";
   return "bg-step-success";
+}
+
+function applianceStrokeClass(applianceGroup: string): string {
+  if (applianceGroup === "Aircon") return "text-primary";
+  if (applianceGroup === "Lighting") return "text-step-inspect";
+  if (applianceGroup === "Plugload") return "text-step-warning";
+  return "text-step-success";
+}
+
+function applianceSeriesBarClass(index: number): string {
+  return [
+    "bg-step-warning",
+    "bg-primary",
+    "bg-step-inspect",
+    "bg-step-success",
+    "bg-step-query",
+    "bg-step-fetch",
+    "bg-step-visualize",
+    "bg-step-transform",
+    "bg-step-knowledge",
+  ][index % 9]!;
+}
+
+function applianceSeriesStrokeClass(index: number): string {
+  return [
+    "text-step-warning",
+    "text-primary",
+    "text-step-inspect",
+    "text-step-success",
+    "text-step-query",
+    "text-step-fetch",
+    "text-step-visualize",
+    "text-step-transform",
+    "text-step-knowledge",
+  ][index % 9]!;
 }
 
 function titleCase(value: string): string {

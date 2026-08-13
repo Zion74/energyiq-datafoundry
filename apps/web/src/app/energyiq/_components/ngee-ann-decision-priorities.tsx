@@ -26,15 +26,15 @@ export function NgeeAnnDecisionPriorities({
     <section
       id="ngee-ann-takeaways"
       aria-labelledby="ngee-ann-decision-priorities"
-      className="scroll-mt-28 border-b border-border bg-surface-subtle/45 px-5 py-7 lg:px-7 lg:py-8"
+      className="scroll-mt-28 border-b border-border bg-surface px-5 py-7 lg:px-7 lg:py-8"
     >
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h3 id="ngee-ann-decision-priorities" className="text-lg font-semibold tracking-[-0.015em] text-foreground">
-            Takeaways and next decisions
+            Operational review recommendations
           </h3>
           <p className="mt-1.5 max-w-3xl text-sm leading-6 text-muted">
-            Start here: what changed, why it matters, and the next check to make.
+            Takeaways and next decisions from the accepted Snapshot: what changed, why it matters, and the next check to make.
           </p>
         </div>
         <span className="rounded-full border border-border bg-surface px-3 py-1.5 text-xs font-medium text-muted">
@@ -93,7 +93,11 @@ export function NgeeAnnDecisionPriorities({
       {view.items.length > 0 ? (
         <div className="mt-5 space-y-4">
           {view.items.map((item) => (
-            <article key={item.priorityId} className="min-w-0 rounded-xl border border-border bg-surface p-5 shadow-[var(--shadow-card)] lg:p-6">
+            <article
+              key={item.priorityId}
+              data-recommendation-card
+              className="min-w-0 rounded-xl border border-border bg-surface p-5 shadow-[var(--shadow-card)] lg:p-6"
+            >
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-xs font-semibold text-primary">Priority {item.rank}</p>
@@ -126,9 +130,14 @@ export function NgeeAnnDecisionPriorities({
               {item.lifecycle ? (
                 <p className="mt-3 max-w-3xl text-sm leading-6 text-muted">{item.lifecycle.detail}</p>
               ) : null}
-              <HorizonComparison horizons={item.horizons} />
+              <div className="mt-4 flex flex-wrap gap-x-6 gap-y-2 rounded-lg bg-surface-subtle px-4 py-3 text-sm leading-6">
+                <p><span className="font-semibold text-foreground">Affected area:</span> <span className="text-muted">{item.explorerScopeName}</span></p>
+                <p className="text-muted">No saving is assumed until the recommended check is completed.</p>
+              </div>
               <dl className="mt-5 grid gap-x-8 gap-y-4 text-sm leading-6 md:grid-cols-2">
+                <PriorityField label="Evidence" value={item.evidence} />
                 <PriorityField label="Why it matters" value={item.impact} />
+                <PriorityField label="Recommended action" value={item.action} />
                 <PriorityField label="Where to investigate first" value={item.driver} />
                 <PriorityField label="Recommended next check" value={item.nextCheck} />
                 <PriorityField label="How to confirm progress" value={item.verificationMetric} />
@@ -137,9 +146,9 @@ export function NgeeAnnDecisionPriorities({
                 <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
                   Details, evidence and limitations
                 </summary>
+                <HorizonComparison horizons={item.horizons} />
                 <div className="mt-4 text-sm leading-6 text-muted">
                   <p><span className="font-semibold text-foreground">Rule finding.</span> {item.finding}</p>
-                  <p><span className="font-semibold text-foreground">Supporting evidence.</span> {item.evidence}</p>
                   <p className="mt-2">Seen on {item.recurrenceDayCount} distinct exception days. Linked Level and Circuit evidence is preserved.</p>
                   {item.confidenceLimitation ? (
                     <p className="mt-2 text-step-warning"><span className="font-semibold">Limitation.</span> {item.confidenceLimitation}</p>

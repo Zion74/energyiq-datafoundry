@@ -141,6 +141,14 @@ export type EnergyFactProjectMaterializationWrite = {
 export type EnergyFactProjectMaterializationResult = {
   batchStats: Record<string, EnergyFactMaterializationStats>;
   projectAudit: EnergyFactProjectAudit;
+  timings: EnergyFactProjectMaterializationTimings;
+};
+
+export type EnergyFactProjectMaterializationTimings = {
+  sourceWriteMs: number;
+  canonicalRebuildMs: number;
+  integrityAndCheckpointMs: number;
+  totalMs: number;
 };
 
 export type EnergyFactProjectState = EnergyIqSnapshotFactScope & {
@@ -152,6 +160,7 @@ export type EnergyFactProjectState = EnergyIqSnapshotFactScope & {
 export const writeEnergyFactProjectMaterialization = async (
   input: EnergyFactProjectMaterializationWrite,
 ): Promise<EnergyFactProjectMaterializationResult> => {
+  const totalStartedAt = performance.now();
   const databasePath = input.databasePath === ":memory:" ? input.databasePath : resolve(input.databasePath);
   if (databasePath !== ":memory:") mkdirSync(dirname(databasePath), { recursive: true });
   validateProjectMaterializationInput(input);
@@ -161,6 +170,7 @@ export const writeEnergyFactProjectMaterialization = async (
     await ensureFactSchema(connection);
     await duckDbRun(connection, "BEGIN TRANSACTION");
     await assertExpectedPreviousFactState(connection, input);
+    const sourceWriteStartedAt = performance.now();
     for (const batch of input.batches) {
       const write: EnergyFactScopedBatchWrite = {
         projectId: input.projectId,
@@ -174,7 +184,14 @@ export const writeEnergyFactProjectMaterialization = async (
       await insertRows(connection, "energy_source_interval_facts", FACT_COLUMNS, write.intervalFacts.map(factValues));
       await insertRows(connection, "energy_source_quality_events", QUALITY_COLUMNS, write.qualityEvents.map((event) => qualityValues(event, write.sourceSha256)));
     }
-    await publishCanonicalProjectFacts(connection, input.projectId, input.timezone, input.snapshotFactScope);
+    const sourceWriteMs = elapsedMs(sourceWriteStartedAt);
+    const canonicalRebuildMs = await publishCanonicalProjectFacts(
+      connection,
+      input.projectId,
+      input.timezone,
+      input.snapshotFactScope,
+    );
+    const integrityStartedAt = performance.now();
     const batchStats: Record<string, EnergyFactMaterializationStats> = {};
     for (const batch of input.batches) {
       batchStats[batch.importBatchId] = await readMaterializationStats(connection, batch.importBatchId);
@@ -182,7 +199,17 @@ export const writeEnergyFactProjectMaterialization = async (
     const projectAudit = await readProjectAudit(connection, input.projectId, input.snapshotFactScope.sourceSha256);
     await duckDbRun(connection, "COMMIT");
     await duckDbRun(connection, "CHECKPOINT");
-    return { batchStats, projectAudit };
+    const integrityAndCheckpointMs = elapsedMs(integrityStartedAt);
+    return {
+      batchStats,
+      projectAudit,
+      timings: {
+        sourceWriteMs,
+        canonicalRebuildMs,
+        integrityAndCheckpointMs,
+        totalMs: elapsedMs(totalStartedAt),
+      },
+    };
   } catch (error) {
     await duckDbRun(connection, "ROLLBACK").catch(() => undefined);
     throw error;
@@ -694,7 +721,8 @@ const publishCanonicalProjectFacts = async (
   projectId: string,
   timezone: string,
   snapshotFactScope: EnergyIqSnapshotFactScope,
-): Promise<void> => {
+): Promise<number> => {
+  const canonicalRebuildStartedAt = performance.now();
   await rebuildCanonicalNormalizedReadings(connection, projectId, snapshotFactScope.sourceSha256);
   await rebuildCanonicalSourceIntervals(connection, projectId, snapshotFactScope.sourceSha256);
   await rebuildCanonicalSourceQualityEvents(connection, projectId, snapshotFactScope.sourceSha256);
@@ -703,6 +731,7 @@ const publishCanonicalProjectFacts = async (
   await rebuildProjectCumulativeIntervals(connection, projectId, timezone);
   await rebuildProjectCumulativeQualityEvents(connection, projectId);
   await writeProjectFactState(connection, snapshotFactScope);
+  return elapsedMs(canonicalRebuildStartedAt);
 };
 
 const assertExpectedPreviousFactState = async (
@@ -1130,3 +1159,6 @@ const ignoreAlreadyClosed = (error: unknown): void => {
   if (error instanceof Error && error.message.includes("already closed")) return;
   throw error;
 };
+
+const elapsedMs = (startedAt: number): number => roundedMs(performance.now() - startedAt);
+const roundedMs = (durationMs: number): number => Math.round(durationMs * 1_000) / 1_000;

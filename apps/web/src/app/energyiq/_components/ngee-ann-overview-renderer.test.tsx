@@ -33,6 +33,219 @@ function makeWithinThreshold(row: DailyAnomalyRow): void {
 }
 
 describe("NgeeAnnOverviewRenderer", () => {
+  it("builds the default when-energy summary from the selected complete profile cells", () => {
+    const view = buildNgeeAnnOverviewViewModel(ngeeAnnGoldenSnapshot()).dayProfile;
+    expect(view.status).toBe("available");
+    if (view.status !== "available") return;
+
+    expect(view.profiles.find((profile) => profile.id === "project:weekday")?.summary).toEqual({
+      status: "available",
+      peakHour: 14,
+      peakHourLabel: "14:00",
+      peakUsageKwh: 16.0703,
+      peakUsage: "16.0703",
+      dailyUsageKwh: 246.8528,
+      dailyUsage: "246.9",
+      sampleDayCount: 5,
+    });
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot: ngeeAnnGoldenSnapshot() }} />,
+    );
+    expect(markup).toContain("When energy occurs");
+    expect(markup).toContain("Weekday / Project peaked at 14:00");
+    expect(markup).toContain("16.0703 kWh mean");
+    expect(markup).toContain("5 complete-day samples");
+    expect(markup).toContain("Weekend / Project peaked at 14:00 with a 9.7148 kWh mean across 2 complete-day samples.");
+    expect(markup).toContain("This observed profile does not by itself prove an anomaly, waste or cause.");
+    expect(markup).toContain("Darker Heatmap cells show higher accepted usage within the selected view; they do not by themselves prove an anomaly, waste or cause.");
+  });
+
+  it("keeps the complete-day profile summary independent from excluded partial grid cells", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    snapshot.analysis.timeBehaviour!.scopes[0]!.cells[0]!.dataHealth = {
+      status: "partial",
+      coveragePct: 75,
+      expectedMeterIntervalCount: 16,
+      validIntervalCount: 12,
+      qualityEventCount: 1,
+    };
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+    expect(markup).toContain("Weekday / Project peaked at 14:00");
+    expect(markup).toContain("5 complete days / 24 server values");
+  });
+
+  it("fails the full Day Profile contract closed when an available profile has no valid samples", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const profile = snapshot.analysis.timeBehaviour!.dayProfiles.find((candidate) => (
+      candidate.scopeId === "project" && candidate.dayType === "weekday"
+    ));
+    if (!profile || profile.status !== "available") throw new Error("Expected available Project weekday profile.");
+    profile.sampleDayCount = 0;
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+    expect(markup).toContain("The server Day Profile contract is incomplete or invalid.");
+    expect(markup).not.toContain("Weekday / Project peaked at 14:00");
+  });
+
+  it("opens with an answer-first Executive Summary built only from verified Snapshot facts", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+
+    expect(view.executiveSummary.headline).toBe("Energy use increased 26.4% versus the previous period");
+    expect(view.executiveSummary.signals).toEqual([
+      expect.objectContaining({
+        id: "period-change",
+        label: "What changed",
+        value: "+319.49 kWh",
+        href: "#ngee-ann-comparison-evidence",
+      }),
+      expect.objectContaining({
+        id: "main-driver",
+        label: "Largest aligned movements",
+        value: "Level 7: +319.56 kWh",
+        detail: "Category Load: +352.21 kWh. These are separate same-direction movements; their overlap and cause are not established.",
+        href: "#ngee-ann-circuit-analysis",
+      }),
+      expect.objectContaining({
+        id: "first-review",
+        label: "First date to review",
+        value: "Project · 13 Jun",
+        href: "#incident-project-2026-06-13",
+      }),
+    ]);
+    expect(view.changeOverTime.headline).toBe("Start with Project on 13 Jun: +105.63 kWh above its comparable-day baseline");
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+
+    expect(markup).toContain("Executive Summary");
+    expect(markup).toContain("Energy use increased 26.4% versus the previous period");
+    expect(markup).toContain("Key Highlights");
+    expect(markup).toContain("Consumption Breakdown");
+    expect(markup).toContain("Energy Distribution");
+    expect(markup).toContain("+26.4% vs previous");
+    expect(markup).toContain("Component subtotal:");
+    expect(markup).toContain("Category mix (component Circuits)");
+    expect(markup).toContain("Start with Project on 13 Jun: +105.63 kWh above its comparable-day baseline");
+    expect(markup).toContain('href="#ngee-ann-circuit-analysis"');
+    expect(markup).toContain('href="#incident-project-2026-06-13"');
+    const expectedSections = [
+      ["ngee-ann-daily-trend", "Daily Total Trend"],
+      ["ngee-ann-executive-summary", "Executive Summary"],
+      ["ngee-ann-summary-findings", "Summary of Findings"],
+      ["ngee-ann-day-profile-analysis", "Day Profile Analysis"],
+      ["ngee-ann-energy-health", "Energy Health Summary"],
+      ["ngee-ann-circuit-analysis", "Circuit Category Analysis"],
+      ["ngee-ann-recommendations", "Personalized Recommendations"],
+      ["ngee-ann-evidence", "Evidence and calculation details"],
+    ] as const;
+    const container = document.createElement("div");
+    container.innerHTML = markup;
+    expect(Array.from(container.querySelectorAll<HTMLElement>("[data-overview-section]"), (section) => section.id))
+      .toEqual(expectedSections.map(([id]) => id));
+    for (let index = 1; index < expectedSections.length; index += 1) {
+      expect(markup.indexOf(expectedSections[index - 1]![1])).toBeLessThan(markup.indexOf(expectedSections[index]![1]));
+    }
+    expect(markup).toContain("Detected Anomaly List");
+    expect(container.querySelectorAll("[data-summary-finding]")).toHaveLength(6);
+    expect(container.querySelectorAll("[data-template-anomaly-trigger]")).toHaveLength(1);
+    expect(markup.indexOf("Executive Summary")).toBeLessThan(markup.indexOf("Consumption Breakdown"));
+    expect(markup.indexOf("Consumption Breakdown")).toBeLessThan(markup.indexOf("Energy Distribution"));
+    expect(markup.indexOf("Energy Distribution")).toBeLessThan(markup.indexOf("Summary of Findings"));
+  });
+
+  it("withholds aligned movements instead of relabelling opposite-direction facts", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    for (const scope of snapshot.analysis.childScopes) {
+      if (scope.comparison) scope.comparison.changeKwh = -Math.abs(scope.comparison.changeKwh || 1);
+    }
+    for (const category of snapshot.analysis.categories) {
+      if (category.comparison) category.comparison.changeKwh = -Math.abs(category.comparison.changeKwh || 1);
+    }
+
+    const view = buildNgeeAnnOverviewViewModel(snapshot);
+    const movements = view.executiveSummary.signals.find((signal) => signal.id === "main-driver");
+
+    expect(movements).toEqual(expect.objectContaining({
+      label: "Largest aligned movements",
+      value: "Unavailable",
+      status: "unavailable",
+      href: null,
+    }));
+    expect(movements?.detail).toContain("No Level and Category movements align");
+  });
+
+  it("keeps missing comparison and anomaly facts explicit without inventing an Executive Summary", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    snapshot.analysis.comparison.changePct = null;
+    snapshot.analysis.dailyUsageAnomalies = {
+      status: "unavailable",
+      ruleRevisionId: "comparison.daily_usage_above_baseline@1",
+      reason: {
+        code: "BUSINESS_CALENDAR_VERSION_MISSING",
+        message: "No Published Calendar is pinned.",
+      },
+    };
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+
+    expect(markup).toContain("Comparable-period change unavailable");
+    expect(markup).toContain("No validated comparable-period usage is available.");
+    expect(markup).toContain("No Published Calendar is pinned.");
+    expect(markup).toContain("No triggered daily incident is available for review");
+    expect(markup).not.toContain("0% versus the previous period");
+    expect(markup).not.toContain("0 kWh above its comparable-day baseline");
+  });
+
+  it("labels an incomplete component Category period partial and withholds its totals", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    const project = snapshot.analysis.componentCategoryBreakdown!.scopes[0]!;
+    const incompleteDay = project.rows[0]!;
+    incompleteDay.categories[0]!.usageKwh = null;
+    incompleteDay.categories[0]!.sharePct = null;
+    incompleteDay.componentUsageKwh = null;
+    incompleteDay.dataHealth = {
+      ...incompleteDay.dataHealth,
+      status: "partial",
+      coveragePct: 75,
+      validIntervalCount: Math.floor(incompleteDay.dataHealth.expectedMeterIntervalCount * 0.75),
+    };
+    Object.assign(project.period, {
+      status: "partial",
+      reason: "At least one daily component Category is incomplete.",
+      officialUsageKwh: null,
+      componentUsageKwh: null,
+      gapKwh: null,
+      ratioPct: null,
+      categories: project.period.categories.map((category) => ({
+        ...category,
+        usageKwh: null,
+        sharePct: null,
+      })),
+    });
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+    const container = document.createElement("div");
+    container.innerHTML = markup;
+    const section = container.querySelector('section[aria-labelledby="ngee-ann-consumption-breakdown"]');
+
+    expect(section?.textContent).toContain("Partial component data");
+    expect(section?.textContent).toContain("Period totals withheld");
+    expect(section?.textContent).not.toContain("Component subtotal: 1,519 kWh");
+    expect(section?.textContent).not.toContain("Official Scope total: 1,531.2 kWh");
+  });
+
   it("shows one deterministic theme across latest day, rolling 7 days and rolling 28 days", () => {
     const markup = renderToStaticMarkup(
       <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot: ngeeAnnGoldenSnapshot() }} />,
@@ -61,6 +274,36 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Newly supported in current B");
     expect(markup).toContain("This does not prove the issue itself began in B.");
     expect(markup).toContain('data-decision-lifecycle-kind="newly_supported"');
+  });
+
+  it("renders the server action in the main decision path and keeps horizons inside details", () => {
+    const action = "Review the strongest supported Level, Circuit and hourly Evidence before changing schedules or equipment.";
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot: ngeeAnnGoldenSnapshot() }} />,
+    );
+    const container = document.createElement("div");
+    container.innerHTML = markup;
+    const priority = container.querySelector("#ngee-ann-takeaways article");
+    expect(priority).not.toBeNull();
+    const text = priority!.textContent ?? "";
+
+    expect(text).toContain(action);
+    const fieldLabels = Array.from(priority!.querySelectorAll("dl dt"), (field) => field.textContent);
+    expect(fieldLabels).toEqual([
+      "Evidence",
+      "Why it matters",
+      "Recommended action",
+      "Where to investigate first",
+      "Recommended next check",
+      "How to confirm progress",
+    ]);
+
+    const details = priority!.querySelector("details");
+    expect(details).not.toBeNull();
+    expect(details!.querySelectorAll("[data-horizon-label]")).toHaveLength(3);
+    expect(details!.querySelector('[data-horizon-label="Rolling 7 days"]')?.getAttribute("aria-label"))
+      .toBe("Rolling 7 days, 10 Jun – 16 Jun: 1,531.17 kWh versus 1,211.68 kWh governed baseline; +319.49 kWh, +26.4%");
+    expect(priority!.querySelector(":scope > [data-horizon-label]")).toBeNull();
   });
 
   it("shows a prior theme as resolved only when current B has complete no-trigger Evidence", () => {
@@ -146,7 +389,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).not.toContain("Rolling 28 days, 20 May – 16 Jun: 0 kWh");
   });
 
-  it("places the server-owned decision priorities after Data Status and before Key highlights", () => {
+  it("places verified figures before server-owned decisions in the answer-first Executive Summary", () => {
     const snapshot = ngeeAnnGoldenSnapshot();
     const projectExplorerHref = [
       "/energyiq/explorer?projectId=ngee-ann-polytechnic",
@@ -167,7 +410,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     );
 
     expect(markup).toContain("Takeaways and next decisions");
-    expect(markup).toContain("Supporting evidence");
+    expect(markup).toContain("Evidence");
     expect(markup).toContain("Why it matters");
     expect(markup).toContain("Recommended next check");
     expect(markup).toContain("How to confirm progress");
@@ -178,9 +421,11 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Ask AI Analyst");
     expect(markup).toContain("AI energy analyst");
     expect(markup).toContain("Inspecting scoped data");
-    expect(markup.indexOf("Takeaways and next decisions")).toBeLessThan(markup.indexOf("Verified figures"));
-    expect(markup.indexOf("Verified figures")).toBeLessThan(markup.indexOf("AI energy analyst"));
-    expect(markup.indexOf("AI energy analyst")).toBeLessThan(markup.indexOf("Change over time"));
+    expect(markup.indexOf("Daily Total Trend")).toBeLessThan(markup.indexOf("Executive Summary"));
+    expect(markup.indexOf("Executive Summary")).toBeLessThan(markup.indexOf("Key Highlights"));
+    expect(markup.indexOf("Circuit Category Analysis")).toBeLessThan(markup.indexOf("Personalized Recommendations"));
+    expect(markup.indexOf("Personalized Recommendations")).toBeLessThan(markup.indexOf("AI energy analyst"));
+    expect(markup.indexOf("AI energy analyst")).toBeLessThan(markup.indexOf("Evidence and calculation details"));
 
     const container = document.createElement("div");
     container.innerHTML = markup;
@@ -241,7 +486,9 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain(expected);
     expect(markup).toContain("0 decision priorities");
     expect(markup).not.toContain("View supporting evidence");
-    expect(markup).toContain("Verified figures");
+    expect(markup).not.toContain("Recommended action");
+    expect(markup).not.toContain("Review the strongest supported Level, Circuit and hourly Evidence before changing schedules or equipment.");
+    expect(markup).toContain("Key Highlights");
   });
 
   it("fails invalid priorities closed while leaving the rest of the Golden Overview visible", () => {
@@ -253,8 +500,8 @@ describe("NgeeAnnOverviewRenderer", () => {
 
     expect(markup).toContain("Decision themes unavailable");
     expect(markup).toContain("order or Evidence contract is invalid");
-    expect(markup).toContain("1531.17");
-    expect(markup).toContain("Energy trend");
+    expect(markup).toContain("1,531.17");
+    expect(markup).toContain("Daily Total Trend");
   });
 
   it("uses a warning badge for a server-owned partial priority", () => {
@@ -288,45 +535,61 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Ready");
     expect(markup).toContain("100% coverage");
     expect(markup).toContain("2,688 / 2,688 valid intervals");
-    expect(markup).toContain("1531.17");
+    expect(markup).toContain("1,531.17");
     expect(markup).toContain("218.74");
     expect(markup).toContain("20.67");
-    expect(markup).toContain("26.4% higher");
-    expect(markup).toContain("Current 1531.17 kWh vs previous 1211.68 kWh");
+    expect(markup).toContain("+26.4% vs previous");
+    expect(markup).toContain("Previous period: 1,211.68 kWh");
     expect(markup).toContain("S$489.97");
     expect(markup).toContain("Area and headcount metadata are missing");
     expect(markup).toContain("Normalised benchmarks are not shown.");
     expect(markup).not.toContain("Normalised benchmarks unavailable.");
     expect(markup).toContain("Configure area metadata. Configure headcount metadata.");
     expect(markup).toContain("Based on the active tariff for this period");
+    expect(markup).toContain("Open a card for its supporting breakdown.");
+    expect(markup).toContain("Average electricity used per day in this Overview window");
     expect(markup).toContain("Energy trend");
     expect(markup).toContain("When did accepted energy use change inside the selected Period?");
     expect(markup).toContain("Energy trend Scope");
-    expect(markup).toContain("7 daily buckets");
+    expect(markup).toContain("5 daily buckets");
     expect(markup).toContain("Trend evidence / daily_totals_v1");
-    expect(markup).toContain("Priority usage exceptions");
-    expect(markup).toContain("Focus on the largest gaps from comparable days");
-    expect(markup).toContain("Largest gap to review first");
-    expect(markup.match(/data-priority-anomaly-trigger="true"/g)).toHaveLength(3);
+    expect(markup).toContain("Detected Anomaly List");
+    expect(markup).toContain("Open a flagged day to compare its accepted 24-hour Circuit evidence");
+    expect(markup).toContain("Threshold");
+    expect(markup.match(/data-template-anomaly-trigger="true"/g)).toHaveLength(1);
     expect(markup.match(/data-anomaly-trigger="true"/g)).toHaveLength(7);
     expect(markup).toContain("View all 7 flagged checks");
     expect(markup).toContain("How these exceptions were selected");
     expect(markup).not.toContain("Triggered only / pinned Rule");
     expect(markup).toContain("Day profile");
-    expect(markup).toContain("How does the typical 24-hour energy shape change by Day Type and Scope?");
+    expect(markup).toContain("Weekday daily average");
+    expect(markup).toContain("246.9 kWh/day");
+    expect(markup).toContain("Weekend daily average");
+    expect(markup).toContain("148.5 kWh/day");
+    expect(markup).toContain("Public Holiday baseline unavailable");
+    expect(markup).toContain("24-Hour Profile Comparison");
+    expect(markup).toContain("Official Scope energy");
+    expect(markup).toContain("Published component Category shape");
+    expect(markup).toContain("Load");
+    expect(markup).toContain("Light");
+    expect(markup).toContain("How does the observed 24-hour energy shape change by Day Type and Scope?");
     expect(markup).toContain("5 complete days / 24 server values");
     expect(markup).toContain("Day Profile evidence / time_bucket_grid_v1");
     expect(markup).toContain("Usage heatmap");
     expect(markup).toContain("Which recurring local hour pattern or individual date needs inspection?");
-    expect(markup).toContain("Level × hour average");
+    expect(markup).toContain("Level → Circuit");
     expect(markup).toContain("Average day type");
     expect(markup).toContain("Date × hour");
+    expect(markup).toContain("Daily usage pattern by Level");
+    expect(markup).toContain("Level profile summary");
+    expect(markup).toContain("Office Load 4 Fan ISOL 1/2");
+    expect(markup).not.toContain("This Snapshot does not publish a Circuit-by-hour heatmap");
     expect(markup).toContain("Heatmap evidence / time_bucket_grid_v1");
     expect(markup).toContain("energy.total_usage_kwh@1");
     expect(markup).toContain("Energy distribution");
     expect(markup).toContain("bg-blue-600");
     expect(markup).toContain("bg-teal-700");
-    expect(markup).toContain("Which Level needs attention first?");
+    expect(markup).toContain("Where is current energy concentrated by Level, and which Level changed most?");
     expect(markup).toContain("1054.1845");
     expect(markup).toContain("68.8484%");
     expect(markup).toContain("734.6257");
@@ -334,7 +597,20 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("476.9838");
     expect(markup).toContain("31.1516%");
     expect(markup).toContain("-0.0142%");
+    expect(markup).toContain("Time-based Behavioral Analysis");
+    expect(markup).toContain("Published operating-period energy");
+    expect(markup).toContain('aria-label="1,200.0 kWh per period"');
+    expect(markup).toContain("Published non-operating energy");
+    expect(markup).toContain('aria-label="331.2 kWh per period"');
+    expect(markup).not.toContain("08:00–18:00");
+    expect(markup).not.toContain("22:00–06:00");
     expect(markup).toContain("Energy composition");
+    expect(markup).toContain("Top Circuit Ranking");
+    expect(markup).toContain("Published component Circuits ranked by current Snapshot energy");
+    expect(markup).toContain("14 published Circuit rows");
+    expect(markup).toContain("Share of Project");
+    expect(markup).toContain("Validated movement");
+    expect(markup).not.toContain("vs Avg of Top 10");
     expect(markup).toContain("What explains the official Project total?");
     expect(markup).toContain("Where the energy went");
     expect(markup).toContain("bg-violet-600");
@@ -350,7 +626,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("-32.7158 kWh");
     expect(markup).toContain("-10.0832%");
     expect(markup).toContain("Largest component Circuits");
-    expect(markup).toContain("Ranked by current usage. Use these Circuits to decide where to investigate first.");
+    expect(markup).toContain("Ranked by current usage only. This is not an anomaly, priority or savings ranking.");
     expect(markup).toContain("439.0972 kWh");
     expect(markup).toContain("28.6773%");
     expect(markup).toContain("70.6873 kWh");
@@ -388,11 +664,10 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("level-7");
     expect(markup).toContain("No · explanatory component");
     expect(markup).toContain("[2026-06-09T16:00:00.000Z, 2026-06-16T16:00:00.000Z)");
-    expect(markup.indexOf("Energy trend")).toBeLessThan(markup.indexOf("Energy distribution"));
-    expect(markup.indexOf("Energy trend")).toBeLessThan(markup.indexOf("Priority usage exceptions"));
-    expect(markup.indexOf("Priority usage exceptions")).toBeLessThan(markup.indexOf("Energy distribution"));
+    expect(markup.indexOf("Daily Total Trend")).toBeLessThan(markup.indexOf("Executive Summary"));
+    expect(markup.indexOf("Detected Anomaly List")).toBeLessThan(markup.indexOf("Executive Summary"));
+    expect(markup.indexOf("Day Profile Analysis")).toBeLessThan(markup.indexOf("Energy distribution"));
     expect(markup.indexOf("Energy distribution")).toBeLessThan(markup.indexOf("Energy composition"));
-    expect(markup.indexOf("Energy composition")).toBeLessThan(markup.indexOf("Day profile"));
     expect(markup.indexOf("Day profile")).toBeLessThan(markup.indexOf("Usage heatmap"));
     expect(markup.indexOf("Usage heatmap")).toBeLessThan(markup.indexOf("Evidence and calculation details"));
     expect(markup.indexOf("Accounting trace")).toBeLessThan(markup.indexOf("Derived meter trace"));
@@ -440,6 +715,66 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(markup).toContain("Level comparison unavailable");
     expect(markup).toContain("does not include the Level comparison and quality contract");
     expect(markup).not.toContain("1054.1845");
+  });
+
+  it("separates current concentration from measured change without joining Level and Category", () => {
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot: ngeeAnnGoldenSnapshot() }} />,
+    );
+
+    expect(markup).toContain("Current concentration by Level");
+    expect(markup).toContain("Largest measured Level movement");
+    expect(markup).toContain("Current concentration by Category");
+    expect(markup).toContain("Largest measured Category movement");
+    const levelCurrent = markup.slice(
+      markup.indexOf("Current concentration by Level"),
+      markup.indexOf("Largest measured Level movement"),
+    );
+    const levelMovement = markup.slice(
+      markup.indexOf("Largest measured Level movement"),
+      markup.indexOf("Current concentration by Category"),
+    );
+    const categoryCurrent = markup.slice(
+      markup.indexOf("Current concentration by Category"),
+      markup.indexOf("Largest measured Category movement"),
+    );
+    const categoryMovement = markup.slice(
+      markup.indexOf("Largest measured Category movement"),
+      markup.indexOf("Level and Category are separate views"),
+    );
+    for (const value of ["Level 7", "1054.18", "68.8%", "Project energy"]) expect(levelCurrent).toContain(value);
+    for (const value of ["Level 7", "+319.56 kWh", "+43.5%", "previous window"]) expect(levelMovement).toContain(value);
+    for (const value of ["Load", "1239.42", "80.9%", "Project energy"]) expect(categoryCurrent).toContain(value);
+    for (const value of ["Load", "+352.21 kWh", "+39.7%", "previous window"]) expect(categoryMovement).toContain(value);
+    expect(markup).toContain("Level and Category are separate views; their overlap and cause are not established here.");
+    expect(markup).not.toContain("Level 7 Load");
+  });
+
+  it("keeps current contributor views open when comparison facts are absent", () => {
+    const snapshot = ngeeAnnGoldenSnapshot();
+    for (const level of snapshot.analysis.childScopes.filter((scope) => scope.nodeType === "level")) {
+      delete level.comparison;
+    }
+    for (const category of snapshot.analysis.categories) delete category.comparison;
+    for (const circuit of snapshot.analysis.circuits) delete circuit.comparison;
+
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
+    );
+
+    expect(markup).toContain("Current concentration by Level");
+    expect(markup).toContain("Current concentration by Category");
+    expect(markup).toContain("1054.18");
+    expect(markup).toContain("68.8%");
+    expect(markup).toContain("1239.42");
+    expect(markup).toContain("80.9%");
+    expect(markup).toContain("439.1");
+    expect(markup).toContain("Measured Level movement unavailable");
+    expect(markup).toContain("Measured Category movement unavailable");
+    expect(markup).toContain("Circuit movement unavailable");
+    expect(markup).not.toContain("Level comparison unavailable");
+    expect(markup).not.toContain("Category comparison unavailable");
+    expect(markup).not.toContain("Component Circuit ranking unavailable");
   });
 
   it("fails only Energy trend closed for a legacy Snapshot without daily totals", () => {
@@ -497,7 +832,7 @@ describe("NgeeAnnOverviewRenderer", () => {
       <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot }} />,
     );
 
-    expect(markup).toContain("7 daily buckets");
+    expect(markup).toContain("5 daily buckets");
     expect(markup).toContain("Day profile unavailable");
     expect(markup).toContain("Usage heatmap unavailable");
     expect(markup).toContain("does not include the authoritative hourly time grid");
@@ -555,7 +890,7 @@ describe("NgeeAnnOverviewRenderer", () => {
     expect(suppressedMarkup).toContain("prevented a trustworthy conclusion for every check");
     expect(suppressedMarkup).not.toContain("data-anomaly-trigger=\"true\"");
     for (const markup of [absentMarkup, unavailableMarkup, invalidMarkup, suppressedMarkup]) {
-      expect(markup).toContain("Energy trend");
+      expect(markup).toContain("Daily Total Trend");
       expect(markup).toContain("Day profile");
       expect(markup).toContain("Energy distribution");
     }
@@ -578,7 +913,7 @@ describe("NgeeAnnOverviewRenderer", () => {
 
     expect(markup).toContain("7 checks crossed both published thresholds; 13 stayed within threshold; 1 could not be classified.");
     expect(markup).toContain("Suppressed checks are not counted as normal.");
-    expect(markup.match(/data-priority-anomaly-trigger="true"/g)).toHaveLength(3);
+    expect(markup.match(/data-template-anomaly-trigger="true"/g)).toHaveLength(1);
     expect(markup.match(/data-anomaly-trigger="true"/g)).toHaveLength(7);
   });
 
@@ -790,6 +1125,92 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
       .find((candidate) => candidate.textContent === label) as HTMLButtonElement | undefined;
   };
 
+  it("opens the four template-aligned KPI cards and keeps the Peak evidence dialog reachable", async () => {
+    await renderGolden();
+
+    const totalCard = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent?.includes("Total Consumption"));
+    expect(totalCard).toBeTruthy();
+
+    await act(async () => totalCard!.click());
+
+    const breakdown = container.querySelector("#ngee-ann-highlight-breakdown");
+    expect(breakdown?.textContent).toContain("Level 7");
+    expect(breakdown?.textContent).toContain("1054.18 kWh");
+    expect(container.querySelectorAll("#ngee-ann-key-highlights article")).toHaveLength(4);
+    expect(peakTrigger()).toBeTruthy();
+  });
+
+  it("ports personalized recommendations without inventing savings or workflow state", () => {
+    const markup = renderToStaticMarkup(
+      <NgeeAnnOverviewRenderer state={{ status: "ready", snapshot: ngeeAnnGoldenSnapshot() }} />,
+    );
+    const container = document.createElement("div");
+    container.innerHTML = markup;
+    const recommendations = container.querySelector("#ngee-ann-takeaways");
+
+    expect(recommendations?.textContent).toContain("Operational review recommendations");
+    expect(recommendations?.textContent).toContain("Affected area");
+    expect(recommendations?.textContent).toContain("No saving is assumed until the recommended check is completed.");
+    expect(recommendations?.querySelectorAll("[data-recommendation-card]")).toHaveLength(1);
+    expect(recommendations?.textContent).not.toContain("Estimated saving");
+    expect(recommendations?.textContent).not.toContain("Add to Action Log");
+  });
+
+  it("switches Consumption Breakdown by Scope without recomputing the Snapshot in React", async () => {
+    await renderGolden();
+
+    const filter = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Consumption Breakdown filter type"]',
+    )!;
+    await act(async () => {
+      filter.value = "space";
+      filter.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    const scope = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Consumption Breakdown Scope"]',
+    )!;
+    await act(async () => {
+      scope.value = "level-7";
+      scope.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    expect(scope.value).toBe("level-7");
+    expect(container.textContent).toContain("Level 7 · focus or hover a day for exact values");
+    const day = container.querySelector<SVGGElement>('g[aria-label^="10 Jun, Weekday"]');
+    expect(day?.getAttribute("tabindex")).toBe("0");
+  });
+
+  it("supports Scope, period/day and keyboard Category selection in Energy Distribution", async () => {
+    await renderGolden();
+
+    const space = container.querySelector<HTMLSelectElement>(
+      'select[aria-label="Energy Distribution Space Filter"]',
+    )!;
+    await act(async () => {
+      space.value = "level-7";
+      space.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    const singleDay = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
+      .find((button) => button.textContent === "Single day")!;
+    await act(async () => singleDay.click());
+
+    expect(singleDay.getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector('select[aria-label="Energy Distribution Local date"]')).not.toBeNull();
+
+    const lightSegment = container.querySelector<SVGPathElement>('path[aria-label^="Light,"]')!;
+    await act(async () => lightSegment.focus());
+
+    expect(lightSegment.getAttribute("aria-pressed")).toBe("true");
+    const ranking = container.querySelector<HTMLElement>(
+      '[role="region"][aria-label^="Light Circuit ranking"]',
+    );
+    expect(ranking?.getAttribute("tabindex")).toBe("0");
+    expect(ranking?.textContent).toContain("Level 7");
+  });
+
   const samePeriodAnomalyRefreshCases: Array<{
     name: string;
     mutate: (snapshot: ReturnType<typeof ngeeAnnGoldenSnapshot>) => void;
@@ -999,7 +1420,32 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(container.textContent).toContain("Governed baseline 138.88 kWh");
   });
 
-  it("opens a frozen daily incident, switches exact server modes, closes and restores trigger focus", async () => {
+  it("keeps the template Day Type, Scope, anomaly list and detail heatmap on one interaction path", async () => {
+    await renderGolden();
+
+    const trend = container.querySelector("#ngee-ann-daily-trend")!;
+    expect(trend.querySelectorAll("[data-trend-point]")).toHaveLength(5);
+    expect(trend.querySelectorAll("[data-template-anomaly-trigger]")).toHaveLength(1);
+    expect(filterButton("Day Type", "Weekday")?.getAttribute("aria-pressed")).toBe("true");
+    expect(filterButton("Day Type", "Holiday")?.hasAttribute("disabled")).toBe(true);
+
+    await act(async () => filterButton("Day Type", "Weekend")?.click());
+    expect(trend.querySelectorAll("[data-trend-point]")).toHaveLength(2);
+    expect(trend.querySelectorAll("[data-template-anomaly-trigger]")).toHaveLength(2);
+    expect(trend.textContent).toContain("13 Jun Sat");
+    expect(trend.textContent).toContain("14 Jun Sun");
+
+    const row = trend.querySelector<HTMLElement>("[data-template-anomaly-trigger]")!;
+    await act(async () => row.focus());
+    await act(async () => row.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    const dialog = anomalyDialog()!;
+    expect(dialog.textContent).toContain("24-hour deviation heatmap");
+    expect(dialog.querySelector("[data-anomaly-detail-heatmap]")).not.toBeNull();
+    expect(dialog.querySelectorAll("[data-anomaly-detail-heatmap] button")).toHaveLength(72);
+    expect((document.activeElement as HTMLElement)?.textContent).toBe("Close");
+  });
+
+  it("opens an accessible frozen daily incident modal, switches exact server modes, closes and restores trigger focus", async () => {
     await renderGolden();
     expect(anomalyTriggers()).toHaveLength(7);
     const trigger = anomalyTriggers()[0]!;
@@ -1007,9 +1453,13 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     await activateNativeButton(trigger, "Enter");
     let dialog = anomalyDialog()!;
     expect(dialog).toBeTruthy();
-    expect(dialog.textContent).toContain("Project / Thu 11 Jun");
+    expect(dialog.textContent).toContain("Anomaly Detail — 11 Jun Thu");
+    expect(dialog.textContent).toContain("weekday baseline · Project");
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(container.contains(dialog)).toBe(false);
+    expect(dialog.parentElement?.parentElement).toBe(document.body);
     expect((document.activeElement as HTMLElement)?.textContent).toBe("Close");
-    expect(anomalyFilterButton("Comparison view", "Overlay")?.getAttribute("aria-pressed")).toBe("true");
+    expect(anomalyFilterButton("Comparison view", "Overlay comparison")?.getAttribute("aria-pressed")).toBe("true");
     expect(dialog.querySelectorAll("[data-anomaly-series]")).toHaveLength(3);
     expect(dialog.textContent).toContain("Official Scope series · included in the official total");
     expect(dialog.textContent).not.toContain("路");
@@ -1027,7 +1477,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     await act(async () => point.focus());
     expect(dialog.textContent).toContain("Impact");
 
-    await act(async () => anomalyFilterButton("Comparison view", "Selected")?.click());
+    await act(async () => anomalyFilterButton("Comparison view", "Selected day")?.click());
     point = dialog.querySelector<HTMLButtonElement>('[data-anomaly-series="scope:project"] button')!;
     expect(point.getAttribute("aria-label")).toContain("selected");
     expect(point.getAttribute("aria-label")).not.toContain("average");
@@ -1037,7 +1487,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(selectedDetail).not.toContain("Average");
     expect(selectedDetail).not.toContain("Impact");
 
-    await act(async () => anomalyFilterButton("Comparison view", "Average")?.click());
+    await act(async () => anomalyFilterButton("Comparison view", "Comparable-day average")?.click());
     point = dialog.querySelector<HTMLButtonElement>('[data-anomaly-series="scope:project"] button')!;
     expect(point.getAttribute("aria-label")).not.toContain("selected");
     expect(point.getAttribute("aria-label")).toContain("average");
@@ -1055,21 +1505,54 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
 
     await activateNativeButton(trigger, " ");
     dialog = anomalyDialog()!;
-    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
-      "button:not([disabled]), summary, a[href], input, select, textarea, [tabindex]:not([tabindex='-1'])",
-    ));
-    const first = focusable[0]!;
-    const last = focusable.at(-1)!;
-    await act(async () => last.focus());
-    await act(async () => {
-      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true }));
-    });
-    expect(document.activeElement).toBe(first);
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(container.contains(dialog)).toBe(false);
+    expect(dialog.parentElement?.parentElement).toBe(document.body);
     await act(async () => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     });
     expect(anomalyDialog()).toBeNull();
     expect(document.activeElement).toBe(trigger);
+  });
+
+  it("traps Tab focus inside the Anomaly Detail modal", async () => {
+    await renderGolden();
+    await activateNativeButton(anomalyTriggers()[0]!, "Enter");
+    const dialog = anomalyDialog()!;
+    const focusable = Array.from(dialog.querySelectorAll<HTMLElement>(
+      "button:not([disabled]), summary, a[href], input, select, textarea, [tabindex]:not([tabindex='-1'])",
+    ));
+    const first = focusable[0]!;
+    const last = focusable.at(-1)!;
+
+    await act(async () => last.focus());
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true })));
+    expect(document.activeElement).toBe(first);
+
+    await act(async () => first.focus());
+    await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true })));
+    expect(document.activeElement).toBe(last);
+  });
+
+  it("writes anomaly comparison and Category changes back through the Overview context callbacks", async () => {
+    const onComparisonChange = vi.fn();
+    const onCategoryChange = vi.fn();
+    await act(async () => {
+      root.render(
+        <NgeeAnnOverviewRenderer
+          state={{ status: "ready", snapshot: ngeeAnnGoldenSnapshot() }}
+          onComparisonChange={onComparisonChange}
+          onCategoryChange={onCategoryChange}
+        />,
+      );
+    });
+    await activateNativeButton(anomalyTriggers()[0]!, "Enter");
+
+    await act(async () => anomalyFilterButton("Comparison view", "Selected day")?.click());
+    await act(async () => anomalyFilterButton("Category", "Load")?.click());
+
+    expect(onComparisonChange).toHaveBeenCalledWith("selected");
+    expect(onCategoryChange).toHaveBeenCalledWith("load");
   });
 
   it("opens the primary incident dialog directly from its Decision theme and restores that link", async () => {
@@ -1080,7 +1563,8 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     await act(async () => trigger.click());
     const dialog = anomalyDialog()!;
     expect(dialog).toBeTruthy();
-    expect(dialog.textContent).toContain("Project / Sat 13 Jun");
+    expect(dialog.textContent).toContain("Anomaly Detail — 13 Jun Sat");
+    expect(dialog.textContent).toContain("weekend baseline · Project");
     expect((document.activeElement as HTMLElement)?.textContent).toBe("Close");
 
     await act(async () => {
@@ -1095,7 +1579,8 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     await act(async () => anomalyTriggers()[3]!.click());
     const dialog = anomalyDialog()!;
 
-    expect(dialog.textContent).toContain("Level 7 / Thu 11 Jun");
+    expect(dialog.textContent).toContain("Anomaly Detail — 11 Jun Thu");
+    expect(dialog.textContent).toContain("weekday baseline · Level 7");
     expect(dialog.querySelectorAll("[data-anomaly-series]")).toHaveLength(3);
     await act(async () => anomalyFilterButton("Category", "Load")?.click());
     expect(dialog.querySelectorAll("[data-anomaly-series]")).toHaveLength(1);
@@ -1139,7 +1624,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     async ({ mutate }) => {
       await renderGolden();
       await act(async () => anomalyTriggers()[3]!.click());
-      await act(async () => anomalyFilterButton("Comparison view", "Average")?.click());
+      await act(async () => anomalyFilterButton("Comparison view", "Comparable-day average")?.click());
       await act(async () => anomalyFilterButton("Category", "Load")?.click());
       await act(async () => anomalyFilterButton("Scope", "Level 7 component Load")?.click());
       const oldDialog = anomalyDialog()!;
@@ -1160,7 +1645,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
       expect(document.activeElement).not.toBe(oldFocusedPoint);
       await act(async () => anomalyTriggers()[3]!.click());
       expect((document.activeElement as HTMLElement)?.textContent).toBe("Close");
-      expect(anomalyFilterButton("Comparison view", "Overlay")?.getAttribute("aria-pressed")).toBe("true");
+      expect(anomalyFilterButton("Comparison view", "Overlay comparison")?.getAttribute("aria-pressed")).toBe("true");
       expect(anomalyFilterButton("Scope", "All")?.getAttribute("aria-pressed")).toBe("true");
       expect(anomalyFilterButton("Category", "All")?.getAttribute("aria-pressed")).toBe("true");
     },
@@ -1211,12 +1696,12 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     )!;
     await act(async () => heatmapCell.click());
     await act(async () => anomalyTriggers()[0]!.click());
-    await act(async () => anomalyFilterButton("Comparison view", "Average")?.click());
+    await act(async () => anomalyFilterButton("Comparison view", "Comparable-day average")?.click());
     expect(trendPoint.getAttribute("aria-pressed")).toBe("true");
     expect(profilePoint.getAttribute("aria-pressed")).toBe("true");
     expect(heatmapCell.getAttribute("aria-pressed")).toBe("true");
     expect(anomalyDialog()).toBeTruthy();
-    expect(anomalyFilterButton("Comparison view", "Average")?.getAttribute("aria-pressed")).toBe("true");
+    expect(anomalyFilterButton("Comparison view", "Comparable-day average")?.getAttribute("aria-pressed")).toBe("true");
 
     const next = ngeeAnnSingleDaySnapshot({ includeDailyTotals: false });
     await act(async () => {
@@ -1227,7 +1712,7 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(filterButton("Energy trend Scope", "Project")?.getAttribute("aria-pressed")).toBe("true");
     expect(filterButton("Day Profile type", "Weekday")?.getAttribute("aria-pressed")).toBe("true");
     expect(filterButton("Day Profile Scope", "Project")?.getAttribute("aria-pressed")).toBe("true");
-    expect(filterButton("Heatmap view", "Level × hour average")?.getAttribute("aria-pressed")).toBe("true");
+    expect(filterButton("Heatmap view", "Level → Circuit")?.getAttribute("aria-pressed")).toBe("true");
     expect(container.querySelector<HTMLButtonElement>(
       'button[aria-label^="16 Jun 00:00: 5.3565 kWh"]',
     )?.getAttribute("aria-pressed")).toBe("false");
@@ -1289,6 +1774,10 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     expect(weekend.getAttribute("aria-pressed")).toBe("true");
     expect(level7.getAttribute("aria-pressed")).toBe("true");
     expect(container.textContent).toContain("2 complete days / 24 server values");
+    expect(container.textContent).toContain("Weekend / Level 7 peaked at 14:00");
+    expect(container.textContent).toContain("7.5239 kWh mean");
+    expect(container.textContent).toContain("2 complete-day samples");
+    expect(container.textContent).toContain("Weekday / Level 7 peaked at 14:00 with a 10.7286 kWh mean across 5 complete-day samples.");
 
     const profileHour = container.querySelector<HTMLButtonElement>(
       'button[aria-label^="Weekend Level 7 00:00:"]',
@@ -1310,11 +1799,14 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
 
     await act(async () => publicHoliday.click());
     expect(container.textContent).toContain("Public Holiday / Level 7 unavailable");
+    expect(container.textContent).toContain("When-energy summary unavailable");
     expect(container.textContent).toContain("requires an authoritative release-pinned Calendar classification");
     expect(container.textContent).toContain("No value is inferred or zero-filled");
 
     await act(async () => weekday.click());
     expect(container.textContent).toContain("5 complete days / 24 server values");
+    expect(container.textContent).toContain("Weekday / Level 7 peaked at 14:00");
+    expect(container.textContent).toContain("10.7286 kWh mean");
     expect(container.textContent).toContain("Hover or focus an hour");
   });
 
@@ -1322,17 +1814,17 @@ describe("NgeeAnnOverviewRenderer interaction closure", () => {
     await renderGolden();
 
     const dateHour = filterButton("Heatmap view", "Date × hour")!;
-    const levelHour = filterButton("Heatmap view", "Level × hour average")!;
+    const levelHour = filterButton("Heatmap view", "Level → Circuit")!;
     const weekday = filterButton("Average day type", "Weekday")!;
     expect(levelHour.getAttribute("aria-pressed")).toBe("true");
     expect(weekday.getAttribute("aria-pressed")).toBe("true");
     expect(filterButton("Heatmap Level", "Project")).toBeUndefined();
     const averageCell = container.querySelector<HTMLButtonElement>(
-      'button[aria-label^="Project / Weekday 00:00: mean"]',
+      'button[aria-label^="Level 7 / Office Load 4 Fan ISOL 1/2 / Weekday 00:00: mean"]',
     )!;
     await act(async () => averageCell.focus());
-    expect(container.textContent).toContain("Project / Weekday / 00:00");
-    expect(container.textContent).toContain("5 complete-day samples / mean_of_complete_local_days");
+    expect(container.textContent).toContain("Level 7 / Office Load 4 Fan ISOL 1/2 / Weekday / 00:00");
+    expect(container.textContent).toContain("5 common complete-day samples / published component Circuit");
     await activateNativeButton(averageCell, "Enter");
     await act(async () => averageCell.blur());
     expect(averageCell.getAttribute("aria-pressed")).toBe("true");

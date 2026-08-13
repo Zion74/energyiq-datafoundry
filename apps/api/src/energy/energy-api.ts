@@ -50,7 +50,6 @@ import {
 import { materializeEnergyProjectManifest } from "./energy-project-materialization.js";
 import {
   queueCurrentProjectOverviewAiArtifact,
-  resolveCurrentOverviewAiArtifactIdentity,
 } from "./overview-ai-artifact.js";
 import { EnergyAdminAccessService } from "./energy-admin-access.js";
 import {
@@ -202,19 +201,38 @@ export const handleEnergyApiRequest = async (
     if (segments[0] === "projects" && segments[2] === "overview-ai-artifact") {
       const projectId = decodeURIComponent(segments[1] ?? "");
       const project = context.metadataStore.energyIq.getProject(projectId);
-      const scopeId = request.method === "GET"
-        ? new URL(request.url ?? "/", "http://127.0.0.1").searchParams.get("scopeId") ?? project.root_scope_id
-        : project.root_scope_id;
-      const identity = resolveCurrentOverviewAiArtifactIdentity({
-        metadataStore: context.metadataStore,
+      const requestUrl = new URL(request.url ?? "/", "http://127.0.0.1");
+      const scopeId = requestUrl.searchParams.get("scopeId") ?? project.root_scope_id;
+      const pinParts = {
+        from: requestUrl.searchParams.get("from"),
+        to: requestUrl.searchParams.get("to"),
+        dataSnapshotId: requestUrl.searchParams.get("dataSnapshotId"),
+        projectReleaseId: requestUrl.searchParams.get("projectReleaseId"),
+      };
+      const suppliedPinParts = Object.values(pinParts).filter((value) => value?.trim()).length;
+      if (suppliedPinParts > 0 && suppliedPinParts < 4) {
+        throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_PIN_INCOMPLETE");
+      }
+      const pin = suppliedPinParts === 4
+        ? {
+            from: pinParts.from!,
+            to: pinParts.to!,
+            dataSnapshotId: pinParts.dataSnapshotId!,
+            projectReleaseId: pinParts.projectReleaseId!,
+          }
+        : undefined;
+      if (!context.overviewAiWorkflow) throw new Error("ENERGYIQ_OVERVIEW_AI_SERVER_WORKFLOW_REQUIRED");
+      const identity = await context.overviewAiWorkflow.resolveCurrentIdentity({
         projectId,
         scopeId,
         user,
+        ...(pin ? { pin } : {}),
       });
       if (segments.length === 3 && request.method === "GET") {
         const artifact = context.metadataStore.energyIq.overviewAiArtifacts.find(identity);
         return {
           status: 200,
+          headers: { "Cache-Control": "private, no-store" },
           body: createSuccessResult(artifact
             ? toOverviewAiArtifactDto(artifact)
             : {
@@ -224,48 +242,18 @@ export const handleEnergyApiRequest = async (
               }),
         };
       }
-      if (segments.length === 4 && segments[3] === "complete" && request.method === "POST") {
-        const body = requireRecord(await readJsonBody(request));
-        const result = requireRecord(body.result);
-        if (result.status !== "available"
-          || typeof result.runId !== "string"
-          || !result.runId.trim()
-          || !Array.isArray(result.findings)) {
-          throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
-        }
-        const run = context.metadataStore.runs.find({ user_id: user.id, run_id: result.runId });
-        if (!run
-          || run.status !== "completed"
-          || !run.finished_at
-          || !run.user_input.includes(identity.dataSnapshotId)
-          || !run.user_input.includes(identity.projectReleaseId)) {
-          throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RUN_INVALID");
-        }
-        let artifact = context.metadataStore.energyIq.overviewAiArtifacts.find(identity)
-          ?? context.metadataStore.energyIq.overviewAiArtifacts.queue({
-            identity,
-            triggeredBy: user.id,
-          });
-        if (artifact.status !== "available") {
-          const workerId = `completed-run:${result.runId}`;
-          const claim = context.metadataStore.energyIq.overviewAiArtifacts.claim({
-            identity,
-            workerId,
-            leaseMs: 60_000,
-          });
-          if (claim.claimed) {
-            artifact = context.metadataStore.energyIq.overviewAiArtifacts.complete({
-              identity,
-              workerId,
-              sessionId: run.session_id,
-              runId: result.runId,
-              resultJson: JSON.stringify(result),
-            });
-          } else {
-            artifact = claim.artifact;
-          }
-        }
+      if (segments.length === 4 && segments[3] === "ensure" && request.method === "POST") {
+        const artifact = await context.overviewAiWorkflow.execute({ identity, user, retry: false });
         return { status: 200, body: createSuccessResult(toOverviewAiArtifactDto(artifact)) };
+      }
+      if (segments.length === 4 && segments[3] === "retry" && request.method === "POST") {
+        const artifact = await context.overviewAiWorkflow.execute({ identity, user, retry: true });
+        return { status: 200, body: createSuccessResult(toOverviewAiArtifactDto(artifact)) };
+      }
+      if (segments.length === 4
+        && (segments[3] === "claim" || segments[3] === "complete" || segments[3] === "fail")
+        && request.method === "POST") {
+        throw new AuthError(403, "FORBIDDEN", "Overview AI Artifact browser orchestration is forbidden.");
       }
     }
     if (segments[0] === "projects" && segments.length === 1 && request.method === "POST") {
@@ -312,6 +300,7 @@ export const handleEnergyApiRequest = async (
         try {
           overviewAiArtifact = await queueCurrentProjectOverviewAiArtifact({
             metadataStore: context.metadataStore,
+            dataGateway: context.dataGateway,
             projectId,
             user,
           });
@@ -325,6 +314,7 @@ export const handleEnergyApiRequest = async (
             dataSnapshot: toEnergyDataSnapshotDto(materialized.snapshot),
             readiness: await createProjectDataReadiness(context, projectId, materialized.document),
             duplicate: materialized.duplicate,
+            ...(materialized.timings ? { materializationTimings: materialized.timings } : {}),
             ...(overviewAiArtifact
               ? {
                   overviewAiArtifact: {
@@ -540,6 +530,7 @@ export const handleEnergyApiRequest = async (
         try {
           overviewAiArtifact = await queueCurrentProjectOverviewAiArtifact({
             metadataStore: context.metadataStore,
+            dataGateway: context.dataGateway,
             projectId,
             user,
           });
@@ -1291,8 +1282,14 @@ const toOverviewAiArtifactDto = (artifact: EnergyIqOverviewAiArtifactRecord): Re
   ...(artifact.run_id ? { runId: artifact.run_id } : {}),
   ...(artifact.completed_at ? { completedAt: artifact.completed_at } : {}),
   ...(artifact.error_code ? { errorCode: artifact.error_code } : {}),
-  ...(artifact.result_json ? { result: JSON.parse(artifact.result_json) as unknown } : {}),
+  ...(artifact.result_json ? { result: customerVisibleOverviewAiResult(JSON.parse(artifact.result_json) as unknown) } : {}),
 });
+
+const customerVisibleOverviewAiResult = (value: unknown): unknown => {
+  if (!isRecord(value) || !isRecord(value.workflow) || !Array.isArray(value.workflow.editorTrace)) return value;
+  const { editorTrace: _, ...workflow } = value.workflow;
+  return { ...value, workflow };
+};
 
 const savedAnalysisRerunQuery = (
   query: EnergyQueryContextRequest,
@@ -1372,14 +1369,23 @@ const parseRequestedSavedAnalysisAiArtifact = (
 ): SavedAnalysisAiArtifact | undefined => {
   if (value === undefined) return undefined;
   const artifact = parseSavedAnalysisAiArtifactInput(value, snapshot);
-  const run = context.metadataStore.runs.find({ user_id: userId, run_id: artifact.result.runId });
-  if (!run
-    || run.status !== "completed"
-    || !run.finished_at
-    || !run.user_input.includes(artifact.snapshotId)
-    || !run.user_input.includes(artifact.projectReleaseId)) {
-    throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_RUN_INVALID");
+  if (snapshot.renderer.key === "preschool-overview" && !isPreschoolAcceptedSavedResult(artifact.result, snapshot)) {
+    throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
   }
+  const runIds = savedAnalysisAiRunIds(artifact.result);
+  const runs = runIds.map((runId) => {
+    const run = context.metadataStore.runs.find({ user_id: userId, run_id: runId });
+    if (!run
+      || run.status !== "completed"
+      || !run.finished_at
+      || !run.user_input.includes(artifact.snapshotId)
+      || !run.user_input.includes(artifact.projectReleaseId)) {
+      throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_RUN_INVALID");
+    }
+    return run;
+  });
+  const run = runs.find((candidate) => candidate.id === artifact.result.runId);
+  if (!run?.finished_at) throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_RUN_INVALID");
   return {
     ...artifact,
     completedAt: run.finished_at,
@@ -1455,7 +1461,7 @@ const parseSavedAnalysisAiArtifactInput = (
   if (snapshot.renderer.key === "preschool-overview"
     && (value.result.packId !== "preschool-analysis-pack"
       || value.result.packRevision !== "v1"
-      || value.result.findings.length > 3)) {
+      || (!isPreschoolAcceptedSavedResult(value.result, snapshot) && value.result.findings.length > 3))) {
     throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
   }
   const input = value as SavedAnalysisAiArtifactInput;
@@ -1470,6 +1476,114 @@ const parseSavedAnalysisAiArtifactInput = (
   if (serialized.length > 262_144) throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_TOO_LARGE");
   return artifact;
 };
+
+const savedAnalysisAiRunIds = (result: SavedAnalysisAiArtifactInput["result"]): string[] => {
+  if (!isRecord(result.workflow)
+    || !isRecord(result.workflow.stages)
+    || !isRecord(result.workflow.stages.investigator)
+    || !isRecord(result.workflow.stages.editor)
+    || typeof result.workflow.stages.investigator.runId !== "string"
+    || typeof result.workflow.stages.editor.runId !== "string") return [result.runId];
+  return [...new Set([
+    result.workflow.stages.investigator.runId,
+    result.workflow.stages.editor.runId,
+  ])];
+};
+
+const isPreschoolAcceptedSavedResult = (
+  result: Record<string, unknown>,
+  snapshot: ProjectAnalysisSnapshot,
+): boolean => {
+  if (!isRecord(result.contract)
+    || result.contract.id !== "preschool-ai-accepted-artifact"
+    || result.contract.revision !== "v13"
+    || !isRecord(result.binding)
+    || result.binding.projectId !== snapshot.context.projectId
+    || result.binding.scopeId !== snapshot.context.scopeId
+    || result.binding.dataSnapshotId !== snapshot.dataSnapshot.id
+    || result.binding.projectReleaseId !== snapshot.projectRelease.id
+    || result.binding.dataCutoff !== snapshot.context.primaryPeriod.endExclusive
+    || !isRecord(result.binding.analysisPeriod)
+    || result.binding.analysisPeriod.from !== snapshot.context.primaryPeriod.start
+    || result.binding.analysisPeriod.to !== snapshot.context.primaryPeriod.endExclusive
+    || result.binding.outputContractRevision !== "v13"
+    || !isRecord(result.workflow)
+    || result.workflow.id !== "preschool-two-stage"
+    || result.workflow.revision !== "preschool-two-stage-v2"
+    || !isRecord(result.workflow.methodSkill)
+    || result.workflow.methodSkill.id !== "energy-insight-investigation"
+    || result.workflow.methodSkill.revision !== "1.0.0"
+    || !isRecord(result.workflow.stages)
+    || !isRecord(result.workflow.stages.investigator)
+    || !isRecord(result.workflow.stages.editor)
+    || !isPresentString(result.workflow.stages.investigator.runId)
+    || !isPresentString(result.workflow.stages.editor.runId)
+    || result.workflow.stages.investigator.promptRevision !== "preschool-investigator-v11"
+    || result.workflow.stages.editor.promptRevision !== "preschool-insight-editor-v5"
+    || result.workflow.stages.editor.runId !== result.runId
+    || result.workflow.stages.investigator.runId === result.workflow.stages.editor.runId
+    || !Array.isArray(result.findings)) return false;
+  return result.findings.every((finding) => isRecord(finding)
+    && isPresentString(finding.id)
+    && isRecord(finding.binding)
+    && finding.binding.projectId === snapshot.context.projectId
+    && finding.binding.scopeId === snapshot.context.scopeId
+    && finding.binding.dataSnapshotId === snapshot.dataSnapshot.id
+    && finding.binding.projectReleaseId === snapshot.projectRelease.id
+    && finding.binding.dataCutoff === snapshot.context.primaryPeriod.endExclusive
+    && isRecord(finding.binding.analysisPeriod)
+    && finding.binding.analysisPeriod.from === snapshot.context.primaryPeriod.start
+    && finding.binding.analysisPeriod.to === snapshot.context.primaryPeriod.endExclusive
+    && finding.binding.outputContractRevision === "v13"
+    && Array.isArray(finding.placementTargets)
+    && finding.placementTargets.length > 0
+    && finding.placementTargets.every(isPreschoolPlacementTarget)
+    && (finding.epistemicLevel === "verified"
+      || finding.epistemicLevel === "hypothesis"
+      || finding.epistemicLevel === "exploration-idea")
+    && (finding.relationship === "supports"
+      || finding.relationship === "challenges"
+      || finding.relationship === "independent")
+    && isStringArray(finding.signalRefs)
+    && isPresentString(finding.title)
+    && isPresentString(finding.takeaway)
+    && isOptionalPresentString(finding.interpretation)
+    && isPresentString(finding.action)
+    && isPresentString(finding.expectedIfAct)
+    && isPresentString(finding.ifIgnored)
+    && isOptionalPresentString(finding.possibleExplanation)
+    && isOptionalPresentString(finding.verification)
+    && isPresentString(finding.uncertainty)
+    && (!isPresentString(finding.possibleExplanation) || isPresentString(finding.verification))
+    && (finding.epistemicLevel === "verified"
+      || isPresentString(finding.verification)
+      || isPresentString(finding.uncertainty))
+    && isRecord(finding.evidence)
+    && finding.evidence.snapshotId === snapshot.dataSnapshot.id
+    && isRecord(finding.evidence.period)
+    && finding.evidence.period.from === snapshot.context.primaryPeriod.start
+    && finding.evidence.period.to === snapshot.context.primaryPeriod.endExclusive
+    && Array.isArray(finding.evidence.deterministic)
+    && Array.isArray(finding.evidence.tools)
+    && (finding.epistemicLevel !== "verified"
+      || finding.evidence.deterministic.length > 0
+      || finding.evidence.tools.length > 0));
+};
+
+const isPreschoolPlacementTarget = (value: unknown): boolean =>
+  value === "preschool.overall-key-findings"
+  || value === "preschool.benchmark"
+  || value === "preschool.standby"
+  || value === "preschool.operating-hours"
+  || value === "preschool.forecast"
+  || value === "cross-section";
+
+const isPresentString = (value: unknown): value is string =>
+  typeof value === "string" && Boolean(value.trim());
+
+const isOptionalPresentString = (value: unknown): boolean => value === undefined || isPresentString(value);
+
+const isStringArray = (value: unknown): boolean => Array.isArray(value) && value.every(isPresentString);
 
 const materializeSavedAiFinding = (finding: Record<string, unknown>): Record<string, unknown> => {
   const { presentation: _untrustedPresentation, ...findingWithoutPresentation } = finding;

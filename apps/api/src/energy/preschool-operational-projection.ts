@@ -14,6 +14,11 @@ import {
   resolveEnergyPublishedMeterRoute,
   type EnergyQueryContext,
 } from "./energy-query-context.js";
+import {
+  PRESCHOOL_EXPECTED_APPLIANCE_ALIAS_COUNT,
+  preschoolApplianceAliasForPublishedCircuit,
+  preschoolApplianceContractForAlias,
+} from "./preschool-appliance-projection.js";
 
 const PRESCHOOL_PROJECT_ID = "preschool-demo";
 const PRESCHOOL_MAY_PERIOD = {
@@ -23,9 +28,12 @@ const PRESCHOOL_MAY_PERIOD = {
 } as const;
 const SPIKE_THRESHOLD_PCT = 50;
 const EXPECTED_CENTRE_COUNT = 30;
-const EXPECTED_CELL_COUNT = EXPECTED_CENTRE_COUNT * 31 * 24;
-const CELL_QUERY_ID = "preschool_centre_hour_cells_v1" as const;
+const PRESCHOOL_OPERATIONAL_ROLLING_DAY_COUNT = 28;
+const PRESCHOOL_OPERATIONAL_FIXTURE_START = "2026-05-01";
+const PRESCHOOL_OPERATIONAL_FIXTURE_END_EXCLUSIVE = "2026-07-01";
+const CELL_QUERY_ID = "preschool_centre_hour_appliance_cells_v2" as const;
 const DAILY_TOTALS_QUERY_ID = "daily_totals_v1" as const;
+const RECONCILIATION_TOLERANCE_KWH = 0.01;
 const PRESCHOOL_MAY_COMPLETE_WEEK_STARTS = [
   "2026-05-04",
   "2026-05-11",
@@ -64,11 +72,40 @@ export type PreschoolOperationalSpike = {
   leadingCircuitSharePct: number;
 };
 
+export type PreschoolOperationalCircuitCell = {
+  circuitId: string;
+  name: string;
+  category: string;
+  usageKwh: number;
+};
+
+export type PreschoolOperationalApplianceComposition = {
+  totalKwh: number;
+  provisionalCostBeforeGstSgd: number;
+  reconciliationGapKwh: number;
+  applianceGroups: Array<{
+    name: string;
+    usageKwh: number;
+    sharePct: number;
+    provisionalCostBeforeGstSgd: number;
+    sourceAliases: string[];
+  }>;
+  appliances: Array<{
+    name: string;
+    applianceGroup: string;
+    usageKwh: number;
+    sharePct: number;
+    provisionalCostBeforeGstSgd: number;
+    centreCount: number;
+    sourceCircuitIds: string[];
+  }>;
+};
+
 export type PreschoolOperationalProjection = {
   status: "available";
   contract: {
     id: "preschool-may-2026-operational-behaviour";
-    version: "1";
+    version: "2" | "3";
     spikeThresholdPct: 50;
   };
   period: {
@@ -81,9 +118,15 @@ export type PreschoolOperationalProjection = {
     standbyKwh: number;
     standbySharePct: number;
     operatingKwh: number;
+    operatingSharePct: number;
+    provisionalStandbyCostBeforeGstSgd: number;
+    provisionalOperatingCostBeforeGstSgd: number;
   };
+  tariffReference: typeof PRESCHOOL_DEMO_TARIFF_REFERENCE;
+  standbyAppliances: PreschoolOperationalApplianceComposition;
+  operatingAppliances: PreschoolOperationalApplianceComposition;
   hourlyProfile: {
-    completeDayCount: 31;
+    completeDayCount: number;
     unit: "mean kWh per complete day";
     rows: Array<{
       localHour: number;
@@ -95,11 +138,17 @@ export type PreschoolOperationalProjection = {
   planningOutlook: {
     status: "provisional";
     contract: {
-      id: "preschool-june-2026-naive-weekly-baseline";
-      version: "1";
+      id: "preschool-monthly-naive-weekly-baseline";
+      version: "2";
       method: "mean of four complete Monday-Sunday weeks";
     };
-    targetPeriod: typeof PRESCHOOL_JUNE_PERIOD;
+    targetPeriod: {
+      start: string;
+      endInclusive: string;
+      endExclusive: string;
+      timezone: string;
+      days: number;
+    };
     sourceWeeks: Array<{
       start: string;
       endInclusive: string;
@@ -128,6 +177,7 @@ export type PreschoolOperationalProjection = {
       queryId: "daily_totals_v1";
       recipeId: "preschool-naive-weekly-planning-baseline-v1";
     };
+    estimateSeries?: PreschoolPlanningEstimateSeries;
     limitations: string[];
   } | {
     status: "unavailable";
@@ -146,6 +196,7 @@ export type PreschoolOperationalProjection = {
       centreType: string | null;
       spikeCount: number;
       worstSpike: PreschoolOperationalSpike;
+      events: PreschoolOperationalSpike[];
     }>;
   }>;
   sop: {
@@ -171,10 +222,11 @@ export type PreschoolOperationalProjection = {
     metricRevisionIds: string[];
     businessCalendarVersion: string;
     sourceQueryIds: string[];
-    projectionQueryId: "preschool_centre_hour_cells_v1";
+    projectionQueryId: "preschool_centre_hour_appliance_cells_v2";
     projectionRecipeIds: [
       "preschool-hour-slot-spike-v1",
       "preschool-after-hours-sop-signal-v1",
+      "preschool-operating-state-appliance-v1",
     ];
     baseline: "same-centre same-hour-slot mean within operating state";
   };
@@ -201,6 +253,7 @@ export type PreschoolOperationalCell = {
   usageKwh: number;
   leadingCircuitName: string;
   leadingCircuitKwh: number;
+  circuits: PreschoolOperationalCircuitCell[];
 };
 
 type PreschoolCentre = {
@@ -217,6 +270,12 @@ export const loadPreschoolOperationalProjection = async (input: {
   projectRelease: PublishedProjectRelease;
   context: EnergyQueryContext;
   analysis: ProjectAnalysisPayload;
+  planningTargetPeriod?: {
+    start: string;
+    endExclusive: string;
+    timezone: string;
+    targetDayCount: number;
+  };
   databasePath?: string;
 }): Promise<PreschoolOperationalProjection> => {
   const unavailableEvidence = unavailableEvidenceFor(input);
@@ -247,10 +306,14 @@ export const loadPreschoolOperationalProjection = async (input: {
     );
   }
   const centres = resolveCentres(input.analysis, input.metadataStore, input.projectRelease);
-  if (!centres || !supportedCalendar(calendar)) {
+  const periodContract = resolveOperationalPeriodContract(
+    { start: input.context.from, endExclusive: input.context.to },
+    input.context.timezone,
+  );
+  if (!centres || !periodContract || !supportedCalendar(calendar, periodContract)) {
     return unavailable(
       "PRESCHOOL_OPERATIONAL_CONTRACT_UNSUPPORTED",
-      "This MVP module requires the published May Calendar to use one Project-wide, whole-hour schedule and 30 published Centres.",
+      "This MVP module requires a release-pinned Project-wide, whole-hour Calendar covering the accepted period and 30 published Centres.",
       unavailableEvidence,
     );
   }
@@ -299,6 +362,7 @@ export const loadPreschoolOperationalProjection = async (input: {
       period: { start: input.context.from, endExclusive: input.context.to },
       timezone: input.context.timezone,
       analysis: input.analysis,
+      ...(input.planningTargetPeriod ? { planningTargetPeriod: input.planningTargetPeriod } : {}),
       calendar,
       centres,
       cells,
@@ -306,7 +370,7 @@ export const loadPreschoolOperationalProjection = async (input: {
   } catch {
     return unavailable(
       "PRESCHOOL_OPERATIONAL_FACTS_UNAVAILABLE",
-      "Centre-hour Spike and provisional SOP signals are unavailable because the trusted May fact projection did not complete.",
+      "Centre-hour Spike and provisional SOP signals are unavailable because the trusted accepted-window fact projection did not complete.",
       unavailableEvidence,
     );
   }
@@ -320,6 +384,12 @@ export const buildPreschoolOperationalProjection = (input: {
   analysis: Pick<ProjectAnalysisPayload, "offHours" | "provenance"> & {
     context?: Pick<ProjectAnalysisPayload["context"], "scopeId">;
     dailyTotals?: ProjectAnalysisPayload["dailyTotals"];
+  };
+  planningTargetPeriod?: {
+    start: string;
+    endExclusive: string;
+    timezone: string;
+    targetDayCount: number;
   };
   calendar: EnergyIqOperatingCalendarRevision;
   centres: PreschoolCentre[];
@@ -352,33 +422,32 @@ export const buildPreschoolOperationalProjection = (input: {
       evidence,
     );
   }
+  const periodContract = resolveOperationalPeriodContract(input.period, input.timezone);
   if (
-    input.period.start !== PRESCHOOL_MAY_PERIOD.start
-    || input.period.endExclusive !== PRESCHOOL_MAY_PERIOD.endExclusive
-    || input.timezone !== PRESCHOOL_MAY_PERIOD.timezone
-    || !supportedCalendar(input.calendar)
+    !periodContract
+    || !supportedCalendar(input.calendar, periodContract)
     || input.centres.length !== EXPECTED_CENTRE_COUNT
     || new Set(input.centres.map((centre) => centre.scopeId)).size !== EXPECTED_CENTRE_COUNT
   ) {
     return unavailable(
       "PRESCHOOL_OPERATIONAL_CONTRACT_UNSUPPORTED",
-      "This MVP module only supports the published 30-Centre May 2026 Calendar contract.",
+      "This MVP module only supports the published 30-Centre full-May Golden or a complete 28-day May/June accepted window.",
       evidence,
     );
   }
   const knownScopeIds = new Set(input.centres.map((centre) => centre.scopeId));
   if (
-    input.cells.length !== EXPECTED_CELL_COUNT
+    input.cells.length !== periodContract.expectedCellCount
     || input.cells.some((cell) => !knownScopeIds.has(cell.scopeId)
-      || !isMayCell(cell)
+      || !isCellInOperationalPeriod(cell, periodContract)
       || !Number.isFinite(cell.usageKwh)
       || cell.usageKwh < 0)
     || new Set(input.cells.map((cell) => `${cell.scopeId}:${cell.localDate}:${cell.localHour}`)).size
-      !== EXPECTED_CELL_COUNT
+      !== periodContract.expectedCellCount
   ) {
     return unavailable(
       "PRESCHOOL_OPERATIONAL_FACTS_UNAVAILABLE",
-      "Centre-hour Spike and provisional SOP signals require one complete accepted hourly cell for every published Centre in May.",
+      "Centre-hour Spike and provisional SOP signals require one complete accepted hourly cell for every published Centre and local day in the accepted period.",
       evidence,
     );
   }
@@ -392,6 +461,25 @@ export const buildPreschoolOperationalProjection = (input: {
     return unavailable(
       "PRESCHOOL_OPERATIONAL_CONTRACT_UNSUPPORTED",
       "The current operating calendar contains a partial-hour or overnight window that this hourly MVP projection cannot classify without ambiguity.",
+      evidence,
+    );
+  }
+  const standbyAppliances = buildOperatingStateApplianceComposition({
+    cells: classified as Array<PreschoolOperationalCell & { operatingState: PreschoolOperatingState }>,
+    centres: input.centres,
+    operatingState: "standby",
+    expectedKwh: input.analysis.offHours.standbyKwh,
+  });
+  const operatingAppliances = buildOperatingStateApplianceComposition({
+    cells: classified as Array<PreschoolOperationalCell & { operatingState: PreschoolOperatingState }>,
+    centres: input.centres,
+    operatingState: "operating",
+    expectedKwh: input.analysis.offHours.operatingKwh,
+  });
+  if (!standbyAppliances || !operatingAppliances) {
+    return unavailable(
+      "PRESCHOOL_OPERATIONAL_FACTS_UNAVAILABLE",
+      "Operating-state Appliance evidence was withheld because published Circuit aliases were incomplete or did not reconcile to the accepted standby and operating totals.",
       evidence,
     );
   }
@@ -420,7 +508,10 @@ export const buildPreschoolOperationalProjection = (input: {
       baselineKwh: round(baselineKwh),
       impactKwh: round(cell.usageKwh - baselineKwh),
       variancePct: round(((cell.usageKwh - baselineKwh) / baselineKwh) * 100),
-      leadingCircuitName: cell.leadingCircuitName,
+      leadingCircuitName: preschoolApplianceAliasForPublishedCircuit(
+        cell.leadingCircuitName,
+        cell.scopeId,
+      ) ?? cell.leadingCircuitName,
       leadingCircuitKwh: round(cell.leadingCircuitKwh),
       leadingCircuitSharePct: cell.usageKwh > 0
         ? round((cell.leadingCircuitKwh / cell.usageKwh) * 100)
@@ -445,6 +536,7 @@ export const buildPreschoolOperationalProjection = (input: {
         ...centre,
         spikeCount: ordered.length,
         worstSpike: withoutInternalSpikeFields(worst),
+        events: ordered.map(withoutInternalSpikeFields),
       };
     }).sort((left, right) => right.spikeCount - left.spikeCount
       || right.worstSpike.variancePct - left.worstSpike.variancePct
@@ -480,13 +572,16 @@ export const buildPreschoolOperationalProjection = (input: {
       totalKwh: round(operatingKwh + closedHourKwh),
     };
   });
-  const planningOutlook = buildPreschoolPlanningOutlook(input.analysis);
+  const planningOutlook = buildPreschoolPlanningOutlook(
+    input.analysis,
+    input.planningTargetPeriod,
+  );
 
   return {
     status: "available",
     contract: {
       id: "preschool-may-2026-operational-behaviour",
-      version: "1",
+      version: "3",
       spikeThresholdPct: SPIKE_THRESHOLD_PCT,
     },
     period: { ...input.period, timezone: input.timezone },
@@ -495,9 +590,22 @@ export const buildPreschoolOperationalProjection = (input: {
       standbyKwh: input.analysis.offHours.standbyKwh,
       standbySharePct: input.analysis.offHours.sharePct,
       operatingKwh: input.analysis.offHours.operatingKwh,
+      operatingSharePct: percent(
+        input.analysis.offHours.operatingKwh,
+        input.analysis.offHours.operatingKwh + input.analysis.offHours.standbyKwh,
+      ),
+      provisionalStandbyCostBeforeGstSgd: round(
+        input.analysis.offHours.standbyKwh * PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh,
+      ),
+      provisionalOperatingCostBeforeGstSgd: round(
+        input.analysis.offHours.operatingKwh * PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh,
+      ),
     },
+    tariffReference: PRESCHOOL_DEMO_TARIFF_REFERENCE,
+    standbyAppliances,
+    operatingAppliances,
     hourlyProfile: {
-      completeDayCount: 31,
+      completeDayCount,
       unit: "mean kWh per complete day",
       rows: hourlyProfile,
     },
@@ -525,19 +633,209 @@ export const buildPreschoolOperationalProjection = (input: {
       projectionRecipeIds: [
         "preschool-hour-slot-spike-v1",
         "preschool-after-hours-sop-signal-v1",
+        "preschool-operating-state-appliance-v1",
       ],
       baseline: "same-centre same-hour-slot mean within operating state",
     },
   };
 };
 
-const buildPreschoolPlanningOutlook = (
-  analysis: Pick<ProjectAnalysisPayload, "offHours" | "provenance">
-    & {
-      context?: Pick<ProjectAnalysisPayload["context"], "scopeId">;
-      dailyTotals?: ProjectAnalysisPayload["dailyTotals"];
+const buildOperatingStateApplianceComposition = (input: {
+  cells: Array<PreschoolOperationalCell & { operatingState: PreschoolOperatingState }>;
+  centres: PreschoolCentre[];
+  operatingState: PreschoolOperatingState;
+  expectedKwh: number;
+}): PreschoolOperationalApplianceComposition | null => {
+  const applianceRows = new Map<string, {
+    applianceGroup: string;
+    usageKwh: number;
+    centreIds: Set<string>;
+    sourceCircuitIds: Set<string>;
+  }>();
+  let stateCircuitTotalKwh = 0;
+  for (const cell of input.cells) {
+    if (cell.circuits.length === 0) return null;
+    const cellCircuitTotalKwh = cell.circuits.reduce((sum, circuit) => sum + circuit.usageKwh, 0);
+    if (Math.abs(cellCircuitTotalKwh - cell.usageKwh) > RECONCILIATION_TOLERANCE_KWH) return null;
+    for (const circuit of cell.circuits) {
+      const alias = preschoolApplianceAliasForPublishedCircuit(circuit.name, cell.scopeId);
+      const aliasContract = alias ? preschoolApplianceContractForAlias(alias) : null;
+      if (
+        !alias
+        || !aliasContract
+        || aliasContract.category !== circuit.category
+        || !circuit.circuitId
+        || !Number.isFinite(circuit.usageKwh)
+        || circuit.usageKwh < 0
+      ) return null;
+      if (cell.operatingState !== input.operatingState) continue;
+      const row = applianceRows.get(alias) ?? {
+        applianceGroup: aliasContract.applianceGroup,
+        usageKwh: 0,
+        centreIds: new Set<string>(),
+        sourceCircuitIds: new Set<string>(),
+      };
+      row.usageKwh += circuit.usageKwh;
+      row.centreIds.add(cell.scopeId);
+      row.sourceCircuitIds.add(circuit.circuitId);
+      applianceRows.set(alias, row);
+      stateCircuitTotalKwh += circuit.usageKwh;
+    }
+  }
+  if (
+    applianceRows.size === 0
+    || (input.operatingState === "standby"
+      && applianceRows.size !== PRESCHOOL_EXPECTED_APPLIANCE_ALIAS_COUNT)
+    || [...applianceRows.values()].some((row) => (
+      row.centreIds.size !== input.centres.length
+      || row.sourceCircuitIds.size !== input.centres.length
+    ))
+  ) return null;
+  const roundedGapKwh = round(stateCircuitTotalKwh - input.expectedKwh);
+  const reconciliationGapKwh = Object.is(roundedGapKwh, -0) ? 0 : roundedGapKwh;
+  if (Math.abs(reconciliationGapKwh) > RECONCILIATION_TOLERANCE_KWH) return null;
+
+  const appliances = [...applianceRows.entries()]
+    .map(([name, row]) => ({
+      name,
+      applianceGroup: row.applianceGroup,
+      usageKwh: round(row.usageKwh),
+      sharePct: percent(row.usageKwh, input.expectedKwh),
+      provisionalCostBeforeGstSgd: round(row.usageKwh * PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh),
+      centreCount: row.centreIds.size,
+      sourceCircuitIds: [...row.sourceCircuitIds].sort((left, right) => left.localeCompare(right)),
+    }))
+    .sort((left, right) => right.usageKwh - left.usageKwh || left.name.localeCompare(right.name));
+  const groupRows = new Map<string, { usageKwh: number; sourceAliases: string[] }>();
+  for (const appliance of appliances) {
+    const row = groupRows.get(appliance.applianceGroup) ?? { usageKwh: 0, sourceAliases: [] };
+    row.usageKwh += appliance.usageKwh;
+    row.sourceAliases.push(appliance.name);
+    groupRows.set(appliance.applianceGroup, row);
+  }
+
+  return {
+    totalKwh: round(input.expectedKwh),
+    provisionalCostBeforeGstSgd: round(
+      input.expectedKwh * PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh,
+    ),
+    reconciliationGapKwh,
+    applianceGroups: [...groupRows.entries()]
+      .map(([name, row]) => ({
+        name,
+        usageKwh: round(row.usageKwh),
+        sharePct: percent(row.usageKwh, input.expectedKwh),
+        provisionalCostBeforeGstSgd: round(
+          row.usageKwh * PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh,
+        ),
+        sourceAliases: row.sourceAliases.sort((left, right) => left.localeCompare(right)),
+      }))
+      .sort((left, right) => right.usageKwh - left.usageKwh || left.name.localeCompare(right.name)),
+    appliances,
+  };
+};
+
+export type PreschoolPlanningAnalysisInput = {
+  offHours: { status: string };
+  provenance: {
+    dataSnapshotId: string;
+    queryIds: readonly string[];
+  };
+  context?: { scopeId: string } | undefined;
+  dailyTotals?: {
+    timezone: string;
+    scopes: Array<{
+      scopeId: string;
+      scopeName?: string;
+      scopeType?: string;
+      rows: Array<{
+        localDate: string;
+        usageKwh: number | null;
+        dataHealth: { status: "complete" | "partial" | "unavailable" };
+      }>;
+    }>;
+  } | undefined;
+};
+
+export type PreschoolPlanningEstimateBucket = {
+  start: string;
+  endExclusive: string;
+  estimatedKwh: number;
+};
+
+export type PreschoolPlanningEstimateSeries = {
+  contract: {
+    id: "preschool-monthly-estimate-series";
+    version: "2";
+    method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total";
+  };
+  scopes: Array<{
+    scopeId: string;
+    scopeName: string;
+    scopeType: string;
+    scopeRole: "portfolio" | "centre";
+    estimatedKwh: number;
+    estimatedCostBeforeGstSgd: number;
+    buckets: Record<"daily" | "weekly" | "monthly", PreschoolPlanningEstimateBucket[]>;
+  }>;
+};
+
+export const buildPreschoolPlanningOutlook = (
+  analysis: PreschoolPlanningAnalysisInput,
+  targetPeriod: {
+    start: string;
+    endExclusive: string;
+    timezone: string;
+    targetDayCount: number;
+  } = {
+    start: PRESCHOOL_JUNE_PERIOD.start,
+    endExclusive: "2026-07-01",
+    timezone: PRESCHOOL_MAY_PERIOD.timezone,
+    targetDayCount: PRESCHOOL_JUNE_PERIOD.days,
+  },
+): Extract<PreschoolOperationalProjection, { status: "available" }>["planningOutlook"] => (
+  buildPreschoolPlanningOutlookFromCompleteMayRows({
+    analysis,
+    targetPeriod,
+    currentPeriodDates: Array.from({ length: 31 }, (_, offset) => (
+      `2026-05-${String(offset + 1).padStart(2, "0")}`
+    )),
+    additionalLimitations: [],
+  })
+);
+
+export const recoverPreschoolPlanningOutlookFromCompleteWeeks = (
+  analysis: PreschoolPlanningAnalysisInput,
+): Extract<PreschoolOperationalProjection, { status: "available" }>["planningOutlook"] => (
+  buildPreschoolPlanningOutlookFromCompleteMayRows({
+    analysis,
+    targetPeriod: {
+      start: PRESCHOOL_JUNE_PERIOD.start,
+      endExclusive: "2026-07-01",
+      timezone: PRESCHOOL_MAY_PERIOD.timezone,
+      targetDayCount: PRESCHOOL_JUNE_PERIOD.days,
     },
-): Extract<PreschoolOperationalProjection, { status: "available" }>["planningOutlook"] => {
+    currentPeriodDates: Array.from({ length: 28 }, (_, offset) => (
+      `2026-05-${String(offset + 4).padStart(2, "0")}`
+    )),
+    additionalLimitations: [
+      "Current-period cost uses the complete May 4-31 source window because May 1-3 are outside the Saved Overview period.",
+    ],
+  })
+);
+
+const buildPreschoolPlanningOutlookFromCompleteMayRows = (input: {
+  analysis: PreschoolPlanningAnalysisInput;
+  targetPeriod: {
+    start: string;
+    endExclusive: string;
+    timezone: string;
+    targetDayCount: number;
+  };
+  currentPeriodDates: string[];
+  additionalLimitations: string[];
+}): Extract<PreschoolOperationalProjection, { status: "available" }>["planningOutlook"] => {
+  const { analysis } = input;
   const dailyTotals = analysis.dailyTotals;
   const scopeId = analysis.context?.scopeId;
   const unavailable = (): Extract<PreschoolOperationalProjection, { status: "available" }>["planningOutlook"] => ({
@@ -557,47 +855,51 @@ const buildPreschoolPlanningOutlook = (
   const scope = dailyTotals.scopes.find((candidate) => candidate.scopeId === scopeId);
   if (!scope) return unavailable();
   const rowByDate = new Map(scope.rows.map((row) => [row.localDate, row]));
-  const currentPeriodRows = Array.from({ length: 31 }, (_, offset) => {
-    const localDate = `2026-05-${String(offset + 1).padStart(2, "0")}`;
-    return rowByDate.get(localDate);
-  });
-  if (currentPeriodRows.some((row) => row?.dataHealth.status !== "complete" || typeof row.usageKwh !== "number")) {
-    return unavailable();
-  }
-  const currentPeriodUsageKwh = (currentPeriodRows as Array<NonNullable<typeof currentPeriodRows[number]>>)
+  const currentPeriodRows = completePlanningRows(rowByDate, input.currentPeriodDates);
+  if (!currentPeriodRows) return unavailable();
+  const currentPeriodUsageKwh = currentPeriodRows
     .reduce((total, row) => total + (row.usageKwh ?? 0), 0);
   const sourceWeeks = PRESCHOOL_MAY_COMPLETE_WEEK_STARTS.flatMap((start) => {
-    const rows = Array.from({ length: 7 }, (_, offset) => {
+    const dates = Array.from({ length: 7 }, (_, offset) => {
       const date = new Date(`${start}T00:00:00.000Z`);
       date.setUTCDate(date.getUTCDate() + offset);
-      return rowByDate.get(date.toISOString().slice(0, 10));
+      return date.toISOString().slice(0, 10);
     });
-    if (rows.some((row) => row?.dataHealth.status !== "complete" || typeof row.usageKwh !== "number")) {
-      return [];
-    }
-    const typedRows = rows as Array<NonNullable<typeof rows[number]>>;
+    const rows = completePlanningRows(rowByDate, dates);
+    if (!rows) return [];
     return [{
       start,
-      endInclusive: typedRows[typedRows.length - 1]!.localDate,
-      usageKwh: round(typedRows.reduce((total, row) => total + (row.usageKwh ?? 0), 0)),
+      endInclusive: rows[rows.length - 1]!.localDate,
+      usageKwh: round(rows.reduce((total, row) => total + (row.usageKwh ?? 0), 0)),
     }];
   });
   if (sourceWeeks.length !== PRESCHOOL_MAY_COMPLETE_WEEK_STARTS.length) return unavailable();
   const weeklyValues = sourceWeeks.map((week) => week.usageKwh);
   const weeklyAverageKwh = weeklyValues.reduce((total, value) => total + value, 0) / weeklyValues.length;
-  const targetScale = PRESCHOOL_JUNE_PERIOD.days / 7;
+  const targetScale = input.targetPeriod.targetDayCount / 7;
   const projectedKwh = weeklyAverageKwh * targetScale;
   const lowerKwh = Math.min(...weeklyValues) * targetScale;
   const upperKwh = Math.max(...weeklyValues) * targetScale;
   const rate = PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh;
+  const estimateSeries = buildPreschoolPlanningEstimateSeries(
+    analysis,
+    round(projectedKwh),
+    input.targetPeriod,
+  );
   return {
     status: "provisional",
     contract: {
-      id: "preschool-june-2026-naive-weekly-baseline",
-      version: "1",
+      id: "preschool-monthly-naive-weekly-baseline",
+      version: "2",
       method: "mean of four complete Monday-Sunday weeks",
     },
-    targetPeriod: PRESCHOOL_JUNE_PERIOD,
+    targetPeriod: {
+      start: input.targetPeriod.start,
+      endInclusive: shiftPlanningDate(input.targetPeriod.endExclusive, -1),
+      endExclusive: input.targetPeriod.endExclusive,
+      timezone: input.targetPeriod.timezone,
+      days: input.targetPeriod.targetDayCount,
+    },
     sourceWeeks,
     weeklyBaseline: {
       averageKwh: round(weeklyAverageKwh),
@@ -622,12 +924,153 @@ const buildPreschoolPlanningOutlook = (
       queryId: DAILY_TOTALS_QUERY_ID,
       recipeId: "preschool-naive-weekly-planning-baseline-v1",
     },
+    ...(estimateSeries ? { estimateSeries } : {}),
     limitations: [
       "Planning baseline only; it is not an AI or validated statistical forecast.",
       "Weather, occupancy, holidays, operational changes and tariff-plan differences are not modelled.",
       "Cost uses the SP regulated low-tension non-domestic reference before GST, not the customer's contract or bill.",
+      ...input.additionalLimitations,
     ],
   };
+};
+
+export const buildPreschoolPlanningEstimateSeries = (
+  analysis: PreschoolPlanningAnalysisInput,
+  projectedKwh: number,
+  targetPeriod: {
+    start: string;
+    endExclusive: string;
+    timezone: string;
+    targetDayCount: number;
+  } = {
+    start: PRESCHOOL_JUNE_PERIOD.start,
+    endExclusive: "2026-07-01",
+    timezone: PRESCHOOL_MAY_PERIOD.timezone,
+    targetDayCount: PRESCHOOL_JUNE_PERIOD.days,
+  },
+): PreschoolPlanningEstimateSeries | null => {
+  const portfolioScopeId = analysis.context?.scopeId;
+  const scopes = analysis.dailyTotals?.scopes;
+  if (!portfolioScopeId || !scopes || analysis.dailyTotals?.timezone !== targetPeriod.timezone) return null;
+  const portfolio = scopes.find((scope) => scope.scopeId === portfolioScopeId);
+  const portfolioRaw = portfolio ? rawPlanningEstimate(portfolio.rows, targetPeriod) : null;
+  if (!portfolioRaw) return null;
+  const portfolioRawTotal = sumPlanning(portfolioRaw.map((row) => row.estimatedKwh));
+  if (portfolioRawTotal <= 0) return null;
+  const scale = projectedKwh / portfolioRawTotal;
+  const estimatedScopes = scopes.flatMap((scope) => {
+    const raw = rawPlanningEstimate(scope.rows, targetPeriod);
+    if (!raw) return [];
+    const estimatedTarget = scope.scopeId === portfolioScopeId
+      ? projectedKwh
+      : round(sumPlanning(raw.map((row) => row.estimatedKwh)) * scale);
+    const daily = scalePlanningEstimate(raw, scale, estimatedTarget);
+    return [{
+      scopeId: scope.scopeId,
+      scopeName: scope.scopeName ?? scope.scopeId,
+      scopeType: scope.scopeType ?? (scope.scopeId === portfolioScopeId ? "project" : "centre"),
+      scopeRole: scope.scopeId === portfolioScopeId ? "portfolio" as const : "centre" as const,
+      estimatedKwh: estimatedTarget,
+      estimatedCostBeforeGstSgd: round(
+        estimatedTarget * PRESCHOOL_DEMO_TARIFF_REFERENCE.beforeGstSgdPerKwh,
+      ),
+      buckets: {
+        daily,
+        weekly: aggregatePlanningEstimate(daily, 7),
+        monthly: aggregatePlanningEstimate(daily, targetPeriod.targetDayCount),
+      },
+    }];
+  });
+  return estimatedScopes.some((scope) => scope.scopeRole === "portfolio")
+    ? {
+        contract: {
+          id: "preschool-monthly-estimate-series",
+          version: "2",
+          method: "same-weekday mean from four complete May weeks, scaled to the Saved Plan total",
+        },
+        scopes: estimatedScopes,
+      }
+    : null;
+};
+
+const rawPlanningEstimate = (
+  rows: NonNullable<PreschoolPlanningAnalysisInput["dailyTotals"]>["scopes"][number]["rows"],
+  targetPeriod: {
+    start: string;
+    targetDayCount: number;
+  },
+): PreschoolPlanningEstimateBucket[] | null => {
+  const rowsByDate = new Map(rows.map((row) => [row.localDate, row]));
+  const sourceDates = Array.from({ length: 28 }, (_, offset) => shiftPlanningDate("2026-05-04", offset));
+  const sourceRows = sourceDates.flatMap((date) => {
+    const row = rowsByDate.get(date);
+    return row?.dataHealth.status === "complete" && typeof row.usageKwh === "number" ? [row] : [];
+  });
+  if (sourceRows.length !== sourceDates.length) return null;
+  const meansByWeekday = new Map<number, number>();
+  for (let weekday = 0; weekday < 7; weekday += 1) {
+    const values = sourceRows
+      .filter((row) => new Date(`${row.localDate}T00:00:00.000Z`).getUTCDay() === weekday)
+      .map((row) => row.usageKwh!);
+    if (values.length !== 4) return null;
+    meansByWeekday.set(weekday, sumPlanning(values) / values.length);
+  }
+  return Array.from({ length: targetPeriod.targetDayCount }, (_, offset) => {
+    const start = shiftPlanningDate(targetPeriod.start, offset);
+    return {
+      start,
+      endExclusive: shiftPlanningDate(start, 1),
+      estimatedKwh: meansByWeekday.get(new Date(`${start}T00:00:00.000Z`).getUTCDay())!,
+    };
+  });
+};
+
+const scalePlanningEstimate = (
+  rows: PreschoolPlanningEstimateBucket[],
+  scale: number,
+  target: number,
+): PreschoolPlanningEstimateBucket[] => {
+  const scaled = rows.map((row) => ({ ...row, estimatedKwh: round(row.estimatedKwh * scale) }));
+  const last = scaled.at(-1);
+  if (last) last.estimatedKwh = round(last.estimatedKwh + (target - sumPlanning(scaled.map((row) => row.estimatedKwh))));
+  return scaled;
+};
+
+const aggregatePlanningEstimate = (
+  daily: PreschoolPlanningEstimateBucket[],
+  size: number,
+): PreschoolPlanningEstimateBucket[] => {
+  const buckets: PreschoolPlanningEstimateBucket[] = [];
+  for (let offset = 0; offset < daily.length; offset += size) {
+    const rows = daily.slice(offset, offset + size);
+    buckets.push({
+      start: rows[0]!.start,
+      endExclusive: rows.at(-1)!.endExclusive,
+      estimatedKwh: round(sumPlanning(rows.map((row) => row.estimatedKwh))),
+    });
+  }
+  return buckets;
+};
+
+const shiftPlanningDate = (localDate: string, days: number): string => {
+  const date = new Date(`${localDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+};
+
+const sumPlanning = (values: number[]): number => values.reduce((total, value) => total + value, 0);
+
+const completePlanningRows = (
+  rowByDate: Map<string, NonNullable<PreschoolPlanningAnalysisInput["dailyTotals"]>["scopes"][number]["rows"][number]>,
+  dates: string[],
+): NonNullable<PreschoolPlanningAnalysisInput["dailyTotals"]>["scopes"][number]["rows"] | null => {
+  const rows = dates.flatMap((date) => {
+    const row = rowByDate.get(date);
+    return row?.dataHealth.status === "complete" && typeof row.usageKwh === "number"
+      ? [row]
+      : [];
+  });
+  return rows.length === dates.length ? rows : null;
 };
 
 const resolveCentres = (
@@ -661,7 +1104,17 @@ const resolveCentres = (
   return centres.every((centre): centre is PreschoolCentre => centre !== null) ? centres : null;
 };
 
-const supportedCalendar = (calendar: EnergyIqOperatingCalendarRevision): boolean => {
+type OperationalPeriodContract = {
+  firstLocalDate: string;
+  endExclusiveLocalDate: string;
+  completeDayCount: number;
+  expectedCellCount: number;
+};
+
+const supportedCalendar = (
+  calendar: EnergyIqOperatingCalendarRevision,
+  period: OperationalPeriodContract,
+): boolean => {
   if (
     calendar.project_id !== PRESCHOOL_PROJECT_ID
     || calendar.timezone !== PRESCHOOL_MAY_PERIOD.timezone
@@ -671,8 +1124,8 @@ const supportedCalendar = (calendar: EnergyIqOperatingCalendarRevision): boolean
   const entry = calendar.entries[0];
   const effectiveFrom = entry.effective_from.slice(0, 10);
   const effectiveTo = entry.effective_to?.slice(0, 10);
-  return effectiveFrom <= "2026-05-01"
-    && (!effectiveTo || effectiveTo >= "2026-06-01")
+  return effectiveFrom <= period.firstLocalDate
+    && (!effectiveTo || effectiveTo >= period.endExclusiveLocalDate)
     && Object.values(entry.weekly).flat().every(supportedTimeRange)
     && (entry.exceptions ?? []).every((exception) => exception.operating.every(supportedTimeRange));
 };
@@ -732,9 +1185,11 @@ const hasExpectedEvidencePins = (input: {
 }): boolean => input.projectRelease.projectId === PRESCHOOL_PROJECT_ID
   && input.context.projectId === PRESCHOOL_PROJECT_ID
   && input.context.scopeId === "preschool-project"
-  && input.context.from === PRESCHOOL_MAY_PERIOD.start
-  && input.context.to === PRESCHOOL_MAY_PERIOD.endExclusive
   && input.context.timezone === PRESCHOOL_MAY_PERIOD.timezone
+  && resolveOperationalPeriodContract(
+    { start: input.context.from, endExclusive: input.context.to },
+    input.context.timezone,
+  ) !== null
   && input.context.dataSnapshotId === input.analysis.provenance.dataSnapshotId
   && input.context.hierarchyRevisionId === input.projectRelease.hierarchyRevisionId
   && input.context.meterMappingRevisionId === input.projectRelease.meterMappingRevisionId
@@ -759,8 +1214,50 @@ const unavailable = (
   evidence: Extract<PreschoolOperationalProjection, { status: "unavailable" }>["evidence"],
 ): PreschoolOperationalProjection => ({ status: "unavailable", reason: { code, message }, evidence });
 
-const isMayCell = (cell: PreschoolOperationalCell): boolean => cell.localDate >= "2026-05-01"
-  && cell.localDate <= "2026-05-31"
+const resolveOperationalPeriodContract = (
+  period: { start: string; endExclusive: string },
+  timezone: string,
+): OperationalPeriodContract | null => {
+  if (timezone !== PRESCHOOL_MAY_PERIOD.timezone) return null;
+  const startMs = Date.parse(period.start);
+  const endExclusiveMs = Date.parse(period.endExclusive);
+  const completeDayCount = (endExclusiveMs - startMs) / 86_400_000;
+  if (!Number.isFinite(startMs)
+    || !Number.isFinite(endExclusiveMs)
+    || !Number.isInteger(completeDayCount)
+    || completeDayCount <= 0) return null;
+
+  const firstLocalDate = singaporeLocalDate(startMs);
+  const endExclusiveLocalDate = singaporeLocalDate(endExclusiveMs);
+  if (startMs !== singaporeLocalDayStart(firstLocalDate)
+    || endExclusiveMs !== singaporeLocalDayStart(endExclusiveLocalDate)) return null;
+
+  const isPublishedMay = period.start === PRESCHOOL_MAY_PERIOD.start
+    && period.endExclusive === PRESCHOOL_MAY_PERIOD.endExclusive;
+  const isSupportedRollingWindow = completeDayCount === PRESCHOOL_OPERATIONAL_ROLLING_DAY_COUNT
+    && firstLocalDate >= PRESCHOOL_OPERATIONAL_FIXTURE_START
+    && endExclusiveLocalDate <= PRESCHOOL_OPERATIONAL_FIXTURE_END_EXCLUSIVE;
+  if (!isPublishedMay && !isSupportedRollingWindow) return null;
+
+  return {
+    firstLocalDate,
+    endExclusiveLocalDate,
+    completeDayCount,
+    expectedCellCount: EXPECTED_CENTRE_COUNT * completeDayCount * 24,
+  };
+};
+
+const singaporeLocalDate = (instantMs: number): string => new Date(
+  instantMs + 8 * 60 * 60_000,
+).toISOString().slice(0, 10);
+
+const singaporeLocalDayStart = (localDate: string): number => Date.parse(`${localDate}T00:00:00.000+08:00`);
+
+const isCellInOperationalPeriod = (
+  cell: PreschoolOperationalCell,
+  period: OperationalPeriodContract,
+): boolean => cell.localDate >= period.firstLocalDate
+  && cell.localDate < period.endExclusiveLocalDate
   && Number.isInteger(cell.localHour)
   && cell.localHour >= 0
   && cell.localHour <= 23;
@@ -781,25 +1278,52 @@ const withoutInternalSpikeFields = (spike: {
 };
 
 const round = (value: number): number => Math.round((value + Number.EPSILON) * 10_000) / 10_000;
+const percent = (part: number, total: number): number => total > 0 ? round((part / total) * 100) : 0;
 
 const rowToCells = (row: unknown[]): PreschoolOperationalCell[] => {
   const scopeId = typeof row[0] === "string" ? row[0] : "";
   const json = typeof row[1] === "string" ? row[1] : "[]";
   const parsed = JSON.parse(json) as unknown;
   if (!scopeId || !Array.isArray(parsed)) throw new Error("PRESCHOOL_OPERATIONAL_CELL_ROW_INVALID");
-  return parsed.map((item) => {
+  const grouped = new Map<string, {
+    localDate: string;
+    localHour: number;
+    circuits: PreschoolOperationalCircuitCell[];
+  }>();
+  for (const item of parsed) {
     if (!isRecord(item)) throw new Error("PRESCHOOL_OPERATIONAL_CELL_INVALID");
     const localDate = String(item.local_date ?? "");
     const localHour = Number(item.local_hour);
-    const usageKwh = Number(item.usage_kwh);
-    const leadingCircuitName = String(item.leading_circuit_name ?? "");
-    const leadingCircuitKwh = Number(item.leading_circuit_kwh);
-    if (!localDate || !Number.isInteger(localHour) || !Number.isFinite(usageKwh)
-      || !leadingCircuitName || !Number.isFinite(leadingCircuitKwh)) {
+    const circuitId = String(item.circuit_id ?? "");
+    const name = String(item.circuit_name ?? "");
+    const category = String(item.circuit_category ?? "");
+    const usageKwh = Number(item.circuit_kwh);
+    if (!localDate || !Number.isInteger(localHour) || !circuitId || !name || !category
+      || !Number.isFinite(usageKwh)) {
       throw new Error("PRESCHOOL_OPERATIONAL_CELL_INVALID");
     }
-    return { scopeId, localDate, localHour, usageKwh, leadingCircuitName, leadingCircuitKwh };
-  });
+    const key = `${localDate}:${localHour}`;
+    const group = grouped.get(key) ?? { localDate, localHour, circuits: [] };
+    group.circuits.push({ circuitId, name, category, usageKwh });
+    grouped.set(key, group);
+  }
+  return [...grouped.values()]
+    .map((group) => {
+      const circuits = [...group.circuits]
+        .sort((left, right) => right.usageKwh - left.usageKwh || left.name.localeCompare(right.name));
+      const leading = circuits[0];
+      if (!leading) throw new Error("PRESCHOOL_OPERATIONAL_CELL_INVALID");
+      return {
+        scopeId,
+        localDate: group.localDate,
+        localHour: group.localHour,
+        usageKwh: circuits.reduce((sum, circuit) => sum + circuit.usageKwh, 0),
+        leadingCircuitName: leading.name,
+        leadingCircuitKwh: leading.usageKwh,
+        circuits,
+      };
+    })
+    .sort((left, right) => left.localDate.localeCompare(right.localDate) || left.localHour - right.localHour);
 };
 
 const preschoolCentreHourCellsSql = (viewName: string): string => `
@@ -808,32 +1332,26 @@ const preschoolCentreHourCellsSql = (viewName: string): string => `
     TO_JSON(LIST(STRUCT_PACK(
       local_date := local_date,
       local_hour := local_hour,
-      usage_kwh := usage_kwh,
-      leading_circuit_name := circuit_name,
-      leading_circuit_kwh := circuit_kwh
-    ) ORDER BY local_date, local_hour)) AS cells_json
+      circuit_id := circuit_id,
+      circuit_name := circuit_name,
+      circuit_category := circuit_category,
+      circuit_kwh := circuit_kwh
+    ) ORDER BY local_date, local_hour, circuit_kwh DESC, circuit_name)) AS circuit_cells_json
   FROM (
     SELECT
-      circuit_cells.*,
-      SUM(circuit_kwh) OVER (PARTITION BY scope_id, local_date, local_hour) AS usage_kwh,
-      ROW_NUMBER() OVER (
-        PARTITION BY scope_id, local_date, local_hour
-        ORDER BY circuit_kwh DESC, circuit_name ASC
-      ) AS driver_rank
-    FROM (
-      SELECT
-        source.parent_node_id AS scope_id,
-        STRFTIME(CAST(source.local_interval_start AS DATE), '%Y-%m-%d') AS local_date,
-        source.local_hour,
-        source.circuit_name,
-        SUM(source.usage_kwh) AS circuit_kwh
-      FROM ${quoteIdentifier(viewName)} source
-      WHERE source.quality_status = 'ok'
-        AND source.official_aggregation_eligible = TRUE
-      GROUP BY source.parent_node_id, CAST(source.local_interval_start AS DATE), source.local_hour, source.circuit_name
-    ) circuit_cells
-  ) ranked
-  WHERE driver_rank = 1
+      source.parent_node_id AS scope_id,
+      STRFTIME(CAST(source.local_interval_start AS DATE), '%Y-%m-%d') AS local_date,
+      source.local_hour,
+      source.meter_node_id AS circuit_id,
+      source.circuit_name,
+      source.category AS circuit_category,
+      SUM(source.usage_kwh) AS circuit_kwh
+    FROM ${quoteIdentifier(viewName)} source
+    WHERE source.quality_status = 'ok'
+      AND source.official_aggregation_eligible = TRUE
+    GROUP BY source.parent_node_id, CAST(source.local_interval_start AS DATE), source.local_hour,
+      source.meter_node_id, source.circuit_name, source.category
+  ) circuit_cells
   GROUP BY scope_id
   ORDER BY scope_id
 `;

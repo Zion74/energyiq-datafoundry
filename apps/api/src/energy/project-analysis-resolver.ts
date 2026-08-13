@@ -16,6 +16,7 @@ import { resolve as resolvePath } from "node:path";
 import {
   executeEnergyScopeAnalysisWithLatestAvailable,
   selectEnergyCurrentOverviewPeriod,
+  selectEnergyLatestCompleteDay,
   selectEnergyLatestCompletePeriod,
   type EnergyScopeAnalysis,
 } from "./energy-analysis.js";
@@ -46,6 +47,12 @@ import {
   loadPreschoolOperationalProjection,
   type PreschoolOperationalProjection,
 } from "./preschool-operational-projection.js";
+import {
+  loadPreschoolPlanningLifecycle,
+  resolvePreschoolMonthlyTargetPeriod,
+  type PreschoolMonthlyTargetPeriod,
+  type PreschoolPlanningLifecycle,
+} from "./preschool-planning-lifecycle.js";
 import {
   buildPreschoolDecisionSignals,
   type PreschoolDecisionSignals,
@@ -106,6 +113,8 @@ export type ProjectAnalysisSnapshot = {
       endExclusive: string;
     };
     projectReleaseId: string;
+    latestCompleteLocalDay?: string | null;
+    monthlyOutlookTargetPeriod?: PreschoolMonthlyTargetPeriod | null;
   };
   projectRelease: PublishedProjectRelease;
   recipe: PublishedProjectRelease["recipe"];
@@ -123,6 +132,7 @@ export type ProjectAnalysisSnapshot = {
   preschoolBenchmark?: PreschoolBenchmarkProjection;
   preschoolAppliances?: PreschoolApplianceProjection;
   preschoolOperational?: PreschoolOperationalProjection;
+  preschoolPlanningLifecycle?: PreschoolPlanningLifecycle;
   preschoolDecisionSignals?: PreschoolDecisionSignals;
   dataSnapshot: {
     id: string;
@@ -254,7 +264,8 @@ export const resolveProjectAnalysis = async (input: {
       detail: "Publish a Project Template Revision and register its customer Renderer before opening the customer Overview.",
     };
   }
-  const publishedRunContext: PublishedRunContext = input.request.analysisWindow === "latest-complete-7d"
+  const publishedRunContext: PublishedRunContext = input.request.analysisWindow === "latest-complete-day"
+    || input.request.analysisWindow === "latest-complete-7d"
     || input.request.analysisWindow === "current-overview-28d"
     ? await resolveCurrentOverviewContext(input)
     : resolvePublishedEnergyQueryContext({
@@ -320,6 +331,24 @@ export const resolveProjectAnalysis = async (input: {
           .filter((rule) => projectRelease.ruleRevisionIds.includes(rule.revision_id)),
         databasePath: analysisDatabasePath,
       });
+      const preschoolRoot = projectRelease.renderer.key === "preschool-overview"
+        && releasedContext.scopeId === input.metadataStore.energyIq
+          .getProject(releasedContext.projectId).root_scope_id;
+      const preschoolLatestCompleteLocalDay = preschoolRoot
+        ? await selectPreschoolLatestCompleteLocalDay({
+            metadataStore: input.metadataStore,
+            dataGateway: input.dataGateway,
+            userId: input.user.id,
+            context: releasedContext,
+            databasePath: analysisDatabasePath,
+          })
+        : null;
+      const preschoolMonthlyOutlookTargetPeriod = preschoolLatestCompleteLocalDay
+        ? resolvePreschoolMonthlyTargetPeriod(
+            preschoolLatestCompleteLocalDay,
+            releasedContext.timezone,
+          )
+        : null;
       const snapshotContext: ProjectAnalysisSnapshot["context"] = {
         ...releasedContext,
         primaryPeriod: {
@@ -327,6 +356,10 @@ export const resolveProjectAnalysis = async (input: {
           endExclusive: releasedContext.to,
         },
         projectReleaseId: projectRelease.id,
+        ...(preschoolRoot ? {
+          latestCompleteLocalDay: preschoolLatestCompleteLocalDay,
+          monthlyOutlookTargetPeriod: preschoolMonthlyOutlookTargetPeriod,
+        } : {}),
       };
       const evidenceMetricIds = [...(
         projectRelease.metricRevisionIds.length > 0
@@ -359,8 +392,7 @@ export const resolveProjectAnalysis = async (input: {
             dailyUsageAnomalies: analysis.dailyUsageAnomalies,
           })
         : undefined;
-      const preschoolBenchmark = projectRelease.renderer.key === "preschool-overview"
-        && releasedContext.scopeId === input.metadataStore.energyIq.getProject(releasedContext.projectId).root_scope_id
+      const preschoolBenchmark = preschoolRoot
         && hasCompletePreschoolBenchmarkWindow(analysis, releasedContext.scopeId)
           ? resolvePreschoolBenchmarkProjection({
               metadataStore: input.metadataStore,
@@ -371,8 +403,7 @@ export const resolveProjectAnalysis = async (input: {
               analysis,
             })
           : undefined;
-      const preschoolAppliances = projectRelease.renderer.key === "preschool-overview"
-        && releasedContext.scopeId === input.metadataStore.energyIq.getProject(releasedContext.projectId).root_scope_id
+      const preschoolAppliances = preschoolRoot
           ? buildPreschoolApplianceProjection({
               projectRelease,
               period: snapshotContext.primaryPeriod,
@@ -380,8 +411,7 @@ export const resolveProjectAnalysis = async (input: {
               analysis,
             })
           : undefined;
-      const preschoolOperational = projectRelease.renderer.key === "preschool-overview"
-        && releasedContext.scopeId === input.metadataStore.energyIq.getProject(releasedContext.projectId).root_scope_id
+      const preschoolOperational = preschoolRoot
           ? await loadPreschoolOperationalProjection({
               metadataStore: input.metadataStore,
               dataGateway: input.dataGateway,
@@ -389,11 +419,13 @@ export const resolveProjectAnalysis = async (input: {
               projectRelease,
               context: releasedContext,
               analysis,
+              ...(preschoolMonthlyOutlookTargetPeriod
+                ? { planningTargetPeriod: preschoolMonthlyOutlookTargetPeriod }
+                : {}),
               databasePath: analysisDatabasePath,
             })
           : undefined;
-      const preschoolDecisionSignals = projectRelease.renderer.key === "preschool-overview"
-        && releasedContext.scopeId === input.metadataStore.energyIq.getProject(releasedContext.projectId).root_scope_id
+      const preschoolDecisionSignals = preschoolRoot
           ? buildPreschoolDecisionSignals({
               projectReleaseId: projectRelease.id,
               dataSnapshotId: analysis.provenance.dataSnapshotId,
@@ -447,6 +479,32 @@ export const resolveProjectAnalysis = async (input: {
     },
     { bypass: input.bypassCache === true || analysisDatabasePath === ":memory:" },
   );
+  if (
+    resolution.snapshot.renderer.key === "preschool-overview"
+    && resolution.snapshot.context.resource === "electricity"
+    && resolution.snapshot.context.scopeId === input.metadataStore.energyIq
+      .getProject(resolution.snapshot.context.projectId).root_scope_id
+  ) {
+    const latestCompleteLocalDay = resolution.snapshot.context.latestCompleteLocalDay;
+    const preschoolPlanningLifecycle = latestCompleteLocalDay
+      ? await loadPreschoolPlanningLifecycle({
+      metadataStore: input.metadataStore,
+      dataGateway: input.dataGateway,
+      userId: input.user.id,
+      context: releasedContext,
+      projectRelease,
+      latestCompleteLocalDay,
+      databasePath: analysisDatabasePath,
+    })
+      : undefined;
+    return {
+      ...resolution,
+      snapshot: {
+        ...resolution.snapshot,
+        ...(preschoolPlanningLifecycle ? { preschoolPlanningLifecycle } : {}),
+      },
+    };
+  }
   if (resolution.snapshot.renderer.key !== "ngee-ann-overview"
     || !resolution.snapshot.decisionPriorities) return resolution;
   const decisionLifecycle = buildNgeeAnnDecisionLifecycle({
@@ -471,6 +529,23 @@ export const resolveProjectAnalysis = async (input: {
   };
 };
 
+const selectPreschoolLatestCompleteLocalDay = async (
+  input: Parameters<typeof selectEnergyLatestCompleteDay>[0],
+): Promise<string | null> => {
+  try {
+    return (await selectEnergyLatestCompleteDay(input)).period.localFrom;
+  } catch (error) {
+    if (
+      error instanceof Error
+      && (
+        error.message === "ENERGYIQ_LATEST_COMPLETE_PERIOD_COVERAGE_NOT_FOUND"
+        || error.message === "ENERGYIQ_LATEST_COMPLETE_DAY_NOT_FOUND"
+      )
+    ) return null;
+    throw error;
+  }
+};
+
 const resolveCurrentOverviewContext = async (input: {
   metadataStore: MetadataStore;
   dataGateway: LocalDataGateway;
@@ -489,9 +564,11 @@ const resolveCurrentOverviewContext = async (input: {
     to,
     ...requestedContext
   } = input.request;
-  const selectOverviewPeriod = analysisWindow === "current-overview-28d"
-    ? selectEnergyCurrentOverviewPeriod
-    : selectEnergyLatestCompletePeriod;
+  const selectOverviewPeriod = analysisWindow === "latest-complete-day"
+    ? selectEnergyLatestCompleteDay
+    : analysisWindow === "current-overview-28d"
+      ? selectEnergyCurrentOverviewPeriod
+      : selectEnergyLatestCompletePeriod;
   const suppliedPinParts = [from, to, expectedDataSnapshotId, expectedProjectReleaseId]
     .filter((value) => value !== undefined).length;
   if (suppliedPinParts > 0 && suppliedPinParts < 4) {

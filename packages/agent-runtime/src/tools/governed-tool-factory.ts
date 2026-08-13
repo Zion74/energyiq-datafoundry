@@ -46,6 +46,11 @@ export type GovernedToolFactoryOptions = {
   runId?: string;
   segmentId?: string;
   getSegmentId?(): string;
+  transformObservation?(input: {
+    observation: unknown;
+    rawResult: unknown;
+    toolName: string;
+  }): unknown;
 };
 
 export class GovernedToolFactory {
@@ -55,6 +60,7 @@ export class GovernedToolFactory {
   private readonly runId: string | undefined;
   private readonly segmentId: string | undefined;
   private readonly getSegmentId: (() => string) | undefined;
+  private readonly transformObservation: GovernedToolFactoryOptions["transformObservation"];
 
   constructor(
     private readonly dispatcher: ToolObservationDispatcher,
@@ -68,6 +74,7 @@ export class GovernedToolFactory {
     this.runId = options.runId;
     this.segmentId = options.segmentId;
     this.getSegmentId = options.getSegmentId;
+    this.transformObservation = options.transformObservation;
   }
 
   /** Wrap every registered tool at its execution boundary. */
@@ -117,15 +124,25 @@ export class GovernedToolFactory {
                 ...(toolInput !== undefined ? { toolInput } : {})
               });
             }
-            this.emitToolCallResult(toolCallId, toolName, serializeToolResultContent(actionResult.observation));
-            return actionResult.observation;
+            const observation = this.transformObservation?.({
+              observation: actionResult.observation,
+              rawResult: actionResult.rawResult,
+              toolName,
+            }) ?? actionResult.observation;
+            this.emitToolCallResult(toolCallId, toolName, serializeToolResultContent(observation));
+            return observation;
           }
           const rawResult = await execute(...args);
           if (rawResult === undefined) {
             return undefined;
           }
           const contextPackage = this.dispatcher.dispatch(toolName, rawResult);
-          const observation = toolObservationModelFromPackage(contextPackage);
+          const projectedObservation = toolObservationModelFromPackage(contextPackage);
+          const observation = this.transformObservation?.({
+            observation: projectedObservation,
+            rawResult,
+            toolName,
+          }) ?? projectedObservation;
           await this.onResult?.({
             contextPackage,
             rawResult,

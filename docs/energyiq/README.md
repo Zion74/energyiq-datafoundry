@@ -50,6 +50,8 @@
 
 | 文档 | 状态 |
 | --- | --- |
+| [Ngee Ann Analysis 模板复刻执行方案](2026-08-10-Ngee-Ann-Analysis模板复刻执行方案.md) | in progress；N5 已完成 server-published Category×24h 与 Level→Circuit×24h 工程切片，待合并后真实 Chrome 1440/1920/tablet 与 Charles 人工验收 |
+| [Preschool Section 5 Charles 复刻执行方案](2026-08-10-Preschool-Section5-Charles复刻执行方案.md) | in progress；A5 已进入人工验收；[#42](https://github.com/Zion74/energyiq-datafoundry/issues/42) 把固定 June Forecast 校准为自然月 Monthly Energy Outlook，冻结 Original Estimate，并按同日期范围对照 Actual 与 Current Outlook |
 | [AI Analyst Harness 与 AI Slot 执行路径](2026-08-08-AI-Analyst-Harness与AI-Slot执行路径.md) | in progress；当前以两项目 60 秒客户价值、AI Finding 首屏表达和分层验收为主线；v10 后的完整 submit/repair 延期，通用化只沉淀轻量 Analysis Pattern Cards |
 | [2026-08-06 Overview 夜间执行清单与 Runlog](2026-08-06-Overview夜间执行清单与Runlog.md) | in progress；第 11 节为 2026-08-07 当前行动方案：Overview takeaway-first 阅读体验 → #31 Explorer 精准下钻与设备趋势 → Preschool 演示型图表 → #5/#19/#20/#21 收口；AI 侧线保持隔离 |
 | [三 Agent MVP 最终执行与重置包](2026-08-03-三Agent-MVP最终执行与重置包.md) | accepted；唯一派工入口，含共同基线和三个最终 Prompt |
@@ -62,6 +64,7 @@
 
 | 文档 | 作用 |
 | --- | --- |
+| [2026-08-09 Preschool Overview AI 路线 B 集成记录](2026-08-09-Preschool-Overview-AI-路线B集成记录.md) | 两阶段 AI Artifact、bounded failed retry、Benchmark/Standby 薄适配、本地自动化证据，以及仍待完成的服务端执行、Provider 与 Chrome 边界 |
 | [2026-08-04 Ngee Ann 权威 Excel、Mapping 与 Facts Materialization 实施记录](2026-08-04-Ngee-Ann权威Excel-Mapping与Facts-Materialization实施记录.md) | 四份权威 workbook、18/18 Mapping、项目级 canonical interval rebuild、100,205 facts、固定 Golden、Admin readiness 与 #4/#24/#19 边界 |
 | [可信查询范围与 Energy Fact 接入记录](2026-07-31-可信查询范围与Energy-Fact接入记录.md) | Ngee Ann/Preschool 事实接入、DuckDB Scope 约束、SQL allowlist 和验证证据 |
 | [2026-08-01 Admin 与 Tier 批次 0–1 实施记录](2026-08-01-Admin-Tier-批次0-1实施记录.md) | Project/Tier/Node Draft、Validate、Publish、样板迁移、测试和本地复现证据 |
@@ -74,7 +77,7 @@
 | [2026-08-04 Tariff 与营业日历持久化实施记录](2026-08-04-Tariff与营业日历持久化实施记录.md) | 不可变 Tariff/Calendar、Published Release Resolver、API/Web/Saved serialized 集成、显式 Unavailable，以及待完成的 Ngee Ann #24-first Golden |
 | [2026-08-04 Published Meter Routing 实施记录](2026-08-04-Published-Meter-Routing实施记录.md) | Mapping schema v2、Meter attachment、按 Scope/Resource/Category 的官方 routes、Release pin 与四层 Golden |
 | [2026-08-04 T03/T04/T13 集成实施记录](2026-08-04-T03-T04-T13集成实施记录.md) | Runtime policy、Period-effective metadata、Workspace 默认模型、公开 API/持久化契约，以及 T13 尚未通过的 live 产品门禁 |
-| [Preschool Overview Interaction Matrix](2026-08-06-Preschool-Overview-Interaction-Matrix.md) | Preschool 对 Charles 模块的保留、适配、主动删除，以及 Evidence、降级、1440/1920 和人工验收边界 |
+| [Preschool Overview Interaction Matrix](2026-08-06-Preschool-Overview-Interaction-Matrix.md) | Preschool 对 Charles 模块的保留、适配与主动删除；包含 A4 Operating Hours 的 v2 additive/feature-detect 合同、Evidence 收尾顺序，以及新 API 构建后的 3102 正向验收边界 |
 | [2026-08-03 DeepSeek V4 Flash 与 DataFoundry 实测记录](2026-08-03-DeepSeek-V4-Flash与DataFoundry实测记录.md) | Flash 连接和工具链可运行，但同一问数产生过两种结果；记录时区 SQL、图表触发、60 秒超时和用户级模型配置等真实缺口 |
 | [2026-08-01 Ngee Ann 源到事实契约原型](2026-08-01-Ngee-Ann-源到事实契约原型记录.md) | 统一 Adapter、SHA 幂等、实际时长 Fact、Virtual Load 12、冲突与官方汇总排重的可运行证据 |
 | [2026-08-01 Admin 首次数据源配置交互原型](2026-08-01-Admin-首次数据源配置交互原型记录.md) | 已废弃的 A/B/C 历史实验记录；正式路径已回归 Project Overview、Structure、Data Sources 与 Meter Mapping |

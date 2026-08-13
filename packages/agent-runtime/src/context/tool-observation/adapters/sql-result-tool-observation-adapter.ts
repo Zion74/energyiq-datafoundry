@@ -10,6 +10,7 @@ import { toolObservationProjectionToItems } from "../tool-observation-projection
 import type { ToolObservationAdapter } from "../tool-observation-adapter.js";
 
 export type SqlResultInput = {
+  evidenceIndex?: number;
   result: SqlExecutionResult;
   sql: string;
 };
@@ -47,7 +48,14 @@ export class SqlResultToolObservationAdapter implements ToolObservationAdapter {
         max_sql_chars: getLimit(budget, "maxSqlChars", DEFAULT_TOOL_OBSERVATION_PROJECTION_POLICY.sql.max_sql_chars)
       }
     });
-    return toolObservationProjectionToItems(contextPackage, this.resultType, 10);
+    const projection = input.evidenceIndex === undefined
+      ? contextPackage
+      : {
+          ...contextPackage,
+          model: prependEvidenceIndex(contextPackage.model, input.evidenceIndex),
+          activity: prependEvidenceIndex(contextPackage.activity, input.evidenceIndex),
+        };
+    return toolObservationProjectionToItems(projection, this.resultType, 10);
   }
 }
 
@@ -60,15 +68,33 @@ const normalizeSqlResultInput = (raw: unknown): SqlResultInput | undefined => {
   }
 
   if (isSqlExecutionResult(raw.result)) {
-    return { result: raw.result, sql: typeof raw.sql === "string" ? raw.sql : "" };
+    return {
+      result: raw.result,
+      sql: typeof raw.sql === "string" ? raw.sql : "",
+      ...evidenceIndexFrom(raw),
+    };
   }
 
   if (isSqlExecutionResult(raw)) {
-    return { result: raw, sql: "" };
+    return { result: raw, sql: "", ...evidenceIndexFrom(raw) };
   }
 
   return undefined;
 };
+
+const evidenceIndexFrom = (value: Record<string, unknown>): { evidenceIndex?: number } => (
+  typeof value.evidence_index === "number"
+    && Number.isSafeInteger(value.evidence_index)
+    && value.evidence_index > 0
+    ? { evidenceIndex: value.evidence_index }
+    : {}
+);
+
+const prependEvidenceIndex = (value: unknown, evidenceIndex: number): unknown => (
+  isRecord(value)
+    ? { evidence_index: evidenceIndex, ...value }
+    : { evidence_index: evidenceIndex, result: value }
+);
 
 const createInvalidSqlResultProjection = (raw: unknown) => {
   const serialized = safeSerialize(raw);

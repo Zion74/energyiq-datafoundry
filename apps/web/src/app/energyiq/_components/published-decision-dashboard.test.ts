@@ -120,7 +120,7 @@ describe("published Overview URL reload", () => {
     await act(async () => history?.click());
 
     expect(mockedRouter.push).toHaveBeenCalledWith(
-      "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&grain=day&comparison=overlay&category=all&history=1",
+      "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Custom&from=2026-05-01&to=2026-05-31&grain=day&comparison=overlay&category=all&history=1",
     );
   });
 
@@ -136,7 +136,7 @@ describe("published Overview URL reload", () => {
     expect(singleDay).toMatchObject({ grain: "hour", comparison: "average", category: "load" });
   });
 
-  it("restores anomaly controls and handoffs from URL, writes changes back, and keeps dialog state transient", async () => {
+  it("restores anomaly handoffs from URL and keeps detail comparison controls section-local", async () => {
     const ngeeAnn = project("ngee-ann-polytechnic", "Ngee Ann Polytechnic");
     mockedAccess.activeProject = ngeeAnn;
     mockedAccess.access = accessContext([ngeeAnn]);
@@ -167,9 +167,9 @@ describe("published Overview URL reload", () => {
     await act(async () => openIncident?.click());
     const dialog = document.querySelector<HTMLElement>("[role='dialog']");
     const average = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])
-      .find((button) => button.textContent === "Average");
+      .find((button) => button.textContent === "Comparable-day average");
     const selected = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])
-      .find((button) => button.textContent === "Selected");
+      .find((button) => button.textContent === "Selected day");
     const load = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])
       .find((button) => button.textContent === "Load");
     const light = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])
@@ -177,20 +177,20 @@ describe("published Overview URL reload", () => {
     expect(average?.getAttribute("aria-pressed")).toBe("true");
     expect(load?.getAttribute("aria-pressed")).toBe("true");
 
+    const navigationCountBeforeDetail = mockedRouter.replace.mock.calls.length;
     await act(async () => selected?.click());
     await act(async () => light?.click());
+    expect(selected?.getAttribute("aria-pressed")).toBe("true");
+    expect(light?.getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelector("[data-anomaly-inline-detail='true']")).toBe(dialog);
+    expect(mockedRouter.replace).toHaveBeenCalledTimes(navigationCountBeforeDetail);
+
     const close = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") ?? [])
       .find((button) => button.textContent === "Close");
     await act(async () => close?.click());
 
-    const navigations = mockedRouter.replace.mock.calls.map(([href]) => href);
-    expect(navigations).toHaveLength(3);
-    expect(navigations[1]).toContain("scopeId=project&resource=electricity&grain=day&comparison=selected&category=load");
-    expect(navigations[1]).toContain("currentDataSnapshotId=");
-    expect(navigations[1]).not.toContain("period=");
-    expect(navigations[2]).toContain("scopeId=project&resource=electricity&grain=day&comparison=selected&category=light");
-    expect(navigations[2]).toContain("currentDataSnapshotId=");
-    expect(navigations[2]).not.toContain("period=");
+    expect(document.querySelector("[data-anomaly-inline-detail='true']")).toBeNull();
+    expect(mockedRouter.replace).toHaveBeenCalledTimes(navigationCountBeforeDetail);
     expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
   });
 
@@ -235,7 +235,7 @@ describe("published Overview URL reload", () => {
     });
 
     expect(container.textContent).toContain("Decision themes unavailable");
-    expect(container.textContent).toContain("Verified figures");
+    expect(container.textContent).toContain("Key Highlights");
     expect(container.textContent).toContain("Energy decision overview");
     expect(container.textContent).toContain("Rolling 28-day view");
     expect(container.textContent).toContain("20 May 2026–16 Jun 2026");
@@ -251,14 +251,18 @@ describe("published Overview URL reload", () => {
       anchor.textContent,
       anchor.getAttribute("href"),
     ])).toEqual([
-      ["Takeaways", "#ngee-ann-takeaways"],
-      ["Verified figures", "#ngee-ann-key-highlights"],
-      ["AI analysis", "#ngee-ann-ai-analysis"],
-      ["Change over time", "#ngee-ann-change"],
-      ["Main contributors", "#ngee-ann-location"],
-      ["Time patterns", "#ngee-ann-timing"],
+      ["Daily trend", "#ngee-ann-daily-trend"],
+      ["Executive summary", "#ngee-ann-executive-summary"],
+      ["Summary of findings", "#ngee-ann-summary-findings"],
+      ["Day profile", "#ngee-ann-day-profile-analysis"],
+      ["Energy health", "#ngee-ann-energy-health"],
+      ["Circuit analysis", "#ngee-ann-circuit-analysis"],
+      ["Recommendations", "#ngee-ann-recommendations"],
       ["Evidence", "#ngee-ann-evidence"],
     ]);
+    for (const anchor of Array.from(contents?.querySelectorAll<HTMLAnchorElement>("a") ?? [])) {
+      expect(container.querySelector(anchor.getAttribute("href")!)).not.toBeNull();
+    }
     expect(resolveProjectAnalysis).toHaveBeenCalledOnce();
     expect(resolveProjectAnalysis).toHaveBeenCalledWith({
       projectId: "ngee-ann-polytechnic",
@@ -323,7 +327,7 @@ describe("published Overview URL reload", () => {
     expect(container.querySelectorAll("input[type='date']")).toHaveLength(0);
   });
 
-  it("uses the dedicated Preschool shell on the current rolling 28-day Snapshot and bypasses only Refresh", async () => {
+  it("uses the dedicated Preschool shell on the fixed May Charles baseline and bypasses only Refresh", async () => {
     const preschool = project("preschool-demo", "Preschool Portfolio");
     mockedAccess.activeProject = preschool;
     mockedAccess.access = accessContext([preschool]);
@@ -345,7 +349,9 @@ describe("published Overview URL reload", () => {
       projectId: "preschool-demo",
       scopeId: "project",
       resource: "electricity",
-      analysisWindow: "current-overview-28d",
+      period: "Custom",
+      from: "2026-05-01",
+      to: "2026-05-31",
     });
     expect(container.querySelector("[data-preschool-overview='true']")).not.toBeNull();
     expect(container.textContent?.match(/Portfolio energy overview/g)).toHaveLength(1);
@@ -371,16 +377,19 @@ describe("published Overview URL reload", () => {
     });
     expect(container.textContent).toContain("Overview contents");
     const contents = container.querySelector("[aria-label='Overview contents']");
-    expect(Array.from(contents?.querySelectorAll<HTMLAnchorElement>("a") ?? [], (anchor) => anchor.textContent)).toEqual([
-      "Takeaways",
-      "AI analysis",
-      "Energy drivers",
-      "Efficiency",
-      "Operating patterns",
-      "June plan",
-      "Centre detail",
-      "Evidence",
+    const contentLinks = Array.from(contents?.querySelectorAll<HTMLAnchorElement>("a") ?? []);
+    expect(contentLinks.map((anchor) => [anchor.textContent, anchor.getAttribute("href")])).toEqual([
+      ["1 · Overview", "#preschool-overall-summary"],
+      ["2 · Benchmarks", "#preschool-benchmark-analysis"],
+      ["3 · Standby wastage", "#preschool-standby-wastage"],
+      ["4 · Operating hours", "#preschool-operating-hours"],
+      ["5 · Monthly outlook", "#preschool-monthly-outlook"],
     ]);
+    for (const anchor of contentLinks) {
+      const href = anchor.getAttribute("href");
+      expect(href).toMatch(/^#preschool-/);
+      expect(container.querySelector(href!)).not.toBeNull();
+    }
     expect(Array.from(container.querySelectorAll("button"), (button) => button.textContent)).not.toEqual(
       expect.arrayContaining(["Yesterday", "Last 7 days", "Previous week", "Previous month", "Custom"]),
     );
@@ -388,14 +397,12 @@ describe("published Overview URL reload", () => {
       container.querySelector("[aria-label='Resource type']")?.querySelectorAll("button") ?? [],
       (button) => button.textContent,
     )).toEqual(["Electricity"]);
-    expect(container.textContent).toContain("Refresh current overview");
+    expect(container.textContent).toContain("Refresh view");
     expect(container.textContent).toContain("Save analysis");
-    expect(mockedRouter.replace).toHaveBeenCalledWith(expect.stringContaining(
-      `currentDataSnapshotId=${snapshot.context.dataSnapshotId}`,
-    ));
+    expect(mockedRouter.replace).not.toHaveBeenCalled();
 
     const refresh = Array.from(container.querySelectorAll<HTMLButtonElement>("button"))
-      .find((button) => button.textContent === "Refresh current overview");
+      .find((button) => button.textContent === "Refresh view");
     await act(async () => refresh?.click());
 
     expect(resolveProjectAnalysis).toHaveBeenCalledTimes(2);
@@ -403,7 +410,9 @@ describe("published Overview URL reload", () => {
       projectId: "preschool-demo",
       scopeId: "project",
       resource: "electricity",
-      analysisWindow: "current-overview-28d",
+      period: "Custom",
+      from: "2026-05-01",
+      to: "2026-05-31",
     }, { bypassCache: true });
   });
 
@@ -411,7 +420,7 @@ describe("published Overview URL reload", () => {
     ["a URL without Period", "/energyiq/overview?projectId=preschool-demo&scopeId=level-7&resource=electricity"],
     ["an old arbitrary Custom range", "/energyiq/overview?projectId=preschool-demo&scopeId=level-7&resource=electricity&period=Custom&from=2026-06-10&to=2026-06-16"],
     ["an old Water resource", "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=water&period=Custom&from=2026-05-01&to=2026-05-31"],
-  ] as const)("ignores legacy Preschool %s and resolves the current rolling Overview", async (_label, href) => {
+  ] as const)("canonicalizes legacy Preschool %s to the fixed May Charles baseline", async (_label, href) => {
     const preschool = project("preschool-demo", "Preschool Portfolio");
     mockedAccess.activeProject = preschool;
     mockedAccess.access = accessContext([preschool]);
@@ -428,9 +437,13 @@ describe("published Overview URL reload", () => {
       projectId: "preschool-demo",
       scopeId: "project",
       resource: "electricity",
-      analysisWindow: "current-overview-28d",
+      period: "Custom",
+      from: "2026-05-01",
+      to: "2026-05-31",
     });
-    expect(mockedRouter.replace).not.toHaveBeenCalled();
+    expect(mockedRouter.replace).toHaveBeenCalledWith(
+      "/energyiq/overview?projectId=preschool-demo&scopeId=project&resource=electricity&period=Custom&from=2026-05-01&to=2026-05-31&grain=day&comparison=overlay&category=all",
+    );
     expect(container.querySelector("[role='combobox'][aria-label='Analysis Scope']")).toBeNull();
     expect(container.querySelectorAll("input[type='date']")).toHaveLength(0);
     expect(configApi.getEnergyProjectHierarchy).not.toHaveBeenCalled();

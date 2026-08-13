@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { NgeeAnnHourAxis } from "./ngee-ann-hour-axis";
+import type { NgeeAnnTrendDayType } from "./ngee-ann-energy-trend";
 import type { NgeeAnnDailyAnomalyViewModel } from "./ngee-ann-overview-view-model";
 import { anomalyIncidentDomId } from "./ngee-ann-overview-links";
 
@@ -12,7 +13,6 @@ type Series = Incident["series"][number];
 type ViewMode = "overlay" | "selected" | "average";
 
 const ALL_SCOPES = "all-scopes";
-const PRIORITY_INCIDENT_LIMIT = 3;
 
 export const NGEE_ANN_OPEN_INCIDENT_EVENT = "energyiq:ngee-ann-open-incident";
 
@@ -23,12 +23,16 @@ export type NgeeAnnOpenIncidentEventDetail = {
 
 export function NgeeAnnDailyAnomalies({
   view,
+  selectedScopeId: listScopeId,
+  selectedDayType: listDayType,
   comparison = "overlay",
   category = "all",
   onComparisonChange,
   onCategoryChange,
 }: {
   view: NgeeAnnDailyAnomalyViewModel;
+  selectedScopeId?: string;
+  selectedDayType?: NgeeAnnTrendDayType;
   comparison?: ViewMode;
   category?: "all" | "load" | "light";
   onComparisonChange?: (comparison: ViewMode) => void;
@@ -39,8 +43,8 @@ export function NgeeAnnDailyAnomalies({
   const [selectedScopeId, setSelectedScopeId] = useState(ALL_SCOPES);
   const [selectedCategory, setSelectedCategory] = useState<"all" | "load" | "light">(category);
   const triggerRef = useRef<HTMLElement | null>(null);
-  const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   const closeDialog = useCallback(() => {
     setOpenIncidentId(null);
@@ -75,22 +79,22 @@ export function NgeeAnnDailyAnomalies({
   useEffect(() => {
     if (!openIncidentId) return;
     closeRef.current?.focus();
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
         closeDialog();
         return;
       }
-      if (event.key !== "Tab") return;
-      const focusable = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
+      if (event.key !== "Tab" || !dialogRef.current) return;
+      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
         "button:not([disabled]), summary, a[href], input, select, textarea, [tabindex]:not([tabindex='-1'])",
-      ) ?? []).filter((element) => !element.hasAttribute("disabled"));
-      const first = focusable[0];
-      const last = focusable.at(-1);
-      if (!first || !last) {
-        event.preventDefault();
-        dialogRef.current?.focus();
-      } else if (event.shiftKey && document.activeElement === first) {
+      ));
+      if (focusable.length === 0) return;
+      const first = focusable[0]!;
+      const last = focusable.at(-1)!;
+      if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
         last.focus();
       } else if (!event.shiftKey && document.activeElement === last) {
@@ -99,14 +103,17 @@ export function NgeeAnnDailyAnomalies({
       }
     };
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = previousBodyOverflow;
+    };
   }, [closeDialog, openIncidentId]);
 
   if (view.status === "unavailable") {
     return (
       <section aria-labelledby="ngee-ann-daily-anomalies" className="border-b border-border px-5 py-7 lg:px-7 lg:py-8">
         <h3 id="ngee-ann-daily-anomalies" className="text-lg font-semibold tracking-[-0.015em] text-foreground">
-          Priority usage exceptions
+          Detected Anomaly List
         </h3>
         <p className="mt-1.5 text-sm leading-6 text-muted">{view.decisionQuestion}</p>
         <div className="mt-4 rounded-lg border border-border bg-surface-subtle px-4 py-4" role="status">
@@ -118,110 +125,89 @@ export function NgeeAnnDailyAnomalies({
   }
 
   const incident = view.incidents.find((candidate) => candidate.incidentId === openIncidentId) ?? null;
-  const rankedIncidents = [...view.incidents].sort((left, right) => (
-    Math.abs(right.impactKwhValue) - Math.abs(left.impactKwhValue)
-    || right.localDate.localeCompare(left.localDate)
-    || left.incidentId.localeCompare(right.incidentId)
+  const visibleIncidents = view.incidents.filter((candidate) => (
+    (!listScopeId || candidate.scopeId === listScopeId)
+    && (!listDayType || candidate.dayType.toLowerCase() === listDayType)
   ));
-  const priorityIncidents = rankedIncidents.slice(0, PRIORITY_INCIDENT_LIMIT);
-  const largestIncident = priorityIncidents[0] ?? null;
-  const largestImpact = largestIncident ? Math.max(1, Math.abs(largestIncident.impactKwhValue)) : 1;
   const openIncident = (incidentId: string, trigger: HTMLElement) => {
     triggerRef.current = trigger;
     setOpenIncidentId(incidentId);
   };
 
   return (
-    <section aria-labelledby="ngee-ann-daily-anomalies" className="border-b border-border px-5 py-7 lg:px-7 lg:py-8">
+    <section id="ngee-ann-detected-anomaly-list" aria-labelledby="ngee-ann-daily-anomalies" className="scroll-mt-28 border-b border-border px-5 py-7 lg:px-7 lg:py-8">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div className="max-w-3xl">
           <h3 id="ngee-ann-daily-anomalies" className="text-lg font-semibold tracking-[-0.015em] text-foreground">
-            Priority usage exceptions
+            Detected Anomaly List
           </h3>
           <p className="mt-1.5 text-sm leading-6 text-muted">
-            Focus on the largest gaps from comparable days; open the full record only when you need to investigate the pattern.
+            Open a flagged day to compare its accepted 24-hour Circuit evidence with the frozen comparable-day baseline.
           </p>
         </div>
-        {view.incidents.length > 0 ? (
+        {visibleIncidents.length > 0 ? (
           <span className="w-fit rounded-full bg-step-warning/10 px-3 py-1.5 text-xs font-semibold text-step-warning">
-            {view.incidents.length} flagged checks
+            {visibleIncidents.length} detected {visibleIncidents.length === 1 ? "anomaly" : "anomalies"}
           </span>
         ) : null}
       </div>
 
-      {view.incidents.length > 0 ? (
+      {visibleIncidents.length > 0 ? (
         <>
-          <div className="mt-5 grid gap-5 border-y border-border py-5 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)] lg:gap-8">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">What needs attention</p>
-              <p className="mt-2 text-3xl font-semibold tracking-[-0.03em] tabular-nums text-foreground">
-                {view.incidents.length}
-                <span className="ml-2 text-base font-medium tracking-normal text-muted">daily checks</span>
-              </p>
-              <p className="mt-2 max-w-md text-sm leading-6 text-muted">
-                Crossed the published comparison rule across the Project and Levels. This is a review queue, not {view.incidents.length} confirmed root causes.
-              </p>
-            </div>
-            {largestIncident ? (
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">Largest gap to review first</p>
-                <p className="mt-2 text-3xl font-semibold tracking-[-0.03em] tabular-nums text-step-warning">
-                  {formatSignedKwh(largestIncident.impactKwhValue)}
-                </p>
-                <p className="mt-1 text-base font-semibold text-foreground">
-                  {largestIncident.scopeName} · {largestIncident.weekday} {largestIncident.dateLabel}
-                </p>
-                <p className="mt-1 text-sm leading-6 text-muted">
-                  {formatSignedPercent(largestIncident.relativePctValue)} versus comparable {largestIncident.dayType.toLowerCase()} days. Check the operating context and the largest contributing circuits before deciding on an intervention.
-                </p>
-              </div>
-            ) : null}
-          </div>
-
-          <div className="mt-6" aria-label="Highest-impact usage exceptions">
-            <div className="flex flex-wrap items-end justify-between gap-2">
-              <div>
-                <h4 className="text-base font-semibold text-foreground">Highest-impact exceptions</h4>
-                <p className="mt-1 text-sm leading-6 text-muted">Start with these three; impact is the accepted usage above the comparable-day baseline.</p>
-              </div>
-              <p className="text-xs font-medium text-muted">Showing {priorityIncidents.length} of {rankedIncidents.length}</p>
-            </div>
-            <div className="mt-3 divide-y divide-border border-y border-border">
-              {priorityIncidents.map((item, index) => (
-                <article key={item.incidentId} className="grid gap-3 py-4 md:grid-cols-[2rem_minmax(11rem,0.9fr)_minmax(12rem,1.4fr)_minmax(8rem,0.65fr)_auto] md:items-center md:gap-4">
-                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-surface-subtle text-xs font-semibold text-muted" aria-hidden="true">{index + 1}</span>
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">{item.scopeName}</p>
-                    <p className="mt-0.5 text-xs text-muted">{item.weekday} {item.dateLabel} · {item.dayType}</p>
-                  </div>
-                  <div
-                    role="img"
-                    aria-label={`${item.scopeName} ${item.dateLabel}: ${formatSignedKwh(item.impactKwhValue)} above comparable-day baseline`}
-                    className="h-2.5 overflow-hidden rounded-full bg-surface-subtle"
-                  >
-                    <span className="block h-full rounded-full bg-step-warning/70" style={{ width: `${Math.max(6, Math.abs(item.impactKwhValue) / largestImpact * 100)}%` }} />
-                  </div>
-                  <div>
-                    <p className="text-base font-semibold tabular-nums text-foreground">{formatSignedKwh(item.impactKwhValue)}</p>
-                    <p className="mt-0.5 text-xs tabular-nums text-muted">{formatSignedPercent(item.relativePctValue)} vs baseline</p>
-                  </div>
-                  <button
-                    type="button"
-                    data-priority-anomaly-trigger="true"
-                    aria-haspopup="dialog"
+          <p className="mt-4 text-sm text-muted">
+            Detected anomalies: <span className="font-semibold tabular-nums text-foreground">{visibleIncidents.length}</span>
+            {listDayType ? ` / ${listDayType === "public_holiday" ? "Holiday" : `${listDayType.charAt(0).toUpperCase()}${listDayType.slice(1)}`} days` : ""}
+          </p>
+          <div className="mt-3 overflow-x-auto rounded-lg border border-border">
+            <table className="w-full min-w-[860px] border-collapse text-left text-sm">
+              <caption className="sr-only">Detected anomalies for the selected Day Type and Scope</caption>
+              <thead className="bg-surface-subtle text-xs text-muted">
+                <tr>
+                  <th className="px-3 py-3 font-semibold">Date</th>
+                  <th className="px-3 py-3 font-semibold">Type</th>
+                  <th className="px-3 py-3 text-right font-semibold">Daily total</th>
+                  <th className="px-3 py-3 text-right font-semibold">Expected</th>
+                  <th className="px-3 py-3 text-right font-semibold">Threshold</th>
+                  <th className="px-3 py-3 font-semibold">Level totals (kWh)</th>
+                  <th className="px-3 py-3 text-right font-semibold">Delta</th>
+                  <th className="px-3 py-3 font-semibold">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {visibleIncidents.map((item) => (
+                  <tr
+                    key={item.incidentId}
+                    tabIndex={0}
+                    role="button"
+                    aria-expanded={item.incidentId === openIncidentId}
+                    aria-controls="ngee-ann-anomaly-dialog"
+                    aria-label={`Open anomaly detail for ${item.scopeName}, ${item.weekday} ${item.dateLabel}`}
+                    data-template-anomaly-trigger="true"
+                    className="cursor-pointer bg-surface hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30"
                     onClick={(event) => openIncident(item.incidentId, event.currentTarget)}
-                    className="min-h-10 rounded-lg border border-primary/25 px-3.5 text-sm font-semibold text-primary hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      openIncident(item.incidentId, event.currentTarget);
+                    }}
                   >
-                    Investigate
-                  </button>
-                </article>
-              ))}
-            </div>
+                    <td className="whitespace-nowrap px-3 py-3 font-semibold text-foreground">{item.dateLabel} {item.weekday}</td>
+                    <td className="px-3 py-3 text-muted">{item.dayType}</td>
+                    <td className="px-3 py-3 text-right tabular-nums text-foreground">{formatKwhNumber(item.actualKwhValue)}</td>
+                    <td className="px-3 py-3 text-right tabular-nums text-muted">{formatKwhNumber(item.baselineKwhValue)}</td>
+                    <td className="px-3 py-3 text-right tabular-nums text-muted">{formatKwhNumber(item.thresholdKwhValue)}</td>
+                    <td className="px-3 py-3 text-xs tabular-nums text-muted">{levelTotalsLabel(item)}</td>
+                    <td className="px-3 py-3 text-right font-semibold tabular-nums text-step-warning">{formatSignedPercent(item.relativePctValue)}</td>
+                    <td className="px-3 py-3"><span className="rounded-md bg-step-warning/10 px-2 py-1 text-xs font-semibold text-step-warning">Anomaly</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
 
           <details className="mt-5 rounded-lg border border-border bg-surface-subtle/50 px-4 py-3">
             <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
-              View all {rankedIncidents.length} flagged checks
+              View all {view.incidents.length} flagged checks
             </summary>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">
               Complete audit list in the published server order. Open a row only when you need its 24-hour comparison and frozen Evidence.
@@ -233,7 +219,8 @@ export function NgeeAnnDailyAnomalies({
                   id={anomalyIncidentDomId(item.incidentId)}
                   type="button"
                   data-anomaly-trigger="true"
-                  aria-haspopup="dialog"
+                  aria-expanded={item.incidentId === openIncidentId}
+                  aria-controls="ngee-ann-anomaly-dialog"
                   onClick={(event) => openIncident(item.incidentId, event.currentTarget)}
                   className="grid min-h-14 w-full scroll-mt-24 gap-1 px-3 py-3 text-left hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 sm:grid-cols-[minmax(10rem,1fr)_minmax(11rem,1fr)_auto] sm:items-center sm:gap-4"
                 >
@@ -251,14 +238,18 @@ export function NgeeAnnDailyAnomalies({
       ) : (
         <div className="mt-4 rounded-lg border border-border bg-surface-subtle px-4 py-4" role="status">
           <p className="text-sm font-semibold text-foreground">
-            {view.allSuppressed
+            {view.incidents.length > 0
+              ? "No detected anomaly matches the selected Day Type and Scope"
+              : view.allSuppressed
               ? "No daily check was eligible for a conclusion"
               : view.outcomeSummary.suppressed > 0
                 ? "No confirmed exception; some daily checks remain inconclusive"
                 : "No daily usage exception crossed the published rule"}
           </p>
           <p className="mt-1 text-sm leading-6 text-muted">
-            {view.allSuppressed
+            {view.incidents.length > 0
+              ? "Choose another Day Type or Scope to inspect the remaining server-triggered records."
+              : view.allSuppressed
               ? "Coverage, quality, Calendar or comparable-day gates prevented a trustworthy conclusion for every check."
               : view.outcomeSummary.suppressed > 0
                 ? "Checks that passed the rule stayed within threshold; suppressed checks are not being described as normal."
@@ -267,126 +258,121 @@ export function NgeeAnnDailyAnomalies({
         </div>
       )}
 
-      <AnomalyEvidence view={view} />
-
-      {incident ? createPortal((
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/35 p-3 sm:p-6">
+      {incident && typeof document !== "undefined" ? createPortal(
+        <div className="fixed inset-0 z-50 grid items-center overflow-y-auto bg-foreground/40 p-3 backdrop-blur-[1px] sm:p-6">
           <div
             ref={dialogRef}
+            id="ngee-ann-anomaly-dialog"
             role="dialog"
             aria-modal="true"
             aria-labelledby="ngee-ann-anomaly-dialog-title"
             aria-describedby="ngee-ann-anomaly-dialog-question"
-            tabIndex={-1}
-            className="max-h-[min(90vh,900px)] w-full max-w-6xl overflow-y-auto rounded-xl border border-border bg-surface shadow-[var(--shadow-card)] focus:outline-none"
+            className="mx-auto max-h-[calc(100dvh-1.5rem)] w-full max-w-6xl overflow-y-auto rounded-xl border border-primary/25 bg-surface shadow-[var(--shadow-card)] sm:max-h-[calc(100dvh-3rem)]"
           >
-            <header className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-border bg-surface px-5 py-4 sm:px-6">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted">Daily usage evidence</p>
-                <h2 id="ngee-ann-anomaly-dialog-title" className="mt-1 text-lg font-semibold tracking-[-0.02em] text-foreground">
-                  {incident.scopeName} / {incident.weekday} {incident.dateLabel}
-                </h2>
-                <p id="ngee-ann-anomaly-dialog-question" className="mt-1 max-w-3xl text-sm leading-6 text-muted">
-                  Selected day and frozen comparable-day baseline from the same server incident payload.
-                </p>
-              </div>
-              <button
-                ref={closeRef}
-                type="button"
-                onClick={closeDialog}
-                className="min-h-11 shrink-0 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground hover:bg-surface-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
-              >
-                Close
-              </button>
-            </header>
-
-            <div className="space-y-5 px-5 py-5 sm:px-6">
-              <IncidentSummary incident={incident} />
-
-              <div className="grid gap-4 xl:grid-cols-3">
-                <fieldset>
-                  <legend className="mb-2 text-xs font-semibold text-muted">Comparison view</legend>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(["overlay", "selected", "average"] as const).map((mode) => (
-                      <FilterButton
-                        key={mode}
-                        selected={viewMode === mode}
-                        controls="ngee-ann-anomaly-series"
-                        onClick={() => {
-                          setViewMode(mode);
-                          onComparisonChange?.(mode);
-                        }}
-                      >
-                        {mode === "overlay" ? "Overlay" : mode === "selected" ? "Selected" : "Average"}
-                      </FilterButton>
-                    ))}
-                  </div>
-                </fieldset>
-                <fieldset>
-                  <legend className="mb-2 text-xs font-semibold text-muted">Scope</legend>
-                  <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
-                    <FilterButton selected={selectedScopeId === ALL_SCOPES} controls="ngee-ann-anomaly-series" onClick={() => setSelectedScopeId(ALL_SCOPES)}>
-                      All
-                    </FilterButton>
-                    {seriesScopeOptions(incident.series).map((scope) => (
-                      <FilterButton key={scope.id} selected={selectedScopeId === scope.id} controls="ngee-ann-anomaly-series" onClick={() => setSelectedScopeId(scope.id)}>
-                        {scope.name}
-                      </FilterButton>
-                    ))}
-                  </div>
-                </fieldset>
-                <fieldset>
-                  <legend className="mb-2 text-xs font-semibold text-muted">Category</legend>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(["all", "load", "light"] as const).map((category) => (
-                      <FilterButton
-                        key={category}
-                        selected={selectedCategory === category}
-                        controls="ngee-ann-anomaly-series"
-                        onClick={() => {
-                          setSelectedCategory(category);
-                          onCategoryChange?.(category);
-                        }}
-                      >
-                        {category === "all" ? "All" : category === "load" ? "Load" : "Light"}
-                      </FilterButton>
-                    ))}
-                  </div>
-                </fieldset>
-              </div>
-
-              <IncidentSeries
-                incident={incident}
-                viewMode={viewMode}
-                selectedScopeId={selectedScopeId}
-                selectedCategory={selectedCategory}
-              />
-
-              <IncidentEvidence incident={incident} view={view} />
+          <header className="flex items-start justify-between gap-4 border-b border-border bg-surface-subtle px-4 py-4 sm:px-5">
+            <div>
+              <h2 id="ngee-ann-anomaly-dialog-title" className="text-lg font-semibold tracking-[-0.02em] text-foreground">
+                Anomaly Detail — {incident.dateLabel} {incident.weekday}
+              </h2>
+              <p id="ngee-ann-anomaly-dialog-question" className="mt-1 max-w-3xl text-sm leading-6 text-muted">
+                {formatSignedPercent(incident.relativePctValue)} vs {incident.dayType.toLowerCase()} baseline · {incident.scopeName}
+              </p>
             </div>
-          </div>
-        </div>
-      ), document.body) : null}
-    </section>
-  );
-}
+            <button
+              ref={closeRef}
+              type="button"
+              onClick={closeDialog}
+              className="min-h-11 shrink-0 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-foreground hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+            >
+              Close
+            </button>
+          </header>
 
-function IncidentSummary({ incident }: { incident: Incident }) {
-  return (
-    <section aria-labelledby="ngee-ann-anomaly-summary" className="rounded-lg border border-border bg-surface-subtle p-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h3 id="ngee-ann-anomaly-summary" className="text-sm font-semibold text-foreground">Why this day was flagged</h3>
-          <p className="mt-1 text-sm text-muted">{incident.range} / {incident.dayType}</p>
-          <p className="mt-1 text-xs text-muted-light">{incident.coverage} / {incident.intervals} / {incident.qualityEvents}</p>
-        </div>
-        <dl className="grid grid-cols-2 gap-x-5 gap-y-2 text-right text-xs">
-          <div><dt className="text-muted">Actual</dt><dd className="mt-1 text-base font-semibold tabular-nums text-foreground">{incident.actualKwh} kWh</dd></div>
-          <div><dt className="text-muted">Baseline</dt><dd className="mt-1 text-base font-semibold tabular-nums text-foreground">{incident.baselineKwh} kWh</dd></div>
-          <div><dt className="text-muted">Impact</dt><dd className="font-semibold tabular-nums text-foreground">{incident.impactKwh} kWh</dd></div>
-          <div><dt className="text-muted">Relative</dt><dd className="font-semibold tabular-nums text-foreground">{incident.relativePct}</dd></div>
-        </dl>
-      </div>
+          <div className="space-y-5 px-4 py-5 sm:px-5">
+            <div className="grid gap-4 lg:grid-cols-3">
+              <fieldset>
+                <legend className="mb-2 text-xs font-semibold text-muted">Comparison view</legend>
+                <div className="flex flex-wrap gap-1.5">
+                  {(["overlay", "selected", "average"] as const).map((mode) => (
+                    <FilterButton
+                      key={mode}
+                      selected={viewMode === mode}
+                      controls="ngee-ann-anomaly-heatmap"
+                      onClick={() => {
+                        setViewMode(mode);
+                        onComparisonChange?.(mode);
+                      }}
+                    >
+                      {mode === "overlay" ? "Overlay comparison" : mode === "selected" ? "Selected day" : "Comparable-day average"}
+                    </FilterButton>
+                  ))}
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend className="mb-2 text-xs font-semibold text-muted">Scope</legend>
+                <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
+                  <FilterButton selected={selectedScopeId === ALL_SCOPES} controls="ngee-ann-anomaly-heatmap" onClick={() => setSelectedScopeId(ALL_SCOPES)}>
+                    All
+                  </FilterButton>
+                  {seriesScopeOptions(incident.series).map((scope) => (
+                    <FilterButton key={scope.id} selected={selectedScopeId === scope.id} controls="ngee-ann-anomaly-heatmap" onClick={() => setSelectedScopeId(scope.id)}>
+                      {scope.name}
+                    </FilterButton>
+                  ))}
+                </div>
+              </fieldset>
+              <fieldset>
+                <legend className="mb-2 text-xs font-semibold text-muted">Category</legend>
+                <div className="flex flex-wrap gap-1.5">
+                  {(["all", "load", "light"] as const).map((seriesCategory) => (
+                    <FilterButton
+                      key={seriesCategory}
+                      selected={selectedCategory === seriesCategory}
+                      controls="ngee-ann-anomaly-heatmap"
+                      onClick={() => {
+                        setSelectedCategory(seriesCategory);
+                        onCategoryChange?.(seriesCategory);
+                      }}
+                    >
+                      {seriesCategory === "all" ? "All" : seriesCategory === "load" ? "Load" : "Light"}
+                    </FilterButton>
+                  ))}
+                </div>
+              </fieldset>
+            </div>
+
+            <IncidentDeviationHeatmap
+              incident={incident}
+              viewMode={viewMode}
+              selectedScopeId={selectedScopeId}
+              selectedCategory={selectedCategory}
+            />
+
+            <details className="rounded-lg border border-border bg-surface-subtle/50 px-4 py-3">
+              <summary className="cursor-pointer text-sm font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
+                Hourly series evidence
+              </summary>
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">
+                Supporting bar views retain every accepted server point without adding Circuit totals in React.
+              </p>
+              <div className="mt-4">
+                <IncidentSeries
+                  incident={incident}
+                  viewMode={viewMode}
+                  selectedScopeId={selectedScopeId}
+                  selectedCategory={selectedCategory}
+                />
+              </div>
+            </details>
+
+            <IncidentEvidence incident={incident} view={view} />
+          </div>
+          </div>
+        </div>,
+        document.body,
+      ) : null}
+
+      <AnomalyEvidence view={view} />
     </section>
   );
 }
@@ -402,10 +388,7 @@ function IncidentSeries({
   selectedScopeId: string;
   selectedCategory: "all" | "load" | "light";
 }) {
-  const visible = incident.series.filter((series) => (
-    (selectedScopeId === ALL_SCOPES || series.scopeId === selectedScopeId)
-    && (selectedCategory === "all" || series.category === selectedCategory)
-  ));
+  const visible = filterIncidentSeries(incident, selectedScopeId, selectedCategory);
   return (
     <section id="ngee-ann-anomaly-series" aria-labelledby="ngee-ann-anomaly-series-heading">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -602,6 +585,37 @@ function seriesScopeOptions(series: Series[]): Array<{ id: string; name: string 
   return options;
 }
 
+function heatmapMagnitudeClass(value: number | null, maximum: number, viewMode: ViewMode): string {
+  if (value === null || maximum <= 0) return "bg-surface-subtle text-muted-light";
+  const ratio = Math.abs(value) / maximum;
+  if (viewMode === "overlay" && value > 0) {
+    if (ratio >= 0.75) return "bg-step-warning text-white";
+    if (ratio >= 0.5) return "bg-step-warning/70 text-white";
+    if (ratio >= 0.25) return "bg-step-warning/35 text-foreground";
+    if (ratio >= 0.1) return "bg-step-warning/15 text-foreground";
+  }
+  if (ratio >= 0.75) return "bg-primary text-white";
+  if (ratio >= 0.5) return "bg-primary/70 text-white";
+  if (ratio >= 0.25) return "bg-primary/35 text-foreground";
+  if (ratio >= 0.1) return "bg-primary/15 text-foreground";
+  return "bg-surface text-muted";
+}
+
+function heatmapPointLabel(series: Series, point: Series["points"][number], viewMode: ViewMode): string {
+  if (viewMode === "selected") return `${series.scopeName}, ${point.hourLabel}: selected ${formatChartValue(point.selectedKwh)}`;
+  if (viewMode === "average") return `${series.scopeName}, ${point.hourLabel}: comparable-day average ${formatChartValue(point.baselineKwh)}`;
+  return `${series.scopeName}, ${point.hourLabel}: selected ${formatChartValue(point.selectedKwh)}; average ${formatChartValue(point.baselineKwh)}; difference ${formatChartValue(point.impactKwh)}`;
+}
+
+function formatHeatmapValue(value: number | null, signed: boolean): string {
+  if (value === null) return "—";
+  const rounded = new Intl.NumberFormat("en-SG", { maximumFractionDigits: 2 }).format(Math.abs(value));
+  if (!signed) return rounded;
+  if (value > 0) return `+${rounded}`;
+  if (value < 0) return `−${rounded}`;
+  return "0";
+}
+
 function seriesPointLabel(series: Series, point: Series["points"][number], viewMode: ViewMode): string {
   const selected = viewMode === "average" ? "" : `; selected ${formatChartValue(point.selectedKwh)}`;
   const average = viewMode === "selected" ? "" : `; average ${formatChartValue(point.baselineKwh)}`;
@@ -614,6 +628,102 @@ function formatChartValue(value: number | null): string {
 
 function formatKwh(value: number): string {
   return `${new Intl.NumberFormat("en-SG", { maximumFractionDigits: 1 }).format(value)} kWh`;
+}
+
+function formatKwhNumber(value: number): string {
+  return new Intl.NumberFormat("en-SG", { maximumFractionDigits: 1 }).format(value);
+}
+
+function IncidentDeviationHeatmap({
+  incident,
+  viewMode,
+  selectedScopeId,
+  selectedCategory,
+}: {
+  incident: Incident;
+  viewMode: ViewMode;
+  selectedScopeId: string;
+  selectedCategory: "all" | "load" | "light";
+}) {
+  const visibleSeries = filterIncidentSeries(incident, selectedScopeId, selectedCategory)
+    .filter((series) => series.status !== "unavailable");
+  const pointValue = (point: Series["points"][number]) => (
+    viewMode === "selected" ? point.selectedKwh : viewMode === "average" ? point.baselineKwh : point.impactKwh
+  );
+  const maximumValue = Math.max(
+    0,
+    ...visibleSeries.flatMap((series) => series.points.map((point) => Math.abs(pointValue(point) ?? 0))),
+  );
+  return (
+    <section id="ngee-ann-anomaly-heatmap" aria-labelledby="ngee-ann-anomaly-heatmap-heading" data-anomaly-detail-heatmap="true">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h3 id="ngee-ann-anomaly-heatmap-heading" className="text-sm font-semibold text-foreground">
+            {viewMode === "overlay" ? "24-hour deviation heatmap" : viewMode === "selected" ? "Selected-day 24-hour heatmap" : "Comparable-day average heatmap"}
+          </h3>
+          <p className="mt-1 max-w-3xl text-sm leading-6 text-muted">
+            {viewMode === "overlay"
+              ? "Each cell is accepted selected-day kWh minus the frozen comparable-day average. Warm colour is above the reference; blue is below it."
+              : viewMode === "selected"
+                ? "Each cell is the accepted selected-day server value in kWh."
+                : "Each cell is the frozen comparable-day average server value in kWh."} Colour supports comparison only; it does not prove cause or success.
+          </p>
+        </div>
+        <span className="text-xs text-muted">{visibleSeries.length} server series</span>
+      </div>
+      {visibleSeries.length > 0 ? (
+        <div className="mt-3 overflow-x-auto rounded-lg border border-border pb-1">
+          <div className="min-w-[1120px]">
+            <div className="grid grid-cols-[220px_repeat(24,minmax(34px,1fr))] gap-px bg-border p-px text-[10px]">
+              <div className="sticky left-0 z-[2] bg-surface-subtle px-3 py-2 font-semibold text-muted">Scope / Circuit</div>
+              {Array.from({ length: 24 }, (_, hour) => (
+                <div key={hour} className="bg-surface-subtle px-1 py-2 text-center tabular-nums text-muted">{String(hour).padStart(2, "0")}</div>
+              ))}
+              {visibleSeries.flatMap((series) => [
+                <div key={`${series.seriesId}:label`} className="sticky left-0 z-[1] min-w-0 bg-surface px-3 py-2">
+                  <span className="block truncate font-semibold text-foreground" title={series.scopeName}>{series.scopeName}</span>
+                  <span className="mt-0.5 block truncate text-muted">{series.categoryLabel ?? "Official Scope"}</span>
+                </div>,
+                ...series.points.map((point) => (
+                  <button
+                    key={`${series.seriesId}:${point.localHour}`}
+                    type="button"
+                    title={heatmapPointLabel(series, point, viewMode)}
+                    aria-label={heatmapPointLabel(series, point, viewMode)}
+                    className={`${heatmapMagnitudeClass(pointValue(point), maximumValue, viewMode)} min-h-10 px-1 text-center tabular-nums focus-visible:relative focus-visible:z-[3] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40`}
+                  >
+                    {formatHeatmapValue(pointValue(point), viewMode === "overlay")}
+                  </button>
+                )),
+              ])}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <p className="mt-3 rounded-lg border border-border bg-surface-subtle px-4 py-3 text-sm text-muted" role="status">
+          No accepted hourly series is available for this incident.
+        </p>
+      )}
+    </section>
+  );
+}
+
+function filterIncidentSeries(
+  incident: Incident,
+  selectedScopeId: string,
+  selectedCategory: "all" | "load" | "light",
+): Series[] {
+  return incident.series.filter((series) => (
+    (selectedScopeId === ALL_SCOPES || series.scopeId === selectedScopeId)
+    && (selectedCategory === "all" || series.category === selectedCategory)
+  ));
+}
+
+function levelTotalsLabel(incident: Incident): string {
+  if (incident.relatedLevelTotals.length === 0) return "Not applicable for this Scope";
+  return incident.relatedLevelTotals
+    .map((level) => `${level.scopeName}: ${level.selectedKwh === null ? "Unavailable" : level.selectedKwh}`)
+    .join(" / ");
 }
 
 function formatSignedKwh(value: number): string {

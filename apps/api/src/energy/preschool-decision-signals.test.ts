@@ -133,13 +133,8 @@ function benchmarkCentre(scopeId: string, centreCode: string) {
 }
 
 function operationalProjection(): PreschoolOperationalProjection {
-  const centre = (scopeId: string, centreCode: string) => ({
-    scopeId,
-    centreCode,
-    name: `Centre ${centreCode}`,
-    centreType: "Preschool",
-    spikeCount: 2,
-    worstSpike: {
+  const centre = (scopeId: string, centreCode: string) => {
+    const worstSpike = {
       localDate: "2026-05-01",
       localHour: 1,
       dayType: "weekday" as const,
@@ -150,13 +145,54 @@ function operationalProjection(): PreschoolOperationalProjection {
       leadingCircuitName: "Aircon",
       leadingCircuitKwh: 4,
       leadingCircuitSharePct: 80,
-    },
-  });
+    };
+    return {
+      scopeId,
+      centreCode,
+      name: `Centre ${centreCode}`,
+      centreType: "Preschool",
+      spikeCount: 2,
+      worstSpike,
+      events: [worstSpike, { ...worstSpike, localDate: "2026-05-02", variancePct: 100 }],
+    };
+  };
   return {
     status: "available",
-    contract: { id: "preschool-may-2026-operational-behaviour", version: "1", spikeThresholdPct: 50 },
+    contract: { id: "preschool-may-2026-operational-behaviour", version: "2", spikeThresholdPct: 50 },
     period,
-    energy: { totalKwh: 24921.81, standbyKwh: 3103.78, standbySharePct: 12.5, operatingKwh: 21818.03 },
+    energy: {
+      totalKwh: 24921.81,
+      standbyKwh: 3103.78,
+      standbySharePct: 12.5,
+      operatingKwh: 21818.03,
+      operatingSharePct: 87.5,
+      provisionalStandbyCostBeforeGstSgd: 846.4,
+      provisionalOperatingCostBeforeGstSgd: 5949.78,
+    },
+    tariffReference: {
+      sourceName: "SP Group",
+      sourceUrl: "https://www.spgroup.com.sg/about-us/media-resources/news-and-media-releases/Electricity-Tariff-Revision-for-the-Period-1-April-to-30-June-2026",
+      appendixUrl: "https://www.spgroup.com.sg/dam/spgroup/images/news-media-releases/2026/Appendix-2---Q2-2026.png0",
+      supplyClass: "Low tension, non-domestic",
+      appliesFrom: "2026-04-01",
+      appliesTo: "2026-06-30",
+      beforeGstSgdPerKwh: 0.2727,
+      withGstSgdPerKwh: 0.2972,
+    },
+    standbyAppliances: {
+      totalKwh: 3103.78,
+      provisionalCostBeforeGstSgd: 846.4,
+      reconciliationGapKwh: 0,
+      applianceGroups: [],
+      appliances: [],
+    },
+    operatingAppliances: {
+      totalKwh: 21818.03,
+      provisionalCostBeforeGstSgd: 5949.78,
+      reconciliationGapKwh: 0,
+      applianceGroups: [],
+      appliances: [],
+    },
     hourlyProfile: { completeDayCount: 31, unit: "mean kWh per complete day", rows: [] },
     planningOutlook: {
       status: "unavailable",
@@ -185,8 +221,8 @@ function operationalProjection(): PreschoolOperationalProjection {
       metricRevisionIds: ["metric-1"],
       businessCalendarVersion: "calendar-1",
       sourceQueryIds: ["operational-query"],
-      projectionQueryId: "preschool_centre_hour_cells_v1",
-      projectionRecipeIds: ["preschool-hour-slot-spike-v1", "preschool-after-hours-sop-signal-v1"],
+      projectionQueryId: "preschool_centre_hour_appliance_cells_v2",
+      projectionRecipeIds: ["preschool-hour-slot-spike-v1", "preschool-after-hours-sop-signal-v1", "preschool-operating-state-appliance-v1"],
       baseline: "same-centre same-hour-slot mean within operating state",
     },
   };
