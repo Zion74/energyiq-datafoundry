@@ -111,7 +111,18 @@ export { resolveOverviewAiStageStructuredOutput } from "./energy/preschool-overv
 
 type OverviewAiRuntimeStageInput = Omit<PreschoolOverviewAiStageInput, "stage"> & {
   stage: PreschoolOverviewAiStage;
+  /** Server-owned only; never read from AG-UI forwarded props. */
+  trustedRuntimeOverride?: OverviewAiTrustedRuntimeOverride;
 };
+
+type OverviewAiStructuredOutput = NonNullable<ReturnType<typeof resolveOverviewAiStageStructuredOutput>>;
+
+type OverviewAiTrustedRuntimeOverride = {
+  structuredOutput: OverviewAiStructuredOutput;
+  conversationMessageMaxChars: number;
+};
+
+const PACK_V2_SECTION_MESSAGE_MAX_CHARS = 110_000;
 
 const DEV_USER: MeResponse = {
   id: "dev-user",
@@ -153,6 +164,28 @@ export const resolveOverviewAiStageRuntimeOptions = (stage: PreschoolOverviewAiS
     ...(structuredOutput ? { structuredOutput } : {}),
   };
 };
+
+export const resolveOverviewAiServerRunnerOptions = (input: {
+  stage: PreschoolOverviewAiStage;
+  structuredOutput?: OverviewAiStructuredOutput;
+}): OverviewAiTrustedRuntimeOverride | undefined => {
+  if ((input.stage !== "section-interpreter" && input.stage !== "executive-synthesis")
+    || !input.structuredOutput) return undefined;
+  return {
+    structuredOutput: input.structuredOutput,
+    conversationMessageMaxChars: input.stage === "section-interpreter"
+      ? PACK_V2_SECTION_MESSAGE_MAX_CHARS
+      : 24_000,
+  };
+};
+
+export const resolveOverviewAiAgentRuntimeOptions = (
+  stage: PreschoolOverviewAiStage,
+  trustedOverride?: OverviewAiTrustedRuntimeOverride,
+): ReturnType<typeof resolveOverviewAiStageRuntimeOptions> => ({
+  ...resolveOverviewAiStageRuntimeOptions(stage),
+  ...(trustedOverride ?? {}),
+});
 
 export const shouldIncludeProjectAnalysisEvidenceContext = (
   stage?: PreschoolOverviewAiStage,
@@ -326,6 +359,9 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
           ...(stageInput.user.display_name ? { display_name: stageInput.user.display_name } : {}),
         },
         overviewAiStage: stageInput.stage,
+        ...(stageInput.trustedRuntimeOverride
+          ? { overviewAiTrustedRuntimeOverride: stageInput.trustedRuntimeOverride }
+          : {}),
         workspaceId: stageInput.workspaceId,
         workspaceRoot: process.env.WORKSPACE_ROOT ?? join(process.env.STORAGE_ROOT_DIR ?? "storage", "workspaces"),
       }),
@@ -341,8 +377,28 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
   const overviewAiWorkflow = createPreschoolOverviewAiPageWorkflow({
     metadataStore,
     dataGateway,
-    runSection: (stageInput) => runOverviewAiValueStage({ ...stageInput, stage: "section-interpreter" }),
-    runExecutiveSynthesis: (stageInput) => runOverviewAiValueStage({ ...stageInput, stage: "executive-synthesis" }),
+    runSection: ({ structuredOutput, ...stageInput }) => {
+      const trustedRuntimeOverride = resolveOverviewAiServerRunnerOptions({
+        stage: "section-interpreter",
+        ...(structuredOutput ? { structuredOutput } : {}),
+      });
+      return runOverviewAiValueStage({
+        ...stageInput,
+        stage: "section-interpreter",
+        ...(trustedRuntimeOverride ? { trustedRuntimeOverride } : {}),
+      });
+    },
+    runExecutiveSynthesis: ({ structuredOutput, ...stageInput }) => {
+      const trustedRuntimeOverride = resolveOverviewAiServerRunnerOptions({
+        stage: "executive-synthesis",
+        ...(structuredOutput ? { structuredOutput } : {}),
+      });
+      return runOverviewAiValueStage({
+        ...stageInput,
+        stage: "executive-synthesis",
+        ...(trustedRuntimeOverride ? { trustedRuntimeOverride } : {}),
+      });
+    },
   });
   const templateChangeWorkflow = createEnergyIqTemplateChangeWorkflow({
     metadataStore,
@@ -695,6 +751,8 @@ type DataFoundryAgUiAgentInput = {
   memoryExtractionTimeoutMs: number;
   /** Server-created Overview Artifact stage; never accepted from browser props. */
   overviewAiStage?: PreschoolOverviewAiStage;
+  /** Server-created Pack-v2 override; never accepted from browser props. */
+  overviewAiTrustedRuntimeOverride?: OverviewAiTrustedRuntimeOverride;
   runCancelRegistry: RunCancelRegistry;
   taskStateRuntime: TaskStateRuntime;
   traceSectionSummaries: boolean;
@@ -732,7 +790,10 @@ class DataFoundryAgUiAgent extends AbstractAgent {
           runId === runInput.runId ? runInput : { ...runInput, runId };
         const userInput = extractLastUserText(normalizedRunInput) ?? "CopilotKit AG-UI run";
         const overviewAiStageOptions = this.input.overviewAiStage
-          ? resolveOverviewAiStageRuntimeOptions(this.input.overviewAiStage)
+          ? resolveOverviewAiAgentRuntimeOptions(
+              this.input.overviewAiStage,
+              this.input.overviewAiTrustedRuntimeOverride,
+            )
           : undefined;
         const useEnergyContext = shouldUseEnergyContextForOverviewAiStage(this.input.overviewAiStage);
         let effectiveRunConfig;

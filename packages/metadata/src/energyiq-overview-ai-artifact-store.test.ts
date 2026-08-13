@@ -340,6 +340,76 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
     }
   });
 
+  it("rejects malformed v4 capability, Evidence, insight budget, and publication accounting", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-overview-artifact-v4-strict-"));
+    let metadata: ReturnType<typeof createMetadataStore> | undefined;
+    try {
+      const store = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+      metadata = store;
+      seedArtifactProject(store);
+      const reject = (suffix: string, mutate: (result: ReturnType<typeof sectionV4Result>) => unknown) => {
+        const artifactIdentity = sectionV4Identity(`snapshot-v4-strict-${suffix}`);
+        expect(() => completeSectionV4(store, artifactIdentity, mutate(sectionV4Result(artifactIdentity, "available"))))
+          .toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
+      };
+
+      reject("capability-mode", (result) => ({
+        ...result,
+        capability: { revision: "pack-only-v1", mode: "tool-enabled", tools: [] },
+      }));
+      reject("capability-tools", (result) => ({
+        ...result,
+        capability: { revision: "pack-only-v1", mode: "pack-only", tools: ["compare_centres"] },
+      }));
+      reject("summary-empty-evidence", (result) => ({
+        ...result,
+        summary: { text: "Unsupported summary.", evidenceRefs: [] },
+      }));
+      reject("summary-duplicate-evidence", (result) => ({
+        ...result,
+        summary: { text: "Duplicated Evidence.", evidenceRefs: ["evidence:summary", "evidence:summary"] },
+      }));
+      reject("insight-empty-evidence", (result) => ({
+        ...result,
+        insights: [sectionV4Insight("insight-1", [])],
+        publication: publication({ discovered: 1, accepted: 1, published: 1 }),
+      }));
+      reject("insight-duplicate-evidence", (result) => ({
+        ...result,
+        insights: [sectionV4Insight("insight-1", ["evidence:1", "evidence:1"])],
+        publication: publication({ discovered: 1, accepted: 1, published: 1 }),
+      }));
+      reject("four-insights", (result) => ({
+        ...result,
+        insights: [1, 2, 3, 4].map((index) => sectionV4Insight(`insight-${index}`, [`evidence:${index}`])),
+        publication: publication({ discovered: 4, accepted: 4, published: 4 }),
+      }));
+      reject("publication-count", (result) => ({
+        ...result,
+        insights: [sectionV4Insight("insight-1", ["evidence:1"])],
+        publication: publication({ discovered: 2, accepted: 1, rejected: 0, published: 1 }),
+      }));
+      reject("suppression-count", (result) => ({
+        ...result,
+        insights: [sectionV4Insight("insight-1", ["evidence:1"])],
+        publication: publication({ discovered: 2, accepted: 2, published: 1, suppressed: [] }),
+      }));
+      reject("suppression-duplicate", (result) => ({
+        ...result,
+        insights: [sectionV4Insight("insight-1", ["evidence:1"])],
+        publication: publication({
+          discovered: 3,
+          accepted: 3,
+          published: 1,
+          suppressed: ["candidate-2", "candidate-2"],
+        }),
+      }));
+    } finally {
+      metadata?.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("allows an expired running lease to be reclaimed without creating another artifact", () => {
     const root = mkdtempSync(join(tmpdir(), "energyiq-overview-artifact-reclaim-"));
     let metadata: ReturnType<typeof createMetadataStore> | undefined;
@@ -669,7 +739,7 @@ const sectionV4Result = (
   },
   sectionId: artifactIdentity.targetId,
   packRevision: "v2",
-  capability: { revision: "pack-only-v1" },
+  capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
   ...(status === "available"
     ? { summary: { text: "The Section has a concise evidence-backed summary.", evidenceRefs: ["evidence:summary"] } }
     : {}),
@@ -683,6 +753,30 @@ const sectionV4Result = (
     publishedCount: 0,
     suppressedCandidateIds: [],
   },
+});
+
+const sectionV4Insight = (id: string, evidenceRefs: string[]) => ({
+  id,
+  title: "A concise supported angle",
+  epistemicStatus: "inferred",
+  text: "The supplied Evidence supports this relationship.",
+  evidenceRefs,
+});
+
+const publication = (input: {
+  discovered: number;
+  accepted: number;
+  rejected?: number;
+  published: number;
+  suppressed?: string[];
+}) => ({
+  policyId: "preschool-section-publication",
+  policyRevision: "v1",
+  discoveredCount: input.discovered,
+  acceptedCount: input.accepted,
+  rejectedCount: input.rejected ?? input.discovered - input.accepted,
+  publishedCount: input.published,
+  suppressedCandidateIds: input.suppressed ?? [],
 });
 
 const completeSectionV4 = (

@@ -668,11 +668,19 @@ describe("saved analysis decision-quality boundary", () => {
     }
   }, 30_000);
 
-  it("restores frozen v3 exactly without a Provider run and attaches only canonical untampered v4", async () => {
+  it("restores frozen v3 exactly and rejects canonical Saved @2 attachment from another Workspace without a Provider run", async () => {
     const root = mkdtempSync(join(tmpdir(), "energy-api-saved-ai-versioned-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
     try {
       ensureEnergyIqBootstrap(metadata);
+      const otherWorkspaceId = "saved-ai-other-workspace";
+      metadata.workspaces.upsert({
+        id: otherWorkspaceId,
+        owner_user_id: "dev-user",
+        name: "Other customer workspace",
+        kind: "customer",
+      });
+      metadata.workspaceMemberships.upsertOwner({ workspace_id: otherWorkspaceId, user_id: "dev-user" });
       const project = metadata.energyIq.getProject("preschool-demo");
       const templateRevision = metadata.energyIq.templates.publishProjectRevisionWithinTransaction({
         project_id: project.id,
@@ -691,6 +699,7 @@ describe("saved analysis decision-quality boundary", () => {
       const period = { from: "2026-05-01T00:00:00.000Z", to: "2026-06-01T00:00:00.000Z" };
       const snapshot = {
         context: {
+          workspaceId: PRESCHOOL_WORKSPACE_ID,
           projectId: project.id,
           scopeId: project.root_scope_id,
           resource: "electricity",
@@ -849,7 +858,7 @@ describe("saved analysis decision-quality boundary", () => {
           binding: preschoolOverviewAiBindingFromIdentity(sectionIdentityV4),
           sectionId: "centre-benchmark",
           packRevision: "v2",
-          capability: { revision: "pack-only-v1" },
+          capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
           summary: { text: "Canonical v4 summary.", evidenceRefs: ["evidence:v4"] },
           insights: [],
           publication: {
@@ -872,6 +881,62 @@ describe("saved analysis decision-quality boundary", () => {
         projectReleaseId: templateRevision.revision_id,
         result: canonicalV4,
       } as const;
+      const otherWorkspaceBaseIdentity = { ...baseIdentity, workspaceId: otherWorkspaceId };
+      const otherWorkspaceSectionIdentity = { ...sectionIdentityV4, workspaceId: otherWorkspaceId };
+      const otherWorkspaceSection = artifactStore.queue({
+        identity: otherWorkspaceSectionIdentity,
+        triggeredBy: "dev-user",
+      });
+      artifactStore.claim({
+        identity: otherWorkspaceSectionIdentity,
+        workerId: "saved-ai-other-workspace-worker",
+        leaseMs: 60_000,
+      });
+      artifactStore.complete({
+        identity: otherWorkspaceSectionIdentity,
+        workerId: "saved-ai-other-workspace-worker",
+        sessionId: "saved-ai-version-session",
+        runId: "saved-ai-v4-run",
+        resultJson: JSON.stringify({
+          artifactKind: "section-interpretation",
+          status: "available",
+          providerProfileId: otherWorkspaceSectionIdentity.modelProfileId,
+          runId: "saved-ai-v4-run",
+          contract: { id: "preschool-section-interpretation", revision: "preschool-section-interpretation-v4" },
+          binding: preschoolOverviewAiBindingFromIdentity(otherWorkspaceSectionIdentity),
+          sectionId: "centre-benchmark",
+          packRevision: "v2",
+          capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
+          summary: { text: "Canonical summary from another Workspace.", evidenceRefs: ["evidence:v4"] },
+          insights: [],
+          publication: {
+            policyId: "preschool-section-publication",
+            policyRevision: "v1",
+            discoveredCount: 0,
+            acceptedCount: 0,
+            rejectedCount: 0,
+            publishedCount: 0,
+            suppressedCandidateIds: [],
+          },
+        }),
+      });
+      const otherWorkspaceCanonical = composePreschoolOverviewAiReadModel({
+        metadataStore: metadata,
+        baseIdentity: otherWorkspaceBaseIdentity,
+      });
+      expect(otherWorkspaceCanonical?.sections["centre-benchmark"]).toMatchObject({
+        artifactId: otherWorkspaceSection.id,
+        status: "available",
+      });
+      expect(await handleEnergyApiRequest(
+        jsonPost({ aiArtifact: { ...artifactV4, result: otherWorkspaceCanonical } }),
+        ["projects", project.id, "saved-analyses", savedV4.id, "ai-result"],
+        context,
+      )).toMatchObject({
+        status: 400,
+        body: { success: false, error: { message: "ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID" } },
+      });
+      expect(metadata.runs.listByStatuses({ statuses: ["completed"] })).toHaveLength(runCountBeforeAttachments);
       const attachV4 = await handleEnergyApiRequest(
         jsonPost({ aiArtifact: artifactV4 }),
         ["projects", project.id, "saved-analyses", savedV4.id, "ai-result"],

@@ -3,11 +3,17 @@ import { describe, expect, it } from "vitest";
 import {
   buildOverviewAiStageRunInput,
   collectOverviewAiText,
+  resolveOverviewAiAgentRuntimeOptions,
+  resolveOverviewAiServerRunnerOptions,
   resolveOverviewAiStageRuntimeOptions,
   resolveOverviewAiStageStructuredOutput,
   shouldUseEnergyContextForOverviewAiStage,
   shouldIncludeProjectAnalysisEvidenceContext,
 } from "./server.js";
+import {
+  PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4,
+  PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4,
+} from "./energy/preschool-overview-ai-structured-output.js";
 
 describe("Overview AI server stage options", () => {
   it("keeps the investigator on the narrow Artifact path with DeepSeek thinking disabled", () => {
@@ -108,6 +114,88 @@ describe("Overview AI server stage options", () => {
         keyPoints: { minItems: 0, maxItems: 4 },
       },
     });
+  });
+
+  it("threads the trusted Pack-v2 Section override through the real agent options", () => {
+    const trusted = resolveOverviewAiServerRunnerOptions({
+      stage: "section-interpreter",
+      structuredOutput: PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4,
+    });
+    expect(trusted).toEqual({
+      structuredOutput: PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4,
+      conversationMessageMaxChars: 110_000,
+    });
+
+    expect(resolveOverviewAiAgentRuntimeOptions("section-interpreter", trusted)).toMatchObject({
+      structuredOutput: PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4,
+      conversationMessageMaxChars: 110_000,
+    });
+    expect(resolveOverviewAiAgentRuntimeOptions("section-interpreter", undefined)).toMatchObject({
+      structuredOutput: resolveOverviewAiStageStructuredOutput("section-interpreter"),
+      conversationMessageMaxChars: 12_000,
+    });
+  });
+
+  it("threads the trusted V4 Executive override without changing the legacy default", () => {
+    const trusted = resolveOverviewAiServerRunnerOptions({
+      stage: "executive-synthesis",
+      structuredOutput: PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4,
+    });
+    expect(resolveOverviewAiAgentRuntimeOptions("executive-synthesis", trusted)).toMatchObject({
+      structuredOutput: PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4,
+      conversationMessageMaxChars: 24_000,
+    });
+    expect(resolveOverviewAiAgentRuntimeOptions("executive-synthesis", undefined)).toMatchObject({
+      structuredOutput: resolveOverviewAiStageStructuredOutput("executive-synthesis"),
+      conversationMessageMaxChars: 24_000,
+    });
+  });
+
+  it("does not expose trusted runtime overrides through browser-forwarded props", () => {
+    const input = buildOverviewAiStageRunInput({
+      stage: "section-interpreter",
+      prompt: "Return JSON only.",
+      identity: {
+        workspaceId: "preschool-workspace",
+        projectId: "preschool-demo",
+        scopeId: "preschool-project",
+        resource: "electricity",
+        dataSnapshotId: "snapshot-current",
+        projectReleaseId: "release-current",
+        analysisPeriodFrom: "2026-05-01T00:00:00.000Z",
+        analysisPeriodTo: "2026-06-01T00:00:00.000Z",
+        rendererKey: "preschool-overview",
+        rendererVersion: "1",
+        analysisPackId: "preschool-section-pack",
+        analysisPackRevision: "v2",
+        modelProfileId: "workspace-default",
+        modelProfileRevision: 1,
+        outputContractRevision: "preschool-section-interpretation-v4",
+        validatorRevision: "acceptance-validator-v1",
+        workflowRevision: "discover-accept-publish-v1",
+        investigatorPromptRevision: "discovery-prompt-v1",
+        editorPromptRevision: "not-applicable-v1",
+        methodSkillId: "none",
+        methodSkillRevision: "not-applicable-v1",
+        artifactKind: "section-interpretation",
+        targetId: "centre-benchmark",
+      },
+      workspaceId: "preschool-workspace",
+      user: {
+        id: "dev-user",
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-01T00:00:00.000Z",
+      },
+      runId: "section-run",
+      sessionId: "section-session",
+      trustedRuntimeOverride: {
+        structuredOutput: PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4,
+        conversationMessageMaxChars: 110_000,
+      },
+    });
+    expect(input.forwardedProps).not.toHaveProperty("trustedRuntimeOverride");
+    expect(input.forwardedProps).not.toHaveProperty("structuredOutput");
+    expect(input.forwardedProps).not.toHaveProperty("conversationMessageMaxChars");
   });
 
   it("suppresses only duplicate full Snapshot and Catalog context for Overview stages", () => {

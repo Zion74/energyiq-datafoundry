@@ -72,7 +72,7 @@ export type PreschoolSectionKeyPoint = {
   evidenceRefs: string[];
 };
 
-export type PreschoolSectionInterpretationResult = {
+export type PreschoolSectionInterpretationResultV3 = {
   artifactKind: "section-interpretation";
   status: "available" | "empty";
   providerProfileId: string;
@@ -85,6 +85,10 @@ export type PreschoolSectionInterpretationResult = {
   limitation?: string;
 };
 
+export type PreschoolSectionInterpretationResult =
+  | PreschoolSectionInterpretationResultV3
+  | import("@datafoundry/contracts").PreschoolSectionInterpretationResultV4;
+
 export type PreschoolExecutiveKeyFinding = {
   id: string;
   takeaway: string;
@@ -92,7 +96,7 @@ export type PreschoolExecutiveKeyFinding = {
   evidenceRefs: string[];
 };
 
-export type PreschoolExecutiveSynthesisResult = {
+export type PreschoolExecutiveSynthesisResultV3 = {
   artifactKind: "executive-synthesis";
   status: "available" | "empty";
   providerProfileId: string;
@@ -102,6 +106,44 @@ export type PreschoolExecutiveSynthesisResult = {
   sourceSectionArtifactIds: string[];
   keyFindings: PreschoolExecutiveKeyFinding[];
 };
+
+export type PreschoolOverviewKeyFinding = {
+  id: string;
+  title: string;
+  text: string;
+  sectionIds: PreschoolSectionId[];
+  evidenceRefs: string[];
+  alert?: {
+    severity: "attention" | "urgent";
+    certainty: "confirmed" | "anomaly" | "possible";
+  };
+};
+
+type PreschoolExecutiveSynthesisResultV4Base = {
+  artifactKind: "executive-synthesis";
+  providerProfileId: string;
+  runId: string;
+  contract: { id: "preschool-executive-synthesis"; revision: "preschool-executive-synthesis-v4" };
+  binding: PreschoolOverviewAiBinding;
+  sourceSectionArtifactIds: string[];
+};
+
+export type PreschoolExecutiveSynthesisResultV4 = PreschoolExecutiveSynthesisResultV4Base & ({
+  status: "available";
+  summary: {
+    text: string;
+    evidenceRefs: string[];
+  };
+  findings: PreschoolOverviewKeyFinding[];
+} | {
+  status: "empty";
+  summary?: never;
+  findings: [];
+});
+
+export type PreschoolExecutiveSynthesisResult =
+  | PreschoolExecutiveSynthesisResultV3
+  | PreschoolExecutiveSynthesisResultV4;
 
 export type PreschoolOverviewAiUnitStatus<T> =
   | { status: "queued" | "running" }

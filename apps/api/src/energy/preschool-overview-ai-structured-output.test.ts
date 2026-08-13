@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4,
   PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V3,
   PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4,
   resolveOverviewAiStageStructuredOutput,
@@ -31,6 +32,13 @@ describe("Preschool Overview AI structured output", () => {
     expect(resolveOverviewAiStageStructuredOutputV4("section-interpreter"))
       .toBe(PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4);
     expect(resolveOverviewAiStageStructuredOutputV4("executive-synthesis"))
-      .toBe(resolveOverviewAiStageStructuredOutput("executive-synthesis"));
+      .toBe(PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4);
+    expect(PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4.schema).toMatchObject({
+      required: ["status", "findings"],
+      properties: {
+        summary: { type: "object" },
+        findings: { type: "array", maxItems: 3 },
+      },
+    });
   });
 });

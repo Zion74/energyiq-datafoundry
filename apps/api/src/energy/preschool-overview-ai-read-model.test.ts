@@ -10,9 +10,13 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { preschoolExecutiveSynthesisTargetId } from "./preschool-executive-synthesis.js";
-import { composePreschoolOverviewAiReadModel } from "./preschool-overview-ai-read-model.js";
+import {
+  composePreschoolOverviewAiReadModel,
+  composePreschoolOverviewAiReadModelV3,
+} from "./preschool-overview-ai-read-model.js";
 import {
   createOverviewAiArtifactIdentity,
+  createPreschoolOverviewAiExecutiveArtifactIdentityV4,
   createPreschoolOverviewAiSectionArtifactIdentityV3,
   createPreschoolOverviewAiSectionArtifactIdentityV4,
   createPreschoolOverviewAiValueArtifactIdentity,
@@ -94,7 +98,7 @@ describe("composePreschoolOverviewAiReadModel", () => {
           : binding,
         sectionId: "centre-benchmark",
         packRevision: "v2",
-        capability: { revision: "pack-only-v1" },
+        capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
         summary: {
           text: "A stored result with a mismatched binding must not be exposed.",
           evidenceRefs: ["evidence:1"],
@@ -159,9 +163,8 @@ describe("composePreschoolOverviewAiReadModel", () => {
       failSection(metadata, baseIdentity, "standby-wastage");
       runningSection(metadata, baseIdentity, "operating-behaviour");
       completeSection(metadata, baseIdentity, "planning-outlook", "empty");
-      const executiveIdentity = createPreschoolOverviewAiValueArtifactIdentity({
+      const executiveIdentity = createPreschoolOverviewAiExecutiveArtifactIdentityV4({
         baseIdentity,
-        artifactKind: "executive-synthesis",
         targetId: preschoolExecutiveSynthesisTargetId([benchmark.id]),
       });
       metadata.energyIq.overviewAiArtifacts.queue({ identity: executiveIdentity, triggeredBy: "dev-user" });
@@ -187,6 +190,54 @@ describe("composePreschoolOverviewAiReadModel", () => {
       });
       expect(readModel?.sections["centre-benchmark"]).toHaveProperty("result.summary");
       expect(readModel?.sections["planning-outlook"]).toHaveProperty("result.runId");
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("restores exact historical v3 Section and Executive Artifacts through the v3 composer", () => {
+    const root = mkdtempSync(join(tmpdir(), "preschool-overview-read-model-v3-history-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      seedProject(metadata);
+      const baseIdentity = identity();
+      const benchmark = completeSectionV3(metadata, baseIdentity, "centre-benchmark");
+      const executiveIdentity = createPreschoolOverviewAiValueArtifactIdentity({
+        baseIdentity,
+        artifactKind: "executive-synthesis",
+        targetId: preschoolExecutiveSynthesisTargetId([benchmark.id]),
+      });
+      metadata.energyIq.overviewAiArtifacts.queue({ identity: executiveIdentity, triggeredBy: "dev-user" });
+      const workerId = "executive-v3-worker";
+      metadata.energyIq.overviewAiArtifacts.claim({ identity: executiveIdentity, workerId, leaseMs: 60_000 });
+      metadata.energyIq.overviewAiArtifacts.complete({
+        identity: executiveIdentity,
+        workerId,
+        sessionId: "executive-v3-session",
+        runId: "executive-v3-run",
+        resultJson: JSON.stringify({
+          artifactKind: "executive-synthesis",
+          status: "available",
+          providerProfileId: executiveIdentity.modelProfileId,
+          runId: "executive-v3-run",
+          contract: { id: "preschool-executive-synthesis", revision: "preschool-executive-synthesis-v1" },
+          binding: preschoolOverviewAiBindingFromIdentity(executiveIdentity),
+          sourceSectionArtifactIds: [benchmark.id],
+          keyFindings: [{
+            id: "historical-v3-finding",
+            takeaway: "Frozen v3 evidence remains readable.",
+            sectionIds: ["centre-benchmark"],
+            evidenceRefs: ["evidence:v3"],
+          }],
+        }),
+      });
+
+      expect(composePreschoolOverviewAiReadModelV3({ metadataStore: metadata, baseIdentity })).toMatchObject({
+        sections: { "centre-benchmark": { status: "available", artifactId: benchmark.id } },
+        executive: { status: "available", result: { keyFindings: [{ id: "historical-v3-finding" }] } },
+      });
+      expect(composePreschoolOverviewAiReadModel({ metadataStore: metadata, baseIdentity })).toBeNull();
     } finally {
       metadata.close();
       rmSync(root, { recursive: true, force: true });
@@ -255,7 +306,7 @@ const completeSection = (
       binding: preschoolOverviewAiBindingFromIdentity(unitIdentity),
       sectionId,
       packRevision: "v2",
-      capability: { revision: "pack-only-v1" },
+      capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
       ...(status === "available" ? {
         summary: {
           text: "Verified evidence supports a focused review.",

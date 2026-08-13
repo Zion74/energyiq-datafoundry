@@ -145,6 +145,54 @@ export const PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V1 = {
   },
 } satisfies PublicStructuredOutputOptions<StructuredEnvelope>;
 
+const executiveAlertV4: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["severity", "certainty"],
+  properties: {
+    severity: { type: "string", enum: ["attention", "urgent"] },
+    certainty: { type: "string", enum: ["confirmed", "anomaly", "possible"] },
+  },
+};
+
+const executiveFindingV4: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["title", "text", "sectionIds", "evidenceRefs"],
+  properties: {
+    title: nonEmptyString,
+    text: nonEmptyString,
+    sectionIds: {
+      type: "array",
+      minItems: 1,
+      uniqueItems: true,
+      items: { type: "string", enum: [...PRESCHOOL_SECTION_IDS] },
+    },
+    evidenceRefs,
+    alert: executiveAlertV4,
+  },
+};
+
+/** Current bounded Key Findings proposal contract. Identity and Evidence lineage stay server-owned. */
+export const PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4 = {
+  errorStrategy: "strict",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["status", "findings"],
+    properties: {
+      status: { type: "string", enum: ["available", "empty"] },
+      summary: sectionSummaryV4,
+      findings: {
+        type: "array",
+        minItems: 0,
+        maxItems: 3,
+        items: executiveFindingV4,
+      },
+    },
+  },
+} satisfies PublicStructuredOutputOptions<StructuredEnvelope>;
+
 const templateChangeOperation: JsonSchema = {
   type: "object",
   additionalProperties: false,
@@ -223,6 +271,8 @@ export const resolveOverviewAiStageStructuredOutput = (
 /** Explicit V4 entrypoint for the Pack-v2 workflow; the existing Page path remains on V3. */
 export const resolveOverviewAiStageStructuredOutputV4 = (
   stage: PreschoolOverviewAiStage,
-): PublicStructuredOutputOptions<StructuredEnvelope> | undefined => stage === "section-interpreter"
-  ? PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4
-  : resolveOverviewAiStageStructuredOutput(stage);
+): PublicStructuredOutputOptions<StructuredEnvelope> | undefined => {
+  if (stage === "section-interpreter") return PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4;
+  if (stage === "executive-synthesis") return PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4;
+  return resolveOverviewAiStageStructuredOutput(stage);
+};

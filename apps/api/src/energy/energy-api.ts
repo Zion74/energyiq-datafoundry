@@ -1761,6 +1761,7 @@ const isPreschoolSectionedSavedResult = (
   snapshot: ProjectAnalysisSnapshot,
 ): value is PreschoolOverviewAiReadModel => {
   if (!isPreschoolOverviewAiReadModel(value)
+    || value.binding.workspaceId !== snapshot.context.workspaceId
     || value.binding.dataSnapshotId !== snapshot.dataSnapshot.id
     || value.binding.projectReleaseId !== snapshot.projectRelease.id
     || value.binding.projectId !== "preschool-demo"

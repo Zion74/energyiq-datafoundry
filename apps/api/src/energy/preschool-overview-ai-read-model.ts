@@ -5,6 +5,7 @@ import type {
 } from "@datafoundry/metadata";
 
 import {
+  createPreschoolOverviewAiExecutiveArtifactIdentityV4,
   createPreschoolOverviewAiSectionArtifactIdentityV3,
   createPreschoolOverviewAiSectionArtifactIdentityV4,
   createPreschoolOverviewAiValueArtifactIdentity,
@@ -28,6 +29,8 @@ export const composePreschoolOverviewAiReadModel = (input: {
   ...input,
   createSectionIdentity: createPreschoolOverviewAiSectionArtifactIdentityV4,
   parseSectionResult,
+  createExecutiveIdentity: createPreschoolOverviewAiExecutiveArtifactIdentityV4,
+  parseExecutiveResult: parseExecutiveResultV4,
 });
 
 export const composePreschoolOverviewAiReadModelV3 = (input: {
@@ -37,6 +40,12 @@ export const composePreschoolOverviewAiReadModelV3 = (input: {
   ...input,
   createSectionIdentity: createPreschoolOverviewAiSectionArtifactIdentityV3,
   parseSectionResult: parseSectionResultV3,
+  createExecutiveIdentity: ({ baseIdentity, targetId }) => createPreschoolOverviewAiValueArtifactIdentity({
+    baseIdentity,
+    artifactKind: "executive-synthesis",
+    targetId,
+  }),
+  parseExecutiveResult: parseExecutiveResultV3,
 });
 
 const composeReadModel = (input: {
@@ -44,6 +53,11 @@ const composeReadModel = (input: {
   baseIdentity: OverviewAiArtifactIdentityV13;
   createSectionIdentity: typeof createPreschoolOverviewAiSectionArtifactIdentityV4;
   parseSectionResult: typeof parseSectionResult;
+  createExecutiveIdentity: (input: {
+    baseIdentity: OverviewAiArtifactIdentityV13;
+    targetId: string;
+  }) => EnergyIqOverviewAiArtifactIdentity;
+  parseExecutiveResult: typeof parseExecutiveResultV4;
 }): PreschoolOverviewAiReadModel | null => {
   const store = input.metadataStore.energyIq.overviewAiArtifacts;
   const sectionArtifacts = Object.fromEntries(PRESCHOOL_SECTION_IDS.map((sectionId) => {
@@ -63,9 +77,8 @@ const composeReadModel = (input: {
       : null;
     return result?.status === "available" && artifact ? [artifact.id] : [];
   });
-  const executiveIdentity = createPreschoolOverviewAiValueArtifactIdentity({
+  const executiveIdentity = input.createExecutiveIdentity({
     baseIdentity: input.baseIdentity,
-    artifactKind: "executive-synthesis",
     targetId: preschoolExecutiveSynthesisTargetId(acceptedSectionArtifactIds),
   });
   const executiveArtifact = store.find(executiveIdentity) ?? null;
@@ -82,7 +95,7 @@ const composeReadModel = (input: {
       const { identity, artifact } = sectionArtifacts[sectionId];
       return [sectionId, sectionUnit(artifact, identity, input.parseSectionResult)];
     })) as PreschoolOverviewAiReadModel["sections"],
-    executive: executiveUnit(executiveArtifact, executiveIdentity),
+    executive: executiveUnit(executiveArtifact, executiveIdentity, input.parseExecutiveResult),
     ...(autonomousArtifact?.status === "available" && autonomousArtifact.result_json
       ? { autonomous: parseJson(autonomousArtifact.result_json) }
       : {}),
@@ -109,13 +122,14 @@ const sectionUnit = (
 const executiveUnit = (
   artifact: EnergyIqOverviewAiArtifactRecord | null,
   identity: EnergyIqOverviewAiArtifactIdentity,
+  parseResult: typeof parseExecutiveResultV4,
 ): PreschoolOverviewAiUnitStatus<PreschoolExecutiveSynthesisResult> => {
   if (!artifact) return { status: "unavailable", reason: "Executive synthesis has not been generated." };
   if (artifact.status === "queued" || artifact.status === "running") return { status: artifact.status };
   if (artifact.status === "failed") {
     return { status: "unavailable", artifactId: artifact.id, reason: artifact.error_code ?? "Executive synthesis failed." };
   }
-  const result = artifact.result_json ? parseExecutiveResult(artifact.result_json, identity) : null;
+  const result = artifact.result_json ? parseResult(artifact.result_json, identity) : null;
   if (!result) return { status: "unavailable", artifactId: artifact.id, reason: "Executive synthesis is invalid." };
   return result.status === "empty"
     ? { status: "empty", artifactId: artifact.id, result }
@@ -185,7 +199,7 @@ const sameValueArtifactBinding = (
   && value.analysisPeriod.from === identity.analysisPeriodFrom
   && value.analysisPeriod.to === identity.analysisPeriodTo;
 
-const parseExecutiveResult = (
+const parseExecutiveResultV3 = (
   value: string,
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): PreschoolExecutiveSynthesisResult | null => {
@@ -199,6 +213,33 @@ const parseExecutiveResult = (
     || !Array.isArray(parsed.sourceSectionArtifactIds)
     || preschoolExecutiveSynthesisTargetId(parsed.sourceSectionArtifactIds.filter((id): id is string => typeof id === "string")) !== identity.targetId
     || !Array.isArray(parsed.keyFindings)) return null;
+  return parsed as unknown as PreschoolExecutiveSynthesisResult;
+};
+
+const parseExecutiveResultV4 = (
+  value: string,
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): PreschoolExecutiveSynthesisResult | null => {
+  const parsed = parseJson(value);
+  if (!isRecord(parsed)
+    || parsed.artifactKind !== "executive-synthesis"
+    || (parsed.status !== "available" && parsed.status !== "empty")
+    || !isRecord(parsed.contract)
+    || parsed.contract.revision !== "preschool-executive-synthesis-v4"
+    || parsed.contract.revision !== identity.outputContractRevision
+    || !sameValueArtifactBinding(parsed.binding, identity)
+    || !Array.isArray(parsed.sourceSectionArtifactIds)
+    || !parsed.sourceSectionArtifactIds.every((id) => typeof id === "string" && Boolean(id.trim()))
+    || !Array.isArray(parsed.findings)) return null;
+  if (parsed.status === "empty") {
+    if (parsed.sourceSectionArtifactIds.length !== 0
+      || parsed.summary !== undefined
+      || parsed.findings.length !== 0) return null;
+  } else if (parsed.sourceSectionArtifactIds.length === 0
+    || !isRecord(parsed.summary)
+    || typeof parsed.summary.text !== "string"
+    || !parsed.summary.text.trim()
+    || !Array.isArray(parsed.summary.evidenceRefs)) return null;
   return parsed as unknown as PreschoolExecutiveSynthesisResult;
 };
 

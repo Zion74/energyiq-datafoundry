@@ -119,6 +119,40 @@ export const createPreschoolOverviewAiValueArtifactIdentity = (input: {
   };
 };
 
+export const createPreschoolOverviewAiExecutiveArtifactIdentityV4 = (input: {
+  baseIdentity: OverviewAiArtifactIdentityV13;
+  targetId: string;
+}): PreschoolOverviewAiValueArtifactIdentity => {
+  if (!input.targetId.trim()) {
+    throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_REQUIRED");
+  }
+  const {
+    artifactKind: _legacyArtifactKind,
+    targetId: _legacyTargetId,
+    identityContractRevision: _legacyIdentityContractRevision,
+    capabilityRevision: _legacyCapabilityRevision,
+    publicationRevision: _legacyPublicationRevision,
+    ...baseIdentity
+  } = input.baseIdentity;
+  return {
+    ...baseIdentity,
+    artifactKind: "executive-synthesis",
+    targetId: input.targetId,
+    identityContractRevision: "v4",
+    analysisPackId: "preschool-executive-section-artifacts",
+    analysisPackRevision: "section-interpretation-v4",
+    outputContractRevision: "preschool-executive-synthesis-v4",
+    validatorRevision: "preschool-executive-synthesis-validator-v4",
+    workflowRevision: "preschool-executive-synthesis-v4",
+    investigatorPromptRevision: "preschool-executive-synthesis-prompt-v4",
+    editorPromptRevision: "not-applicable-v1",
+    methodSkillId: "none",
+    methodSkillRevision: "not-applicable-v1",
+    capabilityRevision: "section-artifacts-only-v1",
+    publicationRevision: "key-findings-v1",
+  };
+};
+
 export const createPreschoolOverviewAiSectionArtifactIdentityV3 = (input: {
   baseIdentity: OverviewAiArtifactIdentityV13;
   targetId: PreschoolSectionId | string;

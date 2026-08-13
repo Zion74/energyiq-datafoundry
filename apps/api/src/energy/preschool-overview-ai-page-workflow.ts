@@ -23,7 +23,7 @@ import {
   type PreschoolSectionId,
 } from "./preschool-overview-ai-contracts.js";
 import { createPreschoolSectionInterpreter, type PreschoolSectionInterpreterRunner } from "./preschool-section-interpreter.js";
-import { assemblePreschoolSectionPacks } from "./preschool-section-pack.js";
+import { assemblePreschoolSectionPacksV2 } from "./preschool-section-pack-v2.js";
 import { resolveProjectAnalysis, type ProjectAnalysisSnapshot } from "./project-analysis-resolver.js";
 
 export type PreschoolOverviewAiRetryTarget = PreschoolSectionId | "executive-synthesis";
@@ -95,6 +95,7 @@ export const createPreschoolOverviewAiPageWorkflow = (input: {
     metadataStore: input.metadataStore,
     runSynthesis: input.runExecutiveSynthesis,
     assertRuntimeIdentity: (identity) => requireModelRuntimeIdentity(input.metadataStore, identity),
+    revision: "v4",
   });
 
   return {
@@ -122,7 +123,7 @@ export const createPreschoolOverviewAiPageWorkflow = (input: {
       const baseIdentity = requireBaseIdentity(identity);
       requireModelRuntimeIdentity(input.metadataStore, baseIdentity);
       const snapshot = await resolveSnapshot({ identity: baseIdentity, user });
-      const packs = assemblePreschoolSectionPacks({ identity: baseIdentity, snapshot });
+      const packs = assemblePreschoolSectionPacksV2({ identity: baseIdentity, snapshot });
       const retryTargets = retry
         ? retryTarget && isPreschoolSectionId(retryTarget)
           ? [retryTarget]
