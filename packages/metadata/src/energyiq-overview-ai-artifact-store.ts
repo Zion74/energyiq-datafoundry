@@ -523,9 +523,7 @@ const requireSectionInterpretationResultV4 = (
     || identity.analysisPackId !== "preschool-section-pack"
     || identity.analysisPackRevision !== "v2"
     || identity.outputContractRevision !== "preschool-section-interpretation-v4"
-    || identity.validatorRevision !== "acceptance-validator-v2"
-    || identity.workflowRevision !== "discover-tools-accept-publish-v1"
-    || identity.investigatorPromptRevision !== "discovery-prompt-v2"
+    || !validSectionV4ExecutionRevision(identity)
     || identity.capabilityRevision !== "scoped-read-only-v1"
     || identity.publicationRevision !== "v1"
     || parsed.artifactKind !== "section-interpretation"
@@ -704,10 +702,7 @@ const requireExecutiveSynthesisResultV4 = (
     || identity.analysisPackId !== "preschool-executive-section-artifacts"
     || identity.analysisPackRevision !== "section-interpretation-v4"
     || identity.outputContractRevision !== "preschool-executive-synthesis-v4"
-    || identity.validatorRevision !== "preschool-executive-synthesis-validator-v5"
-    || identity.workflowRevision !== "preschool-executive-synthesis-v5"
-    || identity.investigatorPromptRevision !== "preschool-executive-synthesis-prompt-v5"
-    || identity.capabilityRevision !== "section-artifacts-and-overview-evidence-v1"
+    || !validExecutiveV4ExecutionRevision(identity)
     || identity.publicationRevision !== "key-findings-v2"
     || parsed.artifactKind !== "executive-synthesis"
     || (parsed.status !== "available" && parsed.status !== "empty")
@@ -740,6 +735,24 @@ const requireExecutiveSynthesisResultV4 = (
   }
   requireExecutiveSourceLineageV4({ parsed, identity, sourceIds, db });
 };
+
+const validSectionV4ExecutionRevision = (identity: EnergyIqOverviewAiArtifactIdentity): boolean =>
+  (identity.validatorRevision === "acceptance-validator-v2"
+    && identity.workflowRevision === "discover-tools-accept-publish-v1"
+    && identity.investigatorPromptRevision === "discovery-prompt-v2")
+  || (identity.validatorRevision === "acceptance-validator-v3"
+    && identity.workflowRevision === "discover-tools-accept-publish-v2"
+    && identity.investigatorPromptRevision === "discovery-prompt-v3");
+
+const validExecutiveV4ExecutionRevision = (identity: EnergyIqOverviewAiArtifactIdentity): boolean =>
+  (identity.validatorRevision === "preschool-executive-synthesis-validator-v5"
+    && identity.workflowRevision === "preschool-executive-synthesis-v5"
+    && identity.investigatorPromptRevision === "preschool-executive-synthesis-prompt-v5"
+    && identity.capabilityRevision === "section-artifacts-and-overview-evidence-v1")
+  || (identity.validatorRevision === "preschool-executive-synthesis-validator-v5"
+    && identity.workflowRevision === "preschool-executive-synthesis-v6"
+    && identity.investigatorPromptRevision === "preschool-executive-synthesis-prompt-v6"
+    && identity.capabilityRevision === "section-artifacts-and-overview-evidence-v2");
 
 const requireExecutiveSourceLineageV4 = (input: {
   parsed: Record<string, unknown>;

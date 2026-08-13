@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createOverviewAiArtifactIdentity,
+  createPreschoolOverviewAiExecutiveArtifactIdentityV4,
   createPreschoolOverviewAiSectionArtifactIdentityV4,
   createPreschoolOverviewAiValueArtifactIdentity,
   overviewAiArtifactPinnedLocalPeriod,
@@ -111,13 +112,22 @@ describe("createOverviewAiArtifactIdentity", () => {
       analysisPackId: "preschool-section-pack",
       analysisPackRevision: "v2",
       outputContractRevision: "preschool-section-interpretation-v4",
-      validatorRevision: "acceptance-validator-v2",
-      workflowRevision: "discover-tools-accept-publish-v1",
-      investigatorPromptRevision: "discovery-prompt-v2",
+      validatorRevision: "acceptance-validator-v3",
+      workflowRevision: "discover-tools-accept-publish-v2",
+      investigatorPromptRevision: "discovery-prompt-v3",
       capabilityRevision: "scoped-read-only-v1",
       publicationRevision: "v1",
     });
     expect(standby).not.toEqual(benchmark);
+    expect(createPreschoolOverviewAiExecutiveArtifactIdentityV4({
+      baseIdentity: legacy,
+      targetId: "sections:current-v4",
+    })).toMatchObject({
+      validatorRevision: "preschool-executive-synthesis-validator-v5",
+      workflowRevision: "preschool-executive-synthesis-v6",
+      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v6",
+      capabilityRevision: "section-artifacts-and-overview-evidence-v2",
+    });
     expect(legacySection).toMatchObject({
       outputContractRevision: "preschool-section-interpretation-v3",
       validatorRevision: "preschool-section-interpreter-validator-v12",
