@@ -526,8 +526,8 @@ describe("Preschool Executive Synthesis", () => {
     harness.close();
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.identity_json)).toMatchObject({
-      validatorRevision: "preschool-executive-synthesis-validator-v8",
-      workflowRevision: "preschool-executive-synthesis-v8",
+      validatorRevision: "preschool-executive-synthesis-validator-v9",
+      workflowRevision: "preschool-executive-synthesis-v9",
       investigatorPromptRevision: "preschool-executive-synthesis-prompt-v6",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
       publicationRevision: "key-findings-v2",
@@ -650,6 +650,82 @@ describe("Preschool Executive Synthesis", () => {
         factIds: ["analysis.summary.closed_hour_share_pct", "analysis.summary.peak_kw"],
       },
       findings: [{ alert: { severity: "attention", certainty: "possible" } }],
+    });
+  });
+
+  it("removes an unsupported cross-source cost relation and restores the uniquely matching Overview Fact", async () => {
+    const harness = createHarness();
+    const operating = completeSectionV4(
+      harness,
+      "operating-behaviour",
+      "available",
+      "Operating hours used 21,818 kWh at a provisional cost of about S$5,950 before GST.",
+    );
+    const authoritativeOverviewEvidence = {
+      binding: preschoolOverviewAiBindingFromIdentity(harness.identity),
+      catalog: {
+        contract: "analysis-context-evidence@1" as const,
+        sourceId: "project-analysis-snapshot:preschool-demo:snapshot-current",
+        pins: {
+          workspaceId: harness.identity.workspaceId,
+          projectId: harness.identity.projectId,
+          scopeId: harness.identity.scopeId,
+          dataSnapshotId: harness.identity.dataSnapshotId,
+          dataCutoff: "2026-05-31T23:45:00.000Z",
+          projectReleaseId: harness.identity.projectReleaseId,
+          metricVersion: "energy-v1",
+        },
+        facts: [{
+          id: "analysis.summary.usage_kwh",
+          label: "Portfolio energy use",
+          metricId: "energy.total_usage_kwh",
+          value: 24_921.8,
+          unit: "kWh",
+          status: "confirmed" as const,
+          evidenceRefs: ["query:overview-current"],
+          dimensions: { sectionId: "overview" },
+        }],
+      },
+    };
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      revision: "v4",
+      authoritativeOverviewEvidence,
+      runSynthesis: async (input) => ({
+        answer: JSON.stringify({
+          status: "available",
+          summary: {
+            text: "The portfolio used 24,921.8 kWh at a provisional cost of about S$5,950 before GST, with operating evidence available.",
+            evidenceRefs: ["evidence:operating-behaviour:summary"],
+          },
+          findings: [{
+            title: "Operating evidence remains available",
+            text: "The accepted operating evidence supports a focused review.",
+            sectionIds: ["operating-behaviour"],
+            evidenceRefs: ["evidence:operating-behaviour:insight"],
+          }],
+        }),
+        runId: input.runId,
+        sessionId: input.sessionId,
+      }),
+    });
+
+    const artifact = await synthesizer.execute({
+      baseIdentity: harness.identity,
+      user: harness.user,
+      retry: false,
+      authoritativeOverviewEvidence,
+    });
+    harness.close();
+
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+    expect(JSON.parse(artifact.result_json!)).toMatchObject({
+      sourceSectionArtifactIds: [operating.id],
+      summary: {
+        text: "The portfolio used 24,921.8 kWh, with operating evidence available.",
+        evidenceRefs: ["evidence:operating-behaviour:summary", "analysis.summary.usage_kwh"],
+      },
+      overviewEvidence: { factIds: ["analysis.summary.usage_kwh"] },
     });
   });
 
@@ -863,6 +939,7 @@ const completeSectionV4 = (
   harness: ReturnType<typeof createHarness>,
   sectionId: PreschoolSectionId,
   status: "available" | "empty" = "available",
+  summaryText = `Current ${sectionId} summary.`,
 ) => {
   const identity = sectionIdentityV4(harness.identity, sectionId);
   harness.metadata.energyIq.overviewAiArtifacts.queue({ identity, triggeredBy: harness.user.id });
@@ -894,7 +971,7 @@ const completeSectionV4 = (
       toolAudits: [],
       ...(status === "available" ? {
         summary: {
-          text: `Current ${sectionId} summary.`,
+          text: summaryText,
           evidenceRefs: [`evidence:${sectionId}:summary`],
         },
         insights: [{

@@ -464,14 +464,17 @@ const materializeExecutiveResultV4 = (input: {
     || parsed.findings.length > 3) {
     throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_MALFORMED");
   }
-  const summaryText = cleanText(parsed.summary.text);
+  const rawSummaryText = cleanText(parsed.summary.text);
   const rawSummaryEvidenceRefs = stringArray(parsed.summary.evidenceRefs);
-  if (!summaryText || !rawSummaryEvidenceRefs || rawSummaryEvidenceRefs.length === 0
-    || hasBannedCustomerText(summaryText)) {
+  if (!rawSummaryText || !rawSummaryEvidenceRefs || rawSummaryEvidenceRefs.length === 0
+    || hasBannedCustomerText(rawSummaryText)) {
     throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_FACT_UNSUPPORTED");
   }
   const acceptedBySection = new Map(input.accepted.map((accepted) => [accepted.result.sectionId, accepted]));
   const evidenceOwners = sectionEvidenceOwners(input.accepted);
+  const narrativesByEvidenceRef = sectionNarrativesByEvidenceRef(input.accepted);
+  const allAcceptedNarratives = [...new Set([...narrativesByEvidenceRef.values()].flat())];
+  const summaryText = removeUnsupportedEnergyCostRelation(rawSummaryText, allAcceptedNarratives);
   const overviewFacts = input.authoritativeOverviewEvidence?.catalog.facts ?? [];
   const authoritativeEvidence = new Set(overviewFacts.map(({ id }) => id));
   const overviewFactsByProvenanceRef = new Map<string, typeof overviewFacts>();
@@ -483,14 +486,6 @@ const materializeExecutiveResultV4 = (input: {
     }
   }
   const usedOverviewFactIds = new Set<string>();
-  const sourceNumbers = [
-    ...collectNumbers(input.accepted.flatMap(({ result }) => [
-      result.summary.text,
-      ...result.insights.flatMap(({ title, label, text }) => label ? [title, label, text] : [title, text]),
-      result.limitation,
-    ])),
-    ...overviewFacts.flatMap(({ value }) => typeof value === "number" ? [value] : []),
-  ];
   const requireSupportedEvidence = (
     reference: string,
     narrativeText: string,
@@ -522,10 +517,21 @@ const materializeExecutiveResultV4 = (input: {
     for (const sectionId of supported.owners) contributingSections.add(sectionId);
     return supported.canonicalReference;
   }))];
+  restoreImplicitOverviewFactRefs({
+    narrativeText: summaryText,
+    evidenceRefs: summaryEvidenceRefs,
+    overviewFacts,
+    narrativesByEvidenceRef,
+    usedOverviewFactIds,
+  });
   if (summaryEvidenceRefs.length === 0) {
     throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_EVIDENCE_UNSUPPORTED");
   }
-  if (hasUnsupportedNumber(summaryText, sourceNumbers)) {
+  if (hasUnsupportedNumber(summaryText, numbersSupportedByEvidenceRefs(
+    summaryEvidenceRefs,
+    narrativesByEvidenceRef,
+    overviewFacts,
+  ))) {
     throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_FACT_UNSUPPORTED");
   }
   const findings: PreschoolOverviewKeyFinding[] = parsed.findings.flatMap((candidate, index) => {
@@ -539,8 +545,7 @@ const materializeExecutiveResultV4 = (input: {
       || new Set(sectionIds).size !== sectionIds.length
       || sectionIds.some((sectionId) => !acceptedBySection.has(sectionId))
       || !rawEvidenceRefs || rawEvidenceRefs.length === 0
-      || hasBannedCustomerText(title) || hasBannedCustomerText(text)
-      || hasUnsupportedNumber(`${title} ${text}`, sourceNumbers)) {
+      || hasBannedCustomerText(title) || hasBannedCustomerText(text)) {
       return [];
     }
     const declaredSections = new Set(sectionIds);
@@ -571,6 +576,11 @@ const materializeExecutiveResultV4 = (input: {
     if ([...declaredSections].some((sectionId) => !evidenceBackedSections.has(sectionId))) {
       return [];
     }
+    if (hasUnsupportedNumber(`${title} ${text}`, numbersSupportedByEvidenceRefs(
+      evidenceRefs,
+      narrativesByEvidenceRef,
+      overviewFacts,
+    ))) return [];
     let alert: PreschoolOverviewKeyFinding["alert"] | undefined;
     try {
       alert = parseAlert(candidate.alert);
@@ -782,6 +792,91 @@ const sectionEvidenceOwners = (
     }
   }
   return owners;
+};
+
+const sectionNarrativesByEvidenceRef = (
+  accepted: AcceptedSectionV4[],
+): Map<string, string[]> => {
+  const narratives = new Map<string, string[]>();
+  const add = (reference: string, text: string): void => {
+    const values = narratives.get(reference) ?? [];
+    values.push(text);
+    narratives.set(reference, values);
+  };
+  for (const { result } of accepted) {
+    for (const reference of result.summary.evidenceRefs) add(reference, result.summary.text);
+    for (const insight of result.insights) {
+      const text = [insight.title, insight.label, insight.text].filter(Boolean).join(" ");
+      for (const reference of insight.evidenceRefs) add(reference, text);
+    }
+  }
+  return narratives;
+};
+
+const numbersSupportedByEvidenceRefs = (
+  evidenceRefs: string[],
+  narrativesByEvidenceRef: Map<string, string[]>,
+  overviewFacts: AnalysisContextEvidenceCatalog["facts"],
+): number[] => [
+  ...collectNumbers(evidenceRefs.flatMap((reference) => narrativesByEvidenceRef.get(reference) ?? [])),
+  ...overviewFacts.flatMap(({ id, value }) => evidenceRefs.includes(id) && typeof value === "number" ? [value] : []),
+];
+
+const restoreImplicitOverviewFactRefs = (input: {
+  narrativeText: string;
+  evidenceRefs: string[];
+  overviewFacts: AnalysisContextEvidenceCatalog["facts"];
+  narrativesByEvidenceRef: Map<string, string[]>;
+  usedOverviewFactIds: Set<string>;
+}): void => {
+  const supported = numbersSupportedByEvidenceRefs(
+    input.evidenceRefs,
+    input.narrativesByEvidenceRef,
+    input.overviewFacts,
+  );
+  for (const match of input.narrativeText.replaceAll("−", "-").matchAll(NUMBER_TOKEN)) {
+    const raw = match[0].replaceAll(",", "");
+    const reportedValue = Number(raw);
+    const precision = raw.includes(".") ? raw.length - raw.indexOf(".") - 1 : 0;
+    if (supported.some((value) => reportedNumberMatches(value, reportedValue, precision))) continue;
+    const matchingFacts = input.overviewFacts.filter(({ value }) => typeof value === "number"
+      && reportedNumberMatches(value, reportedValue, precision));
+    if (matchingFacts.length !== 1) continue;
+    const factId = matchingFacts[0]!.id;
+    if (!input.evidenceRefs.includes(factId)) input.evidenceRefs.push(factId);
+    input.usedOverviewFactIds.add(factId);
+    supported.push(matchingFacts[0]!.value as number);
+  }
+};
+
+const removeUnsupportedEnergyCostRelation = (text: string, sourceNarratives: string[]): string => {
+  const sourcePairs = sourceNarratives.flatMap(energyCostPairs);
+  const unsupported = energyCostPairs(text).some((candidate) => !sourcePairs.some((source) =>
+    reportedNumberMatches(source.energyKwh, candidate.energyKwh, candidate.energyPrecision)
+    && reportedNumberMatches(source.cost, candidate.cost, candidate.costPrecision)));
+  if (!unsupported) return text;
+  return text.replace(
+    /\s+at\s+(?:a\s+)?(?:provisional\s+|estimated\s+)?cost\s+of\s+(?:about\s+|roughly\s+)?(?:S\$|SGD)\s*[\d,.]+\s*(?:before\s+GST)?/giu,
+    "",
+  );
+};
+
+const energyCostPairs = (text: string): Array<{
+  energyKwh: number;
+  energyPrecision: number;
+  cost: number;
+  costPrecision: number;
+}> => [...text.matchAll(/([\d,.]+)\s*kWh\b[^.!?;]{0,120}?(?:S\$|SGD)\s*([\d,.]+)/giu)]
+  .map((match) => ({
+    energyKwh: Number(match[1]!.replaceAll(",", "")),
+    energyPrecision: decimalPrecision(match[1]!),
+    cost: Number(match[2]!.replaceAll(",", "")),
+    costPrecision: decimalPrecision(match[2]!),
+  }));
+
+const decimalPrecision = (raw: string): number => {
+  const normalized = raw.replaceAll(",", "");
+  return normalized.includes(".") ? normalized.length - normalized.indexOf(".") - 1 : 0;
 };
 
 const parseAlert = (value: unknown): PreschoolOverviewKeyFinding["alert"] | undefined => {

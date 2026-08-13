@@ -124,8 +124,8 @@ describe("createOverviewAiArtifactIdentity", () => {
       baseIdentity: legacy,
       targetId: "sections:current-v4",
     })).toMatchObject({
-      validatorRevision: "preschool-executive-synthesis-validator-v8",
-      workflowRevision: "preschool-executive-synthesis-v8",
+      validatorRevision: "preschool-executive-synthesis-validator-v9",
+      workflowRevision: "preschool-executive-synthesis-v9",
       investigatorPromptRevision: "preschool-executive-synthesis-prompt-v6",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
     });
