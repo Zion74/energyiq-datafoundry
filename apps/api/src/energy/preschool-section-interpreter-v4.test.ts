@@ -149,9 +149,9 @@ describe("Preschool Section Interpreter v4", () => {
     });
   });
 
-  it("rejects a Section Summary that exceeds the two-sentence reading budget", () => {
+  it("keeps the first two supported Summary sentences within the reading budget", () => {
     const pack = packV2("standby-wastage", 1);
-    expect(() => materializePreschoolSectionResultV4({
+    const result = materializePreschoolSectionResultV4({
       answer: JSON.stringify({
         sectionId: "standby-wastage",
         status: "available",
@@ -164,7 +164,40 @@ describe("Preschool Section Interpreter v4", () => {
       pack,
       identity: identity("standby-wastage"),
       runId: "runtime-run-summary-sentence-budget",
-    })).toThrow("PRESCHOOL_SECTION_INTERPRETATION_SUMMARY_UNSUPPORTED");
+    });
+    expect(result).toMatchObject({
+      status: "available",
+      summary: { text: "Verified energy use is 30 kWh. Verified energy use is 30 kWh." },
+    });
+  });
+
+  it("uses the first accepted Insight headline when a hollow Summary would hide useful content", () => {
+    const pack = packV2("centre-benchmark", 1);
+    const result = materializePreschoolSectionResultV4({
+      answer: JSON.stringify({
+        sectionId: "centre-benchmark",
+        status: "available",
+        summary: {
+          text: "The verified Section evidence is available.",
+          evidenceRefs: ["evidence:centre-benchmark:1"],
+        },
+        candidates: [{
+          title: "Priority signal at 30 kWh",
+          epistemicStatus: "observed",
+          text: "Verified energy use is 30 kWh.",
+          evidenceRefs: ["evidence:centre-benchmark:1"],
+        }],
+      }),
+      pack,
+      identity: identity("centre-benchmark"),
+      runId: "runtime-run-summary-from-insight",
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      summary: { text: "Priority signal at 30 kWh." },
+      insights: [{ title: "Priority signal at 30 kWh" }],
+    });
   });
 
   it.each([

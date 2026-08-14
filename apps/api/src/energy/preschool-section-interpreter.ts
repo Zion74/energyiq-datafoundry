@@ -460,8 +460,11 @@ export const materializePreschoolSectionResultV4 = (input: {
     expectedSectionId: input.pack.sectionId,
     binding,
   });
-  const discovery = keepSupportedSummarySentences(
+  const discovery = recoverUsefulSupportedSummary(
+    keepSupportedSummarySentences(
     calibrateCandidateEpistemicStatus(parsedDiscovery),
+    input.pack,
+    ),
     input.pack,
   );
   if (discovery.status === "available" && discovery.limitation
@@ -516,16 +519,36 @@ const keepSupportedSummarySentences = (
 ): ReturnType<typeof parsePreschoolSectionDiscoveryV4> => {
   if (discovery.status !== "available") return discovery;
   const citedEvidence = citedPackEvidence(discovery.summary.evidenceRefs, pack);
-  if (isSupportedNarrative(discovery.summary.text, citedEvidence, pack.evidence)) return discovery;
+  if (sentenceCount(discovery.summary.text) <= 2
+    && isSupportedNarrative(discovery.summary.text, citedEvidence, pack.evidence)) return discovery;
   const supportedText = [...new Intl.Segmenter("en", { granularity: "sentence" })
     .segment(discovery.summary.text)]
     .map(({ segment }) => segment.trim())
     .filter((sentence) => sentence
       && summaryFragmentIsSelfContained(sentence)
       && isSupportedNarrative(sentence, citedEvidence, pack.evidence))
+    .slice(0, 2)
     .join(" ");
   return supportedText
     ? { ...discovery, summary: { ...discovery.summary, text: supportedText } }
+    : discovery;
+};
+
+const recoverUsefulSupportedSummary = (
+  discovery: PreschoolSectionDiscoveryV4,
+  pack: PreschoolSectionPackV2,
+): PreschoolSectionDiscoveryV4 => {
+  if (discovery.status !== "available") return discovery;
+  const authority = createPackV2AcceptanceAuthority(pack);
+  if (authority.validateSummary(discovery.summary).accepted) return discovery;
+  const candidate = discovery.candidates.find((value) => authority.validateCandidate(value).accepted);
+  if (!candidate) return discovery;
+  const headline = /[.!?]$/u.test(candidate.title.trim())
+    ? candidate.title.trim()
+    : `${candidate.title.trim()}.`;
+  const summary = { text: headline, evidenceRefs: [...new Set(candidate.evidenceRefs)] };
+  return authority.validateSummary(summary).accepted
+    ? { ...discovery, summary }
     : discovery;
 };
 

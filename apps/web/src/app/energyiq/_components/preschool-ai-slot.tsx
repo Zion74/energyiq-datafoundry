@@ -956,7 +956,7 @@ const isV4ExecutiveResult = (
   if (expectedStatus && value.status !== expectedStatus) return false;
   if (value.status === "available") {
     return isUniqueStringArray(value.sourceSectionArtifactIds, false, 4)
-      && isSummary(value.summary, 420)
+      && isSummary(value.summary, 600)
       && (value.overviewEvidence === undefined
         || isExecutiveOverviewEvidenceLineage(value.overviewEvidence, value.binding))
       && value.findings.every(isKeyFinding);

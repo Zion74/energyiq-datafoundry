@@ -329,7 +329,8 @@ describe("Preschool Executive Synthesis", () => {
     expect(result).not.toHaveProperty("keyFindings");
     expect(prompt).toContain('"summary"');
     expect(prompt).toContain('"insights"');
-    expect(prompt).toContain("Summary: at most 420 characters");
+    expect(prompt).toContain("Summary: target at most 420 characters");
+    expect(prompt).toContain("hard validation limit 600");
     expect(prompt).toContain("finding title: at most 96 characters");
     expect(prompt).not.toContain('"keyPoints"');
     expect(prompt).not.toContain('"sectionId":"planning-outlook"');
@@ -600,9 +601,9 @@ describe("Preschool Executive Synthesis", () => {
     harness.close();
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.identity_json)).toMatchObject({
-      validatorRevision: "preschool-executive-synthesis-validator-v13",
+      validatorRevision: "preschool-executive-synthesis-validator-v14",
       workflowRevision: "preschool-executive-synthesis-v9",
-      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v9",
+      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v10",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
       publicationRevision: "key-findings-v2",
     });

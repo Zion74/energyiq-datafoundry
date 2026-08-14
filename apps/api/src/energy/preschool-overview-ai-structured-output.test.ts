@@ -269,7 +269,7 @@ describe("Preschool Overview AI structured output", () => {
     expect(PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4.schema).toMatchObject({
       required: ["status", "findings"],
       properties: {
-        summary: { type: "object", properties: { text: { maxLength: 420 } } },
+        summary: { type: "object", properties: { text: { maxLength: 600 } } },
         findings: {
           type: "array",
           maxItems: 3,

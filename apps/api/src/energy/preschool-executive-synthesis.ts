@@ -34,6 +34,7 @@ import {
   PRESCHOOL_EXECUTIVE_FINDING_TEXT_MAX_CHARS,
   PRESCHOOL_EXECUTIVE_FINDING_TITLE_MAX_CHARS,
   PRESCHOOL_EXECUTIVE_SUMMARY_MAX_CHARS,
+  PRESCHOOL_EXECUTIVE_SUMMARY_TARGET_CHARS,
   resolveOverviewAiStageStructuredOutputV4,
 } from "./preschool-overview-ai-structured-output.js";
 
@@ -351,7 +352,7 @@ const buildExecutivePromptV4 = (
     "Preserve source epistemic status: an inferred or speculative Section Insight may support only explicitly qualified Key Findings. Never upgrade a signal, relationship, hypothesis, or possibility into a confirmed fact.",
     "Qualify the Summary sentence, Finding title, and every Finding sentence independently. A cautious word in the body never makes an unqualified headline safe.",
     "Return one concise answer-first summary and 0-3 compact findings. A high-priority alert is optional and must be supported by the supplied Evidence.",
-    `Presentation limits only — Summary: at most ${PRESCHOOL_EXECUTIVE_SUMMARY_MAX_CHARS} characters and three sentences; finding title: at most ${PRESCHOOL_EXECUTIVE_FINDING_TITLE_MAX_CHARS} characters; finding text: at most ${PRESCHOOL_EXECUTIVE_FINDING_TEXT_MAX_CHARS} characters. Preserve the best supported analytical angle within those limits.`,
+    `Presentation limits only — Summary: target at most ${PRESCHOOL_EXECUTIVE_SUMMARY_TARGET_CHARS} characters and three sentences (hard validation limit ${PRESCHOOL_EXECUTIVE_SUMMARY_MAX_CHARS}); finding title: at most ${PRESCHOOL_EXECUTIVE_FINDING_TITLE_MAX_CHARS} characters; finding text: at most ${PRESCHOOL_EXECUTIVE_FINDING_TEXT_MAX_CHARS} characters. Preserve the best supported analytical angle within those limits.`,
     "In customer-facing narrative, say 'all Centres' instead of 'Portfolio'. Internal Evidence labels may still use portfolio.",
     "Narrative text may use only limited inline **bold** and _italics_; do not return headings, links, images, HTML, code, tables, or custom styling.",
     "Every summary and finding must cite exact evidenceRefs. Every finding must declare the exact contributing sectionIds.",
