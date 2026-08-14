@@ -478,7 +478,7 @@ const additionalTransitionNew: JsonSchema = {
   properties: {
     transition: { type: "string", enum: ["new"] },
     currentFindingId: nonEmptyString,
-    currentEvidenceRefs: evidenceRefs,
+    currentEvidenceRefs: uniqueEvidenceRefs,
   },
 };
 
@@ -495,9 +495,9 @@ const additionalTransitionPaired: JsonSchema = {
   properties: {
     transition: { type: "string", enum: ["changed", "still-supported", "resolved"] },
     previousFindingId: nonEmptyString,
-    previousEvidenceRefs: evidenceRefs,
+    previousEvidenceRefs: uniqueEvidenceRefs,
     currentFindingId: nonEmptyString,
-    currentEvidenceRefs: evidenceRefs,
+    currentEvidenceRefs: uniqueEvidenceRefs,
   },
 };
 
