@@ -475,7 +475,13 @@ export function dataTaskRuntimeHeaders(
 export function isEnergyIqOverviewSlotSessionId(sessionId: string): boolean {
   return sessionId.startsWith("energyiq-overview-slot-")
     || sessionId.startsWith("ngee-ann-overview-")
-    || sessionId.startsWith("preschool-overview-");
+    || sessionId.startsWith("preschool-overview-")
+    || sessionId.startsWith("preschool-section-interpreter-")
+    || sessionId.startsWith("preschool-executive-synthesis-")
+    || sessionId.startsWith("preschool-additional-ai-insights-")
+    || sessionId.startsWith("preschool-additional-evaluation-")
+    || sessionId.startsWith("preschool-additional-transition-generation-")
+    || sessionId.startsWith("preschool-additional-transition-comparison-");
 }
 
 export function mergeServerChatSessions(

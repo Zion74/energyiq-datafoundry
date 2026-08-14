@@ -482,9 +482,7 @@ const handleSessionRequest = async (
         : {}),
       ...(cursor ? { cursor } : {})
     });
-    const records = projectId
-      ? listedRecords.filter((session) => !isEnergyIqOverviewSlotSessionId(session.id))
-      : listedRecords;
+    const records = listedRecords.filter((session) => !isEnergyIqOverviewSlotSessionId(session.id));
     return ok({
       sessions: records.map((session) =>
         sessionListDto(

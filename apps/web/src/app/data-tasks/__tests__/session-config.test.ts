@@ -205,7 +205,12 @@ describe("session config disabled map", () => {
     )).toBe(true);
     expect(isEnergyIqOverviewSlotSessionId("ngee-ann-overview-1234")).toBe(true);
     expect(isEnergyIqOverviewSlotSessionId("preschool-overview-1234")).toBe(true);
+    expect(isEnergyIqOverviewSlotSessionId("preschool-section-interpreter-1234")).toBe(true);
+    expect(isEnergyIqOverviewSlotSessionId("preschool-executive-synthesis-v4-1234")).toBe(true);
+    expect(isEnergyIqOverviewSlotSessionId("preschool-additional-evaluation-1234")).toBe(true);
+    expect(isEnergyIqOverviewSlotSessionId("preschool-additional-transition-comparison-1234")).toBe(true);
     expect(isEnergyIqOverviewSlotSessionId("58b8bcf4-analyst-session")).toBe(false);
+    expect(isEnergyIqOverviewSlotSessionId("additional-insights-user-question")).toBe(false);
   });
 
   it("merges server sessions with local pinned metadata", () => {
