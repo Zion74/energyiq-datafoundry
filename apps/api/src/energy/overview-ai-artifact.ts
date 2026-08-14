@@ -302,7 +302,7 @@ export const createPreschoolOverviewAiSectionArtifactIdentityV4 = (input: {
     outputContractRevision: "preschool-section-interpretation-v4",
     validatorRevision: "acceptance-validator-v9",
     workflowRevision: "discover-tools-accept-publish-v2",
-    investigatorPromptRevision: "discovery-prompt-v8",
+    investigatorPromptRevision: "discovery-prompt-v9",
     editorPromptRevision: "not-applicable-v1",
     methodSkillId: "none",
     methodSkillRevision: "not-applicable-v1",

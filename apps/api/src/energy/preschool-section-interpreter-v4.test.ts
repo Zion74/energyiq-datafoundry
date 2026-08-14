@@ -78,6 +78,11 @@ describe("Preschool Section Interpreter v4", () => {
     expect(prompt).toContain("usageKwh is total interval energy");
     expect(prompt).toContain("one Portfolio row is not a Centre");
     expect(prompt).toContain("looks like, suggests, is consistent with");
+    expect(prompt).toContain("A median is a percentile reference; it does not prove that most Centres sit near it");
+    expect(prompt).toContain("Never combine several different rank positions into one label such as 'top-2'");
+    expect(prompt).toContain("operating-hours share describes all energy during opening hours, not the share consumed by flagged spikes");
+    expect(prompt).toContain("Do not calculate a combined total or share from several Evidence items");
+    expect(prompt).toContain("The first non-whitespace character of the response must be '{'");
     expect(prompt).not.toContain("allowedNextChecks");
     expect(prompt).not.toContain('"kind"');
   });
