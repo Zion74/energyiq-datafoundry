@@ -289,6 +289,8 @@ const evaluationBatchIsValid = (
     || !unique(attempts.map(({ attemptId }) => attemptId))) return false;
   const completed = attempts.filter(isCompletedAttempt);
   const reviewable = completed.filter(({ machineGate }) => machineGate.status === "passed");
+  const legacyV4TerminalReview = isLegacyV4TerminalEvaluation(value.status, value.target);
+  const blindReviewAttempts = legacyV4TerminalReview ? completed : reviewable;
   if (!unique(attempts.map(({ providerRunId }) => providerRunId))
     || !unique(attempts.map(({ providerSessionId }) => providerSessionId))
     || !unique(attempts.map(({ artifact }) => artifact.artifactId))
@@ -305,7 +307,7 @@ const evaluationBatchIsValid = (
   const pendingFinalization = value.status === "running" && reviewAudit.length === 0 && entries.length === 0;
   if (!pendingFinalization
     && (!sameStrings(reviewAudit.map(({ reviewToken }) => reviewToken), entries.map(({ reviewToken }) => reviewToken))
-      || !sameStrings(reviewAudit.map(({ attemptId }) => attemptId), reviewable.map(({ attemptId }) => attemptId)))) return false;
+      || !sameStrings(reviewAudit.map(({ attemptId }) => attemptId), blindReviewAttempts.map(({ attemptId }) => attemptId)))) return false;
 
   if (value.approval !== undefined) {
     if (!approvalIsValid(value.approval)
@@ -324,7 +326,7 @@ const evaluationBatchIsValid = (
   }
   if (!validateLifecycleStatus) return true;
   const hasRunning = attempts.some(({ status }) => status === "running");
-  const allReviewableCompletedReviewed = reviewable.every(({ humanReview }) => humanReview !== undefined);
+  const allBlindReviewAttemptsReviewed = blindReviewAttempts.every(({ humanReview }) => humanReview !== undefined);
   const passingCompleted = reviewable.filter(({ humanReview }) => (
     humanReview !== undefined
       && additionalAiInsightHumanReviewIsPassing(humanReview)
@@ -339,21 +341,31 @@ const evaluationBatchIsValid = (
     return !hasRunning
       && value.status === "awaiting-human-review"
       && value.approval === undefined
-      && reviewable.length > 0
-      && !allReviewableCompletedReviewed;
+      && blindReviewAttempts.length > 0
+      && !allBlindReviewAttemptsReviewed;
   }
   if (value.status === "failed") {
     return value.approval === undefined
-      && (reviewable.length === 0 || (allReviewableCompletedReviewed && passingCompleted < 2));
+      && (blindReviewAttempts.length === 0 || (allBlindReviewAttemptsReviewed && passingCompleted < 2));
   }
   if (value.status === "passed") {
-    return value.approval === undefined && allReviewableCompletedReviewed && passingCompleted >= 2;
+    return value.approval === undefined && allBlindReviewAttemptsReviewed && passingCompleted >= 2;
   }
   return value.status === "approved-candidate"
     && value.approval !== undefined
-    && allReviewableCompletedReviewed
+    && allBlindReviewAttemptsReviewed
     && passingCompleted >= 2;
 };
+
+const isLegacyV4TerminalEvaluation = (
+  status: unknown,
+  target: AdditionalAiInsightEvaluationTarget,
+): boolean => (
+  (status === "failed" || status === "passed" || status === "approved-candidate")
+  && target.artifactIdentityRevision === "additional-insights-v4"
+  && target.workflowRevision === "additional-insights-discover-accept-publish-v4"
+  && target.promptRevision === "additional-insights-discovery-v4"
+);
 
 export const additionalAiInsightEvaluationBatchIsValid = (
   value: unknown,

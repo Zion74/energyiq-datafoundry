@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EventType } from "@ag-ui/client";
+import { TypeValidationError } from "@ai-sdk/provider";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -51,7 +52,7 @@ describe("Overview AI server stage options", () => {
     expect(normalizeOverviewAiStageRuntimeError(
       "additional-insights-discovery",
       schemaValidationError,
-    ).message).toBe("PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_SCHEMA_INVALID");
+    ).message).toBe("candidates.0 additional properties");
     expect(normalizeOverviewAiStageRuntimeError(
       "additional-insights-discovery",
       new Error("Provider does not support structured_output for this model"),
@@ -495,6 +496,7 @@ describe("Overview AI server stage options", () => {
         });
         if (!eventTransitionTrusted) throw new Error("Expected event transition runtime options");
         let assemblyCapability: unknown;
+        let localStructuredOutputFailure: unknown;
         const transitionAgent = new DataFoundryAgUiAgent({
           artifactService: {} as never,
           completedMemoryFlushOverride: async () => undefined,
@@ -514,6 +516,10 @@ describe("Overview AI server stage options", () => {
               governedMessages: assemblyInput.messages,
               mastraAgent: {
                 run: () => new Observable((subscriber) => {
+                  if (localStructuredOutputFailure) {
+                    subscriber.error(localStructuredOutputFailure);
+                    return;
+                  }
                   subscriber.next({
                     type: EventType.TEXT_MESSAGE_START,
                     messageId: "transition-structured-answer",
@@ -570,6 +576,23 @@ describe("Overview AI server stage options", () => {
         expect(collectOverviewAiText(completedTransition.events)).toBe('{"outcomes":[]}');
         expect(metadata.runs.find({ user_id: "dev-user", run_id: "transition-runtime-run" }))
           .toMatchObject({ status: "completed", session_id: "transition-runtime-session" });
+
+        localStructuredOutputFailure = new Error("Local final schema validation failed", {
+          cause: new TypeValidationError({
+            value: { outcomes: [{ extra: true }] },
+            cause: new Error("outcomes.0 additional properties"),
+          }),
+        });
+        await expect(collectOverviewAiStageEvents(transitionAgent, {
+          ...stageInput,
+          runId: "transition-schema-invalid-run",
+          sessionId: "transition-schema-invalid-session",
+        }, metadata)).rejects.toThrow("PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_SCHEMA_INVALID");
+        expect(metadata.runs.find({ user_id: "dev-user", run_id: "transition-schema-invalid-run" }))
+          .toMatchObject({
+            status: "failed",
+            error_message: "PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_SCHEMA_INVALID",
+          });
       } finally {
         metadata.close();
       }

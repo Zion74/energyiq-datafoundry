@@ -1,4 +1,5 @@
 import { AbstractAgent, EventType, type BaseEvent, type RunAgentInput } from "@ag-ui/client";
+import { TypeValidationError } from "@ai-sdk/provider";
 import {
   CopilotRuntime,
   ExperimentalEmptyAdapter,
@@ -878,23 +879,54 @@ export const normalizeOverviewAiStageRuntimeError = (
     return new Error(PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID);
   }
   if ((stage === "additional-insights-discovery" || stage === "additional-insights-transition")
-    && errorChainIncludesName(error, "AI_TypeValidationError")) {
+    && isLocalAdditionalStructuredOutputSchemaError(error)) {
     return new Error(PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_SCHEMA_INVALID);
   }
   return error instanceof Error ? error : new Error(message);
 };
 
-const errorChainIncludesName = (error: unknown, expectedName: string): boolean => {
+const LOCAL_ADDITIONAL_STRUCTURED_OUTPUT_SCHEMA_ERROR = Symbol(
+  "energyiq.local-additional-structured-output-schema-error",
+);
+
+class LocalAdditionalStructuredOutputSchemaError extends Error {
+  readonly [LOCAL_ADDITIONAL_STRUCTURED_OUTPUT_SCHEMA_ERROR] = true;
+
+  constructor(cause: unknown) {
+    super(PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_SCHEMA_INVALID, { cause });
+  }
+}
+
+const markLocalAdditionalStructuredOutputSchemaError = (
+  stage: PreschoolOverviewAiStage,
+  structuredOutputEnabled: boolean,
+  error: unknown,
+): unknown => (
+  structuredOutputEnabled
+  && (stage === "additional-insights-discovery" || stage === "additional-insights-transition")
+  && errorChainIncludesTypeValidationError(error)
+    ? new LocalAdditionalStructuredOutputSchemaError(error)
+    : error
+);
+
+const errorChainIncludesTypeValidationError = (error: unknown): boolean => {
   let current: unknown = error;
   const seen = new Set<unknown>();
   for (let depth = 0; depth < 6 && typeof current === "object" && current !== null; depth += 1) {
     if (seen.has(current)) return false;
     seen.add(current);
-    if ("name" in current && current.name === expectedName) return true;
+    if (TypeValidationError.isInstance(current)) return true;
     current = "cause" in current ? current.cause : undefined;
   }
   return false;
 };
+
+const isLocalAdditionalStructuredOutputSchemaError = (
+  error: unknown,
+): error is LocalAdditionalStructuredOutputSchemaError => (
+  error instanceof LocalAdditionalStructuredOutputSchemaError
+  && error[LOCAL_ADDITIONAL_STRUCTURED_OUTPUT_SCHEMA_ERROR] === true
+);
 
 export const collectOverviewAiText = (events: ReadonlyArray<Record<string, unknown>>): string =>
   events
@@ -1805,8 +1837,15 @@ export class DataFoundryAgUiAgent extends AbstractAgent {
 
           },
           error: (error: unknown) => {
+            const boundaryError = this.input.overviewAiStage
+              ? markLocalAdditionalStructuredOutputSchemaError(
+                  this.input.overviewAiStage,
+                  overviewAiStageOptions?.structuredOutput !== undefined,
+                  error,
+                )
+              : error;
             const normalizedError = this.input.overviewAiStage
-              ? normalizeOverviewAiStageRuntimeError(this.input.overviewAiStage, error)
+              ? normalizeOverviewAiStageRuntimeError(this.input.overviewAiStage, boundaryError)
               : error;
             const message = normalizedError instanceof Error
               ? normalizedError.message

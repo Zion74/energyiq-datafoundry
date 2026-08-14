@@ -242,6 +242,122 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
     }
   });
 
+  it("restores a terminal v4 blind review that historically included a machine-failed attempt", () => {
+    const harness = createHarness();
+    try {
+      reserveAndComplete(harness, { machineFailOrdinal: 1 });
+      reviewAllPassing(harness);
+      const current = harness.store.getEvaluation({
+        evaluationId: "evaluation-1",
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      });
+      const machineFailed = current.attempts.find((attempt) => attempt.status === "completed"
+        && attempt.machineGate.status === "failed")!;
+      expect(current.reviewAudit.map(({ attemptId }) => attemptId)).not.toContain(machineFailed.attemptId);
+
+      const completed = current.attempts.filter((attempt) => attempt.status === "completed");
+      const historicalOrder = [...completed].sort((left, right) => (
+        createHash("sha256").update(`${current.evaluationId}:${left.attemptId}:sort`).digest("hex")
+          .localeCompare(createHash("sha256").update(`${current.evaluationId}:${right.attemptId}:sort`).digest("hex"))
+      ));
+      const blindToken = (attemptId: string, suffix: string): string => (
+        createHash("sha256").update(`${current.evaluationId}:${attemptId}:${suffix}`).digest("hex").slice(0, 24)
+      );
+      const historicalEntries = historicalOrder.map((attempt, index) => {
+        const findingId = `finding-${attempt.ordinal}`;
+        return {
+          label: (["Review A", "Review B", "Review C"] as const)[index]!,
+          reviewToken: `blind-${blindToken(attempt.attemptId, "token")}`,
+          summary: {
+            reviewSummaryToken: `blind-summary-${blindToken(attempt.attemptId, "summary")}`,
+            text: `Finding ${findingId}`,
+          },
+          findings: [{
+            reviewFindingToken: `blind-finding-${createHash("sha256")
+              .update(`${current.evaluationId}:${attempt.attemptId}:${findingId}:finding`)
+              .digest("hex").slice(0, 24)}`,
+            title: `Finding ${findingId}`,
+            text: "An incremental Evidence-bound angle.",
+            epistemicStatus: "observed" as const,
+            evidenceRefs: ["analysis.summary.usage_kwh"],
+            originKind: "ai-discovery" as const,
+            directionMethodResourceIds: [],
+          }],
+        };
+      });
+      const historicalTarget = {
+        ...current.target,
+        artifactIdentityRevision: "additional-insights-v4",
+        workflowRevision: "additional-insights-discover-accept-publish-v4",
+        promptRevision: "additional-insights-discovery-v4",
+      };
+      const historical = {
+        ...current,
+        target: historicalTarget,
+        status: "passed",
+        attempts: current.attempts.map((attempt) => {
+          if (attempt.status !== "completed") return attempt;
+          const reviewEntry = historicalEntries[historicalOrder.findIndex(({ attemptId }) => (
+            attemptId === attempt.attemptId
+          ))]!;
+          return {
+            ...attempt,
+            humanReview: {
+              actorId: "reviewer-legacy-v4",
+              reviewedAt: "2026-08-14T02:00:00.000Z",
+              scores: PASSING_SCORES,
+              contentUsefulness: {
+                summary: { applicable: true as const, score: 4 },
+                insights: reviewEntry.findings.map(({ reviewFindingToken }) => ({
+                  reviewFindingToken,
+                  score: 4,
+                })),
+              },
+              passed: true,
+              revision: 1,
+            },
+          };
+        }),
+        reviewPack: {
+          ...current.reviewPack,
+          entries: historicalEntries,
+        },
+        reviewAudit: historicalOrder.map((attempt, index) => ({
+          reviewToken: historicalEntries[index]!.reviewToken,
+          attemptId: attempt.attemptId,
+        })),
+      };
+      const row = harness.metadata.db.prepare(`
+        SELECT reservation_json FROM energyiq_additional_insight_evaluations WHERE id = ?
+      `).get(current.evaluationId) as { reservation_json: string };
+      const reservation = JSON.parse(row.reservation_json) as Record<string, unknown>;
+      harness.metadata.db.prepare(`
+        UPDATE energyiq_additional_insight_evaluations
+        SET reservation_json = ?, record_json = ? WHERE id = ?
+      `).run(
+        JSON.stringify({ ...reservation, target: historicalTarget }),
+        JSON.stringify(historical),
+        current.evaluationId,
+      );
+
+      harness.reopen();
+      expect(harness.store.getEvaluation({
+        evaluationId: current.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      })).toMatchObject({
+        status: "passed",
+        target: { artifactIdentityRevision: "additional-insights-v4" },
+        reviewAudit: expect.arrayContaining([
+          expect.objectContaining({ attemptId: machineFailed.attemptId }),
+        ]),
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
   it("does not let a stale finalizer overwrite reviews committed by another Store connection", () => {
     const harness = completedHarness();
     const peer = createMetadataStore({ database_path: harness.databasePath });

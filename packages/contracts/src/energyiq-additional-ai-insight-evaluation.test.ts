@@ -127,6 +127,28 @@ describe("Additional AI Insight pass@3 evaluation contract", () => {
     expect(additionalAiInsightEvaluationBatchIsValid(malformedFinding)).toBe(false);
   });
 
+  it("keeps terminal v4 blind packs readable when the historical review included a machine-failed attempt", () => {
+    const historical = validBatch();
+    historical.target.artifactIdentityRevision = "additional-insights-v4";
+    historical.target.workflowRevision = "additional-insights-discover-accept-publish-v4";
+    historical.target.promptRevision = "additional-insights-discovery-v4";
+    completedAttempt(historical, 0).machineGate = {
+      status: "failed",
+      checks: ADDITIONAL_AI_INSIGHT_EVALUATION_MACHINE_CHECKS.map((check, index) => index === 0
+        ? { check, passed: false, code: "CONTRACT_FAILED" }
+        : { check, passed: true }),
+    };
+
+    expect(additionalAiInsightEvaluationBatchIsValid(historical)).toBe(true);
+    expect(evaluateAdditionalAiInsightPassAt3(historical)).toBe("passed");
+
+    const current = structuredClone(historical);
+    current.target.artifactIdentityRevision = "additional-insights-v5";
+    current.target.workflowRevision = "additional-insights-discover-accept-publish-v5";
+    current.target.promptRevision = "additional-insights-discovery-v5";
+    expect(additionalAiInsightEvaluationBatchIsValid(current)).toBe(false);
+  });
+
   it("requires Summary and every blinded Insight usefulness to pass without averaging", () => {
     const batch = validBatch();
     const entry = batch.reviewPack.entries.find(({ reviewToken }) => reviewToken === "blind-a")!;
