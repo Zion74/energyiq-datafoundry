@@ -139,6 +139,16 @@ describe("EnergyIQ AI claim validation", () => {
       evidence: [],
       sqlEvidence: [],
     })).toBe(true);
+    for (const narrative of [
+      "The centre is closed for maintenance.",
+      "The centre in Singapore remains operational.",
+    ]) {
+      expect(energyAiNarrativeClaimsSupported({
+        narrative,
+        evidence: [],
+        sqlEvidence: [],
+      })).toBe(true);
+    }
   });
 
   it("requires a multiplier claim to come from a ratio, multiple, or factor field", () => {

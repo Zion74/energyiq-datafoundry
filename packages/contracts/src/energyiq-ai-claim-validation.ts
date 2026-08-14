@@ -254,7 +254,7 @@ function isProjectCentreCode(value: string): boolean {
   if (!/^[A-Z0-9][A-Z0-9_-]{0,15}$/u.test(normalized)) return false;
   if (/[0-9_-]/u.test(normalized)) return true;
   if (value === normalized) return normalized.length <= 8;
-  return /^[a-z]{1,2}$/u.test(value);
+  return /^[a-z]$/u.test(value);
 }
 
 function hasCurrencyUnit(context: string): boolean {
