@@ -19,6 +19,7 @@ import {
 } from "./server.js";
 import {
   PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2,
+  PRESCHOOL_ADDITIONAL_AI_INSIGHTS_TRANSITION_STRUCTURED_OUTPUT_V1,
   PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4,
   PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4,
 } from "./energy/preschool-overview-ai-structured-output.js";
@@ -26,8 +27,59 @@ import { buildPreschoolSectionDiscoveryPrompt } from "./energy/preschool-section
 import type { PreschoolSectionPackV2 } from "./energy/preschool-section-pack-v2.js";
 import { MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS } from "./energy/preschool-executive-synthesis.js";
 import { MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS } from "./energy/preschool-additional-ai-insights-workflow.js";
+import { MAX_PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_CHARS } from "./energy/preschool-additional-ai-insights-evaluation.js";
 
 describe("Overview AI server stage options", () => {
+  it("registers the Evidence-bound Additional transition as an isolated no-tool production stage", () => {
+    const structuredOutput = resolveOverviewAiStageStructuredOutput("additional-insights-transition");
+    expect(structuredOutput).toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_TRANSITION_STRUCTURED_OUTPUT_V1);
+    if (!structuredOutput) throw new Error("Expected Additional transition structured output");
+    expect(structuredOutput?.schema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: ["outcomes"],
+    });
+    expect(resolveOverviewAiStageRuntimeOptions("additional-insights-transition")).toMatchObject({
+      analysisRequirementsMode: "omit",
+      disableTools: true,
+      structuredOutput,
+    });
+    const trusted = resolveOverviewAiServerRunnerOptions({
+      stage: "additional-insights-transition",
+      structuredOutput,
+    });
+    expect(trusted).toMatchObject({
+      structuredOutput,
+      conversationMessageMaxChars: MAX_PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_CHARS,
+    });
+    expect(trusted).not.toHaveProperty("trustedStageTools");
+    expect(resolveOverviewAiAgentRuntimeOptions("additional-insights-transition", trusted)).toMatchObject({
+      structuredOutput,
+      conversationMessageMaxChars: MAX_PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_CHARS,
+      disableTools: true,
+    });
+    expect(shouldUseEnergyContextForOverviewAiStage("additional-insights-transition")).toBe(false);
+    expect(shouldIncludeProjectAnalysisEvidenceContext("additional-insights-transition")).toBe(false);
+    const run = buildOverviewAiStageRunInput({
+      stage: "additional-insights-transition",
+      prompt: "Compare exact A and B Evidence.",
+      identity: additionalIdentity(),
+      workspaceId: "preschool-workspace",
+      user: { id: "dev-user" } as never,
+      runId: "transition-comparison-run",
+      sessionId: "transition-comparison-session",
+    });
+    expect(run.tools).toEqual([]);
+    expect(run.forwardedProps).not.toHaveProperty("externalContext");
+    expect(run.forwardedProps).toMatchObject({
+      run_config: {
+        skillMode: "none",
+        enabledDatasourceIds: [],
+        enabledSkillIds: [],
+      },
+    });
+  });
+
   it("isolates Additional discovery to server-owned contract tools and current EnergyIQ pins", () => {
     const toolNames = [
       "energy.evidence.read",

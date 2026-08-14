@@ -54,6 +54,12 @@ export type PreschoolAdditionalAiInsightsWorkflow = {
     baseIdentity: OverviewAiArtifactIdentityV13;
     user: UserRecord;
   }): Promise<EnergyIqOverviewAiArtifactRecord>;
+  evaluateAttempt(input: {
+    identity: PreschoolAdditionalAiInsightArtifactIdentity;
+    user: UserRecord;
+    runId: string;
+    sessionId: string;
+  }): Promise<AdditionalAiInsightsArtifact>;
 };
 
 export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
@@ -63,8 +69,95 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
     user: UserRecord;
   }): Promise<AnalysisContextEvidenceCatalog>;
   runDiscovery: PreschoolAdditionalAiInsightsDiscoveryRunner;
-}): PreschoolAdditionalAiInsightsWorkflow => ({
-  async execute({ baseIdentity, user }) {
+}): PreschoolAdditionalAiInsightsWorkflow => {
+  const evaluateAttempt: PreschoolAdditionalAiInsightsWorkflow["evaluateAttempt"] = async ({
+    identity,
+    user,
+    runId,
+    sessionId,
+  }) => {
+    const methodSet = requireMethodResources(resolveCurrentAdditionalAiInsightMethodSet(
+      identity.workspaceId,
+      input.metadataStore.energyIq.insightMethodGovernance.listPublishedWorkspaceMethodResources({
+        workspaceId: identity.workspaceId,
+      }),
+    ));
+    if (identity.methodSetId !== methodSet.id
+      || identity.methodSetRevision !== methodSet.revision
+      || identity.methodSetFingerprint !== createPreschoolAdditionalAiInsightArtifactIdentity({
+        baseIdentity: identity,
+        methodSet,
+      }).methodSetFingerprint) {
+      throw new Error("PRESCHOOL_ADDITIONAL_AI_EVALUATION_IDENTITY_MISMATCH");
+    }
+    requireModelRuntimeIdentity(input.metadataStore, identity);
+    const catalog = await input.resolveEvidenceCatalog({ identity, user });
+    const runtime = createPreschoolAdditionalAiInsightRuntime({
+      binding: {
+        workspaceId: identity.workspaceId,
+        projectId: identity.projectId,
+        scopeId: identity.scopeId,
+        dataSnapshotId: identity.dataSnapshotId,
+        projectReleaseId: identity.projectReleaseId,
+      },
+      catalog,
+    });
+    const completed = await input.runDiscovery({
+      prompt: buildDiscoveryPrompt({ identity, catalog, methodResources: methodSet.resources }),
+      runId,
+      sessionId,
+      user,
+      workspaceId: identity.workspaceId,
+      identity,
+      toolNames: runtime.toolNames,
+      invokeTool: runtime.invoke,
+    });
+    if (completed.runId !== runId || completed.sessionId !== sessionId) {
+      throw new Error("PRESCHOOL_ADDITIONAL_AI_RUNTIME_IDENTITY_MISMATCH");
+    }
+    const candidates = parseDiscoveryCandidates(completed.answer);
+    if (!candidates) throw new Error("PRESCHOOL_ADDITIONAL_AI_DISCOVERY_RESULT_INVALID");
+    const artifact = publishAdditionalArtifact({
+      identity,
+      methodSet,
+      catalog,
+      candidates,
+      toolAudits: runtime.audits(),
+      runId,
+    });
+    if (!additionalAiInsightsArtifactIsValid({
+      value: artifact,
+      expectedMethods: methodSet.methods,
+      expected: {
+        workspaceId: identity.workspaceId,
+        projectId: identity.projectId,
+        scopeId: identity.scopeId,
+        dataSnapshotId: identity.dataSnapshotId,
+        projectReleaseId: identity.projectReleaseId,
+        analysisPeriod: {
+          from: identity.analysisPeriodFrom,
+          to: identity.analysisPeriodTo,
+        },
+        modelProfileId: identity.modelProfileId,
+        modelProfileRevision: identity.modelProfileRevision,
+        methodSetId: identity.methodSetId,
+        methodSetRevision: identity.methodSetRevision,
+        methodSetFingerprint: identity.methodSetFingerprint,
+        outputContractRevision: identity.outputContractRevision,
+        capabilityRevision: identity.capabilityRevision,
+        publicationRevision: identity.publicationRevision,
+        canvasRevision: identity.canvasRevision,
+      },
+    })) {
+      throw new Error("PRESCHOOL_ADDITIONAL_AI_PUBLICATION_INVALID");
+    }
+    requireModelRuntimeIdentity(input.metadataStore, identity);
+    return artifact;
+  };
+
+  return {
+    evaluateAttempt,
+    async execute({ baseIdentity, user }) {
     const methodSet = requireMethodResources(resolveCurrentAdditionalAiInsightMethodSet(
       baseIdentity.workspaceId,
       input.metadataStore.energyIq.insightMethodGovernance.listPublishedWorkspaceMethodResources({
@@ -85,69 +178,7 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
     const runId = `preschool-additional-ai-insights-${randomUUID()}`;
     const sessionId = `preschool-additional-ai-insights-${randomUUID()}`;
     try {
-      requireModelRuntimeIdentity(input.metadataStore, identity);
-      const catalog = await input.resolveEvidenceCatalog({ identity, user });
-      const runtime = createPreschoolAdditionalAiInsightRuntime({
-        binding: {
-          workspaceId: identity.workspaceId,
-          projectId: identity.projectId,
-          scopeId: identity.scopeId,
-          dataSnapshotId: identity.dataSnapshotId,
-          projectReleaseId: identity.projectReleaseId,
-        },
-        catalog,
-      });
-      const completed = await input.runDiscovery({
-        prompt: buildDiscoveryPrompt({ identity, catalog, methodResources: methodSet.resources }),
-        runId,
-        sessionId,
-        user,
-        workspaceId: identity.workspaceId,
-        identity,
-        toolNames: runtime.toolNames,
-        invokeTool: runtime.invoke,
-      });
-      if (completed.runId !== runId || completed.sessionId !== sessionId) {
-        throw new Error("PRESCHOOL_ADDITIONAL_AI_RUNTIME_IDENTITY_MISMATCH");
-      }
-      const candidates = parseDiscoveryCandidates(completed.answer);
-      if (!candidates) throw new Error("PRESCHOOL_ADDITIONAL_AI_DISCOVERY_RESULT_INVALID");
-      const artifact = publishAdditionalArtifact({
-        identity,
-        methodSet,
-        catalog,
-        candidates,
-        toolAudits: runtime.audits(),
-        runId,
-      });
-      const validation = {
-        value: artifact,
-        expectedMethods: methodSet.methods,
-        expected: {
-          workspaceId: identity.workspaceId,
-          projectId: identity.projectId,
-          scopeId: identity.scopeId,
-          dataSnapshotId: identity.dataSnapshotId,
-          projectReleaseId: identity.projectReleaseId,
-          analysisPeriod: {
-            from: identity.analysisPeriodFrom,
-            to: identity.analysisPeriodTo,
-          },
-          modelProfileId: identity.modelProfileId,
-          modelProfileRevision: identity.modelProfileRevision,
-          methodSetId: identity.methodSetId,
-          methodSetRevision: identity.methodSetRevision,
-          methodSetFingerprint: identity.methodSetFingerprint,
-          outputContractRevision: identity.outputContractRevision,
-          capabilityRevision: identity.capabilityRevision,
-          publicationRevision: identity.publicationRevision,
-          canvasRevision: identity.canvasRevision,
-        },
-      };
-      if (!additionalAiInsightsArtifactIsValid(validation)) {
-        throw new Error("PRESCHOOL_ADDITIONAL_AI_PUBLICATION_INVALID");
-      }
-      requireModelRuntimeIdentity(input.metadataStore, identity);
+      const artifact = await evaluateAttempt({ identity, user, runId, sessionId });
       return input.metadataStore.energyIq.overviewAiArtifacts.complete({
         identity,
         workerId,
@@ -162,8 +193,9 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
         errorCode: boundedErrorCode(error),
       });
     }
-  },
-});
+    },
+  };
+};
 
 const requireModelRuntimeIdentity = (
   metadataStore: MetadataStore,

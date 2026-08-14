@@ -18,6 +18,7 @@ type JsonSchema = {
   uniqueItems?: boolean;
   minimum?: number;
   maximum?: number;
+  oneOf?: JsonSchema[];
 };
 
 const nonEmptyString: JsonSchema = { type: "string", minLength: 1 };
@@ -470,6 +471,70 @@ export const PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2 = {
   },
 } satisfies PublicStructuredOutputOptions<StructuredEnvelope>;
 
+const additionalTransitionNew: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["transition", "currentFindingId", "currentEvidenceRefs"],
+  properties: {
+    transition: { type: "string", enum: ["new"] },
+    currentFindingId: nonEmptyString,
+    currentEvidenceRefs: evidenceRefs,
+  },
+};
+
+const additionalTransitionPaired: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "transition",
+    "previousFindingId",
+    "previousEvidenceRefs",
+    "currentFindingId",
+    "currentEvidenceRefs",
+  ],
+  properties: {
+    transition: { type: "string", enum: ["changed", "still-supported", "resolved"] },
+    previousFindingId: nonEmptyString,
+    previousEvidenceRefs: evidenceRefs,
+    currentFindingId: nonEmptyString,
+    currentEvidenceRefs: evidenceRefs,
+  },
+};
+
+const additionalTransitionNoMaterialChange: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["transition"],
+  properties: {
+    transition: { type: "string", enum: ["no-material-change"] },
+  },
+};
+
+/** Evidence-bound Snapshot A-to-B classification; no arbitrary chart, code, or tool surface. */
+export const PRESCHOOL_ADDITIONAL_AI_INSIGHTS_TRANSITION_STRUCTURED_OUTPUT_V1 = {
+  errorStrategy: "strict",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["outcomes"],
+    properties: {
+      outcomes: {
+        type: "array",
+        minItems: 1,
+        maxItems: 6,
+        items: {
+          type: "object",
+          oneOf: [
+            additionalTransitionNew,
+            additionalTransitionPaired,
+            additionalTransitionNoMaterialChange,
+          ],
+        },
+      },
+    },
+  },
+} satisfies PublicStructuredOutputOptions<StructuredEnvelope>;
+
 export const resolveOverviewAiStageStructuredOutput = (
   stage: PreschoolOverviewAiStage,
 ): PublicStructuredOutputOptions<StructuredEnvelope> | undefined => {
@@ -477,6 +542,9 @@ export const resolveOverviewAiStageStructuredOutput = (
   if (stage === "executive-synthesis") return PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V1;
   if (stage === "template-proposal") return ENERGYIQ_TEMPLATE_CHANGE_PROPOSAL_STRUCTURED_OUTPUT_V1;
   if (stage === "additional-insights-discovery") return PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2;
+  if (stage === "additional-insights-transition") {
+    return PRESCHOOL_ADDITIONAL_AI_INSIGHTS_TRANSITION_STRUCTURED_OUTPUT_V1;
+  }
   return undefined;
 };
 

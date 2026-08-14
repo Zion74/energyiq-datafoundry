@@ -39,7 +39,8 @@ export type PreschoolOverviewAiStage =
   | "section-interpreter"
   | "executive-synthesis"
   | "template-proposal"
-  | "additional-insights-discovery";
+  | "additional-insights-discovery"
+  | "additional-insights-transition";
 
 const OVERVIEW_AI_CANDIDATE_SUBMISSION_TOOL_NAME = "overview_ai_candidates_submit" as const;
 

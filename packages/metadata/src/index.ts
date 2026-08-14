@@ -19,6 +19,7 @@ import { EnergyIqStore, initializeEnergyIqSchema } from "./energyiq-store.js";
 import { initializeEnergyIqMetricSchema } from "./energyiq-metric-store.js";
 import { initializeEnergyIqOverviewAiArtifactSchema } from "./energyiq-overview-ai-artifact-store.js";
 import { initializeEnergyIqInsightMethodGovernanceSchema } from "./energyiq-insight-method-governance-store.js";
+import { initializeEnergyIqAdditionalInsightEvaluationSchema } from "./energyiq-additional-insight-evaluation-store.js";
 import {
   ensureEnergyIqOperationalPolicyBindingOwnershipSchema,
   initializeEnergyIqOperationalPolicySchema
@@ -39,6 +40,7 @@ export * from "./energyiq-saved-analysis-store.js";
 export * from "./energyiq-scope-metadata-resolver.js";
 export * from "./energyiq-metric-store.js";
 export * from "./energyiq-operational-policy-store.js";
+export * from "./energyiq-additional-insight-evaluation-store.js";
 export * from "./energyiq-overview-ai-artifact-store.js";
 export * from "./energyiq-insight-method-governance-store.js";
 export * from "./energyiq-project-setup-store.js";
@@ -4081,6 +4083,9 @@ const runMigrations = (db: DatabaseSync): void => {
   });
   runSchemaMigration(db, "0032_energyiq_insight_method_governance", "Persist Additional Insight feedback and Method governance", () => {
     initializeEnergyIqInsightMethodGovernanceSchema(db);
+  });
+  runSchemaMigration(db, "0033_energyiq_additional_insight_evaluation", "Persist Additional Insight pass@3 and Snapshot transitions", () => {
+    initializeEnergyIqAdditionalInsightEvaluationSchema(db);
   });
 };
 

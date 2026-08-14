@@ -7,6 +7,7 @@ export * from "./energyiq-autonomous-insights.js";
 export * from "./energyiq-insight-method-promotion.js";
 export * from "./energyiq-insight-canvas.js";
 export * from "./energyiq-additional-ai-insights.js";
+export * from "./energyiq-additional-ai-insight-evaluation.js";
 
 export type ApiResult<T> = {
   success: boolean;

@@ -872,3 +872,25 @@ Web current Finding 提供自己的反馈 loading / existing / saving / success 
 受保护 API 与独立可测试管理组件暴露，仍需在真实管理页面中完成浏览器放置与交互验收。此 checkpoint 只证明 Contracts、Metadata、API、
 Method selection 与 Web 状态的自动化门；数据库迁移部署、真实浏览器与权限会话、真实 Provider、人工增量价值评审均未完成。Stage 3E pass@3
 与 Snapshot A→B evaluation 仍未开始，因此不得宣称 Stage 3 或 Additional AI Insights 已完成产品验收。
+
+### 18.10 Stage 3E 工程 checkpoint
+
+Stage 3E 已建立独立于 current Overview Artifact 的 Additional 模型价值评估闭环。授权管理员可以针对服务端解析的 exact Snapshot、
+Release、Period、Model Profile 与 Method set 创建 pass@3；三个 attempt 在开始 Provider 工作前分别保留独立 Run、Session、Artifact
+identity，并绕开 current Artifact、single-flight 与页面缓存。中断恢复复用同一个已保留 attempt identity，Provider 或 structured-output
+失败作为该 attempt 的局部终态保存，不把 retry 计成第四次或新的盲评样本。
+
+盲评包使用稳定打乱的 `Review A/B/C` 标签，客户响应不包含 attempt、Run、Session 或私有映射；服务端 audit 保留 token 到 exact attempt
+的映射。机器门只检查合同、事实边界、来源、重复、表达长度和恢复完整性，不强加 What/Why/Action 或固定分析镜头。人工门分别保存
+Summary usefulness 与每条 Insight usefulness，并至少评分新角度、相关性、清晰直白、是否值得进入 AI Analysis、事实与猜想是否诚实、
+用户价值；三次中至少两次同时通过机器与人工阈值才算 pass。管理员批准只产生 `publication-candidate-only` 记录，不自动改变 current
+Overview Artifact。
+
+Snapshot transition 使用已通过评估的 A attempt 与服务端重新生成的 B attempt，再由独立 comparison Run 形成 Evidence-bound 的
+`New / Changed / Still supported / Resolved / No material change`。Store 固定 A/B Artifact 与 Finding/Evidence lineage，拒绝 B 复用 A
+Evidence；生成、校验或比较失败保存为可恢复的局部 transition failure。普通 Overview GET 仍只读 saved current Artifact，不触发
+evaluation、Provider、工具、ensure 或 queue。
+
+这一 checkpoint 只证明 Contracts、Metadata、API、生产 Runner 装配、权限、幂等恢复与关键回归的自动化工程门。此 worktree 未调用
+真实 Provider，未执行真实 pass@3 人工盲评，未在真实 Snapshot A/B 上完成价值判断，也未做浏览器管理流程验收或数据库迁移部署。
+这些真实 Provider、浏览器和人工产品价值门完成前，不得宣称 Stage 3 已通过产品验收；Stage 4 Coding Agent 仍不在范围内。

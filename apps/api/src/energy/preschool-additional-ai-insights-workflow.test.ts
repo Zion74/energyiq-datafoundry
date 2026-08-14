@@ -18,6 +18,39 @@ import { createPreschoolAdditionalAiInsightsWorkflow } from "./preschool-additio
 import { composePreschoolOverviewAiReadModel } from "./preschool-overview-ai-read-model.js";
 
 describe("Preschool Additional AI Insights workflow", () => {
+  it("runs independent evaluation attempts through the real acceptance seam without current Artifact queue/cache", async () => {
+    const harness = createHarness();
+    try {
+      const runDiscovery = vi.fn(async ({ runId, sessionId }) => ({
+        answer: JSON.stringify({ candidates: [candidate(`candidate-${runId}`, "fact:standby-share")] }),
+        runId,
+        sessionId,
+      }));
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        runDiscovery,
+      });
+      const first = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "evaluation-run-1",
+        sessionId: "evaluation-session-1",
+      });
+      const second = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "evaluation-run-2",
+        sessionId: "evaluation-session-2",
+      });
+      expect(runDiscovery).toHaveBeenCalledTimes(2);
+      expect([first.runId, second.runId]).toEqual(["evaluation-run-1", "evaluation-run-2"]);
+      expect(harness.metadata.energyIq.overviewAiArtifacts.find(harness.additionalIdentity)).toBeUndefined();
+    } finally {
+      harness.close();
+    }
+  });
+
   it("maps each candidate's stable Method refs to truthful Finding provenance and rejects bad refs locally", async () => {
     const harness = createHarness();
     try {

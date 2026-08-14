@@ -109,6 +109,10 @@ import {
 } from "./energy/preschool-overview-ai-workflow.js";
 import { createPreschoolOverviewAiPageWorkflow } from "./energy/preschool-overview-ai-page-workflow.js";
 import {
+  createPreschoolAdditionalAiInsightsEvaluationWorkflow,
+  MAX_PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_CHARS,
+} from "./energy/preschool-additional-ai-insights-evaluation.js";
+import {
   createPreschoolAdditionalAiInsightsWorkflow,
   MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS,
 } from "./energy/preschool-additional-ai-insights-workflow.js";
@@ -167,7 +171,8 @@ export const resolveOverviewAiStageRuntimeOptions = (stage: PreschoolOverviewAiS
   const boundedValueStage = stage === "section-interpreter"
     || stage === "executive-synthesis"
     || stage === "template-proposal"
-    || stage === "additional-insights-discovery";
+    || stage === "additional-insights-discovery"
+    || stage === "additional-insights-transition";
   return {
     analysisRequirementsMode: "omit" as const,
     ...(boundedValueStage
@@ -201,7 +206,8 @@ export const resolveOverviewAiServerRunnerOptions = (input: {
 }): OverviewAiTrustedRuntimeOverride | undefined => {
   if ((input.stage !== "section-interpreter"
       && input.stage !== "executive-synthesis"
-      && input.stage !== "additional-insights-discovery")
+      && input.stage !== "additional-insights-discovery"
+      && input.stage !== "additional-insights-transition")
     || !input.structuredOutput) return undefined;
   const trustedStageTools = input.stage === "section-interpreter"
     && input.sectionInsightTools && input.invokeSectionInsightTool
@@ -222,6 +228,8 @@ export const resolveOverviewAiServerRunnerOptions = (input: {
       ? PACK_V2_SECTION_MESSAGE_MAX_CHARS
       : input.stage === "additional-insights-discovery"
         ? MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS
+        : input.stage === "additional-insights-transition"
+          ? MAX_PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_CHARS
         : MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS,
     ...(trustedStageTools ? { disableTools: false as const, trustedStageTools } : {}),
   };
@@ -343,7 +351,9 @@ export const shouldIncludeProjectAnalysisEvidenceContext = (
 
 export const shouldUseEnergyContextForOverviewAiStage = (
   stage?: PreschoolOverviewAiStage,
-): boolean => stage !== "executive-synthesis" && stage !== "template-proposal";
+): boolean => stage !== "executive-synthesis"
+  && stage !== "template-proposal"
+  && stage !== "additional-insights-transition";
 
 const emitEarlyRunFailure = (
   subscriber: { complete(): void; next(event: BaseEvent): void },
@@ -598,6 +608,24 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       });
     },
   });
+  const additionalAiInsightsEvaluationWorkflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
+    metadataStore,
+    runAttempt: (attempt) => additionalAiInsightsWorkflow.evaluateAttempt(attempt),
+    runTransition: (stageInput) => {
+      const structuredOutput = resolveOverviewAiStageStructuredOutput("additional-insights-transition");
+      if (!structuredOutput) throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_STRUCTURED_OUTPUT_REQUIRED");
+      const trustedRuntimeOverride = resolveOverviewAiServerRunnerOptions({
+        stage: "additional-insights-transition",
+        structuredOutput,
+      });
+      return runOverviewAiValueStage({
+        ...stageInput,
+        stage: "additional-insights-transition",
+        workspaceId: stageInput.identity.workspaceId,
+        ...(trustedRuntimeOverride ? { trustedRuntimeOverride } : {}),
+      });
+    },
+  });
   const templateChangeWorkflow = createEnergyIqTemplateChangeWorkflow({
     metadataStore,
     resolveIdentity: ({ projectId, scopeId, user }) => overviewAiWorkflow.resolveCurrentIdentity({
@@ -688,6 +716,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
         knowledgeService,
         metadataStore,
         additionalAiInsightsWorkflow,
+        additionalAiInsightsEvaluationWorkflow,
         overviewAiWorkflow,
         templateChangeWorkflow,
         runCancelRegistry,
@@ -885,7 +914,8 @@ const isIsolatedValueStage = (stage: PreschoolOverviewAiStage): boolean =>
   stage === "section-interpreter"
   || stage === "executive-synthesis"
   || stage === "template-proposal"
-  || stage === "additional-insights-discovery";
+  || stage === "additional-insights-discovery"
+  || stage === "additional-insights-transition";
 
 type HandleCopilotKitRequestInput = {
   artifactService: LocalArtifactService;

@@ -212,6 +212,15 @@ Analysis Run 的只读客户视图。标题和备注可以调整，但冻结的 
 **Insight Method Proposal Lifecycle**
 `provisional → in-review → approved → published` 是人工治理的合法晋升链：项目成员可创建和提交 review，管理员才可批准和发布；每次转换绑定 revision、actor 与时间，禁止票数驱动的自动晋升或跳级。
 
+**Additional Insight Evaluation Attempt**
+在同一固定 Snapshot、Release、Period、Model Profile 与 Method-set identity 下，使用独立 Provider Run/Session 生成的一次不可变评估结果。失败或 retry 属于这一次 attempt 的恢复与审计，不得伪装为新的 pass@3 样本。
+
+**Blinded Review Pack**
+从独立 Evaluation Attempts 生成、隐藏 Run 顺序与 Provider identity 的人工评分包；服务端私有 audit 保留盲评 token 到 exact attempt 的映射。人工评分分别记录 Summary usefulness、各 Insight usefulness，以及新角度、相关性、清晰直白、是否值得深挖、事实与猜想是否诚实和用户价值。
+
+**Snapshot Transition Evaluation**
+在 exact Snapshot A 与重新生成的 exact Snapshot B 之间，以双方 Finding 和 Evidence lineage 为依据记录 `New / Changed / Still supported / Resolved / No material change` 的不可变评估。它不以文本相似度代替事实判断，也不会自动发布 current Overview Artifact。
+
 ## 用户与后台
 
 **user**  

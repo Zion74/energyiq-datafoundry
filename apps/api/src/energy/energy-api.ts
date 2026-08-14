@@ -3,6 +3,10 @@ import {
   createSuccessResult,
   filterAiFindingPresentationEvidence,
   parseAiFindingPresentation,
+  type AdditionalAiInsightEvaluationBatch,
+  type AdditionalAiInsightEvaluationHumanReview,
+  type AdditionalAiInsightHumanScores,
+  type AdditionalAiInsightTransitionEvaluationRecord,
   type AppErrorCode,
 } from "@datafoundry/contracts";
 import {
@@ -216,6 +220,132 @@ export const handleEnergyApiRequest = async (
       const projectId = decodeURIComponent(segments[1] ?? "");
       const access = requireEnergyProjectAccess(context, user, projectId);
       const governance = context.metadataStore.energyIq.insightMethodGovernance;
+      if (segments[3] === "evaluations") {
+        requireEnergyAdminProject(context, user, projectId);
+        const evaluationWorkflow = context.additionalAiInsightsEvaluationWorkflow;
+        if (!evaluationWorkflow) throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_WORKFLOW_REQUIRED");
+        if (segments.length === 4 && request.method === "POST") {
+          const body = requireRecord(await readJsonBody(request));
+          const project = context.metadataStore.energyIq.getProject(projectId);
+          const baseIdentity = await context.overviewAiWorkflow.resolveCurrentIdentity({
+            projectId,
+            scopeId: optionalString(body.scopeId) ?? project.root_scope_id,
+            user,
+            pin: requireAdditionalEvaluationPin(body),
+          });
+          const evaluation = await evaluationWorkflow.executePassAt3({
+            baseIdentity,
+            user,
+            idempotencyKey: requireNonEmptyString(
+              body.idempotencyKey,
+              "ENERGYIQ_ADDITIONAL_EVALUATION_IDEMPOTENCY_KEY_REQUIRED",
+            ),
+          });
+          return { status: 202, body: createSuccessResult(toAdditionalEvaluationSummary(evaluation)) };
+        }
+        if (segments.length >= 5) {
+          const evaluationId = decodeURIComponent(segments[4] ?? "");
+          if (segments.length === 5 && request.method === "GET") {
+            const evaluation = context.metadataStore.energyIq.additionalInsightEvaluations.getEvaluation({
+              evaluationId,
+              expectedWorkspaceId: access.activeWorkspaceId,
+              expectedProjectId: projectId,
+            });
+            return { status: 200, body: createSuccessResult(toAdditionalEvaluationSummary(evaluation)) };
+          }
+          if (segments.length === 6 && segments[5] === "review-pack" && request.method === "GET") {
+            const evaluation = context.metadataStore.energyIq.additionalInsightEvaluations.getEvaluation({
+              evaluationId,
+              expectedWorkspaceId: access.activeWorkspaceId,
+              expectedProjectId: projectId,
+            });
+            return {
+              status: 200,
+              body: createSuccessResult({
+                evaluationId,
+                status: evaluation.status,
+                revision: evaluation.reviewPack.revision,
+                entries: evaluation.reviewPack.entries,
+              }),
+            };
+          }
+          if (segments.length === 7 && segments[5] === "reviews" && request.method === "PUT") {
+            const body = requireRecord(await readJsonBody(request));
+            const evaluation = context.metadataStore.energyIq.additionalInsightEvaluations.recordHumanReview({
+              evaluationId,
+              expectedWorkspaceId: access.activeWorkspaceId,
+              expectedProjectId: projectId,
+              reviewToken: decodeURIComponent(segments[6] ?? ""),
+              actorId: user.id,
+              scores: requireAdditionalEvaluationScores(body.scores),
+              contentUsefulness: requireAdditionalEvaluationContentUsefulness(body.contentUsefulness),
+              expectedRevision: requireNonNegativeInteger(
+                body.expectedRevision,
+                "ENERGYIQ_ADDITIONAL_EVALUATION_REVIEW_REVISION_REQUIRED",
+              ),
+            });
+            return { status: 200, body: createSuccessResult(toAdditionalEvaluationSummary(evaluation)) };
+          }
+          if (segments.length === 6 && segments[5] === "approve" && request.method === "POST") {
+            const body = requireRecord(await readJsonBody(request));
+            const evaluation = context.metadataStore.energyIq.additionalInsightEvaluations.approveEvaluationCandidate({
+              evaluationId,
+              expectedWorkspaceId: access.activeWorkspaceId,
+              expectedProjectId: projectId,
+              reviewToken: requireNonEmptyString(
+                body.reviewToken,
+                "ENERGYIQ_ADDITIONAL_EVALUATION_REVIEW_TOKEN_REQUIRED",
+              ),
+              actorId: user.id,
+              expectedRevision: requireNonNegativeInteger(
+                body.expectedRevision,
+                "ENERGYIQ_ADDITIONAL_EVALUATION_APPROVAL_REVISION_REQUIRED",
+              ),
+            });
+            return { status: 200, body: createSuccessResult(toAdditionalEvaluationSummary(evaluation)) };
+          }
+        }
+      }
+      if (segments[3] === "transitions") {
+        requireEnergyAdminProject(context, user, projectId);
+        const evaluationWorkflow = context.additionalAiInsightsEvaluationWorkflow;
+        if (!evaluationWorkflow) throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_WORKFLOW_REQUIRED");
+        if (segments.length === 4 && request.method === "POST") {
+          const body = requireRecord(await readJsonBody(request));
+          const project = context.metadataStore.energyIq.getProject(projectId);
+          const baseIdentity = await context.overviewAiWorkflow.resolveCurrentIdentity({
+            projectId,
+            scopeId: optionalString(body.scopeId) ?? project.root_scope_id,
+            user,
+            pin: requireAdditionalEvaluationPin(body),
+          });
+          const transition = await evaluationWorkflow.executeTransition({
+            baseIdentity,
+            user,
+            idempotencyKey: requireNonEmptyString(
+              body.idempotencyKey,
+              "ENERGYIQ_ADDITIONAL_TRANSITION_IDEMPOTENCY_KEY_REQUIRED",
+            ),
+            previousEvaluationId: requireNonEmptyString(
+              body.previousEvaluationId,
+              "ENERGYIQ_ADDITIONAL_TRANSITION_PREVIOUS_EVALUATION_REQUIRED",
+            ),
+            previousAttemptId: requireNonEmptyString(
+              body.previousAttemptId,
+              "ENERGYIQ_ADDITIONAL_TRANSITION_PREVIOUS_ATTEMPT_REQUIRED",
+            ),
+          });
+          return { status: 202, body: createSuccessResult(toAdditionalTransitionSummary(transition)) };
+        }
+        if (segments.length === 5 && request.method === "GET") {
+          const transition = context.metadataStore.energyIq.additionalInsightEvaluations.getTransition({
+            transitionId: decodeURIComponent(segments[4] ?? ""),
+            expectedWorkspaceId: access.activeWorkspaceId,
+            expectedProjectId: projectId,
+          });
+          return { status: 200, body: createSuccessResult(toAdditionalTransitionSummary(transition)) };
+        }
+      }
       if (segments[3] === "method-proposals") {
         if (segments.length === 4 && request.method === "GET") {
           requireEnergyAdminProject(context, user, projectId);
@@ -2749,6 +2879,106 @@ const requireNonNegativeInteger = (value: unknown, message: string): number => {
   if (integer < 0) throw new Error(message);
   return integer;
 };
+
+const requireAdditionalEvaluationPin = (body: Record<string, unknown>) => ({
+  dataSnapshotId: requireNonEmptyString(
+    body.dataSnapshotId,
+    "ENERGYIQ_ADDITIONAL_EVALUATION_SNAPSHOT_REQUIRED",
+  ),
+  projectReleaseId: requireNonEmptyString(
+    body.projectReleaseId,
+    "ENERGYIQ_ADDITIONAL_EVALUATION_RELEASE_REQUIRED",
+  ),
+  from: requireNonEmptyString(body.from, "ENERGYIQ_ADDITIONAL_EVALUATION_PERIOD_FROM_REQUIRED"),
+  to: requireNonEmptyString(body.to, "ENERGYIQ_ADDITIONAL_EVALUATION_PERIOD_TO_REQUIRED"),
+});
+
+const requireAdditionalEvaluationScores = (value: unknown): AdditionalAiInsightHumanScores => {
+  const scores = requireRecord(value, "ENERGYIQ_ADDITIONAL_EVALUATION_SCORES_REQUIRED");
+  const names = [
+    "newAngle",
+    "relevance",
+    "clarity",
+    "worthExploring",
+    "epistemicHonesty",
+    "userValue",
+  ] as const;
+  return Object.fromEntries(names.map((name) => {
+    const score = requireInteger(scores[name], `ENERGYIQ_ADDITIONAL_EVALUATION_SCORE_INVALID:${name}`);
+    if (score < 1 || score > 5) {
+      throw new Error(`ENERGYIQ_ADDITIONAL_EVALUATION_SCORE_INVALID:${name}`);
+    }
+    return [name, score];
+  })) as AdditionalAiInsightHumanScores;
+};
+
+const requireAdditionalEvaluationContentUsefulness = (
+  value: unknown,
+): AdditionalAiInsightEvaluationHumanReview["contentUsefulness"] => {
+  const content = requireRecord(value, "ENERGYIQ_ADDITIONAL_EVALUATION_CONTENT_USEFULNESS_REQUIRED");
+  const summary = requireRecord(
+    content.summary,
+    "ENERGYIQ_ADDITIONAL_EVALUATION_SUMMARY_USEFULNESS_REQUIRED",
+  );
+  const parsedSummary = summary.applicable === false
+    ? { applicable: false as const }
+    : {
+      applicable: true as const,
+      score: requireAdditionalEvaluationUsefulnessScore(
+        summary.score,
+        "ENERGYIQ_ADDITIONAL_EVALUATION_SUMMARY_USEFULNESS_INVALID",
+      ),
+    };
+  if (!Array.isArray(content.insights)) {
+    throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_INSIGHT_USEFULNESS_REQUIRED");
+  }
+  return {
+    summary: parsedSummary,
+    insights: content.insights.map((value, index) => {
+      const insight = requireRecord(
+        value,
+        `ENERGYIQ_ADDITIONAL_EVALUATION_INSIGHT_USEFULNESS_INVALID:${index}`,
+      );
+      return {
+        reviewFindingToken: requireNonEmptyString(
+          insight.reviewFindingToken,
+          `ENERGYIQ_ADDITIONAL_EVALUATION_INSIGHT_TOKEN_REQUIRED:${index}`,
+        ),
+        score: requireAdditionalEvaluationUsefulnessScore(
+          insight.score,
+          `ENERGYIQ_ADDITIONAL_EVALUATION_INSIGHT_USEFULNESS_INVALID:${index}`,
+        ),
+      };
+    }),
+  };
+};
+
+const requireAdditionalEvaluationUsefulnessScore = (value: unknown, message: string): number => {
+  const score = requireInteger(value, message);
+  if (score < 1 || score > 5) throw new Error(message);
+  return score;
+};
+
+const toAdditionalEvaluationSummary = (evaluation: AdditionalAiInsightEvaluationBatch) => ({
+  evaluationId: evaluation.evaluationId,
+  status: evaluation.status,
+  completedAttemptCount: evaluation.attempts.filter(({ status }) => status === "completed").length,
+  failedAttemptCount: evaluation.attempts.filter(({ status }) => status === "failed").length,
+  humanReviewedCount: evaluation.attempts.filter((attempt) => (
+    attempt.status === "completed" && attempt.humanReview !== undefined
+  )).length,
+  ...(evaluation.approval ? { approval: evaluation.approval } : {}),
+});
+
+const toAdditionalTransitionSummary = (transition: AdditionalAiInsightTransitionEvaluationRecord) => ({
+  transitionId: transition.transitionId,
+  status: transition.status,
+  previousSnapshotId: transition.previousTarget.dataSnapshotId,
+  currentSnapshotId: transition.currentTarget.dataSnapshotId,
+  ...(transition.status === "completed"
+    ? { outcomeCount: transition.outcomes.length }
+    : { errorCode: transition.errorCode, failureStage: transition.failureStage }),
+});
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);

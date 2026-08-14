@@ -1,0 +1,490 @@
+import { createHash, randomUUID } from "node:crypto";
+
+import {
+  ADDITIONAL_AI_INSIGHT_EVALUATION_MACHINE_CHECKS,
+  additionalAiInsightsArtifactIsValid,
+  resolveCurrentAdditionalAiInsightMethodSet,
+  type AdditionalAiInsightEvaluationAttempt,
+  type AdditionalAiInsightEvaluationBatch,
+  type AdditionalAiInsightEvaluationTarget,
+  type AdditionalAiInsightTransitionFindingRef,
+  type AdditionalAiInsightTransitionEvaluationRecord,
+  type AdditionalAiInsightTransitionOutcome,
+  type AdditionalAiInsightsArtifact,
+} from "@datafoundry/contracts";
+import type { MetadataStore, UserRecord } from "@datafoundry/metadata";
+
+import {
+  createPreschoolAdditionalAiInsightArtifactIdentity,
+  type OverviewAiArtifactIdentityV13,
+  type PreschoolAdditionalAiInsightArtifactIdentity,
+} from "./overview-ai-artifact.js";
+
+export const MAX_PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_CHARS = 64_000;
+
+export type PreschoolAdditionalAiInsightEvaluationAttemptRunner = (input: {
+  identity: PreschoolAdditionalAiInsightArtifactIdentity;
+  runId: string;
+  sessionId: string;
+  user: UserRecord;
+}) => Promise<AdditionalAiInsightsArtifact>;
+
+export type PreschoolAdditionalAiInsightTransitionRunner = (input: {
+  identity: PreschoolAdditionalAiInsightArtifactIdentity;
+  prompt: string;
+  runId: string;
+  sessionId: string;
+  user: UserRecord;
+}) => Promise<{ answer: string; runId: string; sessionId: string }>;
+
+export type PreschoolAdditionalAiInsightsEvaluationWorkflow = {
+  executePassAt3(input: {
+    baseIdentity: OverviewAiArtifactIdentityV13;
+    user: UserRecord;
+    idempotencyKey: string;
+  }): Promise<AdditionalAiInsightEvaluationBatch>;
+  executeTransition(input: {
+    baseIdentity: OverviewAiArtifactIdentityV13;
+    user: UserRecord;
+    idempotencyKey: string;
+    previousEvaluationId: string;
+    previousAttemptId: string;
+  }): Promise<AdditionalAiInsightTransitionEvaluationRecord>;
+};
+
+export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
+  metadataStore: MetadataStore;
+  runAttempt: PreschoolAdditionalAiInsightEvaluationAttemptRunner;
+  runTransition: PreschoolAdditionalAiInsightTransitionRunner;
+  createId?: () => string;
+}): PreschoolAdditionalAiInsightsEvaluationWorkflow => {
+  const createId = input.createId ?? randomUUID;
+  const resolveIdentity = (baseIdentity: OverviewAiArtifactIdentityV13) => {
+    const methodSet = resolveCurrentAdditionalAiInsightMethodSet(
+      baseIdentity.workspaceId,
+      input.metadataStore.energyIq.insightMethodGovernance.listPublishedWorkspaceMethodResources({
+        workspaceId: baseIdentity.workspaceId,
+      }),
+    );
+    return {
+      identity: createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity, methodSet }),
+      expectedMethods: methodSet.methods,
+    };
+  };
+
+  return {
+    async executePassAt3({ baseIdentity, user, idempotencyKey }) {
+      const { identity, expectedMethods } = resolveIdentity(baseIdentity);
+      const target = evaluationTarget(identity);
+      const evaluationId = `additional-evaluation-${createId()}`;
+      const attempts = [1, 2, 3].map((ordinal) => ({
+        attemptId: `additional-evaluation-attempt-${createId()}`,
+        ordinal,
+        providerRunId: `preschool-additional-evaluation-${createId()}`,
+        providerSessionId: `preschool-additional-evaluation-${createId()}`,
+      }));
+      const reserved = input.metadataStore.energyIq.additionalInsightEvaluations.reserveEvaluation({
+        evaluationId,
+        idempotencyKey,
+        requestedBy: user.id,
+        target,
+        attempts,
+      });
+      const pendingAttempts = reserved.record.attempts.filter((attempt) => attempt.status === "running");
+      if (pendingAttempts.length === 0) {
+        return reserved.record.status === "running"
+          ? input.metadataStore.energyIq.additionalInsightEvaluations.finalizeEvaluation({
+            evaluationId: reserved.record.evaluationId,
+            expectedWorkspaceId: identity.workspaceId,
+            expectedProjectId: identity.projectId,
+          })
+          : reserved.record;
+      }
+
+      for (const attempt of pendingAttempts) {
+        try {
+          const artifact = await input.runAttempt({
+            identity,
+            runId: attempt.providerRunId,
+            sessionId: attempt.providerSessionId,
+            user,
+          });
+          const machineGate = evaluateMachineGate(artifact, identity, expectedMethods);
+          input.metadataStore.energyIq.additionalInsightEvaluations.completeAttempt({
+            evaluationId: reserved.record.evaluationId,
+            expectedWorkspaceId: identity.workspaceId,
+            expectedProjectId: identity.projectId,
+            attemptId: attempt.attemptId,
+            artifact,
+            machineGate,
+          });
+        } catch (error) {
+          const code = errorCode(error);
+          input.metadataStore.energyIq.additionalInsightEvaluations.failAttempt({
+            evaluationId: reserved.record.evaluationId,
+            expectedWorkspaceId: identity.workspaceId,
+            expectedProjectId: identity.projectId,
+            attemptId: attempt.attemptId,
+            errorCode: code,
+            failureStage: failureStage(code),
+          });
+        }
+      }
+      return input.metadataStore.energyIq.additionalInsightEvaluations.finalizeEvaluation({
+        evaluationId: reserved.record.evaluationId,
+        expectedWorkspaceId: identity.workspaceId,
+        expectedProjectId: identity.projectId,
+      });
+    },
+
+    async executeTransition({ baseIdentity, user, idempotencyKey, previousEvaluationId, previousAttemptId }) {
+      const { identity } = resolveIdentity(baseIdentity);
+      const target = evaluationTarget(identity);
+      const transitionId = `additional-transition-${createId()}`;
+      const generationProviderRunId = `preschool-additional-transition-generation-${createId()}`;
+      const generationProviderSessionId = `preschool-additional-transition-generation-${createId()}`;
+      const comparisonProviderRunId = `preschool-additional-transition-comparison-${createId()}`;
+      const comparisonProviderSessionId = `preschool-additional-transition-comparison-${createId()}`;
+      const reservation = input.metadataStore.energyIq.additionalInsightEvaluations.reserveTransition({
+        transitionId,
+        idempotencyKey,
+        requestedBy: user.id,
+        previousEvaluationId,
+        previousAttemptId,
+        currentTarget: target,
+        generationProviderRunId,
+        generationProviderSessionId,
+        comparisonProviderRunId,
+        comparisonProviderSessionId,
+      });
+      if (reservation.record) return reservation.record;
+      let failureStage: "generation" | "validation" | "comparison" = "generation";
+      try {
+        const previousArtifact = input.metadataStore.energyIq.additionalInsightEvaluations.getAttemptArtifact(
+          previousEvaluationId,
+          previousAttemptId,
+        );
+        const currentArtifact = await input.runAttempt({
+          identity,
+          runId: reservation.generationProviderRunId,
+          sessionId: reservation.generationProviderSessionId,
+          user,
+        });
+        failureStage = "validation";
+        rejectPreviousSnapshotLeak(previousArtifact, currentArtifact);
+        const prompt = buildTransitionPrompt(previousArtifact, currentArtifact);
+        if (prompt.length > MAX_PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_CHARS) {
+          throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_TOO_LARGE");
+        }
+        failureStage = "comparison";
+        const compared = await input.runTransition({
+          identity,
+          prompt,
+          runId: reservation.comparisonProviderRunId,
+          sessionId: reservation.comparisonProviderSessionId,
+          user,
+        });
+        if (compared.runId !== reservation.comparisonProviderRunId
+          || compared.sessionId !== reservation.comparisonProviderSessionId) {
+          throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_PROVIDER_IDENTITY_MISMATCH");
+        }
+        const outcomes = parseTransitionOutcomes({
+          answer: compared.answer,
+          previousArtifact,
+          currentArtifact,
+          previousArtifactId: previousArtifactId(input.metadataStore, previousEvaluationId, previousAttemptId),
+          previousArtifactIdentityHash: previousArtifactIdentityHash(input.metadataStore, previousEvaluationId, previousAttemptId),
+          currentArtifactId: reservation.currentArtifactId,
+          currentArtifactIdentityHash: reservation.currentArtifactIdentityHash,
+        });
+        failureStage = "validation";
+        return input.metadataStore.energyIq.additionalInsightEvaluations.completeTransition({
+          transitionId,
+          expectedWorkspaceId: identity.workspaceId,
+          expectedProjectId: identity.projectId,
+          currentArtifact,
+          outcomes,
+        });
+      } catch (error) {
+        return input.metadataStore.energyIq.additionalInsightEvaluations.failTransition({
+          transitionId,
+          expectedWorkspaceId: identity.workspaceId,
+          expectedProjectId: identity.projectId,
+          errorCode: errorCode(error),
+          failureStage,
+        });
+      }
+    },
+  };
+};
+
+const evaluationTarget = (
+  identity: PreschoolAdditionalAiInsightArtifactIdentity,
+): AdditionalAiInsightEvaluationTarget => ({
+  workspaceId: identity.workspaceId,
+  projectId: identity.projectId,
+  scopeId: identity.scopeId,
+  resource: identity.resource,
+  dataSnapshotId: identity.dataSnapshotId,
+  projectReleaseId: identity.projectReleaseId,
+  analysisPeriod: { from: identity.analysisPeriodFrom, to: identity.analysisPeriodTo },
+  modelProfileId: identity.modelProfileId,
+  modelProfileRevision: identity.modelProfileRevision,
+  artifactIdentityRevision: identity.identityContractRevision,
+  artifactIdentityHash: sha256(JSON.stringify(identity)),
+  outputContractRevision: identity.outputContractRevision,
+  validatorRevision: identity.validatorRevision,
+  workflowRevision: identity.workflowRevision,
+  promptRevision: identity.investigatorPromptRevision,
+  capabilityRevision: identity.capabilityRevision,
+  publicationRevision: identity.publicationRevision,
+  canvasRevision: identity.canvasRevision,
+  methodSetId: identity.methodSetId,
+  methodSetRevision: identity.methodSetRevision,
+  methodSetFingerprint: identity.methodSetFingerprint,
+});
+
+const evaluateMachineGate = (
+  artifact: AdditionalAiInsightsArtifact,
+  identity: PreschoolAdditionalAiInsightArtifactIdentity,
+  expectedMethods: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>["methods"],
+): AdditionalAiInsightEvaluationAttempt["machineGate"] => {
+  const expected = {
+    workspaceId: identity.workspaceId,
+    projectId: identity.projectId,
+    scopeId: identity.scopeId,
+    dataSnapshotId: identity.dataSnapshotId,
+    projectReleaseId: identity.projectReleaseId,
+    analysisPeriod: { from: identity.analysisPeriodFrom, to: identity.analysisPeriodTo },
+    modelProfileId: identity.modelProfileId,
+    modelProfileRevision: identity.modelProfileRevision,
+    methodSetId: identity.methodSetId,
+    methodSetRevision: identity.methodSetRevision,
+    methodSetFingerprint: identity.methodSetFingerprint,
+    outputContractRevision: identity.outputContractRevision,
+    capabilityRevision: identity.capabilityRevision,
+    publicationRevision: identity.publicationRevision,
+    canvasRevision: identity.canvasRevision,
+  };
+  const contractBoundary = additionalAiInsightsArtifactIsValid({ value: artifact, expected, expectedMethods });
+  const factIds = new Set(artifact.evidenceLineage.facts.map(({ id }) => id));
+  const factBoundary = artifact.findings.every(({ evidenceRefs }) => evidenceRefs.every((ref) => factIds.has(ref)));
+  const provenance = artifact.findings.every(({ origin, toolAuditIds }) => (
+    origin.coreMethod.resourceId === expectedMethods[0]?.resourceId
+    && origin.directionMethods.every((method) => artifact.methodExecution.loadedMethods.some(
+      ({ resourceId, resourceRevision, contentSha256 }) => resourceId === method.resourceId
+        && resourceRevision === method.resourceRevision
+        && contentSha256 === method.contentSha256,
+    ))
+    && toolAuditIds.every((id) => artifact.toolAudits.some(({ auditId }) => auditId === id))
+  ));
+  const normalized = artifact.findings.map(({ title, text }) => `${title.trim().toLowerCase()}\n${text.trim().toLowerCase()}`);
+  const duplicate = new Set(normalized).size === normalized.length;
+  const expressionLength = artifact.findings.every(({ title, text }) => title.length <= 240 && text.length <= 1_200);
+  let restoreCompleteness = false;
+  try {
+    restoreCompleteness = additionalAiInsightsArtifactIsValid({
+      value: JSON.parse(JSON.stringify(artifact)) as unknown,
+      expected,
+      expectedMethods,
+    });
+  } catch {
+    restoreCompleteness = false;
+  }
+  const results: Record<typeof ADDITIONAL_AI_INSIGHT_EVALUATION_MACHINE_CHECKS[number], boolean> = {
+    "contract-boundary": contractBoundary,
+    "fact-boundary": factBoundary,
+    provenance,
+    duplicate,
+    "expression-length": expressionLength,
+    "restore-completeness": restoreCompleteness,
+  };
+  const checks = ADDITIONAL_AI_INSIGHT_EVALUATION_MACHINE_CHECKS.map((check) => ({
+    check,
+    passed: results[check],
+    ...(results[check] ? {} : { code: `ADDITIONAL_EVALUATION_${check.toUpperCase().replaceAll("-", "_")}_FAILED` }),
+  }));
+  return { status: checks.every(({ passed }) => passed) ? "passed" : "failed", checks };
+};
+
+const buildTransitionPrompt = (
+  previousArtifact: AdditionalAiInsightsArtifact,
+  currentArtifact: AdditionalAiInsightsArtifact,
+): string => [
+  "Compare Snapshot A and Snapshot B using an Evidence-bound classification.",
+  "Return New, Changed, Still supported, Resolved, or No material change. Do not classify from text similarity alone.",
+  "Every paired outcome must cite exact A and B Finding IDs and each Finding's exact Evidence refs.",
+  "No material change is valid. Do not manufacture novelty or Alerts.",
+  `Snapshot A audit: ${JSON.stringify(projectTransitionArtifact(previousArtifact))}`,
+  `Snapshot B audit: ${JSON.stringify(projectTransitionArtifact(currentArtifact))}`,
+].join("\n\n");
+
+const projectTransitionArtifact = (artifact: AdditionalAiInsightsArtifact) => ({
+  binding: artifact.binding,
+  findings: artifact.findings.map(({ id, title, text, epistemicStatus, evidenceRefs, alert }) => ({
+    id, title, text, epistemicStatus, evidenceRefs, ...(alert ? { alert } : {}),
+  })),
+  evidence: artifact.evidenceLineage.facts,
+});
+
+const parseTransitionOutcomes = (input: {
+  answer: string;
+  previousArtifact: AdditionalAiInsightsArtifact;
+  currentArtifact: AdditionalAiInsightsArtifact;
+  previousArtifactId: string;
+  previousArtifactIdentityHash: string;
+  currentArtifactId: string;
+  currentArtifactIdentityHash: string;
+}): AdditionalAiInsightTransitionOutcome[] => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input.answer);
+  } catch {
+    throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_RESULT_INVALID");
+  }
+  if (!isRecord(parsed) || !Array.isArray(parsed.outcomes) || parsed.outcomes.length === 0) {
+    throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_RESULT_INVALID");
+  }
+  const previousFindings = new Map(input.previousArtifact.findings.map((finding) => [finding.id, finding]));
+  const currentFindings = new Map(input.currentArtifact.findings.map((finding) => [finding.id, finding]));
+  return parsed.outcomes.map((value): AdditionalAiInsightTransitionOutcome => {
+    if (!isRecord(value) || typeof value.transition !== "string") {
+      throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_RESULT_INVALID");
+    }
+    if (value.transition === "no-material-change") return { transition: "no-material-change" };
+    if (value.transition === "new") {
+      return {
+        transition: "new",
+        current: requireFindingRef(
+          value,
+          "current",
+          currentFindings,
+          input.currentArtifactId,
+          input.currentArtifactIdentityHash,
+        ),
+      };
+    }
+    if (value.transition === "changed" || value.transition === "still-supported" || value.transition === "resolved") {
+      return {
+        transition: value.transition,
+        previous: requireFindingRef(
+          value,
+          "previous",
+          previousFindings,
+          input.previousArtifactId,
+          input.previousArtifactIdentityHash,
+        ),
+        current: requireFindingRef(
+          value,
+          "current",
+          currentFindings,
+          input.currentArtifactId,
+          input.currentArtifactIdentityHash,
+        ),
+      };
+    }
+    throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_RESULT_INVALID");
+  });
+};
+
+const requireFindingRef = (
+  value: Record<string, unknown>,
+  prefix: "previous" | "current",
+  findings: Map<string, AdditionalAiInsightsArtifact["findings"][number]>,
+  artifactId: string,
+  artifactIdentityHash: string,
+): AdditionalAiInsightTransitionFindingRef => {
+  const findingId = value[`${prefix}FindingId`];
+  const evidenceRefs = value[`${prefix}EvidenceRefs`];
+  if (typeof findingId !== "string") {
+    throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_RESULT_INVALID");
+  }
+  const finding = findings.get(findingId);
+  if (!finding
+    || !Array.isArray(evidenceRefs)
+    || evidenceRefs.some((entry) => typeof entry !== "string")
+    || !sameStrings(evidenceRefs as string[], finding.evidenceRefs)) {
+    throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_RESULT_INVALID");
+  }
+  return { artifactId, artifactIdentityHash, findingId, evidenceRefs: [...finding.evidenceRefs] };
+};
+
+const rejectPreviousSnapshotLeak = (
+  previous: AdditionalAiInsightsArtifact,
+  current: AdditionalAiInsightsArtifact,
+): void => {
+  const previousRefs = new Set(previous.findings.flatMap(({ evidenceRefs }) => evidenceRefs));
+  const currentRefs = current.findings.flatMap(({ evidenceRefs }) => evidenceRefs);
+  if (currentRefs.some((ref) => previousRefs.has(ref))) {
+    throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_REUSES_PREVIOUS_EVIDENCE");
+  }
+  const previousNumbers = numericFactTokens(previous);
+  const currentNumbers = numericFactTokens(current);
+  const unsupportedPreviousNumbers = [...previousNumbers].filter((token) => !currentNumbers.has(token));
+  if (unsupportedPreviousNumbers.some((token) => current.findings.some(({ title, text }) => (
+    containsNumericToken(`${title} ${text}`, token)
+  )))) {
+    throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_REUSES_PREVIOUS_NUMBER");
+  }
+};
+
+const numericFactTokens = (artifact: AdditionalAiInsightsArtifact): Set<string> => new Set(
+  artifact.evidenceLineage.facts.flatMap((fact) => "value" in fact
+      && typeof fact.value === "number"
+      && Number.isFinite(fact.value)
+    ? [String(fact.value)]
+    : []),
+);
+
+const containsNumericToken = (text: string, token: string): boolean => new RegExp(
+  `(^|[^0-9.])${escapeRegExp(token)}([^0-9.]|$)`,
+  "u",
+).test(text);
+
+const previousArtifactId = (
+  metadataStore: MetadataStore,
+  evaluationId: string,
+  attemptId: string,
+): string => completedAttempt(metadataStore, evaluationId, attemptId).artifact.artifactId;
+
+const previousArtifactIdentityHash = (
+  metadataStore: MetadataStore,
+  evaluationId: string,
+  attemptId: string,
+): string => completedAttempt(metadataStore, evaluationId, attemptId).artifact.artifactIdentityHash;
+
+const completedAttempt = (
+  metadataStore: MetadataStore,
+  evaluationId: string,
+  attemptId: string,
+): AdditionalAiInsightEvaluationAttempt => {
+  const row = metadataStore.energyIq.additionalInsightEvaluations.getEvaluation({
+    evaluationId,
+    expectedWorkspaceId: metadataStore.energyIq.additionalInsightEvaluations
+      .getAttemptArtifact(evaluationId, attemptId).binding.workspaceId,
+    expectedProjectId: metadataStore.energyIq.additionalInsightEvaluations
+      .getAttemptArtifact(evaluationId, attemptId).binding.projectId,
+  });
+  const attempt = row.attempts.find((candidate) => candidate.attemptId === attemptId);
+  if (!attempt || attempt.status !== "completed") throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_PREVIOUS_ATTEMPT_INVALID");
+  return attempt;
+};
+
+const failureStage = (code: string): "provider" | "structured-output" | "machine-gate" => (
+  /DISCOVERY_RESULT|PUBLICATION_INVALID|STRUCTURED_OUTPUT/u.test(code)
+    ? "structured-output"
+    : /MACHINE_GATE/u.test(code)
+      ? "machine-gate"
+      : "provider"
+);
+
+const errorCode = (error: unknown): string => error instanceof Error && /\S/u.test(error.message)
+  ? error.message.trim().slice(0, 160)
+  : "PRESCHOOL_ADDITIONAL_EVALUATION_ATTEMPT_FAILED";
+const sha256 = (value: string): string => `sha256:${createHash("sha256").update(value).digest("hex")}`;
+const sameStrings = (left: readonly string[], right: readonly string[]): boolean => left.length === right.length
+  && left.every((entry) => right.includes(entry));
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object"
+  && value !== null
+  && !Array.isArray(value);
