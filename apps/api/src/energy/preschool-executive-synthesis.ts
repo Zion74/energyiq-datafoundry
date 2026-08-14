@@ -500,6 +500,7 @@ const materializeExecutiveResultV4 = (input: {
     }
   }
   const usedOverviewFactIds = new Set<string>();
+  const summaryOverviewFactIds = new Set<string>();
   const requireSupportedEvidence = (
     reference: string,
     narrativeText: string,
@@ -526,9 +527,10 @@ const materializeExecutiveResultV4 = (input: {
     throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_EVIDENCE_UNSUPPORTED");
   };
   const contributingSections = new Set<PreschoolSectionId>();
+  const summaryContributingSections = new Set<PreschoolSectionId>();
   const summaryEvidenceRefs = [...new Set(rawSummaryEvidenceRefs.map((reference) => {
-    const supported = requireSupportedEvidence(reference, summaryText);
-    for (const sectionId of supported.owners) contributingSections.add(sectionId);
+    const supported = requireSupportedEvidence(reference, summaryText, summaryOverviewFactIds);
+    for (const sectionId of supported.owners) summaryContributingSections.add(sectionId);
     return supported.canonicalReference;
   }))];
   restoreImplicitOverviewFactRefs({
@@ -536,25 +538,20 @@ const materializeExecutiveResultV4 = (input: {
     evidenceRefs: summaryEvidenceRefs,
     overviewFacts,
     narrativesByEvidenceRef,
-    usedOverviewFactIds,
+    usedOverviewFactIds: summaryOverviewFactIds,
   });
   if (summaryEvidenceRefs.length === 0) {
     throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_EVIDENCE_UNSUPPORTED");
   }
-  if (hasUnsupportedNumber(summaryText, numbersSupportedByEvidenceRefs(
+  const summaryIsSupported = !hasUnsupportedNumber(summaryText, numbersSupportedByEvidenceRefs(
     summaryEvidenceRefs,
     narrativesByEvidenceRef,
     overviewFacts,
-  ))) {
-    throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_FACT_UNSUPPORTED");
-  }
-  if (!narrativePreservesSourceEpistemicStatus(
+  )) && narrativePreservesSourceEpistemicStatus(
     summaryText,
     summaryEvidenceRefs,
     evidenceEpistemicRequirements,
-  )) {
-    throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_FACT_UNSUPPORTED");
-  }
+  );
   const findings: PreschoolOverviewKeyFinding[] = parsed.findings.flatMap((candidate, index) => {
     if (!isRecord(candidate)) return [];
     const title = cleanText(candidate.title);
@@ -632,6 +629,17 @@ const materializeExecutiveResultV4 = (input: {
       ...(alert ? { alert } : {}),
     }];
   });
+  let publishedSummaryText = summaryText;
+  let publishedSummaryEvidenceRefs = summaryEvidenceRefs;
+  if (summaryIsSupported) {
+    for (const sectionId of summaryContributingSections) contributingSections.add(sectionId);
+    for (const factId of summaryOverviewFactIds) usedOverviewFactIds.add(factId);
+  } else {
+    const fallback = findings[0];
+    if (!fallback) throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_FACT_UNSUPPORTED");
+    publishedSummaryText = /[.!?]$/u.test(fallback.title) ? fallback.title : `${fallback.title}.`;
+    publishedSummaryEvidenceRefs = [...fallback.evidenceRefs];
+  }
   const sourceSectionArtifactIds = PRESCHOOL_SECTION_IDS.flatMap((sectionId) => {
     const accepted = acceptedBySection.get(sectionId);
     return contributingSections.has(sectionId) && accepted ? [accepted.artifactId] : [];
@@ -647,7 +655,7 @@ const materializeExecutiveResultV4 = (input: {
     contract: { id: "preschool-executive-synthesis", revision: "preschool-executive-synthesis-v4" },
     binding: preschoolOverviewAiBindingFromIdentity(input.identity),
     sourceSectionArtifactIds,
-    summary: { text: summaryText, evidenceRefs: summaryEvidenceRefs },
+    summary: { text: publishedSummaryText, evidenceRefs: publishedSummaryEvidenceRefs },
     ...(input.authoritativeOverviewEvidence && usedOverviewFactIds.size > 0 ? {
       overviewEvidence: overviewEvidenceLineage(
         input.authoritativeOverviewEvidence.catalog,

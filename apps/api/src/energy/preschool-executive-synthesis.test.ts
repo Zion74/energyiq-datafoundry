@@ -382,6 +382,41 @@ describe("Preschool Executive Synthesis", () => {
     });
   });
 
+  it("falls back to the first accepted Finding headline when the Executive Summary overstates an inferred source", async () => {
+    const harness = createHarness();
+    const benchmark = completeSectionV4(harness, "centre-benchmark");
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      revision: "v4",
+      runSynthesis: async (input) => ({
+        answer: JSON.stringify({
+          status: "available",
+          summary: {
+            text: "The peer evidence proves an efficiency issue.",
+            evidenceRefs: ["evidence:centre-benchmark:insight"],
+          },
+          findings: [{
+            title: "A possible peer pattern warrants a check",
+            text: "The peer pattern points to a possible efficiency signal, not a confirmed issue.",
+            sectionIds: ["centre-benchmark"],
+            evidenceRefs: ["evidence:centre-benchmark:insight"],
+          }],
+        }),
+        runId: input.runId,
+        sessionId: input.sessionId,
+      }),
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+    expect(JSON.parse(artifact.result_json!)).toMatchObject({
+      sourceSectionArtifactIds: [benchmark.id],
+      summary: { text: "A possible peer pattern warrants a check." },
+      findings: [{ title: "A possible peer pattern warrants a check" }],
+    });
+  });
+
   it("rejects an overlong current Key Findings summary even when the Provider ignores its schema", async () => {
     const harness = createHarness();
     completeSectionV4(harness, "centre-benchmark");
@@ -603,7 +638,7 @@ describe("Preschool Executive Synthesis", () => {
     harness.close();
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.identity_json)).toMatchObject({
-      validatorRevision: "preschool-executive-synthesis-validator-v14",
+      validatorRevision: "preschool-executive-synthesis-validator-v15",
       workflowRevision: "preschool-executive-synthesis-v9",
       investigatorPromptRevision: "preschool-executive-synthesis-prompt-v11",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
