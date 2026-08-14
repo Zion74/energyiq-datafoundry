@@ -24,13 +24,13 @@ import {
 import { createMetadataStore } from "./index.js";
 
 describe("EnergyIqAdditionalInsightEvaluationStore", () => {
-  it("does not lease a historical v5 running evaluation attempt", () => {
+  it("keeps a historical v6 running evaluation readable but never leases its attempts", () => {
     const harness = createHarness();
     try {
       const target = evaluationTarget("snapshot-a", "release-a");
       harness.store.reserveEvaluation({
-        evaluationId: "evaluation-historical-v5-running",
-        idempotencyKey: "evaluation-historical-v5-running",
+        evaluationId: "evaluation-historical-v6-running",
+        idempotencyKey: "evaluation-historical-v6-running",
         requestedBy: "admin-1",
         target,
         attempts: attemptReservations(),
@@ -38,21 +38,30 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
       const row = harness.metadata.db.prepare(`
         SELECT reservation_json, record_json FROM energyiq_additional_insight_evaluations
         WHERE id = ?
-      `).get("evaluation-historical-v5-running") as { reservation_json: string; record_json: string };
+      `).get("evaluation-historical-v6-running") as { reservation_json: string; record_json: string };
       const reservation = JSON.parse(row.reservation_json) as Record<string, unknown>;
       const record = JSON.parse(row.record_json) as Record<string, unknown>;
-      const historicalTarget = historicalV5Target(target);
+      const historicalTarget = historicalV6Target(target);
       harness.metadata.db.prepare(`
         UPDATE energyiq_additional_insight_evaluations
         SET reservation_json = ?, record_json = ? WHERE id = ?
       `).run(
         JSON.stringify({ ...reservation, target: historicalTarget }),
         JSON.stringify({ ...record, target: historicalTarget }),
-        "evaluation-historical-v5-running",
+        "evaluation-historical-v6-running",
       );
 
+      expect(harness.store.getEvaluation({
+        evaluationId: "evaluation-historical-v6-running",
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      })).toMatchObject({
+        status: "running",
+        target: { artifactIdentityRevision: "additional-insights-v6" },
+      });
+
       expect(() => harness.store.claimEvaluationAttempt({
-        evaluationId: "evaluation-historical-v5-running",
+        evaluationId: "evaluation-historical-v6-running",
         expectedWorkspaceId: "workspace-1",
         expectedProjectId: "project-1",
         attemptId: "attempt-1",
@@ -1692,12 +1701,12 @@ const evaluationTarget = (
     analysisPeriod: { from: "2026-05-01T00:00:00.000Z", to: "2026-06-01T00:00:00.000Z" },
     modelProfileId: "workspace-default",
     modelProfileRevision: 7,
-    artifactIdentityRevision: "additional-insights-v6",
+    artifactIdentityRevision: "additional-insights-v7",
     artifactIdentityHash: `sha256:${createHash("sha256").update(`${dataSnapshotId}:${projectReleaseId}`).digest("hex")}`,
     outputContractRevision: "energyiq-additional-ai-insights-v2",
-    validatorRevision: "additional-insights-acceptance-v4",
-    workflowRevision: "additional-insights-discover-accept-publish-v6",
-    promptRevision: "additional-insights-discovery-v6",
+    validatorRevision: "additional-insights-acceptance-v5",
+    workflowRevision: "additional-insights-discover-accept-publish-v7",
+    promptRevision: "additional-insights-discovery-v7",
     capabilityRevision: "scoped-read-only-v1",
     publicationRevision: "additional-insights-v2",
     canvasRevision: "energyiq-insight-canvas-v2",
@@ -1867,6 +1876,16 @@ const historicalV5Target = (
   validatorRevision: "additional-insights-acceptance-v3",
   workflowRevision: "additional-insights-discover-accept-publish-v5",
   promptRevision: "additional-insights-discovery-v5",
+});
+
+const historicalV6Target = (
+  current: AdditionalAiInsightEvaluationTarget,
+): AdditionalAiInsightEvaluationTarget => ({
+  ...current,
+  artifactIdentityRevision: "additional-insights-v6",
+  validatorRevision: "additional-insights-acceptance-v4",
+  workflowRevision: "additional-insights-discover-accept-publish-v6",
+  promptRevision: "additional-insights-discovery-v6",
 });
 
 const rewriteEvaluationTargetForTest = (

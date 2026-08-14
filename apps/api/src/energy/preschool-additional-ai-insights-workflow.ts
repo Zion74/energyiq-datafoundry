@@ -481,8 +481,13 @@ const publishAdditionalArtifact = (input: {
   const accepted: AcceptedCandidate[] = [];
   const rejectedCandidateIds: string[] = [];
   for (const candidate of input.candidates) {
+    const normalizedCandidate = input.toolAudits.length === 0
+      && isRecord(candidate.value)
+      && candidate.value.toolAuditIds === undefined
+      ? { ...candidate, value: { ...candidate.value, toolAuditIds: [] } }
+      : candidate;
     const finding = acceptCandidate(
-      candidate,
+      normalizedCandidate,
       factsById,
       input.presentedClaims.claims,
       auditsById,
@@ -640,9 +645,14 @@ const acceptCandidate = (
       relationshipAssertion: incrementalContext.relationshipAssertion,
     })) return null;
   const audits = toolAuditIds.map((id) => auditsById.get(id));
-  if (audits.some((audit) => !audit || audit.status !== "succeeded")
-    || audits.some((audit) => audit!.evidenceRefs.some((ref) => !evidenceRefs.includes(ref)))) return null;
-  if (!alertIsAcceptable(value.alert, value.epistemicStatus, evidenceRefs, factsById)) return null;
+  if (audits.some((audit) => !audit || audit.status !== "succeeded")) return null;
+  const auditedEvidenceRefs = new Set(audits.flatMap((audit) => audit!.evidenceRefs));
+  if (audits.length > 0 && (
+    evidenceRefs.some((ref) => !auditedEvidenceRefs.has(ref))
+    || audits.some((audit) => !audit!.evidenceRefs.some((ref) => evidenceRefs.includes(ref)))
+  )) return null;
+  if (isRecord(value.alert)
+    && !alertIsAcceptable(value.alert, value.epistemicStatus, evidenceRefs, factsById)) return null;
   const finding: AdditionalAiInsightFinding = {
     id: `additional:${candidate.sourceId}`,
     title: value.title.trim(),
@@ -888,6 +898,11 @@ const buildDiscoveryPrompt = (input: {
       content,
     ].join("\n")),
     "Return JSON only: {candidates:[{id,title,text,epistemicStatus:'observed|inferred|speculative',origin:{kind:'ai-discovery|expert-sop|hybrid',directionMethodResourceIds:[exact server-approved Method resourceId],novelContribution?:string},incrementalContext:{relatedPresentedClaimIds:[exact claim id],novelConclusion:string},evidenceRefs:[exact fact id],toolAuditIds:[actual returned audit id],deepDiveQuestion?,alert?,canvas?}]}.",
+    "The first character must be { and the last character must be }. Do not add a preamble, scratch work, Markdown fence, or trailing commentary.",
+    "Each title must be 100 characters or fewer. toolAuditIds is required; use [] when no tool was called. When a tool was called, cite only succeeded audit IDs actually used by that candidate; candidate Evidence may be a relevant subset of the audit Evidence.",
+    "For page readability, text should be 1 to 3 short sentences and no more than 500 characters. deepDiveQuestion should be one short question and no more than 200 characters. These are generation instructions; the server keeps its wider safety ceiling for local candidate isolation.",
+    "ai-discovery must contain exactly kind and directionMethodResourceIds, with directionMethodResourceIds=[]. Do not add novelContribution to ai-discovery. If alert cannot match the exact object shape {severity:'attention|urgent',certainty:'confirmed|anomaly|possible',evidenceRefs:[exact candidate Evidence ref]}, omit it.",
+    "A relationship across multiple Evidence facts cannot be observed; label it inferred or speculative. Do not calculate or state new numeric values that are not directly present in the candidate's cited Evidence; qualitative relationships, counterexamples, and testable hypotheses remain valid.",
     "For core-only discovery use origin.kind='ai-discovery' and directionMethodResourceIds=[]. Cite only the exact loaded expert-direction resourceIds actually used. expert-sop requires one or more such refs. hybrid additionally requires a concise bounded novelContribution. Never invent or duplicate Method refs.",
     "Optional canvas must be an energyiq-insight-canvas plan using only quantitative metric, comparison, or trend blocks bound exactly to supplied Evidence facts. The server may reject blocks locally without rejecting the Finding.",
     "Candidates must already be ordered from highest to lowest incremental value. Zero candidates is valid.",

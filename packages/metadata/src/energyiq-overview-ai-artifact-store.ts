@@ -430,13 +430,13 @@ const canonicalIdentityForMutation = (
 /** Historical Additional identities are read-only; normal mutations require current behavior. */
 const isCurrentAdditionalAiInsightMutationIdentity = (
   identity: EnergyIqOverviewAiArtifactIdentity,
-): boolean => identity.identityContractRevision === "additional-insights-v6"
+): boolean => identity.identityContractRevision === "additional-insights-v7"
   && identity.analysisPackId === "preschool-additional-insights-pack"
   && identity.analysisPackRevision === "v1"
   && identity.outputContractRevision === "energyiq-additional-ai-insights-v2"
-  && identity.validatorRevision === "additional-insights-acceptance-v4"
-  && identity.workflowRevision === "additional-insights-discover-accept-publish-v6"
-  && identity.investigatorPromptRevision === "additional-insights-discovery-v6"
+  && identity.validatorRevision === "additional-insights-acceptance-v5"
+  && identity.workflowRevision === "additional-insights-discover-accept-publish-v7"
+  && identity.investigatorPromptRevision === "additional-insights-discovery-v7"
   && identity.editorPromptRevision === "additional-insights-publication-v2"
   && identity.methodSkillId === "energyiq-open-discovery"
   && identity.methodSkillRevision === "1.0.0"
@@ -581,7 +581,7 @@ const requireAdditionalAiInsightsResult = (
     && identity.editorPromptRevision === "additional-insights-publication-v2"
     && identity.publicationRevision === "additional-insights-v2"
     && identity.canvasRevision === "energyiq-insight-canvas-v2";
-  const isCurrentV6 = identity.identityContractRevision === "additional-insights-v6"
+  const isHistoricalV6 = identity.identityContractRevision === "additional-insights-v6"
     && identity.outputContractRevision === "energyiq-additional-ai-insights-v2"
     && identity.validatorRevision === "additional-insights-acceptance-v4"
     && identity.workflowRevision === "additional-insights-discover-accept-publish-v6"
@@ -589,7 +589,15 @@ const requireAdditionalAiInsightsResult = (
     && identity.editorPromptRevision === "additional-insights-publication-v2"
     && identity.publicationRevision === "additional-insights-v2"
     && identity.canvasRevision === "energyiq-insight-canvas-v2";
-  if ((!isHistoricalV1 && !isHistoricalV2 && !isHistoricalV3 && !isHistoricalV4 && !isHistoricalV5 && !isCurrentV6)
+  const isCurrentV7 = identity.identityContractRevision === "additional-insights-v7"
+    && identity.outputContractRevision === "energyiq-additional-ai-insights-v2"
+    && identity.validatorRevision === "additional-insights-acceptance-v5"
+    && identity.workflowRevision === "additional-insights-discover-accept-publish-v7"
+    && identity.investigatorPromptRevision === "additional-insights-discovery-v7"
+    && identity.editorPromptRevision === "additional-insights-publication-v2"
+    && identity.publicationRevision === "additional-insights-v2"
+    && identity.canvasRevision === "energyiq-insight-canvas-v2";
+  if ((!isHistoricalV1 && !isHistoricalV2 && !isHistoricalV3 && !isHistoricalV4 && !isHistoricalV5 && !isHistoricalV6 && !isCurrentV7)
     || identity.analysisPackId !== "preschool-additional-insights-pack"
     || identity.analysisPackRevision !== "v1"
     || identity.capabilityRevision !== "scoped-read-only-v1"

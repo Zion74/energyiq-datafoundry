@@ -1155,6 +1155,15 @@ describe("Preschool Additional AI Insights workflow", () => {
       expect(artifact).toMatchObject({ status: "available" });
       expect(receivedPrompt).toContain(ENERGYIQ_OPEN_DISCOVERY_METHOD_CONTENT_V1);
       expect(receivedPrompt).toContain("Zero candidates is valid");
+      expect(receivedPrompt).toContain("The first character must be { and the last character must be }");
+      expect(receivedPrompt).toContain("title must be 100 characters or fewer");
+      expect(receivedPrompt).toContain("toolAuditIds is required; use [] when no tool was called");
+      expect(receivedPrompt).toContain("ai-discovery must contain exactly kind and directionMethodResourceIds");
+      expect(receivedPrompt).toContain("If alert cannot match the exact object shape");
+      expect(receivedPrompt).toContain("A relationship across multiple Evidence facts cannot be observed");
+      expect(receivedPrompt).toContain("Do not calculate or state new numeric values");
+      expect(receivedPrompt).toContain("text should be 1 to 3 short sentences and no more than 500 characters");
+      expect(receivedPrompt).toContain("deepDiveQuestion should be one short question and no more than 200 characters");
       expect(receivedPrompt).not.toContain("fill every lens");
       expect(receivedPrompt).not.toContain("snapshot-evidence:");
       const result = JSON.parse(artifact.result_json!) as AdditionalAiInsightsArtifact;
@@ -1522,6 +1531,222 @@ const resolvePresentedClaimsFixture: Parameters<typeof createPreschoolAdditional
     identity,
     catalog: currentCatalog,
     readModel: null,
+  });
+
+  it("accepts the relevant subset of a succeeded tool audit and rejects disjoint or failed audit claims", async () => {
+    const harness = createHarness();
+    try {
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ invokeTool, runId, sessionId }) => {
+          const succeeded = await invokeTool({
+            toolName: "energy.evidence.read",
+            toolCallId: "tool-call:production-shaped-subset",
+            input: { factIds: ["fact:standby-share", "fact:operating-share"] },
+          });
+          const unrelated = await invokeTool({
+            toolName: "energy.evidence.read",
+            toolCallId: "tool-call:production-shaped-unrelated",
+            input: { factIds: ["fact:partial"] },
+          });
+          await expect(invokeTool({
+            toolName: "energy.evidence.read",
+            toolCallId: "tool-call:production-shaped-failed",
+            input: { factIds: ["fact:missing"] },
+          })).rejects.toThrow("PRESCHOOL_ADDITIONAL_AI_EVIDENCE_NOT_FOUND");
+          return {
+            answer: JSON.stringify({ candidates: [
+              candidate("candidate-audit-subset", "fact:standby-share", {
+                title: "Two confirmed shares warrant a joint scheduling check",
+                text: "The two confirmed shares form a qualitative relationship worth testing against operating schedules.",
+                epistemicStatus: "inferred",
+                evidenceRefs: ["fact:standby-share", "fact:operating-share"],
+                toolAuditIds: [succeeded.auditId],
+              }),
+              candidate("candidate-audit-disjoint", "fact:partial", {
+                toolAuditIds: [succeeded.auditId],
+              }),
+              candidate("candidate-audit-extra-unrelated", "fact:standby-share", {
+                toolAuditIds: [succeeded.auditId, unrelated.auditId],
+              }),
+              candidate("candidate-audit-failed", "fact:standby-share", {
+                toolAuditIds: ["additional-tool-audit:tool-call:production-shaped-failed"],
+              }),
+            ] }),
+            runId,
+            sessionId,
+          };
+        },
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "production-shaped-audit-run",
+        sessionId: "production-shaped-audit-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        publication: {
+          discoveredCount: 4,
+          acceptedCount: 1,
+          rejectedCount: 3,
+          acceptedCandidateIds: ["candidate-audit-subset"],
+          rejectedCandidateIds: [
+            "candidate-audit-disjoint",
+            "candidate-audit-extra-unrelated",
+            "candidate-audit-failed",
+          ],
+        },
+        findings: [{
+          id: "additional:candidate-audit-subset",
+          toolAuditIds: ["additional-tool-audit:tool-call:production-shaped-subset"],
+        }],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("normalizes omitted toolAuditIds only when the attempt made no tool calls", async () => {
+    const harness = createHarness();
+    try {
+      let call = 0;
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async ({ identity }) => {
+          const current = catalog();
+          return {
+            ...current,
+            sourceId: `project-analysis-snapshot:preschool-demo:${identity.dataSnapshotId}`,
+            pins: { ...current.pins, dataSnapshotId: identity.dataSnapshotId },
+          };
+        },
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ invokeTool, runId, sessionId }) => {
+          call += 1;
+          if (call === 2) {
+            await invokeTool({
+              toolName: "energy.evidence.read",
+              toolCallId: "tool-call:omitted-audit",
+              input: { factIds: ["fact:standby-share"] },
+            });
+          }
+          const { toolAuditIds: _omittedToolAuditIds, ...proposed } = candidate(
+            call === 1 ? "candidate-omitted-audit-none" : "candidate-omitted-audit-present",
+            "fact:standby-share",
+          );
+          return { answer: JSON.stringify({ candidates: [proposed] }), runId, sessionId };
+        },
+      });
+
+      const withoutTools = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "omitted-audit-no-tools-run",
+        sessionId: "omitted-audit-no-tools-session",
+      });
+      const withTools = await workflow.evaluateAttempt({
+        identity: { ...harness.additionalIdentity, dataSnapshotId: "snapshot-with-tool" },
+        user: harness.user,
+        runId: "omitted-audit-with-tools-run",
+        sessionId: "omitted-audit-with-tools-session",
+      });
+
+      expect(withoutTools).toMatchObject({
+        status: "available",
+        findings: [{ id: "additional:candidate-omitted-audit-none", toolAuditIds: [] }],
+      });
+      expect(withTools).toMatchObject({
+        status: "empty",
+        publication: {
+          discoveredCount: 1,
+          acceptedCount: 0,
+          rejectedCount: 1,
+          rejectedCandidateIds: ["candidate-omitted-audit-present"],
+        },
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("drops a malformed optional alert without losing a supported sibling finding", async () => {
+    const harness = createHarness();
+    try {
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [candidate("candidate-string-alert", "fact:standby-share", {
+            alert: "urgent",
+          })] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "malformed-alert-run",
+        sessionId: "malformed-alert-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        publication: { discoveredCount: 1, acceptedCount: 1, rejectedCount: 0 },
+        findings: [{ id: "additional:candidate-string-alert" }],
+      });
+      if (result.status !== "available") throw new Error("available fixture required");
+      expect(result.findings[0]).not.toHaveProperty("alert");
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("keeps unsupported derived numbers and long titles as candidate-local rejections", async () => {
+    const harness = createHarness();
+    try {
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [
+            candidate("candidate-derived-ratio", "fact:standby-share", {
+              title: "A derived spread requires direct support",
+              text: "The two shares show a 3.9x spread.",
+              evidenceRefs: ["fact:standby-share", "fact:operating-share"],
+            }),
+            candidate("candidate-title-too-long", "fact:standby-share", {
+              title: "x".repeat(101),
+            }),
+          ] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "candidate-local-boundaries-run",
+        sessionId: "candidate-local-boundaries-session",
+      });
+      expect(result.publication).toMatchObject({
+        discoveredCount: 2,
+        acceptedCount: 0,
+        rejectedCount: 2,
+        rejectedCandidateIds: ["candidate-derived-ratio", "candidate-title-too-long"],
+      });
+    } finally {
+      harness.close();
+    }
   });
 
 const canvasPlan = (input: { candidateId: string; title: string; text: string }) => ({

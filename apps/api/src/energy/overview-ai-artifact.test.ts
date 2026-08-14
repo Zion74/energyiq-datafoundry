@@ -175,13 +175,13 @@ describe("createOverviewAiArtifactIdentity", () => {
 
     expect(identity).toMatchObject({
       artifactKind: "autonomous-insights",
-      identityContractRevision: "additional-insights-v6",
+      identityContractRevision: "additional-insights-v7",
       analysisPackId: "preschool-additional-insights-pack",
       analysisPackRevision: "v1",
       outputContractRevision: "energyiq-additional-ai-insights-v2",
-      validatorRevision: "additional-insights-acceptance-v4",
-      workflowRevision: "additional-insights-discover-accept-publish-v6",
-      investigatorPromptRevision: "additional-insights-discovery-v6",
+      validatorRevision: "additional-insights-acceptance-v5",
+      workflowRevision: "additional-insights-discover-accept-publish-v7",
+      investigatorPromptRevision: "additional-insights-discovery-v7",
       editorPromptRevision: "additional-insights-publication-v2",
       methodSkillId: "energyiq-open-discovery",
       methodSkillRevision: "1.0.0",

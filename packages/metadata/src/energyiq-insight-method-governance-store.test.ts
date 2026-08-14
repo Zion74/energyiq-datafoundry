@@ -56,7 +56,7 @@ describe("EnergyIqInsightMethodGovernanceStore", () => {
         scopeId: "artifact-project-scope",
         artifactId: harness.artifact.id,
         artifactIdentityHash: `sha256:${harness.artifact.identity_hash}`,
-        artifactIdentityRevision: "additional-insights-v6",
+        artifactIdentityRevision: "additional-insights-v7",
         dataSnapshotId: "snapshot-feedback",
         projectReleaseId: "release-v1",
         findingId: "additional-insight-1",
@@ -258,7 +258,7 @@ function createHarness() {
 
 type AdditionalIdentity = EnergyIqOverviewAiArtifactIdentity & {
   artifactKind: "autonomous-insights";
-  identityContractRevision: "additional-insights-v6";
+  identityContractRevision: "additional-insights-v7";
   methodSetId: "preschool-additional-insights-current";
   methodSetRevision: "v1";
   methodSetFingerprint: string;
@@ -286,14 +286,14 @@ function additionalIdentity(): AdditionalIdentity {
     modelProfileId: "workspace-default",
     modelProfileRevision: 1,
     outputContractRevision: "energyiq-additional-ai-insights-v2",
-    validatorRevision: "additional-insights-acceptance-v4",
-    workflowRevision: "additional-insights-discover-accept-publish-v6",
-    investigatorPromptRevision: "additional-insights-discovery-v6",
+    validatorRevision: "additional-insights-acceptance-v5",
+    workflowRevision: "additional-insights-discover-accept-publish-v7",
+    investigatorPromptRevision: "additional-insights-discovery-v7",
     editorPromptRevision: "additional-insights-publication-v2",
     methodSkillId: "energyiq-open-discovery",
     methodSkillRevision: "1.0.0",
     artifactKind: "autonomous-insights",
-    identityContractRevision: "additional-insights-v6",
+    identityContractRevision: "additional-insights-v7",
     methodSetId: "preschool-additional-insights-current",
     methodSetRevision: "v1",
     methodSetFingerprint: `sha256:${createHash("sha256").update(canonical).digest("hex")}`,
