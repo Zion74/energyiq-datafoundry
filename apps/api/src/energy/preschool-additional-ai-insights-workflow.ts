@@ -4,7 +4,9 @@ import {
   acceptInsightCanvasPlan,
   additionalAiInsightsArtifactIsValid,
   ENERGYIQ_OPEN_DISCOVERY_METHOD_CONTENT_V1,
+  resolveAdditionalAiInsightMethodSet,
   resolveCurrentAdditionalAiInsightMethodSet,
+  type AdditionalAiInsightMethodResource,
   type AdditionalAiInsightFinding,
   type AdditionalAiInsightsArtifact,
   type InsightCanvasEvidenceFact,
@@ -59,6 +61,7 @@ export type PreschoolAdditionalAiInsightsWorkflow = {
     user: UserRecord;
     runId: string;
     sessionId: string;
+    methodResources?: readonly AdditionalAiInsightMethodResource[];
   }): Promise<AdditionalAiInsightsArtifact>;
 };
 
@@ -75,13 +78,24 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
     user,
     runId,
     sessionId,
+    methodResources,
   }) => {
-    const methodSet = requireMethodResources(resolveCurrentAdditionalAiInsightMethodSet(
-      identity.workspaceId,
-      input.metadataStore.energyIq.insightMethodGovernance.listPublishedWorkspaceMethodResources({
+    const methodSet = requireMethodResources(methodResources
+      ? resolveAdditionalAiInsightMethodSet({
         workspaceId: identity.workspaceId,
-      }),
-    ));
+        methodSetId: identity.methodSetId,
+        methodSetRevision: identity.methodSetRevision,
+        workspaceMethodResources: methodResources.filter(({ method }) => method.scope === "workspace"),
+      }) ?? (() => { throw new Error("PRESCHOOL_ADDITIONAL_AI_METHOD_RESOURCE_INVALID"); })()
+      : resolveCurrentAdditionalAiInsightMethodSet(
+        identity.workspaceId,
+        input.metadataStore.energyIq.insightMethodGovernance.listPublishedWorkspaceMethodResources({
+          workspaceId: identity.workspaceId,
+        }),
+      ));
+    if (methodResources && JSON.stringify(methodSet.resources) !== JSON.stringify(methodResources)) {
+      throw new Error("PRESCHOOL_ADDITIONAL_AI_METHOD_RESOURCE_INVALID");
+    }
     if (identity.methodSetId !== methodSet.id
       || identity.methodSetRevision !== methodSet.revision
       || identity.methodSetFingerprint !== createPreschoolAdditionalAiInsightArtifactIdentity({
@@ -90,7 +104,7 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
       }).methodSetFingerprint) {
       throw new Error("PRESCHOOL_ADDITIONAL_AI_EVALUATION_IDENTITY_MISMATCH");
     }
-    requireModelRuntimeIdentity(input.metadataStore, identity);
+    requireModelRuntimeIdentity(input.metadataStore, identity, methodResources !== undefined);
     const catalog = await input.resolveEvidenceCatalog({ identity, user });
     const runtime = createPreschoolAdditionalAiInsightRuntime({
       binding: {
@@ -151,7 +165,7 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
     })) {
       throw new Error("PRESCHOOL_ADDITIONAL_AI_PUBLICATION_INVALID");
     }
-    requireModelRuntimeIdentity(input.metadataStore, identity);
+    requireModelRuntimeIdentity(input.metadataStore, identity, methodResources !== undefined);
     return artifact;
   };
 
@@ -200,11 +214,12 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
 const requireModelRuntimeIdentity = (
   metadataStore: MetadataStore,
   identity: PreschoolAdditionalAiInsightArtifactIdentity,
+  allowReservedRevision = false,
 ): void => {
   const modelBinding = metadataStore.workspaceDefaultModelProfiles.find(ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID);
   if (!modelBinding
     || identity.modelProfileId !== WORKSPACE_DEFAULT_MODEL_PROFILE_ID
-    || modelBinding.revision !== identity.modelProfileRevision) {
+    || (!allowReservedRevision && modelBinding.revision !== identity.modelProfileRevision)) {
     throw new Error("OVERVIEW_AI_MODEL_PROFILE_REVISION_MISMATCH");
   }
   const modelResource = metadataStore.configResources.find({

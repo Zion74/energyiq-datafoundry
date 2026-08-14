@@ -157,6 +157,125 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
     }
   });
 
+  it("restores the exact reserved Method/Profile identity before resolving current rotations", async () => {
+    const harness = createHarness();
+    try {
+      const originalIdentity = createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity: harness.baseIdentity });
+      const originalMethodSet = resolveCurrentAdditionalAiInsightMethodSet(harness.baseIdentity.workspaceId);
+      const attempts = [1, 2, 3].map((ordinal) => ({
+        attemptId: `rotation-attempt-${ordinal}`,
+        ordinal,
+        providerRunId: `rotation-run-${ordinal}`,
+        providerSessionId: `rotation-session-${ordinal}`,
+      }));
+      const reserved = harness.metadata.energyIq.additionalInsightEvaluations.reserveEvaluation({
+        evaluationId: "rotation-evaluation",
+        idempotencyKey: "rotation-key",
+        requestedBy: harness.user.id,
+        target: evaluationTarget(originalIdentity),
+        attempts,
+        runtimeIdentity: originalIdentity,
+        methodResources: originalMethodSet.resources,
+      });
+      const originalArtifactIds = reserved.record.attempts.map(({ artifact }) => artifact.artifactId);
+      const runAttempt = vi.fn(async ({ identity, runId, methodResources }) => {
+        expect(identity.modelProfileRevision).toBe(originalIdentity.modelProfileRevision);
+        expect(identity.methodSetFingerprint).toBe(originalIdentity.methodSetFingerprint);
+        expect(methodResources).toEqual(originalMethodSet.resources);
+        return artifact(identity, runId, `evidence:${runId}`, `finding-${runId}`);
+      });
+      const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
+        metadataStore: harness.metadata,
+        runAttempt,
+        runTransition: vi.fn(),
+      });
+      const rotatedBaseIdentity = {
+        ...harness.baseIdentity,
+        modelProfileRevision: harness.baseIdentity.modelProfileRevision + 1,
+      };
+      const recovered = await workflow.executePassAt3({
+        baseIdentity: rotatedBaseIdentity,
+        user: harness.user,
+        idempotencyKey: "rotation-key",
+      });
+      expect(runAttempt).toHaveBeenCalledTimes(3);
+      expect(recovered.target).toEqual(evaluationTarget(originalIdentity));
+      expect(recovered.attempts.map(({ artifact }) => artifact.artifactId)).toEqual(originalArtifactIds);
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("resumes an interrupted transition with its reserved identity after Method/Profile rotation", async () => {
+    const harness = createHarness();
+    try {
+      const runAttempt = vi.fn(async ({ identity, runId }: {
+        identity: PreschoolAdditionalAiInsightArtifactIdentity;
+        runId: string;
+      }) => artifact(identity, runId, `evidence:${identity.dataSnapshotId}`, `finding-${identity.dataSnapshotId}`));
+      const runTransition = vi.fn(async ({ runId, sessionId }: { runId: string; sessionId: string }) => ({
+        answer: JSON.stringify({ outcomes: [{ transition: "no-material-change" }] }),
+        runId,
+        sessionId,
+      }));
+      let generatedId = 0;
+      const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
+        metadataStore: harness.metadata,
+        runAttempt,
+        runTransition,
+        createId: () => `new-request-id-${generatedId += 1}`,
+      });
+      const previous = reviewAllPassing(harness, await workflow.executePassAt3({
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        idempotencyKey: "transition-rotation-previous",
+      }));
+      const previousAttempt = previous.attempts.find((attempt) => attempt.status === "completed")!;
+      const currentBaseIdentity = createBaseIdentity("snapshot-b", "release-b");
+      const currentIdentity = createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity: currentBaseIdentity });
+      const methodSet = resolveCurrentAdditionalAiInsightMethodSet(currentBaseIdentity.workspaceId);
+      harness.metadata.energyIq.additionalInsightEvaluations.reserveTransition({
+        transitionId: "reserved-transition-id",
+        idempotencyKey: "transition-rotation-key",
+        requestedBy: harness.user.id,
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+        currentTarget: evaluationTarget(currentIdentity),
+        generationProviderRunId: "reserved-transition-generation-run",
+        generationProviderSessionId: "reserved-transition-generation-session",
+        comparisonProviderRunId: "reserved-transition-comparison-run",
+        comparisonProviderSessionId: "reserved-transition-comparison-session",
+        runtimeIdentity: currentIdentity,
+        methodResources: methodSet.resources,
+      });
+      runAttempt.mockClear();
+      runTransition.mockClear();
+
+      const recovered = await workflow.executeTransition({
+        baseIdentity: { ...currentBaseIdentity, modelProfileRevision: currentBaseIdentity.modelProfileRevision + 1 },
+        user: harness.user,
+        idempotencyKey: "transition-rotation-key",
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+      });
+
+      expect(recovered).toMatchObject({ status: "completed", transitionId: "reserved-transition-id" });
+      expect(runAttempt).toHaveBeenCalledTimes(1);
+      expect(runAttempt.mock.calls[0]![0]).toMatchObject({
+        identity: currentIdentity,
+        runId: "reserved-transition-generation-run",
+        sessionId: "reserved-transition-generation-session",
+        methodResources: methodSet.resources,
+      });
+      expect(runTransition).toHaveBeenCalledWith(expect.objectContaining({
+        runId: "reserved-transition-comparison-run",
+        sessionId: "reserved-transition-comparison-session",
+      }));
+    } finally {
+      harness.close();
+    }
+  });
+
   it("regenerates B once, runs an Evidence-bound comparison, and persists No material change without A Evidence reuse", async () => {
     const harness = createHarness();
     try {
@@ -326,6 +445,97 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
     }
   });
 
+  it("heartbeats long Provider claims so Promise.all replays do not duplicate attempts or transition stages", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-14T00:00:00.000Z"));
+    const harness = createHarness();
+    try {
+      const pendingAttempts = new Map<string, () => void>();
+      const runAttempt = vi.fn(({ identity, runId }: {
+        identity: PreschoolAdditionalAiInsightArtifactIdentity;
+        runId: string;
+      }) => new Promise<AdditionalAiInsightsArtifact>((resolve) => {
+        pendingAttempts.set(runId, () => {
+          pendingAttempts.delete(runId);
+          resolve(artifact(identity, runId, "analysis.summary.usage_kwh", `finding-${runId}`));
+        });
+      }));
+      let resolveComparison: (() => void) | undefined;
+      const runTransition = vi.fn(({ runId, sessionId }: { runId: string; sessionId: string }) => (
+        new Promise<{ answer: string; runId: string; sessionId: string }>((resolve) => {
+          resolveComparison = () => resolve({
+            answer: JSON.stringify({ outcomes: [{ transition: "no-material-change" }] }),
+            runId,
+            sessionId,
+          });
+        })
+      ));
+      const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
+        metadataStore: harness.metadata,
+        runAttempt,
+        runTransition,
+      });
+      const evaluationInput = {
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        idempotencyKey: "long-running-evaluation",
+      };
+      const firstEvaluation = workflow.executePassAt3(evaluationInput);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(6 * 60_000);
+      const secondEvaluation = workflow.executePassAt3(evaluationInput);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(runAttempt.mock.calls.map(([call]) => call.runId)).toEqual([
+        expect.any(String),
+        expect.any(String),
+      ]);
+      expect(new Set(runAttempt.mock.calls.map(([call]) => call.runId))).toHaveLength(2);
+      for (const release of [...pendingAttempts.values()]) release();
+      await vi.advanceTimersByTimeAsync(0);
+      for (const release of [...pendingAttempts.values()]) release();
+      await vi.advanceTimersByTimeAsync(0);
+      const evaluations = await Promise.all([firstEvaluation, secondEvaluation]);
+      expect(runAttempt).toHaveBeenCalledTimes(3);
+      expect(new Set(runAttempt.mock.calls.map(([call]) => call.runId))).toHaveLength(3);
+
+      const reviewed = reviewAllPassing(harness, evaluations.find(({ status }) => status === "awaiting-human-review")!);
+      const previousAttempt = reviewed.attempts.find((attempt) => attempt.status === "completed")!;
+      const transitionInput = {
+        baseIdentity: createBaseIdentity("snapshot-b", "release-b"),
+        user: harness.user,
+        idempotencyKey: "long-running-transition",
+        previousEvaluationId: reviewed.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+      };
+      const firstTransition = workflow.executeTransition(transitionInput);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(6 * 60_000);
+      const transitionReplayDuringGeneration = workflow.executeTransition(transitionInput);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(runAttempt).toHaveBeenCalledTimes(4);
+      for (const release of [...pendingAttempts.values()]) release();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(runTransition).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(6 * 60_000);
+      const transitionReplayDuringComparison = workflow.executeTransition(transitionInput);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(runTransition).toHaveBeenCalledTimes(1);
+      resolveComparison?.();
+      await vi.advanceTimersByTimeAsync(0);
+      const transitions = await Promise.all([
+        firstTransition,
+        transitionReplayDuringGeneration,
+        transitionReplayDuringComparison,
+      ]);
+      expect(transitions[0]).toMatchObject({ status: "completed" });
+      expect(runAttempt).toHaveBeenCalledTimes(4);
+      expect(runTransition).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+      harness.close();
+    }
+  });
+
   it("rejects unsupported A numbers and malformed B lineage before comparison", async () => {
     const harness = createHarness();
     try {
@@ -387,6 +597,110 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
       harness.close();
     }
   });
+
+  it("normalizes lineage-bound numbers, scans all Finding fields, and allows unrelated B facts", async () => {
+    const harness = createHarness();
+    try {
+      let mode: "supported" | "unrelated" = "supported";
+      const runAttempt = vi.fn(async ({ identity, runId }: {
+        identity: PreschoolAdditionalAiInsightArtifactIdentity;
+        runId: string;
+      }) => {
+        const value = artifact(identity, runId, "analysis.summary.usage_kwh", identity.dataSnapshotId === "snapshot-a"
+          ? "finding-a"
+          : "finding-b");
+        if (identity.dataSnapshotId === "snapshot-b") {
+          const primaryFact = value.evidenceLineage.facts[0]!;
+          if (!("value" in primaryFact)) throw new Error("test fixture expected value fact");
+          primaryFact.value = mode === "supported" ? 10 : 12;
+          value.evidenceLineage.facts.push({
+            ...value.evidenceLineage.facts[0]!,
+            id: "analysis.unrelated.same_number",
+            value: 10,
+          });
+          value.findings[0]!.title = "10.0 kWh remains material";
+          value.findings[0]!.text = "The supported value is 1e1 kWh.";
+          value.findings[0]!.deepDiveQuestion = "Should we verify 10 kWh again?";
+        }
+        return value;
+      });
+      const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
+        metadataStore: harness.metadata,
+        runAttempt,
+        runTransition: vi.fn(async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ outcomes: [{ transition: "still-supported", previousFindingId: "finding-a", previousEvidenceRefs: ["analysis.summary.usage_kwh"], currentFindingId: "finding-b", currentEvidenceRefs: ["analysis.summary.usage_kwh"] }] }),
+          runId,
+          sessionId,
+        })),
+      });
+      const previous = reviewAllPassing(harness, await workflow.executePassAt3({
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        idempotencyKey: "numeric-lineage-a",
+      }));
+      const previousAttempt = previous.attempts.find((attempt) => attempt.status === "completed")!;
+      const supported = await workflow.executeTransition({
+        baseIdentity: createBaseIdentity("snapshot-b", "release-b"),
+        user: harness.user,
+        idempotencyKey: "numeric-lineage-supported",
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+      });
+      expect(supported.status).toBe("completed");
+
+      mode = "unrelated";
+      const unrelated = await workflow.executeTransition({
+        baseIdentity: createBaseIdentity("snapshot-b", "release-b"),
+        user: harness.user,
+        idempotencyKey: "numeric-lineage-unrelated",
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+      });
+      expect(unrelated).toMatchObject({
+        status: "failed",
+        errorCode: "PRESCHOOL_ADDITIONAL_TRANSITION_REUSES_PREVIOUS_NUMBER",
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("accepts a Resolved outcome with only the disappeared A Finding lineage", async () => {
+    const harness = createHarness();
+    try {
+      const runAttempt = vi.fn(async ({ identity, runId }: { identity: PreschoolAdditionalAiInsightArtifactIdentity; runId: string }) => (
+        artifact(identity, runId, identity.dataSnapshotId === "snapshot-a" ? "evidence:a" : "evidence:b", identity.dataSnapshotId === "snapshot-a" ? "finding-a" : "finding-b")
+      ));
+      const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
+        metadataStore: harness.metadata,
+        runAttempt,
+        runTransition: vi.fn(async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ outcomes: [{ transition: "resolved", previousFindingId: "finding-a", previousEvidenceRefs: ["evidence:a"] }] }),
+          runId,
+          sessionId,
+        })),
+      });
+      const previous = reviewAllPassing(harness, await workflow.executePassAt3({
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        idempotencyKey: "resolved-a",
+      }));
+      const previousAttempt = previous.attempts.find((attempt) => attempt.status === "completed")!;
+      const resolved = await workflow.executeTransition({
+        baseIdentity: createBaseIdentity("snapshot-b", "release-b"),
+        user: harness.user,
+        idempotencyKey: "resolved-a-b",
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+      });
+      expect(resolved).toMatchObject({
+        status: "completed",
+        outcomes: [{ transition: "resolved", previous: { findingId: "finding-a" } }],
+      });
+    } finally {
+      harness.close();
+    }
+  });
 });
 
 const createHarness = () => {
@@ -444,7 +758,9 @@ const reviewAllPassing = (
         userValue: 4,
       },
       contentUsefulness: {
-        summary: { applicable: false },
+        summary: entry.summary === undefined
+          ? { applicable: false }
+          : { applicable: true, score: 4 },
         insights: entry.findings.map(({ reviewFindingToken }) => ({ reviewFindingToken, score: 4 })),
       },
       expectedRevision: 0,

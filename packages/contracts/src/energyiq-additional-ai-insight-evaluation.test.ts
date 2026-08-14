@@ -130,7 +130,7 @@ describe("Additional AI Insight pass@3 evaluation contract", () => {
   it("requires Summary and every blinded Insight usefulness to pass without averaging", () => {
     const batch = validBatch();
     const entry = batch.reviewPack.entries.find(({ reviewToken }) => reviewToken === "blind-a")!;
-    entry.summary = { text: "A low-value limitation-only Summary." };
+    entry.summary = { reviewSummaryToken: "blind-summary-a", text: "A low-value limitation-only Summary." };
     const attempt = completedAttempt(batch, 0);
     attempt.humanReview!.contentUsefulness = {
       summary: { applicable: true, score: 2 },
@@ -218,9 +218,9 @@ describe("Additional AI Insight Snapshot A-to-B contract", () => {
     pairedOutcome(forged).current!.evidenceRefs = ["evidence:b:forged"];
     expect(additionalAiInsightTransitionIsValid(forged)).toBe(false);
 
-    const textOnly = validTransition("resolved");
-    Reflect.deleteProperty(pairedOutcome(textOnly), "current");
-    expect(additionalAiInsightTransitionIsValid(textOnly)).toBe(false);
+    const resolved = validTransition("resolved");
+    expect(resolved.outcomes[0]).not.toHaveProperty("current");
+    expect(additionalAiInsightTransitionIsValid(resolved)).toBe(true);
 
     const contradictory = validTransition("changed");
     contradictory.outcomes.push({
@@ -341,7 +341,9 @@ const validTransition = (
   };
   const outcome = transition === "new"
     ? { transition, current }
-    : { transition, previous, current };
+    : transition === "resolved"
+      ? { transition, previous }
+      : { transition, previous, current };
   return {
     contractRevision: "energyiq-additional-insight-transition-v1",
     transitionId: "transition-1",
@@ -404,9 +406,9 @@ const reservedArtifactIdentity = (ordinal: number) => ({
 
 const pairedOutcome = (
   record: AdditionalAiInsightTransitionRecord,
-): Extract<AdditionalAiInsightTransitionRecord["outcomes"][number], { transition: "changed" | "still-supported" | "resolved" }> => {
+): Extract<AdditionalAiInsightTransitionRecord["outcomes"][number], { transition: "changed" | "still-supported" }> => {
   const outcome = record.outcomes[0];
-  if (!outcome || outcome.transition === "new" || outcome.transition === "no-material-change") {
+  if (!outcome || (outcome.transition !== "changed" && outcome.transition !== "still-supported")) {
     throw new Error("test fixture expected paired outcome");
   }
   return outcome;

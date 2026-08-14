@@ -117,7 +117,7 @@ export type AdditionalAiInsightEvaluationRunningAttempt = {
 export type AdditionalAiInsightBlindedReviewEntry = {
   label: "Review A" | "Review B" | "Review C";
   reviewToken: string;
-  summary?: { text: string };
+  summary?: { reviewSummaryToken: string; text: string };
   findings: Array<{
     reviewFindingToken: string;
     title: string;
@@ -173,9 +173,12 @@ export type AdditionalAiInsightTransitionOutcome = {
   transition: "new";
   current: AdditionalAiInsightTransitionFindingRef;
 } | {
-  transition: "changed" | "still-supported" | "resolved";
+  transition: "changed" | "still-supported";
   previous: AdditionalAiInsightTransitionFindingRef;
   current: AdditionalAiInsightTransitionFindingRef;
+} | {
+  transition: "resolved";
+  previous: AdditionalAiInsightTransitionFindingRef;
 } | {
   transition: "no-material-change";
 };
@@ -546,7 +549,10 @@ const reviewPackIsValid = (value: unknown): value is AdditionalAiInsightEvaluati
     && onlyKeys(entry, ["label", "reviewToken", "summary", "findings"])
     && entry.label === (["Review A", "Review B", "Review C"] as const)[index]
     && nonEmptyString(entry.reviewToken)
-    && (entry.summary === undefined || (isRecord(entry.summary) && onlyKeys(entry.summary, ["text"]) && nonEmptyString(entry.summary.text)))
+    && (entry.summary === undefined || (isRecord(entry.summary)
+      && onlyKeys(entry.summary, ["reviewSummaryToken", "text"])
+      && nonEmptyString(entry.summary.reviewSummaryToken)
+      && nonEmptyString(entry.summary.text)))
     && Array.isArray(entry.findings)
     && entry.findings.length <= 3
     && entry.findings.every((finding) => isRecord(finding)
@@ -571,6 +577,8 @@ const reviewPackIsValid = (value: unknown): value is AdditionalAiInsightEvaluati
           || finding.alert.certainty === "anomaly"
           || finding.alert.certainty === "possible")))))
   && unique(value.entries.map(({ reviewToken }) => reviewToken))
+  && unique((value.entries as AdditionalAiInsightBlindedReviewEntry[])
+    .flatMap(({ summary }) => summary ? [summary.reviewSummaryToken] : []))
   && unique((value.entries as AdditionalAiInsightBlindedReviewEntry[])
     .flatMap(({ findings }) => findings.map(({ reviewFindingToken }) => reviewFindingToken)));
 
@@ -689,10 +697,14 @@ const transitionOutcomeIsValid = (
     return onlyKeys(value, ["transition", "current"])
       && transitionFindingRefIsValid(value.current, currentArtifact);
   }
-  if (value.transition === "changed" || value.transition === "still-supported" || value.transition === "resolved") {
+  if (value.transition === "changed" || value.transition === "still-supported") {
     return onlyKeys(value, ["transition", "previous", "current"])
       && transitionFindingRefIsValid(value.previous, previousArtifact)
       && transitionFindingRefIsValid(value.current, currentArtifact);
+  }
+  if (value.transition === "resolved") {
+    return onlyKeys(value, ["transition", "previous"])
+      && transitionFindingRefIsValid(value.previous, previousArtifact);
   }
   return false;
 };
