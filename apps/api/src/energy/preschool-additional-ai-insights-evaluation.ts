@@ -96,8 +96,9 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
         expectedProjectId: baseIdentity.projectId,
         idempotencyKey,
       });
+      if (existing && existing.record.status !== "running") return existing.record;
       const { identity, expectedMethods, methodResources, modelProfileSnapshot } = existing
-        ? restoreReservedIdentity(input.metadataStore, baseIdentity, existing.reservation)
+        ? restoreReservedIdentity(baseIdentity, existing.reservation)
         : resolveIdentity(baseIdentity);
       const target = evaluationTarget(identity);
       const evaluationId = `additional-evaluation-${createId()}`;
@@ -206,8 +207,20 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
         expectedProjectId: baseIdentity.projectId,
         idempotencyKey,
       });
+      if (existing) {
+        if (existing.previousEvaluationId !== previousEvaluationId
+          || existing.previousAttemptId !== previousAttemptId) {
+          throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_IDEMPOTENCY_CONFLICT");
+        }
+        const stored = input.metadataStore.energyIq.additionalInsightEvaluations.getTransition({
+          transitionId: existing.transitionId,
+          expectedWorkspaceId: baseIdentity.workspaceId,
+          expectedProjectId: baseIdentity.projectId,
+        });
+        if (stored.status !== "running") return stored;
+      }
       const { identity, expectedMethods, methodResources, modelProfileSnapshot } = existing
-        ? restoreReservedIdentity(input.metadataStore, baseIdentity, {
+        ? restoreReservedIdentity(baseIdentity, {
           target: existing.currentTarget,
           methodResources: existing.methodResources,
           ...(existing.runtimeIdentity ? { runtimeIdentity: existing.runtimeIdentity } : {}),
@@ -362,7 +375,6 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
 };
 
 const restoreReservedIdentity = (
-  metadataStore: MetadataStore,
   baseIdentity: OverviewAiArtifactIdentityV13,
   reservation: {
     target: AdditionalAiInsightEvaluationTarget;
@@ -403,8 +415,10 @@ const restoreReservedIdentity = (
   if (JSON.stringify(evaluationTarget(identity)) !== JSON.stringify(reservation.target)) {
     throw new Error("PRESCHOOL_ADDITIONAL_EVALUATION_RESERVED_IDENTITY_INVALID");
   }
-  const modelProfileSnapshot = reservation.modelProfileSnapshot
-    ?? resolveWorkspaceDefaultModelProfileSnapshot(metadataStore);
+  const modelProfileSnapshot = reservation.modelProfileSnapshot;
+  if (!modelProfileSnapshot) {
+    throw new Error("PRESCHOOL_ADDITIONAL_EVALUATION_RESERVED_MODEL_PROFILE_UNAVAILABLE");
+  }
   if (modelProfileSnapshot.bindingRevision !== reservation.target.modelProfileRevision) {
     throw new Error("PRESCHOOL_ADDITIONAL_EVALUATION_RESERVED_MODEL_PROFILE_UNAVAILABLE");
   }

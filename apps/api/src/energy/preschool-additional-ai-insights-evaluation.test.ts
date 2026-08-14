@@ -128,6 +128,7 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
         requestedBy: harness.user.id,
         target: evaluationTarget(identity),
         attempts,
+        modelProfileSnapshot: resolveWorkspaceDefaultModelProfileSnapshot(harness.metadata),
       });
       const reservedArtifactIds = interrupted.record.attempts.map(({ artifact }) => artifact.artifactId);
       const runAttempt = vi.fn(async ({ identity, runId }: {
@@ -230,6 +231,69 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
     }
   });
 
+  it("fails closed a migrated running evaluation when its historical Model Profile snapshot is unavailable", async () => {
+    const harness = createHarness();
+    try {
+      const identity = createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity: harness.baseIdentity });
+      const methodSet = resolveCurrentAdditionalAiInsightMethodSet(harness.baseIdentity.workspaceId);
+      harness.metadata.energyIq.additionalInsightEvaluations.reserveEvaluation({
+        evaluationId: "legacy-running-evaluation",
+        idempotencyKey: "legacy-running-evaluation-key",
+        requestedBy: harness.user.id,
+        target: evaluationTarget(identity),
+        attempts: [1, 2, 3].map((ordinal) => ({
+          attemptId: `legacy-running-attempt-${ordinal}`,
+          ordinal,
+          providerRunId: `legacy-running-run-${ordinal}`,
+          providerSessionId: `legacy-running-session-${ordinal}`,
+        })),
+        runtimeIdentity: identity,
+        methodResources: methodSet.resources,
+      });
+      const profile = harness.metadata.configResources.get({
+        id: "profile-a",
+        workspace_id: "default",
+        user_id: harness.user.id,
+        kind: "model-profile",
+      });
+      harness.metadata.configResources.upsert({
+        id: profile.id,
+        workspace_id: profile.workspace_id,
+        user_id: profile.user_id,
+        kind: profile.kind,
+        name: profile.name,
+        payload: { provider: "openai-compatible", modelName: "model-after-migration", baseUrl: "https://changed-profile.test/v1" },
+        default_enabled: true,
+        status: "connected",
+        expected_revision: profile.revision,
+      });
+      expect(resolveWorkspaceDefaultModelProfileSnapshot(harness.metadata)).toMatchObject({
+        bindingRevision: identity.modelProfileRevision,
+        profiles: [{ resource: { revision: profile.revision + 1, payload: { modelName: "model-after-migration" } } }],
+      });
+      const runAttempt = vi.fn(async ({ runId }: { runId: string }) => artifact(
+        identity,
+        runId,
+        `evidence:${runId}`,
+        `finding-${runId}`,
+      ));
+      const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
+        metadataStore: harness.metadata,
+        runAttempt,
+        runTransition: vi.fn(),
+      });
+
+      await expect(workflow.executePassAt3({
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        idempotencyKey: "legacy-running-evaluation-key",
+      })).rejects.toThrow(/PRESCHOOL_ADDITIONAL_EVALUATION_RESERVED_MODEL_PROFILE_UNAVAILABLE/);
+      expect(runAttempt).not.toHaveBeenCalled();
+    } finally {
+      harness.close();
+    }
+  });
+
   it("resumes an interrupted transition with its reserved identity after Method/Profile rotation", async () => {
     const harness = createHarness();
     try {
@@ -271,6 +335,7 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
         comparisonProviderSessionId: "reserved-transition-comparison-session",
         runtimeIdentity: currentIdentity,
         methodResources: methodSet.resources,
+        modelProfileSnapshot: resolveWorkspaceDefaultModelProfileSnapshot(harness.metadata),
       });
       runAttempt.mockClear();
       runTransition.mockClear();
@@ -295,6 +360,172 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
         runId: "reserved-transition-comparison-run",
         sessionId: "reserved-transition-comparison-session",
       }));
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("fails closed a migrated running transition when its historical Model Profile snapshot is unavailable", async () => {
+    const harness = createHarness();
+    try {
+      const runAttempt = vi.fn(async ({ identity, runId }: {
+        identity: PreschoolAdditionalAiInsightArtifactIdentity;
+        runId: string;
+      }) => artifact(identity, runId, `evidence:${identity.dataSnapshotId}`, `finding-${identity.dataSnapshotId}`));
+      const runTransition = vi.fn(async ({ runId, sessionId }: { runId: string; sessionId: string }) => ({
+        answer: JSON.stringify({ outcomes: [{ transition: "no-material-change" }] }),
+        runId,
+        sessionId,
+      }));
+      const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
+        metadataStore: harness.metadata,
+        runAttempt,
+        runTransition,
+      });
+      const previous = reviewAllPassing(harness, await workflow.executePassAt3({
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        idempotencyKey: "legacy-transition-previous",
+      }));
+      const previousAttempt = previous.attempts.find((attempt) => attempt.status === "completed")!;
+      const currentBaseIdentity = createBaseIdentity("snapshot-b", "release-b");
+      const currentIdentity = createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity: currentBaseIdentity });
+      const methodSet = resolveCurrentAdditionalAiInsightMethodSet(currentBaseIdentity.workspaceId);
+      harness.metadata.energyIq.additionalInsightEvaluations.reserveTransition({
+        transitionId: "legacy-running-transition",
+        idempotencyKey: "legacy-running-transition-key",
+        requestedBy: harness.user.id,
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+        currentTarget: evaluationTarget(currentIdentity),
+        generationProviderRunId: "legacy-transition-generation-run",
+        generationProviderSessionId: "legacy-transition-generation-session",
+        comparisonProviderRunId: "legacy-transition-comparison-run",
+        comparisonProviderSessionId: "legacy-transition-comparison-session",
+        runtimeIdentity: currentIdentity,
+        methodResources: methodSet.resources,
+      });
+      const profile = harness.metadata.configResources.get({
+        id: "profile-a",
+        workspace_id: "default",
+        user_id: harness.user.id,
+        kind: "model-profile",
+      });
+      harness.metadata.configResources.upsert({
+        id: profile.id,
+        workspace_id: profile.workspace_id,
+        user_id: profile.user_id,
+        kind: profile.kind,
+        name: profile.name,
+        payload: { provider: "openai-compatible", modelName: "model-after-transition-migration", baseUrl: "https://changed-transition-profile.test/v1" },
+        default_enabled: true,
+        status: "connected",
+        expected_revision: profile.revision,
+      });
+      expect(resolveWorkspaceDefaultModelProfileSnapshot(harness.metadata)).toMatchObject({
+        bindingRevision: currentIdentity.modelProfileRevision,
+        profiles: [{ resource: { revision: profile.revision + 1, payload: { modelName: "model-after-transition-migration" } } }],
+      });
+      runAttempt.mockClear();
+      runTransition.mockClear();
+
+      await expect(workflow.executeTransition({
+        baseIdentity: currentBaseIdentity,
+        user: harness.user,
+        idempotencyKey: "legacy-running-transition-key",
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+      })).rejects.toThrow(/PRESCHOOL_ADDITIONAL_EVALUATION_RESERVED_MODEL_PROFILE_UNAVAILABLE/);
+      expect(runAttempt).not.toHaveBeenCalled();
+      expect(runTransition).not.toHaveBeenCalled();
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("keeps terminal historical evaluation and transition records readable without a Model Profile snapshot", async () => {
+    const harness = createHarness();
+    try {
+      const runAttempt = vi.fn(async ({ identity, runId }: {
+        identity: PreschoolAdditionalAiInsightArtifactIdentity;
+        runId: string;
+      }) => artifact(identity, runId, `evidence:${identity.dataSnapshotId}`, `finding-${identity.dataSnapshotId}`));
+      const runTransition = vi.fn(async ({ runId, sessionId }: { runId: string; sessionId: string }) => ({
+        answer: JSON.stringify({ outcomes: [{ transition: "no-material-change" }] }),
+        runId,
+        sessionId,
+      }));
+      const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
+        metadataStore: harness.metadata,
+        runAttempt,
+        runTransition,
+      });
+      const previous = reviewAllPassing(harness, await workflow.executePassAt3({
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        idempotencyKey: "terminal-historical-evaluation",
+      }));
+      const previousAttempt = previous.attempts.find((attempt) => attempt.status === "completed")!;
+      const currentBaseIdentity = createBaseIdentity("snapshot-b", "release-b");
+      const transition = await workflow.executeTransition({
+        baseIdentity: currentBaseIdentity,
+        user: harness.user,
+        idempotencyKey: "terminal-historical-transition",
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+      });
+      const removeSnapshot = (table: string, id: string): void => {
+        const row = harness.metadata.db.prepare(`SELECT reservation_json FROM ${table} WHERE id = ?`).get(id) as {
+          reservation_json: string;
+        };
+        const reservation = JSON.parse(row.reservation_json) as Record<string, unknown>;
+        delete reservation.modelProfileSnapshot;
+        harness.metadata.db.prepare(`UPDATE ${table} SET reservation_json = ? WHERE id = ?`)
+          .run(JSON.stringify(reservation), id);
+      };
+      removeSnapshot("energyiq_additional_insight_evaluations", previous.evaluationId);
+      removeSnapshot("energyiq_additional_insight_transitions", transition.transitionId);
+      const profile = harness.metadata.configResources.get({
+        id: "profile-a",
+        workspace_id: "default",
+        user_id: harness.user.id,
+        kind: "model-profile",
+      });
+      harness.metadata.configResources.upsert({
+        id: profile.id,
+        workspace_id: profile.workspace_id,
+        user_id: profile.user_id,
+        kind: profile.kind,
+        name: profile.name,
+        payload: { provider: "openai-compatible", modelName: "model-after-terminal", baseUrl: "https://changed-terminal-profile.test/v1" },
+        default_enabled: true,
+        status: "connected",
+        expected_revision: profile.revision,
+      });
+      runAttempt.mockClear();
+      runTransition.mockClear();
+
+      expect(await workflow.executePassAt3({
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        idempotencyKey: "terminal-historical-evaluation",
+      })).toEqual(previous);
+      await expect(workflow.executeTransition({
+        baseIdentity: currentBaseIdentity,
+        user: harness.user,
+        idempotencyKey: "terminal-historical-transition",
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: "different-previous-attempt",
+      })).rejects.toThrow(/ENERGYIQ_ADDITIONAL_TRANSITION_IDEMPOTENCY_CONFLICT/);
+      expect(await workflow.executeTransition({
+        baseIdentity: currentBaseIdentity,
+        user: harness.user,
+        idempotencyKey: "terminal-historical-transition",
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+      })).toEqual(transition);
+      expect(runAttempt).not.toHaveBeenCalled();
+      expect(runTransition).not.toHaveBeenCalled();
     } finally {
       harness.close();
     }
