@@ -196,7 +196,7 @@ export function DecisionDashboard() {
           <div className="mb-2 flex items-center gap-2 text-xs font-medium text-muted">
             <span>{activeProject?.name ?? "Ngee Ann Polytechnic"}</span>
             <EnergyIcon name="chevron" className="h-3 w-3" />
-            <span>Portfolio analysis</span>
+            <span>Energy analysis</span>
           </div>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">Energy & water analysis</h1>
           <p className="mt-1.5 max-w-2xl text-sm leading-6 text-muted">

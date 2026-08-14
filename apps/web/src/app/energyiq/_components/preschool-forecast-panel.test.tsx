@@ -31,6 +31,7 @@ describe("PreschoolForecastPanel", () => {
 
     expect(container.querySelector('[data-forecast-grain="daily"]')).not.toBeNull();
     expect(container.querySelector('[data-forecast-scope="portfolio"]')?.textContent).toContain("24,348 kWh");
+    expect(container.querySelector('option[value="portfolio"]')?.textContent).toBe("All centres");
     expect(container.textContent).toContain("1,400 kWh");
     expect(container.querySelectorAll("[data-forecast-kpi]")).toHaveLength(4);
     expect(container.querySelector('path[data-series="original-estimate"]')?.getAttribute("stroke-dasharray")).not.toBeNull();

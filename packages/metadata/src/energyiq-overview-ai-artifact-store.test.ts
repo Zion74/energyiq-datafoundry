@@ -378,6 +378,14 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
         ...result,
         summary: { text: "Duplicated Evidence.", evidenceRefs: ["evidence:summary", "evidence:summary"] },
       }));
+      reject("summary-over-presentation-budget", (result) => ({
+        ...result,
+        summary: { text: "Evidence-backed summary. ".repeat(20), evidenceRefs: ["evidence:summary"] },
+      }));
+      reject("limitation-over-presentation-budget", (result) => ({
+        ...result,
+        limitation: "Evidence limitation. ".repeat(20),
+      }));
       reject("insight-empty-evidence", (result) => ({
         ...result,
         insights: [sectionV4Insight("insight-1", [])],
@@ -386,6 +394,14 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
       reject("insight-duplicate-evidence", (result) => ({
         ...result,
         insights: [sectionV4Insight("insight-1", ["evidence:1", "evidence:1"])],
+        publication: publication({ discovered: 1, accepted: 1, published: 1 }),
+      }));
+      reject("insight-over-presentation-budget", (result) => ({
+        ...result,
+        insights: [{
+          ...sectionV4Insight("insight-1", ["evidence:1"]),
+          text: "Evidence-backed insight. ".repeat(30),
+        }],
         publication: publication({ discovered: 1, accepted: 1, published: 1 }),
       }));
       reject("four-insights", (result) => ({
@@ -738,9 +754,9 @@ const sectionV4Identity = (
   analysisPackId: "preschool-section-pack",
   analysisPackRevision: "v2",
   outputContractRevision: "preschool-section-interpretation-v4",
-  validatorRevision: "acceptance-validator-v5",
+  validatorRevision: "acceptance-validator-v6",
   workflowRevision: "discover-tools-accept-publish-v2",
-  investigatorPromptRevision: "discovery-prompt-v4",
+  investigatorPromptRevision: "discovery-prompt-v5",
   capabilityRevision: "scoped-read-only-v1",
   publicationRevision: "v1",
 });

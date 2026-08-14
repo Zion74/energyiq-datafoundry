@@ -49,6 +49,8 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(markup).not.toContain("Centre rows returned by the authoritative Project analysis.");
     expect(markup).toContain('id="preschool-decision-summary"');
     expect(markup).toContain("At a glance");
+    expect(markup).toContain('data-at-a-glance-grid="true"');
+    expect(markup).toContain("md:grid-cols-2");
     expect(markup).toContain("Key Findings");
     expect(markup).toContain("Restored cross-section timing pattern");
     expect(markup).not.toContain("Portfolio energy overview");
@@ -246,7 +248,7 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     expect(forecastMarkup).toContain("Daily");
     expect(forecastMarkup).toContain("Weekly");
     expect(forecastMarkup).toContain("Monthly");
-    expect(forecastMarkup).toContain("Portfolio");
+    expect(forecastMarkup).toContain("All centres");
     expect(forecastMarkup).toContain("Centre A");
     expect(forecastMarkup).toContain('data-series="original-estimate"');
     expect(forecastMarkup).toContain('data-series="current-outlook"');
@@ -287,7 +289,7 @@ describe("PreschoolOverviewRenderer reading flow", () => {
       "1. Centre G",
     ]);
     expect([...benchmarkSection.querySelectorAll("[data-benchmark-priority-centre]")].map((node) => node.getAttribute("data-benchmark-priority-centre"))).toEqual(["G", "M", "J"]);
-    expect(benchmarkSection.textContent).toContain("Portfolio P75 review threshold");
+    expect(benchmarkSection.textContent).toContain("All-centre P75 review threshold");
     expect(benchmarkSection.querySelectorAll("[data-benchmark-summary]")).toHaveLength(2);
     expect(benchmarkSection.textContent).toContain("2.2 — EUI Benchmark");
     expect(benchmarkSection.textContent).toContain("2.3 — Per-pax Energy Benchmark");
@@ -629,7 +631,7 @@ describe("PreschoolOverviewRenderer reading flow", () => {
       "Total operating energy",
       "4.1 Operating Energy by Appliance",
       "4.2 Operating Hours Spike Analysis",
-      "Supporting Evidence · all-hours Portfolio Appliance context",
+      "Supporting Evidence · all-hours Appliance context across all Centres",
       "Method, tariff and evidence",
     ].map((label) => operatingSection.textContent!.indexOf(label));
     expect(readingOrder.every((position) => position >= 0)).toBe(true);

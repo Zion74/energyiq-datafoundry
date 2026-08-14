@@ -628,7 +628,7 @@ export function buildPreschoolOverviewViewModel(
               ? (appliance.usageKwh / rows[0].usageKwh) * 100
               : 0,
           })),
-          detail: "Customer Appliance names are project-specific aliases for published Circuit labels; the nine rows reconcile to the Portfolio total.",
+          detail: "Customer Appliance names are project-specific aliases for published Circuit labels; the nine rows reconcile to the all-centres total.",
         }
       : {
           status: "unavailable",

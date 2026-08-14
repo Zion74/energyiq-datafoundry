@@ -74,11 +74,14 @@ describe("Preschool Overview AI structured output", () => {
     expect(candidateProperties.kind).toBeUndefined();
     expect(candidateProperties.candidateId).toBeUndefined();
     expect(candidateProperties).toMatchObject({
-      title: { type: "string" },
+      title: { type: "string", maxLength: 96 },
       epistemicStatus: { enum: ["observed", "inferred", "speculative"] },
-      text: { type: "string" },
+      text: { type: "string", maxLength: 480 },
       evidenceRefs: { type: "array" },
+      deepDiveQuestion: { type: "string", maxLength: 220 },
     });
+    expect(v4Properties.summary!.properties!.text).toMatchObject({ maxLength: 360 });
+    expect(v4Properties.limitation).toMatchObject({ maxLength: 320 });
     expect(resolveOverviewAiStageStructuredOutput("section-interpreter"))
       .toBe(PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V3);
     expect(resolveOverviewAiStageStructuredOutputV4("section-interpreter"))
@@ -88,8 +91,12 @@ describe("Preschool Overview AI structured output", () => {
     expect(PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4.schema).toMatchObject({
       required: ["status", "findings"],
       properties: {
-        summary: { type: "object" },
-        findings: { type: "array", maxItems: 3 },
+        summary: { type: "object", properties: { text: { maxLength: 420 } } },
+        findings: {
+          type: "array",
+          maxItems: 3,
+          items: { properties: { title: { maxLength: 96 }, text: { maxLength: 420 } } },
+        },
       },
     });
 

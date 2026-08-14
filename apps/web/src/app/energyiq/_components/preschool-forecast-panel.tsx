@@ -86,7 +86,7 @@ function AvailableForecastPanel({ forecast }: { forecast: ForecastView }) {
               >
                 {forecast.scopes.map((option) => (
                   <option key={option.scopeId} value={option.scopeId}>
-                    {option.role === "portfolio" ? "Portfolio" : option.label}
+                    {option.role === "portfolio" ? "All centres" : option.label}
                   </option>
                 ))}
               </select>
@@ -137,7 +137,7 @@ function ForecastStatusStrip({ forecast, scope }: { forecast: ForecastView; scop
         </div>
       </div>
       <div className="shrink-0 text-xs font-semibold text-foreground sm:text-right">
-        <p>{scope.role === "portfolio" ? "Portfolio" : scope.label} · {forecast.targetPeriod}</p>
+        <p>{scope.role === "portfolio" ? "All centres" : scope.label} · {forecast.targetPeriod}</p>
         <p className="mt-0.5 font-medium text-muted">{scope.actualThrough}</p>
       </div>
     </div>

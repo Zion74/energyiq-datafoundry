@@ -7,13 +7,21 @@ import type {
 } from "@datafoundry/contracts";
 
 import type { PreschoolSectionPackV2 } from "./preschool-section-pack-v2.js";
+import {
+  PRESCHOOL_SECTION_DEEP_DIVE_MAX_CHARS,
+  PRESCHOOL_SECTION_INSIGHT_LABEL_MAX_CHARS,
+  PRESCHOOL_SECTION_INSIGHT_TEXT_MAX_CHARS,
+  PRESCHOOL_SECTION_INSIGHT_TITLE_MAX_CHARS,
+  PRESCHOOL_SECTION_LIMITATION_MAX_CHARS,
+  PRESCHOOL_SECTION_SUMMARY_MAX_CHARS,
+} from "./preschool-overview-ai-structured-output.js";
 
 export const MAX_PRESCHOOL_SECTION_MODEL_PROJECTION_CHARS = 96_000;
 
-export type PreschoolSectionModelProjectionV1 = {
+export type PreschoolSectionModelProjectionV2 = {
   contract: {
     id: "preschool-section-model-projection";
-    revision: "v1";
+    revision: "v2";
   };
   sectionId: PreschoolSectionIdV4;
   audience: PreschoolSectionPackV2["audience"];
@@ -39,20 +47,18 @@ export type PreschoolSectionModelProjectionV1 = {
  */
 export const projectPreschoolSectionPackV2ForModel = (
   pack: PreschoolSectionPackV2,
-): PreschoolSectionModelProjectionV1 => {
-  const projection: PreschoolSectionModelProjectionV1 = {
+): PreschoolSectionModelProjectionV2 => {
+  const projection: PreschoolSectionModelProjectionV2 = {
     contract: {
       id: "preschool-section-model-projection",
-      revision: "v1",
+      revision: "v2",
     },
     sectionId: pack.sectionId,
     audience: pack.audience,
     analysisGoal: pack.analysisGoal,
     evidence: pack.evidence.map((evidence) => ({
       ...evidence,
-      value: pack.sectionId === "planning-outlook"
-        ? compactPlanningEvidenceValue(evidence.value)
-        : evidence.value,
+      value: projectEvidenceValue(pack.sectionId, evidence.value),
       entityRefs: [...evidence.entityRefs],
       evidenceRefs: [...evidence.evidenceRefs],
       ...(evidence.claimRelations
@@ -61,6 +67,7 @@ export const projectPreschoolSectionPackV2ForModel = (
     })),
     alreadyPresentedFacts: pack.alreadyPresentedFacts.map((fact) => ({
       ...fact,
+      value: projectEvidenceValue(pack.sectionId, fact.value),
       evidenceRefs: [...fact.evidenceRefs],
     })),
     crossSectionIndex: pack.crossSectionIndex.map((signal) => ({
@@ -114,6 +121,24 @@ const compactPlanningEvidenceValue = (value: unknown): unknown => {
         },
       }
     : value;
+};
+
+const projectEvidenceValue = (
+  sectionId: PreschoolSectionPackV2["sectionId"],
+  value: unknown,
+): unknown => {
+  if (sectionId === "planning-outlook") return compactPlanningEvidenceValue(value);
+  if ((sectionId !== "standby-wastage" && sectionId !== "operating-behaviour")
+    || !isRecord(value)
+    || typeof value.spikeCount !== "number"
+    || typeof value.centreCount !== "number"
+    || (typeof value.closedHoursKwh !== "number" && typeof value.operatingHoursKwh !== "number")) return value;
+  const { spikeCount, centreCount, ...rest } = value;
+  return {
+    ...rest,
+    flaggedSpikeCount: spikeCount,
+    centresWithFlaggedSpikes: centreCount,
+  };
 };
 
 const encodePlanningScopes = (values: unknown[]): Record<string, unknown> | null => {
@@ -216,6 +241,10 @@ export const parsePreschoolSectionDiscoveryV4 = (input: {
   const summary = parseSummary(parsed.summary);
   if (!summary) throw new Error("PRESCHOOL_SECTION_INTERPRETATION_SUMMARY_UNSUPPORTED");
   const limitation = optionalText(parsed.limitation);
+  if (parsed.limitation !== undefined
+    && (!limitation || limitation.length > PRESCHOOL_SECTION_LIMITATION_MAX_CHARS)) {
+    throw new Error("PRESCHOOL_SECTION_INTERPRETATION_SUMMARY_UNSUPPORTED");
+  }
   return {
     sectionId: input.expectedSectionId,
     binding: input.binding,
@@ -230,7 +259,8 @@ const parseSummary = (value: unknown): PreschoolSectionSummaryV4 | null => {
   if (!isRecord(value)) return null;
   const text = cleanText(value.text);
   const refs = parseEvidenceRefs(value.evidenceRefs);
-  if (!text || !refs || hasUnexpectedKeys(value, ["text", "evidenceRefs"])) return null;
+  if (!text || text.length > PRESCHOOL_SECTION_SUMMARY_MAX_CHARS
+    || !refs || hasUnexpectedKeys(value, ["text", "evidenceRefs"])) return null;
   return { text, evidenceRefs: refs };
 };
 
@@ -244,7 +274,11 @@ const parseCandidate = (value: unknown): PreschoolSectionInsightCandidateV4 => {
   const text = cleanText(value.text);
   const evidenceRefs = parseEvidenceRefs(value.evidenceRefs);
   const deepDiveQuestion = optionalText(value.deepDiveQuestion);
-  if (!title || !text || !evidenceRefs
+  if (!title || title.length > PRESCHOOL_SECTION_INSIGHT_TITLE_MAX_CHARS
+    || (label !== undefined && label.length > PRESCHOOL_SECTION_INSIGHT_LABEL_MAX_CHARS)
+    || !text || text.length > PRESCHOOL_SECTION_INSIGHT_TEXT_MAX_CHARS
+    || (deepDiveQuestion !== undefined && deepDiveQuestion.length > PRESCHOOL_SECTION_DEEP_DIVE_MAX_CHARS)
+    || !evidenceRefs
     || (value.epistemicStatus !== "observed"
       && value.epistemicStatus !== "inferred"
       && value.epistemicStatus !== "speculative")) return malformedCandidate();

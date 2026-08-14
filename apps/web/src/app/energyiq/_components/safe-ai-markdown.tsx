@@ -3,6 +3,10 @@ import ReactMarkdown from "react-markdown";
 
 const SAFE_AI_MARKDOWN_ELEMENTS = ["p", "br", "strong", "em"] as const;
 
+const normalizeHarmlessEmphasisWhitespace = (value: string): string => value
+  .replace(/\*\*([^*\n]*?\S)\s+\*\*/gu, "**$1**")
+  .replace(/_([^_\n]*?\S)\s+_/gu, "_$1_");
+
 export function SafeAiMarkdown({
   children,
   className,
@@ -22,7 +26,7 @@ export function SafeAiMarkdown({
           em: ({ children: emphasis }) => <em className="italic text-foreground">{emphasis}</em>,
         }}
       >
-        {children}
+        {normalizeHarmlessEmphasisWhitespace(children)}
       </ReactMarkdown>
     </div>
   );

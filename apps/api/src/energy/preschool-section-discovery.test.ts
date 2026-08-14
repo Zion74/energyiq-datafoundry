@@ -103,6 +103,42 @@ describe("Preschool Section discovery", () => {
     });
   });
 
+  it("clarifies that operating summary counts describe flagged spikes rather than the whole estate", () => {
+    const pack = richPack("operating-behaviour", 1);
+    pack.evidence[0] = {
+      id: "evidence:operating-summary",
+      label: "Operating-hour energy summary",
+      value: {
+        operatingHoursKwh: 21_818,
+        operatingHoursSharePct: 87.55,
+        spikeCount: 28,
+        centreCount: 14,
+      },
+      unit: "kWh, %",
+      entityRefs: [],
+      evidenceRefs: ["evidence:operating-summary"],
+    };
+    pack.alreadyPresentedFacts = [{
+      id: "page:operating-summary",
+      label: "Operating-hour energy summary",
+      value: pack.evidence[0].value,
+      unit: "kWh, %",
+      evidenceRefs: ["evidence:operating-summary"],
+    }];
+
+    const projection = projectPreschoolSectionPackV2ForModel(pack);
+    for (const projected of [projection.evidence[0]!, projection.alreadyPresentedFacts[0]!]) {
+      expect(projected.value).toMatchObject({
+        operatingHoursKwh: 21_818,
+        flaggedSpikeCount: 28,
+        centresWithFlaggedSpikes: 14,
+      });
+      expect(projected.value).not.toHaveProperty("spikeCount");
+      expect(projected.value).not.toHaveProperty("centreCount");
+    }
+    expect(pack.evidence[0].value).toMatchObject({ spikeCount: 28, centreCount: 14 });
+  });
+
   it("canonicalizes duplicate model Evidence references before acceptance", () => {
     const pack = richPack("standby-wastage", 1);
     const discovery = parsePreschoolSectionDiscoveryV4({
@@ -128,6 +164,21 @@ describe("Preschool Section discovery", () => {
     if (discovery.status !== "available") throw new Error("expected available discovery");
     expect(discovery.summary.evidenceRefs).toEqual(["evidence:1"]);
     expect(discovery.candidates[0]?.evidenceRefs).toEqual(["evidence:1"]);
+  });
+
+  it("rejects an over-budget limitation instead of silently dropping it", () => {
+    const pack = richPack("standby-wastage", 1);
+    expect(() => parsePreschoolSectionDiscoveryV4({
+      answer: JSON.stringify({
+        sectionId: "standby-wastage",
+        status: "available",
+        summary: { text: "One event is supported.", evidenceRefs: ["evidence:1"] },
+        candidates: [],
+        limitation: "L".repeat(321),
+      }),
+      expectedSectionId: "standby-wastage",
+      binding: pack.binding,
+    })).toThrow("PRESCHOOL_SECTION_INTERPRETATION_SUMMARY_UNSUPPORTED");
   });
 });
 

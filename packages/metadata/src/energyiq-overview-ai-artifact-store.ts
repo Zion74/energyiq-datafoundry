@@ -678,7 +678,9 @@ const requireSectionInterpretationResultV4 = (
     }
     return;
   }
-  if (!validSectionSummaryV4(summary) || !optionalString(parsed.limitation)) {
+  if (!validSectionSummaryV4(summary)
+    || !optionalString(parsed.limitation)
+    || (typeof parsed.limitation === "string" && parsed.limitation.length > 320)) {
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_RESULT_INVALID");
   }
 };
@@ -717,6 +719,7 @@ const validSectionToolAuditsV4 = (
 
 const validSectionSummaryV4 = (value: unknown): boolean => isRecord(value)
   && nonEmptyString(value.text)
+  && value.text.length <= 360
   && Array.isArray(value.evidenceRefs)
   && value.evidenceRefs.length > 0
   && value.evidenceRefs.every(nonEmptyString)
@@ -725,16 +728,21 @@ const validSectionSummaryV4 = (value: unknown): boolean => isRecord(value)
 const validSectionInsightV4 = (value: unknown): boolean => isRecord(value)
   && nonEmptyString(value.id)
   && nonEmptyString(value.title)
+  && value.title.length <= 96
   && optionalString(value.label)
+  && (value.label === undefined || (typeof value.label === "string" && value.label.length <= 48))
   && (value.epistemicStatus === "observed"
     || value.epistemicStatus === "inferred"
     || value.epistemicStatus === "speculative")
   && nonEmptyString(value.text)
+  && value.text.length <= 480
   && Array.isArray(value.evidenceRefs)
   && value.evidenceRefs.length > 0
   && value.evidenceRefs.every(nonEmptyString)
   && new Set(value.evidenceRefs).size === value.evidenceRefs.length
-  && optionalString(value.deepDiveQuestion);
+  && optionalString(value.deepDiveQuestion)
+  && (value.deepDiveQuestion === undefined
+    || (typeof value.deepDiveQuestion === "string" && value.deepDiveQuestion.length <= 220));
 
 const validSectionPublicationV4 = (
   value: unknown,
@@ -868,7 +876,10 @@ const validSectionV4ExecutionRevision = (identity: EnergyIqOverviewAiArtifactIde
     && identity.investigatorPromptRevision === "discovery-prompt-v3")
   || (identity.validatorRevision === "acceptance-validator-v5"
     && identity.workflowRevision === "discover-tools-accept-publish-v2"
-    && identity.investigatorPromptRevision === "discovery-prompt-v4");
+    && identity.investigatorPromptRevision === "discovery-prompt-v4")
+  || (identity.validatorRevision === "acceptance-validator-v6"
+    && identity.workflowRevision === "discover-tools-accept-publish-v2"
+    && identity.investigatorPromptRevision === "discovery-prompt-v5");
 
 const validExecutiveV4ExecutionRevision = (identity: EnergyIqOverviewAiArtifactIdentity): boolean =>
   (identity.validatorRevision === "preschool-executive-synthesis-validator-v5"
@@ -894,6 +905,10 @@ const validExecutiveV4ExecutionRevision = (identity: EnergyIqOverviewAiArtifactI
   || (identity.validatorRevision === "preschool-executive-synthesis-validator-v9"
     && identity.workflowRevision === "preschool-executive-synthesis-v9"
     && identity.investigatorPromptRevision === "preschool-executive-synthesis-prompt-v6"
+    && identity.capabilityRevision === "section-artifacts-and-overview-evidence-v2")
+  || (identity.validatorRevision === "preschool-executive-synthesis-validator-v10"
+    && identity.workflowRevision === "preschool-executive-synthesis-v9"
+    && identity.investigatorPromptRevision === "preschool-executive-synthesis-prompt-v7"
     && identity.capabilityRevision === "section-artifacts-and-overview-evidence-v2");
 
 const requireExecutiveSourceLineageV4 = (input: {
@@ -1060,6 +1075,7 @@ const validExecutiveOverviewFactV4 = (value: unknown): boolean => isRecord(value
 
 const validExecutiveSummaryV4 = (value: unknown): boolean => isRecord(value)
   && nonEmptyString(value.text)
+  && value.text.length <= 420
   && Array.isArray(value.evidenceRefs)
   && value.evidenceRefs.length > 0
   && value.evidenceRefs.every(nonEmptyString)
@@ -1068,7 +1084,9 @@ const validExecutiveSummaryV4 = (value: unknown): boolean => isRecord(value)
 const validExecutiveKeyFindingV4 = (value: unknown): boolean => isRecord(value)
   && nonEmptyString(value.id)
   && nonEmptyString(value.title)
+  && value.title.length <= 96
   && nonEmptyString(value.text)
+  && value.text.length <= 420
   && Array.isArray(value.sectionIds)
   && value.sectionIds.length > 0
   && value.sectionIds.every(nonEmptyString)

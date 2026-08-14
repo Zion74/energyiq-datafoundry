@@ -21,6 +21,17 @@ type JsonSchema = {
 };
 
 const nonEmptyString: JsonSchema = { type: "string", minLength: 1 };
+const boundedString = (maxLength: number): JsonSchema => ({ type: "string", minLength: 1, maxLength });
+
+export const PRESCHOOL_SECTION_SUMMARY_MAX_CHARS = 360;
+export const PRESCHOOL_SECTION_INSIGHT_TITLE_MAX_CHARS = 96;
+export const PRESCHOOL_SECTION_INSIGHT_LABEL_MAX_CHARS = 48;
+export const PRESCHOOL_SECTION_INSIGHT_TEXT_MAX_CHARS = 480;
+export const PRESCHOOL_SECTION_DEEP_DIVE_MAX_CHARS = 220;
+export const PRESCHOOL_SECTION_LIMITATION_MAX_CHARS = 320;
+export const PRESCHOOL_EXECUTIVE_SUMMARY_MAX_CHARS = 420;
+export const PRESCHOOL_EXECUTIVE_FINDING_TITLE_MAX_CHARS = 96;
+export const PRESCHOOL_EXECUTIVE_FINDING_TEXT_MAX_CHARS = 420;
 const uniqueEvidenceRefs: JsonSchema = {
   type: "array",
   minItems: 1,
@@ -76,7 +87,7 @@ const sectionSummaryV4: JsonSchema = {
   additionalProperties: false,
   required: ["text", "evidenceRefs"],
   properties: {
-    text: nonEmptyString,
+    text: boundedString(PRESCHOOL_SECTION_SUMMARY_MAX_CHARS),
     evidenceRefs: modelEvidenceRefsV4,
   },
 };
@@ -86,12 +97,12 @@ const sectionInsightCandidateV4: JsonSchema = {
   additionalProperties: false,
   required: ["title", "epistemicStatus", "text", "evidenceRefs"],
   properties: {
-    title: nonEmptyString,
-    label: nonEmptyString,
+    title: boundedString(PRESCHOOL_SECTION_INSIGHT_TITLE_MAX_CHARS),
+    label: boundedString(PRESCHOOL_SECTION_INSIGHT_LABEL_MAX_CHARS),
     epistemicStatus: { type: "string", enum: ["observed", "inferred", "speculative"] },
-    text: nonEmptyString,
+    text: boundedString(PRESCHOOL_SECTION_INSIGHT_TEXT_MAX_CHARS),
     evidenceRefs: modelEvidenceRefsV4,
-    deepDiveQuestion: nonEmptyString,
+    deepDiveQuestion: boundedString(PRESCHOOL_SECTION_DEEP_DIVE_MAX_CHARS),
   },
 };
 
@@ -114,7 +125,7 @@ export const PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4 = {
         minItems: 0,
         items: sectionInsightCandidateV4,
       },
-      limitation: nonEmptyString,
+      limitation: boundedString(PRESCHOOL_SECTION_LIMITATION_MAX_CHARS),
     },
   },
 } satisfies PublicStructuredOutputOptions<StructuredEnvelope>;
@@ -172,8 +183,8 @@ const executiveFindingV4: JsonSchema = {
   additionalProperties: false,
   required: ["title", "text", "sectionIds", "evidenceRefs"],
   properties: {
-    title: nonEmptyString,
-    text: nonEmptyString,
+    title: boundedString(PRESCHOOL_EXECUTIVE_FINDING_TITLE_MAX_CHARS),
+    text: boundedString(PRESCHOOL_EXECUTIVE_FINDING_TEXT_MAX_CHARS),
     sectionIds: {
       type: "array",
       minItems: 1,
@@ -182,6 +193,14 @@ const executiveFindingV4: JsonSchema = {
     },
     evidenceRefs: modelEvidenceRefsV4,
     alert: executiveAlertV4,
+  },
+};
+
+const executiveSummaryV4: JsonSchema = {
+  ...sectionSummaryV4,
+  properties: {
+    ...sectionSummaryV4.properties,
+    text: boundedString(PRESCHOOL_EXECUTIVE_SUMMARY_MAX_CHARS),
   },
 };
 
@@ -194,7 +213,7 @@ export const PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4 = {
     required: ["status", "findings"],
     properties: {
       status: { type: "string", enum: ["available", "empty"] },
-      summary: sectionSummaryV4,
+      summary: executiveSummaryV4,
       findings: {
         type: "array",
         minItems: 0,

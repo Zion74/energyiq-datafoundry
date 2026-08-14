@@ -413,6 +413,46 @@ describe("Preschool Section Interpreter v4", () => {
     });
   });
 
+  it("rejects a real flagged-spike Centre count when it is attached to total operating energy", () => {
+    const pack = packV2("operating-behaviour", 1);
+    pack.evidence[0] = {
+      id: "evidence:operating-behaviour:summary",
+      label: "Operating-hour energy summary",
+      value: {
+        operatingHoursKwh: 21_818,
+        operatingHoursSharePct: 87.55,
+        spikeCount: 28,
+        centreCount: 14,
+      },
+      unit: "kWh, %",
+      entityRefs: [],
+      evidenceRefs: ["evidence:operating-behaviour:summary"],
+    };
+    const answer = (summary: string) => JSON.stringify({
+      sectionId: "operating-behaviour",
+      status: "available",
+      summary: {
+        text: summary,
+        evidenceRefs: ["evidence:operating-behaviour:summary"],
+      },
+      candidates: [],
+    });
+
+    expect(() => materializePreschoolSectionResultV4({
+      answer: answer("During operating hours the estate used 21,818 kWh across 14 Centres."),
+      pack,
+      identity: identity("operating-behaviour"),
+      runId: "runtime-run-wrong-operating-count-relation",
+    })).toThrow("PRESCHOOL_SECTION_INTERPRETATION_SUMMARY_UNSUPPORTED");
+
+    expect(materializePreschoolSectionResultV4({
+      answer: answer("During operating hours the estate used 21,818 kWh. Flagged spikes affected 14 Centres."),
+      pack,
+      identity: identity("operating-behaviour"),
+      runId: "runtime-run-correct-operating-count-relation",
+    })).toMatchObject({ status: "available", summary: { text: expect.stringContaining("Flagged spikes") } });
+  });
+
   it("passes the explicit V4 structured contract only to Pack-v2 runner calls", async () => {
     const root = mkdtempSync(join(tmpdir(), "preschool-section-v4-runner-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });

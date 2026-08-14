@@ -302,7 +302,11 @@ export function PreschoolOverviewRenderer({
             <span className="text-xs font-semibold text-muted">Select a finding to open its section</span>
           </div>
           {view.decisionSummary.items.length > 0 ? (
-            <div className="mt-4 divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface">
+            <div
+              className="mt-4 grid gap-px overflow-hidden rounded-xl border border-border bg-border md:grid-cols-2"
+              data-at-a-glance-grid="true"
+              role="list"
+            >
               {view.decisionSummary.items.map((item) => (
                 <DecisionSummaryCard key={item.id} item={item} />
               ))}
@@ -367,7 +371,7 @@ export function PreschoolOverviewRenderer({
                   </div>
                   <p className="mt-1.5 text-sm leading-6 text-muted">Which Centres are high for both floor-area intensity and energy used per person?</p>
                 </div>
-                <p className="text-xs font-semibold text-muted">Portfolio cohort · n={view.benchmark.sampleSize}</p>
+                <p className="text-xs font-semibold text-muted">All-centre cohort · n={view.benchmark.sampleSize}</p>
               </div>
               <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
                 <div className="min-w-0">
@@ -401,8 +405,8 @@ export function PreschoolOverviewRenderer({
                     ))}
                   </ol>
                   <dl className="mt-4 space-y-2 border-t border-border pt-4 text-xs">
-                    <ReadinessRow label="Portfolio EUI P50 / P75" value={`${view.benchmark.eui.p50} / ${view.benchmark.eui.p75}`} />
-                    <ReadinessRow label="Portfolio per-pax P50 / P75" value={`${view.benchmark.perPax.p50} / ${view.benchmark.perPax.p75}`} />
+                    <ReadinessRow label="All-centre EUI P50 / P75" value={`${view.benchmark.eui.p50} / ${view.benchmark.eui.p75}`} />
+                    <ReadinessRow label="All-centre per-pax P50 / P75" value={`${view.benchmark.perPax.p50} / ${view.benchmark.perPax.p75}`} />
                   </dl>
                   <details className="mt-4 border-t border-border pt-3">
                     <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Benchmark method</summary>
@@ -587,7 +591,7 @@ export function PreschoolOverviewRenderer({
             </div>
             <span className="text-xs text-muted">Top 5 of {view.centres.length} Centres</span>
           </div>
-          <div className="mt-4 grid gap-3" role="list" aria-label="Top five Centres by Portfolio energy contribution">
+          <div className="mt-4 grid gap-3" role="list" aria-label="Top five Centres by all-centre energy contribution">
             {view.centres.slice(0, 5).map((centre) => (
               <CentreContributionRow
                 key={centre.id}
@@ -710,7 +714,7 @@ function DecisionSummaryCard({ item }: { item: PreschoolDecisionSummaryItem }) {
         ? "bg-step-inspect text-white"
         : "bg-step-success text-white";
   return (
-    <article className="min-w-0 bg-surface transition-colors hover:bg-surface-subtle/60" data-decision-priority={item.id}>
+    <article className="min-w-0 bg-surface transition-colors hover:bg-surface-subtle/60" data-decision-priority={item.id} role="listitem">
       <a
         href={`#${item.targetId}`}
         className="grid min-h-20 gap-3 px-4 py-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/30 sm:grid-cols-[44px_minmax(0,1fr)_auto] sm:items-center lg:px-5"
@@ -1047,7 +1051,7 @@ function BenchmarkScatterPlot({ benchmark }: { benchmark: BenchmarkView }) {
         className="h-auto w-full"
       >
         <title id="preschool-benchmark-scatter-title">Centre energy intensity and energy-per-person comparison</title>
-        <desc id="preschool-benchmark-scatter-description">Thirty Centres plotted with annualised energy intensity increasing to the right and energy per person increasing upward. Dashed Portfolio P75 lines identify the Centres to review first.</desc>
+        <desc id="preschool-benchmark-scatter-description">Thirty Centres plotted with annualised energy intensity increasing to the right and energy per person increasing upward. Dashed all-centre P75 lines identify the Centres to review first.</desc>
         <rect x={margin.left} y={margin.top} width={plotWidth} height={plotHeight} rx="8" className="fill-surface" />
         <rect x={margin.left} y={margin.top} width={euiP75X - margin.left} height={perPaxP75Y - margin.top} className="fill-step-warning" opacity="0.04" />
         <rect x={euiP75X} y={margin.top} width={margin.left + plotWidth - euiP75X} height={perPaxP75Y - margin.top} className="fill-step-error" opacity="0.08" />
@@ -1179,7 +1183,7 @@ function BenchmarkCohortLegend() {
       </span>
       <span className="inline-flex items-center gap-1.5 text-step-warning">
         <span aria-hidden="true" className="w-4 border-t border-dashed border-current" />
-        <span className="text-muted">Portfolio P75 review threshold</span>
+        <span className="text-muted">All-centre P75 review threshold</span>
       </span>
     </div>
   );
@@ -1707,16 +1711,16 @@ function AllHoursApplianceContext({
   return (
     <details id="preschool-appliance-ranking" className="mt-5 scroll-mt-28 border-t border-border pt-4" data-all-hours-appliance-context="supporting-only">
       <summary className="cursor-pointer text-xs font-semibold text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">
-        Supporting Evidence · all-hours Portfolio Appliance context
+        Supporting Evidence · all-hours Appliance context across all Centres
       </summary>
       <p className="mt-2 max-w-3xl text-xs leading-5 text-muted">All-hours totals only. This evidence is kept separate from the operating-state composition above.</p>
       {appliances.status === "available" ? (
         <div className="mt-4">
           <div className="flex flex-wrap items-end justify-between gap-3">
-            <h4 id="preschool-appliance-ranking-heading" className="text-sm font-semibold text-foreground">Portfolio Appliance ranking</h4>
+            <h4 id="preschool-appliance-ranking-heading" className="text-sm font-semibold text-foreground">All-centre Appliance ranking</h4>
             <p className="text-xs font-semibold tabular-nums text-foreground">{appliances.totalEnergy} · {appliances.rows.length} Appliances</p>
           </div>
-          <div className="mt-3 divide-y divide-border border-y border-border" role="list" aria-label="All-hours Portfolio Appliance energy ranking">
+          <div className="mt-3 divide-y divide-border border-y border-border" role="list" aria-label="All-hours Appliance energy ranking across all Centres">
             {appliances.rows.map((appliance, index) => (
               <div key={appliance.name} className="grid gap-2 py-3 sm:grid-cols-[minmax(150px,0.8fr)_minmax(220px,1.5fr)_170px] sm:items-center sm:gap-4" role="listitem">
                 <div className="min-w-0">

@@ -30,7 +30,12 @@ import {
   type PreschoolSectionInterpretationResultV3,
   type PreschoolSectionInterpretationResultV4,
 } from "./preschool-overview-ai-contracts.js";
-import { resolveOverviewAiStageStructuredOutputV4 } from "./preschool-overview-ai-structured-output.js";
+import {
+  PRESCHOOL_EXECUTIVE_FINDING_TEXT_MAX_CHARS,
+  PRESCHOOL_EXECUTIVE_FINDING_TITLE_MAX_CHARS,
+  PRESCHOOL_EXECUTIVE_SUMMARY_MAX_CHARS,
+  resolveOverviewAiStageStructuredOutputV4,
+} from "./preschool-overview-ai-structured-output.js";
 
 const LEASE_MS = 3 * 60 * 1_000;
 export const MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS = 64_000;
@@ -344,6 +349,8 @@ const buildExecutivePromptV4 = (
     "Use only the accepted current-v4 Section summaries and insights below, plus any explicitly supplied authoritative Overview Evidence.",
     "Select the few cross-Section themes that matter most. Do not mechanically rewrite every Section or invent a cause, number, date, entity relationship, or action.",
     "Return one concise answer-first summary and 0-3 compact findings. A high-priority alert is optional and must be supported by the supplied Evidence.",
+    `Presentation limits only — Summary: at most ${PRESCHOOL_EXECUTIVE_SUMMARY_MAX_CHARS} characters and three sentences; finding title: at most ${PRESCHOOL_EXECUTIVE_FINDING_TITLE_MAX_CHARS} characters; finding text: at most ${PRESCHOOL_EXECUTIVE_FINDING_TEXT_MAX_CHARS} characters. Preserve the best supported analytical angle within those limits.`,
+    "In customer-facing narrative, say 'all Centres' instead of 'Portfolio'. Internal Evidence labels may still use portfolio.",
     "Narrative text may use only limited inline **bold** and _italics_; do not return headings, links, images, HTML, code, tables, or custom styling.",
     "Every summary and finding must cite exact evidenceRefs. Every finding must declare the exact contributing sectionIds.",
     "Compact projections are lossless: resolve evidenceRefIndexes through evidenceRefs, and read Overview fact rows using their declared dictionaries and columns. Every accepted Insight and Overview fact is present. For an Overview fact, cite its fact-row id as the evidenceRef; its evidence set is provenance only.",
@@ -466,7 +473,8 @@ const materializeExecutiveResultV4 = (input: {
   }
   const rawSummaryText = cleanText(parsed.summary.text);
   const rawSummaryEvidenceRefs = stringArray(parsed.summary.evidenceRefs);
-  if (!rawSummaryText || !rawSummaryEvidenceRefs || rawSummaryEvidenceRefs.length === 0
+  if (!rawSummaryText || rawSummaryText.length > PRESCHOOL_EXECUTIVE_SUMMARY_MAX_CHARS
+    || !rawSummaryEvidenceRefs || rawSummaryEvidenceRefs.length === 0
     || hasBannedCustomerText(rawSummaryText)) {
     throw new Error("PRESCHOOL_EXECUTIVE_SYNTHESIS_FACT_UNSUPPORTED");
   }
@@ -540,7 +548,9 @@ const materializeExecutiveResultV4 = (input: {
     const text = cleanText(candidate.text);
     const sectionIds = stringArray(candidate.sectionIds)?.filter(isPreschoolSectionId);
     const rawEvidenceRefs = stringArray(candidate.evidenceRefs);
-    if (!title || !text || !sectionIds || sectionIds.length === 0
+    if (!title || title.length > PRESCHOOL_EXECUTIVE_FINDING_TITLE_MAX_CHARS
+      || !text || text.length > PRESCHOOL_EXECUTIVE_FINDING_TEXT_MAX_CHARS
+      || !sectionIds || sectionIds.length === 0
       || sectionIds.length !== (candidate.sectionIds as unknown[]).length
       || new Set(sectionIds).size !== sectionIds.length
       || sectionIds.some((sectionId) => !acceptedBySection.has(sectionId))

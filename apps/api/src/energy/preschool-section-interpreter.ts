@@ -38,7 +38,15 @@ import {
   type PreschoolSectionInsightToolResult,
 } from "./preschool-section-insight-runtime.js";
 import { publishPreschoolSectionInterpretation } from "./preschool-section-publication.js";
-import { resolveOverviewAiStageStructuredOutputV4 } from "./preschool-overview-ai-structured-output.js";
+import {
+  PRESCHOOL_SECTION_DEEP_DIVE_MAX_CHARS,
+  PRESCHOOL_SECTION_INSIGHT_LABEL_MAX_CHARS,
+  PRESCHOOL_SECTION_INSIGHT_TEXT_MAX_CHARS,
+  PRESCHOOL_SECTION_INSIGHT_TITLE_MAX_CHARS,
+  PRESCHOOL_SECTION_LIMITATION_MAX_CHARS,
+  PRESCHOOL_SECTION_SUMMARY_MAX_CHARS,
+  resolveOverviewAiStageStructuredOutputV4,
+} from "./preschool-overview-ai-structured-output.js";
 
 const LEASE_MS = 4 * 60 * 1_000;
 const MAX_SECTION_PROMPT_CHARS = 12_000;
@@ -273,8 +281,12 @@ export const buildPreschoolSectionDiscoveryPrompt = (
     "An observed candidate must contain only direct Pack facts. If it says could, may, might, appears, or recommends a choice, label the whole candidate inferred or speculative instead.",
     "For event Evidence, usageKwh is total interval energy; impactKwh is only the excess above its comparison baseline. Never describe impactKwh as the whole spike or interval total.",
     "For planning Evidence, count only rows whose scopeRole is centre when stating a Centre count; one Portfolio row is not a Centre.",
+    "For standby or operating summaries, centresWithFlaggedSpikes describes only Centres with flagged spike events; never attach that count to total energy coverage or the full estate.",
     "Do not invent observed facts, entities, numbers, dates, units, or relationships. A speculative explanation must remain clearly conditional and must not be presented as a confirmed safety alert.",
-    "Keep the Summary short and useful. Candidates are optional; return zero when the Summary is sufficient, or several genuinely distinct candidates when the Pack supports them.",
+    `Keep the Summary short and useful: at most ${PRESCHOOL_SECTION_SUMMARY_MAX_CHARS} characters and three sentences. It should orient the reader without repeating the candidate cards.`,
+    `Presentation limits only: candidate title at most ${PRESCHOOL_SECTION_INSIGHT_TITLE_MAX_CHARS} characters, text at most ${PRESCHOOL_SECTION_INSIGHT_TEXT_MAX_CHARS}, deep-dive question at most ${PRESCHOOL_SECTION_DEEP_DIVE_MAX_CHARS}, and limitation at most ${PRESCHOOL_SECTION_LIMITATION_MAX_CHARS}. These limits do not restrict which useful analytical angle you choose.`,
+    "In customer-facing narrative, say 'all Centres' instead of 'Portfolio'. Internal Pack field names may still use portfolio.",
+    "Candidates are optional; return zero when the Summary is sufficient, or several genuinely distinct candidates when the Pack supports them.",
     "Order candidates from highest to lowest incremental value for a non-technical energy manager. In your internal selection, consider novel angle, relevance, urgency, contrarian value, and verifiability together without returning a fixed lens or score.",
     "The server validates, safety-filters, exactly deduplicates, and publishes at most three candidates, but preserves that source order; put the most valuable supported candidates first.",
     "If the supplied Evidence supports a genuine alert, rank it according to its value and urgency. Do not invent an alert when the Evidence does not support one.",
@@ -445,7 +457,8 @@ export const materializePreschoolSectionResultV4 = (input: {
     input.pack,
   );
   if (discovery.status === "available" && discovery.limitation
-    && !isSupportedNarrative(discovery.limitation, input.pack.evidence, input.pack.evidence)) {
+    && (discovery.limitation.length > PRESCHOOL_SECTION_LIMITATION_MAX_CHARS
+      || !isSupportedNarrative(discovery.limitation, input.pack.evidence, input.pack.evidence))) {
     throw new Error("PRESCHOOL_SECTION_INTERPRETATION_SUMMARY_UNSUPPORTED");
   }
   const acceptance = acceptPreschoolSectionInterpretation({
@@ -514,7 +527,8 @@ const summaryFragmentIsSelfContained = (sentence: string): boolean =>
 const createPackV2AcceptanceAuthority = (pack: PreschoolSectionPackV2) => ({
   validateSummary: (summary: PreschoolSectionSummaryV4) => {
     const citedEvidence = citedPackEvidence(summary.evidenceRefs, pack);
-    return summary.evidenceRefs.length > 0
+    return summary.text.length <= PRESCHOOL_SECTION_SUMMARY_MAX_CHARS
+      && summary.evidenceRefs.length > 0
       && evidenceRefsAreSupported(summary.evidenceRefs, pack)
       && citedEvidence.length > 0
       && isSupportedNarrative(summary.text, citedEvidence, pack.evidence)
@@ -535,6 +549,10 @@ const candidateRejectionCode = (
 ): PreschoolSectionCandidateRejectionCodeV4 | null => {
   if (!candidate.title.trim()
     || !candidate.text.trim()
+    || candidate.title.length > PRESCHOOL_SECTION_INSIGHT_TITLE_MAX_CHARS
+    || candidate.text.length > PRESCHOOL_SECTION_INSIGHT_TEXT_MAX_CHARS
+    || (candidate.label?.length ?? 0) > PRESCHOOL_SECTION_INSIGHT_LABEL_MAX_CHARS
+    || (candidate.deepDiveQuestion?.length ?? 0) > PRESCHOOL_SECTION_DEEP_DIVE_MAX_CHARS
     || candidate.evidenceRefs.length === 0) return "CANDIDATE_MALFORMED";
   if (!evidenceRefsAreSupported(candidate.evidenceRefs, pack)) return "EVIDENCE_REF_UNSUPPORTED";
   const citedEvidence = citedPackEvidence(candidate.evidenceRefs, pack);
@@ -870,6 +888,7 @@ const hasUnsupportedMetricRelation = (
   evidence: PreschoolSectionPack["evidence"],
 ): boolean => {
   if (hasUnsupportedPlanningCentreCount(text, evidence)
+    || hasMislabeledFlaggedCentreCount(text, evidence)
     || hasMislabeledSpikeImpact(text, evidence)) return true;
   const paceValues = evidence.flatMap(({ value }) => collectNumbersForKey(value, "pacePct"));
   if (paceValues.length === 0) return false;
@@ -887,6 +906,40 @@ const hasUnsupportedMetricRelation = (
       return paceValues.some((candidate) => reportedNumberMatches(candidate, value, precision));
     });
   });
+};
+
+const hasMislabeledFlaggedCentreCount = (
+  text: string,
+  evidence: PreschoolSectionPack["evidence"],
+): boolean => {
+  const flaggedCentreCounts = evidence.flatMap(({ value }) => collectFlaggedCentreCounts(value));
+  if (flaggedCentreCounts.length === 0) return false;
+  return [...text.matchAll(/\b(\d{1,3})\s+[Cc]entres?\b/gu)].some((match) => {
+    if (!flaggedCentreCounts.includes(Number(match[1]))) return false;
+    const sentenceStart = Math.max(
+      text.lastIndexOf(".", match.index ?? 0),
+      text.lastIndexOf(";", match.index ?? 0),
+      text.lastIndexOf("!", match.index ?? 0),
+      text.lastIndexOf("?", match.index ?? 0),
+    ) + 1;
+    const followingStops = [".", ";", "!", "?"]
+      .map((stop) => text.indexOf(stop, (match.index ?? 0) + match[0].length))
+      .filter((index) => index >= 0);
+    const sentenceEnd = followingStops.length > 0 ? Math.min(...followingStops) : text.length;
+    const context = text.slice(sentenceStart, sentenceEnd);
+    return !/\b(?:flagged|spikes?|events?|affected|show(?:s|ed|ing)?|record(?:s|ed|ing)?)\b/iu.test(context);
+  });
+};
+
+const collectFlaggedCentreCounts = (value: unknown): number[] => {
+  if (Array.isArray(value)) return value.flatMap(collectFlaggedCentreCounts);
+  if (!isRecord(value)) return [];
+  const own = typeof value.spikeCount === "number"
+    && typeof value.centreCount === "number"
+    && (typeof value.closedHoursKwh === "number" || typeof value.operatingHoursKwh === "number")
+    ? [value.centreCount]
+    : [];
+  return [...own, ...Object.values(value).flatMap(collectFlaggedCentreCounts)];
 };
 
 const hasUnsupportedPlanningCentreCount = (

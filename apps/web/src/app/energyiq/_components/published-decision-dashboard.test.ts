@@ -375,7 +375,8 @@ describe("published Overview URL reload", () => {
       to: "2026-05-31",
     });
     expect(container.querySelector("[data-preschool-overview='true']")).not.toBeNull();
-    expect(container.textContent?.match(/Portfolio energy overview/g)).toHaveLength(1);
+    expect(container.textContent?.match(/Energy overview/g)).toHaveLength(1);
+    expect(container.textContent).not.toContain("Portfolio energy overview");
     expect(container.textContent).not.toContain("Published overview");
     expect(container.textContent).not.toContain("A Project-wide portfolio view built from");
     expect(container.querySelector("[role='combobox'][aria-label='Analysis Scope']")).toBeNull();

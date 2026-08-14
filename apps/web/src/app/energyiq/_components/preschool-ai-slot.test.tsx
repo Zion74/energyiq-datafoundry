@@ -348,6 +348,8 @@ describe("PreschoolAiSlot", () => {
     expect(pageSlot).not.toBeNull();
     expect(pageSlot!.textContent).toContain("Key Findings");
     expect(pageSlot!.textContent).toContain("Based on 2 of 4 Sections");
+    expect(pageSlot!.querySelector('[aria-label="Key findings summary"]')).not.toBeNull();
+    expect(pageSlot!.querySelector('[data-key-findings-grid="true"]')).not.toBeNull();
     expect(pageSlot!.textContent).toContain("Recurring time-pattern signals appear in both closed and opening hours.");
     expect(pageSlot!.textContent).toContain("Two time-pattern signals merit review");
     expect(pageSlot!.textContent).toContain(
@@ -436,6 +438,8 @@ describe("PreschoolAiSlot", () => {
 
     const sectionSummary = findSafeMarkdownByText(sectionSlot!, "cited portfolio evidence");
     expectSafeV4Markdown(sectionSummary, { strong: "energy", emphasis: "Review the pattern" });
+    expect(sectionSlot!.querySelector('[aria-label="Section summary"]')?.textContent).toContain("Summary");
+    expect(sectionSlot!.querySelector('[aria-label="Section insights"]')?.textContent).toContain("Insights");
 
     const observedCard = findInsightCard(sectionSlot!, "Persistent closed-hour base load");
     const observedText = findSafeMarkdownByText(observedCard, "peer-baseline Evidence");
@@ -679,11 +683,35 @@ describe("PreschoolAiSlot", () => {
       },
     },
     {
+      name: "Section summary over its presentation budget",
+      sectionId: "standby-wastage" as const,
+      mutate: (result: PreschoolOverviewAiReadModelDto) => {
+        const unit = result.sections["standby-wastage"];
+        if (unit.status === "available") Object.assign(unit.result.summary, { text: "S".repeat(361) });
+      },
+    },
+    {
       name: "malformed Insight epistemic status",
       sectionId: "standby-wastage" as const,
       mutate: (result: PreschoolOverviewAiReadModelDto) => {
         const unit = result.sections["standby-wastage"];
         if (unit.status === "available" && "insights" in unit.result) Object.assign(unit.result.insights[0]!, { epistemicStatus: "certain" });
+      },
+    },
+    {
+      name: "Insight label over its presentation budget",
+      sectionId: "standby-wastage" as const,
+      mutate: (result: PreschoolOverviewAiReadModelDto) => {
+        const unit = result.sections["standby-wastage"];
+        if (unit.status === "available" && "insights" in unit.result) Object.assign(unit.result.insights[0]!, { label: "L".repeat(49) });
+      },
+    },
+    {
+      name: "Section limitation over its presentation budget",
+      sectionId: "standby-wastage" as const,
+      mutate: (result: PreschoolOverviewAiReadModelDto) => {
+        const unit = result.sections["standby-wastage"];
+        if (unit.status === "available") Object.assign(unit.result, { limitation: "L".repeat(321) });
       },
     },
     {

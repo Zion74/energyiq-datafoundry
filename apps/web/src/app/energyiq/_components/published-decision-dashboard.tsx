@@ -530,7 +530,7 @@ function PublishedDecisionDashboardView({
           {isDedicatedOverviewRenderer ? (
             <>
               <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-                {isPreschoolRenderer ? "Portfolio energy overview" : "Energy decision overview"}
+                {isPreschoolRenderer ? "Energy overview" : "Energy decision overview"}
               </h1>
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted">
                 <span className="font-semibold text-foreground">{selectedProject?.name}</span>

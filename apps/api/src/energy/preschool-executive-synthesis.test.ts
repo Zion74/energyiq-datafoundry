@@ -329,8 +329,38 @@ describe("Preschool Executive Synthesis", () => {
     expect(result).not.toHaveProperty("keyFindings");
     expect(prompt).toContain('"summary"');
     expect(prompt).toContain('"insights"');
+    expect(prompt).toContain("Summary: at most 420 characters");
+    expect(prompt).toContain("finding title: at most 96 characters");
     expect(prompt).not.toContain('"keyPoints"');
     expect(prompt).not.toContain('"sectionId":"planning-outlook"');
+  });
+
+  it("rejects an overlong current Key Findings summary even when the Provider ignores its schema", async () => {
+    const harness = createHarness();
+    completeSectionV4(harness, "centre-benchmark");
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      revision: "v4",
+      runSynthesis: async (input) => ({
+        answer: JSON.stringify({
+          status: "available",
+          summary: {
+            text: "Benchmark evidence remains available. ".repeat(20),
+            evidenceRefs: ["evidence:centre-benchmark:summary"],
+          },
+          findings: [],
+        }),
+        runId: input.runId,
+        sessionId: input.sessionId,
+      }),
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+    expect(artifact).toMatchObject({
+      status: "failed",
+      error_code: "PRESCHOOL_EXECUTIVE_SYNTHESIS_FACT_UNSUPPORTED",
+    });
   });
 
   it("records only current-v4 Sections that actually contribute to the accepted Key Findings output", async () => {
@@ -526,9 +556,9 @@ describe("Preschool Executive Synthesis", () => {
     harness.close();
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.identity_json)).toMatchObject({
-      validatorRevision: "preschool-executive-synthesis-validator-v9",
+      validatorRevision: "preschool-executive-synthesis-validator-v10",
       workflowRevision: "preschool-executive-synthesis-v9",
-      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v6",
+      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v7",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
       publicationRevision: "key-findings-v2",
     });

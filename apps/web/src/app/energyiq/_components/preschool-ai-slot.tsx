@@ -386,13 +386,12 @@ function KeyFindingsUnit({ result }: { result: PreschoolExecutiveSynthesisV4Avai
   return (
     <div>
       <p className="mb-3 text-xs font-medium text-muted">Based on {result.sourceSectionArtifactIds.length} of 4 Sections</p>
-      <SafeAiMarkdown className="max-w-[75ch] text-base leading-7 text-foreground" children={result.summary.text} />
-      <details className="mt-4 border-t border-border pt-3">
-        <summary className="cursor-pointer text-xs font-semibold text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Source Artifacts</summary>
-        <p className="mt-2 break-words font-mono text-[10px] leading-4 text-muted-light">{result.sourceSectionArtifactIds.join(" / ")}</p>
-      </details>
+      <div className="rounded-lg border border-primary/15 bg-primary/[0.04] px-4 py-3" aria-label="Key findings summary">
+        <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-primary">Summary</p>
+        <SafeAiMarkdown className="max-w-[75ch] text-base leading-7 text-foreground" children={result.summary.text} />
+      </div>
       {result.findings.length > 0 ? (
-        <div className="mt-5 space-y-4" aria-label="Key Findings">
+        <div className="mt-4 grid gap-3 lg:grid-cols-2" aria-label="Key Findings" data-key-findings-grid="true">
           {result.findings.map((finding) => (
             <article key={finding.id} className="rounded-xl border border-border bg-surface px-4 py-4 lg:px-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -414,6 +413,10 @@ function KeyFindingsUnit({ result }: { result: PreschoolExecutiveSynthesisV4Avai
           ))}
         </div>
       ) : null}
+      <details className="mt-4 border-t border-border pt-3">
+        <summary className="cursor-pointer text-xs font-semibold text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Source Artifacts</summary>
+        <p className="mt-2 break-words font-mono text-[10px] leading-4 text-muted-light">{result.sourceSectionArtifactIds.join(" / ")}</p>
+      </details>
       <details className="mt-4 border-t border-border pt-3">
         <summary className="cursor-pointer text-xs font-semibold text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Summary Evidence</summary>
         <p className="mt-2 break-words font-mono text-[10px] leading-4 text-muted-light">{result.summary.evidenceRefs.join(" / ")}</p>
@@ -520,9 +523,14 @@ function SectionInterpretationV4Unit({
 }) {
   return (
     <div>
-      <SafeAiMarkdown className="max-w-[75ch] text-base leading-7 text-foreground" children={result.summary.text} />
+      <div className="rounded-lg border border-border bg-surface px-3 py-2.5" aria-label="Section summary">
+        <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-primary">Summary</p>
+        <SafeAiMarkdown className="max-w-[75ch] text-base leading-7 text-foreground" children={result.summary.text} />
+      </div>
       {result.insights.length > 0 ? (
-        <div className="mt-5 space-y-4" aria-label="Section AI insights">
+        <section className="mt-4" aria-label="Section insights">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.06em] text-primary">Insights</p>
+          <div className="grid gap-3 lg:grid-cols-2" aria-label="Section AI insights">
           {result.insights.map((insight) => {
             const exploreHref = insight.deepDiveQuestion && aiAnalystHref
               ? buildSectionInsightHref(aiAnalystHref, artifactId, result, insight)
@@ -553,7 +561,8 @@ function SectionInterpretationV4Unit({
               </article>
             );
           })}
-        </div>
+          </div>
+        </section>
       ) : null}
       <details className="mt-4 border-t border-border pt-3">
         <summary className="cursor-pointer text-xs font-semibold text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/20">Summary Evidence and limitation</summary>
@@ -910,9 +919,11 @@ const isV4SectionResult = (
   if (!isValidSectionResultBase(value) || !Array.isArray(value.insights)) return false;
   if (expectedStatus && value.status !== expectedStatus) return false;
   if (value.status === "available") {
-    return isSummary(value.summary)
+    return isSummary(value.summary, 360)
       && value.insights.every(isSectionInsight)
-      && isOptionalString(value.limitation);
+      && isOptionalString(value.limitation)
+      && (value.limitation === undefined
+        || (typeof value.limitation === "string" && value.limitation.length <= 320));
   }
   return value.status === "empty"
     && value.insights.length === 0
@@ -928,7 +939,7 @@ const isV4ExecutiveResult = (
   if (expectedStatus && value.status !== expectedStatus) return false;
   if (value.status === "available") {
     return isUniqueStringArray(value.sourceSectionArtifactIds, false, 4)
-      && isSummary(value.summary)
+      && isSummary(value.summary, 420)
       && (value.overviewEvidence === undefined
         || isExecutiveOverviewEvidenceLineage(value.overviewEvidence, value.binding))
       && value.findings.every(isKeyFinding);
@@ -1023,8 +1034,11 @@ const isValidBinding = (value: unknown): value is PreschoolOverviewAiBindingDto 
     && Number.isFinite(value.modelProfileRevision);
 };
 
-const isSummary = (value: unknown): boolean =>
-  isRecord(value) && isNonEmptyString(value.text) && isUniqueStringArray(value.evidenceRefs);
+const isSummary = (value: unknown, maxLength: number): boolean =>
+  isRecord(value)
+  && isNonEmptyString(value.text)
+  && value.text.length <= maxLength
+  && isUniqueStringArray(value.evidenceRefs);
 
 const isExecutiveOverviewEvidenceLineage = (
   value: unknown,
@@ -1065,17 +1079,25 @@ const isSectionInsight = (value: unknown): boolean =>
   isRecord(value)
   && isNonEmptyString(value.id)
   && isNonEmptyString(value.title)
+  && value.title.length <= 96
   && isOptionalString(value.label)
+  && (value.label === undefined
+    || (typeof value.label === "string" && value.label.length <= 48))
   && (value.epistemicStatus === "observed" || value.epistemicStatus === "inferred" || value.epistemicStatus === "speculative")
   && isNonEmptyString(value.text)
+  && value.text.length <= 480
   && isUniqueStringArray(value.evidenceRefs)
-  && isOptionalString(value.deepDiveQuestion);
+  && isOptionalString(value.deepDiveQuestion)
+  && (value.deepDiveQuestion === undefined
+    || (typeof value.deepDiveQuestion === "string" && value.deepDiveQuestion.length <= 220));
 
 const isKeyFinding = (value: unknown): boolean => {
   if (!isRecord(value)
     || !isNonEmptyString(value.id)
     || !isNonEmptyString(value.title)
+    || value.title.length > 96
     || !isNonEmptyString(value.text)
+    || value.text.length > 420
     || !isUniqueStringArray(value.sectionIds)
     || !value.sectionIds.every(isPreschoolSectionId)
     || !isUniqueStringArray(value.evidenceRefs)) return false;
