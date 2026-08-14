@@ -554,7 +554,7 @@ const materializeExecutiveResultV4 = (input: {
   );
   const findings: PreschoolOverviewKeyFinding[] = parsed.findings.flatMap((candidate, index) => {
     if (!isRecord(candidate)) return [];
-    const title = cleanText(candidate.title);
+    let title = cleanText(candidate.title);
     const text = cleanText(candidate.text);
     const sectionIds = stringArray(candidate.sectionIds)?.filter(isPreschoolSectionId);
     const rawEvidenceRefs = stringArray(candidate.evidenceRefs);
@@ -602,14 +602,24 @@ const materializeExecutiveResultV4 = (input: {
       overviewFacts,
     ))) return [];
     if (!narrativePreservesSourceEpistemicStatus(
-      title,
-      evidenceRefs,
-      evidenceEpistemicRequirements,
-    ) || !narrativePreservesSourceEpistemicStatus(
       text,
       evidenceRefs,
       evidenceEpistemicRequirements,
     )) return [];
+    if (!narrativePreservesSourceEpistemicStatus(
+      title,
+      evidenceRefs,
+      evidenceEpistemicRequirements,
+    )) {
+      const calibratedTitle = `Possible: ${title}`;
+      if (calibratedTitle.length > PRESCHOOL_EXECUTIVE_FINDING_TITLE_MAX_CHARS
+        || !narrativePreservesSourceEpistemicStatus(
+          calibratedTitle,
+          evidenceRefs,
+          evidenceEpistemicRequirements,
+        )) return [];
+      title = calibratedTitle;
+    }
     let alert: PreschoolOverviewKeyFinding["alert"] | undefined;
     try {
       alert = parseAlert(candidate.alert);

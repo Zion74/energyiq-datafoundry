@@ -1051,6 +1051,10 @@ const validExecutiveV4ExecutionRevision = (identity: EnergyIqOverviewAiArtifactI
   || (identity.validatorRevision === "preschool-executive-synthesis-validator-v16"
     && identity.workflowRevision === "preschool-executive-synthesis-v9"
     && identity.investigatorPromptRevision === "preschool-executive-synthesis-prompt-v11"
+    && identity.capabilityRevision === "section-artifacts-and-overview-evidence-v2")
+  || (identity.validatorRevision === "preschool-executive-synthesis-validator-v17"
+    && identity.workflowRevision === "preschool-executive-synthesis-v9"
+    && identity.investigatorPromptRevision === "preschool-executive-synthesis-prompt-v11"
     && identity.capabilityRevision === "section-artifacts-and-overview-evidence-v2");
 
 const requireExecutiveSourceLineageV4 = (input: {
