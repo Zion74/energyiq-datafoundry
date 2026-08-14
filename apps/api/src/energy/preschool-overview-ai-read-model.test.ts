@@ -149,7 +149,13 @@ describe("composePreschoolOverviewAiReadModel", () => {
       workflowRevision: "additional-insights-discover-accept-publish-v4",
       investigatorPromptRevision: "additional-insights-discovery-v4",
     }],
-  ] as const)("does not present a historical Additional %s Artifact as the current v5 result", (_revision, revisions) => {
+    ["v5", {
+      identityContractRevision: "additional-insights-v5",
+      validatorRevision: "additional-insights-acceptance-v3",
+      workflowRevision: "additional-insights-discover-accept-publish-v5",
+      investigatorPromptRevision: "additional-insights-discovery-v5",
+    }],
+  ] as const)("does not present a historical Additional %s Artifact as the current v6 result", (_revision, revisions) => {
     const root = mkdtempSync(join(tmpdir(), "preschool-overview-read-model-additional-v2-saved-only-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
     try {

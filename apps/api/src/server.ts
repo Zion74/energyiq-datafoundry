@@ -119,8 +119,10 @@ import {
 } from "./energy/preschool-additional-ai-insights-evaluation.js";
 import {
   createPreschoolAdditionalAiInsightsWorkflow,
+  createPreschoolAdditionalAiPresentedClaims,
   MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS,
 } from "./energy/preschool-additional-ai-insights-workflow.js";
+import { composePreschoolOverviewAiReadModel } from "./energy/preschool-overview-ai-read-model.js";
 import {
   isCurrentPreschoolAdditionalAiInsightArtifactIdentity,
   overviewAiArtifactPinnedLocalPeriod,
@@ -623,6 +625,14 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       if (resolution.status !== "ready") throw new Error("OVERVIEW_AI_SNAPSHOT_NOT_READY");
       return createProjectAnalysisContextEvidenceCatalog(resolution.snapshot);
     },
+    resolvePresentedClaims: async ({ identity, catalog }) => createPreschoolAdditionalAiPresentedClaims({
+      identity,
+      catalog,
+      readModel: composePreschoolOverviewAiReadModel({
+        metadataStore,
+        baseIdentity: identity,
+      }),
+    }),
     runDiscovery: ({ toolNames, invokeTool, ...stageInput }) => {
       const structuredOutput = resolveOverviewAiStageStructuredOutput("additional-insights-discovery");
       if (!structuredOutput) throw new Error("PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_REQUIRED");

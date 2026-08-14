@@ -3,7 +3,7 @@ import { toStandardSchema } from "@mastra/core/schema";
 
 import {
   PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1,
-  PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2,
+  PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3,
   PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4,
   PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V3,
   PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4,
@@ -35,7 +35,7 @@ describe("Preschool Overview AI structured output", () => {
   });
 
   it("offers only the approved declarative quantitative Canvas plan to current Additional discovery", () => {
-    const candidates = PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2.schema.properties!.candidates!;
+    const candidates = PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3.schema.properties!.candidates!;
     const canvas = candidates.items!.properties!.canvas!;
     const block = canvas.properties!.investigatorBlocks!.items!;
 
@@ -59,11 +59,11 @@ describe("Preschool Overview AI structured output", () => {
       uniqueItems: true,
     });
     expect(resolveOverviewAiStageStructuredOutput("additional-insights-discovery"))
-      .toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2);
+      .toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3);
   });
 
   it("accepts truthful lightweight origin declarations and rejects malformed origin proposals", async () => {
-    const schema = toStandardSchema(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2.schema as never);
+    const schema = toStandardSchema(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3.schema as never);
     const candidate = (origin: unknown) => ({
       candidates: [{
         id: "candidate-origin",
@@ -71,6 +71,10 @@ describe("Preschool Overview AI structured output", () => {
         text: "The intensity pattern differs from total consumption.",
         epistemicStatus: "inferred",
         origin,
+        incrementalContext: {
+          relatedPresentedClaimIds: ["deterministic-overview:analysis.summary.usage_kwh"],
+          novelConclusion: "Compare the already-presented total with a different denominator.",
+        },
         evidenceRefs: ["analysis.summary.usage_kwh"],
         toolAuditIds: [],
       }],
@@ -114,6 +118,35 @@ describe("Preschool Overview AI structured output", () => {
       const result = await validate(origin);
       expect(result, name).toEqual(expect.objectContaining({ issues: expect.any(Array) }));
     }
+  });
+
+  it("requires an exact bounded incremental claim declaration for current Additional discovery", async () => {
+    const schema = toStandardSchema(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3.schema as never);
+    const proposal = (incrementalContext: unknown) => ({ candidates: [{
+      id: "candidate-incremental",
+      title: "A separately testable concentration pattern",
+      text: "The already-presented share may be concentrated in recurring intervals.",
+      epistemicStatus: "speculative",
+      origin: { kind: "ai-discovery", directionMethodResourceIds: [] },
+      incrementalContext,
+      evidenceRefs: ["analysis.off_hours.share_pct"],
+      toolAuditIds: [],
+    }] });
+
+    await expect(Promise.resolve(schema["~standard"].validate(proposal({
+      relatedPresentedClaimIds: ["section:standby-wastage:summary"],
+      novelConclusion: "Test whether the known share is concentrated in recurring intervals.",
+    })))).resolves.toEqual(expect.not.objectContaining({ issues: expect.anything() }));
+    for (const incrementalContext of [
+      { relatedPresentedClaimIds: ["claim-a", "claim-a"], novelConclusion: "Duplicate refs." },
+      { relatedPresentedClaimIds: [], novelConclusion: "" },
+      { relatedPresentedClaimIds: [], novelConclusion: "Novel.", html: "<b>unsafe</b>" },
+    ]) {
+      await expect(Promise.resolve(schema["~standard"].validate(proposal(incrementalContext))))
+        .resolves.toEqual(expect.objectContaining({ issues: expect.any(Array) }));
+    }
+    expect(resolveOverviewAiStageStructuredOutput("additional-insights-discovery"))
+      .toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3);
   });
 
   it("keeps the v3 schema for history while making v4 the current Section discovery contract", () => {

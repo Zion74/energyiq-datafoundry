@@ -484,6 +484,32 @@ const additionalCandidateV2: JsonSchema = {
   },
 };
 
+const additionalIncrementalContext: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["relatedPresentedClaimIds", "novelConclusion"],
+  properties: {
+    relatedPresentedClaimIds: {
+      type: "array",
+      minItems: 0,
+      maxItems: 16,
+      uniqueItems: true,
+      items: nonEmptyString,
+    },
+    novelConclusion: { type: "string", minLength: 1, maxLength: 800 },
+  },
+};
+
+const additionalCandidateV3: JsonSchema = {
+  ...additionalCandidateV2,
+  required: [...additionalCandidateV2.required!, "incrementalContext"],
+  properties: {
+    ...additionalCandidateV2.properties,
+    title: { type: "string", minLength: 1, maxLength: 180 },
+    incrementalContext: additionalIncrementalContext,
+  },
+};
+
 /** Open model proposal; acceptance and the three-card publication budget remain server-owned. */
 export const PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1 = {
   errorStrategy: "strict",
@@ -512,6 +538,22 @@ export const PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2 = {
         type: "array",
         minItems: 0,
         items: additionalCandidateV2,
+      },
+    },
+  },
+} satisfies PublicStructuredOutputOptions<StructuredEnvelope>;
+
+export const PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3 = {
+  errorStrategy: "strict",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: ["candidates"],
+    properties: {
+      candidates: {
+        type: "array",
+        minItems: 0,
+        items: additionalCandidateV3,
       },
     },
   },
@@ -587,7 +629,7 @@ export const resolveOverviewAiStageStructuredOutput = (
   if (stage === "section-interpreter") return PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V3;
   if (stage === "executive-synthesis") return PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V1;
   if (stage === "template-proposal") return ENERGYIQ_TEMPLATE_CHANGE_PROPOSAL_STRUCTURED_OUTPUT_V1;
-  if (stage === "additional-insights-discovery") return PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2;
+  if (stage === "additional-insights-discovery") return PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3;
   if (stage === "additional-insights-transition") {
     return PRESCHOOL_ADDITIONAL_AI_INSIGHTS_TRANSITION_STRUCTURED_OUTPUT_V1;
   }

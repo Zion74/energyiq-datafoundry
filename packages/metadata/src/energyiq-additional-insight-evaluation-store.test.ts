@@ -81,7 +81,7 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
           expectedProjectId: "project-1",
           attemptId: `attempt-${ordinal}`,
           claimToken,
-          artifact: artifact(target, `provider-run-${ordinal}`, "analysis.summary.usage_kwh", `finding-${ordinal}`),
+          artifact: artifactWithThreeFindings(target, `provider-run-${ordinal}`, `finding-${ordinal}`),
           machineGate: passingMachineGate(),
           completedAt: `2026-08-14T00:0${ordinal}:00.000Z`,
         });
@@ -100,6 +100,11 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
           text: expect.stringContaining("Finding"),
         }),
       })));
+      for (const entry of finalized.reviewPack.entries) {
+        expect(entry.summary?.text).toMatch(/^Finding finding-\d+-primary$/u);
+        expect(entry.summary?.text.length).toBeLessThanOrEqual(180);
+        expect(entry.summary?.text).not.toContain(";");
+      }
       expect(finalized.reviewPack.entries).not.toEqual(expect.arrayContaining([
         expect.objectContaining({ attemptId: expect.anything(), providerRunId: expect.anything() }),
       ]));
@@ -289,6 +294,7 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
       const historicalTarget = {
         ...current.target,
         artifactIdentityRevision: "additional-insights-v4",
+        validatorRevision: "additional-insights-acceptance-v3",
         workflowRevision: "additional-insights-discover-accept-publish-v4",
         promptRevision: "additional-insights-discovery-v4",
       };
@@ -1084,6 +1090,7 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
       const target: AdditionalAiInsightEvaluationTarget = {
         ...evaluationTarget("snapshot-a", "release-a"),
         artifactIdentityRevision: "additional-insights-v3",
+        validatorRevision: "additional-insights-acceptance-v3",
         workflowRevision: "additional-insights-discover-accept-publish-v3",
         promptRevision: "additional-insights-discovery-v3",
       };
@@ -1367,12 +1374,12 @@ const evaluationTarget = (
     analysisPeriod: { from: "2026-05-01T00:00:00.000Z", to: "2026-06-01T00:00:00.000Z" },
     modelProfileId: "workspace-default",
     modelProfileRevision: 7,
-    artifactIdentityRevision: "additional-insights-v5",
+    artifactIdentityRevision: "additional-insights-v6",
     artifactIdentityHash: `sha256:${createHash("sha256").update(`${dataSnapshotId}:${projectReleaseId}`).digest("hex")}`,
     outputContractRevision: "energyiq-additional-ai-insights-v2",
-    validatorRevision: "additional-insights-acceptance-v3",
-    workflowRevision: "additional-insights-discover-accept-publish-v5",
-    promptRevision: "additional-insights-discovery-v5",
+    validatorRevision: "additional-insights-acceptance-v4",
+    workflowRevision: "additional-insights-discover-accept-publish-v6",
+    promptRevision: "additional-insights-discovery-v6",
     capabilityRevision: "scoped-read-only-v1",
     publicationRevision: "additional-insights-v2",
     canvasRevision: "energyiq-insight-canvas-v2",
@@ -1465,6 +1472,34 @@ const artifact = (
       suppressedCandidateIds: [],
     },
   };
+};
+
+const artifactWithThreeFindings = (
+  target: AdditionalAiInsightEvaluationTarget,
+  runId: string,
+  prefix: string,
+): AdditionalAiInsightsArtifact => {
+  const value = artifact(target, runId, "analysis.summary.usage_kwh", `${prefix}-primary`);
+  if (value.status !== "available") throw new Error("available fixture required");
+  const [primary] = value.findings;
+  if (!primary) throw new Error("primary Finding fixture required");
+  const candidateIds = [`${prefix}-primary`, `${prefix}-secondary`, `${prefix}-tertiary`];
+  value.findings = candidateIds.map((candidateId, index) => ({
+    ...structuredClone(primary),
+    id: candidateId,
+    title: `Finding ${candidateId}`,
+    text: `Incremental Evidence-bound angle ${index + 1}.`,
+  }));
+  value.publication = {
+    ...value.publication,
+    discoveredCount: 3,
+    acceptedCount: 3,
+    publishedCount: 3,
+    sourceOrderCandidateIds: candidateIds,
+    acceptedCandidateIds: candidateIds,
+    publishedCandidateIds: candidateIds,
+  };
+  return value;
 };
 
 const createHarness = () => {

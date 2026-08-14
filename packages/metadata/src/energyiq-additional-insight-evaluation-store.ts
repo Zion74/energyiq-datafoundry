@@ -583,7 +583,7 @@ export class EnergyIqAdditionalInsightEvaluationStore {
             ? {
               summary: {
                 reviewSummaryToken: blindSummaryToken(record.evaluationId, attempt.attemptId),
-                text: artifact.findings.map(({ title }) => title).join("; "),
+                text: artifact.findings[0]!.title,
               },
             }
             : {}),
@@ -1372,7 +1372,6 @@ const requireTarget = (
     || target.methodSetFingerprint !== sha256(canonical)
     || !supportedTargetIdentity(target)
     || target.outputContractRevision !== "energyiq-additional-ai-insights-v2"
-    || target.validatorRevision !== "additional-insights-acceptance-v3"
     || target.capabilityRevision !== "scoped-read-only-v1"
     || target.publicationRevision !== "additional-insights-v2"
     || target.canvasRevision !== "energyiq-insight-canvas-v2") {
@@ -1383,20 +1382,28 @@ const requireTarget = (
 
 const supportedTargetIdentity = (target: AdditionalAiInsightEvaluationTarget): boolean => (
   (target.artifactIdentityRevision === "additional-insights-v3"
+    && target.validatorRevision === "additional-insights-acceptance-v3"
     && target.workflowRevision === "additional-insights-discover-accept-publish-v3"
     && target.promptRevision === "additional-insights-discovery-v3")
   || (target.artifactIdentityRevision === "additional-insights-v4"
+    && target.validatorRevision === "additional-insights-acceptance-v3"
     && target.workflowRevision === "additional-insights-discover-accept-publish-v4"
     && target.promptRevision === "additional-insights-discovery-v4")
   || (target.artifactIdentityRevision === "additional-insights-v5"
+    && target.validatorRevision === "additional-insights-acceptance-v3"
     && target.workflowRevision === "additional-insights-discover-accept-publish-v5"
     && target.promptRevision === "additional-insights-discovery-v5")
+  || (target.artifactIdentityRevision === "additional-insights-v6"
+    && target.validatorRevision === "additional-insights-acceptance-v4"
+    && target.workflowRevision === "additional-insights-discover-accept-publish-v6"
+    && target.promptRevision === "additional-insights-discovery-v6")
 );
 
 const requireCurrentTargetIdentity = (target: AdditionalAiInsightEvaluationTarget): void => {
-  if (target.artifactIdentityRevision !== "additional-insights-v5"
-    || target.workflowRevision !== "additional-insights-discover-accept-publish-v5"
-    || target.promptRevision !== "additional-insights-discovery-v5") {
+  if (target.artifactIdentityRevision !== "additional-insights-v6"
+    || target.validatorRevision !== "additional-insights-acceptance-v4"
+    || target.workflowRevision !== "additional-insights-discover-accept-publish-v6"
+    || target.promptRevision !== "additional-insights-discovery-v6") {
     throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_BEHAVIOR_NOT_CURRENT");
   }
 };

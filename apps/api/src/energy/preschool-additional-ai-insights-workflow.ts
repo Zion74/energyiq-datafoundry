@@ -3,6 +3,7 @@ import {
   ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1,
   acceptInsightCanvasPlan,
   additionalAiInsightsArtifactIsValid,
+  energyAiNarrativeClaimsSupported,
   ENERGYIQ_OPEN_DISCOVERY_METHOD_CONTENT_V1,
   resolveAdditionalAiInsightMethodSet,
   resolveCurrentAdditionalAiInsightMethodSet,
@@ -36,7 +37,7 @@ import { ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID } from "../workspace-model-profile-r
 
 const LEASE_MS = 13 * 60 * 1_000;
 const MAX_DISCOVERY_ANSWER_CHARS = 160_000;
-const MAX_CANDIDATE_TITLE_CHARS = 240;
+const MAX_CANDIDATE_TITLE_CHARS = 180;
 const MAX_CANDIDATE_TEXT_CHARS = 1_200;
 const MAX_NOVEL_CONTRIBUTION_CHARS = 800;
 export const MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS = 160_000;
@@ -52,6 +53,180 @@ export type PreschoolAdditionalAiInsightsDiscoveryRunner = (input: {
   invokeTool(input: PreschoolAdditionalAiInsightToolInvocation): Promise<PreschoolAdditionalAiInsightToolResult>;
   modelProfileSnapshot?: EnergyIqAdditionalInsightModelProfileSnapshot;
 }) => Promise<{ answer: string; runId: string; sessionId: string }>;
+
+export type PreschoolAdditionalAiPresentedClaim = {
+  id: string;
+  source: "deterministic-overview" | "key-finding" | "section-summary" | "section-insight";
+  sectionId?: string;
+  artifactId?: string;
+  text: string;
+  evidenceRefs: string[];
+};
+
+export type PreschoolAdditionalAiPresentedClaims = {
+  binding: {
+    workspaceId: string;
+    projectId: string;
+    scopeId: string;
+    dataSnapshotId: string;
+    projectReleaseId: string;
+    analysisPeriod: { from: string; to: string };
+    modelProfileId: string;
+    modelProfileRevision: number;
+  };
+  claims: PreschoolAdditionalAiPresentedClaim[];
+};
+
+export const createPreschoolAdditionalAiPresentedClaims = (input: {
+  identity: PreschoolAdditionalAiInsightArtifactIdentity;
+  catalog: AnalysisContextEvidenceCatalog;
+  readModel: unknown;
+}): PreschoolAdditionalAiPresentedClaims => {
+  const binding = {
+    workspaceId: input.identity.workspaceId,
+    projectId: input.identity.projectId,
+    scopeId: input.identity.scopeId,
+    dataSnapshotId: input.identity.dataSnapshotId,
+    projectReleaseId: input.identity.projectReleaseId,
+    analysisPeriod: { from: input.identity.analysisPeriodFrom, to: input.identity.analysisPeriodTo },
+    modelProfileId: input.identity.modelProfileId,
+    modelProfileRevision: input.identity.modelProfileRevision,
+  };
+  const claims: PreschoolAdditionalAiPresentedClaim[] = input.catalog.facts.map((fact) => ({
+    id: `deterministic-overview:${fact.id}`,
+    source: "deterministic-overview",
+    text: `${fact.label}: ${String(fact.value)}${fact.unit ? ` ${fact.unit}` : ""}`,
+    evidenceRefs: [fact.id],
+  }));
+  if (input.readModel === null || input.readModel === undefined) return { binding, claims };
+  if (!isRecord(input.readModel)
+    || !readModelBindingMatches(input.readModel.binding, binding)
+    || !isRecord(input.readModel.sections)
+    || !isRecord(input.readModel.executive)) {
+    throw new Error("PRESCHOOL_ADDITIONAL_AI_PRESENTED_READ_MODEL_INVALID");
+  }
+  for (const [sectionId, unit] of Object.entries(input.readModel.sections)) {
+    if (!isAvailablePresentedSectionUnit(unit, sectionId, binding)) continue;
+    pushPresentedClaim(claims, {
+      id: `section:${sectionId}:summary`,
+      source: "section-summary",
+      sectionId,
+      artifactId: unit.artifactId,
+      value: unit.result.summary,
+    });
+    for (const insight of unit.result.insights) {
+      if (!isRecord(insight) || !nonEmptyString(insight.id)) continue;
+      pushPresentedClaim(claims, {
+        id: `section:${sectionId}:insight:${insight.id}`,
+        source: "section-insight",
+        sectionId,
+        artifactId: unit.artifactId,
+        value: insight,
+      });
+    }
+  }
+  const executive = input.readModel.executive;
+  if (isAvailablePresentedExecutiveUnit(executive, binding)) {
+    pushPresentedClaim(claims, {
+      id: "key-findings:summary",
+      source: "key-finding",
+      artifactId: executive.artifactId,
+      value: executive.result.summary,
+    });
+    for (const finding of executive.result.findings) {
+      if (!isRecord(finding) || !nonEmptyString(finding.id)) continue;
+      pushPresentedClaim(claims, {
+        id: `key-finding:${finding.id}`,
+        source: "key-finding",
+        artifactId: executive.artifactId,
+        value: finding,
+      });
+    }
+  }
+  return { binding, claims };
+};
+
+const pushPresentedClaim = (
+  target: PreschoolAdditionalAiPresentedClaim[],
+  input: {
+    id: string;
+    source: PreschoolAdditionalAiPresentedClaim["source"];
+    sectionId?: string;
+    artifactId: string;
+    value: unknown;
+  },
+): void => {
+  if (!isPresentedClaimValue(input.value)) return;
+  target.push({
+    id: input.id,
+    source: input.source,
+    ...(input.sectionId ? { sectionId: input.sectionId } : {}),
+    artifactId: input.artifactId,
+    text: [nonEmptyString(input.value.title) ? input.value.title.trim() : "", input.value.text.trim()]
+      .filter(Boolean).join(": "),
+    evidenceRefs: [...input.value.evidenceRefs],
+  });
+};
+
+const isAvailablePresentedSectionUnit = (
+  value: unknown,
+  sectionId: string,
+  binding: PreschoolAdditionalAiPresentedClaims["binding"],
+): value is {
+  status: "available";
+  artifactId: string;
+  result: { summary: unknown; insights: unknown[] };
+} => isRecord(value)
+  && value.status === "available"
+  && nonEmptyString(value.artifactId)
+  && isRecord(value.result)
+  && value.result.artifactKind === "section-interpretation"
+  && value.result.status === "available"
+  && value.result.sectionId === sectionId
+  && readModelBindingMatches(value.result.binding, binding)
+  && isPresentedClaimValue(value.result.summary)
+  && Array.isArray(value.result.insights);
+
+const isAvailablePresentedExecutiveUnit = (
+  value: unknown,
+  binding: PreschoolAdditionalAiPresentedClaims["binding"],
+): value is {
+  status: "available";
+  artifactId: string;
+  result: { summary: unknown; findings: unknown[] };
+} => isRecord(value)
+  && value.status === "available"
+  && nonEmptyString(value.artifactId)
+  && isRecord(value.result)
+  && value.result.artifactKind === "executive-synthesis"
+  && value.result.status === "available"
+  && readModelBindingMatches(value.result.binding, binding)
+  && isPresentedClaimValue(value.result.summary)
+  && Array.isArray(value.result.findings);
+
+const isPresentedClaimValue = (value: unknown): value is Record<string, unknown> & {
+  text: string;
+  evidenceRefs: string[];
+} => isRecord(value)
+  && nonEmptyString(value.text)
+  && Array.isArray(value.evidenceRefs)
+  && value.evidenceRefs.length > 0
+  && uniqueStrings(value.evidenceRefs);
+
+const readModelBindingMatches = (
+  value: unknown,
+  expected: PreschoolAdditionalAiPresentedClaims["binding"],
+): boolean => isRecord(value)
+  && value.workspaceId === expected.workspaceId
+  && value.projectId === expected.projectId
+  && value.scopeId === expected.scopeId
+  && value.dataSnapshotId === expected.dataSnapshotId
+  && value.projectReleaseId === expected.projectReleaseId
+  && value.modelProfileId === expected.modelProfileId
+  && value.modelProfileRevision === expected.modelProfileRevision
+  && isRecord(value.analysisPeriod)
+  && value.analysisPeriod.from === expected.analysisPeriod.from
+  && value.analysisPeriod.to === expected.analysisPeriod.to;
 
 export type PreschoolAdditionalAiInsightsWorkflow = {
   execute(input: {
@@ -74,6 +249,11 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
     identity: PreschoolAdditionalAiInsightArtifactIdentity;
     user: UserRecord;
   }): Promise<AnalysisContextEvidenceCatalog>;
+  resolvePresentedClaims(args: {
+    identity: PreschoolAdditionalAiInsightArtifactIdentity;
+    catalog: AnalysisContextEvidenceCatalog;
+    user: UserRecord;
+  }): Promise<PreschoolAdditionalAiPresentedClaims>;
   runDiscovery: PreschoolAdditionalAiInsightsDiscoveryRunner;
 }): PreschoolAdditionalAiInsightsWorkflow => {
   const evaluateAttempt: PreschoolAdditionalAiInsightsWorkflow["evaluateAttempt"] = async ({
@@ -110,6 +290,11 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
     }
     requireModelRuntimeIdentity(input.metadataStore, identity, modelProfileSnapshot);
     const catalog = await input.resolveEvidenceCatalog({ identity, user });
+    const presentedClaims = requirePresentedClaims(
+      await input.resolvePresentedClaims({ identity, catalog, user }),
+      identity,
+      catalog,
+    );
     const runtime = createPreschoolAdditionalAiInsightRuntime({
       binding: {
         workspaceId: identity.workspaceId,
@@ -121,7 +306,7 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
       catalog,
     });
     const completed = await input.runDiscovery({
-      prompt: buildDiscoveryPrompt({ identity, catalog, methodResources: methodSet.resources }),
+      prompt: buildDiscoveryPrompt({ identity, catalog, presentedClaims, methodResources: methodSet.resources }),
       runId,
       sessionId,
       user,
@@ -140,6 +325,7 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
       identity,
       methodSet,
       catalog,
+      presentedClaims,
       candidates,
       toolAudits: runtime.audits(),
       runId,
@@ -283,6 +469,7 @@ const publishAdditionalArtifact = (input: {
   identity: PreschoolAdditionalAiInsightArtifactIdentity;
   methodSet: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>;
   catalog: AnalysisContextEvidenceCatalog;
+  presentedClaims: PreschoolAdditionalAiPresentedClaims;
   candidates: DiscoveryCandidate[];
   toolAudits: ReturnType<ReturnType<typeof createPreschoolAdditionalAiInsightRuntime>["audits"]>;
   runId: string;
@@ -298,6 +485,7 @@ const publishAdditionalArtifact = (input: {
     const finding = acceptCandidate(
       candidate,
       factsById,
+      input.presentedClaims.claims,
       auditsById,
       coreMethod,
       directionMethods,
@@ -396,6 +584,7 @@ const publishAdditionalArtifact = (input: {
 const acceptCandidate = (
   candidate: DiscoveryCandidate,
   factsById: Map<string, AnalysisContextEvidenceCatalog["facts"][number]>,
+  presentedClaims: readonly PreschoolAdditionalAiPresentedClaim[],
   auditsById: Map<string, ReturnType<ReturnType<typeof createPreschoolAdditionalAiInsightRuntime>["audits"]>[number]>,
   coreMethod: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>["methods"][number],
   directionMethods: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>["methods"],
@@ -405,10 +594,10 @@ const acceptCandidate = (
   const value = candidate.value;
   if (!isRecord(value)
     || !hasOnlyKeys(value, [
-      "id", "title", "text", "epistemicStatus", "origin", "evidenceRefs", "toolAuditIds", "deepDiveQuestion", "alert", "canvas",
+      "id", "title", "text", "epistemicStatus", "origin", "incrementalContext", "evidenceRefs", "toolAuditIds", "deepDiveQuestion", "alert", "canvas",
     ])
     || value.id !== candidate.sourceId
-    || !boundedSafeText(value.title, MAX_CANDIDATE_TITLE_CHARS)
+    || !conciseSummaryTitle(value.title)
     || !boundedSafeText(value.text, MAX_CANDIDATE_TEXT_CHARS)
     || (value.epistemicStatus !== "observed" && value.epistemicStatus !== "inferred" && value.epistemicStatus !== "speculative")
     || !Array.isArray(value.evidenceRefs)
@@ -420,8 +609,27 @@ const acceptCandidate = (
     || optionalBoundedSafeText(value.deepDiveQuestion, MAX_CANDIDATE_TEXT_CHARS) === false) return null;
   const evidenceRefs = value.evidenceRefs;
   const toolAuditIds = value.toolAuditIds;
+  const citedFacts = evidenceRefs.map((reference) => factsById.get(reference)!);
+  if (!energyAiNarrativeClaimsSupported({
+    narrative: [value.title, value.text, nonEmptyString(value.deepDiveQuestion) ? value.deepDiveQuestion : ""].join(" "),
+    evidence: citedFacts.map((fact) => ({
+      id: fact.id,
+      label: fact.label,
+      unit: fact.unit ?? null,
+      values: { [fact.metricId]: fact.value, ...fact.dimensions },
+    })),
+    sqlEvidence: [],
+  })) return null;
   const origin = resolveCandidateOrigin(value.origin, coreMethod, directionMethods);
-  if (!origin) return null;
+  const incrementalContext = resolveIncrementalContext(value.incrementalContext, evidenceRefs, presentedClaims);
+  if (!origin
+    || !incrementalContext
+    || !epistemicBoundaryIsAcceptable({
+      title: value.title,
+      text: value.text,
+      epistemicStatus: value.epistemicStatus,
+      originKind: origin.kind,
+    })) return null;
   const audits = toolAuditIds.map((id) => auditsById.get(id));
   if (audits.some((audit) => !audit || audit.status !== "succeeded")
     || audits.some((audit) => audit!.evidenceRefs.some((ref) => !evidenceRefs.includes(ref)))) return null;
@@ -496,6 +704,44 @@ const resolveCandidateOrigin = (
     };
   }
   return null;
+};
+
+const resolveIncrementalContext = (
+  value: unknown,
+  evidenceRefs: string[],
+  presentedClaims: readonly PreschoolAdditionalAiPresentedClaim[],
+): { relatedPresentedClaimIds: string[]; novelConclusion: string } | null => {
+  if (!isRecord(value)
+    || !hasExactKeys(value, ["relatedPresentedClaimIds", "novelConclusion"])
+    || !Array.isArray(value.relatedPresentedClaimIds)
+    || !uniqueStrings(value.relatedPresentedClaimIds)
+    || !boundedSafeText(value.novelConclusion, MAX_NOVEL_CONTRIBUTION_CHARS)) return null;
+  const claimsById = new Map(presentedClaims.map((claim) => [claim.id, claim]));
+  const related = value.relatedPresentedClaimIds.map((id) => claimsById.get(id));
+  if (related.some((claim) => !claim)) return null;
+  const overlappingClaims = presentedClaims.filter((claim) =>
+    claim.evidenceRefs.some((reference) => evidenceRefs.includes(reference)));
+  if (overlappingClaims.length > 0
+    && !related.some((claim) => claim!.evidenceRefs.some((reference) => evidenceRefs.includes(reference)))) return null;
+  if (related.some((claim) => !claim!.evidenceRefs.some((reference) => evidenceRefs.includes(reference)))) return null;
+  const novelConclusion = value.novelConclusion.trim();
+  if (related.some((claim) => claimTextIsRestatement(claim!.text, novelConclusion))) return null;
+  return { relatedPresentedClaimIds: [...value.relatedPresentedClaimIds], novelConclusion };
+};
+
+const epistemicBoundaryIsAcceptable = (input: {
+  title: string;
+  text: string;
+  epistemicStatus: "observed" | "inferred" | "speculative";
+  originKind: AdditionalAiInsightFinding["origin"]["kind"];
+}): boolean => {
+  const narrative = `${input.title}\n${input.text}`;
+  const explicitCausal = /\b(?:cause(?:s|d)?|driv(?:e|es|en)|explain(?:s|ed)?)(?:\s+\w+){0,3}\s+(?:by|the\s+variance)|\bdue\s+to\b/iu.test(narrative);
+  const explicitAction = /\b(?:highest[- ]leverage|best|optimal|most\s+effective)\b[^.!?\n]{0,80}\b(?:target|action|intervention)\b/iu.test(narrative);
+  const externalBenchmark = /\b(?:typical\s+(?:learning\s+)?environments?|industry\s+benchmarks?|tropical\s+preschools?)\b|\bshould\s+dominate\b/iu.test(narrative);
+  if (input.epistemicStatus === "observed" && (explicitCausal || explicitAction || externalBenchmark)) return false;
+  if (externalBenchmark && input.originKind === "ai-discovery" && input.epistemicStatus !== "speculative") return false;
+  return true;
 };
 
 const acceptCandidateCanvas = (input: {
@@ -596,6 +842,7 @@ const alertIsAcceptable = (
 const buildDiscoveryPrompt = (input: {
   identity: PreschoolAdditionalAiInsightArtifactIdentity;
   catalog: AnalysisContextEvidenceCatalog;
+  presentedClaims: PreschoolAdditionalAiPresentedClaims;
   methodResources: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>["resources"];
 }): string => {
   const prompt = [
@@ -604,10 +851,11 @@ const buildDiscoveryPrompt = (input: {
       `Server-approved Method ${method.role} ${method.resourceId}@${method.resourceRevision}:`,
       content,
     ].join("\n")),
-    "Return JSON only: {candidates:[{id,title,text,epistemicStatus:'observed|inferred|speculative',origin:{kind:'ai-discovery|expert-sop|hybrid',directionMethodResourceIds:[exact server-approved Method resourceId],novelContribution?:string},evidenceRefs:[exact fact id],toolAuditIds:[actual returned audit id],deepDiveQuestion?,alert?,canvas?}]}.",
+    "Return JSON only: {candidates:[{id,title,text,epistemicStatus:'observed|inferred|speculative',origin:{kind:'ai-discovery|expert-sop|hybrid',directionMethodResourceIds:[exact server-approved Method resourceId],novelContribution?:string},incrementalContext:{relatedPresentedClaimIds:[exact claim id],novelConclusion:string},evidenceRefs:[exact fact id],toolAuditIds:[actual returned audit id],deepDiveQuestion?,alert?,canvas?}]}.",
     "For core-only discovery use origin.kind='ai-discovery' and directionMethodResourceIds=[]. Cite only the exact loaded expert-direction resourceIds actually used. expert-sop requires one or more such refs. hybrid additionally requires a concise bounded novelContribution. Never invent or duplicate Method refs.",
     "Optional canvas must be an energyiq-insight-canvas plan using only quantitative metric, comparison, or trend blocks bound exactly to supplied Evidence facts. The server may reject blocks locally without rejecting the Finding.",
     "Candidates must already be ordered from highest to lowest incremental value. Zero candidates is valid.",
+    "Use the structured already-presented claim digests below. Cite exact related claim IDs and state only the genuinely new conclusion. A restatement is not a candidate; the same Evidence may support a new relationship, counterexample, or testable hypothesis.",
     `Server-owned identity: ${JSON.stringify({
       workspaceId: input.identity.workspaceId,
       projectId: input.identity.projectId,
@@ -624,6 +872,7 @@ const buildDiscoveryPrompt = (input: {
       pins: input.catalog.pins,
       facts: input.catalog.facts.map(({ evidenceRefs: _sourceRefs, ...fact }) => fact),
     })}`,
+    `Already-presented claim digests: ${JSON.stringify(input.presentedClaims.claims)}`,
   ].join("\n\n");
   if (prompt.length > MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS) {
     throw new Error(`PRESCHOOL_ADDITIONAL_AI_DISCOVERY_PROMPT_TOO_LARGE:${prompt.length}`);
@@ -646,6 +895,62 @@ const requireMethodResources = (
   return methodSet;
 };
 
+const requirePresentedClaims = (
+  value: PreschoolAdditionalAiPresentedClaims,
+  identity: PreschoolAdditionalAiInsightArtifactIdentity,
+  catalog: AnalysisContextEvidenceCatalog,
+): PreschoolAdditionalAiPresentedClaims => {
+  const expected = {
+    workspaceId: identity.workspaceId,
+    projectId: identity.projectId,
+    scopeId: identity.scopeId,
+    dataSnapshotId: identity.dataSnapshotId,
+    projectReleaseId: identity.projectReleaseId,
+    analysisPeriod: { from: identity.analysisPeriodFrom, to: identity.analysisPeriodTo },
+    modelProfileId: identity.modelProfileId,
+    modelProfileRevision: identity.modelProfileRevision,
+  };
+  const factIds = new Set(catalog.facts.map(({ id }) => id));
+  if (!isRecord(value)
+    || JSON.stringify(value.binding) !== JSON.stringify(expected)
+    || !Array.isArray(value.claims)
+    || !uniqueStrings(value.claims.map(({ id }) => id))
+    || value.claims.some((claim) => !isRecord(claim)
+      || !nonEmptyString(claim.id)
+      || !nonEmptyString(claim.text)
+      || !Array.isArray(claim.evidenceRefs)
+      || claim.evidenceRefs.length === 0
+      || !uniqueStrings(claim.evidenceRefs)
+      || claim.evidenceRefs.some((reference) => !factIds.has(reference)))) {
+    throw new Error("PRESCHOOL_ADDITIONAL_AI_PRESENTED_CLAIMS_INVALID");
+  }
+  return value;
+};
+
+const canonicalClaimText = (value: string): string => value
+  .normalize("NFKC")
+  .toLocaleLowerCase("en")
+  .replace(/[^\p{L}\p{N}]+/gu, " ")
+  .trim();
+
+const CLAIM_FUNCTION_WORDS = new Set([
+  "a", "an", "and", "at", "by", "during", "for", "from", "in", "is", "of", "on", "the", "to", "was",
+]);
+
+const claimTextIsRestatement = (presented: string, proposed: string): boolean => {
+  const left = canonicalClaimText(presented);
+  const right = canonicalClaimText(proposed);
+  if (left === right) return true;
+  const tokens = (value: string): Set<string> => new Set(value.split(" ")
+    .filter((token) => token.length > 1 && !CLAIM_FUNCTION_WORDS.has(token)));
+  const leftTokens = tokens(left);
+  const rightTokens = tokens(right);
+  const smaller = Math.min(leftTokens.size, rightTokens.size);
+  if (smaller < 4) return false;
+  const shared = [...leftTokens].filter((token) => rightTokens.has(token)).length;
+  return shared / smaller >= 0.8;
+};
+
 const boundedErrorCode = (error: unknown): string => {
   const value = error instanceof Error ? error.message : "PRESCHOOL_ADDITIONAL_AI_FAILED";
   return /^[A-Z0-9_:.-]{1,160}$/u.test(value) ? value : "PRESCHOOL_ADDITIONAL_AI_FAILED";
@@ -654,6 +959,9 @@ const boundedErrorCode = (error: unknown): string => {
 const boundedSafeText = (value: unknown, max: number): value is string => nonEmptyString(value)
   && value.length <= max
   && !/(?:<\/?[a-z]|https?:\/\/|javascript:)/iu.test(value);
+
+const conciseSummaryTitle = (value: unknown): value is string =>
+  boundedSafeText(value, MAX_CANDIDATE_TITLE_CHARS) && !/[;\r\n]/u.test(value);
 
 const optionalBoundedSafeText = (value: unknown, max: number): boolean =>
   value === undefined || boundedSafeText(value, max);

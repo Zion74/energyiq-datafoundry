@@ -937,3 +937,21 @@ v5 strict schema 只接受受限的 `ai-discovery`、`expert-sop` 或 `hybrid` o
 稳定的本地 Structured Output schema validation type 被归一为该 attempt 的 `structured-output` 局部失败；Provider 自身不支持 structured output 的
 错误仍归 Provider failure。历史 v4 terminal Artifact/评估保持只读，v4 running reservation 在 v5 current 入口 fail closed。此 checkpoint 仅证明
 本地自动化工程门；尚未在本 worktree 调用真实 Provider、执行新 pass@3 人工盲评或完成浏览器与人工价值验收。
+
+### 18.13 Additional 增量价值与候选事实边界工程修正 checkpoint
+
+第三轮真实 pass@3 表明，工程门虽然通过，候选仍可能复述 deterministic Overview、Key Findings 或四个 Section 已呈现的结论；候选自己的
+Evidence 也可能没有覆盖正文新增的数字或 Centre 实体，因果、最优行动及外部行业比较还可能越过其 epistemic status。current Additional identity
+因此旋转为 `additional-insights-v6`，workflow 为 `additional-insights-discover-accept-publish-v6`，discovery prompt 为
+`additional-insights-discovery-v6`，validator 为 `additional-insights-acceptance-v4`。输出 v2、capability v1、publication v2、canvas v2、Method set
+与 Pack 均未改变。
+
+v6 discovery 由服务端按 exact Snapshot、Release、Period 与 Model Profile 组装 deterministic facts、Section Summary/Insights 和 Key Findings 的
+结构化 presented-claim digests。模型必须声明相关 claim IDs 与有界的新结论；纯重述逐候选拒绝，同一 Evidence 形成新的关系、反例或可证伪假设仍合法。
+服务端仅用该候选自己的 Evidence refs 校验 title、text 与 deepDiveQuestion 中的数字、单位及 Centre 实体，并对 observed 因果/最优行动和没有
+Method/Evidence 的外部 benchmark 越级做局部拒绝。Additional 盲评 Summary 只取发布顺序第一条 Finding 的短标题，不再拼接三个标题；分号标题列表、
+超长标题在 acceptance 层局部拒绝。malformed Section 或 Executive presented unit 通过各自 exact local guard 隔离，不拖垮确定性 facts 或有效 sibling。
+
+历史 v5 terminal Artifact/评估保持只读，v5 running reservation 在 v6 current 入口 fail closed；普通 Overview GET 仍只恢复 saved current Artifact，
+不会启动 Provider、工具、ensure 或 queue。这里的近重述过滤是可审计的确定性安全门，不是完整语义 novelty judge；本 checkpoint 只证明本地自动化
+工程边界。尚未在本 worktree 调用真实 Provider、执行 v6 pass@3 人工盲评、完成浏览器恢复或人工增量价值验收。

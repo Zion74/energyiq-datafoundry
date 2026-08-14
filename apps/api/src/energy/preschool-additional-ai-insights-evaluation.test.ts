@@ -574,7 +574,7 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
     }
   });
 
-  it("fails closed running v4 discovery and transition reservations instead of resuming them with v5 behavior", async () => {
+  it("fails closed running v5 discovery and transition reservations instead of resuming them with v6 behavior", async () => {
     const harness = createHarness();
     try {
       const runAttempt = vi.fn(async ({ identity, runId }: {
@@ -615,7 +615,7 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
         methodResources: methodSet.resources,
         modelProfileSnapshot,
       });
-      downgradeEvaluationReservationToV4(harness.metadata.db, "running-v3-evaluation");
+      downgradeEvaluationReservationToV5(harness.metadata.db, "running-v3-evaluation");
 
       const transitionBase = createBaseIdentity("snapshot-b", "release-b");
       const transitionIdentity = createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity: transitionBase });
@@ -634,8 +634,8 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
         methodResources: methodSet.resources,
         modelProfileSnapshot,
       });
-      downgradeEvaluationReservationToV4(harness.metadata.db, previous.evaluationId);
-      downgradeTransitionReservationToV4(harness.metadata.db, "running-v3-transition");
+      downgradeEvaluationReservationToV5(harness.metadata.db, previous.evaluationId);
+      downgradeTransitionReservationToV5(harness.metadata.db, "running-v3-transition");
       runAttempt.mockClear();
       runTransition.mockClear();
 
@@ -1465,27 +1465,29 @@ const evaluationTarget = (
   methodSetFingerprint: identity.methodSetFingerprint,
 });
 
-const v4RuntimeIdentity = (
+const v5RuntimeIdentity = (
   identity: Record<string, unknown>,
 ): Record<string, unknown> => ({
   ...identity,
-  identityContractRevision: "additional-insights-v4",
-  workflowRevision: "additional-insights-discover-accept-publish-v4",
-  investigatorPromptRevision: "additional-insights-discovery-v4",
+  identityContractRevision: "additional-insights-v5",
+  validatorRevision: "additional-insights-acceptance-v3",
+  workflowRevision: "additional-insights-discover-accept-publish-v5",
+  investigatorPromptRevision: "additional-insights-discovery-v5",
 });
 
-const v4EvaluationTarget = (
+const v5EvaluationTarget = (
   target: AdditionalAiInsightEvaluationTarget,
   identity: Record<string, unknown>,
 ): AdditionalAiInsightEvaluationTarget => ({
   ...target,
-  artifactIdentityRevision: "additional-insights-v4",
+  artifactIdentityRevision: "additional-insights-v5",
   artifactIdentityHash: `sha256:${createHash("sha256").update(JSON.stringify(identity)).digest("hex")}`,
-  workflowRevision: "additional-insights-discover-accept-publish-v4",
-  promptRevision: "additional-insights-discovery-v4",
+  validatorRevision: "additional-insights-acceptance-v3",
+  workflowRevision: "additional-insights-discover-accept-publish-v5",
+  promptRevision: "additional-insights-discovery-v5",
 });
 
-const downgradeEvaluationReservationToV4 = (
+const downgradeEvaluationReservationToV5 = (
   db: DatabaseSync,
   evaluationId: string,
 ): void => {
@@ -1496,14 +1498,14 @@ const downgradeEvaluationReservationToV4 = (
     runtimeIdentity: Record<string, unknown>;
   };
   const record = JSON.parse(row.record_json) as { target: AdditionalAiInsightEvaluationTarget };
-  reservation.runtimeIdentity = v4RuntimeIdentity(reservation.runtimeIdentity);
-  reservation.target = v4EvaluationTarget(reservation.target, reservation.runtimeIdentity);
+  reservation.runtimeIdentity = v5RuntimeIdentity(reservation.runtimeIdentity);
+  reservation.target = v5EvaluationTarget(reservation.target, reservation.runtimeIdentity);
   record.target = reservation.target;
   db.prepare("UPDATE energyiq_additional_insight_evaluations SET reservation_json = ?, record_json = ? WHERE id = ?")
     .run(JSON.stringify(reservation), JSON.stringify(record), evaluationId);
 };
 
-const downgradeTransitionReservationToV4 = (
+const downgradeTransitionReservationToV5 = (
   db: DatabaseSync,
   transitionId: string,
 ): void => {
@@ -1523,8 +1525,8 @@ const downgradeTransitionReservationToV4 = (
   reservation.previousTarget = (JSON.parse(previousRow.record_json) as {
     target: AdditionalAiInsightEvaluationTarget;
   }).target;
-  reservation.runtimeIdentity = v4RuntimeIdentity(reservation.runtimeIdentity);
-  reservation.currentTarget = v4EvaluationTarget(reservation.currentTarget, reservation.runtimeIdentity);
+  reservation.runtimeIdentity = v5RuntimeIdentity(reservation.runtimeIdentity);
+  reservation.currentTarget = v5EvaluationTarget(reservation.currentTarget, reservation.runtimeIdentity);
   reservation.currentArtifactIdentityHash = `sha256:${createHash("sha256").update(JSON.stringify({
     contractRevision: "additional-insight-transition-artifact-v1",
     target: reservation.currentTarget,

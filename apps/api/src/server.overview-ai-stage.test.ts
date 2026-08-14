@@ -30,7 +30,7 @@ import {
 } from "./server.js";
 import { RunCancelRegistry } from "./run-cancel-registry.js";
 import {
-  PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2,
+  PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3,
   PRESCHOOL_ADDITIONAL_AI_INSIGHTS_TRANSITION_STRUCTURED_OUTPUT_V1,
   PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4,
   PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4,
@@ -125,7 +125,7 @@ describe("Overview AI server stage options", () => {
     const trusted = resolveOverviewAiServerRunnerOptions({
       stage: "additional-insights-discovery",
       identity: additionalIdentity(),
-      structuredOutput: PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2,
+      structuredOutput: PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3,
       additionalInsightTools: toolNames,
       invokeAdditionalInsightTool,
     });
@@ -139,13 +139,13 @@ describe("Overview AI server stage options", () => {
       ],
       overviewAiCandidateSubmission: false,
     });
-    expect(currentRuntime.structuredOutput).toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2);
+    expect(currentRuntime.structuredOutput).toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3);
     expect(trusted).toMatchObject({
       disableTools: false,
       conversationMessageMaxChars: MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS,
       trustedStageCapability: "energyiq-additional-insight-discovery",
     });
-    expect(trusted?.structuredOutput).toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2);
+    expect(trusted?.structuredOutput).toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3);
     expect(Object.keys(trusted?.trustedStageTools ?? {}).sort()).toEqual([...toolNames].sort());
     expect(Object.keys(createPreschoolAdditionalAiInsightTrustedStageTools({
       toolNames,
@@ -216,7 +216,7 @@ describe("Overview AI server stage options", () => {
       const trusted = resolveOverviewAiServerRunnerOptions({
         stage: "additional-insights-discovery",
         identity,
-        structuredOutput: PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2,
+        structuredOutput: PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3,
         additionalInsightTools: toolNames,
         invokeAdditionalInsightTool: async ({ toolCallId }) => ({
           auditId: `additional-tool-audit:${toolCallId}`,
@@ -1285,14 +1285,14 @@ const additionalIdentity = (): EnergyIqOverviewAiArtifactIdentity => ({
   modelProfileId: "workspace-default",
   modelProfileRevision: 7,
   outputContractRevision: "energyiq-additional-ai-insights-v2",
-  validatorRevision: "additional-insights-acceptance-v3",
-  workflowRevision: "additional-insights-discover-accept-publish-v5",
-  investigatorPromptRevision: "additional-insights-discovery-v5",
+  validatorRevision: "additional-insights-acceptance-v4",
+  workflowRevision: "additional-insights-discover-accept-publish-v6",
+  investigatorPromptRevision: "additional-insights-discovery-v6",
   editorPromptRevision: "additional-insights-publication-v2",
   methodSkillId: "energyiq-open-discovery",
   methodSkillRevision: "1.0.0",
   artifactKind: "autonomous-insights",
-  identityContractRevision: "additional-insights-v5",
+  identityContractRevision: "additional-insights-v6",
   methodSetId: "preschool-additional-insights-current",
   methodSetRevision: "v1",
   methodSetFingerprint: `sha256:${"a".repeat(64)}`,
