@@ -347,7 +347,9 @@ describe("PreschoolAiSlot", () => {
     const pageSlot = container.querySelector<HTMLElement>('[data-ai-section="page-synthesis"]');
     expect(pageSlot).not.toBeNull();
     expect(pageSlot!.textContent).toContain("Key Findings");
-    expect(pageSlot!.textContent).toContain("Based on 4 of 4 Sections");
+    expect(pageSlot!.textContent).toContain("Reviewed 4 of 4 Sections");
+    expect(pageSlot!.textContent).toContain("Findings cite 2 source Sections");
+    expect(pageSlot!.textContent).not.toContain("Based on 4 of 4 Sections");
     expect(pageSlot!.querySelector('[aria-label="Key findings summary"]')).not.toBeNull();
     expect(pageSlot!.querySelector('[data-key-findings-grid="true"]')).not.toBeNull();
     expect(readableText(pageSlot)).toContain("Recurring time-pattern signals appear in both closed and opening hours.");
@@ -410,8 +412,8 @@ describe("PreschoolAiSlot", () => {
     ));
 
     const pageSlot = container.querySelector<HTMLElement>('[data-ai-section="page-synthesis"]');
-    expect(pageSlot?.textContent).toContain("Based on 4 of 4 sections");
-    expect(pageSlot?.textContent).not.toContain("Based on 2 of 4 sections");
+    expect(pageSlot?.textContent).toContain("Reviewed 4 of 4 sections");
+    expect(pageSlot?.textContent).not.toContain("Findings cite");
   });
 
   it("renders a saved v4 Section summary and scoped Insight cards with a structured Explore handoff", async () => {
@@ -1152,8 +1154,8 @@ describe("PreschoolAiSlot", () => {
     ));
 
     const pageSlot = container.querySelector<HTMLElement>('[data-ai-section="page-synthesis"]');
-    expect(pageSlot?.textContent).toContain("Based on 3 of 4 sections");
-    expect(pageSlot?.textContent).not.toContain("Based on 4 of 4 sections");
+    expect(pageSlot?.textContent).toContain("Reviewed 3 of 4 sections");
+    expect(pageSlot?.textContent).not.toContain("Reviewed 4 of 4 sections");
   });
 
   it("caps historical saved v3 source coverage at four without rejecting the result", async () => {
@@ -1207,7 +1209,7 @@ describe("PreschoolAiSlot", () => {
     ));
 
     const pageSlot = container.querySelector<HTMLElement>('[data-ai-section="page-synthesis"]');
-    expect(pageSlot?.textContent).toContain("Based on 4 of 4 sections");
+    expect(pageSlot?.textContent).toContain("Reviewed 4 of 4 sections");
     expect(pageSlot?.textContent).toContain("No additional Key Findings");
     expect(pageSlot?.textContent).not.toContain("Invalid saved AI");
   });
