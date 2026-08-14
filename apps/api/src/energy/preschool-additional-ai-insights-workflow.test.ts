@@ -764,7 +764,7 @@ describe("Preschool Additional AI Insights workflow", () => {
     }
   });
 
-  it("requires AI-discovered multi-Evidence relationships to be inferred without guessing from prose keywords", async () => {
+  it("normalizes AI-discovered multi-Evidence relationships to inferred without guessing from prose keywords", async () => {
     const harness = createHarness();
     try {
       const relationship = (id: string, epistemicStatus: "observed" | "inferred", qualifier: string) =>
@@ -800,10 +800,87 @@ describe("Preschool Additional AI Insights workflow", () => {
       });
       expect(result.publication).toMatchObject({
         discoveredCount: 2,
-        acceptedCount: 1,
-        rejectedCount: 1,
-        acceptedCandidateIds: ["candidate-relational-inferred"],
-        rejectedCandidateIds: ["candidate-relational-observed"],
+        acceptedCount: 2,
+        rejectedCount: 0,
+        acceptedCandidateIds: ["candidate-relational-observed", "candidate-relational-inferred"],
+        rejectedCandidateIds: [],
+      });
+      expect(result.findings).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "additional:candidate-relational-observed", epistemicStatus: "inferred" }),
+        expect.objectContaining({ id: "additional:candidate-relational-inferred", epistemicStatus: "inferred" }),
+      ]));
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("accepts a production-shaped new relationship from the published narrative without trusting a verbatim novelty declaration", async () => {
+    const harness = createHarness();
+    try {
+      const relationshipCatalog: AnalysisContextEvidenceCatalog = {
+        ...catalog(),
+        facts: [
+          entityFact("fact:centre-l-closed-peak", "Centre L", 1),
+          entityFact("fact:centre-e-closed-peak", "Centre E", 1),
+          entityFact("fact:centre-n-closed-peak", "Centre N", 1),
+          entityFact("fact:centre-j-closed-peak", "Centre J", 0),
+          entityFact("fact:centre-g-closed-peak", "Centre G", 0),
+          entityFact("fact:centre-m-closed-peak", "Centre M", 0),
+        ],
+      };
+      const evidenceRefs = relationshipCatalog.facts.map(({ id }) => id);
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => relationshipCatalog,
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [
+            candidate("candidate-closed-hour-relationship", evidenceRefs[0]!, {
+              title: "Closed-hour peaks split the six Centres into two groups",
+              text: "Centres L, E and N show a closed-hour peak pattern that is absent for Centres J, G and M; treat the grouping as an inference to verify.",
+              epistemicStatus: "observed",
+              evidenceRefs,
+              incrementalContext: {
+                relatedPresentedClaimIds: [],
+                novelConclusion: "The six locations form a potentially useful operational contrast.",
+              },
+            }),
+            candidate("candidate-closed-hour-restatement", evidenceRefs[0]!, {
+              title: "Centre L energy intensity",
+              text: "Centre L energy intensity is 1 kWh/m2.",
+              epistemicStatus: "observed",
+              evidenceRefs: [evidenceRefs[0]],
+              incrementalContext: {
+                relatedPresentedClaimIds: [],
+                novelConclusion: "A different wording that should not create novelty.",
+              },
+            }),
+          ] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "production-shaped-novelty-run",
+        sessionId: "production-shaped-novelty-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        publication: {
+          discoveredCount: 2,
+          acceptedCount: 1,
+          rejectedCount: 1,
+          acceptedCandidateIds: ["candidate-closed-hour-relationship"],
+          rejectedCandidateIds: ["candidate-closed-hour-restatement"],
+        },
+        findings: [{
+          id: "additional:candidate-closed-hour-relationship",
+          epistemicStatus: "inferred",
+        }],
       });
     } finally {
       harness.close();

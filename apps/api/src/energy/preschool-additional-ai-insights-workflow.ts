@@ -634,16 +634,16 @@ const acceptCandidate = (
     presentedClaims,
     { title: value.title, text: value.text },
   );
-  if (!origin
-    || !incrementalContext
-    || !epistemicBoundaryIsAcceptable({
-      title: value.title,
-      text: value.text,
-      ...(nonEmptyString(value.deepDiveQuestion) ? { deepDiveQuestion: value.deepDiveQuestion } : {}),
-      epistemicStatus: value.epistemicStatus,
-      originKind: origin.kind,
-      relationshipAssertion: incrementalContext.relationshipAssertion,
-    })) return null;
+  if (!origin || !incrementalContext) return null;
+  const epistemicStatus = resolveAcceptedEpistemicStatus({
+    title: value.title,
+    text: value.text,
+    ...(nonEmptyString(value.deepDiveQuestion) ? { deepDiveQuestion: value.deepDiveQuestion } : {}),
+    epistemicStatus: value.epistemicStatus,
+    originKind: origin.kind,
+    relationshipAssertion: incrementalContext.relationshipAssertion,
+  });
+  if (!epistemicStatus) return null;
   const audits = toolAuditIds.map((id) => auditsById.get(id));
   if (audits.some((audit) => !audit || audit.status !== "succeeded")) return null;
   const auditedEvidenceRefs = new Set(audits.flatMap((audit) => audit!.evidenceRefs));
@@ -652,12 +652,12 @@ const acceptCandidate = (
     || audits.some((audit) => !audit!.evidenceRefs.some((ref) => evidenceRefs.includes(ref)))
   )) return null;
   if (isRecord(value.alert)
-    && !alertIsAcceptable(value.alert, value.epistemicStatus, evidenceRefs, factsById)) return null;
+    && !alertIsAcceptable(value.alert, epistemicStatus, evidenceRefs, factsById)) return null;
   const finding: AdditionalAiInsightFinding = {
     id: `additional:${candidate.sourceId}`,
     title: value.title.trim(),
     text: value.text.trim(),
-    epistemicStatus: value.epistemicStatus,
+    epistemicStatus,
     origin,
     evidenceRefs: [...evidenceRefs],
     toolAuditIds: [...toolAuditIds],
@@ -746,10 +746,7 @@ const resolveIncrementalContext = (
   if (related.some((claim) => !claim)) return null;
   const novelConclusion = value.novelConclusion.trim();
   const combinedNarrative = `${publishedNarrative.title} ${publishedNarrative.text}`;
-  const canonicalNarrative = canonicalClaimText(combinedNarrative);
-  const canonicalNovelConclusion = canonicalClaimText(novelConclusion);
-  if (!canonicalNarrative.includes(canonicalNovelConclusion)
-    || related.some((claim) => claimTextIsRestatement(claim!.text, publishedNarrative.title)
+  if (related.some((claim) => claimTextIsRestatement(claim!.text, publishedNarrative.title)
       || claimTextIsRestatement(claim!.text, publishedNarrative.text)
       || claimTextIsRestatement(claim!.text, combinedNarrative))) return null;
   return {
@@ -760,24 +757,24 @@ const resolveIncrementalContext = (
   };
 };
 
-const epistemicBoundaryIsAcceptable = (input: {
+const resolveAcceptedEpistemicStatus = (input: {
   title: string;
   text: string;
   deepDiveQuestion?: string;
   epistemicStatus: "observed" | "inferred" | "speculative";
   originKind: AdditionalAiInsightFinding["origin"]["kind"];
   relationshipAssertion: boolean;
-}): boolean => {
+}): "observed" | "inferred" | "speculative" | null => {
   const narrative = `${input.title}\n${input.text}\n${input.deepDiveQuestion ?? ""}`;
   const explicitCausal = /\b(?:cause(?:s|d)?|driv(?:e|es|en)|explain(?:s|ed)?)(?:\s+\w+){0,3}\s+(?:by|the\s+variance)|\bdue\s+to\b/iu.test(narrative);
   const explicitAction = /\b(?:highest[- ]leverage|best|optimal|most\s+effective)\b[^.!?\n]{0,80}\b(?:target|action|intervention)\b/iu.test(narrative);
   const externalBenchmark = /\b(?:typical\s+(?:learning\s+)?environments?|industry\s+benchmarks?|tropical\s+preschools?)\b|\bshould\s+dominate\b/iu.test(narrative);
+  if (input.epistemicStatus === "observed" && (explicitCausal || explicitAction || externalBenchmark)) return null;
+  if (externalBenchmark && input.originKind === "ai-discovery" && input.epistemicStatus !== "speculative") return null;
   if (input.originKind === "ai-discovery"
     && input.epistemicStatus === "observed"
-    && input.relationshipAssertion) return false;
-  if (input.epistemicStatus === "observed" && (explicitCausal || explicitAction || externalBenchmark)) return false;
-  if (externalBenchmark && input.originKind === "ai-discovery" && input.epistemicStatus !== "speculative") return false;
-  return true;
+    && input.relationshipAssertion) return "inferred";
+  return input.epistemicStatus;
 };
 
 const acceptCandidateCanvas = (input: {
