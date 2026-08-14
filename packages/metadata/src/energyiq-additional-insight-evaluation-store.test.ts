@@ -246,6 +246,102 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
     }
   });
 
+  it("keeps a historical v5 running batch readable but refuses to finalize it", () => {
+    const harness = createHarness();
+    try {
+      reserveAndComplete(harness);
+      const historical = rewriteEvaluationTargetForTest(
+        harness,
+        "evaluation-1",
+        historicalV5Target(evaluationTarget("snapshot-a", "release-a")),
+        (record) => ({
+          ...record,
+          status: "running",
+          reviewPack: { revision: "additional-insight-blind-review-v1", entries: [] },
+          reviewAudit: [],
+        }),
+      );
+      expect(harness.store.getEvaluation({
+        evaluationId: historical.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      })).toMatchObject({ status: "running", target: { artifactIdentityRevision: "additional-insights-v5" } });
+
+      expect(() => harness.store.finalizeEvaluation({
+        evaluationId: historical.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      })).toThrow("ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_BEHAVIOR_NOT_CURRENT");
+      expect(harness.store.getEvaluation({
+        evaluationId: historical.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      })).toEqual(historical);
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("keeps a historical v5 blind review readable but refuses to record a score", () => {
+    const harness = completedHarness();
+    try {
+      const historical = rewriteEvaluationTargetForTest(
+        harness,
+        "evaluation-1",
+        historicalV5Target(evaluationTarget("snapshot-a", "release-a")),
+      );
+      const entry = historical.reviewPack.entries[0]!;
+
+      expect(() => harness.store.recordHumanReview({
+        evaluationId: historical.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+        reviewToken: entry.reviewToken,
+        actorId: "reviewer-legacy-v5",
+        scores: PASSING_SCORES,
+        contentUsefulness: contentUsefulness(historical, entry.reviewToken),
+        expectedRevision: 0,
+      })).toThrow("ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_BEHAVIOR_NOT_CURRENT");
+      expect(harness.store.getEvaluation({
+        evaluationId: historical.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      })).toEqual(historical);
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("keeps a historical v5 passed batch readable but refuses to approve a candidate", () => {
+    const harness = completedHarness();
+    try {
+      reviewAllPassing(harness);
+      const historical = rewriteEvaluationTargetForTest(
+        harness,
+        "evaluation-1",
+        historicalV5Target(evaluationTarget("snapshot-a", "release-a")),
+      );
+      expect(historical.status).toBe("passed");
+      const entry = historical.reviewPack.entries[0]!;
+
+      expect(() => harness.store.approveEvaluationCandidate({
+        evaluationId: historical.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+        reviewToken: entry.reviewToken,
+        actorId: "admin-1",
+        expectedRevision: 0,
+      })).toThrow("ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_BEHAVIOR_NOT_CURRENT");
+      expect(harness.store.getEvaluation({
+        evaluationId: historical.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      })).toEqual(historical);
+    } finally {
+      harness.close();
+    }
+  });
+
   it("reserves one pass@3 batch, persists three independent attempts, and recovers a blind pack", () => {
     const harness = createHarness();
     try {
@@ -1772,6 +1868,32 @@ const historicalV5Target = (
   workflowRevision: "additional-insights-discover-accept-publish-v5",
   promptRevision: "additional-insights-discovery-v5",
 });
+
+const rewriteEvaluationTargetForTest = (
+  harness: ReturnType<typeof createHarness>,
+  evaluationId: string,
+  target: AdditionalAiInsightEvaluationTarget,
+  updateRecord: (record: Record<string, unknown>) => Record<string, unknown> = (record) => record,
+) => {
+  const row = harness.metadata.db.prepare(`
+    SELECT reservation_json, record_json FROM energyiq_additional_insight_evaluations WHERE id = ?
+  `).get(evaluationId) as { reservation_json: string; record_json: string };
+  const reservation = JSON.parse(row.reservation_json) as Record<string, unknown>;
+  const record = updateRecord(JSON.parse(row.record_json) as Record<string, unknown>);
+  const historicalRecord = { ...record, target };
+  harness.metadata.db.prepare(`
+    UPDATE energyiq_additional_insight_evaluations SET reservation_json = ?, record_json = ? WHERE id = ?
+  `).run(
+    JSON.stringify({ ...reservation, target }),
+    JSON.stringify(historicalRecord),
+    evaluationId,
+  );
+  return harness.store.getEvaluation({
+    evaluationId,
+    expectedWorkspaceId: target.workspaceId,
+    expectedProjectId: target.projectId,
+  });
+};
 
 const reserveAndComplete = (
   harness: ReturnType<typeof createHarness>,

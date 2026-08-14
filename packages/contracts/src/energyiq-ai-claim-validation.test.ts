@@ -117,6 +117,30 @@ describe("EnergyIQ AI claim validation", () => {
     })).toBe(true);
   });
 
+  it("validates a lowercase singular Centre code without treating a following word as a code", () => {
+    const centreGEvidence = {
+      id: "centre:g:usage",
+      label: "Centre G usage",
+      unit: "kWh",
+      values: { centreCode: "G", usageKwh: 20 },
+    };
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "centre g warrants a separate timing check.",
+      evidence: [],
+      sqlEvidence: [],
+    })).toBe(false);
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "centre g warrants a separate timing check.",
+      evidence: [centreGEvidence],
+      sqlEvidence: [],
+    })).toBe(true);
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "The centre garden warrants routine maintenance.",
+      evidence: [],
+      sqlEvidence: [],
+    })).toBe(true);
+  });
+
   it("requires a multiplier claim to come from a ratio, multiple, or factor field", () => {
     const narrative = "Centre G demand was 15x the peer baseline.";
     expect(energyAiNarrativeClaimsSupported({

@@ -571,6 +571,7 @@ export class EnergyIqAdditionalInsightEvaluationStore {
     }
     const expectedRecordJson = row.record_json;
     const record = this.getEvaluation(input);
+    requireCurrentTargetIdentity(record.target);
     if (record.status !== "running") return record;
     if (record.attempts.some(({ status }) => status === "running")) {
       throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ATTEMPTS_NOT_TERMINAL");
@@ -650,6 +651,7 @@ export class EnergyIqAdditionalInsightEvaluationStore {
   }): AdditionalAiInsightEvaluationBatch {
     return immediateTransaction(this.db, () => {
     const record = this.getEvaluation(input);
+    requireCurrentTargetIdentity(record.target);
     const audit = record.reviewAudit.find(({ reviewToken }) => reviewToken === input.reviewToken);
     if (!audit) throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_REVIEW_TOKEN_INVALID");
     const attempt = record.attempts.find((candidate): candidate is AdditionalAiInsightEvaluationAttempt => (
@@ -728,6 +730,7 @@ export class EnergyIqAdditionalInsightEvaluationStore {
   }): AdditionalAiInsightEvaluationBatch {
     return immediateTransaction(this.db, () => {
     const record = this.getEvaluation(input);
+    requireCurrentTargetIdentity(record.target);
     const audit = record.reviewAudit.find(({ reviewToken }) => reviewToken === input.reviewToken);
     if (!audit) throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_REVIEW_TOKEN_INVALID");
     const selected = record.attempts.find((attempt): attempt is AdditionalAiInsightEvaluationAttempt => (

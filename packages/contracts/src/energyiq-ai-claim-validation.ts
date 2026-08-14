@@ -62,9 +62,8 @@ function namedCentreReferences(value: string): Set<string> {
       if (!separator) break;
       remainder = remainder.slice(separator.length);
     }
-    const coordinatedList = candidates.length > 1;
     for (const candidate of candidates) {
-      if (isProjectCentreCode(candidate, coordinatedList)) references.add(candidate.toLowerCase());
+      if (isProjectCentreCode(candidate)) references.add(candidate.toLowerCase());
     }
   }
   return references;
@@ -243,19 +242,19 @@ function collectNamedCentreDimensions(value: unknown, field = ""): string[] {
 function explicitCentreReference(context: string): string | null {
   const references = new Set([...context.matchAll(/\bcent(?:re|er)\s+([a-z0-9][a-z0-9_-]{0,15})\b/giu)]
     .map((match) => match[1]!)
-    .filter((reference) => isProjectCentreCode(reference, false))
+    .filter(isProjectCentreCode)
     .map((reference) => reference.toLowerCase()));
   if (references.size === 0) return null;
   if (references.size > 1) return "__ambiguous_centre__";
   return [...references][0]!;
 }
 
-function isProjectCentreCode(value: string, allowLowercaseListCode: boolean): boolean {
+function isProjectCentreCode(value: string): boolean {
   const normalized = value.toUpperCase();
   if (!/^[A-Z0-9][A-Z0-9_-]{0,15}$/u.test(normalized)) return false;
   if (/[0-9_-]/u.test(normalized)) return true;
   if (value === normalized) return normalized.length <= 8;
-  return allowLowercaseListCode && /^[a-z]{1,2}$/u.test(value);
+  return /^[a-z]{1,2}$/u.test(value);
 }
 
 function hasCurrencyUnit(context: string): boolean {
