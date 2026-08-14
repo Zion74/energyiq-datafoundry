@@ -395,6 +395,12 @@ export class EnergyIqAdditionalInsightEvaluationStore {
     now?: string;
     leaseMs?: number;
   }): void {
+    const record = this.getEvaluation({
+      evaluationId: input.evaluationId,
+      expectedWorkspaceId: input.expectedWorkspaceId,
+      expectedProjectId: input.expectedProjectId,
+    });
+    requireCurrentTargetIdentity(record.target);
     const now = input.now ?? new Date().toISOString();
     renewEvaluationAttemptClaimPersistence(this.db, {
       evaluationId: input.evaluationId,
@@ -423,6 +429,7 @@ export class EnergyIqAdditionalInsightEvaluationStore {
       expectedWorkspaceId: input.expectedWorkspaceId,
       expectedProjectId: input.expectedProjectId,
       });
+      requireCurrentTargetIdentity(record.target);
       const index = record.attempts.findIndex(({ attemptId }) => attemptId === input.attemptId);
       const reserved = record.attempts[index];
       if (!reserved) throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ATTEMPT_NOT_FOUND");
@@ -507,6 +514,7 @@ export class EnergyIqAdditionalInsightEvaluationStore {
   }): AdditionalAiInsightEvaluationBatch {
     return immediateTransaction(this.db, () => {
       const record = this.getEvaluation(input);
+      requireCurrentTargetIdentity(record.target);
       const index = record.attempts.findIndex(({ attemptId }) => attemptId === input.attemptId);
       const reserved = record.attempts[index];
       if (!reserved) throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ATTEMPT_NOT_FOUND");
@@ -998,6 +1006,12 @@ export class EnergyIqAdditionalInsightEvaluationStore {
     now?: string;
     leaseMs?: number;
   }): void {
+    const row = this.db.prepare(`
+      SELECT reservation_json FROM energyiq_additional_insight_transitions
+      WHERE id = ? AND workspace_id = ? AND project_id = ?
+    `).get(input.transitionId, input.expectedWorkspaceId, input.expectedProjectId);
+    if (!isRecord(row)) throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_NOT_FOUND");
+    requireCurrentTargetIdentity(parseTransitionReservation(row.reservation_json).currentTarget);
     const now = input.now ?? new Date().toISOString();
     renewTransitionClaimPersistence(this.db, {
       transitionId: input.transitionId,
@@ -1025,6 +1039,8 @@ export class EnergyIqAdditionalInsightEvaluationStore {
       WHERE id = ? AND workspace_id = ? AND project_id = ?
     `).get(input.transitionId, input.expectedWorkspaceId, input.expectedProjectId);
       if (!isRecord(row)) throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_NOT_FOUND");
+      const reservation = parseTransitionReservation(row.reservation_json);
+      requireCurrentTargetIdentity(reservation.currentTarget);
       const completedAt = input.completedAt ?? new Date().toISOString();
       requireTransitionClaimPersistence(this.db, {
         transitionId: input.transitionId,
@@ -1043,7 +1059,6 @@ export class EnergyIqAdditionalInsightEvaluationStore {
         }
         return existing;
       }
-      const reservation = parseTransitionReservation(row.reservation_json);
       if (input.currentArtifact.runId !== reservation.generationProviderRunId) {
         throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_PROVIDER_RUN_MISMATCH");
       }
@@ -1117,8 +1132,10 @@ export class EnergyIqAdditionalInsightEvaluationStore {
       const row = this.db.prepare(`
       SELECT reservation_json, record_json FROM energyiq_additional_insight_transitions
       WHERE id = ? AND workspace_id = ? AND project_id = ?
-    `).get(input.transitionId, input.expectedWorkspaceId, input.expectedProjectId);
+      `).get(input.transitionId, input.expectedWorkspaceId, input.expectedProjectId);
       if (!isRecord(row)) throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_NOT_FOUND");
+      const reservation = parseTransitionReservation(row.reservation_json);
+      requireCurrentTargetIdentity(reservation.currentTarget);
       const completedAt = input.completedAt ?? new Date().toISOString();
       requireTransitionClaimPersistence(this.db, {
         transitionId: input.transitionId,
@@ -1136,7 +1153,6 @@ export class EnergyIqAdditionalInsightEvaluationStore {
         }
         return existing;
       }
-      const reservation = parseTransitionReservation(row.reservation_json);
       const previousArtifact = this.getAttemptArtifact({
       evaluationId: reservation.previousEvaluationId,
       attemptId: reservation.previousAttemptId,

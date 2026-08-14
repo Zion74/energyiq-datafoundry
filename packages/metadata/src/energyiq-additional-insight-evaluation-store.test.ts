@@ -108,6 +108,144 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
     }
   });
 
+  it("rejects renew, complete, and fail writes made with already-issued v5 evaluation claim tokens", () => {
+    const harness = createHarness();
+    try {
+      const target = evaluationTarget("snapshot-a", "release-a");
+      harness.store.reserveEvaluation({
+        evaluationId: "evaluation-v5-issued-token",
+        idempotencyKey: "evaluation-v5-issued-token",
+        requestedBy: "admin-1",
+        target,
+        attempts: attemptReservations(),
+      });
+      const tokens = [1, 2, 3].map((ordinal) => claimAttemptToken(
+        harness,
+        "evaluation-v5-issued-token",
+        `attempt-${ordinal}`,
+      ));
+      const row = harness.metadata.db.prepare(`
+        SELECT reservation_json, record_json FROM energyiq_additional_insight_evaluations WHERE id = ?
+      `).get("evaluation-v5-issued-token") as { reservation_json: string; record_json: string };
+      const historicalTarget = historicalV5Target(target);
+      harness.metadata.db.prepare(`
+        UPDATE energyiq_additional_insight_evaluations SET reservation_json = ?, record_json = ? WHERE id = ?
+      `).run(
+        JSON.stringify({ ...JSON.parse(row.reservation_json), target: historicalTarget }),
+        JSON.stringify({ ...JSON.parse(row.record_json), target: historicalTarget }),
+        "evaluation-v5-issued-token",
+      );
+
+      const mutations = [
+        () => harness.store.renewEvaluationAttemptClaim({
+          evaluationId: "evaluation-v5-issued-token",
+          expectedWorkspaceId: "workspace-1",
+          expectedProjectId: "project-1",
+          attemptId: "attempt-1",
+          claimToken: tokens[0]!,
+        }),
+        () => harness.store.completeAttempt({
+          evaluationId: "evaluation-v5-issued-token",
+          expectedWorkspaceId: "workspace-1",
+          expectedProjectId: "project-1",
+          attemptId: "attempt-2",
+          claimToken: tokens[1]!,
+          artifact: artifact(historicalTarget, "provider-run-2", "analysis.summary.usage_kwh", "finding-v5"),
+          machineGate: passingMachineGate(),
+        }),
+        () => harness.store.failAttempt({
+          evaluationId: "evaluation-v5-issued-token",
+          expectedWorkspaceId: "workspace-1",
+          expectedProjectId: "project-1",
+          attemptId: "attempt-3",
+          claimToken: tokens[2]!,
+          errorCode: "PROVIDER_FAILED",
+        }),
+      ];
+      for (const mutate of mutations) {
+        expect(mutate).toThrow("ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_BEHAVIOR_NOT_CURRENT");
+      }
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("rejects renew, complete, and fail writes made with already-issued v5 transition claim tokens", () => {
+    const harness = createHarness();
+    try {
+      reserveAndComplete(harness);
+      reviewAllPassing(harness);
+      const previous = harness.store.getEvaluation({
+        evaluationId: "evaluation-1",
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      });
+      const previousAttempt = previous.attempts.find((attempt) => attempt.status === "completed"
+        && attempt.humanReview?.passed)!;
+      const currentTarget = evaluationTarget("snapshot-b", "release-b");
+      const reservations = ["renew", "complete", "fail"].map((operation) => harness.store.reserveTransition({
+        transitionId: `transition-v5-token-${operation}`,
+        idempotencyKey: `transition-v5-token-${operation}`,
+        requestedBy: "admin-1",
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+        currentTarget,
+        generationProviderRunId: `transition-v5-generation-${operation}`,
+        generationProviderSessionId: `transition-v5-generation-session-${operation}`,
+        comparisonProviderRunId: `transition-v5-comparison-${operation}`,
+        comparisonProviderSessionId: `transition-v5-comparison-session-${operation}`,
+      }));
+      const tokens = reservations.map(({ transitionId }) => claimTransitionToken(harness, transitionId));
+      const historicalTarget = historicalV5Target(currentTarget);
+      for (const { transitionId } of reservations) {
+        const row = harness.metadata.db.prepare(`
+          SELECT reservation_json FROM energyiq_additional_insight_transitions WHERE id = ?
+        `).get(transitionId) as { reservation_json: string };
+        harness.metadata.db.prepare(`
+          UPDATE energyiq_additional_insight_transitions SET reservation_json = ? WHERE id = ?
+        `).run(
+          JSON.stringify({ ...JSON.parse(row.reservation_json), currentTarget: historicalTarget }),
+          transitionId,
+        );
+      }
+
+      const mutations = [
+        () => harness.store.renewTransitionClaim({
+          transitionId: reservations[0]!.transitionId,
+          expectedWorkspaceId: "workspace-1",
+          expectedProjectId: "project-1",
+          claimToken: tokens[0]!,
+        }),
+        () => harness.store.completeTransition({
+          transitionId: reservations[1]!.transitionId,
+          expectedWorkspaceId: "workspace-1",
+          expectedProjectId: "project-1",
+          claimToken: tokens[1]!,
+          currentArtifact: artifact(
+            historicalTarget,
+            reservations[1]!.generationProviderRunId,
+            "analysis.summary.usage_kwh",
+            "finding-v5-transition",
+          ),
+          outcomes: [{ transition: "no-material-change" }],
+        }),
+        () => harness.store.failTransition({
+          transitionId: reservations[2]!.transitionId,
+          expectedWorkspaceId: "workspace-1",
+          expectedProjectId: "project-1",
+          claimToken: tokens[2]!,
+          errorCode: "PROVIDER_FAILED",
+          failureStage: "generation",
+        }),
+      ];
+      for (const mutate of mutations) {
+        expect(mutate).toThrow("ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_BEHAVIOR_NOT_CURRENT");
+      }
+    } finally {
+      harness.close();
+    }
+  });
+
   it("reserves one pass@3 batch, persists three independent attempts, and recovers a blind pack", () => {
     const harness = createHarness();
     try {

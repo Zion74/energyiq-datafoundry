@@ -162,6 +162,58 @@ describe("Preschool Additional AI Insights workflow", () => {
     }
   });
 
+  it("applies deterministic presented baselines even when the model supplies no related claim IDs", async () => {
+    const harness = createHarness();
+    try {
+      const newRelationship = "fact:standby-share: 31 %, while weekday concentration may move differently; test that relationship.";
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [
+            candidate("candidate-empty-related-restatement", "fact:standby-share", {
+              title: "fact:standby-share: 31 %",
+              text: "fact:standby-share: 31 %",
+              epistemicStatus: "observed",
+              incrementalContext: {
+                relatedPresentedClaimIds: [],
+                novelConclusion: "fact:standby-share: 31 %",
+              },
+            }),
+            candidate("candidate-empty-related-new", "fact:standby-share", {
+              title: "Test whether the share hides a weekday relationship",
+              text: newRelationship,
+              epistemicStatus: "speculative",
+              incrementalContext: {
+                relatedPresentedClaimIds: [],
+                novelConclusion: newRelationship,
+              },
+            }),
+          ] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "empty-related-baseline-run",
+        sessionId: "empty-related-baseline-session",
+      });
+      expect(result.publication).toMatchObject({
+        discoveredCount: 2,
+        acceptedCount: 1,
+        rejectedCount: 1,
+        acceptedCandidateIds: ["candidate-empty-related-new"],
+        rejectedCandidateIds: ["candidate-empty-related-restatement"],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
   it("accepts a same-Evidence superset only when the actual narrative adds a testable relationship", async () => {
     const harness = createHarness();
     try {
@@ -572,6 +624,52 @@ describe("Preschool Additional AI Insights workflow", () => {
           "candidate-industry-inferred",
           "candidate-causal-deep-dive",
         ],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("requires AI-discovered multi-Evidence relationships to be inferred without guessing from prose keywords", async () => {
+    const harness = createHarness();
+    try {
+      const relationship = (id: string, epistemicStatus: "observed" | "inferred", qualifier: string) =>
+        candidate(id, "fact:standby-share", {
+          title: `Compare the two shares ${qualifier}`,
+          text: `Standby is 31% while operating is 69%; ${qualifier}.`,
+          epistemicStatus,
+          evidenceRefs: ["fact:standby-share", "fact:operating-share"],
+          incrementalContext: {
+            relatedPresentedClaimIds: [],
+            novelConclusion: `Standby is 31% while operating is 69%; ${qualifier}.`,
+          },
+        });
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [
+            relationship("candidate-relational-observed", "observed", "their connection is newly asserted"),
+            relationship("candidate-relational-inferred", "inferred", "their connection remains an inference to test"),
+          ] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "structured-epistemic-run",
+        sessionId: "structured-epistemic-session",
+      });
+      expect(result.publication).toMatchObject({
+        discoveredCount: 2,
+        acceptedCount: 1,
+        rejectedCount: 1,
+        acceptedCandidateIds: ["candidate-relational-inferred"],
+        rejectedCandidateIds: ["candidate-relational-observed"],
       });
     } finally {
       harness.close();

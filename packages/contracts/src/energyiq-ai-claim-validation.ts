@@ -49,10 +49,25 @@ export function energyAiNarrativeClaimsSupported(input: {
 }
 
 function namedCentreReferences(value: string): Set<string> {
-  return new Set([...value.matchAll(/\bcent(?:re|er)\s+([a-z0-9][a-z0-9_-]{0,15})\b/giu)]
-    .map((match) => match[1]!)
-    .filter(isProjectCentreCode)
-    .map((reference) => reference.toLowerCase()));
+  const references = new Set<string>();
+  for (const introducer of value.matchAll(/\bcent(?:re|er)s?\s+/giu)) {
+    let remainder = value.slice((introducer.index ?? 0) + introducer[0].length);
+    const candidates: string[] = [];
+    for (let count = 0; count < 16; count += 1) {
+      const code = /^[A-Za-z0-9][A-Za-z0-9_-]{0,15}\b/u.exec(remainder)?.[0];
+      if (!code) break;
+      candidates.push(code);
+      remainder = remainder.slice(code.length);
+      const separator = /^(?:\s*,\s*(?:(?:and|&(?:amp;)?)\s+)?|\s+(?:and|&(?:amp;)?)\s+)/iu.exec(remainder)?.[0];
+      if (!separator) break;
+      remainder = remainder.slice(separator.length);
+    }
+    const coordinatedList = candidates.length > 1;
+    for (const candidate of candidates) {
+      if (isProjectCentreCode(candidate, coordinatedList)) references.add(candidate.toLowerCase());
+    }
+  }
+  return references;
 }
 
 function typedEvidenceSupportsCentre(item: EnergyAiTypedEvidenceItem, reference: string): boolean {
@@ -228,15 +243,19 @@ function collectNamedCentreDimensions(value: unknown, field = ""): string[] {
 function explicitCentreReference(context: string): string | null {
   const references = new Set([...context.matchAll(/\bcent(?:re|er)\s+([a-z0-9][a-z0-9_-]{0,15})\b/giu)]
     .map((match) => match[1]!)
-    .filter(isProjectCentreCode)
+    .filter((reference) => isProjectCentreCode(reference, false))
     .map((reference) => reference.toLowerCase()));
   if (references.size === 0) return null;
   if (references.size > 1) return "__ambiguous_centre__";
   return [...references][0]!;
 }
 
-function isProjectCentreCode(value: string): boolean {
-  return /^[A-Z]{1,8}$/u.test(value) || /[0-9_-]/u.test(value);
+function isProjectCentreCode(value: string, allowLowercaseListCode: boolean): boolean {
+  const normalized = value.toUpperCase();
+  if (!/^[A-Z0-9][A-Z0-9_-]{0,15}$/u.test(normalized)) return false;
+  if (/[0-9_-]/u.test(normalized)) return true;
+  if (value === normalized) return normalized.length <= 8;
+  return allowLowercaseListCode && /^[a-z]{1,2}$/u.test(value);
 }
 
 function hasCurrencyUnit(context: string): boolean {

@@ -86,6 +86,37 @@ describe("EnergyIQ AI claim validation", () => {
     })).toBe(true);
   });
 
+  it("validates every code in plural Centre coordination lists without treating ordinary nouns as codes", () => {
+    const centreEvidence = (centreCode: string) => ({
+      id: `centre:${centreCode.toLowerCase()}:usage`,
+      label: `Centre ${centreCode} usage`,
+      unit: "kWh",
+      values: { centreCode, usageKwh: 20 },
+    });
+    for (const narrative of [
+      "Centres G, M and J warrant separate timing checks.",
+      "Centers G, M & J warrant separate timing checks.",
+      "centres g, m and j warrant separate timing checks.",
+      "centers g, m & j warrant separate timing checks.",
+    ]) {
+      expect(energyAiNarrativeClaimsSupported({
+        narrative,
+        evidence: [centreEvidence("G"), centreEvidence("M")],
+        sqlEvidence: [],
+      })).toBe(false);
+      expect(energyAiNarrativeClaimsSupported({
+        narrative,
+        evidence: [centreEvidence("G"), centreEvidence("M"), centreEvidence("J")],
+        sqlEvidence: [],
+      })).toBe(true);
+    }
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "Centres with stable loads warrant routine monitoring.",
+      evidence: [],
+      sqlEvidence: [],
+    })).toBe(true);
+  });
+
   it("requires a multiplier claim to come from a ratio, multiple, or factor field", () => {
     const narrative = "Centre G demand was 15x the peer baseline.";
     expect(energyAiNarrativeClaimsSupported({

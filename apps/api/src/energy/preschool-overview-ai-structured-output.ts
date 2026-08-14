@@ -33,6 +33,7 @@ export const PRESCHOOL_SECTION_LIMITATION_MAX_CHARS = 320;
 export const PRESCHOOL_EXECUTIVE_SUMMARY_MAX_CHARS = 420;
 export const PRESCHOOL_EXECUTIVE_FINDING_TITLE_MAX_CHARS = 96;
 export const PRESCHOOL_EXECUTIVE_FINDING_TEXT_MAX_CHARS = 420;
+export const PRESCHOOL_ADDITIONAL_INSIGHT_TITLE_MAX_CHARS = 100;
 const uniqueEvidenceRefs: JsonSchema = {
   type: "array",
   minItems: 1,
@@ -505,7 +506,7 @@ const additionalCandidateV3: JsonSchema = {
   required: [...additionalCandidateV2.required!, "incrementalContext"],
   properties: {
     ...additionalCandidateV2.properties,
-    title: { type: "string", minLength: 1, maxLength: 180 },
+    title: { type: "string", minLength: 1, maxLength: PRESCHOOL_ADDITIONAL_INSIGHT_TITLE_MAX_CHARS },
     incrementalContext: additionalIncrementalContext,
   },
 };

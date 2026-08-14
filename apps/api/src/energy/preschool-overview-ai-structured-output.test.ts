@@ -149,6 +149,31 @@ describe("Preschool Overview AI structured output", () => {
       .toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3);
   });
 
+  it("uses the acceptance title budget at the strict Additional transport boundary", async () => {
+    const candidateSchema = PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3
+      .schema.properties!.candidates!.items!;
+    expect(candidateSchema.properties!.title).toMatchObject({ maxLength: 100 });
+    const schema = toStandardSchema(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3.schema as never);
+    const proposal = (title: string) => ({ candidates: [{
+      id: "candidate-title-budget",
+      title,
+      text: "A separately testable relationship.",
+      epistemicStatus: "inferred",
+      origin: { kind: "ai-discovery", directionMethodResourceIds: [] },
+      incrementalContext: {
+        relatedPresentedClaimIds: [],
+        novelConclusion: "A separately testable relationship.",
+      },
+      evidenceRefs: ["analysis.summary.usage_kwh"],
+      toolAuditIds: [],
+    }] });
+
+    await expect(Promise.resolve(schema["~standard"].validate(proposal("x".repeat(100)))))
+      .resolves.toEqual(expect.not.objectContaining({ issues: expect.anything() }));
+    await expect(Promise.resolve(schema["~standard"].validate(proposal("x".repeat(101)))))
+      .resolves.toEqual(expect.objectContaining({ issues: expect.any(Array) }));
+  });
+
   it("keeps the v3 schema for history while making v4 the current Section discovery contract", () => {
     const legacyProperties = PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V3.schema.properties!;
     const v4Properties = PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4.schema.properties!;

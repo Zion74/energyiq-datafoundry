@@ -34,10 +34,10 @@ import {
   type PreschoolAdditionalAiInsightToolResult,
 } from "./preschool-additional-ai-insight-runtime.js";
 import { ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID } from "../workspace-model-profile-resolver.js";
+import { PRESCHOOL_ADDITIONAL_INSIGHT_TITLE_MAX_CHARS } from "./preschool-overview-ai-structured-output.js";
 
 const LEASE_MS = 13 * 60 * 1_000;
 const MAX_DISCOVERY_ANSWER_CHARS = 160_000;
-const MAX_CANDIDATE_TITLE_CHARS = 100;
 const MAX_CANDIDATE_TEXT_CHARS = 1_200;
 const MAX_NOVEL_CONTRIBUTION_CHARS = 800;
 export const MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS = 160_000;
@@ -621,6 +621,7 @@ const acceptCandidate = (
   const origin = resolveCandidateOrigin(value.origin, coreMethod, directionMethods);
   const incrementalContext = resolveIncrementalContext(
     value.incrementalContext,
+    evidenceRefs,
     presentedClaims,
     { title: value.title, text: value.text },
   );
@@ -632,6 +633,7 @@ const acceptCandidate = (
       ...(nonEmptyString(value.deepDiveQuestion) ? { deepDiveQuestion: value.deepDiveQuestion } : {}),
       epistemicStatus: value.epistemicStatus,
       originKind: origin.kind,
+      relationshipAssertion: incrementalContext.relationshipAssertion,
     })) return null;
   const audits = toolAuditIds.map((id) => auditsById.get(id));
   if (audits.some((audit) => !audit || audit.status !== "succeeded")
@@ -711,16 +713,22 @@ const resolveCandidateOrigin = (
 
 const resolveIncrementalContext = (
   value: unknown,
+  evidenceRefs: readonly string[],
   presentedClaims: readonly PreschoolAdditionalAiPresentedClaim[],
   publishedNarrative: { title: string; text: string },
-): { relatedPresentedClaimIds: string[]; novelConclusion: string } | null => {
+): { relatedPresentedClaimIds: string[]; novelConclusion: string; relationshipAssertion: boolean } | null => {
   if (!isRecord(value)
     || !hasExactKeys(value, ["relatedPresentedClaimIds", "novelConclusion"])
     || !Array.isArray(value.relatedPresentedClaimIds)
     || !uniqueStrings(value.relatedPresentedClaimIds)
     || !boundedSafeText(value.novelConclusion, MAX_NOVEL_CONTRIBUTION_CHARS)) return null;
   const claimsById = new Map(presentedClaims.map((claim) => [claim.id, claim]));
-  const related = value.relatedPresentedClaimIds.map((id) => claimsById.get(id));
+  const deterministicBaselineIds = evidenceRefs.map((reference) => `deterministic-overview:${reference}`);
+  const relatedPresentedClaimIds = [...new Set([
+    ...value.relatedPresentedClaimIds,
+    ...deterministicBaselineIds,
+  ])];
+  const related = relatedPresentedClaimIds.map((id) => claimsById.get(id));
   if (related.some((claim) => !claim)) return null;
   const novelConclusion = value.novelConclusion.trim();
   const combinedNarrative = `${publishedNarrative.title} ${publishedNarrative.text}`;
@@ -730,7 +738,12 @@ const resolveIncrementalContext = (
     || related.some((claim) => claimTextIsRestatement(claim!.text, publishedNarrative.title)
       || claimTextIsRestatement(claim!.text, publishedNarrative.text)
       || claimTextIsRestatement(claim!.text, combinedNarrative))) return null;
-  return { relatedPresentedClaimIds: [...value.relatedPresentedClaimIds], novelConclusion };
+  return {
+    relatedPresentedClaimIds,
+    novelConclusion,
+    relationshipAssertion: evidenceRefs.length > 1
+      || value.relatedPresentedClaimIds.some((id) => !deterministicBaselineIds.includes(id)),
+  };
 };
 
 const epistemicBoundaryIsAcceptable = (input: {
@@ -739,11 +752,15 @@ const epistemicBoundaryIsAcceptable = (input: {
   deepDiveQuestion?: string;
   epistemicStatus: "observed" | "inferred" | "speculative";
   originKind: AdditionalAiInsightFinding["origin"]["kind"];
+  relationshipAssertion: boolean;
 }): boolean => {
   const narrative = `${input.title}\n${input.text}\n${input.deepDiveQuestion ?? ""}`;
   const explicitCausal = /\b(?:cause(?:s|d)?|driv(?:e|es|en)|explain(?:s|ed)?)(?:\s+\w+){0,3}\s+(?:by|the\s+variance)|\bdue\s+to\b/iu.test(narrative);
   const explicitAction = /\b(?:highest[- ]leverage|best|optimal|most\s+effective)\b[^.!?\n]{0,80}\b(?:target|action|intervention)\b/iu.test(narrative);
   const externalBenchmark = /\b(?:typical\s+(?:learning\s+)?environments?|industry\s+benchmarks?|tropical\s+preschools?)\b|\bshould\s+dominate\b/iu.test(narrative);
+  if (input.originKind === "ai-discovery"
+    && input.epistemicStatus === "observed"
+    && input.relationshipAssertion) return false;
   if (input.epistemicStatus === "observed" && (explicitCausal || explicitAction || externalBenchmark)) return false;
   if (externalBenchmark && input.originKind === "ai-discovery" && input.epistemicStatus !== "speculative") return false;
   return true;
@@ -932,7 +949,9 @@ const presentedClaimIsValid = (value: unknown): value is PreschoolAdditionalAiPr
     || value.sourceEvidenceRefs.length === 0
     || !uniqueStrings(value.sourceEvidenceRefs)) return false;
   if (value.source === "deterministic-overview") {
-    return hasExactKeys(value, ["id", "source", "text", "sourceEvidenceRefs"]);
+    return hasExactKeys(value, ["id", "source", "text", "sourceEvidenceRefs"])
+      && value.sourceEvidenceRefs.length === 1
+      && value.id === `deterministic-overview:${value.sourceEvidenceRefs[0]}`;
   }
   if (value.source === "key-finding") {
     return hasExactKeys(value, ["id", "source", "artifactId", "text", "sourceEvidenceRefs"])
@@ -982,7 +1001,7 @@ const boundedSafeText = (value: unknown, max: number): value is string => nonEmp
   && !/(?:<\/?[a-z]|https?:\/\/|javascript:)/iu.test(value);
 
 const conciseSummaryTitle = (value: unknown): value is string =>
-  boundedSafeText(value, MAX_CANDIDATE_TITLE_CHARS)
+  boundedSafeText(value, PRESCHOOL_ADDITIONAL_INSIGHT_TITLE_MAX_CHARS)
   && !/[;\r\n]/u.test(value)
   && !/[.!?]\s+\S/u.test(value.trim());
 

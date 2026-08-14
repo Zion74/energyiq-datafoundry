@@ -955,3 +955,7 @@ Method/Evidence 的外部 benchmark 越级做局部拒绝。Additional 盲评 Su
 历史 v5 terminal Artifact/评估保持只读，v5 running reservation 在 v6 current 入口 fail closed；普通 Overview GET 仍只恢复 saved current Artifact，
 不会启动 Provider、工具、ensure 或 queue。这里的近重述过滤是可审计的确定性安全门，不是完整语义 novelty judge；本 checkpoint 只证明本地自动化
 工程边界。尚未在本 worktree 调用真实 Provider、执行 v6 pass@3 人工盲评、完成浏览器恢复或人工增量价值验收。
+
+v6 的发布单元同时包含上述增量价值/provenance 实现与其紧随的深 Store mutation、deterministic baseline、Centre 列表、标题预算和结构化
+epistemic guard correction；集成时必须原子纳入，不能只挑前一部分提交。该 correction 前 v6 从未进入集成服务且没有生产 Artifact，因此不再人为
+旋转 v7；若部署环境出现任何旧 v6 Artifact，则必须先停线重新评估 identity 隔离，不能把中间实现当作 current。
