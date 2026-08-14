@@ -109,6 +109,18 @@ const createEnergyIqAgent = async (
 };
 
 describe("EnergyIQ agent policy follows the enabled tool set", () => {
+  it("rejects Additional discovery when candidate submission is appended after selected-tool validation", async () => {
+    await expect(createEnergyIqAgent(
+      ["inspect_schema", "run_sql_readonly", "protocol_handoff"],
+      {
+        explicitProtocol: { protocolId: "general-task", protocolVersion: "1" },
+        overviewAiCandidateSubmission: true,
+        trustedStageCapability: "energyiq-additional-insight-discovery",
+        trustedStageTools: createNamedTools(ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1),
+      },
+    )).rejects.toThrow("TRUSTED_STAGE_CAPABILITY_INVALID");
+  });
+
   it("rejects Additional discovery when final policy composition leaks non-capability tools", async () => {
     const trustedStageTools = createNamedTools(ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1);
     const mcpTools = createNamedTools(["mcp.workspace.lookup"]);
@@ -129,6 +141,16 @@ describe("EnergyIQ agent policy follows the enabled tool set", () => {
       mcpToolNames: ["mcp.workspace.lookup"],
       trustedStageCapability: "energyiq-additional-insight-transition",
     })).rejects.toThrow("TRUSTED_STAGE_CAPABILITY_INVALID");
+  });
+
+  it("rejects Additional transition when protocol handoff is appended after selected-tool validation", async () => {
+    await expect(createEnergyIqAgent(
+      ["inspect_schema", "run_sql_readonly"],
+      {
+        explicitProtocol: { protocolId: "general-task", protocolVersion: "1" },
+        trustedStageCapability: "energyiq-additional-insight-transition",
+      },
+    )).rejects.toThrow("TRUSTED_STAGE_CAPABILITY_INVALID");
   });
 
   it("rejects Additional tools injected after input validation when no capability is present", async () => {

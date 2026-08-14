@@ -340,6 +340,24 @@ export type WorkspaceAttachment = {
 const sameToolNames = (actual: readonly string[], expected: readonly string[]): boolean =>
   actual.length === expected.length && expected.every((toolName) => actual.includes(toolName));
 
+const assertTrustedStageFinalTools = (
+  capability: TrustedStageCapability | undefined,
+  toolNames: readonly string[],
+): void => {
+  if (capability === "energyiq-additional-insight-discovery"
+    && !sameToolNames(toolNames, ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1)) {
+    throw new Error("TRUSTED_STAGE_CAPABILITY_INVALID");
+  }
+  if (capability === "energyiq-additional-insight-transition" && toolNames.length > 0) {
+    throw new Error("TRUSTED_STAGE_CAPABILITY_INVALID");
+  }
+  if (capability === undefined
+    && toolNames.some((toolName) =>
+      (ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1 as readonly string[]).includes(toolName))) {
+    throw new Error("TRUSTED_STAGE_CAPABILITY_INVALID");
+  }
+};
+
 export const createDataFoundry = async (
   input: CreateDataFoundryInput
 ): Promise<{
@@ -593,20 +611,6 @@ export const createDataFoundry = async (
     : excludedToolNames.size === 0
       ? toolsBeforeStageExclusions
       : Object.fromEntries(Object.entries(toolsBeforeStageExclusions).filter(([name]) => !excludedToolNames.has(name)));
-  const selectedToolNames = Object.keys(selectedTools);
-  if (input.trustedStageCapability === "energyiq-additional-insight-discovery"
-    && !sameToolNames(selectedToolNames, ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1)) {
-    throw new Error("TRUSTED_STAGE_CAPABILITY_INVALID");
-  }
-  if (input.trustedStageCapability === "energyiq-additional-insight-transition"
-    && selectedToolNames.length > 0) {
-    throw new Error("TRUSTED_STAGE_CAPABILITY_INVALID");
-  }
-  if (input.trustedStageCapability === undefined
-    && selectedToolNames.some((toolName) =>
-      (ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1 as readonly string[]).includes(toolName))) {
-    throw new Error("TRUSTED_STAGE_CAPABILITY_INVALID");
-  }
   const selectedDatasourceId = input.runContext.selected_datasource_id;
   const deferredProtocolEvents: ProtocolEvent[] = [];
   let protocolEventsReady = false;
@@ -793,6 +797,7 @@ export const createDataFoundry = async (
     ...overviewAiCandidateSubmissionTools,
     ...protocolHandoffTools,
   };
+  assertTrustedStageFinalTools(input.trustedStageCapability, Object.keys(tools));
   const runtimeProviderOptions = createModelRuntimeProviderOptions({
     providerId: input.modelProvider.provider_id,
     ...(input.modelProvider.provider_ids ? { providerIds: input.modelProvider.provider_ids } : {}),
