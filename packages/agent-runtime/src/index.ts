@@ -13,6 +13,7 @@ import { WorkingMemory } from "@mastra/core/processors";
 import { createSkillTools, createWorkspaceTools } from "@mastra/core/workspace";
 import type { Message } from "@ag-ui/core";
 import type { ArtifactService, SessionOutputService } from "@datafoundry/artifacts";
+import { ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1 } from "@datafoundry/contracts";
 import type { DataGateway } from "@datafoundry/data-gateway";
 import { type FileAssetService, fileAssetRefDto, mimeTypeForFilename } from "@datafoundry/files";
 import type { KnowledgeService } from "@datafoundry/knowledge";
@@ -255,12 +256,16 @@ export type AgentLongTermMemoryRecord = {
   source_run_id?: string;
 };
 
+/** Server-owned instruction capability for a narrowly governed production stage. */
+export type TrustedStageCapability =
+  | "energyiq-additional-insight-discovery"
+  | "energyiq-additional-insight-transition";
+
 export type CreateDataFoundryInput = {
   /**
-   * Overview Artifact stages retain the data-analysis protocol but do not need
-   * the generic user-requirement extraction/proposal/commit loop. Read-only SQL
-   * still passes through the normal scoped datasource and query validator.
-   * Defaults preserve the normal Analyst contract.
+   * Some server-owned Overview Artifact stages omit generic user-requirement
+   * extraction. Their explicit protocol and scoped tool capability remain
+   * separate, server-owned inputs. Defaults preserve the normal Analyst contract.
    */
   analysisRequirementsMode?: "default" | "omit";
   /** Strict, run-local Candidate submission; enabled only for the Overview Investigator Stage. */
@@ -285,6 +290,8 @@ export type CreateDataFoundryInput = {
   mcpTools?: Record<string, ToolAction<any, any, any, any, any>>;
   /** Server-owned stage tools. Never populate from AG-UI tools, MCP configuration, or forwarded props. */
   trustedStageTools?: Record<string, ToolAction<any, any, any, any, any>>;
+  /** Server-owned stage identity. Never infer from protocol, Energy context, or the presence of tools. */
+  trustedStageCapability?: TrustedStageCapability;
   sessionOutputService?: SessionOutputService;
   mcpToolNames?: string[];
   selectedSkills?: SkillRecord[];
@@ -345,8 +352,31 @@ export const createDataFoundry = async (
   destroyWorkspace(): Promise<void>;
 }> => {
   const energyIqRun = Boolean(input.runContext.energy_query_context);
+  const trustedStageToolNames = Object.keys(input.trustedStageTools ?? {});
+  const hasAdditionalInsightTool = trustedStageToolNames.some((toolName) =>
+    (ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1 as readonly string[]).includes(toolName));
+  const hasExactAdditionalInsightToolSet = trustedStageToolNames.length
+    === ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1.length
+    && ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1.every((toolName) =>
+      trustedStageToolNames.includes(toolName));
   if (input.trustedStageTools && !energyIqRun) {
     throw new Error("TRUSTED_STAGE_TOOLS_REQUIRE_ENERGYIQ_RUN");
+  }
+  if (hasAdditionalInsightTool
+    && (input.trustedStageCapability !== "energyiq-additional-insight-discovery"
+      || !hasExactAdditionalInsightToolSet)) {
+    throw new Error("TRUSTED_STAGE_CAPABILITY_INVALID");
+  }
+  if (input.trustedStageCapability === "energyiq-additional-insight-discovery"
+    && (!energyIqRun
+      || !hasExactAdditionalInsightToolSet
+      || input.explicitProtocol?.protocolId !== "general-task")) {
+    throw new Error("TRUSTED_STAGE_CAPABILITY_INVALID");
+  }
+  if (input.trustedStageCapability === "energyiq-additional-insight-transition"
+    && (input.trustedStageTools
+      || input.explicitProtocol?.protocolId !== "general-task")) {
+    throw new Error("TRUSTED_STAGE_CAPABILITY_INVALID");
   }
   const maxSteps = AGENT_MAX_STEPS;
   const toolObservationBoundary = createToolObservationBoundary({
@@ -771,6 +801,9 @@ export const createDataFoundry = async (
       ],
       mcpToolNames: input.mcpToolNames ?? [],
       trustedStageToolNames: Object.keys(input.trustedStageTools ?? {}),
+      ...(input.trustedStageCapability
+        ? { trustedStageCapability: input.trustedStageCapability }
+        : {}),
       protocolId: protocolState.protocolId,
       analysisRequirements,
       workspaceAttachments
@@ -936,6 +969,7 @@ type AgentInstructionsInput = {
   taskToolsEnabled: boolean;
   toolNames: string[];
   trustedStageToolNames: string[];
+  trustedStageCapability?: TrustedStageCapability;
   /** MCP tools injected through AG-UI clientTools for this run. */
   mcpToolNames: string[];
   protocolId: string;
@@ -954,6 +988,10 @@ type MaterializedWorkspaceAttachment = {
 const buildAgentInstructions = (input: AgentInstructionsInput): string => {
   const { runContext: context, collaborationToolsEnabled, commandExecutionEnabled, taskToolsEnabled } = input;
   const enabled = (name: string): boolean => input.toolNames.includes(name);
+  const energyIqTrustedStageDiscovery =
+    input.trustedStageCapability === "energyiq-additional-insight-discovery";
+  const energyIqTrustedStageTransition =
+    input.trustedStageCapability === "energyiq-additional-insight-transition";
   const hasAnyEnabledTools = input.toolNames.length > 0 || input.mcpToolNames.length > 0;
   const promoteWorkspaceFileEnabled = enabled("promote_workspace_file");
   const dataTools = ["list_data_sources", "inspect_schema", "preview_table", "run_sql_readonly"].filter(enabled);
@@ -1086,7 +1124,13 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
   }
 
   const policies: string[] = [];
-  if (context.energy_query_context) {
+  if (energyIqTrustedStageTransition) {
+    policies.push(
+      "EnergyIQ server-scoped transition path: compare only the server-provided exact A and B Artifact and Evidence "
+        + "lineage. Do not request tools, SQL, network access, writes, or outside context. A no-material-change "
+        + "result is valid, and the structured output remains authoritative.",
+    );
+  } else if (context.energy_query_context) {
     const energyContext = context.energy_query_context;
     if (isTrustedEnergyTextQueryContract(energyContext)) {
       policies.push(
@@ -1097,6 +1141,13 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
           + "datasource, schema, model profile, provider configuration, or credentials. The answer must state Scope, "
           + "Period with exclusive end and timezone, Metric, Data as of, and Evidence. If a required expected fact is "
           + "absent, report it as unavailable; never invent, extrapolate, or substitute a nearby Metric."
+      );
+    } else if (energyIqTrustedStageDiscovery) {
+      policies.push(
+        "EnergyIQ server-scoped discovery path: use only the listed server-scoped read-only tools and the "
+          + "server-provided Evidence context. Explore Evidence-backed angles openly; zero candidates is valid. "
+          + "Do not request SQL, arbitrary queries, network access, writes, or tools outside this run's allowlist. "
+          + "The structured output and downstream server acceptance remain authoritative.",
       );
     } else if (!enabled("inspect_schema") || !enabled("run_sql_readonly")) {
       policies.push(
@@ -1319,8 +1370,16 @@ const buildAgentInstructions = (input: AgentInstructionsInput): string => {
         + "all unresolvedGoals. Never hand off to bypass schema, SQL validation, evidence, policy, or completion gates."
     );
   }
-  policies.push(context.energy_query_context
-    ? "For EnergyIQ, write the final customer answer in plain English even when the question is in Chinese. Lead with "
+  policies.push(energyIqTrustedStageTransition
+    ? "For EnergyIQ server-scoped transition comparison, follow the requested structured output exactly. Classify "
+      + "changes only from exact A and B Finding and Evidence lineage. Do not force a fixed What/Why/Action lens or "
+      + "invent a change merely to fill the result."
+    : context.energy_query_context
+      ? energyIqTrustedStageDiscovery
+      ? "For EnergyIQ server-scoped discovery, follow the requested structured output exactly. Keep factual claims bound "
+        + "to current Evidence and distinguish observed, inferred, and speculative content honestly. Do not force a fixed "
+        + "What/Why/Action lens or invent a candidate merely to fill the result."
+      : "For EnergyIQ, write the final customer answer in plain English even when the question is in Chinese. Lead with "
       + "the answer or finding, then explain What happened, Why it matters or may have happened, What to do next, and "
       + "How to verify when those sections are useful. Unless the user explicitly requests detail, multiple deliverables, "
       + "or a report, the final answer to one decision question must be a compact executive brief under 300 words and "

@@ -27,6 +27,8 @@ import {
 import { resolveWorkspaceDefaultModelProfileSnapshot } from "../workspace-model-profile-resolver.js";
 
 export const MAX_PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_CHARS = 64_000;
+export const PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID =
+  "PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID";
 const EVALUATION_CLAIM_LEASE_MS = 5 * 60_000;
 const EVALUATION_CLAIM_HEARTBEAT_MS = 60_000;
 
@@ -765,7 +767,9 @@ const completedAttempt = (
 };
 
 const failureStage = (code: string): "provider" | "structured-output" | "machine-gate" => (
-  /DISCOVERY_RESULT|PUBLICATION_INVALID|STRUCTURED_OUTPUT/u.test(code)
+  (code === "PRESCHOOL_ADDITIONAL_AI_DISCOVERY_RESULT_INVALID"
+    || code === "PRESCHOOL_ADDITIONAL_AI_PUBLICATION_INVALID"
+    || code === PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID)
     ? "structured-output"
     : /MACHINE_GATE/u.test(code)
       ? "machine-gate"

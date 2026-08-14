@@ -6,6 +6,7 @@ import {
   createPreschoolAdditionalAiInsightArtifactIdentity,
   createPreschoolOverviewAiSectionArtifactIdentityV4,
   createPreschoolOverviewAiValueArtifactIdentity,
+  isCurrentPreschoolAdditionalAiInsightArtifactIdentity,
   overviewAiArtifactPinnedLocalPeriod,
 } from "./overview-ai-artifact.js";
 
@@ -174,13 +175,13 @@ describe("createOverviewAiArtifactIdentity", () => {
 
     expect(identity).toMatchObject({
       artifactKind: "autonomous-insights",
-      identityContractRevision: "additional-insights-v3",
+      identityContractRevision: "additional-insights-v4",
       analysisPackId: "preschool-additional-insights-pack",
       analysisPackRevision: "v1",
       outputContractRevision: "energyiq-additional-ai-insights-v2",
       validatorRevision: "additional-insights-acceptance-v3",
-      workflowRevision: "additional-insights-discover-accept-publish-v3",
-      investigatorPromptRevision: "additional-insights-discovery-v3",
+      workflowRevision: "additional-insights-discover-accept-publish-v4",
+      investigatorPromptRevision: "additional-insights-discovery-v4",
       editorPromptRevision: "additional-insights-publication-v2",
       methodSkillId: "energyiq-open-discovery",
       methodSkillRevision: "1.0.0",
@@ -193,6 +194,22 @@ describe("createOverviewAiArtifactIdentity", () => {
     });
     expect(identity).not.toHaveProperty("targetId");
     expect(identity.methodSetFingerprint).not.toBe(identity.methodSkillRevision);
+    expect(isCurrentPreschoolAdditionalAiInsightArtifactIdentity(identity)).toBe(true);
+    for (const [field, value] of [
+      ["analysisPackId", "other-pack"],
+      ["analysisPackRevision", "v99"],
+      ["editorPromptRevision", "additional-insights-publication-v99"],
+      ["methodSkillId", "other-method"],
+      ["methodSkillRevision", "99.0.0"],
+      ["methodSetId", "other-method-set"],
+      ["methodSetRevision", "v99"],
+      ["methodSetFingerprint", "sha256:invalid"],
+    ] as const) {
+      expect(isCurrentPreschoolAdditionalAiInsightArtifactIdentity({
+        ...identity,
+        [field]: value,
+      })).toBe(false);
+    }
 
     const callerAttempt = {
       baseIdentity: legacy,

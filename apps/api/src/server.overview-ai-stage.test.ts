@@ -1,15 +1,24 @@
 import { describe, expect, it } from "vitest";
+import { EventType } from "@ag-ui/client";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createDataFoundry, createDataFoundryRunContext } from "@datafoundry/agent-runtime";
-import type { EnergyIqOverviewAiArtifactIdentity } from "@datafoundry/metadata";
+import { Observable } from "rxjs";
+import {
+  createDataFoundry,
+  createDataFoundryRunContext,
+  type AnalysisContextEvidenceCatalog,
+} from "@datafoundry/agent-runtime";
+import { createMetadataStore, type EnergyIqOverviewAiArtifactIdentity } from "@datafoundry/metadata";
 
 import {
   buildOverviewAiStageRunInput,
+  collectOverviewAiStageEvents,
   collectOverviewAiText,
   createPreschoolAdditionalAiInsightTrustedStageTools,
   createPreschoolSectionTrustedStageTools,
+  normalizeOverviewAiStageRuntimeError,
+  DataFoundryAgUiAgent,
   resolveOverviewAiAgentRuntimeOptions,
   resolveOverviewAiServerRunnerOptions,
   resolveOverviewAiStageRuntimeOptions,
@@ -17,6 +26,7 @@ import {
   shouldUseEnergyContextForOverviewAiStage,
   shouldIncludeProjectAnalysisEvidenceContext,
 } from "./server.js";
+import { RunCancelRegistry } from "./run-cancel-registry.js";
 import {
   PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2,
   PRESCHOOL_ADDITIONAL_AI_INSIGHTS_TRANSITION_STRUCTURED_OUTPUT_V1,
@@ -28,8 +38,20 @@ import type { PreschoolSectionPackV2 } from "./energy/preschool-section-pack-v2.
 import { MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS } from "./energy/preschool-executive-synthesis.js";
 import { MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS } from "./energy/preschool-additional-ai-insights-workflow.js";
 import { MAX_PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_CHARS } from "./energy/preschool-additional-ai-insights-evaluation.js";
+import { completeProtocolRun } from "./protocol-run-completion.js";
 
 describe("Overview AI server stage options", () => {
+  it("normalizes only local Additional structured-output root failures", () => {
+    expect(normalizeOverviewAiStageRuntimeError(
+      "additional-insights-discovery",
+      new Error("Structured Output root undefined"),
+    ).message).toBe("PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID");
+    expect(normalizeOverviewAiStageRuntimeError(
+      "additional-insights-discovery",
+      new Error("Provider does not support structured_output for this model"),
+    ).message).toBe("Provider does not support structured_output for this model");
+  });
+
   it("registers the Evidence-bound Additional transition as an isolated no-tool production stage", () => {
     const structuredOutput = resolveOverviewAiStageStructuredOutput("additional-insights-transition");
     expect(structuredOutput).toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_TRANSITION_STRUCTURED_OUTPUT_V1);
@@ -46,11 +68,13 @@ describe("Overview AI server stage options", () => {
     });
     const trusted = resolveOverviewAiServerRunnerOptions({
       stage: "additional-insights-transition",
+      identity: additionalIdentity(),
       structuredOutput,
     });
     expect(trusted).toMatchObject({
       structuredOutput,
       conversationMessageMaxChars: MAX_PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_CHARS,
+      trustedStageCapability: "energyiq-additional-insight-transition",
     });
     expect(trusted).not.toHaveProperty("trustedStageTools");
     expect(resolveOverviewAiAgentRuntimeOptions("additional-insights-transition", trusted)).toMatchObject({
@@ -73,6 +97,7 @@ describe("Overview AI server stage options", () => {
     expect(run.forwardedProps).not.toHaveProperty("externalContext");
     expect(run.forwardedProps).toMatchObject({
       run_config: {
+        protocol: { id: "general-task", version: "1" },
         skillMode: "none",
         enabledDatasourceIds: [],
         enabledSkillIds: [],
@@ -91,6 +116,7 @@ describe("Overview AI server stage options", () => {
     const invokeAdditionalInsightTool = async () => ({}) as never;
     const trusted = resolveOverviewAiServerRunnerOptions({
       stage: "additional-insights-discovery",
+      identity: additionalIdentity(),
       structuredOutput: PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2,
       additionalInsightTools: toolNames,
       invokeAdditionalInsightTool,
@@ -109,6 +135,7 @@ describe("Overview AI server stage options", () => {
     expect(trusted).toMatchObject({
       disableTools: false,
       conversationMessageMaxChars: MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS,
+      trustedStageCapability: "energyiq-additional-insight-discovery",
     });
     expect(trusted?.structuredOutput).toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2);
     expect(Object.keys(trusted?.trustedStageTools ?? {}).sort()).toEqual([...toolNames].sort());
@@ -129,6 +156,9 @@ describe("Overview AI server stage options", () => {
       sessionId: "additional-session",
     });
     expect(run.tools).toEqual([]);
+    expect((Reflect.get(run.forwardedProps, "run_config") as {
+      protocol?: { id: string; version: string };
+    }).protocol).not.toEqual({ id: "data-analysis", version: "1" });
     expect(run.forwardedProps).toMatchObject({
       externalContext: {
         source: "energyiq",
@@ -156,6 +186,7 @@ describe("Overview AI server stage options", () => {
       "energy.project-knowledge.read",
     ] as const;
     const identity = additionalIdentity();
+    const catalog = additionalEvidenceCatalog();
     const input = buildOverviewAiStageRunInput({
       stage: "additional-insights-discovery",
       prompt: "Open discovery.",
@@ -165,9 +196,29 @@ describe("Overview AI server stage options", () => {
       runId: "additional-runtime-run",
       sessionId: "additional-runtime-session",
     });
+    const protocol = (Reflect.get(input.forwardedProps, "run_config") as {
+      protocol?: { id: string; version: string };
+    }).protocol;
+    if (!protocol) throw new Error("Expected server-owned Additional protocol");
     const workspaceRoot = mkdtempSync(join(tmpdir(), "preschool-additional-runtime-"));
     let runtime: Awaited<ReturnType<typeof createDataFoundry>> | undefined;
+    let ordinaryRuntime: Awaited<ReturnType<typeof createDataFoundry>> | undefined;
+    let transitionRuntime: Awaited<ReturnType<typeof createDataFoundry>> | undefined;
     try {
+      const trusted = resolveOverviewAiServerRunnerOptions({
+        stage: "additional-insights-discovery",
+        identity,
+        structuredOutput: PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2,
+        additionalInsightTools: toolNames,
+        invokeAdditionalInsightTool: async ({ toolCallId }) => ({
+          auditId: `additional-tool-audit:${toolCallId}`,
+          evidenceRefs: [catalog.facts[0]!.id],
+          facts: [catalog.facts[0]!],
+        }),
+      });
+      if (!trusted?.trustedStageTools || !trusted.trustedStageCapability) {
+        throw new Error("Expected server-owned Additional tools and capability");
+      }
       runtime = await createDataFoundry({
         analysisRequirementsMode: "omit",
         dataGateway: {} as never,
@@ -175,7 +226,8 @@ describe("Overview AI server stage options", () => {
         excludedToolNames: [
           "skill", "skill_search", "skill_read", "inspect_schema", "run_sql_readonly", "protocol_handoff",
         ],
-        explicitProtocol: { protocolId: "data-analysis", protocolVersion: "1" },
+        contextEvidenceCatalog: catalog,
+        explicitProtocol: { protocolId: protocol.id, protocolVersion: protocol.version },
         messages: input.messages,
         modelProvider: {
           kind: "openai-compatible",
@@ -205,13 +257,316 @@ describe("Overview AI server stage options", () => {
             period: "Custom",
           },
         }),
-        trustedStageTools: createPreschoolAdditionalAiInsightTrustedStageTools({
-          toolNames,
-          invoke: async () => ({}) as never,
+        trustedStageTools: trusted.trustedStageTools,
+        trustedStageCapability: trusted.trustedStageCapability,
+        workspaceRoot,
+      });
+      const tools = await runtime.agent.listTools() as Record<string, {
+        execute?: (input: unknown, options: unknown) => Promise<unknown>;
+      }>;
+      expect(Object.keys(tools).sort()).toEqual([...toolNames].sort());
+      await expect(tools["energy.evidence.read"]?.execute?.(
+        { factIds: [catalog.facts[0]!.id] },
+        { agent: { toolCallId: "additional-evidence-read" } },
+      )).resolves.toMatchObject({
+        evidenceRefs: [catalog.facts[0]!.id],
+      });
+
+      const instructions = await runtime.agent.getInstructions();
+      const instructionText = typeof instructions === "string" ? instructions : JSON.stringify(instructions);
+      expect.soft(instructionText).toContain("Server-scoped read-only tools");
+      expect.soft(instructionText).not.toContain("EnergyIQ selection-only path");
+      expect.soft(instructionText).not.toContain("Do not call, request, or simulate");
+      expect.soft(instructionText).not.toContain(
+        "What happened, Why it matters or may have happened, What to do next",
+      );
+
+      let completed: unknown;
+      let failed: string | undefined;
+      await completeProtocolRun({
+        finalizer: {
+          complete: async ({ terminalDecision }) => { completed = terminalDecision; },
+          fail: ({ errorMessage }) => { failed = errorMessage; },
+        },
+        lastAssistantMessageId: "additional-structured-answer",
+        protocol: runtime.protocol,
+        runId: "additional-runtime-run",
+        terminalEvent: { type: EventType.RUN_FINISHED, timestamp: Date.now() },
+      });
+      expect(failed).toBeUndefined();
+      expect.soft(completed && typeof completed === "object" && "missing" in completed
+        ? (completed as { missing: string[] }).missing
+        : []).toEqual([]);
+      expect(completed).toMatchObject({ status: "completed" });
+
+      await expect(createDataFoundry({
+        analysisRequirementsMode: "omit",
+        dataGateway: {} as never,
+        emitter: { emit: () => undefined },
+        explicitProtocol: { protocolId: "general-task", protocolVersion: "1" },
+        messages: input.messages,
+        modelProvider: {
+          kind: "openai-compatible",
+          model: "openai/test-model",
+          model_name: "test-model",
+          provider_id: "openai-compatible",
+        },
+        runContext: createDataFoundryRunContext({
+          user_id: "dev-user",
+          workspace_id: identity.workspaceId,
+          session_id: "non-additional-runtime-session",
+          run_id: "non-additional-runtime-run",
+          user_input: "Ordinary general task.",
+          chat_mode: "copilotkit",
+          model_name: "test-model",
+          energy_query_context: {
+            projectId: identity.projectId,
+            projectName: "Preschool Portfolio",
+            scopeId: identity.scopeId,
+            scopeName: "Preschool Portfolio",
+            scopeType: "project",
+            resource: "electricity",
+            timezone: "Asia/Singapore",
+            from: identity.analysisPeriodFrom,
+            to: identity.analysisPeriodTo,
+            endExclusive: true,
+            period: "Custom",
+          },
+        }),
+        trustedStageTools: trusted.trustedStageTools,
+        workspaceRoot,
+      })).rejects.toThrow("TRUSTED_STAGE_CAPABILITY_INVALID");
+      ordinaryRuntime = await createDataFoundry({
+        analysisRequirementsMode: "omit",
+        dataGateway: {} as never,
+        emitter: { emit: () => undefined },
+        explicitProtocol: { protocolId: "general-task", protocolVersion: "1" },
+        messages: input.messages,
+        modelProvider: {
+          kind: "openai-compatible",
+          model: "openai/test-model",
+          model_name: "test-model",
+          provider_id: "openai-compatible",
+        },
+        runContext: createDataFoundryRunContext({
+          user_id: "dev-user",
+          workspace_id: identity.workspaceId,
+          session_id: "non-additional-runtime-session",
+          run_id: "non-additional-runtime-run",
+          user_input: "Ordinary general task.",
+          chat_mode: "copilotkit",
+          model_name: "test-model",
+          energy_query_context: {
+            projectId: identity.projectId,
+            projectName: "Preschool Portfolio",
+            scopeId: identity.scopeId,
+            scopeName: "Preschool Portfolio",
+            scopeType: "project",
+            resource: "electricity",
+            timezone: "Asia/Singapore",
+            from: identity.analysisPeriodFrom,
+            to: identity.analysisPeriodTo,
+            endExclusive: true,
+            period: "Custom",
+          },
         }),
         workspaceRoot,
       });
-      expect(Object.keys(await runtime.agent.listTools()).sort()).toEqual([...toolNames].sort());
+      expect(Object.keys(await ordinaryRuntime.agent.listTools()))
+        .not.toEqual(expect.arrayContaining([...toolNames]));
+      const ordinaryInstructions = await ordinaryRuntime.agent.getInstructions();
+      const ordinaryInstructionText = typeof ordinaryInstructions === "string"
+        ? ordinaryInstructions
+        : JSON.stringify(ordinaryInstructions);
+      expect(ordinaryInstructionText).toContain("EnergyIQ selection-only path");
+      expect(ordinaryInstructionText).not.toContain("EnergyIQ server-scoped discovery path");
+
+      const transitionStructuredOutput = resolveOverviewAiStageStructuredOutput("additional-insights-transition");
+      if (!transitionStructuredOutput) throw new Error("Expected transition structured output");
+      const transitionTrusted = resolveOverviewAiServerRunnerOptions({
+        stage: "additional-insights-transition",
+        identity,
+        structuredOutput: transitionStructuredOutput,
+      });
+      const transitionOptions = resolveOverviewAiAgentRuntimeOptions(
+        "additional-insights-transition",
+        transitionTrusted,
+      );
+      if (!transitionOptions.structuredOutput || !transitionOptions.trustedStageCapability) {
+        throw new Error("Expected transition runtime options");
+      }
+      expect(transitionOptions.trustedStageCapability)
+        .toBe("energyiq-additional-insight-transition");
+      transitionRuntime = await createDataFoundry({
+        analysisRequirementsMode: "omit",
+        dataGateway: {} as never,
+        disableTools: true,
+        emitter: { emit: () => undefined },
+        explicitProtocol: { protocolId: "general-task", protocolVersion: "1" },
+        messages: [{ id: "transition-user", role: "user", content: "Compare exact A and B." }],
+        modelProvider: {
+          kind: "openai-compatible",
+          model: "openai/test-model",
+          model_name: "test-model",
+          provider_id: "openai-compatible",
+        },
+        runContext: createDataFoundryRunContext({
+          user_id: "dev-user",
+          workspace_id: identity.workspaceId,
+          session_id: "transition-runtime-session",
+          run_id: "transition-runtime-run",
+          user_input: "Compare exact A and B.",
+          chat_mode: "copilotkit",
+          model_name: "test-model",
+        }),
+        structuredOutput: transitionOptions.structuredOutput,
+        trustedStageCapability: transitionOptions.trustedStageCapability,
+        workspaceRoot,
+      });
+      const transitionInstructions = await transitionRuntime.agent.getInstructions();
+      const transitionInstructionText = typeof transitionInstructions === "string"
+        ? transitionInstructions
+        : JSON.stringify(transitionInstructions);
+      expect(transitionInstructionText).toContain("EnergyIQ server-scoped transition path");
+      expect(transitionInstructionText).toContain("exact A and B Finding and Evidence lineage");
+      expect(transitionInstructionText).not.toContain(
+        "What happened, Why it matters or may have happened, What to do next",
+      );
+      const transitionProtocol = transitionRuntime.protocol;
+      const metadata = createMetadataStore({
+        database_path: join(workspaceRoot, "transition-agent-metadata.sqlite"),
+        secret_master_key: "transition-agent-test-key",
+      });
+      try {
+        metadata.users.upsertDevUser({
+          id: "dev-user",
+          email: "dev@example.test",
+          display_name: "Developer",
+          dev_token: "dev-token",
+        });
+        metadata.workspaces.upsert({
+          id: identity.workspaceId,
+          owner_user_id: "dev-user",
+          name: "Preschool",
+          kind: "customer",
+        });
+        metadata.workspaces.upsert({
+          id: "default",
+          owner_user_id: "dev-user",
+          name: "Default",
+          kind: "personal",
+        });
+        const modelSecret = metadata.secrets.put({
+          workspace_id: identity.workspaceId,
+          user_id: "dev-user",
+          owner_kind: "model-profile",
+          owner_id: "test-model-profile",
+          value: { apiKey: "server-only-test-key" },
+        });
+        const modelResource = metadata.configResources.upsert({
+          id: "test-model-profile",
+          workspace_id: identity.workspaceId,
+          user_id: "dev-user",
+          kind: "model-profile",
+          name: "Test model",
+          payload: {
+            provider: "openai-compatible",
+            modelName: "test-model",
+            baseUrl: "https://provider.invalid/v1",
+          },
+          secret_ref: modelSecret,
+          status: "connected",
+        });
+        const eventIdentity = {
+          ...identity,
+          modelProfileId: modelResource.id,
+          modelProfileRevision: modelResource.revision,
+        };
+        const eventTransitionTrusted = resolveOverviewAiServerRunnerOptions({
+          stage: "additional-insights-transition",
+          identity: eventIdentity,
+          structuredOutput: transitionStructuredOutput,
+        });
+        if (!eventTransitionTrusted) throw new Error("Expected event transition runtime options");
+        let assemblyCapability: unknown;
+        const transitionAgent = new DataFoundryAgUiAgent({
+          artifactService: {} as never,
+          completedMemoryFlushOverride: async () => undefined,
+          conversationMemoryMode: "off",
+          dataGateway: {} as never,
+          fileAssetService: { gcOrphanAssets: () => 0 } as never,
+          knowledgeService: {} as never,
+          memoryExtractionTimeoutMs: 50,
+          metadataStore: metadata,
+          overviewAiStage: "additional-insights-transition",
+          overviewAiTrustedRuntimeOverride: eventTransitionTrusted,
+          runAgentAssemblyFactory: async (assemblyInput) => {
+            assemblyCapability = assemblyInput.trustedStageCapability;
+            return {
+              destroyWorkspace: async () => undefined,
+              flushProtocolEvents: () => undefined,
+              governedMessages: assemblyInput.messages,
+              mastraAgent: {
+                run: () => new Observable((subscriber) => {
+                  subscriber.next({
+                    type: EventType.TEXT_MESSAGE_START,
+                    messageId: "transition-structured-answer",
+                    role: "assistant",
+                    timestamp: Date.now(),
+                  } as never);
+                  subscriber.next({
+                    type: EventType.TEXT_MESSAGE_CONTENT,
+                    messageId: "transition-structured-answer",
+                    delta: '{"outcomes":[]}',
+                    timestamp: Date.now(),
+                  } as never);
+                  subscriber.next({
+                    type: EventType.TEXT_MESSAGE_END,
+                    messageId: "transition-structured-answer",
+                    timestamp: Date.now(),
+                  } as never);
+                  subscriber.next({ type: EventType.RUN_FINISHED, timestamp: Date.now() } as never);
+                  subscriber.complete();
+                }),
+              } as never,
+              protocol: transitionProtocol,
+              sessionDir: join(workspaceRoot, "transition-agent-session"),
+              workspace: { command_execution_enabled: false, isolation: "none" },
+              workspaceDir: workspaceRoot,
+            };
+          },
+          runCancelRegistry: new RunCancelRegistry(),
+          sessionOutputService: {} as never,
+          taskStateRuntime: {} as never,
+          traceSectionSummaries: false,
+          user: { id: "dev-user", email: "dev@example.test", display_name: "Developer" },
+          workspaceId: identity.workspaceId,
+          workspaceRoot,
+        });
+        const stageInput = {
+          stage: "additional-insights-transition" as const,
+          prompt: [
+            "Compare exact A and B Evidence.",
+            `Snapshot: ${eventIdentity.dataSnapshotId}`,
+            `Release: ${eventIdentity.projectReleaseId}`,
+            `Period from: ${eventIdentity.analysisPeriodFrom}`,
+            `Period to: ${eventIdentity.analysisPeriodTo}`,
+          ].join("\n"),
+          identity: eventIdentity,
+          workspaceId: identity.workspaceId,
+          user: { id: "dev-user" } as never,
+          runId: "transition-runtime-run",
+          sessionId: "transition-runtime-session",
+          trustedRuntimeOverride: eventTransitionTrusted,
+        };
+        const completedTransition = await collectOverviewAiStageEvents(transitionAgent, stageInput, metadata);
+        expect(assemblyCapability).toBe("energyiq-additional-insight-transition");
+        expect(collectOverviewAiText(completedTransition.events)).toBe('{"outcomes":[]}');
+        expect(metadata.runs.find({ user_id: "dev-user", run_id: "transition-runtime-run" }))
+          .toMatchObject({ status: "completed", session_id: "transition-runtime-session" });
+      } finally {
+        metadata.close();
+      }
 
       const ordinary = resolveOverviewAiServerRunnerOptions({
         stage: "executive-synthesis",
@@ -221,8 +576,42 @@ describe("Overview AI server stage options", () => {
       });
       expect(ordinary).not.toHaveProperty("trustedStageTools");
     } finally {
+      await transitionRuntime?.destroyWorkspace();
+      await ordinaryRuntime?.destroyWorkspace();
       await runtime?.destroyWorkspace();
       rmSync(workspaceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps historical Additional v3 reservations on their reserved protocol and without v4 capabilities", () => {
+    const historical = historicalAdditionalIdentity();
+    for (const stage of ["additional-insights-discovery", "additional-insights-transition"] as const) {
+      const run = buildOverviewAiStageRunInput({
+        stage,
+        prompt: "Resume historical reservation.",
+        identity: historical,
+        workspaceId: historical.workspaceId,
+        user: { id: "dev-user" } as never,
+        runId: `historical-${stage}-run`,
+        sessionId: `historical-${stage}-session`,
+      });
+      expect(run.forwardedProps).toMatchObject({
+        run_config: { protocol: { id: "data-analysis", version: "1" } },
+      });
+      const structuredOutput = resolveOverviewAiStageStructuredOutput(stage);
+      if (!structuredOutput) throw new Error("Expected historical Additional structured output");
+      const trusted = resolveOverviewAiServerRunnerOptions({
+        stage,
+        identity: historical,
+        structuredOutput,
+        ...(stage === "additional-insights-discovery"
+          ? {
+              additionalInsightTools: ["energy.evidence.read"] as const,
+              invokeAdditionalInsightTool: async () => ({}) as never,
+            }
+          : {}),
+      });
+      expect(trusted).not.toHaveProperty("trustedStageCapability");
     }
   });
 
@@ -829,17 +1218,48 @@ const additionalIdentity = (): EnergyIqOverviewAiArtifactIdentity => ({
   modelProfileRevision: 7,
   outputContractRevision: "energyiq-additional-ai-insights-v2",
   validatorRevision: "additional-insights-acceptance-v3",
-  workflowRevision: "additional-insights-discover-accept-publish-v3",
-  investigatorPromptRevision: "additional-insights-discovery-v3",
+  workflowRevision: "additional-insights-discover-accept-publish-v4",
+  investigatorPromptRevision: "additional-insights-discovery-v4",
   editorPromptRevision: "additional-insights-publication-v2",
   methodSkillId: "energyiq-open-discovery",
   methodSkillRevision: "1.0.0",
   artifactKind: "autonomous-insights",
-  identityContractRevision: "additional-insights-v3",
+  identityContractRevision: "additional-insights-v4",
   methodSetId: "preschool-additional-insights-current",
   methodSetRevision: "v1",
   methodSetFingerprint: `sha256:${"a".repeat(64)}`,
   capabilityRevision: "scoped-read-only-v1",
   publicationRevision: "additional-insights-v2",
   canvasRevision: "energyiq-insight-canvas-v2",
+});
+
+const historicalAdditionalIdentity = (): EnergyIqOverviewAiArtifactIdentity => ({
+  ...additionalIdentity(),
+  identityContractRevision: "additional-insights-v3",
+  workflowRevision: "additional-insights-discover-accept-publish-v3",
+  investigatorPromptRevision: "additional-insights-discovery-v3",
+});
+
+const additionalEvidenceCatalog = (): AnalysisContextEvidenceCatalog => ({
+  contract: "analysis-context-evidence@1",
+  sourceId: "project-analysis-snapshot:preschool-demo:snapshot-current",
+  pins: {
+    workspaceId: "preschool-workspace",
+    projectId: "preschool-demo",
+    scopeId: "preschool-project",
+    dataSnapshotId: "snapshot-current",
+    dataCutoff: "2026-06-01T00:00:00.000Z",
+    projectReleaseId: "release-current",
+    metricVersion: "energy-metrics-v1",
+  },
+  facts: [{
+    id: "fact:standby-share",
+    label: "Standby share",
+    metricId: "energy.standby_share_pct",
+    value: 31,
+    unit: "%",
+    status: "confirmed",
+    evidenceRefs: ["snapshot-evidence:standby"],
+    dimensions: { period: "standby" },
+  }],
 });

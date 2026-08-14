@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import {
   ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1,
@@ -13,7 +14,10 @@ import {
 } from "@datafoundry/contracts";
 
 import { createMetadataStore } from "./index.js";
-import type { EnergyIqOverviewAiArtifactIdentity } from "./energyiq-overview-ai-artifact-store.js";
+import type {
+  EnergyIqOverviewAiArtifactIdentity,
+  EnergyIqOverviewAiArtifactRecord,
+} from "./energyiq-overview-ai-artifact-store.js";
 
 const identity = (
   dataSnapshotId: string,
@@ -889,16 +893,19 @@ describe("EnergyIqOverviewAiArtifactStore current Additional AI Insights", () =>
       );
       expect(availableArtifact).toMatchObject({ status: "available" });
 
+      const historicalV3Identity = historicalAdditionalIdentityV3(availableIdentity);
+      expect(() => metadata.energyIq.overviewAiArtifacts.queue({
+        identity: historicalV3Identity,
+        triggeredBy: "dev-user",
+      })).toThrow("ENERGYIQ_ADDITIONAL_INSIGHT_CURRENT_IDENTITY_REQUIRED");
+
       const sameOutputHistoricalIdentity = historicalAdditionalIdentityV2(availableIdentity);
-      const sameOutputHistoricalArtifact = completeAdditional(
-        metadata,
-        sameOutputHistoricalIdentity,
-        additionalResult(availableIdentity, "available"),
-      );
       expect(sameOutputHistoricalIdentity.outputContractRevision)
         .toBe(availableIdentity.outputContractRevision);
-      expect(sameOutputHistoricalArtifact.id).not.toBe(availableArtifact.id);
-      expect(sameOutputHistoricalArtifact.identity_hash).not.toBe(availableArtifact.identity_hash);
+      expect(() => metadata.energyIq.overviewAiArtifacts.queue({
+        identity: sameOutputHistoricalIdentity,
+        triggeredBy: "dev-user",
+      })).toThrow("ENERGYIQ_ADDITIONAL_INSIGHT_CURRENT_IDENTITY_REQUIRED");
 
       const emptyIdentity = additionalIdentity("snapshot-additional-empty");
       expect(completeAdditional(metadata, emptyIdentity, additionalResult(emptyIdentity, "empty")))
@@ -906,16 +913,10 @@ describe("EnergyIqOverviewAiArtifactStore current Additional AI Insights", () =>
 
       const historicalBase = additionalIdentity("snapshot-additional-historical-v1");
       const historicalIdentity = historicalAdditionalIdentity(historicalBase);
-      const historical = additionalResult(historicalBase, "available");
-      historical.contract.revision = historicalIdentity.outputContractRevision;
-      historical.publication.policyRevision = historicalIdentity.publicationRevision!;
-      historical.evidenceLineage.facts = historical.evidenceLineage.facts.map(({ id, status, evidenceRefs }) => ({
-        id,
-        status,
-        evidenceRefs,
-      }));
-      expect(completeAdditional(metadata, historicalIdentity, historical))
-        .toMatchObject({ status: "available" });
+      expect(() => metadata.energyIq.overviewAiArtifacts.queue({
+        identity: historicalIdentity,
+        triggeredBy: "dev-user",
+      })).toThrow("ENERGYIQ_ADDITIONAL_INSIGHT_CURRENT_IDENTITY_REQUIRED");
 
       const driftIdentity = additionalIdentity("snapshot-additional-drift");
       const drift = additionalResult(driftIdentity, "available");
@@ -947,6 +948,99 @@ describe("EnergyIqOverviewAiArtifactStore current Additional AI Insights", () =>
         identity: { ...availableIdentity, targetId: "method-set:forbidden" },
         triggeredBy: "dev-user",
       })).toThrow("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_FORBIDDEN");
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps historical terminal lookup independent from the current published Method registry", () => {
+    const root = mkdtempSync(join(tmpdir(), "energyiq-additional-history-method-rotation-"));
+    const databasePath = join(root, "metadata.sqlite");
+    const metadata = createMetadataStore({ database_path: databasePath });
+    try {
+      for (const [id, email] of [
+        ["admin-reviewer", "reviewer@example.test"],
+        ["admin-publisher", "publisher@example.test"],
+      ] as const) {
+        metadata.users.upsertDevUser({
+          id,
+          email,
+          display_name: id,
+          dev_token: `${id}-token`,
+        });
+      }
+      seedArtifactProject(metadata);
+      const currentIdentity = additionalIdentity("snapshot-additional-before-method");
+      const currentArtifact = completeAdditional(
+        metadata,
+        currentIdentity,
+        additionalResult(currentIdentity, "available"),
+      );
+      const historicalIdentity = historicalAdditionalIdentityV3(currentIdentity);
+      seedHistoricalTerminalArtifact({
+        databasePath,
+        source: currentArtifact,
+        identity: historicalIdentity,
+      });
+      const historicalArtifact = metadata.energyIq.overviewAiArtifacts.get(historicalIdentity);
+      const proposal = metadata.energyIq.insightMethodGovernance.createProposal({
+        expectedWorkspaceId: "artifact-workspace",
+        expectedProjectId: "artifact-project",
+        artifactId: currentArtifact.id,
+        findingId: "additional-insight-1",
+        actorId: "dev-user",
+        idempotencyKey: "proposal:historical-artifact-read",
+        title: "Check repeated off-hours event shapes",
+        guidance: "Compare repeated event shape and timing before treating an isolated spike as reusable.",
+      });
+      const inReview = metadata.energyIq.insightMethodGovernance.submitProposal({
+        workspaceId: "artifact-workspace",
+        projectId: "artifact-project",
+        proposalId: proposal.id,
+        actorId: "dev-user",
+        expectedRevision: proposal.revision,
+      });
+      const approved = metadata.energyIq.insightMethodGovernance.approveProposal({
+        workspaceId: "artifact-workspace",
+        projectId: "artifact-project",
+        proposalId: proposal.id,
+        actorId: "admin-reviewer",
+        expectedRevision: inReview.revision,
+      });
+      metadata.energyIq.insightMethodGovernance.publishProposal({
+        workspaceId: "artifact-workspace",
+        projectId: "artifact-project",
+        proposalId: proposal.id,
+        actorId: "admin-publisher",
+        expectedRevision: approved.revision,
+      });
+
+      expect(metadata.energyIq.overviewAiArtifacts.find(historicalIdentity)).toEqual(historicalArtifact);
+      expect(metadata.energyIq.overviewAiArtifacts.get(historicalIdentity)).toEqual(historicalArtifact);
+      expect(() => metadata.energyIq.overviewAiArtifacts.claim({
+        identity: historicalIdentity,
+        workerId: "historical-worker",
+        leaseMs: 60_000,
+      })).toThrow("ENERGYIQ_ADDITIONAL_INSIGHT_CURRENT_IDENTITY_REQUIRED");
+      expect(() => metadata.energyIq.overviewAiArtifacts.complete({
+        identity: historicalIdentity,
+        workerId: "historical-worker",
+        sessionId: "historical-session",
+        runId: "historical-run",
+        resultJson: historicalArtifact.result_json!,
+      })).toThrow("ENERGYIQ_ADDITIONAL_INSIGHT_CURRENT_IDENTITY_REQUIRED");
+      const publishedMethods = metadata.energyIq.insightMethodGovernance
+        .listPublishedWorkspaceMethodResources({ workspaceId: "artifact-workspace" });
+      const rotatedIdentity = additionalIdentity("snapshot-additional-rotated-methods", publishedMethods);
+      expect(metadata.energyIq.overviewAiArtifacts.queue({
+        identity: rotatedIdentity,
+        triggeredBy: "dev-user",
+      }).identity_json).toContain(rotatedIdentity.methodSetFingerprint);
+      expect(() => metadata.energyIq.overviewAiArtifacts.queue({
+        identity: { ...currentIdentity, dataSnapshotId: "snapshot-additional-stale-methods" },
+        triggeredBy: "dev-user",
+      })).toThrow("ENERGYIQ_ADDITIONAL_INSIGHT_METHOD_SET_IDENTITY_INVALID");
     } finally {
       metadata.close();
       rmSync(root, { recursive: true, force: true });
@@ -1049,7 +1143,7 @@ const attachAcceptedCanvas = (artifact: AdditionalAiInsightsArtifact): void => {
 
 type AdditionalIdentity = EnergyIqOverviewAiArtifactIdentity & {
   artifactKind: "autonomous-insights";
-  identityContractRevision: "additional-insights-v3";
+  identityContractRevision: "additional-insights-v4";
   methodSetId: "preschool-additional-insights-current";
   methodSetRevision: "v1";
   methodSetFingerprint: string;
@@ -1060,20 +1154,21 @@ type AdditionalIdentity = EnergyIqOverviewAiArtifactIdentity & {
 
 const additionalIdentity = (
   dataSnapshotId: string,
+  workspaceMethodResources: Parameters<typeof resolveCurrentAdditionalAiInsightMethodSet>[1] = [],
 ): AdditionalIdentity => {
-  const methodSet = resolveCurrentAdditionalAiInsightMethodSet("artifact-workspace");
+  const methodSet = resolveCurrentAdditionalAiInsightMethodSet("artifact-workspace", workspaceMethodResources);
   const canonical = canonicalInsightMethodSetJson(methodSet.methods);
   if (!canonical) throw new Error("test Method set must be canonical");
   return {
     ...identity(dataSnapshotId),
     artifactKind: "autonomous-insights",
-    identityContractRevision: "additional-insights-v3",
+    identityContractRevision: "additional-insights-v4",
     analysisPackId: "preschool-additional-insights-pack",
     analysisPackRevision: "v1",
     outputContractRevision: "energyiq-additional-ai-insights-v2",
     validatorRevision: "additional-insights-acceptance-v3",
-    workflowRevision: "additional-insights-discover-accept-publish-v3",
-    investigatorPromptRevision: "additional-insights-discovery-v3",
+    workflowRevision: "additional-insights-discover-accept-publish-v4",
+    investigatorPromptRevision: "additional-insights-discovery-v4",
     editorPromptRevision: "additional-insights-publication-v2",
     methodSkillId: "energyiq-open-discovery",
     methodSkillRevision: "1.0.0",
@@ -1094,6 +1189,15 @@ const historicalAdditionalIdentityV2 = (
   validatorRevision: "additional-insights-acceptance-v2",
   workflowRevision: "additional-insights-discover-accept-publish-v2",
   investigatorPromptRevision: "additional-insights-discovery-v2",
+});
+
+const historicalAdditionalIdentityV3 = (
+  current: AdditionalIdentity,
+): EnergyIqOverviewAiArtifactIdentity => ({
+  ...current,
+  identityContractRevision: "additional-insights-v3",
+  workflowRevision: "additional-insights-discover-accept-publish-v3",
+  investigatorPromptRevision: "additional-insights-discovery-v3",
 });
 
 const historicalAdditionalIdentity = (
@@ -1226,4 +1330,60 @@ const completeAdditional = (
     runId: `run:${artifactIdentity.dataSnapshotId}`,
     resultJson: JSON.stringify(result),
   });
+};
+
+/** Seeds a released historical row without reopening the production mutation surface. */
+const seedHistoricalTerminalArtifact = (input: {
+  databasePath: string;
+  source: EnergyIqOverviewAiArtifactRecord;
+  identity: EnergyIqOverviewAiArtifactIdentity;
+}): void => {
+  const canonical = JSON.parse(input.source.identity_json) as Record<string, unknown>;
+  for (const key of Object.keys(canonical)) {
+    const value = input.identity[key as keyof EnergyIqOverviewAiArtifactIdentity];
+    if (value === undefined) delete canonical[key];
+    else canonical[key] = value;
+  }
+  const identityJson = JSON.stringify(canonical);
+  const identityHash = createHash("sha256").update(identityJson).digest("hex");
+  const db = new DatabaseSync(input.databasePath);
+  try {
+    db.prepare(`
+      INSERT INTO energyiq_overview_ai_artifacts (
+        id, identity_hash, identity_json, workspace_id, project_id, scope_id,
+        resource, data_snapshot_id, project_release_id, renderer_key,
+        renderer_version, analysis_pack_id, analysis_pack_revision,
+        model_profile_id, model_profile_revision, output_contract_revision,
+        validator_revision, status, attempt_count, triggered_by,
+        session_id, run_id, result_json, created_at, updated_at, completed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'available', 1, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      `overview-ai-artifact-${identityHash.slice(0, 24)}`,
+      identityHash,
+      identityJson,
+      input.identity.workspaceId,
+      input.identity.projectId,
+      input.identity.scopeId,
+      input.identity.resource,
+      input.identity.dataSnapshotId,
+      input.identity.projectReleaseId,
+      input.identity.rendererKey,
+      input.identity.rendererVersion,
+      input.identity.analysisPackId,
+      input.identity.analysisPackRevision,
+      input.identity.modelProfileId,
+      input.identity.modelProfileRevision,
+      input.identity.outputContractRevision,
+      input.identity.validatorRevision,
+      input.source.triggered_by,
+      input.source.session_id ?? null,
+      input.source.run_id ?? null,
+      input.source.result_json ?? null,
+      input.source.created_at,
+      input.source.updated_at,
+      input.source.completed_at ?? null,
+    );
+  } finally {
+    db.close();
+  }
 };

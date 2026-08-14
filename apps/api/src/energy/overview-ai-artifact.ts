@@ -46,7 +46,7 @@ export type PreschoolOverviewAiValueArtifactIdentity = EnergyIqOverviewAiArtifac
 
 export type PreschoolAdditionalAiInsightArtifactIdentity = EnergyIqOverviewAiArtifactIdentity & {
   artifactKind: "autonomous-insights";
-  identityContractRevision: "additional-insights-v3";
+  identityContractRevision: "additional-insights-v4";
   methodSetId: "preschool-additional-insights-current";
   methodSetRevision: "v1";
   methodSetFingerprint: string;
@@ -115,13 +115,13 @@ export const createPreschoolAdditionalAiInsightArtifactIdentity = (input: {
   return {
     ...input.baseIdentity,
     artifactKind: "autonomous-insights",
-    identityContractRevision: "additional-insights-v3",
+    identityContractRevision: "additional-insights-v4",
     analysisPackId: "preschool-additional-insights-pack",
     analysisPackRevision: "v1",
     outputContractRevision: "energyiq-additional-ai-insights-v2",
     validatorRevision: "additional-insights-acceptance-v3",
-    workflowRevision: "additional-insights-discover-accept-publish-v3",
-    investigatorPromptRevision: "additional-insights-discovery-v3",
+    workflowRevision: "additional-insights-discover-accept-publish-v4",
+    investigatorPromptRevision: "additional-insights-discovery-v4",
     editorPromptRevision: "additional-insights-publication-v2",
     methodSkillId: "energyiq-open-discovery",
     methodSkillRevision: "1.0.0",
@@ -133,6 +133,29 @@ export const createPreschoolAdditionalAiInsightArtifactIdentity = (input: {
     canvasRevision: "energyiq-insight-canvas-v2",
   };
 };
+
+/** True only for the current server-owned Additional discovery behavior. */
+export const isCurrentPreschoolAdditionalAiInsightArtifactIdentity = (
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): identity is PreschoolAdditionalAiInsightArtifactIdentity =>
+  identity.artifactKind === "autonomous-insights"
+  && identity.identityContractRevision === "additional-insights-v4"
+  && identity.analysisPackId === "preschool-additional-insights-pack"
+  && identity.analysisPackRevision === "v1"
+  && identity.outputContractRevision === "energyiq-additional-ai-insights-v2"
+  && identity.validatorRevision === "additional-insights-acceptance-v3"
+  && identity.workflowRevision === "additional-insights-discover-accept-publish-v4"
+  && identity.investigatorPromptRevision === "additional-insights-discovery-v4"
+  && identity.editorPromptRevision === "additional-insights-publication-v2"
+  && identity.methodSkillId === "energyiq-open-discovery"
+  && identity.methodSkillRevision === "1.0.0"
+  && identity.methodSetId === CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_ID
+  && identity.methodSetRevision === CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_REVISION
+  && typeof identity.methodSetFingerprint === "string"
+  && /^sha256:[0-9a-f]{64}$/u.test(identity.methodSetFingerprint)
+  && identity.capabilityRevision === "scoped-read-only-v1"
+  && identity.publicationRevision === "additional-insights-v2"
+  && identity.canvasRevision === "energyiq-insight-canvas-v2";
 
 export const createPreschoolOverviewAiValueArtifactIdentity = (input: {
   baseIdentity: OverviewAiArtifactIdentityV13;

@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import {
+  CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_ID,
+  CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_REVISION,
   additionalAiInsightsArtifactIsValid,
   canonicalInsightMethodSetJson,
   resolveAdditionalAiInsightMethodSet,
@@ -144,7 +146,7 @@ export class EnergyIqOverviewAiArtifactStore {
     triggeredBy: string;
     now?: string;
   }): EnergyIqOverviewAiArtifactRecord {
-    const canonical = canonicalIdentity(input.identity, this.db);
+    const canonical = canonicalIdentityForMutation(input.identity, this.db);
     const identityJson = JSON.stringify(canonical);
     const identityHash = hashIdentity(identityJson);
     const id = `overview-ai-artifact-${identityHash.slice(0, 24)}`;
@@ -193,7 +195,7 @@ export class EnergyIqOverviewAiArtifactStore {
   }
 
   find(identity: EnergyIqOverviewAiArtifactIdentity): EnergyIqOverviewAiArtifactRecord | undefined {
-    const identityJson = JSON.stringify(canonicalIdentity(identity, this.db));
+    const identityJson = JSON.stringify(canonicalIdentity(identity));
     const row = this.db.prepare(`
       SELECT * FROM energyiq_overview_ai_artifacts WHERE identity_hash = ?
     `).get(hashIdentity(identityJson));
@@ -214,6 +216,7 @@ export class EnergyIqOverviewAiArtifactStore {
     if (!input.workerId.trim() || !Number.isSafeInteger(input.leaseMs) || input.leaseMs <= 0) {
       throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_CLAIM_INVALID");
     }
+    canonicalIdentityForMutation(input.identity, this.db);
     const now = input.now ?? new Date().toISOString();
     const leaseExpiresAt = new Date(Date.parse(now) + input.leaseMs).toISOString();
     this.db.exec("BEGIN IMMEDIATE");
@@ -264,6 +267,7 @@ export class EnergyIqOverviewAiArtifactStore {
     resultJson: string;
     now?: string;
   }): EnergyIqOverviewAiArtifactRecord {
+    canonicalIdentityForMutation(input.identity, this.db);
     requireArtifactResult(input.resultJson, input.identity, this.db);
     const now = input.now ?? new Date().toISOString();
     this.db.exec("BEGIN IMMEDIATE");
@@ -329,7 +333,6 @@ export class EnergyIqOverviewAiArtifactStore {
 
 const canonicalIdentity = (
   identity: EnergyIqOverviewAiArtifactIdentity,
-  db: DatabaseSync,
 ): EnergyIqOverviewAiArtifactIdentity => {
   for (const [key, value] of Object.entries(identity)) {
     if (key === "modelProfileRevision") continue;
@@ -358,7 +361,9 @@ const canonicalIdentity = (
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_FORBIDDEN");
   }
   if (identity.artifactKind === "autonomous-insights") {
-    requireAdditionalMethodSetIdentity(identity, db);
+    if (!identity.methodSetId || !identity.methodSetRevision || !identity.methodSetFingerprint) {
+      throw new Error("ENERGYIQ_ADDITIONAL_INSIGHT_METHOD_SET_IDENTITY_INVALID");
+    }
   } else if (identity.methodSetId !== undefined
     || identity.methodSetRevision !== undefined
     || identity.methodSetFingerprint !== undefined
@@ -406,6 +411,41 @@ const canonicalIdentity = (
     ...(identity.targetId ? { targetId: identity.targetId } : {}),
   };
 };
+
+const canonicalIdentityForMutation = (
+  identity: EnergyIqOverviewAiArtifactIdentity,
+  db: DatabaseSync,
+): EnergyIqOverviewAiArtifactIdentity => {
+  const canonical = canonicalIdentity(identity);
+  if (canonical.artifactKind === "autonomous-insights") {
+    if (!isCurrentAdditionalAiInsightMutationIdentity(canonical)) {
+      throw new Error("ENERGYIQ_ADDITIONAL_INSIGHT_CURRENT_IDENTITY_REQUIRED");
+    }
+    requireAdditionalMethodSetIdentity(canonical, db);
+  }
+  return canonical;
+};
+
+/** Historical Additional identities are read-only; normal mutations require current behavior. */
+const isCurrentAdditionalAiInsightMutationIdentity = (
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): boolean => identity.identityContractRevision === "additional-insights-v4"
+  && identity.analysisPackId === "preschool-additional-insights-pack"
+  && identity.analysisPackRevision === "v1"
+  && identity.outputContractRevision === "energyiq-additional-ai-insights-v2"
+  && identity.validatorRevision === "additional-insights-acceptance-v3"
+  && identity.workflowRevision === "additional-insights-discover-accept-publish-v4"
+  && identity.investigatorPromptRevision === "additional-insights-discovery-v4"
+  && identity.editorPromptRevision === "additional-insights-publication-v2"
+  && identity.methodSkillId === "energyiq-open-discovery"
+  && identity.methodSkillRevision === "1.0.0"
+  && identity.methodSetId === CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_ID
+  && identity.methodSetRevision === CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_REVISION
+  && typeof identity.methodSetFingerprint === "string"
+  && /^sha256:[0-9a-f]{64}$/u.test(identity.methodSetFingerprint)
+  && identity.capabilityRevision === "scoped-read-only-v1"
+  && identity.publicationRevision === "additional-insights-v2"
+  && identity.canvasRevision === "energyiq-insight-canvas-v2";
 
 const hashIdentity = (identityJson: string): string =>
   createHash("sha256").update(identityJson).digest("hex");
@@ -516,7 +556,7 @@ const requireAdditionalAiInsightsResult = (
     && identity.editorPromptRevision === "additional-insights-publication-v2"
     && identity.publicationRevision === "additional-insights-v2"
     && identity.canvasRevision === "energyiq-insight-canvas-v2";
-  const isCurrentV3 = identity.identityContractRevision === "additional-insights-v3"
+  const isHistoricalV3 = identity.identityContractRevision === "additional-insights-v3"
     && identity.outputContractRevision === "energyiq-additional-ai-insights-v2"
     && identity.validatorRevision === "additional-insights-acceptance-v3"
     && identity.workflowRevision === "additional-insights-discover-accept-publish-v3"
@@ -524,7 +564,15 @@ const requireAdditionalAiInsightsResult = (
     && identity.editorPromptRevision === "additional-insights-publication-v2"
     && identity.publicationRevision === "additional-insights-v2"
     && identity.canvasRevision === "energyiq-insight-canvas-v2";
-  if ((!isHistoricalV1 && !isHistoricalV2 && !isCurrentV3)
+  const isCurrentV4 = identity.identityContractRevision === "additional-insights-v4"
+    && identity.outputContractRevision === "energyiq-additional-ai-insights-v2"
+    && identity.validatorRevision === "additional-insights-acceptance-v3"
+    && identity.workflowRevision === "additional-insights-discover-accept-publish-v4"
+    && identity.investigatorPromptRevision === "additional-insights-discovery-v4"
+    && identity.editorPromptRevision === "additional-insights-publication-v2"
+    && identity.publicationRevision === "additional-insights-v2"
+    && identity.canvasRevision === "energyiq-insight-canvas-v2";
+  if ((!isHistoricalV1 && !isHistoricalV2 && !isHistoricalV3 && !isCurrentV4)
     || identity.analysisPackId !== "preschool-additional-insights-pack"
     || identity.analysisPackRevision !== "v1"
     || identity.capabilityRevision !== "scoped-read-only-v1"

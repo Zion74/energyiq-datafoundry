@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -18,7 +19,10 @@ import {
   type OverviewAiArtifactIdentityV13,
   type PreschoolAdditionalAiInsightArtifactIdentity,
 } from "./overview-ai-artifact.js";
-import { createPreschoolAdditionalAiInsightsEvaluationWorkflow } from "./preschool-additional-ai-insights-evaluation.js";
+import {
+  createPreschoolAdditionalAiInsightsEvaluationWorkflow,
+  PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID,
+} from "./preschool-additional-ai-insights-evaluation.js";
 import { resolveWorkspaceDefaultModelProfileSnapshot } from "../workspace-model-profile-resolver.js";
 
 describe("Preschool Additional AI Insights evaluation workflow", () => {
@@ -81,7 +85,7 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
     }
   });
 
-  it("persists one transient Provider/schema failure without retrying or collapsing sibling attempts", async () => {
+  it("persists one undefined structured-output root locally without retrying or collapsing sibling attempts", async () => {
     const harness = createHarness();
     try {
       let invocation = 0;
@@ -90,7 +94,7 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
         runId: string;
       }) => {
         invocation += 1;
-        if (invocation === 2) throw new Error("PRESCHOOL_ADDITIONAL_AI_DISCOVERY_RESULT_INVALID");
+        if (invocation === 2) throw new Error(PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID);
         return artifact(identity, runId, `evidence:${invocation}`, `finding-${invocation}`);
       });
       const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
@@ -110,7 +114,7 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
           ordinal: 2,
           status: "failed",
           failureStage: "structured-output",
-          errorCode: "PRESCHOOL_ADDITIONAL_AI_DISCOVERY_RESULT_INVALID",
+          errorCode: PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID,
         }),
         expect.objectContaining({ ordinal: 3, status: "completed" }),
       ]);
@@ -447,6 +451,124 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
         previousEvaluationId: previous.evaluationId,
         previousAttemptId: previousAttempt.attemptId,
       })).rejects.toThrow(/PRESCHOOL_ADDITIONAL_EVALUATION_RESERVED_MODEL_PROFILE_UNAVAILABLE/);
+      expect(runAttempt).not.toHaveBeenCalled();
+      expect(runTransition).not.toHaveBeenCalled();
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("keeps Provider structured-output capability failures classified as Provider failures", async () => {
+    const harness = createHarness();
+    try {
+      let invocation = 0;
+      const runAttempt = vi.fn(async ({ identity, runId }: {
+        identity: PreschoolAdditionalAiInsightArtifactIdentity;
+        runId: string;
+      }) => {
+        invocation += 1;
+        if (invocation === 2) {
+          throw new Error("Provider does not support structured_output for this model");
+        }
+        return artifact(identity, runId, `evidence:${runId}`, `finding:${runId}`);
+      });
+      const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
+        metadataStore: harness.metadata,
+        runAttempt,
+        runTransition: vi.fn(),
+      });
+      const result = await workflow.executePassAt3({
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        idempotencyKey: "provider-structured-output-capability-key",
+      });
+      expect(result.attempts.find(({ ordinal }) => ordinal === 2)).toMatchObject({
+        status: "failed",
+        failureStage: "provider",
+        errorCode: "Provider does not support structured_output for this model",
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("fails closed running v3 discovery and transition reservations instead of resuming them with v4 behavior", async () => {
+    const harness = createHarness();
+    try {
+      const runAttempt = vi.fn(async ({ identity, runId }: {
+        identity: PreschoolAdditionalAiInsightArtifactIdentity;
+        runId: string;
+      }) => artifact(identity, runId, `evidence:${identity.dataSnapshotId}`, `finding-${identity.dataSnapshotId}`));
+      const runTransition = vi.fn(async ({ runId, sessionId }: { runId: string; sessionId: string }) => ({
+        answer: JSON.stringify({ outcomes: [{ transition: "no-material-change" }] }),
+        runId,
+        sessionId,
+      }));
+      const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
+        metadataStore: harness.metadata,
+        runAttempt,
+        runTransition,
+      });
+      const previous = reviewAllPassing(harness, await workflow.executePassAt3({
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        idempotencyKey: "v3-reservation-previous",
+      }));
+      const previousAttempt = previous.attempts.find((attempt) => attempt.status === "completed")!;
+      const currentIdentity = createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity: harness.baseIdentity });
+      const methodSet = resolveCurrentAdditionalAiInsightMethodSet(harness.baseIdentity.workspaceId);
+      const modelProfileSnapshot = resolveWorkspaceDefaultModelProfileSnapshot(harness.metadata);
+      harness.metadata.energyIq.additionalInsightEvaluations.reserveEvaluation({
+        evaluationId: "running-v3-evaluation",
+        idempotencyKey: "running-v3-evaluation-key",
+        requestedBy: harness.user.id,
+        target: evaluationTarget(currentIdentity),
+        attempts: [1, 2, 3].map((ordinal) => ({
+          attemptId: `running-v3-attempt-${ordinal}`,
+          ordinal,
+          providerRunId: `running-v3-run-${ordinal}`,
+          providerSessionId: `running-v3-session-${ordinal}`,
+        })),
+        runtimeIdentity: currentIdentity,
+        methodResources: methodSet.resources,
+        modelProfileSnapshot,
+      });
+      downgradeEvaluationReservationToV3(harness.metadata.db, "running-v3-evaluation");
+
+      const transitionBase = createBaseIdentity("snapshot-b", "release-b");
+      const transitionIdentity = createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity: transitionBase });
+      harness.metadata.energyIq.additionalInsightEvaluations.reserveTransition({
+        transitionId: "running-v3-transition",
+        idempotencyKey: "running-v3-transition-key",
+        requestedBy: harness.user.id,
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+        currentTarget: evaluationTarget(transitionIdentity),
+        generationProviderRunId: "running-v3-transition-generation",
+        generationProviderSessionId: "running-v3-transition-generation-session",
+        comparisonProviderRunId: "running-v3-transition-comparison",
+        comparisonProviderSessionId: "running-v3-transition-comparison-session",
+        runtimeIdentity: transitionIdentity,
+        methodResources: methodSet.resources,
+        modelProfileSnapshot,
+      });
+      downgradeEvaluationReservationToV3(harness.metadata.db, previous.evaluationId);
+      downgradeTransitionReservationToV3(harness.metadata.db, "running-v3-transition");
+      runAttempt.mockClear();
+      runTransition.mockClear();
+
+      await expect(workflow.executePassAt3({
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        idempotencyKey: "running-v3-evaluation-key",
+      })).rejects.toThrow(/ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_BEHAVIOR_NOT_CURRENT/);
+      await expect(workflow.executeTransition({
+        baseIdentity: transitionBase,
+        user: harness.user,
+        idempotencyKey: "running-v3-transition-key",
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+      })).rejects.toThrow(/ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_BEHAVIOR_NOT_CURRENT/);
       expect(runAttempt).not.toHaveBeenCalled();
       expect(runTransition).not.toHaveBeenCalled();
     } finally {
@@ -1260,6 +1382,76 @@ const evaluationTarget = (
   methodSetRevision: identity.methodSetRevision,
   methodSetFingerprint: identity.methodSetFingerprint,
 });
+
+const v3RuntimeIdentity = (
+  identity: Record<string, unknown>,
+): Record<string, unknown> => ({
+  ...identity,
+  identityContractRevision: "additional-insights-v3",
+  workflowRevision: "additional-insights-discover-accept-publish-v3",
+  investigatorPromptRevision: "additional-insights-discovery-v3",
+});
+
+const v3EvaluationTarget = (
+  target: AdditionalAiInsightEvaluationTarget,
+  identity: Record<string, unknown>,
+): AdditionalAiInsightEvaluationTarget => ({
+  ...target,
+  artifactIdentityRevision: "additional-insights-v3",
+  artifactIdentityHash: `sha256:${createHash("sha256").update(JSON.stringify(identity)).digest("hex")}`,
+  workflowRevision: "additional-insights-discover-accept-publish-v3",
+  promptRevision: "additional-insights-discovery-v3",
+});
+
+const downgradeEvaluationReservationToV3 = (
+  db: DatabaseSync,
+  evaluationId: string,
+): void => {
+  const row = db.prepare("SELECT reservation_json, record_json FROM energyiq_additional_insight_evaluations WHERE id = ?")
+    .get(evaluationId) as { reservation_json: string; record_json: string };
+  const reservation = JSON.parse(row.reservation_json) as {
+    target: AdditionalAiInsightEvaluationTarget;
+    runtimeIdentity: Record<string, unknown>;
+  };
+  const record = JSON.parse(row.record_json) as { target: AdditionalAiInsightEvaluationTarget };
+  reservation.runtimeIdentity = v3RuntimeIdentity(reservation.runtimeIdentity);
+  reservation.target = v3EvaluationTarget(reservation.target, reservation.runtimeIdentity);
+  record.target = reservation.target;
+  db.prepare("UPDATE energyiq_additional_insight_evaluations SET reservation_json = ?, record_json = ? WHERE id = ?")
+    .run(JSON.stringify(reservation), JSON.stringify(record), evaluationId);
+};
+
+const downgradeTransitionReservationToV3 = (
+  db: DatabaseSync,
+  transitionId: string,
+): void => {
+  const row = db.prepare("SELECT reservation_json FROM energyiq_additional_insight_transitions WHERE id = ?")
+    .get(transitionId) as { reservation_json: string };
+  const reservation = JSON.parse(row.reservation_json) as {
+    transitionId: string;
+    previousEvaluationId: string;
+    previousTarget: AdditionalAiInsightEvaluationTarget;
+    currentTarget: AdditionalAiInsightEvaluationTarget;
+    runtimeIdentity: Record<string, unknown>;
+    currentArtifactId: string;
+    currentArtifactIdentityHash: string;
+  };
+  const previousRow = db.prepare("SELECT record_json FROM energyiq_additional_insight_evaluations WHERE id = ?")
+    .get(reservation.previousEvaluationId) as { record_json: string };
+  reservation.previousTarget = (JSON.parse(previousRow.record_json) as {
+    target: AdditionalAiInsightEvaluationTarget;
+  }).target;
+  reservation.runtimeIdentity = v3RuntimeIdentity(reservation.runtimeIdentity);
+  reservation.currentTarget = v3EvaluationTarget(reservation.currentTarget, reservation.runtimeIdentity);
+  reservation.currentArtifactIdentityHash = `sha256:${createHash("sha256").update(JSON.stringify({
+    contractRevision: "additional-insight-transition-artifact-v1",
+    target: reservation.currentTarget,
+    transitionId: reservation.transitionId,
+  })).digest("hex")}`;
+  reservation.currentArtifactId = `additional-transition-artifact-${reservation.currentArtifactIdentityHash.slice(7, 31)}`;
+  db.prepare("UPDATE energyiq_additional_insight_transitions SET reservation_json = ? WHERE id = ?")
+    .run(JSON.stringify(reservation), transitionId);
+};
 
 const artifact = (
   identity: PreschoolAdditionalAiInsightArtifactIdentity,

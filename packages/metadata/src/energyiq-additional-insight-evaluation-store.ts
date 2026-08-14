@@ -250,6 +250,7 @@ export class EnergyIqAdditionalInsightEvaluationStore {
     modelProfileSnapshot?: EnergyIqAdditionalInsightModelProfileSnapshot;
     now?: string;
   }): { created: boolean; record: AdditionalAiInsightEvaluationBatch } {
+    requireCurrentTargetIdentity(input.target);
     const methodResources = requireTarget(input.target, this.db, input.methodResources);
     requireNonEmpty(input.evaluationId, "ENERGYIQ_ADDITIONAL_EVALUATION_ID_REQUIRED");
     requireNonEmpty(input.idempotencyKey, "ENERGYIQ_ADDITIONAL_EVALUATION_IDEMPOTENCY_KEY_REQUIRED");
@@ -809,6 +810,7 @@ export class EnergyIqAdditionalInsightEvaluationStore {
     comparisonProviderSessionId: string;
     record?: AdditionalAiInsightTransitionEvaluationRecord;
   } {
+    requireCurrentTargetIdentity(input.currentTarget);
     const methodResources = requireTarget(input.currentTarget, this.db, input.methodResources);
     requireActor(input.requestedBy, this.db);
     const existing = this.db.prepare(`
@@ -1366,17 +1368,32 @@ const requireTarget = (
     || target.methodSetId !== methodSet.id
     || target.methodSetRevision !== methodSet.revision
     || target.methodSetFingerprint !== sha256(canonical)
-    || target.artifactIdentityRevision !== "additional-insights-v3"
+    || !supportedTargetIdentity(target)
     || target.outputContractRevision !== "energyiq-additional-ai-insights-v2"
     || target.validatorRevision !== "additional-insights-acceptance-v3"
-    || target.workflowRevision !== "additional-insights-discover-accept-publish-v3"
-    || target.promptRevision !== "additional-insights-discovery-v3"
     || target.capabilityRevision !== "scoped-read-only-v1"
     || target.publicationRevision !== "additional-insights-v2"
     || target.canvasRevision !== "energyiq-insight-canvas-v2") {
     throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_INVALID");
   }
   return methodSet.resources.map((resource) => clone(resource));
+};
+
+const supportedTargetIdentity = (target: AdditionalAiInsightEvaluationTarget): boolean => (
+  (target.artifactIdentityRevision === "additional-insights-v3"
+    && target.workflowRevision === "additional-insights-discover-accept-publish-v3"
+    && target.promptRevision === "additional-insights-discovery-v3")
+  || (target.artifactIdentityRevision === "additional-insights-v4"
+    && target.workflowRevision === "additional-insights-discover-accept-publish-v4"
+    && target.promptRevision === "additional-insights-discovery-v4")
+);
+
+const requireCurrentTargetIdentity = (target: AdditionalAiInsightEvaluationTarget): void => {
+  if (target.artifactIdentityRevision !== "additional-insights-v4"
+    || target.workflowRevision !== "additional-insights-discover-accept-publish-v4"
+    || target.promptRevision !== "additional-insights-discovery-v4") {
+    throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_BEHAVIOR_NOT_CURRENT");
+  }
 };
 
 const requireActor = (actorId: string, db: DatabaseSync): void => {

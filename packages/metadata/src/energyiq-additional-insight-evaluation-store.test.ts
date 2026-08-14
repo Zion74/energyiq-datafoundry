@@ -965,7 +965,12 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
   it("upgrades an existing 0033 running batch without changing its three reserved run identities", () => {
     const harness = createHarness();
     try {
-      const target = evaluationTarget("snapshot-a", "release-a");
+      const target: AdditionalAiInsightEvaluationTarget = {
+        ...evaluationTarget("snapshot-a", "release-a"),
+        artifactIdentityRevision: "additional-insights-v3",
+        workflowRevision: "additional-insights-discover-accept-publish-v3",
+        promptRevision: "additional-insights-discovery-v3",
+      };
       const oldRecord = {
         contractRevision: "energyiq-additional-insight-evaluation-v1",
         evaluationId: "evaluation-0033",
@@ -1246,12 +1251,12 @@ const evaluationTarget = (
     analysisPeriod: { from: "2026-05-01T00:00:00.000Z", to: "2026-06-01T00:00:00.000Z" },
     modelProfileId: "workspace-default",
     modelProfileRevision: 7,
-    artifactIdentityRevision: "additional-insights-v3",
+    artifactIdentityRevision: "additional-insights-v4",
     artifactIdentityHash: `sha256:${createHash("sha256").update(`${dataSnapshotId}:${projectReleaseId}`).digest("hex")}`,
     outputContractRevision: "energyiq-additional-ai-insights-v2",
     validatorRevision: "additional-insights-acceptance-v3",
-    workflowRevision: "additional-insights-discover-accept-publish-v3",
-    promptRevision: "additional-insights-discovery-v3",
+    workflowRevision: "additional-insights-discover-accept-publish-v4",
+    promptRevision: "additional-insights-discovery-v4",
     capabilityRevision: "scoped-read-only-v1",
     publicationRevision: "additional-insights-v2",
     canvasRevision: "energyiq-insight-canvas-v2",

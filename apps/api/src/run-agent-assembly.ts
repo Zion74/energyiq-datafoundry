@@ -77,6 +77,7 @@ type CreateRunAgentAssemblyInput = {
   disableTools?: boolean;
   structuredOutput?: PublicStructuredOutputOptions<Record<string, unknown>>;
   trustedStageTools?: CreateDataFoundryInput["trustedStageTools"];
+  trustedStageCapability?: CreateDataFoundryInput["trustedStageCapability"];
   contextPackageRecorder?: ContextPackageRecorder;
   contextPackageExists(reference: ContextPackageRef): boolean;
   evidenceContextItems?: AgentContextItem[] | undefined;
@@ -194,6 +195,9 @@ export const createRunAgentAssembly = async (
     ...(input.disableTools ? { disableTools: true } : {}),
     ...(input.structuredOutput ? { structuredOutput: input.structuredOutput } : {}),
     ...(input.trustedStageTools ? { trustedStageTools: input.trustedStageTools } : {}),
+    ...(input.trustedStageCapability
+      ? { trustedStageCapability: input.trustedStageCapability }
+      : {}),
     ...(input.effectiveRunConfig.protocol ? { explicitProtocol: input.effectiveRunConfig.protocol } : {}),
     messages: input.messages,
     ...(input.modelContextProfile ? { modelContextProfile: input.modelContextProfile } : {}),

@@ -857,8 +857,8 @@ Additional Artifact 与 Finding，绑定精确 Workspace、Project、Scope、Art
 Finding 与 actor；同一 actor 的同一精确 Finding 只有一条当前反馈，重复同票幂等，改票使用 optimistic revision 并保留完整历史。
 反馈不会创建、批准或发布 Method，也不会改变 current Method Registry。
 
-Additional current identity 已旋转为 `additional-insights-v3`，validator/workflow/discovery prompt 同步为 v3；持久化输出合同仍为兼容的
-`energyiq-additional-ai-insights-v2`。每个 discovery candidate 必须提交结构化 origin 和实际使用的稳定 Method resource IDs，服务端只映射
+Stage 3D 完成时 Additional current identity 为 `additional-insights-v3`，validator/workflow/discovery prompt 为 v3；持久化输出合同为
+`energyiq-additional-ai-insights-v2`。后续真实 Provider 质量修正见 18.11。每个 discovery candidate 必须提交结构化 origin 和实际使用的稳定 Method resource IDs，服务端只映射
 本次已加载的精确 Method refs；core-only Finding 保持 `ai-discovery` 且 direction 为空，未知、未加载或重复 refs 只拒绝该候选。治理记录使用
 `artifactIdentityRevision` 绑定 `identityContractRevision`，不再用 output contract revision 冒充 Artifact identity。
 
@@ -905,3 +905,19 @@ tenant composite FK、Artifact hash 恢复与 claim；若曾停在 `_0033` 中�
 Review/approval 使用 SQL revision predicate，reservation 使用 UPSERT，跨进程 stale writer 与重复 idempotency key 不会覆盖 winner。本地自动化
 通过不代表该迁移已经在真实环境执行。
 这些真实 Provider、浏览器和人工产品价值门完成前，不得宣称 Stage 3 已通过产品验收；Stage 4 Coding Agent 仍不在范围内。
+
+### 18.11 Additional 真实 Provider 发现链工程修正 checkpoint
+
+真实 pass@3 证据表明，旧 Additional v3 运行被通用 `data-analysis@1` 的 Schema、query、core grounding 前置门判为 partial，导致模型在真正消费
+Evidence 前结束。current Additional identity 因此旋转为 `additional-insights-v4`，workflow 为
+`additional-insights-discover-accept-publish-v4`，discovery prompt 为 `additional-insights-discovery-v4`；输出 v2、validator v3、capability v1、
+publication v2、canvas v2、Method set 与 Pack 均未改变。
+
+v4 discovery 与 transition 仅在 exact server-owned identity 下使用 `general-task@1` structured-value completion，并分别携带显式 typed
+`trustedStageCapability`。不得从 Energy context、protocol 或工具存在性推断 capability。Discovery 仍只能调用五个服务端授权的 scoped read-only
+Evidence 工具，保持 Evidence Catalog、tool audit、逐候选校验、局部拒绝、零候选合法与最多三条发布；transition 无工具，只比较 exact A/B
+Artifact 与 Evidence lineage。生产 `RUN_FINISHED` finalizer 自动提交 general-task answer 并形成终态，不依赖模型或测试手工调用 action。
+
+历史 v3 terminal Artifact/评估记录只读兼容，但不能作为 current live 结果；旧 running reservation 保留其 v3 identity/protocol，并在 current v4
+入口 fail closed，不能用 v4 行为续跑后冒充 v3。Structured Output 缺失或 root undefined 被规范化为该 attempt 的 structured-output 局部失败，
+不拖垮 pass@3 兄弟 attempts。此 checkpoint 只证明自动化工程边界；真实 Provider 复跑、浏览器恢复和人工增量价值评审仍由集成主线执行。

@@ -12,6 +12,7 @@ import {
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import { preschoolExecutiveSynthesisTargetId } from "./preschool-executive-synthesis.js";
@@ -129,7 +130,20 @@ describe("composePreschoolOverviewAiReadModel", () => {
     }
   });
 
-  it("does not present a v2 Additional Artifact as the current v3 result", () => {
+  it.each([
+    ["v2", {
+      identityContractRevision: "additional-insights-v2",
+      validatorRevision: "additional-insights-acceptance-v2",
+      workflowRevision: "additional-insights-discover-accept-publish-v2",
+      investigatorPromptRevision: "additional-insights-discovery-v2",
+    }],
+    ["v3", {
+      identityContractRevision: "additional-insights-v3",
+      validatorRevision: "additional-insights-acceptance-v3",
+      workflowRevision: "additional-insights-discover-accept-publish-v3",
+      investigatorPromptRevision: "additional-insights-discovery-v3",
+    }],
+  ] as const)("does not present a historical Additional %s Artifact as the current v4 result", (_revision, revisions) => {
     const root = mkdtempSync(join(tmpdir(), "preschool-overview-read-model-additional-v2-saved-only-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
     try {
@@ -138,24 +152,9 @@ describe("composePreschoolOverviewAiReadModel", () => {
       const currentIdentity = createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity });
       const historicalIdentity: EnergyIqOverviewAiArtifactIdentity = {
         ...currentIdentity,
-        identityContractRevision: "additional-insights-v2",
-        validatorRevision: "additional-insights-acceptance-v2",
-        workflowRevision: "additional-insights-discover-accept-publish-v2",
-        investigatorPromptRevision: "additional-insights-discovery-v2",
+        ...revisions,
       };
-      metadata.energyIq.overviewAiArtifacts.queue({ identity: historicalIdentity, triggeredBy: "dev-user" });
-      metadata.energyIq.overviewAiArtifacts.claim({
-        identity: historicalIdentity,
-        workerId: "historical-additional-worker",
-        leaseMs: 60_000,
-      });
-      metadata.energyIq.overviewAiArtifacts.complete({
-        identity: historicalIdentity,
-        workerId: "historical-additional-worker",
-        sessionId: "historical-additional-session",
-        runId: "historical-additional-run",
-        resultJson: JSON.stringify(currentAdditionalResult(currentIdentity)),
-      });
+      seedHistoricalAdditionalArtifactForReadTest(metadata, currentIdentity, historicalIdentity);
 
       expect(composePreschoolOverviewAiReadModel({ metadataStore: metadata, baseIdentity })).toBeNull();
     } finally {
@@ -624,6 +623,48 @@ const artifactRecord = (
   updated_at: "2026-08-13T00:00:00.000Z",
   completed_at: "2026-08-13T00:00:00.000Z",
 });
+
+/** Simulates a released historical row without reopening historical production mutations. */
+const seedHistoricalAdditionalArtifactForReadTest = (
+  metadata: MetadataStore,
+  currentIdentity: ReturnType<typeof createPreschoolAdditionalAiInsightArtifactIdentity>,
+  historicalIdentity: EnergyIqOverviewAiArtifactIdentity,
+): void => {
+  metadata.energyIq.overviewAiArtifacts.queue({ identity: currentIdentity, triggeredBy: "dev-user" });
+  metadata.energyIq.overviewAiArtifacts.claim({
+    identity: currentIdentity,
+    workerId: "historical-additional-migration-worker",
+    leaseMs: 60_000,
+  });
+  const current = metadata.energyIq.overviewAiArtifacts.complete({
+    identity: currentIdentity,
+    workerId: "historical-additional-migration-worker",
+    sessionId: "historical-additional-session",
+    runId: "historical-additional-run",
+    resultJson: JSON.stringify(currentAdditionalResult(currentIdentity)),
+  });
+  const canonical = JSON.parse(current.identity_json) as Record<string, unknown>;
+  for (const key of Object.keys(canonical)) {
+    const value = historicalIdentity[key as keyof EnergyIqOverviewAiArtifactIdentity];
+    if (value === undefined) delete canonical[key];
+    else canonical[key] = value;
+  }
+  const identityJson = JSON.stringify(canonical);
+  const identityHash = createHash("sha256").update(identityJson).digest("hex");
+  metadata.db.prepare(`
+    UPDATE energyiq_overview_ai_artifacts
+    SET id = ?, identity_hash = ?, identity_json = ?,
+        output_contract_revision = ?, validator_revision = ?
+    WHERE id = ?
+  `).run(
+    `overview-ai-artifact-${identityHash.slice(0, 24)}`,
+    identityHash,
+    identityJson,
+    historicalIdentity.outputContractRevision,
+    historicalIdentity.validatorRevision,
+    current.id,
+  );
+};
 
 const currentAdditionalResult = (
   artifactIdentity: ReturnType<typeof createPreschoolAdditionalAiInsightArtifactIdentity>,

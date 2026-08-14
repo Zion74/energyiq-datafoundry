@@ -350,9 +350,9 @@ describe("PreschoolAiSlot", () => {
     expect(pageSlot!.textContent).toContain("Based on 2 of 4 Sections");
     expect(pageSlot!.querySelector('[aria-label="Key findings summary"]')).not.toBeNull();
     expect(pageSlot!.querySelector('[data-key-findings-grid="true"]')).not.toBeNull();
-    expect(pageSlot!.textContent).toContain("Recurring time-pattern signals appear in both closed and opening hours.");
+    expect(readableText(pageSlot)).toContain("Recurring time-pattern signals appear in both closed and opening hours.");
     expect(pageSlot!.textContent).toContain("Two time-pattern signals merit review");
-    expect(pageSlot!.textContent).toContain(
+    expect(readableText(pageSlot)).toContain(
       "Closed-hour energy and unusual opening-hour peaks are separately evidenced.",
     );
 
@@ -431,7 +431,7 @@ describe("PreschoolAiSlot", () => {
     expect(startRun).not.toHaveBeenCalled();
     const sectionSlot = container.querySelector<HTMLElement>('[data-ai-section="standby-wastage"]');
     expect(sectionSlot).not.toBeNull();
-    expect(sectionSlot!.textContent).toContain("Closed-hour energy recurs in the cited portfolio evidence.");
+    expect(readableText(sectionSlot)).toContain("Closed-hour energy recurs in the cited portfolio evidence.");
     for (const forbiddenLabel of ["AI takeaway", "Priority", "Supporting signal", "Why it matters", "Next action"]) {
       expect(sectionSlot!.textContent).not.toContain(forbiddenLabel);
     }
@@ -534,14 +534,14 @@ describe("PreschoolAiSlot", () => {
     expect(unavailableSlot).not.toBeNull();
 
     expect(emptySlot!.textContent).toContain("No additional AI interpretation");
-    expect(emptySlot!.textContent).toContain("Only published Evidence was checked.");
+    expect(readableText(emptySlot)).toContain("Only published Evidence was checked.");
     const emptyLimitation = findSafeMarkdownByText(emptySlot!, "Review more context");
     expect(emptyLimitation.querySelector("strong")?.textContent).toBe("published Evidence");
     expect(emptyLimitation.querySelector("em")?.textContent).toBe("Review more context");
     expect(emptySlot!.querySelectorAll("article")).toHaveLength(0);
     expect(emptySlot!.textContent).not.toContain("Unusual opening-hour peaks recur");
 
-    expect(availableSlot!.textContent).toContain("Unusual opening-hour peaks recur in the cited operating evidence.");
+    expect(readableText(availableSlot)).toContain("Unusual opening-hour peaks recur in the cited operating evidence.");
     expect(availableSlot!.querySelectorAll("article")).toHaveLength(0);
     expect(availableSlot!.textContent).not.toContain("No additional AI interpretation");
     expect(availableSlot!.textContent).not.toContain("unavailable");
@@ -576,7 +576,7 @@ describe("PreschoolAiSlot", () => {
     expect(pageSlot?.textContent).not.toContain("Two time-pattern signals merit review");
     expect(standbySlot?.textContent).toContain("Invalid saved AI result");
     expect(standbySlot?.textContent).not.toContain("No additional AI interpretation");
-    expect(operatingSlot?.textContent).toContain("Unusual opening-hour peaks recur");
+    expect(readableText(operatingSlot)).toContain("Unusual opening-hour peaks recur");
   });
 
   it("isolates one terminal Section identity mismatch while preserving a valid sibling and Key Findings", async () => {
@@ -596,7 +596,7 @@ describe("PreschoolAiSlot", () => {
     const operatingSlot = container.querySelector<HTMLElement>('[data-ai-section="operating-behaviour"]');
     expect(benchmarkSlot?.textContent).toContain("Invalid saved AI result");
     expect(benchmarkSlot?.textContent).not.toContain("No additional AI interpretation");
-    expect(operatingSlot?.textContent).toContain("Unusual opening-hour peaks recur");
+    expect(readableText(operatingSlot)).toContain("Unusual opening-hour peaks recur");
     expect(pageSlot?.textContent).toContain("Two time-pattern signals merit review");
     expect(pageSlot?.textContent).not.toContain("Invalid saved AI read model");
   });
@@ -617,7 +617,8 @@ describe("PreschoolAiSlot", () => {
     expect(pageSlot?.textContent).toContain("Invalid saved AI result");
     expect(pageSlot?.textContent).not.toContain("Two time-pattern signals merit review");
     expect(container.querySelector<HTMLElement>('[data-ai-section="standby-wastage"]')?.textContent).toContain("Persistent closed-hour base load");
-    expect(container.querySelector<HTMLElement>('[data-ai-section="operating-behaviour"]')?.textContent).toContain("Unusual opening-hour peaks recur");
+    expect(readableText(container.querySelector<HTMLElement>('[data-ai-section="operating-behaviour"]')))
+      .toContain("Unusual opening-hour peaks recur");
   });
 
   it("isolates a live v3 Executive without hiding valid v4 Sections or publishing the mixed result", async () => {
@@ -661,7 +662,8 @@ describe("PreschoolAiSlot", () => {
     const pageSlot = container.querySelector<HTMLElement>('[data-ai-section="page-synthesis"]');
     expect(pageSlot?.textContent).toContain("Invalid AI result");
     expect(pageSlot?.textContent).not.toContain("Legacy Executive content must not render live");
-    expect(container.querySelector<HTMLElement>('[data-ai-section="operating-behaviour"]')?.textContent).toContain("Unusual opening-hour peaks recur");
+    expect(readableText(container.querySelector<HTMLElement>('[data-ai-section="operating-behaviour"]')))
+      .toContain("Unusual opening-hour peaks recur");
     expect(onCompletedResult).not.toHaveBeenCalled();
   });
 
@@ -1048,7 +1050,8 @@ describe("PreschoolAiSlot", () => {
 
     expect(container.querySelector<HTMLElement>('[data-ai-section="page-synthesis"]')?.textContent).toContain("Invalid saved AI result");
     expect(container.querySelector<HTMLElement>('[data-ai-section="standby-wastage"]')?.textContent).toContain("Persistent closed-hour base load");
-    expect(container.querySelector<HTMLElement>('[data-ai-section="operating-behaviour"]')?.textContent).toContain("Unusual opening-hour peaks recur");
+    expect(readableText(container.querySelector<HTMLElement>('[data-ai-section="operating-behaviour"]')))
+      .toContain("Unusual opening-hour peaks recur");
   });
 
   it.each(["queued", "running"] as const)(
@@ -1689,6 +1692,10 @@ function expectDecisionSummaryBeforeVisual(container: HTMLElement): void {
   expect(action!.compareDocumentPosition(presentation!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 }
 
+function readableText(node: Element | null | undefined): string {
+  return (node?.textContent ?? "").replaceAll("\u00a0", " ");
+}
+
 function findInsightCard(scope: HTMLElement, title: string): HTMLElement {
   const heading = [...scope.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6")]
     .find((candidate) => candidate.textContent?.trim() === title);
@@ -1700,7 +1707,7 @@ function findInsightCard(scope: HTMLElement, title: string): HTMLElement {
 
 function findSafeMarkdownByText(scope: HTMLElement, text: string): HTMLElement {
   const markdown = [...scope.querySelectorAll<HTMLElement>('[data-safe-ai-markdown="true"]')]
-    .find((candidate) => candidate.textContent?.includes(text));
+    .find((candidate) => readableText(candidate).includes(text));
   expect(markdown).toBeDefined();
   return markdown!;
 }

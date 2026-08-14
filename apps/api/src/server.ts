@@ -27,6 +27,7 @@ import {
   RunEventWriter,
   createMetadataStore,
   type EnergyIqAdditionalInsightModelProfileSnapshot,
+  type EnergyIqOverviewAiArtifactIdentity,
   type UserRecord,
   type MetadataStore
 } from "@datafoundry/metadata";
@@ -112,12 +113,16 @@ import { createPreschoolOverviewAiPageWorkflow } from "./energy/preschool-overvi
 import {
   createPreschoolAdditionalAiInsightsEvaluationWorkflow,
   MAX_PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_CHARS,
+  PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID,
 } from "./energy/preschool-additional-ai-insights-evaluation.js";
 import {
   createPreschoolAdditionalAiInsightsWorkflow,
   MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS,
 } from "./energy/preschool-additional-ai-insights-workflow.js";
-import { overviewAiArtifactPinnedLocalPeriod } from "./energy/overview-ai-artifact.js";
+import {
+  isCurrentPreschoolAdditionalAiInsightArtifactIdentity,
+  overviewAiArtifactPinnedLocalPeriod,
+} from "./energy/overview-ai-artifact.js";
 import { MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS } from "./energy/preschool-executive-synthesis.js";
 import type {
   PreschoolSectionInsightToolInvocation,
@@ -148,6 +153,7 @@ type OverviewAiTrustedRuntimeOverride = {
   conversationMessageMaxChars: number;
   disableTools?: false;
   trustedStageTools?: CreateDataFoundryInput["trustedStageTools"];
+  trustedStageCapability?: CreateDataFoundryInput["trustedStageCapability"];
 };
 
 const PACK_V2_SECTION_MESSAGE_MAX_CHARS = 110_000;
@@ -197,6 +203,7 @@ export const resolveOverviewAiStageRuntimeOptions = (stage: PreschoolOverviewAiS
 
 export const resolveOverviewAiServerRunnerOptions = (input: {
   stage: PreschoolOverviewAiStage;
+  identity?: EnergyIqOverviewAiArtifactIdentity;
   structuredOutput?: OverviewAiStructuredOutput;
   sectionInsightTools?: readonly PreschoolSectionInsightToolName[];
   invokeSectionInsightTool?: (
@@ -234,7 +241,22 @@ export const resolveOverviewAiServerRunnerOptions = (input: {
         : input.stage === "additional-insights-transition"
           ? MAX_PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_CHARS
         : MAX_PRESCHOOL_EXECUTIVE_PROMPT_CHARS,
-    ...(trustedStageTools ? { disableTools: false as const, trustedStageTools } : {}),
+    ...(trustedStageTools
+      ? {
+          disableTools: false as const,
+          trustedStageTools,
+          ...(input.stage === "additional-insights-discovery"
+            && input.identity
+            && isCurrentPreschoolAdditionalAiInsightArtifactIdentity(input.identity)
+            ? { trustedStageCapability: "energyiq-additional-insight-discovery" as const }
+            : {}),
+        }
+      : {}),
+    ...(input.stage === "additional-insights-transition"
+      && input.identity
+      && isCurrentPreschoolAdditionalAiInsightArtifactIdentity(input.identity)
+      ? { trustedStageCapability: "energyiq-additional-insight-transition" as const }
+      : {}),
   };
 };
 
@@ -343,6 +365,7 @@ export const resolveOverviewAiAgentRuntimeOptions = (
   reasoningModel: false;
   structuredOutput?: OverviewAiStructuredOutput;
   trustedStageTools?: CreateDataFoundryInput["trustedStageTools"];
+  trustedStageCapability?: CreateDataFoundryInput["trustedStageCapability"];
 } => ({
   ...resolveOverviewAiStageRuntimeOptions(stage),
   ...(trustedOverride ?? {}),
@@ -603,6 +626,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       if (!structuredOutput) throw new Error("PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_REQUIRED");
       const trustedRuntimeOverride = resolveOverviewAiServerRunnerOptions({
         stage: "additional-insights-discovery",
+        identity: stageInput.identity,
         structuredOutput,
         additionalInsightTools: toolNames,
         invokeAdditionalInsightTool: invokeTool,
@@ -622,6 +646,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       if (!structuredOutput) throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_STRUCTURED_OUTPUT_REQUIRED");
       const trustedRuntimeOverride = resolveOverviewAiServerRunnerOptions({
         stage: "additional-insights-transition",
+        identity: stageInput.identity,
         structuredOutput,
       });
       return runOverviewAiValueStage({
@@ -804,7 +829,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
   return server;
 };
 
-const collectOverviewAiStageEvents = (
+export const collectOverviewAiStageEvents = (
   agent: DataFoundryAgUiAgent,
   input: OverviewAiRuntimeStageInput,
   metadataStore: MetadataStore,
@@ -815,7 +840,7 @@ const collectOverviewAiStageEvents = (
   const events: BaseEvent[] = [];
   agent.run(buildOverviewAiStageRunInput(input)).subscribe({
     next: (event) => events.push(event),
-    error: reject,
+    error: (error) => reject(normalizeOverviewAiStageRuntimeError(input.stage, error)),
     complete: () => {
       const run = metadataStore.runs.find({ user_id: input.user.id, run_id: input.runId });
       if (!run
@@ -826,7 +851,10 @@ const collectOverviewAiStageEvents = (
         || !run.user_input.includes(input.identity.projectReleaseId)
         || !run.user_input.includes(input.identity.analysisPeriodFrom)
         || !run.user_input.includes(input.identity.analysisPeriodTo)) {
-        reject(new Error("OVERVIEW_AI_RUNTIME_RUN_INVALID"));
+        reject(normalizeOverviewAiStageRuntimeError(
+          input.stage,
+          run?.error_message ?? "OVERVIEW_AI_RUNTIME_RUN_INVALID",
+        ));
         return;
       }
       resolve({
@@ -836,6 +864,20 @@ const collectOverviewAiStageEvents = (
     },
   });
 });
+
+export const normalizeOverviewAiStageRuntimeError = (
+  stage: PreschoolOverviewAiStage,
+  error: unknown,
+): Error => {
+  const message = error instanceof Error ? error.message : String(error);
+  if ((stage === "additional-insights-discovery" || stage === "additional-insights-transition")
+    && (message === PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID
+      || /(?:structured[ _-]?output.*\broot\b|\broot\b.*structured[ _-]?output).*(?:undefined|null|missing|invalid)/iu
+        .test(message))) {
+    return new Error(PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID);
+  }
+  return error instanceof Error ? error : new Error(message);
+};
 
 export const collectOverviewAiText = (events: ReadonlyArray<Record<string, unknown>>): string =>
   events
@@ -869,7 +911,11 @@ export const buildOverviewAiStageRunInput = (input: OverviewAiRuntimeStageInput)
         }
       : {}),
     run_config: {
-      protocol: { id: "data-analysis", version: "1" },
+      protocol: (input.stage === "additional-insights-discovery"
+        || input.stage === "additional-insights-transition")
+        && isCurrentPreschoolAdditionalAiInsightArtifactIdentity(input.identity)
+        ? { id: "general-task", version: "1" }
+        : { id: "data-analysis", version: "1" },
       activeLlmProfileId: input.identity.modelProfileId,
       skillMode: isIsolatedValueStage(input.stage)
         ? "none"
@@ -995,7 +1041,7 @@ const handleCopilotKitRequest = async ({
   }
 };
 
-type DataFoundryAgUiAgentInput = {
+export type DataFoundryAgUiAgentInput = {
   artifactService: LocalArtifactService;
   sessionOutputService: SessionOutputService;
   conversationMemoryMode: AgentMemoryMode;
@@ -1005,6 +1051,10 @@ type DataFoundryAgUiAgentInput = {
   metadataStore: MetadataStore;
   knowledgeService: LocalKnowledgeService;
   memoryExtractionTimeoutMs: number;
+  /** Internal test seam; production always uses the canonical assembly factory. */
+  runAgentAssemblyFactory?: typeof createRunAgentAssembly;
+  /** Internal test seam preventing model-backed memory extraction in event-loop tests. */
+  completedMemoryFlushOverride?: () => Promise<void>;
   /** Server-created Overview Artifact stage; never accepted from browser props. */
   overviewAiStage?: PreschoolOverviewAiStage;
   /** Server-created Pack-v2 override; never accepted from browser props. */
@@ -1019,7 +1069,7 @@ type DataFoundryAgUiAgentInput = {
   workspaceRoot: string;
 };
 
-class DataFoundryAgUiAgent extends AbstractAgent {
+export class DataFoundryAgUiAgent extends AbstractAgent {
   private input: DataFoundryAgUiAgentInput;
 
   constructor(input: DataFoundryAgUiAgentInput) {
@@ -1361,7 +1411,7 @@ class DataFoundryAgUiAgent extends AbstractAgent {
           eventPipeline.emit(event);
         };
         replayPendingProtocolEvents({ runId, stateStore: protocolStateStore, emit });
-        const agentAssembly = await createRunAgentAssembly({
+        const agentAssembly = await (this.input.runAgentAssemblyFactory ?? createRunAgentAssembly)({
           ...(trustedEnergyTextContract || energyQueryContext
             ? {
                 // The server-created EnergyIQ view is already the physical,
@@ -1396,6 +1446,9 @@ class DataFoundryAgUiAgent extends AbstractAgent {
                   : {}),
                 ...(overviewAiStageOptions.trustedStageTools
                   ? { trustedStageTools: overviewAiStageOptions.trustedStageTools }
+                  : {}),
+                ...(overviewAiStageOptions.trustedStageCapability
+                  ? { trustedStageCapability: overviewAiStageOptions.trustedStageCapability }
                   : {}),
               }
             : {}),
@@ -1439,7 +1492,9 @@ class DataFoundryAgUiAgent extends AbstractAgent {
           destroyWorkspace: agentAssembly.destroyWorkspace,
           emit,
           fileAssetService: this.input.fileAssetService,
-          flushCompletedMemory: (flushInput) => memoryAssembly.flushCompletedMemory(flushInput),
+          flushCompletedMemory: this.input.completedMemoryFlushOverride
+            ? async () => this.input.completedMemoryFlushOverride!()
+            : (flushInput) => memoryAssembly.flushCompletedMemory(flushInput),
           flushDraftsMemory: () => {
             memoryAssembly.flushDraftsMemory();
           },
