@@ -57,16 +57,19 @@ export type AdditionalAiInsightEvaluationHumanReview = {
   revision: number;
 };
 
+export type AdditionalAiInsightEvaluationArtifactIdentity = {
+  artifactId: string;
+  artifactIdentityHash: string;
+  artifactIdentityRevision: "additional-insight-evaluation-artifact-v1";
+};
+
 export type AdditionalAiInsightEvaluationAttempt = {
   attemptId: string;
   ordinal: number;
   status: "completed";
   providerRunId: string;
   providerSessionId: string;
-  artifact: {
-    artifactId: string;
-    artifactIdentityHash: string;
-    artifactIdentityRevision: "additional-insight-evaluation-artifact-v1";
+  artifact: AdditionalAiInsightEvaluationArtifactIdentity & {
     resultHash: string;
     resultStatus: "available" | "empty";
   };
@@ -94,6 +97,7 @@ export type AdditionalAiInsightEvaluationFailedAttempt = {
   status: "failed";
   providerRunId: string;
   providerSessionId: string;
+  artifact: AdditionalAiInsightEvaluationArtifactIdentity;
   errorCode: string;
   failureStage: "provider" | "structured-output" | "machine-gate";
   startedAt: string;
@@ -106,6 +110,7 @@ export type AdditionalAiInsightEvaluationRunningAttempt = {
   status: "running";
   providerRunId: string;
   providerSessionId: string;
+  artifact: AdditionalAiInsightEvaluationArtifactIdentity;
   startedAt: string;
 };
 
@@ -178,6 +183,7 @@ export type AdditionalAiInsightTransitionOutcome = {
 export type AdditionalAiInsightTransitionArtifactAudit = {
   artifactId: string;
   artifactIdentityHash: string;
+  resultHash: string;
   findingEvidence: Record<string, string[]>;
   evidenceRefs: string[];
 };
@@ -220,9 +226,26 @@ export type AdditionalAiInsightFailedTransitionRecord = {
   completedAt: string;
 };
 
+export type AdditionalAiInsightRunningTransitionRecord = {
+  contractRevision: "energyiq-additional-insight-transition-v1";
+  transitionId: string;
+  idempotencyKey: string;
+  requestedBy: string;
+  status: "running";
+  previousTarget: AdditionalAiInsightEvaluationTarget;
+  currentTarget: AdditionalAiInsightEvaluationTarget;
+  previousArtifact: AdditionalAiInsightTransitionArtifactAudit;
+  generationProviderRunId: string;
+  generationProviderSessionId: string;
+  comparisonProviderRunId: string;
+  comparisonProviderSessionId: string;
+  createdAt: string;
+};
+
 export type AdditionalAiInsightTransitionEvaluationRecord =
   | AdditionalAiInsightTransitionRecord
-  | AdditionalAiInsightFailedTransitionRecord;
+  | AdditionalAiInsightFailedTransitionRecord
+  | AdditionalAiInsightRunningTransitionRecord;
 
 export const evaluateAdditionalAiInsightPassAt3 = (
   batch: AdditionalAiInsightEvaluationBatch,
@@ -233,7 +256,7 @@ export const evaluateAdditionalAiInsightPassAt3 = (
   if (completed.length < 2) return "failed";
   if (completed.some(({ humanReview }) => !humanReview)) return "pending-human-review";
   const passing = completed.filter(({ machineGate, humanReview }) => (
-    machineGate.status === "passed" && humanReviewIsPassing(humanReview!)
+    machineGate.status === "passed" && additionalAiInsightHumanReviewIsPassing(humanReview!)
   )).length;
   return passing >= 2 ? "passed" : "failed";
 };
@@ -263,8 +286,8 @@ const evaluationBatchIsValid = (
   const completed = attempts.filter(isCompletedAttempt);
   if (!unique(attempts.map(({ providerRunId }) => providerRunId))
     || !unique(attempts.map(({ providerSessionId }) => providerSessionId))
-    || !unique(completed.map(({ artifact }) => artifact.artifactId))
-    || !unique(completed.map(({ artifact }) => artifact.artifactIdentityHash))) return false;
+    || !unique(attempts.map(({ artifact }) => artifact.artifactId))
+    || !unique(attempts.map(({ artifact }) => artifact.artifactIdentityHash))) return false;
 
   const reviewAudit = value.reviewAudit;
   if (!reviewAudit.every((entry) => isRecord(entry)
@@ -285,7 +308,7 @@ const evaluationBatchIsValid = (
         attemptId === value.approval.selectedAttemptId
         && machineGate.status === "passed"
         && humanReview !== undefined
-        && humanReviewIsPassing(humanReview)
+        && additionalAiInsightHumanReviewIsPassing(humanReview)
       ))) return false;
   }
   for (const attempt of completed) {
@@ -300,7 +323,7 @@ const evaluationBatchIsValid = (
   const passingCompleted = completed.filter(({ machineGate, humanReview }) => (
     machineGate.status === "passed"
       && humanReview !== undefined
-      && humanReviewIsPassing(humanReview)
+      && additionalAiInsightHumanReviewIsPassing(humanReview)
   )).length;
   if (value.status === "running") {
     return value.approval === undefined
@@ -343,7 +366,7 @@ export const additionalAiInsightTransitionIsValid = (
     || !nonEmptyString(value.requestedBy)
     || !evaluationTargetIsValid(value.previousTarget)
     || !evaluationTargetIsValid(value.currentTarget)
-    || !transitionTargetsMatch(value.previousTarget, value.currentTarget)
+    || !additionalAiInsightEvaluationTargetsCanTransition(value.previousTarget, value.currentTarget)
     || !transitionArtifactIsValid(value.previousArtifact)
     || !transitionArtifactIsValid(value.currentArtifact)
     || !nonEmptyString(value.generationProviderRunId)
@@ -356,9 +379,6 @@ export const additionalAiInsightTransitionIsValid = (
     || value.outcomes.length === 0
     || !nonEmptyString(value.createdAt)
     || !nonEmptyString(value.completedAt)) return false;
-  const previousEvidence = new Set(value.previousArtifact.evidenceRefs);
-  const currentEvidence = new Set(value.currentArtifact.evidenceRefs);
-  if ([...currentEvidence].some((ref) => previousEvidence.has(ref))) return false;
   if (value.outcomes.some((outcome) => !transitionOutcomeIsValid(
     outcome,
     value.previousArtifact,
@@ -386,6 +406,23 @@ export const additionalAiInsightTransitionRecordIsValid = (
   value: unknown,
 ): value is AdditionalAiInsightTransitionEvaluationRecord => {
   if (additionalAiInsightTransitionIsValid(value)) return true;
+  if (isRecord(value)
+    && value.contractRevision === "energyiq-additional-insight-transition-v1"
+    && value.status === "running"
+    && nonEmptyString(value.transitionId)
+    && nonEmptyString(value.idempotencyKey)
+    && nonEmptyString(value.requestedBy)
+    && evaluationTargetIsValid(value.previousTarget)
+    && evaluationTargetIsValid(value.currentTarget)
+    && additionalAiInsightEvaluationTargetsCanTransition(value.previousTarget, value.currentTarget)
+    && transitionArtifactIsValid(value.previousArtifact)
+    && nonEmptyString(value.generationProviderRunId)
+    && nonEmptyString(value.generationProviderSessionId)
+    && nonEmptyString(value.comparisonProviderRunId)
+    && nonEmptyString(value.comparisonProviderSessionId)
+    && value.generationProviderRunId !== value.comparisonProviderRunId
+    && value.generationProviderSessionId !== value.comparisonProviderSessionId
+    && nonEmptyString(value.createdAt)) return true;
   return isRecord(value)
     && value.contractRevision === "energyiq-additional-insight-transition-v1"
     && value.status === "failed"
@@ -394,7 +431,7 @@ export const additionalAiInsightTransitionRecordIsValid = (
     && nonEmptyString(value.requestedBy)
     && evaluationTargetIsValid(value.previousTarget)
     && evaluationTargetIsValid(value.currentTarget)
-    && transitionTargetsMatch(value.previousTarget, value.currentTarget)
+    && additionalAiInsightEvaluationTargetsCanTransition(value.previousTarget, value.currentTarget)
     && transitionArtifactIsValid(value.previousArtifact)
     && nonEmptyString(value.generationProviderRunId)
     && nonEmptyString(value.generationProviderSessionId)
@@ -420,6 +457,7 @@ const evaluationAttemptIsValid = (
     || !positiveInteger(value.ordinal)
     || !nonEmptyString(value.providerRunId)
     || !nonEmptyString(value.providerSessionId)
+    || !artifactIdentityIsValid(value.artifact)
     || !nonEmptyString(value.startedAt)
   ) return false;
   if (value.status === "running") return value.completedAt === undefined;
@@ -440,13 +478,19 @@ const evaluationAttemptIsValid = (
   return true;
 };
 
-const artifactAuditIsValid = (value: unknown): value is AdditionalAiInsightEvaluationAttempt["artifact"] => (
+const artifactIdentityIsValid = (value: unknown): value is AdditionalAiInsightEvaluationArtifactIdentity => (
   isRecord(value)
   && nonEmptyString(value.artifactId)
   && hashIsValid(value.artifactIdentityHash)
   && value.artifactIdentityRevision === "additional-insight-evaluation-artifact-v1"
-  && hashIsValid(value.resultHash)
-  && (value.resultStatus === "available" || value.resultStatus === "empty")
+);
+
+const artifactAuditIsValid = (value: unknown): value is AdditionalAiInsightEvaluationAttempt["artifact"] => (
+  isRecord(value)
+  && artifactIdentityIsValid(value)
+  && hashIsValid((value as Record<string, unknown>).resultHash)
+  && ((value as Record<string, unknown>).resultStatus === "available"
+    || (value as Record<string, unknown>).resultStatus === "empty")
 );
 
 const statisticsAreValid = (value: unknown): boolean => isRecord(value)
@@ -480,12 +524,14 @@ const humanReviewIsValid = (value: unknown): value is AdditionalAiInsightEvaluat
   && positiveInteger(value.revision)
   && humanScoresAreValid(value.scores)
   && contentUsefulnessIsValid(value.contentUsefulness)
-  && value.passed === humanReviewIsPassing(value as AdditionalAiInsightEvaluationHumanReview)
+  && value.passed === additionalAiInsightHumanReviewIsPassing(value as AdditionalAiInsightEvaluationHumanReview)
 );
 
-const humanReviewIsPassing = (value: AdditionalAiInsightEvaluationHumanReview): boolean => (
-  Object.values(value.scores).every((score) => score >= 3)
-);
+export const additionalAiInsightHumanReviewIsPassing = (
+  value: AdditionalAiInsightEvaluationHumanReview,
+): boolean => Object.values(value.scores).every((score) => score >= 3)
+  && (!value.contentUsefulness.summary.applicable || value.contentUsefulness.summary.score >= 3)
+  && value.contentUsefulness.insights.every(({ score }) => score >= 3);
 
 const humanScoresAreValid = (value: unknown): value is AdditionalAiInsightHumanScores => isRecord(value)
   && onlyKeys(value, ["newAngle", "relevance", "clarity", "worthExploring", "epistemicHonesty", "userValue"])
@@ -595,7 +641,7 @@ const evaluationTargetIsValid = (value: unknown): value is AdditionalAiInsightEv
   && nonEmptyString(value.methodSetRevision)
   && hashIsValid(value.methodSetFingerprint);
 
-const transitionTargetsMatch = (
+export const additionalAiInsightEvaluationTargetsCanTransition = (
   previous: AdditionalAiInsightEvaluationTarget,
   current: AdditionalAiInsightEvaluationTarget,
 ): boolean => previous.workspaceId === current.workspaceId
@@ -622,6 +668,7 @@ const transitionArtifactIsValid = (value: unknown): value is AdditionalAiInsight
   if (!isRecord(value)
     || !nonEmptyString(value.artifactId)
     || !hashIsValid(value.artifactIdentityHash)
+    || !hashIsValid(value.resultHash)
     || !isRecord(value.findingEvidence)
     || !uniqueNonEmptyStrings(value.evidenceRefs)) return false;
   const allEvidence = new Set(value.evidenceRefs);

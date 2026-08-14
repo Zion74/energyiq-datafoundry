@@ -2977,7 +2977,9 @@ const toAdditionalTransitionSummary = (transition: AdditionalAiInsightTransition
   currentSnapshotId: transition.currentTarget.dataSnapshotId,
   ...(transition.status === "completed"
     ? { outcomeCount: transition.outcomes.length }
-    : { errorCode: transition.errorCode, failureStage: transition.failureStage }),
+    : transition.status === "failed"
+      ? { errorCode: transition.errorCode, failureStage: transition.failureStage }
+      : {}),
 });
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

@@ -49,6 +49,7 @@ describe("Additional AI Insight pass@3 evaluation contract", () => {
       status: "failed",
       providerRunId: "provider-run-3",
       providerSessionId: "provider-session-3",
+      artifact: reservedArtifactIdentity(3),
       errorCode: "TRANSIENT_PROVIDER_FAILURE",
       failureStage: "provider",
       startedAt: "2026-08-14T00:00:00.000Z",
@@ -126,7 +127,7 @@ describe("Additional AI Insight pass@3 evaluation contract", () => {
     expect(additionalAiInsightEvaluationBatchIsValid(malformedFinding)).toBe(false);
   });
 
-  it("records Summary usefulness separately from each blinded Insight usefulness", () => {
+  it("requires Summary and every blinded Insight usefulness to pass without averaging", () => {
     const batch = validBatch();
     const entry = batch.reviewPack.entries.find(({ reviewToken }) => reviewToken === "blind-a")!;
     entry.summary = { text: "A low-value limitation-only Summary." };
@@ -135,11 +136,55 @@ describe("Additional AI Insight pass@3 evaluation contract", () => {
       summary: { applicable: true, score: 2 },
       insights: [{ reviewFindingToken: "blind-finding-1", score: 5 }],
     };
+    attempt.humanReview!.passed = false;
     expect(additionalAiInsightEvaluationBatchIsValid(batch)).toBe(true);
-    expect(attempt.humanReview!.contentUsefulness).toEqual({
-      summary: { applicable: true, score: 2 },
-      insights: [{ reviewFindingToken: "blind-finding-1", score: 5 }],
-    });
+    expect(evaluateAdditionalAiInsightPassAt3(batch)).toBe("passed");
+
+    const lowSingleInsight = validBatch();
+    completedAttempt(lowSingleInsight, 0).humanReview!.contentUsefulness.insights[0]!.score = 2;
+    completedAttempt(lowSingleInsight, 0).humanReview!.passed = false;
+    expect(additionalAiInsightEvaluationBatchIsValid(lowSingleInsight)).toBe(true);
+
+    const onlyOneContentPassing = validBatch();
+    for (const index of [0, 1]) {
+      completedAttempt(onlyOneContentPassing, index).humanReview!.contentUsefulness.insights[0]!.score = 1;
+      completedAttempt(onlyOneContentPassing, index).humanReview!.passed = false;
+    }
+    onlyOneContentPassing.status = "failed";
+    expect(evaluateAdditionalAiInsightPassAt3(onlyOneContentPassing)).toBe("failed");
+  });
+
+  it("requires independent Artifact identities to be reserved for running and failed attempts", () => {
+    const batch = validBatch();
+    batch.status = "running";
+    batch.reviewPack.entries = [];
+    batch.reviewAudit = [];
+    delete completedAttempt(batch, 0).humanReview;
+    batch.attempts[1] = {
+      attemptId: "attempt-2",
+      ordinal: 2,
+      status: "running",
+      providerRunId: "provider-run-2",
+      providerSessionId: "provider-session-2",
+      artifact: reservedArtifactIdentity(2),
+      startedAt: "2026-08-14T00:00:00.000Z",
+    } as unknown as AdditionalAiInsightEvaluationBatch["attempts"][number];
+    batch.attempts[2] = {
+      attemptId: "attempt-3",
+      ordinal: 3,
+      status: "failed",
+      providerRunId: "provider-run-3",
+      providerSessionId: "provider-session-3",
+      artifact: reservedArtifactIdentity(3),
+      errorCode: "TRANSIENT_PROVIDER_FAILURE",
+      failureStage: "provider",
+      startedAt: "2026-08-14T00:00:00.000Z",
+      completedAt: "2026-08-14T00:01:00.000Z",
+    } as unknown as AdditionalAiInsightEvaluationBatch["attempts"][number];
+    expect(additionalAiInsightEvaluationBatchIsValid(batch)).toBe(true);
+
+    Object.assign(batch.attempts[2]!.artifact!, reservedArtifactIdentity(2));
+    expect(additionalAiInsightEvaluationBatchIsValid(batch)).toBe(false);
   });
 });
 
@@ -151,7 +196,7 @@ describe("Additional AI Insight Snapshot A-to-B contract", () => {
     expect(additionalAiInsightTransitionIsValid(validNoMaterialChange())).toBe(true);
   });
 
-  it("rejects identity drift, A Evidence reuse in B, forged lineage, and text-only pairings", () => {
+  it("allows Snapshot-bound stable fact IDs while rejecting identity drift, forged lineage, and text-only pairings", () => {
     const releaseDrift = validTransition("changed");
     releaseDrift.currentTarget.workspaceId = "workspace-other";
     expect(additionalAiInsightTransitionIsValid(releaseDrift)).toBe(false);
@@ -164,9 +209,10 @@ describe("Additional AI Insight Snapshot A-to-B contract", () => {
     workflowDrift.currentTarget.workflowRevision = "different-workflow";
     expect(additionalAiInsightTransitionIsValid(workflowDrift)).toBe(false);
 
-    const evidenceReuse = validTransition("changed");
-    pairedOutcome(evidenceReuse).current!.evidenceRefs = ["evidence:a:1"];
-    expect(additionalAiInsightTransitionIsValid(evidenceReuse)).toBe(false);
+    const stableFactId = validTransition("still-supported");
+    expect(pairedOutcome(stableFactId).previous.evidenceRefs).toEqual(["analysis.summary.usage_kwh"]);
+    expect(pairedOutcome(stableFactId).current.evidenceRefs).toEqual(["analysis.summary.usage_kwh"]);
+    expect(additionalAiInsightTransitionIsValid(stableFactId)).toBe(true);
 
     const forged = validTransition("still-supported");
     pairedOutcome(forged).current!.evidenceRefs = ["evidence:b:forged"];
@@ -223,9 +269,7 @@ const validBatch = (): AdditionalAiInsightEvaluationBatch => ({
     providerRunId: `provider-run-${ordinal}`,
     providerSessionId: `provider-session-${ordinal}`,
     artifact: {
-      artifactId: `evaluation-artifact-${ordinal}`,
-      artifactIdentityHash: `sha256:${String(ordinal).repeat(64)}`,
-      artifactIdentityRevision: "additional-insight-evaluation-artifact-v1",
+      ...reservedArtifactIdentity(ordinal),
       resultHash: `sha256:${String(ordinal + 3).repeat(64)}`,
       resultStatus: "available" as const,
     },
@@ -287,13 +331,13 @@ const validTransition = (
     artifactId: "artifact-a",
     artifactIdentityHash: `sha256:${"c".repeat(64)}`,
     findingId: "finding-a",
-    evidenceRefs: ["evidence:a:1"],
+    evidenceRefs: ["analysis.summary.usage_kwh"],
   };
   const current = {
     artifactId: "artifact-b",
     artifactIdentityHash: `sha256:${"d".repeat(64)}`,
     findingId: "finding-b",
-    evidenceRefs: ["evidence:b:1"],
+    evidenceRefs: ["analysis.summary.usage_kwh"],
   };
   const outcome = transition === "new"
     ? { transition, current }
@@ -316,14 +360,16 @@ const validTransition = (
     previousArtifact: {
       artifactId: "artifact-a",
       artifactIdentityHash: previous.artifactIdentityHash,
-      findingEvidence: { "finding-a": ["evidence:a:1"] },
-      evidenceRefs: ["evidence:a:1"],
+      resultHash: `sha256:${"1".repeat(64)}`,
+      findingEvidence: { "finding-a": ["analysis.summary.usage_kwh"] },
+      evidenceRefs: ["analysis.summary.usage_kwh"],
     },
     currentArtifact: {
       artifactId: "artifact-b",
       artifactIdentityHash: current.artifactIdentityHash,
-      findingEvidence: { "finding-b": ["evidence:b:1"] },
-      evidenceRefs: ["evidence:b:1"],
+      resultHash: `sha256:${"2".repeat(64)}`,
+      findingEvidence: { "finding-b": ["analysis.summary.usage_kwh"] },
+      evidenceRefs: ["analysis.summary.usage_kwh"],
     },
     generationProviderRunId: "transition-generation-run",
     generationProviderSessionId: "transition-generation-session",
@@ -349,6 +395,12 @@ const completedAttempt = (
   if (!attempt || attempt.status !== "completed") throw new Error("test fixture expected completed attempt");
   return attempt;
 };
+
+const reservedArtifactIdentity = (ordinal: number) => ({
+  artifactId: `evaluation-artifact-${ordinal}`,
+  artifactIdentityHash: `sha256:${String(ordinal).repeat(64)}`,
+  artifactIdentityRevision: "additional-insight-evaluation-artifact-v1" as const,
+});
 
 const pairedOutcome = (
   record: AdditionalAiInsightTransitionRecord,

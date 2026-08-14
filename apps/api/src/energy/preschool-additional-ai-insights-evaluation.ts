@@ -102,11 +102,18 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
       }
 
       for (const attempt of pendingAttempts) {
+        const claim = input.metadataStore.energyIq.additionalInsightEvaluations.claimEvaluationAttempt({
+          evaluationId: reserved.record.evaluationId,
+          expectedWorkspaceId: identity.workspaceId,
+          expectedProjectId: identity.projectId,
+          attemptId: attempt.attemptId,
+        });
+        if (!claim.acquired || !claim.claimToken) continue;
         try {
           const artifact = await input.runAttempt({
             identity,
-            runId: attempt.providerRunId,
-            sessionId: attempt.providerSessionId,
+            runId: claim.attempt.providerRunId,
+            sessionId: claim.attempt.providerSessionId,
             user,
           });
           const machineGate = evaluateMachineGate(artifact, identity, expectedMethods);
@@ -115,6 +122,7 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
             expectedWorkspaceId: identity.workspaceId,
             expectedProjectId: identity.projectId,
             attemptId: attempt.attemptId,
+            claimToken: claim.claimToken,
             artifact,
             machineGate,
           });
@@ -125,11 +133,18 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
             expectedWorkspaceId: identity.workspaceId,
             expectedProjectId: identity.projectId,
             attemptId: attempt.attemptId,
+            claimToken: claim.claimToken,
             errorCode: code,
             failureStage: failureStage(code),
           });
         }
       }
+      const latest = input.metadataStore.energyIq.additionalInsightEvaluations.getEvaluation({
+        evaluationId: reserved.record.evaluationId,
+        expectedWorkspaceId: identity.workspaceId,
+        expectedProjectId: identity.projectId,
+      });
+      if (latest.attempts.some(({ status }) => status === "running")) return latest;
       return input.metadataStore.energyIq.additionalInsightEvaluations.finalizeEvaluation({
         evaluationId: reserved.record.evaluationId,
         expectedWorkspaceId: identity.workspaceId,
@@ -138,7 +153,7 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
     },
 
     async executeTransition({ baseIdentity, user, idempotencyKey, previousEvaluationId, previousAttemptId }) {
-      const { identity } = resolveIdentity(baseIdentity);
+      const { identity, expectedMethods } = resolveIdentity(baseIdentity);
       const target = evaluationTarget(identity);
       const transitionId = `additional-transition-${createId()}`;
       const generationProviderRunId = `preschool-additional-transition-generation-${createId()}`;
@@ -158,11 +173,32 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
         comparisonProviderSessionId,
       });
       if (reservation.record) return reservation.record;
+      const claim = input.metadataStore.energyIq.additionalInsightEvaluations.claimTransition({
+        transitionId: reservation.transitionId,
+        expectedWorkspaceId: identity.workspaceId,
+        expectedProjectId: identity.projectId,
+      });
+      if (!claim.acquired || !claim.claimToken) {
+        return input.metadataStore.energyIq.additionalInsightEvaluations.getTransition({
+          transitionId: reservation.transitionId,
+          expectedWorkspaceId: identity.workspaceId,
+          expectedProjectId: identity.projectId,
+        });
+      }
       let failureStage: "generation" | "validation" | "comparison" = "generation";
       try {
-        const previousArtifact = input.metadataStore.energyIq.additionalInsightEvaluations.getAttemptArtifact(
+        const previousArtifact = input.metadataStore.energyIq.additionalInsightEvaluations.getAttemptArtifact({
+          evaluationId: previousEvaluationId,
+          attemptId: previousAttemptId,
+          expectedWorkspaceId: identity.workspaceId,
+          expectedProjectId: identity.projectId,
+        });
+        const previousAttempt = completedAttempt(
+          input.metadataStore,
           previousEvaluationId,
           previousAttemptId,
+          identity.workspaceId,
+          identity.projectId,
         );
         const currentArtifact = await input.runAttempt({
           identity,
@@ -171,6 +207,9 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
           user,
         });
         failureStage = "validation";
+        if (evaluateMachineGate(currentArtifact, identity, expectedMethods).status !== "passed") {
+          throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_CURRENT_ARTIFACT_INVALID");
+        }
         rejectPreviousSnapshotLeak(previousArtifact, currentArtifact);
         const prompt = buildTransitionPrompt(previousArtifact, currentArtifact);
         if (prompt.length > MAX_PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_CHARS) {
@@ -192,8 +231,8 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
           answer: compared.answer,
           previousArtifact,
           currentArtifact,
-          previousArtifactId: previousArtifactId(input.metadataStore, previousEvaluationId, previousAttemptId),
-          previousArtifactIdentityHash: previousArtifactIdentityHash(input.metadataStore, previousEvaluationId, previousAttemptId),
+          previousArtifactId: previousAttempt.artifact.artifactId,
+          previousArtifactIdentityHash: previousAttempt.artifact.artifactIdentityHash,
           currentArtifactId: reservation.currentArtifactId,
           currentArtifactIdentityHash: reservation.currentArtifactIdentityHash,
         });
@@ -202,6 +241,7 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
           transitionId,
           expectedWorkspaceId: identity.workspaceId,
           expectedProjectId: identity.projectId,
+          claimToken: claim.claimToken,
           currentArtifact,
           outcomes,
         });
@@ -210,6 +250,7 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
           transitionId,
           expectedWorkspaceId: identity.workspaceId,
           expectedProjectId: identity.projectId,
+          claimToken: claim.claimToken,
           errorCode: errorCode(error),
           failureStage,
         });
@@ -413,11 +454,6 @@ const rejectPreviousSnapshotLeak = (
   previous: AdditionalAiInsightsArtifact,
   current: AdditionalAiInsightsArtifact,
 ): void => {
-  const previousRefs = new Set(previous.findings.flatMap(({ evidenceRefs }) => evidenceRefs));
-  const currentRefs = current.findings.flatMap(({ evidenceRefs }) => evidenceRefs);
-  if (currentRefs.some((ref) => previousRefs.has(ref))) {
-    throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_REUSES_PREVIOUS_EVIDENCE");
-  }
   const previousNumbers = numericFactTokens(previous);
   const currentNumbers = numericFactTokens(current);
   const unsupportedPreviousNumbers = [...previousNumbers].filter((token) => !currentNumbers.has(token));
@@ -441,29 +477,17 @@ const containsNumericToken = (text: string, token: string): boolean => new RegEx
   "u",
 ).test(text);
 
-const previousArtifactId = (
-  metadataStore: MetadataStore,
-  evaluationId: string,
-  attemptId: string,
-): string => completedAttempt(metadataStore, evaluationId, attemptId).artifact.artifactId;
-
-const previousArtifactIdentityHash = (
-  metadataStore: MetadataStore,
-  evaluationId: string,
-  attemptId: string,
-): string => completedAttempt(metadataStore, evaluationId, attemptId).artifact.artifactIdentityHash;
-
 const completedAttempt = (
   metadataStore: MetadataStore,
   evaluationId: string,
   attemptId: string,
+  workspaceId: string,
+  projectId: string,
 ): AdditionalAiInsightEvaluationAttempt => {
   const row = metadataStore.energyIq.additionalInsightEvaluations.getEvaluation({
     evaluationId,
-    expectedWorkspaceId: metadataStore.energyIq.additionalInsightEvaluations
-      .getAttemptArtifact(evaluationId, attemptId).binding.workspaceId,
-    expectedProjectId: metadataStore.energyIq.additionalInsightEvaluations
-      .getAttemptArtifact(evaluationId, attemptId).binding.projectId,
+    expectedWorkspaceId: workspaceId,
+    expectedProjectId: projectId,
   });
   const attempt = row.attempts.find((candidate) => candidate.attemptId === attemptId);
   if (!attempt || attempt.status !== "completed") throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_PREVIOUS_ATTEMPT_INVALID");

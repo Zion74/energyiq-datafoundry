@@ -33,6 +33,13 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
       expect(reserved.record.attempts.map((attempt) => attempt.providerRunId)).toEqual([
         "provider-run-1", "provider-run-2", "provider-run-3",
       ]);
+      expect(reserved.record.attempts.map(({ artifact }) => artifact)).toEqual([
+        expect.objectContaining({ artifactIdentityRevision: "additional-insight-evaluation-artifact-v1" }),
+        expect.objectContaining({ artifactIdentityRevision: "additional-insight-evaluation-artifact-v1" }),
+        expect.objectContaining({ artifactIdentityRevision: "additional-insight-evaluation-artifact-v1" }),
+      ]);
+      expect(new Set(reserved.record.attempts.map(({ artifact }) => artifact.artifactId))).toHaveLength(3);
+      expect(new Set(reserved.record.attempts.map(({ artifact }) => artifact.artifactIdentityHash))).toHaveLength(3);
 
       const replay = harness.store.reserveEvaluation({
         evaluationId: "evaluation-other",
@@ -60,12 +67,14 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
       }
 
       for (let ordinal = 1; ordinal <= 3; ordinal += 1) {
+        const claimToken = claimAttemptToken(harness, "evaluation-1", `attempt-${ordinal}`);
         harness.store.completeAttempt({
           evaluationId: "evaluation-1",
           expectedWorkspaceId: "workspace-1",
           expectedProjectId: "project-1",
           attemptId: `attempt-${ordinal}`,
-          artifact: artifact(target, `provider-run-${ordinal}`, `evidence:a:${ordinal}`, `finding-${ordinal}`),
+          claimToken,
+          artifact: artifact(target, `provider-run-${ordinal}`, "analysis.summary.usage_kwh", `finding-${ordinal}`),
           machineGate: passingMachineGate(),
           completedAt: `2026-08-14T00:0${ordinal}:00.000Z`,
         });
@@ -172,8 +181,123 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
         status: "approved-candidate",
         approval: { disposition: "publication-candidate-only", actorId: "admin-1" },
       });
+      expect(() => harness.store.reserveTransition({
+        transitionId: "transition-wrong-approved-attempt",
+        idempotencyKey: "transition-wrong-approved-attempt",
+        requestedBy: "admin-1",
+        previousEvaluationId: "evaluation-1",
+        previousAttemptId: approved.attempts.find((attempt) => attempt.status === "completed"
+          && attempt.attemptId !== approved.approval!.selectedAttemptId)!.attemptId,
+        currentTarget: evaluationTarget("snapshot-b", "release-b"),
+        generationProviderRunId: "transition-generation-run-wrong",
+        generationProviderSessionId: "transition-generation-session-wrong",
+        comparisonProviderRunId: "transition-comparison-run-wrong",
+        comparisonProviderSessionId: "transition-comparison-session-wrong",
+      })).toThrow(/ENERGYIQ_ADDITIONAL_TRANSITION_PREVIOUS_ATTEMPT_NOT_APPROVED/);
     } finally {
       harness.close();
+    }
+  });
+
+  it("rejects A-to-B transition unless the selected A attempt passed machine and human review", () => {
+    const awaiting = completedHarness();
+    try {
+      const batch = awaiting.store.getEvaluation({
+        evaluationId: "evaluation-1",
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      });
+      const attempt = batch.attempts.find((candidate) => candidate.status === "completed")!;
+      expect(() => awaiting.store.reserveTransition({
+        transitionId: "transition-awaiting",
+        idempotencyKey: "transition-awaiting",
+        requestedBy: "admin-1",
+        previousEvaluationId: batch.evaluationId,
+        previousAttemptId: attempt.attemptId,
+        currentTarget: evaluationTarget("snapshot-b", "release-b"),
+        generationProviderRunId: "generation-awaiting",
+        generationProviderSessionId: "generation-session-awaiting",
+        comparisonProviderRunId: "comparison-awaiting",
+        comparisonProviderSessionId: "comparison-session-awaiting",
+      })).toThrow(/ENERGYIQ_ADDITIONAL_TRANSITION_PREVIOUS_EVALUATION_NOT_PASSED/);
+    } finally {
+      awaiting.close();
+    }
+
+    const reviewed = completedHarness();
+    try {
+      const batch = reviewed.store.getEvaluation({
+        evaluationId: "evaluation-1",
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      });
+      batch.reviewPack.entries.forEach((entry, index) => {
+        reviewed.store.recordHumanReview({
+          evaluationId: batch.evaluationId,
+          expectedWorkspaceId: "workspace-1",
+          expectedProjectId: "project-1",
+          reviewToken: entry.reviewToken,
+          actorId: "reviewer-1",
+          scores: PASSING_SCORES,
+          contentUsefulness: index === 0
+            ? {
+              summary: { applicable: false },
+              insights: entry.findings.map(({ reviewFindingToken }) => ({ reviewFindingToken, score: 1 })),
+            }
+            : contentUsefulness(batch, entry.reviewToken),
+          expectedRevision: 0,
+        });
+      });
+      const passed = reviewed.store.getEvaluation({
+        evaluationId: batch.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      });
+      expect(passed.status).toBe("passed");
+      const humanFailed = passed.attempts.find((attempt) => attempt.status === "completed"
+        && attempt.humanReview?.passed === false)!;
+      expect(() => reviewed.store.reserveTransition({
+        transitionId: "transition-human-failed",
+        idempotencyKey: "transition-human-failed",
+        requestedBy: "admin-1",
+        previousEvaluationId: batch.evaluationId,
+        previousAttemptId: humanFailed.attemptId,
+        currentTarget: evaluationTarget("snapshot-b", "release-b"),
+        generationProviderRunId: "generation-human-failed",
+        generationProviderSessionId: "generation-session-human-failed",
+        comparisonProviderRunId: "comparison-human-failed",
+        comparisonProviderSessionId: "comparison-session-human-failed",
+      })).toThrow(/ENERGYIQ_ADDITIONAL_TRANSITION_PREVIOUS_ATTEMPT_NOT_PASSED/);
+    } finally {
+      reviewed.close();
+    }
+
+    const machineFailed = createHarness();
+    try {
+      reserveAndComplete(machineFailed, { machineFailOrdinal: 1 });
+      reviewAllPassing(machineFailed);
+      const batch = machineFailed.store.getEvaluation({
+        evaluationId: "evaluation-1",
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      });
+      expect(batch.status).toBe("passed");
+      const failedAttempt = batch.attempts.find((attempt) => attempt.status === "completed"
+        && attempt.machineGate.status === "failed")!;
+      expect(() => machineFailed.store.reserveTransition({
+        transitionId: "transition-machine-failed",
+        idempotencyKey: "transition-machine-failed",
+        requestedBy: "admin-1",
+        previousEvaluationId: batch.evaluationId,
+        previousAttemptId: failedAttempt.attemptId,
+        currentTarget: evaluationTarget("snapshot-b", "release-b"),
+        generationProviderRunId: "generation-machine-failed",
+        generationProviderSessionId: "generation-session-machine-failed",
+        comparisonProviderRunId: "comparison-machine-failed",
+        comparisonProviderSessionId: "comparison-session-machine-failed",
+      })).toThrow(/ENERGYIQ_ADDITIONAL_TRANSITION_PREVIOUS_ATTEMPT_NOT_PASSED/);
+    } finally {
+      machineFailed.close();
     }
   });
 
@@ -186,7 +310,11 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
         expectedWorkspaceId: "workspace-1",
         expectedProjectId: "project-1",
       });
-      expect(recovered.attempts[2]).toMatchObject({ status: "failed", errorCode: "PROVIDER_FAILED" });
+      expect(recovered.attempts[2]).toMatchObject({
+        status: "failed",
+        errorCode: "PROVIDER_FAILED",
+        artifact: expect.objectContaining({ artifactIdentityRevision: "additional-insight-evaluation-artifact-v1" }),
+      });
       expect(recovered.reviewPack.entries).toHaveLength(2);
       for (const entry of recovered.reviewPack.entries) {
         harness.store.recordHumanReview({
@@ -223,11 +351,13 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
         now: "2026-08-14T03:00:00.000Z",
       });
       expect(reservation.created).toBe(true);
-      const currentArtifact = artifact(currentTarget, "transition-generation-run-1", "evidence:b:1", "finding-b");
+      const transitionClaimToken = claimTransitionToken(harness, reservation.transitionId);
+      const currentArtifact = artifact(currentTarget, "transition-generation-run-1", "analysis.summary.usage_kwh", "finding-b");
       const completed = harness.store.completeTransition({
         transitionId: "transition-1",
         expectedWorkspaceId: "workspace-1",
         expectedProjectId: "project-1",
+        claimToken: transitionClaimToken,
         currentArtifact,
         outcomes: [{
           transition: "changed",
@@ -235,13 +365,13 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
             artifactId: previousAttempt.artifact.artifactId,
             artifactIdentityHash: previousAttempt.artifact.artifactIdentityHash,
             findingId: "finding-1",
-            evidenceRefs: ["evidence:a:1"],
+            evidenceRefs: ["analysis.summary.usage_kwh"],
           },
           current: {
             artifactId: reservation.currentArtifactId,
             artifactIdentityHash: reservation.currentArtifactIdentityHash,
             findingId: "finding-b",
-            evidenceRefs: ["evidence:b:1"],
+            evidenceRefs: ["analysis.summary.usage_kwh"],
           },
         }],
         completedAt: "2026-08-14T03:01:00.000Z",
@@ -250,6 +380,36 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
       expect(completed.previousTarget.artifactIdentityHash).toBe(recovered.target.artifactIdentityHash);
       expect(completed.previousArtifact.artifactIdentityHash).toBe(previousAttempt.artifact.artifactIdentityHash);
       expect(completed.previousTarget.artifactIdentityHash).not.toBe(completed.previousArtifact.artifactIdentityHash);
+      expect(harness.store.getTransition({
+        transitionId: completed.transitionId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      })).toEqual(completed);
+      expect(() => harness.store.completeTransition({
+        transitionId: completed.transitionId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+        claimToken: transitionClaimToken,
+        currentArtifact: artifact(currentTarget, "transition-generation-run-1", "analysis.summary.usage_kwh", "finding-other"),
+        outcomes: completed.outcomes,
+      })).toThrow(/ENERGYIQ_ADDITIONAL_TRANSITION_COMPLETION_CONFLICT/);
+
+      const storedCurrent = harness.metadata.db.prepare(`
+        SELECT current_artifact_json FROM energyiq_additional_insight_transitions WHERE id = ?
+      `).get(completed.transitionId) as { current_artifact_json: string };
+      harness.metadata.db.prepare(`
+        UPDATE energyiq_additional_insight_transitions
+        SET current_artifact_json = json_set(current_artifact_json, '$.findings[0].title', 'Tampered')
+        WHERE id = ?
+      `).run(completed.transitionId);
+      expect(() => harness.store.getTransition({
+        transitionId: completed.transitionId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      })).toThrow(/ENERGYIQ_ADDITIONAL_TRANSITION_CURRENT_ARTIFACT_INVALID/);
+      harness.metadata.db.prepare(`
+        UPDATE energyiq_additional_insight_transitions SET current_artifact_json = ? WHERE id = ?
+      `).run(storedCurrent.current_artifact_json, completed.transitionId);
 
       const replay = harness.store.reserveTransition({
         transitionId: "transition-other",
@@ -269,9 +429,10 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
         transitionId: "transition-1",
         expectedWorkspaceId: "workspace-other",
         expectedProjectId: "project-1",
+        claimToken: transitionClaimToken,
         currentArtifact,
         outcomes: [],
-      })).toThrow(/ENERGYIQ_ADDITIONAL_EVALUATION_TENANT_MISMATCH/);
+      })).toThrow(/ENERGYIQ_ADDITIONAL_TRANSITION_NOT_FOUND/);
     } finally {
       harness.close();
     }
@@ -281,6 +442,7 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
     const harness = createHarness();
     try {
       reserveAndComplete(harness);
+      reviewAllPassing(harness);
       const previous = harness.store.getEvaluation({
         evaluationId: "evaluation-1",
         expectedWorkspaceId: "workspace-1",
@@ -320,11 +482,13 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
         comparisonProviderRunId: "transition-comparison-run-failed",
         comparisonProviderSessionId: "transition-comparison-session-failed",
       });
+      const transitionClaimToken = claimTransitionToken(harness, "transition-failed");
 
       const failed = harness.store.failTransition({
         transitionId: "transition-failed",
         expectedWorkspaceId: "workspace-1",
         expectedProjectId: "project-1",
+        claimToken: transitionClaimToken,
         errorCode: "PRESCHOOL_ADDITIONAL_TRANSITION_REUSES_PREVIOUS_EVIDENCE",
         failureStage: "validation",
         completedAt: "2026-08-14T04:00:00.000Z",
@@ -344,9 +508,318 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
         transitionId: "transition-failed",
         expectedWorkspaceId: "workspace-1",
         expectedProjectId: "project-1",
+        claimToken: transitionClaimToken,
         errorCode: "PRESCHOOL_ADDITIONAL_TRANSITION_REUSES_PREVIOUS_EVIDENCE",
         failureStage: "validation",
       })).toEqual(failed);
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("fails closed on stale terminal writes, persisted Artifact tampering, and tenant probes", () => {
+    const harness = createHarness();
+    try {
+      const claimTokens = reserveAndComplete(harness);
+      const original = harness.store.getEvaluation({
+        evaluationId: "evaluation-1",
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      });
+      const first = original.attempts[0]!;
+      if (first.status !== "completed") throw new Error("test fixture expected completed attempt");
+      expect(() => harness.store.completeAttempt({
+        evaluationId: original.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+        attemptId: first.attemptId,
+        claimToken: claimTokens.get(first.attemptId)!,
+        artifact: artifact(original.target, first.providerRunId, "evidence:other", "finding-other"),
+        machineGate: passingMachineGate(),
+      })).toThrow(/ENERGYIQ_ADDITIONAL_EVALUATION_ATTEMPT_COMPLETION_CONFLICT/);
+
+      expect(() => harness.store.getEvaluation({
+        evaluationId: original.evaluationId,
+        expectedWorkspaceId: "workspace-other",
+        expectedProjectId: "project-1",
+      })).toThrow(/ENERGYIQ_ADDITIONAL_EVALUATION_NOT_FOUND/);
+
+      const stored = harness.metadata.db.prepare(`
+        SELECT a.result_json, e.record_json
+        FROM energyiq_additional_insight_evaluation_artifacts a
+        JOIN energyiq_additional_insight_evaluations e ON e.id = a.evaluation_id
+        WHERE a.evaluation_id = ? AND a.attempt_id = ?
+      `).get(original.evaluationId, first.attemptId) as { result_json: string; record_json: string };
+      harness.metadata.db.prepare(`
+        UPDATE energyiq_additional_insight_evaluation_artifacts
+        SET result_json = json_set(result_json, '$.findings[0].title', 'Tampered')
+        WHERE evaluation_id = ? AND attempt_id = ?
+      `).run(original.evaluationId, first.attemptId);
+      expect(() => harness.store.getEvaluation({
+        evaluationId: original.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      })).toThrow(/ENERGYIQ_ADDITIONAL_EVALUATION_ARTIFACT_HASH_MISMATCH/);
+
+      harness.metadata.db.prepare(`
+        UPDATE energyiq_additional_insight_evaluation_artifacts SET result_json = ?
+        WHERE evaluation_id = ? AND attempt_id = ?
+      `).run(stored.result_json, original.evaluationId, first.attemptId);
+      const mismatchedRecord = JSON.parse(stored.record_json) as {
+        attempts: Array<{ attemptId: string; artifact: { resultHash?: string } }>;
+      };
+      mismatchedRecord.attempts.find(({ attemptId }) => attemptId === first.attemptId)!.artifact.resultHash = `sha256:${"f".repeat(64)}`;
+      harness.metadata.db.prepare(`
+        UPDATE energyiq_additional_insight_evaluations SET record_json = ? WHERE id = ?
+      `).run(JSON.stringify(mismatchedRecord), original.evaluationId);
+      expect(() => harness.store.getEvaluation({
+        evaluationId: original.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      })).toThrow(/ENERGYIQ_ADDITIONAL_EVALUATION_ARTIFACT_HASH_MISMATCH/);
+
+      const crossTargetArtifact = JSON.parse(stored.result_json) as AdditionalAiInsightsArtifact;
+      crossTargetArtifact.binding.dataSnapshotId = "snapshot-other";
+      crossTargetArtifact.evidenceLineage.pins.dataSnapshotId = "snapshot-other";
+      const crossTargetJson = JSON.stringify(crossTargetArtifact);
+      const crossTargetRecord = JSON.parse(stored.record_json) as {
+        attempts: Array<{ attemptId: string; artifact: { resultHash?: string } }>;
+      };
+      crossTargetRecord.attempts.find(({ attemptId }) => attemptId === first.attemptId)!.artifact.resultHash = `sha256:${createHash("sha256").update(crossTargetJson).digest("hex")}`;
+      harness.metadata.db.prepare(`
+        UPDATE energyiq_additional_insight_evaluation_artifacts SET result_json = ?
+        WHERE evaluation_id = ? AND attempt_id = ?
+      `).run(crossTargetJson, original.evaluationId, first.attemptId);
+      harness.metadata.db.prepare(`
+        UPDATE energyiq_additional_insight_evaluations SET record_json = ? WHERE id = ?
+      `).run(JSON.stringify(crossTargetRecord), original.evaluationId);
+      expect(() => harness.store.getEvaluation({
+        evaluationId: original.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      })).toThrow(/ENERGYIQ_ADDITIONAL_EVALUATION_ARTIFACT_INVALID/);
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("uses DB-backed expiring claims and rejects stale attempt owners", () => {
+    const harness = createHarness();
+    try {
+      const target = evaluationTarget("snapshot-a", "release-a");
+      const reserved = harness.store.reserveEvaluation({
+        evaluationId: "evaluation-claim",
+        idempotencyKey: "evaluation-claim-key",
+        requestedBy: "admin-1",
+        target,
+        attempts: attemptReservations("-claim"),
+      });
+      const attempt = reserved.record.attempts[0]!;
+      const first = harness.store.claimEvaluationAttempt({
+        evaluationId: reserved.record.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+        attemptId: attempt.attemptId,
+        now: "2026-08-14T00:00:00.000Z",
+        leaseMs: 1_000,
+      });
+      expect(first.acquired).toBe(true);
+      const concurrent = harness.store.claimEvaluationAttempt({
+        evaluationId: reserved.record.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+        attemptId: attempt.attemptId,
+        now: "2026-08-14T00:00:00.500Z",
+        leaseMs: 1_000,
+      });
+      expect(concurrent.acquired).toBe(false);
+      const recovered = harness.store.claimEvaluationAttempt({
+        evaluationId: reserved.record.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+        attemptId: attempt.attemptId,
+        now: "2026-08-14T00:00:02.000Z",
+        leaseMs: 1_000,
+      });
+      expect(recovered).toMatchObject({ acquired: true, attempt: { artifact: attempt.artifact } });
+      expect(recovered.claimToken).not.toBe(first.claimToken);
+      expect(() => harness.store.completeAttempt({
+        evaluationId: reserved.record.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+        attemptId: attempt.attemptId,
+        claimToken: first.claimToken!,
+        artifact: artifact(target, attempt.providerRunId, "evidence:stale", "finding-stale"),
+        machineGate: passingMachineGate(),
+      })).toThrow(/ENERGYIQ_ADDITIONAL_EVALUATION_CLAIM_CONFLICT/);
+      harness.store.completeAttempt({
+        evaluationId: reserved.record.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+        attemptId: attempt.attemptId,
+        claimToken: recovered.claimToken!,
+        artifact: artifact(target, attempt.providerRunId, "evidence:current", "finding-current"),
+        machineGate: passingMachineGate(),
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("enforces Project ownership, root Scope, migration identity, and Project cascade", () => {
+    const harness = createHarness();
+    try {
+      expect(harness.metadata.db.prepare(`
+        SELECT id FROM schema_migrations WHERE id = '0034_energyiq_additional_insight_evaluation_hardening'
+      `).get()).toBeTruthy();
+      const target = evaluationTarget("snapshot-a", "release-a");
+      for (const invalidTarget of [
+        { ...target, projectId: "project-missing" },
+        { ...target, scopeId: "scope-not-in-project" },
+      ]) {
+        expect(() => harness.store.reserveEvaluation({
+          evaluationId: `invalid-${invalidTarget.projectId}-${invalidTarget.scopeId}`,
+          idempotencyKey: `invalid-${invalidTarget.projectId}-${invalidTarget.scopeId}`,
+          requestedBy: "admin-1",
+          target: invalidTarget,
+          attempts: attemptReservations("-invalid"),
+        })).toThrow(/ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_NOT_FOUND/);
+      }
+
+      const reserved = harness.store.reserveEvaluation({
+        evaluationId: "evaluation-cascade",
+        idempotencyKey: "evaluation-cascade",
+        requestedBy: "admin-1",
+        target,
+        attempts: attemptReservations("-cascade"),
+      });
+      const attempt = reserved.record.attempts[0]!;
+      const claim = harness.store.claimEvaluationAttempt({
+        evaluationId: reserved.record.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+        attemptId: attempt.attemptId,
+      });
+      harness.store.completeAttempt({
+        evaluationId: reserved.record.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+        attemptId: attempt.attemptId,
+        claimToken: claim.claimToken!,
+        artifact: artifact(target, attempt.providerRunId, "analysis.summary.usage_kwh", "finding-cascade"),
+        machineGate: passingMachineGate(),
+      });
+      const foreignKeys = harness.metadata.db.prepare(`
+        PRAGMA foreign_key_list(energyiq_additional_insight_evaluations)
+      `).all().map((row) => (row as { table: string }).table);
+      expect(foreignKeys).toEqual(expect.arrayContaining(["workspaces", "energyiq_projects", "users"]));
+      harness.metadata.db.prepare("DELETE FROM energyiq_projects WHERE id = ?").run("project-1");
+      expect(harness.metadata.db.prepare(`
+        SELECT COUNT(*) AS count FROM energyiq_additional_insight_evaluations WHERE project_id = 'project-1'
+      `).get()).toMatchObject({ count: 0 });
+      expect(harness.metadata.db.prepare(`
+        SELECT COUNT(*) AS count FROM energyiq_additional_insight_evaluation_claims WHERE project_id = 'project-1'
+      `).get()).toMatchObject({ count: 0 });
+      expect(harness.metadata.db.prepare(`
+        SELECT COUNT(*) AS count FROM energyiq_additional_insight_evaluation_artifacts WHERE project_id = 'project-1'
+      `).get()).toMatchObject({ count: 0 });
+      expect(() => harness.store.getEvaluation({
+        evaluationId: reserved.record.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      })).toThrow(/ENERGYIQ_ADDITIONAL_EVALUATION_NOT_FOUND/);
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("upgrades an existing 0033 running batch without changing its three reserved run identities", () => {
+    const harness = createHarness();
+    try {
+      const target = evaluationTarget("snapshot-a", "release-a");
+      const oldRecord = {
+        contractRevision: "energyiq-additional-insight-evaluation-v1",
+        evaluationId: "evaluation-0033",
+        idempotencyKey: "evaluation-0033-key",
+        requestedBy: "admin-1",
+        status: "running",
+        target,
+        attempts: attemptReservations("-0033").map((attempt) => ({
+          ...attempt,
+          status: "running",
+          startedAt: "2026-08-14T00:00:00.000Z",
+        })),
+        reviewPack: { revision: "additional-insight-blind-review-v1", entries: [] },
+        reviewAudit: [],
+        createdAt: "2026-08-14T00:00:00.000Z",
+        updatedAt: "2026-08-14T00:00:00.000Z",
+      };
+      harness.metadata.db.exec(`
+        DROP TABLE energyiq_additional_insight_evaluation_claims;
+        DROP TABLE energyiq_additional_insight_transition_claims;
+        DROP TABLE energyiq_additional_insight_evaluation_artifacts;
+        DROP TABLE energyiq_additional_insight_transitions;
+        DROP TABLE energyiq_additional_insight_evaluations;
+        CREATE TABLE energyiq_additional_insight_evaluations (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          scope_id TEXT NOT NULL,
+          idempotency_key TEXT NOT NULL,
+          record_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(workspace_id, project_id, idempotency_key)
+        );
+        CREATE TABLE energyiq_additional_insight_evaluation_artifacts (
+          evaluation_id TEXT NOT NULL,
+          attempt_id TEXT NOT NULL,
+          result_json TEXT NOT NULL,
+          PRIMARY KEY(evaluation_id, attempt_id),
+          FOREIGN KEY(evaluation_id) REFERENCES energyiq_additional_insight_evaluations(id) ON DELETE CASCADE
+        );
+        CREATE TABLE energyiq_additional_insight_transitions (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          project_id TEXT NOT NULL,
+          idempotency_key TEXT NOT NULL,
+          reservation_json TEXT NOT NULL,
+          record_json TEXT,
+          current_artifact_json TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(workspace_id, project_id, idempotency_key)
+        );
+        DELETE FROM schema_migrations
+        WHERE id = '0034_energyiq_additional_insight_evaluation_hardening';
+      `);
+      harness.metadata.db.prepare(`
+        INSERT INTO energyiq_additional_insight_evaluations (
+          id, workspace_id, project_id, scope_id, idempotency_key, record_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        oldRecord.evaluationId,
+        target.workspaceId,
+        target.projectId,
+        target.scopeId,
+        oldRecord.idempotencyKey,
+        JSON.stringify(oldRecord),
+        oldRecord.createdAt,
+        oldRecord.updatedAt,
+      );
+      harness.reopen();
+      const migrated = harness.store.getEvaluation({
+        evaluationId: oldRecord.evaluationId,
+        expectedWorkspaceId: target.workspaceId,
+        expectedProjectId: target.projectId,
+      });
+      expect(migrated.attempts.map(({ providerRunId }) => providerRunId)).toEqual(
+        oldRecord.attempts.map(({ providerRunId }) => providerRunId),
+      );
+      expect(new Set(migrated.attempts.map(({ artifact }) => artifact.artifactId))).toHaveLength(3);
+      expect(harness.metadata.db.prepare(`
+        SELECT id FROM schema_migrations WHERE id = '0034_energyiq_additional_insight_evaluation_hardening'
+      `).get()).toBeTruthy();
     } finally {
       harness.close();
     }
@@ -376,6 +849,13 @@ const contentUsefulness = (
 const passingMachineGate = () => ({
   status: "passed" as const,
   checks: ADDITIONAL_AI_INSIGHT_EVALUATION_MACHINE_CHECKS.map((check) => ({ check, passed: true })),
+});
+
+const failingMachineGate = () => ({
+  status: "failed" as const,
+  checks: ADDITIONAL_AI_INSIGHT_EVALUATION_MACHINE_CHECKS.map((check, index) => index === 0
+    ? { check, passed: false, code: "CONTRACT_FAILED" }
+    : { check, passed: true }),
 });
 
 const attemptReservations = (suffix = ""): Array<{
@@ -507,6 +987,25 @@ const createHarness = () => {
   const root = mkdtempSync(join(tmpdir(), "energyiq-additional-evaluation-"));
   const databasePath = join(root, "metadata.sqlite");
   let metadata = createMetadataStore({ database_path: databasePath });
+  metadata.users.upsertDevUser({
+    id: "admin-1",
+    email: "admin@example.test",
+    display_name: "Admin",
+    dev_token: "admin-token",
+  });
+  metadata.workspaces.upsert({
+    id: "workspace-1",
+    owner_user_id: "admin-1",
+    name: "Workspace 1",
+    kind: "customer",
+  });
+  metadata.energyIq.upsertProject({
+    id: "project-1",
+    workspace_id: "workspace-1",
+    name: "Project 1",
+    status: "published",
+    root_scope_id: "scope-1",
+  });
   const harness = {
     get metadata() { return metadata; },
     get store() { return metadata.energyIq.additionalInsightEvaluations; },
@@ -524,8 +1023,9 @@ const createHarness = () => {
 
 const reserveAndComplete = (
   harness: ReturnType<typeof createHarness>,
-  input: { failOrdinal?: number } = {},
-): void => {
+  input: { failOrdinal?: number; machineFailOrdinal?: number } = {},
+): Map<string, string> => {
+  const claimTokens = new Map<string, string>();
   const target = evaluationTarget("snapshot-a", "release-a");
   harness.store.reserveEvaluation({
     evaluationId: "evaluation-1",
@@ -540,6 +1040,8 @@ const reserveAndComplete = (
     expectedProjectId: "project-1",
   }).attempts.map(({ status }) => status)).toEqual(["running", "running", "running"]);
   for (let ordinal = 1; ordinal <= 3; ordinal += 1) {
+    const claimToken = claimAttemptToken(harness, "evaluation-1", `attempt-${ordinal}`);
+    claimTokens.set(`attempt-${ordinal}`, claimToken);
     if (ordinal === input.failOrdinal) {
       expect(harness.store.getEvaluation({
         evaluationId: "evaluation-1",
@@ -551,6 +1053,7 @@ const reserveAndComplete = (
         expectedWorkspaceId: "workspace-1",
         expectedProjectId: "project-1",
         attemptId: `attempt-${ordinal}`,
+        claimToken,
         errorCode: "PROVIDER_FAILED",
       });
     } else {
@@ -559,8 +1062,9 @@ const reserveAndComplete = (
         expectedWorkspaceId: "workspace-1",
         expectedProjectId: "project-1",
         attemptId: `attempt-${ordinal}`,
-        artifact: artifact(target, `provider-run-${ordinal}`, `evidence:a:${ordinal}`, `finding-${ordinal}`),
-        machineGate: passingMachineGate(),
+        claimToken,
+        artifact: artifact(target, `provider-run-${ordinal}`, "analysis.summary.usage_kwh", `finding-${ordinal}`),
+        machineGate: ordinal === input.machineFailOrdinal ? failingMachineGate() : passingMachineGate(),
       });
       expect(harness.store.getEvaluation({
         evaluationId: "evaluation-1",
@@ -576,10 +1080,59 @@ const reserveAndComplete = (
     expectedWorkspaceId: "workspace-1",
     expectedProjectId: "project-1",
   });
+  return claimTokens;
 };
 
 const completedHarness = () => {
   const harness = createHarness();
   reserveAndComplete(harness);
   return harness;
+};
+
+const reviewAllPassing = (harness: ReturnType<typeof createHarness>): void => {
+  const batch = harness.store.getEvaluation({
+    evaluationId: "evaluation-1",
+    expectedWorkspaceId: "workspace-1",
+    expectedProjectId: "project-1",
+  });
+  for (const entry of batch.reviewPack.entries) {
+    harness.store.recordHumanReview({
+      evaluationId: batch.evaluationId,
+      expectedWorkspaceId: "workspace-1",
+      expectedProjectId: "project-1",
+      reviewToken: entry.reviewToken,
+      actorId: "reviewer-1",
+      scores: PASSING_SCORES,
+      contentUsefulness: contentUsefulness(batch, entry.reviewToken),
+      expectedRevision: 0,
+    });
+  }
+};
+
+const claimAttemptToken = (
+  harness: ReturnType<typeof createHarness>,
+  evaluationId: string,
+  attemptId: string,
+): string => {
+  const claim = harness.store.claimEvaluationAttempt({
+    evaluationId,
+    expectedWorkspaceId: "workspace-1",
+    expectedProjectId: "project-1",
+    attemptId,
+  });
+  if (!claim.acquired || !claim.claimToken) throw new Error("test fixture expected claim");
+  return claim.claimToken;
+};
+
+const claimTransitionToken = (
+  harness: ReturnType<typeof createHarness>,
+  transitionId: string,
+): string => {
+  const claim = harness.store.claimTransition({
+    transitionId,
+    expectedWorkspaceId: "workspace-1",
+    expectedProjectId: "project-1",
+  });
+  if (!claim.acquired || !claim.claimToken) throw new Error("test fixture expected transition claim");
+  return claim.claimToken;
 };

@@ -1,8 +1,10 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
 import {
   additionalAiInsightEvaluationBatchIsValid,
+  additionalAiInsightEvaluationTargetsCanTransition,
+  additionalAiInsightHumanReviewIsPassing,
   additionalAiInsightTransitionRecordIsValid,
   additionalAiInsightTransitionIsValid,
   additionalAiInsightsArtifactIsValid,
@@ -31,11 +33,15 @@ export const initializeEnergyIqAdditionalInsightEvaluationSchema = (db: Database
       workspace_id TEXT NOT NULL,
       project_id TEXT NOT NULL,
       scope_id TEXT NOT NULL,
+      requested_by TEXT NOT NULL,
       idempotency_key TEXT NOT NULL,
       record_json TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      UNIQUE(workspace_id, project_id, idempotency_key)
+      UNIQUE(workspace_id, project_id, idempotency_key),
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
+      FOREIGN KEY(project_id) REFERENCES energyiq_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(requested_by) REFERENCES users(id)
     );
     CREATE INDEX IF NOT EXISTS idx_energyiq_additional_evaluations_target
       ON energyiq_additional_insight_evaluations(workspace_id, project_id, scope_id, created_at DESC);
@@ -43,24 +49,182 @@ export const initializeEnergyIqAdditionalInsightEvaluationSchema = (db: Database
     CREATE TABLE IF NOT EXISTS energyiq_additional_insight_evaluation_artifacts (
       evaluation_id TEXT NOT NULL,
       attempt_id TEXT NOT NULL,
+      workspace_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
       result_json TEXT NOT NULL,
       PRIMARY KEY(evaluation_id, attempt_id),
-      FOREIGN KEY(evaluation_id) REFERENCES energyiq_additional_insight_evaluations(id) ON DELETE CASCADE
+      FOREIGN KEY(evaluation_id) REFERENCES energyiq_additional_insight_evaluations(id) ON DELETE CASCADE,
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
+      FOREIGN KEY(project_id) REFERENCES energyiq_projects(id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS energyiq_additional_insight_transitions (
       id TEXT PRIMARY KEY,
       workspace_id TEXT NOT NULL,
       project_id TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      requested_by TEXT NOT NULL,
       idempotency_key TEXT NOT NULL,
       reservation_json TEXT NOT NULL,
       record_json TEXT,
       current_artifact_json TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
-      UNIQUE(workspace_id, project_id, idempotency_key)
+      UNIQUE(workspace_id, project_id, idempotency_key),
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
+      FOREIGN KEY(project_id) REFERENCES energyiq_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY(requested_by) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS energyiq_additional_insight_evaluation_claims (
+      evaluation_id TEXT NOT NULL,
+      attempt_id TEXT NOT NULL,
+      workspace_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      claim_token TEXT NOT NULL,
+      lease_expires_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(evaluation_id, attempt_id),
+      FOREIGN KEY(evaluation_id) REFERENCES energyiq_additional_insight_evaluations(id) ON DELETE CASCADE,
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
+      FOREIGN KEY(project_id) REFERENCES energyiq_projects(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS energyiq_additional_insight_transition_claims (
+      transition_id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      claim_token TEXT NOT NULL,
+      lease_expires_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY(transition_id) REFERENCES energyiq_additional_insight_transitions(id) ON DELETE CASCADE,
+      FOREIGN KEY(workspace_id) REFERENCES workspaces(id),
+      FOREIGN KEY(project_id) REFERENCES energyiq_projects(id) ON DELETE CASCADE
     );
   `);
+};
+
+export const ensureEnergyIqAdditionalInsightEvaluationHardeningSchema = (db: DatabaseSync): void => {
+  const columns = db.prepare("PRAGMA table_info(energyiq_additional_insight_evaluations)").all();
+  const alreadyHardened = columns.some((row) => isRecord(row) && row.name === "requested_by");
+  if (alreadyHardened) {
+    initializeEnergyIqAdditionalInsightEvaluationSchema(db);
+    return;
+  }
+  const tableExists = columns.length > 0;
+  if (!tableExists) {
+    initializeEnergyIqAdditionalInsightEvaluationSchema(db);
+    return;
+  }
+  for (const row of db.prepare(`
+    SELECT id, record_json FROM energyiq_additional_insight_evaluations
+  `).all()) {
+    if (!isRecord(row) || !nonEmpty(row.id) || !nonEmpty(row.record_json)) {
+      throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_0033_RECORD_INVALID");
+    }
+    let record: unknown;
+    try { record = JSON.parse(row.record_json); } catch {
+      throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_0033_RECORD_INVALID");
+    }
+    if (!isRecord(record) || !isRecord(record.target) || !Array.isArray(record.attempts)) {
+      throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_0033_RECORD_INVALID");
+    }
+    for (const attempt of record.attempts) {
+      if (!isRecord(attempt) || !nonEmpty(attempt.attemptId)) {
+        throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_0033_RECORD_INVALID");
+      }
+      if (!isRecord(attempt.artifact)) {
+        attempt.artifact = evaluationArtifactIdentity(
+          record.target as AdditionalAiInsightEvaluationTarget,
+          row.id,
+          attempt.attemptId,
+        );
+      }
+    }
+    db.prepare(`
+      UPDATE energyiq_additional_insight_evaluations SET record_json = ? WHERE id = ?
+    `).run(JSON.stringify(record), row.id);
+  }
+  const invalidParents = db.prepare(`
+    SELECT COUNT(*) AS count FROM (
+      SELECT e.id
+      FROM energyiq_additional_insight_evaluations e
+      LEFT JOIN workspaces w ON w.id = e.workspace_id
+      LEFT JOIN energyiq_projects p ON p.id = e.project_id AND p.workspace_id = e.workspace_id
+      LEFT JOIN users u ON u.id = json_extract(e.record_json, '$.requestedBy')
+      WHERE w.id IS NULL OR p.id IS NULL OR u.id IS NULL
+        OR (e.scope_id <> p.root_scope_id AND NOT EXISTS (
+          SELECT 1 FROM energyiq_project_nodes n WHERE n.project_id = e.project_id AND n.id = e.scope_id
+        ))
+      UNION ALL
+      SELECT t.id
+      FROM energyiq_additional_insight_transitions t
+      LEFT JOIN workspaces w ON w.id = t.workspace_id
+      LEFT JOIN energyiq_projects p ON p.id = t.project_id AND p.workspace_id = t.workspace_id
+      LEFT JOIN users u ON u.id = json_extract(t.reservation_json, '$.requestedBy')
+      WHERE w.id IS NULL OR p.id IS NULL OR u.id IS NULL
+    )
+  `).get();
+  if (!isRecord(invalidParents) || invalidParents.count !== 0) {
+    throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_0033_PARENT_INVALID");
+  }
+  db.exec("PRAGMA foreign_keys = OFF");
+  try {
+    db.exec(`
+      BEGIN IMMEDIATE;
+      ALTER TABLE energyiq_additional_insight_evaluation_artifacts
+        RENAME TO energyiq_additional_insight_evaluation_artifacts_0033;
+      ALTER TABLE energyiq_additional_insight_evaluations
+        RENAME TO energyiq_additional_insight_evaluations_0033;
+      ALTER TABLE energyiq_additional_insight_transitions
+        RENAME TO energyiq_additional_insight_transitions_0033;
+      COMMIT;
+    `);
+    initializeEnergyIqAdditionalInsightEvaluationSchema(db);
+    db.exec(`
+      BEGIN IMMEDIATE;
+      INSERT INTO energyiq_additional_insight_evaluations (
+        id, workspace_id, project_id, scope_id, requested_by, idempotency_key,
+        record_json, created_at, updated_at
+      )
+      SELECT id, workspace_id, project_id, scope_id,
+        json_extract(record_json, '$.requestedBy'), idempotency_key,
+        record_json, created_at, updated_at
+      FROM energyiq_additional_insight_evaluations_0033;
+
+      INSERT INTO energyiq_additional_insight_evaluation_artifacts (
+        evaluation_id, attempt_id, workspace_id, project_id, result_json
+      )
+      SELECT a.evaluation_id, a.attempt_id, e.workspace_id, e.project_id, a.result_json
+      FROM energyiq_additional_insight_evaluation_artifacts_0033 a
+      JOIN energyiq_additional_insight_evaluations_0033 e ON e.id = a.evaluation_id;
+
+      INSERT INTO energyiq_additional_insight_transitions (
+        id, workspace_id, project_id, scope_id, requested_by, idempotency_key,
+        reservation_json, record_json, current_artifact_json, created_at, updated_at
+      )
+      SELECT id, workspace_id, project_id,
+        json_extract(reservation_json, '$.currentTarget.scopeId'),
+        json_extract(reservation_json, '$.requestedBy'), idempotency_key,
+        reservation_json, record_json, current_artifact_json, created_at, updated_at
+      FROM energyiq_additional_insight_transitions_0033;
+
+      DROP TABLE energyiq_additional_insight_evaluation_artifacts_0033;
+      DROP TABLE energyiq_additional_insight_evaluations_0033;
+      DROP TABLE energyiq_additional_insight_transitions_0033;
+      COMMIT;
+    `);
+  } catch (error) {
+    try { db.exec("ROLLBACK"); } catch { /* no active transaction */ }
+    throw error;
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
+  }
+  initializeEnergyIqAdditionalInsightEvaluationSchema(db);
+  const violations = db.prepare("PRAGMA foreign_key_check").all();
+  if (violations.length > 0) {
+    throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_0034_FOREIGN_KEY_INVALID");
+  }
 };
 
 type AttemptReservation = {
@@ -104,6 +268,7 @@ export class EnergyIqAdditionalInsightEvaluationStore {
     requireNonEmpty(input.evaluationId, "ENERGYIQ_ADDITIONAL_EVALUATION_ID_REQUIRED");
     requireNonEmpty(input.idempotencyKey, "ENERGYIQ_ADDITIONAL_EVALUATION_IDEMPOTENCY_KEY_REQUIRED");
     requireNonEmpty(input.requestedBy, "ENERGYIQ_ADDITIONAL_EVALUATION_ACTOR_REQUIRED");
+    requireActor(input.requestedBy, this.db);
     const existing = this.db.prepare(`
       SELECT record_json FROM energyiq_additional_insight_evaluations
       WHERE workspace_id = ? AND project_id = ? AND idempotency_key = ?
@@ -133,6 +298,7 @@ export class EnergyIqAdditionalInsightEvaluationStore {
       target: clone(input.target),
       attempts: input.attempts.map((attempt) => ({
         ...attempt,
+        artifact: evaluationArtifactIdentity(input.target, input.evaluationId, attempt.attemptId),
         status: "running" as const,
         startedAt: now,
       })),
@@ -144,13 +310,14 @@ export class EnergyIqAdditionalInsightEvaluationStore {
     requireEvaluation(record);
     this.db.prepare(`
       INSERT INTO energyiq_additional_insight_evaluations (
-        id, workspace_id, project_id, scope_id, idempotency_key, record_json, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        id, workspace_id, project_id, scope_id, requested_by, idempotency_key, record_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.evaluationId,
       record.target.workspaceId,
       record.target.projectId,
       record.target.scopeId,
+      record.requestedBy,
       record.idempotencyKey,
       JSON.stringify(record),
       now,
@@ -159,48 +326,105 @@ export class EnergyIqAdditionalInsightEvaluationStore {
     return { created: true, record };
   }
 
+  claimEvaluationAttempt(input: {
+    evaluationId: string;
+    expectedWorkspaceId: string;
+    expectedProjectId: string;
+    attemptId: string;
+    now?: string;
+    leaseMs?: number;
+  }): {
+    acquired: boolean;
+    claimToken?: string;
+    attempt: AdditionalAiInsightEvaluationBatch["attempts"][number];
+    record: AdditionalAiInsightEvaluationBatch;
+  } {
+    return immediateTransaction(this.db, () => {
+      const record = this.getEvaluation(input);
+      const attempt = record.attempts.find(({ attemptId }) => attemptId === input.attemptId);
+      if (!attempt) throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ATTEMPT_NOT_FOUND");
+      if (attempt.status !== "running") return { acquired: false, attempt, record };
+      const now = input.now ?? new Date().toISOString();
+      const leaseExpiresAt = leaseExpiry(now, input.leaseMs);
+      const claimToken = randomUUID();
+      const existing = this.db.prepare(`
+        SELECT claim_token, lease_expires_at
+        FROM energyiq_additional_insight_evaluation_claims
+        WHERE evaluation_id = ? AND attempt_id = ? AND workspace_id = ? AND project_id = ?
+      `).get(
+        record.evaluationId,
+        attempt.attemptId,
+        record.target.workspaceId,
+        record.target.projectId,
+      );
+      if (isRecord(existing) && typeof existing.lease_expires_at === "string"
+        && existing.lease_expires_at > now) {
+        return { acquired: false, attempt, record };
+      }
+      this.db.prepare(`
+        INSERT INTO energyiq_additional_insight_evaluation_claims (
+          evaluation_id, attempt_id, workspace_id, project_id, claim_token, lease_expires_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(evaluation_id, attempt_id) DO UPDATE SET
+          claim_token = excluded.claim_token,
+          lease_expires_at = excluded.lease_expires_at,
+          updated_at = excluded.updated_at
+      `).run(
+        record.evaluationId,
+        attempt.attemptId,
+        record.target.workspaceId,
+        record.target.projectId,
+        claimToken,
+        leaseExpiresAt,
+        now,
+      );
+      return { acquired: true, claimToken, attempt, record };
+    });
+  }
+
   completeAttempt(input: {
     evaluationId: string;
     expectedWorkspaceId: string;
     expectedProjectId: string;
     attemptId: string;
+    claimToken: string;
     artifact: AdditionalAiInsightsArtifact;
     machineGate: AdditionalAiInsightEvaluationAttempt["machineGate"];
     completedAt?: string;
   }): AdditionalAiInsightEvaluationBatch {
-    const record = this.getEvaluation({
+    return immediateTransaction(this.db, () => {
+      const record = this.getEvaluation({
       evaluationId: input.evaluationId,
       expectedWorkspaceId: input.expectedWorkspaceId,
       expectedProjectId: input.expectedProjectId,
-    });
-    const index = record.attempts.findIndex(({ attemptId }) => attemptId === input.attemptId);
-    const reserved = record.attempts[index];
-    if (!reserved) throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ATTEMPT_NOT_FOUND");
-    if (reserved.status === "completed") return record;
-    if (reserved.status !== "running") throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ATTEMPT_TERMINAL");
-    if (input.artifact.runId !== reserved.providerRunId) {
-      throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_PROVIDER_RUN_MISMATCH");
-    }
-    requireArtifactMatchesTarget(input.artifact, record.target, this.db);
-    const resultJson = JSON.stringify(input.artifact);
-    const artifactIdentityHash = sha256(JSON.stringify({
-      contractRevision: "additional-insight-evaluation-artifact-v1",
-      target: record.target,
-      evaluationId: record.evaluationId,
-      attemptId: reserved.attemptId,
-    }));
-    const artifactId = `additional-evaluation-artifact-${artifactIdentityHash.slice(7, 31)}`;
-    const evidenceRefs = uniqueStrings(input.artifact.findings.flatMap(({ evidenceRefs }) => evidenceRefs));
-    const completed: AdditionalAiInsightEvaluationAttempt = {
+      });
+      const index = record.attempts.findIndex(({ attemptId }) => attemptId === input.attemptId);
+      const reserved = record.attempts[index];
+      if (!reserved) throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ATTEMPT_NOT_FOUND");
+      requireEvaluationClaim(this.db, record, reserved.attemptId, input.claimToken);
+      const resultJson = JSON.stringify(input.artifact);
+      if (reserved.status === "completed") {
+        if (reserved.artifact.resultHash !== sha256(resultJson)
+          || reserved.providerRunId !== input.artifact.runId
+          || JSON.stringify(reserved.machineGate) !== JSON.stringify(input.machineGate)) {
+          throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ATTEMPT_COMPLETION_CONFLICT");
+        }
+        return record;
+      }
+      if (reserved.status !== "running") throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ATTEMPT_TERMINAL");
+      if (input.artifact.runId !== reserved.providerRunId) {
+        throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_PROVIDER_RUN_MISMATCH");
+      }
+      requireArtifactMatchesTarget(input.artifact, record.target, this.db);
+      const evidenceRefs = uniqueStrings(input.artifact.findings.flatMap(({ evidenceRefs }) => evidenceRefs));
+      const completed: AdditionalAiInsightEvaluationAttempt = {
       attemptId: reserved.attemptId,
       ordinal: reserved.ordinal,
       status: "completed",
       providerRunId: reserved.providerRunId,
       providerSessionId: reserved.providerSessionId,
       artifact: {
-        artifactId,
-        artifactIdentityHash,
-        artifactIdentityRevision: "additional-insight-evaluation-artifact-v1",
+        ...reserved.artifact,
         resultHash: sha256(resultJson),
         resultStatus: input.artifact.status,
       },
@@ -216,24 +440,25 @@ export class EnergyIqAdditionalInsightEvaluationStore {
       machineGate: clone(input.machineGate),
       startedAt: reserved.startedAt,
       completedAt: input.completedAt ?? new Date().toISOString(),
-    };
-    record.attempts[index] = completed;
-    record.updatedAt = completed.completedAt;
-    record.status = "running";
-    requireEvaluation(record);
-    this.db.exec("BEGIN IMMEDIATE");
-    try {
+      };
+      record.attempts[index] = completed;
+      record.updatedAt = completed.completedAt;
+      record.status = "running";
+      requireEvaluation(record);
       this.db.prepare(`
-        INSERT INTO energyiq_additional_insight_evaluation_artifacts (evaluation_id, attempt_id, result_json)
-        VALUES (?, ?, ?)
-      `).run(record.evaluationId, completed.attemptId, resultJson);
+        INSERT INTO energyiq_additional_insight_evaluation_artifacts (
+          evaluation_id, attempt_id, workspace_id, project_id, result_json
+        ) VALUES (?, ?, ?, ?, ?)
+      `).run(
+        record.evaluationId,
+        completed.attemptId,
+        record.target.workspaceId,
+        record.target.projectId,
+        resultJson,
+      );
       this.writeEvaluation(record);
-      this.db.exec("COMMIT");
-    } catch (error) {
-      this.db.exec("ROLLBACK");
-      throw error;
-    }
-    return clone(record);
+      return clone(record);
+    });
   }
 
   failAttempt(input: {
@@ -241,32 +466,44 @@ export class EnergyIqAdditionalInsightEvaluationStore {
     expectedWorkspaceId: string;
     expectedProjectId: string;
     attemptId: string;
+    claimToken: string;
     errorCode: string;
     failureStage?: "provider" | "structured-output" | "machine-gate";
     completedAt?: string;
   }): AdditionalAiInsightEvaluationBatch {
-    const record = this.getEvaluation(input);
-    const index = record.attempts.findIndex(({ attemptId }) => attemptId === input.attemptId);
-    const reserved = record.attempts[index];
-    if (!reserved) throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ATTEMPT_NOT_FOUND");
-    if (reserved.status === "failed") return record;
-    if (reserved.status !== "running") throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ATTEMPT_TERMINAL");
-    const completedAt = input.completedAt ?? new Date().toISOString();
-    record.attempts[index] = {
+    return immediateTransaction(this.db, () => {
+      const record = this.getEvaluation(input);
+      const index = record.attempts.findIndex(({ attemptId }) => attemptId === input.attemptId);
+      const reserved = record.attempts[index];
+      if (!reserved) throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ATTEMPT_NOT_FOUND");
+      requireEvaluationClaim(this.db, record, reserved.attemptId, input.claimToken);
+      const errorCode = boundedCode(input.errorCode);
+      const failureStage = input.failureStage ?? "provider";
+      if (reserved.status === "failed") {
+        if (reserved.errorCode !== errorCode || reserved.failureStage !== failureStage) {
+          throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ATTEMPT_FAILURE_CONFLICT");
+        }
+        return record;
+      }
+      if (reserved.status !== "running") throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ATTEMPT_TERMINAL");
+      const completedAt = input.completedAt ?? new Date().toISOString();
+      record.attempts[index] = {
       attemptId: reserved.attemptId,
       ordinal: reserved.ordinal,
       status: "failed",
       providerRunId: reserved.providerRunId,
       providerSessionId: reserved.providerSessionId,
-      errorCode: boundedCode(input.errorCode),
-      failureStage: input.failureStage ?? "provider",
+      artifact: reserved.artifact,
+      errorCode,
+      failureStage,
       startedAt: reserved.startedAt,
       completedAt,
-    };
-    record.updatedAt = completedAt;
-    requireEvaluation(record);
-    this.writeEvaluation(record);
-    return clone(record);
+      };
+      record.updatedAt = completedAt;
+      requireEvaluation(record);
+      this.writeEvaluation(record);
+      return clone(record);
+    });
   }
 
   finalizeEvaluation(input: {
@@ -287,7 +524,7 @@ export class EnergyIqAdditionalInsightEvaluationStore {
     record.reviewPack = {
       revision: "additional-insight-blind-review-v1",
       entries: shuffled.map((attempt, index) => {
-        const artifact = this.getAttemptArtifact(record.evaluationId, attempt.attemptId);
+        const artifact = this.readAttemptArtifact(record, attempt.attemptId);
         return {
           label: (["Review A", "Review B", "Review C"] as const)[index]!,
           reviewToken: blindToken(record.evaluationId, attempt.attemptId),
@@ -356,9 +593,10 @@ export class EnergyIqAdditionalInsightEvaluationStore {
       reviewedAt,
       scores: clone(input.scores),
       contentUsefulness: clone(input.contentUsefulness),
-      passed: Object.values(input.scores).every((score) => score >= 3),
+      passed: false,
       revision: currentRevision + 1,
     };
+    humanReview.passed = additionalAiInsightHumanReviewIsPassing(humanReview);
     attempt.humanReview = humanReview;
     record.updatedAt = reviewedAt;
     const completed = record.attempts.filter((candidate): candidate is AdditionalAiInsightEvaluationAttempt => (
@@ -422,14 +660,15 @@ export class EnergyIqAdditionalInsightEvaluationStore {
     expectedProjectId: string;
   }): AdditionalAiInsightEvaluationBatch {
     const row = this.db.prepare(`
-      SELECT workspace_id, project_id, record_json
-      FROM energyiq_additional_insight_evaluations WHERE id = ?
-    `).get(input.evaluationId);
+      SELECT record_json FROM energyiq_additional_insight_evaluations
+      WHERE id = ? AND workspace_id = ? AND project_id = ?
+    `).get(input.evaluationId, input.expectedWorkspaceId, input.expectedProjectId);
     if (!isRecord(row)) throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_NOT_FOUND");
-    if (row.workspace_id !== input.expectedWorkspaceId || row.project_id !== input.expectedProjectId) {
-      throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_TENANT_MISMATCH");
+    const record = parseEvaluation(row.record_json);
+    for (const attempt of record.attempts) {
+      if (attempt.status === "completed") this.readAttemptArtifact(record, attempt.attemptId);
     }
-    return parseEvaluation(row.record_json);
+    return record;
   }
 
   reserveTransition(input: {
@@ -456,6 +695,7 @@ export class EnergyIqAdditionalInsightEvaluationStore {
     record?: AdditionalAiInsightTransitionEvaluationRecord;
   } {
     requireTarget(input.currentTarget, this.db);
+    requireActor(input.requestedBy, this.db);
     const existing = this.db.prepare(`
       SELECT id, reservation_json, record_json FROM energyiq_additional_insight_transitions
       WHERE workspace_id = ? AND project_id = ? AND idempotency_key = ?
@@ -477,7 +717,11 @@ export class EnergyIqAdditionalInsightEvaluationStore {
         comparisonProviderRunId: reservation.comparisonProviderRunId,
         comparisonProviderSessionId: reservation.comparisonProviderSessionId,
         ...(typeof existing.record_json === "string"
-          ? { record: parseTransition(existing.record_json) }
+          ? { record: this.getTransition({
+            transitionId: reservation.transitionId,
+            expectedWorkspaceId: input.currentTarget.workspaceId,
+            expectedProjectId: input.currentTarget.projectId,
+          }) }
           : {}),
       };
     }
@@ -490,7 +734,17 @@ export class EnergyIqAdditionalInsightEvaluationStore {
       attempt.attemptId === input.previousAttemptId && attempt.status === "completed"
     ));
     if (!previousAttempt) throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_PREVIOUS_ATTEMPT_INVALID");
-    if (!transitionTargetPairIsValid(previous.target, input.currentTarget)) {
+    if (previous.status !== "passed" && previous.status !== "approved-candidate") {
+      throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_PREVIOUS_EVALUATION_NOT_PASSED");
+    }
+    if (previousAttempt.machineGate.status !== "passed" || previousAttempt.humanReview?.passed !== true) {
+      throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_PREVIOUS_ATTEMPT_NOT_PASSED");
+    }
+    if (previous.status === "approved-candidate"
+      && previous.approval?.selectedAttemptId !== previousAttempt.attemptId) {
+      throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_PREVIOUS_ATTEMPT_NOT_APPROVED");
+    }
+    if (!additionalAiInsightEvaluationTargetsCanTransition(previous.target, input.currentTarget)) {
       throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_TARGET_INVALID");
     }
     const currentArtifactIdentityHash = sha256(JSON.stringify({
@@ -519,12 +773,14 @@ export class EnergyIqAdditionalInsightEvaluationStore {
     };
     this.db.prepare(`
       INSERT INTO energyiq_additional_insight_transitions (
-        id, workspace_id, project_id, idempotency_key, reservation_json, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        id, workspace_id, project_id, scope_id, requested_by, idempotency_key, reservation_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       input.transitionId,
       input.currentTarget.workspaceId,
       input.currentTarget.projectId,
+      input.currentTarget.scopeId,
+      input.requestedBy,
       input.idempotencyKey,
       JSON.stringify(reservation),
       now,
@@ -542,37 +798,90 @@ export class EnergyIqAdditionalInsightEvaluationStore {
     };
   }
 
+  claimTransition(input: {
+    transitionId: string;
+    expectedWorkspaceId: string;
+    expectedProjectId: string;
+    now?: string;
+    leaseMs?: number;
+  }): { acquired: boolean; claimToken?: string } {
+    return immediateTransaction(this.db, () => {
+      const row = this.db.prepare(`
+        SELECT record_json FROM energyiq_additional_insight_transitions
+        WHERE id = ? AND workspace_id = ? AND project_id = ?
+      `).get(input.transitionId, input.expectedWorkspaceId, input.expectedProjectId);
+      if (!isRecord(row)) throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_NOT_FOUND");
+      if (typeof row.record_json === "string") return { acquired: false };
+      const now = input.now ?? new Date().toISOString();
+      const leaseExpiresAt = leaseExpiry(now, input.leaseMs);
+      const claimToken = randomUUID();
+      const existing = this.db.prepare(`
+        SELECT claim_token, lease_expires_at FROM energyiq_additional_insight_transition_claims
+        WHERE transition_id = ? AND workspace_id = ? AND project_id = ?
+      `).get(input.transitionId, input.expectedWorkspaceId, input.expectedProjectId);
+      if (isRecord(existing) && typeof existing.lease_expires_at === "string"
+        && existing.lease_expires_at > now) {
+        return { acquired: false };
+      }
+      this.db.prepare(`
+        INSERT INTO energyiq_additional_insight_transition_claims (
+          transition_id, workspace_id, project_id, claim_token, lease_expires_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(transition_id) DO UPDATE SET
+          claim_token = excluded.claim_token,
+          lease_expires_at = excluded.lease_expires_at,
+          updated_at = excluded.updated_at
+      `).run(
+        input.transitionId,
+        input.expectedWorkspaceId,
+        input.expectedProjectId,
+        claimToken,
+        leaseExpiresAt,
+        now,
+      );
+      return { acquired: true, claimToken };
+    });
+  }
+
   completeTransition(input: {
     transitionId: string;
     expectedWorkspaceId: string;
     expectedProjectId: string;
+    claimToken: string;
     currentArtifact: AdditionalAiInsightsArtifact;
     outcomes: AdditionalAiInsightTransitionOutcome[];
     completedAt?: string;
   }): AdditionalAiInsightTransitionRecord {
-    const row = this.db.prepare(`
-      SELECT workspace_id, project_id, reservation_json, record_json
-      FROM energyiq_additional_insight_transitions WHERE id = ?
-    `).get(input.transitionId);
-    if (!isRecord(row)) throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_NOT_FOUND");
-    if (row.workspace_id !== input.expectedWorkspaceId || row.project_id !== input.expectedProjectId) {
-      throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_TENANT_MISMATCH");
-    }
-    if (typeof row.record_json === "string") {
-      const existing = parseTransition(row.record_json);
-      if (existing.status !== "completed") throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_ALREADY_FAILED");
-      return existing;
-    }
-    const reservation = parseTransitionReservation(row.reservation_json);
-    if (input.currentArtifact.runId !== reservation.generationProviderRunId) {
-      throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_PROVIDER_RUN_MISMATCH");
-    }
-    requireArtifactMatchesTarget(input.currentArtifact, reservation.currentTarget, this.db);
-    const previousArtifact = this.getAttemptArtifact(
-      reservation.previousEvaluationId,
-      reservation.previousAttemptId,
-    );
-    const record: AdditionalAiInsightTransitionRecord = {
+    return immediateTransaction(this.db, () => {
+      const row = this.db.prepare(`
+      SELECT reservation_json, record_json, current_artifact_json
+      FROM energyiq_additional_insight_transitions
+      WHERE id = ? AND workspace_id = ? AND project_id = ?
+    `).get(input.transitionId, input.expectedWorkspaceId, input.expectedProjectId);
+      if (!isRecord(row)) throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_NOT_FOUND");
+      requireTransitionClaim(this.db, input.transitionId, input.expectedWorkspaceId, input.expectedProjectId, input.claimToken);
+      if (typeof row.record_json === "string") {
+        const existing = parseTransition(row.record_json);
+        if (existing.status !== "completed") throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_ALREADY_FAILED");
+        if (typeof row.current_artifact_json !== "string"
+          || sha256(row.current_artifact_json) !== sha256(JSON.stringify(input.currentArtifact))
+          || JSON.stringify(existing.outcomes) !== JSON.stringify(input.outcomes)) {
+          throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_COMPLETION_CONFLICT");
+        }
+        return existing;
+      }
+      const reservation = parseTransitionReservation(row.reservation_json);
+      if (input.currentArtifact.runId !== reservation.generationProviderRunId) {
+        throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_PROVIDER_RUN_MISMATCH");
+      }
+      requireArtifactMatchesTarget(input.currentArtifact, reservation.currentTarget, this.db);
+      const previousArtifact = this.getAttemptArtifact({
+      evaluationId: reservation.previousEvaluationId,
+      attemptId: reservation.previousAttemptId,
+      expectedWorkspaceId: reservation.previousTarget.workspaceId,
+      expectedProjectId: reservation.previousTarget.projectId,
+    });
+      const record: AdditionalAiInsightTransitionRecord = {
       contractRevision: "energyiq-additional-insight-transition-v1",
       transitionId: reservation.transitionId,
       idempotencyKey: reservation.idempotencyKey,
@@ -597,48 +906,59 @@ export class EnergyIqAdditionalInsightEvaluationStore {
       outcomes: clone(input.outcomes),
       createdAt: reservation.createdAt,
       completedAt: input.completedAt ?? new Date().toISOString(),
-    };
-    if (!additionalAiInsightTransitionIsValid(record)) {
-      throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_INVALID");
-    }
-    this.db.prepare(`
-      UPDATE energyiq_additional_insight_transitions
-      SET record_json = ?, current_artifact_json = ?, updated_at = ? WHERE id = ?
-    `).run(JSON.stringify(record), JSON.stringify(input.currentArtifact), record.completedAt, record.transitionId);
-    return clone(record);
+      };
+      if (!additionalAiInsightTransitionIsValid(record)) {
+        throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_INVALID");
+      }
+      this.db.prepare(`
+        UPDATE energyiq_additional_insight_transitions
+        SET record_json = ?, current_artifact_json = ?, updated_at = ?
+        WHERE id = ? AND workspace_id = ? AND project_id = ?
+      `).run(
+        JSON.stringify(record),
+        JSON.stringify(input.currentArtifact),
+        record.completedAt,
+        record.transitionId,
+        record.currentTarget.workspaceId,
+        record.currentTarget.projectId,
+      );
+      return clone(record);
+    });
   }
 
   failTransition(input: {
     transitionId: string;
     expectedWorkspaceId: string;
     expectedProjectId: string;
+    claimToken: string;
     errorCode: string;
     failureStage: "generation" | "validation" | "comparison";
     completedAt?: string;
   }): AdditionalAiInsightFailedTransitionRecord {
-    const row = this.db.prepare(`
-      SELECT workspace_id, project_id, reservation_json, record_json
-      FROM energyiq_additional_insight_transitions WHERE id = ?
-    `).get(input.transitionId);
-    if (!isRecord(row)) throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_NOT_FOUND");
-    if (row.workspace_id !== input.expectedWorkspaceId || row.project_id !== input.expectedProjectId) {
-      throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_TENANT_MISMATCH");
-    }
-    if (typeof row.record_json === "string") {
-      const existing = parseTransition(row.record_json);
-      if (existing.status !== "failed") throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_ALREADY_COMPLETED");
-      if (existing.errorCode !== boundedCode(input.errorCode)
-        || existing.failureStage !== input.failureStage) {
-        throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_FAILURE_CONFLICT");
+    return immediateTransaction(this.db, () => {
+      const row = this.db.prepare(`
+      SELECT reservation_json, record_json FROM energyiq_additional_insight_transitions
+      WHERE id = ? AND workspace_id = ? AND project_id = ?
+    `).get(input.transitionId, input.expectedWorkspaceId, input.expectedProjectId);
+      if (!isRecord(row)) throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_NOT_FOUND");
+      requireTransitionClaim(this.db, input.transitionId, input.expectedWorkspaceId, input.expectedProjectId, input.claimToken);
+      if (typeof row.record_json === "string") {
+        const existing = parseTransition(row.record_json);
+        if (existing.status !== "failed") throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_ALREADY_COMPLETED");
+        if (existing.errorCode !== boundedCode(input.errorCode)
+          || existing.failureStage !== input.failureStage) {
+          throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_FAILURE_CONFLICT");
+        }
+        return existing;
       }
-      return existing;
-    }
-    const reservation = parseTransitionReservation(row.reservation_json);
-    const previousArtifact = this.getAttemptArtifact(
-      reservation.previousEvaluationId,
-      reservation.previousAttemptId,
-    );
-    const record: AdditionalAiInsightFailedTransitionRecord = {
+      const reservation = parseTransitionReservation(row.reservation_json);
+      const previousArtifact = this.getAttemptArtifact({
+      evaluationId: reservation.previousEvaluationId,
+      attemptId: reservation.previousAttemptId,
+      expectedWorkspaceId: reservation.previousTarget.workspaceId,
+      expectedProjectId: reservation.previousTarget.projectId,
+    });
+      const record: AdditionalAiInsightFailedTransitionRecord = {
       contractRevision: "energyiq-additional-insight-transition-v1",
       transitionId: reservation.transitionId,
       idempotencyKey: reservation.idempotencyKey,
@@ -659,15 +979,23 @@ export class EnergyIqAdditionalInsightEvaluationStore {
       failureStage: input.failureStage,
       createdAt: reservation.createdAt,
       completedAt: input.completedAt ?? new Date().toISOString(),
-    };
-    if (!additionalAiInsightTransitionRecordIsValid(record)) {
-      throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_RECORD_INVALID");
-    }
-    this.db.prepare(`
-      UPDATE energyiq_additional_insight_transitions
-      SET record_json = ?, updated_at = ? WHERE id = ?
-    `).run(JSON.stringify(record), record.completedAt, record.transitionId);
-    return clone(record);
+      };
+      if (!additionalAiInsightTransitionRecordIsValid(record)) {
+        throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_RECORD_INVALID");
+      }
+      this.db.prepare(`
+        UPDATE energyiq_additional_insight_transitions
+        SET record_json = ?, updated_at = ?
+        WHERE id = ? AND workspace_id = ? AND project_id = ?
+      `).run(
+        JSON.stringify(record),
+        record.completedAt,
+        record.transitionId,
+        record.currentTarget.workspaceId,
+        record.currentTarget.projectId,
+      );
+      return clone(record);
+    });
   }
 
   getTransition(input: {
@@ -676,41 +1004,154 @@ export class EnergyIqAdditionalInsightEvaluationStore {
     expectedProjectId: string;
   }): AdditionalAiInsightTransitionEvaluationRecord {
     const row = this.db.prepare(`
-      SELECT workspace_id, project_id, record_json FROM energyiq_additional_insight_transitions WHERE id = ?
-    `).get(input.transitionId);
-    if (!isRecord(row) || typeof row.record_json !== "string") {
+      SELECT reservation_json, record_json, current_artifact_json FROM energyiq_additional_insight_transitions
+      WHERE id = ? AND workspace_id = ? AND project_id = ?
+    `).get(input.transitionId, input.expectedWorkspaceId, input.expectedProjectId);
+    if (!isRecord(row)) {
       throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_NOT_FOUND");
     }
-    if (row.workspace_id !== input.expectedWorkspaceId || row.project_id !== input.expectedProjectId) {
-      throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_TENANT_MISMATCH");
+    if (typeof row.record_json === "string") {
+      const record = parseTransition(row.record_json);
+      const previousArtifact = this.getAttemptArtifact({
+        evaluationId: parseTransitionReservation(row.reservation_json).previousEvaluationId,
+        attemptId: parseTransitionReservation(row.reservation_json).previousAttemptId,
+        expectedWorkspaceId: record.previousTarget.workspaceId,
+        expectedProjectId: record.previousTarget.projectId,
+      });
+      const expectedPreviousAudit = transitionArtifactAudit(
+        previousArtifact,
+        record.previousArtifact.artifactId,
+        record.previousArtifact.artifactIdentityHash,
+      );
+      if (JSON.stringify(expectedPreviousAudit) !== JSON.stringify(record.previousArtifact)) {
+        throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_PREVIOUS_ARTIFACT_INVALID");
+      }
+      if (record.status === "completed") {
+        if (typeof row.current_artifact_json !== "string") {
+          throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_CURRENT_ARTIFACT_INVALID");
+        }
+        let parsedCurrent: unknown;
+        try { parsedCurrent = JSON.parse(row.current_artifact_json); } catch {
+          throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_CURRENT_ARTIFACT_INVALID");
+        }
+        const currentArtifact = parsedCurrent as AdditionalAiInsightsArtifact;
+        requireArtifactMatchesTarget(currentArtifact, record.currentTarget, this.db);
+        if (currentArtifact.runId !== record.generationProviderRunId
+          || JSON.stringify(transitionArtifactAudit(
+            currentArtifact,
+            record.currentArtifact.artifactId,
+            record.currentArtifact.artifactIdentityHash,
+          )) !== JSON.stringify(record.currentArtifact)) {
+          throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_CURRENT_ARTIFACT_INVALID");
+        }
+      }
+      return record;
     }
-    return parseTransition(row.record_json);
+    const reservation = parseTransitionReservation(row.reservation_json);
+    const previousArtifact = this.getAttemptArtifact({
+      evaluationId: reservation.previousEvaluationId,
+      attemptId: reservation.previousAttemptId,
+      expectedWorkspaceId: reservation.previousTarget.workspaceId,
+      expectedProjectId: reservation.previousTarget.projectId,
+    });
+    const running: AdditionalAiInsightTransitionEvaluationRecord = {
+      contractRevision: "energyiq-additional-insight-transition-v1",
+      transitionId: reservation.transitionId,
+      idempotencyKey: reservation.idempotencyKey,
+      requestedBy: reservation.requestedBy,
+      status: "running",
+      previousTarget: clone(reservation.previousTarget),
+      currentTarget: clone(reservation.currentTarget),
+      previousArtifact: transitionArtifactAudit(
+        previousArtifact,
+        reservation.previousArtifactId,
+        reservation.previousArtifactIdentityHash,
+      ),
+      generationProviderRunId: reservation.generationProviderRunId,
+      generationProviderSessionId: reservation.generationProviderSessionId,
+      comparisonProviderRunId: reservation.comparisonProviderRunId,
+      comparisonProviderSessionId: reservation.comparisonProviderSessionId,
+      createdAt: reservation.createdAt,
+    };
+    if (!additionalAiInsightTransitionRecordIsValid(running)) {
+      throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_RECORD_INVALID");
+    }
+    return running;
   }
 
-  getAttemptArtifact(evaluationId: string, attemptId: string): AdditionalAiInsightsArtifact {
+  getAttemptArtifact(input: {
+    evaluationId: string;
+    attemptId: string;
+    expectedWorkspaceId: string;
+    expectedProjectId: string;
+  }): AdditionalAiInsightsArtifact {
+    const record = this.getEvaluation(input);
+    return this.readAttemptArtifact(record, input.attemptId);
+  }
+
+  private readAttemptArtifact(
+    record: AdditionalAiInsightEvaluationBatch,
+    attemptId: string,
+  ): AdditionalAiInsightsArtifact {
+    const attempt = record.attempts.find((candidate): candidate is AdditionalAiInsightEvaluationAttempt => (
+      candidate.attemptId === attemptId && candidate.status === "completed"
+    ));
+    if (!attempt) throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ARTIFACT_NOT_FOUND");
     const row = this.db.prepare(`
       SELECT result_json FROM energyiq_additional_insight_evaluation_artifacts
-      WHERE evaluation_id = ? AND attempt_id = ?
-    `).get(evaluationId, attemptId);
+      WHERE evaluation_id = ? AND attempt_id = ? AND workspace_id = ? AND project_id = ?
+    `).get(record.evaluationId, attemptId, record.target.workspaceId, record.target.projectId);
     if (!isRecord(row) || typeof row.result_json !== "string") {
       throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ARTIFACT_NOT_FOUND");
     }
-    const value: unknown = JSON.parse(row.result_json);
+    if (sha256(row.result_json) !== attempt.artifact.resultHash) {
+      throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ARTIFACT_HASH_MISMATCH");
+    }
+    let value: unknown;
+    try {
+      value = JSON.parse(row.result_json);
+    } catch {
+      throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ARTIFACT_INVALID");
+    }
     if (!isRecord(value) || value.artifactKind !== "autonomous-insights") {
       throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ARTIFACT_INVALID");
     }
-    return value as AdditionalAiInsightsArtifact;
+    const artifact = value as AdditionalAiInsightsArtifact;
+    requireArtifactMatchesTarget(artifact, record.target, this.db);
+    if (artifact.runId !== attempt.providerRunId || artifact.status !== attempt.artifact.resultStatus) {
+      throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ARTIFACT_IDENTITY_MISMATCH");
+    }
+    return artifact;
   }
 
   private writeEvaluation(record: AdditionalAiInsightEvaluationBatch): void {
-    this.db.prepare(`
+    const result = this.db.prepare(`
       UPDATE energyiq_additional_insight_evaluations
-      SET record_json = ?, updated_at = ? WHERE id = ?
-    `).run(JSON.stringify(record), record.updatedAt, record.evaluationId);
+      SET record_json = ?, updated_at = ?
+      WHERE id = ? AND workspace_id = ? AND project_id = ?
+    `).run(
+      JSON.stringify(record),
+      record.updatedAt,
+      record.evaluationId,
+      record.target.workspaceId,
+      record.target.projectId,
+    );
+    if (result.changes !== 1) throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_NOT_FOUND");
   }
 }
 
 const requireTarget = (target: AdditionalAiInsightEvaluationTarget, db: DatabaseSync): void => {
+  const project = db.prepare(`
+    SELECT root_scope_id FROM energyiq_projects WHERE id = ? AND workspace_id = ?
+  `).get(target.projectId, target.workspaceId);
+  if (!isRecord(project)
+    || !nonEmpty(project.root_scope_id)
+    || (target.scopeId !== project.root_scope_id
+      && !isRecord(db.prepare(`
+        SELECT id FROM energyiq_project_nodes WHERE project_id = ? AND id = ?
+      `).get(target.projectId, target.scopeId)))) {
+    throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_NOT_FOUND");
+  }
   const methodSet = resolveCurrentAdditionalAiInsightMethodSet(
     target.workspaceId,
     new EnergyIqInsightMethodGovernanceStore(db).listPublishedWorkspaceMethodResources({
@@ -731,6 +1172,12 @@ const requireTarget = (target: AdditionalAiInsightEvaluationTarget, db: Database
     || target.publicationRevision !== "additional-insights-v2"
     || target.canvasRevision !== "energyiq-insight-canvas-v2") {
     throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_INVALID");
+  }
+};
+
+const requireActor = (actorId: string, db: DatabaseSync): void => {
+  if (!isRecord(db.prepare("SELECT id FROM users WHERE id = ?").get(actorId))) {
+    throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ACTOR_NOT_FOUND");
   }
 };
 
@@ -776,32 +1223,11 @@ const transitionArtifactAudit = (
   return {
     artifactId,
     artifactIdentityHash,
+    resultHash: sha256(JSON.stringify(artifact)),
     findingEvidence,
     evidenceRefs: uniqueStrings(artifact.findings.flatMap(({ evidenceRefs }) => evidenceRefs)),
   };
 };
-
-const transitionTargetPairIsValid = (
-  previous: AdditionalAiInsightEvaluationTarget,
-  current: AdditionalAiInsightEvaluationTarget,
-): boolean => previous.workspaceId === current.workspaceId
-  && previous.projectId === current.projectId
-  && previous.scopeId === current.scopeId
-  && previous.resource === current.resource
-  && previous.modelProfileId === current.modelProfileId
-  && previous.modelProfileRevision === current.modelProfileRevision
-  && previous.artifactIdentityRevision === current.artifactIdentityRevision
-  && previous.outputContractRevision === current.outputContractRevision
-  && previous.validatorRevision === current.validatorRevision
-  && previous.workflowRevision === current.workflowRevision
-  && previous.promptRevision === current.promptRevision
-  && previous.capabilityRevision === current.capabilityRevision
-  && previous.publicationRevision === current.publicationRevision
-  && previous.canvasRevision === current.canvasRevision
-  && previous.methodSetId === current.methodSetId
-  && previous.methodSetRevision === current.methodSetRevision
-  && previous.methodSetFingerprint === current.methodSetFingerprint
-  && previous.dataSnapshotId !== current.dataSnapshotId;
 
 const parseEvaluation = (value: unknown): AdditionalAiInsightEvaluationBatch => {
   const parsed: unknown = typeof value === "string" ? JSON.parse(value) : value;
@@ -843,6 +1269,78 @@ const attemptReservationIsValid = (value: AttemptReservation): boolean => nonEmp
   && value.ordinal > 0
   && nonEmpty(value.providerRunId)
   && nonEmpty(value.providerSessionId);
+
+const evaluationArtifactIdentity = (
+  target: AdditionalAiInsightEvaluationTarget,
+  evaluationId: string,
+  attemptId: string,
+) => {
+  const artifactIdentityHash = sha256(JSON.stringify({
+    contractRevision: "additional-insight-evaluation-artifact-v1",
+    target,
+    evaluationId,
+    attemptId,
+  }));
+  return {
+    artifactId: `additional-evaluation-artifact-${artifactIdentityHash.slice(7, 31)}`,
+    artifactIdentityHash,
+    artifactIdentityRevision: "additional-insight-evaluation-artifact-v1" as const,
+  };
+};
+
+const leaseExpiry = (now: string, leaseMs = 5 * 60_000): string => {
+  const nowMs = Date.parse(now);
+  if (!Number.isFinite(nowMs)
+    || !Number.isSafeInteger(leaseMs)
+    || leaseMs < 1_000
+    || leaseMs > 30 * 60_000) {
+    throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_CLAIM_LEASE_INVALID");
+  }
+  return new Date(nowMs + leaseMs).toISOString();
+};
+
+const requireEvaluationClaim = (
+  db: DatabaseSync,
+  record: AdditionalAiInsightEvaluationBatch,
+  attemptId: string,
+  claimToken: string,
+): void => {
+  const claim = db.prepare(`
+    SELECT claim_token FROM energyiq_additional_insight_evaluation_claims
+    WHERE evaluation_id = ? AND attempt_id = ? AND workspace_id = ? AND project_id = ?
+  `).get(record.evaluationId, attemptId, record.target.workspaceId, record.target.projectId);
+  if (!isRecord(claim) || !nonEmpty(claimToken) || claim.claim_token !== claimToken) {
+    throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_CLAIM_CONFLICT");
+  }
+};
+
+const requireTransitionClaim = (
+  db: DatabaseSync,
+  transitionId: string,
+  workspaceId: string,
+  projectId: string,
+  claimToken: string,
+): void => {
+  const claim = db.prepare(`
+    SELECT claim_token FROM energyiq_additional_insight_transition_claims
+    WHERE transition_id = ? AND workspace_id = ? AND project_id = ?
+  `).get(transitionId, workspaceId, projectId);
+  if (!isRecord(claim) || !nonEmpty(claimToken) || claim.claim_token !== claimToken) {
+    throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_CLAIM_CONFLICT");
+  }
+};
+
+const immediateTransaction = <T>(db: DatabaseSync, action: () => T): T => {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const result = action();
+    db.exec("COMMIT");
+    return result;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+};
 
 const requireScores = (scores: AdditionalAiInsightHumanScores): void => {
   if (Object.values(scores).length !== 6

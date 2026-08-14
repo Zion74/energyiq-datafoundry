@@ -19,7 +19,10 @@ import { EnergyIqStore, initializeEnergyIqSchema } from "./energyiq-store.js";
 import { initializeEnergyIqMetricSchema } from "./energyiq-metric-store.js";
 import { initializeEnergyIqOverviewAiArtifactSchema } from "./energyiq-overview-ai-artifact-store.js";
 import { initializeEnergyIqInsightMethodGovernanceSchema } from "./energyiq-insight-method-governance-store.js";
-import { initializeEnergyIqAdditionalInsightEvaluationSchema } from "./energyiq-additional-insight-evaluation-store.js";
+import {
+  ensureEnergyIqAdditionalInsightEvaluationHardeningSchema,
+  initializeEnergyIqAdditionalInsightEvaluationSchema,
+} from "./energyiq-additional-insight-evaluation-store.js";
 import {
   ensureEnergyIqOperationalPolicyBindingOwnershipSchema,
   initializeEnergyIqOperationalPolicySchema
@@ -4086,6 +4089,9 @@ const runMigrations = (db: DatabaseSync): void => {
   });
   runSchemaMigration(db, "0033_energyiq_additional_insight_evaluation", "Persist Additional Insight pass@3 and Snapshot transitions", () => {
     initializeEnergyIqAdditionalInsightEvaluationSchema(db);
+  });
+  runSchemaMigration(db, "0034_energyiq_additional_insight_evaluation_hardening", "Harden Additional Insight evaluation tenant and claim persistence", () => {
+    ensureEnergyIqAdditionalInsightEvaluationHardeningSchema(db);
   });
 };
 

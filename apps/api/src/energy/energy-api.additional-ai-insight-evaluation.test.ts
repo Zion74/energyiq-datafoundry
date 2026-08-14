@@ -211,6 +211,32 @@ describe("Additional Insight evaluation API", () => {
           analysisPeriodTo: "2026-07-01T00:00:00.000Z",
         }),
       }));
+
+      harness.executeTransition.mockResolvedValueOnce({
+        transitionId: "transition-running",
+        status: "running",
+        previousTarget: previous.target,
+        currentTarget: {
+          ...previous.target,
+          dataSnapshotId: "snapshot-b",
+          projectReleaseId: "release-b",
+          artifactIdentityHash: `sha256:${"d".repeat(64)}`,
+        },
+      });
+      const inFlight = await handleEnergyApiRequest(jsonRequest("POST", {
+        ...body,
+        idempotencyKey: "snapshot-a-to-b-concurrent",
+      }), path, harness.context);
+      expect(inFlight).toMatchObject({
+        status: 202,
+        body: { success: true, data: {
+          transitionId: "transition-running",
+          status: "running",
+          previousSnapshotId: "snapshot-current",
+          currentSnapshotId: "snapshot-b",
+        } },
+      });
+      expect(JSON.stringify(inFlight.body)).not.toMatch(/errorCode|failureStage/);
     } finally {
       harness.close();
     }

@@ -878,7 +878,8 @@ Method selection 与 Web 状态的自动化门；数据库迁移部署、真实�
 Stage 3E 已建立独立于 current Overview Artifact 的 Additional 模型价值评估闭环。授权管理员可以针对服务端解析的 exact Snapshot、
 Release、Period、Model Profile 与 Method set 创建 pass@3；三个 attempt 在开始 Provider 工作前分别保留独立 Run、Session、Artifact
 identity，并绕开 current Artifact、single-flight 与页面缓存。中断恢复复用同一个已保留 attempt identity，Provider 或 structured-output
-失败作为该 attempt 的局部终态保存，不把 retry 计成第四次或新的盲评样本。
+失败作为该 attempt 的局部终态保存，不把 retry 计成第四次或新的盲评样本。相同 idempotency key 的并发请求通过 Metadata 中可过期的
+DB claim/CAS 协调；只有 claim owner 可执行 Provider 和写入终态，过期恢复仍复用原 Run、Session 与 Artifact identity。
 
 盲评包使用稳定打乱的 `Review A/B/C` 标签，客户响应不包含 attempt、Run、Session 或私有映射；服务端 audit 保留 token 到 exact attempt
 的映射。机器门只检查合同、事实边界、来源、重复、表达长度和恢复完整性，不强加 What/Why/Action 或固定分析镜头。人工门分别保存
@@ -888,9 +889,12 @@ Overview Artifact。
 
 Snapshot transition 使用已通过评估的 A attempt 与服务端重新生成的 B attempt，再由独立 comparison Run 形成 Evidence-bound 的
 `New / Changed / Still supported / Resolved / No material change`。Store 固定 A/B Artifact 与 Finding/Evidence lineage，拒绝 B 复用 A
-Evidence；生成、校验或比较失败保存为可恢复的局部 transition failure。普通 Overview GET 仍只读 saved current Artifact，不触发
+Snapshot identity、旧数字或不属于 B Artifact 的 Evidence；同一个逻辑 fact ID 可以在 A/B 各自 exact Snapshot lineage 下合法复用。
+生成、校验或比较失败保存为可恢复的局部 transition failure。普通 Overview GET 仍只读 saved current Artifact，不触发
 evaluation、Provider、工具、ensure 或 queue。
 
 这一 checkpoint 只证明 Contracts、Metadata、API、生产 Runner 装配、权限、幂等恢复与关键回归的自动化工程门。此 worktree 未调用
 真实 Provider，未执行真实 pass@3 人工盲评，未在真实 Snapshot A/B 上完成价值判断，也未做浏览器管理流程验收或数据库迁移部署。
+部署时由 startup migration registry 执行 `0034_energyiq_additional_insight_evaluation_hardening`，把 0033 表升级为 tenant/FK、Artifact hash
+恢复校验与 DB claim 版本；本地自动化通过不代表该迁移已经在真实环境执行。
 这些真实 Provider、浏览器和人工产品价值门完成前，不得宣称 Stage 3 已通过产品验收；Stage 4 Coding Agent 仍不在范围内。
