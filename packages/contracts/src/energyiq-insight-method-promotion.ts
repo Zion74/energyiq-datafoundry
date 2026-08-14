@@ -20,7 +20,7 @@ export type InsightFindingFeedbackIdentity = {
   scopeId: string;
   artifactId: string;
   artifactIdentityHash: string;
-  artifactContractRevision: string;
+  artifactIdentityRevision: string;
   dataSnapshotId: string;
   projectReleaseId: string;
   analysisPeriod: {
@@ -142,7 +142,7 @@ const exactFeedbackIdentity = (
   && left.scopeId === right.scopeId
   && left.artifactId === right.artifactId
   && left.artifactIdentityHash === right.artifactIdentityHash
-  && left.artifactContractRevision === right.artifactContractRevision
+  && left.artifactIdentityRevision === right.artifactIdentityRevision
   && left.dataSnapshotId === right.dataSnapshotId
   && left.projectReleaseId === right.projectReleaseId
   && left.analysisPeriod.from === right.analysisPeriod.from
@@ -155,7 +155,7 @@ const validFeedbackInput = (input: ApplyInsightFindingFeedbackInput): boolean =>
   input.projectId,
   input.scopeId,
   input.artifactId,
-  input.artifactContractRevision,
+  input.artifactIdentityRevision,
   input.dataSnapshotId,
   input.projectReleaseId,
   input.analysisPeriod.from,

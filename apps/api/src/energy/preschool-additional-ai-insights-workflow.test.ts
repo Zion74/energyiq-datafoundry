@@ -18,14 +18,51 @@ import { createPreschoolAdditionalAiInsightsWorkflow } from "./preschool-additio
 import { composePreschoolOverviewAiReadModel } from "./preschool-overview-ai-read-model.js";
 
 describe("Preschool Additional AI Insights workflow", () => {
-  it("loads only server-published workspace Method content into a new exact Method-set identity", async () => {
+  it("maps each candidate's stable Method refs to truthful Finding provenance and rejects bad refs locally", async () => {
     const harness = createHarness();
     try {
       const prompts: string[] = [];
+      let discoveryCall = 0;
+      let publishedMethodResourceId = "";
       const runDiscovery = vi.fn(async ({ prompt, runId, sessionId }) => {
         prompts.push(prompt);
+        discoveryCall += 1;
         return {
-          answer: JSON.stringify({ candidates: [candidate("candidate-source", "fact:standby-share")] }),
+          answer: JSON.stringify({ candidates: discoveryCall === 1
+            ? [candidate("candidate-source", "fact:standby-share", {
+                origin: { kind: "ai-discovery", directionMethodResourceIds: [] },
+              })]
+            : [
+                candidate("candidate-core", "fact:standby-share", {
+                  origin: { kind: "ai-discovery", directionMethodResourceIds: [] },
+                }),
+                candidate("candidate-sop", "fact:operating-share", {
+                  origin: { kind: "expert-sop", directionMethodResourceIds: [publishedMethodResourceId] },
+                }),
+                candidate("candidate-unknown", "fact:standby-share", {
+                  origin: { kind: "expert-sop", directionMethodResourceIds: ["insight-method:unloaded"] },
+                }),
+                candidate("candidate-duplicate", "fact:standby-share", {
+                  origin: {
+                    kind: "expert-sop",
+                    directionMethodResourceIds: [publishedMethodResourceId, publishedMethodResourceId],
+                  },
+                }),
+                candidate("candidate-hybrid-too-long", "fact:operating-share", {
+                  origin: {
+                    kind: "hybrid",
+                    directionMethodResourceIds: [publishedMethodResourceId],
+                    novelContribution: "x".repeat(801),
+                  },
+                }),
+                candidate("candidate-hybrid", "fact:operating-share", {
+                  origin: {
+                    kind: "hybrid",
+                    directionMethodResourceIds: [publishedMethodResourceId],
+                    novelContribution: "Connect the repeated event shape to a separately evidenced operating pattern.",
+                  },
+                }),
+              ] }),
           runId,
           sessionId,
         };
@@ -61,13 +98,14 @@ describe("Preschool Additional AI Insights workflow", () => {
         actorId: harness.user.id,
         expectedRevision: inReview.revision,
       });
-      harness.metadata.energyIq.insightMethodGovernance.publishProposal({
+      const published = harness.metadata.energyIq.insightMethodGovernance.publishProposal({
         workspaceId: PRESCHOOL_WORKSPACE_ID,
         projectId: "preschool-demo",
         proposalId: provisional.id,
         actorId: harness.user.id,
         expectedRevision: approved.revision,
       });
+      publishedMethodResourceId = published.publication!.method.resourceId;
 
       const second = await workflow.execute({ baseIdentity: harness.baseIdentity, user: harness.user });
       const result = JSON.parse(second.result_json!) as AdditionalAiInsightsArtifact;
@@ -75,15 +113,37 @@ describe("Preschool Additional AI Insights workflow", () => {
       expect(runDiscovery).toHaveBeenCalledTimes(2);
       expect(second.id).not.toBe(first.id);
       expect(prompts[1]).toContain(guidance);
+      expect(prompts[1]).toContain("directionMethodResourceIds");
       expect(result.methodExecution.loadedMethods).toHaveLength(2);
-      expect(result.findings[0]?.origin).toMatchObject({
+      expect(result.findings.map(({ id }) => id)).toEqual([
+        "additional:candidate-core",
+        "additional:candidate-sop",
+        "additional:candidate-hybrid",
+      ]);
+      expect(result.findings[0]?.origin).toEqual({
+        kind: "ai-discovery",
+        coreMethod: result.methodExecution.loadedMethods[0],
+        directionMethods: [],
+      });
+      expect(result.findings[1]?.origin).toMatchObject({
         kind: "expert-sop",
         directionMethods: [expect.objectContaining({
+          resourceId: publishedMethodResourceId,
           scope: "workspace",
           workspaceId: PRESCHOOL_WORKSPACE_ID,
           role: "expert-direction",
         })],
       });
+      expect(result.findings[2]?.origin).toMatchObject({
+        kind: "hybrid",
+        directionMethods: [expect.objectContaining({ resourceId: publishedMethodResourceId })],
+        novelContribution: "Connect the repeated event shape to a separately evidenced operating pattern.",
+      });
+      expect(result.publication.rejectedCandidateIds).toEqual([
+        "candidate-unknown",
+        "candidate-duplicate",
+        "candidate-hybrid-too-long",
+      ]);
       expect(composePreschoolOverviewAiReadModel({
         metadataStore: harness.metadata,
         baseIdentity: harness.baseIdentity,
@@ -194,6 +254,7 @@ describe("Preschool Additional AI Insights workflow", () => {
       });
 
       const artifact = await workflow.execute({ baseIdentity: harness.baseIdentity, user: harness.user });
+      expect(artifact.error_code).toBeUndefined();
       const result = JSON.parse(artifact.result_json!) as AdditionalAiInsightsArtifact;
       expect(result).toMatchObject({
         status: "empty",
@@ -466,6 +527,7 @@ const candidate = (
   title: `Title for ${id}`,
   text: `Incremental observation for ${id}.`,
   epistemicStatus: "inferred",
+  origin: { kind: "ai-discovery", directionMethodResourceIds: [] },
   evidenceRefs: [evidenceRef],
   toolAuditIds: [],
   ...overrides,

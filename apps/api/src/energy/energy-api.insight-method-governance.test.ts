@@ -34,6 +34,7 @@ describe("Additional Insight feedback API", () => {
         actorId: "dev-user",
         workspaceId: "workspace-forged",
         artifactIdentityHash: "sha256:forged",
+        artifactIdentityRevision: "additional-insights-v999",
       }), path, member);
       expect(created).toMatchObject({
         status: 200,
@@ -42,6 +43,7 @@ describe("Additional Insight feedback API", () => {
           workspaceId: PRESCHOOL_WORKSPACE_ID,
           projectId: harness.project.id,
           artifactId: harness.artifact.id,
+          artifactIdentityRevision: "additional-insights-v3",
           findingId: "additional-insight-1",
           rating: "useful",
           revision: 1,
@@ -95,7 +97,12 @@ describe("Additional Insight Method Proposal API", () => {
       }), createPath, member);
       expect(provisional).toMatchObject({
         status: 201,
-        body: { success: true, data: { status: "provisional", revision: 1, createdBy: "second-user" } },
+        body: { success: true, data: {
+          status: "provisional",
+          revision: 1,
+          createdBy: "second-user",
+          artifactIdentityRevision: "additional-insights-v3",
+        } },
       });
       const proposalId = proposalData(provisional).id;
 

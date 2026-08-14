@@ -129,6 +129,41 @@ describe("composePreschoolOverviewAiReadModel", () => {
     }
   });
 
+  it("does not present a v2 Additional Artifact as the current v3 result", () => {
+    const root = mkdtempSync(join(tmpdir(), "preschool-overview-read-model-additional-v2-saved-only-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      seedProject(metadata);
+      const baseIdentity = identity();
+      const currentIdentity = createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity });
+      const historicalIdentity: EnergyIqOverviewAiArtifactIdentity = {
+        ...currentIdentity,
+        identityContractRevision: "additional-insights-v2",
+        validatorRevision: "additional-insights-acceptance-v2",
+        workflowRevision: "additional-insights-discover-accept-publish-v2",
+        investigatorPromptRevision: "additional-insights-discovery-v2",
+      };
+      metadata.energyIq.overviewAiArtifacts.queue({ identity: historicalIdentity, triggeredBy: "dev-user" });
+      metadata.energyIq.overviewAiArtifacts.claim({
+        identity: historicalIdentity,
+        workerId: "historical-additional-worker",
+        leaseMs: 60_000,
+      });
+      metadata.energyIq.overviewAiArtifacts.complete({
+        identity: historicalIdentity,
+        workerId: "historical-additional-worker",
+        sessionId: "historical-additional-session",
+        runId: "historical-additional-run",
+        resultJson: JSON.stringify(currentAdditionalResult(currentIdentity)),
+      });
+
+      expect(composePreschoolOverviewAiReadModel({ metadataStore: metadata, baseIdentity })).toBeNull();
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     ["workspace", (value: AdditionalAiInsightsArtifact) => { value.binding.workspaceId = "other-workspace"; }],
     ["project", (value: AdditionalAiInsightsArtifact) => { value.binding.projectId = "other-project"; }],

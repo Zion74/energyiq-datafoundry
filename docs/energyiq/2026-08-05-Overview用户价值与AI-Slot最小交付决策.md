@@ -838,7 +838,7 @@ Method promotion、Insight Canvas 与 A→B evaluation 的导出仍是已有的�
 Stage 3B 已把 Additional discovery 接入显式 Publisher/Admin Workflow：服务端从固定 Registry 加载 current Method set，按精确
 Snapshot、Release、Period 与 Model identity 建立 scoped read-only runtime，逐候选校验 Evidence、origin、tool audit 与 Alert，按模型
 source order 发布最多三条，并把 `available` 或诚实 `empty` 保存为不可变 current Additional Artifact。普通 Overview 只读已保存
-Artifact；legacy v1 只允许 Frozen Saved Analysis 恢复，不能作为 current live 结果。
+Artifact；历史 v1/v2 只允许 Frozen Saved Analysis 恢复，不能作为 current live 结果。
 
 Stage 3C 已把 `acceptInsightCanvasPlan` 接入同一 Workflow，并旋转 Additional output、validator、workflow、prompt、publication 与 Canvas
 current identity。Artifact 只持久化服务端接受的有序 quantitative `metric`、`comparison`、`trend` blocks，以及受约束的局部拒绝和
@@ -856,6 +856,11 @@ Stage 3D 已建立 Additional Finding 反馈与 Insight Method 晋升的持久�
 Additional Artifact 与 Finding，绑定精确 Workspace、Project、Scope、Artifact identity hash/revision、Snapshot、Release、Period、
 Finding 与 actor；同一 actor 的同一精确 Finding 只有一条当前反馈，重复同票幂等，改票使用 optimistic revision 并保留完整历史。
 反馈不会创建、批准或发布 Method，也不会改变 current Method Registry。
+
+Additional current identity 已旋转为 `additional-insights-v3`，validator/workflow/discovery prompt 同步为 v3；持久化输出合同仍为兼容的
+`energyiq-additional-ai-insights-v2`。每个 discovery candidate 必须提交结构化 origin 和实际使用的稳定 Method resource IDs，服务端只映射
+本次已加载的精确 Method refs；core-only Finding 保持 `ai-discovery` 且 direction 为空，未知、未加载或重复 refs 只拒绝该候选。治理记录使用
+`artifactIdentityRevision` 绑定 `identityContractRevision`，不再用 output contract revision 冒充 Artifact identity。
 
 Method Proposal 使用 `provisional → in-review → approved → published` 的显式状态机、revision conflict、actor/time/from/to audit 与租户边界。
 项目成员可从可见 Finding 创建 provisional 并提交 review；只有管理员可 approve/publish。共享 Overview 的 current Method set 只组合 builtin

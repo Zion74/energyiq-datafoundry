@@ -33,7 +33,7 @@ export type EnergyIqInsightMethodProposalRecord = {
   scopeId: string;
   artifactId: string;
   artifactIdentityHash: string;
-  artifactContractRevision: string;
+  artifactIdentityRevision: string;
   dataSnapshotId: string;
   projectReleaseId: string;
   analysisPeriod: { from: string; to: string };
@@ -60,7 +60,7 @@ export const initializeEnergyIqInsightMethodGovernanceSchema = (db: DatabaseSync
       scope_id TEXT NOT NULL,
       artifact_id TEXT NOT NULL,
       artifact_identity_hash TEXT NOT NULL,
-      artifact_contract_revision TEXT NOT NULL,
+      artifact_identity_revision TEXT NOT NULL,
       data_snapshot_id TEXT NOT NULL,
       project_release_id TEXT NOT NULL,
       analysis_period_from TEXT NOT NULL,
@@ -99,7 +99,7 @@ export const initializeEnergyIqInsightMethodGovernanceSchema = (db: DatabaseSync
       scope_id TEXT NOT NULL,
       artifact_id TEXT NOT NULL,
       artifact_identity_hash TEXT NOT NULL,
-      artifact_contract_revision TEXT NOT NULL,
+      artifact_identity_revision TEXT NOT NULL,
       data_snapshot_id TEXT NOT NULL,
       project_release_id TEXT NOT NULL,
       analysis_period_from TEXT NOT NULL,
@@ -187,7 +187,7 @@ export class EnergyIqInsightMethodGovernanceStore {
       this.db.prepare(`
         INSERT INTO energyiq_additional_insight_feedback (
           id, workspace_id, project_id, scope_id, artifact_id, artifact_identity_hash,
-          artifact_contract_revision, data_snapshot_id, project_release_id,
+          artifact_identity_revision, data_snapshot_id, project_release_id,
           analysis_period_from, analysis_period_to, finding_id, actor_id, rating,
           revision, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -203,7 +203,7 @@ export class EnergyIqInsightMethodGovernanceStore {
         source.scopeId,
         source.artifactId,
         source.artifactIdentityHash,
-        source.artifactContractRevision,
+        source.artifactIdentityRevision,
         source.dataSnapshotId,
         source.projectReleaseId,
         source.analysisPeriod.from,
@@ -317,13 +317,13 @@ export class EnergyIqInsightMethodGovernanceStore {
       this.db.prepare(`
         INSERT INTO energyiq_insight_method_proposals (
           id, workspace_id, project_id, scope_id, artifact_id, artifact_identity_hash,
-          artifact_contract_revision, data_snapshot_id, project_release_id,
+          artifact_identity_revision, data_snapshot_id, project_release_id,
           analysis_period_from, analysis_period_to, finding_id, created_by,
           idempotency_key, title, guidance, status, revision, created_at, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'provisional', 1, ?, ?)
       `).run(
         id, source.workspaceId, source.projectId, source.scopeId, source.artifactId,
-        source.artifactIdentityHash, source.artifactContractRevision, source.dataSnapshotId,
+        source.artifactIdentityHash, source.artifactIdentityRevision, source.dataSnapshotId,
         source.projectReleaseId, source.analysisPeriod.from, source.analysisPeriod.to,
         source.findingId, input.actorId, input.idempotencyKey.trim(), input.title.trim(),
         input.guidance.trim(), now, now,
@@ -484,7 +484,7 @@ export class EnergyIqInsightMethodGovernanceStore {
       : `sha256:${hash(canonicalMethods)}`;
     if (!isRecord(identity)
       || identity.artifactKind !== "autonomous-insights"
-      || identity.identityContractRevision !== "additional-insights-v2"
+      || identity.identityContractRevision !== "additional-insights-v3"
       || identity.outputContractRevision !== "energyiq-additional-ai-insights-v2"
       || identity.methodSetId !== currentMethodSet.id
       || identity.methodSetRevision !== currentMethodSet.revision
@@ -511,7 +511,7 @@ export class EnergyIqInsightMethodGovernanceStore {
       scopeId: requiredString(row, "scope_id"),
       artifactId,
       artifactIdentityHash: `sha256:${requiredString(row, "identity_hash")}`,
-      artifactContractRevision: requiredString(identity, "outputContractRevision"),
+      artifactIdentityRevision: requiredString(identity, "identityContractRevision"),
       dataSnapshotId: requiredString(row, "data_snapshot_id"),
       projectReleaseId: requiredString(row, "project_release_id"),
       analysisPeriod: {
@@ -536,7 +536,7 @@ export class EnergyIqInsightMethodGovernanceStore {
       scopeId: requiredString(row, "scope_id"),
       artifactId: requiredString(row, "artifact_id"),
       artifactIdentityHash: requiredString(row, "artifact_identity_hash"),
-      artifactContractRevision: requiredString(row, "artifact_contract_revision"),
+      artifactIdentityRevision: requiredString(row, "artifact_identity_revision"),
       dataSnapshotId: requiredString(row, "data_snapshot_id"),
       projectReleaseId: requiredString(row, "project_release_id"),
       analysisPeriod: {
@@ -581,7 +581,7 @@ export class EnergyIqInsightMethodGovernanceStore {
       scopeId: requiredString(row, "scope_id"),
       artifactId: requiredString(row, "artifact_id"),
       artifactIdentityHash: requiredString(row, "artifact_identity_hash"),
-      artifactContractRevision: requiredString(row, "artifact_contract_revision"),
+      artifactIdentityRevision: requiredString(row, "artifact_identity_revision"),
       dataSnapshotId: requiredString(row, "data_snapshot_id"),
       projectReleaseId: requiredString(row, "project_release_id"),
       analysisPeriod: {
@@ -629,7 +629,7 @@ type AdditionalFindingIdentity = {
   scopeId: string;
   artifactId: string;
   artifactIdentityHash: string;
-  artifactContractRevision: string;
+  artifactIdentityRevision: string;
   dataSnapshotId: string;
   projectReleaseId: string;
   analysisPeriod: { from: string; to: string };

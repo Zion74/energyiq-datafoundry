@@ -882,8 +882,23 @@ describe("EnergyIqOverviewAiArtifactStore current Additional AI Insights", () =>
         status: "published",
       });
       const availableIdentity = additionalIdentity("snapshot-additional-available");
-      expect(completeAdditional(metadata, availableIdentity, additionalResult(availableIdentity, "available")))
-        .toMatchObject({ status: "available" });
+      const availableArtifact = completeAdditional(
+        metadata,
+        availableIdentity,
+        additionalResult(availableIdentity, "available"),
+      );
+      expect(availableArtifact).toMatchObject({ status: "available" });
+
+      const sameOutputHistoricalIdentity = historicalAdditionalIdentityV2(availableIdentity);
+      const sameOutputHistoricalArtifact = completeAdditional(
+        metadata,
+        sameOutputHistoricalIdentity,
+        additionalResult(availableIdentity, "available"),
+      );
+      expect(sameOutputHistoricalIdentity.outputContractRevision)
+        .toBe(availableIdentity.outputContractRevision);
+      expect(sameOutputHistoricalArtifact.id).not.toBe(availableArtifact.id);
+      expect(sameOutputHistoricalArtifact.identity_hash).not.toBe(availableArtifact.identity_hash);
 
       const emptyIdentity = additionalIdentity("snapshot-additional-empty");
       expect(completeAdditional(metadata, emptyIdentity, additionalResult(emptyIdentity, "empty")))
@@ -1034,7 +1049,7 @@ const attachAcceptedCanvas = (artifact: AdditionalAiInsightsArtifact): void => {
 
 type AdditionalIdentity = EnergyIqOverviewAiArtifactIdentity & {
   artifactKind: "autonomous-insights";
-  identityContractRevision: "additional-insights-v2";
+  identityContractRevision: "additional-insights-v3";
   methodSetId: "preschool-additional-insights-current";
   methodSetRevision: "v1";
   methodSetFingerprint: string;
@@ -1052,13 +1067,13 @@ const additionalIdentity = (
   return {
     ...identity(dataSnapshotId),
     artifactKind: "autonomous-insights",
-    identityContractRevision: "additional-insights-v2",
+    identityContractRevision: "additional-insights-v3",
     analysisPackId: "preschool-additional-insights-pack",
     analysisPackRevision: "v1",
     outputContractRevision: "energyiq-additional-ai-insights-v2",
-    validatorRevision: "additional-insights-acceptance-v2",
-    workflowRevision: "additional-insights-discover-accept-publish-v2",
-    investigatorPromptRevision: "additional-insights-discovery-v2",
+    validatorRevision: "additional-insights-acceptance-v3",
+    workflowRevision: "additional-insights-discover-accept-publish-v3",
+    investigatorPromptRevision: "additional-insights-discovery-v3",
     editorPromptRevision: "additional-insights-publication-v2",
     methodSkillId: "energyiq-open-discovery",
     methodSkillRevision: "1.0.0",
@@ -1070,6 +1085,16 @@ const additionalIdentity = (
     canvasRevision: "energyiq-insight-canvas-v2",
   };
 };
+
+const historicalAdditionalIdentityV2 = (
+  current: AdditionalIdentity,
+): EnergyIqOverviewAiArtifactIdentity => ({
+  ...current,
+  identityContractRevision: "additional-insights-v2",
+  validatorRevision: "additional-insights-acceptance-v2",
+  workflowRevision: "additional-insights-discover-accept-publish-v2",
+  investigatorPromptRevision: "additional-insights-discovery-v2",
+});
 
 const historicalAdditionalIdentity = (
   current: AdditionalIdentity,

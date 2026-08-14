@@ -3,7 +3,7 @@ title: "EnergyIQ 领域词汇表"
 summary: "固定 EnergyIQ 中 Project、Tier、Scope、计量、事实、模板和运行等术语，避免计算名与客户展示名混用。"
 doc_type: concept
 tags: [领域语言, Tier, Meter, Template, Analysis]
-updated_at: "2026-08-04"
+updated_at: "2026-08-14"
 related:
   - "当前共识与新会话入口.md"
   - "领域模型.md"
@@ -202,6 +202,15 @@ Analysis Run 的只读客户视图。标题和备注可以调整，但冻结的 
 
 **Template Change Proposal**  
 人工或 AI 生成、绑定 base_template_revision_id 的结构化模板 Patch。它只能使用协议允许的操作，必须经过权限、Schema、引用、readiness、Diff、固定快照预览和人工发布，不能直接改变正式模板。
+
+**Additional Insight Finding Feedback**
+用户对一个精确 Additional Artifact Finding 提交的 `Useful` 或 `Not useful` 当前选择；它绑定租户、Artifact identity revision、Snapshot/Release/Period、Finding 与 actor，改票保留审计历史，但不会自动改变 Overview 或发布 Method。
+
+**Insight Method Proposal**
+从可见 Additional Finding 提炼出的可复用方法候选，绑定原 Artifact/Finding 与创建者。Proposal 在发布前不属于 current Method Registry，也不能进入共享 Overview 生成。
+
+**Insight Method Proposal Lifecycle**
+`provisional → in-review → approved → published` 是人工治理的合法晋升链：项目成员可创建和提交 review，管理员才可批准和发布；每次转换绑定 revision、actor 与时间，禁止票数驱动的自动晋升或跳级。
 
 ## 用户与后台
 

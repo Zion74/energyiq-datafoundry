@@ -18,7 +18,7 @@ const feedbackIdentity = {
   scopeId: "preschool-project",
   artifactId: "overview-artifact:2026-05",
   artifactIdentityHash: `sha256:${"a".repeat(64)}`,
-  artifactContractRevision: "energyiq-additional-ai-insights-v2",
+  artifactIdentityRevision: "additional-insights-v3",
   dataSnapshotId: "snapshot:2026-05",
   projectReleaseId: "release:preschool-v2",
   analysisPeriod: {
@@ -150,6 +150,14 @@ describe("EnergyIQ insight method promotion", () => {
     expect(() => applyInsightFindingFeedback(current, {
       ...feedbackIdentity,
       workspaceId: "workspace-other-customer",
+      rating: "not-useful",
+      expectedRevision: 1,
+      recordedAt: "2026-08-14T01:02:00.000Z",
+    })).toThrow("INSIGHT_FEEDBACK_IDENTITY_MISMATCH");
+
+    expect(() => applyInsightFindingFeedback(current, {
+      ...feedbackIdentity,
+      artifactIdentityRevision: "additional-insights-v4",
       rating: "not-useful",
       expectedRevision: 1,
       recordedAt: "2026-08-14T01:02:00.000Z",

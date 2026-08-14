@@ -2143,7 +2143,7 @@ export type EnergyAdditionalInsightFeedbackDto = {
   scopeId: string;
   artifactId: string;
   artifactIdentityHash: string;
-  artifactContractRevision: string;
+  artifactIdentityRevision: string;
   dataSnapshotId: string;
   projectReleaseId: string;
   analysisPeriod: { from: string; to: string };
@@ -2169,7 +2169,7 @@ export type EnergyInsightMethodProposalDto = {
   scopeId: string;
   artifactId: string;
   artifactIdentityHash: string;
-  artifactContractRevision: string;
+  artifactIdentityRevision: string;
   dataSnapshotId: string;
   projectReleaseId: string;
   analysisPeriod: { from: string; to: string };

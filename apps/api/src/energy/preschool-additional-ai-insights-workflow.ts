@@ -35,6 +35,7 @@ const LEASE_MS = 13 * 60 * 1_000;
 const MAX_DISCOVERY_ANSWER_CHARS = 160_000;
 const MAX_CANDIDATE_TITLE_CHARS = 240;
 const MAX_CANDIDATE_TEXT_CHARS = 1_200;
+const MAX_NOVEL_CONTRIBUTION_CHARS = 800;
 export const MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS = 160_000;
 
 export type PreschoolAdditionalAiInsightsDiscoveryRunner = (input: {
@@ -339,7 +340,7 @@ const acceptCandidate = (
   const value = candidate.value;
   if (!isRecord(value)
     || !hasOnlyKeys(value, [
-      "id", "title", "text", "epistemicStatus", "evidenceRefs", "toolAuditIds", "deepDiveQuestion", "alert", "canvas",
+      "id", "title", "text", "epistemicStatus", "origin", "evidenceRefs", "toolAuditIds", "deepDiveQuestion", "alert", "canvas",
     ])
     || value.id !== candidate.sourceId
     || !boundedSafeText(value.title, MAX_CANDIDATE_TITLE_CHARS)
@@ -354,6 +355,8 @@ const acceptCandidate = (
     || optionalBoundedSafeText(value.deepDiveQuestion, MAX_CANDIDATE_TEXT_CHARS) === false) return null;
   const evidenceRefs = value.evidenceRefs;
   const toolAuditIds = value.toolAuditIds;
+  const origin = resolveCandidateOrigin(value.origin, coreMethod, directionMethods);
+  if (!origin) return null;
   const audits = toolAuditIds.map((id) => auditsById.get(id));
   if (audits.some((audit) => !audit || audit.status !== "succeeded")
     || audits.some((audit) => audit!.evidenceRefs.some((ref) => !evidenceRefs.includes(ref)))) return null;
@@ -363,13 +366,7 @@ const acceptCandidate = (
     title: value.title.trim(),
     text: value.text.trim(),
     epistemicStatus: value.epistemicStatus,
-    origin: directionMethods.length === 0
-      ? { kind: "ai-discovery", coreMethod, directionMethods: [] }
-      : {
-          kind: "expert-sop",
-          coreMethod,
-          directionMethods: [directionMethods[0]!, ...directionMethods.slice(1)],
-        },
+    origin,
     evidenceRefs: [...evidenceRefs],
     toolAuditIds: [...toolAuditIds],
     ...(nonEmptyString(value.deepDiveQuestion) ? { deepDiveQuestion: value.deepDiveQuestion.trim() } : {}),
@@ -390,6 +387,50 @@ const acceptCandidate = (
     evidenceFacts: canvasEvidenceFacts,
   });
   return canvas ? { ...finding, canvas } : finding;
+};
+
+const resolveCandidateOrigin = (
+  value: unknown,
+  coreMethod: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>["methods"][number],
+  loadedDirectionMethods: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>["methods"],
+): AdditionalAiInsightFinding["origin"] | null => {
+  if (!isRecord(value)
+    || !nonEmptyString(value.kind)
+    || !Array.isArray(value.directionMethodResourceIds)
+    || !uniqueStrings(value.directionMethodResourceIds)) return null;
+  const resourceIds = value.directionMethodResourceIds;
+  if (value.kind === "ai-discovery") {
+    return hasExactKeys(value, ["kind", "directionMethodResourceIds"])
+      && resourceIds.length === 0
+      ? { kind: "ai-discovery", coreMethod, directionMethods: [] }
+      : null;
+  }
+  const resolved = resourceIds.map((resourceId) =>
+    loadedDirectionMethods.filter((method) => method.resourceId === resourceId));
+  if (resourceIds.length === 0 || resolved.some((matches) => matches.length !== 1)) return null;
+  const directionMethods = resolved.map(([method]) => method!);
+  const [firstDirectionMethod, ...remainingDirectionMethods] = directionMethods;
+  if (!firstDirectionMethod) return null;
+  if (value.kind === "expert-sop") {
+    return hasExactKeys(value, ["kind", "directionMethodResourceIds"])
+      ? {
+          kind: "expert-sop",
+          coreMethod,
+          directionMethods: [firstDirectionMethod, ...remainingDirectionMethods],
+        }
+      : null;
+  }
+  if (value.kind === "hybrid"
+    && hasExactKeys(value, ["kind", "directionMethodResourceIds", "novelContribution"])
+    && boundedSafeText(value.novelContribution, MAX_NOVEL_CONTRIBUTION_CHARS)) {
+    return {
+      kind: "hybrid",
+      coreMethod,
+      directionMethods: [firstDirectionMethod, ...remainingDirectionMethods],
+      novelContribution: value.novelContribution.trim(),
+    };
+  }
+  return null;
 };
 
 const acceptCandidateCanvas = (input: {
@@ -498,7 +539,8 @@ const buildDiscoveryPrompt = (input: {
       `Server-approved Method ${method.role} ${method.resourceId}@${method.resourceRevision}:`,
       content,
     ].join("\n")),
-    "Return JSON only: {candidates:[{id,title,text,epistemicStatus:'observed|inferred|speculative',evidenceRefs:[exact fact id],toolAuditIds:[actual returned audit id],deepDiveQuestion?,alert?,canvas?}]}.",
+    "Return JSON only: {candidates:[{id,title,text,epistemicStatus:'observed|inferred|speculative',origin:{kind:'ai-discovery|expert-sop|hybrid',directionMethodResourceIds:[exact server-approved Method resourceId],novelContribution?:string},evidenceRefs:[exact fact id],toolAuditIds:[actual returned audit id],deepDiveQuestion?,alert?,canvas?}]}.",
+    "For core-only discovery use origin.kind='ai-discovery' and directionMethodResourceIds=[]. Cite only the exact loaded expert-direction resourceIds actually used. expert-sop requires one or more such refs. hybrid additionally requires a concise bounded novelContribution. Never invent or duplicate Method refs.",
     "Optional canvas must be an energyiq-insight-canvas plan using only quantitative metric, comparison, or trend blocks bound exactly to supplied Evidence facts. The server may reject blocks locally without rejecting the Finding.",
     "Candidates must already be ordered from highest to lowest incremental value. Zero candidates is valid.",
     `Server-owned identity: ${JSON.stringify({
