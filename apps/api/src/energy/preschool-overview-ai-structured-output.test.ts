@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { toStandardSchema } from "@mastra/core/schema";
 
 import {
   PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1,
@@ -59,6 +60,60 @@ describe("Preschool Overview AI structured output", () => {
     });
     expect(resolveOverviewAiStageStructuredOutput("additional-insights-discovery"))
       .toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2);
+  });
+
+  it("accepts truthful lightweight origin declarations and rejects malformed origin proposals", async () => {
+    const schema = toStandardSchema(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2.schema as never);
+    const candidate = (origin: unknown) => ({
+      candidates: [{
+        id: "candidate-origin",
+        title: "Distinct denominator signal",
+        text: "The intensity pattern differs from total consumption.",
+        epistemicStatus: "inferred",
+        origin,
+        evidenceRefs: ["analysis.summary.usage_kwh"],
+        toolAuditIds: [],
+      }],
+    });
+    const validate = (origin: unknown) => Promise.resolve(schema["~standard"].validate(candidate(origin)));
+
+    await expect(validate({ kind: "ai-discovery", directionMethodResourceIds: [] }))
+      .resolves.toEqual(expect.not.objectContaining({ issues: expect.anything() }));
+    await expect(validate({
+      kind: "expert-sop",
+      directionMethodResourceIds: ["insight-method:workspace-direction"],
+    })).resolves.toEqual(expect.not.objectContaining({ issues: expect.anything() }));
+    await expect(validate({
+      kind: "hybrid",
+      directionMethodResourceIds: ["insight-method:workspace-direction"],
+      novelContribution: "Connect the approved direction with a separately evidenced counter-pattern.",
+    })).resolves.toEqual(expect.not.objectContaining({ issues: expect.anything() }));
+
+    for (const [name, origin] of Object.entries({
+      "ai-extra": { kind: "ai-discovery", directionMethodResourceIds: [], html: "<b>unsafe</b>" },
+      "ai-direction": { kind: "ai-discovery", directionMethodResourceIds: ["insight-method:forged"] },
+      "sop-empty": { kind: "expert-sop", directionMethodResourceIds: [] },
+      "sop-duplicate": {
+        kind: "expert-sop",
+        directionMethodResourceIds: ["insight-method:one", "insight-method:one"],
+      },
+      "sop-novel": {
+        kind: "expert-sop",
+        directionMethodResourceIds: ["insight-method:one"],
+        novelContribution: "Only hybrid may declare this.",
+      },
+      "hybrid-missing-novel": { kind: "hybrid", directionMethodResourceIds: ["insight-method:one"] },
+      "hybrid-empty-direction": { kind: "hybrid", directionMethodResourceIds: [], novelContribution: "Novel." },
+      "hybrid-long-novel": {
+        kind: "hybrid",
+        directionMethodResourceIds: ["insight-method:one"],
+        novelContribution: "x".repeat(801),
+      },
+      forged: { kind: "browser-authored", directionMethodResourceIds: [] },
+    })) {
+      const result = await validate(origin);
+      expect(result, name).toEqual(expect.objectContaining({ issues: expect.any(Array) }));
+    }
   });
 
   it("keeps the v3 schema for history while making v4 the current Section discovery contract", () => {

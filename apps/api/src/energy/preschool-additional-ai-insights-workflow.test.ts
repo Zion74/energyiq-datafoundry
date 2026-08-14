@@ -4,6 +4,7 @@ import {
   type AdditionalAiInsightsArtifact,
 } from "@datafoundry/contracts";
 import { createMetadataStore, type UserRecord } from "@datafoundry/metadata";
+import { toStandardSchema } from "@mastra/core/schema";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +17,7 @@ import {
 import { ensureEnergyIqBootstrap, PRESCHOOL_WORKSPACE_ID } from "./energy-bootstrap.js";
 import { createPreschoolAdditionalAiInsightsWorkflow } from "./preschool-additional-ai-insights-workflow.js";
 import { composePreschoolOverviewAiReadModel } from "./preschool-overview-ai-read-model.js";
+import { PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2 } from "./preschool-overview-ai-structured-output.js";
 
 describe("Preschool Additional AI Insights workflow", () => {
   it("runs independent evaluation attempts through the real acceptance seam without current Artifact queue/cache", async () => {
@@ -46,6 +48,47 @@ describe("Preschool Additional AI Insights workflow", () => {
       expect(runDiscovery).toHaveBeenCalledTimes(2);
       expect([first.runId, second.runId]).toEqual(["evaluation-run-1", "evaluation-run-2"]);
       expect(harness.metadata.energyIq.overviewAiArtifacts.find(harness.additionalIdentity)).toBeUndefined();
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("carries the prompt origin declaration through strict schema parsing and server acceptance", async () => {
+    const harness = createHarness();
+    try {
+      const proposed = {
+        candidates: [candidate("candidate-origin-contract", "fact:standby-share", {
+          origin: { kind: "ai-discovery", directionMethodResourceIds: [] },
+        })],
+      };
+      const strictSchema = toStandardSchema(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2.schema as never);
+      const runDiscovery = vi.fn(async ({ prompt, runId, sessionId }) => {
+        expect(prompt).toContain("origin:{kind:'ai-discovery|expert-sop|hybrid'");
+        const validation = await strictSchema["~standard"].validate(proposed);
+        expect(validation).not.toEqual(expect.objectContaining({ issues: expect.anything() }));
+        return { answer: JSON.stringify(proposed), runId, sessionId };
+      });
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        runDiscovery,
+      });
+
+      const artifact = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "origin-contract-run",
+        sessionId: "origin-contract-session",
+      });
+
+      expect(artifact).toMatchObject({
+        status: "available",
+        publication: { discoveredCount: 1, acceptedCount: 1, rejectedCount: 0 },
+        findings: [{
+          id: "additional:candidate-origin-contract",
+          origin: { kind: "ai-discovery", directionMethods: [] },
+        }],
+      });
     } finally {
       harness.close();
     }

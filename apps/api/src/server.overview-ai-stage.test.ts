@@ -41,11 +41,17 @@ import { MAX_PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_CHARS } from "./energy/presc
 import { completeProtocolRun } from "./protocol-run-completion.js";
 
 describe("Overview AI server stage options", () => {
-  it("normalizes only local Additional structured-output root failures", () => {
+  it("normalizes only typed local Additional structured-output failures", () => {
     expect(normalizeOverviewAiStageRuntimeError(
       "additional-insights-discovery",
       new Error("Structured Output root undefined"),
     ).message).toBe("PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID");
+    const schemaValidationError = new Error("candidates.0 additional properties");
+    schemaValidationError.name = "AI_TypeValidationError";
+    expect(normalizeOverviewAiStageRuntimeError(
+      "additional-insights-discovery",
+      schemaValidationError,
+    ).message).toBe("PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_SCHEMA_INVALID");
     expect(normalizeOverviewAiStageRuntimeError(
       "additional-insights-discovery",
       new Error("Provider does not support structured_output for this model"),
@@ -1218,13 +1224,13 @@ const additionalIdentity = (): EnergyIqOverviewAiArtifactIdentity => ({
   modelProfileRevision: 7,
   outputContractRevision: "energyiq-additional-ai-insights-v2",
   validatorRevision: "additional-insights-acceptance-v3",
-  workflowRevision: "additional-insights-discover-accept-publish-v4",
-  investigatorPromptRevision: "additional-insights-discovery-v4",
+  workflowRevision: "additional-insights-discover-accept-publish-v5",
+  investigatorPromptRevision: "additional-insights-discovery-v5",
   editorPromptRevision: "additional-insights-publication-v2",
   methodSkillId: "energyiq-open-discovery",
   methodSkillRevision: "1.0.0",
   artifactKind: "autonomous-insights",
-  identityContractRevision: "additional-insights-v4",
+  identityContractRevision: "additional-insights-v5",
   methodSetId: "preschool-additional-insights-current",
   methodSetRevision: "v1",
   methodSetFingerprint: `sha256:${"a".repeat(64)}`,

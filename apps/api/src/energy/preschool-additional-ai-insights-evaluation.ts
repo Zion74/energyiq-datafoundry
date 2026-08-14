@@ -29,6 +29,8 @@ import { resolveWorkspaceDefaultModelProfileSnapshot } from "../workspace-model-
 export const MAX_PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_CHARS = 64_000;
 export const PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID =
   "PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID";
+export const PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_SCHEMA_INVALID =
+  "PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_SCHEMA_INVALID";
 const EVALUATION_CLAIM_LEASE_MS = 5 * 60_000;
 const EVALUATION_CLAIM_HEARTBEAT_MS = 60_000;
 
@@ -558,7 +560,12 @@ const evaluateMachineGate = (
     publicationRevision: identity.publicationRevision,
     canvasRevision: identity.canvasRevision,
   };
-  const contractBoundary = additionalAiInsightsArtifactIsValid({ value: artifact, expected, expectedMethods });
+  const honestEmpty = artifact.status !== "empty"
+    || (artifact.publication.discoveredCount === 0
+      && artifact.publication.acceptedCount === 0
+      && artifact.publication.rejectedCount === 0);
+  const contractBoundary = honestEmpty
+    && additionalAiInsightsArtifactIsValid({ value: artifact, expected, expectedMethods });
   const factIds = new Set(artifact.evidenceLineage.facts.map(({ id }) => id));
   const factBoundary = artifact.findings.every(({ evidenceRefs }) => evidenceRefs.every((ref) => factIds.has(ref)));
   const provenance = artifact.findings.every(({ origin, toolAuditIds }) => (
@@ -769,7 +776,8 @@ const completedAttempt = (
 const failureStage = (code: string): "provider" | "structured-output" | "machine-gate" => (
   (code === "PRESCHOOL_ADDITIONAL_AI_DISCOVERY_RESULT_INVALID"
     || code === "PRESCHOOL_ADDITIONAL_AI_PUBLICATION_INVALID"
-    || code === PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID)
+    || code === PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID
+    || code === PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_SCHEMA_INVALID)
     ? "structured-output"
     : /MACHINE_GATE/u.test(code)
       ? "machine-gate"

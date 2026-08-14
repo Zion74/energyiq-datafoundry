@@ -921,3 +921,19 @@ Artifact 与 Evidence lineage。生产 `RUN_FINISHED` finalizer 自动提交 gen
 历史 v3 terminal Artifact/评估记录只读兼容，但不能作为 current live 结果；旧 running reservation 保留其 v3 identity/protocol，并在 current v4
 入口 fail closed，不能用 v4 行为续跑后冒充 v3。Structured Output 缺失或 root undefined 被规范化为该 attempt 的 structured-output 局部失败，
 不拖垮 pass@3 兄弟 attempts。此 checkpoint 只证明自动化工程边界；真实 Provider 复跑、浏览器恢复和人工增量价值评审仍由集成主线执行。
+
+### 18.12 Additional origin 与 honest-empty 工程修正 checkpoint
+
+第二轮真实 Provider 证据确认了 Prompt 与 strict Structured Output schema 的合同矛盾：Prompt 要求每个候选声明轻量 `origin`，旧 schema 却因
+`additionalProperties: false` 拒绝该字段；省略 `origin` 的候选随后又会被 acceptance 全部局部拒绝。current Additional identity 因此旋转为
+`additional-insights-v5`，workflow 为 `additional-insights-discover-accept-publish-v5`，discovery prompt 为
+`additional-insights-discovery-v5`。输出 v2、validator v3、capability v1、publication v2、canvas v2、Method set 与 Pack 均未改变。
+
+v5 strict schema 只接受受限的 `ai-discovery`、`expert-sop` 或 `hybrid` origin declaration；模型只提交 kind、实际使用的稳定 Method resource IDs，
+以及 hybrid 才允许的有界 novel contribution。服务端仍以本次实际加载的 Method 白名单解析完整可信 provenance，未知、未加载、重复或不合法引用
+逐候选拒绝，不信任模型提交完整 Method 对象，也不放宽 Evidence factuality、工具或 HTML/SQL/URL 边界。
+
+`candidates: []` 仍是合法 honest empty；但 discovered 大于零且 accepted 为零的 attempt 不能通过 machine gate，也不能进入 blind review pack。
+稳定的本地 Structured Output schema validation type 被归一为该 attempt 的 `structured-output` 局部失败；Provider 自身不支持 structured output 的
+错误仍归 Provider failure。历史 v4 terminal Artifact/评估保持只读，v4 running reservation 在 v5 current 入口 fail closed。此 checkpoint 仅证明
+本地自动化工程门；尚未在本 worktree 调用真实 Provider、执行新 pass@3 人工盲评或完成浏览器与人工价值验收。

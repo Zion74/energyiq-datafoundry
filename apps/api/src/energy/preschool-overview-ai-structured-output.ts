@@ -430,10 +430,56 @@ const additionalCanvasPlan: JsonSchema = {
   },
 };
 
+const additionalOriginDirectionMethodResourceIds: JsonSchema = {
+  type: "array",
+  minItems: 1,
+  maxItems: 8,
+  uniqueItems: true,
+  items: nonEmptyString,
+};
+
+const additionalOriginProposal: JsonSchema = {
+  type: "object",
+  oneOf: [{
+    type: "object",
+    additionalProperties: false,
+    required: ["kind", "directionMethodResourceIds"],
+    properties: {
+      kind: { type: "string", enum: ["ai-discovery"] },
+      directionMethodResourceIds: {
+        type: "array",
+        minItems: 0,
+        maxItems: 0,
+        uniqueItems: true,
+        items: nonEmptyString,
+      },
+    },
+  }, {
+    type: "object",
+    additionalProperties: false,
+    required: ["kind", "directionMethodResourceIds"],
+    properties: {
+      kind: { type: "string", enum: ["expert-sop"] },
+      directionMethodResourceIds: additionalOriginDirectionMethodResourceIds,
+    },
+  }, {
+    type: "object",
+    additionalProperties: false,
+    required: ["kind", "directionMethodResourceIds", "novelContribution"],
+    properties: {
+      kind: { type: "string", enum: ["hybrid"] },
+      directionMethodResourceIds: additionalOriginDirectionMethodResourceIds,
+      novelContribution: { type: "string", minLength: 1, maxLength: 800 },
+    },
+  }],
+};
+
 const additionalCandidateV2: JsonSchema = {
   ...additionalCandidate,
+  required: [...additionalCandidate.required!, "origin"],
   properties: {
     ...additionalCandidate.properties,
+    origin: additionalOriginProposal,
     canvas: additionalCanvasPlan,
   },
 };

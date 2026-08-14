@@ -569,7 +569,8 @@ export class EnergyIqAdditionalInsightEvaluationStore {
     const completed = record.attempts.filter((attempt): attempt is AdditionalAiInsightEvaluationAttempt => (
       attempt.status === "completed"
     ));
-    const shuffled = [...completed].sort((left, right) => blindSortKey(record.evaluationId, left.attemptId)
+    const reviewable = completed.filter(({ machineGate }) => machineGate.status === "passed");
+    const shuffled = [...reviewable].sort((left, right) => blindSortKey(record.evaluationId, left.attemptId)
       .localeCompare(blindSortKey(record.evaluationId, right.attemptId)));
     record.reviewPack = {
       revision: "additional-insight-blind-review-v1",
@@ -605,7 +606,7 @@ export class EnergyIqAdditionalInsightEvaluationStore {
       reviewToken: blindToken(record.evaluationId, attempt.attemptId),
       attemptId: attempt.attemptId,
     }));
-    record.status = completed.length > 0 ? "awaiting-human-review" : "failed";
+    record.status = reviewable.length > 0 ? "awaiting-human-review" : "failed";
     record.updatedAt = input.now ?? new Date().toISOString();
     requireEvaluation(record);
     const updated = this.db.prepare(`
@@ -676,8 +677,9 @@ export class EnergyIqAdditionalInsightEvaluationStore {
     const completed = record.attempts.filter((candidate): candidate is AdditionalAiInsightEvaluationAttempt => (
       candidate.status === "completed"
     ));
+    const reviewable = completed.filter(({ machineGate }) => machineGate.status === "passed");
     if (record.attempts.every(({ status }) => status !== "running")
-      && completed.every(({ humanReview: review }) => review !== undefined)) {
+      && reviewable.every(({ humanReview: review }) => review !== undefined)) {
       record.status = evaluateAdditionalAiInsightPassAt3(record) === "passed" ? "passed" : "failed";
     } else {
       record.status = "awaiting-human-review";
@@ -1386,12 +1388,15 @@ const supportedTargetIdentity = (target: AdditionalAiInsightEvaluationTarget): b
   || (target.artifactIdentityRevision === "additional-insights-v4"
     && target.workflowRevision === "additional-insights-discover-accept-publish-v4"
     && target.promptRevision === "additional-insights-discovery-v4")
+  || (target.artifactIdentityRevision === "additional-insights-v5"
+    && target.workflowRevision === "additional-insights-discover-accept-publish-v5"
+    && target.promptRevision === "additional-insights-discovery-v5")
 );
 
 const requireCurrentTargetIdentity = (target: AdditionalAiInsightEvaluationTarget): void => {
-  if (target.artifactIdentityRevision !== "additional-insights-v4"
-    || target.workflowRevision !== "additional-insights-discover-accept-publish-v4"
-    || target.promptRevision !== "additional-insights-discovery-v4") {
+  if (target.artifactIdentityRevision !== "additional-insights-v5"
+    || target.workflowRevision !== "additional-insights-discover-accept-publish-v5"
+    || target.promptRevision !== "additional-insights-discovery-v5") {
     throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_BEHAVIOR_NOT_CURRENT");
   }
 };

@@ -175,13 +175,13 @@ describe("createOverviewAiArtifactIdentity", () => {
 
     expect(identity).toMatchObject({
       artifactKind: "autonomous-insights",
-      identityContractRevision: "additional-insights-v4",
+      identityContractRevision: "additional-insights-v5",
       analysisPackId: "preschool-additional-insights-pack",
       analysisPackRevision: "v1",
       outputContractRevision: "energyiq-additional-ai-insights-v2",
       validatorRevision: "additional-insights-acceptance-v3",
-      workflowRevision: "additional-insights-discover-accept-publish-v4",
-      investigatorPromptRevision: "additional-insights-discovery-v4",
+      workflowRevision: "additional-insights-discover-accept-publish-v5",
+      investigatorPromptRevision: "additional-insights-discovery-v5",
       editorPromptRevision: "additional-insights-publication-v2",
       methodSkillId: "energyiq-open-discovery",
       methodSkillRevision: "1.0.0",
@@ -195,6 +195,12 @@ describe("createOverviewAiArtifactIdentity", () => {
     expect(identity).not.toHaveProperty("targetId");
     expect(identity.methodSetFingerprint).not.toBe(identity.methodSkillRevision);
     expect(isCurrentPreschoolAdditionalAiInsightArtifactIdentity(identity)).toBe(true);
+    expect(isCurrentPreschoolAdditionalAiInsightArtifactIdentity({
+      ...identity,
+      identityContractRevision: "additional-insights-v4",
+      workflowRevision: "additional-insights-discover-accept-publish-v4",
+      investigatorPromptRevision: "additional-insights-discovery-v4",
+    })).toBe(false);
     for (const [field, value] of [
       ["analysisPackId", "other-pack"],
       ["analysisPackRevision", "v99"],

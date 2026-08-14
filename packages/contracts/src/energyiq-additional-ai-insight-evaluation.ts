@@ -255,11 +255,12 @@ export const evaluateAdditionalAiInsightPassAt3 = (
 ): AdditionalAiInsightPassAt3Result => {
   if (!evaluationBatchIsValid(batch, false)) return "failed";
   const completed = batch.attempts.filter(isCompletedAttempt);
+  const reviewable = completed.filter(({ machineGate }) => machineGate.status === "passed");
   if (batch.attempts.some(({ status }) => status === "running")) return "pending-human-review";
-  if (completed.length < 2) return "failed";
-  if (completed.some(({ humanReview }) => !humanReview)) return "pending-human-review";
-  const passing = completed.filter(({ machineGate, humanReview }) => (
-    machineGate.status === "passed" && additionalAiInsightHumanReviewIsPassing(humanReview!)
+  if (reviewable.length < 2) return "failed";
+  if (reviewable.some(({ humanReview }) => !humanReview)) return "pending-human-review";
+  const passing = reviewable.filter(({ humanReview }) => (
+    additionalAiInsightHumanReviewIsPassing(humanReview!)
   )).length;
   return passing >= 2 ? "passed" : "failed";
 };
@@ -287,6 +288,7 @@ const evaluationBatchIsValid = (
     || !sameNumbers(attempts.map(({ ordinal }) => ordinal), [1, 2, 3])
     || !unique(attempts.map(({ attemptId }) => attemptId))) return false;
   const completed = attempts.filter(isCompletedAttempt);
+  const reviewable = completed.filter(({ machineGate }) => machineGate.status === "passed");
   if (!unique(attempts.map(({ providerRunId }) => providerRunId))
     || !unique(attempts.map(({ providerSessionId }) => providerSessionId))
     || !unique(attempts.map(({ artifact }) => artifact.artifactId))
@@ -303,7 +305,7 @@ const evaluationBatchIsValid = (
   const pendingFinalization = value.status === "running" && reviewAudit.length === 0 && entries.length === 0;
   if (!pendingFinalization
     && (!sameStrings(reviewAudit.map(({ reviewToken }) => reviewToken), entries.map(({ reviewToken }) => reviewToken))
-      || !sameStrings(reviewAudit.map(({ attemptId }) => attemptId), completed.map(({ attemptId }) => attemptId)))) return false;
+      || !sameStrings(reviewAudit.map(({ attemptId }) => attemptId), reviewable.map(({ attemptId }) => attemptId)))) return false;
 
   if (value.approval !== undefined) {
     if (!approvalIsValid(value.approval)
@@ -322,10 +324,9 @@ const evaluationBatchIsValid = (
   }
   if (!validateLifecycleStatus) return true;
   const hasRunning = attempts.some(({ status }) => status === "running");
-  const allCompletedReviewed = completed.every(({ humanReview }) => humanReview !== undefined);
-  const passingCompleted = completed.filter(({ machineGate, humanReview }) => (
-    machineGate.status === "passed"
-      && humanReview !== undefined
+  const allReviewableCompletedReviewed = reviewable.every(({ humanReview }) => humanReview !== undefined);
+  const passingCompleted = reviewable.filter(({ humanReview }) => (
+    humanReview !== undefined
       && additionalAiInsightHumanReviewIsPassing(humanReview)
   )).length;
   if (value.status === "running") {
@@ -338,19 +339,19 @@ const evaluationBatchIsValid = (
     return !hasRunning
       && value.status === "awaiting-human-review"
       && value.approval === undefined
-      && completed.length > 0
-      && !allCompletedReviewed;
+      && reviewable.length > 0
+      && !allReviewableCompletedReviewed;
   }
   if (value.status === "failed") {
     return value.approval === undefined
-      && (completed.length === 0 || (allCompletedReviewed && passingCompleted < 2));
+      && (reviewable.length === 0 || (allReviewableCompletedReviewed && passingCompleted < 2));
   }
   if (value.status === "passed") {
-    return value.approval === undefined && allCompletedReviewed && passingCompleted >= 2;
+    return value.approval === undefined && allReviewableCompletedReviewed && passingCompleted >= 2;
   }
   return value.status === "approved-candidate"
     && value.approval !== undefined
-    && allCompletedReviewed
+    && allReviewableCompletedReviewed
     && passingCompleted >= 2;
 };
 

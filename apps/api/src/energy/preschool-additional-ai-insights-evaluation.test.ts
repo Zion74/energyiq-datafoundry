@@ -22,6 +22,7 @@ import {
 import {
   createPreschoolAdditionalAiInsightsEvaluationWorkflow,
   PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID,
+  PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_SCHEMA_INVALID,
 } from "./preschool-additional-ai-insights-evaluation.js";
 import { resolveWorkspaceDefaultModelProfileSnapshot } from "../workspace-model-profile-resolver.js";
 
@@ -80,6 +81,46 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
         })).rejects.toThrow(/PRESCHOOL_ADDITIONAL_EVALUATION_IDEMPOTENCY_CONFLICT/);
       }
       expect(runAttempt).toHaveBeenCalledTimes(3);
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("keeps honest zero-discovery empty reviewable but excludes all-rejected discovery from the machine-passed review pack", async () => {
+    const harness = createHarness();
+    try {
+      let invocation = 0;
+      const runAttempt = vi.fn(async ({ identity, runId }: {
+        identity: PreschoolAdditionalAiInsightArtifactIdentity;
+        runId: string;
+      }) => {
+        invocation += 1;
+        if (invocation === 1) return emptyArtifact(identity, runId, 4);
+        if (invocation === 2) return emptyArtifact(identity, runId, 0);
+        return artifact(identity, runId, `evidence:${runId}`, `finding-${runId}`);
+      });
+      const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
+        metadataStore: harness.metadata,
+        runAttempt,
+        runTransition: vi.fn(),
+      });
+
+      const result = await workflow.executePassAt3({
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        idempotencyKey: "honest-empty-vs-all-rejected",
+      });
+      const allRejected = result.attempts.find(({ ordinal }) => ordinal === 1)!;
+      const honestEmpty = result.attempts.find(({ ordinal }) => ordinal === 2)!;
+
+      expect(allRejected).toMatchObject({ status: "completed", machineGate: { status: "failed" } });
+      expect(honestEmpty).toMatchObject({ status: "completed", machineGate: { status: "passed" } });
+      expect(result.reviewAudit.map(({ attemptId }) => attemptId)).not.toContain(allRejected.attemptId);
+      expect(result.reviewAudit.map(({ attemptId }) => attemptId)).toContain(honestEmpty.attemptId);
+      expect(result.reviewPack.entries).toHaveLength(2);
+      expect(result.reviewPack.entries).toEqual(expect.arrayContaining([
+        expect.objectContaining({ findings: [] }),
+      ]));
     } finally {
       harness.close();
     }
@@ -458,6 +499,47 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
     }
   });
 
+  it("classifies a stable local schema validation failure without collapsing sibling attempts", async () => {
+    const harness = createHarness();
+    try {
+      let invocation = 0;
+      const runAttempt = vi.fn(async ({ identity, runId }: {
+        identity: PreschoolAdditionalAiInsightArtifactIdentity;
+        runId: string;
+      }) => {
+        invocation += 1;
+        if (invocation === 1) throw new Error(PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_SCHEMA_INVALID);
+        return artifact(identity, runId, `evidence:${invocation}`, `finding-${invocation}`);
+      });
+      const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
+        metadataStore: harness.metadata,
+        runAttempt,
+        runTransition: vi.fn(),
+      });
+
+      const result = await workflow.executePassAt3({
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        idempotencyKey: "schema-failure-key",
+      });
+
+      expect(runAttempt).toHaveBeenCalledTimes(3);
+      expect(result.attempts).toEqual([
+        expect.objectContaining({
+          ordinal: 1,
+          status: "failed",
+          failureStage: "structured-output",
+          errorCode: PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_SCHEMA_INVALID,
+        }),
+        expect.objectContaining({ ordinal: 2, status: "completed" }),
+        expect.objectContaining({ ordinal: 3, status: "completed" }),
+      ]);
+      expect(result.reviewPack.entries).toHaveLength(2);
+    } finally {
+      harness.close();
+    }
+  });
+
   it("keeps Provider structured-output capability failures classified as Provider failures", async () => {
     const harness = createHarness();
     try {
@@ -492,7 +574,7 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
     }
   });
 
-  it("fails closed running v3 discovery and transition reservations instead of resuming them with v4 behavior", async () => {
+  it("fails closed running v4 discovery and transition reservations instead of resuming them with v5 behavior", async () => {
     const harness = createHarness();
     try {
       const runAttempt = vi.fn(async ({ identity, runId }: {
@@ -533,7 +615,7 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
         methodResources: methodSet.resources,
         modelProfileSnapshot,
       });
-      downgradeEvaluationReservationToV3(harness.metadata.db, "running-v3-evaluation");
+      downgradeEvaluationReservationToV4(harness.metadata.db, "running-v3-evaluation");
 
       const transitionBase = createBaseIdentity("snapshot-b", "release-b");
       const transitionIdentity = createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity: transitionBase });
@@ -552,8 +634,8 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
         methodResources: methodSet.resources,
         modelProfileSnapshot,
       });
-      downgradeEvaluationReservationToV3(harness.metadata.db, previous.evaluationId);
-      downgradeTransitionReservationToV3(harness.metadata.db, "running-v3-transition");
+      downgradeEvaluationReservationToV4(harness.metadata.db, previous.evaluationId);
+      downgradeTransitionReservationToV4(harness.metadata.db, "running-v3-transition");
       runAttempt.mockClear();
       runTransition.mockClear();
 
@@ -1383,27 +1465,27 @@ const evaluationTarget = (
   methodSetFingerprint: identity.methodSetFingerprint,
 });
 
-const v3RuntimeIdentity = (
+const v4RuntimeIdentity = (
   identity: Record<string, unknown>,
 ): Record<string, unknown> => ({
   ...identity,
-  identityContractRevision: "additional-insights-v3",
-  workflowRevision: "additional-insights-discover-accept-publish-v3",
-  investigatorPromptRevision: "additional-insights-discovery-v3",
+  identityContractRevision: "additional-insights-v4",
+  workflowRevision: "additional-insights-discover-accept-publish-v4",
+  investigatorPromptRevision: "additional-insights-discovery-v4",
 });
 
-const v3EvaluationTarget = (
+const v4EvaluationTarget = (
   target: AdditionalAiInsightEvaluationTarget,
   identity: Record<string, unknown>,
 ): AdditionalAiInsightEvaluationTarget => ({
   ...target,
-  artifactIdentityRevision: "additional-insights-v3",
+  artifactIdentityRevision: "additional-insights-v4",
   artifactIdentityHash: `sha256:${createHash("sha256").update(JSON.stringify(identity)).digest("hex")}`,
-  workflowRevision: "additional-insights-discover-accept-publish-v3",
-  promptRevision: "additional-insights-discovery-v3",
+  workflowRevision: "additional-insights-discover-accept-publish-v4",
+  promptRevision: "additional-insights-discovery-v4",
 });
 
-const downgradeEvaluationReservationToV3 = (
+const downgradeEvaluationReservationToV4 = (
   db: DatabaseSync,
   evaluationId: string,
 ): void => {
@@ -1414,14 +1496,14 @@ const downgradeEvaluationReservationToV3 = (
     runtimeIdentity: Record<string, unknown>;
   };
   const record = JSON.parse(row.record_json) as { target: AdditionalAiInsightEvaluationTarget };
-  reservation.runtimeIdentity = v3RuntimeIdentity(reservation.runtimeIdentity);
-  reservation.target = v3EvaluationTarget(reservation.target, reservation.runtimeIdentity);
+  reservation.runtimeIdentity = v4RuntimeIdentity(reservation.runtimeIdentity);
+  reservation.target = v4EvaluationTarget(reservation.target, reservation.runtimeIdentity);
   record.target = reservation.target;
   db.prepare("UPDATE energyiq_additional_insight_evaluations SET reservation_json = ?, record_json = ? WHERE id = ?")
     .run(JSON.stringify(reservation), JSON.stringify(record), evaluationId);
 };
 
-const downgradeTransitionReservationToV3 = (
+const downgradeTransitionReservationToV4 = (
   db: DatabaseSync,
   transitionId: string,
 ): void => {
@@ -1441,8 +1523,8 @@ const downgradeTransitionReservationToV3 = (
   reservation.previousTarget = (JSON.parse(previousRow.record_json) as {
     target: AdditionalAiInsightEvaluationTarget;
   }).target;
-  reservation.runtimeIdentity = v3RuntimeIdentity(reservation.runtimeIdentity);
-  reservation.currentTarget = v3EvaluationTarget(reservation.currentTarget, reservation.runtimeIdentity);
+  reservation.runtimeIdentity = v4RuntimeIdentity(reservation.runtimeIdentity);
+  reservation.currentTarget = v4EvaluationTarget(reservation.currentTarget, reservation.runtimeIdentity);
   reservation.currentArtifactIdentityHash = `sha256:${createHash("sha256").update(JSON.stringify({
     contractRevision: "additional-insight-transition-artifact-v1",
     target: reservation.currentTarget,
@@ -1532,6 +1614,32 @@ const artifact = (
       acceptedCandidateIds: [findingId],
       rejectedCandidateIds: [],
       publishedCandidateIds: [findingId],
+      suppressedCandidateIds: [],
+    },
+  };
+};
+
+const emptyArtifact = (
+  identity: PreschoolAdditionalAiInsightArtifactIdentity,
+  runId: string,
+  discoveredCount: number,
+): AdditionalAiInsightsArtifact => {
+  const rejectedCandidateIds = Array.from({ length: discoveredCount }, (_, index) => `rejected-${index + 1}`);
+  const base = artifact(identity, runId, "unused-evidence", "unused-finding");
+  return {
+    ...base,
+    status: "empty",
+    findings: [],
+    publication: {
+      ...base.publication,
+      discoveredCount,
+      acceptedCount: 0,
+      rejectedCount: discoveredCount,
+      publishedCount: 0,
+      sourceOrderCandidateIds: [...rejectedCandidateIds],
+      acceptedCandidateIds: [],
+      rejectedCandidateIds,
+      publishedCandidateIds: [],
       suppressedCandidateIds: [],
     },
   };

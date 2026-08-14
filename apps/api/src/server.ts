@@ -114,6 +114,7 @@ import {
   createPreschoolAdditionalAiInsightsEvaluationWorkflow,
   MAX_PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_CHARS,
   PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID,
+  PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_SCHEMA_INVALID,
 } from "./energy/preschool-additional-ai-insights-evaluation.js";
 import {
   createPreschoolAdditionalAiInsightsWorkflow,
@@ -876,7 +877,23 @@ export const normalizeOverviewAiStageRuntimeError = (
         .test(message))) {
     return new Error(PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID);
   }
+  if ((stage === "additional-insights-discovery" || stage === "additional-insights-transition")
+    && errorChainIncludesName(error, "AI_TypeValidationError")) {
+    return new Error(PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_SCHEMA_INVALID);
+  }
   return error instanceof Error ? error : new Error(message);
+};
+
+const errorChainIncludesName = (error: unknown, expectedName: string): boolean => {
+  let current: unknown = error;
+  const seen = new Set<unknown>();
+  for (let depth = 0; depth < 6 && typeof current === "object" && current !== null; depth += 1) {
+    if (seen.has(current)) return false;
+    seen.add(current);
+    if ("name" in current && current.name === expectedName) return true;
+    current = "cause" in current ? current.cause : undefined;
+  }
+  return false;
 };
 
 export const collectOverviewAiText = (events: ReadonlyArray<Record<string, unknown>>): string =>
@@ -1788,7 +1805,12 @@ export class DataFoundryAgUiAgent extends AbstractAgent {
 
           },
           error: (error: unknown) => {
-            const message = error instanceof Error ? error.message : "Unknown AG-UI agent error";
+            const normalizedError = this.input.overviewAiStage
+              ? normalizeOverviewAiStageRuntimeError(this.input.overviewAiStage, error)
+              : error;
+            const message = normalizedError instanceof Error
+              ? normalizedError.message
+              : "Unknown AG-UI agent error";
             const event: BaseEvent = {
               type: EventType.RUN_ERROR,
               message,
