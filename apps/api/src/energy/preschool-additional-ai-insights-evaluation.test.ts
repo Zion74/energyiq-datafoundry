@@ -19,6 +19,7 @@ import {
   type PreschoolAdditionalAiInsightArtifactIdentity,
 } from "./overview-ai-artifact.js";
 import { createPreschoolAdditionalAiInsightsEvaluationWorkflow } from "./preschool-additional-ai-insights-evaluation.js";
+import { resolveWorkspaceDefaultModelProfileSnapshot } from "../workspace-model-profile-resolver.js";
 
 describe("Preschool Additional AI Insights evaluation workflow", () => {
   it("runs pass@3 with three independent Provider identities, no current Artifact reuse, and idempotent replay", async () => {
@@ -176,18 +177,40 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
         attempts,
         runtimeIdentity: originalIdentity,
         methodResources: originalMethodSet.resources,
+        modelProfileSnapshot: resolveWorkspaceDefaultModelProfileSnapshot(harness.metadata),
       });
       const originalArtifactIds = reserved.record.attempts.map(({ artifact }) => artifact.artifactId);
-      const runAttempt = vi.fn(async ({ identity, runId, methodResources }) => {
+      const runAttempt = vi.fn(async ({ identity, runId, methodResources, modelProfileSnapshot }) => {
         expect(identity.modelProfileRevision).toBe(originalIdentity.modelProfileRevision);
         expect(identity.methodSetFingerprint).toBe(originalIdentity.methodSetFingerprint);
         expect(methodResources).toEqual(originalMethodSet.resources);
+        expect(modelProfileSnapshot).toMatchObject({
+          bindingRevision: originalIdentity.modelProfileRevision,
+          profiles: [{ resource: { id: "profile-a", payload: { modelName: "model-a" } } }],
+        });
         return artifact(identity, runId, `evidence:${runId}`, `finding-${runId}`);
       });
       const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
         metadataStore: harness.metadata,
         runAttempt,
         runTransition: vi.fn(),
+      });
+      harness.metadata.configResources.upsert({
+        id: "profile-b",
+        workspace_id: "default",
+        user_id: harness.user.id,
+        kind: "model-profile",
+        name: "Profile B",
+        payload: { provider: "openai-compatible", modelName: "model-b", baseUrl: "https://profile-b.test/v1" },
+        default_enabled: true,
+        status: "connected",
+      });
+      harness.metadata.workspaceDefaultModelProfiles.set({
+        workspace_id: "default",
+        profile_id: "profile-b",
+        profile_owner_user_id: harness.user.id,
+        configured_by_user_id: harness.user.id,
+        expected_revision: originalIdentity.modelProfileRevision,
       });
       const rotatedBaseIdentity = {
         ...harness.baseIdentity,
@@ -199,6 +222,7 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
         idempotencyKey: "rotation-key",
       });
       expect(runAttempt).toHaveBeenCalledTimes(3);
+      expect(recovered.status).toBe("awaiting-human-review");
       expect(recovered.target).toEqual(evaluationTarget(originalIdentity));
       expect(recovered.attempts.map(({ artifact }) => artifact.artifactId)).toEqual(originalArtifactIds);
     } finally {
@@ -536,6 +560,142 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
     }
   });
 
+  it("waits on a persisted active Provider run after lease takeover and resumes the same run identity", async () => {
+    const harness = createHarness();
+    try {
+      const identity = createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity: harness.baseIdentity });
+      const methodSet = resolveCurrentAdditionalAiInsightMethodSet(harness.baseIdentity.workspaceId);
+      const attempts = [1, 2, 3].map((ordinal) => ({
+        attemptId: `fenced-attempt-${ordinal}`,
+        ordinal,
+        providerRunId: `fenced-run-${ordinal}`,
+        providerSessionId: `fenced-session-${ordinal}`,
+      }));
+      harness.metadata.energyIq.additionalInsightEvaluations.reserveEvaluation({
+        evaluationId: "fenced-evaluation",
+        idempotencyKey: "fenced-evaluation-key",
+        requestedBy: harness.user.id,
+        target: evaluationTarget(identity),
+        attempts,
+        runtimeIdentity: identity,
+        methodResources: methodSet.resources,
+        modelProfileSnapshot: resolveWorkspaceDefaultModelProfileSnapshot(harness.metadata),
+      });
+      harness.metadata.sessions.create({
+        user_id: harness.user.id,
+        id: attempts[0]!.providerSessionId,
+        workspace_id: identity.workspaceId,
+        project_id: identity.projectId,
+      });
+      harness.metadata.runs.create({
+        user_id: harness.user.id,
+        id: attempts[0]!.providerRunId,
+        session_id: attempts[0]!.providerSessionId,
+        request_fingerprint: "server-owned-fingerprint",
+        user_input: "reserved evaluation attempt",
+        status: "running",
+        model_name: "model-a",
+      });
+      const runAttempt = vi.fn(async ({ identity: attemptIdentity, runId }) => (
+        artifact(attemptIdentity, runId, `evidence:${runId}`, `finding-${runId}`)
+      ));
+      const runTransition = vi.fn(async ({ runId, sessionId }) => ({
+        answer: JSON.stringify({ outcomes: [{ transition: "no-material-change" }] }),
+        runId,
+        sessionId,
+      }));
+      const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
+        metadataStore: harness.metadata,
+        runAttempt,
+        runTransition,
+      });
+      const request = {
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        idempotencyKey: "fenced-evaluation-key",
+      };
+      const waiting = await workflow.executePassAt3(request);
+      expect(waiting.status).toBe("running");
+      expect(runAttempt.mock.calls.map(([call]) => call.runId)).toEqual(["fenced-run-2", "fenced-run-3"]);
+
+      harness.metadata.runs.updateStatus({
+        user_id: harness.user.id,
+        run_id: "fenced-run-1",
+        status: "completed",
+      });
+      harness.metadata.db.prepare(`
+        DELETE FROM energyiq_additional_insight_evaluation_claims
+        WHERE evaluation_id = ? AND attempt_id = ?
+      `).run("fenced-evaluation", "fenced-attempt-1");
+      const recovered = await workflow.executePassAt3(request);
+      expect(recovered.status).toBe("awaiting-human-review");
+      expect(runAttempt.mock.calls.map(([call]) => call.runId)).toEqual([
+        "fenced-run-2", "fenced-run-3", "fenced-run-1",
+      ]);
+      expect(new Set(recovered.attempts.map(({ providerRunId }) => providerRunId))).toHaveLength(3);
+
+      const previous = reviewAllPassing(harness, recovered);
+      const previousAttempt = previous.attempts.find((attempt) => attempt.status === "completed")!;
+      const nextBaseIdentity = createBaseIdentity("snapshot-b", "release-b");
+      const nextIdentity = createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity: nextBaseIdentity });
+      harness.metadata.energyIq.additionalInsightEvaluations.reserveTransition({
+        transitionId: "fenced-transition",
+        idempotencyKey: "fenced-transition-key",
+        requestedBy: harness.user.id,
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+        currentTarget: evaluationTarget(nextIdentity),
+        generationProviderRunId: "fenced-transition-generation",
+        generationProviderSessionId: "fenced-transition-generation-session",
+        comparisonProviderRunId: "fenced-transition-comparison",
+        comparisonProviderSessionId: "fenced-transition-comparison-session",
+        runtimeIdentity: nextIdentity,
+        methodResources: methodSet.resources,
+        modelProfileSnapshot: resolveWorkspaceDefaultModelProfileSnapshot(harness.metadata),
+      });
+      harness.metadata.sessions.create({
+        user_id: harness.user.id,
+        id: "fenced-transition-generation-session",
+        workspace_id: nextIdentity.workspaceId,
+        project_id: nextIdentity.projectId,
+      });
+      harness.metadata.runs.create({
+        user_id: harness.user.id,
+        id: "fenced-transition-generation",
+        session_id: "fenced-transition-generation-session",
+        request_fingerprint: "server-owned-transition-fingerprint",
+        user_input: "reserved transition generation",
+        status: "running",
+        model_name: "model-a",
+      });
+      runAttempt.mockClear();
+      const transitionRequest = {
+        baseIdentity: nextBaseIdentity,
+        user: harness.user,
+        idempotencyKey: "fenced-transition-key",
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+      };
+      expect(await workflow.executeTransition(transitionRequest)).toMatchObject({ status: "running" });
+      expect(runAttempt).not.toHaveBeenCalled();
+      expect(runTransition).not.toHaveBeenCalled();
+
+      harness.metadata.runs.updateStatus({
+        user_id: harness.user.id,
+        run_id: "fenced-transition-generation",
+        status: "completed",
+      });
+      harness.metadata.db.prepare(`
+        DELETE FROM energyiq_additional_insight_transition_claims WHERE transition_id = ?
+      `).run("fenced-transition");
+      expect(await workflow.executeTransition(transitionRequest)).toMatchObject({ status: "completed" });
+      expect(runAttempt).toHaveBeenCalledTimes(1);
+      expect(runTransition).toHaveBeenCalledTimes(1);
+    } finally {
+      harness.close();
+    }
+  });
+
   it("rejects unsupported A numbers and malformed B lineage before comparison", async () => {
     const harness = createHarness();
     try {
@@ -609,18 +769,18 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
         const value = artifact(identity, runId, "analysis.summary.usage_kwh", identity.dataSnapshotId === "snapshot-a"
           ? "finding-a"
           : "finding-b");
+        const primaryFact = value.evidenceLineage.facts[0]!;
+        if (!("value" in primaryFact)) throw new Error("test fixture expected value fact");
+        primaryFact.value = identity.dataSnapshotId === "snapshot-a" ? 1000 : mode === "supported" ? 1000 : 1200;
         if (identity.dataSnapshotId === "snapshot-b") {
-          const primaryFact = value.evidenceLineage.facts[0]!;
-          if (!("value" in primaryFact)) throw new Error("test fixture expected value fact");
-          primaryFact.value = mode === "supported" ? 10 : 12;
           value.evidenceLineage.facts.push({
             ...value.evidenceLineage.facts[0]!,
             id: "analysis.unrelated.same_number",
-            value: 10,
+            value: 1000,
           });
-          value.findings[0]!.title = "10.0 kWh remains material";
-          value.findings[0]!.text = "The supported value is 1e1 kWh.";
-          value.findings[0]!.deepDiveQuestion = "Should we verify 10 kWh again?";
+          value.findings[0]!.title = "1,000.0 kWh remains material";
+          value.findings[0]!.text = "The supported value is 1 000e0 kWh.";
+          value.findings[0]!.deepDiveQuestion = "Should we verify 1\u202f000.00 kWh again?";
         }
         return value;
       });
@@ -714,6 +874,12 @@ const createHarness = () => {
   });
   const user = metadata.users.getById({ user_id: "admin-1" }) as UserRecord;
   metadata.workspaces.upsert({
+    id: "default",
+    owner_user_id: user.id,
+    name: "System",
+    kind: "personal",
+  });
+  metadata.workspaces.upsert({
     id: "workspace-1",
     owner_user_id: user.id,
     name: "Workspace 1",
@@ -726,6 +892,25 @@ const createHarness = () => {
     status: "published",
     root_scope_id: "scope-1",
   });
+  metadata.configResources.upsert({
+    id: "profile-a",
+    workspace_id: "default",
+    user_id: user.id,
+    kind: "model-profile",
+    name: "Profile A",
+    payload: { provider: "openai-compatible", modelName: "model-a", baseUrl: "https://profile-a.test/v1" },
+    default_enabled: true,
+    status: "connected",
+  });
+  for (let revision = 1; revision <= 7; revision += 1) {
+    metadata.workspaceDefaultModelProfiles.set({
+      workspace_id: "default",
+      profile_id: "profile-a",
+      profile_owner_user_id: user.id,
+      configured_by_user_id: user.id,
+      ...(revision > 1 ? { expected_revision: revision - 1 } : {}),
+    });
+  }
   return {
     metadata,
     user,

@@ -26,7 +26,8 @@ import {
 } from "./run-input.js";
 import {
   resolveModelProfileChain,
-  systemDefaultModelProfileRevision
+  systemDefaultModelProfileRevision,
+  type WorkspaceDefaultModelProfileSnapshot,
 } from "./workspace-model-profile-resolver.js";
 
 export type ResolvedRunConfig = {
@@ -58,6 +59,8 @@ type ResolveRunConfigInput = {
   defaultDatasourceId?: string;
   metadataStore: MetadataStore;
   modelSelection?: ModelSelectionPolicy;
+  /** Server-owned immutable profile resource captured when a durable run was reserved. */
+  trustedModelProfileSnapshot?: WorkspaceDefaultModelProfileSnapshot;
   runInput: RunAgentInput;
   userId: string;
   userInput: string;
@@ -90,42 +93,59 @@ export const resolveRunConfig = (input: ResolveRunConfigInput): ResolvedRunConfi
   if (input.modelSelection === "system-default") {
     effectiveRunConfig.activeLlmProfileId = WORKSPACE_DEFAULT_MODEL_PROFILE_ID;
   }
-  validateEffectiveResources(effectiveRunConfig, input.metadataStore, input.userId, input.workspaceId);
+  validateEffectiveResources(
+    effectiveRunConfig,
+    input.metadataStore,
+    input.userId,
+    input.workspaceId,
+    input.trustedModelProfileSnapshot,
+  );
   effectiveRunConfig.resourceRevisions = {
-    ...resolveEffectiveResourceRevisions(effectiveRunConfig, input.metadataStore, input.userId, input.workspaceId),
+    ...resolveEffectiveResourceRevisions(
+      effectiveRunConfig,
+      input.metadataStore,
+      input.userId,
+      input.workspaceId,
+      input.trustedModelProfileSnapshot,
+    ),
     ...Object.fromEntries(skillSelection.selectedSkills.map((skill) => [`skill:${skill.id}`, skill.revision]))
   };
   const modelProvider = resolveRunModelProvider(
     effectiveRunConfig.activeLlmProfileId,
     input.metadataStore,
     input.userId,
-    input.workspaceId
+    input.workspaceId,
+    input.trustedModelProfileSnapshot,
   );
   const modelContextProfile = resolveModelContextProfile(
     effectiveRunConfig.activeLlmProfileId,
     modelProvider.model_name,
     input.metadataStore,
     input.userId,
-    input.workspaceId
+    input.workspaceId,
+    input.trustedModelProfileSnapshot,
   );
   const modelSettings = resolveModelSettings(
     effectiveRunConfig.activeLlmProfileId,
     input.metadataStore,
     input.userId,
     input.workspaceId,
-    modelContextProfile
+    modelContextProfile,
+    input.trustedModelProfileSnapshot,
   );
   const reasoningModel = resolveReasoningModel(
     effectiveRunConfig.activeLlmProfileId,
     input.metadataStore,
     input.userId,
-    input.workspaceId
+    input.workspaceId,
+    input.trustedModelProfileSnapshot,
   );
   const runTimeoutMs = resolveRunTimeoutMs(
     effectiveRunConfig.activeLlmProfileId,
     input.metadataStore,
     input.userId,
-    input.workspaceId
+    input.workspaceId,
+    input.trustedModelProfileSnapshot,
   );
   const mcpRuntime = resolveMcpRuntime(
     effectiveRunConfig.enabledMcpServerIds,
@@ -215,7 +235,8 @@ const resolveEffectiveResourceRevisions = (
   config: EffectiveRunConfig,
   metadataStore: MetadataStore,
   userId: string,
-  workspaceId: string
+  workspaceId: string,
+  trustedSnapshot?: WorkspaceDefaultModelProfileSnapshot,
 ): Record<string, number> => {
   const revisions: Record<string, number> = {};
   unique(config.enabledDatasourceIds).forEach((id) => {
@@ -243,14 +264,15 @@ const resolveEffectiveResourceRevisions = (
       metadataStore,
       profileId: config.activeLlmProfileId,
       userId,
-      workspaceId
+      workspaceId,
+      ...(trustedSnapshot ? { trustedSnapshot } : {}),
     });
     for (const profile of chain) {
       revisions[`model-profile:${profile.exposedId}`] = profile.resource.revision;
     }
     if (config.activeLlmProfileId === WORKSPACE_DEFAULT_MODEL_PROFILE_ID) {
       revisions[`model-profile-binding:${WORKSPACE_DEFAULT_MODEL_PROFILE_ID}`] =
-        systemDefaultModelProfileRevision(metadataStore);
+        trustedSnapshot?.bindingRevision ?? systemDefaultModelProfileRevision(metadataStore);
     }
   }
   return revisions;
@@ -260,7 +282,8 @@ const resolveRunModelProvider = (
   profileId: string | undefined,
   metadataStore: MetadataStore,
   userId: string,
-  workspaceId: string
+  workspaceId: string,
+  trustedSnapshot?: WorkspaceDefaultModelProfileSnapshot,
 ): Exclude<ReturnType<typeof createModelProviderFromEnv>, { kind: "mock" }> => {
   if (!profileId || profileId === "server-default") {
     const provider = createModelProviderFromEnv(process.env);
@@ -271,7 +294,13 @@ const resolveRunModelProvider = (
   }
   const providers: Array<Exclude<ReturnType<typeof createModelProviderFromEnv>, { kind: "mock" }>> = [];
   const profileIds: string[] = [];
-  const chain = resolveModelProfileChain({ metadataStore, profileId, userId, workspaceId });
+  const chain = resolveModelProfileChain({
+    metadataStore,
+    profileId,
+    userId,
+    workspaceId,
+    ...(trustedSnapshot ? { trustedSnapshot } : {}),
+  });
   for (const resolved of chain) {
     const profile = resolved.resource;
     const credentials = profile.secret_ref
@@ -325,7 +354,8 @@ const validateEffectiveResources = (
   config: EffectiveRunConfig,
   metadataStore: MetadataStore,
   userId: string,
-  workspaceId: string
+  workspaceId: string,
+  trustedSnapshot?: WorkspaceDefaultModelProfileSnapshot,
 ): void => {
   config.enabledDatasourceIds.forEach((id) => {
     const datasource = metadataStore.dataSources.get({ user_id: userId, datasource_id: id });
@@ -369,7 +399,8 @@ const validateEffectiveResources = (
       metadataStore,
       profileId: config.activeLlmProfileId,
       userId,
-      workspaceId
+      workspaceId,
+      ...(trustedSnapshot ? { trustedSnapshot } : {}),
     });
   }
   if (droppedKb.length > 0) {
@@ -389,9 +420,16 @@ const resolvePrimaryModelProfile = (
   profileId: string,
   metadataStore: MetadataStore,
   userId: string,
-  workspaceId: string
+  workspaceId: string,
+  trustedSnapshot?: WorkspaceDefaultModelProfileSnapshot,
 ): ConfigResourceRecord => {
-  const profile = resolveModelProfileChain({ metadataStore, profileId, userId, workspaceId })[0]?.resource;
+  const profile = resolveModelProfileChain({
+    metadataStore,
+    profileId,
+    userId,
+    workspaceId,
+    ...(trustedSnapshot ? { trustedSnapshot } : {}),
+  })[0]?.resource;
   if (!profile) throw new Error(`PROVIDER_CONFIG_MISSING:${profileId}`);
   return profile;
 };
@@ -401,12 +439,13 @@ const resolveModelSettings = (
   metadataStore: MetadataStore,
   userId: string,
   workspaceId: string,
-  modelContextProfile: AgentModelContextProfile
+  modelContextProfile: AgentModelContextProfile,
+  trustedSnapshot?: WorkspaceDefaultModelProfileSnapshot,
 ): ResolvedRunConfig["modelSettings"] | undefined => {
   if (!profileId || profileId === "server-default") {
     return undefined;
   }
-  const profile = resolvePrimaryModelProfile(profileId, metadataStore, userId, workspaceId);
+  const profile = resolvePrimaryModelProfile(profileId, metadataStore, userId, workspaceId, trustedSnapshot);
   const temperature = numericRecordValue(profile.payload, "temperature");
   const topP = numericRecordValue(profile.payload, "topP") ?? numericRecordValue(profile.payload, "top_p");
   const frequencyPenalty =
@@ -429,12 +468,13 @@ const resolveModelContextProfile = (
   modelName: string,
   metadataStore: MetadataStore,
   userId: string,
-  workspaceId: string
+  workspaceId: string,
+  trustedSnapshot?: WorkspaceDefaultModelProfileSnapshot,
 ): AgentModelContextProfile => {
   if (!profileId || profileId === "server-default") {
     return new ModelContextProfileRegistry().resolve(modelName);
   }
-  const profile = resolvePrimaryModelProfile(profileId, metadataStore, userId, workspaceId);
+  const profile = resolvePrimaryModelProfile(profileId, metadataStore, userId, workspaceId, trustedSnapshot);
   const explicitContextLength = numericRecordValue(profile.payload, "contextLength")
     ?? numericRecordValue(profile.payload, "context_length");
   const verifiedCapability = resolveVerifiedModelCapability(profile);
@@ -508,12 +548,13 @@ const resolveReasoningModel = (
   profileId: string | undefined,
   metadataStore: MetadataStore,
   userId: string,
-  workspaceId: string
+  workspaceId: string,
+  trustedSnapshot?: WorkspaceDefaultModelProfileSnapshot,
 ): boolean | undefined => {
   if (!profileId || profileId === "server-default") {
     return undefined;
   }
-  const profile = resolvePrimaryModelProfile(profileId, metadataStore, userId, workspaceId);
+  const profile = resolvePrimaryModelProfile(profileId, metadataStore, userId, workspaceId, trustedSnapshot);
   return booleanRecordValue(profile.payload, "reasoningModel")
     ?? booleanRecordValue(profile.payload, "reasoning_model");
 };
@@ -522,12 +563,13 @@ const resolveRunTimeoutMs = (
   profileId: string | undefined,
   metadataStore: MetadataStore,
   userId: string,
-  workspaceId: string
+  workspaceId: string,
+  trustedSnapshot?: WorkspaceDefaultModelProfileSnapshot,
 ): number | undefined => {
   if (!profileId || profileId === "server-default") {
     return undefined;
   }
-  const profile = resolvePrimaryModelProfile(profileId, metadataStore, userId, workspaceId);
+  const profile = resolvePrimaryModelProfile(profileId, metadataStore, userId, workspaceId, trustedSnapshot);
   const timeoutMs = numericRecordValue(profile.payload, "timeoutMs")
     ?? numericRecordValue(profile.payload, "timeout_ms");
   return timeoutMs !== undefined ? Math.max(1000, Math.min(10 * 60 * 1000, Math.floor(timeoutMs))) : undefined;

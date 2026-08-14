@@ -13,6 +13,7 @@ import {
   type InsightCanvasRejection,
 } from "@datafoundry/contracts";
 import type {
+  EnergyIqAdditionalInsightModelProfileSnapshot,
   EnergyIqOverviewAiArtifactRecord,
   MetadataStore,
   UserRecord,
@@ -49,6 +50,7 @@ export type PreschoolAdditionalAiInsightsDiscoveryRunner = (input: {
   identity: PreschoolAdditionalAiInsightArtifactIdentity;
   toolNames: readonly PreschoolAdditionalAiInsightToolName[];
   invokeTool(input: PreschoolAdditionalAiInsightToolInvocation): Promise<PreschoolAdditionalAiInsightToolResult>;
+  modelProfileSnapshot?: EnergyIqAdditionalInsightModelProfileSnapshot;
 }) => Promise<{ answer: string; runId: string; sessionId: string }>;
 
 export type PreschoolAdditionalAiInsightsWorkflow = {
@@ -62,6 +64,7 @@ export type PreschoolAdditionalAiInsightsWorkflow = {
     runId: string;
     sessionId: string;
     methodResources?: readonly AdditionalAiInsightMethodResource[];
+    modelProfileSnapshot?: EnergyIqAdditionalInsightModelProfileSnapshot;
   }): Promise<AdditionalAiInsightsArtifact>;
 };
 
@@ -79,6 +82,7 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
     runId,
     sessionId,
     methodResources,
+    modelProfileSnapshot,
   }) => {
     const methodSet = requireMethodResources(methodResources
       ? resolveAdditionalAiInsightMethodSet({
@@ -104,7 +108,7 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
       }).methodSetFingerprint) {
       throw new Error("PRESCHOOL_ADDITIONAL_AI_EVALUATION_IDENTITY_MISMATCH");
     }
-    requireModelRuntimeIdentity(input.metadataStore, identity, methodResources !== undefined);
+    requireModelRuntimeIdentity(input.metadataStore, identity, modelProfileSnapshot);
     const catalog = await input.resolveEvidenceCatalog({ identity, user });
     const runtime = createPreschoolAdditionalAiInsightRuntime({
       binding: {
@@ -125,6 +129,7 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
       identity,
       toolNames: runtime.toolNames,
       invokeTool: runtime.invoke,
+      ...(modelProfileSnapshot ? { modelProfileSnapshot } : {}),
     });
     if (completed.runId !== runId || completed.sessionId !== sessionId) {
       throw new Error("PRESCHOOL_ADDITIONAL_AI_RUNTIME_IDENTITY_MISMATCH");
@@ -165,7 +170,7 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
     })) {
       throw new Error("PRESCHOOL_ADDITIONAL_AI_PUBLICATION_INVALID");
     }
-    requireModelRuntimeIdentity(input.metadataStore, identity, methodResources !== undefined);
+    requireModelRuntimeIdentity(input.metadataStore, identity, modelProfileSnapshot);
     return artifact;
   };
 
@@ -214,12 +219,25 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
 const requireModelRuntimeIdentity = (
   metadataStore: MetadataStore,
   identity: PreschoolAdditionalAiInsightArtifactIdentity,
-  allowReservedRevision = false,
+  trustedSnapshot?: EnergyIqAdditionalInsightModelProfileSnapshot,
 ): void => {
+  if (trustedSnapshot) {
+    const profile = trustedSnapshot.profiles[0];
+    if (trustedSnapshot.bindingRevision !== identity.modelProfileRevision
+      || identity.modelProfileId !== WORKSPACE_DEFAULT_MODEL_PROFILE_ID
+      || trustedSnapshot.profiles.length !== 1
+      || profile?.exposedId !== WORKSPACE_DEFAULT_MODEL_PROFILE_ID
+      || profile.resource.kind !== "model-profile"
+      || profile.resource.status !== "connected"
+      || !profile.resource.default_enabled) {
+      throw new Error("OVERVIEW_AI_MODEL_PROFILE_REVISION_MISMATCH");
+    }
+    return;
+  }
   const modelBinding = metadataStore.workspaceDefaultModelProfiles.find(ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID);
   if (!modelBinding
     || identity.modelProfileId !== WORKSPACE_DEFAULT_MODEL_PROFILE_ID
-    || (!allowReservedRevision && modelBinding.revision !== identity.modelProfileRevision)) {
+    || modelBinding.revision !== identity.modelProfileRevision) {
     throw new Error("OVERVIEW_AI_MODEL_PROFILE_REVISION_MISMATCH");
   }
   const modelResource = metadataStore.configResources.find({

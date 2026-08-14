@@ -13,9 +13,88 @@ import {
   handleWorkspaceDefaultModelProfileRequest,
   workspaceDefaultModelProfileDto
 } from "./workspace-model-profile-api.js";
-import { resolveModelProfileChain } from "./workspace-model-profile-resolver.js";
+import {
+  resolveModelProfileChain,
+  resolveWorkspaceDefaultModelProfileSnapshot,
+} from "./workspace-model-profile-resolver.js";
 
 describe("Workspace default model profile runtime", () => {
+  it("executes the exact server-owned profile snapshot after the workspace-default binding rotates", () => {
+    const root = mkdtempSync(join(tmpdir(), "workspace-default-model-snapshot-"));
+    const metadata = createMetadataStore({
+      database_path: join(root, "metadata.sqlite"),
+      secret_master_key: "test-key",
+    });
+    try {
+      metadata.users.upsertDevUser({
+        id: "dev-user", email: "dev@example.test", display_name: "Developer", dev_token: "dev-token",
+      });
+      metadata.workspaces.upsert({ id: "default", owner_user_id: "dev-user", name: "EnergyIQ", kind: "personal" });
+      metadata.workspaces.upsert({ id: "customer-1", owner_user_id: "dev-user", name: "Customer", kind: "customer" });
+      for (const [id, modelName] of [["profile-a", "model-a"], ["profile-b", "model-b"]] as const) {
+        const secretRef = metadata.secrets.put({
+          workspace_id: "default",
+          user_id: "dev-user",
+          owner_kind: "model-profile",
+          owner_id: id,
+          value: { apiKey: `${id}-secret` },
+        });
+        metadata.configResources.upsert({
+          id,
+          workspace_id: "default",
+          user_id: "dev-user",
+          kind: "model-profile",
+          name: id,
+          payload: { provider: "openai-compatible", modelName, baseUrl: `https://${id}.example.test/v1` },
+          secret_ref: secretRef,
+          default_enabled: true,
+          status: "connected",
+        });
+      }
+      metadata.workspaceDefaultModelProfiles.set({
+        workspace_id: "default",
+        profile_id: "profile-a",
+        profile_owner_user_id: "dev-user",
+        configured_by_user_id: "dev-user",
+      });
+      const historical = resolveWorkspaceDefaultModelProfileSnapshot(metadata);
+      metadata.workspaceDefaultModelProfiles.set({
+        workspace_id: "default",
+        profile_id: "profile-b",
+        profile_owner_user_id: "dev-user",
+        configured_by_user_id: "dev-user",
+        expected_revision: 1,
+      });
+
+      expect(resolveRunConfig({
+        metadataStore: metadata,
+        modelSelection: "system-default",
+        runInput: emptyRunInput(),
+        userId: "dev-user",
+        userInput: "Current run",
+        workspaceId: "customer-1",
+      }).modelProvider.model_name).toBe("model-b");
+      const restored = resolveRunConfig({
+        metadataStore: metadata,
+        modelSelection: "system-default",
+        trustedModelProfileSnapshot: historical,
+        runInput: emptyRunInput(),
+        userId: "dev-user",
+        userInput: "Resume exact evaluation attempt",
+        workspaceId: "customer-1",
+      });
+      expect(restored.modelProvider.model_name).toBe("model-a");
+      expect(restored.effectiveRunConfig.resourceRevisions).toMatchObject({
+        "model-profile:workspace-default": 1,
+        "model-profile-binding:workspace-default": 1,
+      });
+      expect(JSON.stringify(historical)).not.toContain("profile-a-secret");
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("lets a normal user run the admin profile without exposing its secret or fallback", async () => {
     const root = mkdtempSync(join(tmpdir(), "workspace-default-model-"));
     const metadata = createMetadataStore({

@@ -13,13 +13,18 @@ import {
   type AdditionalAiInsightTransitionOutcome,
   type AdditionalAiInsightsArtifact,
 } from "@datafoundry/contracts";
-import type { MetadataStore, UserRecord } from "@datafoundry/metadata";
+import type {
+  EnergyIqAdditionalInsightModelProfileSnapshot,
+  MetadataStore,
+  UserRecord,
+} from "@datafoundry/metadata";
 
 import {
   createPreschoolAdditionalAiInsightArtifactIdentity,
   type OverviewAiArtifactIdentityV13,
   type PreschoolAdditionalAiInsightArtifactIdentity,
 } from "./overview-ai-artifact.js";
+import { resolveWorkspaceDefaultModelProfileSnapshot } from "../workspace-model-profile-resolver.js";
 
 export const MAX_PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_CHARS = 64_000;
 const EVALUATION_CLAIM_LEASE_MS = 5 * 60_000;
@@ -31,6 +36,7 @@ export type PreschoolAdditionalAiInsightEvaluationAttemptRunner = (input: {
   sessionId: string;
   user: UserRecord;
   methodResources?: readonly AdditionalAiInsightMethodResource[];
+  modelProfileSnapshot?: EnergyIqAdditionalInsightModelProfileSnapshot;
 }) => Promise<AdditionalAiInsightsArtifact>;
 
 export type PreschoolAdditionalAiInsightTransitionRunner = (input: {
@@ -39,6 +45,7 @@ export type PreschoolAdditionalAiInsightTransitionRunner = (input: {
   runId: string;
   sessionId: string;
   user: UserRecord;
+  modelProfileSnapshot?: EnergyIqAdditionalInsightModelProfileSnapshot;
 }) => Promise<{ answer: string; runId: string; sessionId: string }>;
 
 export type PreschoolAdditionalAiInsightsEvaluationWorkflow = {
@@ -70,10 +77,15 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
         workspaceId: baseIdentity.workspaceId,
       }),
     );
+    const modelProfileSnapshot = resolveWorkspaceDefaultModelProfileSnapshot(input.metadataStore);
+    if (modelProfileSnapshot.bindingRevision !== baseIdentity.modelProfileRevision) {
+      throw new Error("PRESCHOOL_ADDITIONAL_EVALUATION_MODEL_PROFILE_SNAPSHOT_MISMATCH");
+    }
     return {
       identity: createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity, methodSet }),
       expectedMethods: methodSet.methods,
       methodResources: methodSet.resources,
+      modelProfileSnapshot,
     };
   };
 
@@ -84,8 +96,8 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
         expectedProjectId: baseIdentity.projectId,
         idempotencyKey,
       });
-      const { identity, expectedMethods, methodResources } = existing
-        ? restoreReservedIdentity(baseIdentity, existing.reservation)
+      const { identity, expectedMethods, methodResources, modelProfileSnapshot } = existing
+        ? restoreReservedIdentity(input.metadataStore, baseIdentity, existing.reservation)
         : resolveIdentity(baseIdentity);
       const target = evaluationTarget(identity);
       const evaluationId = `additional-evaluation-${createId()}`;
@@ -103,6 +115,7 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
         attempts,
         runtimeIdentity: identity,
         methodResources,
+        modelProfileSnapshot,
       });
       const pendingAttempts = reserved.record.attempts.filter((attempt) => attempt.status === "running");
       if (pendingAttempts.length === 0) {
@@ -123,6 +136,12 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
           attemptId: attempt.attemptId,
         });
         if (!claim.acquired || !claim.claimToken) continue;
+        if (persistedProviderRunIsActive(
+          input.metadataStore,
+          user,
+          claim.attempt.providerRunId,
+          claim.attempt.providerSessionId,
+        )) continue;
         const heartbeat = startClaimHeartbeat(() => {
           input.metadataStore.energyIq.additionalInsightEvaluations.renewEvaluationAttemptClaim({
             evaluationId: reserved.record.evaluationId,
@@ -140,6 +159,7 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
             sessionId: claim.attempt.providerSessionId,
             user,
             methodResources,
+            modelProfileSnapshot,
           });
           const machineGate = evaluateMachineGate(artifact, identity, expectedMethods);
           heartbeat.assertHealthy();
@@ -186,11 +206,12 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
         expectedProjectId: baseIdentity.projectId,
         idempotencyKey,
       });
-      const { identity, expectedMethods, methodResources } = existing
-        ? restoreReservedIdentity(baseIdentity, {
+      const { identity, expectedMethods, methodResources, modelProfileSnapshot } = existing
+        ? restoreReservedIdentity(input.metadataStore, baseIdentity, {
           target: existing.currentTarget,
           methodResources: existing.methodResources,
           ...(existing.runtimeIdentity ? { runtimeIdentity: existing.runtimeIdentity } : {}),
+          ...(existing.modelProfileSnapshot ? { modelProfileSnapshot: existing.modelProfileSnapshot } : {}),
         })
         : resolveIdentity(baseIdentity);
       const target = evaluationTarget(identity);
@@ -212,6 +233,7 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
         comparisonProviderSessionId,
         runtimeIdentity: identity,
         methodResources,
+        modelProfileSnapshot,
       });
       if (reservation.record) return reservation.record;
       const claim = input.metadataStore.energyIq.additionalInsightEvaluations.claimTransition({
@@ -237,6 +259,18 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
       });
       let failureStage: "generation" | "validation" | "comparison" = "generation";
       try {
+        if (persistedProviderRunIsActive(
+          input.metadataStore,
+          user,
+          reservation.generationProviderRunId,
+          reservation.generationProviderSessionId,
+        )) {
+          return input.metadataStore.energyIq.additionalInsightEvaluations.getTransition({
+            transitionId: reservation.transitionId,
+            expectedWorkspaceId: identity.workspaceId,
+            expectedProjectId: identity.projectId,
+          });
+        }
         const previousArtifact = input.metadataStore.energyIq.additionalInsightEvaluations.getAttemptArtifact({
           evaluationId: previousEvaluationId,
           attemptId: previousAttemptId,
@@ -256,6 +290,7 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
           sessionId: reservation.generationProviderSessionId,
           user,
           methodResources,
+          modelProfileSnapshot,
         });
         failureStage = "validation";
         if (evaluateMachineGate(currentArtifact, identity, expectedMethods).status !== "passed") {
@@ -267,12 +302,25 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
           throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_PROMPT_TOO_LARGE");
         }
         failureStage = "comparison";
+        if (persistedProviderRunIsActive(
+          input.metadataStore,
+          user,
+          reservation.comparisonProviderRunId,
+          reservation.comparisonProviderSessionId,
+        )) {
+          return input.metadataStore.energyIq.additionalInsightEvaluations.getTransition({
+            transitionId: reservation.transitionId,
+            expectedWorkspaceId: identity.workspaceId,
+            expectedProjectId: identity.projectId,
+          });
+        }
         const compared = await input.runTransition({
           identity,
           prompt,
           runId: reservation.comparisonProviderRunId,
           sessionId: reservation.comparisonProviderSessionId,
           user,
+          modelProfileSnapshot,
         });
         if (compared.runId !== reservation.comparisonProviderRunId
           || compared.sessionId !== reservation.comparisonProviderSessionId) {
@@ -314,11 +362,13 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
 };
 
 const restoreReservedIdentity = (
+  metadataStore: MetadataStore,
   baseIdentity: OverviewAiArtifactIdentityV13,
   reservation: {
     target: AdditionalAiInsightEvaluationTarget;
     runtimeIdentity?: Record<string, unknown>;
     methodResources: readonly AdditionalAiInsightMethodResource[];
+    modelProfileSnapshot?: EnergyIqAdditionalInsightModelProfileSnapshot;
   },
 ) => {
   const expectedMethods = reservation.methodResources.map(({ method }) => method);
@@ -353,7 +403,17 @@ const restoreReservedIdentity = (
   if (JSON.stringify(evaluationTarget(identity)) !== JSON.stringify(reservation.target)) {
     throw new Error("PRESCHOOL_ADDITIONAL_EVALUATION_RESERVED_IDENTITY_INVALID");
   }
-  return { identity, expectedMethods, methodResources: reservation.methodResources };
+  const modelProfileSnapshot = reservation.modelProfileSnapshot
+    ?? resolveWorkspaceDefaultModelProfileSnapshot(metadataStore);
+  if (modelProfileSnapshot.bindingRevision !== reservation.target.modelProfileRevision) {
+    throw new Error("PRESCHOOL_ADDITIONAL_EVALUATION_RESERVED_MODEL_PROFILE_UNAVAILABLE");
+  }
+  return {
+    identity,
+    expectedMethods,
+    methodResources: reservation.methodResources,
+    modelProfileSnapshot,
+  };
 };
 
 const startClaimHeartbeat = (renew: () => void): {
@@ -377,6 +437,20 @@ const startClaimHeartbeat = (renew: () => void): {
       clearInterval(timer);
     },
   };
+};
+
+const persistedProviderRunIsActive = (
+  metadataStore: MetadataStore,
+  user: UserRecord,
+  runId: string,
+  sessionId: string,
+): boolean => {
+  const run = metadataStore.runs.find({ user_id: user.id, run_id: runId });
+  if (!run) return false;
+  if (run.session_id !== sessionId) {
+    throw new Error("PRESCHOOL_ADDITIONAL_EVALUATION_PROVIDER_IDENTITY_MISMATCH");
+  }
+  return run.status === "queued" || run.status === "running" || run.status === "suspended";
 };
 
 const evaluationTarget = (
@@ -612,8 +686,9 @@ const numericFactsById = (artifact: AdditionalAiInsightsArtifact): Map<string, s
 );
 
 const numericTextValues = (text: string): string[] => [...text.matchAll(
-  /(?<![\p{L}\p{N}_])[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?(?![\p{L}\p{N}_])/giu,
-)].map(([token]) => normalizedNumber(Number(token))).filter((value) => value !== "NaN");
+  /(?<![\p{L}\p{N}_])[-+]?(?:(?:\d{1,3}(?:[, \u202f]\d{3})+|\d+)(?:\.\d*)?|\.\d+)(?:e[-+]?\d+)?(?![\p{L}\p{N}_])/giu,
+)].map(([token]) => normalizedNumber(Number(token.replace(/[, \u202f]/gu, ""))))
+  .filter((value) => value !== "NaN");
 
 const normalizedNumber = (value: number): string => Object.is(value, -0) ? "0" : String(value);
 

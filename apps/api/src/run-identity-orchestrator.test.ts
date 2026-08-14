@@ -1,4 +1,5 @@
 import { createMetadataStore, RunEventWriter } from "@datafoundry/metadata";
+import { EventType } from "@ag-ui/client";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +10,51 @@ import { RunCancelRegistry } from "./run-cancel-registry.js";
 import { resolveRunIdentity } from "./run-identity-orchestrator.js";
 
 describe("resolveRunIdentity EnergyIQ Session scope", () => {
+  it("fences a repeated persisted run before Provider execution and replays its terminal events", () => {
+    const root = mkdtempSync(join(tmpdir(), "run-identity-provider-fence-"));
+    const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      ensureEnergyIqBootstrap(metadata);
+      const writer = new RunEventWriter(metadata.runEvents);
+      const runInput = {
+        threadId: "provider-session-1",
+        runId: "provider-run-1",
+        state: {},
+        messages: [{ id: "message-1", role: "user", content: "fixed evaluation attempt" }],
+        tools: [],
+        context: [],
+        forwardedProps: {},
+      } as never;
+      const input = {
+        effectiveRunConfig: {} as never,
+        metadataStore: metadata,
+        modelName: "historical-model",
+        runCancelRegistry: new RunCancelRegistry(),
+        runEventWriter: writer,
+        runInput,
+        userId: "dev-user",
+        userInput: "fixed evaluation attempt",
+      };
+      expect(resolveRunIdentity(input)).toMatchObject({ kind: "active", isResume: false });
+      expect(() => resolveRunIdentity(input)).toThrow(/RUN_ALREADY_ACTIVE/);
+
+      writer.write({
+        user_id: "dev-user",
+        run_id: "provider-run-1",
+        session_id: "provider-session-1",
+        event: { type: EventType.RUN_STARTED, runId: "provider-run-1", timestamp: 1 },
+      });
+      metadata.runs.updateStatus({ user_id: "dev-user", run_id: "provider-run-1", status: "completed" });
+      expect(resolveRunIdentity(input)).toMatchObject({
+        kind: "replay",
+        events: [{ type: EventType.RUN_STARTED, runId: "provider-run-1" }],
+      });
+    } finally {
+      metadata.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects replay before events from another Workspace or Project can be returned", () => {
     const root = mkdtempSync(join(tmpdir(), "run-identity-energy-scope-"));
     const metadata = createMetadataStore({ database_path: join(root, "metadata.sqlite") });

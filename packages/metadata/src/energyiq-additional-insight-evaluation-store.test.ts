@@ -9,9 +9,11 @@ import {
   ADDITIONAL_AI_INSIGHT_EVALUATION_MACHINE_CHECKS,
   ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1,
   canonicalInsightMethodSetJson,
+  resolveAdditionalAiInsightMethodSet,
   resolveCurrentAdditionalAiInsightMethodSet,
   type AdditionalAiInsightEvaluationTarget,
   type AdditionalAiInsightHumanScores,
+  type AdditionalAiInsightMethodResource,
   type AdditionalAiInsightsArtifact,
 } from "@datafoundry/contracts";
 
@@ -234,6 +236,50 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
         comparisonProviderRunId: "transition-comparison-run-wrong",
         comparisonProviderSessionId: "transition-comparison-session-wrong",
       })).toThrow(/ENERGYIQ_ADDITIONAL_TRANSITION_PREVIOUS_ATTEMPT_NOT_APPROVED/);
+    } finally {
+      peer.close();
+      harness.close();
+    }
+  });
+
+  it("does not let a stale finalizer overwrite reviews committed by another Store connection", () => {
+    const harness = completedHarness();
+    const peer = createMetadataStore({ database_path: harness.databasePath });
+    try {
+      const beforeReview = harness.store.getEvaluation({
+        evaluationId: "evaluation-1",
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      });
+      for (const entry of beforeReview.reviewPack.entries) {
+        peer.energyIq.additionalInsightEvaluations.recordHumanReview({
+          evaluationId: beforeReview.evaluationId,
+          expectedWorkspaceId: "workspace-1",
+          expectedProjectId: "project-1",
+          reviewToken: entry.reviewToken,
+          actorId: "reviewer-1",
+          scores: PASSING_SCORES,
+          contentUsefulness: contentUsefulness(beforeReview, entry.reviewToken),
+          expectedRevision: 0,
+        });
+      }
+      const passed = peer.energyIq.additionalInsightEvaluations.getEvaluation({
+        evaluationId: "evaluation-1",
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      });
+      expect(passed.status).toBe("passed");
+
+      expect(harness.store.finalizeEvaluation({
+        evaluationId: "evaluation-1",
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      })).toEqual(passed);
+      expect(peer.energyIq.additionalInsightEvaluations.getEvaluation({
+        evaluationId: "evaluation-1",
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      })).toEqual(passed);
     } finally {
       peer.close();
       harness.close();
@@ -562,6 +608,57 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
         errorCode: "PRESCHOOL_ADDITIONAL_TRANSITION_REUSES_PREVIOUS_EVIDENCE",
         failureStage: "validation",
       })).toEqual(failed);
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("restores a terminal transition with its reserved Method resources after the current Registry drifts", () => {
+    const harness = createHarness();
+    try {
+      reserveAndComplete(harness);
+      reviewAllPassing(harness);
+      const previous = harness.store.getEvaluation({
+        evaluationId: "evaluation-1",
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      });
+      const previousAttempt = previous.attempts.find((attempt) => attempt.status === "completed")!;
+      const currentTarget = evaluationTarget("snapshot-b", "release-b");
+      const reservation = harness.store.reserveTransition({
+        transitionId: "transition-historical-method",
+        idempotencyKey: "transition-historical-method",
+        requestedBy: "admin-1",
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+        currentTarget,
+        generationProviderRunId: "transition-historical-generation",
+        generationProviderSessionId: "transition-historical-generation-session",
+        comparisonProviderRunId: "transition-historical-comparison",
+        comparisonProviderSessionId: "transition-historical-comparison-session",
+      });
+      const currentArtifact = artifact(
+        currentTarget,
+        reservation.generationProviderRunId,
+        "analysis.summary.usage_kwh",
+        "finding-historical-method",
+      );
+      const completed = harness.store.completeTransition({
+        transitionId: reservation.transitionId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+        claimToken: claimTransitionToken(harness, reservation.transitionId),
+        currentArtifact,
+        outcomes: [{ transition: "no-material-change" }],
+      });
+
+      publishWorkspaceMethodForTest(harness.metadata.db, "later");
+
+      expect(harness.store.getTransition({
+        transitionId: completed.transitionId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      })).toEqual(completed);
     } finally {
       harness.close();
     }
@@ -969,6 +1066,24 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
           reopened.close();
         }
       }
+      publishWorkspaceMethodForTest(harness.metadata.db, "migration-drift");
+      const historicalTarget = targetWithWorkspaceMethod(target, "historical-before-drift");
+      harness.metadata.db.prepare(`
+        UPDATE energyiq_additional_insight_evaluations SET record_json = ? WHERE id = ?
+      `).run(JSON.stringify({ ...oldRecord, target: historicalTarget }), oldRecord.evaluationId);
+      expect(() => ensureEnergyIqAdditionalInsightEvaluationHardeningSchema(harness.metadata.db))
+        .toThrow(/ENERGYIQ_ADDITIONAL_EVALUATION_0034_HISTORICAL_METHOD_RESOURCES_UNAVAILABLE/);
+      expect(harness.metadata.db.prepare(`
+        SELECT id FROM energyiq_additional_insight_evaluations WHERE id = ?
+      `).get(oldRecord.evaluationId)).toMatchObject({ id: oldRecord.evaluationId });
+      expect(harness.metadata.db.prepare(`
+        SELECT id FROM schema_migrations WHERE id = '0034_energyiq_additional_insight_evaluation_hardening'
+      `).get()).toBeUndefined();
+      harness.metadata.db.prepare(`
+        UPDATE energyiq_additional_insight_evaluations SET record_json = ? WHERE id = ?
+      `).run(JSON.stringify(oldRecord), oldRecord.evaluationId);
+      harness.metadata.db.prepare("DELETE FROM energyiq_insight_method_proposals WHERE id = ?")
+        .run("proposal-migration-drift");
       harness.metadata.db.exec(`
         PRAGMA foreign_keys = OFF;
         ALTER TABLE energyiq_additional_insight_evaluation_artifacts
@@ -999,6 +1114,78 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
     }
   });
 });
+
+const publishWorkspaceMethodForTest = (db: DatabaseSync, suffix: string): void => {
+  const content = `Published direction ${suffix}`;
+  const publishedMethod = {
+    skillId: `workspace-insight-method:${suffix}`,
+    semanticVersion: "1.0.0",
+    resourceId: `insight-method-proposal:${suffix}`,
+    resourceRevision: 1,
+    contentSha256: createHash("sha256").update(content).digest("hex"),
+    scope: "workspace",
+    workspaceId: "workspace-1",
+    userId: "admin-1",
+    role: "expert-direction",
+  };
+  db.exec("PRAGMA foreign_keys = OFF");
+  try {
+    db.prepare(`
+      INSERT INTO energyiq_insight_method_proposals (
+        id, workspace_id, project_id, scope_id, artifact_id, artifact_identity_hash,
+        artifact_identity_revision, data_snapshot_id, project_release_id,
+        analysis_period_from, analysis_period_to, finding_id, created_by,
+        idempotency_key, title, guidance, status, revision,
+        publication_actor_id, published_at, published_method_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published', 4, ?, ?, ?, ?, ?)
+    `).run(
+      `proposal-${suffix}`, "workspace-1", "project-1", "scope-1", `historical-artifact-${suffix}`,
+      `sha256:${"a".repeat(64)}`, "additional-insights-v3", `snapshot-${suffix}`, `release-${suffix}`,
+      "2026-05-01T00:00:00.000Z", "2026-06-01T00:00:00.000Z", `finding-${suffix}`, "admin-1",
+      `method-${suffix}`, `Method ${suffix}`, content, "admin-1", "2026-08-14T04:00:00.000Z",
+      JSON.stringify(publishedMethod), "2026-08-14T04:00:00.000Z", "2026-08-14T04:00:00.000Z",
+    );
+  } finally {
+    db.exec("PRAGMA foreign_keys = ON");
+  }
+};
+
+const targetWithWorkspaceMethod = (
+  target: AdditionalAiInsightEvaluationTarget,
+  suffix: string,
+): AdditionalAiInsightEvaluationTarget => {
+  const content = `Historical direction ${suffix}`;
+  const resource: AdditionalAiInsightMethodResource = {
+    method: {
+      skillId: `workspace-insight-method:${suffix}`,
+      semanticVersion: "1.0.0",
+      resourceId: `insight-method-proposal:${suffix}`,
+      resourceRevision: 1,
+      contentSha256: createHash("sha256").update(content).digest("hex"),
+      scope: "workspace",
+      workspaceId: target.workspaceId,
+      userId: "admin-1",
+      role: "expert-direction",
+    },
+    content,
+  };
+  const current = resolveCurrentAdditionalAiInsightMethodSet(target.workspaceId);
+  const methodSet = resolveAdditionalAiInsightMethodSet({
+    workspaceId: target.workspaceId,
+    methodSetId: current.id,
+    methodSetRevision: current.revision,
+    workspaceMethodResources: [resource],
+  });
+  if (!methodSet) throw new Error("test fixture expected historical Method set");
+  return {
+    ...target,
+    methodSetId: methodSet.id,
+    methodSetRevision: methodSet.revision,
+    methodSetFingerprint: `sha256:${createHash("sha256")
+      .update(canonicalInsightMethodSetJson(methodSet.methods)!)
+      .digest("hex")}`,
+  };
+};
 
 const PASSING_SCORES: AdditionalAiInsightHumanScores = {
   newAngle: 4,

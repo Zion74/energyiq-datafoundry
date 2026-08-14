@@ -1,4 +1,8 @@
-import type { ConfigResourceRecord, MetadataStore } from "@datafoundry/metadata";
+import type {
+  ConfigResourceRecord,
+  EnergyIqAdditionalInsightModelProfileSnapshot,
+  MetadataStore,
+} from "@datafoundry/metadata";
 import { WORKSPACE_DEFAULT_MODEL_PROFILE_ID } from "@datafoundry/metadata";
 
 export type ResolvedModelProfile = {
@@ -8,15 +12,27 @@ export type ResolvedModelProfile = {
   resource: ConfigResourceRecord;
 };
 
+export type WorkspaceDefaultModelProfileSnapshot = EnergyIqAdditionalInsightModelProfileSnapshot;
+
 /** Backing Workspace for the single server-managed EnergyIQ model profile. */
 export const ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID = "default";
 
 export const resolveModelProfileChain = (input: {
   metadataStore: MetadataStore;
   profileId: string;
+  trustedSnapshot?: WorkspaceDefaultModelProfileSnapshot;
   userId: string;
   workspaceId: string;
 }): ResolvedModelProfile[] => {
+  if (input.trustedSnapshot) {
+    if (input.profileId !== WORKSPACE_DEFAULT_MODEL_PROFILE_ID) {
+      throw new Error("TRUSTED_MODEL_PROFILE_SNAPSHOT_ID_MISMATCH");
+    }
+    return input.trustedSnapshot.profiles.map((profile) => ({
+      ...profile,
+      resource: { ...profile.resource, payload: { ...profile.resource.payload } },
+    }));
+  }
   if (input.profileId === WORKSPACE_DEFAULT_MODEL_PROFILE_ID) {
     const binding = input.metadataStore.workspaceDefaultModelProfiles.get(ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID);
     const resource = input.metadataStore.configResources.find({
@@ -60,6 +76,25 @@ export const resolveModelProfileChain = (input: {
     currentId = stringValue(resource.payload.fallbackProfileId);
   }
   return profiles;
+};
+
+/** Capture the exact server-owned profile resource without decrypting its secret. */
+export const resolveWorkspaceDefaultModelProfileSnapshot = (
+  metadataStore: MetadataStore,
+): WorkspaceDefaultModelProfileSnapshot => {
+  const binding = metadataStore.workspaceDefaultModelProfiles.get(ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID);
+  return {
+    bindingRevision: binding.revision,
+    profiles: resolveModelProfileChain({
+      metadataStore,
+      profileId: WORKSPACE_DEFAULT_MODEL_PROFILE_ID,
+      userId: binding.profile_owner_user_id,
+      workspaceId: ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID,
+    }).map((profile) => ({
+      ...profile,
+      resource: { ...profile.resource, payload: { ...profile.resource.payload } },
+    })),
+  };
 };
 
 export const workspaceDefaultModelProfileConfigured = (

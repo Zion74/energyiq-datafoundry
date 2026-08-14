@@ -26,6 +26,7 @@ import { LocalKnowledgeService } from "@datafoundry/knowledge";
 import {
   RunEventWriter,
   createMetadataStore,
+  type EnergyIqAdditionalInsightModelProfileSnapshot,
   type UserRecord,
   type MetadataStore
 } from "@datafoundry/metadata";
@@ -134,6 +135,8 @@ export { resolveOverviewAiStageStructuredOutput } from "./energy/preschool-overv
 
 type OverviewAiRuntimeStageInput = Omit<PreschoolOverviewAiStageInput, "stage"> & {
   stage: PreschoolOverviewAiStage;
+  /** Exact profile resource reserved by the server for evaluation recovery. */
+  modelProfileSnapshot?: EnergyIqAdditionalInsightModelProfileSnapshot;
   /** Server-owned only; never read from AG-UI forwarded props. */
   trustedRuntimeOverride?: OverviewAiTrustedRuntimeOverride;
 };
@@ -519,6 +522,9 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
           ...(stageInput.user.display_name ? { display_name: stageInput.user.display_name } : {}),
         },
         overviewAiStage: stageInput.stage,
+        ...(stageInput.modelProfileSnapshot
+          ? { trustedModelProfileSnapshot: stageInput.modelProfileSnapshot }
+          : {}),
         ...(stageInput.trustedRuntimeOverride
           ? { overviewAiTrustedRuntimeOverride: stageInput.trustedRuntimeOverride }
           : {}),
@@ -1003,6 +1009,8 @@ type DataFoundryAgUiAgentInput = {
   overviewAiStage?: PreschoolOverviewAiStage;
   /** Server-created Pack-v2 override; never accepted from browser props. */
   overviewAiTrustedRuntimeOverride?: OverviewAiTrustedRuntimeOverride;
+  /** Server-created durable evaluation binding; never accepted from browser props. */
+  trustedModelProfileSnapshot?: EnergyIqAdditionalInsightModelProfileSnapshot;
   runCancelRegistry: RunCancelRegistry;
   taskStateRuntime: TaskStateRuntime;
   traceSectionSummaries: boolean;
@@ -1149,7 +1157,10 @@ class DataFoundryAgUiAgent extends AbstractAgent {
             runInput: normalizedRunInput,
             userId: this.input.user.id,
             userInput,
-            workspaceId: this.input.workspaceId
+            workspaceId: this.input.workspaceId,
+            ...(this.input.trustedModelProfileSnapshot
+              ? { trustedModelProfileSnapshot: this.input.trustedModelProfileSnapshot }
+              : {}),
           }));
           if (overviewAiStageOptions) reasoningModel = overviewAiStageOptions.reasoningModel;
           if (useEnergyContext && energyScopedDataSource) {
