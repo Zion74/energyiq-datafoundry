@@ -96,7 +96,13 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
         expectedProjectId: baseIdentity.projectId,
         idempotencyKey,
       });
-      if (existing && existing.record.status !== "running") return existing.record;
+      if (existing && existing.record.status !== "running") {
+        const requestedTarget = evaluationTarget(resolveIdentity(baseIdentity).identity);
+        if (!evaluationTargetsAreExactlyEqual(requestedTarget, existing.reservation.target)) {
+          throw new Error("PRESCHOOL_ADDITIONAL_EVALUATION_IDEMPOTENCY_CONFLICT");
+        }
+        return existing.record;
+      }
       const { identity, expectedMethods, methodResources, modelProfileSnapshot } = existing
         ? restoreReservedIdentity(baseIdentity, existing.reservation)
         : resolveIdentity(baseIdentity);
@@ -217,7 +223,13 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
           expectedWorkspaceId: baseIdentity.workspaceId,
           expectedProjectId: baseIdentity.projectId,
         });
-        if (stored.status !== "running") return stored;
+        if (stored.status !== "running") {
+          const requestedTarget = evaluationTarget(resolveIdentity(baseIdentity).identity);
+          if (!evaluationTargetsAreExactlyEqual(requestedTarget, existing.currentTarget)) {
+            throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_IDEMPOTENCY_CONFLICT");
+          }
+          return stored;
+        }
       }
       const { identity, expectedMethods, methodResources, modelProfileSnapshot } = existing
         ? restoreReservedIdentity(baseIdentity, {
@@ -412,7 +424,7 @@ const restoreReservedIdentity = (
       methodSet,
     });
   }
-  if (JSON.stringify(evaluationTarget(identity)) !== JSON.stringify(reservation.target)) {
+  if (!evaluationTargetsAreExactlyEqual(evaluationTarget(identity), reservation.target)) {
     throw new Error("PRESCHOOL_ADDITIONAL_EVALUATION_RESERVED_IDENTITY_INVALID");
   }
   const modelProfileSnapshot = reservation.modelProfileSnapshot;
@@ -492,6 +504,35 @@ const evaluationTarget = (
   methodSetRevision: identity.methodSetRevision,
   methodSetFingerprint: identity.methodSetFingerprint,
 });
+
+const canonicalEvaluationTargetJson = (target: AdditionalAiInsightEvaluationTarget): string => JSON.stringify({
+  workspaceId: target.workspaceId,
+  projectId: target.projectId,
+  scopeId: target.scopeId,
+  resource: target.resource,
+  dataSnapshotId: target.dataSnapshotId,
+  projectReleaseId: target.projectReleaseId,
+  analysisPeriod: { from: target.analysisPeriod.from, to: target.analysisPeriod.to },
+  modelProfileId: target.modelProfileId,
+  modelProfileRevision: target.modelProfileRevision,
+  artifactIdentityRevision: target.artifactIdentityRevision,
+  artifactIdentityHash: target.artifactIdentityHash,
+  outputContractRevision: target.outputContractRevision,
+  validatorRevision: target.validatorRevision,
+  workflowRevision: target.workflowRevision,
+  promptRevision: target.promptRevision,
+  capabilityRevision: target.capabilityRevision,
+  publicationRevision: target.publicationRevision,
+  canvasRevision: target.canvasRevision,
+  methodSetId: target.methodSetId,
+  methodSetRevision: target.methodSetRevision,
+  methodSetFingerprint: target.methodSetFingerprint,
+});
+
+const evaluationTargetsAreExactlyEqual = (
+  left: AdditionalAiInsightEvaluationTarget,
+  right: AdditionalAiInsightEvaluationTarget,
+): boolean => canonicalEvaluationTargetJson(left) === canonicalEvaluationTargetJson(right);
 
 const evaluateMachineGate = (
   artifact: AdditionalAiInsightsArtifact,

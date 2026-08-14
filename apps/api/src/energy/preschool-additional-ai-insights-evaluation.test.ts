@@ -65,6 +65,17 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
       });
       expect(replay).toEqual(first);
       expect(runAttempt).toHaveBeenCalledTimes(3);
+      for (const driftedBaseIdentity of [
+        createBaseIdentity("snapshot-b", "release-a"),
+        createBaseIdentity("snapshot-a", "release-b"),
+      ]) {
+        await expect(workflow.executePassAt3({
+          baseIdentity: driftedBaseIdentity,
+          user: harness.user,
+          idempotencyKey: "pass-at-3-key",
+        })).rejects.toThrow(/PRESCHOOL_ADDITIONAL_EVALUATION_IDEMPOTENCY_CONFLICT/);
+      }
+      expect(runAttempt).toHaveBeenCalledTimes(3);
     } finally {
       harness.close();
     }
@@ -562,8 +573,9 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
       const previousAttempt = reviewedPrevious.attempts[0]!;
       if (previousAttempt.status !== "completed") throw new Error("test fixture expected completed attempt");
 
+      const currentBaseIdentity = createBaseIdentity("snapshot-b", "release-b");
       const transition = await workflow.executeTransition({
-        baseIdentity: createBaseIdentity("snapshot-b", "release-b"),
+        baseIdentity: currentBaseIdentity,
         user: harness.user,
         idempotencyKey: "snapshot-a-to-b",
         previousEvaluationId: reviewedPrevious.evaluationId,
@@ -583,6 +595,27 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
       expect(transitionInput.prompt).toContain("Evidence-bound");
       expect(transitionInput.prompt).not.toMatch(/What-Why-Action|fixed lens/i);
       expect(transition.generationProviderRunId).not.toBe(transition.comparisonProviderRunId);
+      expect(await workflow.executeTransition({
+        baseIdentity: currentBaseIdentity,
+        user: harness.user,
+        idempotencyKey: "snapshot-a-to-b",
+        previousEvaluationId: reviewedPrevious.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+      })).toEqual(transition);
+      for (const driftedBaseIdentity of [
+        createBaseIdentity("snapshot-c", "release-b"),
+        createBaseIdentity("snapshot-b", "release-c"),
+      ]) {
+        await expect(workflow.executeTransition({
+          baseIdentity: driftedBaseIdentity,
+          user: harness.user,
+          idempotencyKey: "snapshot-a-to-b",
+          previousEvaluationId: reviewedPrevious.evaluationId,
+          previousAttemptId: previousAttempt.attemptId,
+        })).rejects.toThrow(/ENERGYIQ_ADDITIONAL_TRANSITION_IDEMPOTENCY_CONFLICT/);
+      }
+      expect(runAttempt).toHaveBeenCalledTimes(4);
+      expect(runTransition).toHaveBeenCalledTimes(1);
     } finally {
       harness.close();
     }
