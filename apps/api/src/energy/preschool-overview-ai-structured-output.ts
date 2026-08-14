@@ -324,7 +324,7 @@ const additionalCanvasFinding: JsonSchema = {
     id: nonEmptyString,
     title: { type: "string", minLength: 1, maxLength: 240 },
     text: { type: "string", minLength: 1, maxLength: 1_600 },
-    evidenceRefs,
+    evidenceRefs: uniqueEvidenceRefs,
     visualNeeded: { type: "boolean" },
   },
 };
@@ -369,7 +369,7 @@ const additionalCanvasGap: JsonSchema = {
     requestedCapability: { type: "string", minLength: 1, maxLength: 240 },
     why: { type: "string", minLength: 1, maxLength: 800 },
     requiredDataShape: { type: "string", minLength: 1, maxLength: 800 },
-    evidenceRefs,
+    evidenceRefs: uniqueEvidenceRefs,
     safeFallback: { type: "string", enum: ["prose", "table", "omit-visual"] },
   },
 };

@@ -49,6 +49,14 @@ describe("Preschool Overview AI structured output", () => {
     expect(canvas.properties).not.toHaveProperty("html");
     expect(canvas.properties).not.toHaveProperty("url");
     expect(canvas.properties).not.toHaveProperty("sql");
+    expect(canvas.properties!.finding!.properties!.evidenceRefs).toMatchObject({
+      minItems: 1,
+      uniqueItems: true,
+    });
+    expect(canvas.properties!.presentationGapRequests!.items!.properties!.evidenceRefs).toMatchObject({
+      minItems: 1,
+      uniqueItems: true,
+    });
     expect(resolveOverviewAiStageStructuredOutput("additional-insights-discovery"))
       .toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2);
   });
