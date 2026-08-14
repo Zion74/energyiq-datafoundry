@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { EventType } from "@ag-ui/client";
-import { TypeValidationError } from "@ai-sdk/provider";
+import { APICallError, TypeValidationError } from "@ai-sdk/provider";
+import { toStandardSchema } from "@mastra/core/schema";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -184,7 +185,7 @@ describe("Overview AI server stage options", () => {
     });
   });
 
-  it("registers Additional tools in the real governed runtime and nowhere else", async () => {
+  it("registers Additional tools and separates local schema failures from Provider validation", async () => {
     const toolNames = [
       "energy.evidence.read",
       "energy.metrics.compare",
@@ -496,7 +497,9 @@ describe("Overview AI server stage options", () => {
         });
         if (!eventTransitionTrusted) throw new Error("Expected event transition runtime options");
         let assemblyCapability: unknown;
-        let localStructuredOutputFailure: unknown;
+        let stageFailure: { kind: "local-schema"; value: Record<string, unknown> }
+          | { kind: "provider"; error: unknown }
+          | undefined;
         const transitionAgent = new DataFoundryAgUiAgent({
           artifactService: {} as never,
           completedMemoryFlushOverride: async () => undefined,
@@ -516,8 +519,24 @@ describe("Overview AI server stage options", () => {
               governedMessages: assemblyInput.messages,
               mastraAgent: {
                 run: () => new Observable((subscriber) => {
-                  if (localStructuredOutputFailure) {
-                    subscriber.error(localStructuredOutputFailure);
+                  if (stageFailure?.kind === "provider") {
+                    subscriber.error(stageFailure.error);
+                    return;
+                  }
+                  if (stageFailure?.kind === "local-schema") {
+                    if (!assemblyInput.structuredOutput) {
+                      subscriber.error(new Error("Expected local structured-output schema"));
+                      return;
+                    }
+                    const value = stageFailure.value;
+                    const schema = toStandardSchema(assemblyInput.structuredOutput.schema);
+                    void Promise.resolve(schema["~standard"].validate(value)).then(
+                      (result) => subscriber.error(new TypeValidationError({
+                        value,
+                        cause: new Error(`Local schema issues: ${JSON.stringify("issues" in result ? result.issues : [])}`),
+                      })),
+                      (error) => subscriber.error(new TypeValidationError({ value, cause: error })),
+                    );
                     return;
                   }
                   subscriber.next({
@@ -577,12 +596,7 @@ describe("Overview AI server stage options", () => {
         expect(metadata.runs.find({ user_id: "dev-user", run_id: "transition-runtime-run" }))
           .toMatchObject({ status: "completed", session_id: "transition-runtime-session" });
 
-        localStructuredOutputFailure = new Error("Local final schema validation failed", {
-          cause: new TypeValidationError({
-            value: { outcomes: [{ extra: true }] },
-            cause: new Error("outcomes.0 additional properties"),
-          }),
-        });
+        stageFailure = { kind: "local-schema", value: { outcomes: [{ extra: true }] } };
         await expect(collectOverviewAiStageEvents(transitionAgent, {
           ...stageInput,
           runId: "transition-schema-invalid-run",
@@ -592,6 +606,31 @@ describe("Overview AI server stage options", () => {
           .toMatchObject({
             status: "failed",
             error_message: "PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_SCHEMA_INVALID",
+          });
+
+        stageFailure = {
+          kind: "provider",
+          error: new APICallError({
+            message: "Provider response schema validation failed",
+            url: "https://provider.invalid/v1/chat/completions",
+            requestBodyValues: { model: "test-model" },
+            statusCode: 502,
+            cause: new TypeValidationError({
+              value: { providerEnvelope: "malformed" },
+              cause: new Error("provider response field missing"),
+            }),
+            isRetryable: false,
+          }),
+        };
+        await expect(collectOverviewAiStageEvents(transitionAgent, {
+          ...stageInput,
+          runId: "transition-provider-schema-invalid-run",
+          sessionId: "transition-provider-schema-invalid-session",
+        }, metadata)).rejects.toThrow("Provider response schema validation failed");
+        expect(metadata.runs.find({ user_id: "dev-user", run_id: "transition-provider-schema-invalid-run" }))
+          .toMatchObject({
+            status: "failed",
+            error_message: "Provider response schema validation failed",
           });
       } finally {
         metadata.close();

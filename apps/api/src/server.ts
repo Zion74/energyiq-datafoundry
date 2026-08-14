@@ -1,5 +1,4 @@
 import { AbstractAgent, EventType, type BaseEvent, type RunAgentInput } from "@ag-ui/client";
-import { TypeValidationError } from "@ai-sdk/provider";
 import {
   CopilotRuntime,
   ExperimentalEmptyAdapter,
@@ -19,6 +18,7 @@ import {
   type TrustedEnergyTextQueryContract
 } from "@datafoundry/agent-runtime";
 import { createTool } from "@mastra/core/tools";
+import { toStandardSchema } from "@mastra/core/schema";
 import { LocalArtifactService, SessionOutputService } from "@datafoundry/artifacts";
 import { type MeResponse, createEnvConfig, createErrorResult, createSuccessResult } from "@datafoundry/contracts";
 import { LocalDataGateway } from "@datafoundry/data-gateway";
@@ -879,7 +879,7 @@ export const normalizeOverviewAiStageRuntimeError = (
     return new Error(PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID);
   }
   if ((stage === "additional-insights-discovery" || stage === "additional-insights-transition")
-    && isLocalAdditionalStructuredOutputSchemaError(error)) {
+    && errorChainIncludesLocalAdditionalStructuredOutputSchemaError(error)) {
     return new Error(PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_SCHEMA_INVALID);
   }
   return error instanceof Error ? error : new Error(message);
@@ -897,25 +897,44 @@ class LocalAdditionalStructuredOutputSchemaError extends Error {
   }
 }
 
-const markLocalAdditionalStructuredOutputSchemaError = (
+const wrapLocalAdditionalStructuredOutputSchema = (
   stage: PreschoolOverviewAiStage,
-  structuredOutputEnabled: boolean,
-  error: unknown,
-): unknown => (
-  structuredOutputEnabled
-  && (stage === "additional-insights-discovery" || stage === "additional-insights-transition")
-  && errorChainIncludesTypeValidationError(error)
-    ? new LocalAdditionalStructuredOutputSchemaError(error)
-    : error
-);
+  structuredOutput: NonNullable<CreateDataFoundryInput["structuredOutput"]>,
+): NonNullable<CreateDataFoundryInput["structuredOutput"]> => {
+  if (stage !== "additional-insights-discovery" && stage !== "additional-insights-transition") {
+    return structuredOutput;
+  }
+  const schema = toStandardSchema(structuredOutput.schema);
+  const standard = schema["~standard"];
+  return {
+    ...structuredOutput,
+    schema: {
+      "~standard": {
+        ...standard,
+        validate: async (value: unknown) => {
+          let result;
+          try {
+            result = await standard.validate(value);
+          } catch (error) {
+            throw new LocalAdditionalStructuredOutputSchemaError(error);
+          }
+          if ("issues" in result && Array.isArray(result.issues) && result.issues.length > 0) {
+            throw new LocalAdditionalStructuredOutputSchemaError(result.issues);
+          }
+          return result;
+        },
+      },
+    },
+  };
+};
 
-const errorChainIncludesTypeValidationError = (error: unknown): boolean => {
+const errorChainIncludesLocalAdditionalStructuredOutputSchemaError = (error: unknown): boolean => {
   let current: unknown = error;
   const seen = new Set<unknown>();
   for (let depth = 0; depth < 6 && typeof current === "object" && current !== null; depth += 1) {
     if (seen.has(current)) return false;
     seen.add(current);
-    if (TypeValidationError.isInstance(current)) return true;
+    if (isLocalAdditionalStructuredOutputSchemaError(current)) return true;
     current = "cause" in current ? current.cause : undefined;
   }
   return false;
@@ -1150,6 +1169,12 @@ export class DataFoundryAgUiAgent extends AbstractAgent {
           ? resolveOverviewAiAgentRuntimeOptions(
               this.input.overviewAiStage,
               this.input.overviewAiTrustedRuntimeOverride,
+            )
+          : undefined;
+        const overviewAiStructuredOutput = this.input.overviewAiStage && overviewAiStageOptions?.structuredOutput
+          ? wrapLocalAdditionalStructuredOutputSchema(
+              this.input.overviewAiStage,
+              overviewAiStageOptions.structuredOutput,
             )
           : undefined;
         const useEnergyContext = shouldUseEnergyContextForOverviewAiStage(this.input.overviewAiStage);
@@ -1490,8 +1515,8 @@ export class DataFoundryAgUiAgent extends AbstractAgent {
                 ...(overviewAiStageOptions.excludedToolNames.length > 0
                   ? { excludedToolNames: overviewAiStageOptions.excludedToolNames }
                   : {}),
-                ...(overviewAiStageOptions.structuredOutput
-                  ? { structuredOutput: overviewAiStageOptions.structuredOutput }
+                ...(overviewAiStructuredOutput
+                  ? { structuredOutput: overviewAiStructuredOutput }
                   : {}),
                 ...(overviewAiStageOptions.trustedStageTools
                   ? { trustedStageTools: overviewAiStageOptions.trustedStageTools }
@@ -1837,15 +1862,8 @@ export class DataFoundryAgUiAgent extends AbstractAgent {
 
           },
           error: (error: unknown) => {
-            const boundaryError = this.input.overviewAiStage
-              ? markLocalAdditionalStructuredOutputSchemaError(
-                  this.input.overviewAiStage,
-                  overviewAiStageOptions?.structuredOutput !== undefined,
-                  error,
-                )
-              : error;
             const normalizedError = this.input.overviewAiStage
-              ? normalizeOverviewAiStageRuntimeError(this.input.overviewAiStage, boundaryError)
+              ? normalizeOverviewAiStageRuntimeError(this.input.overviewAiStage, error)
               : error;
             const message = normalizedError instanceof Error
               ? normalizedError.message
