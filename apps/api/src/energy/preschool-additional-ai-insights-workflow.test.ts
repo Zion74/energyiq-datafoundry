@@ -23,6 +23,44 @@ import { composePreschoolOverviewAiReadModel } from "./preschool-overview-ai-rea
 import { PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3 } from "./preschool-overview-ai-structured-output.js";
 
 describe("Preschool Additional AI Insights workflow", () => {
+  it("projects the current Additional identity before composing presented Layer 1 and 2 claims", async () => {
+    const harness = createHarness();
+    const runDiscovery = vi.fn(async ({ runId, sessionId }) => ({
+      answer: JSON.stringify({ candidates: [] }),
+      runId,
+      sessionId,
+    }));
+    try {
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: async ({ identity, catalog: currentCatalog }) =>
+          createPreschoolAdditionalAiPresentedClaims({
+            identity,
+            catalog: currentCatalog,
+            readModel: composePreschoolOverviewAiReadModel({
+              metadataStore: harness.metadata,
+              baseIdentity: identity,
+            }),
+          }),
+        runDiscovery,
+      });
+
+      await expect(workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "presented-claims-run",
+        sessionId: "presented-claims-session",
+      })).resolves.toMatchObject({
+        status: "empty",
+        publication: { discoveredCount: 0, acceptedCount: 0, rejectedCount: 0 },
+      });
+      expect(runDiscovery).toHaveBeenCalledTimes(1);
+    } finally {
+      harness.close();
+    }
+  });
+
   it("preserves Pack claim provenance while accepting a new Catalog-Evidence relationship", async () => {
     const harness = createHarness();
     try {

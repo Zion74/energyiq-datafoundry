@@ -101,6 +101,27 @@ export const createOverviewAiArtifactIdentity = (input: {
   };
 };
 
+/**
+ * Projects a derived Overview AI artifact identity back to the exact current
+ * Layer 1/2 base identity. Derived fields must never leak into sibling
+ * Section or Executive identities.
+ */
+export const projectCurrentOverviewAiArtifactBaseIdentity = (
+  identity: EnergyIqOverviewAiArtifactIdentity,
+): OverviewAiArtifactIdentityV13 => createOverviewAiArtifactIdentity({
+  workspaceId: identity.workspaceId,
+  projectId: identity.projectId,
+  scopeId: identity.scopeId,
+  dataSnapshotId: identity.dataSnapshotId,
+  projectReleaseId: identity.projectReleaseId,
+  analysisPeriodFrom: identity.analysisPeriodFrom,
+  analysisPeriodTo: identity.analysisPeriodTo,
+  rendererKey: identity.rendererKey,
+  rendererVersion: identity.rendererVersion,
+  modelProfileId: identity.modelProfileId,
+  modelProfileRevision: identity.modelProfileRevision,
+});
+
 export const createPreschoolAdditionalAiInsightArtifactIdentity = (input: {
   baseIdentity: OverviewAiArtifactIdentityV13;
   methodSet?: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>;

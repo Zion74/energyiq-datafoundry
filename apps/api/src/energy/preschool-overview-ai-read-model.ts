@@ -17,6 +17,7 @@ import {
   createPreschoolOverviewAiSectionArtifactIdentityV3,
   createPreschoolOverviewAiSectionArtifactIdentityV4,
   createPreschoolOverviewAiValueArtifactIdentity,
+  projectCurrentOverviewAiArtifactBaseIdentity,
   type OverviewAiArtifactIdentityV13,
   type PreschoolAdditionalAiInsightArtifactIdentity,
 } from "./overview-ai-artifact.js";
@@ -35,14 +36,16 @@ export const composePreschoolOverviewAiReadModel = (input: {
   metadataStore: MetadataStore;
   baseIdentity: OverviewAiArtifactIdentityV13;
 }): PreschoolOverviewAiReadModel | null => {
+  const baseIdentity = projectCurrentOverviewAiArtifactBaseIdentity(input.baseIdentity);
   const methodSet = resolveCurrentAdditionalAiInsightMethodSet(
-    input.baseIdentity.workspaceId,
+    baseIdentity.workspaceId,
     input.metadataStore.energyIq.insightMethodGovernance?.listPublishedWorkspaceMethodResources({
-      workspaceId: input.baseIdentity.workspaceId,
+      workspaceId: baseIdentity.workspaceId,
     }) ?? [],
   );
   return composeReadModel({
     ...input,
+    baseIdentity,
     createSectionIdentity: createPreschoolOverviewAiSectionArtifactIdentityV4,
     parseSectionResult,
     createExecutiveIdentity: createPreschoolOverviewAiExecutiveArtifactIdentityV4,
