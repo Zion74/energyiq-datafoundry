@@ -815,7 +815,7 @@ const validSectionToolAuditsV4 = (
 
 const validSectionSummaryV4 = (value: unknown): boolean => isRecord(value)
   && nonEmptyString(value.text)
-  && value.text.length <= 360
+  && value.text.length <= 480
   && Array.isArray(value.evidenceRefs)
   && value.evidenceRefs.length > 0
   && value.evidenceRefs.every(nonEmptyString)
@@ -981,7 +981,10 @@ const validSectionV4ExecutionRevision = (identity: EnergyIqOverviewAiArtifactIde
     && identity.investigatorPromptRevision === "discovery-prompt-v6")
   || (identity.validatorRevision === "acceptance-validator-v8"
     && identity.workflowRevision === "discover-tools-accept-publish-v2"
-    && identity.investigatorPromptRevision === "discovery-prompt-v7");
+    && identity.investigatorPromptRevision === "discovery-prompt-v7")
+  || (identity.validatorRevision === "acceptance-validator-v9"
+    && identity.workflowRevision === "discover-tools-accept-publish-v2"
+    && identity.investigatorPromptRevision === "discovery-prompt-v8");
 
 const validExecutiveV4ExecutionRevision = (identity: EnergyIqOverviewAiArtifactIdentity): boolean =>
   (identity.validatorRevision === "preschool-executive-synthesis-validator-v5"
@@ -1017,6 +1020,10 @@ const validExecutiveV4ExecutionRevision = (identity: EnergyIqOverviewAiArtifactI
     && identity.investigatorPromptRevision === "preschool-executive-synthesis-prompt-v8"
     && identity.capabilityRevision === "section-artifacts-and-overview-evidence-v2")
   || (identity.validatorRevision === "preschool-executive-synthesis-validator-v12"
+    && identity.workflowRevision === "preschool-executive-synthesis-v9"
+    && identity.investigatorPromptRevision === "preschool-executive-synthesis-prompt-v9"
+    && identity.capabilityRevision === "section-artifacts-and-overview-evidence-v2")
+  || (identity.validatorRevision === "preschool-executive-synthesis-validator-v13"
     && identity.workflowRevision === "preschool-executive-synthesis-v9"
     && identity.investigatorPromptRevision === "preschool-executive-synthesis-prompt-v9"
     && identity.capabilityRevision === "section-artifacts-and-overview-evidence-v2");

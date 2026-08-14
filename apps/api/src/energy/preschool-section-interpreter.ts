@@ -45,6 +45,7 @@ import {
   PRESCHOOL_SECTION_INSIGHT_TITLE_MAX_CHARS,
   PRESCHOOL_SECTION_LIMITATION_MAX_CHARS,
   PRESCHOOL_SECTION_SUMMARY_MAX_CHARS,
+  PRESCHOOL_SECTION_SUMMARY_TARGET_CHARS,
   resolveOverviewAiStageStructuredOutputV4,
 } from "./preschool-overview-ai-structured-output.js";
 
@@ -60,6 +61,7 @@ const NATURAL_DATE_TOKEN = /\b(?:[1-9]|[12]\d|3[01])\s+(?:January|February|March
 const DAY_MONTH_TOKEN = /\b(?:[1-9]|[12]\d|3[01])\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\b/giu;
 const MONTH_YEAR_TOKEN = /\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4}\b/giu;
 const LOCAL_TIME_TOKEN = /\b(?:[01]?\d|2[0-3]):[0-5]\d\b/g;
+const NATURAL_TIME_TOKEN = /\b(?:0?[1-9]|1[0-2])(?::[0-5]\d)?\s*(?:am|pm)\b/giu;
 const LOCAL_DATE_VALUE = /^\d{4}-\d{2}-\d{2}$/;
 
 export type PreschoolSectionInterpreterRunner = (input: {
@@ -283,7 +285,7 @@ export const buildPreschoolSectionDiscoveryPrompt = (
     "For planning Evidence, count only rows whose scopeRole is centre when stating a Centre count; one Portfolio row is not a Centre.",
     "For standby or operating summaries, centresWithFlaggedSpikes describes only Centres with flagged spike events; never attach that count to total energy coverage or the full estate.",
     "Do not invent observed facts, entities, numbers, dates, units, or relationships. A speculative explanation must remain clearly conditional and must not be presented as a confirmed safety alert.",
-    `Keep the Summary short and useful: at most ${PRESCHOOL_SECTION_SUMMARY_MAX_CHARS} characters and two sentences. Lead with this Section's most important Evidence-backed screening conclusion; put any limitation or provisional-metadata caveat after that conclusion. A caveat alone is not a Summary.`,
+    `Keep the Summary short and useful: target at most ${PRESCHOOL_SECTION_SUMMARY_TARGET_CHARS} characters and two sentences (the hard validation limit is ${PRESCHOOL_SECTION_SUMMARY_MAX_CHARS}). Lead with this Section's most important Evidence-backed screening conclusion; put any limitation or provisional-metadata caveat after that conclusion. A caveat alone is not a Summary.`,
     "Do not use placeholder prose such as 'the evidence is available'. Name the actual pattern, object, comparison, event, or planning signal supported by the cited Evidence.",
     `Presentation limits only: candidate title at most ${PRESCHOOL_SECTION_INSIGHT_TITLE_MAX_CHARS} characters, text at most ${PRESCHOOL_SECTION_INSIGHT_TEXT_MAX_CHARS}, deep-dive question at most ${PRESCHOOL_SECTION_DEEP_DIVE_MAX_CHARS}, and limitation at most ${PRESCHOOL_SECTION_LIMITATION_MAX_CHARS}. These limits do not restrict which useful analytical angle you choose.`,
     "In customer-facing narrative, say 'all Centres' instead of 'Portfolio'. Internal Pack field names may still use portfolio.",
@@ -771,7 +773,8 @@ const hasUnsupportedNumber = (text: string, evidence: PreschoolSectionPack["evid
     .replace(NATURAL_DATE_TOKEN, "")
     .replace(DAY_MONTH_TOKEN, "")
     .replace(MONTH_YEAR_TOKEN, "")
-    .replace(LOCAL_TIME_TOKEN, "");
+    .replace(LOCAL_TIME_TOKEN, "")
+    .replace(NATURAL_TIME_TOKEN, "");
   const tokens = [...numericText.matchAll(NUMBER_TOKEN)];
   return tokens.some((match) => {
     const raw = match[0].replaceAll(",", "");
@@ -837,11 +840,18 @@ const hasUnsupportedTemporalClaim = (
   if (monthYears.some((prefix) => prefix === null
     || ![...supported.dates].some((date) => date.startsWith(`${prefix}-`)))) return true;
   const times = [...text.matchAll(LOCAL_TIME_TOKEN)].map(([value]) => value);
-  return times.some((time) => {
+  if (times.some((time) => {
     const separator = time.indexOf(":");
     const hour = Number(time.slice(0, separator));
     const minute = Number(time.slice(separator + 1));
     return minute !== 0 || !supported.hours.has(hour);
+  })) return true;
+  return [...text.matchAll(NATURAL_TIME_TOKEN)].some(([value]) => {
+    const match = value.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)$/iu);
+    if (!match || Number(match[2] ?? "0") !== 0) return true;
+    const twelveHour = Number(match[1]);
+    const hour = (twelveHour % 12) + (match[3]!.toLowerCase() === "pm" ? 12 : 0);
+    return !supported.hours.has(hour);
   });
 };
 
@@ -944,7 +954,8 @@ const hasUnsupportedMetricRelation = (
       .replace(LOCAL_DATE_TOKEN, "")
       .replace(NATURAL_DATE_TOKEN, "")
       .replace(MONTH_YEAR_TOKEN, "")
-      .replace(LOCAL_TIME_TOKEN, "");
+      .replace(LOCAL_TIME_TOKEN, "")
+      .replace(NATURAL_TIME_TOKEN, "");
     return [...numericClause.matchAll(NUMBER_TOKEN)].some((match) => {
       const raw = match[0].replaceAll(",", "");
       const value = Number(raw);

@@ -417,6 +417,10 @@ describe("PreschoolAiSlot", () => {
   it("renders a saved v4 Section summary and scoped Insight cards with a structured Explore handoff", async () => {
     const startRun = vi.fn();
     const result = v4ReadModelResult();
+    const standby = result.sections["standby-wastage"];
+    if (standby.status !== "available") throw new Error("v4 fixture missing");
+    standby.result.summary.text = standby.result.summary.text.padEnd(416, " useful context");
+    expect(standby.result.summary.text).toHaveLength(416);
     await act(async () => root.render(
       <PreschoolAiSlot
         snapshot={preschoolGoldenSnapshot()}
@@ -689,7 +693,7 @@ describe("PreschoolAiSlot", () => {
       sectionId: "standby-wastage" as const,
       mutate: (result: PreschoolOverviewAiReadModelDto) => {
         const unit = result.sections["standby-wastage"];
-        if (unit.status === "available") Object.assign(unit.result.summary, { text: "S".repeat(361) });
+        if (unit.status === "available") Object.assign(unit.result.summary, { text: "S".repeat(481) });
       },
     },
     {

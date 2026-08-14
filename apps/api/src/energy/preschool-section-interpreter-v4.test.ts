@@ -321,12 +321,12 @@ describe("Preschool Section Interpreter v4", () => {
     });
   });
 
-  it("accepts an evidence-backed day and month when the year is unambiguous", () => {
+  it("accepts an evidence-backed day, month and natural am/pm time", () => {
     const pack = packV2("standby-wastage", 1);
     pack.evidence[0] = {
       id: "evidence:standby-wastage:1",
       label: "Worst closed-hour spike",
-      value: { localDate: "2026-05-25", localHour: 1 },
+      value: { localDate: "2026-05-25", localHour: 20 },
       entityRefs: ["centre-l"],
       evidenceRefs: ["evidence:standby-wastage:1"],
     };
@@ -335,7 +335,7 @@ describe("Preschool Section Interpreter v4", () => {
         sectionId: "standby-wastage",
         status: "available",
         summary: {
-          text: "The worst spike was on **25 May** at **01:00**.",
+          text: "The worst spike was on **25 May** at **8pm**.",
           evidenceRefs: ["evidence:standby-wastage:1"],
         },
         candidates: [],
@@ -347,7 +347,41 @@ describe("Preschool Section Interpreter v4", () => {
 
     expect(result).toMatchObject({
       status: "available",
-      summary: { text: "The worst spike was on **25 May** at **01:00**." },
+      summary: { text: "The worst spike was on **25 May** at **8pm**." },
+    });
+  });
+
+  it("rejects an overlong candidate locally without losing its useful sibling", () => {
+    const pack = packV2("operating-behaviour", 1);
+    const result = materializePreschoolSectionResultV4({
+      answer: JSON.stringify({
+        sectionId: "operating-behaviour",
+        status: "available",
+        summary: {
+          text: "Verified energy use is 30 kWh.",
+          evidenceRefs: ["evidence:operating-behaviour:1"],
+        },
+        candidates: [{
+          title: "T".repeat(97),
+          epistemicStatus: "inferred",
+          text: "This candidate is deliberately too long in its title.",
+          evidenceRefs: ["evidence:operating-behaviour:1"],
+        }, {
+          title: "Useful timing angle",
+          epistemicStatus: "inferred",
+          text: "This supported timing angle may warrant review.",
+          evidenceRefs: ["evidence:operating-behaviour:1"],
+        }],
+      }),
+      pack,
+      identity: identity("operating-behaviour"),
+      runId: "runtime-run-local-presentation-budget",
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      insights: [{ id: "preschool:operating-behaviour:candidate:2", title: "Useful timing angle" }],
+      publication: { discoveredCount: 2, acceptedCount: 1, rejectedCount: 1, publishedCount: 1 },
     });
   });
 

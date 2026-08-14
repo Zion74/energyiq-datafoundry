@@ -855,7 +855,7 @@ const narrativePreservesSourceEpistemicStatus = (
     if (/\b(?:proves?|proven|establish(?:es|ed)?|definitive(?:ly)?|is\s+caused\s+by)\b/iu.test(claim)) {
       return false;
     }
-    const qualified = /\b(?:may|might|could|possible|possibly|potential(?:ly)?|suggest(?:s|ed|ing)?|indicat(?:es|ed|ing)?|appears?|looks?\s+like|consistent\s+with|signal|hypothesis|inferred|speculative|worth\s+(?:checking|reviewing|testing))\b/iu
+    const qualified = /\b(?:may|might|could|plausible|plausibly|possible|possibly|potential(?:ly)?|suggest(?:s|ed|ing)?|indicat(?:es|ed|ing)?|appears?|looks?\s+like|points?\s+to|consistent\s+with|signal|hypothesis|inferred|speculative|worth\s+(?:checking|reviewing|testing))\b/iu
       .test(claim);
     if (!qualified) return false;
     return !required.includes("speculative")

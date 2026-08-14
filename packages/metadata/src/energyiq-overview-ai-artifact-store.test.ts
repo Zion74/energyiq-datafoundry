@@ -309,7 +309,12 @@ describe("EnergyIqOverviewAiArtifactStore", () => {
       seedArtifactProject(store);
 
       const availableIdentity = sectionV4Identity("snapshot-v4-available", "centre-benchmark");
-      expect(completeSectionV4(store, availableIdentity, sectionV4Result(availableIdentity, "available")))
+      const availableResult = sectionV4Result(availableIdentity, "available");
+      availableResult.summary = {
+        text: "S".repeat(416),
+        evidenceRefs: ["evidence:summary"],
+      };
+      expect(completeSectionV4(store, availableIdentity, availableResult))
         .toMatchObject({ status: "available", result_json: expect.any(String) });
 
       const emptyIdentity = sectionV4Identity("snapshot-v4-empty", "planning-outlook");
@@ -758,9 +763,9 @@ const sectionV4Identity = (
   analysisPackId: "preschool-section-pack",
   analysisPackRevision: "v2",
   outputContractRevision: "preschool-section-interpretation-v4",
-  validatorRevision: "acceptance-validator-v8",
+  validatorRevision: "acceptance-validator-v9",
   workflowRevision: "discover-tools-accept-publish-v2",
-  investigatorPromptRevision: "discovery-prompt-v7",
+  investigatorPromptRevision: "discovery-prompt-v8",
   capabilityRevision: "scoped-read-only-v1",
   publicationRevision: "v1",
 });

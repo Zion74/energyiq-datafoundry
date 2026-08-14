@@ -359,8 +359,8 @@ describe("Preschool Executive Synthesis", () => {
             sectionIds: ["centre-benchmark"],
             evidenceRefs: ["evidence:centre-benchmark:insight"],
           }, {
-            title: "Peer pattern may warrant a check",
-            text: "The peer pattern suggests a possible efficiency signal, not a confirmed issue.",
+            title: "A plausible peer pattern warrants a check",
+            text: "The peer pattern points to a possible efficiency signal, not a confirmed issue.",
             sectionIds: ["centre-benchmark"],
             evidenceRefs: ["evidence:centre-benchmark:insight"],
           }],
@@ -375,7 +375,7 @@ describe("Preschool Executive Synthesis", () => {
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.result_json!)).toMatchObject({
       sourceSectionArtifactIds: [benchmark.id],
-      findings: [{ title: "Peer pattern may warrant a check" }],
+      findings: [{ title: "A plausible peer pattern warrants a check" }],
     });
   });
 
@@ -600,7 +600,7 @@ describe("Preschool Executive Synthesis", () => {
     harness.close();
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.identity_json)).toMatchObject({
-      validatorRevision: "preschool-executive-synthesis-validator-v12",
+      validatorRevision: "preschool-executive-synthesis-validator-v13",
       workflowRevision: "preschool-executive-synthesis-v9",
       investigatorPromptRevision: "preschool-executive-synthesis-prompt-v9",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",

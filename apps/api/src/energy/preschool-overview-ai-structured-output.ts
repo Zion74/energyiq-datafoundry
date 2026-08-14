@@ -24,7 +24,8 @@ type JsonSchema = {
 const nonEmptyString: JsonSchema = { type: "string", minLength: 1 };
 const boundedString = (maxLength: number): JsonSchema => ({ type: "string", minLength: 1, maxLength });
 
-export const PRESCHOOL_SECTION_SUMMARY_MAX_CHARS = 360;
+export const PRESCHOOL_SECTION_SUMMARY_MAX_CHARS = 480;
+export const PRESCHOOL_SECTION_SUMMARY_TARGET_CHARS = 360;
 export const PRESCHOOL_SECTION_INSIGHT_TITLE_MAX_CHARS = 96;
 export const PRESCHOOL_SECTION_INSIGHT_LABEL_MAX_CHARS = 48;
 export const PRESCHOOL_SECTION_INSIGHT_TEXT_MAX_CHARS = 480;
@@ -94,19 +95,10 @@ const sectionSummaryV4: JsonSchema = {
   },
 };
 
-const sectionInsightCandidateV4: JsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["title", "epistemicStatus", "text", "evidenceRefs"],
-  properties: {
-    title: boundedString(PRESCHOOL_SECTION_INSIGHT_TITLE_MAX_CHARS),
-    label: boundedString(PRESCHOOL_SECTION_INSIGHT_LABEL_MAX_CHARS),
-    epistemicStatus: { type: "string", enum: ["observed", "inferred", "speculative"] },
-    text: boundedString(PRESCHOOL_SECTION_INSIGHT_TEXT_MAX_CHARS),
-    evidenceRefs: modelEvidenceRefsV4,
-    deepDiveQuestion: boundedString(PRESCHOOL_SECTION_DEEP_DIVE_MAX_CHARS),
-  },
-};
+// Candidate defects are isolated by the server parser and acceptance layer.
+// Keep the Provider envelope broad so one overlong sibling cannot discard the
+// whole Section before the server can preserve useful candidates.
+const sectionInsightCandidateV4: JsonSchema = { type: "object" };
 
 /**
  * Current model proposal contract for one independently executed Section.

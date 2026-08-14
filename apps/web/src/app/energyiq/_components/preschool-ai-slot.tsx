@@ -936,7 +936,7 @@ const isV4SectionResult = (
   if (!isValidSectionResultBase(value) || !Array.isArray(value.insights)) return false;
   if (expectedStatus && value.status !== expectedStatus) return false;
   if (value.status === "available") {
-    return isSummary(value.summary, 360)
+    return isSummary(value.summary, 480)
       && value.insights.every(isSectionInsight)
       && isOptionalString(value.limitation)
       && (value.limitation === undefined
