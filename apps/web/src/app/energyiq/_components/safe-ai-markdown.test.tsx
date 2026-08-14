@@ -14,4 +14,15 @@ describe("SafeAiMarkdown", () => {
     expect(markup).toContain("This is a naive baseline, not a validated forecast.</em>");
     expect(markup).not.toContain("_This is a naive baseline");
   });
+
+  it("preserves readable spacing before repeated emphasis spans", () => {
+    const markup = renderToStaticMarkup(
+      <SafeAiMarkdown>
+        {"Centre L is first, and **Centre N** is second, while the **Heater** remains distinct."}
+      </SafeAiMarkdown>,
+    );
+
+    expect(markup).toContain("and\u00a0<strong");
+    expect(markup).toContain("the\u00a0<strong");
+  });
 });

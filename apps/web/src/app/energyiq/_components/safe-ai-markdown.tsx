@@ -4,8 +4,10 @@ import ReactMarkdown from "react-markdown";
 const SAFE_AI_MARKDOWN_ELEMENTS = ["p", "br", "strong", "em"] as const;
 
 const normalizeHarmlessEmphasisWhitespace = (value: string): string => value
-  .replace(/\*\*([^*\n]*?\S)\s+\*\*/gu, "**$1**")
-  .replace(/_([^_\n]*?\S)\s+_/gu, "_$1_");
+  .replace(/(^|[\s(\[{"'“‘])\*\*([^*\n]*?\S)\s+\*\*/gu, "$1**$2**")
+  .replace(/(^|[\s(\[{"'“‘])_([^_\n]*?\S)\s+_/gu, "$1_$2_")
+  .replaceAll(" **", "\u00a0**")
+  .replaceAll(" _", "\u00a0_");
 
 export function SafeAiMarkdown({
   children,

@@ -308,7 +308,7 @@ export function preschoolGoldenSnapshot(): EnergyProjectAnalysisSnapshotDto {
           severity: "attention",
           label: "High for both floor area and headcount",
           metrics: [
-            { id: "priority-centres", label: "Centres above both Portfolio P75 lines", metricId: "preschool.benchmark.priority_count", value: 3, unit: "count", role: "primary", precision: 0, dimensions: { benchmark: "portfolio-p75" } },
+            { id: "priority-centres", label: "Centres above both all-centre P75 lines", metricId: "preschool.benchmark.priority_count", value: 3, unit: "count", role: "primary", precision: 0, dimensions: { benchmark: "portfolio-p75" } },
             { id: "benchmark-sample", label: "Centres compared", metricId: "preschool.benchmark.sample_size", value: 30, unit: "count", role: "supporting", precision: 0, dimensions: { benchmark: "portfolio" } },
           ],
           entities: ["G", "M", "J"].map((code) => ({ kind: "centre" as const, scopeId: centreByCode.get(code)!.scopeId, code, name: centreByCode.get(code)!.name })),

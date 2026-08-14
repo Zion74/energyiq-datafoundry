@@ -128,7 +128,7 @@ export function buildPreschoolDecisionSignals(input: {
       severity: "attention",
       label: "High for both floor area and headcount",
       metrics: [
-        metric("priority-centres", "Centres above both Portfolio P75 lines", "preschool.benchmark.priority_count", benchmark.priorityCentreCodes.length, "count", "primary", 0, { benchmark: "portfolio-p75" }),
+        metric("priority-centres", "Centres above both all-centre P75 lines", "preschool.benchmark.priority_count", benchmark.priorityCentreCodes.length, "count", "primary", 0, { benchmark: "portfolio-p75" }),
         metric("benchmark-sample", "Centres compared", "preschool.benchmark.sample_size", benchmark.sampleSize, "count", "supporting", 0, { benchmark: "portfolio" }),
       ],
       entities: benchmark.centres
@@ -155,7 +155,7 @@ export function buildPreschoolDecisionSignals(input: {
       metrics: [
         metric("operating-spike-centres", "Centres with unusual opening-hour peaks", "preschool.operating.centre_count", operational.spikes.operating.centreCount, "count", "primary", 0, { operatingState: "open" }),
         metric("operating-spike-count", "Unusual opening-hour peaks", "preschool.operating.spike_count", operational.spikes.operating.count, "count", "supporting", 0, { operatingState: "open" }),
-        metric("portfolio-centres", "Centres in the Portfolio", "preschool.portfolio.centre_count", input.totalCentreCount, "count", "supporting", 0, { scope: "project" }),
+        metric("portfolio-centres", "Centres reviewed", "preschool.portfolio.centre_count", input.totalCentreCount, "count", "supporting", 0, { scope: "project" }),
       ],
       entities: operational.spikes.operating.centres.map((centre) => ({
         kind: "centre" as const,
