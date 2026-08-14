@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { standardSchemaToJSONSchema, type StandardSchemaWithJSON } from "@mastra/core/schema";
 import { createTool } from "@mastra/core/tools";
 import { z } from "zod";
+import { ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1 } from "@datafoundry/contracts";
 
 import {
   createDataFoundry,
@@ -20,6 +21,17 @@ type ExecutableRuntimeTool = {
   description?: string;
   execute?: (input: Record<string, unknown>, options: Record<string, unknown>) => Promise<unknown>;
 };
+
+const createNamedTools = (
+  toolNames: readonly string[],
+): NonNullable<CreateDataFoundryInput["trustedStageTools"]> => Object.fromEntries(
+  toolNames.map((toolName) => [toolName, createTool({
+    id: toolName,
+    description: `Test ${toolName}`,
+    inputSchema: z.object({}).strict(),
+    execute: async () => ({ toolName }),
+  })]),
+) as unknown as NonNullable<CreateDataFoundryInput["trustedStageTools"]>;
 
 afterEach(() => {
   for (const workspaceRoot of workspaceRoots.splice(0)) {
@@ -36,6 +48,11 @@ const createEnergyIqAgent = async (
     disableTools?: boolean;
     structuredOutput?: CreateDataFoundryInput["structuredOutput"];
     trustedStageTools?: CreateDataFoundryInput["trustedStageTools"];
+    trustedStageCapability?: CreateDataFoundryInput["trustedStageCapability"];
+    mcpTools?: CreateDataFoundryInput["mcpTools"];
+    mcpToolNames?: CreateDataFoundryInput["mcpToolNames"];
+    explicitProtocol?: CreateDataFoundryInput["explicitProtocol"];
+    energyIqContext?: boolean;
     modelProvider?: CreateDataFoundryInput["modelProvider"];
   } = {},
 ) => {
@@ -49,7 +66,10 @@ const createEnergyIqAgent = async (
     ...(options.disableTools ? { disableTools: true } : {}),
     ...(options.structuredOutput ? { structuredOutput: options.structuredOutput } : {}),
     ...(options.trustedStageTools ? { trustedStageTools: options.trustedStageTools } : {}),
-    explicitProtocol: { protocolId: "data-analysis", protocolVersion: "1" },
+    ...(options.trustedStageCapability ? { trustedStageCapability: options.trustedStageCapability } : {}),
+    ...(options.mcpTools ? { mcpTools: options.mcpTools } : {}),
+    ...(options.mcpToolNames ? { mcpToolNames: options.mcpToolNames } : {}),
+    explicitProtocol: options.explicitProtocol ?? { protocolId: "data-analysis", protocolVersion: "1" },
     messages: [],
     modelProvider: options.modelProvider ?? {
       kind: "openai-compatible",
@@ -68,25 +88,58 @@ const createEnergyIqAgent = async (
       enabled_datasource_ids: ["energy"],
       selected_datasource_id: "energy",
       model_name: "test-model",
-      energy_query_context: {
-        projectId: "preschool-demo",
-        projectName: "Preschool Portfolio",
-        scopeId: "project",
-        scopeName: "Preschool Portfolio",
-        scopeType: "project",
-        resource: "electricity",
-        timezone: "Asia/Singapore",
-        from: "2026-05-01T16:00:00.000Z",
-        to: "2026-06-01T16:00:00.000Z",
-        endExclusive: true,
-        period: "Custom",
-      },
+      ...(options.energyIqContext === false ? {} : {
+        energy_query_context: {
+          projectId: "preschool-demo",
+          projectName: "Preschool Portfolio",
+          scopeId: "project",
+          scopeName: "Preschool Portfolio",
+          scopeType: "project",
+          resource: "electricity",
+          timezone: "Asia/Singapore",
+          from: "2026-05-01T16:00:00.000Z",
+          to: "2026-06-01T16:00:00.000Z",
+          endExclusive: true,
+          period: "Custom",
+        },
+      }),
     },
     workspaceRoot,
   });
 };
 
 describe("EnergyIQ agent policy follows the enabled tool set", () => {
+  it("rejects Additional discovery when final policy composition leaks non-capability tools", async () => {
+    const trustedStageTools = createNamedTools(ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1);
+    const mcpTools = createNamedTools(["mcp.workspace.lookup"]);
+
+    await expect(createEnergyIqAgent([], {
+      explicitProtocol: { protocolId: "general-task", protocolVersion: "1" },
+      mcpTools,
+      trustedStageCapability: "energyiq-additional-insight-discovery",
+      trustedStageTools,
+    })).rejects.toThrow("TRUSTED_STAGE_CAPABILITY_INVALID");
+  });
+
+  it("rejects Additional transition when final policy composition exposes any tool", async () => {
+    await expect(createEnergyIqAgent([], {
+      energyIqContext: false,
+      explicitProtocol: { protocolId: "general-task", protocolVersion: "1" },
+      mcpTools: createNamedTools(["mcp.workspace.lookup"]),
+      mcpToolNames: ["mcp.workspace.lookup"],
+      trustedStageCapability: "energyiq-additional-insight-transition",
+    })).rejects.toThrow("TRUSTED_STAGE_CAPABILITY_INVALID");
+  });
+
+  it("rejects Additional tools injected after input validation when no capability is present", async () => {
+    await expect(createEnergyIqAgent([], {
+      energyIqContext: false,
+      explicitProtocol: { protocolId: "general-task", protocolVersion: "1" },
+      mcpToolNames: [...ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1],
+      mcpTools: createNamedTools(ADDITIONAL_AI_INSIGHTS_SCOPED_READ_ONLY_TOOLS_V1),
+    })).rejects.toThrow("TRUSTED_STAGE_CAPABILITY_INVALID");
+  });
+
   it("attaches no tools when a bounded value stage disables tools", async () => {
     const runtime = await createEnergyIqAgent([], { disableTools: true });
 
