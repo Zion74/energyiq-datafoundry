@@ -15,8 +15,87 @@ import {
 } from "./overview-ai-artifact.js";
 import { ensureEnergyIqBootstrap, PRESCHOOL_WORKSPACE_ID } from "./energy-bootstrap.js";
 import { createPreschoolAdditionalAiInsightsWorkflow } from "./preschool-additional-ai-insights-workflow.js";
+import { composePreschoolOverviewAiReadModel } from "./preschool-overview-ai-read-model.js";
 
 describe("Preschool Additional AI Insights workflow", () => {
+  it("loads only server-published workspace Method content into a new exact Method-set identity", async () => {
+    const harness = createHarness();
+    try {
+      const prompts: string[] = [];
+      const runDiscovery = vi.fn(async ({ prompt, runId, sessionId }) => {
+        prompts.push(prompt);
+        return {
+          answer: JSON.stringify({ candidates: [candidate("candidate-source", "fact:standby-share")] }),
+          runId,
+          sessionId,
+        };
+      });
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        runDiscovery,
+      });
+      const first = await workflow.execute({ baseIdentity: harness.baseIdentity, user: harness.user });
+      const guidance = "Compare repeated event shape and timing before treating an isolated spike as a reusable pattern.";
+      const provisional = harness.metadata.energyIq.insightMethodGovernance.createProposal({
+        expectedWorkspaceId: PRESCHOOL_WORKSPACE_ID,
+        expectedProjectId: "preschool-demo",
+        artifactId: first.id,
+        findingId: "additional:candidate-source",
+        actorId: harness.user.id,
+        idempotencyKey: "proposal:workflow-method",
+        title: "Repeated event shape",
+        guidance,
+      });
+      const inReview = harness.metadata.energyIq.insightMethodGovernance.submitProposal({
+        workspaceId: PRESCHOOL_WORKSPACE_ID,
+        projectId: "preschool-demo",
+        proposalId: provisional.id,
+        actorId: harness.user.id,
+        expectedRevision: provisional.revision,
+      });
+      const approved = harness.metadata.energyIq.insightMethodGovernance.approveProposal({
+        workspaceId: PRESCHOOL_WORKSPACE_ID,
+        projectId: "preschool-demo",
+        proposalId: provisional.id,
+        actorId: harness.user.id,
+        expectedRevision: inReview.revision,
+      });
+      harness.metadata.energyIq.insightMethodGovernance.publishProposal({
+        workspaceId: PRESCHOOL_WORKSPACE_ID,
+        projectId: "preschool-demo",
+        proposalId: provisional.id,
+        actorId: harness.user.id,
+        expectedRevision: approved.revision,
+      });
+
+      const second = await workflow.execute({ baseIdentity: harness.baseIdentity, user: harness.user });
+      const result = JSON.parse(second.result_json!) as AdditionalAiInsightsArtifact;
+
+      expect(runDiscovery).toHaveBeenCalledTimes(2);
+      expect(second.id).not.toBe(first.id);
+      expect(prompts[1]).toContain(guidance);
+      expect(result.methodExecution.loadedMethods).toHaveLength(2);
+      expect(result.findings[0]?.origin).toMatchObject({
+        kind: "expert-sop",
+        directionMethods: [expect.objectContaining({
+          scope: "workspace",
+          workspaceId: PRESCHOOL_WORKSPACE_ID,
+          role: "expert-direction",
+        })],
+      });
+      expect(composePreschoolOverviewAiReadModel({
+        metadataStore: harness.metadata,
+        baseIdentity: harness.baseIdentity,
+      })?.additional).toMatchObject({
+        status: "available",
+        artifactId: second.id,
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
   it("discovers openly, rejects bad candidates locally and publishes at most three in model source order", async () => {
     const harness = createHarness();
     try {

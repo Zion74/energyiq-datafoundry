@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import { EnergyIqMetricStore } from "./energyiq-metric-store.js";
 import { EnergyIqOperationalPolicyStore } from "./energyiq-operational-policy-store.js";
 import { EnergyIqOverviewAiArtifactStore } from "./energyiq-overview-ai-artifact-store.js";
+import { EnergyIqInsightMethodGovernanceStore } from "./energyiq-insight-method-governance-store.js";
 import { EnergyIqRuleStore } from "./energyiq-rule-store.js";
 import { EnergyIqSavedAnalysisStore } from "./energyiq-saved-analysis-store.js";
 import { EnergyIqScopeMetadataResolver } from "./energyiq-scope-metadata-resolver.js";
@@ -259,6 +260,7 @@ export class EnergyIqStore {
   readonly metrics: EnergyIqMetricStore;
   readonly operationalPolicy: EnergyIqOperationalPolicyStore;
   readonly overviewAiArtifacts: EnergyIqOverviewAiArtifactStore;
+  readonly insightMethodGovernance: EnergyIqInsightMethodGovernanceStore;
   readonly projectSetup: EnergyIqProjectSetupStore;
   readonly rules: EnergyIqRuleStore;
   readonly savedAnalyses: EnergyIqSavedAnalysisStore;
@@ -270,6 +272,7 @@ export class EnergyIqStore {
     this.metrics = new EnergyIqMetricStore(db);
     this.operationalPolicy = new EnergyIqOperationalPolicyStore(db);
     this.overviewAiArtifacts = new EnergyIqOverviewAiArtifactStore(db);
+    this.insightMethodGovernance = new EnergyIqInsightMethodGovernanceStore(db);
     this.projectSetup = new EnergyIqProjectSetupStore(db);
     this.rules = new EnergyIqRuleStore(db);
     this.savedAnalyses = new EnergyIqSavedAnalysisStore(db);

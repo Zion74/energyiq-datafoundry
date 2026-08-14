@@ -30,7 +30,10 @@ import type {
   PreschoolAiEpistemicLevel,
 } from "./preschool-ai-artifact";
 import { AiFindingPresentationView } from "./ai-finding-presentation-view";
-import { PreschoolAdditionalAiInsights } from "./preschool-additional-ai-insights";
+import {
+  PreschoolAdditionalAiInsights,
+  type PreschoolAdditionalFeedbackClient,
+} from "./preschool-additional-ai-insights";
 import { SafeAiMarkdown } from "./safe-ai-markdown";
 
 type ProgressCallback = (progress: PreschoolAiProgress) => void;
@@ -52,6 +55,7 @@ export function PreschoolAiSlot({
   onResult,
   onCompletedResult,
   startRun = getOrStartPreschoolAiRun,
+  additionalFeedbackClient,
 }: {
   snapshot: EnergyProjectAnalysisSnapshotDto;
   sectionId?: PreschoolAiSectionId;
@@ -62,6 +66,7 @@ export function PreschoolAiSlot({
   onResult?: (result: PreschoolAiRunResult) => void;
   onCompletedResult?: (result: Extract<PreschoolAiRunResult, { status: "available" }>) => void;
   startRun?: (input: PreschoolAiRunInput, onProgress?: ProgressCallback) => Promise<PreschoolAiRunResult>;
+  additionalFeedbackClient?: PreschoolAdditionalFeedbackClient;
 }) {
   const input = useMemo(() => buildPreschoolAiRunInput(snapshot), [snapshot]);
   const inputRef = useRef(input);
@@ -167,6 +172,7 @@ export function PreschoolAiSlot({
         sectionId={sectionId}
         mode={mode}
         aiAnalystHref={aiAnalystHref}
+        additionalFeedbackClient={additionalFeedbackClient}
       />
     );
   }
@@ -235,11 +241,13 @@ function SectionedAiResult({
   sectionId,
   mode,
   aiAnalystHref,
+  additionalFeedbackClient,
 }: {
   result: PreschoolOverviewAiReadModelDto;
   sectionId: PreschoolAiSectionId;
   mode: "live" | "saved";
   aiAnalystHref?: string;
+  additionalFeedbackClient?: PreschoolAdditionalFeedbackClient;
 }) {
   if (sectionId === "page-synthesis") {
     const lineage = buildExecutiveLineage(result, mode);
@@ -269,6 +277,7 @@ function SectionedAiResult({
           unit={result.additional}
           outerBinding={result.binding}
           mode={mode}
+          feedbackClient={additionalFeedbackClient}
         />
       );
     }

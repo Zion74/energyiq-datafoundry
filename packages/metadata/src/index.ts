@@ -18,6 +18,7 @@ import {
 import { EnergyIqStore, initializeEnergyIqSchema } from "./energyiq-store.js";
 import { initializeEnergyIqMetricSchema } from "./energyiq-metric-store.js";
 import { initializeEnergyIqOverviewAiArtifactSchema } from "./energyiq-overview-ai-artifact-store.js";
+import { initializeEnergyIqInsightMethodGovernanceSchema } from "./energyiq-insight-method-governance-store.js";
 import {
   ensureEnergyIqOperationalPolicyBindingOwnershipSchema,
   initializeEnergyIqOperationalPolicySchema
@@ -39,6 +40,7 @@ export * from "./energyiq-scope-metadata-resolver.js";
 export * from "./energyiq-metric-store.js";
 export * from "./energyiq-operational-policy-store.js";
 export * from "./energyiq-overview-ai-artifact-store.js";
+export * from "./energyiq-insight-method-governance-store.js";
 export * from "./energyiq-project-setup-store.js";
 export * from "./energyiq-rule-store.js";
 export * from "./energyiq-template-store.js";
@@ -4076,6 +4078,9 @@ const runMigrations = (db: DatabaseSync): void => {
   });
   runSchemaMigration(db, "0031_energyiq_template_change_proposal", "Persist reviewed EnergyIQ template change proposals", () => {
     initializeEnergyIqTemplateChangeSchema(db);
+  });
+  runSchemaMigration(db, "0032_energyiq_insight_method_governance", "Persist Additional Insight feedback and Method governance", () => {
+    initializeEnergyIqInsightMethodGovernanceSchema(db);
   });
 };
 

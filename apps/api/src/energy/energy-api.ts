@@ -212,6 +212,135 @@ export const handleEnergyApiRequest = async (
         }))
       };
     }
+    if (segments[0] === "projects" && segments[2] === "additional-ai-insights") {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      const access = requireEnergyProjectAccess(context, user, projectId);
+      const governance = context.metadataStore.energyIq.insightMethodGovernance;
+      if (segments[3] === "method-proposals") {
+        if (segments.length === 4 && request.method === "GET") {
+          requireEnergyAdminProject(context, user, projectId);
+          return {
+            status: 200,
+            body: createSuccessResult({
+              proposals: governance.listProposals({
+                workspaceId: access.activeWorkspaceId,
+                projectId,
+              }),
+            }),
+          };
+        }
+        if (segments.length === 6 && request.method === "POST") {
+          const proposalId = decodeURIComponent(segments[4] ?? "");
+          const action = segments[5];
+          const body = requireRecord(await readJsonBody(request));
+          const expectedRevision = requireNonNegativeInteger(
+            body.expectedRevision,
+            "ENERGYIQ_INSIGHT_METHOD_PROPOSAL_REVISION_REQUIRED",
+          );
+          const proposal = governance.getProposal({
+            workspaceId: access.activeWorkspaceId,
+            projectId,
+            proposalId,
+          });
+          if (action === "submit") {
+            if (proposal.createdBy !== user.id && access.role !== "admin") {
+              throw new AuthError(403, "FORBIDDEN", "ENERGYIQ_INSIGHT_METHOD_PROPOSAL_FORBIDDEN");
+            }
+            return {
+              status: 200,
+              body: createSuccessResult(transitionInsightMethodProposal(() => governance.submitProposal({
+                workspaceId: access.activeWorkspaceId,
+                projectId,
+                proposalId,
+                actorId: user.id,
+                expectedRevision,
+              }))),
+            };
+          }
+          if (action === "approve" || action === "publish") {
+            requireEnergyAdminProject(context, user, projectId);
+            const transition = action === "approve"
+              ? () => governance.approveProposal({
+                  workspaceId: access.activeWorkspaceId,
+                  projectId,
+                  proposalId,
+                  actorId: user.id,
+                  expectedRevision,
+                })
+              : () => governance.publishProposal({
+                  workspaceId: access.activeWorkspaceId,
+                  projectId,
+                  proposalId,
+                  actorId: user.id,
+                  expectedRevision,
+                });
+            return { status: 200, body: createSuccessResult(transitionInsightMethodProposal(transition)) };
+          }
+        }
+      }
+      if (segments.length === 7 && segments[4] === "findings") {
+        const artifactId = decodeURIComponent(segments[3] ?? "");
+        const findingId = decodeURIComponent(segments[5] ?? "");
+        if (segments[6] === "feedback") {
+          if (request.method === "GET") {
+            return {
+              status: 200,
+              body: createSuccessResult(governance.findVisibleFeedback({
+                workspaceId: access.activeWorkspaceId,
+                projectId,
+                artifactId,
+                findingId,
+                actorId: user.id,
+              }) ?? null),
+            };
+          }
+          if (request.method === "PUT") {
+            const body = requireRecord(await readJsonBody(request));
+            if (body.rating !== "useful" && body.rating !== "not-useful") {
+              throw new Error("ENERGYIQ_ADDITIONAL_FEEDBACK_RATING_INVALID");
+            }
+            return {
+              status: 200,
+              body: createSuccessResult(governance.recordFeedback({
+                expectedWorkspaceId: access.activeWorkspaceId,
+                expectedProjectId: projectId,
+                artifactId,
+                findingId,
+                actorId: user.id,
+                rating: body.rating,
+                expectedRevision: requireNonNegativeInteger(
+                  body.expectedRevision,
+                  "ENERGYIQ_ADDITIONAL_FEEDBACK_REVISION_REQUIRED",
+                ),
+              })),
+            };
+          }
+        }
+        if (segments[6] === "method-proposals" && request.method === "POST") {
+          const body = requireRecord(await readJsonBody(request));
+          return {
+            status: 201,
+            body: createSuccessResult(governance.createProposal({
+              expectedWorkspaceId: access.activeWorkspaceId,
+              expectedProjectId: projectId,
+              artifactId,
+              findingId,
+              actorId: user.id,
+              idempotencyKey: requireNonEmptyString(
+                body.idempotencyKey,
+                "ENERGYIQ_INSIGHT_METHOD_PROPOSAL_IDEMPOTENCY_KEY_REQUIRED",
+              ),
+              title: requireNonEmptyString(body.title, "ENERGYIQ_INSIGHT_METHOD_PROPOSAL_TITLE_REQUIRED"),
+              guidance: requireNonEmptyString(body.guidance, "ENERGYIQ_INSIGHT_METHOD_PROPOSAL_GUIDANCE_REQUIRED"),
+            })),
+          };
+        }
+      }
+      return {
+        status: 404,
+        body: createErrorResult("RESOURCE_NOT_FOUND", "Additional Insight governance endpoint not found."),
+      };
+    }
     if (segments[0] === "projects" && segments[2] === "overview-ai-artifact") {
       const projectId = decodeURIComponent(segments[1] ?? "");
       const project = context.metadataStore.energyIq.getProject(projectId);
@@ -1201,7 +1330,9 @@ export const toEnergyApiErrorResponse = (error: unknown): ConfigApiResponse => {
   const rawMessage = error instanceof Error ? error.message : String(error);
   const message = rawMessage.match(/ENERGYIQ_[A-Z0-9_]+(?::[^\s]+)?/)?.[0] ?? rawMessage;
   const forbidden = message.includes("FORBIDDEN") || message.includes("ADMIN_REQUIRED");
+  const notFound = message.includes("NOT_FOUND");
   const conflict = message.includes("CONFLICT")
+    || message === "ENERGYIQ_ADDITIONAL_ARTIFACT_NOT_CURRENT"
     || message === "ENERGYIQ_SOURCE_MANIFEST_NOT_CONFIRMED"
     || message === "ENERGYIQ_SOURCE_MANIFEST_MISMATCH"
     || message.startsWith("ENERGYIQ_IMPORT_BATCH_NOT_PINNED")
@@ -1223,13 +1354,15 @@ export const toEnergyApiErrorResponse = (error: unknown): ConfigApiResponse => {
     || message === "ENERGYIQ_RULE_REVISION_NOT_FOUND";
   const code: AppErrorCode = forbidden
     ? "FORBIDDEN"
+    : notFound
+      ? "RESOURCE_NOT_FOUND"
     : conflict
       ? "CONFLICT"
       : invalid
         ? "BAD_REQUEST"
         : "INTERNAL_ERROR";
   return {
-    status: forbidden ? 403 : conflict ? 409 : invalid ? 400 : 500,
+    status: forbidden ? 403 : notFound ? 404 : conflict ? 409 : invalid ? 400 : 500,
     body: createErrorResult(code, message),
   };
 };
@@ -2057,6 +2190,38 @@ const requireEnergyAdmin = (
   return access;
 };
 
+const requireEnergyProjectAccess = (
+  context: Required<ConfigApiContext>,
+  user: ReturnType<Required<ConfigApiContext>["metadataStore"]["users"]["getById"]>,
+  projectId: string,
+) => {
+  const access = resolveEnergyAccessContext({
+    metadataStore: context.metadataStore,
+    user,
+    requestedWorkspaceId: context.workspaceId,
+  });
+  const project = context.metadataStore.energyIq.getProject(projectId);
+  const visible = access.projects.find((candidate) => candidate.id === project.id
+    && candidate.workspaceId === access.activeWorkspaceId);
+  if (!visible || project.workspace_id !== access.activeWorkspaceId
+    || (visible.status !== "published" && access.role !== "admin")) {
+    throw new AuthError(403, "FORBIDDEN", "ENERGYIQ_PROJECT_FORBIDDEN");
+  }
+  return access;
+};
+
+const transitionInsightMethodProposal = <T>(transition: () => T): T => {
+  try {
+    return transition();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.startsWith("INSIGHT_METHOD_NOT_")) {
+      throw new Error(`ENERGYIQ_INSIGHT_METHOD_TRANSITION_CONFLICT:${message}`);
+    }
+    throw error;
+  }
+};
+
 const requireEnergyAdminProject = (
   context: Required<ConfigApiContext>,
   user: ReturnType<Required<ConfigApiContext>["metadataStore"]["users"]["getById"]>,
@@ -2577,6 +2742,12 @@ const requireInteger = (value: unknown, message: string): number => {
     throw new Error(message);
   }
   return value;
+};
+
+const requireNonNegativeInteger = (value: unknown, message: string): number => {
+  const integer = requireInteger(value, message);
+  if (integer < 0) throw new Error(message);
+  return integer;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

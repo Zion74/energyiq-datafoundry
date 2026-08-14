@@ -1425,6 +1425,83 @@ describe("PreschoolAiSlot", () => {
     expect(container.textContent).not.toContain("Legacy autonomous angle");
   });
 
+  it("loads and changes only the signed-in actor's feedback for the exact current Finding", async () => {
+    const result = v4ReadModelResult();
+    Object.assign(result, { additional: currentAdditionalUnit(result.binding) });
+    let resolveFeedback!: (value: unknown) => void;
+    const loadFeedback = vi.fn(() => new Promise((resolve) => { resolveFeedback = resolve; }));
+    const saveFeedback = vi.fn(async () => ({
+      rating: "not-useful" as const,
+      revision: 2,
+      updatedAt: "2026-08-14T04:00:00.000Z",
+    }));
+    const startRun = vi.fn().mockResolvedValue(result);
+
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        sectionId="overall-summary"
+        liveResult={result}
+        startRun={startRun}
+        additionalFeedbackClient={{ loadFeedback, saveFeedback }}
+      />,
+    ));
+
+    expect(container.textContent).toContain("Loading your feedback");
+    expect(loadFeedback).toHaveBeenCalledWith({
+      projectId: "preschool-demo",
+      artifactId: "additional-current-v2",
+      findingId: "additional:candidate-counter-pattern",
+    });
+
+    await act(async () => resolveFeedback({
+      rating: "useful",
+      revision: 1,
+      updatedAt: "2026-08-14T03:00:00.000Z",
+    }));
+    const useful = [...container.querySelectorAll("button")].find((button) => button.textContent === "Useful");
+    const notUseful = [...container.querySelectorAll("button")].find((button) => button.textContent === "Not useful");
+    expect(useful?.getAttribute("aria-pressed")).toBe("true");
+    expect(notUseful).toBeDefined();
+
+    await act(async () => notUseful!.click());
+    expect(saveFeedback).toHaveBeenCalledWith({
+      projectId: "preschool-demo",
+      artifactId: "additional-current-v2",
+      findingId: "additional:candidate-counter-pattern",
+      rating: "not-useful",
+      expectedRevision: 1,
+    });
+    expect(container.textContent).toContain("Feedback saved");
+    expect(notUseful?.getAttribute("aria-pressed")).toBe("true");
+    expect(startRun).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the Finding visible and exposes a local feedback error", async () => {
+    const result = v4ReadModelResult();
+    Object.assign(result, { additional: currentAdditionalUnit(result.binding) });
+    const client = {
+      loadFeedback: vi.fn().mockResolvedValue(null),
+      saveFeedback: vi.fn().mockRejectedValue(new Error("network unavailable")),
+    };
+
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        sectionId="overall-summary"
+        liveResult={result}
+        startRun={vi.fn().mockResolvedValue(result)}
+        additionalFeedbackClient={client}
+      />,
+    ));
+    await act(async () => undefined);
+    const useful = [...container.querySelectorAll("button")].find((button) => button.textContent === "Useful");
+    await act(async () => useful!.click());
+
+    expect(container.textContent).toContain("A counter-pattern appears");
+    expect(container.textContent).toContain("Feedback could not be saved");
+  });
+
   it("isolates malformed Additional findings and Canvas while preserving valid siblings", async () => {
     const result = v4ReadModelResult();
     const additional = currentAdditionalUnit(result.binding);

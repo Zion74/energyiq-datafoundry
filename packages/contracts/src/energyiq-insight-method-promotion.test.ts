@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { InsightMethodRevisionRef } from "./energyiq-autonomous-insights.js";
 import {
+  applyInsightFindingFeedback,
   approveInsightMethodProposal,
   insightMethodIsSelectableForSurface,
   publishApprovedInsightMethodProposal,
@@ -10,6 +11,23 @@ import {
   type InsightMethodProposal,
   type InsightMethodSelectionContext,
 } from "./energyiq-insight-method-promotion.js";
+
+const feedbackIdentity = {
+  workspaceId: "workspace-singapore-preschool",
+  projectId: "preschool-demo",
+  scopeId: "preschool-project",
+  artifactId: "overview-artifact:2026-05",
+  artifactIdentityHash: `sha256:${"a".repeat(64)}`,
+  artifactContractRevision: "energyiq-additional-ai-insights-v2",
+  dataSnapshotId: "snapshot:2026-05",
+  projectReleaseId: "release:preschool-v2",
+  analysisPeriod: {
+    from: "2026-05-01T00:00:00.000Z",
+    to: "2026-06-01T00:00:00.000Z",
+  },
+  findingId: "finding:closed-hours-event-shape",
+  actorId: "operator:charles",
+} as const;
 
 const provisionalProposal = (): InsightMethodProposal => ({
   id: "method-proposal:closed-hours-event-shape",
@@ -60,6 +78,84 @@ const privateAnalysisContext = (
 });
 
 describe("EnergyIQ insight method promotion", () => {
+  it("records one exact actor vote idempotently and preserves an audited change of vote", () => {
+    const useful = applyInsightFindingFeedback(undefined, {
+      ...feedbackIdentity,
+      rating: "useful",
+      expectedRevision: 0,
+      recordedAt: "2026-08-14T01:00:00.000Z",
+    });
+
+    expect(useful).toMatchObject({
+      ...feedbackIdentity,
+      rating: "useful",
+      revision: 1,
+      createdAt: "2026-08-14T01:00:00.000Z",
+      updatedAt: "2026-08-14T01:00:00.000Z",
+      history: [{
+        revision: 1,
+        fromRating: null,
+        toRating: "useful",
+        actorId: feedbackIdentity.actorId,
+        recordedAt: "2026-08-14T01:00:00.000Z",
+      }],
+    });
+
+    expect(applyInsightFindingFeedback(useful, {
+      ...feedbackIdentity,
+      rating: "useful",
+      expectedRevision: 0,
+      recordedAt: "2026-08-14T01:01:00.000Z",
+    })).toBe(useful);
+
+    const changed = applyInsightFindingFeedback(useful, {
+      ...feedbackIdentity,
+      rating: "not-useful",
+      expectedRevision: 1,
+      recordedAt: "2026-08-14T01:02:00.000Z",
+    });
+    expect(changed).toMatchObject({
+      rating: "not-useful",
+      revision: 2,
+      createdAt: useful.createdAt,
+      updatedAt: "2026-08-14T01:02:00.000Z",
+      history: [
+        useful.history[0],
+        {
+          revision: 2,
+          fromRating: "useful",
+          toRating: "not-useful",
+          actorId: feedbackIdentity.actorId,
+          recordedAt: "2026-08-14T01:02:00.000Z",
+        },
+      ],
+    });
+
+    expect(() => applyInsightFindingFeedback(changed, {
+      ...feedbackIdentity,
+      rating: "useful",
+      expectedRevision: 1,
+      recordedAt: "2026-08-14T01:03:00.000Z",
+    })).toThrow("INSIGHT_FEEDBACK_REVISION_CONFLICT");
+  });
+
+  it("rejects feedback identity drift instead of moving a vote to another Artifact or tenant", () => {
+    const current = applyInsightFindingFeedback(undefined, {
+      ...feedbackIdentity,
+      rating: "useful",
+      expectedRevision: 0,
+      recordedAt: "2026-08-14T01:00:00.000Z",
+    });
+
+    expect(() => applyInsightFindingFeedback(current, {
+      ...feedbackIdentity,
+      workspaceId: "workspace-other-customer",
+      rating: "not-useful",
+      expectedRevision: 1,
+      recordedAt: "2026-08-14T01:02:00.000Z",
+    })).toThrow("INSIGHT_FEEDBACK_IDENTITY_MISMATCH");
+  });
+
   it("keeps a provisional pattern out of production selection after one Useful feedback", () => {
     const proposal = provisionalProposal();
 

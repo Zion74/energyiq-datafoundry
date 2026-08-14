@@ -103,8 +103,13 @@ export const createOverviewAiArtifactIdentity = (input: {
 
 export const createPreschoolAdditionalAiInsightArtifactIdentity = (input: {
   baseIdentity: OverviewAiArtifactIdentityV13;
+  methodSet?: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>;
 }): PreschoolAdditionalAiInsightArtifactIdentity => {
-  const methodSet = resolveCurrentAdditionalAiInsightMethodSet(input.baseIdentity.workspaceId);
+  const methodSet = input.methodSet
+    ?? resolveCurrentAdditionalAiInsightMethodSet(input.baseIdentity.workspaceId);
+  if (methodSet.methods.some(({ workspaceId }) => workspaceId !== input.baseIdentity.workspaceId)) {
+    throw new Error("ENERGYIQ_ADDITIONAL_INSIGHT_METHOD_SET_INVALID");
+  }
   const canonicalMethods = canonicalInsightMethodSetJson(methodSet.methods);
   if (canonicalMethods === null) throw new Error("ENERGYIQ_ADDITIONAL_INSIGHT_METHOD_SET_INVALID");
   return {

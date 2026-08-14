@@ -6,6 +6,8 @@ import type {
 import {
   additionalAiInsightsArtifactIsValid,
   resolveAdditionalAiInsightMethodSet,
+  resolveCurrentAdditionalAiInsightMethodSet,
+  type AdditionalAiInsightMethodSet,
   type AdditionalAiInsightsArtifact,
 } from "@datafoundry/contracts";
 
@@ -32,15 +34,27 @@ import {
 export const composePreschoolOverviewAiReadModel = (input: {
   metadataStore: MetadataStore;
   baseIdentity: OverviewAiArtifactIdentityV13;
-}): PreschoolOverviewAiReadModel | null => composeReadModel({
-  ...input,
-  createSectionIdentity: createPreschoolOverviewAiSectionArtifactIdentityV4,
-  parseSectionResult,
-  createExecutiveIdentity: createPreschoolOverviewAiExecutiveArtifactIdentityV4,
-  parseExecutiveResult: parseExecutiveResultV4,
-  createAdditionalIdentity: createPreschoolAdditionalAiInsightArtifactIdentity,
-  restoreLegacyAutonomous: false,
-});
+}): PreschoolOverviewAiReadModel | null => {
+  const methodSet = resolveCurrentAdditionalAiInsightMethodSet(
+    input.baseIdentity.workspaceId,
+    input.metadataStore.energyIq.insightMethodGovernance?.listPublishedWorkspaceMethodResources({
+      workspaceId: input.baseIdentity.workspaceId,
+    }) ?? [],
+  );
+  return composeReadModel({
+    ...input,
+    createSectionIdentity: createPreschoolOverviewAiSectionArtifactIdentityV4,
+    parseSectionResult,
+    createExecutiveIdentity: createPreschoolOverviewAiExecutiveArtifactIdentityV4,
+    parseExecutiveResult: parseExecutiveResultV4,
+    createAdditionalIdentity: ({ baseIdentity }) => createPreschoolAdditionalAiInsightArtifactIdentity({
+      baseIdentity,
+      methodSet,
+    }),
+    parseAdditionalResult: (value, identity) => parseAdditionalResult(value, identity, methodSet),
+    restoreLegacyAutonomous: false,
+  });
+};
 
 export const composePreschoolOverviewAiReadModelV3 = (input: {
   metadataStore: MetadataStore;
@@ -71,6 +85,7 @@ const composeReadModel = (input: {
   createAdditionalIdentity?: (input: {
     baseIdentity: OverviewAiArtifactIdentityV13;
   }) => PreschoolAdditionalAiInsightArtifactIdentity;
+  parseAdditionalResult?: typeof parseAdditionalResult;
   restoreLegacyAutonomous: boolean;
 }): PreschoolOverviewAiReadModel | null => {
   const store = input.metadataStore.energyIq.overviewAiArtifacts;
@@ -115,7 +130,11 @@ const composeReadModel = (input: {
     })) as PreschoolOverviewAiReadModel["sections"],
     executive: executiveUnit(executiveArtifact, executiveIdentity, input.parseExecutiveResult),
     ...(additionalIdentity
-      ? { additional: additionalUnit(additionalArtifact, additionalIdentity) }
+      ? { additional: additionalUnit(
+          additionalArtifact,
+          additionalIdentity,
+          input.parseAdditionalResult ?? parseAdditionalResult,
+        ) }
       : {}),
     ...(autonomousArtifact?.status === "available" && autonomousArtifact.result_json
       ? { autonomous: parseJson(autonomousArtifact.result_json) }
@@ -126,13 +145,14 @@ const composeReadModel = (input: {
 const additionalUnit = (
   artifact: EnergyIqOverviewAiArtifactRecord | null,
   identity: PreschoolAdditionalAiInsightArtifactIdentity,
+  parseResult: typeof parseAdditionalResult,
 ): PreschoolOverviewAiUnitStatus<AdditionalAiInsightsArtifact> => {
   if (!artifact) return { status: "unavailable", reason: "Additional AI Insights have not been generated." };
   if (artifact.status === "queued" || artifact.status === "running") return { status: artifact.status };
   if (artifact.status === "failed") {
     return { status: "unavailable", artifactId: artifact.id, reason: artifact.error_code ?? "Additional AI Insights failed." };
   }
-  const result = artifact.result_json ? parseAdditionalResult(artifact.result_json, identity) : null;
+  const result = artifact.result_json ? parseResult(artifact.result_json, identity) : null;
   if (!result) return { status: "unavailable", artifactId: artifact.id, reason: "Additional AI Insights are invalid." };
   return result.status === "empty"
     ? { status: "empty", artifactId: artifact.id, result }
@@ -142,9 +162,10 @@ const additionalUnit = (
 const parseAdditionalResult = (
   value: string,
   identity: PreschoolAdditionalAiInsightArtifactIdentity,
+  providedMethodSet?: AdditionalAiInsightMethodSet,
 ): AdditionalAiInsightsArtifact | null => {
   const parsed = parseJson(value);
-  const methodSet = resolveAdditionalAiInsightMethodSet({
+  const methodSet = providedMethodSet ?? resolveAdditionalAiInsightMethodSet({
     workspaceId: identity.workspaceId,
     methodSetId: identity.methodSetId,
     methodSetRevision: identity.methodSetRevision,

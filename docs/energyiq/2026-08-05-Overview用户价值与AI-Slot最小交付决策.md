@@ -849,3 +849,21 @@ presentation gaps；第四个及之后的有效 Block 以 `PRESENTATION_BUDGET_E
 这一 checkpoint 只证明 Stage 3A–3C 的自动化合同、持久化、只读恢复和安全渲染边界，不证明真实 Provider 输出质量、浏览器视觉恢复
 或人工增量价值。Stage 3D feedback/promotion persistence、Stage 3E pass@3 与 Snapshot A→B evaluation 仍未实现；在这些门完成前
 不得宣称 Stage 3 已完成或 Additional Insight 已通过产品验收。
+
+### 18.9 Stage 3D 工程 checkpoint
+
+Stage 3D 已建立 Additional Finding 反馈与 Insight Method 晋升的持久化治理边界。Useful / Not useful 由服务端重新解析 current
+Additional Artifact 与 Finding，绑定精确 Workspace、Project、Scope、Artifact identity hash/revision、Snapshot、Release、Period、
+Finding 与 actor；同一 actor 的同一精确 Finding 只有一条当前反馈，重复同票幂等，改票使用 optimistic revision 并保留完整历史。
+反馈不会创建、批准或发布 Method，也不会改变 current Method Registry。
+
+Method Proposal 使用 `provisional → in-review → approved → published` 的显式状态机、revision conflict、actor/time/from/to audit 与租户边界。
+项目成员可从可见 Finding 创建 provisional 并提交 review；只有管理员可 approve/publish。共享 Overview 的 current Method set 只组合 builtin
+core Method 与该 Workspace 已 published、内容 SHA 可重新验证的 expert direction；未发布、私人或其他 Workspace 的 Method 不进入共享生成。
+发布后 Method-set fingerprint 变化会形成新的 current Additional Artifact identity，普通 Overview 打开仍只读已保存 Artifact，不触发
+Provider、工具、ensure 或 queue。
+
+Web current Finding 提供自己的反馈 loading / existing / saving / success / error 状态；Frozen Saved Analysis 不提交反馈。管理员生命周期通过
+受保护 API 与独立可测试管理组件暴露，仍需在真实管理页面中完成浏览器放置与交互验收。此 checkpoint 只证明 Contracts、Metadata、API、
+Method selection 与 Web 状态的自动化门；数据库迁移部署、真实浏览器与权限会话、真实 Provider、人工增量价值评审均未完成。Stage 3E pass@3
+与 Snapshot A→B evaluation 仍未开始，因此不得宣称 Stage 3 或 Additional AI Insights 已完成产品验收。

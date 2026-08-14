@@ -12,6 +12,47 @@ export type InsightMethodPromotionStatus =
   | "rejected"
   | "superseded";
 
+export type InsightFindingFeedbackRating = "useful" | "not-useful";
+
+export type InsightFindingFeedbackIdentity = {
+  workspaceId: string;
+  projectId: string;
+  scopeId: string;
+  artifactId: string;
+  artifactIdentityHash: string;
+  artifactContractRevision: string;
+  dataSnapshotId: string;
+  projectReleaseId: string;
+  analysisPeriod: {
+    from: string;
+    to: string;
+  };
+  findingId: string;
+  actorId: string;
+};
+
+export type InsightFindingFeedbackHistoryEntry = {
+  revision: number;
+  fromRating: InsightFindingFeedbackRating | null;
+  toRating: InsightFindingFeedbackRating;
+  actorId: string;
+  recordedAt: string;
+};
+
+export type InsightFindingFeedbackRecord = InsightFindingFeedbackIdentity & {
+  rating: InsightFindingFeedbackRating;
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  history: readonly InsightFindingFeedbackHistoryEntry[];
+};
+
+export type ApplyInsightFindingFeedbackInput = InsightFindingFeedbackIdentity & {
+  rating: InsightFindingFeedbackRating;
+  expectedRevision: number;
+  recordedAt: string;
+};
+
 export type InsightMethodPromotionTarget = {
   scope: "platform" | "user" | "workspace";
   workspaceId: string;
@@ -92,6 +133,92 @@ export type InsightMethodSelectionContext =
   };
 
 const nonEmpty = (value: string): boolean => /\S/.test(value);
+
+const exactFeedbackIdentity = (
+  left: InsightFindingFeedbackIdentity,
+  right: InsightFindingFeedbackIdentity,
+): boolean => left.workspaceId === right.workspaceId
+  && left.projectId === right.projectId
+  && left.scopeId === right.scopeId
+  && left.artifactId === right.artifactId
+  && left.artifactIdentityHash === right.artifactIdentityHash
+  && left.artifactContractRevision === right.artifactContractRevision
+  && left.dataSnapshotId === right.dataSnapshotId
+  && left.projectReleaseId === right.projectReleaseId
+  && left.analysisPeriod.from === right.analysisPeriod.from
+  && left.analysisPeriod.to === right.analysisPeriod.to
+  && left.findingId === right.findingId
+  && left.actorId === right.actorId;
+
+const validFeedbackInput = (input: ApplyInsightFindingFeedbackInput): boolean => [
+  input.workspaceId,
+  input.projectId,
+  input.scopeId,
+  input.artifactId,
+  input.artifactContractRevision,
+  input.dataSnapshotId,
+  input.projectReleaseId,
+  input.analysisPeriod.from,
+  input.analysisPeriod.to,
+  input.findingId,
+  input.actorId,
+  input.recordedAt,
+].every(nonEmpty)
+  && /^sha256:[0-9a-f]{64}$/u.test(input.artifactIdentityHash)
+  && (input.rating === "useful" || input.rating === "not-useful")
+  && Number.isSafeInteger(input.expectedRevision)
+  && input.expectedRevision >= 0
+  && Number.isFinite(Date.parse(input.recordedAt));
+
+/**
+ * The one-vote-per-actor state machine. Exact same-rating replays are no-ops;
+ * changing a vote is optimistic-concurrency controlled and appends audit only.
+ */
+export const applyInsightFindingFeedback = (
+  current: InsightFindingFeedbackRecord | undefined,
+  input: ApplyInsightFindingFeedbackInput,
+): InsightFindingFeedbackRecord => {
+  if (!validFeedbackInput(input)) throw new Error("INSIGHT_FEEDBACK_INVALID");
+  const { rating, expectedRevision, recordedAt, ...identity } = input;
+  if (!current) {
+    if (expectedRevision !== 0) throw new Error("INSIGHT_FEEDBACK_REVISION_CONFLICT");
+    return {
+      ...identity,
+      rating,
+      revision: 1,
+      createdAt: recordedAt,
+      updatedAt: recordedAt,
+      history: [{
+        revision: 1,
+        fromRating: null,
+        toRating: rating,
+        actorId: identity.actorId,
+        recordedAt,
+      }],
+    };
+  }
+  if (!exactFeedbackIdentity(current, identity)) {
+    throw new Error("INSIGHT_FEEDBACK_IDENTITY_MISMATCH");
+  }
+  if (current.rating === rating) return current;
+  if (current.revision !== expectedRevision) {
+    throw new Error("INSIGHT_FEEDBACK_REVISION_CONFLICT");
+  }
+  const revision = current.revision + 1;
+  return {
+    ...current,
+    rating,
+    revision,
+    updatedAt: recordedAt,
+    history: [...current.history, {
+      revision,
+      fromRating: current.rating,
+      toRating: rating,
+      actorId: identity.actorId,
+      recordedAt,
+    }],
+  };
+};
 
 const assertActorStamp = (actorId: string, timestamp: string): void => {
   if (!nonEmpty(actorId) || !nonEmpty(timestamp)) {

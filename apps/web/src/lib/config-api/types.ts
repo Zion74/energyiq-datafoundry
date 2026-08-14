@@ -2136,6 +2136,60 @@ export type EnergyOverviewAiArtifactDto = {
   };
 };
 
+export type EnergyAdditionalInsightFeedbackDto = {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  scopeId: string;
+  artifactId: string;
+  artifactIdentityHash: string;
+  artifactContractRevision: string;
+  dataSnapshotId: string;
+  projectReleaseId: string;
+  analysisPeriod: { from: string; to: string };
+  findingId: string;
+  actorId: string;
+  rating: "useful" | "not-useful";
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  history: Array<{
+    revision: number;
+    fromRating: "useful" | "not-useful" | null;
+    toRating: "useful" | "not-useful";
+    actorId: string;
+    recordedAt: string;
+  }>;
+};
+
+export type EnergyInsightMethodProposalDto = {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  scopeId: string;
+  artifactId: string;
+  artifactIdentityHash: string;
+  artifactContractRevision: string;
+  dataSnapshotId: string;
+  projectReleaseId: string;
+  analysisPeriod: { from: string; to: string };
+  findingId: string;
+  createdBy: string;
+  title: string;
+  guidance: string;
+  status: "provisional" | "in-review" | "approved" | "published" | "rejected" | "superseded";
+  revision: number;
+  createdAt: string;
+  updatedAt: string;
+  audit: Array<{
+    revision: number;
+    fromStatus: EnergyInsightMethodProposalDto["status"] | null;
+    toStatus: EnergyInsightMethodProposalDto["status"];
+    actorId: string;
+    recordedAt: string;
+  }>;
+};
+
 export type EnergySavedAnalysisAiArtifactDto = EnergySavedAnalysisAiArtifactInputDto & {
   completedAt: string;
   runProvenance?: {

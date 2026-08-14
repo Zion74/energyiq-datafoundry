@@ -1,8 +1,10 @@
-import React from "react";
+"use client";
+
+import React, { useEffect, useState } from "react";
 
 import type { InsightCanvasQuantitativeBlock } from "@datafoundry/contracts";
 
-import type { PreschoolOverviewAiBindingDto } from "../../../lib/config-api";
+import { configApi, type PreschoolOverviewAiBindingDto } from "../../../lib/config-api";
 import { resolvePreschoolAdditionalCanvasRenderer } from "./preschool-additional-ai-insight-canvas-registry";
 import { EnergyIcon } from "./icons";
 import { SafeAiMarkdown } from "./safe-ai-markdown";
@@ -11,10 +13,12 @@ export function PreschoolAdditionalAiInsights({
   unit,
   outerBinding,
   mode,
+  feedbackClient = configApiAdditionalFeedbackClient,
 }: {
   unit: unknown;
   outerBinding: PreschoolOverviewAiBindingDto;
   mode: "live" | "saved";
+  feedbackClient?: PreschoolAdditionalFeedbackClient;
 }) {
   const parsed = parseAdditionalUnit(unit, outerBinding, mode);
   return (
@@ -43,7 +47,13 @@ export function PreschoolAdditionalAiInsights({
       ) : (
         <div className="space-y-4" aria-label="Additional AI energy insights">
           {parsed.findings.map((finding, index) => finding
-            ? <AdditionalFindingCard key={finding.id} finding={finding} />
+            ? <AdditionalFindingCard
+                key={finding.id}
+                finding={finding}
+                artifactId={parsed.artifactId}
+                projectId={outerBinding.projectId}
+                feedbackClient={mode === "live" ? feedbackClient : undefined}
+              />
             : <InvalidAdditionalFinding key={`invalid:${index}`} index={index} />)}
         </div>
       )}
@@ -56,7 +66,17 @@ export function PreschoolAdditionalAiInsights({
   );
 }
 
-function AdditionalFindingCard({ finding }: { finding: ParsedAdditionalFinding }) {
+function AdditionalFindingCard({
+  finding,
+  artifactId,
+  projectId,
+  feedbackClient,
+}: {
+  finding: ParsedAdditionalFinding;
+  artifactId: string;
+  projectId: string;
+  feedbackClient?: PreschoolAdditionalFeedbackClient;
+}) {
   const status = {
     observed: { label: "Observed", tone: "bg-step-success-soft text-step-success" },
     inferred: { label: "Inferred", tone: "bg-step-warning-soft text-step-warning" },
@@ -102,7 +122,112 @@ function AdditionalFindingCard({ finding }: { finding: ParsedAdditionalFinding }
           ) : null}
         </div>
       </details>
+      {feedbackClient ? (
+        <AdditionalFeedbackControls
+          projectId={projectId}
+          artifactId={artifactId}
+          findingId={finding.id}
+          client={feedbackClient}
+        />
+      ) : null}
     </article>
+  );
+}
+
+export type PreschoolAdditionalFeedbackState = {
+  rating: "useful" | "not-useful";
+  revision: number;
+  updatedAt: string;
+};
+
+export type PreschoolAdditionalFeedbackClient = {
+  loadFeedback(input: {
+    projectId: string;
+    artifactId: string;
+    findingId: string;
+  }): Promise<PreschoolAdditionalFeedbackState | null>;
+  saveFeedback(input: {
+    projectId: string;
+    artifactId: string;
+    findingId: string;
+    rating: PreschoolAdditionalFeedbackState["rating"];
+    expectedRevision: number;
+  }): Promise<PreschoolAdditionalFeedbackState>;
+};
+
+const configApiAdditionalFeedbackClient: PreschoolAdditionalFeedbackClient = {
+  loadFeedback: ({ projectId, artifactId, findingId }) =>
+    configApi.getEnergyAdditionalInsightFeedback(projectId, artifactId, findingId),
+  saveFeedback: ({ projectId, artifactId, findingId, rating, expectedRevision }) =>
+    configApi.putEnergyAdditionalInsightFeedback(projectId, artifactId, findingId, { rating, expectedRevision }),
+};
+
+function AdditionalFeedbackControls({
+  projectId,
+  artifactId,
+  findingId,
+  client,
+}: {
+  projectId: string;
+  artifactId: string;
+  findingId: string;
+  client: PreschoolAdditionalFeedbackClient;
+}) {
+  const [feedback, setFeedback] = useState<PreschoolAdditionalFeedbackState | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "saving" | "saved" | "error">("loading");
+  useEffect(() => {
+    let active = true;
+    setState("loading");
+    void client.loadFeedback({ projectId, artifactId, findingId }).then((loaded) => {
+      if (!active) return;
+      setFeedback(loaded);
+      setState("ready");
+    }).catch(() => {
+      if (active) setState("error");
+    });
+    return () => { active = false; };
+  }, [artifactId, client, findingId, projectId]);
+
+  const save = async (rating: PreschoolAdditionalFeedbackState["rating"]) => {
+    setState("saving");
+    try {
+      const saved = await client.saveFeedback({
+        projectId,
+        artifactId,
+        findingId,
+        rating,
+        expectedRevision: feedback?.revision ?? 0,
+      });
+      setFeedback(saved);
+      setState("saved");
+    } catch {
+      setState("error");
+    }
+  };
+
+  if (state === "loading") {
+    return <p className="mt-4 text-xs text-muted" role="status">Loading your feedback…</p>;
+  }
+  return (
+    <div className="mt-4 border-t border-primary/15 pt-3" aria-label="Your feedback for this insight">
+      <div className="flex flex-wrap items-center gap-2">
+        {(["useful", "not-useful"] as const).map((rating) => (
+          <button
+            key={rating}
+            type="button"
+            aria-pressed={feedback?.rating === rating}
+            disabled={state === "saving"}
+            onClick={() => void save(rating)}
+            className="rounded-full border border-border px-3 py-1 text-xs font-semibold text-foreground disabled:opacity-60"
+          >
+            {rating === "useful" ? "Useful" : "Not useful"}
+          </button>
+        ))}
+        {state === "saving" ? <span className="text-xs text-muted" role="status">Saving feedback…</span> : null}
+        {state === "saved" ? <span className="text-xs text-step-success" role="status">Feedback saved</span> : null}
+        {state === "error" ? <span className="text-xs text-step-error" role="alert">Feedback could not be saved. Please try again.</span> : null}
+      </div>
+    </div>
   );
 }
 
@@ -148,8 +273,8 @@ type ParsedAdditionalFinding = {
 type ParsedAdditionalUnit =
   | { status: "pending" }
   | { status: "unavailable"; detail: string }
-  | { status: "empty"; runId: string }
-  | { status: "available"; runId: string; findings: Array<ParsedAdditionalFinding | null> };
+  | { status: "empty"; artifactId: string; runId: string }
+  | { status: "available"; artifactId: string; runId: string; findings: Array<ParsedAdditionalFinding | null> };
 
 const CANVAS_REJECTION_CODES = new Set([
   "INPUT_IDENTITY_INVALID",
@@ -208,7 +333,7 @@ function parseAdditionalUnit(
   }
   if (unit.status === "empty") {
     return artifact.findings.length === 0
-      ? { status: "empty", runId: artifact.runId }
+      ? { status: "empty", artifactId: unit.artifactId, runId: artifact.runId }
       : { status: "unavailable", detail: "The current Additional Artifact is invalid." };
   }
   if (artifact.findings.length === 0) return { status: "unavailable", detail: "The current Additional Artifact is invalid." };
@@ -225,6 +350,7 @@ function parseAdditionalUnit(
   const factIds = new Set(facts.flatMap((fact) => isRecord(fact) && isNonEmptyString(fact.id) ? [fact.id] : []));
   return {
     status: "available",
+    artifactId: unit.artifactId,
     runId: artifact.runId,
     findings: artifact.findings.map((finding) => parseAdditionalFinding(finding, loadedMethods, factIds)),
   };

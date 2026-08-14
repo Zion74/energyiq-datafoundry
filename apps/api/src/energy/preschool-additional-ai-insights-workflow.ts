@@ -64,7 +64,13 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
   runDiscovery: PreschoolAdditionalAiInsightsDiscoveryRunner;
 }): PreschoolAdditionalAiInsightsWorkflow => ({
   async execute({ baseIdentity, user }) {
-    const identity = createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity });
+    const methodSet = requireMethodResources(resolveCurrentAdditionalAiInsightMethodSet(
+      baseIdentity.workspaceId,
+      input.metadataStore.energyIq.insightMethodGovernance.listPublishedWorkspaceMethodResources({
+        workspaceId: baseIdentity.workspaceId,
+      }),
+    ));
+    const identity = createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity, methodSet });
     requireModelRuntimeIdentity(input.metadataStore, identity);
     const queued = input.metadataStore.energyIq.overviewAiArtifacts.queue({
       identity,
@@ -79,7 +85,6 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
     const sessionId = `preschool-additional-ai-insights-${randomUUID()}`;
     try {
       requireModelRuntimeIdentity(input.metadataStore, identity);
-      const methodSet = requireMethodResources(identity.workspaceId);
       const catalog = await input.resolveEvidenceCatalog({ identity, user });
       const runtime = createPreschoolAdditionalAiInsightRuntime({
         binding: {
@@ -92,7 +97,7 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
         catalog,
       });
       const completed = await input.runDiscovery({
-        prompt: buildDiscoveryPrompt({ identity, catalog, methodContent: methodSet.resources[0]!.content }),
+        prompt: buildDiscoveryPrompt({ identity, catalog, methodResources: methodSet.resources }),
         runId,
         sessionId,
         user,
@@ -219,6 +224,7 @@ const publishAdditionalArtifact = (input: {
   const factsById = new Map(input.catalog.facts.map((fact) => [fact.id, fact]));
   const auditsById = new Map(input.toolAudits.map((audit) => [audit.auditId, audit]));
   const coreMethod = input.methodSet.methods.find(({ role }) => role === "core-method")!;
+  const directionMethods = input.methodSet.methods.filter(({ role }) => role === "expert-direction");
   const canvasEvidenceFacts = projectCanvasEvidenceFacts(input.identity, input.catalog);
   const accepted: AcceptedCandidate[] = [];
   const rejectedCandidateIds: string[] = [];
@@ -228,6 +234,7 @@ const publishAdditionalArtifact = (input: {
       factsById,
       auditsById,
       coreMethod,
+      directionMethods,
       input.identity,
       canvasEvidenceFacts,
     );
@@ -325,6 +332,7 @@ const acceptCandidate = (
   factsById: Map<string, AnalysisContextEvidenceCatalog["facts"][number]>,
   auditsById: Map<string, ReturnType<ReturnType<typeof createPreschoolAdditionalAiInsightRuntime>["audits"]>[number]>,
   coreMethod: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>["methods"][number],
+  directionMethods: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>["methods"],
   identity: PreschoolAdditionalAiInsightArtifactIdentity,
   canvasEvidenceFacts: readonly InsightCanvasEvidenceFact[],
 ): AdditionalAiInsightFinding | null => {
@@ -355,11 +363,13 @@ const acceptCandidate = (
     title: value.title.trim(),
     text: value.text.trim(),
     epistemicStatus: value.epistemicStatus,
-    origin: {
-      kind: "ai-discovery",
-      coreMethod,
-      directionMethods: [],
-    },
+    origin: directionMethods.length === 0
+      ? { kind: "ai-discovery", coreMethod, directionMethods: [] }
+      : {
+          kind: "expert-sop",
+          coreMethod,
+          directionMethods: [directionMethods[0]!, ...directionMethods.slice(1)],
+        },
     evidenceRefs: [...evidenceRefs],
     toolAuditIds: [...toolAuditIds],
     ...(nonEmptyString(value.deepDiveQuestion) ? { deepDiveQuestion: value.deepDiveQuestion.trim() } : {}),
@@ -480,11 +490,14 @@ const alertIsAcceptable = (
 const buildDiscoveryPrompt = (input: {
   identity: PreschoolAdditionalAiInsightArtifactIdentity;
   catalog: AnalysisContextEvidenceCatalog;
-  methodContent: string;
+  methodResources: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>["resources"];
 }): string => {
   const prompt = [
     "You are the Additional AI Insights discovery stage for EnergyIQ Preschool.",
-    input.methodContent,
+    ...input.methodResources.map(({ method, content }) => [
+      `Server-approved Method ${method.role} ${method.resourceId}@${method.resourceRevision}:`,
+      content,
+    ].join("\n")),
     "Return JSON only: {candidates:[{id,title,text,epistemicStatus:'observed|inferred|speculative',evidenceRefs:[exact fact id],toolAuditIds:[actual returned audit id],deepDiveQuestion?,alert?,canvas?}]}.",
     "Optional canvas must be an energyiq-insight-canvas plan using only quantitative metric, comparison, or trend blocks bound exactly to supplied Evidence facts. The server may reject blocks locally without rejecting the Finding.",
     "Candidates must already be ordered from highest to lowest incremental value. Zero candidates is valid.",
@@ -511,8 +524,9 @@ const buildDiscoveryPrompt = (input: {
   return prompt;
 };
 
-const requireMethodResources = (workspaceId: string) => {
-  const methodSet = resolveCurrentAdditionalAiInsightMethodSet(workspaceId);
+const requireMethodResources = (
+  methodSet: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>,
+) => {
   if (methodSet.resources.length !== methodSet.methods.length
     || methodSet.resources.some(({ method, content }) => (
       !methodSet.methods.some((candidate) => candidate === method)

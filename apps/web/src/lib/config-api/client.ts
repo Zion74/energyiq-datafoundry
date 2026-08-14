@@ -16,9 +16,11 @@ import type {
   EnergyAccessContextDto,
   EnergyAdminOrganisationDto,
   EnergyAdminUserDto,
+  EnergyAdditionalInsightFeedbackDto,
   EnergyImportBatchDto,
   EnergyImportBatchesResponseDto,
   EnergyImportMaterializationResponseDto,
+  EnergyInsightMethodProposalDto,
   EnergyOperatingCalendarEntryInputDto,
   EnergyOperatingCalendarRevisionDto,
   EnergyOperationalPolicyConfigurationDto,
@@ -696,6 +698,46 @@ export const configApi = {
     return requestEnvelope<EnergyOverviewAiArtifactDto>(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-ai-artifact/retry?${params.toString()}`,
       { method: "POST", body: JSON.stringify(targetId ? { targetId } : {}) },
+    );
+  },
+
+  getEnergyAdditionalInsightFeedback(
+    projectId: string,
+    artifactId: string,
+    findingId: string,
+  ): Promise<EnergyAdditionalInsightFeedbackDto | null> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/additional-ai-insights/${encodeURIComponent(artifactId)}/findings/${encodeURIComponent(findingId)}/feedback`,
+    );
+  },
+
+  putEnergyAdditionalInsightFeedback(
+    projectId: string,
+    artifactId: string,
+    findingId: string,
+    body: { rating: "useful" | "not-useful"; expectedRevision: number },
+  ): Promise<EnergyAdditionalInsightFeedbackDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/additional-ai-insights/${encodeURIComponent(artifactId)}/findings/${encodeURIComponent(findingId)}/feedback`,
+      { method: "PUT", body: JSON.stringify(body) },
+    );
+  },
+
+  listEnergyInsightMethodProposals(projectId: string): Promise<{ proposals: EnergyInsightMethodProposalDto[] }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/additional-ai-insights/method-proposals`,
+    );
+  },
+
+  transitionEnergyInsightMethodProposal(
+    projectId: string,
+    proposalId: string,
+    action: "submit" | "approve" | "publish",
+    expectedRevision: number,
+  ): Promise<EnergyInsightMethodProposalDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/additional-ai-insights/method-proposals/${encodeURIComponent(proposalId)}/${action}`,
+      { method: "POST", body: JSON.stringify({ expectedRevision }) },
     );
   },
 

@@ -22,6 +22,40 @@ describe("EnergyIQ Additional AI Insights artifact contract", () => {
     expect(methodSet.methods).toEqual([core.method]);
   });
 
+  it("adds only exact published workspace Method resources to the shared Overview set", () => {
+    const content = "Check repeated closed-hours event shape against the current Evidence before treating it as reusable.";
+    const workspaceMethod: InsightMethodRevisionRef = {
+      skillId: "workspace-insight-method:closed-hours-shape",
+      semanticVersion: "1.0.0",
+      resourceId: "insight-method-proposal:closed-hours-shape",
+      resourceRevision: 1,
+      contentSha256: createHash("sha256").update(content).digest("hex"),
+      scope: "workspace",
+      workspaceId: "preschool-workspace",
+      userId: "user-charles",
+      role: "expert-direction",
+    };
+    const methodSet = resolveCurrentAdditionalAiInsightMethodSet("preschool-workspace", [{
+      method: workspaceMethod,
+      content,
+    }]);
+
+    expect(methodSet.methods).toHaveLength(2);
+    expect(methodSet.resources[1]).toEqual({ method: workspaceMethod, content });
+    expect(() => resolveCurrentAdditionalAiInsightMethodSet("preschool-workspace", [{
+      method: { ...workspaceMethod, workspaceId: "other-workspace" },
+      content,
+    }])).toThrow("ENERGYIQ_ADDITIONAL_INSIGHT_METHOD_RESOURCE_INVALID");
+    expect(() => resolveCurrentAdditionalAiInsightMethodSet("preschool-workspace", [{
+      method: { ...workspaceMethod, scope: "user" },
+      content,
+    }])).toThrow("ENERGYIQ_ADDITIONAL_INSIGHT_METHOD_RESOURCE_INVALID");
+    expect(() => resolveCurrentAdditionalAiInsightMethodSet("preschool-workspace", [{
+      method: { ...workspaceMethod, contentSha256: "not-a-sha" },
+      content,
+    }])).toThrow("ENERGYIQ_ADDITIONAL_INSIGHT_METHOD_RESOURCE_INVALID");
+  });
+
   it("accepts a compact shared Artifact with exact Method execution and per-Finding origin", () => {
     const input = validInput();
 

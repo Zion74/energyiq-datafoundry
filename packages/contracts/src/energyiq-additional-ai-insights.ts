@@ -46,6 +46,7 @@ export const resolveAdditionalAiInsightMethodSet = (input: {
   workspaceId: string;
   methodSetId: string;
   methodSetRevision: string;
+  workspaceMethodResources?: readonly AdditionalAiInsightMethodResource[];
 }): AdditionalAiInsightMethodSet | null => {
   if (!nonEmptyString(input.workspaceId)
     || input.methodSetId !== CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_ID
@@ -61,23 +62,38 @@ export const resolveAdditionalAiInsightMethodSet = (input: {
     userId: "energyiq-system",
     role: "core-method",
   };
+  const workspaceResources = [...(input.workspaceMethodResources ?? [])]
+    .sort((left, right) => methodSortKey(left.method).localeCompare(methodSortKey(right.method)));
+  if (workspaceResources.some(({ method, content }) => !insightMethodRevisionRefIsValid(method)
+    || method.scope !== "workspace"
+    || method.workspaceId !== input.workspaceId
+    || method.role !== "expert-direction"
+    || !nonEmptyString(content))
+    || new Set(workspaceResources.map(({ method }) => methodSortKey(method))).size !== workspaceResources.length) {
+    return null;
+  }
   return {
     id: CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_ID,
     revision: CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_REVISION,
-    methods: [coreMethod],
-    resources: [{ method: coreMethod, content: ENERGYIQ_OPEN_DISCOVERY_METHOD_CONTENT_V1 }],
+    methods: [coreMethod, ...workspaceResources.map(({ method }) => method)],
+    resources: [
+      { method: coreMethod, content: ENERGYIQ_OPEN_DISCOVERY_METHOD_CONTENT_V1 },
+      ...workspaceResources,
+    ],
   };
 };
 
 export const resolveCurrentAdditionalAiInsightMethodSet = (
   workspaceId: string,
+  workspaceMethodResources: readonly AdditionalAiInsightMethodResource[] = [],
 ): AdditionalAiInsightMethodSet => {
   const resolved = resolveAdditionalAiInsightMethodSet({
     workspaceId,
     methodSetId: CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_ID,
     methodSetRevision: CURRENT_ADDITIONAL_AI_INSIGHT_METHOD_SET_REVISION,
+    workspaceMethodResources,
   });
-  if (!resolved) throw new Error("ENERGYIQ_ADDITIONAL_INSIGHT_METHOD_SET_NOT_FOUND");
+  if (!resolved) throw new Error("ENERGYIQ_ADDITIONAL_INSIGHT_METHOD_RESOURCE_INVALID");
   return resolved;
 };
 

@@ -7,6 +7,8 @@ import {
 } from "@datafoundry/contracts";
 import type { DatabaseSync } from "node:sqlite";
 
+import { EnergyIqInsightMethodGovernanceStore } from "./energyiq-insight-method-governance-store.js";
+
 export type EnergyIqOverviewAiArtifactKind =
   | "section-interpretation"
   | "executive-synthesis"
@@ -142,7 +144,7 @@ export class EnergyIqOverviewAiArtifactStore {
     triggeredBy: string;
     now?: string;
   }): EnergyIqOverviewAiArtifactRecord {
-    const canonical = canonicalIdentity(input.identity);
+    const canonical = canonicalIdentity(input.identity, this.db);
     const identityJson = JSON.stringify(canonical);
     const identityHash = hashIdentity(identityJson);
     const id = `overview-ai-artifact-${identityHash.slice(0, 24)}`;
@@ -191,7 +193,7 @@ export class EnergyIqOverviewAiArtifactStore {
   }
 
   find(identity: EnergyIqOverviewAiArtifactIdentity): EnergyIqOverviewAiArtifactRecord | undefined {
-    const identityJson = JSON.stringify(canonicalIdentity(identity));
+    const identityJson = JSON.stringify(canonicalIdentity(identity, this.db));
     const row = this.db.prepare(`
       SELECT * FROM energyiq_overview_ai_artifacts WHERE identity_hash = ?
     `).get(hashIdentity(identityJson));
@@ -327,6 +329,7 @@ export class EnergyIqOverviewAiArtifactStore {
 
 const canonicalIdentity = (
   identity: EnergyIqOverviewAiArtifactIdentity,
+  db: DatabaseSync,
 ): EnergyIqOverviewAiArtifactIdentity => {
   for (const [key, value] of Object.entries(identity)) {
     if (key === "modelProfileRevision") continue;
@@ -355,7 +358,7 @@ const canonicalIdentity = (
     throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_TARGET_FORBIDDEN");
   }
   if (identity.artifactKind === "autonomous-insights") {
-    requireAdditionalMethodSetIdentity(identity);
+    requireAdditionalMethodSetIdentity(identity, db);
   } else if (identity.methodSetId !== undefined
     || identity.methodSetRevision !== undefined
     || identity.methodSetFingerprint !== undefined
@@ -431,7 +434,7 @@ const requireArtifactResult = (
     return;
   }
   if (identity.artifactKind === "autonomous-insights") {
-    requireAdditionalAiInsightsResult(parsed, identity);
+    requireAdditionalAiInsightsResult(parsed, identity, db);
     return;
   }
   const artifactBinding = parsed.binding;
@@ -494,8 +497,9 @@ const requireSectionInterpretationResult = (
 const requireAdditionalAiInsightsResult = (
   parsed: Record<string, unknown>,
   identity: EnergyIqOverviewAiArtifactIdentity,
+  db: DatabaseSync,
 ): void => {
-  const expectedMethods = requireAdditionalMethodSetIdentity(identity);
+  const expectedMethods = requireAdditionalMethodSetIdentity(identity, db);
   const isHistoricalV1 = identity.identityContractRevision === "additional-insights-v1"
     && identity.outputContractRevision === "energyiq-additional-ai-insights-v1"
     && identity.validatorRevision === "additional-insights-acceptance-v1"
@@ -546,6 +550,7 @@ const requireAdditionalAiInsightsResult = (
 
 const requireAdditionalMethodSetIdentity = (
   identity: EnergyIqOverviewAiArtifactIdentity,
+  db: DatabaseSync,
 ): readonly InsightMethodRevisionRef[] => {
   if (!identity.methodSetId || !identity.methodSetRevision || !identity.methodSetFingerprint) {
     throw new Error("ENERGYIQ_ADDITIONAL_INSIGHT_METHOD_SET_IDENTITY_INVALID");
@@ -554,6 +559,8 @@ const requireAdditionalMethodSetIdentity = (
     workspaceId: identity.workspaceId,
     methodSetId: identity.methodSetId,
     methodSetRevision: identity.methodSetRevision,
+    workspaceMethodResources: new EnergyIqInsightMethodGovernanceStore(db)
+      .listPublishedWorkspaceMethodResources({ workspaceId: identity.workspaceId }),
   });
   const canonical = methodSet ? canonicalInsightMethodSetJson(methodSet.methods) : null;
   const fingerprint = canonical === null
