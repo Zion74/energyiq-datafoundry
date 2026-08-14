@@ -61,6 +61,54 @@ describe("Preschool Additional AI Insights workflow", () => {
     }
   });
 
+  it("keeps a complete current Snapshot prompt when its evidence context is between 160k and 192k characters", async () => {
+    const harness = createHarness();
+    const baseCatalog = catalog();
+    const firstFact = baseCatalog.facts[0]!;
+    const largeCatalog: AnalysisContextEvidenceCatalog = {
+      ...baseCatalog,
+      facts: [
+        { ...firstFact, label: `${firstFact.label} ${"x".repeat(80_000)}` },
+        ...baseCatalog.facts.slice(1),
+      ],
+    };
+    const runDiscovery = vi.fn(async ({ prompt, runId, sessionId }) => {
+      expect(prompt.length).toBeGreaterThan(160_000);
+      expect(prompt.length).toBeLessThanOrEqual(192_000);
+      return {
+        answer: JSON.stringify({ candidates: [] }),
+        runId,
+        sessionId,
+      };
+    });
+    try {
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => largeCatalog,
+        resolvePresentedClaims: async ({ identity, catalog: currentCatalog }) =>
+          createPreschoolAdditionalAiPresentedClaims({
+            identity,
+            catalog: currentCatalog,
+            readModel: composePreschoolOverviewAiReadModel({
+              metadataStore: harness.metadata,
+              baseIdentity: identity,
+            }),
+          }),
+        runDiscovery,
+      });
+
+      await expect(workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "large-complete-prompt-run",
+        sessionId: "large-complete-prompt-session",
+      })).resolves.toMatchObject({ status: "empty" });
+      expect(runDiscovery).toHaveBeenCalledTimes(1);
+    } finally {
+      harness.close();
+    }
+  });
+
   it("preserves Pack claim provenance while accepting a new Catalog-Evidence relationship", async () => {
     const harness = createHarness();
     try {

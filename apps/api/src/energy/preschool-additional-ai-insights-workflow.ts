@@ -40,7 +40,7 @@ const LEASE_MS = 13 * 60 * 1_000;
 const MAX_DISCOVERY_ANSWER_CHARS = 160_000;
 const MAX_CANDIDATE_TEXT_CHARS = 1_200;
 const MAX_NOVEL_CONTRIBUTION_CHARS = 800;
-export const MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS = 160_000;
+export const MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS = 192_000;
 
 export type PreschoolAdditionalAiInsightsDiscoveryRunner = (input: {
   prompt: string;
