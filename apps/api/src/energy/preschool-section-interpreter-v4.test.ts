@@ -83,6 +83,7 @@ describe("Preschool Section Interpreter v4", () => {
     expect(prompt).toContain("operating-hours share describes all energy during opening hours, not the share consumed by flagged spikes");
     expect(prompt).toContain("Do not calculate a combined total or share from several Evidence items");
     expect(prompt).toContain("The first non-whitespace character of the response must be '{'");
+    expect(prompt).toContain("Do not ask whether Centres share equipment or a circuit unless the cited Evidence names the same equipment or circuit for every Centre");
     expect(prompt).not.toContain("allowedNextChecks");
     expect(prompt).not.toContain('"kind"');
   });

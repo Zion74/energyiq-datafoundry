@@ -116,7 +116,7 @@ describe("createOverviewAiArtifactIdentity", () => {
       outputContractRevision: "preschool-section-interpretation-v4",
       validatorRevision: "acceptance-validator-v10",
       workflowRevision: "discover-tools-accept-publish-v2",
-      investigatorPromptRevision: "discovery-prompt-v9",
+      investigatorPromptRevision: "discovery-prompt-v10",
       capabilityRevision: "scoped-read-only-v1",
       publicationRevision: "v1",
     });
@@ -127,7 +127,7 @@ describe("createOverviewAiArtifactIdentity", () => {
     })).toMatchObject({
       validatorRevision: "preschool-executive-synthesis-validator-v14",
       workflowRevision: "preschool-executive-synthesis-v9",
-      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v10",
+      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v11",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
     });
     expect(legacySection).toMatchObject({

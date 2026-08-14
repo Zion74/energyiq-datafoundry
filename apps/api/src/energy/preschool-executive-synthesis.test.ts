@@ -331,6 +331,8 @@ describe("Preschool Executive Synthesis", () => {
     expect(prompt).toContain('"insights"');
     expect(prompt).toContain("Summary: target at most 420 characters");
     expect(prompt).toContain("hard validation limit 600");
+    expect(prompt).toContain("A Section screening priority does not mean that Centre dominates total energy");
+    expect(prompt).toContain("they do not prove shared equipment or a shared cause");
     expect(prompt).toContain("finding title: at most 96 characters");
     expect(prompt).not.toContain('"keyPoints"');
     expect(prompt).not.toContain('"sectionId":"planning-outlook"');
@@ -603,7 +605,7 @@ describe("Preschool Executive Synthesis", () => {
     expect(JSON.parse(artifact.identity_json)).toMatchObject({
       validatorRevision: "preschool-executive-synthesis-validator-v14",
       workflowRevision: "preschool-executive-synthesis-v9",
-      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v10",
+      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v11",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
       publicationRevision: "key-findings-v2",
     });

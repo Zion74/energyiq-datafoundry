@@ -298,6 +298,7 @@ export const buildPreschoolSectionDiscoveryPrompt = (
     "The server validates, safety-filters, exactly deduplicates, and publishes at most three candidates, but preserves that source order; put the most valuable supported candidates first.",
     "If the supplied Evidence supports a genuine alert, rank it according to its value and urgency. Do not invent an alert when the Evidence does not support one.",
     "Do not force a recommendation, next action, cause, or one candidate per category. A useful candidate may instead surface a pattern, contrast, connection, counterexample, hypothesis, experiment, watch signal, or question.",
+    "A deep-dive question may explore an uncertainty, but its stated premise must still be supported. Do not ask whether Centres share equipment or a circuit unless the cited Evidence names the same equipment or circuit for every Centre.",
     "Avoid repeating alreadyPresentedFacts unless the repetition is necessary to explain a new relationship or priority.",
     "Every Summary and candidate must copy the exact evidenceRefs supporting its factual basis. Cite every Evidence item discussed.",
     "Narrative fields may use limited inline Markdown: **bold** for a few decisive words and _italics_ for a caveat. Do not use headings, lists, links, images, code, HTML, or tables.",
