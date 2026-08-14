@@ -113,6 +113,7 @@ type WorkflowContext = {
     outputContractRevision: string;
   };
   evidence: EvidenceItem[];
+  knownCentreCodes: string[];
   coverage: unknown;
   decisionSignals: Array<{ id: string; label: string }>;
   projectName: string;
@@ -494,6 +495,7 @@ function buildWorkflowContext(
   return {
     binding,
     evidence,
+    knownCentreCodes: benchmark.centres.map(({ centreCode }) => centreCode),
     coverage: buildCoverage(binding, signals.items, evidence, Boolean(operational), true),
     decisionSignals: signals.items.map(({ id, label }) => ({ id, label })),
     projectName: snapshot.context.projectName,
@@ -655,6 +657,7 @@ function buildEditorPrompt(
         text,
         candidate.evidenceRefs.flatMap((id) => evidenceById.get(id) ? [evidenceById.get(id)!] : []),
         tools,
+        context.knownCentreCodes,
       ) ? [field] : []
     )),
     ...(candidate.presentation
@@ -897,8 +900,13 @@ function materializeCanonicalArtifact(input: {
     }
     const display = selection.copy ?? candidate;
     const narrative = candidateNarrativeEntries(display).map(([, text]) => text);
-    const reboundTools = narrative.some((text) => unsupportedNarrative(text, evidence, tools))
-      ? minimalRunSqlEvidence(narrative, evidence, input.tools)
+    const reboundTools = narrative.some((text) => unsupportedNarrative(
+      text,
+      evidence,
+      tools,
+      input.context.knownCentreCodes,
+    ))
+      ? minimalRunSqlEvidence(narrative, evidence, input.tools, input.context.knownCentreCodes)
       : tools;
     if (!reboundTools) {
       return { status: "rejected" as const, selection, reason: "narrative is unsupported by cited Evidence" };
@@ -908,7 +916,7 @@ function materializeCanonicalArtifact(input: {
       evidenceSqlIndexes: reboundTools.map(({ evidenceIndex }) => evidenceIndex),
     });
     const safePresentation = presentation && presentationNarratives(presentation).every((text) => (
-      !unsupportedNarrative(text, evidence, reboundTools)
+      !unsupportedNarrative(text, evidence, reboundTools, input.context.knownCentreCodes)
     ))
       ? presentation
       : null;
@@ -1140,9 +1148,10 @@ function minimalRunSqlEvidence(
   narrative: string[],
   evidence: EvidenceItem[],
   runTools: ToolEvidence[],
+  knownCentreCodes: readonly string[],
 ): ToolEvidence[] | null {
   const supportsAll = (tools: ToolEvidence[]) => narrative.every((text) => (
-    !unsupportedNarrative(text, evidence, tools)
+    !unsupportedNarrative(text, evidence, tools, knownCentreCodes)
   ));
   if (!supportsAll(runTools)) return null;
   const selected = [...runTools];
@@ -1154,12 +1163,18 @@ function minimalRunSqlEvidence(
   return selected;
 }
 
-function unsupportedNarrative(text: string, evidence: EvidenceItem[], tools: ToolEvidence[]): boolean {
+function unsupportedNarrative(
+  text: string,
+  evidence: EvidenceItem[],
+  tools: ToolEvidence[],
+  knownCentreCodes: readonly string[],
+): boolean {
   if (!narrativeDateTimesSupported(text, evidence, tools)) return true;
   if (!energyAiNarrativeClaimsSupported({
     narrative: text,
     evidence,
     sqlEvidence: tools,
+    knownCentreCodes,
   })) return true;
   const allowedEntities = new Set([
     ...evidence.flatMap(({ values }) => collectStrings(values)),

@@ -33,22 +33,26 @@ export function energyAiNarrativeClaimsSupported(input: {
   evidence: readonly EnergyAiTypedEvidenceItem[];
   sqlEvidence: readonly EnergyAiSqlEvidence[];
   fallbackCentreReference?: string | null;
+  knownCentreCodes?: readonly string[];
 }): boolean {
+  const knownCentreCodes = new Set((input.knownCentreCodes ?? [])
+    .map((code) => code.trim().toLowerCase())
+    .filter((code) => /^[a-z0-9][a-z0-9_-]{0,15}$/u.test(code)));
   const deterministic = input.evidence.flatMap((item) => collectTypedNumericEvidence(item.values)
     .map((cell) => ({ item, cell })));
   const sql = input.sqlEvidence.flatMap(({ columns, rows }) => collectSqlNumericEvidence(columns, rows));
-  const centreReferences = namedCentreReferences(input.narrative);
+  const centreReferences = namedCentreReferences(input.narrative, knownCentreCodes);
   if ([...centreReferences].some((reference) =>
     !input.evidence.some((item) => typedEvidenceSupportsCentre(item, reference))
     && !sql.some((cell) => sqlCellSupportsCentre(cell, reference)))) return false;
   return numericClaims(input.narrative).every((claim) =>
     deterministic.some(({ item, cell }) => numericMatches(claim, cell.value)
-      && deterministicCellSupportsClaim(item, cell, claim, input.fallbackCentreReference ?? null))
+      && deterministicCellSupportsClaim(item, cell, claim, input.fallbackCentreReference ?? null, knownCentreCodes))
     || sql.some((cell) => numericMatches(claim, cell.value)
-      && sqlCellSupportsClaim(cell, claim, input.fallbackCentreReference ?? null)));
+      && sqlCellSupportsClaim(cell, claim, input.fallbackCentreReference ?? null, knownCentreCodes)));
 }
 
-function namedCentreReferences(value: string): Set<string> {
+function namedCentreReferences(value: string, knownCentreCodes: ReadonlySet<string>): Set<string> {
   const references = new Set<string>();
   for (const introducer of value.matchAll(/\bcent(?:re|er)s?\s+/giu)) {
     let remainder = value.slice((introducer.index ?? 0) + introducer[0].length);
@@ -63,7 +67,7 @@ function namedCentreReferences(value: string): Set<string> {
       remainder = remainder.slice(separator.length);
     }
     for (const candidate of candidates) {
-      if (isProjectCentreCode(candidate)) references.add(candidate.toLowerCase());
+      if (isProjectCentreCode(candidate, knownCentreCodes)) references.add(candidate.toLowerCase());
     }
   }
   return references;
@@ -172,10 +176,11 @@ function deterministicCellSupportsClaim(
   cell: { field: string | null; value: number },
   claim: NumericClaim,
   fallbackCentreReference: string | null,
+  knownCentreCodes: ReadonlySet<string>,
 ): boolean {
   const metricContext = `${claim.context} ${semanticMetricContext(claim.entityContext.toLowerCase())}`;
   if (!fieldSupportsClaim(cell.field, metricContext, item.unit)) return false;
-  const centreReference = explicitCentreReference(claim.entityContext) ?? fallbackCentreReference;
+  const centreReference = explicitCentreReference(claim.entityContext, knownCentreCodes) ?? fallbackCentreReference;
   if (!centreReference) return true;
   const dimensions: string[] = `${item.id} ${item.label} ${collectNamedCentreDimensions(item.values).join(" ")}`
     .toLowerCase().match(/[a-z0-9]+/gu) ?? [];
@@ -186,9 +191,10 @@ function sqlCellSupportsClaim(
   cell: SqlNumericCell,
   claim: NumericClaim,
   fallbackCentreReference: string | null,
+  knownCentreCodes: ReadonlySet<string>,
 ): boolean {
   if (!fieldSupportsClaim(cell.column, `${claim.context} ${semanticMetricContext(claim.entityContext.toLowerCase())}`, null)) return false;
-  const centreReference = explicitCentreReference(claim.entityContext) ?? fallbackCentreReference;
+  const centreReference = explicitCentreReference(claim.entityContext, knownCentreCodes) ?? fallbackCentreReference;
   if (!centreReference) return true;
   return cell.dimensions.some((dimension) => {
     if (!dimension.column || !/(?:centre|center|parent_node|scope)/u.test(dimension.column.toLowerCase())) return false;
@@ -239,19 +245,20 @@ function collectNamedCentreDimensions(value: unknown, field = ""): string[] {
   return [];
 }
 
-function explicitCentreReference(context: string): string | null {
+function explicitCentreReference(context: string, knownCentreCodes: ReadonlySet<string>): string | null {
   const references = new Set([...context.matchAll(/\bcent(?:re|er)\s+([a-z0-9][a-z0-9_-]{0,15})\b/giu)]
     .map((match) => match[1]!)
-    .filter(isProjectCentreCode)
+    .filter((reference) => isProjectCentreCode(reference, knownCentreCodes))
     .map((reference) => reference.toLowerCase()));
   if (references.size === 0) return null;
   if (references.size > 1) return "__ambiguous_centre__";
   return [...references][0]!;
 }
 
-function isProjectCentreCode(value: string): boolean {
+function isProjectCentreCode(value: string, knownCentreCodes: ReadonlySet<string>): boolean {
   const normalized = value.toUpperCase();
   if (!/^[A-Z0-9][A-Z0-9_-]{0,15}$/u.test(normalized)) return false;
+  if (knownCentreCodes.has(value.toLowerCase())) return true;
   if (/[0-9_-]/u.test(normalized)) return true;
   if (value === normalized) return normalized.length <= 8;
   return /^[a-z]$/u.test(value);

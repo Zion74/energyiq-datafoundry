@@ -477,6 +477,7 @@ const publishAdditionalArtifact = (input: {
   const coreMethod = input.methodSet.methods.find(({ role }) => role === "core-method")!;
   const directionMethods = input.methodSet.methods.filter(({ role }) => role === "expert-direction");
   const canvasEvidenceFacts = projectCanvasEvidenceFacts(input.identity, input.catalog);
+  const knownCentreCodes = collectCatalogCentreCodes(input.catalog);
   const accepted: AcceptedCandidate[] = [];
   const rejectedCandidateIds: string[] = [];
   for (const candidate of input.candidates) {
@@ -489,6 +490,7 @@ const publishAdditionalArtifact = (input: {
       directionMethods,
       input.identity,
       canvasEvidenceFacts,
+      knownCentreCodes,
     );
     if (finding) accepted.push({ sourceId: candidate.sourceId, finding });
     else rejectedCandidateIds.push(candidate.sourceId);
@@ -588,6 +590,7 @@ const acceptCandidate = (
   directionMethods: ReturnType<typeof resolveCurrentAdditionalAiInsightMethodSet>["methods"],
   identity: PreschoolAdditionalAiInsightArtifactIdentity,
   canvasEvidenceFacts: readonly InsightCanvasEvidenceFact[],
+  knownCentreCodes: readonly string[],
 ): AdditionalAiInsightFinding | null => {
   const value = candidate.value;
   if (!isRecord(value)
@@ -617,6 +620,7 @@ const acceptCandidate = (
       values: { [fact.metricId]: fact.value, ...fact.dimensions },
     })),
     sqlEvidence: [],
+    knownCentreCodes,
   })) return null;
   const origin = resolveCandidateOrigin(value.origin, coreMethod, directionMethods);
   const incrementalContext = resolveIncrementalContext(
@@ -833,6 +837,16 @@ const projectCanvasEvidenceFacts = (
     unit: fact.unit,
   }];
 });
+
+const collectCatalogCentreCodes = (catalog: AnalysisContextEvidenceCatalog): string[] => [...new Set(
+  catalog.facts.flatMap(({ dimensions }) => Object.entries(dimensions).flatMap(([key, value]) => {
+    if (key === "centreCode") return [value];
+    if (key === "centreCodes") return value.split(/[\s,;|]+/u);
+    return [];
+  }))
+    .map((code) => code.trim())
+    .filter((code) => /^[A-Za-z0-9][A-Za-z0-9_-]{0,15}$/u.test(code)),
+)];
 
 const sameStringOrder = (left: readonly string[], right: readonly unknown[]): boolean => left.length === right.length
   && left.every((value, index) => value === right[index]);

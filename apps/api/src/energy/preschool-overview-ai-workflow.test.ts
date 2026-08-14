@@ -1379,6 +1379,71 @@ describe("Preschool Overview AI server workflow", () => {
     });
   });
 
+  it("uses the complete Snapshot Centre vocabulary for lowercase multi-character references", async () => {
+    const harness = createHarness();
+    const currentSnapshot = snapshot();
+    const benchmark = currentSnapshot.preschoolBenchmark;
+    if (!benchmark || benchmark.status !== "provisional") throw new Error("Expected benchmark fixture");
+    benchmark.priorityCentreCodes = ["G", "AA"];
+    benchmark.centres = [
+      {
+        scopeId: "centre-g",
+        centreCode: "G",
+        name: "Centre G",
+        cohort: "Childcare",
+        usageKwh: 100,
+        annualisedEuiKwhPerSqmYear: 120,
+        mayKwhPerPerson: 30,
+        quadrant: "priority",
+        priority: true,
+      },
+      {
+        scopeId: "centre-aa",
+        centreCode: "AA",
+        name: "Centre AA",
+        cohort: "Childcare",
+        usageKwh: 300,
+        annualisedEuiKwhPerSqmYear: 140,
+        mayKwhPerPerson: 35,
+        quadrant: "priority",
+        priority: true,
+      },
+    ];
+    const workflow = createPreschoolOverviewAiWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: harness.gateway,
+      resolveSnapshot: async () => currentSnapshot,
+      runStage: async ({ stage, runId, sessionId }) => stage === "investigator"
+        ? envelopeEvents({
+            candidates: [{
+              id: "candidate-1",
+              epistemicLevel: "verified",
+              title: "centre aa warrants a timing check",
+              takeaway: "centre aa warrants a separate timing check despite citing only Centre G Evidence.",
+              evidenceRefs: ["benchmark:priority-centre:G"],
+              evidenceSqlIndexes: [],
+            }],
+          }, runId, sessionId)
+        : envelopeEvents({
+            findings: [{
+              sourceCandidateIds: ["candidate-1"],
+              placementTargets: ["preschool.benchmark"],
+              relationship: "independent",
+              signalRefs: [],
+            }],
+            trace: [{ decision: "accepted", sourceCandidateIds: ["candidate-1"] }],
+          }, runId, sessionId),
+    });
+
+    const artifact = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact).toMatchObject({
+      status: "failed",
+      error_code: "OVERVIEW_AI_RUNTIME_VALIDATION_REJECTED_ALL",
+    });
+  });
+
   it("accepts manager-facing percentage rounding from the same typed metric", async () => {
     const harness = createHarness();
     const currentSnapshot = snapshot();

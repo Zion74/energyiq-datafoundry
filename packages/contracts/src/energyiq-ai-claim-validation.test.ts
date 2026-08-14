@@ -151,6 +151,48 @@ describe("EnergyIQ AI claim validation", () => {
     }
   });
 
+  it("uses an exact server-owned Centre vocabulary for lowercase multi-character codes", () => {
+    const centreEvidence = (centreCode: string) => ({
+      id: `centre:${centreCode.toLowerCase()}:usage`,
+      label: `Centre ${centreCode} usage`,
+      unit: "kWh",
+      values: { centreCode, usageKwh: 20 },
+    });
+    const knownCentreCodes = ["G", "AA", "AD"];
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "centre aa warrants a separate timing check.",
+      evidence: [],
+      sqlEvidence: [],
+      knownCentreCodes,
+    })).toBe(false);
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "centre aa warrants a separate timing check.",
+      evidence: [centreEvidence("AA")],
+      sqlEvidence: [],
+      knownCentreCodes,
+    })).toBe(true);
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "centres aa and ad warrant separate timing checks.",
+      evidence: [centreEvidence("AA")],
+      sqlEvidence: [],
+      knownCentreCodes,
+    })).toBe(false);
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "centres aa and ad warrant separate timing checks.",
+      evidence: [centreEvidence("AA"), centreEvidence("AD")],
+      sqlEvidence: [],
+      knownCentreCodes,
+    })).toBe(true);
+    for (const narrative of ["the centre is closed", "the centre in Singapore remains operational"]) {
+      expect(energyAiNarrativeClaimsSupported({
+        narrative,
+        evidence: [],
+        sqlEvidence: [],
+        knownCentreCodes,
+      })).toBe(true);
+    }
+  });
+
   it("requires a multiplier claim to come from a ratio, multiple, or factor field", () => {
     const narrative = "Centre G demand was 15x the peer baseline.";
     expect(energyAiNarrativeClaimsSupported({

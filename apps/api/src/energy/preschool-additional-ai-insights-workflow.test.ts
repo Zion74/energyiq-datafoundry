@@ -553,6 +553,54 @@ describe("Preschool Additional AI Insights workflow", () => {
     }
   });
 
+  it("uses the complete Catalog Centre vocabulary while validating only candidate-cited Evidence", async () => {
+    const harness = createHarness();
+    try {
+      const evidenceCatalog = catalog();
+      evidenceCatalog.facts.push(
+        entityFact("fact:centre-g-intensity", "Centre G", 3.26),
+        entityFact("fact:centre-aa-intensity", "Centre AA", 4.25),
+      );
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => evidenceCatalog,
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [
+            candidate("candidate-aa-with-g-evidence", "fact:centre-g-intensity", {
+              title: "centre aa warrants a timing check",
+              text: "centre aa warrants a separate timing check despite citing only Centre G Evidence.",
+              incrementalContext: incrementalContext("deterministic-overview:fact:centre-g-intensity"),
+            }),
+            candidate("candidate-aa-with-aa-evidence", "fact:centre-aa-intensity", {
+              title: "centre aa warrants a separate check",
+              text: "centre aa warrants a separate timing check before attributing a driver.",
+              incrementalContext: incrementalContext("deterministic-overview:fact:centre-aa-intensity"),
+            }),
+          ] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "candidate-aa-lineage-run",
+        sessionId: "candidate-aa-lineage-session",
+      });
+      expect(result.publication).toMatchObject({
+        discoveredCount: 2,
+        acceptedCount: 1,
+        rejectedCount: 1,
+        acceptedCandidateIds: ["candidate-aa-with-aa-evidence"],
+        rejectedCandidateIds: ["candidate-aa-with-g-evidence"],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
   it("rejects explicit causal, action, and external-benchmark assertions that overstate their epistemic status", async () => {
     const harness = createHarness();
     try {
