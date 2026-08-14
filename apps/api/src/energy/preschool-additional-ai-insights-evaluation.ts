@@ -784,9 +784,20 @@ const failureStage = (code: string): "provider" | "structured-output" | "machine
       : "provider"
 );
 
-const errorCode = (error: unknown): string => error instanceof Error && /\S/u.test(error.message)
-  ? error.message.trim().slice(0, 160)
-  : "PRESCHOOL_ADDITIONAL_EVALUATION_ATTEMPT_FAILED";
+const LOCAL_STRUCTURED_OUTPUT_ERROR_CODES = [
+  PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_ROOT_INVALID,
+  PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_SCHEMA_INVALID,
+] as const;
+const errorCode = (error: unknown): string => {
+  if (!(error instanceof Error) || !/\S/u.test(error.message)) {
+    return "PRESCHOOL_ADDITIONAL_EVALUATION_ATTEMPT_FAILED";
+  }
+  const message = error.message.trim();
+  const localCode = LOCAL_STRUCTURED_OUTPUT_ERROR_CODES.find((code) => (
+    message === code || message === `Error: ${code}`
+  ));
+  return localCode ?? message.slice(0, 160);
+};
 const sha256 = (value: string): string => `sha256:${createHash("sha256").update(value).digest("hex")}`;
 const sameStrings = (left: readonly string[], right: readonly string[]): boolean => left.length === right.length
   && left.every((entry) => right.includes(entry));

@@ -485,32 +485,6 @@ const additionalCandidateV2: JsonSchema = {
   },
 };
 
-const additionalIncrementalContext: JsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["relatedPresentedClaimIds", "novelConclusion"],
-  properties: {
-    relatedPresentedClaimIds: {
-      type: "array",
-      minItems: 0,
-      maxItems: 16,
-      uniqueItems: true,
-      items: nonEmptyString,
-    },
-    novelConclusion: { type: "string", minLength: 1, maxLength: 800 },
-  },
-};
-
-const additionalCandidateV3: JsonSchema = {
-  ...additionalCandidateV2,
-  required: [...additionalCandidateV2.required!, "incrementalContext"],
-  properties: {
-    ...additionalCandidateV2.properties,
-    title: { type: "string", minLength: 1, maxLength: PRESCHOOL_ADDITIONAL_INSIGHT_TITLE_MAX_CHARS },
-    incrementalContext: additionalIncrementalContext,
-  },
-};
-
 /** Open model proposal; acceptance and the three-card publication budget remain server-owned. */
 export const PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1 = {
   errorStrategy: "strict",
@@ -554,7 +528,8 @@ export const PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3 = {
       candidates: {
         type: "array",
         minItems: 0,
-        items: additionalCandidateV3,
+        maxItems: 32,
+        items: { type: "object" },
       },
     },
   },

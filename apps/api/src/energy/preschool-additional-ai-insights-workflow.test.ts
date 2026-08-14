@@ -898,6 +898,85 @@ describe("Preschool Additional AI Insights workflow", () => {
     }
   });
 
+  it("accepts the gross candidate envelope while rejecting malformed siblings locally", async () => {
+    const harness = createHarness();
+    try {
+      const valid = candidate("candidate-valid", "fact:standby-share");
+      const proposed = {
+        candidates: [
+          valid,
+          { ...valid, id: "candidate-long-title", title: "x".repeat(140) },
+          {
+            ...valid,
+            id: "candidate-misplaced-deep-dive",
+            incrementalContext: {
+              ...valid.incrementalContext,
+              deepDiveQuestion: "Which interval should be inspected next?",
+            },
+          },
+        ],
+      };
+      const transport = toStandardSchema(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3.schema as never);
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => {
+          await expect(Promise.resolve(transport["~standard"].validate(proposed)))
+            .resolves.toEqual(expect.not.objectContaining({ issues: expect.anything() }));
+          return { answer: JSON.stringify(proposed), runId, sessionId };
+        },
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "mixed-candidate-run",
+        sessionId: "mixed-candidate-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        publication: {
+          discoveredCount: 3,
+          acceptedCount: 1,
+          rejectedCount: 2,
+          publishedCount: 1,
+          acceptedCandidateIds: ["candidate-valid"],
+          rejectedCandidateIds: ["candidate-long-title", "candidate-misplaced-deep-dive"],
+        },
+        findings: [{ id: "additional:candidate-valid" }],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("rejects a discovery preamble instead of extracting a trailing JSON object", async () => {
+    const harness = createHarness();
+    try {
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: `Here is my analysis before the final object.\n${JSON.stringify({ candidates: [] })}`,
+          runId,
+          sessionId,
+        }),
+      });
+
+      await expect(workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "preamble-run",
+        sessionId: "preamble-session",
+      })).rejects.toThrow("PRESCHOOL_ADDITIONAL_AI_DISCOVERY_RESULT_INVALID");
+    } finally {
+      harness.close();
+    }
+  });
+
   it("maps each candidate's stable Method refs to truthful Finding provenance and rejects bad refs locally", async () => {
     const harness = createHarness();
     try {

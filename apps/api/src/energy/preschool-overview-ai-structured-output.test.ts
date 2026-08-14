@@ -3,6 +3,7 @@ import { toStandardSchema } from "@mastra/core/schema";
 
 import {
   PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V1,
+  PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2,
   PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3,
   PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4,
   PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V3,
@@ -34,8 +35,8 @@ describe("Preschool Overview AI structured output", () => {
       .not.toHaveProperty("canvas");
   });
 
-  it("offers only the approved declarative quantitative Canvas plan to current Additional discovery", () => {
-    const candidates = PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3.schema.properties!.candidates!;
+  it("keeps the approved Canvas declaration in history while current transport delegates block acceptance", () => {
+    const candidates = PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2.schema.properties!.candidates!;
     const canvas = candidates.items!.properties!.canvas!;
     const block = canvas.properties!.investigatorBlocks!.items!;
 
@@ -58,12 +59,15 @@ describe("Preschool Overview AI structured output", () => {
       minItems: 1,
       uniqueItems: true,
     });
+    expect(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3.schema.properties!.candidates)
+      .toMatchObject({ type: "array", maxItems: 32, items: { type: "object" } });
     expect(resolveOverviewAiStageStructuredOutput("additional-insights-discovery"))
       .toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3);
   });
 
-  it("accepts truthful lightweight origin declarations and rejects malformed origin proposals", async () => {
-    const schema = toStandardSchema(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3.schema as never);
+  it("keeps the historical origin schema strict without making current root validation candidate-global", async () => {
+    const historicalSchema = toStandardSchema(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2.schema as never);
+    const currentSchema = toStandardSchema(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3.schema as never);
     const candidate = (origin: unknown) => ({
       candidates: [{
         id: "candidate-origin",
@@ -79,15 +83,22 @@ describe("Preschool Overview AI structured output", () => {
         toolAuditIds: [],
       }],
     });
-    const validate = (origin: unknown) => Promise.resolve(schema["~standard"].validate(candidate(origin)));
+    const historicalCandidate = (origin: unknown) => {
+      const { incrementalContext: _incrementalContext, ...value } = candidate(origin).candidates[0]!;
+      return { candidates: [value] };
+    };
+    const validateHistorical = (origin: unknown) => Promise.resolve(
+      historicalSchema["~standard"].validate(historicalCandidate(origin)),
+    );
+    const validateCurrent = (origin: unknown) => Promise.resolve(currentSchema["~standard"].validate(candidate(origin)));
 
-    await expect(validate({ kind: "ai-discovery", directionMethodResourceIds: [] }))
+    await expect(validateHistorical({ kind: "ai-discovery", directionMethodResourceIds: [] }))
       .resolves.toEqual(expect.not.objectContaining({ issues: expect.anything() }));
-    await expect(validate({
+    await expect(validateHistorical({
       kind: "expert-sop",
       directionMethodResourceIds: ["insight-method:workspace-direction"],
     })).resolves.toEqual(expect.not.objectContaining({ issues: expect.anything() }));
-    await expect(validate({
+    await expect(validateHistorical({
       kind: "hybrid",
       directionMethodResourceIds: ["insight-method:workspace-direction"],
       novelContribution: "Connect the approved direction with a separately evidenced counter-pattern.",
@@ -115,12 +126,14 @@ describe("Preschool Overview AI structured output", () => {
       },
       forged: { kind: "browser-authored", directionMethodResourceIds: [] },
     })) {
-      const result = await validate(origin);
+      const result = await validateHistorical(origin);
       expect(result, name).toEqual(expect.objectContaining({ issues: expect.any(Array) }));
+      await expect(validateCurrent(origin), name)
+        .resolves.toEqual(expect.not.objectContaining({ issues: expect.anything() }));
     }
   });
 
-  it("requires an exact bounded incremental claim declaration for current Additional discovery", async () => {
+  it("leaves incremental-claim detail to candidate-local acceptance", async () => {
     const schema = toStandardSchema(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3.schema as never);
     const proposal = (incrementalContext: unknown) => ({ candidates: [{
       id: "candidate-incremental",
@@ -143,16 +156,56 @@ describe("Preschool Overview AI structured output", () => {
       { relatedPresentedClaimIds: [], novelConclusion: "Novel.", html: "<b>unsafe</b>" },
     ]) {
       await expect(Promise.resolve(schema["~standard"].validate(proposal(incrementalContext))))
-        .resolves.toEqual(expect.objectContaining({ issues: expect.any(Array) }));
+        .resolves.toEqual(expect.not.objectContaining({ issues: expect.anything() }));
     }
     expect(resolveOverviewAiStageStructuredOutput("additional-insights-discovery"))
       .toBe(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3);
   });
 
-  it("uses the acceptance title budget at the strict Additional transport boundary", async () => {
+  it("keeps production-shaped candidate format defects below the gross discovery envelope", async () => {
+    const schema = toStandardSchema(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3.schema as never);
+    const validCandidate = {
+      id: "candidate-valid",
+      title: "A separately testable timing relationship",
+      text: "The recurring timing pattern may move differently from the already-presented total.",
+      epistemicStatus: "speculative",
+      origin: { kind: "ai-discovery", directionMethodResourceIds: [] },
+      incrementalContext: {
+        relatedPresentedClaimIds: ["deterministic-overview:analysis.summary.usage_kwh"],
+        novelConclusion: "The recurring timing pattern may move differently from the already-presented total.",
+      },
+      evidenceRefs: ["analysis.summary.usage_kwh"],
+      toolAuditIds: [],
+    };
+    const replay = {
+      candidates: [
+        validCandidate,
+        { ...validCandidate, id: "candidate-long-title", title: "x".repeat(140) },
+        {
+          ...validCandidate,
+          id: "candidate-misplaced-deep-dive",
+          incrementalContext: {
+            ...validCandidate.incrementalContext,
+            deepDiveQuestion: "Which interval should be inspected next?",
+          },
+        },
+      ],
+    };
+
+    await expect(Promise.resolve(schema["~standard"].validate(replay)))
+      .resolves.toEqual(expect.not.objectContaining({ issues: expect.anything() }));
+    await expect(Promise.resolve(schema["~standard"].validate({ candidates: ["not-an-object"] })))
+      .resolves.toEqual(expect.objectContaining({ issues: expect.any(Array) }));
+    await expect(Promise.resolve(schema["~standard"].validate({ candidates: Array.from({ length: 33 }, () => ({})) })))
+      .resolves.toEqual(expect.objectContaining({ issues: expect.any(Array) }));
+    expect(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3.schema.properties!.candidates)
+      .toMatchObject({ type: "array", minItems: 0, maxItems: 32 });
+  });
+
+  it("leaves the publication title budget to candidate-local acceptance", async () => {
     const candidateSchema = PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3
       .schema.properties!.candidates!.items!;
-    expect(candidateSchema.properties!.title).toMatchObject({ maxLength: 100 });
+    expect(candidateSchema).toEqual({ type: "object" });
     const schema = toStandardSchema(PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3.schema as never);
     const proposal = (title: string) => ({ candidates: [{
       id: "candidate-title-budget",
@@ -171,7 +224,7 @@ describe("Preschool Overview AI structured output", () => {
     await expect(Promise.resolve(schema["~standard"].validate(proposal("x".repeat(100)))))
       .resolves.toEqual(expect.not.objectContaining({ issues: expect.anything() }));
     await expect(Promise.resolve(schema["~standard"].validate(proposal("x".repeat(101)))))
-      .resolves.toEqual(expect.objectContaining({ issues: expect.any(Array) }));
+      .resolves.toEqual(expect.not.objectContaining({ issues: expect.anything() }));
   });
 
   it("keeps the v3 schema for history while making v4 the current Section discovery contract", () => {

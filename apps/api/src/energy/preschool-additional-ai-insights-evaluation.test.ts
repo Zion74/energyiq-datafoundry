@@ -540,6 +540,42 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
     }
   });
 
+  it("normalizes a wrapped known local schema code before classifying the failed attempt", async () => {
+    const harness = createHarness();
+    try {
+      let invocation = 0;
+      const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
+        metadataStore: harness.metadata,
+        runAttempt: vi.fn(async ({ identity, runId }) => {
+          invocation += 1;
+          if (invocation === 1) {
+            throw new Error(`Error: ${PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_SCHEMA_INVALID}`);
+          }
+          return artifact(identity, runId, `evidence:${invocation}`, `finding-${invocation}`);
+        }),
+        runTransition: vi.fn(),
+      });
+
+      const result = await workflow.executePassAt3({
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        idempotencyKey: "wrapped-schema-failure-key",
+      });
+
+      expect(result.attempts[0]).toMatchObject({
+        status: "failed",
+        failureStage: "structured-output",
+        errorCode: PRESCHOOL_ADDITIONAL_AI_STRUCTURED_OUTPUT_SCHEMA_INVALID,
+      });
+      expect(result.attempts.slice(1)).toEqual([
+        expect.objectContaining({ status: "completed" }),
+        expect.objectContaining({ status: "completed" }),
+      ]);
+    } finally {
+      harness.close();
+    }
+  });
+
   it("keeps Provider structured-output capability failures classified as Provider failures", async () => {
     const harness = createHarness();
     try {
