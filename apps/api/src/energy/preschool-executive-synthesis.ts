@@ -349,6 +349,7 @@ const buildExecutivePromptV4 = (
     "Use only the accepted current-v4 Section summaries and insights below, plus any explicitly supplied authoritative Overview Evidence.",
     "Select the few cross-Section themes that matter most. Do not mechanically rewrite every Section or invent a cause, number, date, entity relationship, or action.",
     "Preserve source epistemic status: an inferred or speculative Section Insight may support only explicitly qualified Key Findings. Never upgrade a signal, relationship, hypothesis, or possibility into a confirmed fact.",
+    "Qualify the Summary sentence, Finding title, and every Finding sentence independently. A cautious word in the body never makes an unqualified headline safe.",
     "Return one concise answer-first summary and 0-3 compact findings. A high-priority alert is optional and must be supported by the supplied Evidence.",
     `Presentation limits only — Summary: at most ${PRESCHOOL_EXECUTIVE_SUMMARY_MAX_CHARS} characters and three sentences; finding title: at most ${PRESCHOOL_EXECUTIVE_FINDING_TITLE_MAX_CHARS} characters; finding text: at most ${PRESCHOOL_EXECUTIVE_FINDING_TEXT_MAX_CHARS} characters. Preserve the best supported analytical angle within those limits.`,
     "In customer-facing narrative, say 'all Centres' instead of 'Portfolio'. Internal Evidence labels may still use portfolio.",
@@ -601,7 +602,11 @@ const materializeExecutiveResultV4 = (input: {
       overviewFacts,
     ))) return [];
     if (!narrativePreservesSourceEpistemicStatus(
-      `${title} ${text}`,
+      title,
+      evidenceRefs,
+      evidenceEpistemicRequirements,
+    ) || !narrativePreservesSourceEpistemicStatus(
+      text,
       evidenceRefs,
       evidenceEpistemicRequirements,
     )) return [];
@@ -843,14 +848,19 @@ const narrativePreservesSourceEpistemicStatus = (
 ): boolean => {
   const required = evidenceRefs.flatMap((reference) => requirements.get(reference) ?? []);
   if (required.length === 0) return true;
-  if (/\b(?:proves?|proven|establish(?:es|ed)?|definitive(?:ly)?|is\s+caused\s+by)\b/iu.test(text)) {
-    return false;
-  }
-  const qualified = /\b(?:may|might|could|possible|possibly|potential(?:ly)?|suggest(?:s|ed|ing)?|indicat(?:es|ed|ing)?|appears?|looks?\s+like|consistent\s+with|signal|hypothesis|inferred|speculative|worth\s+(?:checking|reviewing|testing))\b/iu
-    .test(text);
-  if (!qualified) return false;
-  return !required.includes("speculative")
-    || /\b(?:may|might|could|possible|possibly|potential(?:ly)?|hypothesis|speculative|test(?:able|ing)?)\b/iu.test(text);
+  const claims = [...new Intl.Segmenter("en", { granularity: "sentence" }).segment(text)]
+    .map(({ segment }) => segment.trim())
+    .filter(Boolean);
+  return claims.length > 0 && claims.every((claim) => {
+    if (/\b(?:proves?|proven|establish(?:es|ed)?|definitive(?:ly)?|is\s+caused\s+by)\b/iu.test(claim)) {
+      return false;
+    }
+    const qualified = /\b(?:may|might|could|possible|possibly|potential(?:ly)?|suggest(?:s|ed|ing)?|indicat(?:es|ed|ing)?|appears?|looks?\s+like|consistent\s+with|signal|hypothesis|inferred|speculative|worth\s+(?:checking|reviewing|testing))\b/iu
+      .test(claim);
+    if (!qualified) return false;
+    return !required.includes("speculative")
+      || /\b(?:may|might|could|possible|possibly|potential(?:ly)?|hypothesis|speculative|test(?:able|ing)?)\b/iu.test(claim);
+  });
 };
 
 const sectionNarrativesByEvidenceRef = (

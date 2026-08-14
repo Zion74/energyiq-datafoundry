@@ -114,9 +114,9 @@ describe("createOverviewAiArtifactIdentity", () => {
       analysisPackId: "preschool-section-pack",
       analysisPackRevision: "v2",
       outputContractRevision: "preschool-section-interpretation-v4",
-      validatorRevision: "acceptance-validator-v7",
+      validatorRevision: "acceptance-validator-v8",
       workflowRevision: "discover-tools-accept-publish-v2",
-      investigatorPromptRevision: "discovery-prompt-v6",
+      investigatorPromptRevision: "discovery-prompt-v7",
       capabilityRevision: "scoped-read-only-v1",
       publicationRevision: "v1",
     });
@@ -125,9 +125,9 @@ describe("createOverviewAiArtifactIdentity", () => {
       baseIdentity: legacy,
       targetId: "sections:current-v4",
     })).toMatchObject({
-      validatorRevision: "preschool-executive-synthesis-validator-v11",
+      validatorRevision: "preschool-executive-synthesis-validator-v12",
       workflowRevision: "preschool-executive-synthesis-v9",
-      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v8",
+      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v9",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
     });
     expect(legacySection).toMatchObject({

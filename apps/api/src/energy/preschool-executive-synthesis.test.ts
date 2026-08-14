@@ -291,7 +291,7 @@ describe("Preschool Executive Synthesis", () => {
               ],
             },
             findings: [{
-              title: "Priorities recur across three Sections",
+              title: "Priorities may recur across three Sections",
               text: "The current evidence suggests a connection between peer position and both closed- and operating-hour signals.",
               sectionIds: ["centre-benchmark", "standby-wastage", "operating-behaviour"],
               evidenceRefs: [
@@ -322,7 +322,7 @@ describe("Preschool Executive Synthesis", () => {
       sourceSectionArtifactIds: [benchmark.id, standby.id, operating.id],
       summary: { text: "Three current Sections point to a concentrated management review." },
       findings: [{
-        title: "Priorities recur across three Sections",
+        title: "Priorities may recur across three Sections",
         sectionIds: ["centre-benchmark", "standby-wastage", "operating-behaviour"],
       }],
     });
@@ -351,6 +351,11 @@ describe("Preschool Executive Synthesis", () => {
           findings: [{
             title: "Efficiency issue is established",
             text: "The peer pattern proves an efficiency issue across the group.",
+            sectionIds: ["centre-benchmark"],
+            evidenceRefs: ["evidence:centre-benchmark:insight"],
+          }, {
+            title: "Schedule mismatch causes waste",
+            text: "This may warrant review before any cause is assigned.",
             sectionIds: ["centre-benchmark"],
             evidenceRefs: ["evidence:centre-benchmark:insight"],
           }, {
@@ -595,9 +600,9 @@ describe("Preschool Executive Synthesis", () => {
     harness.close();
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.identity_json)).toMatchObject({
-      validatorRevision: "preschool-executive-synthesis-validator-v11",
+      validatorRevision: "preschool-executive-synthesis-validator-v12",
       workflowRevision: "preschool-executive-synthesis-v9",
-      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v8",
+      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v9",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
       publicationRevision: "key-findings-v2",
     });
@@ -685,7 +690,7 @@ describe("Preschool Executive Synthesis", () => {
             ],
           },
           findings: [{
-            title: "Benchmark context remains the supported priority",
+            title: "Benchmark context may remain the supported priority",
             text: "The benchmark evidence suggests the supported Section context may remain relevant.",
             sectionIds: ["centre-benchmark"],
             evidenceRefs: ["evidence:centre-benchmark:insight"],

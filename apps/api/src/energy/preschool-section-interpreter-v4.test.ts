@@ -23,7 +23,7 @@ describe("Preschool Section Interpreter v4", () => {
         sectionId: "centre-benchmark",
         status: "available",
         summary: {
-          text: "The verified Section evidence is available.",
+          text: "Verified energy use is 30 kWh.",
           evidenceRefs: ["evidence:centre-benchmark:1"],
         },
         candidates: [{
@@ -89,7 +89,7 @@ describe("Preschool Section Interpreter v4", () => {
         sectionId: "planning-outlook",
         status: "available",
         summary: {
-          text: "The verified Section evidence is available.",
+          text: "Verified energy use is 30 kWh.",
           evidenceRefs: ["evidence:planning-outlook:1"],
         },
         candidates: [],
@@ -113,7 +113,7 @@ describe("Preschool Section Interpreter v4", () => {
         sectionId: "standby-wastage",
         status: "available",
         summary: {
-          text: "The verified Section evidence is available.",
+          text: "Verified energy use is 30 kWh.",
           evidenceRefs: ["evidence:standby-wastage:1"],
         },
         candidates: [{
@@ -131,7 +131,7 @@ describe("Preschool Section Interpreter v4", () => {
     expect(result).toMatchObject({
       status: "available",
       summary: {
-        text: "The verified Section evidence is available.",
+        text: "Verified energy use is 30 kWh.",
         evidenceRefs: ["evidence:standby-wastage:1"],
       },
       insights: [],
@@ -151,7 +151,7 @@ describe("Preschool Section Interpreter v4", () => {
         sectionId: "standby-wastage",
         status: "available",
         summary: {
-          text: "The verified Section evidence is available. The verified Section evidence is available. The verified Section evidence is available.",
+          text: "Verified energy use is 30 kWh. Verified energy use is 30 kWh. Verified energy use is 30 kWh.",
           evidenceRefs: ["evidence:standby-wastage:1"],
         },
         candidates: [],
@@ -168,18 +168,21 @@ describe("Preschool Section Interpreter v4", () => {
       limitation: "Floor area metadata is provisional.",
       conclusion: "The peer comparison places 3 Centres in the highest-use group.",
       value: { highestUseGroupCount: 3, metadataStatus: "provisional" },
+      unit: undefined,
     },
     {
       sectionId: "planning-outlook" as const,
       limitation: "Forecast cost uses a reference tariff and is not an actual bill.",
       conclusion: "Projected usage is running at 108% of plan.",
       value: { pacePct: 108, tariffAssumption: { status: "provisional", notBill: true } },
+      unit: "%",
     },
   ])("requires the $sectionId Summary to lead with its screened conclusion instead of substituting a caveat", ({
     sectionId,
     limitation,
     conclusion,
     value,
+    unit,
   }) => {
     const pack = packV2(sectionId, 1);
     pack.limitations = [limitation];
@@ -187,6 +190,7 @@ describe("Preschool Section Interpreter v4", () => {
       id: `evidence:${sectionId}:1`,
       label: "Current Section screening result",
       value,
+      ...(unit ? { unit } : {}),
       entityRefs: [],
       evidenceRefs: [`evidence:${sectionId}:1`],
     };
@@ -205,9 +209,14 @@ describe("Preschool Section Interpreter v4", () => {
       runId: `runtime-run-${sectionId}-limitation-only`,
     })).toThrow("PRESCHOOL_SECTION_INTERPRETATION_SUMMARY_UNSUPPORTED");
 
-    const supportedConclusion = sectionId === "planning-outlook"
-      ? "The verified Section evidence is available."
-      : conclusion;
+    expect(() => materializePreschoolSectionResultV4({
+      answer: answer("The verified Section evidence is available."),
+      pack,
+      identity: identity(sectionId),
+      runId: `runtime-run-${sectionId}-generic-placeholder`,
+    })).toThrow("PRESCHOOL_SECTION_INTERPRETATION_SUMMARY_UNSUPPORTED");
+
+    const supportedConclusion = conclusion;
     expect(materializePreschoolSectionResultV4({
       answer: answer(`${supportedConclusion} ${limitation}`),
       pack,
@@ -236,6 +245,7 @@ describe("Preschool Section Interpreter v4", () => {
           ],
         },
       },
+      unit: "%",
       entityRefs: [],
       evidenceRefs: ["evidence:planning-outlook:1"],
     };
@@ -245,7 +255,7 @@ describe("Preschool Section Interpreter v4", () => {
         sectionId: "planning-outlook",
         status: "available",
         summary: {
-          text: "The verified Section evidence is available.",
+          text: "Projected usage is running at 108% of plan.",
           evidenceRefs: ["evidence:planning-outlook:1"],
         },
         candidates: [{
@@ -419,7 +429,7 @@ describe("Preschool Section Interpreter v4", () => {
         sectionId: "standby-wastage",
         status: "available",
         summary: {
-          text: "The verified Section evidence is available.",
+          text: "Verified energy use is 30 kWh.",
           evidenceRefs: ["evidence:standby-wastage:1"],
         },
         candidates: [{
@@ -454,7 +464,7 @@ describe("Preschool Section Interpreter v4", () => {
         sectionId: "standby-wastage",
         status: "available",
         summary: {
-          text: "The verified Section evidence is available.",
+          text: "Verified energy use is 30 kWh.",
           evidenceRefs: ["evidence:standby-wastage:1"],
         },
         candidates: [{
@@ -741,7 +751,7 @@ describe("Preschool Section Interpreter v4", () => {
             sectionId: runnerInput.identity.targetId,
             status: "available",
             summary: {
-              text: "The verified Section evidence is available.",
+              text: "Verified energy use is 30 kWh.",
               evidenceRefs: [`evidence:${runnerInput.identity.targetId}:1`],
             },
             candidates: [],

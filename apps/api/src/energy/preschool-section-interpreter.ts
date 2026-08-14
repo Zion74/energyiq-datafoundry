@@ -284,6 +284,7 @@ export const buildPreschoolSectionDiscoveryPrompt = (
     "For standby or operating summaries, centresWithFlaggedSpikes describes only Centres with flagged spike events; never attach that count to total energy coverage or the full estate.",
     "Do not invent observed facts, entities, numbers, dates, units, or relationships. A speculative explanation must remain clearly conditional and must not be presented as a confirmed safety alert.",
     `Keep the Summary short and useful: at most ${PRESCHOOL_SECTION_SUMMARY_MAX_CHARS} characters and two sentences. Lead with this Section's most important Evidence-backed screening conclusion; put any limitation or provisional-metadata caveat after that conclusion. A caveat alone is not a Summary.`,
+    "Do not use placeholder prose such as 'the evidence is available'. Name the actual pattern, object, comparison, event, or planning signal supported by the cited Evidence.",
     `Presentation limits only: candidate title at most ${PRESCHOOL_SECTION_INSIGHT_TITLE_MAX_CHARS} characters, text at most ${PRESCHOOL_SECTION_INSIGHT_TEXT_MAX_CHARS}, deep-dive question at most ${PRESCHOOL_SECTION_DEEP_DIVE_MAX_CHARS}, and limitation at most ${PRESCHOOL_SECTION_LIMITATION_MAX_CHARS}. These limits do not restrict which useful analytical angle you choose.`,
     "In customer-facing narrative, say 'all Centres' instead of 'Portfolio'. Internal Pack field names may still use portfolio.",
     "Candidates are optional; return zero when the Summary is sufficient, or several genuinely distinct candidates when the Pack supports them.",
@@ -591,8 +592,13 @@ const summaryLeadsWithConclusion = (text: string, limitations: string[]): boolea
     .map(({ segment }) => segment.trim())
     .find(Boolean);
   return Boolean(firstSentence)
+    && !summaryIsGenericPlaceholder(firstSentence!)
     && !limitations.some((limitation) => narrativesAreNearEquivalent(firstSentence!, limitation));
 };
+
+const summaryIsGenericPlaceholder = (sentence: string): boolean =>
+  /^(?:the\s+)?(?:verified\s+)?(?:section\s+)?(?:evidence|data|results?|information)\s+(?:is|are)\s+(?:available|provided)\.?$/iu
+    .test(sentence.replaceAll(/[*_`]/gu, "").trim());
 
 const sentenceCount = (text: string): number => [...new Intl.Segmenter("en", { granularity: "sentence" })
   .segment(text)]
