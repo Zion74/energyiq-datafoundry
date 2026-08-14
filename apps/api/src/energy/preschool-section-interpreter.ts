@@ -278,12 +278,12 @@ export const buildPreschoolSectionDiscoveryPrompt = (
     `Available scoped read-only tools: ${JSON.stringify(pack.capabilities.tools)}. Tool arguments must contain only the documented controlled parameters; never submit Pack, binding, Section, Snapshot, Release, period, SQL, URL, network, or write instructions.`,
     "The Pack is a factual boundary, not a writing template: identify the most useful angles instead of filling fixed What, Why, or Action slots.",
     "You may connect supplied facts and propose relevant hypotheses. Mark direct Pack facts as observed, supported relationships as inferred, and plausible but unverified lines of inquiry as speculative.",
-    "An observed candidate must contain only direct Pack facts. If it says could, may, might, appears, or recommends a choice, label the whole candidate inferred or speculative instead.",
+    "An observed candidate must contain only direct Pack facts. If it says could, may, might, appears, looks like, suggests, is consistent with, or recommends a choice, label the whole candidate inferred or speculative instead.",
     "For event Evidence, usageKwh is total interval energy; impactKwh is only the excess above its comparison baseline. Never describe impactKwh as the whole spike or interval total.",
     "For planning Evidence, count only rows whose scopeRole is centre when stating a Centre count; one Portfolio row is not a Centre.",
     "For standby or operating summaries, centresWithFlaggedSpikes describes only Centres with flagged spike events; never attach that count to total energy coverage or the full estate.",
     "Do not invent observed facts, entities, numbers, dates, units, or relationships. A speculative explanation must remain clearly conditional and must not be presented as a confirmed safety alert.",
-    `Keep the Summary short and useful: at most ${PRESCHOOL_SECTION_SUMMARY_MAX_CHARS} characters and three sentences. It should orient the reader without repeating the candidate cards.`,
+    `Keep the Summary short and useful: at most ${PRESCHOOL_SECTION_SUMMARY_MAX_CHARS} characters and two sentences. Lead with this Section's most important Evidence-backed screening conclusion; put any limitation or provisional-metadata caveat after that conclusion. A caveat alone is not a Summary.`,
     `Presentation limits only: candidate title at most ${PRESCHOOL_SECTION_INSIGHT_TITLE_MAX_CHARS} characters, text at most ${PRESCHOOL_SECTION_INSIGHT_TEXT_MAX_CHARS}, deep-dive question at most ${PRESCHOOL_SECTION_DEEP_DIVE_MAX_CHARS}, and limitation at most ${PRESCHOOL_SECTION_LIMITATION_MAX_CHARS}. These limits do not restrict which useful analytical angle you choose.`,
     "In customer-facing narrative, say 'all Centres' instead of 'Portfolio'. Internal Pack field names may still use portfolio.",
     "Candidates are optional; return zero when the Summary is sufficient, or several genuinely distinct candidates when the Pack supports them.",
@@ -496,8 +496,9 @@ const calibrateCandidateEpistemicStatus = (
 };
 
 const containsInferenceLanguage = (text: string): boolean =>
-  /\b(?:could|might|appears?|apparently|likely|possibly|potential(?:ly)?|recommend(?:s|ed|ing)?|should|worth considering)\b/iu
+  /\b(?:could|might|appears?|apparently|likely|possibly|potential(?:ly)?|recommend(?:s|ed|ing)?|should|suggest(?:s|ed|ing)?|worth considering)\b/iu
     .test(text)
+  || /\blooks?\s+like\b|\bconsistent\s+with\b/iu.test(text)
   || /\bmay\s+(?:be|reflect|indicate|suggest|result|offer|mean|signal|help|need|show|point|support|capture)\b/iu
     .test(text);
 
@@ -528,9 +529,11 @@ const createPackV2AcceptanceAuthority = (pack: PreschoolSectionPackV2) => ({
   validateSummary: (summary: PreschoolSectionSummaryV4) => {
     const citedEvidence = citedPackEvidence(summary.evidenceRefs, pack);
     return summary.text.length <= PRESCHOOL_SECTION_SUMMARY_MAX_CHARS
+      && sentenceCount(summary.text) <= 2
       && summary.evidenceRefs.length > 0
       && evidenceRefsAreSupported(summary.evidenceRefs, pack)
       && citedEvidence.length > 0
+      && summaryLeadsWithConclusion(summary.text, pack.limitations)
       && isSupportedNarrative(summary.text, citedEvidence, pack.evidence)
       ? { accepted: true as const }
       : { accepted: false as const };
@@ -557,6 +560,9 @@ const candidateRejectionCode = (
   if (!evidenceRefsAreSupported(candidate.evidenceRefs, pack)) return "EVIDENCE_REF_UNSUPPORTED";
   const citedEvidence = citedPackEvidence(candidate.evidenceRefs, pack);
   if (citedEvidence.length === 0) return "EVIDENCE_REF_UNSUPPORTED";
+  if (candidateRestatesPresentedLimitation(candidate, pack.limitations)) {
+    return "PRESENTED_LIMITATION_RESTATED";
+  }
   const narrative = [candidate.title, candidate.label, candidate.text, candidate.deepDiveQuestion]
     .filter((value): value is string => Boolean(value));
   if (narrative.some((value) => hasBannedCustomerText(value) || hasUnsafeMarkdown(value))) {
@@ -579,6 +585,40 @@ const candidateRejectionCode = (
   }
   return null;
 };
+
+const summaryLeadsWithConclusion = (text: string, limitations: string[]): boolean => {
+  const firstSentence = [...new Intl.Segmenter("en", { granularity: "sentence" }).segment(text)]
+    .map(({ segment }) => segment.trim())
+    .find(Boolean);
+  return Boolean(firstSentence)
+    && !limitations.some((limitation) => narrativesAreNearEquivalent(firstSentence!, limitation));
+};
+
+const sentenceCount = (text: string): number => [...new Intl.Segmenter("en", { granularity: "sentence" })
+  .segment(text)]
+  .filter(({ segment }) => Boolean(segment.trim()))
+  .length;
+
+const candidateRestatesPresentedLimitation = (
+  candidate: PreschoolSectionInsightCandidateV4,
+  limitations: string[],
+): boolean => [candidate.title, candidate.text]
+  .some((narrative) => limitations.some((limitation) => narrativesAreNearEquivalent(narrative, limitation)));
+
+const narrativesAreNearEquivalent = (left: string, right: string): boolean => {
+  const leftTokens = narrativeTokens(left);
+  const rightTokens = narrativeTokens(right);
+  if (leftTokens.size < 4 || rightTokens.size < 4) return false;
+  const overlap = [...leftTokens].filter((token) => rightTokens.has(token)).length;
+  const shorterCoverage = overlap / Math.min(leftTokens.size, rightTokens.size);
+  const longerCoverage = overlap / Math.max(leftTokens.size, rightTokens.size);
+  return shorterCoverage >= 0.9 && longerCoverage >= 0.75;
+};
+
+const narrativeTokens = (value: string): Set<string> => new Set(value
+  .replaceAll(/[*_`]/gu, "")
+  .toLocaleLowerCase("en")
+  .match(/[\p{L}\p{N}]+/gu) ?? []);
 
 const evidenceRefsAreSupported = (
   refs: string[],

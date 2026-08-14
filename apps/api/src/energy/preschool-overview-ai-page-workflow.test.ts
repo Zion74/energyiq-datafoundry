@@ -221,6 +221,45 @@ describe("Preschool Overview AI page workflow", () => {
     expect(executivePrompt).toContain('"contract":"analysis-context-evidence@1"');
     expect(executivePrompt).toContain('"dataCutoff":"2026-06-01T00:00:00.000Z"');
   });
+
+  it("passes all four available current Sections into Key Findings synthesis", async () => {
+    const harness = createHarness();
+    for (const sectionId of PRESCHOOL_SECTION_IDS) {
+      completeSectionV4(harness, sectionId, `Current ${sectionId} conclusion.`);
+    }
+    let executivePrompt = "";
+    let sectionProviderCalls = 0;
+    const workflow = createPreschoolOverviewAiPageWorkflow({
+      metadataStore: harness.metadata,
+      dataGateway: {} as LocalDataGateway,
+      resolveSnapshot: async () => emptySnapshot(),
+      runSection: async () => {
+        sectionProviderCalls += 1;
+        throw new Error("EXISTING_SECTIONS_MUST_BE_REUSED");
+      },
+      runExecutiveSynthesis: async ({ prompt, runId, sessionId }) => {
+        executivePrompt = prompt;
+        return {
+          answer: JSON.stringify({
+            status: "available",
+            summary: {
+              text: "All four current Sections support a bounded management review.",
+              evidenceRefs: PRESCHOOL_SECTION_IDS.map((sectionId) => `evidence:v4:${sectionId}`),
+            },
+            findings: [],
+          }),
+          runId,
+          sessionId,
+        };
+      },
+    });
+
+    const result = await workflow.execute({ identity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+    expect(sectionProviderCalls).toBe(0);
+    expect(PRESCHOOL_SECTION_IDS.every((sectionId) => executivePrompt.includes(`\"sectionId\":\"${sectionId}\"`))).toBe(true);
+    expect(result.executive.status).toBe("available");
+  });
 });
 
 const statuses = (

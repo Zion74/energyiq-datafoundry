@@ -358,13 +358,12 @@ function ExecutiveUnit({
     return <>{coverage}<Unavailable detail="The Executive Summary is unavailable. Completed Section interpretations remain visible below." /></>;
   }
   if (unit.status === "empty") {
-    const sourceCoverage = <p className="mb-3 text-xs font-medium text-muted">Based on {unit.result.sourceSectionArtifactIds.length} of 4 sections</p>;
     return isV4ExecutiveResult(unit.result, "empty")
-      ? <>{sourceCoverage}<EmptyValue title="No additional Key Findings" detail="The accepted Sections did not support a distinct cross-section theme for this Snapshot." /></>
+      ? <>{coverage}<EmptyValue title="No additional Key Findings" detail="The accepted Sections did not support a distinct cross-section theme for this Snapshot." /></>
       : <>{coverage}<EmptyValue title="No additional Executive Summary finding" detail="The accepted Sections did not support a distinct cross-section message for this Snapshot." /></>;
   }
   if (isV4ExecutiveResult(unit.result, "available")) {
-    return <KeyFindingsUnit result={unit.result} />;
+    return <KeyFindingsUnit result={unit.result} completedSectionCount={completedSectionCount} />;
   }
   return (
     <div>
@@ -391,10 +390,16 @@ function ExecutiveUnit({
   );
 }
 
-function KeyFindingsUnit({ result }: { result: PreschoolExecutiveSynthesisV4AvailableResult }) {
+function KeyFindingsUnit({
+  result,
+  completedSectionCount,
+}: {
+  result: PreschoolExecutiveSynthesisV4AvailableResult;
+  completedSectionCount: number;
+}) {
   return (
     <div>
-      <p className="mb-3 text-xs font-medium text-muted">Based on {result.sourceSectionArtifactIds.length} of 4 Sections</p>
+      <p className="mb-3 text-xs font-medium text-muted">Based on {completedSectionCount} of 4 Sections</p>
       <div className="rounded-lg border border-primary/15 bg-primary/[0.04] px-4 py-3" aria-label="Key findings summary">
         <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-primary">Summary</p>
         <SafeAiMarkdown className="max-w-[75ch] text-base leading-7 text-foreground" children={result.summary.text} />
@@ -918,7 +923,10 @@ function AiFrame({
 const completedSectionCount = (result: PreschoolOverviewAiReadModelDto): number =>
   requiredSectionIds.filter((sectionId) => {
     const unit = result.sections[sectionId];
-    return isValidSectionUnit(unit) && (unit.status === "available" || unit.status === "empty");
+    return isValidSectionUnit(unit)
+      && (unit.status === "available"
+        || unit.status === "empty"
+        || (unit.status === "unavailable" && unit.artifactId !== undefined));
   }).length;
 
 const isV4SectionResult = (

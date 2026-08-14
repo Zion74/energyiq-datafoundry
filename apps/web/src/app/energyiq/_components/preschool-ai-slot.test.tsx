@@ -347,7 +347,7 @@ describe("PreschoolAiSlot", () => {
     const pageSlot = container.querySelector<HTMLElement>('[data-ai-section="page-synthesis"]');
     expect(pageSlot).not.toBeNull();
     expect(pageSlot!.textContent).toContain("Key Findings");
-    expect(pageSlot!.textContent).toContain("Based on 2 of 4 Sections");
+    expect(pageSlot!.textContent).toContain("Based on 4 of 4 Sections");
     expect(pageSlot!.querySelector('[aria-label="Key findings summary"]')).not.toBeNull();
     expect(pageSlot!.querySelector('[data-key-findings-grid="true"]')).not.toBeNull();
     expect(readableText(pageSlot)).toContain("Recurring time-pattern signals appear in both closed and opening hours.");
@@ -381,7 +381,7 @@ describe("PreschoolAiSlot", () => {
     expect(summaryEvidence.textContent).not.toContain("section-standby-v4");
   });
 
-  it("uses Evidence-contributing source artifacts, not terminal Section coverage, for saved v4 empty Key Findings", async () => {
+  it("keeps terminal Section coverage separate from Evidence-contributing source artifacts for saved v4 empty Key Findings", async () => {
     const result = v4ReadModelResult();
     const executive = result.executive;
     if (executive.status !== "available" || !("findings" in executive.result)) throw new Error("v4 fixture missing");
@@ -410,8 +410,8 @@ describe("PreschoolAiSlot", () => {
     ));
 
     const pageSlot = container.querySelector<HTMLElement>('[data-ai-section="page-synthesis"]');
-    expect(pageSlot?.textContent).toContain("Based on 2 of 4 sections");
-    expect(pageSlot?.textContent).not.toContain("Based on 3 of 4 sections");
+    expect(pageSlot?.textContent).toContain("Based on 4 of 4 sections");
+    expect(pageSlot?.textContent).not.toContain("Based on 2 of 4 sections");
   });
 
   it("renders a saved v4 Section summary and scoped Insight cards with a structured Explore handoff", async () => {
@@ -1139,6 +1139,7 @@ describe("PreschoolAiSlot", () => {
   it("counts only the four required Section keys for terminal coverage", async () => {
     const result = cloneV4ReadModelResult();
     result.executive = { status: "unavailable", artifactId: "key-findings-v4", reason: "SYNTHESIS_FAILED" };
+    result.sections["planning-outlook"] = { status: "running" };
     const extraSections = result.sections as unknown as Record<string, unknown>;
     extraSections["unexpected-extra-section"] = cloneV4ReadModelResult().sections["centre-benchmark"];
 
@@ -1202,7 +1203,7 @@ describe("PreschoolAiSlot", () => {
     ));
 
     const pageSlot = container.querySelector<HTMLElement>('[data-ai-section="page-synthesis"]');
-    expect(pageSlot?.textContent).toContain("Based on 0 of 4 sections");
+    expect(pageSlot?.textContent).toContain("Based on 4 of 4 sections");
     expect(pageSlot?.textContent).toContain("No additional Key Findings");
     expect(pageSlot?.textContent).not.toContain("Invalid saved AI");
   });

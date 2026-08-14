@@ -77,7 +77,7 @@ describe("Preschool Section Interpreter v4", () => {
     expect(prompt).toContain("Do not invent an alert");
     expect(prompt).toContain("usageKwh is total interval energy");
     expect(prompt).toContain("one Portfolio row is not a Centre");
-    expect(prompt).toContain("could, may, might, appears, or recommends");
+    expect(prompt).toContain("looks like, suggests, is consistent with");
     expect(prompt).not.toContain("allowedNextChecks");
     expect(prompt).not.toContain('"kind"');
   });
@@ -141,6 +141,135 @@ describe("Preschool Section Interpreter v4", () => {
         rejectedCount: 1,
         publishedCount: 0,
       },
+    });
+  });
+
+  it("rejects a Section Summary that exceeds the two-sentence reading budget", () => {
+    const pack = packV2("standby-wastage", 1);
+    expect(() => materializePreschoolSectionResultV4({
+      answer: JSON.stringify({
+        sectionId: "standby-wastage",
+        status: "available",
+        summary: {
+          text: "The verified Section evidence is available. The verified Section evidence is available. The verified Section evidence is available.",
+          evidenceRefs: ["evidence:standby-wastage:1"],
+        },
+        candidates: [],
+      }),
+      pack,
+      identity: identity("standby-wastage"),
+      runId: "runtime-run-summary-sentence-budget",
+    })).toThrow("PRESCHOOL_SECTION_INTERPRETATION_SUMMARY_UNSUPPORTED");
+  });
+
+  it.each([
+    {
+      sectionId: "centre-benchmark" as const,
+      limitation: "Floor area metadata is provisional.",
+      conclusion: "The peer comparison places 3 Centres in the highest-use group.",
+      value: { highestUseGroupCount: 3, metadataStatus: "provisional" },
+    },
+    {
+      sectionId: "planning-outlook" as const,
+      limitation: "Forecast cost uses a reference tariff and is not an actual bill.",
+      conclusion: "Projected usage is running at 108% of plan.",
+      value: { pacePct: 108, tariffAssumption: { status: "provisional", notBill: true } },
+    },
+  ])("requires the $sectionId Summary to lead with its screened conclusion instead of substituting a caveat", ({
+    sectionId,
+    limitation,
+    conclusion,
+    value,
+  }) => {
+    const pack = packV2(sectionId, 1);
+    pack.limitations = [limitation];
+    pack.evidence[0] = {
+      id: `evidence:${sectionId}:1`,
+      label: "Current Section screening result",
+      value,
+      entityRefs: [],
+      evidenceRefs: [`evidence:${sectionId}:1`],
+    };
+    const answer = (summary: string) => JSON.stringify({
+      sectionId,
+      status: "available",
+      summary: { text: summary, evidenceRefs: [`evidence:${sectionId}:1`] },
+      candidates: [],
+      limitation,
+    });
+
+    expect(() => materializePreschoolSectionResultV4({
+      answer: answer(limitation),
+      pack,
+      identity: identity(sectionId),
+      runId: `runtime-run-${sectionId}-limitation-only`,
+    })).toThrow("PRESCHOOL_SECTION_INTERPRETATION_SUMMARY_UNSUPPORTED");
+
+    const supportedConclusion = sectionId === "planning-outlook"
+      ? "The verified Section evidence is available."
+      : conclusion;
+    expect(materializePreschoolSectionResultV4({
+      answer: answer(`${supportedConclusion} ${limitation}`),
+      pack,
+      identity: identity(sectionId),
+      runId: `runtime-run-${sectionId}-conclusion-first`,
+    })).toMatchObject({
+      status: "available",
+      summary: { text: `${supportedConclusion} ${limitation}` },
+    });
+  });
+
+  it("locally rejects a planning Insight that only restates the presented tariff limitation", () => {
+    const pack = packV2("planning-outlook", 1);
+    const limitation = "Forecast cost uses a reference tariff and is not an actual bill.";
+    pack.limitations = [limitation];
+    pack.evidence[0] = {
+      id: "evidence:planning-outlook:1",
+      label: "Current planning outlook",
+      value: {
+        pacePct: 108,
+        tariffAssumption: { status: "provisional", notBill: true },
+        forecast: {
+          scopes: [
+            { scopeId: "portfolio", scopeRole: "portfolio" },
+            { scopeId: "centre-1", scopeRole: "centre" },
+          ],
+        },
+      },
+      entityRefs: [],
+      evidenceRefs: ["evidence:planning-outlook:1"],
+    };
+
+    const result = materializePreschoolSectionResultV4({
+      answer: JSON.stringify({
+        sectionId: "planning-outlook",
+        status: "available",
+        summary: {
+          text: "The verified Section evidence is available.",
+          evidenceRefs: ["evidence:planning-outlook:1"],
+        },
+        candidates: [{
+          title: "Reference tariff caveat",
+          epistemicStatus: "observed",
+          text: "Forecast cost uses a reference tariff and is not an actual bill.",
+          evidenceRefs: ["evidence:planning-outlook:1"],
+        }, {
+          title: "Scope distinction",
+          epistemicStatus: "inferred",
+          text: "The Portfolio is a separate scope from the Centre rows.",
+          evidenceRefs: ["evidence:planning-outlook:1"],
+        }],
+        limitation,
+      }),
+      pack,
+      identity: identity("planning-outlook"),
+      runId: "runtime-run-planning-limitation-restatement",
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      insights: [{ title: "Scope distinction", epistemicStatus: "inferred" }],
+      publication: { discoveredCount: 2, acceptedCount: 1, rejectedCount: 1, publishedCount: 1 },
     });
   });
 
@@ -311,6 +440,38 @@ describe("Preschool Section Interpreter v4", () => {
         title: "Possible schedule relationship",
         epistemicStatus: "inferred",
       }],
+    });
+  });
+
+  it.each([
+    "The pattern looks like a scheduling mismatch.",
+    "The pattern suggests a scheduling mismatch.",
+    "The pattern is consistent with a scheduling mismatch.",
+  ])("downgrades observed wording that makes an inferred relationship: %s", (text) => {
+    const pack = packV2("standby-wastage", 1);
+    const result = materializePreschoolSectionResultV4({
+      answer: JSON.stringify({
+        sectionId: "standby-wastage",
+        status: "available",
+        summary: {
+          text: "The verified Section evidence is available.",
+          evidenceRefs: ["evidence:standby-wastage:1"],
+        },
+        candidates: [{
+          title: "Possible schedule relationship",
+          epistemicStatus: "observed",
+          text,
+          evidenceRefs: ["evidence:standby-wastage:1"],
+        }],
+      }),
+      pack,
+      identity: identity("standby-wastage"),
+      runId: "runtime-run-epistemic-phrasing",
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      insights: [{ epistemicStatus: "inferred", text }],
     });
   });
 

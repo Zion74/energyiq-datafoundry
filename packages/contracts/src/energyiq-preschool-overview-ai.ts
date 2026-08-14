@@ -64,6 +64,7 @@ export type PreschoolSectionCandidateRejectionCodeV4 =
   | "DATE_UNSUPPORTED"
   | "MARKDOWN_UNSAFE"
   | "SAFETY_CLAIM_UNSUPPORTED"
+  | "PRESENTED_LIMITATION_RESTATED"
   | "CANDIDATE_MALFORMED";
 
 export type PreschoolSectionCandidateRejectionV4 = {

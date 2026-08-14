@@ -292,7 +292,7 @@ describe("Preschool Executive Synthesis", () => {
             },
             findings: [{
               title: "Priorities recur across three Sections",
-              text: "The current evidence connects peer position with both closed- and operating-hour signals.",
+              text: "The current evidence suggests a connection between peer position and both closed- and operating-hour signals.",
               sectionIds: ["centre-benchmark", "standby-wastage", "operating-behaviour"],
               evidenceRefs: [
                 "evidence:centre-benchmark:insight",
@@ -333,6 +333,45 @@ describe("Preschool Executive Synthesis", () => {
     expect(prompt).toContain("finding title: at most 96 characters");
     expect(prompt).not.toContain('"keyPoints"');
     expect(prompt).not.toContain('"sectionId":"planning-outlook"');
+  });
+
+  it("does not upgrade an inferred Section relationship into a certain Key Finding", async () => {
+    const harness = createHarness();
+    const benchmark = completeSectionV4(harness, "centre-benchmark");
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      revision: "v4",
+      runSynthesis: async (input) => ({
+        answer: JSON.stringify({
+          status: "available",
+          summary: {
+            text: "The benchmark evidence suggests a relationship worth checking.",
+            evidenceRefs: ["evidence:centre-benchmark:insight"],
+          },
+          findings: [{
+            title: "Efficiency issue is established",
+            text: "The peer pattern proves an efficiency issue across the group.",
+            sectionIds: ["centre-benchmark"],
+            evidenceRefs: ["evidence:centre-benchmark:insight"],
+          }, {
+            title: "Peer pattern may warrant a check",
+            text: "The peer pattern suggests a possible efficiency signal, not a confirmed issue.",
+            sectionIds: ["centre-benchmark"],
+            evidenceRefs: ["evidence:centre-benchmark:insight"],
+          }],
+        }),
+        runId: input.runId,
+        sessionId: input.sessionId,
+      }),
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+    expect(JSON.parse(artifact.result_json!)).toMatchObject({
+      sourceSectionArtifactIds: [benchmark.id],
+      findings: [{ title: "Peer pattern may warrant a check" }],
+    });
   });
 
   it("rejects an overlong current Key Findings summary even when the Provider ignores its schema", async () => {
@@ -540,11 +579,11 @@ describe("Preschool Executive Synthesis", () => {
             evidenceRefs: ["analysis.summary.usage_kwh", "evidence:centre-benchmark:summary"],
           },
           findings: [{
-            title: "Confirmed portfolio alert",
-            text: "The confirmed 120 kWh total adds context to the current benchmark pattern.",
+            title: "Portfolio total adds context to a possible benchmark signal",
+            text: "The confirmed 120 kWh total adds context to a benchmark pattern that may warrant review.",
             sectionIds: ["centre-benchmark"],
             evidenceRefs: ["analysis.summary.usage_kwh", "evidence:centre-benchmark:insight"],
-            alert: { severity: "attention", certainty: "confirmed" },
+            alert: { severity: "attention", certainty: "possible" },
           }],
         }),
         runId: input.runId,
@@ -556,9 +595,9 @@ describe("Preschool Executive Synthesis", () => {
     harness.close();
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.identity_json)).toMatchObject({
-      validatorRevision: "preschool-executive-synthesis-validator-v10",
+      validatorRevision: "preschool-executive-synthesis-validator-v11",
       workflowRevision: "preschool-executive-synthesis-v9",
-      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v7",
+      investigatorPromptRevision: "preschool-executive-synthesis-prompt-v8",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
       publicationRevision: "key-findings-v2",
     });
@@ -569,7 +608,7 @@ describe("Preschool Executive Synthesis", () => {
         sourceId: "project-analysis-snapshot:preschool-demo:snapshot-current",
         factIds: ["analysis.summary.usage_kwh"],
       },
-      findings: [{ alert: { severity: "attention", certainty: "confirmed" } }],
+      findings: [{ alert: { severity: "attention", certainty: "possible" } }],
     });
   });
 
@@ -647,7 +686,7 @@ describe("Preschool Executive Synthesis", () => {
           },
           findings: [{
             title: "Benchmark context remains the supported priority",
-            text: "The benchmark evidence provides the supported Section context.",
+            text: "The benchmark evidence suggests the supported Section context may remain relevant.",
             sectionIds: ["centre-benchmark"],
             evidenceRefs: ["evidence:centre-benchmark:insight"],
             alert: { severity: "attention", certainty: "inferred" },
