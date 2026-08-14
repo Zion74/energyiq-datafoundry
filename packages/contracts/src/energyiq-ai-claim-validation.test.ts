@@ -67,6 +67,25 @@ describe("EnergyIQ AI claim validation", () => {
     })).toBe(false);
   });
 
+  it("requires every named Centre entity even when the narrative has no number", () => {
+    const centreEvidence = (centreCode: string) => [{
+      id: `centre:${centreCode.toLowerCase()}:usage`,
+      label: `Centre ${centreCode} usage`,
+      unit: "kWh",
+      values: { centreCode, usageKwh: 20 },
+    }];
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "Centre N warrants a separate timing check.",
+      evidence: centreEvidence("G"),
+      sqlEvidence: [],
+    })).toBe(false);
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "Centre N warrants a separate timing check.",
+      evidence: centreEvidence("N"),
+      sqlEvidence: [],
+    })).toBe(true);
+  });
+
   it("requires a multiplier claim to come from a ratio, multiple, or factor field", () => {
     const narrative = "Centre G demand was 15x the peer baseline.";
     expect(energyAiNarrativeClaimsSupported({

@@ -23,12 +23,14 @@ import { composePreschoolOverviewAiReadModel } from "./preschool-overview-ai-rea
 import { PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3 } from "./preschool-overview-ai-structured-output.js";
 
 describe("Preschool Additional AI Insights workflow", () => {
-  it("rejects a presented claim restatement locally while accepting a new Evidence-bound hypothesis", async () => {
+  it("preserves Pack claim provenance while accepting a new Catalog-Evidence relationship", async () => {
     const harness = createHarness();
     try {
+      const sectionEvidenceRef = "preschool:snapshot-current:section-standby-wastage:summary";
       const runDiscovery = vi.fn(async ({ prompt, runId, sessionId }) => {
         expect(prompt).toContain("Already-presented claim digests");
         expect(prompt).toContain("section:standby-wastage:summary");
+        expect(prompt).toContain(sectionEvidenceRef);
         return {
           answer: JSON.stringify({ candidates: [
             candidate("candidate-restatement", "fact:standby-share", {
@@ -46,7 +48,16 @@ describe("Preschool Additional AI Insights workflow", () => {
               epistemicStatus: "speculative",
               incrementalContext: {
                 relatedPresentedClaimIds: ["section:standby-wastage:summary"],
-                novelConclusion: "Test whether the already-presented share is concentrated in a small set of recurring intervals.",
+                novelConclusion: "a small number of recurring intervals may account for most of it",
+              },
+            }),
+            candidate("candidate-forged-claim", "fact:standby-share", {
+              title: "A forged relationship",
+              text: "This relationship cites an unknown presented claim.",
+              epistemicStatus: "speculative",
+              incrementalContext: {
+                relatedPresentedClaimIds: ["section:standby-wastage:forged"],
+                novelConclusion: "Test a relationship to a claim that is not in the current envelope.",
               },
             }),
           ] }),
@@ -57,29 +68,22 @@ describe("Preschool Additional AI Insights workflow", () => {
       const workflow = createPreschoolAdditionalAiInsightsWorkflow({
         metadataStore: harness.metadata,
         resolveEvidenceCatalog: async () => catalog(),
-        resolvePresentedClaims: async () => ({
-          binding: {
-            workspaceId: PRESCHOOL_WORKSPACE_ID,
-            projectId: "preschool-demo",
-            scopeId: "preschool-project",
-            dataSnapshotId: "snapshot-current",
-            projectReleaseId: "release-current",
-            analysisPeriod: {
-              from: "2026-05-01T00:00:00.000Z",
-              to: "2026-06-01T00:00:00.000Z",
-            },
-            modelProfileId: "workspace-default",
-            modelProfileRevision: 1,
-          },
-          claims: [{
+        resolvePresentedClaims: async ({ identity, catalog: currentCatalog }) => {
+          const claims = createPreschoolAdditionalAiPresentedClaims({
+            identity,
+            catalog: currentCatalog,
+            readModel: presentedReadModel({
+              dataSnapshotId: "snapshot-current",
+              sectionEvidenceRef,
+            }),
+          });
+          expect(claims.claims).toEqual(expect.arrayContaining([expect.objectContaining({
             id: "section:standby-wastage:summary",
-            source: "section-summary",
-            sectionId: "standby-wastage",
             artifactId: "section-artifact-standby",
-            text: "Standby energy use accounts for 31% of the selected period.",
-            evidenceRefs: ["fact:standby-share"],
-          }],
-        }),
+            sourceEvidenceRefs: [sectionEvidenceRef],
+          })]));
+          return claims;
+        },
         runDiscovery,
       });
 
@@ -93,14 +97,101 @@ describe("Preschool Additional AI Insights workflow", () => {
       expect(result).toMatchObject({
         status: "available",
         publication: {
-          discoveredCount: 2,
+          discoveredCount: 3,
           acceptedCount: 1,
-          rejectedCount: 1,
+          rejectedCount: 2,
           acceptedCandidateIds: ["candidate-hypothesis"],
-          rejectedCandidateIds: ["candidate-restatement"],
+          rejectedCandidateIds: ["candidate-restatement", "candidate-forged-claim"],
         },
         findings: [{ id: "additional:candidate-hypothesis", epistemicStatus: "speculative" }],
       });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("binds claimed novelty to the actual published narrative", async () => {
+    const harness = createHarness();
+    try {
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [
+            candidate("candidate-novelty-bypass", "fact:standby-share", {
+              title: "fact:standby-share: 31 %",
+              text: "fact:standby-share: 31 %",
+              epistemicStatus: "observed",
+              incrementalContext: {
+                relatedPresentedClaimIds: ["deterministic-overview:fact:standby-share"],
+                novelConclusion: "A separate timing relationship should be tested.",
+              },
+            }),
+            candidate("candidate-deep-dive-bypass", "fact:standby-share", {
+              title: "fact:standby-share: 31 %",
+              text: "fact:standby-share: 31 %",
+              deepDiveQuestion: "Could a separate timing relationship be tested?",
+              epistemicStatus: "observed",
+              incrementalContext: {
+                relatedPresentedClaimIds: ["deterministic-overview:fact:standby-share"],
+                novelConclusion: "Could a separate timing relationship be tested?",
+              },
+            }),
+          ] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "novelty-binding-run",
+        sessionId: "novelty-binding-session",
+      });
+
+      expect(result.publication).toMatchObject({
+        discoveredCount: 2,
+        acceptedCount: 0,
+        rejectedCount: 2,
+        rejectedCandidateIds: ["candidate-novelty-bypass", "candidate-deep-dive-bypass"],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("accepts a same-Evidence superset only when the actual narrative adds a testable relationship", async () => {
+    const harness = createHarness();
+    try {
+      const narrative = "fact:standby-share: 31 %, while its weekday concentration may move differently; test that relationship.";
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [candidate("candidate-superset-relation", "fact:standby-share", {
+            title: "Test whether the share hides a weekday relationship",
+            text: narrative,
+            epistemicStatus: "speculative",
+            incrementalContext: {
+              relatedPresentedClaimIds: ["deterministic-overview:fact:standby-share"],
+              novelConclusion: narrative,
+            },
+          })] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "superset-relation-run",
+        sessionId: "superset-relation-session",
+      });
+      expect(result.publication.acceptedCandidateIds).toEqual(["candidate-superset-relation"]);
     } finally {
       harness.close();
     }
@@ -141,13 +232,16 @@ describe("Preschool Additional AI Insights workflow", () => {
                   modelProfileId: "workspace-default",
                   modelProfileRevision: 1,
                 },
-                summary: { text: "Standby accounts for 31%.", evidenceRefs: ["fact:standby-share"] },
+                summary: {
+                  text: "Standby accounts for 31%.",
+                  evidenceRefs: ["preschool:snapshot-current:section-standby-wastage:summary"],
+                },
                 insights: [{
                   id: "standby-pattern",
                   title: "Standby pattern",
                   text: "The 31% share is already visible.",
                   epistemicStatus: "observed",
-                  evidenceRefs: ["fact:standby-share"],
+                  evidenceRefs: ["preschool:snapshot-current:section-standby-wastage:insight:standby-pattern"],
                 }],
               },
             },
@@ -185,7 +279,7 @@ describe("Preschool Additional AI Insights workflow", () => {
         expect.objectContaining({
           id: "deterministic-overview:fact:standby-share",
           source: "deterministic-overview",
-          evidenceRefs: ["fact:standby-share"],
+          sourceEvidenceRefs: ["fact:standby-share"],
         }),
         {
           id: "section:standby-wastage:summary",
@@ -193,11 +287,59 @@ describe("Preschool Additional AI Insights workflow", () => {
           sectionId: "standby-wastage",
           artifactId: "section-artifact-standby",
           text: "Standby accounts for 31%.",
-          evidenceRefs: ["fact:standby-share"],
+          sourceEvidenceRefs: ["preschool:snapshot-current:section-standby-wastage:summary"],
         },
         expect.objectContaining({ id: "section:standby-wastage:insight:standby-pattern" }),
         expect.objectContaining({ id: "key-finding:operating-theme", artifactId: "executive-artifact-current" }),
       ]));
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("does not carry presented Section provenance across Snapshot identities", () => {
+    const harness = createHarness();
+    try {
+      const nextBaseIdentity = createOverviewAiArtifactIdentity({
+        workspaceId: PRESCHOOL_WORKSPACE_ID,
+        projectId: "preschool-demo",
+        scopeId: "preschool-project",
+        dataSnapshotId: "snapshot-next",
+        projectReleaseId: "release-current",
+        analysisPeriodFrom: "2026-05-01T00:00:00.000Z",
+        analysisPeriodTo: "2026-06-01T00:00:00.000Z",
+        rendererKey: "preschool-overview",
+        rendererVersion: "1",
+        modelProfileId: "workspace-default",
+        modelProfileRevision: 1,
+      });
+      const nextIdentity = createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity: nextBaseIdentity });
+      const nextCatalog = catalog();
+      nextCatalog.sourceId = "project-analysis-snapshot:preschool-demo:snapshot-next";
+      nextCatalog.pins.dataSnapshotId = "snapshot-next";
+
+      expect(() => createPreschoolAdditionalAiPresentedClaims({
+        identity: nextIdentity,
+        catalog: nextCatalog,
+        readModel: presentedReadModel({
+          dataSnapshotId: "snapshot-current",
+          sectionEvidenceRef: "preschool:snapshot-current:section-standby-wastage:summary",
+        }),
+      })).toThrowError("PRESCHOOL_ADDITIONAL_AI_PRESENTED_READ_MODEL_INVALID");
+
+      const projected = createPreschoolAdditionalAiPresentedClaims({
+        identity: nextIdentity,
+        catalog: nextCatalog,
+        readModel: presentedReadModel({
+          dataSnapshotId: "snapshot-next",
+          sectionEvidenceRef: "preschool:snapshot-next:section-standby-wastage:summary",
+        }),
+      });
+      const sectionClaim = projected.claims.find(({ id }) => id === "section:standby-wastage:summary");
+      expect(sectionClaim?.sourceEvidenceRefs).toEqual([
+        "preschool:snapshot-next:section-standby-wastage:summary",
+      ]);
+      expect(JSON.stringify(projected.claims)).not.toContain("preschool:snapshot-current:section-");
     } finally {
       harness.close();
     }
@@ -269,6 +411,30 @@ describe("Preschool Additional AI Insights workflow", () => {
     }
   });
 
+  it.each([null, "malformed-executive"])(
+    "ignores a non-object Executive locally without losing valid Section claims: %j",
+    (executive) => {
+      const harness = createHarness();
+      try {
+        const readModel = presentedReadModel({
+          dataSnapshotId: "snapshot-current",
+          sectionEvidenceRef: "preschool:snapshot-current:section-standby-wastage:summary",
+        });
+        const projected = createPreschoolAdditionalAiPresentedClaims({
+          identity: harness.additionalIdentity,
+          catalog: catalog(),
+          readModel: { ...readModel, executive },
+        });
+        expect(projected.claims).toEqual(expect.arrayContaining([
+          expect.objectContaining({ id: "deterministic-overview:fact:standby-share" }),
+          expect.objectContaining({ id: "section:standby-wastage:summary" }),
+        ]));
+      } finally {
+        harness.close();
+      }
+    },
+  );
+
   it("rejects candidate-local numbers and Centre entities not covered by its own Evidence refs", async () => {
     const harness = createHarness();
     try {
@@ -300,6 +466,16 @@ describe("Preschool Additional AI Insights workflow", () => {
               text: "Centre Q records 4.75 kWh/m2; test whether its timing differs from peers.",
               incrementalContext: incrementalContext("deterministic-overview:fact:centre-q-intensity"),
             }),
+            candidate("candidate-wrong-centre-without-number", "fact:centre-g-intensity", {
+              title: "Centre N warrants a timing check",
+              text: "Centre N warrants a separate timing check despite citing only Centre G Evidence.",
+              incrementalContext: incrementalContext("deterministic-overview:fact:centre-g-intensity"),
+            }),
+            candidate("candidate-centre-n-without-number", "fact:centre-n-intensity", {
+              title: "Centre N warrants a timing check",
+              text: "Centre N warrants a separate timing check before attributing a driver.",
+              incrementalContext: incrementalContext("deterministic-overview:fact:centre-n-intensity"),
+            }),
           ] }),
           runId,
           sessionId,
@@ -314,11 +490,11 @@ describe("Preschool Additional AI Insights workflow", () => {
       });
 
       expect(result.publication).toMatchObject({
-        discoveredCount: 3,
-        acceptedCount: 2,
-        rejectedCount: 1,
-        acceptedCandidateIds: ["candidate-centre-n", "candidate-centre-q"],
-        rejectedCandidateIds: ["candidate-wrong-centre"],
+        discoveredCount: 5,
+        acceptedCount: 3,
+        rejectedCount: 2,
+        acceptedCandidateIds: ["candidate-centre-n", "candidate-centre-q", "candidate-centre-n-without-number"],
+        rejectedCandidateIds: ["candidate-wrong-centre", "candidate-wrong-centre-without-number"],
       });
     } finally {
       harness.close();
@@ -365,6 +541,13 @@ describe("Preschool Additional AI Insights workflow", () => {
               epistemicStatus: "speculative",
               incrementalContext: incrementalContext("deterministic-overview:fact:standby-share"),
             }),
+            candidate("candidate-causal-deep-dive", "fact:standby-share", {
+              title: "Check the variance boundary",
+              text: "The measured share is the only observed result.",
+              deepDiveQuestion: "Is the variance driven by occupancy?",
+              epistemicStatus: "observed",
+              incrementalContext: incrementalContext("deterministic-overview:fact:standby-share"),
+            }),
           ] }),
           runId,
           sessionId,
@@ -379,14 +562,15 @@ describe("Preschool Additional AI Insights workflow", () => {
       });
 
       expect(result.publication).toMatchObject({
-        discoveredCount: 5,
+        discoveredCount: 6,
         acceptedCount: 2,
-        rejectedCount: 3,
+        rejectedCount: 4,
         acceptedCandidateIds: ["candidate-causal-inferred", "candidate-industry-hypothesis"],
         rejectedCandidateIds: [
           "candidate-causal-observed",
           "candidate-action-observed",
           "candidate-industry-inferred",
+          "candidate-causal-deep-dive",
         ],
       });
     } finally {
@@ -412,6 +596,14 @@ describe("Preschool Additional AI Insights workflow", () => {
               title: "One ostensibly incremental conclusion ".repeat(8),
               incrementalContext: incrementalContext("deterministic-overview:fact:standby-share"),
             }),
+            candidate("candidate-title-multiple-sentences", "fact:standby-share", {
+              title: "The share is stable. A timing relationship remains untested",
+              incrementalContext: incrementalContext("deterministic-overview:fact:standby-share"),
+            }),
+            candidate("candidate-title-long-under-old-limit", "fact:standby-share", {
+              title: "A concise finding should not become a long management-summary headline that carries several loosely connected qualifications",
+              incrementalContext: incrementalContext("deterministic-overview:fact:standby-share"),
+            }),
             candidate("candidate-concise", "fact:standby-share", {
               title: "Standby concentration is worth testing",
               text: "The existing share may be concentrated in a small set of intervals.",
@@ -433,7 +625,12 @@ describe("Preschool Additional AI Insights workflow", () => {
 
       expect(result.publication).toMatchObject({
         acceptedCandidateIds: ["candidate-concise"],
-        rejectedCandidateIds: ["candidate-title-list", "candidate-title-overlong"],
+        rejectedCandidateIds: [
+          "candidate-title-list",
+          "candidate-title-overlong",
+          "candidate-title-multiple-sentences",
+          "candidate-title-long-under-old-limit",
+        ],
       });
       expect(result.findings[0]?.title).toBe("Standby concentration is worth testing");
     } finally {
@@ -1029,21 +1226,32 @@ const candidate = (
   id: string,
   evidenceRef: string,
   overrides: Record<string, unknown> = {},
-) => ({
-  id,
-  title: `Title for ${id}`,
-  text: `Incremental observation for ${id}.`,
-  epistemicStatus: "inferred",
-  origin: { kind: "ai-discovery", directionMethodResourceIds: [] },
-  incrementalContext: incrementalContext(`deterministic-overview:${evidenceRef}`),
-  evidenceRefs: [evidenceRef],
-  toolAuditIds: [],
-  ...overrides,
-});
+) => {
+  const value = {
+    id,
+    title: `Title for ${id}`,
+    text: `Incremental observation for ${id}.`,
+    epistemicStatus: "inferred",
+    origin: { kind: "ai-discovery", directionMethodResourceIds: [] },
+    incrementalContext: incrementalContext(`deterministic-overview:${evidenceRef}`),
+    evidenceRefs: [evidenceRef],
+    toolAuditIds: [],
+    ...overrides,
+  };
+  if (value.incrementalContext.novelConclusion === TEST_NOVEL_CONCLUSION_FROM_NARRATIVE) {
+    value.incrementalContext = {
+      ...value.incrementalContext,
+      novelConclusion: String(value.text),
+    };
+  }
+  return value;
+};
+
+const TEST_NOVEL_CONCLUSION_FROM_NARRATIVE = "__use-candidate-narrative__";
 
 const incrementalContext = (relatedPresentedClaimId: string) => ({
   relatedPresentedClaimIds: [relatedPresentedClaimId],
-  novelConclusion: `Test a new relationship beyond ${relatedPresentedClaimId}.`,
+  novelConclusion: TEST_NOVEL_CONCLUSION_FROM_NARRATIVE,
 });
 
 const resolvePresentedClaimsFixture: Parameters<typeof createPreschoolAdditionalAiInsightsWorkflow>[0]["resolvePresentedClaims"] =
@@ -1129,6 +1337,46 @@ const fact = (
   status,
   evidenceRefs: [`snapshot-evidence:${id}`],
   dimensions: {},
+});
+
+const presentedReadModel = (input: {
+  dataSnapshotId: string;
+  sectionEvidenceRef: string;
+}) => ({
+  binding: {
+    workspaceId: PRESCHOOL_WORKSPACE_ID,
+    projectId: "preschool-demo",
+    scopeId: "preschool-project",
+    dataSnapshotId: input.dataSnapshotId,
+    projectReleaseId: "release-current",
+    analysisPeriod: { from: "2026-05-01T00:00:00.000Z", to: "2026-06-01T00:00:00.000Z" },
+    modelProfileId: "workspace-default",
+    modelProfileRevision: 1,
+  },
+  sections: {
+    "standby-wastage": {
+      status: "available",
+      artifactId: "section-artifact-standby",
+      result: {
+        artifactKind: "section-interpretation",
+        status: "available",
+        sectionId: "standby-wastage",
+        binding: {
+          workspaceId: PRESCHOOL_WORKSPACE_ID,
+          projectId: "preschool-demo",
+          scopeId: "preschool-project",
+          dataSnapshotId: input.dataSnapshotId,
+          projectReleaseId: "release-current",
+          analysisPeriod: { from: "2026-05-01T00:00:00.000Z", to: "2026-06-01T00:00:00.000Z" },
+          modelProfileId: "workspace-default",
+          modelProfileRevision: 1,
+        },
+        summary: { text: "Standby energy use accounts for 31% of the selected period.", evidenceRefs: [input.sectionEvidenceRef] },
+        insights: [],
+      },
+    },
+  },
+  executive: { status: "empty" },
 });
 
 const entityFact = (id: string, centreName: string, value: number) => ({

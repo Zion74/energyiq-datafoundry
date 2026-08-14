@@ -308,6 +308,7 @@ export class EnergyIqOverviewAiArtifactStore {
     now?: string;
   }): EnergyIqOverviewAiArtifactRecord {
     if (!input.errorCode.trim()) throw new Error("ENERGYIQ_OVERVIEW_AI_ARTIFACT_ERROR_REQUIRED");
+    canonicalIdentityForMutation(input.identity, this.db);
     const now = input.now ?? new Date().toISOString();
     this.db.exec("BEGIN IMMEDIATE");
     try {

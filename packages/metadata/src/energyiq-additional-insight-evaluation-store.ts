@@ -371,6 +371,7 @@ export class EnergyIqAdditionalInsightEvaluationStore {
       const attempt = record.attempts.find(({ attemptId }) => attemptId === input.attemptId);
       if (!attempt) throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_ATTEMPT_NOT_FOUND");
       if (attempt.status !== "running") return { acquired: false, attempt, record };
+      requireCurrentTargetIdentity(record.target);
       const now = input.now ?? new Date().toISOString();
       const claimToken = acquireEvaluationAttemptClaimPersistence(this.db, {
         evaluationId: record.evaluationId,
@@ -969,11 +970,13 @@ export class EnergyIqAdditionalInsightEvaluationStore {
   }): { acquired: boolean; claimToken?: string } {
     return immediateTransaction(this.db, () => {
       const row = this.db.prepare(`
-        SELECT record_json FROM energyiq_additional_insight_transitions
+        SELECT reservation_json, record_json FROM energyiq_additional_insight_transitions
         WHERE id = ? AND workspace_id = ? AND project_id = ?
       `).get(input.transitionId, input.expectedWorkspaceId, input.expectedProjectId);
       if (!isRecord(row)) throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_NOT_FOUND");
       if (typeof row.record_json === "string") return { acquired: false };
+      const reservation = parseTransitionReservation(row.reservation_json);
+      requireCurrentTargetIdentity(reservation.currentTarget);
       const now = input.now ?? new Date().toISOString();
       const claimToken = acquireTransitionClaimPersistence(this.db, {
         transitionId: input.transitionId,

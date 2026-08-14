@@ -37,7 +37,7 @@ import { ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID } from "../workspace-model-profile-r
 
 const LEASE_MS = 13 * 60 * 1_000;
 const MAX_DISCOVERY_ANSWER_CHARS = 160_000;
-const MAX_CANDIDATE_TITLE_CHARS = 180;
+const MAX_CANDIDATE_TITLE_CHARS = 100;
 const MAX_CANDIDATE_TEXT_CHARS = 1_200;
 const MAX_NOVEL_CONTRIBUTION_CHARS = 800;
 export const MAX_PRESCHOOL_ADDITIONAL_DISCOVERY_PROMPT_CHARS = 160_000;
@@ -60,7 +60,7 @@ export type PreschoolAdditionalAiPresentedClaim = {
   sectionId?: string;
   artifactId?: string;
   text: string;
-  evidenceRefs: string[];
+  sourceEvidenceRefs: string[];
 };
 
 export type PreschoolAdditionalAiPresentedClaims = {
@@ -96,13 +96,12 @@ export const createPreschoolAdditionalAiPresentedClaims = (input: {
     id: `deterministic-overview:${fact.id}`,
     source: "deterministic-overview",
     text: `${fact.label}: ${String(fact.value)}${fact.unit ? ` ${fact.unit}` : ""}`,
-    evidenceRefs: [fact.id],
+    sourceEvidenceRefs: [fact.id],
   }));
   if (input.readModel === null || input.readModel === undefined) return { binding, claims };
   if (!isRecord(input.readModel)
     || !readModelBindingMatches(input.readModel.binding, binding)
-    || !isRecord(input.readModel.sections)
-    || !isRecord(input.readModel.executive)) {
+    || !isRecord(input.readModel.sections)) {
     throw new Error("PRESCHOOL_ADDITIONAL_AI_PRESENTED_READ_MODEL_INVALID");
   }
   for (const [sectionId, unit] of Object.entries(input.readModel.sections)) {
@@ -164,7 +163,7 @@ const pushPresentedClaim = (
     artifactId: input.artifactId,
     text: [nonEmptyString(input.value.title) ? input.value.title.trim() : "", input.value.text.trim()]
       .filter(Boolean).join(": "),
-    evidenceRefs: [...input.value.evidenceRefs],
+    sourceEvidenceRefs: [...input.value.evidenceRefs],
   });
 };
 
@@ -293,7 +292,6 @@ export const createPreschoolAdditionalAiInsightsWorkflow = (input: {
     const presentedClaims = requirePresentedClaims(
       await input.resolvePresentedClaims({ identity, catalog, user }),
       identity,
-      catalog,
     );
     const runtime = createPreschoolAdditionalAiInsightRuntime({
       binding: {
@@ -621,12 +619,17 @@ const acceptCandidate = (
     sqlEvidence: [],
   })) return null;
   const origin = resolveCandidateOrigin(value.origin, coreMethod, directionMethods);
-  const incrementalContext = resolveIncrementalContext(value.incrementalContext, evidenceRefs, presentedClaims);
+  const incrementalContext = resolveIncrementalContext(
+    value.incrementalContext,
+    presentedClaims,
+    { title: value.title, text: value.text },
+  );
   if (!origin
     || !incrementalContext
     || !epistemicBoundaryIsAcceptable({
       title: value.title,
       text: value.text,
+      ...(nonEmptyString(value.deepDiveQuestion) ? { deepDiveQuestion: value.deepDiveQuestion } : {}),
       epistemicStatus: value.epistemicStatus,
       originKind: origin.kind,
     })) return null;
@@ -708,8 +711,8 @@ const resolveCandidateOrigin = (
 
 const resolveIncrementalContext = (
   value: unknown,
-  evidenceRefs: string[],
   presentedClaims: readonly PreschoolAdditionalAiPresentedClaim[],
+  publishedNarrative: { title: string; text: string },
 ): { relatedPresentedClaimIds: string[]; novelConclusion: string } | null => {
   if (!isRecord(value)
     || !hasExactKeys(value, ["relatedPresentedClaimIds", "novelConclusion"])
@@ -719,23 +722,25 @@ const resolveIncrementalContext = (
   const claimsById = new Map(presentedClaims.map((claim) => [claim.id, claim]));
   const related = value.relatedPresentedClaimIds.map((id) => claimsById.get(id));
   if (related.some((claim) => !claim)) return null;
-  const overlappingClaims = presentedClaims.filter((claim) =>
-    claim.evidenceRefs.some((reference) => evidenceRefs.includes(reference)));
-  if (overlappingClaims.length > 0
-    && !related.some((claim) => claim!.evidenceRefs.some((reference) => evidenceRefs.includes(reference)))) return null;
-  if (related.some((claim) => !claim!.evidenceRefs.some((reference) => evidenceRefs.includes(reference)))) return null;
   const novelConclusion = value.novelConclusion.trim();
-  if (related.some((claim) => claimTextIsRestatement(claim!.text, novelConclusion))) return null;
+  const combinedNarrative = `${publishedNarrative.title} ${publishedNarrative.text}`;
+  const canonicalNarrative = canonicalClaimText(combinedNarrative);
+  const canonicalNovelConclusion = canonicalClaimText(novelConclusion);
+  if (!canonicalNarrative.includes(canonicalNovelConclusion)
+    || related.some((claim) => claimTextIsRestatement(claim!.text, publishedNarrative.title)
+      || claimTextIsRestatement(claim!.text, publishedNarrative.text)
+      || claimTextIsRestatement(claim!.text, combinedNarrative))) return null;
   return { relatedPresentedClaimIds: [...value.relatedPresentedClaimIds], novelConclusion };
 };
 
 const epistemicBoundaryIsAcceptable = (input: {
   title: string;
   text: string;
+  deepDiveQuestion?: string;
   epistemicStatus: "observed" | "inferred" | "speculative";
   originKind: AdditionalAiInsightFinding["origin"]["kind"];
 }): boolean => {
-  const narrative = `${input.title}\n${input.text}`;
+  const narrative = `${input.title}\n${input.text}\n${input.deepDiveQuestion ?? ""}`;
   const explicitCausal = /\b(?:cause(?:s|d)?|driv(?:e|es|en)|explain(?:s|ed)?)(?:\s+\w+){0,3}\s+(?:by|the\s+variance)|\bdue\s+to\b/iu.test(narrative);
   const explicitAction = /\b(?:highest[- ]leverage|best|optimal|most\s+effective)\b[^.!?\n]{0,80}\b(?:target|action|intervention)\b/iu.test(narrative);
   const externalBenchmark = /\b(?:typical\s+(?:learning\s+)?environments?|industry\s+benchmarks?|tropical\s+preschools?)\b|\bshould\s+dominate\b/iu.test(narrative);
@@ -855,7 +860,7 @@ const buildDiscoveryPrompt = (input: {
     "For core-only discovery use origin.kind='ai-discovery' and directionMethodResourceIds=[]. Cite only the exact loaded expert-direction resourceIds actually used. expert-sop requires one or more such refs. hybrid additionally requires a concise bounded novelContribution. Never invent or duplicate Method refs.",
     "Optional canvas must be an energyiq-insight-canvas plan using only quantitative metric, comparison, or trend blocks bound exactly to supplied Evidence facts. The server may reject blocks locally without rejecting the Finding.",
     "Candidates must already be ordered from highest to lowest incremental value. Zero candidates is valid.",
-    "Use the structured already-presented claim digests below. Cite exact related claim IDs and state only the genuinely new conclusion. A restatement is not a candidate; the same Evidence may support a new relationship, counterexample, or testable hypothesis.",
+    "Use the structured already-presented claim digests below. Their sourceEvidenceRefs preserve source provenance and are not candidate Evidence authority. Cite exact related claim IDs and state only the genuinely new conclusion; related claims need not share an Evidence namespace with the candidate. Candidate evidenceRefs must still be exact IDs from the Current authoritative Evidence Catalog. A restatement is not a candidate; the same or different Evidence may support a new relationship, counterexample, or testable hypothesis.",
     `Server-owned identity: ${JSON.stringify({
       workspaceId: input.identity.workspaceId,
       projectId: input.identity.projectId,
@@ -898,7 +903,6 @@ const requireMethodResources = (
 const requirePresentedClaims = (
   value: PreschoolAdditionalAiPresentedClaims,
   identity: PreschoolAdditionalAiInsightArtifactIdentity,
-  catalog: AnalysisContextEvidenceCatalog,
 ): PreschoolAdditionalAiPresentedClaims => {
   const expected = {
     workspaceId: identity.workspaceId,
@@ -910,21 +914,36 @@ const requirePresentedClaims = (
     modelProfileId: identity.modelProfileId,
     modelProfileRevision: identity.modelProfileRevision,
   };
-  const factIds = new Set(catalog.facts.map(({ id }) => id));
   if (!isRecord(value)
     || JSON.stringify(value.binding) !== JSON.stringify(expected)
     || !Array.isArray(value.claims)
     || !uniqueStrings(value.claims.map(({ id }) => id))
-    || value.claims.some((claim) => !isRecord(claim)
-      || !nonEmptyString(claim.id)
-      || !nonEmptyString(claim.text)
-      || !Array.isArray(claim.evidenceRefs)
-      || claim.evidenceRefs.length === 0
-      || !uniqueStrings(claim.evidenceRefs)
-      || claim.evidenceRefs.some((reference) => !factIds.has(reference)))) {
+    || value.claims.some((claim) => !presentedClaimIsValid(claim))) {
     throw new Error("PRESCHOOL_ADDITIONAL_AI_PRESENTED_CLAIMS_INVALID");
   }
   return value;
+};
+
+const presentedClaimIsValid = (value: unknown): value is PreschoolAdditionalAiPresentedClaim => {
+  if (!isRecord(value)
+    || !nonEmptyString(value.id)
+    || !nonEmptyString(value.text)
+    || !Array.isArray(value.sourceEvidenceRefs)
+    || value.sourceEvidenceRefs.length === 0
+    || !uniqueStrings(value.sourceEvidenceRefs)) return false;
+  if (value.source === "deterministic-overview") {
+    return hasExactKeys(value, ["id", "source", "text", "sourceEvidenceRefs"]);
+  }
+  if (value.source === "key-finding") {
+    return hasExactKeys(value, ["id", "source", "artifactId", "text", "sourceEvidenceRefs"])
+      && nonEmptyString(value.artifactId);
+  }
+  if (value.source === "section-summary" || value.source === "section-insight") {
+    return hasExactKeys(value, ["id", "source", "sectionId", "artifactId", "text", "sourceEvidenceRefs"])
+      && nonEmptyString(value.sectionId)
+      && nonEmptyString(value.artifactId);
+  }
+  return false;
 };
 
 const canonicalClaimText = (value: string): string => value
@@ -948,7 +967,9 @@ const claimTextIsRestatement = (presented: string, proposed: string): boolean =>
   const smaller = Math.min(leftTokens.size, rightTokens.size);
   if (smaller < 4) return false;
   const shared = [...leftTokens].filter((token) => rightTokens.has(token)).length;
-  return shared / smaller >= 0.8;
+  const union = new Set([...leftTokens, ...rightTokens]).size;
+  const larger = Math.max(leftTokens.size, rightTokens.size);
+  return shared / union >= 0.6 && smaller / larger >= 0.65;
 };
 
 const boundedErrorCode = (error: unknown): string => {
@@ -961,7 +982,9 @@ const boundedSafeText = (value: unknown, max: number): value is string => nonEmp
   && !/(?:<\/?[a-z]|https?:\/\/|javascript:)/iu.test(value);
 
 const conciseSummaryTitle = (value: unknown): value is string =>
-  boundedSafeText(value, MAX_CANDIDATE_TITLE_CHARS) && !/[;\r\n]/u.test(value);
+  boundedSafeText(value, MAX_CANDIDATE_TITLE_CHARS)
+  && !/[;\r\n]/u.test(value)
+  && !/[.!?]\s+\S/u.test(value.trim());
 
 const optionalBoundedSafeText = (value: unknown, max: number): boolean =>
   value === undefined || boundedSafeText(value, max);

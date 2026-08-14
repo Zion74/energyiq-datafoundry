@@ -37,11 +37,36 @@ export function energyAiNarrativeClaimsSupported(input: {
   const deterministic = input.evidence.flatMap((item) => collectTypedNumericEvidence(item.values)
     .map((cell) => ({ item, cell })));
   const sql = input.sqlEvidence.flatMap(({ columns, rows }) => collectSqlNumericEvidence(columns, rows));
+  const centreReferences = namedCentreReferences(input.narrative);
+  if ([...centreReferences].some((reference) =>
+    !input.evidence.some((item) => typedEvidenceSupportsCentre(item, reference))
+    && !sql.some((cell) => sqlCellSupportsCentre(cell, reference)))) return false;
   return numericClaims(input.narrative).every((claim) =>
     deterministic.some(({ item, cell }) => numericMatches(claim, cell.value)
       && deterministicCellSupportsClaim(item, cell, claim, input.fallbackCentreReference ?? null))
     || sql.some((cell) => numericMatches(claim, cell.value)
       && sqlCellSupportsClaim(cell, claim, input.fallbackCentreReference ?? null)));
+}
+
+function namedCentreReferences(value: string): Set<string> {
+  return new Set([...value.matchAll(/\bcent(?:re|er)\s+([a-z0-9][a-z0-9_-]{0,15})\b/giu)]
+    .map((match) => match[1]!)
+    .filter(isProjectCentreCode)
+    .map((reference) => reference.toLowerCase()));
+}
+
+function typedEvidenceSupportsCentre(item: EnergyAiTypedEvidenceItem, reference: string): boolean {
+  const tokens: string[] = `${item.id} ${item.label} ${collectNamedCentreDimensions(item.values).join(" ")}`
+    .toLowerCase().match(/[a-z0-9]+/gu) ?? [];
+  return tokens.includes(reference);
+}
+
+function sqlCellSupportsCentre(cell: SqlNumericCell, reference: string): boolean {
+  return cell.dimensions.some((dimension) => {
+    if (!dimension.column || !/(?:centre|center|parent_node|scope)/u.test(dimension.column.toLowerCase())) return false;
+    const tokens: string[] = dimension.value.toLowerCase().match(/[a-z0-9]+/gu) ?? [];
+    return tokens.includes(reference);
+  });
 }
 
 function collectTypedNumericEvidence(

@@ -24,6 +24,90 @@ import {
 import { createMetadataStore } from "./index.js";
 
 describe("EnergyIqAdditionalInsightEvaluationStore", () => {
+  it("does not lease a historical v5 running evaluation attempt", () => {
+    const harness = createHarness();
+    try {
+      const target = evaluationTarget("snapshot-a", "release-a");
+      harness.store.reserveEvaluation({
+        evaluationId: "evaluation-historical-v5-running",
+        idempotencyKey: "evaluation-historical-v5-running",
+        requestedBy: "admin-1",
+        target,
+        attempts: attemptReservations(),
+      });
+      const row = harness.metadata.db.prepare(`
+        SELECT reservation_json, record_json FROM energyiq_additional_insight_evaluations
+        WHERE id = ?
+      `).get("evaluation-historical-v5-running") as { reservation_json: string; record_json: string };
+      const reservation = JSON.parse(row.reservation_json) as Record<string, unknown>;
+      const record = JSON.parse(row.record_json) as Record<string, unknown>;
+      const historicalTarget = historicalV5Target(target);
+      harness.metadata.db.prepare(`
+        UPDATE energyiq_additional_insight_evaluations
+        SET reservation_json = ?, record_json = ? WHERE id = ?
+      `).run(
+        JSON.stringify({ ...reservation, target: historicalTarget }),
+        JSON.stringify({ ...record, target: historicalTarget }),
+        "evaluation-historical-v5-running",
+      );
+
+      expect(() => harness.store.claimEvaluationAttempt({
+        evaluationId: "evaluation-historical-v5-running",
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+        attemptId: "attempt-1",
+      })).toThrow("ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_BEHAVIOR_NOT_CURRENT");
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("does not lease a historical v5 running transition", () => {
+    const harness = createHarness();
+    try {
+      reserveAndComplete(harness);
+      reviewAllPassing(harness);
+      const previous = harness.store.getEvaluation({
+        evaluationId: "evaluation-1",
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      });
+      const previousAttempt = previous.attempts.find((attempt) => attempt.status === "completed"
+        && attempt.humanReview?.passed)!;
+      const currentTarget = evaluationTarget("snapshot-b", "release-b");
+      const transition = harness.store.reserveTransition({
+        transitionId: "transition-historical-v5-running",
+        idempotencyKey: "transition-historical-v5-running",
+        requestedBy: "admin-1",
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+        currentTarget,
+        generationProviderRunId: "transition-generation-v5",
+        generationProviderSessionId: "transition-generation-session-v5",
+        comparisonProviderRunId: "transition-comparison-v5",
+        comparisonProviderSessionId: "transition-comparison-session-v5",
+      });
+      const row = harness.metadata.db.prepare(`
+        SELECT reservation_json FROM energyiq_additional_insight_transitions WHERE id = ?
+      `).get(transition.transitionId) as { reservation_json: string };
+      const reservation = JSON.parse(row.reservation_json) as Record<string, unknown>;
+      harness.metadata.db.prepare(`
+        UPDATE energyiq_additional_insight_transitions SET reservation_json = ? WHERE id = ?
+      `).run(
+        JSON.stringify({ ...reservation, currentTarget: historicalV5Target(currentTarget) }),
+        transition.transitionId,
+      );
+
+      expect(() => harness.store.claimTransition({
+        transitionId: transition.transitionId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      })).toThrow("ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_BEHAVIOR_NOT_CURRENT");
+    } finally {
+      harness.close();
+    }
+  });
+
   it("reserves one pass@3 batch, persists three independent attempts, and recovers a blind pack", () => {
     const harness = createHarness();
     try {
@@ -1540,6 +1624,16 @@ const createHarness = () => {
   };
   return harness;
 };
+
+const historicalV5Target = (
+  target: AdditionalAiInsightEvaluationTarget,
+): AdditionalAiInsightEvaluationTarget => ({
+  ...target,
+  artifactIdentityRevision: "additional-insights-v5",
+  validatorRevision: "additional-insights-acceptance-v3",
+  workflowRevision: "additional-insights-discover-accept-publish-v5",
+  promptRevision: "additional-insights-discovery-v5",
+});
 
 const reserveAndComplete = (
   harness: ReturnType<typeof createHarness>,

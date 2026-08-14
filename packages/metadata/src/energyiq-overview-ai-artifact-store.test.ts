@@ -1036,6 +1036,22 @@ describe("EnergyIqOverviewAiArtifactStore current Additional AI Insights", () =>
       expect(metadata.energyIq.overviewAiArtifacts.get(historicalV4Identity)).toEqual(historicalV4Artifact);
       expect(metadata.energyIq.overviewAiArtifacts.find(historicalV5Identity)).toEqual(historicalV5Artifact);
       expect(metadata.energyIq.overviewAiArtifacts.get(historicalV5Identity)).toEqual(historicalV5Artifact);
+      metadata.db.prepare(`
+        UPDATE energyiq_overview_ai_artifacts
+        SET status = 'running', result_json = NULL, completed_at = NULL,
+            lease_owner = 'historical-v5-worker', lease_expires_at = '2099-01-01T00:00:00.000Z'
+        WHERE id = ?
+      `).run(historicalV5Artifact.id);
+      expect(() => metadata.energyIq.overviewAiArtifacts.claim({
+        identity: historicalV5Identity,
+        workerId: "historical-v5-worker-2",
+        leaseMs: 60_000,
+      })).toThrow("ENERGYIQ_ADDITIONAL_INSIGHT_CURRENT_IDENTITY_REQUIRED");
+      expect(() => metadata.energyIq.overviewAiArtifacts.fail({
+        identity: historicalV5Identity,
+        workerId: "historical-v5-worker",
+        errorCode: "HISTORICAL_RUN_FAILED",
+      })).toThrow("ENERGYIQ_ADDITIONAL_INSIGHT_CURRENT_IDENTITY_REQUIRED");
       expect(() => metadata.energyIq.overviewAiArtifacts.queue({
         identity: historicalV5Identity,
         triggeredBy: "dev-user",
