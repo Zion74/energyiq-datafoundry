@@ -138,6 +138,15 @@ export type AdditionalAiInsightEvaluationApproval = {
   disposition: "publication-candidate-only";
 };
 
+export type AdditionalAiInsightEvaluationPublication = {
+  sourceAttemptId: string;
+  artifactId: string;
+  artifactIdentityHash: string;
+  actorId: string;
+  publishedAt: string;
+  revision: number;
+};
+
 export type AdditionalAiInsightEvaluationBatch = {
   contractRevision: "energyiq-additional-insight-evaluation-v1";
   evaluationId: string;
@@ -156,6 +165,7 @@ export type AdditionalAiInsightEvaluationBatch = {
   };
   reviewAudit: Array<{ reviewToken: string; attemptId: string }>;
   approval?: AdditionalAiInsightEvaluationApproval;
+  publication?: AdditionalAiInsightEvaluationPublication;
   createdAt: string;
   updatedAt: string;
 };
@@ -318,6 +328,12 @@ const evaluationBatchIsValid = (
         && additionalAiInsightHumanReviewIsPassing(humanReview)
       ))) return false;
   }
+  if (value.publication !== undefined) {
+    if (!publicationIsValid(value.publication)
+      || value.approval === undefined
+      || value.publication.sourceAttemptId !== value.approval.selectedAttemptId
+      || value.publication.artifactIdentityHash !== value.target.artifactIdentityHash) return false;
+  }
   for (const attempt of completed) {
     if (!attempt.humanReview) continue;
     const mapping = reviewAudit.find(({ attemptId }) => attemptId === attempt.attemptId);
@@ -333,6 +349,7 @@ const evaluationBatchIsValid = (
   )).length;
   if (value.status === "running") {
     return value.approval === undefined
+      && value.publication === undefined
       && entries.length === 0
       && reviewAudit.length === 0
       && completed.every(({ humanReview }) => humanReview === undefined);
@@ -341,15 +358,20 @@ const evaluationBatchIsValid = (
     return !hasRunning
       && value.status === "awaiting-human-review"
       && value.approval === undefined
+      && value.publication === undefined
       && blindReviewAttempts.length > 0
       && !allBlindReviewAttemptsReviewed;
   }
   if (value.status === "failed") {
     return value.approval === undefined
+      && value.publication === undefined
       && (blindReviewAttempts.length === 0 || (allBlindReviewAttemptsReviewed && passingCompleted < 2));
   }
   if (value.status === "passed") {
-    return value.approval === undefined && allBlindReviewAttemptsReviewed && passingCompleted >= 2;
+    return value.approval === undefined
+      && value.publication === undefined
+      && allBlindReviewAttemptsReviewed
+      && passingCompleted >= 2;
   }
   return value.status === "approved-candidate"
     && value.approval !== undefined
@@ -628,6 +650,17 @@ const approvalIsValid = (value: unknown): value is AdditionalAiInsightEvaluation
   && nonEmptyString(value.approvedAt)
   && positiveInteger(value.revision)
   && value.disposition === "publication-candidate-only";
+
+const publicationIsValid = (value: unknown): value is AdditionalAiInsightEvaluationPublication => isRecord(value)
+  && onlyKeys(value, [
+    "sourceAttemptId", "artifactId", "artifactIdentityHash", "actorId", "publishedAt", "revision",
+  ])
+  && nonEmptyString(value.sourceAttemptId)
+  && nonEmptyString(value.artifactId)
+  && hashIsValid(value.artifactIdentityHash)
+  && nonEmptyString(value.actorId)
+  && nonEmptyString(value.publishedAt)
+  && positiveInteger(value.revision);
 
 const evaluationTargetIsValid = (value: unknown): value is AdditionalAiInsightEvaluationTarget => isRecord(value)
   && onlyKeys(value, [

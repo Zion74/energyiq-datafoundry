@@ -27,6 +27,78 @@ import {
 import { resolveWorkspaceDefaultModelProfileSnapshot } from "../workspace-model-profile-resolver.js";
 
 describe("Preschool Additional AI Insights evaluation workflow", () => {
+  it("promotes only the exact approved attempt into the current Overview without another Provider run", async () => {
+    const harness = createHarness();
+    try {
+      const runAttempt = vi.fn(async ({ identity, runId }: {
+        identity: PreschoolAdditionalAiInsightArtifactIdentity;
+        runId: string;
+      }) => artifact(identity, runId, `evidence:${runId}`, `finding-${runId}`));
+      const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
+        metadataStore: harness.metadata,
+        runAttempt,
+        runTransition: vi.fn(),
+      });
+      const passed = reviewAllPassing(harness, await workflow.executePassAt3({
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        idempotencyKey: "publish-approved-candidate",
+      }));
+      const selected = passed.attempts.find((attempt) => (
+        attempt.status === "completed" && attempt.humanReview?.passed
+      ))!;
+      const reviewToken = passed.reviewAudit.find(({ attemptId }) => attemptId === selected.attemptId)!.reviewToken;
+      harness.metadata.energyIq.additionalInsightEvaluations.approveEvaluationCandidate({
+        evaluationId: passed.evaluationId,
+        expectedWorkspaceId: passed.target.workspaceId,
+        expectedProjectId: passed.target.projectId,
+        reviewToken,
+        actorId: harness.user.id,
+        expectedRevision: 0,
+      });
+      const selectedArtifact = harness.metadata.energyIq.additionalInsightEvaluations.getAttemptArtifact({
+        evaluationId: passed.evaluationId,
+        attemptId: selected.attemptId,
+        expectedWorkspaceId: passed.target.workspaceId,
+        expectedProjectId: passed.target.projectId,
+      });
+
+      const published = await workflow.publishApprovedCandidate({
+        baseIdentity: harness.baseIdentity,
+        evaluationId: passed.evaluationId,
+        user: harness.user,
+      });
+
+      expect(runAttempt).toHaveBeenCalledTimes(3);
+      expect(published.publication).toMatchObject({
+        sourceAttemptId: selected.attemptId,
+        actorId: harness.user.id,
+        revision: 1,
+      });
+      const currentIdentity = createPreschoolAdditionalAiInsightArtifactIdentity({ baseIdentity: harness.baseIdentity });
+      const currentArtifact = harness.metadata.energyIq.overviewAiArtifacts.get(currentIdentity);
+      expect(currentArtifact).toMatchObject({ status: "available", run_id: selected.providerRunId });
+      expect(JSON.parse(currentArtifact.result_json!)).toEqual(selectedArtifact);
+
+      const replay = await workflow.publishApprovedCandidate({
+        baseIdentity: harness.baseIdentity,
+        evaluationId: passed.evaluationId,
+        user: harness.user,
+      });
+      expect(replay).toEqual(published);
+      expect(runAttempt).toHaveBeenCalledTimes(3);
+
+      await expect(workflow.publishApprovedCandidate({
+        baseIdentity: createBaseIdentity("snapshot-b", "release-b"),
+        evaluationId: passed.evaluationId,
+        user: harness.user,
+      })).rejects.toThrow(/PRESCHOOL_ADDITIONAL_EVALUATION_PUBLICATION_TARGET_STALE/);
+      expect(runAttempt).toHaveBeenCalledTimes(3);
+    } finally {
+      harness.close();
+    }
+  });
+
   it("runs pass@3 with three independent Provider identities, no current Artifact reuse, and idempotent replay", async () => {
     const harness = createHarness();
     try {

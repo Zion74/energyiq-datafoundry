@@ -28,6 +28,11 @@ export type PreschoolAdditionalEvaluationAdminClient = {
     };
   }): Promise<EnergyAdditionalInsightTransitionSummaryDto>;
   getTransition(projectId: string, transitionId: string): Promise<EnergyAdditionalInsightTransitionSummaryDto>;
+  publishEvaluation(
+    projectId: string,
+    evaluationId: string,
+    expectedRevision: number,
+  ): Promise<EnergyAdditionalInsightEvaluationSummaryDto>;
 };
 
 const configApiClient: PreschoolAdditionalEvaluationAdminClient = {
@@ -37,6 +42,9 @@ const configApiClient: PreschoolAdditionalEvaluationAdminClient = {
     .then(({ transitions }) => transitions),
   createTransition: ({ projectId, body }) => configApi.createEnergyAdditionalInsightTransition(projectId, body),
   getTransition: (projectId, transitionId) => configApi.getEnergyAdditionalInsightTransition(projectId, transitionId),
+  publishEvaluation: (projectId, evaluationId, expectedRevision) => (
+    configApi.publishEnergyAdditionalInsightEvaluation(projectId, evaluationId, expectedRevision)
+  ),
 };
 
 export function PreschoolAdditionalEvaluationAdmin({
@@ -51,7 +59,7 @@ export function PreschoolAdditionalEvaluationAdmin({
   const [evaluations, setEvaluations] = useState<EnergyAdditionalInsightEvaluationSummaryDto[]>([]);
   const [transitions, setTransitions] = useState<EnergyAdditionalInsightTransitionSummaryDto[]>([]);
   const [selectedEvaluationId, setSelectedEvaluationId] = useState<string>("");
-  const [state, setState] = useState<"loading" | "ready" | "running" | "error">("loading");
+  const [state, setState] = useState<"loading" | "ready" | "running" | "publishing" | "error">("loading");
 
   useEffect(() => {
     let active = true;
@@ -104,6 +112,20 @@ export function PreschoolAdditionalEvaluationAdmin({
     }
   };
 
+  const publish = async () => {
+    if (!selected || selected.publication || !initialPin || !isCurrentEvaluation(selected, initialPin)) return;
+    setState("publishing");
+    try {
+      const published = await client.publishEvaluation(projectId, selected.evaluationId, 0);
+      setEvaluations((current) => current.map((evaluation) => (
+        evaluation.evaluationId === published.evaluationId ? published : evaluation
+      )));
+      setState("ready");
+    } catch {
+      setState("error");
+    }
+  };
+
   return (
     <section aria-labelledby="snapshot-ab-heading" className="space-y-4 rounded-xl border border-border bg-surface p-5">
       <div>
@@ -121,12 +143,27 @@ export function PreschoolAdditionalEvaluationAdmin({
 
       {state === "loading" ? <p role="status" className="text-sm text-muted">Loading approved A baselines…</p> : null}
       {state === "running" ? <p role="status" className="text-sm font-medium text-primary">Generating B and comparing Evidence…</p> : null}
-      {state === "error" ? <p role="alert" className="text-sm text-step-error">The comparison did not complete. Its failure remains recorded for review.</p> : null}
+      {state === "publishing" ? <p role="status" className="text-sm font-medium text-primary">Publishing the approved result without another AI run…</p> : null}
+      {state === "error" ? <p role="alert" className="text-sm text-step-error">The requested operation did not complete. No published result was changed.</p> : null}
 
       {state !== "loading" && approved.length === 0 ? (
         <p className="rounded-lg border border-border bg-surface-subtle p-4 text-sm text-muted">
           No approved A baseline is available. Complete a pass@3 blind review before starting A/B comparison.
         </p>
+      ) : null}
+
+      {selected ? (
+        <div className="flex flex-wrap gap-2 text-xs font-semibold" aria-label="Evaluation governance state">
+          <StatePill label="Review complete" tone="success" />
+          <StatePill label="Approved candidate" tone="success" />
+          {selected.publication ? (
+            <StatePill label="Published" tone="success" />
+          ) : initialPin && !isCurrentEvaluation(selected, initialPin) ? (
+            <StatePill label="Out of date" tone="warning" />
+          ) : (
+            <StatePill label="Not published" tone="neutral" />
+          )}
+        </div>
       ) : null}
 
       {selected ? (
@@ -160,14 +197,26 @@ export function PreschoolAdditionalEvaluationAdmin({
       ) : null}
 
       {selected && initialPin ? (
-        <button
-          type="button"
-          disabled={state === "running"}
-          onClick={() => void compare()}
-          className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
-        >
-          Compare A with current B
-        </button>
+        <div className="flex flex-wrap gap-2">
+          {!selected.publication && isCurrentEvaluation(selected, initialPin) ? (
+            <button
+              type="button"
+              disabled={state === "publishing"}
+              onClick={() => void publish()}
+              className="rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              Publish to current Overview
+            </button>
+          ) : null}
+          <button
+            type="button"
+            disabled={state === "running" || state === "publishing"}
+            onClick={() => void compare()}
+            className="rounded-lg border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-foreground disabled:opacity-60"
+          >
+            Compare A with current B
+          </button>
+        </div>
       ) : null}
 
       {transitions.length > 0 ? (
@@ -226,6 +275,29 @@ function TransitionResult({ transition }: { transition: EnergyAdditionalInsightT
 function OutcomePill({ label, count }: { label: string; count: number }) {
   return <span className="rounded-full border border-border bg-surface px-2.5 py-1 text-foreground">{label} {count}</span>;
 }
+
+function StatePill({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: "success" | "warning" | "neutral";
+}) {
+  const className = tone === "success"
+    ? "border-step-success/30 bg-step-success-soft text-step-success"
+    : tone === "warning"
+      ? "border-step-warning/30 bg-step-warning-soft text-step-warning"
+      : "border-border bg-surface-subtle text-muted";
+  return <span className={`rounded-full border px-2.5 py-1 ${className}`}>{label}</span>;
+}
+
+const isCurrentEvaluation = (
+  evaluation: EnergyAdditionalInsightEvaluationSummaryDto,
+  pin: PreschoolSnapshotTransitionPin,
+): boolean => evaluation.target.dataSnapshotId === pin.dataSnapshotId
+  && evaluation.target.projectReleaseId === pin.projectReleaseId
+  && evaluation.target.analysisPeriod.from === pin.from
+  && evaluation.target.analysisPeriod.to === pin.to;
 
 function isApprovedBaseline(
   evaluation: EnergyAdditionalInsightEvaluationSummaryDto,

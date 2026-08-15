@@ -777,6 +777,17 @@ export const configApi = {
     );
   },
 
+  publishEnergyAdditionalInsightEvaluation(
+    projectId: string,
+    evaluationId: string,
+    expectedRevision: number,
+  ): Promise<EnergyAdditionalInsightEvaluationSummaryDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/additional-ai-insights/evaluations/${encodeURIComponent(evaluationId)}/publish`,
+      { method: "POST", body: JSON.stringify({ expectedRevision }) },
+    );
+  },
+
   listEnergyAdditionalInsightTransitions(
     projectId: string,
   ): Promise<{ transitions: EnergyAdditionalInsightTransitionSummaryDto[] }> {

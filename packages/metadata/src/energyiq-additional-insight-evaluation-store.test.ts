@@ -24,6 +24,55 @@ import {
 import { createMetadataStore } from "./index.js";
 
 describe("EnergyIqAdditionalInsightEvaluationStore", () => {
+  it("records an idempotent publication audit only for the approved source attempt", () => {
+    const harness = createHarness();
+    try {
+      reserveAndComplete(harness);
+      reviewAllPassing(harness);
+      const passed = harness.store.getEvaluation({
+        evaluationId: "evaluation-1",
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      });
+      const selected = passed.attempts.find((attempt) => (
+        attempt.status === "completed" && attempt.humanReview?.passed
+      ))!;
+      const reviewToken = passed.reviewAudit.find(({ attemptId }) => attemptId === selected.attemptId)!.reviewToken;
+      harness.store.approveEvaluationCandidate({
+        evaluationId: passed.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+        reviewToken,
+        actorId: "admin-1",
+        expectedRevision: 0,
+      });
+
+      expect(() => harness.store.recordApprovedCandidatePublication({
+        evaluationId: passed.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+        sourceAttemptId: "attempt-other",
+        artifactId: "overview-ai-artifact-current",
+        artifactIdentityHash: passed.target.artifactIdentityHash,
+        actorId: "admin-1",
+        expectedRevision: 0,
+      })).toThrow("ENERGYIQ_ADDITIONAL_EVALUATION_PUBLICATION_SOURCE_INVALID");
+
+      expect(() => harness.store.recordApprovedCandidatePublication({
+        evaluationId: passed.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+        sourceAttemptId: selected.attemptId,
+        artifactId: "overview-ai-artifact-current",
+        artifactIdentityHash: passed.target.artifactIdentityHash,
+        actorId: "admin-1",
+        expectedRevision: 0,
+      })).toThrow("ENERGYIQ_ADDITIONAL_EVALUATION_PUBLICATION_ARTIFACT_INVALID");
+    } finally {
+      harness.close();
+    }
+  });
+
   it("lists only the requested Project evaluations and transitions for an admin workbench", () => {
     const harness = createHarness();
     try {

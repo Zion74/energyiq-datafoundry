@@ -2260,6 +2260,14 @@ export type EnergyAdditionalInsightEvaluationSummaryDto = {
     approvedAt: string;
     disposition: "publication-candidate-only";
   };
+  publication?: {
+    sourceAttemptId: string;
+    artifactId: string;
+    artifactIdentityHash: string;
+    actorId: string;
+    publishedAt: string;
+    revision: number;
+  };
   createdAt: string;
   updatedAt: string;
 };

@@ -58,6 +58,12 @@ export type PreschoolAdditionalAiInsightsEvaluationWorkflow = {
     user: UserRecord;
     idempotencyKey: string;
   }): Promise<AdditionalAiInsightEvaluationBatch>;
+  publishApprovedCandidate(input: {
+    baseIdentity: OverviewAiArtifactIdentityV13;
+    evaluationId: string;
+    user: UserRecord;
+    expectedRevision?: number;
+  }): Promise<AdditionalAiInsightEvaluationBatch>;
   executeTransition(input: {
     baseIdentity: OverviewAiArtifactIdentityV13;
     user: UserRecord;
@@ -208,6 +214,73 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
         evaluationId: reserved.record.evaluationId,
         expectedWorkspaceId: identity.workspaceId,
         expectedProjectId: identity.projectId,
+      });
+    },
+
+    async publishApprovedCandidate({ baseIdentity, evaluationId, user, expectedRevision = 0 }) {
+      const evaluationStore = input.metadataStore.energyIq.additionalInsightEvaluations;
+      const evaluation = evaluationStore.getEvaluation({
+        evaluationId,
+        expectedWorkspaceId: baseIdentity.workspaceId,
+        expectedProjectId: baseIdentity.projectId,
+      });
+      const { identity } = resolveIdentity(baseIdentity);
+      if (!evaluationTargetsAreExactlyEqual(evaluation.target, evaluationTarget(identity))) {
+        throw new Error("PRESCHOOL_ADDITIONAL_EVALUATION_PUBLICATION_TARGET_STALE");
+      }
+      const selectedAttemptId = evaluation.approval?.selectedAttemptId;
+      const selected = selectedAttemptId
+        ? evaluation.attempts.find((attempt): attempt is AdditionalAiInsightEvaluationAttempt => (
+            attempt.attemptId === selectedAttemptId
+            && attempt.status === "completed"
+            && attempt.machineGate.status === "passed"
+            && attempt.humanReview?.passed === true
+          ))
+        : undefined;
+      if (evaluation.status !== "approved-candidate" || !selected) {
+        throw new Error("PRESCHOOL_ADDITIONAL_EVALUATION_PUBLICATION_NOT_APPROVED");
+      }
+      const artifact = evaluationStore.getAttemptArtifact({
+        evaluationId,
+        attemptId: selected.attemptId,
+        expectedWorkspaceId: baseIdentity.workspaceId,
+        expectedProjectId: baseIdentity.projectId,
+      });
+      if (artifact.status !== "available" || artifact.findings.length === 0) {
+        throw new Error("PRESCHOOL_ADDITIONAL_EVALUATION_PUBLICATION_EMPTY");
+      }
+      const resultJson = JSON.stringify(artifact);
+      const artifactStore = input.metadataStore.energyIq.overviewAiArtifacts;
+      let current = artifactStore.queue({ identity, triggeredBy: user.id });
+      if (current.status === "available") {
+        if (current.result_json !== resultJson
+          || current.run_id !== selected.providerRunId
+          || current.session_id !== selected.providerSessionId) {
+          throw new Error("PRESCHOOL_ADDITIONAL_EVALUATION_PUBLICATION_CONFLICT");
+        }
+      } else {
+        const workerId = `approved-additional-publication:${evaluationId}:${selected.attemptId}`;
+        const claim = artifactStore.claim({ identity, workerId, leaseMs: 60_000 });
+        if (!claim.claimed) {
+          throw new Error("PRESCHOOL_ADDITIONAL_EVALUATION_PUBLICATION_IN_PROGRESS");
+        }
+        current = artifactStore.complete({
+          identity,
+          workerId,
+          sessionId: selected.providerSessionId,
+          runId: selected.providerRunId,
+          resultJson,
+        });
+      }
+      return evaluationStore.recordApprovedCandidatePublication({
+        evaluationId,
+        expectedWorkspaceId: baseIdentity.workspaceId,
+        expectedProjectId: baseIdentity.projectId,
+        sourceAttemptId: selected.attemptId,
+        artifactId: current.id,
+        artifactIdentityHash: evaluation.target.artifactIdentityHash,
+        actorId: user.id,
+        expectedRevision,
       });
     },
 

@@ -43,6 +43,7 @@ describe("PreschoolAdditionalEvaluationAdmin", () => {
         },
       }),
       getTransition: vi.fn(),
+      publishEvaluation: vi.fn(),
     };
 
     await act(async () => root.render(
@@ -92,6 +93,7 @@ describe("PreschoolAdditionalEvaluationAdmin", () => {
       listTransitions: vi.fn().mockResolvedValue([]),
       createTransition: vi.fn(),
       getTransition: vi.fn(),
+      publishEvaluation: vi.fn(),
     };
     await act(async () => root.render(
       <PreschoolAdditionalEvaluationAdmin
@@ -105,6 +107,53 @@ describe("PreschoolAdditionalEvaluationAdmin", () => {
     expect(container.textContent).toContain("No approved A baseline is available");
     expect(container.querySelector("button")).toBeNull();
     expect(client.createTransition).not.toHaveBeenCalled();
+  });
+
+  it("shows approval and publication separately and publishes without starting a comparison", async () => {
+    const published = {
+      ...approvedEvaluation,
+      publication: {
+        sourceAttemptId: "attempt-a",
+        artifactId: "overview-ai-artifact-current",
+        artifactIdentityHash: `sha256:${"a".repeat(64)}`,
+        actorId: "admin-1",
+        publishedAt: "2026-08-15T01:00:00.000Z",
+        revision: 1,
+      },
+    };
+    const client = {
+      listEvaluations: vi.fn().mockResolvedValue([approvedEvaluation]),
+      listTransitions: vi.fn().mockResolvedValue([]),
+      createTransition: vi.fn(),
+      getTransition: vi.fn(),
+      publishEvaluation: vi.fn().mockResolvedValue(published),
+    };
+    await act(async () => root.render(
+      <PreschoolAdditionalEvaluationAdmin
+        projectId="preschool-demo"
+        initialPin={{
+          scopeId: "preschool-project",
+          dataSnapshotId: "snapshot-a",
+          projectReleaseId: "release-a",
+          from: "2026-05-01T00:00:00.000Z",
+          to: "2026-06-01T00:00:00.000Z",
+        }}
+        client={client}
+      />,
+    ));
+    await act(async () => undefined);
+
+    expect(container.textContent).toContain("Review complete");
+    expect(container.textContent).toContain("Approved candidate");
+    expect(container.textContent).toContain("Not published");
+    const publish = [...container.querySelectorAll("button")].find((button) => (
+      button.textContent === "Publish to current Overview"
+    ));
+    await act(async () => publish!.click());
+
+    expect(client.publishEvaluation).toHaveBeenCalledWith("preschool-demo", "evaluation-a", 0);
+    expect(client.createTransition).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Published");
   });
 });
 

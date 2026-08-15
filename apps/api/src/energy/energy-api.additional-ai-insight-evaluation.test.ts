@@ -242,6 +242,63 @@ describe("Additional Insight evaluation API", () => {
     }
   });
 
+  it("publishes an approved current candidate for admins without starting pass@3 again", async () => {
+    const harness = createHarness();
+    try {
+      const approved = {
+        ...harness.seedEvaluation(),
+        status: "approved-candidate",
+        approval: {
+          selectedAttemptId: "attempt-approved",
+          actorId: "dev-user",
+          approvedAt: "2026-08-15T00:00:00.000Z",
+          revision: 1,
+          disposition: "publication-candidate-only",
+        },
+      };
+      harness.metadata.energyIq.additionalInsightEvaluations.getEvaluation = vi.fn(() => approved as never);
+      harness.publishApprovedCandidate.mockResolvedValue({
+        ...approved,
+        publication: {
+          sourceAttemptId: "attempt-approved",
+          artifactId: "overview-ai-artifact-current",
+          artifactIdentityHash: approved.target.artifactIdentityHash,
+          actorId: "dev-user",
+          publishedAt: "2026-08-15T01:00:00.000Z",
+          revision: 1,
+        },
+      });
+      const path = [...evaluationPath(harness), "evaluation-seeded", "publish"];
+
+      const member = await handleEnergyApiRequest(jsonRequest("POST", { expectedRevision: 0 }), path, {
+        ...harness.context,
+        userId: "second-user",
+      });
+      expect(member.status).toBe(403);
+
+      const response = await handleEnergyApiRequest(
+        jsonRequest("POST", { expectedRevision: 0 }),
+        path,
+        harness.context,
+      );
+      expect(response).toMatchObject({
+        status: 200,
+        body: { success: true, data: { publication: { sourceAttemptId: "attempt-approved" } } },
+      });
+      expect(harness.resolveCurrentIdentity).toHaveBeenCalledWith(expect.objectContaining({
+        projectId: harness.project.id,
+        scopeId: harness.project.root_scope_id,
+      }));
+      expect(harness.publishApprovedCandidate).toHaveBeenCalledWith(expect.objectContaining({
+        evaluationId: "evaluation-seeded",
+        user: expect.objectContaining({ id: "dev-user" }),
+      }));
+      expect(harness.executePassAt3).not.toHaveBeenCalled();
+    } finally {
+      harness.close();
+    }
+  });
+
   it("lists admin-scoped A baselines and A-to-B transition summaries without exposing Provider identity", async () => {
     const harness = createHarness();
     try {
@@ -379,12 +436,13 @@ const createHarness = () => {
     updatedAt: "2026-08-14T00:00:00.000Z",
   }));
   const executeTransition = vi.fn();
+  const publishApprovedCandidate = vi.fn();
   const context = {
     metadataStore: metadata,
     userId: "dev-user",
     workspaceId: PRESCHOOL_WORKSPACE_ID,
     overviewAiWorkflow: { resolveCurrentIdentity, read },
-    additionalAiInsightsEvaluationWorkflow: { executePassAt3, executeTransition },
+    additionalAiInsightsEvaluationWorkflow: { executePassAt3, executeTransition, publishApprovedCandidate },
   } as unknown as Required<ConfigApiContext>;
   return {
     metadata,
@@ -394,6 +452,7 @@ const createHarness = () => {
     read,
     executePassAt3,
     executeTransition,
+    publishApprovedCandidate,
     seedEvaluation() {
       const target = {
         workspaceId: PRESCHOOL_WORKSPACE_ID,

@@ -820,6 +820,87 @@ export class EnergyIqAdditionalInsightEvaluationStore {
     });
   }
 
+  recordApprovedCandidatePublication(input: {
+    evaluationId: string;
+    expectedWorkspaceId: string;
+    expectedProjectId: string;
+    sourceAttemptId: string;
+    artifactId: string;
+    artifactIdentityHash: string;
+    actorId: string;
+    expectedRevision: number;
+    now?: string;
+  }): AdditionalAiInsightEvaluationBatch {
+    return immediateTransaction(this.db, () => {
+      const record = this.getEvaluation(input);
+      requireCurrentTargetIdentity(record.target);
+      if (record.status !== "approved-candidate"
+        || !record.approval
+        || record.approval.selectedAttemptId !== input.sourceAttemptId) {
+        throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_PUBLICATION_SOURCE_INVALID");
+      }
+      const selected = record.attempts.find((attempt): attempt is AdditionalAiInsightEvaluationAttempt => (
+        attempt.attemptId === input.sourceAttemptId && attempt.status === "completed"
+      ));
+      if (!selected) throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_PUBLICATION_SOURCE_INVALID");
+      if (input.artifactIdentityHash !== record.target.artifactIdentityHash) {
+        throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_PUBLICATION_IDENTITY_INVALID");
+      }
+      requireNonEmpty(input.artifactId, "ENERGYIQ_ADDITIONAL_EVALUATION_PUBLICATION_ARTIFACT_REQUIRED");
+      requireNonEmpty(input.actorId, "ENERGYIQ_ADDITIONAL_EVALUATION_PUBLICATION_ACTOR_REQUIRED");
+      const artifact = this.db.prepare(`
+        SELECT identity_json, status, run_id, session_id, result_json FROM energyiq_overview_ai_artifacts
+        WHERE id = ? AND workspace_id = ? AND project_id = ?
+      `).get(input.artifactId, record.target.workspaceId, record.target.projectId);
+      if (!isRecord(artifact)
+        || artifact.status !== "available"
+        || artifact.run_id !== selected.providerRunId
+        || artifact.session_id !== selected.providerSessionId
+        || typeof artifact.result_json !== "string"
+        || sha256(artifact.result_json) !== selected.artifact.resultHash
+        || !overviewArtifactIdentityMatchesEvaluationTarget(artifact.identity_json, record.target)) {
+        throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_PUBLICATION_ARTIFACT_INVALID");
+      }
+      if (record.publication) {
+        if (record.publication.sourceAttemptId === input.sourceAttemptId
+          && record.publication.artifactId === input.artifactId
+          && record.publication.artifactIdentityHash === input.artifactIdentityHash) return record;
+        throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_PUBLICATION_CONFLICT");
+      }
+      if (input.expectedRevision !== 0) {
+        throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_PUBLICATION_REVISION_CONFLICT");
+      }
+      const publishedAt = input.now ?? new Date().toISOString();
+      record.publication = {
+        sourceAttemptId: input.sourceAttemptId,
+        artifactId: input.artifactId,
+        artifactIdentityHash: input.artifactIdentityHash,
+        actorId: input.actorId,
+        publishedAt,
+        revision: 1,
+      };
+      record.updatedAt = publishedAt;
+      requireEvaluation(record);
+      const result = this.db.prepare(`
+        UPDATE energyiq_additional_insight_evaluations
+        SET record_json = ?, updated_at = ?
+        WHERE id = ? AND workspace_id = ? AND project_id = ?
+          AND COALESCE(json_extract(record_json, '$.publication.revision'), 0) = ?
+      `).run(
+        JSON.stringify(record),
+        record.updatedAt,
+        record.evaluationId,
+        record.target.workspaceId,
+        record.target.projectId,
+        input.expectedRevision,
+      );
+      if (result.changes !== 1) {
+        throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_PUBLICATION_REVISION_CONFLICT");
+      }
+      return clone(record);
+    });
+  }
+
   getEvaluation(input: {
     evaluationId: string;
     expectedWorkspaceId: string;
@@ -1500,6 +1581,37 @@ const supportedTargetIdentity = (target: AdditionalAiInsightEvaluationTarget): b
     && target.workflowRevision === "additional-insights-discover-accept-publish-v15"
     && target.promptRevision === "additional-insights-discovery-v10")
 );
+
+const overviewArtifactIdentityMatchesEvaluationTarget = (
+  value: unknown,
+  target: AdditionalAiInsightEvaluationTarget,
+): boolean => {
+  let identity: unknown;
+  try { identity = typeof value === "string" ? JSON.parse(value) : value; } catch { return false; }
+  return isRecord(identity)
+    && identity.artifactKind === "autonomous-insights"
+    && identity.workspaceId === target.workspaceId
+    && identity.projectId === target.projectId
+    && identity.scopeId === target.scopeId
+    && identity.resource === target.resource
+    && identity.dataSnapshotId === target.dataSnapshotId
+    && identity.projectReleaseId === target.projectReleaseId
+    && identity.analysisPeriodFrom === target.analysisPeriod.from
+    && identity.analysisPeriodTo === target.analysisPeriod.to
+    && identity.modelProfileId === target.modelProfileId
+    && identity.modelProfileRevision === target.modelProfileRevision
+    && identity.identityContractRevision === target.artifactIdentityRevision
+    && identity.outputContractRevision === target.outputContractRevision
+    && identity.validatorRevision === target.validatorRevision
+    && identity.workflowRevision === target.workflowRevision
+    && identity.investigatorPromptRevision === target.promptRevision
+    && identity.capabilityRevision === target.capabilityRevision
+    && identity.publicationRevision === target.publicationRevision
+    && identity.canvasRevision === target.canvasRevision
+    && identity.methodSetId === target.methodSetId
+    && identity.methodSetRevision === target.methodSetRevision
+    && identity.methodSetFingerprint === target.methodSetFingerprint;
+};
 
 const requireCurrentTargetIdentity = (target: AdditionalAiInsightEvaluationTarget): void => {
   if (target.artifactIdentityRevision !== "additional-insights-v15"

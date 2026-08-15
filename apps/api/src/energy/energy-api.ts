@@ -316,6 +316,29 @@ export const handleEnergyApiRequest = async (
             });
             return { status: 200, body: createSuccessResult(toAdditionalEvaluationSummary(evaluation)) };
           }
+          if (segments.length === 6 && segments[5] === "publish" && request.method === "POST") {
+            const body = requireRecord(await readJsonBody(request));
+            const existing = context.metadataStore.energyIq.additionalInsightEvaluations.getEvaluation({
+              evaluationId,
+              expectedWorkspaceId: access.activeWorkspaceId,
+              expectedProjectId: projectId,
+            });
+            const baseIdentity = await context.overviewAiWorkflow.resolveCurrentIdentity({
+              projectId,
+              scopeId: existing.target.scopeId,
+              user,
+            });
+            const evaluation = await evaluationWorkflow.publishApprovedCandidate({
+              baseIdentity,
+              evaluationId,
+              user,
+              expectedRevision: requireNonNegativeInteger(
+                body.expectedRevision,
+                "ENERGYIQ_ADDITIONAL_EVALUATION_PUBLICATION_REVISION_REQUIRED",
+              ),
+            });
+            return { status: 200, body: createSuccessResult(toAdditionalEvaluationSummary(evaluation)) };
+          }
         }
       }
       if (segments[3] === "transitions") {
@@ -3038,6 +3061,7 @@ const toAdditionalEvaluationSummary = (evaluation: AdditionalAiInsightEvaluation
     attempt.status === "completed" && attempt.humanReview !== undefined
   )).length,
   ...(evaluation.approval ? { approval: evaluation.approval } : {}),
+  ...(evaluation.publication ? { publication: evaluation.publication } : {}),
   createdAt: evaluation.createdAt,
   updatedAt: evaluation.updatedAt,
 });
