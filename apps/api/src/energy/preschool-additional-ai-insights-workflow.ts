@@ -445,14 +445,136 @@ type AcceptedCandidate = {
   finding: AdditionalAiInsightFinding;
 };
 
+const MAX_DISCOVERY_ENVELOPE_PUNCTUATION_REPAIRS = 4;
+
+const repairMissingPropertyOpeningQuotes = (input: string): { value: string; repairs: number } | null => {
+  let value = "";
+  let repairs = 0;
+  for (let index = 0; index < input.length;) {
+    const current = input[index]!;
+    if (current === '"') {
+      const start = index;
+      index += 1;
+      let escaped = false;
+      while (index < input.length) {
+        const character = input[index]!;
+        index += 1;
+        if (escaped) {
+          escaped = false;
+        } else if (character === "\\") {
+          escaped = true;
+        } else if (character === '"') {
+          break;
+        }
+      }
+      if (input[index - 1] !== '"') return null;
+      value += input.slice(start, index);
+      continue;
+    }
+    value += current;
+    index += 1;
+    if (current !== "{" && current !== ",") continue;
+    const whitespaceStart = index;
+    while (index < input.length && /\s/.test(input[index]!)) index += 1;
+    value += input.slice(whitespaceStart, index);
+    const propertyStart = index;
+    if (!/[A-Za-z_]/.test(input[index] ?? "")) continue;
+    index += 1;
+    while (index < input.length && /[A-Za-z0-9_]/.test(input[index]!)) index += 1;
+    if (input[index] !== '"') {
+      value += input.slice(propertyStart, index);
+      continue;
+    }
+    const closingQuote = index;
+    index += 1;
+    const separatorStart = index;
+    while (index < input.length && /\s/.test(input[index]!)) index += 1;
+    if (input[index] !== ":") {
+      value += input.slice(propertyStart, separatorStart);
+      continue;
+    }
+    value += `"${input.slice(propertyStart, closingQuote + 1)}${input.slice(separatorStart, index + 1)}`;
+    index += 1;
+    repairs += 1;
+    if (repairs > MAX_DISCOVERY_ENVELOPE_PUNCTUATION_REPAIRS) return null;
+  }
+  return { value, repairs };
+};
+
+const repairUnbalancedRootClosers = (
+  input: string,
+  repairsSoFar: number,
+): string | null => {
+  const stack: Array<"{" | "["> = [];
+  let output = "";
+  let inString = false;
+  let escaped = false;
+  let repairs = repairsSoFar;
+  for (let index = 0; index < input.length; index += 1) {
+    const character = input[index]!;
+    if (inString) {
+      output += character;
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') inString = false;
+      continue;
+    }
+    if (character === '"') {
+      inString = true;
+      output += character;
+      continue;
+    }
+    if (character === "{" || character === "[") {
+      stack.push(character);
+      output += character;
+      continue;
+    }
+    if (character !== "}" && character !== "]") {
+      output += character;
+      continue;
+    }
+    const expectedOpen = character === "}" ? "{" : "[";
+    if (stack.at(-1) === expectedOpen) {
+      stack.pop();
+      output += character;
+      continue;
+    }
+    if (stack.length > 0 || !input.slice(index).split("").every((value) => /[\s}\]]/.test(value))) {
+      return null;
+    }
+    repairs += 1;
+    if (repairs > MAX_DISCOVERY_ENVELOPE_PUNCTUATION_REPAIRS) return null;
+  }
+  if (inString) return null;
+  while (stack.length > 0) {
+    output += stack.pop() === "{" ? "}" : "]";
+    repairs += 1;
+    if (repairs > MAX_DISCOVERY_ENVELOPE_PUNCTUATION_REPAIRS) return null;
+  }
+  return output;
+};
+
+const parseDiscoveryEnvelope = (answer: string): unknown => {
+  try {
+    return JSON.parse(answer) as unknown;
+  } catch {
+    const trimmed = answer.trim();
+    if (!trimmed.startsWith("{")) return null;
+    const quoted = repairMissingPropertyOpeningQuotes(trimmed);
+    if (!quoted) return null;
+    const balanced = repairUnbalancedRootClosers(quoted.value, quoted.repairs);
+    if (!balanced || balanced === trimmed) return null;
+    try {
+      return JSON.parse(balanced) as unknown;
+    } catch {
+      return null;
+    }
+  }
+};
+
 const parseDiscoveryCandidates = (answer: string): DiscoveryCandidate[] | null => {
   if (typeof answer !== "string" || answer.length > MAX_DISCOVERY_ANSWER_CHARS) return null;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(answer);
-  } catch {
-    return null;
-  }
+  const parsed = parseDiscoveryEnvelope(answer);
   if (!isRecord(parsed) || !hasExactKeys(parsed, ["candidates"]) || !Array.isArray(parsed.candidates)) return null;
   const seen = new Set<string>();
   return parsed.candidates.map((value, index) => {

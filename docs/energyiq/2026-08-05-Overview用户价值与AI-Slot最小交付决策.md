@@ -1041,3 +1041,17 @@ handoff，不能只传自然语言摘要或让旧 A 查询 current B。
 4. A/B 页面能说明哪些结论 New、Changed、Still supported、Resolved 或 No material change；
 5. 普通 Overview 打开、硬刷新和账户切换不新增 Provider Run；
 6. 自动测试、真实 Provider、浏览器、多账户与人工价值审核分别记录，不互相冒充。
+
+## 20. 2026-08-16 Additional discovery 外壳恢复边界
+
+真实 v19 pass@3 证明，DeepSeek V4 Flash 即使没有触及 context 或 output-token 上限，也可能在已经形成有价值候选后只损坏最外层 JSON 标点。三次独立 Run 均被 Run Harness 正确记录为 completed，但业务 Evaluation 在随后解析 discovery value 时失败；二者属于不同验收层，不能把 Run completed 当成 Artifact 可发布。
+
+current Workflow 采用有限 Option 3+ transport recovery：
+
+- 原始 answer 必须以 `{` 开始，不从前言、Markdown fence、scratch 或 DSML 中搜索/抽取 JSON；
+- 只允许补一个裸属性名缺失的开引号，以及删除多余或补齐缺失的尾部 `}` / `]`；
+- 单次最多四处修复，超过预算、字符串未闭合、括号类型错配、相邻多个根对象或错误根键全部拒绝；
+- 修复后仍必须是 exact `{candidates}`，每个 candidate 的字段、数字、Centre、Evidence、Tool audit、epistemic status、novelty 和 Canvas 继续走原有本地独立校验；
+- repair 不改变任何字符串或事实内容，只恢复可解析的 proposal envelope；坏候选不能借 repair 洗白，也不能吞掉有效 sibling。
+
+这改变了当前可接受的 transport envelope，因此 identity 旋转为 `additional-insights-v20`，workflow 为 `additional-insights-discover-accept-publish-v20`，validator 仍为 `additional-insights-acceptance-v16`，prompt 仍为 `additional-insights-discovery-v10`。v19 terminal 保持历史只读，v19 running/mutation fail closed。长期可评估 gross-only submission tool，避免 Tools 与 assistant JSON 混用，但不得在本次热修中扩大协议范围。

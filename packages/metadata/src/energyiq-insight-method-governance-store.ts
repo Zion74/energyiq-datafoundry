@@ -624,10 +624,10 @@ export class EnergyIqInsightMethodGovernanceStore {
     const projectReleaseId = requiredString(row, "project_release_id");
     if (!isRecord(identity)
       || identity.artifactKind !== "autonomous-insights"
-      || identity.identityContractRevision !== "additional-insights-v19"
+      || identity.identityContractRevision !== "additional-insights-v20"
       || identity.outputContractRevision !== "energyiq-additional-ai-insights-v2"
       || identity.validatorRevision !== "additional-insights-acceptance-v16"
-      || identity.workflowRevision !== "additional-insights-discover-accept-publish-v19"
+      || identity.workflowRevision !== "additional-insights-discover-accept-publish-v20"
       || identity.investigatorPromptRevision !== "additional-insights-discovery-v10"
       || identity.workspaceId !== workspaceId
       || identity.projectId !== projectId

@@ -1556,6 +1556,98 @@ describe("Preschool Additional AI Insights workflow", () => {
     }
   });
 
+  it.each([
+    {
+      name: "one surplus root closer",
+      corrupt: (answer: string) => `${answer}}`,
+    },
+    {
+      name: "one missing candidate-key quote and one missing root closer",
+      corrupt: (answer: string) => answer.replace('"angle":', 'angle":').slice(0, -1),
+    },
+  ])("repairs $name without bypassing candidate-local acceptance", async ({ corrupt }) => {
+    const harness = createHarness();
+    try {
+      const valid = candidate("candidate-repaired-envelope", "fact:standby-share");
+      const malformedSibling = {
+        ...valid,
+        id: "candidate-still-invalid",
+        title: "x".repeat(140),
+      };
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: corrupt(JSON.stringify({ candidates: [valid, malformedSibling] })),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "bounded-envelope-repair-run",
+        sessionId: "bounded-envelope-repair-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        publication: {
+          discoveredCount: 2,
+          acceptedCount: 1,
+          rejectedCount: 1,
+          publishedCount: 1,
+          acceptedCandidateIds: ["candidate-repaired-envelope"],
+          rejectedCandidateIds: ["candidate-still-invalid"],
+        },
+        findings: [{
+          id: "additional:candidate-repaired-envelope",
+          title: "Title for candidate-repaired-envelope",
+          text: "**Evidence signal:** The cited current Evidence establishes the selected baseline.\n\n**AI angle:** Incremental angle for candidate-repaired-envelope.",
+        }],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it.each([
+    ["a Markdown fence", (answer: string) => `\`\`\`json\n${answer}\n\`\`\``],
+    ["two adjacent root objects", (answer: string) => `${answer}${answer}`],
+    ["more punctuation defects than the repair budget", (answer: string) => (
+      ["id", "title", "observation", "angle", "epistemicStatus"]
+        .reduce((value, key) => value.replace(`"${key}":`, `${key}":`), answer)
+    )],
+    ["the wrong root key", () => JSON.stringify({ findings: [] })],
+  ])("rejects %s instead of widening the bounded discovery envelope", async (_name, corrupt) => {
+    const harness = createHarness();
+    try {
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: corrupt(JSON.stringify({
+            candidates: [candidate("candidate-outside-repair-boundary", "fact:standby-share")],
+          })),
+          runId,
+          sessionId,
+        }),
+      });
+
+      await expect(workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "outside-repair-boundary-run",
+        sessionId: "outside-repair-boundary-session",
+      })).rejects.toThrow("PRESCHOOL_ADDITIONAL_AI_DISCOVERY_RESULT_INVALID");
+    } finally {
+      harness.close();
+    }
+  });
+
   it("maps each candidate's stable Method refs to truthful Finding provenance and rejects bad refs locally", async () => {
     const harness = createHarness();
     try {
