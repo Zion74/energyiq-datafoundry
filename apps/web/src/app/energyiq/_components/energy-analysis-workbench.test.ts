@@ -2,10 +2,47 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildEnergyAiHandoffInitialDraftPrompt,
+  energyQueryContextRequestFromSearchParams,
   toEnergyAnalysisExternalContext,
 } from "./energy-analysis-workbench";
 
 describe("EnergyIQ AI Analyst handoff", () => {
+  it("pins an Overview handoff to the exact Snapshot, Release and 28-day Period", () => {
+    const params = new URLSearchParams({
+      projectId: "preschool-demo",
+      scopeId: "project",
+      resource: "electricity",
+      period: "Custom",
+      from: "2026-05-20",
+      to: "2026-06-16",
+      dataSnapshotId: "snapshot-b",
+      projectReleaseId: "release-b",
+    });
+
+    expect(energyQueryContextRequestFromSearchParams(params, "preschool-demo")).toEqual({
+      projectId: "preschool-demo",
+      scopeId: "project",
+      resource: "electricity",
+      period: "Custom",
+      from: "2026-05-20",
+      to: "2026-06-16",
+      expectedDataSnapshotId: "snapshot-b",
+      expectedProjectReleaseId: "release-b",
+    });
+  });
+
+  it("uses the server-owned current 28-day domain for a direct Preschool AI entry", () => {
+    expect(energyQueryContextRequestFromSearchParams(
+      new URLSearchParams({ projectId: "preschool-demo" }),
+      "preschool-demo",
+    )).toEqual({
+      projectId: "preschool-demo",
+      scopeId: "project",
+      resource: "electricity",
+      analysisWindow: "current-overview-28d",
+    });
+  });
+
   it("projects the server-resolved Snapshot and data cutoff into the visible Analyst context", () => {
     const context = toEnergyAnalysisExternalContext({
       userId: "user-1",

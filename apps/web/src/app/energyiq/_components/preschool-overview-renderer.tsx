@@ -189,6 +189,16 @@ export function PreschoolOverviewRenderer({
               <span className="inline-flex items-center gap-1.5"><EnergyIcon name="calendar" className="h-3.5 w-3.5 text-muted-light" />{view.context.period}</span>
               <span>{view.context.timezone}</span>
             </div>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs" aria-label="Overview data domains">
+              <span className="rounded-full border border-border bg-surface-subtle px-3 py-1.5 text-muted">
+                <strong className="font-semibold text-foreground">Sections 1–4</strong> · {view.context.analysisWindowLabel}
+              </span>
+              <span className="rounded-full border border-border bg-surface-subtle px-3 py-1.5 text-muted">
+                <strong className="font-semibold text-foreground">Section 5</strong> · {view.forecast.status === "unavailable"
+                  ? "Monthly plan / actual / outlook"
+                  : `${view.forecast.targetMonth} plan / actual / outlook`}
+              </span>
+            </div>
           </div>
           {dataStatus}
         </header>

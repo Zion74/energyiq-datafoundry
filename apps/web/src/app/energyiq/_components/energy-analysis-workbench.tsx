@@ -40,32 +40,7 @@ export function EnergyAnalysisWorkbench() {
     [searchParams],
   );
   const requestedContext = useMemo<EnergyQueryContextRequestDto>(
-    () => {
-      const projectId =
-        activeProject?.id ?? searchParams.get("projectId") ?? "ngee-ann-polytechnic";
-      const explicitPeriod = searchParams.get("period");
-      const usePreschoolDemoWindow =
-        projectId === "preschool-demo" && explicitPeriod === null;
-      return {
-        projectId,
-        scopeId: searchParams.get("scopeId") ?? "project",
-        resource:
-          searchParams.get("resource") === "water" ? "water" : "electricity",
-        period: usePreschoolDemoWindow
-          ? "Custom"
-          : normalizePeriod(explicitPeriod),
-        ...(searchParams.get("from")
-          ? { from: searchParams.get("from")! }
-          : usePreschoolDemoWindow
-            ? { from: "2026-05-01" }
-            : {}),
-        ...(searchParams.get("to")
-          ? { to: searchParams.get("to")! }
-          : usePreschoolDemoWindow
-            ? { to: "2026-05-31" }
-            : {}),
-      };
-    },
+    () => energyQueryContextRequestFromSearchParams(searchParams, activeProject?.id),
     [activeProject?.id, searchParams],
   );
   const [resolved, setResolved] = useState<EnergyQueryContextDto | null>(null);
@@ -206,6 +181,35 @@ const normalizePeriod = (
   }
   return "Last 30 days";
 };
+
+export function energyQueryContextRequestFromSearchParams(
+  searchParams: Pick<URLSearchParams, "get">,
+  activeProjectId?: string,
+): EnergyQueryContextRequestDto {
+  const projectId = activeProjectId ?? searchParams.get("projectId") ?? "ngee-ann-polytechnic";
+  const explicitPeriod = searchParams.get("period");
+  const dataSnapshotId = searchParams.get("dataSnapshotId");
+  const projectReleaseId = searchParams.get("projectReleaseId");
+  const identityPin = {
+    ...(dataSnapshotId ? { expectedDataSnapshotId: dataSnapshotId } : {}),
+    ...(projectReleaseId ? { expectedProjectReleaseId: projectReleaseId } : {}),
+  };
+  const base = {
+    projectId,
+    scopeId: searchParams.get("scopeId") ?? "project",
+    resource: searchParams.get("resource") === "water" ? "water" as const : "electricity" as const,
+    ...identityPin,
+  };
+  if (projectId === "preschool-demo" && explicitPeriod === null) {
+    return { ...base, analysisWindow: "current-overview-28d" };
+  }
+  return {
+    ...base,
+    period: normalizePeriod(explicitPeriod),
+    ...(searchParams.get("from") ? { from: searchParams.get("from")! } : {}),
+    ...(searchParams.get("to") ? { to: searchParams.get("to")! } : {}),
+  };
+}
 
 type EnergyAiHandoffSearchParams = Pick<URLSearchParams, "get">;
 

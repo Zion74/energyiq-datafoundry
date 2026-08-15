@@ -28,6 +28,10 @@ describe("PreschoolOverviewRenderer reading flow", () => {
     ]);
     expect(markup.match(/data-overview-section=/g)).toHaveLength(5);
     expect(markup).toContain("Energy Review");
+    expect(markup).toContain("Sections 1–4");
+    expect(markup).toContain("Calendar-month window");
+    expect(markup).toContain("Section 5");
+    expect(markup).toContain("June 2026 plan / actual / outlook");
     expect(markup).toContain("Overall metrics");
     expect(markup).toContain("Energy use and estimated cost across 30 Centres.");
     expect(markup.match(/data-overall-summary-metric=/g)).toHaveLength(3);

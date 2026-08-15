@@ -3,7 +3,7 @@ title: "2026-08-05 决策：Overview 用户价值与 AI Slot 最小交付"
 summary: "以同一 Published Snapshot 和 Evidence Catalog 连接确定性 Facts、At a glance、Section Interpretation、AI Executive Summary、Additional AI Insights 与预生成共享 Artifact，并让 Overview 首屏和 AI 恢复解耦。"
 doc_type: decision
 tags: [Overview, Ngee Ann, AI Slot, DataFoundry, Evidence]
-updated_at: "2026-08-13"
+updated_at: "2026-08-15"
 related:
   - "决策-Overview改造与AI-Analysis打通最终方案.md"
   - "决策-项目Renderer-Recipe与时间上下文.md"
@@ -959,3 +959,58 @@ Method/Evidence 的外部 benchmark 越级做局部拒绝。Additional 盲评 Su
 v6 的发布单元同时包含上述增量价值/provenance 实现与其紧随的深 Store mutation、deterministic baseline、Centre 列表、标题预算和结构化
 epistemic guard correction；集成时必须原子纳入，不能只挑前一部分提交。该 correction 前 v6 从未进入集成服务且没有生产 Artifact，因此不再人为
 旋转 v7；若部署环境出现任何旧 v6 Artifact，则必须先停线重新评估 identity 隔离，不能把中间实现当作 current。
+
+## 19. 2026-08-15 Preschool 连续数据与整页 A/B 数据域决策
+
+### 19.1 A/B 的产品含义
+
+A/B 不是只比较 Additional AI Insights，也不是让用户任意选择两段日期。它比较两个不可变的 **Overview Version**：
+
+- A：上一份已发布或已保存的完整 Overview；
+- B：新数据进入、完成 materialization 并通过发布门后的候选或当前 Overview；
+- 每个 Version 同时固定 Snapshot、Project Release、data cutoff、Primary Period、Section 5 月度域、Sections 1–5 确定性结果、
+  Section Interpretations、Key Findings、Additional AI Insights、Evidence 与 AI Analysis 上下文。
+
+只有上述身份全部一致地切换，才能说“数据新进来后 Overview 和 AI Analysis 一起变了”。Additional transition 只是整页 A/B 的一个子结果，
+不能代表完整 A/B 已完成。
+
+### 19.2 Primary Period 与 Section 5 不冲突
+
+Preschool 客户 Current Overview 与 Ngee Ann 一样，由服务端解析 `current-overview-28d`：以最新完整本地日为 cutoff，Sections 1–4 使用截至该
+cutoff 的滚动 28 个本地日。浏览器不再固定 `2026-05-01`–`2026-05-31`，也不以 URL 中的旧 Custom 日期覆盖 current identity。服务端返回后，
+URL 只记录 exact current from/to、Snapshot 与 Release pin，用于刷新、分享与 fail-closed 恢复。
+
+Section 5 是显式的派生月度域，不是第二个全局 Primary Period：
+
+- 与 Sections 1–4 共用同一个 Current Snapshot、Release 与 data cutoff；
+- 自己声明 target calendar month、frozen Plan identity、Actual-through-cutoff 与 Current Outlook；
+- Plan 与 Actual 可以来自不同 Snapshot，但必须各自保留 Evidence lineage，且目标月份必须兼容；
+- 页面必须同时显示 `Sections 1–4 · Rolling 28-day window` 与 `Section 5 · <month> plan / actual / outlook`，不能静默混合。
+
+因此二者没有业务冲突：28 天回答“最近的运营表现如何”，Section 5 回答“目标月计划执行到哪里、月末可能怎样”。真正的冲突只会发生在系统
+把两者伪装成同一 Period、或让 AI 不带来源地混合数字时；这两种情况都必须 fail closed 或逐条标明域。
+
+### 19.3 AI Analysis 数据域切换
+
+- 从 Section 1–4 的 Insight 进入 AI Analysis：固定该 Overview Version 的 Snapshot、Release、Primary Period 与 Evidence refs；
+- 从 Section 5 进入：同时传 target month、Plan identity、Actual Snapshot/cutoff 与对应 Evidence；
+- 从 Key Findings 进入：保留每条来源 Section 的 period role，不把月度 Plan 数字冒充 28 天 Actual；
+- 从 A/B 比较进入：同时提供 A 与 B 两套只读 context，默认只允许比较，不允许查询“当前数据”后冒充 A 的 Evidence；
+- 用户切换到 B 后，旧 A 对话标记为 historical/outdated context，不能继续显示成 B 的回答。
+
+### 19.4 Charles 临时验收入口与后续正式入口
+
+短期管理员入口应显示 `Compare with previous Overview`，由服务端选择当前 B 与同 Project/Scope 最近一份兼容的 Saved/Published A；页面先展示
+两套数据域与身份，再展示 KPI、Section availability、Key Findings 与 Additional transitions 的变化。没有兼容 A 时诚实显示不可比较，不临时拼接
+一个历史日期。当前 `Test A/B update` 只能视为 Additional evaluation 的管理诊断入口，不能作为客户版整页 A/B。
+
+长期正式入口仍由数据发布事件生成 B、保留 A，并在 Overview 上提供只读比较；普通打开与刷新只恢复已存 Artifact，不临时调用 Provider。
+
+### 19.5 验收门
+
+1. 新数据发布后，Current Snapshot 与滚动 28 日范围前进；Sections 1–4、Key Findings、Section Interpretations 与 AI Analysis context 同步换版；
+2. Section 5 继续使用同一 cutoff 下的目标月语义，并证明 Plan/Actual Evidence 不混；
+3. Saved A 字节与身份不变，B 不复用 A Artifact；
+4. A/B 页面能说明哪些结论 New、Changed、Still supported、Resolved 或 No material change；
+5. 普通 Overview 打开、硬刷新和账户切换不新增 Provider Run；
+6. 自动测试、真实 Provider、浏览器、多账户与人工价值审核分别记录，不互相冒充。

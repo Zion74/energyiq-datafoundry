@@ -75,6 +75,7 @@ export type PreschoolOverviewViewModel = {
     projectName: string;
     scopeName: string;
     period: string;
+    analysisWindowLabel: string;
     timezone: string;
   };
   dataStatus: {
@@ -500,6 +501,11 @@ export function buildPreschoolOverviewViewModel(
       projectName: snapshot.context.projectName,
       scopeName: snapshot.context.scopeName,
       period: formatPeriod(snapshot.context.from, snapshot.context.to, snapshot.context.timezone),
+      analysisWindowLabel: formatAnalysisWindowKind(
+        snapshot.context.from,
+        snapshot.context.to,
+        snapshot.context.timezone,
+      ),
       timezone: snapshot.context.timezone,
     },
     dataStatus: {
@@ -1620,6 +1626,14 @@ function formatAnalysisWindowLabel(from: string, toExclusive: string, timeZone: 
   return isCompleteCalendarMonth(from, toExclusive, timeZone)
     ? formatMonthYear(from, timeZone)
     : formatPeriod(from, toExclusive, timeZone);
+}
+
+function formatAnalysisWindowKind(from: string, toExclusive: string, timeZone: string): string {
+  if (isCompleteCalendarMonth(from, toExclusive, timeZone)) return "Calendar-month window";
+  const localDayCount = Math.round((Date.parse(toExclusive) - Date.parse(from)) / 86_400_000);
+  return localDayCount === 28
+    ? "Rolling 28-day window"
+    : `${localDayCount}-day analysis window`;
 }
 
 function isCompleteCalendarMonth(from: string, toExclusive: string, timeZone: string): boolean {

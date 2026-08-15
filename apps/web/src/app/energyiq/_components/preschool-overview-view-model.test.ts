@@ -16,6 +16,7 @@ describe("Preschool Overview ViewModel", () => {
     const view = buildPreschoolOverviewViewModel(snapshot);
 
     expect(view.context.period).toBe("11 May 2026–7 Jun 2026");
+    expect(view.context.analysisWindowLabel).toBe("Rolling 28-day window");
     expect(view.overallSummary.periodLabel).toBe("11 May 2026–7 Jun 2026");
     expect(view.overallSummary.metrics[1]?.label).toBe("Total energy · 11 May 2026–7 Jun 2026");
     expect(view.benchmark).toMatchObject({
