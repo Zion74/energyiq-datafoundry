@@ -67,7 +67,10 @@ describe("EnergyIqAdminSidebar", () => {
     });
 
     expect(container.textContent).toContain("Admin console");
-    expect(container.textContent).toContain("Overview Setup");
+    expect(container.textContent).toContain("Overview Design");
+    expect(container.textContent).toContain("AI Analysis");
+    expect(container.textContent).toContain("Methods & SOP");
+    expect(container.textContent).not.toContain("Overview Setup");
     expect(container.textContent).not.toContain("Templates");
     expect(container.textContent).not.toContain("Delivery, access and AI operations");
     const collapse = container.querySelector<HTMLButtonElement>("button[aria-label='Collapse admin navigation']");

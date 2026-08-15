@@ -26,6 +26,7 @@ import type {
   EnergyOperationalPolicyConfigurationDto,
   EnergyProjectAnalysisResolutionDto,
   EnergyOverviewAiArtifactDto,
+  EnergyProjectOverviewAdminStateDto,
   EnergyProjectMetricConfigResponseDto,
   EnergyProjectDataCoverageDto,
   EnergyProjectRuleConfigResponseDto,
@@ -673,6 +674,19 @@ export const configApi = {
     const params = overviewAiArtifactParams(scopeId, pin);
     return requestEnvelope<EnergyOverviewAiArtifactDto>(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-ai-artifact?${params.toString()}`,
+    );
+  },
+
+  getEnergyProjectOverviewAdminState(projectId: string): Promise<EnergyProjectOverviewAdminStateDto> {
+    return requestEnvelope<EnergyProjectOverviewAdminStateDto>(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-admin-state`,
+    );
+  },
+
+  generateMissingEnergyProjectOverviewAnalysis(projectId: string): Promise<EnergyProjectOverviewAdminStateDto> {
+    return requestEnvelope<EnergyProjectOverviewAdminStateDto>(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-admin-state/actions/generate-missing`,
+      { method: "POST", body: "{}" },
     );
   },
 

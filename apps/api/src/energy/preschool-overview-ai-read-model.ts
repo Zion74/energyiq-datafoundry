@@ -153,13 +153,13 @@ const additionalUnit = (
   if (!artifact) return { status: "unavailable", reason: "Additional AI Insights have not been generated." };
   if (artifact.status === "queued" || artifact.status === "running") return { status: artifact.status };
   if (artifact.status === "failed") {
-    return { status: "unavailable", artifactId: artifact.id, reason: artifact.error_code ?? "Additional AI Insights failed." };
+    return { status: "unavailable", artifactId: artifact.id, ...(artifact.completed_at ? { completedAt: artifact.completed_at } : {}), reason: artifact.error_code ?? "Additional AI Insights failed." };
   }
   const result = artifact.result_json ? parseResult(artifact.result_json, identity) : null;
   if (!result) return { status: "unavailable", artifactId: artifact.id, reason: "Additional AI Insights are invalid." };
   return result.status === "empty"
-    ? { status: "empty", artifactId: artifact.id, result }
-    : { status: "available", artifactId: artifact.id, result };
+    ? { status: "empty", artifactId: artifact.id, ...(artifact.completed_at ? { completedAt: artifact.completed_at } : {}), result }
+    : { status: "available", artifactId: artifact.id, ...(artifact.completed_at ? { completedAt: artifact.completed_at } : {}), result };
 };
 
 const parseAdditionalResult = (
@@ -209,13 +209,13 @@ const sectionUnit = (
   if (!artifact) return { status: "unavailable", reason: "Section interpretation has not been generated." };
   if (artifact.status === "queued" || artifact.status === "running") return { status: artifact.status };
   if (artifact.status === "failed") {
-    return { status: "unavailable", artifactId: artifact.id, reason: artifact.error_code ?? "Section interpretation failed." };
+    return { status: "unavailable", artifactId: artifact.id, ...(artifact.completed_at ? { completedAt: artifact.completed_at } : {}), reason: artifact.error_code ?? "Section interpretation failed." };
   }
   const result = artifact.result_json ? parseResult(artifact.result_json, identity) : null;
   if (!result) return { status: "unavailable", artifactId: artifact.id, reason: "Section interpretation is invalid." };
   return result.status === "empty"
-    ? { status: "empty", artifactId: artifact.id, result }
-    : { status: "available", artifactId: artifact.id, result };
+    ? { status: "empty", artifactId: artifact.id, ...(artifact.completed_at ? { completedAt: artifact.completed_at } : {}), result }
+    : { status: "available", artifactId: artifact.id, ...(artifact.completed_at ? { completedAt: artifact.completed_at } : {}), result };
 };
 
 const executiveUnit = (
@@ -226,13 +226,13 @@ const executiveUnit = (
   if (!artifact) return { status: "unavailable", reason: "Executive synthesis has not been generated." };
   if (artifact.status === "queued" || artifact.status === "running") return { status: artifact.status };
   if (artifact.status === "failed") {
-    return { status: "unavailable", artifactId: artifact.id, reason: artifact.error_code ?? "Executive synthesis failed." };
+    return { status: "unavailable", artifactId: artifact.id, ...(artifact.completed_at ? { completedAt: artifact.completed_at } : {}), reason: artifact.error_code ?? "Executive synthesis failed." };
   }
   const result = artifact.result_json ? parseResult(artifact.result_json, identity) : null;
   if (!result) return { status: "unavailable", artifactId: artifact.id, reason: "Executive synthesis is invalid." };
   return result.status === "empty"
-    ? { status: "empty", artifactId: artifact.id, result }
-    : { status: "available", artifactId: artifact.id, result };
+    ? { status: "empty", artifactId: artifact.id, ...(artifact.completed_at ? { completedAt: artifact.completed_at } : {}), result }
+    : { status: "available", artifactId: artifact.id, ...(artifact.completed_at ? { completedAt: artifact.completed_at } : {}), result };
 };
 
 const parseSectionResult = (

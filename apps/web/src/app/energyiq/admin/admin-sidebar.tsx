@@ -15,7 +15,9 @@ export type AdminSection =
   | "operational-policies"
   | "data-map"
   | "templates"
+  | "ai-analysis"
   | "knowledge"
+  | "methods"
   | "assets"
   | "runs"
   | "conversations"
@@ -64,8 +66,10 @@ const projectItems: NavigationItem[] = [
   { id: "meter-mapping", label: "Meter Mapping", icon: "meter", available: true },
   { id: "operational-policies", label: "Tariff & Hours", icon: "settings", available: true },
   { id: "data-map", label: "Data Map", icon: "map", available: true },
-  { id: "templates", label: "Overview Setup", icon: "explorer", available: true },
+  { id: "templates", label: "Overview Design", icon: "explorer", available: true },
+  { id: "ai-analysis", label: "AI Analysis", icon: "analysis", available: true },
   { id: "knowledge", label: "Knowledge", icon: "spark", available: true },
+  { id: "methods", label: "Methods & SOP", icon: "settings", available: true },
   { id: "assets", label: "Assets", icon: "explorer", available: true },
 ];
 
@@ -328,7 +332,7 @@ export function isAdminSection(value: string | null): value is AdminSection {
   if (!value) return false;
   return [
     "overview", "organisations", "users", "project-overview", "basics", "structure",
-    "data-sources", "meter-mapping", "operational-policies", "data-map", "templates", "knowledge", "assets",
+    "data-sources", "meter-mapping", "operational-policies", "data-map", "templates", "ai-analysis", "knowledge", "methods", "assets",
     "runs", "conversations", "usage", "traces", "models", "skills", "tools", "mcp",
   ].includes(value);
 }

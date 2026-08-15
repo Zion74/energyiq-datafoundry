@@ -177,9 +177,9 @@ export type PreschoolExecutiveSynthesisResult =
 
 export type PreschoolOverviewAiUnitStatus<T> =
   | { status: "queued" | "running" }
-  | { status: "available"; artifactId: string; result: T }
-  | { status: "empty"; artifactId: string; result: T }
-  | { status: "unavailable"; artifactId?: string; reason: string };
+  | { status: "available"; artifactId: string; completedAt?: string; result: T }
+  | { status: "empty"; artifactId: string; completedAt?: string; result: T }
+  | { status: "unavailable"; artifactId?: string; completedAt?: string; reason: string };
 
 export type PreschoolOverviewAiReadModel = {
   artifactKind: "preschool-overview-ai-read-model";
