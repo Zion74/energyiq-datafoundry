@@ -117,6 +117,36 @@ describe("EnergyIQ AI claim validation", () => {
     })).toBe(true);
   });
 
+  it("recognises server-owned plural Centre code dimensions as entity Evidence", () => {
+    const evidence = [
+      {
+        id: "after-hours:centres",
+        label: "Centres with closed-hour peaks",
+        unit: "count",
+        values: { centreCount: 4, centreCodes: "L,G,E,N" },
+      },
+      {
+        id: "efficiency:priority-centres",
+        label: "Priority Centres",
+        unit: "count",
+        values: { centreCount: 3, centreCodes: "J,G,M" },
+      },
+    ];
+
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "Centre G appears in both the closed-hour and efficiency-priority Centre sets.",
+      evidence,
+      sqlEvidence: [],
+      knownCentreCodes: ["E", "G", "J", "L", "M", "N"],
+    })).toBe(true);
+    expect(energyAiNarrativeClaimsSupported({
+      narrative: "Centre H appears in both sets.",
+      evidence,
+      sqlEvidence: [],
+      knownCentreCodes: ["E", "G", "H", "J", "L", "M", "N"],
+    })).toBe(false);
+  });
+
   it("validates a lowercase singular Centre code without treating a following word as a code", () => {
     const centreGEvidence = {
       id: "centre:g:usage",

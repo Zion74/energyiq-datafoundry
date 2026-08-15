@@ -16,10 +16,10 @@ import { handleEnergyApiRequest } from "./energy-api.js";
 import { resolveEnergyPublishedMeterRoute } from "./energy-query-context.js";
 import {
   createOverviewAiArtifactIdentity,
+  createPreschoolOverviewAiSectionArtifactIdentityV4,
   createPreschoolOverviewAiValueArtifactIdentity,
 } from "./overview-ai-artifact.js";
 import { materializePreschoolGoldenFixture } from "./preschool-golden.fixture.js";
-import { preschoolExecutiveSynthesisTargetId } from "./preschool-executive-synthesis.js";
 import {
   composePreschoolOverviewAiReadModel,
   composePreschoolOverviewAiReadModelV3,
@@ -526,18 +526,10 @@ describe("saved analysis decision-quality boundary", () => {
         modelProfileRevision: bindingV2.modelProfileRevision,
       });
       const artifactStore = metadata.energyIq.overviewAiArtifacts;
-      const sectionIdentityV2 = {
-        ...baseIdentityV2,
-        artifactKind: "section-interpretation",
+      const sectionIdentityV2 = createPreschoolOverviewAiSectionArtifactIdentityV4({
+        baseIdentity: baseIdentityV2,
         targetId: "centre-benchmark",
-        outputContractRevision: "preschool-section-interpretation-v3",
-        validatorRevision: "preschool-section-interpreter-validator-v12",
-        workflowRevision: "preschool-section-interpreter-v14",
-        investigatorPromptRevision: "preschool-section-interpreter-prompt-v14",
-        editorPromptRevision: "not-applicable-v1",
-        methodSkillId: "none",
-        methodSkillRevision: "not-applicable-v1",
-      } as const;
+      });
       const sectionArtifactV2 = artifactStore.queue({ identity: sectionIdentityV2, triggeredBy: "dev-user" });
       artifactStore.claim({ identity: sectionIdentityV2, workerId: "saved-analysis-section-worker-v2", leaseMs: 60_000 });
       artifactStore.complete({
@@ -550,42 +542,30 @@ describe("saved analysis decision-quality boundary", () => {
           status: "available",
           providerProfileId: sectionIdentityV2.modelProfileId,
           runId: "saved-analysis-ai-section-run-v2",
-          contract: { id: "preschool-section-interpretation", revision: "preschool-section-interpretation-v3" },
+          contract: { id: "preschool-section-interpretation", revision: "preschool-section-interpretation-v4" },
           binding: preschoolOverviewAiBindingFromIdentity(sectionIdentityV2),
           sectionId: "centre-benchmark",
-          summary: "Benchmark evidence supports a focused operating review.",
-          keyPoints: [
-            { kind: "finding", text: "Benchmark evidence deserves attention.", evidenceRefs: ["evidence:benchmark"] },
-            { kind: "next-check", text: "Review schedules before assigning a cause.", evidenceRefs: ["evidence:benchmark"] },
-          ],
-        }),
-      });
-      const executiveIdentityV2 = createPreschoolOverviewAiValueArtifactIdentity({
-        baseIdentity: baseIdentityV2,
-        artifactKind: "executive-synthesis",
-        targetId: preschoolExecutiveSynthesisTargetId([sectionArtifactV2.id]),
-      });
-      artifactStore.queue({ identity: executiveIdentityV2, triggeredBy: "dev-user" });
-      artifactStore.claim({ identity: executiveIdentityV2, workerId: "saved-analysis-executive-worker-v2", leaseMs: 60_000 });
-      artifactStore.complete({
-        identity: executiveIdentityV2,
-        workerId: "saved-analysis-executive-worker-v2",
-        sessionId: "saved-analysis-ai-session-v2",
-        runId: "saved-analysis-ai-executive-run-v2",
-        resultJson: JSON.stringify({
-          artifactKind: "executive-synthesis",
-          status: "available",
-          providerProfileId: executiveIdentityV2.modelProfileId,
-          runId: "saved-analysis-ai-executive-run-v2",
-          contract: { id: "preschool-executive-synthesis", revision: "preschool-executive-synthesis-v1" },
-          binding: preschoolOverviewAiBindingFromIdentity(executiveIdentityV2),
-          sourceSectionArtifactIds: [sectionArtifactV2.id],
-          keyFindings: [{
-            id: "executive-finding-v2",
-            takeaway: "Benchmark evidence supports a focused operating review.",
-            sectionIds: ["centre-benchmark"],
+          packRevision: "v2",
+          capability: {
+            revision: "scoped-read-only-v1",
+            mode: "scoped-read-only",
+            tools: ["compare_centres", "inspect_related_section_signals"],
+          },
+          toolAudits: [],
+          summary: {
+            text: "Benchmark evidence supports a focused operating review.",
             evidenceRefs: ["evidence:benchmark"],
-          }],
+          },
+          insights: [],
+          publication: {
+            policyId: "preschool-section-publication",
+            policyRevision: "v1",
+            discoveredCount: 0,
+            acceptedCount: 0,
+            rejectedCount: 0,
+            publishedCount: 0,
+            suppressedCandidateIds: [],
+          },
         }),
       });
       const canonicalResultV2 = composePreschoolOverviewAiReadModel({
@@ -609,7 +589,11 @@ describe("saved analysis decision-quality boundary", () => {
       const tamperedResultV2 = JSON.parse(JSON.stringify(canonicalResultV2)) as NonNullable<typeof canonicalResultV2>;
       const tamperedSection = tamperedResultV2.sections["centre-benchmark"];
       if (tamperedSection.status !== "available") throw new Error("canonical Section fixture missing");
-      tamperedSection.result.summary = "Browser-authored replacement summary.";
+      const tamperedSummary = tamperedSection.result.summary;
+      if (!tamperedSummary || typeof tamperedSummary === "string") {
+        throw new Error("canonical V4 Section Summary fixture missing");
+      }
+      tamperedSummary.text = "Browser-authored replacement summary.";
       const tamperedAttachment = await handleEnergyApiRequest(
         jsonPost({ aiArtifact: { ...canonicalArtifactV2, result: tamperedResultV2 } }),
         ["projects", project.id, "saved-analyses", records[0]?.id ?? "", "ai-result"],
@@ -825,23 +809,10 @@ describe("saved analysis decision-quality boundary", () => {
         created_by: "dev-user",
       });
 
-      const sectionIdentityV4 = {
-        ...baseIdentity,
-        identityContractRevision: "v4",
-        analysisPackId: "preschool-section-pack",
-        analysisPackRevision: "v2",
-        artifactKind: "section-interpretation",
+      const sectionIdentityV4 = createPreschoolOverviewAiSectionArtifactIdentityV4({
+        baseIdentity,
         targetId: "centre-benchmark",
-        outputContractRevision: "preschool-section-interpretation-v4",
-        validatorRevision: "acceptance-validator-v1",
-        workflowRevision: "discover-accept-publish-v1",
-        investigatorPromptRevision: "discovery-prompt-v1",
-        editorPromptRevision: "not-applicable-v1",
-        methodSkillId: "none",
-        methodSkillRevision: "not-applicable-v1",
-        capabilityRevision: "pack-only-v1",
-        publicationRevision: "v1",
-      } as const;
+      });
       const sectionV4 = artifactStore.queue({ identity: sectionIdentityV4, triggeredBy: "dev-user" });
       artifactStore.claim({ identity: sectionIdentityV4, workerId: "saved-ai-v4-worker", leaseMs: 60_000 });
       artifactStore.complete({
@@ -858,7 +829,12 @@ describe("saved analysis decision-quality boundary", () => {
           binding: preschoolOverviewAiBindingFromIdentity(sectionIdentityV4),
           sectionId: "centre-benchmark",
           packRevision: "v2",
-          capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
+          capability: {
+            revision: "scoped-read-only-v1",
+            mode: "scoped-read-only",
+            tools: ["compare_centres", "inspect_related_section_signals"],
+          },
+          toolAudits: [],
           summary: { text: "Canonical v4 summary.", evidenceRefs: ["evidence:v4"] },
           insights: [],
           publication: {
@@ -906,7 +882,12 @@ describe("saved analysis decision-quality boundary", () => {
           binding: preschoolOverviewAiBindingFromIdentity(otherWorkspaceSectionIdentity),
           sectionId: "centre-benchmark",
           packRevision: "v2",
-          capability: { revision: "pack-only-v1", mode: "pack-only", tools: [] },
+          capability: {
+            revision: "scoped-read-only-v1",
+            mode: "scoped-read-only",
+            tools: ["compare_centres", "inspect_related_section_signals"],
+          },
+          toolAudits: [],
           summary: { text: "Canonical summary from another Workspace.", evidenceRefs: ["evidence:v4"] },
           insights: [],
           publication: {

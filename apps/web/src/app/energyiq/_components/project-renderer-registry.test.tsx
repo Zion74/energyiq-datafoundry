@@ -133,11 +133,11 @@ describe("Project Renderer Registry", () => {
     expect(preschoolMarkup).toContain("18 May · 14:00–15:00");
     expect(preschoolMarkup).toContain("observed leading contributor");
     expect(preschoolMarkup).not.toContain("Public Holiday");
-    expect(preschoolMarkup).toContain("Overall consumption summary");
+    expect(preschoolMarkup).toContain("Overall metrics");
     expect(preschoolMarkup.match(/data-overall-summary-metric=/g)).toHaveLength(3);
     expect(preschoolMarkup).toContain("Energy &amp; cost by centre type");
     expect(preschoolMarkup).toContain("S$0.2727/kWh before GST");
-    expect(preschoolMarkup).toContain("AI Executive Summary");
+    expect(preschoolMarkup).toContain("Key Findings");
     expect(preschoolMarkup).toContain("At a glance");
     expect(preschoolMarkup).toContain("AI energy analyst");
     expect(preschoolMarkup).toContain("Loading saved AI summary…");
@@ -163,7 +163,7 @@ describe("Project Renderer Registry", () => {
     const aiSlot = preschoolMarkup.indexOf("AI energy analyst");
     expect(efficiencyPriority).toBeGreaterThan(-1);
     expect(aiSlot).toBeGreaterThan(-1);
-    expect(aiSlot).toBeLessThan(efficiencyPriority);
+    expect(aiSlot).toBeGreaterThan(operatingPriority);
     expect(afterHoursPriority).toBeGreaterThan(efficiencyPriority);
     expect(operatingPriority).toBeGreaterThan(afterHoursPriority);
     const decisionMarkup = preschoolMarkup.slice(efficiencyPriority, preschoolMarkup.indexOf("Monthly Energy Outlook"));

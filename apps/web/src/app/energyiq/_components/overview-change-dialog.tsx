@@ -354,6 +354,7 @@ const findLatestCompatibleOverview = async (input: {
     let earlierReadFailure: unknown = null;
     for (const detail of details) {
       if (detail.status === "rejected") {
+        if (isLegacySavedAiPayloadError(detail.reason)) continue;
         earlierReadFailure ??= detail.reason;
         continue;
       }
@@ -366,6 +367,9 @@ const findLatestCompatibleOverview = async (input: {
   }
   return null;
 };
+
+const isLegacySavedAiPayloadError = (reason: unknown): boolean => reason instanceof Error
+  && reason.message === "ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID";
 
 const MAX_CLIENT_COMPARISON_CANDIDATES = 40;
 

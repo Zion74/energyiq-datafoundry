@@ -238,7 +238,7 @@ function semanticMetricContext(entityContext: string): string {
 
 function collectNamedCentreDimensions(value: unknown, field = ""): string[] {
   if (typeof value === "string") {
-    return /(?:centre|center|parent_node|scope)(?:_?code|_?id|_?name)?$/u.test(field.toLowerCase()) ? [value] : [];
+    return /(?:centre|center|parent_node|scope)s?(?:_?(?:code|id|name)s?)?$/u.test(field.toLowerCase()) ? [value] : [];
   }
   if (Array.isArray(value)) return value.flatMap((item) => collectNamedCentreDimensions(item, field));
   if (isRecord(value)) return Object.entries(value).flatMap(([key, item]) => collectNamedCentreDimensions(item, key));

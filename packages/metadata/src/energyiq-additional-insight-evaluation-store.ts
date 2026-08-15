@@ -1584,6 +1584,18 @@ const supportedTargetIdentity = (target: AdditionalAiInsightEvaluationTarget): b
     && target.validatorRevision === "additional-insights-acceptance-v13"
     && target.workflowRevision === "additional-insights-discover-accept-publish-v16"
     && target.promptRevision === "additional-insights-discovery-v10")
+  || (target.artifactIdentityRevision === "additional-insights-v17"
+    && target.validatorRevision === "additional-insights-acceptance-v14"
+    && target.workflowRevision === "additional-insights-discover-accept-publish-v17"
+    && target.promptRevision === "additional-insights-discovery-v10")
+  || (target.artifactIdentityRevision === "additional-insights-v18"
+    && target.validatorRevision === "additional-insights-acceptance-v15"
+    && target.workflowRevision === "additional-insights-discover-accept-publish-v18"
+    && target.promptRevision === "additional-insights-discovery-v10")
+  || (target.artifactIdentityRevision === "additional-insights-v19"
+    && target.validatorRevision === "additional-insights-acceptance-v16"
+    && target.workflowRevision === "additional-insights-discover-accept-publish-v19"
+    && target.promptRevision === "additional-insights-discovery-v10")
 );
 
 const overviewArtifactIdentityMatchesEvaluationTarget = (
@@ -1618,9 +1630,9 @@ const overviewArtifactIdentityMatchesEvaluationTarget = (
 };
 
 const requireCurrentTargetIdentity = (target: AdditionalAiInsightEvaluationTarget): void => {
-  if (target.artifactIdentityRevision !== "additional-insights-v16"
-    || target.validatorRevision !== "additional-insights-acceptance-v13"
-    || target.workflowRevision !== "additional-insights-discover-accept-publish-v16"
+  if (target.artifactIdentityRevision !== "additional-insights-v19"
+    || target.validatorRevision !== "additional-insights-acceptance-v16"
+    || target.workflowRevision !== "additional-insights-discover-accept-publish-v19"
     || target.promptRevision !== "additional-insights-discovery-v10") {
     throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_BEHAVIOR_NOT_CURRENT");
   }

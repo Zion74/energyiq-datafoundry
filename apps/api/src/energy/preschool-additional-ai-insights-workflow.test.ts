@@ -722,6 +722,377 @@ describe("Preschool Additional AI Insights workflow", () => {
     }
   });
 
+  it("keeps plural-dimension cross-signal Insights and replaces one unsupported title with its factual observation", async () => {
+    const harness = createHarness();
+    try {
+      const evidenceCatalog = catalog();
+      evidenceCatalog.facts.push(
+        {
+          id: "fact:after-hours-centres",
+          label: "Centres with closed-hour peaks",
+          metricId: "preschool.operating.centre_count",
+          value: 4,
+          unit: "count",
+          status: "confirmed",
+          evidenceRefs: ["snapshot-evidence:after-hours-centres"],
+          dimensions: { centreCodes: "L,G,E,N" },
+        },
+        {
+          id: "fact:priority-centres",
+          label: "Priority efficiency Centres",
+          metricId: "preschool.benchmark.priority_count",
+          value: 3,
+          unit: "count",
+          status: "confirmed",
+          evidenceRefs: ["snapshot-evidence:priority-centres"],
+          dimensions: { centreCodes: "J,G,M" },
+        },
+      );
+      const evidenceRefs = ["fact:after-hours-centres", "fact:priority-centres"];
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => evidenceCatalog,
+        resolvePresentedClaims: async ({ identity, catalog: currentCatalog }) =>
+          createPreschoolAdditionalAiPresentedClaims({ identity, catalog: currentCatalog, readModel: null }),
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [
+            candidate("candidate-centre-g-overlap", evidenceRefs[0]!, {
+              title: "Centre G spans both after-hours and efficiency-priority groups",
+              observation: "Centre G appears in both the closed-hour and efficiency-priority Centre sets.",
+              angle: "That overlap may make Centre G's closed-hour pattern a possible contributor to its efficiency signal.",
+              evidenceRefs,
+              incrementalContext: {
+                relatedPresentedClaimIds: evidenceRefs.map((ref) => `deterministic-overview:${ref}`),
+                novelConclusion: "Centre G spans both after-hours and efficiency-priority groups",
+              },
+            }),
+            candidate("candidate-wrong-two-of-three", evidenceRefs[0]!, {
+              title: "2 of 3 priority Centres show closed-hour peaks",
+              observation: "Centre G appears in both the closed-hour and efficiency-priority Centre sets.",
+              angle: "That overlap could be explored before attributing a cause.",
+              evidenceRefs,
+              incrementalContext: {
+                relatedPresentedClaimIds: evidenceRefs.map((ref) => `deterministic-overview:${ref}`),
+                novelConclusion: "2 of 3 priority Centres show closed-hour peaks",
+              },
+            }),
+          ] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "plural-dimension-candidate-run",
+        sessionId: "plural-dimension-candidate-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        publication: {
+          discoveredCount: 2,
+          acceptedCount: 2,
+          rejectedCount: 0,
+          acceptedCandidateIds: ["candidate-centre-g-overlap", "candidate-wrong-two-of-three"],
+          rejectedCandidateIds: [],
+        },
+      });
+      expect(result.findings).toEqual([
+        expect.objectContaining({
+          id: "additional:candidate-centre-g-overlap",
+          epistemicStatus: "inferred",
+          evidenceRefs,
+        }),
+        expect.objectContaining({
+          id: "additional:candidate-wrong-two-of-three",
+          title: "Centre G appears in both the closed-hour and efficiency-priority Centre sets.",
+          epistemicStatus: "inferred",
+          evidenceRefs,
+        }),
+      ]);
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("replaces unsupported factual-ordering titles while preserving their supported observations and angles", async () => {
+    const harness = createHarness();
+    try {
+      const evidenceCatalog = catalog();
+      evidenceCatalog.facts.push(
+        {
+          id: "fact:off-hours-energy",
+          label: "Off-hours energy use",
+          metricId: "energy.off_hours_usage_kwh",
+          value: 2631.0813,
+          unit: "kWh",
+          status: "confirmed",
+          evidenceRefs: ["snapshot-evidence:off-hours-energy"],
+          dimensions: {},
+        },
+        {
+          id: "fact:aircon-energy",
+          label: "aircon energy use",
+          metricId: "energy.category_usage_kwh",
+          value: 5468.9737,
+          unit: "kWh",
+          status: "confirmed",
+          evidenceRefs: ["snapshot-evidence:aircon-energy"],
+          dimensions: { category: "aircon" },
+        },
+        entityFact("fact:centre-l-per-person", "Centre L", 24.7851),
+        {
+          id: "fact:after-hours-centres",
+          label: "Centres with closed-hour peaks",
+          metricId: "preschool.operating.centre_count",
+          value: 4,
+          unit: "count",
+          status: "confirmed",
+          evidenceRefs: ["snapshot-evidence:after-hours-centres"],
+          dimensions: { centreCodes: "L,G,E,N" },
+        },
+        {
+          id: "fact:centre-l-priority",
+          label: "Centre L priority flag",
+          metricId: "preschool.benchmark.priority_flag",
+          value: false,
+          status: "confirmed",
+          evidenceRefs: ["snapshot-evidence:centre-l-priority"],
+          dimensions: { centreCode: "L" },
+        },
+        {
+          id: "fact:centre-g-eui-rank",
+          label: "Centre G EUI rank",
+          metricId: "preschool.benchmark.eui_rank",
+          value: 1,
+          unit: "rank",
+          status: "confirmed",
+          evidenceRefs: ["snapshot-evidence:centre-g-eui-rank"],
+          dimensions: { centreCode: "G", metric: "eui", rank: "1" },
+        },
+      );
+      const energyRefs = ["fact:off-hours-energy", "fact:aircon-energy"];
+      const centreRefs = ["fact:centre-l-per-person", "fact:after-hours-centres", "fact:centre-l-priority"];
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => evidenceCatalog,
+        resolvePresentedClaims: async ({ identity, catalog: currentCatalog }) =>
+          createPreschoolAdditionalAiPresentedClaims({ identity, catalog: currentCatalog, readModel: null }),
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [
+            candidate("candidate-false-exceeds", energyRefs[0]!, {
+              title: "Closed-hour 2631.0813 kWh exceeds Aircon category total",
+              observation: "Off-hours energy is 2631.0813 kWh while Aircon energy is 5468.9737 kWh.",
+              angle: "The relationship may still justify checking the closed-hour category mix.",
+              evidenceRefs: energyRefs,
+              incrementalContext: {
+                relatedPresentedClaimIds: energyRefs.map((ref) => `deterministic-overview:${ref}`),
+                novelConclusion: "Closed-hour 2631.0813 kWh exceeds Aircon category total",
+              },
+            }),
+            candidate("candidate-unsupported-top", centreRefs[0]!, {
+              title: "Centre L has top absolute use despite escaping the priority screen",
+              observation: "Centre L appears in the closed-hour Centre set and is not marked as a priority Centre.",
+              angle: "Its absolute use may deserve a separate review from the intensity screen.",
+              evidenceRefs: centreRefs,
+              incrementalContext: {
+                relatedPresentedClaimIds: centreRefs.map((ref) => `deterministic-overview:${ref}`),
+                novelConclusion: "Centre L has top absolute use despite escaping the priority screen",
+              },
+            }),
+            candidate("candidate-transparent-hypothesis", energyRefs[0]!, {
+              title: "Closed-hour composition may differ from the overall category mix",
+              observation: "Off-hours energy is 2631.0813 kWh while Aircon energy is 5468.9737 kWh.",
+              angle: "The closed-hour composition may differ from the overall category mix, which is worth testing at circuit level.",
+              evidenceRefs: energyRefs,
+              epistemicStatus: "speculative",
+              incrementalContext: {
+                relatedPresentedClaimIds: energyRefs.map((ref) => `deterministic-overview:${ref}`),
+                novelConclusion: "Closed-hour composition may differ from the overall category mix",
+              },
+            }),
+            candidate("candidate-qualified-false-observation", energyRefs[0]!, {
+              title: "A timing comparison may deserve review",
+              observation: "Off-hours energy exceeds Aircon energy, which may matter.",
+              angle: "The relationship may justify a category-level timing check.",
+              evidenceRefs: energyRefs,
+              incrementalContext: {
+                relatedPresentedClaimIds: energyRefs.map((ref) => `deterministic-overview:${ref}`),
+                novelConclusion: "A timing comparison may deserve review",
+              },
+            }),
+            candidate("candidate-cross-centre-rank-leak", centreRefs[0]!, {
+              title: "A separate absolute-use lens may help",
+              observation: "Centre L has highest absolute energy use across the portfolio.",
+              angle: "Absolute use may reveal a different priority from the intensity screen.",
+              evidenceRefs: [...centreRefs, "fact:centre-g-eui-rank"],
+              incrementalContext: {
+                relatedPresentedClaimIds: [...centreRefs, "fact:centre-g-eui-rank"]
+                  .map((ref) => `deterministic-overview:${ref}`),
+                novelConclusion: "A separate absolute-use lens may help",
+              },
+            }),
+            candidate("candidate-multi-centre-rank-leak", "fact:centre-g-eui-rank", {
+              title: "A shared intensity pattern may deserve review",
+              observation: "Centre G and Centre L have highest EUI across the portfolio.",
+              angle: "A shared high-intensity pattern could point to a common operating condition.",
+              evidenceRefs: ["fact:centre-g-eui-rank", ...centreRefs],
+              incrementalContext: {
+                relatedPresentedClaimIds: ["fact:centre-g-eui-rank", ...centreRefs]
+                  .map((ref) => `deterministic-overview:${ref}`),
+                novelConclusion: "A shared intensity pattern may deserve review",
+              },
+            }),
+            candidate("candidate-mixed-direction-rank-leak", "fact:centre-g-eui-rank", {
+              title: "The intensity extremes may deserve review",
+              observation: "Centre G has highest EUI but lowest EUI across the portfolio.",
+              angle: "Contradictory extremes would warrant checking the comparison basis.",
+              evidenceRefs: ["fact:centre-g-eui-rank"],
+              incrementalContext: {
+                relatedPresentedClaimIds: ["deterministic-overview:fact:centre-g-eui-rank"],
+                novelConclusion: "The intensity extremes may deserve review",
+              },
+            }),
+            candidate("candidate-most-energy-rank-leak", "fact:centre-g-eui-rank", {
+              title: "Absolute use may deserve a separate review",
+              observation: "Centre L uses the most energy across the portfolio.",
+              angle: "Absolute use could identify a different operational priority.",
+              evidenceRefs: ["fact:centre-g-eui-rank", ...centreRefs],
+              incrementalContext: {
+                relatedPresentedClaimIds: ["fact:centre-g-eui-rank", ...centreRefs]
+                  .map((ref) => `deterministic-overview:${ref}`),
+                novelConclusion: "Absolute use may deserve a separate review",
+              },
+            }),
+            candidate("candidate-ranks-first-eui-leak", "fact:centre-g-eui-rank", {
+              title: "The EUI ranking may deserve a separate review",
+              observation: "Centre L ranks first for EUI across the portfolio.",
+              angle: "The EUI ranking could identify a different operational priority.",
+              evidenceRefs: ["fact:centre-g-eui-rank", ...centreRefs],
+              incrementalContext: {
+                relatedPresentedClaimIds: ["fact:centre-g-eui-rank", ...centreRefs]
+                  .map((ref) => `deterministic-overview:${ref}`),
+                novelConclusion: "The EUI ranking may deserve a separate review",
+              },
+            }),
+          ] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "factual-ordering-run",
+        sessionId: "factual-ordering-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        publication: {
+          acceptedCandidateIds: [
+            "candidate-false-exceeds",
+            "candidate-unsupported-top",
+            "candidate-transparent-hypothesis",
+          ],
+          rejectedCandidateIds: [
+            "candidate-qualified-false-observation",
+            "candidate-cross-centre-rank-leak",
+            "candidate-multi-centre-rank-leak",
+            "candidate-mixed-direction-rank-leak",
+            "candidate-most-energy-rank-leak",
+            "candidate-ranks-first-eui-leak",
+          ],
+        },
+      });
+      expect(result.findings).toEqual([
+        expect.objectContaining({
+          id: "additional:candidate-false-exceeds",
+          title: "Off-hours energy is 2631.0813 kWh while Aircon energy is 5468.9737 kWh.",
+        }),
+        expect.objectContaining({
+          id: "additional:candidate-unsupported-top",
+          title: "Centre L appears in the closed-hour Centre set and is not marked as a priority Centre.",
+        }),
+        expect.objectContaining({ id: "additional:candidate-transparent-hypothesis" }),
+      ]);
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("accepts common superlative wording when exact metric and rank Evidence supports it", async () => {
+    const harness = createHarness();
+    try {
+      const evidenceCatalog = catalog();
+      evidenceCatalog.facts.push(
+        {
+          id: "fact:centre-l-absolute-rank",
+          label: "Centre L absolute energy rank",
+          metricId: "preschool.benchmark.absolute_usage_rank",
+          value: 1,
+          unit: "rank",
+          status: "confirmed",
+          evidenceRefs: ["snapshot-evidence:centre-l-absolute-rank"],
+          dimensions: { centreCode: "L", metric: "absolute-energy", rank: "1" },
+        },
+        {
+          id: "fact:centre-g-eui-rank",
+          label: "Centre G EUI rank",
+          metricId: "preschool.benchmark.eui_rank",
+          value: 1,
+          unit: "rank",
+          status: "confirmed",
+          evidenceRefs: ["snapshot-evidence:centre-g-eui-rank"],
+          dimensions: { centreCode: "G", metric: "eui", rank: "1" },
+        },
+      );
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => evidenceCatalog,
+        resolvePresentedClaims: async ({ identity, catalog: currentCatalog }) =>
+          createPreschoolAdditionalAiPresentedClaims({ identity, catalog: currentCatalog, readModel: null }),
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [
+            candidate("candidate-most-electricity", "fact:centre-l-absolute-rank", {
+              title: "Absolute energy use may deserve a separate lens",
+              observation: "Centre L uses the most electricity across the portfolio.",
+              angle: "This may reveal a different priority from the normalised intensity screen.",
+              evidenceRefs: ["fact:centre-l-absolute-rank"],
+              incrementalContext: incrementalContext("deterministic-overview:fact:centre-l-absolute-rank"),
+            }),
+            candidate("candidate-first-energy-intensity", "fact:centre-g-eui-rank", {
+              title: "The intensity leader may deserve a targeted review",
+              observation: "Centre G ranks first for energy intensity across the portfolio.",
+              angle: "This could focus a like-for-like operational comparison.",
+              evidenceRefs: ["fact:centre-g-eui-rank"],
+              incrementalContext: incrementalContext("deterministic-overview:fact:centre-g-eui-rank"),
+            }),
+          ] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "supported-superlatives-run",
+        sessionId: "supported-superlatives-session",
+      });
+
+      expect(result.publication).toMatchObject({
+        acceptedCandidateIds: ["candidate-most-electricity", "candidate-first-energy-intensity"],
+        rejectedCandidateIds: [],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
   it("uses the complete Catalog Centre vocabulary while validating only candidate-cited Evidence", async () => {
     const harness = createHarness();
     try {
@@ -2120,11 +2491,11 @@ const resolvePresentedClaimsFixture: Parameters<typeof createPreschoolAdditional
           answer: JSON.stringify({ candidates: [candidate("candidate-supported-cross-period", "analysis.comparison.change_pct", {
             title: "Energy use increased by 4.63% from the previous period",
             observation: "Energy use rose 4.63 percent from the previous period.",
-            angle: "Energy use recorded an increase of 4.63 percent from the previous period and might be 10% lower after schedule changes.",
+            angle: "Energy use recorded an increase of 4.63 percent from the previous period. If schedules change, energy use may be 10% lower than last month.",
             epistemicStatus: "speculative",
             incrementalContext: {
               relatedPresentedClaimIds: ["deterministic-overview:analysis.comparison.change_pct"],
-              novelConclusion: "Energy use might be 10% lower after schedule changes",
+              novelConclusion: "If schedules change, energy use may be 10% lower than last month",
             },
           })] }),
           runId,
@@ -2143,7 +2514,77 @@ const resolvePresentedClaimsFixture: Parameters<typeof createPreschoolAdditional
         status: "available",
         publication: { acceptedCandidateIds: ["candidate-supported-cross-period"] },
         findings: [{
-          text: "**Evidence signal:** Energy use rose 4.63 percent from the previous period.\n\n**AI angle:** Energy use recorded an increase of 4.63 percent from the previous period and might be 10% lower after schedule changes.",
+          text: "**Evidence signal:** Energy use rose 4.63 percent from the previous period.\n\n**AI angle:** Energy use recorded an increase of 4.63 percent from the previous period. If schedules change, energy use may be 10% lower than last month.",
+        }],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("does not lend peak comparison Evidence to a same-magnitude total-energy claim", async () => {
+    const harness = createHarness();
+    try {
+      const currentCatalog = catalog();
+      currentCatalog.facts.push(
+        {
+          ...fact("analysis.summary.peak_kw", "confirmed", 138.8),
+          metricId: "energy.peak_interval_average_kw",
+          unit: "kW",
+        },
+        {
+          ...fact("analysis.summary.usage_kwh", "confirmed", 24_483.57),
+          metricId: "energy.total_usage_kwh",
+          unit: "kWh",
+        },
+        {
+          ...fact("analysis.comparison.peak_change_pct", "confirmed", 4.63),
+          metricId: "energy.period_change_pct",
+          dimensions: {
+            comparison: "previous-period",
+            comparedMetricId: "energy.peak_interval_average_kw",
+          },
+        },
+      );
+      const evidenceRefs = [
+        "analysis.summary.peak_kw",
+        "analysis.summary.usage_kwh",
+        "analysis.comparison.peak_change_pct",
+      ];
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => currentCatalog,
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [candidate("candidate-cross-metric-comparison", evidenceRefs[0]!, {
+            title: "Peak comparison could frame a targeted follow-up",
+            observation: "Peak interval-average power is 138.8 kW.",
+            angle: "Total energy use increased 4.63% from the previous period and peak demand rose 4.63% from the previous period. The peak comparison may be worth checking against operating schedules.",
+            epistemicStatus: "speculative",
+            evidenceRefs,
+            incrementalContext: {
+              relatedPresentedClaimIds: evidenceRefs.map((ref) => `deterministic-overview:${ref}`),
+              novelConclusion: "Peak comparison could frame a targeted follow-up",
+            },
+          })] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "cross-metric-comparison-run",
+        sessionId: "cross-metric-comparison-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        publication: { acceptedCandidateIds: ["candidate-cross-metric-comparison"] },
+        findings: [{
+          id: "additional:candidate-cross-metric-comparison",
+          text: "**Evidence signal:** Peak interval-average power is 138.8 kW.\n\n**AI angle:** The peak comparison may be worth checking against operating schedules.",
         }],
       });
     } finally {
@@ -2183,7 +2624,7 @@ const resolvePresentedClaimsFixture: Parameters<typeof createPreschoolAdditional
           answer: JSON.stringify({ candidates: [candidate("candidate-peak-comparison-boundary", "analysis.summary.peak_kw", {
             title: "Peak demand may be concentrated in a narrow operating window",
             observation: "Peak interval-average power is 138.8 kW.",
-            angle: "Peak demand was higher than the previous 28-day window, but total energy use might be higher than last month. Centre G energy use was higher than last month. Total energy use increased by 99% from last month. Managers might investigate why total energy use increased 99% from last month. It is possible that managers should investigate why total energy use increased 99% from last month. If managers investigate why total energy use increased 99% from last month, they should check the comparison first. Total energy use surged by 99% from last month. Total energy use jumped by 99 percent from last month. Total energy use was 99 percent more than last month. Total energy use saw a 99% increase from last month. Total energy use recorded an increase of 99 percent from last month. Total energy use doubled from last month. Total energy use halved from last month. Total energy use may be 10% higher than last month due to plug loads accounting for 98% of use. Peak demand may be higher than last month, which would be worth testing against the next comparison window.",
+            angle: "Peak demand was higher than the previous 28-day window, but total energy use might be higher than last month. Centre G energy use was higher than last month. Total energy use increased by 99% from last month. Managers might investigate why total energy use increased 99% from last month. It is possible that managers should investigate why total energy use increased 99% from last month. If managers investigate why total energy use increased 99% from last month, they should check the comparison first. Total energy use surged by 99% from last month. Total energy use jumped by 99 percent from last month. Total energy use was 99 percent more than last month. Total energy use saw a 99% increase from last month. Total energy use recorded an increase of 99 percent from last month. Usage may have increased 999% in the previous period. Total energy use may be 999% higher than last month. Total energy use may be double last month. Total energy use may be halved versus the previous period. Total energy use may be 10% higher than last month due to plug loads accounting for 98% of use. Peak demand may be higher than last month, which would be worth testing against the next comparison window.",
             epistemicStatus: "speculative",
             evidenceRefs: ["analysis.summary.peak_kw", "analysis.comparison.change_pct", "analysis.child_scopes.centre-g.usage_kwh", "analysis.categories.plug_load.share_pct"],
             incrementalContext: {
@@ -2209,6 +2650,198 @@ const resolvePresentedClaimsFixture: Parameters<typeof createPreschoolAdditional
         findings: [{
           text: "**Evidence signal:** Peak interval-average power is 138.8 kW.\n\n**AI angle:** total energy use might be higher than last month. Peak demand may be higher than last month, which would be worth testing against the next comparison window.",
           epistemicStatus: "speculative",
+        }],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("does not let a scenario label turn an unsupported historical magnitude into a forward experiment", async () => {
+    const harness = createHarness();
+    try {
+      const currentCatalog = catalog();
+      currentCatalog.facts.push({
+        ...fact("analysis.summary.usage_kwh", "confirmed", 24_483.57),
+        metricId: "energy.total_usage_kwh",
+        unit: "kWh",
+      });
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => currentCatalog,
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [candidate("candidate-retrospective-scenario-mask", "analysis.summary.usage_kwh", {
+            title: "A schedule relationship may be worth testing",
+            observation: "Total energy use is 24483.57 kWh.",
+            angle: "Total energy may be 999% higher than last month, a scenario worth investigating. Total energy may be 999% higher than last month and a proposed schedule adjustment is worth testing. A schedule relationship may be worth testing in the next period.",
+            epistemicStatus: "speculative",
+            incrementalContext: {
+              relatedPresentedClaimIds: ["deterministic-overview:analysis.summary.usage_kwh"],
+              novelConclusion: "A schedule relationship may be worth testing in the next period",
+            },
+          })] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "retrospective-scenario-mask-run",
+        sessionId: "retrospective-scenario-mask-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        publication: { acceptedCandidateIds: ["candidate-retrospective-scenario-mask"] },
+        findings: [{
+          text: "**Evidence signal:** Total energy use is 24483.57 kWh.\n\n**AI angle:** A schedule relationship may be worth testing in the next period.",
+        }],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("does not lend one comparison fact to another metric joined under a shared change verb", async () => {
+    const harness = createHarness();
+    try {
+      const currentCatalog = catalog();
+      currentCatalog.facts.push(
+        {
+          ...fact("analysis.summary.peak_kw", "confirmed", 138.8),
+          metricId: "energy.peak_interval_average_kw",
+          unit: "kW",
+        },
+        {
+          ...fact("analysis.summary.usage_kwh", "confirmed", 24_483.57),
+          metricId: "energy.total_usage_kwh",
+          unit: "kWh",
+        },
+        {
+          ...fact("analysis.comparison.change_pct", "confirmed", 4.63),
+          metricId: "energy.period_change_pct",
+          dimensions: {
+            comparison: "previous-period",
+            comparedMetricId: "energy.total_usage_kwh",
+          },
+        },
+      );
+      const evidenceRefs = [
+        "analysis.summary.peak_kw",
+        "analysis.summary.usage_kwh",
+        "analysis.comparison.change_pct",
+      ];
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => currentCatalog,
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [candidate("candidate-shared-change-verb", evidenceRefs[0]!, {
+            title: "Peak timing may deserve a targeted review",
+            observation: "Peak interval-average power is 138.8 kW.",
+            angle: "Peak demand and total energy use rose 4.63% from the previous period. Peak timing may deserve a targeted review.",
+            epistemicStatus: "speculative",
+            evidenceRefs,
+            incrementalContext: {
+              relatedPresentedClaimIds: evidenceRefs.map((ref) => `deterministic-overview:${ref}`),
+              novelConclusion: "Peak timing may deserve a targeted review",
+            },
+          })] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "shared-change-verb-run",
+        sessionId: "shared-change-verb-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        publication: { acceptedCandidateIds: ["candidate-shared-change-verb"] },
+        findings: [{
+          text: "**Evidence signal:** Peak interval-average power is 138.8 kW.\n\n**AI angle:** Peak timing may deserve a targeted review.",
+        }],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("does not lend one Centre comparison fact to another Centre joined under a shared change verb", async () => {
+    const harness = createHarness();
+    try {
+      const currentCatalog = catalog();
+      currentCatalog.facts.push(
+        {
+          ...fact("analysis.child_scopes.centre-g.usage_kwh", "confirmed", 880),
+          label: "Centre G energy use",
+          metricId: "energy.total_usage_kwh",
+          unit: "kWh",
+          dimensions: { centreCode: "G", scopeId: "centre-g" },
+        },
+        {
+          ...fact("analysis.child_scopes.centre-h.usage_kwh", "confirmed", 760),
+          label: "Centre H energy use",
+          metricId: "energy.total_usage_kwh",
+          unit: "kWh",
+          dimensions: { centreCode: "H", scopeId: "centre-h" },
+        },
+        {
+          ...fact("analysis.child_scopes.centre-h.change_pct", "confirmed", 4.63),
+          metricId: "energy.period_change_pct",
+          dimensions: {
+            comparison: "previous-period",
+            comparedMetricId: "energy.total_usage_kwh",
+            centreCode: "H",
+            scopeId: "centre-h",
+          },
+        },
+      );
+      const evidenceRefs = [
+        "analysis.child_scopes.centre-g.usage_kwh",
+        "analysis.child_scopes.centre-h.usage_kwh",
+        "analysis.child_scopes.centre-h.change_pct",
+      ];
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => currentCatalog,
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [candidate("candidate-shared-centre-change-verb", evidenceRefs[0]!, {
+            title: "The two Centres may deserve a timing comparison",
+            observation: "Centre G uses 880 kWh while Centre H uses 760 kWh.",
+            angle: "Centre G and Centre H energy use increased 4.63% from the previous period. The two Centres may deserve a timing comparison.",
+            epistemicStatus: "speculative",
+            evidenceRefs,
+            incrementalContext: {
+              relatedPresentedClaimIds: evidenceRefs.map((ref) => `deterministic-overview:${ref}`),
+              novelConclusion: "The two Centres may deserve a timing comparison",
+            },
+          })] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "shared-centre-change-verb-run",
+        sessionId: "shared-centre-change-verb-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        publication: { acceptedCandidateIds: ["candidate-shared-centre-change-verb"] },
+        findings: [{
+          text: "**Evidence signal:** Centre G uses 880 kWh while Centre H uses 760 kWh.\n\n**AI angle:** The two Centres may deserve a timing comparison.",
         }],
       });
     } finally {
@@ -2258,6 +2891,49 @@ const resolvePresentedClaimsFixture: Parameters<typeof createPreschoolAdditional
           title: novelConclusion,
           text: "**Evidence signal:** Standby is 31% (current Snapshot).\n\n**AI angle:** The standby share may hide a weekday timing pattern.",
           epistemicStatus: "speculative",
+        }],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("removes an exactly repeated exploratory sentence without dropping the supported card", async () => {
+    const harness = createHarness();
+    try {
+      const repeated = "This is a testable hypothesis rather than a confirmed root cause.";
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [candidate("candidate-repeated-angle", "fact:standby-share", {
+            title: "Standby timing may warrant a focused test",
+            observation: "Standby energy represents 31% of the selected period.",
+            angle: `${repeated} ${repeated.toLocaleLowerCase("en")}`,
+            epistemicStatus: "speculative",
+            incrementalContext: {
+              relatedPresentedClaimIds: ["deterministic-overview:fact:standby-share"],
+              novelConclusion: repeated,
+            },
+          })] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "repeated-angle-run",
+        sessionId: "repeated-angle-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        publication: { acceptedCandidateIds: ["candidate-repeated-angle"] },
+        findings: [{
+          text: `**Evidence signal:** Standby energy represents 31% of the selected period.\n\n**AI angle:** ${repeated}`,
         }],
       });
     } finally {

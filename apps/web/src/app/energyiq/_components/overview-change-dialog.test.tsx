@@ -161,6 +161,75 @@ describe("OverviewChangeDialog", () => {
     expect(container.textContent).not.toContain("Snapshot A:");
   });
 
+  it("skips a legacy Saved entry with an invalid AI payload and compares the next verified Overview", async () => {
+    const current = snapshot("snapshot-b", "release-b", 1_100);
+    const client = {
+      listEnergySavedAnalyses: vi.fn().mockResolvedValue({
+        items: [
+          { ...summary("legacy-invalid-ai", "snapshot-legacy", 2), createdAt: "2026-08-15T02:00:00.000Z" },
+          { ...summary("verified-a", "snapshot-a", 1), createdAt: "2026-08-15T01:00:00.000Z" },
+        ],
+      }),
+      getEnergySavedAnalysis: vi.fn(async (_projectId: string, analysisId: string) => {
+        if (analysisId === "legacy-invalid-ai") {
+          throw new Error("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+        }
+        return detail(summary("verified-a", "snapshot-a", 1), snapshot("snapshot-a", "release-a", 1_000));
+      }),
+    };
+
+    await act(async () => {
+      root.render(
+        <OverviewChangeDialog
+          projectId="preschool-demo"
+          currentSnapshot={current}
+          currentAiArtifact={null}
+          client={client}
+          onClose={vi.fn()}
+          onOpenPrevious={vi.fn()}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("Snapshot A:");
+    expect(container.textContent).toContain("snapshot-a");
+    expect(container.textContent).not.toContain("ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+  });
+
+  it("fails closed when a Saved read error only contains the legacy code as wrapped context", async () => {
+    const current = snapshot("snapshot-b", "release-b", 1_100);
+    const client = {
+      listEnergySavedAnalyses: vi.fn().mockResolvedValue({
+        items: [
+          { ...summary("newer-current-error", "snapshot-newer", 2), createdAt: "2026-08-15T02:00:00.000Z" },
+          { ...summary("verified-a", "snapshot-a", 1), createdAt: "2026-08-15T01:00:00.000Z" },
+        ],
+      }),
+      getEnergySavedAnalysis: vi.fn(async (_projectId: string, analysisId: string) => {
+        if (analysisId === "newer-current-error") {
+          throw new Error("Current Saved read failed after ENERGYIQ_SAVED_ANALYSIS_AI_RESULT_INVALID");
+        }
+        return detail(summary("verified-a", "snapshot-a", 1), snapshot("snapshot-a", "release-a", 1_000));
+      }),
+    };
+
+    await act(async () => {
+      root.render(
+        <OverviewChangeDialog
+          projectId="preschool-demo"
+          currentSnapshot={current}
+          currentAiArtifact={null}
+          client={client}
+          onClose={vi.fn()}
+          onOpenPrevious={vi.fn()}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("Current Saved read failed");
+    expect(container.textContent).not.toContain("Snapshot A:");
+  });
+
   it("traps keyboard focus inside the dialog and restores the opening control on close", async () => {
     const opener = document.createElement("button");
     opener.textContent = "Open comparison";

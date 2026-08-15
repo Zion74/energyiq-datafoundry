@@ -630,32 +630,39 @@ const acceptCandidate = (
     sqlEvidence: [],
     knownCentreCodes,
   }) && crossPeriodFactsAreSupported(narrative, citedFacts);
-  const acceptedTitle = resolveSupportedCandidateTitle({
-    title: value.title,
-    incrementalContext: value.incrementalContext,
-    narrativeIsSupported,
-  });
-  if (!acceptedTitle) return null;
+  const factualNarrativeIsSupported = (narrative: string): boolean => narrativeIsSupported(narrative)
+    && factualOrderingClaimsAreSupported(narrative, citedFacts);
   const acceptedNarrative = resolveSeparatedCandidateNarrative({
     observation: value.observation,
     angle: value.angle,
-    narrativeIsSupported,
+    observationIsSupported: factualNarrativeIsSupported,
+    angleIsSupported: narrativeIsSupported,
   });
   if (!acceptedNarrative) return null;
+  const acceptedTitle = resolveSupportedCandidateTitle({
+    title: value.title,
+    incrementalContext: value.incrementalContext,
+    fallbackObservation: acceptedNarrative.observation,
+    narrativeIsSupported: factualNarrativeIsSupported,
+  });
+  if (!acceptedTitle) return null;
   const acceptedDeepDiveQuestion = nonEmptyString(value.deepDiveQuestion)
     && narrativeIsSupported(value.deepDiveQuestion)
     ? value.deepDiveQuestion.trim()
     : undefined;
   const origin = resolveCandidateOrigin(value.origin, coreMethod, directionMethods);
+  const incrementalContextValue = acceptedTitle.repairedFromObservation && isRecord(value.incrementalContext)
+    ? { ...value.incrementalContext, novelConclusion: acceptedNarrative.angle }
+    : value.incrementalContext;
   const incrementalContext = resolveIncrementalContext(
-    value.incrementalContext,
+    incrementalContextValue,
     evidenceRefs,
     presentedClaims,
-    { title: acceptedTitle, text: acceptedNarrative.noveltyText },
+    { title: acceptedTitle.text, text: acceptedNarrative.noveltyText },
   );
   if (!origin || !incrementalContext) return null;
   const epistemicStatus = resolveAcceptedEpistemicStatus({
-    title: acceptedTitle,
+    title: acceptedTitle.text,
     text: acceptedNarrative.epistemicText,
     ...(acceptedDeepDiveQuestion ? { deepDiveQuestion: acceptedDeepDiveQuestion } : {}),
     epistemicStatus: value.epistemicStatus,
@@ -671,7 +678,7 @@ const acceptCandidate = (
     && !alertIsAcceptable(value.alert, epistemicStatus, evidenceRefs, factsById)) return null;
   const finding: AdditionalAiInsightFinding = {
     id: `additional:${candidate.sourceId}`,
-    title: acceptedTitle,
+    title: acceptedTitle.text,
     text: acceptedNarrative.publishedText,
     epistemicStatus,
     origin,
@@ -750,6 +757,157 @@ const crossPeriodFactsAreSupported = (
   .filter((fragment) => fragment.trim().length > 0)
   .every((fragment) => crossPeriodFactIsSupported(fragment, citedFacts));
 
+const factualOrderingClaimsAreSupported = (
+  narrative: string,
+  citedFacts: readonly AnalysisContextEvidenceCatalog["facts"][number][],
+): boolean => {
+  if (!superlativeClaimsAreSupported(narrative, citedFacts)) return false;
+
+  const relationPattern = /\b(exceeds?|higher\s+than|greater\s+than|more\s+than|lower\s+than|less\s+than|below)\b/giu;
+  return [...narrative.matchAll(relationPattern)].every((match) => {
+    const relationIndex = match.index ?? 0;
+    const left = narrative.slice(0, relationIndex);
+    const right = narrative.slice(relationIndex + match[0].length);
+    const numeric = [...left.matchAll(/(-?\d[\d,]*(?:\.\d+)?)/gu)].at(-1)?.[1];
+    const leftFact = numeric
+      ? (() => {
+          const leftValue = Number(numeric.replace(/,/gu, ""));
+          const precision = numeric.includes(".") ? numeric.split(".")[1]!.length : 0;
+          const tolerance = (0.5 * (10 ** -precision)) + Number.EPSILON;
+          return citedFacts.find(({ value }) => typeof value === "number"
+            && Math.abs(value - leftValue) <= tolerance) ?? null;
+        })()
+      : resolveOrderingFactFromText(citedFacts, left);
+    if (!leftFact) return false;
+    const rightFact = resolveOrderingFactFromText(citedFacts.filter((fact) => fact !== leftFact), right);
+    if (!rightFact) return false;
+    const leftValue = leftFact.value as number;
+    const rightValue = rightFact.value as number;
+    return /^(?:exceeds?|higher\s+than|greater\s+than|more\s+than)$/iu.test(match[0])
+      ? leftValue > rightValue
+      : leftValue < rightValue;
+  });
+};
+
+const SUPERLATIVE_CLAIM_PATTERN = /\b(?:(?:top|highest|lowest|largest|smallest)\s+(?:absolute\s+)?(?:energy|use|usage|consumer|user|eui|per[- ]?(?:person|pax)|demand|load)|(?:uses?|consumes?|records?)\s+(?:the\s+)?(?:most|least)\s+(?:energy|electricity|use|usage|demand|load)|ranks?\s+(?:first|last|#?\s*1)\s+for\s+(?:eui|energy\s+intensity|per[- ]?(?:person|pax)|energy|use|usage|demand|load))\b/giu;
+
+const superlativeClaimsAreSupported = (
+  narrative: string,
+  citedFacts: readonly AnalysisContextEvidenceCatalog["facts"][number][],
+): boolean => narrative
+  .split(/(?<=[.!?])\s+(?=[\p{Lu}\p{N}])/u)
+  .filter((sentence) => sentence.trim().length > 0)
+  .every((sentence) => {
+    const claims = [...sentence.matchAll(SUPERLATIVE_CLAIM_PATTERN)];
+    if (claims.length === 0) return true;
+    return claims.every((claim) => {
+      const rankFacts = citedFacts.filter((fact) =>
+        superlativeRankFactMatchesDirection(fact, claim[0])
+        && superlativeMetricMatchesFact(claim[0], fact));
+      const subjectCentreCodes = superlativeSubjectCentreCodes(
+        sentence,
+        claim.index ?? 0,
+        citedFacts,
+      );
+      if (subjectCentreCodes.length > 0) {
+        return subjectCentreCodes.every((centreCode) => rankFacts.some((fact) =>
+          factCentreCodes(fact).includes(centreCode)));
+      }
+      return resolveOrderingFactFromText(rankFacts, sentence) !== null;
+    });
+  });
+
+const superlativeSubjectCentreCodes = (
+  sentence: string,
+  claimIndex: number,
+  citedFacts: readonly AnalysisContextEvidenceCatalog["facts"][number][],
+): string[] => {
+  const beforeClaim = sentence.slice(0, claimIndex);
+  const boundaries = [...beforeClaim.matchAll(/[;:.!?]|\b(?:but|while|whereas|however)\b/giu)];
+  const lastBoundary = boundaries.at(-1);
+  const subject = beforeClaim.slice(lastBoundary
+    ? (lastBoundary.index ?? 0) + lastBoundary[0].length
+    : 0);
+  if (!/\bCentres?\b/iu.test(subject)) return [];
+  const knownCodes = new Set(citedFacts.flatMap(factCentreCodes));
+  return [...knownCodes].filter((centreCode) => new RegExp(
+    `\\b${escapeRegularExpression(centreCode)}\\b`,
+    "iu",
+  ).test(subject));
+};
+
+const factCentreCodes = (
+  fact: AnalysisContextEvidenceCatalog["facts"][number],
+): string[] => [...new Set([
+  ...(fact.dimensions.centreCode ? [fact.dimensions.centreCode] : []),
+  ...(fact.dimensions.centreCodes?.split(/[,\s]+/u) ?? []),
+  ...[...fact.label.matchAll(/\bCentres?\s+([A-Z]{1,2})\b/giu)]
+    .map((match) => match[1] ?? ""),
+]
+  .map((value) => value.trim().toLocaleUpperCase("en"))
+  .filter(Boolean))];
+
+const escapeRegularExpression = (value: string): string =>
+  value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+
+const superlativeRankFactMatchesDirection = (
+  fact: AnalysisContextEvidenceCatalog["facts"][number],
+  claim: string,
+): boolean => {
+  const factText = canonicalClaimText(
+    `${fact.id} ${fact.label} ${fact.metricId} ${Object.entries(fact.dimensions)
+      .map(([key, value]) => `${key} ${String(value)}`)
+      .join(" ")}`,
+  );
+  if (/\b(?:lowest|smallest|least|last)\b/iu.test(claim)) {
+    return /\b(?:lowest|smallest|least|last)\b/iu.test(factText);
+  }
+  return Object.entries(fact.dimensions).some(([key, value]) =>
+    /rank/iu.test(key) && String(value) === "1")
+    || /(?:\brank\s*#?\s*1\b|#1\b)/iu.test(`${fact.id} ${fact.label}`);
+};
+
+const superlativeMetricMatchesFact = (
+  claim: string,
+  fact: AnalysisContextEvidenceCatalog["facts"][number],
+): boolean => {
+  const factText = canonicalClaimText(
+    `${fact.id} ${fact.label} ${fact.metricId} ${Object.entries(fact.dimensions)
+      .map(([key, value]) => `${key} ${String(value)}`)
+      .join(" ")}`,
+  );
+  if (/\b(?:eui|energy\s+intensity)\b/iu.test(claim)) {
+    return /\b(?:eui|intensity|floor area)\b/iu.test(factText);
+  }
+  if (/\bper[- ]?(?:person|pax)\b/iu.test(claim)) {
+    return /\b(?:per person|per pax|headcount)\b/iu.test(factText);
+  }
+  return /\b(?:energy|use|usage|kwh|demand|load)\b/iu.test(factText)
+    && !/\b(?:eui|intensity|floor area|per person|per pax|headcount)\b/iu.test(factText);
+};
+
+const resolveOrderingFactFromText = (
+  facts: readonly AnalysisContextEvidenceCatalog["facts"][number][],
+  text: string,
+): AnalysisContextEvidenceCatalog["facts"][number] | null => {
+  const textTokens = new Set(canonicalClaimText(text).split(" ").filter(Boolean));
+  const ranked = facts
+    .filter((fact) => typeof fact.value === "number")
+    .map((fact) => {
+      const factTokens = new Set(canonicalClaimText(
+        `${fact.label} ${Object.values(fact.dimensions).join(" ")}`,
+      ).split(" ").filter(Boolean));
+      return {
+        fact,
+        score: [...factTokens].filter((token) => textTokens.has(token)).length,
+      };
+    })
+    .sort((left, right) => right.score - left.score);
+  const top = ranked[0];
+  if (!top || top.score < 2 || ranked[1]?.score === top.score) return null;
+  return top.fact;
+};
+
 const TEMPORAL_NEUTRAL_CHANGE_SOURCE = String.raw`unchanged|flat|stable|steady|similar|same`;
 const TEMPORAL_POSITIVE_CHANGE_SOURCE = String.raw`increas(?:e|ed|ing)|higher|greater|above|more|rose|risen|grew|grown|surg(?:e|ed|ing)|jump(?:ed|ing)?|doubl(?:e|ed|ing)|up`;
 const TEMPORAL_NEGATIVE_CHANGE_SOURCE = String.raw`decreas(?:e|ed|ing)|declin(?:e|ed|ing)|reduc(?:e|ed|ing)|lower|less|fewer|below|fell|fallen|dropped|halv(?:e|ed|ing)|down`;
@@ -765,17 +923,61 @@ const crossPeriodFactIsSupported = (
   if (changeMatches.length === 0) return false;
   const measuredChanges = changeMatches.filter((match) => !temporalChangeIsHypothetical(narrative, match.index ?? 0));
   if (measuredChanges.length === 0) return true;
-  const comparedMetricId = temporalClaimMetricId(narrative);
-  if (!comparedMetricId) return false;
-  const comparison = citedComparisonChange(citedFacts, comparedMetricId, narrative);
-  if (!comparison) return false;
-  return measuredChanges.every((match) => temporalDirectionMatches(match[0], comparison.changePct))
-    && temporalMagnitudesMatch(narrative, comparison, measuredChanges);
+  return measuredChanges.every((match) => {
+    const clause = temporalChangeClause(narrative, match.index ?? 0, match[0].length);
+    const comparedMetricIds = temporalClaimMetricIdsForChange(
+      narrative,
+      match.index ?? 0,
+      clause,
+    );
+    if (comparedMetricIds.length === 0) return false;
+    return comparedMetricIds.every((comparedMetricId) => {
+      const comparison = citedComparisonChange(citedFacts, comparedMetricId, clause);
+      return comparison !== null
+        && temporalDirectionMatches(match[0], comparison.changePct)
+        && temporalMagnitudesMatch(narrative, comparison, [match]);
+    });
+  });
 };
 
 const temporalChangeIsHypothetical = (narrative: string, changeIndex: number): boolean => {
   const prefix = temporalClaimGovernancePrefix(narrative, changeIndex);
-  return /\b(?:may|might|could)\s+(?:(?:potentially|possibly)\s+)?(?:have\s+)?(?:be(?:en)?\s+)?(?:(?:about|around|roughly|approximately)\s+)?(?:-?\d[\d,]*(?:\.\d+)?\s*(?:%|percent(?:age)?(?:\s+points?)?|kWh)\s+)?$/iu.test(prefix);
+  const hasTransparentModal = /\b(?:may|might|could)\s+(?:(?:potentially|possibly)\s+)?(?:have\s+)?(?:be(?:en)?\s+)?(?:(?:about|around|roughly|approximately)\s+)?(?:-?\d[\d,]*(?:\.\d+)?\s*(?:%|percent(?:age)?(?:\s+points?)?|kWh)\s+)?$/iu.test(prefix);
+  if (!hasTransparentModal) return false;
+  // A modal does not turn a retrospective quantitative claim into a scenario.
+  // "May have increased" still asserts a possible historical measurement and
+  // must therefore be backed by exact comparison Evidence.
+  if (/\b(?:may|might|could)\s+(?:(?:potentially|possibly)\s+)?have\b/iu.test(prefix)) {
+    return false;
+  }
+  const changeToken = narrative.slice(changeIndex).match(new RegExp(`^(?:${TEMPORAL_CHANGE_SOURCE})`, "iu"))?.[0] ?? "";
+  if (explicitForwardExperimentApplies(narrative, changeIndex)) return true;
+  const clause = temporalChangeClause(narrative, changeIndex, changeToken.length);
+  const hasRetrospectiveComparator = /\b(?:prior|previous|earlier|last)\s+(?:(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[- ]?)?(?:day|week|month|year|period|window)s?(?:\s+window)?\b/iu.test(clause);
+  const hasExplicitPercentage = /-?\d[\d,]*(?:\.\d+)?\s*(?:%|percent(?:age)?(?:\s+points?)?)/iu.test(clause);
+  const hasImplicitMagnitude = /^(?:doubl(?:e|ed|ing)|halv(?:e|ed|ing))$/iu.test(changeToken);
+  if (hasRetrospectiveComparator && (hasExplicitPercentage || hasImplicitMagnitude)) return false;
+  return true;
+};
+
+const explicitForwardExperimentApplies = (narrative: string, changeIndex: number): boolean => {
+  const before = narrative.slice(0, changeIndex);
+  const previousSentenceBoundary = Math.max(
+    before.lastIndexOf("."),
+    before.lastIndexOf("!"),
+    before.lastIndexOf("?"),
+    before.lastIndexOf(";"),
+  );
+  const sentencePrefix = before.slice(previousSentenceBoundary + 1).slice(-200);
+  const sentenceSuffix = narrative.slice(changeIndex, changeIndex + 200);
+  const interventionSource = String.raw`schedules?|setpoints?|controls?|equipment|timings?|operating\s+hours?|occupancy|loads?|start\s+times?|shutdowns?`;
+  const governedForwardFrame = new RegExp(
+    String.raw`\b(?:what[- ]if|scenario|experiment|trial|proposed)\b[^.!?;]{0,120}\b(?:${interventionSource})\b[^.!?;]{0,48}$`,
+    "iu",
+  );
+  return new RegExp(String.raw`\bif\b[^.!?;]{0,140}\b(?:${interventionSource})\b`, "iu").test(sentencePrefix)
+    || new RegExp(String.raw`\bafter\b[^.!?;]{0,80}\b(?:${interventionSource})\b[^.!?;]{0,48}\b(?:change|changes|adjust|adjustment|shift|reduction)\b`, "iu").test(sentenceSuffix)
+    || governedForwardFrame.test(sentencePrefix);
 };
 
 const maskTransparentHypotheticalPercentages = (narrative: string): string => {
@@ -830,15 +1032,53 @@ const temporalClaimGovernancePrefix = (narrative: string, changeIndex: number): 
   return before.slice(start).slice(-96);
 };
 
-const temporalClaimMetricId = (narrative: string): string | null => {
-  if (/\b(?:peak|maximum|max\.?\s+demand)\b/iu.test(narrative)) return "energy.peak_interval_average_kw";
-  if (/\b(?:off[- ]hours?|closed[- ]hours?|standby)\b/iu.test(narrative)) return "energy.off_hours_usage_kwh";
-  if (/\bCentres?\s+[A-Z]{1,2}\b/iu.test(narrative)) return "energy.total_usage_kwh";
-  if (/\b(?:circuit|plug\s*load|lighting|heater|aircon|air\s*conditioning)\b/iu.test(narrative)) return "energy.circuit_usage_kwh";
-  if (/\b(?:total\s+(?:energy|electricity)\s+|(?:energy|electricity)\s+|total\s+)(?:use|usage|consumption)\b/iu.test(narrative)) {
-    return "energy.total_usage_kwh";
+const temporalClaimMetricId = (narrative: string): string | null =>
+  temporalMetricIdsFromText(narrative)[0] ?? null;
+
+const temporalMetricIdsFromText = (narrative: string): string[] => {
+  if (/\b(?:off[- ]hours?|closed[- ]hours?|standby)\b/iu.test(narrative)) {
+    return ["energy.off_hours_usage_kwh"];
   }
-  return null;
+  if (/\bCentres?\s+[A-Z]{1,2}\b/iu.test(narrative)) {
+    return ["energy.total_usage_kwh"];
+  }
+  if (/\b(?:circuit|plug\s*load|lighting|heater|aircon|air\s*conditioning)\b/iu.test(narrative)) {
+    return ["energy.circuit_usage_kwh"];
+  }
+  return [...new Set([
+    ...(/\b(?:peak|maximum|max\.?\s+demand)\b/iu.test(narrative)
+      ? ["energy.peak_interval_average_kw"]
+      : []),
+    ...(/\b(?:total\s+(?:energy|electricity)\s+|(?:energy|electricity)\s+|total\s+)(?:use|usage|consumption)\b/iu.test(narrative)
+      ? ["energy.total_usage_kwh"]
+      : []),
+  ])];
+};
+
+const temporalClaimMetricIdsForChange = (
+  narrative: string,
+  changeIndex: number,
+  localClause: string,
+): string[] => {
+  const localMetricIds = temporalMetricIdsFromText(localClause);
+  const beforeChange = narrative.slice(0, changeIndex);
+  const sentenceBoundary = [...beforeChange.matchAll(/[;.!?]|\b(?:but|while|whereas|however|because|given\s+that)\b/giu)].at(-1);
+  const sentencePrefix = beforeChange.slice(sentenceBoundary
+    ? (sentenceBoundary.index ?? 0) + sentenceBoundary[0].length
+    : 0);
+  const conjunctions = [...sentencePrefix.matchAll(/\band\b/giu)];
+  const conjunction = conjunctions.at(-1);
+  if (!conjunction) return localMetricIds;
+  const left = sentencePrefix.slice(0, conjunction.index ?? 0);
+  const right = sentencePrefix.slice((conjunction.index ?? 0) + conjunction[0].length);
+  if (new RegExp(String.raw`\b(?:${TEMPORAL_CHANGE_SOURCE})\b`, "iu").test(left)) {
+    return localMetricIds;
+  }
+  const leftMetricIds = temporalMetricIdsFromText(left);
+  const rightMetricIds = temporalMetricIdsFromText(right);
+  return leftMetricIds.length > 0 && rightMetricIds.length > 0
+    ? [...new Set([...leftMetricIds, ...rightMetricIds])]
+    : localMetricIds;
 };
 
 const citedComparisonChange = (
@@ -1240,14 +1480,23 @@ const claimTextsShareMeaningfulToken = (left: string, right: string): boolean =>
 const resolveSeparatedCandidateNarrative = (input: {
   observation: unknown;
   angle: unknown;
-  narrativeIsSupported(narrative: string): boolean;
-}): { publishedText: string; noveltyText: string; epistemicText: string } | null => {
+  observationIsSupported(narrative: string): boolean;
+  angleIsSupported(narrative: string): boolean;
+}): {
+  observation: string;
+  angle: string;
+  publishedText: string;
+  noveltyText: string;
+  epistemicText: string;
+} | null => {
   if (!nonEmptyString(input.observation)
     || !nonEmptyString(input.angle)) return null;
-  const observation = salvageSupportedNarrative(input.observation, input.narrativeIsSupported);
-  const angle = salvageSupportedNarrative(input.angle, input.narrativeIsSupported);
+  const observation = salvageSupportedNarrative(input.observation, input.observationIsSupported);
+  const angle = salvageSupportedNarrative(input.angle, input.angleIsSupported);
   if (!observation || !angle) return null;
   return {
+    observation,
+    angle,
     publishedText: `**Evidence signal:** ${observation}\n\n**AI angle:** ${angle}`,
     noveltyText: `${observation} ${angle}`,
     epistemicText: angle,
@@ -1257,14 +1506,24 @@ const resolveSeparatedCandidateNarrative = (input: {
 const resolveSupportedCandidateTitle = (input: {
   title: string;
   incrementalContext: unknown;
+  fallbackObservation: string;
   narrativeIsSupported(narrative: string): boolean;
-}): string | null => {
+}): { text: string; repairedFromObservation: boolean } | null => {
   const title = input.title.trim();
-  if (input.narrativeIsSupported(title)) return title;
+  if (input.narrativeIsSupported(title)) return { text: title, repairedFromObservation: false };
   if (!isRecord(input.incrementalContext)
-    || !conciseSummaryTitle(input.incrementalContext.novelConclusion)) return null;
+    || !conciseSummaryTitle(input.incrementalContext.novelConclusion)) {
+    return conciseSummaryTitle(input.fallbackObservation)
+      ? { text: input.fallbackObservation, repairedFromObservation: true }
+      : null;
+  }
   const novelConclusion = input.incrementalContext.novelConclusion.trim();
-  return input.narrativeIsSupported(novelConclusion) ? novelConclusion : null;
+  if (input.narrativeIsSupported(novelConclusion)) {
+    return { text: novelConclusion, repairedFromObservation: false };
+  }
+  return conciseSummaryTitle(input.fallbackObservation)
+    ? { text: input.fallbackObservation, repairedFromObservation: true }
+    : null;
 };
 
 const salvageSupportedNarrative = (
@@ -1272,6 +1531,8 @@ const salvageSupportedNarrative = (
   narrativeIsSupported: (value: string) => boolean,
 ): string | null => {
   const trimmed = narrative.trim();
+  const deduplicated = deduplicateRepeatedSentences(trimmed);
+  if (deduplicated !== trimmed && narrativeIsSupported(deduplicated)) return deduplicated;
   if (narrativeIsSupported(trimmed)) return trimmed;
   const withoutUnsupportedParentheticals = trimmed
     .replace(/\s*\(([^()\r\n]{1,200})\)/gu, (segment, content: string) =>
@@ -1288,6 +1549,18 @@ const salvageSupportedNarrative = (
     .filter((fragment) => fragment.length > 0 && narrativeIsSupported(fragment))
     .map((fragment) => /[.!?]$/u.test(fragment) ? fragment : `${fragment}.`);
   return fragments.length > 0 ? fragments.join(" ") : null;
+};
+
+const deduplicateRepeatedSentences = (value: string): string => {
+  const seen = new Set<string>();
+  return value.split(/(?<=[.!?])\s+/u)
+    .filter((sentence) => {
+      const canonical = canonicalClaimText(sentence);
+      if (!canonical || seen.has(canonical)) return false;
+      seen.add(canonical);
+      return true;
+    })
+    .join(" ");
 };
 
 const narrativeContainsConclusion = (narrative: string, conclusion: string): boolean => {
