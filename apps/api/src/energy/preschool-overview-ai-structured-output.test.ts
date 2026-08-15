@@ -251,6 +251,10 @@ describe("Preschool Overview AI structured output", () => {
       .resolves.toEqual(expect.not.objectContaining({ issues: expect.anything() }));
   });
 
+  it("defers malformed Section envelopes to the local parser so exact honest-empty output can recover", () => {
+    expect(PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4.errorStrategy).toBe("warn");
+  });
+
   it("keeps the v3 schema for history while making v4 the current Section discovery contract", () => {
     const legacyProperties = PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V3.schema.properties!;
     const v4Properties = PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4.schema.properties!;

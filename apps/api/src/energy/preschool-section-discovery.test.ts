@@ -166,6 +166,29 @@ describe("Preschool Section discovery", () => {
     expect(discovery.candidates[0]?.evidenceRefs).toEqual(["evidence:1"]);
   });
 
+  it("treats only an exact empty Provider array as an honest empty Section", () => {
+    const pack = richPack("planning-outlook", 1);
+    const discovery = parsePreschoolSectionDiscoveryV4({
+      answer: "[]",
+      expectedSectionId: "planning-outlook",
+      binding: pack.binding,
+    });
+
+    expect(discovery).toEqual({
+      sectionId: "planning-outlook",
+      binding: pack.binding,
+      status: "empty",
+      candidates: [],
+    });
+    for (const answer of ["[{}]", "No new finding.\n[]", "```json\n[]\n```"]) {
+      expect(() => parsePreschoolSectionDiscoveryV4({
+        answer,
+        expectedSectionId: "planning-outlook",
+        binding: pack.binding,
+      })).toThrow();
+    }
+  });
+
   it("rejects an over-budget limitation instead of silently dropping it", () => {
     const pack = richPack("standby-wastage", 1);
     expect(() => parsePreschoolSectionDiscoveryV4({

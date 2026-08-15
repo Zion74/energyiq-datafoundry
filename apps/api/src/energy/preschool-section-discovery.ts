@@ -220,6 +220,14 @@ export const parsePreschoolSectionDiscoveryV4 = (input: {
   expectedSectionId: PreschoolSectionIdV4;
   binding: PreschoolOverviewAiBindingV4;
 }): PreschoolSectionDiscoveryV4 => {
+  if (input.answer.trim() === "[]") {
+    return {
+      sectionId: input.expectedSectionId,
+      binding: input.binding,
+      status: "empty",
+      candidates: [],
+    };
+  }
   const parsed = parseResponseObject(input.answer, input.expectedSectionId);
   if (parsed.status === "empty") {
     if (parsed.summary !== undefined

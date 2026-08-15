@@ -106,7 +106,7 @@ const sectionInsightCandidateV4: JsonSchema = { type: "object" };
  * Candidate identity, acceptance and the three-insight publication budget remain server-owned.
  */
 export const PRESCHOOL_SECTION_INTERPRETER_STRUCTURED_OUTPUT_V4 = {
-  errorStrategy: "strict",
+  errorStrategy: "warn",
   schema: {
     type: "object",
     additionalProperties: false,
