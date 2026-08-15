@@ -616,29 +616,39 @@ const acceptCandidate = (
   const evidenceRefs = value.evidenceRefs;
   const toolAuditIds = value.toolAuditIds;
   const citedFacts = evidenceRefs.map((reference) => factsById.get(reference)!);
-  if (!energyAiNarrativeClaimsSupported({
-    narrative: [value.title, value.text, nonEmptyString(value.deepDiveQuestion) ? value.deepDiveQuestion : ""].join(" "),
-    evidence: citedFacts.map((fact) => ({
+  const narrativeEvidence = citedFacts.map((fact) => ({
       id: fact.id,
       label: fact.label,
       unit: fact.unit ?? null,
       values: { [fact.metricId]: fact.value, ...fact.dimensions },
-    })),
+    }));
+  const narrativeIsSupported = (narrative: string): boolean => energyAiNarrativeClaimsSupported({
+    narrative,
+    evidence: narrativeEvidence,
     sqlEvidence: [],
     knownCentreCodes,
-  })) return null;
+  });
+  if (!narrativeIsSupported(value.title)) return null;
+  const supportedSentences = value.text.trim().split(/(?<=[.!?])\s+(?=[\p{Lu}\p{N}])/u)
+    .filter((sentence) => narrativeIsSupported(sentence));
+  if (supportedSentences.length === 0) return null;
+  const acceptedText = supportedSentences.join(" ");
+  const acceptedDeepDiveQuestion = nonEmptyString(value.deepDiveQuestion)
+    && narrativeIsSupported(value.deepDiveQuestion)
+    ? value.deepDiveQuestion.trim()
+    : undefined;
   const origin = resolveCandidateOrigin(value.origin, coreMethod, directionMethods);
   const incrementalContext = resolveIncrementalContext(
     value.incrementalContext,
     evidenceRefs,
     presentedClaims,
-    { title: value.title, text: value.text },
+    { title: value.title, text: acceptedText },
   );
   if (!origin || !incrementalContext) return null;
   const epistemicStatus = resolveAcceptedEpistemicStatus({
     title: value.title,
-    text: value.text,
-    ...(nonEmptyString(value.deepDiveQuestion) ? { deepDiveQuestion: value.deepDiveQuestion } : {}),
+    text: acceptedText,
+    ...(acceptedDeepDiveQuestion ? { deepDiveQuestion: acceptedDeepDiveQuestion } : {}),
     epistemicStatus: value.epistemicStatus,
     originKind: origin.kind,
     relationshipAssertion: incrementalContext.relationshipAssertion,
@@ -653,12 +663,12 @@ const acceptCandidate = (
   const finding: AdditionalAiInsightFinding = {
     id: `additional:${candidate.sourceId}`,
     title: value.title.trim(),
-    text: value.text.trim(),
+    text: acceptedText,
     epistemicStatus,
     origin,
     evidenceRefs: [...evidenceRefs],
     toolAuditIds: [...toolAuditIds],
-    ...(nonEmptyString(value.deepDiveQuestion) ? { deepDiveQuestion: value.deepDiveQuestion.trim() } : {}),
+    ...(acceptedDeepDiveQuestion ? { deepDiveQuestion: acceptedDeepDiveQuestion } : {}),
     ...(isRecord(value.alert)
       ? {
           alert: {
@@ -896,6 +906,7 @@ const buildDiscoveryPrompt = (input: {
     "The first character must be { and the last character must be }. Do not add a preamble, scratch work, Markdown fence, or trailing commentary.",
     "Each title must be 100 characters or fewer. toolAuditIds is required; use [] when no tool was called. When a tool was called, cite only succeeded audit IDs actually used by that candidate. Every cited audit must overlap the candidate Evidence; the candidate may additionally cite exact Current Catalog Evidence that was not returned by that audit because the server validates every Evidence ref independently.",
     "For page readability, text should be 1 to 3 short sentences and no more than 500 characters. deepDiveQuestion should be one short question and no more than 200 characters. These are generation instructions; the server keeps its wider safety ceiling for local candidate isolation.",
+    "Make every sentence independently supportable by the candidate's Evidence. The server may remove an unsupported sentence or optional deep-dive question while preserving a supported, genuinely new conclusion; it will still reject a candidate whose title or all body sentences are unsupported.",
     "ai-discovery must contain exactly kind and directionMethodResourceIds, with directionMethodResourceIds=[]. Do not add novelContribution to ai-discovery. If alert cannot match the exact object shape {severity:'attention|urgent',certainty:'confirmed|anomaly|possible',evidenceRefs:[exact candidate Evidence ref]}, omit it.",
     "A relationship across multiple Evidence facts cannot be observed; label it inferred or speculative. Do not calculate or state new numeric values that are not directly present in the candidate's cited Evidence; qualitative relationships, counterexamples, and testable hypotheses remain valid.",
     "For core-only discovery use origin.kind='ai-discovery' and directionMethodResourceIds=[]. Cite only the exact loaded expert-direction resourceIds actually used. expert-sop requires one or more such refs. hybrid additionally requires a concise bounded novelContribution. Never invent or duplicate Method refs.",

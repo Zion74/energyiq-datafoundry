@@ -215,6 +215,39 @@ describe("EnergyIqAdditionalInsightEvaluationStore", () => {
     }
   });
 
+  it("keeps a historical v10 running evaluation readable but never leases its attempts", () => {
+    const harness = createHarness();
+    try {
+      const target = evaluationTarget("snapshot-v10", "release-v10");
+      const evaluationId = "evaluation-historical-v10-running";
+      harness.store.reserveEvaluation({
+        evaluationId,
+        idempotencyKey: evaluationId,
+        requestedBy: "admin-1",
+        target,
+        attempts: attemptReservations("-v10"),
+      });
+      rewriteEvaluationTargetForTest(harness, evaluationId, historicalV10Target(target));
+
+      expect(harness.store.getEvaluation({
+        evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      })).toMatchObject({
+        status: "running",
+        target: { artifactIdentityRevision: "additional-insights-v10" },
+      });
+      expect(() => harness.store.claimEvaluationAttempt({
+        evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+        attemptId: "attempt-1-v10",
+      })).toThrow("ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_BEHAVIOR_NOT_CURRENT");
+    } finally {
+      harness.close();
+    }
+  });
+
   it("keeps a historical v6 running evaluation readable but never leases its attempts", () => {
     const harness = createHarness();
     try {
@@ -1892,12 +1925,12 @@ const evaluationTarget = (
     analysisPeriod: { from: "2026-05-01T00:00:00.000Z", to: "2026-06-01T00:00:00.000Z" },
     modelProfileId: "workspace-default",
     modelProfileRevision: 7,
-    artifactIdentityRevision: "additional-insights-v10",
+    artifactIdentityRevision: "additional-insights-v11",
     artifactIdentityHash: `sha256:${createHash("sha256").update(`${dataSnapshotId}:${projectReleaseId}`).digest("hex")}`,
     outputContractRevision: "energyiq-additional-ai-insights-v2",
-    validatorRevision: "additional-insights-acceptance-v7",
-    workflowRevision: "additional-insights-discover-accept-publish-v10",
-    promptRevision: "additional-insights-discovery-v8",
+    validatorRevision: "additional-insights-acceptance-v8",
+    workflowRevision: "additional-insights-discover-accept-publish-v11",
+    promptRevision: "additional-insights-discovery-v9",
     capabilityRevision: "scoped-read-only-v1",
     publicationRevision: "additional-insights-v2",
     canvasRevision: "energyiq-insight-canvas-v2",
@@ -2107,6 +2140,16 @@ const historicalV9Target = (
   validatorRevision: "additional-insights-acceptance-v6",
   workflowRevision: "additional-insights-discover-accept-publish-v9",
   promptRevision: "additional-insights-discovery-v7",
+});
+
+const historicalV10Target = (
+  current: AdditionalAiInsightEvaluationTarget,
+): AdditionalAiInsightEvaluationTarget => ({
+  ...current,
+  artifactIdentityRevision: "additional-insights-v10",
+  validatorRevision: "additional-insights-acceptance-v7",
+  workflowRevision: "additional-insights-discover-accept-publish-v10",
+  promptRevision: "additional-insights-discovery-v8",
 });
 
 const rewriteEvaluationTargetForTest = (

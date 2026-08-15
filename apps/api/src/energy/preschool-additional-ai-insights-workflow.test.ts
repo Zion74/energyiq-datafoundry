@@ -1928,6 +1928,54 @@ const resolvePresentedClaimsFixture: Parameters<typeof createPreschoolAdditional
     }
   });
 
+  it("drops an unsupported sentence and optional deep dive without discarding a valuable supported candidate", async () => {
+    const harness = createHarness();
+    try {
+      const supportedConclusion = "The confirmed standby share may still vary with weekday schedules.";
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [candidate("candidate-sentence-salvage", "fact:standby-share", {
+            title: "Test whether standby share varies with weekday schedules",
+            text: `Standby is 31%. ${supportedConclusion} An unsupported sibling sentence claims 999 kWh.`,
+            epistemicStatus: "speculative",
+            deepDiveQuestion: "Did the unsupported peak reach 777 kWh?",
+            incrementalContext: {
+              relatedPresentedClaimIds: ["deterministic-overview:fact:standby-share"],
+              novelConclusion: supportedConclusion,
+            },
+          })] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "sentence-salvage-run",
+        sessionId: "sentence-salvage-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        publication: {
+          acceptedCandidateIds: ["candidate-sentence-salvage"],
+          rejectedCandidateIds: [],
+        },
+        findings: [{
+          id: "additional:candidate-sentence-salvage",
+          text: `Standby is 31%. ${supportedConclusion}`,
+        }],
+      });
+      expect(result.status === "available" && result.findings[0]).not.toHaveProperty("deepDiveQuestion");
+    } finally {
+      harness.close();
+    }
+  });
+
 const canvasPlan = (input: { candidateId: string; title: string; text: string }) => ({
   identity: {
     workspaceId: PRESCHOOL_WORKSPACE_ID,
