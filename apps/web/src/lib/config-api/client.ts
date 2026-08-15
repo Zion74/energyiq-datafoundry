@@ -31,6 +31,7 @@ import type {
   EnergyOverviewAiArtifactDto,
   EnergyProjectOverviewAdminStateDto,
   EnergyProjectHarnessConfigurationDto,
+  EnergyProjectAiOperationsDto,
   EnergyProjectMetricConfigResponseDto,
   EnergyProjectDataCoverageDto,
   EnergyProjectRuleConfigResponseDto,
@@ -690,6 +691,18 @@ export const configApi = {
   getEnergyProjectHarnessConfiguration(projectId: string): Promise<EnergyProjectHarnessConfigurationDto> {
     return requestEnvelope<EnergyProjectHarnessConfigurationDto>(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/harness-configuration`,
+    );
+  },
+
+  getEnergyProjectAiOperations(projectId: string): Promise<EnergyProjectAiOperationsDto> {
+    return requestEnvelope<EnergyProjectAiOperationsDto>(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/ai-operations`,
+    );
+  },
+
+  getEnergyProjectAiOperationsRun(projectId: string, runId: string): Promise<EnergyProjectAiOperationsDto> {
+    return requestEnvelope<EnergyProjectAiOperationsDto>(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/ai-operations/runs/${encodeURIComponent(runId)}`,
     );
   },
 

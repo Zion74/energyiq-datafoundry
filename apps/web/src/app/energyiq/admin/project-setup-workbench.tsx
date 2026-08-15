@@ -55,6 +55,7 @@ import {
 import { deriveProjectDeliveryProgress } from "./project-delivery-progress";
 import { ProjectOverviewAiReadiness } from "./project-overview-ai-readiness";
 import { ProjectHarnessConfiguration } from "./project-harness-configuration";
+import { ProjectAiOperations } from "./project-ai-operations";
 import { TemplateDraftPreview } from "./template-draft-preview";
 import { TemplateChangeProposalPanel } from "./template-change-proposal-panel";
 import {
@@ -591,6 +592,9 @@ function renderAdminSection({
   }
   if (section === "harness") {
     return <ProjectHarnessConfiguration projectId={selectedProjectId} />;
+  }
+  if (section === "runs") {
+    return <ProjectAiOperations projectId={selectedProjectId} />;
   }
 
   const planned = plannedSectionCopy(section);
@@ -2757,7 +2761,7 @@ function plannedSectionCopy(section: AdminSection): { title: string; description
 }
 
 function isProjectContext(section: AdminSection): boolean {
-  return ["project-overview", "basics", "structure", "data-sources", "meter-mapping", "operational-policies", "data-map", "templates", "ai-analysis", "knowledge", "methods", "assets", "harness"].includes(section);
+  return ["project-overview", "basics", "structure", "data-sources", "meter-mapping", "operational-policies", "data-map", "templates", "ai-analysis", "knowledge", "methods", "assets", "runs", "harness"].includes(section);
 }
 
 function adminSectionMeta(section: AdminSection, projectName?: string): { title: string; description: string } {
@@ -2778,7 +2782,7 @@ function adminSectionMeta(section: AdminSection, projectName?: string): { title:
     knowledge: { title: "Knowledge", description: `${project} · documents and citations available to AI.` },
     methods: { title: "Methods & SOP", description: `${project} · governed analysis methods and SOP proposals.` },
     assets: { title: "Assets", description: `${project} · Project-owned files and source material.` },
-    runs: { title: "Runs & Replays", description: "Analysis runs, deterministic replays and failures." },
+    runs: { title: "Runs & Traces", description: `${project} · historical configuration, context, Tool outcomes, tokens and Artifact lineage from persisted Run evidence.` },
     conversations: { title: "Conversations & Queries", description: "Customer questions, common intents and support investigation." },
     usage: { title: "Usage & Cost", description: "Model usage, token cost and budget signals." },
     traces: { title: "Traces", description: "AI session execution and evidence traces." },

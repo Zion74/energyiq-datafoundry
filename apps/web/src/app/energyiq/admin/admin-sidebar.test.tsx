@@ -86,4 +86,30 @@ describe("EnergyIqAdminSidebar", () => {
     await act(async () => collapse?.click());
     expect(onDesktopCollapsedChange).toHaveBeenCalledWith(true);
   });
+
+  it("opens the delivered Project-scoped Runs & Traces operation view", async () => {
+    const onSectionChange = vi.fn();
+
+    await act(async () => {
+      root.render(
+        <EnergyIqAdminSidebar
+          projects={[{ id: "project-1", name: "Project 1", status: "published" }]}
+          selectedProjectId="project-1"
+          activeSection="overview"
+          desktopCollapsed={false}
+          onProjectChange={() => undefined}
+          onCreateProject={() => undefined}
+          onDesktopCollapsedChange={() => undefined}
+          onSectionChange={onSectionChange}
+        />,
+      );
+    });
+
+    const runs = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("Runs & Traces"));
+    expect(runs).toBeDefined();
+    await act(async () => runs?.click());
+    expect(onSectionChange).toHaveBeenCalledWith("runs");
+    expect(container.textContent).not.toContain("Runs & Replays");
+  });
 });

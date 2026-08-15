@@ -75,7 +75,7 @@ const projectItems: NavigationItem[] = [
 ];
 
 const operationItems: NavigationItem[] = [
-  { id: "runs", label: "Runs & Replays", icon: "analysis", available: false },
+  { id: "runs", label: "Runs & Traces", icon: "analysis", available: true },
   { id: "conversations", label: "Conversations & Queries", icon: "ask", available: false },
   { id: "usage", label: "Usage & Cost", icon: "meter", available: false },
   { id: "traces", label: "Traces", icon: "map", available: false },
@@ -311,7 +311,7 @@ function activeProjectSection(section: AdminSection): AdminSection {
 }
 
 function isProjectSection(section: AdminSection): boolean {
-  return projectItems.some((item) => item.id === activeProjectSection(section));
+  return projectItems.some((item) => item.id === activeProjectSection(section)) || section === "runs";
 }
 
 function labelForSection(section: AdminSection): string {

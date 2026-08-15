@@ -2381,6 +2381,104 @@ export type EnergyProjectHarnessConfigurationDto = {
   unavailable: Array<{ id: string; detail: string }>;
 };
 
+export type EnergyProjectAiRunSummaryDto = {
+  runId: string;
+  actorId: string;
+  sessionId: string;
+  status: "queued" | "running" | "suspended" | "completed" | "failed" | "canceled";
+  stage: string | null;
+  modelProvider: string | null;
+  modelName: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  latencyMs: number | null;
+  parentRunId: string | null;
+  errorCode: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  toolCounts: {
+    called: number;
+    succeeded: number;
+    rejected: number;
+    failed: number;
+  };
+  traceAvailability: "available" | "partial" | "unavailable";
+};
+
+export type EnergyProjectAiRunDetailDto = EnergyProjectAiRunSummaryDto & {
+  historicalConfiguration: {
+    status: "available" | "unavailable";
+    detail: string;
+    modelProfileId: string | null;
+    resourceRevisions: Record<string, number>;
+    selectedSkills: Array<{ id: string; name: string; revision: number }>;
+    selectionAudit: { selected: number; rejected: number; unavailable: number };
+    loadedSkills: {
+      status: "available" | "unavailable";
+      items: Array<{ id: string; revision: number | null }>;
+    };
+    mcp: {
+      enabledServerIds: string[];
+      serverToolMapping: {
+        status: "available" | "unavailable";
+        items: Array<{ serverId: string; toolNames: string[] }>;
+      };
+    };
+  };
+  context: {
+    status: "available" | "unavailable";
+    steps: Array<{
+      stepNumber: number;
+      packageId: string | null;
+      packageRevision: number | null;
+      planId: string | null;
+      selectedGroupCount: number;
+      omittedGroupCount: number;
+      selectedSourceTypes: string[];
+      omittedSourceTypes: string[];
+      truncationDecisionCount: number;
+      promptTokens: number | null;
+      inputBudget: number | null;
+      contextWindow: number | null;
+      remainingTokens: number | null;
+      capabilitySource: string | null;
+      highWaterMark: string | null;
+    }>;
+  };
+  tools: Array<{
+    toolCallId: string;
+    name: string;
+    status: "called" | "succeeded" | "rejected" | "failed";
+    startedAt: string | null;
+    finishedAt: string | null;
+  }>;
+  tokens: {
+    input: number;
+    output: number;
+    total: number;
+    cache: {
+      status: "available" | "unavailable";
+      hit: number | null;
+      miss: number | null;
+    };
+  };
+  lineage: {
+    artifacts: Array<{ id: string; type: string; name: string }>;
+    energyIqArtifacts: Array<{
+      id: string;
+      kind: string;
+      targetId: string | null;
+      findingIds: string[];
+    }>;
+  };
+};
+
+export type EnergyProjectAiOperationsDto = {
+  project: { id: string; name: string; workspaceId: string };
+  runs: EnergyProjectAiRunSummaryDto[];
+  selectedRun: EnergyProjectAiRunDetailDto | null;
+};
+
 export type EnergyAdditionalInsightFeedbackDto = {
   id: string;
   workspaceId: string;
