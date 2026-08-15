@@ -475,6 +475,16 @@ const resolveModelContextProfile = (
     return new ModelContextProfileRegistry().resolve(modelName);
   }
   const profile = resolvePrimaryModelProfile(profileId, metadataStore, userId, workspaceId, trustedSnapshot);
+  return resolveConfiguredModelContextProfile(profile, modelName);
+};
+
+/** Resolve the planning limits recorded on one configured model resource without contacting its Provider. */
+export const resolveConfiguredModelContextProfile = (
+  profile: ConfigResourceRecord,
+  modelName = stringRecordValue(profile.payload, "modelName")
+    ?? stringRecordValue(profile.payload, "model")
+    ?? "",
+): AgentModelContextProfile => {
   const explicitContextLength = numericRecordValue(profile.payload, "contextLength")
     ?? numericRecordValue(profile.payload, "context_length");
   const verifiedCapability = resolveVerifiedModelCapability(profile);
@@ -493,7 +503,7 @@ const resolveModelContextProfile = (
   );
   const safetyMargin = Math.max(512, Math.min(4096, Math.floor(contextWindow * 0.05)));
   return {
-    id: `profile:${profileId}`,
+    id: `profile:${profile.id}`,
     modelPattern: modelName || "*",
     capabilitySource: explicitContextLength !== undefined ? "explicit-profile" : "verified-model-default",
     contextWindow,
