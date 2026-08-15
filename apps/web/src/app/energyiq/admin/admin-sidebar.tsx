@@ -23,6 +23,7 @@ export type AdminSection =
   | "conversations"
   | "usage"
   | "traces"
+  | "harness"
   | "models"
   | "skills"
   | "tools"
@@ -81,10 +82,7 @@ const operationItems: NavigationItem[] = [
 ];
 
 const configurationItems: NavigationItem[] = [
-  { id: "models", label: "Models & Routing", icon: "spark", available: false },
-  { id: "skills", label: "Skills", icon: "settings", available: false },
-  { id: "tools", label: "Tools", icon: "settings", available: false },
-  { id: "mcp", label: "MCP", icon: "map", available: false },
+  { id: "harness", label: "Configuration overview", icon: "settings", available: true },
 ];
 
 export function EnergyIqAdminSidebar(props: AdminSidebarProps) {
@@ -219,7 +217,7 @@ function SidebarContent({
         </details>
 
         <NavigationGroup title="AI Operations" items={operationItems} activeSection={activeSection} onSelect={onSectionChange} />
-        <NavigationGroup title="AI Configuration" items={configurationItems} activeSection={activeSection} onSelect={onSectionChange} />
+        <NavigationGroup title="Harness Configuration" items={configurationItems} activeSection={activeSection} onSelect={onSectionChange} />
       </nav>
     </div>
   );
@@ -333,6 +331,6 @@ export function isAdminSection(value: string | null): value is AdminSection {
   return [
     "overview", "organisations", "users", "project-overview", "basics", "structure",
     "data-sources", "meter-mapping", "operational-policies", "data-map", "templates", "ai-analysis", "knowledge", "methods", "assets",
-    "runs", "conversations", "usage", "traces", "models", "skills", "tools", "mcp",
+    "runs", "conversations", "usage", "traces", "harness", "models", "skills", "tools", "mcp",
   ].includes(value);
 }

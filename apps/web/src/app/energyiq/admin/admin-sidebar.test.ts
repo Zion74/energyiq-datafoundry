@@ -11,4 +11,8 @@ describe("EnergyIQ Admin navigation", () => {
     expect(isAdminSection("ai-analysis")).toBe(true);
     expect(isAdminSection("methods")).toBe(true);
   });
+
+  it("restores the Harness Configuration route from the URL", () => {
+    expect(isAdminSection("harness")).toBe(true);
+  });
 });

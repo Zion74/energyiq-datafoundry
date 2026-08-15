@@ -54,6 +54,7 @@ import {
 } from "./overview-profile-model";
 import { deriveProjectDeliveryProgress } from "./project-delivery-progress";
 import { ProjectOverviewAiReadiness } from "./project-overview-ai-readiness";
+import { ProjectHarnessConfiguration } from "./project-harness-configuration";
 import { TemplateDraftPreview } from "./template-draft-preview";
 import { TemplateChangeProposalPanel } from "./template-change-proposal-panel";
 import {
@@ -587,6 +588,9 @@ function renderAdminSection({
         ) : null}
       </div>
     );
+  }
+  if (section === "harness") {
+    return <ProjectHarnessConfiguration projectId={selectedProjectId} />;
   }
 
   const planned = plannedSectionCopy(section);
@@ -2753,7 +2757,7 @@ function plannedSectionCopy(section: AdminSection): { title: string; description
 }
 
 function isProjectContext(section: AdminSection): boolean {
-  return ["project-overview", "basics", "structure", "data-sources", "meter-mapping", "operational-policies", "data-map", "templates", "ai-analysis", "knowledge", "methods", "assets"].includes(section);
+  return ["project-overview", "basics", "structure", "data-sources", "meter-mapping", "operational-policies", "data-map", "templates", "ai-analysis", "knowledge", "methods", "assets", "harness"].includes(section);
 }
 
 function adminSectionMeta(section: AdminSection, projectName?: string): { title: string; description: string } {
@@ -2778,6 +2782,7 @@ function adminSectionMeta(section: AdminSection, projectName?: string): { title:
     conversations: { title: "Conversations & Queries", description: "Customer questions, common intents and support investigation." },
     usage: { title: "Usage & Cost", description: "Model usage, token cost and budget signals." },
     traces: { title: "Traces", description: "AI session execution and evidence traces." },
+    harness: { title: "Harness Configuration", description: `${project} · current server-owned Models, Skills, Methods, Tools, MCP, Context and instruction layers.` },
     models: { title: "Models & Routing", description: "Model providers, task routing and fallback order." },
     skills: { title: "Skills", description: "Managed analysis skills available to EnergyIQ agents." },
     tools: { title: "Tools", description: "Tool permissions and runtime availability." },

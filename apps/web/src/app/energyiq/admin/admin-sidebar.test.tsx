@@ -50,6 +50,7 @@ describe("EnergyIqAdminSidebar", () => {
 
   it("uses an icon-only collapse control and omits the redundant subtitle", async () => {
     const onDesktopCollapsedChange = vi.fn<(collapsed: boolean) => void>();
+    const onSectionChange = vi.fn();
 
     await act(async () => {
       root.render(
@@ -61,7 +62,7 @@ describe("EnergyIqAdminSidebar", () => {
           onProjectChange={() => undefined}
           onCreateProject={() => undefined}
           onDesktopCollapsedChange={onDesktopCollapsedChange}
-          onSectionChange={() => undefined}
+          onSectionChange={onSectionChange}
         />,
       );
     });
@@ -70,6 +71,13 @@ describe("EnergyIqAdminSidebar", () => {
     expect(container.textContent).toContain("Overview Design");
     expect(container.textContent).toContain("AI Analysis");
     expect(container.textContent).toContain("Methods & SOP");
+    expect(container.textContent).toContain("Harness Configuration");
+    expect(container.textContent).toContain("Configuration overview");
+    expect(container.textContent).not.toContain("AI Configuration");
+    const harness = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("Configuration overview"));
+    await act(async () => harness?.click());
+    expect(onSectionChange).toHaveBeenCalledWith("harness");
     expect(container.textContent).not.toContain("Overview Setup");
     expect(container.textContent).not.toContain("Templates");
     expect(container.textContent).not.toContain("Delivery, access and AI operations");

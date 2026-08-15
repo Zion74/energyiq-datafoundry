@@ -2280,6 +2280,107 @@ export type EnergyProjectOverviewAdminStateDto = {
   explainability?: EnergyProjectAiExplainabilityDto;
 };
 
+export type EnergyProjectHarnessConfigurationDto = {
+  status: "available" | "partially-unavailable";
+  detail: string;
+  project: {
+    id: string;
+    name: string;
+    workspaceId: string;
+    rendererKey: "ngee-ann-overview" | "preschool-overview" | null;
+  };
+  resources: {
+    models: Array<{
+      id: string;
+      name: string;
+      source: "server-system-binding" | "current-admin-resource";
+      status: string;
+      revision: number;
+      enabled: boolean;
+      provider: string | null;
+      modelName: string | null;
+      planningContext: {
+        capabilitySource: "conservative-fallback" | "explicit-profile" | "verified-model-default";
+        contextWindow: number;
+        maxOutputTokens: number;
+        outputReserve: number;
+        safetyMargin: number;
+        inputBudget: number;
+      };
+    }>;
+    skills: Array<{
+      id: string;
+      name: string;
+      description: string;
+      version: string;
+      revision: number;
+      status: string;
+      enabled: boolean;
+      physicalOwner: "builtin" | "user";
+      declaredScope: "builtin" | "user" | "workspace";
+      scopeStatus: "verified" | "unverified";
+      availability: "configured" | "unavailable";
+      allowedToolIds: string[];
+      deniedToolIds: string[];
+      contentSha256: string | null;
+    }>;
+    methods: Array<{
+      resourceId: string;
+      resourceRevision: number;
+      skillId: string;
+      semanticVersion: string;
+      role: "core-method" | "expert-direction";
+      scope: "builtin" | "workspace";
+      contentSha256: string;
+      lifecycle: "published";
+    }>;
+    tools: Array<{
+      id: string;
+      source: "datafoundry-builtin" | "energyiq-server-owned";
+      availability: "registered" | "declared-for-stage";
+    }>;
+    mcpServers: Array<{
+      id: string;
+      name: string;
+      revision: number;
+      status: string;
+      enabled: boolean;
+      physicalOwner: "user";
+      availability: "configured";
+      connection: "persisted-status";
+      statusAsOf: string;
+      toolManifest: {
+        source: "persisted-last-test" | "not-tested";
+        toolNames: string[];
+      };
+    }>;
+  };
+  harnesses: Array<{
+    id: "ai-analyst" | "key-findings" | "section-analysis" | "additional-insights";
+    label: string;
+    resolution: "run-dependent" | "fixed-stage-contract";
+    status: "available" | "unavailable";
+    detail: string;
+    modelIds: string[];
+    skillIds: string[];
+    methodResourceIds: string[];
+    toolIds: string[];
+    mcpServerIds: string[];
+    context: {
+      mode: "run-planned";
+      sources: string[];
+    };
+    instructions: Array<{
+      kind: "platform" | "workflow-stage" | "skill-method" | "output-contract";
+      label: string;
+      revision: string | null;
+      revisionStatus: "resource-pinned" | "run-pinned" | "not-separately-versioned";
+      visibility: "summary-only";
+    }>;
+  }>;
+  unavailable: Array<{ id: string; detail: string }>;
+};
+
 export type EnergyAdditionalInsightFeedbackDto = {
   id: string;
   workspaceId: string;

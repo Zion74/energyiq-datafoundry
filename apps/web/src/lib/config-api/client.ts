@@ -30,6 +30,7 @@ import type {
   EnergyProjectAnalysisResolutionDto,
   EnergyOverviewAiArtifactDto,
   EnergyProjectOverviewAdminStateDto,
+  EnergyProjectHarnessConfigurationDto,
   EnergyProjectMetricConfigResponseDto,
   EnergyProjectDataCoverageDto,
   EnergyProjectRuleConfigResponseDto,
@@ -683,6 +684,12 @@ export const configApi = {
   getEnergyProjectOverviewAdminState(projectId: string): Promise<EnergyProjectOverviewAdminStateDto> {
     return requestEnvelope<EnergyProjectOverviewAdminStateDto>(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/overview-admin-state`,
+    );
+  },
+
+  getEnergyProjectHarnessConfiguration(projectId: string): Promise<EnergyProjectHarnessConfigurationDto> {
+    return requestEnvelope<EnergyProjectHarnessConfigurationDto>(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/harness-configuration`,
     );
   },
 

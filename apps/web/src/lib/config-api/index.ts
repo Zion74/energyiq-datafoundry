@@ -87,6 +87,7 @@ export type {
   EnergyProjectOverviewAdminReadinessItemDto,
   EnergyProjectOverviewAdminReadinessStatusDto,
   EnergyProjectOverviewAdminStateDto,
+  EnergyProjectHarnessConfigurationDto,
   EnergyProjectAiExplainabilityDto,
   EnergyProjectAiMethodTraceDto,
   PreschoolExecutiveSynthesisResultDto,
