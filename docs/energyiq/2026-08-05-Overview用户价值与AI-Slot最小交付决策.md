@@ -1006,6 +1006,20 @@ Section 5 是显式的派生月度域，不是第二个全局 Primary Period：
 
 长期正式入口仍由数据发布事件生成 B、保留 A，并在 Overview 上提供只读比较；普通打开与刷新只恢复已存 Artifact，不临时调用 Provider。
 
+2026-08-15 的首个客户可见薄切片已在 Overview 为管理员加入 `What changed?`：B 使用当前服务端已解析的 Snapshot；A 从该 Project/Scope/
+resource 的权限内 Saved Analysis 列表中按全局 `createdAt` 选择最近的不可变版本。A/B 必须是不同 Snapshot，并且窗口长度、时区、Renderer、Recipe、
+Hierarchy、Mapping、Formula、Metric、Calendar 与 Tariff 口径一致；否则不计算 KPI 差值。页面展示 A/B Period、Snapshot、Release、总用量、日均用量、
+峰值、闭店占比，以及前后已保存的 Key Findings、Section Interpretation 和 Additional AI Insights 内容变化。比较动作只调用 Saved list/detail GET，
+不会调用 Provider、ensure、queue 或 retry；候选的 Period/cutoff 还必须不晚于 B，任一较新候选 Detail 无法验证时整次比较失败，不静默回退到旧 A。
+当前客户端薄片最多检查最近 40 份并明确披露未扫描的旧历史；正式入口仍应收敛为服务端返回一份签名的最近兼容 A。AI 内容比较会区分客户可见语义变化、
+Evidence lineage 变化、Model Profile/输出合同变化和 Additional Method set 变化，不能把运行口径变化全部归因于数据。没有兼容 A 时诚实显示 empty。
+原 `Test A/B update` 继续作为 Additional evaluation 管理诊断，已迁移到
+Admin `AI Analysis` 页面，不能冒充整页比较。
+
+本薄切片尚未把 Additional transition 的 `New / Changed / Still supported / Resolved / No material change` 合并进同一客户卡片，也没有开放 A/B
+双上下文的 AI Analysis 深挖入口。当前 `What changed?` 只能展示两边各自已存的 AI 结论和状态；后续新增 AI 深挖时必须由服务端签发 A/B 双 identity
+handoff，不能只传自然语言摘要或让旧 A 查询 current B。
+
 ### 19.5 验收门
 
 1. 新数据发布后，Current Snapshot 与滚动 28 日范围前进；Sections 1–4、Key Findings、Section Interpretations 与 AI Analysis context 同步换版；

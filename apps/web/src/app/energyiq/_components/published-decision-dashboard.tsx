@@ -32,6 +32,7 @@ import {
   type OverviewNavigationSection,
 } from "./overview-section-navigation";
 import { NGEE_ANN_OVERVIEW_SECTIONS } from "./ngee-ann-overview-sections";
+import { OverviewChangeDialog } from "./overview-change-dialog";
 import { PRESCHOOL_OVERVIEW_SECTIONS } from "./preschool-overview-renderer";
 import { orderProjectNodesDepthFirst } from "./project-tree-model";
 import {
@@ -146,6 +147,7 @@ function PublishedDecisionDashboardView({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAnalysis, setSavedAnalysis] = useState<EnergySavedAnalysisDetailDto | null>(null);
   const [aiArtifact, setAiArtifact] = useState<EnergySavedAnalysisAiArtifactInputDto | null>(null);
+  const [changeDialogOpen, setChangeDialogOpen] = useState(false);
   const [hierarchy, setHierarchy] = useState<EnergyProjectHierarchyDto | null>(null);
   const [hierarchyError, setHierarchyError] = useState<string | null>(null);
   const [hierarchyLoading, setHierarchyLoading] = useState(false);
@@ -174,6 +176,7 @@ function PublishedDecisionDashboardView({
   const refreshRequestRevisionRef = useRef<number | null>(null);
   const refreshBypassPendingRef = useRef(false);
   const historyButtonRef = useRef<HTMLButtonElement>(null);
+  const changeButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     pendingUrlSearchRef.current = urlSearch;
@@ -307,6 +310,16 @@ function PublishedDecisionDashboardView({
   const saveAllowed = Boolean(
     qualityPolicy?.saveAllowed && currentSnapshot?.projectRelease.templateRevisionId,
   );
+
+  useEffect(() => {
+    setAiArtifact(null);
+    setChangeDialogOpen(false);
+  }, [
+    currentSnapshot?.dataSnapshot.id,
+    currentSnapshot?.projectRelease.id,
+    currentSnapshot?.renderer.key,
+    projectId,
+  ]);
 
   useEffect(() => {
     if (!projectId || resource !== "electricity" || projectSelectionError || queryValidationError) return;
@@ -610,6 +623,16 @@ function PublishedDecisionDashboardView({
               Test A/B update
             </button>
           ) : null}
+          {access?.role === "admin" && currentSnapshot ? (
+            <button
+              ref={changeButtonRef}
+              type="button"
+              onClick={() => setChangeDialogOpen(true)}
+              className="h-10 rounded-lg border border-border bg-surface px-4 text-xs font-semibold text-foreground transition-colors hover:bg-surface-subtle"
+            >
+              What changed?
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={refreshOverview}
@@ -735,6 +758,19 @@ function PublishedDecisionDashboardView({
         </div>
       )}
     </div>
+    {changeDialogOpen && currentSnapshot ? (
+      <OverviewChangeDialog
+        projectId={projectId}
+        currentSnapshot={currentSnapshot}
+        currentAiArtifact={aiArtifact}
+        returnFocusRef={changeButtonRef}
+        onClose={() => setChangeDialogOpen(false)}
+        onOpenPrevious={(analysisId) => {
+          setChangeDialogOpen(false);
+          navigateHistory({ open: true, selectedAnalysisId: analysisId });
+        }}
+      />
+    ) : null}
     {historyState.open ? (
       <OverviewHistoryDialog
         projectName={selectedProject?.name ?? "Current Project"}
@@ -957,7 +993,7 @@ export function preschoolSnapshotTransitionAdminHref(input: {
   to: string;
 }): string {
   const params = new URLSearchParams({
-    section: "knowledge",
+    section: "ai-analysis",
     projectId: input.projectId,
     abScopeId: input.scopeId,
     abSnapshotId: input.dataSnapshotId,
