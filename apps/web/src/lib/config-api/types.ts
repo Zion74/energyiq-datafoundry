@@ -2185,7 +2185,7 @@ export type EnergyProjectOverviewAdminStateDto = {
   allowedActions: Array<"generate-missing">;
   recommendedNextAction: {
     action: "generate-missing";
-    label: "Generate missing analysis";
+    label: "Generate missing analysis" | "Retry failed analysis";
     detail: string;
   } | null;
 };

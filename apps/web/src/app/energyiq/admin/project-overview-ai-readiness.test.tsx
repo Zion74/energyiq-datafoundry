@@ -98,6 +98,51 @@ describe("ProjectOverviewAiReadiness", () => {
     expect(container.textContent).not.toContain("Generate missing analysis");
   });
 
+  it("shows a retry action when the server reports a failed current analysis item", async () => {
+    const initial = preschoolState();
+    const failed = preschoolState({
+      analysis: {
+        ...initial.analysis,
+        status: "needs-attention",
+        readyCount: 5,
+        items: initial.analysis.items.map((item) => item.id === "section:centre-benchmark"
+          ? { ...item, status: "needs-attention" as const, detail: "This analysis needs attention." }
+          : { ...item, status: "ready" as const, detail: "Ready." }),
+      },
+      recommendedNextAction: {
+        action: "generate-missing",
+        label: "Retry failed analysis",
+        detail: "Retry only failed current results.",
+      },
+    });
+    const ready = preschoolState({
+      analysis: {
+        ...failed.analysis,
+        status: "ready",
+        readyCount: 6,
+        items: failed.analysis.items.map((item) => ({ ...item, status: "ready" as const })),
+      },
+      allowedActions: [],
+      recommendedNextAction: null,
+    });
+    const client = {
+      getEnergyProjectOverviewAdminState: vi.fn().mockResolvedValue(failed),
+      generateMissingEnergyProjectOverviewAnalysis: vi.fn().mockResolvedValue(ready),
+    };
+
+    await act(async () => {
+      root.render(<ProjectOverviewAiReadiness projectId="preschool-demo" client={client} />);
+    });
+
+    const retry = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent === "Retry failed analysis");
+    expect(retry).toBeDefined();
+    await act(async () => retry?.click());
+
+    expect(client.generateMissingEnergyProjectOverviewAnalysis).toHaveBeenCalledWith("preschool-demo");
+    expect(container.textContent).toContain("6 of 6 ready");
+  });
+
   it("does not say no action is needed when saved analysis needs attention", async () => {
     const initial = preschoolState();
     const state = preschoolState({

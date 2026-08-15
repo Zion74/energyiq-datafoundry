@@ -111,7 +111,11 @@ export function ProjectOverviewAiReadiness({
               onClick={() => void generateMissing()}
               className={primaryButton}
             >
-              {generating ? "Generating missing analysis…" : "Generate missing analysis"}
+              {generating
+                ? state.recommendedNextAction?.label === "Retry failed analysis"
+                  ? "Retrying failed analysis…"
+                  : "Generating missing analysis…"
+                : state.recommendedNextAction?.label}
             </button>
           ) : null}
         </div>

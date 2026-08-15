@@ -891,6 +891,56 @@ describe("Overview AI Artifact API", () => {
     }
   });
 
+  it("lets an admin retry only the failed current Section without rerunning ready siblings", async () => {
+    const harness = await createHarness();
+    try {
+      const ready = readyAggregateResultFor(harness.identity);
+      const failed = {
+        ...ready,
+        sections: {
+          ...ready.sections,
+          "centre-benchmark": {
+            status: "unavailable" as const,
+            artifactId: "section-centre-benchmark-failed",
+            reason: "STRUCTURED_OUTPUT_SCHEMA_VALIDATION_FAILED",
+          },
+        },
+      };
+      const read = vi.fn()
+        .mockResolvedValueOnce(failed)
+        .mockResolvedValue(ready);
+      const execute = vi.fn().mockResolvedValue(ready);
+      const executeAdditional = vi.fn();
+      const resolveCurrentIdentity = vi.fn().mockResolvedValue(harness.identity);
+      const context = {
+        ...harness.context,
+        overviewAiWorkflow: { execute, read, resolveCurrentIdentity },
+        additionalAiInsightsWorkflow: { execute: executeAdditional },
+      } as unknown as Required<ConfigApiContext>;
+
+      const response = await handleEnergyApiRequest(
+        jsonPost({}),
+        ["projects", harness.project.id, "overview-admin-state", "actions", "generate-missing"],
+        context,
+      );
+
+      expect(response).toMatchObject({
+        status: 200,
+        body: { success: true, data: { analysis: { status: "ready" }, allowedActions: [] } },
+      });
+      expect(execute).toHaveBeenCalledOnce();
+      expect(execute).toHaveBeenCalledWith({
+        identity: harness.identity,
+        user: expect.objectContaining({ id: "dev-user" }),
+        retry: true,
+        retryTarget: "centre-benchmark",
+      });
+      expect(executeAdditional).not.toHaveBeenCalled();
+    } finally {
+      harness.close();
+    }
+  });
+
   it("does not start Provider work when every current analysis result is already ready", async () => {
     const harness = await createHarness();
     try {

@@ -2,7 +2,10 @@ import type { MetadataStore, UserRecord } from "@datafoundry/metadata";
 
 import type { OverviewAiArtifactIdentityV13 } from "./overview-ai-artifact.js";
 import type { PreschoolAdditionalAiInsightsWorkflow } from "./preschool-additional-ai-insights-workflow.js";
-import type { PreschoolOverviewAiPageWorkflow } from "./preschool-overview-ai-page-workflow.js";
+import type {
+  PreschoolOverviewAiPageWorkflow,
+  PreschoolOverviewAiRetryTarget,
+} from "./preschool-overview-ai-page-workflow.js";
 import {
   PRESCHOOL_SECTION_IDS,
   type PreschoolOverviewAiReadModel,
@@ -60,7 +63,7 @@ export type ProjectOverviewAdminState = {
   allowedActions: Array<"generate-missing">;
   recommendedNextAction: {
     action: "generate-missing";
-    label: "Generate missing analysis";
+    label: "Generate missing analysis" | "Retry failed analysis";
     detail: string;
   } | null;
 };
@@ -169,6 +172,8 @@ export const createProjectOverviewAdminReadinessService = (input: {
     const readyCount = items.filter((item) => item.status === "ready" || item.status === "no-new-insight").length;
     const analysisStatus = aggregateAnalysisStatus(items);
     const canGenerateMissing = items.some((item) => item.status === "not-generated");
+    const canRetryFailedCore = items.some((item) => retryTargetForItem(item) !== null);
+    const canGenerateOrRetry = canGenerateMissing || canRetryFailedCore;
     const lastGeneratedAt = latestTimestamp(items.flatMap((item) =>
       item.completedAt && (item.status === "ready" || item.status === "no-new-insight")
         ? [item.completedAt]
@@ -199,12 +204,14 @@ export const createProjectOverviewAdminReadinessService = (input: {
         lastGeneratedAt,
         items,
       },
-      allowedActions: canGenerateMissing ? ["generate-missing"] : [],
-      recommendedNextAction: canGenerateMissing
-        ? {
+      allowedActions: canGenerateOrRetry ? ["generate-missing"] : [],
+      recommendedNextAction: canGenerateOrRetry
+          ? {
             action: "generate-missing",
-            label: "Generate missing analysis",
-            detail: "Create only the current analysis results that have not been saved yet.",
+            label: canGenerateMissing ? "Generate missing analysis" : "Retry failed analysis",
+            detail: canGenerateMissing
+              ? "Create only the current analysis results that have not been saved yet."
+              : "Retry only the current Key Findings or Section results that failed.",
           }
         : null,
     };
@@ -229,8 +236,16 @@ export const createProjectOverviewAdminReadinessService = (input: {
         item.status === "not-generated" && (item.id === "key-findings" || item.id.startsWith("section:")));
       const missingAdditional = before.analysis.items.some((item) =>
         item.status === "not-generated" && item.id === "additional-insights");
+      const failedCoreTargets = before.analysis.items.flatMap((item) => {
+        const target = retryTargetForItem(item);
+        return target ? [target] : [];
+      });
       if (missingCore) {
         await input.overviewAiExecutor.execute({ identity, user, retry: false });
+      } else {
+        for (const retryTarget of failedCoreTargets) {
+          await input.overviewAiExecutor.execute({ identity, user, retry: true, retryTarget });
+        }
       }
       const additionalAiInsightsWorkflow = input.additionalAiInsightsWorkflow;
       if (missingAdditional) {
@@ -242,6 +257,18 @@ export const createProjectOverviewAdminReadinessService = (input: {
       return readProjectOverviewAdminState({ projectId, user });
     },
   };
+};
+
+const retryTargetForItem = (
+  item: ProjectOverviewAdminReadinessItem,
+): PreschoolOverviewAiRetryTarget | null => {
+  if (item.status !== "needs-attention" || !item.artifactId) return null;
+  if (item.id === "key-findings") return "executive-synthesis";
+  if (!item.id.startsWith("section:")) return null;
+  const sectionId = item.id.slice("section:".length);
+  return PRESCHOOL_SECTION_IDS.includes(sectionId as PreschoolSectionId)
+    ? sectionId as PreschoolSectionId
+    : null;
 };
 
 const unavailablePreschoolState = (input: {
