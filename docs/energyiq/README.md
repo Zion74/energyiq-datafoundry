@@ -17,7 +17,7 @@
 9. [三 Agent MVP 执行手册](2026-08-03-三Agent-MVP执行手册.md)：Data Foundation、Structured Template 和 AI Analyst 的责任、并行依赖与验收；
 10. [DataFoundry Agent Harness 复用边界](说明-DataFoundry-Agent-Harness与EnergyIQ复用边界.md)：解释已有 Runtime、Task Console、Knowledge/MCP/Tools 和受控图表，不重复建设；
 11. [领域词汇表](CONTEXT.md)：Project、Tier、Scope、Meter、Fact、Template、Run 和 Data Health 的统一用语；
-12. [开发计划：Admin 与模板运行闭环](开发计划-Admin与模板运行闭环.md)：已有 Admin/模板能力、Ngee Ann MVP 批次，以及 2026-08-15 Overview 与 Layer 1–3 AI Readiness 执行方案；
+12. [开发计划：Admin 与模板运行闭环](开发计划-Admin与模板运行闭环.md)：已有 Admin/模板能力、2026-08-15 Preschool Stage 1–3 v12 可用化、真实 Provider、A→B、多账户与 Ngee Ann 后续依赖计划；
 13. [最新 MVP PRD](PRD-EnergyIQ-MVP.md)：客户页面、Admin、数据、模板与验收。
 
 若旧聊天或旧文档冲突，以“当前共识与新会话入口”及其链接的 accepted 专题为准。
@@ -56,7 +56,7 @@
 | [2026-08-06 Overview 夜间执行清单与 Runlog](2026-08-06-Overview夜间执行清单与Runlog.md) | in progress；第 11 节为 2026-08-07 当前行动方案：Overview takeaway-first 阅读体验 → #31 Explorer 精准下钻与设备趋势 → Preschool 演示型图表 → #5/#19/#20/#21 收口；AI 侧线保持隔离 |
 | [三 Agent MVP 最终执行与重置包](2026-08-03-三Agent-MVP最终执行与重置包.md) | accepted；唯一派工入口，含共同基线和三个最终 Prompt |
 | [三 Agent MVP 执行手册](2026-08-03-三Agent-MVP执行手册.md) | accepted；三个 Agent 的责任、并行节奏、MVP 边界与验收 Owner 已确认 |
-| [开发计划：Admin 与模板运行闭环](开发计划-Admin与模板运行闭环.md) | in progress；补齐项目级 Overview 与 Layer 1–3 AI Readiness、授权 Generate missing analysis 和多账户验收，不横向扩建通用运维平台 |
+| [开发计划：Admin 与模板运行闭环](开发计划-Admin与模板运行闭环.md) | in progress；当前关键路径为 Preschool Stage 1–3 v12 生成/审批/发布/浏览器验收，再做真实 A→B、多账户与 Ngee Ann 公共 AI Slot |
 
 原来的三线责任文档、各 Agent Handoff 和纠正 Prompt 已标记为 `superseded`，只保留为历史入口；执行统一以“三 Agent MVP 执行手册”为准。
 

@@ -960,6 +960,19 @@ v6 的发布单元同时包含上述增量价值/provenance 实现与其紧随�
 epistemic guard correction；集成时必须原子纳入，不能只挑前一部分提交。该 correction 前 v6 从未进入集成服务且没有生产 Artifact，因此不再人为
 旋转 v7；若部署环境出现任何旧 v6 Artifact，则必须先停线重新评估 identity 隔离，不能把中间实现当作 current。
 
+### 18.14 Additional 事实底座与发散角度分层 checkpoint
+
+真实 pass@3 进一步证明，按句子机械删除未通过事实校验的片段会产生残句，也会把“没有直接证明的原因假设”与“编造的硬数字”混为一类。用户确认的产品原则不是追求百分之百确定后才展示，而是在正确性与创造性之间建立可读、诚实的边界。
+
+current discovery 候选因此拆成两个叙事字段：
+
+- `observation`：一条可核查的 Evidence signal；数字、单位、日期和 Centre 实体必须由候选自己的 current Evidence 支持；
+- `angle`：Agent 自主提出的新关系、反例、可能机制、情景推演或低风险实验。它可以超出 Evidence 已证明的结论，但必须使用 `inferred` 或 `speculative` 等诚实状态，不得把未引用的精确数字、Centre、确认因果、节省或结果写成事实。
+
+系统不规定固定 What/Why/How、主题、lens 或 SQL 数量。Agent 可以自由解释已引用的事实和 Centre；若需要新的派生数字，应先通过受控工具形成 typed Evidence。发布后的稳定 Artifact 继续使用 output v2 字符串合同，并以安全 Markdown 组合成 `Evidence signal` 与 `AI angle` 两段，盲评、反馈、Method Proposal 与既有 Web DTO 不需要同时迁移。旧 v11 的“逐句 salvage”只保留历史只读兼容，不再属于 current mutation。
+
+行为身份旋转为 `additional-insights-v12`，validator 为 `additional-insights-acceptance-v9`，workflow 为 `additional-insights-discover-accept-publish-v12`，discovery prompt 为 `additional-insights-discovery-v10`；output v2、publication v2、capability v1、canvas v2 与 Method set 不变。本 checkpoint 只证明本地自动化合同；仍需新的真实 Provider pass@3、人工价值评分、浏览器与部署验收，不能复用 v11 结果冒充 v12。
+
 ## 19. 2026-08-15 Preschool 连续数据与整页 A/B 数据域决策
 
 ### 19.1 A/B 的产品含义

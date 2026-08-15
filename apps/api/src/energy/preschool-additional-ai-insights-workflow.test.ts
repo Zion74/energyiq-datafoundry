@@ -1326,7 +1326,10 @@ describe("Preschool Additional AI Insights workflow", () => {
       expect(receivedPrompt).toContain("If alert cannot match the exact object shape");
       expect(receivedPrompt).toContain("A relationship across multiple Evidence facts cannot be observed");
       expect(receivedPrompt).toContain("Do not calculate or state new numeric values");
-      expect(receivedPrompt).toContain("text should be 1 to 3 short sentences and no more than 500 characters");
+      expect(receivedPrompt).toContain("observation should be one short Evidence-backed sentence");
+      expect(receivedPrompt).toContain("angle states the genuinely useful relationship, counterexample, hypothesis, or low-risk experiment");
+      expect(receivedPrompt).toContain("may go beyond what the Evidence proves");
+      expect(receivedPrompt).toContain("may freely interpret cited facts and named Centres");
       expect(receivedPrompt).toContain("deepDiveQuestion should be one short question and no more than 200 characters");
       expect(receivedPrompt).not.toContain("fill every lens");
       expect(receivedPrompt).not.toContain("snapshot-evidence:");
@@ -1413,7 +1416,7 @@ describe("Preschool Additional AI Insights workflow", () => {
         canvas: canvasPlan({
           candidateId: "candidate-canvas",
           title: "Title for candidate-canvas",
-          text: "Incremental observation for candidate-canvas.",
+          text: "**Evidence signal:** The cited current Evidence establishes the selected baseline.\n\n**AI angle:** Incremental angle for candidate-canvas.",
         }),
       });
       const workflow = createPreschoolAdditionalAiInsightsWorkflow({
@@ -1464,7 +1467,7 @@ describe("Preschool Additional AI Insights workflow", () => {
       const plan = canvasPlan({
         candidateId: "candidate-budget",
         title: "Title for candidate-budget",
-        text: "Incremental observation for candidate-budget.",
+        text: "**Evidence signal:** The cited current Evidence establishes the selected baseline.\n\n**AI angle:** Incremental angle for candidate-budget.",
       });
       const acceptedTemplate = plan.investigatorBlocks[0]!;
       plan.investigatorBlocks = Array.from({ length: 4 }, (_, index) => ({
@@ -1663,21 +1666,34 @@ const candidate = (
   evidenceRef: string,
   overrides: Record<string, unknown> = {},
 ) => {
+  const {
+    text: legacyText,
+    observation: proposedObservation,
+    angle: proposedAngle,
+    ...remainingOverrides
+  } = overrides;
   const value = {
     id,
     title: `Title for ${id}`,
-    text: `Incremental observation for ${id}.`,
+    observation: typeof proposedObservation === "string"
+      ? proposedObservation
+      : "The cited current Evidence establishes the selected baseline.",
+    angle: typeof proposedAngle === "string"
+      ? proposedAngle
+      : typeof legacyText === "string"
+        ? legacyText
+        : `Incremental angle for ${id}.`,
     epistemicStatus: "inferred",
     origin: { kind: "ai-discovery", directionMethodResourceIds: [] },
     incrementalContext: incrementalContext(`deterministic-overview:${evidenceRef}`),
     evidenceRefs: [evidenceRef],
     toolAuditIds: [],
-    ...overrides,
+    ...remainingOverrides,
   };
   if (value.incrementalContext.novelConclusion === TEST_NOVEL_CONCLUSION_FROM_NARRATIVE) {
     value.incrementalContext = {
       ...value.incrementalContext,
-      novelConclusion: String(value.text),
+      novelConclusion: String(value.angle),
     };
   }
   return value;
@@ -1928,10 +1944,9 @@ const resolvePresentedClaimsFixture: Parameters<typeof createPreschoolAdditional
     }
   });
 
-  it("drops an unsupported sentence and optional deep dive without discarding a valuable supported candidate", async () => {
+  it("rejects an unsupported hard number without treating a speculative angle as a factual claim", async () => {
     const harness = createHarness();
     try {
-      const supportedConclusion = "The confirmed standby share may still vary with weekday schedules.";
       const workflow = createPreschoolAdditionalAiInsightsWorkflow({
         metadataStore: harness.metadata,
         resolveEvidenceCatalog: async () => catalog(),
@@ -1939,12 +1954,13 @@ const resolvePresentedClaimsFixture: Parameters<typeof createPreschoolAdditional
         runDiscovery: async ({ runId, sessionId }) => ({
           answer: JSON.stringify({ candidates: [candidate("candidate-sentence-salvage", "fact:standby-share", {
             title: "Test whether standby share varies with weekday schedules",
-            text: `Standby is 31%. ${supportedConclusion} An unsupported sibling sentence claims 999 kWh.`,
+            observation: "Standby is 31%.",
+            angle: "Standby may vary with weekday schedules, but an unsupported hard claim says it reached 999 kWh.",
             epistemicStatus: "speculative",
             deepDiveQuestion: "Did the unsupported peak reach 777 kWh?",
             incrementalContext: {
               relatedPresentedClaimIds: ["deterministic-overview:fact:standby-share"],
-              novelConclusion: supportedConclusion,
+              novelConclusion: "Standby may vary with weekday schedules",
             },
           })] }),
           runId,
@@ -1960,17 +1976,64 @@ const resolvePresentedClaimsFixture: Parameters<typeof createPreschoolAdditional
       });
 
       expect(result).toMatchObject({
-        status: "available",
+        status: "empty",
         publication: {
-          acceptedCandidateIds: ["candidate-sentence-salvage"],
+          acceptedCandidateIds: [],
+          rejectedCandidateIds: ["candidate-sentence-salvage"],
+        },
+        findings: [],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("publishes an evidence-backed observation with a clearly labelled exploratory angle", async () => {
+    const harness = createHarness();
+    try {
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [{
+            id: "candidate-evidence-and-angle",
+            title: "Test whether standby load follows a shared closing routine",
+            observation: "Standby energy represents 31% of the selected period.",
+            angle: "A shared closing routine may be concentrating this load; compare weekday and weekend recurrence before changing schedules.",
+            epistemicStatus: "speculative",
+            origin: { kind: "ai-discovery", directionMethodResourceIds: [] },
+            incrementalContext: {
+              relatedPresentedClaimIds: ["deterministic-overview:fact:standby-share"],
+              novelConclusion: "A shared closing routine may be concentrating this load",
+            },
+            evidenceRefs: ["fact:standby-share"],
+            toolAuditIds: [],
+          }] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "evidence-and-angle-run",
+        sessionId: "evidence-and-angle-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        findings: [{
+          id: "additional:candidate-evidence-and-angle",
+          epistemicStatus: "speculative",
+          text: "**Evidence signal:** Standby energy represents 31% of the selected period.\n\n**AI angle:** A shared closing routine may be concentrating this load; compare weekday and weekend recurrence before changing schedules.",
+        }],
+        publication: {
+          acceptedCandidateIds: ["candidate-evidence-and-angle"],
           rejectedCandidateIds: [],
         },
-        findings: [{
-          id: "additional:candidate-sentence-salvage",
-          text: `Standby is 31%. ${supportedConclusion}`,
-        }],
       });
-      expect(result.status === "available" && result.findings[0]).not.toHaveProperty("deepDiveQuestion");
     } finally {
       harness.close();
     }

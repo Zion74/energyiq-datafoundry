@@ -162,6 +162,71 @@ Admin 面向 Charles、涂鸦管理员和实施人员使用业务语言；技术
 | 把 Preschool 结构写死 | Project capability adapter 决定层级、Section 和可用动作 |
 | Knowledge 与 Method 混淆 | Knowledge 只管理来源资料；Methods & SOP 管理分析方法和提案 |
 
+## 1.2 2026-08-15 Preschool Stage 1–3 可用化、A→B 与发布跟踪
+
+### 当前判断
+
+本节是当前执行入口，避免把任务状态只保存在聊天上下文中。GitHub [#47](https://github.com/Zion74/energyiq-datafoundry/issues/47) 继续作为 Preschool Stage 3 父 Ticket；本节只记录依赖顺序、完成定义、当前证据和预计时间。代码测试、真实 Provider、浏览器、人工价值判断和生产部署必须分开报告。
+
+截至 2026-08-15，本地权威 Integration Metadata 显示：
+
+- Layer 1 Key Findings 与 Layer 2 Section Interpretation 已有可用 `v4` Artifact；
+- Layer 3 Additional AI Insights 只有历史 `additional-insights-v8` 可用 Artifact；
+- 当前实现已旋转到 `additional-insights-v12`，因此旧 v8 只能历史只读，不能冒充当前结果；
+- 普通 Overview 打开或刷新只读取已保存 Artifact，不自动启动 Provider；
+- 因此当前页面的 Layer 3 `Unavailable` 是“当前 v12 尚未生成/发布”的诚实状态，不是 dev mode 自动造成，也不能仅靠刷新恢复。
+
+本地 v12 改造把每条 Additional Insight 分成两个表达层：
+
+1. `Evidence signal`：数字、日期、Centre、事件和其他硬事实必须可追溯；
+2. `AI angle`：允许模型提出关系、反例、假设、可能原因和低风险实验，只要使用 `inferred` / `speculative` 等诚实状态，不把猜想写成确认事实。
+
+这不是固定 What/Why/How 模板，也不限定分析主题。Evidence 是事实底座，AI angle 是 Agent 的发散空间。
+
+### 关键路径与 Ticket 拆分
+
+| 顺序 | 优先级 | Ticket / 工作包 | 完成定义 | 依赖 | 预计净耗时 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | P0 | [#58 Stage 3 v12 本地收口与 Provider pass@3](https://github.com/Zion74/energyiq-datafoundry/issues/58) | focused tests、Contracts/Metadata/API/Web build、diff review、clean commit 全绿；部署后完成三次真实 attempt | 无 | 本地 0.5–1 小时；Provider 1–2 小时 |
+| 2 | P0 | #58 v12 不可变部署 | 服务器运行精确 commit；Metadata migration、API ready、Web health 和数据库路径核对通过 | #58 本地门 | 0.5–1 小时 |
+| 3 | P0 | #58 当前 Snapshot 真实 Provider pass@3 | 同一 Snapshot/Profile 三次独立 attempt；坏候选局部拒绝；至少两次进入可人工审核状态 | 部署、Provider/Profile/Secret 正常 | 1–2 小时 |
+| 4 | P0 | [#59 人工盲审与正式 Overview 发布](https://github.com/Zion74/energyiq-datafoundry/issues/59) | 管理员能看盲审包、评分、批准；批准结果产生 current v12 Overview Artifact，而不只停留在 `publication-candidate-only` | #58 | 2–4 小时（含缺失发布 seam） |
+| 5 | P0 | Preschool Stage 1–3 浏览器价值验收 | Key Findings、Section Summary/Insights、Additional 的 Evidence signal/AI angle 可见；语句自然、重点明确、Evidence 可读、无 console/overflow | 4 | 1–2 小时 |
+| 6 | P1 | [#60 Preschool 真实 Snapshot A→B](https://github.com/Zion74/energyiq-datafoundry/issues/60) | A 严格早于 B；指标、Key Findings、Section、Additional、AI Analysis 数据域同步变化；旧结论被保留/更新/淘汰；普通刷新 Run 数不增 | #59、受控 B 数据 | 0.5–1 工作日 |
+| 7 | P1 | 生产多账户验收 | Charles 管理员看全部项目；Ngee Ann 普通账号只见 Ngee Ann；两个项目 Overview 和 AI Analysis 可用 | 5，最好完成 6 | 1–2 小时 |
+| 8 | P1 | Ngee Ann 通用 AI Slot | 实现 Ngee Ann 自己的 Pack、Key Findings、Section Interpretation、Additional 与 Readiness Adapter，不复制 Preschool 四 Section | 5–7 | 2–4 工作日 |
+| 9 | P1 | AI 质量反馈与 Method/SOP 沉淀 | 记录 usefulness、复述、清晰度、Explore 行为；用户认可的 Insight 生成 Proposal，人工批准后进入复跑方法库 | 6、8 | 1–2 工作日 MVP |
+
+### “真正可用”的时间定义
+
+- **Preschool Stage 1–3 本地可用**：完成 1、3、4、5。若 Provider 与本地数据库正常，预计还需 **4–8 小时**；自动测试通过不能替代真实 Provider 和人工价值验收。
+- **Preschool 生产可交给 Charles 测试**：完成 1–5，并通过生产部署与账号 smoke，预计 **同一工作日内**；如果正式发布 seam 或 Provider 出现新阻塞，按 Ticket 单独报告。
+- **连续数据 A→B 与多账户达到客户验收状态**：完成 6–7，预计再需 **0.5–1 工作日**。
+- **Ngee Ann 也进入公共 Layer 1–3 产品流程**：完成 8，预计 **2–4 工作日**，不应为了赶进度复制 Preschool 业务 Pack。
+- **质量反馈与 SOP Library MVP**：完成 9，预计 **1–2 工作日**；不会自动批准或发布客户方法。
+
+### 硬验收门
+
+1. 当前 Snapshot/Release/Profile/identity 必须 exact；旧 Artifact 只能历史只读。
+2. 打开、刷新、展开 Evidence 和 Saved restore 的 Provider Run 增量必须为 0。
+3. 硬事实必须有当前 Evidence；发散角度可以超出证明范围，但必须诚实标注不确定性，不能添加无来源的精确数字、日期、Centre 或事件。
+4. 一个坏候选只淘汰自己；不得吞掉其他有价值候选或确定性 Overview。
+5. 人工批准必须明确区分“候选通过评估”与“已经进入客户 Overview”；两者之间需要可审计的发布动作。
+6. A→B 必须同时切换确定性 Overview、三层 AI Artifact 和 AI Analysis context；只比较 Additional 不算整页 A→B。
+7. 多账户、真实 Provider、浏览器、数据库和部署分别保存证据，任何一项不能替代其他项。
+
+### 后续 GitHub 关系
+
+- [#47](https://github.com/Zion74/energyiq-datafoundry/issues/47)：Preschool Stage 3 父 Ticket；
+- [#58](https://github.com/Zion74/energyiq-datafoundry/issues/58)：v12 Evidence signal / AI angle、部署与真实 Provider pass@3；
+- [#59](https://github.com/Zion74/energyiq-datafoundry/issues/59)：已批准候选发布到 current Overview；
+- [#60](https://github.com/Zion74/energyiq-datafoundry/issues/60)：Preschool 整页与 AI 数据域 A→B；
+- [#39](https://github.com/Zion74/energyiq-datafoundry/issues/39)：新 Snapshot 后预生成 current Overview Artifact；
+- [#53](https://github.com/Zion74/energyiq-datafoundry/issues/53)：生产浏览器与多账户验收；
+- [#55](https://github.com/Zion74/energyiq-datafoundry/issues/55)：Ngee Ann 接入公共 Layer 1–3；
+- [#56](https://github.com/Zion74/energyiq-datafoundry/issues/56)：Ngee Ann 真实 A→B；
+- [#57](https://github.com/Zion74/energyiq-datafoundry/issues/57)：AI 质量反馈与 Method/SOP 沉淀。
+
 ## 2. 当前代码基线
 
 开发应直接演进现有模块：

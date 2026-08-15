@@ -1432,6 +1432,8 @@ describe("PreschoolAiSlot", () => {
     expect(container.textContent).toContain("Evidence, Method and limitation");
     expect(container.textContent).toContain("energyiq-open-discovery@1.0.0");
     expect(container.querySelector("a")).toBeNull();
+    expect([...container.querySelectorAll("strong")].some((node) => node.textContent === "Evidence signal:" )).toBe(true);
+    expect([...container.querySelectorAll("strong")].some((node) => node.textContent === "AI angle:" )).toBe(true);
     expect([...container.querySelectorAll("strong")].some((node) => node.textContent === "standby share")).toBe(true);
     expect([...container.querySelectorAll("strong")].some((node) => node.textContent?.includes("raw HTML"))).toBe(false);
     expect(container.textContent).not.toContain("Legacy autonomous angle");
@@ -2137,7 +2139,7 @@ function currentAdditionalUnit(binding: PreschoolOverviewAiReadModelDto["binding
       findings: [{
         id: "additional:candidate-counter-pattern",
         title: "A counter-pattern appears",
-        text: "The cited **standby share** differs from the expected pattern.  \n_Review the current Snapshot_ without assuming a cause; ignore [unsafe link](https://example.test) and <strong>raw HTML</strong>.",
+        text: "**Evidence signal:** The cited **standby share** differs from the expected pattern.  \n\n**AI angle:** _Review the current Snapshot_ without assuming a cause; ignore [unsafe link](https://example.test) and <strong>raw HTML</strong>.",
         epistemicStatus: "inferred",
         origin: { kind: "ai-discovery", coreMethod: method, directionMethods: [] },
         evidenceRefs: ["fact:standby-share"],

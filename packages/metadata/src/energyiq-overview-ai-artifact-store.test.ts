@@ -990,6 +990,7 @@ describe("EnergyIqOverviewAiArtifactStore current Additional AI Insights", () =>
       const historicalV8Identity = historicalAdditionalIdentityV8(currentIdentity);
       const historicalV9Identity = historicalAdditionalIdentityV9(currentIdentity);
       const historicalV10Identity = historicalAdditionalIdentityV10(currentIdentity);
+      const historicalV11Identity = historicalAdditionalIdentityV11(currentIdentity);
       seedHistoricalTerminalArtifact({
         databasePath,
         source: currentArtifact,
@@ -1030,6 +1031,11 @@ describe("EnergyIqOverviewAiArtifactStore current Additional AI Insights", () =>
         source: currentArtifact,
         identity: historicalV10Identity,
       });
+      seedHistoricalTerminalArtifact({
+        databasePath,
+        source: currentArtifact,
+        identity: historicalV11Identity,
+      });
       const historicalArtifact = metadata.energyIq.overviewAiArtifacts.get(historicalIdentity);
       const historicalV4Artifact = metadata.energyIq.overviewAiArtifacts.get(historicalV4Identity);
       const historicalV5Artifact = metadata.energyIq.overviewAiArtifacts.get(historicalV5Identity);
@@ -1038,6 +1044,7 @@ describe("EnergyIqOverviewAiArtifactStore current Additional AI Insights", () =>
       const historicalV8Artifact = metadata.energyIq.overviewAiArtifacts.get(historicalV8Identity);
       const historicalV9Artifact = metadata.energyIq.overviewAiArtifacts.get(historicalV9Identity);
       const historicalV10Artifact = metadata.energyIq.overviewAiArtifacts.get(historicalV10Identity);
+      const historicalV11Artifact = metadata.energyIq.overviewAiArtifacts.get(historicalV11Identity);
       const proposal = metadata.energyIq.insightMethodGovernance.createProposal({
         expectedWorkspaceId: "artifact-workspace",
         expectedProjectId: "artifact-project",
@@ -1086,6 +1093,8 @@ describe("EnergyIqOverviewAiArtifactStore current Additional AI Insights", () =>
       expect(metadata.energyIq.overviewAiArtifacts.get(historicalV9Identity)).toEqual(historicalV9Artifact);
       expect(metadata.energyIq.overviewAiArtifacts.find(historicalV10Identity)).toEqual(historicalV10Artifact);
       expect(metadata.energyIq.overviewAiArtifacts.get(historicalV10Identity)).toEqual(historicalV10Artifact);
+      expect(metadata.energyIq.overviewAiArtifacts.find(historicalV11Identity)).toEqual(historicalV11Artifact);
+      expect(metadata.energyIq.overviewAiArtifacts.get(historicalV11Identity)).toEqual(historicalV11Artifact);
       metadata.db.prepare(`
         UPDATE energyiq_overview_ai_artifacts
         SET status = 'running', result_json = NULL, completed_at = NULL,
@@ -1263,7 +1272,7 @@ const attachAcceptedCanvas = (artifact: AdditionalAiInsightsArtifact): void => {
 
 type AdditionalIdentity = EnergyIqOverviewAiArtifactIdentity & {
   artifactKind: "autonomous-insights";
-  identityContractRevision: "additional-insights-v11";
+  identityContractRevision: "additional-insights-v12";
   methodSetId: "preschool-additional-insights-current";
   methodSetRevision: "v1";
   methodSetFingerprint: string;
@@ -1282,13 +1291,13 @@ const additionalIdentity = (
   return {
     ...identity(dataSnapshotId),
     artifactKind: "autonomous-insights",
-    identityContractRevision: "additional-insights-v11",
+    identityContractRevision: "additional-insights-v12",
     analysisPackId: "preschool-additional-insights-pack",
     analysisPackRevision: "v1",
     outputContractRevision: "energyiq-additional-ai-insights-v2",
-    validatorRevision: "additional-insights-acceptance-v8",
-    workflowRevision: "additional-insights-discover-accept-publish-v11",
-    investigatorPromptRevision: "additional-insights-discovery-v9",
+    validatorRevision: "additional-insights-acceptance-v9",
+    workflowRevision: "additional-insights-discover-accept-publish-v12",
+    investigatorPromptRevision: "additional-insights-discovery-v10",
     editorPromptRevision: "additional-insights-publication-v2",
     methodSkillId: "energyiq-open-discovery",
     methodSkillRevision: "1.0.0",
@@ -1387,6 +1396,16 @@ const historicalAdditionalIdentityV10 = (
   validatorRevision: "additional-insights-acceptance-v7",
   workflowRevision: "additional-insights-discover-accept-publish-v10",
   investigatorPromptRevision: "additional-insights-discovery-v8",
+});
+
+const historicalAdditionalIdentityV11 = (
+  current: AdditionalIdentity,
+): EnergyIqOverviewAiArtifactIdentity => ({
+  ...current,
+  identityContractRevision: "additional-insights-v11",
+  validatorRevision: "additional-insights-acceptance-v8",
+  workflowRevision: "additional-insights-discover-accept-publish-v11",
+  investigatorPromptRevision: "additional-insights-discovery-v9",
 });
 
 const historicalAdditionalIdentity = (

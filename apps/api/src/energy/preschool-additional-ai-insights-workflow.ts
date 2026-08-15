@@ -598,13 +598,15 @@ const acceptCandidate = (
   knownCentreCodes: readonly string[],
 ): AdditionalAiInsightFinding | null => {
   const value = candidate.value;
+  const hasSeparatedNarrative = isRecord(value) && hasOnlyKeys(value, [
+    "id", "title", "observation", "angle", "epistemicStatus", "origin", "incrementalContext", "evidenceRefs", "toolAuditIds", "deepDiveQuestion", "alert", "canvas",
+  ]);
   if (!isRecord(value)
-    || !hasOnlyKeys(value, [
-      "id", "title", "text", "epistemicStatus", "origin", "incrementalContext", "evidenceRefs", "toolAuditIds", "deepDiveQuestion", "alert", "canvas",
-    ])
+    || !hasSeparatedNarrative
     || value.id !== candidate.sourceId
     || !conciseSummaryTitle(value.title)
-    || !boundedSafeText(value.text, MAX_CANDIDATE_TEXT_CHARS)
+    || !boundedSafeText(value.observation, MAX_CANDIDATE_TEXT_CHARS)
+    || !boundedSafeText(value.angle, MAX_CANDIDATE_TEXT_CHARS)
     || (value.epistemicStatus !== "observed" && value.epistemicStatus !== "inferred" && value.epistemicStatus !== "speculative")
     || !Array.isArray(value.evidenceRefs)
     || value.evidenceRefs.length === 0
@@ -629,10 +631,12 @@ const acceptCandidate = (
     knownCentreCodes,
   });
   if (!narrativeIsSupported(value.title)) return null;
-  const supportedSentences = value.text.trim().split(/(?<=[.!?])\s+(?=[\p{Lu}\p{N}])/u)
-    .filter((sentence) => narrativeIsSupported(sentence));
-  if (supportedSentences.length === 0) return null;
-  const acceptedText = supportedSentences.join(" ");
+  const acceptedNarrative = resolveSeparatedCandidateNarrative({
+    observation: value.observation,
+    angle: value.angle,
+    narrativeIsSupported,
+  });
+  if (!acceptedNarrative) return null;
   const acceptedDeepDiveQuestion = nonEmptyString(value.deepDiveQuestion)
     && narrativeIsSupported(value.deepDiveQuestion)
     ? value.deepDiveQuestion.trim()
@@ -642,12 +646,12 @@ const acceptCandidate = (
     value.incrementalContext,
     evidenceRefs,
     presentedClaims,
-    { title: value.title, text: acceptedText },
+    { title: value.title, text: acceptedNarrative.noveltyText },
   );
   if (!origin || !incrementalContext) return null;
   const epistemicStatus = resolveAcceptedEpistemicStatus({
     title: value.title,
-    text: acceptedText,
+    text: acceptedNarrative.epistemicText,
     ...(acceptedDeepDiveQuestion ? { deepDiveQuestion: acceptedDeepDiveQuestion } : {}),
     epistemicStatus: value.epistemicStatus,
     originKind: origin.kind,
@@ -663,7 +667,7 @@ const acceptCandidate = (
   const finding: AdditionalAiInsightFinding = {
     id: `additional:${candidate.sourceId}`,
     title: value.title.trim(),
-    text: acceptedText,
+    text: acceptedNarrative.publishedText,
     epistemicStatus,
     origin,
     evidenceRefs: [...evidenceRefs],
@@ -682,6 +686,7 @@ const acceptCandidate = (
   const canvas = acceptCandidateCanvas({
     candidate,
     candidateValue: value,
+    publishedText: acceptedNarrative.publishedText,
     identity,
     evidenceFacts: canvasEvidenceFacts,
   });
@@ -788,6 +793,7 @@ const resolveAcceptedEpistemicStatus = (input: {
 const acceptCandidateCanvas = (input: {
   candidate: DiscoveryCandidate;
   candidateValue: Record<string, unknown>;
+  publishedText: string;
   identity: PreschoolAdditionalAiInsightArtifactIdentity;
   evidenceFacts: readonly InsightCanvasEvidenceFact[];
 }): Extract<AdditionalAiInsightFinding["canvas"], { contractRevision: "energyiq-insight-canvas-v2" }> | undefined => {
@@ -805,7 +811,7 @@ const acceptCandidateCanvas = (input: {
   });
   const findingMatches = accepted.acceptedFinding?.id === input.candidate.sourceId
     && accepted.acceptedFinding.title === input.candidateValue.title
-    && accepted.acceptedFinding.text === input.candidateValue.text
+    && accepted.acceptedFinding.text === input.publishedText
     && Array.isArray(input.candidateValue.evidenceRefs)
     && sameStringOrder(accepted.acceptedFinding.evidenceRefs, input.candidateValue.evidenceRefs);
   const acceptedBlocks = findingMatches ? accepted.acceptedBlocks.slice(0, 3) : [];
@@ -902,17 +908,17 @@ const buildDiscoveryPrompt = (input: {
       `Server-approved Method ${method.role} ${method.resourceId}@${method.resourceRevision}:`,
       content,
     ].join("\n")),
-    "Return JSON only: {candidates:[{id,title,text,epistemicStatus:'observed|inferred|speculative',origin:{kind:'ai-discovery|expert-sop|hybrid',directionMethodResourceIds:[exact server-approved Method resourceId],novelContribution?:string},incrementalContext:{relatedPresentedClaimIds:[exact claim id],novelConclusion:string},evidenceRefs:[exact fact id],toolAuditIds:[actual returned audit id],deepDiveQuestion?,alert?,canvas?}]}.",
+    "Return JSON only: {candidates:[{id,title,observation,angle,epistemicStatus:'observed|inferred|speculative',origin:{kind:'ai-discovery|expert-sop|hybrid',directionMethodResourceIds:[exact server-approved Method resourceId],novelContribution?:string},incrementalContext:{relatedPresentedClaimIds:[exact claim id],novelConclusion:string},evidenceRefs:[exact fact id],toolAuditIds:[actual returned audit id],deepDiveQuestion?,alert?,canvas?}]}.",
     "The first character must be { and the last character must be }. Do not add a preamble, scratch work, Markdown fence, or trailing commentary.",
     "Each title must be 100 characters or fewer. toolAuditIds is required; use [] when no tool was called. When a tool was called, cite only succeeded audit IDs actually used by that candidate. Every cited audit must overlap the candidate Evidence; the candidate may additionally cite exact Current Catalog Evidence that was not returned by that audit because the server validates every Evidence ref independently.",
-    "For page readability, text should be 1 to 3 short sentences and no more than 500 characters. deepDiveQuestion should be one short question and no more than 200 characters. These are generation instructions; the server keeps its wider safety ceiling for local candidate isolation.",
-    "Make every sentence independently supportable by the candidate's Evidence. The server may remove an unsupported sentence or optional deep-dive question while preserving a supported, genuinely new conclusion; it will still reject a candidate whose title or all body sentences are unsupported.",
+    "For page readability, observation should be one short Evidence-backed sentence. angle should be 1 to 2 short sentences and no more than 500 characters. deepDiveQuestion should be one short question and no more than 200 characters. These are generation instructions; the server keeps its wider safety ceiling for local candidate isolation.",
+    "Separate correctness from exploration. observation states only facts directly supported by the candidate Evidence. angle states the genuinely useful relationship, counterexample, hypothesis, or low-risk experiment. An inferred or speculative angle may freely interpret cited facts and named Centres and may go beyond what the Evidence proves, but it must use transparent possibility language and must not introduce uncited precise numbers, uncited Centres, dates, confirmed causes, savings, or outcomes.",
     "ai-discovery must contain exactly kind and directionMethodResourceIds, with directionMethodResourceIds=[]. Do not add novelContribution to ai-discovery. If alert cannot match the exact object shape {severity:'attention|urgent',certainty:'confirmed|anomaly|possible',evidenceRefs:[exact candidate Evidence ref]}, omit it.",
-    "A relationship across multiple Evidence facts cannot be observed; label it inferred or speculative. Do not calculate or state new numeric values that are not directly present in the candidate's cited Evidence; qualitative relationships, counterexamples, and testable hypotheses remain valid.",
+    "A relationship across multiple Evidence facts cannot be observed; label it inferred or speculative. Do not calculate or state new numeric values that are not directly present in the candidate's cited Evidence. Qualitative relationships, counterexamples, possible mechanisms, and testable hypotheses are valuable and remain valid even when the Evidence does not confirm the explanation.",
     "For core-only discovery use origin.kind='ai-discovery' and directionMethodResourceIds=[]. Cite only the exact loaded expert-direction resourceIds actually used. expert-sop requires one or more such refs. hybrid additionally requires a concise bounded novelContribution. Never invent or duplicate Method refs.",
     "Optional canvas must be an energyiq-insight-canvas plan using only quantitative metric, comparison, or trend blocks bound exactly to supplied Evidence facts. The server may reject blocks locally without rejecting the Finding.",
     "Candidates must already be ordered from highest to lowest incremental value. Zero candidates is valid.",
-    "Use the structured already-presented claim digests below. Their sourceEvidenceRefs preserve source provenance and are not candidate Evidence authority. Cite exact related claim IDs and state only the genuinely new conclusion; write novelConclusion as a concise conclusion that is actually present in title or text. A title may repeat a factual baseline when the text adds that new conclusion. Related claims need not share an Evidence namespace with the candidate. Candidate evidenceRefs must still be exact IDs from the Current authoritative Evidence Catalog. A restatement is not a candidate; the same or different Evidence may support a new relationship, counterexample, or testable hypothesis.",
+    "Use the structured already-presented claim digests below. Their sourceEvidenceRefs preserve source provenance and are not candidate Evidence authority. Cite exact related claim IDs and state only the genuinely new conclusion; write novelConclusion as a concise conclusion that is actually present in title or angle. A title or observation may repeat a factual baseline when the angle adds that new conclusion. Related claims need not share an Evidence namespace with the candidate. Candidate evidenceRefs must still be exact IDs from the Current authoritative Evidence Catalog. A restatement is not a candidate; the same or different Evidence may support a new relationship, counterexample, or testable hypothesis.",
     `Server-owned identity: ${JSON.stringify({
       workspaceId: input.identity.workspaceId,
       projectId: input.identity.projectId,
@@ -1016,6 +1022,24 @@ const meaningfulClaimTokens = (value: string): Set<string> => new Set(canonicalC
 const claimTextsShareMeaningfulToken = (left: string, right: string): boolean => {
   const leftTokens = meaningfulClaimTokens(left);
   return [...meaningfulClaimTokens(right)].some((token) => leftTokens.has(token));
+};
+
+const resolveSeparatedCandidateNarrative = (input: {
+  observation: unknown;
+  angle: unknown;
+  narrativeIsSupported(narrative: string): boolean;
+}): { publishedText: string; noveltyText: string; epistemicText: string } | null => {
+  if (!nonEmptyString(input.observation)
+    || !nonEmptyString(input.angle)
+    || !input.narrativeIsSupported(input.observation)
+    || !input.narrativeIsSupported(input.angle)) return null;
+  const observation = input.observation.trim();
+  const angle = input.angle.trim();
+  return {
+    publishedText: `**Evidence signal:** ${observation}\n\n**AI angle:** ${angle}`,
+    noveltyText: `${observation} ${angle}`,
+    epistemicText: angle,
+  };
 };
 
 const narrativeContainsConclusion = (narrative: string, conclusion: string): boolean => {
