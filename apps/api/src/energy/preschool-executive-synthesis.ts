@@ -853,11 +853,20 @@ const sectionEvidenceOwners = (
 const sectionEvidenceEpistemicRequirements = (
   accepted: AcceptedSectionV4[],
 ): Map<string, "inferred" | "speculative"> => {
+  const directlyObserved = new Set<string>();
+  for (const { result } of accepted) {
+    for (const reference of result.summary.evidenceRefs) directlyObserved.add(reference);
+    for (const insight of result.insights) {
+      if (insight.epistemicStatus !== "observed") continue;
+      for (const reference of insight.evidenceRefs) directlyObserved.add(reference);
+    }
+  }
   const requirements = new Map<string, "inferred" | "speculative">();
   for (const { result } of accepted) {
     for (const insight of result.insights) {
       if (insight.epistemicStatus === "observed") continue;
       for (const reference of insight.evidenceRefs) {
+        if (directlyObserved.has(reference)) continue;
         const current = requirements.get(reference);
         if (current !== "speculative") requirements.set(reference, insight.epistemicStatus);
       }

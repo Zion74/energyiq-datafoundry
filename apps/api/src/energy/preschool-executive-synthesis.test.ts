@@ -626,6 +626,59 @@ describe("Preschool Executive Synthesis", () => {
     });
   });
 
+  it("keeps observed claims direct when the same Evidence also supports a qualified inference", async () => {
+    const harness = createHarness();
+    const standby = completeSectionV4(
+      harness,
+      "standby-wastage",
+      "available",
+      "Current standby summary.",
+      [{
+        id: "insight:standby:observed",
+        title: "Centre L holds all 11 flagged events",
+        epistemicStatus: "observed",
+        text: "All 11 flagged events are in Centre L.",
+        evidenceRefs: ["evidence:standby:shared"],
+      }, {
+        id: "insight:standby:inferred",
+        title: "A shared operating cause may be worth testing",
+        epistemicStatus: "inferred",
+        text: "The same 11 events may reflect a shared operating cause.",
+        evidenceRefs: ["evidence:standby:shared"],
+      }],
+    );
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      revision: "v4",
+      runSynthesis: async (input) => ({
+        answer: JSON.stringify({
+          status: "available",
+          summary: {
+            text: "Current standby summary.",
+            evidenceRefs: ["evidence:standby-wastage:summary"],
+          },
+          findings: [{
+            title: "Centre L holds all 11 flagged events",
+            text: "All 11 flagged events are in Centre L. A shared operating cause may be worth testing.",
+            sectionIds: ["standby-wastage"],
+            evidenceRefs: ["evidence:standby:shared"],
+          }],
+        }),
+        runId: input.runId,
+        sessionId: input.sessionId,
+      }),
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+    expect(JSON.parse(artifact.result_json!)).toMatchObject({
+      sourceSectionArtifactIds: [standby.id],
+      findings: [{ title: "Centre L holds all 11 flagged events" }],
+    });
+  });
+
   it("persists a supported deterministic Overview Evidence reference without weakening Section lineage", async () => {
     const harness = createHarness();
     const benchmark = completeSectionV4(harness, "centre-benchmark");
@@ -682,7 +735,7 @@ describe("Preschool Executive Synthesis", () => {
     harness.close();
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.identity_json)).toMatchObject({
-      validatorRevision: "preschool-executive-synthesis-validator-v18",
+      validatorRevision: "preschool-executive-synthesis-validator-v19",
       workflowRevision: "preschool-executive-synthesis-v10",
       investigatorPromptRevision: "preschool-executive-synthesis-prompt-v11",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
@@ -1096,6 +1149,19 @@ const completeSectionV4 = (
   sectionId: PreschoolSectionId,
   status: "available" | "empty" = "available",
   summaryText = `Current ${sectionId} summary.`,
+  insights: Array<{
+    id: string;
+    title: string;
+    epistemicStatus: "observed" | "inferred" | "speculative";
+    text: string;
+    evidenceRefs: string[];
+  }> = [{
+    id: `insight:${sectionId}:1`,
+    title: `Current ${sectionId} insight`,
+    epistemicStatus: "inferred",
+    text: `Current ${sectionId} evidence supports this relationship.`,
+    evidenceRefs: [`evidence:${sectionId}:insight`],
+  }],
 ) => {
   const identity = sectionIdentityV4(harness.identity, sectionId);
   harness.metadata.energyIq.overviewAiArtifacts.queue({ identity, triggeredBy: harness.user.id });
@@ -1130,20 +1196,14 @@ const completeSectionV4 = (
           text: summaryText,
           evidenceRefs: [`evidence:${sectionId}:summary`],
         },
-        insights: [{
-          id: `insight:${sectionId}:1`,
-          title: `Current ${sectionId} insight`,
-          epistemicStatus: "inferred",
-          text: `Current ${sectionId} evidence supports this relationship.`,
-          evidenceRefs: [`evidence:${sectionId}:insight`],
-        }],
+        insights,
         publication: {
           policyId: "preschool-section-publication",
           policyRevision: "v1",
-          discoveredCount: 1,
-          acceptedCount: 1,
+          discoveredCount: insights.length,
+          acceptedCount: insights.length,
           rejectedCount: 0,
-          publishedCount: 1,
+          publishedCount: insights.length,
           suppressedCandidateIds: [],
         },
       } : {
