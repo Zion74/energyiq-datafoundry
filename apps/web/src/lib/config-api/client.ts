@@ -17,6 +17,8 @@ import type {
   EnergyAdminOrganisationDto,
   EnergyAdminUserDto,
   EnergyAdditionalInsightFeedbackDto,
+  EnergyAdditionalInsightEvaluationSummaryDto,
+  EnergyAdditionalInsightTransitionSummaryDto,
   EnergyImportBatchDto,
   EnergyImportBatchesResponseDto,
   EnergyImportMaterializationResponseDto,
@@ -750,6 +752,50 @@ export const configApi = {
     return requestEnvelope(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/additional-ai-insights/method-proposals/${encodeURIComponent(proposalId)}/${action}`,
       { method: "POST", body: JSON.stringify({ expectedRevision }) },
+    );
+  },
+
+  listEnergyAdditionalInsightEvaluations(
+    projectId: string,
+  ): Promise<{ evaluations: EnergyAdditionalInsightEvaluationSummaryDto[] }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/additional-ai-insights/evaluations`,
+    );
+  },
+
+  listEnergyAdditionalInsightTransitions(
+    projectId: string,
+  ): Promise<{ transitions: EnergyAdditionalInsightTransitionSummaryDto[] }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/additional-ai-insights/transitions`,
+    );
+  },
+
+  createEnergyAdditionalInsightTransition(
+    projectId: string,
+    body: {
+      idempotencyKey: string;
+      previousEvaluationId: string;
+      previousAttemptId: string;
+      scopeId: string;
+      dataSnapshotId: string;
+      projectReleaseId: string;
+      from: string;
+      to: string;
+    },
+  ): Promise<EnergyAdditionalInsightTransitionSummaryDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/additional-ai-insights/transitions`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  },
+
+  getEnergyAdditionalInsightTransition(
+    projectId: string,
+    transitionId: string,
+  ): Promise<EnergyAdditionalInsightTransitionSummaryDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/additional-ai-insights/transitions/${encodeURIComponent(transitionId)}`,
     );
   },
 

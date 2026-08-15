@@ -239,6 +239,50 @@ type TransitionReservation = {
 export class EnergyIqAdditionalInsightEvaluationStore {
   constructor(private readonly db: DatabaseSync) {}
 
+  listEvaluations(input: {
+    expectedWorkspaceId: string;
+    expectedProjectId: string;
+  }): AdditionalAiInsightEvaluationBatch[] {
+    const rows = this.db.prepare(`
+      SELECT id FROM energyiq_additional_insight_evaluations
+      WHERE workspace_id = ? AND project_id = ?
+      ORDER BY updated_at DESC, id DESC
+      LIMIT 50
+    `).all(input.expectedWorkspaceId, input.expectedProjectId);
+    return rows.map((row) => {
+      if (!isRecord(row) || typeof row.id !== "string") {
+        throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_RECORD_INVALID");
+      }
+      return this.getEvaluation({
+        evaluationId: row.id,
+        expectedWorkspaceId: input.expectedWorkspaceId,
+        expectedProjectId: input.expectedProjectId,
+      });
+    });
+  }
+
+  listTransitions(input: {
+    expectedWorkspaceId: string;
+    expectedProjectId: string;
+  }): AdditionalAiInsightTransitionEvaluationRecord[] {
+    const rows = this.db.prepare(`
+      SELECT id FROM energyiq_additional_insight_transitions
+      WHERE workspace_id = ? AND project_id = ?
+      ORDER BY created_at DESC, id DESC
+      LIMIT 50
+    `).all(input.expectedWorkspaceId, input.expectedProjectId);
+    return rows.map((row) => {
+      if (!isRecord(row) || typeof row.id !== "string") {
+        throw new Error("ENERGYIQ_ADDITIONAL_TRANSITION_RECORD_INVALID");
+      }
+      return this.getTransition({
+        transitionId: row.id,
+        expectedWorkspaceId: input.expectedWorkspaceId,
+        expectedProjectId: input.expectedProjectId,
+      });
+    });
+  }
+
   reserveEvaluation(input: {
     evaluationId: string;
     idempotencyKey: string;

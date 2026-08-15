@@ -55,6 +55,8 @@ export type {
   EnergyAdminOrganisationDto,
   EnergyAdminUserDto,
   EnergyAdditionalInsightFeedbackDto,
+  EnergyAdditionalInsightEvaluationSummaryDto,
+  EnergyAdditionalInsightTransitionSummaryDto,
   EnergyDeliveryStage,
   EnergyHierarchyRevisionDto,
   EnergyDataSnapshotDto,

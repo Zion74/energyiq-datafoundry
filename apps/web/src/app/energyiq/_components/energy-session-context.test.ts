@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { EnergyQueryContextDto, SessionEnergyContextDto } from "../../../lib/config-api";
 import {
+  decideEnergySessionContextRestore,
   energySessionContextStatus,
   restoredEnergySessionHref,
 } from "./energy-session-context";
@@ -38,6 +39,50 @@ describe("restoredEnergySessionHref", () => {
       new URLSearchParams("projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-06-03&to=2026-06-09"),
       historical,
     )).toBeNull();
+  });
+});
+
+describe("decideEnergySessionContextRestore", () => {
+  it("preserves an explicit requested window on the initial conversation restore", () => {
+    const decision = decideEnergySessionContextRestore({
+      pathname: "/energyiq/ai",
+      currentSearchParams: new URLSearchParams(
+        "projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-05-20&to=2026-06-16",
+      ),
+      context: historical,
+      initialRestoredContextKey: null,
+    });
+
+    expect(decision.href).toBeNull();
+    expect(decision.initialRestoredContextKey).toBeTruthy();
+  });
+
+  it("still restores a different historical context after the initial session", () => {
+    const initial = decideEnergySessionContextRestore({
+      pathname: "/energyiq/ai",
+      currentSearchParams: new URLSearchParams(
+        "projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-05-20&to=2026-06-16",
+      ),
+      context: historical,
+      initialRestoredContextKey: null,
+    });
+    const other = {
+      ...historical,
+      from: "2026-07-01T16:00:00.000Z",
+      to: "2026-07-08T16:00:00.000Z",
+      dataSnapshotId: "snapshot-b",
+    };
+
+    expect(decideEnergySessionContextRestore({
+      pathname: "/energyiq/ai",
+      currentSearchParams: new URLSearchParams(
+        "projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-05-20&to=2026-06-16",
+      ),
+      context: other,
+      initialRestoredContextKey: initial.initialRestoredContextKey,
+    }).href).toBe(
+      "/energyiq/ai?projectId=ngee-ann-polytechnic&scopeId=project&resource=electricity&period=Custom&from=2026-07-02&to=2026-07-08",
+    );
   });
 });
 

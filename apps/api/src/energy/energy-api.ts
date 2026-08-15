@@ -224,6 +224,17 @@ export const handleEnergyApiRequest = async (
         requireEnergyAdminProject(context, user, projectId);
         const evaluationWorkflow = context.additionalAiInsightsEvaluationWorkflow;
         if (!evaluationWorkflow) throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_WORKFLOW_REQUIRED");
+        if (segments.length === 4 && request.method === "GET") {
+          return {
+            status: 200,
+            body: createSuccessResult({
+              evaluations: context.metadataStore.energyIq.additionalInsightEvaluations.listEvaluations({
+                expectedWorkspaceId: access.activeWorkspaceId,
+                expectedProjectId: projectId,
+              }).map(toAdditionalEvaluationSummary),
+            }),
+          };
+        }
         if (segments.length === 4 && request.method === "POST") {
           const body = requireRecord(await readJsonBody(request));
           const project = context.metadataStore.energyIq.getProject(projectId);
@@ -310,6 +321,17 @@ export const handleEnergyApiRequest = async (
         requireEnergyAdminProject(context, user, projectId);
         const evaluationWorkflow = context.additionalAiInsightsEvaluationWorkflow;
         if (!evaluationWorkflow) throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_WORKFLOW_REQUIRED");
+        if (segments.length === 4 && request.method === "GET") {
+          return {
+            status: 200,
+            body: createSuccessResult({
+              transitions: context.metadataStore.energyIq.additionalInsightEvaluations.listTransitions({
+                expectedWorkspaceId: access.activeWorkspaceId,
+                expectedProjectId: projectId,
+              }).map(toAdditionalTransitionSummary),
+            }),
+          };
+        }
         if (segments.length === 4 && request.method === "POST") {
           const body = requireRecord(await readJsonBody(request));
           const project = context.metadataStore.energyIq.getProject(projectId);
@@ -2962,12 +2984,19 @@ const requireAdditionalEvaluationUsefulnessScore = (value: unknown, message: str
 const toAdditionalEvaluationSummary = (evaluation: AdditionalAiInsightEvaluationBatch) => ({
   evaluationId: evaluation.evaluationId,
   status: evaluation.status,
+  target: {
+    dataSnapshotId: evaluation.target.dataSnapshotId,
+    projectReleaseId: evaluation.target.projectReleaseId,
+    analysisPeriod: evaluation.target.analysisPeriod,
+  },
   completedAttemptCount: evaluation.attempts.filter(({ status }) => status === "completed").length,
   failedAttemptCount: evaluation.attempts.filter(({ status }) => status === "failed").length,
   humanReviewedCount: evaluation.attempts.filter((attempt) => (
     attempt.status === "completed" && attempt.humanReview !== undefined
   )).length,
   ...(evaluation.approval ? { approval: evaluation.approval } : {}),
+  createdAt: evaluation.createdAt,
+  updatedAt: evaluation.updatedAt,
 });
 
 const toAdditionalTransitionSummary = (transition: AdditionalAiInsightTransitionEvaluationRecord) => ({
@@ -2976,7 +3005,15 @@ const toAdditionalTransitionSummary = (transition: AdditionalAiInsightTransition
   previousSnapshotId: transition.previousTarget.dataSnapshotId,
   currentSnapshotId: transition.currentTarget.dataSnapshotId,
   ...(transition.status === "completed"
-    ? { outcomeCount: transition.outcomes.length }
+    ? {
+      outcomeCount: transition.outcomes.length,
+      outcomeCounts: Object.fromEntries(
+        ["new", "changed", "still-supported", "resolved", "no-material-change"].map((kind) => [
+          kind,
+          transition.outcomes.filter(({ transition: outcome }) => outcome === kind).length,
+        ]),
+      ),
+    }
     : transition.status === "failed"
       ? { errorCode: transition.errorCode, failureStage: transition.failureStage }
       : {}),

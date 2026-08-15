@@ -2190,6 +2190,43 @@ export type EnergyInsightMethodProposalDto = {
   }>;
 };
 
+export type EnergyAdditionalInsightEvaluationSummaryDto = {
+  evaluationId: string;
+  status: "running" | "awaiting-human-review" | "failed" | "passed" | "approved-candidate";
+  target: {
+    dataSnapshotId: string;
+    projectReleaseId: string;
+    analysisPeriod: { from: string; to: string };
+  };
+  completedAttemptCount: number;
+  failedAttemptCount: number;
+  humanReviewedCount: number;
+  approval?: {
+    selectedAttemptId: string;
+    approvedAt: string;
+    disposition: "publication-candidate-only";
+  };
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type EnergyAdditionalInsightTransitionSummaryDto = {
+  transitionId: string;
+  status: "running" | "completed" | "failed";
+  previousSnapshotId: string;
+  currentSnapshotId: string;
+  outcomeCount?: number;
+  outcomeCounts?: {
+    new: number;
+    changed: number;
+    "still-supported": number;
+    resolved: number;
+    "no-material-change": number;
+  };
+  errorCode?: string;
+  failureStage?: "generation" | "validation" | "comparison";
+};
+
 export type EnergySavedAnalysisAiArtifactDto = EnergySavedAnalysisAiArtifactInputDto & {
   completedAt: string;
   runProvenance?: {

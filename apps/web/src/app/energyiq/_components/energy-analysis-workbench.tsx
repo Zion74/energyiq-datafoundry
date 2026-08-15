@@ -2,7 +2,7 @@
 
 import nextDynamic from "next/dynamic";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { DataTasksExternalContext } from "../../data-tasks/data-tasks-app";
 import {
@@ -12,6 +12,7 @@ import {
   type SessionEnergyContextDto,
 } from "../../../lib/config-api";
 import {
+  decideEnergySessionContextRestore,
   energySessionContextStatus,
   restoredEnergySessionHref,
 } from "./energy-session-context";
@@ -70,6 +71,7 @@ export function EnergyAnalysisWorkbench() {
   const [resolved, setResolved] = useState<EnergyQueryContextDto | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sessionContext, setSessionContext] = useState<SessionEnergyContextDto | null>(null);
+  const initialSessionRestoreKeyRef = useRef<string | null | false>(null);
 
   const handleSessionEnergyContextRestored = useCallback((context: SessionEnergyContextDto | null) => {
     if (!context) {
@@ -84,9 +86,15 @@ export function EnergyAnalysisWorkbench() {
       return;
     }
     setSessionContext(context);
-    const restoredHref = restoredEnergySessionHref(pathname, searchParams, context);
-    if (restoredHref) {
-      router.replace(restoredHref, { scroll: false });
+    const decision = decideEnergySessionContextRestore({
+      pathname,
+      currentSearchParams: searchParams,
+      context,
+      initialRestoredContextKey: initialSessionRestoreKeyRef.current,
+    });
+    initialSessionRestoreKeyRef.current = decision.initialRestoredContextKey;
+    if (decision.href) {
+      router.replace(decision.href, { scroll: false });
     }
   }, [access?.activeWorkspaceId, activeProject?.id, pathname, router, searchParams]);
 

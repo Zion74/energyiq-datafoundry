@@ -241,6 +241,87 @@ describe("Additional Insight evaluation API", () => {
       harness.close();
     }
   });
+
+  it("lists admin-scoped A baselines and A-to-B transition summaries without exposing Provider identity", async () => {
+    const harness = createHarness();
+    try {
+      const seeded = harness.seedEvaluation();
+      vi.spyOn(
+        harness.metadata.energyIq.additionalInsightEvaluations,
+        "listEvaluations",
+      ).mockReturnValue([{
+        ...seeded,
+        status: "approved-candidate",
+        approval: {
+          selectedAttemptId: "attempt-approved-a",
+          actorId: "dev-user",
+          approvedAt: "2026-08-14T01:00:00.000Z",
+          revision: 1,
+          disposition: "publication-candidate-only",
+        },
+      } as never]);
+      vi.spyOn(
+        harness.metadata.energyIq.additionalInsightEvaluations,
+        "listTransitions",
+      ).mockReturnValue([{
+        contractRevision: "energyiq-additional-insight-transition-v1",
+        transitionId: "transition-1",
+        status: "completed",
+        previousTarget: seeded.target,
+        currentTarget: {
+          ...seeded.target,
+          dataSnapshotId: "snapshot-b",
+          artifactIdentityHash: `sha256:${"c".repeat(64)}`,
+        },
+        outcomes: [
+          { transition: "new", current: {} },
+          { transition: "still-supported", previous: {}, current: {} },
+        ],
+      } as never]);
+
+      const forbidden = await handleEnergyApiRequest(
+        getRequest(),
+        evaluationPath(harness),
+        { ...harness.context, userId: "second-user" },
+      );
+      expect(forbidden.status).toBe(403);
+
+      const evaluations = await handleEnergyApiRequest(
+        getRequest(),
+        evaluationPath(harness),
+        harness.context,
+      );
+      expect(evaluations).toMatchObject({
+        status: 200,
+        body: { success: true, data: { evaluations: [{
+          evaluationId: "evaluation-seeded",
+          status: "approved-candidate",
+          target: {
+            dataSnapshotId: "snapshot-current",
+            analysisPeriod: { from: "2026-05-01T00:00:00.000Z", to: "2026-06-01T00:00:00.000Z" },
+          },
+          approval: { selectedAttemptId: "attempt-approved-a" },
+        }] } },
+      });
+
+      const transitions = await handleEnergyApiRequest(
+        getRequest(),
+        ["projects", harness.project.id, "additional-ai-insights", "transitions"],
+        harness.context,
+      );
+      expect(transitions).toMatchObject({
+        status: 200,
+        body: { success: true, data: { transitions: [{
+          transitionId: "transition-1",
+          status: "completed",
+          outcomeCounts: { new: 1, "still-supported": 1 },
+        }] } },
+      });
+      expect(JSON.stringify({ evaluations, transitions })).not.toMatch(/providerRun|providerSession/);
+    } finally {
+      harness.close();
+    }
+  });
 });
 
 const createHarness = () => {
@@ -289,6 +370,13 @@ const createHarness = () => {
     evaluationId: "evaluation-1",
     status: "awaiting-human-review",
     attempts: [],
+    target: {
+      dataSnapshotId: "snapshot-current",
+      projectReleaseId: "release-current",
+      analysisPeriod: { from: "2026-05-01T00:00:00.000Z", to: "2026-06-01T00:00:00.000Z" },
+    },
+    createdAt: "2026-08-14T00:00:00.000Z",
+    updatedAt: "2026-08-14T00:00:00.000Z",
   }));
   const executeTransition = vi.fn();
   const context = {

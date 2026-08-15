@@ -24,6 +24,61 @@ import {
 import { createMetadataStore } from "./index.js";
 
 describe("EnergyIqAdditionalInsightEvaluationStore", () => {
+  it("lists only the requested Project evaluations and transitions for an admin workbench", () => {
+    const harness = createHarness();
+    try {
+      reserveAndComplete(harness);
+      reviewAllPassing(harness);
+      const passed = harness.store.getEvaluation({
+        evaluationId: "evaluation-1",
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      });
+      const selected = passed.attempts.find((attempt) => (
+        attempt.status === "completed" && attempt.humanReview?.passed
+      ))!;
+      harness.store.approveEvaluationCandidate({
+        evaluationId: passed.evaluationId,
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+        reviewToken: passed.reviewAudit.find(({ attemptId }) => attemptId === selected.attemptId)!.reviewToken,
+        actorId: "admin-1",
+        expectedRevision: 0,
+      });
+      harness.store.reserveTransition({
+        transitionId: "transition-1",
+        idempotencyKey: "transition-1",
+        requestedBy: "admin-1",
+        previousEvaluationId: passed.evaluationId,
+        previousAttemptId: selected.attemptId,
+        currentTarget: evaluationTarget("snapshot-b", "release-b"),
+        generationProviderRunId: "transition-generation",
+        generationProviderSessionId: "transition-generation-session",
+        comparisonProviderRunId: "transition-comparison",
+        comparisonProviderSessionId: "transition-comparison-session",
+      });
+
+      expect(harness.store.listEvaluations({
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      })).toEqual([
+        expect.objectContaining({ evaluationId: "evaluation-1", status: "approved-candidate" }),
+      ]);
+      expect(harness.store.listTransitions({
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-1",
+      })).toEqual([
+        expect.objectContaining({ transitionId: "transition-1", status: "running" }),
+      ]);
+      expect(harness.store.listEvaluations({
+        expectedWorkspaceId: "workspace-1",
+        expectedProjectId: "project-other",
+      })).toEqual([]);
+    } finally {
+      harness.close();
+    }
+  });
+
   it("keeps a historical v7 running evaluation readable but never leases its attempts", () => {
     const harness = createHarness();
     try {

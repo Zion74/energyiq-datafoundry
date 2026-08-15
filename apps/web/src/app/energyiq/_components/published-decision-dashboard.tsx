@@ -624,6 +624,22 @@ function PublishedDecisionDashboardView({
               ))}
             </div>
           ) : null}
+          {access?.role === "admin" && isPreschoolRenderer && currentSnapshot ? (
+            <button
+              type="button"
+              onClick={() => router.push(preschoolSnapshotTransitionAdminHref({
+                projectId,
+                scopeId: currentSnapshot.context.scopeId,
+                dataSnapshotId: currentSnapshot.context.dataSnapshotId,
+                projectReleaseId: currentSnapshot.projectRelease.id,
+                from: currentSnapshot.context.from,
+                to: currentSnapshot.context.to,
+              }))}
+              className="h-10 rounded-lg border border-primary/30 bg-primary/5 px-4 text-xs font-semibold text-primary transition-colors hover:bg-primary/10"
+            >
+              Test A/B update
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={refreshOverview}
@@ -960,6 +976,26 @@ export function currentOverviewUrlWithView(view: OverviewUrlViewState): string {
     next.set("currentProjectReleaseId", view.currentOverviewPin.projectReleaseId);
   }
   return `/energyiq/overview?${next.toString()}`;
+}
+
+export function preschoolSnapshotTransitionAdminHref(input: {
+  projectId: string;
+  scopeId: string;
+  dataSnapshotId: string;
+  projectReleaseId: string;
+  from: string;
+  to: string;
+}): string {
+  const params = new URLSearchParams({
+    section: "knowledge",
+    projectId: input.projectId,
+    abScopeId: input.scopeId,
+    abSnapshotId: input.dataSnapshotId,
+    abReleaseId: input.projectReleaseId,
+    abFrom: input.from,
+    abTo: input.to,
+  });
+  return `/energyiq/admin?${params.toString()}`;
 }
 
 function isHourGrainCompatible(period: OverviewPeriod, from: string, to: string): boolean {

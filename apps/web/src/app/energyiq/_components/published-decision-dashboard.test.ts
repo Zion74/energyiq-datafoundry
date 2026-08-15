@@ -28,6 +28,7 @@ import {
   overviewAnalysisRequest,
   overviewUrlWithView,
   overviewViewStateFromSearchParams,
+  preschoolSnapshotTransitionAdminHref,
   PublishedDecisionDashboard,
   toDateInput,
 } from "./published-decision-dashboard";
@@ -42,6 +43,21 @@ const mockedRouter = vi.hoisted(() => ({
   push: vi.fn<(href: string) => void>(),
   replace: vi.fn<(href: string) => void>(),
 }));
+
+describe("preschoolSnapshotTransitionAdminHref", () => {
+  it("carries the exact current Overview B identity into the admin lab", () => {
+    expect(preschoolSnapshotTransitionAdminHref({
+      projectId: "preschool-demo",
+      scopeId: "preschool-project",
+      dataSnapshotId: "snapshot-b",
+      projectReleaseId: "release-b",
+      from: "2026-06-01T00:00:00.000Z",
+      to: "2026-07-01T00:00:00.000Z",
+    })).toBe(
+      "/energyiq/admin?section=knowledge&projectId=preschool-demo&abScopeId=preschool-project&abSnapshotId=snapshot-b&abReleaseId=release-b&abFrom=2026-06-01T00%3A00%3A00.000Z&abTo=2026-07-01T00%3A00%3A00.000Z",
+    );
+  });
+});
 
 vi.mock("next/navigation", () => ({
   useRouter: () => mockedRouter,

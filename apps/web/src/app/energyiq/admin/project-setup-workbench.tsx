@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   useCallback,
   useEffect,
@@ -40,6 +40,10 @@ import { EnergyIcon } from "../_components/icons";
 import { EnergySelect } from "../_components/energy-select";
 import type { useEnergyIqAccess } from "../_components/energyiq-access";
 import { PreschoolAdditionalMethodProposalAdmin } from "../_components/preschool-additional-method-proposal-admin";
+import {
+  PreschoolAdditionalEvaluationAdmin,
+  type PreschoolSnapshotTransitionPin,
+} from "../_components/preschool-additional-evaluation-admin";
 import { EnergyIqAdminSidebar, type AdminSection } from "./admin-sidebar";
 import { AdminAccessPages } from "./admin-access-pages";
 import { resolveComponentReadiness, resolveMetricReadiness, resolveRuleReadiness } from "./analysis-configuration-model";
@@ -99,6 +103,7 @@ export function EnergyIqAdminWorkbench({
   initialSection?: AdminSection;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { access, activeProject, refresh, selectProject, selectProjectContext } = accessState;
   const currentWorkspaceProjects = useMemo(() => access?.projects ?? [], [access?.projects]);
   const activeWorkspaceName = access?.workspaces.find(
@@ -118,6 +123,18 @@ export function EnergyIqAdminWorkbench({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [loading, setLoading] = useState(false);
+  const snapshotTransitionPin = useMemo<PreschoolSnapshotTransitionPin | null>(() => {
+    const values = {
+      scopeId: searchParams.get("abScopeId"),
+      dataSnapshotId: searchParams.get("abSnapshotId"),
+      projectReleaseId: searchParams.get("abReleaseId"),
+      from: searchParams.get("abFrom"),
+      to: searchParams.get("abTo"),
+    };
+    return Object.values(values).every((value) => typeof value === "string" && value.length > 0)
+      ? values as PreschoolSnapshotTransitionPin
+      : null;
+  }, [searchParams]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -387,6 +404,7 @@ export function EnergyIqAdminWorkbench({
             selectedProject,
             chooseAdminProject,
             selectedProjectId,
+            snapshotTransitionPin,
             setup,
             document,
             validation,
@@ -427,6 +445,7 @@ function renderAdminSection({
   selectedProject,
   chooseAdminProject,
   selectedProjectId,
+  snapshotTransitionPin,
   setup,
   document,
   validation,
@@ -447,6 +466,7 @@ function renderAdminSection({
   selectedProject?: EnergyProjectDto;
   chooseAdminProject: (projectId: string) => void;
   selectedProjectId: string;
+  snapshotTransitionPin: PreschoolSnapshotTransitionPin | null;
   setup: EnergyProjectSetupDto;
   document: EnergyProjectSetupDocumentDto;
   validation: EnergyProjectSetupValidationDto | null;
@@ -549,7 +569,17 @@ function renderAdminSection({
     );
   }
   if (section === "knowledge") {
-    return <PreschoolAdditionalMethodProposalAdmin projectId={selectedProjectId} />;
+    return (
+      <div className="space-y-6">
+        <PreschoolAdditionalMethodProposalAdmin projectId={selectedProjectId} />
+        {selectedProjectId === "preschool-demo" ? (
+          <PreschoolAdditionalEvaluationAdmin
+            projectId={selectedProjectId}
+            initialPin={snapshotTransitionPin}
+          />
+        ) : null}
+      </div>
+    );
   }
 
   const planned = plannedSectionCopy(section);
