@@ -43,7 +43,10 @@ export function PreschoolAdditionalAiInsights({
       ) : parsed.status === "unavailable" ? (
         <AdditionalStatus title="Additional insights unavailable" detail={parsed.detail} />
       ) : parsed.status === "empty" ? (
-        <AdditionalStatus title="No material additional insight" detail="The published discovery found no distinct Evidence-backed angle worth adding." />
+        <AdditionalStatus
+          title="No material additional insight"
+          detail={emptyAdditionalDetail(parsed.reviewedCount)}
+        />
       ) : (
         <div className="space-y-4" aria-label="Additional AI energy insights">
           {parsed.findings.map((finding, index) => finding
@@ -273,7 +276,7 @@ type ParsedAdditionalFinding = {
 type ParsedAdditionalUnit =
   | { status: "pending" }
   | { status: "unavailable"; detail: string }
-  | { status: "empty"; artifactId: string; runId: string }
+  | { status: "empty"; artifactId: string; runId: string; reviewedCount: number }
   | { status: "available"; artifactId: string; runId: string; findings: Array<ParsedAdditionalFinding | null> };
 
 const CANVAS_REJECTION_CODES = new Set([
@@ -332,8 +335,19 @@ function parseAdditionalUnit(
     return { status: "unavailable", detail: "The current Additional Artifact is invalid." };
   }
   if (unit.status === "empty") {
+    const publication = artifact.publication;
     return artifact.findings.length === 0
-      ? { status: "empty", artifactId: unit.artifactId, runId: artifact.runId }
+      && isRecord(publication)
+      && isNonNegativeInteger(publication.discoveredCount)
+      && publication.acceptedCount === 0
+      && publication.publishedCount === 0
+      && publication.rejectedCount === publication.discoveredCount
+      ? {
+          status: "empty",
+          artifactId: unit.artifactId,
+          runId: artifact.runId,
+          reviewedCount: publication.discoveredCount,
+        }
       : { status: "unavailable", detail: "The current Additional Artifact is invalid." };
   }
   if (artifact.findings.length === 0) return { status: "unavailable", detail: "The current Additional Artifact is invalid." };
@@ -491,6 +505,17 @@ function epistemicLimitation(status: ParsedAdditionalFinding["epistemicStatus"])
   if (status === "observed") return "Observed only within the cited current Snapshot Evidence; it does not establish a cause.";
   if (status === "inferred") return "This interpretation must be rechecked against the cited Evidence before action.";
   return "This is a hypothesis to test; the cited Evidence does not confirm the explanation.";
+}
+
+function emptyAdditionalDetail(reviewedCount: number): string {
+  if (reviewedCount === 0) {
+    return "The analysis completed but found no distinct Evidence-backed angle to publish.";
+  }
+  return `${reviewedCount} candidate angle${reviewedCount === 1 ? " was" : "s were"} reviewed. None met both the Evidence and novelty bar, so no low-value filler was published.`;
+}
+
+function isNonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
 function isUniqueNonEmptyStrings(value: unknown, allowEmpty: boolean): value is string[] {

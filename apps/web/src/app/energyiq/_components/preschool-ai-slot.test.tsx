@@ -444,6 +444,8 @@ describe("PreschoolAiSlot", () => {
 
     const sectionSummary = findSafeMarkdownByText(sectionSlot!, "cited portfolio evidence");
     expectSafeV4Markdown(sectionSummary, { strong: "energy", emphasis: "Review the pattern" });
+    expect(sectionSummary.classList.contains("w-full")).toBe(true);
+    expect(sectionSummary.classList.contains("max-w-[75ch]")).toBe(false);
     expect(sectionSlot!.querySelector('[aria-label="Section summary"]')?.textContent).toContain("Summary");
     expect(sectionSlot!.querySelector('[aria-label="Section insights"]')?.textContent).toContain("Insights");
 
@@ -1617,7 +1619,26 @@ describe("PreschoolAiSlot", () => {
     const result = v4ReadModelResult();
     const base = currentAdditionalUnit(result.binding);
     const additional = status === "empty"
-      ? { ...base, status, result: { ...base.result, status, findings: [] } }
+      ? {
+          ...base,
+          status,
+          result: {
+            ...base.result,
+            status,
+            findings: [],
+            publication: {
+              ...base.result.publication,
+              discoveredCount: 3,
+              acceptedCount: 0,
+              rejectedCount: 3,
+              publishedCount: 0,
+              sourceOrderCandidateIds: ["candidate-1", "candidate-2", "candidate-3"],
+              acceptedCandidateIds: [],
+              rejectedCandidateIds: ["candidate-1", "candidate-2", "candidate-3"],
+              publishedCandidateIds: [],
+            },
+          },
+        }
       : status === "unavailable"
         ? { status, artifactId: base.artifactId, reason: "ADDITIONAL_FAILED" }
         : { status };
@@ -1636,6 +1657,10 @@ describe("PreschoolAiSlot", () => {
 
     expect(startRun).not.toHaveBeenCalled();
     expect(container.textContent).toContain(expected);
+    if (status === "empty") {
+      expect(container.textContent).toContain("3 candidate angles were reviewed");
+      expect(container.textContent).toContain("None met both the Evidence and novelty bar");
+    }
   });
 
   it("preserves pointer-only Additional v1 narrative only for frozen Saved Analysis", async () => {

@@ -541,7 +541,7 @@ function SectionInterpretationV4Unit({
     <div>
       <div className="rounded-lg border border-border bg-surface px-3 py-2.5" aria-label="Section summary">
         <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-primary">Summary</p>
-        <SafeAiMarkdown className="max-w-[75ch] text-base leading-7 text-foreground" children={result.summary.text} />
+        <SafeAiMarkdown className="w-full text-base leading-7 text-foreground" children={result.summary.text} />
       </div>
       {result.insights.length > 0 ? (
         <section className="mt-4" aria-label="Section insights">
