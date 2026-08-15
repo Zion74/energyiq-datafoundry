@@ -484,10 +484,10 @@ export class EnergyIqInsightMethodGovernanceStore {
       : `sha256:${hash(canonicalMethods)}`;
     if (!isRecord(identity)
       || identity.artifactKind !== "autonomous-insights"
-      || identity.identityContractRevision !== "additional-insights-v12"
+      || identity.identityContractRevision !== "additional-insights-v13"
       || identity.outputContractRevision !== "energyiq-additional-ai-insights-v2"
-      || identity.validatorRevision !== "additional-insights-acceptance-v9"
-      || identity.workflowRevision !== "additional-insights-discover-accept-publish-v12"
+      || identity.validatorRevision !== "additional-insights-acceptance-v10"
+      || identity.workflowRevision !== "additional-insights-discover-accept-publish-v13"
       || identity.investigatorPromptRevision !== "additional-insights-discovery-v10"
       || identity.methodSetId !== currentMethodSet.id
       || identity.methodSetRevision !== currentMethodSet.revision

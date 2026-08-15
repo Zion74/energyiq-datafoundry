@@ -1944,7 +1944,7 @@ const resolvePresentedClaimsFixture: Parameters<typeof createPreschoolAdditional
     }
   });
 
-  it("rejects an unsupported hard number without treating a speculative angle as a factual claim", async () => {
+  it("salvages a useful speculative angle when only one precise sentence is unsupported", async () => {
     const harness = createHarness();
     try {
       const workflow = createPreschoolAdditionalAiInsightsWorkflow({
@@ -1976,13 +1976,17 @@ const resolvePresentedClaimsFixture: Parameters<typeof createPreschoolAdditional
       });
 
       expect(result).toMatchObject({
-        status: "empty",
+        status: "available",
         publication: {
-          acceptedCandidateIds: [],
-          rejectedCandidateIds: ["candidate-sentence-salvage"],
+          acceptedCandidateIds: ["candidate-sentence-salvage"],
+          rejectedCandidateIds: [],
         },
-        findings: [],
+        findings: [{
+          id: "additional:candidate-sentence-salvage",
+          text: "**Evidence signal:** Standby is 31%.\n\n**AI angle:** Standby may vary with weekday schedules.",
+        }],
       });
+      expect(result.status === "available" && result.findings[0]).not.toHaveProperty("deepDiveQuestion");
     } finally {
       harness.close();
     }

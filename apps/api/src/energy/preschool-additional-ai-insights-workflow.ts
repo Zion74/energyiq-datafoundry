@@ -1030,16 +1030,30 @@ const resolveSeparatedCandidateNarrative = (input: {
   narrativeIsSupported(narrative: string): boolean;
 }): { publishedText: string; noveltyText: string; epistemicText: string } | null => {
   if (!nonEmptyString(input.observation)
-    || !nonEmptyString(input.angle)
-    || !input.narrativeIsSupported(input.observation)
-    || !input.narrativeIsSupported(input.angle)) return null;
-  const observation = input.observation.trim();
-  const angle = input.angle.trim();
+    || !nonEmptyString(input.angle)) return null;
+  const observation = salvageSupportedNarrative(input.observation, input.narrativeIsSupported);
+  const angle = salvageSupportedNarrative(input.angle, input.narrativeIsSupported);
+  if (!observation || !angle) return null;
   return {
     publishedText: `**Evidence signal:** ${observation}\n\n**AI angle:** ${angle}`,
     noveltyText: `${observation} ${angle}`,
     epistemicText: angle,
   };
+};
+
+const salvageSupportedNarrative = (
+  narrative: string,
+  narrativeIsSupported: (value: string) => boolean,
+): string | null => {
+  const trimmed = narrative.trim();
+  if (narrativeIsSupported(trimmed)) return trimmed;
+  const fragments = trimmed
+    .split(/(?<=[.!?])\s+(?=[\p{Lu}\p{N}])/u)
+    .flatMap((sentence) => sentence.split(/\s*;\s*|,\s*(?=(?:but|while|whereas|however)\b)/iu))
+    .map((fragment) => fragment.trim().replace(/^(?:but|while|whereas|however)\s+/iu, ""))
+    .filter((fragment) => fragment.length > 0 && narrativeIsSupported(fragment))
+    .map((fragment) => /[.!?]$/u.test(fragment) ? fragment : `${fragment}.`);
+  return fragments.length > 0 ? fragments.join(" ") : null;
 };
 
 const narrativeContainsConclusion = (narrative: string, conclusion: string): boolean => {
