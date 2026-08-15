@@ -512,7 +512,7 @@ export const PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V2 = {
 } satisfies PublicStructuredOutputOptions<StructuredEnvelope>;
 
 export const PRESCHOOL_ADDITIONAL_AI_INSIGHTS_STRUCTURED_OUTPUT_V3 = {
-  errorStrategy: "strict",
+  errorStrategy: "warn",
   schema: {
     type: "object",
     additionalProperties: false,
@@ -569,7 +569,7 @@ const additionalTransitionNoMaterialChange: JsonSchema = {
 
 /** Evidence-bound Snapshot A-to-B classification; no arbitrary chart, code, or tool surface. */
 export const PRESCHOOL_ADDITIONAL_AI_INSIGHTS_TRANSITION_STRUCTURED_OUTPUT_V1 = {
-  errorStrategy: "strict",
+  errorStrategy: "warn",
   schema: {
     type: "object",
     additionalProperties: false,

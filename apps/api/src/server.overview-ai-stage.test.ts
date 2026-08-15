@@ -1267,6 +1267,26 @@ describe("Overview AI server stage options", () => {
       { type: "CUSTOM", delta: "ignored" },
     ])).toBe('{"sections":[]}');
   });
+
+  it("uses only the exact post-reasoning JSON for Additional stages", () => {
+    const finalObject = '{"candidates":[{"id":"candidate-useful"}]}';
+    const reasoningWrapped = [
+      "I will compare the current Evidence before returning the final object.",
+      '{"scratch":"not the result"}',
+      `<｜end▁of▁thinking｜>${finalObject}`,
+    ].join("\n");
+    const events = [
+      { type: "TEXT_MESSAGE_CONTENT", delta: reasoningWrapped.slice(0, 80) },
+      { type: "TEXT_MESSAGE_CHUNK", delta: reasoningWrapped.slice(80) },
+    ];
+
+    expect(collectOverviewAiText(events, "additional-insights-discovery")).toBe(finalObject);
+    expect(collectOverviewAiText(events, "additional-insights-transition")).toBe(finalObject);
+    expect(collectOverviewAiText(events, "section-interpreter")).toBe(reasoningWrapped);
+    expect(collectOverviewAiText([
+      { type: "TEXT_MESSAGE_CONTENT", delta: `Ordinary preamble.\n${finalObject}` },
+    ], "additional-insights-discovery")).toBe(`Ordinary preamble.\n${finalObject}`);
+  });
 });
 
 const additionalIdentity = (): EnergyIqOverviewAiArtifactIdentity => ({
@@ -1286,13 +1306,13 @@ const additionalIdentity = (): EnergyIqOverviewAiArtifactIdentity => ({
   modelProfileRevision: 7,
   outputContractRevision: "energyiq-additional-ai-insights-v2",
   validatorRevision: "additional-insights-acceptance-v6",
-  workflowRevision: "additional-insights-discover-accept-publish-v8",
+  workflowRevision: "additional-insights-discover-accept-publish-v9",
   investigatorPromptRevision: "additional-insights-discovery-v7",
   editorPromptRevision: "additional-insights-publication-v2",
   methodSkillId: "energyiq-open-discovery",
   methodSkillRevision: "1.0.0",
   artifactKind: "autonomous-insights",
-  identityContractRevision: "additional-insights-v8",
+  identityContractRevision: "additional-insights-v9",
   methodSetId: "preschool-additional-insights-current",
   methodSetRevision: "v1",
   methodSetFingerprint: `sha256:${"a".repeat(64)}`,

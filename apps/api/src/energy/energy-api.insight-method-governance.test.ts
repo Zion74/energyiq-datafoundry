@@ -43,7 +43,7 @@ describe("Additional Insight feedback API", () => {
           workspaceId: PRESCHOOL_WORKSPACE_ID,
           projectId: harness.project.id,
           artifactId: harness.artifact.id,
-          artifactIdentityRevision: "additional-insights-v8",
+          artifactIdentityRevision: "additional-insights-v9",
           findingId: "additional-insight-1",
           rating: "useful",
           revision: 1,
@@ -101,7 +101,7 @@ describe("Additional Insight Method Proposal API", () => {
           status: "provisional",
           revision: 1,
           createdBy: "second-user",
-          artifactIdentityRevision: "additional-insights-v8",
+          artifactIdentityRevision: "additional-insights-v9",
         } },
       });
       const proposalId = proposalData(provisional).id;

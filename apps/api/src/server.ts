@@ -562,7 +562,7 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
       metadataStore,
     );
     return {
-      answer: collectOverviewAiText(completed.events),
+      answer: collectOverviewAiText(completed.events, stageInput.stage),
       runId: completed.completedRun.runId,
       sessionId: completed.completedRun.sessionId,
     };
@@ -957,12 +957,28 @@ const isLocalAdditionalStructuredOutputSchemaError = (
   && error[LOCAL_ADDITIONAL_STRUCTURED_OUTPUT_SCHEMA_ERROR] === true
 );
 
-export const collectOverviewAiText = (events: ReadonlyArray<Record<string, unknown>>): string =>
-  events
+const DEEPSEEK_REASONING_TERMINATOR = "<｜end▁of▁thinking｜>";
+
+export const collectOverviewAiText = (
+  events: ReadonlyArray<Record<string, unknown>>,
+  stage?: PreschoolOverviewAiStage,
+): string => {
+  const answer = events
     .filter((event) => event.type === "TEXT_MESSAGE_CONTENT" || event.type === "TEXT_MESSAGE_CHUNK")
     .map((event) => typeof event.delta === "string" ? event.delta : "")
     .join("")
     .trim();
+  if (stage !== "additional-insights-discovery" && stage !== "additional-insights-transition") return answer;
+  const terminatorIndex = answer.lastIndexOf(DEEPSEEK_REASONING_TERMINATOR);
+  if (terminatorIndex < 0) return answer;
+  const finalAnswer = answer.slice(terminatorIndex + DEEPSEEK_REASONING_TERMINATOR.length).trim();
+  try {
+    const parsed = JSON.parse(finalAnswer) as unknown;
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? finalAnswer : answer;
+  } catch {
+    return answer;
+  }
+};
 
 export const buildOverviewAiStageRunInput = (input: OverviewAiRuntimeStageInput): RunAgentInput => ({
   threadId: input.sessionId,
