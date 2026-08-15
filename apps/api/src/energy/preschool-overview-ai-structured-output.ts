@@ -160,36 +160,10 @@ export const PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V1 = {
   },
 } satisfies PublicStructuredOutputOptions<StructuredEnvelope>;
 
-const executiveAlertV4: JsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["severity", "certainty"],
-  properties: {
-    severity: { type: "string", enum: ["attention", "urgent"] },
-    certainty: {
-      type: "string",
-      enum: ["confirmed", "anomaly", "possible", "observed", "inferred", "speculative"],
-    },
-  },
-};
-
-const executiveFindingV4: JsonSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["title", "text", "sectionIds", "evidenceRefs"],
-  properties: {
-    title: boundedString(PRESCHOOL_EXECUTIVE_FINDING_TITLE_MAX_CHARS),
-    text: boundedString(PRESCHOOL_EXECUTIVE_FINDING_TEXT_MAX_CHARS),
-    sectionIds: {
-      type: "array",
-      minItems: 1,
-      uniqueItems: true,
-      items: { type: "string", enum: [...PRESCHOOL_SECTION_IDS] },
-    },
-    evidenceRefs: modelEvidenceRefsV4,
-    alert: executiveAlertV4,
-  },
-};
+// Finding defects are isolated by the local materializer. Keep the Provider
+// item envelope broad so one overlong or malformed sibling cannot discard the
+// supported Findings before candidate-local validation runs.
+const executiveFindingCandidateV4: JsonSchema = { type: "object" };
 
 const executiveSummaryV4: JsonSchema = {
   ...sectionSummaryV4,
@@ -213,7 +187,7 @@ export const PRESCHOOL_EXECUTIVE_SYNTHESIS_STRUCTURED_OUTPUT_V4 = {
         type: "array",
         minItems: 0,
         maxItems: 3,
-        items: executiveFindingV4,
+        items: executiveFindingCandidateV4,
       },
     },
   },

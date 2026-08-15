@@ -238,7 +238,7 @@ export const createPreschoolOverviewAiExecutiveArtifactIdentityV4 = (input: {
     analysisPackRevision: "section-interpretation-v4",
     outputContractRevision: "preschool-executive-synthesis-v4",
     validatorRevision: "preschool-executive-synthesis-validator-v18",
-    workflowRevision: "preschool-executive-synthesis-v9",
+    workflowRevision: "preschool-executive-synthesis-v10",
     investigatorPromptRevision: "preschool-executive-synthesis-prompt-v11",
     editorPromptRevision: "not-applicable-v1",
     methodSkillId: "none",
