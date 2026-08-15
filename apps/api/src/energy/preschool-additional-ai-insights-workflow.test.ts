@@ -1992,6 +1992,55 @@ const resolvePresentedClaimsFixture: Parameters<typeof createPreschoolAdditional
     }
   });
 
+  it("uses the supported AI conclusion when an otherwise useful card has one unsupported title or parenthetical claim", async () => {
+    const harness = createHarness();
+    try {
+      const novelConclusion = "The standby share may hide a weekday timing pattern";
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [candidate("candidate-title-salvage", "fact:standby-share", {
+            title: "Standby is 31%, not the unsupported 88%, and may follow a weekday pattern",
+            observation: "Standby is 31% (current Snapshot) (the unsupported holiday claim says 88%).",
+            angle: "The standby share may hide a weekday timing pattern. An unsupported hard claim says it reached 999 kWh.",
+            epistemicStatus: "speculative",
+            incrementalContext: {
+              relatedPresentedClaimIds: ["deterministic-overview:fact:standby-share"],
+              novelConclusion,
+            },
+          })] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "title-salvage-run",
+        sessionId: "title-salvage-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        publication: {
+          acceptedCandidateIds: ["candidate-title-salvage"],
+          rejectedCandidateIds: [],
+        },
+        findings: [{
+          id: "additional:candidate-title-salvage",
+          title: novelConclusion,
+          text: "**Evidence signal:** Standby is 31% (current Snapshot).\n\n**AI angle:** The standby share may hide a weekday timing pattern.",
+          epistemicStatus: "speculative",
+        }],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
   it("publishes an evidence-backed observation with a clearly labelled exploratory angle", async () => {
     const harness = createHarness();
     try {

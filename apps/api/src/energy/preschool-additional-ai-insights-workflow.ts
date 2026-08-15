@@ -630,7 +630,12 @@ const acceptCandidate = (
     sqlEvidence: [],
     knownCentreCodes,
   });
-  if (!narrativeIsSupported(value.title)) return null;
+  const acceptedTitle = resolveSupportedCandidateTitle({
+    title: value.title,
+    incrementalContext: value.incrementalContext,
+    narrativeIsSupported,
+  });
+  if (!acceptedTitle) return null;
   const acceptedNarrative = resolveSeparatedCandidateNarrative({
     observation: value.observation,
     angle: value.angle,
@@ -646,11 +651,11 @@ const acceptCandidate = (
     value.incrementalContext,
     evidenceRefs,
     presentedClaims,
-    { title: value.title, text: acceptedNarrative.noveltyText },
+    { title: acceptedTitle, text: acceptedNarrative.noveltyText },
   );
   if (!origin || !incrementalContext) return null;
   const epistemicStatus = resolveAcceptedEpistemicStatus({
-    title: value.title,
+    title: acceptedTitle,
     text: acceptedNarrative.epistemicText,
     ...(acceptedDeepDiveQuestion ? { deepDiveQuestion: acceptedDeepDiveQuestion } : {}),
     epistemicStatus: value.epistemicStatus,
@@ -666,7 +671,7 @@ const acceptCandidate = (
     && !alertIsAcceptable(value.alert, epistemicStatus, evidenceRefs, factsById)) return null;
   const finding: AdditionalAiInsightFinding = {
     id: `additional:${candidate.sourceId}`,
-    title: value.title.trim(),
+    title: acceptedTitle,
     text: acceptedNarrative.publishedText,
     epistemicStatus,
     origin,
@@ -1041,14 +1046,35 @@ const resolveSeparatedCandidateNarrative = (input: {
   };
 };
 
+const resolveSupportedCandidateTitle = (input: {
+  title: string;
+  incrementalContext: unknown;
+  narrativeIsSupported(narrative: string): boolean;
+}): string | null => {
+  const title = input.title.trim();
+  if (input.narrativeIsSupported(title)) return title;
+  if (!isRecord(input.incrementalContext)
+    || !conciseSummaryTitle(input.incrementalContext.novelConclusion)) return null;
+  const novelConclusion = input.incrementalContext.novelConclusion.trim();
+  return input.narrativeIsSupported(novelConclusion) ? novelConclusion : null;
+};
+
 const salvageSupportedNarrative = (
   narrative: string,
   narrativeIsSupported: (value: string) => boolean,
 ): string | null => {
   const trimmed = narrative.trim();
   if (narrativeIsSupported(trimmed)) return trimmed;
-  const fragments = trimmed
-    .split(/(?<=[.!?])\s+(?=[\p{Lu}\p{N}])/u)
+  const withoutUnsupportedParentheticals = trimmed
+    .replace(/\s*\(([^()\r\n]{1,200})\)/gu, (segment, content: string) =>
+      narrativeIsSupported(content.trim()) ? segment : "")
+    .replace(/\s+([.!?,])/gu, "$1")
+    .replace(/\s{2,}/gu, " ")
+    .trim();
+  if (withoutUnsupportedParentheticals !== trimmed
+    && narrativeIsSupported(withoutUnsupportedParentheticals)) return withoutUnsupportedParentheticals;
+  const fragments = [...new Set([trimmed, withoutUnsupportedParentheticals])]
+    .flatMap((variant) => variant.split(/(?<=[.!?])\s+(?=[\p{Lu}\p{N}])/u))
     .flatMap((sentence) => sentence.split(/\s*;\s*|,\s*(?=(?:but|while|whereas|however)\b)/iu))
     .map((fragment) => fragment.trim().replace(/^(?:but|while|whereas|however)\s+/iu, ""))
     .filter((fragment) => fragment.length > 0 && narrativeIsSupported(fragment))

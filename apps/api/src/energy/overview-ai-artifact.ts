@@ -46,7 +46,7 @@ export type PreschoolOverviewAiValueArtifactIdentity = EnergyIqOverviewAiArtifac
 
 export type PreschoolAdditionalAiInsightArtifactIdentity = EnergyIqOverviewAiArtifactIdentity & {
   artifactKind: "autonomous-insights";
-  identityContractRevision: "additional-insights-v13";
+  identityContractRevision: "additional-insights-v14";
   methodSetId: "preschool-additional-insights-current";
   methodSetRevision: "v1";
   methodSetFingerprint: string;
@@ -136,12 +136,12 @@ export const createPreschoolAdditionalAiInsightArtifactIdentity = (input: {
   return {
     ...input.baseIdentity,
     artifactKind: "autonomous-insights",
-    identityContractRevision: "additional-insights-v13",
+    identityContractRevision: "additional-insights-v14",
     analysisPackId: "preschool-additional-insights-pack",
     analysisPackRevision: "v1",
     outputContractRevision: "energyiq-additional-ai-insights-v2",
-    validatorRevision: "additional-insights-acceptance-v10",
-    workflowRevision: "additional-insights-discover-accept-publish-v13",
+    validatorRevision: "additional-insights-acceptance-v11",
+    workflowRevision: "additional-insights-discover-accept-publish-v14",
     investigatorPromptRevision: "additional-insights-discovery-v10",
     editorPromptRevision: "additional-insights-publication-v2",
     methodSkillId: "energyiq-open-discovery",
@@ -160,12 +160,12 @@ export const isCurrentPreschoolAdditionalAiInsightArtifactIdentity = (
   identity: EnergyIqOverviewAiArtifactIdentity,
 ): identity is PreschoolAdditionalAiInsightArtifactIdentity =>
   identity.artifactKind === "autonomous-insights"
-  && identity.identityContractRevision === "additional-insights-v13"
+  && identity.identityContractRevision === "additional-insights-v14"
   && identity.analysisPackId === "preschool-additional-insights-pack"
   && identity.analysisPackRevision === "v1"
   && identity.outputContractRevision === "energyiq-additional-ai-insights-v2"
-  && identity.validatorRevision === "additional-insights-acceptance-v10"
-  && identity.workflowRevision === "additional-insights-discover-accept-publish-v13"
+  && identity.validatorRevision === "additional-insights-acceptance-v11"
+  && identity.workflowRevision === "additional-insights-discover-accept-publish-v14"
   && identity.investigatorPromptRevision === "additional-insights-discovery-v10"
   && identity.editorPromptRevision === "additional-insights-publication-v2"
   && identity.methodSkillId === "energyiq-open-discovery"
