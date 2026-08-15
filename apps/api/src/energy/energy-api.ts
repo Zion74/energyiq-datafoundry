@@ -84,6 +84,7 @@ import {
 } from "./preschool-overview-ai-read-model.js";
 import { createProjectOverviewAdminReadinessService } from "./project-overview-admin-readiness.js";
 import { createProjectHarnessConfigurationReader } from "./project-harness-configuration.js";
+import { createProjectAiOperationsReader } from "./project-ai-operations.js";
 import type { PreschoolOverviewAiRetryTarget } from "./preschool-overview-ai-page-workflow.js";
 
 const EXPLORER_ANALYSIS_CACHE_LIMIT = 100;
@@ -696,6 +697,25 @@ export const handleEnergyApiRequest = async (
         status: 200,
         headers: { "Cache-Control": "private, no-store" },
         body: createSuccessResult(reader.readProjectHarnessConfiguration(projectId)),
+      };
+    }
+    if (segments[0] === "projects"
+      && (segments.length === 3 || segments.length === 5)
+      && segments[2] === "ai-operations"
+      && (segments.length === 3 || segments[3] === "runs")
+      && request.method === "GET") {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      const runId = segments.length === 5 ? decodeURIComponent(segments[4] ?? "") : undefined;
+      requireEnergyAdminProject(context, user, projectId);
+      const reader = createProjectAiOperationsReader({
+        metadataStore: context.metadataStore,
+        user,
+        workspaceId: context.workspaceId,
+      });
+      return {
+        status: 200,
+        headers: { "Cache-Control": "private, no-store" },
+        body: createSuccessResult(reader.readProjectAiOperations(projectId, runId ? { runId } : undefined)),
       };
     }
     if (segments[0] === "projects"

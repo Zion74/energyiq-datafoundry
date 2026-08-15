@@ -70,6 +70,10 @@ import { RunCheckpointProjector } from "./run-checkpoint-projector.js";
 import { TraceSectionCoordinator } from "./trace-section-coordinator.js";
 import { resolveCheckpointResumeSeed, type CheckpointResumeSeed } from "./run-checkpoint-resume.js";
 import { resolveRunConfig } from "./run-config-resolver.js";
+import {
+  createRunConfigAuditCapture,
+  createSkillMaterializedAuditCapture,
+} from "./run-config-audit.js";
 import { resolveRunIdentity } from "./run-identity-orchestrator.js";
 import { createRunMemoryAssembly } from "./run-memory-assembly.js";
 import {
@@ -1801,6 +1805,12 @@ export class DataFoundryAgUiAgent extends AbstractAgent {
                 active_llm_profile_id: effectiveRunConfig.activeLlmProfileId,
                 workspace_id: this.input.workspaceId,
                 workspace: agentAssembly.workspace,
+                ...createRunConfigAuditCapture({
+                  ...(effectiveRunConfig.resourceRevisions
+                    ? { resourceRevisions: effectiveRunConfig.resourceRevisions }
+                    : {}),
+                  mcpToolNamesByServerId: mcpRuntime.toolNamesByServerId,
+                }),
                 ...(modelContextProfile
                   ? {
                       context_window: modelContextProfile.contextWindow,
@@ -1859,6 +1869,10 @@ export class DataFoundryAgUiAgent extends AbstractAgent {
                   tags: skill.tags
                 }))
               }));
+              emit(createCustomEvent(
+                "skill.materialized",
+                createSkillMaterializedAuditCapture(selectedSkills),
+              ));
               emit({
                 type: EventType.STATE_SNAPSHOT,
                 snapshot: {

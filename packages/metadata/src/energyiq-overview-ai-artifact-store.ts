@@ -207,6 +207,17 @@ export class EnergyIqOverviewAiArtifactStore {
     return record;
   }
 
+  /** Read all immutable Artifact attempts for one exact Workspace and Project. */
+  listByProject(input: { workspaceId: string; projectId: string }): EnergyIqOverviewAiArtifactRecord[] {
+    return this.db.prepare(`
+      SELECT *
+      FROM energyiq_overview_ai_artifacts
+      WHERE workspace_id = ? AND project_id = ?
+      ORDER BY updated_at DESC, id DESC
+    `).all(input.workspaceId, input.projectId)
+      .map((row) => mapArtifact(row as Record<string, unknown>));
+  }
+
   claim(input: {
     identity: EnergyIqOverviewAiArtifactIdentity;
     workerId: string;

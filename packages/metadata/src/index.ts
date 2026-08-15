@@ -1972,6 +1972,39 @@ export class RunRepository {
       .filter((run): run is RunRecord => run !== undefined);
   }
 
+  /** List Runs whose immutable Session scope belongs to one exact Workspace and Project. */
+  listByProject(input: { workspace_id: string; project_id: string; limit?: number }): RunRecord[] {
+    const limit = Math.max(1, Math.min(input.limit ?? 100, 500));
+    return this.db.prepare(`
+      SELECT runs.*
+      FROM runs
+      INNER JOIN sessions
+        ON sessions.user_id = runs.user_id
+        AND sessions.id = runs.session_id
+      WHERE sessions.workspace_id = ?
+        AND sessions.project_id = ?
+      ORDER BY runs.started_at DESC, runs.id DESC
+      LIMIT ?
+    `).all(input.workspace_id, input.project_id, limit)
+      .map(mapRunRow)
+      .filter((run): run is RunRecord => run !== undefined);
+  }
+
+  /** Find one Run only when its immutable Session scope matches the exact Project. */
+  findByProject(input: { workspace_id: string; project_id: string; run_id: string }): Optional<RunRecord> {
+    return mapRunRow(this.db.prepare(`
+      SELECT runs.*
+      FROM runs
+      INNER JOIN sessions
+        ON sessions.user_id = runs.user_id
+        AND sessions.id = runs.session_id
+      WHERE sessions.workspace_id = ?
+        AND sessions.project_id = ?
+        AND runs.id = ?
+      LIMIT 1
+    `).get(input.workspace_id, input.project_id, input.run_id));
+  }
+
   get(input: { user_id: string; run_id: string }): RunRecord {
     const run = this.find(input);
 
