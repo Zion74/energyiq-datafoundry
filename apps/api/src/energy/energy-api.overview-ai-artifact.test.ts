@@ -570,7 +570,7 @@ describe("Overview AI Artifact API", () => {
   it("reads project Overview and Layer 1–3 readiness without starting Provider work", async () => {
     const harness = await createHarness();
     try {
-      const read = vi.fn().mockResolvedValue(aggregateResultFor(harness.identity));
+      const read = vi.fn().mockResolvedValue(explainableAggregateResultFor(harness.identity));
       const execute = vi.fn();
       const resolveCurrentIdentity = vi.fn().mockResolvedValue(harness.identity);
       const context = {
@@ -608,8 +608,52 @@ describe("Overview AI Artifact API", () => {
                 expect.objectContaining({ id: "key-findings", status: "needs-attention" }),
                 expect.objectContaining({ id: "section:centre-benchmark", status: "ready" }),
                 expect.objectContaining({ id: "section:operating-behaviour", status: "not-generated" }),
-                expect.objectContaining({ id: "additional-insights", status: "not-generated" }),
+                expect.objectContaining({ id: "additional-insights", status: "ready" }),
               ]),
+            },
+            explainability: {
+              status: "available",
+              declared: {
+                skills: [expect.objectContaining({
+                  id: "energyiq-open-discovery",
+                  revision: "1.0.0",
+                  availability: "declared-available",
+                })],
+                methods: [expect.objectContaining({
+                  resourceId: "builtin:energyiq-open-discovery",
+                  scope: "builtin",
+                  lifecycle: "published",
+                  availability: "declared-available",
+                })],
+                tools: expect.arrayContaining([
+                  expect.objectContaining({ id: "energy.evidence.read", availability: "declared-available" }),
+                  expect.objectContaining({ id: "energy.metrics.compare", availability: "declared-available" }),
+                ]),
+              },
+              currentArtifact: {
+                artifactId: "additional-current",
+                readOnly: true,
+                historical: false,
+                loadedMethods: [expect.objectContaining({
+                  resourceId: "builtin:energyiq-open-discovery",
+                  usage: "actually-loaded",
+                })],
+                findings: [expect.objectContaining({
+                  id: "additional-finding-1",
+                  evidenceSignal: "Portfolio demand stayed concentrated in two Centres.",
+                  aiAngle: "This may be a repeatable scheduling pattern worth testing.",
+                  origin: "ai-discovery",
+                  attributedMethods: [expect.objectContaining({
+                    resourceId: "builtin:energyiq-open-discovery",
+                    usage: "finding-attributed",
+                  })],
+                  successfulTools: [expect.objectContaining({
+                    auditId: "audit-evidence-success",
+                    toolName: "energy.evidence.read",
+                    usage: "tool-succeeded",
+                  })],
+                })],
+              },
             },
             allowedActions: ["generate-missing"],
             recommendedNextAction: { action: "generate-missing" },
@@ -620,6 +664,56 @@ describe("Overview AI Artifact API", () => {
       expect(read).toHaveBeenCalledOnce();
       expect(execute).not.toHaveBeenCalled();
     } finally {
+      harness.close();
+    }
+  });
+
+  it("keeps the saved Artifact trace available when the declared governance catalog is locally unavailable", async () => {
+    const harness = await createHarness();
+    const catalogRead = vi.spyOn(
+      harness.metadata.energyIq.insightMethodGovernance,
+      "listPublishedWorkspaceMethodResources",
+    ).mockImplementation(() => {
+      throw new Error("GOVERNANCE_CATALOG_UNAVAILABLE");
+    });
+    try {
+      const read = vi.fn().mockResolvedValue(explainableAggregateResultFor(harness.identity));
+      const execute = vi.fn();
+      const context = {
+        ...harness.context,
+        overviewAiWorkflow: {
+          execute,
+          read,
+          resolveCurrentIdentity: vi.fn().mockResolvedValue(harness.identity),
+        },
+      } as unknown as Required<ConfigApiContext>;
+
+      const response = await handleEnergyApiRequest(
+        getRequest(`/api/v1/energy/projects/${harness.project.id}/overview-admin-state`),
+        ["projects", harness.project.id, "overview-admin-state"],
+        context,
+      );
+
+      expect(response).toMatchObject({
+        status: 200,
+        body: { success: true, data: { explainability: {
+          status: "available",
+          declared: {
+            status: "partially-unavailable",
+            skills: [expect.objectContaining({ id: "energyiq-open-discovery" })],
+            methods: [expect.objectContaining({ resourceId: "builtin:energyiq-open-discovery" })],
+            tools: expect.arrayContaining([expect.objectContaining({ id: "energy.evidence.read" })]),
+          },
+          currentArtifact: {
+            status: "available",
+            artifactId: "additional-current",
+            findings: [expect.objectContaining({ id: "additional-finding-1", status: "available" })],
+          },
+        } } },
+      });
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      catalogRead.mockRestore();
       harness.close();
     }
   });
@@ -1057,6 +1151,109 @@ async function createHarness() {
     close: () => {
       metadata.close();
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    },
+  };
+}
+
+function explainableAggregateResultFor(identity: ReturnType<typeof createOverviewAiArtifactIdentity>) {
+  const current = aggregateResultFor(identity);
+  const coreMethod = {
+    skillId: "energyiq-open-discovery",
+    semanticVersion: "1.0.0",
+    resourceId: "builtin:energyiq-open-discovery",
+    resourceRevision: 1,
+    contentSha256: "5af7fdc13e241bf92a4b14268aa1382996c2af31d920d9dc8644bb2efec87d59",
+    scope: "builtin" as const,
+    workspaceId: identity.workspaceId,
+    userId: "energyiq-system",
+    role: "core-method" as const,
+  };
+  return {
+    ...current,
+    additional: {
+      status: "available" as const,
+      artifactId: "additional-current",
+      result: {
+        artifactKind: "autonomous-insights" as const,
+        status: "available" as const,
+        providerProfileId: identity.modelProfileId,
+        runId: "run-additional-current",
+        contract: { id: "energyiq-additional-ai-insights" as const, revision: "energyiq-additional-ai-insights-v2" },
+        binding: current.binding,
+        methodExecution: {
+          methodSetId: "preschool-additional-insights-current",
+          methodSetRevision: "v1",
+          methodSetFingerprint: `sha256:${"a".repeat(64)}`,
+          loadedMethods: [coreMethod],
+        },
+        capability: {
+          revision: "scoped-read-only-v1",
+          mode: "scoped-read-only" as const,
+          allowedTools: [
+            "energy.evidence.read",
+            "energy.metrics.compare",
+            "energy.timeseries.analyze",
+            "energy.snapshot-history.read",
+            "energy.project-knowledge.read",
+          ],
+          usedTools: ["energy.evidence.read", "energy.metrics.compare"],
+        },
+        toolAudits: [{
+          auditId: "audit-evidence-success",
+          toolCallId: "tool-call-success",
+          toolName: "energy.evidence.read",
+          status: "succeeded" as const,
+          evidenceRefs: ["fact:portfolio-demand"],
+        }, {
+          auditId: "audit-compare-rejected",
+          toolCallId: "tool-call-rejected",
+          toolName: "energy.metrics.compare",
+          status: "rejected" as const,
+          evidenceRefs: [],
+          errorCode: "TOOL_INPUT_REJECTED",
+        }],
+        evidenceLineage: {
+          catalogContract: "analysis-context-evidence@1" as const,
+          sourceId: `project-analysis-snapshot:${identity.projectId}:${identity.dataSnapshotId}`,
+          pins: {
+            workspaceId: identity.workspaceId,
+            projectId: identity.projectId,
+            scopeId: identity.scopeId,
+            dataSnapshotId: identity.dataSnapshotId,
+            dataCutoff: identity.analysisPeriodTo,
+            projectReleaseId: identity.projectReleaseId,
+            metricVersion: "metric-v1",
+          },
+          facts: [{
+            id: "fact:portfolio-demand",
+            status: "confirmed" as const,
+            evidenceRefs: ["query:portfolio-demand"],
+          }],
+        },
+        publication: {
+          policyId: "energyiq-additional-ai-insights" as const,
+          policyRevision: "additional-insights-v2",
+          discoveredCount: 1,
+          acceptedCount: 1,
+          rejectedCount: 0,
+          publishedCount: 1,
+          sourceOrderCandidateIds: ["additional-finding-1"],
+          acceptedCandidateIds: ["additional-finding-1"],
+          rejectedCandidateIds: [],
+          publishedCandidateIds: ["additional-finding-1"],
+          suppressedCandidateIds: [],
+        },
+        findings: [{
+          id: "additional-finding-1",
+          title: "Test a repeatable scheduling pattern",
+          text: "**Evidence signal:** Portfolio demand stayed concentrated in two Centres.\n\n**AI angle:** This may be a repeatable scheduling pattern worth testing.",
+          epistemicStatus: "inferred" as const,
+          origin: { kind: "ai-discovery" as const, coreMethod, directionMethods: [] as const },
+          evidenceRefs: ["fact:portfolio-demand"],
+          toolAuditIds: ["audit-evidence-success", "audit-compare-rejected"],
+          deepDiveQuestion: "Does this concentration repeat on comparable days?",
+        }],
+      },
     },
   };
 }

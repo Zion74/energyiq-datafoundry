@@ -52,7 +52,16 @@ describe("ProjectOverviewAiReadiness", () => {
     expect(container.textContent).toContain("Key Findings");
     expect(container.textContent).toContain("Centre benchmark");
     expect(container.textContent).toContain("Additional AI Insights");
-    expect(container.textContent).not.toContain("Artifact");
+    expect(container.textContent).toContain("Available for this Project");
+    expect(container.textContent).toContain("Used for this Artifact");
+    expect(container.textContent).toContain("Open discovery");
+    expect(container.textContent).toContain("Portfolio demand stayed concentrated in two Centres.");
+    expect(container.textContent).toContain("This may be a repeatable scheduling pattern worth testing.");
+    expect(container.textContent).toContain("energy.evidence.read");
+    expect(container.textContent).not.toContain("energy.metrics.compare was used");
+    const traceTechnicalDetails = container.querySelector("details[data-ai-trace-technical]");
+    expect(traceTechnicalDetails?.open).toBe(false);
+    expect(traceTechnicalDetails?.querySelector("summary")?.textContent).toContain("Technical IDs");
 
     const generate = Array.from(container.querySelectorAll("button"))
       .find((button) => button.textContent === "Generate missing analysis");
@@ -165,10 +174,104 @@ describe("ProjectOverviewAiReadiness", () => {
     expect(container.textContent).toContain("Review readiness details");
     expect(container.textContent).not.toContain("No action needed");
   });
+
+  it("binds Useful, Not useful, append-only Comment and Method Proposal actions to the exact Finding", async () => {
+    const state = preschoolState();
+    const client = {
+      getEnergyProjectOverviewAdminState: vi.fn().mockResolvedValue(state),
+      generateMissingEnergyProjectOverviewAnalysis: vi.fn(),
+      getEnergyAdditionalInsightFeedback: vi.fn().mockResolvedValue(null),
+      putEnergyAdditionalInsightFeedback: vi.fn().mockImplementation(async (
+        _projectId: string,
+        artifactId: string,
+        findingId: string,
+        body: { rating: "useful" | "not-useful"; expectedRevision: number },
+      ) => ({
+        id: "feedback-current",
+        artifactId,
+        findingId,
+        rating: body.rating,
+        revision: 1,
+      })),
+      listEnergyAdditionalInsightComments: vi.fn().mockResolvedValue({ comments: [] }),
+      appendEnergyAdditionalInsightComment: vi.fn().mockResolvedValue({
+        id: "comment-current",
+        actorId: "dev-user",
+        text: "Verify this pattern against the next comparable week.",
+        createdAt: "2026-08-15T02:00:00.000Z",
+      }),
+      createEnergyInsightMethodProposal: vi.fn().mockResolvedValue({
+        id: "proposal-current",
+        status: "provisional",
+        revision: 1,
+      }),
+    };
+
+    await act(async () => root.render(
+      <ProjectOverviewAiReadiness projectId="preschool-demo" client={client} />,
+    ));
+    await act(async () => undefined);
+
+    const useful = [...container.querySelectorAll("button")].find((button) => button.textContent === "Useful");
+    const notUseful = [...container.querySelectorAll("button")].find((button) => button.textContent === "Not useful");
+    expect(useful).toBeDefined();
+    expect(notUseful).toBeDefined();
+    await act(async () => useful!.click());
+    expect(client.putEnergyAdditionalInsightFeedback).toHaveBeenCalledWith(
+      "preschool-demo",
+      "additional-current",
+      "additional-finding-1",
+      { rating: "useful", expectedRevision: 0 },
+    );
+
+    const comment = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Admin comment"]');
+    await act(async () => setControlValue(comment!, "Verify this pattern against the next comparable week."));
+    const addComment = [...container.querySelectorAll("button")].find((button) => button.textContent === "Add comment");
+    await act(async () => addComment!.click());
+    expect(client.appendEnergyAdditionalInsightComment).toHaveBeenCalledWith(
+      "preschool-demo",
+      "additional-current",
+      "additional-finding-1",
+      expect.objectContaining({
+        text: "Verify this pattern against the next comparable week.",
+        idempotencyKey: expect.any(String),
+      }),
+    );
+    expect(container.textContent).toContain("Verify this pattern against the next comparable week.");
+
+    const propose = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent === "Propose Method revision");
+    await act(async () => propose!.click());
+    const title = container.querySelector<HTMLInputElement>('input[aria-label="Proposal title"]');
+    const guidance = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Proposal guidance"]');
+    await act(async () => setControlValue(title!, "Review repeated concentration"));
+    await act(async () => setControlValue(guidance!, "Check comparable weeks before reusing this analysis direction."));
+    const createProposal = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent === "Create proposal");
+    await act(async () => createProposal!.click());
+    expect(client.createEnergyInsightMethodProposal).toHaveBeenCalledWith(
+      "preschool-demo",
+      "additional-current",
+      "additional-finding-1",
+      expect.objectContaining({
+        title: "Review repeated concentration",
+        guidance: "Check comparable weeks before reusing this analysis direction.",
+        idempotencyKey: expect.any(String),
+      }),
+    );
+    expect(container.textContent).toContain("Proposal created as provisional");
+    expect(container.textContent).not.toContain("Edit published Method");
+  });
 });
 
+function setControlValue(control: HTMLInputElement | HTMLTextAreaElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(control), "value")?.set;
+  setter?.call(control, value);
+  control.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 function preschoolState(overrides: Partial<EnergyProjectOverviewAdminStateDto> = {}): EnergyProjectOverviewAdminStateDto {
-  const base: EnergyProjectOverviewAdminStateDto = {
+  const base = {
     projectId: "preschool-demo",
     projectName: "Preschool Portfolio",
     rendererKey: "preschool-overview",
@@ -206,6 +309,94 @@ function preschoolState(overrides: Partial<EnergyProjectOverviewAdminStateDto> =
       label: "Generate missing analysis",
       detail: "Create only missing results.",
     },
-  };
+    explainability: {
+      status: "available",
+      detail: "Declared capabilities and the exact saved Additional Insight trace are available.",
+      declared: {
+        status: "available",
+        detail: "Published capabilities declared for the Project.",
+        skills: [{ id: "energyiq-open-discovery", revision: "1.0.0", availability: "declared-available" }],
+        methods: [{
+          skillId: "energyiq-open-discovery",
+          semanticVersion: "1.0.0",
+          resourceId: "builtin:energyiq-open-discovery",
+          resourceRevision: 1,
+          scope: "builtin",
+          lifecycle: "published",
+          availability: "declared-available",
+          technical: {
+            contentSha256: "a".repeat(64),
+            workspaceId: "preschool-demo-org",
+            ownerId: "energyiq-system",
+            role: "core-method",
+          },
+        }],
+        tools: [
+          { id: "energy.evidence.read", availability: "declared-available" },
+          { id: "energy.metrics.compare", availability: "declared-available" },
+        ],
+      },
+      governance: { status: "available", detail: "Project Method Proposal lifecycle.", proposals: [] },
+      currentArtifact: {
+        status: "available",
+        artifactId: "additional-current",
+        readOnly: true,
+        historical: false,
+        detail: "This is an immutable trace of the exact current saved Artifact.",
+        technical: {
+          runId: "run-current",
+          outputContractRevision: "energyiq-additional-ai-insights-v2",
+          methodSetId: "preschool-additional-insights-current",
+          methodSetRevision: "v1",
+          methodSetFingerprint: `sha256:${"b".repeat(64)}`,
+          capabilityRevision: "scoped-read-only-v1",
+        },
+        loadedMethods: [{
+          skillId: "energyiq-open-discovery",
+          semanticVersion: "1.0.0",
+          resourceId: "builtin:energyiq-open-discovery",
+          resourceRevision: 1,
+          scope: "builtin",
+          role: "core-method",
+          usage: "actually-loaded",
+          technical: {
+            contentSha256: "a".repeat(64),
+            workspaceId: "preschool-demo-org",
+            ownerId: "energyiq-system",
+          },
+        }],
+        findings: [{
+          id: "additional-finding-1",
+          title: "Test a repeatable scheduling pattern",
+          status: "available",
+          detail: "Exact Finding attribution and successful Tool audits from the saved Artifact.",
+          evidenceSignal: "Portfolio demand stayed concentrated in two Centres.",
+          aiAngle: "This may be a repeatable scheduling pattern worth testing.",
+          origin: "ai-discovery",
+          evidenceRefs: ["fact:portfolio-demand"],
+          attributedMethods: [{
+            skillId: "energyiq-open-discovery",
+            semanticVersion: "1.0.0",
+            resourceId: "builtin:energyiq-open-discovery",
+            resourceRevision: 1,
+            scope: "builtin",
+            role: "core-method",
+            usage: "finding-attributed",
+            technical: {
+              contentSha256: "a".repeat(64),
+              workspaceId: "preschool-demo-org",
+              ownerId: "energyiq-system",
+            },
+          }],
+          successfulTools: [{
+            auditId: "audit-evidence-success",
+            toolName: "energy.evidence.read",
+            evidenceRefs: ["fact:portfolio-demand"],
+            usage: "tool-succeeded",
+          }],
+        }],
+      },
+    },
+  } as unknown as EnergyProjectOverviewAdminStateDto;
   return { ...base, ...overrides };
 }

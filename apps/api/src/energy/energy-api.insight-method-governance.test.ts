@@ -84,6 +84,75 @@ describe("Additional Insight feedback API", () => {
   });
 });
 
+describe("Additional Insight Finding comment API", () => {
+  it("lets only an admin append and read exact Finding comments without trusting browser identity", async () => {
+    const harness = createHarness();
+    try {
+      const path = findingPath(harness, "comments");
+      const created = await handleEnergyApiRequest(jsonRequest("POST", {
+        idempotencyKey: "comment:admin-review",
+        text: "Useful direction; verify the repeat pattern before proposing a Method revision.",
+        actorId: "second-user",
+        workspaceId: "workspace-forged",
+        projectId: "project-forged",
+      }), path, harness.context);
+      expect(created).toMatchObject({
+        status: 201,
+        body: { success: true, data: {
+          workspaceId: PRESCHOOL_WORKSPACE_ID,
+          projectId: harness.project.id,
+          artifactId: harness.artifact.id,
+          artifactIdentityRevision: "additional-insights-v12",
+          findingId: "additional-insight-1",
+          actorId: "dev-user",
+          text: "Useful direction; verify the repeat pattern before proposing a Method revision.",
+        } },
+      });
+      expect(await handleEnergyApiRequest(jsonRequest("POST", {
+        idempotencyKey: "comment:admin-review",
+        text: "Useful direction; verify the repeat pattern before proposing a Method revision.",
+      }), path, harness.context)).toEqual(created);
+
+      const listed = await handleEnergyApiRequest(getRequest(), path, harness.context);
+      expect(listed).toMatchObject({
+        status: 200,
+        headers: { "Cache-Control": "private, no-store" },
+        body: { success: true, data: { comments: [expect.objectContaining({
+          id: commentData(created).id,
+          actorId: "dev-user",
+          findingId: "additional-insight-1",
+        })] } },
+      });
+
+      const member = { ...harness.context, userId: "second-user" };
+      expect(await handleEnergyApiRequest(getRequest(), path, member)).toMatchObject({
+        status: 403,
+        body: { success: false, error: { code: "FORBIDDEN" } },
+      });
+      expect(await handleEnergyApiRequest(jsonRequest("POST", {
+        idempotencyKey: "comment:member-forbidden",
+        text: "This comment must not be appended.",
+      }), path, member)).toMatchObject({
+        status: 403,
+        body: { success: false, error: { code: "FORBIDDEN" } },
+      });
+      expect(harness.metadata.energyIq.insightMethodGovernance.listFindingComments({
+        expectedWorkspaceId: PRESCHOOL_WORKSPACE_ID,
+        expectedProjectId: harness.project.id,
+        artifactId: harness.artifact.id,
+        findingId: "additional-insight-1",
+      })).toHaveLength(1);
+
+      expect(await handleEnergyApiRequest(getRequest(), path, {
+        ...harness.context,
+        workspaceId: "default",
+      })).toMatchObject({ status: 403 });
+    } finally {
+      harness.close();
+    }
+  });
+});
+
 describe("Additional Insight Method Proposal API", () => {
   it("keeps create and submit with the project member while reserving approve and publish for admins", async () => {
     const harness = createHarness();
@@ -145,6 +214,23 @@ describe("Additional Insight Method Proposal API", () => {
         status: 409,
         body: { success: false, error: { code: "CONFLICT" } },
       });
+      const historicalCommentMutation = await handleEnergyApiRequest(jsonRequest("POST", {
+        idempotencyKey: "comment:historical-artifact",
+        text: "Historical Artifacts must remain immutable.",
+      }), findingPath(harness, "comments"), harness.context);
+      expect(historicalCommentMutation).toMatchObject({
+        status: 201,
+        body: { success: true, data: {
+          artifactId: harness.artifact.id,
+          findingId: "additional-insight-1",
+          text: "Historical Artifacts must remain immutable.",
+        } },
+      });
+      expect(harness.metadata.energyIq.insightMethodGovernance.getProposal({
+        workspaceId: PRESCHOOL_WORKSPACE_ID,
+        projectId: harness.project.id,
+        proposalId,
+      })).toMatchObject({ status: "published", revision: 4 });
 
       const listed = await handleEnergyApiRequest(getRequest(), [
         "projects", harness.project.id, "additional-ai-insights", "method-proposals",
@@ -349,6 +435,13 @@ function proposalData(response: Awaited<ReturnType<typeof handleEnergyApiRequest
   if (!("success" in response.body) || response.body.success !== true || !("data" in response.body)
     || typeof response.body.data !== "object" || response.body.data === null || !("id" in response.body.data)
     || typeof response.body.data.id !== "string") throw new Error("test proposal response missing id");
+  return response.body.data as { id: string };
+}
+
+function commentData(response: Awaited<ReturnType<typeof handleEnergyApiRequest>>): { id: string } {
+  if (!("success" in response.body) || response.body.success !== true || !("data" in response.body)
+    || typeof response.body.data !== "object" || response.body.data === null || !("id" in response.body.data)
+    || typeof response.body.data.id !== "string") throw new Error("test comment response missing id");
   return response.body.data as { id: string };
 }
 

@@ -15,6 +15,80 @@ import { createMetadataStore } from "./index.js";
 import type { EnergyIqOverviewAiArtifactIdentity } from "./energyiq-overview-ai-artifact-store.js";
 
 describe("EnergyIqInsightMethodGovernanceStore", () => {
+  it("appends immutable comments to one exact Finding with tenant-scoped reads", () => {
+    const harness = createHarness();
+    try {
+      const first = harness.metadata.energyIq.insightMethodGovernance.appendFindingComment({
+        expectedWorkspaceId: "artifact-workspace",
+        expectedProjectId: "artifact-project",
+        artifactId: harness.artifact.id,
+        findingId: "additional-insight-1",
+        actorId: "admin-reviewer",
+        idempotencyKey: "comment:first-review",
+        text: "Useful lead; verify whether the same shape repeats next week.",
+        now: "2026-08-15T01:00:00.000Z",
+      });
+      const replay = harness.metadata.energyIq.insightMethodGovernance.appendFindingComment({
+        expectedWorkspaceId: "artifact-workspace",
+        expectedProjectId: "artifact-project",
+        artifactId: harness.artifact.id,
+        findingId: "additional-insight-1",
+        actorId: "admin-reviewer",
+        idempotencyKey: "comment:first-review",
+        text: "Useful lead; verify whether the same shape repeats next week.",
+        now: "2026-08-15T01:01:00.000Z",
+      });
+      const second = harness.metadata.energyIq.insightMethodGovernance.appendFindingComment({
+        expectedWorkspaceId: "artifact-workspace",
+        expectedProjectId: "artifact-project",
+        artifactId: harness.artifact.id,
+        findingId: "additional-insight-1",
+        actorId: "admin-reviewer",
+        idempotencyKey: "comment:second-review",
+        text: "Do not publish a Method revision until the repeated pattern is reviewed.",
+        now: "2026-08-15T01:02:00.000Z",
+      });
+
+      expect(replay).toEqual(first);
+      expect(first).toMatchObject({
+        workspaceId: "artifact-workspace",
+        projectId: "artifact-project",
+        scopeId: "artifact-project-scope",
+        artifactId: harness.artifact.id,
+        artifactIdentityHash: `sha256:${harness.artifact.identity_hash}`,
+        artifactIdentityRevision: "additional-insights-v12",
+        findingId: "additional-insight-1",
+        actorId: "admin-reviewer",
+        text: "Useful lead; verify whether the same shape repeats next week.",
+        createdAt: "2026-08-15T01:00:00.000Z",
+      });
+      expect(second.id).not.toBe(first.id);
+      expect(harness.metadata.energyIq.insightMethodGovernance.listFindingComments({
+        expectedWorkspaceId: "artifact-workspace",
+        expectedProjectId: "artifact-project",
+        artifactId: harness.artifact.id,
+        findingId: "additional-insight-1",
+      })).toEqual([first, second]);
+      expect(harness.metadata.energyIq.insightMethodGovernance.listFindingComments({
+        expectedWorkspaceId: "workspace-other",
+        expectedProjectId: "artifact-project",
+        artifactId: harness.artifact.id,
+        findingId: "additional-insight-1",
+      })).toEqual([]);
+      expect(() => harness.metadata.energyIq.insightMethodGovernance.appendFindingComment({
+        expectedWorkspaceId: "artifact-workspace",
+        expectedProjectId: "artifact-project",
+        artifactId: harness.artifact.id,
+        findingId: "finding-does-not-exist",
+        actorId: "admin-reviewer",
+        idempotencyKey: "comment:fake-finding",
+        text: "This must not be stored.",
+      })).toThrow("ENERGYIQ_ADDITIONAL_FINDING_NOT_FOUND");
+    } finally {
+      harness.close();
+    }
+  });
+
   it("persists one actor vote with idempotent replay, audited change, and exact Artifact/Finding identity", () => {
     const harness = createHarness();
     try {

@@ -227,6 +227,52 @@ Admin 面向 Charles、涂鸦管理员和实施人员使用业务语言；技术
 - [#56](https://github.com/Zion74/energyiq-datafoundry/issues/56)：Ngee Ann 真实 A→B；
 - [#57](https://github.com/Zion74/energyiq-datafoundry/issues/57)：AI 质量反馈与 Method/SOP 沉淀。
 
+## 1.3 2026-08-15 Admin AI 可解释性 tracer bullet
+
+本节记录 [#61](https://github.com/Zion74/energyiq-datafoundry/issues/61) 的正式执行边界。目标不是新增通用 AI 配置台，而是在现有 Project Admin `AI Analysis` 与 `Methods & SOP` 中回答两个交付问题：当前 Project/Layer 声明允许什么，以及一个 exact saved Finding 实际用了什么。
+
+### 深模块与读取边界
+
+扩展现有 `readProjectOverviewAdminState(projectId)`，由服务端从 current Project identity、已验证的 Overview Read Model、Method Governance Store 和 Artifact provenance 组合 explainability projection。普通 Admin GET 继续保持 `private, no-store`，不调用 Provider、不执行 Tool、不 ensure、不 queue。Workspace、Project、Artifact、Finding、Method 和 Snapshot/Release/Period identity 均由服务端解析；跨租户、错 Project 或不完整 provenance fail closed，单条 trace 不可用时只把该项标为 `Unavailable`。
+
+Read Model 必须显式区分：
+
+1. **Declared available**：当前 Project/Layer 合同声明可用的 Skill、Harness/Pack、Method 与 Tool；
+2. **Actually loaded**：该 Artifact 的 Run 实际加载并被 exact revision/content SHA 固定的 Method；
+3. **Finding attributed**：该 Finding `origin` 实际引用的 core/direction Method，以及 hybrid 的 novel contribution；
+4. **Tool succeeded**：该 Finding 引用且对应 audit 状态为 succeeded 的 Tool call。
+
+允许但未调用、Run 加载但 Finding 未引用、被拒绝的 Tool audit 均不得显示为“已使用”。技术 ID、revision、SHA、fingerprint、Run/Artifact identity 默认折叠；Admin 默认看到人类可读的 Evidence signal、AI angle、origin 与范围摘要。
+
+### Method/SOP 与评论治理
+
+- builtin core Method 以 builtin 范围显示；published Workspace Method 对该 Workspace 的共享 Overview 可见，来源 Project 与运行可见范围分开表达；
+- provisional、in-review、approved、published 状态继续来自现有 Method Proposal/Governance Store，不建立第二套 Store；
+- Useful / Not useful 继续绑定 exact Finding；
+- Finding comment 作为同一 Governance Store 内的 exact Finding append-only audit，保留 actor/time，不修改 Artifact；
+- 历史 Artifact 只读。评论、反馈和 Proposal 是独立治理记录，不回写历史输出；
+- 对分析方法的任何修改只形成 Proposal。评论、反馈、点击或票数都不能自动 approve/publish Skill、Method 或 SOP。
+
+### TDD 与验收门
+
+按一个公开 seam、一个 RED、一个最小 GREEN 的 vertical slices 执行：
+
+1. Admin state/API：tenant exact、`private, no-store`、普通 GET 0 Provider、available-vs-used、historical read-only、局部 unavailable；
+2. Governance：exact Finding append-only comment、跨 Workspace/Project/Artifact/Finding 拒绝、Artifact 不变、Proposal 状态不自动推进；
+3. Web：AI Analysis 显示 exact Finding trace，Methods & SOP 显示生命周期与真实可见范围，技术 identity 折叠。
+
+focused API/Web tests、相关 Contracts/Metadata/API/Web builds 与 `git diff --check` 为自动化工程门。真实 Provider、浏览器/设备、部署、多账户和人工价值验收继续分别报告，不能由自动化结果替代。
+
+冲突边界：本 Ticket 不修改 Stage 3 discovery、identity、Artifact/evaluation mutation、正式发布或 A→B compare 实现；优先只读消费已有 provenance。若必须触碰这些文件，先停线协调。
+
+### 2026-08-15 实现状态
+
+- 已完成 `overview-admin-state` explainability 深读模型：分别表达 declared available、actually loaded、Finding attributed 与 tool succeeded；被拒绝或只声明未调用的 Tool 不计为已使用。
+- 已完成同一 Method Governance Store 内的 exact Finding append-only comment；评论、反馈和 Proposal 不回写 Artifact，也不自动 approve/publish Method 或 SOP。
+- 已完成 Admin `AI Analysis` 的人类可读 trace、折叠技术 identity 和 exact Finding 治理操作；`Methods & SOP` 同步展示 published catalog、范围、revision 与 Proposal 生命周期。
+- 自动化证据：focused API/Web/Metadata 共 37 tests 通过；Metadata、API 和 Web production build 通过；`git diff --check` 通过；受保护的 Stage 3 discovery/identity/artifact/evaluation/A→B compare 文件无 diff。
+- 尚未执行：真实 Provider、真实浏览器/设备、部署与人工产品验收。它们不得由上述自动化结果替代。
+
 ## 2. 当前代码基线
 
 开发应直接演进现有模块：

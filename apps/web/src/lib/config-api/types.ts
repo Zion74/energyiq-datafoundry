@@ -2153,6 +2153,95 @@ export type EnergyProjectOverviewAdminReadinessItemDto = {
   completedAt?: string;
 };
 
+export type EnergyProjectAiMethodTraceDto = {
+  skillId: string;
+  semanticVersion: string;
+  resourceId: string;
+  resourceRevision: number;
+  scope: "builtin" | "user" | "workspace";
+  role: "core-method" | "expert-direction";
+  usage: "actually-loaded" | "finding-attributed";
+  technical: {
+    contentSha256: string;
+    workspaceId: string;
+    ownerId: string;
+  };
+};
+
+export type EnergyProjectAiExplainabilityDto = {
+  status: "available" | "unavailable";
+  detail: string;
+  declared: {
+    status: "available" | "partially-unavailable" | "unavailable";
+    detail: string;
+    skills: Array<{ id: string; revision: string; availability: "declared-available" }>;
+    methods: Array<{
+      skillId: string;
+      semanticVersion: string;
+      resourceId: string;
+      resourceRevision: number;
+      scope: "builtin" | "workspace";
+      lifecycle: "published";
+      availability: "declared-available";
+      technical: {
+        contentSha256: string;
+        workspaceId: string;
+        ownerId: string;
+        role: "core-method" | "expert-direction";
+      };
+    }>;
+    tools: Array<{ id: string; availability: "declared-available" }>;
+  };
+  governance: {
+    status: "available" | "unavailable";
+    detail: string;
+    proposals: Array<{
+      id: string;
+      title: string;
+      lifecycle: "provisional" | "in-review" | "approved" | "published" | "rejected" | "superseded";
+      revision: number;
+      visibility: "project";
+      projectId: string;
+      findingId: string;
+      sourceArtifactId: string;
+    }>;
+  };
+  currentArtifact: null | {
+    status: "available" | "unavailable";
+    artifactId: string;
+    readOnly: true;
+    historical: false;
+    detail: string;
+    technical?: {
+      runId: string;
+      outputContractRevision: string;
+      methodSetId: string;
+      methodSetRevision: string;
+      methodSetFingerprint: string;
+      capabilityRevision: string;
+    };
+    loadedMethods?: EnergyProjectAiMethodTraceDto[];
+    findings?: Array<{
+      id: string;
+      title: string;
+      status: "available" | "unavailable";
+      detail: string;
+      evidenceSignal?: string;
+      aiAngle?: string;
+      origin?: "ai-discovery" | "expert-sop" | "hybrid";
+      novelContribution?: string;
+      evidenceRefs?: string[];
+      attributedMethods?: EnergyProjectAiMethodTraceDto[];
+      successfulTools?: Array<{
+        auditId: string;
+        toolName: string;
+        evidenceRefs: string[];
+        usage: "tool-succeeded";
+      }>;
+    }>;
+  };
+};
+
 export type EnergyProjectOverviewAdminStateDto = {
   projectId: string;
   projectName: string;
@@ -2188,6 +2277,7 @@ export type EnergyProjectOverviewAdminStateDto = {
     label: "Generate missing analysis" | "Retry failed analysis";
     detail: string;
   } | null;
+  explainability?: EnergyProjectAiExplainabilityDto;
 };
 
 export type EnergyAdditionalInsightFeedbackDto = {
@@ -2214,6 +2304,23 @@ export type EnergyAdditionalInsightFeedbackDto = {
     actorId: string;
     recordedAt: string;
   }>;
+};
+
+export type EnergyAdditionalInsightCommentDto = {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  scopeId: string;
+  artifactId: string;
+  artifactIdentityHash: string;
+  artifactIdentityRevision: string;
+  dataSnapshotId: string;
+  projectReleaseId: string;
+  analysisPeriod: { from: string; to: string };
+  findingId: string;
+  actorId: string;
+  text: string;
+  createdAt: string;
 };
 
 export type EnergyInsightMethodProposalDto = {

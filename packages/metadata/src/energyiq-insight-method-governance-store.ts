@@ -18,6 +18,23 @@ import type { DatabaseSync } from "node:sqlite";
 
 export type EnergyIqInsightFindingFeedbackRecord = InsightFindingFeedbackRecord & { id: string };
 
+export type EnergyIqInsightFindingCommentRecord = {
+  id: string;
+  workspaceId: string;
+  projectId: string;
+  scopeId: string;
+  artifactId: string;
+  artifactIdentityHash: string;
+  artifactIdentityRevision: string;
+  dataSnapshotId: string;
+  projectReleaseId: string;
+  analysisPeriod: { from: string; to: string };
+  findingId: string;
+  actorId: string;
+  text: string;
+  createdAt: string;
+};
+
 export type EnergyIqInsightMethodProposalAudit = {
   revision: number;
   fromStatus: InsightMethodPromotionStatus | null;
@@ -79,6 +96,32 @@ export const initializeEnergyIqInsightMethodGovernanceSchema = (db: DatabaseSync
     );
     CREATE INDEX IF NOT EXISTS idx_energyiq_additional_feedback_finding
       ON energyiq_additional_insight_feedback(workspace_id, project_id, artifact_id, finding_id);
+
+    CREATE TABLE IF NOT EXISTS energyiq_additional_insight_comments (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      artifact_id TEXT NOT NULL,
+      artifact_identity_hash TEXT NOT NULL,
+      artifact_identity_revision TEXT NOT NULL,
+      data_snapshot_id TEXT NOT NULL,
+      project_release_id TEXT NOT NULL,
+      analysis_period_from TEXT NOT NULL,
+      analysis_period_to TEXT NOT NULL,
+      finding_id TEXT NOT NULL,
+      actor_id TEXT NOT NULL,
+      idempotency_key TEXT NOT NULL,
+      text TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE (workspace_id, actor_id, idempotency_key),
+      FOREIGN KEY (workspace_id) REFERENCES workspaces(id),
+      FOREIGN KEY (project_id) REFERENCES energyiq_projects(id) ON DELETE CASCADE,
+      FOREIGN KEY (artifact_id) REFERENCES energyiq_overview_ai_artifacts(id) ON DELETE CASCADE,
+      FOREIGN KEY (actor_id) REFERENCES users(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_energyiq_additional_comments_finding
+      ON energyiq_additional_insight_comments(workspace_id, project_id, artifact_id, finding_id, created_at, id);
 
     CREATE TABLE IF NOT EXISTS energyiq_additional_insight_feedback_history (
       feedback_id TEXT NOT NULL,
@@ -145,6 +188,85 @@ export const initializeEnergyIqInsightMethodGovernanceSchema = (db: DatabaseSync
 
 export class EnergyIqInsightMethodGovernanceStore {
   constructor(private readonly db: DatabaseSync) {}
+
+  appendFindingComment(input: {
+    expectedWorkspaceId: string;
+    expectedProjectId: string;
+    artifactId: string;
+    findingId: string;
+    actorId: string;
+    idempotencyKey: string;
+    text: string;
+    now?: string;
+  }): EnergyIqInsightFindingCommentRecord {
+    const source = this.requireStoredAdditionalFinding(input.artifactId, input.findingId).source;
+    requireExpectedSource(source, input);
+    requireCommentText(input);
+    const current = this.db.prepare(`
+      SELECT * FROM energyiq_additional_insight_comments
+      WHERE workspace_id = ? AND actor_id = ? AND idempotency_key = ?
+    `).get(source.workspaceId, input.actorId, input.idempotencyKey.trim());
+    if (isRecord(current)) {
+      const existing = this.mapComment(current);
+      if (existing.projectId !== source.projectId
+        || existing.artifactId !== source.artifactId
+        || existing.findingId !== source.findingId
+        || existing.text !== input.text.trim()) {
+        throw new Error("ENERGYIQ_ADDITIONAL_COMMENT_IDEMPOTENCY_CONFLICT");
+      }
+      return existing;
+    }
+    const createdAt = input.now ?? new Date().toISOString();
+    const id = `insight-comment-${hash([
+      source.workspaceId,
+      input.actorId,
+      input.idempotencyKey.trim(),
+    ].join("\u0000")).slice(0, 24)}`;
+    this.db.prepare(`
+      INSERT INTO energyiq_additional_insight_comments (
+        id, workspace_id, project_id, scope_id, artifact_id, artifact_identity_hash,
+        artifact_identity_revision, data_snapshot_id, project_release_id,
+        analysis_period_from, analysis_period_to, finding_id, actor_id,
+        idempotency_key, text, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      source.workspaceId,
+      source.projectId,
+      source.scopeId,
+      source.artifactId,
+      source.artifactIdentityHash,
+      source.artifactIdentityRevision,
+      source.dataSnapshotId,
+      source.projectReleaseId,
+      source.analysisPeriod.from,
+      source.analysisPeriod.to,
+      source.findingId,
+      input.actorId,
+      input.idempotencyKey.trim(),
+      input.text.trim(),
+      createdAt,
+    );
+    return this.getCommentById(id);
+  }
+
+  listFindingComments(input: {
+    expectedWorkspaceId: string;
+    expectedProjectId: string;
+    artifactId: string;
+    findingId: string;
+  }): EnergyIqInsightFindingCommentRecord[] {
+    return this.db.prepare(`
+      SELECT * FROM energyiq_additional_insight_comments
+      WHERE workspace_id = ? AND project_id = ? AND artifact_id = ? AND finding_id = ?
+      ORDER BY created_at, id
+    `).all(
+      input.expectedWorkspaceId,
+      input.expectedProjectId,
+      input.artifactId,
+      input.findingId,
+    ).map((row) => this.mapComment(requireRecord(row)));
+  }
 
   recordFeedback(input: {
     expectedWorkspaceId: string;
@@ -462,6 +584,28 @@ export class EnergyIqInsightMethodGovernanceStore {
   }
 
   private requireAdditionalFinding(artifactId: string, findingId: string): AdditionalFindingIdentity {
+    const stored = this.requireStoredAdditionalFinding(artifactId, findingId);
+    const { source, identity } = stored;
+    const currentMethodSet = resolveCurrentAdditionalAiInsightMethodSet(
+      source.workspaceId,
+      this.listPublishedWorkspaceMethodResources({ workspaceId: source.workspaceId }),
+    );
+    const canonicalMethods = canonicalInsightMethodSetJson(currentMethodSet.methods);
+    const currentFingerprint = canonicalMethods === null
+      ? null
+      : `sha256:${hash(canonicalMethods)}`;
+    if (identity.methodSetId !== currentMethodSet.id
+      || identity.methodSetRevision !== currentMethodSet.revision
+      || identity.methodSetFingerprint !== currentFingerprint) {
+      throw new Error("ENERGYIQ_ADDITIONAL_ARTIFACT_NOT_CURRENT");
+    }
+    return source;
+  }
+
+  private requireStoredAdditionalFinding(
+    artifactId: string,
+    findingId: string,
+  ): { source: AdditionalFindingIdentity; identity: Record<string, unknown> } {
     const row = this.db.prepare(`
       SELECT * FROM energyiq_overview_ai_artifacts WHERE id = ?
     `).get(artifactId);
@@ -474,14 +618,10 @@ export class EnergyIqInsightMethodGovernanceStore {
     const identity = parseJson(row.identity_json);
     const result = parseJson(row.result_json);
     const workspaceId = requiredString(row, "workspace_id");
-    const currentMethodSet = resolveCurrentAdditionalAiInsightMethodSet(
-      workspaceId,
-      this.listPublishedWorkspaceMethodResources({ workspaceId }),
-    );
-    const canonicalMethods = canonicalInsightMethodSetJson(currentMethodSet.methods);
-    const currentFingerprint = canonicalMethods === null
-      ? null
-      : `sha256:${hash(canonicalMethods)}`;
+    const projectId = requiredString(row, "project_id");
+    const scopeId = requiredString(row, "scope_id");
+    const dataSnapshotId = requiredString(row, "data_snapshot_id");
+    const projectReleaseId = requiredString(row, "project_release_id");
     if (!isRecord(identity)
       || identity.artifactKind !== "autonomous-insights"
       || identity.identityContractRevision !== "additional-insights-v19"
@@ -489,10 +629,16 @@ export class EnergyIqInsightMethodGovernanceStore {
       || identity.validatorRevision !== "additional-insights-acceptance-v16"
       || identity.workflowRevision !== "additional-insights-discover-accept-publish-v19"
       || identity.investigatorPromptRevision !== "additional-insights-discovery-v10"
-      || identity.methodSetId !== currentMethodSet.id
-      || identity.methodSetRevision !== currentMethodSet.revision
-      || identity.methodSetFingerprint !== currentFingerprint) {
-      throw new Error("ENERGYIQ_ADDITIONAL_ARTIFACT_NOT_CURRENT");
+      || identity.workspaceId !== workspaceId
+      || identity.projectId !== projectId
+      || identity.scopeId !== scopeId
+      || identity.dataSnapshotId !== dataSnapshotId
+      || identity.projectReleaseId !== projectReleaseId
+      || !nonEmptyStringValue(identity.methodSetId)
+      || !nonEmptyStringValue(identity.methodSetRevision)
+      || typeof identity.methodSetFingerprint !== "string"
+      || !/^sha256:[0-9a-f]{64}$/u.test(identity.methodSetFingerprint)) {
+      throw new Error("ENERGYIQ_ADDITIONAL_ARTIFACT_NOT_FOUND");
     }
     if (!isRecord(result)
       || result.artifactKind !== "autonomous-insights"
@@ -503,31 +649,62 @@ export class EnergyIqInsightMethodGovernanceStore {
       || result.binding.workspaceId !== identity.workspaceId
       || result.binding.projectId !== identity.projectId
       || result.binding.scopeId !== identity.scopeId
+      || result.binding.dataSnapshotId !== identity.dataSnapshotId
+      || result.binding.projectReleaseId !== identity.projectReleaseId
       || !Array.isArray(result.findings)
       || !result.findings.some((finding) => isRecord(finding) && finding.id === findingId)
-      || !isRecord(result.binding.analysisPeriod)) {
+      || !isRecord(result.binding.analysisPeriod)
+      || result.binding.analysisPeriod.from !== identity.analysisPeriodFrom
+      || result.binding.analysisPeriod.to !== identity.analysisPeriodTo) {
       throw new Error("ENERGYIQ_ADDITIONAL_FINDING_NOT_FOUND");
     }
-    return {
+    return { identity, source: {
       workspaceId,
-      projectId: requiredString(row, "project_id"),
-      scopeId: requiredString(row, "scope_id"),
+      projectId,
+      scopeId,
       artifactId,
       artifactIdentityHash: `sha256:${requiredString(row, "identity_hash")}`,
       artifactIdentityRevision: requiredString(identity, "identityContractRevision"),
-      dataSnapshotId: requiredString(row, "data_snapshot_id"),
-      projectReleaseId: requiredString(row, "project_release_id"),
+      dataSnapshotId,
+      projectReleaseId,
       analysisPeriod: {
         from: requiredString(result.binding.analysisPeriod, "from"),
         to: requiredString(result.binding.analysisPeriod, "to"),
       },
       findingId,
-    };
+    } };
   }
 
   private getFeedbackById(id: string): EnergyIqInsightFindingFeedbackRecord {
     const row = this.db.prepare("SELECT * FROM energyiq_additional_insight_feedback WHERE id = ?").get(id);
     return this.mapFeedback(requireRecord(row));
+  }
+
+  private getCommentById(id: string): EnergyIqInsightFindingCommentRecord {
+    const row = this.db.prepare("SELECT * FROM energyiq_additional_insight_comments WHERE id = ?").get(id);
+    return this.mapComment(requireRecord(row));
+  }
+
+  private mapComment(row: Record<string, unknown>): EnergyIqInsightFindingCommentRecord {
+    return {
+      id: requiredString(row, "id"),
+      workspaceId: requiredString(row, "workspace_id"),
+      projectId: requiredString(row, "project_id"),
+      scopeId: requiredString(row, "scope_id"),
+      artifactId: requiredString(row, "artifact_id"),
+      artifactIdentityHash: requiredString(row, "artifact_identity_hash"),
+      artifactIdentityRevision: requiredString(row, "artifact_identity_revision"),
+      dataSnapshotId: requiredString(row, "data_snapshot_id"),
+      projectReleaseId: requiredString(row, "project_release_id"),
+      analysisPeriod: {
+        from: requiredString(row, "analysis_period_from"),
+        to: requiredString(row, "analysis_period_to"),
+      },
+      findingId: requiredString(row, "finding_id"),
+      actorId: requiredString(row, "actor_id"),
+      text: requiredString(row, "text"),
+      createdAt: requiredString(row, "created_at"),
+    };
   }
 
   private mapFeedback(row: Record<string, unknown>): EnergyIqInsightFindingFeedbackRecord {
@@ -685,6 +862,13 @@ const requireProposalText = (input: {
   }
 };
 
+const requireCommentText = (input: { idempotencyKey: string; text: string }): void => {
+  if (!nonEmpty(input.idempotencyKey) || input.idempotencyKey.length > 160
+    || !nonEmpty(input.text) || input.text.length > 2_000) {
+    throw new Error("ENERGYIQ_ADDITIONAL_COMMENT_INVALID");
+  }
+};
+
 const mapProposalAudit = (value: unknown): EnergyIqInsightMethodProposalAudit => {
   const row = requireRecord(value);
   return {
@@ -721,6 +905,8 @@ const requiredString = (record: Record<string, unknown>, key: string): string =>
 const optionalString = (value: unknown): string | undefined =>
   typeof value === "string" && nonEmpty(value) ? value : undefined;
 
+const nonEmptyStringValue = (value: unknown): value is string =>
+  typeof value === "string" && nonEmpty(value);
 const nonEmpty = (value: string): boolean => /\S/u.test(value);
 const hash = (value: string): string => createHash("sha256").update(value).digest("hex");
 const isRecord = (value: unknown): value is Record<string, unknown> =>

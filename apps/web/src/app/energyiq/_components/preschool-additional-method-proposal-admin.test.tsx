@@ -4,6 +4,7 @@ import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { EnergyProjectAiExplainabilityDto } from "../../../lib/config-api";
 import { PreschoolAdditionalMethodProposalAdmin } from "./preschool-additional-method-proposal-admin";
 
 describe("PreschoolAdditionalMethodProposalAdmin", () => {
@@ -32,6 +33,33 @@ describe("PreschoolAdditionalMethodProposalAdmin", () => {
     ];
     const client = {
       listProposals: vi.fn().mockResolvedValue(proposals),
+      getExplainability: vi.fn().mockResolvedValue({
+        status: "available",
+        detail: "Declared Methods are available.",
+        declared: {
+          status: "available",
+          detail: "Published capabilities declared for the Project.",
+          skills: [],
+          methods: [{
+            skillId: "energyiq-open-discovery",
+            semanticVersion: "1.0.0",
+            resourceId: "builtin:energyiq-open-discovery",
+            resourceRevision: 1,
+            scope: "builtin",
+            lifecycle: "published",
+            availability: "declared-available",
+            technical: {
+              contentSha256: "a".repeat(64),
+              workspaceId: "preschool-demo-org",
+              ownerId: "energyiq-system",
+              role: "core-method",
+            },
+          }],
+          tools: [],
+        },
+        governance: { status: "available", detail: "Project proposals.", proposals: [] },
+        currentArtifact: null,
+      } satisfies EnergyProjectAiExplainabilityDto),
       transitionProposal: vi.fn(async (input: { proposalId: string; action: string }) => proposal({
         id: input.proposalId,
         status: input.action === "submit" ? "in-review" : input.action === "approve" ? "approved" : "published",
@@ -45,6 +73,10 @@ describe("PreschoolAdditionalMethodProposalAdmin", () => {
     await act(async () => undefined);
 
     expect(container.textContent).toContain("Repeated event shape");
+    expect(container.textContent).toContain("Available Methods & SOP");
+    expect(container.textContent).toContain("Open discovery");
+    expect(container.textContent).toContain("Published");
+    expect(container.textContent).toContain("Built-in visibility");
     const submit = [...container.querySelectorAll("button")].find((button) => button.textContent === "Submit for review");
     const approve = [...container.querySelectorAll("button")].find((button) => button.textContent === "Approve");
     const publish = [...container.querySelectorAll("button")].find((button) => button.textContent === "Publish");

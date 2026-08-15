@@ -5,10 +5,12 @@ import React, { useEffect, useState } from "react";
 import {
   configApi,
   type EnergyInsightMethodProposalDto,
+  type EnergyProjectAiExplainabilityDto,
 } from "../../../lib/config-api";
 
 export type PreschoolAdditionalMethodProposalAdminClient = {
   listProposals(projectId: string): Promise<EnergyInsightMethodProposalDto[]>;
+  getExplainability?(projectId: string): Promise<EnergyProjectAiExplainabilityDto | undefined>;
   transitionProposal(input: {
     projectId: string;
     proposalId: string;
@@ -22,6 +24,8 @@ const configApiProposalClient: PreschoolAdditionalMethodProposalAdminClient = {
     .then(({ proposals }) => proposals),
   transitionProposal: ({ projectId, proposalId, action, expectedRevision }) =>
     configApi.transitionEnergyInsightMethodProposal(projectId, proposalId, action, expectedRevision),
+  getExplainability: (projectId) => configApi.getEnergyProjectOverviewAdminState(projectId)
+    .then((state) => state.explainability),
 };
 
 export function PreschoolAdditionalMethodProposalAdmin({
@@ -32,15 +36,20 @@ export function PreschoolAdditionalMethodProposalAdmin({
   client?: PreschoolAdditionalMethodProposalAdminClient;
 }) {
   const [proposals, setProposals] = useState<EnergyInsightMethodProposalDto[]>([]);
+  const [explainability, setExplainability] = useState<EnergyProjectAiExplainabilityDto | undefined>();
   const [state, setState] = useState<"loading" | "ready" | "updated" | "error">("loading");
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
     setState("loading");
-    void client.listProposals(projectId).then((loaded) => {
+    void Promise.all([
+      client.listProposals(projectId),
+      client.getExplainability?.(projectId) ?? Promise.resolve(undefined),
+    ]).then(([loaded, catalog]) => {
       if (!active) return;
       setProposals(loaded);
+      setExplainability(catalog);
       setState("ready");
     }).catch(() => {
       if (active) setState("error");
@@ -83,6 +92,32 @@ export function PreschoolAdditionalMethodProposalAdmin({
       {state === "loading" ? <p role="status" className="text-sm text-muted">Loading Method proposals…</p> : null}
       {state === "error" ? <p role="alert" className="text-sm text-step-error">Proposal could not be updated. Refresh before retrying.</p> : null}
       {state === "updated" ? <p role="status" className="text-sm text-step-success">Proposal updated</p> : null}
+      {explainability?.status === "available" ? (
+        <section aria-labelledby="available-methods-heading" className="rounded-lg border border-border bg-surface-subtle p-4">
+          <h3 id="available-methods-heading" className="font-semibold text-foreground">Available Methods & SOP</h3>
+          <p className="mt-1 text-sm leading-6 text-muted">
+            Published entries are declared available for this Workspace. A saved Artifact trace is the source of truth for actual use.
+          </p>
+          <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+            {explainability.declared.methods.map((method) => (
+              <li key={`${method.resourceId}:${method.resourceRevision}`} className="rounded-md border border-border bg-surface px-3 py-2 text-sm">
+                <p className="font-semibold">{methodName(method.skillId)}</p>
+                <p className="mt-1 text-xs text-muted">
+                  Published · r{method.resourceRevision} · {method.scope === "builtin" ? "Built-in visibility" : "Workspace visibility"}
+                </p>
+              </li>
+            ))}
+          </ul>
+          <details className="mt-3 text-sm">
+            <summary className="cursor-pointer font-semibold text-muted">Technical IDs</summary>
+            <ul className="mt-2 space-y-1 font-mono text-xs">
+              {explainability.declared.methods.map((method) => (
+                <li key={method.resourceId}>{method.resourceId}@{method.resourceRevision}</li>
+              ))}
+            </ul>
+          </details>
+        </section>
+      ) : null}
       {state !== "loading" && proposals.length === 0 ? (
         <p className="rounded-lg border border-border bg-surface-subtle p-4 text-sm text-muted">No Method proposals are awaiting review.</p>
       ) : null}
@@ -121,3 +156,7 @@ export function PreschoolAdditionalMethodProposalAdmin({
     </section>
   );
 }
+
+const methodName = (skillId: string): string => skillId === "energyiq-open-discovery"
+  ? "Open discovery"
+  : skillId.replace(/^workspace-insight-method:/u, "Workspace Method ");

@@ -4093,6 +4093,9 @@ const runMigrations = (db: DatabaseSync): void => {
   runSchemaMigration(db, "0034_energyiq_additional_insight_evaluation_hardening", "Harden Additional Insight evaluation tenant and claim persistence", () => {
     ensureEnergyIqAdditionalInsightEvaluationHardeningSchema(db);
   });
+  runSchemaMigration(db, "0035_energyiq_additional_insight_comments", "Persist append-only exact Finding comments in Method governance", () => {
+    initializeEnergyIqInsightMethodGovernanceSchema(db);
+  });
 };
 
 const initializeSchemaMigrationTable = (db: DatabaseSync): void => {

@@ -13,6 +13,11 @@ import {
   type PreschoolSectionId,
 } from "./preschool-overview-ai-contracts.js";
 import { resolveProjectOverviewProfile } from "./project-analysis-resolver.js";
+import {
+  projectAiExplainabilityState,
+  unavailableProjectAiExplainabilityState,
+  type ProjectAiExplainabilityState,
+} from "./project-ai-explainability.js";
 
 export type ProjectOverviewAdminReadinessStatus =
   | "ready"
@@ -66,6 +71,7 @@ export type ProjectOverviewAdminState = {
     label: "Generate missing analysis" | "Retry failed analysis";
     detail: string;
   } | null;
+  explainability: ProjectAiExplainabilityState;
 };
 
 export type ProjectOverviewAdminReadinessService = {
@@ -132,6 +138,9 @@ export const createProjectOverviewAdminReadinessService = (input: {
         },
         allowedActions: [],
         recommendedNextAction: null,
+        explainability: unavailableProjectAiExplainabilityState(
+          "AI explainability is not available for this Project renderer.",
+        ),
       };
     }
 
@@ -214,6 +223,12 @@ export const createProjectOverviewAdminReadinessService = (input: {
               : "Retry only the current Key Findings or Section results that failed.",
           }
         : null,
+      explainability: readExplainability({
+        metadataStore: input.metadataStore,
+        workspaceId: identity.workspaceId,
+        projectId: project.id,
+        readModel,
+      }),
     };
   };
 
@@ -298,7 +313,44 @@ const unavailablePreschoolState = (input: {
   },
   allowedActions: [],
   recommendedNextAction: null,
+  explainability: unavailableProjectAiExplainabilityState(input.detail),
 });
+
+const readExplainability = (input: {
+  metadataStore: MetadataStore;
+  workspaceId: string;
+  projectId: string;
+  readModel: PreschoolOverviewAiReadModel | null;
+}): ProjectAiExplainabilityState => {
+  const governance = input.metadataStore.energyIq.insightMethodGovernance;
+  let publishedWorkspaceMethods: ReturnType<typeof governance.listPublishedWorkspaceMethodResources> = [];
+  let declaredUnavailableDetail: string | undefined;
+  try {
+    publishedWorkspaceMethods = governance.listPublishedWorkspaceMethodResources({
+      workspaceId: input.workspaceId,
+    });
+  } catch {
+    declaredUnavailableDetail = "Workspace Method catalog is temporarily unavailable; built-in capabilities and the saved Artifact trace remain visible.";
+  }
+  let proposals: ReturnType<typeof governance.listProposals> = [];
+  let governanceUnavailableDetail: string | undefined;
+  try {
+    proposals = governance.listProposals({
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+    });
+  } catch {
+    governanceUnavailableDetail = "Project Method Proposal lifecycle is temporarily unavailable.";
+  }
+  return projectAiExplainabilityState({
+    workspaceId: input.workspaceId,
+    readModel: input.readModel,
+    publishedWorkspaceMethods,
+    proposals,
+    ...(declaredUnavailableDetail ? { declaredUnavailableDetail } : {}),
+    ...(governanceUnavailableDetail ? { governanceUnavailableDetail } : {}),
+  });
+};
 
 const readinessItems = (
   readModel: PreschoolOverviewAiReadModel | null,

@@ -457,6 +457,41 @@ export const handleEnergyApiRequest = async (
       if (segments.length === 7 && segments[4] === "findings") {
         const artifactId = decodeURIComponent(segments[3] ?? "");
         const findingId = decodeURIComponent(segments[5] ?? "");
+        if (segments[6] === "comments") {
+          requireEnergyAdminProject(context, user, projectId);
+          if (request.method === "GET") {
+            return {
+              status: 200,
+              headers: { "Cache-Control": "private, no-store" },
+              body: createSuccessResult({
+                comments: governance.listFindingComments({
+                  expectedWorkspaceId: access.activeWorkspaceId,
+                  expectedProjectId: projectId,
+                  artifactId,
+                  findingId,
+                }),
+              }),
+            };
+          }
+          if (request.method === "POST") {
+            const body = requireRecord(await readJsonBody(request));
+            return {
+              status: 201,
+              body: createSuccessResult(governance.appendFindingComment({
+                expectedWorkspaceId: access.activeWorkspaceId,
+                expectedProjectId: projectId,
+                artifactId,
+                findingId,
+                actorId: user.id,
+                idempotencyKey: requireNonEmptyString(
+                  body.idempotencyKey,
+                  "ENERGYIQ_ADDITIONAL_COMMENT_IDEMPOTENCY_KEY_REQUIRED",
+                ),
+                text: requireNonEmptyString(body.text, "ENERGYIQ_ADDITIONAL_COMMENT_TEXT_REQUIRED"),
+              })),
+            };
+          }
+        }
         if (segments[6] === "feedback") {
           if (request.method === "GET") {
             return {

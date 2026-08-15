@@ -17,6 +17,7 @@ import type {
   EnergyAdminOrganisationDto,
   EnergyAdminUserDto,
   EnergyAdditionalInsightFeedbackDto,
+  EnergyAdditionalInsightCommentDto,
   EnergyAdditionalInsightEvaluationSummaryDto,
   EnergyAdditionalInsightTransitionSummaryDto,
   EnergyImportBatchDto,
@@ -736,6 +737,28 @@ export const configApi = {
     return requestEnvelope(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/additional-ai-insights/${encodeURIComponent(artifactId)}/findings/${encodeURIComponent(findingId)}/feedback`,
       { method: "PUT", body: JSON.stringify(body) },
+    );
+  },
+
+  listEnergyAdditionalInsightComments(
+    projectId: string,
+    artifactId: string,
+    findingId: string,
+  ): Promise<{ comments: EnergyAdditionalInsightCommentDto[] }> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/additional-ai-insights/${encodeURIComponent(artifactId)}/findings/${encodeURIComponent(findingId)}/comments`,
+    );
+  },
+
+  appendEnergyAdditionalInsightComment(
+    projectId: string,
+    artifactId: string,
+    findingId: string,
+    body: { idempotencyKey: string; text: string },
+  ): Promise<EnergyAdditionalInsightCommentDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/additional-ai-insights/${encodeURIComponent(artifactId)}/findings/${encodeURIComponent(findingId)}/comments`,
+      { method: "POST", body: JSON.stringify(body) },
     );
   },
 
