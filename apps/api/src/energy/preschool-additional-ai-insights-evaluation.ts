@@ -428,6 +428,7 @@ export const createPreschoolAdditionalAiInsightsEvaluationWorkflow = (input: {
           || compared.sessionId !== reservation.comparisonProviderSessionId) {
           throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_PROVIDER_IDENTITY_MISMATCH");
         }
+        failureStage = "validation";
         const outcomes = parseTransitionOutcomes({
           answer: compared.answer,
           previousArtifact,
@@ -685,8 +686,9 @@ const buildTransitionPrompt = (
 ): string => [
   "Compare Snapshot A and Snapshot B using an Evidence-bound classification.",
   "Return New, Changed, Still supported, Resolved, or No material change. Do not classify from text similarity alone.",
-  "Every paired outcome must cite exact A and B Finding IDs and each Finding's exact Evidence refs.",
-  "No material change is valid. Do not manufacture novelty or Alerts.",
+  "Classify every Snapshot A Finding and every Snapshot B Finding exactly once. Every paired outcome must cite exact A and B Finding IDs and each Finding's exact Evidence refs.",
+  "Use No material change only when both Snapshots contain zero Findings. If non-empty A and B Findings are unrelated, return Resolved for the A Finding and New for the B Finding instead of hiding the change.",
+  "Do not manufacture novelty or Alerts.",
   `Snapshot A audit: ${JSON.stringify(projectTransitionArtifact(previousArtifact))}`,
   `Snapshot B audit: ${JSON.stringify(projectTransitionArtifact(currentArtifact))}`,
 ].join("\n\n");
@@ -719,7 +721,11 @@ const parseTransitionOutcomes = (input: {
   }
   const previousFindings = new Map(input.previousArtifact.findings.map((finding) => [finding.id, finding]));
   const currentFindings = new Map(input.currentArtifact.findings.map((finding) => [finding.id, finding]));
-  return parsed.outcomes.map((value): AdditionalAiInsightTransitionOutcome => {
+  if (parsed.outcomes.some((value) => isRecord(value) && value.transition === "no-material-change")
+    && (parsed.outcomes.length !== 1 || previousFindings.size > 0 || currentFindings.size > 0)) {
+    throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_RESULT_INCOMPLETE");
+  }
+  const outcomes = parsed.outcomes.map((value): AdditionalAiInsightTransitionOutcome => {
     if (!isRecord(value) || typeof value.transition !== "string") {
       throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_RESULT_INVALID");
     }
@@ -769,6 +775,17 @@ const parseTransitionOutcomes = (input: {
     }
     throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_RESULT_INVALID");
   });
+  const coveredPrevious = outcomes.flatMap((outcome) => (
+    "previous" in outcome ? [outcome.previous.findingId] : []
+  ));
+  const coveredCurrent = outcomes.flatMap((outcome) => (
+    "current" in outcome ? [outcome.current.findingId] : []
+  ));
+  if (!sameUniqueStrings(coveredPrevious, [...previousFindings.keys()])
+    || !sameUniqueStrings(coveredCurrent, [...currentFindings.keys()])) {
+    throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_RESULT_INCOMPLETE");
+  }
+  return outcomes;
 };
 
 const requireFindingRef = (
@@ -787,7 +804,7 @@ const requireFindingRef = (
   if (!finding
     || !Array.isArray(evidenceRefs)
     || evidenceRefs.some((entry) => typeof entry !== "string")
-    || !sameStrings(evidenceRefs as string[], finding.evidenceRefs)) {
+    || !sameUniqueStrings(evidenceRefs as string[], finding.evidenceRefs)) {
     throw new Error("PRESCHOOL_ADDITIONAL_TRANSITION_RESULT_INVALID");
   }
   return { artifactId, artifactIdentityHash, findingId, evidenceRefs: [...finding.evidenceRefs] };
@@ -874,6 +891,12 @@ const errorCode = (error: unknown): string => {
 const sha256 = (value: string): string => `sha256:${createHash("sha256").update(value).digest("hex")}`;
 const sameStrings = (left: readonly string[], right: readonly string[]): boolean => left.length === right.length
   && left.every((entry) => right.includes(entry));
+
+const sameUniqueStrings = (left: readonly string[], right: readonly string[]): boolean => (
+  new Set(left).size === left.length
+  && new Set(right).size === right.length
+  && sameStrings(left, right)
+);
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object"
   && value !== null
   && !Array.isArray(value);

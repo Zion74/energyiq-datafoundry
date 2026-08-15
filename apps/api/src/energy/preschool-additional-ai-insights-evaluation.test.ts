@@ -430,7 +430,12 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
         runId: string;
       }) => artifact(identity, runId, `evidence:${identity.dataSnapshotId}`, `finding-${identity.dataSnapshotId}`));
       const runTransition = vi.fn(async ({ runId, sessionId }: { runId: string; sessionId: string }) => ({
-        answer: JSON.stringify({ outcomes: [{ transition: "no-material-change" }] }),
+        answer: changedTransitionAnswer(
+          "finding-snapshot-a",
+          "evidence:snapshot-a",
+          "finding-snapshot-b",
+          "evidence:snapshot-b",
+        ),
         runId,
         sessionId,
       }));
@@ -774,7 +779,12 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
         runId: string;
       }) => artifact(identity, runId, `evidence:${identity.dataSnapshotId}`, `finding-${identity.dataSnapshotId}`));
       const runTransition = vi.fn(async ({ runId, sessionId }: { runId: string; sessionId: string }) => ({
-        answer: JSON.stringify({ outcomes: [{ transition: "no-material-change" }] }),
+        answer: changedTransitionAnswer(
+          "finding-snapshot-a",
+          "evidence:snapshot-a",
+          "finding-snapshot-b",
+          "evidence:snapshot-b",
+        ),
         runId,
         sessionId,
       }));
@@ -854,7 +864,7 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
     }
   });
 
-  it("regenerates B once, runs an Evidence-bound comparison, and persists No material change without A Evidence reuse", async () => {
+  it("rejects No material change when A and B both contain Findings instead of silently dropping changes", async () => {
     const harness = createHarness();
     try {
       const runAttempt = vi.fn(async ({ identity, runId }: {
@@ -894,10 +904,11 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
         previousAttemptId: previousAttempt.attemptId,
       });
       expect(transition).toMatchObject({
-        status: "completed",
+        status: "failed",
         previousTarget: { dataSnapshotId: "snapshot-a" },
         currentTarget: { dataSnapshotId: "snapshot-b" },
-        outcomes: [{ transition: "no-material-change" }],
+        failureStage: "validation",
+        errorCode: "PRESCHOOL_ADDITIONAL_TRANSITION_RESULT_INCOMPLETE",
       });
       expect(runAttempt).toHaveBeenCalledTimes(4);
       expect(runTransition).toHaveBeenCalledTimes(1);
@@ -905,6 +916,8 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
       expect(transitionInput.prompt).toContain("evidence:a:1");
       expect(transitionInput.prompt).toContain("evidence:b:1");
       expect(transitionInput.prompt).toContain("Evidence-bound");
+      expect(transitionInput.prompt).toContain("every Snapshot A Finding and every Snapshot B Finding exactly once");
+      expect(transitionInput.prompt).toContain("only when both Snapshots contain zero Findings");
       expect(transitionInput.prompt).not.toMatch(/What-Why-Action|fixed lens/i);
       expect(transition.generationProviderRunId).not.toBe(transition.comparisonProviderRunId);
       expect(await workflow.executeTransition({
@@ -928,6 +941,138 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
       }
       expect(runAttempt).toHaveBeenCalledTimes(4);
       expect(runTransition).toHaveBeenCalledTimes(1);
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("accepts No material change only when both Snapshot artifacts contain no Findings", async () => {
+    const harness = createHarness();
+    try {
+      const runAttempt = vi.fn(async ({ identity, runId }: {
+        identity: PreschoolAdditionalAiInsightArtifactIdentity;
+        runId: string;
+      }) => emptyArtifact(identity, runId, 0));
+      const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
+        metadataStore: harness.metadata,
+        runAttempt,
+        runTransition: vi.fn(async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ outcomes: [{ transition: "no-material-change" }] }),
+          runId,
+          sessionId,
+        })),
+      });
+      const previous = reviewAllPassing(harness, await workflow.executePassAt3({
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        idempotencyKey: "empty-a-evaluation",
+      }));
+      const previousAttempt = previous.attempts.find((attempt) => attempt.status === "completed")!;
+
+      await expect(workflow.executeTransition({
+        baseIdentity: createBaseIdentity("snapshot-b", "release-b"),
+        user: harness.user,
+        idempotencyKey: "empty-a-to-empty-b",
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+      })).resolves.toMatchObject({
+        status: "completed",
+        outcomes: [{ transition: "no-material-change" }],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("rejects duplicate transition coverage that omits another A and B Finding", async () => {
+    const harness = createHarness();
+    try {
+      const runAttempt = vi.fn(async ({ identity, runId }: {
+        identity: PreschoolAdditionalAiInsightArtifactIdentity;
+        runId: string;
+      }) => artifactWithTwoFindings(identity, runId, identity.dataSnapshotId));
+      const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
+        metadataStore: harness.metadata,
+        runAttempt,
+        runTransition: vi.fn(async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({
+            outcomes: [1, 2].map(() => ({
+              transition: "changed",
+              previousFindingId: "snapshot-a:finding:1",
+              previousEvidenceRefs: ["snapshot-a:evidence:1"],
+              currentFindingId: "snapshot-b:finding:1",
+              currentEvidenceRefs: ["snapshot-b:evidence:1"],
+            })),
+          }),
+          runId,
+          sessionId,
+        })),
+      });
+      const previous = reviewAllPassing(harness, await workflow.executePassAt3({
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        idempotencyKey: "duplicate-coverage-a",
+      }));
+      const previousAttempt = previous.attempts.find((attempt) => attempt.status === "completed")!;
+
+      await expect(workflow.executeTransition({
+        baseIdentity: createBaseIdentity("snapshot-b", "release-b"),
+        user: harness.user,
+        idempotencyKey: "duplicate-coverage-a-b",
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+      })).resolves.toMatchObject({
+        status: "failed",
+        failureStage: "validation",
+        errorCode: "PRESCHOOL_ADDITIONAL_TRANSITION_RESULT_INCOMPLETE",
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("rejects duplicate Evidence refs that omit another cited Evidence item", async () => {
+    const harness = createHarness();
+    try {
+      const runAttempt = vi.fn(async ({ identity, runId }: {
+        identity: PreschoolAdditionalAiInsightArtifactIdentity;
+        runId: string;
+      }) => artifactWithTwoEvidenceRefs(identity, runId, identity.dataSnapshotId));
+      const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
+        metadataStore: harness.metadata,
+        runAttempt,
+        runTransition: vi.fn(async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({
+            outcomes: [{
+              transition: "changed",
+              previousFindingId: "snapshot-a:finding",
+              previousEvidenceRefs: ["snapshot-a:evidence:1", "snapshot-a:evidence:1"],
+              currentFindingId: "snapshot-b:finding",
+              currentEvidenceRefs: ["snapshot-b:evidence:1", "snapshot-b:evidence:2"],
+            }],
+          }),
+          runId,
+          sessionId,
+        })),
+      });
+      const previous = reviewAllPassing(harness, await workflow.executePassAt3({
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        idempotencyKey: "duplicate-evidence-a",
+      }));
+      const previousAttempt = previous.attempts.find((attempt) => attempt.status === "completed")!;
+
+      await expect(workflow.executeTransition({
+        baseIdentity: createBaseIdentity("snapshot-b", "release-b"),
+        user: harness.user,
+        idempotencyKey: "duplicate-evidence-a-b",
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+      })).resolves.toMatchObject({
+        status: "failed",
+        failureStage: "validation",
+        errorCode: "PRESCHOOL_ADDITIONAL_TRANSITION_RESULT_INVALID",
+      });
     } finally {
       harness.close();
     }
@@ -998,11 +1143,20 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
         runId: string;
       }) => {
         await Promise.resolve();
-        return artifact(identity, runId, "analysis.summary.usage_kwh", `finding-${runId}`);
+        return artifact(identity, runId, "analysis.summary.usage_kwh", `finding-${identity.dataSnapshotId}`);
       });
       const runTransition = vi.fn(async ({ runId, sessionId }: { runId: string; sessionId: string }) => {
         await Promise.resolve();
-        return { answer: JSON.stringify({ outcomes: [{ transition: "no-material-change" }] }), runId, sessionId };
+        return {
+          answer: changedTransitionAnswer(
+            "finding-snapshot-a",
+            "analysis.summary.usage_kwh",
+            "finding-snapshot-b",
+            "analysis.summary.usage_kwh",
+          ),
+          runId,
+          sessionId,
+        };
       });
       const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
         metadataStore: harness.metadata,
@@ -1037,6 +1191,7 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
         workflow.executeTransition(transitionInput),
         workflow.executeTransition(transitionInput),
       ]);
+      expect(transitions[0]).toMatchObject({ status: "completed", outcomes: [{ transition: "changed" }] });
       expect(runAttempt).toHaveBeenCalledTimes(4);
       expect(runTransition).toHaveBeenCalledTimes(1);
       expect(new Set(transitions.map(({ transitionId }) => transitionId))).toHaveLength(1);
@@ -1057,14 +1212,19 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
       }) => new Promise<AdditionalAiInsightsArtifact>((resolve) => {
         pendingAttempts.set(runId, () => {
           pendingAttempts.delete(runId);
-          resolve(artifact(identity, runId, "analysis.summary.usage_kwh", `finding-${runId}`));
+          resolve(artifact(identity, runId, "analysis.summary.usage_kwh", `finding-${identity.dataSnapshotId}`));
         });
       }));
       let resolveComparison: (() => void) | undefined;
       const runTransition = vi.fn(({ runId, sessionId }: { runId: string; sessionId: string }) => (
         new Promise<{ answer: string; runId: string; sessionId: string }>((resolve) => {
           resolveComparison = () => resolve({
-            answer: JSON.stringify({ outcomes: [{ transition: "no-material-change" }] }),
+            answer: changedTransitionAnswer(
+              "finding-snapshot-a",
+              "analysis.summary.usage_kwh",
+              "finding-snapshot-b",
+              "analysis.summary.usage_kwh",
+            ),
             runId,
             sessionId,
           });
@@ -1173,10 +1333,20 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
         model_name: "model-a",
       });
       const runAttempt = vi.fn(async ({ identity: attemptIdentity, runId }) => (
-        artifact(attemptIdentity, runId, `evidence:${runId}`, `finding-${runId}`)
+        artifact(
+          attemptIdentity,
+          runId,
+          `evidence:${attemptIdentity.dataSnapshotId}`,
+          `finding-${attemptIdentity.dataSnapshotId}`,
+        )
       ));
       const runTransition = vi.fn(async ({ runId, sessionId }) => ({
-        answer: JSON.stringify({ outcomes: [{ transition: "no-material-change" }] }),
+        answer: changedTransitionAnswer(
+          "finding-snapshot-a",
+          "evidence:snapshot-a",
+          "finding-snapshot-b",
+          "evidence:snapshot-b",
+        ),
         runId,
         sessionId,
       }));
@@ -1401,7 +1571,7 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
     }
   });
 
-  it("accepts a Resolved outcome with only the disappeared A Finding lineage", async () => {
+  it("rejects a partial Resolved outcome that leaves a current B Finding unclassified", async () => {
     const harness = createHarness();
     try {
       const runAttempt = vi.fn(async ({ identity, runId }: { identity: PreschoolAdditionalAiInsightArtifactIdentity; runId: string }) => (
@@ -1426,6 +1596,53 @@ describe("Preschool Additional AI Insights evaluation workflow", () => {
         baseIdentity: createBaseIdentity("snapshot-b", "release-b"),
         user: harness.user,
         idempotencyKey: "resolved-a-b",
+        previousEvaluationId: previous.evaluationId,
+        previousAttemptId: previousAttempt.attemptId,
+      });
+      expect(resolved).toMatchObject({
+        status: "failed",
+        failureStage: "validation",
+        errorCode: "PRESCHOOL_ADDITIONAL_TRANSITION_RESULT_INCOMPLETE",
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("accepts Resolved when the disappeared A Finding exhausts the comparison and B is empty", async () => {
+    const harness = createHarness();
+    try {
+      const runAttempt = vi.fn(async ({ identity, runId }: {
+        identity: PreschoolAdditionalAiInsightArtifactIdentity;
+        runId: string;
+      }) => identity.dataSnapshotId === "snapshot-a"
+        ? artifact(identity, runId, "evidence:a", "finding-a")
+        : emptyArtifact(identity, runId, 0));
+      const workflow = createPreschoolAdditionalAiInsightsEvaluationWorkflow({
+        metadataStore: harness.metadata,
+        runAttempt,
+        runTransition: vi.fn(async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({
+            outcomes: [{
+              transition: "resolved",
+              previousFindingId: "finding-a",
+              previousEvidenceRefs: ["evidence:a"],
+            }],
+          }),
+          runId,
+          sessionId,
+        })),
+      });
+      const previous = reviewAllPassing(harness, await workflow.executePassAt3({
+        baseIdentity: harness.baseIdentity,
+        user: harness.user,
+        idempotencyKey: "resolved-empty-b-a",
+      }));
+      const previousAttempt = previous.attempts.find((attempt) => attempt.status === "completed")!;
+      const resolved = await workflow.executeTransition({
+        baseIdentity: createBaseIdentity("snapshot-b", "release-b"),
+        user: harness.user,
+        idempotencyKey: "resolved-empty-b-a-b",
         previousEvaluationId: previous.evaluationId,
         previousAttemptId: previousAttempt.attemptId,
       });
@@ -1650,7 +1867,7 @@ const artifact = (
   runId: string,
   evidenceId: string,
   findingId: string,
-): AdditionalAiInsightsArtifact => {
+): Extract<AdditionalAiInsightsArtifact, { status: "available" }> => {
   const methodSet = resolveCurrentAdditionalAiInsightMethodSet(identity.workspaceId);
   return {
     artifactKind: "autonomous-insights",
@@ -1726,6 +1943,84 @@ const artifact = (
       publishedCandidateIds: [findingId],
       suppressedCandidateIds: [],
     },
+  };
+};
+
+const changedTransitionAnswer = (
+  previousFindingId: string,
+  previousEvidenceRef: string,
+  currentFindingId: string,
+  currentEvidenceRef: string,
+): string => JSON.stringify({
+  outcomes: [{
+    transition: "changed",
+    previousFindingId,
+    previousEvidenceRefs: [previousEvidenceRef],
+    currentFindingId,
+    currentEvidenceRefs: [currentEvidenceRef],
+  }],
+});
+
+const artifactWithTwoFindings = (
+  identity: PreschoolAdditionalAiInsightArtifactIdentity,
+  runId: string,
+  prefix: string,
+): AdditionalAiInsightsArtifact => {
+  const first = artifact(identity, runId, `${prefix}:evidence:1`, `${prefix}:finding:1`);
+  const firstFact = first.evidenceLineage.facts[0]!;
+  const firstFinding = first.findings[0]!;
+  const secondEvidenceId = `${prefix}:evidence:2`;
+  const secondFindingId = `${prefix}:finding:2`;
+  return {
+    ...first,
+    evidenceLineage: {
+      ...first.evidenceLineage,
+      facts: [
+        firstFact,
+        { ...firstFact, id: secondEvidenceId, evidenceRefs: [`source:${secondEvidenceId}`] },
+      ],
+    },
+    findings: [
+      firstFinding,
+      {
+        ...firstFinding,
+        id: secondFindingId,
+        title: `Finding ${secondFindingId}`,
+        evidenceRefs: [secondEvidenceId],
+      },
+    ],
+    publication: {
+      ...first.publication,
+      discoveredCount: 2,
+      acceptedCount: 2,
+      publishedCount: 2,
+      sourceOrderCandidateIds: [`${prefix}:finding:1`, secondFindingId],
+      acceptedCandidateIds: [`${prefix}:finding:1`, secondFindingId],
+      publishedCandidateIds: [`${prefix}:finding:1`, secondFindingId],
+    },
+  };
+};
+
+const artifactWithTwoEvidenceRefs = (
+  identity: PreschoolAdditionalAiInsightArtifactIdentity,
+  runId: string,
+  prefix: string,
+): AdditionalAiInsightsArtifact => {
+  const firstEvidenceId = `${prefix}:evidence:1`;
+  const secondEvidenceId = `${prefix}:evidence:2`;
+  const findingId = `${prefix}:finding`;
+  const base = artifact(identity, runId, firstEvidenceId, findingId);
+  const firstFact = base.evidenceLineage.facts[0]!;
+  return {
+    ...base,
+    evidenceLineage: {
+      ...base.evidenceLineage,
+      facts: [
+        firstFact,
+        { ...firstFact, id: secondEvidenceId, evidenceRefs: [`source:${secondEvidenceId}`] },
+      ],
+    },
+    findings: [{ ...base.findings[0]!, evidenceRefs: [firstEvidenceId, secondEvidenceId] }],
   };
 };
 

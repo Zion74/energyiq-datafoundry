@@ -53,6 +53,7 @@
 | [Ngee Ann Analysis 模板复刻执行方案](2026-08-10-Ngee-Ann-Analysis模板复刻执行方案.md) | in progress；N5 已完成 server-published Category×24h 与 Level→Circuit×24h 工程切片，待合并后真实 Chrome 1440/1920/tablet 与 Charles 人工验收 |
 | [Preschool Section 5 Charles 复刻执行方案](2026-08-10-Preschool-Section5-Charles复刻执行方案.md) | in progress；A5 已进入人工验收；[#42](https://github.com/Zion74/energyiq-datafoundry/issues/42) 把固定 June Forecast 校准为自然月 Monthly Energy Outlook，冻结 Original Estimate，并按同日期范围对照 Actual 与 Current Outlook |
 | [AI Analyst Harness 与 AI Slot 执行路径](2026-08-08-AI-Analyst-Harness与AI-Slot执行路径.md) | in progress；当前以两项目 60 秒客户价值、AI Finding 首屏表达和分层验收为主线；v10 后的完整 submit/repair 延期，通用化只沉淀轻量 Analysis Pattern Cards |
+| [AI 输出审核边界二次验证结论与实施计划](2026-08-16-AI输出审核边界二次验证结论与实施计划.md) | provisional；独立复核 Layer 1–3 与 A→B 后选择 Option 3+：Evidence 约束事实，推断/猜想保留发挥空间，按最小片段局部失败，并以 typed claim、sourceClaimIds 和真实 Provider/A→B 为后续验收门 |
 | [2026-08-06 Overview 夜间执行清单与 Runlog](2026-08-06-Overview夜间执行清单与Runlog.md) | in progress；第 11 节为 2026-08-07 当前行动方案：Overview takeaway-first 阅读体验 → #31 Explorer 精准下钻与设备趋势 → Preschool 演示型图表 → #5/#19/#20/#21 收口；AI 侧线保持隔离 |
 | [三 Agent MVP 最终执行与重置包](2026-08-03-三Agent-MVP最终执行与重置包.md) | accepted；唯一派工入口，含共同基线和三个最终 Prompt |
 | [三 Agent MVP 执行手册](2026-08-03-三Agent-MVP执行手册.md) | accepted；三个 Agent 的责任、并行节奏、MVP 边界与验收 Owner 已确认 |
