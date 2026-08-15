@@ -24,8 +24,9 @@ describe("PreschoolAdditionalMethodProposalAdmin", () => {
     vi.unstubAllGlobals();
   });
 
-  it("loads proposals and performs only explicit revision-bound approve and publish actions", async () => {
+  it("loads proposals and performs only explicit revision-bound submit, approve and publish actions", async () => {
     const proposals = [
+      proposal({ id: "proposal-provisional", status: "provisional", revision: 1 }),
       proposal({ id: "proposal-review", status: "in-review", revision: 2 }),
       proposal({ id: "proposal-approved", status: "approved", revision: 3 }),
     ];
@@ -33,8 +34,8 @@ describe("PreschoolAdditionalMethodProposalAdmin", () => {
       listProposals: vi.fn().mockResolvedValue(proposals),
       transitionProposal: vi.fn(async (input: { proposalId: string; action: string }) => proposal({
         id: input.proposalId,
-        status: input.action === "approve" ? "approved" : "published",
-        revision: input.action === "approve" ? 3 : 4,
+        status: input.action === "submit" ? "in-review" : input.action === "approve" ? "approved" : "published",
+        revision: input.action === "submit" ? 2 : input.action === "approve" ? 3 : 4,
       })),
     };
 
@@ -44,18 +45,26 @@ describe("PreschoolAdditionalMethodProposalAdmin", () => {
     await act(async () => undefined);
 
     expect(container.textContent).toContain("Repeated event shape");
+    const submit = [...container.querySelectorAll("button")].find((button) => button.textContent === "Submit for review");
     const approve = [...container.querySelectorAll("button")].find((button) => button.textContent === "Approve");
     const publish = [...container.querySelectorAll("button")].find((button) => button.textContent === "Publish");
+    await act(async () => submit!.click());
     await act(async () => approve!.click());
     await act(async () => publish!.click());
 
     expect(client.transitionProposal).toHaveBeenNthCalledWith(1, {
       projectId: "preschool-demo",
+      proposalId: "proposal-provisional",
+      action: "submit",
+      expectedRevision: 1,
+    });
+    expect(client.transitionProposal).toHaveBeenNthCalledWith(2, {
+      projectId: "preschool-demo",
       proposalId: "proposal-review",
       action: "approve",
       expectedRevision: 2,
     });
-    expect(client.transitionProposal).toHaveBeenNthCalledWith(2, {
+    expect(client.transitionProposal).toHaveBeenNthCalledWith(3, {
       projectId: "preschool-demo",
       proposalId: "proposal-approved",
       action: "publish",
@@ -82,7 +91,7 @@ describe("PreschoolAdditionalMethodProposalAdmin", () => {
   });
 });
 
-function proposal(input: { id: string; status: "in-review" | "approved" | "published"; revision: number }) {
+function proposal(input: { id: string; status: "provisional" | "in-review" | "approved" | "published"; revision: number }) {
   return {
     id: input.id,
     workspaceId: "preschool-demo-org",

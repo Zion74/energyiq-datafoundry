@@ -14,11 +14,13 @@ export function PreschoolAdditionalAiInsights({
   outerBinding,
   mode,
   feedbackClient = configApiAdditionalFeedbackClient,
+  methodProposalClient = configApiMethodProposalClient,
 }: {
   unit: unknown;
   outerBinding: PreschoolOverviewAiBindingDto;
   mode: "live" | "saved";
   feedbackClient?: PreschoolAdditionalFeedbackClient;
+  methodProposalClient?: PreschoolAdditionalMethodProposalClient;
 }) {
   const parsed = parseAdditionalUnit(unit, outerBinding, mode);
   return (
@@ -56,6 +58,7 @@ export function PreschoolAdditionalAiInsights({
                 artifactId={parsed.artifactId}
                 projectId={outerBinding.projectId}
                 feedbackClient={mode === "live" ? feedbackClient : undefined}
+                methodProposalClient={mode === "live" ? methodProposalClient : undefined}
               />
             : <InvalidAdditionalFinding key={`invalid:${index}`} index={index} />)}
         </div>
@@ -74,11 +77,13 @@ function AdditionalFindingCard({
   artifactId,
   projectId,
   feedbackClient,
+  methodProposalClient,
 }: {
   finding: ParsedAdditionalFinding;
   artifactId: string;
   projectId: string;
   feedbackClient?: PreschoolAdditionalFeedbackClient;
+  methodProposalClient?: PreschoolAdditionalMethodProposalClient;
 }) {
   const status = {
     observed: { label: "Observed", tone: "bg-step-success-soft text-step-success" },
@@ -130,7 +135,9 @@ function AdditionalFindingCard({
           projectId={projectId}
           artifactId={artifactId}
           findingId={finding.id}
+          findingTitle={finding.title}
           client={feedbackClient}
+          methodProposalClient={methodProposalClient}
         />
       ) : null}
     </article>
@@ -165,19 +172,47 @@ const configApiAdditionalFeedbackClient: PreschoolAdditionalFeedbackClient = {
     configApi.putEnergyAdditionalInsightFeedback(projectId, artifactId, findingId, { rating, expectedRevision }),
 };
 
+export type PreschoolAdditionalMethodProposalClient = {
+  createProposal(input: {
+    projectId: string;
+    artifactId: string;
+    findingId: string;
+    idempotencyKey: string;
+    title: string;
+    guidance: string;
+  }): Promise<{ id: string; status: "provisional" | "in-review" | "approved" | "published" | "rejected" | "superseded" }>;
+};
+
+const configApiMethodProposalClient: PreschoolAdditionalMethodProposalClient = {
+  createProposal: ({ projectId, artifactId, findingId, idempotencyKey, title, guidance }) =>
+    configApi.createEnergyInsightMethodProposal(projectId, artifactId, findingId, {
+      idempotencyKey,
+      title,
+      guidance,
+    }),
+};
+
 function AdditionalFeedbackControls({
   projectId,
   artifactId,
   findingId,
+  findingTitle,
   client,
+  methodProposalClient,
 }: {
   projectId: string;
   artifactId: string;
   findingId: string;
+  findingTitle: string;
   client: PreschoolAdditionalFeedbackClient;
+  methodProposalClient?: PreschoolAdditionalMethodProposalClient;
 }) {
   const [feedback, setFeedback] = useState<PreschoolAdditionalFeedbackState | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "saving" | "saved" | "error">("loading");
+  const [proposalOpen, setProposalOpen] = useState(false);
+  const [proposalTitle, setProposalTitle] = useState(findingTitle);
+  const [proposalGuidance, setProposalGuidance] = useState("");
+  const [proposalState, setProposalState] = useState<"ready" | "saving" | "saved" | "error">("ready");
   useEffect(() => {
     let active = true;
     setState("loading");
@@ -208,6 +243,26 @@ function AdditionalFeedbackControls({
     }
   };
 
+  const saveMethodProposal = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!methodProposalClient || !proposalTitle.trim() || !proposalGuidance.trim()) return;
+    setProposalState("saving");
+    try {
+      await methodProposalClient.createProposal({
+        projectId,
+        artifactId,
+        findingId,
+        idempotencyKey: `finding-method:${artifactId}:${findingId}`,
+        title: proposalTitle.trim(),
+        guidance: proposalGuidance.trim(),
+      });
+      setProposalState("saved");
+      setProposalOpen(false);
+    } catch {
+      setProposalState("error");
+    }
+  };
+
   if (state === "loading") {
     return <p className="mt-4 text-xs text-muted" role="status">Loading your feedback…</p>;
   }
@@ -230,6 +285,56 @@ function AdditionalFeedbackControls({
         {state === "saved" ? <span className="text-xs text-step-success" role="status">Feedback saved</span> : null}
         {state === "error" ? <span className="text-xs text-step-error" role="alert">Feedback could not be saved. Please try again.</span> : null}
       </div>
+      {feedback?.rating === "useful" && methodProposalClient ? (
+        <div className="mt-3">
+          {proposalState === "saved" ? (
+            <p className="text-xs text-step-success" role="status">Method proposal saved for review</p>
+          ) : proposalOpen ? (
+            <form className="space-y-3 rounded-lg border border-border bg-surface-subtle p-3" onSubmit={(event) => void saveMethodProposal(event)}>
+              <p className="text-xs leading-5 text-muted">
+                Describe a reusable check or comparison—not this Snapshot&apos;s conclusion. The proposal remains provisional until reviewed and published.
+              </p>
+              <label className="block text-xs font-semibold text-foreground">
+                Method name
+                <input
+                  aria-label="Method name"
+                  value={proposalTitle}
+                  onChange={(event) => setProposalTitle(event.target.value)}
+                  className="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-sm font-normal"
+                />
+              </label>
+              <label className="block text-xs font-semibold text-foreground">
+                Reusable method guidance
+                <textarea
+                  aria-label="Reusable method guidance"
+                  value={proposalGuidance}
+                  onChange={(event) => setProposalGuidance(event.target.value)}
+                  rows={3}
+                  placeholder="What should be recalculated or compared on each new Snapshot?"
+                  className="mt-1 w-full rounded-md border border-border bg-surface px-3 py-2 text-sm font-normal"
+                />
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="submit"
+                  disabled={proposalState === "saving" || !proposalTitle.trim() || !proposalGuidance.trim()}
+                  className="rounded-md bg-primary px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                >
+                  {proposalState === "saving" ? "Saving proposal…" : "Save method proposal"}
+                </button>
+                <button type="button" onClick={() => setProposalOpen(false)} className="rounded-md border border-border px-3 py-2 text-xs font-semibold text-foreground">
+                  Cancel
+                </button>
+              </div>
+              {proposalState === "error" ? <p className="text-xs text-step-error" role="alert">Method proposal could not be saved. Please try again.</p> : null}
+            </form>
+          ) : (
+            <button type="button" onClick={() => setProposalOpen(true)} className="text-xs font-semibold text-primary underline-offset-2 hover:underline">
+              Propose reusable method
+            </button>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }

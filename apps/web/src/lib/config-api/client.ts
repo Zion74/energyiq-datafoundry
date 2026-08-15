@@ -723,6 +723,18 @@ export const configApi = {
     );
   },
 
+  createEnergyInsightMethodProposal(
+    projectId: string,
+    artifactId: string,
+    findingId: string,
+    body: { idempotencyKey: string; title: string; guidance: string },
+  ): Promise<EnergyInsightMethodProposalDto> {
+    return requestEnvelope(
+      `/api/v1/energy/projects/${encodeURIComponent(projectId)}/additional-ai-insights/${encodeURIComponent(artifactId)}/findings/${encodeURIComponent(findingId)}/method-proposals`,
+      { method: "POST", body: JSON.stringify(body) },
+    );
+  },
+
   listEnergyInsightMethodProposals(projectId: string): Promise<{ proposals: EnergyInsightMethodProposalDto[] }> {
     return requestEnvelope(
       `/api/v1/energy/projects/${encodeURIComponent(projectId)}/additional-ai-insights/method-proposals`,

@@ -12,7 +12,7 @@ export type PreschoolAdditionalMethodProposalAdminClient = {
   transitionProposal(input: {
     projectId: string;
     proposalId: string;
-    action: "approve" | "publish";
+    action: "submit" | "approve" | "publish";
     expectedRevision: number;
   }): Promise<EnergyInsightMethodProposalDto>;
 };
@@ -50,7 +50,7 @@ export function PreschoolAdditionalMethodProposalAdmin({
 
   const transition = async (
     proposal: EnergyInsightMethodProposalDto,
-    action: "approve" | "publish",
+    action: "submit" | "approve" | "publish",
   ) => {
     setUpdatingId(proposal.id);
     setState("ready");
@@ -88,11 +88,13 @@ export function PreschoolAdditionalMethodProposalAdmin({
       ) : null}
       <div className="space-y-3">
         {proposals.map((proposal) => {
-          const action = proposal.status === "in-review"
-            ? "approve" as const
-            : proposal.status === "approved"
-              ? "publish" as const
-              : null;
+          const action = proposal.status === "provisional"
+            ? "submit" as const
+            : proposal.status === "in-review"
+              ? "approve" as const
+              : proposal.status === "approved"
+                ? "publish" as const
+                : null;
           return (
             <article key={proposal.id} className="rounded-lg border border-border bg-surface p-4" data-method-proposal={proposal.id}>
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -108,7 +110,7 @@ export function PreschoolAdditionalMethodProposalAdmin({
                     onClick={() => void transition(proposal, action)}
                     className="rounded-md bg-primary px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
                   >
-                    {action === "approve" ? "Approve" : "Publish"}
+                    {action === "submit" ? "Submit for review" : action === "approve" ? "Approve" : "Publish"}
                   </button>
                 ) : null}
               </div>

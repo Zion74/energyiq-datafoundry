@@ -33,6 +33,7 @@ import { AiFindingPresentationView } from "./ai-finding-presentation-view";
 import {
   PreschoolAdditionalAiInsights,
   type PreschoolAdditionalFeedbackClient,
+  type PreschoolAdditionalMethodProposalClient,
 } from "./preschool-additional-ai-insights";
 import { SafeAiMarkdown } from "./safe-ai-markdown";
 
@@ -56,6 +57,7 @@ export function PreschoolAiSlot({
   onCompletedResult,
   startRun = getOrStartPreschoolAiRun,
   additionalFeedbackClient,
+  additionalMethodProposalClient,
 }: {
   snapshot: EnergyProjectAnalysisSnapshotDto;
   sectionId?: PreschoolAiSectionId;
@@ -67,6 +69,7 @@ export function PreschoolAiSlot({
   onCompletedResult?: (result: Extract<PreschoolAiRunResult, { status: "available" }>) => void;
   startRun?: (input: PreschoolAiRunInput, onProgress?: ProgressCallback) => Promise<PreschoolAiRunResult>;
   additionalFeedbackClient?: PreschoolAdditionalFeedbackClient;
+  additionalMethodProposalClient?: PreschoolAdditionalMethodProposalClient;
 }) {
   const input = useMemo(() => buildPreschoolAiRunInput(snapshot), [snapshot]);
   const inputRef = useRef(input);
@@ -173,6 +176,7 @@ export function PreschoolAiSlot({
         mode={mode}
         aiAnalystHref={aiAnalystHref}
         additionalFeedbackClient={additionalFeedbackClient}
+        additionalMethodProposalClient={additionalMethodProposalClient}
       />
     );
   }
@@ -242,12 +246,14 @@ function SectionedAiResult({
   mode,
   aiAnalystHref,
   additionalFeedbackClient,
+  additionalMethodProposalClient,
 }: {
   result: PreschoolOverviewAiReadModelDto;
   sectionId: PreschoolAiSectionId;
   mode: "live" | "saved";
   aiAnalystHref?: string;
   additionalFeedbackClient?: PreschoolAdditionalFeedbackClient;
+  additionalMethodProposalClient?: PreschoolAdditionalMethodProposalClient;
 }) {
   if (sectionId === "page-synthesis") {
     const lineage = buildExecutiveLineage(result, mode);
@@ -278,6 +284,7 @@ function SectionedAiResult({
           outerBinding={result.binding}
           mode={mode}
           feedbackClient={additionalFeedbackClient}
+          methodProposalClient={additionalMethodProposalClient}
         />
       );
     }

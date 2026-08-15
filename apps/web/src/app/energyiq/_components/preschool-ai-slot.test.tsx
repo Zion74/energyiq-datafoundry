@@ -1489,6 +1489,63 @@ describe("PreschoolAiSlot", () => {
     expect(startRun).toHaveBeenCalledOnce();
   });
 
+  it("lets a user turn a useful Finding into an editable provisional Method proposal", async () => {
+    const result = v4ReadModelResult();
+    Object.assign(result, { additional: currentAdditionalUnit(result.binding) });
+    const createProposal = vi.fn().mockResolvedValue({
+      id: "proposal-counter-pattern",
+      status: "provisional" as const,
+    });
+
+    await act(async () => root.render(
+      <PreschoolAiSlot
+        snapshot={preschoolGoldenSnapshot()}
+        sectionId="overall-summary"
+        liveResult={result}
+        startRun={vi.fn().mockResolvedValue(result)}
+        additionalFeedbackClient={{
+          loadFeedback: vi.fn().mockResolvedValue({
+            rating: "useful" as const,
+            revision: 1,
+            updatedAt: "2026-08-14T03:00:00.000Z",
+          }),
+          saveFeedback: vi.fn(),
+        }}
+        additionalMethodProposalClient={{ createProposal }}
+      />,
+    ));
+    await act(async () => undefined);
+
+    const propose = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent === "Propose reusable method");
+    expect(propose).toBeDefined();
+    await act(async () => propose!.click());
+
+    const title = container.querySelector<HTMLInputElement>('input[aria-label="Method name"]')!;
+    const guidance = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Reusable method guidance"]')!;
+    expect(title.value).toBe("A counter-pattern appears");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+        guidance,
+        "Re-run the absolute-versus-normalised ranking comparison on each new Snapshot and publish only material divergence.",
+      );
+      guidance.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const saveProposal = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent === "Save method proposal");
+    await act(async () => saveProposal!.click());
+
+    expect(createProposal).toHaveBeenCalledWith({
+      projectId: "preschool-demo",
+      artifactId: "additional-current-v2",
+      findingId: "additional:candidate-counter-pattern",
+      idempotencyKey: "finding-method:additional-current-v2:additional:candidate-counter-pattern",
+      title: "A counter-pattern appears",
+      guidance: "Re-run the absolute-versus-normalised ranking comparison on each new Snapshot and publish only material divergence.",
+    });
+    expect(container.textContent).toContain("Method proposal saved for review");
+  });
+
   it("keeps the Finding visible and exposes a local feedback error", async () => {
     const result = v4ReadModelResult();
     Object.assign(result, { additional: currentAdditionalUnit(result.binding) });

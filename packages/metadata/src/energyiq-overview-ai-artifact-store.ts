@@ -993,6 +993,9 @@ const validSectionV4ExecutionRevision = (identity: EnergyIqOverviewAiArtifactIde
     && identity.investigatorPromptRevision === "discovery-prompt-v9")
   || (identity.validatorRevision === "acceptance-validator-v10"
     && identity.workflowRevision === "discover-tools-accept-publish-v2"
+    && identity.investigatorPromptRevision === "discovery-prompt-v10")
+  || (identity.validatorRevision === "acceptance-validator-v11"
+    && identity.workflowRevision === "discover-tools-accept-publish-v2"
     && identity.investigatorPromptRevision === "discovery-prompt-v10");
 
 const validExecutiveV4ExecutionRevision = (identity: EnergyIqOverviewAiArtifactIdentity): boolean =>

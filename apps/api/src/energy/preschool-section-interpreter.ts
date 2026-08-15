@@ -463,8 +463,11 @@ export const materializePreschoolSectionResultV4 = (input: {
   });
   const discovery = recoverUsefulSupportedSummary(
     keepSupportedSummarySentences(
-    calibrateCandidateEpistemicStatus(parsedDiscovery),
-    input.pack,
+      preserveUsefulCandidateAfterUnsupportedNumericSentence(
+        calibrateCandidateEpistemicStatus(parsedDiscovery),
+        input.pack,
+      ),
+      input.pack,
     ),
     input.pack,
   );
@@ -513,6 +516,33 @@ const containsInferenceLanguage = (text: string): boolean =>
   || /\blooks?\s+like\b|\bconsistent\s+with\b/iu.test(text)
   || /\bmay\s+(?:be|reflect|indicate|suggest|result|offer|mean|signal|help|need|show|point|support|capture)\b/iu
     .test(text);
+
+const preserveUsefulCandidateAfterUnsupportedNumericSentence = (
+  discovery: PreschoolSectionDiscoveryV4,
+  pack: PreschoolSectionPackV2,
+): PreschoolSectionDiscoveryV4 => {
+  if (discovery.status !== "available") return discovery;
+  return {
+    ...discovery,
+    candidates: discovery.candidates.map((candidate) => {
+      const initialRejection = candidateRejectionCode(candidate, pack);
+      if (initialRejection !== "NUMBER_OR_UNIT_UNSUPPORTED") return candidate;
+      const citedEvidence = citedPackEvidence(candidate.evidenceRefs, pack);
+      const sentences = [...new Intl.Segmenter("en", { granularity: "sentence" })
+        .segment(candidate.text)]
+        .map(({ segment }) => segment.trim())
+        .filter(Boolean);
+      if (sentences.length < 2) return candidate;
+      const supportedText = sentences.filter((sentence) => !hasUnsupportedNumber(sentence, citedEvidence)
+        && !hasUnsupportedUnit(sentence, citedEvidence)
+        && !hasUnsupportedMetricRelation(sentence, citedEvidence))
+        .join(" ");
+      if (!supportedText || supportedText === candidate.text) return candidate;
+      const repaired = { ...candidate, text: supportedText };
+      return candidateRejectionCode(repaired, pack) === null ? repaired : candidate;
+    }),
+  };
+};
 
 const keepSupportedSummarySentences = (
   discovery: ReturnType<typeof parsePreschoolSectionDiscoveryV4>,

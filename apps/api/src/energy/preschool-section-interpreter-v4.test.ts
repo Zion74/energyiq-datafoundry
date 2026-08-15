@@ -424,6 +424,96 @@ describe("Preschool Section Interpreter v4", () => {
     });
   });
 
+  it("preserves a useful AI-generated insight when one unsupported numeric sentence can be removed", () => {
+    const pack = packV2("centre-benchmark", 0);
+    pack.evidence = [{
+      id: "evidence:centre-benchmark:portfolio",
+      label: "All Centres benchmark",
+      value: { sampleSize: 30, supportedValue: 30 },
+      unit: "kWh",
+      entityRefs: [],
+      evidenceRefs: ["evidence:centre-benchmark:portfolio"],
+    }, {
+      id: "evidence:centre-benchmark:e",
+      label: "Centre E benchmark",
+      value: {
+        centreCode: "E",
+        name: "Centre E",
+        metrics: {
+          absoluteUsage: { value: 870.4991, unit: "kWh", rank: { position: 1, outOf: 30 } },
+          floorAreaNormalised: { value: 6.4442, unit: "kWh/m2/year", rank: { position: 19, outOf: 30 } },
+        },
+      },
+      entityRefs: ["preschool-centre-e"],
+      evidenceRefs: ["evidence:centre-benchmark:e"],
+    }, {
+      id: "evidence:centre-benchmark:g",
+      label: "Centre G benchmark",
+      value: {
+        centreCode: "G",
+        name: "Centre G",
+        metrics: {
+          absoluteUsage: { value: 815.89, unit: "kWh", rank: { position: 26, outOf: 30 } },
+          floorAreaNormalised: { value: 19.3875, unit: "kWh/m2/year", rank: { position: 1, outOf: 30 } },
+        },
+      },
+      entityRefs: ["preschool-centre-g"],
+      evidenceRefs: ["evidence:centre-benchmark:g"],
+    }, {
+      id: "evidence:centre-benchmark:y",
+      label: "Centre Y benchmark",
+      value: {
+        centreCode: "Y",
+        name: "Centre Y",
+        metrics: { absoluteUsage: { value: 810.581, unit: "kWh", rank: { position: 30, outOf: 30 } } },
+      },
+      entityRefs: ["preschool-centre-y"],
+      evidenceRefs: ["evidence:centre-benchmark:y"],
+    }];
+
+    const result = materializePreschoolSectionResultV4({
+      answer: JSON.stringify({
+        sectionId: "centre-benchmark",
+        status: "available",
+        summary: {
+          text: "Verified energy use is 30 kWh.",
+          evidenceRefs: ["evidence:centre-benchmark:portfolio"],
+        },
+        candidates: [{
+          title: "Absolute usage is flat but normalised rankings diverge widely",
+          label: "All Centres pattern",
+          epistemicStatus: "observed",
+          text: "Total May usage across all 30 Centres clusters tightly between about 810 and 870 kWh. Centre E used 870.4991 kWh, while Centre G used 815.89 kWh. This suggests normalised rankings may surface different review priorities.",
+          evidenceRefs: [
+            "evidence:centre-benchmark:portfolio",
+            "evidence:centre-benchmark:e",
+            "evidence:centre-benchmark:g",
+          ],
+          deepDiveQuestion: "Would normalised rankings surface different review priorities?",
+        }],
+      }),
+      pack,
+      identity: identity("centre-benchmark"),
+      runId: "runtime-run-candidate-local-numeric-repair",
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      insights: [{
+        id: "preschool:centre-benchmark:candidate:1",
+        epistemicStatus: "inferred",
+        title: "Absolute usage is flat but normalised rankings diverge widely",
+        text: "Centre E used 870.4991 kWh, while Centre G used 815.89 kWh. This suggests normalised rankings may surface different review priorities.",
+      }],
+      publication: {
+        discoveredCount: 1,
+        acceptedCount: 1,
+        rejectedCount: 0,
+        publishedCount: 1,
+      },
+    });
+  });
+
   it("accepts negative percentages expressed with a Unicode minus or as a below-plan magnitude", () => {
     const pack = packV2("planning-outlook", 1);
     pack.evidence[0] = {

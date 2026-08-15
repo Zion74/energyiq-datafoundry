@@ -300,7 +300,7 @@ export const createPreschoolOverviewAiSectionArtifactIdentityV4 = (input: {
     analysisPackId: "preschool-section-pack",
     analysisPackRevision: "v2",
     outputContractRevision: "preschool-section-interpretation-v4",
-    validatorRevision: "acceptance-validator-v10",
+    validatorRevision: "acceptance-validator-v11",
     workflowRevision: "discover-tools-accept-publish-v2",
     investigatorPromptRevision: "discovery-prompt-v10",
     editorPromptRevision: "not-applicable-v1",

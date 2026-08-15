@@ -39,6 +39,7 @@ import {
 import { EnergyIcon } from "../_components/icons";
 import { EnergySelect } from "../_components/energy-select";
 import type { useEnergyIqAccess } from "../_components/energyiq-access";
+import { PreschoolAdditionalMethodProposalAdmin } from "../_components/preschool-additional-method-proposal-admin";
 import { EnergyIqAdminSidebar, type AdminSection } from "./admin-sidebar";
 import { AdminAccessPages } from "./admin-access-pages";
 import { resolveComponentReadiness, resolveMetricReadiness, resolveRuleReadiness } from "./analysis-configuration-model";
@@ -546,6 +547,9 @@ function renderAdminSection({
         published={setup.project.delivery_stage === "published"}
       />
     );
+  }
+  if (section === "knowledge") {
+    return <PreschoolAdditionalMethodProposalAdmin projectId={selectedProjectId} />;
   }
 
   const planned = plannedSectionCopy(section);
