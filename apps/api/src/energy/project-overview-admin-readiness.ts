@@ -151,10 +151,15 @@ export const createProjectOverviewAdminReadinessService = (input: {
         user,
       });
     } catch (reason) {
+      const unavailableCustomerOverview = {
+        status: "needs-attention" as const,
+        detail: readableError(reason, "Current Overview facts are unavailable for the published Project."),
+        url: null,
+      };
       return unavailablePreschoolState({
         projectId: project.id,
         projectName: project.name,
-        customerOverview,
+        customerOverview: unavailableCustomerOverview,
         detail: readableError(reason, "Current data is not ready for AI analysis."),
       });
     }
@@ -164,7 +169,10 @@ export const createProjectOverviewAdminReadinessService = (input: {
     const readyCount = items.filter((item) => item.status === "ready" || item.status === "no-new-insight").length;
     const analysisStatus = aggregateAnalysisStatus(items);
     const canGenerateMissing = items.some((item) => item.status === "not-generated");
-    const lastGeneratedAt = latestTimestamp(items.flatMap((item) => item.completedAt ? [item.completedAt] : []));
+    const lastGeneratedAt = latestTimestamp(items.flatMap((item) =>
+      item.completedAt && (item.status === "ready" || item.status === "no-new-insight")
+        ? [item.completedAt]
+        : []));
 
     return {
       projectId: project.id,
@@ -273,8 +281,8 @@ const readinessItems = (
   if (!sameBinding(readModel, identity)) {
     return missingPreschoolItems().map((item) => ({
       ...item,
-      status: "out-of-date",
-      detail: "The saved analysis belongs to an earlier data or Project release.",
+      status: "needs-attention",
+      detail: "The saved analysis failed exact Snapshot, Release, period, or model identity validation.",
     }));
   }
   return [

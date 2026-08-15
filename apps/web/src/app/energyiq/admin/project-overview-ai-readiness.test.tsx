@@ -97,6 +97,29 @@ describe("ProjectOverviewAiReadiness", () => {
     expect(container.textContent).not.toContain("Centre benchmark");
     expect(container.textContent).not.toContain("Generate missing analysis");
   });
+
+  it("does not say no action is needed when saved analysis needs attention", async () => {
+    const initial = preschoolState();
+    const state = preschoolState({
+      allowedActions: [],
+      recommendedNextAction: null,
+      analysis: {
+        ...initial.analysis,
+        status: "needs-attention",
+      },
+    });
+    const client = {
+      getEnergyProjectOverviewAdminState: vi.fn().mockResolvedValue(state),
+      generateMissingEnergyProjectOverviewAnalysis: vi.fn(),
+    };
+
+    await act(async () => {
+      root.render(<ProjectOverviewAiReadiness projectId="preschool-demo" client={client} variant="summary" />);
+    });
+
+    expect(container.textContent).toContain("Review readiness details");
+    expect(container.textContent).not.toContain("No action needed");
+  });
 });
 
 function preschoolState(overrides: Partial<EnergyProjectOverviewAdminStateDto> = {}): EnergyProjectOverviewAdminStateDto {

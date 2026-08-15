@@ -624,6 +624,41 @@ describe("Overview AI Artifact API", () => {
     }
   });
 
+  it("does not report the customer Overview as ready when current deterministic facts cannot resolve", async () => {
+    const harness = await createHarness();
+    try {
+      const read = vi.fn();
+      const execute = vi.fn();
+      const resolveCurrentIdentity = vi.fn().mockRejectedValue(new Error("ENERGYIQ_SNAPSHOT_FACTS_UNAVAILABLE"));
+      const context = {
+        ...harness.context,
+        overviewAiWorkflow: { execute, read, resolveCurrentIdentity },
+      } as unknown as Required<ConfigApiContext>;
+
+      const response = await handleEnergyApiRequest(
+        getRequest(`/api/v1/energy/projects/${harness.project.id}/overview-admin-state`),
+        ["projects", harness.project.id, "overview-admin-state"],
+        context,
+      );
+
+      expect(response).toMatchObject({
+        status: 200,
+        body: {
+          success: true,
+          data: {
+            customerOverview: { status: "needs-attention", url: null },
+            analysis: { status: "needs-attention" },
+            allowedActions: [],
+          },
+        },
+      });
+      expect(read).not.toHaveBeenCalled();
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      harness.close();
+    }
+  });
+
   it("does not invent Preschool AI Sections for Ngee Ann and keeps the read side-effect free", async () => {
     const harness = await createHarness();
     try {
@@ -669,7 +704,7 @@ describe("Overview AI Artifact API", () => {
     }
   });
 
-  it("marks a saved read model from an earlier Snapshot as out of date", async () => {
+  it("treats a cross-Snapshot exact-read result as an integrity failure, not a historical result", async () => {
     const harness = await createHarness();
     try {
       const stale = aggregateResultFor(harness.identity);
@@ -694,14 +729,47 @@ describe("Overview AI Artifact API", () => {
           success: true,
           data: {
             analysis: {
-              status: "out-of-date",
+              status: "needs-attention",
               items: expect.arrayContaining([
-                expect.objectContaining({ id: "key-findings", status: "out-of-date" }),
-                expect.objectContaining({ id: "additional-insights", status: "out-of-date" }),
+                expect.objectContaining({ id: "key-findings", status: "needs-attention" }),
+                expect.objectContaining({ id: "additional-insights", status: "needs-attention" }),
               ]),
             },
             allowedActions: [],
           },
+        },
+      });
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("reports Last generated from successful current artifacts, not a later failed artifact", async () => {
+    const harness = await createHarness();
+    try {
+      const current = aggregateResultFor(harness.identity);
+      Object.assign(current.sections["centre-benchmark"], { completedAt: "2026-08-15T01:00:00.000Z" });
+      Object.assign(current.sections["standby-wastage"], { completedAt: "2026-08-15T03:00:00.000Z" });
+      const read = vi.fn().mockResolvedValue(current);
+      const execute = vi.fn();
+      const resolveCurrentIdentity = vi.fn().mockResolvedValue(harness.identity);
+      const context = {
+        ...harness.context,
+        overviewAiWorkflow: { execute, read, resolveCurrentIdentity },
+      } as unknown as Required<ConfigApiContext>;
+
+      const response = await handleEnergyApiRequest(
+        getRequest(`/api/v1/energy/projects/${harness.project.id}/overview-admin-state`),
+        ["projects", harness.project.id, "overview-admin-state"],
+        context,
+      );
+
+      expect(response).toMatchObject({
+        status: 200,
+        body: {
+          success: true,
+          data: { analysis: { lastGeneratedAt: "2026-08-15T01:00:00.000Z" } },
         },
       });
       expect(execute).not.toHaveBeenCalled();
@@ -731,6 +799,36 @@ describe("Overview AI Artifact API", () => {
       expect(response).toMatchObject({
         status: 403,
         body: { success: false, error: { code: "FORBIDDEN", message: "ENERGYIQ_ADMIN_REQUIRED" } },
+      });
+      expect(resolveCurrentIdentity).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("rejects an admin Project action when the Project is outside the selected Workspace", async () => {
+    const harness = await createHarness();
+    try {
+      const read = vi.fn();
+      const execute = vi.fn();
+      const resolveCurrentIdentity = vi.fn();
+      const context = {
+        ...harness.context,
+        workspaceId: "default",
+        overviewAiWorkflow: { execute, read, resolveCurrentIdentity },
+      } as unknown as Required<ConfigApiContext>;
+
+      const response = await handleEnergyApiRequest(
+        jsonPost({}),
+        ["projects", harness.project.id, "overview-admin-state", "actions", "generate-missing"],
+        context,
+      );
+
+      expect(response).toMatchObject({
+        status: 403,
+        body: { success: false, error: { code: "FORBIDDEN", message: "ENERGYIQ_PROJECT_FORBIDDEN" } },
       });
       expect(resolveCurrentIdentity).not.toHaveBeenCalled();
       expect(read).not.toHaveBeenCalled();

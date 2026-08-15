@@ -132,7 +132,7 @@ export function ProjectOverviewAiReadiness({
           />
           <ReadinessFact
             label="Next action"
-            value={state.recommendedNextAction?.label ?? (state.analysis.supported ? "No action needed" : "Connect this Project when ready")}
+            value={state.recommendedNextAction?.label ?? readinessFallbackAction(state)}
           />
         </div>
       ) : state.analysis.supported ? (
@@ -227,3 +227,10 @@ const formatTimestamp = (value: string): string => {
 
 const messageFrom = (reason: unknown, fallback: string): string =>
   reason instanceof Error && reason.message ? reason.message : fallback;
+
+const readinessFallbackAction = (state: EnergyProjectOverviewAdminStateDto): string => {
+  if (!state.analysis.supported) return "Connect this Project when ready";
+  if (state.analysis.status === "ready" || state.analysis.status === "no-new-insight") return "No action needed";
+  if (state.analysis.status === "generating") return "Wait for saved analysis";
+  return "Review readiness details";
+};
