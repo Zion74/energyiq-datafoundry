@@ -816,21 +816,13 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
         sendAuthError(response, error);
         return;
       }
-      const message = error instanceof Error ? error.message : "Unknown server error";
-
       if (!response.headersSent) {
-        if (message.startsWith("UNAUTHORIZED:")) {
-          sendJson(response, 401, createErrorResult("UNAUTHORIZED", message.slice("UNAUTHORIZED:".length)));
-          return;
-        }
-        if (message.startsWith("FORBIDDEN:")) {
-          sendJson(response, 403, createErrorResult("FORBIDDEN", message.slice("FORBIDDEN:".length)));
-          return;
-        }
-        sendJson(response, 500, createErrorResult("NOT_ENABLED", message));
+        const classified = classifyServerRequestError(error);
+        sendJson(response, classified.status, createErrorResult(classified.code, classified.message));
         return;
       }
 
+      const message = error instanceof Error ? error.message : "Unknown server error";
       response.destroy(error instanceof Error ? error : new Error(message));
     }
   });
@@ -844,6 +836,24 @@ export const createServer = async (options: CreateServerOptions = {}): Promise<S
 
   return server;
 };
+
+export function classifyServerRequestError(error: unknown): {
+  status: 401 | 403 | 500;
+  code: "UNAUTHORIZED" | "FORBIDDEN" | "NOT_ENABLED";
+  message: string;
+} {
+  const message = error instanceof Error ? error.message : "Unknown server error";
+  if (message.startsWith("UNAUTHORIZED:")) {
+    return { status: 401, code: "UNAUTHORIZED", message: message.slice("UNAUTHORIZED:".length) };
+  }
+  if (message.startsWith("FORBIDDEN:")) {
+    return { status: 403, code: "FORBIDDEN", message: message.slice("FORBIDDEN:".length) };
+  }
+  if (message === "ENERGYIQ_WORKSPACE_FORBIDDEN") {
+    return { status: 403, code: "FORBIDDEN", message };
+  }
+  return { status: 500, code: "NOT_ENABLED", message };
+}
 
 export const collectOverviewAiStageEvents = (
   agent: DataFoundryAgUiAgent,
