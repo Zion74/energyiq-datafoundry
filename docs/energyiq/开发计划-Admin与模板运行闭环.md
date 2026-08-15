@@ -325,6 +325,16 @@ registered/configured
 - 不修改 Stage 3 discovery/identity/artifact/evaluation/A→B 文件；优先只读消费 #61 与既有 provenance；
 - focused API/Web tests、相关 package builds 与 `git diff --check` 是自动化门；真实 Provider、真实 MCP、浏览器、多账户、部署和人工验收分别报告。
 
+### 2026-08-16 Worker 实现状态
+
+- [#63](https://github.com/Zion74/energyiq-datafoundry/issues/63) 的只读 seam 已在独立分支 `codex/admin-harness-configuration` 完成：`GET /api/v1/energy/projects/:projectId/harness-configuration` 只接受服务端解析的 Admin/Workspace/Project identity，响应 `private, no-store`，不调用 Provider、model probe、MCP connect、Tool 或 Overview ensure/queue。实现提交为 `7e2daaafddb90f43c1fc1eb00d8689502a90f679`，system binding 与 Analyst current-resource routing 隔离修正为 `719ca243ee31b40310801e65b1d9cc48560d3b6e`。
+- Read Model 已明确区分 current catalog 与 Harness declaration：generic Analyst 标为 `Resolved per run`；Preschool Key Findings、Section Analysis 与 Additional Insights 标为 `Fixed stage contract`；Ngee Ann 不伪造 Preschool Stages。system-owned model binding 只进入 Overview Stages，当前 Admin model resource 只作为 Analyst candidate；context capacity 复用 Run planning 的同一纯 resolver。
+- Skill 同时返回 physical owner、declared scope、revision、enabled/status 与 scope verification；`scope=workspace` 但仍为 user-owned 的资源 fail closed 为 `Unavailable`。MCP 只返回 persisted status、as-of 与 last-tested manifest 名称，不返回 URL、headers、secret、command 或内部文件引用，也不做 live health 推断。
+- [#64](https://github.com/Zion74/energyiq-datafoundry/issues/64) 的 Admin 界面已在 `3d12738fee7b28885da4f62e3ce786895d65a4b1` 完成：侧栏分组由 `AI Configuration` 改为 `Harness Configuration`，单一 Project-exact 页面展示 Harness overview、Models & Routing、Skills & Methods、Tools & MCP、Context & Instructions 五类摘要；技术 ID/revision/SHA 默认折叠，空与局部 unavailable 显式显示。
+- UI copy 固定 `Configured / Declared for this Harness / Resolved per run` 与历史 `selected/loaded/succeeded` 的边界：当前配置不冒充 historical Run evidence，registered Tool 不冒充 called/succeeded，persisted MCP snapshot 不冒充 live connection；System Prompt 以 Platform、Workflow/Stage、Skill/Method、Context 与 Output Contract 分层摘要表达，不开放任意 Prompt/MCP/Tool 编辑器。
+- 当前自动化证据：API focused 6 tests、Web focused 8 tests 通过；`@datafoundry/api` TypeScript build 与 `@datafoundry/web` production build 通过；`git diff --check` 通过；受保护的 Stage 3 discovery/identity/artifact/evaluation/A→B 文件无 diff。真实 Provider、真实 MCP、真实浏览器/设备、多账户部署与人工产品验收尚未执行，不能由这些自动化结果替代。
+- [#65](https://github.com/Zion74/energyiq-datafoundry/issues/65) AI Operations 与 [#66](https://github.com/Zion74/energyiq-datafoundry/issues/66) governed Harness Policy revision 仍未实现。下一步必须先集成 #63/#64，再只从 historical Run/Context/Artifact/audit 读取 actual trace；若证据未持久化则显示 `Unavailable`，不得回填 current configuration。
+
 ## 2. 当前代码基线
 
 开发应直接演进现有模块：
