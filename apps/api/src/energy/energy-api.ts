@@ -2190,7 +2190,7 @@ const savedSectionContractRevision = (
   return [...revisions][0]!;
 };
 
-const validPreschoolSavedUnit = (
+export const validPreschoolSavedUnit = (
   value: unknown,
   binding: PreschoolOverviewAiReadModel["binding"],
   artifactKind: "section-interpretation" | "executive-synthesis",
@@ -2233,7 +2233,19 @@ const validPreschoolSavedUnit = (
           && Boolean(value.result.summary.text.trim())
           && Array.isArray(value.result.summary.evidenceRefs));
   }
-  return Array.isArray(value.result.sourceSectionArtifactIds) && Array.isArray(value.result.keyFindings);
+  if (!Array.isArray(value.result.sourceSectionArtifactIds) || !isRecord(value.result.contract)) return false;
+  if (value.result.contract.id !== "preschool-executive-synthesis") return false;
+  if (value.result.contract.revision === "preschool-executive-synthesis-v1") {
+    return Array.isArray(value.result.keyFindings);
+  }
+  if (value.result.contract.revision !== "preschool-executive-synthesis-v4"
+    || !Array.isArray(value.result.findings)) return false;
+  return value.result.status === "empty"
+    ? value.result.summary === undefined && value.result.findings.length === 0
+    : isRecord(value.result.summary)
+      && typeof value.result.summary.text === "string"
+      && Boolean(value.result.summary.text.trim())
+      && Array.isArray(value.result.summary.evidenceRefs);
 };
 
 const isPreschoolAcceptedSavedResult = (
