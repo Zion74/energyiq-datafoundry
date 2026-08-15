@@ -102,7 +102,7 @@ describe("Additional Insight Finding comment API", () => {
           workspaceId: PRESCHOOL_WORKSPACE_ID,
           projectId: harness.project.id,
           artifactId: harness.artifact.id,
-          artifactIdentityRevision: "additional-insights-v12",
+          artifactIdentityRevision: "additional-insights-v19",
           findingId: "additional-insight-1",
           actorId: "dev-user",
           text: "Useful direction; verify the repeat pattern before proposing a Method revision.",

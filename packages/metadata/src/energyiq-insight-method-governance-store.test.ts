@@ -56,7 +56,7 @@ describe("EnergyIqInsightMethodGovernanceStore", () => {
         scopeId: "artifact-project-scope",
         artifactId: harness.artifact.id,
         artifactIdentityHash: `sha256:${harness.artifact.identity_hash}`,
-        artifactIdentityRevision: "additional-insights-v12",
+        artifactIdentityRevision: "additional-insights-v19",
         findingId: "additional-insight-1",
         actorId: "admin-reviewer",
         text: "Useful lead; verify whether the same shape repeats next week.",
