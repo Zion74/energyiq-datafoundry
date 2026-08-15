@@ -53,6 +53,7 @@ import {
   resolveAdminOverviewPreviewMode,
 } from "./overview-profile-model";
 import { deriveProjectDeliveryProgress } from "./project-delivery-progress";
+import { ProjectOverviewAiReadiness } from "./project-overview-ai-readiness";
 import { TemplateDraftPreview } from "./template-draft-preview";
 import { TemplateChangeProposalPanel } from "./template-change-proposal-panel";
 import {
@@ -564,14 +565,20 @@ function renderAdminSection({
         document={document}
         businessCalendarVersion={setup.project.business_calendar_version}
         overviewProfile={setup.overviewProfile}
-        published={setup.project.delivery_stage === "published"}
+        published={selectedProject?.status === "published"}
       />
     );
   }
   if (section === "knowledge") {
+    return <PlannedAdminPage {...plannedSectionCopy("knowledge")} />;
+  }
+  if (section === "methods") {
+    return <PreschoolAdditionalMethodProposalAdmin projectId={selectedProjectId} />;
+  }
+  if (section === "ai-analysis") {
     return (
-      <div className="space-y-6">
-        <PreschoolAdditionalMethodProposalAdmin projectId={selectedProjectId} />
+      <div className="mx-auto max-w-6xl space-y-6">
+        <ProjectOverviewAiReadiness projectId={selectedProjectId} />
         {selectedProjectId === "preschool-demo" ? (
           <PreschoolAdditionalEvaluationAdmin
             projectId={selectedProjectId}
@@ -1871,9 +1878,15 @@ function ProjectDeliveryOverview({
         </div>
       </section>
 
+      <ProjectOverviewAiReadiness
+        projectId={projectId}
+        variant="summary"
+        onOpenFull={() => setSection("ai-analysis")}
+      />
+
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
         <section className="rounded-xl border border-border bg-surface p-5">
-          <h3 className="text-sm font-semibold">Recommended next action</h3>
+          <h3 className="text-sm font-semibold">Configuration next step</h3>
           <div className="mt-4 flex items-start gap-3 rounded-xl bg-primary-light/5 p-4">
             <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-white">
               <EnergyIcon name="arrow" className="h-4 w-4" />
@@ -2730,15 +2743,17 @@ function WorkflowStep({ number, title, body }: { number: string; title: string; 
 function plannedSectionCopy(section: AdminSection): { title: string; description: string; dependency: string } {
   const copy: Partial<Record<AdminSection, { title: string; description: string; dependency: string }>> = {
     "data-map": { title: "Data Map", description: "Review configured scopes, meters, sources and trusted relationships without replacing authoritative project configuration.", dependency: "Published Structure and Meter Mapping" },
-    templates: { title: "Overview Setup", description: "Review the customer Overview profile and its pinned release configuration.", dependency: "Registered Overview profile, metrics, rules and mapped facts" },
+    templates: { title: "Overview Design", description: "Review the deterministic customer Overview, metrics, rules, layout and pinned release configuration.", dependency: "Registered Overview profile, metrics, rules and mapped facts" },
+    "ai-analysis": { title: "AI Analysis", description: "Check whether Key Findings, Section analysis and Additional AI Insights are ready for the current Project data.", dependency: "Published customer Overview and current data" },
     knowledge: { title: "Project Knowledge", description: "Add operational documents that AI may cite. Structured meter facts and mappings do not belong in the knowledge base.", dependency: "Project scope and access policy" },
+    methods: { title: "Methods & SOP", description: "Review and govern analysis method proposals derived from useful Additional AI Insights.", dependency: "Published Additional AI Insights and admin review" },
     assets: { title: "Project Assets", description: "Store project files that belong to this Project rather than a user's personal temporary assets.", dependency: "Project scope and storage policy" },
   };
   return copy[section] ?? { title: "Admin capability", description: "This capability is part of the agreed Admin information architecture but is not connected in the current pilot.", dependency: "A later implementation batch" };
 }
 
 function isProjectContext(section: AdminSection): boolean {
-  return ["project-overview", "basics", "structure", "data-sources", "meter-mapping", "operational-policies", "data-map", "templates", "knowledge", "assets"].includes(section);
+  return ["project-overview", "basics", "structure", "data-sources", "meter-mapping", "operational-policies", "data-map", "templates", "ai-analysis", "knowledge", "methods", "assets"].includes(section);
 }
 
 function adminSectionMeta(section: AdminSection, projectName?: string): { title: string; description: string } {
@@ -2754,8 +2769,10 @@ function adminSectionMeta(section: AdminSection, projectName?: string): { title:
     "meter-mapping": { title: "Meter Mapping", description: `${project} · source labels to physical meters, scopes and optional derived meters.` },
     "operational-policies": { title: "Tariff & Operating Hours", description: `${project} · immutable effective policy revisions prepared for the next Project publication.` },
     "data-map": { title: "Data Map", description: `${project} · trusted configured relationships and traceable lineage.` },
-    templates: { title: "Overview Setup", description: `${project} · customer Overview profile, decision horizons and pinned release configuration.` },
+    templates: { title: "Overview Design", description: `${project} · deterministic customer Overview, decision horizons and pinned release configuration.` },
+    "ai-analysis": { title: "AI Analysis", description: `${project} · current Key Findings, Section analysis, Additional AI Insights and the next generation action.` },
     knowledge: { title: "Knowledge", description: `${project} · documents and citations available to AI.` },
+    methods: { title: "Methods & SOP", description: `${project} · governed analysis methods and SOP proposals.` },
     assets: { title: "Assets", description: `${project} · Project-owned files and source material.` },
     runs: { title: "Runs & Replays", description: "Analysis runs, deterministic replays and failures." },
     conversations: { title: "Conversations & Queries", description: "Customer questions, common intents and support investigation." },

@@ -82,6 +82,7 @@ import {
   composePreschoolOverviewAiReadModel,
   composePreschoolOverviewAiReadModelV3,
 } from "./preschool-overview-ai-read-model.js";
+import { createProjectOverviewAdminReadinessService } from "./project-overview-admin-readiness.js";
 import type { PreschoolOverviewAiRetryTarget } from "./preschool-overview-ai-page-workflow.js";
 
 const EXPLORER_ANALYSIS_CACHE_LIMIT = 100;
@@ -604,6 +605,48 @@ export const handleEnergyApiRequest = async (
         && request.method === "POST") {
         throw new AuthError(403, "FORBIDDEN", "Overview AI Artifact browser orchestration is forbidden.");
       }
+    }
+    if (segments[0] === "projects"
+      && segments.length === 3
+      && segments[2] === "overview-admin-state"
+      && request.method === "GET") {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      requireEnergyAdminProject(context, user, projectId);
+      const service = createProjectOverviewAdminReadinessService({
+        metadataStore: context.metadataStore,
+        ...(context.overviewAiWorkflow ? { overviewAiWorkflow: context.overviewAiWorkflow } : {}),
+      });
+      return {
+        status: 200,
+        headers: { "Cache-Control": "private, no-store" },
+        body: createSuccessResult(await service.readProjectOverviewAdminState({ projectId, user })),
+      };
+    }
+    if (segments[0] === "projects"
+      && segments.length === 5
+      && segments[2] === "overview-admin-state"
+      && segments[3] === "actions"
+      && segments[4] === "generate-missing"
+      && request.method === "POST") {
+      const projectId = decodeURIComponent(segments[1] ?? "");
+      requireEnergyAdminProject(context, user, projectId);
+      const service = createProjectOverviewAdminReadinessService({
+        metadataStore: context.metadataStore,
+        overviewAiWorkflow: context.overviewAiWorkflow,
+        overviewAiExecutor: context.overviewAiWorkflow,
+        ...(context.additionalAiInsightsWorkflow
+          ? { additionalAiInsightsWorkflow: context.additionalAiInsightsWorkflow }
+          : {}),
+      });
+      return {
+        status: 200,
+        headers: { "Cache-Control": "private, no-store" },
+        body: createSuccessResult(await service.requestProjectOverviewAdminAction({
+          projectId,
+          user,
+          action: "generate-missing",
+        })),
+      };
     }
     if (segments[0] === "projects" && segments.length === 1 && request.method === "POST") {
       const access = requireEnergyAdmin(context, user);

@@ -566,6 +566,296 @@ describe("Overview AI Artifact API", () => {
       harness.close();
     }
   });
+
+  it("reads project Overview and Layer 1–3 readiness without starting Provider work", async () => {
+    const harness = await createHarness();
+    try {
+      const read = vi.fn().mockResolvedValue(aggregateResultFor(harness.identity));
+      const execute = vi.fn();
+      const resolveCurrentIdentity = vi.fn().mockResolvedValue(harness.identity);
+      const context = {
+        ...harness.context,
+        overviewAiWorkflow: { execute, read, resolveCurrentIdentity },
+      } as unknown as Required<ConfigApiContext>;
+
+      const response = await handleEnergyApiRequest(
+        getRequest(`/api/v1/energy/projects/${harness.project.id}/overview-admin-state`),
+        ["projects", harness.project.id, "overview-admin-state"],
+        context,
+      );
+
+      expect(response).toMatchObject({
+        status: 200,
+        headers: { "Cache-Control": "private, no-store" },
+        body: {
+          success: true,
+          data: {
+            projectId: "preschool-demo",
+            customerOverview: { status: "ready" },
+            capabilities: {
+              keyFindings: true,
+              sectionAnalysis: [
+                "centre-benchmark",
+                "standby-wastage",
+                "operating-behaviour",
+                "planning-outlook",
+              ],
+              additionalInsights: true,
+            },
+            analysis: {
+              supported: true,
+              items: expect.arrayContaining([
+                expect.objectContaining({ id: "key-findings", status: "needs-attention" }),
+                expect.objectContaining({ id: "section:centre-benchmark", status: "ready" }),
+                expect.objectContaining({ id: "section:operating-behaviour", status: "not-generated" }),
+                expect.objectContaining({ id: "additional-insights", status: "not-generated" }),
+              ]),
+            },
+            allowedActions: ["generate-missing"],
+            recommendedNextAction: { action: "generate-missing" },
+          },
+        },
+      });
+      expect(resolveCurrentIdentity).toHaveBeenCalledOnce();
+      expect(read).toHaveBeenCalledOnce();
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("does not invent Preschool AI Sections for Ngee Ann and keeps the read side-effect free", async () => {
+    const harness = await createHarness();
+    try {
+      const read = vi.fn();
+      const execute = vi.fn();
+      const resolveCurrentIdentity = vi.fn();
+      const ngeeAnnProject = harness.metadata.energyIq.getProject("ngee-ann-polytechnic");
+      const context = {
+        ...harness.context,
+        workspaceId: ngeeAnnProject.workspace_id,
+        overviewAiWorkflow: { execute, read, resolveCurrentIdentity },
+      } as unknown as Required<ConfigApiContext>;
+
+      const response = await handleEnergyApiRequest(
+        getRequest("/api/v1/energy/projects/ngee-ann-polytechnic/overview-admin-state"),
+        ["projects", "ngee-ann-polytechnic", "overview-admin-state"],
+        context,
+      );
+
+      expect(response).toMatchObject({
+        status: 200,
+        body: {
+          success: true,
+          data: {
+            projectId: "ngee-ann-polytechnic",
+            customerOverview: { status: "ready" },
+            capabilities: {
+              keyFindings: false,
+              sectionAnalysis: [],
+              additionalInsights: false,
+            },
+            analysis: { supported: false, items: [] },
+            allowedActions: [],
+            recommendedNextAction: null,
+          },
+        },
+      });
+      expect(resolveCurrentIdentity).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("marks a saved read model from an earlier Snapshot as out of date", async () => {
+    const harness = await createHarness();
+    try {
+      const stale = aggregateResultFor(harness.identity);
+      stale.binding.dataSnapshotId = "snapshot-previous";
+      const read = vi.fn().mockResolvedValue(stale);
+      const execute = vi.fn();
+      const resolveCurrentIdentity = vi.fn().mockResolvedValue(harness.identity);
+      const context = {
+        ...harness.context,
+        overviewAiWorkflow: { execute, read, resolveCurrentIdentity },
+      } as unknown as Required<ConfigApiContext>;
+
+      const response = await handleEnergyApiRequest(
+        getRequest(`/api/v1/energy/projects/${harness.project.id}/overview-admin-state`),
+        ["projects", harness.project.id, "overview-admin-state"],
+        context,
+      );
+
+      expect(response).toMatchObject({
+        status: 200,
+        body: {
+          success: true,
+          data: {
+            analysis: {
+              status: "out-of-date",
+              items: expect.arrayContaining([
+                expect.objectContaining({ id: "key-findings", status: "out-of-date" }),
+                expect.objectContaining({ id: "additional-insights", status: "out-of-date" }),
+              ]),
+            },
+            allowedActions: [],
+          },
+        },
+      });
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("rejects ordinary users before reading Admin readiness", async () => {
+    const harness = await createHarness();
+    try {
+      const read = vi.fn();
+      const execute = vi.fn();
+      const resolveCurrentIdentity = vi.fn();
+      const context = {
+        ...harness.context,
+        userId: "second-user",
+        overviewAiWorkflow: { execute, read, resolveCurrentIdentity },
+      } as unknown as Required<ConfigApiContext>;
+
+      const response = await handleEnergyApiRequest(
+        getRequest(`/api/v1/energy/projects/${harness.project.id}/overview-admin-state`),
+        ["projects", harness.project.id, "overview-admin-state"],
+        context,
+      );
+
+      expect(response).toMatchObject({
+        status: 403,
+        body: { success: false, error: { code: "FORBIDDEN", message: "ENERGYIQ_ADMIN_REQUIRED" } },
+      });
+      expect(resolveCurrentIdentity).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("lets an authorized Tuya-style admin generate only missing current analysis", async () => {
+    const harness = await createHarness();
+    try {
+      harness.metadata.energyIq.upsertUserRole({ user_id: "second-user", role: "admin" });
+      const missing = aggregateResultFor(harness.identity);
+      const ready = readyAggregateResultFor(harness.identity);
+      const read = vi.fn()
+        .mockResolvedValueOnce(missing)
+        .mockResolvedValue(ready);
+      const execute = vi.fn().mockResolvedValue(ready);
+      const executeAdditional = vi.fn().mockResolvedValue({ status: "available" });
+      const resolveCurrentIdentity = vi.fn().mockResolvedValue(harness.identity);
+      const context = {
+        ...harness.context,
+        userId: "second-user",
+        overviewAiWorkflow: { execute, read, resolveCurrentIdentity },
+        additionalAiInsightsWorkflow: { execute: executeAdditional },
+      } as unknown as Required<ConfigApiContext>;
+
+      const response = await handleEnergyApiRequest(
+        jsonPost({}),
+        ["projects", harness.project.id, "overview-admin-state", "actions", "generate-missing"],
+        context,
+      );
+
+      expect(response).toMatchObject({
+        status: 200,
+        body: {
+          success: true,
+          data: {
+            projectId: "preschool-demo",
+            analysis: { status: "ready", readyCount: 6, totalCount: 6 },
+            allowedActions: [],
+            recommendedNextAction: null,
+          },
+        },
+      });
+      expect(execute).toHaveBeenCalledOnce();
+      expect(execute).toHaveBeenCalledWith({
+        identity: harness.identity,
+        user: expect.objectContaining({ id: "second-user" }),
+        retry: false,
+      });
+      expect(executeAdditional).toHaveBeenCalledOnce();
+      expect(executeAdditional).toHaveBeenCalledWith({
+        baseIdentity: harness.identity,
+        user: expect.objectContaining({ id: "second-user" }),
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("does not start Provider work when every current analysis result is already ready", async () => {
+    const harness = await createHarness();
+    try {
+      const ready = readyAggregateResultFor(harness.identity);
+      const read = vi.fn().mockResolvedValue(ready);
+      const execute = vi.fn();
+      const executeAdditional = vi.fn();
+      const resolveCurrentIdentity = vi.fn().mockResolvedValue(harness.identity);
+      const context = {
+        ...harness.context,
+        overviewAiWorkflow: { execute, read, resolveCurrentIdentity },
+        additionalAiInsightsWorkflow: { execute: executeAdditional },
+      } as unknown as Required<ConfigApiContext>;
+
+      const response = await handleEnergyApiRequest(
+        jsonPost({}),
+        ["projects", harness.project.id, "overview-admin-state", "actions", "generate-missing"],
+        context,
+      );
+
+      expect(response).toMatchObject({
+        status: 200,
+        body: { success: true, data: { analysis: { status: "ready" }, allowedActions: [] } },
+      });
+      expect(execute).not.toHaveBeenCalled();
+      expect(executeAdditional).not.toHaveBeenCalled();
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("forbids ordinary users from Generate missing analysis", async () => {
+    const harness = await createHarness();
+    try {
+      const read = vi.fn();
+      const execute = vi.fn();
+      const executeAdditional = vi.fn();
+      const resolveCurrentIdentity = vi.fn();
+      const context = {
+        ...harness.context,
+        userId: "second-user",
+        overviewAiWorkflow: { execute, read, resolveCurrentIdentity },
+        additionalAiInsightsWorkflow: { execute: executeAdditional },
+      } as unknown as Required<ConfigApiContext>;
+
+      const response = await handleEnergyApiRequest(
+        jsonPost({}),
+        ["projects", harness.project.id, "overview-admin-state", "actions", "generate-missing"],
+        context,
+      );
+
+      expect(response).toMatchObject({
+        status: 403,
+        body: { success: false, error: { code: "FORBIDDEN", message: "ENERGYIQ_ADMIN_REQUIRED" } },
+      });
+      expect(resolveCurrentIdentity).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+      expect(execute).not.toHaveBeenCalled();
+      expect(executeAdditional).not.toHaveBeenCalled();
+    } finally {
+      harness.close();
+    }
+  });
 });
 
 async function createHarness() {
@@ -658,6 +948,51 @@ function aggregateResultFor(identity: ReturnType<typeof createOverviewAiArtifact
       "planning-outlook": { status: "unavailable" as const, reason: "Not generated." },
     },
     executive: { status: "unavailable" as const, artifactId: "executive", reason: "SYNTHESIS_FAILED" },
+  };
+}
+
+function readyAggregateResultFor(identity: ReturnType<typeof createOverviewAiArtifactIdentity>) {
+  const current = aggregateResultFor(identity);
+  const available = (sectionId: keyof typeof current.sections) => ({
+    status: "available" as const,
+    artifactId: `section-${sectionId}`,
+    result: {
+      artifactKind: "section-interpretation" as const,
+      status: "available" as const,
+      providerProfileId: identity.modelProfileId,
+      runId: `run-${sectionId}`,
+      binding: current.binding,
+      sectionId,
+      summary: "Current evidence is available.",
+      keyPoints: [],
+    },
+  });
+  return {
+    ...current,
+    sections: {
+      "centre-benchmark": available("centre-benchmark"),
+      "standby-wastage": available("standby-wastage"),
+      "operating-behaviour": available("operating-behaviour"),
+      "planning-outlook": available("planning-outlook"),
+    },
+    executive: {
+      status: "available" as const,
+      artifactId: "executive-current",
+      result: {
+        artifactKind: "executive-synthesis" as const,
+        status: "available" as const,
+        providerProfileId: identity.modelProfileId,
+        runId: "run-executive",
+        binding: current.binding,
+        sourceSectionArtifactIds: [],
+        keyFindings: [],
+      },
+    },
+    additional: {
+      status: "available" as const,
+      artifactId: "additional-current",
+      result: { status: "available" as const },
+    },
   };
 }
 

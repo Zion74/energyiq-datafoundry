@@ -2082,9 +2082,9 @@ export type PreschoolExecutiveSynthesisResultDto =
 export type PreschoolOverviewAiUnitStatusDto<T extends { status: "available" | "empty" }> =
   | { status: "queued" }
   | { status: "running" }
-  | { status: "available"; artifactId: string; result: Extract<T, { status: "available" }> }
-  | { status: "empty"; artifactId: string; result: Extract<T, { status: "empty" }> }
-  | { status: "unavailable"; artifactId?: string; reason: string };
+  | { status: "available"; artifactId: string; completedAt?: string; result: Extract<T, { status: "available" }> }
+  | { status: "empty"; artifactId: string; completedAt?: string; result: Extract<T, { status: "empty" }> }
+  | { status: "unavailable"; artifactId?: string; completedAt?: string; reason: string };
 
 export type PreschoolOverviewAiReadModelDto = {
   artifactKind: "preschool-overview-ai-read-model";
@@ -2134,6 +2134,60 @@ export type EnergyOverviewAiArtifactDto = {
     findings: Array<Record<string, unknown>>;
     [key: string]: unknown;
   };
+};
+
+export type EnergyProjectOverviewAdminReadinessStatusDto =
+  | "ready"
+  | "generating"
+  | "not-generated"
+  | "needs-attention"
+  | "no-new-insight"
+  | "out-of-date";
+
+export type EnergyProjectOverviewAdminReadinessItemDto = {
+  id: string;
+  label: string;
+  status: EnergyProjectOverviewAdminReadinessStatusDto;
+  detail: string;
+  artifactId?: string;
+  completedAt?: string;
+};
+
+export type EnergyProjectOverviewAdminStateDto = {
+  projectId: string;
+  projectName: string;
+  rendererKey: "ngee-ann-overview" | "preschool-overview" | null;
+  customerOverview: {
+    status: EnergyProjectOverviewAdminReadinessStatusDto;
+    detail: string;
+    url: string | null;
+  };
+  currentIdentity: {
+    dataSnapshotId: string;
+    projectReleaseId: string;
+    analysisPeriod: { from: string; to: string };
+    modelProfileRevision: number;
+  } | null;
+  capabilities: {
+    keyFindings: boolean;
+    sectionAnalysis: PreschoolOverviewAiSectionIdDto[];
+    additionalInsights: boolean;
+  };
+  analysis: {
+    supported: boolean;
+    status: EnergyProjectOverviewAdminReadinessStatusDto;
+    detail: string;
+    readyCount: number;
+    totalCount: number;
+    lastGeneratedAt: string | null;
+    items: EnergyProjectOverviewAdminReadinessItemDto[];
+  };
+  allowedActions: Array<"generate-missing">;
+  recommendedNextAction: {
+    action: "generate-missing";
+    label: "Generate missing analysis";
+    detail: string;
+  } | null;
 };
 
 export type EnergyAdditionalInsightFeedbackDto = {
