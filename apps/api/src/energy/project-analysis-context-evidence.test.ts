@@ -28,6 +28,21 @@ describe("ProjectAnalysisSnapshot Context Evidence catalog", () => {
         evidenceRefs: ["evidence-current"],
       }),
       expect.objectContaining({
+        id: "analysis.comparison.change_pct",
+        dimensions: expect.objectContaining({
+          comparison: "previous-period",
+          comparedMetricId: "energy.total_usage_kwh",
+          scopeId: "preschool-project",
+        }),
+      }),
+      expect.objectContaining({
+        id: "analysis.child_scopes.centre-a.usage_kwh",
+        dimensions: expect.objectContaining({
+          scopeId: "centre-a",
+          centreCode: "A",
+        }),
+      }),
+      expect.objectContaining({
         id: "preschool.benchmark.centres.centre-a.annualised_eui",
         value: 13.62,
         unit: "kWh/m2/year",

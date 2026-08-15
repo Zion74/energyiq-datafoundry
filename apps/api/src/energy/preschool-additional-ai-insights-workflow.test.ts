@@ -2036,6 +2036,186 @@ const resolvePresentedClaimsFixture: Parameters<typeof createPreschoolAdditional
     }
   });
 
+  it("removes an unsupported cross-period fact while preserving the evidence-bound exploratory angle", async () => {
+    const harness = createHarness();
+    try {
+      const currentCatalog = catalog();
+      currentCatalog.facts.push(
+        {
+          ...fact("analysis.summary.peak_kw", "confirmed", 138.8),
+          metricId: "energy.peak_interval_average_power_kw",
+          unit: "kW",
+        },
+        {
+          ...fact("analysis.summary.usage_kwh", "confirmed", 24_483.57),
+          metricId: "energy.total_usage_kwh",
+          unit: "kWh",
+        },
+      );
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => currentCatalog,
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [candidate("candidate-cross-period-salvage", "analysis.summary.peak_kw", {
+            title: "Peak demand may be concentrated in a narrow operating window",
+            observation: "Peak interval-average power is 138.8 kW.",
+            angle: "Total usage is essentially unchanged from the prior period. Total energy use declined from last month. Total energy use reduced from last month. Total energy use surged from last month. Total energy use jumped from last month. Total energy use doubled from last month. Total energy use halved from last month. The peak may indicate a concentrated demand window worth testing.",
+            epistemicStatus: "speculative",
+            evidenceRefs: ["analysis.summary.peak_kw", "analysis.summary.usage_kwh"],
+            incrementalContext: {
+              relatedPresentedClaimIds: [
+                "deterministic-overview:analysis.summary.peak_kw",
+                "deterministic-overview:analysis.summary.usage_kwh",
+              ],
+              novelConclusion: "The peak may indicate a concentrated demand window worth testing",
+            },
+          })] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "cross-period-salvage-run",
+        sessionId: "cross-period-salvage-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        publication: {
+          acceptedCandidateIds: ["candidate-cross-period-salvage"],
+          rejectedCandidateIds: [],
+        },
+        findings: [{
+          id: "additional:candidate-cross-period-salvage",
+          text: "**Evidence signal:** Peak interval-average power is 138.8 kW.\n\n**AI angle:** The peak may indicate a concentrated demand window worth testing.",
+          epistemicStatus: "speculative",
+        }],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("keeps a measured cross-period fact when the candidate cites the authoritative comparison Evidence", async () => {
+    const harness = createHarness();
+    try {
+      const currentCatalog = catalog();
+      currentCatalog.facts.push({
+        ...fact("analysis.comparison.change_pct", "confirmed", 4.63),
+        metricId: "energy.period_change_pct",
+        dimensions: {
+          comparison: "previous-period",
+          comparedMetricId: "energy.total_usage_kwh",
+        },
+      });
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => currentCatalog,
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [candidate("candidate-supported-cross-period", "analysis.comparison.change_pct", {
+            title: "Energy use increased by 4.63% from the previous period",
+            observation: "Energy use rose 4.63 percent from the previous period.",
+            angle: "Energy use recorded an increase of 4.63 percent from the previous period and might be 10% lower after schedule changes.",
+            epistemicStatus: "speculative",
+            incrementalContext: {
+              relatedPresentedClaimIds: ["deterministic-overview:analysis.comparison.change_pct"],
+              novelConclusion: "Energy use might be 10% lower after schedule changes",
+            },
+          })] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "supported-cross-period-run",
+        sessionId: "supported-cross-period-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        publication: { acceptedCandidateIds: ["candidate-supported-cross-period"] },
+        findings: [{
+          text: "**Evidence signal:** Energy use rose 4.63 percent from the previous period.\n\n**AI angle:** Energy use recorded an increase of 4.63 percent from the previous period and might be 10% lower after schedule changes.",
+        }],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
+  it("does not lend total-energy comparison Evidence to a measured peak claim but keeps a transparent hypothesis", async () => {
+    const harness = createHarness();
+    try {
+      const currentCatalog = catalog();
+      currentCatalog.facts.push(
+        {
+          ...fact("analysis.summary.peak_kw", "confirmed", 138.8),
+          metricId: "energy.peak_interval_average_kw",
+          unit: "kW",
+        },
+        {
+          ...fact("analysis.comparison.change_pct", "confirmed", 4.63),
+          metricId: "energy.period_change_pct",
+          dimensions: {
+            comparison: "previous-period",
+            comparedMetricId: "energy.total_usage_kwh",
+          },
+        },
+        entityFact("analysis.child_scopes.centre-g.usage_kwh", "Centre G", 880),
+        {
+          ...fact("analysis.categories.plug_load.share_pct", "confirmed", 99),
+          metricId: "energy.category_share_pct",
+        },
+      );
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => currentCatalog,
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [candidate("candidate-peak-comparison-boundary", "analysis.summary.peak_kw", {
+            title: "Peak demand may be concentrated in a narrow operating window",
+            observation: "Peak interval-average power is 138.8 kW.",
+            angle: "Peak demand was higher than the previous 28-day window, but total energy use might be higher than last month. Centre G energy use was higher than last month. Total energy use increased by 99% from last month. Managers might investigate why total energy use increased 99% from last month. It is possible that managers should investigate why total energy use increased 99% from last month. If managers investigate why total energy use increased 99% from last month, they should check the comparison first. Total energy use surged by 99% from last month. Total energy use jumped by 99 percent from last month. Total energy use was 99 percent more than last month. Total energy use saw a 99% increase from last month. Total energy use recorded an increase of 99 percent from last month. Total energy use doubled from last month. Total energy use halved from last month. Total energy use may be 10% higher than last month due to plug loads accounting for 98% of use. Peak demand may be higher than last month, which would be worth testing against the next comparison window.",
+            epistemicStatus: "speculative",
+            evidenceRefs: ["analysis.summary.peak_kw", "analysis.comparison.change_pct", "analysis.child_scopes.centre-g.usage_kwh", "analysis.categories.plug_load.share_pct"],
+            incrementalContext: {
+              relatedPresentedClaimIds: ["deterministic-overview:analysis.summary.peak_kw"],
+              novelConclusion: "Peak demand may be higher than last month, which would be worth testing against the next comparison window",
+            },
+          })] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "peak-comparison-boundary-run",
+        sessionId: "peak-comparison-boundary-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        publication: { acceptedCandidateIds: ["candidate-peak-comparison-boundary"] },
+        findings: [{
+          text: "**Evidence signal:** Peak interval-average power is 138.8 kW.\n\n**AI angle:** total energy use might be higher than last month. Peak demand may be higher than last month, which would be worth testing against the next comparison window.",
+          epistemicStatus: "speculative",
+        }],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
   it("uses the supported AI conclusion when an otherwise useful card has one unsupported title or parenthetical claim", async () => {
     const harness = createHarness();
     try {

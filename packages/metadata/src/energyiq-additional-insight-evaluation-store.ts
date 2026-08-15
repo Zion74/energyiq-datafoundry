@@ -1580,6 +1580,10 @@ const supportedTargetIdentity = (target: AdditionalAiInsightEvaluationTarget): b
     && target.validatorRevision === "additional-insights-acceptance-v12"
     && target.workflowRevision === "additional-insights-discover-accept-publish-v15"
     && target.promptRevision === "additional-insights-discovery-v10")
+  || (target.artifactIdentityRevision === "additional-insights-v16"
+    && target.validatorRevision === "additional-insights-acceptance-v13"
+    && target.workflowRevision === "additional-insights-discover-accept-publish-v16"
+    && target.promptRevision === "additional-insights-discovery-v10")
 );
 
 const overviewArtifactIdentityMatchesEvaluationTarget = (
@@ -1614,9 +1618,9 @@ const overviewArtifactIdentityMatchesEvaluationTarget = (
 };
 
 const requireCurrentTargetIdentity = (target: AdditionalAiInsightEvaluationTarget): void => {
-  if (target.artifactIdentityRevision !== "additional-insights-v15"
-    || target.validatorRevision !== "additional-insights-acceptance-v12"
-    || target.workflowRevision !== "additional-insights-discover-accept-publish-v15"
+  if (target.artifactIdentityRevision !== "additional-insights-v16"
+    || target.validatorRevision !== "additional-insights-acceptance-v13"
+    || target.workflowRevision !== "additional-insights-discover-accept-publish-v16"
     || target.promptRevision !== "additional-insights-discovery-v10") {
     throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_BEHAVIOR_NOT_CURRENT");
   }

@@ -124,7 +124,12 @@ const addCoreFacts = (
     unit: "kWh",
     status,
     evidenceRefs,
-    dimensions: { comparison: "previous-period" },
+    dimensions: {
+      comparison: "previous-period",
+      comparedMetricId: "energy.total_usage_kwh",
+      scopeId: snapshot.context.scopeId,
+      scopeName: snapshot.context.scopeName,
+    },
   });
   pushNumber(target, {
     id: "analysis.comparison.change_kwh",
@@ -134,7 +139,12 @@ const addCoreFacts = (
     unit: "kWh",
     status,
     evidenceRefs,
-    dimensions: { comparison: "previous-period" },
+    dimensions: {
+      comparison: "previous-period",
+      comparedMetricId: "energy.total_usage_kwh",
+      scopeId: snapshot.context.scopeId,
+      scopeName: snapshot.context.scopeName,
+    },
   });
   pushOptionalNumber(target, snapshot.analysis.comparison.changePct, {
     id: "analysis.comparison.change_pct",
@@ -143,7 +153,12 @@ const addCoreFacts = (
     unit: "%",
     status,
     evidenceRefs,
-    dimensions: { comparison: "previous-period" },
+    dimensions: {
+      comparison: "previous-period",
+      comparedMetricId: "energy.total_usage_kwh",
+      scopeId: snapshot.context.scopeId,
+      scopeName: snapshot.context.scopeName,
+    },
   });
 };
 
@@ -153,10 +168,12 @@ const addChildScopeFacts = (
   evidenceRefs: string[],
 ): void => {
   for (const scope of snapshot.analysis.childScopes) {
+    const centreCode = /^Centre\s+([A-Za-z0-9][A-Za-z0-9_-]{0,15})$/u.exec(scope.name)?.[1];
     const dimensions = {
       scopeId: scope.nodeId,
       scopeName: scope.name,
       scopeType: scope.nodeType,
+      ...(centreCode ? { centreCode } : {}),
     };
     const prefix = `analysis.child_scopes.${scope.nodeId}`;
     const status = factStatus(snapshot, scope.metadata.status);

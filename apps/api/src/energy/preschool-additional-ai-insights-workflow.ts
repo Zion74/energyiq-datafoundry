@@ -625,11 +625,11 @@ const acceptCandidate = (
       values: { [fact.metricId]: fact.value, ...fact.dimensions },
     }));
   const narrativeIsSupported = (narrative: string): boolean => energyAiNarrativeClaimsSupported({
-    narrative,
+    narrative: maskTransparentHypotheticalPercentages(narrative),
     evidence: narrativeEvidence,
     sqlEvidence: [],
     knownCentreCodes,
-  });
+  }) && crossPeriodFactsAreSupported(narrative, citedFacts);
   const acceptedTitle = resolveSupportedCandidateTitle({
     title: value.title,
     incrementalContext: value.incrementalContext,
@@ -740,6 +740,207 @@ const resolveCandidateOrigin = (
     };
   }
   return null;
+};
+
+const crossPeriodFactsAreSupported = (
+  narrative: string,
+  citedFacts: readonly AnalysisContextEvidenceCatalog["facts"][number][],
+): boolean => narrative
+  .split(/(?<=[.!?])\s+(?=[\p{Lu}\p{N}])|\s*;\s*|,\s*(?=(?:but|while|whereas|however)\b)/iu)
+  .filter((fragment) => fragment.trim().length > 0)
+  .every((fragment) => crossPeriodFactIsSupported(fragment, citedFacts));
+
+const TEMPORAL_NEUTRAL_CHANGE_SOURCE = String.raw`unchanged|flat|stable|steady|similar|same`;
+const TEMPORAL_POSITIVE_CHANGE_SOURCE = String.raw`increas(?:e|ed|ing)|higher|greater|above|more|rose|risen|grew|grown|surg(?:e|ed|ing)|jump(?:ed|ing)?|doubl(?:e|ed|ing)|up`;
+const TEMPORAL_NEGATIVE_CHANGE_SOURCE = String.raw`decreas(?:e|ed|ing)|declin(?:e|ed|ing)|reduc(?:e|ed|ing)|lower|less|fewer|below|fell|fallen|dropped|halv(?:e|ed|ing)|down`;
+const TEMPORAL_CHANGE_SOURCE = `${TEMPORAL_NEUTRAL_CHANGE_SOURCE}|${TEMPORAL_POSITIVE_CHANGE_SOURCE}|${TEMPORAL_NEGATIVE_CHANGE_SOURCE}|changed`;
+
+const crossPeriodFactIsSupported = (
+  narrative: string,
+  citedFacts: readonly AnalysisContextEvidenceCatalog["facts"][number][],
+): boolean => {
+  const hasTemporalComparator = /\b(?:prior|previous|earlier|last)\s+(?:(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[- ]?)?(?:day|week|month|year|period|window)s?(?:\s+window)?\b|\b(?:day|week|month|year|period)[- ](?:over|on)[- ](?:day|week|month|year|period)\b/iu.test(narrative);
+  if (!hasTemporalComparator) return true;
+  const changeMatches = [...narrative.matchAll(new RegExp(String.raw`\b(?:${TEMPORAL_CHANGE_SOURCE})\b`, "giu"))];
+  if (changeMatches.length === 0) return false;
+  const measuredChanges = changeMatches.filter((match) => !temporalChangeIsHypothetical(narrative, match.index ?? 0));
+  if (measuredChanges.length === 0) return true;
+  const comparedMetricId = temporalClaimMetricId(narrative);
+  if (!comparedMetricId) return false;
+  const comparison = citedComparisonChange(citedFacts, comparedMetricId, narrative);
+  if (!comparison) return false;
+  return measuredChanges.every((match) => temporalDirectionMatches(match[0], comparison.changePct))
+    && temporalMagnitudesMatch(narrative, comparison, measuredChanges);
+};
+
+const temporalChangeIsHypothetical = (narrative: string, changeIndex: number): boolean => {
+  const prefix = temporalClaimGovernancePrefix(narrative, changeIndex);
+  return /\b(?:may|might|could)\s+(?:(?:potentially|possibly)\s+)?(?:have\s+)?(?:be(?:en)?\s+)?(?:(?:about|around|roughly|approximately)\s+)?(?:-?\d[\d,]*(?:\.\d+)?\s*(?:%|percent(?:age)?(?:\s+points?)?|kWh)\s+)?$/iu.test(prefix);
+};
+
+const maskTransparentHypotheticalPercentages = (narrative: string): string => {
+  const governedMagnitudeSpans = [...narrative.matchAll(new RegExp(String.raw`\b(?:${TEMPORAL_CHANGE_SOURCE})\b`, "giu"))]
+    .filter((change) => temporalChangeIsHypothetical(narrative, change.index ?? 0))
+    .flatMap((change) => hypotheticalPercentageMagnitudeSpans(
+      narrative,
+      change.index ?? 0,
+      change[0].length,
+    ));
+  return narrative.replace(
+    /-?\d[\d,]*(?:\.\d+)?\s*(?:%|percent(?:age)?(?:\s+points?)?)(?=\s|[.,;:!?)]|$)/giu,
+    (quantity, offset: number) => governedMagnitudeSpans.some((span) => offset >= span.start && offset < span.end)
+      ? "a scenario percentage"
+      : quantity,
+  );
+};
+
+const hypotheticalPercentageMagnitudeSpans = (
+  narrative: string,
+  changeIndex: number,
+  changeLength: number,
+): { start: number; end: number }[] => {
+  const quantitySource = String.raw`-?\d[\d,]*(?:\.\d+)?\s*(?:%|percent(?:age)?(?:\s+points?)?)`;
+  const lookBehindStart = Math.max(0, changeIndex - 96);
+  const before = narrative.slice(lookBehindStart, changeIndex);
+  const beforeMatch = before.match(new RegExp(`(${quantitySource})\\s*$`, "iu"));
+  const afterStart = changeIndex + changeLength;
+  const after = narrative.slice(afterStart, afterStart + 96);
+  const afterMatch = after.match(new RegExp(`^\\s*(?:(?:by|of)\\s+)?(?:(?:about|around|roughly|approximately)\\s+)?(${quantitySource})`, "iu"));
+  return [
+    ...(beforeMatch && beforeMatch.index !== undefined
+      ? [{
+          start: lookBehindStart + beforeMatch.index + beforeMatch[0].indexOf(beforeMatch[1]!),
+          end: lookBehindStart + beforeMatch.index + beforeMatch[0].indexOf(beforeMatch[1]!) + beforeMatch[1]!.length,
+        }]
+      : []),
+    ...(afterMatch && afterMatch.index !== undefined
+      ? [{
+          start: afterStart + afterMatch.index + afterMatch[0].indexOf(afterMatch[1]!),
+          end: afterStart + afterMatch.index + afterMatch[0].indexOf(afterMatch[1]!) + afterMatch[1]!.length,
+        }]
+      : []),
+  ];
+};
+
+const temporalClaimGovernancePrefix = (narrative: string, changeIndex: number): string => {
+  const before = narrative.slice(0, changeIndex);
+  const boundaries = [...before.matchAll(/[,;:.!?]|\b(?:and|but|while|whereas|however|because|given\s+that)\b/giu)];
+  const lastBoundary = boundaries.at(-1);
+  const start = lastBoundary ? (lastBoundary.index ?? 0) + lastBoundary[0].length : 0;
+  return before.slice(start).slice(-96);
+};
+
+const temporalClaimMetricId = (narrative: string): string | null => {
+  if (/\b(?:peak|maximum|max\.?\s+demand)\b/iu.test(narrative)) return "energy.peak_interval_average_kw";
+  if (/\b(?:off[- ]hours?|closed[- ]hours?|standby)\b/iu.test(narrative)) return "energy.off_hours_usage_kwh";
+  if (/\bCentres?\s+[A-Z]{1,2}\b/iu.test(narrative)) return "energy.total_usage_kwh";
+  if (/\b(?:circuit|plug\s*load|lighting|heater|aircon|air\s*conditioning)\b/iu.test(narrative)) return "energy.circuit_usage_kwh";
+  if (/\b(?:total\s+(?:energy|electricity)\s+|(?:energy|electricity)\s+|total\s+)(?:use|usage|consumption)\b/iu.test(narrative)) {
+    return "energy.total_usage_kwh";
+  }
+  return null;
+};
+
+const citedComparisonChange = (
+  citedFacts: readonly AnalysisContextEvidenceCatalog["facts"][number][],
+  comparedMetricId: string,
+  narrative: string,
+): { changePct: number; changeKwh?: number } | null => {
+  const comparisonFacts = citedFacts.filter((fact) => fact.dimensions.comparison === "previous-period"
+    && fact.dimensions.comparedMetricId === comparedMetricId);
+  const namedCentreCodes = [...narrative.matchAll(/\bCentres?\s+([A-Z]{1,2})\b/giu)]
+    .map((match) => match[1]?.toLocaleUpperCase("en"))
+    .filter((value): value is string => Boolean(value));
+  const currentEntityScopeIds = new Set(citedFacts
+    .filter((fact) => namedCentreCodes.includes(fact.dimensions.centreCode?.toLocaleUpperCase("en") ?? ""))
+    .map((fact) => fact.dimensions.scopeId)
+    .filter((value): value is string => Boolean(value)));
+  const scopedComparisonFacts = namedCentreCodes.length === 0
+    ? comparisonFacts
+    : comparisonFacts.filter((fact) => namedCentreCodes.includes(fact.dimensions.centreCode?.toLocaleUpperCase("en") ?? "")
+      || currentEntityScopeIds.has(fact.dimensions.scopeId ?? ""));
+  const percentChange = scopedComparisonFacts.find((fact) => fact.metricId === "energy.period_change_pct")?.value;
+  const absoluteChange = scopedComparisonFacts.find((fact) => fact.metricId === "energy.period_change_kwh")?.value;
+  const previousUsage = scopedComparisonFacts.find((fact) => fact.id === "analysis.comparison.previous_usage_kwh")?.value;
+  if (typeof percentChange === "number" && Number.isFinite(percentChange)) {
+    return {
+      changePct: percentChange,
+      ...(typeof absoluteChange === "number" && Number.isFinite(absoluteChange) ? { changeKwh: absoluteChange } : {}),
+    };
+  }
+  if (typeof absoluteChange !== "number" || !Number.isFinite(absoluteChange)
+    || typeof previousUsage !== "number" || !Number.isFinite(previousUsage) || previousUsage === 0) return null;
+  return { changePct: (absoluteChange / previousUsage) * 100, changeKwh: absoluteChange };
+};
+
+const temporalDirectionMatches = (token: string, changePct: number): boolean => {
+  if (new RegExp(`^(?:${TEMPORAL_NEUTRAL_CHANGE_SOURCE})$`, "iu").test(token)) return Math.abs(changePct) <= 1;
+  if (new RegExp(`^(?:${TEMPORAL_POSITIVE_CHANGE_SOURCE})$`, "iu").test(token)) return changePct > 0;
+  if (new RegExp(`^(?:${TEMPORAL_NEGATIVE_CHANGE_SOURCE})$`, "iu").test(token)) return changePct < 0;
+  return token.toLocaleLowerCase("en") === "changed";
+};
+
+const temporalMagnitudesMatch = (
+  narrative: string,
+  comparison: { changePct: number; changeKwh?: number },
+  measuredChanges: readonly RegExpMatchArray[],
+): boolean => {
+  const magnitudeUnit = String.raw`(%|percent(?:age)?(?:\s+points?)?|kWh)`;
+  const patterns = [
+    new RegExp(String.raw`\b(?:${TEMPORAL_CHANGE_SOURCE})\s+(?:by\s+)?(-?\d[\d,]*(?:\.\d+)?)\s*${magnitudeUnit}(?=\s|[.,;:!?)]|$)`, "giu"),
+    new RegExp(String.raw`(-?\d[\d,]*(?:\.\d+)?)\s*${magnitudeUnit}\s+(?:higher|greater|above|more|lower|less|fewer|below|up|down|increase|decrease|reduction|rise|drop|growth|decline)\b`, "giu"),
+    new RegExp(String.raw`\b(?:up|down)\s+(?:by\s+)?(-?\d[\d,]*(?:\.\d+)?)\s*${magnitudeUnit}(?=\s|[.,;:!?)]|$)`, "giu"),
+    new RegExp(String.raw`\b(?:${TEMPORAL_CHANGE_SOURCE}|reduction|rise|drop|growth)\s+(?:of|by)\s+(-?\d[\d,]*(?:\.\d+)?)\s*${magnitudeUnit}(?=\s|[.,;:!?)]|$)`, "giu"),
+  ];
+  return measuredChanges.every((change) => {
+    const clause = temporalChangeClause(narrative, change.index ?? 0, change[0].length);
+    const magnitudes = patterns.flatMap((pattern) => [...clause.matchAll(pattern)].map((match) => ({
+      value: Number(match[1]?.replace(/,/gu, "")),
+      unit: match[2]?.toLocaleLowerCase("en"),
+    })));
+    const explicitMagnitudesMatch = magnitudes.every(({ value, unit }) => {
+      if (!Number.isFinite(value)) return false;
+      const expected = unit === "kwh"
+        ? comparison.changeKwh
+        : unit?.includes("point")
+          ? undefined
+          : comparison.changePct;
+      if (expected === undefined) return false;
+      const tolerance = Math.max(0.01, Math.abs(expected) * 0.005);
+      return Math.abs(Math.abs(value) - Math.abs(expected)) <= tolerance;
+    });
+    if (!explicitMagnitudesMatch) return false;
+    if (/^doubl(?:e|ed|ing)$/iu.test(change[0])) {
+      return Math.abs(Math.abs(comparison.changePct) - 100) <= 0.5;
+    }
+    if (/^halv(?:e|ed|ing)$/iu.test(change[0])) {
+      return Math.abs(Math.abs(comparison.changePct) - 50) <= 0.25;
+    }
+    return true;
+  });
+};
+
+const temporalChangeClause = (narrative: string, changeIndex: number, changeLength: number): string => {
+  const range = temporalChangeClauseRange(narrative, changeIndex, changeLength);
+  return narrative.slice(range.start, range.end);
+};
+
+const temporalChangeClauseRange = (
+  narrative: string,
+  changeIndex: number,
+  changeLength: number,
+): { start: number; end: number } => {
+  const boundaryPattern = /(?<!\d)[,.:](?!\d)|[;!?]|\b(?:and|but|while|whereas|however|because|given\s+that)\b/giu;
+  const before = narrative.slice(0, changeIndex);
+  const previousBoundaries = [...before.matchAll(boundaryPattern)];
+  const previousBoundary = previousBoundaries.at(-1);
+  const start = previousBoundary ? (previousBoundary.index ?? 0) + previousBoundary[0].length : 0;
+  const after = narrative.slice(changeIndex + changeLength);
+  const nextBoundary = [...after.matchAll(boundaryPattern)].at(0);
+  const end = nextBoundary
+    ? changeIndex + changeLength + (nextBoundary.index ?? 0)
+    : narrative.length;
+  return { start, end };
 };
 
 const resolveIncrementalContext = (
