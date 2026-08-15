@@ -3,7 +3,7 @@ title: "EnergyIQ 开发计划：Admin 与模板运行闭环"
 summary: "在 DataFoundry 现有代码上分批完成 Tier、计量映射、Excel 数据、项目模板、复跑和客户页面贯通。"
 doc_type: playbook
 tags: [开发计划, Admin, Tier, Excel, Template Revision, Analysis Run]
-updated_at: "2026-08-15"
+updated_at: "2026-08-16"
 related:
   - "当前共识与新会话入口.md"
   - "领域模型.md"
@@ -272,6 +272,58 @@ focused API/Web tests、相关 Contracts/Metadata/API/Web builds 与 `git diff -
 - 已完成 Admin `AI Analysis` 的人类可读 trace、折叠技术 identity 和 exact Finding 治理操作；`Methods & SOP` 同步展示 published catalog、范围、revision 与 Proposal 生命周期。
 - 自动化证据：focused API/Web/Metadata 共 37 tests 通过；Metadata、API 和 Web production build 通过；`git diff --check` 通过；受保护的 Stage 3 discovery/identity/artifact/evaluation/A→B compare 文件无 diff。
 - 尚未执行：真实 Provider、真实浏览器/设备、部署与人工产品验收。它们不得由上述自动化结果替代。
+
+## 1.4 2026-08-16 Admin Harness Configuration 与 AI Operations 修订路线
+
+本节记录 [#62](https://github.com/Zion74/energyiq-datafoundry/issues/62) 的正式路线。原“AI Configuration 直接挂接 Models/Skills/Tools/MCP”设想不足以表达当前 Runtime：generic AI Analyst、Overview Key Findings、Section Analysis 与 Additional Insights 使用不同的模型绑定、Context、Skill/Method 与 Tool seam；配置存在也不代表某个 Harness 声明可用，更不代表某次 Run 实际使用。因此 Admin 分组改为 **Harness Configuration**，先建设解释性的只读配置，再在同一 identity 上建设 AI Operations。
+
+### 审查后必须修正的假设
+
+1. **Skill selection 可能依赖用户输入。** generic Analyst 的 auto selection 只能在 Run 或显式 preview POST 中解析；普通配置 GET 只显示候选、默认与 policy，并标为 `Resolved per run`，不能预演成 exact selected set。
+2. **Config Resource 当前物理 owner 是 `workspace_id + user_id`。** payload 中声明 `scope=workspace` 不能单独证明真正 Workspace 共享。Read Model 同时显示 physical owner 与 declared scope；不一致、无法证明或跨 actor 的资源 fail closed，不在本批次做隐式迁移。
+3. **MCP manifest 与连接状态是持久化快照，不是 live health。** GET 只显示 persisted status、manifest revision 与 as-of；连接/模型测试只能由显式、可审计 POST 触发。
+4. **Context capacity 是规划合同。** `contextWindow` 必须同时显示 `explicit-profile / verified-model-default / conservative-fallback` 来源，不能把 fallback 当作 Provider 保证。
+5. **Configuration 不等于 historical execution。** current Store revision 不可反查并冒充历史 Run；历史只读取当时 Run event、Context Package/Plan、Artifact provenance 与 audit。缺失 Run-captured MCP server→tool mapping 时显示 `Unavailable`，不能套用 current manifest。
+6. **System Prompt 不是单一可编辑字符串。** Platform instruction、Workflow/Stage Prompt、Skill/Method instruction、Context source 与 Output Contract 分层展示。首批只返回脱敏摘要、revision/content hash 与静态模板预览；动态 tenant Prompt/Context 留给 AI Operations，并继续做会话可见性与审计。
+7. **当前 admin 不自动等于 platform operator。** secret、headers、MCP command、内部路径、平台私有 policy 与动态客户内容不因 admin GET 直接下发。
+
+### 深模块与状态语言
+
+第一条公开 seam 固定为：
+
+```ts
+readProjectHarnessConfiguration(projectId)
+```
+
+调用方只传 Project id；服务端解析 actor、Workspace、Project、Release、system-owned model binding、Workspace Analyst defaults、Project capability、Config Resource、Method Governance 与 Runtime registry。返回按 Harness/Stage 分组的 Models、Skills/Methods、Tools/MCP、Context 与 Instructions，以及局部 `Unavailable`。普通 GET 保持 `private, no-store`、0 Provider、0 model probe、0 MCP connect、0 Tool、0 ensure/queue。
+
+统一状态链：
+
+```text
+registered/configured
+→ declared eligible for this Harness
+→ resolved/selected/materialized in one Run
+→ actually loaded/read or called
+→ succeeded and/or attributed by one Finding
+```
+
+前一状态不得自动推导后一状态。AI Analysis 继续回答“当前客户结果与 exact Finding 为什么出现”；Methods & SOP 继续治理 Proposal；Harness Configuration 回答“当前允许如何运行”；AI Operations 回答“历史上实际怎样运行”。
+
+### Tickets 与执行顺序
+
+1. [#63 HCFG-1](https://github.com/Zion74/energyiq-datafoundry/issues/63)：server-owned Project Harness Configuration read model；
+2. [#64 HCFG-2](https://github.com/Zion74/energyiq-datafoundry/issues/64)：Admin Harness Configuration interface；
+3. [#65 AIOPS-1](https://github.com/Zion74/energyiq-datafoundry/issues/65)：Project AI Run configuration and execution trace；
+4. [#66 HCFG-3](https://github.com/Zion74/energyiq-datafoundry/issues/66)：只有 immutable revision/history 合同充分后才开放 Project Harness Policy Draft/Validate/Diff/Publish。
+
+#63 是首个 `ready-for-agent` tracer。#64 blocked by #63；#65 blocked by #63/#64；#66 blocked by #63/#64。#30、#54、#57、#61 作为 Harness Eval、跨项目 AI、质量治理与 Finding explainability 的相关前置，不把整个 Configuration/Operations 路线错误挂在 #57 之下。
+
+### TDD 与验收门
+
+- API seam：admin-only、tenant/Project exact、system model 与 Workspace default 不混淆、run-dependent selection、persisted-not-live MCP、owner/scope mismatch、secret redaction、partial unavailable、historical current-vs-snapshot 分离；
+- Web seam：Harness Configuration 导航与五类摘要、available-vs-used copy、技术 identity 折叠、空/局部不可用与 responsive；
+- 不修改 Stage 3 discovery/identity/artifact/evaluation/A→B 文件；优先只读消费 #61 与既有 provenance；
+- focused API/Web tests、相关 package builds 与 `git diff --check` 是自动化门；真实 Provider、真实 MCP、浏览器、多账户、部署和人工验收分别报告。
 
 ## 2. 当前代码基线
 
@@ -553,32 +605,30 @@ focused API/Web tests、相关 Contracts/Metadata/API/Web builds 与 `git diff -
 - 累计读数差分得到的功率明确标为 interval average power，不冒充瞬时功率；
 - 客户 UI 不出现 Tier 1/2 计算术语。
 
-## 10. 批次 6：复用技术设置与轻量 Operations
+## 10. 批次 6：Harness Configuration 与轻量 AI Operations
 
-### 直接挂接
+本批次以 1.4 节和 #62 为准，不再把通用 DataFoundry 技术设置页面直接挂进 EnergyIQ 后就视为完成。Accounts、Data Sources、Knowledge、Assets 与 Data Map 仍复用既有能力；Models、Skills、Methods、Tools、MCP、Context 和 Instructions 通过 Project-exact Harness Read Model 解释其 owner、scope、revision、适用 Stage 与状态链。
 
-- Accounts（Organisation/User Admin、邀请激活与登录已完成；后续只补生产邮件和运维细节）；
-- Data Sources；
-- Knowledge；
-- Assets；
-- Models/fallback；
-- Skills；
-- Tools；
-- MCP；
-- Data Map 技术配置。
+### Harness Configuration
 
-不复制这些页面，只增加 EnergyIQ Shell、Workspace/Project scope 和 admin 导航。
+- Overview：按 AI Analyst、Key Findings、Section Analysis、Additional Insights 等 capability 展示用途、配置来源与局部 unavailable；
+- Models & Routing：system-owned 与 Workspace default 分开，显示 Profile chain、revision、persisted status、context budget 与 capability source，secret redacted；
+- Skills & Methods：builtin/user/workspace physical owner、declared scope、version/revision/SHA、policy 与 applicability；Method lifecycle 仍来自 Governance Store；
+- Tools & MCP：builtin、server-owned、MCP 三类，allowed/available/run-dependent/actual 分开；MCP manifest 标记 persisted as-of；
+- Context & Instructions：Context source、预算、裁剪策略、Platform/Stage/Skill instruction layers 与 Output Contract；不开放任意 Prompt editor。
 
-### 轻量监测
+首批为只读解释面。Project Harness Policy 写能力必须复用 Project Draft/Release，采用 Validate、Diff/Preview、人工 Publish 与新 revision；若现有 Store 不能回读 immutable history，则保持 disabled，不以当前 revision 冒充历史。
 
-- Import/Sync/Run 失败列表；
-- Template 发布审计；
-- 典型 query；
-- 模型与 token 用量；
-- Session Trace；
-- admin 查看客户会话正文的审计。
+### AI Operations
 
-复杂趋势大屏、告警平台和成本结算延期。
+- Project-scoped Run list/detail、失败与 retry/rerun 关系；
+- exact model/profile revisions、selected Skill 与 selection audit；
+- Run-captured MCP/tool mapping、Tool succeeded/rejected/failed；
+- Context Package/Plan selected/omitted/truncation 与 prompt verification telemetry；
+- Token、latency、Artifact/Finding provenance；
+- customer conversation 正文与动态 Prompt/Context 采用独立可见性、redaction 和审计。
+
+Import/Sync、Template 发布审计仍在相邻 Operations 能力中复用。复杂趋势大屏、告警平台、成本结算和任意配置编辑器延期。
 
 ## 11. 批次 7：Tuya API Connector
 
