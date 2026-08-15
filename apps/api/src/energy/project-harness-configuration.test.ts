@@ -194,6 +194,55 @@ describe("Project Harness Configuration", () => {
     }
   });
 
+  it("does not confuse the EnergyIQ system binding with Analyst model candidates", () => {
+    const root = mkdtempSync(join(tmpdir(), "project-harness-configuration-routing-"));
+    const metadataStore = createMetadataStore({ database_path: join(root, "metadata.sqlite") });
+    try {
+      ensureEnergyIqBootstrap(metadataStore);
+      const user = metadataStore.users.getById({ user_id: "dev-user" });
+      metadataStore.configResources.upsert({
+        id: "overview-system-model",
+        workspace_id: ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID,
+        user_id: user.id,
+        kind: "model-profile",
+        name: "Overview system model",
+        payload: { provider: "openai-compatible", modelName: "overview-model", contextLength: 32_768 },
+        default_enabled: true,
+        status: "connected",
+      });
+      metadataStore.workspaceDefaultModelProfiles.set({
+        workspace_id: ENERGYIQ_SYSTEM_MODEL_WORKSPACE_ID,
+        profile_id: "overview-system-model",
+        profile_owner_user_id: user.id,
+        configured_by_user_id: user.id,
+      });
+      metadataStore.configResources.upsert({
+        id: "analyst-model",
+        workspace_id: PRESCHOOL_WORKSPACE_ID,
+        user_id: user.id,
+        kind: "model-profile",
+        name: "Analyst model",
+        payload: { provider: "openai-compatible", modelName: "analyst-model", contextLength: 16_384 },
+        default_enabled: true,
+        status: "connected",
+      });
+
+      const state = createProjectHarnessConfigurationReader({
+        metadataStore,
+        user,
+        workspaceId: PRESCHOOL_WORKSPACE_ID,
+      }).readProjectHarnessConfiguration("preschool-demo");
+      const analyst = state.harnesses.find(({ id }) => id === "ai-analyst");
+      const additional = state.harnesses.find(({ id }) => id === "additional-insights");
+
+      expect(analyst?.modelIds).toEqual(["analyst-model"]);
+      expect(additional?.modelIds).toEqual(["overview-system-model"]);
+    } finally {
+      metadataStore.close();
+      rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
+  });
+
   it("does not invent Preschool stage contracts for Ngee Ann and degrades locally", () => {
     const root = mkdtempSync(join(tmpdir(), "project-harness-configuration-profile-"));
     const metadataStore = createMetadataStore({ database_path: join(root, "metadata.sqlite") });

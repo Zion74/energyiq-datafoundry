@@ -185,6 +185,9 @@ export const createProjectHarnessConfigurationReader = (input: {
     const systemModelIds = models
       .filter(({ source, enabled, status }) => source === "server-system-binding" && enabled && status === "connected")
       .map(({ id }) => id);
+    const analystModelIds = models
+      .filter(({ source, enabled, status }) => source === "current-admin-resource" && enabled && status === "connected")
+      .map(({ id }) => id);
     const eligibleSkillIds = skills
       .filter(({ availability, enabled }) => availability === "configured" && enabled)
       .map(({ id }) => id);
@@ -203,10 +206,12 @@ export const createProjectHarnessConfigurationReader = (input: {
     ];
 
     const harnesses: HarnessSummary[] = [
-      analystHarness(systemModelIds, eligibleSkillIds, configuredMcpIds),
+      analystHarness(analystModelIds, eligibleSkillIds, configuredMcpIds),
       ...overviewHarnesses(profile?.rendererKey ?? null, systemModelIds, methods.map(({ resourceId }) => resourceId)),
     ];
-    const hasUnavailable = unavailable.length > 0 || skills.some(({ availability }) => availability === "unavailable");
+    const hasUnavailable = unavailable.length > 0
+      || skills.some(({ availability }) => availability === "unavailable")
+      || harnesses.some(({ status }) => status === "unavailable");
     return {
       status: hasUnavailable ? "partially-unavailable" : "available",
       detail: hasUnavailable
@@ -349,7 +354,7 @@ const analystHarness = (
   label: "AI Analyst",
   resolution: "run-dependent",
   status: modelIds.length > 0 ? "available" : "unavailable",
-  detail: "Workspace defaults and current-admin resources are candidates; exact Skill, MCP, Tool, and model resolution occurs per Run.",
+  detail: "Current Admin resources are candidates; exact Skill, MCP, Tool, and model resolution occurs per Run.",
   modelIds,
   skillIds,
   methodResourceIds: [],
