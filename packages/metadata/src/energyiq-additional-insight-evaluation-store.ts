@@ -1495,12 +1495,16 @@ const supportedTargetIdentity = (target: AdditionalAiInsightEvaluationTarget): b
     && target.validatorRevision === "additional-insights-acceptance-v11"
     && target.workflowRevision === "additional-insights-discover-accept-publish-v14"
     && target.promptRevision === "additional-insights-discovery-v10")
+  || (target.artifactIdentityRevision === "additional-insights-v15"
+    && target.validatorRevision === "additional-insights-acceptance-v12"
+    && target.workflowRevision === "additional-insights-discover-accept-publish-v15"
+    && target.promptRevision === "additional-insights-discovery-v10")
 );
 
 const requireCurrentTargetIdentity = (target: AdditionalAiInsightEvaluationTarget): void => {
-  if (target.artifactIdentityRevision !== "additional-insights-v14"
-    || target.validatorRevision !== "additional-insights-acceptance-v11"
-    || target.workflowRevision !== "additional-insights-discover-accept-publish-v14"
+  if (target.artifactIdentityRevision !== "additional-insights-v15"
+    || target.validatorRevision !== "additional-insights-acceptance-v12"
+    || target.workflowRevision !== "additional-insights-discover-accept-publish-v15"
     || target.promptRevision !== "additional-insights-discovery-v10") {
     throw new Error("ENERGYIQ_ADDITIONAL_EVALUATION_TARGET_BEHAVIOR_NOT_CURRENT");
   }

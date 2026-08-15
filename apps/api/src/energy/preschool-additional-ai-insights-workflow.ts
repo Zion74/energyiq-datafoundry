@@ -755,8 +755,15 @@ const resolveIncrementalContext = (
     || !boundedSafeText(value.novelConclusion, MAX_NOVEL_CONTRIBUTION_CHARS)) return null;
   const claimsById = new Map(presentedClaims.map((claim) => [claim.id, claim]));
   const deterministicBaselineIds = evidenceRefs.map((reference) => `deterministic-overview:${reference}`);
+  const suppliedRelatedClaimIds = value.relatedPresentedClaimIds.filter((id) => {
+    if (claimsById.has(id)) return true;
+    return !deterministicBaselineIds.some((baselineId) => {
+      const suffixStart = baselineId.indexOf(":");
+      return suffixStart >= 0 && id.endsWith(baselineId.slice(suffixStart));
+    });
+  });
   const relatedPresentedClaimIds = [...new Set([
-    ...value.relatedPresentedClaimIds,
+    ...suppliedRelatedClaimIds,
     ...deterministicBaselineIds,
   ])];
   const related = relatedPresentedClaimIds.map((id) => claimsById.get(id));
@@ -771,7 +778,7 @@ const resolveIncrementalContext = (
     relatedPresentedClaimIds,
     novelConclusion,
     relationshipAssertion: evidenceRefs.length > 1
-      || value.relatedPresentedClaimIds.some((id) => !deterministicBaselineIds.includes(id)),
+      || suppliedRelatedClaimIds.some((id) => !deterministicBaselineIds.includes(id)),
   };
 };
 

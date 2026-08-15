@@ -300,6 +300,50 @@ describe("Preschool Additional AI Insights workflow", () => {
     }
   });
 
+  it("ignores a malformed alias for a deterministic baseline that the server already binds exactly", async () => {
+    const harness = createHarness();
+    try {
+      const novelConclusion = "The standby share may hide a recurring weekday timing pattern worth testing.";
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [candidate("candidate-malformed-deterministic-alias", "fact:standby-share", {
+            title: "Test whether standby follows a weekday timing pattern",
+            observation: "Standby is 31%.",
+            angle: novelConclusion,
+            epistemicStatus: "speculative",
+            incrementalContext: {
+              relatedPresentedClaimIds: ["determinostic-overview:fact:standby-share"],
+              novelConclusion,
+            },
+          })] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "malformed-deterministic-alias-run",
+        sessionId: "malformed-deterministic-alias-session",
+      });
+
+      expect(result).toMatchObject({
+        status: "available",
+        publication: {
+          acceptedCandidateIds: ["candidate-malformed-deterministic-alias"],
+          rejectedCandidateIds: [],
+        },
+        findings: [{ id: "additional:candidate-malformed-deterministic-alias" }],
+      });
+    } finally {
+      harness.close();
+    }
+  });
+
   it("accepts a same-Evidence superset only when the actual narrative adds a testable relationship", async () => {
     const harness = createHarness();
     try {
