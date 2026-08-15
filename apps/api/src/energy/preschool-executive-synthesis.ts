@@ -624,10 +624,14 @@ const materializeExecutiveResultV4 = (input: {
     try {
       alert = parseAlert(candidate.alert);
     } catch {
-      return [];
+      // Alert metadata is optional. A malformed alert must not discard an
+      // otherwise supported Finding; publish the Finding without the alert.
+      alert = undefined;
     }
     if (alert && alert.certainty !== "possible"
-      && evidenceRefs.some((reference) => evidenceEpistemicRequirements.has(reference))) return [];
+      && evidenceRefs.some((reference) => evidenceEpistemicRequirements.has(reference))) {
+      alert = { ...alert, certainty: "possible" };
+    }
     for (const sectionId of declaredSections) contributingSections.add(sectionId);
     for (const factId of candidateOverviewFactIds) usedOverviewFactIds.add(factId);
     return [{

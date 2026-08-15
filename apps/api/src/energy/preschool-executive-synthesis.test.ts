@@ -585,6 +585,47 @@ describe("Preschool Executive Synthesis", () => {
     expect(storedBenchmark).toEqual(benchmark);
   });
 
+  it("downgrades an over-certain optional alert without discarding an otherwise supported Key Finding", async () => {
+    const harness = createHarness();
+    const standby = completeSectionV4(harness, "standby-wastage");
+    const operating = completeSectionV4(harness, "operating-behaviour");
+    const synthesizer = createPreschoolExecutiveSynthesizer({
+      metadataStore: harness.metadata,
+      revision: "v4",
+      runSynthesis: async (input) => ({
+        answer: JSON.stringify({
+          status: "available",
+          summary: {
+            text: "The accepted operational summaries support a focused review.",
+            evidenceRefs: ["evidence:standby-wastage:summary", "evidence:operating-behaviour:summary"],
+          },
+          findings: [{
+            title: "Priorities may recur across operational Sections",
+            text: "The current evidence suggests a connection between closed- and operating-hour signals.",
+            sectionIds: ["standby-wastage", "operating-behaviour"],
+            evidenceRefs: ["evidence:standby-wastage:insight", "evidence:operating-behaviour:insight"],
+            alert: { severity: "attention", certainty: "observed" },
+          }],
+        }),
+        runId: input.runId,
+        sessionId: input.sessionId,
+      }),
+    });
+
+    const artifact = await synthesizer.execute({ baseIdentity: harness.identity, user: harness.user, retry: false });
+    harness.close();
+
+    expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
+    expect(JSON.parse(artifact.result_json!)).toMatchObject({
+      sourceSectionArtifactIds: [standby.id, operating.id],
+      summary: { text: "The accepted operational summaries support a focused review." },
+      findings: [{
+        title: "Priorities may recur across operational Sections",
+        alert: { severity: "attention", certainty: "possible" },
+      }],
+    });
+  });
+
   it("persists a supported deterministic Overview Evidence reference without weakening Section lineage", async () => {
     const harness = createHarness();
     const benchmark = completeSectionV4(harness, "centre-benchmark");
@@ -641,7 +682,7 @@ describe("Preschool Executive Synthesis", () => {
     harness.close();
     expect(artifact.status, artifact.error_code ?? undefined).toBe("available");
     expect(JSON.parse(artifact.identity_json)).toMatchObject({
-      validatorRevision: "preschool-executive-synthesis-validator-v17",
+      validatorRevision: "preschool-executive-synthesis-validator-v18",
       workflowRevision: "preschool-executive-synthesis-v9",
       investigatorPromptRevision: "preschool-executive-synthesis-prompt-v11",
       capabilityRevision: "section-artifacts-and-overview-evidence-v2",
