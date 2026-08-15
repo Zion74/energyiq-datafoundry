@@ -3,7 +3,7 @@ title: "EnergyIQ 开发计划：Admin 与模板运行闭环"
 summary: "在 DataFoundry 现有代码上分批完成 Tier、计量映射、Excel 数据、项目模板、复跑和客户页面贯通。"
 doc_type: playbook
 tags: [开发计划, Admin, Tier, Excel, Template Revision, Analysis Run]
-updated_at: "2026-08-03"
+updated_at: "2026-08-15"
 related:
   - "当前共识与新会话入口.md"
   - "领域模型.md"
@@ -39,6 +39,128 @@ admin creates Project
 → drills into Explorer
 → continues in AI Analyst with the same trusted context
 ~~~
+
+## 1.1 2026-08-15 Admin Overview 与 AI Readiness 执行方案
+
+### 背景与目标
+
+Preschool Overview 已形成三层客户价值输出：
+
+1. **Layer 1 · Key Findings**：跨 Section 的简洁总结；
+2. **Layer 2 · Section AI Interpretation**：本 Section 的 Summary 与可继续深挖的 Insights；
+3. **Layer 3 · Additional AI Insights**：由受治理的 Method、SOP 或模型新角度产生的额外发现。
+
+Admin 当前仍主要表达确定性配置和模板发布，无法直接回答三个交付问题：客户现在能看到什么、Overview 与三层 AI 是否就绪、管理员下一步应该做什么。本批次不扩建通用运维平台，而是补齐一个项目级 **Overview & AI Readiness** 闭环。
+
+### 产品边界
+
+- 客户 Overview 继续只读取已保存的分析结果，打开或刷新页面不得启动 Provider；
+- Admin 可以读取当前 Project 的确定性 Overview、Layer 1–3 和精确的当前/过期状态；
+- `Generate missing analysis` 只生成当前 Snapshot/Release 下尚未成功保存的分析，不强制覆盖已有成功结果；
+- 涂鸦管理员可以对自己有权管理的 Project 触发 `Generate missing analysis`；MVP 继续使用现有 `admin` 角色，不新增未经验证的 `partner_admin` 角色；
+- 权限、Project/Workspace 归属、当前 Snapshot/Release/Profile 和允许动作全部由服务端解析，浏览器不提交权威身份；
+- 普通 `user`、跨 Workspace 管理员和无权 Project 均不能触发生成；
+- 本批不开放模型切换、Method 发布、全量强制重跑、跨 Project 批量生成或任意 Provider 参数。
+
+### 深模块接口
+
+Admin 页面只依赖一个项目级 Readiness Module，而不直接解释多个底层 Artifact/Run：
+
+~~~ts
+readProjectOverviewAdminState(projectId)
+
+requestProjectOverviewAdminAction({
+  projectId,
+  action,
+  target?
+})
+~~~
+
+`readProjectOverviewAdminState` 返回：
+
+- Project 发布状态和客户 Overview 入口；
+- 当前 Data Snapshot / Project Release 的人类可读摘要；
+- 确定性 Overview 是否可用；
+- Layer 1 Key Findings 状态；
+- Layer 2 各 Section 的独立状态与覆盖数；
+- Layer 3 Additional AI Insights 状态；
+- 最后成功生成时间、局部失败与是否过期；
+- 服务端计算的 `allowedActions` 和唯一 `recommendedNextAction`。
+
+动作合同按能力逐步开放：
+
+- 本批：`generate-missing`；
+- 后续：`retry-section`、`regenerate-key-findings`、`regenerate-additional`。
+
+同一 Project、Snapshot、Release 和动作的重复请求必须幂等；浏览器双击不得制造重复 Provider Run。
+
+### Admin 信息架构与语言
+
+Project Admin 围绕“客户体验”重新组织，但不在第一批大规模移动旧页面：
+
+- `Overview Setup` 改为 **Overview Design**，只负责确定性页面、Metric、Rule、Layout 与发布配置；
+- 新增 **AI Analysis**，负责 Layer 1–3 状态、生成缺失结果和局部失败定位；
+- **Knowledge** 只表示 AI 可引用的文档与引用；
+- Additional Insight Method Proposal 从 Knowledge 中拆出为 **Methods & SOP**；
+- Project Overview 增加一个紧凑的 **Overview & AI readiness** 摘要，显示当前客户可见状态和唯一下一步。
+
+Admin 面向 Charles、涂鸦管理员和实施人员使用业务语言；技术字段只放在 `Technical details`：
+
+| 内部术语 | Admin 文案 |
+| --- | --- |
+| Artifact | Saved analysis result |
+| ensure/materialize | Generate missing analysis |
+| retry target | Retry failed item |
+| Executive synthesis | Key Findings |
+| Section Interpreter | Section analysis |
+| empty | No new insight for this data update |
+| identity mismatch | Out of date for current data |
+| Method proposal | Analysis method proposal |
+
+统一状态：`Ready`、`Generating`、`Not generated`、`Needs attention`、`No new insight`、`Out of date`。
+
+### Tickets 与执行顺序
+
+1. **Admin Readiness contract and read model**：先固定状态语义、项目能力和只读接口；
+2. **Project-scoped Generate missing analysis**：补授权、幂等和成本边界；
+3. **Admin navigation and terminology**：拆分 Overview Design、AI Analysis、Knowledge、Methods & SOP；
+4. **AI Analysis and Project Overview UI**：实现 readiness 摘要、状态表、唯一下一步和操作反馈；
+5. **Cross-project and multi-account acceptance**：Preschool 与 Ngee Ann 使用各自能力适配，验证 Charles、涂鸦管理员和普通用户。
+
+前一个 Ticket 的公开合同和红测通过后，后一个 Ticket 才可开始。不得把 Preschool 的四个 Section 写成所有 Project 的通用事实；Readiness Module 必须根据 Project Renderer/AI capability 返回可用层级。
+
+执行跟踪：
+
+| Ticket | 状态 | 结果 |
+| --- | --- | --- |
+| [#49 Admin Readiness](https://github.com/Zion74/energyiq-datafoundry/issues/49) | automated complete | 项目级只读状态、当前身份、Layer 1–3 独立状态和过期判断已实现 |
+| [#50 Generate missing analysis](https://github.com/Zion74/energyiq-datafoundry/issues/50) | automated complete | 仅授权 Admin 可触发；复用现有 current identity、成功 Artifact 和运行幂等边界 |
+| [#51 Admin IA](https://github.com/Zion74/energyiq-datafoundry/issues/51) | automated complete | Overview Design、AI Analysis、Knowledge、Methods & SOP 已分工 |
+| [#52 Admin UI](https://github.com/Zion74/energyiq-datafoundry/issues/52) | automated complete | Project Overview 摘要、完整 Readiness、单一 AI 主动作和 Technical details 已实现 |
+| [#53 Acceptance](https://github.com/Zion74/energyiq-datafoundry/issues/53) | ready for human | 等待浏览器、多账户、真实 Provider 与部署环境验收 |
+
+### 验收门
+
+- Admin 普通 GET、客户 Overview 打开与刷新均不增加 Provider Run；
+- 有缺失分析时，授权管理员看到一个明确的 `Generate missing analysis` 主动作；全部就绪时不显示误导性生成动作；
+- 涂鸦管理员只能对有权 Project 操作，Charles 管理员可查看全部 Project，普通用户不能进入 Admin 或调用生成接口；
+- 部分 Section 失败不会隐藏成功 sibling，Layer 1/3 状态独立显示；
+- 过期结果不能冒充当前结果，必须显示 `Out of date for current data`；
+- Preschool 显示 Layer 1–3；Ngee Ann 只显示其已接入的能力，不伪造 Preschool Section；
+- 页面首先显示结论与下一步，原始 Artifact/Run/Revision 仅在 Technical details 中出现；
+- Web focused tests、API authorization/idempotency tests、build/typecheck、1440px/1920px 浏览器检查和多账户人工验收通过。
+
+### 风险控制
+
+| 风险 | 控制 |
+| --- | --- |
+| 发布已成功但 AI 部分失败 | 确定性 Overview 与三层 AI 分开显示状态，局部失败不阻断客户事实 |
+| 新数据后恢复旧结果 | Readiness 绑定服务端当前 Snapshot/Release，旧结果显示 Out of date |
+| 双击或多人同时生成造成成本 | server-owned idempotency key、current identity 和 existing-success reuse |
+| 涂鸦管理员越权 | 现有 `admin` 角色 + Workspace/Project 精确归属校验；拒绝浏览器提供的 Workspace 权威值 |
+| Admin 退化成技术监控台 | 默认只显示客户可见状态、覆盖数、最后生成和唯一下一步；技术身份折叠 |
+| 把 Preschool 结构写死 | Project capability adapter 决定层级、Section 和可用动作 |
+| Knowledge 与 Method 混淆 | Knowledge 只管理来源资料；Methods & SOP 管理分析方法和提案 |
 
 ## 2. 当前代码基线
 
