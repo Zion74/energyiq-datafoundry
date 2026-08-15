@@ -646,11 +646,8 @@ const acceptCandidate = (
   if (!epistemicStatus) return null;
   const audits = toolAuditIds.map((id) => auditsById.get(id));
   if (audits.some((audit) => !audit || audit.status !== "succeeded")) return null;
-  const auditedEvidenceRefs = new Set(audits.flatMap((audit) => audit!.evidenceRefs));
-  if (audits.length > 0 && (
-    evidenceRefs.some((ref) => !auditedEvidenceRefs.has(ref))
-    || audits.some((audit) => !audit!.evidenceRefs.some((ref) => evidenceRefs.includes(ref)))
-  )) return null;
+  if (audits.length > 0
+    && audits.some((audit) => !audit!.evidenceRefs.some((ref) => evidenceRefs.includes(ref)))) return null;
   if (isRecord(value.alert)
     && !alertIsAcceptable(value.alert, epistemicStatus, evidenceRefs, factsById)) return null;
   const finding: AdditionalAiInsightFinding = {
@@ -746,9 +743,10 @@ const resolveIncrementalContext = (
   if (related.some((claim) => !claim)) return null;
   const novelConclusion = value.novelConclusion.trim();
   const combinedNarrative = `${publishedNarrative.title} ${publishedNarrative.text}`;
-  if (related.some((claim) => claimTextIsRestatement(claim!.text, publishedNarrative.title)
-      || claimTextIsRestatement(claim!.text, publishedNarrative.text)
-      || claimTextIsRestatement(claim!.text, combinedNarrative))) return null;
+  const conclusionIsRepresented = narrativeContainsConclusion(combinedNarrative, novelConclusion)
+    || (evidenceRefs.length > 1 && claimTextsShareMeaningfulToken(combinedNarrative, novelConclusion));
+  if (!conclusionIsRepresented
+    || related.some((claim) => claimTextIsRestatement(claim!.text, novelConclusion))) return null;
   return {
     relatedPresentedClaimIds,
     novelConclusion,
@@ -896,14 +894,14 @@ const buildDiscoveryPrompt = (input: {
     ].join("\n")),
     "Return JSON only: {candidates:[{id,title,text,epistemicStatus:'observed|inferred|speculative',origin:{kind:'ai-discovery|expert-sop|hybrid',directionMethodResourceIds:[exact server-approved Method resourceId],novelContribution?:string},incrementalContext:{relatedPresentedClaimIds:[exact claim id],novelConclusion:string},evidenceRefs:[exact fact id],toolAuditIds:[actual returned audit id],deepDiveQuestion?,alert?,canvas?}]}.",
     "The first character must be { and the last character must be }. Do not add a preamble, scratch work, Markdown fence, or trailing commentary.",
-    "Each title must be 100 characters or fewer. toolAuditIds is required; use [] when no tool was called. When a tool was called, cite only succeeded audit IDs actually used by that candidate; candidate Evidence may be a relevant subset of the audit Evidence.",
+    "Each title must be 100 characters or fewer. toolAuditIds is required; use [] when no tool was called. When a tool was called, cite only succeeded audit IDs actually used by that candidate. Every cited audit must overlap the candidate Evidence; the candidate may additionally cite exact Current Catalog Evidence that was not returned by that audit because the server validates every Evidence ref independently.",
     "For page readability, text should be 1 to 3 short sentences and no more than 500 characters. deepDiveQuestion should be one short question and no more than 200 characters. These are generation instructions; the server keeps its wider safety ceiling for local candidate isolation.",
     "ai-discovery must contain exactly kind and directionMethodResourceIds, with directionMethodResourceIds=[]. Do not add novelContribution to ai-discovery. If alert cannot match the exact object shape {severity:'attention|urgent',certainty:'confirmed|anomaly|possible',evidenceRefs:[exact candidate Evidence ref]}, omit it.",
     "A relationship across multiple Evidence facts cannot be observed; label it inferred or speculative. Do not calculate or state new numeric values that are not directly present in the candidate's cited Evidence; qualitative relationships, counterexamples, and testable hypotheses remain valid.",
     "For core-only discovery use origin.kind='ai-discovery' and directionMethodResourceIds=[]. Cite only the exact loaded expert-direction resourceIds actually used. expert-sop requires one or more such refs. hybrid additionally requires a concise bounded novelContribution. Never invent or duplicate Method refs.",
     "Optional canvas must be an energyiq-insight-canvas plan using only quantitative metric, comparison, or trend blocks bound exactly to supplied Evidence facts. The server may reject blocks locally without rejecting the Finding.",
     "Candidates must already be ordered from highest to lowest incremental value. Zero candidates is valid.",
-    "Use the structured already-presented claim digests below. Their sourceEvidenceRefs preserve source provenance and are not candidate Evidence authority. Cite exact related claim IDs and state only the genuinely new conclusion; related claims need not share an Evidence namespace with the candidate. Candidate evidenceRefs must still be exact IDs from the Current authoritative Evidence Catalog. A restatement is not a candidate; the same or different Evidence may support a new relationship, counterexample, or testable hypothesis.",
+    "Use the structured already-presented claim digests below. Their sourceEvidenceRefs preserve source provenance and are not candidate Evidence authority. Cite exact related claim IDs and state only the genuinely new conclusion; write novelConclusion as a concise conclusion that is actually present in title or text. A title may repeat a factual baseline when the text adds that new conclusion. Related claims need not share an Evidence namespace with the candidate. Candidate evidenceRefs must still be exact IDs from the Current authoritative Evidence Catalog. A restatement is not a candidate; the same or different Evidence may support a new relationship, counterexample, or testable hypothesis.",
     `Server-owned identity: ${JSON.stringify({
       workspaceId: input.identity.workspaceId,
       projectId: input.identity.projectId,
@@ -1001,14 +999,31 @@ const CLAIM_FUNCTION_WORDS = new Set([
   "a", "an", "and", "at", "by", "during", "for", "from", "in", "is", "of", "on", "the", "to", "was",
 ]);
 
+const meaningfulClaimTokens = (value: string): Set<string> => new Set(canonicalClaimText(value).split(" ")
+  .filter((token) => token.length > 1 && !CLAIM_FUNCTION_WORDS.has(token)));
+
+const claimTextsShareMeaningfulToken = (left: string, right: string): boolean => {
+  const leftTokens = meaningfulClaimTokens(left);
+  return [...meaningfulClaimTokens(right)].some((token) => leftTokens.has(token));
+};
+
+const narrativeContainsConclusion = (narrative: string, conclusion: string): boolean => {
+  const canonicalNarrative = canonicalClaimText(narrative);
+  const canonicalConclusion = canonicalClaimText(conclusion);
+  if (canonicalNarrative.includes(canonicalConclusion)) return true;
+  const conclusionTokens = meaningfulClaimTokens(conclusion);
+  if (conclusionTokens.size < 4) return false;
+  const narrativeTokens = meaningfulClaimTokens(narrative);
+  const shared = [...conclusionTokens].filter((token) => narrativeTokens.has(token)).length;
+  return shared / conclusionTokens.size >= 0.75;
+};
+
 const claimTextIsRestatement = (presented: string, proposed: string): boolean => {
   const left = canonicalClaimText(presented);
   const right = canonicalClaimText(proposed);
   if (left === right) return true;
-  const tokens = (value: string): Set<string> => new Set(value.split(" ")
-    .filter((token) => token.length > 1 && !CLAIM_FUNCTION_WORDS.has(token)));
-  const leftTokens = tokens(left);
-  const rightTokens = tokens(right);
+  const leftTokens = meaningfulClaimTokens(left);
+  const rightTokens = meaningfulClaimTokens(right);
   const smaller = Math.min(leftTokens.size, rightTokens.size);
   if (smaller < 4) return false;
   const shared = [...leftTokens].filter((token) => rightTokens.has(token)).length;

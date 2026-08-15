@@ -335,6 +335,45 @@ describe("Preschool Additional AI Insights workflow", () => {
     }
   });
 
+  it("allows a factual baseline in the title when the bound conclusion adds a new relationship", async () => {
+    const harness = createHarness();
+    try {
+      const novelConclusion = "The contrast with operating use may hide a recurring weekday timing pattern worth testing.";
+      const workflow = createPreschoolAdditionalAiInsightsWorkflow({
+        metadataStore: harness.metadata,
+        resolveEvidenceCatalog: async () => catalog(),
+        resolvePresentedClaims: resolvePresentedClaimsFixture,
+        runDiscovery: async ({ runId, sessionId }) => ({
+          answer: JSON.stringify({ candidates: [candidate("candidate-baseline-title-new-relation", "fact:standby-share", {
+            title: "fact:standby-share: 31 %",
+            text: `Operating use is 69%. ${novelConclusion}`,
+            epistemicStatus: "inferred",
+            evidenceRefs: ["fact:standby-share", "fact:operating-share"],
+            incrementalContext: {
+              relatedPresentedClaimIds: [
+                "deterministic-overview:fact:standby-share",
+                "deterministic-overview:fact:operating-share",
+              ],
+              novelConclusion,
+            },
+          })] }),
+          runId,
+          sessionId,
+        }),
+      });
+
+      const result = await workflow.evaluateAttempt({
+        identity: harness.additionalIdentity,
+        user: harness.user,
+        runId: "baseline-title-new-relation-run",
+        sessionId: "baseline-title-new-relation-session",
+      });
+      expect(result.publication.acceptedCandidateIds).toEqual(["candidate-baseline-title-new-relation"]);
+    } finally {
+      harness.close();
+    }
+  });
+
   it("projects exact deterministic, Section, and Key Finding claims for the current Snapshot", () => {
     const harness = createHarness();
     try {
@@ -1671,6 +1710,11 @@ const resolvePresentedClaimsFixture: Parameters<typeof createPreschoolAdditional
             toolCallId: "tool-call:production-shaped-subset",
             input: { factIds: ["fact:standby-share", "fact:operating-share"] },
           });
+          const catalogSubset = await invokeTool({
+            toolName: "energy.evidence.read",
+            toolCallId: "tool-call:production-shaped-catalog-subset",
+            input: { factIds: ["fact:standby-share"] },
+          });
           const unrelated = await invokeTool({
             toolName: "energy.evidence.read",
             toolCallId: "tool-call:production-shaped-unrelated",
@@ -1689,6 +1733,13 @@ const resolvePresentedClaimsFixture: Parameters<typeof createPreschoolAdditional
                 epistemicStatus: "inferred",
                 evidenceRefs: ["fact:standby-share", "fact:operating-share"],
                 toolAuditIds: [succeeded.auditId],
+              }),
+              candidate("candidate-audit-plus-catalog", "fact:standby-share", {
+                title: "A read fact can be compared with another current catalog fact",
+                text: "The confirmed standby and operating shares form a qualitative relationship worth testing against schedules.",
+                epistemicStatus: "inferred",
+                evidenceRefs: ["fact:standby-share", "fact:operating-share"],
+                toolAuditIds: [catalogSubset.auditId],
               }),
               candidate("candidate-audit-disjoint", "fact:partial", {
                 toolAuditIds: [succeeded.auditId],
@@ -1716,10 +1767,10 @@ const resolvePresentedClaimsFixture: Parameters<typeof createPreschoolAdditional
       expect(result).toMatchObject({
         status: "available",
         publication: {
-          discoveredCount: 4,
-          acceptedCount: 1,
+          discoveredCount: 5,
+          acceptedCount: 2,
           rejectedCount: 3,
-          acceptedCandidateIds: ["candidate-audit-subset"],
+          acceptedCandidateIds: ["candidate-audit-subset", "candidate-audit-plus-catalog"],
           rejectedCandidateIds: [
             "candidate-audit-disjoint",
             "candidate-audit-extra-unrelated",
@@ -1729,6 +1780,9 @@ const resolvePresentedClaimsFixture: Parameters<typeof createPreschoolAdditional
         findings: [{
           id: "additional:candidate-audit-subset",
           toolAuditIds: ["additional-tool-audit:tool-call:production-shaped-subset"],
+        }, {
+          id: "additional:candidate-audit-plus-catalog",
+          toolAuditIds: ["additional-tool-audit:tool-call:production-shaped-catalog-subset"],
         }],
       });
     } finally {
