@@ -283,6 +283,7 @@ export const buildPreschoolSectionDiscoveryPrompt = (
     "An observed candidate must contain only direct Pack facts. If it says could, may, might, appears, looks like, suggests, is consistent with, or recommends a choice, label the whole candidate inferred or speculative instead.",
     "For event Evidence, usageKwh is total interval energy; impactKwh is only the excess above its comparison baseline. Never describe impactKwh as the whole spike or interval total.",
     "For planning Evidence, count only rows whose scopeRole is centre when stating a Centre count; one Portfolio row is not a Centre.",
+    "For planning Evidence, pacePct is an index against the frozen estimate for the same complete days: below 100 is below planned pace and above 100 is above planned pace. For example, 88.8 means 88.8% of planned pace, not 88.8% ahead or behind. Do not calculate the complement unless the Pack supplies it explicitly.",
     "For standby or operating summaries, centresWithFlaggedSpikes describes only Centres with flagged spike events; never attach that count to total energy coverage or the full estate.",
     "For operating Evidence, operating-hours share describes all energy during opening hours, not the share consumed by flagged spikes.",
     "A median is a percentile reference; it does not prove that most Centres sit near it. Never combine several different rank positions into one label such as 'top-2'; state each exact supplied rank or use a qualitative contrast.",
@@ -1004,7 +1005,8 @@ const hasUnsupportedMetricRelation = (
 ): boolean => {
   if (hasUnsupportedPlanningCentreCount(text, evidence)
     || hasMislabeledFlaggedCentreCount(text, evidence)
-    || hasMislabeledSpikeImpact(text, evidence)) return true;
+    || hasMislabeledSpikeImpact(text, evidence)
+    || hasMislabeledPaceIndex(text, evidence)) return true;
   const paceValues = evidence.flatMap(({ value }) => collectNumbersForKey(value, "pacePct"));
   if (paceValues.length === 0) return false;
   return text.split(/[!?;]|(?<!\d)\.(?!\d)|\b(?:but|while|whereas)\b/iu).some((clause) => {
@@ -1022,6 +1024,22 @@ const hasUnsupportedMetricRelation = (
       return paceValues.some((candidate) => reportedNumberMatches(candidate, value, precision));
     });
   });
+};
+
+const hasMislabeledPaceIndex = (
+  text: string,
+  evidence: PreschoolSectionPack["evidence"],
+): boolean => {
+  const paceValues = evidence.flatMap(({ value }) => collectNumbersForKey(value, "pacePct"));
+  if (paceValues.length === 0) return false;
+  return [...text.matchAll(/(?:([+-]?\d[\d,]*(?:\.\d+)?)\s*%\s+(?:ahead|behind)\b|\b(?:ahead|behind)(?:\s+by)?\s+([+-]?\d[\d,]*(?:\.\d+)?)\s*%)/giu)]
+    .some((match) => {
+      const raw = (match[1] ?? match[2] ?? "").replaceAll(",", "");
+      const reported = Number(raw);
+      const precision = raw.includes(".") ? raw.length - raw.indexOf(".") - 1 : 0;
+      return Number.isFinite(reported)
+        && paceValues.some((candidate) => reportedNumberMatches(candidate, reported, precision));
+    });
 };
 
 const hasMislabeledFlaggedCentreCount = (

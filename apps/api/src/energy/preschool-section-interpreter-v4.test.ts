@@ -82,6 +82,8 @@ describe("Preschool Section Interpreter v4", () => {
     expect(prompt).toContain("Never combine several different rank positions into one label such as 'top-2'");
     expect(prompt).toContain("operating-hours share describes all energy during opening hours, not the share consumed by flagged spikes");
     expect(prompt).toContain("Do not calculate a combined total or share from several Evidence items");
+    expect(prompt).toContain("pacePct is an index against the frozen estimate for the same complete days");
+    expect(prompt).toContain("88.8 means 88.8% of planned pace, not 88.8% ahead or behind");
     expect(prompt).toContain("The first non-whitespace character of the response must be '{'");
     expect(prompt).toContain("Do not ask whether Centres share equipment or a circuit unless the cited Evidence names the same equipment or circuit for every Centre");
     expect(prompt).not.toContain("allowedNextChecks");
@@ -169,6 +171,34 @@ describe("Preschool Section Interpreter v4", () => {
     expect(result).toMatchObject({
       status: "available",
       summary: { text: "Verified energy use is 30 kWh. Verified energy use is 30 kWh." },
+    });
+  });
+
+  it("removes a planning Summary sentence that mislabels pacePct as percent ahead", () => {
+    const pack = packV2("planning-outlook", 1);
+    pack.evidence[0] = {
+      ...pack.evidence[0]!,
+      value: { pacePct: 88.79, expectedFullMonthKwh: 25_572, plannedFullMonthKwh: 26_240 },
+      unit: "%, kWh",
+    };
+    const result = materializePreschoolSectionResultV4({
+      answer: JSON.stringify({
+        sectionId: "planning-outlook",
+        status: "available",
+        summary: {
+          text: "Actual use is 88.79% ahead of the planned pace. Current full-month outlook is 25,572 kWh versus 26,240 kWh planned.",
+          evidenceRefs: ["evidence:planning-outlook:1"],
+        },
+        candidates: [],
+      }),
+      pack,
+      identity: identity("planning-outlook"),
+      runId: "runtime-run-planning-pace",
+    });
+
+    expect(result).toMatchObject({
+      status: "available",
+      summary: { text: "Current full-month outlook is 25,572 kWh versus 26,240 kWh planned." },
     });
   });
 
